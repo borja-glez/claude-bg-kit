@@ -15307,6 +15307,7 @@ function run(argv, io) {
       }
       case "decision": {
         const [sub, arg] = args;
+        const root = mainCheckout(io.cwd);
         if (sub === "add") {
           const file = flag("data-file");
           if (!file) throw new UsageError("decision add: --data-file is required");
@@ -15319,9 +15320,9 @@ function run(argv, io) {
           if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new UsageError("decision add: --data-file must be a JSON object");
           const task = flag("task");
           if (task !== void 0 && (!TASK_ID.test(task) || task === "." || task === "..")) throw new UsageError(`decision add: invalid --task ${task}`);
-          const exec = readExecution(mainCheckout(io.cwd));
+          const exec = readExecution(root);
           try {
-            const { n, event } = addDecision(io.cwd, raw, { ts: ts(), ...task ? { task } : {}, runId: exec?.active ? exec.runId : null });
+            const { n, event } = addDecision(root, raw, { ts: ts(), ...task ? { task } : {}, runId: exec?.active ? exec.runId : null });
             return json({ n, ...event });
           } catch (e) {
             if (e instanceof DecisionInputError) throw new UsageError(`decision add: ${e.message}`);
@@ -15331,12 +15332,12 @@ function run(argv, io) {
         if (sub === "list") {
           const since = flag("since");
           if (since !== void 0 && !Number.isFinite(Date.parse(since))) throw new UsageError(`decision list: --since must be a date, got ${since}`);
-          return json(listDecisions(io.cwd, { task: flag("task"), run: flag("run"), since, all: has("all"), auto: has("auto") }));
+          return json(listDecisions(root, { task: flag("task"), run: flag("run"), since, all: has("all"), auto: has("auto") }));
         }
         if (sub === "show") {
           const n = Number(arg);
           if (!Number.isInteger(n) || n < 1) throw new UsageError("decision show: <n> must be a positive integer");
-          const d = allDecisions(io.cwd).find((x) => x.n === n);
+          const d = allDecisions(root).find((x) => x.n === n);
           if (!d) throw new UsageError(`decision show: there is no decision ${n}`);
           return json(d);
         }
@@ -15346,7 +15347,7 @@ function run(argv, io) {
           const outFlag = flag("out");
           const out = outFlag !== void 0 ? import_node_path17.default.resolve(io.cwd, outFlag) : import_node_path17.default.join(repoDir, "docs", "forge", "decisions", `${scopeFileName(scope)}.md`);
           if (!out.endsWith(".md")) throw new UsageError("decision md: --out must be a .md file");
-          const list = allDecisions(io.cwd).filter((d) => d.by !== "user" && (decisionScope(d) ?? "forge") === scope);
+          const list = allDecisions(root).filter((d) => d.by !== "user" && (decisionScope(d) ?? "forge") === scope);
           if (!list.length) return json({ written: false, scope, count: 0 });
           (0, import_node_fs16.mkdirSync)(import_node_path17.default.dirname(out), { recursive: true });
           (0, import_node_fs16.writeFileSync)(out, renderDecisionsMd(list, scope, flag("locale") ?? "en"));

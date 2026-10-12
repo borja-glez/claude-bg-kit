@@ -11821,7 +11821,8 @@ async function loadExecution($, root) {
   }
 }
 async function loadDecisions($, root) {
-  const dir = join(root, ".forge");
+  const main = mainCheckoutFrom(root, await readOpt($, join(root, ".git")) ?? null);
+  const dir = join(main, ".forge");
   const f = (await listOpt($, dir)).find((x) => x.kind === "file" && x.name === "decisions.json");
   return f && f.size <= DECISIONS_MAX ? readOpt($, join(dir, "decisions.json")) : void 0;
 }
@@ -12801,6 +12802,9 @@ async function loadForgeFiles($, root) {
   } catch {
   }
   const out = { ...execFiles };
+  const mainDir = join(main, ".forge");
+  const decisions = (main === root ? entries : await listOpt($, mainDir)).find((f) => f.kind === "file" && f.name === "decisions.json");
+  if (decisions && decisions.size <= DECISIONS_MAX) out.forgeDecisions = await readOpt($, join(mainDir, "decisions.json"));
   if (!entries.length) {
     forgeSeen = { dir, entries };
     return out;
@@ -12818,8 +12822,6 @@ async function loadForgeFiles($, root) {
       if (nums.length) out.forgeBriefs = Math.max(...nums);
     }
   }
-  const decisions = entries.find((f) => f.kind === "file" && f.name === "decisions.json");
-  if (decisions && decisions.size <= DECISIONS_MAX) out.forgeDecisions = await readOpt($, join(dir, "decisions.json"));
   const run = entries.find((f) => f.kind === "file" && f.name === "run.json");
   if (run && run.size <= FORGE_RUN_MAX) out.forgeRun = await readOpt($, join(dir, "run.json"));
   forgeSeen = { dir, entries, run: out.forgeRun, execution: main === root ? out.forgeExecution : void 0 };

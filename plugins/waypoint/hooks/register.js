@@ -11273,7 +11273,8 @@ async function loadExecution($, root) {
   }
 }
 async function loadDecisions($, root) {
-  const dir = join(root, ".forge");
+  const main = mainCheckoutFrom(root, await readOpt($, join(root, ".git")) ?? null);
+  const dir = join(main, ".forge");
   const f = (await listOpt($, dir)).find((x) => x.kind === "file" && x.name === "decisions.json");
   return f && f.size <= DECISIONS_MAX ? readOpt($, join(dir, "decisions.json")) : void 0;
 }
