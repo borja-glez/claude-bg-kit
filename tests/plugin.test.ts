@@ -74,13 +74,13 @@ describe('plugin layout', () => {
   it('forge run skill drives the Large path through waypoint', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
     for (const w of ['forge-planner', 'FORGE brief --plan', 'FORGE triage --plan', '/waypoint:design', '/waypoint:plan', '/waypoint:work',
-      '§3', '--path large', 'review-perf', 'final review', 'report-<n>.txt', '"base"',
-      'FORGE waypoint-cli', 'run.json', 'final-validators.json', 'FORGE verdict --task <project>-final', 'final-fix.txt', 'mkdir -p .forge/work/T', 'Commit title prefix', 'blocked path', 'first paragraph', '`start_prompt`']) expect(md).toContain(w);
+      '--path large', 'review-perf', 'final review', 'report-<n>.txt', '"base"',
+      'FORGE waypoint-cli', 'run.json', 'final-validators.json', 'FORGE verdict --task <project>-final', 'final-fix.txt', 'mkdir -p .forge/work/T', 'Commit title prefix', 'blocked path', '`start_prompt`']) expect(md).toContain(w);
     expect(md).not.toContain('report-<n>.md');
   });
   it('forge Large: approve steps, run.json once, lease, final re-review inputs, start_prompt', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
-    for (const w of ['steps 1–3', 'every agent spawned in that step has returned', '`/waypoint:launch` adds the forge suffix', 'only if that file does not exist', 'busyUntil: <NOW + 90 min>', 'busyUntil: {"__delete__": true}',
+    for (const w of ['steps 1–3', '`/waypoint:launch` adds the forge suffix', 'only if that file does not exist',
       'final-validators-2.json', 'final-2.patch', '--dir .forge/work/<project>/final-2 --validators .forge/work/<project>/final-validators-2.json',
       '`redo` is treated as `fix`', '--no-merged', 'forge drives this session (forge:run Large loop)', 'design-page',
       'keeps its verdict and still scores', 'FORGE log --kind ruling --task <id>-<n>']) expect(md).toContain(w);
@@ -245,6 +245,10 @@ describe('plugin layout', () => {
     for (const w of ['## Execution', 'FORGE swarm propose --plan', 'FORGE swarm worktree <T>', 'FORGE swarm task <T> --stage', 'FORGE swarm integrate <T>', 'FORGE swarm merge',
       '--merge-on-finish', '.claude/worktrees/run', 'leaseUntil', 'state/T.exec', 'meta/run', 'two lines', 'never cd']) expect(md).toContain(w);
     expect(md).not.toContain('## Swarm');
+    expect(md).not.toContain('Run `/waypoint:work` and follow it');
+    expect(md).not.toContain('Then continue `/waypoint:work` at §4');
+    for (const w of ['git -C .claude/worktrees/run diff', '--no-merged forge/run-', '--cwd .claude/worktrees/run']) expect(md).toContain(w);
+    expect(read('plugins/forge/skills/infinite/SKILL.md')).not.toContain("the tick's `progress`");
     const inf = read('plugins/forge/skills/infinite/SKILL.md');
     expect(inf).toContain('Execution step');
     expect(inf).not.toContain('Swarm step');
