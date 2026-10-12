@@ -10565,6 +10565,7 @@ function parseChangelog(text) {
 
 // src/lib/types.ts
 var TRACK_COLORS = ["blue", "mauve", "teal", "pink", "sky", "flamingo"];
+var STAGES = ["brief", "implement", "validate", "verify", "review", "verdict", "integrate"];
 
 // src/lib/plan.ts
 var SEG = /^[A-Za-z0-9_.-]{1,64}$/;
@@ -10667,7 +10668,6 @@ function findCycle(plan) {
 }
 
 // src/lib/execution-state.ts
-var STAGES = ["brief", "implement", "validate", "verify", "review", "verdict", "integrate"];
 var TASK_STATUSES = ["running", "accepted", "integrated", "conflict", "blocked"];
 var STOPS = ["finished", "stalled", "stopped", "budget", "migrated"];
 var MAX_TASKS = 500;

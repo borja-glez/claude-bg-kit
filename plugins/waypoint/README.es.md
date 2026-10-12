@@ -6,7 +6,7 @@
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.11.1](https://img.shields.io/badge/versi%C3%B3n-0.11.1-cba6f7?style=flat-square)
+![versión 0.12.0](https://img.shields.io/badge/versi%C3%B3n-0.12.0-cba6f7?style=flat-square)
 ![requiere sesión en claude.ai](https://img.shields.io/badge/requiere-sesi%C3%B3n%20en%20claude.ai-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -81,7 +81,7 @@ El roadmap es un artifact de claude.ai. Es privado hasta que lo compartes, y las
 | --- | --- |
 | **Seguimiento** | El progreso por fases o por frentes: una caja por tarea con el color de su estado, la tarea en curso con sus minutos, una línea temporal con zoom y dependencias, filtros, minimapa y exportación. |
 | **Versiones** | Qué cubre cada versión del plan y cuánto llevan sus fases. |
-| **Sesiones** | Las sesiones vivas, su frente, su tarea y sus mensajes. |
+| **Sesiones** | Las sesiones vivas con su rol (coordinadora, ejecutora o manual), su vida, su frente, su tarea y sus mensajes; mientras hay una ejecución activa, un bloque Ejecución con sus plazas y las libres. |
 | **Notas** | Decisiones, ideas, deudas y preguntas sobre el proyecto, opcionalmente ligadas a una tarea; las preguntas abiertas se pueden responder. |
 | **Propuestas** | Propuestas de mejora del scout de forge o de personas, con filtros por estado, categoría y riesgo. |
 
@@ -91,7 +91,9 @@ El roadmap es un artifact de claude.ai. Es privado hasta que lo compartes, y las
 
 **Verificación.** Cuando forge verificó una tarea con herramientas, su detalle enseña un bloque de Verificación: el resultado, las superficies usadas, cada comprobación con lo esperado y lo observado, y las capturas como miniaturas que se abren en una vista ampliada. Las cajas de tareas del seguimiento llevan un pequeño indicador en las tareas verificadas. Las capturas solo se suben si la configuración de forge del proyecto tiene `evidence: upload` (el valor por defecto), lo que hace el roadmap interno de la organización; con `evidence: local` el roadmap sigue pudiendo compartirse públicamente y enseña los resultados sin imágenes.
 
-**forge en la página.** Cuando forge lleva una tarea, su ficha enseña también el camino y la fase de forge, el agente, los validadores, el veredicto de la revisión y la ronda. Mientras hay una ejecución infinita activa, la cabecera enseña `∞ ciclo N` (con `/M` si la ejecución tiene presupuesto de ciclos). Un enjambre enseña `◆ enjambre vivos/máximo` y marca sus integraciones en la línea temporal.
+**forge en la página.** Cuando forge lleva una tarea, su ficha enseña también el camino y la fase de forge, el agente, los validadores, el veredicto de la revisión y la ronda. Mientras hay una ejecución infinita activa, la cabecera enseña `∞ ciclo N` (con `/M` si la ejecución tiene presupuesto de ciclos). Mientras hay una ejecución de forge activa, la cabecera enseña la píldora `▶ ejecución · subagentes 2/3` (modo, tareas en marcha sobre el máximo); añade `sin señal desde 12:40` cuando la coordinadora lleva 7 minutos en silencio y `parada desde 12:40` pasados 12, y marca las integraciones de la ejecución en la línea temporal.
+
+**Ejecución.** La vista Sesiones abre con un bloque Ejecución: una línea por tarea en marcha con su etapa, agente y tiempo, las plazas usadas sobre el máximo (`2/3 plazas`) y las libres. Las tarjetas de sesión llevan una etiqueta de rol (coordinadora, ejecutora, manual) y un punto de vida. Una tarea en curso cuya ejecutora dejó de renovar su concesión se marca **huérfana** y cuenta como bloqueada en los filtros, para que lo notes y otra sesión pueda recuperarla. La página lee todo esto del documento `meta/run` del roadmap (`runId`, `mode`, `parallel`, `branch`, `mergeOnFinish`, `active`, `stopReason`, `coordinator` y una plaza por tarea en marcha con su `task`, `stage`, `agent`, `by` y `since`), que forge mantiene al día.
 
 **Permisos.** Los colaboradores solo pueden escribir notas y propuestas. Todo lo demás (plan, estado, sesiones, eventos, mensajes) necesita permiso de editor. Claude escribe con ArtifactData como propietario, y las reglas nunca lo limitan. Sin una persona con sesión iniciada, o si la base de datos rechaza una nota, el editor de notas queda en solo lectura.
 
@@ -105,7 +107,7 @@ El roadmap es un artifact de claude.ai. Es privado hasta que lo compartes, y las
 | --- | --- | --- |
 | **Diseño** | Versión del diseño, propuestas y puntos críticos de la última crítica | Aplicar todas, Elegir…, Otra ronda, Reescribir, Preguntarme, Aprobar, Ver diseño |
 | **Trabajo** | Tu frente y su progreso, la tarea en curso con sus minutos, el progreso global, mensajes sin leer, una decisión pendiente | Siguiente tarea, Estado, Lanzar sesión en un frente…, Abrir roadmap |
-| **Enjambre** | Frentes vivos sobre el máximo, frentes integrados, progreso global, conflictos | Estado, Parar enjambre, Abrir roadmap |
+| **Ejecución** | La ejecución (`▶ EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · … · 3/12 · integradas 3`): modo, tareas en marcha sobre el máximo, cada tarea con su etapa y ronda, tareas hechas sobre el total e integradas; termina con `⚠ sin señal` o `⚠ parada` cuando la coordinadora deja de dar señales de vida | Estado, Parar, Abrir roadmap |
 
 Con [lens](../lens/README.es.md) instalado, un botón **Panel** abre el panel de progreso. Si un comando no puede ejecutarse desde la banda, queda en el prompt con el aviso «pulsa Enter».
 
@@ -115,7 +117,7 @@ La banda se dibuja en la terminal y en la pestaña Code de la app de escritorio.
 
 `/waypoint:launch <frente>` crea `.claude/worktrees/<frente>` en la rama `track/<frente>` y arranca allí una sesión de Claude en segundo plano. Cada sesión reclama tareas de su frente y escribe su progreso en el roadmap. Cuando dos sesiones tocan los mismos ficheros, reciben un aviso de solapamiento. Las sesiones pueden traspasarse o delegarse trabajo con mensajes, que se guardan en el roadmap y se envían con `SendMessage`. Si una sesión desaparece, las demás recuperan su tarea.
 
-Para muchos frentes a la vez con integración automática, usa el [enjambre](../forge/README.es.md#enjambre) de forge.
+Para muchos frentes a la vez con integración automática, usa los [modos de ejecución](../forge/README.es.md#modos-de-ejecución) de forge.
 
 ## Hooks
 

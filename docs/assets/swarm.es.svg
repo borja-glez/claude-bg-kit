@@ -61,6 +61,6 @@ text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,san
 <text x="166" y="340" font-size="11.5" class="dim">frente docs · espera a api T3 · se lanza al desbloquearse</text>
 <path d="M32 380H868" stroke="#a6e3a1" stroke-width="2.5"/>
 <text x="40" y="372" font-size="12" class="m" style="fill:#a6e3a1" font-weight="700">main</text>
-<text x="32" y="414" font-size="11.5" class="dim">Hasta swarm.parallel frentes a la vez (5 por defecto) · un merge cada vez, validadores tras cada uno y marcha atrás si hay conflicto.</text>
+<text x="32" y="414" font-size="11.5" class="dim">Hasta swarm.parallel frentes a la vez (3 por defecto) · un merge cada vez, validadores tras cada uno y marcha atrás si hay conflicto.</text>
 <text x="32" y="432" font-size="11.5" class="dim">Funciona en el camino Large y en el modo infinito · se ve en el roadmap, la banda y lens.</text>
 </svg>

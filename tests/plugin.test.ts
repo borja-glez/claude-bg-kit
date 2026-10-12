@@ -19,7 +19,7 @@ describe('plugin layout', () => {
   });
   it('lens manifest, module and contract exist', () => {
     const p = JSON.parse(read('plugins/lens/.claude-plugin/plugin.json'));
-    expect(p).toMatchObject({ name: 'lens', version: '0.6.1', types: './types/index.d.ts' });
+    expect(p).toMatchObject({ name: 'lens', version: '0.7.0', types: './types/index.d.ts' });
     expect(JSON.parse(read('plugins/lens/hooks/hooks.json'))).toEqual({ modules: ['./register.js'] });
     for (const f of ['hooks/register.js', 'types/index.d.ts', 'README.md']) {
       expect(existsSync(new URL(`../plugins/lens/${f}`, import.meta.url))).toBe(true);
@@ -117,9 +117,18 @@ describe('plugin layout', () => {
     expect(md).toMatch(/bundles several independent changes/);
     expect(md).toMatch(/adds new behaviour with its tests/);
   });
-  it('versions: forge 0.6.1, waypoint 0.11.1', () => {
-    expect(JSON.parse(read('plugins/forge/.claude-plugin/plugin.json')).version).toBe('0.6.1');
-    expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.11.1');
+  it('versions: forge 0.7.0, waypoint 0.12.0', () => {
+    expect(JSON.parse(read('plugins/forge/.claude-plugin/plugin.json')).version).toBe('0.7.0');
+    expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.12.0');
+  });
+  it('READMEs describe the execution modes and no longer the old swarm defaults', () => {
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md', 'README.md', 'README.es.md']) {
+      const md = read(f);
+      expect(md).not.toMatch(/5 by default|default 5|5 por defecto/);
+    }
+    expect(read('plugins/forge/README.md')).toContain('forge/run-<project>');
+    expect(read('plugins/forge/README.md')).not.toContain('busyUntil');
+    expect(read('plugins/forge/README.es.md')).toContain('forge/run-<proyecto>');
   });
   it('plan skill publishes the roadmap with notes and proposals write rules for contributors', () => {
     const md = read('plugins/waypoint/skills/plan/SKILL.md');
@@ -136,9 +145,9 @@ describe('plugin layout', () => {
     for (const w of ['design-snapshot', 'design-changed', 'critique-check', 'critique-select', 'design-page', 'rewrite', 'interview', 'approve', '--since', 'applied']) expect(md).toContain(w);
     expect(read('plugins/waypoint/skills/plan/SKILL.md')).toContain('plan.yaml does not exist yet');
   });
-  it('forge manifest depends on waypoint ^0.11.1 and ships its CLI', () => {
+  it('forge manifest depends on waypoint ^0.12.0 and ships its CLI', () => {
     const p = JSON.parse(read('plugins/forge/.claude-plugin/plugin.json'));
-    expect(p).toMatchObject({ name: 'forge', version: '0.6.1', dependencies: [{ name: 'waypoint', version: '^0.11.1' }] });
+    expect(p).toMatchObject({ name: 'forge', version: '0.7.0', dependencies: [{ name: 'waypoint', version: '^0.12.0' }] });
     expect(existsSync(new URL('../plugins/forge/dist/forge.cjs', import.meta.url))).toBe(true);
   });
   it('forge scout agent: frontmatter and rules', () => {

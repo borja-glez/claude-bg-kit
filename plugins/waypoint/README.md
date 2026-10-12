@@ -6,7 +6,7 @@
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.11.1](https://img.shields.io/badge/version-0.11.1-cba6f7?style=flat-square)
+![version 0.12.0](https://img.shields.io/badge/version-0.12.0-cba6f7?style=flat-square)
 ![requires claude.ai login](https://img.shields.io/badge/requires-claude.ai%20login-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -81,7 +81,7 @@ The roadmap is an artifact on claude.ai. It is private until you share it, and i
 | --- | --- |
 | **Tracking** | Progress by phase or by track (a *frente* in the Spanish UI): a box per task coloured by state, the task in progress with its minutes, a zoomable timeline with dependencies, filters, a minimap and export. |
 | **Versions** | What each plan version covers and how far along its phases are. |
-| **Sessions** | The live sessions, their track, their task and their messages. |
+| **Sessions** | The live sessions with their role (coordinator, executor or manual), their liveness, their track, their task and their messages; while an execution is active, an Execution block with its slots and free places. |
 | **Notes** | Decisions, ideas, debts and questions about the project, optionally tied to a task; open questions can be answered. |
 | **Proposals** | Improvement proposals from forge's scout or from people, with filters by status, category and risk. |
 
@@ -91,7 +91,9 @@ The roadmap is an artifact on claude.ai. It is private until you share it, and i
 
 **Verification.** When forge verified a task with tools, its detail shows a Verification block: the result, the surfaces used, each check with what was expected and observed, and the screenshots as thumbnails that open in a lightbox. Tracking task boxes carry a small indicator for verified tasks. Screenshots are uploaded only when the project's forge config has `evidence: upload` (the default), which makes the roadmap organization-internal; with `evidence: local` the roadmap stays publicly shareable and shows the results without images.
 
-**forge on the page.** When forge drives a task, its card also shows forge's path and phase, the agent, the validators, the review verdict and the round. While an infinite run is active, the header shows `∞ cycle N` (with `/M` when the run has a cycle budget). A swarm shows `◆ swarm live/parallel` and marks its integrations on the timeline.
+**forge on the page.** When forge drives a task, its card also shows forge's path and phase, the agent, the validators, the review verdict and the round. While an infinite run is active, the header shows `∞ cycle N` (with `/M` when the run has a cycle budget). While a forge execution is active, the header shows the pill `▶ execution · subagents 2/3` (mode, tasks running out of the maximum); it adds `no signal since 12:40` when the coordinator has been silent for 7 minutes and `stopped since 12:40` after 12, and it marks the execution's integrations on the timeline.
+
+**Execution.** The Sessions view opens with an Execution block: one line per running task with its stage, agent and time, the slots in use out of the maximum (`2/3 slots`) and the free ones. Session cards carry a role tag (coordinator, executor, manual) and a liveness dot. A task that is in progress but whose executor stopped renewing its lease is marked **orphaned** and counts as blocked in the filters, so you notice it and another session can recover it. The page reads all of this from the roadmap's `meta/run` document (`runId`, `mode`, `parallel`, `branch`, `mergeOnFinish`, `active`, `stopReason`, `coordinator` and one slot per running task with its `task`, `stage`, `agent`, `by` and `since`), which forge keeps up to date.
 
 **Permissions.** Contributors can write only notes and proposals. Everything else (plan, state, sessions, events, messages) needs Editor. Claude writes through ArtifactData as the owner, which the rules never limit. Without a signed-in viewer, or when the database refuses a note, the composer is read-only.
 
@@ -105,7 +107,7 @@ The roadmap is an artifact on claude.ai. It is private until you share it, and i
 | --- | --- | --- |
 | **Design** | Design version, proposals and critical points from the last critique | Apply all, Pick…, Another round, Rewrite, Interview me, Approve, View design |
 | **Work** | Your track and its progress, the task in progress with its minutes, overall progress, unread messages, a pending decision | Next task, Status, Launch session on track…, Open roadmap |
-| **Swarm** | Live fronts out of the maximum, tracks integrated, overall progress, conflicts | Status, Stop swarm, Open roadmap |
+| **Run** | The execution (`▶ EXECUTION · subagents 2/3 · T004 review (r2) · … · 3/12 · integrated 3`): mode, tasks running out of the maximum, each task with its stage and round, tasks done out of the total and tasks integrated; it ends with `⚠ no signal` or `⚠ stopped` when the coordinator stops giving signs of life | Status, Stop, Open roadmap |
 
 With [lens](../lens/README.md) installed, a **Panel** button opens the progress panel. If a command cannot run from the band, it is left in the prompt with a note saying "press Enter".
 
@@ -115,7 +117,7 @@ The band is drawn in the terminal and in the Code tab of the desktop app. It is 
 
 `/waypoint:launch <track>` creates `.claude/worktrees/<track>` on the branch `track/<track>` and starts a background Claude session there. Each session claims tasks from its track and writes its progress to the roadmap. When two sessions touch the same files, they get an overlap warning. Sessions can hand off or delegate work through messages, which are stored in the roadmap and sent with `SendMessage`. A session that disappears has its task recovered by the others.
 
-For many tracks at once with automatic integration, use forge's [swarm](../forge/README.md#swarm).
+For many tracks at once with automatic integration, use forge's [execution modes](../forge/README.md#execution-modes).
 
 ## Hooks
 

@@ -61,6 +61,6 @@ text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,san
 <text x="166" y="340" font-size="11.5" class="dim">front docs · waits for api T3 · launched when it unblocks</text>
 <path d="M32 380H868" stroke="#a6e3a1" stroke-width="2.5"/>
 <text x="40" y="372" font-size="12" class="m" style="fill:#a6e3a1" font-weight="700">main</text>
-<text x="32" y="414" font-size="11.5" class="dim">Up to swarm.parallel fronts at once (default 5) · one merge at a time, validators after each one, rollback on conflict.</text>
+<text x="32" y="414" font-size="11.5" class="dim">Up to swarm.parallel fronts at once (default 3) · one merge at a time, validators after each one, rollback on conflict.</text>
 <text x="32" y="432" font-size="11.5" class="dim">Works on the Large path and in infinite mode · shown in the roadmap, the band and lens.</text>
 </svg>

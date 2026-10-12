@@ -7,9 +7,9 @@ Diséñalas, planifícalas, constrúyelas con revisión independiente, ejecútal
 
 [English](README.md) · **Español**
 
-![waypoint 0.11.1](https://img.shields.io/badge/waypoint-0.11.1-cba6f7?style=flat-square)
-![forge 0.6.1](https://img.shields.io/badge/forge-0.6.1-fab387?style=flat-square)
-![lens 0.6.1](https://img.shields.io/badge/lens-0.6.1-b4befe?style=flat-square)
+![waypoint 0.12.0](https://img.shields.io/badge/waypoint-0.12.0-cba6f7?style=flat-square)
+![forge 0.7.0](https://img.shields.io/badge/forge-0.7.0-fab387?style=flat-square)
+![lens 0.7.0](https://img.shields.io/badge/lens-0.7.0-b4befe?style=flat-square)
 ![Marketplace de Claude Code](https://img.shields.io/badge/Claude%20Code-marketplace%20bg--kit-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -36,7 +36,7 @@ Diséñalas, planifícalas, constrúyelas con revisión independiente, ejecútal
 | | Plugin | Qué aporta | Más información |
 | --- | --- | --- | --- |
 | 🧭 | **waypoint** | Documentos de diseño que se pulen en rondas de crítica, un `plan.yaml` de frentes, fases y tareas, un **roadmap vivo** publicado como artifact de claude.ai y sesiones en paralelo coordinadas sobre worktrees de git. | [plugins/waypoint](plugins/waypoint/README.es.md) |
-| 🔨 | **forge** | Una forma de trabajar adaptativa: **triaje por tamaño**, el modelo adecuado para cada papel, primero tus propios validadores, **revisión independiente ponderada**, un **enjambre** de sesiones en paralelo y un **modo infinito** desatendido. | [plugins/forge](plugins/forge/README.es.md) |
+| 🔨 | **forge** | Una forma de trabajar adaptativa: **triaje por tamaño**, el modelo adecuado para cada papel, primero tus propios validadores, **revisión independiente ponderada**, una **ejecución** de tareas en paralelo (subagentes ahora, sesiones en la versión siguiente) y un **modo infinito** desatendido. | [plugins/forge](plugins/forge/README.es.md) |
 | 🔍 | **lens** | Un **panel de progreso en vivo** dentro de Claude Code: roadmap, etapas de forge, ejecuciones de superpowers, pendientes, subagentes, **el modelo y el esfuerzo en uso**, y el **consumo en tokens y dólares** comparado con trabajar sin forge. | [plugins/lens](plugins/lens/README.es.md) |
 
 ## Combínalos a tu manera
@@ -47,7 +47,7 @@ Los plugins están desacoplados: instala solo los que quieras. La única depende
 | --- | --- |
 | **waypoint** | Rondas de diseño, `plan.yaml`, el roadmap vivo, la banda y las sesiones en paralelo, sin el triaje ni la revisión de forge. |
 | **waypoint + lens** | Lo anterior más el panel en vivo y el consumo, todavía sin forge. |
-| **waypoint + forge** | El bucle de construcción completo y el enjambre; lens no hace falta. |
+| **waypoint + forge** | El bucle de construcción completo y la ejecución en paralelo; lens no hace falta. |
 | **lens** | El panel por sí solo: pendientes, subagentes, modelo, esfuerzo y consumo de cualquier sesión. |
 | **cualquiera + [superpowers](https://github.com/obra/superpowers)** | Conviven con las skills de superpowers; lens además enseña sus planes y ejecuciones con subagentes. |
 
@@ -64,7 +64,7 @@ Una tarea grande pasa por cuatro etapas. Por el camino tomas tres decisiones: ap
 1. **Diseño (waypoint).** `/waypoint:design` escribe un documento de diseño. El agente `design-critic` lo revisa por rondas y devuelve propuestas numeradas. Las aplicas, pides otra ronda, haces que Claude te entreviste o lo reescribes. Lo apruebas cuando está bien.
 2. **Plan (waypoint + forge).** `forge-planner` convierte el diseño aprobado en `plan.yaml`: **frentes** (líneas de trabajo independientes; *tracks* en inglés), fases y tareas pequeñas y verificables con los ficheros que toca cada una. `/waypoint:plan` lo publica como **roadmap vivo** en claude.ai. Cualquiera con el enlace ve el progreso, escribe notas y decide propuestas allí.
 3. **Construir (forge).** `/forge:run` hace el triaje de cada tarea por tamaño y elige un camino. Los caminos más pesados pasan por un implementador elegido según la dificultad, luego por los validadores del propio proyecto (tests, lint, tipos, build) y después por hasta tres revisores independientes (correctness, security, perf). Su veredicto ponderado acepta el trabajo o lo devuelve en una ronda de arreglo, con un modelo más fuerte desde la ronda 3.
-4. **En paralelo (enjambre de forge).** Cuando el plan tiene varios frentes desbloqueados, una sesión coordinadora lanza una sesión en segundo plano por frente, cada una en su propio worktree de git, hasta `swarm.parallel` a la vez (5 por defecto). Integra en tu rama el trabajo terminado **de un merge en uno**, pasando los validadores tras cada merge y deshaciéndolo si hay conflicto.
+4. **Ejecución (forge).** Cuando el plan tiene tareas desbloqueadas, una coordinadora las ejecuta hasta `swarm.parallel` a la vez (3 por defecto). En modo *subagents* (el de por defecto; el modo `sessions` llega en la versión siguiente) cada tarea tiene su propio worktree de git y un subagente, y un planificador decide qué se ejecuta a continuación; una tarea cada vez es simplemente N = 1. El trabajo terminado se integra **de un merge en uno** en la rama de ejecución `forge/run-<proyecto>`, pasando los validadores tras cada merge y comparándolos con lo que ya fallaba allí. Tu checkout no se toca hasta la fusión final, que te pide permiso.
 
 El **modo infinito** (`/forge:infinite`) sigue haciendo ciclos dentro de un presupuesto de ciclos u horas. Un scout propone mejoras con pruebas. Las de bajo riesgo y verificables se aprueban solas y el resto te esperan. Las propuestas aprobadas se convierten en tareas nuevas.
 
@@ -78,7 +78,7 @@ Añade el marketplace directamente desde GitHub e instala los plugins que quiera
 claude plugin marketplace add borja-glez/claude-bg-kit
 
 claude plugin install waypoint@bg-kit
-claude plugin install forge@bg-kit     # instala waypoint ^0.11.1 como dependencia
+claude plugin install forge@bg-kit     # instala waypoint ^0.12.0 como dependencia
 claude plugin install lens@bg-kit
 ```
 
@@ -126,7 +126,7 @@ Si Claude Code muestra `ArtifactData` con otro nombre (por ejemplo `mcp__…__Ar
 /forge:run Añade reintentos de webhooks con backoff exponencial y una cola de mensajes fallidos
 ```
 
-forge la clasifica como Large, así que empieza con `/waypoint:design`. Itera el diseño con los botones de la banda y apruébalo; forge planifica, publica el roadmap y trabaja las tareas. Con dos o más frentes desbloqueados, los ejecuta en enjambre.
+forge la clasifica como Large, así que empieza con `/waypoint:design`. Itera el diseño con los botones de la banda y apruébalo; forge planifica, publica el roadmap y trabaja las tareas. Con dos o más frentes desbloqueados, los ejecuta en paralelo como una ejecución.
 
 **Solo el roadmap, sin forge:**
 
@@ -166,7 +166,7 @@ Un artifact de claude.ai que se actualiza mientras Claude trabaja. Tiene cinco v
 
 <p align="center"><img src="docs/assets/band.es.svg" alt="Maqueta de la banda sobre el prompt en los modos diseño, trabajo y enjambre" width="100%"></p>
 
-La banda es una línea sobre el prompt que cambia según lo que estés haciendo. En modo diseño enseña propuestas y puntos críticos; en modo trabajo, tu frente, la tarea en curso y el porcentaje global; en modo enjambre, los frentes vivos y cuántos están integrados. Cada botón ejecuta el comando correspondiente.
+La banda es una línea sobre el prompt que cambia según lo que estés haciendo. En modo diseño enseña propuestas y puntos críticos; en modo trabajo, tu frente, la tarea en curso y el porcentaje global; en modo ejecución, las tareas en marcha, su etapa y cuántas están integradas. Cada botón ejecuta el comando correspondiente.
 
 ### Caminos y agentes de forge
 
@@ -174,7 +174,7 @@ La banda es una línea sobre el prompt que cambia según lo que estés haciendo.
 
 Lo pequeño sigue siendo barato y lo grande recibe el tratamiento completo. Los implementadores van desde Haiku para el trabajo mecánico hasta Opus con esfuerzo muy alto para lo delicado. Los revisores siempre usan Opus con esfuerzo muy alto, y solo actúan cuando los validadores han pasado.
 
-### El enjambre (forge)
+### Ejecución en paralelo (forge)
 
 <p align="center"><img src="docs/assets/swarm.es.svg" alt="Una coordinadora lanza sesiones en los frentes desbloqueados, cada una en su worktree, y las integra en main de una en una" width="100%"></p>
 

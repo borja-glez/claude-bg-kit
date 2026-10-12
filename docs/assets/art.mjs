@@ -552,7 +552,7 @@ const EN = {
   swarmTitle: 'forge swarm · several fronts at once', swarmSub: 'the coordinator only coordinates: it launches sessions on unblocked tracks and integrates their work',
   swarmDesc: 'Diagram of a forge swarm: a coordinator session launches one background session per unblocked track, each in its own git worktree; as fronts finish they are merged into main one at a time.',
   coordinatorFull: 'coordinator', coordSub: 'forge swarm tick: launch unblocked fronts, integrate finished work, sleep, repeat', integrated: 'integrated', waiting: 'front docs · waits for api T3 · launched when it unblocks',
-  swarmFoot1: 'Up to swarm.parallel fronts at once (default 5) · one merge at a time, validators after each one, rollback on conflict.',
+  swarmFoot1: 'Up to swarm.parallel fronts at once (default 3) · one merge at a time, validators after each one, rollback on conflict.',
   swarmFoot2: 'Works on the Large path and in infinite mode · shown in the roadmap, the band and lens.',
 };
 EN.coordinator = 'coordinator';
@@ -610,7 +610,7 @@ const ES = {
   swarmTitle: 'enjambre de forge · varios frentes a la vez', swarmSub: 'la coordinadora solo coordina: lanza sesiones en los frentes desbloqueados e integra su trabajo',
   swarmDesc: 'Diagrama de un enjambre de forge: una sesión coordinadora lanza una sesión en segundo plano por cada frente desbloqueado, cada una en su worktree de git; según terminan, se integran en main de una en una.',
   coordSub: 'forge swarm tick: lanza frentes desbloqueados, integra lo terminado, duerme y repite', integrated: 'integrado', waiting: 'frente docs · espera a api T3 · se lanza al desbloquearse',
-  swarmFoot1: 'Hasta swarm.parallel frentes a la vez (5 por defecto) · un merge cada vez, validadores tras cada uno y marcha atrás si hay conflicto.',
+  swarmFoot1: 'Hasta swarm.parallel frentes a la vez (3 por defecto) · un merge cada vez, validadores tras cada uno y marcha atrás si hay conflicto.',
   swarmFoot2: 'Funciona en el camino Large y en el modo infinito · se ve en el roadmap, la banda y lens.',
 };
 

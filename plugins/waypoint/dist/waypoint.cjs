@@ -13539,6 +13539,9 @@ function computeMetrics(plan, states, now, activeSessions = 1) {
   };
 }
 
+// src/lib/execution-view.ts
+var FUTURE_TOLERANCE_MS = 2 * 6e4;
+
 // src/mod/model.ts
 function pickProject(entries) {
   const withSession = entries.filter((e) => e.hasSession);

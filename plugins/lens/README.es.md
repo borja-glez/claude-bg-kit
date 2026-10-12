@@ -7,7 +7,7 @@ Roadmap, etapas de forge, ejecuciones de superpowers, pendientes, subagentes, el
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.6.1](https://img.shields.io/badge/versi%C3%B3n-0.6.1-b4befe?style=flat-square)
+![versión 0.7.0](https://img.shields.io/badge/versi%C3%B3n-0.7.0-b4befe?style=flat-square)
 ![sin coste en tokens](https://img.shields.io/badge/coste%20en%20tokens-ninguno-a6e3a1?style=flat-square)
 
 </div>
@@ -57,7 +57,7 @@ Cada sección es una tarjeta con su propio color (la paleta Catppuccin del roadm
 | **Ahora** | la sesión | El modelo principal y su esfuerzo (`Opus 5.5 · esfuerzo alto`), la herramienta en marcha y cuánto lleva el turno. |
 | **Roadmap** | plan de waypoint | Porcentaje, fase, una caja por tarea del frente, la tarea en curso con sus minutos frente a su estimación, mensajes y decisiones pendientes. |
 | **forge** | `.forge/status.json` | La última tarea de forge clasificada o trabajada en el día, descrita más abajo. |
-| **enjambre** | `.forge/swarm.json` | Frentes vivos, en espera y listos, y a qué espera cada frente en espera. |
+| **Ejecución** | `.forge/execution/` y `.forge/live/` | Mientras hay una ejecución de forge activa, una fila por tarea en marcha con su etapa, nivel, agente, duración y ronda, y una ficha de vida (viva, sin señal a los 7 minutos, parada a los 12). Debajo, listas atenuadas de las tareas en cola, en conflicto, bloqueadas y huérfanas. Sustituye a la antigua tarjeta de enjambre. |
 | **superpowers** | `.superpowers/sdd/<plan>/progress.md` | El plan activo y su registro de subagent-driven-development: tarea N/M, la ronda de arreglo actual y las últimas entradas. Un plan terminado sin pasos marcados se oculta. |
 | **Pendientes** | TodoWrite | Hechos/total, el que está en curso y los siguientes. |
 | **Subagentes** | Claude Code | Los subagentes en marcha, con su tipo, descripción, modelo, esfuerzo y tiempo. |
@@ -68,6 +68,7 @@ Cada sección es una tarjeta con su propio color (la paleta Catppuccin del roadm
 
 - la tarea y su camino;
 - las etapas (triaje → implementar → validar → verificar → revisar → veredicto, más diseño, plan y final en el camino Large), con la actual encendida; la etapa de verificar solo aparece cuando forge verifica la tarea;
+- durante una ejecución, las etapas propias de la ejecución (brief, implementar, validar, verificar, revisar, veredicto, integrar) de la tarea que se trabaja;
 - una caja por brief: aceptado, actual o pendiente;
 - el último agente con su nivel, modelo y esfuerzo;
 - una fila de verificación cuando la tarea se verificó: las superficies usadas, las comprobaciones superadas sobre el total y el resultado (pass, fail o blocked);
@@ -79,7 +80,7 @@ Debajo de las etapas lista hasta 5 propuestas pendientes, cada una como `título
 
 La tarjeta **Consumo** responde a tres preguntas: qué modelo trabaja, cuánto lleva gastado y cuánto cuesta el método.
 
-- **Esta sesión ▸ ejecución.** La vista de ejecución suma todas las sesiones de la ejecución de forge en curso (la coordinadora del enjambre y sus frentes) a partir de `.forge/usage/<sesión>.json`. Aparece mientras hay una ejecución activa o una que terminó en las últimas 12 horas.
+- **Esta sesión ▸ ejecución.** La vista de ejecución suma todas las sesiones de la ejecución de forge en curso (la coordinadora de la ejecución y sus tareas) a partir de `.forge/usage/<sesión>.json`. Aparece mientras hay una ejecución activa o una que terminó en las últimas 12 horas.
 - **Grupos.** Sesión principal, Implementadores, Revisores, Verificación (los agentes `forge-verify`), Planificación y scout, Otros subagentes y Seguimiento ≈ (una estimación del contexto que se va en la gestión de waypoint y forge). Cada grupo enseña su modelo dominante, sus tokens, sus dólares y su porcentaje.
 - **Comprobación con `/cost`.** El total de la sesión se compara con el coste del propio Claude Code. Aparece un ⚠ si los dos difieren en más de un 10 %, por ejemplo cuando un modelo falta en la tabla de precios o lens cargó con la sesión ya empezada.
 - **Sin forge (estimado).** El mismo trabajo hecho solo por la sesión principal, con su modelo y sin revisión. Siempre va marcado como estimación, porque en una sola sesión el contexto crecería y costaría más, y nada se revisaría.

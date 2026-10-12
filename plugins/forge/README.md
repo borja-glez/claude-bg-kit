@@ -7,8 +7,8 @@ Triage by size, the right model for each role, your own tools first, independent
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.6.1](https://img.shields.io/badge/version-0.6.1-fab387?style=flat-square)
-![depends on waypoint ^0.11.1](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.11.1-cba6f7?style=flat-square)
+![version 0.7.0](https://img.shields.io/badge/version-0.7.0-fab387?style=flat-square)
+![depends on waypoint ^0.12.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.12.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -22,7 +22,7 @@ Triage by size, the right model for each role, your own tools first, independent
 - [Paths](#paths)
 - [Agents](#agents)
 - [The Large path](#the-large-path)
-- [Swarm](#swarm)
+- [Execution modes](#execution-modes)
 - [Infinite mode](#infinite-mode)
 - [Proposals](#proposals)
 - [Verification](#verification)
@@ -37,7 +37,7 @@ Doing every task the same way wastes effort. A full review of a one-line fix cos
 - **Tools before opinions.** Your tests, linters, type checker and build run before any reviewer reads the diff.
 - **Independent review.** Reviewers are separate agents that never wrote the code. They judge it against the brief and return scored verdicts, and forge weighs those into a decision.
 - **The right model for the role.** Mechanical work goes to Haiku; delicate work goes to Opus at extra-high effort.
-- **Scales out.** Big plans run as a swarm of parallel sessions, and infinite mode keeps improving the project within a budget.
+- **Scales out.** Big plans run as an execution of parallel tasks, and infinite mode keeps improving the project within a budget.
 
 ## Install
 
@@ -46,18 +46,18 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depends on [waypoint](../waypoint/README.md) ^0.11.1, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
+forge depends on [waypoint](../waypoint/README.md) ^0.12.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
 
 ## Usage
 
 | Command | What it does |
 | --- | --- |
 | `/forge:run <task>` | Triage the task and work it on the path its size calls for. |
-| `/forge:run --parallel N <task>` | Same, with a swarm of up to N parallel sessions on the Large path. |
+| `/forge:run --parallel N <task>` | Same, running up to N tasks at once on the Large path (3 by default, max 10). |
 | `/forge:infinite [--cycles N] [--hours H]` | Unattended improvement cycles within a budget. |
 | `/forge:decide <id> approve\|reject\|comment <text>` | Decide or comment on a proposal from any session. |
 | `/forge:verify [surface]` | Check the work by using it (web, emulator, CLI...), or create and edit verification surfaces. |
-| `/forge:stop` | Stop the infinite run or the swarm. |
+| `/forge:stop` | Stop the infinite run or the execution. |
 
 ```text
 /forge:run Fix the off-by-one in pagination            → Trivial or Small
@@ -103,21 +103,34 @@ Implementers write their report to `report-<n>.txt` and also include it in their
 3. `/waypoint:work` claims each task, and its "do the work" step becomes the forge loop: `brief --plan`, `triage --plan`, an implementer, the validators and the three reviewers, for up to 4 rounds.
 4. When the tasks are done, `review-correctness` reviews the whole branch against the design and the plan, with at most one fix and one re-review. The re-review gets fresh validators and a fresh diff, and a `redo` verdict is treated as a fix.
 
-The run's base is kept in `.forge/work/<project>/run.json`, written once after the design is approved. While an implementer or reviewer runs, the session holds a `busyUntil` lease on its waypoint session, so parallel sessions do not recover its task.
+The run's base is kept in `.forge/work/<project>/run.json`, written once after the design is approved. While a task runs, the coordinator renews a lease (`leaseUntil`, 10 minutes) on the task's state and on its own waypoint session, so parallel sessions do not recover a task that is still being worked. Besides the lease, each session of an execution leaves a local signal in `.forge/live/` (see [Live signal](#live-signal)).
 
-## Swarm
+## Execution modes
 
 <p align="center"><img src="../../docs/assets/swarm.en.svg" alt="A coordinator launches sessions on unblocked tracks, each in its own worktree, and merges them into main one at a time" width="100%"></p>
 
-With `swarm.parallel` of 2 or more in `.forge/config.yaml` (default 5) or `--parallel N`, the Large path and infinite mode run as a **swarm**, and the session only coordinates:
+On the Large path and in infinite mode, forge runs the plan's tasks through **one planner** that works per task: `forge swarm tick` decides which tasks are ready (their dependencies are integrated and their zones do not overlap) and which finished work to integrate, up to `swarm.parallel` at once. There are two modes:
 
-- **Each tick** it lists the roadmap, and `forge swarm tick` decides which fronts (tracks) to launch with `waypoint launch --swarm` and which work to integrate. A front is launched only when its dependencies are integrated.
-- **Each front** is a background session in `.claude/worktrees/<track>` on the branch `track/<track>`.
-- **Integration** happens with your one-time authorization, one merge at a time, into the main checkout's branch. It merges up to the last done task of a front, runs the validators, and commits, or rolls back if there is a conflict or a validator fails.
-- **Between ticks** it sleeps with `forge swarm sleep` in the background.
-- **State** lives in `.forge/swarm.json`, mirrored to the roadmap's `meta/swarm`. The roadmap, lens and the band show it.
+- **subagents** (the default). The coordinator session works each task with subagents in a git worktree of its own.
+- **sessions** (not available yet; it arrives in the next version). Each task would run in its own background session. Until then, asking for it falls back to subagents.
 
-After a stall caused by a conflict, `forge swarm retry <track>` reactivates the swarm without another `/forge:run`.
+Sequential execution is not a third mode: it is subagents with N = 1.
+
+**How the mode is chosen.** forge proposes one (`forge swarm propose --plan <plan>` says how wide the plan is and recommends a mode and N), or you say it ("en enjambre", "con subagentes", "en paralelo", "secuencial"), or you fix it with `swarm.mode` in `.forge/config.yaml`. N is your `--parallel N` if given, else the recommendation, capped by `swarm.parallel`.
+
+**The run branch.** An execution works on `forge/run-<project>`, in the worktree `.claude/worktrees/run`. Open the app from there to see the run's work as it grows. Your checkout is not touched until the final merge, which asks for your permission, or uses the one you gave when the run started (`--merge-on-finish`). `swarm start` refuses the default branch as `--branch`, and never pushes.
+
+**Task worktrees.** Each task gets `.claude/worktrees/task-<task>` on the branch `task/<task>` (`forge swarm worktree <task>`). Right after creating a worktree, forge installs its dependencies with `swarm.setup` in `.forge/config.yaml`. Without it, the command is deduced from the lockfile: `npm ci` for `package-lock.json`, `pnpm install --frozen-lockfile` for `pnpm-lock.yaml`, `yarn install --frozen-lockfile` for `yarn.lock`. A Python `.venv` has no safe default: set `swarm.setup`. The result (its command and the last lines of output) is shown to you, and a failed install never stops the run.
+
+**Integration.** A finished task is merged into the run branch with `forge swarm integrate <task>`, one merge at a time, running the validators after each one. Failures that **already existed** on the run branch do not block: the validators are compared with a baseline cached per scope, target and commit in `.forge/execution/baseline/`, and only new failures roll the merge back (a conflict does too). The final `forge swarm merge` into your branch does the same and answers `merged`, `needs-authorization`, `main-dirty` or `conflict`.
+
+**Stopping.** `/forge:stop` (or `forge stop`) ends the execution: the coordinator sees the stop and finishes its step, and a run whose session is gone is closed anyway. After a stall caused by a conflict or a blocked task, `forge swarm retry <task>` reactivates the execution without another `/forge:run`.
+
+**State and visibility.** The state lives in `.forge/execution/` (the run, one file per task) and is mirrored to the roadmap's `meta/run`. The roadmap, lens and the band show it: one row per running task with its stage, agent, duration and liveness.
+
+### Live signal
+
+`forge hook live` runs on SessionStart, SessionEnd, SubagentStart, SubagentStop and Stop. For the coordinator of an active execution it writes `.forge/live/<sessionId>.json` in the main checkout, with the last event, the time and the subagents that are running. lens, the band and the roadmap read it: a session is shown as **silent** after 7 minutes without events and **stopped** after 12. Subagents that started more than 3 hours ago are dropped. The hook prints nothing and never fails.
 
 ## Infinite mode
 
@@ -184,7 +197,7 @@ Tests and reviewers read the code; verification **uses** the result. A **surface
 
 ## Configuration
 
-`.forge/` in the project holds `config.yaml`, `verify/` (the surfaces), the ledger, `local.yaml`, `status.json`, `work/<task-id>/` (briefs, diffs, reports, reviews, verification evidence), `proposals/`, `run.json`, `swarm.json` and `usage/`. Git ignores everything in it except `config.yaml` and `verify/*.md`.
+`.forge/` in the project holds `config.yaml`, `verify/` (the surfaces), the ledger, `local.yaml`, `status.json`, `work/<task-id>/` (briefs, diffs, reports, reviews, verification evidence), `proposals/`, `run.json`, `execution/` (the execution and its baselines), `live/` (the local signal) and `usage/`. Git ignores everything in it except `config.yaml` and `verify/*.md`.
 
 ```yaml
 profile: balanced              # balanced | economy | quality
@@ -204,8 +217,13 @@ verify:
 evidence: upload               # upload | local; default upload
 validatorTimeoutSec: 600
 swarm:
-  parallel: 5                  # 1 turns the swarm off; max 10
+  parallel: 3                  # tasks at once; 1 runs one at a time; max 10
+  mode: subagents              # optional: subagents | sessions (sessions arrives in the next version)
+  setup: npm ci                # optional: installs a new worktree's dependencies; default deduced from the lockfile
+  launcher: bg                 # bg | herdr; default bg
 ```
+
+`swarm.setup` is a command of up to 500 characters, run in each worktree forge creates. `.forge/config.yaml` is the one file of `.forge/` that git does track, so a `setup` you commit applies to everyone who runs the project.
 
 > **Changed in 0.6.0:** a `validators` list in `.forge/config.yaml` no longer turns detection off; detected validators are used too, and yours win by name. Set `detect: false` for the previous behaviour.
 
@@ -279,9 +297,22 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 </details>
 
 <details>
-<summary><b>Infinite mode and swarm</b></summary>
+<summary><b>Infinite mode and execution</b></summary>
 
 - `infinite start --cycles N | --hours H`, `infinite status`, `cycle --progress yes|no`, `stop`
-- `swarm start | status | tick | integrate <track> | mark <track> | retry <track> | sleep <seconds> [--mark] | stop`
+- `swarm start --project P --session SID [--mode subagents|sessions] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]` - start or resume an execution; creates the run branch and its worktree and prints the `setup` result. Run it from the main checkout.
+- `swarm status` - the execution state, per task.
+- `swarm propose --plan p` - the plan's width and the recommended mode and N.
+- `swarm worktree <task>` - create the task's worktree and branch (and run `swarm.setup`).
+- `swarm task <task> --stage S [--agent A | --no-agent] [--round N] [--status running|accepted|blocked] [--detail-file F] [--lease ISO]` - record the task's stage, agent and round; `swarm task <task> --drop` forgets a task whose claim was lost.
+- `swarm tick --plan p --db dir` - decide what to launch and what to integrate (`--db` is a copy of the roadmap's `state` and `sessions` documents).
+- `swarm integrate <task>` - merge an accepted task into the run branch, comparing the validators with the baseline.
+- `swarm merge [--yes]` - merge the run branch into your branch; without `--yes` it needs the permission given at start.
+- `swarm retry <task>` - put a task in conflict or blocked back to work.
+- `swarm sleep <seconds> [--mark]` - wait between ticks (up to 900 s); `--mark` only records the wake-up time.
+- `swarm stop [--reason stopped|budget]`
+- `stop` - stop the infinite run and the execution.
+- `hook live` - the live-signal hook (stdin: the hook event). It prints nothing.
+- `--cwd <dir>` - on any command, run it as if from that directory (validators, git and the project's files), so a coordinator never has to `cd` into a worktree.
 
 </details>

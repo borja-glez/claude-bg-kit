@@ -7,8 +7,8 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.6.1](https://img.shields.io/badge/versi%C3%B3n-0.6.1-fab387?style=flat-square)
-![depende de waypoint ^0.11.1](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.11.1-cba6f7?style=flat-square)
+![versión 0.7.0](https://img.shields.io/badge/versi%C3%B3n-0.7.0-fab387?style=flat-square)
+![depende de waypoint ^0.12.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.12.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -22,7 +22,7 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 - [Caminos](#caminos)
 - [Agentes](#agentes)
 - [El camino Large](#el-camino-large)
-- [Enjambre](#enjambre)
+- [Modos de ejecución](#modos-de-ejecución)
 - [Modo infinito](#modo-infinito)
 - [Propuestas](#propuestas)
 - [Verificación](#verificación)
@@ -37,7 +37,7 @@ Hacer todas las tareas igual malgasta esfuerzo. Una revisión completa de un arr
 - **Herramientas antes que opiniones.** Tus tests, linters, comprobador de tipos y build se ejecutan antes de que ningún revisor lea el diff.
 - **Revisión independiente.** Los revisores son agentes aparte que no escribieron el código. Lo juzgan contra el brief y devuelven veredictos con nota, y forge los pondera en una decisión.
 - **El modelo adecuado para cada papel.** El trabajo mecánico va a Haiku; el delicado, a Opus con esfuerzo muy alto.
-- **Escala.** Los planes grandes se ejecutan como un enjambre de sesiones en paralelo, y el modo infinito sigue mejorando el proyecto dentro de un presupuesto.
+- **Escala.** Los planes grandes se ejecutan como una ejecución de tareas en paralelo, y el modo infinito sigue mejorando el proyecto dentro de un presupuesto.
 
 ## Instalación
 
@@ -46,18 +46,18 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depende de [waypoint](../waypoint/README.es.md) ^0.11.1, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
+forge depende de [waypoint](../waypoint/README.es.md) ^0.12.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
 
 ## Uso
 
 | Comando | Qué hace |
 | --- | --- |
 | `/forge:run <tarea>` | Hace el triaje de la tarea y la trabaja por el camino que pide su tamaño. |
-| `/forge:run --parallel N <tarea>` | Lo mismo, con un enjambre de hasta N sesiones en paralelo en el camino Large. |
+| `/forge:run --parallel N <tarea>` | Lo mismo, ejecutando hasta N tareas a la vez en el camino Large (3 por defecto, máximo 10). |
 | `/forge:infinite [--cycles N] [--hours H]` | Ciclos de mejora desatendidos dentro de un presupuesto. |
 | `/forge:decide <id> approve\|reject\|comment <texto>` | Decide o comenta una propuesta desde cualquier sesión. |
 | `/forge:verify [superficie]` | Comprueba el trabajo usándolo (web, emulador, CLI...), o crea y edita superficies de verificación. |
-| `/forge:stop` | Para la ejecución infinita o el enjambre. |
+| `/forge:stop` | Para la ejecución infinita o la ejecución en paralelo. |
 
 ```text
 /forge:run Corrige el error por uno en la paginación      → Trivial o Small
@@ -103,21 +103,34 @@ Los implementadores escriben su informe en `report-<n>.txt` y también lo incluy
 3. `/waypoint:work` reclama cada tarea, y su paso «hacer el trabajo» se convierte en el bucle de forge: `brief --plan`, `triage --plan`, un implementador, los validadores y los tres revisores, durante hasta 4 rondas.
 4. Al acabar las tareas, `review-correctness` revisa toda la rama contra el diseño y el plan, con como mucho un arreglo y una segunda revisión. La segunda revisión recibe validadores y diff nuevos, y un veredicto `redo` se trata como un arreglo.
 
-La base de la ejecución se guarda en `.forge/work/<proyecto>/run.json`, que se escribe una vez tras aprobar el diseño. Mientras corre un implementador o un revisor, la sesión mantiene un `busyUntil` en su sesión de waypoint, para que las sesiones en paralelo no le quiten la tarea.
+La base de la ejecución se guarda en `.forge/work/<proyecto>/run.json`, que se escribe una vez tras aprobar el diseño. Mientras una tarea corre, la coordinadora renueva una concesión (`leaseUntil`, 10 minutos) en el estado de la tarea y en su propia sesión de waypoint, para que las sesiones en paralelo no le quiten una tarea que sigue en marcha. Además de la concesión, cada sesión de una ejecución deja una señal local en `.forge/live/` (mira [Señal en vivo](#señal-en-vivo)).
 
-## Enjambre
+## Modos de ejecución
 
 <p align="center"><img src="../../docs/assets/swarm.es.svg" alt="Una coordinadora lanza sesiones en los frentes desbloqueados, cada una en su worktree, y las integra en main de una en una" width="100%"></p>
 
-Con `swarm.parallel` a 2 o más en `.forge/config.yaml` (5 por defecto) o con `--parallel N`, el camino Large y el modo infinito se ejecutan como un **enjambre**, y la sesión solo coordina:
+En el camino Large y en el modo infinito, forge ejecuta las tareas del plan con **un planificador** que trabaja por tareas: `forge swarm tick` decide qué tareas están listas (sus dependencias están integradas y sus zonas no se solapan) y qué trabajo terminado integrar, hasta `swarm.parallel` a la vez. Hay dos modos:
 
-- **En cada tick** lista el roadmap, y `forge swarm tick` decide qué frentes lanzar con `waypoint launch --swarm` y qué trabajo integrar. Un frente solo se lanza cuando sus dependencias están integradas.
-- **Cada frente** es una sesión en segundo plano en `.claude/worktrees/<frente>`, en la rama `track/<frente>`.
-- **La integración** se hace con tu autorización (una sola vez), de un merge en uno, en la rama del checkout principal. Integra hasta la última tarea terminada del frente, pasa los validadores y hace commit, o deshace el merge si hay conflicto o falla un validador.
-- **Entre ticks** duerme en segundo plano con `forge swarm sleep`.
-- **El estado** vive en `.forge/swarm.json`, reflejado en el `meta/swarm` del roadmap. Lo enseñan el roadmap, lens y la banda.
+- **subagents** (el de por defecto). La sesión coordinadora trabaja cada tarea con subagentes en un worktree de git propio.
+- **sessions** (aún no disponible: llega en la versión siguiente). Cada tarea correría en su propia sesión en segundo plano. Hasta entonces, pedirlo cae a subagents.
 
-Si el enjambre se para por un conflicto, `forge swarm retry <frente>` lo reactiva sin volver a lanzar `/forge:run`.
+La ejecución secuencial no es un tercer modo: es subagents con N = 1.
+
+**Cómo se elige el modo.** forge propone uno (`forge swarm propose --plan <plan>` dice cuán ancho es el plan y recomienda un modo y una N), o lo dices tú («en enjambre», «con subagentes», «en paralelo», «secuencial»), o lo fijas con `swarm.mode` en `.forge/config.yaml`. N es tu `--parallel N` si lo das, y si no la recomendación, con el tope de `swarm.parallel`.
+
+**La rama de ejecución.** Una ejecución trabaja en `forge/run-<proyecto>`, en el worktree `.claude/worktrees/run`. Abre la app desde ahí para ver el trabajo de la ejecución según crece. Tu checkout no se toca hasta la fusión final, que te pide permiso o usa el que diste al empezar (`--merge-on-finish`). `swarm start` rechaza la rama por defecto como `--branch`, y nunca hace push.
+
+**Worktrees por tarea.** Cada tarea tiene `.claude/worktrees/task-<tarea>` en la rama `task/<tarea>` (`forge swarm worktree <tarea>`). Nada más crear un worktree, forge instala sus dependencias con `swarm.setup` de `.forge/config.yaml`. Sin él, el comando se deduce del lockfile: `npm ci` para `package-lock.json`, `pnpm install --frozen-lockfile` para `pnpm-lock.yaml`, `yarn install --frozen-lockfile` para `yarn.lock`. Un `.venv` de Python no tiene un valor por defecto seguro: pon `swarm.setup`. El resultado (su comando y las últimas líneas de salida) se te enseña, y una instalación fallida nunca para la ejecución.
+
+**Integración.** Una tarea terminada se fusiona en la rama de ejecución con `forge swarm integrate <tarea>`, de un merge en uno, pasando los validadores tras cada uno. Los fallos que **ya existían** en la rama de ejecución no bloquean: los validadores se comparan con una base guardada por ámbito, destino y commit en `.forge/execution/baseline/`, y solo los fallos nuevos deshacen el merge (un conflicto también). El `forge swarm merge` final a tu rama hace lo mismo y responde `merged`, `needs-authorization`, `main-dirty` o `conflict`.
+
+**Parar.** `/forge:stop` (o `forge stop`) termina la ejecución: la coordinadora ve la parada y acaba su paso, y una ejecución cuya sesión ya no existe se cierra igualmente. Tras una parada por un conflicto o una tarea bloqueada, `forge swarm retry <tarea>` reactiva la ejecución sin volver a lanzar `/forge:run`.
+
+**Estado y visibilidad.** El estado vive en `.forge/execution/` (la ejecución y un fichero por tarea) y se refleja en el `meta/run` del roadmap. Lo enseñan el roadmap, lens y la banda: una fila por tarea en marcha con su etapa, agente, duración y vida.
+
+### Señal en vivo
+
+`forge hook live` se ejecuta en SessionStart, SessionEnd, SubagentStart, SubagentStop y Stop. Para la coordinadora de una ejecución activa escribe `.forge/live/<sessionId>.json` en el checkout principal, con el último evento, la hora y los subagentes en marcha. lens, la banda y el roadmap lo leen: una sesión se muestra **sin señal** tras 7 minutos sin eventos y **parada** tras 12. Los subagentes que empezaron hace más de 3 horas se descartan. El hook no imprime nada y nunca falla.
 
 ## Modo infinito
 
@@ -184,7 +197,7 @@ Los tests y los revisores leen el código; la verificación **usa** el resultado
 
 ## Configuración
 
-`.forge/` en el proyecto contiene `config.yaml`, `verify/` (las superficies), el registro, `local.yaml`, `status.json`, `work/<id-de-tarea>/` (briefs, diffs, informes, revisiones, pruebas de verificación), `proposals/`, `run.json`, `swarm.json` y `usage/`. Git ignora todo lo que hay dentro salvo `config.yaml` y `verify/*.md`.
+`.forge/` en el proyecto contiene `config.yaml`, `verify/` (las superficies), el registro, `local.yaml`, `status.json`, `work/<id-de-tarea>/` (briefs, diffs, informes, revisiones, pruebas de verificación), `proposals/`, `run.json`, `execution/` (la ejecución y sus bases), `live/` (la señal local) y `usage/`. Git ignora todo lo que hay dentro salvo `config.yaml` y `verify/*.md`.
 
 ```yaml
 profile: balanced              # balanced | economy | quality
@@ -204,8 +217,13 @@ verify:
 evidence: upload               # upload | local; por defecto upload
 validatorTimeoutSec: 600
 swarm:
-  parallel: 5                  # 1 desactiva el enjambre; máximo 10
+  parallel: 3                  # tareas a la vez; 1 ejecuta una cada vez; máximo 10
+  mode: subagents              # opcional: subagents | sessions (sessions llega en la versión siguiente)
+  setup: npm ci                # opcional: instala las dependencias de un worktree nuevo; por defecto se deduce del lockfile
+  launcher: bg                 # bg | herdr; por defecto bg
 ```
+
+`swarm.setup` es un comando de hasta 500 caracteres, que se ejecuta en cada worktree que crea forge. `.forge/config.yaml` es el único fichero de `.forge/` que git sí versiona, así que un `setup` que commitees vale para todo el que ejecute el proyecto.
 
 > **Cambio en 0.6.0:** una lista `validators` en `.forge/config.yaml` ya no desactiva la detección; también se usan los validadores detectados, y los tuyos ganan por nombre. Pon `detect: false` para el comportamiento anterior.
 
@@ -279,9 +297,22 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 </details>
 
 <details>
-<summary><b>Modo infinito y enjambre</b></summary>
+<summary><b>Modo infinito y ejecución</b></summary>
 
 - `infinite start --cycles N | --hours H`, `infinite status`, `cycle --progress yes|no`, `stop`
-- `swarm start | status | tick | integrate <frente> | mark <frente> | retry <frente> | sleep <segundos> [--mark] | stop`
+- `swarm start --project P --session SID [--mode subagents|sessions] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]` - empieza o reanuda una ejecución; crea la rama de ejecución y su worktree e imprime el resultado de `setup`. Ejecútalo desde el checkout principal.
+- `swarm status` - el estado de la ejecución, por tarea.
+- `swarm propose --plan p` - el ancho del plan y el modo y la N recomendados.
+- `swarm worktree <tarea>` - crea el worktree y la rama de la tarea (y ejecuta `swarm.setup`).
+- `swarm task <tarea> --stage S [--agent A | --no-agent] [--round N] [--status running|accepted|blocked] [--detail-file F] [--lease ISO]` - anota la etapa, el agente y la ronda de la tarea; `swarm task <tarea> --drop` olvida una tarea cuya reclamación se perdió.
+- `swarm tick --plan p --db dir` - decide qué lanzar y qué integrar (`--db` es una copia de los documentos `state` y `sessions` del roadmap).
+- `swarm integrate <tarea>` - fusiona una tarea aceptada en la rama de ejecución, comparando los validadores con la base.
+- `swarm merge [--yes]` - fusiona la rama de ejecución en tu rama; sin `--yes` necesita el permiso dado al empezar.
+- `swarm retry <tarea>` - devuelve al trabajo una tarea en conflicto o bloqueada.
+- `swarm sleep <segundos> [--mark]` - espera entre ticks (hasta 900 s); `--mark` solo anota la hora de despertar.
+- `swarm stop [--reason stopped|budget]`
+- `stop` - para la ejecución infinita y la ejecución en paralelo.
+- `hook live` - el hook de la señal en vivo (stdin: el evento del hook). No imprime nada.
+- `--cwd <dir>` - en cualquier comando, lo ejecuta como si fuera desde ese directorio (validadores, git y ficheros del proyecto), para que una coordinadora nunca tenga que hacer `cd` a un worktree.
 
 </details>
