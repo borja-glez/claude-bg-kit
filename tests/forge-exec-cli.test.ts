@@ -209,7 +209,7 @@ describe('forge swarm (execution)', () => {
   it('tick reads member public files and the ListAgents snapshot', () => {
     sessionsRun();
     mkdirSync(path.dirname(executionTaskFile(root, 'T1')), { recursive: true });
-    writeFileSync(executionTaskFile(root, 'T1'),JSON.stringify({ task: 'T1', runId: readExecution(root)!.runId, stage: 'review', status: 'running', agent: 'forge-review-perf', round: 1, since: NOW.toISOString(), updatedAt: NOW.toISOString(), leaseUntil: NOW.toISOString(), by: 'S2', mode: 'sessions' }));
+    writeFileSync(executionTaskFile(root, 'T1'), JSON.stringify({ task: 'T1', runId: readExecution(root)!.runId, stage: 'review', status: 'running', agent: 'forge-review-perf', round: 1, since: NOW.toISOString(), updatedAt: NOW.toISOString(), leaseUntil: NOW.toISOString(), by: 'S2', mode: 'sessions' }));
     writeFileSync(path.join(root, 'agents.json'), JSON.stringify([{ name: 'wp-shop-T1', state: 'working' }, { bad: 1 }]));
     out(run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db', '--agents', 'agents.json'], io));
     expect(readExecution(root)!.tasks.T1).toMatchObject({ stage: 'review', agent: 'forge-review-perf' });
@@ -232,6 +232,35 @@ describe('forge swarm (execution)', () => {
     sessionsRun();
     expect(out(run(['swarm', 'nudge', 'T1', '--plan', 'plan.yaml'], io))).toEqual({ task: 'T1', name: 'wp-shop-T1', text: '[forge run] T1: continúa con brief; si estás bloqueado, márcalo como bloqueado' });
     expect(readExecution(root)!.tasks.T1.nudgedAt).toBe(NOW.toISOString());
+  });
+  it('relaunch resets startedAt and nudgedAt and the note lists commits on the task branch', () => {
+    sessionsRun();
+    const e0 = readExecution(root)!;
+    saveExecution(root, { ...e0, tasks: { ...e0.tasks, T1: { ...e0.tasks.T1, startedAt: '2026-10-12T00:00:00.000Z', nudgedAt: '2026-10-12T01:00:00.000Z' } } });
+    const tree = git('rev-parse', 'forge/run-shop^{tree}');
+    const sha = git('commit-tree', tree, '-p', 'forge/run-shop', '-m', 'work on t1');
+    git('branch', '-f', 'task/T1', sha);
+    out(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io));
+    const t = readExecution(root)!.tasks.T1;
+    expect(t.startedAt).toBe(NOW.toISOString());
+    expect(t.nudgedAt ?? null).toBeNull();
+    expect(readFileSync(path.join(root, '.forge', 'work', 'T1', 'handover.md'), 'utf8')).toContain('work on t1');
+  });
+  it('relaunch refuses a blocked and an accepted task', () => {
+    sessionsRun();
+    for (const status of ['blocked', 'accepted'] as const) {
+      const e = readExecution(root)!;
+      saveExecution(root, { ...e, tasks: { ...e.tasks, T1: { ...e.tasks.T1, status } } });
+      expect(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io).code).toBe(2);
+    }
+  });
+  it('nudge and relaunch check the plan path and nudge saves nothing when it fails', () => {
+    sessionsRun();
+    expect(run(['swarm', 'nudge', 'T1', '--plan', 'missing.yaml'], io).code).toBe(2);
+    expect(run(['swarm', 'nudge', 'T1', '--plan', '-x'], io).code).toBe(2);
+    expect(run(['swarm', 'relaunch', 'T1', '--plan', 'missing.yaml'], io).code).toBe(2);
+    expect(readExecution(root)!.tasks.T1.nudgedAt ?? null).toBeNull();
+    expect(readExecution(root)!.tasks.T1.attempts).toBe(0);
   });
   it('relaunch and nudge refuse a subagents task', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));

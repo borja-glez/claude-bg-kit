@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, statSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { UsageError } from './errors.js';
 import type { ExecResult, Io } from './run.js';
@@ -385,14 +385,21 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       const e = current();
       const t = e.tasks[task];
       if (!t || t.status !== 'running' || t.executor !== 'sessions') throw new UsageError(`swarm ${sub}: ${task} is not a running sessions task`);
+      const planArg = flag('plan');
+      if (has('plan') && (!planArg || planArg.startsWith('-'))) throw new UsageError(`swarm ${sub}: --plan needs a file`);
+      if (planArg) {
+        const isFile = (() => { try { return statSync(path.resolve(io.cwd, planArg)).isFile(); } catch { return false; } })();
+        if (planArg.startsWith('-') || !isFile) throw new UsageError(`swarm ${sub}: --plan ${planArg} is not a plan file`);
+      }
       if (sub === 'nudge') {
-        saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, nudgedAt: iso } } });
-        const es = (flag('plan') ? loadPlanArg(io, flag('plan'), 'nudge').locale : planLocale(io.cwd, e.project)) === 'es';
+        // The text (and so the plan) is read before anything is saved.
+        const es = (planArg ? loadPlanArg(io, planArg, 'nudge').locale : planLocale(io.cwd, e.project)) === 'es';
         const text = es ? `[forge run] ${task}: continúa con ${t.stage}; si estás bloqueado, márcalo como bloqueado`
           : `[forge run] ${task}: continue with ${t.stage}; if you are blocked, mark it blocked`;
+        saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, nudgedAt: iso } } });
         return json({ task, name: `wp-${e.project}-${task}`, text });
       }
-      const planPath = flag('plan');
+      const planPath = planArg;
       if (!planPath) throw new UsageError('swarm relaunch: --plan is required');
       // The cap and the reason live in schedule.ts: one rule for the scheduler and this command.
       const verdict = relaunchOrBlock(task, t.attempts);
