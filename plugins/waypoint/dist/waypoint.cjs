@@ -11417,10 +11417,24 @@ var NEVER = INVALID;
 // src/lib/types.ts
 var TRACK_COLORS = ["blue", "mauve", "teal", "pink", "sky", "flamingo"];
 
+// src/lib/ids.ts
+var BAD = /[^A-Za-z0-9_\-.~:@+]+/g;
+function sessionIdFrom(name) {
+  const s = name.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(BAD, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+  return s || "main";
+}
+function compactTs(d) {
+  return d.toISOString().replace(/[-:]/g, "").replace(".", "");
+}
+function eventId(d, sessionId, rand = Math.random) {
+  const r2 = Math.floor(rand() * 36 ** 4).toString(36).padStart(4, "0");
+  return `${compactTs(d)}-${sessionId}-${r2}`;
+}
+var PLAN_ID_RE = /^[A-Za-z0-9_.-]{1,64}$/;
+var isPlanId = (s) => PLAN_ID_RE.test(s) && s !== "." && s !== "..";
+
 // src/lib/plan.ts
-var SEG = /^[A-Za-z0-9_.-]{1,64}$/;
-var isPlanId = (s) => SEG.test(s) && s !== "." && s !== "..";
-var id = external_exports.string().regex(SEG, "invalid id (allowed: letters, digits, _ - .; max 64)").refine((s) => s !== "." && s !== "..", "invalid id");
+var id = external_exports.string().regex(PLAN_ID_RE, "invalid id (allowed: letters, digits, _ - .; max 64)").refine((s) => s !== "." && s !== "..", "invalid id");
 var TaskSchema = external_exports.object({
   id,
   title: external_exports.string().min(1),
@@ -13478,20 +13492,6 @@ function buildDesignPageData(input) {
     current: currentNo,
     versions
   };
-}
-
-// src/lib/ids.ts
-var BAD = /[^A-Za-z0-9_\-.~:@+]+/g;
-function sessionIdFrom(name) {
-  const s = name.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(BAD, "-").replace(/^-+|-+$/g, "").slice(0, 40);
-  return s || "main";
-}
-function compactTs(d) {
-  return d.toISOString().replace(/[-:]/g, "").replace(".", "");
-}
-function eventId(d, sessionId, rand = Math.random) {
-  const r2 = Math.floor(rand() * 36 ** 4).toString(36).padStart(4, "0");
-  return `${compactTs(d)}-${sessionId}-${r2}`;
 }
 
 // src/lib/metrics.ts

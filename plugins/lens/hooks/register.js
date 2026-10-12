@@ -10445,10 +10445,12 @@ var coerce = {
 };
 var NEVER = INVALID;
 
+// src/lib/ids.ts
+var PLAN_ID_RE = /^[A-Za-z0-9_.-]{1,64}$/;
+var isPlanId = (s) => PLAN_ID_RE.test(s) && s !== "." && s !== "..";
+
 // src/lib/plan.ts
-var SEG = /^[A-Za-z0-9_.-]{1,64}$/;
-var isPlanId = (s) => SEG.test(s) && s !== "." && s !== "..";
-var id = external_exports.string().regex(SEG, "invalid id (allowed: letters, digits, _ - .; max 64)").refine((s) => s !== "." && s !== "..", "invalid id");
+var id = external_exports.string().regex(PLAN_ID_RE, "invalid id (allowed: letters, digits, _ - .; max 64)").refine((s) => s !== "." && s !== "..", "invalid id");
 var TaskSchema = external_exports.object({
   id,
   title: external_exports.string().min(1),
@@ -10558,6 +10560,7 @@ var str3 = (x) => typeof x === "string" && x ? x : null;
 var iso = (x) => typeof x === "string" && !Number.isNaN(Date.parse(x)) ? x : null;
 var int3 = (x, min, max, dflt) => typeof x === "number" && Number.isInteger(x) ? Math.min(max, Math.max(min, x)) : dflt;
 var oneOf2 = (list, x) => list.includes(x) ? x : null;
+var cleanTitle = (x) => typeof x === "string" ? x.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim().slice(0, 200) : "";
 function normalizeTask(x) {
   if (!isObj2(x)) return null;
   const status = oneOf2(TASK_STATUSES, x.status);
@@ -10567,6 +10570,7 @@ function normalizeTask(x) {
   const branch = str3(x.branch);
   const startedAt = iso(x.startedAt);
   if (!status || !stage || !executor || worktree === null || !branch || !startedAt) return null;
+  const title = cleanTitle(x.title);
   return {
     status,
     stage,
@@ -10580,7 +10584,8 @@ function normalizeTask(x) {
     agent: str3(x.agent),
     updatedAt: iso(x.updatedAt) ?? startedAt,
     detail: typeof x.detail === "string" ? x.detail.slice(0, 500) : null,
-    ...iso(x.nudgedAt) ? { nudgedAt: iso(x.nudgedAt) } : {}
+    ...iso(x.nudgedAt) ? { nudgedAt: iso(x.nudgedAt) } : {},
+    ...title ? { title } : {}
   };
 }
 function normalizeExecution(x) {
@@ -10616,7 +10621,8 @@ function normalizeExecution(x) {
     stallReason: typeof x.stallReason === "string" ? x.stallReason.slice(0, 1e3) : null,
     lastStepAt: iso(x.lastStepAt),
     lastBlockStep: iso(x.lastBlockStep),
-    sleepUntil: iso(x.sleepUntil)
+    sleepUntil: iso(x.sleepUntil),
+    ...typeof x.planned === "number" && Number.isInteger(x.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x.planned)) } : {}
   };
 }
 function parseExecution(text) {
@@ -10729,7 +10735,7 @@ function executionView(i) {
     const agent = p ? p.agent : t.agent;
     return {
       task: id2,
-      title: i.titles?.[id2] ?? null,
+      title: i.titles?.[id2] ?? t.title ?? null,
       stage: p?.stage ?? t.stage,
       agent,
       round: p?.round ?? t.round,
@@ -10750,7 +10756,7 @@ function executionView(i) {
     stallReason: e.stallReason,
     coordinator: { liveness: coord, lastSeen },
     integrated: ids("integrated").length,
-    total: Object.keys(e.tasks).length,
+    total: Math.max(e.planned ?? 0, Object.keys(e.tasks).length),
     slots,
     queued: ids("accepted"),
     conflicts: ids("conflict"),
@@ -11139,8 +11145,9 @@ function executionFromFiles(execText, taskTexts = {}, liveTexts = {}, now, title
     }
   }
   let v;
+  const clean = titles && Object.fromEntries(Object.entries(titles).map(([id2, t]) => [id2, cleanText(t)]));
   try {
-    v = executionView({ exec: parseExecution(execText), tasks, live, titles, now });
+    v = executionView({ exec: parseExecution(execText), tasks, live, titles: clean, now });
   } catch {
     return null;
   }
