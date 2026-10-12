@@ -19,7 +19,8 @@ import { parseDocument } from 'yaml';
 import { UsageError } from './errors.js';
 import { swarmCommand } from './swarm.js';
 import { readSwarm, saveSwarm } from '../swarm.js';
-import { detectValidators, selectValidators, runValidators, globMatch, type RepoReader, type Scope } from '../validators.js';
+import { detectValidators, selectValidators, runValidators, globMatch, onPath, type RepoReader, type Scope } from '../validators.js';
+import { checkTools } from '../tools.js';
 import { readLocal, updateLocal } from '../local.js';
 import { readSurfaces, detectDrafts, appendLearned, surfaceFile, surfaceHash } from '../surfaces.js';
 
@@ -27,7 +28,7 @@ export interface ExecResult { code: number; output: string; ms: number; timedOut
 export interface Io { cwd: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|agents|last|proposals|surfaces|waypoint-cli|infinite|cycle|swarm|stop|hook> ...';
+const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|agents|last|proposals|surfaces|tools|local|waypoint-cli|infinite|cycle|swarm|stop|hook> ...';
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 
@@ -523,6 +524,39 @@ export function run(argv: string[], io: Io): Result {
           return json({ name, count: r.count });
         }
         throw new UsageError('usage: forge surfaces [learn --name N --notes-file F [--heading H] | proposed --name N]');
+      }
+      case 'tools': {
+        const all = readSurfaces(io.cwd);
+        const one = flag('surface');
+        const picked = one === undefined ? all : all.filter(s => s.name === one);
+        if (one !== undefined && !picked.length) throw new UsageError(`tools: no surface ${one} in .forge/verify/`);
+        return json(checkTools(picked.flatMap(s => s.tools), { onPath, exec: io.exec ?? defaultExec(io.cwd) }));
+      }
+      case 'local': {
+        const [sub, key, value] = args;
+        if (sub === 'get') {
+          const s = readLocal(io.cwd);
+          if (key === undefined) return json(s);
+          const m = /^surfaces\.(.+)$/.exec(key);
+          if (!m) throw new UsageError('local get: the path must be surfaces.<name>');
+          return json(s.surfaces[m[1]] ?? null);
+        }
+        if (sub === 'set') {
+          const m = /^surfaces\.(.+)$/.exec(key ?? '');
+          if (!m || !NAME.test(m[1])) throw new UsageError('local set: the path must be surfaces.<name>');
+          if (value !== 'allowed' && value !== 'denied' && value !== 'none') throw new UsageError('local set: the value must be allowed|denied|none');
+          // An allowance is tied to what the surface says now: a later edit of the file asks again (verify-plan: changed).
+          const surface = readSurfaces(io.cwd).find(x => x.name === m[1]);
+          if (value === 'allowed' && !surface) throw new UsageError(`local set: .forge/verify/${m[1]}.md does not exist`);
+          updateLocal(io.cwd, s => {
+            const surfaces = { ...s.surfaces };
+            if (value === 'none') delete surfaces[m[1]];
+            else surfaces[m[1]] = { state: value, hash: value === 'allowed' ? surface!.hash : null };
+            return { ...s, surfaces };
+          });
+          return ok('ok');
+        }
+        throw new UsageError('usage: forge local get [surfaces.<name>] | set surfaces.<name> allowed|denied|none');
       }
       case 'swarm':
         return swarmCommand(args, io, { git: io.git ?? defaultGit(io.cwd), exec: io.exec ?? defaultExec(io.cwd), repo: repoReader(io.cwd) });
