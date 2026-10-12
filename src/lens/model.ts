@@ -265,7 +265,8 @@ export function executionFromFiles(execText: string | undefined, taskTexts: Reco
     try { const d = normalizeLive(JSON.parse(t)); if (d) live.push(d); } catch { /* skip */ }
   }
   let v;
-  try { v = executionView({ exec: parseExecution(execText), tasks, live, titles, now }); } catch { return null; }
+  const clean = titles && Object.fromEntries(Object.entries(titles).map(([id, t]) => [id, cleanText(t)]));
+  try { v = executionView({ exec: parseExecution(execText), tasks, live, titles: clean, now }); } catch { return null; }
   if (!v) return null;
   return {
     runId: v.runId, mode: v.mode, parallel: v.parallel, branch: v.branch, active: v.active, stopReason: v.stopReason,

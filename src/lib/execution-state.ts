@@ -60,12 +60,13 @@ function normalizeTask(x: unknown): ExecTask | null {
   const branch = str(x.branch);
   const startedAt = iso(x.startedAt);
   if (!status || !stage || !executor || worktree === null || !branch || !startedAt) return null;
+  const title = cleanTitle(x.title);
   return {
     status, stage, executor, worktree, branch, startedAt, stageSince: iso(x.stageSince) ?? startedAt,
     round: int(x.round, 0, 99, 0), attempts: int(x.attempts, 0, 99, 0),
     agent: str(x.agent), updatedAt: iso(x.updatedAt) ?? startedAt, detail: typeof x.detail === 'string' ? x.detail.slice(0, 500) : null,
     ...(iso(x.nudgedAt) ? { nudgedAt: iso(x.nudgedAt) } : {}),
-    ...(cleanTitle(x.title) ? { title: cleanTitle(x.title) } : {}),
+    ...(title ? { title } : {}),
   };
 }
 

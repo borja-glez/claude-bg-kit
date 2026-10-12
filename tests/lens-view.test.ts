@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { fmtTokens, fmtUsd, usageBandText, barParts, briefCells, forgePhase, headline, stagesFor, tierOf, todoCells, roadmapCells, pct } from '../src/lens/view.js';
 import { buildCards, cardAlt, type CardTexts } from '../src/lens/cards.js';
 import { bandSvg, cardSvg, fit, xml } from '../src/lens/svg.js';
-import type { PanelModel } from '../src/lens/model.js';
+import { executionFromFiles, type PanelModel } from '../src/lens/model.js';
 
 const T: CardTexts = {
   sRoadmap: 'Roadmap', sSuperpowers: 'superpowers', sNow: 'Now', sTodos: 'Todos', sSubagents: 'Subagents', sTasks: 'Tasks', sForge: 'forge',
@@ -90,6 +90,18 @@ describe('lens view', () => {
     expect(text).toContain('r2');
     expect(text).toContain('5m');
     expect(text).toContain(`${T.queued}: T003`);
+  });
+  it('execution card: a plan title with control characters reaches the row cleaned', () => {
+    const at = '2026-10-12T12:00:00.000Z';
+    const text = JSON.stringify({ runId: 'r1', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', coordinator: 'main', startedAt: at, active: true,
+      tasks: { T1: { status: 'running', stage: 'implement', executor: 'subagents', worktree: '', branch: 'task/T1', startedAt: at } } });
+    const execution = executionFromFiles(text, {}, {}, Date.parse(at), { T1: 'Log\u001b[31min\nform' });
+    const card = buildCards({ ...EMPTY, execution }, T, 0).find(c => c.title === T.sExecution)!;
+    const rows = card.blocks.filter(b => b.kind === 'row') as { text: string }[];
+    expect(rows.map(r => r.text)).toContain('Log[31minform');
+    // eslint-disable-next-line no-control-regex
+    expect(rows.every(r => !/[\u0000-\u001f\u007f-\u009f]/.test(r.text))).toBe(true);
+    expect(JSON.stringify(rows)).toContain('form');
   });
   it('execution card: a row per manual task after the slots, with its stage, time and liveness', () => {
     const manual = [{ task: 'T9', title: 'Docs', stage: 'implement', seconds: 600, liveness: 'silent' as const, by: 'M1' }];
