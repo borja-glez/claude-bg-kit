@@ -19,7 +19,7 @@ describe('plugin layout', () => {
   });
   it('lens manifest, module and contract exist', () => {
     const p = JSON.parse(read('plugins/lens/.claude-plugin/plugin.json'));
-    expect(p).toMatchObject({ name: 'lens', version: '0.5.0', types: './types/index.d.ts' });
+    expect(p).toMatchObject({ name: 'lens', version: '0.5.1', types: './types/index.d.ts' });
     expect(JSON.parse(read('plugins/lens/hooks/hooks.json'))).toEqual({ modules: ['./register.js'] });
     for (const f of ['hooks/register.js', 'types/index.d.ts', 'README.md']) {
       expect(existsSync(new URL(`../plugins/lens/${f}`, import.meta.url))).toBe(true);
@@ -98,8 +98,8 @@ describe('plugin layout', () => {
   it('waypoint design approve stops before planning when forge drives the session', () => {
     expect(read('plugins/waypoint/skills/design/SKILL.md')).toContain('stop after step 3: `/forge:run` continues with `forge-planner`');
   });
-  it('versions: forge 0.5.0, waypoint 0.10.0', () => {
-    expect(JSON.parse(read('plugins/forge/.claude-plugin/plugin.json')).version).toBe('0.5.0');
+  it('versions: forge 0.5.1, waypoint 0.10.0', () => {
+    expect(JSON.parse(read('plugins/forge/.claude-plugin/plugin.json')).version).toBe('0.5.1');
     expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.10.0');
   });
   it('plan skill publishes the roadmap with notes and proposals write rules for contributors', () => {
@@ -119,7 +119,7 @@ describe('plugin layout', () => {
   });
   it('forge manifest depends on waypoint ^0.10.0 and ships its CLI', () => {
     const p = JSON.parse(read('plugins/forge/.claude-plugin/plugin.json'));
-    expect(p).toMatchObject({ name: 'forge', version: '0.5.0', dependencies: [{ name: 'waypoint', version: '^0.10.0' }] });
+    expect(p).toMatchObject({ name: 'forge', version: '0.5.1', dependencies: [{ name: 'waypoint', version: '^0.10.0' }] });
     expect(existsSync(new URL('../plugins/forge/dist/forge.cjs', import.meta.url))).toBe(true);
   });
   it('forge scout agent: frontmatter and rules', () => {
