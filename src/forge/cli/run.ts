@@ -194,6 +194,16 @@ function hookStop(io: Io): string {
 }
 
 export function run(argv: string[], io: Io): Result {
+  // --cwd <dir>: run there, so a coordinator never has to cd into a worktree (a cd outside a subshell sticks).
+  const cwdAt = argv.indexOf('--cwd');
+  if (cwdAt >= 0) {
+    const dir = argv[cwdAt + 1];
+    if (!dir || dir.startsWith('--')) return { code: 2, stdout: '', stderr: 'forge: --cwd needs a directory\n' };
+    const abs = path.resolve(io.cwd, dir);
+    if (!existsSync(abs)) return { code: 2, stdout: '', stderr: `forge: --cwd ${abs} does not exist\n` };
+    argv = [...argv.slice(0, cwdAt), ...argv.slice(cwdAt + 2)];
+    io = { ...io, cwd: abs, git: defaultGit(abs), exec: defaultExec(abs) };
+  }
   const [cmd, ...args] = argv;
   const flag = (name: string) => {
     const i = args.indexOf(`--${name}`);

@@ -289,6 +289,15 @@ describe('forge CLI', () => {
   it('validate --path must be a known path', () => {
     expect(run(['validate', '--all', '--path', 'huge'], io).code).toBe(2);
   });
+  it('--cwd runs a command in another directory without moving the caller', () => {
+    const other = mkdtempSync(path.join(tmpdir(), 'forge-cwd-'));
+    writeFileSync(path.join(other, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "process.exit(0)"' } }));
+    const r = run(['validate', '--all', '--cwd', other], { ...io, exec: undefined, git: undefined });
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toEqual([expect.objectContaining({ validator: 'test', ok: true })]);
+    expect(readEvents(other).at(-1)).toMatchObject({ kind: 'validate' });
+    expect(run(['validate', '--all', '--cwd', path.join(other, 'nope')], io).code).toBe(2);
+  });
 });
 
 describe('forge infinite', () => {
