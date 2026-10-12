@@ -101,9 +101,12 @@ export function schedule(i: ScheduleInput): { actions: ScheduleAction[]; next: E
     const t = tasks[id];
     if (t.status !== 'running' || t.executor !== 'sessions') continue;
     const o = owner(id);
+    // After a relaunch the old, stopped owner stays on the roadmap until the new session claims, so a (re)started
+    // front always gets a full lease window before it can be relaunched again (swarm relaunch resets startedAt).
+    const pastLease = now - Date.parse(t.startedAt) > LEASE_MINUTES * 60000;
     const ownerStopped = !!o && o !== exec.coordinator && sessionLiveness(sessions[o], now) === 'stopped';
-    const neverClaimed = !o && now - Date.parse(t.startedAt) > LEASE_MINUTES * 60000;
-    if ((ownerStopped || neverClaimed) && !listed(id)) {
+    const neverClaimed = !o;
+    if (pastLease && (ownerStopped || neverClaimed) && !listed(id)) {
       const a = relaunchOrBlock(id, t.attempts);
       if (a.type === 'block') tasks[id] = { ...t, status: 'blocked', detail: a.reason, updatedAt: nowIso };
       actions.push(a);
@@ -138,7 +141,7 @@ export function schedule(i: ScheduleInput): { actions: ScheduleAction[]; next: E
     // Another live or silent session holds an unfinished task: the run waits for it instead of stopping.
     actions.push({ type: 'wait', seconds: STEP_WAIT_SECONDS });
   } else if (!moving) {
-    stallReason = describeStall(plan, states, tasks, depIntegrated, claimedByOther);
+    stallReason = describeStall(plan, states, tasks, depIntegrated);
     actions.push({ type: 'stalled', reason: stallReason });
     active = false; stopReason = 'stalled';
   } else {
@@ -148,7 +151,8 @@ export function schedule(i: ScheduleInput): { actions: ScheduleAction[]; next: E
 }
 
 function describeStall(plan: PlanView, states: States, tasks: Record<string, ExecTask>,
-  depIntegrated: (d: string) => boolean, claimedByOther: (id: string) => boolean): string {
+  depIntegrated: (d: string) => boolean): string {
+  // A task claimed by another live or silent session never reaches here: the schedule waits for it instead.
   const groups = new Map<string, string[]>();
   const add = (key: string, id: string) => groups.set(key, [...(groups.get(key) ?? []), id]);
   for (const t of plan.tasks) {
@@ -156,7 +160,6 @@ function describeStall(plan: PlanView, states: States, tasks: Record<string, Exe
     const ex = tasks[t.id];
     if (ex?.status === 'conflict') add('conflict', t.id);
     else if (ex?.status === 'blocked' || statusOf(states, t.id) === 'blocked') add('blocked', t.id);
-    else if (claimedByOther(t.id)) add(`claimed by ${states[t.id]!.owner}`, t.id);
     else {
       const dep = t.depends_on.find(d => !depIntegrated(d));
       if (dep) add(`waits for ${dep} (${statusOf(states, dep) === 'done' ? 'not integrated' : 'not done'})`, t.id);

@@ -118,13 +118,34 @@ describe('schedule', () => {
   });
   it('relaunches a sessions task whose owner stopped and is not listed, then blocks at the cap', () => {
     const base = { plan: plan([task('T1')]), states: { T1: { status: 'in_progress' as const, owner: 'S2' } }, sessions: { S2: live(at(-30)) } };
-    expect(schedule(input({ ...base, exec: exec({ mode: 'sessions', tasks: sess('T1') }), agents: [] })).actions)
+    const old = { startedAt: at(-11) };
+    expect(schedule(input({ ...base, exec: exec({ mode: 'sessions', tasks: sess('T1', 'running', old) }), agents: [] })).actions)
       .toContainEqual({ type: 'relaunch', task: 'T1', attempt: 1 });
-    expect(schedule(input({ ...base, exec: exec({ mode: 'sessions', tasks: sess('T1') }), agents: [{ name: 'wp-shop-T1', state: 'working' }] })).actions
+    expect(schedule(input({ ...base, exec: exec({ mode: 'sessions', tasks: sess('T1', 'running', old) }), agents: [{ name: 'wp-shop-T1', state: 'working' }] })).actions
       .some(a => a.type === 'relaunch')).toBe(false);
-    const capped = schedule(input({ ...base, exec: exec({ mode: 'sessions', tasks: sess('T1', 'running', { attempts: RELAUNCH_CAP }) }), agents: [] }));
-    expect(capped.next.tasks.T1).toMatchObject({ status: 'blocked' });
+    const capped = schedule(input({ ...base, exec: exec({ mode: 'sessions', tasks: sess('T1', 'running', { ...old, attempts: RELAUNCH_CAP }) }), agents: [] }));
+    expect(capped.next.tasks.T1).toMatchObject({ status: 'blocked', detail: 'the session of T1 stopped 3 times' });
     expect(capped.actions).toContainEqual({ type: 'block', task: 'T1', reason: 'the session of T1 stopped 3 times' });
+  });
+  it('gives a relaunched front a lease window before its stopped old owner can trigger another relaunch', () => {
+    const base = { plan: plan([task('T1')]), states: { T1: { status: 'in_progress' as const, owner: 'S2' } }, sessions: { S2: live(at(-30)) }, agents: null };
+    expect(schedule(input({ ...base, exec: exec({ mode: 'sessions', tasks: sess('T1', 'running', { attempts: 1, startedAt: at(-1) }) }) })).actions
+      .some(a => a.type === 'relaunch')).toBe(false);
+    expect(schedule(input({ ...base, exec: exec({ mode: 'sessions', tasks: sess('T1', 'running', { attempts: 1, startedAt: at(-11) }) }) })).actions)
+      .toContainEqual({ type: 'relaunch', task: 'T1', attempt: 2 });
+  });
+  it('without agents (null) relaunches on a stopped owner and never nudges', () => {
+    const r = schedule(input({ plan: plan([task('T1')]), states: { T1: { status: 'in_progress', owner: 'S2' } }, sessions: { S2: live(at(-30)) }, agents: null,
+      exec: exec({ mode: 'sessions', tasks: sess('T1', 'running', { startedAt: at(-30), stageSince: at(-30) }) }) }));
+    expect(r.actions).toContainEqual({ type: 'relaunch', task: 'T1', attempt: 1 });
+    expect(r.actions.some(a => a.type === 'nudge')).toBe(false);
+  });
+  it('boundaries: quiet at exactly 15 minutes nudges; unclaimed at exactly 10 minutes is not relaunched yet', () => {
+    const r = schedule(input({ plan: plan([task('T1')]), states: { T1: { status: 'in_progress', owner: 'S2' } }, sessions: { S2: live(at(5)) },
+      agents: [{ name: 'wp-shop-T1', state: 'idle' }], exec: exec({ mode: 'sessions', tasks: sess('T1', 'running', { stageSince: at(-NUDGE_MINUTES) }) }) }));
+    expect(r.actions).toContainEqual({ type: 'nudge', task: 'T1', stage: 'implement' });
+    const ten = schedule(input({ plan: plan([task('T1')]), exec: exec({ mode: 'sessions', tasks: sess('T1', 'running', { startedAt: at(-10) }) }) }));
+    expect(ten.actions.some(a => a.type === 'relaunch')).toBe(false);
   });
   it('relaunchOrBlock: relaunches below the cap and blocks with the reason at it', () => {
     expect(RELAUNCH_CAP).toBe(2);
@@ -140,7 +161,7 @@ describe('schedule', () => {
   });
   it('a blocked sessions task frees its slot in the same step', () => {
     const r = schedule(input({ plan: plan([task('T1'), task('T2')]), states: { T1: { status: 'in_progress', owner: 'S2' } }, sessions: { S2: live(at(-30)) },
-      exec: exec({ mode: 'sessions', parallel: 1, tasks: sess('T1', 'running', { attempts: RELAUNCH_CAP }) }), agents: [] }));
+      exec: exec({ mode: 'sessions', parallel: 1, tasks: sess('T1', 'running', { attempts: RELAUNCH_CAP, startedAt: at(-11) }) }), agents: [] }));
     expect(starts(r)).toEqual(['T2']);
   });
   it('nudges a live idle session with no stage change in 15 minutes, once per window', () => {
