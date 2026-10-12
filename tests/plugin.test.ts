@@ -292,4 +292,18 @@ describe('plugin layout', () => {
     for (const ev of ['SessionStart', 'SessionEnd', 'SubagentStart', 'SubagentStop', 'Stop']) expect(hooks).toContain(`"${ev}"`);
     expect(hooks).toContain('hook live');
   });
+  it('skills describe the sessions executor, run members, manual members and unattended runs', () => {
+    const runMd = read('plugins/forge/skills/run/SKILL.md');
+    for (const s of ['### Run member', '### Requests during an execution', '### Unattended', 'list the background sessions with ListAgents',
+      'FORGE swarm relaunch', 'FORGE swarm nudge', 'The new session reads .forge/work/<T>/handover.md first', 'FORGE swarm report <T> --session <SID>',
+      'A run member never integrates and never merges', 'An unattended execution never stops to ask', 'FORGE log --kind decision',
+      'FORGE swarm takeover --session <SID> --db DB', '--mode sessions']) expect(runMd).toContain(s);
+    expect(runMd).not.toContain('Sessions mode arrives in a later version');
+    expect(runMd).toContain('### Manual member');
+    expect(runMd).toContain('FORGE swarm join --session <SID> --role manual');
+    expect(runMd).toContain('FORGE swarm next --plan <plan> --db DB --session <SID>');
+    expect(read('plugins/waypoint/skills/work/SKILL.md')).toContain('join the execution as a manual member: invoke /forge:run --join and follow its ### Manual member');
+    expect(read('plugins/forge/skills/stop/SKILL.md')).toContain('[forge run] stop after your current step');
+    expect(read('plugins/forge/skills/infinite/SKILL.md')).toContain('has diverged from');
+  });
 });
