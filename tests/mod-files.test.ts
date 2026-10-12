@@ -63,12 +63,12 @@ describe('loadBandModel · execution files', () => {
     expect(reads).not.toContain(`${root}/.forge/execution.json`);
   });
 
-  it('skips baseline-* task files', async () => {
+  it('skips the baseline/ subdirectory of the execution', async () => {
     const root = '/repo';
-    const { $, reads } = fake(root, { ...base(root), [`${root}/.forge/execution.json`]: EXEC, [`${root}/.forge/execution/T002.json`]: pub('T002'), [`${root}/.forge/execution/baseline-abc.json`]: '{}' });
+    const { $, reads } = fake(root, { ...base(root), [`${root}/.forge/execution.json`]: EXEC, [`${root}/.forge/execution/T002.json`]: pub('T002'), [`${root}/.forge/execution/baseline/T002.json`]: '{}' });
     await loadBandModel($);
     expect(reads).toContain(`${root}/.forge/execution/T002.json`);
-    expect(reads.some(r => r.includes('baseline-'))).toBe(false);
+    expect(reads.some(r => r.includes('/baseline'))).toBe(false);
   });
 
   it('caps task files at 50 and live files at 20', async () => {

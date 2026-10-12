@@ -171,7 +171,7 @@ async function loadExecutionFiles($: Engine, main: string, listing?: Listing): P
   out.forgeExecution = await readOpt($, join(dir, 'execution.json'));
   if (out.forgeExecution === undefined) return out;
   if (entries.some(f => f.kind === 'dir' && f.name === 'execution')) {
-    out.forgeExecTasks = await readJsonDir($, join(dir, 'execution'), FORGE_EXEC_TASKS_MAX, FORGE_EXEC_FILE_MAX, name => !name.startsWith('baseline-') && SAFE_TASK.test(name));
+    out.forgeExecTasks = await readJsonDir($, join(dir, 'execution'), FORGE_EXEC_TASKS_MAX, FORGE_EXEC_FILE_MAX, name => SAFE_TASK.test(name));
   }
   if (entries.some(f => f.kind === 'dir' && f.name === 'live')) {
     out.forgeLive = await readJsonDir($, join(dir, 'live'), FORGE_LIVE_MAX, FORGE_EXEC_FILE_MAX);

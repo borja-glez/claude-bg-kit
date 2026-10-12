@@ -85,7 +85,7 @@ async function loadExecution($: Engine, root: string): Promise<Pick<BandFiles, '
     if (execution === undefined) return {};
     const out: Pick<BandFiles, 'execution' | 'execTasks' | 'live'> = { execution };
     if (entries.some(f => f.kind === 'dir' && f.name === 'execution')) {
-      out.execTasks = await readJsonDir($, join(dir, 'execution'), EXEC_TASKS_MAX, name => !name.startsWith('baseline-') && SAFE_TASK.test(name));
+      out.execTasks = await readJsonDir($, join(dir, 'execution'), EXEC_TASKS_MAX, name => SAFE_TASK.test(name));
     }
     if (entries.some(f => f.kind === 'dir' && f.name === 'live')) out.live = await readJsonDir($, join(dir, 'live'), LIVE_MAX, () => true);
     return out;
