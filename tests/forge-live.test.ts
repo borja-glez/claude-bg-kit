@@ -58,6 +58,26 @@ describe('forge hook live', () => {
     run(['hook', 'stop'], { ...io, now: () => new Date('2026-10-12T12:03:00.000Z'), stdin: JSON.stringify({ session_id: 's1' }) });
     expect(JSON.parse(readFileSync(liveFile(root, 's1'), 'utf8'))).toMatchObject({ event: 'Stop', ts: '2026-10-12T12:03:00.000Z' });
   });
+  const runningTask = { T1: { status: 'running', stage: 'implement', round: 1, worktree: '/w', branch: 'task/T1', executor: 'subagents', attempts: 0, agent: 'forge-impl', startedAt: T, stageSince: T, updatedAt: T, detail: null } };
+  it('a Stop while unbound and with an agent running binds the session and writes the signal', () => {
+    exec({ hookSession: null, tasks: runningTask });
+    expect(run(['hook', 'stop'], { ...io, stdin: JSON.stringify({ session_id: 's1' }) }).stdout).toBe('');
+    expect(readExecution(root)?.hookSession).toBe('s1');
+    expect(JSON.parse(readFileSync(liveFile(root, 's1'), 'utf8'))).toMatchObject({ role: 'coordinator', runId: 'r1', event: 'Stop' });
+  });
+  it('a SubagentStart while unbound binds the session and the signal lists the agent', () => {
+    exec({ hookSession: null });
+    hook({ session_id: 's1', hook_event_name: 'SubagentStart', agent_id: 'a1', agent_type: 'forge:forge-impl' });
+    expect(readExecution(root)?.hookSession).toBe('s1');
+    expect(JSON.parse(readFileSync(liveFile(root, 's1'), 'utf8'))).toMatchObject({ agents: [{ id: 'a1', type: 'forge:forge-impl' }] });
+  });
+  it('a SubagentStart from another session never rebinds a bound execution', () => {
+    exec({ hookSession: 's1' });
+    hook({ session_id: 's2', hook_event_name: 'SubagentStart', agent_id: 'a1', agent_type: 'x' });
+    expect(readExecution(root)?.hookSession).toBe('s1');
+    expect(existsSync(liveFile(root, 's2'))).toBe(false);
+    expect(existsSync(liveFile(root, 's1'))).toBe(false);
+  });
   it('writes into the main checkout from a linked worktree, under the ignored forge dir', () => {
     exec();
     const wt = path.join(root, '.claude', 'worktrees', 'w');

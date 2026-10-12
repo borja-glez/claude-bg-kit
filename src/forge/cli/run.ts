@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { appendEvent, readEvents, forgeDir, LEDGER_KINDS, type LedgerKind } from '../ledger.js';
 import { parseRun, startRun, recordCycle, stopReason, endRun, readRunText, saveRun, stopFile, type RunState, type StopContext } from '../run.js';
-import { decideStop, decideExecutionStop } from '../hook.js';
+import { decideStop, decideExecutionStop, bindHookSession } from '../hook.js';
 import { readExecution, saveExecution } from '../execution.js';
 import { planLocale, replyIn } from '../../lib/locale.js';
 import { triage, zonesFromPaths, PATH_ORDER, type PathName } from '../triage.js';
@@ -174,11 +174,14 @@ function stopContext(cwd: string, now: Date): StopContext {
 // (an execution runs inside its cycles); otherwise an active execution decides.
 function hookStop(io: Io): string {
   try {
-    hookLive(io, 'Stop');
     const input: unknown = JSON.parse(io.stdin ?? '');
     if (!input || typeof input !== 'object' || Array.isArray(input)) return '';
     const hookInput = input as { stop_hook_active?: boolean; session_id?: unknown };
-    const exec = readExecution(io.cwd);
+    // An unbound active execution binds to the first session that stops, saved before the signal is written.
+    const read = readExecution(io.cwd);
+    const exec = bindHookSession(read, hookInput.session_id);
+    if (exec && exec !== read) saveExecution(io.cwd, exec);
+    hookLive(io, 'Stop');
     const sleeping = !!exec?.active && !!exec.sleepUntil && Date.parse(exec.sleepUntil) > io.now().getTime();
     const run = parseRun(readRunText(io.cwd));
     if (run?.active) {

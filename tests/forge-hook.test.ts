@@ -111,6 +111,19 @@ describe('decideExecutionStop', () => {
     // An agent that has not reported for longer than a lease does not hold the block back.
     expect(decideExecutionStop({ session_id: 's1' }, ex({ tasks: xtask('forge-impl', '2026-10-12T11:40:00.000Z') }), { now: xnow, stopFile: false }).block).toBe(true);
   });
+  it('binds an unbound execution to the stopping session in every branch, and never rebinds', () => {
+    // Not blocked: an agent is running.
+    expect(decideExecutionStop({ session_id: 's1' }, ex({ tasks: xtask('forge-impl', '2026-10-12T11:58:00.000Z') }), { now: xnow, stopFile: false }))
+      .toMatchObject({ block: false, exec: { hookSession: 's1' } });
+    // Not blocked: sleeping.
+    expect(decideExecutionStop({ session_id: 's1' }, ex({ sleepUntil: '2026-10-12T12:03:00.000Z' }), { now: xnow, stopFile: false }))
+      .toMatchObject({ block: false, exec: { hookSession: 's1' } });
+    // Blocked.
+    expect(decideExecutionStop({ session_id: 's1' }, ex(), { now: xnow, stopFile: false })).toMatchObject({ block: true, exec: { hookSession: 's1' } });
+    // Without a session id nothing is bound; a bound one is kept.
+    expect(decideExecutionStop({}, ex({ tasks: xtask('forge-impl', '2026-10-12T11:58:00.000Z') }), { now: xnow, stopFile: false }).exec?.hookSession).toBeNull();
+    expect(decideExecutionStop({ session_id: 's2' }, ex({ hookSession: 's1' }), { now: xnow, stopFile: false }).exec?.hookSession).toBe('s1');
+  });
   it('does not block while sleeping, and ends with one block when the stop file appears', () => {
     expect(decideExecutionStop({ session_id: 's1' }, ex({ sleepUntil: '2026-10-12T12:03:00.000Z' }), { now: xnow, stopFile: false }).block).toBe(false);
     const d = decideExecutionStop({ session_id: 's1' }, ex(), { now: xnow, stopFile: true });

@@ -11,17 +11,27 @@ export const executionEndedReason = (reason: string): string =>
   `the forge execution ended (${reason}): report it as /forge:run's Execution section says (step 7), then stop.`;
 
 /**
- * The Stop hook's decision for an execution's coordinator. It binds to the first session it blocks and leaves the
- * others alone. It never blocks while the coordinator sleeps, nor while an agent of a task is running: that agent's
- * return wakes the session, so a block would only add a turn (and fight a /goal evaluator). With stop_hook_active it
- * blocks again only after a new step.
+ * An active execution whose hookSession is still unbound, bound to this session; anything else unchanged. A bound
+ * hookSession is never rebound.
  */
-export function decideExecutionStop(input: { stop_hook_active?: boolean; session_id?: unknown }, e: ExecutionState | null, ctx: { now: Date; stopFile: boolean }):
+export function bindHookSession(e: ExecutionState | null, session: unknown): ExecutionState | null {
+  if (!e || !e.active || e.hookSession !== null || typeof session !== 'string' || !session) return e;
+  return { ...e, hookSession: session };
+}
+
+/**
+ * The Stop hook's decision for an execution's coordinator. It binds to the first session that stops while it is
+ * unbound (blocked or not: the returned exec carries the binding) and leaves the others alone. It never blocks while
+ * the coordinator sleeps, nor while an agent of a task is running: that agent's return wakes the session, so a block
+ * would only add a turn (and fight a /goal evaluator). With stop_hook_active it blocks again only after a new step.
+ */
+export function decideExecutionStop(input: { stop_hook_active?: boolean; session_id?: unknown }, exec: ExecutionState | null, ctx: { now: Date; stopFile: boolean }):
   { block: false; exec: ExecutionState | null } | { block: true; reason: string; exec: ExecutionState; ended?: string } {
-  if (!e || !e.active) return { block: false, exec: e };
+  if (!exec || !exec.active) return { block: false, exec };
   const session = typeof input.session_id === 'string' && input.session_id ? input.session_id : null;
-  if (e.hookSession !== null && session !== e.hookSession) return { block: false, exec: e };
-  const hookSession = e.hookSession ?? session;
+  if (exec.hookSession !== null && session !== exec.hookSession) return { block: false, exec };
+  const e = bindHookSession(exec, session) as ExecutionState;
+  const hookSession = e.hookSession;
   if (ctx.stopFile) {
     const ended: ExecutionState = { ...e, active: false, stopReason: 'stopped', sleepUntil: null, hookSession };
     return { block: true, reason: executionEndedReason('stopped'), ended: 'stopped', exec: ended };

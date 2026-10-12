@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { normalizeLive, type LiveDoc } from '../lib/execution-state.js';
-import { readExecution } from './execution.js';
+import { readExecution, saveExecution } from './execution.js';
 import { forgeDir } from './ledger.js';
 import { mainCheckout } from './local.js';
 import type { Io } from './cli/run.js';
@@ -24,7 +24,10 @@ export function nextLive(prev: LiveDoc | null, ev: { event: LiveEvent; agentId?:
   return { sessionId: ctx.sessionId, role: ctx.role, runId: ctx.runId, task: ctx.task, event: ev.event, ts: ctx.now, agents, ended };
 }
 
-/** Records this session's local signal when it coordinates an active execution; prints nothing and never fails. */
+/**
+ * Records this session's local signal when it coordinates an active execution; prints nothing and never fails.
+ * A SubagentStart while the execution is unbound binds it to this session first; a bound one is never rebound.
+ */
 export function hookLive(io: Io, forced?: LiveEvent): string {
   try {
     const input = JSON.parse(io.stdin ?? '') as { session_id?: unknown; hook_event_name?: unknown; agent_id?: unknown; agent_type?: unknown };
@@ -33,8 +36,14 @@ export function hookLive(io: Io, forced?: LiveEvent): string {
     const event = forced ?? named;
     if (!sessionId || !event) return '';
     const main = mainCheckout(io.cwd);
-    const exec = readExecution(main);
-    if (!exec?.active || exec.hookSession !== sessionId) return '';
+    let exec = readExecution(main);
+    if (!exec?.active) return '';
+    // An unbound execution binds to the first session that starts an agent (the Stop hook binds it on a stop).
+    if (exec.hookSession === null && event === 'SubagentStart') {
+      exec = { ...exec, hookSession: sessionId };
+      saveExecution(main, exec);
+    }
+    if (exec.hookSession !== sessionId) return '';
     const file = liveFile(main, sessionId);
     let prev: LiveDoc | null = null;
     try { prev = normalizeLive(JSON.parse(readFileSync(file, 'utf8'))); } catch { prev = null; }
