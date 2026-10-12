@@ -1,7 +1,8 @@
 import { atom, read, update } from 'claude-code';
 import type { Register, Timer } from 'claude-code';
 import type { BandModel } from './model.js';
-import { clip, join, listOpt, loadBandModel, readOpt, type Engine } from './files.js';
+import { join, listOpt, loadBandModel, readOpt, type Engine } from './files.js';
+import { bandLine, textsFor } from './band-line.js';
 import { applyWrite, artifactId, writeFailed, writesOf } from './mirror.js';
 
 const band = atom({ plugin: 'waypoint', key: 'band' } as const, { mode: 'none' } as BandModel);
@@ -63,65 +64,6 @@ async function tick($: Engine): Promise<void> {
     const m = await read($, band);
     if (m.mode === 'work' && m.current?.startedAt) $.ui.invalidate('ui.render');
   } catch { /* ignore */ }
-}
-
-const TEXT = {
-  es: {
-    design: 'DISEÑO', proposals: 'propuestas', proposal: 'propuesta', critical: 'críticas', criticalOne: 'crítica', noCritique: 'sin crítica aún',
-    noTask: 'sin tarea en curso', track: 'frente', tasks: 'tareas', overall: 'global', decision: 'decisión pendiente',
-    applyAll: 'Aplicar todas', pick: 'Elegir…', round: 'Otra ronda', rewrite: 'Reescribir', interview: 'Preguntarme',
-    approve: 'Aprobar', viewDesign: 'Ver diseño', nextTask: 'Siguiente tarea', status: 'Estado',
-    launch: 'Lanzar sesión en un frente…', roadmap: 'Abrir roadmap',
-    pressEnter: 'Comando listo en el prompt: pulsa Enter',
-    panel: 'Panel',
-    swarm: 'enjambre', integratedN: 'integrados', conflictOne: 'conflicto', conflicts: 'conflictos', stalled: 'parado', stopSwarm: 'Parar enjambre',
-  },
-  en: {
-    design: 'DESIGN', proposals: 'proposals', proposal: 'proposal', critical: 'critical', criticalOne: 'critical', noCritique: 'no critique yet',
-    noTask: 'no task in progress', track: 'track', tasks: 'tasks', overall: 'overall', decision: 'decision pending',
-    applyAll: 'Apply all', pick: 'Pick…', round: 'Another round', rewrite: 'Rewrite', interview: 'Interview me',
-    approve: 'Approve', viewDesign: 'View design', nextTask: 'Next task', status: 'Status',
-    launch: 'Launch session on track…', roadmap: 'Open roadmap',
-    pressEnter: 'Command ready in the prompt: press Enter',
-    panel: 'Panel',
-    swarm: 'swarm', integratedN: 'integrated', conflictOne: 'conflict', conflicts: 'conflicts', stalled: 'stalled', stopSwarm: 'Stop swarm',
-  },
-} as const;
-type Texts = (typeof TEXT)[keyof typeof TEXT];
-
-const textsFor = (locale: string | undefined): Texts => (locale === 'es' ? TEXT.es : TEXT.en);
-
-function bandLine(m: BandModel, nowMs: number): string {
-  if (m.mode === 'none') return '';
-  const t = textsFor(m.locale);
-  if (m.mode === 'design') {
-    const head = `◆ ${t.design} · ${m.project} · v${m.version}`;
-    if (m.round === 0) return `${head} · ${t.noCritique}`;
-    return `${head} · ${m.proposals} ${m.proposals === 1 ? t.proposal : t.proposals} · ${m.critical} ${m.critical === 1 ? t.criticalOne : t.critical}`;
-  }
-  if (m.mode === 'swarm') {
-    const parts = [`◆ ${t.swarm} ${m.stalled ? t.stalled : `${m.live}/${m.parallel}`}`, `${t.integratedN} ${m.integrated}/${m.tracks}`, `${t.overall} ${m.percent} %`];
-    if (m.conflicts > 0) parts.push(`⚠ ${m.conflicts} ${m.conflicts === 1 ? t.conflictOne : t.conflicts}`);
-    return parts.join(' · ');
-  }
-  // A session on a track names it with its progress; one without a track counts the plan's tasks.
-  const parts = [m.track ? `● ${t.track} ${m.track} ${m.trackDone}/${m.trackTotal}` : `● ${m.sid}`];
-  if (m.swarm) parts.push(t.swarm);
-  if (m.current) {
-    parts.push(`${m.current.id} ${clip(m.current.title)}`);
-    const started = m.current.startedAt ? Date.parse(m.current.startedAt) : NaN;
-    if (Number.isFinite(started) && nowMs >= started) {
-      const min = Math.floor((nowMs - started) / 60000);
-      parts.push(`${min} min${m.current.estimateMin ? `/${m.current.estimateMin}` : ''}`);
-    }
-  } else {
-    parts.push(t.noTask);
-  }
-  if (!m.track) parts.push(`${t.tasks} ${m.trackDone}/${m.trackTotal}`);
-  parts.push(`${t.overall} ${m.percent} %`);
-  if (m.inbox > 0) parts.push(`✉ ${m.inbox}`);
-  if (m.escalation) parts.push(`⚠ ${t.decision}`);
-  return parts.join(' · ');
 }
 
 export const register: Register = on => {
@@ -201,10 +143,10 @@ export const register: Register = on => {
             <Button key="approve" label={t.approve} variant="primary" onPress={submit('/waypoint:design approve')} />,
             ...(m.designUrl ? [link(m.designUrl, t.viewDesign)] : []),
           ]
-        : m.mode === 'swarm'
+        : m.mode === 'run'
           ? [
               <Button key="status" label={t.status} onPress={submit('/waypoint:status')} />,
-              <Button key="stop-swarm" label={t.stopSwarm} onPress={submit('/forge:stop')} />,
+              <Button key="stop-run" label={t.stopRun} onPress={submit('/forge:stop')} />,
               ...(m.roadmapUrl ? [link(m.roadmapUrl, t.roadmap)] : []),
             ]
         : [

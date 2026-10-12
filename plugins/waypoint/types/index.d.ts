@@ -6,8 +6,9 @@ export type WaypointBand =
       current: { id: string; title: string; startedAt?: string; estimateMin?: number } | null;
       trackDone: number; trackTotal: number; percent: number; inbox: number; escalation: boolean;
       phase: { index: number; total: number; name: string } | null; cells: string; swarm: boolean }
-  | { mode: 'swarm'; project: string; locale: string; live: number; parallel: number; integrated: number; tracks: number;
-      percent: number; conflicts: number; stalled: boolean; roadmapUrl: string | null }
+  | { mode: 'run'; project: string; locale: string; executor: 'subagents' | 'sessions'; running: number; parallel: number;
+      integrated: number; total: number; slots: { task: string; stage: string; round: number }[];
+      worst: 'alive' | 'silent' | 'stopped'; stalled: boolean; roadmapUrl: string | null }
   | { mode: 'design'; project: string; locale: string; version: number; round: number; proposals: number; critical: number; designUrl: string | null };
 declare module 'claude-code' {
   interface PluginState {

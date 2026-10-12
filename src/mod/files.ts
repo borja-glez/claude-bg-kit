@@ -1,10 +1,10 @@
 import type { EngineInterface } from 'claude-code';
+import { mainCheckoutFrom } from '../lib/main-checkout.js';
 import { buildBandModel, pickProject, type BandFiles, type BandModel, type ProjectEntry } from './model.js';
 
 export type Engine = EngineInterface;
 
 export const MAX_DOCS = 500;
-const TITLE_MAX = 40;
 
 export const join = (...parts: string[]) => parts.join('/');
 
@@ -39,10 +39,7 @@ export async function readCollection($: Engine, dir: string): Promise<Record<str
   return out;
 }
 
-export function clip(text: string, max = TITLE_MAX): string {
-  const chars = Array.from(String(text).replace(/\s+/g, ' ').trim());
-  return chars.length <= max ? chars.join('') : chars.slice(0, max - 1).join('') + '…';
-}
+export { clip } from './band-line.js';
 
 // As the hooks do: only a folder holding plan.yaml or design.md is a project.
 async function projectEntries($: Engine, root: string): Promise<ProjectEntry[]> {
@@ -56,6 +53,43 @@ async function projectEntries($: Engine, root: string): Promise<ProjectEntry[]> 
     entries.push({ name: d.name, hasSession, mtimeMs: Math.max(...times) });
   }
   return entries;
+}
+
+const EXEC_MAX = 64 * 1024;
+const EXEC_FILE_MAX = 8 * 1024;
+const EXEC_TASKS_MAX = 50;
+const LIVE_MAX = 20;
+const SAFE_TASK = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,80}$/;
+
+async function readJsonDir($: Engine, dir: string, max: number, keep: (name: string) => boolean): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  const files = (await listOpt($, dir))
+    .filter(f => f.kind === 'file' && f.name.endsWith('.json') && f.size <= EXEC_FILE_MAX && keep(f.name.slice(0, -5)))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, max);
+  for (const f of files) {
+    const text = await readOpt($, join(dir, f.name));
+    if (text !== undefined) out[f.name.slice(0, -5)] = text;
+  }
+  return out;
+}
+
+// The execution the coordinator writes in the main checkout, whichever worktree this session is in.
+async function loadExecution($: Engine, root: string): Promise<Pick<BandFiles, 'execution' | 'execTasks' | 'live'>> {
+  try {
+    const main = mainCheckoutFrom(root, (await readOpt($, join(root, '.git'))) ?? null);
+    const dir = join(main, '.forge');
+    const entries = await listOpt($, dir);
+    const exec = entries.find(f => f.kind === 'file' && f.name === 'execution.json');
+    if (!exec || exec.size > EXEC_MAX) return {};
+    const execution = await readOpt($, join(dir, 'execution.json'));
+    if (execution === undefined) return {};
+    const out: Pick<BandFiles, 'execution' | 'execTasks' | 'live'> = { execution };
+    if (entries.some(f => f.kind === 'dir' && f.name === 'execution')) {
+      out.execTasks = await readJsonDir($, join(dir, 'execution'), EXEC_TASKS_MAX, name => !name.startsWith('baseline-') && SAFE_TASK.test(name));
+    }
+    if (entries.some(f => f.kind === 'dir' && f.name === 'live')) out.live = await readJsonDir($, join(dir, 'live'), LIVE_MAX, () => true);
+    return out;
+  } catch { return {}; }
 }
 
 export async function loadBandModel($: Engine): Promise<BandModel> {
@@ -79,7 +113,7 @@ export async function loadBandModel($: Engine): Promise<BandModel> {
     session: await readOpt($, join(pstate, 'session.json')),
     states: await readCollection($, join(pstate, 'dbcache', 'state')),
     messages: await readCollection($, join(pstate, 'dbcache', 'messages')),
-    swarm: await readOpt($, join(root, '.forge', 'swarm.json')),
+    ...(await loadExecution($, root)),
     critiques,
   };
   return buildBandModel(project, files);

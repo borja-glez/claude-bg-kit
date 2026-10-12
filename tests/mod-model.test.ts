@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { buildBandModel, pickProject, type BandFiles } from '../src/mod/model.js';
+import { bandLine } from '../src/mod/band-line.js';
 
 const plan = readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8')
   .replace('version: "0.1"', 'version: "0.1"\nartifacts:\n  roadmap: https://claude.ai/artifact/abc');
@@ -47,23 +48,28 @@ describe('buildBandModel · work', () => {
       phase: { index: 1, total: 2, name: 'Base' },
     });
   });
-  it('shows the swarm mode in the coordinator checkout while the swarm is active or stalled', () => {
-    const swarm = JSON.stringify({
-      active: true, parallel: 5, mergeAuthorized: true, project: 'demo-shop', base: 'main', coordinator: 'main', hookSession: null,
-      startedAt: '2026-10-11T10:00:00Z', lastTickAt: null, lastBlockTick: null, sleepUntil: null, stopReason: null, stallReason: null, notice: null,
-      fronts: {
-        backend: { status: 'running', session: null, launchedAt: null, currentTask: null, heartbeatAt: null, done: 1, total: 4, waitingFor: null, detail: null },
-        ui: { status: 'conflict', session: null, launchedAt: null, currentTask: null, heartbeatAt: null, done: 0, total: 2, waitingFor: null, detail: 'x' },
-      },
-    });
-    const m = buildBandModel('demo-shop', { ...files(), swarm });
-    expect(m).toMatchObject({ mode: 'swarm', live: 1, parallel: 5, integrated: 0, tracks: 2, conflicts: 1, stalled: false });
-    const finished = JSON.parse(swarm);
-    expect(buildBandModel('demo-shop', { ...files(), swarm: JSON.stringify({ ...finished, active: false, stopReason: 'finished' }) }).mode).toBe('work');
-    // A swarm of another project, or a member that sees the swarm file, stays in work mode.
-    expect(buildBandModel('demo-shop', { ...files(), swarm: JSON.stringify({ ...finished, project: 'other' }) }).mode).toBe('work');
-    const member = j({ sessionId: 'backend', track: 'backend', launchedBy: 'main' });
-    expect(buildBandModel('demo-shop', { ...files(), session: member, swarm })).toMatchObject({ mode: 'work', swarm: true });
+  const EXEC = (over: object = {}) => JSON.stringify({ runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'demo-shop', base: 'main', branch: 'forge/run-demo-shop', mergeOnFinish: false, coordinator: 'main', hookSession: 's1', active: true, stopReason: null, stallReason: null,
+    startedAt: new Date(Date.now() - 3600000).toISOString(), lastStepAt: new Date(Date.now() - 60000).toISOString(), lastBlockStep: null, sleepUntil: null,
+    tasks: {
+      T002: { status: 'running', stage: 'review', round: 2, worktree: '/w', branch: 'task/T002', executor: 'subagents', attempts: 0, agent: null, startedAt: new Date(Date.now() - 1200000).toISOString(), updatedAt: new Date().toISOString(), stageSince: new Date().toISOString(), detail: null },
+      T001: { status: 'integrated', stage: 'integrate', round: 1, worktree: '/w1', branch: 'task/T001', executor: 'subagents', attempts: 0, agent: null, startedAt: new Date(Date.now() - 3000000).toISOString(), updatedAt: new Date().toISOString(), stageSince: new Date().toISOString(), detail: null },
+    }, ...over });
+  it('run mode: executor, slots with stage and round, progress and the worst liveness', () => {
+    const m = buildBandModel('demo-shop', { ...empty, plan, session: j({ sessionId: 'main', track: null }), execution: EXEC() });
+    expect(m).toMatchObject({ mode: 'run', executor: 'subagents', running: 1, parallel: 3, integrated: 1, total: 2, slots: [{ task: 'T002', stage: 'review', round: 2 }], worst: 'alive', stalled: false });
+  });
+  it('run mode turns silent and then stopped when the coordinator stops stepping', () => {
+    const old = (min: number) => EXEC({ lastStepAt: new Date(Date.now() - min * 60000).toISOString() });
+    expect(buildBandModel('demo-shop', { ...empty, plan, execution: old(8) })).toMatchObject({ mode: 'run', worst: 'silent' });
+    expect(buildBandModel('demo-shop', { ...empty, plan, execution: old(13) })).toMatchObject({ mode: 'run', worst: 'stopped' });
+  });
+  it('a member session keeps its work band; a finished execution shows no run band', () => {
+    expect(buildBandModel('demo-shop', { ...empty, plan, session: j({ sessionId: 'x', track: 'backend', launchedBy: 'main' }), execution: EXEC() }).mode).toBe('work');
+    expect(buildBandModel('demo-shop', { ...empty, plan, session: j({ sessionId: 'main', track: null }), execution: EXEC({ active: false, stopReason: 'finished' }) }).mode).toBe('work');
+  });
+  it('draws the run band line with stages, rounds and the liveness warning', () => {
+    expect(bandLine({ mode: 'run', project: 'p', locale: 'es', executor: 'subagents', running: 2, parallel: 3, integrated: 3, total: 12, slots: [{ task: 'T004', stage: 'review', round: 2 }, { task: 'T008', stage: 'implement', round: 1 }], worst: 'silent', stalled: false, roadmapUrl: null }, 0))
+      .toBe('▶ EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · T008 implementar · 3/12 · integradas 3 · ⚠ sin señal');
   });
   it('marks a swarm member in work mode', () => {
     const m = buildBandModel('demo-shop', { ...files(), session: JSON.stringify({ sessionId: 'backend', track: 'backend', launchedBy: 'main' }) });

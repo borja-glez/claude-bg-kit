@@ -4,12 +4,14 @@ import { parseCritique } from '../lib/critique.js';
 import { parseDesign } from '../lib/design.js';
 import { parseChangelog } from '../lib/history.js';
 import { parsePlan } from '../lib/plan.js';
-import { parseSwarm, swarmLive, type SwarmState } from '../lib/swarm-state.js';
+import { executionView } from '../lib/execution-view.js';
+import { normalizeLive, normalizePublicTask, parseExecution, type LiveDoc, type PublicTask } from '../lib/execution-state.js';
 import type { MessageDoc, States } from '../lib/types.js';
 
 export interface ProjectEntry { name: string; hasSession: boolean; mtimeMs: number }
 export interface BandFiles {
-  plan?: string; session?: string; swarm?: string; design?: string; changelog?: string;
+  plan?: string; session?: string; execution?: string; execTasks?: Record<string, string>; live?: Record<string, string>;
+  design?: string; changelog?: string;
   states: Record<string, string>; messages: Record<string, string>; critiques: Record<string, string>;
 }
 // In work mode `cells` holds one letter per task of the track (or of the plan), in plan order: d done, a active,
@@ -21,8 +23,9 @@ export type BandModel =
       current: { id: string; title: string; startedAt?: string; estimateMin?: number } | null;
       trackDone: number; trackTotal: number; percent: number; inbox: number; escalation: boolean;
       phase: { index: number; total: number; name: string } | null; cells: string; swarm: boolean }
-  | { mode: 'swarm'; project: string; locale: string; live: number; parallel: number; integrated: number; tracks: number;
-      percent: number; conflicts: number; stalled: boolean; roadmapUrl: string | null }
+  | { mode: 'run'; project: string; locale: string; executor: 'subagents' | 'sessions'; running: number; parallel: number;
+      integrated: number; total: number; slots: { task: string; stage: string; round: number }[];
+      worst: 'alive' | 'silent' | 'stopped'; stalled: boolean; roadmapUrl: string | null }
   | { mode: 'design'; project: string; locale: string; version: number; round: number; proposals: number; critical: number; designUrl: string | null };
 
 function json<T>(text: string | undefined): T | undefined {
@@ -45,12 +48,12 @@ export function pickProject(entries: ProjectEntry[]): string | null {
 
 export function buildBandModel(project: string, f: BandFiles): BandModel {
   try {
-    if (f.plan !== undefined && f.swarm !== undefined) {
-      const s = parseSwarm(f.swarm);
-      // Only the coordinator of this project's swarm: a member (session.json has launchedBy) keeps its work band.
+    if (f.plan !== undefined && f.execution !== undefined) {
+      // Only the coordinator of this project's execution: a member (session.json has launchedBy) keeps its work band.
       const member = json<{ launchedBy?: unknown }>(f.session)?.launchedBy;
       const isMember = typeof member === 'string' && !!member;
-      if (s && s.project === project && !isMember && (s.active || s.stopReason === 'stalled')) return swarmModel(project, f.plan, s, f);
+      const r = isMember ? null : runModel(project, f);
+      if (r) return r;
     }
     if (f.plan !== undefined && f.session !== undefined) return workModel(project, f);
     if (f.design !== undefined) return designModel(project, f);
@@ -98,16 +101,20 @@ function workModel(project: string, f: BandFiles): BandModel {
   };
 }
 
-function swarmModel(project: string, planText: string, s: SwarmState, f: BandFiles): BandModel {
-  const plan = parsePlan(planText);
-  const states = parsed<States[string]>(f.states) as States;
-  const fronts = Object.values(s.fronts);
+function runModel(project: string, f: BandFiles): BandModel | null {
+  const exec = parseExecution(f.execution);
+  if (!exec || exec.project !== project) return null;
+  const tasks: Record<string, PublicTask> = {};
+  for (const [id, t] of Object.entries(f.execTasks ?? {})) { const p = normalizePublicTask(json(t)); if (p && p.task === id) tasks[id] = p; }
+  const live = Object.values(f.live ?? {}).map(t => normalizeLive(json(t))).filter((d): d is LiveDoc => d !== null);
+  const v = executionView({ exec, tasks, live, now: Date.now() });
+  if (!v) return null;
+  const rank = { alive: 0, silent: 1, stopped: 2 } as const;
+  const worst = [v.coordinator.liveness, ...v.slots.map(s => s.liveness)].reduce((a, b) => (rank[b] > rank[a] ? b : a), 'alive' as 'alive' | 'silent' | 'stopped');
+  let plan; try { plan = parsePlan(f.plan!); } catch { plan = null; }
   return {
-    mode: 'swarm', project, locale: plan.locale, live: swarmLive(s), parallel: s.parallel,
-    integrated: fronts.filter(x => x.status === 'integrated').length, tracks: plan.tracks.length,
-    percent: computeMetrics(plan, states, Date.now()).percent,
-    conflicts: fronts.filter(x => x.status === 'conflict' || x.status === 'launch-failed').length,
-    stalled: !s.active, roadmapUrl: plan.artifacts.roadmap ?? null,
+    mode: 'run', project, locale: plan?.locale ?? 'en', executor: v.mode, running: v.slots.length, parallel: v.parallel, integrated: v.integrated, total: v.total,
+    slots: v.slots.slice(0, 2).map(s => ({ task: s.task, stage: s.stage, round: s.round })), worst, stalled: !v.active, roadmapUrl: plan?.artifacts.roadmap ?? null,
   };
 }
 
