@@ -44,14 +44,14 @@ text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,san
 </g>
 <rect x="286" y="152" width="582" height="48" rx="10" fill="none" stroke="#94e2d5" stroke-width="1" stroke-opacity=".55"/>
 <text x="302" y="181" font-size="13" style="fill:#94e2d5" font-weight="700">Small</text>
-<rect x="392" y="165" width="123.1" height="22" rx="6" fill="#313244"/>
-<text x="453.55" y="180" font-size="11" text-anchor="middle">impl-light / mech</text>
-<text x="524.1" y="180" font-size="12" class="faint" text-anchor="middle">→</text>
-<rect x="533.1" y="165" width="148.29999999999998" height="22" rx="6" fill="#313244"/>
-<text x="607.25" y="180" font-size="11" text-anchor="middle">todos los validadores</text>
-<text x="690.4" y="180" font-size="12" class="faint" text-anchor="middle">→</text>
-<rect x="699.4" y="165" width="91.6" height="22" rx="6" fill="#313244"/>
-<text x="745.1999999999999" y="180" font-size="11" text-anchor="middle">leer el diff</text>
+<rect x="392" y="165" width="154.6" height="22" rx="6" fill="#313244"/>
+<text x="469.3" y="180" font-size="11" text-anchor="middle">delegada: mech / light</text>
+<text x="555.6" y="180" font-size="12" class="faint" text-anchor="middle">→</text>
+<rect x="564.6" y="165" width="148.29999999999998" height="22" rx="6" fill="#313244"/>
+<text x="638.75" y="180" font-size="11" text-anchor="middle">todos los validadores</text>
+<text x="721.9" y="180" font-size="12" class="faint" text-anchor="middle">→</text>
+<rect x="730.9" y="165" width="91.6" height="22" rx="6" fill="#313244"/>
+<text x="776.6999999999999" y="180" font-size="11" text-anchor="middle">leer el diff</text>
 <path d="M236 212C262 212 262 240 286 240" stroke="#585b70" stroke-width="1.5" fill="none"/>
 <g class="st" style="animation-delay:6s">
 <path d="M236 212C262 212 262 240 286 240" stroke="#a6e3a1" stroke-width="2.5" fill="none" class="flow"/>

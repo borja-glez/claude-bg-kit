@@ -7,8 +7,8 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.8.0](https://img.shields.io/badge/versi%C3%B3n-0.8.0-fab387?style=flat-square)
-![depende de waypoint ^0.13.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.13.0-cba6f7?style=flat-square)
+![versión 0.9.0](https://img.shields.io/badge/versi%C3%B3n-0.9.0-fab387?style=flat-square)
+![depende de waypoint ^0.14.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.14.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -46,7 +46,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depende de [waypoint](../waypoint/README.es.md) ^0.13.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
+forge depende de [waypoint](../waypoint/README.es.md) ^0.14.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
 
 ## Uso
 
@@ -69,12 +69,12 @@ forge depende de [waypoint](../waypoint/README.es.md) ^0.13.0, que se instala co
 
 | Camino | Puerta | Ejecutor | Validación | Revisión |
 | --- | --- | --- | --- | --- |
-| **Trivial** | ninguna | la sesión principal | validadores del fichero cambiado | ninguna |
-| **Small** | ninguna | sesión principal, `impl-light` o `mech` | todos los validadores + leer el diff | ninguna |
+| **Trivial** | ninguna | la sesión principal; `mech` cuando es una petición de un lote | validadores del fichero cambiado | ninguna |
+| **Small** | ninguna | siempre delegada: `mech` (Haiku) para trabajo mecánico, `impl-light` (Sonnet) en el resto; la propia sesión solo cuando todo el cambio ya está en su contexto y son 10 líneas o menos | todos los validadores + leer el diff | ninguna |
 | **Medium** | plan corto, sigue salvo que lo pares | `impl` / `impl-heavy` | todos los validadores | correctness (+ security si es sensible) |
 | **Large** | aprobación obligatoria del diseño | `/waypoint:design`, `/waypoint:plan` y luego el bucle Medium por tarea | todos los validadores | correctness + security + perf, y revisión final de toda la rama |
 
-El triaje lee el texto de la tarea, los ficheros que probablemente toque y las zonas sensibles (auth, datos y migraciones, API pública, dependencias, CI), y elige los validadores que aplican.
+El triaje lee el texto de la tarea, los ficheros que probablemente toque y las zonas sensibles (auth, datos y migraciones, API pública, dependencias, CI), y elige los validadores que aplican. `forge triage` imprime además el `implementer` del tamaño (su rol, agente, si lo hace la propia sesión y por qué), resuelto con el perfil; `--batch` marca una petición de varias.
 
 **El bucle de revisión.** Los revisores escriben veredictos en JSON. `forge verdict` los pondera en una nota, y `forge round` decide el siguiente paso: `done`, `resume` (arreglar con el mismo implementador), `fresh-stronger` (un implementador nuevo, un nivel más arriba), `redo`, `breaker` o `stalled`. Desde la ronda 3 sube de nivel, y las tareas Large tienen hasta 4 rondas.
 
@@ -139,6 +139,8 @@ La ejecución secuencial no es un tercer modo: es subagents con N = 1.
 **Desatendido.** En `/forge:infinite`, bajo `/goal` y en los miembros de la ejecución, forge no pregunta. Deja notas-pregunta en el roadmap y registra cada decisión con `forge log --kind decision`.
 
 **Peticiones durante una ejecución.** El trabajo nuevo vive en la rama de ejecución, no en tu rama. En la sesión coordinadora, una petición Trivial o Small que quieres ya se hace en el worktree de la ejecución con su propio commit (o pasa a ser una tarea que depende de la que corre si los ficheros se solapan); una Medium pasa a ser una tarea nueva del plan que el siguiente tick arranca; una Large o un bloque nuevo tiene su propio diseño y plan sin parar la ejecución; las preguntas se responden en la sesión, y lo que debe quedar va como nota del roadmap. En otra sesión valen las mismas reglas como miembro manual.
+
+**Varias peticiones a la vez.** Varias peticiones independientes de un mensaje, y los briefs independientes de una Medium, corren en paralelo como **ejecución efímera**: el mismo planificador, siempre con subagentes, con N = min(`swarm.parallel`, tareas en paralelo). Cada tarea trabaja en `.claude/worktrees/task-<id>` desde tu rama actual y se integra **en tu rama actual**, de una en una, en cuanto se acepta; no hay rama de ejecución ni pregunta de fusión. La integración se niega si tu HEAD se movió. Una tarea sin zonas corre sola, y se comprueban las dependencias y los ciclos. Se ve en lens y en la banda y, si el proyecto tiene roadmap, allí como **Tareas sueltas** (fuera de `plan.yaml` y del progreso del plan). Una petición Large sale del lote, y con una sola tarea no hay ejecución efímera. `swarm start` se niega mientras haya otra ejecución activa que no esté retomando. Un conflicto al integrar la tarea de una sesión ejecutora o manual tiene una ronda de arreglo con los subagentes de la coordinadora (`swarm retry <T> --adopt`, que se niega si el worktree de quien la tiene tiene cambios sin confirmar); a la segunda, se escala.
 
 **El lanzador.** `swarm.launcher: bg | herdr` elige cómo se abre una sesión. Un sondeo acotado en el tiempo encontró que herdr no puede abrir paneles desde la línea de comandos, así que `--launcher herdr` devuelve un error (código 2) y la coordinadora usa `bg`. herdr aún no está soportado.
 
@@ -280,8 +282,8 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 <details>
 <summary><b>Tareas y revisión</b></summary>
 
-- `triage [--task id] (<texto> | --text-file f)` - clasifica una tarea: camino, ficheros, zonas sensibles y validadores. `--text-file` lee el texto de un fichero, para que nunca pase por un shell.
-- `triage --plan p --task T` - hace el triaje de una tarea del plan a partir de sus zonas y su `done_when`.
+- `triage [--task id] [--batch] (<texto> | --text-file f)` - clasifica una tarea: camino, ficheros, zonas sensibles, validadores y el `implementer` (rol, agente, self, why). `--batch` marca una petición de varias, así que una Trivial va a `mech`. `--text-file` lee el texto de un fichero, para que nunca pase por un shell.
+- `triage --plan p --task T` - hace el triaje de una tarea del plan a partir de sus zonas y su `done_when`; imprime también el `implementer`.
 - `brief --plan p --task T [--design d]` - imprime el brief de una tarea del plan de waypoint, con la línea `Commit title prefix` que usan los implementadores.
 - `validate [--affected a,b | --all] [--path trivial|small|medium|large] [--base sha] [--final] [--task id] [--base-run | --baseline f]` - ejecuta los validadores del proyecto que tocan (ver Coincidencias); `--base` da el diff contra el que se casan los `affects` de e2e, `--final` elige el conjunto de la revisión final. `--base-run` marca una ejecución sobre el commit base, antes de cualquier cambio; `--baseline f` toma el JSON de esa ejecución y marca `preexisting` un fallo que la base ya tenía, que no cuenta ni en el código de salida ni en el veredicto. Un runner de tests que no encuentra tests pasa como `skipped: "no-tests"`.
 - `verdict --task id --dir d [--validators f] [--sensitive] [--perf]` - pondera los JSON de los revisores en una nota. Un revisor aparece con `invalid: true` si su salida no servía (`dropped: 0`, cuenta como abstención) o si se descartaron algunos de sus hallazgos (`dropped` > 0; la revisión mantiene su veredicto y puntúa, y la skill registra los hallazgos descartados como resolución).
@@ -314,9 +316,9 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 <summary><b>Modo infinito y ejecución</b></summary>
 
 - `infinite start --cycles N | --hours H`, `infinite status`, `cycle --progress yes|no`, `stop`
-- `swarm start --project P --session SID [--mode subagents|sessions] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]` - empieza o reanuda una ejecución; crea la rama de ejecución y su worktree (o pone al día una atrasada respecto a su base, `baseSync`) e imprime el resultado de `setup`. Ejecútalo desde el checkout principal.
+- `swarm start --project P --session SID [--mode subagents|sessions] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F]` - empieza o reanuda una ejecución (`--kind ephemeral --tasks F` empieza una efímera con el fichero JSON F de tareas sueltas y escribe su estado en `.forge/loose.json`); crea la rama de ejecución y su worktree (o pone al día una atrasada respecto a su base, `baseSync`) e imprime el resultado de `setup`. Ejecútalo desde el checkout principal.
 - `swarm status` - el estado de la ejecución, por tarea.
-- `swarm propose --plan p` - el ancho del plan y el modo y la N recomendados.
+- `swarm propose --plan P | --tasks F` - el ancho del plan (o de las tareas sueltas) y el modo y la N recomendados.
 - `swarm worktree <tarea> [--member SID]` - crea el worktree y la rama de la tarea (y ejecuta `swarm.setup`); `--member` es para una sesión miembro, que crea el suyo.
 - `swarm join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]` - registra un miembro en `.forge/members/<SID>.json`. `SID` es su id de sesión de waypoint; `--hook-session` es el id de sesión propio de Claude (las skills pasan `${CLAUDE_SESSION_ID}`), con el que los hooks reconocen al miembro; al volver a unirse sin él se conserva el anotado.
 - `swarm report <tarea> --session SID --stage S [--status running|accepted|blocked] [--agent A | --no-agent] [--round N] [--lease ISO]` - un miembro publica su propia etapa y su señal en vivo (nunca escribe `execution.json`).
@@ -324,10 +326,11 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 - `swarm relaunch <tarea> --plan p` / `swarm nudge <tarea> [--plan p]` - relanza una tarea de sessions parada con una nota de relevo (como mucho 2 veces), o recuerda a una inactiva (el plan da el idioma del recordatorio).
 - `swarm takeover --session SID [--db dir]` - toma el relevo de la coordinadora cuando está parada; un miembro de la ejecución no puede. La coordinadora pasa a ser `SID`, y el hook Stop se ata a esa sesión en su siguiente parada.
 - `swarm task <tarea> --stage S [--agent A | --no-agent] [--round N] [--status running|accepted|blocked] [--detail-file F] [--lease ISO]` - anota la etapa, el agente y la ronda de la tarea; `swarm task <tarea> --drop` olvida una tarea cuya reclamación se perdió.
-- `swarm tick --plan p --db dir [--agents F]` - decide qué lanzar, recordar, relanzar e integrar (`--db` es una copia de los documentos `state` y `sessions` del roadmap; `--agents` es un fichero JSON con las sesiones en segundo plano, `[{name, state: working|idle}]`).
+- `swarm tick [--plan p --db dir] [--agents F]` - decide qué lanzar, recordar, relanzar e integrar; en una ejecución efímera no lleva `--plan` ni `--db` (`--db` es una copia de los documentos `state` y `sessions` del roadmap; `--agents` es un fichero JSON con las sesiones en segundo plano, `[{name, state: working|idle}]`).
 - `swarm integrate <tarea>` - fusiona una tarea aceptada en la rama de ejecución, comparando los validadores con la base.
 - `swarm merge [--yes]` - fusiona la rama de ejecución en tu rama; sin `--yes` necesita el permiso dado al empezar.
-- `swarm retry <tarea>` - devuelve al trabajo una tarea en conflicto o bloqueada.
+- `swarm retry <T> [--adopt]` - devuelve al trabajo una tarea en conflicto o bloqueada. `--adopt` da a la tarea en conflicto de una sesión ejecutora o manual una ronda de arreglo con los subagentes de la coordinadora; se niega si el worktree de quien la tiene está sucio.
+- `.forge/loose.json` - el estado de una ejecución efímera (sus tareas sueltas, con título, zonas y dependencias).
 - `swarm sleep <segundos> [--mark]` - espera entre ticks (hasta 900 s); `--mark` solo anota la hora de despertar.
 - `swarm stop [--reason stopped|budget]`
 - `stop` - para la ejecución infinita y la ejecución en paralelo.

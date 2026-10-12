@@ -7,8 +7,8 @@ Triage by size, the right model for each role, your own tools first, independent
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.8.0](https://img.shields.io/badge/version-0.8.0-fab387?style=flat-square)
-![depends on waypoint ^0.13.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.13.0-cba6f7?style=flat-square)
+![version 0.9.0](https://img.shields.io/badge/version-0.9.0-fab387?style=flat-square)
+![depends on waypoint ^0.14.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.14.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -46,7 +46,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depends on [waypoint](../waypoint/README.md) ^0.13.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
+forge depends on [waypoint](../waypoint/README.md) ^0.14.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
 
 ## Usage
 
@@ -69,12 +69,12 @@ forge depends on [waypoint](../waypoint/README.md) ^0.13.0, which is installed w
 
 | Path | Gate | Executor | Validation | Review |
 | --- | --- | --- | --- | --- |
-| **Trivial** | none | the main session | validators on the changed file | none |
-| **Small** | none | main session, `impl-light` or `mech` | all validators + reading the diff | none |
+| **Trivial** | none | the main session; `mech` when it is one request of a batch | validators on the changed file | none |
+| **Small** | none | always delegated: `mech` (Haiku) for mechanical work, `impl-light` (Sonnet) otherwise; the session itself only when the whole change is already in its context and is 10 lines or fewer | all validators + reading the diff | none |
 | **Medium** | short plan, continues unless stopped | `impl` / `impl-heavy` | all validators | correctness (+ security when sensitive) |
 | **Large** | mandatory approval of the design | `/waypoint:design`, `/waypoint:plan`, then the Medium loop per task | all validators | correctness + security + perf, final whole-branch review |
 
-Triage reads the task text, the files it is likely to touch and the sensitive zones (auth, data and migrations, public API, dependencies, CI), and picks the validators that apply.
+Triage reads the task text, the files it is likely to touch and the sensitive zones (auth, data and migrations, public API, dependencies, CI), and picks the validators that apply. `forge triage` also prints the `implementer` for the size (its role, agent, whether the session does it itself, and why), resolved through the profile; `--batch` marks one request of several.
 
 **The review loop.** Reviewers write JSON verdicts. `forge verdict` weighs them into a score, and `forge round` decides the next step: `done`, `resume` (fix with the same implementer), `fresh-stronger` (a new implementer one tier up), `redo`, `breaker` or `stalled`. From round 3 it moves up a tier, and Large tasks get up to 4 rounds.
 
@@ -139,6 +139,8 @@ Sequential execution is not a third mode: it is subagents with N = 1.
 **Unattended.** In `/forge:infinite`, under `/goal` and in run members, forge does not ask. It leaves question notes on the roadmap and records every decision with `forge log --kind decision`.
 
 **Requests during an execution.** New work lives on the run branch, not on your branch. In the coordinator session, a Trivial or Small request you want now is done in the run worktree with its own commit (or becomes a task that depends on the running one if the files overlap); a Medium request becomes a new plan task that the next tick starts; a Large one or a new block gets its own design and plan without stopping the execution; questions are answered in the session, and what must stay goes as a roadmap note. In another session the same rules apply as a manual member.
+
+**Several requests at once.** Several independent requests in one message, and the independent briefs of a Medium task, run in parallel as an **ephemeral execution**: the same planner, always with subagents, with N = min(`swarm.parallel`, parallel tasks). Each task works in `.claude/worktrees/task-<id>` from your current branch and is integrated **into your current branch**, one at a time, as soon as it is accepted; there is no run branch and no merge question. Integration refuses if your HEAD moved. A task with no zones runs alone, and dependencies and cycles are checked. You see it in lens and the band and, when the project has a roadmap, there as **Loose tasks** (outside `plan.yaml` and the plan's progress). A Large request leaves the batch, and with a single task there is no ephemeral execution. `swarm start` refuses while another run is active that it is not resuming. A conflict when integrating the task of an executor or manual session gets one fix round with the coordinator's subagents (`swarm retry <T> --adopt`, which refuses if the holder's worktree has uncommitted changes); on the second, it escalates.
 
 **The launcher.** `swarm.launcher: bg | herdr` chooses how a session is opened. A time-boxed spike found that herdr cannot open panes from the command line, so `--launcher herdr` exits with code 2 and the coordinator uses `bg`. herdr is not supported yet.
 
@@ -280,8 +282,8 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 <details>
 <summary><b>Tasks and review</b></summary>
 
-- `triage [--task id] (<text> | --text-file f)` - classify a task: path, files, sensitive zones and validators. `--text-file` reads the text from a file, so it never goes through a shell.
-- `triage --plan p --task T` - triage a plan task from its zones and `done_when`.
+- `triage [--task id] [--batch] (<text> | --text-file f)` - classify a task: path, files, sensitive zones, validators and the `implementer` (role, agent, self, why). `--batch` marks one request of several, so a Trivial one goes to `mech`. `--text-file` reads the text from a file, so it never goes through a shell.
+- `triage --plan p --task T` - triage a plan task from its zones and `done_when`; it prints the `implementer` too.
 - `brief --plan p --task T [--design d]` - print a task brief built from a waypoint plan task, including the `Commit title prefix` line that implementers use.
 - `validate [--affected a,b | --all] [--path trivial|small|medium|large] [--base sha] [--final] [--task id] [--base-run | --baseline f]` - run the project validators that apply (see Matching); `--base` gives the diff that e2e `affects` are matched against, `--final` selects the final review's set. `--base-run` marks a run on the base commit, before any change; `--baseline f` takes that run's JSON and marks a failure the base already had `preexisting`, which neither the exit code nor the verdict counts. A test runner that finds no tests passes as `skipped: "no-tests"`.
 - `verdict --task id --dir d [--validators f] [--sensitive] [--perf]` - weigh the reviewers' JSON files into a score. A reviewer is listed with `invalid: true` when its output was unusable (`dropped: 0`, counted as an abstention) or when some of its findings were dropped (`dropped` > 0; the review keeps its verdict and still scores, and the skill records the dropped findings as a ruling).
@@ -314,9 +316,9 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 <summary><b>Infinite mode and execution</b></summary>
 
 - `infinite start --cycles N | --hours H`, `infinite status`, `cycle --progress yes|no`, `stop`
-- `swarm start --project P --session SID [--mode subagents|sessions] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]` - start or resume an execution; creates the run branch and its worktree (or brings a stale one up to its base, `baseSync`) and prints the `setup` result. Run it from the main checkout.
+- `swarm start --project P --session SID [--mode subagents|sessions] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F]` - start or resume an execution (`--kind ephemeral --tasks F` starts an ephemeral one from the JSON file F of loose tasks and writes its state to `.forge/loose.json`); creates the run branch and its worktree (or brings a stale one up to its base, `baseSync`) and prints the `setup` result. Run it from the main checkout.
 - `swarm status` - the execution state, per task.
-- `swarm propose --plan p` - the plan's width and the recommended mode and N.
+- `swarm propose --plan P | --tasks F` - the plan's (or the loose tasks') width and the recommended mode and N.
 - `swarm worktree <task> [--member SID]` - create the task's worktree and branch (and run `swarm.setup`); `--member` is for a member session, which creates its own.
 - `swarm join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]` - register a member in `.forge/members/<SID>.json`. `SID` is its waypoint session id; `--hook-session` is Claude's own session id (the skills pass `${CLAUDE_SESSION_ID}`), which the hooks use to recognise the member; a rejoin without it keeps the one recorded.
 - `swarm report <task> --session SID --stage S [--status running|accepted|blocked] [--agent A | --no-agent] [--round N] [--lease ISO]` - a member publishes its own stage and live signal (it never writes `execution.json`).
@@ -324,10 +326,11 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 - `swarm relaunch <task> --plan p` / `swarm nudge <task> [--plan p]` - restart a stopped sessions task with a handover note (at most 2 times), or remind an idle one (the plan gives the reminder's language).
 - `swarm takeover --session SID [--db dir]` - take over the coordinator when it is stopped; a run member cannot. The coordinator becomes `SID`, and the Stop hook binds to that session at its next stop.
 - `swarm task <task> --stage S [--agent A | --no-agent] [--round N] [--status running|accepted|blocked] [--detail-file F] [--lease ISO]` - record the task's stage, agent and round; `swarm task <task> --drop` forgets a task whose claim was lost.
-- `swarm tick --plan p --db dir [--agents F]` - decide what to launch, nudge, relaunch and integrate (`--db` is a copy of the roadmap's `state` and `sessions` documents; `--agents` is a JSON file of the background sessions, `[{name, state: working|idle}]`).
+- `swarm tick [--plan p --db dir] [--agents F]` - decide what to launch, nudge, relaunch and integrate; in an ephemeral execution it takes no `--plan` or `--db` (`--db` is a copy of the roadmap's `state` and `sessions` documents; `--agents` is a JSON file of the background sessions, `[{name, state: working|idle}]`).
 - `swarm integrate <task>` - merge an accepted task into the run branch, comparing the validators with the baseline.
 - `swarm merge [--yes]` - merge the run branch into your branch; without `--yes` it needs the permission given at start.
-- `swarm retry <task>` - put a task in conflict or blocked back to work.
+- `swarm retry <T> [--adopt]` - put a task in conflict or blocked back to work. `--adopt` gives the conflicting task of an executor or manual session one fix round with the coordinator's subagents; it refuses if the holder's worktree is dirty.
+- `.forge/loose.json` - the state of an ephemeral execution (its loose tasks, with title, zones and dependencies).
 - `swarm sleep <seconds> [--mark]` - wait between ticks (up to 900 s); `--mark` only records the wake-up time.
 - `swarm stop [--reason stopped|budget]`
 - `stop` - stop the infinite run and the execution.

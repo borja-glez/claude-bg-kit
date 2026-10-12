@@ -6,7 +6,7 @@
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.13.0](https://img.shields.io/badge/versi%C3%B3n-0.13.0-cba6f7?style=flat-square)
+![versión 0.14.0](https://img.shields.io/badge/versi%C3%B3n-0.14.0-cba6f7?style=flat-square)
 ![requiere sesión en claude.ai](https://img.shields.io/badge/requiere-sesi%C3%B3n%20en%20claude.ai-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -95,6 +95,8 @@ El roadmap es un artifact de claude.ai. Es privado hasta que lo compartes, y las
 
 **Ejecución.** La vista Sesiones abre con un bloque Ejecución: una línea por tarea en marcha con su etapa, agente y tiempo, las plazas usadas sobre el máximo (`2/3 plazas`) y las libres. Las tarjetas de sesión llevan una etiqueta de rol (coordinadora, ejecutora, manual) y un punto de vida. Una tarea en curso cuya ejecutora dejó de renovar su concesión se marca **huérfana** y cuenta como bloqueada en los filtros, para que lo notes y otra sesión pueda recuperarla. La página lee todo esto del documento `meta/run` del roadmap (`runId`, `mode`, `parallel`, `branch`, `mergeOnFinish`, `active`, `stopReason`, `coordinator` y una plaza por tarea en marcha con su `task`, `stage`, `agent`, `by` y `since`), que forge mantiene al día.
 
+**Tareas sueltas.** Cuando hay una ejecución efímera de forge (varias peticiones independientes en paralelo), la vista de seguimiento tiene una sección **Tareas sueltas** con el título, estado, etapa y agente de cada petición, y la píldora de la ejecución se lee `▶ tareas sueltas · subagentes n/N`. No cuentan en el progreso del plan ni entran en `plan.yaml`.
+
 **Permisos.** Los colaboradores solo pueden escribir notas y propuestas. Todo lo demás (plan, estado, sesiones, eventos, mensajes) necesita permiso de editor. Claude escribe con ArtifactData como propietario, y las reglas nunca lo limitan. Sin una persona con sesión iniciada, o si la base de datos rechaza una nota, el editor de notas queda en solo lectura.
 
 > Después de actualizar el plugin, ejecuta `/waypoint:plan` y vuelve a publicar para que la página reciba las vistas nuevas. Un roadmap publicado por primera vez con 0.7.x o anterior debe republicarse una vez con las capacidades nuevas; la skill de plan las pasa.
@@ -107,7 +109,7 @@ El roadmap es un artifact de claude.ai. Es privado hasta que lo compartes, y las
 | --- | --- | --- |
 | **Diseño** | Versión del diseño, propuestas y puntos críticos de la última crítica | Aplicar todas, Elegir…, Otra ronda, Reescribir, Preguntarme, Aprobar, Ver diseño |
 | **Trabajo** | Tu frente y su progreso, la tarea en curso con sus minutos, el progreso global, mensajes sin leer, una decisión pendiente | Siguiente tarea, Estado, Lanzar sesión en un frente…, Abrir roadmap |
-| **Ejecución** | La ejecución (`▶ EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · … · 3/12 · integradas 3`): modo, tareas en marcha sobre el máximo, cada tarea con su etapa y ronda, tareas hechas sobre el total e integradas; una ejecución atascada enseña solo `▶ EJECUCIÓN parada`, y se añade `⚠ sin señal` o `⚠ parada` cuando la coordinadora o una tarea en marcha se queda en silencio o se para | Estado, Parar, Abrir roadmap |
+| **Ejecución** | La ejecución (`▶ EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · … · 3/12 · integradas 3`): modo, tareas en marcha sobre el máximo, cada tarea con su etapa y ronda, tareas integradas sobre el total del plan (o del lote); una ejecución efímera se lee `▶ tareas sueltas · subagentes n/N`; una ejecución atascada enseña solo `▶ EJECUCIÓN parada`, y se añade `⚠ sin señal` o `⚠ parada` cuando la coordinadora o una tarea en marcha se queda en silencio o se para | Estado, Parar, Abrir roadmap |
 
 Con [lens](../lens/README.es.md) instalado, un botón **Panel** abre el panel de progreso. Si un comando no puede ejecutarse desde la banda, queda en el prompt con el aviso «pulsa Enter».
 

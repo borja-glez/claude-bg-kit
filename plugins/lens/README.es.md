@@ -7,7 +7,7 @@ Roadmap, etapas de forge, ejecuciones de superpowers, pendientes, subagentes, el
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.8.0](https://img.shields.io/badge/versi%C3%B3n-0.8.0-b4befe?style=flat-square)
+![versión 0.9.0](https://img.shields.io/badge/versi%C3%B3n-0.9.0-b4befe?style=flat-square)
 ![sin coste en tokens](https://img.shields.io/badge/coste%20en%20tokens-ninguno-a6e3a1?style=flat-square)
 
 </div>
@@ -57,7 +57,7 @@ Cada sección es una tarjeta con su propio color (la paleta Catppuccin del roadm
 | **Ahora** | la sesión | El modelo principal y su esfuerzo (`Opus 5.5 · esfuerzo alto`), la herramienta en marcha y cuánto lleva el turno. |
 | **Roadmap** | plan de waypoint | Porcentaje, fase, una caja por tarea del frente, la tarea en curso con sus minutos frente a su estimación, mensajes y decisiones pendientes. |
 | **forge** | `.forge/status.json` | La última tarea de forge clasificada o trabajada en el día, descrita más abajo. |
-| **Ejecución** | `.forge/execution/` y `.forge/live/` | Mientras hay una ejecución de forge activa, una fila por tarea en marcha con su etapa, nivel, agente, duración y ronda, y una ficha de vida (viva, sin señal a los 7 minutos, parada a los 12). Las sesiones ejecutoras y manuales tienen sus propias filas (`manual · T009`) y cada franja está viva o no según su propia sesión. Debajo, listas atenuadas de las tareas en cola, en conflicto, bloqueadas y huérfanas. Sustituye a la antigua tarjeta de enjambre. |
+| **Ejecución** | `.forge/execution/` y `.forge/live/` | Mientras hay una ejecución de forge activa, una fila por tarea en marcha con su título, etapa, nivel, agente, duración y ronda, y una ficha de vida (viva, sin señal a los 7 minutos, parada a los 12). Cada fila enseña el título de la tarea y la tarjeta el total real de la ejecución; una ejecución efímera se ve igual que una de plan. Las sesiones ejecutoras y manuales tienen sus propias filas (`manual · T009`) y cada franja está viva o no según su propia sesión. Debajo, listas atenuadas de las tareas en cola, en conflicto, bloqueadas y huérfanas. Sustituye a la antigua tarjeta de enjambre. |
 | **superpowers** | `.superpowers/sdd/<plan>/progress.md` | El plan activo y su registro de subagent-driven-development: tarea N/M, la ronda de arreglo actual y las últimas entradas. Un plan terminado sin pasos marcados se oculta. |
 | **Pendientes** | TodoWrite | Hechos/total, el que está en curso y los siguientes. |
 | **Subagentes** | Claude Code | Los subagentes en marcha, con su tipo, descripción, modelo, esfuerzo y tiempo. |

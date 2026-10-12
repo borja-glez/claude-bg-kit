@@ -7,9 +7,9 @@ Design them, plan them, build them with independent review, run them in parallel
 
 **English** · [Español](README.es.md)
 
-![waypoint 0.13.0](https://img.shields.io/badge/waypoint-0.13.0-cba6f7?style=flat-square)
-![forge 0.8.0](https://img.shields.io/badge/forge-0.8.0-fab387?style=flat-square)
-![lens 0.8.0](https://img.shields.io/badge/lens-0.8.0-b4befe?style=flat-square)
+![waypoint 0.14.0](https://img.shields.io/badge/waypoint-0.14.0-cba6f7?style=flat-square)
+![forge 0.9.0](https://img.shields.io/badge/forge-0.9.0-fab387?style=flat-square)
+![lens 0.9.0](https://img.shields.io/badge/lens-0.9.0-b4befe?style=flat-square)
 ![Claude Code plugin marketplace](https://img.shields.io/badge/Claude%20Code-marketplace%20bg--kit-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -78,7 +78,7 @@ Add the marketplace straight from GitHub, then install the plugins you want:
 claude plugin marketplace add borja-glez/claude-bg-kit
 
 claude plugin install waypoint@bg-kit
-claude plugin install forge@bg-kit     # pulls in waypoint ^0.13.0 as a dependency
+claude plugin install forge@bg-kit     # pulls in waypoint ^0.14.0 as a dependency
 claude plugin install lens@bg-kit
 ```
 
@@ -172,11 +172,13 @@ The band is a line above the prompt that changes with what you are doing. In des
 
 <p align="center"><img src="docs/assets/paths.en.svg" alt="forge triage routes a task to the Trivial, Small, Medium or Large path; the implementer ladder and the three reviewers" width="100%"></p>
 
-Small things stay cheap and big things get the full treatment. Implementers range from Haiku for mechanical work to Opus at extra-high effort for delicate work. Reviewers always run on Opus at extra-high effort, and only after the validators pass.
+Small things stay cheap and big things get the full treatment: a Small task is always delegated, to `mech` or `impl-light`. Implementers range from Haiku for mechanical work to Opus at extra-high effort for delicate work. Reviewers always run on Opus at extra-high effort, and only after the validators pass.
 
 ### Parallel execution (forge)
 
 <p align="center"><img src="docs/assets/swarm.en.svg" alt="A coordinator session on the run branch forge/run-<project> launches an implementer subagent per ready task, each in its own task worktree; tasks are integrated into the run branch one at a time and merged into your branch at the end" width="100%"></p>
+
+Independent loose requests in one message also run in parallel, as an ephemeral execution that integrates each task into your current branch; with a roadmap they show up there as loose tasks.
 
 ### The panel (lens)
 

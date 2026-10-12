@@ -6,7 +6,7 @@
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.13.0](https://img.shields.io/badge/version-0.13.0-cba6f7?style=flat-square)
+![version 0.14.0](https://img.shields.io/badge/version-0.14.0-cba6f7?style=flat-square)
 ![requires claude.ai login](https://img.shields.io/badge/requires-claude.ai%20login-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -95,6 +95,8 @@ The roadmap is an artifact on claude.ai. It is private until you share it, and i
 
 **Execution.** The Sessions view opens with an Execution block: one line per running task with its stage, agent and time, the slots in use out of the maximum (`2/3 slots`) and the free ones. Session cards carry a role tag (coordinator, executor, manual) and a liveness dot. A task that is in progress but whose executor stopped renewing its lease is marked **orphaned** and counts as blocked in the filters, so you notice it and another session can recover it. The page reads all of this from the roadmap's `meta/run` document (`runId`, `mode`, `parallel`, `branch`, `mergeOnFinish`, `active`, `stopReason`, `coordinator` and one slot per running task with its `task`, `stage`, `agent`, `by` and `since`), which forge keeps up to date.
 
+**Loose tasks.** When a forge ephemeral execution (several independent requests run in parallel) is active, the Tracking view has a **Loose tasks** section with the title, status, stage and agent of each request, and the run pill reads `▶ loose tasks · subagents n/N`. They do not count in the plan's progress and never enter `plan.yaml`.
+
 **Permissions.** Contributors can write only notes and proposals. Everything else (plan, state, sessions, events, messages) needs Editor. Claude writes through ArtifactData as the owner, which the rules never limit. Without a signed-in viewer, or when the database refuses a note, the composer is read-only.
 
 > After updating the plugin, run `/waypoint:plan` and republish so the page gets the new views. A roadmap first published by 0.7.x or earlier must be republished once with the new capabilities; the plan skill passes them.
@@ -107,7 +109,7 @@ The roadmap is an artifact on claude.ai. It is private until you share it, and i
 | --- | --- | --- |
 | **Design** | Design version, proposals and critical points from the last critique | Apply all, Pick…, Another round, Rewrite, Interview me, Approve, View design |
 | **Work** | Your track and its progress, the task in progress with its minutes, overall progress, unread messages, a pending decision | Next task, Status, Launch session on track…, Open roadmap |
-| **Run** | The execution (`▶ EXECUTION · subagents 2/3 · T004 review (r2) · … · 3/12 · integrated 3`): mode, tasks running out of the maximum, each task with its stage and round, tasks done out of the total and tasks integrated; a stalled run shows just `▶ EXECUTION stopped`, and `⚠ no signal` or `⚠ stopped` is appended when the coordinator or a running task goes silent or stops | Status, Stop, Open roadmap |
+| **Run** | The execution (`▶ EXECUTION · subagents 2/3 · T004 review (r2) · … · 3/12 · integrated 3`): mode, tasks running out of the maximum, each task with its stage and round, tasks integrated out of the plan's total (or the batch's); an ephemeral execution reads `▶ loose tasks · subagents n/N`; a stalled run shows just `▶ EXECUTION stopped`, and `⚠ no signal` or `⚠ stopped` is appended when the coordinator or a running task goes silent or stops | Status, Stop, Open roadmap |
 
 With [lens](../lens/README.md) installed, a **Panel** button opens the progress panel. If a command cannot run from the band, it is left in the prompt with a note saying "press Enter".
 

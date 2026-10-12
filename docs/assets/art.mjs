@@ -542,7 +542,7 @@ const EN = {
   pathsDesc: 'Diagram of forge triage: a task goes to the Trivial, Small, Medium or Large path, each with its executor, validation and review; below, the implementer ladder by model and the three reviewers.',
   task: 'task', lanes: [
     ['Trivial', ['main session', 'validators on the file']],
-    ['Small', ['impl-light / mech', 'all validators', 'read the diff']],
+    ['Small', ['delegated: mech / light', 'all validators', 'read the diff']],
     ['Medium', ['short plan', 'impl / heavy', 'validators', 'correctness +security']],
     ['Large', ['approved design', 'plan', 'Medium loop per task', 'final review']],
   ],
@@ -554,7 +554,7 @@ const EN = {
   coordinatorFull: 'coordinator', coordSub: 'forge swarm tick: launch ready tasks, review, integrate, sleep, repeat', integrated: 'integrated', waiting: 'T009 · waits for T004 · launched once it is integrated', subagent: 'subagent', runPill: '▶ execution · subagents 3/3',
   swarmFoot0: 'At the end the run branch is merged into your branch, with your permission (or the one you gave at the start).',
   swarmFoot1: 'Up to swarm.parallel tasks at once (default 3) · one merge at a time, validators after each one compared with what already failed.',
-  swarmFoot2: 'Subagents or sessions mode · manual sessions join at any time · shown in the roadmap, the band and lens.',
+  swarmFoot2: 'Subagents or sessions mode · manual sessions join at any time · loose requests run in parallel too.',
 };
 EN.coordinator = 'coordinator';
 
@@ -601,7 +601,7 @@ const ES = {
   pathsDesc: 'Diagrama del triaje de forge: una tarea va al camino Trivial, Small, Medium o Large, cada uno con su ejecutor, su validación y su revisión; debajo, la escalera de implementadores por modelo y los tres revisores.',
   task: 'tarea', lanes: [
     ['Trivial', ['sesión principal', 'validadores del fichero']],
-    ['Small', ['impl-light / mech', 'todos los validadores', 'leer el diff']],
+    ['Small', ['delegada: mech / light', 'todos los validadores', 'leer el diff']],
     ['Medium', ['plan corto', 'impl / heavy', 'validadores', 'correctness +security']],
     ['Large', ['diseño aprobado', 'plan', 'bucle Medium por tarea', 'revisión final']],
   ],
@@ -613,7 +613,7 @@ const ES = {
   coordSub: 'forge swarm tick: lanza tareas listas, revisa, integra, duerme y repite', integrated: 'integrado', waiting: 'T009 · espera a T004 · se lanza al integrarse', subagent: 'subagente', runPill: '▶ ejecución · subagentes 3/3',
   swarmFoot0: 'Al final la rama de ejecución se fusiona en la tuya, con tu permiso (o el que diste al empezar).',
   swarmFoot1: 'Hasta swarm.parallel tareas a la vez (3 por defecto) · un merge cada vez, validadores tras cada uno comparados con lo que ya fallaba.',
-  swarmFoot2: 'Modo subagentes o sesiones · las sesiones manuales se unen cuando quieran · se ve en el roadmap, la banda y lens.',
+  swarmFoot2: 'Modo subagentes o sesiones · las sesiones manuales se unen cuando quieran · las peticiones sueltas también van en paralelo.',
 };
 
 const ART = { flow, roadmap, band, lens, paths, swarm };

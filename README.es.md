@@ -7,9 +7,9 @@ Diséñalas, planifícalas, constrúyelas con revisión independiente, ejecútal
 
 [English](README.md) · **Español**
 
-![waypoint 0.13.0](https://img.shields.io/badge/waypoint-0.13.0-cba6f7?style=flat-square)
-![forge 0.8.0](https://img.shields.io/badge/forge-0.8.0-fab387?style=flat-square)
-![lens 0.8.0](https://img.shields.io/badge/lens-0.8.0-b4befe?style=flat-square)
+![waypoint 0.14.0](https://img.shields.io/badge/waypoint-0.14.0-cba6f7?style=flat-square)
+![forge 0.9.0](https://img.shields.io/badge/forge-0.9.0-fab387?style=flat-square)
+![lens 0.9.0](https://img.shields.io/badge/lens-0.9.0-b4befe?style=flat-square)
 ![Marketplace de Claude Code](https://img.shields.io/badge/Claude%20Code-marketplace%20bg--kit-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -78,7 +78,7 @@ Añade el marketplace directamente desde GitHub e instala los plugins que quiera
 claude plugin marketplace add borja-glez/claude-bg-kit
 
 claude plugin install waypoint@bg-kit
-claude plugin install forge@bg-kit     # instala waypoint ^0.13.0 como dependencia
+claude plugin install forge@bg-kit     # instala waypoint ^0.14.0 como dependencia
 claude plugin install lens@bg-kit
 ```
 
@@ -172,11 +172,13 @@ La banda es una línea sobre el prompt que cambia según lo que estés haciendo.
 
 <p align="center"><img src="docs/assets/paths.es.svg" alt="El triaje de forge lleva una tarea al camino Trivial, Small, Medium o Large; la escalera de implementadores y los tres revisores" width="100%"></p>
 
-Lo pequeño sigue siendo barato y lo grande recibe el tratamiento completo. Los implementadores van desde Haiku para el trabajo mecánico hasta Opus con esfuerzo muy alto para lo delicado. Los revisores siempre usan Opus con esfuerzo muy alto, y solo actúan cuando los validadores han pasado.
+Lo pequeño sigue siendo barato y lo grande recibe el tratamiento completo: una Small siempre se delega, a `mech` o `impl-light`. Los implementadores van desde Haiku para el trabajo mecánico hasta Opus con esfuerzo muy alto para lo delicado. Los revisores siempre usan Opus con esfuerzo muy alto, y solo actúan cuando los validadores han pasado.
 
 ### Ejecución en paralelo (forge)
 
 <p align="center"><img src="docs/assets/swarm.es.svg" alt="Una coordinadora en la rama de ejecución forge/run-<proyecto> lanza un subagente implementador por tarea lista, cada uno en su worktree de tarea; las tareas se integran en la rama de ejecución de una en una y se fusionan en tu rama al final" width="100%"></p>
+
+Las peticiones sueltas e independientes de un mensaje también van en paralelo, como una ejecución efímera que integra cada tarea en tu rama actual; si hay roadmap, salen allí como tareas sueltas.
 
 ### El panel (lens)
 

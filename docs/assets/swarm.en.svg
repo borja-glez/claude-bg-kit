@@ -63,5 +63,5 @@ text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,san
 <text x="40" y="372" font-size="12" class="m" style="fill:#a6e3a1" font-weight="700">forge/run-&lt;project&gt; · .claude/worktrees/run</text>
 <text x="32" y="404" font-size="11.5" class="dim">At the end the run branch is merged into your branch, with your permission (or the one you gave at the start).</text>
 <text x="32" y="422" font-size="11.5" class="dim">Up to swarm.parallel tasks at once (default 3) · one merge at a time, validators after each one compared with what already failed.</text>
-<text x="32" y="440" font-size="11.5" class="dim">Subagents or sessions mode · manual sessions join at any time · shown in the roadmap, the band and lens.</text>
+<text x="32" y="440" font-size="11.5" class="dim">Subagents or sessions mode · manual sessions join at any time · loose requests run in parallel too.</text>
 </svg>
