@@ -48,7 +48,7 @@ var MAX_STAGES = 20;
 var MAX_TS = 40;
 var tsText = (x) => str2(x) && x.length <= MAX_TS ? x : null;
 function stagesOf(x) {
-  const out = {};
+  const out = /* @__PURE__ */ Object.create(null);
   if (!isObj(x)) return out;
   for (const [k, v] of Object.entries(x)) {
     if (Object.keys(out).length >= MAX_STAGES) break;
@@ -11228,6 +11228,10 @@ var FINISHED_TTL_MS = 5 * 6e4;
 function pushFinished(list, entry) {
   return [...list.filter((x) => x.id !== entry.id), entry].slice(-FINISHED_MAX);
 }
+function withoutRunning(list, running) {
+  const ids = new Set(running.map((s) => s.id));
+  return list.filter((x) => !ids.has(x.id));
+}
 function freshFinished(list, now) {
   return list.filter((x) => Number.isFinite(now) && x.at <= now && now - x.at < FINISHED_TTL_MS);
 }
@@ -11295,9 +11299,9 @@ function parsePlanTasks(md) {
   if (typeof md !== "string") return tasks;
   let cur = null;
   for (const line of md.split(/\r?\n/)) {
-    const h2 = /^###\s+Task\s+(\d+)\s*:\s*(.*?)\s*$/.exec(line);
-    if (h2) {
-      cur = { n: Number(h2[1]), title: h2[2], steps: 0, checked: 0 };
+    const heading = /^###\s+Task\s+(\d+)\s*:\s*(.*?)\s*$/.exec(line);
+    if (heading) {
+      cur = { n: Number(heading[1]), title: heading[2], steps: 0, checked: 0 };
       tasks.push(cur);
       continue;
     }
@@ -12191,7 +12195,7 @@ function buildCards(m, t, nowMs2) {
     }
     for (const r of w.recentDone ?? []) {
       const over = r.estimateMin !== void 0 && r.minutes > r.estimateMin;
-      blocks.push({ kind: "text", text: `\u2713 ${r.id} \xB7 ${r.minutes}${r.estimateMin ? `/${r.estimateMin}` : ""} min`, dim: true, ...over ? { hue: "yellow" } : {} });
+      blocks.push({ kind: "text", text: `\u2713 ${r.id} \xB7 ${r.minutes > 1440 ? ">24h" : r.minutes}${r.estimateMin ? `/${r.estimateMin}` : ""} min`, dim: true, ...over ? { hue: "yellow" } : {} });
     }
     const chips = [];
     if (w.inbox > 0) chips.push({ text: `\u2709 ${w.inbox}`, hue: "blue" });
@@ -13235,6 +13239,7 @@ async function liveSubagents($, now) {
   }
   const live = new Set(out.map((s) => s.id));
   for (const s of fresh) if (!live.has(s.id)) recordFinished(s, now);
+  finished = withoutRunning(finished, out);
   return out.slice(-MAX_ACTIVITY);
 }
 async function buildPanel($) {

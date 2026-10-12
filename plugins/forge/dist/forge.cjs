@@ -7387,11 +7387,14 @@ function closeStage(s2, ts) {
   const to = isoMs(ts);
   if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return s2.stages;
   const key = stageKey(s2.phase);
-  if (!(key in s2.stages) && Object.keys(s2.stages).length >= MAX_STAGES) return s2.stages;
-  return { ...s2.stages, [key]: (s2.stages[key] ?? 0) + Math.round((to - from) / 1e3) };
+  const known = Object.hasOwn(s2.stages, key);
+  if (!known && Object.keys(s2.stages).length >= MAX_STAGES) return s2.stages;
+  const out = Object.assign(/* @__PURE__ */ Object.create(null), s2.stages);
+  out[key] = (known ? s2.stages[key] : 0) + Math.round((to - from) / 1e3);
+  return out;
 }
 function stagesOf(x) {
-  const out = {};
+  const out = /* @__PURE__ */ Object.create(null);
   if (!isObj(x)) return out;
   for (const [k, v] of Object.entries(x)) {
     if (Object.keys(out).length >= MAX_STAGES) break;
