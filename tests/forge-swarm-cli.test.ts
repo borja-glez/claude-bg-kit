@@ -45,7 +45,7 @@ const writeDocs = (dir: string, docs: Record<string, unknown>) => {
 describe('forge swarm', () => {
   it('start creates the state with the base branch and the config parallel', () => {
     const s = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--merge'], io));
-    expect(s).toMatchObject({ active: true, parallel: 5, mergeAuthorized: true, project: 'shop', base: 'main', coordinator: 'main' });
+    expect(s).toMatchObject({ active: true, parallel: 3, mergeAuthorized: true, project: 'shop', base: 'main', coordinator: 'main' });
     expect(readSwarm(root)?.base).toBe('main');
   });
   it('start takes --parallel over the config and refuses a swarm of 1', () => {
@@ -78,7 +78,7 @@ describe('forge swarm', () => {
     writeFileSync(path.join(root, 'agents.json'), '["wp-shop-zzz"]');
     const r = out(run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db', '--agents', 'agents.json'], io));
     expect(r.actions).toEqual([{ type: 'launch', track: 'a' }, { type: 'wait', seconds: 240 }]);
-    expect(r).toMatchObject({ progress: true, live: 0, parallel: 5 });
+    expect(r).toMatchObject({ progress: true, live: 0, parallel: 3 });
     expect(readSwarm(root)!.fronts.b.status).toBe('waiting');
     expect(gitCalls).toContainEqual(['rev-list', '--count', 'main..track/a']);
   });

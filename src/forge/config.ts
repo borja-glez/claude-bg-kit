@@ -12,7 +12,7 @@ export interface ValidatorSpec { name: string; cmd: string; kind?: string; affec
 export interface VerifyLimits { checks: number; shots: number; minutes: number }
 export interface ForgeConfig {
   profile: Profile; validators?: ValidatorSpec[]; detect: boolean; exclude: string[];
-  verify: { limits: VerifyLimits }; evidence: 'upload' | 'local'; validatorTimeoutSec: number; swarm: { parallel: number };
+  verify: { limits: VerifyLimits }; evidence: 'upload' | 'local'; validatorTimeoutSec: number; swarm: { parallel: number; mode?: 'subagents' | 'sessions'; launcher: 'bg' | 'herdr' };
 }
 export class ConfigError extends Error {}
 
@@ -36,12 +36,16 @@ const Schema = z.object({
   }).strict().default({}),
   evidence: z.enum(['upload', 'local']).default('upload'),
   validatorTimeoutSec: z.number().int().positive().max(7200).default(600),
-  swarm: z.object({ parallel: z.number().int().min(1).max(10).default(5) }).strict().default({ parallel: 5 }),
+  swarm: z.object({
+    parallel: z.number().int().min(1).max(10).default(3),
+    mode: z.enum(['subagents', 'sessions']).optional(),
+    launcher: z.enum(['bg', 'herdr']).default('bg'),
+  }).strict().default({ parallel: 3, launcher: 'bg' }),
 }).strict();
 
 const DEFAULTS: ForgeConfig = {
   profile: 'balanced', detect: true, exclude: [], verify: { limits: { checks: 8, shots: 10, minutes: 10 } },
-  evidence: 'upload', validatorTimeoutSec: 600, swarm: { parallel: 5 },
+  evidence: 'upload', validatorTimeoutSec: 600, swarm: { parallel: 3, launcher: 'bg' },
 };
 
 export function parseConfig(text: string | null): ForgeConfig {

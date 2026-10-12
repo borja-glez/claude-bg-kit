@@ -5,8 +5,14 @@ describe('forge config', () => {
   it('defaults: detect on, nothing excluded, verify limits, evidence upload', () => {
     expect(parseConfig(null)).toEqual({
       profile: 'balanced', detect: true, exclude: [], verify: { limits: { checks: 8, shots: 10, minutes: 10 } },
-      evidence: 'upload', validatorTimeoutSec: 600, swarm: { parallel: 5 },
+      evidence: 'upload', validatorTimeoutSec: 600, swarm: { parallel: 3, launcher: 'bg' },
     });
+  });
+  it('swarm: parallel 3 by default, an optional mode and the launcher', () => {
+    expect(parseConfig(null).swarm).toEqual({ parallel: 3, launcher: 'bg' });
+    expect(parseConfig('swarm:\n  mode: sessions\n  parallel: 2\n').swarm).toEqual({ parallel: 2, mode: 'sessions', launcher: 'bg' });
+    expect(() => parseConfig('swarm:\n  mode: threads\n')).toThrow(ConfigError);
+    expect(() => parseConfig('swarm:\n  launcher: tmux\n')).toThrow(ConfigError);
   });
   it('kind is free text with the name pattern, when is optional', () => {
     const c = parseConfig('validators:\n  - name: a11y\n    cmd: npm run a11y\n    kind: a11y\n    when: final\n');
