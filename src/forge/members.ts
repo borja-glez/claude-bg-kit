@@ -2,12 +2,12 @@ import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync
 import path from 'node:path';
 import { forgeDir } from './ledger.js';
 import { isPlanId } from '../lib/plan.js';
+import { isSafeId } from '../lib/execution-state.js';
 
 export type MemberRole = 'executor' | 'manual';
 export interface MemberDoc { sessionId: string; role: MemberRole; runId: string; task: string | null; name: string | null; since: string }
-const SID = /^[A-Za-z0-9_\-.]{1,120}$/;
-/** The one rule for a member's session id: it names a file, so no `:` (an NTFS stream), `/` or `..`. */
-export const isMemberId = (s: string): boolean => SID.test(s) && s !== '.' && s !== '..';
+/** The one rule for a member's session id: it names a file, so no `:` (an NTFS stream), `/` or `..` (shared with execution.json). */
+export const isMemberId = (s: string): boolean => isSafeId(s);
 export const memberFile = (main: string, sessionId: string) => path.join(main, '.forge', 'members', `${sessionId}.json`);
 
 export function normalizeMember(x: unknown): MemberDoc | null {

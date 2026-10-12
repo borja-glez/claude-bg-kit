@@ -2,6 +2,16 @@ import { STAGES, type Stage } from './types.js';
 import type { SwarmState } from './swarm-state.js';
 import { isPlanId } from './plan.js';
 
+/**
+ * The one rule for a session or run id that names a file or reaches the model's context: no `:` (an NTFS stream),
+ * `/`, `..`, spaces or control characters, at most 120 characters.
+ */
+const SAFE_ID = /^[A-Za-z0-9_\-.]{1,120}$/;
+export const isSafeId = (s: unknown): s is string => typeof s === 'string' && SAFE_ID.test(s) && s !== '.' && s !== '..';
+/** The run branch rule of `swarm start`: at most 120 characters, no leading dash, no `..`. */
+const RUN_BRANCH = /^[A-Za-z0-9_./][A-Za-z0-9_\-./]{0,119}$/;
+export const isRunBranch = (s: unknown): s is string => typeof s === 'string' && RUN_BRANCH.test(s) && !s.includes('..');
+
 export type ExecMode = 'subagents' | 'sessions';
 export type ExecTaskStatus = 'running' | 'accepted' | 'integrated' | 'conflict' | 'blocked';
 export interface ExecTask {
@@ -58,6 +68,8 @@ export function normalizeExecution(x: unknown): ExecutionState | null {
   const runId = str(x.runId), project = str(x.project), base = str(x.base), branch = str(x.branch), coordinator = str(x.coordinator);
   const startedAt = iso(x.startedAt);
   if (!mode || !runId || !project || !base || !branch || !coordinator || !startedAt) return null;
+  // These reach the model's context (SessionStart) and name files: a crafted value makes the whole execution invalid.
+  if (!isSafeId(runId) || !isSafeId(coordinator) || !isRunBranch(branch)) return null;
   const tasks: Record<string, ExecTask> = {};
   if (isObj(x.tasks)) {
     for (const [id, t] of Object.entries(x.tasks).slice(0, MAX_TASKS)) {
@@ -69,7 +81,7 @@ export function normalizeExecution(x: unknown): ExecutionState | null {
     runId, kind, mode, project, base, branch, coordinator, startedAt, tasks,
     parallel: int(x.parallel, 1, 10, 3),
     mergeOnFinish: x.mergeOnFinish === true,
-    hookSession: str(x.hookSession),
+    hookSession: isSafeId(x.hookSession) ? x.hookSession : null,
     active: x.active === true,
     stopReason: oneOf(STOPS, x.stopReason),
     stallReason: typeof x.stallReason === 'string' ? x.stallReason.slice(0, 1000) : null,
@@ -85,7 +97,7 @@ export function parseExecution(text: string | null | undefined): ExecutionState 
 /** An old swarm becomes a stopped execution: its fronts are not tasks, so nothing of it is resumed. */
 export function fromSwarm(s: SwarmState): ExecutionState {
   return {
-    runId: `swarm-${s.startedAt}`, kind: 'plan', mode: 'sessions', parallel: Math.min(10, Math.max(1, s.parallel)),
+    runId: `swarm-${s.startedAt.replace(/[:.]/g, '')}`, kind: 'plan', mode: 'sessions', parallel: Math.min(10, Math.max(1, s.parallel)),
     project: s.project, base: s.base, branch: s.base, mergeOnFinish: s.mergeAuthorized, coordinator: s.coordinator,
     hookSession: s.hookSession, active: false, stopReason: 'migrated', stallReason: null, startedAt: s.startedAt,
     lastStepAt: s.lastTickAt, lastBlockStep: null, sleepUntil: null, tasks: {},

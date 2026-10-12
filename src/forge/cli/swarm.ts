@@ -12,7 +12,7 @@ import { LEASE_MINUTES, sessionLiveness } from '../../lib/coordination.js';
 import { planLocale } from '../../lib/locale.js';
 import { signalLiveness } from '../../lib/execution-view.js';
 import { liveFile } from '../live.js';
-import { STAGES, normalizePublicTask, normalizeLive, type ExecutionState, type ExecTask, type PublicTask } from '../../lib/execution-state.js';
+import { STAGES, normalizePublicTask, normalizeLive, normalizeExecution, isSafeId, isRunBranch, type ExecutionState, type ExecTask, type PublicTask } from '../../lib/execution-state.js';
 import { parsePlan, PlanError, isPlanId } from '../../lib/plan.js';
 import type { SessionDoc, Stage, TaskState } from '../../lib/types.js';
 import { mainWorktreeFrom, samePath } from '../../lib/worktree.js';
@@ -337,7 +337,11 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         if (now.getTime() - last < TAKEOVER_MIN * 60000) throw new UsageError(`swarm start: coordinator ${prev.coordinator} is active (last step ${prev.lastStepAt ?? prev.startedAt})`);
       }
       const branch = flag('branch') ?? runBranch(project);
-      if (!/^[A-Za-z0-9_./][A-Za-z0-9_\-./]{0,119}$/.test(branch) || branch.includes('..')) throw new UsageError('swarm start: --branch is not a valid branch name');
+      if (!isRunBranch(branch)) throw new UsageError('swarm start: --branch is not a valid branch name');
+      // execution.json is read back through the safe id rules: refuse here, before any branch or worktree exists.
+      if (!isMemberId(session)) throw new UsageError('swarm start: --session must use letters, digits, _ - . (at most 120)');
+      if (!isSafeId(`${project}-${iso.replace(/[:.]/g, '')}`)) throw new UsageError('swarm start: --project must use letters, digits, _ - .');
+      if (kind === 'ephemeral' && !isRunBranch(base)) throw new UsageError(`swarm start: the base branch ${base} is outside the run branch rule (letters, digits, _ - . /)`);
       let setup: SetupResult = null;
       let baseSync: 'created' | 'up-to-date' | 'fast-forward' | 'merged' | null = null;
       const resume = !!prev && prev.active && prev.project === project && prev.branch === (kind === 'plan' ? branch : base);
@@ -368,13 +372,19 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         if (!existed) baseSync = 'created';
         else if (!resume) {
           const at = deps.at(wt);
+          // Read before any merge: once a merge stops on a conflict, the worktree always looks dirty.
+          const status = at.git(['status', '--porcelain', '--', '.', ...LOCAL_STATE]);
+          const dirty = status === null || status.trim() !== '';
+          const dirtyMsg = `swarm start: the run worktree ${wt} has uncommitted changes; commit or clean them before ${branch} is brought up to ${base}`;
           if (deps.git(['merge-base', '--is-ancestor', base, branch]) !== null) baseSync = 'up-to-date';
           else if (deps.git(['merge-base', '--is-ancestor', branch, base]) !== null) {
-            if (at.git(['merge', '--ff-only', base]) === null) throw new UsageError(`swarm start: cannot fast-forward ${branch} to ${base}`);
+            if (at.git(['merge', '--ff-only', base]) === null) throw new UsageError(dirty ? dirtyMsg : `swarm start: cannot fast-forward ${branch} to ${base}`);
             baseSync = 'fast-forward';
           } else if (at.git(['merge', '--no-ff', base, '-m', `forge: bring ${base} into ${branch}`]) !== null) baseSync = 'merged';
           else {
             at.git(['merge', '--abort']);
+            // A refused merge in a dirty worktree is not a conflict: say what blocks it.
+            if (dirty) throw new UsageError(dirtyMsg);
             throw new UsageError(`swarm start: ${branch} has diverged from ${base} and they conflict; merge them by hand or remove ${branch}`);
           }
         }
@@ -386,6 +396,8 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
             mergeOnFinish: has('merge-on-finish'), coordinator: session, hookSession: null, active: true, stopReason: null, stallReason: null,
             startedAt: iso, lastStepAt: null, lastBlockStep: null, sleepUntil: null, tasks: {},
           };
+      // An execution that would not read back (an id outside the safe rule) is refused rather than saved.
+      if (!normalizeExecution(state)) throw new UsageError('swarm start: --project, --session and the run branch must use letters, digits, _ - . (and / in the branch), at most 120 characters');
       rmSync(stopFile(io.cwd), { force: true });
       saveExecution(io.cwd, state);
       return json({ ...state, setup, baseSync });
@@ -548,22 +560,26 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     }
     case 'takeover': {
       const session = flag('session');
-      if (!session || !ID.test(session)) throw new UsageError('swarm takeover: --session is required');
+      if (!session) throw new UsageError('swarm takeover: --session is required');
+      if (!isMemberId(session)) throw new UsageError(`swarm takeover: --session ${session.slice(0, 130)} is not a valid session id (letters, digits, _ - .; max 120)`);
       const e = current();
       if (!e.active) throw new UsageError('swarm takeover: the execution is not active');
       if (session === e.coordinator || session === e.hookSession) {
         if (e.hookSession !== session) saveExecution(io.cwd, { ...e, hookSession: session });
         return json({ took: 'already', runId: e.runId });
       }
+      // A run member keeps its role: it would otherwise coordinate the task it executes.
+      if (readMember(io.cwd, session)?.runId === e.runId) throw new UsageError(`swarm takeover: ${session} is a member of the execution ${e.runId}; a run member cannot take over the coordinator`);
       const previous = e.hookSession ?? e.coordinator;
       // The liveliest of the local signal and the roadmap lease decides; with neither, the last step does.
+      // A previous id outside the safe rule names no file: it counts as having no signal and no lease.
       const order = ['stopped', 'silent', 'alive'] as const;
       const seen: (typeof order)[number][] = [];
-      try {
+      if (isSafeId(previous)) try {
         const d = normalizeLive(JSON.parse(readFileSync(liveFile(io.cwd, previous), 'utf8')));
         if (d) seen.push(signalLiveness(d.ts, d.ended, now.getTime()));
       } catch { /* no signal */ }
-      if (flag('db')) {
+      if (flag('db') && isSafeId(previous)) {
         try { seen.push(sessionLiveness(JSON.parse(readFileSync(path.resolve(io.cwd, flag('db')!, 'sessions', `${previous}.json`), 'utf8')) as SessionDoc, now.getTime())); } catch { /* no lease */ }
       }
       if (!seen.length) seen.push(now.getTime() - Date.parse(e.lastStepAt ?? e.startedAt) >= TAKEOVER_MIN * 60000 ? 'stopped' : 'alive');

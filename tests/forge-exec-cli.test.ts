@@ -7,6 +7,7 @@ import { run, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { readExecution, saveExecution, executionTaskFile } from '../src/forge/execution.js';
 import { normalizeExecution } from '../src/lib/execution-state.js';
 import { setupFor } from '../src/forge/cli/swarm.js';
+import { writeMember } from '../src/forge/members.js';
 
 const PLAN = `project: shop
 locale: es
@@ -297,6 +298,42 @@ describe('forge swarm (execution)', () => {
     expect(readExecution(root)!.coordinator).toBe('old');
     expect(out(run(['swarm', 'takeover', '--session', 'new'], later)).took).toBe(true);
     expect(run(['swarm', 'takeover'], later).code).toBe(2);
+  });
+  it('takeover refuses a member of this run and an invalid session id', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'old'], io));
+    const e = readExecution(root)!;
+    const later = { ...io, now: () => new Date(NOW.getTime() + 20 * 60000) };
+    writeMember(root, { sessionId: 'E1', role: 'executor', runId: e.runId, task: 'T1', name: null, since: NOW.toISOString() });
+    const r = run(['swarm', 'takeover', '--session', 'E1'], later);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('E1 is a member of the execution');
+    expect(run(['swarm', 'takeover', '--session', 'a:b'], later).code).toBe(2);
+    expect(readExecution(root)!.coordinator).toBe('old');
+    // A member of an older run is not a member of this one: it may take over.
+    writeMember(root, { sessionId: 'E2', role: 'executor', runId: 'old-run', task: 'T1', name: null, since: NOW.toISOString() });
+    expect(out(run(['swarm', 'takeover', '--session', 'E2'], later)).took).toBe(true);
+  });
+  it('start refuses a session or project id that execution.json would not read back, before creating anything', () => {
+    expect(run(['swarm', 'start', '--project', 'shop', '--session', 'a:b'], io).code).toBe(2);
+    expect(run(['swarm', 'start', '--project', 'sh:op', '--session', 'main', '--branch', 'forge/run-x'], io).code).toBe(2);
+    expect(existsSync(path.join(root, '.claude', 'worktrees', 'run'))).toBe(false);
+    expect(readExecution(root)).toBeNull();
+  });
+  it('a refused bring-up in a dirty run worktree says so instead of reporting a conflict', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    expect(run(['swarm', 'stop'], io).code).toBe(0);
+    const wt = path.join(root, '.claude', 'worktrees', 'run');
+    writeFileSync(path.join(wt, 'run.txt'), 'r\n');
+    execFileSync('git', ['add', 'run.txt'], { cwd: wt }); execFileSync('git', ['commit', '-qm', 'run work'], { cwd: wt });
+    writeFileSync(path.join(wt, 'plan.yaml'), 'local edit\n');
+    writeFileSync(path.join(root, 'plan.yaml'), PLAN + '# base side\n'); git('commit', '-qam', 'base side');
+    const tip = git('rev-parse', 'forge/run-shop');
+    const r = run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('has uncommitted changes');
+    expect(r.stderr).not.toContain('diverged');
+    expect(git('rev-parse', 'forge/run-shop')).toBe(tip);
+    expect(readFileSync(path.join(wt, 'plan.yaml'), 'utf8')).toBe('local edit\n');
   });
   it('start reports how the run branch met its base: created, null on resume and for an ephemeral run', () => {
     expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io)).baseSync).toBe('created');
