@@ -10765,6 +10765,7 @@ function normalizeLive(x) {
 
 // src/lib/execution-view.ts
 var FUTURE_TOLERANCE_MS = 2 * 6e4;
+var AGENT_ALIVE_MS = 3 * 36e5;
 function usable(ts, now) {
   const t = ts ? Date.parse(ts) : NaN;
   return Number.isFinite(t) && t - now <= FUTURE_TOLERANCE_MS ? t : null;
@@ -10785,19 +10786,24 @@ function executionView(i) {
   const signal = i.live.filter((d) => fresh(d) && d.role === "coordinator" && d.runId === e.runId && (!e.hookSession || d.sessionId === e.hookSession)).reduce((best, d) => !best || Date.parse(d.ts) > Date.parse(best.ts) ? d : best, null);
   const candidates = [signal?.ts ?? null, e.lastStepAt].map((ts) => ({ ts, t: usable(ts, i.now) })).filter((c) => c.t !== null);
   const lastSeen = candidates.length ? candidates.reduce((a, b) => b.t > a.t ? b : a).ts : null;
-  const coord = !e.active ? "stopped" : signal?.ended ? "stopped" : signalLiveness(lastSeen, false, i.now);
+  const waiting = !!e.active && !!signal && !signal.ended && signal.agents.some((a) => {
+    const t = usable(a.since, i.now);
+    return t !== null && i.now - t < AGENT_ALIVE_MS;
+  });
+  const coord = !e.active ? "stopped" : signal?.ended ? "stopped" : waiting ? "alive" : signalLiveness(lastSeen, false, i.now);
   const ids = (status) => Object.keys(e.tasks).filter((id2) => e.tasks[id2].status === status);
   const slots = ids("running").sort((a, b) => Date.parse(e.tasks[a].startedAt) - Date.parse(e.tasks[b].startedAt)).map((id2) => {
     const t = e.tasks[id2];
     const p = i.tasks[id2] && i.tasks[id2].runId === e.runId ? i.tasks[id2] : null;
+    const agent = p ? p.agent : t.agent;
     return {
       task: id2,
       title: i.titles?.[id2] ?? null,
       stage: p?.stage ?? t.stage,
-      agent: p ? p.agent : t.agent,
+      agent,
       round: p?.round ?? t.round,
       since: p?.since ?? t.stageSince,
-      liveness: p ? liveness(i.now, p.leaseUntil) : coord,
+      liveness: agent && waiting ? "alive" : p ? liveness(i.now, p.leaseUntil) : coord,
       mode: p?.mode ?? t.executor
     };
   });
@@ -11159,7 +11165,7 @@ async function loadExecution($, root) {
     if (execution === void 0) return {};
     const out = { execution };
     if (entries.some((f) => f.kind === "dir" && f.name === "execution")) {
-      out.execTasks = await readJsonDir($, join(dir, "execution"), EXEC_TASKS_MAX, (name) => !name.startsWith("baseline-") && SAFE_TASK.test(name));
+      out.execTasks = await readJsonDir($, join(dir, "execution"), EXEC_TASKS_MAX, (name) => SAFE_TASK.test(name));
     }
     if (entries.some((f) => f.kind === "dir" && f.name === "live")) out.live = await readJsonDir($, join(dir, "live"), LIVE_MAX, () => true);
     return out;

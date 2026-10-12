@@ -7741,11 +7741,16 @@ function legacyIdle(s2, now, minutes = IDLE_MINUTES) {
 // src/forge/hook.ts
 var executionBlockReason = (running, parallel) => `forge execution is active (${running}/${parallel} running). Step it as /forge:run's Execution section describes; to end it run /forge:stop.`;
 var executionEndedReason = (reason) => `the forge execution ended (${reason}): report it as /forge:run's Execution section says (step 7), then stop.`;
-function decideExecutionStop(input, e, ctx) {
-  if (!e || !e.active) return { block: false, exec: e };
+function bindHookSession(e, session) {
+  if (!e || !e.active || e.hookSession !== null || typeof session !== "string" || !session) return e;
+  return { ...e, hookSession: session };
+}
+function decideExecutionStop(input, exec, ctx) {
+  if (!exec || !exec.active) return { block: false, exec };
   const session = typeof input.session_id === "string" && input.session_id ? input.session_id : null;
-  if (e.hookSession !== null && session !== e.hookSession) return { block: false, exec: e };
-  const hookSession = e.hookSession ?? session;
+  if (exec.hookSession !== null && session !== exec.hookSession) return { block: false, exec };
+  const e = bindHookSession(exec, session);
+  const hookSession = e.hookSession;
   if (ctx.stopFile) {
     const ended = { ...e, active: false, stopReason: "stopped", sleepUntil: null, hookSession };
     return { block: true, reason: executionEndedReason("stopped"), ended: "stopped", exec: ended };
@@ -13525,8 +13530,13 @@ function hookLive(io, forced) {
     const event = forced ?? named;
     if (!sessionId || !event) return "";
     const main = mainCheckout(io.cwd);
-    const exec = readExecution(main);
-    if (!exec?.active || exec.hookSession !== sessionId) return "";
+    let exec = readExecution(main);
+    if (!exec?.active) return "";
+    if (exec.hookSession === null && event === "SubagentStart") {
+      exec = { ...exec, hookSession: sessionId };
+      saveExecution(main, exec);
+    }
+    if (exec.hookSession !== sessionId) return "";
     const file = liveFile(main, sessionId);
     let prev = null;
     try {
@@ -13846,11 +13856,13 @@ function stopContext(cwd2, now) {
 }
 function hookStop(io) {
   try {
-    hookLive(io, "Stop");
     const input = JSON.parse(io.stdin ?? "");
     if (!input || typeof input !== "object" || Array.isArray(input)) return "";
     const hookInput = input;
-    const exec = readExecution(io.cwd);
+    const read = readExecution(io.cwd);
+    const exec = bindHookSession(read, hookInput.session_id);
+    if (exec && exec !== read) saveExecution(io.cwd, exec);
+    hookLive(io, "Stop");
     const sleeping = !!exec?.active && !!exec.sleepUntil && Date.parse(exec.sleepUntil) > io.now().getTime();
     const run2 = parseRun(readRunText(io.cwd));
     if (run2?.active) {
