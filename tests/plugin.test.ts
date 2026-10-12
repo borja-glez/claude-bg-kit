@@ -351,6 +351,17 @@ describe('plugin layout', () => {
     expect(inf).toContain('FORGE decision list --auto --since');
     expect(inf).not.toContain('FORGE log --kind decision');
   });
+  it('decisions are only those taken without the user, and the Large report lists both the task and the run', () => {
+    const run = read('plugins/forge/skills/run/SKILL.md');
+    const sec = run.slice(run.indexOf('## Decisions'), run.indexOf('## 1. Triage'));
+    expect(sec).toContain('Attended rulings stay `FORGE log --kind ruling`');
+    expect(sec).not.toContain('a ruling that lets the work go on');
+    expect(run).toContain('the automatic decisions (`## Decisions`, both `--task <project>` and `--run <runId>`)');
+  });
+  it('the decisions skill aborts a revert that stops for any reason and never reverts a decision twice', () => {
+    const md = read('plugins/forge/skills/decisions/SKILL.md');
+    for (const s of ['git -C <D> merge-base --is-ancestor <head> HEAD', 'stops for any reason', 'FORGE decision list --all', 'already reverted']) expect(md).toContain(s);
+  });
   it('the decisions skill lists them and reverts one only after a confirmation', () => {
     const md = read('plugins/forge/skills/decisions/SKILL.md');
     expect(md).toMatch(/^---\r?\nname: decisions\r?\n/);

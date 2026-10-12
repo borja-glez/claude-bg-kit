@@ -23,7 +23,7 @@ Rules for every path:
 
 ## Decisions
 
-A decision you take in place of the user (an unattended safe path, a ruling that lets the work go on) is recorded with `FORGE decision add --data-file <f>`, never with the generic `FORGE log` (it skips the checks and the summary lens reads). Write the file with the Write tool in `.forge/work/<id>/`:
+A decision you take in place of the user because nobody is there to ask (an unattended execution: the safe paths of `### Unattended`) is recorded with `FORGE decision add --data-file <f>`, never with the generic `FORGE log` (it skips the checks and the summary lens reads). Attended rulings stay `FORGE log --kind ruling` and go in the report's rulings, as the paths below say: the user is there and sees them. Write the file with the Write tool in `.forge/work/<id>/`:
 
 `{"point": "<route|triage|design-apply|design-approve|plan-confirm|mode|ruling|safe-path|other>", "what": "<one line>", "chosen": "<the option taken>", "alternatives": ["<the others>"], "why": "<one line>", "by": "unattended", "revert": "<how to undo it, in the user's language>", "undo": <one of the shapes below>, "task": "<id>"}`
 
@@ -104,7 +104,7 @@ Subsystem, architecture, much ambiguity or risk, or a greenfield project. Gate: 
    - Spawn `review-correctness` in final review mode with the design path, the plan path and that diff, output dir `.forge/work/<project>/final-1/`. Then `FORGE verdict --task <project>-final --dir .forge/work/<project>/final-1 --validators .forge/work/<project>/final-validators.json` and act on the verdict's `action` (not the reviewer's own `verdict`).
    - If the action is `fix` or `redo` (a whole run is never redone: `redo` is treated as `fix`): one fix by `impl-heavy` with the final review JSON as its brief, the absolute path of the run worktree (it works and commits there, on `forge/run-<project>`), report path `.forge/work/<project>/final-fix.txt`, task id `<project>-final`. Then the re-review, on fresh inputs: `FORGE validate --final --task <project>-final --cwd .claude/worktrees/run > .forge/work/<project>/final-validators-2.json`, `git -C .claude/worktrees/run diff <base>..HEAD > .forge/work/<project>/final-2.patch` (same `base` from `run.json`), spawn `review-correctness` in final review mode with the design path, the plan path and `final-2.patch`, output dir `.forge/work/<project>/final-2/`, then `FORGE verdict --task <project>-final --dir .forge/work/<project>/final-2 --validators .forge/work/<project>/final-validators-2.json`. Whatever remains goes to the user as rulings; no second fix.
    - The final review covers only what is integrated into the run branch. With the verdict, list to the user the task branches not integrated yet (`git branch --list 'task/*' --no-merged forge/run-<project>`): their work was not reviewed.
-5. Log the phase `done`, then report: the roadmap URL, tasks done, verdict scores, rulings, task branches not integrated, and the automatic decisions (`## Decisions`).
+5. Log the phase `done`, then report: the roadmap URL, tasks done, verdict scores, rulings, task branches not integrated, and the automatic decisions (`## Decisions`, both `--task <project>` and `--run <runId>`).
 
 ## Execution
 
