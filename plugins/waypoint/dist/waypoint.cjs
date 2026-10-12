@@ -13738,6 +13738,7 @@ function run(argv, io) {
       case "escalations":
         return ok(JSON.stringify(escalationCandidates(readDocs(flag("messages") && abs(flag("messages"))))));
       case "launch": {
+        if (args[0] !== void 0 && !/^[\w./\\:~@+ -]+$/.test(args[0])) return fail("launch: the plan path may only use letters, digits, spaces and _ . / \\ : ~ @ + -", 2);
         const p = loadPlan();
         const track = args[1];
         const taskMode = args.includes("--task");
@@ -13773,23 +13774,19 @@ function run(argv, io) {
         if (taskMode) {
           const taskWt = import_node_path2.default.join(root, ".claude", "worktrees", `task-${track}`);
           const taskBranch = `task/${track}`;
-          if (!(0, import_node_fs2.existsSync)(taskWt)) {
-            const exists = git("branch", "--list", taskBranch) !== "";
-            git("worktree", "add", taskWt, ...exists ? [taskBranch] : ["-b", taskBranch, base]);
-          }
           const taskName = `wp-${p.project}-${track}`;
           const taskPrompt = `/forge:run --plan ${args[0]} --task ${track} \u2014 run member of ${val("--coordinator")}: work only ${track}, then stop`;
           const taskCommand = `claude --bg --name ${taskName} "${taskPrompt}"`;
           const taskRun = launchRun(launcher, { name: taskName, prompt: taskPrompt, worktree: taskWt });
           if (taskRun === null) return fail("launch: herdr cannot open panes from the command line; use launcher bg", 2);
+          if (!(0, import_node_fs2.existsSync)(taskWt)) {
+            const exists = git("branch", "--list", taskBranch) !== "";
+            git("worktree", "add", taskWt, ...exists ? [taskBranch] : ["-b", taskBranch, base]);
+          }
           return ok(JSON.stringify({ worktree: taskWt, branch: taskBranch, name: taskName, prompt: taskPrompt, command: taskCommand, run: taskRun, runId: val("--run"), task: track }));
         }
         const worktree = import_node_path2.default.join(root, ".claude", "worktrees", track);
         const branch = `track/${track}`;
-        if (!(0, import_node_fs2.existsSync)(worktree)) {
-          const exists = git("branch", "--list", branch) !== "";
-          git("worktree", "add", worktree, ...exists ? [branch] : ["-b", branch, ...base ? [base] : []]);
-        }
         const name = `wp-${p.project}-${track}`;
         const FORGE_MARK = "forge drives this session";
         let forge = args.includes("--forge") || !!swarm;
@@ -13807,6 +13804,10 @@ function run(argv, io) {
         const command = `claude --bg --name ${name} "${prompt}"`;
         const inWorktree = launchRun(launcher, { name, prompt, worktree });
         if (inWorktree === null) return fail("launch: herdr cannot open panes from the command line; use launcher bg", 2);
+        if (!(0, import_node_fs2.existsSync)(worktree)) {
+          const exists = git("branch", "--list", branch) !== "";
+          git("worktree", "add", worktree, ...exists ? [branch] : ["-b", branch, ...base ? [base] : []]);
+        }
         return ok(JSON.stringify({ worktree, branch, name, prompt, command, run: inWorktree }));
       }
       case "status": {

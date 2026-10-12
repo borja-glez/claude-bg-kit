@@ -12981,7 +12981,16 @@ function schedule(i) {
     tasks[id2] = { ...t, stage: p.stage, round: p.round, agent: p.agent, stageSince: p.since, updatedAt: p.updatedAt };
   }
   for (const [id2, t] of Object.entries(tasks)) {
-    if (t.status === "running" && t.executor !== "subagents" && statusOf(states, id2) === "done") tasks[id2] = { ...t, status: "accepted", stage: "integrate", updatedAt: nowIso };
+    if (t.status !== "running" || t.executor === "subagents") continue;
+    if (statusOf(states, id2) === "done") {
+      tasks[id2] = { ...t, status: "accepted", stage: "integrate", updatedAt: nowIso };
+      continue;
+    }
+    const p = pub[id2];
+    const own = !!p && p.runId === exec.runId && p.by !== exec.coordinator;
+    if (own && p.status === "blocked" || statusOf(states, id2) === "blocked") {
+      tasks[id2] = { ...t, status: "blocked", detail: "blocked by its session", updatedAt: nowIso };
+    }
   }
   for (const t of plan.tasks) {
     const o = owner(t.id);
@@ -13158,7 +13167,8 @@ function normalizeMember(x) {
   if (!sessionId || !role || !runId || !since) return null;
   const task = typeof o.task === "string" && isPlanId(o.task) ? o.task : null;
   const name = typeof o.name === "string" && o.name ? o.name.slice(0, 80) : null;
-  return { sessionId, role, runId, task, name, since };
+  const hookSession = typeof o.hookSession === "string" && isMemberId(o.hookSession) ? o.hookSession : null;
+  return { sessionId, role, runId, task, name, since, hookSession };
 }
 function readMember(main, sessionId) {
   if (!isMemberId(sessionId)) return null;
@@ -13169,8 +13179,10 @@ function readMember(main, sessionId) {
     return null;
   }
 }
-function writeMember(main, m) {
+function writeMember(main, input) {
+  const m = { ...input, hookSession: input.hookSession ?? null };
   if (!isMemberId(m.sessionId)) throw new Error(`invalid member session id: ${JSON.stringify(m.sessionId.slice(0, 130))}`);
+  if (m.hookSession !== null && !isMemberId(m.hookSession)) throw new Error(`invalid member hook session id: ${JSON.stringify(m.hookSession.slice(0, 130))}`);
   forgeDir(main);
   const file = memberFile(main, m.sessionId);
   (0, import_node_fs10.mkdirSync)(import_node_path10.default.dirname(file), { recursive: true });
@@ -13181,6 +13193,25 @@ function writeMember(main, m) {
   } finally {
     (0, import_node_fs10.rmSync)(tmp, { force: true });
   }
+}
+function listMembers(main, runId) {
+  let names2 = [];
+  try {
+    names2 = (0, import_node_fs10.readdirSync)(import_node_path10.default.join(main, ".forge", "members")).filter((f) => f.endsWith(".json"));
+  } catch {
+    return [];
+  }
+  return names2.slice(0, 200).map((f) => readMember(main, f.slice(0, -5))).filter((m) => !!m && m.runId === runId).slice(0, 50);
+}
+function findMemberByHook(main, hookSessionId, runId) {
+  if (!isMemberId(hookSessionId)) return null;
+  return listMembers(main, runId).find((m) => m.hookSession === hookSessionId && m.runId === runId) ?? null;
+}
+function memberForHook(main, hookSessionId, runId) {
+  const byHook = findMemberByHook(main, hookSessionId, runId);
+  if (byHook) return byHook;
+  const direct = readMember(main, hookSessionId);
+  return direct && direct.runId === runId && (direct.hookSession === null || direct.hookSession === hookSessionId) ? direct : null;
 }
 
 // src/forge/live.ts
@@ -13211,16 +13242,16 @@ function hookLive(io, forced) {
     const main = mainCheckout(io.cwd);
     let exec = readExecution(main);
     if (!exec?.active) return "";
-    const found = readMember(main, sessionId);
-    const isMember = !!found && found.runId === exec.runId;
-    if (exec.hookSession === null && event === "SubagentStart" && !isMember) {
+    const found = memberForHook(main, sessionId, exec.runId);
+    if (exec.hookSession === null && event === "SubagentStart" && !found) {
       exec = { ...exec, hookSession: sessionId };
       saveExecution(main, exec);
     }
     const member = exec.hookSession === sessionId ? null : found;
-    if (exec.hookSession !== sessionId && (!member || member.runId !== exec.runId)) return "";
+    if (exec.hookSession !== sessionId && !member) return "";
     const role = member ? member.role : "coordinator";
-    const file = liveFile(main, sessionId);
+    const signalId = member ? member.sessionId : sessionId;
+    const file = liveFile(main, signalId);
     let prev = null;
     try {
       prev = normalizeLive(JSON.parse((0, import_node_fs11.readFileSync)(file, "utf8")));
@@ -13230,7 +13261,7 @@ function hookLive(io, forced) {
     const doc = nextLive(
       prev,
       { event, agentId: typeof input.agent_id === "string" ? input.agent_id : void 0, agentType: typeof input.agent_type === "string" ? input.agent_type : void 0 },
-      { sessionId, role, runId: exec.runId, task: member?.task ?? null, now: io.now().toISOString() }
+      { sessionId: signalId, role, runId: exec.runId, task: member?.task ?? null, now: io.now().toISOString() }
     );
     forgeDir(main);
     (0, import_node_fs11.mkdirSync)(import_node_path11.default.dirname(file), { recursive: true });
@@ -13496,7 +13527,12 @@ function swarmCommand(args, io, deps) {
       const task = flag("task") ?? null;
       if (task !== null && !isPlanId(task)) throw new UsageError("swarm join: --task is not a task id");
       if (role === "executor" && !task) throw new UsageError("swarm join: an executor needs --task");
-      writeMember(main, { sessionId: session, role, runId: e.runId, task, name: flag("name") ?? null, since: iso3 });
+      if (has("hook-session") && !flag("hook-session")) throw new UsageError("swarm join: --hook-session needs an id");
+      const before = readMember(main, session);
+      const hookSession = flag("hook-session") ?? (before?.runId === e.runId ? before.hookSession : null);
+      if (hookSession !== null && !isMemberId(hookSession)) throw new UsageError(`swarm join: --hook-session ${hookSession.slice(0, 130)} is not a valid session id (letters, digits, _ - .; max 120)`);
+      if (hookSession !== null && hookSession === e.hookSession) throw new UsageError(`swarm join: ${hookSession} coordinates this execution`);
+      writeMember(main, { sessionId: session, role, runId: e.runId, task, name: flag("name") ?? null, since: iso3, hookSession });
       return json({ runId: e.runId, role, task, coordinator: e.coordinator, branch: e.branch, mode: e.mode, project: e.project });
     }
     case "report": {
@@ -13765,6 +13801,7 @@ function swarmCommand(args, io, deps) {
       const log = deps.git(["log", "--oneline", "-n", "20", `${e.branch}..${t.branch}`])?.trim();
       const commits = log ? log.split(/\r?\n/).map((l) => `  - ${l}`).join("\n") : "  - none";
       const note = import_node_path13.default.join(io.cwd, ".forge", "work", task, "handover.md");
+      const memberWork = import_node_path13.default.join(t.worktree || taskWorktree(io.cwd, task), ".forge", "work", task);
       (0, import_node_fs12.mkdirSync)(import_node_path13.default.dirname(note), { recursive: true });
       (0, import_node_fs12.writeFileSync)(note, [
         `# Handover: ${task} (attempt ${attempt} of ${RELAUNCH_CAP + 1})`,
@@ -13775,7 +13812,10 @@ function swarmCommand(args, io, deps) {
         `- Commits on ${t.branch} not yet on ${e.branch}:`,
         commits,
         "",
-        `Resume from ${t.branch} in this worktree: read .forge/work/${task}/task.json if it exists, do not redo a step whose output file is already written, and continue from the last stage.`,
+        `- This note: ${note} (main checkout ${io.cwd})`,
+        `- Work files of the earlier attempts: ${memberWork} (the brief is brief-<n>.md there, with report-<n>.txt, validators-<n>.json and reviews-<n>-<round>/)`,
+        "",
+        `Resume from ${t.branch} in this worktree: read the brief in ${memberWork} if it exists (else write it as the brief stage says), do not redo a step whose output file is already written, and continue from the last stage.`,
         ""
       ].join("\n"));
       saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, attempts: attempt, startedAt: iso3, nudgedAt: null, updatedAt: iso3 } } });
@@ -13807,7 +13847,7 @@ function swarmCommand(args, io, deps) {
       const e = current();
       if (!e.active) throw new UsageError("swarm takeover: the execution is not active");
       if (session === e.coordinator || session === e.hookSession) {
-        if (e.hookSession !== session) saveExecution(io.cwd, { ...e, hookSession: session });
+        if (e.coordinator !== session || e.hookSession !== null) saveExecution(io.cwd, { ...e, coordinator: session, hookSession: null });
         return json({ took: "already", runId: e.runId });
       }
       if (readMember(io.cwd, session)?.runId === e.runId) throw new UsageError(`swarm takeover: ${session} is a member of the execution ${e.runId}; a run member cannot take over the coordinator`);
@@ -13819,16 +13859,16 @@ function swarmCommand(args, io, deps) {
         if (d) seen.push(signalLiveness(d.ts, d.ended, now.getTime()));
       } catch {
       }
-      if (flag("db") && isSafeId(previous)) {
+      if (flag("db") && isSafeId(e.coordinator)) {
         try {
-          seen.push(sessionLiveness(JSON.parse((0, import_node_fs12.readFileSync)(import_node_path13.default.resolve(io.cwd, flag("db"), "sessions", `${previous}.json`), "utf8")), now.getTime()));
+          seen.push(sessionLiveness(JSON.parse((0, import_node_fs12.readFileSync)(import_node_path13.default.resolve(io.cwd, flag("db"), "sessions", `${e.coordinator}.json`), "utf8")), now.getTime()));
         } catch {
         }
       }
       if (!seen.length) seen.push(now.getTime() - Date.parse(e.lastStepAt ?? e.startedAt) >= TAKEOVER_MIN * 6e4 ? "stopped" : "alive");
       const liveness2 = seen.reduce((a, b) => order.indexOf(b) > order.indexOf(a) ? b : a, "stopped");
       if (liveness2 !== "stopped") return json({ took: false, previous, liveness: liveness2, joinAs: "manual" });
-      saveExecution(io.cwd, { ...e, coordinator: session, hookSession: session, sleepUntil: null });
+      saveExecution(io.cwd, { ...e, coordinator: session, hookSession: null, sleepUntil: null });
       appendEvent(io.cwd, { ts: iso3, kind: "decision", what: "takeover", previous, by: session });
       return json({ took: true, previous, runId: e.runId, running: Object.entries(e.tasks).filter(([, t]) => t.status === "running").map(([id2]) => id2) });
     }
@@ -13837,7 +13877,7 @@ function swarmCommand(args, io, deps) {
     case "merge":
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError("usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]|status|propose --plan P|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick --plan P --db DIR [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T>|merge|retry <T>|sleep <seconds> [--mark]|stop [--reason stopped|budget]|join --session SID --role executor|manual [--task T] [--name N]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID [--db DIR]>");
+      throw new UsageError("usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]|status|propose --plan P|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick --plan P --db DIR [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T>|merge|retry <T>|sleep <seconds> [--mark]|stop [--reason stopped|budget]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID [--db DIR]>");
   }
 }
 
@@ -14185,8 +14225,8 @@ function hookStop(io) {
     const main = mainCheckout(io.cwd);
     const read = readExecution(main);
     const sid = typeof hookInput.session_id === "string" ? hookInput.session_id : null;
-    const member = read?.active && sid ? readMember(main, sid) : null;
-    if (member && member.runId === read?.runId) {
+    const member = read?.active && sid ? memberForHook(main, sid, read.runId) : null;
+    if (member) {
       hookLive(io, "Stop");
       return "";
     }
