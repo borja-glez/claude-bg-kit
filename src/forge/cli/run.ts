@@ -20,6 +20,7 @@ import { UsageError } from './errors.js';
 import { swarmCommand } from './swarm.js';
 import { readSwarm, saveSwarm } from '../swarm.js';
 import { detectValidators, selectValidators, runValidators, globMatch, type RepoReader, type Scope } from '../validators.js';
+import { readLocal, updateLocal } from '../local.js';
 
 export interface ExecResult { code: number; output: string; ms: number; timedOut: boolean }
 export interface Io { cwd: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void }
@@ -117,7 +118,6 @@ export const repoReader = (root: string): RepoReader => ({
   read: rel => { try { return readFileSync(path.join(root, rel), 'utf8'); } catch { return null; } },
   list: dir => { try { return readdirSync(path.join(root, dir ?? '')); } catch { return []; } },
 });
-const validatorNames = (root: string): string[] => detectValidators(repoReader(root), loadConfig(root)).map(v => v.name);
 
 // The plan and one task of it; a usage error (exit 2) for a missing file, a broken plan or an unknown task.
 function planTask(cwd: string, planArg: string | undefined, id: string | undefined) {
@@ -250,7 +250,9 @@ export function run(argv: string[], io: Io): Result {
         const tracked = lines(listed);
         const zoneFiles = planned ? tracked.filter(f => planned.zones.some(z => globMatch(z, f))) : [];
         const extra = planned ? { files: zoneFiles, zones: zonesFromPaths(planned.zones) } : undefined;
-        const result = triage(task, { files: tracked, commits, gitOk: listed !== null, grep }, validatorNames(io.cwd), extra);
+        const catalog = detectValidators(repoReader(io.cwd), loadConfig(io.cwd)).map(v => ({ name: v.name, cmd: v.cmd, kind: v.kind, source: v.source }));
+        const names = catalog.map(v => v.name);
+        const result = triage(task, { files: tracked, commits, gitOk: listed !== null, grep }, names, extra);
         if (planned?.zones.length && !zoneFiles.length) result.reasons.push('zones match no tracked file (new files?)');
         // The ratchet: a repeated triage of the same task never lowers the path it already reached.
         if (flag('task')) {
@@ -262,8 +264,12 @@ export function run(argv: string[], io: Io): Result {
             result.reasons.push(`ratchet: kept ${prior} from an earlier triage of this task`);
           }
         }
+        const known = readLocal(io.cwd).known;
+        const fresh = names.filter(n => !known.includes(n));
+        // `known` mirrors what exists now: new names are added, vanished ones dropped silently.
+        if (fresh.length || known.some(n => !names.includes(n))) updateLocal(io.cwd, s => ({ ...s, known: names }));
         appendEvent(io.cwd, { ts: ts(), kind: 'triage', ...(flag('task') ? { task: flag('task') } : {}), ...result });
-        return json(result);
+        return json({ ...result, catalog, new: fresh });
       }
       case 'validate': {
         const config = loadConfig(io.cwd);

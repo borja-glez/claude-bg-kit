@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run, defaultExec, type Io } from '../src/forge/cli/run.js';
 import { readEvents } from '../src/forge/ledger.js';
+import { readLocal } from '../src/forge/local.js';
 import { saveProposal, loadProposals } from '../src/forge/proposals.js';
 import type { ProposalDoc } from '../src/lib/proposals.js';
 import { parsePlan } from '../src/lib/plan.js';
@@ -187,6 +188,19 @@ describe('forge CLI', () => {
   it('triage on a repository without commits (rev-list fails) is greenfield', () => {
     io.git = args => (args.includes('ls-files') ? '' : null);
     expect(JSON.parse(run(['triage', 'build a todo app'], io).stdout)).toMatchObject({ greenfield: true, path: 'large' });
+  });
+  it('triage lists the catalog, announces validators not yet known, then remembers them', () => {
+    writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'x' } }));
+    const git = (args: string[]) => (args[0] === '-c' && args.includes('ls-files') ? 'a.ts\nb.ts\nc.ts\nd.ts\ne.ts\n' : args[0] === 'rev-list' ? '5\n' : '');
+    const first = JSON.parse(run(['triage', 'fix a typo in a.ts'], { ...io, git }).stdout);
+    expect(first.validators).toEqual(['test']);
+    expect(first.catalog).toEqual([{ name: 'test', cmd: 'npm test', kind: 'test', source: 'detected' }]);
+    expect(first.new).toEqual(['test']);
+    expect(JSON.parse(run(['triage', 'fix a typo in a.ts'], { ...io, git }).stdout).new).toEqual([]);
+    writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { 'test:e2e': 'y' } }));
+    const third = JSON.parse(run(['triage', 'fix a typo in a.ts'], { ...io, git }).stdout);
+    expect(third.new).toEqual(['test:e2e']);
+    expect(readLocal(root).known).toEqual(['test:e2e']);
   });
   it('triage needs the task text', () => {
     expect(run(['triage'], io).code).toBe(2);
