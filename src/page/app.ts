@@ -327,7 +327,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     else if (action === 'toggle-phase') { const id = el.dataset.id!; ui.expanded.has(id) ? ui.expanded.delete(id) : ui.expanded.add(id); }
     else if (action === 'open-task') { ui.modal = el.dataset.id || null; ui.shot = null; }
     else if (action === 'close-modal') { ui.modal = null; ui.shot = null; }
-    else if (action === 'open-shot') { ui.shot = Number(el.dataset.i); }
+    else if (action === 'open-shot') { const i = Number(el.dataset.i); ui.shot = Number.isInteger(i) && i >= 0 ? i : null; }
     else if (action === 'close-shot') { ui.shot = null; }
     else if (action === 'view') { const v = el.dataset.view as View; ui.view = VIEWS.includes(v) ? v : 'tracking'; if (ui.notice !== 'readonly') ui.notice = null; }
     else if (action === 'tgroup') {

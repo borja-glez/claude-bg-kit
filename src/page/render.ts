@@ -185,7 +185,7 @@ function renderCards(m: Model, d: Dict, x: Metrics, loc: string): string {
       const over = !!t.estimate_min && el > t.estimate_min;
       const ph = m.plan.phases.find(p => p.id === t.phase);
       return `<div class="run" data-action="open-task" data-id="${esc(t.id)}">
-        <div class="t"><em>${esc(t.id)}</em> ${esc(t.title)}</div>
+        <div class="t"><em>${esc(t.id)}</em> ${esc(t.title)}${eviMark(m, d, t.id)}</div>
         <div class="mono">${trackTag(m, t.track)} ${esc(ph?.name)} · ${esc(d.elapsed(el, t.estimate_min))}${s.owner ? ` · <span class="k">${esc(s.owner)}</span>` : ''}</div>
         <div class="bar${over ? ' over' : ''}"><i style="width:${pct.toFixed(1)}%"></i></div></div>`;
     }).join('')}</div>${running.length > MAX_RUNNING ? `<div class="mono">${esc(d.more(running.length - MAX_RUNNING))}</div>` : ''}`;
@@ -377,7 +377,7 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string): string {
       return `<div class="tr ph" data-action="toggle-phase" data-id="${esc(r.id)}" title="${esc(r.label)} · ${esc(r.counter)}"><span class="chev">${expanded.has(r.id) ? '⌄' : '›'}</span> <span class="lab">${groupLabel(m, groupBy, r)}</span><span class="mini"><i style="width:${pct}%"></i></span><span class="c">${esc(r.counter)}</span></div>`;
     }
     const s = st(r);
-    return `<div class="tr tk${crit.has(r.id) ? ' crit' : ''}" data-action="open-task" data-id="${esc(r.id)}" data-task="${esc(r.id)}" data-deps="${esc(deps(r.id).join(' '))}" title="${esc(r.id)} · ${esc(r.label)} · ${esc(d.status[s])}"><i class="sd st-${s}"></i><span class="k">${esc(r.id)}</span> <span class="lab">${esc(r.label)}</span> ${groupBy === 'track' ? '' : trackTag(m, r.trackId)}</div>`;
+    return `<div class="tr tk${crit.has(r.id) ? ' crit' : ''}" data-action="open-task" data-id="${esc(r.id)}" data-task="${esc(r.id)}" data-deps="${esc(deps(r.id).join(' '))}" title="${esc(r.id)} · ${esc(r.label)} · ${esc(d.status[s])}"><i class="sd st-${s}"></i><span class="k">${esc(r.id)}</span> <span class="lab">${esc(r.label)}</span>${eviMark(m, d, r.id)} ${groupBy === 'track' ? '' : trackTag(m, r.trackId)}</div>`;
   }).join('');
   const kindLabel = (k: string) => (k === 'estimate' ? d.legend.estimate : k === 'done' ? d.legend.done : k === 'blocked' ? d.legend.blocked : d.legend.current);
   const right = rows.map(r => {
@@ -587,6 +587,12 @@ function renderTaskModal(m: Model, d: Dict, id: string, loc: string): string {
   </div></div>`;
 }
 
+/** The verification marker next to a task: green when the evidence passed, red otherwise; empty without evidence. */
+function eviMark(m: Model, d: Dict, id: string): string {
+  const ev = m.states[id]?.evidence;
+  return ev ? `<span class="evi ${ev.result === 'pass' ? 'ok' : 'del'}" title="${esc(d.verify.title)}">▣</span>` : '';
+}
+
 function renderEvidence(d: Dict, e: NonNullable<TaskState['evidence']>): string {
   const head = e.result === 'pass' ? `<span class="ok">✓ ${num(e.passed)}/${num(e.total)}</span>`
     : e.result === 'fail' ? `<span class="del">✗ ${num(e.passed)}/${num(e.total)}</span>`
@@ -678,8 +684,7 @@ function renderVersionsView(m: Model, d: Dict, ui: UiState): string {
       const pips = cat.tasks.map(t => `<i class="st-${safeStatus(t.status)}">■</i>`).join('');
       const tasks = closed ? '' : cat.tasks.map(t => {
         const st = safeStatus(t.status);
-        const ev = m.states[t.id]?.evidence;
-        return `<div class="tc" data-action="open-task" data-id="${esc(t.id)}"><div class="st st-${st}">${ST_ICON[st]} ${esc(d.status[st])}${ev ? `<span class="evi ${ev.result === 'pass' ? 'ok' : 'del'}" title="${esc(d.verify.title)}">▣</span>` : ''}</div><div class="tt"><span class="k">${esc(t.id)}</span> ${esc(t.title)} ${trackTag(m, t.track)}</div></div>`;
+        return `<div class="tc" data-action="open-task" data-id="${esc(t.id)}"><div class="st st-${st}">${ST_ICON[st]} ${esc(d.status[st])}${eviMark(m, d, t.id)}</div><div class="tt"><span class="k">${esc(t.id)}</span> ${esc(t.title)} ${trackTag(m, t.track)}</div></div>`;
       }).join('');
       return `<button class="cat" data-action="toggle-cat" data-key="${esc(key)}" aria-expanded="${!closed}"><span><span class="cn">${closed ? '›' : '⌄'} ${esc(cat.name)}</span><span class="mono">${esc(d.entries(cat.tasks.length))}</span></span><span class="pips">${pips}</span></button>${tasks}`;
     }).join('');

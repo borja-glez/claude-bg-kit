@@ -488,9 +488,15 @@ describe('swarm', () => {
     expect(html).toContain('empty');
     expect(html).toContain('1 item');
   });
+  it('renders no lightbox for an out-of-range shot', () => {
+    const m = base();
+    m.states.T001 = { ...m.states.T001!, evidence: { surfaces: ['web'], result: 'pass', passed: 1, total: 1, shots: [{ url: 'https://claude.ai/_blob/b', surface: 'web', check: 'c', ok: true }] } };
+    expect(renderApp(m, { ...ui(), modal: 'T001', shot: 99 })).not.toContain('class="lightbox"');
+  });
   it('marks tasks with evidence in the tracking cards', () => {
     const m = base();
     m.states.T001 = { ...m.states.T001!, evidence: { surfaces: ['web'], result: 'fail', passed: 0, total: 1, shots: [] } };
+    expect(renderApp(m, ui({ expanded: new Set(['F1', 'F2']) }))).toContain('class="evi del"');
     expect(renderApp(m, ui({ view: 'versions' }))).toContain('class="evi del"');
   });
 });
