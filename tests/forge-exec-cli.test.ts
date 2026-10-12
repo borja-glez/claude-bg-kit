@@ -452,7 +452,10 @@ describe('forge swarm (execution)', () => {
       expect(member()).toMatchObject({ sessionId: 't9', hookSession: HOOK });
       out(run(['swarm', 'join', '--session', 't9', '--role', 'executor', '--task', 'T1'], wio));
       expect(member().hookSession).toBe(HOOK);
-      expect(run(['swarm', 'join', '--session', 't9', '--role', 'executor', '--task', 'T1', '--hook-session', 'a:b'], wio).code).toBe(2);
+      // An unusable hook id (e.g. an unsubstituted ${CLAUDE_SESSION_ID}) joins with a warning and keeps the recorded one.
+      const odd = out(run(['swarm', 'join', '--session', 't9', '--role', 'executor', '--task', 'T1', '--hook-session', '${CLAUDE_SESSION_ID}'], wio));
+      expect(odd.warning).toMatch(/not a usable session id/);
+      expect(member().hookSession).toBe(HOOK);
       expect(run(['swarm', 'join', '--session', 't9', '--role', 'executor', '--task', 'T1', '--hook-session'], wio).code).toBe(2);
       saveExecution(root, { ...readExecution(root)!, hookSession: 'coord-hook' });
       expect(run(['swarm', 'join', '--session', 'M1', '--role', 'manual', '--hook-session', 'coord-hook'], wio).code).toBe(2);

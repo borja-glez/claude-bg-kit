@@ -13529,11 +13529,13 @@ function swarmCommand(args, io, deps) {
       if (role === "executor" && !task) throw new UsageError("swarm join: an executor needs --task");
       if (has("hook-session") && !flag("hook-session")) throw new UsageError("swarm join: --hook-session needs an id");
       const before = readMember(main, session);
-      const hookSession = flag("hook-session") ?? (before?.runId === e.runId ? before.hookSession : null);
-      if (hookSession !== null && !isMemberId(hookSession)) throw new UsageError(`swarm join: --hook-session ${hookSession.slice(0, 130)} is not a valid session id (letters, digits, _ - .; max 120)`);
+      const given = flag("hook-session");
+      const usable2 = given !== void 0 && isMemberId(given) ? given : null;
+      const warning = given !== void 0 && usable2 === null ? `--hook-session ${given.slice(0, 130)} is not a usable session id (letters, digits, _ - .; max 120): joined without a live signal` : null;
+      const hookSession = usable2 ?? (before?.runId === e.runId ? before.hookSession : null);
       if (hookSession !== null && hookSession === e.hookSession) throw new UsageError(`swarm join: ${hookSession} coordinates this execution`);
       writeMember(main, { sessionId: session, role, runId: e.runId, task, name: flag("name") ?? null, since: iso3, hookSession });
-      return json({ runId: e.runId, role, task, coordinator: e.coordinator, branch: e.branch, mode: e.mode, project: e.project });
+      return json({ runId: e.runId, role, task, coordinator: e.coordinator, branch: e.branch, mode: e.mode, project: e.project, ...warning ? { warning } : {} });
     }
     case "report": {
       const task = taskArg();
