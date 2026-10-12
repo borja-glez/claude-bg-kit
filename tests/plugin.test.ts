@@ -208,6 +208,29 @@ describe('plugin layout', () => {
     }
     expect(read('plugins/forge/agents/forge-review-correctness.md')).toMatch(/final review/i);
   });
+  it('forge-verify agents: models, no tools list, never edit the project', () => {
+    for (const [file, model] of [['forge-verify', 'sonnet'], ['forge-verify-heavy', 'opus']] as const) {
+      const md = read(`plugins/forge/agents/${file}.md`);
+      expect(md).toMatch(new RegExp(`^name: ${file}$`, 'm'));
+      expect(md).toMatch(new RegExp(`^model: ${model}$`, 'm'));
+      expect(md).toMatch(/^effort: high$/m);
+      expect(md).not.toMatch(/^tools:/m);
+      expect(md).toContain('Never edit, create or delete files of the project');
+      expect(md).toContain('pids.json');
+      expect(md).toContain('"result": "pass" | "fail" | "blocked"');
+      expect(md).toContain('learned');
+    }
+  });
+  it('the run skill wires verification in', () => {
+    const md = read('plugins/forge/skills/run/SKILL.md');
+    for (const s of ['FORGE verify-plan', 'forge-verify', 'FORGE surfaces learn', 'FORGE local set surfaces.', 'verify-skip', 'FORGE verify-cleanup', '--path', '`new`', 'asset: true', 'permission: changed']) expect(md).toContain(s);
+    expect(md).toMatch(/explains how to check something[\s\S]*\.forge\/verify\/<name>\.md/);
+  });
+  it('the verify skill exists', () => {
+    const md = read('plugins/forge/skills/verify/SKILL.md');
+    expect(md).toMatch(/^name: verify$/m);
+    expect(md).toContain('.forge/verify/<name>.md');
+  });
   it('forge run skill covers the paths and the CLI', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
     expect(md).toMatch(/^---\r?\nname: run\r?\ndescription: .+\r?\n/);
