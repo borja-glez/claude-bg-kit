@@ -529,6 +529,31 @@ describe('execution', () => {
     expect(sec).toMatch(/bump[^]*integrada · integrar · tardó 22 min/);
     expect(sec).not.toContain('tardó 16 min');
   });
+  it('a loose task under a minute shows <1 min, in both languages', () => {
+    const m = base();
+    m.run = looseRun({ loose: [{ id: 'bump', title: 'Bump', status: 'integrated' as const, stage: 'integrate' as const, agent: null, seconds: 20 }] });
+    const es = looseSection(renderApp(m, ui()));
+    expect(es).toContain('tardó &lt;1 min');
+    expect(es).not.toContain('0 min');
+    const en = { ...m, meta: { ...m.meta!, locale: 'en' } };
+    expect(looseSection(renderApp(en, ui()))).toContain('took &lt;1 min');
+  });
+  it('the task detail exec line shows no time for a future or invalid since', () => {
+    const mk = (since: string) => {
+      const m = base();
+      m.states.T002 = { status: 'in_progress', owner: 'main', exec: { runId: 'r1', mode: 'subagents', by: 'main', agent: 'forge-impl-heavy', stage: 'implement', round: 1, since, leaseUntil: new Date(NOW + 5 * 60000).toISOString() } };
+      return renderApp(m, ui());
+    };
+    const execOf = (html: string) => { const i = html.indexOf('class="mono exec"'); return html.slice(i, html.indexOf('</div>', i)); };
+    expect(execOf(mk(new Date(NOW - 7 * 60000).toISOString()))).toContain('lleva 7 min');
+    for (const bad of [new Date(NOW + 30 * 60000).toISOString(), 'garbage']) {
+      const line = execOf(mk(bad));
+      expect(line).toContain('forge-impl-heavy');
+      expect(line).not.toContain('lleva');
+      expect(line).not.toContain('hace');
+      expect(line).not.toContain('NaN');
+    }
+  });
   it('loose tasks do not count in the plan progress, filters or timeline, and never show as orphaned', () => {
     const m = base();
     const open = ui({ expanded: new Set(['F1', 'F2']) });

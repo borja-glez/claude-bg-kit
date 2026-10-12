@@ -174,7 +174,8 @@ const liveDot = (l: 'alive' | 'silent' | 'stopped') => `<span class="dot live-${
 /** The «coordinadora · subagentes · agent · etapa · 7 min» line of a task with an exec block, with its liveness dot. */
 function execLine(m: Model, d: Dict, exec: NonNullable<TaskState['exec']>): string {
   const l = liveness(m.now, exec.leaseUntil);
-  const parts = [d.run.role.coordinator, d.run.mode[exec.mode] ?? exec.mode, exec.agent, d.run.stage[exec.stage] ?? exec.stage, d.ago(mins(Date.parse(exec.since), m.now))];
+  const since = pastMs(exec.since, m.now);
+  const parts = [d.run.role.coordinator, d.run.mode[exec.mode] ?? exec.mode, exec.agent, d.run.stage[exec.stage] ?? exec.stage, since !== null ? d.lasts(mins(since, m.now)) : null];
   return `${liveDot(l)} ${parts.filter(Boolean).map(p => esc(String(p))).join(' · ')}`;
 }
 
@@ -302,7 +303,7 @@ function renderLoose(m: Model, d: Dict): string {
   const rows = r.loose.map(t => {
     const status = oneOf(LOOSE_STATUSES, t.status, 'queued');
     const finished = status === 'integrated' || status === 'conflict' || status === 'blocked';
-    const parts = [d.run.looseStatus[status], t.stage ? d.run.stage[t.stage] ?? t.stage : null, t.agent, finished && t.seconds !== undefined ? d.took(Math.floor(t.seconds / 60)) : null];
+    const parts = [d.run.looseStatus[status], t.stage ? d.run.stage[t.stage] ?? t.stage : null, t.agent, finished && t.seconds !== undefined ? (t.seconds < 60 ? d.tookUnderMin : d.took(Math.floor(t.seconds / 60))) : null];
     return `<li class="lt st-${status}">${liveDot(l)} <span class="k">${esc(t.id)}</span> <span class="lab">${esc(t.title)}</span> <span class="mono">${parts.filter(Boolean).map(p => esc(String(p))).join(' · ')}</span></li>`;
   }).join('');
   return `<section class="loose card"><div class="lbl">${esc(d.run.looseTitle)} (${r.loose.length})</div><ul class="lts">${rows}</ul></section>`;

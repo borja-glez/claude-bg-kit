@@ -38,6 +38,19 @@ describe('computeMetrics', () => {
     expect(computeMetrics(plan, s, NOW).paceMin).toBe(0);
   });
 
+  it('does not throw on a junk startedAt or doneAt, and skips that task from the pace', () => {
+    const good = { status: 'done', startedAt: '2026-10-11T10:00:00Z', doneAt: '2026-10-11T10:20:00Z' } as const;
+    const s = {
+      T001: good,
+      T002: { status: 'done', startedAt: 'garbage', doneAt: '2026-10-11T11:00:00Z' },
+      T003: { status: 'done', startedAt: '2026-10-11T10:20:00Z', doneAt: 'nope' },
+    } as States;
+    let m!: ReturnType<typeof computeMetrics>;
+    expect(() => { m = computeMetrics(plan, s, NOW); }).not.toThrow();
+    expect(m.done).toBe(3);
+    expect(m.paceMin).toBe(20);
+  });
+
   it('marks a fully done phase as done', () => {
     const s: States = { T001: { status: 'done' }, T002: { status: 'done' }, T003: { status: 'done' } };
     const m = computeMetrics(plan, s, NOW);
