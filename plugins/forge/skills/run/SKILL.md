@@ -13,6 +13,7 @@ Never put user text or JSON inside a shell string. Write the task text to `.forg
 
 Rules for every path:
 - Irreversible or outward actions (delete, merge into main, publish) always need the user's approval; never push without being asked.
+- Before you start, run `git status --porcelain`. If the tree has changes that are not part of this task (the user's own work, an earlier task left uncommitted), ask the user whether to commit, stash or leave them before you go on; never commit, stash or discard them on your own. forge's own files under `.forge/` do not count.
 - Always name the agent when you spawn one (subagent type `forge:<agent>`); never let work inherit your own model. Roles (`impl`, `review-security`, ...) map to agent names through `FORGE agents` (it applies the profile in `.forge/config.yaml`).
 - The implementer **tier ladder**, in roles: `mech` -> `impl-light` -> `impl` -> `impl-heavy`. "One tier up" is the next role on it, resolved to an agent with `FORGE agents`; above `impl-heavy` stay on `impl-heavy` and tell the user at the end.
 - `forge-fable` is used only when the user explicitly asks for Fable.
@@ -62,7 +63,7 @@ Several files or some design; moderate risk. Gate: show a short plan (<= 10 line
    - `redo`: undo the attempt without rewriting history: `git revert --no-edit $BASE..HEAD` (skip it when HEAD is still `BASE`), then a fresh implementer starts again from the brief with a different approach; repeat from step 3.
    - `breaker` or `stalled`: stop the loop. If what is open blocks the work, tell the user and ask; otherwise record the open findings as a ruling (`FORGE log --kind ruling --data-file <file>`) and continue, telling the user at the end.
    - `tierUp: true` (from round 3) and `fresh-stronger` mean the same single step up the ladder, not two: the implementer of that round is one tier above the one before it. With next = `redo` and `tierUp: true`, the fresh implementer is that one tier up.
-7. Report at the end: tasks, commits, verdict scores, rulings.
+7. Log the phase `done` (same file shape, with the last brief number), so the roadmap and lens show the run as finished. Then report: tasks, commits, verdict scores, rulings.
 
 ## Large
 
@@ -83,7 +84,7 @@ Subsystem, architecture, much ambiguity or risk, or a greenfield project. Gate: 
    - Spawn `review-correctness` in final review mode with the design path, the plan path and that diff, output dir `.forge/work/<project>/final-1/`. Then `FORGE verdict --task <project>-final --dir .forge/work/<project>/final-1 --validators .forge/work/<project>/final-validators.json` and act on the verdict's `action` (not the reviewer's own `verdict`).
    - If the action is `fix` or `redo` (a whole run is never redone: `redo` is treated as `fix`): one fix by `impl-heavy` with the final review JSON as its brief, report path `.forge/work/<project>/final-fix.txt`, task id `<project>-final`. Then the re-review, on fresh inputs: `FORGE validate --all --task <project>-final > .forge/work/<project>/final-validators-2.json`, `git diff <base>..HEAD > .forge/work/<project>/final-2.patch` (same `base` from `run.json`), spawn `review-correctness` in final review mode with the design path, the plan path and `final-2.patch`, output dir `.forge/work/<project>/final-2/`, then `FORGE verdict --task <project>-final --dir .forge/work/<project>/final-2 --validators .forge/work/<project>/final-validators-2.json`. Whatever remains goes to the user as rulings; no second fix.
    - The final review covers only what is merged into the current branch. With the verdict, list to the user the track branches not merged yet (`git branch --list 'track/*' --no-merged HEAD`): their work was not reviewed.
-5. Report: the roadmap URL, tasks done, verdict scores, rulings, unmerged track branches.
+5. Log the phase `done`, then report: the roadmap URL, tasks done, verdict scores, rulings, unmerged track branches.
 
 ## Swarm
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fmtTokens, fmtUsd, usageBandText, barParts, briefCells, headline, stagesFor, tierOf, todoCells, roadmapCells, pct } from '../src/lens/view.js';
+import { fmtTokens, fmtUsd, usageBandText, barParts, briefCells, forgePhase, headline, stagesFor, tierOf, todoCells, roadmapCells, pct } from '../src/lens/view.js';
 import { buildCards, cardAlt, type CardTexts } from '../src/lens/cards.js';
 import { bandSvg, cardSvg, fit, xml } from '../src/lens/svg.js';
 import type { PanelModel } from '../src/lens/model.js';
@@ -47,6 +47,15 @@ describe('lens view', () => {
     // A finished run has every stage of its path done, whatever the path.
     expect(stagesFor('medium', 'done', 'ok').map(s => s.state)).toEqual(['done', 'done', 'done', 'done', 'done']);
     expect(stagesFor('large', 'done').every(s => s.state === 'done')).toBe(true);
+  });
+  it('reads a run whose every brief is accepted as done, even when the done phase was never logged', () => {
+    const f = { ...FORGE, phase: 'review', verdict: { action: 'accept', score: 0.98 }, brief: 1, briefs: 1, accepted: [1] };
+    expect(forgePhase(f)).toBe('done');
+    expect(forgePhase({ ...f, briefs: 2 })).toBe('review');
+    expect(forgePhase({ ...f, verdict: { action: 'resume', score: 0.5 } })).toBe('review');
+    expect(forgePhase({ ...f, accepted: [] })).toBe('review');
+    const card = buildCards({ ...EMPTY, forge: f }, T, 0).find(c => c.title === f.task)!;
+    expect(card.subtitle).toBe('forge · done');
   });
   it('turns briefs, todos and roadmap letters into cells', () => {
     expect(briefCells(FORGE)!.cells).toEqual(['done', 'done', 'active', 'pending', 'pending']);

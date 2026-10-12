@@ -11642,6 +11642,12 @@ function stagesFor(path, phase, validated = null) {
   const out = names.map((name, k) => ({ name, state: i < 0 ? k === 0 ? "done" : "pending" : k < i ? "done" : k === i ? "active" : "pending" }));
   return out;
 }
+function forgePhase(f) {
+  const total = Math.max(f.briefs ?? 0, f.brief ?? 0);
+  const accepted = new Set(f.accepted ?? []);
+  const all = total > 0 && Array.from({ length: total }, (_, i) => i + 1).every((n2) => accepted.has(n2));
+  return all && f.verdict?.action === "accept" ? "done" : f.phase;
+}
 var count2 = (cells2) => ({ cells: cells2, done: cells2.filter((c2) => c2 === "done").length, total: cells2.length });
 var roadmapCells = (w) => count2([...w.cells ?? ""].map((ch) => LETTER[ch] ?? "pending"));
 function briefCells(f) {
@@ -11687,7 +11693,7 @@ function headline(m) {
   if (m.forge) {
     const f = m.forge;
     const c2 = briefCells(f);
-    return { section: "forge", title: f.task, detail: [f.path, f.phase].filter(Boolean).join(" \xB7 "), cells: c2, agent: f.agent };
+    return { section: "forge", title: f.task, detail: [f.path, forgePhase(f)].filter(Boolean).join(" \xB7 "), cells: c2, agent: f.agent };
   }
   if (m.waypoint) {
     const w = m.waypoint;
@@ -11760,7 +11766,7 @@ function buildCards(m, t, nowMs2) {
     const blocks = [];
     const f = m.forge;
     if (f) {
-      blocks.push({ kind: "stages", stages: stagesFor(f.path, f.phase, f.validators.length ? f.validators.every((v) => v.ok) ? "ok" : "failed" : null), hue: SECTION_HUE.forge });
+      blocks.push({ kind: "stages", stages: stagesFor(f.path, forgePhase(f), f.validators.length ? f.validators.every((v) => v.ok) ? "ok" : "failed" : null), hue: SECTION_HUE.forge });
       const c2 = briefCells(f);
       if (c2) {
         blocks.push({ kind: "bar", ratio: ratio(c2.done, c2.total), hue: SECTION_HUE.forge, moving: c2.done < c2.total, label: t.briefs, right: `${c2.done}/${c2.total}` });
@@ -11787,7 +11793,7 @@ function buildCards(m, t, nowMs2) {
       title: f?.task ?? "forge",
       hue: SECTION_HUE.forge,
       chip: f?.path ? { text: f.path, hue: PATH_HUE[f.path] ?? "peach" } : inf?.active ? { text: "\u221E", hue: "mauve" } : void 0,
-      subtitle: f?.phase ? `${t.sForge} \xB7 ${f.phase}` : void 0,
+      subtitle: f && forgePhase(f) ? `${t.sForge} \xB7 ${forgePhase(f)}` : void 0,
       blocks
     });
   }

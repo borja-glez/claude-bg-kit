@@ -7,7 +7,7 @@ Triage by size, the right model for each role, your own tools first, independent
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.5.3](https://img.shields.io/badge/version-0.5.3-fab387?style=flat-square)
+![version 0.5.4](https://img.shields.io/badge/version-0.5.4-fab387?style=flat-square)
 ![depends on waypoint ^0.10.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.10.0-cba6f7?style=flat-square)
 
 </div>

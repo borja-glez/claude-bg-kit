@@ -84,6 +84,14 @@ export function stagesFor(path: string, phase: string, validated: 'ok' | 'failed
   return out;
 }
 
+// The phase to show: a run whose briefs are all accepted is done, even when the session never logged the done phase.
+export function forgePhase(f: NonNullable<PanelModel['forge']>): string {
+  const total = Math.max(f.briefs ?? 0, f.brief ?? 0);
+  const accepted = new Set(f.accepted ?? []);
+  const all = total > 0 && Array.from({ length: total }, (_, i) => i + 1).every(n => accepted.has(n));
+  return all && f.verdict?.action === 'accept' ? 'done' : f.phase;
+}
+
 export interface Cells { cells: CellState[]; done: number; total: number }
 export const count = (cells: CellState[]): Cells => ({ cells, done: cells.filter(c => c === 'done').length, total: cells.length });
 
@@ -147,7 +155,7 @@ export function headline(m: PanelModel): Headline | null {
   if (m.forge) {
     const f = m.forge;
     const c = briefCells(f);
-    return { section: 'forge', title: f.task, detail: [f.path, f.phase].filter(Boolean).join(' · '), cells: c, agent: f.agent };
+    return { section: 'forge', title: f.task, detail: [f.path, forgePhase(f)].filter(Boolean).join(' · '), cells: c, agent: f.agent };
   }
   if (m.waypoint) {
     const w = m.waypoint;

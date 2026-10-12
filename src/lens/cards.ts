@@ -3,7 +3,7 @@
 import type { PanelModel } from './model.js';
 import type { Block, Card } from './svg.js';
 import {
-  SECTION_HUE, SECTION_ICON, PATH_HUE, tierOf, stagesFor, roadmapCells, briefCells, todoCells, superpowersCells,
+  SECTION_HUE, SECTION_ICON, PATH_HUE, tierOf, stagesFor, forgePhase, roadmapCells, briefCells, todoCells, superpowersCells,
   ratio, duration, fmtTokens, fmtUsd, type Hue,
 } from './view.js';
 import { shortModelName } from '../lib/prices.js';
@@ -57,7 +57,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     const blocks: Block[] = [];
     const f = m.forge;
     if (f) {
-      blocks.push({ kind: 'stages', stages: stagesFor(f.path, f.phase, f.validators.length ? (f.validators.every(v => v.ok) ? 'ok' : 'failed') : null), hue: SECTION_HUE.forge });
+      blocks.push({ kind: 'stages', stages: stagesFor(f.path, forgePhase(f), f.validators.length ? (f.validators.every(v => v.ok) ? 'ok' : 'failed') : null), hue: SECTION_HUE.forge });
       const c = briefCells(f);
       if (c) {
         blocks.push({ kind: 'bar', ratio: ratio(c.done, c.total), hue: SECTION_HUE.forge, moving: c.done < c.total, label: t.briefs, right: `${c.done}/${c.total}` });
@@ -82,7 +82,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     out.push({
       icon: SECTION_ICON.forge, title: f?.task ?? 'forge', hue: SECTION_HUE.forge,
       chip: f?.path ? { text: f.path, hue: PATH_HUE[f.path] ?? 'peach' } : inf?.active ? { text: '∞', hue: 'mauve' } : undefined,
-      subtitle: f?.phase ? `${t.sForge} · ${f.phase}` : undefined, blocks,
+      subtitle: f && forgePhase(f) ? `${t.sForge} · ${forgePhase(f)}` : undefined, blocks,
     });
   }
 

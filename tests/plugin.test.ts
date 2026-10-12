@@ -19,7 +19,7 @@ describe('plugin layout', () => {
   });
   it('lens manifest, module and contract exist', () => {
     const p = JSON.parse(read('plugins/lens/.claude-plugin/plugin.json'));
-    expect(p).toMatchObject({ name: 'lens', version: '0.5.2', types: './types/index.d.ts' });
+    expect(p).toMatchObject({ name: 'lens', version: '0.5.3', types: './types/index.d.ts' });
     expect(JSON.parse(read('plugins/lens/hooks/hooks.json'))).toEqual({ modules: ['./register.js'] });
     for (const f of ['hooks/register.js', 'types/index.d.ts', 'README.md']) {
       expect(existsSync(new URL(`../plugins/lens/${f}`, import.meta.url))).toBe(true);
@@ -104,6 +104,12 @@ describe('plugin layout', () => {
       expect(read(`plugins/forge/agents/forge-${a}.md`)).toMatch(/Change the project's files with the Edit and Write tools, never with `sed -i`.*forge's own work files.*is fine/s);
     }
   });
+  it('the run skill logs done at the end and never commits unrelated changes on its own', () => {
+    const md = read('plugins/forge/skills/run/SKILL.md');
+    expect(md).toContain('7. Log the phase `done`');
+    expect(md).toContain('5. Log the phase `done`, then report');
+    expect(md).toMatch(/ask the user whether to commit, stash or leave them before you go on; never commit, stash or discard them on your own/);
+  });
   it('the run skill tells the session when to raise a light path to Medium', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
     expect(md).toContain('**raise to at least Medium**');
@@ -111,8 +117,8 @@ describe('plugin layout', () => {
     expect(md).toMatch(/bundles several independent changes/);
     expect(md).toMatch(/adds new behaviour with its tests/);
   });
-  it('versions: forge 0.5.3, waypoint 0.10.0', () => {
-    expect(JSON.parse(read('plugins/forge/.claude-plugin/plugin.json')).version).toBe('0.5.3');
+  it('versions: forge 0.5.4, waypoint 0.10.0', () => {
+    expect(JSON.parse(read('plugins/forge/.claude-plugin/plugin.json')).version).toBe('0.5.4');
     expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.10.0');
   });
   it('plan skill publishes the roadmap with notes and proposals write rules for contributors', () => {
@@ -132,7 +138,7 @@ describe('plugin layout', () => {
   });
   it('forge manifest depends on waypoint ^0.10.0 and ships its CLI', () => {
     const p = JSON.parse(read('plugins/forge/.claude-plugin/plugin.json'));
-    expect(p).toMatchObject({ name: 'forge', version: '0.5.3', dependencies: [{ name: 'waypoint', version: '^0.10.0' }] });
+    expect(p).toMatchObject({ name: 'forge', version: '0.5.4', dependencies: [{ name: 'waypoint', version: '^0.10.0' }] });
     expect(existsSync(new URL('../plugins/forge/dist/forge.cjs', import.meta.url))).toBe(true);
   });
   it('forge scout agent: frontmatter and rules', () => {
