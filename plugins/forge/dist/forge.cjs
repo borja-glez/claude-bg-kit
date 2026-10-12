@@ -107,17 +107,17 @@ var require_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    function visit_(key, node, visitor, path17) {
-      const ctrl = callVisitor(key, node, visitor, path17);
+    function visit_(key, node, visitor, path18) {
+      const ctrl = callVisitor(key, node, visitor, path18);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path17, ctrl);
-        return visit_(key, ctrl, visitor, path17);
+        replaceNode(key, path18, ctrl);
+        return visit_(key, ctrl, visitor, path18);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path17 = Object.freeze(path17.concat(node));
+          path18 = Object.freeze(path18.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = visit_(i, node.items[i], visitor, path17);
+            const ci = visit_(i, node.items[i], visitor, path18);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -128,13 +128,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path17 = Object.freeze(path17.concat(node));
-          const ck = visit_("key", node.key, visitor, path17);
+          path18 = Object.freeze(path18.concat(node));
+          const ck = visit_("key", node.key, visitor, path18);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = visit_("value", node.value, visitor, path17);
+          const cv = visit_("value", node.value, visitor, path18);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -155,17 +155,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node, visitor, path17) {
-      const ctrl = await callVisitor(key, node, visitor, path17);
+    async function visitAsync_(key, node, visitor, path18) {
+      const ctrl = await callVisitor(key, node, visitor, path18);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path17, ctrl);
-        return visitAsync_(key, ctrl, visitor, path17);
+        replaceNode(key, path18, ctrl);
+        return visitAsync_(key, ctrl, visitor, path18);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path17 = Object.freeze(path17.concat(node));
+          path18 = Object.freeze(path18.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = await visitAsync_(i, node.items[i], visitor, path17);
+            const ci = await visitAsync_(i, node.items[i], visitor, path18);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -176,13 +176,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path17 = Object.freeze(path17.concat(node));
-          const ck = await visitAsync_("key", node.key, visitor, path17);
+          path18 = Object.freeze(path18.concat(node));
+          const ck = await visitAsync_("key", node.key, visitor, path18);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = await visitAsync_("value", node.value, visitor, path17);
+          const cv = await visitAsync_("value", node.value, visitor, path18);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -209,23 +209,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node, visitor, path17) {
+    function callVisitor(key, node, visitor, path18) {
       if (typeof visitor === "function")
-        return visitor(key, node, path17);
+        return visitor(key, node, path18);
       if (identity.isMap(node))
-        return visitor.Map?.(key, node, path17);
+        return visitor.Map?.(key, node, path18);
       if (identity.isSeq(node))
-        return visitor.Seq?.(key, node, path17);
+        return visitor.Seq?.(key, node, path18);
       if (identity.isPair(node))
-        return visitor.Pair?.(key, node, path17);
+        return visitor.Pair?.(key, node, path18);
       if (identity.isScalar(node))
-        return visitor.Scalar?.(key, node, path17);
+        return visitor.Scalar?.(key, node, path18);
       if (identity.isAlias(node))
-        return visitor.Alias?.(key, node, path17);
+        return visitor.Alias?.(key, node, path18);
       return void 0;
     }
-    function replaceNode(key, path17, node) {
-      const parent = path17[path17.length - 1];
+    function replaceNode(key, path18, node) {
+      const parent = path18[path18.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node;
       } else if (identity.isPair(parent)) {
@@ -297,13 +297,13 @@ var require_directives = __commonJS({
        * @param onError - May be called even if the action was successful
        * @returns `true` on success
        */
-      add(line, onError) {
+      add(line2, onError) {
         if (this.atNextDocument) {
           this.yaml = { explicit: _Directives.defaultYaml.explicit, version: "1.1" };
           this.tags = Object.assign({}, _Directives.defaultTags);
           this.atNextDocument = false;
         }
-        const parts = line.trim().split(/[ \t]+/);
+        const parts = line2.trim().split(/[ \t]+/);
         const name = parts.shift();
         switch (name) {
           case "%TAG": {
@@ -837,10 +837,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path17, value) {
+    function collectionFromPath(schema, path18, value) {
       let v = value;
-      for (let i = path17.length - 1; i >= 0; --i) {
-        const k = path17[i];
+      for (let i = path18.length - 1; i >= 0; --i) {
+        const k = path18[i];
         if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
           const a = [];
           a[k] = v;
@@ -859,7 +859,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path17) => path17 == null || typeof path17 === "object" && !!path17[Symbol.iterator]().next().done;
+    var isEmptyPath = (path18) => path18 == null || typeof path18 === "object" && !!path18[Symbol.iterator]().next().done;
     var Collection = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -889,11 +889,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path17, value) {
-        if (isEmptyPath(path17))
+      addIn(path18, value) {
+        if (isEmptyPath(path18))
           this.add(value);
         else {
-          const [key, ...rest] = path17;
+          const [key, ...rest] = path18;
           const node = this.get(key, true);
           if (identity.isCollection(node))
             node.addIn(rest, value);
@@ -907,8 +907,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path17) {
-        const [key, ...rest] = path17;
+      deleteIn(path18) {
+        const [key, ...rest] = path18;
         if (rest.length === 0)
           return this.delete(key);
         const node = this.get(key, true);
@@ -922,8 +922,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path17, keepScalar) {
-        const [key, ...rest] = path17;
+      getIn(path18, keepScalar) {
+        const [key, ...rest] = path18;
         const node = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -941,8 +941,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path17) {
-        const [key, ...rest] = path17;
+      hasIn(path18) {
+        const [key, ...rest] = path18;
         if (rest.length === 0)
           return this.has(key);
         const node = this.get(key, true);
@@ -952,8 +952,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path17, value) {
-        const [key, ...rest] = path17;
+      setIn(path18, value) {
+        const [key, ...rest] = path18;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -977,13 +977,13 @@ var require_Collection = __commonJS({
 var require_stringifyComment = __commonJS({
   "node_modules/yaml/dist/stringify/stringifyComment.js"(exports2) {
     "use strict";
-    var stringifyComment = (str5) => str5.replace(/^(?!$)(?: $)?/gm, "#");
+    var stringifyComment = (str6) => str6.replace(/^(?!$)(?: $)?/gm, "#");
     function indentComment(comment, indent) {
       if (/^\n+$/.test(comment))
         return comment.substring(1);
       return indent ? comment.replace(/^(?! *$)/gm, indent) : comment;
     }
-    var lineComment = (str5, indent, comment) => str5.endsWith("\n") ? indentComment(comment, indent) : comment.includes("\n") ? "\n" + indentComment(comment, indent) : (str5.endsWith(" ") ? "" : " ") + comment;
+    var lineComment = (str6, indent, comment) => str6.endsWith("\n") ? indentComment(comment, indent) : comment.includes("\n") ? "\n" + indentComment(comment, indent) : (str6.endsWith(" ") ? "" : " ") + comment;
     exports2.indentComment = indentComment;
     exports2.lineComment = lineComment;
     exports2.stringifyComment = stringifyComment;
@@ -997,14 +997,14 @@ var require_foldFlowLines = __commonJS({
     var FOLD_FLOW = "flow";
     var FOLD_BLOCK = "block";
     var FOLD_QUOTED = "quoted";
-    function foldFlowLines(text, indent, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
+    function foldFlowLines(text2, indent, mode = "flow", { indentAtStart, lineWidth = 80, minContentWidth = 20, onFold, onOverflow } = {}) {
       if (!lineWidth || lineWidth < 0)
-        return text;
+        return text2;
       if (lineWidth < minContentWidth)
         minContentWidth = 0;
       const endStep = Math.max(1 + minContentWidth, 1 + lineWidth - indent.length);
-      if (text.length <= endStep)
-        return text;
+      if (text2.length <= endStep)
+        return text2;
       const folds = [];
       const escapedFolds = {};
       let end = lineWidth - indent.length;
@@ -1021,14 +1021,14 @@ var require_foldFlowLines = __commonJS({
       let escStart = -1;
       let escEnd = -1;
       if (mode === FOLD_BLOCK) {
-        i = consumeMoreIndentedLines(text, i, indent.length);
+        i = consumeMoreIndentedLines(text2, i, indent.length);
         if (i !== -1)
           end = i + endStep;
       }
-      for (let ch; ch = text[i += 1]; ) {
+      for (let ch; ch = text2[i += 1]; ) {
         if (mode === FOLD_QUOTED && ch === "\\") {
           escStart = i;
-          switch (text[i + 1]) {
+          switch (text2[i + 1]) {
             case "x":
               i += 3;
               break;
@@ -1045,12 +1045,12 @@ var require_foldFlowLines = __commonJS({
         }
         if (ch === "\n") {
           if (mode === FOLD_BLOCK)
-            i = consumeMoreIndentedLines(text, i, indent.length);
+            i = consumeMoreIndentedLines(text2, i, indent.length);
           end = i + indent.length + endStep;
           split = void 0;
         } else {
           if (ch === " " && prev && prev !== " " && prev !== "\n" && prev !== "	") {
-            const next = text[i + 1];
+            const next = text2[i + 1];
             if (next && next !== " " && next !== "\n" && next !== "	")
               split = i;
           }
@@ -1062,12 +1062,12 @@ var require_foldFlowLines = __commonJS({
             } else if (mode === FOLD_QUOTED) {
               while (prev === " " || prev === "	") {
                 prev = ch;
-                ch = text[i += 1];
+                ch = text2[i += 1];
                 overflow = true;
               }
               const j = i > escEnd + 1 ? i - 2 : escStart - 1;
               if (escapedFolds[j])
-                return text;
+                return text2;
               folds.push(j);
               escapedFolds[j] = true;
               end = j + endStep;
@@ -1082,39 +1082,39 @@ var require_foldFlowLines = __commonJS({
       if (overflow && onOverflow)
         onOverflow();
       if (folds.length === 0)
-        return text;
+        return text2;
       if (onFold)
         onFold();
-      let res = text.slice(0, folds[0]);
+      let res = text2.slice(0, folds[0]);
       for (let i2 = 0; i2 < folds.length; ++i2) {
         const fold = folds[i2];
-        const end2 = folds[i2 + 1] || text.length;
+        const end2 = folds[i2 + 1] || text2.length;
         if (fold === 0)
           res = `
-${indent}${text.slice(0, end2)}`;
+${indent}${text2.slice(0, end2)}`;
         else {
           if (mode === FOLD_QUOTED && escapedFolds[fold])
-            res += `${text[fold]}\\`;
+            res += `${text2[fold]}\\`;
           res += `
-${indent}${text.slice(fold + 1, end2)}`;
+${indent}${text2.slice(fold + 1, end2)}`;
         }
       }
       return res;
     }
-    function consumeMoreIndentedLines(text, i, indent) {
+    function consumeMoreIndentedLines(text2, i, indent) {
       let end = i;
       let start = i + 1;
-      let ch = text[start];
+      let ch = text2[start];
       while (ch === " " || ch === "	") {
         if (i < start + indent) {
-          ch = text[++i];
+          ch = text2[++i];
         } else {
           do {
-            ch = text[++i];
+            ch = text2[++i];
           } while (ch && ch !== "\n");
           end = i;
           start = i + 1;
-          ch = text[start];
+          ch = text2[start];
         }
       }
       return end;
@@ -1137,16 +1137,16 @@ var require_stringifyString = __commonJS({
       lineWidth: ctx.options.lineWidth,
       minContentWidth: ctx.options.minContentWidth
     });
-    var containsDocumentMarker = (str5) => /^(%|---|\.\.\.)/m.test(str5);
-    function lineLengthOverLimit(str5, lineWidth, indentLength) {
+    var containsDocumentMarker = (str6) => /^(%|---|\.\.\.)/m.test(str6);
+    function lineLengthOverLimit(str6, lineWidth, indentLength) {
       if (!lineWidth || lineWidth < 0)
         return false;
       const limit = lineWidth - indentLength;
-      const strLen = str5.length;
+      const strLen = str6.length;
       if (strLen <= limit)
         return false;
       for (let i = 0, start = 0; i < strLen; ++i) {
-        if (str5[i] === "\n") {
+        if (str6[i] === "\n") {
           if (i - start > limit)
             return true;
           start = i + 1;
@@ -1163,11 +1163,11 @@ var require_stringifyString = __commonJS({
       const { implicitKey } = ctx;
       const minMultiLineLength = ctx.options.doubleQuotedMinMultiLineLength;
       const indent = ctx.indent || (containsDocumentMarker(value) ? "  " : "");
-      let str5 = "";
+      let str6 = "";
       let start = 0;
       for (let i = 0, ch = json[i]; ch; ch = json[++i]) {
         if (ch === " " && json[i + 1] === "\\" && json[i + 2] === "n") {
-          str5 += json.slice(start, i) + "\\ ";
+          str6 += json.slice(start, i) + "\\ ";
           i += 1;
           start = i;
           ch = "\\";
@@ -1176,38 +1176,38 @@ var require_stringifyString = __commonJS({
           switch (json[i + 1]) {
             case "u":
               {
-                str5 += json.slice(start, i);
+                str6 += json.slice(start, i);
                 const code = json.substr(i + 2, 4);
                 switch (code) {
                   case "0000":
-                    str5 += "\\0";
+                    str6 += "\\0";
                     break;
                   case "0007":
-                    str5 += "\\a";
+                    str6 += "\\a";
                     break;
                   case "000b":
-                    str5 += "\\v";
+                    str6 += "\\v";
                     break;
                   case "001b":
-                    str5 += "\\e";
+                    str6 += "\\e";
                     break;
                   case "0085":
-                    str5 += "\\N";
+                    str6 += "\\N";
                     break;
                   case "00a0":
-                    str5 += "\\_";
+                    str6 += "\\_";
                     break;
                   case "2028":
-                    str5 += "\\L";
+                    str6 += "\\L";
                     break;
                   case "2029":
-                    str5 += "\\P";
+                    str6 += "\\P";
                     break;
                   default:
                     if (code.substr(0, 2) === "00")
-                      str5 += "\\x" + code.substr(2);
+                      str6 += "\\x" + code.substr(2);
                     else
-                      str5 += json.substr(i, 6);
+                      str6 += json.substr(i, 6);
                 }
                 i += 5;
                 start = i + 1;
@@ -1217,14 +1217,14 @@ var require_stringifyString = __commonJS({
               if (implicitKey || json[i + 2] === '"' || json.length < minMultiLineLength) {
                 i += 1;
               } else {
-                str5 += json.slice(start, i) + "\n\n";
+                str6 += json.slice(start, i) + "\n\n";
                 while (json[i + 2] === "\\" && json[i + 3] === "n" && json[i + 4] !== '"') {
-                  str5 += "\n";
+                  str6 += "\n";
                   i += 2;
                 }
-                str5 += indent;
+                str6 += indent;
                 if (json[i + 2] === " ")
-                  str5 += "\\";
+                  str6 += "\\";
                 i += 1;
                 start = i + 1;
               }
@@ -1233,8 +1233,8 @@ var require_stringifyString = __commonJS({
               i += 1;
           }
       }
-      str5 = start ? str5 + json.slice(start) : json;
-      return implicitKey ? str5 : foldFlowLines.foldFlowLines(str5, indent, foldFlowLines.FOLD_QUOTED, getFoldOptions(ctx, false));
+      str6 = start ? str6 + json.slice(start) : json;
+      return implicitKey ? str6 : foldFlowLines.foldFlowLines(str6, indent, foldFlowLines.FOLD_QUOTED, getFoldOptions(ctx, false));
     }
     function singleQuotedString(value, ctx) {
       if (ctx.options.singleQuote === false || ctx.implicitKey && value.includes("\n") || /[ \t]\n|\n[ \t]/.test(value))
@@ -1362,15 +1362,15 @@ ${indent}${start}${value}${end}`;
           return quotedString(value, ctx);
         }
       }
-      const str5 = value.replace(/\n+/g, `$&
+      const str6 = value.replace(/\n+/g, `$&
 ${indent}`);
       if (actualString) {
-        const test = (tag) => tag.default && tag.tag !== "tag:yaml.org,2002:str" && tag.test?.test(str5);
+        const test = (tag) => tag.default && tag.tag !== "tag:yaml.org,2002:str" && tag.test?.test(str6);
         const { compat, tags } = ctx.doc.schema;
         if (tags.some(test) || compat?.some(test))
           return quotedString(value, ctx);
       }
-      return implicitKey ? str5 : foldFlowLines.foldFlowLines(str5, indent, foldFlowLines.FOLD_FLOW, getFoldOptions(ctx, false));
+      return implicitKey ? str6 : foldFlowLines.foldFlowLines(str6, indent, foldFlowLines.FOLD_FLOW, getFoldOptions(ctx, false));
     }
     function stringifyString(item, ctx, onComment, onChompKeep) {
       const { implicitKey, inFlow } = ctx;
@@ -1522,11 +1522,11 @@ var require_stringify = __commonJS({
       const props = stringifyProps(node, tagObj, ctx);
       if (props.length > 0)
         ctx.indentAtStart = (ctx.indentAtStart ?? 0) + props.length + 1;
-      const str5 = typeof tagObj.stringify === "function" ? tagObj.stringify(node, ctx, onComment, onChompKeep) : identity.isScalar(node) ? stringifyString.stringifyString(node, ctx, onComment, onChompKeep) : node.toString(ctx, onComment, onChompKeep);
+      const str6 = typeof tagObj.stringify === "function" ? tagObj.stringify(node, ctx, onComment, onChompKeep) : identity.isScalar(node) ? stringifyString.stringifyString(node, ctx, onComment, onChompKeep) : node.toString(ctx, onComment, onChompKeep);
       if (!props)
-        return str5;
-      return identity.isScalar(node) || str5[0] === "{" || str5[0] === "[" ? `${props} ${str5}` : `${props}
-${ctx.indent}${str5}`;
+        return str6;
+      return identity.isScalar(node) || str6[0] === "{" || str6[0] === "[" ? `${props} ${str6}` : `${props}
+${ctx.indent}${str6}`;
     }
     exports2.createStringifyContext = createStringifyContext;
     exports2.stringify = stringify2;
@@ -1561,8 +1561,8 @@ var require_stringifyPair = __commonJS({
       });
       let keyCommentDone = false;
       let chompKeep = false;
-      let str5 = stringify2.stringify(key, ctx, () => keyCommentDone = true, () => chompKeep = true);
-      if (!explicitKey && !ctx.inFlow && str5.length > 1024) {
+      let str6 = stringify2.stringify(key, ctx, () => keyCommentDone = true, () => chompKeep = true);
+      if (!explicitKey && !ctx.inFlow && str6.length > 1024) {
         if (simpleKeys)
           throw new Error("With simple keys, single line scalar must not span more than 1024 characters");
         explicitKey = true;
@@ -1571,27 +1571,27 @@ var require_stringifyPair = __commonJS({
         if (allNullValues || value == null) {
           if (keyCommentDone && onComment)
             onComment();
-          return str5 === "" ? "?" : explicitKey ? `? ${str5}` : str5;
+          return str6 === "" ? "?" : explicitKey ? `? ${str6}` : str6;
         }
       } else if (allNullValues && !simpleKeys || value == null && explicitKey) {
-        str5 = `? ${str5}`;
+        str6 = `? ${str6}`;
         if (keyComment && !keyCommentDone) {
-          str5 += stringifyComment.lineComment(str5, ctx.indent, commentString(keyComment));
+          str6 += stringifyComment.lineComment(str6, ctx.indent, commentString(keyComment));
         } else if (chompKeep && onChompKeep)
           onChompKeep();
-        return str5;
+        return str6;
       }
       if (keyCommentDone)
         keyComment = null;
       if (explicitKey) {
         if (keyComment)
-          str5 += stringifyComment.lineComment(str5, ctx.indent, commentString(keyComment));
-        str5 = `? ${str5}
+          str6 += stringifyComment.lineComment(str6, ctx.indent, commentString(keyComment));
+        str6 = `? ${str6}
 ${indent}:`;
       } else {
-        str5 = `${str5}:`;
+        str6 = `${str6}:`;
         if (keyComment)
-          str5 += stringifyComment.lineComment(str5, ctx.indent, commentString(keyComment));
+          str6 += stringifyComment.lineComment(str6, ctx.indent, commentString(keyComment));
       }
       let vsb, vcb, valueComment;
       if (identity.isNode(value)) {
@@ -1607,7 +1607,7 @@ ${indent}:`;
       }
       ctx.implicitKey = false;
       if (!explicitKey && !keyComment && identity.isScalar(value))
-        ctx.indentAtStart = str5.length + 1;
+        ctx.indentAtStart = str6.length + 1;
       chompKeep = false;
       if (!indentSeq && indentStep.length >= 2 && !ctx.inFlow && !explicitKey && identity.isSeq(value) && !value.flow && !value.tag && !value.anchor) {
         ctx.indent = ctx.indent.substring(2);
@@ -1651,16 +1651,16 @@ ${ctx.indent}`;
       } else if (valueStr === "" || valueStr[0] === "\n") {
         ws = "";
       }
-      str5 += ws + valueStr;
+      str6 += ws + valueStr;
       if (ctx.inFlow) {
         if (valueCommentDone && onComment)
           onComment();
       } else if (valueComment && !valueCommentDone) {
-        str5 += stringifyComment.lineComment(str5, ctx.indent, commentString(valueComment));
+        str6 += stringifyComment.lineComment(str6, ctx.indent, commentString(valueComment));
       } else if (chompKeep && onChompKeep) {
         onChompKeep();
       }
-      return str5;
+      return str6;
     }
     exports2.stringifyPair = stringifyPair;
   }
@@ -1887,31 +1887,31 @@ var require_stringifyCollection = __commonJS({
           }
         }
         chompKeep = false;
-        let str6 = stringify2.stringify(item, itemCtx, () => comment2 = null, () => chompKeep = true);
+        let str7 = stringify2.stringify(item, itemCtx, () => comment2 = null, () => chompKeep = true);
         if (comment2)
-          str6 += stringifyComment.lineComment(str6, itemIndent, commentString(comment2));
+          str7 += stringifyComment.lineComment(str7, itemIndent, commentString(comment2));
         if (chompKeep && comment2)
           chompKeep = false;
-        lines.push(blockItemPrefix + str6);
+        lines.push(blockItemPrefix + str7);
       }
-      let str5;
+      let str6;
       if (lines.length === 0) {
-        str5 = flowChars.start + flowChars.end;
+        str6 = flowChars.start + flowChars.end;
       } else {
-        str5 = lines[0];
+        str6 = lines[0];
         for (let i = 1; i < lines.length; ++i) {
-          const line = lines[i];
-          str5 += line ? `
-${indent}${line}` : "\n";
+          const line2 = lines[i];
+          str6 += line2 ? `
+${indent}${line2}` : "\n";
         }
       }
       if (comment) {
-        str5 += "\n" + stringifyComment.indentComment(commentString(comment), indent);
+        str6 += "\n" + stringifyComment.indentComment(commentString(comment), indent);
         if (onComment)
           onComment();
       } else if (chompKeep && onChompKeep)
         onChompKeep();
-      return str5;
+      return str6;
     }
     function stringifyFlowCollection({ items }, ctx, { flowChars, itemIndent }) {
       const { indent, indentStep, flowCollectionPadding: fcPadding, options: { commentString } } = ctx;
@@ -1954,21 +1954,21 @@ ${indent}${line}` : "\n";
         }
         if (comment)
           reqNewline = true;
-        let str5 = stringify2.stringify(item, itemCtx, () => comment = null);
-        reqNewline || (reqNewline = lines.length > linesAtValue || str5.includes("\n"));
+        let str6 = stringify2.stringify(item, itemCtx, () => comment = null);
+        reqNewline || (reqNewline = lines.length > linesAtValue || str6.includes("\n"));
         if (i < items.length - 1) {
-          str5 += ",";
+          str6 += ",";
         } else if (ctx.options.trailingComma) {
           if (ctx.options.lineWidth > 0) {
-            reqNewline || (reqNewline = lines.reduce((sum, line) => sum + line.length + 2, 2) + (str5.length + 2) > ctx.options.lineWidth);
+            reqNewline || (reqNewline = lines.reduce((sum, line2) => sum + line2.length + 2, 2) + (str6.length + 2) > ctx.options.lineWidth);
           }
           if (reqNewline) {
-            str5 += ",";
+            str6 += ",";
           }
         }
         if (comment)
-          str5 += stringifyComment.lineComment(str5, itemIndent, commentString(comment));
-        lines.push(str5);
+          str6 += stringifyComment.lineComment(str6, itemIndent, commentString(comment));
+        lines.push(str6);
         linesAtValue = lines.length;
       }
       const { start, end } = flowChars;
@@ -1976,15 +1976,15 @@ ${indent}${line}` : "\n";
         return start + end;
       } else {
         if (!reqNewline) {
-          const len = lines.reduce((sum, line) => sum + line.length + 2, 2);
+          const len = lines.reduce((sum, line2) => sum + line2.length + 2, 2);
           reqNewline = ctx.options.lineWidth > 0 && len > ctx.options.lineWidth;
         }
         if (reqNewline) {
-          let str5 = start;
-          for (const line of lines)
-            str5 += line ? `
-${indentStep}${indent}${line}` : "\n";
-          return `${str5}
+          let str6 = start;
+          for (const line2 of lines)
+            str6 += line2 ? `
+${indentStep}${indent}${line2}` : "\n";
+          return `${str6}
 ${indent}${end}`;
         } else {
           return `${start}${fcPadding}${lines.join(" ")}${fcPadding}${end}`;
@@ -2316,7 +2316,7 @@ var require_string = __commonJS({
       identify: (value) => typeof value === "string",
       default: true,
       tag: "tag:yaml.org,2002:str",
-      resolve: (str5) => str5,
+      resolve: (str6) => str6,
       stringify(item, ctx, onComment, onChompKeep) {
         ctx = Object.assign({ actualString: true }, ctx);
         return stringifyString.stringifyString(item, ctx, onComment, onChompKeep);
@@ -2354,7 +2354,7 @@ var require_bool = __commonJS({
       default: true,
       tag: "tag:yaml.org,2002:bool",
       test: /^(?:[Tt]rue|TRUE|[Ff]alse|FALSE)$/,
-      resolve: (str5) => new Scalar.Scalar(str5[0] === "t" || str5[0] === "T"),
+      resolve: (str6) => new Scalar.Scalar(str6[0] === "t" || str6[0] === "T"),
       stringify({ source, value }, ctx) {
         if (source && boolTag.test.test(source)) {
           const sv = source[0] === "t" || source[0] === "T";
@@ -2406,7 +2406,7 @@ var require_float = __commonJS({
       default: true,
       tag: "tag:yaml.org,2002:float",
       test: /^(?:[-+]?\.(?:inf|Inf|INF)|\.nan|\.NaN|\.NAN)$/,
-      resolve: (str5) => str5.slice(-3).toLowerCase() === "nan" ? NaN : str5[0] === "-" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY,
+      resolve: (str6) => str6.slice(-3).toLowerCase() === "nan" ? NaN : str6[0] === "-" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY,
       stringify: stringifyNumber.stringifyNumber
     };
     var floatExp = {
@@ -2415,7 +2415,7 @@ var require_float = __commonJS({
       tag: "tag:yaml.org,2002:float",
       format: "EXP",
       test: /^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)[eE][-+]?[0-9]+$/,
-      resolve: (str5) => parseFloat(str5),
+      resolve: (str6) => parseFloat(str6),
       stringify(node) {
         const num3 = Number(node.value);
         return isFinite(num3) ? num3.toExponential() : stringifyNumber.stringifyNumber(node);
@@ -2426,11 +2426,11 @@ var require_float = __commonJS({
       default: true,
       tag: "tag:yaml.org,2002:float",
       test: /^[-+]?(?:\.[0-9]+|[0-9]+\.[0-9]*)$/,
-      resolve(str5) {
-        const node = new Scalar.Scalar(parseFloat(str5));
-        const dot = str5.indexOf(".");
-        if (dot !== -1 && str5[str5.length - 1] === "0")
-          node.minFractionDigits = str5.length - dot - 1;
+      resolve(str6) {
+        const node = new Scalar.Scalar(parseFloat(str6));
+        const dot = str6.indexOf(".");
+        if (dot !== -1 && str6[str6.length - 1] === "0")
+          node.minFractionDigits = str6.length - dot - 1;
         return node;
       },
       stringify: stringifyNumber.stringifyNumber
@@ -2447,7 +2447,7 @@ var require_int = __commonJS({
     "use strict";
     var stringifyNumber = require_stringifyNumber();
     var intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
-    var intResolve = (str5, offset, radix, { intAsBigInt }) => intAsBigInt ? BigInt(str5) : parseInt(str5.substring(offset), radix);
+    var intResolve = (str6, offset, radix, { intAsBigInt }) => intAsBigInt ? BigInt(str6) : parseInt(str6.substring(offset), radix);
     function intStringify(node, radix, prefix) {
       const { value } = node;
       if (intIdentify(value) && value >= 0)
@@ -2460,7 +2460,7 @@ var require_int = __commonJS({
       tag: "tag:yaml.org,2002:int",
       format: "OCT",
       test: /^0o[0-7]+$/,
-      resolve: (str5, _onError, opt) => intResolve(str5, 2, 8, opt),
+      resolve: (str6, _onError, opt) => intResolve(str6, 2, 8, opt),
       stringify: (node) => intStringify(node, 8, "0o")
     };
     var int2 = {
@@ -2468,7 +2468,7 @@ var require_int = __commonJS({
       default: true,
       tag: "tag:yaml.org,2002:int",
       test: /^[-+]?[0-9]+$/,
-      resolve: (str5, _onError, opt) => intResolve(str5, 0, 10, opt),
+      resolve: (str6, _onError, opt) => intResolve(str6, 0, 10, opt),
       stringify: stringifyNumber.stringifyNumber
     };
     var intHex = {
@@ -2477,7 +2477,7 @@ var require_int = __commonJS({
       tag: "tag:yaml.org,2002:int",
       format: "HEX",
       test: /^0x[0-9a-fA-F]+$/,
-      resolve: (str5, _onError, opt) => intResolve(str5, 2, 16, opt),
+      resolve: (str6, _onError, opt) => intResolve(str6, 2, 16, opt),
       stringify: (node) => intStringify(node, 16, "0x")
     };
     exports2.int = int2;
@@ -2530,7 +2530,7 @@ var require_schema2 = __commonJS({
         identify: (value) => typeof value === "string",
         default: true,
         tag: "tag:yaml.org,2002:str",
-        resolve: (str5) => str5,
+        resolve: (str6) => str6,
         stringify: stringifyJSON
       },
       {
@@ -2547,7 +2547,7 @@ var require_schema2 = __commonJS({
         default: true,
         tag: "tag:yaml.org,2002:bool",
         test: /^true$|^false$/,
-        resolve: (str5) => str5 === "true",
+        resolve: (str6) => str6 === "true",
         stringify: stringifyJSON
       },
       {
@@ -2555,7 +2555,7 @@ var require_schema2 = __commonJS({
         default: true,
         tag: "tag:yaml.org,2002:int",
         test: /^-?(?:0|[1-9][0-9]*)$/,
-        resolve: (str5, _onError, { intAsBigInt }) => intAsBigInt ? BigInt(str5) : parseInt(str5, 10),
+        resolve: (str6, _onError, { intAsBigInt }) => intAsBigInt ? BigInt(str6) : parseInt(str6, 10),
         stringify: ({ value }) => intIdentify(value) ? value.toString() : JSON.stringify(value)
       },
       {
@@ -2563,7 +2563,7 @@ var require_schema2 = __commonJS({
         default: true,
         tag: "tag:yaml.org,2002:float",
         test: /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]*)?(?:[eE][-+]?[0-9]+)?$/,
-        resolve: (str5) => parseFloat(str5),
+        resolve: (str6) => parseFloat(str6),
         stringify: stringifyJSON
       }
     ];
@@ -2571,9 +2571,9 @@ var require_schema2 = __commonJS({
       default: true,
       tag: "",
       test: /^/,
-      resolve(str5, onError) {
-        onError(`Unresolved plain scalar ${JSON.stringify(str5)}`);
-        return str5;
+      resolve(str6, onError) {
+        onError(`Unresolved plain scalar ${JSON.stringify(str6)}`);
+        return str6;
       }
     };
     var schema = [map.map, seq.seq].concat(jsonScalars, jsonError);
@@ -2605,10 +2605,10 @@ var require_binary = __commonJS({
         if (typeof node_buffer.Buffer === "function") {
           return node_buffer.Buffer.from(src, "base64");
         } else if (typeof atob === "function") {
-          const str5 = atob(src.replace(/[\n\r]/g, ""));
-          const buffer = new Uint8Array(str5.length);
-          for (let i = 0; i < str5.length; ++i)
-            buffer[i] = str5.charCodeAt(i);
+          const str6 = atob(src.replace(/[\n\r]/g, ""));
+          const buffer = new Uint8Array(str6.length);
+          for (let i = 0; i < str6.length; ++i)
+            buffer[i] = str6.charCodeAt(i);
           return buffer;
         } else {
           onError("This environment does not support reading binary tags; either Buffer or atob is required");
@@ -2619,28 +2619,28 @@ var require_binary = __commonJS({
         if (!value)
           return "";
         const buf = value;
-        let str5;
+        let str6;
         if (typeof node_buffer.Buffer === "function") {
-          str5 = buf instanceof node_buffer.Buffer ? buf.toString("base64") : node_buffer.Buffer.from(buf.buffer).toString("base64");
+          str6 = buf instanceof node_buffer.Buffer ? buf.toString("base64") : node_buffer.Buffer.from(buf.buffer).toString("base64");
         } else if (typeof btoa === "function") {
           let s2 = "";
           for (let i = 0; i < buf.length; ++i)
             s2 += String.fromCharCode(buf[i]);
-          str5 = btoa(s2);
+          str6 = btoa(s2);
         } else {
           throw new Error("This environment does not support writing binary tags; either Buffer or btoa is required");
         }
         type ?? (type = Scalar.Scalar.BLOCK_LITERAL);
         if (type !== Scalar.Scalar.QUOTE_DOUBLE) {
           const lineWidth = Math.max(ctx.options.lineWidth - ctx.indent.length, ctx.options.minContentWidth);
-          const n = Math.ceil(str5.length / lineWidth);
+          const n = Math.ceil(str6.length / lineWidth);
           const lines = new Array(n);
           for (let i = 0, o = 0; i < n; ++i, o += lineWidth) {
-            lines[i] = str5.substr(o, lineWidth);
+            lines[i] = str6.substr(o, lineWidth);
           }
-          str5 = lines.join(type === Scalar.Scalar.BLOCK_LITERAL ? "\n" : " ");
+          str6 = lines.join(type === Scalar.Scalar.BLOCK_LITERAL ? "\n" : " ");
         }
-        return stringifyString.stringifyString({ comment, type, value: str5 }, ctx, onComment, onChompKeep);
+        return stringifyString.stringifyString({ comment, type, value: str6 }, ctx, onComment, onChompKeep);
       }
     };
     exports2.binary = binary;
@@ -2846,7 +2846,7 @@ var require_float2 = __commonJS({
       default: true,
       tag: "tag:yaml.org,2002:float",
       test: /^(?:[-+]?\.(?:inf|Inf|INF)|\.nan|\.NaN|\.NAN)$/,
-      resolve: (str5) => str5.slice(-3).toLowerCase() === "nan" ? NaN : str5[0] === "-" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY,
+      resolve: (str6) => str6.slice(-3).toLowerCase() === "nan" ? NaN : str6[0] === "-" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY,
       stringify: stringifyNumber.stringifyNumber
     };
     var floatExp = {
@@ -2855,7 +2855,7 @@ var require_float2 = __commonJS({
       tag: "tag:yaml.org,2002:float",
       format: "EXP",
       test: /^[-+]?(?:[0-9][0-9_]*)?(?:\.[0-9_]*)?[eE][-+]?[0-9]+$/,
-      resolve: (str5) => parseFloat(str5.replace(/_/g, "")),
+      resolve: (str6) => parseFloat(str6.replace(/_/g, "")),
       stringify(node) {
         const num3 = Number(node.value);
         return isFinite(num3) ? num3.toExponential() : stringifyNumber.stringifyNumber(node);
@@ -2866,11 +2866,11 @@ var require_float2 = __commonJS({
       default: true,
       tag: "tag:yaml.org,2002:float",
       test: /^[-+]?(?:[0-9][0-9_]*)?\.[0-9_]*$/,
-      resolve(str5) {
-        const node = new Scalar.Scalar(parseFloat(str5.replace(/_/g, "")));
-        const dot = str5.indexOf(".");
+      resolve(str6) {
+        const node = new Scalar.Scalar(parseFloat(str6.replace(/_/g, "")));
+        const dot = str6.indexOf(".");
         if (dot !== -1) {
-          const f = str5.substring(dot + 1).replace(/_/g, "");
+          const f = str6.substring(dot + 1).replace(/_/g, "");
           if (f[f.length - 1] === "0")
             node.minFractionDigits = f.length;
         }
@@ -2890,34 +2890,34 @@ var require_int2 = __commonJS({
     "use strict";
     var stringifyNumber = require_stringifyNumber();
     var intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
-    function intResolve(str5, offset, radix, { intAsBigInt }) {
-      const sign = str5[0];
+    function intResolve(str6, offset, radix, { intAsBigInt }) {
+      const sign = str6[0];
       if (sign === "-" || sign === "+")
         offset += 1;
-      str5 = str5.substring(offset).replace(/_/g, "");
+      str6 = str6.substring(offset).replace(/_/g, "");
       if (intAsBigInt) {
         switch (radix) {
           case 2:
-            str5 = `0b${str5}`;
+            str6 = `0b${str6}`;
             break;
           case 8:
-            str5 = `0o${str5}`;
+            str6 = `0o${str6}`;
             break;
           case 16:
-            str5 = `0x${str5}`;
+            str6 = `0x${str6}`;
             break;
         }
-        const n2 = BigInt(str5);
+        const n2 = BigInt(str6);
         return sign === "-" ? BigInt(-1) * n2 : n2;
       }
-      const n = parseInt(str5, radix);
+      const n = parseInt(str6, radix);
       return sign === "-" ? -1 * n : n;
     }
     function intStringify(node, radix, prefix) {
       const { value } = node;
       if (intIdentify(value)) {
-        const str5 = value.toString(radix);
-        return value < 0 ? "-" + prefix + str5.substr(1) : prefix + str5;
+        const str6 = value.toString(radix);
+        return value < 0 ? "-" + prefix + str6.substr(1) : prefix + str6;
       }
       return stringifyNumber.stringifyNumber(node);
     }
@@ -2927,7 +2927,7 @@ var require_int2 = __commonJS({
       tag: "tag:yaml.org,2002:int",
       format: "BIN",
       test: /^[-+]?0b[0-1_]+$/,
-      resolve: (str5, _onError, opt) => intResolve(str5, 2, 2, opt),
+      resolve: (str6, _onError, opt) => intResolve(str6, 2, 2, opt),
       stringify: (node) => intStringify(node, 2, "0b")
     };
     var intOct = {
@@ -2936,7 +2936,7 @@ var require_int2 = __commonJS({
       tag: "tag:yaml.org,2002:int",
       format: "OCT",
       test: /^[-+]?0[0-7_]+$/,
-      resolve: (str5, _onError, opt) => intResolve(str5, 1, 8, opt),
+      resolve: (str6, _onError, opt) => intResolve(str6, 1, 8, opt),
       stringify: (node) => intStringify(node, 8, "0")
     };
     var int2 = {
@@ -2944,7 +2944,7 @@ var require_int2 = __commonJS({
       default: true,
       tag: "tag:yaml.org,2002:int",
       test: /^[-+]?[0-9][0-9_]*$/,
-      resolve: (str5, _onError, opt) => intResolve(str5, 0, 10, opt),
+      resolve: (str6, _onError, opt) => intResolve(str6, 0, 10, opt),
       stringify: stringifyNumber.stringifyNumber
     };
     var intHex = {
@@ -2953,7 +2953,7 @@ var require_int2 = __commonJS({
       tag: "tag:yaml.org,2002:int",
       format: "HEX",
       test: /^[-+]?0x[0-9a-fA-F_]+$/,
-      resolve: (str5, _onError, opt) => intResolve(str5, 2, 16, opt),
+      resolve: (str6, _onError, opt) => intResolve(str6, 2, 16, opt),
       stringify: (node) => intStringify(node, 16, "0x")
     };
     exports2.int = int2;
@@ -3057,9 +3057,9 @@ var require_timestamp = __commonJS({
   "node_modules/yaml/dist/schema/yaml-1.1/timestamp.js"(exports2) {
     "use strict";
     var stringifyNumber = require_stringifyNumber();
-    function parseSexagesimal(str5, asBigInt) {
-      const sign = str5[0];
-      const parts = sign === "-" || sign === "+" ? str5.substring(1) : str5;
+    function parseSexagesimal(str6, asBigInt) {
+      const sign = str6[0];
+      const parts = sign === "-" || sign === "+" ? str6.substring(1) : str6;
       const num3 = (n) => asBigInt ? BigInt(n) : Number(n);
       const res = parts.replace(/_/g, "").split(":").reduce((res2, p) => res2 * num3(60) + num3(p), num3(0));
       return sign === "-" ? num3(-1) * res : res;
@@ -3096,7 +3096,7 @@ var require_timestamp = __commonJS({
       tag: "tag:yaml.org,2002:int",
       format: "TIME",
       test: /^[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+$/,
-      resolve: (str5, _onError, { intAsBigInt }) => parseSexagesimal(str5, intAsBigInt),
+      resolve: (str6, _onError, { intAsBigInt }) => parseSexagesimal(str6, intAsBigInt),
       stringify: stringifySexagesimal
     };
     var floatTime = {
@@ -3105,7 +3105,7 @@ var require_timestamp = __commonJS({
       tag: "tag:yaml.org,2002:float",
       format: "TIME",
       test: /^[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*$/,
-      resolve: (str5) => parseSexagesimal(str5, false),
+      resolve: (str6) => parseSexagesimal(str6, false),
       stringify: stringifySexagesimal
     };
     var timestamp = {
@@ -3116,8 +3116,8 @@ var require_timestamp = __commonJS({
       // may be omitted altogether, resulting in a date format. In such a case, the time part is
       // assumed to be 00:00:00Z (start of day, UTC).
       test: RegExp("^([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})(?:(?:t|T|[ \\t]+)([0-9]{1,2}):([0-9]{1,2}):([0-9]{1,2}(\\.[0-9]+)?)(?:[ \\t]*(Z|[-+][012]?[0-9](?::[0-9]{2})?))?)?$"),
-      resolve(str5) {
-        const match = str5.match(timestamp.test);
+      resolve(str6) {
+        const match = str6.match(timestamp.test);
         if (!match)
           throw new Error("!!timestamp expects a date, starting with yyyy-mm-dd");
         const [, year, month, day, hour, minute, second] = match.map(Number);
@@ -3468,9 +3468,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path17, value) {
+      addIn(path18, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path17, value);
+          this.contents.addIn(path18, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -3545,14 +3545,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path17) {
-        if (Collection.isEmptyPath(path17)) {
+      deleteIn(path18) {
+        if (Collection.isEmptyPath(path18)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path17) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path18) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -3567,10 +3567,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path17, keepScalar) {
-        if (Collection.isEmptyPath(path17))
+      getIn(path18, keepScalar) {
+        if (Collection.isEmptyPath(path18))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path17, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path18, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -3581,10 +3581,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path17) {
-        if (Collection.isEmptyPath(path17))
+      hasIn(path18) {
+        if (Collection.isEmptyPath(path18))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path17) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path18) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -3601,13 +3601,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path17, value) {
-        if (Collection.isEmptyPath(path17)) {
+      setIn(path18, value) {
+        if (Collection.isEmptyPath(path18)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, Array.from(path17), value);
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path18), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path17, value);
+          this.contents.setIn(path18, value);
         }
       }
       /**
@@ -3726,10 +3726,10 @@ var require_errors = __commonJS({
       if (error.pos[0] === -1)
         return;
       error.linePos = error.pos.map((pos) => lc.linePos(pos));
-      const { line, col } = error.linePos[0];
-      error.message += ` at line ${line}, column ${col}`;
+      const { line: line2, col } = error.linePos[0];
+      error.message += ` at line ${line2}, column ${col}`;
       let ci = col - 1;
-      let lineStr = src.substring(lc.lineStarts[line - 1], lc.lineStarts[line]).replace(/[\n\r]+$/, "");
+      let lineStr = src.substring(lc.lineStarts[line2 - 1], lc.lineStarts[line2]).replace(/[\n\r]+$/, "");
       if (ci >= 60 && lineStr.length > 80) {
         const trimStart = Math.min(ci - 39, lineStr.length - 79);
         lineStr = "\u2026" + lineStr.substring(trimStart);
@@ -3737,8 +3737,8 @@ var require_errors = __commonJS({
       }
       if (lineStr.length > 80)
         lineStr = lineStr.substring(0, 79) + "\u2026";
-      if (line > 1 && /^ *$/.test(lineStr.substring(0, ci))) {
-        let prev = src.substring(lc.lineStarts[line - 2], lc.lineStarts[line - 1]);
+      if (line2 > 1 && /^ *$/.test(lineStr.substring(0, ci))) {
+        let prev = src.substring(lc.lineStarts[line2 - 2], lc.lineStarts[line2 - 1]);
         if (prev.length > 80)
           prev = prev.substring(0, 79) + "\u2026\n";
         lineStr = prev + lineStr;
@@ -3746,7 +3746,7 @@ var require_errors = __commonJS({
       if (/[^ ]/.test(lineStr)) {
         let count2 = 1;
         const end = error.linePos[1];
-        if (end?.line === line && end.col > col) {
+        if (end?.line === line2 && end.col > col) {
           count2 = Math.max(1, Math.min(end.col - col, 80 - ci));
         }
         const pointer = " ".repeat(ci) + "^".repeat(count2);
@@ -4695,8 +4695,8 @@ var require_resolve_flow_scalar = __commonJS({
       return unfoldLines(source.slice(1, -1)).replace(/''/g, "'");
     }
     function unfoldLines(source) {
-      const line = /(.*?)\r?\n/sy;
-      let match = line.exec(source);
+      const line2 = /(.*?)\r?\n/sy;
+      let match = line2.exec(source);
       if (!match)
         return source;
       let trimEnd, trimBoth;
@@ -4709,8 +4709,8 @@ var require_resolve_flow_scalar = __commonJS({
       }
       let res = match[1].replace(trimEnd, "");
       let sep = " ";
-      let pos = line.lastIndex;
-      while (match = line.exec(source)) {
+      let pos = line2.lastIndex;
+      while (match = line2.exec(source)) {
         const lm = match[1].replace(trimBoth, "");
         if (lm === "") {
           if (sep === "\n")
@@ -4721,7 +4721,7 @@ var require_resolve_flow_scalar = __commonJS({
           res += sep + lm;
           sep = " ";
         }
-        pos = line.lastIndex;
+        pos = line2.lastIndex;
       }
       const last = /[ \t]*(.*)/sy;
       last.lastIndex = pos;
@@ -5568,9 +5568,9 @@ var require_cst_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    visit.itemAtPath = (cst, path17) => {
+    visit.itemAtPath = (cst, path18) => {
       let item = cst;
-      for (const [field, index] of path17) {
+      for (const [field, index] of path18) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -5579,23 +5579,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit.parentCollection = (cst, path17) => {
-      const parent = visit.itemAtPath(cst, path17.slice(0, -1));
-      const field = path17[path17.length - 1][0];
+    visit.parentCollection = (cst, path18) => {
+      const parent = visit.itemAtPath(cst, path18.slice(0, -1));
+      const field = path18[path18.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path17, item, visitor) {
-      let ctrl = visitor(item, path17);
+    function _visit(path18, item, visitor) {
+      let ctrl = visitor(item, path18);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item[field];
         if (token && "items" in token) {
           for (let i = 0; i < token.items.length; ++i) {
-            const ci = _visit(Object.freeze(path17.concat([[field, i]])), token.items[i], visitor);
+            const ci = _visit(Object.freeze(path18.concat([[field, i]])), token.items[i], visitor);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -5606,10 +5606,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item, path17);
+            ctrl = ctrl(item, path18);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path17) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path18) : ctrl;
     }
     exports2.visit = visit;
   }
@@ -5851,40 +5851,40 @@ var require_lexer = __commonJS({
         }
       }
       *parseStream() {
-        let line = this.getLine();
-        if (line === null)
+        let line2 = this.getLine();
+        if (line2 === null)
           return this.setNext("stream");
-        if (line[0] === cst.BOM) {
+        if (line2[0] === cst.BOM) {
           yield* this.pushCount(1);
-          line = line.substring(1);
+          line2 = line2.substring(1);
         }
-        if (line[0] === "%") {
-          let dirEnd = line.length;
-          let cs = line.indexOf("#");
+        if (line2[0] === "%") {
+          let dirEnd = line2.length;
+          let cs = line2.indexOf("#");
           while (cs !== -1) {
-            const ch = line[cs - 1];
+            const ch = line2[cs - 1];
             if (ch === " " || ch === "	") {
               dirEnd = cs - 1;
               break;
             } else {
-              cs = line.indexOf("#", cs + 1);
+              cs = line2.indexOf("#", cs + 1);
             }
           }
           while (true) {
-            const ch = line[dirEnd - 1];
+            const ch = line2[dirEnd - 1];
             if (ch === " " || ch === "	")
               dirEnd -= 1;
             else
               break;
           }
           const n = (yield* this.pushCount(dirEnd)) + (yield* this.pushSpaces(true));
-          yield* this.pushCount(line.length - n);
+          yield* this.pushCount(line2.length - n);
           this.pushNewline();
           return "stream";
         }
         if (this.atLineEnd()) {
           const sp = yield* this.pushSpaces(true);
-          yield* this.pushCount(line.length - sp);
+          yield* this.pushCount(line2.length - sp);
           yield* this.pushNewline();
           return "stream";
         }
@@ -5925,13 +5925,13 @@ var require_lexer = __commonJS({
       }
       *parseDocument() {
         yield* this.pushSpaces(true);
-        const line = this.getLine();
-        if (line === null)
+        const line2 = this.getLine();
+        if (line2 === null)
           return this.setNext("doc");
         let n = yield* this.pushIndicators();
-        switch (line[n]) {
+        switch (line2[n]) {
           case "#":
-            yield* this.pushCount(line.length - n);
+            yield* this.pushCount(line2.length - n);
           // fallthrough
           case void 0:
             yield* this.pushNewline();
@@ -5956,7 +5956,7 @@ var require_lexer = __commonJS({
           case ">":
             n += yield* this.parseBlockScalarHeader();
             n += yield* this.pushSpaces(true);
-            yield* this.pushCount(line.length - n);
+            yield* this.pushCount(line2.length - n);
             yield* this.pushNewline();
             return yield* this.parseBlockScalar();
           default:
@@ -5976,11 +5976,11 @@ var require_lexer = __commonJS({
           }
           sp += yield* this.pushSpaces(true);
         } while (nl + sp > 0);
-        const line = this.getLine();
-        if (line === null)
+        const line2 = this.getLine();
+        if (line2 === null)
           return this.setNext("flow");
-        if (indent !== -1 && indent < this.indentNext && line[0] !== "#" || indent === 0 && (line.startsWith("---") || line.startsWith("...")) && isEmpty(line[3])) {
-          const atFlowEndMarker = indent === this.indentNext - 1 && this.flowLevel === 1 && (line[0] === "]" || line[0] === "}");
+        if (indent !== -1 && indent < this.indentNext && line2[0] !== "#" || indent === 0 && (line2.startsWith("---") || line2.startsWith("...")) && isEmpty(line2[3])) {
+          const atFlowEndMarker = indent === this.indentNext - 1 && this.flowLevel === 1 && (line2[0] === "]" || line2[0] === "}");
           if (!atFlowEndMarker) {
             this.flowLevel = 0;
             yield cst.FLOW_END;
@@ -5988,17 +5988,17 @@ var require_lexer = __commonJS({
           }
         }
         let n = 0;
-        while (line[n] === ",") {
+        while (line2[n] === ",") {
           n += yield* this.pushCount(1);
           n += yield* this.pushSpaces(true);
           this.flowKey = false;
         }
         n += yield* this.pushIndicators();
-        switch (line[n]) {
+        switch (line2[n]) {
           case void 0:
             return "flow";
           case "#":
-            yield* this.pushCount(line.length - n);
+            yield* this.pushCount(line2.length - n);
             return "flow";
           case "{":
           case "[":
@@ -7361,13 +7361,13 @@ var require_dist = __commonJS({
 });
 
 // src/forge/cli/main.ts
-var import_node_fs16 = require("node:fs");
+var import_node_fs17 = require("node:fs");
 
 // src/forge/cli/run.ts
 var import_node_child_process2 = require("node:child_process");
-var import_node_fs15 = require("node:fs");
+var import_node_fs16 = require("node:fs");
 var import_node_os = require("node:os");
-var import_node_path16 = __toESM(require("node:path"), 1);
+var import_node_path17 = __toESM(require("node:path"), 1);
 
 // src/forge/ledger.ts
 var import_node_fs = require("node:fs");
@@ -7533,10 +7533,10 @@ function readEvents(root) {
   const file = ledgerFile(root);
   if (!(0, import_node_fs.existsSync)(file)) return [];
   const out = [];
-  for (const line of (0, import_node_fs.readFileSync)(file, "utf8").split("\n")) {
-    if (!line.trim()) continue;
+  for (const line2 of (0, import_node_fs.readFileSync)(file, "utf8").split("\n")) {
+    if (!line2.trim()) continue;
     try {
-      const e = JSON.parse(line);
+      const e = JSON.parse(line2);
       if (e && typeof e === "object" && typeof e.ts === "string" && LEDGER_KINDS.includes(e.kind) && (e.task === void 0 || typeof e.task === "string")) out.push(e);
     } catch {
     }
@@ -7552,11 +7552,11 @@ var import_node_path2 = __toESM(require("node:path"), 1);
 var isCount = (x) => typeof x === "number" && Number.isInteger(x) && x >= 0;
 var isPositiveInt = (x) => isCount(x) && x > 0;
 var isPositive = (x) => typeof x === "number" && Number.isFinite(x) && x > 0;
-function parseRun(text) {
-  if (text === null) return null;
+function parseRun(text2) {
+  if (text2 === null) return null;
   let o;
   try {
-    const x = JSON.parse(text);
+    const x = JSON.parse(text2);
     if (!x || typeof x !== "object" || Array.isArray(x)) return null;
     o = x;
   } catch {
@@ -7853,10 +7853,10 @@ function normalizeSwarm(x) {
     fronts
   };
 }
-function parseSwarm(text) {
-  if (typeof text !== "string") return null;
+function parseSwarm(text2) {
+  if (typeof text2 !== "string") return null;
   try {
-    return normalizeSwarm(JSON.parse(text));
+    return normalizeSwarm(JSON.parse(text2));
   } catch {
     return null;
   }
@@ -8360,8 +8360,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path17, errorMaps, issueData } = params;
-  const fullPath = [...path17, ...issueData.path || []];
+  const { data, path: path18, errorMaps, issueData } = params;
+  const fullPath = [...path18, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -8477,11 +8477,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path17, key) {
+  constructor(parent, value, path18, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path17;
+    this._path = path18;
     this._key = key;
   }
   get path() {
@@ -11964,10 +11964,10 @@ var PlanError = class extends Error {
     this.name = "PlanError";
   }
 };
-function parsePlan(text) {
+function parsePlan(text2) {
   let raw;
   try {
-    raw = (0, import_yaml.parse)(text);
+    raw = (0, import_yaml.parse)(text2);
   } catch (e) {
     throw new PlanError([`YAML: ${e.message}`]);
   }
@@ -12103,10 +12103,10 @@ function normalizeExecution(x) {
     ...typeof x.planned === "number" && Number.isInteger(x.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x.planned)) } : {}
   };
 }
-function parseExecution(text) {
-  if (typeof text !== "string") return null;
+function parseExecution(text2) {
+  if (typeof text2 !== "string") return null;
   try {
-    return normalizeExecution(JSON.parse(text));
+    return normalizeExecution(JSON.parse(text2));
   } catch {
     return null;
   }
@@ -12159,11 +12159,11 @@ var runBranch = (project) => `forge/run-${project}`;
 var taskBranch = (task) => `task/${task}`;
 var runWorktree = (root) => import_node_path4.default.join(root, ".claude", "worktrees", "run");
 var taskWorktree = (root, task) => import_node_path4.default.join(root, ".claude", "worktrees", `task-${task}`);
-function writeAtomic(file, text) {
+function writeAtomic(file, text2) {
   (0, import_node_fs4.mkdirSync)(import_node_path4.default.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   try {
-    (0, import_node_fs4.writeFileSync)(tmp, text);
+    (0, import_node_fs4.writeFileSync)(tmp, text2);
     (0, import_node_fs4.renameSync)(tmp, file);
   } finally {
     (0, import_node_fs4.rmSync)(tmp, { force: true });
@@ -12258,16 +12258,16 @@ var MECHANICAL = [
   /(?<![\p{L}\p{N}_])aplic(?:a|ar|ando)\s+(?:el|este|ese|un|los|estos)\s+parches?(?![\p{L}\p{N}_])/iu,
   /(?<![\p{L}\p{N}_])(?:mueve|mover|muevo)\s+(?:los?\s+|las?\s+)?(?:archivos?|carpetas?|directorios?|\S*[\w-]\.\w+\s+a\b|\S*\/\S*\s+a\b)/iu
 ];
-function isMechanical(text) {
-  const t = String(text).slice(0, MAX_TEXT);
+function isMechanical(text2) {
+  const t = String(text2).slice(0, MAX_TEXT);
   return MECHANICAL.some((re) => re.test(t));
 }
-function implementerFor(r2, text, opts = {}) {
+function implementerFor(r2, text2, opts = {}) {
   switch (r2.path) {
     case "trivial":
       return opts.batch ? { role: "mech", self: false, why: "trivial in a batch: delegated, the session runs several at once" } : { role: null, self: true, why: "trivial: the session does it" };
     case "small":
-      return isMechanical(text) ? { role: "mech", self: false, why: "small and mechanical: always delegated to mech" } : { role: "impl-light", self: false, why: "small and bounded: always delegated to impl-light" };
+      return isMechanical(text2) ? { role: "mech", self: false, why: "small and mechanical: always delegated to mech" } : { role: "impl-light", self: false, why: "small and bounded: always delegated to impl-light" };
     case "medium":
       return r2.sensitive.length ? { role: "impl-heavy", self: false, why: `medium on a sensitive zone (${r2.sensitive.join(", ")})` } : { role: "impl", self: false, why: "medium" };
     default:
@@ -12278,53 +12278,53 @@ var PATH_TOKEN = /[\w.\-/]*[\w-]\.[A-Za-z0-9]{1,8}\b|[\w.-]+\/[\w.\-/]+/g;
 var isSymbol = (w) => w.length >= 4 && (/[a-z][A-Z]/.test(w) || /^[A-Za-z]+_[A-Za-z0-9_]+$/.test(w));
 function triage(task, repo, validators, extra) {
   const reasons = [];
-  const text = String(task).slice(0, MAX_TEXT);
+  const text2 = String(task).slice(0, MAX_TEXT);
   const files = new Set(extra?.files);
   const named = /* @__PURE__ */ new Set();
-  for (const tok of text.match(PATH_TOKEN) ?? []) {
+  for (const tok of text2.match(PATH_TOKEN) ?? []) {
     const t = tok.replace(/^\.\//, "");
     for (const f of repo.files) if (f === t || f.endsWith(`/${t}`)) {
       files.add(f);
       named.add(f);
     }
   }
-  const words2 = new Set([...text.matchAll(/`([^`]+)`/g)].map((m) => m[1].trim()).filter((w) => /^[\w.$]{3,}$/.test(w)));
-  for (const w of text.split(/[^A-Za-z0-9_]+/)) if (isSymbol(w)) words2.add(w);
+  const words2 = new Set([...text2.matchAll(/`([^`]+)`/g)].map((m) => m[1].trim()).filter((w) => /^[\w.$]{3,}$/.test(w)));
+  for (const w of text2.split(/[^A-Za-z0-9_]+/)) if (isSymbol(w)) words2.add(w);
   for (const w of [...words2].slice(0, MAX_SYMBOLS)) for (const f of repo.grep(w).slice(0, MAX_PER_SYMBOL)) files.add(f);
   const located = [...files].sort().slice(0, MAX_FILES);
-  const sensitive = ZONES.filter((z) => z.text.some((re) => re.test(text)) || extra?.zones.includes(z.zone) || located.some((f) => z.path.test(f))).map((z) => z.zone);
+  const sensitive = ZONES.filter((z) => z.text.some((re) => re.test(text2)) || extra?.zones.includes(z.zone) || located.some((f) => z.path.test(f))).map((z) => z.zone);
   const greenfield = repo.gitOk && (repo.commits === 0 || repo.files.length < 5);
   if (!repo.gitOk) reasons.push("git unavailable");
-  const wordCount = text.trim().split(/\s+/).length;
+  const wordCount = text2.trim().split(/\s+/).length;
   const sized = named.size ? named.size : located.length;
-  let path17;
+  let path18;
   if (greenfield) {
-    path17 = "large";
+    path18 = "large";
     reasons.push("greenfield repository");
-  } else if (LARGE.some((re) => re.test(text))) {
-    path17 = "large";
+  } else if (LARGE.some((re) => re.test(text2))) {
+    path18 = "large";
     reasons.push("architecture-scale wording");
   } else if (sized > 10) {
-    path17 = "large";
+    path18 = "large";
     reasons.push(`${sized} files located`);
   } else if (sized > 3) {
-    path17 = "medium";
+    path18 = "medium";
     reasons.push(`${sized} files located`);
   } else if (sized === 0) {
-    path17 = "small";
+    path18 = "small";
     reasons.push("no files located: the session should judge the scope");
-  } else if (sized === 1 && wordCount <= 25 && !RENAME.some((re) => re.test(text))) {
-    path17 = "trivial";
+  } else if (sized === 1 && wordCount <= 25 && !RENAME.some((re) => re.test(text2))) {
+    path18 = "trivial";
     reasons.push(named.size ? "one named file, short task" : "one file, short task");
   } else {
-    path17 = "small";
+    path18 = "small";
     reasons.push(`${sized} file(s) located`);
   }
-  if (sensitive.length && PATH_ORDER.indexOf(path17) < PATH_ORDER.indexOf("medium")) {
-    path17 = "medium";
+  if (sensitive.length && PATH_ORDER.indexOf(path18) < PATH_ORDER.indexOf("medium")) {
+    path18 = "medium";
     reasons.push(`sensitive zone: ${sensitive.join(", ")}`);
   }
-  return { path: path17, files: located, sensitive, greenfield, validators, reasons };
+  return { path: path18, files: located, sensitive, greenfield, validators, reasons };
 }
 
 // src/forge/brief.ts
@@ -12396,11 +12396,11 @@ var DEFAULTS = {
   validatorTimeoutSec: 600,
   swarm: { parallel: 3, launcher: "bg" }
 };
-function parseConfig(text) {
-  if (text === null || !text.trim()) return structuredClone(DEFAULTS);
+function parseConfig(text2) {
+  if (text2 === null || !text2.trim()) return structuredClone(DEFAULTS);
   let raw;
   try {
-    raw = (0, import_yaml2.parse)(text);
+    raw = (0, import_yaml2.parse)(text2);
   } catch (e) {
     throw new ConfigError(`.forge/config.yaml: ${e.message}`);
   }
@@ -12443,19 +12443,19 @@ function findingOf(v) {
   const sev = typeof f.severity === "string" ? f.severity.trim().toLowerCase() : "";
   const out = { severity: SEVERITIES.includes(sev) ? sev : "important", problem: f.problem };
   if (typeof f.file === "string" && f.file.trim()) out.file = f.file;
-  const line = lineOf(f.line);
-  if (line !== void 0) out.line = line;
+  const line2 = lineOf(f.line);
+  if (line2 !== void 0) out.line = line2;
   if (typeof f.fix === "string") out.fix = f.fix;
   return out;
 }
-function parseReview(text) {
-  if (!text) return invalidReview();
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
+function parseReview(text2) {
+  if (!text2) return invalidReview();
+  const start = text2.indexOf("{");
+  const end = text2.lastIndexOf("}");
   if (start < 0 || end <= start) return invalidReview();
   let raw;
   try {
-    raw = JSON.parse(text.slice(start, end + 1));
+    raw = JSON.parse(text2.slice(start, end + 1));
   } catch {
     return invalidReview();
   }
@@ -12485,13 +12485,13 @@ function weightsFor(opts) {
 }
 var s = (v) => typeof v === "string" ? v : v == null ? "" : String(v);
 var truthy = (v) => v === true || typeof v === "string" && v.trim().toLowerCase() === "true";
-function parseVerifyFile(text) {
-  if (!text) return null;
-  const a = text.indexOf("{"), b = text.lastIndexOf("}");
+function parseVerifyFile(text2) {
+  if (!text2) return null;
+  const a = text2.indexOf("{"), b = text2.lastIndexOf("}");
   if (a < 0 || b <= a) return null;
   let raw;
   try {
-    raw = JSON.parse(text.slice(a, b + 1));
+    raw = JSON.parse(text2.slice(a, b + 1));
   } catch {
     return null;
   }
@@ -12594,8 +12594,8 @@ function synthesize(reviews, weights, validatorsOk, failingValidators = []) {
 
 // src/forge/loop.ts
 var CAP = { medium: 3, large: 4 };
-function decideRound(history, path17) {
-  const cap = CAP[path17];
+function decideRound(history, path18) {
+  const cap = CAP[path18];
   const last = history.at(-1);
   const round = history.filter((h) => h.action !== "accept").length;
   const tierUp = round >= 3;
@@ -12629,15 +12629,15 @@ function normalizeProposal(x) {
   if (!oneOf3(PROPOSAL_CATEGORIES, o.category) || !oneOf3(PROPOSAL_RISKS, o.risk) || !oneOf3(PROPOSAL_STATUSES, o.status)) return null;
   if (o.source !== "scout" && o.source !== "user") return null;
   if (!str4(o.title) || !o.title.trim() || !str4(o.author)) return null;
-  const text = (v) => str4(v) ? v.slice(0, MAX_PROPOSAL_TEXT) : "";
+  const text2 = (v) => str4(v) ? v.slice(0, MAX_PROPOSAL_TEXT) : "";
   const out = {
     ts: str4(o.ts) ? o.ts : "",
     category: o.category,
     risk: o.risk,
     title: o.title.slice(0, MAX_PROPOSAL_TITLE),
-    rationale: text(o.rationale),
-    evidence: text(o.evidence),
-    pillar: text(o.pillar).slice(0, MAX_PROPOSAL_TITLE),
+    rationale: text2(o.rationale),
+    evidence: text2(o.evidence),
+    pillar: text2(o.pillar).slice(0, MAX_PROPOSAL_TITLE),
     status: o.status,
     source: o.source,
     author: o.author
@@ -12737,10 +12737,10 @@ var OPS = /ops\/s/giu;
 var BEFORE_AFTER = /\d+(?:\.\d+)?\s*ms\s*(?:→|->)\s*\d+(?:\.\d+)?\s*ms/giu;
 var TEST_WORD = /\b(?:tests?|tested|spec)\b/giu;
 var wordsIn = (s2) => s2.match(/[\p{L}\p{N}]+/gu) ?? [];
-function hasUnnegated(text, re) {
-  for (const m of text.matchAll(re)) {
-    const before = wordsIn(text.slice(0, m.index)).slice(-WORDS_BEFORE);
-    const after = wordsIn(text.slice(m.index + m[0].length)).slice(0, WORDS_AFTER);
+function hasUnnegated(text2, re) {
+  for (const m of text2.matchAll(re)) {
+    const before = wordsIn(text2.slice(0, m.index)).slice(-WORDS_BEFORE);
+    const after = wordsIn(text2.slice(m.index + m[0].length)).slice(0, WORDS_AFTER);
     if (![...before, ...after].some((w) => NEGATORS.has(w.toLowerCase()))) return true;
   }
   return false;
@@ -12783,10 +12783,10 @@ function similarOpen(p, all) {
   }
   return null;
 }
-function safeZone(path17) {
-  if (!path17 || !/^[A-Za-z0-9_./*-]+$/.test(path17) || path17.startsWith("-")) return null;
-  if (path17.startsWith("/") || path17.split("/").includes("..")) return null;
-  return path17;
+function safeZone(path18) {
+  if (!path18 || !/^[A-Za-z0-9_./*-]+$/.test(path18) || path18.startsWith("-")) return null;
+  if (path18.startsWith("/") || path18.split("/").includes("..")) return null;
+  return path18;
 }
 
 // src/forge/to-task.ts
@@ -13307,8 +13307,8 @@ function hookLive(io, forced) {
     }
     if (event === "SessionStart" && !forced) {
       const running = Object.values(exec.tasks).filter((t) => t.status === "running").length;
-      const text = role === "coordinator" ? `forge: this session coordinates the execution ${exec.runId} (${exec.mode}, ${running}/${exec.parallel} running, run branch ${exec.branch}). Resume it with /forge:run \u2192 Resume: renew your lease, reconcile each task and keep stepping.` : `forge: this session is the ${role} session of ${member?.task ?? "a task"} in the execution ${exec.runId} coordinated by ${exec.coordinator}. Resume it with /forge:run \u2192 Run member: rejoin with FORGE swarm join, renew your lease and continue from your last reported stage.`;
-      return JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: text } });
+      const text2 = role === "coordinator" ? `forge: this session coordinates the execution ${exec.runId} (${exec.mode}, ${running}/${exec.parallel} running, run branch ${exec.branch}). Resume it with /forge:run \u2192 Resume: renew your lease, reconcile each task and keep stepping.` : `forge: this session is the ${role} session of ${member?.task ?? "a task"} in the execution ${exec.runId} coordinated by ${exec.coordinator}. Resume it with /forge:run \u2192 Run member: rejoin with FORGE swarm join, renew your lease and continue from your last reported stage.`;
+      return JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: text2 } });
     }
   } catch {
   }
@@ -13319,8 +13319,8 @@ function hookLive(io, forced) {
 var import_node_path12 = __toESM(require("node:path"), 1);
 function mainWorktreeFrom(porcelain) {
   if (typeof porcelain !== "string") return null;
-  const line = porcelain.split(/\r?\n/).find((l) => l.startsWith("worktree "));
-  return line ? line.slice("worktree ".length).trim() || null : null;
+  const line2 = porcelain.split(/\r?\n/).find((l) => l.startsWith("worktree "));
+  return line2 ? line2.slice("worktree ".length).trim() || null : null;
 }
 function samePath(a, b) {
   const norm3 = (p) => {
@@ -13451,9 +13451,9 @@ function runSetup(deps, dir, root) {
 }
 function worktreeHolding(porcelain, branch) {
   let at = null;
-  for (const line of (porcelain ?? "").split(/\r?\n/)) {
-    if (line.startsWith("worktree ")) at = line.slice("worktree ".length).trim();
-    else if (line === `branch refs/heads/${branch}`) return at;
+  for (const line2 of (porcelain ?? "").split(/\r?\n/)) {
+    if (line2.startsWith("worktree ")) at = line2.slice("worktree ".length).trim();
+    else if (line2 === `branch refs/heads/${branch}`) return at;
   }
   return null;
 }
@@ -13537,8 +13537,8 @@ function mergeIn(at, ref, message, scope, timeoutSec, configRoot, cacheDir, targ
   if (!pre) return { result: "conflict", detail: "cannot read HEAD" };
   const rollback = (detail) => {
     const undone = at.git(["merge", "--abort"]) !== null;
-    const clean = undone && at.git(["rev-parse", "HEAD"])?.trim() === pre && !merging();
-    return { result: "conflict", detail: clean ? detail : `rollback failed: needs manual attention (${detail})` };
+    const clean2 = undone && at.git(["rev-parse", "HEAD"])?.trim() === pre && !merging();
+    return { result: "conflict", detail: clean2 ? detail : `rollback failed: needs manual attention (${detail})` };
   };
   let baseline = readBaseline(cacheDir, key, pre);
   if (baseline === null) {
@@ -13980,9 +13980,9 @@ function swarmCommand(args, io, deps) {
       }
       if (sub === "nudge") {
         const es2 = (planArg ? loadPlanArg(io, planArg, "nudge").locale : planLocale(io.cwd, e.project)) === "es";
-        const text = es2 ? `[forge run] ${task}: contin\xFAa con ${t.stage}; si est\xE1s bloqueado, m\xE1rcalo como bloqueado` : `[forge run] ${task}: continue with ${t.stage}; if you are blocked, mark it blocked`;
+        const text2 = es2 ? `[forge run] ${task}: contin\xFAa con ${t.stage}; si est\xE1s bloqueado, m\xE1rcalo como bloqueado` : `[forge run] ${task}: continue with ${t.stage}; if you are blocked, mark it blocked`;
         saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, nudgedAt: iso3 } } });
-        return json({ task, name: `wp-${e.project}-${task}`, text });
+        return json({ task, name: `wp-${e.project}-${task}`, text: text2 });
       }
       const planPath = planArg;
       if (!planPath) throw new UsageError("swarm relaunch: --plan is required");
@@ -14063,7 +14063,7 @@ function swarmCommand(args, io, deps) {
       const liveness2 = seen.reduce((a, b) => order.indexOf(b) > order.indexOf(a) ? b : a, "stopped");
       if (liveness2 !== "stopped") return json({ took: false, previous, liveness: liveness2, joinAs: "manual" });
       saveExecution(io.cwd, { ...e, coordinator: session, hookSession: null, sleepUntil: null });
-      appendEvent(io.cwd, { ts: iso3, kind: "decision", what: "takeover", previous, by: session });
+      appendEvent(io.cwd, { ts: iso3, kind: "decision", point: "takeover", what: "takeover", chosen: session, why: `the coordinator ${previous} stopped`, by: "user", weight: "minor", previous, session });
       return json({ took: true, previous, runId: e.runId, running: Object.entries(e.tasks).filter(([, t]) => t.status === "running").map(([id2]) => id2) });
     }
     case "integrate":
@@ -14125,14 +14125,14 @@ var import_node_crypto2 = require("node:crypto");
 var import_node_fs14 = require("node:fs");
 var import_node_path15 = __toESM(require("node:path"), 1);
 var import_yaml4 = __toESM(require_dist(), 1);
-function surfaceHash(text) {
-  return (0, import_node_crypto2.createHash)("sha256").update(text.replace(/\r\n/g, "\n")).digest("hex").slice(0, 16);
+function surfaceHash(text2) {
+  return (0, import_node_crypto2.createHash)("sha256").update(text2.replace(/\r\n/g, "\n")).digest("hex").slice(0, 16);
 }
 var strs = (x) => Array.isArray(x) ? x.filter((s2) => typeof s2 === "string" && s2.trim() !== "") : [];
 var surfaceFile = (name) => `.forge/verify/${name}.md`;
-function parseSurface(name, text) {
-  const t = text.replace(/\r\n/g, "\n");
-  const out = { name, file: surfaceFile(name), title: name, affects: null, tools: [], hash: surfaceHash(text) };
+function parseSurface(name, text2) {
+  const t = text2.replace(/\r\n/g, "\n");
+  const out = { name, file: surfaceFile(name), title: name, affects: null, tools: [], hash: surfaceHash(text2) };
   let body = t;
   const m = /^---\n([\s\S]*?)\n---\n?/.exec(t);
   if (m) {
@@ -14161,12 +14161,12 @@ function readSurfaces(root) {
   }
   return names2.filter((f) => f.endsWith(".md") && NAME.test(f.slice(0, -3))).sort().map((f) => {
     const name = f.slice(0, -3);
-    let text = "";
+    let text2 = "";
     try {
-      text = (0, import_node_fs14.readFileSync)(import_node_path15.default.join(root, ".forge", "verify", f), "utf8");
+      text2 = (0, import_node_fs14.readFileSync)(import_node_path15.default.join(root, ".forge", "verify", f), "utf8");
     } catch {
     }
-    return parseSurface(name, text);
+    return parseSurface(name, text2);
   });
 }
 var WEB_DEPS = ["vite", "next", "react-scripts", "@angular/core", "svelte", "vue", "astro"];
@@ -14214,17 +14214,17 @@ function bodyLines(t) {
   const hdr = /^---\n[\s\S]*?\n---[ \t]*(\n|$)/.exec(t);
   if (hdr) pos = hdr[0].length;
   let fence = false;
-  for (const text of t.slice(pos).split("\n")) {
-    if (/^\s*(```|~~~)/.test(text)) fence = !fence;
-    else if (!fence) out.push({ text, at: pos });
-    pos += text.length + 1;
+  for (const text2 of t.slice(pos).split("\n")) {
+    if (/^\s*(```|~~~)/.test(text2)) fence = !fence;
+    else if (!fence) out.push({ text: text2, at: pos });
+    pos += text2.length + 1;
   }
   return out;
 }
-function appendLearned(text, date, notes, heading = "Learned") {
-  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+function appendLearned(text2, date, notes, heading = "Learned") {
+  const eol = text2.includes("\r\n") ? "\r\n" : "\n";
   const lines = notes.map((n) => `- ${date}: ${n.replace(/\s*\r?\n\s*/g, " ").trim()}`);
-  const t = text.replace(/\r\n/g, "\n");
+  const t = text2.replace(/\r\n/g, "\n");
   const bl = bodyLines(t);
   const hi = bl.findIndex((l) => HEADING.test(l.text));
   let next;
@@ -14248,23 +14248,287 @@ ${lines.join("\n")}
   return { text: eol === "\n" ? next : next.replace(/\n/g, "\r\n"), count: count2 };
 }
 
+// src/forge/decisions.ts
+var import_node_fs15 = require("node:fs");
+var import_node_path16 = __toESM(require("node:path"), 1);
+
+// src/lib/decisions.ts
+var DECISION_POINTS = ["route", "triage", "design-apply", "design-approve", "plan-confirm", "mode", "ruling", "safe-path", "takeover", "revert", "other"];
+var DECISION_BY = ["auto", "unattended", "user"];
+var MAJOR_POINTS = ["route", "design-approve", "plan-confirm", "mode"];
+var LIMITS = { what: 200, chosen: 200, alternative: 200, alternatives: 10, why: 500, revert: 500, safePath: 200, reason: 300 };
+var DECISIONS_MAX = 16 * 1024;
+var DECISIONS_WINDOW_MS = 24 * 36e5;
+var LAST_MAX = 5;
+var SHORT = 80;
+var SHA = /^[0-9a-f]{7,40}$/i;
+var PROJECT_ID = /^[A-Za-z0-9_.-]{1,64}$/;
+var TASK_ID = /^[A-Za-z0-9_.:-]{1,120}$/;
+var RUN_ID = /^[A-Za-z0-9_.-]{1,120}$/;
+var BRANCH = /^[A-Za-z0-9_./][A-Za-z0-9_\-./]{0,199}$/;
+var isObj4 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
+var str5 = (x) => typeof x === "string";
+var oneOf4 = (list, x) => str5(x) && list.includes(x) ? x : null;
+var notDots = (s2) => s2 !== "." && s2 !== "..";
+var clean = (s2, max) => s2.replace(/[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
+var text = (x, max) => str5(x) ? clean(x, max) || null : null;
+var ident = (x, re) => str5(x) && re.test(x) && notDots(x) ? x : null;
+var weightOf = (point) => MAJOR_POINTS.includes(point) ? "major" : "minor";
+function normalizeUndo(x) {
+  if (!isObj4(x)) return null;
+  switch (x.type) {
+    case "git-revert": {
+      const base = str5(x.base) && SHA.test(x.base) ? x.base : null;
+      const head = str5(x.head) && SHA.test(x.head) ? x.head : null;
+      if (!base || !head) return null;
+      const cwd2 = text(x.cwd, 500);
+      return cwd2 ? { type: "git-revert", base, head, cwd: cwd2 } : { type: "git-revert", base, head };
+    }
+    case "design-reopen": {
+      const project = ident(x.project, PROJECT_ID);
+      return project ? { type: "design-reopen", project } : null;
+    }
+    case "plan-edit": {
+      const project = ident(x.project, PROJECT_ID);
+      const tasks = Array.isArray(x.tasks) ? x.tasks.map((t) => ident(t, TASK_ID)).filter((t) => t !== null).slice(0, 50) : [];
+      return project && tasks.length ? { type: "plan-edit", project, tasks } : null;
+    }
+    case "branch-discard": {
+      const branch = str5(x.branch) && BRANCH.test(x.branch) && !x.branch.includes("..") ? x.branch : null;
+      return branch ? { type: "branch-discard", branch } : null;
+    }
+    case "none": {
+      const reason = text(x.reason, LIMITS.reason);
+      return reason ? { type: "none", reason } : null;
+    }
+    default:
+      return null;
+  }
+}
+function normalizeDecision(x) {
+  if (!isObj4(x)) return null;
+  const ts = str5(x.ts) && x.ts ? x.ts : null;
+  const what = text(x.what, LIMITS.what);
+  if (!ts || !what) return null;
+  const safePath = text(x.safePath, LIMITS.safePath);
+  const point = oneOf4(DECISION_POINTS, x.point) ?? (safePath ? "safe-path" : what === "takeover" ? "takeover" : "other");
+  const alternatives = Array.isArray(x.alternatives) ? x.alternatives.map((a) => text(a, LIMITS.alternative)).filter((a) => a !== null).slice(0, LIMITS.alternatives) : [];
+  return {
+    ts,
+    point,
+    what,
+    chosen: text(x.chosen, LIMITS.chosen) ?? safePath ?? what,
+    alternatives,
+    why: text(x.why, LIMITS.why) ?? "",
+    by: oneOf4(DECISION_BY, x.by) ?? "unattended",
+    weight: x.weight === "major" || x.weight === "minor" ? x.weight : weightOf(point),
+    revert: text(x.revert, LIMITS.revert),
+    undo: normalizeUndo(x.undo),
+    task: ident(x.task, TASK_ID),
+    runId: ident(x.runId, RUN_ID),
+    safePath,
+    revertOf: typeof x.revertOf === "number" && Number.isInteger(x.revertOf) && x.revertOf > 0 ? x.revertOf : null
+  };
+}
+function decisionScope(d) {
+  if (d.runId) return d.runId;
+  return d.task ? d.task.replace(/-\d{1,3}$/, "") : null;
+}
+function scopeFileName(scope) {
+  const s2 = scope.replace(/[^A-Za-z0-9_.-]/g, "-").slice(0, 120);
+  return s2 && notDots(s2) ? s2 : "forge";
+}
+function nextDecisionsDoc(prev, d, n) {
+  if (d.by === "user") return prev;
+  const scope = decisionScope(d) ?? "forge";
+  const base = prev && prev.scope === scope ? prev : null;
+  const entry = { n, point: d.point, what: clean(d.what, SHORT), chosen: clean(d.chosen, SHORT), ts: d.ts };
+  return {
+    ts: d.ts,
+    scope,
+    count: (base?.count ?? 0) + 1,
+    autonomy: d.by,
+    last: [...base?.last ?? [], { ...entry, weight: d.weight }].slice(-LAST_MAX),
+    lastMajor: d.weight === "major" ? entry : base?.lastMajor ?? null
+  };
+}
+var posInt = (x) => typeof x === "number" && Number.isInteger(x) && x > 0 ? x : null;
+function entryOf(x) {
+  if (!isObj4(x)) return null;
+  const n = posInt(x.n);
+  const ts = str5(x.ts) && x.ts ? x.ts : null;
+  const point = oneOf4(DECISION_POINTS, x.point);
+  const what = text(x.what, SHORT);
+  const chosen = text(x.chosen, SHORT);
+  return n && ts && point && what && chosen ? { n, point, what, chosen, ts } : null;
+}
+function normalizeDecisionsDoc(x) {
+  if (!isObj4(x)) return null;
+  const ts = str5(x.ts) && x.ts ? x.ts : null;
+  const scope = text(x.scope, 120);
+  const count2 = typeof x.count === "number" && Number.isInteger(x.count) && x.count >= 0 ? x.count : null;
+  const autonomy = x.autonomy === "auto" || x.autonomy === "unattended" ? x.autonomy : null;
+  if (!ts || !scope || count2 === null || !autonomy) return null;
+  const last = [];
+  for (const e of Array.isArray(x.last) ? x.last : []) {
+    const entry = entryOf(e);
+    if (entry && isObj4(e)) last.push({ ...entry, weight: e.weight === "major" ? "major" : "minor" });
+  }
+  return { ts, scope, count: count2, autonomy, last: last.slice(-LAST_MAX), lastMajor: entryOf(x.lastMajor) };
+}
+
+// src/forge/decisions.ts
+var DecisionInputError = class extends Error {
+};
+var decisionsFile = (root) => import_node_path16.default.join(root, ".forge", "decisions.json");
+var notDots2 = (s2) => s2 !== "." && s2 !== "..";
+var line = (max) => external_exports.string().transform((s2) => clean(s2, max)).pipe(external_exports.string().min(1, "must not be empty"));
+var ident2 = (re) => external_exports.string().regex(re).refine(notDots2, "invalid id");
+var Undo = external_exports.discriminatedUnion("type", [
+  external_exports.object({ type: external_exports.literal("git-revert"), base: external_exports.string().regex(SHA), head: external_exports.string().regex(SHA), cwd: line(500).optional() }).strict(),
+  external_exports.object({ type: external_exports.literal("design-reopen"), project: ident2(PROJECT_ID) }).strict(),
+  external_exports.object({ type: external_exports.literal("plan-edit"), project: ident2(PROJECT_ID), tasks: external_exports.array(ident2(TASK_ID)).min(1).max(50) }).strict(),
+  external_exports.object({ type: external_exports.literal("branch-discard"), branch: external_exports.string().regex(BRANCH).refine((s2) => !s2.includes(".."), "invalid branch") }).strict(),
+  external_exports.object({ type: external_exports.literal("none"), reason: line(LIMITS.reason) }).strict()
+]);
+var Input = external_exports.object({
+  point: external_exports.enum(DECISION_POINTS),
+  what: line(LIMITS.what),
+  chosen: line(LIMITS.chosen),
+  alternatives: external_exports.array(line(LIMITS.alternative)).max(LIMITS.alternatives).optional(),
+  why: line(LIMITS.why),
+  by: external_exports.enum(DECISION_BY),
+  weight: external_exports.enum(["major", "minor"]).optional(),
+  revert: line(LIMITS.revert).optional(),
+  undo: Undo.optional(),
+  safePath: line(LIMITS.safePath).optional(),
+  revertOf: external_exports.number().int().positive().optional(),
+  task: ident2(TASK_ID).optional(),
+  runId: ident2(RUN_ID).optional()
+}).strict();
+function readDecisionsDoc(root) {
+  try {
+    return normalizeDecisionsDoc(JSON.parse((0, import_node_fs15.readFileSync)(decisionsFile(root), "utf8")));
+  } catch {
+    return null;
+  }
+}
+function saveDecisionsDoc(root, event, n) {
+  try {
+    const d = normalizeDecision(event);
+    if (!d) return;
+    const prev = readDecisionsDoc(root);
+    const next = nextDecisionsDoc(prev, d, n);
+    if (!next || next === prev) return;
+    forgeDir(root);
+    const file = decisionsFile(root);
+    const tmp = `${file}.${process.pid}.tmp`;
+    try {
+      (0, import_node_fs15.writeFileSync)(tmp, JSON.stringify(next) + "\n");
+      (0, import_node_fs15.renameSync)(tmp, file);
+    } finally {
+      (0, import_node_fs15.rmSync)(tmp, { force: true });
+    }
+  } catch {
+  }
+}
+function addDecision(root, raw, ctx) {
+  const r2 = Input.safeParse(raw);
+  if (!r2.success) throw new DecisionInputError(r2.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; "));
+  const { task: dataTask, runId: dataRun, weight, ...rest } = r2.data;
+  const task = ctx.task ?? dataTask;
+  const runId = dataRun ?? ctx.runId ?? void 0;
+  const event = {
+    ts: ctx.ts,
+    kind: "decision",
+    ...rest,
+    weight: weight ?? weightOf(rest.point),
+    ...task ? { task } : {},
+    ...runId ? { runId } : {}
+  };
+  appendEvent(root, event);
+  const n = readEvents(root).filter((e) => e.kind === "decision").length;
+  saveDecisionsDoc(root, event, n);
+  return { n, event };
+}
+function allDecisions(root) {
+  const out = [];
+  readEvents(root).filter((e) => e.kind === "decision").forEach((e, i) => {
+    const d = normalizeDecision(e);
+    if (d) out.push({ ...d, n: i + 1 });
+  });
+  return out;
+}
+var ownTask = (task, t) => t === task || !!t && t.startsWith(`${task}-`) && /^\d{1,3}$/.test(t.slice(task.length + 1));
+function listDecisions(root, f) {
+  const all = allDecisions(root);
+  let out = all;
+  if (f.task) {
+    const task = f.task;
+    out = out.filter((d) => ownTask(task, d.task));
+  }
+  if (f.run) out = out.filter((d) => d.runId === f.run);
+  if (f.since) {
+    const s2 = Date.parse(f.since);
+    out = out.filter((d) => Date.parse(d.ts) >= s2);
+  }
+  if (!f.task && !f.run && !f.since && !f.all) {
+    const latest = [...all].reverse().find((d) => d.by !== "user");
+    const scope = readDecisionsDoc(root)?.scope ?? (latest ? decisionScope(latest) ?? "forge" : null);
+    out = scope ? out.filter((d) => (decisionScope(d) ?? "forge") === scope) : [];
+  }
+  return f.auto ? out.filter((d) => d.by !== "user") : out;
+}
+var MD = {
+  es: {
+    title: "Decisiones autom\xE1ticas",
+    intro: "forge tom\xF3 estas decisiones sin preguntar. Para deshacer una: `/forge:decisions revert <n>`.",
+    chosen: "Elegido",
+    alternatives: "Alternativas",
+    why: "Por qu\xE9",
+    revert: "C\xF3mo revertir",
+    when: "Cu\xE1ndo",
+    noRevert: "no se puede revertir de forma autom\xE1tica"
+  },
+  en: {
+    title: "Automatic decisions",
+    intro: "forge took these decisions without asking. To undo one: `/forge:decisions revert <n>`.",
+    chosen: "Chosen",
+    alternatives: "Alternatives",
+    why: "Why",
+    revert: "How to undo",
+    when: "When",
+    noRevert: "cannot be undone automatically"
+  }
+};
+function renderDecisionsMd(list, scope, locale) {
+  const t = locale.toLowerCase().startsWith("es") ? MD.es : MD.en;
+  const out = [`# ${t.title} \xB7 ${scope}`, "", t.intro, ""];
+  for (const d of list) {
+    out.push(`## ${d.n}. ${d.what}`, "", `- **${t.chosen}:** ${d.chosen}`);
+    if (d.alternatives.length) out.push(`- **${t.alternatives}:** ${d.alternatives.join(", ")}`);
+    out.push(`- **${t.why}:** ${d.why || "\u2014"}`, `- **${t.revert}:** ${d.revert ?? t.noRevert}`, `- **${t.when}:** ${d.ts} \xB7 ${d.by} \xB7 ${d.weight}`, "");
+  }
+  return out.join("\n");
+}
+
 // src/forge/cli/run.ts
-var USAGE = "usage: forge <triage|brief|validate|verdict|round|log|agents|last|proposals|surfaces|tools|local|verify-plan|verify-cleanup|waypoint-cli|infinite|cycle|swarm|stop|hook> ...";
+var USAGE = "usage: forge <triage|brief|validate|verdict|round|log|decision|agents|last|proposals|surfaces|tools|local|verify-plan|verify-cleanup|waypoint-cli|infinite|cycle|swarm|stop|hook> ...";
 var MAX_OUTPUT = 4 * 1024 * 1024;
 var MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 function readTail(fd) {
-  const size = (0, import_node_fs15.fstatSync)(fd).size;
+  const size = (0, import_node_fs16.fstatSync)(fd).size;
   const len = Math.min(size, MAX_OUTPUT);
   const buf = Buffer.alloc(len);
   let off = 0;
   while (off < len) {
-    const n = (0, import_node_fs15.readSync)(fd, buf, off, len - off, size - len + off);
+    const n = (0, import_node_fs16.readSync)(fd, buf, off, len - off, size - len + off);
     if (n <= 0) break;
     off += n;
   }
-  const text = buf.subarray(0, off).toString("utf8");
+  const text2 = buf.subarray(0, off).toString("utf8");
   return size > MAX_OUTPUT ? `[output truncated]
-${text}` : text;
+${text2}` : text2;
 }
 var TIMEOUT_EXIT = 124;
 var WRAPPER_SOURCE = `
@@ -14294,9 +14558,9 @@ function defaultExec(cwd2) {
     let dir;
     let fd;
     try {
-      dir = (0, import_node_fs15.mkdtempSync)(import_node_path16.default.join((0, import_node_os.tmpdir)(), "forge-exec-"));
-      const file = import_node_path16.default.join(dir, "out.log");
-      fd = (0, import_node_fs15.openSync)(file, "w+");
+      dir = (0, import_node_fs16.mkdtempSync)(import_node_path17.default.join((0, import_node_os.tmpdir)(), "forge-exec-"));
+      const file = import_node_path17.default.join(dir, "out.log");
+      fd = (0, import_node_fs16.openSync)(file, "w+");
       const r2 = (0, import_node_child_process2.spawnSync)(process.execPath, ["-e", WRAPPER_SOURCE, "--", cmd, String(timeoutMs), file], {
         cwd: cwd2,
         windowsHide: true,
@@ -14306,7 +14570,7 @@ function defaultExec(cwd2) {
         maxBuffer: 64 * 1024
       });
       const err = r2.error;
-      const timedOut2 = err?.code === "ETIMEDOUT" || r2.status === TIMEOUT_EXIT && (0, import_node_fs15.existsSync)(`${file}.timeout`);
+      const timedOut2 = err?.code === "ETIMEDOUT" || r2.status === TIMEOUT_EXIT && (0, import_node_fs16.existsSync)(`${file}.timeout`);
       let output = readTail(fd);
       if (r2.stderr) output += `${output && !output.endsWith("\n") ? "\n" : ""}${r2.stderr}`;
       if (err && !timedOut2) output += `${output && !output.endsWith("\n") ? "\n" : ""}${err.message}
@@ -14318,13 +14582,13 @@ function defaultExec(cwd2) {
     } finally {
       if (fd !== void 0) {
         try {
-          (0, import_node_fs15.closeSync)(fd);
+          (0, import_node_fs16.closeSync)(fd);
         } catch {
         }
       }
       if (dir !== void 0) {
         try {
-          (0, import_node_fs15.rmSync)(dir, { recursive: true, force: true });
+          (0, import_node_fs16.rmSync)(dir, { recursive: true, force: true });
         } catch {
         }
       }
@@ -14341,17 +14605,17 @@ function defaultGit(cwd2) {
   };
 }
 var repoReader = (root) => ({
-  exists: (rel) => (0, import_node_fs15.existsSync)(import_node_path16.default.join(root, rel)),
+  exists: (rel) => (0, import_node_fs16.existsSync)(import_node_path17.default.join(root, rel)),
   read: (rel) => {
     try {
-      return (0, import_node_fs15.readFileSync)(import_node_path16.default.join(root, rel), "utf8");
+      return (0, import_node_fs16.readFileSync)(import_node_path17.default.join(root, rel), "utf8");
     } catch {
       return null;
     }
   },
   list: (dir) => {
     try {
-      return (0, import_node_fs15.readdirSync)(import_node_path16.default.join(root, dir ?? ""));
+      return (0, import_node_fs16.readdirSync)(import_node_path17.default.join(root, dir ?? ""));
     } catch {
       return [];
     }
@@ -14359,15 +14623,15 @@ var repoReader = (root) => ({
 });
 function planTask(cwd2, planArg, id2) {
   if (!planArg || !id2) throw new UsageError("--plan and --task are required");
-  let text;
+  let text2;
   try {
-    text = (0, import_node_fs15.readFileSync)(import_node_path16.default.resolve(cwd2, planArg), "utf8");
+    text2 = (0, import_node_fs16.readFileSync)(import_node_path17.default.resolve(cwd2, planArg), "utf8");
   } catch {
     throw new UsageError(`cannot read plan ${planArg}`);
   }
   let plan;
   try {
-    plan = parsePlan(text);
+    plan = parsePlan(text2);
   } catch (e) {
     if (e instanceof PlanError) throw new UsageError(`${planArg}: ${e.issues.join("; ")}`);
     throw e;
@@ -14377,13 +14641,13 @@ function planTask(cwd2, planArg, id2) {
   return { plan, task };
 }
 function findWaypointCli(scriptPath) {
-  const forgeRoot = import_node_path16.default.resolve(import_node_path16.default.dirname(scriptPath), "..");
-  const dev = import_node_path16.default.join(forgeRoot, "..", "waypoint", "dist", "waypoint.cjs");
-  if ((0, import_node_fs15.existsSync)(dev)) return import_node_path16.default.resolve(dev);
-  const base = import_node_path16.default.join(forgeRoot, "..", "..", "waypoint");
+  const forgeRoot = import_node_path17.default.resolve(import_node_path17.default.dirname(scriptPath), "..");
+  const dev = import_node_path17.default.join(forgeRoot, "..", "waypoint", "dist", "waypoint.cjs");
+  if ((0, import_node_fs16.existsSync)(dev)) return import_node_path17.default.resolve(dev);
+  const base = import_node_path17.default.join(forgeRoot, "..", "..", "waypoint");
   let versions = [];
   try {
-    versions = (0, import_node_fs15.readdirSync)(base);
+    versions = (0, import_node_fs16.readdirSync)(base);
   } catch {
     return null;
   }
@@ -14397,8 +14661,8 @@ function findWaypointCli(scriptPath) {
     return 0;
   };
   for (const v of versions.sort((a, b) => cmp(b, a))) {
-    const f = import_node_path16.default.join(base, v, "dist", "waypoint.cjs");
-    if ((0, import_node_fs15.existsSync)(f)) return import_node_path16.default.resolve(f);
+    const f = import_node_path17.default.join(base, v, "dist", "waypoint.cjs");
+    if ((0, import_node_fs16.existsSync)(f)) return import_node_path17.default.resolve(f);
   }
   return null;
 }
@@ -14406,7 +14670,7 @@ function stopContext(cwd2, now) {
   const proposals = loadProposals(cwd2);
   return {
     now,
-    stopFile: (0, import_node_fs15.existsSync)(stopFile(cwd2)),
+    stopFile: (0, import_node_fs16.existsSync)(stopFile(cwd2)),
     approvedPending: proposals.filter(isActionable).length,
     pendingProposals: proposals.filter((p) => p.status === "proposed" || p.status === "discussing").length
   };
@@ -14436,7 +14700,7 @@ function hookStop(io) {
       if (d2.ended) appendEvent(io.cwd, { ts: io.now().toISOString(), kind: "cycle", action: "stopped", reason: d2.ended });
       return JSON.stringify({ decision: "block", reason: d2.reason + replyIn(planLocale(io.cwd, exec?.project)) }) + "\n";
     }
-    const d = decideExecutionStop(hookInput, exec, { now: io.now(), stopFile: (0, import_node_fs15.existsSync)(stopFile(main)) });
+    const d = decideExecutionStop(hookInput, exec, { now: io.now(), stopFile: (0, import_node_fs16.existsSync)(stopFile(main)) });
     if (!d.block) return "";
     saveExecution(main, d.exec);
     return JSON.stringify({ decision: "block", reason: d.reason + replyIn(planLocale(main, d.exec.project)) }) + "\n";
@@ -14449,10 +14713,10 @@ function run(argv, io) {
   if (cwdAt >= 0) {
     const dir = argv[cwdAt + 1];
     if (!dir || dir.startsWith("--")) return { code: 2, stdout: "", stderr: "forge: --cwd needs a directory\n" };
-    const abs = import_node_path16.default.resolve(io.cwd, dir);
-    if (!(0, import_node_fs15.existsSync)(abs)) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} does not exist
+    const abs = import_node_path17.default.resolve(io.cwd, dir);
+    if (!(0, import_node_fs16.existsSync)(abs)) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} does not exist
 ` };
-    if (!(0, import_node_fs15.statSync)(abs).isDirectory()) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} is not a directory
+    if (!(0, import_node_fs16.statSync)(abs).isDirectory()) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} is not a directory
 ` };
     argv = [...argv.slice(0, cwdAt), ...argv.slice(cwdAt + 2)];
     io = { ...io, workdir: abs, git: defaultGit(abs), exec: defaultExec(abs) };
@@ -14480,7 +14744,7 @@ function run(argv, io) {
           const label = flag("data-file") !== void 0 ? "--data-file" : "--data";
           let parsed;
           try {
-            const raw = flag("data-file") !== void 0 ? (0, import_node_fs15.readFileSync)(import_node_path16.default.resolve(io.cwd, flag("data-file")), "utf8") : flag("data");
+            const raw = flag("data-file") !== void 0 ? (0, import_node_fs16.readFileSync)(import_node_path17.default.resolve(io.cwd, flag("data-file")), "utf8") : flag("data");
             parsed = JSON.parse(raw);
           } catch {
             throw new UsageError(`log: ${label} must be a JSON object`);
@@ -14494,8 +14758,8 @@ function run(argv, io) {
       }
       case "brief": {
         const { plan, task } = planTask(io.cwd, flag("plan"), flag("task"));
-        const design = flag("design") ?? import_node_path16.default.join(import_node_path16.default.dirname(flag("plan")), "design.md");
-        const designPath = (0, import_node_fs15.existsSync)(import_node_path16.default.resolve(io.cwd, design)) ? design.replace(/\\/g, "/") : null;
+        const design = flag("design") ?? import_node_path17.default.join(import_node_path17.default.dirname(flag("plan")), "design.md");
+        const designPath = (0, import_node_fs16.existsSync)(import_node_path17.default.resolve(io.cwd, design)) ? design.replace(/\\/g, "/") : null;
         return ok(renderBrief(plan, task, { planPath: flag("plan").replace(/\\/g, "/"), designPath }));
       }
       case "triage": {
@@ -14507,7 +14771,7 @@ function run(argv, io) {
         let task = textArgs.filter((a) => !a.startsWith("--")).join(" ").trim();
         if (flag("text-file") !== void 0) {
           try {
-            task = (0, import_node_fs15.readFileSync)(import_node_path16.default.resolve(io.cwd, flag("text-file")), "utf8").trim();
+            task = (0, import_node_fs16.readFileSync)(import_node_path17.default.resolve(io.cwd, flag("text-file")), "utf8").trim();
           } catch {
             throw new UsageError("triage: cannot read --text-file");
           }
@@ -14565,7 +14829,7 @@ function run(argv, io) {
           if (flag("baseline") === void 0) throw new UsageError("validate: --baseline needs the JSON a validate run printed on the base commit");
           let baseline;
           try {
-            baseline = JSON.parse((0, import_node_fs15.readFileSync)(import_node_path16.default.resolve(io.cwd, flag("baseline")), "utf8"));
+            baseline = JSON.parse((0, import_node_fs16.readFileSync)(import_node_path17.default.resolve(io.cwd, flag("baseline")), "utf8"));
           } catch {
             throw new UsageError("validate: --baseline must be the JSON written by forge validate");
           }
@@ -14581,14 +14845,14 @@ function run(argv, io) {
         const task = flag("task");
         const dirArg = flag("dir");
         if (!task || !dirArg) throw new UsageError("verdict: --task and --dir are required");
-        const dir = import_node_path16.default.resolve(io.cwd, dirArg);
+        const dir = import_node_path17.default.resolve(io.cwd, dirArg);
         const reviews = {};
         for (const name of ["correctness", "security", "perf"]) {
-          const file = import_node_path16.default.join(dir, `${name}.json`);
-          if ((0, import_node_fs15.existsSync)(file)) reviews[name] = parseReview((0, import_node_fs15.readFileSync)(file, "utf8"));
+          const file = import_node_path17.default.join(dir, `${name}.json`);
+          if ((0, import_node_fs16.existsSync)(file)) reviews[name] = parseReview((0, import_node_fs16.readFileSync)(file, "utf8"));
         }
-        const verifyPath = import_node_path16.default.join(dir, "verify.json");
-        const verifyFile = (0, import_node_fs15.existsSync)(verifyPath) ? parseVerifyFile((0, import_node_fs15.readFileSync)(verifyPath, "utf8")) : void 0;
+        const verifyPath = import_node_path17.default.join(dir, "verify.json");
+        const verifyFile = (0, import_node_fs16.existsSync)(verifyPath) ? parseVerifyFile((0, import_node_fs16.readFileSync)(verifyPath, "utf8")) : void 0;
         if (verifyFile !== void 0) reviews.verify = verifyReview(verifyFile);
         if (!Object.keys(reviews).length) throw new UsageError(`no reviews found in ${dirArg}`);
         let validatorsOk;
@@ -14598,7 +14862,7 @@ function run(argv, io) {
         if (flag("validators")) {
           let results;
           try {
-            results = JSON.parse((0, import_node_fs15.readFileSync)(import_node_path16.default.resolve(io.cwd, flag("validators")), "utf8"));
+            results = JSON.parse((0, import_node_fs16.readFileSync)(import_node_path17.default.resolve(io.cwd, flag("validators")), "utf8"));
           } catch {
             throw new UsageError("verdict: --validators must be the JSON written by forge validate");
           }
@@ -14621,7 +14885,7 @@ function run(argv, io) {
           ts: ts(),
           kind: "verdict",
           task,
-          dir: import_node_path16.default.relative(io.cwd, dir).split(import_node_path16.default.sep).join("/") || ".",
+          dir: import_node_path17.default.relative(io.cwd, dir).split(import_node_path17.default.sep).join("/") || ".",
           action: result.action,
           score: result.score,
           signature: result.signature,
@@ -14630,7 +14894,7 @@ function run(argv, io) {
           minor: result.minor.length
         });
         if (verifyFile !== void 0) {
-          const rel = import_node_path16.default.relative(io.cwd, dir).split(import_node_path16.default.sep).join("/");
+          const rel = import_node_path17.default.relative(io.cwd, dir).split(import_node_path17.default.sep).join("/");
           const evidence = rel.replace(/reviews-(\d+-\d+)$/, "evidence/$1");
           appendEvent(io.cwd, {
             ts: ts(),
@@ -14650,7 +14914,7 @@ function run(argv, io) {
         if (!dir) throw new UsageError("verify-cleanup: --dir is required");
         let pids = [];
         try {
-          const raw = JSON.parse((0, import_node_fs15.readFileSync)(import_node_path16.default.resolve(io.cwd, dir, "pids.json"), "utf8"));
+          const raw = JSON.parse((0, import_node_fs16.readFileSync)(import_node_path17.default.resolve(io.cwd, dir, "pids.json"), "utf8"));
           if (Array.isArray(raw)) pids = raw.filter((p) => Number.isInteger(p));
         } catch {
           pids = [];
@@ -14707,7 +14971,7 @@ function run(argv, io) {
         };
         const readText = (f, what) => {
           try {
-            return (0, import_node_fs15.readFileSync)(import_node_path16.default.resolve(io.cwd, f), "utf8");
+            return (0, import_node_fs16.readFileSync)(import_node_path17.default.resolve(io.cwd, f), "utf8");
           } catch {
             throw new UsageError(`proposals: cannot read ${what}`);
           }
@@ -14779,7 +15043,7 @@ function run(argv, io) {
           case "save": {
             const from = subFlag("from");
             if (!from) throw new UsageError("proposals save: --from is required");
-            const id2 = subFlag("id") ?? import_node_path16.default.basename(from).replace(/(\.db)?\.json$/, "");
+            const id2 = subFlag("id") ?? import_node_path17.default.basename(from).replace(/(\.db)?\.json$/, "");
             if (!PROPOSAL_ID.test(id2)) throw new UsageError("proposals save: a proposal id (p + 14 digits + 4 letters/digits) is required (--id, or a <id>.json / <id>.db.json file name)");
             let doc;
             try {
@@ -14797,11 +15061,11 @@ function run(argv, io) {
           case "pull": {
             const dir = subFlag("dir");
             if (!dir) throw new UsageError("proposals pull: --dir is required");
-            const abs = import_node_path16.default.resolve(io.cwd, dir);
+            const abs = import_node_path17.default.resolve(io.cwd, dir);
             let names2;
-            if (!(0, import_node_fs15.existsSync)(abs)) return ok("0");
+            if (!(0, import_node_fs16.existsSync)(abs)) return ok("0");
             try {
-              names2 = (0, import_node_fs15.readdirSync)(abs);
+              names2 = (0, import_node_fs16.readdirSync)(abs);
             } catch {
               throw new UsageError(`proposals pull: cannot read ${dir}`);
             }
@@ -14812,7 +15076,7 @@ function run(argv, io) {
               if (!PROPOSAL_ID.test(id2)) continue;
               let doc;
               try {
-                doc = normalizeProposal(JSON.parse((0, import_node_fs15.readFileSync)(import_node_path16.default.join(abs, name), "utf8")));
+                doc = normalizeProposal(JSON.parse((0, import_node_fs16.readFileSync)(import_node_path17.default.join(abs, name), "utf8")));
               } catch {
                 continue;
               }
@@ -14846,16 +15110,16 @@ function run(argv, io) {
             if (!found) throw new UsageError(`proposals to-task: ${id2} not found`);
             if (!isActionable(found)) throw new UsageError(`proposals to-task: ${id2} is not approved`);
             if (found.taskId !== void 0) throw new UsageError(`proposals to-task: ${id2} already has task ${found.taskId}`);
-            const text = readText(planArg, "--plan");
+            const text2 = readText(planArg, "--plan");
             let plan;
             try {
-              plan = parsePlan(text);
+              plan = parsePlan(text2);
             } catch (e) {
               if (e instanceof PlanError) throw new UsageError(`${planArg}: ${e.issues.join("; ")}`);
               throw e;
             }
             const { task, phase } = proposalToTask(plan, found, { track: subFlag("track") });
-            const ydoc = (0, import_yaml5.parseDocument)(text);
+            const ydoc = (0, import_yaml5.parseDocument)(text2);
             if (phase) ydoc.addIn(["phases"], ydoc.createNode(phase));
             ydoc.addIn(["tasks"], ydoc.createNode(task));
             const next = String(ydoc);
@@ -14865,7 +15129,7 @@ function run(argv, io) {
               if (e instanceof PlanError) throw new UsageError(`proposals to-task: the resulting plan is invalid: ${e.issues.join("; ")}`);
               throw e;
             }
-            (0, import_node_fs15.writeFileSync)(import_node_path16.default.resolve(io.cwd, planArg), next);
+            (0, import_node_fs16.writeFileSync)(import_node_path17.default.resolve(io.cwd, planArg), next);
             const { id: _id, ...doc } = found;
             saveProposal(io.cwd, id2, { ...doc, taskId: task.id });
             appendEvent(io.cwd, { ts: ts(), kind: "proposal", action: "to-task", id: id2, taskId: task.id });
@@ -14890,19 +15154,19 @@ function run(argv, io) {
           return ok("ok");
         }
         if (sub === "learn") {
-          const file = import_node_path16.default.join(io.cwd, surfaceFile(name));
-          if (!(0, import_node_fs15.existsSync)(file)) throw new UsageError(`surfaces learn: ${surfaceFile(name)} does not exist`);
-          if ((0, import_node_fs15.lstatSync)(file).isSymbolicLink()) throw new UsageError(`surfaces learn: ${surfaceFile(name)} is a symlink`);
+          const file = import_node_path17.default.join(io.cwd, surfaceFile(name));
+          if (!(0, import_node_fs16.existsSync)(file)) throw new UsageError(`surfaces learn: ${surfaceFile(name)} does not exist`);
+          if ((0, import_node_fs16.lstatSync)(file).isSymbolicLink()) throw new UsageError(`surfaces learn: ${surfaceFile(name)} is a symlink`);
           let notes;
           try {
-            notes = JSON.parse((0, import_node_fs15.readFileSync)(import_node_path16.default.resolve(io.cwd, flag("notes-file") ?? ""), "utf8"));
+            notes = JSON.parse((0, import_node_fs16.readFileSync)(import_node_path17.default.resolve(io.cwd, flag("notes-file") ?? ""), "utf8"));
           } catch {
             throw new UsageError("surfaces learn: --notes-file must be a JSON array of strings");
           }
           if (!Array.isArray(notes) || !notes.every((n) => typeof n === "string" && n.trim())) throw new UsageError("surfaces learn: --notes-file must be a JSON array of strings");
-          const before = (0, import_node_fs15.readFileSync)(file, "utf8");
+          const before = (0, import_node_fs16.readFileSync)(file, "utf8");
           const r2 = appendLearned(before, ts().slice(0, 10), notes, flag("heading") ?? "Learned");
-          (0, import_node_fs15.writeFileSync)(file, r2.text);
+          (0, import_node_fs16.writeFileSync)(file, r2.text);
           const cur = readLocal(io.cwd).surfaces[name];
           if (cur && cur.state === "allowed" && cur.hash === surfaceHash(before)) updateLocal(io.cwd, (s2) => ({ ...s2, surfaces: { ...s2.surfaces, [name]: { ...cur, hash: surfaceHash(r2.text) } } }));
           return json({ name, count: r2.count });
@@ -14978,26 +15242,26 @@ function run(argv, io) {
             if (!valid(n)) throw new UsageError(`infinite start: --${name} must be ${what}`);
             return n;
           };
-          const posInt = (n) => Number.isInteger(n) && n > 0;
-          const cycles = num3("cycles", posInt, "a positive integer");
+          const posInt2 = (n) => Number.isInteger(n) && n > 0;
+          const cycles = num3("cycles", posInt2, "a positive integer");
           const hours = num3("hours", (n) => Number.isFinite(n) && n > 0, "a positive number");
-          const queueMax = num3("queue-max", posInt, "a positive integer");
+          const queueMax = num3("queue-max", posInt2, "a positive integer");
           const session = flag("session");
           if (has("session") && !session) throw new UsageError("infinite start: --session needs a session id");
           if (cycles === void 0 && hours === void 0) throw new UsageError("infinite start: a budget is required (--cycles N and/or --hours H)");
           const current = parseRun(readRunText(io.cwd));
           if (current?.active && stopReason(current, stopContext(io.cwd, io.now())) === null) throw new UsageError("infinite start: a run is already active (forge stop, or forge infinite status)");
           forgeDir(io.cwd);
-          (0, import_node_fs15.rmSync)(stopFile(io.cwd), { force: true });
+          (0, import_node_fs16.rmSync)(stopFile(io.cwd), { force: true });
           const run2 = startRun(io.now(), { ...cycles !== void 0 ? { cycles } : {}, ...hours !== void 0 ? { hours } : {} }, queueMax, session ?? null);
           saveRun(io.cwd, run2);
           return json(run2);
         }
         if (sub === "status") {
-          const text = readRunText(io.cwd);
-          const run2 = parseRun(text);
+          const text2 = readRunText(io.cwd);
+          const run2 = parseRun(text2);
           const reason = run2?.active ? stopReason(run2, stopContext(io.cwd, io.now())) : null;
-          return json({ present: text !== null, valid: run2 !== null, run: run2, stopReason: reason });
+          return json({ present: text2 !== null, valid: run2 !== null, run: run2, stopReason: reason });
         }
         throw new UsageError("usage: forge infinite <start --cycles N|--hours H [--queue-max N] [--session ID]|status>");
       }
@@ -15007,7 +15271,7 @@ function run(argv, io) {
         let error;
         if (flag("error-file") !== void 0) {
           try {
-            error = (0, import_node_fs15.readFileSync)(import_node_path16.default.resolve(io.cwd, flag("error-file")), "utf8");
+            error = (0, import_node_fs16.readFileSync)(import_node_path17.default.resolve(io.cwd, flag("error-file")), "utf8");
           } catch {
             throw new UsageError("cycle: cannot read --error-file");
           }
@@ -15021,7 +15285,7 @@ function run(argv, io) {
       }
       case "stop": {
         forgeDir(io.cwd);
-        (0, import_node_fs15.writeFileSync)(stopFile(io.cwd), `${ts()}
+        (0, import_node_fs16.writeFileSync)(stopFile(io.cwd), `${ts()}
 `);
         const current = parseRun(readRunText(io.cwd));
         if (current?.active) {
@@ -15040,6 +15304,55 @@ function run(argv, io) {
       case "agents": {
         const { profile } = loadConfig(io.cwd);
         return json({ profile, agents: Object.fromEntries(ROLES.map((r2) => [r2, agentFor(r2, profile)])) });
+      }
+      case "decision": {
+        const [sub, arg] = args;
+        if (sub === "add") {
+          const file = flag("data-file");
+          if (!file) throw new UsageError("decision add: --data-file is required");
+          let raw;
+          try {
+            raw = JSON.parse((0, import_node_fs16.readFileSync)(import_node_path17.default.resolve(io.cwd, file), "utf8"));
+          } catch {
+            throw new UsageError("decision add: --data-file must be a JSON object");
+          }
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new UsageError("decision add: --data-file must be a JSON object");
+          const task = flag("task");
+          if (task !== void 0 && (!TASK_ID.test(task) || task === "." || task === "..")) throw new UsageError(`decision add: invalid --task ${task}`);
+          const exec = readExecution(mainCheckout(io.cwd));
+          try {
+            const { n, event } = addDecision(io.cwd, raw, { ts: ts(), ...task ? { task } : {}, runId: exec?.active ? exec.runId : null });
+            return json({ n, ...event });
+          } catch (e) {
+            if (e instanceof DecisionInputError) throw new UsageError(`decision add: ${e.message}`);
+            throw e;
+          }
+        }
+        if (sub === "list") {
+          const since = flag("since");
+          if (since !== void 0 && !Number.isFinite(Date.parse(since))) throw new UsageError(`decision list: --since must be a date, got ${since}`);
+          return json(listDecisions(io.cwd, { task: flag("task"), run: flag("run"), since, all: has("all"), auto: has("auto") }));
+        }
+        if (sub === "show") {
+          const n = Number(arg);
+          if (!Number.isInteger(n) || n < 1) throw new UsageError("decision show: <n> must be a positive integer");
+          const d = allDecisions(io.cwd).find((x) => x.n === n);
+          if (!d) throw new UsageError(`decision show: there is no decision ${n}`);
+          return json(d);
+        }
+        if (sub === "md") {
+          const scope = flag("scope");
+          if (!scope) throw new UsageError("decision md: --scope is required");
+          const outFlag = flag("out");
+          const out = outFlag !== void 0 ? import_node_path17.default.resolve(io.cwd, outFlag) : import_node_path17.default.join(repoDir, "docs", "forge", "decisions", `${scopeFileName(scope)}.md`);
+          if (!out.endsWith(".md")) throw new UsageError("decision md: --out must be a .md file");
+          const list = allDecisions(io.cwd).filter((d) => d.by !== "user" && (decisionScope(d) ?? "forge") === scope);
+          if (!list.length) return json({ written: false, scope, count: 0 });
+          (0, import_node_fs16.mkdirSync)(import_node_path17.default.dirname(out), { recursive: true });
+          (0, import_node_fs16.writeFileSync)(out, renderDecisionsMd(list, scope, flag("locale") ?? "en"));
+          return json({ written: true, scope, count: list.length, path: out });
+        }
+        throw new UsageError("usage: forge decision add --data-file f [--task id] | list [--task id] [--run id] [--since iso] [--all] [--auto] | show <n> | md --scope s [--out f] [--locale es|en]");
       }
       case "last": {
         const task = flag("task");
@@ -15072,7 +15385,7 @@ var cwd = process.cwd();
 var stdin = "";
 if (process.argv[2] === "hook" && !process.stdin.isTTY) {
   try {
-    stdin = (0, import_node_fs16.readFileSync)(0, "utf8");
+    stdin = (0, import_node_fs17.readFileSync)(0, "utf8");
   } catch {
     stdin = "";
   }

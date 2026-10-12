@@ -25,6 +25,7 @@ export type LensPanel = {
     } | null;
   } | null;
   infinite: { cycle: number; cyclesMax: number | null; hoursLeft: number | null; active: boolean; autoApproved: string[] } | null;
+  decisions: { count: number; autonomy: 'auto' | 'unattended'; lastMajor: string | null } | null;
   execution: {
     runId: string; mode: 'subagents' | 'sessions'; parallel: number; branch: string; active: boolean;
     stopReason: string | null; stallReason: string | null;

@@ -11642,6 +11642,13 @@ function chunk(writes, files, max = 50, maxBytes = 9e5) {
   return out;
 }
 
+// src/lib/decisions.ts
+var DECISION_POINTS = ["route", "triage", "design-apply", "design-approve", "plan-confirm", "mode", "ruling", "safe-path", "takeover", "revert", "other"];
+var LIMITS = { what: 200, chosen: 200, alternative: 200, alternatives: 10, why: 500, revert: 500, safePath: 200, reason: 300 };
+var DECISIONS_MAX = 16 * 1024;
+var DECISIONS_WINDOW_MS = 24 * 36e5;
+var clean = (s, max) => s.replace(/[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
+
 // src/lib/notes.ts
 var NOTE_TYPES = ["decision", "idea", "debt", "question"];
 var MAX_NOTE = 2e3;
@@ -11657,6 +11664,24 @@ function normalizeNote(x2) {
   if (str(o.answeredBy)) out.answeredBy = o.answeredBy;
   if (str(o.answeredAt)) out.answeredAt = o.answeredAt;
   if (str(o.proposalId) && o.proposalId && !o.proposalId.includes("/")) out.proposalId = o.proposalId;
+  const decision = normalizeNoteDecision(o.decision);
+  if (decision) out.decision = decision;
+  return out;
+}
+function normalizeNoteDecision(x2) {
+  if (!x2 || typeof x2 !== "object" || Array.isArray(x2)) return null;
+  const o = x2;
+  if (!str(o.point) || !DECISION_POINTS.includes(o.point)) return null;
+  const line = (v, max) => str(v) ? clean(v, max) : "";
+  const what = line(o.what, LIMITS.what);
+  const chosen = line(o.chosen, LIMITS.chosen);
+  const why = line(o.why, LIMITS.why);
+  if (!what || !chosen || !why) return null;
+  const out = { point: o.point, what, chosen, why, auto: true };
+  const alternatives = Array.isArray(o.alternatives) ? o.alternatives.map((a) => line(a, LIMITS.alternative)).filter(Boolean).slice(0, LIMITS.alternatives) : [];
+  if (alternatives.length) out.alternatives = alternatives;
+  const revert = line(o.revert, LIMITS.revert);
+  if (revert) out.revert = revert;
   return out;
 }
 var time = (s) => {

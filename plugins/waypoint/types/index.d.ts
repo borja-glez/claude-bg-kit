@@ -6,11 +6,11 @@ export type WaypointBand =
       current: { id: string; title: string; startedAt?: string; estimateMin?: number } | null;
       trackDone: number; trackTotal: number; percent: number; inbox: number; escalation: boolean;
       phase: { index: number; total: number; name: string } | null; cells: string; swarm: boolean;
-      run: { coordinator: string; stage: string } | null }
+      run: { coordinator: string; stage: string } | null; auto?: { count: number; lastMajor: string | null } }
   | { mode: 'run'; project: string; locale: string; executor: 'subagents' | 'sessions'; running: number; parallel: number;
       integrated: number; total: number; slots: { task: string; stage: string; round: number }[];
-      worst: 'alive' | 'silent' | 'stopped'; stalled: boolean; roadmapUrl: string | null }
-  | { mode: 'design'; project: string; locale: string; version: number; round: number; proposals: number; critical: number; designUrl: string | null };
+      worst: 'alive' | 'silent' | 'stopped'; stalled: boolean; roadmapUrl: string | null; auto?: { count: number; lastMajor: string | null } }
+  | { mode: 'design'; project: string; locale: string; version: number; round: number; proposals: number; critical: number; designUrl: string | null; auto?: { count: number; lastMajor: string | null } };
 declare module 'claude-code' {
   interface PluginState {
     waypoint: { band: WaypointBand; hidden: boolean };
