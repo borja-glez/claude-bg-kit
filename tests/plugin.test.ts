@@ -240,6 +240,16 @@ describe('plugin layout', () => {
       'tier ladder', '`mech` -> `impl-light` -> `impl` -> `impl-heavy`', 'git revert --no-edit $BASE..HEAD', '`invalid: true`',
       '`failures` of every validator with `ok: false` and no `preexisting` in `validators-<n>.json`', '--baseline .forge/work/<id>/baseline-<n>.json', '--base-run', 'FORGE last --task <id>-<n>']) expect(md).toContain(w);
   });
+  it('forge run skill: Execution section with the task state machine and the mode choice', () => {
+    const md = read('plugins/forge/skills/run/SKILL.md');
+    for (const w of ['## Execution', 'FORGE swarm propose --plan', 'FORGE swarm worktree <T>', 'FORGE swarm task <T> --stage', 'FORGE swarm integrate <T>', 'FORGE swarm merge',
+      '--merge-on-finish', '.claude/worktrees/run', 'leaseUntil', 'state/T.exec', 'meta/run', 'two lines', 'never cd']) expect(md).toContain(w);
+    expect(md).not.toContain('## Swarm');
+    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    expect(inf).toContain('Execution step');
+    expect(inf).not.toContain('Swarm step');
+    expect(read('plugins/forge/skills/stop/SKILL.md')).toContain('meta/run');
+  });
   it('the plan skill declares assets only with evidence upload and warns about public sharing', () => {
     const md = read('plugins/waypoint/skills/plan/SKILL.md');
     expect(md).toContain('"assets": {}');
