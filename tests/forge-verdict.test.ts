@@ -168,6 +168,16 @@ describe('verify.json', () => {
     expect(verifyReview(parseVerifyFile(file({ result: 'blocked', reason: 'x', checks: [] })))).toEqual({ verdict: 'abstain', confidence: 0, findings: [], invalid: true });
     expect(verifyReview(null)).toEqual({ verdict: 'abstain', confidence: 0, findings: [], invalid: true });
   });
+  it('the result follows the checks unless blocked', () => {
+    const allOk = parseVerifyFile(file({ result: 'fail', checks: [check(1, true), check(2, true)] }));
+    expect(allOk!.result).toBe('pass');
+    expect(verifyReview(allOk)).toEqual({ verdict: 'pass', confidence: 1, findings: [] });
+    const oneFailed = parseVerifyFile(file({ result: 'pass', checks: [check(1, true), check(2, false)] }));
+    expect(oneFailed!.result).toBe('fail');
+    const r = verifyReview(oneFailed);
+    expect(r.verdict).toBe('fail');
+    expect(r.findings).toEqual([{ severity: 'important', file: 'verify/web', problem: 'c2: expected e, observed o' }]);
+  });
   it('a failing main check fails the verdict like a critical correctness finding', () => {
     const W2 = weightsFor({ sensitive: false, perf: false });
     expect(W2.verify).toBe(W2.correctness);

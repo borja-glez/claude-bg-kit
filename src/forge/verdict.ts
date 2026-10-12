@@ -101,13 +101,15 @@ export function parseVerifyFile(text: string | null): VerifyFile | null {
   const reason = typeof r.reason === 'string' && r.reason.trim() ? r.reason : null;
   if (result === 'blocked' && !reason) return null;
   const objs = (x: unknown) => (Array.isArray(x) ? x.filter((o): o is Record<string, unknown> => !!o && typeof o === 'object' && !Array.isArray(o)) : []);
+  const checks = objs(r.checks).map((c, i) => ({
+    id: typeof c.id === 'number' ? c.id : i + 1, surface: s(c.surface), name: s(c.name), main: truthy(c.main), ok: truthy(c.ok),
+    expected: s(c.expected), observed: s(c.observed), shot: typeof c.shot === 'string' && c.shot.trim() ? c.shot : null,
+  }));
   return {
     surfaces: Array.isArray(r.surfaces) ? r.surfaces.filter((x): x is string => typeof x === 'string') : [],
-    result, reason,
-    checks: objs(r.checks).map((c, i) => ({
-      id: typeof c.id === 'number' ? c.id : i + 1, surface: s(c.surface), name: s(c.name), main: truthy(c.main), ok: truthy(c.ok),
-      expected: s(c.expected), observed: s(c.observed), shot: typeof c.shot === 'string' && c.shot.trim() ? c.shot : null,
-    })),
+    // Unless blocked, the checks decide: a stated result that disagrees with them is overridden.
+    result: result === 'blocked' ? result : checks.some(c => !c.ok) ? 'fail' : 'pass', reason,
+    checks,
     unchecked: Array.isArray(r.unchecked) ? r.unchecked.map(s) : [],
     learned: objs(r.learned).filter(l => typeof l.note === 'string' && l.note.trim()).map(l => ({ surface: s(l.surface), note: s(l.note) })),
     proposals: objs(r.proposals).filter(p => typeof p.change === 'string' && p.change.trim()).map(p => ({ surface: s(p.surface), change: s(p.change) })),
