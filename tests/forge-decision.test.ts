@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdtempSync, mkdirSync, appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { addDecision, allDecisions, decisionsFile, listDecisions, readDecisionsDoc, renderDecisionsMd, DecisionInputError } from '../src/forge/decisions.js';
@@ -130,6 +131,26 @@ describe('forge decision CLI', () => {
     expect(JSON.parse(run(['decision', 'md', '--scope', 'nothing'], io).stdout)).toEqual({ written: false, scope: 'nothing', count: 0 });
     expect(run(['decision', 'md'], io).code).toBe(2);
     expect(run(['decision', 'md', '--scope', 'ns:task', '--out', 'x.txt'], io).code).toBe(2);
+  });
+  it('a session in a linked worktree (a run member) records and reads decisions in the main checkout', () => {
+    const main = mkdtempSync(path.join(tmpdir(), 'forge-dec-main-'));
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: main, stdio: 'ignore' });
+    git('init', '-q', '-b', 'main');
+    writeFileSync(path.join(main, 'a.txt'), 'a');
+    git('add', 'a.txt');
+    git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'a');
+    const wt = path.join(main, '.claude', 'worktrees', 'task-T1');
+    git('worktree', 'add', '-q', '-b', 'task/T1', wt);
+    writeFileSync(path.join(wt, 'd.json'), JSON.stringify(INPUT));
+    const inWt: Io = { cwd: wt, now: () => new Date(at(0)) };
+    expect(run(['decision', 'add', '--data-file', 'd.json', '--task', 'T1'], inWt).code).toBe(0);
+    expect(readEvents(main).filter(e => e.kind === 'decision')).toHaveLength(1);
+    expect(existsSync(path.join(wt, '.forge', 'ledger.jsonl'))).toBe(false);
+    expect(readDecisionsDoc(main)).toMatchObject({ scope: 'T1', count: 1 });
+    expect(JSON.parse(run(['decision', 'list', '--task', 'T1'], { cwd: main, now: () => new Date(at(1)) }).stdout)).toHaveLength(1);
+    expect(JSON.parse(run(['decision', 'show', '1'], inWt).stdout)).toMatchObject({ n: 1, task: 'T1' });
+    // The file of a project without a roadmap goes with the work, in the worktree.
+    expect(JSON.parse(run(['decision', 'md', '--scope', 'T1'], inWt).stdout).path).toBe(path.join(wt, 'docs', 'forge', 'decisions', 'T1.md'));
   });
   it('an unknown subcommand prints its usage', () => {
     const r = run(['decision', 'nope'], io);

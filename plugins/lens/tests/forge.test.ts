@@ -317,6 +317,26 @@ test('the band shows the forge task with its bar while there is activity, as cel
   await desk.unmount();
 });
 
+test('in a linked worktree the card counts the decisions of the main checkout', async ($, on) => {
+  const at = new Date(NOW - 10 * 60_000).toISOString();
+  const doc = (count: number) => JSON.stringify({ ts: at, scope: 'r1', count, autonomy: 'unattended', last: [], lastMajor: null });
+  serveFiles(on, {
+    ...FORGE,
+    [`${ROOT}/.git`]: 'gitdir: /main/.git/worktrees/task-T1\n',
+    [`/main/.forge/decisions.json`]: doc(4),
+    [`${ROOT}/.forge/decisions.json`]: doc(9),
+  });
+  servePanes(on);
+  start(on);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
+  const text = await said(ui);
+  expect(text).toContain('4 automatic decisions');
+  expect(text).not.toContain('9 automatic decisions');
+  await ui.unmount();
+});
+
 test('the forge card counts the automatic decisions from .forge/decisions.json', async ($, on) => {
   const at = new Date(NOW - 10 * 60_000).toISOString();
   const DECISIONS = JSON.stringify({ ts: at, scope: 'hash', count: 2, autonomy: 'auto', last: [], lastMajor: { n: 4, point: 'design-approve', what: 'design approved (v3)', chosen: 'approve', ts: at } });

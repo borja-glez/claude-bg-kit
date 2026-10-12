@@ -192,6 +192,11 @@ async function loadForgeFiles($: Engine, root: string): Promise<PanelFiles> {
   let execFiles: PanelFiles = {};
   try { execFiles = await loadExecutionFiles($, main, main === root ? entries : undefined); } catch { /* no execution card */ }
   const out: PanelFiles = { ...execFiles };
+  // forge's automatic decisions (.forge/decisions.json, a few hundred bytes; not read above DECISIONS_MAX), kept in the
+  // main checkout whichever worktree this session is in, so read even when this root has no .forge/ of its own.
+  const mainDir = join(main, '.forge');
+  const decisions = (main === root ? entries : await listOpt($, mainDir)).find(f => f.kind === 'file' && f.name === 'decisions.json');
+  if (decisions && decisions.size <= DECISIONS_MAX) out.forgeDecisions = await readOpt($, join(mainDir, 'decisions.json'));
   if (!entries.length) { forgeSeen = { dir, entries }; return out; }
   const status = entries.find(f => f.kind === 'file' && f.name === 'status.json');
   if (status && status.size <= FORGE_STATUS_MAX) out.forgeStatus = await readOpt($, join(dir, 'status.json'));
@@ -205,9 +210,6 @@ async function loadForgeFiles($: Engine, root: string): Promise<PanelFiles> {
       if (nums.length) out.forgeBriefs = Math.max(...nums);
     }
   }
-  // forge's automatic decisions (.forge/decisions.json, a few hundred bytes): not read above DECISIONS_MAX.
-  const decisions = entries.find(f => f.kind === 'file' && f.name === 'decisions.json');
-  if (decisions && decisions.size <= DECISIONS_MAX) out.forgeDecisions = await readOpt($, join(dir, 'decisions.json'));
   // The infinite run (.forge/run.json, a few hundred bytes): not read above 16 KiB.
   const run = entries.find(f => f.kind === 'file' && f.name === 'run.json');
   if (run && run.size <= FORGE_RUN_MAX) out.forgeRun = await readOpt($, join(dir, 'run.json'));

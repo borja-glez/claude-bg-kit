@@ -44,6 +44,28 @@ const base = (root: string) => ({
   [`${root}/.waypoint/demo-shop/session.json`]: JSON.stringify({ sessionId: 'main', track: null }),
 });
 
+describe('loadBandModel · decisions', () => {
+  const doc = () => JSON.stringify({ ts: iso(Date.now() - 60000), scope: 'r1', count: 2, autonomy: 'unattended', last: [], lastMajor: null });
+  it('reads decisions.json from the main checkout when the root is a linked worktree, and ignores the worktree own', async () => {
+    const root = '/repo-w'; const main = '/repo';
+    const { $, reads } = fake(root, {
+      ...base(root),
+      [`${root}/.git`]: `gitdir: ${main}/.git/worktrees/w\n`,
+      [`${main}/.forge/decisions.json`]: doc(),
+      [`${root}/.forge/decisions.json`]: JSON.stringify({ nope: true }),
+    });
+    expect(await loadBandModel($)).toMatchObject({ mode: 'work', auto: { count: 2, lastMajor: null } });
+    expect(reads).toContain(`${main}/.forge/decisions.json`);
+    expect(reads).not.toContain(`${root}/.forge/decisions.json`);
+  });
+  it('does not read an oversized decisions.json', async () => {
+    const root = '/repo';
+    const { $, reads } = fake(root, { ...base(root), [`${root}/.forge/decisions.json`]: doc() }, { [`${root}/.forge/decisions.json`]: { size: 17 * 1024 } });
+    expect(await loadBandModel($)).not.toHaveProperty('auto');
+    expect(reads).not.toContain(`${root}/.forge/decisions.json`);
+  });
+});
+
 describe('loadBandModel · execution files', () => {
   it('reads the execution from the main checkout when the root is a linked worktree', async () => {
     const root = '/repo-w'; const main = '/repo';

@@ -93,9 +93,11 @@ async function loadExecution($: Engine, root: string): Promise<Pick<BandFiles, '
   } catch { return {}; }
 }
 
-// forge's decisions summary in this session's .forge/ (a few hundred bytes; not read above DECISIONS_MAX).
+// forge's decisions summary (a few hundred bytes; not read above DECISIONS_MAX), kept in the main checkout's .forge/
+// whichever worktree this session is in, like the execution.
 async function loadDecisions($: Engine, root: string): Promise<string | undefined> {
-  const dir = join(root, '.forge');
+  const main = mainCheckoutFrom(root, (await readOpt($, join(root, '.git'))) ?? null);
+  const dir = join(main, '.forge');
   const f = (await listOpt($, dir)).find(x => x.kind === 'file' && x.name === 'decisions.json');
   return f && f.size <= DECISIONS_MAX ? readOpt($, join(dir, 'decisions.json')) : undefined;
 }

@@ -728,6 +728,9 @@ export function run(argv: string[], io: Io): Result {
       }
       case 'decision': {
         const [sub, arg] = args;
+        // One record per repository: a run member in its task worktree writes and reads the main checkout's ledger,
+        // where the coordinator's reports, lens, the band and /forge:decisions look.
+        const root = mainCheckout(io.cwd);
         if (sub === 'add') {
           const file = flag('data-file');
           if (!file) throw new UsageError('decision add: --data-file is required');
@@ -737,9 +740,9 @@ export function run(argv: string[], io: Io): Result {
           const task = flag('task');
           if (task !== undefined && (!TASK_ID.test(task) || task === '.' || task === '..')) throw new UsageError(`decision add: invalid --task ${task}`);
           // An active execution names the run the decision belongs to (its scope), unless the data names one.
-          const exec = readExecution(mainCheckout(io.cwd));
+          const exec = readExecution(root);
           try {
-            const { n, event } = addDecision(io.cwd, raw, { ts: ts(), ...(task ? { task } : {}), runId: exec?.active ? exec.runId : null });
+            const { n, event } = addDecision(root, raw, { ts: ts(), ...(task ? { task } : {}), runId: exec?.active ? exec.runId : null });
             return json({ n, ...event });
           } catch (e) {
             if (e instanceof DecisionInputError) throw new UsageError(`decision add: ${e.message}`);
@@ -749,12 +752,12 @@ export function run(argv: string[], io: Io): Result {
         if (sub === 'list') {
           const since = flag('since');
           if (since !== undefined && !Number.isFinite(Date.parse(since))) throw new UsageError(`decision list: --since must be a date, got ${since}`);
-          return json(listDecisions(io.cwd, { task: flag('task'), run: flag('run'), since, all: has('all'), auto: has('auto') }));
+          return json(listDecisions(root, { task: flag('task'), run: flag('run'), since, all: has('all'), auto: has('auto') }));
         }
         if (sub === 'show') {
           const n = Number(arg);
           if (!Number.isInteger(n) || n < 1) throw new UsageError('decision show: <n> must be a positive integer');
-          const d = allDecisions(io.cwd).find(x => x.n === n);
+          const d = allDecisions(root).find(x => x.n === n);
           if (!d) throw new UsageError(`decision show: there is no decision ${n}`);
           return json(d);
         }
@@ -765,7 +768,7 @@ export function run(argv: string[], io: Io): Result {
           // The file is project content (it goes to git with the work): by default under the code's directory.
           const out = outFlag !== undefined ? path.resolve(io.cwd, outFlag) : path.join(repoDir, 'docs', 'forge', 'decisions', `${scopeFileName(scope)}.md`);
           if (!out.endsWith('.md')) throw new UsageError('decision md: --out must be a .md file');
-          const list = allDecisions(io.cwd).filter(d => d.by !== 'user' && (decisionScope(d) ?? 'forge') === scope);
+          const list = allDecisions(root).filter(d => d.by !== 'user' && (decisionScope(d) ?? 'forge') === scope);
           if (!list.length) return json({ written: false, scope, count: 0 });
           mkdirSync(path.dirname(out), { recursive: true });
           writeFileSync(out, renderDecisionsMd(list, scope, flag('locale') ?? 'en'));
