@@ -130,7 +130,7 @@ Sequential execution is not a third mode: it is subagents with N = 1.
 
 **State and visibility.** The state lives in `.forge/execution/` (the run, one file per task) and is mirrored to the roadmap's `meta/run`. The roadmap, lens and the band show it: one row per running task with its stage, agent, duration and liveness. Executor and manual sessions appear with their own liveness.
 
-**Stalled fronts (sessions mode).** The planner watches each session. After 15 minutes without a stage change, if the session is idle, `swarm nudge` sends it a reminder. If the session stopped, `swarm relaunch` starts it again with a handover note, `.forge/work/<T>/handover.md`, at most 2 times; the third failure blocks the task. A relaunched session gets a 10-minute window before it is judged again. When the last task is claimed by another live session, the run waits instead of stopping.
+**Stalled fronts (sessions mode).** The planner watches each session. After 15 minutes without a stage change, if the session is idle, `swarm nudge` sends it a reminder. If the session stopped, `swarm relaunch` starts it again with a handover note, `.forge/work/<T>/handover.md`, at most 2 times; the third failure blocks the task. A relaunched session gets a 10-minute window before it is judged again. A task its session marks blocked is blocked in the execution too: it frees its slot and is never nudged nor relaunched. When the last task is claimed by another live session, the run waits instead of stopping.
 
 **Manual sessions.** Any session where you run `/waypoint:work`, or ask it to "take a pending task", joins the execution with the role `manual` at any time (`swarm join`). It takes tasks with the same planner (`swarm next`), works in its own task worktree (`swarm worktree <T> --member`) and reports its stages (`swarm report`); the coordinator integrates its work. A member only acts on its own task and never writes `execution.json`.
 
@@ -318,11 +318,11 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 - `swarm status` - the execution state, per task.
 - `swarm propose --plan p` - the plan's width and the recommended mode and N.
 - `swarm worktree <task> [--member SID]` - create the task's worktree and branch (and run `swarm.setup`); `--member` is for a member session, which creates its own.
-- `swarm join --session SID --role executor|manual [--task T]` - register a member in `.forge/members/<SID>.json`.
-- `swarm report <task> --session SID --stage S` - a member publishes its own stage and live signal (it never writes `execution.json`).
+- `swarm join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]` - register a member in `.forge/members/<SID>.json`. `SID` is its waypoint session id; `--hook-session` is Claude's own session id (the skills pass `${CLAUDE_SESSION_ID}`), which the hooks use to recognise the member; a rejoin without it keeps the one recorded.
+- `swarm report <task> --session SID --stage S [--status running|accepted|blocked] [--agent A | --no-agent] [--round N] [--lease ISO]` - a member publishes its own stage and live signal (it never writes `execution.json`).
 - `swarm next --plan p --db dir --session SID` - offer a manual member a ready task.
-- `swarm relaunch <task>` / `swarm nudge <task>` - restart a stopped sessions task with a handover note (at most 2 times), or remind an idle one.
-- `swarm takeover --session SID --db dir` - take over the coordinator when it is stopped; a run member cannot.
+- `swarm relaunch <task> --plan p` / `swarm nudge <task> [--plan p]` - restart a stopped sessions task with a handover note (at most 2 times), or remind an idle one (the plan gives the reminder's language).
+- `swarm takeover --session SID [--db dir]` - take over the coordinator when it is stopped; a run member cannot. The coordinator becomes `SID`, and the Stop hook binds to that session at its next stop.
 - `swarm task <task> --stage S [--agent A | --no-agent] [--round N] [--status running|accepted|blocked] [--detail-file F] [--lease ISO]` - record the task's stage, agent and round; `swarm task <task> --drop` forgets a task whose claim was lost.
 - `swarm tick --plan p --db dir [--agents F]` - decide what to launch, nudge, relaunch and integrate (`--db` is a copy of the roadmap's `state` and `sessions` documents; `--agents` is a JSON file of the background sessions, `[{name, state: working|idle}]`).
 - `swarm integrate <task>` - merge an accepted task into the run branch, comparing the validators with the baseline.

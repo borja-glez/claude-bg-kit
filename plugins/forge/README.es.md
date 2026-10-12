@@ -130,7 +130,7 @@ La ejecución secuencial no es un tercer modo: es subagents con N = 1.
 
 **Estado y visibilidad.** El estado vive en `.forge/execution/` (la ejecución y un fichero por tarea) y se refleja en el `meta/run` del roadmap. Lo enseñan el roadmap, lens y la banda: una fila por tarea en marcha con su etapa, agente, duración y vida. Las sesiones ejecutoras y manuales aparecen con su propia vida.
 
-**Frentes parados (modo sessions).** El planificador vigila cada sesión. Tras 15 minutos sin cambio de etapa, si la sesión está inactiva, `swarm nudge` le manda un recordatorio. Si la sesión se paró, `swarm relaunch` la vuelve a lanzar con una nota de relevo, `.forge/work/<T>/handover.md`, como mucho 2 veces; al tercer fallo la tarea se bloquea. Una sesión relanzada tiene una ventana de 10 minutos antes de volver a juzgarla. Cuando la última tarea la ha reclamado otra sesión viva, la ejecución espera en vez de pararse.
+**Frentes parados (modo sessions).** El planificador vigila cada sesión. Tras 15 minutos sin cambio de etapa, si la sesión está inactiva, `swarm nudge` le manda un recordatorio. Si la sesión se paró, `swarm relaunch` la vuelve a lanzar con una nota de relevo, `.forge/work/<T>/handover.md`, como mucho 2 veces; al tercer fallo la tarea se bloquea. Una sesión relanzada tiene una ventana de 10 minutos antes de volver a juzgarla. Una tarea que su sesión marca como bloqueada queda bloqueada también en la ejecución: libera su plaza y nunca se le recuerda ni se relanza. Cuando la última tarea la ha reclamado otra sesión viva, la ejecución espera en vez de pararse.
 
 **Sesiones manuales.** Cualquier sesión donde ejecutes `/waypoint:work`, o le pidas «coge una tarea pendiente», se une a la ejecución con el rol `manual` en cualquier momento (`swarm join`). Coge tareas con el mismo planificador (`swarm next`), trabaja en su propio worktree de tarea (`swarm worktree <T> --member`) y publica sus etapas (`swarm report`); la coordinadora integra su trabajo. Un miembro solo actúa sobre su propia tarea y nunca escribe `execution.json`.
 
@@ -318,11 +318,11 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 - `swarm status` - el estado de la ejecución, por tarea.
 - `swarm propose --plan p` - el ancho del plan y el modo y la N recomendados.
 - `swarm worktree <tarea> [--member SID]` - crea el worktree y la rama de la tarea (y ejecuta `swarm.setup`); `--member` es para una sesión miembro, que crea el suyo.
-- `swarm join --session SID --role executor|manual [--task T]` - registra un miembro en `.forge/members/<SID>.json`.
-- `swarm report <tarea> --session SID --stage S` - un miembro publica su propia etapa y su señal en vivo (nunca escribe `execution.json`).
+- `swarm join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]` - registra un miembro en `.forge/members/<SID>.json`. `SID` es su id de sesión de waypoint; `--hook-session` es el id de sesión propio de Claude (las skills pasan `${CLAUDE_SESSION_ID}`), con el que los hooks reconocen al miembro; al volver a unirse sin él se conserva el anotado.
+- `swarm report <tarea> --session SID --stage S [--status running|accepted|blocked] [--agent A | --no-agent] [--round N] [--lease ISO]` - un miembro publica su propia etapa y su señal en vivo (nunca escribe `execution.json`).
 - `swarm next --plan p --db dir --session SID` - ofrece a un miembro manual una tarea lista.
-- `swarm relaunch <tarea>` / `swarm nudge <tarea>` - relanza una tarea de sessions parada con una nota de relevo (como mucho 2 veces), o recuerda a una inactiva.
-- `swarm takeover --session SID --db dir` - toma el relevo de la coordinadora cuando está parada; un miembro de la ejecución no puede.
+- `swarm relaunch <tarea> --plan p` / `swarm nudge <tarea> [--plan p]` - relanza una tarea de sessions parada con una nota de relevo (como mucho 2 veces), o recuerda a una inactiva (el plan da el idioma del recordatorio).
+- `swarm takeover --session SID [--db dir]` - toma el relevo de la coordinadora cuando está parada; un miembro de la ejecución no puede. La coordinadora pasa a ser `SID`, y el hook Stop se ata a esa sesión en su siguiente parada.
 - `swarm task <tarea> --stage S [--agent A | --no-agent] [--round N] [--status running|accepted|blocked] [--detail-file F] [--lease ISO]` - anota la etapa, el agente y la ronda de la tarea; `swarm task <tarea> --drop` olvida una tarea cuya reclamación se perdió.
 - `swarm tick --plan p --db dir [--agents F]` - decide qué lanzar, recordar, relanzar e integrar (`--db` es una copia de los documentos `state` y `sessions` del roadmap; `--agents` es un fichero JSON con las sesiones en segundo plano, `[{name, state: working|idle}]`).
 - `swarm integrate <tarea>` - fusiona una tarea aceptada en la rama de ejecución, comparando los validadores con la base.
