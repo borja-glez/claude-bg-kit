@@ -107,17 +107,17 @@ var require_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    function visit_(key, node, visitor, path3) {
-      const ctrl = callVisitor(key, node, visitor, path3);
+    function visit_(key, node, visitor, path4) {
+      const ctrl = callVisitor(key, node, visitor, path4);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path3, ctrl);
-        return visit_(key, ctrl, visitor, path3);
+        replaceNode(key, path4, ctrl);
+        return visit_(key, ctrl, visitor, path4);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path3 = Object.freeze(path3.concat(node));
+          path4 = Object.freeze(path4.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = visit_(i, node.items[i], visitor, path3);
+            const ci = visit_(i, node.items[i], visitor, path4);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -128,13 +128,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path3 = Object.freeze(path3.concat(node));
-          const ck = visit_("key", node.key, visitor, path3);
+          path4 = Object.freeze(path4.concat(node));
+          const ck = visit_("key", node.key, visitor, path4);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = visit_("value", node.value, visitor, path3);
+          const cv = visit_("value", node.value, visitor, path4);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -155,17 +155,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node, visitor, path3) {
-      const ctrl = await callVisitor(key, node, visitor, path3);
+    async function visitAsync_(key, node, visitor, path4) {
+      const ctrl = await callVisitor(key, node, visitor, path4);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path3, ctrl);
-        return visitAsync_(key, ctrl, visitor, path3);
+        replaceNode(key, path4, ctrl);
+        return visitAsync_(key, ctrl, visitor, path4);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path3 = Object.freeze(path3.concat(node));
+          path4 = Object.freeze(path4.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = await visitAsync_(i, node.items[i], visitor, path3);
+            const ci = await visitAsync_(i, node.items[i], visitor, path4);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -176,13 +176,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path3 = Object.freeze(path3.concat(node));
-          const ck = await visitAsync_("key", node.key, visitor, path3);
+          path4 = Object.freeze(path4.concat(node));
+          const ck = await visitAsync_("key", node.key, visitor, path4);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = await visitAsync_("value", node.value, visitor, path3);
+          const cv = await visitAsync_("value", node.value, visitor, path4);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -209,23 +209,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node, visitor, path3) {
+    function callVisitor(key, node, visitor, path4) {
       if (typeof visitor === "function")
-        return visitor(key, node, path3);
+        return visitor(key, node, path4);
       if (identity.isMap(node))
-        return visitor.Map?.(key, node, path3);
+        return visitor.Map?.(key, node, path4);
       if (identity.isSeq(node))
-        return visitor.Seq?.(key, node, path3);
+        return visitor.Seq?.(key, node, path4);
       if (identity.isPair(node))
-        return visitor.Pair?.(key, node, path3);
+        return visitor.Pair?.(key, node, path4);
       if (identity.isScalar(node))
-        return visitor.Scalar?.(key, node, path3);
+        return visitor.Scalar?.(key, node, path4);
       if (identity.isAlias(node))
-        return visitor.Alias?.(key, node, path3);
+        return visitor.Alias?.(key, node, path4);
       return void 0;
     }
-    function replaceNode(key, path3, node) {
-      const parent = path3[path3.length - 1];
+    function replaceNode(key, path4, node) {
+      const parent = path4[path4.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node;
       } else if (identity.isPair(parent)) {
@@ -837,10 +837,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path3, value) {
+    function collectionFromPath(schema, path4, value) {
       let v = value;
-      for (let i = path3.length - 1; i >= 0; --i) {
-        const k2 = path3[i];
+      for (let i = path4.length - 1; i >= 0; --i) {
+        const k2 = path4[i];
         if (typeof k2 === "number" && Number.isInteger(k2) && k2 >= 0) {
           const a = [];
           a[k2] = v;
@@ -859,7 +859,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path3) => path3 == null || typeof path3 === "object" && !!path3[Symbol.iterator]().next().done;
+    var isEmptyPath = (path4) => path4 == null || typeof path4 === "object" && !!path4[Symbol.iterator]().next().done;
     var Collection = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -889,11 +889,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path3, value) {
-        if (isEmptyPath(path3))
+      addIn(path4, value) {
+        if (isEmptyPath(path4))
           this.add(value);
         else {
-          const [key, ...rest] = path3;
+          const [key, ...rest] = path4;
           const node = this.get(key, true);
           if (identity.isCollection(node))
             node.addIn(rest, value);
@@ -907,8 +907,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path3) {
-        const [key, ...rest] = path3;
+      deleteIn(path4) {
+        const [key, ...rest] = path4;
         if (rest.length === 0)
           return this.delete(key);
         const node = this.get(key, true);
@@ -922,8 +922,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path3, keepScalar) {
-        const [key, ...rest] = path3;
+      getIn(path4, keepScalar) {
+        const [key, ...rest] = path4;
         const node = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -941,8 +941,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path3) {
-        const [key, ...rest] = path3;
+      hasIn(path4) {
+        const [key, ...rest] = path4;
         if (rest.length === 0)
           return this.has(key);
         const node = this.get(key, true);
@@ -952,8 +952,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path3, value) {
-        const [key, ...rest] = path3;
+      setIn(path4, value) {
+        const [key, ...rest] = path4;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -3468,9 +3468,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path3, value) {
+      addIn(path4, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path3, value);
+          this.contents.addIn(path4, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -3545,14 +3545,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path3) {
-        if (Collection.isEmptyPath(path3)) {
+      deleteIn(path4) {
+        if (Collection.isEmptyPath(path4)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path3) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path4) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -3567,10 +3567,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path3, keepScalar) {
-        if (Collection.isEmptyPath(path3))
+      getIn(path4, keepScalar) {
+        if (Collection.isEmptyPath(path4))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path3, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path4, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -3581,10 +3581,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path3) {
-        if (Collection.isEmptyPath(path3))
+      hasIn(path4) {
+        if (Collection.isEmptyPath(path4))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path3) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path4) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -3601,13 +3601,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path3, value) {
-        if (Collection.isEmptyPath(path3)) {
+      setIn(path4, value) {
+        if (Collection.isEmptyPath(path4)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, Array.from(path3), value);
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path4), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path3, value);
+          this.contents.setIn(path4, value);
         }
       }
       /**
@@ -5568,9 +5568,9 @@ var require_cst_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    visit.itemAtPath = (cst, path3) => {
+    visit.itemAtPath = (cst, path4) => {
       let item = cst;
-      for (const [field, index] of path3) {
+      for (const [field, index] of path4) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -5579,23 +5579,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit.parentCollection = (cst, path3) => {
-      const parent = visit.itemAtPath(cst, path3.slice(0, -1));
-      const field = path3[path3.length - 1][0];
+    visit.parentCollection = (cst, path4) => {
+      const parent = visit.itemAtPath(cst, path4.slice(0, -1));
+      const field = path4[path4.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path3, item, visitor) {
-      let ctrl = visitor(item, path3);
+    function _visit(path4, item, visitor) {
+      let ctrl = visitor(item, path4);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item[field];
         if (token && "items" in token) {
           for (let i = 0; i < token.items.length; ++i) {
-            const ci = _visit(Object.freeze(path3.concat([[field, i]])), token.items[i], visitor);
+            const ci = _visit(Object.freeze(path4.concat([[field, i]])), token.items[i], visitor);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -5606,10 +5606,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item, path3);
+            ctrl = ctrl(item, path4);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path3) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path4) : ctrl;
     }
     exports2.visit = visit;
   }
@@ -7361,12 +7361,12 @@ var require_dist = __commonJS({
 });
 
 // src/cli/main.ts
-var import_node_path2 = __toESM(require("node:path"), 1);
-var import_node_fs2 = require("node:fs");
+var import_node_path3 = __toESM(require("node:path"), 1);
+var import_node_fs3 = require("node:fs");
 
 // src/cli/run.ts
-var import_node_fs = require("node:fs");
-var import_node_path = __toESM(require("node:path"), 1);
+var import_node_fs2 = require("node:fs");
+var import_node_path2 = __toESM(require("node:path"), 1);
 var import_node_child_process = require("node:child_process");
 var import_node_crypto2 = require("node:crypto");
 
@@ -7851,8 +7851,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path3, errorMaps, issueData } = params;
-  const fullPath = [...path3, ...issueData.path || []];
+  const { data, path: path4, errorMaps, issueData } = params;
+  const fullPath = [...path4, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -7968,11 +7968,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path3, key) {
+  constructor(parent, value, path4, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path3;
+    this._path = path4;
     this._key = key;
   }
   get path() {
@@ -13544,6 +13544,39 @@ function mainWorktreeFrom(porcelain) {
 }
 var BRANCH_RE = /^[A-Za-z0-9_.\/~:@+][A-Za-z0-9_\-.\/~:@+]{0,199}$/;
 
+// src/lib/locale.ts
+var import_node_fs = require("node:fs");
+var import_node_path = __toESM(require("node:path"), 1);
+var NAMES = {
+  es: "Spanish",
+  en: "English",
+  pt: "Portuguese",
+  fr: "French",
+  de: "German",
+  it: "Italian",
+  ca: "Catalan",
+  gl: "Galician",
+  eu: "Basque"
+};
+function replyIn(locale) {
+  const code = (locale ?? "").toLowerCase().split(/[-_]/)[0];
+  if (!code) return " Tell the user in their own language.";
+  const name = NAMES[code];
+  return ` Tell the user in ${name ? `${name} (${code})` : `the language \xAB${code}\xBB`}, the plan's language.`;
+}
+function planLocale(root, project) {
+  try {
+    const docs = import_node_path.default.join(root, "docs", "waypoint");
+    const projects = project ? [project] : (0, import_node_fs.readdirSync)(docs, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+    for (const p of projects) {
+      const file = import_node_path.default.join(docs, p, "plan.yaml");
+      if ((0, import_node_fs.existsSync)(file)) return parsePlan((0, import_node_fs.readFileSync)(file, "utf8")).locale ?? null;
+    }
+  } catch {
+  }
+  return null;
+}
+
 // src/cli/run.ts
 var USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|design-validate|design-snapshot|design-changed|critique-check|critique-select|design-page|hook> ...`;
 function run(argv, io) {
@@ -13552,25 +13585,25 @@ function run(argv, io) {
     const i = args.indexOf(`--${name}`);
     return i >= 0 ? args[i + 1] : void 0;
   };
-  const abs = (p) => import_node_path.default.resolve(io.cwd, p);
+  const abs = (p) => import_node_path2.default.resolve(io.cwd, p);
   const ok = (stdout) => ({ code: 0, stdout: stdout.endsWith("\n") ? stdout : `${stdout}
 `, stderr: "" });
   const fail = (stderr, code = 1) => ({ code, stdout: "", stderr: `${stderr}
 ` });
-  const loadPlan = () => parsePlan((0, import_node_fs.readFileSync)(abs(args[0]), "utf8"));
+  const loadPlan = () => parsePlan((0, import_node_fs2.readFileSync)(abs(args[0]), "utf8"));
   const docs = (name) => readDocs(flag(name) && abs(flag(name)));
   const optSessions = () => {
     if (!flag("sessions")) return void 0;
-    if (!(0, import_node_fs.existsSync)(abs(flag("sessions")))) throw new CacheError(`${cmd}: --sessions cache missing \u2014 list it first`);
+    if (!(0, import_node_fs2.existsSync)(abs(flag("sessions")))) throw new CacheError(`${cmd}: --sessions cache missing \u2014 list it first`);
     return docs("sessions");
   };
   const loadView = () => {
     const p = loadPlan();
     const db = flag("db");
     if (!db) return { view: p, project: p.project, version: p.version };
-    const metaFile = import_node_path.default.join(abs(db), "meta", "project.json");
-    const phases = Object.values(readDocs(import_node_path.default.join(abs(db), "plan"))).map(normalizePhase).filter((x2) => !!x2);
-    const meta = (0, import_node_fs.existsSync)(metaFile) ? normalizeMeta(JSON.parse((0, import_node_fs.readFileSync)(metaFile, "utf8"))) : null;
+    const metaFile = import_node_path2.default.join(abs(db), "meta", "project.json");
+    const phases = Object.values(readDocs(import_node_path2.default.join(abs(db), "plan"))).map(normalizePhase).filter((x2) => !!x2);
+    const meta = (0, import_node_fs2.existsSync)(metaFile) ? normalizeMeta(JSON.parse((0, import_node_fs2.readFileSync)(metaFile, "utf8"))) : null;
     if (!meta || !phases.length) throw new CacheError("db plan cache missing \u2014 list meta and plan first");
     return { view: planViewFromDocs(meta, phases), project: p.project, version: meta.version || p.version };
   };
@@ -13584,10 +13617,10 @@ function run(argv, io) {
         const p = loadPlan();
         const collection = args[1] ?? "";
         if (!/^[a-z_]{1,32}$/.test(collection)) return fail("clean-cache: <collection> must match ^[a-z_]{1,32}$", 2);
-        const root = import_node_path.default.join(io.cwd, ".waypoint");
-        const target = import_node_path.default.resolve(root, p.project, "dbcache", collection);
-        if (!target.startsWith(root + import_node_path.default.sep)) return fail("clean-cache: path escapes .waypoint", 2);
-        (0, import_node_fs.rmSync)(target, { recursive: true, force: true });
+        const root = import_node_path2.default.join(io.cwd, ".waypoint");
+        const target = import_node_path2.default.resolve(root, p.project, "dbcache", collection);
+        if (!target.startsWith(root + import_node_path2.default.sep)) return fail("clean-cache: path escapes .waypoint", 2);
+        (0, import_node_fs2.rmSync)(target, { recursive: true, force: true });
         return ok(target);
       }
       case "hash":
@@ -13596,16 +13629,16 @@ function run(argv, io) {
         const p = loadPlan();
         const out = abs(flag("out") ?? ".waypoint/roadmap.html");
         const snapshot = buildDocs(p, io.now().toISOString());
-        const tpl = (0, import_node_fs.readFileSync)(import_node_path.default.join(io.assetsDir, "roadmap.template.html"), "utf8");
+        const tpl = (0, import_node_fs2.readFileSync)(import_node_path2.default.join(io.assetsDir, "roadmap.template.html"), "utf8");
         const html = tpl.replace("__TITLE__", () => `${p.project} Roadmap`).replace("__SNAPSHOT__", () => JSON.stringify(snapshot).replace(/</g, "\\u003c"));
-        (0, import_node_fs.mkdirSync)(import_node_path.default.dirname(out), { recursive: true });
-        (0, import_node_fs.writeFileSync)(out, html);
+        (0, import_node_fs2.mkdirSync)(import_node_path2.default.dirname(out), { recursive: true });
+        (0, import_node_fs2.writeFileSync)(out, html);
         return ok(out);
       }
       case "sync": {
         const p = loadPlan();
         const knownPath = flag("known");
-        const known = knownPath && (0, import_node_fs.existsSync)(abs(knownPath)) ? JSON.parse((0, import_node_fs.readFileSync)(abs(knownPath), "utf8")) : {};
+        const known = knownPath && (0, import_node_fs2.existsSync)(abs(knownPath)) ? JSON.parse((0, import_node_fs2.readFileSync)(abs(knownPath), "utf8")) : {};
         const session = flag("session") ?? "main";
         const now = io.now();
         const outDir = abs(flag("out") ?? ".waypoint/sync");
@@ -13615,8 +13648,8 @@ function run(argv, io) {
           eventId: eventId(now, session, io.rand),
           states: readDocs(flag("states") && abs(flag("states")))
         });
-        (0, import_node_fs.mkdirSync)(outDir, { recursive: true });
-        for (const [file, body] of Object.entries(files)) (0, import_node_fs.writeFileSync)(file, JSON.stringify(body, null, 2));
+        (0, import_node_fs2.mkdirSync)(outDir, { recursive: true });
+        for (const [file, body] of Object.entries(files)) (0, import_node_fs2.writeFileSync)(file, JSON.stringify(body, null, 2));
         return ok(JSON.stringify({ batches }));
       }
       case "next": {
@@ -13643,7 +13676,7 @@ function run(argv, io) {
       }
       case "recover": {
         for (const f of ["states", "sessions"]) {
-          if (!flag(f) || !(0, import_node_fs.existsSync)(abs(flag(f)))) return fail(`recover: --${f} cache missing \u2014 list it first`);
+          if (!flag(f) || !(0, import_node_fs2.existsSync)(abs(flag(f)))) return fail(`recover: --${f} cache missing \u2014 list it first`);
         }
         const { view } = loadView();
         const minutes = Number(flag("minutes") ?? IDLE_MINUTES);
@@ -13658,12 +13691,12 @@ function run(argv, io) {
       case "notes": {
         const dir = flag("notes");
         if (!dir) return fail("notes cache missing \u2014 list notes first");
-        if (!(0, import_node_fs.existsSync)(abs(dir))) return ok(JSON.stringify({ notes: [], latest: null }));
-        if (!(0, import_node_fs.statSync)(abs(dir)).isDirectory()) return fail("notes cache missing \u2014 list notes first");
+        if (!(0, import_node_fs2.existsSync)(abs(dir))) return ok(JSON.stringify({ notes: [], latest: null }));
+        if (!(0, import_node_fs2.statSync)(abs(dir)).isDirectory()) return fail("notes cache missing \u2014 list notes first");
         const all = [];
-        for (const f of (0, import_node_fs.readdirSync)(abs(dir)).filter((x2) => x2.endsWith(".json")).sort()) {
+        for (const f of (0, import_node_fs2.readdirSync)(abs(dir)).filter((x2) => x2.endsWith(".json")).sort()) {
           try {
-            const n = normalizeNote(JSON.parse((0, import_node_fs.readFileSync)(import_node_path.default.join(abs(dir), f), "utf8")));
+            const n = normalizeNote(JSON.parse((0, import_node_fs2.readFileSync)(import_node_path2.default.join(abs(dir), f), "utf8")));
             if (n) all.push({ ...n, id: f.slice(0, -5) });
           } catch {
           }
@@ -13694,9 +13727,9 @@ function run(argv, io) {
         if (swarm && !base) return fail("launch: --swarm needs --base <the swarm base branch>", 2);
         const git = (...a) => (0, import_node_child_process.execFileSync)("git", a, { cwd: io.cwd, encoding: "utf8" }).trim();
         const root = mainWorktreeFrom(git("worktree", "list", "--porcelain")) ?? git("rev-parse", "--show-toplevel");
-        const worktree = import_node_path.default.join(root, ".claude", "worktrees", track);
+        const worktree = import_node_path2.default.join(root, ".claude", "worktrees", track);
         const branch = `track/${track}`;
-        if (!(0, import_node_fs.existsSync)(worktree)) {
+        if (!(0, import_node_fs2.existsSync)(worktree)) {
           const exists = git("branch", "--list", branch) !== "";
           git("worktree", "add", worktree, ...exists ? [branch] : ["-b", branch, ...base ? [base] : []]);
         }
@@ -13704,17 +13737,19 @@ function run(argv, io) {
         const FORGE_MARK = "forge drives this session";
         let forge = args.includes("--forge") || !!swarm;
         if (!forge && !args.includes("--no-forge")) {
-          const designFile = import_node_path.default.join(import_node_path.default.dirname(abs(args[0])), "design.md");
-          if ((0, import_node_fs.existsSync)(designFile)) {
+          const designFile = import_node_path2.default.join(import_node_path2.default.dirname(abs(args[0])), "design.md");
+          if ((0, import_node_fs2.existsSync)(designFile)) {
             try {
-              forge = parseDesign((0, import_node_fs.readFileSync)(designFile, "utf8")).meta.start_prompt.includes(FORGE_MARK);
+              forge = parseDesign((0, import_node_fs2.readFileSync)(designFile, "utf8")).meta.start_prompt.includes(FORGE_MARK);
             } catch (e) {
               if (!(e instanceof DesignError)) throw e;
             }
           }
         }
         const prompt = `/waypoint:work ${track}` + (forge ? ` \u2014 ${FORGE_MARK} (forge:run Large loop)` : "") + (args.includes("--merge") ? ` \u2014 the user authorizes merging ${branch} into main at phase close` : "") + (swarm ? ` \u2014 swarm member of ${swarm}: do not merge into the base branch; keep taking tasks of your track and stop when it has no next task` : "");
-        return ok(JSON.stringify({ worktree, branch, name, prompt, command: `claude --bg --name ${name} "${prompt}"` }));
+        const command = `claude --bg --name ${name} "${prompt}"`;
+        const inWorktree = `(cd '${worktree.split("'").join(`'\\''`)}' && ${command})`;
+        return ok(JSON.stringify({ worktree, branch, name, prompt, command, run: inWorktree }));
       }
       case "status": {
         const { view: p, project, version } = loadView();
@@ -13746,8 +13781,8 @@ function run(argv, io) {
         return ok(JSON.stringify({ sha, ts: new Date(ts).toISOString(), title: title.join("	"), add: num(/(\d+) insertion/), del: num(/(\d+) deletion/) }));
       }
       case "design-validate": {
-        const d = parseDesign((0, import_node_fs.readFileSync)(abs(args[0]), "utf8"));
-        const log = readChangelog(import_node_path.default.dirname(abs(args[0])));
+        const d = parseDesign((0, import_node_fs2.readFileSync)(abs(args[0]), "utf8"));
+        const log = readChangelog(import_node_path2.default.dirname(abs(args[0])));
         const sections = d.sections.length;
         return ok(`ok: ${d.words} words, ${sections} sections, v${log[log.length - 1]?.version ?? 0}`);
       }
@@ -13755,47 +13790,47 @@ function run(argv, io) {
         const file = abs(args[0]);
         const note = flag("note");
         if (!note) return fail("design-snapshot: --note is required", 2);
-        const text = (0, import_node_fs.readFileSync)(file, "utf8");
+        const text = (0, import_node_fs2.readFileSync)(file, "utf8");
         const d = parseDesign(text);
-        const base = import_node_path.default.join(import_node_path.default.dirname(file), "design");
-        const histDir = import_node_path.default.join(base, "history");
-        const log = readChangelog(import_node_path.default.dirname(file));
-        const version = nextVersion((0, import_node_fs.existsSync)(histDir) ? (0, import_node_fs.readdirSync)(histDir) : []);
+        const base = import_node_path2.default.join(import_node_path2.default.dirname(file), "design");
+        const histDir = import_node_path2.default.join(base, "history");
+        const log = readChangelog(import_node_path2.default.dirname(file));
+        const version = nextVersion((0, import_node_fs2.existsSync)(histDir) ? (0, import_node_fs2.readdirSync)(histDir) : []);
         const roundFlag = flag("round");
         const round = roundFlag !== void 0 ? Number(roundFlag) : log[log.length - 1]?.round ?? 0;
         if (!Number.isInteger(round) || round < 0) return fail("design-snapshot: --round must be a non-negative integer", 2);
         const next = appendChangelog(log, { version, date: io.now().toISOString().slice(0, 10), note, words: d.words, round });
-        (0, import_node_fs.mkdirSync)(histDir, { recursive: true });
-        const dest = import_node_path.default.join(histDir, `v${version}.md`);
+        (0, import_node_fs2.mkdirSync)(histDir, { recursive: true });
+        const dest = import_node_path2.default.join(histDir, `v${version}.md`);
         try {
-          (0, import_node_fs.writeFileSync)(dest, text, { flag: "wx" });
+          (0, import_node_fs2.writeFileSync)(dest, text, { flag: "wx" });
         } catch (e) {
           if (e.code === "EEXIST") return fail(`design-snapshot: ${dest} already exists; history is immutable`);
           throw e;
         }
-        (0, import_node_fs.writeFileSync)(import_node_path.default.join(base, "changelog.json"), JSON.stringify(next, null, 2) + "\n");
+        (0, import_node_fs2.writeFileSync)(import_node_path2.default.join(base, "changelog.json"), JSON.stringify(next, null, 2) + "\n");
         return ok(JSON.stringify({ version, path: dest }));
       }
       case "design-changed": {
         const file = abs(args[0]);
-        const text = (0, import_node_fs.readFileSync)(file, "utf8");
+        const text = (0, import_node_fs2.readFileSync)(file, "utf8");
         const d = parseDesign(text);
-        const histDir = import_node_path.default.join(import_node_path.default.dirname(file), "design", "history");
-        const versions = listVersions((0, import_node_fs.existsSync)(histDir) ? (0, import_node_fs.readdirSync)(histDir) : []);
+        const histDir = import_node_path2.default.join(import_node_path2.default.dirname(file), "design", "history");
+        const versions = listVersions((0, import_node_fs2.existsSync)(histDir) ? (0, import_node_fs2.readdirSync)(histDir) : []);
         const sinceFlag = flag("since");
         const since = sinceFlag !== void 0 ? Number(sinceFlag) : versions[versions.length - 1];
-        const prevFile = since !== void 0 ? import_node_path.default.join(histDir, `v${since}.md`) : void 0;
-        if (since === void 0 || !prevFile || !(0, import_node_fs.existsSync)(prevFile)) {
+        const prevFile = since !== void 0 ? import_node_path2.default.join(histDir, `v${since}.md`) : void 0;
+        if (since === void 0 || !prevFile || !(0, import_node_fs2.existsSync)(prevFile)) {
           if (sinceFlag !== void 0) return fail(`design-changed: no history for v${sinceFlag}`);
           return ok(JSON.stringify({ since: 0, changed: d.sections.map((s) => s.slug), scope: "full" }));
         }
-        const changed = changedSections((0, import_node_fs.readFileSync)(prevFile, "utf8"), text);
+        const changed = changedSections((0, import_node_fs2.readFileSync)(prevFile, "utf8"), text);
         const total = d.sections.length;
         const count = changed.filter((s) => s !== "_intro").length;
         return ok(JSON.stringify({ since, changed, scope: total === 0 || count * 2 > total ? "full" : "changed" }));
       }
       case "critique-check": {
-        const c = parseCritique((0, import_node_fs.readFileSync)(abs(args[0]), "utf8"));
+        const c = parseCritique((0, import_node_fs2.readFileSync)(abs(args[0]), "utf8"));
         const issues = [];
         for (const name of ["round", "version"]) {
           const given = flag(name);
@@ -13806,7 +13841,7 @@ function run(argv, io) {
         const designFlag = flag("design");
         const headings = {};
         if (designFlag !== void 0) {
-          const sections = parseDesign((0, import_node_fs.readFileSync)(abs(designFlag), "utf8")).sections;
+          const sections = parseDesign((0, import_node_fs2.readFileSync)(abs(designFlag), "utf8")).sections;
           for (const s of sections) headings[s.slug] = s.heading;
           const slugs = /* @__PURE__ */ new Set(["_intro", ...sections.map((s) => s.slug)]);
           for (const p of c.proposals) if (!slugs.has(p.section)) issues.push(`proposal ${p.n}: section "${p.section}" is not a section slug of the design`);
@@ -13815,7 +13850,7 @@ function run(argv, io) {
         return ok(formatProposals(c, flag("locale") ?? "en", headings));
       }
       case "critique-select": {
-        const c = parseCritique((0, import_node_fs.readFileSync)(abs(args[0]), "utf8"));
+        const c = parseCritique((0, import_node_fs2.readFileSync)(abs(args[0]), "utf8"));
         if (!args[1]) return fail("critique-select: <spec> is required", 2);
         return ok(JSON.stringify(selectProposals(c, args[1])));
       }
@@ -13823,26 +13858,26 @@ function run(argv, io) {
         const file = abs(args[0]);
         const out = flag("out");
         if (!out) return fail("design-page: --out is required", 2);
-        const dirPath = import_node_path.default.dirname(file);
-        const histDir = import_node_path.default.join(dirPath, "design", "history");
+        const dirPath = import_node_path2.default.dirname(file);
+        const histDir = import_node_path2.default.join(dirPath, "design", "history");
         const history = {};
-        for (const v of listVersions((0, import_node_fs.existsSync)(histDir) ? (0, import_node_fs.readdirSync)(histDir) : [])) history[v] = (0, import_node_fs.readFileSync)(import_node_path.default.join(histDir, `v${v}.md`), "utf8");
-        const current = (0, import_node_fs.readFileSync)(file, "utf8");
+        for (const v of listVersions((0, import_node_fs2.existsSync)(histDir) ? (0, import_node_fs2.readdirSync)(histDir) : [])) history[v] = (0, import_node_fs2.readFileSync)(import_node_path2.default.join(histDir, `v${v}.md`), "utf8");
+        const current = (0, import_node_fs2.readFileSync)(file, "utf8");
         let source = `docs/waypoint/${parseDesign(current).meta.project}/`;
         try {
           const root = (0, import_node_child_process.execFileSync)("git", ["rev-parse", "--show-toplevel"], { cwd: dirPath, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-          const rel = import_node_path.default.relative(import_node_path.default.resolve(root), dirPath).split(import_node_path.default.sep).join("/");
-          if (!rel.startsWith("..") && !import_node_path.default.isAbsolute(rel)) source = rel ? `${rel}/` : "";
+          const rel = import_node_path2.default.relative(import_node_path2.default.resolve(root), dirPath).split(import_node_path2.default.sep).join("/");
+          if (!rel.startsWith("..") && !import_node_path2.default.isAbsolute(rel)) source = rel ? `${rel}/` : "";
         } catch {
         }
         const data = buildDesignPageData({ current, history, changelog: readChangelog(dirPath), source });
-        const tpl = (0, import_node_fs.readFileSync)(import_node_path.default.join(io.assetsDir, "design.template.html"), "utf8");
+        const tpl = (0, import_node_fs2.readFileSync)(import_node_path2.default.join(io.assetsDir, "design.template.html"), "utf8");
         const title = `${data.meta.title.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")} \xB7 Design`;
         const json = JSON.stringify(data).replace(/</g, "\\u003c");
         const html = tpl.replace(/__TITLE__|__DATA__/g, (m) => m === "__TITLE__" ? title : json);
         const target = abs(out);
-        (0, import_node_fs.mkdirSync)(import_node_path.default.dirname(target), { recursive: true });
-        (0, import_node_fs.writeFileSync)(target, html);
+        (0, import_node_fs2.mkdirSync)(import_node_path2.default.dirname(target), { recursive: true });
+        (0, import_node_fs2.writeFileSync)(target, html);
         return ok(target);
       }
       case "hook": {
@@ -13887,7 +13922,7 @@ function isCommitCommand(cmd) {
   return COMMIT_RE.test(cmd) && !/(^|\s)--dry-run(?![\w-])/.test(cmd);
 }
 function lines(file) {
-  return (0, import_node_fs.existsSync)(file) ? (0, import_node_fs.readFileSync)(file, "utf8").split("\n").filter((l3) => l3.trim()) : [];
+  return (0, import_node_fs2.existsSync)(file) ? (0, import_node_fs2.readFileSync)(file, "utf8").split("\n").filter((l3) => l3.trim()) : [];
 }
 var nonEmpty = (v) => typeof v === "string" && v.trim() ? v : void 0;
 function runHook(sub, io) {
@@ -13902,19 +13937,19 @@ function runHook(sub, io) {
   const cmd = input.tool_input?.command;
   if (sub === "post-commit" && (typeof cmd !== "string" || !isCommitCommand(cmd))) return "";
   const root = nonEmpty(io.env?.CLAUDE_PROJECT_DIR) ?? nonEmpty(input.cwd) ?? io.cwd;
-  const base = import_node_path.default.join(root, "docs", "waypoint");
-  const entries = (0, import_node_fs.existsSync)(base) ? (0, import_node_fs.readdirSync)(base, { withFileTypes: true }).filter((d) => d.isDirectory()).flatMap((d) => {
-    const files = ["plan.yaml", "design.md"].map((n) => import_node_path.default.join(base, d.name, n)).filter(import_node_fs.existsSync);
+  const base = import_node_path2.default.join(root, "docs", "waypoint");
+  const entries = (0, import_node_fs2.existsSync)(base) ? (0, import_node_fs2.readdirSync)(base, { withFileTypes: true }).filter((d) => d.isDirectory()).flatMap((d) => {
+    const files = ["plan.yaml", "design.md"].map((n) => import_node_path2.default.join(base, d.name, n)).filter(import_node_fs2.existsSync);
     if (!files.length) return [];
-    return [{ name: d.name, hasSession: (0, import_node_fs.existsSync)(import_node_path.default.join(root, ".waypoint", d.name, "session.json")), mtimeMs: Math.max(...files.map((f) => (0, import_node_fs.statSync)(f).mtimeMs)) }];
+    return [{ name: d.name, hasSession: (0, import_node_fs2.existsSync)(import_node_path2.default.join(root, ".waypoint", d.name, "session.json")), mtimeMs: Math.max(...files.map((f) => (0, import_node_fs2.statSync)(f).mtimeMs)) }];
   }) : [];
   const project = pickProject(entries);
   if (!project) return "";
-  const wp = import_node_path.default.join(root, ".waypoint", project);
-  const docDir = import_node_path.default.join(base, project);
+  const wp = import_node_path2.default.join(root, ".waypoint", project);
+  const docDir = import_node_path2.default.join(base, project);
   const session = () => {
     try {
-      return JSON.parse((0, import_node_fs.readFileSync)(import_node_path.default.join(wp, "session.json"), "utf8")) ?? {};
+      return JSON.parse((0, import_node_fs2.readFileSync)(import_node_path2.default.join(wp, "session.json"), "utf8")) ?? {};
     } catch {
       return {};
     }
@@ -13923,33 +13958,33 @@ function runHook(sub, io) {
     if (s.currentTask) return s.currentTask;
     if (!s.sessionId) return null;
     try {
-      const states = readDocs(import_node_path.default.join(wp, "dbcache", "state"));
+      const states = readDocs(import_node_path2.default.join(wp, "dbcache", "state"));
       return Object.entries(states).find(([, st2]) => (st2.status === "in_progress" || st2.status === "claimed") && st2.owner === s.sessionId)?.[0] ?? null;
     } catch {
       return null;
     }
   };
   const head = () => (0, import_node_child_process.execFileSync)("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-  const headFile = import_node_path.default.join(wp, "last-head");
+  const headFile = import_node_path2.default.join(wp, "last-head");
   switch (sub) {
     case "session-start": {
       try {
         const h2 = head();
-        (0, import_node_fs.mkdirSync)(wp, { recursive: true });
-        (0, import_node_fs.writeFileSync)(headFile, h2 + "\n");
+        (0, import_node_fs2.mkdirSync)(wp, { recursive: true });
+        (0, import_node_fs2.writeFileSync)(headFile, h2 + "\n");
       } catch {
       }
-      const planFile = import_node_path.default.join(docDir, "plan.yaml");
+      const planFile = import_node_path2.default.join(docDir, "plan.yaml");
       let text = null;
-      if ((0, import_node_fs.existsSync)(planFile)) {
+      if ((0, import_node_fs2.existsSync)(planFile)) {
         try {
-          const plan = parsePlan((0, import_node_fs.readFileSync)(planFile, "utf8"));
+          const plan = parsePlan((0, import_node_fs2.readFileSync)(planFile, "utf8"));
           const s = session();
           const taskId = currentTask(s);
           const cur = taskId ? plan.tasks.find((t) => t.id === taskId) : void 0;
           let open = 0;
           try {
-            if (s.sessionId) open = Object.values(readDocs(import_node_path.default.join(wp, "dbcache", "messages"))).filter((m) => m.to === s.sessionId && m.status === "open").length;
+            if (s.sessionId) open = Object.values(readDocs(import_node_path2.default.join(wp, "dbcache", "messages"))).filter((m) => m.to === s.sessionId && m.status === "open").length;
           } catch {
             open = 0;
           }
@@ -13958,8 +13993,8 @@ function runHook(sub, io) {
           text = null;
         }
       }
-      if (text === null && (0, import_node_fs.existsSync)(import_node_path.default.join(docDir, "design.md"))) {
-        const d = parseDesign((0, import_node_fs.readFileSync)(import_node_path.default.join(docDir, "design.md"), "utf8"));
+      if (text === null && (0, import_node_fs2.existsSync)(import_node_path2.default.join(docDir, "design.md"))) {
+        const d = parseDesign((0, import_node_fs2.readFileSync)(import_node_path2.default.join(docDir, "design.md"), "utf8"));
         if (d.meta.status === "draft") {
           const log = readChangelog(docDir);
           text = `waypoint: design document ${project} v${log[log.length - 1]?.version ?? 0} (draft). Use /waypoint:design to continue the design loop.`;
@@ -13971,44 +14006,44 @@ function runHook(sub, io) {
       const task = currentTask(session());
       if (!task) return "";
       const sha = head();
-      const last = (0, import_node_fs.existsSync)(headFile) ? (0, import_node_fs.readFileSync)(headFile, "utf8").trim() : "";
+      const last = (0, import_node_fs2.existsSync)(headFile) ? (0, import_node_fs2.readFileSync)(headFile, "utf8").trim() : "";
       if (sha === last) return "";
-      (0, import_node_fs.mkdirSync)(wp, { recursive: true });
-      (0, import_node_fs.writeFileSync)(headFile, sha + "\n");
-      (0, import_node_fs.appendFileSync)(import_node_path.default.join(wp, "pending-commits.jsonl"), JSON.stringify({ ts: io.now().toISOString(), task, sha, command: cmd.slice(0, 200) }) + "\n");
+      (0, import_node_fs2.mkdirSync)(wp, { recursive: true });
+      (0, import_node_fs2.writeFileSync)(headFile, sha + "\n");
+      (0, import_node_fs2.appendFileSync)(import_node_path2.default.join(wp, "pending-commits.jsonl"), JSON.stringify({ ts: io.now().toISOString(), task, sha, command: cmd.slice(0, 200) }) + "\n");
       return "";
     }
     case "stop": {
       if (input.stop_hook_active === true) return "";
-      const commits = lines(import_node_path.default.join(wp, "pending-commits.jsonl"));
-      const queued = lines(import_node_path.default.join(wp, "queue.jsonl"));
+      const commits = lines(import_node_path2.default.join(wp, "pending-commits.jsonl"));
+      const queued = lines(import_node_path2.default.join(wp, "queue.jsonl"));
       if (!commits.length && !queued.length) return "";
       const hash = (0, import_node_crypto2.createHash)("sha256").update(JSON.stringify([commits, queued])).digest("hex");
-      const ackFile = import_node_path.default.join(wp, "stop-ack");
-      if ((0, import_node_fs.existsSync)(ackFile) && (0, import_node_fs.readFileSync)(ackFile, "utf8").trim() === hash) return "";
-      (0, import_node_fs.writeFileSync)(ackFile, hash + "\n");
-      return JSON.stringify({ decision: "block", reason: `waypoint: ${commits.length} commit(s) / ${queued.length} queued roadmap update(s) are not in the live roadmap yet. Record them (work skill: a \`commit\` event for intermediate commits, or the task's completion), or flush the queue, then remove those lines from .waypoint/${project}/pending-commits.jsonl. You can also stop now; this reminder shows once per change.` });
+      const ackFile = import_node_path2.default.join(wp, "stop-ack");
+      if ((0, import_node_fs2.existsSync)(ackFile) && (0, import_node_fs2.readFileSync)(ackFile, "utf8").trim() === hash) return "";
+      (0, import_node_fs2.writeFileSync)(ackFile, hash + "\n");
+      return JSON.stringify({ decision: "block", reason: `waypoint: ${commits.length} commit(s) / ${queued.length} queued roadmap update(s) are not in the live roadmap yet. Record them (work skill: a \`commit\` event for intermediate commits, or the task's completion), or flush the queue, then remove those lines from .waypoint/${project}/pending-commits.jsonl. You can also stop now; this reminder shows once per change.${replyIn(planLocale(root, project))}` });
     }
     default:
       return "";
   }
 }
 function readDocs(dir) {
-  if (!dir || !(0, import_node_fs.existsSync)(dir)) return {};
+  if (!dir || !(0, import_node_fs2.existsSync)(dir)) return {};
   return Object.fromEntries(
-    (0, import_node_fs.readdirSync)(dir).filter((f) => f.endsWith(".json")).map((f) => [f.slice(0, -5), JSON.parse((0, import_node_fs.readFileSync)(import_node_path.default.join(dir, f), "utf8"))])
+    (0, import_node_fs2.readdirSync)(dir).filter((f) => f.endsWith(".json")).map((f) => [f.slice(0, -5), JSON.parse((0, import_node_fs2.readFileSync)(import_node_path2.default.join(dir, f), "utf8"))])
   );
 }
 function readChangelog(designDir) {
-  const f = import_node_path.default.join(designDir, "design", "changelog.json");
-  return parseChangelog((0, import_node_fs.existsSync)(f) ? (0, import_node_fs.readFileSync)(f, "utf8") : null);
+  const f = import_node_path2.default.join(designDir, "design", "changelog.json");
+  return parseChangelog((0, import_node_fs2.existsSync)(f) ? (0, import_node_fs2.readFileSync)(f, "utf8") : null);
 }
 
 // src/cli/main.ts
 var stdin = "";
 if (process.argv[2] === "hook") {
   try {
-    stdin = (0, import_node_fs2.readFileSync)(0, "utf8");
+    stdin = (0, import_node_fs3.readFileSync)(0, "utf8");
   } catch {
     stdin = "";
   }
@@ -14018,7 +14053,7 @@ var r = run(process.argv.slice(2), {
   env: process.env,
   cwd: process.cwd(),
   now: () => /* @__PURE__ */ new Date(),
-  assetsDir: process.env.WAYPOINT_ASSETS ?? import_node_path2.default.resolve(import_node_path2.default.dirname(process.argv[1]), "../assets")
+  assetsDir: process.env.WAYPOINT_ASSETS ?? import_node_path3.default.resolve(import_node_path3.default.dirname(process.argv[1]), "../assets")
 });
 process.stdout.write(r.stdout);
 process.stderr.write(r.stderr);

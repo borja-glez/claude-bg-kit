@@ -11360,7 +11360,19 @@ function buildBandModel(project, f) {
     if (f.design !== void 0) return designModel(project, f);
   } catch {
   }
-  return { mode: "none" };
+  const locale = knownLocale(f);
+  return locale ? { mode: "none", locale } : { mode: "none" };
+}
+function knownLocale(f) {
+  try {
+    if (f.plan !== void 0) return parsePlan(f.plan).locale;
+  } catch {
+  }
+  try {
+    if (f.design !== void 0) return parseDesign(f.design).meta.locale;
+  } catch {
+  }
+  return void 0;
 }
 var MAX_CELLS = 120;
 var CELL = { done: "d", in_progress: "a", claimed: "a", blocked: "b", free: "p", orphaned: "b" };
@@ -11419,7 +11431,7 @@ function swarmModel(project, planText, s, f) {
 }
 function designModel(project, f) {
   const d = parseDesign(f.design);
-  if (d.meta.status !== "draft") return { mode: "none" };
+  if (d.meta.status !== "draft") return { mode: "none", locale: d.meta.locale };
   let changelog = [];
   try {
     changelog = parseChangelog(f.changelog ?? null);
@@ -11744,6 +11756,14 @@ var modelRight = (s, t) => s.model ? `${shortModelName(s.model)}${s.effort ? ` \
 var VERDICT_HUE = { accept: "green", fix: "yellow", redo: "red" };
 function buildCards(m, t, nowMs2) {
   const out = [];
+  let usageCard = null;
+  if (m.mainModel || m.tool || m.turnSeconds !== null) {
+    const blocks = [];
+    if (m.mainModel) blocks.push({ kind: "row", dot: "lavender", text: `${shortModelName(m.mainModel.model)}${m.mainModel.effort ? ` \xB7 ${t.effort} ${t.effortLevel(m.mainModel.effort)}` : ""}` });
+    if (m.tool) blocks.push({ kind: "row", dot: "sky", spinning: true, tag: { text: t.tool, hue: "sky" }, text: m.tool.name, right: duration(m.tool.seconds) ?? void 0 });
+    if (m.turnSeconds !== null) blocks.push({ kind: "row", dot: "sub", text: t.turn, right: duration(m.turnSeconds) ?? void 0 });
+    out.push({ icon: SECTION_ICON.now, title: t.sNow, hue: SECTION_HUE.now, blocks });
+  }
   if (m.waypoint) {
     const w = m.waypoint;
     const cells2 = roadmapCells(w);
@@ -11875,7 +11895,7 @@ function buildCards(m, t, nowMs2) {
       blocks.push({ kind: "text", text: t.withoutForgeNote, dim: true });
     }
     blocks.push({ kind: "text", text: `${t.pricesAsOf} ${u.pricesAsOf}`, dim: true });
-    out.push({ icon: "$", title: t.sUsage, hue: "teal", chip: { text: `${u.partial ? "\u2265 " : ""}${fmtUsd(u.costUsd, loc)}`, hue: "teal" }, blocks });
+    usageCard = { icon: "$", title: t.sUsage, hue: "teal", chip: { text: `${u.partial ? "\u2265 " : ""}${fmtUsd(u.costUsd, loc)}`, hue: "teal" }, blocks };
   }
   if (m.superpowers) {
     const s = m.superpowers;
@@ -11912,13 +11932,7 @@ function buildCards(m, t, nowMs2) {
     ];
     out.push({ icon: SECTION_ICON.tasks, title: t.sTasks, hue: SECTION_HUE.tasks, blocks });
   }
-  if (m.mainModel || m.tool || m.turnSeconds !== null) {
-    const blocks = [];
-    if (m.mainModel) blocks.push({ kind: "row", dot: "lavender", text: `${shortModelName(m.mainModel.model)}${m.mainModel.effort ? ` \xB7 ${t.effort} ${t.effortLevel(m.mainModel.effort)}` : ""}` });
-    if (m.tool) blocks.push({ kind: "row", dot: "sky", spinning: true, tag: { text: t.tool, hue: "sky" }, text: m.tool.name, right: duration(m.tool.seconds) ?? void 0 });
-    if (m.turnSeconds !== null) blocks.push({ kind: "row", dot: "sub", text: t.turn, right: duration(m.turnSeconds) ?? void 0 });
-    out.push({ icon: SECTION_ICON.now, title: t.sNow, hue: SECTION_HUE.now, blocks });
-  }
+  if (usageCard) out.push(usageCard);
   return out;
 }
 function cardAlt(card) {
@@ -12708,7 +12722,7 @@ async function buildPanel($) {
     activity: { ...activity, subagents },
     now,
     usage: usageInput(),
-    ...roadmap.mode !== "none" ? { locale: roadmap.locale } : {}
+    ...roadmap.locale ? { locale: roadmap.locale } : {}
   });
 }
 function keepBand($, model) {
@@ -12904,7 +12918,7 @@ var TEXT = {
   }
 };
 var textsFor = (locale) => locale === "es" ? TEXT.es : TEXT.en;
-var lensTexts = () => textsFor(roadmap.mode !== "none" ? roadmap.locale : void 0);
+var lensTexts = () => textsFor(roadmap.locale);
 async function openPanel($) {
   const t = lensTexts();
   let placed = false;

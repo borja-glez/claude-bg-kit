@@ -10757,7 +10757,19 @@ function buildBandModel(project, f) {
     if (f.design !== void 0) return designModel(project, f);
   } catch {
   }
-  return { mode: "none" };
+  const locale = knownLocale(f);
+  return locale ? { mode: "none", locale } : { mode: "none" };
+}
+function knownLocale(f) {
+  try {
+    if (f.plan !== void 0) return parsePlan(f.plan).locale;
+  } catch {
+  }
+  try {
+    if (f.design !== void 0) return parseDesign(f.design).meta.locale;
+  } catch {
+  }
+  return void 0;
 }
 var MAX_CELLS = 120;
 var CELL = { done: "d", in_progress: "a", claimed: "a", blocked: "b", free: "p", orphaned: "b" };
@@ -10816,7 +10828,7 @@ function swarmModel(project, planText, s, f) {
 }
 function designModel(project, f) {
   const d = parseDesign(f.design);
-  if (d.meta.status !== "draft") return { mode: "none" };
+  if (d.meta.status !== "draft") return { mode: "none", locale: d.meta.locale };
   let changelog = [];
   try {
     changelog = parseChangelog(f.changelog ?? null);
