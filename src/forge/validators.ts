@@ -1,9 +1,9 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { ExecResult } from './cli/run.js';
-import type { ForgeConfig } from './config.js';
+import type { ForgeConfig, When } from './config.js';
 
-export interface Validator { name: string; cmd: string; kind: string; affects?: string[] }
+export interface Validator { name: string; cmd: string; kind: string; affects?: string[]; when?: When; source: 'manual' | 'detected' }
 // A flaky result (failed, then passed on the retry) is ok: true; its first failures are kept for the record.
 export interface ValidatorResult { validator: string; ok: boolean; flaky: boolean; durationMs: number; failures: string[] }
 // list(dir) lists the entries of a directory relative to the repo root (the root itself when omitted).
@@ -46,32 +46,64 @@ function dotnetTarget(rootEntries: string[]): string | null {
   return projects.length === 1 ? projects[0] : null;
 }
 
-export function detectValidators(repo: RepoReader, config: ForgeConfig, which: (name: string) => boolean = onPath): Validator[] {
-  // Validators listed in the config replace detection; an empty list means none.
-  if (config.validators) return config.validators.map(v => ({ ...v, kind: v.kind ?? 'other' }));
+const E2E_SCRIPTS = ['e2e', 'test:e2e', 'test:integration'];
+const CONFIGS = (base: string) => ['ts', 'js', 'mjs', 'cjs'].map(e => `${base}.${e}`);
+
+function detected(repo: RepoReader, which: (name: string) => boolean, platform: NodeJS.Platform): Validator[] {
   const out: Validator[] = [];
+  const push = (v: Omit<Validator, 'source'>) => out.push({ ...v, source: 'detected' });
   const pkgText = repo.read('package.json');
+  let scripts: Record<string, unknown> = {};
+  let runner = 'npm';
   if (pkgText !== null) {
-    let scripts: Record<string, unknown> = {};
     try { scripts = (JSON.parse(pkgText)?.scripts ?? {}) as Record<string, unknown>; } catch { scripts = {}; }
-    const runner = repo.exists('bun.lock') || repo.exists('bun.lockb') ? 'bun' : repo.exists('pnpm-lock.yaml') ? 'pnpm' : repo.exists('yarn.lock') ? 'yarn' : 'npm';
+    runner = repo.exists('bun.lock') || repo.exists('bun.lockb') ? 'bun' : repo.exists('pnpm-lock.yaml') ? 'pnpm' : repo.exists('yarn.lock') ? 'yarn' : 'npm';
     for (const [script, kind] of NPM_ORDER) {
       const body = scripts[script];
       if (typeof body !== 'string' || !body.trim()) continue;
       if (script === 'test' && PLACEHOLDER_TEST.test(body)) continue;
       if (kind === 'typecheck' && out.some(v => v.kind === 'typecheck')) continue;
       const cmd = script === 'test' ? `${runner} test` : runner === 'yarn' ? `yarn ${script}` : `${runner} run ${script}`;
-      out.push({ name: script, cmd, kind });
+      push({ name: script, cmd, kind });
     }
   }
-  if (usesPytest(repo)) out.push({ name: 'pytest', cmd: `${pythonFor(repo, which)} -m pytest -q`, kind: 'test' });
-  if (repo.exists('Cargo.toml')) out.push({ name: 'cargo-test', cmd: 'cargo test', kind: 'test' });
-  if (repo.exists('go.mod')) out.push({ name: 'go-vet', cmd: 'go vet ./...', kind: 'lint' }, { name: 'go-test', cmd: 'go test ./...', kind: 'test' });
+  const run = (s: string) => (runner === 'yarn' ? `yarn ${s}` : `${runner} run ${s}`);
+  const has = (s: string) => typeof scripts[s] === 'string' && (scripts[s] as string).trim() !== '';
+  const e2eScripts = E2E_SCRIPTS.filter(has);
+  for (const s of e2eScripts) push({ name: s, cmd: run(s), kind: 'e2e' });
+  if (!e2eScripts.length) {
+    if (CONFIGS('playwright.config').some(f => repo.exists(f))) push({ name: 'playwright', cmd: 'npx playwright test', kind: 'e2e' });
+    if (CONFIGS('cypress.config').some(f => repo.exists(f))) push({ name: 'cypress', cmd: 'npx cypress run', kind: 'e2e' });
+    if (['.detoxrc', '.detoxrc.js', '.detoxrc.json', 'detox.config.js'].some(f => repo.exists(f))) push({ name: 'detox', cmd: 'npx detox test', kind: 'e2e' });
+  }
+  if (has('bench')) push({ name: 'bench', cmd: run('bench'), kind: 'bench' });
+  if (usesPytest(repo)) push({ name: 'pytest', cmd: `${pythonFor(repo, which)} -m pytest -q`, kind: 'test' });
+  if (repo.exists('Cargo.toml')) push({ name: 'cargo-test', cmd: 'cargo test', kind: 'test' });
+  if (repo.exists('go.mod')) { push({ name: 'go-vet', cmd: 'go vet ./...', kind: 'lint' }); push({ name: 'go-test', cmd: 'go test ./...', kind: 'test' }); }
   const dotnet = dotnetTarget(repo.list());
-  if (dotnet) out.push({ name: 'dotnet-test', cmd: `dotnet test ${/\s/.test(dotnet) ? `"${dotnet}"` : dotnet}`, kind: 'test' });
+  if (dotnet) push({ name: 'dotnet-test', cmd: `dotnet test ${/\s/.test(dotnet) ? `"${dotnet}"` : dotnet}`, kind: 'test' });
+  if (repo.exists('pubspec.yaml')) { push({ name: 'flutter-analyze', cmd: 'flutter analyze', kind: 'lint' }); push({ name: 'flutter-test', cmd: 'flutter test', kind: 'test' }); }
+  const gw = repo.exists('gradlew') ? '' : repo.exists('android/gradlew') ? 'android/' : null;
+  const androidApp = gw !== null && ['app/build.gradle', 'app/build.gradle.kts'].some(f => /com\.android\.application/.test(repo.read(gw + f) ?? ''));
+  if (pkgText === null && androidApp) {
+    const g = `${gw ? 'cd android && ' : ''}${platform === 'win32' ? 'gradlew.bat' : './gradlew'}`;
+    push({ name: 'gradle-lint', cmd: `${g} lint`, kind: 'lint' });
+    push({ name: 'gradle-test', cmd: `${g} testDebugUnitTest`, kind: 'test' });
+  }
   const make = repo.read('GNUmakefile') ?? repo.read('makefile') ?? repo.read('Makefile');
-  if (make !== null && /^test\s*:(?!=)/m.test(make) && !out.some(v => v.kind === 'test')) out.push({ name: 'make-test', cmd: 'make test', kind: 'test' });
+  if (make !== null && /^test\s*:(?!=)/m.test(make) && !out.some(v => v.kind === 'test')) push({ name: 'make-test', cmd: 'make test', kind: 'test' });
   return out;
+}
+
+// Manual validators (the config) and, unless detect is false, detected ones minus `exclude`. A manual validator
+// replaces a detected one of the same name in place; the other manual ones follow.
+export function detectValidators(repo: RepoReader, config: ForgeConfig, which: (name: string) => boolean = onPath, platform: NodeJS.Platform = process.platform): Validator[] {
+  const manual = (config.validators ?? []).map(v => ({ ...v, kind: v.kind ?? 'other', source: 'manual' as const }));
+  if (!config.detect) return manual;
+  const byName = new Map(manual.map(v => [v.name, v]));
+  const merged = detected(repo, which, platform).filter(v => !config.exclude.includes(v.name)).map(v => byName.get(v.name) ?? v);
+  const used = new Set(merged.map(v => v.name));
+  return [...merged, ...manual.filter(v => !used.has(v.name))];
 }
 
 export function globMatch(glob: string, file: string): boolean {

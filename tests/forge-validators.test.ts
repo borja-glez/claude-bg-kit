@@ -70,13 +70,54 @@ describe('detectValidators', () => {
     expect(has({ 'tests/test_core.py': '' })).toEqual(['pytest']);
     expect(has({ 'tests/helpers.py': '', 'tests/deep/test_x.py': '' })).toEqual([]);
   });
-  it('an empty validators list in the config means none, without detection', () => {
-    const c = parseConfig('validators: []\n');
-    expect(detectValidators(repo({ 'package.json': JSON.stringify({ scripts: { test: 'x' } }) }), c)).toEqual([]);
+  const pkg = (scripts: Record<string, string>) => JSON.stringify({ scripts });
+  it('detect: false with an empty list means none (0.5.x behaviour)', () => {
+    const c = parseConfig('detect: false\nvalidators: []\n');
+    expect(detectValidators(repo({ 'package.json': pkg({ test: 'x' }) }), c)).toEqual([]);
   });
-  it('config validators replace detection', () => {
-    const c = parseConfig('validators:\n  - name: e2e\n    cmd: npm run e2e\n');
-    expect(detectValidators(repo({ 'package.json': JSON.stringify({ scripts: { test: 'x' } }) }), c)).toEqual([{ name: 'e2e', cmd: 'npm run e2e', kind: 'other' }]);
+  it('detect: false keeps only the manual list', () => {
+    const c = parseConfig('detect: false\nvalidators:\n  - name: e2e\n    cmd: npm run e2e\n');
+    expect(detectValidators(repo({ 'package.json': pkg({ test: 'x' }) }), c)).toEqual([{ name: 'e2e', cmd: 'npm run e2e', kind: 'other', source: 'manual' }]);
+  });
+  it('a manual list no longer turns detection off: both are used, manual wins by name', () => {
+    const c = parseConfig('validators:\n  - name: test\n    cmd: npm run test:ci\n    kind: test\n  - name: unit\n    cmd: npm run unit\n');
+    expect(detectValidators(repo({ 'package.json': pkg({ lint: 'eslint .', test: 'vitest' }) }), c).map(v => [v.name, v.cmd, v.source])).toEqual([
+      ['lint', 'npm run lint', 'detected'], ['test', 'npm run test:ci', 'manual'], ['unit', 'npm run unit', 'manual'],
+    ]);
+  });
+  it('exclude drops detected validators by name', () => {
+    const c = parseConfig('exclude: [build, nope]\n');
+    expect(detectValidators(repo({ 'package.json': pkg({ test: 'x', build: 'y' }) }), c).map(v => v.name)).toEqual(['test']);
+  });
+  it('e2e and bench scripts', () => {
+    const v = detectValidators(repo({ 'package.json': pkg({ test: 'x', 'test:e2e': 'playwright test', bench: 'node b.js' }), 'playwright.config.ts': '' }), cfg);
+    expect(v.map(x => [x.name, x.cmd, x.kind])).toEqual([
+      ['test', 'npm test', 'test'], ['test:e2e', 'npm run test:e2e', 'e2e'], ['bench', 'npm run bench', 'bench'],
+    ]);
+  });
+  it('playwright, cypress and detox configs when no e2e script exists', () => {
+    const cmds = (files: Record<string, string>) => detectValidators(repo({ 'package.json': pkg({}), ...files }), cfg).map(v => [v.name, v.cmd, v.kind]);
+    expect(cmds({ 'playwright.config.mjs': '' })).toEqual([['playwright', 'npx playwright test', 'e2e']]);
+    expect(cmds({ 'cypress.config.js': '' })).toEqual([['cypress', 'npx cypress run', 'e2e']]);
+    expect(cmds({ '.detoxrc.json': '' })).toEqual([['detox', 'npx detox test', 'e2e']]);
+    expect(cmds({ 'detox.config.js': '' })).toEqual([['detox', 'npx detox test', 'e2e']]);
+  });
+  it('flutter', () => {
+    expect(detectValidators(repo({ 'pubspec.yaml': 'name: app\n' }), cfg).map(v => [v.name, v.cmd, v.kind])).toEqual([
+      ['flutter-analyze', 'flutter analyze', 'lint'], ['flutter-test', 'flutter test', 'test'],
+    ]);
+  });
+  it('native android with gradle, gradlew.bat on Windows, nothing when package.json exists', () => {
+    const android = { gradlew: '', 'app/build.gradle': "plugins { id 'com.android.application' }" };
+    expect(detectValidators(repo(android), cfg, () => false, 'linux').map(v => v.cmd)).toEqual(['./gradlew lint', './gradlew testDebugUnitTest']);
+    expect(detectValidators(repo(android), cfg, () => false, 'win32').map(v => v.cmd)).toEqual(['gradlew.bat lint', 'gradlew.bat testDebugUnitTest']);
+    const sub = { 'android/gradlew': '', 'android/app/build.gradle.kts': 'id("com.android.application")' };
+    expect(detectValidators(repo(sub), cfg, () => false, 'linux').map(v => v.cmd)).toEqual(['cd android && ./gradlew lint', 'cd android && ./gradlew testDebugUnitTest']);
+    expect(detectValidators(repo({ ...android, 'package.json': pkg({}) }), cfg, () => false, 'linux')).toEqual([]);
+    expect(detectValidators(repo({ gradlew: '', 'app/build.gradle': 'java library' }), cfg, () => false, 'linux')).toEqual([]);
+  });
+  it('every detected validator says so', () => {
+    expect(detectValidators(repo({ 'package.json': pkg({ test: 'x' }) }), cfg).every(v => v.source === 'detected')).toBe(true);
   });
   it('a broken package.json detects nothing from it', () => {
     expect(detectValidators(repo({ 'package.json': '{oops' }), cfg)).toEqual([]);
@@ -85,9 +126,9 @@ describe('detectValidators', () => {
 
 describe('selectValidators', () => {
   const all = [
-    { name: 'typecheck', cmd: 'a', kind: 'typecheck' as const },
-    { name: 'build', cmd: 'b', kind: 'build' as const },
-    { name: 'e2e', cmd: 'c', kind: 'other' as const, affects: ['web/**'] },
+    { name: 'typecheck', cmd: 'a', kind: 'typecheck' as const, source: 'detected' as const },
+    { name: 'build', cmd: 'b', kind: 'build' as const, source: 'detected' as const },
+    { name: 'e2e', cmd: 'c', kind: 'other' as const, source: 'manual' as const, affects: ['web/**'] },
   ];
   it('--all runs everything', () => { expect(selectValidators(all, null)).toHaveLength(3); });
   it('affected skips build and validators whose globs miss', () => {
@@ -102,7 +143,7 @@ describe('selectValidators', () => {
 });
 
 describe('runValidators', () => {
-  const v = [{ name: 'test', cmd: 'npm test', kind: 'test' as const }];
+  const v = [{ name: 'test', cmd: 'npm test', kind: 'test' as const, source: 'detected' as const }];
   it('passes', () => {
     const r = runValidators(v, () => ({ code: 0, output: 'ok', ms: 5, timedOut: false }), 600);
     expect(r).toEqual([{ validator: 'test', ok: true, flaky: false, durationMs: 5, failures: [] }]);
