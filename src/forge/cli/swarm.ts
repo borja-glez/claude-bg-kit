@@ -533,6 +533,9 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       const log = deps.git(['log', '--oneline', '-n', '20', `${e.branch}..${t.branch}`])?.trim();
       const commits = log ? log.split(/\r?\n/).map(l => `  - ${l}`).join('\n') : '  - none';
       const note = path.join(io.cwd, '.forge', 'work', task, 'handover.md');
+      // A run member keeps its work files (brief-<n>.md, report-<n>.txt, validators-<n>.json, reviews-<n>-<round>/)
+      // in .forge/work/<T>/ of its own task worktree, where it runs; only this note lives in the main checkout.
+      const memberWork = path.join(t.worktree || taskWorktree(io.cwd, task), '.forge', 'work', task);
       mkdirSync(path.dirname(note), { recursive: true });
       writeFileSync(note, [
         `# Handover: ${task} (attempt ${attempt} of ${RELAUNCH_CAP + 1})`, '',
@@ -540,7 +543,9 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         `- Last stage: ${t.stage} · round ${t.round} · agent ${t.agent ?? 'none'} · since ${t.stageSince}`,
         `- Detail: ${t.detail ?? 'none'}`,
         `- Commits on ${t.branch} not yet on ${e.branch}:`, commits, '',
-        `Resume from ${t.branch} in this worktree: read .forge/work/${task}/task.json if it exists, do not redo a step whose output file is already written, and continue from the last stage.`, '',
+        `- This note: ${note} (main checkout ${io.cwd})`,
+        `- Work files of the earlier attempts: ${memberWork} (the brief is brief-<n>.md there, with report-<n>.txt, validators-<n>.json and reviews-<n>-<round>/)`, '',
+        `Resume from ${t.branch} in this worktree: read the brief in ${memberWork} if it exists (else write it as the brief stage says), do not redo a step whose output file is already written, and continue from the last stage.`, '',
       ].join('\n'));
       saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, attempts: attempt, startedAt: iso, nudgedAt: null, updatedAt: iso } } });
       return json({ task, attempt, note, launch: ['launch', planPath, task, '--task', '--run', e.runId, '--coordinator', e.coordinator, '--base', e.branch] });

@@ -222,7 +222,12 @@ describe('forge swarm (execution)', () => {
     const r = out(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io));
     const e = readExecution(root)!;
     expect(r).toMatchObject({ task: 'T1', attempt: 1, launch: ['launch', 'plan.yaml', 'T1', '--task', '--run', e.runId, '--coordinator', 'main', '--base', 'forge/run-shop'] });
-    expect(readFileSync(path.join(root, '.forge', 'work', 'T1', 'handover.md'), 'utf8')).toContain('# Handover: T1 (attempt 1 of 3)');
+    const note = readFileSync(path.join(root, '.forge', 'work', 'T1', 'handover.md'), 'utf8');
+    expect(note).toContain('# Handover: T1 (attempt 1 of 3)');
+    // It names the real brief, in the task worktree, and its own main-checkout path; never a task.json.
+    expect(note).not.toContain('task.json');
+    expect(note).toContain(`${path.join(e.tasks.T1.worktree || path.join(root, '.claude', 'worktrees', 'task-T1'), '.forge', 'work', 'T1')} (the brief is brief-<n>.md there`);
+    expect(note).toContain(`This note: ${path.join(root, '.forge', 'work', 'T1', 'handover.md')} (main checkout ${root})`);
     expect(e.tasks.T1.attempts).toBe(1);
     out(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io));
     expect(out(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io))).toEqual({ task: 'T1', blocked: true, reason: 'the session of T1 stopped 3 times' });
