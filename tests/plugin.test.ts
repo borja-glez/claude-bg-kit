@@ -254,6 +254,12 @@ describe('plugin layout', () => {
     expect(inf).not.toContain('Swarm step');
     expect(read('plugins/forge/skills/stop/SKILL.md')).toContain('meta/run');
   });
+  it('infinite mode runs its execution on forge/run-<project> from the infinite branch and merges it back', () => {
+    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    expect(inf).not.toContain('--branch <the run branch');
+    expect(inf).toContain('without `--branch` and with `--merge-on-finish`');
+    expect(inf).toContain('run `FORGE swarm merge`');
+  });
   it('the plan skill declares assets only with evidence upload and warns about public sharing', () => {
     const md = read('plugins/waypoint/skills/plan/SKILL.md');
     expect(md).toContain('"assets": {}');

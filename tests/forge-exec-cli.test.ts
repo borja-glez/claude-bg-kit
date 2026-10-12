@@ -53,6 +53,34 @@ describe('forge swarm (execution)', () => {
     run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db'], { ...io });
     expect(run(['swarm', 'start', '--project', 'shop', '--session', 'other'], io).code).toBe(2);
   });
+  it('start refuses the base branch, a branch checked out elsewhere and a branch that starts with a dash', () => {
+    const base = run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--branch', 'main'], io);
+    expect(base.code).toBe(2);
+    expect(base.stderr).toMatch(/main is the base branch/);
+    git('branch', 'busy');
+    git('worktree', 'add', path.join(root, '.claude', 'worktrees', 'other'), 'busy');
+    const busy = run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--branch', 'busy'], io);
+    expect(busy.code).toBe(2);
+    expect(busy.stderr).toMatch(/busy is checked out in another worktree/);
+    expect(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--branch', '-x'], io).code).toBe(2);
+    expect(readExecution(root)).toBeNull();
+  });
+  it('start from a non-main base creates forge/run-<project> from it', () => {
+    git('checkout', '-q', '-b', 'forge/infinite');
+    writeFileSync(path.join(root, 'inf.txt'), 'x');
+    git('add', 'inf.txt'); git('commit', '-qm', 'infinite work');
+    const e = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--merge-on-finish'], io));
+    expect(e).toMatchObject({ base: 'forge/infinite', branch: 'forge/run-shop', mergeOnFinish: true });
+    expect(git('rev-parse', 'forge/run-shop')).toBe(git('rev-parse', 'forge/infinite'));
+    expect(git('rev-parse', '--abbrev-ref', 'HEAD')).toBe('forge/infinite');
+  });
+  it('start refuses an existing run worktree that is on another branch, naming it', () => {
+    git('branch', 'stray');
+    git('worktree', 'add', path.join(root, '.claude', 'worktrees', 'run'), 'stray');
+    const r = run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/is on stray, not forge\/run-shop/);
+  });
   it('propose recommends subagents with the real width, sequential when it is 1', () => {
     expect(out(run(['swarm', 'propose', '--plan', 'plan.yaml'], io))).toMatchObject({ width: 2, recommended: { mode: 'subagents', parallel: 2 }, configured: null });
   });

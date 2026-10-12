@@ -30,6 +30,16 @@ function readDocs<T>(dir: string): Record<string, T> {
   return out;
 }
 
+/** The worktree that has `branch` checked out, from `git worktree list --porcelain`; null when none. */
+function worktreeHolding(porcelain: string | null, branch: string): string | null {
+  let at: string | null = null;
+  for (const line of (porcelain ?? '').split(/\r?\n/)) {
+    if (line.startsWith('worktree ')) at = line.slice('worktree '.length).trim();
+    else if (line === `branch refs/heads/${branch}`) return at;
+  }
+  return null;
+}
+
 // Blocks the process for ms without spinning; the coordinator runs `swarm sleep` in the background.
 const sleepSync = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
@@ -172,12 +182,21 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         if (now.getTime() - last < TAKEOVER_MIN * 60000) throw new UsageError(`swarm start: coordinator ${prev.coordinator} is active (last step ${prev.lastStepAt ?? prev.startedAt})`);
       }
       const branch = flag('branch') ?? runBranch(project);
-      if (!/^[A-Za-z0-9_\-./]{1,120}$/.test(branch) || branch.includes('..')) throw new UsageError('swarm start: --branch is not a valid branch name');
+      if (!/^[A-Za-z0-9_./][A-Za-z0-9_\-./]{0,119}$/.test(branch) || branch.includes('..')) throw new UsageError('swarm start: --branch is not a valid branch name');
       if (kind === 'plan') {
+        const wt = runWorktree(io.cwd);
+        // The run branch gets its own worktree: it can be neither the base (checked out here) nor a branch
+        // another worktree holds, or `git worktree add` refuses it.
+        if (branch === base) throw new UsageError(`swarm start: ${branch} is the base branch (checked out in the main checkout); the run branch must be another one (omit --branch for ${runBranch(project)})`);
+        const holder = worktreeHolding(deps.git(['worktree', 'list', '--porcelain']), branch);
+        if (holder && !samePath(holder, wt)) throw new UsageError(`swarm start: ${branch} is checked out in another worktree (${holder}); pick another --branch`);
+        if (existsSync(wt)) {
+          const on = deps.at(wt).git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
+          if (on !== branch) throw new UsageError(`swarm start: ${wt} exists and is on ${on ?? '?'}, not ${branch}; switch it or remove it (git worktree remove)`);
+        }
         if (deps.git(['rev-parse', '--verify', '-q', `refs/heads/${branch}`]) === null && deps.git(['branch', branch, base]) === null) {
           throw new UsageError(`swarm start: cannot create ${branch} from ${base}`);
         }
-        const wt = runWorktree(io.cwd);
         if (!existsSync(wt) && deps.git(['worktree', 'add', wt, branch]) === null) throw new UsageError(`swarm start: cannot add the worktree ${wt}`);
       }
       const resume = prev && prev.active && prev.project === project && prev.branch === (kind === 'plan' ? branch : base);
