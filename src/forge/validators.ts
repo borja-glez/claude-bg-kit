@@ -85,7 +85,7 @@ function detected(repo: RepoReader, which: (name: string) => boolean, platform: 
   if (repo.exists('pubspec.yaml')) { push({ name: 'flutter-analyze', cmd: 'flutter analyze', kind: 'lint' }); push({ name: 'flutter-test', cmd: 'flutter test', kind: 'test' }); }
   const gw = repo.exists('gradlew') ? '' : repo.exists('android/gradlew') ? 'android/' : null;
   const androidApp = gw !== null && ['app/build.gradle', 'app/build.gradle.kts'].some(f => /com\.android\.application/.test(repo.read(gw + f) ?? ''));
-  if (pkgText === null && androidApp) {
+  if (pkgText === null && androidApp && !repo.exists('pubspec.yaml')) {
     const g = `${gw ? 'cd android && ' : ''}${platform === 'win32' ? 'gradlew.bat' : './gradlew'}`;
     push({ name: 'gradle-lint', cmd: `${g} lint`, kind: 'lint' });
     push({ name: 'gradle-test', cmd: `${g} testDebugUnitTest`, kind: 'test' });

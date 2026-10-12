@@ -111,6 +111,10 @@ describe('detectValidators', () => {
       ['flutter-analyze', 'flutter analyze', 'lint'], ['flutter-test', 'flutter test', 'test'],
     ]);
   });
+  it('flutter with an android folder gets no gradle validators', () => {
+    const files = { 'pubspec.yaml': 'name: app\n', 'android/gradlew': '', 'android/app/build.gradle': "plugins { id 'com.android.application' }" };
+    expect(detectValidators(repo(files), cfg, () => false, 'linux').map(v => v.name)).toEqual(['flutter-analyze', 'flutter-test']);
+  });
   it('native android with gradle, gradlew.bat on Windows, nothing when package.json exists', () => {
     const android = { gradlew: '', 'app/build.gradle': "plugins { id 'com.android.application' }" };
     expect(detectValidators(repo(android), cfg, () => false, 'linux').map(v => v.cmd)).toEqual(['./gradlew lint', './gradlew testDebugUnitTest']);
