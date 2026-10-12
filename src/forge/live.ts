@@ -4,7 +4,7 @@ import { normalizeLive, type LiveDoc } from '../lib/execution-state.js';
 import { readExecution, saveExecution } from './execution.js';
 import { forgeDir } from './ledger.js';
 import { mainCheckout } from './local.js';
-import { readMember } from './members.js';
+import { memberForHook } from './members.js';
 import type { Io } from './cli/run.js';
 
 export const liveFile = (main: string, sessionId: string) => path.join(main, '.forge', 'live', `${sessionId}.json`);
@@ -42,21 +42,23 @@ export function hookLive(io: Io, forced?: LiveEvent): string {
     let exec = readExecution(main);
     if (!exec?.active) return '';
     // An unbound execution binds to the first session that starts an agent (the Stop hook binds it on a stop).
-    // A registered member of this run never takes the binding.
-    const found = readMember(main, sessionId);
-    const isMember = !!found && found.runId === exec.runId;
-    if (exec.hookSession === null && event === 'SubagentStart' && !isMember) {
+    // A registered member of this run never takes the binding. Members are found by their hook id (Claude's
+    // session_id), recorded at join; the hook id is not their waypoint SID.
+    const found = memberForHook(main, sessionId, exec.runId);
+    if (exec.hookSession === null && event === 'SubagentStart' && !found) {
       exec = { ...exec, hookSession: sessionId };
       saveExecution(main, exec);
     }
     const member = exec.hookSession === sessionId ? null : found;
-    if (exec.hookSession !== sessionId && (!member || member.runId !== exec.runId)) return '';
+    if (exec.hookSession !== sessionId && !member) return '';
     const role: LiveDoc['role'] = member ? member.role : 'coordinator';
-    const file = liveFile(main, sessionId);
+    // A member's signal is keyed by its waypoint SID, the `by` of its public task; the coordinator's by its hook id.
+    const signalId = member ? member.sessionId : sessionId;
+    const file = liveFile(main, signalId);
     let prev: LiveDoc | null = null;
     try { prev = normalizeLive(JSON.parse(readFileSync(file, 'utf8'))); } catch { prev = null; }
     const doc = nextLive(prev, { event, agentId: typeof input.agent_id === 'string' ? input.agent_id : undefined, agentType: typeof input.agent_type === 'string' ? input.agent_type : undefined },
-      { sessionId, role, runId: exec.runId, task: member?.task ?? null, now: io.now().toISOString() });
+      { sessionId: signalId, role, runId: exec.runId, task: member?.task ?? null, now: io.now().toISOString() });
     forgeDir(main);
     mkdirSync(path.dirname(file), { recursive: true });
     const tmp = `${file}.${process.pid}.tmp`;

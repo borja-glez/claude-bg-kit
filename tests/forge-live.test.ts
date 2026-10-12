@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { nextLive, liveFile } from '../src/forge/live.js';
-import { saveExecution, readExecution } from '../src/forge/execution.js';
+import { saveExecution, readExecution, writePublicTask, executionTaskFile } from '../src/forge/execution.js';
 import { writeMember } from '../src/forge/members.js';
+import { executionFromFiles } from '../src/lens/model.js';
+import { buildBandModel } from '../src/mod/model.js';
 
 const T = '2026-10-12T12:00:00.000Z';
 describe('nextLive', () => {
@@ -170,6 +172,68 @@ describe('forge hook live', () => {
     expect(JSON.parse(readFileSync(liveFile(root, 's2'), 'utf8'))).toMatchObject({ role: 'executor', event: 'Stop' });
     expect(existsSync(path.join(wt, '.forge', 'execution.json'))).toBe(false);
     expect(existsSync(path.join(wt, '.forge', 'live'))).toBe(false);
+  });
+  // A member's waypoint SID (t9, from a track name) and its hook session id (Claude's UUID) differ in real use.
+  const HOOK = '0f3c2a8e-5b1d-4c7a-9e2f-7d6b1a3c4e5f';
+  const joinT9 = (over: object = {}) => writeMember(root, { sessionId: 't9', role: 'executor', runId: 'r1', task: 'T1', name: 'wp-shop-T1', since: T, hookSession: HOOK, ...over });
+  it('(a) a member SubagentStart under its hook id writes .forge/live/<SID>.json with its role', () => {
+    exec({ mode: 'sessions' });
+    joinT9();
+    hook({ session_id: HOOK, hook_event_name: 'SubagentStart', agent_id: 'a1', agent_type: 'forge:forge-impl' });
+    expect(JSON.parse(readFileSync(liveFile(root, 't9'), 'utf8'))).toMatchObject({ sessionId: 't9', role: 'executor', runId: 'r1', task: 'T1', agents: [{ id: 'a1' }] });
+    expect(existsSync(liveFile(root, HOOK))).toBe(false);
+    expect(readExecution(root)?.hookSession).toBe('s1');
+  });
+  it('(b) a member Stop under its hook id leaves a null hookSession null and never blocks', () => {
+    exec({ mode: 'sessions', hookSession: null, tasks: runningTask });
+    joinT9();
+    expect(run(['hook', 'stop'], { ...io, stdin: JSON.stringify({ session_id: HOOK }) }).stdout).toBe('');
+    expect(readExecution(root)?.hookSession).toBeNull();
+    hook({ session_id: HOOK, hook_event_name: 'SubagentStart', agent_id: 'a1', agent_type: 'x' });
+    expect(readExecution(root)?.hookSession).toBeNull();
+    expect(JSON.parse(readFileSync(liveFile(root, 't9'), 'utf8'))).toMatchObject({ role: 'executor', sessionId: 't9' });
+  });
+  it('(c) SessionStart under its hook id gives the member the Run member context', () => {
+    exec({ mode: 'sessions', tasks: runningTask });
+    joinT9();
+    const out = JSON.parse(hook({ session_id: HOOK, hook_event_name: 'SessionStart', source: 'resume' }).stdout);
+    expect(out.hookSpecificOutput.additionalContext).toContain('executor session of T1 in the execution r1 coordinated by main');
+    expect(out.hookSpecificOutput.additionalContext).toContain('→ Run member');
+  });
+  it('a member of another run, or one that recorded another hook id, is not found by the hook id', () => {
+    exec({ mode: 'sessions', hookSession: null });
+    joinT9({ runId: 'old' });
+    hook({ session_id: HOOK, hook_event_name: 'SubagentStart', agent_id: 'a1', agent_type: 'x' });
+    expect(readExecution(root)?.hookSession).toBe(HOOK);
+    exec({ mode: 'sessions' });
+    writeMember(root, { sessionId: 's7', role: 'manual', runId: 'r1', task: null, name: null, since: T, hookSession: 'other-hook' });
+    hook({ session_id: 's7', hook_event_name: 'SessionStart' });
+    expect(existsSync(liveFile(root, 's7'))).toBe(false);
+  });
+  it('(d) lens and the band read a member row by the signal the hook wrote under its SID', () => {
+    const now = new Date();
+    const iso = (min: number) => new Date(now.getTime() + min * 60000).toISOString();
+    const nowIo = { ...io, now: () => now };
+    const sessionsTask = { T1: { ...runningTask.T1, executor: 'sessions', startedAt: iso(-20), stageSince: iso(-20), updatedAt: iso(-1) } };
+    exec({ mode: 'sessions', tasks: sessionsTask, lastStepAt: iso(-1), startedAt: iso(-30) });
+    joinT9();
+    // The member's lease lapsed: only its own signal keeps the row alive.
+    writePublicTask(root, { task: 'T1', runId: 'r1', stage: 'implement', status: 'running', agent: 'forge-impl', round: 1, since: iso(-20), updatedAt: iso(-30), leaseUntil: iso(-15), by: 't9', mode: 'sessions' });
+    const files = () => {
+      const dir = path.join(root, '.forge', 'live');
+      const live: Record<string, string> = {};
+      if (existsSync(dir)) for (const f of readdirSync(dir)) live[f.slice(0, -5)] = readFileSync(path.join(dir, f), 'utf8');
+      return { execution: readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8'), execTasks: { T1: readFileSync(executionTaskFile(root, 'T1'), 'utf8') }, live };
+    };
+    const before = files();
+    expect(executionFromFiles(before.execution, before.execTasks, before.live, now.getTime())!.slots[0]).toMatchObject({ task: 'T1', mode: 'sessions', liveness: 'stopped' });
+    run(['hook', 'live'], { ...nowIo, stdin: JSON.stringify({ session_id: HOOK, hook_event_name: 'SubagentStart', agent_id: 'a1', agent_type: 'forge:forge-impl' }) });
+    const after = files();
+    expect(Object.keys(after.live)).toEqual(['t9']);
+    expect(executionFromFiles(after.execution, after.execTasks, after.live, now.getTime())!.slots[0]).toMatchObject({ task: 'T1', liveness: 'alive' });
+    const band = buildBandModel('shop', { states: {}, messages: {}, critiques: {}, plan: 'x', ...after });
+    expect(band).toMatchObject({ mode: 'run', executor: 'sessions', worst: 'alive' });
+    expect(buildBandModel('shop', { states: {}, messages: {}, critiques: {}, plan: 'x', ...before })).toMatchObject({ mode: 'run', worst: 'stopped' });
   });
   it('writes nothing for a session whose member file is junk', () => {
     exec();

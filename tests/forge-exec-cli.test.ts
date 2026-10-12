@@ -280,8 +280,11 @@ describe('forge swarm (execution)', () => {
     expect(out(run(['swarm', 'takeover', '--session', 'new'], io))).toMatchObject({ took: false, previous: 'old', liveness: 'alive', joinAs: 'manual' });
     const later = { ...io, now: () => new Date(NOW.getTime() + 20 * 60000) };
     expect(out(run(['swarm', 'takeover', '--session', 'new'], later))).toMatchObject({ took: true, previous: 'old', runId: e.runId });
-    expect(readExecution(root)).toMatchObject({ coordinator: 'new', hookSession: 'new' });
+    // The waypoint SID becomes the coordinator; the hook binding waits for this session's next Stop or SubagentStart.
+    expect(readExecution(root)).toMatchObject({ coordinator: 'new', hookSession: null });
+    saveExecution(root, { ...readExecution(root)!, hookSession: 'claude-hook-uuid' });
     expect(out(run(['swarm', 'takeover', '--session', 'new'], later))).toMatchObject({ took: 'already' });
+    expect(readExecution(root)).toMatchObject({ coordinator: 'new', hookSession: null });
     expect(readFileSync(path.join(root, '.forge', 'ledger.jsonl'), 'utf8')).toContain('"what":"takeover"');
   });
   it('takeover takes the liveliest of the signal and the lease, and falls back to the last step', () => {
@@ -298,6 +301,13 @@ describe('forge swarm (execution)', () => {
     expect(readExecution(root)!.coordinator).toBe('old');
     expect(out(run(['swarm', 'takeover', '--session', 'new'], later)).took).toBe(true);
     expect(run(['swarm', 'takeover'], later).code).toBe(2);
+  });
+  it('takeover reads the roadmap lease under the coordinator SID even when the hook id differs', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'old'], io));
+    saveExecution(root, { ...readExecution(root)!, hookSession: '0f3c2a8e-hook' });
+    const later = { ...io, now: () => new Date(NOW.getTime() + 20 * 60000) };
+    writeDocs(path.join(root, 'db', 'sessions'), { old: { name: 'c', status: 'active', heartbeatAt: new Date(NOW.getTime() + 19 * 60000).toISOString(), leaseUntil: new Date(NOW.getTime() + 25 * 60000).toISOString() } });
+    expect(out(run(['swarm', 'takeover', '--session', 'new', '--db', 'db'], later))).toMatchObject({ took: false, previous: '0f3c2a8e-hook', liveness: 'alive' });
   });
   it('takeover refuses a member of this run and an invalid session id', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'old'], io));
@@ -429,6 +439,19 @@ describe('forge swarm (execution)', () => {
     it('join refuses a session id outside the members rule and writes nothing', () => {
       expect(run(['swarm', 'join', '--session', 'a:b', '--role', 'manual'], wio).code).toBe(2);
       expect(existsSync(path.join(root, '.forge', 'members'))).toBe(false);
+    });
+    it('join records the hook session id, validates it, and a rejoin without it keeps it', () => {
+      const HOOK = '0f3c2a8e-5b1d-4c7a-9e2f-7d6b1a3c4e5f';
+      const member = () => JSON.parse(readFileSync(path.join(root, '.forge', 'members', 't9.json'), 'utf8'));
+      out(run(['swarm', 'join', '--session', 't9', '--role', 'executor', '--task', 'T1', '--hook-session', HOOK], wio));
+      expect(member()).toMatchObject({ sessionId: 't9', hookSession: HOOK });
+      out(run(['swarm', 'join', '--session', 't9', '--role', 'executor', '--task', 'T1'], wio));
+      expect(member().hookSession).toBe(HOOK);
+      expect(run(['swarm', 'join', '--session', 't9', '--role', 'executor', '--task', 'T1', '--hook-session', 'a:b'], wio).code).toBe(2);
+      expect(run(['swarm', 'join', '--session', 't9', '--role', 'executor', '--task', 'T1', '--hook-session'], wio).code).toBe(2);
+      saveExecution(root, { ...readExecution(root)!, hookSession: 'coord-hook' });
+      expect(run(['swarm', 'join', '--session', 'M1', '--role', 'manual', '--hook-session', 'coord-hook'], wio).code).toBe(2);
+      expect(member().hookSession).toBe(HOOK);
     });
     it('an executor gets a worktree only for its own task', () => {
       out(run(['swarm', 'join', '--session', 'E1', '--role', 'executor', '--task', 'T1'], wio));

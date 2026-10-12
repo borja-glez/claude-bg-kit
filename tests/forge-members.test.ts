@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { normalizeMember, readMember, writeMember, listMembers, memberFile, isMemberId } from '../src/forge/members.js';
+import { normalizeMember, readMember, writeMember, listMembers, memberFile, isMemberId, findMemberByHook, memberForHook } from '../src/forge/members.js';
 
 const T = '2026-10-12T12:00:00.000Z';
 describe('members', () => {
@@ -11,7 +11,9 @@ describe('members', () => {
   afterEach(() => rmSync(root, { recursive: true, force: true }));
   it('normalizes and drops junk', () => {
     expect(normalizeMember({ sessionId: 's2', role: 'manual', runId: 'r1', task: 'T009', name: 'me', since: T }))
-      .toEqual({ sessionId: 's2', role: 'manual', runId: 'r1', task: 'T009', name: 'me', since: T });
+      .toEqual({ sessionId: 's2', role: 'manual', runId: 'r1', task: 'T009', name: 'me', since: T, hookSession: null });
+    expect(normalizeMember({ sessionId: 's2', role: 'manual', runId: 'r1', since: T, hookSession: '0f3c-uuid' })?.hookSession).toBe('0f3c-uuid');
+    expect(normalizeMember({ sessionId: 's2', role: 'manual', runId: 'r1', since: T, hookSession: 'a:b' })?.hookSession).toBeNull();
     expect(normalizeMember({ sessionId: 's2', role: 'coordinator', runId: 'r1', since: T })).toBeNull();
     expect(normalizeMember({ sessionId: '../x', role: 'manual', runId: 'r1', since: T })).toBeNull();
     expect(normalizeMember({ sessionId: 's2', role: 'manual', runId: 'r1', task: 'nope!', since: T })?.task).toBeNull();
@@ -37,5 +39,19 @@ describe('members', () => {
     for (const bad of ['a:b', 'a@b', 'a+b', 'a~b', '../x', '', 'x'.repeat(121)]) expect(isMemberId(bad)).toBe(false);
     expect(() => writeMember(root, { sessionId: 'a:b', role: 'manual', runId: 'r1', task: null, name: null, since: T })).toThrow();
     expect(existsSync(path.join(root, '.forge', 'members'))).toBe(false);
+    expect(() => writeMember(root, { sessionId: 's2', role: 'manual', runId: 'r1', task: null, name: null, since: T, hookSession: 'a:b' })).toThrow();
+  });
+  it('a hook finds a member by its recorded hook id, else by a direct lookup when the ids are equal', () => {
+    writeMember(root, { sessionId: 't9', role: 'executor', runId: 'r1', task: 'T1', name: null, since: T, hookSession: 'hook-uuid' });
+    writeMember(root, { sessionId: 's3', role: 'manual', runId: 'r1', task: null, name: null, since: T });
+    writeMember(root, { sessionId: 's4', role: 'manual', runId: 'r1', task: null, name: null, since: T, hookSession: 'other' });
+    expect(findMemberByHook(root, 'hook-uuid', 'r1')?.sessionId).toBe('t9');
+    expect(findMemberByHook(root, 'hook-uuid', 'r2')).toBeNull();
+    expect(findMemberByHook(root, 't9', 'r1')).toBeNull();
+    expect(memberForHook(root, 'hook-uuid', 'r1')?.sessionId).toBe('t9');
+    expect(memberForHook(root, 's3', 'r1')?.sessionId).toBe('s3');
+    expect(memberForHook(root, 's3', 'r2')).toBeNull();
+    expect(memberForHook(root, 's4', 'r1')).toBeNull();
+    expect(memberForHook(root, '../x', 'r1')).toBeNull();
   });
 });

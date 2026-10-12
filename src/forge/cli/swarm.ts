@@ -278,7 +278,14 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       const task = flag('task') ?? null;
       if (task !== null && !isPlanId(task)) throw new UsageError('swarm join: --task is not a task id');
       if (role === 'executor' && !task) throw new UsageError('swarm join: an executor needs --task');
-      writeMember(main, { sessionId: session, role, runId: e.runId, task, name: flag('name') ?? null, since: iso });
+      // Claude's own session id, the one its hooks receive: the hooks find the member by it.
+      if (has('hook-session') && !flag('hook-session')) throw new UsageError('swarm join: --hook-session needs an id');
+      // A rejoin without it keeps the hook id this member recorded in the same run.
+      const before = readMember(main, session);
+      const hookSession = flag('hook-session') ?? (before?.runId === e.runId ? before.hookSession : null);
+      if (hookSession !== null && !isMemberId(hookSession)) throw new UsageError(`swarm join: --hook-session ${hookSession.slice(0, 130)} is not a valid session id (letters, digits, _ - .; max 120)`);
+      if (hookSession !== null && hookSession === e.hookSession) throw new UsageError(`swarm join: ${hookSession} coordinates this execution`);
+      writeMember(main, { sessionId: session, role, runId: e.runId, task, name: flag('name') ?? null, since: iso, hookSession });
       return json({ runId: e.runId, role, task, coordinator: e.coordinator, branch: e.branch, mode: e.mode, project: e.project });
     }
     case 'report': {
@@ -564,8 +571,10 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       if (!isMemberId(session)) throw new UsageError(`swarm takeover: --session ${session.slice(0, 130)} is not a valid session id (letters, digits, _ - .; max 120)`);
       const e = current();
       if (!e.active) throw new UsageError('swarm takeover: the execution is not active');
+      // --session is a waypoint SID, never Claude's hook id: the coordinator becomes it and the hook binding is left
+      // unbound, so the next Stop or SubagentStart of a non-member session (this one) binds its own hook id.
       if (session === e.coordinator || session === e.hookSession) {
-        if (e.hookSession !== session) saveExecution(io.cwd, { ...e, hookSession: session });
+        if (e.coordinator !== session || e.hookSession !== null) saveExecution(io.cwd, { ...e, coordinator: session, hookSession: null });
         return json({ took: 'already', runId: e.runId });
       }
       // A run member keeps its role: it would otherwise coordinate the task it executes.
@@ -579,13 +588,14 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         const d = normalizeLive(JSON.parse(readFileSync(liveFile(io.cwd, previous), 'utf8')));
         if (d) seen.push(signalLiveness(d.ts, d.ended, now.getTime()));
       } catch { /* no signal */ }
-      if (flag('db') && isSafeId(previous)) {
-        try { seen.push(sessionLiveness(JSON.parse(readFileSync(path.resolve(io.cwd, flag('db')!, 'sessions', `${previous}.json`), 'utf8')) as SessionDoc, now.getTime())); } catch { /* no lease */ }
+      // The signal is keyed by the hook id; the roadmap lease by the coordinator's waypoint SID.
+      if (flag('db') && isSafeId(e.coordinator)) {
+        try { seen.push(sessionLiveness(JSON.parse(readFileSync(path.resolve(io.cwd, flag('db')!, 'sessions', `${e.coordinator}.json`), 'utf8')) as SessionDoc, now.getTime())); } catch { /* no lease */ }
       }
       if (!seen.length) seen.push(now.getTime() - Date.parse(e.lastStepAt ?? e.startedAt) >= TAKEOVER_MIN * 60000 ? 'stopped' : 'alive');
       const liveness = seen.reduce((a, b) => (order.indexOf(b) > order.indexOf(a) ? b : a), 'stopped' as (typeof order)[number]);
       if (liveness !== 'stopped') return json({ took: false, previous, liveness, joinAs: 'manual' });
-      saveExecution(io.cwd, { ...e, coordinator: session, hookSession: session, sleepUntil: null });
+      saveExecution(io.cwd, { ...e, coordinator: session, hookSession: null, sleepUntil: null });
       appendEvent(io.cwd, { ts: iso, kind: 'decision', what: 'takeover', previous, by: session });
       return json({ took: true, previous, runId: e.runId, running: Object.entries(e.tasks).filter(([, t]) => t.status === 'running').map(([id]) => id) });
     }
@@ -594,6 +604,6 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     case 'merge':
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError('usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]|status|propose --plan P|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick --plan P --db DIR [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T>|merge|retry <T>|sleep <seconds> [--mark]|stop [--reason stopped|budget]|join --session SID --role executor|manual [--task T] [--name N]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID [--db DIR]>');
+      throw new UsageError('usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]|status|propose --plan P|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick --plan P --db DIR [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T>|merge|retry <T>|sleep <seconds> [--mark]|stop [--reason stopped|budget]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID [--db DIR]>');
   }
 }
