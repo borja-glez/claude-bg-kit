@@ -1,0 +1,281 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="724" viewBox="0 0 1000 724" role="img" aria-labelledby="t d">
+<title id="t">claude-bg-kit · from idea to merged code</title>
+<desc id="d">Diagram of the full flow: design with critic rounds, plan and live roadmap, the forge loop of triage, implement, validate, review and verdict, a parallel swarm of fronts that is integrated into main, and infinite mode with scout proposals. lens and the roadmap observe every stage.</desc>
+<style>
+text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#cdd6f4}
+.m{font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace}
+.dim{fill:#a6adc8}
+.faint{fill:#7f849c}
+.flow{stroke-dasharray:4 6;animation:dash 1s linear infinite}
+.spin{transform-box:fill-box;transform-origin:center;animation:spin 1s linear infinite}
+.blink{animation:blink 1.1s steps(1) infinite}
+@keyframes dash{to{stroke-dashoffset:-20}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes blink{50%{opacity:0}}
+@keyframes lit{0%{fill-opacity:0;stroke-opacity:.3}1.3%{fill-opacity:.22;stroke-opacity:1}8%{fill-opacity:.22;stroke-opacity:1}10.5%{fill-opacity:0;stroke-opacity:.3}100%{fill-opacity:0;stroke-opacity:.3}}
+.lit{animation:lit 20s infinite both}
+@keyframes litT{0%{opacity:.55}1.3%{opacity:1}8%{opacity:1}10.5%{opacity:.55}100%{opacity:.55}}
+.litT{animation:litT 20s infinite both}
+@keyframes done{0%{fill:#45475a}2%{fill:#89b4fa}70%{fill:#89b4fa}74%{fill:#45475a}100%{fill:#45475a}}
+.done{animation:done 20s infinite both}
+@keyframes g0{0%{transform:scaleX(0.05)}85%{transform:scaleX(1)}100%{transform:scaleX(1)}}
+.g0{transform-box:fill-box;transform-origin:left center;animation:g0 5.5s ease-in-out 0s infinite both}
+@keyframes g1{0%{transform:scaleX(0.05)}85%{transform:scaleX(1)}100%{transform:scaleX(1)}}
+.g1{transform-box:fill-box;transform-origin:left center;animation:g1 8s ease-in-out 0.7s infinite both}
+@keyframes g2{0%{transform:scaleX(0.05)}85%{transform:scaleX(1)}100%{transform:scaleX(1)}}
+.g2{transform-box:fill-box;transform-origin:left center;animation:g2 6.5s ease-in-out 1.4s infinite both}
+@keyframes g3{0%{transform:scaleX(0.15)}90%{transform:scaleX(0.95)}100%{transform:scaleX(0.95)}}
+.g3{transform-box:fill-box;transform-origin:left center;animation:g3 20s ease-in-out 0s infinite both}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+<rect x="0" y="0" width="1000" height="724" rx="18" fill="#1e1e2e"/>
+<defs><marker id="a-g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#585b70"/></marker><marker id="a-p" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#fab387"/></marker><marker id="a-y" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#f9e2af"/></marker></defs>
+<text x="32" y="46" font-size="22" font-weight="700">claude-bg-kit · from idea to merged code</text>
+<text x="32" y="70" font-size="13" class="dim">waypoint designs and tracks, forge builds and reviews, lens shows it all live</text>
+<rect x="32" y="92" width="688" height="104" rx="12" fill="#181825" stroke="#313244" stroke-width="1"/>
+<circle cx="56" cy="112" r="11" fill="#cba6f7"/><text x="56" y="116.5" font-size="12" style="fill:#11111b" font-weight="700" text-anchor="middle">1</text>
+<text x="76" y="117" font-size="15" font-weight="700">Design</text>
+<rect x="127.6" y="103" width="72" height="19" rx="9.5" fill="none" stroke="#cba6f7" stroke-width="1"/><text x="163.6" y="116.5" font-size="11" class="m" style="fill:#cba6f7" text-anchor="middle">waypoint</text>
+<path d="M160 154L182 154" stroke="#585b70" stroke-width="1.5" fill="none" class="flow" marker-end="url(#a-g)"/>
+<path d="M356 154L378 154" stroke="#585b70" stroke-width="1.5" fill="none" class="flow" marker-end="url(#a-g)"/>
+<path d="M552 154L574 154" stroke="#585b70" stroke-width="1.5" fill="none" class="flow" marker-end="url(#a-g)"/>
+<rect x="32" y="208" width="688" height="104" rx="12" fill="#181825" stroke="#313244" stroke-width="1"/>
+<circle cx="56" cy="228" r="11" fill="#89b4fa"/><text x="56" y="232.5" font-size="12" style="fill:#11111b" font-weight="700" text-anchor="middle">2</text>
+<text x="76" y="233" font-size="15" font-weight="700">Plan</text>
+<rect x="110.4" y="219" width="128" height="19" rx="9.5" fill="none" stroke="#89b4fa" stroke-width="1"/><text x="174.4" y="232.5" font-size="11" class="m" style="fill:#89b4fa" text-anchor="middle">waypoint · forge</text>
+<path d="M200 270L222 270" stroke="#585b70" stroke-width="1.5" fill="none" class="flow" marker-end="url(#a-g)"/>
+<path d="M366 270L388 270" stroke="#585b70" stroke-width="1.5" fill="none" class="flow" marker-end="url(#a-g)"/>
+<path d="M542 270L564 270" stroke="#585b70" stroke-width="1.5" fill="none" class="flow" marker-end="url(#a-g)"/>
+<rect x="32" y="324" width="688" height="152" rx="12" fill="#181825" stroke="#313244" stroke-width="1"/>
+<circle cx="56" cy="344" r="11" fill="#fab387"/><text x="56" y="348.5" font-size="12" style="fill:#11111b" font-weight="700" text-anchor="middle">3</text>
+<text x="76" y="349" font-size="15" font-weight="700">Build</text>
+<rect x="119" y="335" width="86" height="19" rx="9.5" fill="none" stroke="#fab387" stroke-width="1"/><text x="162" y="348.5" font-size="11" class="m" style="fill:#fab387" text-anchor="middle">/forge:run</text>
+<path d="M146 386L168 386" stroke="#585b70" stroke-width="1.5" fill="none" class="flow" marker-end="url(#a-g)"/>
+<path d="M288 386L310 386" stroke="#585b70" stroke-width="1.5" fill="none" class="flow" marker-end="url(#a-g)"/>
+<path d="M418 386L440 386" stroke="#585b70" stroke-width="1.5" fill="none" class="flow" marker-end="url(#a-g)"/>
+<path d="M568 386L590 386" stroke="#585b70" stroke-width="1.5" fill="none" class="flow" marker-end="url(#a-g)"/>
+<path d="M649 414C649 450 228 450 228 416" stroke="#fab387" stroke-width="1.5" fill="none" class="flow" marker-end="url(#a-p)"/>
+<g class="litT" style="animation-delay:8.1s"><text x="438" y="464" font-size="11" style="fill:#fab387" text-anchor="middle">fix round · up to 4 · a stronger model from round 3</text></g>
+<rect x="32" y="488" width="688" height="122" rx="12" fill="#181825" stroke="#313244" stroke-width="1"/>
+<circle cx="56" cy="508" r="11" fill="#94e2d5"/><text x="56" y="512.5" font-size="12" style="fill:#11111b" font-weight="700" text-anchor="middle">4</text>
+<text x="76" y="513" font-size="15" font-weight="700">Parallel</text>
+<rect x="144.8" y="499" width="93" height="19" rx="9.5" fill="none" stroke="#94e2d5" stroke-width="1"/><text x="191.3" y="512.5" font-size="11" class="m" style="fill:#94e2d5" text-anchor="middle">forge swarm</text>
+<text x="206" y="537" font-size="11" class="m dim">track api</text>
+<path d="M180 556L200 533" stroke="#585b70" stroke-width="1" fill="none"/>
+<rect x="290" y="529" width="166" height="8" rx="4" fill="#45475a"/><rect x="290" y="529" width="166" height="8" rx="4" fill="#94e2d5" class="g0"/>
+<path d="M458 533L480 556" stroke="#585b70" stroke-width="1" fill="none"/>
+<text x="206" y="559" font-size="11" class="m dim">track ui</text>
+<path d="M180 556L200 555" stroke="#585b70" stroke-width="1" fill="none"/>
+<rect x="290" y="551" width="166" height="8" rx="4" fill="#45475a"/><rect x="290" y="551" width="166" height="8" rx="4" fill="#94e2d5" class="g1"/>
+<path d="M458 555L480 556" stroke="#585b70" stroke-width="1" fill="none"/>
+<text x="206" y="581" font-size="11" class="m dim">track data</text>
+<path d="M180 556L200 577" stroke="#585b70" stroke-width="1" fill="none"/>
+<rect x="290" y="573" width="166" height="8" rx="4" fill="#45475a"/><rect x="290" y="573" width="166" height="8" rx="4" fill="#94e2d5" class="g2"/>
+<path d="M458 577L480 556" stroke="#585b70" stroke-width="1" fill="none"/>
+<text x="373" y="604" font-size="10.5" class="faint" text-anchor="middle">one session and one git worktree per front</text>
+<path d="M604 556L626 556" stroke="#585b70" stroke-width="1.5" fill="none" class="flow" marker-end="url(#a-g)"/>
+<rect x="32" y="622" width="688" height="86" rx="12" fill="#181825" stroke="#313244" stroke-width="1"/>
+<text x="48" y="646" font-size="15" style="fill:#f9e2af" font-weight="700">∞  Infinite mode</text><text x="185.6" y="646" font-size="11.5" class="dim">cycles until the budget runs out</text>
+<path d="M170 677L192 677" stroke="#585b70" stroke-width="1.5" fill="none" class="flow" marker-end="url(#a-g)"/>
+<path d="M326 677L348 677" stroke="#585b70" stroke-width="1.5" fill="none" class="flow" marker-end="url(#a-g)"/>
+<path d="M482 677L504 677" stroke="#585b70" stroke-width="1.5" fill="none" class="flow" marker-end="url(#a-g)"/>
+<path d="M628 677H713V440" stroke="#f9e2af" stroke-width="1.5" fill="none" class="flow" marker-end="url(#a-y)"/>
+<text x="668" y="670" font-size="10.5" style="fill:#f9e2af" text-anchor="middle">to Build</text>
+<path d="M722 154H742" stroke="#b4befe" stroke-width="1" stroke-opacity=".6" class="flow"/>
+<path d="M722 270H742" stroke="#b4befe" stroke-width="1" stroke-opacity=".6" class="flow"/>
+<path d="M722 386H742" stroke="#b4befe" stroke-width="1" stroke-opacity=".6" class="flow"/>
+<path d="M722 556H742" stroke="#b4befe" stroke-width="1" stroke-opacity=".6" class="flow"/>
+<g>
+<rect x="48" y="128" width="110" height="52" rx="10" fill="#313244"/>
+<rect x="48" y="128" width="110" height="52" rx="10" fill="#cba6f7" stroke="#cba6f7" stroke-width="1.5" class="lit" style="animation-delay:0s"/>
+<text x="103" y="150" font-size="13" class="m" font-weight="600" text-anchor="middle">Idea</text>
+<text x="103" y="168" font-size="11" class="dim" text-anchor="middle">your request</text>
+</g>
+<g>
+<rect x="184" y="128" width="170" height="52" rx="10" fill="#313244"/>
+<rect x="184" y="128" width="170" height="52" rx="10" fill="#cba6f7" stroke="#cba6f7" stroke-width="1.5" class="lit" style="animation-delay:0.6s"/>
+<text x="269" y="150" font-size="13" class="m" font-weight="600" text-anchor="middle">/waypoint:design</text>
+<text x="269" y="168" font-size="11" class="dim" text-anchor="middle">apply · round · rewrite</text>
+</g>
+<g>
+<rect x="380" y="128" width="170" height="52" rx="10" fill="#313244"/>
+<rect x="380" y="128" width="170" height="52" rx="10" fill="#cba6f7" stroke="#cba6f7" stroke-width="1.5" class="lit" style="animation-delay:1.2s"/>
+<text x="465" y="150" font-size="13" class="m" font-weight="600" text-anchor="middle">design-critic</text>
+<text x="465" y="168" font-size="11" class="dim" text-anchor="middle">numbered proposals</text>
+</g>
+<g>
+<rect x="576" y="128" width="130" height="52" rx="10" fill="#313244"/>
+<rect x="576" y="128" width="130" height="52" rx="10" fill="#cba6f7" stroke="#cba6f7" stroke-width="1.5" class="lit" style="animation-delay:1.9s"/>
+<text x="641" y="150" font-size="13" class="m" font-weight="600" text-anchor="middle">Approve</text>
+<text x="641" y="168" font-size="11" class="dim" text-anchor="middle">you sign off</text>
+</g>
+<g>
+<rect x="48" y="244" width="150" height="52" rx="10" fill="#313244"/>
+<rect x="48" y="244" width="150" height="52" rx="10" fill="#89b4fa" stroke="#89b4fa" stroke-width="1.5" class="lit" style="animation-delay:2.5s"/>
+<text x="123" y="266" font-size="13" class="m" font-weight="600" text-anchor="middle">forge-planner</text>
+<text x="123" y="284" font-size="11" class="dim" text-anchor="middle">design → tasks</text>
+</g>
+<g>
+<rect x="224" y="244" width="140" height="52" rx="10" fill="#313244"/>
+<rect x="224" y="244" width="140" height="52" rx="10" fill="#89b4fa" stroke="#89b4fa" stroke-width="1.5" class="lit" style="animation-delay:3.1s"/>
+<text x="294" y="266" font-size="13" class="m" font-weight="600" text-anchor="middle">plan.yaml</text>
+<text x="294" y="284" font-size="11" class="dim" text-anchor="middle">tracks · phases</text>
+</g>
+<g>
+<rect x="390" y="244" width="150" height="52" rx="10" fill="#313244"/>
+<rect x="390" y="244" width="150" height="52" rx="10" fill="#89b4fa" stroke="#89b4fa" stroke-width="1.5" class="lit" style="animation-delay:3.7s"/>
+<text x="465" y="266" font-size="13" class="m" font-weight="600" text-anchor="middle">/waypoint:plan</text>
+<text x="465" y="284" font-size="11" class="dim" text-anchor="middle">publish</text>
+</g>
+<g>
+<rect x="566" y="244" width="140" height="52" rx="10" fill="#313244"/>
+<rect x="566" y="244" width="140" height="52" rx="10" fill="#89b4fa" stroke="#89b4fa" stroke-width="1.5" class="lit" style="animation-delay:4.3s"/>
+<text x="636" y="266" font-size="13" class="m" font-weight="600" text-anchor="middle">Live roadmap</text>
+<text x="636" y="284" font-size="11" class="dim" text-anchor="middle">claude.ai artifact</text>
+</g>
+<g>
+<rect x="48" y="360" width="96" height="52" rx="10" fill="#313244"/>
+<rect x="48" y="360" width="96" height="52" rx="10" fill="#fab387" stroke="#fab387" stroke-width="1.5" class="lit" style="animation-delay:5s"/>
+<text x="96" y="382" font-size="13" class="m" font-weight="600" text-anchor="middle">triage</text>
+<text x="96" y="400" font-size="11" class="dim" text-anchor="middle">by size</text>
+</g>
+<g>
+<rect x="170" y="360" width="116" height="52" rx="10" fill="#313244"/>
+<rect x="170" y="360" width="116" height="52" rx="10" fill="#fab387" stroke="#fab387" stroke-width="1.5" class="lit" style="animation-delay:5.6s"/>
+<text x="228" y="382" font-size="13" class="m" font-weight="600" text-anchor="middle">implement</text>
+<text x="228" y="400" font-size="11" class="dim" text-anchor="middle">mech → heavy</text>
+</g>
+<g>
+<rect x="312" y="360" width="104" height="52" rx="10" fill="#313244"/>
+<rect x="312" y="360" width="104" height="52" rx="10" fill="#fab387" stroke="#fab387" stroke-width="1.5" class="lit" style="animation-delay:6.2s"/>
+<text x="364" y="382" font-size="13" class="m" font-weight="600" text-anchor="middle">validate</text>
+<text x="364" y="400" font-size="11" class="dim" text-anchor="middle">your tools first</text>
+</g>
+<g>
+<rect x="442" y="360" width="124" height="52" rx="10" fill="#313244"/>
+<rect x="442" y="360" width="124" height="52" rx="10" fill="#fab387" stroke="#fab387" stroke-width="1.5" class="lit" style="animation-delay:6.8s"/>
+<text x="504" y="382" font-size="13" class="m" font-weight="600" text-anchor="middle">review ×3</text>
+<text x="504" y="400" font-size="11" class="dim" text-anchor="middle">independent</text>
+</g>
+<g>
+<rect x="592" y="360" width="114" height="52" rx="10" fill="#313244"/>
+<rect x="592" y="360" width="114" height="52" rx="10" fill="#fab387" stroke="#fab387" stroke-width="1.5" class="lit" style="animation-delay:7.4s"/>
+<text x="649" y="382" font-size="13" class="m" font-weight="600" text-anchor="middle">verdict</text>
+<text x="649" y="400" font-size="11" class="dim" text-anchor="middle">weighted score</text>
+</g>
+<g>
+<rect x="48" y="524" width="130" height="64" rx="10" fill="#313244"/>
+<rect x="48" y="524" width="130" height="64" rx="10" fill="#94e2d5" stroke="#94e2d5" stroke-width="1.5" class="lit" style="animation-delay:8.7s"/>
+<text x="113" y="546" font-size="13" class="m" font-weight="600" text-anchor="middle">coordinator</text>
+<text x="113" y="564" font-size="11" class="dim" text-anchor="middle">forge swarm tick</text>
+</g>
+<g>
+<rect x="482" y="524" width="120" height="64" rx="10" fill="#313244"/>
+<rect x="482" y="524" width="120" height="64" rx="10" fill="#94e2d5" stroke="#94e2d5" stroke-width="1.5" class="lit" style="animation-delay:9.3s"/>
+<text x="542" y="546" font-size="13" class="m" font-weight="600" text-anchor="middle">integrate</text>
+<text x="542" y="564" font-size="11" class="dim" text-anchor="middle">one merge at a time</text>
+</g>
+<g>
+<rect x="628" y="524" width="78" height="64" rx="10" fill="#313244"/>
+<rect x="628" y="524" width="78" height="64" rx="10" fill="#a6e3a1" stroke="#a6e3a1" stroke-width="1.5" class="lit" style="animation-delay:9.9s"/>
+<text x="667" y="546" font-size="13" class="m" font-weight="600" text-anchor="middle">main</text>
+<text x="667" y="564" font-size="11" class="dim" text-anchor="middle">validated</text>
+</g>
+<g>
+<rect x="48" y="658" width="120" height="38" rx="10" fill="#313244"/>
+<rect x="48" y="658" width="120" height="38" rx="10" fill="#f9e2af" stroke="#f9e2af" stroke-width="1.5" class="lit" style="animation-delay:10.5s"/>
+<text x="108" y="682" font-size="13" class="m" font-weight="600" text-anchor="middle">forge-scout</text>
+
+</g>
+<g>
+<rect x="194" y="658" width="130" height="38" rx="10" fill="#313244"/>
+<rect x="194" y="658" width="130" height="38" rx="10" fill="#f9e2af" stroke="#f9e2af" stroke-width="1.5" class="lit" style="animation-delay:11.2s"/>
+<text x="259" y="682" font-size="13" class="m" font-weight="600" text-anchor="middle">proposals</text>
+
+</g>
+<g>
+<rect x="350" y="658" width="130" height="38" rx="10" fill="#313244"/>
+<rect x="350" y="658" width="130" height="38" rx="10" fill="#f9e2af" stroke="#f9e2af" stroke-width="1.5" class="lit" style="animation-delay:11.8s"/>
+<text x="415" y="682" font-size="13" class="m" font-weight="600" text-anchor="middle">you decide</text>
+
+</g>
+<g>
+<rect x="506" y="658" width="120" height="38" rx="10" fill="#313244"/>
+<rect x="506" y="658" width="120" height="38" rx="10" fill="#f9e2af" stroke="#f9e2af" stroke-width="1.5" class="lit" style="animation-delay:12.4s"/>
+<text x="566" y="682" font-size="13" class="m" font-weight="600" text-anchor="middle">new tasks</text>
+
+</g>
+<rect x="744" y="92" width="224" height="330" rx="12" fill="#181825" stroke="#b4befe" stroke-width="1"/>
+<text x="760" y="117" font-size="15" style="fill:#b4befe" font-weight="700">◉ lens</text>
+<text x="952" y="117" font-size="11" class="dim" text-anchor="end">live panel</text>
+<text x="760" y="143" font-size="11.5" class="m dim">Opus 5.5 · effort high</text>
+<text x="760" y="170" font-size="12" style="fill:#89b4fa" font-weight="600">Roadmap</text>
+<rect x="760" y="178" width="192" height="8" rx="4" fill="#45475a"/><rect x="760" y="178" width="192" height="8" rx="4" fill="#89b4fa" class="g3"/>
+<text x="760" y="210" font-size="12" style="fill:#fab387" font-weight="600">forge · T7</text>
+<rect x="760" y="218" width="35" height="18" rx="5" fill="#313244"/>
+<rect x="760" y="218" width="35" height="18" rx="5" fill="#fab387" stroke="#fab387" class="lit" style="animation-delay:5s"/>
+<text x="777.5" y="231" font-size="9.5" class="m" text-anchor="middle">tri</text>
+<rect x="799" y="218" width="35" height="18" rx="5" fill="#313244"/>
+<rect x="799" y="218" width="35" height="18" rx="5" fill="#fab387" stroke="#fab387" class="lit" style="animation-delay:5.6s"/>
+<text x="816.5" y="231" font-size="9.5" class="m" text-anchor="middle">impl</text>
+<rect x="838" y="218" width="35" height="18" rx="5" fill="#313244"/>
+<rect x="838" y="218" width="35" height="18" rx="5" fill="#fab387" stroke="#fab387" class="lit" style="animation-delay:6.2s"/>
+<text x="855.5" y="231" font-size="9.5" class="m" text-anchor="middle">val</text>
+<rect x="877" y="218" width="35" height="18" rx="5" fill="#313244"/>
+<rect x="877" y="218" width="35" height="18" rx="5" fill="#fab387" stroke="#fab387" class="lit" style="animation-delay:6.9s"/>
+<text x="894.5" y="231" font-size="9.5" class="m" text-anchor="middle">rev</text>
+<rect x="916" y="218" width="35" height="18" rx="5" fill="#313244"/>
+<rect x="916" y="218" width="35" height="18" rx="5" fill="#fab387" stroke="#fab387" class="lit" style="animation-delay:7.5s"/>
+<text x="933.5" y="231" font-size="9.5" class="m" text-anchor="middle">ver</text>
+<text x="760" y="262" font-size="12" style="fill:#b4befe" font-weight="600">Subagents</text>
+<path d="M766 272a6 6 0 1 1 -6 6" stroke="#fab387" stroke-width="2" fill="none" class="spin"/>
+<text x="778" y="282" font-size="11" class="m">impl · Opus 5.5 · medium</text>
+<path d="M766 292a6 6 0 1 1 -6 6" stroke="#89b4fa" stroke-width="2" fill="none" class="spin"/>
+<text x="778" y="302" font-size="11" class="m">review · Opus 5.5 · xhigh</text>
+<text x="760" y="330" font-size="12" style="fill:#94e2d5" font-weight="600">Usage</text>
+<text x="952" y="330" font-size="11" class="m" text-anchor="end">1.84M tok · $6.20</text>
+<rect x="760" y="338" width="95" height="8" rx="2" fill="#b4befe"/>
+<rect x="856" y="338" width="37.400000000000006" height="8" rx="2" fill="#a6e3a1"/>
+<rect x="894.4" y="338" width="37.400000000000006" height="8" rx="2" fill="#89b4fa"/>
+<rect x="932.8" y="338" width="10.52" height="8" rx="2" fill="#cba6f7"/>
+<rect x="944.3199999999999" y="338" width="6.68" height="8" rx="2" fill="#f9e2af"/>
+<text x="760" y="364" font-size="10.5" class="dim">without forge (estimate): ~$4.70</text>
+<text x="760" y="400" font-size="10.5" class="faint">reads the same files, adds no tokens</text>
+<rect x="744" y="434" width="224" height="176" rx="12" fill="#181825" stroke="#89b4fa" stroke-width="1"/>
+<text x="760" y="459" font-size="15" style="fill:#89b4fa" font-weight="700">Roadmap</text>
+<text x="952" y="459" font-size="11" class="dim" text-anchor="end">claude.ai</text>
+<text x="760" y="488" font-size="11" class="m dim">api</text>
+<rect x="800" y="477" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:5s"/>
+<rect x="819" y="477" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:5.5s"/>
+<rect x="838" y="477" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:5.9s"/>
+<rect x="857" y="477" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:6.4s"/>
+<rect x="876" y="477" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:6.8s"/>
+<rect x="895" y="477" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:7.3s"/>
+<rect x="914" y="477" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:7.7s"/>
+<rect x="933" y="477" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:8.2s"/>
+<text x="760" y="514" font-size="11" class="m dim">ui</text>
+<rect x="800" y="503" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:8.6s"/>
+<rect x="819" y="503" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:9.1s"/>
+<rect x="838" y="503" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:9.5s"/>
+<rect x="857" y="503" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:10s"/>
+<rect x="876" y="503" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:10.4s"/>
+<rect x="895" y="503" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:10.9s"/>
+<rect x="914" y="503" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:11.3s"/>
+<rect x="933" y="503" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:11.8s"/>
+<text x="760" y="540" font-size="11" class="m dim">data</text>
+<rect x="800" y="529" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:12.2s"/>
+<rect x="819" y="529" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:12.7s"/>
+<rect x="838" y="529" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:13.1s"/>
+<rect x="857" y="529" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:13.6s"/>
+<rect x="876" y="529" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:14s"/>
+<rect x="895" y="529" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:14.5s"/>
+<rect x="914" y="529" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:14.9s"/>
+<rect x="933" y="529" width="14" height="14" rx="3" fill="#45475a" class="done" style="animation-delay:15.4s"/>
+<text x="760" y="578" font-size="10.5" class="dim">Tracking · Versions · Sessions</text>
+<text x="760" y="594" font-size="10.5" class="dim">Notes · Proposals</text>
+<rect x="744" y="622" width="224" height="86" rx="12" fill="#181825" stroke="#f9e2af" stroke-width="1"/>
+<text x="760" y="646" font-size="15" style="fill:#f9e2af" font-weight="700">You</text>
+<text x="760" y="666" font-size="11" class="dim">· approve the design</text>
+<text x="760" y="682" font-size="11" class="dim">· decide proposals</text>
+<text x="760" y="698" font-size="11" class="dim">· authorize merges</text>
+</svg>

@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023"],
+    "types": [],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "jsx": "react",
+    "jsxFactory": "h",
+    "jsxFragmentFactory": "Fragment"
+  },
+  "include": [
+    "plugins/waypoint/.claude-plugin/types",
+    "src/mod/register.tsx",
+    "src/mod/state.d.ts",
+    "plugins/waypoint/tests",
+    "src/lens/register.tsx",
+    "src/lens/state.d.ts",
+    "src/lens/term.tsx",
+    "src/lens/pulse.tsx",
+    "plugins/lens/tests"
+  ]
+}

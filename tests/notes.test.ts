@@ -1,0 +1,96 @@
+import { describe, it, expect } from 'vitest';
+import { MAX_NOTE, NOTE_TYPES, counts, filterNotes, normalizeNote, notesSince } from '../src/lib/notes.js';
+import type { NoteDoc } from '../src/lib/types.js';
+
+type N = NoteDoc & { id: string };
+const n = (id: string, o: Partial<NoteDoc> = {}): N => ({ id, ts: '2026-10-11T10:00:00Z', type: 'idea', author: 'user:u1', text: id, ...o });
+
+describe('normalizeNote', () => {
+  it('accepts a valid note and keeps optional fields', () => {
+    const x = normalizeNote({ ts: 't', type: 'question', author: 'user:a', text: 'q', taskId: 'T1', answer: 'a', answeredBy: 'session:S', answeredAt: 'z' });
+    expect(x).toEqual({ ts: 't', type: 'question', author: 'user:a', text: 'q', taskId: 'T1', answer: 'a', answeredBy: 'session:S', answeredAt: 'z' });
+  });
+  it('rejects non-objects, bad type and non-string required fields', () => {
+    expect(NOTE_TYPES).toEqual(['decision', 'idea', 'debt', 'question']);
+    for (const bad of [null, 3, 'x', [], { type: 'nope', author: 'a', text: 't' }, { type: 'idea', author: 1, text: 't' }, { type: 'idea', author: 'a', text: 5 }]) {
+      expect(normalizeNote(bad)).toBeNull();
+    }
+  });
+  it('tolerates a missing ts and drops non-string optionals', () => {
+    const x = normalizeNote({ type: 'debt', author: 'user:a', text: 't', taskId: 7, answer: {} });
+    expect(x).toEqual({ ts: '', type: 'debt', author: 'user:a', text: 't' });
+  });
+  it('truncates text and answer to MAX_NOTE', () => {
+    expect(MAX_NOTE).toBe(2000);
+    const x = normalizeNote({ ts: 't', type: 'idea', author: 'a', text: 'x'.repeat(3000), answer: 'y'.repeat(2500) })!;
+    expect(x.text).toHaveLength(2000);
+    expect(x.answer).toHaveLength(2000);
+  });
+});
+
+describe('filterNotes', () => {
+  const list = [
+    n('old', { ts: '2026-10-01T00:00:00Z', type: 'decision', author: 'session:S1' }),
+    n('new', { ts: '2026-10-05T00:00:00Z', type: 'question' }),
+    n('nots', { ts: '', type: 'debt' }),
+    n('ans', { ts: '2026-10-03T00:00:00Z', type: 'question', answer: 'done' }),
+  ];
+  it('all sorts by ts desc with no-ts last', () => {
+    expect(filterNotes(list, 'all', null).map(x => x.id)).toEqual(['new', 'ans', 'old', 'nots']);
+  });
+  it('filters by type', () => {
+    expect(filterNotes(list, 'decision', null).map(x => x.id)).toEqual(['old']);
+  });
+  it('open = unanswered questions', () => {
+    expect(filterNotes(list, 'open', null).map(x => x.id)).toEqual(['new']);
+  });
+  it('mine matches author and is empty when me is null', () => {
+    expect(filterNotes(list, 'mine', 'user:u1').map(x => x.id)).toEqual(['new', 'ans', 'nots']);
+    expect(filterNotes(list, 'mine', null)).toEqual([]);
+  });
+  it('does not mutate the input', () => {
+    const copy = list.map(x => x.id);
+    filterNotes(list, 'all', null);
+    expect(list.map(x => x.id)).toEqual(copy);
+  });
+});
+
+describe('notesSince', () => {
+  const list = [
+    n('u-old', { ts: '2026-10-01T00:00:00Z' }),
+    n('u-new', { ts: '2026-10-05T00:00:00Z' }),
+    n('s-new', { ts: '2026-10-06T00:00:00Z', author: 'session:S' }),
+    n('s-q-answered', { ts: '2026-10-01T00:00:00Z', author: 'session:S', type: 'question', answer: 'a', answeredAt: '2026-10-07T00:00:00Z' }),
+    n('s-q-old-answer', { ts: '2026-10-01T00:00:00Z', author: 'session:S', type: 'question', answer: 'a', answeredAt: '2026-10-02T00:00:00Z' }),
+    n('u-nots', { ts: '' }),
+  ];
+  it('returns new user notes plus questions answered after since, ascending', () => {
+    expect(notesSince(list, '2026-10-03T00:00:00Z').map(x => x.id)).toEqual(['u-new', 's-q-answered']);
+  });
+  it('null or invalid since returns all user notes', () => {
+    const all = ['u-nots', 'u-old', 'u-new'];
+    expect(notesSince(list, null).map(x => x.id)).toEqual(all);
+    expect(notesSince(list, 'garbage').map(x => x.id)).toEqual(all);
+  });
+  it('notes without ts count as old', () => {
+    expect(notesSince(list, '2000-01-01T00:00:00Z').map(x => x.id)).not.toContain('u-nots');
+  });
+});
+
+describe('counts', () => {
+  it('counts per type and open questions', () => {
+    const c = counts([n('a', { type: 'decision' }), n('b', { type: 'question' }), n('c', { type: 'question', answer: 'x' }), n('d', { type: 'debt' })]);
+    expect(c).toEqual({ decision: 1, idea: 0, debt: 1, question: 2, open: 1 });
+  });
+});
+
+describe('normalizeNote proposalId', () => {
+  const b = { ts: 't', type: 'idea', author: 'user:1', text: 'x' };
+  it('keeps a plain string proposalId', () => {
+    expect(normalizeNote({ ...b, proposalId: 'p1' })).toMatchObject({ proposalId: 'p1' });
+  });
+  it('drops proposalId with a slash or a non-string', () => {
+    expect(normalizeNote({ ...b, proposalId: 'a/b' })!.proposalId).toBeUndefined();
+    expect(normalizeNote({ ...b, proposalId: 5 })!.proposalId).toBeUndefined();
+  });
+});

@@ -1,0 +1,109 @@
+<div align="center">
+
+# 🔍 lens
+
+**A live progress panel for Claude Code sessions.**
+Roadmap, forge stages, superpowers runs, todos, subagents, the model and effort in use, and what it all costs.
+
+**English** · [Español](README.es.md) · [← bg-kit](../../README.md)
+
+![version 0.5.0](https://img.shields.io/badge/version-0.5.0-b4befe?style=flat-square)
+![no token cost](https://img.shields.io/badge/token%20cost-none-a6e3a1?style=flat-square)
+
+</div>
+
+<p align="center"><img src="../../docs/assets/lens.en.svg" alt="The lens panel: model and effort, roadmap, forge stages, subagents and the Usage card" width="100%"></p>
+
+## Contents
+
+- [Why lens](#why-lens)
+- [Install](#install)
+- [Usage](#usage)
+- [What the panel shows](#what-the-panel-shows)
+- [Usage and cost](#usage-and-cost)
+- [The band](#the-band)
+- [How it reads](#how-it-reads)
+- [Develop](#develop)
+
+## Why lens
+
+Long runs happen out of sight: subagents in the background, reviewers in parallel, sessions in other worktrees. lens puts them on one screen next to your conversation, so you can tell at a glance whether things are moving, what is stuck and how much it is costing. It only observes and never adds tokens to your sessions.
+
+## Install
+
+```bash
+claude plugin marketplace add <path-to>/claude-bg-kit
+claude plugin install lens@bg-kit
+```
+
+lens detects [waypoint](../waypoint/README.md), [forge](../forge/README.md) and [superpowers](https://github.com/obra/superpowers) from their files in the project and needs none of them installed. Restart Claude Code after installing or updating.
+
+## Usage
+
+- `/lens` opens the side panel. With waypoint installed, the **Panel** button in its band does the same.
+- The panel and the band are drawn in the terminal and in the Code tab of the desktop app.
+
+| Where | How it looks |
+| --- | --- |
+| **Terminal** | Rounded frames, block bars and task boxes in cells. Spinners, a sheen along active bars and pulsing boxes are animated on the drawing thread by a surface module (`hooks/pulse.js`), so they cost no state writes. |
+| **Desktop app** | Each card is an SVG with gradient bars, a moving sheen, breathing boxes and spinning rings. It follows the light or dark scheme, stops moving under reduced motion, and its alt text says everything the card shows. |
+
+## What the panel shows
+
+Each section is a card in its own colour (the roadmap's Catppuccin palette) and appears only when its source exists. Task boxes are coloured by state: done (blue), in progress (orange, pulsing), blocked (yellow), sent back by review (red) and pending (outlined). Agents are coloured by level: forge's implementer ladder runs from cool to warm (mech, light, impl, heavy, fable), and the reviewers by what they judge (correctness, security, perf).
+
+| Card | Source | What you see |
+| --- | --- | --- |
+| **Now** | the session | The main model and its effort (`Opus 5.5 · effort high`), the tool running and how long the turn has been going. |
+| **Roadmap** | waypoint plan | Percent, phase, a box per task of the track, the task in progress with its minutes against its estimate, messages and pending decisions. |
+| **forge** | `.forge/status.json` | The last forge task triaged or worked on within the day, described below. |
+| **swarm** | `.forge/swarm.json` | Live, waiting and ready fronts, and what each waiting front waits for. |
+| **superpowers** | `.superpowers/sdd/<plan>/progress.md` | The active plan and its subagent-driven-development ledger: task N/M, the current fix round, the last entries. A finished plan with no checked steps is hidden. |
+| **Todos** | TodoWrite | Done/total, the one in progress and the next ones. |
+| **Subagents** | Claude Code | The subagents running, with their type, description, model, effort and time. |
+| **Claude Code tasks** | Claude Code | Open and done tasks and the latest ones. |
+| **Usage** | the session and `.forge/usage/` | Tokens and dollars by part, described in [Usage and cost](#usage-and-cost). |
+
+**The forge card** shows:
+
+- the task and its path;
+- the stages (triage → implement → validate → review → verdict, plus design, plan and final on the Large path), with the current one lit;
+- a box per brief: accepted, current or pending;
+- the last agent with its level, model and effort;
+- the last validators (✓/✗), the verdict with its score, and the review round against its cap.
+
+Below the stages it lists up to 5 pending proposals, each as `title · category · risk` with **Approve** and **Reject** buttons that run `/forge:decide`. While a `/forge:infinite` run is active, the card also shows `∞ N/M · Hh left` and the 3 newest auto-approved proposals.
+
+## Usage and cost
+
+The **Usage** card answers three questions: which model is working, how much it has spent, and what the method costs.
+
+- **This session ▸ run.** The run view adds up every session of the current forge run (the swarm coordinator and its fronts) from `.forge/usage/<session>.json`. It appears while a run is active or ended in the last 12 hours.
+- **Groups.** Main session, Implementers, Reviewers, Planning and scout, Other subagents, and Tracking ≈ (an estimate of the context spent on waypoint and forge bookkeeping). Each group shows its dominant model, its tokens, its dollars and its share.
+- **Check against `/cost`.** The session total is compared with Claude Code's own cost. A ⚠ appears when the two differ by more than 10 %, for example when a model is missing from the price table or lens loaded partway through the session.
+- **Without forge (estimate).** The same work done by the main session alone, on its model, without review. It is always marked as an estimate, since in one session the context would grow and cost more, and nothing would be reviewed.
+- **Prices** come from a dated table in the code (`src/lib/prices.ts`). A model without a price shows tokens but no dollars, and totals are marked `≥`.
+
+lens measures from the moment it loads, from Claude Code's per-request token counts. It never reads transcripts and never calls a model. Fast mode is not priced separately; the `/cost` check reveals it.
+
+## The band
+
+When Claude has open todos or running subagents, and waypoint is not drawing its own band, lens draws a band above the prompt. It shows the most specific run going on (forge, else the roadmap, superpowers or the todos) with its bar, its task boxes and its count, then this session's usage (`· 1.8M tok · $6.2`), **Panel** and **×**. **×** hides it until the next session.
+
+## How it reads
+
+- While the panel is open, lens reads files every 10 s and after each turn.
+- While the panel is closed, it reads only when there is activity (open todos or running subagents), every 30 s, for the band.
+- With nothing going on and the panel closed, it keeps only a small in-memory record of the session's activity.
+- Panel state is written only while the panel is open, and usage files only in projects that have `.forge/`.
+- `.forge/run.json` is not read above 16 KiB, only the 50 newest proposal files are read, and usage files above 256 KiB are ignored.
+
+## Develop
+
+The plugin is a mod: `src/lens/register.tsx`, bundled to `hooks/register.js` by `npm run build` at the repository root (commit the result).
+
+- `claude plugin validate plugins/lens` checks the manifest, the hooks module and its state contract.
+- `claude plugin test plugins/lens` runs `plugins/lens/tests/*.test.ts` against the engine.
+- `npm run typecheck:mod` type-checks the mod.
+
+Bump the version in `plugin.json` on every change: the installed plugin cache is keyed by version.

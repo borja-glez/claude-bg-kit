@@ -1,0 +1,82 @@
+<title>__TITLE__</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>:root{--crust:#11111b;--mantle:#181825;--base:#1e1e2e;--s0:#313244;--s1:#45475a;--s2:#585b70;--o0:#6c7086;--o1:#7f849c;--sub0:#a6adc8;--sub1:#bac2de;--text:#cdd6f4;
+  --lavender:#b4befe;--blue:#89b4fa;--sapphire:#74c7ec;--sky:#89dceb;--teal:#94e2d5;--green:#a6e3a1;--yellow:#f9e2af;--peach:#fab387;--red:#f38ba8;--mauve:#cba6f7;--pink:#f5c2e7;--flamingo:#f2cdcd;
+  --done:var(--sapphire);--cur:var(--peach);--blk:var(--yellow);--now:var(--red);color-scheme:dark}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--crust:#dce0e8;--mantle:#e6e9ef;--base:#eff1f5;--s0:#ccd0da;--s1:#bcc0cc;--s2:#acb0be;--o0:#9ca0b0;--o1:#8c8fa1;--sub0:#6c6f85;--sub1:#5c5f77;--text:#4c4f69;
+  --lavender:#7287fd;--blue:#1e66f5;--sapphire:#209fb5;--sky:#04a5e5;--teal:#179299;--green:#40a02b;--yellow:#df8e1d;--peach:#fe640b;--red:#d20f39;--mauve:#8839ef;--pink:#ea76cb;--flamingo:#dd7878;color-scheme:light}}
+:root[data-theme="dark"]{color-scheme:dark}
+:root[data-theme="light"]{--crust:#dce0e8;--mantle:#e6e9ef;--base:#eff1f5;--s0:#ccd0da;--s1:#bcc0cc;--s2:#acb0be;--o0:#9ca0b0;--o1:#8c8fa1;--sub0:#6c6f85;--sub1:#5c5f77;--text:#4c4f69;--lavender:#7287fd;--blue:#1e66f5;--sapphire:#209fb5;--sky:#04a5e5;--teal:#179299;--green:#40a02b;--yellow:#df8e1d;--peach:#fe640b;--red:#d20f39;--mauve:#8839ef;--pink:#ea76cb;--flamingo:#dd7878;color-scheme:light}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--base);color:var(--text);font-family:'IBM Plex Sans',system-ui,sans-serif}
+body{overflow-x:clip}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+#wp-design-root{max-width:1100px;margin:0 auto;padding:32px 24px 64px}
+.lbl{font-family:'Barlow Condensed',sans-serif;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--o1);margin-bottom:6px}
+header{border-bottom:1px solid var(--s0);padding-bottom:20px}
+.eb{font-family:'Barlow Condensed',sans-serif;font-size:12px;letter-spacing:.16em;color:var(--peach)}
+h1{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:56px;line-height:1;margin:8px 0 12px;text-transform:uppercase;letter-spacing:.01em;overflow-wrap:anywhere}
+.dot{color:var(--peach)}
+.lead{font-size:17px;line-height:1.55;color:var(--sub1);max-width:70ch;margin:0 0 18px}
+.met{display:flex;flex-wrap:wrap;gap:12px 32px}
+.met div{font-family:'Barlow Condensed',sans-serif;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--o1);min-width:0}
+.met b{display:block;font-size:26px;font-weight:700;color:var(--text);letter-spacing:0;text-transform:none;overflow-wrap:anywhere}
+.met b.src{font:600 13px 'JetBrains Mono',monospace;padding-top:9px;color:var(--lavender)}
+.vers{margin-top:20px}
+.vl{display:flex;flex-wrap:wrap;gap:6px}
+.vers .v{font-family:'JetBrains Mono',monospace;font-size:12px;padding:5px 10px;border:1px solid var(--s0);border-radius:4px;color:var(--sub0)}
+.vers .v:hover{border-color:var(--s2);color:var(--text)}
+.vers .v.on{border-color:var(--peach);color:var(--text);background:var(--mantle)}
+.note{margin:10px 0 0;font-size:13px;color:var(--sub0)}
+.pil{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:20px}
+.p{background:var(--mantle);border:1px solid var(--s0);border-left:3px solid var(--peach);border-radius:6px;padding:12px 14px;min-width:0}
+.p b{display:block;font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:600;margin-bottom:4px}
+.p span{font-size:13.5px;color:var(--sub1);line-height:1.5}
+.pr{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:20px;background:var(--mantle);border:1px solid var(--s0);border-radius:8px;padding:12px 14px}
+.pr>div{min-width:0}
+.pr code{font:600 14px 'JetBrains Mono',monospace;color:var(--peach);overflow-wrap:anywhere}
+.cp{flex:none;background:var(--peach);color:var(--crust);font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;letter-spacing:.1em;text-transform:uppercase;padding:8px 14px;border-radius:4px}
+.cp:hover{filter:brightness(1.08)}
+.doc{display:grid;grid-template-columns:220px minmax(0,1fr);gap:32px;margin-top:28px}
+.toc{position:sticky;top:16px;align-self:start;display:flex;flex-direction:column;gap:2px;font-size:13px;min-width:0}
+.toc a{color:var(--sub0);text-decoration:none;padding:3px 0 3px 10px;border-left:2px solid var(--s0);overflow-wrap:anywhere}
+.toc a:hover{color:var(--text);border-left-color:var(--peach)}
+.toc a.l3{padding-left:22px;font-size:12.5px}
+.body{min-width:0;font-size:16px;line-height:1.7;overflow-wrap:anywhere}
+.body h2,.body h3{font-family:'Barlow Condensed',sans-serif;line-height:1.15;scroll-margin-top:16px}
+.body h2{font-size:30px;margin:2em 0 .5em;padding-bottom:6px;border-bottom:1px solid var(--s0)}
+.body h3{font-size:22px;margin:1.6em 0 .4em;color:var(--lavender)}
+.body img{max-width:100%;height:auto}
+.body a{color:var(--blue)}
+.body code,.body pre{font-family:'JetBrains Mono',monospace;font-size:.88em}
+.body code{background:var(--mantle);padding:1px 5px;border-radius:3px}
+.body pre{background:var(--mantle);border:1px solid var(--s0);border-radius:6px;padding:12px;overflow-x:auto}
+.body pre code{background:none;padding:0}
+.body blockquote{margin:1em 0;padding:2px 14px;border-left:3px solid var(--s2);color:var(--sub1)}
+.body table{border-collapse:collapse;display:block;overflow-x:auto;max-width:100%}
+.body th,.body td{border:1px solid var(--s0);padding:6px 10px;text-align:left}
+.body th{background:var(--mantle)}
+@media (max-width:760px){
+  #wp-design-root{padding:20px 16px 48px}
+  h1{font-size:40px}
+  .doc{grid-template-columns:minmax(0,1fr);gap:20px}
+  .toc{position:static;border:1px solid var(--s0);border-radius:6px;padding:10px;background:var(--mantle)}
+  .pil{grid-template-columns:minmax(0,1fr)}
+  .pr{flex-direction:column;align-items:stretch}
+  .cp{width:100%}
+}
+</style>
+<div id="wp-design-root"></div>
+<script type="application/json" id="wp-design-data">__DATA__</script>
+<script>"use strict";(()=>{var $={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"},e=s=>String(s??"").replace(/[&<>"']/g,o=>$[o]),u={en:{eyebrow:"DESIGN DOCUMENT \xB7 EXECUTABLE SPECIFICATION",version:"Version",words:"Words",rounds:"Rounds",source:"Source",prompt:"Start prompt",copy:"Copy prompt",copied:"Copied",versions:"Versions",toc:"Contents",current:"current"},es:{eyebrow:"DOCUMENTO DE DISE\xD1O \xB7 ESPECIFICACI\xD3N EJECUTABLE",version:"Versi\xF3n",words:"Palabras",rounds:"Rondas",source:"Fuente",prompt:"Prompt de arranque",copy:"Copiar prompt",copied:"Copiado",versions:"Versiones",toc:"\xCDndice",current:"actual"}},g=s=>u[(s??"en").toLowerCase().split(/[-_]/)[0]]??u.en;function b(s,o){let t=g(s.meta.locale),r=s.versions.find(n=>n.version===o)??s.versions[s.versions.length-1],i=r?.version??s.current,c=s.versions.map(n=>`<button class="v ${n.version===i?"on":""}" data-version="${e(n.version)}">v${e(n.version)}${n.version===s.current?` \xB7 ${e(t.current)}`:""}</button>`).join(""),a=s.meta.pillars.map(n=>`<div class="p"><b>${e(n.title)}</b><span>${e(n.text)}</span></div>`).join(""),d=(r?.toc??[]).map(n=>`<a class="l${e(n.level)}" href="#${e(n.slug)}">${e(n.heading)}</a>`).join("");return`<header>
+<div class="eb">${e(t.eyebrow)}${r?.date?` \xB7 ${e(r.date)}`:""}</div>
+<h1>${e(s.meta.title)}<span class="dot">.</span></h1>
+<p class="lead">${e(s.meta.summary)}</p>
+<div class="met"><div><b>v${e(i)}</b>${e(t.version)}</div><div><b>${e(r?.words??s.words)}</b>${e(t.words)}</div><div><b>${e(s.rounds)}</b>${e(t.rounds)}</div><div><b class="src">${e(s.source)}</b>${e(t.source)}</div></div>
+</header>
+<section class="vers"><div class="lbl">${e(t.versions)}</div><div class="vl">${c}</div>${r?.note?`<p class="note">${e(r.note)}</p>`:""}</section>
+<section class="pil">${a}</section>
+<section class="pr"><div><div class="lbl">${e(t.prompt)}</div><code>${e(s.meta.start_prompt)}</code></div><button class="cp" data-action="copy">${e(t.copy)}</button></section>
+<div class="doc"><nav class="toc"><div class="lbl">${e(t.toc)}</div>${d}</nav><article class="body">${r?.html??""}</article></div>`}function E(s,o,t={}){let r=g(o.meta.locale),i=c=>{s.innerHTML=b(o,c)};i(o.current),s.addEventListener("click",c=>{let a=c.target,d=a?.closest("[data-version]");if(d){i(Number(d.dataset.version));return}let n=a?.closest('[data-action="copy"]');if(!n)return;let m=t.copy??(l=>navigator.clipboard.writeText(l));Promise.resolve().then(()=>m(o.meta.start_prompt)).then(()=>{n.textContent=r.copied,setTimeout(()=>{n.isConnected&&(n.textContent=r.copy)},1500)},()=>{let l=s.querySelector(".pr code");if(l){let p=document.createRange();p.selectNodeContents(l);let v=getSelection();v?.removeAllRanges(),v?.addRange(p)}})})}function y(){let s=document.getElementById("wp-design-data");if(!s)return;let o=document.getElementById("wp-design-root");try{E(o,JSON.parse(s.textContent??""))}catch(t){o.textContent=`Error: ${t.message}`}}y();})();
+</script>

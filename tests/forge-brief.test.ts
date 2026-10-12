@@ -1,0 +1,46 @@
+import { describe, it, expect } from 'vitest';
+import { parsePlan } from '../src/lib/plan.js';
+import { renderBrief, taskText } from '../src/forge/brief.js';
+
+const PLAN = parsePlan(`project: shop
+locale: es
+version: "0.1"
+tracks: [{ id: backend, name: Backend, color: blue }]
+phases: [{ id: F1, name: Base }]
+tasks:
+  - id: T001
+    title: Esquema de pedidos
+    track: backend
+    phase: F1
+    includes: tabla orders y migración
+    done_when: la migración crea la tabla orders
+    verification: npm test
+    zones: ["src/db/**"]
+    estimate_min: 30
+  - id: T002
+    title: API de pedidos
+    track: backend
+    phase: F1
+    done_when: GET /orders devuelve la lista
+    depends_on: [T001]
+    zones: ["src/api/orders/**"]
+`);
+
+describe('brief', () => {
+  it('taskText joins title, includes and done_when', () => {
+    expect(taskText(PLAN.tasks[0])).toBe('Esquema de pedidos. tabla orders y migración. la migración crea la tabla orders');
+    expect(taskText(PLAN.tasks[1])).toBe('API de pedidos. GET /orders devuelve la lista');
+  });
+  it('renders every field the implementer needs, verbatim', () => {
+    const md = renderBrief(PLAN, PLAN.tasks[1], { planPath: 'docs/waypoint/shop/plan.yaml', designPath: 'docs/waypoint/shop/design.md' });
+    for (const s of ['# T002: API de pedidos', 'Done when: GET /orders devuelve la lista', 'Zones: src/api/orders/**', 'Depends on: T001', 'Commit title prefix: T002: ',
+      'Track: backend', 'Phase: F1', 'Plan: docs/waypoint/shop/plan.yaml', 'Design: docs/waypoint/shop/design.md']) expect(md).toContain(s);
+    expect(md).not.toContain('Verification:');
+  });
+  it('omits the design line when there is none and shows verification when present', () => {
+    const md = renderBrief(PLAN, PLAN.tasks[0], { planPath: 'p.yaml', designPath: null });
+    expect(md).not.toContain('Design:');
+    expect(md).toContain('Verification: npm test');
+    expect(md).toContain('Includes: tabla orders y migración');
+  });
+});

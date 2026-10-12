@@ -1,0 +1,156 @@
+<div align="center">
+
+# 🧭 waypoint
+
+**Design docs, live roadmaps and multi-session tracking for very large Claude Code tasks.**
+
+**English** · [Español](README.es.md) · [← bg-kit](../../README.md)
+
+![version 0.10.0](https://img.shields.io/badge/version-0.10.0-cba6f7?style=flat-square)
+![requires claude.ai login](https://img.shields.io/badge/requires-claude.ai%20login-89b4fa?style=flat-square)
+![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
+
+</div>
+
+<p align="center"><img src="../../docs/assets/roadmap.en.svg" alt="The waypoint roadmap: tracks with task boxes, a timeline and live sessions" width="100%"></p>
+
+## Contents
+
+- [Why waypoint](#why-waypoint)
+- [Features](#features)
+- [Install](#install)
+- [Usage](#usage)
+- [The roadmap](#the-roadmap)
+- [The band](#the-band)
+- [Parallel sessions](#parallel-sessions)
+- [Hooks](#hooks)
+- [CLI reference](#cli-reference)
+- [Permissions](#permissions)
+- [Develop](#develop)
+
+## Why waypoint
+
+A task that spans dozens of steps and several sessions loses its thread: what was decided, what is done, who is working on what. waypoint keeps that thread outside the conversation. It keeps a design you approved, a plan in the repository and a live page that every session and every person reads and writes.
+
+## Features
+
+- **Design in rounds.** A `design-critic` agent reviews the design document and returns numbered proposals with their critical points. You apply all or some of them, ask for another round, have Claude interview you, or rewrite, until you approve it.
+- **A plan in the repo.** `docs/waypoint/<project>/plan.yaml` holds tracks, phases and tasks, each with its zones (the files it touches), `done_when` and an estimate. The approved design seeds it.
+- **A live roadmap.** The plan is published as a claude.ai artifact that updates while Claude works. Its views are Tracking (by phase or by track), Versions, Sessions, Notes and Proposals, with filters, a zoomable timeline, dependencies, a minimap, export and a phone layout.
+- **Parallel sessions.** `/waypoint:launch <track>` starts a background session in its own git worktree. Sessions show up in the roadmap and coordinate through messages: overlap warnings, handoffs and delegation.
+- **A band above the prompt** that shows where you are and runs the next command with one click.
+- **Nothing lost.** Hooks record every commit and remind you of pending roadmap writes before the session stops.
+
+## Install
+
+```bash
+claude plugin marketplace add <path-to>/claude-bg-kit
+claude plugin install waypoint@bg-kit
+```
+
+Requires a claude.ai login (for the artifacts) and Node ≥ 20. Restart Claude Code after installing or updating.
+
+## Usage
+
+| Command | What it does |
+| --- | --- |
+| `/waypoint:design [new\|round\|apply <all\|1,3>\|rewrite\|interview\|approve]` | Write a design document, improve it in critic rounds and approve it. The approved design seeds the plan. |
+| `/waypoint:plan` | Write or sync `docs/waypoint/<project>/plan.yaml` and publish the live roadmap. |
+| `/waypoint:work [track]` | Take tasks one by one; the roadmap updates live. |
+| `/waypoint:status` | Progress summary. |
+| `/waypoint:launch <track>` | Start a background session on a track in its own git worktree. |
+
+A typical run:
+
+```text
+/waypoint:design new              # first draft
+/waypoint:design round            # the critic proposes numbered changes
+/waypoint:design apply 1,3        # apply the ones you want
+/waypoint:design approve
+/waypoint:plan                    # plan.yaml + the roadmap URL
+/waypoint:work                    # or launch a session per track
+```
+
+With [forge](../forge/README.md) installed, `/forge:run` drives these steps for you and adds triage, validation and independent review to each task.
+
+## The roadmap
+
+The roadmap is an artifact on claude.ai. It is private until you share it, and its database rules decide what each viewer can write.
+
+| View | What it shows |
+| --- | --- |
+| **Tracking** | Progress by phase or by track (a *frente* in the Spanish UI): a box per task coloured by state, the task in progress with its minutes, a zoomable timeline with dependencies, filters, a minimap and export. |
+| **Versions** | What each plan version covers and how far along its phases are. |
+| **Sessions** | The live sessions, their track, their task and their messages. |
+| **Notes** | Decisions, ideas, debts and questions about the project, optionally tied to a task; open questions can be answered. |
+| **Proposals** | Improvement proposals from forge's scout or from people, with filters by status, category and risk. |
+
+**Notes.** The work skill reads new notes from people at the start of each task and treats them as information, never as orders. It also writes its own decision, debt and question notes.
+
+**Proposals.** Each card shows the category, risk, status, the pillar it serves, the rationale, the evidence, the estimate and path when present, who decided it and why, and its comments. Contributors can approve or reject a proposal that is still proposed or in discussion (with an optional reason) and comment on any proposal. If someone decided it in the meantime, the page does not overwrite that decision and says so. forge only works on proposals that are approved or auto-approved.
+
+**forge on the page.** When forge drives a task, its card also shows forge's path and phase, the agent, the validators, the review verdict and the round. While an infinite run is active, the header shows `∞ cycle N` (with `/M` when the run has a cycle budget). A swarm shows `◆ swarm live/parallel` and marks its integrations on the timeline.
+
+**Permissions.** Contributors can write only notes and proposals. Everything else (plan, state, sessions, events, messages) needs Editor. Claude writes through ArtifactData as the owner, which the rules never limit. Without a signed-in viewer, or when the database refuses a note, the composer is read-only.
+
+> After updating the plugin, run `/waypoint:plan` and republish so the page gets the new views. A roadmap first published by 0.7.x or earlier must be republished once with the new capabilities; the plan skill passes them.
+
+## The band
+
+<p align="center"><img src="../../docs/assets/band.en.svg" alt="The band above the prompt in design, work and swarm modes" width="100%"></p>
+
+| Mode | Shows | Buttons |
+| --- | --- | --- |
+| **Design** | Design version, proposals and critical points from the last critique | Apply all, Pick…, Another round, Rewrite, Interview me, Approve, View design |
+| **Work** | Your track and its progress, the task in progress with its minutes, overall progress, unread messages, a pending decision | Next task, Status, Launch session on track…, Open roadmap |
+| **Swarm** | Live fronts out of the maximum, tracks integrated, overall progress, conflicts | Status, Stop swarm, Open roadmap |
+
+With [lens](../lens/README.md) installed, a **Panel** button opens the progress panel. If a command cannot run from the band, it is left in the prompt with a note saying "press Enter".
+
+The band is drawn in the terminal and in the Code tab of the desktop app. It is not drawn in the VS Code panel or with `-p`; there, use the commands directly.
+
+## Parallel sessions
+
+`/waypoint:launch <track>` creates `.claude/worktrees/<track>` on the branch `track/<track>` and starts a background Claude session there. Each session claims tasks from its track and writes its progress to the roadmap. When two sessions touch the same files, they get an overlap warning. Sessions can hand off or delegate work through messages, which are stored in the roadmap and sent with `SendMessage`. A session that disappears has its task recovered by the others.
+
+For many tracks at once with automatic integration, use forge's [swarm](../forge/README.md#swarm).
+
+## Hooks
+
+- **SessionStart** injects the roadmap or design context into a new, resumed, cleared or compacted session.
+- **PostToolUse** (Bash) records each `git commit` that moved HEAD, with its `sha`, in `.waypoint/<project>/pending-commits.jsonl`. Failed commits and `--dry-run` are not recorded. The work skill records intermediate commits as `commit` events and removes their lines, and empties the file when it completes or leaves a task.
+- **Stop** reminds you once per distinct pending set while `pending-commits.jsonl` or `queue.jsonl` has lines, so no commit or roadmap write is lost. Stopping again with nothing new goes through, and it never blocks when the Stop hook is already active.
+
+## CLI reference
+
+The skills run the CLI as `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" <command>`. `bin/waypoint` is a wrapper for shells where the plugin's `bin/` is on PATH.
+
+| Group | Commands |
+| --- | --- |
+| Design | `design-validate`, `design-snapshot`, `design-changed`, `critique-check`, `critique-select`, `design-page` |
+| Plan and page | `validate`, `hash` (prints the plan hash, used to detect an out-of-date roadmap), `page`, `sync`, `clean-cache` |
+| Work | `next [--base <branch>]`, `conflicts`, `recover`, `status`, `commit-info` |
+| Sessions | `launch <track> [--swarm <id> --base <branch>]`, `inbox`, `escalations`, `notes`, `session-id` |
+| Helpers | `event-id`, `now` |
+
+## Permissions
+
+Optional; add them to `permissions.allow` in `~/.claude/settings.json` so the work skill runs without a prompt for each call:
+
+```json
+{ "permissions": { "allow": ["Bash(node *waypoint.cjs*)", "ArtifactData", "Bash(git *)"] } }
+```
+
+`ArtifactData` is the tool name as this plugin's skills call it. If Claude Code lists it under another name (for example `mcp__…__ArtifactData`), use that name.
+
+## Develop
+
+From the repository root: `npm install`, `npm test`, then `npm run build`, which regenerates `dist/`, `assets/`, `hooks/register.js` and `types/index.d.ts` (commit them).
+
+The band is a mod (`src/mod/register.tsx`, bundled to `hooks/register.js`):
+
+- `claude plugin validate plugins/waypoint` checks the manifest, the hooks module and its state contract.
+- `claude plugin test plugins/waypoint` runs `plugins/waypoint/tests/*.test.ts` against the engine.
+- `npm run typecheck:mod` type-checks the mod and its tests. It needs the engine's API types in `plugins/waypoint/.claude-plugin/types/` (git-ignored). Claude Code writes them there when it loads the folder with `claude --plugin-dir plugins/waypoint`, or you can copy `types/claude-code.d.ts` from the `plugin-authoring` skill to `plugins/waypoint/.claude-plugin/types/claude-code/index.d.ts`.
+
+Bump the version in `plugin.json` on every change: the installed plugin cache is keyed by version.

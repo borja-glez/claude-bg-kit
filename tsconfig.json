@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": ["src", "tests"],
+  "exclude": ["src/mod/register.tsx", "src/mod/state.d.ts", "src/mod/files.ts", "src/lens/register.tsx", "src/lens/state.d.ts", "src/lens/term.tsx", "src/lens/pulse.tsx"]
+}

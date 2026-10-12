@@ -1,0 +1,55 @@
+project: demo-shop
+locale: es
+version: "0.1"
+versions:
+  - id: "0.1"
+    phases: [F1, F2]
+tracks:
+  - { id: backend, name: Backend, color: blue }
+  - { id: ui, name: Interfaz, color: mauve }
+phases:
+  - { id: F1, name: Base, plan_status: committed }
+  - { id: F2, name: Checkout, plan_status: provisional }
+tasks:
+  - id: T001
+    title: Esquema de pedidos
+    track: backend
+    phase: F1
+    done_when: migración aplicada y test de modelo en verde
+    zones: ["src/db/**"]
+    estimate_min: 20
+  - id: T002
+    title: API de pedidos
+    track: backend
+    phase: F1
+    done_when: tests de la API en verde
+    depends_on: [T001]
+    zones: ["src/api/orders/**"]
+    estimate_min: 30
+  - id: T003
+    title: Maqueta de carrito
+    track: ui
+    phase: F1
+    done_when: componente renderiza con datos falsos
+    zones: ["web/cart/**"]
+    estimate_min: 25
+  - id: T004
+    title: Pasarela de pago
+    track: backend
+    phase: F2
+    done_when: cobro de prueba aprobado
+    depends_on: [T002]
+    zones: ["src/payments/**"]
+  - id: T005
+    title: Pantalla de checkout
+    track: ui
+    phase: F2
+    done_when: flujo e2e de checkout en verde
+    depends_on: [T003, T004]
+    zones: ["web/checkout/**"]
+  - id: T006
+    title: Email de confirmación
+    track: backend
+    phase: F2
+    done_when: email enviado en test de integración
+    depends_on: [T004]

@@ -1,0 +1,22 @@
+{
+  "name": "bg-kit",
+  "owner": { "name": "Borja" },
+  "description": "Borja's Claude Code plugins: waypoint roadmaps, the lens progress panel and the forge method.",
+  "plugins": [
+    {
+      "name": "waypoint",
+      "source": "./plugins/waypoint",
+      "description": "Design docs, live roadmap artifacts and multi-session tracking for very large tasks."
+    },
+    {
+      "name": "lens",
+      "source": "./plugins/lens",
+      "description": "A live progress panel for Claude Code sessions: roadmap, superpowers runs, todos, subagents and tasks."
+    },
+    {
+      "name": "forge",
+      "source": "./plugins/forge",
+      "description": "An adaptive way of working for Claude Code: triage by size, models by role, tool-first validation and weighted independent review."
+    }
+  ]
+}

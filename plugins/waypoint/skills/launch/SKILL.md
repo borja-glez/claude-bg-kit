@@ -1,0 +1,20 @@
+---
+name: launch
+description: Use to start another Claude Code session on a waypoint track in its own git worktree, in the background. Triggers: "/waypoint:launch <track>", "lanza una sesión en el frente X", "lanza una sesión en la pista X", "launch a session for track X".
+allowed-tools: Bash(node *waypoint.cjs*) Bash(git *) Bash(claude --bg *) ArtifactData ListAgents Read
+---
+
+# waypoint: launch a session on a track
+
+`waypoint` below means the plugin CLI: run it as `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" <command> …`. The user may still be prompted to approve the `claude --bg` command.
+
+1. Plan: `docs/waypoint/<project>/plan.yaml` (ask which if several). The track must exist in it; if the user didn't name one, list the tracks and ask.
+2. Make sure the plan is committed (`git status --porcelain docs/waypoint`); a worktree only sees committed files. If not, commit it first with the repository's commit rules.
+3. Check the track is free: `waypoint session-id <track>` → `SIDT`; `waypoint clean-cache <plan> sessions`, then ArtifactData `list` collection `sessions` (`query: {limit: 1000}`, `out_dir: .waypoint/<project>/dbcache`). The track is busy when `sessions/SIDT` is `active` and either its heartbeat is less than 15 minutes old, or its `busyUntil` is in the future and at most 90 minutes after its heartbeat (same rule as recover), or `ListAgents` shows a session named `wp-<project>-<track>`. If busy, tell the user and do not launch.
+4. Ask the user whether that session may merge `track/<track>` into `main` when it closes a phase (default: no, it will report instead).
+5. `waypoint launch <plan> <track>` (add `--merge` if the user authorized merging in step 4) → `{"worktree","branch","name","prompt","command"}`. Forge-driven runs get the forge suffix ` — forge drives this session (forge:run Large loop)` automatically when the design's `start_prompt` carries it; pass `--forge` to force it or `--no-forge` to suppress it.
+6. Run `command` exactly as returned from inside `worktree` with the Bash tool: `cd "<worktree>" && <command>`. It starts a background session named `name` with the prompt `prompt`. Authorization to merge only counts inside this initial prompt.
+   - If it fails with "Workspace not trusted": a new worktree is a new folder and Claude Code only starts background sessions in trusted folders. Never try to work around it. Tell the user to run, in a separate terminal, `cd "<worktree>"` then `claude`, accept the trust prompt and `/exit`; then retry this step.
+7. Tell the user in their language: the session name, its worktree and branch, that it appears in `claude agents`, that the session will ask for tool permissions there ("Needs input") which they must approve, and that it will show up in the roadmap's Sessions view once it registers.
+
+A forge swarm coordinator launches with `waypoint launch <plan> <track> --swarm <coordinator SID> --base <swarm base branch>` (a new track branch starts from that base; `--swarm` requires it) from the main checkout, runs the returned command in a subshell, and skips steps 3, 4 and 7: `forge swarm tick` already checked the track is free, the coordinator holds the merge authorization (`--swarm` refuses `--merge`), and it reports itself.

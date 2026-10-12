@@ -1,0 +1,80 @@
+import { describe, it, expect } from 'vitest';
+import { triage, type RepoFacts } from '../src/forge/triage.js';
+
+const FILES = ['src/app.ts', 'src/auth/login.ts', 'src/util/format.ts', 'src/db/migrations/001.sql', 'package.json', '.github/workflows/ci.yml',
+  ...Array.from({ length: 20 }, (_, i) => `src/feature/f${i}.ts`)];
+const repo = (grep: Record<string, string[]> = {}, over: Partial<RepoFacts> = {}): RepoFacts =>
+  ({ files: FILES, commits: 40, gitOk: true, grep: w => grep[w] ?? [], ...over });
+
+describe('triage', () => {
+  it('one named file, short task → trivial', () => {
+    const r = triage('fix the typo in src/util/format.ts', repo(), ['test']);
+    expect(r).toMatchObject({ path: 'trivial', files: ['src/util/format.ts'], sensitive: [], greenfield: false, validators: ['test'] });
+  });
+  it('nothing located → small, with a reason', () => {
+    const r = triage('add a dark mode toggle', repo(), []);
+    expect(r.path).toBe('small');
+    expect(r.reasons.join(' ')).toMatch(/no files located/);
+  });
+  it('a symbol found in three files → small', () => {
+    const r = triage('rename formatPrice to formatMoney', repo({ formatPrice: ['src/a.ts', 'src/b.ts', 'src/c.ts'] }), []);
+    expect(r.path).toBe('small');
+    expect(r.files).toEqual(['src/a.ts', 'src/b.ts', 'src/c.ts']);
+  });
+  it('auth zone lifts a one-file change to medium', () => {
+    const r = triage('change the password check in src/auth/login.ts', repo(), []);
+    expect(r.sensitive).toContain('auth');
+    expect(r.path).toBe('medium');
+  });
+  it('detects data, deps and ci zones from paths', () => {
+    expect(triage('edit src/db/migrations/001.sql', repo(), []).sensitive).toContain('data');
+    expect(triage('bump a version in package.json', repo(), []).sensitive).toContain('deps');
+    expect(triage('tweak .github/workflows/ci.yml', repo(), []).sensitive).toContain('ci');
+  });
+  it('more than ten files → large', () => {
+    const many = FILES.filter(f => f.startsWith('src/feature/'));
+    expect(triage('update useFeatureFlag everywhere', repo({ useFeatureFlag: many }), []).path).toBe('large');
+  });
+  it('architecture words → large', () => {
+    expect(triage('redesign the plugin architecture', repo(), []).path).toBe('large');
+  });
+  it('Spanish architecture wording → large', () => {
+    expect(triage('añade un subsistema de pedidos con una API REST mínima', repo(), []).path).toBe('large');
+    expect(triage('Rediseña la arquitectura del plugin', repo(), []).path).toBe('large');
+    expect(triage('Crea un nuevo servicio de notificaciones desde cero', repo(), []).path).toBe('large');
+    expect(triage('Migración a Postgres', repo(), []).path).toBe('large');
+    expect(triage('Añade una migración de la tabla de usuarios', repo(), []).path).not.toBe('large');
+  });
+  it('an empty repo is greenfield and large', () => {
+    const r = triage('build a todo app', repo({}, { files: [], commits: 0 }), []);
+    expect(r).toMatchObject({ greenfield: true, path: 'large' });
+  });
+  it('never greps short or common words', () => {
+    const asked: string[] = [];
+    triage('make the app load data from the api', { files: FILES, commits: 5, gitOk: true, grep: w => { asked.push(w); return []; } }, []);
+    expect(asked).toEqual([]);
+  });
+  it('a git failure is not greenfield: it says so and the other rules pick the path', () => {
+    const r = triage('add a dark mode toggle', repo({}, { files: [], commits: 0, gitOk: false }), []);
+    expect(r).toMatchObject({ greenfield: false, path: 'small' });
+    expect(r.reasons).toContain('git unavailable');
+    expect(r.reasons.join(' ')).not.toMatch(/greenfield/);
+  });
+  it('Spanish wording marks sensitive zones', () => {
+    expect(triage('Cambia la validación de la contraseña y la autenticación de usuarios', repo(), []).sensitive).toEqual(['auth']);
+    expect(triage('Añade una migración nueva a la base de datos con otro esquema', repo(), []).sensitive).toEqual(['data']);
+    expect(triage('Actualiza dependencias y revisa el despliegue de la integración continua', repo(), []).sensitive).toEqual(['deps', 'ci']);
+    expect(triage('Expón la API pública con un endpoint nuevo', repo(), []).sensitive).toEqual(['public-api']);
+    expect(triage('Gestiona la sesión del usuario', repo(), []).sensitive).toEqual(['auth']);
+    // Unicode-aware boundaries: no match inside a longer word.
+    expect(triage('Revisa la presesión del texto', repo(), []).sensitive).toEqual([]);
+  });
+  it('a huge task text stays fast and greps at most 20 symbols', () => {
+    const asked: string[] = [];
+    const big = Array.from({ length: 40 }, (_, i) => `symbolNumber${i}`).join(' ') + ' ' + 'a'.repeat(100_000) + ' ' + 'x.'.repeat(20_000);
+    const t0 = Date.now();
+    triage(big, { files: FILES, commits: 40, gitOk: true, grep: w => { asked.push(w); return []; } }, []);
+    expect(Date.now() - t0).toBeLessThan(1000);
+    expect(asked).toHaveLength(20);
+  });
+});
