@@ -114,8 +114,9 @@ export function normalizeInfinite(x: unknown): InfiniteDoc | null {
   };
 }
 
-// Asset urls from the roadmap's own store: https, or the /_blob/<id> path every view serves. Anything else is dropped.
-const safeUrl = (u: unknown): string | undefined => (typeof u === 'string' && (/^https:\/\//.test(u) || /^\/_blob\/[\w-]+$/.test(u)) ? u : undefined);
+// Asset urls from the roadmap's own store: the artifact asset host (https://claude.ai/), or the /_blob/<id> path every
+// view serves. Anything else is dropped.
+const safeUrl = (u: unknown): string | undefined => (typeof u === 'string' && (u.startsWith('https://claude.ai/') || /^\/_blob\/[\w-]+$/.test(u)) ? u : undefined);
 
 function normalizeEvidence(x: unknown): TaskState['evidence'] | undefined {
   if (!isObj(x) || (x.result !== 'pass' && x.result !== 'fail' && x.result !== 'blocked')) return undefined;

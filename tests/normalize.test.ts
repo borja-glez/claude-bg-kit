@@ -116,6 +116,10 @@ describe('normalizeState forge', () => {
     ] });
     expect(normalizeState({ evidence: { result: 'maybe' } }).evidence).toBeUndefined();
     expect(normalizeState({ evidence: { result: 'pass', passed: 1, total: 1, shots: [{ url: '/_blob/id1', surface: 'w', check: 'c', ok: true }] } }).evidence!.shots[0].url).toBe('/_blob/id1');
+    const urlOf = (url: string) => normalizeState({ evidence: { result: 'pass', passed: 1, total: 1, shots: [{ url, surface: 'w', check: 'c', ok: true }] } }).evidence!.shots[0].url;
+    expect(urlOf('https://evil.example/x.png')).toBeUndefined();
+    expect(urlOf('https://claude.ai.evil.example/x.png')).toBeUndefined();
+    expect(urlOf('javascript:alert(1)')).toBeUndefined();
   });
 });
 
