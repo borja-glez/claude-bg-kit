@@ -96,12 +96,17 @@ function detected(repo: RepoReader, which: (name: string) => boolean, platform: 
 }
 
 // Manual validators (the config) and, unless detect is false, detected ones minus `exclude`. A manual validator
-// replaces a detected one of the same name in place; the other manual ones follow.
+// replaces a detected one of the same name in place; the other manual ones follow. A detected validator that runs
+// the same command as a manual one (whitespace collapsed) is dropped: the manual one already runs it.
+const sameCmd = (cmd: string) => cmd.replace(/\s+/g, ' ').trim();
 export function detectValidators(repo: RepoReader, config: ForgeConfig, which: (name: string) => boolean = onPath, platform: NodeJS.Platform = process.platform): Validator[] {
   const manual = (config.validators ?? []).map(v => ({ ...v, kind: v.kind ?? 'other', source: 'manual' as const }));
   if (!config.detect) return manual;
   const byName = new Map(manual.map(v => [v.name, v]));
-  const merged = detected(repo, which, platform).filter(v => !config.exclude.includes(v.name)).map(v => byName.get(v.name) ?? v);
+  const manualCmds = new Set(manual.map(v => sameCmd(v.cmd)));
+  const merged = detected(repo, which, platform)
+    .filter(v => !config.exclude.includes(v.name) && (byName.has(v.name) || !manualCmds.has(sameCmd(v.cmd))))
+    .map(v => byName.get(v.name) ?? v);
   const used = new Set(merged.map(v => v.name));
   return [...merged, ...manual.filter(v => !used.has(v.name))];
 }

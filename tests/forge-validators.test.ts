@@ -85,6 +85,10 @@ describe('detectValidators', () => {
       ['lint', 'npm run lint', 'detected'], ['test', 'npm run test:ci', 'manual'], ['unit', 'npm run unit', 'manual'],
     ]);
   });
+  it('a detected validator with the same command as a manual one is dropped', () => {
+    const c = parseConfig('validators:\n  - name: unit\n    cmd: "  npm   test "\n');
+    expect(detectValidators(repo({ 'package.json': pkg({ lint: 'eslint .', test: 'vitest' }) }), c).map(v => v.name)).toEqual(['lint', 'unit']);
+  });
   it('exclude drops detected validators by name', () => {
     const c = parseConfig('exclude: [build, nope]\n');
     expect(detectValidators(repo({ 'package.json': pkg({ test: 'x', build: 'y' }) }), c).map(v => v.name)).toEqual(['test']);
