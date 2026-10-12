@@ -12,21 +12,36 @@ export interface ExecView {
   agents: { id: string; type: string; since: string }[];
 }
 
+/** A timestamp more than this far ahead of now is clock skew or corruption: it is invalid, not a sign of life. */
+const FUTURE_TOLERANCE_MS = 2 * 60000;
+
+/** The time in ms of a usable timestamp, or null: unparseable, or more than FUTURE_TOLERANCE_MS ahead of now. */
+function usable(ts: string | null | undefined, now: number): number | null {
+  const t = ts ? Date.parse(ts) : NaN;
+  return Number.isFinite(t) && t - now <= FUTURE_TOLERANCE_MS ? t : null;
+}
+
 /** The liveness of a local signal: by its age (no lease to read), stopped at once when its session ended. */
 export function signalLiveness(ts: string | null, ended: boolean, now: number): Liveness {
-  const t = ts ? Date.parse(ts) : NaN;
-  if (ended || !Number.isFinite(t)) return 'stopped';
-  const age = now - t;
+  const t = usable(ts, now);
+  if (ended || t === null) return 'stopped';
+  const age = Math.max(0, now - t);
   return age < LIVE_SILENT_MINUTES * 60000 ? 'alive' : age < LIVE_STOPPED_MINUTES * 60000 ? 'silent' : 'stopped';
 }
 
 export function executionView(i: { exec: ExecutionState | null; tasks: Record<string, PublicTask>; live: LiveDoc[]; titles?: Record<string, string>; now: number }): ExecView | null {
   const e = i.exec;
   if (!e || (!e.active && e.stopReason !== 'stalled')) return null;
-  const fresh = (d: LiveDoc) => i.now - Date.parse(d.ts) < LIVE_MAX_AGE_HOURS * 3600000;
-  const signal = i.live.find(d => fresh(d) && d.role === 'coordinator' && d.runId === e.runId && (!e.hookSession || d.sessionId === e.hookSession)) ?? null;
-  const times = [signal?.ts, e.lastStepAt].filter((x): x is string => !!x && Number.isFinite(Date.parse(x)));
-  const lastSeen = times.length ? times.reduce((a, b) => (Date.parse(a) >= Date.parse(b) ? a : b)) : null;
+  const fresh = (d: LiveDoc) => {
+    const t = usable(d.ts, i.now);
+    return t !== null && i.now - t < LIVE_MAX_AGE_HOURS * 3600000;
+  };
+  // Of the matching coordinator signals, the one with the most recent valid ts.
+  const signal = i.live
+    .filter(d => fresh(d) && d.role === 'coordinator' && d.runId === e.runId && (!e.hookSession || d.sessionId === e.hookSession))
+    .reduce<LiveDoc | null>((best, d) => (!best || Date.parse(d.ts) > Date.parse(best.ts) ? d : best), null);
+  const candidates = [signal?.ts ?? null, e.lastStepAt].map(ts => ({ ts, t: usable(ts, i.now) })).filter((c): c is { ts: string; t: number } => c.t !== null);
+  const lastSeen = candidates.length ? candidates.reduce((a, b) => (b.t > a.t ? b : a)).ts : null;
   const coord: Liveness = !e.active ? 'stopped' : signal?.ended ? 'stopped' : signalLiveness(lastSeen, false, i.now);
   const ids = (status: string) => Object.keys(e.tasks).filter(id => e.tasks[id].status === status);
   const slots: ExecSlot[] = ids('running')

@@ -52,4 +52,27 @@ describe('executionView', () => {
     expect(signalLiveness(at(-12), false, NOW)).toBe('stopped');
     expect(signalLiveness(null, false, NOW)).toBe('stopped');
   });
+  it('a signal more than 2 minutes in the future is invalid and never keeps the coordinator alive', () => {
+    expect(executionView({ exec: exec({ lastStepAt: null }), tasks: {}, live: [live(10)], now: NOW })!.coordinator.liveness).toBe('stopped');
+    expect(executionView({ exec: exec({ lastStepAt: at(30) }), tasks: {}, live: [live(-13)], now: NOW })!.coordinator.liveness).toBe('stopped');
+    expect(executionView({ exec: exec({ lastStepAt: null }), tasks: {}, live: [live(1)], now: NOW })!.coordinator.liveness).toBe('alive');
+    expect(executionView({ exec: exec({ lastStepAt: null }), tasks: {}, live: [{ ...live(-1), ts: 'not a date' }], now: NOW })!.coordinator.lastSeen).toBeNull();
+    expect(signalLiveness(at(3), false, NOW)).toBe('stopped');
+  });
+  it('the most recent valid signal of the run and hook session wins; another session is ignored', () => {
+    const v = executionView({ exec: exec({ lastStepAt: null }), tasks: {}, live: [live(-13), live(-2), { ...live(-1), sessionId: 's2' }], now: NOW })!;
+    expect(v.coordinator).toEqual({ liveness: 'alive', lastSeen: at(-2) });
+    const other = executionView({ exec: exec({ lastStepAt: at(-13) }), tasks: {}, live: [{ ...live(-1), sessionId: 's2' }], now: NOW })!;
+    expect(other.coordinator.liveness).toBe('stopped');
+  });
+  it('a stalled execution lists its running tasks without a public task as stopped orphans', () => {
+    const v = executionView({ exec: exec({ active: false, stopReason: 'stalled', stallReason: 'x' }), tasks: {}, live: [live(-1)], now: NOW })!;
+    expect(v.slots.map(s => s.liveness)).toEqual(['stopped', 'stopped']);
+    expect(v.orphans).toEqual(['T1', 'T2']);
+  });
+  it('a public task of another run falls back to the coordinator liveness and the execution task', () => {
+    const other = { ...pub('T1', 5), runId: 'r2', stage: 'verify' as const, agent: 'someone-else' };
+    const v = executionView({ exec: exec(), tasks: { T1: other }, live: [live(-1)], now: NOW })!;
+    expect(v.slots[0]).toMatchObject({ stage: 'implement', agent: 'forge-impl', round: 1, since: at(-3), liveness: 'alive' });
+  });
 });
