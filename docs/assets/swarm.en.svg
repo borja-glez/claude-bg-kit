@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="452" viewBox="0 0 900 452" role="img" aria-labelledby="t d">
-<title id="t">forge swarm · several fronts at once</title>
-<desc id="d">Diagram of a forge swarm: a coordinator session launches one background session per unblocked track, each in its own git worktree; as fronts finish they are merged into main one at a time.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="464" viewBox="0 0 900 464" role="img" aria-labelledby="t d">
+<title id="t">forge execution · several tasks at once</title>
+<desc id="d">Diagram of a forge execution in subagents mode: a coordinator session on the run branch forge/run-project, in .claude/worktrees/run, launches an implementer subagent per ready task, each in its own worktree .claude/worktrees/task-T; each task goes through review and is integrated into the run branch one at a time, and the run branch is merged into your branch at the end with your permission.</desc>
 <style>
 text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#cdd6f4}
 .m{font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace}
@@ -26,41 +26,42 @@ text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,san
 .ok2{animation:ok2 14s infinite both}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
 </style>
-<rect x="0" y="0" width="900" height="452" rx="18" fill="#1e1e2e"/>
-<text x="32" y="44" font-size="20" font-weight="700">forge swarm · several fronts at once</text>
-<text x="32" y="66" font-size="12.5" class="dim">the coordinator only coordinates: it launches sessions on unblocked tracks and integrates their work</text>
+<rect x="0" y="0" width="900" height="464" rx="18" fill="#1e1e2e"/>
+<text x="32" y="44" font-size="20" font-weight="700">forge execution · several tasks at once</text>
+<text x="32" y="66" font-size="12.5" class="dim">the coordinator only coordinates: it launches a subagent per ready task and integrates their work into the run branch</text>
 <rect x="32" y="92" width="836" height="50" rx="10" fill="#181825" stroke="#94e2d5" stroke-width="1"/>
 <text x="48" y="115" font-size="13" style="fill:#94e2d5" font-weight="700">coordinator</text>
-<text x="48" y="132" font-size="11" class="dim">forge swarm tick: launch unblocked fronts, integrate finished work, sleep, repeat</text>
-<text x="852" y="122" font-size="13" class="m" style="fill:#94e2d5" text-anchor="end">◆ swarm 3/5</text>
+<text x="48" y="132" font-size="11" class="dim">forge swarm tick: launch ready tasks, review, integrate, sleep, repeat</text>
+<text x="852" y="122" font-size="13" class="m" style="fill:#94e2d5" text-anchor="end">▶ execution · subagents 2/3</text>
 <path d="M120 142V184H150" stroke="#585b70" stroke-width="1" fill="none" class="flow"/>
 <rect x="150" y="164" width="470" height="40" rx="10" fill="#181825" stroke="#313244" stroke-width="1"/>
-<text x="166" y="182" font-size="12.5" style="fill:#89b4fa" font-weight="700">track api</text>
-<text x="166" y="197" font-size="10" class="m faint">.claude/worktrees/api · track/api</text>
+<text x="166" y="182" font-size="12.5" style="fill:#89b4fa" font-weight="700">T004 · subagent</text>
+<text x="166" y="197" font-size="10" class="m faint">.claude/worktrees/task-T004 · task/T004</text>
 <rect x="370" y="180" width="150" height="8" rx="4" fill="#45475a"/><rect x="370" y="180" width="150" height="8" rx="4" fill="#89b4fa" class="g0"/>
 <g class="ok0"><text x="536" y="189" font-size="11.5" class="m" style="fill:#a6e3a1">✓ integrated</text>
 <path d="M620 184C700 184 772 350 772 370" stroke="#89b4fa" stroke-width="1.8" fill="none"/>
 <circle cx="772" cy="380" r="7" fill="#89b4fa"/></g>
 <path d="M90 142V236H150" stroke="#585b70" stroke-width="1" fill="none" class="flow"/>
 <rect x="150" y="216" width="470" height="40" rx="10" fill="#181825" stroke="#313244" stroke-width="1"/>
-<text x="166" y="234" font-size="12.5" style="fill:#cba6f7" font-weight="700">track ui</text>
-<text x="166" y="249" font-size="10" class="m faint">.claude/worktrees/ui · track/ui</text>
+<text x="166" y="234" font-size="12.5" style="fill:#cba6f7" font-weight="700">T005 · subagent</text>
+<text x="166" y="249" font-size="10" class="m faint">.claude/worktrees/task-T005 · task/T005</text>
 <rect x="370" y="232" width="150" height="8" rx="4" fill="#45475a"/><rect x="370" y="232" width="150" height="8" rx="4" fill="#cba6f7" class="g1"/>
 <g class="ok1"><text x="536" y="241" font-size="11.5" class="m" style="fill:#a6e3a1">✓ integrated</text>
 <path d="M620 236C700 236 722 350 722 370" stroke="#cba6f7" stroke-width="1.8" fill="none"/>
 <circle cx="722" cy="380" r="7" fill="#cba6f7"/></g>
 <path d="M60 142V288H150" stroke="#585b70" stroke-width="1" fill="none" class="flow"/>
 <rect x="150" y="268" width="470" height="40" rx="10" fill="#181825" stroke="#313244" stroke-width="1"/>
-<text x="166" y="286" font-size="12.5" style="fill:#94e2d5" font-weight="700">track data</text>
-<text x="166" y="301" font-size="10" class="m faint">.claude/worktrees/data · track/data</text>
+<text x="166" y="286" font-size="12.5" style="fill:#94e2d5" font-weight="700">T008 · subagent</text>
+<text x="166" y="301" font-size="10" class="m faint">.claude/worktrees/task-T008 · task/T008</text>
 <rect x="370" y="284" width="150" height="8" rx="4" fill="#45475a"/><rect x="370" y="284" width="150" height="8" rx="4" fill="#94e2d5" class="g2"/>
 <g class="ok2"><text x="536" y="293" font-size="11.5" class="m" style="fill:#a6e3a1">✓ integrated</text>
 <path d="M620 288C700 288 672 350 672 370" stroke="#94e2d5" stroke-width="1.8" fill="none"/>
 <circle cx="672" cy="380" r="7" fill="#94e2d5"/></g>
 <rect x="150" y="320" width="470" height="30" rx="10" fill="none" stroke="#45475a" stroke-width="1" stroke-dasharray="4 4"/>
-<text x="166" y="340" font-size="11.5" class="dim">front docs · waits for api T3 · launched when it unblocks</text>
+<text x="166" y="340" font-size="11.5" class="dim">T009 · waits for T004 · launched once it is integrated</text>
 <path d="M32 380H868" stroke="#a6e3a1" stroke-width="2.5"/>
-<text x="40" y="372" font-size="12" class="m" style="fill:#a6e3a1" font-weight="700">main</text>
-<text x="32" y="414" font-size="11.5" class="dim">Up to swarm.parallel fronts at once (default 3) · one merge at a time, validators after each one, rollback on conflict.</text>
-<text x="32" y="432" font-size="11.5" class="dim">Works on the Large path and in infinite mode · shown in the roadmap, the band and lens.</text>
+<text x="40" y="372" font-size="12" class="m" style="fill:#a6e3a1" font-weight="700">forge/run-&lt;project&gt; · .claude/worktrees/run</text>
+<text x="32" y="404" font-size="11.5" class="dim">At the end the run branch is merged into your branch, with your permission (or the one you gave at the start).</text>
+<text x="32" y="422" font-size="11.5" class="dim">Up to swarm.parallel tasks at once (default 3) · one merge at a time, validators after each one compared with what already failed.</text>
+<text x="32" y="440" font-size="11.5" class="dim">Subagents mode; sessions mode arrives in the next version · shown in the roadmap, the band and lens.</text>
 </svg>

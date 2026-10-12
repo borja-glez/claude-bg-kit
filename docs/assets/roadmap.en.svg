@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="900" height="520" viewBox="0 0 900 520" role="img" aria-labelledby="t d">
 <title id="t">waypoint roadmap</title>
-<desc id="d">Mock of the waypoint roadmap artifact: header with progress, infinite and swarm pills, views, four fronts with their task boxes, a timeline and the live sessions.</desc>
+<desc id="d">Mock of the waypoint roadmap artifact: header with progress, infinite and execution pills, views, four fronts with their task boxes, a timeline and the live sessions.</desc>
 <style>
 text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#cdd6f4}
 .m{font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace}
@@ -38,8 +38,8 @@ text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,san
 <text x="186" y="72" font-size="11" class="m" style="fill:#a6adc8" text-anchor="middle">v3</text>
 <rect x="210" y="58" width="102" height="20" rx="10" fill="none" stroke="#f9e2af" stroke-width="1"/>
 <text x="261" y="72" font-size="11" class="m" style="fill:#f9e2af" text-anchor="middle">∞ cycle 4/10</text>
-<rect x="320" y="58" width="95" height="20" rx="10" fill="none" stroke="#94e2d5" stroke-width="1"/>
-<text x="367.5" y="72" font-size="11" class="m" style="fill:#94e2d5" text-anchor="middle">◆ swarm 3/5</text>
+<rect x="320" y="58" width="207" height="20" rx="10" fill="none" stroke="#94e2d5" stroke-width="1"/>
+<text x="423.5" y="72" font-size="11" class="m" style="fill:#94e2d5" text-anchor="middle">▶ execution · subagents 2/3</text>
 <text x="872" y="74" font-size="22" style="fill:#89b4fa" font-weight="700" text-anchor="end">62 %</text>
 <rect x="712" y="84" width="160" height="6" rx="3" fill="#45475a"/><rect x="712" y="84" width="160" height="6" rx="3" fill="#89b4fa" class="g0"/>
 <text x="28" y="126" font-size="13" style="fill:#cdd6f4" font-weight="700">Tracking</text>

@@ -56,7 +56,7 @@ lens detects waypoint, forge and superpowers from their files in the project, so
 ## How it all fits together
 
 <p align="center">
-  <img src="docs/assets/flow.en.svg" alt="The full flow: design with critic rounds, plan and live roadmap, the forge build loop, a parallel swarm integrated into main, and infinite mode, with lens and the roadmap observing every stage" width="100%">
+  <img src="docs/assets/flow.en.svg" alt="The full flow: design with critic rounds, plan and live roadmap, the forge build loop, a parallel execution integrated into a run branch and merged at the end, and infinite mode, with lens and the roadmap observing every stage" width="100%">
 </p>
 
 A large task goes through four stages. You make three decisions along the way: you approve the design, you decide on proposals, and you authorize merges.
@@ -164,7 +164,7 @@ A claude.ai artifact that updates while Claude works. It has five views: Trackin
 
 ### The band (waypoint)
 
-<p align="center"><img src="docs/assets/band.en.svg" alt="Mock of the band above the prompt in design, work and swarm modes" width="100%"></p>
+<p align="center"><img src="docs/assets/band.en.svg" alt="Mock of the band above the prompt in design, work and run modes" width="100%"></p>
 
 The band is a line above the prompt that changes with what you are doing. In design mode it shows proposals and critical points; in work mode, your track, the task in progress and the overall percentage; in run mode, the running tasks, their stage and how many are integrated. Each button runs the matching command.
 
@@ -176,7 +176,7 @@ Small things stay cheap and big things get the full treatment. Implementers rang
 
 ### Parallel execution (forge)
 
-<p align="center"><img src="docs/assets/swarm.en.svg" alt="A coordinator launches sessions on unblocked tracks, each in its own worktree, and merges them into main one at a time" width="100%"></p>
+<p align="center"><img src="docs/assets/swarm.en.svg" alt="A coordinator session on the run branch forge/run-<project> launches an implementer subagent per ready task, each in its own task worktree; tasks are integrated into the run branch one at a time and merged into your branch at the end" width="100%"></p>
 
 ### The panel (lens)
 

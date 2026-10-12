@@ -103,11 +103,11 @@ Implementers write their report to `report-<n>.txt` and also include it in their
 3. `/waypoint:work` claims each task, and its "do the work" step becomes the forge loop: `brief --plan`, `triage --plan`, an implementer, the validators and the three reviewers, for up to 4 rounds.
 4. When the tasks are done, `review-correctness` reviews the whole branch against the design and the plan, with at most one fix and one re-review. The re-review gets fresh validators and a fresh diff, and a `redo` verdict is treated as a fix.
 
-The run's base is kept in `.forge/work/<project>/run.json`, written once after the design is approved. While a task runs, the coordinator renews a lease (`leaseUntil`, 10 minutes) on the task's state and on its own waypoint session, so parallel sessions do not recover a task that is still being worked. Besides the lease, each session of an execution leaves a local signal in `.forge/live/` (see [Live signal](#live-signal)).
+The run's base is kept in `.forge/work/<project>/run.json`, written once after the design is approved. While a task runs, the coordinator renews a lease (`leaseUntil`, 10 minutes) on the task's state and on its own waypoint session, so parallel sessions do not recover a task that is still being worked. Besides the lease, the coordinator leaves a local signal in `.forge/live/` (see [Live signal](#live-signal)).
 
 ## Execution modes
 
-<p align="center"><img src="../../docs/assets/swarm.en.svg" alt="A coordinator launches sessions on unblocked tracks, each in its own worktree, and merges them into main one at a time" width="100%"></p>
+<p align="center"><img src="../../docs/assets/swarm.en.svg" alt="A coordinator session on the run branch forge/run-<project> launches an implementer subagent per ready task, each in its own task worktree; tasks are integrated into the run branch one at a time and merged into your branch at the end" width="100%"></p>
 
 On the Large path and in infinite mode, forge runs the plan's tasks through **one planner** that works per task: `forge swarm tick` decides which tasks are ready (their dependencies are integrated and their zones do not overlap) and which finished work to integrate, up to `swarm.parallel` at once. There are two modes:
 

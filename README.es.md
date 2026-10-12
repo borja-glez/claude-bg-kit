@@ -56,7 +56,7 @@ lens detecta waypoint, forge y superpowers por sus ficheros en el proyecto, así
 ## Cómo encaja todo
 
 <p align="center">
-  <img src="docs/assets/flow.es.svg" alt="El flujo completo: diseño con rondas de crítica, plan y roadmap vivo, el bucle de construcción de forge, un enjambre en paralelo que se integra en main y el modo infinito, con lens y el roadmap observando cada etapa" width="100%">
+  <img src="docs/assets/flow.es.svg" alt="El flujo completo: diseño con rondas de crítica, plan y roadmap vivo, el bucle de construcción de forge, una ejecución en paralelo que se integra en una rama de ejecución y se fusiona al final y el modo infinito, con lens y el roadmap observando cada etapa" width="100%">
 </p>
 
 Una tarea grande pasa por cuatro etapas. Por el camino tomas tres decisiones: apruebas el diseño, decides las propuestas y autorizas los merges.
@@ -164,7 +164,7 @@ Un artifact de claude.ai que se actualiza mientras Claude trabaja. Tiene cinco v
 
 ### La banda (waypoint)
 
-<p align="center"><img src="docs/assets/band.es.svg" alt="Maqueta de la banda sobre el prompt en los modos diseño, trabajo y enjambre" width="100%"></p>
+<p align="center"><img src="docs/assets/band.es.svg" alt="Maqueta de la banda sobre el prompt en los modos diseño, trabajo y ejecución" width="100%"></p>
 
 La banda es una línea sobre el prompt que cambia según lo que estés haciendo. En modo diseño enseña propuestas y puntos críticos; en modo trabajo, tu frente, la tarea en curso y el porcentaje global; en modo ejecución, las tareas en marcha, su etapa y cuántas están integradas. Cada botón ejecuta el comando correspondiente.
 
@@ -176,7 +176,7 @@ Lo pequeño sigue siendo barato y lo grande recibe el tratamiento completo. Los 
 
 ### Ejecución en paralelo (forge)
 
-<p align="center"><img src="docs/assets/swarm.es.svg" alt="Una coordinadora lanza sesiones en los frentes desbloqueados, cada una en su worktree, y las integra en main de una en una" width="100%"></p>
+<p align="center"><img src="docs/assets/swarm.es.svg" alt="Una coordinadora en la rama de ejecución forge/run-<proyecto> lanza un subagente implementador por tarea lista, cada uno en su worktree de tarea; las tareas se integran en la rama de ejecución de una en una y se fusionan en tu rama al final" width="100%"></p>
 
 ### El panel (lens)
 

@@ -101,13 +101,13 @@ El roadmap es un artifact de claude.ai. Es privado hasta que lo compartes, y las
 
 ## La banda
 
-<p align="center"><img src="../../docs/assets/band.es.svg" alt="La banda sobre el prompt en los modos diseño, trabajo y enjambre" width="100%"></p>
+<p align="center"><img src="../../docs/assets/band.es.svg" alt="La banda sobre el prompt en los modos diseño, trabajo y ejecución" width="100%"></p>
 
 | Modo | Enseña | Botones |
 | --- | --- | --- |
 | **Diseño** | Versión del diseño, propuestas y puntos críticos de la última crítica | Aplicar todas, Elegir…, Otra ronda, Reescribir, Preguntarme, Aprobar, Ver diseño |
 | **Trabajo** | Tu frente y su progreso, la tarea en curso con sus minutos, el progreso global, mensajes sin leer, una decisión pendiente | Siguiente tarea, Estado, Lanzar sesión en un frente…, Abrir roadmap |
-| **Ejecución** | La ejecución (`▶ EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · … · 3/12 · integradas 3`): modo, tareas en marcha sobre el máximo, cada tarea con su etapa y ronda, tareas hechas sobre el total e integradas; termina con `⚠ sin señal` o `⚠ parada` cuando la coordinadora deja de dar señales de vida | Estado, Parar, Abrir roadmap |
+| **Ejecución** | La ejecución (`▶ EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · … · 3/12 · integradas 3`): modo, tareas en marcha sobre el máximo, cada tarea con su etapa y ronda, tareas hechas sobre el total e integradas; una ejecución atascada enseña solo `▶ EJECUCIÓN parada`, y se añade `⚠ sin señal` o `⚠ parada` cuando la coordinadora o una tarea en marcha se queda en silencio o se para | Estado, Parar, Abrir roadmap |
 
 Con [lens](../lens/README.es.md) instalado, un botón **Panel** abre el panel de progreso. Si un comando no puede ejecutarse desde la banda, queda en el prompt con el aviso «pulsa Enter».
 

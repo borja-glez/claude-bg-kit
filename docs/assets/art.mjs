@@ -150,12 +150,12 @@ ${rect(tx, y + 11, cw, 19, { rx: 9.5, fill: 'none', stroke: color })}${text(tx +
     `<g class="litT" style="animation-delay:${loopD}s">${text(438, 464, t.fixLoop, { size: 11, anchor: 'middle', fill: C.peach })}</g>`);
   i++;
   // 4 · Parallel
-  parts.push(band(488, 122, '4', t.parallel, 'forge swarm', C.teal));
+  parts.push(band(488, 122, '4', t.parallel, 'forge swarm tick', C.teal));
   node(48, 524, 130, 64, t.coordinator, 'forge swarm tick', C.teal);
-  const fronts = [['api', 5.5], ['ui', 8], ['data', 6.5]];
+  const fronts = [['T004', 5.5], ['T005', 8], ['T008', 6.5]];
   fronts.forEach(([name, dur], k) => {
     const y = 526 + k * 22;
-    parts.push(text(206, y + 11, `${t.front} ${name}`, { size: 11, cls: 'm dim' }));
+    parts.push(text(206, y + 11, name, { size: 11, cls: 'm dim' }));
     parts.push(`<path d="M180 556L${200} ${y + 7}" stroke="${C.s2}" stroke-width="1" fill="none"/>`);
     const b = growBar(290, y + 3, 166, 8, C.teal, 0.05, 1, dur, { delay: k * 0.7, hold: 0.85 });
     css.push(b.css); parts.push(b.body);
@@ -323,7 +323,7 @@ function band(t) {
   const modes = [
     [t.bandDesign, t.bandDesignBtns],
     [t.bandWork, t.bandWorkBtns],
-    [t.bandSwarm, t.bandSwarmBtns],
+    [t.bandRun, t.bandRunBtns],
   ];
   modes.forEach(([line, btns], k) => {
     p.push(state(k, cycle, modes.length, [
@@ -464,21 +464,21 @@ ${rect(286, y, 582, 48, { rx: 10, fill: colors[k], extra: ' fill-opacity=".14"' 
 // ───────────────────────── forge swarm ─────────────────────────
 
 function swarm(t) {
-  const W = 900, H = 452, cycle = 14;
+  const W = 900, H = 464, cycle = 14;
   const css = [], p = [rect(0, 0, W, H, { rx: 18, fill: C.base })];
   p.push(text(32, 44, t.swarmTitle, { size: 20, weight: 700 }), text(32, 66, t.swarmSub, { size: 12.5, cls: 'dim' }));
   // coordinator
   p.push(rect(32, 92, 836, 50, { rx: 10, fill: C.mantle, stroke: C.teal }));
   p.push(text(48, 115, t.coordinator, { size: 13, weight: 700, fill: C.teal }), text(48, 132, t.coordSub, { size: 11, cls: 'dim' }));
-  p.push(text(852, 122, '◆ swarm 3/5', { size: 13, cls: 'm', anchor: 'end', fill: C.teal }));
-  const fronts = [['api', C.blue, 0], ['ui', C.mauve, 1.2], ['data', C.teal, 0.5]];
+  p.push(text(852, 122, t.runPill, { size: 13, cls: 'm', anchor: 'end', fill: C.teal }));
+  const fronts = [['T004', C.blue, 0], ['T005', C.mauve, 1.2], ['T008', C.teal, 0.5]];
   const dur = [0.42, 0.62, 0.52];
   fronts.forEach(([name, c, d], k) => {
     const y = 164 + k * 52;
     // Nested elbows left of the fronts: the deeper the front, the further left its trunk, so no line crosses a box.
     p.push(`<path d="M${120 - k * 30} 142V${y + 20}H150" stroke="${C.s2}" stroke-width="1" fill="none" class="flow"/>`);
     p.push(rect(150, y, 470, 40, { rx: 10, fill: C.mantle, stroke: C.s0 }));
-    p.push(text(166, y + 18, `${t.front} ${name}`, { size: 12.5, weight: 700, fill: c }), text(166, y + 33, `.claude/worktrees/${name} · track/${name}`, { size: 10, cls: 'm faint' }));
+    p.push(text(166, y + 18, `${name} · ${t.subagent}`, { size: 12.5, weight: 700, fill: c }), text(166, y + 33, `.claude/worktrees/task-${name} · task/${name}`, { size: 10, cls: 'm faint' }));
     const b = growBar(370, y + 16, 150, 8, c, 0.05, 1, cycle, { delay: d, hold: dur[k] }); css.push(b.css); p.push(b.body);
     const at = r1(((dur[k] * cycle + d) / cycle) * 100);
     css.push(`@keyframes ok${k}{0%{opacity:0}${at}%{opacity:0}${r1(at + 2)}%{opacity:1}96%{opacity:1}100%{opacity:0}}
@@ -492,8 +492,8 @@ function swarm(t) {
   p.push(rect(150, 320, 470, 30, { rx: 10, fill: 'none', stroke: C.s1, extra: ' stroke-dasharray="4 4"' }),
     text(166, 340, t.waiting, { size: 11.5, cls: 'dim' }));
   // main line
-  p.push(`<path d="M32 380H868" stroke="${C.green}" stroke-width="2.5"/>`, text(40, 372, 'main', { size: 12, cls: 'm', weight: 700, fill: C.green }));
-  p.push(text(32, 414, t.swarmFoot1, { size: 11.5, cls: 'dim' }), text(32, 432, t.swarmFoot2, { size: 11.5, cls: 'dim' }));
+  p.push(`<path d="M32 380H868" stroke="${C.green}" stroke-width="2.5"/>`, text(40, 372, 'forge/run-<project> · .claude/worktrees/run', { size: 12, cls: 'm', weight: 700, fill: C.green }));
+  p.push(text(32, 404, t.swarmFoot0, { size: 11.5, cls: 'dim' }), text(32, 422, t.swarmFoot1, { size: 11.5, cls: 'dim' }), text(32, 440, t.swarmFoot2, { size: 11.5, cls: 'dim' }));
   return svg(W, H, t.swarmTitle, t.swarmDesc, css.join('\n'), p.join('\n'));
 }
 
@@ -502,32 +502,32 @@ function swarm(t) {
 const EN = {
   flowTitle: 'claude-bg-kit · from idea to merged code',
   flowSub: 'waypoint designs and tracks, forge builds and reviews, lens shows it all live',
-  flowDesc: 'Diagram of the full flow: design with critic rounds, plan and live roadmap, the forge loop of triage, implement, validate, review and verdict, a parallel swarm of fronts that is integrated into main, and infinite mode with scout proposals. lens and the roadmap observe every stage.',
+  flowDesc: 'Diagram of the full flow: design with critic rounds, plan and live roadmap, the forge loop of triage, implement, validate, review and verdict, a parallel execution of tasks by subagents that is integrated into a run branch and merged into your branch at the end, and infinite mode with scout proposals. lens and the roadmap observe every stage.',
   design: 'Design', idea: 'Idea', ideaSub: 'your request', designSub: 'apply · round · rewrite', criticSub: 'numbered proposals', approve: 'Approve', approveSub: 'you sign off',
   plan: 'Plan', plannerSub: 'design → tasks', planSub: 'tracks · phases', publishSub: 'publish', roadmap: 'Live roadmap', roadmapSub: 'claude.ai artifact',
   build: 'Build', triageSub: 'by size', implement: 'implement', implementSub: 'mech → heavy', validate: 'validate', validateSub: 'your tools first',
   review: 'review ×3', reviewSub: 'independent', verdict: 'verdict', verdictSub: 'weighted score',
   fixLoop: 'fix round · up to 4 · a stronger model from round 3',
-  parallel: 'Parallel', coordinator: 'coordinator', front: 'front', ownWorktree: 'one session and one git worktree per front', integrate: 'integrate', integrateSub: 'one merge at a time', mainSub: 'validated',
+  parallel: 'Parallel', coordinator: 'coordinator', front: 'front', ownWorktree: 'one subagent and one git worktree per task', integrate: 'integrate', integrateSub: 'one merge at a time', mainSub: 'final merge',
   infinite: 'Infinite mode', infiniteSub: 'cycles until the budget runs out', proposals: 'proposals', youDecide: 'you decide', newTasks: 'new tasks', toBuild: 'to Build',
   livePanel: 'live panel', effortHigh: 'effort high', stages: ['tri', 'impl', 'val', 'rev', 'ver'], subagents: 'Subagents', usage: 'Usage',
   withoutForge: 'without forge (estimate): ~$4.70', lensObserves: 'reads the same files, adds no tokens',
   views1: 'Tracking · Versions · Sessions', views2: 'Notes · Proposals', you: 'You', youLines: ['approve the design', 'decide proposals', 'authorize merges'],
 
-  rmTitle: 'waypoint roadmap', rmDesc: 'Mock of the waypoint roadmap artifact: header with progress, infinite and swarm pills, views, four fronts with their task boxes, a timeline and the live sessions.',
-  rmSub: 'Live roadmap · plan v3', rmCycle: '∞ cycle 4/10', rmSwarm: '◆ swarm 3/5', nav: ['Tracking', 'Versions', 'Sessions', 'Notes', 'Proposals'],
+  rmTitle: 'waypoint roadmap', rmDesc: 'Mock of the waypoint roadmap artifact: header with progress, infinite and execution pills, views, four fronts with their task boxes, a timeline and the live sessions.',
+  rmSub: 'Live roadmap · plan v3', rmCycle: '∞ cycle 4/10', rmSwarm: '▶ execution · subagents 2/3', nav: ['Tracking', 'Versions', 'Sessions', 'Notes', 'Proposals'],
   byPhase: 'By phase', byTrack: 'By track', front: 'track', rmTasks: ['T7 Webhook retries', 'T3 Checkout form', 'T8 Backfill orders', 'T2 API guide'],
   timeline: 'Timeline', today: 'today', sessions: 'Sessions', rmSessions: ['api · T7 · 12 min', 'data · T8 · 4 min', 'ui · waiting for api T3'],
 
-  bandTitle: 'waypoint band', bandDesc: 'Mock of the band above the Claude Code prompt in its three modes: design, work and swarm, with their buttons.',
+  bandTitle: 'waypoint band', bandDesc: 'Mock of the band above the Claude Code prompt in its three modes: design, work and run (the execution), with their buttons.',
   bandLog: [['> /waypoint:work api', C.sub], ['● T7 Webhook retries — claimed, 30 min estimate', C.text], ['● forge: medium · impl (Opus 5.5 · medium) · validators unit, lint', C.text], ['● review: correctness 0.92 · security 0.88 → accepted', C.green]],
-  bandModes: ['design mode', 'work mode', 'swarm mode'],
+  bandModes: ['design mode', 'work mode', 'run mode'],
   bandDesign: '◆ DESIGN · checkout-v2 · v3 · 7 proposals · 2 critical',
   bandDesignBtns: [{ label: 'Apply all' }, { label: 'Pick…' }, { label: 'Another round' }, { label: 'Rewrite' }, { label: 'Interview me' }, { label: 'Approve', primary: true }],
   bandWork: '● track api 2/5 · T7 Webhook retries · 12 min/30 · overall 38 % · ✉ 1',
   bandWorkBtns: [{ label: 'Next task', primary: true }, { label: 'Status' }, { label: 'Launch session on track…' }, { label: 'Open roadmap' }],
-  bandSwarm: '◆ swarm 3/5 · integrated 4/11 · overall 46 %',
-  bandSwarmBtns: [{ label: 'Status' }, { label: 'Stop swarm' }, { label: 'Open roadmap' }],
+  bandRun: '▶ EXECUTION · subagents 2/3 · T004 review (r2) · T008 implement · 3/12 · integrated 3',
+  bandRunBtns: [{ label: 'Status' }, { label: 'Stop' }, { label: 'Open roadmap' }],
 
   lensTitle: 'lens panel', lensDesc: 'Mock of the lens side panel: the model and effort in use, the roadmap card, the forge card with its stages, the running subagents and the Usage card with cost by part and the without-forge estimate.',
   lensLog: [['> /forge:run add webhook retries', C.sub], ['● triage → medium', C.text], ['  4 files · validators unit, lint', C.sub], ['● brief-1 → forge-impl', C.text], ['● validate: unit ✓  lint ✓', C.green], ['● reviewers: correctness, security', C.text], ['', C.text], ['> /lens', C.sub], ['● panel open', C.lav]],
@@ -549,43 +549,44 @@ const EN = {
   ladder: 'Implementers, cool to warm', fableOnly: 'only on request', reviewers: 'Reviewers',
   pathsFoot: 'Validators (tests, lint, types, build) always run before any reviewer; a review that fails goes back for a fix round.',
 
-  swarmTitle: 'forge swarm · several fronts at once', swarmSub: 'the coordinator only coordinates: it launches sessions on unblocked tracks and integrates their work',
-  swarmDesc: 'Diagram of a forge swarm: a coordinator session launches one background session per unblocked track, each in its own git worktree; as fronts finish they are merged into main one at a time.',
-  coordinatorFull: 'coordinator', coordSub: 'forge swarm tick: launch unblocked fronts, integrate finished work, sleep, repeat', integrated: 'integrated', waiting: 'front docs · waits for api T3 · launched when it unblocks',
-  swarmFoot1: 'Up to swarm.parallel fronts at once (default 3) · one merge at a time, validators after each one, rollback on conflict.',
-  swarmFoot2: 'Works on the Large path and in infinite mode · shown in the roadmap, the band and lens.',
+  swarmTitle: 'forge execution · several tasks at once', swarmSub: 'the coordinator only coordinates: it launches a subagent per ready task and integrates their work into the run branch',
+  swarmDesc: 'Diagram of a forge execution in subagents mode: a coordinator session on the run branch forge/run-project, in .claude/worktrees/run, launches an implementer subagent per ready task, each in its own worktree .claude/worktrees/task-T; each task goes through review and is integrated into the run branch one at a time, and the run branch is merged into your branch at the end with your permission.',
+  coordinatorFull: 'coordinator', coordSub: 'forge swarm tick: launch ready tasks, review, integrate, sleep, repeat', integrated: 'integrated', waiting: 'T009 · waits for T004 · launched once it is integrated', subagent: 'subagent', runPill: '▶ execution · subagents 2/3',
+  swarmFoot0: 'At the end the run branch is merged into your branch, with your permission (or the one you gave at the start).',
+  swarmFoot1: 'Up to swarm.parallel tasks at once (default 3) · one merge at a time, validators after each one compared with what already failed.',
+  swarmFoot2: 'Subagents mode; sessions mode arrives in the next version · shown in the roadmap, the band and lens.',
 };
 EN.coordinator = 'coordinator';
 
 const ES = {
   flowTitle: 'claude-bg-kit · de la idea al código integrado',
   flowSub: 'waypoint diseña y sigue, forge construye y revisa, lens lo enseña todo en vivo',
-  flowDesc: 'Diagrama del flujo completo: diseño con rondas de crítica, plan y roadmap en vivo, el bucle de forge (triaje, implementar, validar, revisar y veredicto), un enjambre de frentes en paralelo que se integra en main, y el modo infinito con propuestas del scout. lens y el roadmap observan cada etapa.',
+  flowDesc: 'Diagrama del flujo completo: diseño con rondas de crítica, plan y roadmap en vivo, el bucle de forge (triaje, implementar, validar, revisar y veredicto), una ejecución en paralelo de tareas con subagentes que se integra en una rama de ejecución y se fusiona en tu rama al final, y el modo infinito con propuestas del scout. lens y el roadmap observan cada etapa.',
   design: 'Diseño', idea: 'Idea', ideaSub: 'tu petición', designSub: 'aplicar · ronda · reescribir', criticSub: 'propuestas numeradas', approve: 'Aprobar', approveSub: 'das el visto bueno',
   plan: 'Plan', plannerSub: 'diseño → tareas', planSub: 'frentes · fases', publishSub: 'publicar', roadmap: 'Roadmap vivo', roadmapSub: 'artifact de claude.ai',
   build: 'Construir', triageSub: 'por tamaño', implement: 'implementar', implementSub: 'mech → heavy', validate: 'validar', validateSub: 'tus herramientas',
   review: 'revisión ×3', reviewSub: 'independiente', verdict: 'veredicto', verdictSub: 'nota ponderada',
   fixLoop: 'ronda de arreglo · hasta 4 · modelo más fuerte desde la ronda 3',
-  parallel: 'En paralelo', coordinator: 'coordinadora', front: 'frente', ownWorktree: 'una sesión y un worktree de git por frente', integrate: 'integrar', integrateSub: 'un merge cada vez', mainSub: 'validado',
+  parallel: 'En paralelo', coordinator: 'coordinadora', front: 'frente', ownWorktree: 'un subagente y un worktree de git por tarea', integrate: 'integrar', integrateSub: 'un merge cada vez', mainSub: 'fusión final',
   infinite: 'Modo infinito', infiniteSub: 'ciclos hasta agotar el presupuesto', proposals: 'propuestas', youDecide: 'tú decides', newTasks: 'tareas nuevas', toBuild: 'a Construir',
   livePanel: 'panel en vivo', effortHigh: 'esfuerzo alto', stages: ['tri', 'impl', 'val', 'rev', 'ver'], subagents: 'Subagentes', usage: 'Consumo',
   withoutForge: 'sin forge (estimado): ~4,70 $', lensObserves: 'lee los mismos ficheros, no gasta tokens',
   views1: 'Seguimiento · Versiones · Sesiones', views2: 'Notas · Propuestas', you: 'Tú', youLines: ['apruebas el diseño', 'decides las propuestas', 'autorizas los merges'],
 
-  rmTitle: 'roadmap de waypoint', rmDesc: 'Maqueta del roadmap de waypoint: cabecera con el progreso, las píldoras de modo infinito y enjambre, las vistas, cuatro frentes con sus tareas, una línea temporal y las sesiones vivas.',
-  rmSub: 'Roadmap vivo · plan v3', rmCycle: '∞ ciclo 4/10', rmSwarm: '◆ enjambre 3/5', nav: ['Seguimiento', 'Versiones', 'Sesiones', 'Notas', 'Propuestas'],
+  rmTitle: 'roadmap de waypoint', rmDesc: 'Maqueta del roadmap de waypoint: cabecera con el progreso, las píldoras de modo infinito y ejecución, las vistas, cuatro frentes con sus tareas, una línea temporal y las sesiones vivas.',
+  rmSub: 'Roadmap vivo · plan v3', rmCycle: '∞ ciclo 4/10', rmSwarm: '▶ ejecución · subagentes 2/3', nav: ['Seguimiento', 'Versiones', 'Sesiones', 'Notas', 'Propuestas'],
   byPhase: 'Por fases', byTrack: 'Por frentes', front: 'frente', rmTasks: ['T7 Reintentos de webhooks', 'T3 Formulario de pago', 'T8 Rellenar pedidos', 'T2 Guía de la API'],
   timeline: 'Línea temporal', today: 'hoy', sessions: 'Sesiones', rmSessions: ['api · T7 · 12 min', 'data · T8 · 4 min', 'ui · espera a api T3'],
 
-  bandTitle: 'banda de waypoint', bandDesc: 'Maqueta de la banda sobre el prompt de Claude Code en sus tres modos: diseño, trabajo y enjambre, con sus botones.',
+  bandTitle: 'banda de waypoint', bandDesc: 'Maqueta de la banda sobre el prompt de Claude Code en sus tres modos: diseño, trabajo y ejecución, con sus botones.',
   bandLog: [['> /waypoint:work api', C.sub], ['● T7 Reintentos de webhooks — reclamada, estimación 30 min', C.text], ['● forge: medium · impl (Opus 5.5 · medium) · validadores unit, lint', C.text], ['● revisión: correctness 0,92 · security 0,88 → aceptada', C.green]],
-  bandModes: ['modo diseño', 'modo trabajo', 'modo enjambre'],
+  bandModes: ['modo diseño', 'modo trabajo', 'modo ejecución'],
   bandDesign: '◆ DISEÑO · checkout-v2 · v3 · 7 propuestas · 2 críticas',
   bandDesignBtns: [{ label: 'Aplicar todas' }, { label: 'Elegir…' }, { label: 'Otra ronda' }, { label: 'Reescribir' }, { label: 'Preguntarme' }, { label: 'Aprobar', primary: true }],
   bandWork: '● frente api 2/5 · T7 Reintentos de webhooks · 12 min/30 · global 38 % · ✉ 1',
   bandWorkBtns: [{ label: 'Siguiente tarea', primary: true }, { label: 'Estado' }, { label: 'Lanzar sesión en un frente…' }, { label: 'Abrir roadmap' }],
-  bandSwarm: '◆ enjambre 3/5 · integrados 4/11 · global 46 %',
-  bandSwarmBtns: [{ label: 'Estado' }, { label: 'Parar enjambre' }, { label: 'Abrir roadmap' }],
+  bandRun: '▶ EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · T008 implementar · 3/12 · integradas 3',
+  bandRunBtns: [{ label: 'Estado' }, { label: 'Parar' }, { label: 'Abrir roadmap' }],
 
   lensTitle: 'panel de lens', lensDesc: 'Maqueta del panel lateral de lens: el modelo y el esfuerzo en uso, la tarjeta del roadmap, la de forge con sus etapas, los subagentes en marcha y la tarjeta Consumo con el coste por parte y la estimación sin forge.',
   lensLog: [['> /forge:run añade reintentos a los webhooks', C.sub], ['● triaje → medium', C.text], ['  4 ficheros · validadores unit, lint', C.sub], ['● brief-1 → forge-impl', C.text], ['● validar: unit ✓  lint ✓', C.green], ['● revisores: correctness, security', C.text], ['', C.text], ['> /lens', C.sub], ['● panel abierto', C.lav]],
@@ -607,11 +608,12 @@ const ES = {
   ladder: 'Implementadores, de frío a cálido', fableOnly: 'solo si lo pides', reviewers: 'Revisores',
   pathsFoot: 'Los validadores (tests, lint, tipos, build) corren siempre antes que los revisores; una revisión que falla vuelve en una ronda de arreglo.',
 
-  swarmTitle: 'enjambre de forge · varios frentes a la vez', swarmSub: 'la coordinadora solo coordina: lanza sesiones en los frentes desbloqueados e integra su trabajo',
-  swarmDesc: 'Diagrama de un enjambre de forge: una sesión coordinadora lanza una sesión en segundo plano por cada frente desbloqueado, cada una en su worktree de git; según terminan, se integran en main de una en una.',
-  coordSub: 'forge swarm tick: lanza frentes desbloqueados, integra lo terminado, duerme y repite', integrated: 'integrado', waiting: 'frente docs · espera a api T3 · se lanza al desbloquearse',
-  swarmFoot1: 'Hasta swarm.parallel frentes a la vez (3 por defecto) · un merge cada vez, validadores tras cada uno y marcha atrás si hay conflicto.',
-  swarmFoot2: 'Funciona en el camino Large y en el modo infinito · se ve en el roadmap, la banda y lens.',
+  swarmTitle: 'ejecución de forge · varias tareas a la vez', swarmSub: 'la coordinadora solo coordina: lanza un subagente por tarea lista e integra su trabajo en la rama de ejecución',
+  swarmDesc: 'Diagrama de una ejecución de forge en modo subagentes: una sesión coordinadora en la rama de ejecución forge/run-proyecto, en .claude/worktrees/run, lanza un subagente implementador por tarea lista, cada uno en su worktree .claude/worktrees/task-T; cada tarea pasa por revisión y se integra en la rama de ejecución de una en una, y al final esa rama se fusiona en la tuya con tu permiso.',
+  coordSub: 'forge swarm tick: lanza tareas listas, revisa, integra, duerme y repite', integrated: 'integrado', waiting: 'T009 · espera a T004 · se lanza al integrarse', subagent: 'subagente', runPill: '▶ ejecución · subagentes 2/3',
+  swarmFoot0: 'Al final la rama de ejecución se fusiona en la tuya, con tu permiso (o el que diste al empezar).',
+  swarmFoot1: 'Hasta swarm.parallel tareas a la vez (3 por defecto) · un merge cada vez, validadores tras cada uno comparados con lo que ya fallaba.',
+  swarmFoot2: 'Modo subagentes; el modo sesiones llega en la versión siguiente · se ve en el roadmap, la banda y lens.',
 };
 
 const ART = { flow, roadmap, band, lens, paths, swarm };
