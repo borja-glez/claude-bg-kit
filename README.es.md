@@ -20,6 +20,7 @@ Diséñalas, planifícalas, constrúyelas con revisión independiente, ejecútal
 ## Contenido
 
 - [Qué incluye](#qué-incluye)
+- [Combínalos a tu manera](#combínalos-a-tu-manera)
 - [Cómo encaja todo](#cómo-encaja-todo)
 - [Instalación](#instalación)
 - [Primeros pasos](#primeros-pasos)
@@ -37,6 +38,20 @@ Diséñalas, planifícalas, constrúyelas con revisión independiente, ejecútal
 | 🧭 | **waypoint** | Documentos de diseño que se pulen en rondas de crítica, un `plan.yaml` de frentes, fases y tareas, un **roadmap vivo** publicado como artifact de claude.ai y sesiones en paralelo coordinadas sobre worktrees de git. | [plugins/waypoint](plugins/waypoint/README.es.md) |
 | 🔨 | **forge** | Una forma de trabajar adaptativa: **triaje por tamaño**, el modelo adecuado para cada papel, primero tus propios validadores, **revisión independiente ponderada**, un **enjambre** de sesiones en paralelo y un **modo infinito** desatendido. | [plugins/forge](plugins/forge/README.es.md) |
 | 🔍 | **lens** | Un **panel de progreso en vivo** dentro de Claude Code: roadmap, etapas de forge, ejecuciones de superpowers, pendientes, subagentes, **el modelo y el esfuerzo en uso**, y el **consumo en tokens y dólares** comparado con trabajar sin forge. | [plugins/lens](plugins/lens/README.es.md) |
+
+## Combínalos a tu manera
+
+Los plugins están desacoplados: instala solo los que quieras. La única dependencia obligatoria es forge → waypoint, porque forge planifica y coordina a través del roadmap de waypoint.
+
+| Instalas | Qué obtienes |
+| --- | --- |
+| **waypoint** | Rondas de diseño, `plan.yaml`, el roadmap vivo, la banda y las sesiones en paralelo, sin el triaje ni la revisión de forge. |
+| **waypoint + lens** | Lo anterior más el panel en vivo y el consumo, todavía sin forge. |
+| **waypoint + forge** | El bucle de construcción completo y el enjambre; lens no hace falta. |
+| **lens** | El panel por sí solo: pendientes, subagentes, modelo, esfuerzo y consumo de cualquier sesión. |
+| **cualquiera + [superpowers](https://github.com/obra/superpowers)** | Conviven con las skills de superpowers; lens además enseña sus planes y ejecuciones con subagentes. |
+
+lens detecta waypoint, forge y superpowers por sus ficheros en el proyecto, así que nunca necesita ninguno de ellos.
 
 ## Cómo encaja todo
 
@@ -186,7 +201,6 @@ src/          fuentes TypeScript: lib/ (compartido), page/ (roadmap), mod/ (band
 tests/        suites de vitest
 docs/
   assets/     las imágenes de los README (las genera art.mjs)
-  superpowers/ specs y planes de implementación
 build.mjs     compila todos los plugins
 ```
 
