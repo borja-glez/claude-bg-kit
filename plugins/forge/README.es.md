@@ -7,8 +7,8 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.9.0](https://img.shields.io/badge/versi%C3%B3n-0.9.0-fab387?style=flat-square)
-![depende de waypoint ^0.14.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.14.0-cba6f7?style=flat-square)
+![versión 0.10.0](https://img.shields.io/badge/versi%C3%B3n-0.10.0-fab387?style=flat-square)
+![depende de waypoint ^0.15.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.15.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -46,7 +46,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depende de [waypoint](../waypoint/README.es.md) ^0.14.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
+forge depende de [waypoint](../waypoint/README.es.md) ^0.15.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
 
 ## Uso
 
@@ -213,7 +213,7 @@ Los tests y los revisores leen el código; la verificación **usa** el resultado
 
 ## Configuración
 
-`.forge/` en el proyecto contiene `config.yaml`, `verify/` (las superficies), el registro, `local.yaml`, `status.json`, `work/<id-de-tarea>/` (briefs, diffs, informes, revisiones, pruebas de verificación), `proposals/`, `run.json`, `execution/` (la ejecución y sus bases), `live/` (la señal local) y `usage/`. Git ignora todo lo que hay dentro salvo `config.yaml` y `verify/*.md`.
+`.forge/` en el proyecto contiene `config.yaml`, `verify/` (las superficies), el registro, `local.yaml`, `status.json` (la última tarea, con `taskStartedAt`, `stageSince`, `stages` (segundos por fase) y `doneAt` para los tiempos de lens), `work/<id-de-tarea>/` (briefs, diffs, informes, revisiones, pruebas de verificación), `proposals/`, `run.json`, `execution/` (la ejecución y sus bases; cada tarea de `execution.json` guarda `finishedAt` al integrarse, bloquearse o adoptarse con `swarm retry <T> --adopt`), `live/` (la señal local) y `usage/`. Git ignora todo lo que hay dentro salvo `config.yaml` y `verify/*.md`.
 
 ```yaml
 profile: balanced              # balanced | economy | quality

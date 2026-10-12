@@ -6,7 +6,7 @@
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.14.0](https://img.shields.io/badge/versi%C3%B3n-0.14.0-cba6f7?style=flat-square)
+![versión 0.15.0](https://img.shields.io/badge/versi%C3%B3n-0.15.0-cba6f7?style=flat-square)
 ![requiere sesión en claude.ai](https://img.shields.io/badge/requiere-sesi%C3%B3n%20en%20claude.ai-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -91,11 +91,13 @@ El roadmap es un artifact de claude.ai. Es privado hasta que lo compartes, y las
 
 **Verificación.** Cuando forge verificó una tarea con herramientas, su detalle enseña un bloque de Verificación: el resultado, las superficies usadas, cada comprobación con lo esperado y lo observado, y las capturas como miniaturas que se abren en una vista ampliada. Las cajas de tareas del seguimiento llevan un pequeño indicador en las tareas verificadas. Las capturas solo se suben si la configuración de forge del proyecto tiene `evidence: upload` (el valor por defecto), lo que hace el roadmap interno de la organización; con `evidence: local` el roadmap sigue pudiendo compartirse públicamente y enseña los resultados sin imágenes.
 
+**Tiempos de las tareas.** La ficha de una tarea hecha dice cuánto tardó frente a su estimación (`tardó 22 min · estimado 30`, en ámbar si se pasó); la de una tarea reclamada o en curso dice cuánto lleva (`lleva 12 min`). Una tarea con una fecha ausente, futura o invertida no enseña tiempo.
+
 **forge en la página.** Cuando forge lleva una tarea, su ficha enseña también el camino y la fase de forge, el agente, los validadores, el veredicto de la revisión y la ronda. Mientras hay una ejecución infinita activa, la cabecera enseña `∞ ciclo N` (con `/M` si la ejecución tiene presupuesto de ciclos). Mientras hay una ejecución de forge activa, la cabecera enseña la píldora `▶ ejecución · subagentes 2/3` (modo, tareas en marcha sobre el máximo); añade `sin señal desde 12:40` cuando la coordinadora lleva 7 minutos en silencio y `parada desde 12:40` pasados 12, y marca las integraciones de la ejecución en la línea temporal.
 
-**Ejecución.** La vista Sesiones abre con un bloque Ejecución: una línea por tarea en marcha con su etapa, agente y tiempo, las plazas usadas sobre el máximo (`2/3 plazas`) y las libres. Las tarjetas de sesión llevan una etiqueta de rol (coordinadora, ejecutora, manual) y un punto de vida. Una tarea en curso cuya ejecutora dejó de renovar su concesión se marca **huérfana** y cuenta como bloqueada en los filtros, para que lo notes y otra sesión pueda recuperarla. La página lee todo esto del documento `meta/run` del roadmap (`runId`, `mode`, `parallel`, `branch`, `mergeOnFinish`, `active`, `stopReason`, `coordinator` y una plaza por tarea en marcha con su `task`, `stage`, `agent`, `by` y `since`), que forge mantiene al día.
+**Ejecución.** La vista Sesiones abre con un bloque Ejecución: una línea por tarea en marcha con su etapa, agente y cuánto lleva (`lleva 12 min`), las plazas usadas sobre el máximo (`2/3 plazas`) y las libres. Las tarjetas de sesión llevan una etiqueta de rol (coordinadora, ejecutora, manual) y un punto de vida. Una tarea en curso cuya ejecutora dejó de renovar su concesión se marca **huérfana** y cuenta como bloqueada en los filtros, para que lo notes y otra sesión pueda recuperarla. La página lee todo esto del documento `meta/run` del roadmap (`runId`, `mode`, `parallel`, `branch`, `mergeOnFinish`, `active`, `stopReason`, `coordinator` y una plaza por tarea en marcha con su `task`, `stage`, `agent`, `by` y `since`), que forge mantiene al día.
 
-**Tareas sueltas.** Cuando hay una ejecución efímera de forge (varias peticiones independientes en paralelo), la vista de seguimiento tiene una sección **Tareas sueltas** con el título, estado, etapa y agente de cada petición, y la píldora de la ejecución se lee `▶ tareas sueltas · subagentes n/N`. No cuentan en el progreso del plan ni entran en `plan.yaml`.
+**Tareas sueltas.** Cuando hay una ejecución efímera de forge (varias peticiones independientes en paralelo), la vista de seguimiento tiene una sección **Tareas sueltas** con el título, estado, etapa y agente de cada petición (y, una vez integrada, en conflicto o bloqueada, cuánto tardó, `tardó 6 min`, cuando la coordinadora lo publica), y la píldora de la ejecución se lee `▶ tareas sueltas · subagentes n/N`. No cuentan en el progreso del plan ni entran en `plan.yaml`.
 
 **Permisos.** Los colaboradores solo pueden escribir notas y propuestas. Todo lo demás (plan, estado, sesiones, eventos, mensajes) necesita permiso de editor. Claude escribe con ArtifactData como propietario, y las reglas nunca lo limitan. Sin una persona con sesión iniciada, o si la base de datos rechaza una nota, el editor de notas queda en solo lectura.
 

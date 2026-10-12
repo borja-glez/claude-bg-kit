@@ -211,7 +211,7 @@ text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,san
 <text x="760" y="143" font-size="11.5" class="m dim">Opus 5.5 · effort high</text>
 <text x="760" y="170" font-size="12" style="fill:#89b4fa" font-weight="600">Roadmap</text>
 <rect x="760" y="178" width="192" height="8" rx="4" fill="#45475a"/><rect x="760" y="178" width="192" height="8" rx="4" fill="#89b4fa" class="g3"/>
-<text x="760" y="210" font-size="12" style="fill:#fab387" font-weight="600">forge · T7</text>
+<text x="760" y="210" font-size="12" style="fill:#fab387" font-weight="600">forge · T7 · 8m 40s</text>
 <rect x="760" y="218" width="35" height="18" rx="5" fill="#313244"/>
 <rect x="760" y="218" width="35" height="18" rx="5" fill="#fab387" stroke="#fab387" class="lit" style="animation-delay:5s"/>
 <text x="777.5" y="231" font-size="9.5" class="m" text-anchor="middle">tri</text>

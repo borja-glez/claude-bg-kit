@@ -185,7 +185,7 @@ ${text(48, 646, `∞  ${t.infinite}`, { size: 15, weight: 700, fill: C.yellow })
   L.push(text(760, 170, 'Roadmap', { size: 12, weight: 600, fill: C.blue }));
   const rb = growBar(760, 178, 192, 8, C.blue, 0.15, 0.95, cycle, { hold: 0.9 }); css.push(rb.css); L.push(rb.body);
   // forge stages, lit with the Build nodes
-  L.push(text(760, 210, 'forge · T7', { size: 12, weight: 600, fill: C.peach }));
+  L.push(text(760, 210, 'forge · T7 · 8m 40s', { size: 12, weight: 600, fill: C.peach }));
   t.stages.forEach((s, k) => {
     const x = 760 + k * 39;
     L.push(rect(x, 218, 35, 18, { rx: 5, fill: C.s0 }),
