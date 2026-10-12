@@ -25,9 +25,16 @@ export type LensPanel = {
     } | null;
   } | null;
   infinite: { cycle: number; cyclesMax: number | null; hoursLeft: number | null; active: boolean; autoApproved: string[] } | null;
-  swarm: {
-    active: boolean; live: number; parallel: number; stalled: string | null; waiting: number; ready: number; conflict: number;
-    fronts: { track: string; status: string; task: string | null; done: number; total: number; waitTask: string | null; waitTrack: string | null; note: string | null }[];
+  execution: {
+    runId: string; mode: 'subagents' | 'sessions'; parallel: number; branch: string; active: boolean;
+    stopReason: string | null; stallReason: string | null;
+    coordinator: { liveness: 'alive' | 'silent' | 'stopped'; lastSeen: string | null };
+    integrated: number; total: number;
+    slots: {
+      task: string; title: string | null; stage: string; agent: string | null; model: string | null; effort: string | null;
+      round: number; seconds: number; liveness: 'alive' | 'silent' | 'stopped'; mode: 'subagents' | 'sessions' | 'manual';
+    }[];
+    queued: string[]; conflicts: string[]; blocked: string[]; orphans: string[];
   } | null;
   proposals: { id: string; title: string; category: string; risk: string }[];
   mainModel: { model: string; effort: string | null } | null;

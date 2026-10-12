@@ -1,5 +1,8 @@
 import path from 'node:path';
 
+// Kept in a module of its own with no Node imports, so lens's neutral mod bundle can import it.
+export { mainCheckoutFrom } from './main-checkout.js';
+
 /** The main checkout: the path of the first `worktree` entry of `git worktree list --porcelain`. */
 export function mainWorktreeFrom(porcelain: string | null | undefined): string | null {
   if (typeof porcelain !== 'string') return null;

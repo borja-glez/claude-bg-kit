@@ -2,7 +2,8 @@ import type { BandModel } from '../mod/model.js';
 import { normalizeProposal } from '../lib/proposals.js';
 import { cleanText, normalizeStatus } from '../lib/forge-status.js';
 import { parseRun } from '../lib/forge-run.js';
-import { parseSwarm, swarmLive } from '../lib/swarm-state.js';
+import { normalizeLive, normalizePublicTask, parseExecution, type LiveDoc, type PublicTask } from '../lib/execution-state.js';
+import { executionView } from '../lib/execution-view.js';
 import { MAIN, type UsageState } from './usage.js';
 import { summarizeUsage } from './usage-summary.js';
 import { PRICES_AS_OF } from '../lib/prices.js';
@@ -131,9 +132,16 @@ export type PanelModel = {
     } | null;
   } | null;
   infinite: { cycle: number; cyclesMax: number | null; hoursLeft: number | null; active: boolean; autoApproved: string[] } | null;
-  swarm: {
-    active: boolean; live: number; parallel: number; stalled: string | null; waiting: number; ready: number; conflict: number;
-    fronts: { track: string; status: string; task: string | null; done: number; total: number; waitTask: string | null; waitTrack: string | null; note: string | null }[];
+  execution: {
+    runId: string; mode: 'subagents' | 'sessions'; parallel: number; branch: string; active: boolean;
+    stopReason: string | null; stallReason: string | null;
+    coordinator: { liveness: 'alive' | 'silent' | 'stopped'; lastSeen: string | null };
+    integrated: number; total: number;
+    slots: {
+      task: string; title: string | null; stage: string; agent: string | null; model: string | null; effort: string | null;
+      round: number; seconds: number; liveness: 'alive' | 'silent' | 'stopped'; mode: 'subagents' | 'sessions' | 'manual';
+    }[];
+    queued: string[]; conflicts: string[]; blocked: string[]; orphans: string[];
   } | null;
   proposals: { id: string; title: string; category: string; risk: string }[];
   mainModel: { model: string; effort: string | null } | null;
@@ -226,24 +234,47 @@ function pendingProposals(texts: Record<string, string> | undefined): PanelModel
 /** forge's run.json is a few hundred bytes; lens neither reads nor parses one above this. */
 export const FORGE_RUN_MAX = 16 * 1024;
 
-/** .forge/swarm.json is a few KB; lens neither reads nor parses one above this. */
-export const FORGE_SWARM_MAX = 64 * 1024;
+/** .forge/execution.json is a few KB; lens neither reads nor parses one above this. */
+export const FORGE_EXEC_MAX = 64 * 1024;
+/** Each .forge/execution/<task>.json and .forge/live/<session>.json is small; lens reads none above this. */
+export const FORGE_EXEC_FILE_MAX = 8 * 1024;
+export const FORGE_EXEC_TASKS_MAX = 50;
+export const FORGE_LIVE_MAX = 20;
 
-/** The swarm for the panel: null when absent, oversized, invalid, or finished (a stalled one stays to say why). */
-export function swarmFromFile(text: string | undefined): PanelModel['swarm'] {
-  if (typeof text !== 'string' || text.length > FORGE_SWARM_MAX) return null;
-  const s = parseSwarm(text);
-  if (!s || (!s.active && s.stopReason !== 'stalled')) return null;
-  const fronts = Object.entries(s.fronts).map(([track, f]) => ({
-    track, status: f.status, task: f.currentTask, done: f.done, total: f.total,
-    // The waiting task and track stay primitives: cards.ts words them in the panel's language.
-    waitTask: f.waitingFor?.task ?? null, waitTrack: f.waitingFor?.track ?? null,
-    note: f.detail ? clip(f.detail) : null,
-  }));
-  const n = (status: string) => fronts.filter(f => f.status === status).length;
+/**
+ * The execution for the panel, from .forge/execution.json, the public task files (.forge/execution/<task>.json, keyed
+ * by task id) and the live signals (.forge/live/*.json): null when absent, oversized, invalid or finished (a stalled
+ * one stays to say why). Bad task or signal files are skipped.
+ */
+export function executionFromFiles(execText: string | undefined, taskTexts: Record<string, string> = {}, liveTexts: Record<string, string> = {}, now: number, titles?: Record<string, string>): PanelModel['execution'] {
+  if (typeof execText !== 'string' || execText.length > FORGE_EXEC_MAX) return null;
+  const tasks: Record<string, PublicTask> = {};
+  for (const [id, t] of Object.entries(taskTexts)) {
+    if (typeof t !== 'string' || t.length > FORGE_EXEC_FILE_MAX) continue;
+    try { const p = normalizePublicTask(JSON.parse(t)); if (p && p.task === id) tasks[id] = p; } catch { /* skip */ }
+  }
+  const live: LiveDoc[] = [];
+  for (const t of Object.values(liveTexts)) {
+    if (typeof t !== 'string' || t.length > FORGE_EXEC_FILE_MAX) continue;
+    try { const d = normalizeLive(JSON.parse(t)); if (d) live.push(d); } catch { /* skip */ }
+  }
+  let v;
+  try { v = executionView({ exec: parseExecution(execText), tasks, live, titles, now }); } catch { return null; }
+  if (!v) return null;
   return {
-    active: s.active, live: swarmLive(s), parallel: s.parallel, stalled: s.active ? null : s.stallReason,
-    waiting: n('waiting'), ready: n('ready'), conflict: n('conflict') + n('launch-failed'), fronts,
+    runId: v.runId, mode: v.mode, parallel: v.parallel, branch: v.branch, active: v.active, stopReason: v.stopReason,
+    stallReason: v.stallReason ? clip(v.stallReason) : null,
+    coordinator: { ...v.coordinator }, integrated: v.integrated, total: v.total,
+    // model / effort: lens knows them only for its own session's subagents (from the usage loops), not for these.
+    slots: v.slots.map(s => {
+      const since = Date.parse(s.since);
+      return {
+        task: s.task, title: s.title ? clip(s.title) : null, stage: s.stage, agent: s.agent, model: null, effort: null, round: s.round,
+        seconds: Number.isFinite(since) && Number.isFinite(now) ? Math.max(0, Math.round((now - since) / 1000)) : 0,
+        liveness: s.liveness, mode: s.mode,
+      };
+    }),
+    queued: v.queued, conflicts: v.conflicts, blocked: v.blocked, orphans: v.orphans,
   };
 }
 const MAX_AUTO = 3;
@@ -280,7 +311,8 @@ export function infiniteFromRun(text: string | undefined, proposals: Record<stri
 
 export function buildPanelModel(input: {
   band: BandModel; ledger?: string; ledgerPlan?: string; planFallback?: string; ledgerMtimeMs?: number;
-  forgeStatus?: string; forgeRun?: string; forgeSwarm?: string; proposals?: Record<string, string>; forgeBriefs?: number;
+  forgeStatus?: string; forgeRun?: string; proposals?: Record<string, string>; forgeBriefs?: number;
+  forgeExecution?: string; forgeExecTasks?: Record<string, string>; forgeLive?: Record<string, string>;
   activity: Activity; now: number; locale?: string;
   // `officialOwnUsd`: this session's own computed cost at the moment `officialUsd` was read, for the drift check.
   usage?: { session: UsageState; run: UsageState | null; officialUsd: number | null; officialOwnUsd?: number | null };
@@ -337,7 +369,9 @@ export function buildPanelModel(input: {
       : null,
     forge: input.forgeStatus !== undefined ? forgeFromStatus(input.forgeStatus, now, input.forgeBriefs ?? null) : null,
     infinite: infiniteFromRun(input.forgeRun, input.proposals, now),
-    swarm: swarmFromFile(input.forgeSwarm),
+    // The only plan task title the band model carries is the current one's.
+    execution: executionFromFiles(input.forgeExecution, input.forgeExecTasks, input.forgeLive, now,
+      wp?.current ? { [wp.current.id]: wp.current.title } : undefined),
     proposals: pendingProposals(input.proposals),
     mainModel: mainLoop?.model ? { model: mainLoop.model, effort: mainLoop.effort } : null,
     usage,

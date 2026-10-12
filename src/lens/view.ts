@@ -58,9 +58,11 @@ export function tierOf(agent: string | null | undefined): Tier {
 export const PATH_HUE: Record<string, Hue> = { trivial: 'green', small: 'teal', medium: 'peach', large: 'red' };
 
 // The stages forge goes through; a phase it names that is none of them is drawn on its own.
-export const STAGES = ['triage', 'design', 'plan', 'implement', 'validate', 'verify', 'review', 'verdict', 'final'] as const;
+// `execution` is a Large run's plan being executed (path 'run' below).
+export const STAGES = ['triage', 'design', 'plan', 'execution', 'implement', 'validate', 'verify', 'review', 'verdict', 'final'] as const;
+const RUN_STAGES: readonly (typeof STAGES)[number][] = ['design', 'plan', 'execution', 'final'];
 const STAGE_OF: Record<string, (typeof STAGES)[number]> = {
-  triage: 'triage', design: 'design', plan: 'plan', planning: 'plan', implement: 'implement', implementation: 'implement',
+  triage: 'triage', design: 'design', plan: 'plan', planning: 'plan', execution: 'execution', implement: 'implement', implementation: 'implement',
   impl: 'implement', fix: 'implement', redo: 'implement', validate: 'validate', validation: 'validate', verify: 'verify', review: 'review',
   verdict: 'verdict', round: 'verdict', final: 'final', 'final-review': 'final', done: 'final',
 };
@@ -68,11 +70,18 @@ const STAGE_OF: Record<string, (typeof STAGES)[number]> = {
 export interface Stage { name: string; state: 'done' | 'active' | 'pending' }
 // The stages of forge's path: Large shows design and plan, the others skip them; final only on Large.
 // Trivial and Small have no reviewers. `validated` says how the last validation went: Trivial logs no phases,
-// so validators that ran are what moves it past implement.
+// so validators that ran are what moves it past implement. Path 'run' is a Large run as a whole while its plan
+// executes: design ▸ plan ▸ execution ▸ final.
 export function stagesFor(path: string, phase: string, validated: 'ok' | 'failed' | null = null, verifyPlanned = false): Stage[] {
+  if (path === 'run') {
+    if (phase.toLowerCase() === 'done') return RUN_STAGES.map(name => ({ name, state: 'done' }));
+    const i = RUN_STAGES.indexOf(STAGE_OF[phase.toLowerCase()] ?? 'execution');
+    const at = i < 0 ? RUN_STAGES.indexOf('execution') : i;
+    return RUN_STAGES.map((name, k) => ({ name, state: k < at ? 'done' : k === at ? 'active' : 'pending' }));
+  }
   const large = path === 'large';
   const light = path === 'trivial' || path === 'small';
-  const names = STAGES.filter(s => (large || (s !== 'design' && s !== 'plan' && s !== 'final'))
+  const names = STAGES.filter(s => s !== 'execution' && (large || (s !== 'design' && s !== 'plan' && s !== 'final'))
     && !(light && (s === 'review' || s === 'verdict')) && (s !== 'verify' || verifyPlanned));
   if (phase.toLowerCase() === 'done') return names.map(name => ({ name, state: 'done' }));
   const at = STAGE_OF[phase.toLowerCase()] ?? null;
@@ -150,10 +159,10 @@ export const duration = (seconds: number | null | undefined): string | null =>
 // The one-line summary the band shows: the most specific run going on, in this order.
 export interface Headline { section: SectionId; title: string; detail: string; cells: Cells | null; agent: string | null }
 export function headline(m: PanelModel): Headline | null {
-  if (m.swarm?.active) {
-    const sw = m.swarm;
-    const detail = [sw.waiting && `${sw.waiting} ⧗`, sw.ready && `${sw.ready} ⇡`, sw.conflict && `⚠ ${sw.conflict}`].filter(Boolean).join(' · ');
-    return { section: 'forge', title: `⑂ ${sw.live}/${sw.parallel}`, detail, cells: null, agent: null };
+  if (m.execution?.active) {
+    const x = m.execution;
+    const detail = x.slots.slice(0, 2).map(s => `${s.task} ${s.stage}`).join(' · ');
+    return { section: 'forge', title: `▶ ${x.slots.length}/${x.parallel}`, detail, cells: null, agent: null };
   }
   if (m.forge) {
     const f = m.forge;

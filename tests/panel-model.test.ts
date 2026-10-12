@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { buildBandModel } from '../src/mod/model.js';
 import { newUsage, recordStep, labelLoop } from '../src/lens/usage.js';
-import { buildPanelModel, swarmFromFile, forgeFromStatus, parsePlanTasks, parseSddLedger, summarizeTodos, type Activity } from '../src/lens/model.js';
+import { buildPanelModel, forgeFromStatus, parsePlanTasks, parseSddLedger, summarizeTodos, type Activity } from '../src/lens/model.js';
 
 const LEDGER = `# SDD ledger — plan: docs/superpowers/plans/2026-10-11-waypoint-views.md
 
@@ -128,7 +128,7 @@ describe('buildPanelModel', () => {
   it('is all-null for an empty project', () => {
     expect(buildPanelModel(base)).toEqual({
       locale: 'en', waypoint: null, superpowers: null, todos: null, subagents: [], tool: null, turnSeconds: null, ccTasks: null,
-      forge: null, infinite: null, swarm: null, proposals: [], mainModel: null, usage: null,
+      forge: null, infinite: null, execution: null, proposals: [], mainModel: null, usage: null,
     });
   });
   it('derives waypoint from a work band and takes its locale', () => {
@@ -310,32 +310,21 @@ describe('buildPanelModel infinite', () => {
   });
 });
 
-describe('swarmFromFile', () => {
-  const doc = {
-    active: true, parallel: 3, mergeAuthorized: true, project: 'p', base: 'main', coordinator: 'main', hookSession: null,
-    startedAt: '2026-10-11T10:00:00Z', lastTickAt: null, lastBlockTick: null, sleepUntil: null, stopReason: null, stallReason: null, notice: null,
-    fronts: {
-      a: { status: 'running', session: 'wp-p-a', launchedAt: null, currentTask: 'A1', heartbeatAt: null, done: 1, total: 3, waitingFor: null, detail: null },
-      b: { status: 'waiting', session: null, launchedAt: null, currentTask: null, heartbeatAt: null, done: 0, total: 2, waitingFor: { task: 'A1', track: 'a', reason: 'not-integrated' }, detail: null },
-      c: { status: 'conflict', session: null, launchedAt: null, currentTask: null, heartbeatAt: null, done: 1, total: 1, waitingFor: null, detail: 'merge conflict' },
-    },
-  };
-  it('summarizes an active swarm', () => {
-    expect(swarmFromFile(JSON.stringify(doc))).toEqual({
-      active: true, live: 1, parallel: 3, stalled: null, waiting: 1, ready: 0, conflict: 1,
-      fronts: [
-        { track: 'a', status: 'running', task: 'A1', done: 1, total: 3, waitTask: null, waitTrack: null, note: null },
-        { track: 'b', status: 'waiting', task: null, done: 0, total: 2, waitTask: 'A1', waitTrack: 'a', note: null },
-        { track: 'c', status: 'conflict', task: null, done: 1, total: 1, waitTask: null, waitTrack: null, note: 'merge conflict' },
-      ],
-    });
+describe('buildPanelModel · execution', () => {
+  const T0 = '2026-10-12T12:00:00.000Z';
+  const now = Date.parse(T0);
+  const execDoc = JSON.stringify({ runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false, coordinator: 'main', hookSession: 's1', active: true, stopReason: null, stallReason: null, startedAt: '2026-10-12T11:00:00.000Z', lastStepAt: '2026-10-12T11:58:00.000Z', lastBlockStep: null, sleepUntil: null,
+    tasks: { T4: { status: 'running', stage: 'review', round: 2, worktree: '/w', branch: 'task/T4', executor: 'subagents', attempts: 0, agent: 'forge-review-correctness', startedAt: '2026-10-12T11:40:00.000Z', updatedAt: '2026-10-12T11:59:00.000Z', stageSince: '2026-10-12T11:57:00.000Z', detail: null },
+      T2: { status: 'integrated', stage: 'integrate', round: 1, worktree: '/w2', branch: 'task/T2', executor: 'subagents', attempts: 0, agent: null, startedAt: '2026-10-12T11:10:00.000Z', updatedAt: '2026-10-12T11:30:00.000Z', stageSince: '2026-10-12T11:30:00.000Z', detail: null } } });
+  it('builds the execution section from the files, with seconds in stage and liveness', () => {
+    const m = buildPanelModel({ band: band(), activity: act(), now, forgeExecution: execDoc, forgeExecTasks: {}, forgeLive: { s1: JSON.stringify({ sessionId: 's1', role: 'coordinator', runId: 'r1', task: null, event: 'Stop', ts: '2026-10-12T11:59:00.000Z', agents: [], ended: false }) } });
+    expect(m.execution).toMatchObject({ mode: 'subagents', parallel: 3, integrated: 1, total: 2, coordinator: { liveness: 'alive' } });
+    expect(m.execution!.slots[0]).toMatchObject({ task: 'T4', stage: 'review', round: 2, seconds: 180, liveness: 'alive' });
   });
-  it('keeps a stalled swarm and drops a finished, absent, oversized or invalid one', () => {
-    expect(swarmFromFile(JSON.stringify({ ...doc, active: false, stopReason: 'stalled', stallReason: 'blocked: b' }))?.stalled).toBe('blocked: b');
-    expect(swarmFromFile(JSON.stringify({ ...doc, active: false, stopReason: 'finished' }))).toBeNull();
-    expect(swarmFromFile(undefined)).toBeNull();
-    expect(swarmFromFile('x'.repeat(70 * 1024))).toBeNull();
-    expect(swarmFromFile('{')).toBeNull();
+  it('is null without a file, with junk, or for a finished execution', () => {
+    expect(buildPanelModel({ band: band(), activity: act(), now }).execution).toBeNull();
+    expect(buildPanelModel({ band: band(), activity: act(), now, forgeExecution: '{oops' }).execution).toBeNull();
+    expect(buildPanelModel({ band: band(), activity: act(), now, forgeExecution: execDoc.replace('"active":true', '"active":false').replace('"stopReason":null', '"stopReason":"finished"') }).execution).toBeNull();
   });
 });
 

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { newUsage, recordStep, recordTracking, labelLoop } from '../src/lens/usage.js';
 import { toUsageFile, parseUsageFile, mainCheckoutFrom, runStartedAt, mergeForRun, seedUsage, USAGE_FILE_MAX } from '../src/lens/usage-file.js';
+import { mainCheckoutFrom as libMainCheckoutFrom } from '../src/lib/worktree.js';
 
 const U = (i: number, o: number) => ({ input_tokens: i, output_tokens: o, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 });
 const T0 = Date.parse('2026-10-12T10:00:00.000Z');
@@ -29,13 +30,14 @@ describe('usage file', () => {
     expect(mainCheckoutFrom('/home/u/repo/.claude/worktrees/ui', 'gitdir: /home/u/repo/.git/worktrees/ui')).toBe('/home/u/repo');
     expect(mainCheckoutFrom('E:/repo', null)).toBe('E:/repo');
     expect(mainCheckoutFrom('E:/repo', 'garbage')).toBe('E:/repo');
+    expect(libMainCheckoutFrom).toBe(mainCheckoutFrom);
   });
-  it('takes the run start from the swarm, else the infinite run, else the newest Large run', () => {
+  it('takes the run start from the execution, else the infinite run, else the newest Large run', () => {
     const now = T0;
     const fresh = now - 60_000;
-    const swarm = { text: JSON.stringify({ startedAt: '2026-10-12T09:00:00.000Z' }), mtimeMs: fresh };
+    const execution = { text: JSON.stringify({ startedAt: '2026-10-12T09:00:00.000Z' }), mtimeMs: fresh };
     const run = { text: JSON.stringify({ startedAt: '2026-10-12T08:00:00.000Z' }), mtimeMs: fresh };
-    expect(runStartedAt({ swarm, run, largeRuns: [] }, now)).toBe(Date.parse('2026-10-12T09:00:00.000Z'));
+    expect(runStartedAt({ execution, run, largeRuns: [] }, now)).toBe(Date.parse('2026-10-12T09:00:00.000Z'));
     expect(runStartedAt({ run, largeRuns: [] }, now)).toBe(Date.parse('2026-10-12T08:00:00.000Z'));
     const large = [{ text: JSON.stringify({ startedAt: '2026-10-12T07:00:00.000Z' }), mtimeMs: fresh }, { text: '{}', mtimeMs: fresh }];
     expect(runStartedAt({ largeRuns: large }, now)).toBe(Date.parse('2026-10-12T07:00:00.000Z'));
@@ -46,15 +48,15 @@ describe('usage file', () => {
     const old = now - 13 * 3600_000;
     const recent = now - 11 * 3600_000;
     const doc = (active: boolean, startedAt: string) => JSON.stringify({ active, startedAt });
-    // An inactive swarm or infinite run untouched for 13 hours is over.
-    expect(runStartedAt({ swarm: { text: doc(false, '2026-10-11T09:00:00.000Z'), mtimeMs: old }, largeRuns: [] }, now)).toBeNull();
+    // An inactive execution or infinite run untouched for 13 hours is over.
+    expect(runStartedAt({ execution: { text: doc(false, '2026-10-11T09:00:00.000Z'), mtimeMs: old }, largeRuns: [] }, now)).toBeNull();
     expect(runStartedAt({ run: { text: doc(false, '2026-10-11T08:00:00.000Z'), mtimeMs: old }, largeRuns: [] }, now)).toBeNull();
     // Active ones count whatever their age; recent inactive ones count too.
-    expect(runStartedAt({ swarm: { text: doc(true, '2026-10-11T09:00:00.000Z'), mtimeMs: old }, largeRuns: [] }, now)).toBe(Date.parse('2026-10-11T09:00:00.000Z'));
+    expect(runStartedAt({ execution: { text: doc(true, '2026-10-11T09:00:00.000Z'), mtimeMs: old }, largeRuns: [] }, now)).toBe(Date.parse('2026-10-11T09:00:00.000Z'));
     expect(runStartedAt({ run: { text: doc(false, '2026-10-11T08:00:00.000Z'), mtimeMs: recent }, largeRuns: [] }, now)).toBe(Date.parse('2026-10-11T08:00:00.000Z'));
-    // An old swarm gives way to a live infinite run.
+    // An old execution gives way to a live infinite run.
     expect(runStartedAt({
-      swarm: { text: doc(false, '2026-10-11T09:00:00.000Z'), mtimeMs: old },
+      execution: { text: doc(false, '2026-10-11T09:00:00.000Z'), mtimeMs: old },
       run: { text: doc(true, '2026-10-11T08:00:00.000Z'), mtimeMs: old }, largeRuns: [],
     }, now)).toBe(Date.parse('2026-10-11T08:00:00.000Z'));
     // A Large run counts only by its mtime.

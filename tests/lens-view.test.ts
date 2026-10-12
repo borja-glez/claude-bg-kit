@@ -6,7 +6,9 @@ import type { PanelModel } from '../src/lens/model.js';
 
 const T: CardTexts = {
   sRoadmap: 'Roadmap', sSuperpowers: 'superpowers', sNow: 'Now', sTodos: 'Todos', sSubagents: 'Subagents', sTasks: 'Tasks', sForge: 'forge',
-  sSwarm: 'swarm', swarmWaiting: 'waiting', swarmReady: 'ready', waitsFor: (task, track) => `waits for ${task} (${track})`,
+  sExecution: 'Execution', modeSubagents: 'subagents', modeSessions: 'sessions', alive: 'alive', silent: 'silent', stopped: 'stopped',
+  queued: 'to integrate', orphans: 'orphaned', conflictsLbl: 'in conflict', blockedLbl: 'blocked', integratedN: 'integrated',
+  stage: { brief: 'brief', implement: 'implement', validate: 'validate', verify: 'verify', review: 'review', verdict: 'verdict', integrate: 'integrate', execution: 'execution' },
   track: 'track', phase: 'Phase', noTask: 'no task', decision: 'decision', fixRound: 'round', done: 'done', open: 'open',
   tool: 'tool', turn: 'turn', briefs: 'briefs', cycle: 'cycle', hoursLeft: h => `${h}h left`, auto: 'auto', task: 'Task',
   sUsage: 'Usage', effort: 'effort', effortLevel: e => e, thisSession: 'this session', run: 'run', gMain: 'main', gImpl: 'implementers',
@@ -21,7 +23,13 @@ const FORGE: NonNullable<PanelModel['forge']> = {
 };
 const EMPTY: PanelModel = {
   locale: 'en', waypoint: null, superpowers: null, todos: null, subagents: [], tool: null, turnSeconds: null, ccTasks: null,
-  forge: null, infinite: null, swarm: null, proposals: [], mainModel: null, usage: null,
+  forge: null, infinite: null, execution: null, proposals: [], mainModel: null, usage: null,
+};
+const EXEC: NonNullable<PanelModel['execution']> = {
+  runId: 'r1', mode: 'subagents', parallel: 3, branch: 'forge/run-shop', active: true, stopReason: null, stallReason: null,
+  coordinator: { liveness: 'silent', lastSeen: '2026-10-12T11:52:00.000Z' }, integrated: 3, total: 12,
+  slots: [{ task: 'T004', title: 'Pisos', stage: 'review', agent: 'forge-review-correctness', model: null, effort: null, round: 2, seconds: 300, liveness: 'alive', mode: 'subagents' }],
+  queued: ['T003'], conflicts: [], blocked: [], orphans: [],
 };
 
 describe('lens view', () => {
@@ -72,19 +80,25 @@ describe('lens view', () => {
     expect(barParts(1, 10).fill).toBe('█'.repeat(10));
     expect(pct(1, 3)).toBe('33%');
   });
-  it('prefers an active swarm in the headline', () => {
-    const m = { ...EMPTY, forge: FORGE, swarm: { active: true, live: 2, parallel: 5, stalled: null, waiting: 1, ready: 0, conflict: 0, fronts: [] } };
-    expect(headline(m)).toMatchObject({ section: 'forge', title: '⑂ 2/5' });
+  it('execution card: header with mode, progress and the coordinator state; a row per running task', () => {
+    const card = buildCards({ ...EMPTY, execution: EXEC }, T, 0).find(c => c.title === T.sExecution)!;
+    const text = JSON.stringify(card);
+    expect(text).toContain('1/3');
+    expect(text).toContain('3 ' + T.integratedN);
+    expect(text).toContain(T.silent);
+    expect(text).toContain('T004');
+    expect(text).toContain('r2');
+    expect(text).toContain('5m');
+    expect(text).toContain(`${T.queued}: T003`);
   });
-  it('words the swarm waiting note with the locale text, and keeps details as they are', () => {
-    const fronts = [
-      { track: 'b', status: 'waiting', task: null, done: 0, total: 2, waitTask: 'A1', waitTrack: 'a', note: null },
-      { track: 'c', status: 'conflict', task: null, done: 1, total: 1, waitTask: null, waitTrack: null, note: 'merge conflict' },
-    ];
-    const es = { ...T, waitsFor: (task: string, track: string) => `espera a ${task} (${track})` };
-    const [card] = buildCards({ ...EMPTY, swarm: { active: true, live: 0, parallel: 2, stalled: null, waiting: 1, ready: 0, conflict: 1, fronts } }, es, 0);
-    const rows = card.blocks.filter(b => b.kind === 'row').map(b => (b.kind === 'row' ? b.text : ''));
-    expect(rows).toEqual(['espera a A1 (a)', 'merge conflict']);
+  it('the execution leads the lens band headline', () => {
+    expect(headline({ ...EMPTY, execution: EXEC, forge: FORGE })).toMatchObject({ section: 'forge', title: '▶ 1/3', detail: 'T004 review' });
+    expect(headline({ ...EMPTY, execution: { ...EXEC, active: false, stopReason: 'stalled' }, forge: FORGE })).toMatchObject({ title: 'orders' });
+  });
+  it('a large forge task during an execution draws the run stages', () => {
+    const card = buildCards({ ...EMPTY, execution: EXEC, forge: { ...FORGE, path: 'large', phase: 'review' } }, T, 0).find(c => c.title === FORGE.task)!;
+    const stages = card.blocks.find(b => b.kind === 'stages') as { stages: { name: string; state: string }[] };
+    expect(stages.stages.map(s => `${s.name}:${s.state}`)).toEqual(['design:done', 'plan:done', 'execution:active', 'final:pending']);
   });
   it('the band headline prefers forge, then the roadmap, then todos', () => {
     expect(headline(EMPTY)).toBeNull();

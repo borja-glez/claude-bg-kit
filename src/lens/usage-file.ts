@@ -50,12 +50,8 @@ export function parseUsageFile(text: string | undefined): UsageFile | null {
   };
 }
 
-/** The main checkout of a session root: `<repo>` for a worktree whose .git file says `gitdir: <repo>/.git/worktrees/<x>`. */
-export function mainCheckoutFrom(root: string, gitFileText: string | null): string {
-  const m = gitFileText ? /^gitdir:\s*(.+?)[\\/]\.git[\\/]worktrees[\\/][^\\/\r\n]+\s*$/m.exec(gitFileText) : null;
-  const dir = m ? m[1] : null;
-  return dir && (/^[A-Za-z]:/.test(dir) || dir.startsWith('/')) ? dir : root;
-}
+// From lib/main-checkout.ts (lib/worktree.ts re-exports it too, but imports node:path, which the mod bundle cannot).
+export { mainCheckoutFrom } from '../lib/main-checkout.js';
 
 /** A run file as read: its text and its mtime (null when unknown). */
 export interface RunSource { text?: string; mtimeMs: number | null }
@@ -73,12 +69,12 @@ const startOf = (x: Obj | null): number | null => {
 const recent = (src: RunSource, now: number) => src.mtimeMs !== null && Number.isFinite(now) && now - src.mtimeMs <= RUN_RECENT_MS;
 
 /**
- * The current run's start: the swarm's, else the infinite run's, else the newest Large run's (base files). A swarm or
- * infinite run counts while its `active` is true or its file was touched within 12 hours; a Large run, by its mtime.
- * null when none counts: the run is over and the card shows this session only.
+ * The current run's start: the execution's (.forge/execution.json), else the infinite run's, else the newest Large
+ * run's (base files). An execution or infinite run counts while its `active` is true or its file was touched within
+ * 12 hours; a Large run, by its mtime. null when none counts: the run is over and the card shows this session only.
  */
-export function runStartedAt(src: { swarm?: RunSource; run?: RunSource; largeRuns: RunSource[] }, now: number): number | null {
-  for (const s of [src.swarm, src.run]) {
+export function runStartedAt(src: { execution?: RunSource; run?: RunSource; largeRuns: RunSource[] }, now: number): number | null {
+  for (const s of [src.execution, src.run]) {
     if (!s) continue;
     const x = parsed(s.text);
     if (!x || (x.active !== true && !recent(s, now))) continue;

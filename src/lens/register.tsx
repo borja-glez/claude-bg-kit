@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code';
 import type { Register, Timer } from 'claude-code';
 import type { BandModel } from '../mod/model.js';
-import { buildPanelModel, parseSddLedger, summarizeTodos, FORGE_RUN_MAX, FORGE_SWARM_MAX, PROPOSAL_ID, type Activity, type PanelModel } from './model.js';
+import { buildPanelModel, parseSddLedger, summarizeTodos, FORGE_RUN_MAX, FORGE_EXEC_MAX, FORGE_EXEC_FILE_MAX, FORGE_EXEC_TASKS_MAX, FORGE_LIVE_MAX, PROPOSAL_ID, type Activity, type PanelModel } from './model.js';
 import { clip, join, listOpt, loadBandModel, mtime, nowMs, readOpt, MAX_DOCS, type Engine } from '../mod/files.js';
 import { normalizeStatus } from '../lib/forge-status.js';
 import { buildCards, cardAlt } from './cards.js';
@@ -43,7 +43,8 @@ let roadmap: BandModel = { mode: 'none' };
 
 type PanelFiles = {
   ledger?: string; ledgerPlan?: string; planFallback?: string; ledgerMtimeMs?: number;
-  forgeStatus?: string; forgeRun?: string; forgeSwarm?: string; proposals?: Record<string, string>; forgeBriefs?: number;
+  forgeStatus?: string; forgeRun?: string; proposals?: Record<string, string>; forgeBriefs?: number;
+  forgeExecution?: string; forgeExecTasks?: Record<string, string>; forgeLive?: Record<string, string>;
 };
 // The last model built, kept in module memory for the band (which draws without reading $.state or files).
 let bandModel: PanelModel | null = null;
@@ -142,16 +143,54 @@ async function newest($: Engine, paths: string[]): Promise<{ path: string; t: nu
 }
 
 let proposalCache: { key: string; proposals: Record<string, string> } | null = null;
-// The root's .forge listing and its run.json / swarm.json texts from the last panel read, shared with the usage meter.
+// The root's .forge listing and its run.json / execution.json texts from the last panel read, shared with the usage meter.
 type Listing = Awaited<ReturnType<typeof listOpt>>;
-let forgeSeen: { dir: string; entries: Listing; run?: string; swarm?: string } | null = null;
+let forgeSeen: { dir: string; entries: Listing; run?: string; execution?: string } | null = null;
 
-// forge's status (kept by forge on each ledger append; the ledger itself is never read), its infinite run and its 50 newest proposals,
-// only when .forge/ lists.
-async function loadForgeFiles($: Engine, root: string): Promise<PanelFiles> {
+// The texts of up to `max` .json files of a folder, each at most `size` bytes, keyed by name without .json.
+async function readJsonDir($: Engine, dir: string, max: number, size: number, keep: (name: string) => boolean = () => true): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  const files = (await listOpt($, dir))
+    .filter(f => f.kind === 'file' && f.name.endsWith('.json') && f.size <= size && keep(f.name.slice(0, -5)))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, max);
+  for (const f of files) {
+    const text = await readOpt($, join(dir, f.name));
+    if (text !== undefined) out[f.name.slice(0, -5)] = text;
+  }
+  return out;
+}
+
+// The execution (.forge/execution.json, its public task files and the live signals), always from the main checkout:
+// the coordinator writes it there, whichever worktree this session is in.
+async function loadExecutionFiles($: Engine, main: string, listing?: Listing): Promise<PanelFiles> {
   const out: PanelFiles = {};
+  const dir = join(main, '.forge');
+  const entries = listing ?? await listOpt($, dir);
+  const exec = entries.find(f => f.kind === 'file' && f.name === 'execution.json');
+  if (!exec || exec.size > FORGE_EXEC_MAX) return out;
+  out.forgeExecution = await readOpt($, join(dir, 'execution.json'));
+  if (out.forgeExecution === undefined) return out;
+  if (entries.some(f => f.kind === 'dir' && f.name === 'execution')) {
+    out.forgeExecTasks = await readJsonDir($, join(dir, 'execution'), FORGE_EXEC_TASKS_MAX, FORGE_EXEC_FILE_MAX, name => !name.startsWith('baseline-') && SAFE_TASK.test(name));
+  }
+  if (entries.some(f => f.kind === 'dir' && f.name === 'live')) {
+    out.forgeLive = await readJsonDir($, join(dir, 'live'), FORGE_LIVE_MAX, FORGE_EXEC_FILE_MAX);
+  }
+  return out;
+}
+
+// forge's status (kept by forge on each ledger append; the ledger itself is never read), its infinite run and its 50
+// newest proposals from the session root, only when .forge/ lists; the execution from the main checkout.
+async function loadForgeFiles($: Engine, root: string): Promise<PanelFiles> {
+  // Resolved once per session and shared with the usage meter (usageWhere). A .git folder does not read (undefined):
+  // a normal checkout, the root itself.
+  if (mainCheckout === null) mainCheckout = mainCheckoutFrom(root, (await readOpt($, join(root, '.git'))) ?? null);
+  const main = mainCheckout;
   const dir = join(root, '.forge');
   const entries = await listOpt($, dir);
+  let execFiles: PanelFiles = {};
+  try { execFiles = await loadExecutionFiles($, main, main === root ? entries : undefined); } catch { /* no execution card */ }
+  const out: PanelFiles = { ...execFiles };
   if (!entries.length) { forgeSeen = { dir, entries }; return out; }
   const status = entries.find(f => f.kind === 'file' && f.name === 'status.json');
   if (status && status.size <= FORGE_STATUS_MAX) out.forgeStatus = await readOpt($, join(dir, 'status.json'));
@@ -168,10 +207,8 @@ async function loadForgeFiles($: Engine, root: string): Promise<PanelFiles> {
   // The infinite run (.forge/run.json, a few hundred bytes): not read above 16 KiB.
   const run = entries.find(f => f.kind === 'file' && f.name === 'run.json');
   if (run && run.size <= FORGE_RUN_MAX) out.forgeRun = await readOpt($, join(dir, 'run.json'));
-  // The swarm (.forge/swarm.json, a few KB): not read above 64 KiB.
-  const swarm = entries.find(f => f.kind === 'file' && f.name === 'swarm.json');
-  if (swarm && swarm.size <= FORGE_SWARM_MAX) out.forgeSwarm = await readOpt($, join(dir, 'swarm.json'));
-  forgeSeen = { dir, entries, run: out.forgeRun, swarm: out.forgeSwarm };
+  // The execution was read above from the main checkout: shared with the usage meter when that is this root.
+  forgeSeen = { dir, entries, run: out.forgeRun, execution: main === root ? out.forgeExecution : undefined };
   if (entries.some(f => f.kind === 'dir' && f.name === 'proposals')) {
     const pdir = join(dir, 'proposals');
     const files = (await listOpt($, pdir))
@@ -366,7 +403,7 @@ async function largeRuns($: Engine, forge: string, now: number): Promise<RunSour
 }
 
 // The run's start and the other sessions' files, or null when the main checkout has no .forge/ or no run. The .forge
-// listing, run.json and swarm.json come from the panel's own read when the root is the main checkout.
+// listing, run.json and execution.json come from the panel's own read when the root is the main checkout.
 async function refreshRunInputs($: Engine, now: number): Promise<void> {
   const where = await usageWhere($);
   const forge = join(where.main, '.forge');
@@ -377,7 +414,7 @@ async function refreshRunInputs($: Engine, now: number): Promise<void> {
     entries.some(f => f.kind === 'file' && f.name === name && f.size <= max) ? readOpt($, join(forge, name)) : undefined;
   const mtimeOf = (name: string) => entries.find(f => f.kind === 'file' && f.name === name)?.mtimeMs ?? null;
   const since = runStartedAt({
-    swarm: { text: seen ? seen.swarm : await small('swarm.json', FORGE_SWARM_MAX), mtimeMs: mtimeOf('swarm.json') },
+    execution: { text: seen ? seen.execution : await small('execution.json', FORGE_EXEC_MAX), mtimeMs: mtimeOf('execution.json') },
     run: { text: seen ? seen.run : await small('run.json', FORGE_RUN_MAX), mtimeMs: mtimeOf('run.json') },
     largeRuns: entries.some(f => f.kind === 'dir' && f.name === 'work') ? await largeRuns($, forge, now) : [],
   }, now);
@@ -543,7 +580,9 @@ const TEXT = {
     noTask: 'sin tarea en curso', track: 'frente', decision: 'decisión pendiente',
     sRoadmap: 'Roadmap', sSuperpowers: 'superpowers', sNow: 'Ahora', sTodos: 'Pendientes', sSubagents: 'Subagentes',
     sTasks: 'Tareas de Claude Code', fixRound: 'ronda', phase: 'Fase', done: 'hechas', open: 'abiertas', tool: 'herramienta', turn: 'turno',
-    sSwarm: 'enjambre', swarmWaiting: 'en espera', swarmReady: 'listos', waitsFor: (task: string, track: string) => `espera a ${task} (${track})`,
+    sExecution: 'Ejecución', modeSubagents: 'subagentes', modeSessions: 'sesiones', alive: 'viva', silent: 'sin señal', stopped: 'parada',
+    queued: 'por integrar', orphans: 'huérfanas', conflictsLbl: 'en conflicto', blockedLbl: 'bloqueadas', integratedN: 'integradas',
+    stage: { brief: 'brief', implement: 'implementar', validate: 'validar', verify: 'verificar', review: 'revisar', verdict: 'veredicto', integrate: 'integrar', execution: 'ejecución' },
     sForge: 'forge', approve: 'Aprobar', reject: 'Rechazar', hoursLeft: (h: number) => `quedan ${h} h`, auto: 'auto',
     pressEnter: 'Comando listo en el prompt: pulsa Enter',
     briefs: 'briefs', cycle: 'ciclo', task: 'Tarea', proposals: 'Propuestas',
@@ -555,7 +594,9 @@ const TEXT = {
     noTask: 'no task in progress', track: 'track', decision: 'decision pending',
     sRoadmap: 'Roadmap', sSuperpowers: 'superpowers', sNow: 'Now', sTodos: 'Todos', sSubagents: 'Subagents',
     sTasks: 'Claude Code tasks', fixRound: 'round', phase: 'Phase', done: 'done', open: 'open', tool: 'tool', turn: 'turn',
-    sSwarm: 'swarm', swarmWaiting: 'waiting', swarmReady: 'ready', waitsFor: (task: string, track: string) => `waits for ${task} (${track})`,
+    sExecution: 'Execution', modeSubagents: 'subagents', modeSessions: 'sessions', alive: 'alive', silent: 'silent', stopped: 'stopped',
+    queued: 'to integrate', orphans: 'orphaned', conflictsLbl: 'in conflict', blockedLbl: 'blocked', integratedN: 'integrated',
+    stage: { brief: 'brief', implement: 'implement', validate: 'validate', verify: 'verify', review: 'review', verdict: 'verdict', integrate: 'integrate', execution: 'execution' },
     sForge: 'forge', approve: 'Approve', reject: 'Reject', hoursLeft: (h: number) => `${h}h left`, auto: 'auto',
     pressEnter: 'Command ready in the prompt: press Enter',
     briefs: 'briefs', cycle: 'cycle', task: 'Task', proposals: 'Proposals',

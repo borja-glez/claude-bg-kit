@@ -10,7 +10,9 @@ import { shortModelName } from '../lib/prices.js';
 
 export interface CardTexts {
   sRoadmap: string; sSuperpowers: string; sNow: string; sTodos: string; sSubagents: string; sTasks: string; sForge: string;
-  sSwarm: string; swarmWaiting: string; swarmReady: string; waitsFor: (task: string, track: string) => string;
+  sExecution: string; modeSubagents: string; modeSessions: string; alive: string; silent: string; stopped: string;
+  queued: string; conflictsLbl: string; blockedLbl: string; orphans: string; integratedN: string;
+  stage: Record<'brief' | 'implement' | 'validate' | 'verify' | 'review' | 'verdict' | 'integrate' | 'execution', string>;
   track: string; phase: string; noTask: string; decision: string; fixRound: string; done: string; open: string;
   tool: string; turn: string; briefs: string; cycle: string; hoursLeft: (h: number) => string; auto: string; task: string;
   sUsage: string; effort: string; effortLevel: (e: string) => string; thisSession: string; run: string; gMain: string; gImpl: string;
@@ -67,7 +69,10 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     const blocks: Block[] = [];
     const f = m.forge;
     if (f) {
-      blocks.push({ kind: 'stages', stages: stagesFor(f.path, forgePhase(f), f.validators.length ? (f.validators.every(v => v.ok) ? 'ok' : 'failed') : null, f.verify?.planned === true), hue: SECTION_HUE.forge });
+      // A Large task whose plan is executing draws the run's stages, not those of the last task logged.
+      const stages = m.execution?.active && f.path === 'large' ? stagesFor('run', 'execution')
+        : stagesFor(f.path, forgePhase(f), f.validators.length ? (f.validators.every(v => v.ok) ? 'ok' : 'failed') : null, f.verify?.planned === true);
+      blocks.push({ kind: 'stages', stages, hue: SECTION_HUE.forge });
       if (f.verify?.planned) {
         const v = f.verify;
         const where = `verify ${v.surfaces.join(', ')}`;
@@ -106,22 +111,27 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     });
   }
 
-  if (m.swarm) {
-    const sw = m.swarm;
-    const DOT: Record<string, Hue> = { running: 'peach', queued: 's2', waiting: 'yellow', blocked: 'yellow', ready: 'teal', integrated: 'green', conflict: 'red', 'launch-failed': 'red' };
-    const MARK: Record<string, string> = { running: '●', queued: '·', waiting: '⧗', blocked: '⧗', ready: '⇡', integrated: '✓', conflict: '⚠', 'launch-failed': '⚠' };
+  if (m.execution) {
+    const x = m.execution;
+    const HUE: Record<'alive' | 'silent' | 'stopped', Hue> = { alive: 'green', silent: 'yellow', stopped: 'red' };
+    const stage = (s: string) => t.stage[s as keyof CardTexts['stage']] ?? s;
     const blocks: Block[] = [{
-      kind: 'bar', ratio: ratio(sw.live, sw.parallel), hue: 'teal', moving: sw.active && sw.live > 0, label: `⑂ ${t.sSwarm}`,
-      right: [`${sw.live}/${sw.parallel}`, sw.waiting && `${sw.waiting} ${t.swarmWaiting}`, sw.ready && `${sw.ready} ${t.swarmReady}`, sw.conflict && `⚠ ${sw.conflict}`].filter(Boolean).join(' · '),
+      kind: 'bar', ratio: ratio(x.slots.length, x.parallel), hue: 'teal', moving: x.active && x.slots.length > 0,
+      label: `${x.mode === 'sessions' ? t.modeSessions : t.modeSubagents} ${x.slots.length}/${x.parallel}`,
+      // Done: accepted (waiting to integrate) or integrated.
+      right: `${x.integrated + x.queued.length}/${x.total} ${t.done} · ${x.integrated} ${t.integratedN}`,
     }];
-    if (sw.stalled) blocks.push({ kind: 'text', text: sw.stalled, dim: false });
-    for (const f of sw.fronts) {
+    if (x.stallReason) blocks.push({ kind: 'text', text: x.stallReason, dim: false });
+    for (const s of x.slots) {
       blocks.push({
-        kind: 'row', dot: DOT[f.status] ?? 's2', spinning: f.status === 'running', tag: { text: `${MARK[f.status] ?? '·'} ${f.track}`, hue: DOT[f.status] ?? 's2' },
-        text: f.task ?? (f.waitTask ? t.waitsFor(f.waitTask, f.waitTrack ?? '') : f.note) ?? '', right: `${f.done}/${f.total}`,
+        kind: 'row', dot: HUE[s.liveness], spinning: s.liveness === 'alive', tag: { text: s.task, hue: HUE[s.liveness] }, text: s.title ?? '',
+        right: [stage(s.stage), s.agent ? tierOf(s.agent).label : null, duration(s.seconds), s.round ? `r${s.round}` : null].filter(Boolean).join(' · '),
       });
     }
-    out.push({ icon: SECTION_ICON.forge, title: t.sSwarm, hue: 'teal', chip: { text: `${sw.live}/${sw.parallel}`, hue: 'teal' }, blocks });
+    const list = (label: string, ids: string[]) => { if (ids.length) blocks.push({ kind: 'text', text: `${label}: ${ids.join(', ')}`, dim: true }); };
+    list(t.queued, x.queued); list(t.conflictsLbl, x.conflicts); list(t.blockedLbl, x.blocked); list(t.orphans, x.orphans);
+    const coord = x.coordinator.liveness;
+    out.push({ icon: '▶', title: t.sExecution, hue: 'teal', chip: { text: coord === 'alive' ? t.alive : coord === 'silent' ? t.silent : t.stopped, hue: HUE[coord] }, blocks });
   }
 
   if (m.usage) {
