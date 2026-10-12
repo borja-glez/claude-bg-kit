@@ -141,6 +141,19 @@ describe('plugin layout', () => {
     expect(forge.dependencies).toEqual([{ name: 'waypoint', version: '^0.15.0' }]);
     expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.15.0');
   });
+  it('README version badges and dependency lines match the manifests', () => {
+    const v = (p: string) => JSON.parse(read(`plugins/${p}/.claude-plugin/plugin.json`)).version as string;
+    const dep = (JSON.parse(read('plugins/forge/.claude-plugin/plugin.json')).dependencies as { version: string }[])[0].version;
+    for (const lang of ['', '.es']) {
+      const root = read(`README${lang}.md`);
+      for (const p of ['waypoint', 'forge', 'lens']) expect(root).toContain(`badge/${p}-${v(p)}-`);
+      expect(root).toContain(`waypoint ${dep} `);
+      for (const p of ['waypoint', 'forge', 'lens']) expect(read(`plugins/${p}/README${lang}.md`)).toMatch(new RegExp(`badge/versi(on|%C3%B3n)-${v(p).replace(/\./g, '\\.')}-`));
+      const forge = read(`plugins/forge/README${lang}.md`);
+      expect(forge).toContain(`waypoint%20${encodeURIComponent(dep)}-`);
+      expect(forge).toContain(`) ${dep},`);
+    }
+  });
   it('READMEs describe the decisions', () => {
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
       const md = read(f);
