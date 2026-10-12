@@ -295,8 +295,26 @@ describe('forge CLI', () => {
     const r = run(['validate', '--all', '--cwd', other], { ...io, exec: undefined, git: undefined });
     expect(r.code).toBe(0);
     expect(JSON.parse(r.stdout)).toEqual([expect.objectContaining({ validator: 'test', ok: true })]);
-    expect(readEvents(other).at(-1)).toMatchObject({ kind: 'validate' });
+    // forge's own state stays with the caller: the event lands in the caller's ledger, not the other directory's.
+    expect(readEvents(root).at(-1)).toMatchObject({ kind: 'validate' });
+    expect(existsSync(path.join(other, '.forge', 'ledger.jsonl'))).toBe(false);
     expect(run(['validate', '--all', '--cwd', path.join(other, 'nope')], io).code).toBe(2);
+  });
+  it('--cwd keeps file flags relative to the caller: a baseline in the caller marks preexisting failures', () => {
+    const other = mkdtempSync(path.join(tmpdir(), 'forge-cwd-'));
+    writeFileSync(path.join(other, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "process.exit(1)"' } }));
+    mkdirSync(path.join(root, '.forge', 'work', 'T'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'work', 'T', 'baseline-1.json'), JSON.stringify([{ validator: 'test', ok: false, flaky: false, failures: [] }]));
+    const r = run(['validate', '--all', '--cwd', other, '--baseline', '.forge/work/T/baseline-1.json'], { ...io, exec: undefined, git: undefined });
+    expect(r.stderr).toBe('');
+    expect(JSON.parse(r.stdout)).toEqual([expect.objectContaining({ validator: 'test', ok: false, preexisting: true })]);
+    expect(r.code).toBe(0);
+  });
+  it('--cwd must be a directory', () => {
+    writeFileSync(path.join(root, 'file.txt'), 'x');
+    const r = run(['validate', '--all', '--cwd', path.join(root, 'file.txt')], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/not a directory/);
   });
 });
 

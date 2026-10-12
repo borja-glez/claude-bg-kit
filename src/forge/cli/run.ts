@@ -1,5 +1,5 @@
 import { spawnSync, execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync, readdirSync, openSync, closeSync, fstatSync, readSync, rmSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, statSync, lstatSync, readFileSync, readdirSync, openSync, closeSync, fstatSync, readSync, rmSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { appendEvent, readEvents, forgeDir, LEDGER_KINDS, type LedgerKind } from '../ledger.js';
@@ -27,7 +27,7 @@ import { readLocal, updateLocal } from '../local.js';
 import { readSurfaces, detectDrafts, appendLearned, surfaceFile, surfaceHash } from '../surfaces.js';
 
 export interface ExecResult { code: number; output: string; ms: number; timedOut: boolean }
-export interface Io { cwd: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void }
+export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void }
 type Result = { code: number; stdout: string; stderr: string };
 
 const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|agents|last|proposals|surfaces|tools|local|verify-plan|verify-cleanup|waypoint-cli|infinite|cycle|swarm|stop|hook> ...';
@@ -194,16 +194,20 @@ function hookStop(io: Io): string {
 }
 
 export function run(argv: string[], io: Io): Result {
-  // --cwd <dir>: run there, so a coordinator never has to cd into a worktree (a cd outside a subshell sticks).
+  // --cwd <dir>: the code lives there (validators, git and the project's files), so a coordinator never has to cd
+  // into a worktree (a cd outside a subshell sticks). forge's own state (ledger, .forge/work, the execution) and
+  // every file flag stay with the caller's directory.
   const cwdAt = argv.indexOf('--cwd');
   if (cwdAt >= 0) {
     const dir = argv[cwdAt + 1];
     if (!dir || dir.startsWith('--')) return { code: 2, stdout: '', stderr: 'forge: --cwd needs a directory\n' };
     const abs = path.resolve(io.cwd, dir);
     if (!existsSync(abs)) return { code: 2, stdout: '', stderr: `forge: --cwd ${abs} does not exist\n` };
+    if (!statSync(abs).isDirectory()) return { code: 2, stdout: '', stderr: `forge: --cwd ${abs} is not a directory\n` };
     argv = [...argv.slice(0, cwdAt), ...argv.slice(cwdAt + 2)];
-    io = { ...io, cwd: abs, git: defaultGit(abs), exec: defaultExec(abs) };
+    io = { ...io, workdir: abs, git: defaultGit(abs), exec: defaultExec(abs) };
   }
+  const repoDir = io.workdir ?? io.cwd;
   const [cmd, ...args] = argv;
   const flag = (name: string) => {
     const i = args.indexOf(`--${name}`);
@@ -267,7 +271,7 @@ export function run(argv: string[], io: Io): Result {
         const tracked = lines(listed);
         const zoneFiles = planned ? tracked.filter(f => planned.zones.some(z => globMatch(z, f))) : [];
         const extra = planned ? { files: zoneFiles, zones: zonesFromPaths(planned.zones) } : undefined;
-        const catalog = detectValidators(repoReader(io.cwd), loadConfig(io.cwd)).map(v => ({ name: v.name, cmd: v.cmd, kind: v.kind, source: v.source }));
+        const catalog = detectValidators(repoReader(repoDir), loadConfig(repoDir)).map(v => ({ name: v.name, cmd: v.cmd, kind: v.kind, source: v.source }));
         const names = catalog.map(v => v.name);
         const result = triage(task, { files: tracked, commits, gitOk: listed !== null, grep }, names, extra);
         if (planned?.zones.length && !zoneFiles.length) result.reasons.push('zones match no tracked file (new files?)');
@@ -289,8 +293,8 @@ export function run(argv: string[], io: Io): Result {
         return json({ ...result, catalog, new: fresh });
       }
       case 'validate': {
-        const config = loadConfig(io.cwd);
-        const all = detectValidators(repoReader(io.cwd), config);
+        const config = loadConfig(repoDir);
+        const all = detectValidators(repoReader(repoDir), config);
         const p = flag('path');
         if (p !== undefined && !(PATH_ORDER as readonly string[]).includes(p)) throw new UsageError(`validate: --path must be one of ${PATH_ORDER.join('|')}`);
         let scope: Scope;
@@ -557,7 +561,7 @@ export function run(argv: string[], io: Io): Result {
         if (sub === undefined || sub.startsWith('--')) {
           const surfaces = readSurfaces(io.cwd);
           const local = readLocal(io.cwd);
-          const drafts = detectDrafts(repoReader(io.cwd)).filter(d => !surfaces.some(s => s.name === d.name) && !local.proposed.includes(d.name));
+          const drafts = detectDrafts(repoReader(repoDir)).filter(d => !surfaces.some(s => s.name === d.name) && !local.proposed.includes(d.name));
           return json({ surfaces, drafts });
         }
         const name = flag('name');
@@ -594,7 +598,7 @@ export function run(argv: string[], io: Io): Result {
         const plan = verifyPlan({
           path: p, asked: has('asked'),
           changed: diff === null ? null : diff.split('\n').map(s => s.trim()).filter(Boolean),
-          surfaces: readSurfaces(io.cwd), drafts: detectDrafts(repoReader(io.cwd)), local: readLocal(io.cwd),
+          surfaces: readSurfaces(io.cwd), drafts: detectDrafts(repoReader(repoDir)), local: readLocal(io.cwd),
           missing: s => missingTools(s.tools, onPath),
         });
         appendEvent(io.cwd, { ts: ts(), kind: 'verify', task, planned: plan.eligible, surfaces: plan.surfaces.filter(s => s.permission === 'allowed').map(s => s.name) });
@@ -628,7 +632,7 @@ export function run(argv: string[], io: Io): Result {
       }
       case 'swarm':
         return swarmCommand(args, io, {
-          git: io.git ?? defaultGit(io.cwd), exec: io.exec ?? defaultExec(io.cwd), repo: repoReader(io.cwd),
+          git: io.git ?? defaultGit(io.cwd), exec: io.exec ?? defaultExec(io.cwd), repo: repoReader(repoDir),
           at: dir => ({ git: defaultGit(dir), exec: defaultExec(dir), repo: repoReader(dir) }),
         });
       case 'hook': {
