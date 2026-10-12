@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectValidators, selectValidators, runValidators, failureLines, globMatch, type RepoReader } from '../src/forge/validators.js';
+import { detectValidators, selectValidators, runValidators, failureLines, globMatch, type RepoReader, type Validator, type Scope } from '../src/forge/validators.js';
 import { parseConfig } from '../src/forge/config.js';
 
 // list(dir) returns the direct entries of dir, like readdirSync.
@@ -125,15 +125,27 @@ describe('detectValidators', () => {
 });
 
 describe('selectValidators', () => {
+  const v = (name: string, kind: string, extra: Partial<Validator> = {}): Validator => ({ name, cmd: name, kind, source: 'detected', ...extra });
   const all = [
-    { name: 'typecheck', cmd: 'a', kind: 'typecheck' as const, source: 'detected' as const },
-    { name: 'build', cmd: 'b', kind: 'build' as const, source: 'detected' as const },
-    { name: 'e2e', cmd: 'c', kind: 'other' as const, source: 'manual' as const, affects: ['web/**'] },
+    v('typecheck', 'typecheck'), v('build', 'build'), v('web', 'other', { affects: ['web/**'] }),
+    v('e2e', 'e2e', { affects: ['web/**'] }), v('e2e-all', 'e2e'), v('bench', 'bench'),
+    v('a11y', 'a11y'), v('hw', 'hardware', { when: 'final' }), v('fast', 'custom', { when: 'always' }), v('late', 'test', { when: 'final' }),
   ];
-  it('--all runs everything', () => { expect(selectValidators(all, null)).toHaveLength(3); });
-  it('affected skips build and validators whose globs miss', () => {
-    expect(selectValidators(all, ['src/x.ts']).map(v => v.name)).toEqual(['typecheck']);
-    expect(selectValidators(all, ['web/page.tsx']).map(v => v.name)).toEqual(['typecheck', 'e2e']);
+  const names = (s: Scope) => selectValidators(all, s).map(x => x.name);
+  it('affected: no build, e2e, bench or medium/final kinds; globs filter', () => {
+    expect(names({ mode: 'affected', files: ['src/x.ts'] })).toEqual(['typecheck', 'fast']);
+    expect(names({ mode: 'affected', files: ['web/page.tsx'] })).toEqual(['typecheck', 'web', 'fast']);
+  });
+  it('small: everything except e2e, bench and medium/final kinds', () => {
+    expect(names({ mode: 'small' })).toEqual(['typecheck', 'build', 'web', 'fast']);
+  });
+  it('heavy: e2e only when its affects match the diff or it has none; no bench; when: medium kinds run', () => {
+    expect(names({ mode: 'heavy', changed: ['src/x.ts'] })).toEqual(['typecheck', 'build', 'web', 'e2e-all', 'a11y', 'fast']);
+    expect(names({ mode: 'heavy', changed: ['web/a.tsx'] })).toEqual(['typecheck', 'build', 'web', 'e2e', 'e2e-all', 'a11y', 'fast']);
+    expect(names({ mode: 'heavy', changed: null })).toEqual(['typecheck', 'build', 'web', 'e2e', 'e2e-all', 'a11y', 'fast']);
+  });
+  it('final: everything', () => {
+    expect(names({ mode: 'final' })).toEqual(all.map(x => x.name));
   });
   it('globs', () => {
     expect(globMatch('web/**', 'web/a/b.ts')).toBe(true);

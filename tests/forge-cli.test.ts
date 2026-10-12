@@ -222,6 +222,28 @@ describe('forge CLI', () => {
     expect(JSON.parse(r.stdout)).toEqual([]);
     expect(r.stderr).toBe('no validators cover the affected paths\n');
   });
+  it('validate --path small skips e2e; --path medium --base runs e2e only when the diff matches', () => {
+    writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'x', 'test:e2e': 'y' } }));
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators:\n  - name: test:e2e\n    cmd: e2e\n    kind: e2e\n    affects: ["web/**"]\n');
+    const ran: string[] = [];
+    const exec = (cmd: string) => { ran.push(cmd); return { code: 0, output: '', ms: 1, timedOut: false }; };
+    const git = (args: string[]) => (args[0] === 'diff' ? 'web/a.tsx\n' : null);
+    expect(run(['validate', '--all', '--path', 'small', '--task', 't'], { ...io, exec }).code).toBe(0);
+    expect(ran).toEqual(['npm test']);
+    ran.length = 0;
+    expect(run(['validate', '--all', '--path', 'medium', '--base', 'abc', '--task', 't'], { ...io, exec, git }).code).toBe(0);
+    expect(ran).toEqual(['npm test', 'e2e']);
+    ran.length = 0;
+    expect(run(['validate', '--all', '--path', 'medium', '--base', 'abc', '--task', 't'], { ...io, exec, git: () => 'src/x.ts\n' }).code).toBe(0);
+    expect(ran).toEqual(['npm test']);
+    ran.length = 0;
+    expect(run(['validate', '--final', '--task', 't'], { ...io, exec }).code).toBe(0);
+    expect(ran).toEqual(['npm test', 'e2e']);
+  });
+  it('validate --path must be a known path', () => {
+    expect(run(['validate', '--all', '--path', 'huge'], io).code).toBe(2);
+  });
 });
 
 describe('forge infinite', () => {

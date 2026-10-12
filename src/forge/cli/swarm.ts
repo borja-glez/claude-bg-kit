@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { UsageError } from './errors.js';
 import type { ExecResult, Io } from './run.js';
-import { detectValidators, runValidators, type RepoReader } from '../validators.js';
+import { detectValidators, selectValidators, runValidators, type RepoReader } from '../validators.js';
 import { loadConfig } from '../config.js';
 import { decide, readSwarm, saveSwarm } from '../swarm.js';
 import { stopFile } from '../run.js';
@@ -243,7 +243,7 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
   // Already in the base branch: nothing to commit.
   if (!merging()) return integrated();
   const config = loadConfig(io.cwd);
-  const failed = runValidators(detectValidators(deps.repo, config), deps.exec, config.validatorTimeoutSec).filter(r => !r.ok);
+  const failed = runValidators(selectValidators(detectValidators(deps.repo, config), { mode: 'heavy', changed: null }), deps.exec, config.validatorTimeoutSec).filter(r => !r.ok);
   if (failed.length) return rollback(`validators failed after integrating ${ref}: ${failed.map(r => r.validator).join(', ')}`);
   const committed = deps.git(['commit', '--no-edit', '-m', `swarm: integrate ${track}`]) !== null;
   if (!committed || merging() || deps.git(['rev-parse', 'HEAD'])?.trim() === preMergeSha) {

@@ -111,10 +111,26 @@ export function globMatch(glob: string, file: string): boolean {
   return new RegExp(`^${re}$`).test(file.replace(/\\/g, '/'));
 }
 
-// null = all; a list = the validators that cover those paths (never build).
-export function selectValidators(all: Validator[], affected: string[] | null): Validator[] {
-  if (affected === null) return all;
-  return all.filter(v => v.kind !== 'build' && (!v.affects?.length || affected.some(f => v.affects!.some(g => globMatch(g, f)))));
+// Which validators a run executes (spec §4.2). `when` decides first; otherwise known kinds have their own rule and
+// unknown kinds behave as when: medium. --affected keeps only validators whose `affects` match (or have none).
+export type Scope = { mode: 'affected'; files: string[] } | { mode: 'small' } | { mode: 'heavy'; changed: string[] | null } | { mode: 'final' };
+const KNOWN = new Set(['test', 'lint', 'typecheck', 'other', 'build', 'e2e', 'bench']);
+const covers = (v: Validator, files: string[]) => !v.affects?.length || files.some(f => v.affects!.some(g => globMatch(g, f)));
+
+function runsIn(v: Validator, scope: Scope): boolean {
+  const when = v.when ?? (KNOWN.has(v.kind) ? undefined : 'medium');
+  const m = scope.mode;
+  if (when === 'always') return true;
+  if (when === 'medium') return m === 'heavy' || m === 'final';
+  if (when === 'final') return m === 'final';
+  if (v.kind === 'build') return m !== 'affected';
+  if (v.kind === 'bench') return m === 'final';
+  if (v.kind === 'e2e') return m === 'final' || (m === 'heavy' && (scope.changed === null || covers(v, scope.changed)));
+  return true;
+}
+
+export function selectValidators(all: Validator[], scope: Scope): Validator[] {
+  return all.filter(v => runsIn(v, scope) && (scope.mode !== 'affected' || covers(v, scope.files)));
 }
 
 const FAILURE = /(fail|error|✗|×|assert|panic|exception)/i;

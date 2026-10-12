@@ -19,7 +19,7 @@ import { parseDocument } from 'yaml';
 import { UsageError } from './errors.js';
 import { swarmCommand } from './swarm.js';
 import { readSwarm, saveSwarm } from '../swarm.js';
-import { detectValidators, selectValidators, runValidators, globMatch, type RepoReader } from '../validators.js';
+import { detectValidators, selectValidators, runValidators, globMatch, type RepoReader, type Scope } from '../validators.js';
 
 export interface ExecResult { code: number; output: string; ms: number; timedOut: boolean }
 export interface Io { cwd: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void }
@@ -268,8 +268,18 @@ export function run(argv: string[], io: Io): Result {
       case 'validate': {
         const config = loadConfig(io.cwd);
         const all = detectValidators(repoReader(io.cwd), config);
-        const affected = has('all') || flag('affected') === undefined ? null : flag('affected')!.split(',').map(s => s.trim()).filter(Boolean);
-        const list = selectValidators(all, affected);
+        const p = flag('path');
+        if (p !== undefined && !(PATH_ORDER as readonly string[]).includes(p)) throw new UsageError(`validate: --path must be one of ${PATH_ORDER.join('|')}`);
+        let scope: Scope;
+        if (has('final')) scope = { mode: 'final' };
+        else if (!has('all') && flag('affected') !== undefined) scope = { mode: 'affected', files: flag('affected')!.split(',').map(s => s.trim()).filter(Boolean) };
+        else if (p === 'trivial' || p === 'small') scope = { mode: 'small' };
+        else {
+          const base = flag('base');
+          const diff = base ? (io.git ?? defaultGit(io.cwd))(['diff', '--name-only', `${base}..HEAD`]) : null;
+          scope = { mode: 'heavy', changed: diff === null ? null : diff.split('\n').map(s => s.trim()).filter(Boolean) };
+        }
+        const list = selectValidators(all, scope);
         const results = runValidators(list, io.exec ?? defaultExec(io.cwd), config.validatorTimeoutSec);
         const allOk = results.every(r => r.ok);
         appendEvent(io.cwd, { ts: ts(), kind: 'validate', ...(flag('task') ? { task: flag('task') } : {}), ok: allOk, results: results.map(r => ({ validator: r.validator, ok: r.ok, flaky: r.flaky, ...(r.ok ? {} : { failures: r.failures }) })) });
