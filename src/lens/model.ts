@@ -2,9 +2,10 @@ import type { BandModel } from '../mod/model.js';
 import { normalizeProposal } from '../lib/proposals.js';
 import { cleanText, normalizeStatus } from '../lib/forge-status.js';
 import { parseRun } from '../lib/forge-run.js';
-import { normalizeLive, normalizePublicTask, parseExecution, type LiveDoc, type PublicTask } from '../lib/execution-state.js';
+import { FUTURE_SKEW_MS, normalizeLive, normalizePublicTask, parseExecution, type LiveDoc, type PublicTask } from '../lib/execution-state.js';
 import { executionView } from '../lib/execution-view.js';
 import { MAIN, type UsageState } from './usage.js';
+import { STAGES, stageOf } from './view.js';
 import { summarizeUsage } from './usage-summary.js';
 import { PRICES_AS_OF } from '../lib/prices.js';
 import { freshFinished, type FinishedAgent } from './finished.js';
@@ -133,6 +134,7 @@ export type PanelModel = {
       planned: boolean; surfaces: string[]; result: string | null; passed: number | null; total: number | null;
       evidence: string | null; reason: string | null;
     } | null;
+    timing?: { taskSeconds: number | null; done: boolean; stages: { name: string; seconds: number; live: boolean }[] } | null;
   } | null;
   infinite: { cycle: number; cyclesMax: number | null; hoursLeft: number | null; active: boolean; autoApproved: string[] } | null;
   execution: {
@@ -231,7 +233,41 @@ export function forgeFromStatus(text: string, now: number, briefs: number | null
   const t = Date.parse(st.ts);
   if (!Number.isFinite(t) || !Number.isFinite(now) || now - t > FORGE_WINDOW_MS) return null;
   const { ts: _ts, taskStartedAt: _a, stageSince: _b, stages: _c, doneAt: _d, ...forge } = st;
-  return { ...forge, briefs };
+  return { ...forge, briefs, timing: forgeTiming(st, now) };
+}
+
+/** Whole seconds from `from` to `to`; null when `from` is missing or not a date, either end is more than FUTURE_SKEW_MS ahead of now, or the span is negative. */
+export function elapsed(from: string | null | undefined, to: number, now: number): number | null {
+  const t = from ? Date.parse(from) : NaN;
+  if (!Number.isFinite(t) || !Number.isFinite(to) || !Number.isFinite(now)) return null;
+  if (t - now > FUTURE_SKEW_MS || to - now > FUTURE_SKEW_MS || to < t) return null;
+  return Math.floor((to - t) / 1000);
+}
+
+// The task's time (to doneAt when finished) and its stages grouped as lens names them, the current one live.
+function forgeTiming(st: { phase: string; taskStartedAt: string | null; stageSince: string | null; stages: Record<string, number>; doneAt: string | null }, now: number): NonNullable<PanelModel['forge']>['timing'] {
+  if (!st.taskStartedAt) return null;
+  // A doneAt that is not a date, is before the start or is in the future is ignored: the task counts as running.
+  const rawDone = st.doneAt ? Date.parse(st.doneAt) : NaN;
+  const doneMs = elapsed(st.taskStartedAt, rawDone, now) !== null ? rawDone : NaN;
+  const done = Number.isFinite(doneMs);
+  const sums = new Map<string, number>();
+  for (const [phase, s] of Object.entries(st.stages ?? {})) {
+    if (typeof s !== 'number' || !Number.isFinite(s) || s < 0) continue;
+    const name = stageOf(phase);
+    sums.set(name, (sums.get(name) ?? 0) + s);
+  }
+  const current = stageOf(st.phase || 'triage');
+  const liveSecs = done ? null : elapsed(st.stageSince, now, now);
+  if (liveSecs !== null) sums.set(current, (sums.get(current) ?? 0) + liveSecs);
+  const order: readonly string[] = STAGES;
+  const known = order.filter(n => sums.has(n));
+  const other = [...sums.keys()].filter(n => !order.includes(n));
+  return {
+    taskSeconds: elapsed(st.taskStartedAt, done ? doneMs : now, now),
+    done,
+    stages: [...known, ...other].map(name => ({ name, seconds: sums.get(name)!, live: liveSecs !== null && name === current })),
+  };
 }
 
 // Pending proposals (proposed or under discussion), newest id first (ids start with their UTC time), at most 5.
@@ -331,10 +367,13 @@ export function infiniteFromRun(text: string | undefined, proposals: Record<stri
   return { cycle, cyclesMax: max, hoursLeft, active: run.active, autoApproved: autoApproved(proposals) };
 }
 
-/** What the band compares and keeps: the model without the finished subagents' seconds (the band shows no times). */
+/** What the band compares and keeps: the model without the seconds it never shows (finished subagents, usage time, forge timing). */
 export function bandKey(model: PanelModel): string {
-  const { subagentsDone: _done, ...rest } = model;
-  return JSON.stringify(rest);
+  const { subagentsDone: _done, usage, forge, ...rest } = model;
+  const key: Record<string, unknown> = { ...rest };
+  if (usage) { const { time: _time, ...u } = usage; key.usage = u; } else key.usage = usage;
+  if (forge) { const { timing: _timing, ...f } = forge; key.forge = f; } else key.forge = forge;
+  return JSON.stringify(key);
 }
 
 export function buildPanelModel(input: {

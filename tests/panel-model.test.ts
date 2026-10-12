@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { buildBandModel } from '../src/mod/model.js';
 import { newUsage, recordStep, labelLoop, closeTurn } from '../src/lens/usage.js';
 import { FINISHED_TTL_MS } from '../src/lens/finished.js';
-import { buildPanelModel, bandKey, usageTime,forgeFromStatus, parsePlanTasks, parseSddLedger, summarizeTodos, type Activity } from '../src/lens/model.js';
+import { buildPanelModel, bandKey, usageTime, elapsed, forgeFromStatus, parsePlanTasks, parseSddLedger, summarizeTodos, type Activity, type PanelModel } from '../src/lens/model.js';
 
 const LEDGER = `# SDD ledger — plan: docs/superpowers/plans/2026-10-11-waypoint-views.md
 
@@ -216,10 +216,59 @@ const STATUS = {
   validators: [{ name: 'test', ok: true }], verdict: { action: 'accept', score: 0.97 }, round: 0, cap: 3,
 };
 
+describe('forge timings', () => {
+  const S = (o: object) => JSON.stringify({ ...STATUS, ts: at(1), ...o });
+  it('elapsed is null for junk, a future start or end, and a negative span', () => {
+    expect(elapsed(at(10), NOW, NOW)).toBe(600);
+    expect(elapsed('nope', NOW, NOW)).toBeNull();
+    expect(elapsed(undefined, NOW, NOW)).toBeNull();
+    expect(elapsed(at(-5), NOW, NOW)).toBeNull();
+    expect(elapsed(at(-1), NOW, NOW)).toBeNull();
+    expect(elapsed(at(10), NOW + 10 * 60_000, NOW)).toBeNull();
+  });
+  it('a task in progress: its time so far, closed stages grouped in STAGES order, the current one live', () => {
+    const f = forgeFromStatus(S({
+      phase: 'fix', taskStartedAt: at(10), stageSince: at(1),
+      stages: { triage: 12, implement: 300, validate: 48, 'my-step': 7 }, doneAt: null,
+    }), NOW)!;
+    expect(f.timing).toEqual({
+      taskSeconds: 600, done: false,
+      stages: [
+        { name: 'triage', seconds: 12, live: false },
+        { name: 'implement', seconds: 360, live: true },
+        { name: 'validate', seconds: 48, live: false },
+        { name: 'my-step', seconds: 7, live: false },
+      ],
+    });
+  });
+  it('a finished task: its time up to doneAt and the stages fixed', () => {
+    const f = forgeFromStatus(S({ phase: 'done', taskStartedAt: at(20), stageSince: at(5), stages: { triage: 10, implement: 850 }, doneAt: at(5) }), NOW)!;
+    expect(f.timing).toEqual({ taskSeconds: 900, done: true, stages: [{ name: 'triage', seconds: 10, live: false }, { name: 'implement', seconds: 850, live: false }] });
+  });
+  it('a future or junk start gives no task time; the stages still show', () => {
+    const f = forgeFromStatus(S({ taskStartedAt: at(-30), stageSince: 'x', stages: { triage: 3 }, doneAt: null }), NOW)!;
+    expect(f.timing).toEqual({ taskSeconds: null, done: false, stages: [{ name: 'triage', seconds: 3, live: false }] });
+  });
+  it('a doneAt before the start is ignored: the task counts as running', () => {
+    const f = forgeFromStatus(S({ phase: 'implement', taskStartedAt: at(10), stageSince: at(1), stages: {}, doneAt: at(20) }), NOW)!;
+    expect(f.timing!.done).toBe(false);
+    expect(f.timing!.taskSeconds).toBe(600);
+  });
+  it('phases named like Object.prototype members do not break the grouping', () => {
+    const text = '{"ts":"' + at(1) + '","task":"t","path":"small","phase":"constructor","agent":null,"validators":[],"verdict":null,"round":null,"cap":null,'
+      + '"taskStartedAt":"' + at(10) + '","stageSince":"' + at(1) + '","stages":{"constructor":5,"__proto__":9,"toString":2,"implement":4},"doneAt":null}';
+    const f = forgeFromStatus(text, NOW);
+    const names = f!.timing!.stages.map(s => s.name);
+    expect(names[0]).toBe('implement');
+    expect(names).toContain('constructor');
+    expect(f!.timing!.stages.find(s => s.name === 'constructor')).toEqual({ name: 'constructor', seconds: 65, live: true });
+  });
+});
+
 describe('forgeFromStatus', () => {
   it('maps a valid status.json without its ts', () => {
     const { ts: _ts, ...rest } = STATUS;
-    expect(forgeFromStatus(JSON.stringify(STATUS), NOW)).toEqual({ ...rest, brief: null, accepted: [], verify: null, briefs: null });
+    expect(forgeFromStatus(JSON.stringify(STATUS), NOW)).toEqual({ ...rest, brief: null, accepted: [], verify: null, briefs: null, timing: null });
     expect(forgeFromStatus(JSON.stringify(STATUS), NOW, 4)).toMatchObject({ briefs: 4 });
   });
   it('is null for junk, invalid fields or a status older than a day', () => {
@@ -441,5 +490,18 @@ describe('buildPanelModel finished subagents', () => {
     const b = buildPanelModel({ band: { mode: 'none' }, now, activity: act({ finished: [{ id: 'x', type: 'Explore', seconds: 3, at: now }] }) });
     expect(JSON.stringify(a)).not.toBe(JSON.stringify(b));
     expect(bandKey(a)).toBe(bandKey(b));
+  });
+
+  it('the band key ignores the usage time and the forge timing, but not other changes', () => {
+    const base = buildPanelModel({ band: { mode: 'none' }, now: 1_000_000, activity: act() });
+    const forge = { task: 't', path: 'small', phase: 'implement', agent: null, validators: [], verdict: null, round: null, cap: null, brief: null, accepted: [], briefs: null };
+    const usage = { rows: [], total: 1 } as unknown as NonNullable<PanelModel['usage']>;
+    const mk = (secs: number, time: number, extra: object = {}) => ({
+      ...base, ...extra,
+      forge: { ...forge, timing: { taskSeconds: secs, done: false, stages: [{ name: 'implement', seconds: secs, live: true }] } },
+      usage: { ...usage, time: { activeSeconds: time, activePartial: false, sinceStartSeconds: time, session: null } },
+    }) as PanelModel;
+    expect(bandKey(mk(10, 5))).toBe(bandKey(mk(99, 77)));
+    expect(bandKey(mk(10, 5))).not.toBe(bandKey(mk(10, 5, { tool: { name: 'x' } })));
   });
 });

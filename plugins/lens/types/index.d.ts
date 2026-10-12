@@ -24,6 +24,7 @@ export type LensPanel = {
       planned: boolean; surfaces: string[]; result: string | null; passed: number | null; total: number | null;
       evidence: string | null; reason: string | null;
     } | null;
+    timing?: { taskSeconds: number | null; done: boolean; stages: { name: string; seconds: number; live: boolean }[] } | null;
   } | null;
   infinite: { cycle: number; cyclesMax: number | null; hoursLeft: number | null; active: boolean; autoApproved: string[] } | null;
   execution: {

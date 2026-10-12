@@ -67,6 +67,12 @@ const STAGE_OF: Record<string, (typeof STAGES)[number]> = {
   verdict: 'verdict', round: 'verdict', final: 'final', 'final-review': 'final', done: 'final',
 };
 
+/** The STAGES name a forge phase belongs to (fix → implement, planning → plan…); an unknown phase keeps its own name. */
+export const stageOf = (phase: string): string => {
+  const p = String(phase).toLowerCase();
+  return Object.hasOwn(STAGE_OF, p) ? STAGE_OF[p] : p;
+};
+
 export interface Stage { name: string; state: 'done' | 'active' | 'pending' }
 // The stages of forge's path: Large shows design and plan, the others skip them; final only on Large.
 // Trivial and Small have no reviewers. `validated` says how the last validation went: Trivial logs no phases,

@@ -12,7 +12,7 @@ export interface CardTexts {
   sRoadmap: string; sSuperpowers: string; sNow: string; sTodos: string; sSubagents: string; sTasks: string; sForge: string;
   sExecution: string; manualRow: string; modeSubagents: string; modeSessions: string; alive: string; silent: string; stopped: string;
   queued: string; conflictsLbl: string; blockedLbl: string; orphans: string; integratedN: string;
-  stage: Record<'brief' | 'implement' | 'validate' | 'verify' | 'review' | 'verdict' | 'integrate' | 'execution', string>;
+  stage: Record<'brief' | 'implement' | 'validate' | 'verify' | 'review' | 'verdict' | 'integrate' | 'execution' | 'triage' | 'design' | 'plan' | 'final', string>;
   track: string; phase: string; noTask: string; decision: string; fixRound: string; done: string; open: string;
   tool: string; turn: string; briefs: string; cycle: string; hoursLeft: (h: number) => string; auto: string; task: string;
   sUsage: string; effort: string; effortLevel: (e: string) => string; thisSession: string; run: string; gMain: string; gImpl: string;
@@ -73,6 +73,11 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
       const stages = m.execution?.active && f.path === 'large' ? stagesFor('run', 'execution')
         : stagesFor(f.path, forgePhase(f), f.validators.length ? (f.validators.every(v => v.ok) ? 'ok' : 'failed') : null, f.verify?.planned === true);
       blocks.push({ kind: 'stages', stages, hue: SECTION_HUE.forge });
+      const tm = f.timing;
+      if (tm && tm.stages.length) {
+        const label = (n: string) => (Object.hasOwn(t.stage, n) ? t.stage[n as keyof CardTexts['stage']] : n);
+        blocks.push({ kind: 'text', text: tm.stages.map(s => `${label(s.name)} ${span(s.seconds) ?? '0s'}${s.live ? '…' : ''}`).join(' · '), dim: true });
+      }
       if (f.verify?.planned) {
         const v = f.verify;
         const where = `verify ${v.surfaces.join(', ')}`;
@@ -107,7 +112,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     out.push({
       icon: SECTION_ICON.forge, title: f?.task ?? 'forge', hue: SECTION_HUE.forge,
       chip: f?.path ? { text: f.path, hue: PATH_HUE[f.path] ?? 'peach' } : inf?.active ? { text: '∞', hue: 'mauve' } : undefined,
-      subtitle: f && forgePhase(f) ? `${t.sForge} · ${forgePhase(f)}` : undefined, blocks,
+      subtitle: f && forgePhase(f) ? [t.sForge, forgePhase(f), f.timing && span(f.timing.taskSeconds) ? `${f.timing.done ? '✓ ' : ''}${span(f.timing.taskSeconds)}` : null].filter(Boolean).join(' · ') : undefined, blocks,
     });
   }
 

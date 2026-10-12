@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fmtTokens, fmtUsd, usageBandText, barParts, briefCells, forgePhase, headline, stagesFor, tierOf, todoCells, roadmapCells, pct, span } from '../src/lens/view.js';
+import { fmtTokens, fmtUsd, usageBandText, barParts, briefCells, forgePhase, headline, stagesFor, tierOf, todoCells, roadmapCells, pct, span, stageOf } from '../src/lens/view.js';
 import { buildCards, cardAlt, type CardTexts } from '../src/lens/cards.js';
 import { bandSvg, cardSvg, fit, xml } from '../src/lens/svg.js';
 import { executionFromFiles, type PanelModel } from '../src/lens/model.js';
@@ -8,7 +8,7 @@ const T: CardTexts = {
   sRoadmap: 'Roadmap', sSuperpowers: 'superpowers', sNow: 'Now', sTodos: 'Todos', sSubagents: 'Subagents', sTasks: 'Tasks', sForge: 'forge',
   sExecution: 'Execution', manualRow: 'manual', modeSubagents: 'subagents', modeSessions: 'sessions', alive: 'alive', silent: 'silent', stopped: 'stopped',
   queued: 'to integrate', orphans: 'orphaned', conflictsLbl: 'in conflict', blockedLbl: 'blocked', integratedN: 'integrated',
-  stage: { brief: 'brief', implement: 'implement', validate: 'validate', verify: 'verify', review: 'review', verdict: 'verdict', integrate: 'integrate', execution: 'execution' },
+  stage: { brief: 'brief', implement: 'implement', validate: 'validate', verify: 'verify', review: 'review', verdict: 'verdict', integrate: 'integrate', execution: 'execution', triage: 'triage', design: 'design', plan: 'plan', final: 'final' },
   track: 'track', phase: 'Phase', noTask: 'no task', decision: 'decision', fixRound: 'round', done: 'done', open: 'open',
   tool: 'tool', turn: 'turn', briefs: 'briefs', cycle: 'cycle', hoursLeft: h => `${h}h left`, auto: 'auto', task: 'Task',
   sUsage: 'Usage', effort: 'effort', effortLevel: e => e, thisSession: 'this session', run: 'run', gMain: 'main', gImpl: 'implementers',
@@ -337,5 +337,34 @@ describe('lens timings: finished subagents', () => {
     const only = buildCards({ ...EMPTY, subagentsDone: done }, T, 0).find(c => c.title === T.sSubagents)!;
     expect(only.blocks).toHaveLength(1);
     expect(only.chip).toBeUndefined();
+  });
+});
+
+describe('lens timings: forge', () => {
+  it('maps phases to stages, unknown ones by their own name', () => {
+    expect(stageOf('fix')).toBe('implement');
+    expect(stageOf('Planning')).toBe('plan');
+    expect(stageOf('triage')).toBe('triage');
+    expect(stageOf('my-step')).toBe('my-step');
+    expect(stageOf('constructor')).toBe('constructor');
+    expect(stageOf('__proto__')).toBe('__proto__');
+  });
+  it('adds the task time to the subtitle and a dim stage line under the stages, the live one with …', () => {
+    const timing = { taskSeconds: 520, done: false, stages: [{ name: 'triage', seconds: 12, live: false }, { name: 'implement', seconds: 302, live: true }] };
+    const card = buildCards({ ...EMPTY, forge: { ...FORGE, timing } }, T, 0).find(c => c.title === FORGE.task)!;
+    expect(card.subtitle).toBe('forge · implement · 8m 40s');
+    expect(card.blocks[0].kind).toBe('stages');
+    expect(card.blocks[1]).toEqual({ kind: 'text', text: 'triage 12s · implement 5m 02s…', dim: true });
+  });
+  it('a finished task shows ✓ and its total, and the stages without …', () => {
+    const timing = { taskSeconds: 860, done: true, stages: [{ name: 'implement', seconds: 800, live: false }, { name: 'verdict', seconds: 60, live: false }] };
+    const card = buildCards({ ...EMPTY, forge: { ...FORGE, phase: 'done', timing } }, T, 0).find(c => c.title === FORGE.task)!;
+    expect(card.subtitle).toBe('forge · done · ✓ 14m 20s');
+    expect(card.blocks[1]).toEqual({ kind: 'text', text: 'implement 13m 20s · verdict 1m 00s', dim: true });
+  });
+  it('without timing (an older status) the card is as before', () => {
+    const card = buildCards({ ...EMPTY, forge: { ...FORGE, timing: null } }, T, 0)[0];
+    expect(card.subtitle).toBe('forge · implement');
+    expect(card.blocks.map(b => b.kind)).toEqual(['stages', 'bar', 'cells', 'row', 'chips']);
   });
 });
