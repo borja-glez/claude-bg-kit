@@ -21,7 +21,7 @@ describe('deriveStatus', () => {
     expect(s).toEqual({
       ts: '5', task: 'hash', path: 'medium', phase: 'review', agent: 'forge-review-security',
       validators: [{ name: 'test', ok: true }, { name: 'lint', ok: false }], verdict: { action: 'accept', score: 0.97 }, round: 0, cap: 3,
-      brief: 1, accepted: [1],
+      brief: 1, accepted: [1], verify: null,
     });
   });
   it('tracks the brief in progress and the accepted briefs, from phase events and brief ids', () => {
@@ -47,7 +47,7 @@ describe('deriveStatus', () => {
     ];
     expect(apply([...run, { ts: '5', kind: 'triage', task: 'o', path: 'large' }])).toMatchObject({ path: 'large', phase: 'implement', agent: 'forge-impl', accepted: [1] });
     expect(apply([...run, { ts: '5', kind: 'triage', task: 'o', path: 'large', reasons: ['x'] }])).toEqual({
-      ts: '5', task: 'o', path: 'large', phase: '', agent: null, validators: [], verdict: null, round: null, cap: null, brief: null, accepted: [],
+      ts: '5', task: 'o', path: 'large', phase: '', agent: null, validators: [], verdict: null, round: null, cap: null, brief: null, accepted: [], verify: null,
     });
   });
   it('reads a status written before brief and accepted existed', () => {
@@ -83,5 +83,26 @@ describe('normalizeStatus', () => {
     expect(normalizeStatus(null)).toBeNull();
     expect(normalizeStatus({ ts: '1', task: '', path: '', phase: '', agent: null, validators: [], verdict: null })).toBeNull();
     expect(normalizeStatus({ ts: '1', task: 't', path: '', phase: '', agent: 3, validators: [], verdict: null })).toBeNull();
+  });
+});
+
+describe('verify in the status', () => {
+  const t = (kind: string, extra: Record<string, unknown> = {}) => ({ ts: '2026-10-12T10:00:00Z', kind, task: 'x', ...extra });
+  it('a plan then a result fill verify; a fresh triage clears it', () => {
+    let s = deriveStatus(null, { ...t('triage'), path: 'medium', reasons: [] });
+    expect(s!.verify).toBeNull();
+    s = deriveStatus(s, { ...t('verify'), task: 'x-1', planned: true, surfaces: ['web'] });
+    expect(s!.verify).toEqual({ planned: true, surfaces: ['web'], result: null, passed: null, total: null, evidence: null, reason: null });
+    s = deriveStatus(s, { ...t('verify'), task: 'x-1', result: 'fail', passed: 4, total: 6, evidence: '.forge/work/x/evidence/1-1' });
+    expect(s!.verify).toEqual({ planned: true, surfaces: ['web'], result: 'fail', passed: 4, total: 6, evidence: '.forge/work/x/evidence/1-1', reason: null });
+    s = deriveStatus(s, { ...t('triage'), path: 'medium', reasons: [] });
+    expect(s!.verify).toBeNull();
+  });
+  it('normalizeStatus keeps a valid verify and drops a broken one; old files read as null', () => {
+    const base = { ts: 'a', task: 'x', path: 'medium', phase: 'review', agent: null, validators: [], verdict: null, round: null, cap: null, brief: 1, accepted: [] };
+    expect(normalizeStatus(base)!.verify).toBeNull();
+    expect(normalizeStatus({ ...base, verify: { planned: true, surfaces: ['web', 3], result: 'pass', passed: 1, total: 1, evidence: 'e', reason: null } })!.verify)
+      .toEqual({ planned: true, surfaces: ['web'], result: 'pass', passed: 1, total: 1, evidence: 'e', reason: null });
+    expect(normalizeStatus({ ...base, verify: 'yes' })!.verify).toBeNull();
   });
 });

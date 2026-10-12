@@ -48,6 +48,7 @@ var str2 = (x) => typeof x === "string";
 var num = (x) => typeof x === "number" && Number.isFinite(x) ? x : null;
 var isObj = (x) => !!x && typeof x === "object" && !Array.isArray(x);
 var cleanText = (s) => s.replace(/[\x00-\x1f\x7f-\x9f‪-‮⁦-⁩]/g, "").slice(0, CLIP);
+var pathText = (x) => str2(x) ? x.replace(/[\x00-\x1f\x7f-\x9f]/g, "").slice(0, 200) : null;
 var briefNum = (x) => typeof x === "number" && Number.isInteger(x) && x > 0 && x < 1e4 ? x : null;
 function normalizeStatus(x) {
   if (!isObj(x) || !str2(x.ts) || !str2(x.task) || !x.task || !str2(x.path) || !str2(x.phase)) return null;
@@ -70,7 +71,17 @@ function normalizeStatus(x) {
     cap: num(x.cap),
     // Absent in a status written before these fields existed.
     brief: briefNum(x.brief),
-    accepted: Array.isArray(x.accepted) ? [...new Set(x.accepted.map(briefNum).filter((v) => v !== null))].sort((a, b) => a - b).slice(-MAX_ACCEPTED) : []
+    accepted: Array.isArray(x.accepted) ? [...new Set(x.accepted.map(briefNum).filter((v) => v !== null))].sort((a, b) => a - b).slice(-MAX_ACCEPTED) : [],
+    // Absent in a status written before the verify plan existed.
+    verify: isObj(x.verify) && typeof x.verify.planned === "boolean" ? {
+      planned: x.verify.planned,
+      surfaces: (Array.isArray(x.verify.surfaces) ? x.verify.surfaces : []).filter(str2).slice(0, MAX_VALIDATORS).map(cleanText),
+      result: str2(x.verify.result) ? cleanText(x.verify.result) : null,
+      passed: num(x.verify.passed),
+      total: num(x.verify.total),
+      evidence: pathText(x.verify.evidence),
+      reason: str2(x.verify.reason) ? cleanText(x.verify.reason) : null
+    } : null
   };
 }
 

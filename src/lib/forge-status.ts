@@ -8,6 +8,8 @@ export type ForgeStatus = {
   round: number | null; cap: number | null;
   // The brief in progress (Medium and Large) and the briefs whose verdict accepted them.
   brief: number | null; accepted: number[];
+  // The verify plan of the current task (from verify-plan) and its result (from verdict), null before any plan.
+  verify: { planned: boolean; surfaces: string[]; result: string | null; passed: number | null; total: number | null; evidence: string | null; reason: string | null } | null;
 };
 
 const CLIP = 80;
@@ -20,6 +22,9 @@ const isObj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 
 
 /** C0, DEL and C1 control characters and bidi overrides/isolates removed, then clipped to 80. */
 export const cleanText = (s: string): string => s.replace(/[\x00-\x1f\x7f-\x9f‪-‮⁦-⁩]/g, '').slice(0, CLIP);
+
+const EMPTY_VERIFY: NonNullable<ForgeStatus['verify']> = { planned: false, surfaces: [], result: null, passed: null, total: null, evidence: null, reason: null };
+const pathText = (x: unknown) => (str(x) ? x.replace(/[\x00-\x1f\x7f-\x9f]/g, '').slice(0, 200) : null);
 
 // The brief number of `<task>-<n>`, or null for the task itself.
 const briefOf = (task: string, t: unknown): number | null =>
@@ -52,7 +57,7 @@ export function deriveStatus(prev: ForgeStatus | null, event: unknown): ForgeSta
     const fresh = e.kind === 'triage' && Array.isArray(e.reasons);
     const base: ForgeStatus = prev && prev.task === task && !fresh
       ? prev
-      : { ts, task, path: '', phase: '', agent: null, validators: [], verdict: null, round: null, cap: null, brief: null, accepted: [] };
+      : { ts, task, path: '', phase: '', agent: null, validators: [], verdict: null, round: null, cap: null, brief: null, accepted: [], verify: null };
     const next: ForgeStatus = { ...base, ts };
     if (e.kind === 'triage' && str(e.path)) next.path = cleanText(e.path);
     if (e.kind === 'phase' && str(e.phase)) next.phase = cleanText(e.phase);
@@ -72,6 +77,16 @@ export function deriveStatus(prev: ForgeStatus | null, event: unknown): ForgeSta
       return { ...cur, accepted, verdict: { action: cleanText(e.action), score: num(e.score) } };
     }
     case 'round': return { ...cur, round: num(e.round), cap: num(e.cap) };
+    case 'verify': {
+      const v = { ...(cur.verify ?? EMPTY_VERIFY) };
+      if (typeof e.planned === 'boolean') {
+        v.planned = e.planned;
+        v.surfaces = (Array.isArray(e.surfaces) ? e.surfaces : []).filter(str).slice(0, MAX_VALIDATORS).map(cleanText);
+        v.result = null; v.passed = null; v.total = null; v.evidence = null; v.reason = null;
+      }
+      if (str(e.result)) { v.result = cleanText(e.result); v.passed = num(e.passed); v.total = num(e.total); v.evidence = pathText(e.evidence); v.reason = str(e.reason) ? cleanText(e.reason) : null; }
+      return { ...cur, verify: v };
+    }
     default: return prev;
   }
 }
@@ -97,5 +112,13 @@ export function normalizeStatus(x: unknown): ForgeStatus | null {
     // Absent in a status written before these fields existed.
     brief: briefNum(x.brief),
     accepted: Array.isArray(x.accepted) ? [...new Set(x.accepted.map(briefNum).filter((v): v is number => v !== null))].sort((a, b) => a - b).slice(-MAX_ACCEPTED) : [],
+    // Absent in a status written before the verify plan existed.
+    verify: isObj(x.verify) && typeof x.verify.planned === 'boolean' ? {
+      planned: x.verify.planned,
+      surfaces: (Array.isArray(x.verify.surfaces) ? x.verify.surfaces : []).filter(str).slice(0, MAX_VALIDATORS).map(cleanText),
+      result: str(x.verify.result) ? cleanText(x.verify.result) : null,
+      passed: num(x.verify.passed), total: num(x.verify.total),
+      evidence: pathText(x.verify.evidence), reason: str(x.verify.reason) ? cleanText(x.verify.reason) : null,
+    } : null,
   };
 }

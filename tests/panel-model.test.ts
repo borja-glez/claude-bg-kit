@@ -218,7 +218,7 @@ const STATUS = {
 describe('forgeFromStatus', () => {
   it('maps a valid status.json without its ts', () => {
     const { ts: _ts, ...rest } = STATUS;
-    expect(forgeFromStatus(JSON.stringify(STATUS), NOW)).toEqual({ ...rest, brief: null, accepted: [], briefs: null });
+    expect(forgeFromStatus(JSON.stringify(STATUS), NOW)).toEqual({ ...rest, brief: null, accepted: [], verify: null, briefs: null });
     expect(forgeFromStatus(JSON.stringify(STATUS), NOW, 4)).toMatchObject({ briefs: 4 });
   });
   it('is null for junk, invalid fields or a status older than a day', () => {
