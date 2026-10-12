@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { verifyPlan } from '../src/forge/verify.js';
+import { verifyPlan, cleanupPids } from '../src/forge/verify.js';
 import type { Surface, Draft } from '../src/forge/surfaces.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { readEvents } from '../src/forge/ledger.js';
@@ -82,5 +82,34 @@ describe('forge verify-plan', () => {
   });
   it('verify-skip is a ledger kind', () => {
     expect(run(['log', '--kind', 'verify-skip', '--task', 't-1', '--data', '{"surface":"web","reason":"text only"}'], io).code).toBe(0);
+  });
+});
+
+describe('verdict with verify.json and verify-cleanup', () => {
+  let root: string; let io: Io;
+  beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-vv-')); io = { cwd: root, now: () => new Date('2026-10-12T10:00:00Z') }; });
+  it('the verdict reads verify.json and logs the verify result with the evidence dir', () => {
+    const dir = path.join(root, '.forge', 'work', 't', 'reviews-1-1');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'correctness.json'), '{"verdict":"pass","confidence":1,"findings":[]}');
+    writeFileSync(path.join(dir, 'verify.json'), JSON.stringify({ surfaces: ['web'], result: 'pass', checks: [{ id: 1, surface: 'web', name: 'a', ok: true, expected: 'e', observed: 'o', shot: '01.png' }] }));
+    writeFileSync(path.join(root, 'v.json'), '[]');
+    const out = JSON.parse(run(['verdict', '--task', 't-1', '--dir', '.forge/work/t/reviews-1-1', '--validators', 'v.json'], io).stdout);
+    expect(out.reviewers.map((r: { name: string }) => r.name)).toEqual(['correctness', 'verify']);
+    expect(readEvents(root).at(-1)).toMatchObject({ kind: 'verify', task: 't-1', result: 'pass', passed: 1, total: 1, evidence: '.forge/work/t/evidence/1-1' });
+  });
+  it('a dir with only verify.json is enough for a verdict', () => {
+    const dir = path.join(root, 'r');
+    mkdirSync(dir);
+    writeFileSync(path.join(dir, 'verify.json'), JSON.stringify({ result: 'pass', checks: [] }));
+    writeFileSync(path.join(root, 'v.json'), '[]');
+    expect(run(['verdict', '--task', 't-1', '--dir', 'r', '--validators', 'v.json'], io).code).toBe(0);
+  });
+  it('cleanupPids kills what is alive and reports the rest', () => {
+    expect(cleanupPids([10, 11], pid => pid === 10)).toEqual({ killed: [10], gone: [11] });
+  });
+  it('verify-cleanup with no pids.json does nothing', () => {
+    mkdirSync(path.join(root, 'ev'));
+    expect(JSON.parse(run(['verify-cleanup', '--dir', 'ev'], io).stdout)).toEqual({ killed: [], gone: [] });
   });
 });

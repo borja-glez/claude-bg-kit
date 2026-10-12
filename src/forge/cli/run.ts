@@ -9,7 +9,7 @@ import { triage, zonesFromPaths, PATH_ORDER, type PathName } from '../triage.js'
 import { parsePlan, PlanError } from '../../lib/plan.js';
 import { renderBrief, taskText } from '../brief.js';
 import { loadConfig, agentFor, ROLES, ConfigError, NAME } from '../config.js';
-import { parseReview, weightsFor, synthesize, type ReviewerName, type Action, type FailingValidator } from '../verdict.js';
+import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, type ReviewerName, type Action, type FailingValidator } from '../verdict.js';
 import { decideRound } from '../loop.js';
 import { PROPOSAL_ID, proposalId, saveProposal, loadProposals, decideLocal, decideDoc, mirrorProposal } from '../proposals.js';
 import { normalizeProposal, isActionable, PROPOSAL_STATUSES, type Decision } from '../../lib/proposals.js';
@@ -21,7 +21,7 @@ import { swarmCommand } from './swarm.js';
 import { readSwarm, saveSwarm } from '../swarm.js';
 import { detectValidators, selectValidators, runValidators, globMatch, onPath, type RepoReader, type Scope } from '../validators.js';
 import { checkTools, missingTools } from '../tools.js';
-import { verifyPlan } from '../verify.js';
+import { verifyPlan, cleanupPids } from '../verify.js';
 import { readLocal, updateLocal } from '../local.js';
 import { readSurfaces, detectDrafts, appendLearned, surfaceFile, surfaceHash } from '../surfaces.js';
 
@@ -29,7 +29,7 @@ export interface ExecResult { code: number; output: string; ms: number; timedOut
 export interface Io { cwd: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|agents|last|proposals|surfaces|tools|local|waypoint-cli|infinite|cycle|swarm|stop|hook> ...';
+const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|agents|last|proposals|surfaces|tools|local|verify-plan|verify-cleanup|waypoint-cli|infinite|cycle|swarm|stop|hook> ...';
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 
@@ -306,6 +306,9 @@ export function run(argv: string[], io: Io): Result {
           const file = path.join(dir, `${name}.json`);
           if (existsSync(file)) reviews[name] = parseReview(readFileSync(file, 'utf8'));
         }
+        const verifyPath = path.join(dir, 'verify.json');
+        const verifyFile = existsSync(verifyPath) ? parseVerifyFile(readFileSync(verifyPath, 'utf8')) : undefined;
+        if (verifyFile !== undefined) reviews.verify = verifyReview(verifyFile);
         if (!Object.keys(reviews).length) throw new UsageError(`no reviews found in ${dirArg}`);
         let validatorsOk: boolean;
         let failing: FailingValidator[] = [];
@@ -328,7 +331,30 @@ export function run(argv: string[], io: Io): Result {
         // dir lets `round` count a re-run verdict on the same review dir once.
         appendEvent(io.cwd, { ts: ts(), kind: 'verdict', task, dir: path.relative(io.cwd, dir).split(path.sep).join('/') || '.', action: result.action, score: result.score, signature: result.signature,
           critical: result.critical.length, important: result.important.length, minor: result.minor.length });
+        if (verifyFile !== undefined) {
+          const rel = path.relative(io.cwd, dir).split(path.sep).join('/');
+          const evidence = rel.replace(/reviews-(\d+-\d+)$/, 'evidence/$1');
+          appendEvent(io.cwd, { ts: ts(), kind: 'verify', task, result: verifyFile?.result ?? 'invalid',
+            passed: verifyFile ? verifyFile.checks.filter(c => c.ok).length : 0, total: verifyFile ? verifyFile.checks.length : 0,
+            ...(evidence !== rel ? { evidence } : {}), ...(verifyFile?.reason ? { reason: verifyFile.reason } : {}) });
+        }
         return json(result);
+      }
+      case 'verify-cleanup': {
+        const dir = flag('dir');
+        if (!dir) throw new UsageError('verify-cleanup: --dir is required');
+        let pids: number[] = [];
+        try { const raw = JSON.parse(readFileSync(path.resolve(io.cwd, dir, 'pids.json'), 'utf8')); if (Array.isArray(raw)) pids = raw.filter((p): p is number => Number.isInteger(p) && p > 0); } catch { pids = []; }
+        const kill = (pid: number) => {
+          try {
+            if (process.platform === 'win32') execFileSync('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true });
+            else process.kill(-pid, 'SIGTERM');
+            return true;
+          } catch {
+            try { process.kill(pid, 'SIGTERM'); return true; } catch { return false; }
+          }
+        };
+        return json(cleanupPids(pids, kill));
       }
       case 'round': {
         const task = flag('task');

@@ -35,3 +35,10 @@ export function verifyPlan(i: { path: string; asked: boolean; changed: string[] 
     : surfaces.length ? surfaces.map(s => `${s.name}${s.match ? ` (${s.match})` : ''}`).join(', ') : 'no surface matches the diff';
   return { eligible, surfaces, drafts, reason };
 }
+
+/** Kills each pid (its whole tree); `kill` returns false when the process is already gone. */
+export function cleanupPids(pids: number[], kill: (pid: number) => boolean): { killed: number[]; gone: number[] } {
+  const killed: number[] = [], gone: number[] = [];
+  for (const pid of pids) (kill(pid) ? killed : gone).push(pid);
+  return { killed, gone };
+}

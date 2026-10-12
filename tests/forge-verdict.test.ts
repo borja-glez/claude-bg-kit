@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseReview, weightsFor, synthesize, type Review } from '../src/forge/verdict.js';
+import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, type Review } from '../src/forge/verdict.js';
 
 const pass = (confidence = 1, findings: Review['findings'] = []): Review => ({ verdict: 'pass', confidence, findings });
 const fail = (confidence = 1, findings: Review['findings'] = []): Review => ({ verdict: 'fail', confidence, findings });
@@ -37,10 +37,10 @@ describe('parseReview', () => {
 
 describe('weightsFor', () => {
   it('defaults, sensitive and perf', () => {
-    expect(W).toEqual({ correctness: 0.5, security: 0.3, perf: 0.2 });
-    expect(weightsFor({ sensitive: true, perf: false })).toEqual({ correctness: 0.3, security: 0.5, perf: 0.2 });
-    expect(weightsFor({ sensitive: false, perf: true })).toEqual({ correctness: 0.3, security: 0.2, perf: 0.5 });
-    expect(weightsFor({ sensitive: true, perf: true })).toEqual({ correctness: 0.2, security: 0.4, perf: 0.4 });
+    expect(W).toEqual({ correctness: 0.5, security: 0.3, perf: 0.2, verify: 0.5 });
+    expect(weightsFor({ sensitive: true, perf: false })).toEqual({ correctness: 0.3, security: 0.5, perf: 0.2, verify: 0.3 });
+    expect(weightsFor({ sensitive: false, perf: true })).toEqual({ correctness: 0.3, security: 0.2, perf: 0.5, verify: 0.3 });
+    expect(weightsFor({ sensitive: true, perf: true })).toEqual({ correctness: 0.2, security: 0.4, perf: 0.4, verify: 0.2 });
   });
 });
 
@@ -141,4 +141,42 @@ it('the verdict output reports dropped per reviewer', () => {
   const rev = parseReview('{"verdict":"pass","confidence":1,"findings":[{"severity":"critical","file":"a.ts","description":"x"}]}');
   const out = synthesize({ correctness: rev }, weightsFor({ sensitive: false, perf: false }), true);
   expect(out.reviewers[0]).toMatchObject({ name: 'correctness', invalid: true, dropped: 1 });
+});
+
+describe('verify.json', () => {
+  const file = (o: Record<string, unknown>) => `Result:\n\`\`\`json\n${JSON.stringify(o)}\n\`\`\``;
+  const check = (id: number, ok: unknown, main = false) => ({ id, surface: 'web', name: `c${id}`, main, ok, expected: 'e', observed: 'o', shot: `0${id}.png` });
+  it('parses leniently: prose around, ok as a string, a check without shot', () => {
+    const v = parseVerifyFile(file({ surfaces: ['web'], result: 'fail', checks: [check(1, 'true'), { ...check(2, false, true), shot: undefined }], learned: [{ surface: 'web', note: 'n' }] }));
+    expect(v).toMatchObject({ result: 'fail', reason: null, unchecked: [], learned: [{ surface: 'web', note: 'n' }], proposals: [] });
+    expect(v!.checks.map(c => [c.ok, c.shot])).toEqual([[true, '01.png'], [false, null]]);
+  });
+  it('unusable files are null', () => {
+    for (const t of [null, '', 'no json', file({ result: 'maybe', checks: [] }), file({ result: 'pass', checks: 'x' }), file({ result: 'blocked', checks: [] })]) {
+      expect(parseVerifyFile(t)).toBeNull();
+    }
+  });
+  it('blocked with a reason parses', () => {
+    expect(parseVerifyFile(file({ result: 'blocked', reason: 'no emulator', checks: [] }))).toMatchObject({ result: 'blocked', reason: 'no emulator' });
+  });
+  it('pass, fail (main critical, others important) and blocked as a review', () => {
+    expect(verifyReview(parseVerifyFile(file({ result: 'pass', checks: [check(1, true)] })))).toEqual({ verdict: 'pass', confidence: 1, findings: [] });
+    const fail = verifyReview(parseVerifyFile(file({ result: 'fail', checks: [check(1, false, true), check(2, false), check(3, true)] })));
+    expect(fail.verdict).toBe('fail');
+    expect(fail.findings.map(f => [f.severity, f.file])).toEqual([['critical', 'verify/web'], ['important', 'verify/web']]);
+    expect(fail.findings[0].problem).toBe('c1: expected e, observed o');
+    expect(verifyReview(parseVerifyFile(file({ result: 'blocked', reason: 'x', checks: [] })))).toEqual({ verdict: 'abstain', confidence: 0, findings: [], invalid: true });
+    expect(verifyReview(null)).toEqual({ verdict: 'abstain', confidence: 0, findings: [], invalid: true });
+  });
+  it('a failing main check fails the verdict like a critical correctness finding', () => {
+    const W2 = weightsFor({ sensitive: false, perf: false });
+    expect(W2.verify).toBe(W2.correctness);
+    const r = synthesize({ correctness: pass(), verify: verifyReview(parseVerifyFile(file({ result: 'fail', checks: [check(1, false, true)] }))) }, W2, true);
+    expect(r.action).toBe('fix');
+    expect(r.critical).toHaveLength(1);
+  });
+  it('a blocked verify never fails the task by itself', () => {
+    const r = synthesize({ correctness: pass(), verify: verifyReview(parseVerifyFile(file({ result: 'blocked', reason: 'x', checks: [] }))) }, weightsFor({ sensitive: false, perf: false }), true);
+    expect(r.action).toBe('accept');
+  });
 });

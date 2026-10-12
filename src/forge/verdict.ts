@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 
-export type ReviewerName = 'correctness' | 'security' | 'perf';
+export type ReviewerName = 'correctness' | 'security' | 'perf' | 'verify';
 export interface Finding { severity: 'critical' | 'important' | 'minor'; file?: string; line?: number; problem: string; fix?: string }
 export interface Review { verdict: 'pass' | 'fail' | 'abstain'; confidence: number; findings: Finding[]; approach?: 'ok' | 'wrong'; invalid?: boolean; dropped?: number }
 export interface FailingValidator { validator: string; failures: string[] }
-export interface Weights { correctness: number; security: number; perf: number }
+export interface Weights { correctness: number; security: number; perf: number; verify: number }
 export type Action = 'accept' | 'fix' | 'redo';
 export interface VerdictResult {
   action: Action; score: number | null; reasons: string[]; critical: Finding[]; important: Finding[]; minor: Finding[];
@@ -70,10 +70,60 @@ export function parseReview(text: string | null): Review {
 }
 
 export function weightsFor(opts: { sensitive: boolean; perf: boolean }): Weights {
-  if (opts.sensitive && opts.perf) return { correctness: 0.2, security: 0.4, perf: 0.4 };
-  if (opts.sensitive) return { correctness: 0.3, security: 0.5, perf: 0.2 };
-  if (opts.perf) return { correctness: 0.3, security: 0.2, perf: 0.5 };
-  return { correctness: 0.5, security: 0.3, perf: 0.2 };
+  if (opts.sensitive && opts.perf) return { correctness: 0.2, security: 0.4, perf: 0.4, verify: 0.2 };
+  if (opts.sensitive) return { correctness: 0.3, security: 0.5, perf: 0.2, verify: 0.3 };
+  if (opts.perf) return { correctness: 0.3, security: 0.2, perf: 0.5, verify: 0.3 };
+  return { correctness: 0.5, security: 0.3, perf: 0.2, verify: 0.5 };
+}
+
+export interface VerifyCheck { id: number; surface: string; name: string; main: boolean; ok: boolean; expected: string; observed: string; shot: string | null }
+export interface VerifyFile {
+  surfaces: string[]; result: 'pass' | 'fail' | 'blocked'; reason: string | null; checks: VerifyCheck[]; unchecked: string[];
+  learned: { surface: string; note: string }[]; proposals: { surface: string; change: string }[];
+}
+
+const s = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
+const truthy = (v: unknown) => v === true || (typeof v === 'string' && v.trim().toLowerCase() === 'true');
+
+// forge-verify's file, read as leniently as a reviewer's: JSON inside prose or a fence; a check without `shot` keeps
+// null; `ok` as "true" counts. Null when unusable: no object, an unknown result, checks not a list, blocked without reason.
+export function parseVerifyFile(text: string | null): VerifyFile | null {
+  if (!text) return null;
+  const a = text.indexOf('{'), b = text.lastIndexOf('}');
+  if (a < 0 || b <= a) return null;
+  let raw: unknown;
+  try { raw = JSON.parse(text.slice(a, b + 1)); } catch { return null; }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const result = s(r.result).trim().toLowerCase();
+  if (result !== 'pass' && result !== 'fail' && result !== 'blocked') return null;
+  if (!Array.isArray(r.checks)) return null;
+  const reason = typeof r.reason === 'string' && r.reason.trim() ? r.reason : null;
+  if (result === 'blocked' && !reason) return null;
+  const objs = (x: unknown) => (Array.isArray(x) ? x.filter((o): o is Record<string, unknown> => !!o && typeof o === 'object' && !Array.isArray(o)) : []);
+  return {
+    surfaces: Array.isArray(r.surfaces) ? r.surfaces.filter((x): x is string => typeof x === 'string') : [],
+    result, reason,
+    checks: objs(r.checks).map((c, i) => ({
+      id: typeof c.id === 'number' ? c.id : i + 1, surface: s(c.surface), name: s(c.name), main: truthy(c.main), ok: truthy(c.ok),
+      expected: s(c.expected), observed: s(c.observed), shot: typeof c.shot === 'string' && c.shot.trim() ? c.shot : null,
+    })),
+    unchecked: Array.isArray(r.unchecked) ? r.unchecked.map(s) : [],
+    learned: objs(r.learned).filter(l => typeof l.note === 'string' && l.note.trim()).map(l => ({ surface: s(l.surface), note: s(l.note) })),
+    proposals: objs(r.proposals).filter(p => typeof p.change === 'string' && p.change.trim()).map(p => ({ surface: s(p.surface), change: s(p.change) })),
+  };
+}
+
+// As a review: pass is a confident pass; each failed check is a finding (critical on the main flow, important
+// otherwise) with `verify/<surface>` as its evidence; blocked or unusable abstains, flagged invalid.
+export function verifyReview(v: VerifyFile | null): Review {
+  if (!v || v.result === 'blocked') return invalidReview();
+  if (v.result === 'pass') return { verdict: 'pass', confidence: 1, findings: [] };
+  const findings: Finding[] = v.checks.filter(c => !c.ok).map(c => ({
+    severity: c.main ? 'critical' : 'important', file: `verify/${c.surface || 'app'}`,
+    problem: `${c.name}: expected ${c.expected}, observed ${c.observed}`,
+  }));
+  return { verdict: 'fail', confidence: 1, findings };
 }
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
