@@ -6,7 +6,7 @@ import path from 'node:path';
 import { run, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { readExecution, saveExecution, executionTaskFile } from '../src/forge/execution.js';
 import { normalizeExecution } from '../src/lib/execution-state.js';
-import { setupFor } from '../src/forge/cli/swarm.js';
+import { setupFor, swarmCommand } from '../src/forge/cli/swarm.js';
 import { writeMember } from '../src/forge/members.js';
 import { readLoose } from '../src/forge/loose.js';
 import { samePath } from '../src/lib/worktree.js';
@@ -263,6 +263,18 @@ describe('forge swarm (execution)', () => {
     rmSync(path.join(mine, 'wip.txt'));
     expect(out(run(['swarm', 'retry', 'T2', '--adopt'], io)).adopted).toBe(true);
   });
+  it('retry --adopt refuses when the status of the worktree it would take over cannot be read', () => {
+    sessionsRun();
+    const mine = path.join(root, '.claude', 'worktrees', 'mine');
+    git('branch', 'task/T2', 'forge/run-shop');
+    git('worktree', 'add', mine, 'task/T2');
+    const e = readExecution(root)!;
+    saveExecution(root, { ...e, tasks: { ...e.tasks, T2: { ...e.tasks.T2, status: 'conflict', executor: 'manual', worktree: '' } } });
+    const real = defaultGit(root);
+    const deps = { git: real, exec: undefined, repo: undefined, at: () => ({ git: () => null, exec: undefined, repo: undefined }) } as never;
+    expect(() => swarmCommand(['retry', 'T2', '--adopt'], io, deps)).toThrow(/could not read the worktree status/);
+    expect(readExecution(root)!.tasks.T2).toMatchObject({ status: 'conflict', executor: 'manual' });
+  });
   it('tick reads member public files and the ListAgents snapshot', () => {
     sessionsRun();
     mkdirSync(path.dirname(executionTaskFile(root, 'T1')), { recursive: true });
@@ -487,11 +499,41 @@ describe('forge swarm (execution)', () => {
       expect(r.stderr).toMatch(new RegExp(`the execution ${e.runId} is active \\(kind ephemeral\\); finish it or stop it \\(forge stop\\)`));
       expect(readFileSync(file).equals(before)).toBe(true);
     });
-    it('start moves a task branch that is already merged into the base', () => {
+    it('start deletes a task branch that is already merged into the base', () => {
       git('branch', 'task/fix-a');
       writeFileSync(path.join(root, 'later.txt'), 'x'); git('add', 'later.txt'); git('commit', '-qm', 'later');
       out(start());
-      expect(git('rev-parse', 'task/fix-a')).toBe(git('rev-parse', 'main'));
+      expect(git('branch', '--list', 'task/fix-a')).toBe('');
+    });
+    it('a second run reusing merged ids starts the dependent task from the integrated work of its dependency', () => {
+      const ids = tasksFile([
+        { id: 'a', title: 'a', path: 'small', zones: ['a.txt'], depends_on: [] },
+        { id: 'b', title: 'b', path: 'small', zones: ['b.txt'], depends_on: ['a'] },
+      ]);
+      const commitIn = (w: string, file: string) => {
+        writeFileSync(path.join(w, file), `${file}\n`);
+        execFileSync('git', ['add', file], { cwd: w }); execFileSync('git', ['commit', '-qm', `work ${file}`], { cwd: w });
+      };
+      const finish = (task: string, file: string) => {
+        out(run(['swarm', 'tick'], io));
+        const w = out(run(['swarm', 'worktree', task], io)).worktree;
+        commitIn(w, file);
+        out(run(['swarm', 'task', task, '--stage', 'verdict', '--status', 'accepted'], io));
+        out(run(['swarm', 'tick'], io));
+        expect(out(run(['swarm', 'integrate', task], io))).toMatchObject({ result: 'integrated' });
+        git('worktree', 'remove', '--force', w);
+      };
+      // First run: both ids end up merged into main.
+      out(run(['swarm', 'start', '--project', 'loose', '--session', 'main', '--kind', 'ephemeral', '--tasks', ids], io));
+      finish('a', 'a1.txt'); finish('b', 'b1.txt');
+      saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'finished' });
+      expect(git('branch', '--list', 'task/a')).toContain('task/a');
+      // Second run reuses the same ids.
+      out(run(['swarm', 'start', '--project', 'loose', '--session', 'main', '--kind', 'ephemeral', '--tasks', ids], io));
+      finish('a', 'a2.txt');
+      out(run(['swarm', 'tick'], io));
+      const wb = out(run(['swarm', 'worktree', 'b'], io)).worktree;
+      expect(existsSync(path.join(wb, 'a2.txt'))).toBe(true);
     });
     it('resuming an active ephemeral run keeps its loose tasks and says new ones are ignored', () => {
       const first = out(start());

@@ -269,8 +269,10 @@ function renderRunBlock(m: Model, d: Dict): string {
   if (!r || !r.active) return '';
   const coord = m.sessions[r.coordinator];
   const slot = (s: RunDoc['slots'][number]) => {
-    const task = m.plan.tasks.find(t => t.id === s.task);
-    const ex = m.states[s.task]?.exec;
+    // A loose id is not a plan id: an ephemeral run never takes a title or a lease from the plan, even on a clash.
+    const ephemeral = r.kind === 'ephemeral';
+    const task = ephemeral ? undefined : m.plan.tasks.find(t => t.id === s.task);
+    const ex = ephemeral ? undefined : m.states[s.task]?.exec;
     const l = ex ? liveness(m.now, ex.leaseUntil) : coord ? sessionLiveness(coord, m.now) : 'stopped';
     const age = mins(Date.parse(s.since), m.now);
     const title = task?.title ?? r.loose.find(x => x.id === s.task)?.title ?? '';

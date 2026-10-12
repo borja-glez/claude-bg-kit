@@ -456,9 +456,10 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
           };
       // An execution that would not read back (an id outside the safe rule) is refused rather than saved.
       if (!normalizeExecution(state)) throw new UsageError('swarm start: --project, --session and the run branch must use letters, digits, _ - . (and / in the branch), at most 120 characters');
-      // A task branch already merged into the base starts over from it: nothing on it is lost.
+      // A task branch already merged into the base is deleted (an ancestor of it: nothing is lost); `swarm worktree`
+      // creates it again from the tip of the run's branch when its turn comes, so it sees the work integrated since.
       for (const tb of moves) {
-        if (deps.git(['branch', '-f', tb, base]) === null) throw new UsageError(`swarm start: cannot move ${tb} to ${base}; if a worktree still holds it, run git worktree prune or remove that worktree (git worktree remove)`);
+        if (deps.git(['branch', '-D', tb]) === null) throw new UsageError(`swarm start: cannot delete ${tb}; if a worktree still holds it, run git worktree prune or remove that worktree (git worktree remove)`);
       }
       rmSync(stopFile(io.cwd), { force: true });
       saveExecution(io.cwd, state);
@@ -568,8 +569,12 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         // The fix round runs where the branch already is (a member's task-<T>, or the manual session's own worktree).
         const holder = worktreeHolding(deps.git(['worktree', 'list', '--porcelain']), t.branch);
         // Taking over a session's own worktree must not trample its uncommitted edits.
-        if (holder !== null && (deps.at(holder).git(['status', '--porcelain']) ?? '').trim() !== '') {
-          throw new UsageError(`swarm retry: the worktree of ${t.branch} (${holder}) has uncommitted changes; commit or discard them before --adopt`);
+        if (holder !== null) {
+          const status = deps.at(holder).git(['status', '--porcelain']);
+          if (status === null) throw new UsageError(`swarm retry: could not read the worktree status of ${t.branch} (${holder}); check it by hand before --adopt`);
+          if (status.trim() !== '') {
+            throw new UsageError(`swarm retry: the worktree of ${t.branch} (${holder}) has uncommitted changes; commit or discard them before --adopt`);
+          }
         }
         const worktree = holder ?? addTaskWorktree(deps, io.cwd, task, e.branch).worktree;
         const revive = !e.active && e.stopReason === 'stalled';

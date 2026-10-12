@@ -448,6 +448,21 @@ describe('execution', () => {
     expect(renderApp(en, ui())).toContain('▶ loose tasks · subagents 1/2');
     expect(renderApp(en, ui({ view: 'sessions' }))).toContain('▶ loose tasks · subagents 1/2 · coordinator: main');
   });
+  it('a loose id equal to a plan task id shows the loose title and the coordinator liveness, not the plan task', () => {
+    const m = base();
+    const planTask = m.plan.tasks[0];
+    m.states = { ...m.states, [planTask.id]: { ...(m.states[planTask.id] ?? {}), status: 'in_progress', exec: { leaseUntil: new Date(NOW + 5 * 60000).toISOString() } } as never };
+    m.run = looseRun({
+      slots: [{ task: planTask.id, stage: 'implement' as const, agent: 'forge-mech', by: 'main', since: new Date(NOW - 3 * 60000).toISOString() }],
+      loose: [{ id: planTask.id, title: 'Loose namesake', status: 'running' as const, stage: 'implement' as const, agent: 'forge-mech' }],
+    });
+    m.sessions.main = { ...m.sessions.main, leaseUntil: new Date(NOW - 20 * 60000).toISOString() };
+    const sv = renderApp(m, ui({ view: 'sessions' }));
+    const slot = sv.slice(sv.indexOf('<div class="sc slot"'), sv.indexOf('</h3>', sv.indexOf('<div class="sc slot"')));
+    expect(slot).toContain('Loose namesake');
+    expect(slot).not.toContain(planTask.title);
+    expect(slot).toContain('live-stopped');
+  });
   it('the tracking view lists the loose tasks with status, stage, agent and the slot liveness dot', () => {
     const m = base();
     m.run = looseRun();
