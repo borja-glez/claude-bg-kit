@@ -128,7 +128,7 @@ describe('buildPanelModel', () => {
   it('is all-null for an empty project', () => {
     expect(buildPanelModel(base)).toEqual({
       locale: 'en', waypoint: null, superpowers: null, todos: null, subagents: [], tool: null, turnSeconds: null, ccTasks: null,
-      forge: null, infinite: null, execution: null, proposals: [], mainModel: null, usage: null,
+      forge: null, infinite: null, decisions: null, execution: null, proposals: [], mainModel: null, usage: null,
     });
   });
   it('derives waypoint from a work band and takes its locale', () => {
@@ -392,5 +392,25 @@ describe('buildPanelModel usage', () => {
     recordStep(run, { model: 'claude-opus-5-5', usage: U(3_000_000, 0) });
     const m = buildPanelModel({ ...base, usage: { session: session(), run, officialUsd: null } });
     expect(m.usage).toMatchObject({ scope: 'run', tokens: 3_000_000, session: { tokens: 2_000_000 } });
+  });
+});
+
+describe('buildPanelModel decisions', () => {
+  const now = Date.parse('2026-10-13T12:00:00Z');
+  const base = { band: { mode: 'none' } as const, activity: act(), now };
+  const doc = (o: Record<string, unknown> = {}) => JSON.stringify({
+    ts: '2026-10-13T11:50:00Z', scope: 'orders', count: 2, autonomy: 'auto', last: [],
+    lastMajor: { n: 7, point: 'design-approve', what: 'diseño aprobado (v4)', chosen: 'approve', ts: '2026-10-13T11:50:00Z' }, ...o,
+  });
+  it('summarizes the automatic decisions of the last day', () => {
+    expect(buildPanelModel({ ...base, forgeDecisions: doc() }).decisions).toEqual({ count: 2, autonomy: 'auto', lastMajor: 'diseño aprobado (v4)' });
+    expect(buildPanelModel({ ...base, forgeDecisions: doc({ lastMajor: null }) }).decisions?.lastMajor).toBeNull();
+  });
+  it('is null when absent, stale, empty, corrupt or oversized', () => {
+    expect(buildPanelModel(base).decisions).toBeNull();
+    expect(buildPanelModel({ ...base, forgeDecisions: doc({ ts: '2026-10-12T11:00:00Z' }) }).decisions).toBeNull();
+    expect(buildPanelModel({ ...base, forgeDecisions: doc({ count: 0 }) }).decisions).toBeNull();
+    expect(buildPanelModel({ ...base, forgeDecisions: '{"ts":' }).decisions).toBeNull();
+    expect(buildPanelModel({ ...base, forgeDecisions: doc() + ' '.repeat(16 * 1024) }).decisions).toBeNull();
   });
 });

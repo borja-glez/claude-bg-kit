@@ -4,6 +4,7 @@ import type { BandModel } from '../mod/model.js';
 import { buildPanelModel, parseSddLedger, summarizeTodos, FORGE_RUN_MAX, FORGE_EXEC_MAX, FORGE_EXEC_FILE_MAX, FORGE_EXEC_TASKS_MAX, FORGE_LIVE_MAX, PROPOSAL_ID, type Activity, type PanelModel } from './model.js';
 import { clip, join, listOpt, loadBandModel, mtime, nowMs, readOpt, MAX_DOCS, type Engine } from '../mod/files.js';
 import { normalizeStatus } from '../lib/forge-status.js';
+import { DECISIONS_MAX } from '../lib/decisions.js';
 import { buildCards, cardAlt } from './cards.js';
 import { cardSvg, bandSvg } from './svg.js';
 import { termCard, termBand, type TermUI } from './term.js';
@@ -43,7 +44,7 @@ let roadmap: BandModel = { mode: 'none' };
 
 type PanelFiles = {
   ledger?: string; ledgerPlan?: string; planFallback?: string; ledgerMtimeMs?: number;
-  forgeStatus?: string; forgeRun?: string; proposals?: Record<string, string>; forgeBriefs?: number;
+  forgeStatus?: string; forgeRun?: string; proposals?: Record<string, string>; forgeBriefs?: number; forgeDecisions?: string;
   forgeExecution?: string; forgeExecTasks?: Record<string, string>; forgeLive?: Record<string, string>;
 };
 // The last model built, kept in module memory for the band (which draws without reading $.state or files).
@@ -204,6 +205,9 @@ async function loadForgeFiles($: Engine, root: string): Promise<PanelFiles> {
       if (nums.length) out.forgeBriefs = Math.max(...nums);
     }
   }
+  // forge's automatic decisions (.forge/decisions.json, a few hundred bytes): not read above DECISIONS_MAX.
+  const decisions = entries.find(f => f.kind === 'file' && f.name === 'decisions.json');
+  if (decisions && decisions.size <= DECISIONS_MAX) out.forgeDecisions = await readOpt($, join(dir, 'decisions.json'));
   // The infinite run (.forge/run.json, a few hundred bytes): not read above 16 KiB.
   const run = entries.find(f => f.kind === 'file' && f.name === 'run.json');
   if (run && run.size <= FORGE_RUN_MAX) out.forgeRun = await readOpt($, join(dir, 'run.json'));
@@ -584,6 +588,7 @@ const TEXT = {
     queued: 'por integrar', orphans: 'huérfanas', conflictsLbl: 'en conflicto', blockedLbl: 'bloqueadas', integratedN: 'integradas',
     stage: { brief: 'brief', implement: 'implementar', validate: 'validar', verify: 'verificar', review: 'revisar', verdict: 'veredicto', integrate: 'integrar', execution: 'ejecución' },
     sForge: 'forge', approve: 'Aprobar', reject: 'Rechazar', hoursLeft: (h: number) => `quedan ${h} h`, auto: 'auto',
+    autoDecisions: (n: number) => `${n} ${n === 1 ? 'decisión automática' : 'decisiones automáticas'}`,
     pressEnter: 'Comando listo en el prompt: pulsa Enter',
     briefs: 'briefs', cycle: 'ciclo', task: 'Tarea', proposals: 'Propuestas',
     sUsage: 'Consumo', effort: 'esfuerzo', thisSession: 'esta sesión', run: 'ejecución', gMain: 'Sesión principal', gImpl: 'Implementadores', gReview: 'Revisores', gVerify: 'Verificación', blocked: 'bloqueada', gPlan: 'Planificación y scout', gOther: 'Otros subagentes', tracking: 'Seguimiento', withoutForge: 'Sin forge (estimado)', withoutForgeNote: 'orientativo: en una sola sesión el contexto crecería y costaría más, y no habría revisión', forgeCosts: (usd: string, pct: number) => `forge cuesta +${usd} (+${pct} %)`, forgeSaves: (usd: string) => `forge ahorra −${usd}`, pricesAsOf: 'precios a', drift: 'precios o medición incompletos', various: 'varios', noReview: 'sin revisiones independientes', effortLevel: (e: string) => ({ low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' } as Record<string, string>)[e] ?? e,
@@ -598,6 +603,7 @@ const TEXT = {
     queued: 'to integrate', orphans: 'orphaned', conflictsLbl: 'in conflict', blockedLbl: 'blocked', integratedN: 'integrated',
     stage: { brief: 'brief', implement: 'implement', validate: 'validate', verify: 'verify', review: 'review', verdict: 'verdict', integrate: 'integrate', execution: 'execution' },
     sForge: 'forge', approve: 'Approve', reject: 'Reject', hoursLeft: (h: number) => `${h}h left`, auto: 'auto',
+    autoDecisions: (n: number) => `${n} automatic decision${n === 1 ? '' : 's'}`,
     pressEnter: 'Command ready in the prompt: press Enter',
     briefs: 'briefs', cycle: 'cycle', task: 'Task', proposals: 'Proposals',
     sUsage: 'Usage', effort: 'effort', thisSession: 'this session', run: 'run', gMain: 'Main session', gImpl: 'Implementers', gReview: 'Reviewers', gVerify: 'Verification', blocked: 'blocked', gPlan: 'Planning and scout', gOther: 'Other subagents', tracking: 'Tracking', withoutForge: 'Without forge (estimate)', withoutForgeNote: 'rough: in one session the context would grow and cost more, with no review', forgeCosts: (usd: string, pct: number) => `forge costs +${usd} (+${pct}%)`, forgeSaves: (usd: string) => `forge saves −${usd}`, pricesAsOf: 'prices as of', drift: 'prices or measurement incomplete', various: 'mixed', noReview: 'no independent review', effortLevel: (e: string) => e,

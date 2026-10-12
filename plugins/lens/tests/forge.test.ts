@@ -316,3 +316,20 @@ test('the band shows the forge task with its bar while there is activity, as cel
   expect(await desk.find({ key: 'panel' })).toBeDefined();
   await desk.unmount();
 });
+
+test('the forge card counts the automatic decisions from .forge/decisions.json', async ($, on) => {
+  const at = new Date(NOW - 10 * 60_000).toISOString();
+  const DECISIONS = JSON.stringify({ ts: at, scope: 'hash', count: 2, autonomy: 'auto', last: [], lastMajor: { n: 4, point: 'design-approve', what: 'design approved (v3)', chosen: 'approve', ts: at } });
+  serveFiles(on, { ...FORGE, [`${ROOT}/.forge/decisions.json`]: DECISIONS });
+  servePanes(on);
+  start(on);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ plugin: 'lens', surface, component: 'Pane', requestId: PANE, props: PANE_PROPS });
+    const text = await said(ui);
+    expect(text).toContain('2 automatic decisions');
+    expect(text).toContain('design approved (v3)');
+    await ui.unmount();
+  }
+});

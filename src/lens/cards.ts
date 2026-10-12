@@ -18,7 +18,7 @@ export interface CardTexts {
   sUsage: string; effort: string; effortLevel: (e: string) => string; thisSession: string; run: string; gMain: string; gImpl: string;
   gReview: string; gPlan: string; gOther: string; tracking: string; withoutForge: string; withoutForgeNote: string;
   forgeCosts: (usd: string, pct: number) => string; forgeSaves: (usd: string) => string; pricesAsOf: string; drift: string; various: string;
-  noReview: string; gVerify: string; blocked: string;
+  noReview: string; gVerify: string; blocked: string; autoDecisions: (n: number) => string;
 }
 
 const modelRight = (s: { model?: string; effort?: string }, t: CardTexts): string | undefined =>
@@ -65,7 +65,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     });
   }
 
-  if (m.forge || m.infinite?.active) {
+  if (m.forge || m.infinite?.active || m.decisions) {
     const blocks: Block[] = [];
     const f = m.forge;
     if (f) {
@@ -103,6 +103,12 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
       const right = [inf.cyclesMax !== null ? `${inf.cycle}/${inf.cyclesMax}` : `${inf.cycle}`, inf.hoursLeft !== null && t.hoursLeft(inf.hoursLeft)].filter(Boolean).join(' · ');
       blocks.push({ kind: 'bar', ratio: inf.cyclesMax ? ratio(inf.cycle - 1, inf.cyclesMax) : 0, hue: 'mauve', moving: true, label: `∞ ${t.cycle}`, right });
       for (const title of inf.autoApproved) blocks.push({ kind: 'row', dot: 'green', tag: { text: t.auto, hue: 'green' }, text: title });
+    }
+    // What forge decided without asking in the last day (.forge/decisions.json): the count and the last major one.
+    const dec = m.decisions;
+    if (dec) {
+      blocks.push({ kind: 'row', dot: 'yellow', tag: { text: `⚑ ${t.auto}`, hue: 'yellow' }, text: t.autoDecisions(dec.count) });
+      if (dec.lastMajor) blocks.push({ kind: 'text', text: dec.lastMajor, dim: true });
     }
     out.push({
       icon: SECTION_ICON.forge, title: f?.task ?? 'forge', hue: SECTION_HUE.forge,

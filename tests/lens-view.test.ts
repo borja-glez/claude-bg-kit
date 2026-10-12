@@ -16,6 +16,7 @@ const T: CardTexts = {
   withoutForgeNote: 'estimate: forge off, everything on the main model', forgeCosts: (usd, pct) => `forge costs ${usd} more (+${pct} %)`,
   forgeSaves: usd => `forge saves ${usd}`, pricesAsOf: 'prices as of', drift: 'differs from /cost',
   noReview: 'no independent review', gVerify: 'verification', blocked: 'blocked',
+  autoDecisions: n => `${n} automatic decision${n === 1 ? '' : 's'}`,
 };
 const FORGE: NonNullable<PanelModel['forge']> = {
   task: 'orders', path: 'large', phase: 'implement', agent: 'forge-impl-heavy', validators: [{ name: 'test', ok: true }],
@@ -23,7 +24,7 @@ const FORGE: NonNullable<PanelModel['forge']> = {
 };
 const EMPTY: PanelModel = {
   locale: 'en', waypoint: null, superpowers: null, todos: null, subagents: [], tool: null, turnSeconds: null, ccTasks: null,
-  forge: null, infinite: null, execution: null, proposals: [], mainModel: null, usage: null,
+  forge: null, infinite: null, decisions: null, execution: null, proposals: [], mainModel: null, usage: null,
 };
 const EXEC: NonNullable<PanelModel['execution']> = {
   runId: 'r1', mode: 'subagents', parallel: 3, branch: 'forge/run-shop', active: true, stopReason: null, stallReason: null,
@@ -137,6 +138,15 @@ describe('lens cards', () => {
     expect(alt).toContain('briefs 2/5');
     expect(alt).toContain('heavy forge-impl-heavy');
     expect(alt).toContain('accept 0.96');
+  });
+  it('the forge card counts the automatic decisions and names the last major one, even with no forge task', () => {
+    const [card] = buildCards({ ...EMPTY, decisions: { count: 3, autonomy: 'auto', lastMajor: 'design approved (v4)' } }, T, 0);
+    expect(card.title).toBe('forge');
+    const blocks = JSON.stringify(card.blocks);
+    expect(blocks).toContain('3 automatic decisions');
+    expect(blocks).toContain('design approved (v4)');
+    const withTask = buildCards({ ...EMPTY, forge: FORGE, decisions: { count: 1, autonomy: 'unattended', lastMajor: null } }, T, 0).find(c => c.title === FORGE.task)!;
+    expect(JSON.stringify(withTask.blocks)).toContain('1 automatic decision"');
   });
   it('builds nothing from an empty model', () => {
     expect(buildCards(EMPTY, T, 0)).toEqual([]);
