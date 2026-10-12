@@ -71,6 +71,7 @@ export function stagesFor(path: string, phase: string, validated: 'ok' | 'failed
   const large = path === 'large';
   const light = path === 'trivial' || path === 'small';
   const names = STAGES.filter(s => (large || (s !== 'design' && s !== 'plan' && s !== 'final')) && !(light && (s === 'review' || s === 'verdict')));
+  if (phase.toLowerCase() === 'done') return names.map(name => ({ name, state: 'done' }));
   const at = STAGE_OF[phase.toLowerCase()] ?? null;
   let i = at ? names.indexOf(at) : -1;
   const v = names.indexOf('validate');

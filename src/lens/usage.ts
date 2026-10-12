@@ -8,7 +8,10 @@ export interface UsageLoop {
   input: number; output: number; cacheRead: number; cacheWrite: number; costUsd: number; unpriced: number;
 }
 export interface UsageState { startedAt: number; loops: Record<string, UsageLoop>; tracking: { waypoint: number; forge: number } }
-type StepUsage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number; model?: string };
+type StepUsage = {
+  input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number; model?: string;
+  cache_creation?: { ephemeral_5m_input_tokens?: number; ephemeral_1h_input_tokens?: number } | null;
+};
 
 const MAX_LOOPS = 200;
 /** Where the steps of loops past MAX_LOOPS go, so none is lost. */
@@ -44,7 +47,8 @@ export function recordStep(s: UsageState, step: { agentId?: string; model: strin
   loop.output += t.output;
   loop.cacheRead += t.cacheRead;
   loop.cacheWrite += t.cacheWrite;
-  const c = stepCost(model, t);
+  // Subagents write to the 5-minute cache, which costs less than the main session's 1-hour one.
+  const c = stepCost(model, { ...t, cacheWrite5m: n(step.usage.cache_creation?.ephemeral_5m_input_tokens) });
   if (c === null) loop.unpriced += 1;
   else loop.costUsd += c;
 }

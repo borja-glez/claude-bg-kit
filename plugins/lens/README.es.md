@@ -7,7 +7,7 @@ Roadmap, etapas de forge, ejecuciones de superpowers, pendientes, subagentes, el
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.5.1](https://img.shields.io/badge/versi%C3%B3n-0.5.1-b4befe?style=flat-square)
+![versión 0.5.2](https://img.shields.io/badge/versi%C3%B3n-0.5.2-b4befe?style=flat-square)
 ![sin coste en tokens](https://img.shields.io/badge/coste%20en%20tokens-ninguno-a6e3a1?style=flat-square)
 
 </div>

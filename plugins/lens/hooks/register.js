@@ -223,7 +223,10 @@ function priceFor(model, promptTokens = 0) {
   if (hit[0] === "claude-haiku-5-5" && promptTokens > HAIKU_55_TIER_TOKENS) return HAIKU_55_HIGH;
   return hit[1];
 }
-var cost = (p, t) => (t.input * p.input + t.output * p.output + t.cacheRead * p.cacheRead + t.cacheWrite * p.cacheWrite) / 1e6;
+var cost = (p, t) => {
+  const w5 = Math.min(t.cacheWrite5m ?? 0, t.cacheWrite);
+  return (t.input * p.input + t.output * p.output + t.cacheRead * p.cacheRead + (t.cacheWrite - w5) * p.cacheWrite + w5 * p.input * 1.25) / 1e6;
+};
 function stepCost(model, t) {
   const p = priceFor(model, t.input + t.cacheRead + t.cacheWrite);
   return p ? cost(p, t) : null;
@@ -272,7 +275,7 @@ function recordStep(s, step) {
   loop.output += t.output;
   loop.cacheRead += t.cacheRead;
   loop.cacheWrite += t.cacheWrite;
-  const c2 = stepCost(model, t);
+  const c2 = stepCost(model, { ...t, cacheWrite5m: n(step.usage.cache_creation?.ephemeral_5m_input_tokens) });
   if (c2 === null) loop.unpriced += 1;
   else loop.costUsd += c2;
 }
@@ -11627,6 +11630,7 @@ function stagesFor(path, phase, validated = null) {
   const large = path === "large";
   const light = path === "trivial" || path === "small";
   const names = STAGES.filter((s) => (large || s !== "design" && s !== "plan" && s !== "final") && !(light && (s === "review" || s === "verdict")));
+  if (phase.toLowerCase() === "done") return names.map((name) => ({ name, state: "done" }));
   const at = STAGE_OF[phase.toLowerCase()] ?? null;
   let i = at ? names.indexOf(at) : -1;
   const v = names.indexOf("validate");

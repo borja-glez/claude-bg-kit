@@ -4,7 +4,8 @@
 
 export const PRICES_AS_OF = '2026-10-12';
 export interface Price { input: number; output: number; cacheRead: number; cacheWrite: number }
-export interface Tokens { input: number; output: number; cacheRead: number; cacheWrite: number }
+// cacheWrite5m: the part of cacheWrite written to the 5-minute cache (1.25x input); the rest is priced as 1-hour writes.
+export interface Tokens { input: number; output: number; cacheRead: number; cacheWrite: number; cacheWrite5m?: number }
 
 const P = (input: number, output: number, cacheRead: number, cacheWrite: number): Price => ({ input, output, cacheRead, cacheWrite });
 const HAIKU_55_HIGH = P(0.5, 2.5, 0.05, 1);
@@ -44,7 +45,10 @@ export function priceFor(model: string, promptTokens = 0): Price | null {
   return hit[1];
 }
 
-const cost = (p: Price, t: Tokens) => (t.input * p.input + t.output * p.output + t.cacheRead * p.cacheRead + t.cacheWrite * p.cacheWrite) / 1e6;
+const cost = (p: Price, t: Tokens) => {
+  const w5 = Math.min(t.cacheWrite5m ?? 0, t.cacheWrite);
+  return (t.input * p.input + t.output * p.output + t.cacheRead * p.cacheRead + (t.cacheWrite - w5) * p.cacheWrite + w5 * p.input * 1.25) / 1e6;
+};
 
 /** One request's cost, with the tier its own prompt size gives. */
 export function stepCost(model: string, t: Tokens): number | null {

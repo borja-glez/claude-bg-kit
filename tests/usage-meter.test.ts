@@ -14,6 +14,18 @@ describe('usage meter', () => {
     expect(s.loops.a1).toMatchObject({ kind: 'unknown', model: 'claude-sonnet-5-5', effort: 'low', steps: 1, input: 7, output: 3 });
     expect(s.loops[MAIN].costUsd).toBeCloseTo((110 * 4 + 55 * 20 + 1000 * 0.2 + 10 * 8) / 1e6);
   });
+  it('prices 5-minute cache writes at 1.25x input and 1-hour ones at 2x, from the response split', () => {
+    const s = newUsage(1);
+    const M = 1_000_000;
+    // Opus 5.5: input $4/M, so 5m writes $5/M and 1h writes $8/M.
+    recordStep(s, { agentId: 'a', model: 'claude-opus-5-5', usage: { ...U(0, 0, 0, M), cache_creation: { ephemeral_5m_input_tokens: M, ephemeral_1h_input_tokens: 0 } } });
+    recordStep(s, { agentId: 'b', model: 'claude-opus-5-5', usage: { ...U(0, 0, 0, M), cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: M } } });
+    recordStep(s, { agentId: 'c', model: 'claude-opus-5-5', usage: U(0, 0, 0, M) });
+    expect(s.loops.a.costUsd).toBeCloseTo(5);
+    expect(s.loops.b.costUsd).toBeCloseTo(8);
+    expect(s.loops.c.costUsd).toBeCloseTo(8); // no split: the 1-hour price, as before
+    expect(s.loops.a.cacheWrite).toBe(M);
+  });
   it('counts a step with no usage as a step with no tokens, and an unpriced model as unpriced', () => {
     const s = newUsage(1);
     recordStep(s, { model: 'claude-opus-5-5', usage: null });

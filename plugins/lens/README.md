@@ -7,7 +7,7 @@ Roadmap, forge stages, superpowers runs, todos, subagents, the model and effort 
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.5.1](https://img.shields.io/badge/version-0.5.1-b4befe?style=flat-square)
+![version 0.5.2](https://img.shields.io/badge/version-0.5.2-b4befe?style=flat-square)
 ![no token cost](https://img.shields.io/badge/token%20cost-none-a6e3a1?style=flat-square)
 
 </div>

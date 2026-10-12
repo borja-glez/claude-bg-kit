@@ -44,6 +44,9 @@ describe('lens view', () => {
     expect(stagesFor('trivial', '', 'ok').map(s => s.state)).toEqual(['done', 'done', 'done']);
     expect(stagesFor('small', '', 'failed').map(s => `${s.name}:${s.state}`)).toEqual(['triage:done', 'implement:done', 'validate:active']);
     expect(stagesFor('medium', 'review', 'ok').map(s => s.state)).toEqual(['done', 'done', 'done', 'active', 'pending']);
+    // A finished run has every stage of its path done, whatever the path.
+    expect(stagesFor('medium', 'done', 'ok').map(s => s.state)).toEqual(['done', 'done', 'done', 'done', 'done']);
+    expect(stagesFor('large', 'done').every(s => s.state === 'done')).toBe(true);
   });
   it('turns briefs, todos and roadmap letters into cells', () => {
     expect(briefCells(FORGE)!.cells).toEqual(['done', 'done', 'active', 'pending', 'pending']);
