@@ -10,7 +10,7 @@ import { readExecution, saveExecution, writePublicTask, executionTaskFile, runBr
 import { schedule, widthOf } from '../schedule.js';
 import { LEASE_MINUTES } from '../../lib/coordination.js';
 import { STAGES, type ExecutionState, type ExecTask } from '../../lib/execution-state.js';
-import { parsePlan, PlanError } from '../../lib/plan.js';
+import { parsePlan, PlanError, isPlanId } from '../../lib/plan.js';
 import type { SessionDoc, Stage, TaskState } from '../../lib/types.js';
 import { mainWorktreeFrom, samePath } from '../../lib/worktree.js';
 
@@ -114,7 +114,7 @@ function mergeIn(at: GitDeps, ref: string, message: string, scope: 'heavy' | 'fi
 
 function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
   const task = rest[0];
-  if (!task || !ID.test(task)) throw new UsageError('swarm integrate: a task id is required');
+  if (!task || !isPlanId(task)) throw new UsageError('swarm integrate: a task id is required');
   const e = readExecution(io.cwd);
   if (!e) throw new UsageError('swarm integrate: no execution (forge swarm start)');
   const t = e.tasks[task];
@@ -178,7 +178,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
   }
   const taskArg = () => {
     const t = rest[0];
-    if (!t || !ID.test(t)) throw new UsageError(`swarm ${sub}: a task id is required`);
+    if (!t || !isPlanId(t)) throw new UsageError(`swarm ${sub}: a task id is required`);
     return t;
   };
 
@@ -246,8 +246,9 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     case 'propose': {
       const plan = loadPlanArg(io, flag('plan'), 'propose');
       const width = widthOf(plan);
-      const configured = loadConfig(io.cwd).swarm.mode ?? null;
-      const parallel = width < 2 ? 1 : Math.min(3, width);
+      const config = loadConfig(io.cwd);
+      const configured = config.swarm.mode ?? null;
+      const parallel = width < 2 ? 1 : Math.min(config.swarm.parallel, width);
       const reasons = [`${plan.tasks.length} tasks`, `up to ${width} at once (dependencies and zones)`];
       return json({ width, configured, recommended: { mode: 'subagents', parallel }, reasons });
     }
@@ -337,11 +338,13 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       const seconds = Number(rest[0]);
       if (!Number.isInteger(seconds) || seconds < 1 || seconds > MAX_SLEEP_S) throw new UsageError(`swarm sleep: seconds must be an integer from 1 to ${MAX_SLEEP_S}`);
       const e = current();
-      saveExecution(io.cwd, { ...e, sleepUntil: new Date(now.getTime() + seconds * 1000).toISOString() });
+      const until = new Date(now.getTime() + seconds * 1000).toISOString();
+      saveExecution(io.cwd, { ...e, sleepUntil: until });
       if (has('mark')) return ok();
       (io.sleep ?? sleepSync)(seconds * 1000);
+      // A newer sleep (or a --mark) may have replaced it meanwhile: only clear the value this call set.
       const after = readExecution(io.cwd);
-      if (after) saveExecution(io.cwd, { ...after, sleepUntil: null });
+      if (after && after.sleepUntil === until) saveExecution(io.cwd, { ...after, sleepUntil: null });
       return ok();
     }
     case 'stop': {

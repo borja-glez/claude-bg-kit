@@ -1,5 +1,6 @@
 import type { Stage } from './types.js';
 import type { SwarmState } from './swarm-state.js';
+import { isPlanId } from './plan.js';
 
 export type ExecMode = 'subagents' | 'sessions';
 export type ExecTaskStatus = 'running' | 'accepted' | 'integrated' | 'conflict' | 'blocked';
@@ -20,7 +21,6 @@ export interface ExecutionState {
 export const STAGES: readonly Stage[] = ['brief', 'implement', 'validate', 'verify', 'review', 'verdict', 'integrate'];
 const TASK_STATUSES: readonly ExecTaskStatus[] = ['running', 'accepted', 'integrated', 'conflict', 'blocked'];
 const STOPS: readonly ExecStopReason[] = ['finished', 'stalled', 'stopped', 'budget', 'migrated'];
-const ID = /^[A-Za-z0-9_\-.~:@+]{1,80}$/;
 const MAX_TASKS = 500;
 
 type Obj = Record<string, unknown>;
@@ -58,7 +58,7 @@ export function normalizeExecution(x: unknown): ExecutionState | null {
   const tasks: Record<string, ExecTask> = {};
   if (isObj(x.tasks)) {
     for (const [id, t] of Object.entries(x.tasks).slice(0, MAX_TASKS)) {
-      const n = ID.test(id) ? normalizeTask(t) : null;
+      const n = isPlanId(id) ? normalizeTask(t) : null;
       if (n) tasks[id] = n;
     }
   }

@@ -4,7 +4,8 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run, defaultGit, type Io } from '../src/forge/cli/run.js';
-import { readExecution, executionTaskFile } from '../src/forge/execution.js';
+import { readExecution, saveExecution, executionTaskFile } from '../src/forge/execution.js';
+import { normalizeExecution } from '../src/lib/execution-state.js';
 import { setupFor } from '../src/forge/cli/swarm.js';
 
 const PLAN = `project: shop
@@ -162,6 +163,25 @@ describe('forge swarm (execution)', () => {
     expect(readExecution(root)!.sleepUntil).toBe('2026-10-12T12:05:00.000Z');
     expect(run(['swarm', 'stop'], io).code).toBe(0);
     expect(readExecution(root)).toMatchObject({ active: false, stopReason: 'stopped' });
+  });
+  it('sleep clears sleepUntil only when a newer sleep did not replace it', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    const newer = '2026-10-12T13:00:00.000Z';
+    const overlap = () => { const e = readExecution(root)!; saveExecution(root, { ...e, sleepUntil: newer }); };
+    expect(run(['swarm', 'sleep', '60'], { ...io, sleep: overlap }).code).toBe(0);
+    expect(readExecution(root)!.sleepUntil).toBe(newer);
+    expect(run(['swarm', 'sleep', '60'], io).code).toBe(0);
+    expect(readExecution(root)!.sleepUntil).toBeNull();
+  });
+  it('propose caps the recommendation with swarm.parallel', () => {
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators: []\nswarm:\n  parallel: 1\n');
+    expect(out(run(['swarm', 'propose', '--plan', 'plan.yaml'], io))).toMatchObject({ width: 2, recommended: { parallel: 1 } });
+  });
+  it('task ids follow the plan id rule', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    for (const bad of ['a:b', '..', 'a/b', 'x'.repeat(65)]) expect(run(['swarm', 'worktree', bad], io).code).toBe(2);
+    for (const sub of ['task', 'retry', 'integrate']) expect(run(['swarm', sub, 'a:b'], io).code).toBe(2);
+    expect(normalizeExecution({ ...readExecution(root)!, tasks: { 'a:b': { status: 'running', stage: 'brief', executor: 'subagents', worktree: '', branch: 'task/x', startedAt: NOW.toISOString() } } })!.tasks).toEqual({});
   });
   it('top-level forge stop ends an active execution and leaves the stop file', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
