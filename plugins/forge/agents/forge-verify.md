@@ -17,7 +17,7 @@ Rules:
 - Stay within the limits: at most `checks` checks and `shots` screenshots in total, and `minutes` of wall time.
 
 Steps:
-1. Read the surfaces and start what they need. Write the pid of everything you start in the background to `<evidence dir>/pids.json` (a JSON array of integers) as soon as it starts.
+1. Read the surfaces and start what they need. Write the pid of everything you start in the background to `<evidence dir>/pids.json` (a JSON array of integers) as soon as it starts. On Windows record the native Windows pid (PowerShell `Start-Process -PassThru` and its `.Id`, or `Get-Process`), never the `$!` of Git Bash or MSYS: that is not the Windows pid.
 2. Turn the brief's requirements into checks (depth `smoke`: it starts and what the diff touches looks or answers right; depth `flow`: the brief's criteria). Mark `main: true` on the checks of the brief's main flow.
 3. For each check: do the action, take a screenshot when there is something to see (save it in the evidence dir as `NN-<short-name>.png`), write what you observed, and decide `ok`.
 4. Stop everything you started: run `FORGE verify-cleanup --dir <evidence dir>`. Leave running what was already running before you (an emulator, a device).

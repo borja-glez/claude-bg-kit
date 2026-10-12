@@ -21,7 +21,7 @@ import { swarmCommand } from './swarm.js';
 import { readSwarm, saveSwarm } from '../swarm.js';
 import { detectValidators, selectValidators, runValidators, globMatch, onPath, type RepoReader, type Scope } from '../validators.js';
 import { checkTools, missingTools } from '../tools.js';
-import { verifyPlan, cleanupPids } from '../verify.js';
+import { verifyPlan, cleanupPids, killTarget } from '../verify.js';
 import { readLocal, updateLocal } from '../local.js';
 import { readSurfaces, detectDrafts, appendLearned, surfaceFile, surfaceHash } from '../surfaces.js';
 
@@ -344,11 +344,14 @@ export function run(argv: string[], io: Io): Result {
         const dir = flag('dir');
         if (!dir) throw new UsageError('verify-cleanup: --dir is required');
         let pids: number[] = [];
-        try { const raw = JSON.parse(readFileSync(path.resolve(io.cwd, dir, 'pids.json'), 'utf8')); if (Array.isArray(raw)) pids = raw.filter((p): p is number => Number.isInteger(p) && p > 0); } catch { pids = []; }
+        try { const raw = JSON.parse(readFileSync(path.resolve(io.cwd, dir, 'pids.json'), 'utf8')); if (Array.isArray(raw)) pids = raw.filter((p): p is number => Number.isInteger(p)); } catch { pids = []; }
+        const pgid = (pid: number): number | null => {
+          try { const n = Number(execFileSync('ps', ['-o', 'pgid=', '-p', String(pid)], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim()); return Number.isInteger(n) && n > 0 ? n : null; } catch { return null; }
+        };
         const kill = (pid: number) => {
           try {
             if (process.platform === 'win32') execFileSync('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true });
-            else process.kill(-pid, 'SIGTERM');
+            else process.kill(killTarget(pid, pgid(pid)), 'SIGTERM');
             return true;
           } catch {
             try { process.kill(pid, 'SIGTERM'); return true; } catch { return false; }
