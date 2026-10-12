@@ -20,7 +20,8 @@ import { UsageError } from './errors.js';
 import { swarmCommand } from './swarm.js';
 import { readSwarm, saveSwarm } from '../swarm.js';
 import { detectValidators, selectValidators, runValidators, globMatch, onPath, type RepoReader, type Scope } from '../validators.js';
-import { checkTools } from '../tools.js';
+import { checkTools, missingTools } from '../tools.js';
+import { verifyPlan } from '../verify.js';
 import { readLocal, updateLocal } from '../local.js';
 import { readSurfaces, detectDrafts, appendLearned, surfaceFile, surfaceHash } from '../surfaces.js';
 
@@ -531,6 +532,20 @@ export function run(argv: string[], io: Io): Result {
         const picked = one === undefined ? all : all.filter(s => s.name === one);
         if (one !== undefined && !picked.length) throw new UsageError(`tools: no surface ${one} in .forge/verify/`);
         return json(checkTools(picked.flatMap(s => s.tools), { onPath, exec: io.exec ?? defaultExec(io.cwd) }));
+      }
+      case 'verify-plan': {
+        const task = flag('task'), p = flag('path'), base = flag('base');
+        if (!task || !p || !base) throw new UsageError('verify-plan: --task, --path and --base are required');
+        if (!(PATH_ORDER as readonly string[]).includes(p)) throw new UsageError(`verify-plan: --path must be one of ${PATH_ORDER.join('|')}`);
+        const diff = (io.git ?? defaultGit(io.cwd))(['diff', '--name-only', `${base}..HEAD`]);
+        const plan = verifyPlan({
+          path: p, asked: has('asked'),
+          changed: diff === null ? null : diff.split('\n').map(s => s.trim()).filter(Boolean),
+          surfaces: readSurfaces(io.cwd), drafts: detectDrafts(repoReader(io.cwd)), local: readLocal(io.cwd),
+          missing: s => missingTools(s.tools, onPath),
+        });
+        appendEvent(io.cwd, { ts: ts(), kind: 'verify', task, planned: plan.eligible, surfaces: plan.surfaces.filter(s => s.permission === 'allowed').map(s => s.name) });
+        return json(plan);
       }
       case 'local': {
         const [sub, key, value] = args;
