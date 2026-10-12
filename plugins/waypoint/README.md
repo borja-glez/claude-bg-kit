@@ -44,7 +44,7 @@ A task that spans dozens of steps and several sessions loses its thread: what wa
 ## Install
 
 ```bash
-claude plugin marketplace add <path-to>/claude-bg-kit
+claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install waypoint@bg-kit
 ```
 

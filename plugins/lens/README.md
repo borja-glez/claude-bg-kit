@@ -32,7 +32,7 @@ Long runs happen out of sight: subagents in the background, reviewers in paralle
 ## Install
 
 ```bash
-claude plugin marketplace add <path-to>/claude-bg-kit
+claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install lens@bg-kit
 ```
 

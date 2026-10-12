@@ -44,7 +44,7 @@ Una tarea de decenas de pasos y varias sesiones pierde el hilo: qué se decidió
 ## Instalación
 
 ```bash
-claude plugin marketplace add <ruta>/claude-bg-kit
+claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install waypoint@bg-kit
 ```
 

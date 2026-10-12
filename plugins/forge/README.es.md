@@ -41,7 +41,7 @@ Hacer todas las tareas igual malgasta esfuerzo. Una revisión completa de un arr
 ## Instalación
 
 ```bash
-claude plugin marketplace add <ruta>/claude-bg-kit
+claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 

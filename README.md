@@ -57,16 +57,27 @@ A large task goes through four stages. You make three decisions along the way: y
 
 ## Install
 
-The marketplace is a folder (or a git repository) that Claude Code adds by path:
+Add the marketplace straight from GitHub, then install the plugins you want:
 
 ```bash
-git clone <repository-url> claude-bg-kit
-claude plugin marketplace add ./claude-bg-kit
+claude plugin marketplace add borja-glez/claude-bg-kit
 
 claude plugin install waypoint@bg-kit
 claude plugin install forge@bg-kit     # pulls in waypoint ^0.10.0 as a dependency
 claude plugin install lens@bg-kit
 ```
+
+Inside a session, `/plugin marketplace add borja-glez/claude-bg-kit` does the same. To get new versions later, run `claude plugin marketplace update bg-kit`.
+
+<details>
+<summary><b>From a local clone</b> (to work on the plugins themselves)</summary>
+
+```bash
+git clone https://github.com/borja-glez/claude-bg-kit.git
+claude plugin marketplace add ./claude-bg-kit
+```
+
+</details>
 
 Restart Claude Code after installing or updating a plugin.
 

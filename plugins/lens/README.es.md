@@ -32,7 +32,7 @@ Las ejecuciones largas pasan fuera de la vista: subagentes en segundo plano, rev
 ## Instalación
 
 ```bash
-claude plugin marketplace add <ruta>/claude-bg-kit
+claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install lens@bg-kit
 ```
 

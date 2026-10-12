@@ -41,7 +41,7 @@ Doing every task the same way wastes effort. A full review of a one-line fix cos
 ## Install
 
 ```bash
-claude plugin marketplace add <path-to>/claude-bg-kit
+claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 

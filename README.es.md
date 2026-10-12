@@ -57,16 +57,27 @@ El **modo infinito** (`/forge:infinite`) sigue haciendo ciclos dentro de un pres
 
 ## Instalación
 
-El marketplace es una carpeta (o un repositorio git) que Claude Code añade por su ruta:
+Añade el marketplace directamente desde GitHub e instala los plugins que quieras:
 
 ```bash
-git clone <url-del-repositorio> claude-bg-kit
-claude plugin marketplace add ./claude-bg-kit
+claude plugin marketplace add borja-glez/claude-bg-kit
 
 claude plugin install waypoint@bg-kit
 claude plugin install forge@bg-kit     # instala waypoint ^0.10.0 como dependencia
 claude plugin install lens@bg-kit
 ```
+
+Dentro de una sesión, `/plugin marketplace add borja-glez/claude-bg-kit` hace lo mismo. Para recibir versiones nuevas más adelante, ejecuta `claude plugin marketplace update bg-kit`.
+
+<details>
+<summary><b>Desde un clon local</b> (para trabajar en los propios plugins)</summary>
+
+```bash
+git clone https://github.com/borja-glez/claude-bg-kit.git
+claude plugin marketplace add ./claude-bg-kit
+```
+
+</details>
 
 Reinicia Claude Code después de instalar o actualizar un plugin.
 
