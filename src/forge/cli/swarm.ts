@@ -78,18 +78,23 @@ const LOCAL_STATE = [':!.forge', ':!.waypoint', ':!.claude'];
 
 type MergeOutcome = { result: 'merged'; sha: string; preexisting: string[] } | { result: 'dirty' | 'conflict'; detail: string };
 
-function readBaseline(cacheDir: string, sha: string): unknown {
-  try { return JSON.parse(readFileSync(path.join(cacheDir, `baseline-${sha}.json`), 'utf8')); } catch { return null; }
+// A baseline is only valid for the same scope and target (worktree, config and environment differ between them).
+const baselineFile = (cacheDir: string, key: string, sha: string) => path.join(cacheDir, 'baseline', `${key}-${sha}.json`);
+function readBaseline(cacheDir: string, key: string, sha: string): unknown {
+  try { return JSON.parse(readFileSync(baselineFile(cacheDir, key, sha), 'utf8')); } catch { return null; }
 }
-function writeBaseline(cacheDir: string, sha: string, results: unknown): void {
-  try { mkdirSync(cacheDir, { recursive: true }); writeFileSync(path.join(cacheDir, `baseline-${sha}.json`), JSON.stringify(results)); } catch { /* a missing cache only costs a rerun */ }
+const timedOut = (results: unknown) => Array.isArray(results) && results.some(r => Array.isArray(r?.failures) && r.failures.some((f: unknown) => typeof f === 'string' && f.startsWith('timeout after')));
+function writeBaseline(cacheDir: string, key: string, sha: string, results: unknown): void {
+  if (timedOut(results)) return; // a timeout says nothing about the tip: never cache it
+  try { mkdirSync(path.join(cacheDir, 'baseline'), { recursive: true }); writeFileSync(baselineFile(cacheDir, key, sha), JSON.stringify(results)); } catch { /* a missing cache only costs a rerun */ }
 }
 
 /**
  * Merges `ref` into the branch checked out at `at` with --no-ff, runs the validators there and commits `message`.
  * A conflict or a red validator is rolled back to the pre-merge sha; a merge left half-done is never touched.
  */
-function mergeIn(at: GitDeps, ref: string, message: string, scope: 'heavy' | 'final', timeoutSec: number, configRoot: string, cacheDir: string): MergeOutcome {
+function mergeIn(at: GitDeps, ref: string, message: string, scope: 'heavy' | 'final', timeoutSec: number, configRoot: string, cacheDir: string, target: 'run' | 'main'): MergeOutcome {
+  const key = `${scope}-${target}`;
   const merging = () => at.git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']) !== null;
   if (merging()) return { result: 'dirty', detail: 'an unfinished merge is in progress there (git merge --abort to clear it)' };
   const dirty = at.git(['status', '--porcelain', '--', '.', ...LOCAL_STATE]);
@@ -103,13 +108,15 @@ function mergeIn(at: GitDeps, ref: string, message: string, scope: 'heavy' | 'fi
     return { result: 'conflict', detail: clean ? detail : `rollback failed: needs manual attention (${detail})` };
   };
   // What the target's tip already fails is not caused by this merge: validators red there are "preexisting".
-  let baseline: unknown = readBaseline(cacheDir, pre);
+  let baseline: unknown = readBaseline(cacheDir, key, pre);
   if (baseline === null) {
     try {
       const config0 = loadConfig(configRoot);
       baseline = runValidators(selectValidators(detectValidators(at.repo, config0), scope === 'final' ? { mode: 'final' } : { mode: 'heavy', changed: null }), at.exec, timeoutSec);
-      writeBaseline(cacheDir, pre, baseline);
+      writeBaseline(cacheDir, key, pre, baseline);
     } catch { baseline = []; }
+    const left = at.git(['status', '--porcelain', '--', '.', ...LOCAL_STATE]);
+    if (left === null || left.trim() !== '') return { result: 'dirty', detail: `the validators left changes in the worktree: ${(left ?? '').split(/\r?\n/).filter(Boolean).slice(0, 5).join(', ')}` };
   }
   if (at.git(['merge', '--no-ff', '--no-commit', ref]) === null) {
     if (!merging()) return { result: 'conflict', detail: `git refused to merge ${ref}` };
@@ -128,7 +135,7 @@ function mergeIn(at: GitDeps, ref: string, message: string, scope: 'heavy' | 'fi
   if (at.git(['commit', '--no-edit', '-m', message]) === null || merging()) return rollback(`could not commit the merge of ${ref}`);
   const sha = at.git(['rev-parse', 'HEAD'])?.trim() ?? '';
   if (!sha || sha === pre) return rollback(`could not commit the merge of ${ref}`);
-  writeBaseline(cacheDir, sha, results);
+  writeBaseline(cacheDir, key, sha, results);
   return { result: 'merged', sha, preexisting: results.filter(r => r.preexisting).map(r => r.validator) };
 }
 
@@ -148,7 +155,7 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
     if (head !== e.branch) return out({ result: 'run-dirty', detail: `${wt} is on ${head ?? '?'}, not ${e.branch}` });
   }
   const config = loadConfig(io.cwd);
-  const r = mergeIn(target, t.branch, `forge: integrate ${task}`, 'heavy', config.validatorTimeoutSec, wt, path.join(io.cwd, '.forge', 'execution'));
+  const r = mergeIn(target, t.branch, `forge: integrate ${task}`, 'heavy', config.validatorTimeoutSec, wt, path.join(io.cwd, '.forge', 'execution'), 'run');
   const cur = readExecution(io.cwd)!;
   if (r.result === 'dirty') return out({ result: 'run-dirty', detail: r.detail });
   const next: ExecTask = r.result === 'merged'
@@ -167,7 +174,7 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
   const branch = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
   if (branch !== e.base) return out({ result: 'main-dirty', detail: `the main checkout is on ${branch ?? '?'}, not ${e.base}` });
   const config = loadConfig(io.cwd);
-  const r = mergeIn(deps, e.branch, `forge: merge ${e.branch}`, 'final', config.validatorTimeoutSec, io.cwd, path.join(io.cwd, '.forge', 'execution'));
+  const r = mergeIn(deps, e.branch, `forge: merge ${e.branch}`, 'final', config.validatorTimeoutSec, io.cwd, path.join(io.cwd, '.forge', 'execution'), 'main');
   if (r.result === 'dirty') return out({ result: 'main-dirty', detail: `the main checkout ${r.detail}` });
   return out(r.result === 'merged' ? { result: 'merged', sha: r.sha, preexisting: r.preexisting } : { result: 'conflict', detail: r.detail });
 }

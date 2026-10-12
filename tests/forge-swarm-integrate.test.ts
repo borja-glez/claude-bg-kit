@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -89,7 +89,44 @@ describe('forge swarm integrate (into the run branch)', () => {
   it('reuses the baseline of the run tip it just produced', () => {
     accept('T1', 'a.txt', 'a\n');
     const first = out(run(['swarm', 'integrate', 'T1'], io));
-    expect(existsSync(path.join(root, '.forge', 'execution', `baseline-${first.sha}.json`))).toBe(true);
+    expect(existsSync(path.join(root, '.forge', 'execution', 'baseline', `heavy-run-${first.sha}.json`))).toBe(true);
+  });
+  const counted = (counter: string) => {
+    const CNT = `validators:\n  - name: cnt\n    cmd: node -e "require('fs').appendFileSync('${counter.replace(/\\/g, '/')}','x\\n')"\n`;
+    mkdirSync(path.join(runWt(), '.forge'), { recursive: true });
+    writeFileSync(path.join(runWt(), '.forge', 'config.yaml'), CNT);
+    return () => (existsSync(counter) ? readFileSync(counter, 'utf8').split('\n').filter(Boolean).length : 0);
+  };
+  it('a second integration reuses the cached run baseline (validators run once per integration)', () => {
+    const count = counted(path.join(root, '..', `cnt-${path.basename(root)}.txt`));
+    accept('T1', 'a.txt', 'a\n');
+    accept('T2', 'b.txt', 'b\n');
+    out(run(['swarm', 'integrate', 'T1'], io));
+    const afterFirst = count();
+    expect(afterFirst).toBe(2); // baseline + post-merge
+    out(run(['swarm', 'integrate', 'T2'], io));
+    expect(count()).toBe(afterFirst + 1);
+    rmSync(path.join(root, '..', `cnt-${path.basename(root)}.txt`), { force: true });
+  });
+  it('merge does not reuse the run baseline: the main checkout gets its own', () => {
+    accept('T1', 'a.txt', 'a\n');
+    const first = out(run(['swarm', 'integrate', 'T1'], io));
+    const dir = path.join(root, '.forge', 'execution', 'baseline');
+    expect(existsSync(path.join(dir, `final-main-${g(root, 'rev-parse', 'main')}.json`))).toBe(false);
+    const r = out(run(['swarm', 'merge', '--yes'], io));
+    expect(r).toMatchObject({ result: 'merged', preexisting: [] });
+    expect(existsSync(path.join(dir, `heavy-run-${first.sha}.json`))).toBe(true);
+    expect(readdirSync(dir).some(f => f.startsWith('final-main-'))).toBe(true);
+  });
+  it('a validator that leaves files in the worktree makes the integration run-dirty and the task stays accepted', () => {
+    const JUNK = 'validators:\n  - name: junk\n    cmd: node -e "require(\'fs\').writeFileSync(\'junk.txt\',\'x\')"\n';
+    mkdirSync(path.join(runWt(), '.forge'), { recursive: true });
+    writeFileSync(path.join(runWt(), '.forge', 'config.yaml'), JUNK);
+    accept('T1', 'a.txt', 'a\n');
+    const r = out(run(['swarm', 'integrate', 'T1'], io));
+    expect(r.result).toBe('run-dirty');
+    expect(r.detail).toContain('junk.txt');
+    expect(readExecution(root)!.tasks.T1.status).toBe('accepted');
   });
   it('rolls back when the validators cannot run (invalid config brought by the task)', () => {
     const w = accept('T1', 'a.txt', 'a\n');
