@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { schedule, widthOf, STEP_WAIT_SECONDS, type ScheduleInput } from '../src/forge/schedule.js';
+import { schedule, widthOf, relaunchOrBlock, STEP_WAIT_SECONDS, NUDGE_MINUTES, RELAUNCH_CAP, type ScheduleInput } from '../src/forge/schedule.js';
 import type { ExecutionState } from '../src/lib/execution-state.js';
 import type { PlanView, PlanTask, States } from '../src/lib/types.js';
 
@@ -69,17 +69,91 @@ describe('schedule', () => {
   });
   it('stalls with a reason per task when nothing can move', () => {
     const p = plan([task('T1'), task('T2'), task('T3', ['T9']), task('T9')]);
-    const states: States = { T1: { status: 'blocked', blockedBy: ['external'] }, T9: { status: 'in_progress', owner: 'manual-1' } };
-    const sessions = { 'manual-1': { name: 'm', status: 'active' as const, heartbeatAt: at(-1), leaseUntil: at(5) } };
-    const r = schedule(input({ plan: p, states, sessions, exec: exec({ tasks: running('T2', 'conflict') }) }));
-    expect(r.actions).toEqual([{ type: 'stalled', reason: expect.stringContaining('blocked: T1') }]);
-    expect(r.next.stallReason).toContain('conflict: T2');
-    expect(r.next.stallReason).toContain('claimed by manual-1: T9');
+    // No live claim here: a task claimed by another live session makes the run wait instead (see below).
+    const states: States = { T1: { status: 'blocked', blockedBy: ['external'] }, T9: { status: 'blocked', blockedBy: ['external'] } };
+    const r = schedule(input({ plan: p, states, exec: exec({ tasks: running('T2', 'conflict') }) }));
+    expect(r.actions).toEqual([{ type: 'stalled', reason: 'blocked: T1, T9; conflict: T2; waits for T9 (not done): T3' }]);
     expect(r.next).toMatchObject({ active: false, stopReason: 'stalled' });
   });
   it('widthOf: the most tasks that can run at once, by dependencies and zones', () => {
     expect(widthOf(plan([task('T1'), task('T2', ['T1']), task('T3', ['T2'])]))).toBe(1);
     expect(widthOf(plan([task('T1'), task('T2', ['T1']), task('T3', ['T1']), task('T4', ['T1'])]))).toBe(3);
     expect(widthOf(plan([task('T1', [], ['src/x/**']), task('T2', [], ['src/x/a.ts'])]))).toBe(1);
+  });
+
+  const sess = (id: string, status: 'running' | 'accepted' = 'running', over: object = {}) => ({
+    [id]: { ...running(id, status)[id], executor: 'sessions' as const, ...over },
+  });
+  const live = (leaseUntil: string) => ({ name: 'x', status: 'active' as const, heartbeatAt: at(-1), leaseUntil, role: 'executor' as const });
+  const pubT = (task: string, over: object = {}) => ({ task, runId: 'r1', stage: 'review' as const, status: 'running' as const, agent: 'forge-review-correctness', round: 2, since: at(-2), updatedAt: at(-1), leaseUntil: at(8), by: 'S2', mode: 'sessions' as const, ...over });
+
+  it("copies a member's public stage into the execution", () => {
+    const r = schedule(input({ plan: plan([task('T1')]), exec: exec({ mode: 'sessions', tasks: sess('T1') }), states: { T1: { status: 'in_progress', owner: 'S2' } },
+      sessions: { S2: live(at(5)) }, publicTasks: { T1: pubT('T1') } }));
+    expect(r.next.tasks.T1).toMatchObject({ stage: 'review', round: 2, agent: 'forge-review-correctness', stageSince: at(-2) });
+  });
+  it("ignores a public stage of another run or written by the coordinator", () => {
+    const base = { plan: plan([task('T1')]), exec: exec({ mode: 'sessions', tasks: sess('T1') }), states: { T1: { status: 'in_progress' as const, owner: 'S2' } }, sessions: { S2: live(at(5)) } };
+    expect(schedule(input({ ...base, publicTasks: { T1: pubT('T1', { runId: 'r0' }) } })).next.tasks.T1).toMatchObject({ stage: 'implement', round: 1 });
+    expect(schedule(input({ ...base, publicTasks: { T1: pubT('T1', { by: 'main' }) } })).next.tasks.T1).toMatchObject({ stage: 'implement', round: 1 });
+  });
+  it('accepts a sessions task its session marked done and integrates it', () => {
+    const r = schedule(input({ plan: plan([task('T1')]), exec: exec({ mode: 'sessions', tasks: sess('T1') }), states: { T1: { status: 'done', owner: 'S2', commits: [{ sha: 'bbb2222', ts: at(-1), title: 't', add: 1, del: 0 }] } } }));
+    expect(r.next.tasks.T1).toMatchObject({ status: 'accepted', stage: 'integrate' });
+    expect(r.actions[0]).toEqual({ type: 'integrate', task: 'T1', ref: 'task/T1' });
+  });
+  it('adopts a task a manual session finished with commits not yet on the run branch', () => {
+    const states: States = { T1: { status: 'done', owner: 'M1', commits: [{ sha: 'ccc3333', ts: at(-1), title: 't', add: 1, del: 0 }] } };
+    const r = schedule(input({ plan: plan([task('T1')]), states }));
+    expect(r.next.tasks.T1).toMatchObject({ status: 'accepted', executor: 'manual', branch: 'task/T1' });
+    expect(r.actions[0]).toEqual({ type: 'integrate', task: 'T1', ref: 'task/T1' });
+    const done = schedule(input({ plan: plan([task('T1')]), states, integrated: ['ccc3333'] }));
+    expect(done.next.tasks.T1).toBeUndefined();
+    expect(done.actions.at(-1)).toEqual({ type: 'finish' });
+  });
+  it('waits instead of stalling while the last task is claimed by another live session', () => {
+    const r = schedule(input({ plan: plan([task('T1')]), states: { T1: { status: 'in_progress', owner: 'M1' } }, sessions: { M1: { ...live(at(5)), role: 'manual' } } }));
+    expect(r.actions).toEqual([{ type: 'wait', seconds: STEP_WAIT_SECONDS }]);
+    expect(r.next).toMatchObject({ active: true, stopReason: null });
+  });
+  it('relaunches a sessions task whose owner stopped and is not listed, then blocks at the cap', () => {
+    const base = { plan: plan([task('T1')]), states: { T1: { status: 'in_progress' as const, owner: 'S2' } }, sessions: { S2: live(at(-30)) } };
+    expect(schedule(input({ ...base, exec: exec({ mode: 'sessions', tasks: sess('T1') }), agents: [] })).actions)
+      .toContainEqual({ type: 'relaunch', task: 'T1', attempt: 1 });
+    expect(schedule(input({ ...base, exec: exec({ mode: 'sessions', tasks: sess('T1') }), agents: [{ name: 'wp-shop-T1', state: 'working' }] })).actions
+      .some(a => a.type === 'relaunch')).toBe(false);
+    const capped = schedule(input({ ...base, exec: exec({ mode: 'sessions', tasks: sess('T1', 'running', { attempts: RELAUNCH_CAP }) }), agents: [] }));
+    expect(capped.next.tasks.T1).toMatchObject({ status: 'blocked' });
+    expect(capped.actions).toContainEqual({ type: 'block', task: 'T1', reason: 'the session of T1 stopped 3 times' });
+  });
+  it('relaunchOrBlock: relaunches below the cap and blocks with the reason at it', () => {
+    expect(RELAUNCH_CAP).toBe(2);
+    expect(relaunchOrBlock('T1', 0)).toEqual({ type: 'relaunch', task: 'T1', attempt: 1 });
+    expect(relaunchOrBlock('T1', 1)).toEqual({ type: 'relaunch', task: 'T1', attempt: 2 });
+    expect(relaunchOrBlock('T1', 2)).toEqual({ type: 'block', task: 'T1', reason: 'the session of T1 stopped 3 times' });
+  });
+  it('relaunches a session that never claimed its task within the lease', () => {
+    const r = schedule(input({ plan: plan([task('T1')]), exec: exec({ mode: 'sessions', tasks: sess('T1', 'running', { startedAt: at(-11) }) }) }));
+    expect(r.actions).toContainEqual({ type: 'relaunch', task: 'T1', attempt: 1 });
+    const fresh = schedule(input({ plan: plan([task('T1')]), exec: exec({ mode: 'sessions', tasks: sess('T1', 'running', { startedAt: at(-9) }) }) }));
+    expect(fresh.actions.some(a => a.type === 'relaunch')).toBe(false);
+  });
+  it('a blocked sessions task frees its slot in the same step', () => {
+    const r = schedule(input({ plan: plan([task('T1'), task('T2')]), states: { T1: { status: 'in_progress', owner: 'S2' } }, sessions: { S2: live(at(-30)) },
+      exec: exec({ mode: 'sessions', parallel: 1, tasks: sess('T1', 'running', { attempts: RELAUNCH_CAP }) }), agents: [] }));
+    expect(starts(r)).toEqual(['T2']);
+  });
+  it('nudges a live idle session with no stage change in 15 minutes, once per window', () => {
+    const quiet = { stageSince: at(-NUDGE_MINUTES - 1) };
+    const base = { plan: plan([task('T1')]), states: { T1: { status: 'in_progress' as const, owner: 'S2' } }, sessions: { S2: live(at(5)) } };
+    const idle = [{ name: 'wp-shop-T1', state: 'idle' as const }];
+    expect(schedule(input({ ...base, exec: exec({ mode: 'sessions', tasks: sess('T1', 'running', quiet) }), agents: idle })).actions)
+      .toContainEqual({ type: 'nudge', task: 'T1', stage: 'implement' });
+    expect(schedule(input({ ...base, exec: exec({ mode: 'sessions', tasks: sess('T1', 'running', { ...quiet, nudgedAt: at(-5) }) }), agents: idle })).actions
+      .some(a => a.type === 'nudge')).toBe(false);
+    expect(schedule(input({ ...base, exec: exec({ mode: 'sessions', tasks: sess('T1', 'running', quiet) }), agents: [{ name: 'wp-shop-T1', state: 'working' }] })).actions
+      .some(a => a.type === 'nudge')).toBe(false);
+    expect(schedule(input({ ...base, exec: exec({ mode: 'sessions', tasks: sess('T1', 'running', quiet) }), agents: null })).actions
+      .some(a => a.type === 'nudge')).toBe(false);
   });
 });

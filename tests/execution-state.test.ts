@@ -41,6 +41,12 @@ describe('execution state', () => {
     expect(Object.keys(e.tasks)).toEqual(['T1']);
     expect(e.tasks.T1.worktree).toBe('');
   });
+  it('keeps an ISO nudgedAt on a task and drops one that is not a date', () => {
+    const N = '2026-10-12T12:15:00.000Z';
+    expect(normalizeExecution({ ...base, tasks: { T1: { ...base.tasks.T1, nudgedAt: N } } })!.tasks.T1.nudgedAt).toBe(N);
+    const bad = normalizeExecution({ ...base, tasks: { T1: { ...base.tasks.T1, nudgedAt: 'yesterday' } } })!.tasks.T1;
+    expect('nudgedAt' in bad).toBe(false);
+  });
   it('clamps parallel to 1-10', () => {
     expect(normalizeExecution({ ...base, parallel: 50 })!.parallel).toBe(10);
     expect(normalizeExecution({ ...base, parallel: 0 })!.parallel).toBe(1);

@@ -1,21 +1,41 @@
 import { commitShas, isAvailable, isUnlocked, statusOf } from '../lib/deps.js';
-import { sessionLiveness, zonesOf } from '../lib/coordination.js';
+import { LEASE_MINUTES, sessionLiveness, zonesOf } from '../lib/coordination.js';
 import { overlappingZones } from '../lib/zones.js';
-import type { ExecutionState, ExecTask } from '../lib/execution-state.js';
-import type { PlanTask, PlanView, SessionDoc, States } from '../lib/types.js';
+import type { ExecutionState, ExecTask, PublicTask } from '../lib/execution-state.js';
+import type { PlanTask, PlanView, SessionDoc, Stage, States } from '../lib/types.js';
 
+/** A live session of a front that has not changed stage in this long, and sits idle, gets a nudge (once per window). */
+export const NUDGE_MINUTES = 15;
+/** Relaunches of a front's session; with attempts >= this, the next failure blocks the task. */
+export const RELAUNCH_CAP = 2;
+/** What ListAgents shows of a background session. */
+export interface BgAgent { name: string; state: 'working' | 'idle' }
 export type ScheduleAction =
   | { type: 'start'; task: string }
   | { type: 'integrate'; task: string; ref: string }
+  | { type: 'relaunch'; task: string; attempt: number }
+  | { type: 'nudge'; task: string; stage: Stage }
+  | { type: 'block'; task: string; reason: string }
   | { type: 'wait'; seconds: number }
   | { type: 'finish' }
   | { type: 'stalled'; reason: string };
 export interface ScheduleInput {
   plan: PlanView; states: States; sessions: Record<string, SessionDoc | undefined>;
   exec: ExecutionState; integrated: string[]; now: number;
+  /** .forge/execution/<T>.json per task. */
+  publicTasks?: Record<string, PublicTask>;
+  /** null: unknown (ListAgents could not be read). */
+  agents?: BgAgent[] | null;
 }
 /** With agents running, the coordinator steps at least this often (it also renews its lease then). */
 export const STEP_WAIT_SECONDS = 300;
+
+/** The single rule for a front whose session died after `attempts` relaunches: relaunch it, or block it at the cap. */
+export function relaunchOrBlock(task: string, attempts: number):
+  { type: 'relaunch'; task: string; attempt: number } | { type: 'block'; task: string; reason: string } {
+  if (attempts >= RELAUNCH_CAP) return { type: 'block', task, reason: `the session of ${task} stopped ${attempts + 1} times` };
+  return { type: 'relaunch', task, attempt: attempts + 1 };
+}
 const HELD: ExecTask['status'][] = ['running', 'accepted', 'conflict', 'blocked'];
 const ACTIVE = ['claimed', 'in_progress'];
 
@@ -44,6 +64,26 @@ export function schedule(i: ScheduleInput): { actions: ScheduleAction[]; next: E
   const orphan = (id: string) => ACTIVE.includes(statusOf(states, id)) && !!owner(id) && owner(id) !== exec.coordinator && !claimedByOther(id);
   // The coordinator's own active task missing from the execution (state lost after a crash) is re-adopted.
   const readopt = (id: string) => ACTIVE.includes(statusOf(states, id)) && owner(id) === exec.coordinator && !tasks[id];
+
+  // Members (sessions or manual) write their own stage publicly; the execution mirrors it.
+  const pub = i.publicTasks ?? {};
+  const agents = i.agents ?? null;
+  for (const [id, t] of Object.entries(tasks)) {
+    const p = pub[id];
+    if (t.executor === 'subagents' || !p || p.runId !== exec.runId || p.by === exec.coordinator) continue;
+    tasks[id] = { ...t, stage: p.stage, round: p.round, agent: p.agent, stageSince: p.since, updatedAt: p.updatedAt };
+  }
+  // A member's task marked done on the roadmap is accepted and goes to integration.
+  for (const [id, t] of Object.entries(tasks)) {
+    if (t.status === 'running' && t.executor !== 'subagents' && statusOf(states, id) === 'done') tasks[id] = { ...t, status: 'accepted', stage: 'integrate', updatedAt: nowIso };
+  }
+  // Work a manual session finished, with commits not yet on the run branch, is adopted for integration.
+  for (const t of plan.tasks) {
+    const o = owner(t.id);
+    const shas = commitShas(states, t.id);
+    if (tasks[t.id] || statusOf(states, t.id) !== 'done' || !o || o === exec.coordinator || !shas.length || shas.every(s => integrated.has(s))) continue;
+    tasks[t.id] = { status: 'accepted', stage: 'integrate', round: 0, worktree: '', branch: `task/${t.id}`, executor: 'manual', attempts: 0, agent: null, startedAt: nowIso, stageSince: nowIso, updatedAt: nowIso, detail: null };
+  }
   const startable =(t: PlanTask) => !held(t.id)
     && ((isAvailable(t, states) && isUnlocked(t, states)) || orphan(t.id) || readopt(t.id))
     && t.depends_on.every(depIntegrated)
@@ -53,6 +93,26 @@ export function schedule(i: ScheduleInput): { actions: ScheduleAction[]; next: E
   const accepted = Object.keys(tasks).filter(id => tasks[id].status === 'accepted' && byId.has(id))
     .sort((a, b) => rank(byId.get(a)!) - rank(byId.get(b)!));
   if (accepted.length) actions.push({ type: 'integrate', task: accepted[0], ref: tasks[accepted[0]].branch });
+
+  // Session fronts: relaunch a dead session (block it at the cap), nudge a live one that sits idle. Before counting
+  // runningIds, so a task blocked here frees its slot.
+  const listed = (id: string) => agents?.find(a => a.name === `wp-${exec.project}-${id}`) ?? null;
+  for (const id of Object.keys(tasks)) {
+    const t = tasks[id];
+    if (t.status !== 'running' || t.executor !== 'sessions') continue;
+    const o = owner(id);
+    const ownerStopped = !!o && o !== exec.coordinator && sessionLiveness(sessions[o], now) === 'stopped';
+    const neverClaimed = !o && now - Date.parse(t.startedAt) > LEASE_MINUTES * 60000;
+    if ((ownerStopped || neverClaimed) && !listed(id)) {
+      const a = relaunchOrBlock(id, t.attempts);
+      if (a.type === 'block') tasks[id] = { ...t, status: 'blocked', detail: a.reason, updatedAt: nowIso };
+      actions.push(a);
+      continue;
+    }
+    const quiet = now - Date.parse(t.stageSince) >= NUDGE_MINUTES * 60000;
+    const nudgedLately = !!t.nudgedAt && now - Date.parse(t.nudgedAt) < NUDGE_MINUTES * 60000;
+    if (quiet && !nudgedLately && listed(id)?.state === 'idle') actions.push({ type: 'nudge', task: id, stage: t.stage });
+  }
 
   const runningIds = Object.keys(tasks).filter(id => tasks[id].status === 'running');
   const busy: PlanTask[] = runningIds.map(id => byId.get(id)).filter((t): t is PlanTask => !!t);
@@ -74,6 +134,9 @@ export function schedule(i: ScheduleInput): { actions: ScheduleAction[]; next: E
   if (!moving && allDone) {
     actions.push({ type: 'finish' });
     active = false; stopReason = 'finished'; stallReason = null;
+  } else if (!moving && plan.tasks.some(t => statusOf(states, t.id) !== 'done' && claimedByOther(t.id))) {
+    // Another live or silent session holds an unfinished task: the run waits for it instead of stopping.
+    actions.push({ type: 'wait', seconds: STEP_WAIT_SECONDS });
   } else if (!moving) {
     stallReason = describeStall(plan, states, tasks, depIntegrated, claimedByOther);
     actions.push({ type: 'stalled', reason: stallReason });

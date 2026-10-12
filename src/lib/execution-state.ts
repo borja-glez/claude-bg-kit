@@ -8,6 +8,7 @@ export interface ExecTask {
   status: ExecTaskStatus; stage: Stage; round: number; worktree: string; branch: string;
   executor: 'subagents' | 'sessions' | 'manual'; attempts: number; agent: string | null;
   startedAt: string; stageSince: string; updatedAt: string; detail: string | null;
+  nudgedAt?: string | null;
 }
 export type ExecStopReason = 'finished' | 'stalled' | 'stopped' | 'budget' | 'migrated';
 export interface ExecutionState {
@@ -46,6 +47,7 @@ function normalizeTask(x: unknown): ExecTask | null {
     status, stage, executor, worktree, branch, startedAt, stageSince: iso(x.stageSince) ?? startedAt,
     round: int(x.round, 0, 99, 0), attempts: int(x.attempts, 0, 99, 0),
     agent: str(x.agent), updatedAt: iso(x.updatedAt) ?? startedAt, detail: typeof x.detail === 'string' ? x.detail.slice(0, 500) : null,
+    ...(iso(x.nudgedAt) ? { nudgedAt: iso(x.nudgedAt) } : {}),
   };
 }
 
