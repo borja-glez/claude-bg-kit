@@ -7761,15 +7761,20 @@ var LARGE = [
   /\b(architecture|redesign|rewrite|subsystem|new (project|app|service|system)|from scratch|migrat(e|ion) (to|from))\b/i,
   es("arquitect|redise\xF1|reescrib|reescritur|subsistem", "desde cero|(?:nuev[oa]|otr[oa]) (?:proyecto|aplicaci[o\xF3]n|app|servicio|sistema)|migr(?:ar|aci[o\xF3]n) (?:a|al|desde)")
 ];
+var RENAME = [/\brenam/i, /(?<![\p{L}\p{N}_])renombr/iu];
 var PATH_TOKEN = /[\w.\-/]*[\w-]\.[A-Za-z0-9]{1,8}\b|[\w.-]+\/[\w.\-/]+/g;
 var isSymbol = (w) => w.length >= 4 && (/[a-z][A-Z]/.test(w) || /^[A-Za-z]+_[A-Za-z0-9_]+$/.test(w));
 function triage(task, repo, validators, extra) {
   const reasons = [];
   const text = String(task).slice(0, MAX_TEXT);
   const files = new Set(extra?.files);
+  const named = /* @__PURE__ */ new Set();
   for (const tok of text.match(PATH_TOKEN) ?? []) {
     const t = tok.replace(/^\.\//, "");
-    for (const f of repo.files) if (f === t || f.endsWith(`/${t}`)) files.add(f);
+    for (const f of repo.files) if (f === t || f.endsWith(`/${t}`)) {
+      files.add(f);
+      named.add(f);
+    }
   }
   const words2 = new Set([...text.matchAll(/`([^`]+)`/g)].map((m) => m[1].trim()).filter((w) => /^[\w.$]{3,}$/.test(w)));
   for (const w of text.split(/[^A-Za-z0-9_]+/)) if (isSymbol(w)) words2.add(w);
@@ -7779,6 +7784,7 @@ function triage(task, repo, validators, extra) {
   const greenfield = repo.gitOk && (repo.commits === 0 || repo.files.length < 5);
   if (!repo.gitOk) reasons.push("git unavailable");
   const wordCount = text.trim().split(/\s+/).length;
+  const sized = named.size ? named.size : located.length;
   let path10;
   if (greenfield) {
     path10 = "large";
@@ -7786,21 +7792,21 @@ function triage(task, repo, validators, extra) {
   } else if (LARGE.some((re) => re.test(text))) {
     path10 = "large";
     reasons.push("architecture-scale wording");
-  } else if (located.length > 10) {
+  } else if (sized > 10) {
     path10 = "large";
-    reasons.push(`${located.length} files located`);
-  } else if (located.length > 3) {
+    reasons.push(`${sized} files located`);
+  } else if (sized > 3) {
     path10 = "medium";
-    reasons.push(`${located.length} files located`);
-  } else if (located.length === 0) {
+    reasons.push(`${sized} files located`);
+  } else if (sized === 0) {
     path10 = "small";
     reasons.push("no files located: the session should judge the scope");
-  } else if (located.length === 1 && wordCount <= 25) {
+  } else if (sized === 1 && wordCount <= 25 && !RENAME.some((re) => re.test(text))) {
     path10 = "trivial";
-    reasons.push("one file, short task");
+    reasons.push(named.size ? "one named file, short task" : "one file, short task");
   } else {
     path10 = "small";
-    reasons.push(`${located.length} file(s) located`);
+    reasons.push(`${sized} file(s) located`);
   }
   if (sensitive.length && PATH_ORDER.indexOf(path10) < PATH_ORDER.indexOf("medium")) {
     path10 = "medium";

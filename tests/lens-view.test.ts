@@ -39,6 +39,12 @@ describe('lens view', () => {
     expect(stagesFor('large', 'design').map(s => s.name)).toContain('final');
     expect(stagesFor('small', 'something-else')[0].state).toBe('done');
   });
+  it('gives Trivial and Small no review stages, and counts validators that ran as validation done', () => {
+    expect(stagesFor('small', '').map(s => `${s.name}:${s.state}`)).toEqual(['triage:done', 'implement:pending', 'validate:pending']);
+    expect(stagesFor('trivial', '', 'ok').map(s => s.state)).toEqual(['done', 'done', 'done']);
+    expect(stagesFor('small', '', 'failed').map(s => `${s.name}:${s.state}`)).toEqual(['triage:done', 'implement:done', 'validate:active']);
+    expect(stagesFor('medium', 'review', 'ok').map(s => s.state)).toEqual(['done', 'done', 'done', 'active', 'pending']);
+  });
   it('turns briefs, todos and roadmap letters into cells', () => {
     expect(briefCells(FORGE)!.cells).toEqual(['done', 'done', 'active', 'pending', 'pending']);
     expect(briefCells({ ...FORGE, verdict: { action: 'fix', score: 0.3 }, round: 1, accepted: [1, 2] })!.cells[2]).toBe('failed');

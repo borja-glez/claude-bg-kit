@@ -11,6 +11,17 @@ describe('triage', () => {
     const r = triage('fix the typo in src/util/format.ts', repo(), ['test']);
     expect(r).toMatchObject({ path: 'trivial', files: ['src/util/format.ts'], sensitive: [], greenfield: false, validators: ['test'] });
   });
+  it('a named file sizes the task: other files where its symbol appears do not lift it', () => {
+    const r = triage('Añade un comentario de una línea encima de createCart en src/util/format.ts', repo({ createCart: ['src/util/format.ts', 'test/format.test.ts'] }), ['test']);
+    expect(r.path).toBe('trivial');
+    expect(r.files).toEqual(['src/util/format.ts', 'test/format.test.ts']);
+  });
+  it('a rename stays at least small even when it names one file', () => {
+    expect(triage('rename formatPrice in src/util/format.ts', repo({ formatPrice: ['src/util/format.ts', 'src/a.ts'] }), []).path).toBe('small');
+    expect(triage('Renombra formatPrice en src/util/format.ts', repo(), []).path).toBe('small');
+    // Commas and a final full stop are not a rename.
+    expect(triage('Añade un parámetro (cents, currency) a formatPrice en src/util/format.ts.', repo(), []).path).toBe('trivial');
+  });
   it('nothing located → small, with a reason', () => {
     const r = triage('add a dark mode toggle', repo(), []);
     expect(r.path).toBe('small');

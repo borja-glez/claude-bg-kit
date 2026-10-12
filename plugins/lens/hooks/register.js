@@ -11623,11 +11623,18 @@ var STAGE_OF = {
   "final-review": "final",
   done: "final"
 };
-function stagesFor(path, phase) {
+function stagesFor(path, phase, validated = null) {
   const large = path === "large";
-  const names = STAGES.filter((s) => large || s !== "design" && s !== "plan" && s !== "final");
+  const light = path === "trivial" || path === "small";
+  const names = STAGES.filter((s) => (large || s !== "design" && s !== "plan" && s !== "final") && !(light && (s === "review" || s === "verdict")));
   const at = STAGE_OF[phase.toLowerCase()] ?? null;
-  const i = at ? names.indexOf(at) : -1;
+  let i = at ? names.indexOf(at) : -1;
+  const v = names.indexOf("validate");
+  if (validated && at === null) {
+    if (validated === "failed") i = v;
+    else if (light) return names.map((name) => ({ name, state: "done" }));
+    else i = v + 1;
+  }
   const out = names.map((name, k) => ({ name, state: i < 0 ? k === 0 ? "done" : "pending" : k < i ? "done" : k === i ? "active" : "pending" }));
   return out;
 }
@@ -11749,7 +11756,7 @@ function buildCards(m, t, nowMs2) {
     const blocks = [];
     const f = m.forge;
     if (f) {
-      blocks.push({ kind: "stages", stages: stagesFor(f.path, f.phase), hue: SECTION_HUE.forge });
+      blocks.push({ kind: "stages", stages: stagesFor(f.path, f.phase, f.validators.length ? f.validators.every((v) => v.ok) ? "ok" : "failed" : null), hue: SECTION_HUE.forge });
       const c2 = briefCells(f);
       if (c2) {
         blocks.push({ kind: "bar", ratio: ratio(c2.done, c2.total), hue: SECTION_HUE.forge, moving: c2.done < c2.total, label: t.briefs, right: `${c2.done}/${c2.total}` });

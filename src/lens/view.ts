@@ -65,11 +65,20 @@ const STAGE_OF: Record<string, (typeof STAGES)[number]> = {
 
 export interface Stage { name: string; state: 'done' | 'active' | 'pending' }
 // The stages of forge's path: Large shows design and plan, the others skip them; final only on Large.
-export function stagesFor(path: string, phase: string): Stage[] {
+// Trivial and Small have no reviewers. `validated` says how the last validation went: Trivial logs no phases,
+// so validators that ran are what moves it past implement.
+export function stagesFor(path: string, phase: string, validated: 'ok' | 'failed' | null = null): Stage[] {
   const large = path === 'large';
-  const names = STAGES.filter(s => large || (s !== 'design' && s !== 'plan' && s !== 'final'));
+  const light = path === 'trivial' || path === 'small';
+  const names = STAGES.filter(s => (large || (s !== 'design' && s !== 'plan' && s !== 'final')) && !(light && (s === 'review' || s === 'verdict')));
   const at = STAGE_OF[phase.toLowerCase()] ?? null;
-  const i = at ? names.indexOf(at) : -1;
+  let i = at ? names.indexOf(at) : -1;
+  const v = names.indexOf('validate');
+  if (validated && at === null) {
+    if (validated === 'failed') i = v;
+    else if (light) return names.map(name => ({ name, state: 'done' }));
+    else i = v + 1;
+  }
   const out: Stage[] = names.map((name, k) => ({ name, state: i < 0 ? (k === 0 ? 'done' : 'pending') : k < i ? 'done' : k === i ? 'active' : 'pending' }));
   return out;
 }

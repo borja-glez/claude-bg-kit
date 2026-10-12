@@ -57,7 +57,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     const blocks: Block[] = [];
     const f = m.forge;
     if (f) {
-      blocks.push({ kind: 'stages', stages: stagesFor(f.path, f.phase), hue: SECTION_HUE.forge });
+      blocks.push({ kind: 'stages', stages: stagesFor(f.path, f.phase, f.validators.length ? (f.validators.every(v => v.ok) ? 'ok' : 'failed') : null), hue: SECTION_HUE.forge });
       const c = briefCells(f);
       if (c) {
         blocks.push({ kind: 'bar', ratio: ratio(c.done, c.total), hue: SECTION_HUE.forge, moving: c.done < c.total, label: t.briefs, right: `${c.done}/${c.total}` });

@@ -29,6 +29,9 @@ export function zonesFromPaths(paths: string[]): Zone[] {
 const LARGE = [/\b(architecture|redesign|rewrite|subsystem|new (project|app|service|system)|from scratch|migrat(e|ion) (to|from))\b/i,
   es('arquitect|rediseñ|reescrib|reescritur|subsistem', 'desde cero|(?:nuev[oa]|otr[oa]) (?:proyecto|aplicaci[oó]n|app|servicio|sistema)|migr(?:ar|aci[oó]n) (?:a|al|desde)')];
 
+// A rename spreads past the file it names: never Trivial.
+const RENAME = [/\brenam/i, /(?<![\p{L}\p{N}_])renombr/iu];
+
 // Path-like tokens: something/with/slashes or name.ext.
 const PATH_TOKEN = /[\w.\-/]*[\w-]\.[A-Za-z0-9]{1,8}\b|[\w.-]+\/[\w.\-/]+/g;
 // Symbols worth a grep: camelCase, PascalCase with an inner capital, snake_case, or `backticked`.
@@ -39,10 +42,11 @@ export function triage(task: string, repo: RepoFacts, validators: string[], extr
   // Capped so that the regexes below stay fast on pasted logs or huge specs.
   const text = String(task).slice(0, MAX_TEXT);
   const files = new Set<string>(extra?.files);
+  const named = new Set<string>();
 
   for (const tok of text.match(PATH_TOKEN) ?? []) {
     const t = tok.replace(/^\.\//, '');
-    for (const f of repo.files) if (f === t || f.endsWith(`/${t}`)) files.add(f);
+    for (const f of repo.files) if (f === t || f.endsWith(`/${t}`)) { files.add(f); named.add(f); }
   }
   const words = new Set([...text.matchAll(/`([^`]+)`/g)].map(m => m[1].trim()).filter(w => /^[\w.$]{3,}$/.test(w)));
   for (const w of text.split(/[^A-Za-z0-9_]+/)) if (isSymbol(w)) words.add(w);
@@ -54,15 +58,17 @@ export function triage(task: string, repo: RepoFacts, validators: string[], extr
   const greenfield = repo.gitOk && (repo.commits === 0 || repo.files.length < 5);
   if (!repo.gitOk) reasons.push('git unavailable');
   const wordCount = text.trim().split(/\s+/).length;
+  // Files the task names set its size; where its symbols also appear (tests, callers) does not lift it.
+  const sized = named.size ? named.size : located.length;
 
   let path: PathName;
   if (greenfield) { path = 'large'; reasons.push('greenfield repository'); }
   else if (LARGE.some(re => re.test(text))) { path = 'large'; reasons.push('architecture-scale wording'); }
-  else if (located.length > 10) { path = 'large'; reasons.push(`${located.length} files located`); }
-  else if (located.length > 3) { path = 'medium'; reasons.push(`${located.length} files located`); }
-  else if (located.length === 0) { path = 'small'; reasons.push('no files located: the session should judge the scope'); }
-  else if (located.length === 1 && wordCount <= 25) { path = 'trivial'; reasons.push('one file, short task'); }
-  else { path = 'small'; reasons.push(`${located.length} file(s) located`); }
+  else if (sized > 10) { path = 'large'; reasons.push(`${sized} files located`); }
+  else if (sized > 3) { path = 'medium'; reasons.push(`${sized} files located`); }
+  else if (sized === 0) { path = 'small'; reasons.push('no files located: the session should judge the scope'); }
+  else if (sized === 1 && wordCount <= 25 && !RENAME.some(re => re.test(text))) { path = 'trivial'; reasons.push(named.size ? 'one named file, short task' : 'one file, short task'); }
+  else { path = 'small'; reasons.push(`${sized} file(s) located`); }
 
   if (sensitive.length && PATH_ORDER.indexOf(path) < PATH_ORDER.indexOf('medium')) {
     path = 'medium';
