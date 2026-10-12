@@ -56,6 +56,7 @@ forge depends on [waypoint](../waypoint/README.md) ^0.14.0, which is installed w
 | `/forge:run --parallel N <task>` | Same, running up to N tasks at once on the Large path (3 by default, max 10). |
 | `/forge:infinite [--cycles N] [--hours H]` | Unattended improvement cycles within a budget. |
 | `/forge:decide <id> approve\|reject\|comment <text>` | Decide or comment on a proposal from any session. |
+| `/forge:decisions [revert <n>]` | List what forge decided without asking, and undo one after your confirmation. |
 | `/forge:verify [surface]` | Check the work by using it (web, emulator, CLI...), or create and edit verification surfaces. |
 | `/forge:stop` | Stop the infinite run or the execution. |
 
@@ -136,7 +137,9 @@ Sequential execution is not a third mode: it is subagents with N = 1.
 
 **Resume and handover.** `claude --resume` of the coordinator or of an executor receives the execution's context on SessionStart. A new session takes over from the coordinator only when it is stopped (`swarm takeover`); otherwise it joins as a manual member. A run member cannot take over. If the run branch is behind its base, `swarm start` brings it up to date (`baseSync`: `created`, `up-to-date`, `fast-forward` or `merged`); on a conflict it refuses and nothing is lost.
 
-**Unattended.** In `/forge:infinite`, under `/goal` and in run members, forge does not ask. It leaves question notes on the roadmap and records every decision with `forge log --kind decision`.
+**Unattended.** In `/forge:infinite`, under `/goal` and in run members, forge does not ask. It leaves question notes on the roadmap and records every decision it takes in your place.
+
+**Decisions.** Each decision forge takes without asking is recorded with what it chose, the alternatives, why and how to undo it (`forge decision add`). With a roadmap it also appears there as a decision note tagged **auto**. Without one it goes to `docs/forge/decisions/<scope>.md`, committed with the work. Every final report ends with an «Automatic decisions» section, lens and the band show how many there were in the last day, and `/forge:decisions revert <n>` undoes one (a `git revert` of its commits, reopening the design, removing the plan tasks it added that have not started, or deleting its branch) after asking you.
 
 **Requests during an execution.** New work lives on the run branch, not on your branch. In the coordinator session, a Trivial or Small request you want now is done in the run worktree with its own commit (or becomes a task that depends on the running one if the files overlap); a Medium request becomes a new plan task that the next tick starts; a Large one or a new block gets its own design and plan without stopping the execution; questions are answered in the session, and what must stay goes as a roadmap note. In another session the same rules apply as a manual member.
 
@@ -288,7 +291,11 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 - `validate [--affected a,b | --all] [--path trivial|small|medium|large] [--base sha] [--final] [--task id] [--base-run | --baseline f]` - run the project validators that apply (see Matching); `--base` gives the diff that e2e `affects` are matched against, `--final` selects the final review's set. `--base-run` marks a run on the base commit, before any change; `--baseline f` takes that run's JSON and marks a failure the base already had `preexisting`, which neither the exit code nor the verdict counts. A test runner that finds no tests passes as `skipped: "no-tests"`.
 - `verdict --task id --dir d [--validators f] [--sensitive] [--perf]` - weigh the reviewers' JSON files into a score. A reviewer is listed with `invalid: true` when its output was unusable (`dropped: 0`, counted as an abstention) or when some of its findings were dropped (`dropped` > 0; the review keeps its verdict and still scores, and the skill records the dropped findings as a ruling).
 - `round --task id --path medium|large` - decide the next step of the review loop (`done`, `resume`, `fresh-stronger`, `redo`, `breaker`, `stalled`; `tierUp` from round 3).
-- `log --kind k [--task id] [--data json | --data-file f]` - append to the ledger; `--kind decision` records a decision made unattended.
+- `log --kind k [--task id] [--data json | --data-file f]` - append to the ledger.
+- `decision add --data-file f [--task id]` - record a decision forge took (strict JSON: `point`, `what`, `chosen`, `why`, `by`, optional `alternatives`, `weight`, `revert`, `undo`, `safePath`, `revertOf`, `task`, `runId`); prints it with its number `n` and keeps `.forge/decisions.json`, the summary lens and the band read. During an active execution it carries the run's id.
+- `decision list [--task id] [--run id] [--since iso] [--all] [--auto]` - the decisions, numbered; with no filter, those of the latest scope. `--auto` leaves out your own answers.
+- `decision show <n>` - one decision, with its `undo`.
+- `decision md --scope s [--out f] [--locale es|en]` - write the automatic decisions of a scope to `docs/forge/decisions/<scope>.md` (or `--out`); writes nothing when there are none.
 - `last --task id` - the path, last phase event, last verdict and last round of a task.
 - `agents` - agent names for the active profile.
 - `surfaces [learn --name N --notes-file F [--heading H] | proposed --name N]` - list the surfaces and detected drafts; append notes to a surface's `Learned` section; mark a draft as proposed.

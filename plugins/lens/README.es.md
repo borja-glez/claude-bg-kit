@@ -74,7 +74,7 @@ Cada sección es una tarjeta con su propio color (la paleta Catppuccin del roadm
 - una fila de verificación cuando la tarea se verificó: las superficies usadas, las comprobaciones superadas sobre el total y el resultado (pass, fail o blocked);
 - los últimos validadores (✓/✗), el veredicto con su nota y la ronda de revisión frente a su límite.
 
-Debajo de las etapas lista hasta 5 propuestas pendientes, cada una como `título · categoría · riesgo` con botones **Aprobar** y **Rechazar** que ejecutan `/forge:decide`. Mientras hay una ejecución `/forge:infinite` activa, la tarjeta también enseña `∞ N/M · quedan H h` y las 3 propuestas autoaprobadas más recientes.
+Debajo de las etapas lista hasta 5 propuestas pendientes, cada una como `título · categoría · riesgo` con botones **Aprobar** y **Rechazar** que ejecutan `/forge:decide`. Mientras hay una ejecución `/forge:infinite` activa, la tarjeta también enseña `∞ N/M · quedan H h` y las 3 propuestas autoaprobadas más recientes. Si forge decidió algo sin preguntar en el último día, la tarjeta enseña además `⚑ N decisiones automáticas` y la última de peso (`/forge:decisions` las lista).
 
 ## Consumo y coste
 
