@@ -42,6 +42,79 @@ function loadPlanArg(io: Io, planArg: string | undefined, sub: string) {
   }
 }
 
+const LOCAL_STATE = [':!.forge', ':!.waypoint', ':!.claude'];
+
+type MergeOutcome = { result: 'merged'; sha: string } | { result: 'dirty' | 'conflict'; detail: string };
+/**
+ * Merges `ref` into the branch checked out at `at` with --no-ff, runs the validators there and commits `message`.
+ * A conflict or a red validator is rolled back to the pre-merge sha; a merge left half-done is never touched.
+ */
+function mergeIn(at: GitDeps, ref: string, message: string, scope: 'heavy' | 'final', timeoutSec: number, configRoot: string): MergeOutcome {
+  const merging = () => at.git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']) !== null;
+  if (merging()) return { result: 'dirty', detail: 'an unfinished merge is in progress there (git merge --abort to clear it)' };
+  const dirty = at.git(['status', '--porcelain', '--', '.', ...LOCAL_STATE]);
+  if (dirty === null || dirty.trim() !== '') return { result: 'dirty', detail: 'it has uncommitted changes' };
+  if (at.git(['rev-parse', '--verify', '-q', `${ref}^{commit}`]) === null) return { result: 'conflict', detail: `unknown ref ${ref}` };
+  const pre = at.git(['rev-parse', 'HEAD'])?.trim();
+  if (!pre) return { result: 'conflict', detail: 'cannot read HEAD' };
+  const rollback = (detail: string): MergeOutcome => {
+    const undone = at.git(['merge', '--abort']) !== null;
+    const clean = undone && at.git(['rev-parse', 'HEAD'])?.trim() === pre && !merging();
+    return { result: 'conflict', detail: clean ? detail : `rollback failed: needs manual attention (${detail})` };
+  };
+  if (at.git(['merge', '--no-ff', '--no-commit', ref]) === null) {
+    if (!merging()) return { result: 'conflict', detail: `git refused to merge ${ref}` };
+    return rollback(`merge conflict with ${ref}`);
+  }
+  if (!merging()) return { result: 'merged', sha: pre };
+  const config = loadConfig(configRoot);
+  const failed = runValidators(selectValidators(detectValidators(at.repo, config), scope === 'final' ? { mode: 'final' } : { mode: 'heavy', changed: null }), at.exec, timeoutSec).filter(r => !r.ok);
+  if (failed.length) return rollback(`validators failed after merging ${ref}: ${failed.map(r => r.validator).join(', ')}`);
+  if (at.git(['commit', '--no-edit', '-m', message]) === null || merging()) return rollback(`could not commit the merge of ${ref}`);
+  const sha = at.git(['rev-parse', 'HEAD'])?.trim() ?? '';
+  return sha && sha !== pre ? { result: 'merged', sha } : rollback(`could not commit the merge of ${ref}`);
+}
+
+function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
+  const task = rest[0];
+  if (!task || !ID.test(task)) throw new UsageError('swarm integrate: a task id is required');
+  const e = readExecution(io.cwd);
+  if (!e) throw new UsageError('swarm integrate: no execution (forge swarm start)');
+  const t = e.tasks[task];
+  if (!t || t.status !== 'accepted') throw new UsageError(`swarm integrate: ${task} is not accepted`);
+  const at = io.now().toISOString();
+  const out = (v: unknown): Result => ({ code: 0, stdout: JSON.stringify(v) + '\n', stderr: '' });
+  const wt = e.kind === 'plan' ? runWorktree(io.cwd) : io.cwd;
+  const target = deps.at(wt);
+  if (e.kind === 'plan') {
+    const head = target.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
+    if (head !== e.branch) return out({ result: 'run-dirty', detail: `${wt} is on ${head ?? '?'}, not ${e.branch}` });
+  }
+  const config = loadConfig(io.cwd);
+  const r = mergeIn(target, t.branch, `forge: integrate ${task}`, 'heavy', config.validatorTimeoutSec, wt);
+  const cur = readExecution(io.cwd)!;
+  if (r.result === 'dirty') return out({ result: 'run-dirty', detail: r.detail });
+  const next: ExecTask = r.result === 'merged'
+    ? { ...cur.tasks[task], status: 'integrated', stage: 'integrate', updatedAt: at, detail: null }
+    : { ...cur.tasks[task], status: 'conflict', detail: r.detail, updatedAt: at };
+  saveExecution(io.cwd, { ...cur, tasks: { ...cur.tasks, [task]: next } });
+  return out(r.result === 'merged' ? { result: 'integrated', sha: r.sha } : { result: 'conflict', detail: r.detail });
+}
+
+function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
+  const e = readExecution(io.cwd);
+  if (!e) throw new UsageError('swarm merge: no execution (forge swarm start)');
+  const out = (v: unknown): Result => ({ code: 0, stdout: JSON.stringify(v) + '\n', stderr: '' });
+  if (e.kind !== 'plan') return out({ result: 'merged', sha: deps.git(['rev-parse', 'HEAD'])?.trim() ?? '' });
+  if (!e.mergeOnFinish && !rest.includes('--yes')) return out({ result: 'needs-authorization' });
+  const branch = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
+  if (branch !== e.base) return out({ result: 'main-dirty', detail: `the main checkout is on ${branch ?? '?'}, not ${e.base}` });
+  const config = loadConfig(io.cwd);
+  const r = mergeIn(deps, e.branch, `forge: merge ${e.branch}`, 'final', config.validatorTimeoutSec, io.cwd);
+  if (r.result === 'dirty') return out({ result: 'main-dirty', detail: `the main checkout ${r.detail}` });
+  return out(r.result === 'merged' ? { result: 'merged', sha: r.sha } : { result: 'conflict', detail: r.detail });
+}
+
 export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
   const [sub, ...rest] = args;
   const flag = (name: string) => {
@@ -226,76 +299,4 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     default:
       throw new UsageError('usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]|status|propose --plan P|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|tick --plan P --db DIR|integrate <T>|merge|retry <T>|sleep <seconds> [--mark]|stop [--reason stopped|budget]>');
   }
-}
-
-// Temporary until Task 8 rewrites the final merge.
-function mergeFinal(_rest: string[], _io: Io, _deps: SwarmDeps): Result {
-  throw new UsageError('swarm merge: not implemented yet');
-}
-
-// Integration runs only in the main checkout, never in a track worktree, so it works while the front keeps working.
-const LOCAL_STATE = [':!.forge', ':!.waypoint', ':!.claude'];
-const REF = /^(track\/[A-Za-z0-9_\-.~:@+]{1,80}|[0-9a-f]{7,64})$/;
-
-function integrate(rest: string[], io: Io, deps: GitDeps): Result {
-  const track = rest[0];
-  const i = rest.indexOf('--ref');
-  const ref = i >= 0 ? rest[i + 1] : undefined;
-  if (!track || !ID.test(track) || !ref || !REF.test(ref)) throw new UsageError('swarm integrate: <track> and --ref track/<id>|<sha> are required');
-  const s = readSwarm(io.cwd);
-  if (!s) throw new UsageError('swarm integrate: no swarm (forge swarm start)');
-  if (!s.mergeAuthorized) throw new UsageError('swarm integrate: integrating needs the user\'s authorization (swarm start --merge)');
-  const at = io.now().toISOString();
-  const out = (v: unknown): Result => ({ code: 0, stdout: JSON.stringify(v) + '\n', stderr: '' });
-  const conflict = (detail: string): Result => {
-    const cur = readSwarm(io.cwd)!;
-    saveSwarm(io.cwd, {
-      ...cur,
-      fronts: { ...cur.fronts, [track]: { ...(cur.fronts[track] ?? emptyFront()), status: 'conflict', detail } },
-      notice: { kind: 'conflict', track, at },
-    });
-    return out({ result: 'conflict', detail });
-  };
-  const integrated = (): Result => {
-    const cur = readSwarm(io.cwd)!;
-    saveSwarm(io.cwd, { ...cur, notice: cur.notice?.kind === 'main-dirty' ? null : cur.notice });
-    return out({ result: 'integrated', detail: null });
-  };
-  const merging = () => deps.git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']) !== null;
-  // A merge left half-done (a killed integrate, or one started by hand) must be cleared by the user first.
-  if (merging()) return conflict('rollback failed: an unfinished integration is in progress in the main checkout (run git merge --abort to clear it)');
-  const branch = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
-  const dirty = deps.git(['status', '--porcelain', '--', '.', ...LOCAL_STATE]);
-  if (branch !== s.base || dirty === null || dirty.trim() !== '') {
-    const first = s.notice?.kind !== 'main-dirty';
-    if (first) saveSwarm(io.cwd, { ...s, notice: { kind: 'main-dirty', track, at } });
-    return out({ result: 'main-dirty', detail: branch !== s.base ? `the main checkout is on ${branch ?? '?'}, not ${s.base}` : 'the main checkout has uncommitted changes', first });
-  }
-  if (deps.git(['rev-parse', '--verify', '-q', `${ref}^{commit}`]) === null) return conflict(`unknown ref ${ref}`);
-  // Roll back to this sha, never to the mutable ORIG_HEAD.
-  const preMergeSha = deps.git(['rev-parse', 'HEAD'])?.trim();
-  if (!preMergeSha) throw new UsageError('swarm integrate: cannot read HEAD');
-  // The merge is committed only after the validators pass, so a kill midway leaves MERGE_HEAD (caught above on the
-  // next call), never an unvalidated commit. `merge --abort` keeps local changes the merge did not touch; the checks
-  // make a failed rollback visible.
-  const rollback = (detail: string): Result => {
-    const undone = deps.git(['merge', '--abort']) !== null;
-    const clean = undone && deps.git(['rev-parse', 'HEAD'])?.trim() === preMergeSha && !merging();
-    return conflict(clean ? detail : `rollback failed: the main checkout needs manual attention (${detail})`);
-  };
-  if (deps.git(['merge', '--no-ff', '--no-commit', ref]) === null) {
-    // No merge started (git refused it, e.g. local changes it would overwrite): nothing to roll back.
-    if (!merging()) return conflict(`git refused to merge ${ref} into ${s.base} (local changes it would overwrite?)`);
-    return rollback(`merge conflict integrating ${ref} into ${s.base}`);
-  }
-  // Already in the base branch: nothing to commit.
-  if (!merging()) return integrated();
-  const config = loadConfig(io.cwd);
-  const failed = runValidators(selectValidators(detectValidators(deps.repo, config), { mode: 'heavy', changed: null }), deps.exec, config.validatorTimeoutSec).filter(r => !r.ok);
-  if (failed.length) return rollback(`validators failed after integrating ${ref}: ${failed.map(r => r.validator).join(', ')}`);
-  const committed = deps.git(['commit', '--no-edit', '-m', `swarm: integrate ${track}`]) !== null;
-  if (!committed || merging() || deps.git(['rev-parse', 'HEAD'])?.trim() === preMergeSha) {
-    return rollback(`could not commit the integration of ${ref}`);
-  }
-  return integrated();
 }
