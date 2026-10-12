@@ -8,7 +8,7 @@ import { decideStop, decideSwarmStop } from '../hook.js';
 import { triage, zonesFromPaths, PATH_ORDER, type PathName } from '../triage.js';
 import { parsePlan, PlanError } from '../../lib/plan.js';
 import { renderBrief, taskText } from '../brief.js';
-import { loadConfig, agentFor, ROLES, ConfigError } from '../config.js';
+import { loadConfig, agentFor, ROLES, ConfigError, NAME } from '../config.js';
 import { parseReview, weightsFor, synthesize, type ReviewerName, type Action, type FailingValidator } from '../verdict.js';
 import { decideRound } from '../loop.js';
 import { PROPOSAL_ID, proposalId, saveProposal, loadProposals, decideLocal, decideDoc, mirrorProposal } from '../proposals.js';
@@ -21,12 +21,13 @@ import { swarmCommand } from './swarm.js';
 import { readSwarm, saveSwarm } from '../swarm.js';
 import { detectValidators, selectValidators, runValidators, globMatch, type RepoReader, type Scope } from '../validators.js';
 import { readLocal, updateLocal } from '../local.js';
+import { readSurfaces, detectDrafts, appendLearned, surfaceFile } from '../surfaces.js';
 
 export interface ExecResult { code: number; output: string; ms: number; timedOut: boolean }
 export interface Io { cwd: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|agents|last|proposals|waypoint-cli|infinite|cycle|swarm|stop|hook> ...';
+const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|agents|last|proposals|surfaces|waypoint-cli|infinite|cycle|swarm|stop|hook> ...';
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 
@@ -495,6 +496,29 @@ export function run(argv: string[], io: Io): Result {
           default:
             throw new UsageError('usage: forge proposals <add|list|decide|save|pull|policy|to-task> ...');
         }
+      }
+      case 'surfaces': {
+        const [sub] = args;
+        if (sub === undefined || sub.startsWith('--')) {
+          const surfaces = readSurfaces(io.cwd);
+          const local = readLocal(io.cwd);
+          const drafts = detectDrafts(repoReader(io.cwd)).filter(d => !surfaces.some(s => s.name === d.name) && !local.proposed.includes(d.name));
+          return json({ surfaces, drafts });
+        }
+        const name = flag('name');
+        if (!name || !NAME.test(name)) throw new UsageError(`surfaces ${sub}: --name must match ${NAME}`);
+        if (sub === 'proposed') { updateLocal(io.cwd, s => ({ ...s, proposed: [...new Set([...s.proposed, name])] })); return ok('ok'); }
+        if (sub === 'learn') {
+          const file = path.join(io.cwd, surfaceFile(name));
+          if (!existsSync(file)) throw new UsageError(`surfaces learn: ${surfaceFile(name)} does not exist`);
+          let notes: unknown;
+          try { notes = JSON.parse(readFileSync(path.resolve(io.cwd, flag('notes-file') ?? ''), 'utf8')); } catch { throw new UsageError('surfaces learn: --notes-file must be a JSON array of strings'); }
+          if (!Array.isArray(notes) || !notes.every(n => typeof n === 'string' && n.trim())) throw new UsageError('surfaces learn: --notes-file must be a JSON array of strings');
+          const r = appendLearned(readFileSync(file, 'utf8'), ts().slice(0, 10), notes as string[], flag('heading') ?? 'Learned');
+          writeFileSync(file, r.text);
+          return json({ name, count: r.count });
+        }
+        throw new UsageError('usage: forge surfaces [learn --name N --notes-file F [--heading H] | proposed --name N]');
       }
       case 'swarm':
         return swarmCommand(args, io, { git: io.git ?? defaultGit(io.cwd), exec: io.exec ?? defaultExec(io.cwd), repo: repoReader(io.cwd) });
