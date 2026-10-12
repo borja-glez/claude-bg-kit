@@ -12,7 +12,7 @@ export interface ValidatorSpec { name: string; cmd: string; kind?: string; affec
 export interface VerifyLimits { checks: number; shots: number; minutes: number }
 export interface ForgeConfig {
   profile: Profile; validators?: ValidatorSpec[]; detect: boolean; exclude: string[];
-  verify: { limits: VerifyLimits }; evidence: 'upload' | 'local'; validatorTimeoutSec: number; swarm: { parallel: number; mode?: 'subagents' | 'sessions'; launcher: 'bg' | 'herdr' };
+  verify: { limits: VerifyLimits }; evidence: 'upload' | 'local'; validatorTimeoutSec: number; swarm: { parallel: number; mode?: 'subagents' | 'sessions'; launcher: 'bg' | 'herdr'; setup?: string };
 }
 export class ConfigError extends Error {}
 
@@ -40,6 +40,7 @@ const Schema = z.object({
     parallel: z.number().int().min(1).max(10).default(3),
     mode: z.enum(['subagents', 'sessions']).optional(),
     launcher: z.enum(['bg', 'herdr']).default('bg'),
+    setup: z.string().min(1).max(500).optional(),
   }).strict().default({ parallel: 3, launcher: 'bg' }),
 }).strict();
 

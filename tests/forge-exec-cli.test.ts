@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { readExecution, executionTaskFile } from '../src/forge/execution.js';
+import { setupFor } from '../src/forge/cli/swarm.js';
 
 const PLAN = `project: shop
 locale: es
@@ -97,6 +98,36 @@ describe('forge swarm (execution)', () => {
     out(run(['swarm', 'task', 'T1', '--stage', 'implement', '--agent', 'forge-impl', '--round', '1'], io));
     expect(readExecution(root)!.tasks.T1).toMatchObject({ stage: 'implement', agent: 'forge-impl', round: 1 });
     expect(JSON.parse(readFileSync(executionTaskFile(root, 'T1'), 'utf8'))).toMatchObject({ task: 'T1', stage: 'implement', agent: 'forge-impl', by: 'main', mode: 'subagents' });
+  });
+  it('worktree runs swarm.setup in a new task worktree once and reports it', () => {
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), `validators: []\nswarm:\n  setup: node -e "require('fs').writeFileSync('setup-ran','1')"\n`);
+    const s = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], { ...io, exec: undefined }));
+    expect(existsSync(path.join(root, '.claude', 'worktrees', 'run', 'setup-ran'))).toBe(true);
+    expect(s.setup).toMatchObject({ ok: true });
+    const w = out(run(['swarm', 'worktree', 'T1'], { ...io, exec: undefined }));
+    expect(existsSync(path.join(w.worktree, 'setup-ran'))).toBe(true);
+    expect(w.setup).toMatchObject({ cmd: `node -e "require('fs').writeFileSync('setup-ran','1')"`, ok: true });
+    expect(Array.isArray(w.setup.tail)).toBe(true);
+    rmSync(path.join(w.worktree, 'setup-ran'));
+    const again = out(run(['swarm', 'worktree', 'T1'], { ...io, exec: undefined }));
+    expect(again.setup).toBeNull();
+    expect(existsSync(path.join(w.worktree, 'setup-ran'))).toBe(false);
+  });
+  it('setup: a lockfile picks the install command, a failure is reported, a .venv without setup asks for one', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators: []\nswarm:\n  setup: node -e "process.exit(3)"\n');
+    const failed = out(run(['swarm', 'worktree', 'T1'], { ...io, exec: undefined }));
+    expect(failed.setup).toMatchObject({ ok: false });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators: []\n');
+    mkdirSync(path.join(root, '.venv'));
+    const venv = out(run(['swarm', 'worktree', 'T2'], io));
+    expect(venv.setup).toEqual({ cmd: null, ok: false, tail: ['python project: set swarm.setup in .forge/config.yaml to create the venv in each worktree'] });
+    const files = (names: string[]) => ({ exists: (f: string) => names.includes(f), read: () => null, list: () => [] });
+    expect(setupFor(files(['package-lock.json']), undefined)).toEqual({ cmd: 'npm ci' });
+    expect(setupFor(files(['pnpm-lock.yaml']), undefined)).toEqual({ cmd: 'pnpm install --frozen-lockfile' });
+    expect(setupFor(files(['yarn.lock']), undefined)).toEqual({ cmd: 'yarn install --frozen-lockfile' });
+    expect(setupFor(files([]), undefined)).toBeNull();
+    expect(setupFor(files(['package-lock.json', '.venv']), 'make deps')).toEqual({ cmd: 'make deps' });
   });
   it('tick refuses without the state and sessions listings', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));

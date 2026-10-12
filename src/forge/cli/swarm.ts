@@ -30,6 +30,30 @@ function readDocs<T>(dir: string): Record<string, T> {
   return out;
 }
 
+const VENV_HINT = 'python project: set swarm.setup in .forge/config.yaml to create the venv in each worktree';
+export type SetupPlan = { cmd: string } | { cmd: null; hint: string } | null;
+export type SetupResult = { cmd: string | null; ok: boolean; tail: string[] } | null;
+
+/** What prepares a new worktree: swarm.setup, else the install command of the main checkout's lockfile. */
+export function setupFor(repo: RepoReader, configured: string | undefined): SetupPlan {
+  if (configured) return { cmd: configured };
+  if (repo.exists('.venv')) return { cmd: null, hint: VENV_HINT };
+  if (repo.exists('package-lock.json')) return { cmd: 'npm ci' };
+  if (repo.exists('pnpm-lock.yaml')) return { cmd: 'pnpm install --frozen-lockfile' };
+  if (repo.exists('yarn.lock')) return { cmd: 'yarn install --frozen-lockfile' };
+  return null;
+}
+
+/** Runs the setup in a worktree just created; a failure is reported, never thrown. */
+function runSetup(deps: SwarmDeps, dir: string, root: string): SetupResult {
+  const config = loadConfig(root);
+  const plan = setupFor(deps.repo, config.swarm.setup);
+  if (!plan) return null;
+  if (plan.cmd === null) return { cmd: null, ok: false, tail: [plan.hint] };
+  const r = deps.at(dir).exec(plan.cmd, config.validatorTimeoutSec);
+  return { cmd: plan.cmd, ok: r.code === 0 && !r.timedOut, tail: r.output.split(/\r?\n/).filter(l => l.trim()).slice(-20) };
+}
+
 /** The worktree that has `branch` checked out, from `git worktree list --porcelain`; null when none. */
 function worktreeHolding(porcelain: string | null, branch: string): string | null {
   let at: string | null = null;
@@ -183,6 +207,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       }
       const branch = flag('branch') ?? runBranch(project);
       if (!/^[A-Za-z0-9_./][A-Za-z0-9_\-./]{0,119}$/.test(branch) || branch.includes('..')) throw new UsageError('swarm start: --branch is not a valid branch name');
+      let setup: SetupResult = null;
       if (kind === 'plan') {
         const wt = runWorktree(io.cwd);
         // The run branch gets its own worktree: it can be neither the base (checked out here) nor a branch
@@ -197,7 +222,10 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         if (deps.git(['rev-parse', '--verify', '-q', `refs/heads/${branch}`]) === null && deps.git(['branch', branch, base]) === null) {
           throw new UsageError(`swarm start: cannot create ${branch} from ${base}`);
         }
-        if (!existsSync(wt) && deps.git(['worktree', 'add', wt, branch]) === null) throw new UsageError(`swarm start: cannot add the worktree ${wt}`);
+        if (!existsSync(wt)) {
+          if (deps.git(['worktree', 'add', wt, branch]) === null) throw new UsageError(`swarm start: cannot add the worktree ${wt}`);
+          setup = runSetup(deps, wt, io.cwd);
+        }
       }
       const resume = prev && prev.active && prev.project === project && prev.branch === (kind === 'plan' ? branch : base);
       const state: ExecutionState = resume
@@ -209,7 +237,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
           };
       rmSync(stopFile(io.cwd), { force: true });
       saveExecution(io.cwd, state);
-      return json(state);
+      return json({ ...state, setup });
     }
     case 'status': {
       const state = readExecution(io.cwd);
@@ -228,15 +256,17 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       const e = current();
       const dir = taskWorktree(io.cwd, task);
       const branch = taskBranch(task);
+      let setup: SetupResult = null;
       if (!existsSync(dir)) {
         const exists = deps.git(['rev-parse', '--verify', '-q', `refs/heads/${branch}`]) !== null;
         const added = exists ? deps.git(['worktree', 'add', dir, branch]) : deps.git(['worktree', 'add', '-b', branch, dir, e.branch]);
         if (added === null) throw new UsageError(`swarm worktree: cannot add ${dir} for ${branch}`);
+        setup = runSetup(deps, dir, io.cwd);
       }
       const base = deps.at(dir).git(['rev-parse', 'HEAD'])?.trim() ?? null;
       const t: ExecTask = e.tasks[task] ?? { status: 'running', stage: 'brief', round: 0, worktree: dir, branch, executor: e.mode, attempts: 0, agent: null, startedAt: iso, updatedAt: iso, detail: null };
       saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, worktree: dir, branch, updatedAt: iso } } });
-      return json({ worktree: dir, branch, base });
+      return json({ worktree: dir, branch, base, setup });
     }
     case 'task': {
       const task = taskArg();

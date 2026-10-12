@@ -14,6 +14,12 @@ describe('forge config', () => {
     expect(() => parseConfig('swarm:\n  mode: threads\n')).toThrow(ConfigError);
     expect(() => parseConfig('swarm:\n  launcher: tmux\n')).toThrow(ConfigError);
   });
+  it('swarm.setup: an optional command of at most 500 characters', () => {
+    expect(parseConfig('swarm:\n  setup: uv sync\n').swarm).toEqual({ parallel: 3, launcher: 'bg', setup: 'uv sync' });
+    expect(() => parseConfig(`swarm:\n  setup: ${'x'.repeat(501)}\n`)).toThrow(ConfigError);
+    expect(() => parseConfig('swarm:\n  setup: ""\n')).toThrow(ConfigError);
+    expect(() => parseConfig('swarm:\n  setup: 3\n')).toThrow(ConfigError);
+  });
   it('kind is free text with the name pattern, when is optional', () => {
     const c = parseConfig('validators:\n  - name: a11y\n    cmd: npm run a11y\n    kind: a11y\n    when: final\n');
     expect(c.validators).toEqual([{ name: 'a11y', cmd: 'npm run a11y', kind: 'a11y', when: 'final' }]);
