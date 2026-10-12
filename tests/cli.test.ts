@@ -279,6 +279,42 @@ describe('multi-session commands', () => {
       expect(run(['launch', 'plan.yaml', 'ui', '--base', 'main'], io).code).toBe(0);
     });
   });
+
+  describe('launch --task', () => {
+    const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd: dir, encoding: 'utf8' }).trim();
+    const init = () => { git('init', '-q', '-b', 'main'); git('add', '.'); git('commit', '-qm', 'init'); git('branch', 'forge/run-demo-shop'); };
+    const args = ['launch', 'plan.yaml', 'T001', '--task', '--run', 'r1', '--coordinator', 'S1', '--base', 'forge/run-demo-shop'];
+    it('creates task/<T> from the run branch and a forge run member prompt', () => {
+      init();
+      const r = JSON.parse(run(args, io).stdout);
+      expect(r).toMatchObject({ branch: 'task/T001', name: 'wp-demo-shop-T001', runId: 'r1', task: 'T001' });
+      expect(path.resolve(r.worktree).toLowerCase()).toBe(path.resolve(dir, '.claude', 'worktrees', 'task-T001').toLowerCase());
+      expect(r.prompt).toBe('/forge:run --plan plan.yaml --task T001 — run member of S1: work only T001, then stop');
+      expect(r.command).toBe(`claude --bg --name wp-demo-shop-T001 "${r.prompt}"`);
+      expect(git('rev-parse', 'task/T001')).toBe(git('rev-parse', 'forge/run-demo-shop'));
+    });
+    it('reuses an existing task branch with its work (relaunch)', () => {
+      init();
+      git('branch', 'task/T001', 'main');
+      git('checkout', '-q', 'task/T001');
+      writeFileSync(path.join(dir, 'done.txt'), 'x\n'); git('add', 'done.txt'); git('commit', '-qm', 'work');
+      const tip = git('rev-parse', 'HEAD');
+      git('checkout', '-q', 'main');
+      const r = JSON.parse(run(args, io).stdout);
+      expect(existsSync(path.join(r.worktree, 'done.txt'))).toBe(true);
+      expect(git('rev-parse', 'task/T001')).toBe(tip);
+      expect(run(args, io).code).toBe(0);
+    });
+    it('refuses unknown tasks and missing or unsafe flags', () => {
+      init();
+      expect(run(['launch', 'plan.yaml', 'T999', '--task', '--run', 'r1', '--coordinator', 'S1', '--base', 'main'], io).code).toBe(1);
+      expect(run(['launch', 'plan.yaml', 'T001', '--task', '--coordinator', 'S1', '--base', 'main'], io).code).toBe(2);
+      expect(run(['launch', 'plan.yaml', 'T001', '--task', '--run', 'r1', '--base', 'main'], io).code).toBe(2);
+      expect(run(['launch', 'plan.yaml', 'T001', '--task', '--run', 'r1', '--coordinator', 'a"b', '--base', 'main'], io).code).toBe(2);
+      expect(run(['launch', 'plan.yaml', 'T001', '--task', '--run', 'r1', '--coordinator', 'S1'], io).code).toBe(2);
+      expect(run([...args, '--merge'], io).code).toBe(2);
+    });
+  });
 });
 
 describe('final fix: db plan cache, idle owners, recover caches', () => {

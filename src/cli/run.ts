@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, rmSync
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { parsePlan, PlanError } from '../lib/plan.js';
+import { parsePlan, PlanError, isPlanId } from '../lib/plan.js';
 import { buildDocs, buildSyncWrites, planHash, planViewFromDocs, type Known } from '../lib/sync.js';
 import { normalizeMeta, normalizePhase } from '../page/normalize.js';
 import { availableTasks, commitShas } from '../lib/deps.js';
@@ -165,8 +165,19 @@ export function run(argv: string[], io: Io): Result {
       case 'launch': {
         const p = loadPlan();
         const track = args[1];
-        if (!p.tracks.some(t => t.id === track)) return fail(`launch: unknown track ${track ?? ''}`);
+        const taskMode = args.includes('--task');
+        if (taskMode) {
+          if (!track || !isPlanId(track) || !p.tasks.some(t => t.id === track)) return fail(`launch: unknown task ${track ?? ''}`);
+        } else if (!p.tracks.some(t => t.id === track)) return fail(`launch: unknown track ${track ?? ''}`);
         const SAFE_ID = /^[A-Za-z0-9_.~:@+][A-Za-z0-9_\-.~:@+]{0,79}$/;
+        const val = (f: string) => { const i = args.indexOf(f); const v = i >= 0 ? args[i + 1] : undefined; return v && !v.startsWith('--') ? v : undefined; };
+        if (taskMode) {
+          const runId = val('--run'), coordinator = val('--coordinator'), taskBase = val('--base');
+          if (!runId || !SAFE_ID.test(runId)) return fail('launch --task: --run needs the execution id', 2);
+          if (!coordinator || !SAFE_ID.test(coordinator)) return fail('launch --task: --coordinator needs the coordinator session id', 2);
+          if (!taskBase || !BRANCH_RE.test(taskBase)) return fail('launch --task: --base needs the run branch', 2);
+          if (args.includes('--merge') || args.includes('--swarm')) return fail('launch --task: the coordinator integrates; --merge and --swarm do not apply', 2);
+        }
         const swarmAt = args.indexOf('--swarm');
         const swarm = swarmAt >= 0 ? args[swarmAt + 1] : undefined;
         if (swarmAt >= 0 && (!swarm || !SAFE_ID.test(swarm))) return fail('launch: --swarm needs the coordinator session id', 2);
@@ -178,6 +189,20 @@ export function run(argv: string[], io: Io): Result {
         const git = (...a: string[]) => execFileSync('git', a, { cwd: io.cwd, encoding: 'utf8' }).trim();
         // Worktrees always live under the main checkout, even when this runs inside another worktree.
         const root = mainWorktreeFrom(git('worktree', 'list', '--porcelain')) ?? git('rev-parse', '--show-toplevel');
+        if (taskMode) {
+          // Same worktree and branch names as `forge swarm worktree <T>`: every execution mode shares the work of a task.
+          const taskWt = path.join(root, '.claude', 'worktrees', `task-${track}`);
+          const taskBranch = `task/${track}`;
+          if (!existsSync(taskWt)) {
+            const exists = git('branch', '--list', taskBranch) !== '';
+            git('worktree', 'add', taskWt, ...(exists ? [taskBranch] : ['-b', taskBranch, base!]));
+          }
+          const taskName = `wp-${p.project}-${track}`;
+          const taskPrompt = `/forge:run --plan ${args[0]} --task ${track} — run member of ${val('--coordinator')}: work only ${track}, then stop`;
+          const taskCommand = `claude --bg --name ${taskName} "${taskPrompt}"`;
+          const taskRun = `(cd '${taskWt.split("'").join(`'\\''`)}' && ${taskCommand})`;
+          return ok(JSON.stringify({ worktree: taskWt, branch: taskBranch, name: taskName, prompt: taskPrompt, command: taskCommand, run: taskRun, runId: val('--run'), task: track }));
+        }
         const worktree = path.join(root, '.claude', 'worktrees', track!);
         const branch = `track/${track}`;
         if (!existsSync(worktree)) {
