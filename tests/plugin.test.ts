@@ -111,6 +111,17 @@ describe('plugin layout', () => {
       expect(md).toContain(w);
     }
   });
+  it('run skill: model by size, ephemeral execution, parallel Medium briefs and the member conflict fix round', () => {
+    const md = read('plugins/forge/skills/run/SKILL.md');
+    for (const w of ['implementer.agent', '--batch', '**always delegated**', '10 lines or fewer', '### Ephemeral execution', '--kind ephemeral',
+      '.forge/work/loose-tasks.json', 'no `--plan` nor `--db`', '**Briefs in parallel.**', 'FORGE swarm retry <T> --adopt', 'integrated into the current branch',
+      'step 5 is its **Ephemeral run.** paragraph']) {
+      expect(md).toContain(w);
+    }
+    expect(md).not.toContain('there is no roadmap (no ArtifactData');
+    expect(md).not.toContain('Implement yourself, or spawn the `impl-light` agent');
+    expect(md).not.toContain('A `conflict` on such a task is not retried');
+  });
   it('the run skill logs done at the end and never commits unrelated changes on its own', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
     expect(md).toContain('7. Log the phase `done`');
