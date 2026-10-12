@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { appendEvent, readEvents, forgeDir, LEDGER_KINDS, type LedgerKind } from '../ledger.js';
 import { parseRun, startRun, recordCycle, stopReason, endRun, readRunText, saveRun, stopFile, type RunState, type StopContext } from '../run.js';
-import { decideStop, decideSwarmStop } from '../hook.js';
+import { decideStop, decideExecutionStop } from '../hook.js';
+import { readExecution, saveExecution } from '../execution.js';
 import { planLocale, replyIn } from '../../lib/locale.js';
 import { triage, zonesFromPaths, PATH_ORDER, type PathName } from '../triage.js';
 import { parsePlan, PlanError } from '../../lib/plan.js';
@@ -170,26 +171,26 @@ function stopContext(cwd: string, now: Date): StopContext {
 }
 
 // The Stop hook: fail-open (any error prints nothing); prints a block or nothing. An active infinite run decides first
-// (a swarm runs inside its cycles); otherwise an active swarm decides.
+// (an execution runs inside its cycles); otherwise an active execution decides.
 function hookStop(io: Io): string {
   try {
     const input: unknown = JSON.parse(io.stdin ?? '');
     if (!input || typeof input !== 'object' || Array.isArray(input)) return '';
     const hookInput = input as { stop_hook_active?: boolean; session_id?: unknown };
-    const swarm = readSwarm(io.cwd);
-    const sleeping = !!swarm?.active && !!swarm.sleepUntil && Date.parse(swarm.sleepUntil) > io.now().getTime();
+    const exec = readExecution(io.cwd);
+    const sleeping = !!exec?.active && !!exec.sleepUntil && Date.parse(exec.sleepUntil) > io.now().getTime();
     const run = parseRun(readRunText(io.cwd));
     if (run?.active) {
       const d = decideStop(hookInput, run, { ...stopContext(io.cwd, io.now()), ledgerEvents: readEvents(io.cwd).length, swarmSleeping: sleeping });
       if (!d.block) return '';
       saveRun(io.cwd, d.run);
       if (d.ended) appendEvent(io.cwd, { ts: io.now().toISOString(), kind: 'cycle', action: 'stopped', reason: d.ended });
-      return JSON.stringify({ decision: 'block', reason: d.reason + replyIn(planLocale(io.cwd, swarm?.project)) }) + '\n';
+      return JSON.stringify({ decision: 'block', reason: d.reason + replyIn(planLocale(io.cwd, exec?.project)) }) + '\n';
     }
-    const d = decideSwarmStop(hookInput, swarm, { now: io.now(), stopFile: existsSync(stopFile(io.cwd)) });
+    const d = decideExecutionStop(hookInput, exec, { now: io.now(), stopFile: existsSync(stopFile(io.cwd)) });
     if (!d.block) return '';
-    saveSwarm(io.cwd, d.swarm);
-    return JSON.stringify({ decision: 'block', reason: d.reason + replyIn(planLocale(io.cwd, d.swarm.project)) }) + '\n';
+    saveExecution(io.cwd, d.exec);
+    return JSON.stringify({ decision: 'block', reason: d.reason + replyIn(planLocale(io.cwd, d.exec.project)) }) + '\n';
   } catch { return ''; }
 }
 

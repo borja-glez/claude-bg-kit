@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { startRun, recordCycle } from '../src/forge/run.js';
-import { decideStop, decideSwarmStop } from '../src/forge/hook.js';
-import { emptyFront, type SwarmState } from '../src/lib/swarm-state.js';
+import { decideStop, decideExecutionStop } from '../src/forge/hook.js';
+import type { ExecutionState } from '../src/lib/execution-state.js';
 
 const T0 = new Date('2026-10-11T10:00:00.000Z');
 const ctx = (over: Partial<{ now: Date; stopFile: boolean; approvedPending: number; pendingProposals: number; ledgerEvents: number }> = {}) =>
@@ -90,41 +90,31 @@ describe('decideStop', () => {
   });
 });
 
-const sw = (over: Partial<SwarmState> = {}): SwarmState => ({
-  active: true, parallel: 5, mergeAuthorized: true, project: 'shop', base: 'main', coordinator: 'main', hookSession: null,
-  startedAt: T0.toISOString(), lastTickAt: '2026-10-11T10:05:00.000Z', lastBlockTick: null, sleepUntil: null,
-  stopReason: null, stallReason: null, notice: null, fronts: { a: { ...emptyFront(), status: 'running' } }, ...over,
+const ex = (over: Partial<ExecutionState> = {}): ExecutionState => ({
+  runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,
+  coordinator: 'main', hookSession: null, active: true, stopReason: null, stallReason: null, startedAt: '2026-10-12T11:00:00.000Z',
+  lastStepAt: '2026-10-12T11:59:00.000Z', lastBlockStep: null, sleepUntil: null, tasks: {}, ...over,
 });
-const sctx = (over: Partial<{ now: Date; stopFile: boolean }> = {}) => ({ now: T0, stopFile: false, ...over });
+const xnow = new Date('2026-10-12T12:00:00.000Z');
+const xtask = (agent: string | null, updatedAt: string) => ({ T1: { status: 'running' as const, stage: 'implement' as const, round: 1, worktree: '/w', branch: 'task/T1', executor: 'subagents' as const, attempts: 0, agent, startedAt: updatedAt, updatedAt, detail: null } });
 
-describe('decideSwarmStop', () => {
-  it('does not block without an active swarm', () => {
-    expect(decideSwarmStop({}, null, sctx()).block).toBe(false);
-    expect(decideSwarmStop({}, sw({ active: false }), sctx()).block).toBe(false);
-  });
-  it('blocks, binds the session and records the tick it blocked on', () => {
-    const d = decideSwarmStop({ session_id: 's1' }, sw(), sctx());
+describe('decideExecutionStop', () => {
+  it('blocks an active execution once per step and binds to the first session', () => {
+    const d = decideExecutionStop({ session_id: 's1' }, ex(), { now: xnow, stopFile: false });
     expect(d.block).toBe(true);
-    if (!d.block) return;
-    expect(d.reason).toContain('forge swarm is active (1/5 slots)');
-    expect(d.swarm).toMatchObject({ hookSession: 's1', lastBlockTick: '2026-10-11T10:05:00.000Z' });
+    if (d.block) expect(d.reason).toContain('forge execution is active (0/3 running)');
+    expect(decideExecutionStop({ session_id: 's2' }, ex({ hookSession: 's1' }), { now: xnow, stopFile: false }).block).toBe(false);
+    expect(decideExecutionStop({ session_id: 's1', stop_hook_active: true }, ex({ hookSession: 's1', lastBlockStep: '2026-10-12T11:59:00.000Z' }), { now: xnow, stopFile: false }).block).toBe(false);
   });
-  it('leaves other sessions alone once bound', () => {
-    expect(decideSwarmStop({ session_id: 's2' }, sw({ hookSession: 's1' }), sctx()).block).toBe(false);
+  it('never blocks while an agent of a task is running (it wakes the session)', () => {
+    expect(decideExecutionStop({ session_id: 's1' }, ex({ tasks: xtask('forge-impl', '2026-10-12T11:58:00.000Z') }), { now: xnow, stopFile: false }).block).toBe(false);
+    // An agent that has not reported for longer than a lease does not hold the block back.
+    expect(decideExecutionStop({ session_id: 's1' }, ex({ tasks: xtask('forge-impl', '2026-10-12T11:40:00.000Z') }), { now: xnow, stopFile: false }).block).toBe(true);
   });
-  it('does not block while sleeping', () => {
-    expect(decideSwarmStop({ session_id: 's1' }, sw({ sleepUntil: '2026-10-11T10:03:00.000Z' }), sctx()).block).toBe(false);
-    expect(decideSwarmStop({ session_id: 's1' }, sw({ sleepUntil: '2026-10-11T09:59:00.000Z' }), sctx()).block).toBe(true);
-  });
-  it('with stop_hook_active blocks again only after a new tick', () => {
-    const blocked = sw({ lastBlockTick: '2026-10-11T10:05:00.000Z' });
-    expect(decideSwarmStop({ stop_hook_active: true }, blocked, sctx()).block).toBe(false);
-    expect(decideSwarmStop({ stop_hook_active: true }, { ...blocked, lastTickAt: '2026-10-11T10:09:00.000Z' }, sctx()).block).toBe(true);
-  });
-  it('the stop file ends the swarm and blocks once to report', () => {
-    const d = decideSwarmStop({}, sw(), sctx({ stopFile: true }));
-    expect(d.block && d.ended).toBe('stopped');
-    expect(d.swarm).toMatchObject({ active: false, stopReason: 'stopped' });
+  it('does not block while sleeping, and ends with one block when the stop file appears', () => {
+    expect(decideExecutionStop({ session_id: 's1' }, ex({ sleepUntil: '2026-10-12T12:03:00.000Z' }), { now: xnow, stopFile: false }).block).toBe(false);
+    const d = decideExecutionStop({ session_id: 's1' }, ex(), { now: xnow, stopFile: true });
+    expect(d).toMatchObject({ block: true, ended: 'stopped', exec: { active: false, stopReason: 'stopped' } });
   });
 });
 

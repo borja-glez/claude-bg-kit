@@ -1,34 +1,39 @@
 import { stopReason, endRun, type RunState, type StopContext } from './run.js';
 
-import { swarmLive, type SwarmState } from '../lib/swarm-state.js';
+import { LEASE_MINUTES } from '../lib/coordination.js';
+import type { ExecutionState } from '../lib/execution-state.js';
 
 export interface HookContext extends StopContext { ledgerEvents: number; swarmSleeping?: boolean }
 
-export const swarmBlockReason = (live: number, parallel: number): string =>
-  `forge swarm is active (${live}/${parallel} slots). Run the next swarm tick as /forge:run's Swarm section describes; to end it run /forge:stop.`;
-export const swarmEndedReason = (reason: string): string =>
-  `the forge swarm ended (${reason}): report it as /forge:run's Swarm section says (step 7), then stop.`;
+export const executionBlockReason = (running: number, parallel: number): string =>
+  `forge execution is active (${running}/${parallel} running). Step it as /forge:run's Execution section describes; to end it run /forge:stop.`;
+export const executionEndedReason = (reason: string): string =>
+  `the forge execution ended (${reason}): report it as /forge:run's Execution section says (step 7), then stop.`;
 
 /**
- * The Stop hook's decision for a swarm coordinator. It binds to the first session it blocks (hookSession) and leaves
- * every other session alone. It never blocks while the coordinator sleeps (sleepUntil in the future): the background
- * `swarm sleep` wakes it. With stop_hook_active it blocks again only after a new tick, so a turn without a tick
- * cannot loop. The stop file ends the swarm with one last block to report.
+ * The Stop hook's decision for an execution's coordinator. It binds to the first session it blocks and leaves the
+ * others alone. It never blocks while the coordinator sleeps, nor while an agent of a task is running: that agent's
+ * return wakes the session, so a block would only add a turn (and fight a /goal evaluator). With stop_hook_active it
+ * blocks again only after a new step.
  */
-export function decideSwarmStop(input: { stop_hook_active?: boolean; session_id?: unknown }, swarm: SwarmState | null, ctx: { now: Date; stopFile: boolean }):
-  { block: false; swarm: SwarmState | null } | { block: true; reason: string; swarm: SwarmState; ended?: string } {
-  if (!swarm || !swarm.active) return { block: false, swarm };
+export function decideExecutionStop(input: { stop_hook_active?: boolean; session_id?: unknown }, e: ExecutionState | null, ctx: { now: Date; stopFile: boolean }):
+  { block: false; exec: ExecutionState | null } | { block: true; reason: string; exec: ExecutionState; ended?: string } {
+  if (!e || !e.active) return { block: false, exec: e };
   const session = typeof input.session_id === 'string' && input.session_id ? input.session_id : null;
-  if (swarm.hookSession !== null && session !== swarm.hookSession) return { block: false, swarm };
-  const hookSession = swarm.hookSession ?? session;
+  if (e.hookSession !== null && session !== e.hookSession) return { block: false, exec: e };
+  const hookSession = e.hookSession ?? session;
   if (ctx.stopFile) {
-    const ended: SwarmState = { ...swarm, active: false, stopReason: 'stopped', sleepUntil: null, hookSession };
-    return { block: true, reason: swarmEndedReason('stopped'), ended: 'stopped', swarm: ended };
+    const ended: ExecutionState = { ...e, active: false, stopReason: 'stopped', sleepUntil: null, hookSession };
+    return { block: true, reason: executionEndedReason('stopped'), ended: 'stopped', exec: ended };
   }
-  const until = swarm.sleepUntil ? Date.parse(swarm.sleepUntil) : NaN;
-  if (Number.isFinite(until) && until > ctx.now.getTime()) return { block: false, swarm };
-  if (input.stop_hook_active === true && swarm.lastTickAt === swarm.lastBlockTick) return { block: false, swarm };
-  return { block: true, reason: swarmBlockReason(swarmLive(swarm), swarm.parallel), swarm: { ...swarm, hookSession, lastBlockTick: swarm.lastTickAt } };
+  const now = ctx.now.getTime();
+  const until = e.sleepUntil ? Date.parse(e.sleepUntil) : NaN;
+  if (Number.isFinite(until) && until > now) return { block: false, exec: e };
+  const agentRunning = Object.values(e.tasks).some(t => t.status === 'running' && !!t.agent && now - Date.parse(t.updatedAt) < LEASE_MINUTES * 60000);
+  if (agentRunning) return { block: false, exec: e };
+  if (input.stop_hook_active === true && e.lastStepAt === e.lastBlockStep) return { block: false, exec: e };
+  const running = Object.values(e.tasks).filter(t => t.status === 'running').length;
+  return { block: true, reason: executionBlockReason(running, e.parallel), exec: { ...e, hookSession, lastBlockStep: e.lastStepAt } };
 }
 
 const hhmm = (d: Date) => d.toISOString().slice(11, 16);
