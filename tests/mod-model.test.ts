@@ -67,6 +67,20 @@ describe('buildBandModel · work', () => {
     expect(buildBandModel('demo-shop', { ...empty, plan, session: j({ sessionId: 'x', track: 'backend', launchedBy: 'main' }), execution: EXEC() }).mode).toBe('work');
     expect(buildBandModel('demo-shop', { ...empty, plan, session: j({ sessionId: 'main', track: null }), execution: EXEC({ active: false, stopReason: 'finished' }) }).mode).toBe('work');
   });
+  it('run mode takes worst from a slot whose lease lapsed while the coordinator is alive', () => {
+    const pub = JSON.stringify({ task: 'T002', runId: 'r1', stage: 'review', status: 'running', agent: null, round: 2, since: new Date().toISOString(), updatedAt: new Date().toISOString(), leaseUntil: new Date(Date.now() - 3600000).toISOString(), by: 'x', mode: 'subagents' });
+    const m = buildBandModel('demo-shop', { ...empty, plan, execution: EXEC(), execTasks: { T002: pub } });
+    expect(m).toMatchObject({ mode: 'run', worst: 'stopped' });
+  });
+  it('bandLine variants: stalled, stopped, sessions, round 1, en locale, unknown stage', () => {
+    const run = (over: object, locale = 'es') => bandLine({ mode: 'run', project: 'p', locale, executor: 'subagents', running: 1, parallel: 2, integrated: 0, total: 4, slots: [{ task: 'T001', stage: 'implement', round: 1 }], worst: 'alive', stalled: false, roadmapUrl: null, ...over } as never, 0);
+    expect(run({ stalled: true })).toBe('▶ EJECUCIÓN parada');
+    expect(run({ worst: 'stopped' })).toBe('▶ EJECUCIÓN · subagentes 1/2 · T001 implementar · 0/4 · integradas 0 · ⚠ parada');
+    expect(run({ executor: 'sessions' })).toBe('▶ EJECUCIÓN · sesiones 1/2 · T001 implementar · 0/4 · integradas 0');
+    expect(run({}, 'en')).toBe('▶ EXECUTION · subagents 1/2 · T001 implement · 0/4 · integrated 0');
+    expect(run({ worst: 'silent' }, 'en')).toContain('⚠ no signal');
+    expect(run({ slots: [{ task: 'T009', stage: 'weird', round: 1 }] })).toContain('T009 weird');
+  });
   it('draws the run band line with stages, rounds and the liveness warning', () => {
     expect(bandLine({ mode: 'run', project: 'p', locale: 'es', executor: 'subagents', running: 2, parallel: 3, integrated: 3, total: 12, slots: [{ task: 'T004', stage: 'review', round: 2 }, { task: 'T008', stage: 'implement', round: 1 }], worst: 'silent', stalled: false, roadmapUrl: null }, 0))
       .toBe('▶ EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · T008 implementar · 3/12 · integradas 3 · ⚠ sin señal');

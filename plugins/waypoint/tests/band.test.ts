@@ -34,8 +34,9 @@ const WORK: WaypointBand = {
   current: { id: 'T3', title: 'A very long task title that goes well beyond forty characters', startedAt: '2026-10-11T10:00:00.000Z', estimateMin: 30 },
   trackDone: 2, trackTotal: 5, percent: 40, inbox: 1, escalation: true, phase: { index: 1, total: 2, name: 'Base' }, cells: 'ddapp', swarm: false,
 };
-const SWARM: WaypointBand = {
-  mode: 'swarm', project: 'demo', locale: 'es', live: 4, parallel: 5, integrated: 2, tracks: 11, percent: 52, conflicts: 1, stalled: false,
+const RUN: WaypointBand = {
+  mode: 'run', project: 'demo', locale: 'es', executor: 'subagents', running: 2, parallel: 3, integrated: 3, total: 12,
+  slots: [{ task: 'T004', stage: 'review', round: 2 }, { task: 'T008', stage: 'implement', round: 1 }], worst: 'silent', stalled: false,
   roadmapUrl: 'https://claude.ai/artifact/roadmap',
 };
 
@@ -107,16 +108,16 @@ test('work band runs /waypoint:work, the cross hides it and a new session shows 
   }
 });
 
-test('the swarm band shows the swarm, stops it and offers no per-session work buttons', async ($, on) => {
+test('the run band shows the execution, stops it and offers no per-session work buttons', async ($, on) => {
   const sent: string[] = [];
   recordCommands(on, sent);
-  serveBand(on, () => SWARM);
+  serveBand(on, () => RUN);
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
-    expect(await ui.find({ type: 'Text', text: '◆ enjambre 4/5 · integrados 2/11 · global 52 % · ⚠ 1 conflicto' })).toBeDefined();
+    expect(await ui.find({ type: 'Text', text: '▶ EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · T008 implementar · 3/12 · integradas 3 · ⚠ sin señal' })).toBeDefined();
     expect(await ui.find({ type: 'Button', text: 'Estado' })).toBeDefined();
-    expect(await ui.find({ type: 'Button', text: 'Parar enjambre' })).toBeDefined();
-    await ui.press({ key: 'stop-swarm' });
+    expect(await ui.find({ type: 'Button', text: 'Parar' })).toBeDefined();
+    await ui.press({ key: 'stop-run' });
     expect(sent.at(-1)).toBe('/forge:stop');
     expect(await ui.find({ type: 'Button', text: 'Siguiente tarea' })).toBeUndefined();
     expect(await ui.find({ type: 'Button', text: 'Lanzar sesión en un frente…' })).toBeUndefined();
@@ -128,7 +129,7 @@ test('a swarm member work band is marked', async ($, on) => {
   serveBand(on, () => ({ ...WORK, swarm: true }));
   mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
   const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
-  expect((await ui.find({ type: 'Text', text: /^● frente core 2\/5 · enjambre · T3 / }))?.text).toContain('· enjambre · T3 ');
+  expect((await ui.find({ type: 'Text', text: /^● frente core 2\/5 · ejecución · T3 / }))?.text).toContain('· ejecución · T3 ');
   await ui.unmount();
 });
 
