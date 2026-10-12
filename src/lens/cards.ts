@@ -109,7 +109,9 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     const loc = m.locale;
     const usd = (v: number | null) => (v === null ? '—' : fmtUsd(v, loc));
     const name = (g: { model: string | null }) => (g.model === null ? '' : g.model === 'varios' ? t.various : shortModelName(g.model));
-    const label: Record<string, string> = { main: t.gMain, impl: t.gImpl, review: t.gReview, plan: t.gPlan, other: t.gOther };
+    // «Other» only reads right next to forge's own groups; on its own it is just the subagents.
+    const forgeGroups = u.groups.some(g => g.id === 'impl' || g.id === 'review' || g.id === 'plan');
+    const label: Record<string, string> = { main: t.gMain, impl: t.gImpl, review: t.gReview, plan: t.gPlan, other: forgeGroups ? t.gOther : t.sSubagents };
     const blocks: Block[] = [{
       kind: 'bar', ratio: 1, hue: 'teal', label: u.scope === 'run' ? t.run : t.thisSession,
       right: `${fmtTokens(u.tokens, loc)} tok · ${u.partial ? '≥ ' : ''}${fmtUsd(u.costUsd, loc)}`,

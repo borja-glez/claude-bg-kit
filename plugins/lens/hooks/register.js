@@ -11808,7 +11808,8 @@ function buildCards(m, t, nowMs2) {
     const loc = m.locale;
     const usd = (v) => v === null ? "\u2014" : fmtUsd(v, loc);
     const name = (g) => g.model === null ? "" : g.model === "varios" ? t.various : shortModelName(g.model);
-    const label = { main: t.gMain, impl: t.gImpl, review: t.gReview, plan: t.gPlan, other: t.gOther };
+    const forgeGroups = u.groups.some((g) => g.id === "impl" || g.id === "review" || g.id === "plan");
+    const label = { main: t.gMain, impl: t.gImpl, review: t.gReview, plan: t.gPlan, other: forgeGroups ? t.gOther : t.sSubagents };
     const blocks = [{
       kind: "bar",
       ratio: 1,

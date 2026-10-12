@@ -146,6 +146,14 @@ describe('usage formats and card', () => {
     expect(text).toContain('2026-10-12');
     expect(text).toContain('6.18');
   });
+  it('calls subagents just «Subagents» when no forge group is there, «other» only next to forge ones', () => {
+    const g = (id: 'main' | 'impl' | 'other') => ({ id, model: 'claude-opus-5-5', tokens: 10, costUsd: 0.1, share: 0.5 });
+    const base = { scope: 'session' as const, tokens: 20, costUsd: 0.2, partial: false, sessionPartial: false, officialUsd: null, drift: false, session: null, tracking: null, withoutForge: null, pricesAsOf: '2026-10-12' };
+    const tags = (groups: ReturnType<typeof g>[]) =>
+      buildCards({ ...EMPTY, usage: { ...base, groups } }, T, 0).find(c => c.title === T.sUsage)!.blocks.flatMap(b => ('tag' in b && b.tag ? [b.tag.text] : []));
+    expect(tags([g('main'), g('other')])).toEqual(['main', 'Subagents']);
+    expect(tags([g('main'), g('impl'), g('other')])).toEqual(['main', 'implementers', 'other']);
+  });
   it('shows «≥» on a partial total and the drift warning', () => {
     const usage = { scope: 'session' as const, tokens: 10, costUsd: 1, partial: true, sessionPartial: true, officialUsd: 2, drift: true, session: null, groups: [], tracking: null, withoutForge: null, pricesAsOf: '2026-10-12' };
     const text = JSON.stringify(buildCards({ ...EMPTY, usage }, T, 0).find(c => c.title === T.sUsage)!.blocks);
