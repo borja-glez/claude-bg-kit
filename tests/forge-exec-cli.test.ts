@@ -105,6 +105,10 @@ describe('forge swarm (execution)', () => {
     out(run(['swarm', 'task', 'T1', '--stage', 'implement', '--agent', 'forge-impl', '--round', '1'], io));
     expect(readExecution(root)!.tasks.T1).toMatchObject({ stage: 'implement', agent: 'forge-impl', round: 1 });
     expect(JSON.parse(readFileSync(executionTaskFile(root, 'T1'), 'utf8'))).toMatchObject({ task: 'T1', stage: 'implement', agent: 'forge-impl', by: 'main', mode: 'subagents' });
+    const before = readExecution(root)!.tasks.T1.stageSince;
+    out(run(['swarm', 'task', 'T1', '--stage', 'implement', '--round', '2'], { ...io, now: () => new Date('2026-10-12T12:07:00.000Z') }));
+    expect(readExecution(root)!.tasks.T1.stageSince).toBe(before);
+    expect(JSON.parse(readFileSync(executionTaskFile(root, 'T1'), 'utf8')).since).toBe(before);
   });
   it('worktree runs swarm.setup in a new task worktree once and reports it', () => {
     writeFileSync(path.join(root, '.forge', 'config.yaml'), `validators: []\nswarm:\n  setup: node -e "require('fs').writeFileSync('setup-ran','1')"\n`);

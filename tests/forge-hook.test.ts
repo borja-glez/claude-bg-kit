@@ -96,7 +96,7 @@ const ex = (over: Partial<ExecutionState> = {}): ExecutionState => ({
   lastStepAt: '2026-10-12T11:59:00.000Z', lastBlockStep: null, sleepUntil: null, tasks: {}, ...over,
 });
 const xnow = new Date('2026-10-12T12:00:00.000Z');
-const xtask = (agent: string | null, updatedAt: string) => ({ T1: { status: 'running' as const, stage: 'implement' as const, round: 1, worktree: '/w', branch: 'task/T1', executor: 'subagents' as const, attempts: 0, agent, startedAt: updatedAt, updatedAt, detail: null } });
+const xtask = (agent: string | null, updatedAt: string) => ({ T1: { status: 'running' as const, stage: 'implement' as const, round: 1, worktree: '/w', branch: 'task/T1', executor: 'subagents' as const, attempts: 0, agent, startedAt: updatedAt, stageSince: updatedAt, updatedAt, detail: null } });
 
 describe('decideExecutionStop', () => {
   it('blocks an active execution once per step and binds to the first session', () => {

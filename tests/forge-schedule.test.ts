@@ -15,7 +15,7 @@ const exec = (over: Partial<ExecutionState> = {}): ExecutionState => ({
   lastBlockStep: null, sleepUntil: null, tasks: {}, ...over,
 });
 const running = (id: string, status: 'running' | 'accepted' | 'conflict' | 'blocked' = 'running') => ({
-  [id]: { status, stage: 'implement' as const, round: 1, worktree: `/w/${id}`, branch: `task/${id}`, executor: 'subagents' as const, attempts: 0, agent: null, startedAt: at(-5), updatedAt: at(-1), detail: null },
+  [id]: { status, stage: 'implement' as const, round: 1, worktree: `/w/${id}`, branch: `task/${id}`, executor: 'subagents' as const, attempts: 0, agent: null, startedAt: at(-5), stageSince: at(-5), updatedAt: at(-1), detail: null },
 });
 const input = (over: Partial<ScheduleInput>): ScheduleInput => ({ plan: plan([]), states: {}, sessions: {}, exec: exec(), integrated: [], now: NOW, ...over });
 const starts = (r: ReturnType<typeof schedule>) => r.actions.filter(a => a.type === 'start').map(a => (a as { task: string }).task);

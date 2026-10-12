@@ -7,7 +7,7 @@ export type ExecTaskStatus = 'running' | 'accepted' | 'integrated' | 'conflict' 
 export interface ExecTask {
   status: ExecTaskStatus; stage: Stage; round: number; worktree: string; branch: string;
   executor: 'subagents' | 'sessions' | 'manual'; attempts: number; agent: string | null;
-  startedAt: string; updatedAt: string; detail: string | null;
+  startedAt: string; stageSince: string; updatedAt: string; detail: string | null;
 }
 export type ExecStopReason = 'finished' | 'stalled' | 'stopped' | 'budget' | 'migrated';
 export interface ExecutionState {
@@ -42,7 +42,7 @@ function normalizeTask(x: unknown): ExecTask | null {
   const startedAt = iso(x.startedAt);
   if (!status || !stage || !executor || worktree === null || !branch || !startedAt) return null;
   return {
-    status, stage, executor, worktree, branch, startedAt,
+    status, stage, executor, worktree, branch, startedAt, stageSince: iso(x.stageSince) ?? startedAt,
     round: int(x.round, 0, 99, 0), attempts: int(x.attempts, 0, 99, 0),
     agent: str(x.agent), updatedAt: iso(x.updatedAt) ?? startedAt, detail: typeof x.detail === 'string' ? x.detail.slice(0, 500) : null,
   };
@@ -91,3 +91,37 @@ export function fromSwarm(s: SwarmState): ExecutionState {
 
 export const runningTasks = (e: ExecutionState): string[] =>
   Object.entries(e.tasks).filter(([, t]) => t.status === 'running').map(([id]) => id);
+
+export interface PublicTask {
+  task: string; runId: string; stage: Stage; status: ExecTaskStatus; agent: string | null; round: number;
+  since: string; updatedAt: string; leaseUntil: string; by: string; mode: 'subagents' | 'sessions' | 'manual';
+}
+export function normalizePublicTask(x: unknown): PublicTask | null {
+  if (!isObj(x)) return null;
+  const task = str(x.task), runId = str(x.runId), by = str(x.by);
+  const stage = oneOf(STAGES, x.stage), status = oneOf(TASK_STATUSES, x.status), mode = oneOf(['subagents', 'sessions', 'manual'] as const, x.mode);
+  const since = iso(x.since), updatedAt = iso(x.updatedAt), leaseUntil = iso(x.leaseUntil);
+  if (!task || !isPlanId(task) || !runId || !by || !stage || !status || !mode || !since || !updatedAt || !leaseUntil) return null;
+  return { task, runId, stage, status, mode, by, since, updatedAt, leaseUntil, agent: str(x.agent), round: int(x.round, 0, 99, 0) };
+}
+
+export interface LiveDoc {
+  sessionId: string; role: 'coordinator' | 'executor' | 'manual'; runId: string | null; task: string | null;
+  event: string; ts: string; agents: { id: string; type: string; since: string }[]; ended: boolean;
+}
+/** A local signal older than this reads as silent, older than the next as stopped; one ended is stopped at once. */
+export const LIVE_SILENT_MINUTES = 7;
+export const LIVE_STOPPED_MINUTES = 12;
+/** Signals older than this are leftovers of past sessions: readers ignore them. */
+export const LIVE_MAX_AGE_HOURS = 24;
+export function normalizeLive(x: unknown): LiveDoc | null {
+  if (!isObj(x)) return null;
+  const sessionId = str(x.sessionId), ts = iso(x.ts);
+  const role = oneOf(['coordinator', 'executor', 'manual'] as const, x.role);
+  if (!sessionId || !ts || !role) return null;
+  const agents = Array.isArray(x.agents)
+    ? x.agents.filter(isObj).map(a => ({ id: str(a.id), type: str(a.type) ?? '', since: iso(a.since) }))
+      .filter((a): a is { id: string; type: string; since: string } => !!a.id && !!a.since).slice(0, 20)
+    : [];
+  return { sessionId, role, ts, agents, runId: str(x.runId), task: str(x.task), event: (str(x.event) ?? '').slice(0, 40), ended: x.ended === true };
+}

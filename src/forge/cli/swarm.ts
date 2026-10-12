@@ -288,7 +288,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         setup = runSetup(deps, dir, io.cwd);
       }
       const base = deps.at(dir).git(['rev-parse', 'HEAD'])?.trim() ?? null;
-      const t: ExecTask = e.tasks[task] ?? { status: 'running', stage: 'brief', round: 0, worktree: dir, branch, executor: e.mode, attempts: 0, agent: null, startedAt: iso, updatedAt: iso, detail: null };
+      const t: ExecTask = e.tasks[task] ?? { status: 'running', stage: 'brief', round: 0, worktree: dir, branch, executor: e.mode, attempts: 0, agent: null, startedAt: iso, stageSince: iso, updatedAt: iso, detail: null };
       saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, worktree: dir, branch, updatedAt: iso } } });
       return json({ worktree: dir, branch, base, setup });
     }
@@ -315,10 +315,11 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       const round = has('round') ? Number(flag('round')) : prev.round;
       if (!Number.isInteger(round) || round < 0 || round > 99) throw new UsageError('swarm task: --round must be an integer from 0 to 99');
       const agent = has('no-agent') ? null : (flag('agent') ?? prev.agent);
-      const next: ExecTask = { ...prev, stage, status, round, agent, detail, updatedAt: iso, ...(prev.stage !== stage ? { startedAt: prev.startedAt } : {}) };
+      const stageSince = prev.stage !== stage ? iso : prev.stageSince;
+      const next: ExecTask = { ...prev, stage, status, round, agent, detail, updatedAt: iso, stageSince };
       saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: next } });
       const lease = flag('lease') && !Number.isNaN(Date.parse(flag('lease')!)) ? flag('lease')! : new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString();
-      writePublicTask(io.cwd, { task, runId: e.runId, stage, status, agent, round, since: prev.stage === stage ? prev.updatedAt : iso, updatedAt: iso, leaseUntil: lease, by: e.coordinator, mode: prev.executor });
+      writePublicTask(io.cwd, { task, runId: e.runId, stage, status, agent, round, since: stageSince, updatedAt: iso, leaseUntil: lease, by: e.coordinator, mode: prev.executor });
       if (prev.stage !== stage) appendEvent(io.cwd, { ts: iso, kind: 'phase', task, phase: stage });
       return json(next);
     }
@@ -353,7 +354,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       const revive = !e.active && e.stopReason === 'stalled';
       saveExecution(io.cwd, {
         ...e, ...(revive ? { active: true, stopReason: null, stallReason: null } : {}),
-        tasks: { ...e.tasks, [task]: { ...t, status: 'running', stage: 'implement', attempts: t.attempts + 1, detail: null, updatedAt: iso } },
+        tasks: { ...e.tasks, [task]: { ...t, status: 'running', stage: 'implement', attempts: t.attempts + 1, detail: null, updatedAt: iso, stageSince: iso } },
       });
       return ok();
     }

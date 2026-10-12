@@ -2,8 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import path from 'node:path';
 import { forgeDir } from './ledger.js';
 import { readSwarm, swarmFile } from './swarm.js';
-import { fromSwarm, parseExecution, type ExecTaskStatus, type ExecutionState } from '../lib/execution-state.js';
-import type { Stage } from '../lib/types.js';
+import { fromSwarm, parseExecution, type ExecutionState, type PublicTask } from '../lib/execution-state.js';
 
 export const executionFile = (root: string) => path.join(root, '.forge', 'execution.json');
 export const executionTaskFile = (root: string, task: string) => path.join(root, '.forge', 'execution', `${task}.json`);
@@ -12,10 +11,7 @@ export const taskBranch = (task: string) => `task/${task}`;
 export const runWorktree = (root: string) => path.join(root, '.claude', 'worktrees', 'run');
 export const taskWorktree = (root: string, task: string) => path.join(root, '.claude', 'worktrees', `task-${task}`);
 
-export interface PublicTask {
-  task: string; runId: string; stage: Stage; status: ExecTaskStatus; agent: string | null; round: number;
-  since: string; updatedAt: string; leaseUntil: string; by: string; mode: 'subagents' | 'sessions' | 'manual';
-}
+export type { PublicTask } from '../lib/execution-state.js';
 
 function writeAtomic(file: string, text: string): void {
   mkdirSync(path.dirname(file), { recursive: true });
