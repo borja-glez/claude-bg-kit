@@ -117,7 +117,7 @@ La banda se dibuja en la terminal y en la pestaña Code de la app de escritorio.
 
 `/waypoint:launch <frente>` crea `.claude/worktrees/<frente>` en la rama `track/<frente>` y arranca allí una sesión de Claude en segundo plano. Cada sesión reclama tareas de su frente y escribe su progreso en el roadmap. Cuando dos sesiones tocan los mismos ficheros, reciben un aviso de solapamiento. Las sesiones pueden traspasarse o delegarse trabajo con mensajes, que se guardan en el roadmap y se envían con `SendMessage`. Si una sesión desaparece, las demás recuperan su tarea.
 
-El modo sessions de forge lanza a sus miembros con `launch <plan> <T> --task --run R --coordinator SID --base B [--launcher bg|herdr]`: una sesión por tarea, en `.claude/worktrees/task-<T>` sobre `task/<T>`. La banda de un miembro así dice «de la ejecución de <coordinadora>». Cualquier sesión puede además unirse desde `/waypoint:work` a una ejecución en marcha como miembro manual y coger una tarea pendiente.
+El modo sessions de forge lanza a sus miembros con `launch <plan> <T> --task --run R --coordinator SID --base B [--launcher bg|herdr]`: una sesión por tarea, en `.claude/worktrees/task-<T>` sobre `task/<T>`. La banda de un miembro así dice «de la ejecución de <coordinadora>». Cualquier sesión puede además unirse desde `/waypoint:work` a una ejecución en marcha como miembro manual y coger una tarea pendiente. Los ids de sesión que se usan con una ejecución de forge deben cumplir `[A-Za-z0-9_.-]` (sin `~ : @ +`): forge rechaza cualquier otro.
 
 Para muchos frentes a la vez con integración automática, usa los [modos de ejecución](../forge/README.es.md#modos-de-ejecución) de forge.
 

@@ -117,7 +117,7 @@ The band is drawn in the terminal and in the Code tab of the desktop app. It is 
 
 `/waypoint:launch <track>` creates `.claude/worktrees/<track>` on the branch `track/<track>` and starts a background Claude session there. Each session claims tasks from its track and writes its progress to the roadmap. When two sessions touch the same files, they get an overlap warning. Sessions can hand off or delegate work through messages, which are stored in the roadmap and sent with `SendMessage`. A session that disappears has its task recovered by the others.
 
-forge's sessions mode launches its members with `launch <plan> <T> --task --run R --coordinator SID --base B [--launcher bg|herdr]`: one session per task, in `.claude/worktrees/task-<T>` on `task/<T>`. The band of such a member says "of the execution of <coordinator>". Any session can also join a running execution as a manual member from `/waypoint:work`, and take a pending task.
+forge's sessions mode launches its members with `launch <plan> <T> --task --run R --coordinator SID --base B [--launcher bg|herdr]`: one session per task, in `.claude/worktrees/task-<T>` on `task/<T>`. The band of such a member says "of the execution of <coordinator>". Any session can also join a running execution as a manual member from `/waypoint:work`, and take a pending task. Session ids used with a forge execution must match `[A-Za-z0-9_.-]` (no `~ : @ +`): forge refuses any other.
 
 For many tracks at once with automatic integration, use forge's [execution modes](../forge/README.md#execution-modes).
 

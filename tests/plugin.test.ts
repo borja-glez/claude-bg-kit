@@ -316,6 +316,21 @@ describe('plugin layout', () => {
     expect(runMd).toContain('FORGE swarm next --plan <plan> --db DB --session <SID>');
     expect(read('plugins/waypoint/skills/work/SKILL.md')).toContain('join the execution as a manual member: invoke /forge:run --join and follow its ### Manual member');
     expect(read('plugins/forge/skills/stop/SKILL.md')).toContain('[forge run] stop after your current step');
+  });
+  it('members join with their hook session id; sessions starts set the worktree up first; stop reaches only named members of the run', () => {
+    const runMd = read('plugins/forge/skills/run/SKILL.md');
+    expect(runMd).toContain('FORGE swarm join --session <SID> --role executor --task <T> --name wp-<project>-<T> --hook-session ${CLAUDE_SESSION_ID}');
+    expect(runMd).toContain('FORGE swarm join --session <SID> --role manual --hook-session ${CLAUDE_SESSION_ID}');
+    expect(runMd).toContain('`start {task}` in mode `sessions`: first `FORGE swarm worktree <T>`');
+    expect(runMd).toMatch(/5\. \*\*Finish\.\*\* Commits on `task\/<T>`[^\n]*FORGE swarm report <T> --session <SID> --stage verdict --status accepted --no-agent/);
+    expect(runMd).toContain('it never edits task code itself (except direct requests, below)');
+    expect(runMd).not.toContain('on `integrated` only');
+    expect(runMd).toContain('(`/waypoint:plan`)');
+    const stop = read('plugins/forge/skills/stop/SKILL.md');
+    expect(stop).toContain('whose `runId` is the `runId` remembered in step 1');
+    expect(stop).toContain('do not report it');
+    expect(stop).toContain('whose `name` is null');
+    expect(read('plugins/waypoint/skills/work/SKILL.md')).toContain('no `~ : @ +`');
     expect(read('plugins/forge/skills/infinite/SKILL.md')).toContain('has diverged from');
   });
 });
