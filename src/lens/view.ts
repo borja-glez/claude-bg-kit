@@ -43,6 +43,8 @@ const TIERS: Record<string, Tier> = {
   'forge-review-correctness': { label: 'correctness', hue: 'green', rank: null },
   'forge-review-security': { label: 'security', hue: 'red', rank: null },
   'forge-review-perf': { label: 'perf', hue: 'yellow', rank: null },
+  'forge-verify': { label: 'verify', hue: 'sapphire', rank: null },
+  'forge-verify-heavy': { label: 'verify', hue: 'sapphire', rank: null },
   'forge-planner': { label: 'planner', hue: 'lavender', rank: null },
   'forge-scout': { label: 'scout', hue: 'flamingo', rank: null },
   'design-critic': { label: 'critic', hue: 'flamingo', rank: null },
@@ -56,10 +58,10 @@ export function tierOf(agent: string | null | undefined): Tier {
 export const PATH_HUE: Record<string, Hue> = { trivial: 'green', small: 'teal', medium: 'peach', large: 'red' };
 
 // The stages forge goes through; a phase it names that is none of them is drawn on its own.
-export const STAGES = ['triage', 'design', 'plan', 'implement', 'validate', 'review', 'verdict', 'final'] as const;
+export const STAGES = ['triage', 'design', 'plan', 'implement', 'validate', 'verify', 'review', 'verdict', 'final'] as const;
 const STAGE_OF: Record<string, (typeof STAGES)[number]> = {
   triage: 'triage', design: 'design', plan: 'plan', planning: 'plan', implement: 'implement', implementation: 'implement',
-  impl: 'implement', fix: 'implement', redo: 'implement', validate: 'validate', validation: 'validate', review: 'review',
+  impl: 'implement', fix: 'implement', redo: 'implement', validate: 'validate', validation: 'validate', verify: 'verify', review: 'review',
   verdict: 'verdict', round: 'verdict', final: 'final', 'final-review': 'final', done: 'final',
 };
 
@@ -67,10 +69,11 @@ export interface Stage { name: string; state: 'done' | 'active' | 'pending' }
 // The stages of forge's path: Large shows design and plan, the others skip them; final only on Large.
 // Trivial and Small have no reviewers. `validated` says how the last validation went: Trivial logs no phases,
 // so validators that ran are what moves it past implement.
-export function stagesFor(path: string, phase: string, validated: 'ok' | 'failed' | null = null): Stage[] {
+export function stagesFor(path: string, phase: string, validated: 'ok' | 'failed' | null = null, verifyPlanned = false): Stage[] {
   const large = path === 'large';
   const light = path === 'trivial' || path === 'small';
-  const names = STAGES.filter(s => (large || (s !== 'design' && s !== 'plan' && s !== 'final')) && !(light && (s === 'review' || s === 'verdict')));
+  const names = STAGES.filter(s => (large || (s !== 'design' && s !== 'plan' && s !== 'final'))
+    && !(light && (s === 'review' || s === 'verdict')) && (s !== 'verify' || verifyPlanned));
   if (phase.toLowerCase() === 'done') return names.map(name => ({ name, state: 'done' }));
   const at = STAGE_OF[phase.toLowerCase()] ?? null;
   let i = at ? names.indexOf(at) : -1;

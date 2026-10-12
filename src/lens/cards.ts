@@ -16,7 +16,7 @@ export interface CardTexts {
   sUsage: string; effort: string; effortLevel: (e: string) => string; thisSession: string; run: string; gMain: string; gImpl: string;
   gReview: string; gPlan: string; gOther: string; tracking: string; withoutForge: string; withoutForgeNote: string;
   forgeCosts: (usd: string, pct: number) => string; forgeSaves: (usd: string) => string; pricesAsOf: string; drift: string; various: string;
-  noReview: string;
+  noReview: string; gVerify: string; shots: string; blocked: string;
 }
 
 const modelRight = (s: { model?: string; effort?: string }, t: CardTexts): string | undefined =>
@@ -57,7 +57,17 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     const blocks: Block[] = [];
     const f = m.forge;
     if (f) {
-      blocks.push({ kind: 'stages', stages: stagesFor(f.path, forgePhase(f), f.validators.length ? (f.validators.every(v => v.ok) ? 'ok' : 'failed') : null), hue: SECTION_HUE.forge });
+      blocks.push({ kind: 'stages', stages: stagesFor(f.path, forgePhase(f), f.validators.length ? (f.validators.every(v => v.ok) ? 'ok' : 'failed') : null, f.verify?.planned === true), hue: SECTION_HUE.forge });
+      if (f.verify?.planned) {
+        const v = f.verify;
+        const where = `verify ${v.surfaces.join(', ')}`;
+        const text = v.result === 'pass' ? `✓ ${where} · ${v.passed}/${v.total} · ${v.passed} ${t.shots}`
+          : v.result === 'fail' ? `✗ ${where} · ${v.passed}/${v.total}`
+          : v.result === 'blocked' ? `⊘ ${where} · ${t.blocked}: ${v.reason ?? ''}`
+          : where;
+        blocks.push({ kind: 'text', text, dim: v.result === null });
+        if (v.evidence) blocks.push({ kind: 'text', text: v.evidence, dim: true });
+      }
       const c = briefCells(f);
       if (c) {
         blocks.push({ kind: 'bar', ratio: ratio(c.done, c.total), hue: SECTION_HUE.forge, moving: c.done < c.total, label: t.briefs, right: `${c.done}/${c.total}` });
@@ -115,7 +125,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     };
     // «Other» only reads right next to forge's own groups; on its own it is just the subagents.
     const forgeGroups = u.groups.some(g => g.id === 'impl' || g.id === 'review' || g.id === 'plan');
-    const label: Record<string, string> = { main: t.gMain, impl: t.gImpl, review: t.gReview, plan: t.gPlan, other: forgeGroups ? t.gOther : t.sSubagents };
+    const label: Record<string, string> = { main: t.gMain, impl: t.gImpl, review: t.gReview, verify: t.gVerify, plan: t.gPlan, other: forgeGroups ? t.gOther : t.sSubagents };
     const blocks: Block[] = [{
       kind: 'bar', ratio: 1, hue: 'teal', label: u.scope === 'run' ? t.run : t.thisSession,
       right: `${fmtTokens(u.tokens, loc)} tok · ${u.partial ? '≥ ' : ''}${fmtUsd(u.costUsd, loc)}`,

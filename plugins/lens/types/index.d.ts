@@ -19,6 +19,10 @@ export type LensPanel = {
     task: string; path: string; phase: string; agent: string | null; validators: { name: string; ok: boolean }[];
     verdict: { action: string; score: number | null } | null; round: number | null; cap: number | null;
     brief: number | null; accepted: number[]; briefs: number | null;
+    verify?: {
+      planned: boolean; surfaces: string[]; result: string | null; passed: number | null; total: number | null;
+      evidence: string | null; reason: string | null;
+    } | null;
   } | null;
   infinite: { cycle: number; cyclesMax: number | null; hoursLeft: number | null; active: boolean; autoApproved: string[] } | null;
   swarm: {
@@ -30,7 +34,7 @@ export type LensPanel = {
   usage: {
     scope: 'session' | 'run'; tokens: number; costUsd: number; partial: boolean; sessionPartial: boolean; officialUsd: number | null; drift: boolean;
     session: { tokens: number; costUsd: number } | null;
-    groups: { id: 'main' | 'impl' | 'review' | 'plan' | 'other'; model: string | null; effort?: string | null; tokens: number; costUsd: number | null; share: number }[];
+    groups: { id: 'main' | 'impl' | 'review' | 'verify' | 'plan' | 'other'; model: string | null; effort?: string | null; tokens: number; costUsd: number | null; share: number }[];
     tracking: { tokens: number; costUsd: number | null } | null;
     withoutForge: { costUsd: number; deltaUsd: number; deltaPct: number } | null;
     pricesAsOf: string;

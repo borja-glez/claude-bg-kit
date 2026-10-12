@@ -13,7 +13,7 @@ const T: CardTexts = {
   gReview: 'reviewers', gPlan: 'planning', gOther: 'other', tracking: 'tracking', withoutForge: 'without forge', various: 'various',
   withoutForgeNote: 'estimate: forge off, everything on the main model', forgeCosts: (usd, pct) => `forge costs ${usd} more (+${pct} %)`,
   forgeSaves: usd => `forge saves ${usd}`, pricesAsOf: 'prices as of', drift: 'differs from /cost',
-  noReview: 'no independent review',
+  noReview: 'no independent review', gVerify: 'verification', shots: 'shots', blocked: 'blocked',
 };
 const FORGE: NonNullable<PanelModel['forge']> = {
   task: 'orders', path: 'large', phase: 'implement', agent: 'forge-impl-heavy', validators: [{ name: 'test', ok: true }],
@@ -235,5 +235,23 @@ describe('usage partial marks and edges', () => {
     expect(text).not.toContain('forge costs');
     const full = JSON.stringify(buildCards({ ...EMPTY, usage: { ...U, withoutForge: w } }, T, 0).find(c => c.title === T.sUsage)!.blocks);
     expect(full).toContain('forge costs $1.50 more (+30 %)');
+  });
+  it('adds a verify stage when verification is planned', () => {
+    expect(stagesFor('medium', 'review', null, true).map(s => s.name)).toEqual(['triage', 'implement', 'validate', 'verify', 'review', 'verdict']);
+    expect(stagesFor('medium', 'review').map(s => s.name)).not.toContain('verify');
+    expect(stagesFor('small', '', 'ok', true).map(s => s.name)).toEqual(['triage', 'implement', 'validate', 'verify']);
+  });
+  it('forge-verify has its own tier', () => {
+    expect(tierOf('forge:forge-verify')).toMatchObject({ label: 'verify', hue: 'sapphire' });
+    expect(tierOf('forge-verify-heavy')).toMatchObject({ label: 'verify', hue: 'sapphire' });
+  });
+  it('the forge card shows the verify result row', () => {
+    const v = (verify: NonNullable<PanelModel['forge']>['verify']) =>
+      JSON.stringify(buildCards({ ...EMPTY, forge: { ...FORGE, verify } }, T, 0).find(c => c.title === FORGE.task)!.blocks);
+    expect(v({ planned: true, surfaces: ['web'], result: 'pass', passed: 6, total: 6, evidence: '.forge/work/x/evidence/1-1', reason: null })).toContain('✓ verify web · 6/6 · 6 shots');
+    expect(v({ planned: true, surfaces: ['web'], result: 'fail', passed: 4, total: 6, evidence: null, reason: null })).toContain('✗ verify web · 4/6');
+    expect(v({ planned: true, surfaces: ['app'], result: 'blocked', passed: 0, total: 0, evidence: null, reason: 'no emulator' })).toContain('⊘ verify app · blocked: no emulator');
+    expect(v({ planned: true, surfaces: ['web'], result: null, passed: null, total: null, evidence: null, reason: null })).toContain('verify web');
+    expect(v(null)).not.toContain('verify');
   });
 });

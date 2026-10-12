@@ -315,10 +315,11 @@ function recordTracking(s, kind, chars) {
 }
 
 // src/lens/usage-summary.ts
-var ORDER = ["main", "impl", "review", "plan", "other"];
+var ORDER = ["main", "impl", "review", "verify", "plan", "other"];
 function groupOf(loopId, kind) {
   if (kind === "main" || loopId === "main" || loopId.endsWith("/main")) return "main";
   if (/forge-(impl|mech|fable)/.test(kind)) return "impl";
+  if (/forge-verify/.test(kind)) return "verify";
   if (/forge-review/.test(kind)) return "review";
   if (/forge-(planner|scout)|design-critic/.test(kind)) return "plan";
   return "other";
@@ -11608,6 +11609,8 @@ var TIERS = {
   "forge-review-correctness": { label: "correctness", hue: "green", rank: null },
   "forge-review-security": { label: "security", hue: "red", rank: null },
   "forge-review-perf": { label: "perf", hue: "yellow", rank: null },
+  "forge-verify": { label: "verify", hue: "sapphire", rank: null },
+  "forge-verify-heavy": { label: "verify", hue: "sapphire", rank: null },
   "forge-planner": { label: "planner", hue: "lavender", rank: null },
   "forge-scout": { label: "scout", hue: "flamingo", rank: null },
   "design-critic": { label: "critic", hue: "flamingo", rank: null }
@@ -11617,7 +11620,7 @@ function tierOf(agent) {
   return TIERS[name] ?? { label: name || "?", hue: "lavender", rank: null };
 }
 var PATH_HUE = { trivial: "green", small: "teal", medium: "peach", large: "red" };
-var STAGES = ["triage", "design", "plan", "implement", "validate", "review", "verdict", "final"];
+var STAGES = ["triage", "design", "plan", "implement", "validate", "verify", "review", "verdict", "final"];
 var STAGE_OF = {
   triage: "triage",
   design: "design",
@@ -11630,6 +11633,7 @@ var STAGE_OF = {
   redo: "implement",
   validate: "validate",
   validation: "validate",
+  verify: "verify",
   review: "review",
   verdict: "verdict",
   round: "verdict",
@@ -11637,10 +11641,10 @@ var STAGE_OF = {
   "final-review": "final",
   done: "final"
 };
-function stagesFor(path, phase, validated = null) {
+function stagesFor(path, phase, validated = null, verifyPlanned = false) {
   const large = path === "large";
   const light = path === "trivial" || path === "small";
-  const names = STAGES.filter((s) => (large || s !== "design" && s !== "plan" && s !== "final") && !(light && (s === "review" || s === "verdict")));
+  const names = STAGES.filter((s) => (large || s !== "design" && s !== "plan" && s !== "final") && !(light && (s === "review" || s === "verdict")) && (s !== "verify" || verifyPlanned));
   if (phase.toLowerCase() === "done") return names.map((name) => ({ name, state: "done" }));
   const at = STAGE_OF[phase.toLowerCase()] ?? null;
   let i = at ? names.indexOf(at) : -1;
@@ -11777,7 +11781,14 @@ function buildCards(m, t, nowMs2) {
     const blocks = [];
     const f = m.forge;
     if (f) {
-      blocks.push({ kind: "stages", stages: stagesFor(f.path, forgePhase(f), f.validators.length ? f.validators.every((v) => v.ok) ? "ok" : "failed" : null), hue: SECTION_HUE.forge });
+      blocks.push({ kind: "stages", stages: stagesFor(f.path, forgePhase(f), f.validators.length ? f.validators.every((v) => v.ok) ? "ok" : "failed" : null, f.verify?.planned === true), hue: SECTION_HUE.forge });
+      if (f.verify?.planned) {
+        const v = f.verify;
+        const where = `verify ${v.surfaces.join(", ")}`;
+        const text = v.result === "pass" ? `\u2713 ${where} \xB7 ${v.passed}/${v.total} \xB7 ${v.passed} ${t.shots}` : v.result === "fail" ? `\u2717 ${where} \xB7 ${v.passed}/${v.total}` : v.result === "blocked" ? `\u2298 ${where} \xB7 ${t.blocked}: ${v.reason ?? ""}` : where;
+        blocks.push({ kind: "text", text, dim: v.result === null });
+        if (v.evidence) blocks.push({ kind: "text", text: v.evidence, dim: true });
+      }
       const c2 = briefCells(f);
       if (c2) {
         blocks.push({ kind: "bar", ratio: ratio(c2.done, c2.total), hue: SECTION_HUE.forge, moving: c2.done < c2.total, label: t.briefs, right: `${c2.done}/${c2.total}` });
@@ -11843,7 +11854,7 @@ function buildCards(m, t, nowMs2) {
       return `${g.model === "varios" ? t.various : shortModelName(g.model)}${effort}`;
     };
     const forgeGroups = u.groups.some((g) => g.id === "impl" || g.id === "review" || g.id === "plan");
-    const label = { main: t.gMain, impl: t.gImpl, review: t.gReview, plan: t.gPlan, other: forgeGroups ? t.gOther : t.sSubagents };
+    const label = { main: t.gMain, impl: t.gImpl, review: t.gReview, verify: t.gVerify, plan: t.gPlan, other: forgeGroups ? t.gOther : t.sSubagents };
     const blocks = [{
       kind: "bar",
       ratio: 1,
@@ -12820,6 +12831,9 @@ var TEXT = {
     gMain: "Sesi\xF3n principal",
     gImpl: "Implementadores",
     gReview: "Revisores",
+    gVerify: "Verificaci\xF3n",
+    shots: "capturas",
+    blocked: "bloqueada",
     gPlan: "Planificaci\xF3n y scout",
     gOther: "Otros subagentes",
     tracking: "Seguimiento",
@@ -12874,6 +12888,9 @@ var TEXT = {
     gMain: "Main session",
     gImpl: "Implementers",
     gReview: "Reviewers",
+    gVerify: "Verification",
+    shots: "shots",
+    blocked: "blocked",
     gPlan: "Planning and scout",
     gOther: "Other subagents",
     tracking: "Tracking",

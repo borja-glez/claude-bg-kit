@@ -91,4 +91,17 @@ describe('usage summary', () => {
     labelLoop(s, 'i', 'forge:forge-impl');
     expect(Object.is(summarizeUsage(s).withoutForge!.deltaPct, 0)).toBe(true);
   });
+  it('forge-verify loops form the verify group, left out of the without-forge estimate', () => {
+    expect(groupOf('a', 'forge:forge-verify')).toBe('verify');
+    expect(groupOf('a', 'forge:forge-verify-heavy')).toBe('verify');
+    const s = newUsage(0);
+    recordStep(s, { model: 'claude-opus-5-5', usage: U(M, 0) });
+    recordStep(s, { agentId: 'i', model: 'claude-sonnet-5-5', usage: U(M, 0) });
+    recordStep(s, { agentId: 'v', model: 'claude-sonnet-5-5', usage: U(M, 0) });
+    labelLoop(s, 'i', 'forge:forge-impl');
+    labelLoop(s, 'v', 'forge:forge-verify');
+    const r = summarizeUsage(s);
+    expect(r.groups.map(g => g.id)).toEqual(['main', 'impl', 'verify']);
+    expect(r.withoutForge!.costUsd).toBeCloseTo(8); // main $4 + impl repriced at Opus $4; verify not counted
+  });
 });

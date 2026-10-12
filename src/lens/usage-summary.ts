@@ -3,18 +3,19 @@
 import { priceFor, tokensCost } from '../lib/prices.js';
 import type { UsageLoop, UsageState } from './usage.js';
 
-export type GroupId = 'main' | 'impl' | 'review' | 'plan' | 'other';
+export type GroupId = 'main' | 'impl' | 'review' | 'verify' | 'plan' | 'other';
 export interface UsageSummary {
   tokens: number; costUsd: number; partial: boolean;
   groups: { id: GroupId; model: string | null; effort: string | null; tokens: number; costUsd: number | null; share: number }[];
   tracking: { tokens: number; costUsd: number | null } | null;
   withoutForge: { costUsd: number; deltaUsd: number; deltaPct: number } | null;
 }
-const ORDER: GroupId[] = ['main', 'impl', 'review', 'plan', 'other'];
+const ORDER: GroupId[] = ['main', 'impl', 'review', 'verify', 'plan', 'other'];
 
 export function groupOf(loopId: string, kind: string): GroupId {
   if (kind === 'main' || loopId === 'main' || loopId.endsWith('/main')) return 'main';
   if (/forge-(impl|mech|fable)/.test(kind)) return 'impl';
+  if (/forge-verify/.test(kind)) return 'verify';
   if (/forge-review/.test(kind)) return 'review';
   if (/forge-(planner|scout)|design-critic/.test(kind)) return 'plan';
   return 'other';
