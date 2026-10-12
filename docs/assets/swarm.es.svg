@@ -32,7 +32,7 @@ text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,san
 <rect x="32" y="92" width="836" height="50" rx="10" fill="#181825" stroke="#94e2d5" stroke-width="1"/>
 <text x="48" y="115" font-size="13" style="fill:#94e2d5" font-weight="700">coordinadora</text>
 <text x="48" y="132" font-size="11" class="dim">forge swarm tick: lanza tareas listas, revisa, integra, duerme y repite</text>
-<text x="852" y="122" font-size="13" class="m" style="fill:#94e2d5" text-anchor="end">▶ ejecución · subagentes 2/3</text>
+<text x="852" y="122" font-size="13" class="m" style="fill:#94e2d5" text-anchor="end">▶ ejecución · subagentes 3/3</text>
 <path d="M120 142V184H150" stroke="#585b70" stroke-width="1" fill="none" class="flow"/>
 <rect x="150" y="164" width="470" height="40" rx="10" fill="#181825" stroke="#313244" stroke-width="1"/>
 <text x="166" y="182" font-size="12.5" style="fill:#89b4fa" font-weight="700">T004 · subagente</text>

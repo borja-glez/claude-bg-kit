@@ -551,7 +551,7 @@ const EN = {
 
   swarmTitle: 'forge execution · several tasks at once', swarmSub: 'the coordinator only coordinates: it launches a subagent per ready task and integrates their work into the run branch',
   swarmDesc: 'Diagram of a forge execution in subagents mode: a coordinator session on the run branch forge/run-project, in .claude/worktrees/run, launches an implementer subagent per ready task, each in its own worktree .claude/worktrees/task-T; each task goes through review and is integrated into the run branch one at a time, and the run branch is merged into your branch at the end with your permission.',
-  coordinatorFull: 'coordinator', coordSub: 'forge swarm tick: launch ready tasks, review, integrate, sleep, repeat', integrated: 'integrated', waiting: 'T009 · waits for T004 · launched once it is integrated', subagent: 'subagent', runPill: '▶ execution · subagents 2/3',
+  coordinatorFull: 'coordinator', coordSub: 'forge swarm tick: launch ready tasks, review, integrate, sleep, repeat', integrated: 'integrated', waiting: 'T009 · waits for T004 · launched once it is integrated', subagent: 'subagent', runPill: '▶ execution · subagents 3/3',
   swarmFoot0: 'At the end the run branch is merged into your branch, with your permission (or the one you gave at the start).',
   swarmFoot1: 'Up to swarm.parallel tasks at once (default 3) · one merge at a time, validators after each one compared with what already failed.',
   swarmFoot2: 'Subagents mode; sessions mode arrives in the next version · shown in the roadmap, the band and lens.',
@@ -610,7 +610,7 @@ const ES = {
 
   swarmTitle: 'ejecución de forge · varias tareas a la vez', swarmSub: 'la coordinadora solo coordina: lanza un subagente por tarea lista e integra su trabajo en la rama de ejecución',
   swarmDesc: 'Diagrama de una ejecución de forge en modo subagentes: una sesión coordinadora en la rama de ejecución forge/run-proyecto, en .claude/worktrees/run, lanza un subagente implementador por tarea lista, cada uno en su worktree .claude/worktrees/task-T; cada tarea pasa por revisión y se integra en la rama de ejecución de una en una, y al final esa rama se fusiona en la tuya con tu permiso.',
-  coordSub: 'forge swarm tick: lanza tareas listas, revisa, integra, duerme y repite', integrated: 'integrado', waiting: 'T009 · espera a T004 · se lanza al integrarse', subagent: 'subagente', runPill: '▶ ejecución · subagentes 2/3',
+  coordSub: 'forge swarm tick: lanza tareas listas, revisa, integra, duerme y repite', integrated: 'integrado', waiting: 'T009 · espera a T004 · se lanza al integrarse', subagent: 'subagente', runPill: '▶ ejecución · subagentes 3/3',
   swarmFoot0: 'Al final la rama de ejecución se fusiona en la tuya, con tu permiso (o el que diste al empezar).',
   swarmFoot1: 'Hasta swarm.parallel tareas a la vez (3 por defecto) · un merge cada vez, validadores tras cada uno comparados con lo que ya fallaba.',
   swarmFoot2: 'Modo subagentes; el modo sesiones llega en la versión siguiente · se ve en el roadmap, la banda y lens.',
