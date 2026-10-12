@@ -7,6 +7,11 @@ type Sessions = Record<string, SessionDoc | undefined>;
 export const IDLE_MINUTES = 15;
 /** A `busyUntil` lease counts only up to this many minutes after its heartbeat; a longer one is ignored. */
 export const LEASE_CAP_MINUTES = 90;
+/** A lease is renewed for this long at each step or heartbeat. */
+export const LEASE_MINUTES = 10;
+/** After a lease ends it reads as silent for this long, then as stopped. */
+export const SILENT_MINUTES = 5;
+export type Liveness = 'alive' | 'silent' | 'stopped';
 const ACTIVE = ['claimed', 'in_progress'];
 
 export function zonesOf(task: PlanTask, state?: TaskState): string[] {
@@ -54,6 +59,26 @@ export function pickTask(plan: PlanView, states: States, opts: { sessionId: stri
 }
 
 export function isIdle(s: SessionDoc | undefined, now: number, minutes = IDLE_MINUTES): boolean {
+  if (s && s.status !== 'idle' && typeof s.leaseUntil === 'string') return liveness(now, s.leaseUntil) === 'stopped';
+  return legacyIdle(s, now, minutes);
+}
+
+/** Derived by whoever reads it: nothing ever writes «stopped», a lease that is not renewed becomes it. */
+export function liveness(now: number, leaseUntil: string | null | undefined): Liveness {
+  const until = typeof leaseUntil === 'string' ? Date.parse(leaseUntil) : NaN;
+  if (!Number.isFinite(until)) return 'stopped';
+  if (now < until) return 'alive';
+  return now - until < SILENT_MINUTES * 60000 ? 'silent' : 'stopped';
+}
+
+/** A session with a lease is read by it; one without (older waypoint) by the heartbeat window, as before. */
+export function sessionLiveness(s: SessionDoc | undefined, now: number): Liveness {
+  if (!s || s.status === 'idle') return 'stopped';
+  if (typeof s.leaseUntil === 'string') return liveness(now, s.leaseUntil);
+  return legacyIdle(s, now) ? 'stopped' : 'alive';
+}
+
+function legacyIdle(s: SessionDoc | undefined, now: number, minutes = IDLE_MINUTES): boolean {
   if (!s || s.status === 'idle') return true;
   const hb = Date.parse(s.heartbeatAt);
   if (!Number.isFinite(hb)) return true;

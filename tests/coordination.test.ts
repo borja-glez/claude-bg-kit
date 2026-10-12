@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parsePlan } from '../src/lib/plan.js';
-import { conflictsFor, escalationCandidates, inboxFor, isIdle, pickTask, recoverableTasks, threadKey } from '../src/lib/coordination.js';
+import { conflictsFor, escalationCandidates, inboxFor, isIdle, liveness, pickTask, recoverableTasks, sessionLiveness, threadKey, LEASE_MINUTES, SILENT_MINUTES } from '../src/lib/coordination.js';
 import type { MessageDoc, SessionDoc, States } from '../src/lib/types.js';
 
 const base = parsePlan(readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8'));
@@ -183,5 +183,35 @@ describe('pickTask with integrated commits (swarm members)', () => {
   });
   it('without integrated nothing changes', () => {
     expect(pickTask(base, states, { sessionId: 'ui', track: 'ui' }).task?.id).toBe('T005');
+  });
+});
+
+describe('liveness', () => {
+  const t0 = Date.parse('2026-10-12T12:00:00.000Z');
+  const at = (min: number) => new Date(t0 + min * 60000).toISOString();
+  it('is alive before the lease ends, silent for 5 minutes after, then stopped', () => {
+    expect(LEASE_MINUTES).toBe(10);
+    expect(SILENT_MINUTES).toBe(5);
+    expect(liveness(t0, at(1))).toBe('alive');
+    expect(liveness(t0, at(0))).toBe('silent');
+    expect(liveness(t0, at(-4.9))).toBe('silent');
+    expect(liveness(t0, at(-5))).toBe('stopped');
+    expect(liveness(t0, null)).toBe('stopped');
+    expect(liveness(t0, 'nonsense')).toBe('stopped');
+  });
+  it('reads a session by its lease, and falls back to the heartbeat window without one', () => {
+    const base = { name: 'x', status: 'active' as const };
+    expect(sessionLiveness({ ...base, heartbeatAt: at(-60), leaseUntil: at(3) }, t0)).toBe('alive');
+    expect(sessionLiveness({ ...base, heartbeatAt: at(-1), leaseUntil: at(-7) }, t0)).toBe('stopped');
+    // Without leaseUntil: the old rule (15 min of heartbeat, busyUntil within its cap).
+    expect(sessionLiveness({ ...base, heartbeatAt: at(-14) }, t0)).toBe('alive');
+    expect(sessionLiveness({ ...base, heartbeatAt: at(-16) }, t0)).toBe('stopped');
+    expect(sessionLiveness({ ...base, heartbeatAt: at(-1), status: 'idle' }, t0)).toBe('stopped');
+    expect(sessionLiveness(undefined, t0)).toBe('stopped');
+  });
+  it('isIdle is true only when a leased session is stopped, so a silent owner keeps its task', () => {
+    const base = { name: 'x', status: 'active' as const, heartbeatAt: at(-30) };
+    expect(isIdle({ ...base, leaseUntil: at(-2) }, t0)).toBe(false);
+    expect(isIdle({ ...base, leaseUntil: at(-6) }, t0)).toBe(true);
   });
 });

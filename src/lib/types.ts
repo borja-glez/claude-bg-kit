@@ -33,6 +33,12 @@ export interface Plan {
 export type PlanView = Pick<Plan, 'tracks' | 'phases' | 'tasks' | 'versions'>;
 
 export interface Commit { sha: string; ts: string; title: string; add: number; del: number }
+export type Stage = 'brief' | 'implement' | 'validate' | 'verify' | 'review' | 'verdict' | 'integrate';
+/** Who runs a task of a forge execution and how; written by its executor, read by the roadmap, lens and the scheduler. */
+export interface TaskExec {
+  runId: string; mode: 'subagents' | 'sessions' | 'manual'; by: string; agent?: string | null;
+  stage: Stage; round?: number; since: string; leaseUntil: string;
+}
 export interface TaskState {
   status: TaskStatus;
   owner?: string;
@@ -44,6 +50,7 @@ export interface TaskState {
   summary?: string;
   zonesTouched?: string[];
   forge?: { path: string; phase: string; agent?: string; validators?: { name: string; ok: boolean }[]; verdict?: { action: string; score: number | null }; round?: number; cap?: number };
+  exec?: TaskExec;
   evidence?: {
     surfaces: string[]; result: 'pass' | 'fail' | 'blocked'; passed: number; total: number; local?: string; pending?: boolean; reason?: string;
     shots: { url?: string; id?: string; surface: string; check: string; ok: boolean; expected?: string; observed?: string }[];
@@ -63,6 +70,11 @@ export interface SessionDoc {
   worktree?: string;
   /** The coordinator SID when a forge swarm launched this session. */
   launchedBy?: string;
+  /** What this session is in a forge execution (plan 1+): its coordinator, a session that runs one task, or one the user opened. */
+  role?: 'coordinator' | 'executor' | 'manual';
+  runId?: string;
+  /** ISO time until which the session counts as alive; see liveness(). Renewed at each step or heartbeat. */
+  leaseUntil?: string;
   status: 'active' | 'idle';
 }
 export type MessageType = 'overlap_warning' | 'handoff_request' | 'delegate' | 'reply' | 'escalation';
