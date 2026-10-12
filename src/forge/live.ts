@@ -4,6 +4,7 @@ import { normalizeLive, type LiveDoc } from '../lib/execution-state.js';
 import { readExecution, saveExecution } from './execution.js';
 import { forgeDir } from './ledger.js';
 import { mainCheckout } from './local.js';
+import { readMember } from './members.js';
 import type { Io } from './cli/run.js';
 
 export const liveFile = (main: string, sessionId: string) => path.join(main, '.forge', 'live', `${sessionId}.json`);
@@ -25,7 +26,7 @@ export function nextLive(prev: LiveDoc | null, ev: { event: LiveEvent; agentId?:
 }
 
 /**
- * Records this session's local signal when it coordinates an active execution; prints nothing and never fails.
+ * Records this session's local signal when it coordinates an active execution or is a registered member of it; prints nothing and never fails.
  * A SubagentStart while the execution is unbound binds it to this session first; a bound one is never rebound.
  */
 export function hookLive(io: Io, forced?: LiveEvent): string {
@@ -43,12 +44,14 @@ export function hookLive(io: Io, forced?: LiveEvent): string {
       exec = { ...exec, hookSession: sessionId };
       saveExecution(main, exec);
     }
-    if (exec.hookSession !== sessionId) return '';
+    const member = exec.hookSession === sessionId ? null : readMember(main, sessionId);
+    if (exec.hookSession !== sessionId && (!member || member.runId !== exec.runId)) return '';
+    const role: LiveDoc['role'] = member ? member.role : 'coordinator';
     const file = liveFile(main, sessionId);
     let prev: LiveDoc | null = null;
     try { prev = normalizeLive(JSON.parse(readFileSync(file, 'utf8'))); } catch { prev = null; }
     const doc = nextLive(prev, { event, agentId: typeof input.agent_id === 'string' ? input.agent_id : undefined, agentType: typeof input.agent_type === 'string' ? input.agent_type : undefined },
-      { sessionId, role: 'coordinator', runId: exec.runId, task: null, now: io.now().toISOString() });
+      { sessionId, role, runId: exec.runId, task: member?.task ?? null, now: io.now().toISOString() });
     forgeDir(main);
     mkdirSync(path.dirname(file), { recursive: true });
     const tmp = `${file}.${process.pid}.tmp`;

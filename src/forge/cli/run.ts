@@ -23,7 +23,7 @@ import { swarmCommand } from './swarm.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, type RepoReader, type Scope } from '../validators.js';
 import { checkTools, missingTools } from '../tools.js';
 import { verifyPlan, cleanupPids, killTarget } from '../verify.js';
-import { readLocal, updateLocal } from '../local.js';
+import { readLocal, updateLocal, mainCheckout } from '../local.js';
 import { hookLive } from '../live.js';
 import { readSurfaces, detectDrafts, appendLearned, surfaceFile, surfaceHash } from '../surfaces.js';
 
@@ -178,9 +178,10 @@ function hookStop(io: Io): string {
     if (!input || typeof input !== 'object' || Array.isArray(input)) return '';
     const hookInput = input as { stop_hook_active?: boolean; session_id?: unknown };
     // An unbound active execution binds to the first session that stops, saved before the signal is written.
-    const read = readExecution(io.cwd);
+    const main = mainCheckout(io.cwd);
+    const read = readExecution(main);
     const exec = bindHookSession(read, hookInput.session_id);
-    if (exec && exec !== read) saveExecution(io.cwd, exec);
+    if (exec && exec !== read) saveExecution(main, exec);
     hookLive(io, 'Stop');
     const sleeping = !!exec?.active && !!exec.sleepUntil && Date.parse(exec.sleepUntil) > io.now().getTime();
     const run = parseRun(readRunText(io.cwd));
@@ -191,10 +192,10 @@ function hookStop(io: Io): string {
       if (d.ended) appendEvent(io.cwd, { ts: io.now().toISOString(), kind: 'cycle', action: 'stopped', reason: d.ended });
       return JSON.stringify({ decision: 'block', reason: d.reason + replyIn(planLocale(io.cwd, exec?.project)) }) + '\n';
     }
-    const d = decideExecutionStop(hookInput, exec, { now: io.now(), stopFile: existsSync(stopFile(io.cwd)) });
+    const d = decideExecutionStop(hookInput, exec, { now: io.now(), stopFile: existsSync(stopFile(main)) });
     if (!d.block) return '';
-    saveExecution(io.cwd, d.exec);
-    return JSON.stringify({ decision: 'block', reason: d.reason + replyIn(planLocale(io.cwd, d.exec.project)) }) + '\n';
+    saveExecution(main, d.exec);
+    return JSON.stringify({ decision: 'block', reason: d.reason + replyIn(planLocale(main, d.exec.project)) }) + '\n';
   } catch { return ''; }
 }
 

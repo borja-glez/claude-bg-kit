@@ -6,6 +6,7 @@ import path from 'node:path';
 import { run, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { nextLive, liveFile } from '../src/forge/live.js';
 import { saveExecution, readExecution } from '../src/forge/execution.js';
+import { writeMember } from '../src/forge/members.js';
 
 const T = '2026-10-12T12:00:00.000Z';
 describe('nextLive', () => {
@@ -86,6 +87,34 @@ describe('forge hook live', () => {
     expect(existsSync(liveFile(root, 's1'))).toBe(true);
     expect(existsSync(path.join(wt, '.forge', 'live', 's1.json'))).toBe(false);
     expect(existsSync(path.join(root, '.forge', '.gitignore'))).toBe(true);
+  });
+  it('records executor and manual members of the run with their role and task', () => {
+    exec();
+    writeMember(root, { sessionId: 's2', role: 'executor', runId: 'r1', task: 'T002', name: 'wp-shop-T002', since: T });
+    writeMember(root, { sessionId: 's3', role: 'manual', runId: 'r1', task: null, name: null, since: T });
+    writeMember(root, { sessionId: 's4', role: 'manual', runId: 'old-run', task: null, name: null, since: T });
+    hook({ session_id: 's2', hook_event_name: 'SessionStart' });
+    hook({ session_id: 's3', hook_event_name: 'SubagentStart', agent_id: 'a9', agent_type: 'forge:forge-mech' });
+    hook({ session_id: 's4', hook_event_name: 'SessionStart' });
+    expect(JSON.parse(readFileSync(liveFile(root, 's2'), 'utf8'))).toMatchObject({ role: 'executor', runId: 'r1', task: 'T002' });
+    expect(JSON.parse(readFileSync(liveFile(root, 's3'), 'utf8'))).toMatchObject({ role: 'manual', task: null, agents: [{ id: 'a9' }] });
+    expect(existsSync(liveFile(root, 's4'))).toBe(false);
+    expect(readExecution(root)?.hookSession).toBe('s1');
+  });
+  it('a member Stop hook writes its signal and never blocks', () => {
+    exec({ tasks: runningTask });
+    writeMember(root, { sessionId: 's2', role: 'executor', runId: 'r1', task: 'T1', name: null, since: T });
+    expect(run(['hook', 'stop'], { ...io, stdin: JSON.stringify({ session_id: 's2' }) }).stdout).toBe('');
+    expect(JSON.parse(readFileSync(liveFile(root, 's2'), 'utf8'))).toMatchObject({ role: 'executor', event: 'Stop' });
+  });
+  it('the Stop hook from a linked worktree reads and saves the execution in the main checkout', () => {
+    exec({ hookSession: null, tasks: runningTask });
+    const wt = path.join(root, '.claude', 'worktrees', 'run');
+    git('worktree', 'add', '-q', wt, '-b', 'forge/run-shop');
+    run(['hook', 'stop'], { ...io, cwd: wt, git: defaultGit(wt), stdin: JSON.stringify({ session_id: 's1' }) });
+    expect(readExecution(root)?.hookSession).toBe('s1');
+    expect(existsSync(path.join(wt, '.forge', 'execution.json'))).toBe(false);
+    expect(existsSync(liveFile(root, 's1'))).toBe(true);
   });
   it('fails open on junk input', () => {
     exec();
