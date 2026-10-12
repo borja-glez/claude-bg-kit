@@ -116,6 +116,7 @@ export type PanelModel = {
     current: { id: string; title: string; startedAt?: string; estimateMin?: number } | null;
     inbox: number; escalation: boolean; roadmapUrl: string | null; locale: string;
     phase: { index: number; total: number; name: string } | null; cells: string;
+    recentDone?: { id: string; minutes: number; estimateMin?: number }[];
   } | null;
   superpowers: {
     plan: string; tasks: number; done: number; current: { task: string; round: number } | null; lastLines: string[];
@@ -142,9 +143,11 @@ export type PanelModel = {
     stopReason: string | null; stallReason: string | null;
     coordinator: { liveness: 'alive' | 'silent' | 'stopped'; lastSeen: string | null };
     integrated: number; total: number;
+    elapsedSeconds?: number | null;
+    finished?: { task: string; seconds: number }[];
     slots: {
       task: string; title: string | null; stage: string; agent: string | null; model: string | null; effort: string | null;
-      round: number; seconds: number; liveness: 'alive' | 'silent' | 'stopped'; mode: 'subagents' | 'sessions' | 'manual';
+      round: number; seconds: number; taskSeconds?: number | null; liveness: 'alive' | 'silent' | 'stopped'; mode: 'subagents' | 'sessions' | 'manual';
     }[];
     manual: { task: string; title: string | null; stage: string; seconds: number; liveness: 'alive' | 'silent' | 'stopped'; by: string }[];
     queued: string[]; conflicts: string[]; blocked: string[]; orphans: string[];
@@ -318,16 +321,19 @@ export function executionFromFiles(execText: string | undefined, taskTexts: Reco
   }
   let v;
   const clean = titles && Object.fromEntries(Object.entries(titles).map(([id, t]) => [id, cleanText(t)]));
-  try { v = executionView({ exec: parseExecution(execText), tasks, live, titles: clean, now }); } catch { return null; }
+  try { v = executionView({ exec: parseExecution(execText, now), tasks, live, titles: clean, now }); } catch { return null; }
   if (!v) return null;
   return {
     runId: v.runId, mode: v.mode, parallel: v.parallel, branch: v.branch, active: v.active, stopReason: v.stopReason,
     stallReason: v.stallReason ? clip(v.stallReason) : null,
     coordinator: { ...v.coordinator }, integrated: v.integrated, total: v.total,
+    elapsedSeconds: elapsed(v.startedAt, now, now),
+    finished: v.finished.map(f => ({ task: f.task, seconds: elapsed(f.startedAt, Date.parse(f.finishedAt), now) }))
+      .filter((f): f is { task: string; seconds: number } => f.seconds !== null),
     // model / effort: lens knows them only for its own session's subagents (from the usage loops), not for these.
     slots: v.slots.map(s => ({
       task: s.task, title: s.title ? clip(s.title) : null, stage: s.stage, agent: s.agent, model: null, effort: null, round: s.round,
-      seconds: secondsSince(s.since, now), liveness: s.liveness, mode: s.mode,
+      seconds: secondsSince(s.since, now), taskSeconds: elapsed(s.startedAt, now, now), liveness: s.liveness, mode: s.mode,
     })),
     manual: v.manual.map(s => ({
       task: s.task, title: s.title ? clip(s.title) : null, stage: s.stage, seconds: secondsSince(s.since, now), liveness: s.liveness, by: s.by ?? '',
@@ -373,6 +379,11 @@ export function bandKey(model: PanelModel): string {
   const key: Record<string, unknown> = { ...rest };
   if (usage) { const { time: _time, ...u } = usage; key.usage = u; } else key.usage = usage;
   if (forge) { const { timing: _timing, ...f } = forge; key.forge = f; } else key.forge = forge;
+  // The run time, the task times and the finished line are seconds the band never shows.
+  if (rest.execution) {
+    const { elapsedSeconds: _e, finished: _f, slots, ...x } = rest.execution;
+    key.execution = { ...x, slots: slots.map(({ taskSeconds: _t, ...s }) => s) };
+  }
   return JSON.stringify(key);
 }
 
@@ -417,6 +428,7 @@ export function buildPanelModel(input: {
       current: wp.current, inbox: wp.inbox, escalation: wp.escalation, roadmapUrl: wp.roadmapUrl, locale: wp.locale,
       phase: wp.phase ? { ...wp.phase, name: clip(wp.phase.name) } : null,
       cells: typeof wp.cells === 'string' ? wp.cells.replace(/[^dabp]/g, '').slice(0, 120) : '',
+      recentDone: (wp.recentDone ?? []).slice(0, 3),
     },
     superpowers: superpowers(input),
     todos: todos.total ? todos : null,

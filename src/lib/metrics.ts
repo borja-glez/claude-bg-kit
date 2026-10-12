@@ -39,9 +39,11 @@ export function computeMetrics(plan: PlanView, states: States, now: number, acti
   for (const t of plan.tasks) {
     const s = states[t.id];
     const start = s?.startedAt ?? s?.claimedAt;
-    if (start) starts.push(Date.parse(start));
+    // A junk date must not throw (toISOString on NaN) and hide the whole band: it is left out.
+    if (start && Number.isFinite(Date.parse(start))) starts.push(Date.parse(start));
     if (s?.status === 'done' && s.startedAt && s.doneAt) {
-      durations.push(Math.max(0, (Date.parse(s.doneAt) - Date.parse(s.startedAt)) / 60000));
+      const d = Math.max(0, (Date.parse(s.doneAt) - Date.parse(s.startedAt)) / 60000);
+      if (Number.isFinite(d)) durations.push(d);
     }
   }
   const paceMin = durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : null;

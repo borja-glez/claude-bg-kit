@@ -386,6 +386,33 @@ describe('buildPanelModel · execution', () => {
     expect(m.execution!.manual).toEqual([{ task: 'T9', title: null, stage: 'implement', seconds: 600, liveness: 'alive', by: 'M1' }]);
     expect(m.execution!.slots.map(s => s.task)).toEqual(['T4']);
   });
+  it('adds the run time, each slot task time and the finished tasks with their seconds', () => {
+    const doc = JSON.parse(execDoc);
+    doc.tasks.T2.finishedAt = '2026-10-12T11:32:00.000Z';
+    doc.tasks.T3 = { ...doc.tasks.T2, branch: 'task/T3', startedAt: '2026-10-12T11:50:00.000Z', finishedAt: '2026-10-12T12:30:00.000Z' };
+    const m = buildPanelModel({ band: band(), activity: act(), now, forgeExecution: JSON.stringify(doc), forgeExecTasks: {}, forgeLive: {} });
+    expect(m.execution!.elapsedSeconds).toBe(3600);
+    expect(m.execution!.slots[0].taskSeconds).toBe(1200);
+    // T3 finished 30 min in the future: dropped on read.
+    expect(m.execution!.finished).toEqual([{ task: 'T2', seconds: 1320 }]);
+  });
+  it('drops a finished task whose finishedAt is before its start, and never lists a running one', () => {
+    const doc = JSON.parse(execDoc);
+    doc.tasks.T2.finishedAt = '2026-10-12T11:05:00.000Z';
+    doc.tasks.T4.finishedAt = '2026-10-12T11:50:00.000Z';
+    const m = buildPanelModel({ band: band(), activity: act(), now, forgeExecution: JSON.stringify(doc), forgeExecTasks: {}, forgeLive: {} });
+    expect(m.execution!.finished).toEqual([]);
+  });
+  it('the band key ignores the execution timing seconds', () => {
+    const doc = JSON.parse(execDoc);
+    doc.tasks.T2.finishedAt = '2026-10-12T11:32:00.000Z';
+    const base = buildPanelModel({ band: band(), activity: act(), now, forgeExecution: JSON.stringify(doc), forgeExecTasks: {}, forgeLive: {} });
+    const x = base.execution!;
+    const mk = (secs: number): PanelModel => ({ ...base, execution: { ...x, elapsedSeconds: secs, finished: [{ task: 'T2', seconds: secs }], slots: x.slots.map(s => ({ ...s, taskSeconds: secs })) } });
+    expect(JSON.stringify(mk(10))).not.toBe(JSON.stringify(mk(99)));
+    expect(bandKey(mk(10))).toBe(bandKey(mk(99)));
+    expect(bandKey(mk(10))).not.toBe(bandKey({ ...mk(10), execution: { ...mk(10).execution!, integrated: 5 } }));
+  });
   it('is null without a file, with junk, or for a finished execution', () => {
     expect(buildPanelModel({ band: band(), activity: act(), now }).execution).toBeNull();
     expect(buildPanelModel({ band: band(), activity: act(), now, forgeExecution: '{oops' }).execution).toBeNull();
@@ -467,6 +494,16 @@ describe('buildPanelModel usage', () => {
     recordStep(run, { model: 'claude-opus-5-5', usage: U(3_000_000, 0) });
     const m = buildPanelModel({ ...base, usage: { session: session(), run, officialUsd: null } });
     expect(m.usage).toMatchObject({ scope: 'run', tokens: 3_000_000, session: { tokens: 2_000_000 } });
+  });
+});
+
+describe('buildPanelModel roadmap recent done', () => {
+  it('copies the roadmap recent done tasks, at most 3', () => {
+    const rd = [{ id: 'T1', minutes: 22, estimateMin: 30 }, { id: 'T2', minutes: 5 }, { id: 'T3', minutes: 9 }, { id: 'T4', minutes: 1 }];
+    const b = band();
+    if (b.mode !== 'work') throw new Error('fixture: band() is a work band');
+    expect(buildPanelModel({ band: { ...b, recentDone: rd }, activity: act(), now: 0 }).waypoint!.recentDone).toEqual(rd.slice(0, 3));
+    expect(buildPanelModel({ band: b, activity: act(), now: 0 }).waypoint!.recentDone).toEqual([]);
   });
 });
 

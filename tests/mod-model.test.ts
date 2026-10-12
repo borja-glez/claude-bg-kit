@@ -48,6 +48,24 @@ describe('buildBandModel · work', () => {
       phase: { index: 1, total: 2, name: 'Base' },
     });
   });
+  it('lists the 3 newest done tasks of the track with their minutes, from startedAt or claimedAt', () => {
+    const later = new Date(Date.now() + 3600_000).toISOString();
+    const m = buildBandModel('demo-shop', { ...files(), states: {
+      ...files().states,
+      T001: j({ status: 'done', startedAt: '2026-10-11T10:00:00Z', doneAt: '2026-10-11T10:22:30Z' }),
+      T004: j({ status: 'done', claimedAt: '2026-10-11T09:00:00Z', doneAt: '2026-10-11T09:31:00Z' }),
+      T006: j({ status: 'done', doneAt: '2026-10-11T11:00:00Z' }),
+      T003: j({ status: 'done', startedAt: '2026-10-11T08:00:00Z', doneAt: '2026-10-11T12:00:00Z' }),
+    } });
+    expect(m).toMatchObject({ mode: 'work', recentDone: [{ id: 'T001', minutes: 22, estimateMin: 20 }, { id: 'T004', minutes: 31 }] });
+    const odd = buildBandModel('demo-shop', { ...files(), states: {
+      ...files().states,
+      T001: j({ status: 'done', startedAt: '2026-10-11T10:00:00Z', doneAt: later }),
+      T004: j({ status: 'done', startedAt: '2026-10-11T10:00:00Z', doneAt: '2026-10-11T09:00:00Z' }),
+      T006: j({ status: 'done', startedAt: 'nope', doneAt: '2026-10-11T09:00:00Z' }),
+    } });
+    expect(odd).toMatchObject({ mode: 'work', recentDone: [] });
+  });
   const EXEC = (over: object = {}) => JSON.stringify({ runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'demo-shop', base: 'main', branch: 'forge/run-demo-shop', mergeOnFinish: false, coordinator: 'main', hookSession: 's1', active: true, stopReason: null, stallReason: null,
     startedAt: new Date(Date.now() - 3600000).toISOString(), lastStepAt: new Date(Date.now() - 60000).toISOString(), lastBlockStep: null, sleepUntil: null,
     tasks: {

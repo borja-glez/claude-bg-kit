@@ -6,6 +6,7 @@ export type LensPanel = {
     current: { id: string; title: string; startedAt?: string; estimateMin?: number } | null;
     inbox: number; escalation: boolean; roadmapUrl: string | null; locale: string;
     phase: { index: number; total: number; name: string } | null; cells: string;
+    recentDone?: { id: string; minutes: number; estimateMin?: number }[];
   } | null;
   superpowers: {
     plan: string; tasks: number; done: number; current: { task: string; round: number } | null; lastLines: string[];
@@ -32,9 +33,11 @@ export type LensPanel = {
     stopReason: string | null; stallReason: string | null;
     coordinator: { liveness: 'alive' | 'silent' | 'stopped'; lastSeen: string | null };
     integrated: number; total: number;
+    elapsedSeconds?: number | null;
+    finished?: { task: string; seconds: number }[];
     slots: {
       task: string; title: string | null; stage: string; agent: string | null; model: string | null; effort: string | null;
-      round: number; seconds: number; liveness: 'alive' | 'silent' | 'stopped'; mode: 'subagents' | 'sessions' | 'manual';
+      round: number; seconds: number; taskSeconds?: number | null; liveness: 'alive' | 'silent' | 'stopped'; mode: 'subagents' | 'sessions' | 'manual';
     }[];
     manual: { task: string; title: string | null; stage: string; seconds: number; liveness: 'alive' | 'silent' | 'stopped'; by: string }[];
     queued: string[]; conflicts: string[]; blocked: string[]; orphans: string[];

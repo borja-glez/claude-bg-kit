@@ -90,7 +90,7 @@ function block(ui: TermUI, key: string, b: Block, inner: number): RenderElement 
           {b.right ? <Text dimColor>{b.right}</Text> : null}
         </Box>
       );
-    case 'text': return <Text key={key} dimColor={b.dim} wrap="truncate-end">{b.text}</Text>;
+    case 'text': return <Text key={key} color={b.hue ? hex(b.hue) : undefined} dimColor={b.dim} wrap="truncate-end">{b.text}</Text>;
     case 'chips':
       return (
         <Box key={key} flexDirection="row" flexWrap="wrap" columnGap={1}>

@@ -23,7 +23,8 @@ export type BandModel =
       current: { id: string; title: string; startedAt?: string; estimateMin?: number } | null;
       trackDone: number; trackTotal: number; percent: number; inbox: number; escalation: boolean;
       phase: { index: number; total: number; name: string } | null; cells: string; swarm: boolean;
-      run: { coordinator: string; stage: string } | null }
+      run: { coordinator: string; stage: string } | null;
+      recentDone?: { id: string; minutes: number; estimateMin?: number }[] }
   | { mode: 'run'; project: string; locale: string; executor: 'subagents' | 'sessions'; running: number; parallel: number;
       integrated: number; total: number; slots: { task: string; stage: string; round: number }[];
       worst: 'alive' | 'silent' | 'stopped'; stalled: boolean; roadmapUrl: string | null }
@@ -73,6 +74,23 @@ function knownLocale(f: BandFiles): string | undefined {
 const MAX_CELLS = 120;
 const CELL: Record<string, string> = { done: 'd', in_progress: 'a', claimed: 'a', blocked: 'b', free: 'p', orphaned: 'b' };
 
+const RECENT_DONE = 3;
+const SKEW_MS = 2 * 60000;
+// The newest done tasks of the track (or plan), with their whole minutes from startedAt (else claimedAt) to doneAt.
+// A missing or junk date, a doneAt in the future or one before the start leaves the task out.
+function recentDone(tasks: { id: string; estimate_min?: number }[], states: States, now: number): { id: string; minutes: number; estimateMin?: number }[] {
+  const out: { id: string; minutes: number; estimateMin?: number; at: number }[] = [];
+  for (const t of tasks) {
+    const s = states[t.id];
+    if (s?.status !== 'done') continue;
+    const end = Date.parse(s.doneAt ?? '');
+    const start = Date.parse(s.startedAt ?? s.claimedAt ?? '');
+    if (!Number.isFinite(end) || !Number.isFinite(start) || end - now > SKEW_MS || end < start) continue;
+    out.push({ id: t.id, minutes: Math.floor((end - start) / 60000), ...(t.estimate_min ? { estimateMin: t.estimate_min } : {}), at: end });
+  }
+  return out.sort((a, b) => b.at - a.at).slice(0, RECENT_DONE).map(({ at: _at, ...r }) => r);
+}
+
 function workModel(project: string, f: BandFiles): BandModel {
   let plan;
   try { plan = parsePlan(f.plan!); } catch { return { mode: 'none' }; }
@@ -100,6 +118,7 @@ function workModel(project: string, f: BandFiles): BandModel {
     cells: plan.tasks.filter(t => !track || t.track === track).slice(0, MAX_CELLS).map(t => CELL[states[t.id]?.status ?? 'free'] ?? 'p').join(''),
     swarm: typeof session.launchedBy === 'string' && !!session.launchedBy,
     run: memberRun(project, sid, f),
+    recentDone: recentDone(plan.tasks.filter(t => !track || t.track === track), states, Date.now()),
   };
 }
 

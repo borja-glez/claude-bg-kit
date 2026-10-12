@@ -18,7 +18,7 @@ export interface CardTexts {
   sUsage: string; effort: string; effortLevel: (e: string) => string; thisSession: string; run: string; gMain: string; gImpl: string;
   gReview: string; gPlan: string; gOther: string; tracking: string; withoutForge: string; withoutForgeNote: string;
   forgeCosts: (usd: string, pct: number) => string; forgeSaves: (usd: string) => string; pricesAsOf: string; drift: string; various: string;
-  noReview: string; gVerify: string; blocked: string; active: string; sinceStart: string;
+  noReview: string; gVerify: string; blocked: string; active: string; sinceStart: string; taskTime: string;
 }
 
 const modelRight = (s: { model?: string; effort?: string }, t: CardTexts): string | undefined =>
@@ -54,6 +54,10 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
       blocks.push({ kind: 'row', dot: 'peach', spinning: true, tag: { text: w.current.id, hue: 'peach' }, text: w.current.title, right });
     } else {
       blocks.push({ kind: 'text', text: t.noTask, dim: true });
+    }
+    for (const r of w.recentDone ?? []) {
+      const over = r.estimateMin !== undefined && r.minutes > r.estimateMin;
+      blocks.push({ kind: 'text', text: `✓ ${r.id} · ${r.minutes}${r.estimateMin ? `/${r.estimateMin}` : ''} min`, dim: true, ...(over ? { hue: 'yellow' as Hue } : {}) });
     }
     const chips: { text: string; hue: Hue }[] = [];
     if (w.inbox > 0) chips.push({ text: `✉ ${w.inbox}`, hue: 'blue' });
@@ -130,7 +134,8 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     for (const s of x.slots) {
       blocks.push({
         kind: 'row', dot: HUE[s.liveness], spinning: s.liveness === 'alive', tag: { text: s.task, hue: HUE[s.liveness] }, text: s.title ?? '',
-        right: [stage(s.stage), s.agent ? tierOf(s.agent).label : null, duration(s.seconds), s.round ? `r${s.round}` : null].filter(Boolean).join(' · '),
+        right: [stage(s.stage), s.agent ? tierOf(s.agent).label : null, duration(s.seconds),
+          s.taskSeconds != null && span(s.taskSeconds) ? `${t.taskTime} ${span(s.taskSeconds)}` : null, s.round ? `r${s.round}` : null].filter(Boolean).join(' · '),
       });
     }
     for (const s of x.manual) {
@@ -139,10 +144,13 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
         text: `${t.manualRow} · ${s.task}${s.title ? ` ${s.title}` : ''}`, right: [stage(s.stage), duration(s.seconds)].filter(Boolean).join(' · '),
       });
     }
+    if (x.finished?.length) blocks.push({ kind: 'text', text: `✓ ${x.finished.map(f => `${f.task} ${span(f.seconds) ?? '0s'}`).join(' · ')}`, dim: true });
     const list = (label: string, ids: string[]) => { if (ids.length) blocks.push({ kind: 'text', text: `${label}: ${ids.join(', ')}`, dim: true }); };
     list(t.queued, x.queued); list(t.conflictsLbl, x.conflicts); list(t.blockedLbl, x.blocked); list(t.orphans, x.orphans);
     const coord = x.coordinator.liveness;
-    out.push({ icon: '▶', title: t.sExecution, hue: 'teal', chip: { text: coord === 'alive' ? t.alive : coord === 'silent' ? t.silent : t.stopped, hue: HUE[coord] }, blocks });
+    out.push({ icon: '▶', title: t.sExecution, hue: 'teal', chip: { text: coord === 'alive' ? t.alive : coord === 'silent' ? t.silent : t.stopped, hue: HUE[coord] },
+      subtitle: x.elapsedSeconds != null && span(x.elapsedSeconds) ? `⏱ ${span(x.elapsedSeconds)}` : undefined, blocks,
+    });
   }
 
   if (m.usage) {

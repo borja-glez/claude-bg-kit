@@ -15,7 +15,7 @@ const T: CardTexts = {
   gReview: 'reviewers', gPlan: 'planning', gOther: 'other', tracking: 'tracking', withoutForge: 'without forge', various: 'various',
   withoutForgeNote: 'estimate: forge off, everything on the main model', forgeCosts: (usd, pct) => `forge costs ${usd} more (+${pct} %)`,
   forgeSaves: usd => `forge saves ${usd}`, pricesAsOf: 'prices as of', drift: 'differs from /cost',
-  noReview: 'no independent review', gVerify: 'verification', blocked: 'blocked', active: 'active', sinceStart: 'since start',
+  taskTime: 'task', noReview: 'no independent review', gVerify: 'verification', blocked: 'blocked', active: 'active', sinceStart: 'since start',
 };
 const FORGE: NonNullable<PanelModel['forge']> = {
   task: 'orders', path: 'large', phase: 'implement', agent: 'forge-impl-heavy', validators: [{ name: 'test', ok: true }],
@@ -337,6 +337,32 @@ describe('lens timings: finished subagents', () => {
     const only = buildCards({ ...EMPTY, subagentsDone: done }, T, 0).find(c => c.title === T.sSubagents)!;
     expect(only.blocks).toHaveLength(1);
     expect(only.chip).toBeUndefined();
+  });
+});
+
+describe('lens timings: execution and roadmap', () => {
+  it('adds the task time to each slot, a dim finished line and the run time in the subtitle', () => {
+    const x = { ...EXEC, elapsedSeconds: 7500, slots: [{ ...EXEC.slots[0], taskSeconds: 1080 }], finished: [{ task: 'T002', seconds: 1320 }, { task: 'T005', seconds: 1860 }] };
+    const card = buildCards({ ...EMPTY, execution: x }, T, 0).find(c => c.title === T.sExecution)!;
+    expect(card.subtitle).toBe('⏱ 2h 05m');
+    const row = card.blocks.find(b => b.kind === 'row')!;
+    expect(row.kind === 'row' && row.right).toBe('review · correctness · 5m 00s · task 18m 00s · r2');
+    expect(card.blocks).toContainEqual({ kind: 'text', text: '✓ T002 22m 00s · T005 31m 00s', dim: true });
+    // An execution without timings draws as before.
+    expect(JSON.stringify(buildCards({ ...EMPTY, execution: EXEC }, T, 0))).not.toContain('✓');
+  });
+  it('lists the last done roadmap tasks dimmed, in amber when over the estimate', () => {
+    const w = {
+      project: 'shop', track: 'api', percent: 40, trackDone: 2, trackTotal: 5, current: null, inbox: 0, escalation: false, roadmapUrl: null, locale: 'en',
+      phase: null, cells: 'ddapp', recentDone: [{ id: 'T003', minutes: 22, estimateMin: 30 }, { id: 'T002', minutes: 41, estimateMin: 30 }, { id: 'T001', minutes: 7 }],
+    };
+    const card = buildCards({ ...EMPTY, waypoint: w }, T, Date.parse('2026-10-12T12:00:00.000Z')).find(c => c.title === 'shop')!;
+    const texts = card.blocks.filter(b => b.kind === 'text' && b.text.startsWith('✓'));
+    expect(texts).toEqual([
+      { kind: 'text', text: '✓ T003 · 22/30 min', dim: true },
+      { kind: 'text', text: '✓ T002 · 41/30 min', dim: true, hue: 'yellow' },
+      { kind: 'text', text: '✓ T001 · 7 min', dim: true },
+    ]);
   });
 });
 

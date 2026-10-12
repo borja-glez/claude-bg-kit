@@ -39,7 +39,7 @@ export type Block =
   | { kind: 'cells'; cells: CellState[] }
   | { kind: 'stages'; stages: Stage[]; hue: Hue }
   | { kind: 'row'; dot: Hue; text: string; right?: string; tag?: { text: string; hue: Hue }; spinning?: boolean }
-  | { kind: 'text'; text: string; dim?: boolean }
+  | { kind: 'text'; text: string; dim?: boolean; hue?: Hue }
   | { kind: 'chips'; chips: { text: string; hue: Hue }[] };
 
 export interface Card { icon: string; title: string; hue: Hue; chip?: { text: string; hue: Hue }; subtitle?: string; blocks: Block[] }
@@ -135,7 +135,7 @@ function drawBlock(b: Block, x: number, y: number, inner: number, id: string): s
       return out;
     }
     case 'text':
-      return `<text class="${b.dim ? 'm' : 't'}" x="${x}" y="${y + 14}" font-family="${FONT}" font-size="12">${xml(fit(b.text, 12, inner))}</text>`;
+      return `<text class="${b.dim ? 'm' : 't'}"${b.hue ? ` style="fill:${c(b.hue)}"` : ''} x="${x}" y="${y + 14}" font-family="${FONT}" font-size="12">${xml(fit(b.text, 12, inner))}</text>`;
     case 'chips': {
       let cx = x;
       let out = '';

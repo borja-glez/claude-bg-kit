@@ -20,6 +20,34 @@ const live = (tsMin: number, ended = false, agents: LiveDoc['agents'] = [{ id: '
 /** A signal that lists no agent: its age alone decides. */
 const idle = (tsMin: number, ended = false) => live(tsMin, ended, []);
 
+describe('executionView timings', () => {
+  it('gives each slot its task start, the run start, and the 3 newest finished tasks that are not running', () => {
+    const fin = (status: 'integrated' | 'blocked' | 'running', startedMin: number, finishedMin: number) => ({ ...task(status, startedMin), finishedAt: at(finishedMin) });
+    const e = exec({ tasks: {
+      T1: task('running', -20), T2: fin('integrated', -50, -40), T3: fin('blocked', -45, -30), T4: fin('integrated', -40, -20),
+      T5: fin('integrated', -35, -10), T6: fin('running', -30, -5), T7: task('integrated'),
+    } });
+    const v = executionView({ exec: e, tasks: {}, live: [live(-1)], now: NOW })!;
+    expect(v.startedAt).toBe(at(-60));
+    expect(v.slots.find(s => s.task === 'T1')!.startedAt).toBe(at(-20));
+    expect(v.finished).toEqual([
+      { task: 'T5', startedAt: at(-35), finishedAt: at(-10) },
+      { task: 'T4', startedAt: at(-40), finishedAt: at(-20) },
+      { task: 'T3', startedAt: at(-45), finishedAt: at(-30) },
+    ]);
+  });
+  it('lists only integrated or blocked tasks as finished: never a running, accepted or conflict one with a stale finishedAt', () => {
+    const fin = (status: 'accepted' | 'conflict' | 'running' | 'integrated', finishedMin: number) => ({ ...task(status, -40), finishedAt: at(finishedMin) });
+    const e = exec({ tasks: { A: fin('accepted', -1), B: fin('running', -2), C: fin('conflict', -3), D: fin('integrated', -4) } });
+    const v = executionView({ exec: e, tasks: {}, live: [live(-1)], now: NOW })!;
+    expect(v.finished.map(f => f.task)).toEqual(['D']);
+  });
+  it('a manual slot has no task start', () => {
+    const p: PublicTask = { task: 'T9', runId: 'r1', stage: 'implement', status: 'running', agent: null, round: 1, since: at(-5), updatedAt: at(-1), leaseUntil: at(5), by: 'M1', mode: 'manual' };
+    expect(executionView({ exec: exec(), tasks: { T9: p }, live: [live(-1)], now: NOW })!.manual[0].startedAt).toBeNull();
+  });
+});
+
 describe('executionView', () => {
   it('takes slot titles from the execution and counts the planned tasks in the total', () => {
     const e = exec({ planned: 12, tasks: { T1: { ...task('running', -20), title: 'Login' }, T2: task('running', -5) } });
