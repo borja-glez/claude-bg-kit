@@ -133,6 +133,12 @@ describe('waypoint CLI', () => {
     expect(info).toMatchObject({ title: 'T001: Esquema de pedidos', del: 0 });
     expect(info.sha).toMatch(/^[0-9a-f]{40}$/);
     expect(info.add).toBeGreaterThan(50);
+    // A sha of another branch (e.g. an integration on the run branch) reads from the same object database.
+    git('checkout', '-q', '-b', 'side');
+    git('-c', 'user.email=a@b.c', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'forge: integrate T1');
+    const side = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+    git('checkout', '-q', '-');
+    expect(JSON.parse(run(['commit-info', side], io).stdout)).toMatchObject({ sha: side, title: 'forge: integrate T1' });
   });
 });
 

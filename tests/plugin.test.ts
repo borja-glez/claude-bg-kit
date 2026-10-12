@@ -260,6 +260,18 @@ describe('plugin layout', () => {
     expect(inf).toContain('without `--branch` and with `--merge-on-finish`');
     expect(inf).toContain('run `FORGE swarm merge`');
   });
+  it('execution skills: wait 0 only after an integration, claim races dropped, leases renewed, no task.json', () => {
+    const md = read('plugins/forge/skills/run/SKILL.md');
+    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    for (const s of [md, inf]) expect(s).toContain('any other `wait 0` is treated as `wait 300`');
+    expect(md).toContain('FORGE swarm task <T> --drop');
+    expect(md).not.toContain('`FORGE swarm retry <T>` later');
+    expect(md).toContain('git -C <worktree> diff forge/run-<project>...HEAD');
+    expect(md).toContain('FORGE swarm task <T> --lease <NOW + 10 min>');
+    expect(md).toContain('commit-info <sha>');
+    for (const s of [md, inf]) expect(s).not.toContain('task.json');
+    expect(inf).not.toContain('lastTickAt');
+  });
   it('the plan skill declares assets only with evidence upload and warns about public sharing', () => {
     const md = read('plugins/waypoint/skills/plan/SKILL.md');
     expect(md).toContain('"assets": {}');

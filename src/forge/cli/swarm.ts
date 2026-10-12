@@ -6,7 +6,7 @@ import { detectValidators, selectValidators, runValidators, type RepoReader } fr
 import { loadConfig } from '../config.js';
 import { stopFile } from '../run.js';
 import { appendEvent } from '../ledger.js';
-import { readExecution, saveExecution, writePublicTask, runBranch, taskBranch, runWorktree, taskWorktree } from '../execution.js';
+import { readExecution, saveExecution, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree } from '../execution.js';
 import { schedule, widthOf } from '../schedule.js';
 import { LEASE_MINUTES } from '../../lib/coordination.js';
 import { STAGES, type ExecutionState, type ExecTask } from '../../lib/execution-state.js';
@@ -273,6 +273,13 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       const e = current();
       const prev = e.tasks[task];
       if (!prev) throw new UsageError(`swarm task: ${task} is not part of this execution`);
+      if (has('drop')) {
+        // A claim race lost to another session: forget the task so the next tick sees that session's claim.
+        const { [task]: _dropped, ...tasks } = e.tasks;
+        saveExecution(io.cwd, { ...e, tasks });
+        rmSync(executionTaskFile(io.cwd, task), { force: true });
+        return ok();
+      }
       const stage = (flag('stage') ?? prev.stage) as Stage;
       if (!STAGES.includes(stage)) throw new UsageError(`swarm task: --stage must be one of ${STAGES.join('|')}`);
       const status = (flag('status') ?? prev.status) as ExecTask['status'];
@@ -349,6 +356,6 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     case 'merge':
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError('usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]|status|propose --plan P|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|tick --plan P --db DIR|integrate <T>|merge|retry <T>|sleep <seconds> [--mark]|stop [--reason stopped|budget]>');
+      throw new UsageError('usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]|status|propose --plan P|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick --plan P --db DIR|integrate <T>|merge|retry <T>|sleep <seconds> [--mark]|stop [--reason stopped|budget]>');
   }
 }

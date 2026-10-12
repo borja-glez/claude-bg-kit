@@ -129,6 +129,22 @@ describe('forge swarm (execution)', () => {
     expect(setupFor(files([]), undefined)).toBeNull();
     expect(setupFor(files(['package-lock.json', '.venv']), 'make deps')).toEqual({ cmd: 'make deps' });
   });
+  it('task --drop forgets a task lost in a claim race, so the next tick leaves it to its owner', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    writeDocs(path.join(root, 'db', 'state'), {});
+    writeDocs(path.join(root, 'db', 'sessions'), {});
+    out(run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db'], io));
+    out(run(['swarm', 'task', 'T1', '--stage', 'brief'], io));
+    expect(existsSync(executionTaskFile(root, 'T1'))).toBe(true);
+    expect(run(['swarm', 'task', 'T1', '--drop'], io).code).toBe(0);
+    expect(readExecution(root)!.tasks.T1).toBeUndefined();
+    expect(existsSync(executionTaskFile(root, 'T1'))).toBe(false);
+    writeDocs(path.join(root, 'db', 'state'), { T1: { status: 'in_progress', owner: 'other', claimedAt: NOW.toISOString() } });
+    writeDocs(path.join(root, 'db', 'sessions'), { other: { status: 'active', heartbeatAt: NOW.toISOString(), leaseUntil: new Date(NOW.getTime() + 600000).toISOString() } });
+    const t = out(run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db'], io));
+    expect(t.actions.filter((a: { type: string }) => a.type === 'start').map((a: { task: string }) => a.task)).not.toContain('T1');
+    expect(readExecution(root)!.tasks.T1).toBeUndefined();
+  });
   it('tick refuses without the state and sessions listings', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     expect(run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'nope'], io).code).toBe(2);
