@@ -90,7 +90,7 @@ Triage reads the task text, the files it is likely to touch and the sensitive zo
 | `forge-review-correctness` | Opus | xhigh | correctness review |
 | `forge-review-security` | Opus | xhigh | security review |
 | `forge-review-perf` | Opus | xhigh | performance review |
-| `forge-verify` | Sonnet | default | uses the work through a surface and reports evidence (`forge-verify-heavy`, Opus, on the `quality` profile) |
+| `forge-verify` | Sonnet | high | uses the work through a surface and reports evidence (`forge-verify-heavy`, Opus, also high, on the `quality` profile) |
 | `forge-planner` | Opus | xhigh | Large path: turns an approved design into a waypoint plan |
 | `forge-scout` | Opus | medium | infinite mode: evidence-backed improvement proposals |
 
