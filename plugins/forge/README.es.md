@@ -176,7 +176,7 @@ Los tests y los revisores leen el código; la verificación **usa** el resultado
 - **Por detección.** forge reconoce una web, un proyecto Android o Flutter y similares, y propone un borrador de superficie para que lo aceptes.
 - **Por experiencia.** `forge-verify` añade lo que aprende (un primer arranque lento, un ajuste que hay que activar) a la sección `Aprendido` de la superficie, así que la siguiente vez empieza sabiendo más.
 
-**Cuándo se ejecuta.** Solo en tareas Medium y Large, y solo cuando el diff toca los globs `affects` de una superficie (o el texto de la tarea pide verificar). Una superficie sin `affects` es siempre candidata y decide la sesión. Las tareas Trivial y Small se la saltan salvo que la pidas. Una superficie solo se ejecuta si la has permitido (ver Configuración).
+**Cuándo se ejecuta.** En tareas Medium y Large, cuando el diff toca los globs `affects` de una superficie. Una superficie sin `affects` es siempre candidata y decide la sesión. En tareas Trivial y Small solo se ejecuta cuando la tarea lo pide. Una superficie solo se ejecuta si la has permitido (ver Configuración).
 
 **El agente.** `forge-verify` (Sonnet; `forge-verify-heavy` en Opus con el perfil `quality`) arranca la superficie, prueba el flujo principal de la tarea y escribe `verify.json` y capturas en `.forge/work/<id>/`. Corre en paralelo con los revisores, y sus fallos cuentan en el veredicto como los de un revisor. Nunca edita ficheros del proyecto, nunca hace commit, push ni merge, y nunca instala dependencias del proyecto. `verify.limits` acota cuántas comprobaciones, capturas y minutos gasta.
 
@@ -193,7 +193,7 @@ exclude: [build]               # validadores detectados que no quieres, por nomb
 validators:                    # manuales
   - name: unit
     cmd: npm test
-    kind: test                 # texto libre
+    kind: test                 # letras, dígitos y _ . : -
     affects: ["src/**", "test/**"]
   - name: a11y
     cmd: npm run a11y
@@ -211,7 +211,7 @@ swarm:
 
 **Validadores.** Con `detect: true` (el valor por defecto), forge detecta las herramientas del proyecto y mezcla tu lista `validators` con ellas; un validador manual sustituye a uno detectado con el mismo nombre, y `exclude` quita los detectados por nombre. Con `detect: false` solo se ejecuta la lista, y `validators: []` significa ninguno.
 
-- `kind` es texto libre (`test`, `lint`, `e2e`, `a11y`...). `when` dice cuándo se ejecuta un validador: `always`, `medium` (tareas Medium y Large y la revisión final) o `final` (solo la revisión final de una ejecución Large). Un `kind` que forge no conoce vale `medium` por defecto.
+- `kind` es cualquier nombre hecho de letras, dígitos y `_ . : -` (`test`, `lint`, `e2e`, `a11y`...). `when` dice cuándo se ejecuta un validador: `always`, `medium` (tareas Medium y Large y la revisión final) o `final` (solo la revisión final de una ejecución Large). Un `kind` que forge no conoce vale `medium` por defecto.
 - `verify.limits` admite como máximo `checks: 20`, `shots: 30` y `minutes: 60`.
 - `evidence` es `upload` o `local`, como se describe en [Verificación](#verificación).
 
@@ -239,7 +239,7 @@ Empareja desde Ajustes > Dispositivos y pesa: debe salir el peso en la pantalla 
 
 - `affects` es una lista de globs sobre rutas relativas al repo con separadores `/`. `*` casa dentro de un segmento de la ruta y `**` atraviesa segmentos (`src/**`, `web/*.ts`); no se admite otra sintaxis de glob.
 - Un validador con `affects` solo se ejecuta en `validate --affected` si casa alguna de las rutas cambiadas. Sin `affects`, se ejecuta siempre.
-- `--all` (o sin `--affected`) ejecuta todos los validadores. Los validadores `build` se saltan con `--affected`.
+- Qué validadores se ejecutan depende del tipo y del momento: `test`, `lint`, `typecheck` y `other` se ejecutan siempre; `build` se salta con `--affected`; `e2e` solo se ejecuta en tareas Medium y Large cuando sus `affects` casan con el diff (o no tiene), y en la revisión final; `bench` solo en la revisión final. Un tipo que forge no conoce se ejecuta en tareas Medium y Large y en la revisión final. El `when` de un validador manda sobre todo esto. Por eso `--all` no ejecuta todos los validadores.
 
 ## Referencia de la CLI
 
@@ -251,13 +251,13 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 - `triage [--task id] (<texto> | --text-file f)` - clasifica una tarea: camino, ficheros, zonas sensibles y validadores. `--text-file` lee el texto de un fichero, para que nunca pase por un shell.
 - `triage --plan p --task T` - hace el triaje de una tarea del plan a partir de sus zonas y su `done_when`.
 - `brief --plan p --task T [--design d]` - imprime el brief de una tarea del plan de waypoint, con la línea `Commit title prefix` que usan los implementadores.
-- `validate [--affected a,b | --all] [--task id]` - ejecuta los validadores del proyecto.
+- `validate [--affected a,b | --all] [--path trivial|small|medium|large] [--base sha] [--final] [--task id]` - ejecuta los validadores del proyecto que tocan (ver Coincidencias); `--base` da el diff contra el que se casan los `affects` de e2e, `--final` elige el conjunto de la revisión final.
 - `verdict --task id --dir d [--validators f] [--sensitive] [--perf]` - pondera los JSON de los revisores en una nota. Un revisor aparece con `invalid: true` si su salida no servía (`dropped: 0`, cuenta como abstención) o si se descartaron algunos de sus hallazgos (`dropped` > 0; la revisión mantiene su veredicto y puntúa, y la skill registra los hallazgos descartados como resolución).
 - `round --task id --path medium|large` - decide el siguiente paso del bucle de revisión (`done`, `resume`, `fresh-stronger`, `redo`, `breaker`, `stalled`; `tierUp` desde la ronda 3).
 - `log --kind k [--task id] [--data json | --data-file f]` - añade una entrada al registro.
 - `last --task id` - el camino, el último evento de fase, el último veredicto y la última ronda de una tarea.
 - `agents` - los nombres de los agentes del perfil activo.
-- `surfaces [learn --name N --notes-file F | proposed --name N]` - lista las superficies y los borradores detectados; añade notas a la sección `Aprendido` de una superficie; marca un borrador como propuesto.
+- `surfaces [learn --name N --notes-file F [--heading H] | proposed --name N]` - lista las superficies y los borradores detectados; añade notas a la sección `Aprendido` de una superficie; marca un borrador como propuesto.
 - `tools [--surface N]` - comprueba cuáles de las herramientas que lista una superficie están en el PATH.
 - `local get [surfaces.<nombre>] | set surfaces.<nombre> allowed|denied|none` - lee o escribe los permisos de las superficies en `.forge/local.yaml`.
 - `verify-plan --task id --path p --base sha [--asked]` - decide si se verifica y qué superficies son candidatas.

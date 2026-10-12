@@ -176,7 +176,7 @@ Tests and reviewers read the code; verification **uses** the result. A **surface
 - **By detection.** forge spots a web app, an Android or Flutter project and the like, and proposes a draft surface for you to accept.
 - **By experience.** `forge-verify` appends what it learned (a slow first start, a flag that must be on) to the surface's `Learned` section, so the next run starts smarter.
 
-**When it runs.** Only on Medium and Large tasks, and only when the diff touches a surface's `affects` globs (or the task text asks for verification). A surface without `affects` is always a candidate and the session decides. Trivial and Small tasks skip it unless you ask. A surface runs only if you have allowed it (see Configuration).
+**When it runs.** On Medium and Large tasks, when the diff touches a surface's `affects` globs. A surface without `affects` is always a candidate and the session decides. On Trivial and Small tasks it runs only when the task asks for it. A surface runs only if you have allowed it (see Configuration).
 
 **The agent.** `forge-verify` (Sonnet; `forge-verify-heavy` on Opus with the `quality` profile) starts the surface, tries the task's main flow and writes `verify.json` plus screenshots under `.forge/work/<id>/`. It runs in parallel with the reviewers, and its failures count in the verdict like a reviewer's. It never edits project files, never commits, pushes or merges, and never installs project dependencies. `verify.limits` caps how many checks, screenshots and minutes it spends.
 
@@ -193,7 +193,7 @@ exclude: [build]               # detected validators you do not want, by name
 validators:                    # manual
   - name: unit
     cmd: npm test
-    kind: test                 # free text
+    kind: test                 # letters, digits and _ . : -
     affects: ["src/**", "test/**"]
   - name: a11y
     cmd: npm run a11y
@@ -211,7 +211,7 @@ swarm:
 
 **Validators.** With `detect: true` (the default), forge detects the project's tools and merges your `validators` list into them; a manual validator replaces a detected one with the same name, and `exclude` drops detected ones by name. With `detect: false` only the listed set runs, and `validators: []` means none.
 
-- `kind` is free text (`test`, `lint`, `e2e`, `a11y`...). `when` says when a validator runs: `always`, `medium` (Medium and Large tasks and the final review) or `final` (only the final review of a Large run). A `kind` forge does not know defaults to `medium`.
+- `kind` is any name made of letters, digits and `_ . : -` (`test`, `lint`, `e2e`, `a11y`...). `when` says when a validator runs: `always`, `medium` (Medium and Large tasks and the final review) or `final` (only the final review of a Large run). A `kind` forge does not know defaults to `medium`.
 - `verify.limits` accepts at most `checks: 20`, `shots: 30` and `minutes: 60`.
 - `evidence` is `upload` or `local`, as described in [Verification](#verification).
 
@@ -239,7 +239,7 @@ Pair from Settings > Devices and weigh: the weight must show on the main screen.
 
 - `affects` is a list of globs over repo-relative paths with `/` separators. `*` matches within one path segment and `**` matches across segments (`src/**`, `web/*.ts`); no other glob syntax is supported.
 - A validator with `affects` runs on `validate --affected` only when one of the changed paths matches. Without `affects`, it always runs.
-- `--all` (or no `--affected`) runs every validator. `build` validators are skipped with `--affected`.
+- Which validators run depends on the kind and the moment: `test`, `lint`, `typecheck` and `other` always run; `build` is skipped with `--affected`; `e2e` runs only on Medium and Large tasks when its `affects` match the diff (or it has none), and at the final review; `bench` runs only at the final review. A kind forge does not know runs on Medium and Large tasks and at the final review. A validator's `when` overrides all of this. `--all` therefore does not run every validator.
 
 ## CLI reference
 
@@ -251,13 +251,13 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 - `triage [--task id] (<text> | --text-file f)` - classify a task: path, files, sensitive zones and validators. `--text-file` reads the text from a file, so it never goes through a shell.
 - `triage --plan p --task T` - triage a plan task from its zones and `done_when`.
 - `brief --plan p --task T [--design d]` - print a task brief built from a waypoint plan task, including the `Commit title prefix` line that implementers use.
-- `validate [--affected a,b | --all] [--task id]` - run the project validators.
+- `validate [--affected a,b | --all] [--path trivial|small|medium|large] [--base sha] [--final] [--task id]` - run the project validators that apply (see Matching); `--base` gives the diff that e2e `affects` are matched against, `--final` selects the final review's set.
 - `verdict --task id --dir d [--validators f] [--sensitive] [--perf]` - weigh the reviewers' JSON files into a score. A reviewer is listed with `invalid: true` when its output was unusable (`dropped: 0`, counted as an abstention) or when some of its findings were dropped (`dropped` > 0; the review keeps its verdict and still scores, and the skill records the dropped findings as a ruling).
 - `round --task id --path medium|large` - decide the next step of the review loop (`done`, `resume`, `fresh-stronger`, `redo`, `breaker`, `stalled`; `tierUp` from round 3).
 - `log --kind k [--task id] [--data json | --data-file f]` - append to the ledger.
 - `last --task id` - the path, last phase event, last verdict and last round of a task.
 - `agents` - agent names for the active profile.
-- `surfaces [learn --name N --notes-file F | proposed --name N]` - list the surfaces and detected drafts; append notes to a surface's `Learned` section; mark a draft as proposed.
+- `surfaces [learn --name N --notes-file F [--heading H] | proposed --name N]` - list the surfaces and detected drafts; append notes to a surface's `Learned` section; mark a draft as proposed.
 - `tools [--surface N]` - check which of the tools a surface lists are on the PATH.
 - `local get [surfaces.<name>] | set surfaces.<name> allowed|denied|none` - read or write surface permissions in `.forge/local.yaml`.
 - `verify-plan --task id --path p --base sha [--asked]` - decide whether verification runs and which surfaces are candidates.
