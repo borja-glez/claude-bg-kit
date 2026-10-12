@@ -164,6 +164,8 @@ export function run(argv: string[], io: Io): Result {
       case 'escalations':
         return ok(JSON.stringify(escalationCandidates(readDocs<MessageDoc>(flag('messages') && abs(flag('messages')!)))));
       case 'launch': {
+        // The plan path goes into the launched session's prompt, inside double quotes in a shell command.
+        if (args[0] !== undefined && !/^[\w./\\:~@+ -]+$/.test(args[0])) return fail('launch: the plan path may only use letters, digits, spaces and _ . / \\ : ~ @ + -', 2);
         const p = loadPlan();
         const track = args[1];
         const taskMode = args.includes('--task');
@@ -197,23 +199,20 @@ export function run(argv: string[], io: Io): Result {
           // Same worktree and branch names as `forge swarm worktree <T>`: every execution mode shares the work of a task.
           const taskWt = path.join(root, '.claude', 'worktrees', `task-${track}`);
           const taskBranch = `task/${track}`;
+          const taskName = `wp-${p.project}-${track}`;
+          const taskPrompt = `/forge:run --plan ${args[0]} --task ${track} — run member of ${val('--coordinator')}: work only ${track}, then stop`;
+          const taskCommand = `claude --bg --name ${taskName} "${taskPrompt}"`;
+          // The launcher is resolved before any branch or worktree exists: a refused one leaves nothing behind.
+          const taskRun = launchRun(launcher as Launcher, { name: taskName, prompt: taskPrompt, worktree: taskWt });
+          if (taskRun === null) return fail('launch: herdr cannot open panes from the command line; use launcher bg', 2);
           if (!existsSync(taskWt)) {
             const exists = git('branch', '--list', taskBranch) !== '';
             git('worktree', 'add', taskWt, ...(exists ? [taskBranch] : ['-b', taskBranch, base!]));
           }
-          const taskName = `wp-${p.project}-${track}`;
-          const taskPrompt = `/forge:run --plan ${args[0]} --task ${track} — run member of ${val('--coordinator')}: work only ${track}, then stop`;
-          const taskCommand = `claude --bg --name ${taskName} "${taskPrompt}"`;
-          const taskRun = launchRun(launcher as Launcher, { name: taskName, prompt: taskPrompt, worktree: taskWt });
-          if (taskRun === null) return fail('launch: herdr cannot open panes from the command line; use launcher bg', 2);
           return ok(JSON.stringify({ worktree: taskWt, branch: taskBranch, name: taskName, prompt: taskPrompt, command: taskCommand, run: taskRun, runId: val('--run'), task: track }));
         }
         const worktree = path.join(root, '.claude', 'worktrees', track!);
         const branch = `track/${track}`;
-        if (!existsSync(worktree)) {
-          const exists = git('branch', '--list', branch) !== '';
-          git('worktree', 'add', worktree, ...(exists ? [branch] : ['-b', branch, ...(base ? [base] : [])]));
-        }
         const name = `wp-${p.project}-${track}`;
         const FORGE_MARK = 'forge drives this session';
         let forge = args.includes('--forge') || !!swarm;
@@ -232,6 +231,11 @@ export function run(argv: string[], io: Io): Result {
         // leave a coordinator working in the worktree. Single quotes, with any quote in the path escaped.
         const inWorktree = launchRun(launcher as Launcher, { name, prompt, worktree });
         if (inWorktree === null) return fail('launch: herdr cannot open panes from the command line; use launcher bg', 2);
+        // Only once the launcher resolved: a refused one leaves no branch nor worktree behind.
+        if (!existsSync(worktree)) {
+          const exists = git('branch', '--list', branch) !== '';
+          git('worktree', 'add', worktree, ...(exists ? [branch] : ['-b', branch, ...(base ? [base] : [])]));
+        }
         return ok(JSON.stringify({ worktree, branch, name, prompt, command, run: inWorktree }));
       }
       case 'status': {

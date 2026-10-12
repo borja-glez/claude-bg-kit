@@ -330,6 +330,24 @@ describe('multi-session commands', () => {
       }
       expect(run([...args, '--launcher', 'nope'], io).code).toBe(2);
     });
+    it('a launcher that cannot run is refused before any worktree or branch exists', () => {
+      init();
+      if (HERDR_TEMPLATE !== null) return; // only a refused launcher shows it
+      expect(run([...args, '--launcher', 'herdr'], io).code).toBe(2);
+      expect(existsSync(path.join(dir, '.claude', 'worktrees', 'task-T001'))).toBe(false);
+      expect(git('branch', '--list', 'task/T001')).toBe('');
+      expect(run(['launch', 'plan.yaml', 'ui', '--launcher', 'herdr'], io).code).toBe(2);
+      expect(existsSync(path.join(dir, '.claude', 'worktrees', 'ui'))).toBe(false);
+      expect(git('branch', '--list', 'track/ui')).toBe('');
+    });
+    it('refuses a plan path with characters outside the safe set, before anything is created', () => {
+      init();
+      for (const bad of ['plan".yaml', 'plan$(x).yaml', 'plan`x`.yaml', 'a;b.yaml']) {
+        expect(run(['launch', bad, 'T001', '--task', '--run', 'r1', '--coordinator', 'S1', '--base', 'forge/run-demo-shop'], io).code).toBe(2);
+      }
+      expect(existsSync(path.join(dir, '.claude', 'worktrees', 'task-T001'))).toBe(false);
+      expect(run(['launch', path.join(dir, 'plan.yaml'), 'T001', '--task', '--run', 'r1', '--coordinator', 'S1', '--base', 'forge/run-demo-shop'], io).code).toBe(0);
+    });
   });
 });
 
