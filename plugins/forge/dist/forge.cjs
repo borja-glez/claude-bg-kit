@@ -7364,7 +7364,7 @@ var require_dist = __commonJS({
 var import_node_fs11 = require("node:fs");
 
 // src/forge/cli/run.ts
-var import_node_child_process = require("node:child_process");
+var import_node_child_process2 = require("node:child_process");
 var import_node_fs10 = require("node:fs");
 var import_node_os = require("node:os");
 var import_node_path11 = __toESM(require("node:path"), 1);
@@ -12171,20 +12171,22 @@ function parseVerifyFile(text) {
   const reason = typeof r2.reason === "string" && r2.reason.trim() ? r2.reason : null;
   if (result === "blocked" && !reason) return null;
   const objs = (x) => Array.isArray(x) ? x.filter((o) => !!o && typeof o === "object" && !Array.isArray(o)) : [];
+  const checks = objs(r2.checks).map((c, i) => ({
+    id: typeof c.id === "number" ? c.id : i + 1,
+    surface: s(c.surface),
+    name: s(c.name),
+    main: truthy(c.main),
+    ok: truthy(c.ok),
+    expected: s(c.expected),
+    observed: s(c.observed),
+    shot: typeof c.shot === "string" && c.shot.trim() ? c.shot : null
+  }));
   return {
     surfaces: Array.isArray(r2.surfaces) ? r2.surfaces.filter((x) => typeof x === "string") : [],
-    result,
+    // Unless blocked, the checks decide: a stated result that disagrees with them is overridden.
+    result: result === "blocked" ? result : checks.some((c) => !c.ok) ? "fail" : "pass",
     reason,
-    checks: objs(r2.checks).map((c, i) => ({
-      id: typeof c.id === "number" ? c.id : i + 1,
-      surface: s(c.surface),
-      name: s(c.name),
-      main: truthy(c.main),
-      ok: truthy(c.ok),
-      expected: s(c.expected),
-      observed: s(c.observed),
-      shot: typeof c.shot === "string" && c.shot.trim() ? c.shot : null
-    })),
+    checks,
     unchecked: Array.isArray(r2.unchecked) ? r2.unchecked.map(s) : [],
     learned: objs(r2.learned).filter((l) => typeof l.note === "string" && l.note.trim()).map((l) => ({ surface: s(l.surface), note: s(l.note) })),
     proposals: objs(r2.proposals).filter((p) => typeof p.change === "string" && p.change.trim()).map((p) => ({ surface: s(p.surface), change: s(p.change) }))
@@ -12576,7 +12578,7 @@ function detected(repo, which, platform) {
   }
   const gw = repo.exists("gradlew") ? "" : repo.exists("android/gradlew") ? "android/" : null;
   const androidApp = gw !== null && ["app/build.gradle", "app/build.gradle.kts"].some((f) => /com\.android\.application/.test(repo.read(gw + f) ?? ""));
-  if (pkgText === null && androidApp) {
+  if (pkgText === null && androidApp && !repo.exists("pubspec.yaml")) {
     const g = `${gw ? "cd android && " : ""}${platform === "win32" ? "gradlew.bat" : "./gradlew"}`;
     push({ name: "gradle-lint", cmd: `${g} lint`, kind: "lint" });
     push({ name: "gradle-test", cmd: `${g} testDebugUnitTest`, kind: "test" });
@@ -12585,11 +12587,13 @@ function detected(repo, which, platform) {
   if (make !== null && /^test\s*:(?!=)/m.test(make) && !out.some((v) => v.kind === "test")) push({ name: "make-test", cmd: "make test", kind: "test" });
   return out;
 }
+var sameCmd = (cmd) => cmd.replace(/\s+/g, " ").trim();
 function detectValidators(repo, config, which = onPath, platform = process.platform) {
   const manual = (config.validators ?? []).map((v) => ({ ...v, kind: v.kind ?? "other", source: "manual" }));
   if (!config.detect) return manual;
   const byName = new Map(manual.map((v) => [v.name, v]));
-  const merged = detected(repo, which, platform).filter((v) => !config.exclude.includes(v.name)).map((v) => byName.get(v.name) ?? v);
+  const manualCmds = new Set(manual.map((v) => sameCmd(v.cmd)));
+  const merged = detected(repo, which, platform).filter((v) => !config.exclude.includes(v.name) && (byName.has(v.name) || !manualCmds.has(sameCmd(v.cmd)))).map((v) => byName.get(v.name) ?? v);
   const used = new Set(merged.map((v) => v.name));
   return [...merged, ...manual.filter((v) => !used.has(v.name))];
 }
@@ -13209,17 +13213,30 @@ function verifyPlan(i) {
   const reason = i.changed === null ? "the diff is unknown: only surfaces without affects are candidates" : surfaces.length ? surfaces.map((s2) => `${s2.name}${s2.match ? ` (${s2.match})` : ""}`).join(", ") : "no surface matches the diff";
   return { eligible, surfaces, drafts, reason };
 }
-function cleanupPids(pids, kill) {
+function cleanupPids(pids, kill, protect = [process.pid, process.ppid]) {
   const killed = [], gone = [];
-  for (const pid of pids) (kill(pid) ? killed : gone).push(pid);
+  for (const pid of pids) (pid > 1 && !protect.includes(pid) && kill(pid) ? killed : gone).push(pid);
   return { killed, gone };
 }
+var killTarget = (pid, pgid) => pgid === pid ? -pid : pid;
 
 // src/forge/local.ts
+var import_node_child_process = require("node:child_process");
 var import_node_fs8 = require("node:fs");
 var import_node_path9 = __toESM(require("node:path"), 1);
 var import_yaml3 = __toESM(require_dist(), 1);
-var localFile = (root) => import_node_path9.default.join(root, ".forge", "local.yaml");
+function mainCheckout(root) {
+  try {
+    const [gitDir, common] = (0, import_node_child_process.execFileSync)("git", ["rev-parse", "--git-dir", "--git-common-dir"], { cwd: root, encoding: "utf8", timeout: 5e3, stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).split(/\r?\n/).map((l) => l.trim());
+    if (!gitDir || !common) return root;
+    const commonDir = import_node_path9.default.resolve(root, common);
+    if (import_node_path9.default.resolve(root, gitDir) === commonDir || import_node_path9.default.basename(commonDir) !== ".git") return root;
+    return import_node_path9.default.dirname(commonDir);
+  } catch {
+    return root;
+  }
+}
+var localFile = (root) => import_node_path9.default.join(mainCheckout(root), ".forge", "local.yaml");
 var names = (x) => Array.isArray(x) ? [...new Set(x.filter((s2) => typeof s2 === "string" && NAME.test(s2)))] : [];
 function readLocal(root) {
   let raw = null;
@@ -13240,7 +13257,7 @@ function readLocal(root) {
   return { ...o, surfaces, known: names(o.known), proposed: names(o.proposed) };
 }
 function writeLocal(root, s2) {
-  forgeDir(root);
+  forgeDir(mainCheckout(root));
   const file = localFile(root);
   const tmp = `${file}.${process.pid}.tmp`;
   (0, import_node_fs8.writeFileSync)(tmp, (0, import_yaml3.stringify)(s2));
@@ -13429,7 +13446,7 @@ function defaultExec(cwd2) {
       dir = (0, import_node_fs10.mkdtempSync)(import_node_path11.default.join((0, import_node_os.tmpdir)(), "forge-exec-"));
       const file = import_node_path11.default.join(dir, "out.log");
       fd = (0, import_node_fs10.openSync)(file, "w+");
-      const r2 = (0, import_node_child_process.spawnSync)(process.execPath, ["-e", WRAPPER_SOURCE, "--", cmd, String(timeoutMs), file], {
+      const r2 = (0, import_node_child_process2.spawnSync)(process.execPath, ["-e", WRAPPER_SOURCE, "--", cmd, String(timeoutMs), file], {
         cwd: cwd2,
         windowsHide: true,
         timeout: timeoutMs + 15e3,
@@ -13466,7 +13483,7 @@ function defaultExec(cwd2) {
 function defaultGit(cwd2) {
   return (args) => {
     try {
-      return (0, import_node_child_process.execFileSync)("git", args, { cwd: cwd2, encoding: "utf8", maxBuffer: MAX_GIT_OUTPUT, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+      return (0, import_node_child_process2.execFileSync)("git", args, { cwd: cwd2, encoding: "utf8", maxBuffer: MAX_GIT_OUTPUT, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
     } catch {
       return null;
     }
@@ -13743,14 +13760,22 @@ function run(argv, io) {
         let pids = [];
         try {
           const raw = JSON.parse((0, import_node_fs10.readFileSync)(import_node_path11.default.resolve(io.cwd, dir, "pids.json"), "utf8"));
-          if (Array.isArray(raw)) pids = raw.filter((p) => Number.isInteger(p) && p > 0);
+          if (Array.isArray(raw)) pids = raw.filter((p) => Number.isInteger(p));
         } catch {
           pids = [];
         }
+        const pgid = (pid) => {
+          try {
+            const n = Number((0, import_node_child_process2.execFileSync)("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8", timeout: 5e3, stdio: ["ignore", "pipe", "ignore"] }).trim());
+            return Number.isInteger(n) && n > 0 ? n : null;
+          } catch {
+            return null;
+          }
+        };
         const kill = (pid) => {
           try {
-            if (process.platform === "win32") (0, import_node_child_process.execFileSync)("taskkill", ["/T", "/F", "/PID", String(pid)], { stdio: "ignore", windowsHide: true });
-            else process.kill(-pid, "SIGTERM");
+            if (process.platform === "win32") (0, import_node_child_process2.execFileSync)("taskkill", ["/T", "/F", "/PID", String(pid)], { stdio: "ignore", windowsHide: true });
+            else process.kill(killTarget(pid, pgid(pid)), "SIGTERM");
             return true;
           } catch {
             try {

@@ -11785,7 +11785,7 @@ function buildCards(m, t, nowMs2) {
       if (f.verify?.planned) {
         const v = f.verify;
         const where = `verify ${v.surfaces.join(", ")}`;
-        const text = v.result === "pass" ? `\u2713 ${where} \xB7 ${v.passed}/${v.total} \xB7 ${v.passed} ${t.shots}` : v.result === "fail" ? `\u2717 ${where} \xB7 ${v.passed}/${v.total}` : v.result === "blocked" ? `\u2298 ${where} \xB7 ${t.blocked}: ${v.reason ?? ""}` : where;
+        const text = v.result === "pass" ? `\u2713 ${where} \xB7 ${v.passed}/${v.total}` : v.result === "fail" ? `\u2717 ${where} \xB7 ${v.passed}/${v.total}` : v.result === "blocked" ? `\u2298 ${where} \xB7 ${t.blocked}: ${v.reason ?? ""}` : where;
         blocks.push({ kind: "text", text, dim: v.result === null });
         if (v.evidence) blocks.push({ kind: "text", text: v.evidence, dim: true });
       }
@@ -12832,7 +12832,6 @@ var TEXT = {
     gImpl: "Implementadores",
     gReview: "Revisores",
     gVerify: "Verificaci\xF3n",
-    shots: "capturas",
     blocked: "bloqueada",
     gPlan: "Planificaci\xF3n y scout",
     gOther: "Otros subagentes",
@@ -12889,7 +12888,6 @@ var TEXT = {
     gImpl: "Implementers",
     gReview: "Reviewers",
     gVerify: "Verification",
-    shots: "shots",
     blocked: "blocked",
     gPlan: "Planning and scout",
     gOther: "Other subagents",
