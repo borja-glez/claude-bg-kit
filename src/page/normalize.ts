@@ -61,11 +61,16 @@ export function normalizeState(x: unknown): TaskState {
 }
 
 /** The exec block of a task state: kept only whole and well-typed (it drives the orphan mark). */
+const isoOrNull = (v: unknown): string | null => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? v : null);
+
+/** state/T.exec: dropped when a field is missing or mistyped, or since/leaseUntil is not a date. */
 function normalizeExec(x: unknown): TaskExec | undefined {
-  if (!isObj(x) || typeof x.runId !== 'string' || typeof x.by !== 'string' || typeof x.since !== 'string' || typeof x.leaseUntil !== 'string') return undefined;
+  if (!isObj(x) || typeof x.runId !== 'string' || typeof x.by !== 'string') return undefined;
+  const since = isoOrNull(x.since), leaseUntil = isoOrNull(x.leaseUntil);
+  if (!since || !leaseUntil) return undefined;
   if (!(STAGES as readonly unknown[]).includes(x.stage)) return undefined;
   if (x.mode !== 'subagents' && x.mode !== 'sessions' && x.mode !== 'manual') return undefined;
-  const e: TaskExec = { runId: x.runId, mode: x.mode, by: x.by, stage: x.stage as Stage, since: x.since, leaseUntil: x.leaseUntil };
+  const e: TaskExec = { runId: x.runId, mode: x.mode, by: x.by, stage: x.stage as Stage, since, leaseUntil };
   if (typeof x.agent === 'string' || x.agent === null) e.agent = x.agent;
   if (typeof x.round === 'number' && Number.isInteger(x.round)) e.round = x.round;
   return e;
@@ -109,8 +114,6 @@ export function normalizeMessage(x: unknown): MessageDoc | null {
     replyTo: optStr(x.replyTo),
   };
 }
-
-const isoOrNull = (v: unknown): string | null => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? v : null);
 
 /** meta/run: the execution published by forge's coordinator; null when it is not a well-formed run. */
 export function normalizeRun(x: unknown): RunDoc | null {

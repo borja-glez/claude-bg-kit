@@ -13,6 +13,11 @@ describe('normalizeRun / execution fields', () => {
     expect(normalizeSession({ name: 'm', heartbeatAt: 'x', role: 'coordinator', runId: 'r1', leaseUntil: '2026-10-12T12:10:00.000Z' })).toMatchObject({ role: 'coordinator', runId: 'r1', leaseUntil: '2026-10-12T12:10:00.000Z' });
     expect(normalizeState({ status: 'in_progress', exec: { runId: 'r1', mode: 'subagents', by: 'main', agent: 'x', stage: 'implement', round: 1, since: '2026-10-12T12:00:00.000Z', leaseUntil: '2026-10-12T12:10:00.000Z' } }).exec).toMatchObject({ stage: 'implement', by: 'main' });
   });
+  it('drops exec when since or leaseUntil is not a date', () => {
+    const exec = { runId: 'r1', mode: 'subagents', by: 'main', agent: 'x', stage: 'implement', round: 1, since: '2026-10-12T12:00:00.000Z', leaseUntil: '2026-10-12T12:10:00.000Z' };
+    expect(normalizeState({ status: 'in_progress', exec: { ...exec, since: 'yesterday-ish' } }).exec).toBeUndefined();
+    expect(normalizeState({ status: 'in_progress', exec: { ...exec, leaseUntil: 'soon' } }).exec).toBeUndefined();
+  });
 });
 
 describe('normalizeMeta', () => {
