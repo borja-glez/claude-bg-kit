@@ -130,7 +130,7 @@ La ejecución secuencial no es un tercer modo: es subagents con N = 1.
 
 ### Señal en vivo
 
-`forge hook live` se ejecuta en SessionStart, SessionEnd, SubagentStart, SubagentStop y Stop. Para la coordinadora de una ejecución activa escribe `.forge/live/<sessionId>.json` en el checkout principal, con el último evento, la hora y los subagentes en marcha. lens, la banda y el roadmap lo leen: una sesión se muestra **sin señal** tras 7 minutos sin eventos y **parada** tras 12. Los subagentes que empezaron hace más de 3 horas se descartan. El hook no imprime nada y nunca falla.
+`forge hook live` se ejecuta en SessionStart, SessionEnd, SubagentStart, SubagentStop y Stop. Para la coordinadora de una ejecución activa escribe `.forge/live/<sessionId>.json` en el checkout principal, con el último evento, la hora y los subagentes en marcha. El primer Stop o SubagentStart de la ejecución fija la coordinadora: desde entonces solo esa sesión escribe la señal. lens y la banda la leen: una sesión se muestra **sin señal** tras 7 minutos sin eventos y **parada** tras 12, salvo que la señal liste un subagente que empezó hace menos de 3 horas (una coordinadora que espera a un agente largo sigue viva). Los subagentes que empezaron hace más de 3 horas se descartan. El roadmap no lee `.forge/live`: usa las concesiones de `sessions/<SID>` de la coordinadora y de `state/<T>.exec` de cada tarea, que la coordinadora alarga hasta el presupuesto previsto del agente (90 minutos como mucho) al lanzarlo. El hook no imprime nada y nunca falla.
 
 ## Modo infinito
 

@@ -130,7 +130,7 @@ Sequential execution is not a third mode: it is subagents with N = 1.
 
 ### Live signal
 
-`forge hook live` runs on SessionStart, SessionEnd, SubagentStart, SubagentStop and Stop. For the coordinator of an active execution it writes `.forge/live/<sessionId>.json` in the main checkout, with the last event, the time and the subagents that are running. lens, the band and the roadmap read it: a session is shown as **silent** after 7 minutes without events and **stopped** after 12. Subagents that started more than 3 hours ago are dropped. The hook prints nothing and never fails.
+`forge hook live` runs on SessionStart, SessionEnd, SubagentStart, SubagentStop and Stop. For the coordinator of an active execution it writes `.forge/live/<sessionId>.json` in the main checkout, with the last event, the time and the subagents that are running. The first Stop or SubagentStart of the execution binds the coordinator: from then on only that session writes the signal. lens and the band read it: a session is shown as **silent** after 7 minutes without events and **stopped** after 12, unless the signal lists a subagent started less than 3 hours ago (a coordinator waiting on a long agent stays alive). Subagents that started more than 3 hours ago are dropped. The roadmap does not read `.forge/live`: it uses the leases in the coordinator's `sessions/<SID>` and in each task's `state/<T>.exec`, which the coordinator extends to the agent's expected budget (at most 90 minutes) when it dispatches one. The hook prints nothing and never fails.
 
 ## Infinite mode
 
