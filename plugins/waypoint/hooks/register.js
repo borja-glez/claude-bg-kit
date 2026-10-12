@@ -39,9 +39,10 @@ function computeMetrics(plan, states, now, activeSessions = 1) {
   for (const t of plan.tasks) {
     const s = states[t.id];
     const start = s?.startedAt ?? s?.claimedAt;
-    if (start) starts.push(Date.parse(start));
+    if (start && Number.isFinite(Date.parse(start))) starts.push(Date.parse(start));
     if (s?.status === "done" && s.startedAt && s.doneAt) {
-      durations.push(Math.max(0, (Date.parse(s.doneAt) - Date.parse(s.startedAt)) / 6e4));
+      const d = Math.max(0, (Date.parse(s.doneAt) - Date.parse(s.startedAt)) / 6e4);
+      if (Number.isFinite(d)) durations.push(d);
     }
   }
   const paceMin = durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : null;
@@ -10680,10 +10681,16 @@ var MAX_TASKS = 500;
 var isObj = (x) => !!x && typeof x === "object" && !Array.isArray(x);
 var str = (x) => typeof x === "string" && x ? x : null;
 var iso = (x) => typeof x === "string" && !Number.isNaN(Date.parse(x)) ? x : null;
+var FUTURE_SKEW_MS = 12e4;
+var finishedOf = (x, now) => {
+  const v = iso(x);
+  if (!v) return null;
+  return now !== void 0 && Number.isFinite(now) && Date.parse(v) - now > FUTURE_SKEW_MS ? null : v;
+};
 var int3 = (x, min, max, dflt) => typeof x === "number" && Number.isInteger(x) ? Math.min(max, Math.max(min, x)) : dflt;
 var oneOf = (list, x) => list.includes(x) ? x : null;
 var cleanTitle = (x) => typeof x === "string" ? x.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim().slice(0, 200) : "";
-function normalizeTask(x) {
+function normalizeTask(x, now) {
   if (!isObj(x)) return null;
   const status = oneOf(TASK_STATUSES, x.status);
   const stage = oneOf(STAGES, x.stage);
@@ -10707,10 +10714,11 @@ function normalizeTask(x) {
     updatedAt: iso(x.updatedAt) ?? startedAt,
     detail: typeof x.detail === "string" ? x.detail.slice(0, 500) : null,
     ...iso(x.nudgedAt) ? { nudgedAt: iso(x.nudgedAt) } : {},
+    ...finishedOf(x.finishedAt, now) ? { finishedAt: finishedOf(x.finishedAt, now) } : {},
     ...title ? { title } : {}
   };
 }
-function normalizeExecution(x) {
+function normalizeExecution(x, now) {
   if (!isObj(x)) return null;
   const mode = oneOf(["subagents", "sessions"], x.mode);
   const kind = oneOf(["plan", "ephemeral"], x.kind) ?? "plan";
@@ -10721,7 +10729,7 @@ function normalizeExecution(x) {
   const tasks = {};
   if (isObj(x.tasks)) {
     for (const [id2, t] of Object.entries(x.tasks).slice(0, MAX_TASKS)) {
-      const n = isPlanId(id2) ? normalizeTask(t) : null;
+      const n = isPlanId(id2) ? normalizeTask(t, now) : null;
       if (n) tasks[id2] = n;
     }
   }
@@ -10747,10 +10755,10 @@ function normalizeExecution(x) {
     ...typeof x.planned === "number" && Number.isInteger(x.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x.planned)) } : {}
   };
 }
-function parseExecution(text) {
+function parseExecution(text, now) {
   if (typeof text !== "string") return null;
   try {
-    return normalizeExecution(JSON.parse(text));
+    return normalizeExecution(JSON.parse(text), now);
   } catch {
     return null;
   }
@@ -10826,10 +10834,12 @@ function executionView(i) {
       since: p?.since ?? t.stageSince,
       liveness: p && isMember(p) ? memberLiveness(p) : agent && waiting ? "alive" : p ? liveness(i.now, p.leaseUntil) : coord,
       mode: p?.mode ?? t.executor,
-      by: p?.by ?? null
+      by: p?.by ?? null,
+      startedAt: t.startedAt
     };
   });
-  const manual = Object.values(i.tasks).filter((p) => p.runId === e.runId && p.mode === "manual" && p.status === "running" && !e.tasks[p.task]).sort((a, b) => Date.parse(a.since) - Date.parse(b.since)).slice(0, 10).map((p) => ({ task: p.task, title: i.titles?.[p.task] ?? null, stage: p.stage, agent: p.agent, round: p.round, since: p.since, liveness: memberLiveness(p), mode: "manual", by: p.by }));
+  const manual = Object.values(i.tasks).filter((p) => p.runId === e.runId && p.mode === "manual" && p.status === "running" && !e.tasks[p.task]).sort((a, b) => Date.parse(a.since) - Date.parse(b.since)).slice(0, 10).map((p) => ({ task: p.task, title: i.titles?.[p.task] ?? null, stage: p.stage, agent: p.agent, round: p.round, since: p.since, liveness: memberLiveness(p), mode: "manual", by: p.by, startedAt: null }));
+  const finished = Object.entries(e.tasks).filter(([, t]) => (t.status === "integrated" || t.status === "blocked") && !!t.finishedAt && Number.isFinite(Date.parse(t.finishedAt))).sort((a, b) => Date.parse(b[1].finishedAt) - Date.parse(a[1].finishedAt)).slice(0, 3).map(([task, t]) => ({ task, startedAt: t.startedAt, finishedAt: t.finishedAt }));
   return {
     runId: e.runId,
     mode: e.mode,
@@ -10847,7 +10857,9 @@ function executionView(i) {
     blocked: ids("blocked"),
     manual,
     orphans: [...slots, ...manual].filter((s) => s.liveness === "stopped").map((s) => s.task),
-    agents: signal?.agents ?? []
+    agents: signal?.agents ?? [],
+    startedAt: e.startedAt,
+    finished
   };
 }
 
@@ -10902,6 +10914,20 @@ function knownLocale(f) {
 }
 var MAX_CELLS = 120;
 var CELL = { done: "d", in_progress: "a", claimed: "a", blocked: "b", free: "p", orphaned: "b" };
+var RECENT_DONE = 3;
+var SKEW_MS = 2 * 6e4;
+function recentDone(tasks, states, now) {
+  const out = [];
+  for (const t of tasks) {
+    const s = states[t.id];
+    if (s?.status !== "done") continue;
+    const end = Date.parse(s.doneAt ?? "");
+    const start = Date.parse(s.startedAt ?? s.claimedAt ?? "");
+    if (!Number.isFinite(end) || !Number.isFinite(start) || end - now > SKEW_MS || end < start) continue;
+    out.push({ id: t.id, minutes: Math.floor((end - start) / 6e4), ...t.estimate_min ? { estimateMin: t.estimate_min } : {}, at: end });
+  }
+  return out.sort((a, b) => b.at - a.at).slice(0, RECENT_DONE).map(({ at: _at, ...r }) => r);
+}
 function workModel(project, f) {
   let plan;
   try {
@@ -10935,7 +10961,8 @@ function workModel(project, f) {
     phase: pi >= 0 ? { index: pi + 1, total: plan.phases.length, name: plan.phases[pi].name } : null,
     cells: plan.tasks.filter((t) => !track || t.track === track).slice(0, MAX_CELLS).map((t) => CELL[states[t.id]?.status ?? "free"] ?? "p").join(""),
     swarm: typeof session.launchedBy === "string" && !!session.launchedBy,
-    run: memberRun(project, sid, f)
+    run: memberRun(project, sid, f),
+    recentDone: recentDone(plan.tasks.filter((t) => !track || t.track === track), states, Date.now())
   };
 }
 function memberRun(project, sid, f) {

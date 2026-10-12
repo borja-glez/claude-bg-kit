@@ -44,6 +44,20 @@ function normalizeProposal(x) {
 var CLIP = 80;
 var MAX_VALIDATORS = 10;
 var MAX_ACCEPTED = 200;
+var MAX_STAGES = 20;
+var MAX_TS = 40;
+var tsText = (x) => str2(x) && x.length <= MAX_TS ? x : null;
+function stagesOf(x) {
+  const out = {};
+  if (!isObj(x)) return out;
+  for (const [k, v] of Object.entries(x)) {
+    if (Object.keys(out).length >= MAX_STAGES) break;
+    const key = cleanText(k).toLowerCase();
+    if (!key || typeof v !== "number" || !Number.isFinite(v) || v < 0) continue;
+    out[key] = Math.round(v);
+  }
+  return out;
+}
 var str2 = (x) => typeof x === "string";
 var num = (x) => typeof x === "number" && Number.isFinite(x) ? x : null;
 var isObj = (x) => !!x && typeof x === "object" && !Array.isArray(x);
@@ -81,7 +95,12 @@ function normalizeStatus(x) {
       total: num(x.verify.total),
       evidence: pathText(x.verify.evidence),
       reason: str2(x.verify.reason) ? cleanText(x.verify.reason) : null
-    } : null
+    } : null,
+    // Absent in a status written before timings existed: no times are shown.
+    taskStartedAt: tsText(x.taskStartedAt),
+    stageSince: tsText(x.stageSince),
+    stages: stagesOf(x.stages),
+    doneAt: tsText(x.doneAt)
   };
 }
 
@@ -10558,10 +10577,16 @@ var MAX_TASKS = 500;
 var isObj2 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
 var str3 = (x) => typeof x === "string" && x ? x : null;
 var iso = (x) => typeof x === "string" && !Number.isNaN(Date.parse(x)) ? x : null;
+var FUTURE_SKEW_MS = 12e4;
+var finishedOf = (x, now) => {
+  const v = iso(x);
+  if (!v) return null;
+  return now !== void 0 && Number.isFinite(now) && Date.parse(v) - now > FUTURE_SKEW_MS ? null : v;
+};
 var int3 = (x, min, max, dflt) => typeof x === "number" && Number.isInteger(x) ? Math.min(max, Math.max(min, x)) : dflt;
 var oneOf2 = (list, x) => list.includes(x) ? x : null;
 var cleanTitle = (x) => typeof x === "string" ? x.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim().slice(0, 200) : "";
-function normalizeTask(x) {
+function normalizeTask(x, now) {
   if (!isObj2(x)) return null;
   const status = oneOf2(TASK_STATUSES, x.status);
   const stage = oneOf2(STAGES, x.stage);
@@ -10585,10 +10610,11 @@ function normalizeTask(x) {
     updatedAt: iso(x.updatedAt) ?? startedAt,
     detail: typeof x.detail === "string" ? x.detail.slice(0, 500) : null,
     ...iso(x.nudgedAt) ? { nudgedAt: iso(x.nudgedAt) } : {},
+    ...finishedOf(x.finishedAt, now) ? { finishedAt: finishedOf(x.finishedAt, now) } : {},
     ...title ? { title } : {}
   };
 }
-function normalizeExecution(x) {
+function normalizeExecution(x, now) {
   if (!isObj2(x)) return null;
   const mode = oneOf2(["subagents", "sessions"], x.mode);
   const kind = oneOf2(["plan", "ephemeral"], x.kind) ?? "plan";
@@ -10599,7 +10625,7 @@ function normalizeExecution(x) {
   const tasks = {};
   if (isObj2(x.tasks)) {
     for (const [id2, t] of Object.entries(x.tasks).slice(0, MAX_TASKS)) {
-      const n2 = isPlanId(id2) ? normalizeTask(t) : null;
+      const n2 = isPlanId(id2) ? normalizeTask(t, now) : null;
       if (n2) tasks[id2] = n2;
     }
   }
@@ -10625,10 +10651,10 @@ function normalizeExecution(x) {
     ...typeof x.planned === "number" && Number.isInteger(x.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x.planned)) } : {}
   };
 }
-function parseExecution(text) {
+function parseExecution(text, now) {
   if (typeof text !== "string") return null;
   try {
-    return normalizeExecution(JSON.parse(text));
+    return normalizeExecution(JSON.parse(text), now);
   } catch {
     return null;
   }
@@ -10742,10 +10768,12 @@ function executionView(i) {
       since: p?.since ?? t.stageSince,
       liveness: p && isMember(p) ? memberLiveness(p) : agent && waiting ? "alive" : p ? liveness(i.now, p.leaseUntil) : coord,
       mode: p?.mode ?? t.executor,
-      by: p?.by ?? null
+      by: p?.by ?? null,
+      startedAt: t.startedAt
     };
   });
-  const manual = Object.values(i.tasks).filter((p) => p.runId === e.runId && p.mode === "manual" && p.status === "running" && !e.tasks[p.task]).sort((a, b) => Date.parse(a.since) - Date.parse(b.since)).slice(0, 10).map((p) => ({ task: p.task, title: i.titles?.[p.task] ?? null, stage: p.stage, agent: p.agent, round: p.round, since: p.since, liveness: memberLiveness(p), mode: "manual", by: p.by }));
+  const manual = Object.values(i.tasks).filter((p) => p.runId === e.runId && p.mode === "manual" && p.status === "running" && !e.tasks[p.task]).sort((a, b) => Date.parse(a.since) - Date.parse(b.since)).slice(0, 10).map((p) => ({ task: p.task, title: i.titles?.[p.task] ?? null, stage: p.stage, agent: p.agent, round: p.round, since: p.since, liveness: memberLiveness(p), mode: "manual", by: p.by, startedAt: null }));
+  const finished2 = Object.entries(e.tasks).filter(([, t]) => (t.status === "integrated" || t.status === "blocked") && !!t.finishedAt && Number.isFinite(Date.parse(t.finishedAt))).sort((a, b) => Date.parse(b[1].finishedAt) - Date.parse(a[1].finishedAt)).slice(0, 3).map(([task, t]) => ({ task, startedAt: t.startedAt, finishedAt: t.finishedAt }));
   return {
     runId: e.runId,
     mode: e.mode,
@@ -10763,7 +10791,9 @@ function executionView(i) {
     blocked: ids("blocked"),
     manual,
     orphans: [...slots, ...manual].filter((s) => s.liveness === "stopped").map((s) => s.task),
-    agents: signal?.agents ?? []
+    agents: signal?.agents ?? [],
+    startedAt: e.startedAt,
+    finished: finished2
   };
 }
 
@@ -10826,7 +10856,23 @@ var MAIN = "main";
 var MAX_LOOPS = 200;
 var OVERFLOW = "overflow";
 var n = (x) => typeof x === "number" && Number.isFinite(x) && x > 0 ? x : 0;
-var newUsage = (startedAt) => ({ startedAt, loops: {}, tracking: { waypoint: 0, forge: 0 } });
+var newUsage = (startedAt) => ({ startedAt, loops: {}, tracking: { waypoint: 0, forge: 0 }, activeMs: 0 });
+var newTurnClock = () => ({ since: null, lastActivityMs: 0 });
+function touchTurn(c2, now) {
+  if (Number.isFinite(now) && now > c2.lastActivityMs) c2.lastActivityMs = now;
+}
+function startTurn(s, c2, now) {
+  if (c2.since !== null) closeTurn(s, c2.since, c2.lastActivityMs);
+  c2.since = now;
+  c2.lastActivityMs = now;
+}
+function endTurn(s, c2, now) {
+  if (c2.since !== null) closeTurn(s, c2.since, now);
+  c2.since = null;
+}
+function closeTurn(s, since, now) {
+  if (Number.isFinite(since) && Number.isFinite(now) && now > since) s.activeMs += now - since;
+}
 function effortText(effort) {
   if (typeof effort === "string" && effort) return effort;
   if (typeof effort === "number" && Number.isFinite(effort)) return String(effort);
@@ -10878,6 +10924,230 @@ function trackingKind(tool, input) {
 }
 function recordTracking(s, kind, chars) {
   s.tracking[kind] += Math.ceil(n(chars) / 4);
+}
+
+// src/lens/view.ts
+var PALETTE = {
+  base: "#1e1e2e",
+  mantle: "#181825",
+  crust: "#11111b",
+  s0: "#313244",
+  s1: "#45475a",
+  s2: "#585b70",
+  o0: "#6c7086",
+  sub: "#a6adc8",
+  text: "#cdd6f4",
+  lavender: "#b4befe",
+  blue: "#89b4fa",
+  sapphire: "#74c7ec",
+  sky: "#89dceb",
+  teal: "#94e2d5",
+  green: "#a6e3a1",
+  yellow: "#f9e2af",
+  peach: "#fab387",
+  red: "#f38ba8",
+  mauve: "#cba6f7",
+  pink: "#f5c2e7",
+  flamingo: "#f2cdcd"
+};
+var LATTE = {
+  base: "#eff1f5",
+  mantle: "#e6e9ef",
+  crust: "#dce0e8",
+  s0: "#ccd0da",
+  s1: "#bcc0cc",
+  s2: "#acb0be",
+  o0: "#9ca0b0",
+  sub: "#6c6f85",
+  text: "#4c4f69",
+  lavender: "#7287fd",
+  blue: "#1e66f5",
+  sapphire: "#209fb5",
+  sky: "#04a5e5",
+  teal: "#179299",
+  green: "#40a02b",
+  yellow: "#df8e1d",
+  peach: "#fe640b",
+  red: "#d20f39",
+  mauve: "#8839ef",
+  pink: "#ea76cb",
+  flamingo: "#dd7878"
+};
+var STATE_HUE = { done: "sapphire", active: "peach", blocked: "yellow", failed: "red", pending: "s2" };
+var LETTER = { d: "done", a: "active", b: "blocked", p: "pending" };
+var SECTION_HUE = {
+  roadmap: "sapphire",
+  forge: "peach",
+  superpowers: "mauve",
+  todos: "green",
+  agents: "lavender",
+  tasks: "teal",
+  now: "sky"
+};
+var SECTION_ICON = {
+  // Single-width glyphs only: some terminals draw ⚒ or ☰ two cells wide and the title runs into them.
+  roadmap: "\u25C6",
+  forge: "\u25C8",
+  superpowers: "\u2726",
+  todos: "\u2261",
+  agents: "\u25CE",
+  tasks: "\u25A4",
+  now: "\u25B8"
+};
+var TIERS = {
+  "forge-mech": { label: "mech", hue: "teal", rank: 1 },
+  "forge-impl-light": { label: "light", hue: "sky", rank: 2 },
+  "forge-impl": { label: "impl", hue: "blue", rank: 3 },
+  "forge-impl-heavy": { label: "heavy", hue: "mauve", rank: 4 },
+  "forge-fable": { label: "fable", hue: "pink", rank: 5 },
+  "forge-review-correctness": { label: "correctness", hue: "green", rank: null },
+  "forge-review-security": { label: "security", hue: "red", rank: null },
+  "forge-review-perf": { label: "perf", hue: "yellow", rank: null },
+  "forge-verify": { label: "verify", hue: "sapphire", rank: null },
+  "forge-verify-heavy": { label: "verify", hue: "sapphire", rank: null },
+  "forge-planner": { label: "planner", hue: "lavender", rank: null },
+  "forge-scout": { label: "scout", hue: "flamingo", rank: null },
+  "design-critic": { label: "critic", hue: "flamingo", rank: null }
+};
+function tierOf(agent) {
+  const name = String(agent ?? "").split(":").pop() ?? "";
+  return TIERS[name] ?? { label: name || "?", hue: "lavender", rank: null };
+}
+var PATH_HUE = { trivial: "green", small: "teal", medium: "peach", large: "red" };
+var STAGES2 = ["triage", "design", "plan", "execution", "implement", "validate", "verify", "review", "verdict", "final"];
+var RUN_STAGES = ["design", "plan", "execution", "final"];
+var STAGE_OF = {
+  triage: "triage",
+  design: "design",
+  plan: "plan",
+  planning: "plan",
+  execution: "execution",
+  implement: "implement",
+  implementation: "implement",
+  impl: "implement",
+  fix: "implement",
+  redo: "implement",
+  validate: "validate",
+  validation: "validate",
+  verify: "verify",
+  review: "review",
+  verdict: "verdict",
+  round: "verdict",
+  final: "final",
+  "final-review": "final",
+  done: "final"
+};
+var stageOf = (phase) => {
+  const p = String(phase).toLowerCase();
+  return Object.hasOwn(STAGE_OF, p) ? STAGE_OF[p] : p;
+};
+function stagesFor(path, phase, validated = null, verifyPlanned = false) {
+  if (path === "run") {
+    if (phase.toLowerCase() === "done") return RUN_STAGES.map((name) => ({ name, state: "done" }));
+    const i2 = RUN_STAGES.indexOf(STAGE_OF[phase.toLowerCase()] ?? "execution");
+    const at2 = i2 < 0 ? RUN_STAGES.indexOf("execution") : i2;
+    return RUN_STAGES.map((name, k) => ({ name, state: k < at2 ? "done" : k === at2 ? "active" : "pending" }));
+  }
+  const large = path === "large";
+  const light = path === "trivial" || path === "small";
+  const names = STAGES2.filter((s) => s !== "execution" && (large || s !== "design" && s !== "plan" && s !== "final") && !(light && (s === "review" || s === "verdict")) && (s !== "verify" || verifyPlanned));
+  if (phase.toLowerCase() === "done") return names.map((name) => ({ name, state: "done" }));
+  const at = STAGE_OF[phase.toLowerCase()] ?? null;
+  let i = at ? names.indexOf(at) : -1;
+  const v = names.indexOf("validate");
+  if (validated && at === null) {
+    if (validated === "failed") i = v;
+    else if (light) return names.map((name) => ({ name, state: "done" }));
+    else i = v + 1;
+  }
+  const out = names.map((name, k) => ({ name, state: i < 0 ? k === 0 ? "done" : "pending" : k < i ? "done" : k === i ? "active" : "pending" }));
+  return out;
+}
+function forgePhase(f) {
+  const total = Math.max(f.briefs ?? 0, f.brief ?? 0);
+  const accepted = new Set(f.accepted ?? []);
+  const all = total > 0 && Array.from({ length: total }, (_, i) => i + 1).every((n2) => accepted.has(n2));
+  return all && f.verdict?.action === "accept" ? "done" : f.phase;
+}
+var count = (cells2) => ({ cells: cells2, done: cells2.filter((c2) => c2 === "done").length, total: cells2.length });
+var roadmapCells = (w) => count([...w.cells ?? ""].map((ch) => LETTER[ch] ?? "pending"));
+function briefCells(f) {
+  const accepted = new Set(f.accepted ?? []);
+  const total = Math.max(f.briefs ?? 0, f.brief ?? 0, ...accepted);
+  if (total <= 0) return null;
+  const sentBack = f.verdict !== null && f.verdict.action !== "accept";
+  const cells2 = [];
+  for (let n2 = 1; n2 <= Math.min(total, 60); n2++) {
+    cells2.push(accepted.has(n2) ? "done" : n2 === f.brief ? sentBack && f.round ? "failed" : "active" : "pending");
+  }
+  return count(cells2);
+}
+function todoCells(t) {
+  const cells2 = [];
+  const total = Math.min(t.total, 60);
+  for (let i = 0; i < total; i++) cells2.push(i < t.done ? "done" : i === t.done && t.inProgress ? "active" : "pending");
+  return { cells: cells2, done: t.done, total: t.total };
+}
+function superpowersCells(s) {
+  const cells2 = [];
+  const total = Math.min(s.tasks, 60);
+  for (let i = 0; i < total; i++) cells2.push(i < s.done ? "done" : i === s.done ? s.current ? "failed" : "active" : "pending");
+  return { cells: cells2, done: s.done, total: s.tasks };
+}
+var ratio = (done, total) => total > 0 ? Math.max(0, Math.min(1, done / total)) : 0;
+var EIGHTHS = ["", "\u258F", "\u258E", "\u258D", "\u258C", "\u258B", "\u258A", "\u2589"];
+function barParts(r, width) {
+  const w = Math.max(1, Math.floor(width));
+  const exact = Math.max(0, Math.min(1, r)) * w;
+  const full = Math.floor(exact);
+  const edge = full < w ? EIGHTHS[Math.round((exact - full) * 7)] : "";
+  const fill = "\u2588".repeat(full) + edge;
+  return { fill, rest: "\u2591".repeat(Math.max(0, w - full - (edge ? 1 : 0))) };
+}
+var duration = (seconds) => seconds === null || seconds === void 0 ? null : seconds < 60 ? `${seconds}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s` : `${Math.floor(seconds / 3600)}h ${String(Math.floor(seconds % 3600 / 60)).padStart(2, "0")}m`;
+var DAY_S = 86400;
+function span(seconds) {
+  if (seconds === null || seconds === void 0 || !Number.isFinite(seconds) || seconds < 0) return null;
+  return seconds > DAY_S ? ">24h" : duration(Math.floor(seconds));
+}
+function headline(m) {
+  if (m.execution?.active) {
+    const x = m.execution;
+    const detail = x.slots.slice(0, 2).map((s) => `${s.task} ${s.stage}`).join(" \xB7 ");
+    return { section: "forge", title: `\u25B6 ${x.slots.length}/${x.parallel}`, detail, cells: null, agent: null };
+  }
+  if (m.forge) {
+    const f = m.forge;
+    const c2 = briefCells(f);
+    return { section: "forge", title: f.task, detail: [f.path, forgePhase(f)].filter(Boolean).join(" \xB7 "), cells: c2, agent: f.agent };
+  }
+  if (m.waypoint) {
+    const w = m.waypoint;
+    return { section: "roadmap", title: w.project, detail: w.current ? `${w.current.id} ${w.current.title}` : "", cells: roadmapCells(w), agent: null };
+  }
+  if (m.superpowers) {
+    const s = m.superpowers;
+    return { section: "superpowers", title: s.plan || "superpowers", detail: s.current ? `round ${s.current.round}/5` : "", cells: superpowersCells(s), agent: null };
+  }
+  if (m.todos) return { section: "todos", title: m.todos.inProgress ?? "", detail: "", cells: todoCells(m.todos), agent: null };
+  if (m.subagents.length) return { section: "agents", title: "", detail: "", cells: null, agent: m.subagents.at(-1).type };
+  return null;
+}
+var dec = (locale) => locale.startsWith("es") ? "," : ".";
+function fmtTokens(n2, locale) {
+  if (n2 >= 999500) return `${(n2 / 1e6).toFixed(2).replace(".", dec(locale))} M`;
+  if (n2 >= 1e3) return `${Math.round(n2 / 1e3)} k`;
+  return String(Math.round(n2));
+}
+function fmtUsd(n2, locale) {
+  const v = (Math.round(n2 * 100) / 100 < 10 ? n2.toFixed(2) : n2.toFixed(1)).replace(".", dec(locale));
+  return locale.startsWith("es") ? `${v} $` : `$${v}`;
+}
+function usageBandText(m) {
+  const u = m.usage;
+  if (!u) return null;
+  const own = u.session ?? { tokens: u.tokens, costUsd: u.costUsd };
+  return `${fmtTokens(own.tokens, m.locale)} tok \xB7 ${u.sessionPartial ? "\u2265 " : ""}${fmtUsd(own.costUsd, m.locale)}`;
 }
 
 // src/lens/usage-summary.ts
@@ -10950,6 +11220,16 @@ function summarizeUsage(s) {
     tracking: trackTokens ? { tokens: trackTokens, costUsd: trackCost } : null,
     withoutForge
   };
+}
+
+// src/lens/finished.ts
+var FINISHED_MAX = 5;
+var FINISHED_TTL_MS = 5 * 6e4;
+function pushFinished(list, entry) {
+  return [...list.filter((x) => x.id !== entry.id), entry].slice(-FINISHED_MAX);
+}
+function freshFinished(list, now) {
+  return list.filter((x) => Number.isFinite(now) && x.at <= now && now - x.at < FINISHED_TTL_MS);
 }
 
 // src/lens/model.ts
@@ -11046,6 +11326,18 @@ function summarizeTodos(todos) {
   return out;
 }
 var secs = (now, since) => Number.isFinite(now) && Number.isFinite(since) ? Math.max(0, Math.floor((now - since) / 1e3)) : null;
+function usageTime(session, run, turnSince, now) {
+  const live = turnSince !== null && Number.isFinite(turnSince) && Number.isFinite(now) && now > turnSince ? now - turnSince : 0;
+  const active = (s) => Math.floor((s.activeMs + live) / 1e3);
+  const since = (s) => s.startedAt > 0 && Number.isFinite(now) && now >= s.startedAt ? Math.floor((now - s.startedAt) / 1e3) : null;
+  const shown = run ?? session;
+  return {
+    activeSeconds: active(shown),
+    activePartial: !!run?.activePartial,
+    sinceStartSeconds: since(shown),
+    session: run ? { activeSeconds: active(session), sinceStartSeconds: since(session) } : null
+  };
+}
 var STALE_LEDGER_MS = 24 * 36e5;
 function superpowers(input) {
   try {
@@ -11096,8 +11388,37 @@ function forgeFromStatus(text, now, briefs = null) {
   if (!st) return null;
   const t = Date.parse(st.ts);
   if (!Number.isFinite(t) || !Number.isFinite(now) || now - t > FORGE_WINDOW_MS) return null;
-  const { ts: _ts, ...forge } = st;
-  return { ...forge, briefs };
+  const { ts: _ts, taskStartedAt: _a, stageSince: _b, stages: _c, doneAt: _d, ...forge } = st;
+  return { ...forge, briefs, timing: forgeTiming(st, now) };
+}
+function elapsed(from, to, now) {
+  const t = from ? Date.parse(from) : NaN;
+  if (!Number.isFinite(t) || !Number.isFinite(to) || !Number.isFinite(now)) return null;
+  if (t - now > FUTURE_SKEW_MS || to - now > FUTURE_SKEW_MS || to < t) return null;
+  return Math.floor((to - t) / 1e3);
+}
+function forgeTiming(st, now) {
+  if (!st.taskStartedAt) return null;
+  const rawDone = st.doneAt ? Date.parse(st.doneAt) : NaN;
+  const doneMs = elapsed(st.taskStartedAt, rawDone, now) !== null ? rawDone : NaN;
+  const done = Number.isFinite(doneMs);
+  const sums = /* @__PURE__ */ new Map();
+  for (const [phase, s] of Object.entries(st.stages ?? {})) {
+    if (typeof s !== "number" || !Number.isFinite(s) || s < 0) continue;
+    const name = stageOf(phase);
+    sums.set(name, (sums.get(name) ?? 0) + s);
+  }
+  const current = stageOf(st.phase || "triage");
+  const liveSecs = done ? null : elapsed(st.stageSince, now, now);
+  if (liveSecs !== null) sums.set(current, (sums.get(current) ?? 0) + liveSecs);
+  const order = STAGES2;
+  const known = order.filter((n2) => sums.has(n2));
+  const other = [...sums.keys()].filter((n2) => !order.includes(n2));
+  return {
+    taskSeconds: elapsed(st.taskStartedAt, done ? doneMs : now, now),
+    done,
+    stages: [...known, ...other].map((name) => ({ name, seconds: sums.get(name), live: liveSecs !== null && name === current }))
+  };
 }
 function pendingProposals(texts) {
   const out = [];
@@ -11147,7 +11468,7 @@ function executionFromFiles(execText, taskTexts = {}, liveTexts = {}, now, title
   let v;
   const clean = titles && Object.fromEntries(Object.entries(titles).map(([id2, t]) => [id2, cleanText(t)]));
   try {
-    v = executionView({ exec: parseExecution(execText), tasks, live, titles: clean, now });
+    v = executionView({ exec: parseExecution(execText, now), tasks, live, titles: clean, now });
   } catch {
     return null;
   }
@@ -11163,6 +11484,8 @@ function executionFromFiles(execText, taskTexts = {}, liveTexts = {}, now, title
     coordinator: { ...v.coordinator },
     integrated: v.integrated,
     total: v.total,
+    elapsedSeconds: elapsed(v.startedAt, now, now),
+    finished: v.finished.map((f) => ({ task: f.task, seconds: elapsed(f.startedAt, Date.parse(f.finishedAt), now) })).filter((f) => f.seconds !== null),
     // model / effort: lens knows them only for its own session's subagents (from the usage loops), not for these.
     slots: v.slots.map((s) => ({
       task: s.task,
@@ -11173,6 +11496,7 @@ function executionFromFiles(execText, taskTexts = {}, liveTexts = {}, now, title
       effort: null,
       round: s.round,
       seconds: secondsSince(s.since, now),
+      taskSeconds: elapsed(s.startedAt, now, now),
       liveness: s.liveness,
       mode: s.mode
     })),
@@ -11220,6 +11544,23 @@ function infiniteFromRun(text, proposals, now) {
   const cycle = run.active ? Math.min(run.cycle + 1, max ?? Infinity) : run.cycle;
   return { cycle, cyclesMax: max, hoursLeft, active: run.active, autoApproved: autoApproved(proposals) };
 }
+function bandKey(model) {
+  const { subagentsDone: _done, usage: usage2, forge, ...rest } = model;
+  const key = { ...rest };
+  if (usage2) {
+    const { time: _time, ...u } = usage2;
+    key.usage = u;
+  } else key.usage = usage2;
+  if (forge) {
+    const { timing: _timing, ...f } = forge;
+    key.forge = f;
+  } else key.forge = forge;
+  if (rest.execution) {
+    const { elapsedSeconds: _e, finished: _f, slots, ...x } = rest.execution;
+    key.execution = { ...x, slots: slots.map(({ taskSeconds: _t, ...s }) => s) };
+  }
+  return JSON.stringify(key);
+}
 function buildPanelModel(input) {
   const { band, activity: a, now } = input;
   const wp = band.mode === "work" ? band : null;
@@ -11248,6 +11589,7 @@ function buildPanelModel(input) {
       groups: shown.groups,
       tracking: shown.tracking,
       withoutForge: shown.withoutForge,
+      time: usageTime(input.usage.session, input.usage.run, a.turnSince ?? null, now),
       pricesAsOf: PRICES_AS_OF
     };
   }
@@ -11265,7 +11607,8 @@ function buildPanelModel(input) {
       roadmapUrl: wp.roadmapUrl,
       locale: wp.locale,
       phase: wp.phase ? { ...wp.phase, name: clip(wp.phase.name) } : null,
-      cells: typeof wp.cells === "string" ? wp.cells.replace(/[^dabp]/g, "").slice(0, 120) : ""
+      cells: typeof wp.cells === "string" ? wp.cells.replace(/[^dabp]/g, "").slice(0, 120) : "",
+      recentDone: (wp.recentDone ?? []).slice(0, 3)
     },
     superpowers: superpowers(input),
     todos: todos.total ? todos : null,
@@ -11281,6 +11624,13 @@ function buildPanelModel(input) {
         ...loop?.effort ? { effort: loop.effort } : {}
       };
     }),
+    subagentsDone: freshFinished(a.finished ?? [], now).map((f) => ({
+      id: f.id,
+      type: f.type,
+      ...f.description ? { description: clip(f.description) } : {},
+      ...f.model ? { model: f.model } : {},
+      seconds: f.seconds
+    })),
     tool: a.tool ? { name: a.tool.name, seconds: secs(now, a.tool.since) } : null,
     turnSeconds: a.turnSince === null || a.turnSince === void 0 ? null : secs(now, a.turnSince),
     ccTasks: cc.length ? { open: cc.filter((t) => !t.done).length, done: cc.filter((t) => t.done).length, recent: cc.slice(-3).map((t) => clip(t.subject)) } : null,
@@ -11329,9 +11679,10 @@ function computeMetrics(plan, states, now, activeSessions = 1) {
   for (const t of plan.tasks) {
     const s = states[t.id];
     const start = s?.startedAt ?? s?.claimedAt;
-    if (start) starts.push(Date.parse(start));
+    if (start && Number.isFinite(Date.parse(start))) starts.push(Date.parse(start));
     if (s?.status === "done" && s.startedAt && s.doneAt) {
-      durations.push(Math.max(0, (Date.parse(s.doneAt) - Date.parse(s.startedAt)) / 6e4));
+      const d = Math.max(0, (Date.parse(s.doneAt) - Date.parse(s.startedAt)) / 6e4);
+      if (Number.isFinite(d)) durations.push(d);
     }
   }
   const paceMin = durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : null;
@@ -11558,6 +11909,20 @@ function knownLocale(f) {
 }
 var MAX_CELLS = 120;
 var CELL = { done: "d", in_progress: "a", claimed: "a", blocked: "b", free: "p", orphaned: "b" };
+var RECENT_DONE = 3;
+var SKEW_MS = 2 * 6e4;
+function recentDone(tasks, states, now) {
+  const out = [];
+  for (const t of tasks) {
+    const s = states[t.id];
+    if (s?.status !== "done") continue;
+    const end = Date.parse(s.doneAt ?? "");
+    const start = Date.parse(s.startedAt ?? s.claimedAt ?? "");
+    if (!Number.isFinite(end) || !Number.isFinite(start) || end - now > SKEW_MS || end < start) continue;
+    out.push({ id: t.id, minutes: Math.floor((end - start) / 6e4), ...t.estimate_min ? { estimateMin: t.estimate_min } : {}, at: end });
+  }
+  return out.sort((a, b) => b.at - a.at).slice(0, RECENT_DONE).map(({ at: _at, ...r }) => r);
+}
 function workModel(project, f) {
   let plan;
   try {
@@ -11591,7 +11956,8 @@ function workModel(project, f) {
     phase: pi >= 0 ? { index: pi + 1, total: plan.phases.length, name: plan.phases[pi].name } : null,
     cells: plan.tasks.filter((t) => !track || t.track === track).slice(0, MAX_CELLS).map((t) => CELL[states[t.id]?.status ?? "free"] ?? "p").join(""),
     swarm: typeof session.launchedBy === "string" && !!session.launchedBy,
-    run: memberRun(project, sid, f)
+    run: memberRun(project, sid, f),
+    recentDone: recentDone(plan.tasks.filter((t) => !track || t.track === track), states, Date.now())
   };
 }
 function memberRun(project, sid, f) {
@@ -11790,221 +12156,6 @@ async function loadBandModel($) {
   return buildBandModel(project, files);
 }
 
-// src/lens/view.ts
-var PALETTE = {
-  base: "#1e1e2e",
-  mantle: "#181825",
-  crust: "#11111b",
-  s0: "#313244",
-  s1: "#45475a",
-  s2: "#585b70",
-  o0: "#6c7086",
-  sub: "#a6adc8",
-  text: "#cdd6f4",
-  lavender: "#b4befe",
-  blue: "#89b4fa",
-  sapphire: "#74c7ec",
-  sky: "#89dceb",
-  teal: "#94e2d5",
-  green: "#a6e3a1",
-  yellow: "#f9e2af",
-  peach: "#fab387",
-  red: "#f38ba8",
-  mauve: "#cba6f7",
-  pink: "#f5c2e7",
-  flamingo: "#f2cdcd"
-};
-var LATTE = {
-  base: "#eff1f5",
-  mantle: "#e6e9ef",
-  crust: "#dce0e8",
-  s0: "#ccd0da",
-  s1: "#bcc0cc",
-  s2: "#acb0be",
-  o0: "#9ca0b0",
-  sub: "#6c6f85",
-  text: "#4c4f69",
-  lavender: "#7287fd",
-  blue: "#1e66f5",
-  sapphire: "#209fb5",
-  sky: "#04a5e5",
-  teal: "#179299",
-  green: "#40a02b",
-  yellow: "#df8e1d",
-  peach: "#fe640b",
-  red: "#d20f39",
-  mauve: "#8839ef",
-  pink: "#ea76cb",
-  flamingo: "#dd7878"
-};
-var STATE_HUE = { done: "sapphire", active: "peach", blocked: "yellow", failed: "red", pending: "s2" };
-var LETTER = { d: "done", a: "active", b: "blocked", p: "pending" };
-var SECTION_HUE = {
-  roadmap: "sapphire",
-  forge: "peach",
-  superpowers: "mauve",
-  todos: "green",
-  agents: "lavender",
-  tasks: "teal",
-  now: "sky"
-};
-var SECTION_ICON = {
-  // Single-width glyphs only: some terminals draw ⚒ or ☰ two cells wide and the title runs into them.
-  roadmap: "\u25C6",
-  forge: "\u25C8",
-  superpowers: "\u2726",
-  todos: "\u2261",
-  agents: "\u25CE",
-  tasks: "\u25A4",
-  now: "\u25B8"
-};
-var TIERS = {
-  "forge-mech": { label: "mech", hue: "teal", rank: 1 },
-  "forge-impl-light": { label: "light", hue: "sky", rank: 2 },
-  "forge-impl": { label: "impl", hue: "blue", rank: 3 },
-  "forge-impl-heavy": { label: "heavy", hue: "mauve", rank: 4 },
-  "forge-fable": { label: "fable", hue: "pink", rank: 5 },
-  "forge-review-correctness": { label: "correctness", hue: "green", rank: null },
-  "forge-review-security": { label: "security", hue: "red", rank: null },
-  "forge-review-perf": { label: "perf", hue: "yellow", rank: null },
-  "forge-verify": { label: "verify", hue: "sapphire", rank: null },
-  "forge-verify-heavy": { label: "verify", hue: "sapphire", rank: null },
-  "forge-planner": { label: "planner", hue: "lavender", rank: null },
-  "forge-scout": { label: "scout", hue: "flamingo", rank: null },
-  "design-critic": { label: "critic", hue: "flamingo", rank: null }
-};
-function tierOf(agent) {
-  const name = String(agent ?? "").split(":").pop() ?? "";
-  return TIERS[name] ?? { label: name || "?", hue: "lavender", rank: null };
-}
-var PATH_HUE = { trivial: "green", small: "teal", medium: "peach", large: "red" };
-var STAGES2 = ["triage", "design", "plan", "execution", "implement", "validate", "verify", "review", "verdict", "final"];
-var RUN_STAGES = ["design", "plan", "execution", "final"];
-var STAGE_OF = {
-  triage: "triage",
-  design: "design",
-  plan: "plan",
-  planning: "plan",
-  execution: "execution",
-  implement: "implement",
-  implementation: "implement",
-  impl: "implement",
-  fix: "implement",
-  redo: "implement",
-  validate: "validate",
-  validation: "validate",
-  verify: "verify",
-  review: "review",
-  verdict: "verdict",
-  round: "verdict",
-  final: "final",
-  "final-review": "final",
-  done: "final"
-};
-function stagesFor(path, phase, validated = null, verifyPlanned = false) {
-  if (path === "run") {
-    if (phase.toLowerCase() === "done") return RUN_STAGES.map((name) => ({ name, state: "done" }));
-    const i2 = RUN_STAGES.indexOf(STAGE_OF[phase.toLowerCase()] ?? "execution");
-    const at2 = i2 < 0 ? RUN_STAGES.indexOf("execution") : i2;
-    return RUN_STAGES.map((name, k) => ({ name, state: k < at2 ? "done" : k === at2 ? "active" : "pending" }));
-  }
-  const large = path === "large";
-  const light = path === "trivial" || path === "small";
-  const names = STAGES2.filter((s) => s !== "execution" && (large || s !== "design" && s !== "plan" && s !== "final") && !(light && (s === "review" || s === "verdict")) && (s !== "verify" || verifyPlanned));
-  if (phase.toLowerCase() === "done") return names.map((name) => ({ name, state: "done" }));
-  const at = STAGE_OF[phase.toLowerCase()] ?? null;
-  let i = at ? names.indexOf(at) : -1;
-  const v = names.indexOf("validate");
-  if (validated && at === null) {
-    if (validated === "failed") i = v;
-    else if (light) return names.map((name) => ({ name, state: "done" }));
-    else i = v + 1;
-  }
-  const out = names.map((name, k) => ({ name, state: i < 0 ? k === 0 ? "done" : "pending" : k < i ? "done" : k === i ? "active" : "pending" }));
-  return out;
-}
-function forgePhase(f) {
-  const total = Math.max(f.briefs ?? 0, f.brief ?? 0);
-  const accepted = new Set(f.accepted ?? []);
-  const all = total > 0 && Array.from({ length: total }, (_, i) => i + 1).every((n2) => accepted.has(n2));
-  return all && f.verdict?.action === "accept" ? "done" : f.phase;
-}
-var count = (cells2) => ({ cells: cells2, done: cells2.filter((c2) => c2 === "done").length, total: cells2.length });
-var roadmapCells = (w) => count([...w.cells ?? ""].map((ch) => LETTER[ch] ?? "pending"));
-function briefCells(f) {
-  const accepted = new Set(f.accepted ?? []);
-  const total = Math.max(f.briefs ?? 0, f.brief ?? 0, ...accepted);
-  if (total <= 0) return null;
-  const sentBack = f.verdict !== null && f.verdict.action !== "accept";
-  const cells2 = [];
-  for (let n2 = 1; n2 <= Math.min(total, 60); n2++) {
-    cells2.push(accepted.has(n2) ? "done" : n2 === f.brief ? sentBack && f.round ? "failed" : "active" : "pending");
-  }
-  return count(cells2);
-}
-function todoCells(t) {
-  const cells2 = [];
-  const total = Math.min(t.total, 60);
-  for (let i = 0; i < total; i++) cells2.push(i < t.done ? "done" : i === t.done && t.inProgress ? "active" : "pending");
-  return { cells: cells2, done: t.done, total: t.total };
-}
-function superpowersCells(s) {
-  const cells2 = [];
-  const total = Math.min(s.tasks, 60);
-  for (let i = 0; i < total; i++) cells2.push(i < s.done ? "done" : i === s.done ? s.current ? "failed" : "active" : "pending");
-  return { cells: cells2, done: s.done, total: s.tasks };
-}
-var ratio = (done, total) => total > 0 ? Math.max(0, Math.min(1, done / total)) : 0;
-var EIGHTHS = ["", "\u258F", "\u258E", "\u258D", "\u258C", "\u258B", "\u258A", "\u2589"];
-function barParts(r, width) {
-  const w = Math.max(1, Math.floor(width));
-  const exact = Math.max(0, Math.min(1, r)) * w;
-  const full = Math.floor(exact);
-  const edge = full < w ? EIGHTHS[Math.round((exact - full) * 7)] : "";
-  const fill = "\u2588".repeat(full) + edge;
-  return { fill, rest: "\u2591".repeat(Math.max(0, w - full - (edge ? 1 : 0))) };
-}
-var duration = (seconds) => seconds === null || seconds === void 0 ? null : seconds < 60 ? `${seconds}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s` : `${Math.floor(seconds / 3600)}h ${String(Math.floor(seconds % 3600 / 60)).padStart(2, "0")}m`;
-function headline(m) {
-  if (m.execution?.active) {
-    const x = m.execution;
-    const detail = x.slots.slice(0, 2).map((s) => `${s.task} ${s.stage}`).join(" \xB7 ");
-    return { section: "forge", title: `\u25B6 ${x.slots.length}/${x.parallel}`, detail, cells: null, agent: null };
-  }
-  if (m.forge) {
-    const f = m.forge;
-    const c2 = briefCells(f);
-    return { section: "forge", title: f.task, detail: [f.path, forgePhase(f)].filter(Boolean).join(" \xB7 "), cells: c2, agent: f.agent };
-  }
-  if (m.waypoint) {
-    const w = m.waypoint;
-    return { section: "roadmap", title: w.project, detail: w.current ? `${w.current.id} ${w.current.title}` : "", cells: roadmapCells(w), agent: null };
-  }
-  if (m.superpowers) {
-    const s = m.superpowers;
-    return { section: "superpowers", title: s.plan || "superpowers", detail: s.current ? `round ${s.current.round}/5` : "", cells: superpowersCells(s), agent: null };
-  }
-  if (m.todos) return { section: "todos", title: m.todos.inProgress ?? "", detail: "", cells: todoCells(m.todos), agent: null };
-  if (m.subagents.length) return { section: "agents", title: "", detail: "", cells: null, agent: m.subagents.at(-1).type };
-  return null;
-}
-var dec = (locale) => locale.startsWith("es") ? "," : ".";
-function fmtTokens(n2, locale) {
-  if (n2 >= 999500) return `${(n2 / 1e6).toFixed(2).replace(".", dec(locale))} M`;
-  if (n2 >= 1e3) return `${Math.round(n2 / 1e3)} k`;
-  return String(Math.round(n2));
-}
-function fmtUsd(n2, locale) {
-  const v = (Math.round(n2 * 100) / 100 < 10 ? n2.toFixed(2) : n2.toFixed(1)).replace(".", dec(locale));
-  return locale.startsWith("es") ? `${v} $` : `$${v}`;
-}
-function usageBandText(m) {
-  const u = m.usage;
-  if (!u) return null;
-  const own = u.session ?? { tokens: u.tokens, costUsd: u.costUsd };
-  return `${fmtTokens(own.tokens, m.locale)} tok \xB7 ${u.sessionPartial ? "\u2265 " : ""}${fmtUsd(own.costUsd, m.locale)}`;
-}
-
 // src/lens/cards.ts
 var modelRight = (s, t) => s.model ? `${shortModelName(s.model)}${s.effort ? ` \xB7 ${t.effortLevel(s.effort)}` : ""}` : void 0;
 var VERDICT_HUE = { accept: "green", fix: "yellow", redo: "red" };
@@ -12038,6 +12189,10 @@ function buildCards(m, t, nowMs2) {
     } else {
       blocks.push({ kind: "text", text: t.noTask, dim: true });
     }
+    for (const r of w.recentDone ?? []) {
+      const over = r.estimateMin !== void 0 && r.minutes > r.estimateMin;
+      blocks.push({ kind: "text", text: `\u2713 ${r.id} \xB7 ${r.minutes}${r.estimateMin ? `/${r.estimateMin}` : ""} min`, dim: true, ...over ? { hue: "yellow" } : {} });
+    }
     const chips = [];
     if (w.inbox > 0) chips.push({ text: `\u2709 ${w.inbox}`, hue: "blue" });
     if (w.escalation) chips.push({ text: `\u26A0 ${t.decision}`, hue: "red" });
@@ -12057,6 +12212,11 @@ function buildCards(m, t, nowMs2) {
     if (f) {
       const stages = m.execution?.active && f.path === "large" ? stagesFor("run", "execution") : stagesFor(f.path, forgePhase(f), f.validators.length ? f.validators.every((v) => v.ok) ? "ok" : "failed" : null, f.verify?.planned === true);
       blocks.push({ kind: "stages", stages, hue: SECTION_HUE.forge });
+      const tm = f.timing;
+      if (tm && tm.stages.length) {
+        const label = (n2) => Object.hasOwn(t.stage, n2) ? t.stage[n2] : n2;
+        blocks.push({ kind: "text", text: tm.stages.map((s) => `${label(s.name)} ${span(s.seconds) ?? "0s"}${s.live ? "\u2026" : ""}`).join(" \xB7 "), dim: true });
+      }
       if (f.verify?.planned) {
         const v = f.verify;
         const where = `verify ${v.surfaces.join(", ")}`;
@@ -12090,7 +12250,7 @@ function buildCards(m, t, nowMs2) {
       title: f?.task ?? "forge",
       hue: SECTION_HUE.forge,
       chip: f?.path ? { text: f.path, hue: PATH_HUE[f.path] ?? "peach" } : inf?.active ? { text: "\u221E", hue: "mauve" } : void 0,
-      subtitle: f && forgePhase(f) ? `${t.sForge} \xB7 ${forgePhase(f)}` : void 0,
+      subtitle: f && forgePhase(f) ? [t.sForge, forgePhase(f), f.timing && span(f.timing.taskSeconds) ? `${f.timing.done ? "\u2713 " : ""}${span(f.timing.taskSeconds)}` : null].filter(Boolean).join(" \xB7 ") : void 0,
       blocks
     });
   }
@@ -12115,7 +12275,13 @@ function buildCards(m, t, nowMs2) {
         spinning: s.liveness === "alive",
         tag: { text: s.task, hue: HUE[s.liveness] },
         text: s.title ?? "",
-        right: [stage(s.stage), s.agent ? tierOf(s.agent).label : null, duration(s.seconds), s.round ? `r${s.round}` : null].filter(Boolean).join(" \xB7 ")
+        right: [
+          stage(s.stage),
+          s.agent ? tierOf(s.agent).label : null,
+          duration(s.seconds),
+          s.taskSeconds != null && span(s.taskSeconds) ? `${t.taskTime} ${span(s.taskSeconds)}` : null,
+          s.round ? `r${s.round}` : null
+        ].filter(Boolean).join(" \xB7 ")
       });
     }
     for (const s of x.manual) {
@@ -12127,6 +12293,7 @@ function buildCards(m, t, nowMs2) {
         right: [stage(s.stage), duration(s.seconds)].filter(Boolean).join(" \xB7 ")
       });
     }
+    if (x.finished?.length) blocks.push({ kind: "text", text: `\u2713 ${x.finished.map((f) => `${f.task} ${span(f.seconds) ?? "0s"}`).join(" \xB7 ")}`, dim: true });
     const list = (label, ids) => {
       if (ids.length) blocks.push({ kind: "text", text: `${label}: ${ids.join(", ")}`, dim: true });
     };
@@ -12135,7 +12302,14 @@ function buildCards(m, t, nowMs2) {
     list(t.blockedLbl, x.blocked);
     list(t.orphans, x.orphans);
     const coord = x.coordinator.liveness;
-    out.push({ icon: "\u25B6", title: t.sExecution, hue: "teal", chip: { text: coord === "alive" ? t.alive : coord === "silent" ? t.silent : t.stopped, hue: HUE[coord] }, blocks });
+    out.push({
+      icon: "\u25B6",
+      title: t.sExecution,
+      hue: "teal",
+      chip: { text: coord === "alive" ? t.alive : coord === "silent" ? t.silent : t.stopped, hue: HUE[coord] },
+      subtitle: x.elapsedSeconds != null && span(x.elapsedSeconds) ? `\u23F1 ${span(x.elapsedSeconds)}` : void 0,
+      blocks
+    });
   }
   if (m.usage) {
     const u = m.usage;
@@ -12155,6 +12329,12 @@ function buildCards(m, t, nowMs2) {
       label: u.scope === "run" ? t.run : t.thisSession,
       right: `${fmtTokens(u.tokens, loc)} tok \xB7 ${u.partial ? "\u2265 " : ""}${fmtUsd(u.costUsd, loc)}`
     }];
+    if (u.time) {
+      const tm = u.time;
+      const line = (active, partial, since) => `\u23F1 ${t.active} ${partial ? "\u2265 " : ""}${span(active) ?? "0s"}${since !== null && span(since) ? ` \xB7 ${t.sinceStart} ${span(since)}` : ""}`;
+      blocks.push({ kind: "text", text: line(tm.activeSeconds, tm.activePartial, tm.sinceStartSeconds) });
+      if (tm.session) blocks.push({ kind: "text", text: `${t.thisSession}: ${line(tm.session.activeSeconds, false, tm.session.sinceStartSeconds)}`, dim: true });
+    }
     if (u.session) blocks.push({ kind: "text", text: `${t.thisSession}: ${fmtTokens(u.session.tokens, loc)} tok \xB7 ${u.sessionPartial ? "\u2265 " : ""}${fmtUsd(u.session.costUsd, loc)}`, dim: true });
     if (u.officialUsd !== null) blocks.push({ kind: "text", text: `${u.drift ? "\u26A0 " : ""}/cost ${fmtUsd(u.officialUsd, loc)}${u.drift ? ` \xB7 ${t.drift}` : ""}`, dim: !u.drift });
     for (const g of u.groups) {
@@ -12190,12 +12370,23 @@ function buildCards(m, t, nowMs2) {
     for (const next of td.next) blocks.push({ kind: "row", dot: "s2", text: next });
     out.push({ icon: SECTION_ICON.todos, title: t.sTodos, hue: SECTION_HUE.todos, chip: { text: `${td.done}/${td.total}`, hue: SECTION_HUE.todos }, blocks });
   }
-  if (m.subagents.length) {
+  const done = m.subagentsDone ?? [];
+  if (m.subagents.length || done.length) {
     const blocks = m.subagents.slice(-10).map((s) => {
       const tier = tierOf(s.type);
       return { kind: "row", dot: tier.hue, spinning: s.status !== "waiting", tag: { text: tier.label, hue: tier.hue }, text: s.description || s.type || "?", right: [modelRight(s, t), duration(s.seconds)].filter(Boolean).join("  ") || void 0 };
     });
-    out.push({ icon: SECTION_ICON.agents, title: t.sSubagents, hue: SECTION_HUE.agents, chip: { text: String(m.subagents.length), hue: SECTION_HUE.agents }, blocks });
+    for (const d of done) {
+      const text = ["\u2713 " + tierOf(d.type).label, d.description, d.model ? shortModelName(d.model) : null, span(d.seconds)].filter(Boolean).join(" \xB7 ");
+      blocks.push({ kind: "text", text, dim: true });
+    }
+    out.push({
+      icon: SECTION_ICON.agents,
+      title: t.sSubagents,
+      hue: SECTION_HUE.agents,
+      chip: m.subagents.length ? { text: String(m.subagents.length), hue: SECTION_HUE.agents } : void 0,
+      blocks
+    });
   }
   if (m.ccTasks) {
     const cc = m.ccTasks;
@@ -12335,7 +12526,7 @@ function drawBlock(b, x, y, inner, id2) {
       return out;
     }
     case "text":
-      return `<text class="${b.dim ? "m" : "t"}" x="${x}" y="${y + 14}" font-family="${FONT}" font-size="12">${xml(fit(b.text, 12, inner))}</text>`;
+      return `<text class="${b.dim ? "m" : "t"}"${b.hue ? ` style="fill:${c(b.hue)}"` : ""} x="${x}" y="${y + 14}" font-family="${FONT}" font-size="12">${xml(fit(b.text, 12, inner))}</text>`;
     case "chips": {
       let cx = x;
       let out = "";
@@ -12434,7 +12625,7 @@ function block(ui, key, b, inner) {
     case "row":
       return /* @__PURE__ */ h(Box, { key, flexDirection: "row", columnGap: 1 }, b.spinning ? spinner(ui, `${key}-s`, b.dot) : /* @__PURE__ */ h(Text, { color: hex(b.dot) }, "\u25CF"), b.tag ? /* @__PURE__ */ h(Text, { color: PALETTE.base, backgroundColor: hex(b.tag.hue), bold: true }, ` ${b.tag.text} `) : null, /* @__PURE__ */ h(Box, { flexGrow: 1, flexShrink: 1 }, /* @__PURE__ */ h(Text, { wrap: "truncate-end" }, b.text)), b.right ? /* @__PURE__ */ h(Text, { dimColor: true }, b.right) : null);
     case "text":
-      return /* @__PURE__ */ h(Text, { key, dimColor: b.dim, wrap: "truncate-end" }, b.text);
+      return /* @__PURE__ */ h(Text, { key, color: b.hue ? hex(b.hue) : void 0, dimColor: b.dim, wrap: "truncate-end" }, b.text);
     case "chips":
       return /* @__PURE__ */ h(Box, { key, flexDirection: "row", flexWrap: "wrap", columnGap: 1 }, b.chips.map((c2, i) => /* @__PURE__ */ h(Text, { key: `${key}-${i}`, color: hex(c2.hue), bold: true }, `\u2039${c2.text}\u203A`)));
   }
@@ -12470,7 +12661,8 @@ function toUsageFile(s, meta) {
     updatedAt: new Date(meta.now).toISOString(),
     costUsd: meta.costUsd,
     loops: s.loops,
-    tracking: s.tracking
+    tracking: s.tracking,
+    activeMs: s.activeMs
   };
 }
 function parseLoop(x) {
@@ -12517,7 +12709,8 @@ function parseUsageFile(text) {
     updatedAt,
     costUsd: typeof x.costUsd === "number" && Number.isFinite(x.costUsd) ? x.costUsd : null,
     loops,
-    tracking: { waypoint: num2(t.waypoint), forge: num2(t.forge) }
+    tracking: { waypoint: num2(t.waypoint), forge: num2(t.forge) },
+    ...typeof x.activeMs === "number" && Number.isFinite(x.activeMs) && x.activeMs >= 0 ? { activeMs: x.activeMs } : {}
   };
 }
 var RUN_RECENT_MS = 12 * 36e5;
@@ -12556,8 +12749,11 @@ function mergeForRun(files, own, since) {
   for (const f of files) {
     if (f.session === own.session || Date.parse(f.updatedAt) < since) continue;
     add(f.session, f.loops, f.tracking);
+    if (f.activeMs === void 0) out.activePartial = true;
+    else out.activeMs += f.activeMs;
   }
   add(own.session, own.state.loops, own.state.tracking);
+  out.activeMs += own.state.activeMs;
   return out;
 }
 function seedUsage(s, file) {
@@ -12581,6 +12777,7 @@ function seedUsage(s, file) {
   }
   s.tracking.waypoint += file.tracking.waypoint;
   s.tracking.forge += file.tracking.forge;
+  s.activeMs += file.activeMs ?? 0;
 }
 
 // src/lens/register.tsx
@@ -12598,6 +12795,17 @@ var MAX_PROPOSAL_FILES = 50;
 var timer = null;
 var emptyActivity = () => ({ tool: null, turnSince: null, todos: void 0, subagents: [], ccTasks: [] });
 var activity = emptyActivity();
+var finished = [];
+var turnClock = newTurnClock();
+var syncTurn = () => {
+  activity.turnSince = turnClock.since;
+};
+async function touch($) {
+  try {
+    touchTurn(turnClock, await nowMs($));
+  } catch {
+  }
+}
 var tools = /* @__PURE__ */ new Map();
 var MAX_TODOS = 200;
 var busy = false;
@@ -12616,6 +12824,9 @@ var lastWrite = -Infinity;
 var lastJson = "";
 function resetPanel() {
   activity = emptyActivity();
+  finished = [];
+  turnClock.since = null;
+  turnClock.lastActivityMs = 0;
   tools.clear();
   busy = false;
   panelFiles = {};
@@ -12867,7 +13078,7 @@ async function syncUsageStart($) {
 var baseName = (path) => path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
 function usageSig() {
   const steps = Object.values(usage.loops).reduce((a, l) => a + l.steps, 0);
-  return `${usage.startedAt}|${steps}|${usage.tracking.waypoint}|${usage.tracking.forge}`;
+  return `${usage.startedAt}|${steps}|${usage.tracking.waypoint}|${usage.tracking.forge}|${usage.activeMs}`;
 }
 async function writeUsageFileNow($, force) {
   try {
@@ -12985,6 +13196,19 @@ function usageInput() {
   }
   return { session: usage, run, officialUsd, officialOwnUsd };
 }
+function recordFinished(ran, now) {
+  if (!Number.isFinite(ran.since) || !Number.isFinite(now)) return;
+  const loop = usage.loops[ran.id];
+  const description = ran.description ?? loop?.description;
+  finished = pushFinished(freshFinished(finished, now), {
+    id: ran.id,
+    type: ran.type,
+    seconds: Math.max(0, Math.floor((now - ran.since) / 1e3)),
+    at: now,
+    ...description ? { description: clip2(String(description), LINE_MAX) } : {},
+    ...loop?.model ? { model: loop.model } : {}
+  });
+}
 async function liveSubagents($, now) {
   const fresh = activity.subagents.filter((s) => now - s.since < SUBAGENT_TTL_MS);
   let list;
@@ -13009,6 +13233,8 @@ async function liveSubagents($, now) {
       since: since.get(a.id) ?? now
     });
   }
+  const live = new Set(out.map((s) => s.id));
+  for (const s of fresh) if (!live.has(s.id)) recordFinished(s, now);
   return out.slice(-MAX_ACTIVITY);
 }
 async function buildPanel($) {
@@ -13017,14 +13243,14 @@ async function buildPanel($) {
   return buildPanelModel({
     band: roadmap,
     ...panelFiles,
-    activity: { ...activity, subagents },
+    activity: { ...activity, subagents, finished: freshFinished(finished, now) },
     now,
     usage: usageInput(),
     ...roadmap.locale ? { locale: roadmap.locale } : {}
   });
 }
 function keepBand($, model) {
-  const json2 = JSON.stringify(model);
+  const json2 = bandKey(model);
   if (json2 === bandJson) return;
   bandJson = json2;
   bandModel = model;
@@ -13134,7 +13360,7 @@ var TEXT = {
     conflictsLbl: "en conflicto",
     blockedLbl: "bloqueadas",
     integratedN: "integradas",
-    stage: { brief: "brief", implement: "implementar", validate: "validar", verify: "verificar", review: "revisar", verdict: "veredicto", integrate: "integrar", execution: "ejecuci\xF3n" },
+    stage: { brief: "brief", implement: "implementar", validate: "validar", verify: "verificar", review: "revisar", verdict: "veredicto", integrate: "integrar", execution: "ejecuci\xF3n", triage: "triaje", design: "dise\xF1o", plan: "plan", final: "final" },
     sForge: "forge",
     approve: "Aprobar",
     reject: "Rechazar",
@@ -13148,6 +13374,9 @@ var TEXT = {
     sUsage: "Consumo",
     effort: "esfuerzo",
     thisSession: "esta sesi\xF3n",
+    active: "activo",
+    sinceStart: "desde el inicio",
+    taskTime: "tarea",
     run: "ejecuci\xF3n",
     gMain: "Sesi\xF3n principal",
     gImpl: "Implementadores",
@@ -13199,7 +13428,7 @@ var TEXT = {
     conflictsLbl: "in conflict",
     blockedLbl: "blocked",
     integratedN: "integrated",
-    stage: { brief: "brief", implement: "implement", validate: "validate", verify: "verify", review: "review", verdict: "verdict", integrate: "integrate", execution: "execution" },
+    stage: { brief: "brief", implement: "implement", validate: "validate", verify: "verify", review: "review", verdict: "verdict", integrate: "integrate", execution: "execution", triage: "triage", design: "design", plan: "plan", final: "final" },
     sForge: "forge",
     approve: "Approve",
     reject: "Reject",
@@ -13213,6 +13442,9 @@ var TEXT = {
     sUsage: "Usage",
     effort: "effort",
     thisSession: "this session",
+    active: "active",
+    sinceStart: "since start",
+    taskTime: "task",
     run: "run",
     gMain: "Main session",
     gImpl: "Implementers",
@@ -13289,6 +13521,11 @@ export const register = (on) => {
   });
   on("session.end", async ($, e, next) => {
     try {
+      endTurn(usage, turnClock, await nowMs($));
+      syncTurn();
+    } catch {
+    }
+    try {
       const u = await $.session.usage();
       if (u.startedAt === usageStartedAt) {
         officialUsd = u.cost?.usd ?? null;
@@ -13330,21 +13567,29 @@ export const register = (on) => {
   });
   on("turn.start", async ($, e, next) => {
     try {
-      activity.turnSince = await nowMs($);
+      startTurn(usage, turnClock, await nowMs($));
+      syncTurn();
       void requestPanelWrite($);
     } catch {
     }
     return next(e);
   });
-  on("turn.complete", ($, e, next) => {
+  on("turn.complete", async ($, e, next) => {
     if (!e.agentId) {
-      activity.turnSince = null;
+      try {
+        endTurn(usage, turnClock, await nowMs($));
+      } catch {
+        turnClock.since = null;
+      }
+      syncTurn();
       void refreshPanel($);
     }
     return next(e);
   });
   on("turn.step", async function* ($, e, next) {
+    void touch($);
     const r = yield* next(e);
+    void touch($);
     try {
       recordStep(usage, { agentId: e.agentId, model: e.model, effort: e.effort, usage: r?.usage ?? null });
       void requestPanelWrite($);
@@ -13362,6 +13607,7 @@ export const register = (on) => {
   });
   on("tool.call", async ($, e, next) => {
     const mine = !e.agentId;
+    void touch($);
     if (mine) {
       try {
         tools.delete(e.tool_use_id);
@@ -13391,6 +13637,7 @@ export const register = (on) => {
       }
       return result;
     } finally {
+      void touch($);
       if (mine && tools.delete(e.tool_use_id)) {
         showTool();
         void requestPanelWrite($);
@@ -13400,18 +13647,24 @@ export const register = (on) => {
   on("classic.SubagentStart", async ($, e, next) => {
     try {
       const id2 = String(e.agent_id);
+      finished = finished.filter((f) => f.id !== id2);
       activity.subagents = pushCapped(activity.subagents.filter((s) => s.id !== id2), { id: id2, type: clip2(String(e.agent_type ?? ""), LINE_MAX), since: await nowMs($) });
       const kind = usage.loops[id2]?.kind;
       if (!kind || kind === "unknown") labelLoop(usage, id2, String(e.agent_type ?? "unknown"));
+      await touch($);
       await noteActivity($);
       void requestPanelWrite($);
     } catch {
     }
     return next(e);
   });
-  on("classic.SubagentStop", ($, e, next) => {
+  on("classic.SubagentStop", async ($, e, next) => {
     try {
+      void touch($);
+      const id2 = String(e.agent_id);
+      const ran = activity.subagents.find((s) => s.id === id2);
       activity.subagents = activity.subagents.filter((s) => s.id !== e.agent_id);
+      if (ran) recordFinished(ran, await nowMs($));
       void noteActivity($);
       void requestPanelWrite($);
     } catch {

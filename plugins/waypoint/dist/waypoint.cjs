@@ -13516,9 +13516,10 @@ function computeMetrics(plan, states, now, activeSessions = 1) {
   for (const t of plan.tasks) {
     const s = states[t.id];
     const start = s?.startedAt ?? s?.claimedAt;
-    if (start) starts.push(Date.parse(start));
+    if (start && Number.isFinite(Date.parse(start))) starts.push(Date.parse(start));
     if (s?.status === "done" && s.startedAt && s.doneAt) {
-      durations.push(Math.max(0, (Date.parse(s.doneAt) - Date.parse(s.startedAt)) / 6e4));
+      const d = Math.max(0, (Date.parse(s.doneAt) - Date.parse(s.startedAt)) / 6e4);
+      if (Number.isFinite(d)) durations.push(d);
     }
   }
   const paceMin = durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : null;
@@ -13551,6 +13552,7 @@ function pickProject(entries) {
   if (!pool.length) return null;
   return [...pool].sort((a, b) => b.mtimeMs - a.mtimeMs)[0].name;
 }
+var SKEW_MS = 2 * 6e4;
 
 // src/lib/worktree.ts
 function mainWorktreeFrom(porcelain) {

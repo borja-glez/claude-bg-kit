@@ -7377,6 +7377,30 @@ var import_node_path = __toESM(require("node:path"), 1);
 var CLIP = 80;
 var MAX_VALIDATORS = 10;
 var MAX_ACCEPTED = 200;
+var MAX_STAGES = 20;
+var MAX_TS = 40;
+var isoMs = (s2) => s2 !== null && /^\d{4}-\d{2}-\d{2}T/.test(s2) ? Date.parse(s2) : NaN;
+var tsText = (x) => str(x) && x.length <= MAX_TS ? x : null;
+var stageKey = (phase) => phase ? phase.toLowerCase() : "triage";
+function closeStage(s2, ts) {
+  const from = isoMs(s2.stageSince);
+  const to = isoMs(ts);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return s2.stages;
+  const key = stageKey(s2.phase);
+  if (!(key in s2.stages) && Object.keys(s2.stages).length >= MAX_STAGES) return s2.stages;
+  return { ...s2.stages, [key]: (s2.stages[key] ?? 0) + Math.round((to - from) / 1e3) };
+}
+function stagesOf(x) {
+  const out = {};
+  if (!isObj(x)) return out;
+  for (const [k, v] of Object.entries(x)) {
+    if (Object.keys(out).length >= MAX_STAGES) break;
+    const key = cleanText(k).toLowerCase();
+    if (!key || typeof v !== "number" || !Number.isFinite(v) || v < 0) continue;
+    out[key] = Math.round(v);
+  }
+  return out;
+}
 var str = (x) => typeof x === "string";
 var num = (x) => typeof x === "number" && Number.isFinite(x) ? x : null;
 var isObj = (x) => !!x && typeof x === "object" && !Array.isArray(x);
@@ -7394,10 +7418,37 @@ function deriveStatus(prev, event) {
   if ((e.kind === "triage" || e.kind === "phase") && str(e.task) && e.task) {
     const task = cleanText(e.task);
     const fresh = e.kind === "triage" && Array.isArray(e.reasons);
-    const base = prev && prev.task === task && !fresh ? prev : { ts, task, path: "", phase: "", agent: null, validators: [], verdict: null, round: null, cap: null, brief: null, accepted: [], verify: null };
+    const same = !!prev && prev.task === task && !fresh;
+    const base = same ? prev : {
+      ts,
+      task,
+      path: "",
+      phase: "",
+      agent: null,
+      validators: [],
+      verdict: null,
+      round: null,
+      cap: null,
+      brief: null,
+      accepted: [],
+      verify: null,
+      taskStartedAt: ts,
+      stageSince: ts,
+      stages: {},
+      doneAt: null
+    };
     const next = { ...base, ts };
     if (e.kind === "triage" && str(e.path)) next.path = cleanText(e.path);
-    if (e.kind === "phase" && str(e.phase)) next.phase = cleanText(e.phase);
+    if (e.kind === "phase" && str(e.phase)) {
+      const phase = cleanText(e.phase);
+      const done = phase.toLowerCase() === "done";
+      if (!(done && base.doneAt)) {
+        if (same && !base.doneAt) next.stages = closeStage(base, ts);
+        next.stageSince = ts;
+        next.doneAt = done ? ts : null;
+      }
+      next.phase = phase;
+    }
     if (e.kind === "phase" && briefNum(e.brief) !== null) next.brief = briefNum(e.brief);
     return next;
   }
@@ -7412,7 +7463,11 @@ function deriveStatus(prev, event) {
     case "verdict": {
       if (!str(e.action)) return prev;
       const accepted = n !== null && e.action === "accept" && !cur.accepted.includes(n) ? [...cur.accepted, n].sort((a, b) => a - b).slice(-MAX_ACCEPTED) : cur.accepted;
-      return { ...cur, accepted, verdict: { action: cleanText(e.action), score: num(e.score) } };
+      const verdict = { action: cleanText(e.action), score: num(e.score) };
+      if (n === null && e.action === "accept" && !cur.doneAt) {
+        return { ...cur, accepted, verdict, stages: closeStage(cur, ts), stageSince: ts, doneAt: ts };
+      }
+      return { ...cur, accepted, verdict };
     }
     case "round":
       return { ...cur, round: num(e.round), cap: num(e.cap) };
@@ -7471,7 +7526,12 @@ function normalizeStatus(x) {
       total: num(x.verify.total),
       evidence: pathText(x.verify.evidence),
       reason: str(x.verify.reason) ? cleanText(x.verify.reason) : null
-    } : null
+    } : null,
+    // Absent in a status written before timings existed: no times are shown.
+    taskStartedAt: tsText(x.taskStartedAt),
+    stageSince: tsText(x.stageSince),
+    stages: stagesOf(x.stages),
+    doneAt: tsText(x.doneAt)
   };
 }
 
@@ -12036,10 +12096,16 @@ var MAX_TASKS = 500;
 var isObj3 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
 var str3 = (x) => typeof x === "string" && x ? x : null;
 var iso2 = (x) => typeof x === "string" && !Number.isNaN(Date.parse(x)) ? x : null;
+var FUTURE_SKEW_MS = 12e4;
+var finishedOf = (x, now) => {
+  const v = iso2(x);
+  if (!v) return null;
+  return now !== void 0 && Number.isFinite(now) && Date.parse(v) - now > FUTURE_SKEW_MS ? null : v;
+};
 var int = (x, min, max, dflt) => typeof x === "number" && Number.isInteger(x) ? Math.min(max, Math.max(min, x)) : dflt;
 var oneOf2 = (list, x) => list.includes(x) ? x : null;
 var cleanTitle = (x) => typeof x === "string" ? x.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim().slice(0, 200) : "";
-function normalizeTask(x) {
+function normalizeTask(x, now) {
   if (!isObj3(x)) return null;
   const status = oneOf2(TASK_STATUSES, x.status);
   const stage = oneOf2(STAGES, x.stage);
@@ -12063,10 +12129,11 @@ function normalizeTask(x) {
     updatedAt: iso2(x.updatedAt) ?? startedAt,
     detail: typeof x.detail === "string" ? x.detail.slice(0, 500) : null,
     ...iso2(x.nudgedAt) ? { nudgedAt: iso2(x.nudgedAt) } : {},
+    ...finishedOf(x.finishedAt, now) ? { finishedAt: finishedOf(x.finishedAt, now) } : {},
     ...title ? { title } : {}
   };
 }
-function normalizeExecution(x) {
+function normalizeExecution(x, now) {
   if (!isObj3(x)) return null;
   const mode = oneOf2(["subagents", "sessions"], x.mode);
   const kind = oneOf2(["plan", "ephemeral"], x.kind) ?? "plan";
@@ -12077,7 +12144,7 @@ function normalizeExecution(x) {
   const tasks = {};
   if (isObj3(x.tasks)) {
     for (const [id2, t] of Object.entries(x.tasks).slice(0, MAX_TASKS)) {
-      const n = isPlanId(id2) ? normalizeTask(t) : null;
+      const n = isPlanId(id2) ? normalizeTask(t, now) : null;
       if (n) tasks[id2] = n;
     }
   }
@@ -12103,10 +12170,10 @@ function normalizeExecution(x) {
     ...typeof x.planned === "number" && Number.isInteger(x.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x.planned)) } : {}
   };
 }
-function parseExecution(text) {
+function parseExecution(text, now) {
   if (typeof text !== "string") return null;
   try {
-    return normalizeExecution(JSON.parse(text));
+    return normalizeExecution(JSON.parse(text), now);
   } catch {
     return null;
   }
@@ -13021,7 +13088,7 @@ function schedule(i) {
     const p = pub[id2];
     const own = !!p && p.runId === exec.runId && p.by !== exec.coordinator;
     if (own && p.status === "blocked" || statusOf(states, id2) === "blocked") {
-      tasks[id2] = { ...t, status: "blocked", detail: "blocked by its session", updatedAt: nowIso };
+      tasks[id2] = { ...t, status: "blocked", detail: "blocked by its session", updatedAt: nowIso, finishedAt: nowIso };
     }
   }
   for (const t of plan.tasks) {
@@ -13045,7 +13112,7 @@ function schedule(i) {
     const neverClaimed = !o;
     if (pastLease && (ownerStopped || neverClaimed) && !listed(id2)) {
       const a = relaunchOrBlock(id2, t.attempts);
-      if (a.type === "block") tasks[id2] = { ...t, status: "blocked", detail: a.reason, updatedAt: nowIso };
+      if (a.type === "block") tasks[id2] = { ...t, status: "blocked", detail: a.reason, updatedAt: nowIso, finishedAt: nowIso };
       actions.push(a);
       continue;
     }
@@ -13593,7 +13660,7 @@ function integrate(rest, io, deps) {
   const r2 = mergeIn(target, t.branch, `forge: integrate ${task}`, "heavy", config.validatorTimeoutSec, wt, import_node_path14.default.join(io.cwd, ".forge", "execution"), "run");
   const cur = readExecution(io.cwd);
   if (r2.result === "dirty") return out({ result: "run-dirty", detail: r2.detail });
-  const next = r2.result === "merged" ? { ...cur.tasks[task], status: "integrated", stage: "integrate", updatedAt: at, detail: null } : { ...cur.tasks[task], status: "conflict", detail: r2.detail, updatedAt: at };
+  const next = r2.result === "merged" ? { ...cur.tasks[task], status: "integrated", stage: "integrate", updatedAt: at, detail: null, finishedAt: at } : { ...cur.tasks[task], status: "conflict", detail: r2.detail, updatedAt: at };
   saveExecution(io.cwd, { ...cur, tasks: { ...cur.tasks, [task]: next } });
   return out(r2.result === "merged" ? { result: "integrated", sha: r2.sha, preexisting: r2.preexisting } : { result: "conflict", detail: r2.detail });
 }
@@ -13882,7 +13949,8 @@ function swarmCommand(args, io, deps) {
       if (!Number.isInteger(round) || round < 0 || round > 99) throw new UsageError("swarm task: --round must be an integer from 0 to 99");
       const agent = has("no-agent") ? null : flag("agent") ?? prev.agent;
       const stageSince = prev.stage !== stage ? iso3 : prev.stageSince;
-      const next = { ...prev, stage, status, round, agent, detail, updatedAt: iso3, stageSince };
+      const finishedAt = status === "blocked" && prev.status !== "blocked" ? iso3 : status === "running" && prev.finishedAt ? null : prev.finishedAt;
+      const next = { ...prev, stage, status, round, agent, detail, updatedAt: iso3, stageSince, ...finishedAt !== void 0 ? { finishedAt } : {} };
       saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: next } });
       const lease = flag("lease") && !Number.isNaN(Date.parse(flag("lease"))) ? flag("lease") : new Date(now.getTime() + LEASE_MINUTES * 6e4).toISOString();
       writePublicTask(io.cwd, { task, runId: e.runId, stage, status, agent, round, since: stageSince, updatedAt: iso3, leaseUntil: lease, by: e.coordinator, mode: prev.executor });
@@ -13946,7 +14014,7 @@ function swarmCommand(args, io, deps) {
         saveExecution(io.cwd, {
           ...e,
           ...revive2 ? { active: true, stopReason: null, stallReason: null } : {},
-          tasks: { ...e.tasks, [task]: { ...t, status: "running", stage: "implement", executor: "subagents", worktree, attempts: t.attempts + 1, nudgedAt: null, updatedAt: iso3, stageSince: iso3 } }
+          tasks: { ...e.tasks, [task]: { ...t, status: "running", stage: "implement", executor: "subagents", worktree, attempts: t.attempts + 1, nudgedAt: null, finishedAt: iso3, updatedAt: iso3, stageSince: iso3 } }
         });
         writePublicTask(io.cwd, { task, runId: e.runId, stage: "implement", status: "running", agent: null, round: t.round, since: iso3, updatedAt: iso3, leaseUntil: new Date(now.getTime() + LEASE_MINUTES * 6e4).toISOString(), by: e.coordinator, mode: "subagents" });
         return json({ task, adopted: true, previous: t.executor, worktree, branch: t.branch });
@@ -13956,7 +14024,7 @@ function swarmCommand(args, io, deps) {
       saveExecution(io.cwd, {
         ...e,
         ...revive ? { active: true, stopReason: null, stallReason: null } : {},
-        tasks: { ...e.tasks, [task]: { ...t, status: "running", stage: "implement", attempts: t.attempts + 1, detail: null, updatedAt: iso3, stageSince: iso3 } }
+        tasks: { ...e.tasks, [task]: { ...t, status: "running", stage: "implement", attempts: t.attempts + 1, detail: null, finishedAt: null, updatedAt: iso3, stageSince: iso3 } }
       });
       return ok();
     }
@@ -13988,7 +14056,7 @@ function swarmCommand(args, io, deps) {
       if (!planPath) throw new UsageError("swarm relaunch: --plan is required");
       const verdict = relaunchOrBlock(task, t.attempts);
       if (verdict.type === "block") {
-        saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, status: "blocked", detail: verdict.reason, updatedAt: iso3 } } });
+        saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, status: "blocked", detail: verdict.reason, updatedAt: iso3, finishedAt: iso3 } } });
         return json({ task, blocked: true, reason: verdict.reason });
       }
       const attempt = verdict.attempt;
