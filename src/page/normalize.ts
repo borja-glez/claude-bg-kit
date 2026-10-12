@@ -143,6 +143,8 @@ function normalizeLoose(x: unknown): LooseRunTask[] {
       id: t.id, title, status: t.status as LooseStatus,
       stage: (STAGES as readonly unknown[]).includes(t.stage) ? (t.stage as Stage) : null,
       agent: typeof t.agent === 'string' && t.agent ? t.agent.slice(0, 80) : null,
+      // Published by the skill from finishedAt − startedAt; at most 30 days.
+      ...(typeof t.seconds === 'number' && Number.isFinite(t.seconds) && t.seconds >= 0 && t.seconds <= 30 * 86400 ? { seconds: Math.round(t.seconds) } : {}),
     });
   }
   return out;

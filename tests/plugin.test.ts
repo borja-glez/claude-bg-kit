@@ -282,7 +282,7 @@ describe('plugin layout', () => {
   it('forge run skill: Execution section with the task state machine and the mode choice', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
     for (const w of ['## Execution', 'FORGE swarm propose --plan', 'FORGE swarm worktree <T>', 'FORGE swarm task <T> --stage', 'FORGE swarm integrate <T>', 'FORGE swarm merge',
-      '--merge-on-finish', '.claude/worktrees/run', 'leaseUntil', 'state/T.exec', 'meta/run', 'two lines', 'never cd']) expect(md).toContain(w);
+      '--merge-on-finish', '.claude/worktrees/run', 'leaseUntil', 'state/T.exec', 'meta/run', 'two lines', 'never cd', 'seconds', 'finishedAt']) expect(md).toContain(w);
     expect(md).not.toContain('## Swarm');
     expect(md).not.toContain('Run `/waypoint:work` and follow it');
     expect(md).not.toContain('Then continue `/waypoint:work` at §4');

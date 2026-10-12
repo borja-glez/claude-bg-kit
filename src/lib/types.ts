@@ -47,7 +47,7 @@ export const LOOSE_MAX_TASKS = 20;
 export type LooseStatus = 'queued' | 'running' | 'integrated' | 'conflict' | 'blocked';
 export const LOOSE_STATUSES: readonly LooseStatus[] = ['queued', 'running', 'integrated', 'conflict', 'blocked'];
 /** A loose task of an ephemeral run as the roadmap shows it: never a plan task, never a state/T. */
-export interface LooseRunTask { id: string; title: string; status: LooseStatus; stage: Stage | null; agent: string | null }
+export interface LooseRunTask { id: string; title: string; status: LooseStatus; stage: Stage | null; agent: string | null; seconds?: number }
 /** Who runs a task of a forge execution and how; written by its executor, read by the roadmap, lens and the scheduler. */
 export interface TaskExec {
   runId: string; mode: 'subagents' | 'sessions' | 'manual'; by: string; agent?: string | null;

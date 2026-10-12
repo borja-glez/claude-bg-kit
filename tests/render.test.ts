@@ -110,6 +110,28 @@ describe('renderApp', () => {
     expect(html).toContain('T002'); // unlocks
   });
 
+  it('the task modal says how long a done task took against its estimate, and how long one in progress has run', () => {
+    const done = renderApp(base(), ui({ modal: 'T001' }));
+    expect(done).toContain('tardó 20 min · estimado 20');
+    expect(done).not.toMatch(/class="ye">tardó/);
+    const over = base();
+    over.states.T001 = { ...over.states.T001, doneAt: '2026-10-11T10:31:00Z' } as never;
+    expect(renderApp(over, ui({ modal: 'T001' }))).toMatch(/<span class="ye">tardó 31 min · estimado 20<\/span>/);
+    expect(renderApp(base(), ui({ modal: 'T002' }))).toContain('lleva 15 min');
+    const en = { ...base(), meta: { ...base().meta!, locale: 'en' } };
+    expect(renderApp(en, ui({ modal: 'T001' }))).toContain('took 20 min · estimated 20');
+    expect(renderApp(en, ui({ modal: 'T002' }))).toContain('running for 15 min');
+  });
+  it('the task modal shows no duration for junk, future or reversed dates', () => {
+    const m = base();
+    m.states.T001 = { ...m.states.T001, doneAt: '2026-10-11T09:00:00Z' } as typeof m.states.T001;
+    m.states.T002 = { ...m.states.T002, startedAt: '2026-10-11T13:00:00Z' } as never;
+    expect(renderApp(m, ui({ modal: 'T001' }))).not.toContain('tardó');
+    expect(renderApp(m, ui({ modal: 'T002' }))).not.toContain('lleva');
+    m.states.T001 = { ...m.states.T001, startedAt: 'nope', claimedAt: undefined } as never;
+    expect(renderApp(m, ui({ modal: 'T001' }))).not.toContain('tardó');
+  });
+
   it('draws the analysis row: burndown, critical path and code zones', () => {
     const html = renderApp(base(), ui());
     expect(html).toContain('class="insights"');
@@ -478,6 +500,34 @@ describe('execution', () => {
     // Only while an ephemeral run is active.
     expect(looseSection(renderApp({ ...m, run: runDoc() }, ui()))).toBe('');
     expect(looseSection(renderApp({ ...m, run: looseRun({ active: false }) }, ui()))).toBe('');
+  });
+  it('a slot reads its time as a duration; an invalid or future since shows none', () => {
+    const m = base();
+    m.run = runDoc();
+    // The first busy slot's markup (free slots are `sc slot free`).
+    const slotOf = (html: string) => { const i = html.indexOf('<div class="sc slot">'); return html.slice(i, html.indexOf('</div></div>', i)); };
+    expect(slotOf(renderApp(m, ui({ view: 'sessions' })))).toContain('lleva 7 min');
+    m.run = runDoc({ slots: [{ task: 'T002', stage: 'implement' as const, agent: null, by: 'main', since: new Date(NOW + 30 * 60000).toISOString() }] });
+    const future = slotOf(renderApp(m, ui({ view: 'sessions' })));
+    expect(future).toContain('T002');
+    expect(future).not.toContain('lleva');
+    expect(future).not.toContain('hace');
+    m.run = runDoc({ slots: [{ task: 'T002', stage: 'implement' as const, agent: null, by: 'main', since: 'garbage' }] });
+    const junk = slotOf(renderApp(m, ui({ view: 'sessions' })));
+    expect(junk).toContain('T002');
+    expect(junk).not.toContain('lleva');
+    expect(junk).not.toContain('NaN');
+    expect(junk).not.toContain('hace');
+  });
+  it('a finished loose task shows how long it took when meta/run carries it', () => {
+    const m = base();
+    m.run = looseRun({ loose: [
+      { id: 'bump', title: 'Bump the version', status: 'integrated' as const, stage: 'integrate' as const, agent: null, seconds: 1320 },
+      { id: 'fix-cart', title: 'Fix the cart', status: 'running' as const, stage: 'implement' as const, agent: 'forge-mech', seconds: 999 },
+    ] });
+    const sec = looseSection(renderApp(m, ui()));
+    expect(sec).toMatch(/bump[^]*integrada · integrar · tardó 22 min/);
+    expect(sec).not.toContain('tardó 16 min');
   });
   it('loose tasks do not count in the plan progress, filters or timeline, and never show as orphaned', () => {
     const m = base();

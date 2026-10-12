@@ -77,6 +77,11 @@ export const PROPOSAL_FILTERS: { [K in ProposalFilterKind]: readonly ProposalFil
 const ENT: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 export const esc = (v: unknown): string => String(v ?? '').replace(/[&<>"']/g, c => ENT[c]);
 const mins = (a: number, b: number) => Math.max(0, Math.round((b - a) / 60000));
+/** A usable past time in ms: a valid date not more than 2 min ahead of now (clock skew), else null. */
+const pastMs = (iso: string | null | undefined, now: number): number | null => {
+  const t = iso ? Date.parse(iso) : NaN;
+  return Number.isFinite(t) && t - now <= 2 * 60000 ? t : null;
+};
 const ICON: Record<EventType, string> = { claimed: '◎', started: '▶', done: '✓', blocked: '⚠', unblocked: '↺', commit: '●', note: '✎', plan_changed: '≡', message: '✉' };
 const ZOOMS: Zoom[] = ['6h', '1d', '3d', '1w', '1m'];
 const STATUSES = ['free', 'claimed', 'in_progress', 'blocked', 'done', 'orphaned'] as const;
@@ -274,10 +279,10 @@ function renderRunBlock(m: Model, d: Dict): string {
     const task = ephemeral ? undefined : m.plan.tasks.find(t => t.id === s.task);
     const ex = ephemeral ? undefined : m.states[s.task]?.exec;
     const l = ex ? liveness(m.now, ex.leaseUntil) : coord ? sessionLiveness(coord, m.now) : 'stopped';
-    const age = mins(Date.parse(s.since), m.now);
+    const since = pastMs(s.since, m.now);
     const title = task?.title ?? r.loose.find(x => x.id === s.task)?.title ?? '';
     return `<div class="sc slot"><h3>${liveDot(l)} <span class="pe">${esc(s.task)}</span> ${esc(title)}</h3>
-      <div class="mono">${esc(d.run.stage[s.stage] ?? s.stage)}${s.agent ? ` · ${esc(s.agent)}` : ''} · ${esc(d.ago(age))}</div></div>`;
+      <div class="mono">${esc(d.run.stage[s.stage] ?? s.stage)}${s.agent ? ` · ${esc(s.agent)}` : ''}${since !== null ? ` · ${esc(d.lasts(mins(since, m.now)))}` : ''}</div></div>`;
   };
   const free = Math.max(0, r.parallel - r.slots.length);
   const head = r.kind === 'ephemeral'
@@ -296,7 +301,8 @@ function renderLoose(m: Model, d: Dict): string {
   const l = coord ? sessionLiveness(coord, m.now) : 'stopped';
   const rows = r.loose.map(t => {
     const status = oneOf(LOOSE_STATUSES, t.status, 'queued');
-    const parts = [d.run.looseStatus[status], t.stage ? d.run.stage[t.stage] ?? t.stage : null, t.agent];
+    const finished = status === 'integrated' || status === 'conflict' || status === 'blocked';
+    const parts = [d.run.looseStatus[status], t.stage ? d.run.stage[t.stage] ?? t.stage : null, t.agent, finished && t.seconds !== undefined ? d.took(Math.floor(t.seconds / 60)) : null];
     return `<li class="lt st-${status}">${liveDot(l)} <span class="k">${esc(t.id)}</span> <span class="lab">${esc(t.title)}</span> <span class="mono">${parts.filter(Boolean).map(p => esc(String(p))).join(' · ')}</span></li>`;
   }).join('');
   return `<section class="loose card"><div class="lbl">${esc(d.run.looseTitle)} (${r.loose.length})</div><ul class="lts">${rows}</ul></section>`;
@@ -580,7 +586,15 @@ function renderTaskModal(m: Model, d: Dict, id: string, loc: string): string {
   const unlocks = m.plan.tasks.filter(x => x.depends_on.includes(id)).map(x => x.id);
   const chips = (ids: string[]) => (ids.length ? ids.map(i => `<button class="chip" data-action="open-task" data-id="${esc(i)}">${esc(i)}</button>`).join(' ') : '—');
   const start = s.startedAt ?? s.claimedAt;
-  const period = start ? `${esc(fmt(start, loc))} → ${s.doneAt ? esc(fmt(s.doneAt, loc)) : '…'}${s.doneAt ? ` · ${mins(Date.parse(start), Date.parse(s.doneAt))} min` : ''}${t.estimate_min ? ` (est. ${num(t.estimate_min)})` : ''}` : '—';
+  const period = start ? `${esc(fmt(start, loc))} → ${s.doneAt ? esc(fmt(s.doneAt, loc)) : '…'}` : '—';
+  // How long it took (done) or has run (claimed or in progress); nothing for a junk, future or reversed date.
+  const from = pastMs(start, m.now);
+  const to = s.status === 'done' ? pastMs(s.doneAt, m.now) : status === 'in_progress' || status === 'claimed' ? m.now : null;
+  const took = from !== null && to !== null && to >= from ? Math.floor((to - from) / 60000) : null;
+  const est = t.estimate_min ? num(t.estimate_min) : undefined;
+  const duration = took === null ? ''
+    : s.status === 'done' ? `<div class="mono dur"><span${est && took > est ? ' class="ye"' : ''}>${esc(d.took(took, est))}</span></div>`
+    : `<div class="mono dur">${esc(d.lasts(took))}</div>`;
   const sec = (label: string, body: string) => `<div class="sec"><div class="lbl">${esc(label)}</div><div>${body}</div></div>`;
   return `<div class="overlay" data-action="close-modal"><div class="modal" role="dialog" aria-modal="true">
     <div class="mh"><div><span class="k">${esc(t.id)}</span> <span class="t">${esc(t.title)}</span><br>
@@ -588,7 +602,7 @@ function renderTaskModal(m: Model, d: Dict, id: string, loc: string): string {
       ${s.exec ? `<div class="mono exec">${execLine(m, d, s.exec)}</div>` : ''}</div>
       <button class="btn" data-action="close-modal" aria-label="${esc(d.close)}">✕</button></div>
     <div class="mgrid"><div>
-      ${sec(d.field.period, period)}
+      ${sec(d.field.period, period + duration)}
       ${sec(d.field.dependsOn, chips(t.depends_on))}
       ${sec(d.field.unlocks, chips(unlocks))}
       ${sec(d.field.session, esc(s.owner ?? '—'))}

@@ -41,6 +41,12 @@ describe('normalizeRun / execution fields', () => {
     const many = Array.from({ length: 30 }, (_, i) => ({ ...ok, id: `t${i}` }));
     expect(normalizeRun({ ...run, kind: 'ephemeral', loose: many })!.loose).toHaveLength(20);
   });
+  it('normalizeRun keeps a loose task seconds only when it is a sane number', () => {
+    const run = { runId: 'loose-1', mode: 'subagents', parallel: 2, branch: 'main', coordinator: 'main', active: true, slots: [], kind: 'ephemeral' };
+    const t = (seconds: unknown) => ({ id: 'fix-cart', title: 'Fix', status: 'integrated', stage: 'integrate', agent: null, seconds });
+    expect(normalizeRun({ ...run, loose: [t(1320.4)] })!.loose[0].seconds).toBe(1320);
+    for (const bad of [-5, 'x', NaN, null, 40 * 86400]) expect(normalizeRun({ ...run, loose: [t(bad)] })!.loose[0]).not.toHaveProperty('seconds');
+  });
   it('normalizeRun reads an older meta/run as a plan run without loose tasks', () => {
     const run = { runId: 'r1', mode: 'subagents', parallel: 3, branch: 'forge/run-x', coordinator: 'main', active: true, slots: [] };
     expect(normalizeRun(run)).toMatchObject({ kind: 'plan', loose: [] });
