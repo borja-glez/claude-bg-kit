@@ -5,6 +5,7 @@ import path from 'node:path';
 import { appendEvent, readEvents, forgeDir, LEDGER_KINDS, type LedgerKind } from '../ledger.js';
 import { parseRun, startRun, recordCycle, stopReason, endRun, readRunText, saveRun, stopFile, type RunState, type StopContext } from '../run.js';
 import { decideStop, decideSwarmStop } from '../hook.js';
+import { planLocale, replyIn } from '../../lib/locale.js';
 import { triage, zonesFromPaths, PATH_ORDER, type PathName } from '../triage.js';
 import { parsePlan, PlanError } from '../../lib/plan.js';
 import { renderBrief, taskText } from '../brief.js';
@@ -19,7 +20,7 @@ import { parseDocument } from 'yaml';
 import { UsageError } from './errors.js';
 import { swarmCommand } from './swarm.js';
 import { readSwarm, saveSwarm } from '../swarm.js';
-import { detectValidators, selectValidators, runValidators, globMatch, onPath, type RepoReader, type Scope } from '../validators.js';
+import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, type RepoReader, type Scope } from '../validators.js';
 import { checkTools, missingTools } from '../tools.js';
 import { verifyPlan, cleanupPids, killTarget } from '../verify.js';
 import { readLocal, updateLocal } from '../local.js';
@@ -183,12 +184,12 @@ function hookStop(io: Io): string {
       if (!d.block) return '';
       saveRun(io.cwd, d.run);
       if (d.ended) appendEvent(io.cwd, { ts: io.now().toISOString(), kind: 'cycle', action: 'stopped', reason: d.ended });
-      return JSON.stringify({ decision: 'block', reason: d.reason }) + '\n';
+      return JSON.stringify({ decision: 'block', reason: d.reason + replyIn(planLocale(io.cwd, swarm?.project)) }) + '\n';
     }
     const d = decideSwarmStop(hookInput, swarm, { now: io.now(), stopFile: existsSync(stopFile(io.cwd)) });
     if (!d.block) return '';
     saveSwarm(io.cwd, d.swarm);
-    return JSON.stringify({ decision: 'block', reason: d.reason }) + '\n';
+    return JSON.stringify({ decision: 'block', reason: d.reason + replyIn(planLocale(io.cwd, d.swarm.project)) }) + '\n';
   } catch { return ''; }
 }
 
@@ -249,7 +250,10 @@ export function run(argv: string[], io: Io): Result {
         const listed = git(['-c', 'core.quotePath=false', 'ls-files']);
         // rev-list fails on a repository without commits: that is 0 commits, not a git failure.
         const commits = Number.parseInt((git(['rev-list', '--count', 'HEAD']) ?? '').trim(), 10) || 0;
-        const grep = (w: string) => lines(git(['-c', 'core.quotePath=false', 'grep', '-l', '-I', '--fixed-strings', '-w', '-e', w]));
+        // The design, the plan and forge's own notes name every symbol of a planned task: a hit there says nothing
+        // about the code the task touches, so the symbol search leaves them out (a task can still name them as paths).
+        const bookkeeping = (f: string) => /^(docs\/waypoint|docs\/superpowers|\.forge|\.waypoint)\//.test(f);
+        const grep = (w: string) => lines(git(['-c', 'core.quotePath=false', 'grep', '-l', '-I', '--fixed-strings', '-w', '-e', w])).filter(f => !bookkeeping(f));
         const tracked = lines(listed);
         const zoneFiles = planned ? tracked.filter(f => planned.zones.some(z => globMatch(z, f))) : [];
         const extra = planned ? { files: zoneFiles, zones: zonesFromPaths(planned.zones) } : undefined;
@@ -289,9 +293,15 @@ export function run(argv: string[], io: Io): Result {
           scope = { mode: 'heavy', changed: diff === null ? null : diff.split('\n').map(s => s.trim()).filter(Boolean) };
         }
         const list = selectValidators(all, scope);
-        const results = runValidators(list, io.exec ?? defaultExec(io.cwd), config.validatorTimeoutSec);
-        const allOk = results.every(r => r.ok);
-        appendEvent(io.cwd, { ts: ts(), kind: 'validate', ...(flag('task') ? { task: flag('task') } : {}), ok: allOk, results: results.map(r => ({ validator: r.validator, ok: r.ok, flaky: r.flaky, ...(r.ok ? {} : { failures: r.failures }) })) });
+        let results = runValidators(list, io.exec ?? defaultExec(io.cwd), config.validatorTimeoutSec);
+        if (has('baseline')) {
+          if (flag('baseline') === undefined) throw new UsageError('validate: --baseline needs the JSON a validate run printed on the base commit');
+          let baseline: unknown;
+          try { baseline = JSON.parse(readFileSync(path.resolve(io.cwd, flag('baseline')!), 'utf8')); } catch { throw new UsageError('validate: --baseline must be the JSON written by forge validate'); }
+          results = markPreexisting(results, baseline);
+        }
+        const allOk = results.every(r => !blocking(r));
+        appendEvent(io.cwd, { ts: ts(), kind: 'validate', ...(flag('task') ? { task: flag('task') } : {}), ...(has('base-run') ? { baseline: true } : {}), ok: allOk, results: results.map(r => ({ validator: r.validator, ok: r.ok, flaky: r.flaky, ...(r.skipped ? { skipped: r.skipped } : {}), ...(r.preexisting ? { preexisting: true } : {}), ...(r.ok ? {} : { failures: r.failures }) })) });
         const out = json(results, allOk ? 0 : 1);
         if (!list.length) out.stderr = all.length ? 'no validators cover the affected paths\n' : 'no validators detected: add tests or list validators in .forge/config.yaml\n';
         return out;
@@ -312,22 +322,26 @@ export function run(argv: string[], io: Io): Result {
         if (!Object.keys(reviews).length) throw new UsageError(`no reviews found in ${dirArg}`);
         let validatorsOk: boolean;
         let failing: FailingValidator[] = [];
+        let preexisting: string[] = [];
         let recorded = true;
         if (flag('validators')) {
           let results: unknown;
           try { results = JSON.parse(readFileSync(path.resolve(io.cwd, flag('validators')!), 'utf8')); } catch { throw new UsageError('verdict: --validators must be the JSON written by forge validate'); }
-          const arr = Array.isArray(results) ? results as { validator?: unknown; ok?: unknown; failures?: unknown }[] : [];
-          validatorsOk = Array.isArray(results) && arr.every(r => r && typeof r === 'object' && r.ok === true);
-          failing = arr.filter(r => r && typeof r === 'object' && r.ok !== true).map(r => ({ validator: String(r.validator ?? ''), failures: Array.isArray(r.failures) ? r.failures.map(String) : [] }));
+          const arr = Array.isArray(results) ? results as { validator?: unknown; ok?: unknown; failures?: unknown; preexisting?: unknown }[] : [];
+          validatorsOk = Array.isArray(results) && arr.every(r => r && typeof r === 'object' && !blocking(r));
+          failing = arr.filter(r => r && typeof r === 'object' && blocking(r)).map(r => ({ validator: String(r.validator ?? ''), failures: Array.isArray(r.failures) ? r.failures.map(String) : [] }));
+          preexisting = arr.filter(r => r && typeof r === 'object' && r.ok !== true && r.preexisting === true).map(r => String(r.validator ?? ''));
         } else {
-          const lastValidate = [...readEvents(io.cwd)].reverse().find(e => e.kind === 'validate' && e.task === task);
+          const lastValidate = [...readEvents(io.cwd)].reverse().find(e => e.kind === 'validate' && e.task === task && e.baseline !== true);
           recorded = lastValidate !== undefined;
           validatorsOk = lastValidate?.ok === true;
-          const rs = Array.isArray(lastValidate?.results) ? lastValidate!.results as { validator?: unknown; ok?: unknown; failures?: unknown }[] : [];
-          failing = rs.filter(r => r && r.ok !== true).map(r => ({ validator: String(r.validator ?? ''), failures: Array.isArray(r.failures) ? r.failures.map(String) : [] }));
+          const rs = Array.isArray(lastValidate?.results) ? lastValidate!.results as { validator?: unknown; ok?: unknown; failures?: unknown; preexisting?: unknown }[] : [];
+          failing = rs.filter(r => r && blocking(r)).map(r => ({ validator: String(r.validator ?? ''), failures: Array.isArray(r.failures) ? r.failures.map(String) : [] }));
+          preexisting = rs.filter(r => r && r.ok !== true && r.preexisting === true).map(r => String(r.validator ?? ''));
         }
         const result = synthesize(reviews, weightsFor({ sensitive: has('sensitive'), perf: has('perf') }), validatorsOk, failing);
         if (!recorded) result.reasons.push('no validation recorded');
+        if (preexisting.length) result.reasons.push(`already failing on the base commit, not counted: ${preexisting.join(', ')}`);
         // dir lets `round` count a re-run verdict on the same review dir once.
         appendEvent(io.cwd, { ts: ts(), kind: 'verdict', task, dir: path.relative(io.cwd, dir).split(path.sep).join('/') || '.', action: result.action, score: result.score, signature: result.signature,
           critical: result.critical.length, important: result.important.length, minor: result.minor.length });

@@ -173,6 +173,7 @@ describe('multi-session commands', () => {
     const first = JSON.parse(run(['launch', 'plan.yaml', 'ui'], io).stdout);
     expect(first).toMatchObject({ branch: 'track/ui', name: 'wp-demo-shop-ui' });
     expect(first.command).toBe('claude --bg --name wp-demo-shop-ui "/waypoint:work ui"');
+    expect(first.run).toBe(`(cd '${first.worktree}' && ${first.command})`);
     expect(existsSync(path.join(first.worktree, 'plan.yaml'))).toBe(true);
     const again = run(['launch', 'plan.yaml', 'ui'], io);
     expect(again.code).toBe(0);
@@ -608,7 +609,7 @@ describe('classic hooks', () => {
     expect(r.code).toBe(0);
     const out = JSON.parse(r.stdout);
     expect(out.decision).toBe('block');
-    expect(out.reason).toBe("waypoint: 1 commit(s) / 0 queued roadmap update(s) are not in the live roadmap yet. Record them (work skill: a `commit` event for intermediate commits, or the task's completion), or flush the queue, then remove those lines from .waypoint/demo-shop/pending-commits.jsonl. You can also stop now; this reminder shows once per change.");
+    expect(out.reason).toBe("waypoint: 1 commit(s) / 0 queued roadmap update(s) are not in the live roadmap yet. Record them (work skill: a `commit` event for intermediate commits, or the task's completion), or flush the queue, then remove those lines from .waypoint/demo-shop/pending-commits.jsonl. You can also stop now; this reminder shows once per change. Tell the user in Spanish (es), the plan's language.");
     // Same pending set: the reminder is not repeated.
     expect(hook('stop', {}).stdout.trim()).toBe('');
     // A new line: it blocks again.

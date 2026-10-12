@@ -7,7 +7,7 @@ export interface HookContext extends StopContext { ledgerEvents: number; swarmSl
 export const swarmBlockReason = (live: number, parallel: number): string =>
   `forge swarm is active (${live}/${parallel} slots). Run the next swarm tick as /forge:run's Swarm section describes; to end it run /forge:stop.`;
 export const swarmEndedReason = (reason: string): string =>
-  `the forge swarm ended (${reason}): report it as /forge:run's Swarm section says (step 7), then stop`;
+  `the forge swarm ended (${reason}): report it as /forge:run's Swarm section says (step 7), then stop.`;
 
 /**
  * The Stop hook's decision for a swarm coordinator. It binds to the first session it blocks (hookSession) and leaves
@@ -42,7 +42,7 @@ function blockReason(run: RunState): string {
 
 /** The one-time block that tells the bound session to close the run it just ended. */
 export const endedReason = (reason: string): string =>
-  `the forge infinite run ended (${reason}): do step 4 of /forge:infinite (turn off meta/infinite and report), then stop`;
+  `the forge infinite run ended (${reason}): do step 4 of /forge:infinite (turn off meta/infinite and report), then stop.`;
 
 /**
  * The Stop hook's decision. An inactive run (or none) never blocks. A run is bound to one session (on its first

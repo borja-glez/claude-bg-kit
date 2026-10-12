@@ -156,6 +156,17 @@ describe('forge CLI', () => {
     ]));
     expect(readEvents(root).at(-1)).toMatchObject({ kind: 'triage', path: 'trivial' });
   });
+  it('triage leaves the design, the plan and forge notes out of the symbol search', () => {
+    io.git = args => {
+      if (args.includes('ls-files')) return 'src/a.ts\nsrc/b.ts\nsrc/c.ts\nsrc/d.ts\nsrc/e.ts\n';
+      if (args[0] === 'rev-list') return '12\n';
+      if (args.includes('grep')) return 'src/a.ts\ndocs/waypoint/demo/design.md\ndocs/waypoint/demo/design/history/v1.md\ndocs/waypoint/demo/plan.yaml\ndocs/superpowers/plans/p.md\n.forge/work/x/brief-1.md\n';
+      return '';
+    };
+    const out = JSON.parse(run(['triage', 'fix parseConfig'], io).stdout);
+    expect(out.files).toEqual(['src/a.ts']);
+    expect(out.path).toBe('trivial');
+  });
   it('triage reads the task text from --text-file', () => {
     io.git = () => '';
     writeFileSync(path.join(root, 'task.txt'), 'rename `foo` to bar; $(rm -rf x)\n');
@@ -221,6 +232,26 @@ describe('forge CLI', () => {
     expect(JSON.parse(r.stdout)).toEqual([{ validator: 'test', ok: false, flaky: false, durationMs: 6, failures: ['FAIL x'] }]);
     expect(readEvents(root).at(-1)).toMatchObject({ kind: 'validate', task: 't1', ok: false });
   });
+  it('validate --baseline does not count a failure the base commit already had; verdict leaves it out', () => {
+    writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'vitest run', build: 'vite build' } }));
+    io.exec = cmd => ({ code: cmd === 'npm run build' ? 1 : 0, output: 'error during build', ms: 1, timedOut: false });
+    const before = run(['validate', '--all', '--path', 'medium', '--task', 't1-1', '--base-run'], io);
+    expect(before.code).toBe(1);
+    writeFileSync(path.join(root, 'baseline.json'), before.stdout);
+    const after = run(['validate', '--all', '--path', 'medium', '--task', 't1-1', '--baseline', 'baseline.json'], io);
+    expect(after.code).toBe(0);
+    expect(JSON.parse(after.stdout).find((r: { validator: string }) => r.validator === 'build')).toMatchObject({ ok: false, preexisting: true });
+    writeFileSync(path.join(root, 'validators.json'), after.stdout);
+    mkdirSync(path.join(root, 'rev'));
+    writeFileSync(path.join(root, 'rev', 'correctness.json'), JSON.stringify({ reviewer: 'correctness', verdict: 'accept', score: 0.95, findings: [] }));
+    const v = JSON.parse(run(['verdict', '--task', 't1-1', '--dir', 'rev', '--validators', 'validators.json'], io).stdout);
+    expect(v.action).toBe('accept');
+    expect(v.reasons.join(' ')).toContain('already failing on the base commit, not counted: build');
+    // Without --validators the verdict reads the change's validation, never the base run.
+    const fallback = JSON.parse(run(['verdict', '--task', 't1-1', '--dir', 'rev'], io).stdout);
+    expect(fallback.action).toBe('accept');
+    expect(run(['validate', '--all', '--baseline'], io).code).toBe(2);
+  });
   it('validate with no validators prints [] and says so', () => {
     const r = run(['validate', '--all'], io);
     expect(r.code).toBe(0);
@@ -265,7 +296,7 @@ describe('forge infinite', () => {
   const readRun = () => JSON.parse(readFileSync(runFile(), 'utf8'));
   const hook = (stdin: string) => run(['hook', 'stop'], { ...io, stdin });
   const touchStop = () => { mkdirSync(path.join(root, '.forge'), { recursive: true }); writeFileSync(path.join(root, '.forge', 'stop'), 'x\n'); };
-  const ended = (reason: string) => ({ decision: 'block', reason: `the forge infinite run ended (${reason}): do step 4 of /forge:infinite (turn off meta/infinite and report), then stop` });
+  const ended = (reason: string) => ({ decision: 'block', reason: `the forge infinite run ended (${reason}): do step 4 of /forge:infinite (turn off meta/infinite and report), then stop. Tell the user in their own language.` });
   it('infinite start writes run.json and refuses a second start', () => {
     expect(run(['infinite', 'start', '--cycles', '3'], io).code).toBe(0);
     expect(readRun()).toMatchObject({ mode: 'infinite', active: true, budget: { cycles: 3 }, cycle: 0, queueMax: 10, blocksSinceCycle: 0 });

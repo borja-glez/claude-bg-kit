@@ -5,7 +5,9 @@ import type { ForgeConfig, When } from './config.js';
 
 export interface Validator { name: string; cmd: string; kind: string; affects?: string[]; when?: When; source: 'manual' | 'detected' }
 // A flaky result (failed, then passed on the retry) is ok: true; its first failures are kept for the record.
-export interface ValidatorResult { validator: string; ok: boolean; flaky: boolean; durationMs: number; failures: string[] }
+// skipped: a test runner that found no tests to run passes (there is nothing to check yet, which is not a failure of the
+// change). preexisting: it failed the same way before the change (see markPreexisting), so it does not count against it.
+export interface ValidatorResult { validator: string; ok: boolean; flaky: boolean; durationMs: number; failures: string[]; skipped?: 'no-tests'; preexisting?: boolean }
 // list(dir) lists the entries of a directory relative to the repo root (the root itself when omitted).
 export interface RepoReader { exists: (rel: string) => boolean; read: (rel: string) => string | null; list: (dir?: string) => string[] }
 
@@ -145,13 +147,33 @@ export function failureLines(output: string): string[] {
   return (hits.length ? hits.slice(-20) : lines.slice(-10)).map(l => l.slice(0, 200));
 }
 
+// vitest, jest, mocha and Playwright when the project has no test files yet.
+const NO_TESTS = /\b(no test files found|no tests found)\b/i;
+const RUNS_TESTS = new Set(['test', 'e2e']);
+
 export function runValidators(list: Validator[], exec: (cmd: string, timeoutSec: number) => ExecResult, timeoutSec: number): ValidatorResult[] {
   return list.map(v => {
     const first = exec(v.cmd, timeoutSec);
     if (first.code === 0 && !first.timedOut) return { validator: v.name, ok: true, flaky: false, durationMs: first.ms, failures: [] };
     if (first.timedOut) return { validator: v.name, ok: false, flaky: false, durationMs: first.ms, failures: [`timeout after ${timeoutSec} s`] };
+    if (RUNS_TESTS.has(v.kind) && NO_TESTS.test(first.output)) return { validator: v.name, ok: true, flaky: false, durationMs: first.ms, failures: failureLines(first.output), skipped: 'no-tests' };
     const second = exec(v.cmd, timeoutSec);
     if (second.code === 0 && !second.timedOut) return { validator: v.name, ok: true, flaky: true, durationMs: first.ms + second.ms, failures: failureLines(first.output) };
     return { validator: v.name, ok: false, flaky: false, durationMs: first.ms + second.ms, failures: second.timedOut ? [`timeout after ${timeoutSec} s`] : failureLines(second.output) };
   });
 }
+
+/**
+ * Marks the failures a baseline already had: the same validator failed on the base commit, before the change, so the
+ * change did not cause it (a build that needs a file a later task creates, a suite broken upstream). The baseline is
+ * the JSON `forge validate` printed on the base commit.
+ */
+export function markPreexisting(results: ValidatorResult[], baseline: unknown): ValidatorResult[] {
+  const failedBefore = new Set((Array.isArray(baseline) ? baseline : [])
+    .filter((b): b is { validator: string; ok: boolean } => !!b && typeof b === 'object' && typeof (b as { validator?: unknown }).validator === 'string' && (b as { ok?: unknown }).ok === false)
+    .map(b => b.validator));
+  return results.map(r => (!r.ok && failedBefore.has(r.validator) ? { ...r, preexisting: true } : r));
+}
+
+/** A result that counts against the change: a failure the base did not already have. */
+export const blocking = (r: { ok?: unknown; preexisting?: unknown }): boolean => r.ok !== true && r.preexisting !== true;

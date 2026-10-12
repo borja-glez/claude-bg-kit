@@ -41,7 +41,7 @@ describe('decideStop', () => {
     expect(d.block).toBe(true);
     if (!d.block) return;
     expect(d.ended).toBe('stop-file');
-    expect(d.reason).toBe('the forge infinite run ended (stop-file): do step 4 of /forge:infinite (turn off meta/infinite and report), then stop');
+    expect(d.reason).toBe('the forge infinite run ended (stop-file): do step 4 of /forge:infinite (turn off meta/infinite and report), then stop.');
     expect(d.run).toMatchObject({ active: false, stoppedReason: 'stop-file' });
     // Once inactive it never blocks again, whatever the context.
     expect(decideStop({}, d.run, ctx({ stopFile: true }))).toEqual({ block: false, run: d.run });

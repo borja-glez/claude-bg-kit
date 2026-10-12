@@ -16,6 +16,7 @@ import { computeMetrics } from '../lib/metrics.js';
 import { normalizeNote, notesSince } from '../lib/notes.js';
 import { pickProject } from '../mod/model.js';
 import { BRANCH_RE, mainWorktreeFrom } from '../lib/worktree.js';
+import { planLocale, replyIn } from '../lib/locale.js';
 import type { MessageDoc, NoteDoc, PhaseDoc, PlanView, SessionDoc, TaskState } from '../lib/types.js';
 
 export interface Io { cwd: string; now: () => Date; rand?: () => number; assetsDir: string; stdin?: string; env?: Record<string, string | undefined> }
@@ -196,7 +197,11 @@ export function run(argv: string[], io: Io): Result {
           + (forge ? ` — ${FORGE_MARK} (forge:run Large loop)` : '')
           + (args.includes('--merge') ? ` — the user authorizes merging ${branch} into main at phase close` : '')
           + (swarm ? ` — swarm member of ${swarm}: do not merge into the base branch; keep taking tasks of your track and stop when it has no next task` : '');
-        return ok(JSON.stringify({ worktree, branch, name, prompt, command: `claude --bg --name ${name} "${prompt}"` }));
+        const command = `claude --bg --name ${name} "${prompt}"`;
+        // `run` starts it from any directory without moving the caller's shell: a cd outside a subshell would
+        // leave a coordinator working in the worktree. Single quotes, with any quote in the path escaped.
+        const inWorktree = `(cd '${worktree.split("'").join(`'\\''`)}' && ${command})`;
+        return ok(JSON.stringify({ worktree, branch, name, prompt, command, run: inWorktree }));
       }
       case 'status': {
         const { view: p, project, version } = loadView();
@@ -458,7 +463,7 @@ function runHook(sub: string | undefined, io: Io): string {
       const ackFile = path.join(wp, 'stop-ack');
       if (existsSync(ackFile) && readFileSync(ackFile, 'utf8').trim() === hash) return '';
       writeFileSync(ackFile, hash + '\n');
-      return JSON.stringify({ decision: 'block', reason: `waypoint: ${commits.length} commit(s) / ${queued.length} queued roadmap update(s) are not in the live roadmap yet. Record them (work skill: a \`commit\` event for intermediate commits, or the task's completion), or flush the queue, then remove those lines from .waypoint/${project}/pending-commits.jsonl. You can also stop now; this reminder shows once per change.` });
+      return JSON.stringify({ decision: 'block', reason: `waypoint: ${commits.length} commit(s) / ${queued.length} queued roadmap update(s) are not in the live roadmap yet. Record them (work skill: a \`commit\` event for intermediate commits, or the task's completion), or flush the queue, then remove those lines from .waypoint/${project}/pending-commits.jsonl. You can also stop now; this reminder shows once per change.${replyIn(planLocale(root, project))}` });
     }
     default:
       return '';

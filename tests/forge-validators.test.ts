@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectValidators, selectValidators, runValidators, failureLines, globMatch, type RepoReader, type Validator, type Scope } from '../src/forge/validators.js';
+import { detectValidators, selectValidators, runValidators, failureLines, globMatch, markPreexisting, blocking, type RepoReader, type Validator, type Scope } from '../src/forge/validators.js';
 import { parseConfig } from '../src/forge/config.js';
 
 // list(dir) returns the direct entries of dir, like readdirSync.
@@ -177,6 +177,28 @@ describe('runValidators', () => {
     const r = runValidators(v, () => ({ code: 1, output: 'line\nFAIL tests/a.test.ts > adds\nAssertionError: 1 !== 2\n', ms: 1, timedOut: false }), 600);
     expect(r[0]).toMatchObject({ ok: false, flaky: false });
     expect(r[0].failures).toEqual(['FAIL tests/a.test.ts > adds', 'AssertionError: 1 !== 2']);
+  });
+  it('a test runner that finds no tests passes as skipped, without a retry', () => {
+    let calls = 0;
+    const out = (output: string) => runValidators(v, () => { calls++; return { code: 1, output, ms: 2, timedOut: false }; }, 600)[0];
+    expect(out('RUN v5\nNo test files found, exiting with code 1')).toMatchObject({ ok: true, skipped: 'no-tests' });
+    expect(calls).toBe(1);
+    const e2e = [{ name: 'e2e', cmd: 'npx playwright test', kind: 'e2e' as const, source: 'detected' as const }];
+    expect(runValidators(e2e, () => ({ code: 1, output: 'Error: No tests found', ms: 1, timedOut: false }), 600)[0]).toMatchObject({ ok: true, skipped: 'no-tests' });
+    // A build that says so is still a failure: only test runners skip.
+    const build = [{ name: 'build', cmd: 'npm run build', kind: 'build' as const, source: 'detected' as const }];
+    expect(runValidators(build, () => ({ code: 1, output: 'no tests found', ms: 1, timedOut: false }), 600)[0].ok).toBe(false);
+  });
+  it('marks the failures the base commit already had, and only those count', () => {
+    const results = [
+      { validator: 'build', ok: false, flaky: false, durationMs: 1, failures: ['x'] },
+      { validator: 'test', ok: false, flaky: false, durationMs: 1, failures: ['y'] },
+      { validator: 'lint', ok: true, flaky: false, durationMs: 1, failures: [] },
+    ];
+    const marked = markPreexisting(results, [{ validator: 'build', ok: false }, { validator: 'test', ok: true }]);
+    expect(marked.map(r => r.preexisting ?? false)).toEqual([true, false, false]);
+    expect(marked.filter(blocking).map(r => r.validator)).toEqual(['test']);
+    expect(markPreexisting(results, 'junk')).toEqual(results);
   });
   it('a timeout is a failure named timeout and is not retried', () => {
     let calls = 0;
