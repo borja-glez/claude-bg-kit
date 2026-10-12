@@ -1,5 +1,5 @@
 import { spawnSync, execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, openSync, closeSync, fstatSync, readSync, rmSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readdirSync, openSync, closeSync, fstatSync, readSync, rmSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { appendEvent, readEvents, forgeDir, LEDGER_KINDS, type LedgerKind } from '../ledger.js';
@@ -21,7 +21,7 @@ import { swarmCommand } from './swarm.js';
 import { readSwarm, saveSwarm } from '../swarm.js';
 import { detectValidators, selectValidators, runValidators, globMatch, type RepoReader, type Scope } from '../validators.js';
 import { readLocal, updateLocal } from '../local.js';
-import { readSurfaces, detectDrafts, appendLearned, surfaceFile } from '../surfaces.js';
+import { readSurfaces, detectDrafts, appendLearned, surfaceFile, surfaceHash } from '../surfaces.js';
 
 export interface ExecResult { code: number; output: string; ms: number; timedOut: boolean }
 export interface Io { cwd: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void }
@@ -511,11 +511,15 @@ export function run(argv: string[], io: Io): Result {
         if (sub === 'learn') {
           const file = path.join(io.cwd, surfaceFile(name));
           if (!existsSync(file)) throw new UsageError(`surfaces learn: ${surfaceFile(name)} does not exist`);
+          if (lstatSync(file).isSymbolicLink()) throw new UsageError(`surfaces learn: ${surfaceFile(name)} is a symlink`);
           let notes: unknown;
           try { notes = JSON.parse(readFileSync(path.resolve(io.cwd, flag('notes-file') ?? ''), 'utf8')); } catch { throw new UsageError('surfaces learn: --notes-file must be a JSON array of strings'); }
           if (!Array.isArray(notes) || !notes.every(n => typeof n === 'string' && n.trim())) throw new UsageError('surfaces learn: --notes-file must be a JSON array of strings');
-          const r = appendLearned(readFileSync(file, 'utf8'), ts().slice(0, 10), notes as string[], flag('heading') ?? 'Learned');
+          const before = readFileSync(file, 'utf8');
+          const r = appendLearned(before, ts().slice(0, 10), notes as string[], flag('heading') ?? 'Learned');
           writeFileSync(file, r.text);
+          const cur = readLocal(io.cwd).surfaces[name];
+          if (cur && cur.state === 'allowed' && cur.hash === surfaceHash(before)) updateLocal(io.cwd, s => ({ ...s, surfaces: { ...s.surfaces, [name]: { ...cur, hash: surfaceHash(r.text) } } }));
           return json({ name, count: r.count });
         }
         throw new UsageError('usage: forge surfaces [learn --name N --notes-file F [--heading H] | proposed --name N]');

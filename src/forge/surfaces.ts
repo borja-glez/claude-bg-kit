@@ -10,13 +10,9 @@ import type { RepoReader } from './validators.js';
 export interface Surface { name: string; file: string; title: string; affects: string[] | null; tools: string[]; hash: string; error?: string }
 export interface Draft { name: string; affects: string[]; tools: string[]; body: string }
 
-// The Learned/Aprendido section: from its heading up to the next "## " heading or the end of the file.
-const LEARNED_SECTION = /^##\s+(Learned|Aprendido)\s*$[\s\S]*?(?=^## |(?![\s\S]))/m;
-
-/** What a permission is tied to: the instructions, without line-ending noise or forge's own Learned notes. */
+/** What a permission is tied to: the whole file, line endings normalised. forge's own notes are re-blessed by `surfaces learn`. */
 export function surfaceHash(text: string): string {
-  const t = text.replace(/\r\n/g, '\n').replace(LEARNED_SECTION, '').replace(/\n+$/, '\n');
-  return createHash('sha256').update(t).digest('hex').slice(0, 16);
+  return createHash('sha256').update(text.replace(/\r\n/g, '\n')).digest('hex').slice(0, 16);
 }
 
 const strs = (x: unknown): string[] => (Array.isArray(x) ? x.filter((s): s is string => typeof s === 'string' && s.trim() !== '') : []);
@@ -87,24 +83,39 @@ export function detectDrafts(repo: RepoReader): Draft[] {
   return out;
 }
 
-const HEADING = /^##\s+(Learned|Aprendido)\s*$/m;
+const HEADING = /^##\s+(Learned|Aprendido)\s*$/;
 
-/** Appends dated one-line notes under "## Learned"/"## Aprendido" (created with `heading` when missing); keeps the file's line endings. */
+/** Lines (with offsets) of the body: after a leading YAML header, outside ``` fences. */
+function bodyLines(t: string): { text: string; at: number }[] {
+  const out: { text: string; at: number }[] = [];
+  let pos = 0;
+  const hdr = /^---\n[\s\S]*?\n---[ \t]*(\n|$)/.exec(t);
+  if (hdr) pos = hdr[0].length;
+  let fence = false;
+  for (const text of t.slice(pos).split('\n')) {
+    if (/^\s*(```|~~~)/.test(text)) fence = !fence;
+    else if (!fence) out.push({ text, at: pos });
+    pos += text.length + 1;
+  }
+  return out;
+}
+
+/** Appends dated one-line notes under "## Learned"/"## Aprendido" in the body (created with `heading` when missing); keeps the file's line endings. */
 export function appendLearned(text: string, date: string, notes: string[], heading = 'Learned'): { text: string; count: number } {
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
   const lines = notes.map(n => `- ${date}: ${n.replace(/\s*\r?\n\s*/g, ' ').trim()}`);
   const t = text.replace(/\r\n/g, '\n');
-  const m = HEADING.exec(t);
+  const bl = bodyLines(t);
+  const hi = bl.findIndex(l => HEADING.test(l.text));
   let next: string;
   let count: number;
-  if (m) {
-    const start = m.index + m[0].length;
-    const rest = t.slice(start);
-    const end = /\n(?=## )/.exec(rest);
-    const section = end ? rest.slice(0, end.index) : rest;
+  if (hi >= 0) {
+    const start = bl[hi].at + bl[hi].text.length;
+    const endLine = bl.slice(hi + 1).find(l => /^## /.test(l.text));
+    const section = t.slice(start, endLine ? endLine.at : undefined);
     const kept = section.replace(/\n+$/, '');
     count = (kept.match(/^- /gm) ?? []).length + lines.length;
-    next = `${t.slice(0, start)}${kept}\n${lines.join('\n')}\n${end ? rest.slice(end.index) : ''}`;
+    next = `${t.slice(0, start)}${kept}\n${lines.join('\n')}\n${endLine ? '\n' + t.slice(endLine.at) : ''}`;
   } else {
     const head = t.replace(/\n+$/, '');
     next = `${head}${head ? '\n\n' : ''}## ${heading}\n${lines.join('\n')}\n`;
