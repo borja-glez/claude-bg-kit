@@ -423,6 +423,15 @@ describe('forge swarm (execution)', () => {
       expect(start().stderr).toMatch(new RegExp(`the execution ${plan.runId} is active`));
       expect(readExecution(root)!.runId).toBe(plan.runId);
     });
+    it('a plan start never replaces an active ephemeral run, even from its coordinator', () => {
+      const e = out(start());
+      const file = path.join(root, '.forge', 'execution.json');
+      const before = readFileSync(file);
+      const r = run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io);
+      expect(r.code).toBe(2);
+      expect(r.stderr).toMatch(new RegExp(`the execution ${e.runId} is active \\(kind ephemeral\\); finish it or stop it \\(forge stop\\)`));
+      expect(readFileSync(file).equals(before)).toBe(true);
+    });
     it('start moves a task branch that is already merged into the base', () => {
       git('branch', 'task/fix-a');
       writeFileSync(path.join(root, 'later.txt'), 'x'); git('add', 'later.txt'); git('commit', '-qm', 'later');

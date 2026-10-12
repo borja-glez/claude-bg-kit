@@ -377,9 +377,11 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       let loose: LooseTask[] = [];
       let ignoredTasks = false;
       const moves: string[] = [];
+      // Even from its own coordinator, of either kind: a new run would overwrite the execution.json of the run in progress.
+      if (prev?.active && !resume) {
+        throw new UsageError(`swarm start: the execution ${prev.runId} is active (kind ${prev.kind}); finish it or stop it (forge stop) first; a request during it goes to that run`);
+      }
       if (kind === 'ephemeral') {
-        // Even from its own coordinator: a new ephemeral run would overwrite the execution.json of the run in progress.
-        if (prev?.active && !resume) throw new UsageError(`swarm start: the execution ${prev.runId} is active; a request during it goes to that run`);
         if (resume && prev) {
           // The run keeps the batch it started with: new requests go to the next run.
           const doc = readLoose(io.cwd, prev.runId);
@@ -456,7 +458,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       if (!normalizeExecution(state)) throw new UsageError('swarm start: --project, --session and the run branch must use letters, digits, _ - . (and / in the branch), at most 120 characters');
       // A task branch already merged into the base starts over from it: nothing on it is lost.
       for (const tb of moves) {
-        if (deps.git(['branch', '-f', tb, base]) === null) throw new UsageError(`swarm start: cannot move ${tb} to ${base}`);
+        if (deps.git(['branch', '-f', tb, base]) === null) throw new UsageError(`swarm start: cannot move ${tb} to ${base}; if a worktree still holds it, run git worktree prune or remove that worktree (git worktree remove)`);
       }
       rmSync(stopFile(io.cwd), { force: true });
       saveExecution(io.cwd, state);
