@@ -10,11 +10,45 @@ export type ForgeStatus = {
   brief: number | null; accepted: number[];
   // The verify plan of the current task (from verify-plan) and its result (from verdict), null before any plan.
   verify: { planned: boolean; surfaces: string[]; result: string | null; passed: number | null; total: number | null; evidence: string | null; reason: string | null } | null;
+  // When the current task started (its triage, or its first phase when no triage was seen), when the current stage
+  // started, the seconds of each closed stage keyed by phase name (lowercase; 'triage' before the first phase),
+  // and when the task finished (phase done, or a verdict accepting the task itself). null / {} in an older status.
+  taskStartedAt: string | null; stageSince: string | null; stages: Record<string, number>; doneAt: string | null;
 };
 
 const CLIP = 80;
 const MAX_VALIDATORS = 10;
 const MAX_ACCEPTED = 200;
+const MAX_STAGES = 20;
+const MAX_TS = 40;
+
+// Only ISO timestamps count for durations (a short string like '1' would parse as some year in V8).
+const isoMs = (s: string | null): number => (s !== null && /^\d{4}-\d{2}-\d{2}T/.test(s) ? Date.parse(s) : NaN);
+const tsText = (x: unknown): string | null => (str(x) && x.length <= MAX_TS ? x : null);
+const stageKey = (phase: string): string => (phase ? phase.toLowerCase() : 'triage');
+
+// The current stage closed at `ts`: its whole seconds added under its phase name. Unchanged when either time is not
+// ISO, the end is before the start, or a new name would pass MAX_STAGES.
+function closeStage(s: ForgeStatus, ts: string): Record<string, number> {
+  const from = isoMs(s.stageSince);
+  const to = isoMs(ts);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return s.stages;
+  const key = stageKey(s.phase);
+  if (!(key in s.stages) && Object.keys(s.stages).length >= MAX_STAGES) return s.stages;
+  return { ...s.stages, [key]: (s.stages[key] ?? 0) + Math.round((to - from) / 1000) };
+}
+
+function stagesOf(x: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!isObj(x)) return out;
+  for (const [k, v] of Object.entries(x)) {
+    if (Object.keys(out).length >= MAX_STAGES) break;
+    const key = cleanText(k).toLowerCase();
+    if (!key || typeof v !== 'number' || !Number.isFinite(v) || v < 0) continue;
+    out[key] = Math.round(v);
+  }
+  return out;
+}
 
 const str = (x: unknown): x is string => typeof x === 'string';
 const num = (x: unknown): number | null => (typeof x === 'number' && Number.isFinite(x) ? x : null);
@@ -55,12 +89,26 @@ export function deriveStatus(prev: ForgeStatus | null, event: unknown): ForgeSta
     // A fresh triage from the CLI (it carries `reasons`; a ratchet logged by the session does not) starts a new run of
     // the task: nothing of an earlier run under the same id is kept.
     const fresh = e.kind === 'triage' && Array.isArray(e.reasons);
-    const base: ForgeStatus = prev && prev.task === task && !fresh
-      ? prev
-      : { ts, task, path: '', phase: '', agent: null, validators: [], verdict: null, round: null, cap: null, brief: null, accepted: [], verify: null };
+    const same = !!prev && prev.task === task && !fresh;
+    const base: ForgeStatus = same
+      ? prev!
+      : {
+        ts, task, path: '', phase: '', agent: null, validators: [], verdict: null, round: null, cap: null, brief: null, accepted: [], verify: null,
+        taskStartedAt: ts, stageSince: ts, stages: {}, doneAt: null,
+      };
     const next: ForgeStatus = { ...base, ts };
     if (e.kind === 'triage' && str(e.path)) next.path = cleanText(e.path);
-    if (e.kind === 'phase' && str(e.phase)) next.phase = cleanText(e.phase);
+    if (e.kind === 'phase' && str(e.phase)) {
+      const phase = cleanText(e.phase);
+      const done = phase.toLowerCase() === 'done';
+      // A repeated done keeps the first; any other phase after done reopens the task (that gap is no stage).
+      if (!(done && base.doneAt)) {
+        if (same && !base.doneAt) next.stages = closeStage(base, ts);
+        next.stageSince = ts;
+        next.doneAt = done ? ts : null;
+      }
+      next.phase = phase;
+    }
     if (e.kind === 'phase' && briefNum(e.brief) !== null) next.brief = briefNum(e.brief);
     return next;
   }
@@ -74,7 +122,12 @@ export function deriveStatus(prev: ForgeStatus | null, event: unknown): ForgeSta
       if (!str(e.action)) return prev;
       const accepted = n !== null && e.action === 'accept' && !cur.accepted.includes(n)
         ? [...cur.accepted, n].sort((a, b) => a - b).slice(-MAX_ACCEPTED) : cur.accepted;
-      return { ...cur, accepted, verdict: { action: cleanText(e.action), score: num(e.score) } };
+      const verdict = { action: cleanText(e.action), score: num(e.score) };
+      // A verdict accepting the task itself (not one of its briefs) finishes it.
+      if (n === null && e.action === 'accept' && !cur.doneAt) {
+        return { ...cur, accepted, verdict, stages: closeStage(cur, ts), stageSince: ts, doneAt: ts };
+      }
+      return { ...cur, accepted, verdict };
     }
     case 'round': return { ...cur, round: num(e.round), cap: num(e.cap) };
     case 'verify': {
@@ -120,5 +173,7 @@ export function normalizeStatus(x: unknown): ForgeStatus | null {
       passed: num(x.verify.passed), total: num(x.verify.total),
       evidence: pathText(x.verify.evidence), reason: str(x.verify.reason) ? cleanText(x.verify.reason) : null,
     } : null,
+    // Absent in a status written before timings existed: no times are shown.
+    taskStartedAt: tsText(x.taskStartedAt), stageSince: tsText(x.stageSince), stages: stagesOf(x.stages), doneAt: tsText(x.doneAt),
   };
 }

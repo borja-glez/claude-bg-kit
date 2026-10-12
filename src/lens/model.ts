@@ -214,7 +214,7 @@ export function forgeFromStatus(text: string, now: number, briefs: number | null
   if (!st) return null;
   const t = Date.parse(st.ts);
   if (!Number.isFinite(t) || !Number.isFinite(now) || now - t > FORGE_WINDOW_MS) return null;
-  const { ts: _ts, ...forge } = st;
+  const { ts: _ts, taskStartedAt: _a, stageSince: _b, stages: _c, doneAt: _d, ...forge } = st;
   return { ...forge, briefs };
 }
 

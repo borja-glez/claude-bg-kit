@@ -22,6 +22,7 @@ describe('deriveStatus', () => {
       ts: '5', task: 'hash', path: 'medium', phase: 'review', agent: 'forge-review-security',
       validators: [{ name: 'test', ok: true }, { name: 'lint', ok: false }], verdict: { action: 'accept', score: 0.97 }, round: 0, cap: 3,
       brief: 1, accepted: [1], verify: null,
+      taskStartedAt: '2', stageSince: '5', stages: {}, doneAt: null,
     });
   });
   it('tracks the brief in progress and the accepted briefs, from phase events and brief ids', () => {
@@ -48,6 +49,7 @@ describe('deriveStatus', () => {
     expect(apply([...run, { ts: '5', kind: 'triage', task: 'o', path: 'large' }])).toMatchObject({ path: 'large', phase: 'implement', agent: 'forge-impl', accepted: [1] });
     expect(apply([...run, { ts: '5', kind: 'triage', task: 'o', path: 'large', reasons: ['x'] }])).toEqual({
       ts: '5', task: 'o', path: 'large', phase: '', agent: null, validators: [], verdict: null, round: null, cap: null, brief: null, accepted: [], verify: null,
+      taskStartedAt: '5', stageSince: '5', stages: {}, doneAt: null,
     });
   });
   it('reads a status written before brief and accepted existed', () => {
@@ -104,5 +106,65 @@ describe('verify in the status', () => {
     expect(normalizeStatus({ ...base, verify: { planned: true, surfaces: ['web', 3], result: 'pass', passed: 1, total: 1, evidence: 'e', reason: null } })!.verify)
       .toEqual({ planned: true, surfaces: ['web'], result: 'pass', passed: 1, total: 1, evidence: 'e', reason: null });
     expect(normalizeStatus({ ...base, verify: 'yes' })!.verify).toBeNull();
+  });
+});
+
+describe('deriveStatus timings', () => {
+  const T = (s: number) => new Date(Date.parse('2026-10-12T10:00:00.000Z') + s * 1000).toISOString();
+  const run = [
+    { ts: T(0), kind: 'triage', task: 'o', path: 'medium', reasons: [] },
+    { ts: T(12), kind: 'phase', task: 'o', phase: 'implement', brief: 1 },
+    { ts: T(312), kind: 'phase', task: 'o', phase: 'validate', brief: 1 },
+    { ts: T(360), kind: 'phase', task: 'o', phase: 'fix', brief: 1 },
+    { ts: T(400), kind: 'phase', task: 'o', phase: 'implement', brief: 2 },
+  ];
+  it('starts the task at its triage and sums each closed stage in seconds, by phase name', () => {
+    const s = apply(run)!;
+    expect(s).toMatchObject({ taskStartedAt: T(0), stageSince: T(400), doneAt: null });
+    expect(s.stages).toEqual({ triage: 12, implement: 300, validate: 48, fix: 40 });
+    // A second stretch of the same phase adds up.
+    const s2 = apply([...run, { ts: T(460), kind: 'phase', task: 'o', phase: 'review' }])!;
+    expect(s2.stages.implement).toBe(360);
+  });
+  it('the done phase closes the stage and sets doneAt; a later done keeps the first; another phase reopens', () => {
+    const done = apply([...run, { ts: T(500), kind: 'phase', task: 'o', phase: 'done' }])!;
+    expect(done).toMatchObject({ doneAt: T(500), stageSince: T(500), phase: 'done' });
+    expect(done.stages.implement).toBe(400);
+    const again = deriveStatus(done, { ts: T(900), kind: 'phase', task: 'o', phase: 'done' })!;
+    expect(again.doneAt).toBe(T(500));
+    expect(again.stages).toEqual(done.stages);
+    const reopened = deriveStatus(done, { ts: T(900), kind: 'phase', task: 'o', phase: 'review' })!;
+    expect(reopened).toMatchObject({ doneAt: null, stageSince: T(900) });
+    // The time between done and the reopening is not a stage.
+    expect(reopened.stages).toEqual(done.stages);
+  });
+  it('a verdict accepting the task itself finishes it; a brief accept does not', () => {
+    const brief = apply([...run, { ts: T(450), kind: 'verdict', task: 'o-2', action: 'accept', score: 0.9 }])!;
+    expect(brief.doneAt).toBeNull();
+    const task = apply([...run, { ts: T(450), kind: 'verdict', task: 'o', action: 'accept', score: 0.9 }])!;
+    expect(task).toMatchObject({ doneAt: T(450), stageSince: T(450) });
+    expect(task.stages.implement).toBe(350);
+  });
+  it('a fresh CLI triage of the same id starts the clock over; a ratchet triage keeps it', () => {
+    const fresh = apply([...run, { ts: T(600), kind: 'triage', task: 'o', path: 'large', reasons: ['x'] }])!;
+    expect(fresh).toMatchObject({ taskStartedAt: T(600), stageSince: T(600), stages: {}, doneAt: null });
+    const ratchet = apply([...run, { ts: T(600), kind: 'triage', task: 'o', path: 'large' }])!;
+    expect(ratchet).toMatchObject({ taskStartedAt: T(0), stageSince: T(400) });
+  });
+  it('skips a stage whose end is before its start or whose times are not ISO', () => {
+    const back = apply([run[0], { ts: T(-30), kind: 'phase', task: 'o', phase: 'implement' }])!;
+    expect(back.stages).toEqual({});
+    expect(back.stageSince).toBe(T(-30));
+    const junk = apply([{ ts: 'x', kind: 'triage', task: 'o', path: 'small' }, { ts: T(5), kind: 'phase', task: 'o', phase: 'implement' }])!;
+    expect(junk.stages).toEqual({});
+  });
+  it('normalizeStatus keeps valid timings and reads an older status without them', () => {
+    const base = { ts: 'a', task: 'x', path: 'medium', phase: 'review', agent: null, validators: [], verdict: null, round: null, cap: null };
+    expect(normalizeStatus(base)).toMatchObject({ taskStartedAt: null, stageSince: null, stages: {}, doneAt: null });
+    const good = normalizeStatus({ ...base, taskStartedAt: T(0), stageSince: T(9), doneAt: T(20), stages: { triage: 9, implement: 11.4, bad: -1, junk: 'x', '\u001b': 3 } })!;
+    expect(good).toMatchObject({ taskStartedAt: T(0), stageSince: T(9), doneAt: T(20), stages: { triage: 9, implement: 11 } });
+    expect(normalizeStatus({ ...base, taskStartedAt: 7, stages: 'x', doneAt: 'y'.repeat(100) })).toMatchObject({ taskStartedAt: null, stages: {}, doneAt: null });
+    const many = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`p${i}`, i]));
+    expect(Object.keys(normalizeStatus({ ...base, stages: many })!.stages)).toHaveLength(20);
   });
 });
