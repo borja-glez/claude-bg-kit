@@ -24,8 +24,18 @@ const modelRight = (s: { model?: string; effort?: string }, t: CardTexts): strin
 
 const VERDICT_HUE: Record<string, Hue> = { accept: 'green', fix: 'yellow', redo: 'red' };
 
+// Order: Now first (one glance: is it alive, on what model), then the work, then Usage as the footer.
 export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
   const out: Card[] = [];
+  let usageCard: Card | null = null;
+
+  if (m.mainModel || m.tool || m.turnSeconds !== null) {
+    const blocks: Block[] = [];
+    if (m.mainModel) blocks.push({ kind: 'row', dot: 'lavender', text: `${shortModelName(m.mainModel.model)}${m.mainModel.effort ? ` · ${t.effort} ${t.effortLevel(m.mainModel.effort)}` : ''}` });
+    if (m.tool) blocks.push({ kind: 'row', dot: 'sky', spinning: true, tag: { text: t.tool, hue: 'sky' }, text: m.tool.name, right: duration(m.tool.seconds) ?? undefined });
+    if (m.turnSeconds !== null) blocks.push({ kind: 'row', dot: 'sub' as Hue, text: t.turn, right: duration(m.turnSeconds) ?? undefined });
+    out.push({ icon: SECTION_ICON.now, title: t.sNow, hue: SECTION_HUE.now, blocks });
+  }
 
   if (m.waypoint) {
     const w = m.waypoint;
@@ -145,7 +155,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
       blocks.push({ kind: 'text', text: t.withoutForgeNote, dim: true });
     }
     blocks.push({ kind: 'text', text: `${t.pricesAsOf} ${u.pricesAsOf}`, dim: true });
-    out.push({ icon: '$', title: t.sUsage, hue: 'teal', chip: { text: `${u.partial ? '≥ ' : ''}${fmtUsd(u.costUsd, loc)}`, hue: 'teal' }, blocks });
+    usageCard = { icon: '$', title: t.sUsage, hue: 'teal', chip: { text: `${u.partial ? '≥ ' : ''}${fmtUsd(u.costUsd, loc)}`, hue: 'teal' }, blocks };
   }
 
   if (m.superpowers) {
@@ -187,13 +197,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     out.push({ icon: SECTION_ICON.tasks, title: t.sTasks, hue: SECTION_HUE.tasks, blocks });
   }
 
-  if (m.mainModel || m.tool || m.turnSeconds !== null) {
-    const blocks: Block[] = [];
-    if (m.mainModel) blocks.push({ kind: 'row', dot: 'lavender', text: `${shortModelName(m.mainModel.model)}${m.mainModel.effort ? ` · ${t.effort} ${t.effortLevel(m.mainModel.effort)}` : ''}` });
-    if (m.tool) blocks.push({ kind: 'row', dot: 'sky', spinning: true, tag: { text: t.tool, hue: 'sky' }, text: m.tool.name, right: duration(m.tool.seconds) ?? undefined });
-    if (m.turnSeconds !== null) blocks.push({ kind: 'row', dot: 'sub' as Hue, text: t.turn, right: duration(m.turnSeconds) ?? undefined });
-    out.push({ icon: SECTION_ICON.now, title: t.sNow, hue: SECTION_HUE.now, blocks });
-  }
+  if (usageCard) out.push(usageCard);
   return out;
 }
 

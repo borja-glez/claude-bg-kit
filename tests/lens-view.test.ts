@@ -164,6 +164,15 @@ describe('usage formats and card', () => {
     expect(text).toContain('2026-10-12');
     expect(text).toContain('6.18');
   });
+  it('puts Now first and Usage last, the work in between', () => {
+    const usage = {
+      scope: 'session' as const, tokens: 20, costUsd: 0.2, partial: false, sessionPartial: false, officialUsd: null, drift: false, session: null,
+      groups: [], tracking: null, withoutForge: null, pricesAsOf: '2026-10-12',
+    };
+    const todos = { done: 1, total: 2, inProgress: 'b', next: [] };
+    const cards = buildCards({ ...EMPTY, usage, forge: FORGE, todos, mainModel: { model: 'claude-opus-5-5', effort: 'high' } }, T, 0);
+    expect(cards.map(c => c.title)).toEqual([T.sNow, FORGE.task, T.sTodos, T.sUsage]);
+  });
   it('calls subagents just «Subagents» when no forge group is there, «other» only next to forge ones', () => {
     const g = (id: 'main' | 'impl' | 'other') => ({ id, model: 'claude-opus-5-5', tokens: 10, costUsd: 0.1, share: 0.5 });
     const base = { scope: 'session' as const, tokens: 20, costUsd: 0.2, partial: false, sessionPartial: false, officialUsd: null, drift: false, session: null, tracking: null, withoutForge: null, pricesAsOf: '2026-10-12' };
