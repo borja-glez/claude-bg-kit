@@ -1,5 +1,5 @@
 export { normalizeNote } from '../lib/notes.js';
-import type { Commit, EventDoc, InfiniteDoc, MessageDoc, MetaDoc, PhaseDoc, PlanTask, PlanTrack, SessionDoc, TaskState } from '../lib/types.js';
+import { STAGES, type Commit, type EventDoc, type InfiniteDoc, type MessageDoc, type MetaDoc, type PhaseDoc, type PlanTask, type PlanTrack, type RunDoc, type SessionDoc, type Stage, type TaskExec, type TaskState } from '../lib/types.js';
 
 // Documents in the shared db are untrusted and may be malformed: coerce them into the shapes the renderer expects.
 type Obj = Record<string, unknown>;
@@ -55,7 +55,20 @@ export function normalizeState(x: unknown): TaskState {
   if (forge) s.forge = forge; else delete s.forge;
   const evidence = normalizeEvidence(o.evidence);
   if (evidence) s.evidence = evidence; else delete s.evidence;
+  const exec = normalizeExec(o.exec);
+  if (exec) s.exec = exec; else delete s.exec;
   return s;
+}
+
+/** The exec block of a task state: kept only whole and well-typed (it drives the orphan mark). */
+function normalizeExec(x: unknown): TaskExec | undefined {
+  if (!isObj(x) || typeof x.runId !== 'string' || typeof x.by !== 'string' || typeof x.since !== 'string' || typeof x.leaseUntil !== 'string') return undefined;
+  if (!(STAGES as readonly unknown[]).includes(x.stage)) return undefined;
+  if (x.mode !== 'subagents' && x.mode !== 'sessions' && x.mode !== 'manual') return undefined;
+  const e: TaskExec = { runId: x.runId, mode: x.mode, by: x.by, stage: x.stage as Stage, since: x.since, leaseUntil: x.leaseUntil };
+  if (typeof x.agent === 'string' || x.agent === null) e.agent = x.agent;
+  if (typeof x.round === 'number' && Number.isInteger(x.round)) e.round = x.round;
+  return e;
 }
 
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -74,7 +87,8 @@ function normalizeForge(x: unknown): TaskState['forge'] | undefined {
 
 export function normalizeSession(x: unknown): SessionDoc {
   const o: Obj = isObj(x) ? x : {};
-  return { ...(o as unknown as SessionDoc), name: str(o.name), heartbeatAt: typeof o.heartbeatAt === 'string' ? o.heartbeatAt : '', currentTask: optStr(o.currentTask), track: optStr(o.track) ?? null, agentName: optStr(o.agentName), branch: optStr(o.branch), worktree: optStr(o.worktree), busyUntil: optStr(o.busyUntil) };
+  return { ...(o as unknown as SessionDoc), name: str(o.name), heartbeatAt: typeof o.heartbeatAt === 'string' ? o.heartbeatAt : '', currentTask: optStr(o.currentTask), track: optStr(o.track) ?? null, agentName: optStr(o.agentName), branch: optStr(o.branch), worktree: optStr(o.worktree), busyUntil: optStr(o.busyUntil),
+    role: o.role === 'coordinator' || o.role === 'executor' || o.role === 'manual' ? o.role : undefined, runId: optStr(o.runId), leaseUntil: optStr(o.leaseUntil) };
 }
 
 export function normalizeEvent(x: unknown): EventDoc {
@@ -97,6 +111,19 @@ export function normalizeMessage(x: unknown): MessageDoc | null {
 }
 
 const isoOrNull = (v: unknown): string | null => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? v : null);
+
+/** meta/run: the execution published by forge's coordinator; null when it is not a well-formed run. */
+export function normalizeRun(x: unknown): RunDoc | null {
+  if (!isObj(x)) return null;
+  const mode = x.mode === 'subagents' || x.mode === 'sessions' ? x.mode : null;
+  if (!mode || typeof x.runId !== 'string' || typeof x.branch !== 'string' || typeof x.coordinator !== 'string') return null;
+  const parallel = typeof x.parallel === 'number' && Number.isInteger(x.parallel) ? Math.min(10, Math.max(1, x.parallel)) : 1;
+  const slots = (Array.isArray(x.slots) ? x.slots : []).filter(isObj)
+    .filter(s => typeof s.task === 'string' && typeof s.stage === 'string' && (STAGES as readonly unknown[]).includes(s.stage) && typeof s.by === 'string' && isoOrNull(s.since))
+    .slice(0, 10).map(s => ({ task: s.task as string, stage: s.stage as Stage, agent: typeof s.agent === 'string' ? s.agent : null, by: s.by as string, since: s.since as string }));
+  return { runId: x.runId, mode, parallel, branch: x.branch, mergeOnFinish: x.mergeOnFinish === true, active: x.active === true,
+    stopReason: typeof x.stopReason === 'string' ? x.stopReason : null, coordinator: x.coordinator, slots };
+}
 
 /** meta/infinite: active only when exactly true, cycle a non-negative integer (else 0), budget kept only when positive. */
 export function normalizeInfinite(x: unknown): InfiniteDoc | null {

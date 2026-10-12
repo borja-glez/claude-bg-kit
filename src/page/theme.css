@@ -323,13 +323,16 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
   .grid{top:28px}
 }
 
-.pill.swarm{background:var(--teal);color:var(--base)}
-.pill.swarm.stalled{background:var(--yellow)}
-.swarm{margin-bottom:16px}
-.swarm .slot.free{opacity:.45;border-style:dashed}
-.swarm .q{margin-top:6px;font-size:14px}
-.swarm .q-conflict b,.swarm .q-launch-failed b{color:var(--red)}
-.swarm .q-ready b{color:var(--teal)}
+.pill.run{background:var(--teal);color:var(--base)}
+.pill.run.warn{background:var(--yellow)}
+.pill.run.stopped{background:var(--red)}
+section.run{margin-bottom:16px}
+section.run .slot.free{opacity:.45;border-style:dashed}
+.dot.live-alive{color:var(--green)}
+.dot.live-silent{color:var(--yellow)}
+.dot.live-stopped{color:var(--red)}
+.orphan{border:1px dashed var(--red)}
+.pill.orphan{color:var(--red);background:none}
 .evidence .shots{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .shot{padding:0;border:2px solid var(--s1);border-radius:6px;background:none;cursor:zoom-in}
 .shot.ok{border-color:var(--green)}.shot.del{border-color:var(--red)}

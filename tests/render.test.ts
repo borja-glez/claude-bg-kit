@@ -6,7 +6,6 @@ import { dictFor } from '../src/page/i18n.js';
 import { esc, renderApp, timelineSvg, type Model, type UiState } from '../src/page/render.js';
 import type { MessageDoc, EventType, NoteDoc, PlanTrack, TaskStatus } from '../src/lib/types.js';
 import type { ProposalDoc } from '../src/lib/proposals.js';
-import { emptyFront, type SwarmState } from '../src/lib/swarm-state.js';
 
 const plan = parsePlan(readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8'));
 const NOW = Date.parse('2026-10-11T12:00:00Z');
@@ -420,47 +419,43 @@ describe('proposals view', () => {
   });
 });
 
-const swarmDoc = (over: Partial<SwarmState> = {}): SwarmState => ({
-  active: true, parallel: 3, mergeAuthorized: true, project: 'demo-shop', base: 'main', coordinator: 'main', hookSession: null,
-  startedAt: '2026-10-11T10:00:00Z', lastTickAt: '2026-10-11T11:58:00Z', lastBlockTick: null, sleepUntil: null,
-  stopReason: null, stallReason: null, notice: null,
-  fronts: {
-    backend: { ...emptyFront(), status: 'running', session: 'wp-demo-shop-backend', currentTask: 'T002', done: 1, total: 4 },
-    ui: { ...emptyFront(), status: 'waiting', waitingFor: { task: 'T002', track: 'backend', reason: 'not-integrated' } },
-  },
-  ...over,
-});
+const runDoc = (over: object = {}) => ({ runId: 'r1', mode: 'subagents' as const, parallel: 3, branch: 'forge/run-demo-shop', mergeOnFinish: false, active: true, stopReason: null, coordinator: 'main',
+  slots: [{ task: 'T002', stage: 'implement' as const, agent: 'forge-impl-heavy', by: 'main', since: new Date(NOW - 7 * 60000).toISOString() }], ...over });
 
-describe('swarm', () => {
-  it('shows the swarm pill while active and the stalled pill with its reason', () => {
-    expect(renderApp({ ...base(), swarm: swarmDoc() }, ui())).toContain('⑂ enjambre 1/3');
-    const stalled = renderApp({ ...base(), swarm: swarmDoc({ active: false, stopReason: 'stalled', stallReason: 'blocked: ui' }) }, ui());
-    expect(stalled).toContain('⑂ enjambre parado');
-    expect(stalled).toContain('title="blocked: ui"');
-    expect(renderApp({ ...base(), swarm: swarmDoc({ active: false, stopReason: 'finished' }) }, ui())).not.toContain('⑂');
-    expect(renderApp({ ...base(), swarm: null }, ui())).not.toContain('⑂');
+describe('execution', () => {
+  it('run pill: active, then silent and stopped by the coordinator lease', () => {
+    const m = base();
+    m.run = runDoc();
+    m.sessions.main = { ...m.sessions.main, leaseUntil: new Date(NOW + 5 * 60000).toISOString() };
+    expect(renderApp(m, ui())).toContain('▶ ejecución · subagentes 1/3');
+    m.sessions.main = { ...m.sessions.main, leaseUntil: new Date(NOW - 2 * 60000).toISOString() };
+    expect(renderApp(m, ui())).toMatch(/sin señal desde \d\d:\d\d/);
+    m.sessions.main = { ...m.sessions.main, leaseUntil: new Date(NOW - 20 * 60000).toISOString() };
+    expect(renderApp(m, ui())).toMatch(/parada desde \d\d:\d\d/);
   });
-  it('shows the Swarm block in the sessions view: slots, free slots and the queue', () => {
-    const html = renderApp({ ...base(), swarm: swarmDoc() }, ui({ view: 'sessions' }));
-    expect(html).toContain('Enjambre');
+  it('sessions view: run block with slots and free places; session cards show role and stopped state', () => {
+    const m = base();
+    m.run = runDoc();
+    m.sessions.main = { ...m.sessions.main, role: 'coordinator', leaseUntil: new Date(NOW - 20 * 60000).toISOString() };
+    const html = renderApp(m, ui({ view: 'sessions' }));
     expect(html).toContain('1/3 plazas');
     expect(html).toContain('libre');
-    expect(html).toContain('En espera');
-    expect(html).toContain('espera a T002 (backend) integrada');
+    expect(html).toContain('coordinadora');
+    expect(html).toMatch(/parada · última señal \d\d:\d\d/);
   });
-  it('escapes front ids and details', () => {
-    const html = renderApp({ ...base(), swarm: swarmDoc({ fronts: { x: { ...emptyFront(), status: 'conflict', detail: '<b>boom</b>' } } }) }, ui({ view: 'sessions' }));
-    expect(html).not.toContain('<b>boom</b>');
-    expect(html).toContain('&lt;b&gt;boom&lt;/b&gt;');
-  });
-  it('marks track rows in the timeline grouped by track', () => {
-    const svg = timelineSvg({ ...base(), swarm: swarmDoc() }, ui({ timelineGroup: 'track' }));
-    expect(svg).toContain('● ');
+  it('a task whose executor lease stopped is drawn as orphaned, not in progress', () => {
+    const m = base();
+    m.states.T002 = { status: 'in_progress', owner: 'main', exec: { runId: 'r1', mode: 'subagents', by: 'main', agent: 'forge-impl-heavy', stage: 'implement', round: 1, since: new Date(NOW - 30 * 60000).toISOString(), leaseUntil: new Date(NOW - 20 * 60000).toISOString() } };
+    const html = renderApp(m, ui());
+    expect(html).toContain('orphan');
+    expect(html).toContain('huérfana');
   });
   it('speaks English with an English plan', () => {
-    const en = renderApp({ ...base(), meta: { ...base().meta!, locale: 'en' }, swarm: swarmDoc() }, ui({ view: 'sessions' }));
-    expect(en).toContain('⑂ swarm 1/3');
-    expect(en).toContain('Waiting');
+    const m = { ...base(), meta: { ...base().meta!, locale: 'en' }, run: runDoc() };
+    expect(renderApp(m, ui({ view: 'sessions' }))).toContain('▶ execution · subagents 1/3');
+  });
+  it('the timeline track rows carry no swarm mark', () => {
+    expect(timelineSvg(base(), ui({ timelineGroup: 'track' }))).not.toContain('● ');
   });
   it('renders the Verification block with thumbnails, local-only and blocked states', () => {
     const m = base();

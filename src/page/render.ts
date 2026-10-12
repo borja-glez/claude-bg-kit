@@ -1,12 +1,11 @@
 import { computeMetrics, type Metrics } from '../lib/metrics.js';
 import { autoTicks, groupIds, layoutRows, NONE_GROUP, planRange, SPAN, windowAt, windowFor, type GroupBy, type Row, type Win, type Zoom } from '../lib/timeline.js';
 import { burndown, criticalPath, forecast, zoneHeat } from '../lib/insights.js';
-import { escalationCandidates, isIdle, zonesOf } from '../lib/coordination.js';
-import { TRACK_COLORS, type EventDoc, type EventType, type InfiniteDoc, type MessageDoc, type MessageType, type MetaDoc, type NoteDoc, type NoteType, type PlanStatus, type PlanView, type SessionDoc, type States, type TaskState, type TaskStatus } from '../lib/types.js';
+import { escalationCandidates, liveness, sessionLiveness, zonesOf } from '../lib/coordination.js';
+import { TRACK_COLORS, type RunDoc, type EventDoc, type EventType, type InfiniteDoc, type MessageDoc, type MessageType, type MetaDoc, type NoteDoc, type NoteType, type PlanStatus, type PlanView, type SessionDoc, type States, type TaskState, type TaskStatus } from '../lib/types.js';
 import { counts, filterNotes, MAX_NOTE, NOTE_TYPES, type NoteFilter } from '../lib/notes.js';
 import { buildVersionColumns, type VersionColumn } from '../lib/versions.js';
 import { canDecide, MAX_PROPOSAL_TEXT, PROPOSAL_CATEGORIES, PROPOSAL_RISKS, PROPOSAL_STATUSES, type ProposalCategory, type ProposalDoc, type ProposalRisk, type ProposalStatus } from '../lib/proposals.js';
-import { swarmLive, type FrontStatus, type SwarmState } from '../lib/swarm-state.js';
 import { dictFor, type Dict } from './i18n.js';
 
 export interface Model {
@@ -20,8 +19,8 @@ export interface Model {
   proposals: (ProposalDoc & { id: string })[];
   /** forge's infinite run (meta/infinite); the pill shows only while it is active. */
   infinite?: InfiniteDoc | null;
-  /** forge's swarm (meta/swarm): the pill and the Swarm block in the sessions view. */
-  swarm?: SwarmState | null;
+  /** forge's execution (meta/run): the pill and the Execution block in the sessions view. */
+  run?: RunDoc | null;
   /** 'user:<id>' of the viewer, or null when unknown. */
   me: string | null;
   /** Display names by opaque user id (from user.profiles). */
@@ -118,7 +117,7 @@ export function renderApp(m: Model, ui: UiState): string {
     ${renderTimeline(m, d, ui, loc)}
     ${renderInsights(m, d, ui, loc)}`;
   return `<div class="shell">
-  <nav class="side"><div class="brand">${esc((m.meta?.name ?? '').toUpperCase())}</div>${infinitePill(m, d)}${swarmPill(m, d)}
+  <nav class="side"><div class="brand">${esc((m.meta?.name ?? '').toUpperCase())}</div>${infinitePill(m, d)}${runPill(m, d)}
     ${navBtn('tracking', '≡', d.nav.tracking)}${navBtn('versions', '▥', d.nav.versions)}${navBtn('sessions', '◎', d.nav.sessions)}${navBtn('notes', '✎', d.nav.notes)}${navBtn('proposals', '◇', d.nav.proposals, openProposals)}
     <div class="scale"><button data-action="scale" data-dir="-1" title="${esc(d.tl.smaller)}" aria-label="${esc(d.tl.smaller)}">A−</button><button data-action="scale" data-dir="1" title="${esc(d.tl.larger)}" aria-label="${esc(d.tl.larger)}">A+</button></div></nav>
   <main class="main">
@@ -136,7 +135,7 @@ function renderHeader(m: Model, d: Dict, x: Metrics, title = d.title): string {
   const tests = m.meta?.metrics?.tests;
   return `<header class="hd">
     ${liveLine(m, d)}
-    <h1>${esc(title)}${infinitePill(m, d)}${swarmPill(m, d)}</h1>
+    <h1>${esc(title)}${infinitePill(m, d)}${runPill(m, d)}</h1>
     <div class="meta">${esc(m.meta?.name ?? '')} · ${esc(d.version)} <b>${esc(m.meta?.version ?? '')}</b> · ${esc(d.phase)} <b>${idx}</b>/${m.plan.phases.length} · <b>${x.done}</b>/${x.total} ${esc(d.tasks)} · <span title="${esc(d.trackHelp)}"><b>${m.plan.tracks.length}</b> ${esc(d.tracks)}</span>${tests != null ? ` · <b>${num(tests)}</b> ${esc(d.tests)}` : ''}${lc ? ` · ${esc(d.lastCommit)} <b>${esc(lc.sha.slice(0, 7))}</b> ${esc(d.ago(mins(Date.parse(lc.ts), m.now)))}` : ''}</div>
   </header>`;
 }
@@ -151,14 +150,30 @@ function infinitePill(m: Model, d: Dict): string {
   return ` <span class="pill inf">${esc(d.infinite(max !== undefined ? Math.min(current, max) : current, max))}</span>`;
 }
 
-// «⑂ enjambre N/M» while the swarm is active; «⑂ enjambre parado» (reason in the title) when it stalled; nothing otherwise.
-function swarmPill(m: Model, d: Dict): string {
-  const s = m.swarm;
-  if (!s) return '';
-  if (s.active) return ` <span class="pill swarm">${esc(d.swarm.pill(swarmLive(s), s.parallel))}</span>`;
-  if (s.stopReason === 'stalled') return ` <span class="pill swarm stalled" title="${esc(s.stallReason ?? '')}">${esc(d.swarm.stalled)}</span>`;
-  return '';
+const hhmm = (iso: string | undefined) => { const t = iso ? new Date(iso) : null; return t && Number.isFinite(t.getTime()) ? `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}` : '—'; };
+
+// «▶ ejecución · subagentes N/M» while the run is active; the coordinator's lease adds «sin señal desde» or «parada desde».
+function runPill(m: Model, d: Dict): string {
+  const r = m.run;
+  if (!r || !r.active) return '';
+  const coord = m.sessions[r.coordinator];
+  const l = coord ? sessionLiveness(coord, m.now) : 'stopped';
+  const extra = l === 'silent' ? ` · ${d.run.silentSince(hhmm(coord?.heartbeatAt))}` : l === 'stopped' ? ` · ${d.run.stoppedSince(hhmm(coord?.heartbeatAt))}` : '';
+  return ` <span class="pill run ${l === 'alive' ? '' : l === 'silent' ? 'warn' : 'stopped'}">${esc(d.run.pill(d.run.mode[r.mode], r.slots.length, r.parallel) + extra)}</span>`;
 }
+
+const liveDot = (l: 'alive' | 'silent' | 'stopped') => `<span class="dot live-${l}">●</span>`;
+
+/** The «coordinadora · subagentes · agent · etapa · 7 min» line of a task with an exec block, with its liveness dot. */
+function execLine(m: Model, d: Dict, exec: NonNullable<TaskState['exec']>): string {
+  const l = liveness(m.now, exec.leaseUntil);
+  const parts = [d.run.role.coordinator, d.run.mode[exec.mode] ?? exec.mode, exec.agent, d.run.stage[exec.stage] ?? exec.stage, d.ago(mins(Date.parse(exec.since), m.now))];
+  return `${liveDot(l)} ${parts.filter(Boolean).map(p => esc(String(p))).join(' · ')}`;
+}
+
+/** An in-progress task whose executor's lease stopped. */
+const isOrphan = (m: Model, st: TaskState | undefined): boolean =>
+  !!st?.exec && st.status === 'in_progress' && liveness(m.now, st.exec.leaseUntil) === 'stopped';
 
 function trackTag(m: Model, trackId?: string | null): string {
   const tr = m.plan.tracks.find(t => t.id === trackId);
@@ -184,9 +199,11 @@ function renderCards(m: Model, d: Dict, x: Metrics, loc: string): string {
       const pct = t.estimate_min ? Math.min(100, (el / t.estimate_min) * 100) : 0;
       const over = !!t.estimate_min && el > t.estimate_min;
       const ph = m.plan.phases.find(p => p.id === t.phase);
-      return `<div class="run" data-action="open-task" data-id="${esc(t.id)}">
-        <div class="t"><em>${esc(t.id)}</em> ${esc(t.title)}${eviMark(m, d, t.id)}</div>
+      const orphan = isOrphan(m, s);
+      return `<div class="run${orphan ? ' orphan' : ''}" data-action="open-task" data-id="${esc(t.id)}">
+        <div class="t"><em>${esc(t.id)}</em> ${esc(t.title)}${orphan ? ` <span class="pill orphan">${esc(d.run.orphan)}</span>` : ''}${eviMark(m, d, t.id)}</div>
         <div class="mono">${trackTag(m, t.track)} ${esc(ph?.name)} · ${esc(d.elapsed(el, t.estimate_min))}${s.owner ? ` · <span class="k">${esc(s.owner)}</span>` : ''}</div>
+        ${s.exec ? `<div class="mono exec">${execLine(m, d, s.exec)}</div>` : ''}
         <div class="bar${over ? ' over' : ''}"><i style="width:${pct.toFixed(1)}%"></i></div></div>`;
     }).join('')}</div>${running.length > MAX_RUNNING ? `<div class="mono">${esc(d.more(running.length - MAX_RUNNING))}</div>` : ''}`;
   }
@@ -236,7 +253,7 @@ function renderSessions(m: Model, d: Dict): string {
   const esca = escalatedSessions(m);
   return `<section class="sess">${list.map(([sid, s]) => {
     const age = hbAge(s, m.now);
-    const idle = isIdle(s, m.now);
+    const idle = sessionLiveness(s, m.now) === 'stopped';
     const warn = esca.has(sid);
     return `<div class="s ${idle ? 'idle' : ''} ${warn ? 'warn' : ''}"><div class="n">${warn ? '⚠' : '<span class="dot">●</span>'} ${esc(s.name)} ${trackTag(m, s.track)}</div>
       <div class="mono">${esc(s.currentTask ?? '—')} · ${esc(d.heartbeat)} ${esc(hbText(d, age))}</div></div>`;
@@ -245,46 +262,22 @@ function renderSessions(m: Model, d: Dict): string {
 
 const MSG_COLOR: Record<MessageType, string> = { overlap_warning: 'mauve', handoff_request: 'peach', delegate: 'teal', reply: 'blue', escalation: 'yellow' };
 
-const SWARM_QUEUE: [FrontStatus, (d: Dict) => string][] = [
-  ['queued', d => d.swarm.queued], ['waiting', d => d.swarm.waiting], ['blocked', d => d.swarm.blocked], ['ready', d => d.swarm.ready],
-  ['integrated', d => d.swarm.integrated], ['conflict', d => d.swarm.conflict], ['launch-failed', d => d.swarm.launchFailed],
-];
-
-function renderSwarmBlock(m: Model, d: Dict): string {
-  const s = m.swarm;
-  if (!s || (!s.active && s.stopReason !== 'stalled')) return '';
-  const x = computeMetrics(m.plan, m.states, m.now, 1);
-  const order = m.plan.tracks.map(t => t.id);
-  const ids = Object.keys(s.fronts).sort((a, b) => order.indexOf(a) - order.indexOf(b));
-  const running = ids.filter(id => s.fronts[id].status === 'running');
-  const slot = (id: string) => {
-    const f = s.fronts[id];
-    // The live session doc wins over the tick's snapshot.
-    const live = Object.values(m.sessions).find(x2 => x2.track === id && !isIdle(x2, m.now));
-    const taskId = live?.currentTask ?? f.currentTask;
-    const task = m.plan.tasks.find(t => t.id === taskId);
-    const prog = x.byTrack[id] ?? { done: f.done, total: f.total };
-    const pct = prog.total ? Math.round((num(prog.done) / prog.total) * 100) : 0;
-    const hb = live?.heartbeatAt ?? f.heartbeatAt;
-    const age = hb ? mins(Date.parse(hb), m.now) : null;
-    return `<div class="sc slot"><h3><span class="dot">●</span> ${trackTag(m, id) || esc(id)}</h3>
-      <div>${task ? `<span class="pe">${esc(task.id)}</span> ${esc(task.title)}` : esc(taskId ?? '—')}</div>
-      <div class="bar c"><i style="width:${pct}%"></i></div><div class="mono">${num(prog.done)}/${num(prog.total)} · ${esc(hbText(d, age))}</div></div>`;
+function renderRunBlock(m: Model, d: Dict): string {
+  const r = m.run;
+  if (!r || !r.active) return '';
+  const coord = m.sessions[r.coordinator];
+  const slot = (s: RunDoc['slots'][number]) => {
+    const task = m.plan.tasks.find(t => t.id === s.task);
+    const ex = m.states[s.task]?.exec;
+    const l = ex ? liveness(m.now, ex.leaseUntil) : coord ? sessionLiveness(coord, m.now) : 'stopped';
+    const age = mins(Date.parse(s.since), m.now);
+    return `<div class="sc slot"><h3>${liveDot(l)} <span class="pe">${esc(s.task)}</span> ${esc(task?.title ?? '')}</h3>
+      <div class="mono">${esc(d.run.stage[s.stage] ?? s.stage)}${s.agent ? ` · ${esc(s.agent)}` : ''} · ${esc(d.ago(age))}</div></div>`;
   };
-  const free = Math.max(0, s.parallel - running.length);
-  const slots = running.map(slot).join('') + Array.from({ length: free }, () => `<div class="sc slot free"><h3>${esc(d.swarm.free)}</h3></div>`).join('');
-  const line = (f: SwarmState['fronts'][string]) =>
-    f.waitingFor ? d.swarm.waitsFor(f.waitingFor.task, f.waitingFor.track, f.waitingFor.reason === 'not-integrated') : f.detail ?? '';
-  const queue = SWARM_QUEUE.map(([status, label]) => {
-    const list = ids.filter(id => s.fronts[id].status === status);
-    if (!list.length) return '';
-    return `<div class="q q-${status}"><b>${esc(label(d))}</b> ${list.map(id => `${esc(id)}${line(s.fronts[id]) ? ` — ${esc(line(s.fronts[id]))}` : ''}`).join(' · ')}</div>`;
-  }).join('');
-  return `<section class="swarm"><div class="lbl">${esc(d.swarm.title)} · ${esc(d.swarm.slots(running.length, s.parallel))} · ${esc(d.swarm.coordinator)}: ${esc(s.coordinator)}</div>
-    <div class="sgrid">${slots}</div>${queue}</section>`;
+  const free = Math.max(0, r.parallel - r.slots.length);
+  return `<section class="run"><div class="lbl">${esc(d.run.title)} · ${esc(d.run.mode[r.mode])} · ${esc(d.run.slots(r.slots.length, r.parallel))} · ${esc(d.run.coordinator)}: ${esc(r.coordinator)}</div>
+    <div class="sgrid">${r.slots.map(slot).join('')}${Array.from({ length: free }, () => `<div class="sc slot free"><h3>${esc(d.run.free)}</h3></div>`).join('')}</div></section>`;
 }
-
-const SWARM_MARK: Record<FrontStatus, string> = { running: '● ', queued: '', waiting: '⧗ ', blocked: '⧗ ', ready: '⇡ ', integrated: '✓ ', conflict: '⚠ ', 'launch-failed': '⚠ ' };
 
 function renderSessionsView(m: Model, d: Dict): string {
   const x = computeMetrics(m.plan, m.states, m.now, 1);
@@ -296,7 +289,9 @@ function renderSessionsView(m: Model, d: Dict): string {
     const prog = s.track ? x.byTrack[s.track] : undefined;
     const pct = prog && prog.total ? Math.round((num(prog.done) / prog.total) * 100) : 0;
     const age = hbAge(s, m.now);
-    const idle = isIdle(s, m.now);
+    const live = sessionLiveness(s, m.now);
+    const idle = live === 'stopped';
+    const hb = idle ? d.run.lastSignal(hhmm(s.heartbeatAt)) : live === 'silent' ? d.run.silentSince(hhmm(s.heartbeatAt)) : hbText(d, age);
     const warn = esca.has(sid);
     const msgs = m.messages.filter(g => g.from === sid || g.to === sid).slice(0, 6);
     const thread = msgs.length ? `<div class="thread"><div class="lbl ${warn ? 'ye' : ''}">${esc(warn ? d.needsDecision : d.threads)}</div>${msgs.map(g => {
@@ -304,19 +299,19 @@ function renderSessionsView(m: Model, d: Dict): string {
       return `<div class="msg c-${MSG_COLOR[t]}"><span class="who">${esc(g.from)} → ${esc(g.to)} · ${esc(d.msgType[t])}</span>${esc(g.text)}</div>`;
     }).join('')}</div>` : warn ? `<div class="thread"><div class="lbl ye">${esc(d.needsDecision)}</div></div>` : '';
     return `<div class="sc ${warn ? 'warn' : ''} ${idle ? 'idle' : ''}">
-      <h3>${warn ? '⚠' : '<span class="dot">●</span>'} ${esc(s.name)} ${trackTag(m, s.track)}</h3>
+      <h3>${warn ? '⚠' : '<span class="dot">●</span>'} ${esc(s.name)} ${s.role ? `<span class="tag">${esc(d.run.role[s.role])}</span>` : ''} ${trackTag(m, s.track)}</h3>
       <dl class="kv">
         <dt>${esc(d.field.task)}</dt><dd>${task ? `<span class="pe">${esc(task.id)}</span> ${esc(task.title)}` : esc(s.currentTask ?? '—')}</dd>
         <dt>${esc(d.field.branch)}</dt><dd>${esc(s.branch ?? '—')}</dd>
         <dt>${esc(d.field.agent)}</dt><dd>${esc(s.agentName ?? '—')}</dd>
-        <dt>${esc(d.heartbeat)}</dt><dd>${esc(hbText(d, age))}</dd>
+        <dt>${esc(d.heartbeat)}</dt><dd>${esc(hb)}</dd>
         <dt>${esc(d.field.zones)}</dt><dd>${zones.length ? zones.map(esc).join(' · ') : '—'}</dd>
       </dl>
       ${prog ? `<div class="bar c"><i style="width:${pct}%"></i></div><div class="mono">${num(prog.done)}/${num(prog.total)}</div>` : ''}
       ${thread}
     </div>`;
   }).join('');
-  return `<section class="sessions-view">${renderSwarmBlock(m, d)}${cards ? `<div class="sgrid">${cards}</div>` : `<div class="muted">${esc(d.noSessions)}</div>`}</section>`;
+  return `<section class="sessions-view">${renderRunBlock(m, d)}${cards ? `<div class="sgrid">${cards}</div>` : `<div class="muted">${esc(d.noSessions)}</div>`}</section>`;
 }
 
 /** The timeline window: free zoom and pan when set, else the zoom preset shifted by whole spans. */
@@ -538,7 +533,7 @@ export function timelineSvg(m: Model, ui: UiState): string {
     const y = TOP + i * RH;
     const bg = r.kind === 'phase' ? `<rect x="0" y="${y}" width="${W}" height="${RH}" fill="${C.s0}" fill-opacity=".35"/>` : '';
     const label = r.kind === 'phase'
-      ? `<text x="14" y="${y + 18}" fill="${C.text}" font-size="14" font-weight="700">${esc(groupBy === 'track' ? `${m.swarm ? SWARM_MARK[m.swarm.fronts[r.id]?.status ?? 'queued'] : ''}${m.plan.tracks.find(t => t.id === r.id)?.name ?? r.label}` : r.label)} · ${esc(r.counter)}</text>`
+      ? `<text x="14" y="${y + 18}" fill="${C.text}" font-size="14" font-weight="700">${esc(groupBy === 'track' ? `${m.plan.tracks.find(t => t.id === r.id)?.name ?? r.label}` : r.label)} · ${esc(r.counter)}</text>`
       : `<text x="30" y="${y + 18}" fill="${C.sub}" font-size="13"><tspan fill="${C.s2}">${esc(r.id)}</tspan> ${esc(r.label.length > 34 ? `${r.label.slice(0, 33)}…` : r.label)}</text>`;
     const bars = r.bars.map(b => `<rect x="${xOf(b.left)}" y="${y + 8}" width="${Math.max(2, (b.width / 100) * cw)}" height="12" rx="6" fill="${fill[b.kind]}"${b.kind === 'estimate' ? ` stroke="${C.s2}" stroke-dasharray="4 3"` : ''}/>`).join('');
     return `${bg}${label}${bars}`;
@@ -566,7 +561,8 @@ function renderTaskModal(m: Model, d: Dict, id: string, loc: string): string {
   const sec = (label: string, body: string) => `<div class="sec"><div class="lbl">${esc(label)}</div><div>${body}</div></div>`;
   return `<div class="overlay" data-action="close-modal"><div class="modal" role="dialog" aria-modal="true">
     <div class="mh"><div><span class="k">${esc(t.id)}</span> <span class="t">${esc(t.title)}</span><br>
-      <span class="pill st-${status}">${esc(d.status[status])}</span> <span class="mono">${esc(ph?.name)}${t.category ? ` · ${esc(t.category)}` : ''}</span> ${trackTag(m, t.track)}</div>
+      <span class="pill st-${status}${isOrphan(m, s) ? ' orphan' : ''}">${esc(isOrphan(m, s) ? d.run.orphan : d.status[status])}</span> <span class="mono">${esc(ph?.name)}${t.category ? ` · ${esc(t.category)}` : ''}</span> ${trackTag(m, t.track)}
+      ${s.exec ? `<div class="mono exec">${execLine(m, d, s.exec)}</div>` : ''}</div>
       <button class="btn" data-action="close-modal" aria-label="${esc(d.close)}">✕</button></div>
     <div class="mgrid"><div>
       ${sec(d.field.period, period)}

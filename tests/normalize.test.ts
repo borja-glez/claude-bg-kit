@@ -1,5 +1,19 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeMeta, normalizePhase, normalizeState, normalizeSession, normalizeEvent, normalizeMessage, normalizeInfinite } from '../src/page/normalize.js';
+import { normalizeMeta, normalizePhase, normalizeState, normalizeSession, normalizeEvent, normalizeMessage, normalizeInfinite, normalizeRun } from '../src/page/normalize.js';
+
+describe('normalizeRun / execution fields', () => {
+  it('normalizeRun keeps valid fields and drops junk', () => {
+    expect(normalizeRun({ runId: 'r1', mode: 'subagents', parallel: 3, branch: 'forge/run-x', mergeOnFinish: true, active: true, stopReason: null, coordinator: 'main',
+      slots: [{ task: 'T1', stage: 'review', agent: 'a', by: 'main', since: '2026-10-12T12:00:00.000Z' }, { task: 5 }] }))
+      .toMatchObject({ runId: 'r1', parallel: 3, slots: [{ task: 'T1', stage: 'review' }] });
+    expect(normalizeRun({ mode: 'threads' })).toBeNull();
+    expect(normalizeRun({ runId: 'r1', mode: 'subagents', parallel: 99, branch: 'b', coordinator: 'c', active: true, slots: 'x' })).toMatchObject({ parallel: 10, slots: [] });
+  });
+  it('sessions keep role, runId and leaseUntil; states keep exec', () => {
+    expect(normalizeSession({ name: 'm', heartbeatAt: 'x', role: 'coordinator', runId: 'r1', leaseUntil: '2026-10-12T12:10:00.000Z' })).toMatchObject({ role: 'coordinator', runId: 'r1', leaseUntil: '2026-10-12T12:10:00.000Z' });
+    expect(normalizeState({ status: 'in_progress', exec: { runId: 'r1', mode: 'subagents', by: 'main', agent: 'x', stage: 'implement', round: 1, since: '2026-10-12T12:00:00.000Z', leaseUntil: '2026-10-12T12:10:00.000Z' } }).exec).toMatchObject({ stage: 'implement', by: 'main' });
+  });
+});
 
 describe('normalizeMeta', () => {
   it('rejects non-objects', () => {

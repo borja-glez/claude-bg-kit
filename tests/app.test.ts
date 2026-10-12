@@ -102,7 +102,7 @@ describe('start', () => {
     const f = fakeDb();
     const root = document.createElement('div');
     const app = await start({ claude: { use: async () => f.db }, snapshot, root, now: () => NOW });
-    expect([...f.subs.keys()].sort()).toEqual(['events', 'messages', 'meta/infinite', 'meta/project', 'meta/swarm', 'notes', 'plan', 'proposals', 'sessions', 'state']);
+    expect([...f.subs.keys()].sort()).toEqual(['events', 'messages', 'meta/infinite', 'meta/project', 'meta/run', 'notes', 'plan', 'proposals', 'sessions', 'state']);
     f.push('state', { T001: { status: 'done', startedAt: '2026-10-11T10:00:00Z', doneAt: '2026-10-11T10:30:00Z' } });
     await flush();
     expect(root.innerHTML).toContain('17 %');

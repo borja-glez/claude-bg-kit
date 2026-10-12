@@ -1,4 +1,4 @@
-import type { Stage } from './types.js';
+import { STAGES, type Stage } from './types.js';
 import type { SwarmState } from './swarm-state.js';
 import { isPlanId } from './plan.js';
 
@@ -18,7 +18,8 @@ export interface ExecutionState {
   tasks: Record<string, ExecTask>;
 }
 
-export const STAGES: readonly Stage[] = ['brief', 'implement', 'validate', 'verify', 'review', 'verdict', 'integrate'];
+// STAGES lives in types.ts (pure, so the roadmap page can bundle it without this file's yaml/zod imports); re-exported here.
+export { STAGES };
 const TASK_STATUSES: readonly ExecTaskStatus[] = ['running', 'accepted', 'integrated', 'conflict', 'blocked'];
 const STOPS: readonly ExecStopReason[] = ['finished', 'stalled', 'stopped', 'budget', 'migrated'];
 const MAX_TASKS = 500;

@@ -34,6 +34,13 @@ export type PlanView = Pick<Plan, 'tracks' | 'phases' | 'tasks' | 'versions'>;
 
 export interface Commit { sha: string; ts: string; title: string; add: number; del: number }
 export type Stage = 'brief' | 'implement' | 'validate' | 'verify' | 'review' | 'verdict' | 'integrate';
+export const STAGES: readonly Stage[] = ['brief', 'implement', 'validate', 'verify', 'review', 'verdict', 'integrate'];
+/** meta/run: the forge execution the roadmap shows (pill, Execution block). */
+export interface RunDoc {
+  runId: string; mode: 'subagents' | 'sessions'; parallel: number; branch: string; mergeOnFinish: boolean;
+  active: boolean; stopReason: string | null; coordinator: string;
+  slots: { task: string; stage: Stage; agent: string | null; by: string; since: string }[];
+}
 /** Who runs a task of a forge execution and how; written by its executor, read by the roadmap, lens and the scheduler. */
 export interface TaskExec {
   runId: string; mode: 'subagents' | 'sessions' | 'manual'; by: string; agent?: string | null;

@@ -4,8 +4,7 @@ import { clampSpan, panFor, planRange, zoomAround, type Zoom } from '../lib/time
 import { MAX_NOTE, NOTE_TYPES } from '../lib/notes.js';
 import { applyDecision, canDecide, MAX_PROPOSAL_TEXT, normalizeProposal, type Decision, type ProposalDoc } from '../lib/proposals.js';
 import { dictFor } from './i18n.js';
-import { normalizeEvent, normalizeInfinite, normalizeMessage, normalizeMeta, normalizeNote, normalizePhase, normalizeSession, normalizeState } from './normalize.js';
-import { normalizeSwarm } from '../lib/swarm-state.js';
+import { normalizeEvent, normalizeInfinite, normalizeMessage, normalizeMeta, normalizeNote, normalizePhase, normalizeRun, normalizeSession, normalizeState } from './normalize.js';
 import { decodeView, encodeView } from './urlstate.js';
 import { categoryKeys, esc, NOTE_FILTERS, PROPOSAL_FILTERS, renderApp, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, vfilterStatuses, VFILTER_KEYS, VIEWS, type Model, type ProposalFilterKind, type UiState, type VFilterKey, type View } from './render.js';
 
@@ -88,7 +87,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     notes: [],
     proposals: [],
     infinite: null,
-    swarm: null,
+    run: null,
     me: null,
     profiles: {},
     readOnly: false,
@@ -675,7 +674,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   const rows = (s: QSnap) => s.docs.map(x => ({ id: x.id, body: x.data() }));
 
   unsubs.push(db.doc('meta/project').onSnapshot(((s: Snap) => { if (s.exists) { const mm = normalizeMeta(s.data()); if (mm) { model.meta = mm; rebuild(); } } schedule(); }) as never, onErr));
-  unsubs.push(db.doc('meta/swarm').onSnapshot(((s: Snap) => { model.swarm = s.exists ? normalizeSwarm(s.data()) : null; schedule(); }) as never, onErr));
+  unsubs.push(db.doc('meta/run').onSnapshot(((s: Snap) => { model.run = s.exists ? normalizeRun(s.data()) : null; schedule(); }) as never, onErr));
   unsubs.push(db.doc('meta/infinite').onSnapshot(((s: Snap) => { model.infinite = s.exists ? normalizeInfinite(s.data()) : null; schedule(); }) as never, onErr));
   unsubs.push(db.collection('plan').onSnapshot(((s: QSnap) => { const p = rows(s).map(r => normalizePhase(r.body)).filter((x): x is PhaseDoc => x !== null); if (p.length) { phaseDocs = p; rebuild(); } schedule(); }) as never, onErr));
   unsubs.push(db.collection('state').onSnapshot(((s: QSnap) => { model.states = Object.fromEntries(rows(s).map(r => [r.id, normalizeState(r.body)])) as States; schedule(); }) as never, onErr));
