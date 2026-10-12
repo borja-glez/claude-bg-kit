@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { readLocal, writeLocal, updateLocal, localFile } from '../src/forge/local.js';
@@ -33,6 +34,29 @@ describe('local.yaml', () => {
     const next = updateLocal(root, s => ({ ...s, surfaces: { ...s.surfaces, web: { state: 'denied', hash: null } } }));
     expect(next).toEqual({ surfaces: { web: { state: 'denied', hash: null } }, known: ['unit'], proposed: [], mine: 'keep' });
     expect(readLocal(root)).toEqual(next);
+  });
+});
+
+describe('local.yaml in a linked worktree', () => {
+  it('is read and written in the main checkout', () => {
+    const main = path.join(root, 'main');
+    mkdirSync(main);
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: main, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 'a@b.c');
+    git('config', 'user.name', 't');
+    writeFileSync(path.join(main, 'a.txt'), 'a\n');
+    git('add', 'a.txt');
+    git('commit', '-qm', 'init');
+    const wt = path.join(root, 'wt');
+    git('worktree', 'add', '-q', wt, '-b', 'track');
+    updateLocal(wt, s => ({ ...s, known: ['unit'] }));
+    expect(existsSync(path.join(main, '.forge', 'local.yaml'))).toBe(true);
+    expect(existsSync(path.join(wt, '.forge', 'local.yaml'))).toBe(false);
+    expect(readLocal(main).known).toEqual(['unit']);
+    writeLocal(main, { surfaces: {}, known: ['lint'], proposed: [] });
+    expect(readLocal(wt).known).toEqual(['lint']);
+    expect(path.resolve(localFile(wt))).toBe(path.resolve(main, '.forge', 'local.yaml'));
   });
 });
 

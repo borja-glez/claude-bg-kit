@@ -1,5 +1,6 @@
 // .forge/local.yaml: what forge knows about this machine (surface permissions, validators already announced,
 // drafts already proposed). Ignored by git; read leniently, written atomically, unknown keys kept.
+import { execFileSync } from 'node:child_process';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse, stringify } from 'yaml';
@@ -10,7 +11,20 @@ import { forgeDir } from './ledger.js';
 export interface SurfacePermission { state: 'allowed' | 'denied'; hash: string | null }
 export interface LocalState { surfaces: Record<string, SurfacePermission>; known: string[]; proposed: string[]; [key: string]: unknown }
 
-export const localFile = (root: string) => path.join(root, '.forge', 'local.yaml');
+/** The main checkout when `root` is a linked git worktree (its common dir is `<main>/.git`), else `root` itself,
+ *  also when git is unavailable. One local.yaml serves every worktree of the repository. */
+export function mainCheckout(root: string): string {
+  try {
+    const [gitDir, common] = execFileSync('git', ['rev-parse', '--git-dir', '--git-common-dir'], { cwd: root, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })
+      .split(/\r?\n/).map(l => l.trim());
+    if (!gitDir || !common) return root;
+    const commonDir = path.resolve(root, common);
+    if (path.resolve(root, gitDir) === commonDir || path.basename(commonDir) !== '.git') return root;
+    return path.dirname(commonDir);
+  } catch { return root; }
+}
+
+export const localFile = (root: string) => path.join(mainCheckout(root), '.forge', 'local.yaml');
 
 const names = (x: unknown): string[] =>
   Array.isArray(x) ? [...new Set(x.filter((s): s is string => typeof s === 'string' && NAME.test(s)))] : [];
@@ -31,7 +45,7 @@ export function readLocal(root: string): LocalState {
 }
 
 export function writeLocal(root: string, s: LocalState): void {
-  forgeDir(root);
+  forgeDir(mainCheckout(root));
   const file = localFile(root);
   const tmp = `${file}.${process.pid}.tmp`;
   writeFileSync(tmp, stringify(s));
