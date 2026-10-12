@@ -1,5 +1,5 @@
 import { spawnSync, execFileSync } from 'node:child_process';
-import { existsSync, statSync, lstatSync, readFileSync, readdirSync, openSync, closeSync, fstatSync, readSync, rmSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, statSync, lstatSync, readFileSync, readdirSync, openSync, closeSync, fstatSync, readSync, rmSync, mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { appendEvent, readEvents, forgeDir, LEDGER_KINDS, type LedgerKind } from '../ledger.js';
@@ -27,12 +27,14 @@ import { readLocal, updateLocal, mainCheckout } from '../local.js';
 import { memberForHook } from '../members.js';
 import { hookLive } from '../live.js';
 import { readSurfaces, detectDrafts, appendLearned, surfaceFile, surfaceHash } from '../surfaces.js';
+import { addDecision, allDecisions, listDecisions, renderDecisionsMd, DecisionInputError } from '../decisions.js';
+import { TASK_ID, decisionScope, scopeFileName } from '../../lib/decisions.js';
 
 export interface ExecResult { code: number; output: string; ms: number; timedOut: boolean }
 export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|agents|last|proposals|surfaces|tools|local|verify-plan|verify-cleanup|waypoint-cli|infinite|cycle|swarm|stop|hook> ...';
+const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|decision|agents|last|proposals|surfaces|tools|local|verify-plan|verify-cleanup|waypoint-cli|infinite|cycle|swarm|stop|hook> ...';
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 
@@ -723,6 +725,53 @@ export function run(argv: string[], io: Io): Result {
       case 'agents': {
         const { profile } = loadConfig(io.cwd);
         return json({ profile, agents: Object.fromEntries(ROLES.map(r => [r, agentFor(r, profile)])) });
+      }
+      case 'decision': {
+        const [sub, arg] = args;
+        if (sub === 'add') {
+          const file = flag('data-file');
+          if (!file) throw new UsageError('decision add: --data-file is required');
+          let raw: unknown;
+          try { raw = JSON.parse(readFileSync(path.resolve(io.cwd, file), 'utf8')); } catch { throw new UsageError('decision add: --data-file must be a JSON object'); }
+          if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new UsageError('decision add: --data-file must be a JSON object');
+          const task = flag('task');
+          if (task !== undefined && (!TASK_ID.test(task) || task === '.' || task === '..')) throw new UsageError(`decision add: invalid --task ${task}`);
+          // An active execution names the run the decision belongs to (its scope), unless the data names one.
+          const exec = readExecution(mainCheckout(io.cwd));
+          try {
+            const { n, event } = addDecision(io.cwd, raw, { ts: ts(), ...(task ? { task } : {}), runId: exec?.active ? exec.runId : null });
+            return json({ n, ...event });
+          } catch (e) {
+            if (e instanceof DecisionInputError) throw new UsageError(`decision add: ${e.message}`);
+            throw e;
+          }
+        }
+        if (sub === 'list') {
+          const since = flag('since');
+          if (since !== undefined && !Number.isFinite(Date.parse(since))) throw new UsageError(`decision list: --since must be a date, got ${since}`);
+          return json(listDecisions(io.cwd, { task: flag('task'), run: flag('run'), since, all: has('all'), auto: has('auto') }));
+        }
+        if (sub === 'show') {
+          const n = Number(arg);
+          if (!Number.isInteger(n) || n < 1) throw new UsageError('decision show: <n> must be a positive integer');
+          const d = allDecisions(io.cwd).find(x => x.n === n);
+          if (!d) throw new UsageError(`decision show: there is no decision ${n}`);
+          return json(d);
+        }
+        if (sub === 'md') {
+          const scope = flag('scope');
+          if (!scope) throw new UsageError('decision md: --scope is required');
+          const outFlag = flag('out');
+          // The file is project content (it goes to git with the work): by default under the code's directory.
+          const out = outFlag !== undefined ? path.resolve(io.cwd, outFlag) : path.join(repoDir, 'docs', 'forge', 'decisions', `${scopeFileName(scope)}.md`);
+          if (!out.endsWith('.md')) throw new UsageError('decision md: --out must be a .md file');
+          const list = allDecisions(io.cwd).filter(d => d.by !== 'user' && (decisionScope(d) ?? 'forge') === scope);
+          if (!list.length) return json({ written: false, scope, count: 0 });
+          mkdirSync(path.dirname(out), { recursive: true });
+          writeFileSync(out, renderDecisionsMd(list, scope, flag('locale') ?? 'en'));
+          return json({ written: true, scope, count: list.length, path: out });
+        }
+        throw new UsageError('usage: forge decision add --data-file f [--task id] | list [--task id] [--run id] [--since iso] [--all] [--auto] | show <n> | md --scope s [--out f] [--locale es|en]');
       }
       case 'last': {
         const task = flag('task');

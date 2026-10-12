@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, appendFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { addDecision, allDecisions, decisionsFile, listDecisions, readDecisionsDoc, renderDecisionsMd, DecisionInputError } from '../src/forge/decisions.js';
 import { readEvents } from '../src/forge/ledger.js';
+import { run, type Io } from '../src/forge/cli/run.js';
+import { saveExecution } from '../src/forge/execution.js';
 
 let root: string;
 beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-dec-')); });
@@ -80,5 +82,58 @@ describe('renderDecisionsMd', () => {
     expect(es).toContain('- **Cómo revertir:** /forge:decisions revert 1');
     expect(renderDecisionsMd(list, 'reparto', 'en-GB')).toContain('# Automatic decisions · reparto');
     expect(renderDecisionsMd([{ ...list[0], revert: null, alternatives: [] }], 'reparto', 'en')).toContain('- **How to undo:** cannot be undone automatically');
+  });
+});
+
+describe('forge decision CLI', () => {
+  let io: Io;
+  beforeEach(() => { io = { cwd: root, now: () => new Date(at(0)) }; });
+  const write = (name: string, v: unknown) => { writeFileSync(path.join(root, name), typeof v === 'string' ? v : JSON.stringify(v)); return name; };
+
+  it('add prints the numbered event; list and show read it back', () => {
+    const r = run(['decision', 'add', '--data-file', write('d.json', INPUT), '--task', 'reparto'], io);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ n: 1, kind: 'decision', ts: at(0), task: 'reparto', weight: 'major' });
+    expect(JSON.parse(run(['decision', 'list'], io).stdout).map((d: { n: number }) => d.n)).toEqual([1]);
+    expect(JSON.parse(run(['decision', 'show', '1'], io).stdout)).toMatchObject({ n: 1, point: 'design-approve', undo: { type: 'design-reopen', project: 'reparto' } });
+    expect(run(['decision', 'show', '2'], io).code).toBe(2);
+    expect(run(['decision', 'show', 'x'], io).code).toBe(2);
+  });
+  it('add takes the run of the active execution', () => {
+    saveExecution(root, {
+      runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,
+      coordinator: 'main', hookSession: null, active: true, stopReason: null, stallReason: null, startedAt: at(0), lastStepAt: null,
+      lastBlockStep: null, sleepUntil: null, tasks: {},
+    });
+    expect(JSON.parse(run(['decision', 'add', '--data-file', write('d.json', INPUT)], io).stdout).runId).toBe('r1');
+  });
+  it('add refuses bad input with exit 2 and writes nothing', () => {
+    expect(run(['decision', 'add'], io).code).toBe(2);
+    expect(run(['decision', 'add', '--data-file', write('bad.json', '{"point":')], io).code).toBe(2);
+    expect(run(['decision', 'add', '--data-file', write('arr.json', [1])], io).code).toBe(2);
+    const r = run(['decision', 'add', '--data-file', write('extra.json', { ...INPUT, extra: true })], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('extra');
+    expect(run(['decision', 'add', '--data-file', write('d.json', INPUT), '--task', 'a/b'], io).code).toBe(2);
+    expect(readEvents(root)).toEqual([]);
+    expect(existsSync(decisionsFile(root))).toBe(false);
+  });
+  it('list checks --since', () => {
+    expect(run(['decision', 'list', '--since', 'yesterday'], io).code).toBe(2);
+  });
+  it('md writes the automatic decisions of a scope under a safe file name, and nothing without them', () => {
+    run(['decision', 'add', '--data-file', write('d.json', INPUT), '--task', 'ns:task'], io);
+    const r = JSON.parse(run(['decision', 'md', '--scope', 'ns:task', '--locale', 'es'], io).stdout);
+    expect(r).toMatchObject({ written: true, scope: 'ns:task', count: 1 });
+    expect(r.path).toBe(path.join(root, 'docs', 'forge', 'decisions', 'ns-task.md'));
+    expect(readFileSync(r.path, 'utf8')).toContain('# Decisiones automáticas · ns:task');
+    expect(JSON.parse(run(['decision', 'md', '--scope', 'nothing'], io).stdout)).toEqual({ written: false, scope: 'nothing', count: 0 });
+    expect(run(['decision', 'md'], io).code).toBe(2);
+    expect(run(['decision', 'md', '--scope', 'ns:task', '--out', 'x.txt'], io).code).toBe(2);
+  });
+  it('an unknown subcommand prints its usage', () => {
+    const r = run(['decision', 'nope'], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('usage: forge decision');
   });
 });

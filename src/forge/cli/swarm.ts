@@ -693,7 +693,8 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       const liveness = seen.reduce((a, b) => (order.indexOf(b) > order.indexOf(a) ? b : a), 'stopped' as (typeof order)[number]);
       if (liveness !== 'stopped') return json({ took: false, previous, liveness, joinAs: 'manual' });
       saveExecution(io.cwd, { ...e, coordinator: session, hookSession: null, sleepUntil: null });
-      appendEvent(io.cwd, { ts: iso, kind: 'decision', what: 'takeover', previous, by: session });
+      // The user asked this session to go on: their decision, recorded in the decision format (by: user).
+      appendEvent(io.cwd, { ts: iso, kind: 'decision', point: 'takeover', what: 'takeover', chosen: session, why: `the coordinator ${previous} stopped`, by: 'user', weight: 'minor', previous, session });
       return json({ took: true, previous, runId: e.runId, running: Object.entries(e.tasks).filter(([, t]) => t.status === 'running').map(([id]) => id) });
     }
     case 'integrate':
