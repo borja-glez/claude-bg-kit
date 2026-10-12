@@ -14,6 +14,8 @@ import { STAGES, normalizePublicTask, type ExecutionState, type ExecTask, type P
 import { parsePlan, PlanError, isPlanId } from '../../lib/plan.js';
 import type { SessionDoc, Stage, TaskState } from '../../lib/types.js';
 import { mainWorktreeFrom, samePath } from '../../lib/worktree.js';
+import { mainCheckout } from '../local.js';
+import { readMember, writeMember } from '../members.js';
 
 export interface GitDeps { git: (args: string[]) => string | null; exec: (cmd: string, timeoutSec: number) => ExecResult; repo: RepoReader }
 export interface SwarmDeps extends GitDeps { at: (dir: string) => GitDeps }
@@ -73,6 +75,44 @@ function loadPlanArg(io: Io, planArg: string | undefined, sub: string) {
   try { return parsePlan(readFileSync(path.resolve(io.cwd, planArg), 'utf8')); } catch (e) {
     throw new UsageError(e instanceof PlanError ? `${planArg}: ${e.issues.join('; ')}` : `swarm ${sub}: cannot read ${planArg}`);
   }
+}
+
+/**
+ * The worktree `task-<T>` of the main checkout on `task/<T>` (created from `runBranch` when the branch is new), with
+ * swarm.setup run when it is created. Shared by the coordinator's `swarm worktree` and a member's `--member`.
+ */
+function addTaskWorktree(deps: SwarmDeps, main: string, task: string, runBranch: string): { worktree: string; branch: string; base: string | null; setup: SetupResult } {
+  const dir = taskWorktree(main, task);
+  const branch = taskBranch(task);
+  let setup: SetupResult = null;
+  if (!existsSync(dir)) {
+    const g = (args: string[]) => deps.git(['-C', main, ...args]);
+    const exists = g(['rev-parse', '--verify', '-q', `refs/heads/${branch}`]) !== null;
+    const added = exists ? g(['worktree', 'add', dir, branch]) : g(['worktree', 'add', '-b', branch, dir, runBranch]);
+    if (added === null) throw new UsageError(`swarm worktree: cannot add ${dir} for ${branch}`);
+    setup = runSetup(deps, dir, main);
+  }
+  return { worktree: dir, branch, base: deps.at(dir).git(['rev-parse', 'HEAD'])?.trim() ?? null, setup };
+}
+
+/** What `tick` and `next` schedule from: the plan, the roadmap listings and the done commits already on the run branch. */
+function readTickInput(io: Io, deps: SwarmDeps, e: ExecutionState, planArg: string | undefined, db: string | undefined, sub: string) {
+  const plan = loadPlanArg(io, planArg, sub);
+  if (!db) throw new UsageError(`swarm ${sub}: --plan and --db are required`);
+  const stateDir = path.resolve(io.cwd, db, 'state');
+  const sessionsDir = path.resolve(io.cwd, db, 'sessions');
+  // Missing listings would make every task look free: refuse instead.
+  if (!existsSync(stateDir) || !existsSync(sessionsDir)) throw new UsageError(`swarm ${sub}: --db must hold the state and sessions listings`);
+  const states = readDocs<TaskState>(stateDir);
+  const sessions = readDocs<SessionDoc>(sessionsDir);
+  const integrated: string[] = [];
+  for (const t of plan.tasks) {
+    if (states[t.id]?.status !== 'done') continue;
+    for (const c of states[t.id]?.commits ?? []) {
+      if (typeof c?.sha === 'string' && ID.test(c.sha) && deps.git(['merge-base', '--is-ancestor', c.sha, e.branch]) !== null) integrated.push(c.sha);
+    }
+  }
+  return { plan, states, sessions, integrated };
 }
 
 const LOCAL_STATE = [':!.forge', ':!.waypoint', ':!.claude'];
@@ -197,7 +237,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     if (!e) throw new UsageError(`swarm ${sub}: no execution (forge swarm start)`);
     return e;
   };
-  if (['start', 'tick', 'integrate', 'merge', 'sleep', 'worktree', 'retry', 'relaunch', 'nudge'].includes(sub ?? '')) {
+  if (['start', 'tick', 'integrate', 'merge', 'sleep', 'worktree', 'retry', 'relaunch', 'nudge'].includes(sub ?? '') && !(sub === 'worktree' && has('member'))) {
     const top = deps.git(['rev-parse', '--show-toplevel'])?.trim();
     const main = mainWorktreeFrom(deps.git(['worktree', 'list', '--porcelain']));
     if (!top || !main || !samePath(top, main)) {
@@ -209,8 +249,59 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     if (!t || !isPlanId(t)) throw new UsageError(`swarm ${sub}: a task id is required`);
     return t;
   };
+  // Members read the execution of the main checkout from any worktree and never write execution.json.
+  const memberCtx = (needMember: boolean) => {
+    const main = mainCheckout(io.cwd);
+    const e = readExecution(main);
+    if (!e?.active) throw new UsageError(`swarm ${sub}: no active execution`);
+    const session = flag('session') ?? flag('member');
+    if (!session || !ID.test(session)) throw new UsageError(`swarm ${sub}: --session is required`);
+    const m = needMember ? readMember(main, session) : null;
+    if (needMember && (!m || m.runId !== e.runId)) throw new UsageError(`swarm ${sub}: ${session} has not joined this execution`);
+    return { main, e, session, m };
+  };
 
   switch (sub) {
+    case 'join': {
+      const { main, e, session } = memberCtx(false);
+      if (session === e.coordinator || session === e.hookSession) throw new UsageError(`swarm join: ${session} coordinates this execution`);
+      const role = flag('role');
+      if (role !== 'executor' && role !== 'manual') throw new UsageError('swarm join: --role must be executor or manual');
+      const task = flag('task') ?? null;
+      if (task !== null && !isPlanId(task)) throw new UsageError('swarm join: --task is not a task id');
+      if (role === 'executor' && !task) throw new UsageError('swarm join: an executor needs --task');
+      writeMember(main, { sessionId: session, role, runId: e.runId, task, name: flag('name') ?? null, since: iso });
+      return json({ runId: e.runId, role, task, coordinator: e.coordinator, branch: e.branch, mode: e.mode, project: e.project });
+    }
+    case 'report': {
+      const task = taskArg();
+      const { main, e, session, m } = memberCtx(true);
+      const member = m!;
+      if (member.role === 'executor' && member.task !== task) throw new UsageError(`swarm report: ${session} executes ${member.task}, not ${task}`);
+      const stage = flag('stage') as Stage | undefined;
+      if (!stage || !STAGES.includes(stage)) throw new UsageError(`swarm report: --stage must be one of ${STAGES.join('|')}`);
+      const status = (flag('status') ?? 'running') as ExecTask['status'];
+      if (!['running', 'accepted', 'blocked'].includes(status)) throw new UsageError('swarm report: --status must be running, accepted or blocked');
+      const round = has('round') ? Number(flag('round')) : 0;
+      if (!Number.isInteger(round) || round < 0 || round > 99) throw new UsageError('swarm report: --round must be an integer from 0 to 99');
+      if (member.role === 'manual' && member.task !== task) writeMember(main, { ...member, task });
+      let prev: PublicTask | null = null;
+      try { prev = normalizePublicTask(JSON.parse(readFileSync(executionTaskFile(main, task), 'utf8'))); } catch { prev = null; }
+      const since = prev && prev.by === session && prev.stage === stage && prev.runId === e.runId ? prev.since : iso;
+      const lease = flag('lease') && !Number.isNaN(Date.parse(flag('lease')!)) ? flag('lease')! : new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString();
+      const p: PublicTask = { task, runId: e.runId, stage, status, agent: has('no-agent') ? null : (flag('agent') ?? null), round, since, updatedAt: iso, leaseUntil: lease, by: session, mode: member.role === 'executor' ? 'sessions' : 'manual' };
+      writePublicTask(main, p);
+      return json(p);
+    }
+    case 'next': {
+      const { e, session } = memberCtx(true);
+      const { plan, states, sessions, integrated } = readTickInput(io, deps, e, flag('plan'), flag('db'), 'next');
+      const running = Object.values(e.tasks).filter(t => t.status === 'running').length;
+      // The coordinator's own scheduler, seen from this session: its claims count as its own, the coordinator's as another's.
+      const d = schedule({ plan, states, sessions, exec: { ...e, coordinator: session, parallel: Math.min(10, running + 1) }, integrated, now: now.getTime() });
+      const start = d.actions.find((a): a is { type: 'start'; task: string } => a.type === 'start');
+      return json(start ? { task: start.task, reason: null } : { task: null, reason: d.next.stallReason ?? 'nothing is ready' });
+    }
     case 'start': {
       const project = flag('project');
       const session = flag('session');
@@ -284,18 +375,15 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       return json({ width, configured, recommended: { mode: 'subagents', parallel }, reasons });
     }
     case 'worktree': {
+      if (has('member')) {
+        // A member gets its task worktree in the main checkout; execution.json stays the coordinator's.
+        const task = taskArg();
+        const { main, e } = memberCtx(true);
+        return json(addTaskWorktree(deps, main, task, e.branch));
+      }
       const task = taskArg();
       const e = current();
-      const dir = taskWorktree(io.cwd, task);
-      const branch = taskBranch(task);
-      let setup: SetupResult = null;
-      if (!existsSync(dir)) {
-        const exists = deps.git(['rev-parse', '--verify', '-q', `refs/heads/${branch}`]) !== null;
-        const added = exists ? deps.git(['worktree', 'add', dir, branch]) : deps.git(['worktree', 'add', '-b', branch, dir, e.branch]);
-        if (added === null) throw new UsageError(`swarm worktree: cannot add ${dir} for ${branch}`);
-        setup = runSetup(deps, dir, io.cwd);
-      }
-      const base = deps.at(dir).git(['rev-parse', 'HEAD'])?.trim() ?? null;
+      const { worktree: dir, branch, base, setup } = addTaskWorktree(deps, io.cwd, task, e.branch);
       const t: ExecTask = e.tasks[task] ?? { status: 'running', stage: 'brief', round: 0, worktree: dir, branch, executor: e.mode, attempts: 0, agent: null, startedAt: iso, stageSince: iso, updatedAt: iso, detail: null };
       saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, worktree: dir, branch, updatedAt: iso } } });
       return json({ worktree: dir, branch, base, setup });
@@ -334,22 +422,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     case 'tick': {
       const e = current();
       if (!e.active) throw new UsageError('swarm tick: the execution is not active');
-      const plan = loadPlanArg(io, flag('plan'), 'tick');
-      const db = flag('db');
-      if (!db) throw new UsageError('swarm tick: --plan and --db are required');
-      const stateDir = path.resolve(io.cwd, db, 'state');
-      const sessionsDir = path.resolve(io.cwd, db, 'sessions');
-      // Missing listings would make every task look free: refuse instead.
-      if (!existsSync(stateDir) || !existsSync(sessionsDir)) throw new UsageError('swarm tick: --db must hold the state and sessions listings');
-      const states = readDocs<TaskState>(stateDir);
-      const sessions = readDocs<SessionDoc>(sessionsDir);
-      const integrated: string[] = [];
-      for (const t of plan.tasks) {
-        if (states[t.id]?.status !== 'done') continue;
-        for (const c of states[t.id]?.commits ?? []) {
-          if (typeof c?.sha === 'string' && ID.test(c.sha) && deps.git(['merge-base', '--is-ancestor', c.sha, e.branch]) !== null) integrated.push(c.sha);
-        }
-      }
+      const { plan, states, sessions, integrated } = readTickInput(io, deps, e, flag('plan'), flag('db'), 'tick');
       const publicTasks: Record<string, PublicTask> = {};
       try {
         for (const f of readdirSync(path.join(io.cwd, '.forge', 'execution')).filter(n => n.endsWith('.json')).slice(0, 500)) {
@@ -448,6 +521,6 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     case 'merge':
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError('usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]|status|propose --plan P|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick --plan P --db DIR [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T>|merge|retry <T>|sleep <seconds> [--mark]|stop [--reason stopped|budget]>');
+      throw new UsageError('usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]|status|propose --plan P|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick --plan P --db DIR [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T>|merge|retry <T>|sleep <seconds> [--mark]|stop [--reason stopped|budget]|join --session SID --role executor|manual [--task T] [--name N]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID>');
   }
 }

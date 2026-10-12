@@ -269,4 +269,89 @@ describe('forge swarm (execution)', () => {
     expect(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io).code).toBe(2);
     expect(run(['swarm', 'nudge', 'T1'], io).code).toBe(2);
   });
+
+  describe('members', () => {
+    let wt: string;
+    let wio: Io;
+    beforeEach(() => {
+      out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+      wt = path.join(root, '.claude', 'worktrees', 'manual');
+      git('worktree', 'add', '-q', wt, '-b', 'manual-work');
+      wio = { ...io, cwd: wt, git: defaultGit(wt) };
+    });
+    it('join registers a manual member from a worktree, in the main checkout', () => {
+      const j = out(run(['swarm', 'join', '--session', 'M1', '--role', 'manual'], wio));
+      expect(j).toMatchObject({ role: 'manual', coordinator: 'main', branch: 'forge/run-shop', task: null });
+      expect(existsSync(path.join(root, '.forge', 'members', 'M1.json'))).toBe(true);
+      expect(existsSync(path.join(wt, '.forge', 'members', 'M1.json'))).toBe(false);
+      expect(run(['swarm', 'join', '--session', 'main', '--role', 'manual'], wio).code).toBe(2);
+      expect(run(['swarm', 'join', '--session', 'E1', '--role', 'executor'], wio).code).toBe(2);
+    });
+    it('worktree --member creates task/<T> from the run branch without touching execution.json', () => {
+      out(run(['swarm', 'join', '--session', 'M1', '--role', 'manual'], wio));
+      const before = readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8');
+      const w = out(run(['swarm', 'worktree', 'T2', '--member', 'M1'], wio));
+      expect(w.branch).toBe('task/T2');
+      expect(path.resolve(w.worktree).toLowerCase()).toBe(path.resolve(root, '.claude', 'worktrees', 'task-T2').toLowerCase());
+      expect(existsSync(path.join(root, '.claude', 'worktrees', 'task-T2', 'plan.yaml'))).toBe(true);
+      expect(readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8')).toBe(before);
+      expect(run(['swarm', 'worktree', 'T2', '--member', 'nobody'], wio).code).toBe(2);
+    });
+    it('report writes the public task as the member, keeping since while the stage holds', () => {
+      out(run(['swarm', 'join', '--session', 'M1', '--role', 'manual'], wio));
+      const p = out(run(['swarm', 'report', 'T2', '--session', 'M1', '--stage', 'implement', '--agent', 'forge-impl'], wio));
+      expect(p).toMatchObject({ task: 'T2', by: 'M1', mode: 'manual', stage: 'implement', status: 'running', since: NOW.toISOString() });
+      const later = { ...wio, now: () => new Date('2026-10-12T12:06:00.000Z') };
+      expect(out(run(['swarm', 'report', 'T2', '--session', 'M1', '--stage', 'implement', '--round', '2'], later)).since).toBe(NOW.toISOString());
+      expect(out(run(['swarm', 'report', 'T2', '--session', 'M1', '--stage', 'review'], later)).since).toBe('2026-10-12T12:06:00.000Z');
+      expect(JSON.parse(readFileSync(path.join(root, '.forge', 'members', 'M1.json'), 'utf8')).task).toBe('T2');
+      expect(run(['swarm', 'report', 'T2', '--session', 'X9', '--stage', 'implement'], wio).code).toBe(2);
+    });
+    it('next offers a manual member the task the scheduler would start, without saving', () => {
+      out(run(['swarm', 'join', '--session', 'M1', '--role', 'manual'], wio));
+      writeDocs(path.join(wt, 'db', 'state'), {});
+      writeDocs(path.join(wt, 'db', 'sessions'), {});
+      const before = readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8');
+      expect(out(run(['swarm', 'next', '--plan', 'plan.yaml', '--db', 'db', '--session', 'M1'], wio))).toEqual({ task: 'T1', reason: null });
+      writeDocs(path.join(wt, 'db', 'state'), { T1: { status: 'in_progress', owner: 'main' }, T2: { status: 'done' }, T3: { status: 'blocked' } });
+      writeDocs(path.join(wt, 'db', 'sessions'), { main: { name: 'c', status: 'active', heartbeatAt: NOW.toISOString(), leaseUntil: new Date(NOW.getTime() + 5 * 60000).toISOString(), role: 'coordinator' } });
+      const none = out(run(['swarm', 'next', '--plan', 'plan.yaml', '--db', 'db', '--session', 'M1'], wio));
+      expect(none.task).toBeNull();
+      expect(readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8')).toBe(before);
+    });
+    it('an executor reports only its own task', () => {
+      out(run(['swarm', 'join', '--session', 'E1', '--role', 'executor', '--task', 'T1'], wio));
+      expect(out(run(['swarm', 'report', 'T1', '--session', 'E1', '--stage', 'brief'], wio)).mode).toBe('sessions');
+      expect(run(['swarm', 'report', 'T2', '--session', 'E1', '--stage', 'brief'], wio).code).toBe(2);
+    });
+    it('a manual member joining mid-run never collides with the scheduler: the versioned claim decides and the loser steps aside', () => {
+      out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--parallel', '1'], io));
+      const db = path.join(root, 'db');
+      const plan = path.join(root, 'plan.yaml');
+      const live = { status: 'active', heartbeatAt: NOW.toISOString(), leaseUntil: new Date(NOW.getTime() + 600000).toISOString() };
+      writeDocs(path.join(db, 'state'), {});
+      writeDocs(path.join(db, 'sessions'), { main: live, M1: live });
+      out(run(['swarm', 'join', '--session', 'M1', '--role', 'manual'], wio));
+      const starts = () => out(run(['swarm', 'tick', '--plan', plan, '--db', db], io)).actions
+        .filter((a: { type: string }) => a.type === 'start').map((a: { task: string }) => a.task);
+      const next = () => out(run(['swarm', 'next', '--plan', plan, '--db', db, '--session', 'M1'], wio)).task;
+      // Just as the scheduler wants it: both see T1 as the next task.
+      expect(next()).toBe('T1');
+      expect(starts()).toEqual(['T1']);
+      // The member wins the versioned claim; the coordinator's claim fails and it drops T1.
+      writeDocs(path.join(db, 'state'), { T1: { status: 'in_progress', owner: 'M1', claimedAt: NOW.toISOString(), version: 2 } });
+      expect(run(['swarm', 'task', 'T1', '--drop'], io).code).toBe(0);
+      out(run(['swarm', 'report', 'T1', '--session', 'M1', '--stage', 'implement'], wio));
+      // The tick sees the winner: T1 stays the member's, the scheduler moves on to T2.
+      expect(starts()).toEqual(['T2']);
+      expect(Object.keys(readExecution(root)!.tasks)).toEqual(['T2']);
+      // During: the scheduler holds T2; the member is only ever offered its own claim, never T2.
+      expect(next()).toBe('T1');
+      expect(starts()).toEqual([]);
+      expect(Object.keys(readExecution(root)!.tasks)).toEqual(['T2']);
+      // The other way round: the coordinator holds the claim on T2, so a member that lost T1 is offered nothing it holds.
+      writeDocs(path.join(db, 'state'), { T1: { status: 'in_progress', owner: 'main', claimedAt: NOW.toISOString(), version: 3 }, T2: { status: 'in_progress', owner: 'main', claimedAt: NOW.toISOString(), version: 1 } });
+      expect(next()).toBeNull();
+    });
+  });
 });
