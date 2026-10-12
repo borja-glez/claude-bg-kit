@@ -6,7 +6,7 @@
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.12.0](https://img.shields.io/badge/versi%C3%B3n-0.12.0-cba6f7?style=flat-square)
+![versión 0.13.0](https://img.shields.io/badge/versi%C3%B3n-0.13.0-cba6f7?style=flat-square)
 ![requiere sesión en claude.ai](https://img.shields.io/badge/requiere-sesi%C3%B3n%20en%20claude.ai-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -117,6 +117,8 @@ La banda se dibuja en la terminal y en la pestaña Code de la app de escritorio.
 
 `/waypoint:launch <frente>` crea `.claude/worktrees/<frente>` en la rama `track/<frente>` y arranca allí una sesión de Claude en segundo plano. Cada sesión reclama tareas de su frente y escribe su progreso en el roadmap. Cuando dos sesiones tocan los mismos ficheros, reciben un aviso de solapamiento. Las sesiones pueden traspasarse o delegarse trabajo con mensajes, que se guardan en el roadmap y se envían con `SendMessage`. Si una sesión desaparece, las demás recuperan su tarea.
 
+El modo sessions de forge lanza a sus miembros con `launch <plan> <T> --task --run R --coordinator SID --base B [--launcher bg|herdr]`: una sesión por tarea, en `.claude/worktrees/task-<T>` sobre `task/<T>`. La banda de un miembro así dice «de la ejecución de <coordinadora>». Cualquier sesión puede además unirse desde `/waypoint:work` a una ejecución en marcha como miembro manual y coger una tarea pendiente.
+
 Para muchos frentes a la vez con integración automática, usa los [modos de ejecución](../forge/README.es.md#modos-de-ejecución) de forge.
 
 ## Hooks
@@ -134,7 +136,7 @@ Las skills ejecutan la CLI como `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" 
 | Diseño | `design-validate`, `design-snapshot`, `design-changed`, `critique-check`, `critique-select`, `design-page` |
 | Plan y página | `validate`, `hash` (imprime el hash del plan, para detectar un roadmap desactualizado), `page`, `sync`, `clean-cache` |
 | Trabajo | `next [--base <rama>]`, `conflicts`, `recover`, `status`, `commit-info` |
-| Sesiones | `launch <frente> [--swarm <id> --base <rama>]`, `inbox`, `escalations`, `notes`, `session-id` |
+| Sesiones | `launch <frente> [--swarm <id> --base <rama>]`, `launch <plan> <T> --task --run R --coordinator SID --base B [--launcher bg|herdr]`, `inbox`, `escalations`, `notes`, `session-id` |
 | Utilidades | `event-id`, `now` |
 
 ## Permisos

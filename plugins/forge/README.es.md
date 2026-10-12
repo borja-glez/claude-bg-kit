@@ -7,8 +7,8 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.7.0](https://img.shields.io/badge/versi%C3%B3n-0.7.0-fab387?style=flat-square)
-![depende de waypoint ^0.12.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.12.0-cba6f7?style=flat-square)
+![versión 0.8.0](https://img.shields.io/badge/versi%C3%B3n-0.8.0-fab387?style=flat-square)
+![depende de waypoint ^0.13.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.13.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -46,7 +46,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depende de [waypoint](../waypoint/README.es.md) ^0.12.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
+forge depende de [waypoint](../waypoint/README.es.md) ^0.13.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
 
 ## Uso
 
@@ -112,9 +112,11 @@ La base de la ejecución se guarda en `.forge/work/<proyecto>/run.json`, que se 
 En el camino Large y en el modo infinito, forge ejecuta las tareas del plan con **un planificador** que trabaja por tareas: `forge swarm tick` decide qué tareas están listas (sus dependencias están integradas y sus zonas no se solapan) y qué trabajo terminado integrar, hasta `swarm.parallel` a la vez. Hay dos modos:
 
 - **subagents** (el de por defecto). La sesión coordinadora trabaja cada tarea con subagentes en un worktree de git propio.
-- **sessions** (aún no disponible: llega en la versión siguiente). Cada tarea correría en su propia sesión en segundo plano. Hasta entonces, pedirlo cae a subagents.
+- **sessions**. Cada tarea corre en su propia sesión `claude --bg`, llamada `wp-<proyecto>-<T>`, en el worktree `.claude/worktrees/task-<T>`. Esa sesión hace el bucle forge de su única tarea, publica su etapa y nunca integra: integra la coordinadora.
 
 La ejecución secuencial no es un tercer modo: es subagents con N = 1.
+
+**Cuándo elegir cada modo.** Subagents es el de por defecto: cuesta menos y todo ocurre en una sola sesión. Elige sessions para planes muy largos o cuando quieres hablar con cada tarea.
 
 **Cómo se elige el modo.** forge propone uno (`forge swarm propose --plan <plan>` dice cuán ancho es el plan y recomienda un modo y una N), o lo dices tú («en enjambre», «con subagentes», «en paralelo», «secuencial»), o lo fijas con `swarm.mode` en `.forge/config.yaml`. N es tu `--parallel N` si lo das, y si no la recomendación, con el tope de `swarm.parallel`.
 
@@ -126,11 +128,23 @@ La ejecución secuencial no es un tercer modo: es subagents con N = 1.
 
 **Parar.** `/forge:stop` (o `forge stop`) termina la ejecución: la coordinadora ve la parada y acaba su paso, y una ejecución cuya sesión ya no existe se cierra igualmente. Tras una parada por un conflicto o una tarea bloqueada, `forge swarm retry <tarea>` reactiva la ejecución sin volver a lanzar `/forge:run`.
 
-**Estado y visibilidad.** El estado vive en `.forge/execution/` (la ejecución y un fichero por tarea) y se refleja en el `meta/run` del roadmap. Lo enseñan el roadmap, lens y la banda: una fila por tarea en marcha con su etapa, agente, duración y vida.
+**Estado y visibilidad.** El estado vive en `.forge/execution/` (la ejecución y un fichero por tarea) y se refleja en el `meta/run` del roadmap. Lo enseñan el roadmap, lens y la banda: una fila por tarea en marcha con su etapa, agente, duración y vida. Las sesiones ejecutoras y manuales aparecen con su propia vida.
+
+**Frentes parados (modo sessions).** El planificador vigila cada sesión. Tras 15 minutos sin cambio de etapa, si la sesión está inactiva, `swarm nudge` le manda un recordatorio. Si la sesión se paró, `swarm relaunch` la vuelve a lanzar con una nota de relevo, `.forge/work/<T>/handover.md`, como mucho 2 veces; al tercer fallo la tarea se bloquea. Una sesión relanzada tiene una ventana de 10 minutos antes de volver a juzgarla. Cuando la última tarea la ha reclamado otra sesión viva, la ejecución espera en vez de pararse.
+
+**Sesiones manuales.** Cualquier sesión donde ejecutes `/waypoint:work`, o le pidas «coge una tarea pendiente», se une a la ejecución con el rol `manual` en cualquier momento (`swarm join`). Coge tareas con el mismo planificador (`swarm next`), trabaja en su propio worktree de tarea (`swarm worktree <T> --member`) y publica sus etapas (`swarm report`); la coordinadora integra su trabajo. Un miembro solo actúa sobre su propia tarea y nunca escribe `execution.json`.
+
+**Retomar y relevo.** `claude --resume` de la coordinadora o de una ejecutora recibe el contexto de la ejecución en SessionStart. Una sesión nueva toma el relevo de la coordinadora solo si está parada (`swarm takeover`); si no, se une como manual. Un miembro de la ejecución no puede tomar el relevo. Si la rama de ejecución se ha quedado atrás respecto a su base, `swarm start` la pone al día (`baseSync`: `created`, `up-to-date`, `fast-forward` o `merged`); ante un conflicto se niega y no se pierde nada.
+
+**Desatendido.** En `/forge:infinite`, bajo `/goal` y en los miembros de la ejecución, forge no pregunta. Deja notas-pregunta en el roadmap y registra cada decisión con `forge log --kind decision`.
+
+**Peticiones durante una ejecución.** El trabajo nuevo vive en la rama de ejecución, no en tu rama. En la sesión coordinadora, una petición Trivial o Small que quieres ya se hace en el worktree de la ejecución con su propio commit (o pasa a ser una tarea que depende de la que corre si los ficheros se solapan); una Medium pasa a ser una tarea nueva del plan que el siguiente tick arranca; una Large o un bloque nuevo tiene su propio diseño y plan sin parar la ejecución; las preguntas se responden en la sesión, y lo que debe quedar va como nota del roadmap. En otra sesión valen las mismas reglas como miembro manual.
+
+**El lanzador.** `swarm.launcher: bg | herdr` elige cómo se abre una sesión. Un sondeo acotado en el tiempo encontró que herdr no puede abrir paneles desde la línea de comandos, así que `--launcher herdr` devuelve un error (código 2) y la coordinadora usa `bg`. herdr aún no está soportado.
 
 ### Señal en vivo
 
-`forge hook live` se ejecuta en SessionStart, SessionEnd, SubagentStart, SubagentStop y Stop. Para la coordinadora de una ejecución activa escribe `.forge/live/<sessionId>.json` en el checkout principal, con el último evento, la hora y los subagentes en marcha. El primer Stop o SubagentStart de la ejecución fija la coordinadora: desde entonces solo esa sesión escribe la señal. lens y la banda la leen: una sesión se muestra **sin señal** tras 7 minutos sin eventos y **parada** tras 12, salvo que la señal liste un subagente que empezó hace menos de 3 horas (una coordinadora que espera a un agente largo sigue viva). Los subagentes que empezaron hace más de 3 horas se descartan. El roadmap no lee `.forge/live`: usa las concesiones de `sessions/<SID>` de la coordinadora y de `state/<T>.exec` de cada tarea, que la coordinadora alarga hasta el presupuesto previsto del agente (90 minutos como mucho) al lanzarlo. El hook no imprime nada y nunca falla.
+`forge hook live` se ejecuta en SessionStart, SessionEnd, SubagentStart, SubagentStop y Stop. La coordinadora de una ejecución activa y los miembros registrados (`.forge/members/<SID>.json`: sesiones ejecutoras y manuales) escriben `.forge/live/<sessionId>.json` en el checkout principal, cada uno con su rol, el último evento, la hora y los subagentes en marcha. El hook trabaja siempre sobre el checkout principal, también desde un worktree de tarea. El primer Stop o SubagentStart de la ejecución fija la coordinadora: desde entonces solo esa sesión escribe la señal de la coordinadora. lens y la banda la leen: una sesión se muestra **sin señal** tras 7 minutos sin eventos y **parada** tras 12, salvo que la señal liste un subagente que empezó hace menos de 3 horas (una coordinadora que espera a un agente largo sigue viva). Los subagentes que empezaron hace más de 3 horas se descartan. El roadmap no lee `.forge/live`: usa las concesiones de `sessions/<SID>` de la coordinadora y de `state/<T>.exec` de cada tarea, que la coordinadora alarga hasta el presupuesto previsto del agente (90 minutos como mucho) al lanzarlo. El hook no imprime nada y nunca falla.
 
 ## Modo infinito
 
@@ -218,7 +232,7 @@ evidence: upload               # upload | local; por defecto upload
 validatorTimeoutSec: 600
 swarm:
   parallel: 3                  # tareas a la vez; 1 ejecuta una cada vez; máximo 10
-  mode: subagents              # opcional: subagents | sessions (sessions llega en la versión siguiente)
+  mode: subagents              # opcional: subagents | sessions
   setup: npm ci                # opcional: instala las dependencias de un worktree nuevo; por defecto se deduce del lockfile
   launcher: bg                 # bg | herdr; por defecto bg
 ```
@@ -272,7 +286,7 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 - `validate [--affected a,b | --all] [--path trivial|small|medium|large] [--base sha] [--final] [--task id] [--base-run | --baseline f]` - ejecuta los validadores del proyecto que tocan (ver Coincidencias); `--base` da el diff contra el que se casan los `affects` de e2e, `--final` elige el conjunto de la revisión final. `--base-run` marca una ejecución sobre el commit base, antes de cualquier cambio; `--baseline f` toma el JSON de esa ejecución y marca `preexisting` un fallo que la base ya tenía, que no cuenta ni en el código de salida ni en el veredicto. Un runner de tests que no encuentra tests pasa como `skipped: "no-tests"`.
 - `verdict --task id --dir d [--validators f] [--sensitive] [--perf]` - pondera los JSON de los revisores en una nota. Un revisor aparece con `invalid: true` si su salida no servía (`dropped: 0`, cuenta como abstención) o si se descartaron algunos de sus hallazgos (`dropped` > 0; la revisión mantiene su veredicto y puntúa, y la skill registra los hallazgos descartados como resolución).
 - `round --task id --path medium|large` - decide el siguiente paso del bucle de revisión (`done`, `resume`, `fresh-stronger`, `redo`, `breaker`, `stalled`; `tierUp` desde la ronda 3).
-- `log --kind k [--task id] [--data json | --data-file f]` - añade una entrada al registro.
+- `log --kind k [--task id] [--data json | --data-file f]` - añade una entrada al registro; `--kind decision` registra una decisión tomada sin supervisión.
 - `last --task id` - el camino, el último evento de fase, el último veredicto y la última ronda de una tarea.
 - `agents` - los nombres de los agentes del perfil activo.
 - `surfaces [learn --name N --notes-file F [--heading H] | proposed --name N]` - lista las superficies y los borradores detectados; añade notas a la sección `Aprendido` de una superficie; marca un borrador como propuesto.
@@ -300,12 +314,17 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 <summary><b>Modo infinito y ejecución</b></summary>
 
 - `infinite start --cycles N | --hours H`, `infinite status`, `cycle --progress yes|no`, `stop`
-- `swarm start --project P --session SID [--mode subagents|sessions] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]` - empieza o reanuda una ejecución; crea la rama de ejecución y su worktree e imprime el resultado de `setup`. Ejecútalo desde el checkout principal.
+- `swarm start --project P --session SID [--mode subagents|sessions] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]` - empieza o reanuda una ejecución; crea la rama de ejecución y su worktree (o pone al día una atrasada respecto a su base, `baseSync`) e imprime el resultado de `setup`. Ejecútalo desde el checkout principal.
 - `swarm status` - el estado de la ejecución, por tarea.
 - `swarm propose --plan p` - el ancho del plan y el modo y la N recomendados.
-- `swarm worktree <tarea>` - crea el worktree y la rama de la tarea (y ejecuta `swarm.setup`).
+- `swarm worktree <tarea> [--member SID]` - crea el worktree y la rama de la tarea (y ejecuta `swarm.setup`); `--member` es para una sesión miembro, que crea el suyo.
+- `swarm join --session SID --role executor|manual [--task T]` - registra un miembro en `.forge/members/<SID>.json`.
+- `swarm report <tarea> --session SID --stage S` - un miembro publica su propia etapa y su señal en vivo (nunca escribe `execution.json`).
+- `swarm next --plan p --db dir --session SID` - ofrece a un miembro manual una tarea lista.
+- `swarm relaunch <tarea>` / `swarm nudge <tarea>` - relanza una tarea de sessions parada con una nota de relevo (como mucho 2 veces), o recuerda a una inactiva.
+- `swarm takeover --session SID --db dir` - toma el relevo de la coordinadora cuando está parada; un miembro de la ejecución no puede.
 - `swarm task <tarea> --stage S [--agent A | --no-agent] [--round N] [--status running|accepted|blocked] [--detail-file F] [--lease ISO]` - anota la etapa, el agente y la ronda de la tarea; `swarm task <tarea> --drop` olvida una tarea cuya reclamación se perdió.
-- `swarm tick --plan p --db dir` - decide qué lanzar y qué integrar (`--db` es una copia de los documentos `state` y `sessions` del roadmap).
+- `swarm tick --plan p --db dir [--agents F]` - decide qué lanzar, recordar, relanzar e integrar (`--db` es una copia de los documentos `state` y `sessions` del roadmap; `--agents` es un fichero JSON con las sesiones en segundo plano, `[{name, state: working|idle}]`).
 - `swarm integrate <tarea>` - fusiona una tarea aceptada en la rama de ejecución, comparando los validadores con la base.
 - `swarm merge [--yes]` - fusiona la rama de ejecución en tu rama; sin `--yes` necesita el permiso dado al empezar.
 - `swarm retry <tarea>` - devuelve al trabajo una tarea en conflicto o bloqueada.

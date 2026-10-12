@@ -7,7 +7,7 @@ Roadmap, forge stages, superpowers runs, todos, subagents, the model and effort 
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.7.0](https://img.shields.io/badge/version-0.7.0-b4befe?style=flat-square)
+![version 0.8.0](https://img.shields.io/badge/version-0.8.0-b4befe?style=flat-square)
 ![no token cost](https://img.shields.io/badge/token%20cost-none-a6e3a1?style=flat-square)
 
 </div>
@@ -57,7 +57,7 @@ Each section is a card in its own colour (the roadmap's Catppuccin palette) and 
 | **Now** | the session | The main model and its effort (`Opus 5.5 · effort high`), the tool running and how long the turn has been going. |
 | **Roadmap** | waypoint plan | Percent, phase, a box per task of the track, the task in progress with its minutes against its estimate, messages and pending decisions. |
 | **forge** | `.forge/status.json` | The last forge task triaged or worked on within the day, described below. |
-| **Execution** | `.forge/execution/` and `.forge/live/` | While a forge execution is active, one row per running task with its stage, tier, agent, duration and round, and a liveness chip (alive, silent after 7 minutes, stopped after 12). Below, dimmed lists of the queued, conflicting, blocked and orphaned tasks. It replaces the old swarm card. |
+| **Execution** | `.forge/execution/` and `.forge/live/` | While a forge execution is active, one row per running task with its stage, tier, agent, duration and round, and a liveness chip (alive, silent after 7 minutes, stopped after 12). Executor and manual sessions get their own rows (`manual · T009`) and each strip is alive or not by its own session. Below, dimmed lists of the queued, conflicting, blocked and orphaned tasks. It replaces the old swarm card. |
 | **superpowers** | `.superpowers/sdd/<plan>/progress.md` | The active plan and its subagent-driven-development ledger: task N/M, the current fix round, the last entries. A finished plan with no checked steps is hidden. |
 | **Todos** | TodoWrite | Done/total, the one in progress and the next ones. |
 | **Subagents** | Claude Code | The subagents running, with their type, description, model, effort and time. |

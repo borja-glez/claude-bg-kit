@@ -63,5 +63,5 @@ text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,san
 <text x="40" y="372" font-size="12" class="m" style="fill:#a6e3a1" font-weight="700">forge/run-&lt;project&gt; · .claude/worktrees/run</text>
 <text x="32" y="404" font-size="11.5" class="dim">Al final la rama de ejecución se fusiona en la tuya, con tu permiso (o el que diste al empezar).</text>
 <text x="32" y="422" font-size="11.5" class="dim">Hasta swarm.parallel tareas a la vez (3 por defecto) · un merge cada vez, validadores tras cada uno comparados con lo que ya fallaba.</text>
-<text x="32" y="440" font-size="11.5" class="dim">Modo subagentes; el modo sesiones llega en la versión siguiente · se ve en el roadmap, la banda y lens.</text>
+<text x="32" y="440" font-size="11.5" class="dim">Modo subagentes o sesiones · las sesiones manuales se unen cuando quieran · se ve en el roadmap, la banda y lens.</text>
 </svg>

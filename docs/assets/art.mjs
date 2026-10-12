@@ -554,7 +554,7 @@ const EN = {
   coordinatorFull: 'coordinator', coordSub: 'forge swarm tick: launch ready tasks, review, integrate, sleep, repeat', integrated: 'integrated', waiting: 'T009 · waits for T004 · launched once it is integrated', subagent: 'subagent', runPill: '▶ execution · subagents 3/3',
   swarmFoot0: 'At the end the run branch is merged into your branch, with your permission (or the one you gave at the start).',
   swarmFoot1: 'Up to swarm.parallel tasks at once (default 3) · one merge at a time, validators after each one compared with what already failed.',
-  swarmFoot2: 'Subagents mode; sessions mode arrives in the next version · shown in the roadmap, the band and lens.',
+  swarmFoot2: 'Subagents or sessions mode · manual sessions join at any time · shown in the roadmap, the band and lens.',
 };
 EN.coordinator = 'coordinator';
 
@@ -613,7 +613,7 @@ const ES = {
   coordSub: 'forge swarm tick: lanza tareas listas, revisa, integra, duerme y repite', integrated: 'integrado', waiting: 'T009 · espera a T004 · se lanza al integrarse', subagent: 'subagente', runPill: '▶ ejecución · subagentes 3/3',
   swarmFoot0: 'Al final la rama de ejecución se fusiona en la tuya, con tu permiso (o el que diste al empezar).',
   swarmFoot1: 'Hasta swarm.parallel tareas a la vez (3 por defecto) · un merge cada vez, validadores tras cada uno comparados con lo que ya fallaba.',
-  swarmFoot2: 'Modo subagentes; el modo sesiones llega en la versión siguiente · se ve en el roadmap, la banda y lens.',
+  swarmFoot2: 'Modo subagentes o sesiones · las sesiones manuales se unen cuando quieran · se ve en el roadmap, la banda y lens.',
 };
 
 const ART = { flow, roadmap, band, lens, paths, swarm };

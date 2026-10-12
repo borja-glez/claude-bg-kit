@@ -7,9 +7,9 @@ Diséñalas, planifícalas, constrúyelas con revisión independiente, ejecútal
 
 [English](README.md) · **Español**
 
-![waypoint 0.12.0](https://img.shields.io/badge/waypoint-0.12.0-cba6f7?style=flat-square)
-![forge 0.7.0](https://img.shields.io/badge/forge-0.7.0-fab387?style=flat-square)
-![lens 0.7.0](https://img.shields.io/badge/lens-0.7.0-b4befe?style=flat-square)
+![waypoint 0.13.0](https://img.shields.io/badge/waypoint-0.13.0-cba6f7?style=flat-square)
+![forge 0.8.0](https://img.shields.io/badge/forge-0.8.0-fab387?style=flat-square)
+![lens 0.8.0](https://img.shields.io/badge/lens-0.8.0-b4befe?style=flat-square)
 ![Marketplace de Claude Code](https://img.shields.io/badge/Claude%20Code-marketplace%20bg--kit-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -64,7 +64,7 @@ Una tarea grande pasa por cuatro etapas. Por el camino tomas tres decisiones: ap
 1. **Diseño (waypoint).** `/waypoint:design` escribe un documento de diseño. El agente `design-critic` lo revisa por rondas y devuelve propuestas numeradas. Las aplicas, pides otra ronda, haces que Claude te entreviste o lo reescribes. Lo apruebas cuando está bien.
 2. **Plan (waypoint + forge).** `forge-planner` convierte el diseño aprobado en `plan.yaml`: **frentes** (líneas de trabajo independientes; *tracks* en inglés), fases y tareas pequeñas y verificables con los ficheros que toca cada una. `/waypoint:plan` lo publica como **roadmap vivo** en claude.ai. Cualquiera con el enlace ve el progreso, escribe notas y decide propuestas allí.
 3. **Construir (forge).** `/forge:run` hace el triaje de cada tarea por tamaño y elige un camino. Los caminos más pesados pasan por un implementador elegido según la dificultad, luego por los validadores del propio proyecto (tests, lint, tipos, build) y después por hasta tres revisores independientes (correctness, security, perf). Su veredicto ponderado acepta el trabajo o lo devuelve en una ronda de arreglo, con un modelo más fuerte desde la ronda 3.
-4. **Ejecución (forge).** Cuando el plan tiene tareas desbloqueadas, una coordinadora las ejecuta hasta `swarm.parallel` a la vez (3 por defecto). En modo *subagents* (el de por defecto; el modo `sessions` llega en la versión siguiente) cada tarea tiene su propio worktree de git y un subagente, y un planificador decide qué se ejecuta a continuación; una tarea cada vez es simplemente N = 1. El trabajo terminado se integra **de un merge en uno** en la rama de ejecución `forge/run-<proyecto>`, pasando los validadores tras cada merge y comparándolos con lo que ya fallaba allí. Tu checkout no se toca hasta la fusión final, que te pide permiso.
+4. **Ejecución (forge).** Cuando el plan tiene tareas desbloqueadas, una coordinadora las ejecuta hasta `swarm.parallel` a la vez (3 por defecto). Cada tarea tiene su propio worktree de git y un subagente (modo *subagents*, el de por defecto) o una sesión propia en segundo plano (modo *sessions*), y un planificador decide qué se ejecuta a continuación; una tarea cada vez es simplemente N = 1. Cualquier otra sesión puede unirse a la ejecución como miembro manual y coger una tarea pendiente. El trabajo terminado se integra **de un merge en uno** en la rama de ejecución `forge/run-<proyecto>`, pasando los validadores tras cada merge y comparándolos con lo que ya fallaba allí. Tu checkout no se toca hasta la fusión final, que te pide permiso.
 
 El **modo infinito** (`/forge:infinite`) sigue haciendo ciclos dentro de un presupuesto de ciclos u horas. Un scout propone mejoras con pruebas. Las de bajo riesgo y verificables se aprueban solas y el resto te esperan. Las propuestas aprobadas se convierten en tareas nuevas.
 
@@ -78,7 +78,7 @@ Añade el marketplace directamente desde GitHub e instala los plugins que quiera
 claude plugin marketplace add borja-glez/claude-bg-kit
 
 claude plugin install waypoint@bg-kit
-claude plugin install forge@bg-kit     # instala waypoint ^0.12.0 como dependencia
+claude plugin install forge@bg-kit     # instala waypoint ^0.13.0 como dependencia
 claude plugin install lens@bg-kit
 ```
 
