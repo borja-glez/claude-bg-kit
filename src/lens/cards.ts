@@ -57,7 +57,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     }
     for (const r of w.recentDone ?? []) {
       const over = r.estimateMin !== undefined && r.minutes > r.estimateMin;
-      blocks.push({ kind: 'text', text: `✓ ${r.id} · ${r.minutes}${r.estimateMin ? `/${r.estimateMin}` : ''} min`, dim: true, ...(over ? { hue: 'yellow' as Hue } : {}) });
+      blocks.push({ kind: 'text', text: `✓ ${r.id} · ${r.minutes > 1440 ? '>24h' : r.minutes}${r.estimateMin ? `/${r.estimateMin}` : ''} min`, dim: true, ...(over ? { hue: 'yellow' as Hue } : {}) });
     }
     const chips: { text: string; hue: Hue }[] = [];
     if (w.inbox > 0) chips.push({ text: `✉ ${w.inbox}`, hue: 'blue' });

@@ -364,6 +364,17 @@ describe('lens timings: execution and roadmap', () => {
       { kind: 'text', text: '✓ T001 · 7 min', dim: true },
     ]);
   });
+  it('shows >24h for a done task over a day, keeping the amber rule', () => {
+    const w = {
+      project: 'shop', track: 'api', percent: 40, trackDone: 2, trackTotal: 5, current: null, inbox: 0, escalation: false, roadmapUrl: null, locale: 'en',
+      phase: null, cells: 'ddapp', recentDone: [{ id: 'T009', minutes: 1441, estimateMin: 30 }, { id: 'T008', minutes: 1440 }],
+    };
+    const card = buildCards({ ...EMPTY, waypoint: w }, T, 0).find(c => c.title === 'shop')!;
+    expect(card.blocks.filter(b => b.kind === 'text' && b.text.startsWith('✓'))).toEqual([
+      { kind: 'text', text: '✓ T009 · >24h/30 min', dim: true, hue: 'yellow' },
+      { kind: 'text', text: '✓ T008 · 1440 min', dim: true },
+    ]);
+  });
 });
 
 describe('lens timings: forge', () => {

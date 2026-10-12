@@ -72,8 +72,8 @@ export function parsePlanTasks(md: string): PlanTask[] {
   if (typeof md !== 'string') return tasks;
   let cur: PlanTask | null = null;
   for (const line of md.split(/\r?\n/)) {
-    const h = /^###\s+Task\s+(\d+)\s*:\s*(.*?)\s*$/.exec(line);
-    if (h) { cur = { n: Number(h[1]), title: h[2], steps: 0, checked: 0 }; tasks.push(cur); continue; }
+    const heading = /^###\s+Task\s+(\d+)\s*:\s*(.*?)\s*$/.exec(line);
+    if (heading) { cur = { n: Number(heading[1]), title: heading[2], steps: 0, checked: 0 }; tasks.push(cur); continue; }
     if (!cur) continue;
     const c = /^\s*[-*]\s+\[([ xX])\]/.exec(line);
     if (c) { cur.steps++; if (c[1] !== ' ') cur.checked++; }
@@ -181,7 +181,7 @@ export function usageTime(session: UsageState, run: UsageState | null, turnSince
   };
 }
 
-const STALE_LEDGER_MS =24 * 3600_000;
+const STALE_LEDGER_MS = 24 * 3600_000;
 
 function superpowers(input: {
   ledger?: string; ledgerPlan?: string; planFallback?: string; ledgerMtimeMs?: number; now: number;

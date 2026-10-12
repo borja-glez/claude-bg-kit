@@ -8,7 +8,7 @@ import { buildCards, cardAlt } from './cards.js';
 import { cardSvg, bandSvg } from './svg.js';
 import { termCard, termBand, type TermUI } from './term.js';
 import { headline, ratio, usageBandText, PALETTE, SECTION_HUE, SECTION_ICON } from './view.js';
-import { freshFinished, pushFinished, type FinishedAgent } from './finished.js';
+import { freshFinished, pushFinished, withoutRunning, type FinishedAgent } from './finished.js';
 import { endTurn, labelLoop, newTurnClock, newUsage, startTurn, touchTurn, recordStep, recordTracking, trackingKind, type UsageState } from './usage.js';
 import { mainCheckoutFrom, mergeForRun, parseUsageFile, runStartedAt, seedUsage, toUsageFile, USAGE_FILE_MAX, USAGE_FILES_MAX, type RunSource, type UsageFile } from './usage-file.js';
 
@@ -512,6 +512,8 @@ async function liveSubagents($: Engine, now: number): Promise<Activity['subagent
   // One that was running here and is gone from the list has ended: kept as finished (a later Stop finds nothing).
   const live = new Set(out.map(s => s.id));
   for (const s of fresh) if (!live.has(s.id)) recordFinished(s, now);
+  // An id that is running again is not also finished.
+  finished = withoutRunning(finished, out);
   return out.slice(-MAX_ACTIVITY);
 }
 
@@ -615,7 +617,7 @@ const TEXT = {
     sForge: 'forge', approve: 'Aprobar', reject: 'Rechazar', hoursLeft: (h: number) => `quedan ${h} h`, auto: 'auto',
     pressEnter: 'Comando listo en el prompt: pulsa Enter',
     briefs: 'briefs', cycle: 'ciclo', task: 'Tarea', proposals: 'Propuestas',
-    sUsage: 'Consumo', effort: 'esfuerzo', thisSession: 'esta sesión', active: 'activo', sinceStart: 'desde el inicio', taskTime: 'tarea',run: 'ejecución', gMain: 'Sesión principal', gImpl: 'Implementadores', gReview: 'Revisores', gVerify: 'Verificación', blocked: 'bloqueada', gPlan: 'Planificación y scout', gOther: 'Otros subagentes', tracking: 'Seguimiento', withoutForge: 'Sin forge (estimado)', withoutForgeNote: 'orientativo: en una sola sesión el contexto crecería y costaría más, y no habría revisión', forgeCosts: (usd: string, pct: number) => `forge cuesta +${usd} (+${pct} %)`, forgeSaves: (usd: string) => `forge ahorra −${usd}`, pricesAsOf: 'precios a', drift: 'precios o medición incompletos', various: 'varios', noReview: 'sin revisiones independientes', effortLevel: (e: string) => ({ low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' } as Record<string, string>)[e] ?? e,
+    sUsage: 'Consumo', effort: 'esfuerzo', thisSession: 'esta sesión', active: 'activo', sinceStart: 'desde el inicio', taskTime: 'tarea', run: 'ejecución', gMain: 'Sesión principal', gImpl: 'Implementadores', gReview: 'Revisores', gVerify: 'Verificación', blocked: 'bloqueada', gPlan: 'Planificación y scout', gOther: 'Otros subagentes', tracking: 'Seguimiento', withoutForge: 'Sin forge (estimado)', withoutForgeNote: 'orientativo: en una sola sesión el contexto crecería y costaría más, y no habría revisión', forgeCosts: (usd: string, pct: number) => `forge cuesta +${usd} (+${pct} %)`, forgeSaves: (usd: string) => `forge ahorra −${usd}`, pricesAsOf: 'precios a', drift: 'precios o medición incompletos', various: 'varios', noReview: 'sin revisiones independientes', effortLevel: (e: string) => ({ low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' } as Record<string, string>)[e] ?? e,
   },
   en: {
     panel: 'Panel', panelOpened: 'Progress panel opened.',
@@ -629,7 +631,7 @@ const TEXT = {
     sForge: 'forge', approve: 'Approve', reject: 'Reject', hoursLeft: (h: number) => `${h}h left`, auto: 'auto',
     pressEnter: 'Command ready in the prompt: press Enter',
     briefs: 'briefs', cycle: 'cycle', task: 'Task', proposals: 'Proposals',
-    sUsage: 'Usage', effort: 'effort', thisSession: 'this session', active: 'active', sinceStart: 'since start', taskTime: 'task',run: 'run', gMain: 'Main session', gImpl: 'Implementers', gReview: 'Reviewers', gVerify: 'Verification', blocked: 'blocked', gPlan: 'Planning and scout', gOther: 'Other subagents', tracking: 'Tracking', withoutForge: 'Without forge (estimate)', withoutForgeNote: 'rough: in one session the context would grow and cost more, with no review', forgeCosts: (usd: string, pct: number) => `forge costs +${usd} (+${pct}%)`, forgeSaves: (usd: string) => `forge saves −${usd}`, pricesAsOf: 'prices as of', drift: 'prices or measurement incomplete', various: 'mixed', noReview: 'no independent review', effortLevel: (e: string) => e,
+    sUsage: 'Usage', effort: 'effort', thisSession: 'this session', active: 'active', sinceStart: 'since start', taskTime: 'task', run: 'run', gMain: 'Main session', gImpl: 'Implementers', gReview: 'Reviewers', gVerify: 'Verification', blocked: 'blocked', gPlan: 'Planning and scout', gOther: 'Other subagents', tracking: 'Tracking', withoutForge: 'Without forge (estimate)', withoutForgeNote: 'rough: in one session the context would grow and cost more, with no review', forgeCosts: (usd: string, pct: number) => `forge costs +${usd} (+${pct}%)`, forgeSaves: (usd: string) => `forge saves −${usd}`, pricesAsOf: 'prices as of', drift: 'prices or measurement incomplete', various: 'mixed', noReview: 'no independent review', effortLevel: (e: string) => e,
   },
 } as const;
 type Texts = (typeof TEXT)[keyof typeof TEXT];

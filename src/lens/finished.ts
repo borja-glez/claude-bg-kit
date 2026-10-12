@@ -9,6 +9,12 @@ export function pushFinished(list: FinishedAgent[], entry: FinishedAgent): Finis
   return [...list.filter(x => x.id !== entry.id), entry].slice(-FINISHED_MAX);
 }
 
+/** The finished entries whose id is not among the running ones: a subagent is never both. */
+export function withoutRunning(list: FinishedAgent[], running: { id: string }[]): FinishedAgent[] {
+  const ids = new Set(running.map(s => s.id));
+  return list.filter(x => !ids.has(x.id));
+}
+
 /** Entries finished within FINISHED_TTL_MS of now (none from the future). */
 export function freshFinished(list: FinishedAgent[], now: number): FinishedAgent[] {
   return list.filter(x => Number.isFinite(now) && x.at <= now && now - x.at < FINISHED_TTL_MS);

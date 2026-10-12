@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { pushFinished, freshFinished, FINISHED_MAX, FINISHED_TTL_MS, type FinishedAgent } from '../src/lens/finished.js';
+import { pushFinished, freshFinished, withoutRunning, FINISHED_MAX, FINISHED_TTL_MS, type FinishedAgent } from '../src/lens/finished.js';
 
 const f = (id: string, at: number): FinishedAgent => ({ id, type: 'Explore', seconds: 10, at });
 
@@ -11,6 +11,11 @@ describe('finished subagents', () => {
     expect(FINISHED_MAX).toBe(5);
     list = pushFinished(list, f('a3', 99));
     expect(list.map(x => x.id)).toEqual(['a2', 'a4', 'a5', 'a6', 'a3']);
+  });
+  it('an id that is running again appears once, as running', () => {
+    const list = [f('a', 1), f('b', 2)];
+    expect(withoutRunning(list, [{ id: 'b' }, { id: 'c' }]).map(x => x.id)).toEqual(['a']);
+    expect(withoutRunning(list, [])).toEqual(list);
   });
   it('drops entries older than five minutes and any from the future', () => {
     const now = 1_000_000;
