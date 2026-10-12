@@ -65,6 +65,27 @@ describe('execution state', () => {
     expect(normalizeExecution({ ...base, parallel: 50 })!.parallel).toBe(10);
     expect(normalizeExecution({ ...base, parallel: 0 })!.parallel).toBe(1);
   });
+  it('keeps a task title and the planned count, and reads an older file without them', () => {
+    const base = { runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', coordinator: 'main', startedAt: '2026-10-12T12:00:00.000Z' };
+    const t = { status: 'running', stage: 'implement', executor: 'subagents', worktree: '', branch: 'task/T1', startedAt: '2026-10-12T12:00:00.000Z' };
+    const e = normalizeExecution({ ...base, planned: 12, tasks: { T1: { ...t, title: '  Login form  ' }, T2: { ...t, title: 42 }, T3: { ...t, title: 'x'.repeat(300) } } })!;
+    expect(e.planned).toBe(12);
+    expect(e.tasks.T1.title).toBe('Login form');
+    expect(e.tasks.T2).not.toHaveProperty('title');
+    expect(e.tasks.T3.title).toHaveLength(200);
+    const old = normalizeExecution({ ...base, tasks: { T1: t } })!;
+    expect(old).not.toHaveProperty('planned');
+    expect(old.tasks.T1).not.toHaveProperty('title');
+    expect(normalizeExecution({ ...base, planned: 9999 })!.planned).toBe(500);
+    expect(normalizeExecution({ ...base, planned: 'x' })).not.toHaveProperty('planned');
+  });
+  it('strips control characters from a task title', () => {
+    const t = { status: 'running', stage: 'implement', executor: 'subagents', worktree: '', branch: 'task/T1', startedAt: '2026-10-12T12:00:00.000Z' };
+    const e = normalizeExecution({ runId: 'r1', mode: 'subagents', project: 'shop', base: 'main', branch: 'b', coordinator: 'main', startedAt: t.startedAt,
+      tasks: { T1: { ...t, title: 'Log\u001b[31min\nform\u0007' }, T2: { ...t, title: '\u0007\n' } } })!;
+    expect(e.tasks.T1.title).toBe('Log[31minform');
+    expect(e.tasks.T2).not.toHaveProperty('title');
+  });
   it('migrates a swarm as stopped, keeping its project, base and coordinator', () => {
     const s: SwarmState = {
       active: true, parallel: 5, mergeAuthorized: true, project: 'shop', base: 'main', coordinator: 'main', hookSession: 'h1',

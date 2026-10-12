@@ -21,6 +21,18 @@ const input = (over: Partial<ScheduleInput>): ScheduleInput => ({ plan: plan([])
 const starts = (r: ReturnType<typeof schedule>) => r.actions.filter(a => a.type === 'start').map(a => (a as { task: string }).task);
 
 describe('schedule', () => {
+  it('records the title of each task it starts and the planned count', () => {
+    const p = plan([task('T1'), task('T2'), task('T3'), task('T4')]);
+    p.tasks[0].title = 'Login form';
+    const r = schedule(input({ plan: p, exec: exec({ parallel: 1 }) }));
+    expect(r.next.tasks.T1.title).toBe('Login form');
+    expect(r.next.planned).toBe(4);
+  });
+  it('fills the title of a task started before titles existed', () => {
+    const p = plan([task('T1'), task('T2')]);
+    const r = schedule(input({ plan: p, exec: exec({ tasks: running('T1') }), states: { T1: { status: 'in_progress', owner: 'main' } } }));
+    expect(r.next.tasks.T1.title).toBe('T1');
+  });
   it('starts independent tasks up to parallel, in plan order', () => {
     const r = schedule(input({ plan: plan([task('T1'), task('T2'), task('T3'), task('T4')]), exec: exec({ parallel: 2 }) }));
     expect(starts(r)).toEqual(['T1', 'T2']);

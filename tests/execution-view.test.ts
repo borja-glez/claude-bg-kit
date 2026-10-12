@@ -21,6 +21,15 @@ const live = (tsMin: number, ended = false, agents: LiveDoc['agents'] = [{ id: '
 const idle = (tsMin: number, ended = false) => live(tsMin, ended, []);
 
 describe('executionView', () => {
+  it('takes slot titles from the execution and counts the planned tasks in the total', () => {
+    const e = exec({ planned: 12, tasks: { T1: { ...task('running', -20), title: 'Login' }, T2: task('running', -5) } });
+    const v = executionView({ exec: e, tasks: {}, live: [live(-1)], now: NOW })!;
+    expect(v.slots.map(s => s.title)).toEqual(['Login', null]);
+    expect(v.total).toBe(12);
+    // A titles map, when given, still wins; planned never lowers the total below the tasks known.
+    expect(executionView({ exec: e, tasks: {}, live: [live(-1)], titles: { T1: 'Other' }, now: NOW })!.slots[0].title).toBe('Other');
+    expect(executionView({ exec: exec({ planned: 1 }), tasks: {}, live: [live(-1)], now: NOW })!.total).toBe(5);
+  });
   it('lists slots in start order with stage and agent from the public task, plus queue, conflicts and counts', () => {
     const v = executionView({ exec: exec(), tasks: { T1: pub('T1', 5) }, live: [live(-1)], titles: { T1: 'Login' }, now: NOW })!;
     expect(v.slots.map(s => s.task)).toEqual(['T1', 'T2']);

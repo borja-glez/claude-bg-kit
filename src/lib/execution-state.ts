@@ -19,6 +19,7 @@ export interface ExecTask {
   executor: 'subagents' | 'sessions' | 'manual'; attempts: number; agent: string | null;
   startedAt: string; stageSince: string; updatedAt: string; detail: string | null;
   nudgedAt?: string | null;
+  title?: string | null;
 }
 export type ExecStopReason = 'finished' | 'stalled' | 'stopped' | 'budget' | 'migrated';
 export interface ExecutionState {
@@ -27,6 +28,8 @@ export interface ExecutionState {
   active: boolean; stopReason: ExecStopReason | null; stallReason: string | null;
   startedAt: string; lastStepAt: string | null; lastBlockStep: string | null; sleepUntil: string | null;
   tasks: Record<string, ExecTask>;
+  /** How many tasks the run plans in all (the plan's, or the loose file's), so the total is not just those started. */
+  planned?: number;
 }
 
 // STAGES lives in types.ts (pure, so the roadmap page can bundle it without this file's yaml/zod imports); re-exported here.
@@ -43,6 +46,10 @@ const int = (x: unknown, min: number, max: number, dflt: number): number =>
   typeof x === 'number' && Number.isInteger(x) ? Math.min(max, Math.max(min, x)) : dflt;
 const oneOf = <T extends string>(list: readonly T[], x: unknown): T | null => ((list as readonly unknown[]).includes(x) ? (x as T) : null);
 
+/** Free text that reaches lens, the band and the terminal: no control characters, trimmed, at most 200 characters. */
+// eslint-disable-next-line no-control-regex
+const cleanTitle = (x: unknown): string => (typeof x === 'string' ? x.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim().slice(0, 200) : '');
+
 function normalizeTask(x: unknown): ExecTask | null {
   if (!isObj(x)) return null;
   const status = oneOf(TASK_STATUSES, x.status);
@@ -58,6 +65,7 @@ function normalizeTask(x: unknown): ExecTask | null {
     round: int(x.round, 0, 99, 0), attempts: int(x.attempts, 0, 99, 0),
     agent: str(x.agent), updatedAt: iso(x.updatedAt) ?? startedAt, detail: typeof x.detail === 'string' ? x.detail.slice(0, 500) : null,
     ...(iso(x.nudgedAt) ? { nudgedAt: iso(x.nudgedAt) } : {}),
+    ...(cleanTitle(x.title) ? { title: cleanTitle(x.title) } : {}),
   };
 }
 
@@ -86,6 +94,7 @@ export function normalizeExecution(x: unknown): ExecutionState | null {
     stopReason: oneOf(STOPS, x.stopReason),
     stallReason: typeof x.stallReason === 'string' ? x.stallReason.slice(0, 1000) : null,
     lastStepAt: iso(x.lastStepAt), lastBlockStep: iso(x.lastBlockStep), sleepUntil: iso(x.sleepUntil),
+    ...(typeof x.planned === 'number' && Number.isInteger(x.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x.planned)) } : {}),
   };
 }
 
