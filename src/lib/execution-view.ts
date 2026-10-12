@@ -14,6 +14,8 @@ export interface ExecView {
 
 /** A timestamp more than this far ahead of now is clock skew or corruption: it is invalid, not a sign of life. */
 const FUTURE_TOLERANCE_MS = 2 * 60000;
+/** An agent listed in a coordinator's signal keeps it alive for this long after it started (the hook prunes it then). */
+const AGENT_ALIVE_MS = 3 * 3600000;
 
 /** The time in ms of a usable timestamp, or null: unparseable, or more than FUTURE_TOLERANCE_MS ahead of now. */
 function usable(ts: string | null | undefined, now: number): number | null {
@@ -42,16 +44,23 @@ export function executionView(i: { exec: ExecutionState | null; tasks: Record<st
     .reduce<LiveDoc | null>((best, d) => (!best || Date.parse(d.ts) > Date.parse(best.ts) ? d : best), null);
   const candidates = [signal?.ts ?? null, e.lastStepAt].map(ts => ({ ts, t: usable(ts, i.now) })).filter((c): c is { ts: string; t: number } => c.t !== null);
   const lastSeen = candidates.length ? candidates.reduce((a, b) => (b.t > a.t ? b : a)).ts : null;
-  const coord: Liveness = !e.active ? 'stopped' : signal?.ended ? 'stopped' : signalLiveness(lastSeen, false, i.now);
+  // A coordinator waiting on a long agent does not step: it stays alive while its signal (not ended) lists an agent
+  // started within AGENT_ALIVE_MS. SessionEnd and that bound cap how long a dead coordinator can read alive.
+  const waiting = !!e.active && !!signal && !signal.ended && signal.agents.some(a => {
+    const t = usable(a.since, i.now);
+    return t !== null && i.now - t < AGENT_ALIVE_MS;
+  });
+  const coord: Liveness = !e.active ? 'stopped' : signal?.ended ? 'stopped' : waiting ? 'alive' : signalLiveness(lastSeen, false, i.now);
   const ids = (status: string) => Object.keys(e.tasks).filter(id => e.tasks[id].status === status);
   const slots: ExecSlot[] = ids('running')
     .sort((a, b) => Date.parse(e.tasks[a].startedAt) - Date.parse(e.tasks[b].startedAt))
     .map(id => {
       const t = e.tasks[id];
       const p = i.tasks[id] && i.tasks[id].runId === e.runId ? i.tasks[id] : null;
+      const agent = p ? p.agent : t.agent;
       return {
-        task: id, title: i.titles?.[id] ?? null, stage: p?.stage ?? t.stage, agent: p ? p.agent : t.agent, round: p?.round ?? t.round,
-        since: p?.since ?? t.stageSince, liveness: p ? liveness(i.now, p.leaseUntil) : coord, mode: p?.mode ?? t.executor,
+        task: id, title: i.titles?.[id] ?? null, stage: p?.stage ?? t.stage, agent, round: p?.round ?? t.round,
+        since: p?.since ?? t.stageSince, liveness: agent && waiting ? 'alive' : p ? liveness(i.now, p.leaseUntil) : coord, mode: p?.mode ?? t.executor,
       };
     });
   return {

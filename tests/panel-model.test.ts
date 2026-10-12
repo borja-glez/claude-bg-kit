@@ -321,6 +321,15 @@ describe('buildPanelModel · execution', () => {
     expect(m.execution).toMatchObject({ mode: 'subagents', parallel: 3, integrated: 1, total: 2, coordinator: { liveness: 'alive' } });
     expect(m.execution!.slots[0]).toMatchObject({ task: 'T4', stage: 'review', round: 2, seconds: 180, liveness: 'alive' });
   });
+  it('a coordinator waiting 20 minutes on a long agent is alive and its task is not orphaned', () => {
+    const stale = execDoc.replace('"lastStepAt":"2026-10-12T11:58:00.000Z"', '"lastStepAt":"2026-10-12T11:40:00.000Z"');
+    const signal = (ended: boolean) => ({ s1: JSON.stringify({ sessionId: 's1', role: 'coordinator', runId: 'r1', task: null, event: 'SubagentStart', ts: '2026-10-12T11:40:00.000Z', agents: [{ id: 'a1', type: 'forge:forge-review-correctness', since: '2026-10-12T11:40:00.000Z' }], ended }) });
+    const m = buildPanelModel({ band: band(), activity: act(), now, forgeExecution: stale, forgeExecTasks: {}, forgeLive: signal(false) });
+    expect(m.execution).toMatchObject({ coordinator: { liveness: 'alive' }, orphans: [] });
+    expect(m.execution!.slots[0].liveness).toBe('alive');
+    const ended = buildPanelModel({ band: band(), activity: act(), now, forgeExecution: stale, forgeExecTasks: {}, forgeLive: signal(true) });
+    expect(ended.execution).toMatchObject({ coordinator: { liveness: 'stopped' }, orphans: ['T4'] });
+  });
   it('is null without a file, with junk, or for a finished execution', () => {
     expect(buildPanelModel({ band: band(), activity: act(), now }).execution).toBeNull();
     expect(buildPanelModel({ band: band(), activity: act(), now, forgeExecution: '{oops' }).execution).toBeNull();

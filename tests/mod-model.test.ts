@@ -63,6 +63,13 @@ describe('buildBandModel · work', () => {
     expect(buildBandModel('demo-shop', { ...empty, plan, execution: old(8) })).toMatchObject({ mode: 'run', worst: 'silent' });
     expect(buildBandModel('demo-shop', { ...empty, plan, execution: old(13) })).toMatchObject({ mode: 'run', worst: 'stopped' });
   });
+  it('run mode stays alive while the coordinator waits on a long agent', () => {
+    const ago = (min: number) => new Date(Date.now() - min * 60000).toISOString();
+    const execution = EXEC({ lastStepAt: ago(20), tasks: { T002: { status: 'running', stage: 'implement', round: 1, worktree: '/w', branch: 'task/T002', executor: 'subagents', attempts: 0, agent: 'forge-impl', startedAt: ago(25), updatedAt: ago(20), stageSince: ago(20), detail: null } } });
+    const live = (ended: boolean) => ({ s1: j({ sessionId: 's1', role: 'coordinator', runId: 'r1', task: null, event: 'SubagentStart', ts: ago(20), agents: [{ id: 'a1', type: 'forge:forge-impl', since: ago(20) }], ended }) });
+    expect(buildBandModel('demo-shop', { ...empty, plan, execution, live: live(false) })).toMatchObject({ mode: 'run', worst: 'alive' });
+    expect(buildBandModel('demo-shop', { ...empty, plan, execution, live: live(true) })).toMatchObject({ mode: 'run', worst: 'stopped' });
+  });
   it('a member session keeps its work band; a finished execution shows no run band', () => {
     expect(buildBandModel('demo-shop', { ...empty, plan, session: j({ sessionId: 'x', track: 'backend', launchedBy: 'main' }), execution: EXEC() }).mode).toBe('work');
     expect(buildBandModel('demo-shop', { ...empty, plan, session: j({ sessionId: 'main', track: null }), execution: EXEC({ active: false, stopReason: 'finished' }) }).mode).toBe('work');

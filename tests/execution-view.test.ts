@@ -15,7 +15,10 @@ const exec = (over: Partial<ExecutionState> = {}): ExecutionState => ({
 });
 const pub = (taskId: string, leaseMin: number, stage: PublicTask['stage'] = 'review'): PublicTask =>
   ({ task: taskId, runId: 'r1', stage, status: 'running', agent: 'forge-review-correctness', round: 2, since: at(-4), updatedAt: at(-1), leaseUntil: at(leaseMin), by: 'main', mode: 'subagents' });
-const live = (tsMin: number, ended = false): LiveDoc => ({ sessionId: 's1', role: 'coordinator', runId: 'r1', task: null, event: 'Stop', ts: at(tsMin), agents: [{ id: 'a1', type: 'forge:forge-impl', since: at(-6) }], ended });
+const live = (tsMin: number, ended = false, agents: LiveDoc['agents'] = [{ id: 'a1', type: 'forge:forge-impl', since: at(-6) }]): LiveDoc =>
+  ({ sessionId: 's1', role: 'coordinator', runId: 'r1', task: null, event: 'Stop', ts: at(tsMin), agents, ended });
+/** A signal that lists no agent: its age alone decides. */
+const idle = (tsMin: number, ended = false) => live(tsMin, ended, []);
 
 describe('executionView', () => {
   it('lists slots in start order with stage and agent from the public task, plus queue, conflicts and counts', () => {
@@ -27,8 +30,8 @@ describe('executionView', () => {
     expect(v.agents).toHaveLength(1);
   });
   it('a coordinator without SessionEnd goes silent, then stopped, by the age of its signal and steps', () => {
-    expect(executionView({ exec: exec({ lastStepAt: at(-8) }), tasks: {}, live: [live(-8)], now: NOW })!.coordinator.liveness).toBe('silent');
-    const v = executionView({ exec: exec({ lastStepAt: at(-13) }), tasks: {}, live: [live(-13)], now: NOW })!;
+    expect(executionView({ exec: exec({ lastStepAt: at(-8) }), tasks: {}, live: [idle(-8)], now: NOW })!.coordinator.liveness).toBe('silent');
+    const v = executionView({ exec: exec({ lastStepAt: at(-13) }), tasks: {}, live: [idle(-13)], now: NOW })!;
     expect(v.coordinator.liveness).toBe('stopped');
     expect(v.orphans).toEqual(['T1', 'T2']);
   });
@@ -37,7 +40,8 @@ describe('executionView', () => {
     expect(executionView({ exec: exec({ lastStepAt: null }), tasks: {}, live: [live(-25 * 60)], now: NOW })!.coordinator.lastSeen).toBeNull();
   });
   it('a task whose own lease stopped is an orphan even with a live coordinator', () => {
-    const v = executionView({ exec: exec(), tasks: { T1: pub('T1', -6) }, live: [live(-1)], now: NOW })!;
+    // With no agent in the signal: a listed agent would keep an agent task alive (see the long-agent case).
+    const v = executionView({ exec: exec(), tasks: { T1: pub('T1', -6) }, live: [idle(-1)], now: NOW })!;
     expect(v.slots[0].liveness).toBe('stopped');
     expect(v.orphans).toEqual(['T1']);
   });
@@ -45,6 +49,26 @@ describe('executionView', () => {
     expect(executionView({ exec: null, tasks: {}, live: [], now: NOW })).toBeNull();
     expect(executionView({ exec: exec({ active: false, stopReason: 'finished' }), tasks: {}, live: [], now: NOW })).toBeNull();
     expect(executionView({ exec: exec({ active: false, stopReason: 'stalled', stallReason: 'blocked: T1' }), tasks: {}, live: [], now: NOW })).toMatchObject({ active: false, stallReason: 'blocked: T1', coordinator: { liveness: 'stopped' } });
+  });
+  it('a coordinator waiting on a long agent stays alive, and so does the slot of an agent task', () => {
+    const waiting = exec({ lastStepAt: at(-20), tasks: { T1: { ...task('running', -25), updatedAt: at(-20) } } });
+    const agent = [{ id: 'a1', type: 'forge:forge-impl', since: at(-20) }];
+    // The task's own lease went stale with the steps; the agent in the signal still keeps it alive.
+    const stale = { T1: { ...pub('T1', -10, 'implement'), agent: 'forge-impl' } };
+    const v = executionView({ exec: waiting, tasks: stale, live: [live(-20, false, agent)], now: NOW })!;
+    expect(v.coordinator.liveness).toBe('alive');
+    expect(v.slots[0].liveness).toBe('alive');
+    expect(v.orphans).toEqual([]);
+    const ended = executionView({ exec: waiting, tasks: stale, live: [live(-20, true, agent)], now: NOW })!;
+    expect(ended.coordinator.liveness).toBe('stopped');
+    expect(ended.orphans).toEqual(['T1']);
+    const none = executionView({ exec: waiting, tasks: {}, live: [idle(-20)], now: NOW })!;
+    expect(none.coordinator.liveness).toBe('stopped');
+    expect(none.orphans).toEqual(['T1']);
+  });
+  it('an agent listed for 3 hours or more no longer keeps the coordinator alive', () => {
+    const v = executionView({ exec: exec({ lastStepAt: at(-20) }), tasks: {}, live: [live(-20, false, [{ id: 'a1', type: 't', since: at(-180) }])], now: NOW })!;
+    expect(v.coordinator.liveness).toBe('stopped');
   });
   it('signalLiveness thresholds', () => {
     expect(signalLiveness(at(-6.9), false, NOW)).toBe('alive');
@@ -54,7 +78,7 @@ describe('executionView', () => {
   });
   it('a signal more than 2 minutes in the future is invalid and never keeps the coordinator alive', () => {
     expect(executionView({ exec: exec({ lastStepAt: null }), tasks: {}, live: [live(10)], now: NOW })!.coordinator.liveness).toBe('stopped');
-    expect(executionView({ exec: exec({ lastStepAt: at(30) }), tasks: {}, live: [live(-13)], now: NOW })!.coordinator.liveness).toBe('stopped');
+    expect(executionView({ exec: exec({ lastStepAt: at(30) }), tasks: {}, live: [idle(-13)], now: NOW })!.coordinator.liveness).toBe('stopped');
     expect(executionView({ exec: exec({ lastStepAt: null }), tasks: {}, live: [live(1)], now: NOW })!.coordinator.liveness).toBe('alive');
     expect(executionView({ exec: exec({ lastStepAt: null }), tasks: {}, live: [{ ...live(-1), ts: 'not a date' }], now: NOW })!.coordinator.lastSeen).toBeNull();
     expect(signalLiveness(at(3), false, NOW)).toBe('stopped');
