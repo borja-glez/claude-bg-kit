@@ -17,6 +17,7 @@ import { normalizeNote, notesSince } from '../lib/notes.js';
 import { pickProject } from '../mod/model.js';
 import { BRANCH_RE, mainWorktreeFrom } from '../lib/worktree.js';
 import { planLocale, replyIn } from '../lib/locale.js';
+import { launchRun, type Launcher } from '../lib/launcher.js';
 import type { MessageDoc, NoteDoc, PhaseDoc, PlanView, SessionDoc, TaskState } from '../lib/types.js';
 
 export interface Io { cwd: string; now: () => Date; rand?: () => number; assetsDir: string; stdin?: string; env?: Record<string, string | undefined> }
@@ -178,6 +179,9 @@ export function run(argv: string[], io: Io): Result {
           if (!taskBase || !BRANCH_RE.test(taskBase)) return fail('launch --task: --base needs the run branch', 2);
           if (args.includes('--merge') || args.includes('--swarm')) return fail('launch --task: the coordinator integrates; --merge and --swarm do not apply', 2);
         }
+        const launcherAt = args.indexOf('--launcher');
+        const launcher = launcherAt >= 0 ? args[launcherAt + 1] : 'bg';
+        if (launcher !== 'bg' && launcher !== 'herdr') return fail('launch: --launcher must be bg or herdr', 2);
         const swarmAt = args.indexOf('--swarm');
         const swarm = swarmAt >= 0 ? args[swarmAt + 1] : undefined;
         if (swarmAt >= 0 && (!swarm || !SAFE_ID.test(swarm))) return fail('launch: --swarm needs the coordinator session id', 2);
@@ -200,7 +204,8 @@ export function run(argv: string[], io: Io): Result {
           const taskName = `wp-${p.project}-${track}`;
           const taskPrompt = `/forge:run --plan ${args[0]} --task ${track} — run member of ${val('--coordinator')}: work only ${track}, then stop`;
           const taskCommand = `claude --bg --name ${taskName} "${taskPrompt}"`;
-          const taskRun = `(cd '${taskWt.split("'").join(`'\\''`)}' && ${taskCommand})`;
+          const taskRun = launchRun(launcher as Launcher, { name: taskName, prompt: taskPrompt, worktree: taskWt });
+          if (taskRun === null) return fail('launch: herdr cannot open panes from the command line; use launcher bg', 2);
           return ok(JSON.stringify({ worktree: taskWt, branch: taskBranch, name: taskName, prompt: taskPrompt, command: taskCommand, run: taskRun, runId: val('--run'), task: track }));
         }
         const worktree = path.join(root, '.claude', 'worktrees', track!);
@@ -225,7 +230,8 @@ export function run(argv: string[], io: Io): Result {
         const command = `claude --bg --name ${name} "${prompt}"`;
         // `run` starts it from any directory without moving the caller's shell: a cd outside a subshell would
         // leave a coordinator working in the worktree. Single quotes, with any quote in the path escaped.
-        const inWorktree = `(cd '${worktree.split("'").join(`'\\''`)}' && ${command})`;
+        const inWorktree = launchRun(launcher as Launcher, { name, prompt, worktree });
+        if (inWorktree === null) return fail('launch: herdr cannot open panes from the command line; use launcher bg', 2);
         return ok(JSON.stringify({ worktree, branch, name, prompt, command, run: inWorktree }));
       }
       case 'status': {

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { run, isCommitCommand, type Io } from '../src/cli/run.js';
 import { parsePlan } from '../src/lib/plan.js';
+import { launchRun, HERDR_TEMPLATE } from '../src/lib/launcher.js';
 import { planHash } from '../src/lib/sync.js';
 
 const FIXTURE = new URL('./fixtures/plan.yaml', import.meta.url);
@@ -313,6 +314,21 @@ describe('multi-session commands', () => {
       expect(run(['launch', 'plan.yaml', 'T001', '--task', '--run', 'r1', '--coordinator', 'a"b', '--base', 'main'], io).code).toBe(2);
       expect(run(['launch', 'plan.yaml', 'T001', '--task', '--run', 'r1', '--coordinator', 'S1'], io).code).toBe(2);
       expect(run([...args, '--merge'], io).code).toBe(2);
+    });
+    it('--launcher bg is the default; herdr follows the spike; anything else is refused', () => {
+      init();
+      const def = JSON.parse(run(args, io).stdout);
+      const bg = JSON.parse(run([...args, '--launcher', 'bg'], io).stdout);
+      expect(bg.run).toBe(def.run);
+      expect(bg.run).toBe(launchRun('bg', { name: bg.name, prompt: bg.prompt, worktree: bg.worktree }));
+      const h = run([...args, '--launcher', 'herdr'], io);
+      if (HERDR_TEMPLATE === null) {
+        expect(h.code).toBe(2);
+        expect(h.stderr).toContain('launch: herdr cannot open panes from the command line; use launcher bg');
+      } else {
+        expect(JSON.parse(h.stdout).run).toBe(launchRun('herdr', { name: bg.name, prompt: bg.prompt, worktree: bg.worktree }));
+      }
+      expect(run([...args, '--launcher', 'nope'], io).code).toBe(2);
     });
   });
 });
