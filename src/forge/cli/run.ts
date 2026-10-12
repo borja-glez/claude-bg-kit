@@ -20,7 +20,6 @@ import { proposalToTask } from '../to-task.js';
 import { parseDocument } from 'yaml';
 import { UsageError } from './errors.js';
 import { swarmCommand } from './swarm.js';
-import { readSwarm, saveSwarm } from '../swarm.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, type RepoReader, type Scope } from '../validators.js';
 import { checkTools, missingTools } from '../tools.js';
 import { verifyPlan, cleanupPids, killTarget } from '../verify.js';
@@ -694,8 +693,8 @@ export function run(argv: string[], io: Io): Result {
           saveRun(io.cwd, endRun(current, 'stopped'));
           appendEvent(io.cwd, { ts: ts(), kind: 'cycle', action: 'stopped', reason: 'stopped' });
         }
-        const swarm = readSwarm(io.cwd);
-        if (swarm?.active) saveSwarm(io.cwd, { ...swarm, active: false, stopReason: 'stopped', sleepUntil: null });
+        const exec = readExecution(io.cwd);
+        if (exec?.active) saveExecution(io.cwd, { ...exec, active: false, stopReason: 'stopped', sleepUntil: null });
         return ok('ok');
       }
       case 'waypoint-cli': {

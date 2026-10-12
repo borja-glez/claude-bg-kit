@@ -88,4 +88,10 @@ describe('forge swarm (execution)', () => {
     expect(run(['swarm', 'stop'], io).code).toBe(0);
     expect(readExecution(root)).toMatchObject({ active: false, stopReason: 'stopped' });
   });
+  it('top-level forge stop ends an active execution and leaves the stop file', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    expect(run(['stop'], io).code).toBe(0);
+    expect(readExecution(root)).toMatchObject({ active: false, stopReason: 'stopped' });
+    expect(existsSync(path.join(root, '.forge', 'stop'))).toBe(true);
+  });
 });
