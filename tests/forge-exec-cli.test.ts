@@ -8,6 +8,7 @@ import { readExecution, saveExecution, executionTaskFile } from '../src/forge/ex
 import { normalizeExecution } from '../src/lib/execution-state.js';
 import { setupFor } from '../src/forge/cli/swarm.js';
 import { writeMember } from '../src/forge/members.js';
+import { readLoose } from '../src/forge/loose.js';
 
 const PLAN = `project: shop
 locale: es
@@ -356,7 +357,8 @@ describe('forge swarm (execution)', () => {
     expect(run(['swarm', 'stop'], io).code).toBe(0);
     expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io)).baseSync).toBe('up-to-date');
     expect(run(['swarm', 'stop'], io).code).toBe(0);
-    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--kind', 'ephemeral'], io)).baseSync).toBeNull();
+    writeFileSync(path.join(root, '.forge', 'tasks.json'), JSON.stringify([{ id: 'x1', title: 'x1', path: 'small', zones: ['x1.txt'], depends_on: [] }, { id: 'x2', title: 'x2', path: 'small', zones: ['x2.txt'], depends_on: [] }]));
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--kind', 'ephemeral', '--tasks', '.forge/tasks.json'], io)).baseSync).toBeNull();
   });
   it('a new execution brings a stale run branch up to date with its base', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
@@ -385,6 +387,102 @@ describe('forge swarm (execution)', () => {
     expect(r.code).toBe(2);
     expect(r.stderr).toContain('has diverged from main');
     expect(git('rev-parse', 'forge/run-shop')).toBe(tip);
+  });
+
+  describe('ephemeral', () => {
+    const tasksFile = (tasks: unknown) => { writeFileSync(path.join(root, '.forge', 'tasks.json'), JSON.stringify(tasks)); return '.forge/tasks.json'; };
+    const three = () => tasksFile([
+      { id: 'fix-a', title: 'fix a', path: 'small', zones: ['a.txt'], depends_on: [] },
+      { id: 'fix-b', title: 'fix b', path: 'trivial', zones: ['b.txt'], depends_on: [] },
+      { id: 'fix-c', title: 'fix c', path: 'small', zones: ['c.txt'], depends_on: ['fix-a'] },
+    ]);
+    const start = (...extra: string[]) => run(['swarm', 'start', '--project', 'loose', '--session', 'main', '--kind', 'ephemeral', '--tasks', three(), ...extra], io);
+    it('start keeps the user branch, creates no run worktree and records the loose tasks', () => {
+      const e = out(start());
+      expect(e).toMatchObject({ kind: 'ephemeral', mode: 'subagents', base: 'main', branch: 'main', parallel: 2, loose: 3 });
+      expect(existsSync(path.join(root, '.claude', 'worktrees', 'run'))).toBe(false);
+      expect(readLoose(root, e.runId)?.tasks.map((t: { id: string }) => t.id)).toEqual(['fix-a', 'fix-b', 'fix-c']);
+    });
+    it('start refuses sessions mode, a missing or invalid --tasks, and an unmerged task branch, before writing anything', () => {
+      expect(start('--mode', 'sessions').code).toBe(2);
+      expect(run(['swarm', 'start', '--project', 'loose', '--session', 'main', '--kind', 'ephemeral'], io).code).toBe(2);
+      const cyc = tasksFile([{ id: 'a', title: 'a', path: 'small', zones: [], depends_on: ['b'] }, { id: 'b', title: 'b', path: 'small', zones: [], depends_on: ['a'] }]);
+      expect(run(['swarm', 'start', '--project', 'loose', '--session', 'main', '--kind', 'ephemeral', '--tasks', cyc], io).stderr).toMatch(/cycle/);
+      git('branch', 'task/fix-a'); git('checkout', '-q', 'task/fix-a');
+      writeFileSync(path.join(root, 'old.txt'), 'x'); git('add', 'old.txt'); git('commit', '-qm', 'old work'); git('checkout', '-q', 'main');
+      expect(start().stderr).toMatch(/task\/fix-a has work not on main/);
+      expect(readExecution(root)).toBeNull();
+    });
+    it('start refuses an existing task worktree for a loose id', () => {
+      git('worktree', 'add', '-q', '-b', 'elsewhere', path.join(root, '.claude', 'worktrees', 'task-fix-b'));
+      expect(start().stderr).toMatch(/task-fix-b already exists/);
+      expect(readExecution(root)).toBeNull();
+    });
+    it('start refuses an ephemeral run while a plan execution is active, even from its coordinator', () => {
+      const plan = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+      expect(start().stderr).toMatch(new RegExp(`the execution ${plan.runId} is active`));
+      expect(readExecution(root)!.runId).toBe(plan.runId);
+    });
+    it('start moves a task branch that is already merged into the base', () => {
+      git('branch', 'task/fix-a');
+      writeFileSync(path.join(root, 'later.txt'), 'x'); git('add', 'later.txt'); git('commit', '-qm', 'later');
+      out(start());
+      expect(git('rev-parse', 'task/fix-a')).toBe(git('rev-parse', 'main'));
+    });
+    it('resuming an active ephemeral run keeps its loose tasks and says new ones are ignored', () => {
+      const first = out(start());
+      const other = tasksFile([
+        { id: 'new-1', title: 'n1', path: 'small', zones: ['n1.txt'], depends_on: [] },
+        { id: 'new-2', title: 'n2', path: 'small', zones: ['n2.txt'], depends_on: [] },
+      ]);
+      const again = out(run(['swarm', 'start', '--project', 'loose', '--session', 'main', '--kind', 'ephemeral', '--tasks', other], io));
+      expect(again).toMatchObject({ runId: first.runId, loose: 3, ignoredTasks: true });
+      expect(again.message).toMatch(/ignored/);
+      expect(readLoose(root, first.runId)?.tasks.map(t => t.id)).toEqual(['fix-a', 'fix-b', 'fix-c']);
+    });
+    it('ticks without a plan, integrates into the user branch one at a time and then starts the dependent task', () => {
+      out(start());
+      const tick = () => out(run(['swarm', 'tick'], io)).actions;
+      expect(tick().filter((a: { type: string }) => a.type === 'start').map((a: { task: string }) => a.task)).toEqual(['fix-a', 'fix-b']);
+      const w = out(run(['swarm', 'worktree', 'fix-a'], io)).worktree;
+      writeFileSync(path.join(w, 'a.txt'), 'a\n');
+      execFileSync('git', ['add', 'a.txt'], { cwd: w }); execFileSync('git', ['commit', '-qm', 'fix-a: work'], { cwd: w });
+      out(run(['swarm', 'task', 'fix-a', '--stage', 'verdict', '--status', 'accepted'], io));
+      expect(tick()[0]).toEqual({ type: 'integrate', task: 'fix-a', ref: 'task/fix-a' });
+      expect(out(run(['swarm', 'integrate', 'fix-a'], io))).toMatchObject({ result: 'integrated' });
+      expect(git('log', '-1', '--format=%s')).toBe('forge: integrate fix-a');
+      expect(git('rev-parse', '--abbrev-ref', 'HEAD')).toBe('main');
+      expect(tick().filter((a: { type: string }) => a.type === 'start').map((a: { task: string }) => a.task)).toEqual(['fix-c']);
+    });
+    it('integrate refuses a dirty user checkout and takes no members', () => {
+      out(start());
+      out(run(['swarm', 'tick'], io));
+      const w = out(run(['swarm', 'worktree', 'fix-b'], io)).worktree;
+      writeFileSync(path.join(w, 'b.txt'), 'b\n');
+      execFileSync('git', ['add', 'b.txt'], { cwd: w }); execFileSync('git', ['commit', '-qm', 'fix-b: work'], { cwd: w });
+      out(run(['swarm', 'task', 'fix-b', '--stage', 'verdict', '--status', 'accepted'], io));
+      writeFileSync(path.join(root, 'plan.yaml'), PLAN + '# local edit\n');
+      expect(out(run(['swarm', 'integrate', 'fix-b'], io))).toMatchObject({ result: 'run-dirty' });
+      expect(readExecution(root)!.tasks['fix-b'].status).toBe('accepted');
+      expect(run(['swarm', 'join', '--session', 'M1', '--role', 'manual'], io).code).toBe(2);
+    });
+    it('integrate refuses when the main checkout left the base branch of the run', () => {
+      out(start());
+      out(run(['swarm', 'tick'], io));
+      const w = out(run(['swarm', 'worktree', 'fix-b'], io)).worktree;
+      writeFileSync(path.join(w, 'b.txt'), 'b\n');
+      execFileSync('git', ['add', 'b.txt'], { cwd: w }); execFileSync('git', ['commit', '-qm', 'fix-b: work'], { cwd: w });
+      out(run(['swarm', 'task', 'fix-b', '--stage', 'verdict', '--status', 'accepted'], io));
+      git('checkout', '-q', '-b', 'side');
+      const r = run(['swarm', 'integrate', 'fix-b'], io);
+      expect(r.code).toBe(2);
+      expect(r.stderr).toMatch(/on side, not main/);
+      expect(git('log', '-1', '--format=%s', 'side')).toBe('init');
+      expect(readExecution(root)!.tasks['fix-b'].status).toBe('accepted');
+    });
+    it('propose reads --tasks', () => {
+      expect(out(run(['swarm', 'propose', '--tasks', three()], io))).toMatchObject({ width: 2, recommended: { mode: 'subagents', parallel: 2 } });
+    });
   });
 
   describe('members', () => {

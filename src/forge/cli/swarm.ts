@@ -18,6 +18,7 @@ import type { SessionDoc, Stage, TaskState } from '../../lib/types.js';
 import { mainWorktreeFrom, samePath } from '../../lib/worktree.js';
 import { mainCheckout } from '../local.js';
 import { readMember, writeMember, isMemberId } from '../members.js';
+import { parseLooseTasks, planOfLoose, statesOfLoose, writeLoose, readLoose, type LooseTask } from '../loose.js';
 
 export interface GitDeps { git: (args: string[]) => string | null; exec: (cmd: string, timeoutSec: number) => ExecResult; repo: RepoReader }
 export interface SwarmDeps extends GitDeps { at: (dir: string) => GitDeps }
@@ -82,6 +83,16 @@ function loadPlanArg(io: Io, planArg: string | undefined, sub: string) {
   try { return parsePlan(readFileSync(path.resolve(io.cwd, planArg), 'utf8')); } catch (e) {
     throw new UsageError(e instanceof PlanError ? `${planArg}: ${e.issues.join('; ')}` : `swarm ${sub}: cannot read ${planArg}`);
   }
+}
+
+/** The loose tasks of an ephemeral run, from the JSON file `--tasks` names. */
+function loadTasksArg(io: Io, file: string | undefined, sub: string): LooseTask[] {
+  if (!file) throw new UsageError(`swarm ${sub}: --tasks is required for an ephemeral run`);
+  let raw: unknown;
+  try { raw = JSON.parse(readFileSync(path.resolve(io.cwd, file), 'utf8')); } catch { throw new UsageError(`swarm ${sub}: cannot read ${file}`); }
+  const r = parseLooseTasks(raw);
+  if ('error' in r) throw new UsageError(`swarm ${sub}: ${r.error}`);
+  return r.tasks;
 }
 
 /**
@@ -198,9 +209,12 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
   const out = (v: unknown): Result => ({ code: 0, stdout: JSON.stringify(v) + '\n', stderr: '' });
   const wt = e.kind === 'plan' ? runWorktree(io.cwd) : io.cwd;
   const target = deps.at(wt);
+  const head = target.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
   if (e.kind === 'plan') {
-    const head = target.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
     if (head !== e.branch) return out({ result: 'run-dirty', detail: `${wt} is on ${head ?? '?'}, not ${e.branch}` });
+  } else if (head !== e.branch) {
+    // An ephemeral run integrates into the user's own branch: never into whatever the user switched to since.
+    throw new UsageError(`swarm integrate: the main checkout is on ${head ?? '?'}, not ${e.branch} (the branch this ephemeral run started from); switch back to ${e.branch} to integrate ${task}`);
   }
   const config = loadConfig(io.cwd);
   const r = mergeIn(target, t.branch, `forge: integrate ${task}`, 'heavy', config.validatorTimeoutSec, wt, path.join(io.cwd, '.forge', 'execution'), 'run');
@@ -261,6 +275,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     const main = mainCheckout(io.cwd);
     const e = readExecution(main);
     if (!e?.active) throw new UsageError(`swarm ${sub}: no active execution`);
+    if (e.kind === 'ephemeral') throw new UsageError(`swarm ${sub}: an ephemeral run takes no members`);
     const session = flag('session') ?? flag('member');
     if (!session) throw new UsageError(`swarm ${sub}: --session is required`);
     if (!isMemberId(session)) throw new UsageError(`swarm ${sub}: --session ${session.slice(0, 130)} is not a valid session id (letters, digits, _ - .; max 120)`);
@@ -337,10 +352,12 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         if (!Number.isInteger(v) || v < 1 || v > 10) throw new UsageError('swarm start: --parallel must be an integer from 1 to 10');
         parallel = v;
       }
-      const mode = flag('mode') ?? config.swarm.mode ?? 'subagents';
-      if (mode !== 'subagents' && mode !== 'sessions') throw new UsageError('swarm start: --mode must be subagents or sessions');
       const kind = flag('kind') ?? 'plan';
       if (kind !== 'plan' && kind !== 'ephemeral') throw new UsageError('swarm start: --kind must be plan or ephemeral');
+      if (kind === 'ephemeral' && flag('mode') === 'sessions') throw new UsageError('swarm start: an ephemeral run is always subagents (sessions need a plan)');
+      // swarm.mode in the config chooses for plan runs only: an ephemeral run has no plan to launch sessions on.
+      const mode = kind === 'ephemeral' ? (flag('mode') ?? 'subagents') : (flag('mode') ?? config.swarm.mode ?? 'subagents');
+      if (mode !== 'subagents' && mode !== 'sessions') throw new UsageError('swarm start: --mode must be subagents or sessions');
       const base = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
       if (!base || base === 'HEAD') throw new UsageError('swarm start: the main checkout must be on a branch');
       const prev = readExecution(io.cwd);
@@ -356,7 +373,34 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       if (kind === 'ephemeral' && !isRunBranch(base)) throw new UsageError(`swarm start: the base branch ${base} is outside the run branch rule (letters, digits, _ - . /)`);
       let setup: SetupResult = null;
       let baseSync: 'created' | 'up-to-date' | 'fast-forward' | 'merged' | null = null;
-      const resume = !!prev && prev.active && prev.project === project && prev.branch === (kind === 'plan' ? branch : base);
+      const resume = !!prev && prev.active && prev.kind === kind && prev.project === project && prev.branch === (kind === 'plan' ? branch : base);
+      let loose: LooseTask[] = [];
+      let ignoredTasks = false;
+      const moves: string[] = [];
+      if (kind === 'ephemeral') {
+        // Even from its own coordinator: a new ephemeral run would overwrite the execution.json of the run in progress.
+        if (prev?.active && !resume) throw new UsageError(`swarm start: the execution ${prev.runId} is active; a request during it goes to that run`);
+        if (resume && prev) {
+          // The run keeps the batch it started with: new requests go to the next run.
+          const doc = readLoose(io.cwd, prev.runId);
+          if (!doc) throw new UsageError('swarm start: the ephemeral run lost .forge/loose.json');
+          loose = doc.tasks;
+          ignoredTasks = has('tasks');
+        } else {
+          loose = loadTasksArg(io, flag('tasks'), 'start');
+          // Loose ids repeat between runs: a leftover worktree or a branch with unmerged work is refused, all checks
+          // before anything moves.
+          for (const t of loose) {
+            const dir = taskWorktree(io.cwd, t.id);
+            if (existsSync(dir)) throw new UsageError(`swarm start: ${dir} already exists; remove it (git worktree remove) or use another id`);
+            const tb = taskBranch(t.id);
+            if (deps.git(['rev-parse', '--verify', '-q', `refs/heads/${tb}`]) === null) continue;
+            if (deps.git(['merge-base', '--is-ancestor', tb, base]) === null) throw new UsageError(`swarm start: ${tb} has work not on ${base}; use another id`);
+            moves.push(tb);
+          }
+        }
+        if (!has('parallel')) parallel = Math.min(parallel, Math.max(1, widthOf(planOfLoose(loose))));
+      }
       if (kind === 'plan') {
         const wt = runWorktree(io.cwd);
         // The run branch gets its own worktree: it can be neither the base (checked out here) nor a branch
@@ -410,16 +454,24 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
           };
       // An execution that would not read back (an id outside the safe rule) is refused rather than saved.
       if (!normalizeExecution(state)) throw new UsageError('swarm start: --project, --session and the run branch must use letters, digits, _ - . (and / in the branch), at most 120 characters');
+      // A task branch already merged into the base starts over from it: nothing on it is lost.
+      for (const tb of moves) {
+        if (deps.git(['branch', '-f', tb, base]) === null) throw new UsageError(`swarm start: cannot move ${tb} to ${base}`);
+      }
       rmSync(stopFile(io.cwd), { force: true });
       saveExecution(io.cwd, state);
-      return json({ ...state, setup, baseSync });
+      if (kind === 'ephemeral' && !resume) writeLoose(io.cwd, { runId: state.runId, tasks: loose });
+      const looseOut = kind === 'ephemeral'
+        ? { loose: loose.length, ...(ignoredTasks ? { ignoredTasks: true, message: `the ephemeral run ${state.runId} is resumed with its own ${loose.length} tasks; --tasks was ignored (start a new run for new requests once this one ends)` } : {}) }
+        : {};
+      return json({ ...state, setup, baseSync, ...looseOut });
     }
     case 'status': {
       const state = readExecution(io.cwd);
       return json({ present: state !== null, state });
     }
     case 'propose': {
-      const plan = loadPlanArg(io, flag('plan'), 'propose');
+      const plan = !flag('plan') && has('tasks') ? planOfLoose(loadTasksArg(io, flag('tasks'), 'propose')) : loadPlanArg(io, flag('plan'), 'propose');
       const width = widthOf(plan);
       const config = loadConfig(io.cwd);
       const configured = config.swarm.mode ?? null;
@@ -476,7 +528,15 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     case 'tick': {
       const e = current();
       if (!e.active) throw new UsageError('swarm tick: the execution is not active');
-      const { plan, states, sessions, integrated } = readTickInput(io, deps, e, flag('plan'), flag('db'), 'tick');
+      // An ephemeral run schedules from its own loose.json and execution: no plan, no roadmap.
+      const input = e.kind === 'ephemeral'
+        ? (() => {
+            const loose = readLoose(io.cwd, e.runId);
+            if (!loose) throw new UsageError('swarm tick: the ephemeral run has no .forge/loose.json');
+            return { plan: planOfLoose(loose.tasks), states: statesOfLoose(e), sessions: {}, integrated: [] as string[] };
+          })()
+        : readTickInput(io, deps, e, flag('plan'), flag('db'), 'tick');
+      const { plan, states, sessions, integrated } = input;
       const publicTasks: Record<string, PublicTask> = {};
       try {
         for (const f of readdirSync(path.join(io.cwd, '.forge', 'execution')).filter(n => n.endsWith('.json')).slice(0, 500)) {
@@ -614,6 +674,6 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     case 'merge':
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError('usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]|status|propose --plan P|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick --plan P --db DIR [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T>|merge|retry <T>|sleep <seconds> [--mark]|stop [--reason stopped|budget]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID [--db DIR]>');
+      throw new UsageError('usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F]|status|propose --plan P|--tasks F|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T>|merge|retry <T>|sleep <seconds> [--mark]|stop [--reason stopped|budget]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID [--db DIR]>');
   }
 }
