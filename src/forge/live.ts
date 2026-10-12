@@ -40,11 +40,14 @@ export function hookLive(io: Io, forced?: LiveEvent): string {
     let exec = readExecution(main);
     if (!exec?.active) return '';
     // An unbound execution binds to the first session that starts an agent (the Stop hook binds it on a stop).
-    if (exec.hookSession === null && event === 'SubagentStart') {
+    // A registered member of this run never takes the binding.
+    const found = readMember(main, sessionId);
+    const isMember = !!found && found.runId === exec.runId;
+    if (exec.hookSession === null && event === 'SubagentStart' && !isMember) {
       exec = { ...exec, hookSession: sessionId };
       saveExecution(main, exec);
     }
-    const member = exec.hookSession === sessionId ? null : readMember(main, sessionId);
+    const member = exec.hookSession === sessionId ? null : found;
     if (exec.hookSession !== sessionId && (!member || member.runId !== exec.runId)) return '';
     const role: LiveDoc['role'] = member ? member.role : 'coordinator';
     const file = liveFile(main, sessionId);

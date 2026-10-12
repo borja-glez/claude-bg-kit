@@ -23,7 +23,10 @@ export function normalizeMember(x: unknown): MemberDoc | null {
 
 export function readMember(main: string, sessionId: string): MemberDoc | null {
   if (!SID.test(sessionId)) return null;
-  try { return normalizeMember(JSON.parse(readFileSync(memberFile(main, sessionId), 'utf8'))); } catch { return null; }
+  try {
+    const m = normalizeMember(JSON.parse(readFileSync(memberFile(main, sessionId), 'utf8')));
+    return m && m.sessionId === sessionId ? m : null;
+  } catch { return null; }
 }
 
 export function writeMember(main: string, m: MemberDoc): void {

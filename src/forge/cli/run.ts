@@ -24,6 +24,7 @@ import { detectValidators, selectValidators, runValidators, markPreexisting, blo
 import { checkTools, missingTools } from '../tools.js';
 import { verifyPlan, cleanupPids, killTarget } from '../verify.js';
 import { readLocal, updateLocal, mainCheckout } from '../local.js';
+import { readMember } from '../members.js';
 import { hookLive } from '../live.js';
 import { readSurfaces, detectDrafts, appendLearned, surfaceFile, surfaceHash } from '../surfaces.js';
 
@@ -180,6 +181,10 @@ function hookStop(io: Io): string {
     // An unbound active execution binds to the first session that stops, saved before the signal is written.
     const main = mainCheckout(io.cwd);
     const read = readExecution(main);
+    // A registered member of this run never takes the coordinator binding nor is blocked on the execution's behalf.
+    const sid = typeof hookInput.session_id === 'string' ? hookInput.session_id : null;
+    const member = read?.active && sid ? readMember(main, sid) : null;
+    if (member && member.runId === read?.runId) { hookLive(io, 'Stop'); return ''; }
     const exec = bindHookSession(read, hookInput.session_id);
     if (exec && exec !== read) saveExecution(main, exec);
     hookLive(io, 'Stop');

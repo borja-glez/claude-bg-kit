@@ -16,6 +16,12 @@ describe('members', () => {
     expect(normalizeMember({ sessionId: '../x', role: 'manual', runId: 'r1', since: T })).toBeNull();
     expect(normalizeMember({ sessionId: 's2', role: 'manual', runId: 'r1', task: 'nope!', since: T })?.task).toBeNull();
   });
+  it('readMember rejects a file whose sessionId differs from the requested one', () => {
+    writeMember(root, { sessionId: 's2', role: 'manual', runId: 'r1', task: null, name: null, since: T });
+    writeFileSync(memberFile(root, 's5'), JSON.stringify({ sessionId: 's2', role: 'manual', runId: 'r1', since: T }));
+    expect(readMember(root, 's5')).toBeNull();
+    expect(readMember(root, 's2')).not.toBeNull();
+  });
   it('writes, reads and lists only the members of a run', () => {
     writeMember(root, { sessionId: 's2', role: 'executor', runId: 'r1', task: 'T002', name: 'wp-shop-T002', since: T });
     writeMember(root, { sessionId: 's3', role: 'manual', runId: 'old', task: null, name: null, since: T });

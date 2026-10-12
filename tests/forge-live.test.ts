@@ -116,6 +116,33 @@ describe('forge hook live', () => {
     expect(existsSync(path.join(wt, '.forge', 'execution.json'))).toBe(false);
     expect(existsSync(liveFile(root, 's1'))).toBe(true);
   });
+  it('a member Stop with an unbound execution leaves it unbound and writes the member signal', () => {
+    exec({ hookSession: null, tasks: runningTask });
+    writeMember(root, { sessionId: 's2', role: 'executor', runId: 'r1', task: 'T1', name: null, since: T });
+    expect(run(['hook', 'stop'], { ...io, stdin: JSON.stringify({ session_id: 's2' }) }).stdout).toBe('');
+    expect(readExecution(root)?.hookSession).toBeNull();
+    expect(JSON.parse(readFileSync(liveFile(root, 's2'), 'utf8'))).toMatchObject({ role: 'executor', event: 'Stop' });
+  });
+  it('a member SubagentStart with an unbound execution leaves it unbound', () => {
+    exec({ hookSession: null });
+    writeMember(root, { sessionId: 's2', role: 'executor', runId: 'r1', task: 'T1', name: null, since: T });
+    hook({ session_id: 's2', hook_event_name: 'SubagentStart', agent_id: 'a1', agent_type: 'x' });
+    expect(readExecution(root)?.hookSession).toBeNull();
+    expect(JSON.parse(readFileSync(liveFile(root, 's2'), 'utf8'))).toMatchObject({ role: 'executor', agents: [{ id: 'a1' }] });
+  });
+  it('a non-member Stop still binds an unbound execution', () => {
+    exec({ hookSession: null, tasks: runningTask });
+    writeMember(root, { sessionId: 's2', role: 'executor', runId: 'old', task: null, name: null, since: T });
+    run(['hook', 'stop'], { ...io, stdin: JSON.stringify({ session_id: 's2' }) });
+    expect(readExecution(root)?.hookSession).toBe('s2');
+  });
+  it('writes nothing for a session whose member file is junk', () => {
+    exec();
+    mkdirSync(path.join(root, '.forge', 'members'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'members', 's7.json'), '{oops');
+    hook({ session_id: 's7', hook_event_name: 'SessionStart' });
+    expect(existsSync(liveFile(root, 's7'))).toBe(false);
+  });
   it('fails open on junk input', () => {
     exec();
     expect(run(['hook', 'live'], { ...io, stdin: '{oops' })).toMatchObject({ code: 0, stdout: '' });
