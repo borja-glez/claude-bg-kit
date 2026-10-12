@@ -21,6 +21,11 @@ describe('nextLive', () => {
     d = nextLive(d, { event: 'SessionEnd' }, ctx);
     expect(d).toMatchObject({ ended: true, event: 'SessionEnd' });
   });
+  it('drops agents older than 3 hours on the next event', () => {
+    const old = nextLive(null, { event: 'SubagentStart', agentId: 'a1', agentType: 't' }, { ...ctx, now: '2026-10-12T08:00:00.000Z' });
+    expect(old.agents).toHaveLength(1);
+    expect(nextLive(old, { event: 'Stop' }, ctx).agents).toEqual([]);
+  });
 });
 
 describe('forge hook live', () => {
@@ -52,6 +57,15 @@ describe('forge hook live', () => {
     expect(JSON.parse(readFileSync(liveFile(root, 's1'), 'utf8'))).toMatchObject({ role: 'coordinator', runId: 'r1', agents: [{ id: 'a1' }] });
     run(['hook', 'stop'], { ...io, now: () => new Date('2026-10-12T12:03:00.000Z'), stdin: JSON.stringify({ session_id: 's1' }) });
     expect(JSON.parse(readFileSync(liveFile(root, 's1'), 'utf8'))).toMatchObject({ event: 'Stop', ts: '2026-10-12T12:03:00.000Z' });
+  });
+  it('writes into the main checkout from a linked worktree, under the ignored forge dir', () => {
+    exec();
+    const wt = path.join(root, '.claude', 'worktrees', 'w');
+    git('worktree', 'add', '-q', wt, '-b', 'w');
+    run(['hook', 'live'], { ...io, cwd: wt, git: defaultGit(wt), stdin: JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart' }) });
+    expect(existsSync(liveFile(root, 's1'))).toBe(true);
+    expect(existsSync(path.join(wt, '.forge', 'live', 's1.json'))).toBe(false);
+    expect(existsSync(path.join(root, '.forge', '.gitignore'))).toBe(true);
   });
   it('fails open on junk input', () => {
     exec();
