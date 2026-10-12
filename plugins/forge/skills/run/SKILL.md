@@ -16,6 +16,7 @@ Rules for every path:
 - Always name the agent when you spawn one (subagent type `forge:<agent>`); never let work inherit your own model. Roles (`impl`, `review-security`, ...) map to agent names through `FORGE agents` (it applies the profile in `.forge/config.yaml`).
 - The implementer **tier ladder**, in roles: `mech` -> `impl-light` -> `impl` -> `impl-heavy`. "One tier up" is the next role on it, resolved to an agent with `FORGE agents`; above `impl-heavy` stay on `impl-heavy` and tell the user at the end.
 - `forge-fable` is used only when the user explicitly asks for Fable.
+- Change the project's files with the Edit and Write tools, never with `sed -i`, `awk`, `perl -i` or by rewriting them through shell redirection: those rewrite whole files and can change their line endings (CRLF on Windows), which turns a one-line change into a whole-file diff. Saving a command's output to forge's own work files (`FORGE validate ... > .forge/work/...`, `git diff ... > .forge/work/...`) is fine and stays as the steps say. This holds on every OS and in every path, also when you implement yourself.
 - Hand over briefs, diffs and reports as files. No narration, no "shall I continue?".
 - Record each phase with `FORGE log --kind phase --task <id> --data-file <file>` (file: `{"phase":"<name>","brief":<n>,"base":"<BASE sha>"}`, so resuming knows the brief and the base), and each agent you spawn with `--kind agent` (file: `{"agent":"<name>","role":"<role>"}`). Trivial skips this logging: triage and validate are enough.
 

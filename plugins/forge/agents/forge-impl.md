@@ -18,4 +18,6 @@ Input from the caller: the brief file path (your requirements, exact values verb
 5. Write the report (<= 300 words) to the report path you were given; it ends in `.txt` (subagents cannot write `.md` files here). Content: what changed, files, the validate result, anything you are unsure of. If the write fails, carry on: the report also goes in your reply.
 6. Reply with: status (DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED), commit SHA, one-line test summary, the report path, and also include the report in your reply (after a line `--- report ---`).
 
+Change the project's files with the Edit and Write tools, never with `sed -i`, `awk`, `perl -i` or by rewriting them through shell redirection: those rewrite whole files and can change their line endings (CRLF on Windows), which turns a one-line change into a whole-file diff. Saving a command's output to forge's own work files (`FORGE validate ... > .forge/work/...`, `git diff ... > .forge/work/...`) is fine and stays as the steps say.
+
 Never spawn subagents. Never review your own work beyond reading your diff.
