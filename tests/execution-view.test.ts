@@ -123,4 +123,22 @@ describe('executionView', () => {
     const gone = executionView({ exec: exec(), tasks: { T9: memberPub('T9', 'M1', 'manual', -30) }, live: [live(-1)], now: NOW })!;
     expect(gone.orphans).toContain('T9');
   });
+  it('a member signal of another run, or of another session, never keeps a member row alive', () => {
+    const e = exec({ mode: 'sessions', tasks: { T1: { ...task('running'), executor: 'sessions' } } });
+    const lapsed = { T1: memberPub('T1', 'S2', 'sessions', -30) };
+    const otherRun = { ...memberLive('S2', 'executor', -1), runId: 'r0' };
+    const otherSession = memberLive('S3', 'executor', -1);
+    expect(executionView({ exec: e, tasks: lapsed, live: [live(-1), otherRun], now: NOW })!.slots[0].liveness).toBe('stopped');
+    expect(executionView({ exec: e, tasks: lapsed, live: [live(-1), otherSession], now: NOW })!.slots[0].liveness).toBe('stopped');
+    const manual = { T9: memberPub('T9', 'M1', 'manual', -30) };
+    expect(executionView({ exec: exec(), tasks: manual, live: [live(-1), { ...memberLive('M1', 'manual', -1), runId: 'r0' }], now: NOW })!.manual[0].liveness).toBe('stopped');
+    expect(executionView({ exec: exec(), tasks: manual, live: [live(-1), memberLive('M2', 'manual', -1)], now: NOW })!.manual[0].liveness).toBe('stopped');
+    // The matching signal does keep it alive.
+    expect(executionView({ exec: exec(), tasks: manual, live: [live(-1), memberLive('M1', 'manual', -1)], now: NOW })!.manual[0].liveness).toBe('alive');
+  });
+  it('an ended member signal makes the manual row stopped even with its lease running', () => {
+    const v = executionView({ exec: exec(), tasks: { T9: memberPub('T9', 'M1', 'manual', 5) }, live: [live(-1), memberLive('M1', 'manual', -1, true)], now: NOW })!;
+    expect(v.manual[0]).toMatchObject({ task: 'T9', liveness: 'stopped' });
+    expect(v.orphans).toContain('T9');
+  });
 });
