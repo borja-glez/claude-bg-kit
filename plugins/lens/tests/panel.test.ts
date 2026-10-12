@@ -209,7 +209,8 @@ test('a subagent shows until the agents list no longer has it', async ($, on) =>
   agents = [];
   await clock.advance(10000);
   await ui.redraw();
-  expect(await said(ui)).not.toContain('Subagents');
+  // It is gone from the running list but kept as finished.
+  expect(await said(ui)).toMatch(/✓ Explore · Find the parser/);
   await ui.unmount();
 });
 
@@ -417,6 +418,30 @@ test('a finished subagent stays listed with ✓ and its time for five minutes; a
   await clock.advance(5 * 60_000 + 10_000);
   await ui.redraw();
   expect(await said(ui)).not.toMatch(/✓ Explore/);
+  await ui.unmount();
+});
+
+test('a subagent the list drops before its stop is kept as finished once; the late stop adds nothing', async ($, on) => {
+  serveFiles(on, []);
+  servePanes(on);
+  const clock = mock.clock(on, { now: NOW });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  let agents = [{ id: 'a1', description: 'Find the parser', type: 'Explore', status: 'running' as const }];
+  on('agent.list', () => ({ value: agents }));
+  on('classic.SubagentStart', () => ({}));
+  on('classic.SubagentStop', () => ({}));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' });
+  await clock.advance(30_000);
+  agents = [];
+  await clock.advance(10_000);
+  await $.classic.SubagentStop({ agent_id: 'a1', agent_type: 'Explore' } as never);
+  await clock.advance(1000);
+  const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
+  const text = await said(ui);
+  expect(text.match(/✓ Explore/g)).toHaveLength(1);
+  expect(text).toMatch(/✓ Explore · Find the parser · \d+m? ?\d*s/);
   await ui.unmount();
 });
 

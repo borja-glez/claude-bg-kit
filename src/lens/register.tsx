@@ -475,6 +475,19 @@ function usageInput(): { session: UsageState; run: UsageState | null; officialUs
   return { session: usage, run, officialUsd, officialOwnUsd };
 }
 
+// Keeps a subagent that ended as finished: its run time from its known start, its description from the live entry or
+// the consumption loop's label, its model from the loop.
+function recordFinished(ran: Activity['subagents'][number], now: number): void {
+  if (!Number.isFinite(ran.since) || !Number.isFinite(now)) return;
+  const loop = usage.loops[ran.id];
+  const description = ran.description ?? loop?.description;
+  finished = pushFinished(freshFinished(finished, now), {
+    id: ran.id, type: ran.type, seconds: Math.max(0, Math.floor((now - ran.since) / 1000)), at: now,
+    ...(description ? { description: clip(String(description), LINE_MAX) } : {}),
+    ...(loop?.model ? { model: loop.model } : {}),
+  });
+}
+
 // $.agent.list() is the truth on each refresh; without it, event entries older than an hour are dropped.
 async function liveSubagents($: Engine, now: number): Promise<Activity['subagents']> {
   const fresh = activity.subagents.filter(s => now - s.since < SUBAGENT_TTL_MS);
@@ -496,6 +509,9 @@ async function liveSubagents($: Engine, now: number): Promise<Activity['subagent
       since: since.get(a.id) ?? now,
     });
   }
+  // One that was running here and is gone from the list has ended: kept as finished (a later Stop finds nothing).
+  const live = new Set(out.map(s => s.id));
+  for (const s of fresh) if (!live.has(s.id)) recordFinished(s, now);
   return out.slice(-MAX_ACTIVITY);
 }
 
@@ -812,17 +828,8 @@ export const register: Register = on => {
       const id = String(e.agent_id);
       const ran = activity.subagents.find(s => s.id === id);
       activity.subagents = activity.subagents.filter(s => s.id !== e.agent_id);
-      // Only a subagent whose start lens heard is listed (no start, no duration).
-      if (ran) {
-        const now = await nowMs($);
-        const loop = usage.loops[id];
-        const description = ran.description ?? loop?.description;
-        finished = pushFinished(freshFinished(finished, now), {
-          id, type: ran.type, seconds: Math.max(0, Math.floor((now - ran.since) / 1000)), at: now,
-          ...(description ? { description: clip(String(description), LINE_MAX) } : {}),
-          ...(loop?.model ? { model: loop.model } : {}),
-        });
-      }
+      // Only a subagent still known here is listed (no start, no duration); one a refresh already dropped was recorded then.
+      if (ran) recordFinished(ran, await nowMs($));
       void noteActivity($);
       void requestPanelWrite($);
     } catch { /* ignore */ }
