@@ -19,6 +19,18 @@ describe('usage summary', () => {
     expect(groupOf('a', 'general-purpose')).toBe('other');
     expect(groupOf('a', 'unknown')).toBe('other');
   });
+  it('gives each group its effort when all its loops share one, «varios» when they differ', () => {
+    const s = newUsage(0);
+    recordStep(s, { model: 'claude-opus-5-5', effort: 'medium', usage: U(10, 0) });
+    recordStep(s, { agentId: 'a', model: 'claude-opus-5-5', effort: 'low', usage: U(10, 0) });
+    recordStep(s, { agentId: 'b', model: 'claude-opus-5-5', effort: 'low', usage: U(10, 0) });
+    recordStep(s, { agentId: 'i', model: 'claude-sonnet-5-5', effort: 'low', usage: U(10, 0) });
+    recordStep(s, { agentId: 'j', model: 'claude-sonnet-5-5', effort: 'high', usage: U(10, 0) });
+    recordStep(s, { agentId: 'r', model: 'claude-opus-5-5', usage: U(10, 0) });
+    labelLoop(s, 'i', 'forge:forge-impl'); labelLoop(s, 'j', 'forge:forge-impl'); labelLoop(s, 'r', 'forge:forge-review-perf');
+    const by = Object.fromEntries(summarizeUsage(s).groups.map(g => [g.id, g.effort]));
+    expect(by).toEqual({ main: 'medium', impl: 'varios', review: null, other: 'low' });
+  });
   it('costs groups, subtracts tracking from main and estimates without forge', () => {
     const s = newUsage(0);
     recordStep(s, { model: 'claude-opus-5-5', usage: U(M, 0) });             // main: $4

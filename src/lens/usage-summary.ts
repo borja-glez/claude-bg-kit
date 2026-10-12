@@ -6,7 +6,7 @@ import type { UsageLoop, UsageState } from './usage.js';
 export type GroupId = 'main' | 'impl' | 'review' | 'plan' | 'other';
 export interface UsageSummary {
   tokens: number; costUsd: number; partial: boolean;
-  groups: { id: GroupId; model: string | null; tokens: number; costUsd: number | null; share: number }[];
+  groups: { id: GroupId; model: string | null; effort: string | null; tokens: number; costUsd: number | null; share: number }[];
   tracking: { tokens: number; costUsd: number | null } | null;
   withoutForge: { costUsd: number; deltaUsd: number; deltaPct: number } | null;
 }
@@ -59,7 +59,10 @@ export function summarizeUsage(s: UsageState): UsageSummary {
       if (costUsd !== null && trackCost !== null) costUsd = Math.max(0, costUsd - trackCost);
     }
     const models = new Set(loops.map(l => l.model).filter(Boolean));
-    return { id, model: models.size > 1 ? 'varios' : dominant(loops), tokens, costUsd, share: 0 };
+    // Only loops that ran a step say anything about effort; a loop without one would read as a second level.
+    const efforts = new Set(loops.filter(l => l.steps > 0).map(l => l.effort));
+    const effort = efforts.size > 1 ? 'varios' : efforts.values().next().value ?? null;
+    return { id, model: models.size > 1 ? 'varios' : dominant(loops), effort, tokens, costUsd, share: 0 };
   });
   for (const g of groups) g.share = totalCost > 0 ? (g.costUsd ?? 0) / totalCost : totalTokens > 0 ? g.tokens / totalTokens : 0;
   const forgeLoops = ['impl', 'review', 'plan'].some(id => byGroup.has(id as GroupId));

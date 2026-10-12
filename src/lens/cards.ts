@@ -108,7 +108,11 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     const u = m.usage;
     const loc = m.locale;
     const usd = (v: number | null) => (v === null ? '—' : fmtUsd(v, loc));
-    const name = (g: { model: string | null }) => (g.model === null ? '' : g.model === 'varios' ? t.various : shortModelName(g.model));
+    const name = (g: { model: string | null; effort?: string | null }) => {
+      if (g.model === null) return '';
+      const effort = !g.effort ? '' : ` · ${g.effort === 'varios' ? t.various : t.effortLevel(g.effort)}`;
+      return `${g.model === 'varios' ? t.various : shortModelName(g.model)}${effort}`;
+    };
     // «Other» only reads right next to forge's own groups; on its own it is just the subagents.
     const forgeGroups = u.groups.some(g => g.id === 'impl' || g.id === 'review' || g.id === 'plan');
     const label: Record<string, string> = { main: t.gMain, impl: t.gImpl, review: t.gReview, plan: t.gPlan, other: forgeGroups ? t.gOther : t.sSubagents };

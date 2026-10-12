@@ -154,6 +154,15 @@ describe('usage formats and card', () => {
     expect(tags([g('main'), g('other')])).toEqual(['main', 'Subagents']);
     expect(tags([g('main'), g('impl'), g('other')])).toEqual(['main', 'implementers', 'other']);
   });
+  it('adds the effort to a Usage row, «various» when the group mixes levels', () => {
+    const base = { scope: 'session' as const, tokens: 20, costUsd: 0.2, partial: false, sessionPartial: false, officialUsd: null, drift: false, session: null, tracking: null, withoutForge: null, pricesAsOf: '2026-10-12' };
+    const groups = [
+      { id: 'main' as const, model: 'claude-opus-5-5', effort: 'medium', tokens: 10, costUsd: 0.1, share: 0.5 },
+      { id: 'other' as const, model: 'claude-opus-5-5', effort: 'varios', tokens: 10, costUsd: 0.1, share: 0.5 },
+    ];
+    const rows = buildCards({ ...EMPTY, usage: { ...base, groups } }, T, 0).find(c => c.title === T.sUsage)!.blocks.flatMap(b => (b.kind === 'row' ? [b.text] : []));
+    expect(rows).toEqual(['Opus 5.5 · medium', 'Opus 5.5 · various']);
+  });
   it('shows «≥» on a partial total and the drift warning', () => {
     const usage = { scope: 'session' as const, tokens: 10, costUsd: 1, partial: true, sessionPartial: true, officialUsd: 2, drift: true, session: null, groups: [], tracking: null, withoutForge: null, pricesAsOf: '2026-10-12' };
     const text = JSON.stringify(buildCards({ ...EMPTY, usage }, T, 0).find(c => c.title === T.sUsage)!.blocks);

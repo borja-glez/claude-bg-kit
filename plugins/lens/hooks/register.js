@@ -346,7 +346,9 @@ function summarizeUsage(s) {
       if (costUsd !== null && trackCost !== null) costUsd = Math.max(0, costUsd - trackCost);
     }
     const models = new Set(loops.map((l) => l.model).filter(Boolean));
-    return { id: id2, model: models.size > 1 ? "varios" : dominant(loops), tokens, costUsd, share: 0 };
+    const efforts = new Set(loops.filter((l) => l.steps > 0).map((l) => l.effort));
+    const effort = efforts.size > 1 ? "varios" : efforts.values().next().value ?? null;
+    return { id: id2, model: models.size > 1 ? "varios" : dominant(loops), effort, tokens, costUsd, share: 0 };
   });
   for (const g of groups) g.share = totalCost > 0 ? (g.costUsd ?? 0) / totalCost : totalTokens > 0 ? g.tokens / totalTokens : 0;
   const forgeLoops = ["impl", "review", "plan"].some((id2) => byGroup.has(id2));
@@ -11807,7 +11809,11 @@ function buildCards(m, t, nowMs2) {
     const u = m.usage;
     const loc = m.locale;
     const usd = (v) => v === null ? "\u2014" : fmtUsd(v, loc);
-    const name = (g) => g.model === null ? "" : g.model === "varios" ? t.various : shortModelName(g.model);
+    const name = (g) => {
+      if (g.model === null) return "";
+      const effort = !g.effort ? "" : ` \xB7 ${g.effort === "varios" ? t.various : t.effortLevel(g.effort)}`;
+      return `${g.model === "varios" ? t.various : shortModelName(g.model)}${effort}`;
+    };
     const forgeGroups = u.groups.some((g) => g.id === "impl" || g.id === "review" || g.id === "plan");
     const label = { main: t.gMain, impl: t.gImpl, review: t.gReview, plan: t.gPlan, other: forgeGroups ? t.gOther : t.sSubagents };
     const blocks = [{

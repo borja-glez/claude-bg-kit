@@ -30,7 +30,7 @@ export type LensPanel = {
   usage: {
     scope: 'session' | 'run'; tokens: number; costUsd: number; partial: boolean; sessionPartial: boolean; officialUsd: number | null; drift: boolean;
     session: { tokens: number; costUsd: number } | null;
-    groups: { id: 'main' | 'impl' | 'review' | 'plan' | 'other'; model: string | null; tokens: number; costUsd: number | null; share: number }[];
+    groups: { id: 'main' | 'impl' | 'review' | 'plan' | 'other'; model: string | null; effort?: string | null; tokens: number; costUsd: number | null; share: number }[];
     tracking: { tokens: number; costUsd: number | null } | null;
     withoutForge: { costUsd: number; deltaUsd: number; deltaPct: number } | null;
     pricesAsOf: string;
