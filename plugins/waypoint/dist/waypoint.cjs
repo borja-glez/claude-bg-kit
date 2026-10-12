@@ -6035,9 +6035,9 @@ var require_lexer = __commonJS({
         }
       }
       *parseQuotedScalar() {
-        const quote = this.charAt(0);
-        let end = this.buffer.indexOf(quote, this.pos + 1);
-        if (quote === "'") {
+        const quote2 = this.charAt(0);
+        let end = this.buffer.indexOf(quote2, this.pos + 1);
+        if (quote2 === "'") {
           while (end !== -1 && this.buffer[end + 1] === "'")
             end = this.buffer.indexOf("'", end + 2);
         } else {
@@ -11419,6 +11419,7 @@ var TRACK_COLORS = ["blue", "mauve", "teal", "pink", "sky", "flamingo"];
 
 // src/lib/plan.ts
 var SEG = /^[A-Za-z0-9_.-]{1,64}$/;
+var isPlanId = (s) => SEG.test(s) && s !== "." && s !== "..";
 var id = external_exports.string().regex(SEG, "invalid id (allowed: letters, digits, _ - .; max 64)").refine((s) => s !== "." && s !== "..", "invalid id");
 var TaskSchema = external_exports.object({
   id,
@@ -13592,6 +13593,15 @@ function planLocale(root, project) {
   return null;
 }
 
+// src/lib/launcher.ts
+var HERDR_TEMPLATE = null;
+var quote = (s) => `'${s.split("'").join(`'\\''`)}'`;
+function launchRun(launcher, x2) {
+  if (launcher === "bg") return `(cd ${quote(x2.worktree)} && claude --bg --name ${x2.name} "${x2.prompt}")`;
+  if (HERDR_TEMPLATE === null) return null;
+  return HERDR_TEMPLATE.split("{name}").join(x2.name).split("{cwd}").join(quote(x2.worktree)).split("{command}").join(`claude --name ${x2.name} "${x2.prompt}"`);
+}
+
 // src/cli/run.ts
 var USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|design-validate|design-snapshot|design-changed|critique-check|critique-select|design-page|hook> ...`;
 function run(argv, io) {
@@ -13730,8 +13740,26 @@ function run(argv, io) {
       case "launch": {
         const p = loadPlan();
         const track = args[1];
-        if (!p.tracks.some((t) => t.id === track)) return fail(`launch: unknown track ${track ?? ""}`);
+        const taskMode = args.includes("--task");
+        if (taskMode) {
+          if (!track || !isPlanId(track) || !p.tasks.some((t) => t.id === track)) return fail(`launch: unknown task ${track ?? ""}`);
+        } else if (!p.tracks.some((t) => t.id === track)) return fail(`launch: unknown track ${track ?? ""}`);
         const SAFE_ID = /^[A-Za-z0-9_.~:@+][A-Za-z0-9_\-.~:@+]{0,79}$/;
+        const val = (f) => {
+          const i = args.indexOf(f);
+          const v = i >= 0 ? args[i + 1] : void 0;
+          return v && !v.startsWith("--") ? v : void 0;
+        };
+        if (taskMode) {
+          const runId = val("--run"), coordinator = val("--coordinator"), taskBase = val("--base");
+          if (!runId || !SAFE_ID.test(runId)) return fail("launch --task: --run needs the execution id", 2);
+          if (!coordinator || !SAFE_ID.test(coordinator)) return fail("launch --task: --coordinator needs the coordinator session id", 2);
+          if (!taskBase || !BRANCH_RE.test(taskBase)) return fail("launch --task: --base needs the run branch", 2);
+          if (args.includes("--merge") || args.includes("--swarm")) return fail("launch --task: the coordinator integrates; --merge and --swarm do not apply", 2);
+        }
+        const launcherAt = args.indexOf("--launcher");
+        const launcher = launcherAt >= 0 ? args[launcherAt + 1] : "bg";
+        if (launcher !== "bg" && launcher !== "herdr") return fail("launch: --launcher must be bg or herdr", 2);
         const swarmAt = args.indexOf("--swarm");
         const swarm = swarmAt >= 0 ? args[swarmAt + 1] : void 0;
         if (swarmAt >= 0 && (!swarm || !SAFE_ID.test(swarm))) return fail("launch: --swarm needs the coordinator session id", 2);
@@ -13742,6 +13770,20 @@ function run(argv, io) {
         if (swarm && !base) return fail("launch: --swarm needs --base <the swarm base branch>", 2);
         const git = (...a) => (0, import_node_child_process.execFileSync)("git", a, { cwd: io.cwd, encoding: "utf8" }).trim();
         const root = mainWorktreeFrom(git("worktree", "list", "--porcelain")) ?? git("rev-parse", "--show-toplevel");
+        if (taskMode) {
+          const taskWt = import_node_path2.default.join(root, ".claude", "worktrees", `task-${track}`);
+          const taskBranch = `task/${track}`;
+          if (!(0, import_node_fs2.existsSync)(taskWt)) {
+            const exists = git("branch", "--list", taskBranch) !== "";
+            git("worktree", "add", taskWt, ...exists ? [taskBranch] : ["-b", taskBranch, base]);
+          }
+          const taskName = `wp-${p.project}-${track}`;
+          const taskPrompt = `/forge:run --plan ${args[0]} --task ${track} \u2014 run member of ${val("--coordinator")}: work only ${track}, then stop`;
+          const taskCommand = `claude --bg --name ${taskName} "${taskPrompt}"`;
+          const taskRun = launchRun(launcher, { name: taskName, prompt: taskPrompt, worktree: taskWt });
+          if (taskRun === null) return fail("launch: herdr cannot open panes from the command line; use launcher bg", 2);
+          return ok(JSON.stringify({ worktree: taskWt, branch: taskBranch, name: taskName, prompt: taskPrompt, command: taskCommand, run: taskRun, runId: val("--run"), task: track }));
+        }
         const worktree = import_node_path2.default.join(root, ".claude", "worktrees", track);
         const branch = `track/${track}`;
         if (!(0, import_node_fs2.existsSync)(worktree)) {
@@ -13763,7 +13805,8 @@ function run(argv, io) {
         }
         const prompt = `/waypoint:work ${track}` + (forge ? ` \u2014 ${FORGE_MARK} (forge:run Large loop)` : "") + (args.includes("--merge") ? ` \u2014 the user authorizes merging ${branch} into main at phase close` : "") + (swarm ? ` \u2014 swarm member of ${swarm}: do not merge into the base branch; keep taking tasks of your track and stop when it has no next task` : "");
         const command = `claude --bg --name ${name} "${prompt}"`;
-        const inWorktree = `(cd '${worktree.split("'").join(`'\\''`)}' && ${command})`;
+        const inWorktree = launchRun(launcher, { name, prompt, worktree });
+        if (inWorktree === null) return fail("launch: herdr cannot open panes from the command line; use launcher bg", 2);
         return ok(JSON.stringify({ worktree, branch, name, prompt, command, run: inWorktree }));
       }
       case "status": {

@@ -107,17 +107,17 @@ var require_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    function visit_(key, node, visitor, path15) {
-      const ctrl = callVisitor(key, node, visitor, path15);
+    function visit_(key, node, visitor, path16) {
+      const ctrl = callVisitor(key, node, visitor, path16);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path15, ctrl);
-        return visit_(key, ctrl, visitor, path15);
+        replaceNode(key, path16, ctrl);
+        return visit_(key, ctrl, visitor, path16);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path15 = Object.freeze(path15.concat(node));
+          path16 = Object.freeze(path16.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = visit_(i, node.items[i], visitor, path15);
+            const ci = visit_(i, node.items[i], visitor, path16);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -128,13 +128,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path15 = Object.freeze(path15.concat(node));
-          const ck = visit_("key", node.key, visitor, path15);
+          path16 = Object.freeze(path16.concat(node));
+          const ck = visit_("key", node.key, visitor, path16);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = visit_("value", node.value, visitor, path15);
+          const cv = visit_("value", node.value, visitor, path16);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -155,17 +155,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node, visitor, path15) {
-      const ctrl = await callVisitor(key, node, visitor, path15);
+    async function visitAsync_(key, node, visitor, path16) {
+      const ctrl = await callVisitor(key, node, visitor, path16);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path15, ctrl);
-        return visitAsync_(key, ctrl, visitor, path15);
+        replaceNode(key, path16, ctrl);
+        return visitAsync_(key, ctrl, visitor, path16);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path15 = Object.freeze(path15.concat(node));
+          path16 = Object.freeze(path16.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = await visitAsync_(i, node.items[i], visitor, path15);
+            const ci = await visitAsync_(i, node.items[i], visitor, path16);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -176,13 +176,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path15 = Object.freeze(path15.concat(node));
-          const ck = await visitAsync_("key", node.key, visitor, path15);
+          path16 = Object.freeze(path16.concat(node));
+          const ck = await visitAsync_("key", node.key, visitor, path16);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = await visitAsync_("value", node.value, visitor, path15);
+          const cv = await visitAsync_("value", node.value, visitor, path16);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -209,23 +209,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node, visitor, path15) {
+    function callVisitor(key, node, visitor, path16) {
       if (typeof visitor === "function")
-        return visitor(key, node, path15);
+        return visitor(key, node, path16);
       if (identity.isMap(node))
-        return visitor.Map?.(key, node, path15);
+        return visitor.Map?.(key, node, path16);
       if (identity.isSeq(node))
-        return visitor.Seq?.(key, node, path15);
+        return visitor.Seq?.(key, node, path16);
       if (identity.isPair(node))
-        return visitor.Pair?.(key, node, path15);
+        return visitor.Pair?.(key, node, path16);
       if (identity.isScalar(node))
-        return visitor.Scalar?.(key, node, path15);
+        return visitor.Scalar?.(key, node, path16);
       if (identity.isAlias(node))
-        return visitor.Alias?.(key, node, path15);
+        return visitor.Alias?.(key, node, path16);
       return void 0;
     }
-    function replaceNode(key, path15, node) {
-      const parent = path15[path15.length - 1];
+    function replaceNode(key, path16, node) {
+      const parent = path16[path16.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node;
       } else if (identity.isPair(parent)) {
@@ -837,10 +837,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path15, value) {
+    function collectionFromPath(schema, path16, value) {
       let v = value;
-      for (let i = path15.length - 1; i >= 0; --i) {
-        const k = path15[i];
+      for (let i = path16.length - 1; i >= 0; --i) {
+        const k = path16[i];
         if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
           const a = [];
           a[k] = v;
@@ -859,7 +859,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path15) => path15 == null || typeof path15 === "object" && !!path15[Symbol.iterator]().next().done;
+    var isEmptyPath = (path16) => path16 == null || typeof path16 === "object" && !!path16[Symbol.iterator]().next().done;
     var Collection = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -889,11 +889,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path15, value) {
-        if (isEmptyPath(path15))
+      addIn(path16, value) {
+        if (isEmptyPath(path16))
           this.add(value);
         else {
-          const [key, ...rest] = path15;
+          const [key, ...rest] = path16;
           const node = this.get(key, true);
           if (identity.isCollection(node))
             node.addIn(rest, value);
@@ -907,8 +907,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path15) {
-        const [key, ...rest] = path15;
+      deleteIn(path16) {
+        const [key, ...rest] = path16;
         if (rest.length === 0)
           return this.delete(key);
         const node = this.get(key, true);
@@ -922,8 +922,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path15, keepScalar) {
-        const [key, ...rest] = path15;
+      getIn(path16, keepScalar) {
+        const [key, ...rest] = path16;
         const node = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -941,8 +941,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path15) {
-        const [key, ...rest] = path15;
+      hasIn(path16) {
+        const [key, ...rest] = path16;
         if (rest.length === 0)
           return this.has(key);
         const node = this.get(key, true);
@@ -952,8 +952,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path15, value) {
-        const [key, ...rest] = path15;
+      setIn(path16, value) {
+        const [key, ...rest] = path16;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -3468,9 +3468,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path15, value) {
+      addIn(path16, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path15, value);
+          this.contents.addIn(path16, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -3545,14 +3545,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path15) {
-        if (Collection.isEmptyPath(path15)) {
+      deleteIn(path16) {
+        if (Collection.isEmptyPath(path16)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path15) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path16) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -3567,10 +3567,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path15, keepScalar) {
-        if (Collection.isEmptyPath(path15))
+      getIn(path16, keepScalar) {
+        if (Collection.isEmptyPath(path16))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path15, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path16, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -3581,10 +3581,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path15) {
-        if (Collection.isEmptyPath(path15))
+      hasIn(path16) {
+        if (Collection.isEmptyPath(path16))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path15) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path16) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -3601,13 +3601,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path15, value) {
-        if (Collection.isEmptyPath(path15)) {
+      setIn(path16, value) {
+        if (Collection.isEmptyPath(path16)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, Array.from(path15), value);
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path16), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path15, value);
+          this.contents.setIn(path16, value);
         }
       }
       /**
@@ -5568,9 +5568,9 @@ var require_cst_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    visit.itemAtPath = (cst, path15) => {
+    visit.itemAtPath = (cst, path16) => {
       let item = cst;
-      for (const [field, index] of path15) {
+      for (const [field, index] of path16) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -5579,23 +5579,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit.parentCollection = (cst, path15) => {
-      const parent = visit.itemAtPath(cst, path15.slice(0, -1));
-      const field = path15[path15.length - 1][0];
+    visit.parentCollection = (cst, path16) => {
+      const parent = visit.itemAtPath(cst, path16.slice(0, -1));
+      const field = path16[path16.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path15, item, visitor) {
-      let ctrl = visitor(item, path15);
+    function _visit(path16, item, visitor) {
+      let ctrl = visitor(item, path16);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item[field];
         if (token && "items" in token) {
           for (let i = 0; i < token.items.length; ++i) {
-            const ci = _visit(Object.freeze(path15.concat([[field, i]])), token.items[i], visitor);
+            const ci = _visit(Object.freeze(path16.concat([[field, i]])), token.items[i], visitor);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -5606,10 +5606,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item, path15);
+            ctrl = ctrl(item, path16);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path15) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path16) : ctrl;
     }
     exports2.visit = visit;
   }
@@ -7361,13 +7361,13 @@ var require_dist = __commonJS({
 });
 
 // src/forge/cli/main.ts
-var import_node_fs14 = require("node:fs");
+var import_node_fs15 = require("node:fs");
 
 // src/forge/cli/run.ts
 var import_node_child_process2 = require("node:child_process");
-var import_node_fs13 = require("node:fs");
+var import_node_fs14 = require("node:fs");
 var import_node_os = require("node:os");
-var import_node_path14 = __toESM(require("node:path"), 1);
+var import_node_path15 = __toESM(require("node:path"), 1);
 
 // src/forge/ledger.ts
 var import_node_fs = require("node:fs");
@@ -7476,7 +7476,7 @@ function normalizeStatus(x) {
 }
 
 // src/forge/ledger.ts
-var LEDGER_KINDS = ["triage", "phase", "agent", "validate", "verdict", "round", "ruling", "cycle", "proposal", "verify", "verify-skip"];
+var LEDGER_KINDS = ["triage", "phase", "agent", "validate", "verdict", "round", "ruling", "cycle", "proposal", "verify", "verify-skip", "decision"];
 var GITIGNORE = "*\n!.gitignore\n!config.yaml\n!verify/\n!verify/*.md\n";
 var GITIGNORE_05 = "*\n!.gitignore\n!config.yaml\n";
 var forgePath = (root) => import_node_path.default.join(root, ".forge");
@@ -8359,8 +8359,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path15, errorMaps, issueData } = params;
-  const fullPath = [...path15, ...issueData.path || []];
+  const { data, path: path16, errorMaps, issueData } = params;
+  const fullPath = [...path16, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -8476,11 +8476,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path15, key) {
+  constructor(parent, value, path16, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path15;
+    this._path = path16;
     this._key = key;
   }
   get path() {
@@ -12023,6 +12023,10 @@ function findCycle(plan) {
 }
 
 // src/lib/execution-state.ts
+var SAFE_ID = /^[A-Za-z0-9_\-.]{1,120}$/;
+var isSafeId = (s2) => typeof s2 === "string" && SAFE_ID.test(s2) && s2 !== "." && s2 !== "..";
+var RUN_BRANCH = /^[A-Za-z0-9_./][A-Za-z0-9_\-./]{0,119}$/;
+var isRunBranch = (s2) => typeof s2 === "string" && RUN_BRANCH.test(s2) && !s2.includes("..");
 var TASK_STATUSES = ["running", "accepted", "integrated", "conflict", "blocked"];
 var STOPS = ["finished", "stalled", "stopped", "budget", "migrated"];
 var MAX_TASKS = 500;
@@ -12052,7 +12056,8 @@ function normalizeTask(x) {
     attempts: int(x.attempts, 0, 99, 0),
     agent: str3(x.agent),
     updatedAt: iso2(x.updatedAt) ?? startedAt,
-    detail: typeof x.detail === "string" ? x.detail.slice(0, 500) : null
+    detail: typeof x.detail === "string" ? x.detail.slice(0, 500) : null,
+    ...iso2(x.nudgedAt) ? { nudgedAt: iso2(x.nudgedAt) } : {}
   };
 }
 function normalizeExecution(x) {
@@ -12062,6 +12067,7 @@ function normalizeExecution(x) {
   const runId = str3(x.runId), project = str3(x.project), base = str3(x.base), branch = str3(x.branch), coordinator = str3(x.coordinator);
   const startedAt = iso2(x.startedAt);
   if (!mode || !runId || !project || !base || !branch || !coordinator || !startedAt) return null;
+  if (!isSafeId(runId) || !isSafeId(coordinator) || !isRunBranch(branch)) return null;
   const tasks = {};
   if (isObj3(x.tasks)) {
     for (const [id2, t] of Object.entries(x.tasks).slice(0, MAX_TASKS)) {
@@ -12081,7 +12087,7 @@ function normalizeExecution(x) {
     tasks,
     parallel: int(x.parallel, 1, 10, 3),
     mergeOnFinish: x.mergeOnFinish === true,
-    hookSession: str3(x.hookSession),
+    hookSession: isSafeId(x.hookSession) ? x.hookSession : null,
     active: x.active === true,
     stopReason: oneOf2(STOPS, x.stopReason),
     stallReason: typeof x.stallReason === "string" ? x.stallReason.slice(0, 1e3) : null,
@@ -12100,7 +12106,7 @@ function parseExecution(text) {
 }
 function fromSwarm(s2) {
   return {
-    runId: `swarm-${s2.startedAt}`,
+    runId: `swarm-${s2.startedAt.replace(/[:.]/g, "")}`,
     kind: "plan",
     mode: "sessions",
     parallel: Math.min(10, Math.max(1, s2.parallel)),
@@ -12120,6 +12126,16 @@ function fromSwarm(s2) {
     tasks: {}
   };
 }
+function normalizePublicTask(x) {
+  if (!isObj3(x)) return null;
+  const task = str3(x.task), runId = str3(x.runId), by = str3(x.by);
+  const stage = oneOf2(STAGES, x.stage), status = oneOf2(TASK_STATUSES, x.status), mode = oneOf2(["subagents", "sessions", "manual"], x.mode);
+  const since = iso2(x.since), updatedAt = iso2(x.updatedAt), leaseUntil = iso2(x.leaseUntil);
+  if (!task || !isPlanId(task) || !runId || !by || !stage || !status || !mode || !since || !updatedAt || !leaseUntil) return null;
+  return { task, runId, stage, status, mode, by, since, updatedAt, leaseUntil, agent: str3(x.agent), round: int(x.round, 0, 99, 0) };
+}
+var LIVE_SILENT_MINUTES = 7;
+var LIVE_STOPPED_MINUTES = 12;
 function normalizeLive(x) {
   if (!isObj3(x)) return null;
   const sessionId = str3(x.sessionId), ts = iso2(x.ts);
@@ -12249,34 +12265,34 @@ function triage(task, repo, validators, extra) {
   if (!repo.gitOk) reasons.push("git unavailable");
   const wordCount = text.trim().split(/\s+/).length;
   const sized = named.size ? named.size : located.length;
-  let path15;
+  let path16;
   if (greenfield) {
-    path15 = "large";
+    path16 = "large";
     reasons.push("greenfield repository");
   } else if (LARGE.some((re) => re.test(text))) {
-    path15 = "large";
+    path16 = "large";
     reasons.push("architecture-scale wording");
   } else if (sized > 10) {
-    path15 = "large";
+    path16 = "large";
     reasons.push(`${sized} files located`);
   } else if (sized > 3) {
-    path15 = "medium";
+    path16 = "medium";
     reasons.push(`${sized} files located`);
   } else if (sized === 0) {
-    path15 = "small";
+    path16 = "small";
     reasons.push("no files located: the session should judge the scope");
   } else if (sized === 1 && wordCount <= 25 && !RENAME.some((re) => re.test(text))) {
-    path15 = "trivial";
+    path16 = "trivial";
     reasons.push(named.size ? "one named file, short task" : "one file, short task");
   } else {
-    path15 = "small";
+    path16 = "small";
     reasons.push(`${sized} file(s) located`);
   }
-  if (sensitive.length && PATH_ORDER.indexOf(path15) < PATH_ORDER.indexOf("medium")) {
-    path15 = "medium";
+  if (sensitive.length && PATH_ORDER.indexOf(path16) < PATH_ORDER.indexOf("medium")) {
+    path16 = "medium";
     reasons.push(`sensitive zone: ${sensitive.join(", ")}`);
   }
-  return { path: path15, files: located, sensitive, greenfield, validators, reasons };
+  return { path: path16, files: located, sensitive, greenfield, validators, reasons };
 }
 
 // src/forge/brief.ts
@@ -12546,8 +12562,8 @@ function synthesize(reviews, weights, validatorsOk, failingValidators = []) {
 
 // src/forge/loop.ts
 var CAP = { medium: 3, large: 4 };
-function decideRound(history, path15) {
-  const cap = CAP[path15];
+function decideRound(history, path16) {
+  const cap = CAP[path16];
   const last = history.at(-1);
   const round = history.filter((h) => h.action !== "accept").length;
   const tierUp = round >= 3;
@@ -12735,10 +12751,10 @@ function similarOpen(p, all) {
   }
   return null;
 }
-function safeZone(path15) {
-  if (!path15 || !/^[A-Za-z0-9_./*-]+$/.test(path15) || path15.startsWith("-")) return null;
-  if (path15.startsWith("/") || path15.split("/").includes("..")) return null;
-  return path15;
+function safeZone(path16) {
+  if (!path16 || !/^[A-Za-z0-9_./*-]+$/.test(path16) || path16.startsWith("-")) return null;
+  if (path16.startsWith("/") || path16.split("/").includes("..")) return null;
+  return path16;
 }
 
 // src/forge/to-task.ts
@@ -12775,8 +12791,8 @@ var UsageError = class extends Error {
 };
 
 // src/forge/cli/swarm.ts
-var import_node_fs9 = require("node:fs");
-var import_node_path10 = __toESM(require("node:path"), 1);
+var import_node_fs12 = require("node:fs");
+var import_node_path13 = __toESM(require("node:path"), 1);
 
 // src/forge/validators.ts
 var import_node_fs8 = require("node:fs");
@@ -12927,7 +12943,13 @@ function markPreexisting(results, baseline) {
 var blocking = (r2) => r2.ok !== true && r2.preexisting !== true;
 
 // src/forge/schedule.ts
+var NUDGE_MINUTES = 15;
+var RELAUNCH_CAP = 2;
 var STEP_WAIT_SECONDS = 300;
+function relaunchOrBlock(task, attempts) {
+  if (attempts >= RELAUNCH_CAP) return { type: "block", task, reason: `the session of ${task} stopped ${attempts + 1} times` };
+  return { type: "relaunch", task, attempt: attempts + 1 };
+}
 var HELD = ["running", "accepted", "conflict", "blocked"];
 var ACTIVE = ["claimed", "in_progress"];
 function ranker(plan) {
@@ -12951,10 +12973,44 @@ function schedule(i) {
   };
   const orphan = (id2) => ACTIVE.includes(statusOf(states, id2)) && !!owner(id2) && owner(id2) !== exec.coordinator && !claimedByOther(id2);
   const readopt = (id2) => ACTIVE.includes(statusOf(states, id2)) && owner(id2) === exec.coordinator && !tasks[id2];
+  const pub = i.publicTasks ?? {};
+  const agents = i.agents ?? null;
+  for (const [id2, t] of Object.entries(tasks)) {
+    const p = pub[id2];
+    if (t.executor === "subagents" || !p || p.runId !== exec.runId || p.by === exec.coordinator) continue;
+    tasks[id2] = { ...t, stage: p.stage, round: p.round, agent: p.agent, stageSince: p.since, updatedAt: p.updatedAt };
+  }
+  for (const [id2, t] of Object.entries(tasks)) {
+    if (t.status === "running" && t.executor !== "subagents" && statusOf(states, id2) === "done") tasks[id2] = { ...t, status: "accepted", stage: "integrate", updatedAt: nowIso };
+  }
+  for (const t of plan.tasks) {
+    const o = owner(t.id);
+    const shas = commitShas(states, t.id);
+    if (tasks[t.id] || statusOf(states, t.id) !== "done" || !o || o === exec.coordinator || !shas.length || shas.every((s2) => integrated.has(s2))) continue;
+    tasks[t.id] = { status: "accepted", stage: "integrate", round: 0, worktree: "", branch: `task/${t.id}`, executor: "manual", attempts: 0, agent: null, startedAt: nowIso, stageSince: nowIso, updatedAt: nowIso, detail: null };
+  }
   const startable = (t) => !held(t.id) && (isAvailable(t, states) && isUnlocked(t, states) || orphan(t.id) || readopt(t.id)) && t.depends_on.every(depIntegrated) && !claimedByOther(t.id);
   const actions = [];
   const accepted = Object.keys(tasks).filter((id2) => tasks[id2].status === "accepted" && byId.has(id2)).sort((a, b) => rank(byId.get(a)) - rank(byId.get(b)));
   if (accepted.length) actions.push({ type: "integrate", task: accepted[0], ref: tasks[accepted[0]].branch });
+  const listed = (id2) => agents?.find((a) => a.name === `wp-${exec.project}-${id2}`) ?? null;
+  for (const id2 of Object.keys(tasks)) {
+    const t = tasks[id2];
+    if (t.status !== "running" || t.executor !== "sessions") continue;
+    const o = owner(id2);
+    const pastLease = now - Date.parse(t.startedAt) > LEASE_MINUTES * 6e4;
+    const ownerStopped = !!o && o !== exec.coordinator && sessionLiveness(sessions[o], now) === "stopped";
+    const neverClaimed = !o;
+    if (pastLease && (ownerStopped || neverClaimed) && !listed(id2)) {
+      const a = relaunchOrBlock(id2, t.attempts);
+      if (a.type === "block") tasks[id2] = { ...t, status: "blocked", detail: a.reason, updatedAt: nowIso };
+      actions.push(a);
+      continue;
+    }
+    const quiet = now - Date.parse(t.stageSince) >= NUDGE_MINUTES * 6e4;
+    const nudgedLately = !!t.nudgedAt && now - Date.parse(t.nudgedAt) < NUDGE_MINUTES * 6e4;
+    if (quiet && !nudgedLately && listed(id2)?.state === "idle") actions.push({ type: "nudge", task: id2, stage: t.stage });
+  }
   const runningIds = Object.keys(tasks).filter((id2) => tasks[id2].status === "running");
   const busy = runningIds.map((id2) => byId.get(id2)).filter((t) => !!t);
   let slots = exec.parallel - runningIds.length;
@@ -12976,8 +13032,10 @@ function schedule(i) {
     active = false;
     stopReason2 = "finished";
     stallReason = null;
+  } else if (!moving && plan.tasks.some((t) => statusOf(states, t.id) !== "done" && claimedByOther(t.id))) {
+    actions.push({ type: "wait", seconds: STEP_WAIT_SECONDS });
   } else if (!moving) {
-    stallReason = describeStall(plan, states, tasks, depIntegrated, claimedByOther);
+    stallReason = describeStall(plan, states, tasks, depIntegrated);
     actions.push({ type: "stalled", reason: stallReason });
     active = false;
     stopReason2 = "stalled";
@@ -12986,7 +13044,7 @@ function schedule(i) {
   }
   return { actions, next: { ...exec, tasks, active, stopReason: stopReason2, stallReason, lastStepAt: nowIso } };
 }
-function describeStall(plan, states, tasks, depIntegrated, claimedByOther) {
+function describeStall(plan, states, tasks, depIntegrated) {
   const groups = /* @__PURE__ */ new Map();
   const add = (key, id2) => groups.set(key, [...groups.get(key) ?? [], id2]);
   for (const t of plan.tasks) {
@@ -12994,7 +13052,6 @@ function describeStall(plan, states, tasks, depIntegrated, claimedByOther) {
     const ex = tasks[t.id];
     if (ex?.status === "conflict") add("conflict", t.id);
     else if (ex?.status === "blocked" || statusOf(states, t.id) === "blocked") add("blocked", t.id);
-    else if (claimedByOther(t.id)) add(`claimed by ${states[t.id].owner}`, t.id);
     else {
       const dep = t.depends_on.find((d) => !depIntegrated(d));
       if (dep) add(`waits for ${dep} (${statusOf(states, dep) === "done" ? "not integrated" : "not done"})`, t.id);
@@ -13019,8 +13076,183 @@ function widthOf(plan) {
   return width;
 }
 
-// src/lib/worktree.ts
+// src/lib/execution-view.ts
+var FUTURE_TOLERANCE_MS = 2 * 6e4;
+var AGENT_ALIVE_MS = 3 * 36e5;
+function usable(ts, now) {
+  const t = ts ? Date.parse(ts) : NaN;
+  return Number.isFinite(t) && t - now <= FUTURE_TOLERANCE_MS ? t : null;
+}
+function signalLiveness(ts, ended, now) {
+  const t = usable(ts, now);
+  if (ended || t === null) return "stopped";
+  const age = Math.max(0, now - t);
+  return age < LIVE_SILENT_MINUTES * 6e4 ? "alive" : age < LIVE_STOPPED_MINUTES * 6e4 ? "silent" : "stopped";
+}
+
+// src/forge/live.ts
+var import_node_fs11 = require("node:fs");
+var import_node_path11 = __toESM(require("node:path"), 1);
+
+// src/forge/local.ts
+var import_node_child_process = require("node:child_process");
+var import_node_fs9 = require("node:fs");
 var import_node_path9 = __toESM(require("node:path"), 1);
+var import_yaml3 = __toESM(require_dist(), 1);
+function mainCheckout(root) {
+  try {
+    const [gitDir, common] = (0, import_node_child_process.execFileSync)("git", ["rev-parse", "--git-dir", "--git-common-dir"], { cwd: root, encoding: "utf8", timeout: 5e3, stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).split(/\r?\n/).map((l) => l.trim());
+    if (!gitDir || !common) return root;
+    const commonDir = import_node_path9.default.resolve(root, common);
+    if (import_node_path9.default.resolve(root, gitDir) === commonDir || import_node_path9.default.basename(commonDir) !== ".git") return root;
+    return import_node_path9.default.dirname(commonDir);
+  } catch {
+    return root;
+  }
+}
+var localFile = (root) => import_node_path9.default.join(mainCheckout(root), ".forge", "local.yaml");
+var names = (x) => Array.isArray(x) ? [...new Set(x.filter((s2) => typeof s2 === "string" && NAME.test(s2)))] : [];
+function readLocal(root) {
+  let raw = null;
+  try {
+    raw = (0, import_yaml3.parse)((0, import_node_fs9.readFileSync)(localFile(root), "utf8"));
+  } catch {
+    raw = null;
+  }
+  const o = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const surfaces = {};
+  if (o.surfaces && typeof o.surfaces === "object" && !Array.isArray(o.surfaces)) {
+    for (const [k, v] of Object.entries(o.surfaces)) {
+      if (!NAME.test(k) || !v || typeof v !== "object" || Array.isArray(v)) continue;
+      const p = v;
+      if (p.state === "allowed" || p.state === "denied") surfaces[k] = { state: p.state, hash: typeof p.hash === "string" ? p.hash : null };
+    }
+  }
+  return { ...o, surfaces, known: names(o.known), proposed: names(o.proposed) };
+}
+function writeLocal(root, s2) {
+  forgeDir(mainCheckout(root));
+  const file = localFile(root);
+  const tmp = `${file}.${process.pid}.tmp`;
+  (0, import_node_fs9.writeFileSync)(tmp, (0, import_yaml3.stringify)(s2));
+  (0, import_node_fs9.renameSync)(tmp, file);
+}
+function updateLocal(root, fn) {
+  const next = fn(readLocal(root));
+  writeLocal(root, next);
+  return next;
+}
+
+// src/forge/members.ts
+var import_node_fs10 = require("node:fs");
+var import_node_path10 = __toESM(require("node:path"), 1);
+var isMemberId = (s2) => isSafeId(s2);
+var memberFile = (main, sessionId) => import_node_path10.default.join(main, ".forge", "members", `${sessionId}.json`);
+function normalizeMember(x) {
+  if (!x || typeof x !== "object" || Array.isArray(x)) return null;
+  const o = x;
+  const sessionId = typeof o.sessionId === "string" && isMemberId(o.sessionId) ? o.sessionId : null;
+  const role = o.role === "executor" || o.role === "manual" ? o.role : null;
+  const runId = typeof o.runId === "string" && o.runId ? o.runId.slice(0, 120) : null;
+  const since = typeof o.since === "string" && !Number.isNaN(Date.parse(o.since)) ? o.since : null;
+  if (!sessionId || !role || !runId || !since) return null;
+  const task = typeof o.task === "string" && isPlanId(o.task) ? o.task : null;
+  const name = typeof o.name === "string" && o.name ? o.name.slice(0, 80) : null;
+  return { sessionId, role, runId, task, name, since };
+}
+function readMember(main, sessionId) {
+  if (!isMemberId(sessionId)) return null;
+  try {
+    const m = normalizeMember(JSON.parse((0, import_node_fs10.readFileSync)(memberFile(main, sessionId), "utf8")));
+    return m && m.sessionId === sessionId ? m : null;
+  } catch {
+    return null;
+  }
+}
+function writeMember(main, m) {
+  if (!isMemberId(m.sessionId)) throw new Error(`invalid member session id: ${JSON.stringify(m.sessionId.slice(0, 130))}`);
+  forgeDir(main);
+  const file = memberFile(main, m.sessionId);
+  (0, import_node_fs10.mkdirSync)(import_node_path10.default.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    (0, import_node_fs10.writeFileSync)(tmp, JSON.stringify(m, null, 2) + "\n");
+    (0, import_node_fs10.renameSync)(tmp, file);
+  } finally {
+    (0, import_node_fs10.rmSync)(tmp, { force: true });
+  }
+}
+
+// src/forge/live.ts
+var liveFile = (main, sessionId) => import_node_path11.default.join(main, ".forge", "live", `${sessionId}.json`);
+var EVENTS = ["SessionStart", "SessionEnd", "SubagentStart", "SubagentStop", "Stop"];
+var AGENT_STALE_MS = 3 * 36e5;
+var SAFE = /^[A-Za-z0-9_\-.]{1,120}$/;
+function nextLive(prev, ev, ctx) {
+  let agents = prev?.agents ?? [];
+  if (ev.event === "SubagentStart" && ev.agentId) agents = [...agents.filter((a) => a.id !== ev.agentId), { id: ev.agentId, type: ev.agentType ?? "", since: ctx.now }].slice(-20);
+  if (ev.event === "SubagentStop" && ev.agentId) agents = agents.filter((a) => a.id !== ev.agentId);
+  if (ev.event === "SessionEnd") agents = [];
+  const cutoff = Date.parse(ctx.now) - AGENT_STALE_MS;
+  agents = agents.filter((a) => {
+    const t = Date.parse(a.since);
+    return !Number.isFinite(t) || t >= cutoff;
+  });
+  const ended = ev.event === "SessionEnd" ? true : ev.event === "SessionStart" ? false : prev?.ended ?? false;
+  return { sessionId: ctx.sessionId, role: ctx.role, runId: ctx.runId, task: ctx.task, event: ev.event, ts: ctx.now, agents, ended };
+}
+function hookLive(io, forced) {
+  try {
+    const input = JSON.parse(io.stdin ?? "");
+    const sessionId = typeof input.session_id === "string" && SAFE.test(input.session_id) ? input.session_id : null;
+    const named = EVENTS.includes(input.hook_event_name) ? input.hook_event_name : null;
+    const event = forced ?? named;
+    if (!sessionId || !event) return "";
+    const main = mainCheckout(io.cwd);
+    let exec = readExecution(main);
+    if (!exec?.active) return "";
+    const found = readMember(main, sessionId);
+    const isMember = !!found && found.runId === exec.runId;
+    if (exec.hookSession === null && event === "SubagentStart" && !isMember) {
+      exec = { ...exec, hookSession: sessionId };
+      saveExecution(main, exec);
+    }
+    const member = exec.hookSession === sessionId ? null : found;
+    if (exec.hookSession !== sessionId && (!member || member.runId !== exec.runId)) return "";
+    const role = member ? member.role : "coordinator";
+    const file = liveFile(main, sessionId);
+    let prev = null;
+    try {
+      prev = normalizeLive(JSON.parse((0, import_node_fs11.readFileSync)(file, "utf8")));
+    } catch {
+      prev = null;
+    }
+    const doc = nextLive(
+      prev,
+      { event, agentId: typeof input.agent_id === "string" ? input.agent_id : void 0, agentType: typeof input.agent_type === "string" ? input.agent_type : void 0 },
+      { sessionId, role, runId: exec.runId, task: member?.task ?? null, now: io.now().toISOString() }
+    );
+    forgeDir(main);
+    (0, import_node_fs11.mkdirSync)(import_node_path11.default.dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.tmp`;
+    try {
+      (0, import_node_fs11.writeFileSync)(tmp, JSON.stringify(doc));
+      (0, import_node_fs11.renameSync)(tmp, file);
+    } finally {
+      (0, import_node_fs11.rmSync)(tmp, { force: true });
+    }
+    if (event === "SessionStart" && !forced) {
+      const running = Object.values(exec.tasks).filter((t) => t.status === "running").length;
+      const text = role === "coordinator" ? `forge: this session coordinates the execution ${exec.runId} (${exec.mode}, ${running}/${exec.parallel} running, run branch ${exec.branch}). Resume it with /forge:run \u2192 Resume: renew your lease, reconcile each task and keep stepping.` : `forge: this session is the ${role} session of ${member?.task ?? "a task"} in the execution ${exec.runId} coordinated by ${exec.coordinator}. Resume it with /forge:run \u2192 Run member: rejoin with FORGE swarm join, renew your lease and continue from your last reported stage.`;
+      return JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: text } });
+    }
+  } catch {
+  }
+  return "";
+}
+
+// src/lib/worktree.ts
+var import_node_path12 = __toESM(require("node:path"), 1);
 function mainWorktreeFrom(porcelain) {
   if (typeof porcelain !== "string") return null;
   const line = porcelain.split(/\r?\n/).find((l) => l.startsWith("worktree "));
@@ -13028,7 +13260,7 @@ function mainWorktreeFrom(porcelain) {
 }
 function samePath(a, b) {
   const norm3 = (p) => {
-    const r2 = import_node_path9.default.resolve(p.replace(/\\/g, "/"));
+    const r2 = import_node_path12.default.resolve(p.replace(/\\/g, "/"));
     return process.platform === "win32" ? r2.toLowerCase() : r2;
   };
   return norm3(a) === norm3(b);
@@ -13040,9 +13272,9 @@ var TAKEOVER_MIN = 15;
 var MAX_SLEEP_S = 900;
 function readDocs(dir) {
   const out = {};
-  for (const f of (0, import_node_fs9.readdirSync)(dir).filter((x) => x.endsWith(".json"))) {
+  for (const f of (0, import_node_fs12.readdirSync)(dir).filter((x) => x.endsWith(".json"))) {
     try {
-      out[f.slice(0, -5)] = JSON.parse((0, import_node_fs9.readFileSync)(import_node_path10.default.join(dir, f), "utf8"));
+      out[f.slice(0, -5)] = JSON.parse((0, import_node_fs12.readFileSync)(import_node_path13.default.join(dir, f), "utf8"));
     } catch {
     }
   }
@@ -13059,7 +13291,10 @@ function setupFor(repo, configured) {
 }
 function runSetup(deps, dir, root) {
   const config = loadConfig(root);
-  const plan = setupFor(deps.repo, config.swarm.setup);
+  const wt = deps.at(dir).repo;
+  const mainRepo = deps.at(root).repo;
+  const repo = { ...wt, exists: (rel) => rel === ".venv" ? mainRepo.exists(rel) : wt.exists(rel) };
+  const plan = setupFor(repo, config.swarm.setup);
   if (!plan) return null;
   if (plan.cmd === null) return { cmd: null, ok: false, tail: [plan.hint] };
   const r2 = deps.at(dir).exec(plan.cmd, config.validatorTimeoutSec);
@@ -13077,16 +13312,46 @@ var sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0
 function loadPlanArg(io, planArg, sub) {
   if (!planArg) throw new UsageError(`swarm ${sub}: --plan is required`);
   try {
-    return parsePlan((0, import_node_fs9.readFileSync)(import_node_path10.default.resolve(io.cwd, planArg), "utf8"));
+    return parsePlan((0, import_node_fs12.readFileSync)(import_node_path13.default.resolve(io.cwd, planArg), "utf8"));
   } catch (e) {
     throw new UsageError(e instanceof PlanError ? `${planArg}: ${e.issues.join("; ")}` : `swarm ${sub}: cannot read ${planArg}`);
   }
 }
+function addTaskWorktree(deps, main, task, runBranch2) {
+  const dir = taskWorktree(main, task);
+  const branch = taskBranch(task);
+  let setup = null;
+  if (!(0, import_node_fs12.existsSync)(dir)) {
+    const g = (args) => deps.git(["-C", main, ...args]);
+    const exists = g(["rev-parse", "--verify", "-q", `refs/heads/${branch}`]) !== null;
+    const added = exists ? g(["worktree", "add", dir, branch]) : g(["worktree", "add", "-b", branch, dir, runBranch2]);
+    if (added === null) throw new UsageError(`swarm worktree: cannot add ${dir} for ${branch}`);
+    setup = runSetup(deps, dir, main);
+  }
+  return { worktree: dir, branch, base: deps.at(dir).git(["rev-parse", "HEAD"])?.trim() ?? null, setup };
+}
+function readTickInput(io, deps, e, planArg, db, sub) {
+  const plan = loadPlanArg(io, planArg, sub);
+  if (!db) throw new UsageError(`swarm ${sub}: --plan and --db are required`);
+  const stateDir = import_node_path13.default.resolve(io.cwd, db, "state");
+  const sessionsDir = import_node_path13.default.resolve(io.cwd, db, "sessions");
+  if (!(0, import_node_fs12.existsSync)(stateDir) || !(0, import_node_fs12.existsSync)(sessionsDir)) throw new UsageError(`swarm ${sub}: --db must hold the state and sessions listings`);
+  const states = readDocs(stateDir);
+  const sessions = readDocs(sessionsDir);
+  const integrated = [];
+  for (const t of plan.tasks) {
+    if (states[t.id]?.status !== "done") continue;
+    for (const c of states[t.id]?.commits ?? []) {
+      if (typeof c?.sha === "string" && ID.test(c.sha) && deps.git(["merge-base", "--is-ancestor", c.sha, e.branch]) !== null) integrated.push(c.sha);
+    }
+  }
+  return { plan, states, sessions, integrated };
+}
 var LOCAL_STATE = [":!.forge", ":!.waypoint", ":!.claude"];
-var baselineFile = (cacheDir, key, sha) => import_node_path10.default.join(cacheDir, "baseline", `${key}-${sha}.json`);
+var baselineFile = (cacheDir, key, sha) => import_node_path13.default.join(cacheDir, "baseline", `${key}-${sha}.json`);
 function readBaseline(cacheDir, key, sha) {
   try {
-    return JSON.parse((0, import_node_fs9.readFileSync)(baselineFile(cacheDir, key, sha), "utf8"));
+    return JSON.parse((0, import_node_fs12.readFileSync)(baselineFile(cacheDir, key, sha), "utf8"));
   } catch {
     return null;
   }
@@ -13095,8 +13360,8 @@ var timedOut = (results) => Array.isArray(results) && results.some((r2) => Array
 function writeBaseline(cacheDir, key, sha, results) {
   if (timedOut(results)) return;
   try {
-    (0, import_node_fs9.mkdirSync)(import_node_path10.default.join(cacheDir, "baseline"), { recursive: true });
-    (0, import_node_fs9.writeFileSync)(baselineFile(cacheDir, key, sha), JSON.stringify(results));
+    (0, import_node_fs12.mkdirSync)(import_node_path13.default.join(cacheDir, "baseline"), { recursive: true });
+    (0, import_node_fs12.writeFileSync)(baselineFile(cacheDir, key, sha), JSON.stringify(results));
   } catch {
   }
 }
@@ -13162,7 +13427,7 @@ function integrate(rest, io, deps) {
     if (head !== e.branch) return out({ result: "run-dirty", detail: `${wt} is on ${head ?? "?"}, not ${e.branch}` });
   }
   const config = loadConfig(io.cwd);
-  const r2 = mergeIn(target, t.branch, `forge: integrate ${task}`, "heavy", config.validatorTimeoutSec, wt, import_node_path10.default.join(io.cwd, ".forge", "execution"), "run");
+  const r2 = mergeIn(target, t.branch, `forge: integrate ${task}`, "heavy", config.validatorTimeoutSec, wt, import_node_path13.default.join(io.cwd, ".forge", "execution"), "run");
   const cur = readExecution(io.cwd);
   if (r2.result === "dirty") return out({ result: "run-dirty", detail: r2.detail });
   const next = r2.result === "merged" ? { ...cur.tasks[task], status: "integrated", stage: "integrate", updatedAt: at, detail: null } : { ...cur.tasks[task], status: "conflict", detail: r2.detail, updatedAt: at };
@@ -13178,7 +13443,7 @@ function mergeFinal(rest, io, deps) {
   const branch = deps.git(["rev-parse", "--abbrev-ref", "HEAD"])?.trim();
   if (branch !== e.base) return out({ result: "main-dirty", detail: `the main checkout is on ${branch ?? "?"}, not ${e.base}` });
   const config = loadConfig(io.cwd);
-  const r2 = mergeIn(deps, e.branch, `forge: merge ${e.branch}`, "final", config.validatorTimeoutSec, io.cwd, import_node_path10.default.join(io.cwd, ".forge", "execution"), "main");
+  const r2 = mergeIn(deps, e.branch, `forge: merge ${e.branch}`, "final", config.validatorTimeoutSec, io.cwd, import_node_path13.default.join(io.cwd, ".forge", "execution"), "main");
   if (r2.result === "dirty") return out({ result: "main-dirty", detail: `the main checkout ${r2.detail}` });
   return out(r2.result === "merged" ? { result: "merged", sha: r2.sha, preexisting: r2.preexisting } : { result: "conflict", detail: r2.detail });
 }
@@ -13199,7 +13464,7 @@ function swarmCommand(args, io, deps) {
     if (!e) throw new UsageError(`swarm ${sub}: no execution (forge swarm start)`);
     return e;
   };
-  if (["start", "tick", "integrate", "merge", "sleep", "worktree", "retry"].includes(sub ?? "")) {
+  if (["start", "tick", "integrate", "merge", "sleep", "worktree", "retry", "relaunch", "nudge", "takeover"].includes(sub ?? "") && !(sub === "worktree" && has("member"))) {
     const top = deps.git(["rev-parse", "--show-toplevel"])?.trim();
     const main = mainWorktreeFrom(deps.git(["worktree", "list", "--porcelain"]));
     if (!top || !main || !samePath(top, main)) {
@@ -13211,7 +13476,64 @@ function swarmCommand(args, io, deps) {
     if (!t || !isPlanId(t)) throw new UsageError(`swarm ${sub}: a task id is required`);
     return t;
   };
+  const memberCtx = (needMember) => {
+    const main = mainCheckout(io.cwd);
+    const e = readExecution(main);
+    if (!e?.active) throw new UsageError(`swarm ${sub}: no active execution`);
+    const session = flag("session") ?? flag("member");
+    if (!session) throw new UsageError(`swarm ${sub}: --session is required`);
+    if (!isMemberId(session)) throw new UsageError(`swarm ${sub}: --session ${session.slice(0, 130)} is not a valid session id (letters, digits, _ - .; max 120)`);
+    const m = needMember ? readMember(main, session) : null;
+    if (needMember && (!m || m.runId !== e.runId)) throw new UsageError(`swarm ${sub}: ${session} has not joined this execution`);
+    return { main, e, session, m };
+  };
   switch (sub) {
+    case "join": {
+      const { main, e, session } = memberCtx(false);
+      if (session === e.coordinator || session === e.hookSession) throw new UsageError(`swarm join: ${session} coordinates this execution`);
+      const role = flag("role");
+      if (role !== "executor" && role !== "manual") throw new UsageError("swarm join: --role must be executor or manual");
+      const task = flag("task") ?? null;
+      if (task !== null && !isPlanId(task)) throw new UsageError("swarm join: --task is not a task id");
+      if (role === "executor" && !task) throw new UsageError("swarm join: an executor needs --task");
+      writeMember(main, { sessionId: session, role, runId: e.runId, task, name: flag("name") ?? null, since: iso3 });
+      return json({ runId: e.runId, role, task, coordinator: e.coordinator, branch: e.branch, mode: e.mode, project: e.project });
+    }
+    case "report": {
+      const task = taskArg();
+      const { main, e, session, m } = memberCtx(true);
+      const member = m;
+      if (member.role === "executor" && member.task !== task) throw new UsageError(`swarm report: ${session} executes ${member.task}, not ${task}`);
+      const stage = flag("stage");
+      if (!stage || !STAGES.includes(stage)) throw new UsageError(`swarm report: --stage must be one of ${STAGES.join("|")}`);
+      const status = flag("status") ?? "running";
+      if (!["running", "accepted", "blocked"].includes(status)) throw new UsageError("swarm report: --status must be running, accepted or blocked");
+      const round = has("round") ? Number(flag("round")) : 0;
+      if (!Number.isInteger(round) || round < 0 || round > 99) throw new UsageError("swarm report: --round must be an integer from 0 to 99");
+      let prev = null;
+      try {
+        prev = normalizePublicTask(JSON.parse((0, import_node_fs12.readFileSync)(executionTaskFile(main, task), "utf8")));
+      } catch {
+        prev = null;
+      }
+      if (prev && prev.by !== session && Date.parse(prev.leaseUntil) > now.getTime()) {
+        throw new UsageError(`swarm report: ${task} is reported by ${prev.by} until ${prev.leaseUntil}`);
+      }
+      if (member.role === "manual" && member.task !== task) writeMember(main, { ...member, task });
+      const since = prev && prev.by === session && prev.stage === stage && prev.runId === e.runId ? prev.since : iso3;
+      const lease = flag("lease") && !Number.isNaN(Date.parse(flag("lease"))) ? flag("lease") : new Date(now.getTime() + LEASE_MINUTES * 6e4).toISOString();
+      const p = { task, runId: e.runId, stage, status, agent: has("no-agent") ? null : flag("agent") ?? null, round, since, updatedAt: iso3, leaseUntil: lease, by: session, mode: member.role === "executor" ? "sessions" : "manual" };
+      writePublicTask(main, p);
+      return json(p);
+    }
+    case "next": {
+      const { e, session } = memberCtx(true);
+      const { plan, states, sessions, integrated } = readTickInput(io, deps, e, flag("plan"), flag("db"), "next");
+      const running = Object.values(e.tasks).filter((t) => t.status === "running").length;
+      const d = schedule({ plan, states, sessions, exec: { ...e, coordinator: session, parallel: Math.min(10, running + 1) }, integrated, now: now.getTime() });
+      const start = d.actions.find((a) => a.type === "start");
+      return json(start ? { task: start.task, reason: null } : { task: null, reason: d.next.stallReason ?? "nothing is ready" });
+    }
     case "start": {
       const project = flag("project");
       const session = flag("session");
@@ -13235,8 +13557,13 @@ function swarmCommand(args, io, deps) {
         if (now.getTime() - last < TAKEOVER_MIN * 6e4) throw new UsageError(`swarm start: coordinator ${prev.coordinator} is active (last step ${prev.lastStepAt ?? prev.startedAt})`);
       }
       const branch = flag("branch") ?? runBranch(project);
-      if (!/^[A-Za-z0-9_./][A-Za-z0-9_\-./]{0,119}$/.test(branch) || branch.includes("..")) throw new UsageError("swarm start: --branch is not a valid branch name");
+      if (!isRunBranch(branch)) throw new UsageError("swarm start: --branch is not a valid branch name");
+      if (!isMemberId(session)) throw new UsageError("swarm start: --session must use letters, digits, _ - . (at most 120)");
+      if (!isSafeId(`${project}-${iso3.replace(/[:.]/g, "")}`)) throw new UsageError("swarm start: --project must use letters, digits, _ - .");
+      if (kind === "ephemeral" && !isRunBranch(base)) throw new UsageError(`swarm start: the base branch ${base} is outside the run branch rule (letters, digits, _ - . /)`);
       let setup = null;
+      let baseSync = null;
+      const resume = !!prev && prev.active && prev.project === project && prev.branch === (kind === "plan" ? branch : base);
       if (kind === "plan") {
         const wt = runWorktree(io.cwd);
         if (branch === base) throw new UsageError(`swarm start: ${branch} is the base branch (checked out in the main checkout); the run branch must be another one (omit --branch for ${runBranch(project)})`);
@@ -13244,20 +13571,37 @@ function swarmCommand(args, io, deps) {
         if (defaultBranch && branch === defaultBranch) throw new UsageError(`swarm start: ${branch} is the default branch; an execution never integrates into it directly`);
         const holder = worktreeHolding(deps.git(["worktree", "list", "--porcelain"]), branch);
         if (holder && !samePath(holder, wt)) throw new UsageError(`swarm start: ${branch} is checked out in another worktree (${holder}); pick another --branch`);
-        if ((0, import_node_fs9.existsSync)(wt)) {
+        if ((0, import_node_fs12.existsSync)(wt)) {
           const on = deps.at(wt).git(["rev-parse", "--abbrev-ref", "HEAD"])?.trim();
           if (on !== branch) throw new UsageError(`swarm start: ${wt} exists and is on ${on ?? "?"}, not ${branch}; switch it or remove it (git worktree remove)`);
         }
-        if (deps.git(["rev-parse", "--verify", "-q", `refs/heads/${branch}`]) === null && deps.git(["branch", branch, base]) === null) {
+        const existed = deps.git(["rev-parse", "--verify", "-q", `refs/heads/${branch}`]) !== null;
+        if (!existed && deps.git(["branch", branch, base]) === null) {
           throw new UsageError(`swarm start: cannot create ${branch} from ${base}`);
         }
-        if (!(0, import_node_fs9.existsSync)(wt)) {
+        if (!(0, import_node_fs12.existsSync)(wt)) {
           if (deps.git(["worktree", "add", wt, branch]) === null) throw new UsageError(`swarm start: cannot add the worktree ${wt}`);
           setup = runSetup(deps, wt, io.cwd);
         }
+        if (!existed) baseSync = "created";
+        else if (!resume) {
+          const at = deps.at(wt);
+          const status = at.git(["status", "--porcelain", "--", ".", ...LOCAL_STATE]);
+          const dirty = status === null || status.trim() !== "";
+          const dirtyMsg = `swarm start: the run worktree ${wt} has uncommitted changes; commit or clean them before ${branch} is brought up to ${base}`;
+          if (deps.git(["merge-base", "--is-ancestor", base, branch]) !== null) baseSync = "up-to-date";
+          else if (deps.git(["merge-base", "--is-ancestor", branch, base]) !== null) {
+            if (at.git(["merge", "--ff-only", base]) === null) throw new UsageError(dirty ? dirtyMsg : `swarm start: cannot fast-forward ${branch} to ${base}`);
+            baseSync = "fast-forward";
+          } else if (at.git(["merge", "--no-ff", base, "-m", `forge: bring ${base} into ${branch}`]) !== null) baseSync = "merged";
+          else {
+            at.git(["merge", "--abort"]);
+            if (dirty) throw new UsageError(dirtyMsg);
+            throw new UsageError(`swarm start: ${branch} has diverged from ${base} and they conflict; merge them by hand or remove ${branch}`);
+          }
+        }
       }
-      const resume = prev && prev.active && prev.project === project && prev.branch === (kind === "plan" ? branch : base);
-      const state = resume ? { ...prev, parallel, mode, mergeOnFinish: prev.mergeOnFinish || has("merge-on-finish"), coordinator: session, hookSession: null, sleepUntil: null } : {
+      const state = resume && prev ? { ...prev, parallel, mode, mergeOnFinish: prev.mergeOnFinish || has("merge-on-finish"), coordinator: session, hookSession: null, sleepUntil: null } : {
         runId: `${project}-${iso3.replace(/[:.]/g, "")}`,
         kind,
         mode,
@@ -13277,9 +13621,10 @@ function swarmCommand(args, io, deps) {
         sleepUntil: null,
         tasks: {}
       };
-      (0, import_node_fs9.rmSync)(stopFile(io.cwd), { force: true });
+      if (!normalizeExecution(state)) throw new UsageError("swarm start: --project, --session and the run branch must use letters, digits, _ - . (and / in the branch), at most 120 characters");
+      (0, import_node_fs12.rmSync)(stopFile(io.cwd), { force: true });
       saveExecution(io.cwd, state);
-      return json({ ...state, setup });
+      return json({ ...state, setup, baseSync });
     }
     case "status": {
       const state = readExecution(io.cwd);
@@ -13295,18 +13640,15 @@ function swarmCommand(args, io, deps) {
       return json({ width, configured, recommended: { mode: "subagents", parallel }, reasons });
     }
     case "worktree": {
+      if (has("member")) {
+        const task2 = taskArg();
+        const { main, e: e2, session, m } = memberCtx(true);
+        if (m.role === "executor" && m.task !== task2) throw new UsageError(`swarm worktree: ${session} executes ${m.task}, not ${task2}`);
+        return json(addTaskWorktree(deps, main, task2, e2.branch));
+      }
       const task = taskArg();
       const e = current();
-      const dir = taskWorktree(io.cwd, task);
-      const branch = taskBranch(task);
-      let setup = null;
-      if (!(0, import_node_fs9.existsSync)(dir)) {
-        const exists = deps.git(["rev-parse", "--verify", "-q", `refs/heads/${branch}`]) !== null;
-        const added = exists ? deps.git(["worktree", "add", dir, branch]) : deps.git(["worktree", "add", "-b", branch, dir, e.branch]);
-        if (added === null) throw new UsageError(`swarm worktree: cannot add ${dir} for ${branch}`);
-        setup = runSetup(deps, dir, io.cwd);
-      }
-      const base = deps.at(dir).git(["rev-parse", "HEAD"])?.trim() ?? null;
+      const { worktree: dir, branch, base, setup } = addTaskWorktree(deps, io.cwd, task, e.branch);
       const t = e.tasks[task] ?? { status: "running", stage: "brief", round: 0, worktree: dir, branch, executor: e.mode, attempts: 0, agent: null, startedAt: iso3, stageSince: iso3, updatedAt: iso3, detail: null };
       saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, worktree: dir, branch, updatedAt: iso3 } } });
       return json({ worktree: dir, branch, base, setup });
@@ -13319,7 +13661,7 @@ function swarmCommand(args, io, deps) {
       if (has("drop")) {
         const { [task]: _dropped, ...tasks } = e.tasks;
         saveExecution(io.cwd, { ...e, tasks });
-        (0, import_node_fs9.rmSync)(executionTaskFile(io.cwd, task), { force: true });
+        (0, import_node_fs12.rmSync)(executionTaskFile(io.cwd, task), { force: true });
         return ok();
       }
       const stage = flag("stage") ?? prev.stage;
@@ -13329,7 +13671,7 @@ function swarmCommand(args, io, deps) {
       let detail = prev.detail;
       if (flag("detail-file")) {
         try {
-          detail = (0, import_node_fs9.readFileSync)(import_node_path10.default.resolve(io.cwd, flag("detail-file")), "utf8").trim().slice(0, 500) || null;
+          detail = (0, import_node_fs12.readFileSync)(import_node_path13.default.resolve(io.cwd, flag("detail-file")), "utf8").trim().slice(0, 500) || null;
         } catch {
           throw new UsageError("swarm task: cannot read --detail-file");
         }
@@ -13348,22 +13690,30 @@ function swarmCommand(args, io, deps) {
     case "tick": {
       const e = current();
       if (!e.active) throw new UsageError("swarm tick: the execution is not active");
-      const plan = loadPlanArg(io, flag("plan"), "tick");
-      const db = flag("db");
-      if (!db) throw new UsageError("swarm tick: --plan and --db are required");
-      const stateDir = import_node_path10.default.resolve(io.cwd, db, "state");
-      const sessionsDir = import_node_path10.default.resolve(io.cwd, db, "sessions");
-      if (!(0, import_node_fs9.existsSync)(stateDir) || !(0, import_node_fs9.existsSync)(sessionsDir)) throw new UsageError("swarm tick: --db must hold the state and sessions listings");
-      const states = readDocs(stateDir);
-      const sessions = readDocs(sessionsDir);
-      const integrated = [];
-      for (const t of plan.tasks) {
-        if (states[t.id]?.status !== "done") continue;
-        for (const c of states[t.id]?.commits ?? []) {
-          if (typeof c?.sha === "string" && ID.test(c.sha) && deps.git(["merge-base", "--is-ancestor", c.sha, e.branch]) !== null) integrated.push(c.sha);
+      const { plan, states, sessions, integrated } = readTickInput(io, deps, e, flag("plan"), flag("db"), "tick");
+      const publicTasks = {};
+      try {
+        for (const f of (0, import_node_fs12.readdirSync)(import_node_path13.default.join(io.cwd, ".forge", "execution")).filter((n) => n.endsWith(".json")).slice(0, 500)) {
+          try {
+            const p = normalizePublicTask(JSON.parse((0, import_node_fs12.readFileSync)(import_node_path13.default.join(io.cwd, ".forge", "execution", f), "utf8")));
+            if (p && `${p.task}.json` === f) publicTasks[p.task] = p;
+          } catch {
+          }
         }
+      } catch {
       }
-      const d = schedule({ plan, states, sessions, exec: e, integrated, now: now.getTime() });
+      let agents = null;
+      if (flag("agents")) {
+        let raw;
+        try {
+          raw = JSON.parse((0, import_node_fs12.readFileSync)(import_node_path13.default.resolve(io.cwd, flag("agents")), "utf8"));
+        } catch {
+          throw new UsageError("swarm tick: cannot read --agents");
+        }
+        if (!Array.isArray(raw)) throw new UsageError("swarm tick: --agents must be a JSON array of {name, state}");
+        agents = raw.filter((a) => !!a && typeof a === "object" && typeof a.name === "string" && (a.state === "working" || a.state === "idle")).slice(0, 100);
+      }
+      const d = schedule({ plan, states, sessions, exec: e, integrated, now: now.getTime(), publicTasks, agents });
       saveExecution(io.cwd, d.next);
       return json({ actions: d.actions, running: Object.values(d.next.tasks).filter((t) => t.status === "running").length, parallel: e.parallel });
     }
@@ -13379,6 +13729,57 @@ function swarmCommand(args, io, deps) {
         tasks: { ...e.tasks, [task]: { ...t, status: "running", stage: "implement", attempts: t.attempts + 1, detail: null, updatedAt: iso3, stageSince: iso3 } }
       });
       return ok();
+    }
+    case "relaunch":
+    case "nudge": {
+      const task = taskArg();
+      const e = current();
+      const t = e.tasks[task];
+      if (!t || t.status !== "running" || t.executor !== "sessions") throw new UsageError(`swarm ${sub}: ${task} is not a running sessions task`);
+      const planArg = flag("plan");
+      if (has("plan") && (!planArg || planArg.startsWith("-"))) throw new UsageError(`swarm ${sub}: --plan needs a file`);
+      if (planArg) {
+        const isFile = (() => {
+          try {
+            return (0, import_node_fs12.statSync)(import_node_path13.default.resolve(io.cwd, planArg)).isFile();
+          } catch {
+            return false;
+          }
+        })();
+        if (planArg.startsWith("-") || !isFile) throw new UsageError(`swarm ${sub}: --plan ${planArg} is not a plan file`);
+      }
+      if (sub === "nudge") {
+        const es2 = (planArg ? loadPlanArg(io, planArg, "nudge").locale : planLocale(io.cwd, e.project)) === "es";
+        const text = es2 ? `[forge run] ${task}: contin\xFAa con ${t.stage}; si est\xE1s bloqueado, m\xE1rcalo como bloqueado` : `[forge run] ${task}: continue with ${t.stage}; if you are blocked, mark it blocked`;
+        saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, nudgedAt: iso3 } } });
+        return json({ task, name: `wp-${e.project}-${task}`, text });
+      }
+      const planPath = planArg;
+      if (!planPath) throw new UsageError("swarm relaunch: --plan is required");
+      const verdict = relaunchOrBlock(task, t.attempts);
+      if (verdict.type === "block") {
+        saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, status: "blocked", detail: verdict.reason, updatedAt: iso3 } } });
+        return json({ task, blocked: true, reason: verdict.reason });
+      }
+      const attempt = verdict.attempt;
+      const log = deps.git(["log", "--oneline", "-n", "20", `${e.branch}..${t.branch}`])?.trim();
+      const commits = log ? log.split(/\r?\n/).map((l) => `  - ${l}`).join("\n") : "  - none";
+      const note = import_node_path13.default.join(io.cwd, ".forge", "work", task, "handover.md");
+      (0, import_node_fs12.mkdirSync)(import_node_path13.default.dirname(note), { recursive: true });
+      (0, import_node_fs12.writeFileSync)(note, [
+        `# Handover: ${task} (attempt ${attempt} of ${RELAUNCH_CAP + 1})`,
+        "",
+        `- Run: ${e.runId} \xB7 coordinator ${e.coordinator} \xB7 run branch ${e.branch}`,
+        `- Last stage: ${t.stage} \xB7 round ${t.round} \xB7 agent ${t.agent ?? "none"} \xB7 since ${t.stageSince}`,
+        `- Detail: ${t.detail ?? "none"}`,
+        `- Commits on ${t.branch} not yet on ${e.branch}:`,
+        commits,
+        "",
+        `Resume from ${t.branch} in this worktree: read .forge/work/${task}/task.json if it exists, do not redo a step whose output file is already written, and continue from the last stage.`,
+        ""
+      ].join("\n"));
+      saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, attempts: attempt, startedAt: iso3, nudgedAt: null, updatedAt: iso3 } } });
+      return json({ task, attempt, note, launch: ["launch", planPath, task, "--task", "--run", e.runId, "--coordinator", e.coordinator, "--base", e.branch] });
     }
     case "sleep": {
       const seconds = Number(rest[0]);
@@ -13399,12 +13800,44 @@ function swarmCommand(args, io, deps) {
       if (e?.active) saveExecution(io.cwd, { ...e, active: false, stopReason: reason, sleepUntil: null });
       return ok();
     }
+    case "takeover": {
+      const session = flag("session");
+      if (!session) throw new UsageError("swarm takeover: --session is required");
+      if (!isMemberId(session)) throw new UsageError(`swarm takeover: --session ${session.slice(0, 130)} is not a valid session id (letters, digits, _ - .; max 120)`);
+      const e = current();
+      if (!e.active) throw new UsageError("swarm takeover: the execution is not active");
+      if (session === e.coordinator || session === e.hookSession) {
+        if (e.hookSession !== session) saveExecution(io.cwd, { ...e, hookSession: session });
+        return json({ took: "already", runId: e.runId });
+      }
+      if (readMember(io.cwd, session)?.runId === e.runId) throw new UsageError(`swarm takeover: ${session} is a member of the execution ${e.runId}; a run member cannot take over the coordinator`);
+      const previous = e.hookSession ?? e.coordinator;
+      const order = ["stopped", "silent", "alive"];
+      const seen = [];
+      if (isSafeId(previous)) try {
+        const d = normalizeLive(JSON.parse((0, import_node_fs12.readFileSync)(liveFile(io.cwd, previous), "utf8")));
+        if (d) seen.push(signalLiveness(d.ts, d.ended, now.getTime()));
+      } catch {
+      }
+      if (flag("db") && isSafeId(previous)) {
+        try {
+          seen.push(sessionLiveness(JSON.parse((0, import_node_fs12.readFileSync)(import_node_path13.default.resolve(io.cwd, flag("db"), "sessions", `${previous}.json`), "utf8")), now.getTime()));
+        } catch {
+        }
+      }
+      if (!seen.length) seen.push(now.getTime() - Date.parse(e.lastStepAt ?? e.startedAt) >= TAKEOVER_MIN * 6e4 ? "stopped" : "alive");
+      const liveness2 = seen.reduce((a, b) => order.indexOf(b) > order.indexOf(a) ? b : a, "stopped");
+      if (liveness2 !== "stopped") return json({ took: false, previous, liveness: liveness2, joinAs: "manual" });
+      saveExecution(io.cwd, { ...e, coordinator: session, hookSession: session, sleepUntil: null });
+      appendEvent(io.cwd, { ts: iso3, kind: "decision", what: "takeover", previous, by: session });
+      return json({ took: true, previous, runId: e.runId, running: Object.entries(e.tasks).filter(([, t]) => t.status === "running").map(([id2]) => id2) });
+    }
     case "integrate":
       return integrate(rest, io, deps);
     case "merge":
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError("usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]|status|propose --plan P|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick --plan P --db DIR|integrate <T>|merge|retry <T>|sleep <seconds> [--mark]|stop [--reason stopped|budget]>");
+      throw new UsageError("usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]|status|propose --plan P|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick --plan P --db DIR [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T>|merge|retry <T>|sleep <seconds> [--mark]|stop [--reason stopped|budget]|join --session SID --role executor|manual [--task T] [--name N]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID [--db DIR]>");
   }
 }
 
@@ -13453,120 +13886,10 @@ function cleanupPids(pids, kill, protect = [process.pid, process.ppid]) {
 }
 var killTarget = (pid, pgid) => pgid === pid ? -pid : pid;
 
-// src/forge/local.ts
-var import_node_child_process = require("node:child_process");
-var import_node_fs10 = require("node:fs");
-var import_node_path11 = __toESM(require("node:path"), 1);
-var import_yaml3 = __toESM(require_dist(), 1);
-function mainCheckout(root) {
-  try {
-    const [gitDir, common] = (0, import_node_child_process.execFileSync)("git", ["rev-parse", "--git-dir", "--git-common-dir"], { cwd: root, encoding: "utf8", timeout: 5e3, stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).split(/\r?\n/).map((l) => l.trim());
-    if (!gitDir || !common) return root;
-    const commonDir = import_node_path11.default.resolve(root, common);
-    if (import_node_path11.default.resolve(root, gitDir) === commonDir || import_node_path11.default.basename(commonDir) !== ".git") return root;
-    return import_node_path11.default.dirname(commonDir);
-  } catch {
-    return root;
-  }
-}
-var localFile = (root) => import_node_path11.default.join(mainCheckout(root), ".forge", "local.yaml");
-var names = (x) => Array.isArray(x) ? [...new Set(x.filter((s2) => typeof s2 === "string" && NAME.test(s2)))] : [];
-function readLocal(root) {
-  let raw = null;
-  try {
-    raw = (0, import_yaml3.parse)((0, import_node_fs10.readFileSync)(localFile(root), "utf8"));
-  } catch {
-    raw = null;
-  }
-  const o = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
-  const surfaces = {};
-  if (o.surfaces && typeof o.surfaces === "object" && !Array.isArray(o.surfaces)) {
-    for (const [k, v] of Object.entries(o.surfaces)) {
-      if (!NAME.test(k) || !v || typeof v !== "object" || Array.isArray(v)) continue;
-      const p = v;
-      if (p.state === "allowed" || p.state === "denied") surfaces[k] = { state: p.state, hash: typeof p.hash === "string" ? p.hash : null };
-    }
-  }
-  return { ...o, surfaces, known: names(o.known), proposed: names(o.proposed) };
-}
-function writeLocal(root, s2) {
-  forgeDir(mainCheckout(root));
-  const file = localFile(root);
-  const tmp = `${file}.${process.pid}.tmp`;
-  (0, import_node_fs10.writeFileSync)(tmp, (0, import_yaml3.stringify)(s2));
-  (0, import_node_fs10.renameSync)(tmp, file);
-}
-function updateLocal(root, fn) {
-  const next = fn(readLocal(root));
-  writeLocal(root, next);
-  return next;
-}
-
-// src/forge/live.ts
-var import_node_fs11 = require("node:fs");
-var import_node_path12 = __toESM(require("node:path"), 1);
-var liveFile = (main, sessionId) => import_node_path12.default.join(main, ".forge", "live", `${sessionId}.json`);
-var EVENTS = ["SessionStart", "SessionEnd", "SubagentStart", "SubagentStop", "Stop"];
-var AGENT_STALE_MS = 3 * 36e5;
-var SAFE = /^[A-Za-z0-9_\-.]{1,120}$/;
-function nextLive(prev, ev, ctx) {
-  let agents = prev?.agents ?? [];
-  if (ev.event === "SubagentStart" && ev.agentId) agents = [...agents.filter((a) => a.id !== ev.agentId), { id: ev.agentId, type: ev.agentType ?? "", since: ctx.now }].slice(-20);
-  if (ev.event === "SubagentStop" && ev.agentId) agents = agents.filter((a) => a.id !== ev.agentId);
-  if (ev.event === "SessionEnd") agents = [];
-  const cutoff = Date.parse(ctx.now) - AGENT_STALE_MS;
-  agents = agents.filter((a) => {
-    const t = Date.parse(a.since);
-    return !Number.isFinite(t) || t >= cutoff;
-  });
-  const ended = ev.event === "SessionEnd" ? true : ev.event === "SessionStart" ? false : prev?.ended ?? false;
-  return { sessionId: ctx.sessionId, role: ctx.role, runId: ctx.runId, task: ctx.task, event: ev.event, ts: ctx.now, agents, ended };
-}
-function hookLive(io, forced) {
-  try {
-    const input = JSON.parse(io.stdin ?? "");
-    const sessionId = typeof input.session_id === "string" && SAFE.test(input.session_id) ? input.session_id : null;
-    const named = EVENTS.includes(input.hook_event_name) ? input.hook_event_name : null;
-    const event = forced ?? named;
-    if (!sessionId || !event) return "";
-    const main = mainCheckout(io.cwd);
-    let exec = readExecution(main);
-    if (!exec?.active) return "";
-    if (exec.hookSession === null && event === "SubagentStart") {
-      exec = { ...exec, hookSession: sessionId };
-      saveExecution(main, exec);
-    }
-    if (exec.hookSession !== sessionId) return "";
-    const file = liveFile(main, sessionId);
-    let prev = null;
-    try {
-      prev = normalizeLive(JSON.parse((0, import_node_fs11.readFileSync)(file, "utf8")));
-    } catch {
-      prev = null;
-    }
-    const doc = nextLive(
-      prev,
-      { event, agentId: typeof input.agent_id === "string" ? input.agent_id : void 0, agentType: typeof input.agent_type === "string" ? input.agent_type : void 0 },
-      { sessionId, role: "coordinator", runId: exec.runId, task: null, now: io.now().toISOString() }
-    );
-    forgeDir(main);
-    (0, import_node_fs11.mkdirSync)(import_node_path12.default.dirname(file), { recursive: true });
-    const tmp = `${file}.${process.pid}.tmp`;
-    try {
-      (0, import_node_fs11.writeFileSync)(tmp, JSON.stringify(doc));
-      (0, import_node_fs11.renameSync)(tmp, file);
-    } finally {
-      (0, import_node_fs11.rmSync)(tmp, { force: true });
-    }
-  } catch {
-  }
-  return "";
-}
-
 // src/forge/surfaces.ts
 var import_node_crypto2 = require("node:crypto");
-var import_node_fs12 = require("node:fs");
-var import_node_path13 = __toESM(require("node:path"), 1);
+var import_node_fs13 = require("node:fs");
+var import_node_path14 = __toESM(require("node:path"), 1);
 var import_yaml4 = __toESM(require_dist(), 1);
 function surfaceHash(text) {
   return (0, import_node_crypto2.createHash)("sha256").update(text.replace(/\r\n/g, "\n")).digest("hex").slice(0, 16);
@@ -13598,7 +13921,7 @@ function parseSurface(name, text) {
 function readSurfaces(root) {
   let names2 = [];
   try {
-    names2 = (0, import_node_fs12.readdirSync)(import_node_path13.default.join(root, ".forge", "verify"));
+    names2 = (0, import_node_fs13.readdirSync)(import_node_path14.default.join(root, ".forge", "verify"));
   } catch {
     return [];
   }
@@ -13606,7 +13929,7 @@ function readSurfaces(root) {
     const name = f.slice(0, -3);
     let text = "";
     try {
-      text = (0, import_node_fs12.readFileSync)(import_node_path13.default.join(root, ".forge", "verify", f), "utf8");
+      text = (0, import_node_fs13.readFileSync)(import_node_path14.default.join(root, ".forge", "verify", f), "utf8");
     } catch {
     }
     return parseSurface(name, text);
@@ -13696,12 +14019,12 @@ var USAGE = "usage: forge <triage|brief|validate|verdict|round|log|agents|last|p
 var MAX_OUTPUT = 4 * 1024 * 1024;
 var MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 function readTail(fd) {
-  const size = (0, import_node_fs13.fstatSync)(fd).size;
+  const size = (0, import_node_fs14.fstatSync)(fd).size;
   const len = Math.min(size, MAX_OUTPUT);
   const buf = Buffer.alloc(len);
   let off = 0;
   while (off < len) {
-    const n = (0, import_node_fs13.readSync)(fd, buf, off, len - off, size - len + off);
+    const n = (0, import_node_fs14.readSync)(fd, buf, off, len - off, size - len + off);
     if (n <= 0) break;
     off += n;
   }
@@ -13737,9 +14060,9 @@ function defaultExec(cwd2) {
     let dir;
     let fd;
     try {
-      dir = (0, import_node_fs13.mkdtempSync)(import_node_path14.default.join((0, import_node_os.tmpdir)(), "forge-exec-"));
-      const file = import_node_path14.default.join(dir, "out.log");
-      fd = (0, import_node_fs13.openSync)(file, "w+");
+      dir = (0, import_node_fs14.mkdtempSync)(import_node_path15.default.join((0, import_node_os.tmpdir)(), "forge-exec-"));
+      const file = import_node_path15.default.join(dir, "out.log");
+      fd = (0, import_node_fs14.openSync)(file, "w+");
       const r2 = (0, import_node_child_process2.spawnSync)(process.execPath, ["-e", WRAPPER_SOURCE, "--", cmd, String(timeoutMs), file], {
         cwd: cwd2,
         windowsHide: true,
@@ -13749,7 +14072,7 @@ function defaultExec(cwd2) {
         maxBuffer: 64 * 1024
       });
       const err = r2.error;
-      const timedOut2 = err?.code === "ETIMEDOUT" || r2.status === TIMEOUT_EXIT && (0, import_node_fs13.existsSync)(`${file}.timeout`);
+      const timedOut2 = err?.code === "ETIMEDOUT" || r2.status === TIMEOUT_EXIT && (0, import_node_fs14.existsSync)(`${file}.timeout`);
       let output = readTail(fd);
       if (r2.stderr) output += `${output && !output.endsWith("\n") ? "\n" : ""}${r2.stderr}`;
       if (err && !timedOut2) output += `${output && !output.endsWith("\n") ? "\n" : ""}${err.message}
@@ -13761,13 +14084,13 @@ function defaultExec(cwd2) {
     } finally {
       if (fd !== void 0) {
         try {
-          (0, import_node_fs13.closeSync)(fd);
+          (0, import_node_fs14.closeSync)(fd);
         } catch {
         }
       }
       if (dir !== void 0) {
         try {
-          (0, import_node_fs13.rmSync)(dir, { recursive: true, force: true });
+          (0, import_node_fs14.rmSync)(dir, { recursive: true, force: true });
         } catch {
         }
       }
@@ -13784,17 +14107,17 @@ function defaultGit(cwd2) {
   };
 }
 var repoReader = (root) => ({
-  exists: (rel) => (0, import_node_fs13.existsSync)(import_node_path14.default.join(root, rel)),
+  exists: (rel) => (0, import_node_fs14.existsSync)(import_node_path15.default.join(root, rel)),
   read: (rel) => {
     try {
-      return (0, import_node_fs13.readFileSync)(import_node_path14.default.join(root, rel), "utf8");
+      return (0, import_node_fs14.readFileSync)(import_node_path15.default.join(root, rel), "utf8");
     } catch {
       return null;
     }
   },
   list: (dir) => {
     try {
-      return (0, import_node_fs13.readdirSync)(import_node_path14.default.join(root, dir ?? ""));
+      return (0, import_node_fs14.readdirSync)(import_node_path15.default.join(root, dir ?? ""));
     } catch {
       return [];
     }
@@ -13804,7 +14127,7 @@ function planTask(cwd2, planArg, id2) {
   if (!planArg || !id2) throw new UsageError("--plan and --task are required");
   let text;
   try {
-    text = (0, import_node_fs13.readFileSync)(import_node_path14.default.resolve(cwd2, planArg), "utf8");
+    text = (0, import_node_fs14.readFileSync)(import_node_path15.default.resolve(cwd2, planArg), "utf8");
   } catch {
     throw new UsageError(`cannot read plan ${planArg}`);
   }
@@ -13820,13 +14143,13 @@ function planTask(cwd2, planArg, id2) {
   return { plan, task };
 }
 function findWaypointCli(scriptPath) {
-  const forgeRoot = import_node_path14.default.resolve(import_node_path14.default.dirname(scriptPath), "..");
-  const dev = import_node_path14.default.join(forgeRoot, "..", "waypoint", "dist", "waypoint.cjs");
-  if ((0, import_node_fs13.existsSync)(dev)) return import_node_path14.default.resolve(dev);
-  const base = import_node_path14.default.join(forgeRoot, "..", "..", "waypoint");
+  const forgeRoot = import_node_path15.default.resolve(import_node_path15.default.dirname(scriptPath), "..");
+  const dev = import_node_path15.default.join(forgeRoot, "..", "waypoint", "dist", "waypoint.cjs");
+  if ((0, import_node_fs14.existsSync)(dev)) return import_node_path15.default.resolve(dev);
+  const base = import_node_path15.default.join(forgeRoot, "..", "..", "waypoint");
   let versions = [];
   try {
-    versions = (0, import_node_fs13.readdirSync)(base);
+    versions = (0, import_node_fs14.readdirSync)(base);
   } catch {
     return null;
   }
@@ -13840,8 +14163,8 @@ function findWaypointCli(scriptPath) {
     return 0;
   };
   for (const v of versions.sort((a, b) => cmp(b, a))) {
-    const f = import_node_path14.default.join(base, v, "dist", "waypoint.cjs");
-    if ((0, import_node_fs13.existsSync)(f)) return import_node_path14.default.resolve(f);
+    const f = import_node_path15.default.join(base, v, "dist", "waypoint.cjs");
+    if ((0, import_node_fs14.existsSync)(f)) return import_node_path15.default.resolve(f);
   }
   return null;
 }
@@ -13849,7 +14172,7 @@ function stopContext(cwd2, now) {
   const proposals = loadProposals(cwd2);
   return {
     now,
-    stopFile: (0, import_node_fs13.existsSync)(stopFile(cwd2)),
+    stopFile: (0, import_node_fs14.existsSync)(stopFile(cwd2)),
     approvedPending: proposals.filter(isActionable).length,
     pendingProposals: proposals.filter((p) => p.status === "proposed" || p.status === "discussing").length
   };
@@ -13859,9 +14182,16 @@ function hookStop(io) {
     const input = JSON.parse(io.stdin ?? "");
     if (!input || typeof input !== "object" || Array.isArray(input)) return "";
     const hookInput = input;
-    const read = readExecution(io.cwd);
+    const main = mainCheckout(io.cwd);
+    const read = readExecution(main);
+    const sid = typeof hookInput.session_id === "string" ? hookInput.session_id : null;
+    const member = read?.active && sid ? readMember(main, sid) : null;
+    if (member && member.runId === read?.runId) {
+      hookLive(io, "Stop");
+      return "";
+    }
     const exec = bindHookSession(read, hookInput.session_id);
-    if (exec && exec !== read) saveExecution(io.cwd, exec);
+    if (exec && exec !== read) saveExecution(main, exec);
     hookLive(io, "Stop");
     const sleeping = !!exec?.active && !!exec.sleepUntil && Date.parse(exec.sleepUntil) > io.now().getTime();
     const run2 = parseRun(readRunText(io.cwd));
@@ -13872,10 +14202,10 @@ function hookStop(io) {
       if (d2.ended) appendEvent(io.cwd, { ts: io.now().toISOString(), kind: "cycle", action: "stopped", reason: d2.ended });
       return JSON.stringify({ decision: "block", reason: d2.reason + replyIn(planLocale(io.cwd, exec?.project)) }) + "\n";
     }
-    const d = decideExecutionStop(hookInput, exec, { now: io.now(), stopFile: (0, import_node_fs13.existsSync)(stopFile(io.cwd)) });
+    const d = decideExecutionStop(hookInput, exec, { now: io.now(), stopFile: (0, import_node_fs14.existsSync)(stopFile(main)) });
     if (!d.block) return "";
-    saveExecution(io.cwd, d.exec);
-    return JSON.stringify({ decision: "block", reason: d.reason + replyIn(planLocale(io.cwd, d.exec.project)) }) + "\n";
+    saveExecution(main, d.exec);
+    return JSON.stringify({ decision: "block", reason: d.reason + replyIn(planLocale(main, d.exec.project)) }) + "\n";
   } catch {
     return "";
   }
@@ -13885,10 +14215,10 @@ function run(argv, io) {
   if (cwdAt >= 0) {
     const dir = argv[cwdAt + 1];
     if (!dir || dir.startsWith("--")) return { code: 2, stdout: "", stderr: "forge: --cwd needs a directory\n" };
-    const abs = import_node_path14.default.resolve(io.cwd, dir);
-    if (!(0, import_node_fs13.existsSync)(abs)) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} does not exist
+    const abs = import_node_path15.default.resolve(io.cwd, dir);
+    if (!(0, import_node_fs14.existsSync)(abs)) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} does not exist
 ` };
-    if (!(0, import_node_fs13.statSync)(abs).isDirectory()) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} is not a directory
+    if (!(0, import_node_fs14.statSync)(abs).isDirectory()) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} is not a directory
 ` };
     argv = [...argv.slice(0, cwdAt), ...argv.slice(cwdAt + 2)];
     io = { ...io, workdir: abs, git: defaultGit(abs), exec: defaultExec(abs) };
@@ -13916,7 +14246,7 @@ function run(argv, io) {
           const label = flag("data-file") !== void 0 ? "--data-file" : "--data";
           let parsed;
           try {
-            const raw = flag("data-file") !== void 0 ? (0, import_node_fs13.readFileSync)(import_node_path14.default.resolve(io.cwd, flag("data-file")), "utf8") : flag("data");
+            const raw = flag("data-file") !== void 0 ? (0, import_node_fs14.readFileSync)(import_node_path15.default.resolve(io.cwd, flag("data-file")), "utf8") : flag("data");
             parsed = JSON.parse(raw);
           } catch {
             throw new UsageError(`log: ${label} must be a JSON object`);
@@ -13930,8 +14260,8 @@ function run(argv, io) {
       }
       case "brief": {
         const { plan, task } = planTask(io.cwd, flag("plan"), flag("task"));
-        const design = flag("design") ?? import_node_path14.default.join(import_node_path14.default.dirname(flag("plan")), "design.md");
-        const designPath = (0, import_node_fs13.existsSync)(import_node_path14.default.resolve(io.cwd, design)) ? design.replace(/\\/g, "/") : null;
+        const design = flag("design") ?? import_node_path15.default.join(import_node_path15.default.dirname(flag("plan")), "design.md");
+        const designPath = (0, import_node_fs14.existsSync)(import_node_path15.default.resolve(io.cwd, design)) ? design.replace(/\\/g, "/") : null;
         return ok(renderBrief(plan, task, { planPath: flag("plan").replace(/\\/g, "/"), designPath }));
       }
       case "triage": {
@@ -13943,7 +14273,7 @@ function run(argv, io) {
         let task = textArgs.filter((a) => !a.startsWith("--")).join(" ").trim();
         if (flag("text-file") !== void 0) {
           try {
-            task = (0, import_node_fs13.readFileSync)(import_node_path14.default.resolve(io.cwd, flag("text-file")), "utf8").trim();
+            task = (0, import_node_fs14.readFileSync)(import_node_path15.default.resolve(io.cwd, flag("text-file")), "utf8").trim();
           } catch {
             throw new UsageError("triage: cannot read --text-file");
           }
@@ -13999,7 +14329,7 @@ function run(argv, io) {
           if (flag("baseline") === void 0) throw new UsageError("validate: --baseline needs the JSON a validate run printed on the base commit");
           let baseline;
           try {
-            baseline = JSON.parse((0, import_node_fs13.readFileSync)(import_node_path14.default.resolve(io.cwd, flag("baseline")), "utf8"));
+            baseline = JSON.parse((0, import_node_fs14.readFileSync)(import_node_path15.default.resolve(io.cwd, flag("baseline")), "utf8"));
           } catch {
             throw new UsageError("validate: --baseline must be the JSON written by forge validate");
           }
@@ -14015,14 +14345,14 @@ function run(argv, io) {
         const task = flag("task");
         const dirArg = flag("dir");
         if (!task || !dirArg) throw new UsageError("verdict: --task and --dir are required");
-        const dir = import_node_path14.default.resolve(io.cwd, dirArg);
+        const dir = import_node_path15.default.resolve(io.cwd, dirArg);
         const reviews = {};
         for (const name of ["correctness", "security", "perf"]) {
-          const file = import_node_path14.default.join(dir, `${name}.json`);
-          if ((0, import_node_fs13.existsSync)(file)) reviews[name] = parseReview((0, import_node_fs13.readFileSync)(file, "utf8"));
+          const file = import_node_path15.default.join(dir, `${name}.json`);
+          if ((0, import_node_fs14.existsSync)(file)) reviews[name] = parseReview((0, import_node_fs14.readFileSync)(file, "utf8"));
         }
-        const verifyPath = import_node_path14.default.join(dir, "verify.json");
-        const verifyFile = (0, import_node_fs13.existsSync)(verifyPath) ? parseVerifyFile((0, import_node_fs13.readFileSync)(verifyPath, "utf8")) : void 0;
+        const verifyPath = import_node_path15.default.join(dir, "verify.json");
+        const verifyFile = (0, import_node_fs14.existsSync)(verifyPath) ? parseVerifyFile((0, import_node_fs14.readFileSync)(verifyPath, "utf8")) : void 0;
         if (verifyFile !== void 0) reviews.verify = verifyReview(verifyFile);
         if (!Object.keys(reviews).length) throw new UsageError(`no reviews found in ${dirArg}`);
         let validatorsOk;
@@ -14032,7 +14362,7 @@ function run(argv, io) {
         if (flag("validators")) {
           let results;
           try {
-            results = JSON.parse((0, import_node_fs13.readFileSync)(import_node_path14.default.resolve(io.cwd, flag("validators")), "utf8"));
+            results = JSON.parse((0, import_node_fs14.readFileSync)(import_node_path15.default.resolve(io.cwd, flag("validators")), "utf8"));
           } catch {
             throw new UsageError("verdict: --validators must be the JSON written by forge validate");
           }
@@ -14055,7 +14385,7 @@ function run(argv, io) {
           ts: ts(),
           kind: "verdict",
           task,
-          dir: import_node_path14.default.relative(io.cwd, dir).split(import_node_path14.default.sep).join("/") || ".",
+          dir: import_node_path15.default.relative(io.cwd, dir).split(import_node_path15.default.sep).join("/") || ".",
           action: result.action,
           score: result.score,
           signature: result.signature,
@@ -14064,7 +14394,7 @@ function run(argv, io) {
           minor: result.minor.length
         });
         if (verifyFile !== void 0) {
-          const rel = import_node_path14.default.relative(io.cwd, dir).split(import_node_path14.default.sep).join("/");
+          const rel = import_node_path15.default.relative(io.cwd, dir).split(import_node_path15.default.sep).join("/");
           const evidence = rel.replace(/reviews-(\d+-\d+)$/, "evidence/$1");
           appendEvent(io.cwd, {
             ts: ts(),
@@ -14084,7 +14414,7 @@ function run(argv, io) {
         if (!dir) throw new UsageError("verify-cleanup: --dir is required");
         let pids = [];
         try {
-          const raw = JSON.parse((0, import_node_fs13.readFileSync)(import_node_path14.default.resolve(io.cwd, dir, "pids.json"), "utf8"));
+          const raw = JSON.parse((0, import_node_fs14.readFileSync)(import_node_path15.default.resolve(io.cwd, dir, "pids.json"), "utf8"));
           if (Array.isArray(raw)) pids = raw.filter((p) => Number.isInteger(p));
         } catch {
           pids = [];
@@ -14141,7 +14471,7 @@ function run(argv, io) {
         };
         const readText = (f, what) => {
           try {
-            return (0, import_node_fs13.readFileSync)(import_node_path14.default.resolve(io.cwd, f), "utf8");
+            return (0, import_node_fs14.readFileSync)(import_node_path15.default.resolve(io.cwd, f), "utf8");
           } catch {
             throw new UsageError(`proposals: cannot read ${what}`);
           }
@@ -14213,7 +14543,7 @@ function run(argv, io) {
           case "save": {
             const from = subFlag("from");
             if (!from) throw new UsageError("proposals save: --from is required");
-            const id2 = subFlag("id") ?? import_node_path14.default.basename(from).replace(/(\.db)?\.json$/, "");
+            const id2 = subFlag("id") ?? import_node_path15.default.basename(from).replace(/(\.db)?\.json$/, "");
             if (!PROPOSAL_ID.test(id2)) throw new UsageError("proposals save: a proposal id (p + 14 digits + 4 letters/digits) is required (--id, or a <id>.json / <id>.db.json file name)");
             let doc;
             try {
@@ -14231,11 +14561,11 @@ function run(argv, io) {
           case "pull": {
             const dir = subFlag("dir");
             if (!dir) throw new UsageError("proposals pull: --dir is required");
-            const abs = import_node_path14.default.resolve(io.cwd, dir);
+            const abs = import_node_path15.default.resolve(io.cwd, dir);
             let names2;
-            if (!(0, import_node_fs13.existsSync)(abs)) return ok("0");
+            if (!(0, import_node_fs14.existsSync)(abs)) return ok("0");
             try {
-              names2 = (0, import_node_fs13.readdirSync)(abs);
+              names2 = (0, import_node_fs14.readdirSync)(abs);
             } catch {
               throw new UsageError(`proposals pull: cannot read ${dir}`);
             }
@@ -14246,7 +14576,7 @@ function run(argv, io) {
               if (!PROPOSAL_ID.test(id2)) continue;
               let doc;
               try {
-                doc = normalizeProposal(JSON.parse((0, import_node_fs13.readFileSync)(import_node_path14.default.join(abs, name), "utf8")));
+                doc = normalizeProposal(JSON.parse((0, import_node_fs14.readFileSync)(import_node_path15.default.join(abs, name), "utf8")));
               } catch {
                 continue;
               }
@@ -14299,7 +14629,7 @@ function run(argv, io) {
               if (e instanceof PlanError) throw new UsageError(`proposals to-task: the resulting plan is invalid: ${e.issues.join("; ")}`);
               throw e;
             }
-            (0, import_node_fs13.writeFileSync)(import_node_path14.default.resolve(io.cwd, planArg), next);
+            (0, import_node_fs14.writeFileSync)(import_node_path15.default.resolve(io.cwd, planArg), next);
             const { id: _id, ...doc } = found;
             saveProposal(io.cwd, id2, { ...doc, taskId: task.id });
             appendEvent(io.cwd, { ts: ts(), kind: "proposal", action: "to-task", id: id2, taskId: task.id });
@@ -14324,19 +14654,19 @@ function run(argv, io) {
           return ok("ok");
         }
         if (sub === "learn") {
-          const file = import_node_path14.default.join(io.cwd, surfaceFile(name));
-          if (!(0, import_node_fs13.existsSync)(file)) throw new UsageError(`surfaces learn: ${surfaceFile(name)} does not exist`);
-          if ((0, import_node_fs13.lstatSync)(file).isSymbolicLink()) throw new UsageError(`surfaces learn: ${surfaceFile(name)} is a symlink`);
+          const file = import_node_path15.default.join(io.cwd, surfaceFile(name));
+          if (!(0, import_node_fs14.existsSync)(file)) throw new UsageError(`surfaces learn: ${surfaceFile(name)} does not exist`);
+          if ((0, import_node_fs14.lstatSync)(file).isSymbolicLink()) throw new UsageError(`surfaces learn: ${surfaceFile(name)} is a symlink`);
           let notes;
           try {
-            notes = JSON.parse((0, import_node_fs13.readFileSync)(import_node_path14.default.resolve(io.cwd, flag("notes-file") ?? ""), "utf8"));
+            notes = JSON.parse((0, import_node_fs14.readFileSync)(import_node_path15.default.resolve(io.cwd, flag("notes-file") ?? ""), "utf8"));
           } catch {
             throw new UsageError("surfaces learn: --notes-file must be a JSON array of strings");
           }
           if (!Array.isArray(notes) || !notes.every((n) => typeof n === "string" && n.trim())) throw new UsageError("surfaces learn: --notes-file must be a JSON array of strings");
-          const before = (0, import_node_fs13.readFileSync)(file, "utf8");
+          const before = (0, import_node_fs14.readFileSync)(file, "utf8");
           const r2 = appendLearned(before, ts().slice(0, 10), notes, flag("heading") ?? "Learned");
-          (0, import_node_fs13.writeFileSync)(file, r2.text);
+          (0, import_node_fs14.writeFileSync)(file, r2.text);
           const cur = readLocal(io.cwd).surfaces[name];
           if (cur && cur.state === "allowed" && cur.hash === surfaceHash(before)) updateLocal(io.cwd, (s2) => ({ ...s2, surfaces: { ...s2.surfaces, [name]: { ...cur, hash: surfaceHash(r2.text) } } }));
           return json({ name, count: r2.count });
@@ -14422,7 +14752,7 @@ function run(argv, io) {
           const current = parseRun(readRunText(io.cwd));
           if (current?.active && stopReason(current, stopContext(io.cwd, io.now())) === null) throw new UsageError("infinite start: a run is already active (forge stop, or forge infinite status)");
           forgeDir(io.cwd);
-          (0, import_node_fs13.rmSync)(stopFile(io.cwd), { force: true });
+          (0, import_node_fs14.rmSync)(stopFile(io.cwd), { force: true });
           const run2 = startRun(io.now(), { ...cycles !== void 0 ? { cycles } : {}, ...hours !== void 0 ? { hours } : {} }, queueMax, session ?? null);
           saveRun(io.cwd, run2);
           return json(run2);
@@ -14441,7 +14771,7 @@ function run(argv, io) {
         let error;
         if (flag("error-file") !== void 0) {
           try {
-            error = (0, import_node_fs13.readFileSync)(import_node_path14.default.resolve(io.cwd, flag("error-file")), "utf8");
+            error = (0, import_node_fs14.readFileSync)(import_node_path15.default.resolve(io.cwd, flag("error-file")), "utf8");
           } catch {
             throw new UsageError("cycle: cannot read --error-file");
           }
@@ -14455,7 +14785,7 @@ function run(argv, io) {
       }
       case "stop": {
         forgeDir(io.cwd);
-        (0, import_node_fs13.writeFileSync)(stopFile(io.cwd), `${ts()}
+        (0, import_node_fs14.writeFileSync)(stopFile(io.cwd), `${ts()}
 `);
         const current = parseRun(readRunText(io.cwd));
         if (current?.active) {
@@ -14506,7 +14836,7 @@ var cwd = process.cwd();
 var stdin = "";
 if (process.argv[2] === "hook" && !process.stdin.isTTY) {
   try {
-    stdin = (0, import_node_fs14.readFileSync)(0, "utf8");
+    stdin = (0, import_node_fs15.readFileSync)(0, "utf8");
   } catch {
     stdin = "";
   }

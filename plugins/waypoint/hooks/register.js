@@ -10668,6 +10668,10 @@ function findCycle(plan) {
 }
 
 // src/lib/execution-state.ts
+var SAFE_ID = /^[A-Za-z0-9_\-.]{1,120}$/;
+var isSafeId = (s) => typeof s === "string" && SAFE_ID.test(s) && s !== "." && s !== "..";
+var RUN_BRANCH = /^[A-Za-z0-9_./][A-Za-z0-9_\-./]{0,119}$/;
+var isRunBranch = (s) => typeof s === "string" && RUN_BRANCH.test(s) && !s.includes("..");
 var TASK_STATUSES = ["running", "accepted", "integrated", "conflict", "blocked"];
 var STOPS = ["finished", "stalled", "stopped", "budget", "migrated"];
 var MAX_TASKS = 500;
@@ -10697,7 +10701,8 @@ function normalizeTask(x) {
     attempts: int3(x.attempts, 0, 99, 0),
     agent: str(x.agent),
     updatedAt: iso(x.updatedAt) ?? startedAt,
-    detail: typeof x.detail === "string" ? x.detail.slice(0, 500) : null
+    detail: typeof x.detail === "string" ? x.detail.slice(0, 500) : null,
+    ...iso(x.nudgedAt) ? { nudgedAt: iso(x.nudgedAt) } : {}
   };
 }
 function normalizeExecution(x) {
@@ -10707,6 +10712,7 @@ function normalizeExecution(x) {
   const runId = str(x.runId), project = str(x.project), base = str(x.base), branch = str(x.branch), coordinator = str(x.coordinator);
   const startedAt = iso(x.startedAt);
   if (!mode || !runId || !project || !base || !branch || !coordinator || !startedAt) return null;
+  if (!isSafeId(runId) || !isSafeId(coordinator) || !isRunBranch(branch)) return null;
   const tasks = {};
   if (isObj(x.tasks)) {
     for (const [id2, t] of Object.entries(x.tasks).slice(0, MAX_TASKS)) {
@@ -10726,7 +10732,7 @@ function normalizeExecution(x) {
     tasks,
     parallel: int3(x.parallel, 1, 10, 3),
     mergeOnFinish: x.mergeOnFinish === true,
-    hookSession: str(x.hookSession),
+    hookSession: isSafeId(x.hookSession) ? x.hookSession : null,
     active: x.active === true,
     stopReason: oneOf(STOPS, x.stopReason),
     stallReason: typeof x.stallReason === "string" ? x.stallReason.slice(0, 1e3) : null,
@@ -10791,6 +10797,15 @@ function executionView(i) {
     return t !== null && i.now - t < AGENT_ALIVE_MS;
   });
   const coord = !e.active ? "stopped" : signal?.ended ? "stopped" : waiting ? "alive" : signalLiveness(lastSeen, false, i.now);
+  const rank = { stopped: 0, silent: 1, alive: 2 };
+  const memberLiveness = (p) => {
+    const d = i.live.filter((x) => fresh(x) && x.sessionId === p.by && x.runId === e.runId).reduce((best, x) => !best || Date.parse(x.ts) > Date.parse(best.ts) ? x : best, null);
+    if (d?.ended) return "stopped";
+    const lease = liveness(i.now, p.leaseUntil);
+    const sig = d ? signalLiveness(d.ts, false, i.now) : null;
+    return sig && rank[sig] > rank[lease] ? sig : lease;
+  };
+  const isMember = (p) => p.mode !== "subagents" && p.by !== e.coordinator;
   const ids = (status) => Object.keys(e.tasks).filter((id2) => e.tasks[id2].status === status);
   const slots = ids("running").sort((a, b) => Date.parse(e.tasks[a].startedAt) - Date.parse(e.tasks[b].startedAt)).map((id2) => {
     const t = e.tasks[id2];
@@ -10803,10 +10818,12 @@ function executionView(i) {
       agent,
       round: p?.round ?? t.round,
       since: p?.since ?? t.stageSince,
-      liveness: agent && waiting ? "alive" : p ? liveness(i.now, p.leaseUntil) : coord,
-      mode: p?.mode ?? t.executor
+      liveness: p && isMember(p) ? memberLiveness(p) : agent && waiting ? "alive" : p ? liveness(i.now, p.leaseUntil) : coord,
+      mode: p?.mode ?? t.executor,
+      by: p?.by ?? null
     };
   });
+  const manual = Object.values(i.tasks).filter((p) => p.runId === e.runId && p.mode === "manual" && p.status === "running" && !e.tasks[p.task]).sort((a, b) => Date.parse(a.since) - Date.parse(b.since)).slice(0, 10).map((p) => ({ task: p.task, title: i.titles?.[p.task] ?? null, stage: p.stage, agent: p.agent, round: p.round, since: p.since, liveness: memberLiveness(p), mode: "manual", by: p.by }));
   return {
     runId: e.runId,
     mode: e.mode,
@@ -10822,7 +10839,8 @@ function executionView(i) {
     queued: ids("accepted"),
     conflicts: ids("conflict"),
     blocked: ids("blocked"),
-    orphans: slots.filter((s) => s.liveness === "stopped").map((s) => s.task),
+    manual,
+    orphans: [...slots, ...manual].filter((s) => s.liveness === "stopped").map((s) => s.task),
     agents: signal?.agents ?? []
   };
 }
@@ -10910,8 +10928,21 @@ function workModel(project, f) {
     escalation: Object.values(messages).some((x) => x.type === "escalation" && x.status === "open" && (x.from === sid || x.to === sid)) || escalationCandidates(messages).some((c) => c.sessions.includes(sid)),
     phase: pi >= 0 ? { index: pi + 1, total: plan.phases.length, name: plan.phases[pi].name } : null,
     cells: plan.tasks.filter((t) => !track || t.track === track).slice(0, MAX_CELLS).map((t) => CELL[states[t.id]?.status ?? "free"] ?? "p").join(""),
-    swarm: typeof session.launchedBy === "string" && !!session.launchedBy
+    swarm: typeof session.launchedBy === "string" && !!session.launchedBy,
+    run: memberRun(project, sid, f)
   };
+}
+function memberRun(project, sid, f) {
+  try {
+    const exec = parseExecution(f.execution);
+    if (!exec || !exec.active || exec.project !== project) return null;
+    for (const t of Object.values(f.execTasks ?? {})) {
+      const p = normalizePublicTask(json(t));
+      if (p && p.by === sid && p.runId === exec.runId) return { coordinator: exec.coordinator, stage: p.stage };
+    }
+  } catch {
+  }
+  return null;
 }
 function runModel(project, f) {
   const exec = parseExecution(f.execution);
@@ -11018,6 +11049,7 @@ var TEXT = {
     stoppedSfx: "parada",
     stopRun: "Parar",
     integratedN: "integradas",
+    memberOf: "de la ejecuci\xF3n de {c}",
     stage: { brief: "brief", implement: "implementar", validate: "validar", verify: "verificar", review: "revisar", verdict: "veredicto", integrate: "integrar", execution: "ejecuci\xF3n" }
   },
   en: {
@@ -11052,6 +11084,7 @@ var TEXT = {
     stoppedSfx: "stopped",
     stopRun: "Stop",
     integratedN: "integrated",
+    memberOf: "in {c}'s execution",
     stage: { brief: "brief", implement: "implement", validate: "validate", verify: "verify", review: "review", verdict: "verdict", integrate: "integrate", execution: "execution" }
   }
 };
@@ -11088,6 +11121,7 @@ function bandLine(m, nowMs) {
   } else {
     parts.push(t.noTask);
   }
+  if (m.run) parts.push(`${t.stage[m.run.stage] ?? m.run.stage} \xB7 ${t.memberOf.replace("{c}", m.run.coordinator)}`);
   if (!m.track) parts.push(`${t.tasks} ${m.trackDone}/${m.trackTotal}`);
   parts.push(`${t.overall} ${m.percent} %`);
   if (m.inbox > 0) parts.push(`\u2709 ${m.inbox}`);
