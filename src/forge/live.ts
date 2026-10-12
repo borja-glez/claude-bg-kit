@@ -26,7 +26,9 @@ export function nextLive(prev: LiveDoc | null, ev: { event: LiveEvent; agentId?:
 }
 
 /**
- * Records this session's local signal when it coordinates an active execution or is a registered member of it; prints nothing and never fails.
+ * Records this session's local signal when it coordinates an active execution or is a registered member of it; never fails.
+ * On a SessionStart (not forced) it returns the SessionStart hook output whose additionalContext tells the coordinator
+ * or the member how to resume; in every other case it returns ''.
  * A SubagentStart while the execution is unbound binds it to this session first; a bound one is never rebound.
  */
 export function hookLive(io: Io, forced?: LiveEvent): string {
@@ -59,6 +61,13 @@ export function hookLive(io: Io, forced?: LiveEvent): string {
     mkdirSync(path.dirname(file), { recursive: true });
     const tmp = `${file}.${process.pid}.tmp`;
     try { writeFileSync(tmp, JSON.stringify(doc)); renameSync(tmp, file); } finally { rmSync(tmp, { force: true }); }
+    if (event === 'SessionStart' && !forced) {
+      const running = Object.values(exec.tasks).filter(t => t.status === 'running').length;
+      const text = role === 'coordinator'
+        ? `forge: this session coordinates the execution ${exec.runId} (${exec.mode}, ${running}/${exec.parallel} running, run branch ${exec.branch}). Resume it with /forge:run → Resume: renew your lease, reconcile each task and keep stepping.`
+        : `forge: this session is the ${role} session of ${member?.task ?? 'a task'} in the execution ${exec.runId} coordinated by ${exec.coordinator}. Resume it with /forge:run → Run member: rejoin with FORGE swarm join, renew your lease and continue from your last reported stage.`;
+      return JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } });
+    }
   } catch { /* fail-open */ }
   return '';
 }

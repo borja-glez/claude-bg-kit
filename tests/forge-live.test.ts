@@ -136,6 +136,35 @@ describe('forge hook live', () => {
     run(['hook', 'stop'], { ...io, stdin: JSON.stringify({ session_id: 's2' }) });
     expect(readExecution(root)?.hookSession).toBe('s2');
   });
+  it('SessionStart tells the coordinator and a member how to resume', () => {
+    exec({ tasks: runningTask });
+    const c = JSON.parse(hook({ session_id: 's1', hook_event_name: 'SessionStart', source: 'resume' }).stdout);
+    expect(c.hookSpecificOutput.hookEventName).toBe('SessionStart');
+    expect(c.hookSpecificOutput.additionalContext).toContain('coordinates the execution r1 (subagents, 1/3 running');
+    writeMember(root, { sessionId: 's2', role: 'executor', runId: 'r1', task: 'T1', name: null, since: T });
+    expect(JSON.parse(hook({ session_id: 's2', hook_event_name: 'SessionStart' }).stdout).hookSpecificOutput.additionalContext)
+      .toContain('executor session of T1 in the execution r1 coordinated by main');
+    expect(hook({ session_id: 's9', hook_event_name: 'SessionStart' }).stdout).toBe('');
+    expect(hook({ session_id: 's1', hook_event_name: 'SubagentStart', agent_id: 'a', agent_type: 'x' }).stdout).toBe('');
+  });
+  it('a coordinator or an executor resumed in a linked worktree keeps its signal and binding in the main checkout', () => {
+    exec({ tasks: runningTask });
+    writeMember(root, { sessionId: 's2', role: 'executor', runId: 'r1', task: 'T1', name: null, since: T });
+    const wt = path.join(root, '.claude', 'worktrees', 'run');
+    git('worktree', 'add', '-q', wt, '-b', 'forge/run-shop');
+    const inWt = { ...io, cwd: wt, git: defaultGit(wt) };
+    const c = JSON.parse(run(['hook', 'live'], { ...inWt, stdin: JSON.stringify({ session_id: 's1', hook_event_name: 'SessionStart', source: 'resume' }) }).stdout);
+    expect(c.hookSpecificOutput.additionalContext).toContain('coordinates the execution r1');
+    const m = JSON.parse(run(['hook', 'live'], { ...inWt, stdin: JSON.stringify({ session_id: 's2', hook_event_name: 'SessionStart', source: 'resume' }) }).stdout);
+    expect(m.hookSpecificOutput.additionalContext).toContain('executor session of T1');
+    run(['hook', 'stop'], { ...inWt, stdin: JSON.stringify({ session_id: 's1' }) });
+    run(['hook', 'stop'], { ...inWt, stdin: JSON.stringify({ session_id: 's2' }) });
+    expect(readExecution(root)?.hookSession).toBe('s1');
+    expect(JSON.parse(readFileSync(liveFile(root, 's1'), 'utf8'))).toMatchObject({ role: 'coordinator', event: 'Stop' });
+    expect(JSON.parse(readFileSync(liveFile(root, 's2'), 'utf8'))).toMatchObject({ role: 'executor', event: 'Stop' });
+    expect(existsSync(path.join(wt, '.forge', 'execution.json'))).toBe(false);
+    expect(existsSync(path.join(wt, '.forge', 'live'))).toBe(false);
+  });
   it('writes nothing for a session whose member file is junk', () => {
     exec();
     mkdirSync(path.join(root, '.forge', 'members'), { recursive: true });

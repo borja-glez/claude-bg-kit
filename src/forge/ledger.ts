@@ -2,7 +2,7 @@ import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, 
 import path from 'node:path';
 import { deriveStatus, normalizeStatus, type ForgeStatus } from '../lib/forge-status.js';
 
-export const LEDGER_KINDS = ['triage', 'phase', 'agent', 'validate', 'verdict', 'round', 'ruling', 'cycle', 'proposal', 'verify', 'verify-skip'] as const;
+export const LEDGER_KINDS = ['triage', 'phase', 'agent', 'validate', 'verdict', 'round', 'ruling', 'cycle', 'proposal', 'verify', 'verify-skip', 'decision'] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 export interface LedgerEvent { ts: string; kind: LedgerKind; task?: string; [key: string]: unknown }
 

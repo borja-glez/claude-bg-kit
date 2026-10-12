@@ -270,6 +270,71 @@ describe('forge swarm (execution)', () => {
     expect(run(['swarm', 'nudge', 'T1'], io).code).toBe(2);
   });
 
+  it('takeover replaces a stopped coordinator and refuses a live one', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'old'], io));
+    const e = readExecution(root)!;
+    saveExecution(root, { ...e, hookSession: 'old' });
+    mkdirSync(path.join(root, '.forge', 'live'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'live', 'old.json'), JSON.stringify({ sessionId: 'old', role: 'coordinator', runId: e.runId, task: null, event: 'Stop', ts: NOW.toISOString(), agents: [], ended: false }));
+    expect(out(run(['swarm', 'takeover', '--session', 'new'], io))).toMatchObject({ took: false, previous: 'old', liveness: 'alive', joinAs: 'manual' });
+    const later = { ...io, now: () => new Date(NOW.getTime() + 20 * 60000) };
+    expect(out(run(['swarm', 'takeover', '--session', 'new'], later))).toMatchObject({ took: true, previous: 'old', runId: e.runId });
+    expect(readExecution(root)).toMatchObject({ coordinator: 'new', hookSession: 'new' });
+    expect(out(run(['swarm', 'takeover', '--session', 'new'], later))).toMatchObject({ took: 'already' });
+    expect(readFileSync(path.join(root, '.forge', 'ledger.jsonl'), 'utf8')).toContain('"what":"takeover"');
+  });
+  it('takeover takes the liveliest of the signal and the lease, and falls back to the last step', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'old'], io));
+    const later = { ...io, now: () => new Date(NOW.getTime() + 20 * 60000) };
+    // No signal and no lease: a start 20 minutes ago with no step counts as stopped; 5 minutes ago does not.
+    expect(out(run(['swarm', 'takeover', '--session', 'new'], { ...io, now: () => new Date(NOW.getTime() + 5 * 60000) }))).toMatchObject({ took: false, liveness: 'alive' });
+    // An old signal but a live lease: the lease wins.
+    mkdirSync(path.join(root, '.forge', 'live'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'live', 'old.json'), JSON.stringify({ sessionId: 'old', role: 'coordinator', runId: readExecution(root)!.runId, task: null, event: 'Stop', ts: NOW.toISOString(), agents: [], ended: true }));
+    const leaseUntil = new Date(NOW.getTime() + 25 * 60000).toISOString();
+    writeDocs(path.join(root, 'db', 'sessions'), { old: { name: 'c', status: 'active', heartbeatAt: new Date(NOW.getTime() + 19 * 60000).toISOString(), leaseUntil } });
+    expect(out(run(['swarm', 'takeover', '--session', 'new', '--db', 'db'], later)).took).toBe(false);
+    expect(readExecution(root)!.coordinator).toBe('old');
+    expect(out(run(['swarm', 'takeover', '--session', 'new'], later)).took).toBe(true);
+    expect(run(['swarm', 'takeover'], later).code).toBe(2);
+  });
+  it('start reports how the run branch met its base: created, null on resume and for an ephemeral run', () => {
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io)).baseSync).toBe('created');
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io)).baseSync).toBeNull();
+    expect(run(['swarm', 'stop'], io).code).toBe(0);
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io)).baseSync).toBe('up-to-date');
+    expect(run(['swarm', 'stop'], io).code).toBe(0);
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--kind', 'ephemeral'], io)).baseSync).toBeNull();
+  });
+  it('a new execution brings a stale run branch up to date with its base', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    expect(run(['swarm', 'stop'], io).code).toBe(0);
+    writeFileSync(path.join(root, 'new.txt'), 'n\n'); git('add', 'new.txt'); git('commit', '-qm', 'base moved');
+    const s = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    expect(s.baseSync).toBe('fast-forward');
+    expect(git('rev-parse', 'forge/run-shop')).toBe(git('rev-parse', 'main'));
+    expect(run(['swarm', 'stop'], io).code).toBe(0);
+    const wt = path.join(root, '.claude', 'worktrees', 'run');
+    writeFileSync(path.join(wt, 'run.txt'), 'r\n');
+    execFileSync('git', ['add', 'run.txt'], { cwd: wt }); execFileSync('git', ['commit', '-qm', 'run work'], { cwd: wt });
+    writeFileSync(path.join(root, 'base2.txt'), 'b\n'); git('add', 'base2.txt'); git('commit', '-qm', 'base moved again');
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io)).baseSync).toBe('merged');
+    expect(existsSync(path.join(wt, 'base2.txt')) && existsSync(path.join(wt, 'run.txt'))).toBe(true);
+  });
+  it('a stale run branch that conflicts with the base is refused and kept', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    expect(run(['swarm', 'stop'], io).code).toBe(0);
+    const wt = path.join(root, '.claude', 'worktrees', 'run');
+    writeFileSync(path.join(wt, 'plan.yaml'), 'x\n');
+    execFileSync('git', ['commit', '-qam', 'run side'], { cwd: wt });
+    const tip = git('rev-parse', 'forge/run-shop');
+    writeFileSync(path.join(root, 'plan.yaml'), PLAN + '# base side\n'); git('commit', '-qam', 'base side');
+    const r = run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('has diverged from main');
+    expect(git('rev-parse', 'forge/run-shop')).toBe(tip);
+  });
+
   describe('members', () => {
     let wt: string;
     let wio: Io;

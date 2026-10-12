@@ -8,9 +8,11 @@ import { stopFile } from '../run.js';
 import { appendEvent } from '../ledger.js';
 import { readExecution, saveExecution, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree } from '../execution.js';
 import { schedule, widthOf, relaunchOrBlock, RELAUNCH_CAP, type BgAgent } from '../schedule.js';
-import { LEASE_MINUTES } from '../../lib/coordination.js';
+import { LEASE_MINUTES, sessionLiveness } from '../../lib/coordination.js';
 import { planLocale } from '../../lib/locale.js';
-import { STAGES, normalizePublicTask, type ExecutionState, type ExecTask, type PublicTask } from '../../lib/execution-state.js';
+import { signalLiveness } from '../../lib/execution-view.js';
+import { liveFile } from '../live.js';
+import { STAGES, normalizePublicTask, normalizeLive, type ExecutionState, type ExecTask, type PublicTask } from '../../lib/execution-state.js';
 import { parsePlan, PlanError, isPlanId } from '../../lib/plan.js';
 import type { SessionDoc, Stage, TaskState } from '../../lib/types.js';
 import { mainWorktreeFrom, samePath } from '../../lib/worktree.js';
@@ -242,7 +244,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     if (!e) throw new UsageError(`swarm ${sub}: no execution (forge swarm start)`);
     return e;
   };
-  if (['start', 'tick', 'integrate', 'merge', 'sleep', 'worktree', 'retry', 'relaunch', 'nudge'].includes(sub ?? '') && !(sub === 'worktree' && has('member'))) {
+  if (['start', 'tick', 'integrate', 'merge', 'sleep', 'worktree', 'retry', 'relaunch', 'nudge', 'takeover'].includes(sub ?? '') && !(sub === 'worktree' && has('member'))) {
     const top = deps.git(['rev-parse', '--show-toplevel'])?.trim();
     const main = mainWorktreeFrom(deps.git(['worktree', 'list', '--porcelain']));
     if (!top || !main || !samePath(top, main)) {
@@ -337,6 +339,8 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       const branch = flag('branch') ?? runBranch(project);
       if (!/^[A-Za-z0-9_./][A-Za-z0-9_\-./]{0,119}$/.test(branch) || branch.includes('..')) throw new UsageError('swarm start: --branch is not a valid branch name');
       let setup: SetupResult = null;
+      let baseSync: 'created' | 'up-to-date' | 'fast-forward' | 'merged' | null = null;
+      const resume = !!prev && prev.active && prev.project === project && prev.branch === (kind === 'plan' ? branch : base);
       if (kind === 'plan') {
         const wt = runWorktree(io.cwd);
         // The run branch gets its own worktree: it can be neither the base (checked out here) nor a branch
@@ -351,16 +355,31 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
           const on = deps.at(wt).git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
           if (on !== branch) throw new UsageError(`swarm start: ${wt} exists and is on ${on ?? '?'}, not ${branch}; switch it or remove it (git worktree remove)`);
         }
-        if (deps.git(['rev-parse', '--verify', '-q', `refs/heads/${branch}`]) === null && deps.git(['branch', branch, base]) === null) {
+        const existed = deps.git(['rev-parse', '--verify', '-q', `refs/heads/${branch}`]) !== null;
+        if (!existed && deps.git(['branch', branch, base]) === null) {
           throw new UsageError(`swarm start: cannot create ${branch} from ${base}`);
         }
         if (!existsSync(wt)) {
           if (deps.git(['worktree', 'add', wt, branch]) === null) throw new UsageError(`swarm start: cannot add the worktree ${wt}`);
           setup = runSetup(deps, wt, io.cwd);
         }
+        // A run branch left by an earlier execution is brought up to its base before planning; a conflict is
+        // refused (never a second run branch) and nothing is removed.
+        if (!existed) baseSync = 'created';
+        else if (!resume) {
+          const at = deps.at(wt);
+          if (deps.git(['merge-base', '--is-ancestor', base, branch]) !== null) baseSync = 'up-to-date';
+          else if (deps.git(['merge-base', '--is-ancestor', branch, base]) !== null) {
+            if (at.git(['merge', '--ff-only', base]) === null) throw new UsageError(`swarm start: cannot fast-forward ${branch} to ${base}`);
+            baseSync = 'fast-forward';
+          } else if (at.git(['merge', '--no-ff', base, '-m', `forge: bring ${base} into ${branch}`]) !== null) baseSync = 'merged';
+          else {
+            at.git(['merge', '--abort']);
+            throw new UsageError(`swarm start: ${branch} has diverged from ${base} and they conflict; merge them by hand or remove ${branch}`);
+          }
+        }
       }
-      const resume = prev && prev.active && prev.project === project && prev.branch === (kind === 'plan' ? branch : base);
-      const state: ExecutionState = resume
+      const state: ExecutionState = resume && prev
         ? { ...prev, parallel, mode, mergeOnFinish: prev.mergeOnFinish || has('merge-on-finish'), coordinator: session, hookSession: null, sleepUntil: null }
         : {
             runId: `${project}-${iso.replace(/[:.]/g, '')}`, kind, mode, parallel, project, base, branch: kind === 'plan' ? branch : base,
@@ -369,7 +388,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
           };
       rmSync(stopFile(io.cwd), { force: true });
       saveExecution(io.cwd, state);
-      return json({ ...state, setup });
+      return json({ ...state, setup, baseSync });
     }
     case 'status': {
       const state = readExecution(io.cwd);
@@ -527,11 +546,38 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       if (e?.active) saveExecution(io.cwd, { ...e, active: false, stopReason: reason, sleepUntil: null });
       return ok();
     }
+    case 'takeover': {
+      const session = flag('session');
+      if (!session || !ID.test(session)) throw new UsageError('swarm takeover: --session is required');
+      const e = current();
+      if (!e.active) throw new UsageError('swarm takeover: the execution is not active');
+      if (session === e.coordinator || session === e.hookSession) {
+        if (e.hookSession !== session) saveExecution(io.cwd, { ...e, hookSession: session });
+        return json({ took: 'already', runId: e.runId });
+      }
+      const previous = e.hookSession ?? e.coordinator;
+      // The liveliest of the local signal and the roadmap lease decides; with neither, the last step does.
+      const order = ['stopped', 'silent', 'alive'] as const;
+      const seen: (typeof order)[number][] = [];
+      try {
+        const d = normalizeLive(JSON.parse(readFileSync(liveFile(io.cwd, previous), 'utf8')));
+        if (d) seen.push(signalLiveness(d.ts, d.ended, now.getTime()));
+      } catch { /* no signal */ }
+      if (flag('db')) {
+        try { seen.push(sessionLiveness(JSON.parse(readFileSync(path.resolve(io.cwd, flag('db')!, 'sessions', `${previous}.json`), 'utf8')) as SessionDoc, now.getTime())); } catch { /* no lease */ }
+      }
+      if (!seen.length) seen.push(now.getTime() - Date.parse(e.lastStepAt ?? e.startedAt) >= TAKEOVER_MIN * 60000 ? 'stopped' : 'alive');
+      const liveness = seen.reduce((a, b) => (order.indexOf(b) > order.indexOf(a) ? b : a), 'stopped' as (typeof order)[number]);
+      if (liveness !== 'stopped') return json({ took: false, previous, liveness, joinAs: 'manual' });
+      saveExecution(io.cwd, { ...e, coordinator: session, hookSession: session, sleepUntil: null });
+      appendEvent(io.cwd, { ts: iso, kind: 'decision', what: 'takeover', previous, by: session });
+      return json({ took: true, previous, runId: e.runId, running: Object.entries(e.tasks).filter(([, t]) => t.status === 'running').map(([id]) => id) });
+    }
     case 'integrate':
       return integrate(rest, io, deps);
     case 'merge':
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError('usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]|status|propose --plan P|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick --plan P --db DIR [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T>|merge|retry <T>|sleep <seconds> [--mark]|stop [--reason stopped|budget]|join --session SID --role executor|manual [--task T] [--name N]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID>');
+      throw new UsageError('usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]|status|propose --plan P|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick --plan P --db DIR [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T>|merge|retry <T>|sleep <seconds> [--mark]|stop [--reason stopped|budget]|join --session SID --role executor|manual [--task T] [--name N]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID [--db DIR]>');
   }
 }
