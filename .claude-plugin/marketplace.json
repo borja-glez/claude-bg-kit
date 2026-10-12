@@ -11,7 +11,7 @@
     {
       "name": "lens",
       "source": "./plugins/lens",
-      "description": "A live progress panel for Claude Code sessions: roadmap, superpowers runs, todos, subagents and tasks."
+      "description": "A live progress panel for Claude Code sessions: model and effort, roadmap, forge stages and executions, superpowers runs, todos, subagents, tasks and usage."
     },
     {
       "name": "forge",

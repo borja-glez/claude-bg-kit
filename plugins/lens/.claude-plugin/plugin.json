@@ -1,6 +1,6 @@
 {
   "name": "lens",
-  "description": "A live progress panel for Claude Code sessions: roadmap, superpowers runs, todos, subagents and tasks.",
+  "description": "A live progress panel for Claude Code sessions: model and effort, roadmap, forge stages and executions, superpowers runs, todos, subagents, tasks and usage.",
   "version": "0.9.0",
   "author": { "name": "Borja" },
   "types": "./types/index.d.ts"

@@ -3,7 +3,7 @@
 # 🔍 lens
 
 **Un panel de progreso en vivo para las sesiones de Claude Code.**
-Roadmap, etapas de forge, ejecuciones de superpowers, pendientes, subagentes, el modelo y el esfuerzo en uso, y lo que cuesta todo.
+El modelo y el esfuerzo en uso, el roadmap, las etapas y ejecuciones de forge, las ejecuciones de superpowers, pendientes, subagentes, tareas de Claude Code, y lo que cuesta todo.
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
@@ -90,7 +90,7 @@ lens mide desde que carga, con los recuentos de tokens que Claude Code da en cad
 
 ## La banda
 
-Cuando Claude tiene pendientes abiertos o subagentes en marcha, y waypoint no está dibujando su propia banda, lens dibuja una banda sobre el prompt. Enseña la ejecución más concreta que haya en marcha (forge; si no, el roadmap, superpowers o los pendientes) con su barra, sus cajas de tareas y su recuento, luego el consumo de esta sesión (`· 1,8 M tok · 6,2 $`), **Panel** y **×**. **×** la oculta hasta la siguiente sesión.
+Cuando Claude tiene pendientes abiertos o subagentes en marcha, y waypoint no está dibujando su propia banda, lens dibuja una banda sobre el prompt. Enseña la ejecución más concreta que haya en marcha (una ejecución de forge activa; si no, la última tarea de forge, el roadmap, superpowers o los pendientes) con su barra, sus cajas de tareas y su recuento, luego el consumo de esta sesión (`· 1,8 M tok · 6,2 $`), **Panel** y **×**. **×** la oculta hasta la siguiente sesión.
 
 ## Cómo lee
 

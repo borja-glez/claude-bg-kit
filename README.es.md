@@ -36,8 +36,8 @@ Diséñalas, planifícalas, constrúyelas con revisión independiente, ejecútal
 | | Plugin | Qué aporta | Más información |
 | --- | --- | --- | --- |
 | 🧭 | **waypoint** | Documentos de diseño que se pulen en rondas de crítica, un `plan.yaml` de frentes, fases y tareas, un **roadmap vivo** publicado como artifact de claude.ai y sesiones en paralelo coordinadas sobre worktrees de git. | [plugins/waypoint](plugins/waypoint/README.es.md) |
-| 🔨 | **forge** | Una forma de trabajar adaptativa: **triaje por tamaño**, el modelo adecuado para cada papel, primero tus propios validadores, **revisión independiente ponderada**, una **ejecución** de tareas en paralelo (subagentes ahora, sesiones en la versión siguiente) y un **modo infinito** desatendido. | [plugins/forge](plugins/forge/README.es.md) |
-| 🔍 | **lens** | Un **panel de progreso en vivo** dentro de Claude Code: roadmap, etapas de forge, ejecuciones de superpowers, pendientes, subagentes, **el modelo y el esfuerzo en uso**, y el **consumo en tokens y dólares** comparado con trabajar sin forge. | [plugins/lens](plugins/lens/README.es.md) |
+| 🔨 | **forge** | Una forma de trabajar adaptativa: **triaje por tamaño**, el modelo adecuado para cada papel, primero tus propios validadores, **revisión independiente ponderada**, una **ejecución** de tareas en paralelo (con subagentes o con sesiones) y un **modo infinito** desatendido. | [plugins/forge](plugins/forge/README.es.md) |
+| 🔍 | **lens** | Un **panel de progreso en vivo** dentro de Claude Code: **el modelo y el esfuerzo en uso**, roadmap, etapas y ejecuciones de forge, ejecuciones de superpowers, pendientes, subagentes, tareas de Claude Code y el **consumo en tokens y dólares** comparado con trabajar sin forge. | [plugins/lens](plugins/lens/README.es.md) |
 
 ## Combínalos a tu manera
 

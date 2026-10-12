@@ -3,7 +3,7 @@
 # 🔍 lens
 
 **A live progress panel for Claude Code sessions.**
-Roadmap, forge stages, superpowers runs, todos, subagents, the model and effort in use, and what it all costs.
+The model and effort in use, the roadmap, forge stages and executions, superpowers runs, todos, subagents, Claude Code tasks, and what it all costs.
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
@@ -90,7 +90,7 @@ lens measures from the moment it loads, from Claude Code's per-request token cou
 
 ## The band
 
-When Claude has open todos or running subagents, and waypoint is not drawing its own band, lens draws a band above the prompt. It shows the most specific run going on (forge, else the roadmap, superpowers or the todos) with its bar, its task boxes and its count, then this session's usage (`· 1.8M tok · $6.2`), **Panel** and **×**. **×** hides it until the next session.
+When Claude has open todos or running subagents, and waypoint is not drawing its own band, lens draws a band above the prompt. It shows the most specific run going on (an active forge execution, else forge's last task, the roadmap, superpowers or the todos) with its bar, its task boxes and its count, then this session's usage (`· 1.8M tok · $6.2`), **Panel** and **×**. **×** hides it until the next session.
 
 ## How it reads
 
