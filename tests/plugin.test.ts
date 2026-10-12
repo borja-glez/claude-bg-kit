@@ -317,6 +317,23 @@ describe('plugin layout', () => {
     expect(md).toMatch(/evidence: local/);
     expect(md).toMatch(/organization-internal|no longer be shared publicly/);
   });
+  it('run and infinite record decisions with decision add, and every report lists them', () => {
+    const run = read('plugins/forge/skills/run/SKILL.md');
+    for (const s of ['## Decisions', 'FORGE decision add --data-file <f>', 'FORGE decision md --scope <scope>', 'FORGE decision list --auto --task <id>',
+      '«Decisiones automáticas»', '"type": "git-revert"', '"type": "none"', 'decision: {point, what, chosen, alternatives, why, revert, auto: true}']) expect(run).toContain(s);
+    expect(run).not.toContain('FORGE log --kind decision');
+    expect(run.match(/automatic decisions/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
+    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    expect(inf).toContain('FORGE decision add --data-file <f>');
+    expect(inf).toContain('FORGE decision list --auto --since');
+    expect(inf).not.toContain('FORGE log --kind decision');
+  });
+  it('the decisions skill lists them and reverts one only after a confirmation', () => {
+    const md = read('plugins/forge/skills/decisions/SKILL.md');
+    expect(md).toMatch(/^---\r?\nname: decisions\r?\n/);
+    for (const s of ['FORGE decision list', 'FORGE decision show <n>', 'AskUserQuestion', 'git -C <D> revert --no-edit <base>..<head>',
+      'git -C <D> revert --abort', 'design-reopen', 'plan-edit', 'branch-discard', '"by": "user"', '"revertOf": <n>', 'Never push']) expect(md).toContain(s);
+  });
   it('forge registers the live hooks', () => {
     const hooks = read('plugins/forge/hooks/hooks.json');
     for (const ev of ['SessionStart', 'SessionEnd', 'SubagentStart', 'SubagentStop', 'Stop']) expect(hooks).toContain(`"${ev}"`);
@@ -326,7 +343,7 @@ describe('plugin layout', () => {
     const runMd = read('plugins/forge/skills/run/SKILL.md');
     for (const s of ['### Run member', '### Requests during an execution', '### Unattended', 'list the background sessions with ListAgents',
       'FORGE swarm relaunch', 'FORGE swarm nudge', 'The new session reads .forge/work/<T>/handover.md first', 'FORGE swarm report <T> --session <SID>',
-      'A run member never integrates and never merges', 'An unattended execution never stops to ask', 'FORGE log --kind decision',
+      'A run member never integrates and never merges', 'An unattended execution never stops to ask', 'FORGE decision add --data-file',
       'FORGE swarm takeover --session <SID> --db DB', '--mode sessions']) expect(runMd).toContain(s);
     expect(runMd).not.toContain('Sessions mode arrives in a later version');
     expect(runMd).toContain('### Manual member');
