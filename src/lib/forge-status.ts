@@ -34,12 +34,16 @@ function closeStage(s: ForgeStatus, ts: string): Record<string, number> {
   const to = isoMs(ts);
   if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return s.stages;
   const key = stageKey(s.phase);
-  if (!(key in s.stages) && Object.keys(s.stages).length >= MAX_STAGES) return s.stages;
-  return { ...s.stages, [key]: (s.stages[key] ?? 0) + Math.round((to - from) / 1000) };
+  const known = Object.hasOwn(s.stages, key);
+  if (!known && Object.keys(s.stages).length >= MAX_STAGES) return s.stages;
+  // Null-prototype, so a phase named `constructor` or `__proto__` is an ordinary key.
+  const out: Record<string, number> = Object.assign(Object.create(null) as Record<string, number>, s.stages);
+  out[key] = (known ? s.stages[key]! : 0) + Math.round((to - from) / 1000);
+  return out;
 }
 
 function stagesOf(x: unknown): Record<string, number> {
-  const out: Record<string, number> = {};
+  const out: Record<string, number> = Object.create(null) as Record<string, number>;
   if (!isObj(x)) return out;
   for (const [k, v] of Object.entries(x)) {
     if (Object.keys(out).length >= MAX_STAGES) break;

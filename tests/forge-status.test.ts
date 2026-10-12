@@ -118,6 +118,19 @@ describe('deriveStatus timings', () => {
     { ts: T(360), kind: 'phase', task: 'o', phase: 'fix', brief: 1 },
     { ts: T(400), kind: 'phase', task: 'o', phase: 'implement', brief: 2 },
   ];
+  it('sums the seconds of phases named constructor or __proto__ like any other', () => {
+    const s = apply([
+      { ts: T(0), kind: 'triage', task: 'o', path: 'medium', reasons: [] },
+      { ts: T(10), kind: 'phase', task: 'o', phase: 'constructor' },
+      { ts: T(30), kind: 'phase', task: 'o', phase: '__proto__' },
+      { ts: T(35), kind: 'phase', task: 'o', phase: 'constructor' },
+      { ts: T(40), kind: 'phase', task: 'o', phase: 'x' },
+    ])!;
+    expect(Object.entries(s.stages)).toEqual([['triage', 10], ['constructor', 25], ['__proto__', 5]]);
+    expect(Object.getPrototypeOf(s.stages)).toBeNull();
+    const back = normalizeStatus(JSON.parse(JSON.stringify(s)))!;
+    expect(Object.entries(back.stages)).toEqual(Object.entries(s.stages));
+  });
   it('starts the task at its triage and sums each closed stage in seconds, by phase name', () => {
     const s = apply(run)!;
     expect(s).toMatchObject({ taskStartedAt: T(0), stageSince: T(400), doneAt: null });
