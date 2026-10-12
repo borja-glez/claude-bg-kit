@@ -1,8 +1,8 @@
-import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { UsageError } from './errors.js';
 import type { ExecResult, Io } from './run.js';
-import { detectValidators, selectValidators, runValidators, type RepoReader } from '../validators.js';
+import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, type RepoReader, type ValidatorResult } from '../validators.js';
 import { loadConfig } from '../config.js';
 import { stopFile } from '../run.js';
 import { appendEvent } from '../ledger.js';
@@ -76,12 +76,20 @@ function loadPlanArg(io: Io, planArg: string | undefined, sub: string) {
 
 const LOCAL_STATE = [':!.forge', ':!.waypoint', ':!.claude'];
 
-type MergeOutcome = { result: 'merged'; sha: string } | { result: 'dirty' | 'conflict'; detail: string };
+type MergeOutcome = { result: 'merged'; sha: string; preexisting: string[] } | { result: 'dirty' | 'conflict'; detail: string };
+
+function readBaseline(cacheDir: string, sha: string): unknown {
+  try { return JSON.parse(readFileSync(path.join(cacheDir, `baseline-${sha}.json`), 'utf8')); } catch { return null; }
+}
+function writeBaseline(cacheDir: string, sha: string, results: unknown): void {
+  try { mkdirSync(cacheDir, { recursive: true }); writeFileSync(path.join(cacheDir, `baseline-${sha}.json`), JSON.stringify(results)); } catch { /* a missing cache only costs a rerun */ }
+}
+
 /**
  * Merges `ref` into the branch checked out at `at` with --no-ff, runs the validators there and commits `message`.
  * A conflict or a red validator is rolled back to the pre-merge sha; a merge left half-done is never touched.
  */
-function mergeIn(at: GitDeps, ref: string, message: string, scope: 'heavy' | 'final', timeoutSec: number, configRoot: string): MergeOutcome {
+function mergeIn(at: GitDeps, ref: string, message: string, scope: 'heavy' | 'final', timeoutSec: number, configRoot: string, cacheDir: string): MergeOutcome {
   const merging = () => at.git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']) !== null;
   if (merging()) return { result: 'dirty', detail: 'an unfinished merge is in progress there (git merge --abort to clear it)' };
   const dirty = at.git(['status', '--porcelain', '--', '.', ...LOCAL_STATE]);
@@ -94,22 +102,34 @@ function mergeIn(at: GitDeps, ref: string, message: string, scope: 'heavy' | 'fi
     const clean = undone && at.git(['rev-parse', 'HEAD'])?.trim() === pre && !merging();
     return { result: 'conflict', detail: clean ? detail : `rollback failed: needs manual attention (${detail})` };
   };
+  // What the target's tip already fails is not caused by this merge: validators red there are "preexisting".
+  let baseline: unknown = readBaseline(cacheDir, pre);
+  if (baseline === null) {
+    try {
+      const config0 = loadConfig(configRoot);
+      baseline = runValidators(selectValidators(detectValidators(at.repo, config0), scope === 'final' ? { mode: 'final' } : { mode: 'heavy', changed: null }), at.exec, timeoutSec);
+      writeBaseline(cacheDir, pre, baseline);
+    } catch { baseline = []; }
+  }
   if (at.git(['merge', '--no-ff', '--no-commit', ref]) === null) {
     if (!merging()) return { result: 'conflict', detail: `git refused to merge ${ref}` };
     return rollback(`merge conflict with ${ref}`);
   }
-  if (!merging()) return { result: 'merged', sha: pre };
-  let failed: { validator: string }[];
+  if (!merging()) return { result: 'merged', sha: pre, preexisting: [] };
+  let results: ValidatorResult[];
   try {
     const config = loadConfig(configRoot);
-    failed = runValidators(selectValidators(detectValidators(at.repo, config), scope === 'final' ? { mode: 'final' } : { mode: 'heavy', changed: null }), at.exec, timeoutSec).filter(r => !r.ok);
+    results = markPreexisting(runValidators(selectValidators(detectValidators(at.repo, config), scope === 'final' ? { mode: 'final' } : { mode: 'heavy', changed: null }), at.exec, timeoutSec), baseline);
   } catch (err) {
     return rollback(`validators could not run: ${(err as Error).message}`);
   }
+  const failed = results.filter(blocking);
   if (failed.length) return rollback(`validators failed after merging ${ref}: ${failed.map(r => r.validator).join(', ')}`);
   if (at.git(['commit', '--no-edit', '-m', message]) === null || merging()) return rollback(`could not commit the merge of ${ref}`);
   const sha = at.git(['rev-parse', 'HEAD'])?.trim() ?? '';
-  return sha && sha !== pre ? { result: 'merged', sha } : rollback(`could not commit the merge of ${ref}`);
+  if (!sha || sha === pre) return rollback(`could not commit the merge of ${ref}`);
+  writeBaseline(cacheDir, sha, results);
+  return { result: 'merged', sha, preexisting: results.filter(r => r.preexisting).map(r => r.validator) };
 }
 
 function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
@@ -128,14 +148,14 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
     if (head !== e.branch) return out({ result: 'run-dirty', detail: `${wt} is on ${head ?? '?'}, not ${e.branch}` });
   }
   const config = loadConfig(io.cwd);
-  const r = mergeIn(target, t.branch, `forge: integrate ${task}`, 'heavy', config.validatorTimeoutSec, wt);
+  const r = mergeIn(target, t.branch, `forge: integrate ${task}`, 'heavy', config.validatorTimeoutSec, wt, path.join(io.cwd, '.forge', 'execution'));
   const cur = readExecution(io.cwd)!;
   if (r.result === 'dirty') return out({ result: 'run-dirty', detail: r.detail });
   const next: ExecTask = r.result === 'merged'
     ? { ...cur.tasks[task], status: 'integrated', stage: 'integrate', updatedAt: at, detail: null }
     : { ...cur.tasks[task], status: 'conflict', detail: r.detail, updatedAt: at };
   saveExecution(io.cwd, { ...cur, tasks: { ...cur.tasks, [task]: next } });
-  return out(r.result === 'merged' ? { result: 'integrated', sha: r.sha } : { result: 'conflict', detail: r.detail });
+  return out(r.result === 'merged' ? { result: 'integrated', sha: r.sha, preexisting: r.preexisting } : { result: 'conflict', detail: r.detail });
 }
 
 function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
@@ -147,9 +167,9 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
   const branch = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
   if (branch !== e.base) return out({ result: 'main-dirty', detail: `the main checkout is on ${branch ?? '?'}, not ${e.base}` });
   const config = loadConfig(io.cwd);
-  const r = mergeIn(deps, e.branch, `forge: merge ${e.branch}`, 'final', config.validatorTimeoutSec, io.cwd);
+  const r = mergeIn(deps, e.branch, `forge: merge ${e.branch}`, 'final', config.validatorTimeoutSec, io.cwd, path.join(io.cwd, '.forge', 'execution'));
   if (r.result === 'dirty') return out({ result: 'main-dirty', detail: `the main checkout ${r.detail}` });
-  return out(r.result === 'merged' ? { result: 'merged', sha: r.sha } : { result: 'conflict', detail: r.detail });
+  return out(r.result === 'merged' ? { result: 'merged', sha: r.sha, preexisting: r.preexisting } : { result: 'conflict', detail: r.detail });
 }
 
 export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
@@ -213,6 +233,9 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         // The run branch gets its own worktree: it can be neither the base (checked out here) nor a branch
         // another worktree holds, or `git worktree add` refuses it.
         if (branch === base) throw new UsageError(`swarm start: ${branch} is the base branch (checked out in the main checkout); the run branch must be another one (omit --branch for ${runBranch(project)})`);
+        const defaultBranch = (deps.git(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])?.trim().replace(/^origin\//, ''))
+          || (deps.git(['rev-parse', '--verify', '-q', 'refs/heads/main']) !== null ? 'main' : deps.git(['rev-parse', '--verify', '-q', 'refs/heads/master']) !== null ? 'master' : null);
+        if (defaultBranch && branch === defaultBranch) throw new UsageError(`swarm start: ${branch} is the default branch; an execution never integrates into it directly`);
         const holder = worktreeHolding(deps.git(['worktree', 'list', '--porcelain']), branch);
         if (holder && !samePath(holder, wt)) throw new UsageError(`swarm start: ${branch} is checked out in another worktree (${holder}); pick another --branch`);
         if (existsSync(wt)) {

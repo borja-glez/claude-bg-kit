@@ -67,6 +67,12 @@ describe('forge swarm (execution)', () => {
     expect(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--branch', '-x'], io).code).toBe(2);
     expect(readExecution(root)).toBeNull();
   });
+  it('start refuses the default branch as the run branch', () => {
+    git('switch', '-qc', 'work');
+    const r = run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--branch', 'main'], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('default branch');
+  });
   it('start from a non-main base creates forge/run-<project> from it', () => {
     git('checkout', '-q', '-b', 'forge/infinite');
     writeFileSync(path.join(root, 'inf.txt'), 'x');

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -13,7 +13,7 @@ const git = (...a: string[]) => g(root, ...a);
 const commitIn = (cwd: string, file: string, text: string, msg: string) => { writeFileSync(path.join(cwd, file), text); g(cwd, 'add', file); g(cwd, 'commit', '-qm', msg); return g(cwd, 'rev-parse', 'HEAD'); };
 const out = (r: { stdout: string }) => JSON.parse(r.stdout);
 const runWt = () => path.join(root, '.claude', 'worktrees', 'run');
-const RED = 'validators:\n  - name: check\n    cmd: node -e "process.exit(1)"\n';
+const NOBAD = 'validators:\n  - name: nobad\n    cmd: node -e "process.exit(require(\'fs\').existsSync(\'bad.txt\')?1:0)"\n';
 
 beforeEach(() => {
   root = mkdtempSync(path.join(tmpdir(), 'forge-integ-'));
@@ -57,16 +57,39 @@ describe('forge swarm integrate (into the run branch)', () => {
     expect(readExecution(root)!.tasks.T1.status).toBe('conflict');
   });
   it('rolls back when the validators fail after the merge', () => {
-    accept('T1', 'a.txt', 'a\n');
-    writeFileSync(path.join(root, '.forge', 'config.yaml'), RED);
+    accept('T1', 'bad.txt', 'x\n');
     // Validators run in the run worktree: its own .forge/config.yaml is read from there.
+    // Green on the run tip, red once bad.txt is merged in (a validator red from the start would be preexisting).
     mkdirSync(path.join(runWt(), '.forge'), { recursive: true });
-    writeFileSync(path.join(runWt(), '.forge', 'config.yaml'), RED);
+    writeFileSync(path.join(runWt(), '.forge', 'config.yaml'), NOBAD);
     const before = g(runWt(), 'rev-parse', 'HEAD');
     expect(out(run(['swarm', 'integrate', 'T1'], io)).detail).toContain('validators failed');
     expect(g(runWt(), 'rev-parse', 'HEAD')).toBe(before);
     expect(() => g(runWt(), 'rev-parse', '-q', '--verify', 'MERGE_HEAD')).toThrow();
     expect(g(runWt(), 'status', '--porcelain')).toBe('');
+  });
+  it('does not roll back for a validator the run branch already failed, and records it as preexisting', () => {
+    // A validator that passes only when web.txt exists: red on the run branch from the start.
+    const WEB = 'validators:\n  - name: web\n    cmd: node -e "process.exit(require(\'fs\').existsSync(\'web.txt\')?0:1)"\n';
+    mkdirSync(path.join(runWt(), '.forge'), { recursive: true });
+    writeFileSync(path.join(runWt(), '.forge', 'config.yaml'), WEB);
+    accept('T1', 'a.txt', 'a\n');
+    const r = out(run(['swarm', 'integrate', 'T1'], io));
+    expect(r).toMatchObject({ result: 'integrated', preexisting: ['web'] });
+    expect(readExecution(root)!.tasks.T1.status).toBe('integrated');
+  });
+  it('still rolls back a validator that passed before the merge and fails after it', () => {
+    mkdirSync(path.join(runWt(), '.forge'), { recursive: true });
+    writeFileSync(path.join(runWt(), '.forge', 'config.yaml'), NOBAD);
+    accept('T1', 'bad.txt', 'x\n');
+    const r = out(run(['swarm', 'integrate', 'T1'], io));
+    expect(r.result).toBe('conflict');
+    expect(r.detail).toContain('nobad');
+  });
+  it('reuses the baseline of the run tip it just produced', () => {
+    accept('T1', 'a.txt', 'a\n');
+    const first = out(run(['swarm', 'integrate', 'T1'], io));
+    expect(existsSync(path.join(root, '.forge', 'execution', `baseline-${first.sha}.json`))).toBe(true);
   });
   it('rolls back when the validators cannot run (invalid config brought by the task)', () => {
     const w = accept('T1', 'a.txt', 'a\n');
