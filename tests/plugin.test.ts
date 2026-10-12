@@ -104,8 +104,15 @@ describe('plugin layout', () => {
       expect(read(`plugins/forge/agents/forge-${a}.md`)).toMatch(/Change the project's files with the Edit and Write tools, never with `sed -i`.*forge's own work files.*is fine/s);
     }
   });
-  it('versions: forge 0.5.2, waypoint 0.10.0', () => {
-    expect(JSON.parse(read('plugins/forge/.claude-plugin/plugin.json')).version).toBe('0.5.2');
+  it('the run skill tells the session when to raise a light path to Medium', () => {
+    const md = read('plugins/forge/skills/run/SKILL.md');
+    expect(md).toContain('**raise to at least Medium**');
+    expect(md).toMatch(/changes behaviour callers rely on/);
+    expect(md).toMatch(/bundles several independent changes/);
+    expect(md).toMatch(/adds new behaviour with its tests/);
+  });
+  it('versions: forge 0.5.3, waypoint 0.10.0', () => {
+    expect(JSON.parse(read('plugins/forge/.claude-plugin/plugin.json')).version).toBe('0.5.3');
     expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.10.0');
   });
   it('plan skill publishes the roadmap with notes and proposals write rules for contributors', () => {
@@ -125,7 +132,7 @@ describe('plugin layout', () => {
   });
   it('forge manifest depends on waypoint ^0.10.0 and ships its CLI', () => {
     const p = JSON.parse(read('plugins/forge/.claude-plugin/plugin.json'));
-    expect(p).toMatchObject({ name: 'forge', version: '0.5.2', dependencies: [{ name: 'waypoint', version: '^0.10.0' }] });
+    expect(p).toMatchObject({ name: 'forge', version: '0.5.3', dependencies: [{ name: 'waypoint', version: '^0.10.0' }] });
     expect(existsSync(new URL('../plugins/forge/dist/forge.cjs', import.meta.url))).toBe(true);
   });
   it('forge scout agent: frontmatter and rules', () => {

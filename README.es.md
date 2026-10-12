@@ -8,7 +8,7 @@ Diséñalas, planifícalas, constrúyelas con revisión independiente, ejecútal
 [English](README.md) · **Español**
 
 ![waypoint 0.10.0](https://img.shields.io/badge/waypoint-0.10.0-cba6f7?style=flat-square)
-![forge 0.5.2](https://img.shields.io/badge/forge-0.5.2-fab387?style=flat-square)
+![forge 0.5.3](https://img.shields.io/badge/forge-0.5.3-fab387?style=flat-square)
 ![lens 0.5.1](https://img.shields.io/badge/lens-0.5.1-b4befe?style=flat-square)
 ![Marketplace de Claude Code](https://img.shields.io/badge/Claude%20Code-marketplace%20bg--kit-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)

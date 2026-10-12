@@ -22,7 +22,12 @@ Rules for every path:
 
 ## 1. Triage
 
-Write the task text to `.forge/work/<id>/task.txt` and run `FORGE triage --task <id> --text-file .forge/work/<id>/task.txt`. It returns `path`, `files`, `sensitive`, `greenfield`, `validators`, `reasons`. Add your own judgement of ambiguity and risk: you may raise the path, never lower it below the CLI's. Announce in one line: path, why, and that the user can correct it. The **ratchet**: during the task the path can only go up (e.g. small -> medium when the change turns out to touch a sensitive zone); log the change with `FORGE log --kind triage --task <id> --data-file <file>` (file: `{"path":"<new path>"}`). Once you raise the path, follow that path: re-running `FORGE triage` for the same task keeps the highest path already logged, and you never go back to a lower one.
+Write the task text to `.forge/work/<id>/task.txt` and run `FORGE triage --task <id> --text-file .forge/work/<id>/task.txt`. It returns `path`, `files`, `sensitive`, `greenfield`, `validators`, `reasons`. Add your own judgement of ambiguity and risk: you may raise the path, never lower it below the CLI's. The CLI only counts files and words, so read the code the task touches and **raise to at least Medium** (log it as below) when the task:
+- changes behaviour callers rely on: new errors or rejected inputs, a changed signature, different return values;
+- bundles several independent changes;
+- adds new behaviour with its tests, rather than a mechanical or one-spot fix.
+
+Announce in one line: path, why (name the reason when you raised it, e.g. "Medium: changes the contract of addItem"), and that the user can correct it. The **ratchet**: during the task the path can only go up (e.g. small -> medium when the change turns out to touch a sensitive zone); log the change with `FORGE log --kind triage --task <id> --data-file <file>` (file: `{"path":"<new path>"}`). Once you raise the path, follow that path: re-running `FORGE triage` for the same task keeps the highest path already logged, and you never go back to a lower one.
 
 If a waypoint task is in progress (the waypoint work skill claimed it), use its id as the task id.
 
