@@ -51,6 +51,11 @@ describe('schedule', () => {
     expect(starts(schedule(input(claimed(at(-2)))))).toEqual([]);
     expect(starts(schedule(input(claimed(at(-6)))))).toEqual(['T1']);
   });
+  it("re-adopts the coordinator's own active task that is missing from the execution", () => {
+    const r = schedule(input({ plan: plan([task('T1')]), states: { T1: { status: 'in_progress', owner: 'main' } } }));
+    expect(starts(r)).toEqual(['T1']);
+    expect(r.next.tasks.T1).toMatchObject({ status: 'running', stage: 'brief' });
+  });
   it('integrates one accepted task per tick and then ticks again at once', () => {
     const r = schedule(input({ plan: plan([task('T1'), task('T2')]), exec: exec({ tasks: { ...running('T1', 'accepted'), ...running('T2', 'accepted') } }), states: { T1: { status: 'in_progress', owner: 'main' }, T2: { status: 'in_progress', owner: 'main' } } }));
     expect(r.actions[0]).toEqual({ type: 'integrate', task: 'T1', ref: 'task/T1' });

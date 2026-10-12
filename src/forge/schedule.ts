@@ -33,6 +33,7 @@ export function schedule(i: ScheduleInput): { actions: ScheduleAction[]; next: E
   const nowIso = new Date(now).toISOString();
   const tasks = { ...exec.tasks };
   const held = (id: string) => HELD.includes(tasks[id]?.status as ExecTask['status']);
+  // A done dependency with no recorded commits counts as integrated (nothing to merge).
   const depIntegrated = (d: string) => statusOf(states, d) === 'done' && commitShas(states, d).every(s => integrated.has(s));
   const owner = (id: string) => states[id]?.owner ?? null;
   // A claim by someone else stands while that session is alive or silent; a stopped owner leaves the task orphaned.
@@ -41,8 +42,10 @@ export function schedule(i: ScheduleInput): { actions: ScheduleAction[]; next: E
     return !!o && o !== exec.coordinator && ACTIVE.includes(statusOf(states, id)) && sessionLiveness(sessions[o], now) !== 'stopped';
   };
   const orphan = (id: string) => ACTIVE.includes(statusOf(states, id)) && !!owner(id) && owner(id) !== exec.coordinator && !claimedByOther(id);
-  const startable = (t: PlanTask) => !held(t.id)
-    && ((isAvailable(t, states) && isUnlocked(t, states)) || orphan(t.id))
+  // The coordinator's own active task missing from the execution (state lost after a crash) is re-adopted.
+  const readopt = (id: string) => ACTIVE.includes(statusOf(states, id)) && owner(id) === exec.coordinator && !tasks[id];
+  const startable =(t: PlanTask) => !held(t.id)
+    && ((isAvailable(t, states) && isUnlocked(t, states)) || orphan(t.id) || readopt(t.id))
     && t.depends_on.every(depIntegrated)
     && !claimedByOther(t.id);
 
