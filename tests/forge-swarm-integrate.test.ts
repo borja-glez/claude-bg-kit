@@ -41,7 +41,7 @@ describe('forge swarm integrate (into the run branch)', () => {
     expect(out(run(['swarm', 'integrate', 'T1'], io))).toMatchObject({ result: 'integrated' });
     expect(g(runWt(), 'log', '-1', '--format=%s')).toBe('forge: integrate T1');
     expect(git('log', '-1', '--format=%s')).toBe('init');
-    expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'integrated', stage: 'integrate' });
+    expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'integrated', stage: 'integrate', finishedAt: '2026-10-12T12:00:00.000Z' });
   });
   it('refuses a task that is not accepted', () => {
     out(run(['swarm', 'worktree', 'T1'], io));
@@ -55,6 +55,7 @@ describe('forge swarm integrate (into the run branch)', () => {
     expect(g(runWt(), 'rev-parse', 'HEAD')).toBe(before);
     expect(g(runWt(), 'status', '--porcelain')).toBe('');
     expect(readExecution(root)!.tasks.T1.status).toBe('conflict');
+    expect(readExecution(root)!.tasks.T1.finishedAt ?? null).toBeNull();
   });
   it('rolls back when the validators fail after the merge', () => {
     accept('T1', 'bad.txt', 'x\n');

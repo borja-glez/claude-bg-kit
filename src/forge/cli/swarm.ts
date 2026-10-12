@@ -221,7 +221,7 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
   const cur = readExecution(io.cwd)!;
   if (r.result === 'dirty') return out({ result: 'run-dirty', detail: r.detail });
   const next: ExecTask = r.result === 'merged'
-    ? { ...cur.tasks[task], status: 'integrated', stage: 'integrate', updatedAt: at, detail: null }
+    ? { ...cur.tasks[task], status: 'integrated', stage: 'integrate', updatedAt: at, detail: null, finishedAt: at }
     : { ...cur.tasks[task], status: 'conflict', detail: r.detail, updatedAt: at };
   saveExecution(io.cwd, { ...cur, tasks: { ...cur.tasks, [task]: next } });
   return out(r.result === 'merged' ? { result: 'integrated', sha: r.sha, preexisting: r.preexisting } : { result: 'conflict', detail: r.detail });
@@ -521,7 +521,9 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       if (!Number.isInteger(round) || round < 0 || round > 99) throw new UsageError('swarm task: --round must be an integer from 0 to 99');
       const agent = has('no-agent') ? null : (flag('agent') ?? prev.agent);
       const stageSince = prev.stage !== stage ? iso : prev.stageSince;
-      const next: ExecTask = { ...prev, stage, status, round, agent, detail, updatedAt: iso, stageSince };
+      // Blocked now (it was not): the task's time ends here. Back to running: the next finish writes it again.
+      const finishedAt = status === 'blocked' && prev.status !== 'blocked' ? iso : status === 'running' && prev.finishedAt ? null : prev.finishedAt;
+      const next: ExecTask = { ...prev, stage, status, round, agent, detail, updatedAt: iso, stageSince, ...(finishedAt !== undefined ? { finishedAt } : {}) };
       saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: next } });
       const lease = flag('lease') && !Number.isNaN(Date.parse(flag('lease')!)) ? flag('lease')! : new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString();
       writePublicTask(io.cwd, { task, runId: e.runId, stage, status, agent, round, since: stageSince, updatedAt: iso, leaseUntil: lease, by: e.coordinator, mode: prev.executor });
@@ -580,7 +582,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         const revive = !e.active && e.stopReason === 'stalled';
         saveExecution(io.cwd, {
           ...e, ...(revive ? { active: true, stopReason: null, stallReason: null } : {}),
-          tasks: { ...e.tasks, [task]: { ...t, status: 'running', stage: 'implement', executor: 'subagents', worktree, attempts: t.attempts + 1, nudgedAt: null, updatedAt: iso, stageSince: iso } },
+          tasks: { ...e.tasks, [task]: { ...t, status: 'running', stage: 'implement', executor: 'subagents', worktree, attempts: t.attempts + 1, nudgedAt: null, finishedAt: iso, updatedAt: iso, stageSince: iso } },
         });
         writePublicTask(io.cwd, { task, runId: e.runId, stage: 'implement', status: 'running', agent: null, round: t.round, since: iso, updatedAt: iso, leaseUntil: new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString(), by: e.coordinator, mode: 'subagents' });
         return json({ task, adopted: true, previous: t.executor, worktree, branch: t.branch });
@@ -589,7 +591,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       const revive = !e.active && e.stopReason === 'stalled';
       saveExecution(io.cwd, {
         ...e, ...(revive ? { active: true, stopReason: null, stallReason: null } : {}),
-        tasks: { ...e.tasks, [task]: { ...t, status: 'running', stage: 'implement', attempts: t.attempts + 1, detail: null, updatedAt: iso, stageSince: iso } },
+        tasks: { ...e.tasks, [task]: { ...t, status: 'running', stage: 'implement', attempts: t.attempts + 1, detail: null, finishedAt: null, updatedAt: iso, stageSince: iso } },
       });
       return ok();
     }
@@ -618,7 +620,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       // The cap and the reason live in schedule.ts: one rule for the scheduler and this command.
       const verdict = relaunchOrBlock(task, t.attempts);
       if (verdict.type === 'block') {
-        saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, status: 'blocked', detail: verdict.reason, updatedAt: iso } } });
+        saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, status: 'blocked', detail: verdict.reason, updatedAt: iso, finishedAt: iso } } });
         return json({ task, blocked: true, reason: verdict.reason });
       }
       const attempt = verdict.attempt;

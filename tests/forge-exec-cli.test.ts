@@ -167,7 +167,9 @@ describe('forge swarm (execution)', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     out(run(['swarm', 'worktree', 'T1'], io));
     out(run(['swarm', 'task', 'T1', '--stage', 'integrate', '--status', 'blocked'], io));
+    expect(readExecution(root)!.tasks.T1.finishedAt).toBe(NOW.toISOString());
     expect(run(['swarm', 'retry', 'T1'], io).code).toBe(0);
+    expect(readExecution(root)!.tasks.T1.finishedAt ?? null).toBeNull();
     expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'running', stage: 'implement', attempts: 1 });
   });
   it('stop marks the execution stopped; sleep --mark records sleepUntil', () => {
@@ -228,7 +230,7 @@ describe('forge swarm (execution)', () => {
     expect(r2.previous).toBe('manual');
     expect(samePath(r2.worktree, mine)).toBe(true);
     const after = readExecution(root)!;
-    expect(after.tasks.T1).toMatchObject({ status: 'running', stage: 'implement', executor: 'subagents', attempts: 1, detail: 'merge conflict with task/T1' });
+    expect(after.tasks.T1).toMatchObject({ status: 'running', stage: 'implement', executor: 'subagents', attempts: 1, detail: 'merge conflict with task/T1', finishedAt: NOW.toISOString() });
     expect(JSON.parse(readFileSync(executionTaskFile(root, 'T1'), 'utf8'))).toMatchObject({ by: 'main', mode: 'subagents', stage: 'implement' });
     // The member marked it done on the roadmap: the tick no longer takes that as accepted, nor relaunches it.
     writeDocs(path.join(root, 'db', 'state'), { T1: { status: 'done', owner: 'S2' } });
@@ -300,6 +302,7 @@ describe('forge swarm (execution)', () => {
     out(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io));
     expect(out(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io))).toEqual({ task: 'T1', blocked: true, reason: 'the session of T1 stopped 3 times' });
     expect(readExecution(root)!.tasks.T1.status).toBe('blocked');
+    expect(readExecution(root)!.tasks.T1.finishedAt).toEqual(expect.any(String));
     expect(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io).code).toBe(2);
   });
   it('nudge prints the fixed text in the plan language and records nudgedAt', () => {

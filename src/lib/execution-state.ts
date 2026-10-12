@@ -19,6 +19,8 @@ export interface ExecTask {
   executor: 'subagents' | 'sessions' | 'manual'; attempts: number; agent: string | null;
   startedAt: string; stageSince: string; updatedAt: string; detail: string | null;
   nudgedAt?: string | null;
+  /** When the task last finished (integrated, blocked, or handed over by `retry --adopt`); null or absent before. */
+  finishedAt?: string | null;
   title?: string | null;
 }
 export type ExecStopReason = 'finished' | 'stalled' | 'stopped' | 'budget' | 'migrated';
@@ -42,6 +44,14 @@ type Obj = Record<string, unknown>;
 const isObj = (x: unknown): x is Obj => !!x && typeof x === 'object' && !Array.isArray(x);
 const str = (x: unknown): string | null => (typeof x === 'string' && x ? x : null);
 const iso = (x: unknown): string | null => (typeof x === 'string' && !Number.isNaN(Date.parse(x)) ? x : null);
+/** A finishedAt more than this ahead of the reader's clock is dropped. */
+export const FUTURE_SKEW_MS = 120_000;
+// An ISO finishedAt; with the reader's clock, not more than FUTURE_SKEW_MS ahead of it.
+const finishedOf = (x: unknown, now?: number): string | null => {
+  const v = iso(x);
+  if (!v) return null;
+  return now !== undefined && Number.isFinite(now) && Date.parse(v) - now > FUTURE_SKEW_MS ? null : v;
+};
 const int = (x: unknown, min: number, max: number, dflt: number): number =>
   typeof x === 'number' && Number.isInteger(x) ? Math.min(max, Math.max(min, x)) : dflt;
 const oneOf = <T extends string>(list: readonly T[], x: unknown): T | null => ((list as readonly unknown[]).includes(x) ? (x as T) : null);
@@ -50,7 +60,7 @@ const oneOf = <T extends string>(list: readonly T[], x: unknown): T | null => ((
 // eslint-disable-next-line no-control-regex
 const cleanTitle = (x: unknown): string => (typeof x === 'string' ? x.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim().slice(0, 200) : '');
 
-function normalizeTask(x: unknown): ExecTask | null {
+function normalizeTask(x: unknown, now?: number): ExecTask | null {
   if (!isObj(x)) return null;
   const status = oneOf(TASK_STATUSES, x.status);
   const stage = oneOf(STAGES, x.stage);
@@ -66,11 +76,12 @@ function normalizeTask(x: unknown): ExecTask | null {
     round: int(x.round, 0, 99, 0), attempts: int(x.attempts, 0, 99, 0),
     agent: str(x.agent), updatedAt: iso(x.updatedAt) ?? startedAt, detail: typeof x.detail === 'string' ? x.detail.slice(0, 500) : null,
     ...(iso(x.nudgedAt) ? { nudgedAt: iso(x.nudgedAt) } : {}),
+    ...(finishedOf(x.finishedAt, now) ? { finishedAt: finishedOf(x.finishedAt, now) } : {}),
     ...(title ? { title } : {}),
   };
 }
 
-export function normalizeExecution(x: unknown): ExecutionState | null {
+export function normalizeExecution(x: unknown, now?: number): ExecutionState | null {
   if (!isObj(x)) return null;
   const mode = oneOf(['subagents', 'sessions'] as const, x.mode);
   const kind = oneOf(['plan', 'ephemeral'] as const, x.kind) ?? 'plan';
@@ -82,7 +93,7 @@ export function normalizeExecution(x: unknown): ExecutionState | null {
   const tasks: Record<string, ExecTask> = {};
   if (isObj(x.tasks)) {
     for (const [id, t] of Object.entries(x.tasks).slice(0, MAX_TASKS)) {
-      const n = isPlanId(id) ? normalizeTask(t) : null;
+      const n = isPlanId(id) ? normalizeTask(t, now) : null;
       if (n) tasks[id] = n;
     }
   }
@@ -99,9 +110,9 @@ export function normalizeExecution(x: unknown): ExecutionState | null {
   };
 }
 
-export function parseExecution(text: string | null | undefined): ExecutionState | null {
+export function parseExecution(text: string | null | undefined, now?: number): ExecutionState | null {
   if (typeof text !== 'string') return null;
-  try { return normalizeExecution(JSON.parse(text)); } catch { return null; }
+  try { return normalizeExecution(JSON.parse(text), now); } catch { return null; }
 }
 
 /** An old swarm becomes a stopped execution: its fronts are not tasks, so nothing of it is resumed. */

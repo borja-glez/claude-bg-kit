@@ -115,7 +115,7 @@ describe('schedule', () => {
     const base = { plan: plan([task('T1'), task('T2')]), states: { T1: { status: 'in_progress' as const, owner: 'S2' } }, sessions: { S2: live(at(-30)) },
       agents: [{ name: 'wp-shop-T1', state: 'idle' as const }] };
     const r = schedule(input({ ...base, exec: exec({ mode: 'sessions', parallel: 1, tasks: sess('T1', 'running', quiet) }), publicTasks: { T1: pubT('T1', { status: 'blocked' }) } }));
-    expect(r.next.tasks.T1).toMatchObject({ status: 'blocked', detail: 'blocked by its session' });
+    expect(r.next.tasks.T1).toMatchObject({ status: 'blocked', detail: 'blocked by its session', finishedAt: new Date(NOW).toISOString() });
     expect(r.actions.some(a => a.type === 'relaunch' || a.type === 'nudge' || a.type === 'block')).toBe(false);
     expect(starts(r)).toEqual(['T2']);
     // A blocked public file of another run, or written by the coordinator, is not this member's word.
@@ -133,6 +133,12 @@ describe('schedule', () => {
     const r = schedule(input({ plan: plan([task('T1')]), exec: exec({ mode: 'sessions', tasks: sess('T1') }), states: { T1: { status: 'done', owner: 'S2', commits: [{ sha: 'bbb2222', ts: at(-1), title: 't', add: 1, del: 0 }] } } }));
     expect(r.next.tasks.T1).toMatchObject({ status: 'accepted', stage: 'integrate' });
     expect(r.actions[0]).toEqual({ type: 'integrate', task: 'T1', ref: 'task/T1' });
+  });
+  it('a member task marked done on the roadmap is accepted without a finishedAt', () => {
+    const acc = schedule(input({ plan: plan([task('T1')]), states: { T1: { status: 'done' as const, owner: 'S2' } }, sessions: { S2: live(at(5)) },
+      exec: exec({ mode: 'sessions', parallel: 1, tasks: sess('T1') }) }));
+    expect(acc.next.tasks.T1.status).toBe('accepted');
+    expect(acc.next.tasks.T1.finishedAt ?? null).toBeNull();
   });
   it('adopts a task a manual session finished with commits not yet on the run branch', () => {
     const states: States = { T1: { status: 'done', owner: 'M1', commits: [{ sha: 'ccc3333', ts: at(-1), title: 't', add: 1, del: 0 }] } };
@@ -156,7 +162,7 @@ describe('schedule', () => {
     expect(schedule(input({ ...base, exec: exec({ mode: 'sessions', tasks: sess('T1', 'running', old) }), agents: [{ name: 'wp-shop-T1', state: 'working' }] })).actions
       .some(a => a.type === 'relaunch')).toBe(false);
     const capped = schedule(input({ ...base, exec: exec({ mode: 'sessions', tasks: sess('T1', 'running', { ...old, attempts: RELAUNCH_CAP }) }), agents: [] }));
-    expect(capped.next.tasks.T1).toMatchObject({ status: 'blocked', detail: 'the session of T1 stopped 3 times' });
+    expect(capped.next.tasks.T1).toMatchObject({ status: 'blocked', detail: 'the session of T1 stopped 3 times', finishedAt: new Date(NOW).toISOString() });
     expect(capped.actions).toContainEqual({ type: 'block', task: 'T1', reason: 'the session of T1 stopped 3 times' });
   });
   it('gives a relaunched front a lease window before its stopped old owner can trigger another relaunch', () => {

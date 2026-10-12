@@ -82,7 +82,7 @@ export function schedule(i: ScheduleInput): { actions: ScheduleAction[]; next: E
     const own = !!p && p.runId === exec.runId && p.by !== exec.coordinator;
     if ((own && p.status === 'blocked') || statusOf(states, id) === 'blocked') {
       // A public task carries no detail of its own (swarm report has no such flag), so the reason is generic.
-      tasks[id] = { ...t, status: 'blocked', detail: 'blocked by its session', updatedAt: nowIso };
+      tasks[id] = { ...t, status: 'blocked', detail: 'blocked by its session', updatedAt: nowIso, finishedAt: nowIso };
     }
   }
   // Work a manual session finished, with commits not yet on the run branch, is adopted for integration.
@@ -118,7 +118,7 @@ export function schedule(i: ScheduleInput): { actions: ScheduleAction[]; next: E
     const neverClaimed = !o;
     if (pastLease && (ownerStopped || neverClaimed) && !listed(id)) {
       const a = relaunchOrBlock(id, t.attempts);
-      if (a.type === 'block') tasks[id] = { ...t, status: 'blocked', detail: a.reason, updatedAt: nowIso };
+      if (a.type === 'block') tasks[id] = { ...t, status: 'blocked', detail: a.reason, updatedAt: nowIso, finishedAt: nowIso };
       actions.push(a);
       continue;
     }

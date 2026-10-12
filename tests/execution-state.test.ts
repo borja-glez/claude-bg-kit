@@ -22,6 +22,19 @@ describe('execution state', () => {
     const t = { ...base.tasks.T1 } as Record<string, unknown>; delete t.stageSince;
     expect(normalizeExecution({ ...base, tasks: { T1: t } })!.tasks.T1.stageSince).toBe(T);
   });
+  it('keeps an ISO finishedAt, drops junk always and a future one only for a reader that passes now', () => {
+    const F = '2026-10-12T12:30:00.000Z';
+    const withF = (v: unknown) => ({ ...base, tasks: { T2: { ...base.tasks.T2, finishedAt: v } } });
+    expect(normalizeExecution(withF(F))!.tasks.T2.finishedAt).toBe(F);
+    expect('finishedAt' in normalizeExecution(withF('soon'))!.tasks.T2).toBe(false);
+    expect('finishedAt' in normalizeExecution(withF(null))!.tasks.T2).toBe(false);
+    // 30 min ahead of a reader at 12:00 is in the future; 1 min ahead is clock skew and stays.
+    expect('finishedAt' in normalizeExecution(withF(F), Date.parse(T))!.tasks.T2).toBe(false);
+    expect(normalizeExecution(withF('2026-10-12T12:01:00.000Z'), Date.parse(T))!.tasks.T2.finishedAt).toBe('2026-10-12T12:01:00.000Z');
+    expect(parseExecution(JSON.stringify(withF(F)), Date.parse(T))!.tasks.T2).not.toHaveProperty('finishedAt');
+    // An older file has none.
+    expect(normalizeExecution(base)!.tasks.T2).not.toHaveProperty('finishedAt');
+  });
   it('normalizes public task and live docs, rejecting junk', () => {
     expect(normalizePublicTask({ task: 'T1', runId: 'r1', stage: 'review', status: 'running', agent: 'forge-impl', round: 2, since: T, updatedAt: T, leaseUntil: T, by: 'main', mode: 'subagents' })).toMatchObject({ task: 'T1', stage: 'review' });
     expect(normalizePublicTask({ task: 'T1', stage: 'nope' })).toBeNull();
