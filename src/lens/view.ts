@@ -156,6 +156,13 @@ export const duration = (seconds: number | null | undefined): string | null =>
     : seconds < 60 ? `${seconds}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`
       : `${Math.floor(seconds / 3600)}h ${String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')}m`;
 
+export const DAY_S = 86_400;
+/** duration() for a span: null when missing, not finite or negative; «>24h» past a day. */
+export function span(seconds: number | null | undefined): string | null {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds < 0) return null;
+  return seconds > DAY_S ? '>24h' : duration(Math.floor(seconds));
+}
+
 // The one-line summary the band shows: the most specific run going on, in this order.
 export interface Headline { section: SectionId; title: string; detail: string; cells: Cells | null; agent: string | null }
 export function headline(m: PanelModel): Headline | null {

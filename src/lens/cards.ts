@@ -4,7 +4,7 @@ import type { PanelModel } from './model.js';
 import type { Block, Card } from './svg.js';
 import {
   SECTION_HUE, SECTION_ICON, PATH_HUE, tierOf, stagesFor, forgePhase, roadmapCells, briefCells, todoCells, superpowersCells,
-  ratio, duration, fmtTokens, fmtUsd, type Hue,
+  ratio, duration, span, fmtTokens, fmtUsd, type Hue,
 } from './view.js';
 import { shortModelName } from '../lib/prices.js';
 
@@ -18,7 +18,7 @@ export interface CardTexts {
   sUsage: string; effort: string; effortLevel: (e: string) => string; thisSession: string; run: string; gMain: string; gImpl: string;
   gReview: string; gPlan: string; gOther: string; tracking: string; withoutForge: string; withoutForgeNote: string;
   forgeCosts: (usd: string, pct: number) => string; forgeSaves: (usd: string) => string; pricesAsOf: string; drift: string; various: string;
-  noReview: string; gVerify: string; blocked: string;
+  noReview: string; gVerify: string; blocked: string; active: string; sinceStart: string;
 }
 
 const modelRight = (s: { model?: string; effort?: string }, t: CardTexts): string | undefined =>
@@ -156,6 +156,13 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
       kind: 'bar', ratio: 1, hue: 'teal', label: u.scope === 'run' ? t.run : t.thisSession,
       right: `${fmtTokens(u.tokens, loc)} tok · ${u.partial ? '≥ ' : ''}${fmtUsd(u.costUsd, loc)}`,
     }];
+    if (u.time) {
+      const tm = u.time;
+      const line = (active: number, partial: boolean, since: number | null) =>
+        `⏱ ${t.active} ${partial ? '≥ ' : ''}${span(active) ?? '0s'}${since !== null && span(since) ? ` · ${t.sinceStart} ${span(since)}` : ''}`;
+      blocks.push({ kind: 'text', text: line(tm.activeSeconds, tm.activePartial, tm.sinceStartSeconds) });
+      if (tm.session) blocks.push({ kind: 'text', text: `${t.thisSession}: ${line(tm.session.activeSeconds, false, tm.session.sinceStartSeconds)}`, dim: true });
+    }
     if (u.session) blocks.push({ kind: 'text', text: `${t.thisSession}: ${fmtTokens(u.session.tokens, loc)} tok · ${u.sessionPartial ? '≥ ' : ''}${fmtUsd(u.session.costUsd, loc)}`, dim: true });
     if (u.officialUsd !== null) blocks.push({ kind: 'text', text: `${u.drift ? '⚠ ' : ''}/cost ${fmtUsd(u.officialUsd, loc)}${u.drift ? ` · ${t.drift}` : ''}`, dim: !u.drift });
     for (const g of u.groups) {

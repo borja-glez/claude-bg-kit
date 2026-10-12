@@ -6,7 +6,7 @@ export const USAGE_FILES_MAX = 200;
 const USAGE_LOOPS_MAX = 201; // 200 loops plus the overflow one
 export interface UsageFile {
   v: 1; session: string; label: string; worktree: string; startedAt: string; updatedAt: string; costUsd: number | null;
-  loops: Record<string, UsageLoop>; tracking: { waypoint: number; forge: number };
+  loops: Record<string, UsageLoop>; tracking: { waypoint: number; forge: number }; activeMs?: number;
 }
 type Obj = Record<string, unknown>;
 const isObj = (x: unknown): x is Obj => !!x && typeof x === 'object' && !Array.isArray(x);
@@ -18,7 +18,7 @@ export function toUsageFile(s: UsageState, meta: { session: string; label: strin
   return {
     v: 1, session: meta.session, label: meta.label, worktree: meta.worktree,
     startedAt: new Date(s.startedAt).toISOString(), updatedAt: new Date(meta.now).toISOString(),
-    costUsd: meta.costUsd, loops: s.loops, tracking: s.tracking,
+    costUsd: meta.costUsd, loops: s.loops, tracking: s.tracking, activeMs: s.activeMs,
   };
 }
 
@@ -47,6 +47,7 @@ export function parseUsageFile(text: string | undefined): UsageFile | null {
     v: 1, session, label: str(x.label) ?? session, worktree: str(x.worktree) ?? '', startedAt, updatedAt,
     costUsd: typeof x.costUsd === 'number' && Number.isFinite(x.costUsd) ? x.costUsd : null,
     loops, tracking: { waypoint: num(t.waypoint), forge: num(t.forge) },
+    ...(typeof x.activeMs === 'number' && Number.isFinite(x.activeMs) && x.activeMs >= 0 ? { activeMs: x.activeMs } : {}),
   };
 }
 
@@ -96,8 +97,12 @@ export function mergeForRun(files: UsageFile[], own: { session: string; state: U
   for (const f of files) {
     if (f.session === own.session || Date.parse(f.updatedAt) < since) continue;
     add(f.session, f.loops, f.tracking);
+    // A file written before activeMs existed counts 0 and makes the run's active time a lower bound.
+    if (f.activeMs === undefined) out.activePartial = true;
+    else out.activeMs += f.activeMs;
   }
   add(own.session, own.state.loops, own.state.tracking);
+  out.activeMs += own.state.activeMs;
   return out;
 }
 
@@ -120,4 +125,5 @@ export function seedUsage(s: UsageState, file: UsageFile): void {
   }
   s.tracking.waypoint += file.tracking.waypoint;
   s.tracking.forge += file.tracking.forge;
+  s.activeMs += file.activeMs ?? 0;
 }

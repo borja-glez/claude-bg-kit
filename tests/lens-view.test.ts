@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fmtTokens, fmtUsd, usageBandText, barParts, briefCells, forgePhase, headline, stagesFor, tierOf, todoCells, roadmapCells, pct } from '../src/lens/view.js';
+import { fmtTokens, fmtUsd, usageBandText, barParts, briefCells, forgePhase, headline, stagesFor, tierOf, todoCells, roadmapCells, pct, span } from '../src/lens/view.js';
 import { buildCards, cardAlt, type CardTexts } from '../src/lens/cards.js';
 import { bandSvg, cardSvg, fit, xml } from '../src/lens/svg.js';
 import { executionFromFiles, type PanelModel } from '../src/lens/model.js';
@@ -15,7 +15,7 @@ const T: CardTexts = {
   gReview: 'reviewers', gPlan: 'planning', gOther: 'other', tracking: 'tracking', withoutForge: 'without forge', various: 'various',
   withoutForgeNote: 'estimate: forge off, everything on the main model', forgeCosts: (usd, pct) => `forge costs ${usd} more (+${pct} %)`,
   forgeSaves: usd => `forge saves ${usd}`, pricesAsOf: 'prices as of', drift: 'differs from /cost',
-  noReview: 'no independent review', gVerify: 'verification', blocked: 'blocked',
+  noReview: 'no independent review', gVerify: 'verification', blocked: 'blocked', active: 'active', sinceStart: 'since start',
 };
 const FORGE: NonNullable<PanelModel['forge']> = {
   task: 'orders', path: 'large', phase: 'implement', agent: 'forge-impl-heavy', validators: [{ name: 'test', ok: true }],
@@ -296,5 +296,32 @@ describe('usage partial marks and edges', () => {
     expect(v({ planned: true, surfaces: ['app'], result: 'blocked', passed: 0, total: 0, evidence: null, reason: 'no emulator' })).toContain('⊘ verify app · blocked: no emulator');
     expect(v({ planned: true, surfaces: ['web'], result: null, passed: null, total: null, evidence: null, reason: null })).toContain('verify web');
     expect(v(null)).not.toContain('verify');
+  });
+});
+
+describe('lens timings: usage', () => {
+  const U = {
+    scope: 'session' as const, tokens: 1000, costUsd: 1, partial: false, sessionPartial: false, officialUsd: null, drift: false, session: null,
+    groups: [], tracking: null, withoutForge: null, pricesAsOf: '2026-10-12',
+  };
+  it('formats spans, past a day as >24h, and nothing for junk', () => {
+    expect(span(45)).toBe('45s');
+    expect(span(723)).toBe('12m 03s');
+    expect(span(8040)).toBe('2h 14m');
+    expect(span(86_401)).toBe('>24h');
+    expect(span(-1)).toBeNull();
+    expect(span(NaN)).toBeNull();
+    expect(span(null)).toBeNull();
+  });
+  it('draws the active and since-start line under the main bar, and this session dimmed in a run', () => {
+    const one = buildCards({ ...EMPTY, usage: { ...U, time: { activeSeconds: 3900, activePartial: false, sinceStartSeconds: 8040, session: null } } }, T, 0)
+      .find(c => c.title === T.sUsage)!;
+    expect(one.blocks[1]).toEqual({ kind: 'text', text: '⏱ active 1h 05m · since start 2h 14m' });
+    const run = buildCards({ ...EMPTY, usage: { ...U, scope: 'run' as const, time: { activeSeconds: 7200, activePartial: true, sinceStartSeconds: 90_000, session: { activeSeconds: 60, sinceStartSeconds: 120 } } } }, T, 0)
+      .find(c => c.title === T.sUsage)!;
+    expect(run.blocks[1]).toEqual({ kind: 'text', text: '⏱ active ≥ 2h 00m · since start >24h' });
+    expect(run.blocks[2]).toEqual({ kind: 'text', text: 'this session: ⏱ active 1m 00s · since start 2m 00s', dim: true });
+    // Without time (an older model) the card is as before.
+    expect(JSON.stringify(buildCards({ ...EMPTY, usage: U }, T, 0))).not.toContain('⏱');
   });
 });

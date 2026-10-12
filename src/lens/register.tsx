@@ -8,7 +8,7 @@ import { buildCards, cardAlt } from './cards.js';
 import { cardSvg, bandSvg } from './svg.js';
 import { termCard, termBand, type TermUI } from './term.js';
 import { headline, ratio, usageBandText, PALETTE, SECTION_HUE, SECTION_ICON } from './view.js';
-import { labelLoop, newUsage, recordStep, recordTracking, trackingKind, type UsageState } from './usage.js';
+import { endTurn, labelLoop, newTurnClock, newUsage, startTurn, touchTurn, recordStep, recordTracking, trackingKind, type UsageState } from './usage.js';
 import { mainCheckoutFrom, mergeForRun, parseUsageFile, runStartedAt, seedUsage, toUsageFile, USAGE_FILE_MAX, USAGE_FILES_MAX, type RunSource, type UsageFile } from './usage-file.js';
 
 const panel = atom({ plugin: 'lens', key: 'panel' } as const, null as PanelModel | null);
@@ -33,6 +33,12 @@ let timer: Timer | null = null;
 
 const emptyActivity = (): Activity => ({ tool: null, turnSince: null, todos: undefined, subagents: [], ccTasks: [] });
 let activity: Activity = emptyActivity();
+// The open main turn and its last sign of life, for the active time (see TurnClock).
+const turnClock = newTurnClock();
+const syncTurn = () => { activity.turnSince = turnClock.since; };
+async function touch($: Engine): Promise<void> {
+  try { touchTurn(turnClock, await nowMs($)); } catch { /* ignore */ }
+}
 // The main loop's tools in flight by tool_use_id, in start order: "Now" shows the most recent still running.
 const tools = new Map<string, { name: string; since: number }>();
 const MAX_TODOS = 200;
@@ -62,6 +68,8 @@ let lastJson = '';
 
 function resetPanel(): void {
   activity = emptyActivity();
+  turnClock.since = null;
+  turnClock.lastActivityMs = 0;
   tools.clear();
   busy = false;
   panelFiles = {};
@@ -344,7 +352,7 @@ const baseName = (path: string) => path.replace(/[\\/]+$/, '').split(/[\\/]/).po
 // What changes the file: the start, the steps and the tracking.
 function usageSig(): string {
   const steps = Object.values(usage.loops).reduce((a, l) => a + l.steps, 0);
-  return `${usage.startedAt}|${steps}|${usage.tracking.waypoint}|${usage.tracking.forge}`;
+  return `${usage.startedAt}|${steps}|${usage.tracking.waypoint}|${usage.tracking.forge}|${usage.activeMs}`;
 }
 
 // Writes this session's usage file when the main checkout has .forge/ and the count changed: at most every 30 s
@@ -586,7 +594,7 @@ const TEXT = {
     sForge: 'forge', approve: 'Aprobar', reject: 'Rechazar', hoursLeft: (h: number) => `quedan ${h} h`, auto: 'auto',
     pressEnter: 'Comando listo en el prompt: pulsa Enter',
     briefs: 'briefs', cycle: 'ciclo', task: 'Tarea', proposals: 'Propuestas',
-    sUsage: 'Consumo', effort: 'esfuerzo', thisSession: 'esta sesión', run: 'ejecución', gMain: 'Sesión principal', gImpl: 'Implementadores', gReview: 'Revisores', gVerify: 'Verificación', blocked: 'bloqueada', gPlan: 'Planificación y scout', gOther: 'Otros subagentes', tracking: 'Seguimiento', withoutForge: 'Sin forge (estimado)', withoutForgeNote: 'orientativo: en una sola sesión el contexto crecería y costaría más, y no habría revisión', forgeCosts: (usd: string, pct: number) => `forge cuesta +${usd} (+${pct} %)`, forgeSaves: (usd: string) => `forge ahorra −${usd}`, pricesAsOf: 'precios a', drift: 'precios o medición incompletos', various: 'varios', noReview: 'sin revisiones independientes', effortLevel: (e: string) => ({ low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' } as Record<string, string>)[e] ?? e,
+    sUsage: 'Consumo', effort: 'esfuerzo', thisSession: 'esta sesión', active: 'activo', sinceStart: 'desde el inicio',run: 'ejecución', gMain: 'Sesión principal', gImpl: 'Implementadores', gReview: 'Revisores', gVerify: 'Verificación', blocked: 'bloqueada', gPlan: 'Planificación y scout', gOther: 'Otros subagentes', tracking: 'Seguimiento', withoutForge: 'Sin forge (estimado)', withoutForgeNote: 'orientativo: en una sola sesión el contexto crecería y costaría más, y no habría revisión', forgeCosts: (usd: string, pct: number) => `forge cuesta +${usd} (+${pct} %)`, forgeSaves: (usd: string) => `forge ahorra −${usd}`, pricesAsOf: 'precios a', drift: 'precios o medición incompletos', various: 'varios', noReview: 'sin revisiones independientes', effortLevel: (e: string) => ({ low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' } as Record<string, string>)[e] ?? e,
   },
   en: {
     panel: 'Panel', panelOpened: 'Progress panel opened.',
@@ -600,7 +608,7 @@ const TEXT = {
     sForge: 'forge', approve: 'Approve', reject: 'Reject', hoursLeft: (h: number) => `${h}h left`, auto: 'auto',
     pressEnter: 'Command ready in the prompt: press Enter',
     briefs: 'briefs', cycle: 'cycle', task: 'Task', proposals: 'Proposals',
-    sUsage: 'Usage', effort: 'effort', thisSession: 'this session', run: 'run', gMain: 'Main session', gImpl: 'Implementers', gReview: 'Reviewers', gVerify: 'Verification', blocked: 'blocked', gPlan: 'Planning and scout', gOther: 'Other subagents', tracking: 'Tracking', withoutForge: 'Without forge (estimate)', withoutForgeNote: 'rough: in one session the context would grow and cost more, with no review', forgeCosts: (usd: string, pct: number) => `forge costs +${usd} (+${pct}%)`, forgeSaves: (usd: string) => `forge saves −${usd}`, pricesAsOf: 'prices as of', drift: 'prices or measurement incomplete', various: 'mixed', noReview: 'no independent review', effortLevel: (e: string) => e,
+    sUsage: 'Usage', effort: 'effort', thisSession: 'this session', active: 'active', sinceStart: 'since start',run: 'run', gMain: 'Main session', gImpl: 'Implementers', gReview: 'Reviewers', gVerify: 'Verification', blocked: 'blocked', gPlan: 'Planning and scout', gOther: 'Other subagents', tracking: 'Tracking', withoutForge: 'Without forge (estimate)', withoutForgeNote: 'rough: in one session the context would grow and cost more, with no review', forgeCosts: (usd: string, pct: number) => `forge costs +${usd} (+${pct}%)`, forgeSaves: (usd: string) => `forge saves −${usd}`, pricesAsOf: 'prices as of', drift: 'prices or measurement incomplete', various: 'mixed', noReview: 'no independent review', effortLevel: (e: string) => e,
   },
 } as const;
 type Texts = (typeof TEXT)[keyof typeof TEXT];
@@ -658,6 +666,8 @@ export const register: Register = on => {
   });
 
   on('session.end', async ($, e, next) => {
+    // A turn still open when the session ends counts up to now.
+    try { endTurn(usage, turnClock, await nowMs($)); syncTurn(); } catch { /* ignore */ }
     // The last usage file, whatever the 30 s pace says, after any write in flight.
     try {
       const u = await $.session.usage();
@@ -697,16 +707,19 @@ export const register: Register = on => {
 
   on('turn.start', async ($, e, next) => {
     try {
-      activity.turnSince = await nowMs($);
+      startTurn(usage, turnClock, await nowMs($));
+      syncTurn();
       void requestPanelWrite($);
     } catch { /* ignore */ }
     return next(e);
   });
 
   // A subagent's turn is not the main turn: it neither ends the main turn's clock nor reads the panel's files.
-  on('turn.complete', ($, e, next) => {
+  on('turn.complete', async ($, e, next) => {
     if (!e.agentId) {
-      activity.turnSince = null;
+      // Every reason closes it: an abort or an API error also arrives here, so the clock never runs on.
+      try { endTurn(usage, turnClock, await nowMs($)); } catch { turnClock.since = null; }
+      syncTurn();
       void refreshPanel($);
     }
     return next(e);
@@ -714,7 +727,9 @@ export const register: Register = on => {
 
   // Each model request, measured from its response (the stream passes through untouched).
   on('turn.step', async function* ($, e, next) {
+    void touch($);
     const r = yield* next(e);
+    void touch($);
     try {
       recordStep(usage, { agentId: e.agentId, model: e.model, effort: e.effort, usage: r?.usage ?? null });
       void requestPanelWrite($);
@@ -734,6 +749,7 @@ export const register: Register = on => {
   // The main loop's tool in flight and its todo list; a subagent's calls are its own.
   on('tool.call', async ($, e, next) => {
     const mine = !e.agentId;
+    void touch($);
     if (mine) {
       try {
         tools.delete(e.tool_use_id);
@@ -762,6 +778,7 @@ export const register: Register = on => {
       }
       return result;
     } finally {
+      void touch($);
       if (mine && tools.delete(e.tool_use_id)) {
         showTool();
         void requestPanelWrite($);
@@ -776,6 +793,7 @@ export const register: Register = on => {
       // A loop agent.spawn did not label (lens loaded later, another spawn path) takes the hook's type.
       const kind = usage.loops[id]?.kind;
       if (!kind || kind === 'unknown') labelLoop(usage, id, String(e.agent_type ?? 'unknown'));
+      await touch($);
       await noteActivity($);
       void requestPanelWrite($);
     } catch { /* ignore */ }
@@ -784,6 +802,7 @@ export const register: Register = on => {
 
   on('classic.SubagentStop', ($, e, next) => {
     try {
+      void touch($);
       activity.subagents = activity.subagents.filter(s => s.id !== e.agent_id);
       void noteActivity($);
       void requestPanelWrite($);

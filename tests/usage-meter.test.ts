@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { newUsage, recordStep, labelLoop, trackingKind, recordTracking, MAIN } from '../src/lens/usage.js';
+import { newUsage, recordStep, labelLoop, trackingKind, recordTracking, closeTurn, newTurnClock, startTurn, touchTurn, endTurn, MAIN } from '../src/lens/usage.js';
 
 const U = (input: number, output: number, cacheRead = 0, cacheWrite = 0) =>
   ({ input_tokens: input, output_tokens: output, cache_read_input_tokens: cacheRead, cache_creation_input_tokens: cacheWrite });
@@ -68,5 +68,46 @@ describe('usage meter', () => {
     expect(Object.keys(s.loops)).toHaveLength(201);
     expect(s.loops.overflow).toMatchObject({ kind: 'unknown', description: null, steps: 2, input: 10, output: 10 });
     expect(s.loops.late).toBeUndefined();
+  });
+});
+
+describe('active time', () => {
+  it('adds each closed turn and ignores a turn that ends before it starts', () => {
+    const s = newUsage(1000);
+    expect(s.activeMs).toBe(0);
+    closeTurn(s, 10_000, 70_000);
+    closeTurn(s, 100_000, 105_000);
+    closeTurn(s, 200_000, 150_000);
+    closeTurn(s, NaN, 150_000);
+    expect(s.activeMs).toBe(65_000);
+  });
+  it('an aborted or failed turn (turn.complete with any reason) closes the clock and stops accruing', () => {
+    const s = newUsage(0);
+    const c = newTurnClock();
+    startTurn(s, c, 1_000);
+    touchTurn(c, 4_000);
+    endTurn(s, c, 5_000);
+    expect(s.activeMs).toBe(4_000);
+    expect(c.since).toBeNull();
+    // Nothing is open: a second end (Stop after turn.complete) adds nothing, and activity does not reopen it.
+    touchTurn(c, 9_000);
+    endTurn(s, c, 20_000);
+    expect(s.activeMs).toBe(4_000);
+  });
+  it('a dangling turn followed by a new turn.start counts only up to its last activity', () => {
+    const s = newUsage(0);
+    const c = newTurnClock();
+    startTurn(s, c, 1_000);
+    touchTurn(c, 3_000);
+    touchTurn(c, 2_000); // never goes back
+    startTurn(s, c, 100_000);
+    expect(s.activeMs).toBe(2_000);
+    expect(c.since).toBe(100_000);
+    endTurn(s, c, 101_000);
+    expect(s.activeMs).toBe(3_000);
+    // A dangling turn with no activity after its start adds nothing.
+    startTurn(s, c, 200_000);
+    startTurn(s, c, 300_000);
+    expect(s.activeMs).toBe(3_000);
   });
 });

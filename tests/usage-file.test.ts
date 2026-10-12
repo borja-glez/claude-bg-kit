@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { newUsage, recordStep, recordTracking, labelLoop } from '../src/lens/usage.js';
+import { newUsage, recordStep, recordTracking, labelLoop, closeTurn } from '../src/lens/usage.js';
 import { toUsageFile, parseUsageFile, mainCheckoutFrom, runStartedAt, mergeForRun, seedUsage, USAGE_FILE_MAX } from '../src/lens/usage-file.js';
 import { mainCheckoutFrom as libMainCheckoutFrom } from '../src/lib/worktree.js';
 
@@ -103,5 +103,36 @@ describe('usage file', () => {
     // The file's loops are copies: recording more does not change the parsed file.
     recordStep(live, { model: 'claude-opus-5-5', usage: U(1, 1) });
     expect(file.loops.main.steps).toBe(1);
+  });
+  it('round-trips activeMs, reads an older file without it, and seeds it once', () => {
+    const s = state(10);
+    closeTurn(s, T0, T0 + 90_000);
+    const f = toUsageFile(s, meta('s1', 5));
+    expect(f.activeMs).toBe(90_000);
+    expect(parseUsageFile(JSON.stringify(f))!.activeMs).toBe(90_000);
+    const { activeMs: _a, ...old } = f;
+    expect(parseUsageFile(JSON.stringify(old))!).not.toHaveProperty('activeMs');
+    expect(parseUsageFile(JSON.stringify({ ...f, activeMs: -5 }))!).not.toHaveProperty('activeMs');
+    const live = state(1);
+    closeTurn(live, T0, T0 + 10_000);
+    seedUsage(live, parseUsageFile(JSON.stringify(f))!);
+    expect(live.activeMs).toBe(100_000);
+    seedUsage(live, parseUsageFile(JSON.stringify(old))!);
+    expect(live.activeMs).toBe(100_000);
+  });
+  it('sums activeMs over the run with the token rule, and marks it partial when a file lacks it', () => {
+    const withActive = (session: string, minutes: number, ms: number) => { const s = state(1); closeTurn(s, T0, T0 + ms); return toUsageFile(s, meta(session, minutes)); };
+    const other = withActive('s2', 30, 60_000);
+    const old = { ...withActive('s3', 0, 999_000), updatedAt: new Date(T0 - 3600_000).toISOString() };
+    const ownStale = withActive('s1', 10, 777_000);
+    const live = state(1);
+    closeTurn(live, T0, T0 + 5_000);
+    const sum = mergeForRun([other, old, ownStale], { session: 's1', state: live }, T0);
+    expect(sum.activeMs).toBe(65_000);
+    expect(sum.activePartial ?? false).toBe(false);
+    expect(sum.startedAt).toBe(T0);
+    const { activeMs: _a, ...noActive } = withActive('s4', 20, 1_000);
+    const partial = mergeForRun([other, noActive as typeof other], { session: 's1', state: live }, T0);
+    expect(partial).toMatchObject({ activeMs: 65_000, activePartial: true });
   });
 });

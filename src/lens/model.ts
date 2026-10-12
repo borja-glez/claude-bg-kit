@@ -152,6 +152,7 @@ export type PanelModel = {
     groups: { id: 'main' | 'impl' | 'review' | 'verify' | 'plan' | 'other'; model: string | null; effort?: string | null; tokens: number; costUsd: number | null; share: number }[];
     tracking: { tokens: number; costUsd: number | null } | null;
     withoutForge: { costUsd: number; deltaUsd: number; deltaPct: number } | null;
+    time?: { activeSeconds: number; activePartial: boolean; sinceStartSeconds: number | null; session: { activeSeconds: number; sinceStartSeconds: number | null } | null };
     pricesAsOf: string;
   } | null;
 };
@@ -160,7 +161,19 @@ export type PanelModel = {
 const secs = (now: number, since: number): number | null =>
   Number.isFinite(now) && Number.isFinite(since) ? Math.max(0, Math.floor((now - since) / 1000)) : null;
 
-const STALE_LEDGER_MS = 24 * 3600_000;
+/** The session's (or run's) active time with the turn in progress, and the time since its start. */
+export function usageTime(session: UsageState, run: UsageState | null, turnSince: number | null, now: number): NonNullable<NonNullable<PanelModel['usage']>['time']> {
+  const live = turnSince !== null && Number.isFinite(turnSince) && Number.isFinite(now) && now > turnSince ? now - turnSince : 0;
+  const active = (s: UsageState) => Math.floor((s.activeMs + live) / 1000);
+  const since = (s: UsageState) => (s.startedAt > 0 && Number.isFinite(now) && now >= s.startedAt ? Math.floor((now - s.startedAt) / 1000) : null);
+  const shown = run ?? session;
+  return {
+    activeSeconds: active(shown), activePartial: !!run?.activePartial, sinceStartSeconds: since(shown),
+    session: run ? { activeSeconds: active(session), sinceStartSeconds: since(session) } : null,
+  };
+}
+
+const STALE_LEDGER_MS =24 * 3600_000;
 
 function superpowers(input: {
   ledger?: string; ledgerPlan?: string; planFallback?: string; ledgerMtimeMs?: number; now: number;
@@ -344,7 +357,9 @@ export function buildPanelModel(input: {
       tokens: shown.tokens, costUsd: shown.costUsd, partial: shown.partial, sessionPartial: own.partial,
       officialUsd: official, drift,
       session: input.usage.run ? { tokens: own.tokens, costUsd: own.costUsd } : null,
-      groups: shown.groups, tracking: shown.tracking, withoutForge: shown.withoutForge, pricesAsOf: PRICES_AS_OF,
+      groups: shown.groups, tracking: shown.tracking, withoutForge: shown.withoutForge,
+      time: usageTime(input.usage.session, input.usage.run, a.turnSince ?? null, now),
+      pricesAsOf: PRICES_AS_OF,
     };
   }
   return {

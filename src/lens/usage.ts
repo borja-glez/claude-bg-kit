@@ -7,7 +7,13 @@ export interface UsageLoop {
   kind: string; description: string | null; model: string | null; effort: string | null; steps: number;
   input: number; output: number; cacheRead: number; cacheWrite: number; costUsd: number; unpriced: number;
 }
-export interface UsageState { startedAt: number; loops: Record<string, UsageLoop>; tracking: { waypoint: number; forge: number } }
+export interface UsageState {
+  startedAt: number; loops: Record<string, UsageLoop>; tracking: { waypoint: number; forge: number };
+  /** Milliseconds of closed main-agent turns. */
+  activeMs: number;
+  /** Set by mergeForRun when some session's file had no activeMs (written before it existed). */
+  activePartial?: boolean;
+}
 type StepUsage = {
   input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number; model?: string;
   cache_creation?: { ephemeral_5m_input_tokens?: number; ephemeral_1h_input_tokens?: number } | null;
@@ -18,7 +24,34 @@ const MAX_LOOPS = 200;
 export const OVERFLOW = 'overflow';
 const n = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) && x > 0 ? x : 0);
 
-export const newUsage = (startedAt: number): UsageState => ({ startedAt, loops: {}, tracking: { waypoint: 0, forge: 0 } });
+export const newUsage = (startedAt: number): UsageState => ({ startedAt, loops: {}, tracking: { waypoint: 0, forge: 0 }, activeMs: 0 });
+
+/**
+ * The open main turn and the last moment the session showed life (tool start/end, subagent start/stop, a model request,
+ * a turn event). A turn can end with no turn.complete the plugin sees; the next turn.start then closes the dangling
+ * one at its last activity, not at now.
+ */
+export interface TurnClock { since: number | null; lastActivityMs: number }
+export const newTurnClock = (): TurnClock => ({ since: null, lastActivityMs: 0 });
+export function touchTurn(c: TurnClock, now: number): void {
+  if (Number.isFinite(now) && now > c.lastActivityMs) c.lastActivityMs = now;
+}
+/** turn.start: closes a turn still open at its last activity, then opens the new one. */
+export function startTurn(s: UsageState, c: TurnClock, now: number): void {
+  if (c.since !== null) closeTurn(s, c.since, c.lastActivityMs);
+  c.since = now;
+  c.lastActivityMs = now;
+}
+/** The turn ended (turn.complete, whatever its reason: abort and error included; or the session ended). */
+export function endTurn(s: UsageState, c: TurnClock, now: number): void {
+  if (c.since !== null) closeTurn(s, c.since, now);
+  c.since = null;
+}
+
+/** A main-agent turn closed: its length added to the active time (nothing for a turn that ends before it starts). */
+export function closeTurn(s: UsageState, since: number, now: number): void {
+  if (Number.isFinite(since) && Number.isFinite(now) && now > since) s.activeMs += now - since;
+}
 
 export function effortText(effort: string | number | undefined): string | null {
   if (typeof effort === 'string' && effort) return effort;

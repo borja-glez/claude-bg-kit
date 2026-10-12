@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { buildBandModel } from '../src/mod/model.js';
-import { newUsage, recordStep, labelLoop } from '../src/lens/usage.js';
-import { buildPanelModel, forgeFromStatus, parsePlanTasks, parseSddLedger, summarizeTodos, type Activity } from '../src/lens/model.js';
+import { newUsage, recordStep, labelLoop, closeTurn } from '../src/lens/usage.js';
+import { buildPanelModel, usageTime,forgeFromStatus, parsePlanTasks, parseSddLedger, summarizeTodos, type Activity } from '../src/lens/model.js';
 
 const LEDGER = `# SDD ledger — plan: docs/superpowers/plans/2026-10-11-waypoint-views.md
 
@@ -365,6 +365,31 @@ describe('buildPanelModel usage', () => {
     });
     expect(m.mainModel).toEqual({ model: 'claude-opus-5-5', effort: 'high' });
     expect(m.subagents[0]).toMatchObject({ model: 'claude-sonnet-5-5', effort: 'medium' });
+  });
+  it('gives the session active time with the turn in progress, and the time since start', () => {
+    const s = session();
+    s.startedAt = 10_000;
+    closeTurn(s, 20_000, 50_000);
+    const m = buildPanelModel({ ...base, activity: act({ turnSince: 90_000 }), usage: { session: s, run: null, officialUsd: null } });
+    expect(m.usage!.time).toEqual({ activeSeconds: 40, activePartial: false, sinceStartSeconds: 90, session: null });
+  });
+  it('in a run, sums the sessions, counts since the run start, and keeps this session apart', () => {
+    const s = session();
+    s.startedAt = 40_000;
+    closeTurn(s, 40_000, 50_000);
+    const run = newUsage(0);
+    run.startedAt = 4_000;
+    run.activeMs = 70_000;
+    run.activePartial = true;
+    expect(usageTime(s, run, 95_000, 100_000)).toEqual({
+      activeSeconds: 75, activePartial: true, sinceStartSeconds: 96, session: { activeSeconds: 15, sinceStartSeconds: 60 },
+    });
+  });
+  it('has no time since start before the start is read, and never a negative one', () => {
+    const s = session();
+    expect(usageTime(s, null, null, 100_000).sinceStartSeconds).toBeNull();
+    s.startedAt = 200_000;
+    expect(usageTime(s, null, 300_000, 100_000)).toMatchObject({ activeSeconds: 0, sinceStartSeconds: null });
   });
   it('summarizes the session, with the /cost check and drift', () => {
     const m = buildPanelModel({ ...base, usage: { session: session(), run: null, officialUsd: 6, officialOwnUsd: 6 } });
