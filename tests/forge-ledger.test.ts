@@ -9,9 +9,9 @@ let root: string;
 beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-')); });
 
 describe('ledger', () => {
-  it('creates .forge with a gitignore that keeps only config.yaml', () => {
+  it('creates .forge with a gitignore that keeps config.yaml and verify/*.md', () => {
     const dir = forgeDir(root);
-    expect(readFileSync(path.join(dir, '.gitignore'), 'utf8')).toBe('*\n!.gitignore\n!config.yaml\n');
+    expect(readFileSync(path.join(dir, '.gitignore'), 'utf8')).toBe('*\n!.gitignore\n!config.yaml\n!verify/\n!verify/*.md\n');
   });
   it('appends and reads events in order', () => {
     appendEvent(root, { ts: '2026-10-11T10:00:00.000Z', kind: 'triage', task: 't1', path: 'small' });

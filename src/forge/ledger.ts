@@ -6,7 +6,9 @@ export const LEDGER_KINDS = ['triage', 'phase', 'agent', 'validate', 'verdict', 
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
 export interface LedgerEvent { ts: string; kind: LedgerKind; task?: string; [key: string]: unknown }
 
-const GITIGNORE = '*\n!.gitignore\n!config.yaml\n';
+const GITIGNORE = '*\n!.gitignore\n!config.yaml\n!verify/\n!verify/*.md\n';
+// What forge 0.5.x wrote; upgraded in place so surfaces reach git. Any other content is the user's and stays.
+const GITIGNORE_05 = '*\n!.gitignore\n!config.yaml\n';
 
 const forgePath = (root: string) => path.join(root, '.forge');
 const ledgerFile = (root: string) => path.join(forgePath(root), 'ledger.jsonl');
@@ -17,6 +19,9 @@ export function forgeDir(root: string): string {
   mkdirSync(dir, { recursive: true });
   const ignore = path.join(dir, '.gitignore');
   if (!existsSync(ignore)) writeFileSync(ignore, GITIGNORE);
+  else {
+    try { if (readFileSync(ignore, 'utf8').replace(/\r\n/g, '\n') === GITIGNORE_05) writeFileSync(ignore, GITIGNORE); } catch { /* leave it */ }
+  }
   return dir;
 }
 
