@@ -199,4 +199,45 @@ describe('forge swarm (execution)', () => {
     expect(readExecution(root)).toMatchObject({ active: false, stopReason: 'stopped' });
     expect(existsSync(path.join(root, '.forge', 'stop'))).toBe(true);
   });
+
+  const sessionsRun = () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--mode', 'sessions'], io));
+    writeDocs(path.join(root, 'db', 'state'), {});
+    writeDocs(path.join(root, 'db', 'sessions'), {});
+    out(run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db'], io));
+  };
+  it('tick reads member public files and the ListAgents snapshot', () => {
+    sessionsRun();
+    mkdirSync(path.dirname(executionTaskFile(root, 'T1')), { recursive: true });
+    writeFileSync(executionTaskFile(root, 'T1'),JSON.stringify({ task: 'T1', runId: readExecution(root)!.runId, stage: 'review', status: 'running', agent: 'forge-review-perf', round: 1, since: NOW.toISOString(), updatedAt: NOW.toISOString(), leaseUntil: NOW.toISOString(), by: 'S2', mode: 'sessions' }));
+    writeFileSync(path.join(root, 'agents.json'), JSON.stringify([{ name: 'wp-shop-T1', state: 'working' }, { bad: 1 }]));
+    out(run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db', '--agents', 'agents.json'], io));
+    expect(readExecution(root)!.tasks.T1).toMatchObject({ stage: 'review', agent: 'forge-review-perf' });
+    writeFileSync(path.join(root, 'bad.json'), '{"x":1}');
+    expect(run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db', '--agents', 'bad.json'], io).code).toBe(2);
+  });
+  it('relaunch counts the attempt, writes the handover note and blocks at the cap', () => {
+    sessionsRun();
+    const r = out(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io));
+    const e = readExecution(root)!;
+    expect(r).toMatchObject({ task: 'T1', attempt: 1, launch: ['launch', 'plan.yaml', 'T1', '--task', '--run', e.runId, '--coordinator', 'main', '--base', 'forge/run-shop'] });
+    expect(readFileSync(path.join(root, '.forge', 'work', 'T1', 'handover.md'), 'utf8')).toContain('# Handover: T1 (attempt 1 of 3)');
+    expect(e.tasks.T1.attempts).toBe(1);
+    out(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io));
+    expect(out(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io))).toEqual({ task: 'T1', blocked: true, reason: 'the session of T1 stopped 3 times' });
+    expect(readExecution(root)!.tasks.T1.status).toBe('blocked');
+    expect(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io).code).toBe(2);
+  });
+  it('nudge prints the fixed text in the plan language and records nudgedAt', () => {
+    sessionsRun();
+    expect(out(run(['swarm', 'nudge', 'T1', '--plan', 'plan.yaml'], io))).toEqual({ task: 'T1', name: 'wp-shop-T1', text: '[forge run] T1: continúa con brief; si estás bloqueado, márcalo como bloqueado' });
+    expect(readExecution(root)!.tasks.T1.nudgedAt).toBe(NOW.toISOString());
+  });
+  it('relaunch and nudge refuse a subagents task', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    writeDocs(path.join(root, 'db', 'state'), {}); writeDocs(path.join(root, 'db', 'sessions'), {});
+    out(run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db'], io));
+    expect(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io).code).toBe(2);
+    expect(run(['swarm', 'nudge', 'T1'], io).code).toBe(2);
+  });
 });

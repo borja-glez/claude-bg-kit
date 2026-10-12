@@ -7,9 +7,10 @@ import { loadConfig } from '../config.js';
 import { stopFile } from '../run.js';
 import { appendEvent } from '../ledger.js';
 import { readExecution, saveExecution, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree } from '../execution.js';
-import { schedule, widthOf } from '../schedule.js';
+import { schedule, widthOf, relaunchOrBlock, RELAUNCH_CAP, type BgAgent } from '../schedule.js';
 import { LEASE_MINUTES } from '../../lib/coordination.js';
-import { STAGES, type ExecutionState, type ExecTask } from '../../lib/execution-state.js';
+import { planLocale } from '../../lib/locale.js';
+import { STAGES, normalizePublicTask, type ExecutionState, type ExecTask, type PublicTask } from '../../lib/execution-state.js';
 import { parsePlan, PlanError, isPlanId } from '../../lib/plan.js';
 import type { SessionDoc, Stage, TaskState } from '../../lib/types.js';
 import { mainWorktreeFrom, samePath } from '../../lib/worktree.js';
@@ -196,7 +197,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     if (!e) throw new UsageError(`swarm ${sub}: no execution (forge swarm start)`);
     return e;
   };
-  if (['start', 'tick', 'integrate', 'merge', 'sleep', 'worktree', 'retry'].includes(sub ?? '')) {
+  if (['start', 'tick', 'integrate', 'merge', 'sleep', 'worktree', 'retry', 'relaunch', 'nudge'].includes(sub ?? '')) {
     const top = deps.git(['rev-parse', '--show-toplevel'])?.trim();
     const main = mainWorktreeFrom(deps.git(['worktree', 'list', '--porcelain']));
     if (!top || !main || !samePath(top, main)) {
@@ -349,7 +350,20 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
           if (typeof c?.sha === 'string' && ID.test(c.sha) && deps.git(['merge-base', '--is-ancestor', c.sha, e.branch]) !== null) integrated.push(c.sha);
         }
       }
-      const d = schedule({ plan, states, sessions, exec: e, integrated, now: now.getTime() });
+      const publicTasks: Record<string, PublicTask> = {};
+      try {
+        for (const f of readdirSync(path.join(io.cwd, '.forge', 'execution')).filter(n => n.endsWith('.json')).slice(0, 500)) {
+          try { const p = normalizePublicTask(JSON.parse(readFileSync(path.join(io.cwd, '.forge', 'execution', f), 'utf8'))); if (p && `${p.task}.json` === f) publicTasks[p.task] = p; } catch { /* skip */ }
+        }
+      } catch { /* none yet */ }
+      let agents: BgAgent[] | null = null;
+      if (flag('agents')) {
+        let raw: unknown;
+        try { raw = JSON.parse(readFileSync(path.resolve(io.cwd, flag('agents')!), 'utf8')); } catch { throw new UsageError('swarm tick: cannot read --agents'); }
+        if (!Array.isArray(raw)) throw new UsageError('swarm tick: --agents must be a JSON array of {name, state}');
+        agents = raw.filter((a): a is BgAgent => !!a && typeof a === 'object' && typeof a.name === 'string' && (a.state === 'working' || a.state === 'idle')).slice(0, 100);
+      }
+      const d = schedule({ plan, states, sessions, exec: e, integrated, now: now.getTime(), publicTasks, agents });
       saveExecution(io.cwd, d.next);
       return json({ actions: d.actions, running: Object.values(d.next.tasks).filter(t => t.status === 'running').length, parallel: e.parallel });
     }
@@ -364,6 +378,43 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         tasks: { ...e.tasks, [task]: { ...t, status: 'running', stage: 'implement', attempts: t.attempts + 1, detail: null, updatedAt: iso, stageSince: iso } },
       });
       return ok();
+    }
+    case 'relaunch':
+    case 'nudge': {
+      const task = taskArg();
+      const e = current();
+      const t = e.tasks[task];
+      if (!t || t.status !== 'running' || t.executor !== 'sessions') throw new UsageError(`swarm ${sub}: ${task} is not a running sessions task`);
+      if (sub === 'nudge') {
+        saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, nudgedAt: iso } } });
+        const es = (flag('plan') ? loadPlanArg(io, flag('plan'), 'nudge').locale : planLocale(io.cwd, e.project)) === 'es';
+        const text = es ? `[forge run] ${task}: continúa con ${t.stage}; si estás bloqueado, márcalo como bloqueado`
+          : `[forge run] ${task}: continue with ${t.stage}; if you are blocked, mark it blocked`;
+        return json({ task, name: `wp-${e.project}-${task}`, text });
+      }
+      const planPath = flag('plan');
+      if (!planPath) throw new UsageError('swarm relaunch: --plan is required');
+      // The cap and the reason live in schedule.ts: one rule for the scheduler and this command.
+      const verdict = relaunchOrBlock(task, t.attempts);
+      if (verdict.type === 'block') {
+        saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, status: 'blocked', detail: verdict.reason, updatedAt: iso } } });
+        return json({ task, blocked: true, reason: verdict.reason });
+      }
+      const attempt = verdict.attempt;
+      const log = deps.git(['log', '--oneline', '-n', '20', `${e.branch}..${t.branch}`])?.trim();
+      const commits = log ? log.split(/\r?\n/).map(l => `  - ${l}`).join('\n') : '  - none';
+      const note = path.join(io.cwd, '.forge', 'work', task, 'handover.md');
+      mkdirSync(path.dirname(note), { recursive: true });
+      writeFileSync(note, [
+        `# Handover: ${task} (attempt ${attempt} of ${RELAUNCH_CAP + 1})`, '',
+        `- Run: ${e.runId} · coordinator ${e.coordinator} · run branch ${e.branch}`,
+        `- Last stage: ${t.stage} · round ${t.round} · agent ${t.agent ?? 'none'} · since ${t.stageSince}`,
+        `- Detail: ${t.detail ?? 'none'}`,
+        `- Commits on ${t.branch} not yet on ${e.branch}:`, commits, '',
+        `Resume from ${t.branch} in this worktree: read .forge/work/${task}/task.json if it exists, do not redo a step whose output file is already written, and continue from the last stage.`, '',
+      ].join('\n'));
+      saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, attempts: attempt, startedAt: iso, nudgedAt: null, updatedAt: iso } } });
+      return json({ task, attempt, note, launch: ['launch', planPath, task, '--task', '--run', e.runId, '--coordinator', e.coordinator, '--base', e.branch] });
     }
     case 'sleep': {
       const seconds = Number(rest[0]);
@@ -390,6 +441,6 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     case 'merge':
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError('usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]|status|propose --plan P|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick --plan P --db DIR|integrate <T>|merge|retry <T>|sleep <seconds> [--mark]|stop [--reason stopped|budget]>');
+      throw new UsageError('usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]|status|propose --plan P|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick --plan P --db DIR [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T>|merge|retry <T>|sleep <seconds> [--mark]|stop [--reason stopped|budget]>');
   }
 }
