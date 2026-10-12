@@ -44,6 +44,10 @@ export interface TaskState {
   summary?: string;
   zonesTouched?: string[];
   forge?: { path: string; phase: string; agent?: string; validators?: { name: string; ok: boolean }[]; verdict?: { action: string; score: number | null }; round?: number; cap?: number };
+  evidence?: {
+    surfaces: string[]; result: 'pass' | 'fail' | 'blocked'; passed: number; total: number; local?: string; pending?: boolean; reason?: string;
+    shots: { url?: string; id?: string; surface: string; check: string; ok: boolean; expected?: string; observed?: string }[];
+  };
 }
 export type States = Record<string, TaskState | undefined>;
 

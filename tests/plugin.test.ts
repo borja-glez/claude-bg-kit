@@ -123,7 +123,7 @@ describe('plugin layout', () => {
   });
   it('plan skill publishes the roadmap with notes and proposals write rules for contributors', () => {
     const md = read('plugins/waypoint/skills/plan/SKILL.md');
-    expect(md).toContain('{"db": {"rules": [{"path": "", "read": "view", "write": "admin"}, {"path": "notes", "read": "view", "write": "interact"}, {"path": "proposals", "read": "view", "write": "interact"}]}, "user": {"scopes": ["profile"]}, "downloads": true}');
+    expect(md).toContain('{"db": {"rules": [{"path": "", "read": "view", "write": "admin"}, {"path": "notes", "read": "view", "write": "interact"}, {"path": "proposals", "read": "view", "write": "interact"}]}, "user": {"scopes": ["profile"]}, "downloads": true, "assets": {}}');
     expect(md).toContain('waypoint 0.9.4 or earlier');
     expect(md).toContain('0.7.x or earlier');
   });
@@ -239,5 +239,11 @@ describe('plugin layout', () => {
       '## Trivial', '## Small', '## Medium', '## Large', 'ratchet', 'breaker', 'stalled', 'fresh-stronger', '/waypoint:design', 'never push', 'forge-fable', '--text-file', '--data-file', '<id>-<n>', 'BASE=$(git rev-parse HEAD)', 'absolute path',
       'tier ladder', '`mech` -> `impl-light` -> `impl` -> `impl-heavy`', 'git revert --no-edit $BASE..HEAD', '`invalid: true`',
       '`failures` of every validator with `ok: false` in `validators-<n>.json`', 'FORGE last --task <id>-<n>']) expect(md).toContain(w);
+  });
+  it('the plan skill declares assets only with evidence upload and warns about public sharing', () => {
+    const md = read('plugins/waypoint/skills/plan/SKILL.md');
+    expect(md).toContain('"assets": {}');
+    expect(md).toMatch(/evidence: local/);
+    expect(md).toMatch(/organization-internal|no longer be shared publicly/);
   });
 });

@@ -40,6 +40,8 @@ export const VFILTER_KEYS: readonly VFilterKey[] = ['done', 'in_progress', 'bloc
 export const NOTE_FILTERS: readonly NoteFilter[] = ['all', 'decision', 'idea', 'debt', 'open', 'mine'];
 export interface UiState {
   zoom: Zoom; offset: number; expanded: Set<string>; modal: string | null; search: string; view: View;
+  /** Index of the open verification screenshot in the modal's task, or null. */
+  shot: number | null;
   /** The timeline window when zoomed or moved freely: its span and its pan from the default anchor, in ms. */
   span?: number; pan?: number;
   /** Timeline status filter (empty: all) and layers drawn over it. */
@@ -123,6 +125,7 @@ export function renderApp(m: Model, ui: UiState): string {
     ${body}
   </main>
   ${ui.modal ? renderTaskModal(m, d, ui.modal, loc) : ''}
+  ${ui.modal && ui.shot !== null && m.states[ui.modal]?.evidence ? renderLightbox(d, m.states[ui.modal]!.evidence!, ui.shot) : ''}
 </div>`;
 }
 
@@ -578,9 +581,30 @@ function renderTaskModal(m: Model, d: Dict, id: string, loc: string): string {
       ${s.summary ? sec(d.field.summary, esc(s.summary)) : ''}
       ${(() => { const ns = filterNotes(m.notes.filter(n => n.taskId === id), 'all', m.me); return ns.length ? sec(d.notesSec, ns.map(n => `<div class="mnote nb-${safeNote(n.type)}"><span class="nt-${safeNote(n.type)}">${esc(d.noteType[safeNote(n.type)])}</span> <span class="k">${esc(authorLabel(m, d, n.author))}</span><div>${esc(n.text)}</div>${n.answer ? `<div class="ans">↳ ${esc(n.answer)}</div>` : ''}</div>`).join('')) : ''; })()}
       ${s.forge ? sec(d.forge.title, renderForge(d, s.forge)) : ''}
+      ${s.evidence ? sec(d.verify.title, renderEvidence(d, s.evidence)) : ''}
       ${sec(d.field.commits, s.commits?.length ? s.commits.map(c => `<div class="mono"><span class="c-blue">${esc(c.sha.slice(0, 7))}</span> ${esc(c.title)} <span class="ok">+${num(c.add)}</span> <span class="del">−${num(c.del)}</span></div>`).join('') : '—')}
     </div></div>
   </div></div>`;
+}
+
+function renderEvidence(d: Dict, e: NonNullable<TaskState['evidence']>): string {
+  const head = e.result === 'pass' ? `<span class="ok">✓ ${num(e.passed)}/${num(e.total)}</span>`
+    : e.result === 'fail' ? `<span class="del">✗ ${num(e.passed)}/${num(e.total)}</span>`
+    : `<span class="warn">⊘ ${esc(d.verify.blocked)}${e.reason ? `: ${esc(e.reason)}` : ''}</span>`;
+  const withUrl = e.shots.filter(s => s.url);
+  const strip = e.shots.map((s, i) => s.url
+    ? `<button class="shot ${s.ok ? 'ok' : 'del'}" data-action="open-shot" data-i="${i}" title="${esc(s.check)}"><img src="${esc(s.url)}" alt="${esc(s.check)}" loading="lazy"></button>`
+    : `<div class="shot-row ${s.ok ? 'ok' : 'del'}">${s.ok ? '✓' : '✗'} ${esc(s.check)}</div>`).join('');
+  const note = !withUrl.length && e.local ? `<div class="muted">${esc(d.verify.localOnly(e.total))}</div>` : e.pending ? `<div class="muted">${esc(d.verify.pending)}</div>` : '';
+  return `<div class="evidence"><div class="mono">${esc(e.surfaces.join(', '))} · ${head}</div>${strip ? `<div class="shots">${strip}</div>` : ''}${note}</div>`;
+}
+
+function renderLightbox(d: Dict, e: NonNullable<TaskState['evidence']>, i: number): string {
+  const s = e.shots[i];
+  if (!s?.url) return '';
+  return `<div class="lightbox" data-action="close-shot" role="dialog" aria-modal="true"><img src="${esc(s.url)}" alt="${esc(s.check)}">
+    <div class="cap"><b>${esc(s.surface)}</b> · ${esc(s.check)} ${s.ok ? '<span class="ok">✓</span>' : '<span class="del">✗</span>'}
+    ${s.expected ? `<div>${esc(d.verify.expected)}: ${esc(s.expected)}</div>` : ''}${s.observed ? `<div>${esc(d.verify.observed)}: ${esc(s.observed)}</div>` : ''}</div></div>`;
 }
 
 function renderForge(d: Dict, f: NonNullable<TaskState['forge']>): string {
@@ -654,7 +678,8 @@ function renderVersionsView(m: Model, d: Dict, ui: UiState): string {
       const pips = cat.tasks.map(t => `<i class="st-${safeStatus(t.status)}">■</i>`).join('');
       const tasks = closed ? '' : cat.tasks.map(t => {
         const st = safeStatus(t.status);
-        return `<div class="tc" data-action="open-task" data-id="${esc(t.id)}"><div class="st st-${st}">${ST_ICON[st]} ${esc(d.status[st])}</div><div class="tt"><span class="k">${esc(t.id)}</span> ${esc(t.title)} ${trackTag(m, t.track)}</div></div>`;
+        const ev = m.states[t.id]?.evidence;
+        return `<div class="tc" data-action="open-task" data-id="${esc(t.id)}"><div class="st st-${st}">${ST_ICON[st]} ${esc(d.status[st])}${ev ? `<span class="evi ${ev.result === 'pass' ? 'ok' : 'del'}" title="${esc(d.verify.title)}">▣</span>` : ''}</div><div class="tt"><span class="k">${esc(t.id)}</span> ${esc(t.title)} ${trackTag(m, t.track)}</div></div>`;
       }).join('');
       return `<button class="cat" data-action="toggle-cat" data-key="${esc(key)}" aria-expanded="${!closed}"><span><span class="cn">${closed ? '›' : '⌄'} ${esc(cat.name)}</span><span class="mono">${esc(d.entries(cat.tasks.length))}</span></span><span class="pips">${pips}</span></button>${tasks}`;
     }).join('');

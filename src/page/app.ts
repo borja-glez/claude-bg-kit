@@ -42,7 +42,7 @@ const isInvalidArgument = (e: unknown): boolean => {
 export async function start(env: Env): Promise<{ stop(): void; model: Model; ui: UiState }> {
   const now = env.now ?? Date.now;
   const ui: UiState = {
-    zoom: '1d', offset: 0, expanded: new Set(), modal: null, search: '', view: 'tracking',
+    zoom: '1d', offset: 0, expanded: new Set(), modal: null, shot: null, search: '', view: 'tracking',
     versionFilter: { statuses: [], phaseStatuses: [], track: null }, collapsed: new Set(), noteFilter: 'all', timelineGroup: 'phase',
     draft: { type: 'idea', text: '' }, answering: null, answerDraft: '', notice: null,
     proposalFilter: { status: 'all', category: 'all', risk: 'all' }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '',
@@ -325,8 +325,10 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     }
     else if (action === 'scale') { setScale(userScale + (Number(el.dataset.dir) > 0 ? 0.1 : -0.1)); return; }
     else if (action === 'toggle-phase') { const id = el.dataset.id!; ui.expanded.has(id) ? ui.expanded.delete(id) : ui.expanded.add(id); }
-    else if (action === 'open-task') { ui.modal = el.dataset.id || null; }
-    else if (action === 'close-modal') { ui.modal = null; }
+    else if (action === 'open-task') { ui.modal = el.dataset.id || null; ui.shot = null; }
+    else if (action === 'close-modal') { ui.modal = null; ui.shot = null; }
+    else if (action === 'open-shot') { ui.shot = Number(el.dataset.i); }
+    else if (action === 'close-shot') { ui.shot = null; }
     else if (action === 'view') { const v = el.dataset.view as View; ui.view = VIEWS.includes(v) ? v : 'tracking'; if (ui.notice !== 'readonly') ui.notice = null; }
     else if (action === 'tgroup') {
       const g = el.dataset.group as UiState['timelineGroup'];
@@ -460,6 +462,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   let overTimeline = false;
   const onPointerOver = (ev: PointerEvent) => { overTimeline = !!(ev.target as Element | null)?.closest?.('[data-role="timeline"]'); };
   const onKey = (ev: KeyboardEvent) => {
+    if (ev.key === 'Escape' && ui.shot !== null) { ui.shot = null; schedule(); return; }
     if (ev.key === 'Escape' && ui.modal) { ui.modal = null; schedule(); return; }
     const t = ev.target as HTMLElement | null;
     if (ui.modal || ev.ctrlKey || ev.metaKey || ev.altKey || (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))) return;

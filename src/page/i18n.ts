@@ -35,6 +35,7 @@ const en = {
   pfilter: { status: 'Status', category: 'Category', risk: 'Risk', all: 'All' },
   pfield: { pillar: 'Pillar', evidence: 'Evidence', estimate: 'Estimate', path: 'Path', comments: 'Comments', decided: 'Decided by' },
   approve: 'Approve', reject: 'Reject', comment: 'Comment', sendReject: 'Reject', reasonPlaceholder: 'Why? (optional)', commentPlaceholder: 'Your comment…',
+  verify: { title: 'Verification', localOnly: (n: number) => `${n} shots (local only)`, pending: 'upload pending', blocked: 'blocked', shots: 'shots', expected: 'Expected', observed: 'Observed' },
   forge: { title: 'forge', agent: 'Agent', validators: 'Validators', verdict: 'Verdict', round: 'Round' },
   swarm: {
     pill: (live: number, max: number) => `⑂ swarm ${live}/${max}`, stalled: '⑂ swarm stalled', title: 'Swarm',
@@ -107,6 +108,7 @@ const es: Dict = {
   pfilter: { status: 'Estado', category: 'Categoría', risk: 'Riesgo', all: 'Todas' },
   pfield: { pillar: 'Pilar', evidence: 'Evidencia', estimate: 'Estimación', path: 'Ruta', comments: 'Comentarios', decided: 'Decidida por' },
   approve: 'Aprobar', reject: 'Rechazar', comment: 'Comentar', sendReject: 'Rechazar', reasonPlaceholder: '¿Por qué? (opcional)', commentPlaceholder: 'Tu comentario…',
+  verify: { title: 'Verificación', localOnly: (n: number) => `${n} capturas (solo en local)`, pending: 'subida pendiente', blocked: 'bloqueada', shots: 'capturas', expected: 'Esperado', observed: 'Observado' },
   forge: { title: 'forge', agent: 'Agente', validators: 'Validadores', verdict: 'Veredicto', round: 'Ronda' },
   swarm: {
     pill: (live: number, max: number) => `⑂ enjambre ${live}/${max}`, stalled: '⑂ enjambre parado', title: 'Enjambre',

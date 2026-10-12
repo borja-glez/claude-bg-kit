@@ -101,6 +101,22 @@ describe('normalizeState forge', () => {
     expect(full.forge).toEqual({ path: 'large', phase: 'review', agent: 'a', validators: [{ name: 'test', ok: true }], verdict: { action: 'fix', score: 0.5 }, round: 2, cap: 4 });
     expect(normalizeState({ forge: { path: 'l', phase: 'p', verdict: { action: 'x', score: 'no' } } }).forge?.verdict).toEqual({ action: 'x', score: null });
   });
+  it('keeps a valid evidence block and drops unsafe urls and bad entries', () => {
+    const s = normalizeState({ status: 'done', evidence: {
+      surfaces: ['web', 3], result: 'fail', passed: 1, total: 2, local: '.forge/work/x/evidence/1-1',
+      shots: [
+        { url: 'https://claude.ai/_blob/abc', id: 'abc', surface: 'web', check: 'adds', ok: true, expected: 'e', observed: 'o' },
+        { url: 'javascript:alert(1)', surface: 'web', check: 'removes', ok: false },
+        { surface: 'web', ok: 'yes' },
+      ],
+    } });
+    expect(s.evidence).toEqual({ surfaces: ['web'], result: 'fail', passed: 1, total: 2, local: '.forge/work/x/evidence/1-1', shots: [
+      { url: 'https://claude.ai/_blob/abc', id: 'abc', surface: 'web', check: 'adds', ok: true, expected: 'e', observed: 'o' },
+      { surface: 'web', check: 'removes', ok: false },
+    ] });
+    expect(normalizeState({ evidence: { result: 'maybe' } }).evidence).toBeUndefined();
+    expect(normalizeState({ evidence: { result: 'pass', passed: 1, total: 1, shots: [{ url: '/_blob/id1', surface: 'w', check: 'c', ok: true }] } }).evidence!.shots[0].url).toBe('/_blob/id1');
+  });
 });
 
 describe('normalizeInfinite', () => {

@@ -33,7 +33,7 @@ const ui = (over: Partial<UiState> = {}): UiState => ({
   zoom: '1d', offset: 0, expanded: new Set(), modal: null, search: '', view: 'tracking',
   versionFilter: { statuses: [], phaseStatuses: [], track: null }, collapsed: new Set(), noteFilter: 'all', timelineGroup: 'phase',
   draft: { type: 'idea', text: '' }, answering: null, answerDraft: '', notice: null,
-  proposalFilter: { status: 'all', category: 'all', risk: 'all' }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '', ...over,
+  proposalFilter: { status: 'all', category: 'all', risk: 'all' }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '', shot: null, ...over,
 });
 
 describe('dictFor', () => {
@@ -461,6 +461,37 @@ describe('swarm', () => {
     const en = renderApp({ ...base(), meta: { ...base().meta!, locale: 'en' }, swarm: swarmDoc() }, ui({ view: 'sessions' }));
     expect(en).toContain('⑂ swarm 1/3');
     expect(en).toContain('Waiting');
+  });
+  it('renders the Verification block with thumbnails, local-only and blocked states', () => {
+    const m = base();
+    m.states.T001 = { ...m.states.T001!, evidence: { surfaces: ['web'], result: 'fail', passed: 1, total: 2, shots: [
+      { url: 'https://claude.ai/_blob/a', surface: 'web', check: 'adds <b>', ok: true },
+      { url: 'https://claude.ai/_blob/b', surface: 'web', check: 'removes', ok: false },
+    ] } };
+    const html = renderApp(m, { ...ui(), modal: 'T001' });
+    expect(html).toContain('✗ 1/2');
+    expect(html).toContain('data-action="open-shot" data-i="1"');
+    expect(html).toContain('src="https://claude.ai/_blob/b"');
+    expect(html).toContain('adds &lt;b&gt;');
+    m.states.T001.evidence = { surfaces: ['web'], result: 'pass', passed: 6, total: 6, local: '.forge/work/x/evidence/1-1', shots: [] };
+    expect(renderApp(m, { ...ui(), modal: 'T001' })).toMatch(/6 (capturas|shots)/);
+    m.states.T001.evidence = { surfaces: ['app'], result: 'blocked', passed: 0, total: 0, reason: 'no emulator', shots: [] };
+    expect(renderApp(m, { ...ui(), modal: 'T001' })).toContain('no emulator');
+  });
+  it('opens a screenshot in a lightbox with its check, expected and observed', () => {
+    const m = base();
+    m.states.T001 = { ...m.states.T001!, evidence: { surfaces: ['web'], result: 'fail', passed: 0, total: 1, shots: [
+      { url: 'https://claude.ai/_blob/b', surface: 'web', check: 'removes', ok: false, expected: 'empty', observed: '1 item' },
+    ] } };
+    const html = renderApp(m, { ...ui(), modal: 'T001', shot: 0 });
+    expect(html).toContain('class="lightbox"');
+    expect(html).toContain('empty');
+    expect(html).toContain('1 item');
+  });
+  it('marks tasks with evidence in the tracking cards', () => {
+    const m = base();
+    m.states.T001 = { ...m.states.T001!, evidence: { surfaces: ['web'], result: 'fail', passed: 0, total: 1, shots: [] } };
+    expect(renderApp(m, ui({ view: 'versions' }))).toContain('class="evi del"');
   });
 });
 

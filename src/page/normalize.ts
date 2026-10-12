@@ -53,6 +53,8 @@ export function normalizeState(x: unknown): TaskState {
   for (const k of ['claimedAt', 'startedAt', 'doneAt'] as const) s[k] = optStr(o[k]);
   const forge = normalizeForge(o.forge);
   if (forge) s.forge = forge; else delete s.forge;
+  const evidence = normalizeEvidence(o.evidence);
+  if (evidence) s.evidence = evidence; else delete s.evidence;
   return s;
 }
 
@@ -110,4 +112,28 @@ export function normalizeInfinite(x: unknown): InfiniteDoc | null {
     startedAt: isoOrNull(x.startedAt) ?? '',
     lastCycleAt: isoOrNull(x.lastCycleAt),
   };
+}
+
+// Asset urls from the roadmap's own store: https, or the /_blob/<id> path every view serves. Anything else is dropped.
+const safeUrl = (u: unknown): string | undefined => (typeof u === 'string' && (/^https:\/\//.test(u) || /^\/_blob\/[\w-]+$/.test(u)) ? u : undefined);
+
+function normalizeEvidence(x: unknown): TaskState['evidence'] | undefined {
+  if (!isObj(x) || (x.result !== 'pass' && x.result !== 'fail' && x.result !== 'blocked')) return undefined;
+  const e: NonNullable<TaskState['evidence']> = {
+    surfaces: strs(x.surfaces), result: x.result,
+    passed: finite(x.passed) ? x.passed : 0, total: finite(x.total) ? x.total : 0,
+    shots: arr(x.shots).filter((v): v is Obj => isObj(v) && typeof v.check === 'string' && typeof v.ok === 'boolean').slice(0, 30).map(v => {
+      const shot: NonNullable<TaskState['evidence']>['shots'][number] = { surface: str(v.surface), check: v.check as string, ok: v.ok as boolean };
+      const url = safeUrl(v.url);
+      if (url) shot.url = url;
+      if (typeof v.id === 'string') shot.id = v.id;
+      if (typeof v.expected === 'string') shot.expected = v.expected;
+      if (typeof v.observed === 'string') shot.observed = v.observed;
+      return shot;
+    }),
+  };
+  if (typeof x.local === 'string') e.local = x.local;
+  if (x.pending === true) e.pending = true;
+  if (typeof x.reason === 'string') e.reason = x.reason;
+  return e;
 }
