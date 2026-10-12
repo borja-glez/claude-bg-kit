@@ -106,9 +106,12 @@ describe('buildBandModel · design', () => {
     const m = buildBandModel('demo-shop', { ...empty, design, changelog, critiques: { 'critique-r1.json': critique, 'critique-r2.json': '{bad' } });
     expect(m).toMatchObject({ round: 1, proposals: 2 });
   });
-  it('hides the band for approved designs and when nothing exists', () => {
-    expect(buildBandModel('demo-shop', { ...empty, design: design.replace('start_prompt:', 'status: approved\nstart_prompt:') })).toEqual({ mode: 'none' });
+  it('hides the band for approved designs and when nothing exists, keeping the language it knows', () => {
+    expect(buildBandModel('demo-shop', { ...empty, design: design.replace('start_prompt:', 'status: approved\nstart_prompt:') })).toEqual({ mode: 'none', locale: 'es' });
     expect(buildBandModel('demo-shop', empty)).toEqual({ mode: 'none' });
+  });
+  it('keeps the plan language while a plan has no session yet', () => {
+    expect(buildBandModel('demo-shop', { ...empty, plan })).toEqual({ mode: 'none', locale: 'es' });
   });
   it('work mode wins over design mode', () => {
     const m = buildBandModel('demo-shop', { ...empty, design, plan, session: j({ sessionId: 'main', track: null }) });

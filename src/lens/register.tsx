@@ -455,7 +455,7 @@ async function buildPanel($: Engine): Promise<PanelModel> {
   const subagents = activity.subagents.filter(s => now - s.since < SUBAGENT_TTL_MS);
   return buildPanelModel({
     band: roadmap, ...panelFiles, activity: { ...activity, subagents }, now, usage: usageInput(),
-    ...(roadmap.mode !== 'none' ? { locale: roadmap.locale } : {}),
+    ...(roadmap.locale ? { locale: roadmap.locale } : {}),
   });
 }
 
@@ -565,7 +565,7 @@ const TEXT = {
 type Texts = (typeof TEXT)[keyof typeof TEXT];
 
 const textsFor = (locale: string | undefined): Texts => (locale === 'es' ? TEXT.es : TEXT.en);
-const lensTexts = (): Texts => textsFor(roadmap.mode !== 'none' ? roadmap.locale : undefined);
+const lensTexts = (): Texts => textsFor(roadmap.locale);
 
 // Opens the pane at the person's request; where it is not placed, a toast says why.
 async function openPanel($: Engine): Promise<boolean> {

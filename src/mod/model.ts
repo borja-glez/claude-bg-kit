@@ -15,7 +15,8 @@ export interface BandFiles {
 // In work mode `cells` holds one letter per task of the track (or of the plan), in plan order: d done, a active,
 // b blocked, p pending.
 export type BandModel =
-  | { mode: 'none' }
+  // locale, when known, lets a reader of the band (lens) keep the project's language while no band is drawn.
+  | { mode: 'none'; locale?: string }
   | { mode: 'work'; project: string; locale: string; sid: string; track: string | null; roadmapUrl: string | null;
       current: { id: string; title: string; startedAt?: string; estimateMin?: number } | null;
       trackDone: number; trackTotal: number; percent: number; inbox: number; escalation: boolean;
@@ -54,7 +55,15 @@ export function buildBandModel(project: string, f: BandFiles): BandModel {
     if (f.plan !== undefined && f.session !== undefined) return workModel(project, f);
     if (f.design !== undefined) return designModel(project, f);
   } catch { /* any parse failure hides the band */ }
-  return { mode: 'none' };
+  const locale = knownLocale(f);
+  return locale ? { mode: 'none', locale } : { mode: 'none' };
+}
+
+// The project's language from its plan, else its design, for a band that draws nothing.
+function knownLocale(f: BandFiles): string | undefined {
+  try { if (f.plan !== undefined) return parsePlan(f.plan).locale; } catch { /* try the design */ }
+  try { if (f.design !== undefined) return parseDesign(f.design).meta.locale; } catch { /* none */ }
+  return undefined;
 }
 
 const MAX_CELLS = 120;
@@ -104,7 +113,7 @@ function swarmModel(project: string, planText: string, s: SwarmState, f: BandFil
 
 function designModel(project: string, f: BandFiles): BandModel {
   const d = parseDesign(f.design!);
-  if (d.meta.status !== 'draft') return { mode: 'none' };
+  if (d.meta.status !== 'draft') return { mode: 'none', locale: d.meta.locale };
   let changelog: ReturnType<typeof parseChangelog> = [];
   try { changelog = parseChangelog(f.changelog ?? null); } catch { changelog = []; }
   const critiques = Object.entries(f.critiques)
