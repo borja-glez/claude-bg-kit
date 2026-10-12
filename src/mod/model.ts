@@ -22,7 +22,8 @@ export type BandModel =
   | { mode: 'work'; project: string; locale: string; sid: string; track: string | null; roadmapUrl: string | null;
       current: { id: string; title: string; startedAt?: string; estimateMin?: number } | null;
       trackDone: number; trackTotal: number; percent: number; inbox: number; escalation: boolean;
-      phase: { index: number; total: number; name: string } | null; cells: string; swarm: boolean }
+      phase: { index: number; total: number; name: string } | null; cells: string; swarm: boolean;
+      run: { coordinator: string; stage: string } | null }
   | { mode: 'run'; project: string; locale: string; executor: 'subagents' | 'sessions'; running: number; parallel: number;
       integrated: number; total: number; slots: { task: string; stage: string; round: number }[];
       worst: 'alive' | 'silent' | 'stopped'; stalled: boolean; roadmapUrl: string | null }
@@ -98,7 +99,21 @@ function workModel(project: string, f: BandFiles): BandModel {
     phase: pi >= 0 ? { index: pi + 1, total: plan.phases.length, name: plan.phases[pi].name } : null,
     cells: plan.tasks.filter(t => !track || t.track === track).slice(0, MAX_CELLS).map(t => CELL[states[t.id]?.status ?? 'free'] ?? 'p').join(''),
     swarm: typeof session.launchedBy === 'string' && !!session.launchedBy,
+    run: memberRun(project, sid, f),
   };
+}
+
+// The execution of this project this session works for (it owns a public task of the run), else null.
+function memberRun(project: string, sid: string, f: BandFiles): { coordinator: string; stage: string } | null {
+  try {
+    const exec = parseExecution(f.execution);
+    if (!exec || !exec.active || exec.project !== project) return null;
+    for (const t of Object.values(f.execTasks ?? {})) {
+      const p = normalizePublicTask(json(t));
+      if (p && p.by === sid && p.runId === exec.runId) return { coordinator: exec.coordinator, stage: p.stage };
+    }
+  } catch { /* no run line */ }
+  return null;
 }
 
 function runModel(project: string, f: BandFiles): BandModel | null {

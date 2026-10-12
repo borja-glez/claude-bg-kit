@@ -6,7 +6,7 @@ import type { PanelModel } from '../src/lens/model.js';
 
 const T: CardTexts = {
   sRoadmap: 'Roadmap', sSuperpowers: 'superpowers', sNow: 'Now', sTodos: 'Todos', sSubagents: 'Subagents', sTasks: 'Tasks', sForge: 'forge',
-  sExecution: 'Execution', modeSubagents: 'subagents', modeSessions: 'sessions', alive: 'alive', silent: 'silent', stopped: 'stopped',
+  sExecution: 'Execution', manualRow: 'manual', modeSubagents: 'subagents', modeSessions: 'sessions', alive: 'alive', silent: 'silent', stopped: 'stopped',
   queued: 'to integrate', orphans: 'orphaned', conflictsLbl: 'in conflict', blockedLbl: 'blocked', integratedN: 'integrated',
   stage: { brief: 'brief', implement: 'implement', validate: 'validate', verify: 'verify', review: 'review', verdict: 'verdict', integrate: 'integrate', execution: 'execution' },
   track: 'track', phase: 'Phase', noTask: 'no task', decision: 'decision', fixRound: 'round', done: 'done', open: 'open',
@@ -29,7 +29,7 @@ const EXEC: NonNullable<PanelModel['execution']> = {
   runId: 'r1', mode: 'subagents', parallel: 3, branch: 'forge/run-shop', active: true, stopReason: null, stallReason: null,
   coordinator: { liveness: 'silent', lastSeen: '2026-10-12T11:52:00.000Z' }, integrated: 3, total: 12,
   slots: [{ task: 'T004', title: 'Pisos', stage: 'review', agent: 'forge-review-correctness', model: null, effort: null, round: 2, seconds: 300, liveness: 'alive', mode: 'subagents' }],
-  queued: ['T003'], conflicts: [], blocked: [], orphans: [],
+  manual: [], queued: ['T003'], conflicts: [], blocked: [], orphans: [],
 };
 
 describe('lens view', () => {
@@ -90,6 +90,14 @@ describe('lens view', () => {
     expect(text).toContain('r2');
     expect(text).toContain('5m');
     expect(text).toContain(`${T.queued}: T003`);
+  });
+  it('execution card: a row per manual task after the slots, with its stage, time and liveness', () => {
+    const manual = [{ task: 'T9', title: 'Docs', stage: 'implement', seconds: 600, liveness: 'silent' as const, by: 'M1' }];
+    const card = buildCards({ ...EMPTY, execution: { ...EXEC, manual } }, T, 0).find(c => c.title === T.sExecution)!;
+    const row = card.blocks.filter(b => b.kind === 'row').at(-1) as { text: string; right?: string; dot: string };
+    expect(row.text).toBe('manual · T9 Docs');
+    expect(row.right).toBe('implement · 10m 00s');
+    expect(row.dot).toBe('yellow');
   });
   it('the execution leads the lens band headline', () => {
     expect(headline({ ...EMPTY, execution: EXEC, forge: FORGE })).toMatchObject({ section: 'forge', title: '▶ 1/3', detail: 'T004 review' });

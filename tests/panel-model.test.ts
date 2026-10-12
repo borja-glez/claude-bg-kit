@@ -330,6 +330,12 @@ describe('buildPanelModel · execution', () => {
     const ended = buildPanelModel({ band: band(), activity: act(), now, forgeExecution: stale, forgeExecTasks: {}, forgeLive: signal(true) });
     expect(ended.execution).toMatchObject({ coordinator: { liveness: 'stopped' }, orphans: ['T4'] });
   });
+  it('lists a manual task of this run after the slots, with its own liveness', () => {
+    const pubDoc = JSON.stringify({ task: 'T9', runId: 'r1', stage: 'implement', status: 'running', agent: null, round: 1, since: '2026-10-12T11:50:00.000Z', updatedAt: T0, leaseUntil: '2026-10-12T12:05:00.000Z', by: 'M1', mode: 'manual' });
+    const m = buildPanelModel({ band: band(), activity: act(), now, forgeExecution: execDoc, forgeExecTasks: { T9: pubDoc }, forgeLive: {} });
+    expect(m.execution!.manual).toEqual([{ task: 'T9', title: null, stage: 'implement', seconds: 600, liveness: 'alive', by: 'M1' }]);
+    expect(m.execution!.slots.map(s => s.task)).toEqual(['T4']);
+  });
   it('is null without a file, with junk, or for a finished execution', () => {
     expect(buildPanelModel({ band: band(), activity: act(), now }).execution).toBeNull();
     expect(buildPanelModel({ band: band(), activity: act(), now, forgeExecution: '{oops' }).execution).toBeNull();

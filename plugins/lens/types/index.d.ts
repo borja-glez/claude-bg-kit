@@ -34,6 +34,7 @@ export type LensPanel = {
       task: string; title: string | null; stage: string; agent: string | null; model: string | null; effort: string | null;
       round: number; seconds: number; liveness: 'alive' | 'silent' | 'stopped'; mode: 'subagents' | 'sessions' | 'manual';
     }[];
+    manual: { task: string; title: string | null; stage: string; seconds: number; liveness: 'alive' | 'silent' | 'stopped'; by: string }[];
     queued: string[]; conflicts: string[]; blocked: string[]; orphans: string[];
   } | null;
   proposals: { id: string; title: string; category: string; risk: string }[];

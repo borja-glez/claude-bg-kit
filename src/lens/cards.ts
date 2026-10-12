@@ -10,7 +10,7 @@ import { shortModelName } from '../lib/prices.js';
 
 export interface CardTexts {
   sRoadmap: string; sSuperpowers: string; sNow: string; sTodos: string; sSubagents: string; sTasks: string; sForge: string;
-  sExecution: string; modeSubagents: string; modeSessions: string; alive: string; silent: string; stopped: string;
+  sExecution: string; manualRow: string; modeSubagents: string; modeSessions: string; alive: string; silent: string; stopped: string;
   queued: string; conflictsLbl: string; blockedLbl: string; orphans: string; integratedN: string;
   stage: Record<'brief' | 'implement' | 'validate' | 'verify' | 'review' | 'verdict' | 'integrate' | 'execution', string>;
   track: string; phase: string; noTask: string; decision: string; fixRound: string; done: string; open: string;
@@ -126,6 +126,12 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
       blocks.push({
         kind: 'row', dot: HUE[s.liveness], spinning: s.liveness === 'alive', tag: { text: s.task, hue: HUE[s.liveness] }, text: s.title ?? '',
         right: [stage(s.stage), s.agent ? tierOf(s.agent).label : null, duration(s.seconds), s.round ? `r${s.round}` : null].filter(Boolean).join(' · '),
+      });
+    }
+    for (const s of x.manual) {
+      blocks.push({
+        kind: 'row', dot: HUE[s.liveness], spinning: s.liveness === 'alive',
+        text: `${t.manualRow} · ${s.task}${s.title ? ` ${s.title}` : ''}`, right: [stage(s.stage), duration(s.seconds)].filter(Boolean).join(' · '),
       });
     }
     const list = (label: string, ids: string[]) => { if (ids.length) blocks.push({ kind: 'text', text: `${label}: ${ids.join(', ')}`, dim: true }); };

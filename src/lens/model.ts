@@ -141,6 +141,7 @@ export type PanelModel = {
       task: string; title: string | null; stage: string; agent: string | null; model: string | null; effort: string | null;
       round: number; seconds: number; liveness: 'alive' | 'silent' | 'stopped'; mode: 'subagents' | 'sessions' | 'manual';
     }[];
+    manual: { task: string; title: string | null; stage: string; seconds: number; liveness: 'alive' | 'silent' | 'stopped'; by: string }[];
     queued: string[]; conflicts: string[]; blocked: string[]; orphans: string[];
   } | null;
   proposals: { id: string; title: string; category: string; risk: string }[];
@@ -241,6 +242,11 @@ export const FORGE_EXEC_FILE_MAX = 8 * 1024;
 export const FORGE_EXEC_TASKS_MAX = 50;
 export const FORGE_LIVE_MAX = 20;
 
+function secondsSince(ts: string, now: number): number {
+  const since = Date.parse(ts);
+  return Number.isFinite(since) && Number.isFinite(now) ? Math.max(0, Math.round((now - since) / 1000)) : 0;
+}
+
 /**
  * The execution for the panel, from .forge/execution.json, the public task files (.forge/execution/<task>.json, keyed
  * by task id) and the live signals (.forge/live/*.json): null when absent, oversized, invalid or finished (a stalled
@@ -266,14 +272,13 @@ export function executionFromFiles(execText: string | undefined, taskTexts: Reco
     stallReason: v.stallReason ? clip(v.stallReason) : null,
     coordinator: { ...v.coordinator }, integrated: v.integrated, total: v.total,
     // model / effort: lens knows them only for its own session's subagents (from the usage loops), not for these.
-    slots: v.slots.map(s => {
-      const since = Date.parse(s.since);
-      return {
-        task: s.task, title: s.title ? clip(s.title) : null, stage: s.stage, agent: s.agent, model: null, effort: null, round: s.round,
-        seconds: Number.isFinite(since) && Number.isFinite(now) ? Math.max(0, Math.round((now - since) / 1000)) : 0,
-        liveness: s.liveness, mode: s.mode,
-      };
-    }),
+    slots: v.slots.map(s => ({
+      task: s.task, title: s.title ? clip(s.title) : null, stage: s.stage, agent: s.agent, model: null, effort: null, round: s.round,
+      seconds: secondsSince(s.since, now), liveness: s.liveness, mode: s.mode,
+    })),
+    manual: v.manual.map(s => ({
+      task: s.task, title: s.title ? clip(s.title) : null, stage: s.stage, seconds: secondsSince(s.since, now), liveness: s.liveness, by: s.by ?? '',
+    })),
     queued: v.queued, conflicts: v.conflicts, blocked: v.blocked, orphans: v.orphans,
   };
 }

@@ -5,7 +5,8 @@ export type WaypointBand =
   | { mode: 'work'; project: string; locale: string; sid: string; track: string | null; roadmapUrl: string | null;
       current: { id: string; title: string; startedAt?: string; estimateMin?: number } | null;
       trackDone: number; trackTotal: number; percent: number; inbox: number; escalation: boolean;
-      phase: { index: number; total: number; name: string } | null; cells: string; swarm: boolean }
+      phase: { index: number; total: number; name: string } | null; cells: string; swarm: boolean;
+      run: { coordinator: string; stage: string } | null }
   | { mode: 'run'; project: string; locale: string; executor: 'subagents' | 'sessions'; running: number; parallel: number;
       integrated: number; total: number; slots: { task: string; stage: string; round: number }[];
       worst: 'alive' | 'silent' | 'stopped'; stalled: boolean; roadmapUrl: string | null }

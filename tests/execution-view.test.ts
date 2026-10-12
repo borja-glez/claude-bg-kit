@@ -99,4 +99,28 @@ describe('executionView', () => {
     const v = executionView({ exec: exec(), tasks: { T1: other }, live: [live(-1)], now: NOW })!;
     expect(v.slots[0]).toMatchObject({ stage: 'implement', agent: 'forge-impl', round: 1, since: at(-3), liveness: 'alive' });
   });
+  const memberPub = (taskId: string, by: string, mode: 'sessions' | 'manual', leaseMin: number): PublicTask =>
+    ({ ...pub(taskId, leaseMin, 'implement'), by, mode, agent: 'forge-impl' });
+  const memberLive = (sessionId: string, role: LiveDoc['role'], tsMin: number, ended = false): LiveDoc =>
+    ({ sessionId, role, runId: 'r1', task: null, event: 'Stop', ts: at(tsMin), agents: [], ended });
+  it('a sessions slot lives by its own session, not by the coordinator', () => {
+    const e = exec({ mode: 'sessions', tasks: { T1: { ...task('running'), executor: 'sessions' } } });
+    const alive = executionView({ exec: e, tasks: { T1: memberPub('T1', 'S2', 'sessions', -30) }, live: [live(-1), memberLive('S2', 'executor', -1)], now: NOW })!;
+    expect(alive.slots[0]).toMatchObject({ liveness: 'alive', by: 'S2', mode: 'sessions' });
+    const dead = executionView({ exec: e, tasks: { T1: memberPub('T1', 'S2', 'sessions', -30) }, live: [live(-1), memberLive('S2', 'executor', -1, true)], now: NOW })!;
+    expect(dead.slots[0].liveness).toBe('stopped');
+    expect(dead.orphans).toEqual(['T1']);
+  });
+  it('a sessions slot ignores the coordinator signal; its lease alone keeps it alive when it has no signal', () => {
+    const e = exec({ mode: 'sessions', tasks: { T1: { ...task('running'), executor: 'sessions' } } });
+    expect(executionView({ exec: e, tasks: { T1: memberPub('T1', 'S2', 'sessions', -30) }, live: [live(-1)], now: NOW })!.slots[0].liveness).toBe('stopped');
+    expect(executionView({ exec: e, tasks: { T1: memberPub('T1', 'S2', 'sessions', 5) }, live: [], now: NOW })!.slots[0].liveness).toBe('alive');
+  });
+  it('lists manual work outside the execution tasks, without taking slots', () => {
+    const v = executionView({ exec: exec(), tasks: { T9: memberPub('T9', 'M1', 'manual', 5) }, live: [live(-1)], titles: { T9: 'Docs' }, now: NOW })!;
+    expect(v.manual).toEqual([expect.objectContaining({ task: 'T9', title: 'Docs', by: 'M1', mode: 'manual', liveness: 'alive' })]);
+    expect(v.slots.map(s => s.task)).toEqual(['T1', 'T2']);
+    const gone = executionView({ exec: exec(), tasks: { T9: memberPub('T9', 'M1', 'manual', -30) }, live: [live(-1)], now: NOW })!;
+    expect(gone.orphans).toContain('T9');
+  });
 });

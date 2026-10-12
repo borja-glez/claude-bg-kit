@@ -17,7 +17,7 @@ export const TEXT = {
     pressEnter: 'Comando listo en el prompt: pulsa Enter',
     panel: 'Panel',
     run: 'EJECUCIÓN', subagents: 'subagentes', sessions: 'sesiones', silentSfx: 'sin señal', stoppedSfx: 'parada', stopRun: 'Parar',
-    integratedN: 'integradas',
+    integratedN: 'integradas', memberOf: 'de la ejecución de {c}',
     stage: { brief: 'brief', implement: 'implementar', validate: 'validar', verify: 'verificar', review: 'revisar', verdict: 'veredicto', integrate: 'integrar', execution: 'ejecución' },
   },
   en: {
@@ -29,7 +29,7 @@ export const TEXT = {
     pressEnter: 'Command ready in the prompt: press Enter',
     panel: 'Panel',
     run: 'EXECUTION', subagents: 'subagents', sessions: 'sessions', silentSfx: 'no signal', stoppedSfx: 'stopped', stopRun: 'Stop',
-    integratedN: 'integrated',
+    integratedN: 'integrated', memberOf: "in {c}'s execution",
     stage: { brief: 'brief', implement: 'implement', validate: 'validate', verify: 'verify', review: 'review', verdict: 'verdict', integrate: 'integrate', execution: 'execution' },
   },
 } as const;
@@ -66,6 +66,7 @@ export function bandLine(m: BandModel, nowMs: number): string {
   } else {
     parts.push(t.noTask);
   }
+  if (m.run) parts.push(`${t.stage[m.run.stage as keyof typeof t.stage] ?? m.run.stage} · ${t.memberOf.replace('{c}', m.run.coordinator)}`);
   if (!m.track) parts.push(`${t.tasks} ${m.trackDone}/${m.trackTotal}`);
   parts.push(`${t.overall} ${m.percent} %`);
   if (m.inbox > 0) parts.push(`✉ ${m.inbox}`);

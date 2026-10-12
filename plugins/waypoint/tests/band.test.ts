@@ -32,7 +32,7 @@ const DESIGN: WaypointBand = {
 const WORK: WaypointBand = {
   mode: 'work', project: 'demo', locale: 'es', sid: 'S1', track: 'core', roadmapUrl: 'https://claude.ai/artifact/roadmap',
   current: { id: 'T3', title: 'A very long task title that goes well beyond forty characters', startedAt: '2026-10-11T10:00:00.000Z', estimateMin: 30 },
-  trackDone: 2, trackTotal: 5, percent: 40, inbox: 1, escalation: true, phase: { index: 1, total: 2, name: 'Base' }, cells: 'ddapp', swarm: false,
+  trackDone: 2, trackTotal: 5, percent: 40, inbox: 1, escalation: true, phase: { index: 1, total: 2, name: 'Base' }, cells: 'ddapp', swarm: false, run: null,
 };
 const RUN: WaypointBand = {
   mode: 'run', project: 'demo', locale: 'es', executor: 'subagents', running: 2, parallel: 3, integrated: 3, total: 12,

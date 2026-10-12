@@ -74,6 +74,15 @@ describe('buildBandModel · work', () => {
     expect(buildBandModel('demo-shop', { ...empty, plan, session: j({ sessionId: 'x', track: 'backend', launchedBy: 'main' }), execution: EXEC() }).mode).toBe('work');
     expect(buildBandModel('demo-shop', { ...empty, plan, session: j({ sessionId: 'main', track: null }), execution: EXEC({ active: false, stopReason: 'finished' }) }).mode).toBe('work');
   });
+  it('a member of the execution names it in its work band; without an execution run is null', () => {
+    const session = j({ sessionId: 'S2', track: 'backend', launchedBy: 'main' });
+    const pubDoc = j({ task: 'T002', runId: 'r1', stage: 'implement', status: 'running', agent: null, round: 1, since: new Date().toISOString(), updatedAt: new Date().toISOString(), leaseUntil: new Date(Date.now() + 300000).toISOString(), by: 'S2', mode: 'sessions' });
+    const m = buildBandModel('demo-shop', { ...empty, plan, session, execution: EXEC(), execTasks: { T002: pubDoc } });
+    expect(m).toMatchObject({ mode: 'work', run: { coordinator: 'main', stage: 'implement' } });
+    expect(bandLine(m, 0)).toContain('· implementar · de la ejecución de main');
+    expect(buildBandModel('demo-shop', { ...empty, plan, session, execTasks: { T002: pubDoc } })).toMatchObject({ mode: 'work', run: null });
+    expect(buildBandModel('demo-shop', { ...empty, plan, session, execution: EXEC(), execTasks: { T002: pubDoc.replace('"S2"', '"S3"') } })).toMatchObject({ run: null });
+  });
   it('run mode takes worst from a slot whose lease lapsed while the coordinator is alive', () => {
     const pub = JSON.stringify({ task: 'T002', runId: 'r1', stage: 'review', status: 'running', agent: null, round: 2, since: new Date().toISOString(), updatedAt: new Date().toISOString(), leaseUntil: new Date(Date.now() - 3600000).toISOString(), by: 'x', mode: 'subagents' });
     const m = buildBandModel('demo-shop', { ...empty, plan, execution: EXEC(), execTasks: { T002: pub } });

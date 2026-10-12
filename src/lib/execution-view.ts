@@ -2,13 +2,13 @@ import { liveness, type Liveness } from './coordination.js';
 import { LIVE_MAX_AGE_HOURS, LIVE_SILENT_MINUTES, LIVE_STOPPED_MINUTES, type ExecutionState, type LiveDoc, type PublicTask } from './execution-state.js';
 import type { Stage } from './types.js';
 
-export interface ExecSlot { task: string; title: string | null; stage: Stage; agent: string | null; round: number; since: string; liveness: Liveness; mode: 'subagents' | 'sessions' | 'manual' }
+export interface ExecSlot { task: string; title: string | null; stage: Stage; agent: string | null; round: number; since: string; liveness: Liveness; mode: 'subagents' | 'sessions' | 'manual'; by: string | null }
 export interface ExecView {
   runId: string; mode: 'subagents' | 'sessions'; parallel: number; branch: string; active: boolean;
   stopReason: string | null; stallReason: string | null;
   coordinator: { liveness: Liveness; lastSeen: string | null };
   integrated: number; total: number;
-  slots: ExecSlot[]; queued: string[]; conflicts: string[]; blocked: string[]; orphans: string[];
+  slots: ExecSlot[]; manual: ExecSlot[]; queued: string[]; conflicts: string[]; blocked: string[]; orphans: string[];
   agents: { id: string; type: string; since: string }[];
 }
 
@@ -51,6 +51,18 @@ export function executionView(i: { exec: ExecutionState | null; tasks: Record<st
     return t !== null && i.now - t < AGENT_ALIVE_MS;
   });
   const coord: Liveness = !e.active ? 'stopped' : signal?.ended ? 'stopped' : waiting ? 'alive' : signalLiveness(lastSeen, false, i.now);
+  // A slot owned by a member session lives by that session: the more alive of its lease and its own fresh signal.
+  // An ended signal is stopped at once, even with a lease still running.
+  const rank = { stopped: 0, silent: 1, alive: 2 } as const;
+  const memberLiveness = (p: PublicTask): Liveness => {
+    const d = i.live.filter(x => fresh(x) && x.sessionId === p.by && x.runId === e.runId)
+      .reduce<LiveDoc | null>((best, x) => (!best || Date.parse(x.ts) > Date.parse(best.ts) ? x : best), null);
+    if (d?.ended) return 'stopped';
+    const lease = liveness(i.now, p.leaseUntil);
+    const sig = d ? signalLiveness(d.ts, false, i.now) : null;
+    return sig && rank[sig] > rank[lease] ? sig : lease;
+  };
+  const isMember = (p: PublicTask): boolean => p.mode !== 'subagents' && p.by !== e.coordinator;
   const ids = (status: string) => Object.keys(e.tasks).filter(id => e.tasks[id].status === status);
   const slots: ExecSlot[] = ids('running')
     .sort((a, b) => Date.parse(e.tasks[a].startedAt) - Date.parse(e.tasks[b].startedAt))
@@ -60,13 +72,20 @@ export function executionView(i: { exec: ExecutionState | null; tasks: Record<st
       const agent = p ? p.agent : t.agent;
       return {
         task: id, title: i.titles?.[id] ?? null, stage: p?.stage ?? t.stage, agent, round: p?.round ?? t.round,
-        since: p?.since ?? t.stageSince, liveness: agent && waiting ? 'alive' : p ? liveness(i.now, p.leaseUntil) : coord, mode: p?.mode ?? t.executor,
+        since: p?.since ?? t.stageSince,
+        liveness: p && isMember(p) ? memberLiveness(p) : agent && waiting ? 'alive' : p ? liveness(i.now, p.leaseUntil) : coord,
+        mode: p?.mode ?? t.executor, by: p?.by ?? null,
       };
     });
+  // Manual work of this run outside the execution's tasks: listed apart, never a slot nor part of the occupation.
+  const manual: ExecSlot[] = Object.values(i.tasks)
+    .filter(p => p.runId === e.runId && p.mode === 'manual' && p.status === 'running' && !e.tasks[p.task])
+    .sort((a, b) => Date.parse(a.since) - Date.parse(b.since)).slice(0, 10)
+    .map(p => ({ task: p.task, title: i.titles?.[p.task] ?? null, stage: p.stage, agent: p.agent, round: p.round, since: p.since, liveness: memberLiveness(p), mode: 'manual' as const, by: p.by }));
   return {
     runId: e.runId, mode: e.mode, parallel: e.parallel, branch: e.branch, active: e.active, stopReason: e.stopReason, stallReason: e.stallReason,
     coordinator: { liveness: coord, lastSeen }, integrated: ids('integrated').length, total: Object.keys(e.tasks).length,
     slots, queued: ids('accepted'), conflicts: ids('conflict'), blocked: ids('blocked'),
-    orphans: slots.filter(s => s.liveness === 'stopped').map(s => s.task), agents: signal?.agents ?? [],
+    manual, orphans: [...slots, ...manual].filter(s => s.liveness === 'stopped').map(s => s.task), agents: signal?.agents ?? [],
   };
 }
