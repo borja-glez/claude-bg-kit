@@ -65,6 +65,31 @@ describe('forge swarm integrate (into the run branch)', () => {
     const before = g(runWt(), 'rev-parse', 'HEAD');
     expect(out(run(['swarm', 'integrate', 'T1'], io)).detail).toContain('validators failed');
     expect(g(runWt(), 'rev-parse', 'HEAD')).toBe(before);
+    expect(() => g(runWt(), 'rev-parse', '-q', '--verify', 'MERGE_HEAD')).toThrow();
+    expect(g(runWt(), 'status', '--porcelain')).toBe('');
+  });
+  it('rolls back when the validators cannot run (invalid config brought by the task)', () => {
+    const w = accept('T1', 'a.txt', 'a\n');
+    mkdirSync(path.join(w, '.forge'), { recursive: true });
+    writeFileSync(path.join(w, '.forge', 'config.yaml'), 'swarm: [nope\n');
+    g(w, 'add', '-f', '.forge/config.yaml'); g(w, 'commit', '-qm', 'bad config');
+    const before = g(runWt(), 'rev-parse', 'HEAD');
+    const r = out(run(['swarm', 'integrate', 'T1'], io));
+    expect(r).toMatchObject({ result: 'conflict' });
+    expect(r.detail).toContain('validators could not run');
+    expect(g(runWt(), 'rev-parse', 'HEAD')).toBe(before);
+    expect(() => g(runWt(), 'rev-parse', '-q', '--verify', 'MERGE_HEAD')).toThrow();
+    expect(g(runWt(), 'status', '--porcelain')).toBe('');
+  });
+  it('does nothing when a merge is already in progress in the run worktree', () => {
+    accept('T1', 'base.txt', 'from T1\n');
+    commitIn(runWt(), 'base.txt', 'from run\n', 'run change');
+    expect(() => g(runWt(), 'merge', '--no-ff', '--no-commit', 'task/T1')).toThrow();
+    const head = g(runWt(), 'rev-parse', 'HEAD');
+    expect(out(run(['swarm', 'integrate', 'T1'], io))).toMatchObject({ result: 'run-dirty' });
+    expect(g(runWt(), 'rev-parse', 'MERGE_HEAD')).toBe(g(root, 'rev-parse', 'task/T1'));
+    expect(g(runWt(), 'rev-parse', 'HEAD')).toBe(head);
+    expect(readExecution(root)!.tasks.T1.status).toBe('accepted');
   });
   it('does nothing when the run worktree is dirty', () => {
     accept('T1', 'a.txt', 'a\n');

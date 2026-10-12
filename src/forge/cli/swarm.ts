@@ -65,8 +65,13 @@ function mergeIn(at: GitDeps, ref: string, message: string, scope: 'heavy' | 'fi
     return rollback(`merge conflict with ${ref}`);
   }
   if (!merging()) return { result: 'merged', sha: pre };
-  const config = loadConfig(configRoot);
-  const failed = runValidators(selectValidators(detectValidators(at.repo, config), scope === 'final' ? { mode: 'final' } : { mode: 'heavy', changed: null }), at.exec, timeoutSec).filter(r => !r.ok);
+  let failed: { validator: string }[];
+  try {
+    const config = loadConfig(configRoot);
+    failed = runValidators(selectValidators(detectValidators(at.repo, config), scope === 'final' ? { mode: 'final' } : { mode: 'heavy', changed: null }), at.exec, timeoutSec).filter(r => !r.ok);
+  } catch (err) {
+    return rollback(`validators could not run: ${(err as Error).message}`);
+  }
   if (failed.length) return rollback(`validators failed after merging ${ref}: ${failed.map(r => r.validator).join(', ')}`);
   if (at.git(['commit', '--no-edit', '-m', message]) === null || merging()) return rollback(`could not commit the merge of ${ref}`);
   const sha = at.git(['rev-parse', 'HEAD'])?.trim() ?? '';
