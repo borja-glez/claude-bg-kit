@@ -7869,151 +7869,6 @@ function readSwarm(root) {
   }
 }
 
-// src/lib/execution-state.ts
-var STAGES = ["brief", "implement", "validate", "verify", "review", "verdict", "integrate"];
-var TASK_STATUSES = ["running", "accepted", "integrated", "conflict", "blocked"];
-var STOPS = ["finished", "stalled", "stopped", "budget", "migrated"];
-var ID = /^[A-Za-z0-9_\-.~:@+]{1,80}$/;
-var MAX_TASKS = 500;
-var isObj3 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
-var str3 = (x) => typeof x === "string" && x ? x : null;
-var iso2 = (x) => typeof x === "string" && !Number.isNaN(Date.parse(x)) ? x : null;
-var int = (x, min, max, dflt) => typeof x === "number" && Number.isInteger(x) ? Math.min(max, Math.max(min, x)) : dflt;
-var oneOf2 = (list, x) => list.includes(x) ? x : null;
-function normalizeTask(x) {
-  if (!isObj3(x)) return null;
-  const status = oneOf2(TASK_STATUSES, x.status);
-  const stage = oneOf2(STAGES, x.stage);
-  const executor = oneOf2(["subagents", "sessions", "manual"], x.executor);
-  const worktree = typeof x.worktree === "string" ? x.worktree : null;
-  const branch = str3(x.branch);
-  const startedAt = iso2(x.startedAt);
-  if (!status || !stage || !executor || worktree === null || !branch || !startedAt) return null;
-  return {
-    status,
-    stage,
-    executor,
-    worktree,
-    branch,
-    startedAt,
-    round: int(x.round, 0, 99, 0),
-    attempts: int(x.attempts, 0, 99, 0),
-    agent: str3(x.agent),
-    updatedAt: iso2(x.updatedAt) ?? startedAt,
-    detail: typeof x.detail === "string" ? x.detail.slice(0, 500) : null
-  };
-}
-function normalizeExecution(x) {
-  if (!isObj3(x)) return null;
-  const mode = oneOf2(["subagents", "sessions"], x.mode);
-  const kind = oneOf2(["plan", "ephemeral"], x.kind) ?? "plan";
-  const runId = str3(x.runId), project = str3(x.project), base = str3(x.base), branch = str3(x.branch), coordinator = str3(x.coordinator);
-  const startedAt = iso2(x.startedAt);
-  if (!mode || !runId || !project || !base || !branch || !coordinator || !startedAt) return null;
-  const tasks = {};
-  if (isObj3(x.tasks)) {
-    for (const [id2, t] of Object.entries(x.tasks).slice(0, MAX_TASKS)) {
-      const n = ID.test(id2) ? normalizeTask(t) : null;
-      if (n) tasks[id2] = n;
-    }
-  }
-  return {
-    runId,
-    kind,
-    mode,
-    project,
-    base,
-    branch,
-    coordinator,
-    startedAt,
-    tasks,
-    parallel: int(x.parallel, 1, 10, 3),
-    mergeOnFinish: x.mergeOnFinish === true,
-    hookSession: str3(x.hookSession),
-    active: x.active === true,
-    stopReason: oneOf2(STOPS, x.stopReason),
-    stallReason: typeof x.stallReason === "string" ? x.stallReason.slice(0, 1e3) : null,
-    lastStepAt: iso2(x.lastStepAt),
-    lastBlockStep: iso2(x.lastBlockStep),
-    sleepUntil: iso2(x.sleepUntil)
-  };
-}
-function parseExecution(text) {
-  if (typeof text !== "string") return null;
-  try {
-    return normalizeExecution(JSON.parse(text));
-  } catch {
-    return null;
-  }
-}
-function fromSwarm(s2) {
-  return {
-    runId: `swarm-${s2.startedAt}`,
-    kind: "plan",
-    mode: "sessions",
-    parallel: Math.min(10, Math.max(1, s2.parallel)),
-    project: s2.project,
-    base: s2.base,
-    branch: s2.base,
-    mergeOnFinish: s2.mergeAuthorized,
-    coordinator: s2.coordinator,
-    hookSession: s2.hookSession,
-    active: false,
-    stopReason: "migrated",
-    stallReason: null,
-    startedAt: s2.startedAt,
-    lastStepAt: s2.lastTickAt,
-    lastBlockStep: null,
-    sleepUntil: null,
-    tasks: {}
-  };
-}
-
-// src/forge/execution.ts
-var executionFile = (root) => import_node_path4.default.join(root, ".forge", "execution.json");
-var executionTaskFile = (root, task) => import_node_path4.default.join(root, ".forge", "execution", `${task}.json`);
-var runBranch = (project) => `forge/run-${project}`;
-var taskBranch = (task) => `task/${task}`;
-var runWorktree = (root) => import_node_path4.default.join(root, ".claude", "worktrees", "run");
-var taskWorktree = (root, task) => import_node_path4.default.join(root, ".claude", "worktrees", `task-${task}`);
-function writeAtomic(file, text) {
-  (0, import_node_fs4.mkdirSync)(import_node_path4.default.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
-  try {
-    (0, import_node_fs4.writeFileSync)(tmp, text);
-    (0, import_node_fs4.renameSync)(tmp, file);
-  } finally {
-    (0, import_node_fs4.rmSync)(tmp, { force: true });
-  }
-}
-function saveExecution(root, e) {
-  forgeDir(root);
-  writeAtomic(executionFile(root), JSON.stringify(e, null, 2) + "\n");
-}
-function readExecution(root) {
-  const file = executionFile(root);
-  if ((0, import_node_fs4.existsSync)(file)) {
-    try {
-      return parseExecution((0, import_node_fs4.readFileSync)(file, "utf8"));
-    } catch {
-      return null;
-    }
-  }
-  const old = readSwarm(root);
-  if (!old) return null;
-  const migrated = fromSwarm(old);
-  saveExecution(root, migrated);
-  (0, import_node_fs4.renameSync)(swarmFile(root), `${swarmFile(root)}.migrated`);
-  return migrated;
-}
-function writePublicTask(root, p) {
-  writeAtomic(executionTaskFile(root, p.task), JSON.stringify(p, null, 2) + "\n");
-}
-
-// src/lib/locale.ts
-var import_node_fs5 = require("node:fs");
-var import_node_path5 = __toESM(require("node:path"), 1);
-
 // src/lib/plan.ts
 var import_yaml = __toESM(require_dist(), 1);
 
@@ -12063,6 +11918,7 @@ var TRACK_COLORS = ["blue", "mauve", "teal", "pink", "sky", "flamingo"];
 
 // src/lib/plan.ts
 var SEG = /^[A-Za-z0-9_.-]{1,64}$/;
+var isPlanId = (s2) => SEG.test(s2) && s2 !== "." && s2 !== "..";
 var id = external_exports.string().regex(SEG, "invalid id (allowed: letters, digits, _ - .; max 64)").refine((s2) => s2 !== "." && s2 !== "..", "invalid id");
 var TaskSchema = external_exports.object({
   id,
@@ -12160,7 +12016,149 @@ function findCycle(plan) {
   return null;
 }
 
+// src/lib/execution-state.ts
+var STAGES = ["brief", "implement", "validate", "verify", "review", "verdict", "integrate"];
+var TASK_STATUSES = ["running", "accepted", "integrated", "conflict", "blocked"];
+var STOPS = ["finished", "stalled", "stopped", "budget", "migrated"];
+var MAX_TASKS = 500;
+var isObj3 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
+var str3 = (x) => typeof x === "string" && x ? x : null;
+var iso2 = (x) => typeof x === "string" && !Number.isNaN(Date.parse(x)) ? x : null;
+var int = (x, min, max, dflt) => typeof x === "number" && Number.isInteger(x) ? Math.min(max, Math.max(min, x)) : dflt;
+var oneOf2 = (list, x) => list.includes(x) ? x : null;
+function normalizeTask(x) {
+  if (!isObj3(x)) return null;
+  const status = oneOf2(TASK_STATUSES, x.status);
+  const stage = oneOf2(STAGES, x.stage);
+  const executor = oneOf2(["subagents", "sessions", "manual"], x.executor);
+  const worktree = typeof x.worktree === "string" ? x.worktree : null;
+  const branch = str3(x.branch);
+  const startedAt = iso2(x.startedAt);
+  if (!status || !stage || !executor || worktree === null || !branch || !startedAt) return null;
+  return {
+    status,
+    stage,
+    executor,
+    worktree,
+    branch,
+    startedAt,
+    round: int(x.round, 0, 99, 0),
+    attempts: int(x.attempts, 0, 99, 0),
+    agent: str3(x.agent),
+    updatedAt: iso2(x.updatedAt) ?? startedAt,
+    detail: typeof x.detail === "string" ? x.detail.slice(0, 500) : null
+  };
+}
+function normalizeExecution(x) {
+  if (!isObj3(x)) return null;
+  const mode = oneOf2(["subagents", "sessions"], x.mode);
+  const kind = oneOf2(["plan", "ephemeral"], x.kind) ?? "plan";
+  const runId = str3(x.runId), project = str3(x.project), base = str3(x.base), branch = str3(x.branch), coordinator = str3(x.coordinator);
+  const startedAt = iso2(x.startedAt);
+  if (!mode || !runId || !project || !base || !branch || !coordinator || !startedAt) return null;
+  const tasks = {};
+  if (isObj3(x.tasks)) {
+    for (const [id2, t] of Object.entries(x.tasks).slice(0, MAX_TASKS)) {
+      const n = isPlanId(id2) ? normalizeTask(t) : null;
+      if (n) tasks[id2] = n;
+    }
+  }
+  return {
+    runId,
+    kind,
+    mode,
+    project,
+    base,
+    branch,
+    coordinator,
+    startedAt,
+    tasks,
+    parallel: int(x.parallel, 1, 10, 3),
+    mergeOnFinish: x.mergeOnFinish === true,
+    hookSession: str3(x.hookSession),
+    active: x.active === true,
+    stopReason: oneOf2(STOPS, x.stopReason),
+    stallReason: typeof x.stallReason === "string" ? x.stallReason.slice(0, 1e3) : null,
+    lastStepAt: iso2(x.lastStepAt),
+    lastBlockStep: iso2(x.lastBlockStep),
+    sleepUntil: iso2(x.sleepUntil)
+  };
+}
+function parseExecution(text) {
+  if (typeof text !== "string") return null;
+  try {
+    return normalizeExecution(JSON.parse(text));
+  } catch {
+    return null;
+  }
+}
+function fromSwarm(s2) {
+  return {
+    runId: `swarm-${s2.startedAt}`,
+    kind: "plan",
+    mode: "sessions",
+    parallel: Math.min(10, Math.max(1, s2.parallel)),
+    project: s2.project,
+    base: s2.base,
+    branch: s2.base,
+    mergeOnFinish: s2.mergeAuthorized,
+    coordinator: s2.coordinator,
+    hookSession: s2.hookSession,
+    active: false,
+    stopReason: "migrated",
+    stallReason: null,
+    startedAt: s2.startedAt,
+    lastStepAt: s2.lastTickAt,
+    lastBlockStep: null,
+    sleepUntil: null,
+    tasks: {}
+  };
+}
+
+// src/forge/execution.ts
+var executionFile = (root) => import_node_path4.default.join(root, ".forge", "execution.json");
+var executionTaskFile = (root, task) => import_node_path4.default.join(root, ".forge", "execution", `${task}.json`);
+var runBranch = (project) => `forge/run-${project}`;
+var taskBranch = (task) => `task/${task}`;
+var runWorktree = (root) => import_node_path4.default.join(root, ".claude", "worktrees", "run");
+var taskWorktree = (root, task) => import_node_path4.default.join(root, ".claude", "worktrees", `task-${task}`);
+function writeAtomic(file, text) {
+  (0, import_node_fs4.mkdirSync)(import_node_path4.default.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    (0, import_node_fs4.writeFileSync)(tmp, text);
+    (0, import_node_fs4.renameSync)(tmp, file);
+  } finally {
+    (0, import_node_fs4.rmSync)(tmp, { force: true });
+  }
+}
+function saveExecution(root, e) {
+  forgeDir(root);
+  writeAtomic(executionFile(root), JSON.stringify(e, null, 2) + "\n");
+}
+function readExecution(root) {
+  const file = executionFile(root);
+  if ((0, import_node_fs4.existsSync)(file)) {
+    try {
+      return parseExecution((0, import_node_fs4.readFileSync)(file, "utf8"));
+    } catch {
+      return null;
+    }
+  }
+  const old = readSwarm(root);
+  if (!old) return null;
+  const migrated = fromSwarm(old);
+  saveExecution(root, migrated);
+  (0, import_node_fs4.renameSync)(swarmFile(root), `${swarmFile(root)}.migrated`);
+  return migrated;
+}
+function writePublicTask(root, p) {
+  writeAtomic(executionTaskFile(root, p.task), JSON.stringify(p, null, 2) + "\n");
+}
+
 // src/lib/locale.ts
+var import_node_fs5 = require("node:fs");
+var import_node_path5 = __toESM(require("node:path"), 1);
 var NAMES = {
   es: "Spanish",
   en: "English",
@@ -12323,7 +12321,8 @@ var Schema = external_exports.object({
   swarm: external_exports.object({
     parallel: external_exports.number().int().min(1).max(10).default(3),
     mode: external_exports.enum(["subagents", "sessions"]).optional(),
-    launcher: external_exports.enum(["bg", "herdr"]).default("bg")
+    launcher: external_exports.enum(["bg", "herdr"]).default("bg"),
+    setup: external_exports.string().min(1).max(500).optional()
   }).strict().default({ parallel: 3, launcher: "bg" })
 }).strict();
 var DEFAULTS = {
@@ -13022,7 +13021,7 @@ function samePath(a, b) {
 }
 
 // src/forge/cli/swarm.ts
-var ID2 = /^[A-Za-z0-9_\-.~:@+]{1,80}$/;
+var ID = /^[A-Za-z0-9_\-.~:@+]{1,80}$/;
 var TAKEOVER_MIN = 15;
 var MAX_SLEEP_S = 900;
 function readDocs(dir) {
@@ -13034,6 +13033,31 @@ function readDocs(dir) {
     }
   }
   return out;
+}
+var VENV_HINT = "python project: set swarm.setup in .forge/config.yaml to create the venv in each worktree";
+function setupFor(repo, configured) {
+  if (configured) return { cmd: configured };
+  if (repo.exists(".venv")) return { cmd: null, hint: VENV_HINT };
+  if (repo.exists("package-lock.json")) return { cmd: "npm ci" };
+  if (repo.exists("pnpm-lock.yaml")) return { cmd: "pnpm install --frozen-lockfile" };
+  if (repo.exists("yarn.lock")) return { cmd: "yarn install --frozen-lockfile" };
+  return null;
+}
+function runSetup(deps, dir, root) {
+  const config = loadConfig(root);
+  const plan = setupFor(deps.repo, config.swarm.setup);
+  if (!plan) return null;
+  if (plan.cmd === null) return { cmd: null, ok: false, tail: [plan.hint] };
+  const r2 = deps.at(dir).exec(plan.cmd, config.validatorTimeoutSec);
+  return { cmd: plan.cmd, ok: r2.code === 0 && !r2.timedOut, tail: r2.output.split(/\r?\n/).filter((l) => l.trim()).slice(-20) };
+}
+function worktreeHolding(porcelain, branch) {
+  let at = null;
+  for (const line of (porcelain ?? "").split(/\r?\n/)) {
+    if (line.startsWith("worktree ")) at = line.slice("worktree ".length).trim();
+    else if (line === `branch refs/heads/${branch}`) return at;
+  }
+  return null;
 }
 var sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 function loadPlanArg(io, planArg, sub) {
@@ -13077,7 +13101,7 @@ function mergeIn(at, ref, message, scope, timeoutSec, configRoot) {
 }
 function integrate(rest, io, deps) {
   const task = rest[0];
-  if (!task || !ID2.test(task)) throw new UsageError("swarm integrate: a task id is required");
+  if (!task || !isPlanId(task)) throw new UsageError("swarm integrate: a task id is required");
   const e = readExecution(io.cwd);
   if (!e) throw new UsageError("swarm integrate: no execution (forge swarm start)");
   const t = e.tasks[task];
@@ -13137,14 +13161,14 @@ function swarmCommand(args, io, deps) {
   }
   const taskArg = () => {
     const t = rest[0];
-    if (!t || !ID2.test(t)) throw new UsageError(`swarm ${sub}: a task id is required`);
+    if (!t || !isPlanId(t)) throw new UsageError(`swarm ${sub}: a task id is required`);
     return t;
   };
   switch (sub) {
     case "start": {
       const project = flag("project");
       const session = flag("session");
-      if (!project || !ID2.test(project) || !session || !ID2.test(session)) throw new UsageError("swarm start: --project and --session are required");
+      if (!project || !ID.test(project) || !session || !ID.test(session)) throw new UsageError("swarm start: --project and --session are required");
       const config = loadConfig(io.cwd);
       let parallel = config.swarm.parallel;
       if (has("parallel")) {
@@ -13164,13 +13188,24 @@ function swarmCommand(args, io, deps) {
         if (now.getTime() - last < TAKEOVER_MIN * 6e4) throw new UsageError(`swarm start: coordinator ${prev.coordinator} is active (last step ${prev.lastStepAt ?? prev.startedAt})`);
       }
       const branch = flag("branch") ?? runBranch(project);
-      if (!/^[A-Za-z0-9_\-./]{1,120}$/.test(branch) || branch.includes("..")) throw new UsageError("swarm start: --branch is not a valid branch name");
+      if (!/^[A-Za-z0-9_./][A-Za-z0-9_\-./]{0,119}$/.test(branch) || branch.includes("..")) throw new UsageError("swarm start: --branch is not a valid branch name");
+      let setup = null;
       if (kind === "plan") {
+        const wt = runWorktree(io.cwd);
+        if (branch === base) throw new UsageError(`swarm start: ${branch} is the base branch (checked out in the main checkout); the run branch must be another one (omit --branch for ${runBranch(project)})`);
+        const holder = worktreeHolding(deps.git(["worktree", "list", "--porcelain"]), branch);
+        if (holder && !samePath(holder, wt)) throw new UsageError(`swarm start: ${branch} is checked out in another worktree (${holder}); pick another --branch`);
+        if ((0, import_node_fs9.existsSync)(wt)) {
+          const on = deps.at(wt).git(["rev-parse", "--abbrev-ref", "HEAD"])?.trim();
+          if (on !== branch) throw new UsageError(`swarm start: ${wt} exists and is on ${on ?? "?"}, not ${branch}; switch it or remove it (git worktree remove)`);
+        }
         if (deps.git(["rev-parse", "--verify", "-q", `refs/heads/${branch}`]) === null && deps.git(["branch", branch, base]) === null) {
           throw new UsageError(`swarm start: cannot create ${branch} from ${base}`);
         }
-        const wt = runWorktree(io.cwd);
-        if (!(0, import_node_fs9.existsSync)(wt) && deps.git(["worktree", "add", wt, branch]) === null) throw new UsageError(`swarm start: cannot add the worktree ${wt}`);
+        if (!(0, import_node_fs9.existsSync)(wt)) {
+          if (deps.git(["worktree", "add", wt, branch]) === null) throw new UsageError(`swarm start: cannot add the worktree ${wt}`);
+          setup = runSetup(deps, wt, io.cwd);
+        }
       }
       const resume = prev && prev.active && prev.project === project && prev.branch === (kind === "plan" ? branch : base);
       const state = resume ? { ...prev, parallel, mode, mergeOnFinish: prev.mergeOnFinish || has("merge-on-finish"), coordinator: session, hookSession: null, sleepUntil: null } : {
@@ -13195,7 +13230,7 @@ function swarmCommand(args, io, deps) {
       };
       (0, import_node_fs9.rmSync)(stopFile(io.cwd), { force: true });
       saveExecution(io.cwd, state);
-      return json(state);
+      return json({ ...state, setup });
     }
     case "status": {
       const state = readExecution(io.cwd);
@@ -13204,8 +13239,9 @@ function swarmCommand(args, io, deps) {
     case "propose": {
       const plan = loadPlanArg(io, flag("plan"), "propose");
       const width = widthOf(plan);
-      const configured = loadConfig(io.cwd).swarm.mode ?? null;
-      const parallel = width < 2 ? 1 : Math.min(3, width);
+      const config = loadConfig(io.cwd);
+      const configured = config.swarm.mode ?? null;
+      const parallel = width < 2 ? 1 : Math.min(config.swarm.parallel, width);
       const reasons = [`${plan.tasks.length} tasks`, `up to ${width} at once (dependencies and zones)`];
       return json({ width, configured, recommended: { mode: "subagents", parallel }, reasons });
     }
@@ -13214,21 +13250,29 @@ function swarmCommand(args, io, deps) {
       const e = current();
       const dir = taskWorktree(io.cwd, task);
       const branch = taskBranch(task);
+      let setup = null;
       if (!(0, import_node_fs9.existsSync)(dir)) {
         const exists = deps.git(["rev-parse", "--verify", "-q", `refs/heads/${branch}`]) !== null;
         const added = exists ? deps.git(["worktree", "add", dir, branch]) : deps.git(["worktree", "add", "-b", branch, dir, e.branch]);
         if (added === null) throw new UsageError(`swarm worktree: cannot add ${dir} for ${branch}`);
+        setup = runSetup(deps, dir, io.cwd);
       }
       const base = deps.at(dir).git(["rev-parse", "HEAD"])?.trim() ?? null;
       const t = e.tasks[task] ?? { status: "running", stage: "brief", round: 0, worktree: dir, branch, executor: e.mode, attempts: 0, agent: null, startedAt: iso3, updatedAt: iso3, detail: null };
       saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, worktree: dir, branch, updatedAt: iso3 } } });
-      return json({ worktree: dir, branch, base });
+      return json({ worktree: dir, branch, base, setup });
     }
     case "task": {
       const task = taskArg();
       const e = current();
       const prev = e.tasks[task];
       if (!prev) throw new UsageError(`swarm task: ${task} is not part of this execution`);
+      if (has("drop")) {
+        const { [task]: _dropped, ...tasks } = e.tasks;
+        saveExecution(io.cwd, { ...e, tasks });
+        (0, import_node_fs9.rmSync)(executionTaskFile(io.cwd, task), { force: true });
+        return ok();
+      }
       const stage = flag("stage") ?? prev.stage;
       if (!STAGES.includes(stage)) throw new UsageError(`swarm task: --stage must be one of ${STAGES.join("|")}`);
       const status = flag("status") ?? prev.status;
@@ -13266,7 +13310,7 @@ function swarmCommand(args, io, deps) {
       for (const t of plan.tasks) {
         if (states[t.id]?.status !== "done") continue;
         for (const c of states[t.id]?.commits ?? []) {
-          if (typeof c?.sha === "string" && ID2.test(c.sha) && deps.git(["merge-base", "--is-ancestor", c.sha, e.branch]) !== null) integrated.push(c.sha);
+          if (typeof c?.sha === "string" && ID.test(c.sha) && deps.git(["merge-base", "--is-ancestor", c.sha, e.branch]) !== null) integrated.push(c.sha);
         }
       }
       const d = schedule({ plan, states, sessions, exec: e, integrated, now: now.getTime() });
@@ -13290,11 +13334,12 @@ function swarmCommand(args, io, deps) {
       const seconds = Number(rest[0]);
       if (!Number.isInteger(seconds) || seconds < 1 || seconds > MAX_SLEEP_S) throw new UsageError(`swarm sleep: seconds must be an integer from 1 to ${MAX_SLEEP_S}`);
       const e = current();
-      saveExecution(io.cwd, { ...e, sleepUntil: new Date(now.getTime() + seconds * 1e3).toISOString() });
+      const until = new Date(now.getTime() + seconds * 1e3).toISOString();
+      saveExecution(io.cwd, { ...e, sleepUntil: until });
       if (has("mark")) return ok();
       (io.sleep ?? sleepSync)(seconds * 1e3);
       const after = readExecution(io.cwd);
-      if (after) saveExecution(io.cwd, { ...after, sleepUntil: null });
+      if (after && after.sleepUntil === until) saveExecution(io.cwd, { ...after, sleepUntil: null });
       return ok();
     }
     case "stop": {
@@ -13309,7 +13354,7 @@ function swarmCommand(args, io, deps) {
     case "merge":
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError("usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]|status|propose --plan P|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|tick --plan P --db DIR|integrate <T>|merge|retry <T>|sleep <seconds> [--mark]|stop [--reason stopped|budget]>");
+      throw new UsageError("usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]|status|propose --plan P|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick --plan P --db DIR|integrate <T>|merge|retry <T>|sleep <seconds> [--mark]|stop [--reason stopped|budget]>");
   }
 }
 
@@ -13729,9 +13774,12 @@ function run(argv, io) {
     const abs = import_node_path13.default.resolve(io.cwd, dir);
     if (!(0, import_node_fs12.existsSync)(abs)) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} does not exist
 ` };
+    if (!(0, import_node_fs12.statSync)(abs).isDirectory()) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} is not a directory
+` };
     argv = [...argv.slice(0, cwdAt), ...argv.slice(cwdAt + 2)];
-    io = { ...io, cwd: abs, git: defaultGit(abs), exec: defaultExec(abs) };
+    io = { ...io, workdir: abs, git: defaultGit(abs), exec: defaultExec(abs) };
   }
+  const repoDir = io.workdir ?? io.cwd;
   const [cmd, ...args] = argv;
   const flag = (name) => {
     const i = args.indexOf(`--${name}`);
@@ -13799,7 +13847,7 @@ function run(argv, io) {
         const tracked = lines(listed);
         const zoneFiles = planned ? tracked.filter((f) => planned.zones.some((z) => globMatch(z, f))) : [];
         const extra = planned ? { files: zoneFiles, zones: zonesFromPaths(planned.zones) } : void 0;
-        const catalog = detectValidators(repoReader(io.cwd), loadConfig(io.cwd)).map((v) => ({ name: v.name, cmd: v.cmd, kind: v.kind, source: v.source }));
+        const catalog = detectValidators(repoReader(repoDir), loadConfig(repoDir)).map((v) => ({ name: v.name, cmd: v.cmd, kind: v.kind, source: v.source }));
         const names2 = catalog.map((v) => v.name);
         const result = triage(task, { files: tracked, commits, gitOk: listed !== null, grep }, names2, extra);
         if (planned?.zones.length && !zoneFiles.length) result.reasons.push("zones match no tracked file (new files?)");
@@ -13818,8 +13866,8 @@ function run(argv, io) {
         return json({ ...result, catalog, new: fresh });
       }
       case "validate": {
-        const config = loadConfig(io.cwd);
-        const all = detectValidators(repoReader(io.cwd), config);
+        const config = loadConfig(repoDir);
+        const all = detectValidators(repoReader(repoDir), config);
         const p = flag("path");
         if (p !== void 0 && !PATH_ORDER.includes(p)) throw new UsageError(`validate: --path must be one of ${PATH_ORDER.join("|")}`);
         let scope;
@@ -14152,7 +14200,7 @@ function run(argv, io) {
         if (sub === void 0 || sub.startsWith("--")) {
           const surfaces = readSurfaces(io.cwd);
           const local = readLocal(io.cwd);
-          const drafts = detectDrafts(repoReader(io.cwd)).filter((d) => !surfaces.some((s2) => s2.name === d.name) && !local.proposed.includes(d.name));
+          const drafts = detectDrafts(repoReader(repoDir)).filter((d) => !surfaces.some((s2) => s2.name === d.name) && !local.proposed.includes(d.name));
           return json({ surfaces, drafts });
         }
         const name = flag("name");
@@ -14198,7 +14246,7 @@ function run(argv, io) {
           asked: has("asked"),
           changed: diff === null ? null : diff.split("\n").map((s2) => s2.trim()).filter(Boolean),
           surfaces: readSurfaces(io.cwd),
-          drafts: detectDrafts(repoReader(io.cwd)),
+          drafts: detectDrafts(repoReader(repoDir)),
           local: readLocal(io.cwd),
           missing: (s2) => missingTools(s2.tools, onPath)
         });
@@ -14234,7 +14282,7 @@ function run(argv, io) {
         return swarmCommand(args, io, {
           git: io.git ?? defaultGit(io.cwd),
           exec: io.exec ?? defaultExec(io.cwd),
-          repo: repoReader(io.cwd),
+          repo: repoReader(repoDir),
           at: (dir) => ({ git: defaultGit(dir), exec: defaultExec(dir), repo: repoReader(dir) })
         });
       case "hook": {
