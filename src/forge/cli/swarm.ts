@@ -322,7 +322,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       let prev: PublicTask | null = null;
       try { prev = normalizePublicTask(JSON.parse(readFileSync(executionTaskFile(main, task), 'utf8'))); } catch { prev = null; }
       // Another session still holding the task's lease owns its public file: never overwrite it.
-      if (prev && prev.by !== session && Date.parse(prev.leaseUntil) > now.getTime()) {
+      if (prev && prev.runId === e.runId && prev.by !== session && Date.parse(prev.leaseUntil) > now.getTime()) {
         throw new UsageError(`swarm report: ${task} is reported by ${prev.by} until ${prev.leaseUntil}`);
       }
       if (member.role === 'manual' && member.task !== task) writeMember(main, { ...member, task });
@@ -560,6 +560,26 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       const task = taskArg();
       const e = current();
       const t = e.tasks[task];
+      if (has('adopt')) {
+        if (!t || t.status !== 'conflict' || t.executor === 'subagents') {
+          throw new UsageError(`swarm retry: --adopt takes a member's task in conflict (${task} is ${t ? `${t.status}, ${t.executor}` : 'not in this execution'})`);
+        }
+        if (deps.git(['rev-parse', '--verify', '-q', `refs/heads/${t.branch}`]) === null) throw new UsageError(`swarm retry: ${t.branch} does not exist`);
+        // The fix round runs where the branch already is (a member's task-<T>, or the manual session's own worktree).
+        const holder = worktreeHolding(deps.git(['worktree', 'list', '--porcelain']), t.branch);
+        // Taking over a session's own worktree must not trample its uncommitted edits.
+        if (holder !== null && (deps.at(holder).git(['status', '--porcelain']) ?? '').trim() !== '') {
+          throw new UsageError(`swarm retry: the worktree of ${t.branch} (${holder}) has uncommitted changes; commit or discard them before --adopt`);
+        }
+        const worktree = holder ?? addTaskWorktree(deps, io.cwd, task, e.branch).worktree;
+        const revive = !e.active && e.stopReason === 'stalled';
+        saveExecution(io.cwd, {
+          ...e, ...(revive ? { active: true, stopReason: null, stallReason: null } : {}),
+          tasks: { ...e.tasks, [task]: { ...t, status: 'running', stage: 'implement', executor: 'subagents', worktree, attempts: t.attempts + 1, nudgedAt: null, updatedAt: iso, stageSince: iso } },
+        });
+        writePublicTask(io.cwd, { task, runId: e.runId, stage: 'implement', status: 'running', agent: null, round: t.round, since: iso, updatedAt: iso, leaseUntil: new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString(), by: e.coordinator, mode: 'subagents' });
+        return json({ task, adopted: true, previous: t.executor, worktree, branch: t.branch });
+      }
       if (!t || (t.status !== 'conflict' && t.status !== 'blocked')) throw new UsageError(`swarm retry: ${task} is not in conflict or blocked`);
       const revive = !e.active && e.stopReason === 'stalled';
       saveExecution(io.cwd, {
@@ -676,6 +696,6 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     case 'merge':
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError('usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F]|status|propose --plan P|--tasks F|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T>|merge|retry <T>|sleep <seconds> [--mark]|stop [--reason stopped|budget]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID [--db DIR]>');
+      throw new UsageError('usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F]|status|propose --plan P|--tasks F|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T>|merge|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID [--db DIR]>');
   }
 }

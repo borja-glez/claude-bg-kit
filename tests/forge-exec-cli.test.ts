@@ -9,6 +9,7 @@ import { normalizeExecution } from '../src/lib/execution-state.js';
 import { setupFor } from '../src/forge/cli/swarm.js';
 import { writeMember } from '../src/forge/members.js';
 import { readLoose } from '../src/forge/loose.js';
+import { samePath } from '../src/lib/worktree.js';
 
 const PLAN = `project: shop
 locale: es
@@ -208,6 +209,60 @@ describe('forge swarm (execution)', () => {
     writeDocs(path.join(root, 'db', 'sessions'), {});
     out(run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db'], io));
   };
+  it('retry --adopt gives a member task in conflict a fix round with the coordinator subagents, in the worktree of its branch', () => {
+    sessionsRun();
+    const wt1 = out(run(['swarm', 'worktree', 'T1'], io)).worktree;
+    const mine = path.join(root, '.claude', 'worktrees', 'mine');
+    git('branch', 'task/T2', 'forge/run-shop');
+    git('worktree', 'add', mine, 'task/T2');
+    const e = readExecution(root)!;
+    saveExecution(root, { ...e, tasks: {
+      ...e.tasks,
+      T1: { ...e.tasks.T1, status: 'conflict', detail: 'merge conflict with task/T1' },
+      T2: { ...e.tasks.T2, status: 'conflict', executor: 'manual', worktree: '' },
+    } });
+    const r1 = out(run(['swarm', 'retry', 'T1', '--adopt'], io));
+    expect(r1).toMatchObject({ task: 'T1', adopted: true, previous: 'sessions', branch: 'task/T1' });
+    expect(samePath(r1.worktree, wt1)).toBe(true);
+    const r2 = out(run(['swarm', 'retry', 'T2', '--adopt'], io));
+    expect(r2.previous).toBe('manual');
+    expect(samePath(r2.worktree, mine)).toBe(true);
+    const after = readExecution(root)!;
+    expect(after.tasks.T1).toMatchObject({ status: 'running', stage: 'implement', executor: 'subagents', attempts: 1, detail: 'merge conflict with task/T1' });
+    expect(JSON.parse(readFileSync(executionTaskFile(root, 'T1'), 'utf8'))).toMatchObject({ by: 'main', mode: 'subagents', stage: 'implement' });
+    // The member marked it done on the roadmap: the tick no longer takes that as accepted, nor relaunches it.
+    writeDocs(path.join(root, 'db', 'state'), { T1: { status: 'done', owner: 'S2' } });
+    const acts = out(run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db'], io)).actions;
+    expect(acts.filter((a: { task?: string }) => a.task === 'T1')).toEqual([]);
+    expect(readExecution(root)!.tasks.T1.status).toBe('running');
+  });
+  it('retry --adopt refuses a subagents task, a task not in conflict and a missing branch', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    writeDocs(path.join(root, 'db', 'state'), {});
+    writeDocs(path.join(root, 'db', 'sessions'), {});
+    out(run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db'], io));
+    const e = readExecution(root)!;
+    saveExecution(root, { ...e, tasks: { ...e.tasks, T1: { ...e.tasks.T1, status: 'conflict' }, T2: { ...e.tasks.T2, executor: 'sessions' } } });
+    expect(run(['swarm', 'retry', 'T1', '--adopt'], io).stderr).toMatch(/--adopt takes a member's task in conflict/);
+    expect(run(['swarm', 'retry', 'T2', '--adopt'], io).code).toBe(2);
+    saveExecution(root, { ...readExecution(root)!, tasks: { ...readExecution(root)!.tasks, T2: { ...e.tasks.T2, executor: 'sessions', status: 'conflict' } } });
+    expect(run(['swarm', 'retry', 'T2', '--adopt'], io).stderr).toMatch(/task\/T2 does not exist/);
+  });
+  it('retry --adopt refuses with code 2 when the worktree it would take over has uncommitted edits', () => {
+    sessionsRun();
+    const mine = path.join(root, '.claude', 'worktrees', 'mine');
+    git('branch', 'task/T2', 'forge/run-shop');
+    git('worktree', 'add', mine, 'task/T2');
+    writeFileSync(path.join(mine, 'wip.txt'), 'unsaved');
+    const e = readExecution(root)!;
+    saveExecution(root, { ...e, tasks: { ...e.tasks, T2: { ...e.tasks.T2, status: 'conflict', executor: 'manual', worktree: '' } } });
+    const r = run(['swarm', 'retry', 'T2', '--adopt'], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/uncommitted/);
+    expect(readExecution(root)!.tasks.T2).toMatchObject({ status: 'conflict', executor: 'manual' });
+    rmSync(path.join(mine, 'wip.txt'));
+    expect(out(run(['swarm', 'retry', 'T2', '--adopt'], io)).adopted).toBe(true);
+  });
   it('tick reads member public files and the ListAgents snapshot', () => {
     sessionsRun();
     mkdirSync(path.dirname(executionTaskFile(root, 'T1')), { recursive: true });
@@ -583,6 +638,12 @@ describe('forge swarm (execution)', () => {
       expect(run(['swarm', 'report', 'T2', '--session', 'M1', '--stage', 'implement'], wio).code).toBe(2);
       expect(JSON.parse(readFileSync(executionTaskFile(root, 'T2'), 'utf8')).by).toBe('S9');
       other(new Date(NOW.getTime() - 60000).toISOString());
+      expect(out(run(['swarm', 'report', 'T2', '--session', 'M1', '--stage', 'implement'], wio)).by).toBe('M1');
+    });
+    it('report ignores the public file of an earlier run, even with a live lease', () => {
+      out(run(['swarm', 'join', '--session', 'M1', '--role', 'manual'], wio));
+      mkdirSync(path.dirname(executionTaskFile(root, 'T2')), { recursive: true });
+      writeFileSync(executionTaskFile(root, 'T2'), JSON.stringify({ task: 'T2', runId: 'old-run', stage: 'implement', status: 'running', agent: null, round: 0, since: NOW.toISOString(), updatedAt: NOW.toISOString(), leaseUntil: new Date(NOW.getTime() + 600000).toISOString(), by: 'S9', mode: 'sessions' }));
       expect(out(run(['swarm', 'report', 'T2', '--session', 'M1', '--stage', 'implement'], wio)).by).toBe('M1');
     });
     it('a member worktree detects its setup from the new worktree, not from the caller worktree', () => {
