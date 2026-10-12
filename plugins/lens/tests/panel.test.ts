@@ -392,6 +392,34 @@ test("a subagent's turn end leaves the main turn under Now", async ($, on) => {
   await ui.unmount();
 });
 
+test('a finished subagent stays listed with ✓ and its time for five minutes; a stop never started adds nothing', async ($, on) => {
+  serveFiles(on, []);
+  servePanes(on);
+  const clock = mock.clock(on, { now: NOW });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  // The agents list is the truth on each refresh: it holds the subagent while it runs.
+  let agents = [{ id: 'a1', description: '', type: 'Explore', status: 'running' as const }];
+  on('agent.list', () => ({ value: agents }));
+  on('classic.SubagentStart', () => ({}));
+  on('classic.SubagentStop', () => ({}));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' });
+  await clock.advance(65_000);
+  agents = [];
+  await $.classic.SubagentStop({ agent_id: 'a1', agent_type: 'Explore' } as never);
+  await $.classic.SubagentStop({ agent_id: 'ghost', agent_type: 'Plan' } as never);
+  await clock.advance(1000);
+  const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
+  expect(await said(ui)).toMatch(/✓ Explore · 1m 05s/);
+  expect(await said(ui)).not.toMatch(/✓ Plan/);
+  // Past the five minutes, and one more panel refresh (every 10 s) builds the model without it.
+  await clock.advance(5 * 60_000 + 10_000);
+  await ui.redraw();
+  expect(await said(ui)).not.toMatch(/✓ Explore/);
+  await ui.unmount();
+});
+
 test('a pane never opened costs no pane checks on the panel cadence', async ($, on) => {
   serveFiles(on, []);
   const clock = start(on);

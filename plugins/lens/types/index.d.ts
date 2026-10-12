@@ -12,6 +12,7 @@ export type LensPanel = {
   } | null;
   todos: { total: number; done: number; inProgress: string | null; next: string[] } | null;
   subagents: { id: string; type: string; description?: string; status?: string; seconds: number | null; model?: string; effort?: string }[];
+  subagentsDone?: { id: string; type: string; description?: string; model?: string; seconds: number }[];
   tool: { name: string; seconds: number | null } | null;
   turnSeconds: number | null;
   ccTasks: { open: number; done: number; recent: string[] } | null;

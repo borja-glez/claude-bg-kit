@@ -1,13 +1,14 @@
 import { atom, read, update } from 'claude-code';
 import type { Register, Timer } from 'claude-code';
 import type { BandModel } from '../mod/model.js';
-import { buildPanelModel, parseSddLedger, summarizeTodos, FORGE_RUN_MAX, FORGE_EXEC_MAX, FORGE_EXEC_FILE_MAX, FORGE_EXEC_TASKS_MAX, FORGE_LIVE_MAX, PROPOSAL_ID, type Activity, type PanelModel } from './model.js';
+import { buildPanelModel, bandKey, parseSddLedger, summarizeTodos, FORGE_RUN_MAX, FORGE_EXEC_MAX, FORGE_EXEC_FILE_MAX, FORGE_EXEC_TASKS_MAX, FORGE_LIVE_MAX, PROPOSAL_ID, type Activity, type PanelModel } from './model.js';
 import { clip, join, listOpt, loadBandModel, mtime, nowMs, readOpt, MAX_DOCS, type Engine } from '../mod/files.js';
 import { normalizeStatus } from '../lib/forge-status.js';
 import { buildCards, cardAlt } from './cards.js';
 import { cardSvg, bandSvg } from './svg.js';
 import { termCard, termBand, type TermUI } from './term.js';
 import { headline, ratio, usageBandText, PALETTE, SECTION_HUE, SECTION_ICON } from './view.js';
+import { freshFinished, pushFinished, type FinishedAgent } from './finished.js';
 import { endTurn, labelLoop, newTurnClock, newUsage, startTurn, touchTurn, recordStep, recordTracking, trackingKind, type UsageState } from './usage.js';
 import { mainCheckoutFrom, mergeForRun, parseUsageFile, runStartedAt, seedUsage, toUsageFile, USAGE_FILE_MAX, USAGE_FILES_MAX, type RunSource, type UsageFile } from './usage-file.js';
 
@@ -33,6 +34,8 @@ let timer: Timer | null = null;
 
 const emptyActivity = (): Activity => ({ tool: null, turnSince: null, todos: undefined, subagents: [], ccTasks: [] });
 let activity: Activity = emptyActivity();
+// Subagents heard finishing, for five minutes (see finished.ts).
+let finished: FinishedAgent[] = [];
 // The open main turn and its last sign of life, for the active time (see TurnClock).
 const turnClock = newTurnClock();
 const syncTurn = () => { activity.turnSince = turnClock.since; };
@@ -68,6 +71,7 @@ let lastJson = '';
 
 function resetPanel(): void {
   activity = emptyActivity();
+  finished = [];
   turnClock.since = null;
   turnClock.lastActivityMs = 0;
   tools.clear();
@@ -499,14 +503,15 @@ async function buildPanel($: Engine): Promise<PanelModel> {
   const now = await nowMs($);
   const subagents = activity.subagents.filter(s => now - s.since < SUBAGENT_TTL_MS);
   return buildPanelModel({
-    band: roadmap, ...panelFiles, activity: { ...activity, subagents }, now, usage: usageInput(),
+    band: roadmap, ...panelFiles, activity: { ...activity, subagents, finished: freshFinished(finished, now) }, now, usage: usageInput(),
     ...(roadmap.locale ? { locale: roadmap.locale } : {}),
   });
 }
 
 // Keeps the band's model and redraws the band when it changed.
 function keepBand($: Engine, model: PanelModel): void {
-  const json = JSON.stringify(model);
+  // The band shows no finished-subagent times: they do not count as a change.
+  const json = bandKey(model);
   if (json === bandJson) return;
   bandJson = json;
   bandModel = model;
@@ -789,6 +794,7 @@ export const register: Register = on => {
   on('classic.SubagentStart', async ($, e, next) => {
     try {
       const id = String(e.agent_id);
+      finished = finished.filter(f => f.id !== id);
       activity.subagents = pushCapped(activity.subagents.filter(s => s.id !== id), { id, type: clip(String(e.agent_type ?? ''), LINE_MAX), since: await nowMs($) });
       // A loop agent.spawn did not label (lens loaded later, another spawn path) takes the hook's type.
       const kind = usage.loops[id]?.kind;
@@ -800,10 +806,23 @@ export const register: Register = on => {
     return next(e);
   });
 
-  on('classic.SubagentStop', ($, e, next) => {
+  on('classic.SubagentStop', async ($, e, next) => {
     try {
       void touch($);
+      const id = String(e.agent_id);
+      const ran = activity.subagents.find(s => s.id === id);
       activity.subagents = activity.subagents.filter(s => s.id !== e.agent_id);
+      // Only a subagent whose start lens heard is listed (no start, no duration).
+      if (ran) {
+        const now = await nowMs($);
+        const loop = usage.loops[id];
+        const description = ran.description ?? loop?.description;
+        finished = pushFinished(freshFinished(finished, now), {
+          id, type: ran.type, seconds: Math.max(0, Math.floor((now - ran.since) / 1000)), at: now,
+          ...(description ? { description: clip(String(description), LINE_MAX) } : {}),
+          ...(loop?.model ? { model: loop.model } : {}),
+        });
+      }
       void noteActivity($);
       void requestPanelWrite($);
     } catch { /* ignore */ }

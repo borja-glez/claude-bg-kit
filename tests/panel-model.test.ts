@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { buildBandModel } from '../src/mod/model.js';
 import { newUsage, recordStep, labelLoop, closeTurn } from '../src/lens/usage.js';
-import { buildPanelModel, usageTime,forgeFromStatus, parsePlanTasks, parseSddLedger, summarizeTodos, type Activity } from '../src/lens/model.js';
+import { FINISHED_TTL_MS } from '../src/lens/finished.js';
+import { buildPanelModel, bandKey, usageTime,forgeFromStatus, parsePlanTasks, parseSddLedger, summarizeTodos, type Activity } from '../src/lens/model.js';
 
 const LEDGER = `# SDD ledger — plan: docs/superpowers/plans/2026-10-11-waypoint-views.md
 
@@ -127,7 +128,7 @@ describe('buildPanelModel', () => {
   const base = { band: { mode: 'none' } as const, activity: act(), now: 100_000 };
   it('is all-null for an empty project', () => {
     expect(buildPanelModel(base)).toEqual({
-      locale: 'en', waypoint: null, superpowers: null, todos: null, subagents: [], tool: null, turnSeconds: null, ccTasks: null,
+      locale: 'en', waypoint: null, superpowers: null, todos: null, subagents: [], subagentsDone: [], tool: null, turnSeconds: null, ccTasks: null,
       forge: null, infinite: null, execution: null, proposals: [], mainModel: null, usage: null,
     });
   });
@@ -417,5 +418,28 @@ describe('buildPanelModel usage', () => {
     recordStep(run, { model: 'claude-opus-5-5', usage: U(3_000_000, 0) });
     const m = buildPanelModel({ ...base, usage: { session: session(), run, officialUsd: null } });
     expect(m.usage).toMatchObject({ scope: 'run', tokens: 3_000_000, session: { tokens: 2_000_000 } });
+  });
+});
+
+describe('buildPanelModel finished subagents', () => {
+  it('lists fresh finished subagents with their seconds, clipped, without the internal time', () => {
+    const now = 1_000_000;
+    const m = buildPanelModel({
+      band: { mode: 'none' }, now,
+      activity: act({ finished: [
+        { id: 'a1', type: 'forge:forge-impl', description: 'd'.repeat(120), model: 'claude-sonnet-5-5', seconds: 95, at: now - 1000 },
+        { id: 'a2', type: 'Explore', seconds: 5, at: now - FINISHED_TTL_MS - 1 },
+      ] }),
+    });
+    expect(m.subagentsDone).toEqual([{ id: 'a1', type: 'forge:forge-impl', description: 'd'.repeat(80), model: 'claude-sonnet-5-5', seconds: 95 }]);
+    expect(buildPanelModel({ band: { mode: 'none' }, now, activity: act() }).subagentsDone).toEqual([]);
+  });
+
+  it('the band key ignores the finished subagents (the band shows no times)', () => {
+    const now = 1_000_000;
+    const a = buildPanelModel({ band: { mode: 'none' }, now, activity: act() });
+    const b = buildPanelModel({ band: { mode: 'none' }, now, activity: act({ finished: [{ id: 'x', type: 'Explore', seconds: 3, at: now }] }) });
+    expect(JSON.stringify(a)).not.toBe(JSON.stringify(b));
+    expect(bandKey(a)).toBe(bandKey(b));
   });
 });

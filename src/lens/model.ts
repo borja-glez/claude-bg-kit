@@ -7,6 +7,7 @@ import { executionView } from '../lib/execution-view.js';
 import { MAIN, type UsageState } from './usage.js';
 import { summarizeUsage } from './usage-summary.js';
 import { PRICES_AS_OF } from '../lib/prices.js';
+import { freshFinished, type FinishedAgent } from './finished.js';
 
 const CLIP = 80;
 const MAX_RANGE = 1000;
@@ -103,6 +104,7 @@ export interface Activity {
   todos: unknown;
   subagents: { id: string; type: string; description?: string; status?: string; since: number }[];
   ccTasks: { id: string; subject: string; done: boolean }[];
+  finished?: FinishedAgent[];
 }
 
 // Copied into the published state contract by build.mjs: literals and primitives only, no other named types.
@@ -119,6 +121,7 @@ export type PanelModel = {
   } | null;
   todos: { total: number; done: number; inProgress: string | null; next: string[] } | null;
   subagents: { id: string; type: string; description?: string; status?: string; seconds: number | null; model?: string; effort?: string }[];
+  subagentsDone?: { id: string; type: string; description?: string; model?: string; seconds: number }[];
   tool: { name: string; seconds: number | null } | null;
   turnSeconds: number | null;
   ccTasks: { open: number; done: number; recent: string[] } | null;
@@ -328,6 +331,12 @@ export function infiniteFromRun(text: string | undefined, proposals: Record<stri
   return { cycle, cyclesMax: max, hoursLeft, active: run.active, autoApproved: autoApproved(proposals) };
 }
 
+/** What the band compares and keeps: the model without the finished subagents' seconds (the band shows no times). */
+export function bandKey(model: PanelModel): string {
+  const { subagentsDone: _done, ...rest } = model;
+  return JSON.stringify(rest);
+}
+
 export function buildPanelModel(input: {
   band: BandModel; ledger?: string; ledgerPlan?: string; planFallback?: string; ledgerMtimeMs?: number;
   forgeStatus?: string; forgeRun?: string; proposals?: Record<string, string>; forgeBriefs?: number;
@@ -383,6 +392,9 @@ export function buildPanelModel(input: {
       ...(loop?.effort ? { effort: loop.effort } : {}),
       };
     }),
+    subagentsDone: freshFinished(a.finished ?? [], now).map(f => ({
+      id: f.id, type: f.type, ...(f.description ? { description: clip(f.description) } : {}), ...(f.model ? { model: f.model } : {}), seconds: f.seconds,
+    })),
     tool: a.tool ? { name: a.tool.name, seconds: secs(now, a.tool.since) } : null,
     turnSeconds: a.turnSince === null || a.turnSince === undefined ? null : secs(now, a.turnSince),
     ccTasks: cc.length

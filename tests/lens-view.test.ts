@@ -325,3 +325,17 @@ describe('lens timings: usage', () => {
     expect(JSON.stringify(buildCards({ ...EMPTY, usage: U }, T, 0))).not.toContain('⏱');
   });
 });
+
+describe('lens timings: finished subagents', () => {
+  it('draws finished subagents after the running ones, dimmed, with ✓ and their time; a card with only finished ones still shows', () => {
+    const running = [{ id: 'r', type: 'forge:forge-impl', description: 'T7', seconds: 30 }];
+    const done = [{ id: 'd', type: 'forge:forge-review-security', description: 'review T6', model: 'claude-sonnet-5-5', seconds: 125 }];
+    const card = buildCards({ ...EMPTY, subagents: running, subagentsDone: done }, T, 0).find(c => c.title === T.sSubagents)!;
+    expect(card.chip).toEqual({ text: '1', hue: 'lavender' });
+    expect(card.blocks[0].kind).toBe('row');
+    expect(card.blocks[1]).toEqual({ kind: 'text', text: '✓ security · review T6 · Sonnet 5.5 · 2m 05s', dim: true });
+    const only = buildCards({ ...EMPTY, subagentsDone: done }, T, 0).find(c => c.title === T.sSubagents)!;
+    expect(only.blocks).toHaveLength(1);
+    expect(only.chip).toBeUndefined();
+  });
+});

@@ -203,12 +203,20 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     out.push({ icon: SECTION_ICON.todos, title: t.sTodos, hue: SECTION_HUE.todos, chip: { text: `${td.done}/${td.total}`, hue: SECTION_HUE.todos }, blocks });
   }
 
-  if (m.subagents.length) {
+  const done = m.subagentsDone ?? [];
+  if (m.subagents.length || done.length) {
     const blocks: Block[] = m.subagents.slice(-10).map(s => {
       const tier = tierOf(s.type);
       return { kind: 'row', dot: tier.hue, spinning: s.status !== 'waiting', tag: { text: tier.label, hue: tier.hue }, text: s.description || s.type || '?', right: [modelRight(s, t), duration(s.seconds)].filter(Boolean).join('  ') || undefined };
     });
-    out.push({ icon: SECTION_ICON.agents, title: t.sSubagents, hue: SECTION_HUE.agents, chip: { text: String(m.subagents.length), hue: SECTION_HUE.agents }, blocks });
+    for (const d of done) {
+      const text = ['✓ ' + tierOf(d.type).label, d.description, d.model ? shortModelName(d.model) : null, span(d.seconds)].filter(Boolean).join(' · ');
+      blocks.push({ kind: 'text', text, dim: true });
+    }
+    out.push({
+      icon: SECTION_ICON.agents, title: t.sSubagents, hue: SECTION_HUE.agents,
+      chip: m.subagents.length ? { text: String(m.subagents.length), hue: SECTION_HUE.agents } : undefined, blocks,
+    });
   }
 
   if (m.ccTasks) {
