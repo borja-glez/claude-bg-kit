@@ -398,3 +398,10 @@ test('a turn end looks for /lens again', async ($, on) => {
   expect(await ui.find({ key: 'panel' })).toBeDefined();
   await ui.unmount();
 });
+
+test('a band with automatic decisions ends with their count and the last major one', async ($, on) => {
+  serveBand(on, () => ({ ...DESIGN, auto: { count: 2, lastMajor: 'design approved (v3)' } }) as WaypointBand);
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  expect(await ui.find({ type: 'Text', text: '◆ DESIGN · demo · v3 · 2 proposals · 1 critical · ⚑ auto · 2 · design approved (v3)' })).toBeDefined();
+  await ui.unmount();
+});

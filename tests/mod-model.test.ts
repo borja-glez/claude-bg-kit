@@ -154,3 +154,25 @@ describe('buildBandModel · design', () => {
     expect(m.mode).toBe('work');
   });
 });
+
+describe('buildBandModel · automatic decisions', () => {
+  const recent = () => j({
+    ts: new Date(Date.now() - 60_000).toISOString(), scope: 'demo', count: 3, autonomy: 'auto', last: [],
+    lastMajor: { n: 5, point: 'design-approve', what: 'diseño aprobado (v4)', chosen: 'approve', ts: new Date().toISOString() },
+  });
+  it('adds the count and the last major decision to a drawn band', () => {
+    const m = buildBandModel('demo-shop', { ...empty, design, decisions: recent() });
+    expect(m).toMatchObject({ mode: 'design', auto: { count: 3, lastMajor: 'diseño aprobado (v4)' } });
+    expect(bandLine(m, Date.now())).toMatch(/ · ⚑ auto · 3 · diseño aprobado \(v4\)$/);
+  });
+  it('leaves it out when stale or invalid, and draws nothing without a band', () => {
+    const stale = j({ ts: '2020-01-01T00:00:00Z', scope: 'x', count: 1, autonomy: 'auto', last: [], lastMajor: null });
+    expect(buildBandModel('demo-shop', { ...empty, design, decisions: stale })).not.toHaveProperty('auto');
+    expect(buildBandModel('demo-shop', { ...empty, design, decisions: 'nope' })).not.toHaveProperty('auto');
+    expect(buildBandModel('demo-shop', { ...empty, decisions: recent() })).toEqual({ mode: 'none' });
+  });
+  it('without a major decision the band shows only the count', () => {
+    const noMajor = j({ ts: new Date().toISOString(), scope: 'x', count: 2, autonomy: 'unattended', last: [], lastMajor: null });
+    expect(bandLine(buildBandModel('demo-shop', { ...empty, design, decisions: noMajor }), Date.now())).toMatch(/ · ⚑ auto · 2$/);
+  });
+});

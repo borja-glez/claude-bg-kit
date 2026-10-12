@@ -1,6 +1,7 @@
 import type { EngineInterface } from 'claude-code';
 import { mainCheckoutFrom } from '../lib/main-checkout.js';
 import { buildBandModel, pickProject, type BandFiles, type BandModel, type ProjectEntry } from './model.js';
+import { DECISIONS_MAX } from '../lib/decisions.js';
 
 export type Engine = EngineInterface;
 
@@ -92,6 +93,13 @@ async function loadExecution($: Engine, root: string): Promise<Pick<BandFiles, '
   } catch { return {}; }
 }
 
+// forge's decisions summary in this session's .forge/ (a few hundred bytes; not read above DECISIONS_MAX).
+async function loadDecisions($: Engine, root: string): Promise<string | undefined> {
+  const dir = join(root, '.forge');
+  const f = (await listOpt($, dir)).find(x => x.kind === 'file' && x.name === 'decisions.json');
+  return f && f.size <= DECISIONS_MAX ? readOpt($, join(dir, 'decisions.json')) : undefined;
+}
+
 export async function loadBandModel($: Engine): Promise<BandModel> {
   const root = await $.session.root();
   const project = pickProject(await projectEntries($, root));
@@ -114,6 +122,7 @@ export async function loadBandModel($: Engine): Promise<BandModel> {
     states: await readCollection($, join(pstate, 'dbcache', 'state')),
     messages: await readCollection($, join(pstate, 'dbcache', 'messages')),
     ...(await loadExecution($, root)),
+    decisions: await loadDecisions($, root),
     critiques,
   };
   return buildBandModel(project, files);

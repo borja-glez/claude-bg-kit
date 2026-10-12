@@ -37,20 +37,26 @@ export type Texts = (typeof TEXT)[keyof typeof TEXT];
 
 export const textsFor = (locale: string | undefined): Texts => (locale === 'es' ? TEXT.es : TEXT.en);
 
+// forge's automatic decisions of the last day, appended to any band.
+function autoPart(m: { auto?: { count: number; lastMajor: string | null } }): string[] {
+  return m.auto ? [`⚑ auto · ${m.auto.count}${m.auto.lastMajor ? ` · ${clip(m.auto.lastMajor, 30)}` : ''}`] : [];
+}
+
 export function bandLine(m: BandModel, nowMs: number): string {
   if (m.mode === 'none') return '';
   const t = textsFor(m.locale);
   if (m.mode === 'design') {
     const head = `◆ ${t.design} · ${m.project} · v${m.version}`;
-    if (m.round === 0) return `${head} · ${t.noCritique}`;
-    return `${head} · ${m.proposals} ${m.proposals === 1 ? t.proposal : t.proposals} · ${m.critical} ${m.critical === 1 ? t.criticalOne : t.critical}`;
+    if (m.round === 0) return [`${head} · ${t.noCritique}`, ...autoPart(m)].join(' · ');
+    return [`${head} · ${m.proposals} ${m.proposals === 1 ? t.proposal : t.proposals} · ${m.critical} ${m.critical === 1 ? t.criticalOne : t.critical}`, ...autoPart(m)].join(' · ');
   }
   if (m.mode === 'run') {
-    if (m.stalled) return `▶ ${t.run} ${t.stoppedSfx}`;
+    if (m.stalled) return [`▶ ${t.run} ${t.stoppedSfx}`, ...autoPart(m)].join(' · ');
     const parts = [`▶ ${t.run}`, `${m.executor === 'sessions' ? t.sessions : t.subagents} ${m.running}/${m.parallel}`,
       ...m.slots.map(s => `${s.task} ${t.stage[s.stage as keyof typeof t.stage] ?? s.stage}${s.round > 1 ? ` (r${s.round})` : ''}`),
       `${m.integrated}/${m.total}`, `${t.integratedN} ${m.integrated}`];
     if (m.worst !== 'alive') parts.push(`⚠ ${m.worst === 'silent' ? t.silentSfx : t.stoppedSfx}`);
+    parts.push(...autoPart(m));
     return parts.join(' · ');
   }
   // A session on a track names it with its progress; one without a track counts the plan's tasks.
@@ -71,5 +77,6 @@ export function bandLine(m: BandModel, nowMs: number): string {
   parts.push(`${t.overall} ${m.percent} %`);
   if (m.inbox > 0) parts.push(`✉ ${m.inbox}`);
   if (m.escalation) parts.push(`⚠ ${t.decision}`);
+  parts.push(...autoPart(m));
   return parts.join(' · ');
 }

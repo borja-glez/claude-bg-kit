@@ -7,11 +7,12 @@ import { parsePlan } from '../lib/plan.js';
 import { executionView } from '../lib/execution-view.js';
 import { normalizeLive, normalizePublicTask, parseExecution, type LiveDoc, type PublicTask } from '../lib/execution-state.js';
 import type { MessageDoc, States } from '../lib/types.js';
+import { decisionsSummary } from '../lib/decisions.js';
 
 export interface ProjectEntry { name: string; hasSession: boolean; mtimeMs: number }
 export interface BandFiles {
   plan?: string; session?: string; execution?: string; execTasks?: Record<string, string>; live?: Record<string, string>;
-  design?: string; changelog?: string;
+  design?: string; changelog?: string; decisions?: string;
   states: Record<string, string>; messages: Record<string, string>; critiques: Record<string, string>;
 }
 // In work mode `cells` holds one letter per task of the track (or of the plan), in plan order: d done, a active,
@@ -23,11 +24,11 @@ export type BandModel =
       current: { id: string; title: string; startedAt?: string; estimateMin?: number } | null;
       trackDone: number; trackTotal: number; percent: number; inbox: number; escalation: boolean;
       phase: { index: number; total: number; name: string } | null; cells: string; swarm: boolean;
-      run: { coordinator: string; stage: string } | null }
+      run: { coordinator: string; stage: string } | null; auto?: { count: number; lastMajor: string | null } }
   | { mode: 'run'; project: string; locale: string; executor: 'subagents' | 'sessions'; running: number; parallel: number;
       integrated: number; total: number; slots: { task: string; stage: string; round: number }[];
-      worst: 'alive' | 'silent' | 'stopped'; stalled: boolean; roadmapUrl: string | null }
-  | { mode: 'design'; project: string; locale: string; version: number; round: number; proposals: number; critical: number; designUrl: string | null };
+      worst: 'alive' | 'silent' | 'stopped'; stalled: boolean; roadmapUrl: string | null; auto?: { count: number; lastMajor: string | null } }
+  | { mode: 'design'; project: string; locale: string; version: number; round: number; proposals: number; critical: number; designUrl: string | null; auto?: { count: number; lastMajor: string | null } };
 
 function json<T>(text: string | undefined): T | undefined {
   if (text === undefined) return undefined;
@@ -54,13 +55,20 @@ export function buildBandModel(project: string, f: BandFiles): BandModel {
       const member = json<{ launchedBy?: unknown }>(f.session)?.launchedBy;
       const isMember = typeof member === 'string' && !!member;
       const r = isMember ? null : runModel(project, f);
-      if (r) return r;
+      if (r) return withAuto(r, f);
     }
-    if (f.plan !== undefined && f.session !== undefined) return workModel(project, f);
-    if (f.design !== undefined) return designModel(project, f);
+    if (f.plan !== undefined && f.session !== undefined) return withAuto(workModel(project, f), f);
+    if (f.design !== undefined) return withAuto(designModel(project, f), f);
   } catch { /* any parse failure hides the band */ }
   const locale = knownLocale(f);
   return locale ? { mode: 'none', locale } : { mode: 'none' };
+}
+
+// forge's automatic decisions of the last day (.forge/decisions.json), on any band that draws.
+function withAuto(m: BandModel, f: BandFiles): BandModel {
+  if (m.mode === 'none') return m;
+  const s = decisionsSummary(f.decisions, Date.now());
+  return s ? { ...m, auto: { count: s.count, lastMajor: s.lastMajor } } : m;
 }
 
 // The project's language from its plan, else its design, for a band that draws nothing.
