@@ -473,8 +473,13 @@ describe('swarm', () => {
     expect(html).toContain('data-action="open-shot" data-i="1"');
     expect(html).toContain('src="https://claude.ai/_blob/b"');
     expect(html).toContain('adds &lt;b&gt;');
-    m.states.T001.evidence = { surfaces: ['web'], result: 'pass', passed: 6, total: 6, local: '.forge/work/x/evidence/1-1', shots: [] };
-    expect(renderApp(m, { ...ui(), modal: 'T001' })).toMatch(/6 (capturas|shots)/);
+    const local = [{ surface: 'web', check: 'a', ok: true }, { surface: 'web', check: 'b', ok: true }];
+    m.states.T001.evidence = { surfaces: ['web'], result: 'pass', passed: 6, total: 6, local: '.forge/work/x/evidence/1-1', shots: local };
+    expect(renderApp(m, { ...ui(), modal: 'T001' })).toMatch(/2 (capturas|shots) \((solo en local|local only)\)/);
+    m.states.T001.evidence = { ...m.states.T001.evidence, pending: true };
+    const pending = renderApp(m, { ...ui(), modal: 'T001' });
+    expect(pending).toMatch(/upload pending|subida pendiente/);
+    expect(pending).not.toMatch(/local only|solo en local/);
     m.states.T001.evidence = { surfaces: ['app'], result: 'blocked', passed: 0, total: 0, reason: 'no emulator', shots: [] };
     expect(renderApp(m, { ...ui(), modal: 'T001' })).toContain('no emulator');
   });

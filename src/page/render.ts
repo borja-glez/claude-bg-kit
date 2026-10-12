@@ -601,7 +601,7 @@ function renderEvidence(d: Dict, e: NonNullable<TaskState['evidence']>): string 
   const strip = e.shots.map((s, i) => s.url
     ? `<button class="shot ${s.ok ? 'ok' : 'del'}" data-action="open-shot" data-i="${i}" title="${esc(s.check)}"><img src="${esc(s.url)}" alt="${esc(s.check)}" loading="lazy"></button>`
     : `<div class="shot-row ${s.ok ? 'ok' : 'del'}">${s.ok ? '✓' : '✗'} ${esc(s.check)}</div>`).join('');
-  const note = !withUrl.length && e.local ? `<div class="muted">${esc(d.verify.localOnly(e.total))}</div>` : e.pending ? `<div class="muted">${esc(d.verify.pending)}</div>` : '';
+  const note = e.pending ? `<div class="muted">${esc(d.verify.pending)}</div>` : !withUrl.length && e.local ? `<div class="muted">${esc(d.verify.localOnly(e.shots.length))}</div>` : '';
   return `<div class="evidence"><div class="mono">${esc(e.surfaces.join(', '))} · ${head}</div>${strip ? `<div class="shots">${strip}</div>` : ''}${note}</div>`;
 }
 

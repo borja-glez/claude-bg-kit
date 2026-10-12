@@ -16,7 +16,7 @@ export interface CardTexts {
   sUsage: string; effort: string; effortLevel: (e: string) => string; thisSession: string; run: string; gMain: string; gImpl: string;
   gReview: string; gPlan: string; gOther: string; tracking: string; withoutForge: string; withoutForgeNote: string;
   forgeCosts: (usd: string, pct: number) => string; forgeSaves: (usd: string) => string; pricesAsOf: string; drift: string; various: string;
-  noReview: string; gVerify: string; shots: string; blocked: string;
+  noReview: string; gVerify: string; blocked: string;
 }
 
 const modelRight = (s: { model?: string; effort?: string }, t: CardTexts): string | undefined =>
@@ -61,7 +61,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
       if (f.verify?.planned) {
         const v = f.verify;
         const where = `verify ${v.surfaces.join(', ')}`;
-        const text = v.result === 'pass' ? `✓ ${where} · ${v.passed}/${v.total} · ${v.passed} ${t.shots}`
+        const text = v.result === 'pass' ? `✓ ${where} · ${v.passed}/${v.total}`
           : v.result === 'fail' ? `✗ ${where} · ${v.passed}/${v.total}`
           : v.result === 'blocked' ? `⊘ ${where} · ${t.blocked}: ${v.reason ?? ''}`
           : where;
