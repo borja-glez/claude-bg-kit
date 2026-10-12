@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { triage, type RepoFacts } from '../src/forge/triage.js';
+import { triage, implementerFor, isMechanical, type RepoFacts } from '../src/forge/triage.js';
 
 const FILES = ['src/app.ts', 'src/auth/login.ts', 'src/util/format.ts', 'src/db/migrations/001.sql', 'package.json', '.github/workflows/ci.yml',
   ...Array.from({ length: 20 }, (_, i) => `src/feature/f${i}.ts`)];
@@ -87,5 +87,38 @@ describe('triage', () => {
     triage(big, { files: FILES, commits: 40, gitOk: true, grep: w => { asked.push(w); return []; } }, []);
     expect(Date.now() - t0).toBeLessThan(1000);
     expect(asked).toHaveLength(20);
+  });
+});
+
+describe('implementerFor', () => {
+  it('a small task is always delegated: mech when mechanical, impl-light otherwise', () => {
+    expect(implementerFor({ path: 'small', sensitive: [] }, 'rename formatPrice to formatAmount')).toMatchObject({ role: 'mech', self: false });
+    expect(implementerFor({ path: 'small', sensitive: [] }, 'Renombra formatPrice en src/util/format.ts')).toMatchObject({ role: 'mech', self: false });
+    expect(implementerFor({ path: 'small', sensitive: [] }, 'aplica este parche a src/a.ts')).toMatchObject({ role: 'mech' });
+    expect(implementerFor({ path: 'small', sensitive: [] }, 'add a guard for empty carts in src/cart.ts')).toMatchObject({ role: 'impl-light', self: false });
+  });
+  it('a trivial task is the session\'s own, except in a batch', () => {
+    expect(implementerFor({ path: 'trivial', sensitive: [] }, 'fix the typo in src/a.ts')).toEqual({ role: null, self: true, why: 'trivial: the session does it' });
+    expect(implementerFor({ path: 'trivial', sensitive: [] }, 'fix the typo in src/a.ts', { batch: true })).toMatchObject({ role: 'mech', self: false });
+  });
+  it('medium goes to impl, or impl-heavy on a sensitive zone; large has no implementer yet', () => {
+    expect(implementerFor({ path: 'medium', sensitive: [] }, 'x').role).toBe('impl');
+    expect(implementerFor({ path: 'medium', sensitive: ['auth'] }, 'x').role).toBe('impl-heavy');
+    expect(implementerFor({ path: 'large', sensitive: [] }, 'x')).toMatchObject({ role: null, self: false });
+  });
+  it('isMechanical reads English and Spanish wording, not substrings', () => {
+    expect(isMechanical('bump the version to 2.1.0')).toBe(true);
+    expect(isMechanical('traduce los textos de la tarjeta')).toBe(true);
+    expect(isMechanical('corrige la errata del README')).toBe(true);
+    expect(isMechanical('add a remove button to the cart')).toBe(false);
+    expect(isMechanical('fix the movement of the cart badge')).toBe(false);
+  });
+  it('isMechanical does not take a bare patch, move or typo in prose about real logic for mechanical', () => {
+    expect(isMechanical('patch the retry logic to back off exponentially')).toBe(false);
+    expect(isMechanical('move the validation logic into the cart reducer and handle empty carts')).toBe(false);
+    expect(isMechanical('the typo handler should debounce input')).toBe(false);
+    expect(isMechanical('apply the patch to src/a.ts')).toBe(true);
+    expect(isMechanical('move src/a.ts to src/lib/a.ts')).toBe(true);
+    expect(isMechanical('fix the typo in the README')).toBe(true);
   });
 });

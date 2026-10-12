@@ -32,6 +32,43 @@ const LARGE = [/\b(architecture|redesign|rewrite|subsystem|new (project|app|serv
 // A rename spreads past the file it names: never Trivial.
 const RENAME = [/\brenam/i, /(?<![\p{L}\p{N}_])renombr/iu];
 
+// Mechanical work (spec §4.3): rename, move, bump, regenerate, typos, translations, fixtures, changelog, a given patch.
+// move / typo / patch only count in mechanical-only phrasings: a bare one appears in prose about real logic changes.
+const MECHANICAL = [
+  /\b(renam\w*|bump\w*|regenerat\w*|translat\w*|fixtures?|changelog)\b/i,
+  /\bapply(?:ing)?\s+(?:the|this|that|these|a|an|given)?\s*patch(?:es)?\b/i,
+  /\bmov(?:e|es|ed|ing)\s+(?:the\s+)?(?:files?|folders?|directory|directories|dirs?)\b|\bmov(?:e|es|ed|ing)\s+\S*[\w-]\.\w+\s+to\b|\bmov(?:e|es|ed|ing)\s+\S*\/\S*\s+to\b/i,
+  /\b(?:fix(?:es|ing)?|correct\w*)\s+(?:the\s+|a\s+|some\s+)?typos?\b|\btypos?\s+fix/i,
+  es('renombr|regener|traduc', 'errata|erratas|fixtures?|changelog|sube la versi[oó]n'),
+  /(?<![\p{L}\p{N}_])aplic(?:a|ar|ando)\s+(?:el|este|ese|un|los|estos)\s+parches?(?![\p{L}\p{N}_])/iu,
+  /(?<![\p{L}\p{N}_])(?:mueve|mover|muevo)\s+(?:los?\s+|las?\s+)?(?:archivos?|carpetas?|directorios?|\S*[\w-]\.\w+\s+a\b|\S*\/\S*\s+a\b)/iu,
+];
+export function isMechanical(text: string): boolean {
+  const t = String(text).slice(0, MAX_TEXT);
+  return MECHANICAL.some(re => re.test(t));
+}
+
+export type ImplRole = 'mech' | 'impl-light' | 'impl' | 'impl-heavy';
+/** Who implements a task of this size: `self` = the session itself (Trivial alone); `role` null with self false = Large (design first). */
+export interface Implementer { role: ImplRole | null; self: boolean; why: string }
+
+/** Model by size (spec §2): Trivial alone is the session's; Small is always delegated; in a batch a Trivial goes to mech. */
+export function implementerFor(r: Pick<TriageResult, 'path' | 'sensitive'>, text: string, opts: { batch?: boolean } = {}): Implementer {
+  switch (r.path) {
+    case 'trivial':
+      return opts.batch ? { role: 'mech', self: false, why: 'trivial in a batch: delegated, the session runs several at once' }
+        : { role: null, self: true, why: 'trivial: the session does it' };
+    case 'small':
+      return isMechanical(text) ? { role: 'mech', self: false, why: 'small and mechanical: always delegated to mech' }
+        : { role: 'impl-light', self: false, why: 'small and bounded: always delegated to impl-light' };
+    case 'medium':
+      return r.sensitive.length ? { role: 'impl-heavy', self: false, why: `medium on a sensitive zone (${r.sensitive.join(', ')})` }
+        : { role: 'impl', self: false, why: 'medium' };
+    default:
+      return { role: null, self: false, why: 'large: design and plan first' };
+  }
+}
+
 // Path-like tokens: something/with/slashes or name.ext.
 const PATH_TOKEN = /[\w.\-/]*[\w-]\.[A-Za-z0-9]{1,8}\b|[\w.-]+\/[\w.\-/]+/g;
 // Symbols worth a grep: camelCase, PascalCase with an inner capital, snake_case, or `backticked`.

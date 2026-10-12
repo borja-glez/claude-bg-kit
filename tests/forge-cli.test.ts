@@ -183,6 +183,26 @@ describe('forge CLI', () => {
     expect(grepped).toEqual(['fooBar']);
     expect(readEvents(root).at(-1)).toMatchObject({ kind: 'triage', task: 'myTaskId' });
   });
+  it('triage prints the implementer for the size, resolved through the profile; --batch delegates a trivial task', () => {
+    io.git = args => {
+      // Five or more tracked files, or the repository counts as greenfield and every task is Large.
+      if (args.includes('ls-files')) return 'src/a.ts\nsrc/b.ts\nsrc/c.ts\nsrc/d.ts\nsrc/e.ts\n';
+      if (args[0] === 'rev-list') return '12\n';
+      return '';
+    };
+    const one = JSON.parse(run(['triage', 'fix the typo in src/a.ts'], io).stdout);
+    expect(one.path).toBe('trivial');
+    expect(one.implementer).toEqual({ role: null, self: true, why: 'trivial: the session does it', agent: null });
+    const batch = JSON.parse(run(['triage', 'fix the typo in src/a.ts', '--batch'], io).stdout);
+    expect(batch.implementer).toMatchObject({ role: 'mech', self: false, agent: 'forge-mech' });
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'profile: quality\n');
+    const quality = JSON.parse(run(['triage', 'rename helperOne in src/a.ts and src/b.ts'], io).stdout);
+    expect(quality.path).toBe('small');
+    expect(quality.implementer).toMatchObject({ role: 'mech', agent: 'forge-impl-light' });
+    // The ledger event keeps its shape: implementer is output only.
+    expect(readEvents(root).at(-1)).not.toHaveProperty('implementer');
+  });
   it('triage of the same task never lowers the path an earlier triage reached', () => {
     run(['log', '--kind', 'triage', '--task', 'rt', '--data', '{"path":"large"}'], io);
     const out = JSON.parse(run(['triage', '--task', 'rt', 'add a dark mode toggle'], io).stdout);

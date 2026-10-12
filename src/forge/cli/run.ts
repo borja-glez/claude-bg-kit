@@ -7,7 +7,7 @@ import { parseRun, startRun, recordCycle, stopReason, endRun, readRunText, saveR
 import { decideStop, decideExecutionStop, bindHookSession } from '../hook.js';
 import { readExecution, saveExecution } from '../execution.js';
 import { planLocale, replyIn } from '../../lib/locale.js';
-import { triage, zonesFromPaths, PATH_ORDER, type PathName } from '../triage.js';
+import { triage, implementerFor, zonesFromPaths, PATH_ORDER, type PathName } from '../triage.js';
 import { parsePlan, PlanError } from '../../lib/plan.js';
 import { renderBrief, taskText } from '../brief.js';
 import { loadConfig, agentFor, ROLES, ConfigError, NAME } from '../config.js';
@@ -297,12 +297,14 @@ export function run(argv: string[], io: Io): Result {
             result.reasons.push(`ratchet: kept ${prior} from an earlier triage of this task`);
           }
         }
+        const impl = implementerFor(result, task, { batch: has('batch') });
+        const implementer = { ...impl, agent: impl.role ? agentFor(impl.role, loadConfig(repoDir).profile) : null };
         const known = readLocal(io.cwd).known;
         const fresh = names.filter(n => !known.includes(n));
         // `known` mirrors what exists now: new names are added, vanished ones dropped silently.
         if (fresh.length || known.some(n => !names.includes(n))) updateLocal(io.cwd, s => ({ ...s, known: names }));
         appendEvent(io.cwd, { ts: ts(), kind: 'triage', ...(flag('task') ? { task: flag('task') } : {}), ...result });
-        return json({ ...result, catalog, new: fresh });
+        return json({ ...result, catalog, new: fresh, implementer });
       }
       case 'validate': {
         const config = loadConfig(repoDir);
