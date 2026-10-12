@@ -1,4 +1,5 @@
-import type { NoteDoc, NoteType } from './types.js';
+import type { NoteDecision, NoteDoc, NoteType } from './types.js';
+import { DECISION_POINTS, LIMITS, clean, type DecisionPoint } from './decisions.js';
 
 export const NOTE_TYPES: NoteType[] = ['decision', 'idea', 'debt', 'question'];
 export const MAX_NOTE = 2000;
@@ -20,6 +21,27 @@ export function normalizeNote(x: unknown): NoteDoc | null {
   if (str(o.answeredBy)) out.answeredBy = o.answeredBy;
   if (str(o.answeredAt)) out.answeredAt = o.answeredAt;
   if (str(o.proposalId) && o.proposalId && !o.proposalId.includes('/')) out.proposalId = o.proposalId;
+  const decision = normalizeNoteDecision(o.decision);
+  if (decision) out.decision = decision;
+  return out;
+}
+
+/** The decision part of a shared (untrusted) note: null unless its point is known and what, chosen and why are usable. */
+export function normalizeNoteDecision(x: unknown): NoteDecision | null {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
+  const o = x as Record<string, unknown>;
+  if (!str(o.point) || !(DECISION_POINTS as readonly string[]).includes(o.point)) return null;
+  const line = (v: unknown, max: number) => (str(v) ? clean(v, max) : '');
+  const what = line(o.what, LIMITS.what);
+  const chosen = line(o.chosen, LIMITS.chosen);
+  const why = line(o.why, LIMITS.why);
+  if (!what || !chosen || !why) return null;
+  const out: NoteDecision = { point: o.point as DecisionPoint, what, chosen, why, auto: true };
+  const alternatives = Array.isArray(o.alternatives)
+    ? o.alternatives.map(a => line(a, LIMITS.alternative)).filter(Boolean).slice(0, LIMITS.alternatives) : [];
+  if (alternatives.length) out.alternatives = alternatives;
+  const revert = line(o.revert, LIMITS.revert);
+  if (revert) out.revert = revert;
   return out;
 }
 

@@ -298,6 +298,20 @@ describe('notes view', () => {
     expect(ro).toContain('solo lectura');
     expect(renderApp({ ...base(), notes, profiles: {} }, ui({ view: 'notes' }))).toContain('usuario');
   });
+  it('marks an automatic decision with what was chosen, why and how to undo it, escaped', () => {
+    const dec = note({ id: 'd1', type: 'decision', text: 'diseño aprobado', decision: { point: 'design-approve', what: 'diseño aprobado (v4)', chosen: 'approve', alternatives: ['another round'], why: 'sin critical', revert: '/forge:decisions revert 7', auto: true } });
+    const html = renderApp({ ...base(), notes: [dec] }, ui({ view: 'notes' }));
+    expect(html).toContain('<span class="nauto">auto</span>');
+    expect(html).toContain('Elegido:</span> approve');
+    expect(html).toContain('(another round)');
+    expect(html).toContain('Por qué:</span> sin critical');
+    expect(html).toContain('Cómo revertir:</span> /forge:decisions revert 7');
+    const evil = note({ id: 'd2', type: 'decision', decision: { point: 'other', what: 'w', chosen: '<script>x</script>', why: '<img onerror=1>', auto: true } });
+    const bad = renderApp({ ...base(), notes: [evil] }, ui({ view: 'notes' }));
+    expect(bad).not.toContain('<script>x');
+    expect(bad).toContain('&lt;script&gt;x&lt;/script&gt;');
+    expect(renderApp({ ...base(), notes: [note({ id: 'p', type: 'decision' })] }, ui({ view: 'notes' }))).not.toContain('class="nauto"');
+  });
   it('escapes hostile notes in every view', () => {
     const bad = [
       note({ id: 'h"><script>', type: 'question', author: HOSTILE, text: HOSTILE, taskId: 'T001' }),

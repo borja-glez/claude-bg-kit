@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MAX_NOTE, NOTE_TYPES, counts, filterNotes, normalizeNote, notesSince } from '../src/lib/notes.js';
+import { MAX_NOTE, NOTE_TYPES, counts, filterNotes, normalizeNote, normalizeNoteDecision, notesSince } from '../src/lib/notes.js';
 import type { NoteDoc } from '../src/lib/types.js';
 
 type N = NoteDoc & { id: string };
@@ -25,6 +25,26 @@ describe('normalizeNote', () => {
     const x = normalizeNote({ ts: 't', type: 'idea', author: 'a', text: 'x'.repeat(3000), answer: 'y'.repeat(2500) })!;
     expect(x.text).toHaveLength(2000);
     expect(x.answer).toHaveLength(2000);
+  });
+});
+
+describe('normalizeNote · decision', () => {
+  const DEC = { point: 'design-approve', what: 'diseño aprobado (v4)', chosen: 'approve', alternatives: ['another round'], why: 'sin critical', revert: '/forge:decisions revert 7', auto: true };
+  it('keeps a valid automatic decision, cleaned', () => {
+    const x = normalizeNote({ ts: 't', type: 'decision', author: 'session:S', text: 'd', decision: { ...DEC, what: 'a\u0007b', auto: 'no' } });
+    expect(x?.decision).toEqual({ ...DEC, what: 'a b', auto: true });
+  });
+  it('drops an unusable decision and keeps the note', () => {
+    for (const bad of [null, 'x', [], { ...DEC, point: 'nope' }, { ...DEC, why: ' ' }, { ...DEC, chosen: 3 }]) {
+      const x = normalizeNote({ ts: 't', type: 'decision', author: 'session:S', text: 'd', decision: bad });
+      expect(x).toEqual({ ts: 't', type: 'decision', author: 'session:S', text: 'd' });
+    }
+  });
+  it('caps alternatives and leaves out empty optionals', () => {
+    const d = normalizeNoteDecision({ ...DEC, alternatives: [...Array(12).fill('x'), 7, ''], revert: '' })!;
+    expect(d.alternatives).toHaveLength(10);
+    expect(d).not.toHaveProperty('revert');
+    expect(normalizeNoteDecision({ ...DEC, alternatives: [] })).not.toHaveProperty('alternatives');
   });
 });
 
