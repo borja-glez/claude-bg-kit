@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { normalizeMember, readMember, writeMember, listMembers, memberFile } from '../src/forge/members.js';
+import { normalizeMember, readMember, writeMember, listMembers, memberFile, isMemberId } from '../src/forge/members.js';
 
 const T = '2026-10-12T12:00:00.000Z';
 describe('members', () => {
@@ -31,5 +31,11 @@ describe('members', () => {
     expect(readMember(root, 'missing')).toBeNull();
     expect(listMembers(root, 'r1').map(m => m.sessionId)).toEqual(['s2']);
     expect(memberFile(root, 's2')).toBe(path.join(root, '.forge', 'members', 's2.json'));
+  });
+  it('member ids follow one rule, and writeMember refuses any other', () => {
+    expect(isMemberId('s2.a-b_c')).toBe(true);
+    for (const bad of ['a:b', 'a@b', 'a+b', 'a~b', '../x', '', 'x'.repeat(121)]) expect(isMemberId(bad)).toBe(false);
+    expect(() => writeMember(root, { sessionId: 'a:b', role: 'manual', runId: 'r1', task: null, name: null, since: T })).toThrow();
+    expect(existsSync(path.join(root, '.forge', 'members'))).toBe(false);
   });
 });

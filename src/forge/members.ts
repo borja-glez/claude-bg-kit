@@ -6,12 +6,14 @@ import { isPlanId } from '../lib/plan.js';
 export type MemberRole = 'executor' | 'manual';
 export interface MemberDoc { sessionId: string; role: MemberRole; runId: string; task: string | null; name: string | null; since: string }
 const SID = /^[A-Za-z0-9_\-.]{1,120}$/;
+/** The one rule for a member's session id: it names a file, so no `:` (an NTFS stream), `/` or `..`. */
+export const isMemberId = (s: string): boolean => SID.test(s) && s !== '.' && s !== '..';
 export const memberFile = (main: string, sessionId: string) => path.join(main, '.forge', 'members', `${sessionId}.json`);
 
 export function normalizeMember(x: unknown): MemberDoc | null {
   if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
   const o = x as Record<string, unknown>;
-  const sessionId = typeof o.sessionId === 'string' && SID.test(o.sessionId) ? o.sessionId : null;
+  const sessionId = typeof o.sessionId === 'string' && isMemberId(o.sessionId) ? o.sessionId : null;
   const role = o.role === 'executor' || o.role === 'manual' ? o.role : null;
   const runId = typeof o.runId === 'string' && o.runId ? o.runId.slice(0, 120) : null;
   const since = typeof o.since === 'string' && !Number.isNaN(Date.parse(o.since)) ? o.since : null;
@@ -22,7 +24,7 @@ export function normalizeMember(x: unknown): MemberDoc | null {
 }
 
 export function readMember(main: string, sessionId: string): MemberDoc | null {
-  if (!SID.test(sessionId)) return null;
+  if (!isMemberId(sessionId)) return null;
   try {
     const m = normalizeMember(JSON.parse(readFileSync(memberFile(main, sessionId), 'utf8')));
     return m && m.sessionId === sessionId ? m : null;
@@ -30,6 +32,7 @@ export function readMember(main: string, sessionId: string): MemberDoc | null {
 }
 
 export function writeMember(main: string, m: MemberDoc): void {
+  if (!isMemberId(m.sessionId)) throw new Error(`invalid member session id: ${JSON.stringify(m.sessionId.slice(0, 130))}`);
   forgeDir(main);
   const file = memberFile(main, m.sessionId);
   mkdirSync(path.dirname(file), { recursive: true });

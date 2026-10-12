@@ -324,6 +324,32 @@ describe('forge swarm (execution)', () => {
       expect(out(run(['swarm', 'report', 'T1', '--session', 'E1', '--stage', 'brief'], wio)).mode).toBe('sessions');
       expect(run(['swarm', 'report', 'T2', '--session', 'E1', '--stage', 'brief'], wio).code).toBe(2);
     });
+    it('join refuses a session id outside the members rule and writes nothing', () => {
+      expect(run(['swarm', 'join', '--session', 'a:b', '--role', 'manual'], wio).code).toBe(2);
+      expect(existsSync(path.join(root, '.forge', 'members'))).toBe(false);
+    });
+    it('an executor gets a worktree only for its own task', () => {
+      out(run(['swarm', 'join', '--session', 'E1', '--role', 'executor', '--task', 'T1'], wio));
+      expect(run(['swarm', 'worktree', 'T2', '--member', 'E1'], wio).code).toBe(2);
+      expect(existsSync(path.join(root, '.claude', 'worktrees', 'task-T2'))).toBe(false);
+      expect(out(run(['swarm', 'worktree', 'T1', '--member', 'E1'], wio)).branch).toBe('task/T1');
+    });
+    it('report refuses a task another live session reports, and takes it once that lease is over', () => {
+      out(run(['swarm', 'join', '--session', 'M1', '--role', 'manual'], wio));
+      const runId = readExecution(root)!.runId;
+      const other = (leaseUntil: string) => writeFileSync(executionTaskFile(root, 'T2'), JSON.stringify({ task: 'T2', runId, stage: 'implement', status: 'running', agent: null, round: 0, since: NOW.toISOString(), updatedAt: NOW.toISOString(), leaseUntil, by: 'S9', mode: 'sessions' }));
+      mkdirSync(path.dirname(executionTaskFile(root, 'T2')), { recursive: true });
+      other(new Date(NOW.getTime() + 60000).toISOString());
+      expect(run(['swarm', 'report', 'T2', '--session', 'M1', '--stage', 'implement'], wio).code).toBe(2);
+      expect(JSON.parse(readFileSync(executionTaskFile(root, 'T2'), 'utf8')).by).toBe('S9');
+      other(new Date(NOW.getTime() - 60000).toISOString());
+      expect(out(run(['swarm', 'report', 'T2', '--session', 'M1', '--stage', 'implement'], wio)).by).toBe('M1');
+    });
+    it('a member worktree detects its setup from the new worktree, not from the caller worktree', () => {
+      mkdirSync(path.join(wt, '.venv'));
+      out(run(['swarm', 'join', '--session', 'M1', '--role', 'manual'], wio));
+      expect(out(run(['swarm', 'worktree', 'T2', '--member', 'M1'], wio)).setup).toBeNull();
+    });
     it('a manual member joining mid-run never collides with the scheduler: the versioned claim decides and the loser steps aside', () => {
       out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--parallel', '1'], io));
       const db = path.join(root, 'db');

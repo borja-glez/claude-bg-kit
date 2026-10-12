@@ -15,7 +15,7 @@ import { parsePlan, PlanError, isPlanId } from '../../lib/plan.js';
 import type { SessionDoc, Stage, TaskState } from '../../lib/types.js';
 import { mainWorktreeFrom, samePath } from '../../lib/worktree.js';
 import { mainCheckout } from '../local.js';
-import { readMember, writeMember } from '../members.js';
+import { readMember, writeMember, isMemberId } from '../members.js';
 
 export interface GitDeps { git: (args: string[]) => string | null; exec: (cmd: string, timeoutSec: number) => ExecResult; repo: RepoReader }
 export interface SwarmDeps extends GitDeps { at: (dir: string) => GitDeps }
@@ -50,7 +50,12 @@ export function setupFor(repo: RepoReader, configured: string | undefined): Setu
 /** Runs the setup in a worktree just created; a failure is reported, never thrown. */
 function runSetup(deps: SwarmDeps, dir: string, root: string): SetupResult {
   const config = loadConfig(root);
-  const plan = setupFor(deps.repo, config.swarm.setup);
+  // Lockfiles are read in the new worktree itself, never in the caller's. A .venv is untracked, so a fresh worktree
+  // never has one: that hint looks at the main checkout.
+  const wt = deps.at(dir).repo;
+  const mainRepo = deps.at(root).repo;
+  const repo: RepoReader = { ...wt, exists: rel => rel === '.venv' ? mainRepo.exists(rel) : wt.exists(rel) };
+  const plan = setupFor(repo, config.swarm.setup);
   if (!plan) return null;
   if (plan.cmd === null) return { cmd: null, ok: false, tail: [plan.hint] };
   const r = deps.at(dir).exec(plan.cmd, config.validatorTimeoutSec);
@@ -255,7 +260,8 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     const e = readExecution(main);
     if (!e?.active) throw new UsageError(`swarm ${sub}: no active execution`);
     const session = flag('session') ?? flag('member');
-    if (!session || !ID.test(session)) throw new UsageError(`swarm ${sub}: --session is required`);
+    if (!session) throw new UsageError(`swarm ${sub}: --session is required`);
+    if (!isMemberId(session)) throw new UsageError(`swarm ${sub}: --session ${session.slice(0, 130)} is not a valid session id (letters, digits, _ - .; max 120)`);
     const m = needMember ? readMember(main, session) : null;
     if (needMember && (!m || m.runId !== e.runId)) throw new UsageError(`swarm ${sub}: ${session} has not joined this execution`);
     return { main, e, session, m };
@@ -284,9 +290,13 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       if (!['running', 'accepted', 'blocked'].includes(status)) throw new UsageError('swarm report: --status must be running, accepted or blocked');
       const round = has('round') ? Number(flag('round')) : 0;
       if (!Number.isInteger(round) || round < 0 || round > 99) throw new UsageError('swarm report: --round must be an integer from 0 to 99');
-      if (member.role === 'manual' && member.task !== task) writeMember(main, { ...member, task });
       let prev: PublicTask | null = null;
       try { prev = normalizePublicTask(JSON.parse(readFileSync(executionTaskFile(main, task), 'utf8'))); } catch { prev = null; }
+      // Another session still holding the task's lease owns its public file: never overwrite it.
+      if (prev && prev.by !== session && Date.parse(prev.leaseUntil) > now.getTime()) {
+        throw new UsageError(`swarm report: ${task} is reported by ${prev.by} until ${prev.leaseUntil}`);
+      }
+      if (member.role === 'manual' && member.task !== task) writeMember(main, { ...member, task });
       const since = prev && prev.by === session && prev.stage === stage && prev.runId === e.runId ? prev.since : iso;
       const lease = flag('lease') && !Number.isNaN(Date.parse(flag('lease')!)) ? flag('lease')! : new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString();
       const p: PublicTask = { task, runId: e.runId, stage, status, agent: has('no-agent') ? null : (flag('agent') ?? null), round, since, updatedAt: iso, leaseUntil: lease, by: session, mode: member.role === 'executor' ? 'sessions' : 'manual' };
@@ -378,7 +388,8 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       if (has('member')) {
         // A member gets its task worktree in the main checkout; execution.json stays the coordinator's.
         const task = taskArg();
-        const { main, e } = memberCtx(true);
+        const { main, e, session, m } = memberCtx(true);
+        if (m!.role === 'executor' && m!.task !== task) throw new UsageError(`swarm worktree: ${session} executes ${m!.task}, not ${task}`);
         return json(addTaskWorktree(deps, main, task, e.branch));
       }
       const task = taskArg();
