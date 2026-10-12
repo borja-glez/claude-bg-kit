@@ -627,7 +627,10 @@ export function run(argv: string[], io: Io): Result {
         throw new UsageError('usage: forge local get [surfaces.<name>] | set surfaces.<name> allowed|denied|none');
       }
       case 'swarm':
-        return swarmCommand(args, io, { git: io.git ?? defaultGit(io.cwd), exec: io.exec ?? defaultExec(io.cwd), repo: repoReader(io.cwd) });
+        return swarmCommand(args, io, {
+          git: io.git ?? defaultGit(io.cwd), exec: io.exec ?? defaultExec(io.cwd), repo: repoReader(io.cwd),
+          at: dir => ({ git: defaultGit(dir), exec: defaultExec(dir), repo: repoReader(dir) }),
+        });
       case 'hook': {
         return { code: 0, stdout: args[0] === 'stop' ? hookStop(io) : '', stderr: '' };
       }
