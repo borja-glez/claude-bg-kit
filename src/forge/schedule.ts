@@ -73,9 +73,17 @@ export function schedule(i: ScheduleInput): { actions: ScheduleAction[]; next: E
     if (t.executor === 'subagents' || !p || p.runId !== exec.runId || p.by === exec.coordinator) continue;
     tasks[id] = { ...t, stage: p.stage, round: p.round, agent: p.agent, stageSince: p.since, updatedAt: p.updatedAt };
   }
-  // A member's task marked done on the roadmap is accepted and goes to integration.
+  // A member's task marked done on the roadmap is accepted and goes to integration; one its session marked blocked
+  // (publicly or on the roadmap) is blocked here too: it frees its slot and is never nudged nor relaunched.
   for (const [id, t] of Object.entries(tasks)) {
-    if (t.status === 'running' && t.executor !== 'subagents' && statusOf(states, id) === 'done') tasks[id] = { ...t, status: 'accepted', stage: 'integrate', updatedAt: nowIso };
+    if (t.status !== 'running' || t.executor === 'subagents') continue;
+    if (statusOf(states, id) === 'done') { tasks[id] = { ...t, status: 'accepted', stage: 'integrate', updatedAt: nowIso }; continue; }
+    const p = pub[id];
+    const own = !!p && p.runId === exec.runId && p.by !== exec.coordinator;
+    if ((own && p.status === 'blocked') || statusOf(states, id) === 'blocked') {
+      // A public task carries no detail of its own (swarm report has no such flag), so the reason is generic.
+      tasks[id] = { ...t, status: 'blocked', detail: 'blocked by its session', updatedAt: nowIso };
+    }
   }
   // Work a manual session finished, with commits not yet on the run branch, is adopted for integration.
   for (const t of plan.tasks) {

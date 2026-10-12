@@ -97,6 +97,26 @@ describe('schedule', () => {
     expect(schedule(input({ ...base, publicTasks: { T1: pubT('T1', { runId: 'r0' }) } })).next.tasks.T1).toMatchObject({ stage: 'implement', round: 1 });
     expect(schedule(input({ ...base, publicTasks: { T1: pubT('T1', { by: 'main' }) } })).next.tasks.T1).toMatchObject({ stage: 'implement', round: 1 });
   });
+  it('a sessions task its member reported blocked becomes blocked, frees its slot and is neither nudged nor relaunched', () => {
+    // Its owner stopped long ago and it sits idle in the listing: running, it would be relaunched or nudged.
+    const quiet = { startedAt: at(-30), stageSince: at(-30) };
+    const base = { plan: plan([task('T1'), task('T2')]), states: { T1: { status: 'in_progress' as const, owner: 'S2' } }, sessions: { S2: live(at(-30)) },
+      agents: [{ name: 'wp-shop-T1', state: 'idle' as const }] };
+    const r = schedule(input({ ...base, exec: exec({ mode: 'sessions', parallel: 1, tasks: sess('T1', 'running', quiet) }), publicTasks: { T1: pubT('T1', { status: 'blocked' }) } }));
+    expect(r.next.tasks.T1).toMatchObject({ status: 'blocked', detail: 'blocked by its session' });
+    expect(r.actions.some(a => a.type === 'relaunch' || a.type === 'nudge' || a.type === 'block')).toBe(false);
+    expect(starts(r)).toEqual(['T2']);
+    // A blocked public file of another run, or written by the coordinator, is not this member's word.
+    const other = schedule(input({ ...base, agents: [{ name: 'wp-shop-T1', state: 'working' as const }], exec: exec({ mode: 'sessions', parallel: 1, tasks: sess('T1') }), publicTasks: { T1: pubT('T1', { status: 'blocked', runId: 'r0' }) } }));
+    expect(other.next.tasks.T1.status).toBe('running');
+  });
+  it('a member task blocked on the roadmap stalls the run in the blocked group when nothing else can move', () => {
+    const r = schedule(input({ plan: plan([task('T1')]), states: { T1: { status: 'blocked', owner: 'M1' } }, sessions: { M1: { ...live(at(5)), role: 'manual' } },
+      exec: exec({ mode: 'sessions', tasks: sess('T1') }) }));
+    expect(r.next.tasks.T1).toMatchObject({ status: 'blocked', detail: 'blocked by its session' });
+    expect(r.actions).toEqual([{ type: 'stalled', reason: 'blocked: T1' }]);
+    expect(r.next).toMatchObject({ active: false, stopReason: 'stalled' });
+  });
   it('accepts a sessions task its session marked done and integrates it', () => {
     const r = schedule(input({ plan: plan([task('T1')]), exec: exec({ mode: 'sessions', tasks: sess('T1') }), states: { T1: { status: 'done', owner: 'S2', commits: [{ sha: 'bbb2222', ts: at(-1), title: 't', add: 1, del: 0 }] } } }));
     expect(r.next.tasks.T1).toMatchObject({ status: 'accepted', stage: 'integrate' });
