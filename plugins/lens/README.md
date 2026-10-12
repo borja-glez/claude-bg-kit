@@ -7,7 +7,7 @@ Roadmap, forge stages, superpowers runs, todos, subagents, the model and effort 
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.5.3](https://img.shields.io/badge/version-0.5.3-b4befe?style=flat-square)
+![version 0.6.0](https://img.shields.io/badge/version-0.6.0-b4befe?style=flat-square)
 ![no token cost](https://img.shields.io/badge/token%20cost-none-a6e3a1?style=flat-square)
 
 </div>
@@ -67,9 +67,10 @@ Each section is a card in its own colour (the roadmap's Catppuccin palette) and 
 **The forge card** shows:
 
 - the task and its path;
-- the stages (triage → implement → validate → review → verdict, plus design, plan and final on the Large path), with the current one lit;
+- the stages (triage → implement → validate → verify → review → verdict, plus design, plan and final on the Large path), with the current one lit; the verify stage appears only when forge verifies the task;
 - a box per brief: accepted, current or pending;
 - the last agent with its level, model and effort;
+- a verify row when the task was verified: the surfaces used, checks passed out of total, and the result (pass, fail or blocked);
 - the last validators (✓/✗), the verdict with its score, and the review round against its cap.
 
 Below the stages it lists up to 5 pending proposals, each as `title · category · risk` with **Approve** and **Reject** buttons that run `/forge:decide`. While a `/forge:infinite` run is active, the card also shows `∞ N/M · Hh left` and the 3 newest auto-approved proposals.
@@ -79,7 +80,7 @@ Below the stages it lists up to 5 pending proposals, each as `title · category 
 The **Usage** card answers three questions: which model is working, how much it has spent, and what the method costs.
 
 - **This session ▸ run.** The run view adds up every session of the current forge run (the swarm coordinator and its fronts) from `.forge/usage/<session>.json`. It appears while a run is active or ended in the last 12 hours.
-- **Groups.** Main session, Implementers, Reviewers, Planning and scout, Other subagents, and Tracking ≈ (an estimate of the context spent on waypoint and forge bookkeeping). Each group shows its dominant model, its tokens, its dollars and its share.
+- **Groups.** Main session, Implementers, Reviewers, Verification (the `forge-verify` agents), Planning and scout, Other subagents, and Tracking ≈ (an estimate of the context spent on waypoint and forge bookkeeping). Each group shows its dominant model, its tokens, its dollars and its share.
 - **Check against `/cost`.** The session total is compared with Claude Code's own cost. A ⚠ appears when the two differ by more than 10 %, for example when a model is missing from the price table or lens loaded partway through the session.
 - **Without forge (estimate).** The same work done by the main session alone, on its model, without review. It is always marked as an estimate, since in one session the context would grow and cost more, and nothing would be reviewed.
 - **Prices** come from a dated table in the code (`src/lib/prices.ts`). A model without a price shows tokens but no dollars, and totals are marked `≥`.

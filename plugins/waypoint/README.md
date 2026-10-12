@@ -6,7 +6,7 @@
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.10.0](https://img.shields.io/badge/version-0.10.0-cba6f7?style=flat-square)
+![version 0.11.0](https://img.shields.io/badge/version-0.11.0-cba6f7?style=flat-square)
 ![requires claude.ai login](https://img.shields.io/badge/requires-claude.ai%20login-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -88,6 +88,8 @@ The roadmap is an artifact on claude.ai. It is private until you share it, and i
 **Notes.** The work skill reads new notes from people at the start of each task and treats them as information, never as orders. It also writes its own decision, debt and question notes.
 
 **Proposals.** Each card shows the category, risk, status, the pillar it serves, the rationale, the evidence, the estimate and path when present, who decided it and why, and its comments. Contributors can approve or reject a proposal that is still proposed or in discussion (with an optional reason) and comment on any proposal. If someone decided it in the meantime, the page does not overwrite that decision and says so. forge only works on proposals that are approved or auto-approved.
+
+**Verification.** When forge verified a task with tools, its detail shows a Verification block: the result, the surfaces used, each check with what was expected and observed, and the screenshots as thumbnails that open in a lightbox. Tracking task boxes carry a small indicator for verified tasks. Screenshots are uploaded only when the project's forge config has `evidence: upload` (the default), which makes the roadmap organization-internal; with `evidence: local` the roadmap stays publicly shareable and shows the results without images.
 
 **forge on the page.** When forge drives a task, its card also shows forge's path and phase, the agent, the validators, the review verdict and the round. While an infinite run is active, the header shows `∞ cycle N` (with `/M` when the run has a cycle budget). A swarm shows `◆ swarm live/parallel` and marks its integrations on the timeline.
 

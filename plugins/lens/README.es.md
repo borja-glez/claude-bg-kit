@@ -7,7 +7,7 @@ Roadmap, etapas de forge, ejecuciones de superpowers, pendientes, subagentes, el
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.5.3](https://img.shields.io/badge/versi%C3%B3n-0.5.3-b4befe?style=flat-square)
+![versión 0.6.0](https://img.shields.io/badge/versi%C3%B3n-0.6.0-b4befe?style=flat-square)
 ![sin coste en tokens](https://img.shields.io/badge/coste%20en%20tokens-ninguno-a6e3a1?style=flat-square)
 
 </div>
@@ -67,9 +67,10 @@ Cada sección es una tarjeta con su propio color (la paleta Catppuccin del roadm
 **La tarjeta de forge** enseña:
 
 - la tarea y su camino;
-- las etapas (triaje → implementar → validar → revisar → veredicto, más diseño, plan y final en el camino Large), con la actual encendida;
+- las etapas (triaje → implementar → validar → verificar → revisar → veredicto, más diseño, plan y final en el camino Large), con la actual encendida; la etapa de verificar solo aparece cuando forge verifica la tarea;
 - una caja por brief: aceptado, actual o pendiente;
 - el último agente con su nivel, modelo y esfuerzo;
+- una fila de verificación cuando la tarea se verificó: las superficies usadas, las comprobaciones superadas sobre el total y el resultado (pass, fail o blocked);
 - los últimos validadores (✓/✗), el veredicto con su nota y la ronda de revisión frente a su límite.
 
 Debajo de las etapas lista hasta 5 propuestas pendientes, cada una como `título · categoría · riesgo` con botones **Aprobar** y **Rechazar** que ejecutan `/forge:decide`. Mientras hay una ejecución `/forge:infinite` activa, la tarjeta también enseña `∞ N/M · quedan H h` y las 3 propuestas autoaprobadas más recientes.
@@ -79,7 +80,7 @@ Debajo de las etapas lista hasta 5 propuestas pendientes, cada una como `título
 La tarjeta **Consumo** responde a tres preguntas: qué modelo trabaja, cuánto lleva gastado y cuánto cuesta el método.
 
 - **Esta sesión ▸ ejecución.** La vista de ejecución suma todas las sesiones de la ejecución de forge en curso (la coordinadora del enjambre y sus frentes) a partir de `.forge/usage/<sesión>.json`. Aparece mientras hay una ejecución activa o una que terminó en las últimas 12 horas.
-- **Grupos.** Sesión principal, Implementadores, Revisores, Planificación y scout, Otros subagentes y Seguimiento ≈ (una estimación del contexto que se va en la gestión de waypoint y forge). Cada grupo enseña su modelo dominante, sus tokens, sus dólares y su porcentaje.
+- **Grupos.** Sesión principal, Implementadores, Revisores, Verificación (los agentes `forge-verify`), Planificación y scout, Otros subagentes y Seguimiento ≈ (una estimación del contexto que se va en la gestión de waypoint y forge). Cada grupo enseña su modelo dominante, sus tokens, sus dólares y su porcentaje.
 - **Comprobación con `/cost`.** El total de la sesión se compara con el coste del propio Claude Code. Aparece un ⚠ si los dos difieren en más de un 10 %, por ejemplo cuando un modelo falta en la tabla de precios o lens cargó con la sesión ya empezada.
 - **Sin forge (estimado).** El mismo trabajo hecho solo por la sesión principal, con su modelo y sin revisión. Siempre va marcado como estimación, porque en una sola sesión el contexto crecería y costaría más, y nada se revisaría.
 - **Los precios** salen de una tabla fechada en el código (`src/lib/prices.ts`). Un modelo sin precio enseña tokens pero no dólares, y los totales llevan `≥`.

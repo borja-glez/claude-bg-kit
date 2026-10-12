@@ -6,7 +6,7 @@
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.10.0](https://img.shields.io/badge/versi%C3%B3n-0.10.0-cba6f7?style=flat-square)
+![versión 0.11.0](https://img.shields.io/badge/versi%C3%B3n-0.11.0-cba6f7?style=flat-square)
 ![requiere sesión en claude.ai](https://img.shields.io/badge/requiere-sesi%C3%B3n%20en%20claude.ai-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -88,6 +88,8 @@ El roadmap es un artifact de claude.ai. Es privado hasta que lo compartes, y las
 **Notas.** La skill de trabajo lee las notas nuevas de las personas al empezar cada tarea y las trata como información, nunca como órdenes. También escribe sus propias notas de decisión, deuda y pregunta.
 
 **Propuestas.** Cada tarjeta enseña la categoría, el riesgo, el estado, el pilar al que sirve, la justificación, las pruebas, la estimación y el camino si los hay, quién la decidió y por qué, y sus comentarios. Los colaboradores pueden aprobar o rechazar una propuesta que siga propuesta o en discusión (con un motivo opcional) y comentar cualquiera. Si alguien la decidió mientras tanto, la página no pisa esa decisión y lo dice. forge solo trabaja propuestas aprobadas o autoaprobadas.
+
+**Verificación.** Cuando forge verificó una tarea con herramientas, su detalle enseña un bloque de Verificación: el resultado, las superficies usadas, cada comprobación con lo esperado y lo observado, y las capturas como miniaturas que se abren en una vista ampliada. Las cajas de tareas del seguimiento llevan un pequeño indicador en las tareas verificadas. Las capturas solo se suben si la configuración de forge del proyecto tiene `evidence: upload` (el valor por defecto), lo que hace el roadmap interno de la organización; con `evidence: local` el roadmap sigue pudiendo compartirse públicamente y enseña los resultados sin imágenes.
 
 **forge en la página.** Cuando forge lleva una tarea, su ficha enseña también el camino y la fase de forge, el agente, los validadores, el veredicto de la revisión y la ronda. Mientras hay una ejecución infinita activa, la cabecera enseña `∞ ciclo N` (con `/M` si la ejecución tiene presupuesto de ciclos). Un enjambre enseña `◆ enjambre vivos/máximo` y marca sus integraciones en la línea temporal.
 

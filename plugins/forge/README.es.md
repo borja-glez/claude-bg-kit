@@ -7,8 +7,8 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.5.4](https://img.shields.io/badge/versi%C3%B3n-0.5.4-fab387?style=flat-square)
-![depende de waypoint ^0.10.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.10.0-cba6f7?style=flat-square)
+![versión 0.6.0](https://img.shields.io/badge/versi%C3%B3n-0.6.0-fab387?style=flat-square)
+![depende de waypoint ^0.11.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.11.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -25,6 +25,7 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 - [Enjambre](#enjambre)
 - [Modo infinito](#modo-infinito)
 - [Propuestas](#propuestas)
+- [Verificación](#verificación)
 - [Configuración](#configuración)
 - [Referencia de la CLI](#referencia-de-la-cli)
 
@@ -45,7 +46,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depende de [waypoint](../waypoint/README.es.md) ^0.10.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
+forge depende de [waypoint](../waypoint/README.es.md) ^0.11.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
 
 ## Uso
 
@@ -55,6 +56,7 @@ forge depende de [waypoint](../waypoint/README.es.md) ^0.10.0, que se instala co
 | `/forge:run --parallel N <tarea>` | Lo mismo, con un enjambre de hasta N sesiones en paralelo en el camino Large. |
 | `/forge:infinite [--cycles N] [--hours H]` | Ciclos de mejora desatendidos dentro de un presupuesto. |
 | `/forge:decide <id> approve\|reject\|comment <texto>` | Decide o comenta una propuesta desde cualquier sesión. |
+| `/forge:verify [superficie]` | Comprueba el trabajo usándolo (web, emulador, CLI...), o crea y edita superficies de verificación. |
 | `/forge:stop` | Para la ejecución infinita o el enjambre. |
 
 ```text
@@ -88,6 +90,7 @@ El triaje lee el texto de la tarea, los ficheros que probablemente toque y las z
 | `forge-review-correctness` | Opus | muy alto | revisión de corrección |
 | `forge-review-security` | Opus | muy alto | revisión de seguridad |
 | `forge-review-perf` | Opus | muy alto | revisión de rendimiento |
+| `forge-verify` | Sonnet | por defecto | usa el trabajo a través de una superficie e informa con pruebas (`forge-verify-heavy`, Opus, con el perfil `quality`) |
 | `forge-planner` | Opus | muy alto | camino Large: convierte un diseño aprobado en un plan de waypoint |
 | `forge-scout` | Opus | medio | modo infinito: propuestas de mejora con pruebas |
 
@@ -163,23 +166,76 @@ Solo se pueden decidir las propuestas `proposed` y `discussing`, y solo las deci
 
 Mientras forge trabaja una tarea de waypoint, también escribe un pequeño bloque `forge` (camino, fase, agente, validadores, veredicto, ronda) en el documento `state/T` de la tarea, que enseñan el roadmap y lens.
 
+## Verificación
+
+Los tests y los revisores leen el código; la verificación **usa** el resultado. Una **superficie** es algo del proyecto que se puede comprobar usándolo: una web, una app en un emulador, un dispositivo simulado, una CLI, una app de escritorio. No tiene tipo: es un fichero Markdown en `.forge/verify/<nombre>.md` que cuenta en texto libre cómo se arranca y cómo se prueba.
+
+**Las superficies aparecen de tres formas:**
+
+- **Por chat.** Cuéntale a la sesión cómo comprobar algo («arranca el emulador, empareja la báscula, pesa») y escribe el fichero por ti, sin preguntar.
+- **Por detección.** forge reconoce una web, un proyecto Android o Flutter y similares, y propone un borrador de superficie para que lo aceptes.
+- **Por experiencia.** `forge-verify` añade lo que aprende (un primer arranque lento, un ajuste que hay que activar) a la sección `Aprendido` de la superficie, así que la siguiente vez empieza sabiendo más.
+
+**Cuándo se ejecuta.** Solo en tareas Medium y Large, y solo cuando el diff toca los globs `affects` de una superficie (o el texto de la tarea pide verificar). Una superficie sin `affects` es siempre candidata y decide la sesión. Las tareas Trivial y Small se la saltan salvo que la pidas. Una superficie solo se ejecuta si la has permitido (ver Configuración).
+
+**El agente.** `forge-verify` (Sonnet; `forge-verify-heavy` en Opus con el perfil `quality`) arranca la superficie, prueba el flujo principal de la tarea y escribe `verify.json` y capturas en `.forge/work/<id>/`. Corre en paralelo con los revisores, y sus fallos cuentan en el veredicto como los de un revisor. Nunca edita ficheros del proyecto, nunca hace commit, push ni merge, y nunca instala dependencias del proyecto. `verify.limits` acota cuántas comprobaciones, capturas y minutos gasta.
+
+**Pruebas en el roadmap.** Con `evidence: upload` (el valor por defecto) las capturas se suben al roadmap y aparecen en el detalle de la tarea. Subirlas hace que el roadmap sea **interno de la organización**, así que ya no se puede compartir públicamente; forge te lo avisa una vez. Con `evidence: local` no se sube nada y el roadmap sigue pudiendo compartirse públicamente. En ambos casos las pruebas quedan en `.forge/work/`.
+
 ## Configuración
 
-`.forge/` en el proyecto contiene `config.yaml`, el registro, `status.json`, `work/<id-de-tarea>/` (briefs, diffs, informes, revisiones), `proposals/`, `run.json`, `swarm.json` y `usage/`. Git ignora todo lo que hay dentro salvo `config.yaml`.
+`.forge/` en el proyecto contiene `config.yaml`, `verify/` (las superficies), el registro, `local.yaml`, `status.json`, `work/<id-de-tarea>/` (briefs, diffs, informes, revisiones, pruebas de verificación), `proposals/`, `run.json`, `swarm.json` y `usage/`. Git ignora todo lo que hay dentro salvo `config.yaml` y `verify/*.md`.
 
 ```yaml
-profile: balanced          # balanced | economy | quality
-validators:
+profile: balanced              # balanced | economy | quality
+detect: true                   # por defecto true
+exclude: [build]               # validadores detectados que no quieres, por nombre
+validators:                    # manuales
   - name: unit
     cmd: npm test
-    kind: test
-    affects: ["src/**"]
+    kind: test                 # texto libre
+    affects: ["src/**", "test/**"]
+  - name: a11y
+    cmd: npm run a11y
+    kind: a11y
+    when: medium               # opcional: always | medium | final
+verify:
+  limits: { checks: 8, shots: 10, minutes: 10 }   # opcional; estos son los valores por defecto
+evidence: upload               # upload | local; por defecto upload
 validatorTimeoutSec: 600
 swarm:
-  parallel: 5              # 1 desactiva el enjambre; máximo 10
+  parallel: 5                  # 1 desactiva el enjambre; máximo 10
 ```
 
-**Validadores.** Sin una lista `validators`, forge detecta las herramientas del proyecto. Una lista sustituye a la detección, y `validators: []` significa ninguno.
+> **Cambio en 0.6.0:** una lista `validators` en `.forge/config.yaml` ya no desactiva la detección; también se usan los validadores detectados, y los tuyos ganan por nombre. Pon `detect: false` para el comportamiento anterior.
+
+**Validadores.** Con `detect: true` (el valor por defecto), forge detecta las herramientas del proyecto y mezcla tu lista `validators` con ellas; un validador manual sustituye a uno detectado con el mismo nombre, y `exclude` quita los detectados por nombre. Con `detect: false` solo se ejecuta la lista, y `validators: []` significa ninguno.
+
+- `kind` es texto libre (`test`, `lint`, `e2e`, `a11y`...). `when` dice cuándo se ejecuta un validador: `always`, `medium` (tareas Medium y Large y la revisión final) o `final` (solo la revisión final de una ejecución Large). Un `kind` que forge no conoce vale `medium` por defecto.
+- `verify.limits` admite como máximo `checks: 20`, `shots: 30` y `minutes: 60`.
+- `evidence` es `upload` o `local`, como se describe en [Verificación](#verificación).
+
+**Las superficies** viven en `.forge/verify/<nombre>.md`: una cabecera opcional (globs `affects` que hacen candidata a la superficie, y las `tools` que usa), instrucciones en texto libre y notas bajo `## Aprendido`.
+
+```markdown
+---
+affects: ["src/ble/**", "src/devices/**"]
+tools: [adb, chrome-mcp]
+---
+# Báscula Bluetooth
+
+Arranca el emulador Pixel_7 y la app con `npx cap run android`.
+La báscula se simula con `node tools/fake-scale.js` (anuncia "SCALE-01").
+Empareja desde Ajustes > Dispositivos y pesa: debe salir el peso en la pantalla principal.
+
+## Aprendido
+- 2026-10-14: el emparejamiento falla si el emulador no tiene Bluetooth activado: `adb shell svc bluetooth enable`.
+- 2026-10-15: la app tarda unos 40 s en arrancar la primera vez.
+```
+
+**Permisos.** `.forge/local.yaml` (fuera de git) guarda tu permiso o prohibición por superficie, y la primera vez que una superficie fuera a ejecutarse, la sesión te pregunta. El permiso queda ligado al contenido del fichero (un hash del fichero entero): si alguien edita la superficie, por ejemplo en un commit o una PR, vuelve a preguntar y te enseña qué cambió. forge vuelve a firmar sus propias notas de `Aprendido`, así que esas nunca provocan la pregunta, pero las líneas que añada cualquier otra persona sí.
+
+**Coincidencias.**
 
 - `affects` es una lista de globs sobre rutas relativas al repo con separadores `/`. `*` casa dentro de un segmento de la ruta y `**` atraviesa segmentos (`src/**`, `web/*.ts`); no se admite otra sintaxis de glob.
 - Un validador con `affects` solo se ejecuta en `validate --affected` si casa alguna de las rutas cambiadas. Sin `affects`, se ejecuta siempre.
@@ -201,6 +257,11 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 - `log --kind k [--task id] [--data json | --data-file f]` - añade una entrada al registro.
 - `last --task id` - el camino, el último evento de fase, el último veredicto y la última ronda de una tarea.
 - `agents` - los nombres de los agentes del perfil activo.
+- `surfaces [learn --name N --notes-file F | proposed --name N]` - lista las superficies y los borradores detectados; añade notas a la sección `Aprendido` de una superficie; marca un borrador como propuesto.
+- `tools [--surface N]` - comprueba cuáles de las herramientas que lista una superficie están en el PATH.
+- `local get [surfaces.<nombre>] | set surfaces.<nombre> allowed|denied|none` - lee o escribe los permisos de las superficies en `.forge/local.yaml`.
+- `verify-plan --task id --path p --base sha [--asked]` - decide si se verifica y qué superficies son candidatas.
+- `verify-cleanup --dir d` - detiene los procesos que dejó `forge-verify` (según `pids.json`).
 - `waypoint-cli` - imprime la ruta absoluta del `waypoint.cjs` de waypoint (el de mayor versión junto a este plugin); sale con 2 si no lo encuentra.
 
 </details>

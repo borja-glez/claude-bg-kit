@@ -7,8 +7,8 @@ Triage by size, the right model for each role, your own tools first, independent
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.5.4](https://img.shields.io/badge/version-0.5.4-fab387?style=flat-square)
-![depends on waypoint ^0.10.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.10.0-cba6f7?style=flat-square)
+![version 0.6.0](https://img.shields.io/badge/version-0.6.0-fab387?style=flat-square)
+![depends on waypoint ^0.11.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.11.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -25,6 +25,7 @@ Triage by size, the right model for each role, your own tools first, independent
 - [Swarm](#swarm)
 - [Infinite mode](#infinite-mode)
 - [Proposals](#proposals)
+- [Verification](#verification)
 - [Configuration](#configuration)
 - [CLI reference](#cli-reference)
 
@@ -45,7 +46,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depends on [waypoint](../waypoint/README.md) ^0.10.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
+forge depends on [waypoint](../waypoint/README.md) ^0.11.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
 
 ## Usage
 
@@ -55,6 +56,7 @@ forge depends on [waypoint](../waypoint/README.md) ^0.10.0, which is installed w
 | `/forge:run --parallel N <task>` | Same, with a swarm of up to N parallel sessions on the Large path. |
 | `/forge:infinite [--cycles N] [--hours H]` | Unattended improvement cycles within a budget. |
 | `/forge:decide <id> approve\|reject\|comment <text>` | Decide or comment on a proposal from any session. |
+| `/forge:verify [surface]` | Check the work by using it (web, emulator, CLI...), or create and edit verification surfaces. |
 | `/forge:stop` | Stop the infinite run or the swarm. |
 
 ```text
@@ -88,6 +90,7 @@ Triage reads the task text, the files it is likely to touch and the sensitive zo
 | `forge-review-correctness` | Opus | xhigh | correctness review |
 | `forge-review-security` | Opus | xhigh | security review |
 | `forge-review-perf` | Opus | xhigh | performance review |
+| `forge-verify` | Sonnet | default | uses the work through a surface and reports evidence (`forge-verify-heavy`, Opus, on the `quality` profile) |
 | `forge-planner` | Opus | xhigh | Large path: turns an approved design into a waypoint plan |
 | `forge-scout` | Opus | medium | infinite mode: evidence-backed improvement proposals |
 
@@ -163,23 +166,76 @@ Only `proposed` and `discussing` proposals can be decided, and only by you (on t
 
 While forge works a waypoint task, it also writes a small `forge` block (path, phase, agent, validators, verdict, round) to the task's `state/T` document, which the roadmap and lens show.
 
+## Verification
+
+Tests and reviewers read the code; verification **uses** the result. A **surface** is something in the project that can be checked by using it: a web page, an app in an emulator, a simulated device, a CLI, a desktop app. A surface has no type: it is a Markdown file in `.forge/verify/<name>.md` that says in free text how to start it and how to try it.
+
+**Surfaces appear in three ways:**
+
+- **By chat.** Tell the session how to check something ("start the emulator, pair the scale, weigh") and it writes the file for you, without asking.
+- **By detection.** forge spots a web app, an Android or Flutter project and the like, and proposes a draft surface for you to accept.
+- **By experience.** `forge-verify` appends what it learned (a slow first start, a flag that must be on) to the surface's `Learned` section, so the next run starts smarter.
+
+**When it runs.** Only on Medium and Large tasks, and only when the diff touches a surface's `affects` globs (or the task text asks for verification). A surface without `affects` is always a candidate and the session decides. Trivial and Small tasks skip it unless you ask. A surface runs only if you have allowed it (see Configuration).
+
+**The agent.** `forge-verify` (Sonnet; `forge-verify-heavy` on Opus with the `quality` profile) starts the surface, tries the task's main flow and writes `verify.json` plus screenshots under `.forge/work/<id>/`. It runs in parallel with the reviewers, and its failures count in the verdict like a reviewer's. It never edits project files, never commits, pushes or merges, and never installs project dependencies. `verify.limits` caps how many checks, screenshots and minutes it spends.
+
+**Evidence on the roadmap.** With `evidence: upload` (the default) the screenshots are uploaded to the roadmap and appear in the task detail. Uploading makes the roadmap **organization-internal**, so it can no longer be shared publicly; forge tells you once. With `evidence: local` nothing is uploaded and the roadmap stays publicly shareable. Evidence stays under `.forge/work/` either way.
+
 ## Configuration
 
-`.forge/` in the project holds `config.yaml`, the ledger, `status.json`, `work/<task-id>/` (briefs, diffs, reports, reviews), `proposals/`, `run.json`, `swarm.json` and `usage/`. Git ignores everything in it except `config.yaml`.
+`.forge/` in the project holds `config.yaml`, `verify/` (the surfaces), the ledger, `local.yaml`, `status.json`, `work/<task-id>/` (briefs, diffs, reports, reviews, verification evidence), `proposals/`, `run.json`, `swarm.json` and `usage/`. Git ignores everything in it except `config.yaml` and `verify/*.md`.
 
 ```yaml
-profile: balanced          # balanced | economy | quality
-validators:
+profile: balanced              # balanced | economy | quality
+detect: true                   # default true
+exclude: [build]               # detected validators you do not want, by name
+validators:                    # manual
   - name: unit
     cmd: npm test
-    kind: test
-    affects: ["src/**"]
+    kind: test                 # free text
+    affects: ["src/**", "test/**"]
+  - name: a11y
+    cmd: npm run a11y
+    kind: a11y
+    when: medium               # optional: always | medium | final
+verify:
+  limits: { checks: 8, shots: 10, minutes: 10 }   # optional; these are the defaults
+evidence: upload               # upload | local; default upload
 validatorTimeoutSec: 600
 swarm:
-  parallel: 5              # 1 turns the swarm off; max 10
+  parallel: 5                  # 1 turns the swarm off; max 10
 ```
 
-**Validators.** Without a `validators` list, forge detects the project's tools. A listed set replaces detection, and `validators: []` means none.
+> **Changed in 0.6.0:** a `validators` list in `.forge/config.yaml` no longer turns detection off; detected validators are used too, and yours win by name. Set `detect: false` for the previous behaviour.
+
+**Validators.** With `detect: true` (the default), forge detects the project's tools and merges your `validators` list into them; a manual validator replaces a detected one with the same name, and `exclude` drops detected ones by name. With `detect: false` only the listed set runs, and `validators: []` means none.
+
+- `kind` is free text (`test`, `lint`, `e2e`, `a11y`...). `when` says when a validator runs: `always`, `medium` (Medium and Large tasks and the final review) or `final` (only the final review of a Large run). A `kind` forge does not know defaults to `medium`.
+- `verify.limits` accepts at most `checks: 20`, `shots: 30` and `minutes: 60`.
+- `evidence` is `upload` or `local`, as described in [Verification](#verification).
+
+**Surfaces** live in `.forge/verify/<name>.md`: an optional header (`affects` globs that make the surface a candidate, `tools` it uses), free-text instructions, and notes under `## Learned`.
+
+```markdown
+---
+affects: ["src/ble/**", "src/devices/**"]
+tools: [adb, chrome-mcp]
+---
+# Bluetooth scale
+
+Start the Pixel_7 emulator and the app with `npx cap run android`.
+The scale is simulated with `node tools/fake-scale.js` (it advertises "SCALE-01").
+Pair from Settings > Devices and weigh: the weight must show on the main screen.
+
+## Learned
+- 2026-10-14: pairing fails if the emulator has Bluetooth off: `adb shell svc bluetooth enable`.
+- 2026-10-15: the app takes about 40 s to start the first time.
+```
+
+**Permissions.** `.forge/local.yaml` (not in git) holds your allow or deny per surface, and the first time a surface would run, the session asks. The permission is tied to the file's content (a hash of the whole file): if anyone edits the surface, for example in a commit or a PR, it asks again and shows what changed. forge re-blesses its own `Learned` notes, so those never trigger the question, but lines added by anyone else do.
+
+**Matching.**
 
 - `affects` is a list of globs over repo-relative paths with `/` separators. `*` matches within one path segment and `**` matches across segments (`src/**`, `web/*.ts`); no other glob syntax is supported.
 - A validator with `affects` runs on `validate --affected` only when one of the changed paths matches. Without `affects`, it always runs.
@@ -201,6 +257,11 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 - `log --kind k [--task id] [--data json | --data-file f]` - append to the ledger.
 - `last --task id` - the path, last phase event, last verdict and last round of a task.
 - `agents` - agent names for the active profile.
+- `surfaces [learn --name N --notes-file F | proposed --name N]` - list the surfaces and detected drafts; append notes to a surface's `Learned` section; mark a draft as proposed.
+- `tools [--surface N]` - check which of the tools a surface lists are on the PATH.
+- `local get [surfaces.<name>] | set surfaces.<name> allowed|denied|none` - read or write surface permissions in `.forge/local.yaml`.
+- `verify-plan --task id --path p --base sha [--asked]` - decide whether verification runs and which surfaces are candidates.
+- `verify-cleanup --dir d` - stop the processes `forge-verify` left running (from `pids.json`).
 - `waypoint-cli` - print the absolute path of waypoint's `waypoint.cjs` (found next to this plugin, highest version); exits with 2 when it is not found.
 
 </details>
