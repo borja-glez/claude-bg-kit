@@ -11771,6 +11771,7 @@ function overlappingZones(a, b) {
 // src/lib/coordination.ts
 var IDLE_MINUTES = 15;
 var LEASE_CAP_MINUTES = 90;
+var SILENT_MINUTES = 5;
 var ACTIVE = ["claimed", "in_progress"];
 function zonesOf(task, state) {
   const touched = Array.isArray(state?.zonesTouched) ? state.zonesTouched : [];
@@ -11808,6 +11809,16 @@ function pickTask(plan, states, opts) {
   return first ? result(first, conflicts(first.id)) : { task: null, resumed: false, unblock: false, conflicts: [] };
 }
 function isIdle(s, now, minutes = IDLE_MINUTES) {
+  if (s && s.status !== "idle" && typeof s.leaseUntil === "string") return liveness(now, s.leaseUntil) === "stopped";
+  return legacyIdle(s, now, minutes);
+}
+function liveness(now, leaseUntil) {
+  const until = typeof leaseUntil === "string" ? Date.parse(leaseUntil) : NaN;
+  if (!Number.isFinite(until)) return "stopped";
+  if (now < until) return "alive";
+  return now - until < SILENT_MINUTES * 6e4 ? "silent" : "stopped";
+}
+function legacyIdle(s, now, minutes = IDLE_MINUTES) {
   if (!s || s.status === "idle") return true;
   const hb = Date.parse(s.heartbeatAt);
   if (!Number.isFinite(hb)) return true;

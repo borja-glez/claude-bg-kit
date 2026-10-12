@@ -107,17 +107,17 @@ var require_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    function visit_(key, node, visitor, path13) {
-      const ctrl = callVisitor(key, node, visitor, path13);
+    function visit_(key, node, visitor, path14) {
+      const ctrl = callVisitor(key, node, visitor, path14);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path13, ctrl);
-        return visit_(key, ctrl, visitor, path13);
+        replaceNode(key, path14, ctrl);
+        return visit_(key, ctrl, visitor, path14);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path13 = Object.freeze(path13.concat(node));
+          path14 = Object.freeze(path14.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = visit_(i, node.items[i], visitor, path13);
+            const ci = visit_(i, node.items[i], visitor, path14);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -128,13 +128,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path13 = Object.freeze(path13.concat(node));
-          const ck = visit_("key", node.key, visitor, path13);
+          path14 = Object.freeze(path14.concat(node));
+          const ck = visit_("key", node.key, visitor, path14);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = visit_("value", node.value, visitor, path13);
+          const cv = visit_("value", node.value, visitor, path14);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -155,17 +155,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node, visitor, path13) {
-      const ctrl = await callVisitor(key, node, visitor, path13);
+    async function visitAsync_(key, node, visitor, path14) {
+      const ctrl = await callVisitor(key, node, visitor, path14);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path13, ctrl);
-        return visitAsync_(key, ctrl, visitor, path13);
+        replaceNode(key, path14, ctrl);
+        return visitAsync_(key, ctrl, visitor, path14);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path13 = Object.freeze(path13.concat(node));
+          path14 = Object.freeze(path14.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = await visitAsync_(i, node.items[i], visitor, path13);
+            const ci = await visitAsync_(i, node.items[i], visitor, path14);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -176,13 +176,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path13 = Object.freeze(path13.concat(node));
-          const ck = await visitAsync_("key", node.key, visitor, path13);
+          path14 = Object.freeze(path14.concat(node));
+          const ck = await visitAsync_("key", node.key, visitor, path14);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = await visitAsync_("value", node.value, visitor, path13);
+          const cv = await visitAsync_("value", node.value, visitor, path14);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -209,23 +209,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node, visitor, path13) {
+    function callVisitor(key, node, visitor, path14) {
       if (typeof visitor === "function")
-        return visitor(key, node, path13);
+        return visitor(key, node, path14);
       if (identity.isMap(node))
-        return visitor.Map?.(key, node, path13);
+        return visitor.Map?.(key, node, path14);
       if (identity.isSeq(node))
-        return visitor.Seq?.(key, node, path13);
+        return visitor.Seq?.(key, node, path14);
       if (identity.isPair(node))
-        return visitor.Pair?.(key, node, path13);
+        return visitor.Pair?.(key, node, path14);
       if (identity.isScalar(node))
-        return visitor.Scalar?.(key, node, path13);
+        return visitor.Scalar?.(key, node, path14);
       if (identity.isAlias(node))
-        return visitor.Alias?.(key, node, path13);
+        return visitor.Alias?.(key, node, path14);
       return void 0;
     }
-    function replaceNode(key, path13, node) {
-      const parent = path13[path13.length - 1];
+    function replaceNode(key, path14, node) {
+      const parent = path14[path14.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node;
       } else if (identity.isPair(parent)) {
@@ -837,10 +837,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path13, value) {
+    function collectionFromPath(schema, path14, value) {
       let v = value;
-      for (let i = path13.length - 1; i >= 0; --i) {
-        const k = path13[i];
+      for (let i = path14.length - 1; i >= 0; --i) {
+        const k = path14[i];
         if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
           const a = [];
           a[k] = v;
@@ -859,7 +859,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path13) => path13 == null || typeof path13 === "object" && !!path13[Symbol.iterator]().next().done;
+    var isEmptyPath = (path14) => path14 == null || typeof path14 === "object" && !!path14[Symbol.iterator]().next().done;
     var Collection = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -889,11 +889,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path13, value) {
-        if (isEmptyPath(path13))
+      addIn(path14, value) {
+        if (isEmptyPath(path14))
           this.add(value);
         else {
-          const [key, ...rest] = path13;
+          const [key, ...rest] = path14;
           const node = this.get(key, true);
           if (identity.isCollection(node))
             node.addIn(rest, value);
@@ -907,8 +907,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path13) {
-        const [key, ...rest] = path13;
+      deleteIn(path14) {
+        const [key, ...rest] = path14;
         if (rest.length === 0)
           return this.delete(key);
         const node = this.get(key, true);
@@ -922,8 +922,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path13, keepScalar) {
-        const [key, ...rest] = path13;
+      getIn(path14, keepScalar) {
+        const [key, ...rest] = path14;
         const node = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -941,8 +941,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path13) {
-        const [key, ...rest] = path13;
+      hasIn(path14) {
+        const [key, ...rest] = path14;
         if (rest.length === 0)
           return this.has(key);
         const node = this.get(key, true);
@@ -952,8 +952,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path13, value) {
-        const [key, ...rest] = path13;
+      setIn(path14, value) {
+        const [key, ...rest] = path14;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -977,13 +977,13 @@ var require_Collection = __commonJS({
 var require_stringifyComment = __commonJS({
   "node_modules/yaml/dist/stringify/stringifyComment.js"(exports2) {
     "use strict";
-    var stringifyComment = (str4) => str4.replace(/^(?!$)(?: $)?/gm, "#");
+    var stringifyComment = (str5) => str5.replace(/^(?!$)(?: $)?/gm, "#");
     function indentComment(comment, indent) {
       if (/^\n+$/.test(comment))
         return comment.substring(1);
       return indent ? comment.replace(/^(?! *$)/gm, indent) : comment;
     }
-    var lineComment = (str4, indent, comment) => str4.endsWith("\n") ? indentComment(comment, indent) : comment.includes("\n") ? "\n" + indentComment(comment, indent) : (str4.endsWith(" ") ? "" : " ") + comment;
+    var lineComment = (str5, indent, comment) => str5.endsWith("\n") ? indentComment(comment, indent) : comment.includes("\n") ? "\n" + indentComment(comment, indent) : (str5.endsWith(" ") ? "" : " ") + comment;
     exports2.indentComment = indentComment;
     exports2.lineComment = lineComment;
     exports2.stringifyComment = stringifyComment;
@@ -1137,16 +1137,16 @@ var require_stringifyString = __commonJS({
       lineWidth: ctx.options.lineWidth,
       minContentWidth: ctx.options.minContentWidth
     });
-    var containsDocumentMarker = (str4) => /^(%|---|\.\.\.)/m.test(str4);
-    function lineLengthOverLimit(str4, lineWidth, indentLength) {
+    var containsDocumentMarker = (str5) => /^(%|---|\.\.\.)/m.test(str5);
+    function lineLengthOverLimit(str5, lineWidth, indentLength) {
       if (!lineWidth || lineWidth < 0)
         return false;
       const limit = lineWidth - indentLength;
-      const strLen = str4.length;
+      const strLen = str5.length;
       if (strLen <= limit)
         return false;
       for (let i = 0, start = 0; i < strLen; ++i) {
-        if (str4[i] === "\n") {
+        if (str5[i] === "\n") {
           if (i - start > limit)
             return true;
           start = i + 1;
@@ -1163,11 +1163,11 @@ var require_stringifyString = __commonJS({
       const { implicitKey } = ctx;
       const minMultiLineLength = ctx.options.doubleQuotedMinMultiLineLength;
       const indent = ctx.indent || (containsDocumentMarker(value) ? "  " : "");
-      let str4 = "";
+      let str5 = "";
       let start = 0;
       for (let i = 0, ch = json[i]; ch; ch = json[++i]) {
         if (ch === " " && json[i + 1] === "\\" && json[i + 2] === "n") {
-          str4 += json.slice(start, i) + "\\ ";
+          str5 += json.slice(start, i) + "\\ ";
           i += 1;
           start = i;
           ch = "\\";
@@ -1176,38 +1176,38 @@ var require_stringifyString = __commonJS({
           switch (json[i + 1]) {
             case "u":
               {
-                str4 += json.slice(start, i);
+                str5 += json.slice(start, i);
                 const code = json.substr(i + 2, 4);
                 switch (code) {
                   case "0000":
-                    str4 += "\\0";
+                    str5 += "\\0";
                     break;
                   case "0007":
-                    str4 += "\\a";
+                    str5 += "\\a";
                     break;
                   case "000b":
-                    str4 += "\\v";
+                    str5 += "\\v";
                     break;
                   case "001b":
-                    str4 += "\\e";
+                    str5 += "\\e";
                     break;
                   case "0085":
-                    str4 += "\\N";
+                    str5 += "\\N";
                     break;
                   case "00a0":
-                    str4 += "\\_";
+                    str5 += "\\_";
                     break;
                   case "2028":
-                    str4 += "\\L";
+                    str5 += "\\L";
                     break;
                   case "2029":
-                    str4 += "\\P";
+                    str5 += "\\P";
                     break;
                   default:
                     if (code.substr(0, 2) === "00")
-                      str4 += "\\x" + code.substr(2);
+                      str5 += "\\x" + code.substr(2);
                     else
-                      str4 += json.substr(i, 6);
+                      str5 += json.substr(i, 6);
                 }
                 i += 5;
                 start = i + 1;
@@ -1217,14 +1217,14 @@ var require_stringifyString = __commonJS({
               if (implicitKey || json[i + 2] === '"' || json.length < minMultiLineLength) {
                 i += 1;
               } else {
-                str4 += json.slice(start, i) + "\n\n";
+                str5 += json.slice(start, i) + "\n\n";
                 while (json[i + 2] === "\\" && json[i + 3] === "n" && json[i + 4] !== '"') {
-                  str4 += "\n";
+                  str5 += "\n";
                   i += 2;
                 }
-                str4 += indent;
+                str5 += indent;
                 if (json[i + 2] === " ")
-                  str4 += "\\";
+                  str5 += "\\";
                 i += 1;
                 start = i + 1;
               }
@@ -1233,8 +1233,8 @@ var require_stringifyString = __commonJS({
               i += 1;
           }
       }
-      str4 = start ? str4 + json.slice(start) : json;
-      return implicitKey ? str4 : foldFlowLines.foldFlowLines(str4, indent, foldFlowLines.FOLD_QUOTED, getFoldOptions(ctx, false));
+      str5 = start ? str5 + json.slice(start) : json;
+      return implicitKey ? str5 : foldFlowLines.foldFlowLines(str5, indent, foldFlowLines.FOLD_QUOTED, getFoldOptions(ctx, false));
     }
     function singleQuotedString(value, ctx) {
       if (ctx.options.singleQuote === false || ctx.implicitKey && value.includes("\n") || /[ \t]\n|\n[ \t]/.test(value))
@@ -1362,15 +1362,15 @@ ${indent}${start}${value}${end}`;
           return quotedString(value, ctx);
         }
       }
-      const str4 = value.replace(/\n+/g, `$&
+      const str5 = value.replace(/\n+/g, `$&
 ${indent}`);
       if (actualString) {
-        const test = (tag) => tag.default && tag.tag !== "tag:yaml.org,2002:str" && tag.test?.test(str4);
+        const test = (tag) => tag.default && tag.tag !== "tag:yaml.org,2002:str" && tag.test?.test(str5);
         const { compat, tags } = ctx.doc.schema;
         if (tags.some(test) || compat?.some(test))
           return quotedString(value, ctx);
       }
-      return implicitKey ? str4 : foldFlowLines.foldFlowLines(str4, indent, foldFlowLines.FOLD_FLOW, getFoldOptions(ctx, false));
+      return implicitKey ? str5 : foldFlowLines.foldFlowLines(str5, indent, foldFlowLines.FOLD_FLOW, getFoldOptions(ctx, false));
     }
     function stringifyString(item, ctx, onComment, onChompKeep) {
       const { implicitKey, inFlow } = ctx;
@@ -1522,11 +1522,11 @@ var require_stringify = __commonJS({
       const props = stringifyProps(node, tagObj, ctx);
       if (props.length > 0)
         ctx.indentAtStart = (ctx.indentAtStart ?? 0) + props.length + 1;
-      const str4 = typeof tagObj.stringify === "function" ? tagObj.stringify(node, ctx, onComment, onChompKeep) : identity.isScalar(node) ? stringifyString.stringifyString(node, ctx, onComment, onChompKeep) : node.toString(ctx, onComment, onChompKeep);
+      const str5 = typeof tagObj.stringify === "function" ? tagObj.stringify(node, ctx, onComment, onChompKeep) : identity.isScalar(node) ? stringifyString.stringifyString(node, ctx, onComment, onChompKeep) : node.toString(ctx, onComment, onChompKeep);
       if (!props)
-        return str4;
-      return identity.isScalar(node) || str4[0] === "{" || str4[0] === "[" ? `${props} ${str4}` : `${props}
-${ctx.indent}${str4}`;
+        return str5;
+      return identity.isScalar(node) || str5[0] === "{" || str5[0] === "[" ? `${props} ${str5}` : `${props}
+${ctx.indent}${str5}`;
     }
     exports2.createStringifyContext = createStringifyContext;
     exports2.stringify = stringify2;
@@ -1561,8 +1561,8 @@ var require_stringifyPair = __commonJS({
       });
       let keyCommentDone = false;
       let chompKeep = false;
-      let str4 = stringify2.stringify(key, ctx, () => keyCommentDone = true, () => chompKeep = true);
-      if (!explicitKey && !ctx.inFlow && str4.length > 1024) {
+      let str5 = stringify2.stringify(key, ctx, () => keyCommentDone = true, () => chompKeep = true);
+      if (!explicitKey && !ctx.inFlow && str5.length > 1024) {
         if (simpleKeys)
           throw new Error("With simple keys, single line scalar must not span more than 1024 characters");
         explicitKey = true;
@@ -1571,27 +1571,27 @@ var require_stringifyPair = __commonJS({
         if (allNullValues || value == null) {
           if (keyCommentDone && onComment)
             onComment();
-          return str4 === "" ? "?" : explicitKey ? `? ${str4}` : str4;
+          return str5 === "" ? "?" : explicitKey ? `? ${str5}` : str5;
         }
       } else if (allNullValues && !simpleKeys || value == null && explicitKey) {
-        str4 = `? ${str4}`;
+        str5 = `? ${str5}`;
         if (keyComment && !keyCommentDone) {
-          str4 += stringifyComment.lineComment(str4, ctx.indent, commentString(keyComment));
+          str5 += stringifyComment.lineComment(str5, ctx.indent, commentString(keyComment));
         } else if (chompKeep && onChompKeep)
           onChompKeep();
-        return str4;
+        return str5;
       }
       if (keyCommentDone)
         keyComment = null;
       if (explicitKey) {
         if (keyComment)
-          str4 += stringifyComment.lineComment(str4, ctx.indent, commentString(keyComment));
-        str4 = `? ${str4}
+          str5 += stringifyComment.lineComment(str5, ctx.indent, commentString(keyComment));
+        str5 = `? ${str5}
 ${indent}:`;
       } else {
-        str4 = `${str4}:`;
+        str5 = `${str5}:`;
         if (keyComment)
-          str4 += stringifyComment.lineComment(str4, ctx.indent, commentString(keyComment));
+          str5 += stringifyComment.lineComment(str5, ctx.indent, commentString(keyComment));
       }
       let vsb, vcb, valueComment;
       if (identity.isNode(value)) {
@@ -1607,7 +1607,7 @@ ${indent}:`;
       }
       ctx.implicitKey = false;
       if (!explicitKey && !keyComment && identity.isScalar(value))
-        ctx.indentAtStart = str4.length + 1;
+        ctx.indentAtStart = str5.length + 1;
       chompKeep = false;
       if (!indentSeq && indentStep.length >= 2 && !ctx.inFlow && !explicitKey && identity.isSeq(value) && !value.flow && !value.tag && !value.anchor) {
         ctx.indent = ctx.indent.substring(2);
@@ -1651,16 +1651,16 @@ ${ctx.indent}`;
       } else if (valueStr === "" || valueStr[0] === "\n") {
         ws = "";
       }
-      str4 += ws + valueStr;
+      str5 += ws + valueStr;
       if (ctx.inFlow) {
         if (valueCommentDone && onComment)
           onComment();
       } else if (valueComment && !valueCommentDone) {
-        str4 += stringifyComment.lineComment(str4, ctx.indent, commentString(valueComment));
+        str5 += stringifyComment.lineComment(str5, ctx.indent, commentString(valueComment));
       } else if (chompKeep && onChompKeep) {
         onChompKeep();
       }
-      return str4;
+      return str5;
     }
     exports2.stringifyPair = stringifyPair;
   }
@@ -1887,31 +1887,31 @@ var require_stringifyCollection = __commonJS({
           }
         }
         chompKeep = false;
-        let str5 = stringify2.stringify(item, itemCtx, () => comment2 = null, () => chompKeep = true);
+        let str6 = stringify2.stringify(item, itemCtx, () => comment2 = null, () => chompKeep = true);
         if (comment2)
-          str5 += stringifyComment.lineComment(str5, itemIndent, commentString(comment2));
+          str6 += stringifyComment.lineComment(str6, itemIndent, commentString(comment2));
         if (chompKeep && comment2)
           chompKeep = false;
-        lines.push(blockItemPrefix + str5);
+        lines.push(blockItemPrefix + str6);
       }
-      let str4;
+      let str5;
       if (lines.length === 0) {
-        str4 = flowChars.start + flowChars.end;
+        str5 = flowChars.start + flowChars.end;
       } else {
-        str4 = lines[0];
+        str5 = lines[0];
         for (let i = 1; i < lines.length; ++i) {
           const line = lines[i];
-          str4 += line ? `
+          str5 += line ? `
 ${indent}${line}` : "\n";
         }
       }
       if (comment) {
-        str4 += "\n" + stringifyComment.indentComment(commentString(comment), indent);
+        str5 += "\n" + stringifyComment.indentComment(commentString(comment), indent);
         if (onComment)
           onComment();
       } else if (chompKeep && onChompKeep)
         onChompKeep();
-      return str4;
+      return str5;
     }
     function stringifyFlowCollection({ items }, ctx, { flowChars, itemIndent }) {
       const { indent, indentStep, flowCollectionPadding: fcPadding, options: { commentString } } = ctx;
@@ -1954,21 +1954,21 @@ ${indent}${line}` : "\n";
         }
         if (comment)
           reqNewline = true;
-        let str4 = stringify2.stringify(item, itemCtx, () => comment = null);
-        reqNewline || (reqNewline = lines.length > linesAtValue || str4.includes("\n"));
+        let str5 = stringify2.stringify(item, itemCtx, () => comment = null);
+        reqNewline || (reqNewline = lines.length > linesAtValue || str5.includes("\n"));
         if (i < items.length - 1) {
-          str4 += ",";
+          str5 += ",";
         } else if (ctx.options.trailingComma) {
           if (ctx.options.lineWidth > 0) {
-            reqNewline || (reqNewline = lines.reduce((sum, line) => sum + line.length + 2, 2) + (str4.length + 2) > ctx.options.lineWidth);
+            reqNewline || (reqNewline = lines.reduce((sum, line) => sum + line.length + 2, 2) + (str5.length + 2) > ctx.options.lineWidth);
           }
           if (reqNewline) {
-            str4 += ",";
+            str5 += ",";
           }
         }
         if (comment)
-          str4 += stringifyComment.lineComment(str4, itemIndent, commentString(comment));
-        lines.push(str4);
+          str5 += stringifyComment.lineComment(str5, itemIndent, commentString(comment));
+        lines.push(str5);
         linesAtValue = lines.length;
       }
       const { start, end } = flowChars;
@@ -1980,11 +1980,11 @@ ${indent}${line}` : "\n";
           reqNewline = ctx.options.lineWidth > 0 && len > ctx.options.lineWidth;
         }
         if (reqNewline) {
-          let str4 = start;
+          let str5 = start;
           for (const line of lines)
-            str4 += line ? `
+            str5 += line ? `
 ${indentStep}${indent}${line}` : "\n";
-          return `${str4}
+          return `${str5}
 ${indent}${end}`;
         } else {
           return `${start}${fcPadding}${lines.join(" ")}${fcPadding}${end}`;
@@ -2316,7 +2316,7 @@ var require_string = __commonJS({
       identify: (value) => typeof value === "string",
       default: true,
       tag: "tag:yaml.org,2002:str",
-      resolve: (str4) => str4,
+      resolve: (str5) => str5,
       stringify(item, ctx, onComment, onChompKeep) {
         ctx = Object.assign({ actualString: true }, ctx);
         return stringifyString.stringifyString(item, ctx, onComment, onChompKeep);
@@ -2354,7 +2354,7 @@ var require_bool = __commonJS({
       default: true,
       tag: "tag:yaml.org,2002:bool",
       test: /^(?:[Tt]rue|TRUE|[Ff]alse|FALSE)$/,
-      resolve: (str4) => new Scalar.Scalar(str4[0] === "t" || str4[0] === "T"),
+      resolve: (str5) => new Scalar.Scalar(str5[0] === "t" || str5[0] === "T"),
       stringify({ source, value }, ctx) {
         if (source && boolTag.test.test(source)) {
           const sv = source[0] === "t" || source[0] === "T";
@@ -2406,7 +2406,7 @@ var require_float = __commonJS({
       default: true,
       tag: "tag:yaml.org,2002:float",
       test: /^(?:[-+]?\.(?:inf|Inf|INF)|\.nan|\.NaN|\.NAN)$/,
-      resolve: (str4) => str4.slice(-3).toLowerCase() === "nan" ? NaN : str4[0] === "-" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY,
+      resolve: (str5) => str5.slice(-3).toLowerCase() === "nan" ? NaN : str5[0] === "-" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY,
       stringify: stringifyNumber.stringifyNumber
     };
     var floatExp = {
@@ -2415,7 +2415,7 @@ var require_float = __commonJS({
       tag: "tag:yaml.org,2002:float",
       format: "EXP",
       test: /^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)[eE][-+]?[0-9]+$/,
-      resolve: (str4) => parseFloat(str4),
+      resolve: (str5) => parseFloat(str5),
       stringify(node) {
         const num3 = Number(node.value);
         return isFinite(num3) ? num3.toExponential() : stringifyNumber.stringifyNumber(node);
@@ -2426,11 +2426,11 @@ var require_float = __commonJS({
       default: true,
       tag: "tag:yaml.org,2002:float",
       test: /^[-+]?(?:\.[0-9]+|[0-9]+\.[0-9]*)$/,
-      resolve(str4) {
-        const node = new Scalar.Scalar(parseFloat(str4));
-        const dot = str4.indexOf(".");
-        if (dot !== -1 && str4[str4.length - 1] === "0")
-          node.minFractionDigits = str4.length - dot - 1;
+      resolve(str5) {
+        const node = new Scalar.Scalar(parseFloat(str5));
+        const dot = str5.indexOf(".");
+        if (dot !== -1 && str5[str5.length - 1] === "0")
+          node.minFractionDigits = str5.length - dot - 1;
         return node;
       },
       stringify: stringifyNumber.stringifyNumber
@@ -2447,7 +2447,7 @@ var require_int = __commonJS({
     "use strict";
     var stringifyNumber = require_stringifyNumber();
     var intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
-    var intResolve = (str4, offset, radix, { intAsBigInt }) => intAsBigInt ? BigInt(str4) : parseInt(str4.substring(offset), radix);
+    var intResolve = (str5, offset, radix, { intAsBigInt }) => intAsBigInt ? BigInt(str5) : parseInt(str5.substring(offset), radix);
     function intStringify(node, radix, prefix) {
       const { value } = node;
       if (intIdentify(value) && value >= 0)
@@ -2460,15 +2460,15 @@ var require_int = __commonJS({
       tag: "tag:yaml.org,2002:int",
       format: "OCT",
       test: /^0o[0-7]+$/,
-      resolve: (str4, _onError, opt) => intResolve(str4, 2, 8, opt),
+      resolve: (str5, _onError, opt) => intResolve(str5, 2, 8, opt),
       stringify: (node) => intStringify(node, 8, "0o")
     };
-    var int = {
+    var int2 = {
       identify: intIdentify,
       default: true,
       tag: "tag:yaml.org,2002:int",
       test: /^[-+]?[0-9]+$/,
-      resolve: (str4, _onError, opt) => intResolve(str4, 0, 10, opt),
+      resolve: (str5, _onError, opt) => intResolve(str5, 0, 10, opt),
       stringify: stringifyNumber.stringifyNumber
     };
     var intHex = {
@@ -2477,10 +2477,10 @@ var require_int = __commonJS({
       tag: "tag:yaml.org,2002:int",
       format: "HEX",
       test: /^0x[0-9a-fA-F]+$/,
-      resolve: (str4, _onError, opt) => intResolve(str4, 2, 16, opt),
+      resolve: (str5, _onError, opt) => intResolve(str5, 2, 16, opt),
       stringify: (node) => intStringify(node, 16, "0x")
     };
-    exports2.int = int;
+    exports2.int = int2;
     exports2.intHex = intHex;
     exports2.intOct = intOct;
   }
@@ -2496,16 +2496,16 @@ var require_schema = __commonJS({
     var string = require_string();
     var bool = require_bool();
     var float = require_float();
-    var int = require_int();
+    var int2 = require_int();
     var schema = [
       map.map,
       seq.seq,
       string.string,
       _null.nullTag,
       bool.boolTag,
-      int.intOct,
-      int.int,
-      int.intHex,
+      int2.intOct,
+      int2.int,
+      int2.intHex,
       float.floatNaN,
       float.floatExp,
       float.float
@@ -2530,7 +2530,7 @@ var require_schema2 = __commonJS({
         identify: (value) => typeof value === "string",
         default: true,
         tag: "tag:yaml.org,2002:str",
-        resolve: (str4) => str4,
+        resolve: (str5) => str5,
         stringify: stringifyJSON
       },
       {
@@ -2547,7 +2547,7 @@ var require_schema2 = __commonJS({
         default: true,
         tag: "tag:yaml.org,2002:bool",
         test: /^true$|^false$/,
-        resolve: (str4) => str4 === "true",
+        resolve: (str5) => str5 === "true",
         stringify: stringifyJSON
       },
       {
@@ -2555,7 +2555,7 @@ var require_schema2 = __commonJS({
         default: true,
         tag: "tag:yaml.org,2002:int",
         test: /^-?(?:0|[1-9][0-9]*)$/,
-        resolve: (str4, _onError, { intAsBigInt }) => intAsBigInt ? BigInt(str4) : parseInt(str4, 10),
+        resolve: (str5, _onError, { intAsBigInt }) => intAsBigInt ? BigInt(str5) : parseInt(str5, 10),
         stringify: ({ value }) => intIdentify(value) ? value.toString() : JSON.stringify(value)
       },
       {
@@ -2563,7 +2563,7 @@ var require_schema2 = __commonJS({
         default: true,
         tag: "tag:yaml.org,2002:float",
         test: /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]*)?(?:[eE][-+]?[0-9]+)?$/,
-        resolve: (str4) => parseFloat(str4),
+        resolve: (str5) => parseFloat(str5),
         stringify: stringifyJSON
       }
     ];
@@ -2571,9 +2571,9 @@ var require_schema2 = __commonJS({
       default: true,
       tag: "",
       test: /^/,
-      resolve(str4, onError) {
-        onError(`Unresolved plain scalar ${JSON.stringify(str4)}`);
-        return str4;
+      resolve(str5, onError) {
+        onError(`Unresolved plain scalar ${JSON.stringify(str5)}`);
+        return str5;
       }
     };
     var schema = [map.map, seq.seq].concat(jsonScalars, jsonError);
@@ -2605,10 +2605,10 @@ var require_binary = __commonJS({
         if (typeof node_buffer.Buffer === "function") {
           return node_buffer.Buffer.from(src, "base64");
         } else if (typeof atob === "function") {
-          const str4 = atob(src.replace(/[\n\r]/g, ""));
-          const buffer = new Uint8Array(str4.length);
-          for (let i = 0; i < str4.length; ++i)
-            buffer[i] = str4.charCodeAt(i);
+          const str5 = atob(src.replace(/[\n\r]/g, ""));
+          const buffer = new Uint8Array(str5.length);
+          for (let i = 0; i < str5.length; ++i)
+            buffer[i] = str5.charCodeAt(i);
           return buffer;
         } else {
           onError("This environment does not support reading binary tags; either Buffer or atob is required");
@@ -2619,28 +2619,28 @@ var require_binary = __commonJS({
         if (!value)
           return "";
         const buf = value;
-        let str4;
+        let str5;
         if (typeof node_buffer.Buffer === "function") {
-          str4 = buf instanceof node_buffer.Buffer ? buf.toString("base64") : node_buffer.Buffer.from(buf.buffer).toString("base64");
+          str5 = buf instanceof node_buffer.Buffer ? buf.toString("base64") : node_buffer.Buffer.from(buf.buffer).toString("base64");
         } else if (typeof btoa === "function") {
           let s2 = "";
           for (let i = 0; i < buf.length; ++i)
             s2 += String.fromCharCode(buf[i]);
-          str4 = btoa(s2);
+          str5 = btoa(s2);
         } else {
           throw new Error("This environment does not support writing binary tags; either Buffer or btoa is required");
         }
         type ?? (type = Scalar.Scalar.BLOCK_LITERAL);
         if (type !== Scalar.Scalar.QUOTE_DOUBLE) {
           const lineWidth = Math.max(ctx.options.lineWidth - ctx.indent.length, ctx.options.minContentWidth);
-          const n = Math.ceil(str4.length / lineWidth);
+          const n = Math.ceil(str5.length / lineWidth);
           const lines = new Array(n);
           for (let i = 0, o = 0; i < n; ++i, o += lineWidth) {
-            lines[i] = str4.substr(o, lineWidth);
+            lines[i] = str5.substr(o, lineWidth);
           }
-          str4 = lines.join(type === Scalar.Scalar.BLOCK_LITERAL ? "\n" : " ");
+          str5 = lines.join(type === Scalar.Scalar.BLOCK_LITERAL ? "\n" : " ");
         }
-        return stringifyString.stringifyString({ comment, type, value: str4 }, ctx, onComment, onChompKeep);
+        return stringifyString.stringifyString({ comment, type, value: str5 }, ctx, onComment, onChompKeep);
       }
     };
     exports2.binary = binary;
@@ -2846,7 +2846,7 @@ var require_float2 = __commonJS({
       default: true,
       tag: "tag:yaml.org,2002:float",
       test: /^(?:[-+]?\.(?:inf|Inf|INF)|\.nan|\.NaN|\.NAN)$/,
-      resolve: (str4) => str4.slice(-3).toLowerCase() === "nan" ? NaN : str4[0] === "-" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY,
+      resolve: (str5) => str5.slice(-3).toLowerCase() === "nan" ? NaN : str5[0] === "-" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY,
       stringify: stringifyNumber.stringifyNumber
     };
     var floatExp = {
@@ -2855,7 +2855,7 @@ var require_float2 = __commonJS({
       tag: "tag:yaml.org,2002:float",
       format: "EXP",
       test: /^[-+]?(?:[0-9][0-9_]*)?(?:\.[0-9_]*)?[eE][-+]?[0-9]+$/,
-      resolve: (str4) => parseFloat(str4.replace(/_/g, "")),
+      resolve: (str5) => parseFloat(str5.replace(/_/g, "")),
       stringify(node) {
         const num3 = Number(node.value);
         return isFinite(num3) ? num3.toExponential() : stringifyNumber.stringifyNumber(node);
@@ -2866,11 +2866,11 @@ var require_float2 = __commonJS({
       default: true,
       tag: "tag:yaml.org,2002:float",
       test: /^[-+]?(?:[0-9][0-9_]*)?\.[0-9_]*$/,
-      resolve(str4) {
-        const node = new Scalar.Scalar(parseFloat(str4.replace(/_/g, "")));
-        const dot = str4.indexOf(".");
+      resolve(str5) {
+        const node = new Scalar.Scalar(parseFloat(str5.replace(/_/g, "")));
+        const dot = str5.indexOf(".");
         if (dot !== -1) {
-          const f = str4.substring(dot + 1).replace(/_/g, "");
+          const f = str5.substring(dot + 1).replace(/_/g, "");
           if (f[f.length - 1] === "0")
             node.minFractionDigits = f.length;
         }
@@ -2890,34 +2890,34 @@ var require_int2 = __commonJS({
     "use strict";
     var stringifyNumber = require_stringifyNumber();
     var intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
-    function intResolve(str4, offset, radix, { intAsBigInt }) {
-      const sign = str4[0];
+    function intResolve(str5, offset, radix, { intAsBigInt }) {
+      const sign = str5[0];
       if (sign === "-" || sign === "+")
         offset += 1;
-      str4 = str4.substring(offset).replace(/_/g, "");
+      str5 = str5.substring(offset).replace(/_/g, "");
       if (intAsBigInt) {
         switch (radix) {
           case 2:
-            str4 = `0b${str4}`;
+            str5 = `0b${str5}`;
             break;
           case 8:
-            str4 = `0o${str4}`;
+            str5 = `0o${str5}`;
             break;
           case 16:
-            str4 = `0x${str4}`;
+            str5 = `0x${str5}`;
             break;
         }
-        const n2 = BigInt(str4);
+        const n2 = BigInt(str5);
         return sign === "-" ? BigInt(-1) * n2 : n2;
       }
-      const n = parseInt(str4, radix);
+      const n = parseInt(str5, radix);
       return sign === "-" ? -1 * n : n;
     }
     function intStringify(node, radix, prefix) {
       const { value } = node;
       if (intIdentify(value)) {
-        const str4 = value.toString(radix);
-        return value < 0 ? "-" + prefix + str4.substr(1) : prefix + str4;
+        const str5 = value.toString(radix);
+        return value < 0 ? "-" + prefix + str5.substr(1) : prefix + str5;
       }
       return stringifyNumber.stringifyNumber(node);
     }
@@ -2927,7 +2927,7 @@ var require_int2 = __commonJS({
       tag: "tag:yaml.org,2002:int",
       format: "BIN",
       test: /^[-+]?0b[0-1_]+$/,
-      resolve: (str4, _onError, opt) => intResolve(str4, 2, 2, opt),
+      resolve: (str5, _onError, opt) => intResolve(str5, 2, 2, opt),
       stringify: (node) => intStringify(node, 2, "0b")
     };
     var intOct = {
@@ -2936,15 +2936,15 @@ var require_int2 = __commonJS({
       tag: "tag:yaml.org,2002:int",
       format: "OCT",
       test: /^[-+]?0[0-7_]+$/,
-      resolve: (str4, _onError, opt) => intResolve(str4, 1, 8, opt),
+      resolve: (str5, _onError, opt) => intResolve(str5, 1, 8, opt),
       stringify: (node) => intStringify(node, 8, "0")
     };
-    var int = {
+    var int2 = {
       identify: intIdentify,
       default: true,
       tag: "tag:yaml.org,2002:int",
       test: /^[-+]?[0-9][0-9_]*$/,
-      resolve: (str4, _onError, opt) => intResolve(str4, 0, 10, opt),
+      resolve: (str5, _onError, opt) => intResolve(str5, 0, 10, opt),
       stringify: stringifyNumber.stringifyNumber
     };
     var intHex = {
@@ -2953,10 +2953,10 @@ var require_int2 = __commonJS({
       tag: "tag:yaml.org,2002:int",
       format: "HEX",
       test: /^[-+]?0x[0-9a-fA-F_]+$/,
-      resolve: (str4, _onError, opt) => intResolve(str4, 2, 16, opt),
+      resolve: (str5, _onError, opt) => intResolve(str5, 2, 16, opt),
       stringify: (node) => intStringify(node, 16, "0x")
     };
-    exports2.int = int;
+    exports2.int = int2;
     exports2.intBin = intBin;
     exports2.intHex = intHex;
     exports2.intOct = intOct;
@@ -3057,9 +3057,9 @@ var require_timestamp = __commonJS({
   "node_modules/yaml/dist/schema/yaml-1.1/timestamp.js"(exports2) {
     "use strict";
     var stringifyNumber = require_stringifyNumber();
-    function parseSexagesimal(str4, asBigInt) {
-      const sign = str4[0];
-      const parts = sign === "-" || sign === "+" ? str4.substring(1) : str4;
+    function parseSexagesimal(str5, asBigInt) {
+      const sign = str5[0];
+      const parts = sign === "-" || sign === "+" ? str5.substring(1) : str5;
       const num3 = (n) => asBigInt ? BigInt(n) : Number(n);
       const res = parts.replace(/_/g, "").split(":").reduce((res2, p) => res2 * num3(60) + num3(p), num3(0));
       return sign === "-" ? num3(-1) * res : res;
@@ -3096,7 +3096,7 @@ var require_timestamp = __commonJS({
       tag: "tag:yaml.org,2002:int",
       format: "TIME",
       test: /^[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+$/,
-      resolve: (str4, _onError, { intAsBigInt }) => parseSexagesimal(str4, intAsBigInt),
+      resolve: (str5, _onError, { intAsBigInt }) => parseSexagesimal(str5, intAsBigInt),
       stringify: stringifySexagesimal
     };
     var floatTime = {
@@ -3105,7 +3105,7 @@ var require_timestamp = __commonJS({
       tag: "tag:yaml.org,2002:float",
       format: "TIME",
       test: /^[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*$/,
-      resolve: (str4) => parseSexagesimal(str4, false),
+      resolve: (str5) => parseSexagesimal(str5, false),
       stringify: stringifySexagesimal
     };
     var timestamp = {
@@ -3116,8 +3116,8 @@ var require_timestamp = __commonJS({
       // may be omitted altogether, resulting in a date format. In such a case, the time part is
       // assumed to be 00:00:00Z (start of day, UTC).
       test: RegExp("^([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})(?:(?:t|T|[ \\t]+)([0-9]{1,2}):([0-9]{1,2}):([0-9]{1,2}(\\.[0-9]+)?)(?:[ \\t]*(Z|[-+][012]?[0-9](?::[0-9]{2})?))?)?$"),
-      resolve(str4) {
-        const match = str4.match(timestamp.test);
+      resolve(str5) {
+        const match = str5.match(timestamp.test);
         if (!match)
           throw new Error("!!timestamp expects a date, starting with yyyy-mm-dd");
         const [, year, month, day, hour, minute, second] = match.map(Number);
@@ -3151,7 +3151,7 @@ var require_schema3 = __commonJS({
     var binary = require_binary();
     var bool = require_bool2();
     var float = require_float2();
-    var int = require_int2();
+    var int2 = require_int2();
     var merge = require_merge();
     var omap = require_omap();
     var pairs = require_pairs();
@@ -3164,10 +3164,10 @@ var require_schema3 = __commonJS({
       _null.nullTag,
       bool.trueTag,
       bool.falseTag,
-      int.intBin,
-      int.intOct,
-      int.int,
-      int.intHex,
+      int2.intBin,
+      int2.intOct,
+      int2.int,
+      int2.intHex,
       float.floatNaN,
       float.floatExp,
       float.float,
@@ -3194,7 +3194,7 @@ var require_tags = __commonJS({
     var string = require_string();
     var bool = require_bool();
     var float = require_float();
-    var int = require_int();
+    var int2 = require_int();
     var schema = require_schema();
     var schema$1 = require_schema2();
     var binary = require_binary();
@@ -3218,9 +3218,9 @@ var require_tags = __commonJS({
       floatExp: float.floatExp,
       floatNaN: float.floatNaN,
       floatTime: timestamp.floatTime,
-      int: int.int,
-      intHex: int.intHex,
-      intOct: int.intOct,
+      int: int2.int,
+      intHex: int2.intHex,
+      intOct: int2.intOct,
       intTime: timestamp.intTime,
       map: map.map,
       merge: merge.merge,
@@ -3468,9 +3468,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path13, value) {
+      addIn(path14, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path13, value);
+          this.contents.addIn(path14, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -3545,14 +3545,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path13) {
-        if (Collection.isEmptyPath(path13)) {
+      deleteIn(path14) {
+        if (Collection.isEmptyPath(path14)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path13) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path14) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -3567,10 +3567,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path13, keepScalar) {
-        if (Collection.isEmptyPath(path13))
+      getIn(path14, keepScalar) {
+        if (Collection.isEmptyPath(path14))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path13, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path14, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -3581,10 +3581,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path13) {
-        if (Collection.isEmptyPath(path13))
+      hasIn(path14) {
+        if (Collection.isEmptyPath(path14))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path13) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path14) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -3601,13 +3601,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path13, value) {
-        if (Collection.isEmptyPath(path13)) {
+      setIn(path14, value) {
+        if (Collection.isEmptyPath(path14)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, Array.from(path13), value);
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path14), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path13, value);
+          this.contents.setIn(path14, value);
         }
       }
       /**
@@ -5568,9 +5568,9 @@ var require_cst_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    visit.itemAtPath = (cst, path13) => {
+    visit.itemAtPath = (cst, path14) => {
       let item = cst;
-      for (const [field, index] of path13) {
+      for (const [field, index] of path14) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -5579,23 +5579,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit.parentCollection = (cst, path13) => {
-      const parent = visit.itemAtPath(cst, path13.slice(0, -1));
-      const field = path13[path13.length - 1][0];
+    visit.parentCollection = (cst, path14) => {
+      const parent = visit.itemAtPath(cst, path14.slice(0, -1));
+      const field = path14[path14.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path13, item, visitor) {
-      let ctrl = visitor(item, path13);
+    function _visit(path14, item, visitor) {
+      let ctrl = visitor(item, path14);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item[field];
         if (token && "items" in token) {
           for (let i = 0; i < token.items.length; ++i) {
-            const ci = _visit(Object.freeze(path13.concat([[field, i]])), token.items[i], visitor);
+            const ci = _visit(Object.freeze(path14.concat([[field, i]])), token.items[i], visitor);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -5606,10 +5606,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item, path13);
+            ctrl = ctrl(item, path14);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path13) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path14) : ctrl;
     }
     exports2.visit = visit;
   }
@@ -7361,13 +7361,13 @@ var require_dist = __commonJS({
 });
 
 // src/forge/cli/main.ts
-var import_node_fs12 = require("node:fs");
+var import_node_fs13 = require("node:fs");
 
 // src/forge/cli/run.ts
 var import_node_child_process2 = require("node:child_process");
-var import_node_fs11 = require("node:fs");
+var import_node_fs12 = require("node:fs");
 var import_node_os = require("node:os");
-var import_node_path12 = __toESM(require("node:path"), 1);
+var import_node_path13 = __toESM(require("node:path"), 1);
 
 // src/forge/ledger.ts
 var import_node_fs = require("node:fs");
@@ -7659,6 +7659,134 @@ function saveRun(root, run2) {
   }
 }
 
+// src/lib/deps.ts
+var statusOf = (states, id2) => states[id2]?.status ?? "free";
+function isUnlocked(task, states) {
+  return task.depends_on.every((d) => statusOf(states, d) === "done");
+}
+function isAvailable(task, states) {
+  const st = states[task.id];
+  const status = statusOf(states, task.id);
+  if (status === "free") return true;
+  if (status !== "blocked") return false;
+  const by = st?.blockedBy ?? [];
+  return by.length > 0 && !by.includes("external") && by.every((b) => statusOf(states, b) === "done");
+}
+var commitShas = (states, id2) => (Array.isArray(states[id2]?.commits) ? states[id2].commits : []).map((c) => c?.sha).filter((s2) => typeof s2 === "string" && !!s2);
+
+// src/lib/zones.ts
+var WILD = /[*?[{]/;
+var norm = (p) => p.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
+function staticPrefix(glob) {
+  const out = [];
+  for (const part of norm(glob).split("/")) {
+    if (WILD.test(part)) break;
+    out.push(part);
+  }
+  return out.join("/");
+}
+var under = (a, b) => b === "" || a === b || a.startsWith(`${b}/`);
+function globsOverlap(a, b) {
+  const wa = WILD.test(a);
+  const wb = WILD.test(b);
+  if (!wa && !wb) {
+    const na = norm(a);
+    const nb = norm(b);
+    return under(na, nb) || under(nb, na);
+  }
+  if (wa && wb) {
+    const pa = staticPrefix(a);
+    const pb = staticPrefix(b);
+    return under(pa, pb) || under(pb, pa);
+  }
+  const literal = norm(wa ? b : a);
+  const prefix = staticPrefix(wa ? a : b);
+  return under(literal, prefix) || under(prefix, literal);
+}
+function overlappingZones(a, b) {
+  const out = [];
+  for (const x of a) for (const y of b) if (globsOverlap(x, y)) out.push([x, y]);
+  return out;
+}
+
+// src/lib/coordination.ts
+var IDLE_MINUTES = 15;
+var LEASE_CAP_MINUTES = 90;
+var LEASE_MINUTES = 10;
+var SILENT_MINUTES = 5;
+function zonesOf(task, state) {
+  const touched = Array.isArray(state?.zonesTouched) ? state.zonesTouched : [];
+  return [...task.zones, ...touched].filter((z) => typeof z === "string");
+}
+function liveness(now, leaseUntil) {
+  const until = typeof leaseUntil === "string" ? Date.parse(leaseUntil) : NaN;
+  if (!Number.isFinite(until)) return "stopped";
+  if (now < until) return "alive";
+  return now - until < SILENT_MINUTES * 6e4 ? "silent" : "stopped";
+}
+function sessionLiveness(s2, now) {
+  if (!s2 || s2.status === "idle") return "stopped";
+  if (typeof s2.leaseUntil === "string") return liveness(now, s2.leaseUntil);
+  return legacyIdle(s2, now) ? "stopped" : "alive";
+}
+function legacyIdle(s2, now, minutes = IDLE_MINUTES) {
+  if (!s2 || s2.status === "idle") return true;
+  const hb = Date.parse(s2.heartbeatAt);
+  if (!Number.isFinite(hb)) return true;
+  const lease = typeof s2.busyUntil === "string" ? Date.parse(s2.busyUntil) : NaN;
+  if (Number.isFinite(lease) && lease - hb <= LEASE_CAP_MINUTES * 6e4 && now < lease) return false;
+  return now - hb > minutes * 6e4;
+}
+
+// src/forge/hook.ts
+var executionBlockReason = (running, parallel) => `forge execution is active (${running}/${parallel} running). Step it as /forge:run's Execution section describes; to end it run /forge:stop.`;
+var executionEndedReason = (reason) => `the forge execution ended (${reason}): report it as /forge:run's Execution section says (step 7), then stop.`;
+function decideExecutionStop(input, e, ctx) {
+  if (!e || !e.active) return { block: false, exec: e };
+  const session = typeof input.session_id === "string" && input.session_id ? input.session_id : null;
+  if (e.hookSession !== null && session !== e.hookSession) return { block: false, exec: e };
+  const hookSession = e.hookSession ?? session;
+  if (ctx.stopFile) {
+    const ended = { ...e, active: false, stopReason: "stopped", sleepUntil: null, hookSession };
+    return { block: true, reason: executionEndedReason("stopped"), ended: "stopped", exec: ended };
+  }
+  const now = ctx.now.getTime();
+  const until = e.sleepUntil ? Date.parse(e.sleepUntil) : NaN;
+  if (Number.isFinite(until) && until > now) return { block: false, exec: e };
+  const agentRunning = Object.values(e.tasks).some((t) => t.status === "running" && !!t.agent && now - Date.parse(t.updatedAt) < LEASE_MINUTES * 6e4);
+  if (agentRunning) return { block: false, exec: e };
+  if (input.stop_hook_active === true && e.lastStepAt === e.lastBlockStep) return { block: false, exec: e };
+  const running = Object.values(e.tasks).filter((t) => t.status === "running").length;
+  return { block: true, reason: executionBlockReason(running, e.parallel), exec: { ...e, hookSession, lastBlockStep: e.lastStepAt } };
+}
+var hhmm = (d) => d.toISOString().slice(11, 16);
+function blockReason(run2) {
+  const parts = [];
+  parts.push(run2.budget.cycles !== void 0 ? `cycle ${run2.cycle + 1} of ${run2.budget.cycles}` : `cycle ${run2.cycle + 1}`);
+  if (run2.budget.hours !== void 0) parts.push(`until ${hhmm(new Date(Date.parse(run2.startedAt) + run2.budget.hours * 36e5))} UTC`);
+  return `forge infinite mode is active (${parts.join(" / ")}). Run the next cycle as /forge:infinite describes; to end the run create .forge/stop or run /forge:stop.`;
+}
+var endedReason = (reason) => `the forge infinite run ended (${reason}): do step 4 of /forge:infinite (turn off meta/infinite and report), then stop.`;
+function decideStop(input, run2, ctx) {
+  if (!run2 || !run2.active) return { block: false, run: run2 };
+  const session = typeof input.session_id === "string" && input.session_id ? input.session_id : null;
+  if (run2.sessionId !== null && session !== run2.sessionId) return { block: false, run: run2 };
+  if (ctx.swarmSleeping) return { block: false, run: run2 };
+  const sessionId = run2.sessionId ?? session;
+  const reason = stopReason(run2, ctx);
+  if (reason) return { block: true, reason: endedReason(reason), ended: reason, run: { ...endRun(run2, reason), lastBlockEvents: ctx.ledgerEvents, sessionId } };
+  if (input.stop_hook_active === true && ctx.ledgerEvents === run2.lastBlockEvents) return { block: false, run: run2 };
+  return { block: true, reason: blockReason(run2), run: { ...run2, lastBlockEvents: ctx.ledgerEvents, sessionId, blocksSinceCycle: run2.blocksSinceCycle + 1 } };
+}
+
+// src/forge/execution.ts
+var import_node_fs4 = require("node:fs");
+var import_node_path4 = __toESM(require("node:path"), 1);
+
+// src/forge/swarm.ts
+var import_node_fs3 = require("node:fs");
+var import_node_path3 = __toESM(require("node:path"), 1);
+
 // src/lib/swarm-state.ts
 var FRONT_STATUSES = ["running", "queued", "waiting", "blocked", "ready", "integrated", "conflict", "launch-failed"];
 var STOP_REASONS = ["finished", "stalled", "stopped", "budget"];
@@ -7669,17 +7797,6 @@ var str2 = (x) => typeof x === "string" && x ? x : null;
 var iso = (x) => typeof x === "string" && !Number.isNaN(Date.parse(x)) ? x : null;
 var count = (x) => typeof x === "number" && Number.isInteger(x) && x >= 0 ? x : 0;
 var oneOf = (list, x) => list.includes(x) ? x : null;
-var emptyFront = () => ({
-  status: "queued",
-  session: null,
-  launchedAt: null,
-  currentTask: null,
-  heartbeatAt: null,
-  done: 0,
-  total: 0,
-  waitingFor: null,
-  detail: null
-});
 function normalizeFront(x) {
   if (!isObj2(x)) return null;
   const status = oneOf(FRONT_STATUSES, x.status);
@@ -7739,48 +7856,163 @@ function parseSwarm(text) {
     return null;
   }
 }
-var swarmLive = (s2) => Object.values(s2.fronts).filter((f) => f.status === "running").length;
 
-// src/forge/hook.ts
-var swarmBlockReason = (live, parallel) => `forge swarm is active (${live}/${parallel} slots). Run the next swarm tick as /forge:run's Swarm section describes; to end it run /forge:stop.`;
-var swarmEndedReason = (reason) => `the forge swarm ended (${reason}): report it as /forge:run's Swarm section says (step 7), then stop.`;
-function decideSwarmStop(input, swarm, ctx) {
-  if (!swarm || !swarm.active) return { block: false, swarm };
-  const session = typeof input.session_id === "string" && input.session_id ? input.session_id : null;
-  if (swarm.hookSession !== null && session !== swarm.hookSession) return { block: false, swarm };
-  const hookSession = swarm.hookSession ?? session;
-  if (ctx.stopFile) {
-    const ended = { ...swarm, active: false, stopReason: "stopped", sleepUntil: null, hookSession };
-    return { block: true, reason: swarmEndedReason("stopped"), ended: "stopped", swarm: ended };
+// src/forge/swarm.ts
+var swarmFile = (root) => import_node_path3.default.join(root, ".forge", "swarm.json");
+function readSwarm(root) {
+  const file = swarmFile(root);
+  if (!(0, import_node_fs3.existsSync)(file)) return null;
+  try {
+    return parseSwarm((0, import_node_fs3.readFileSync)(file, "utf8"));
+  } catch {
+    return null;
   }
-  const until = swarm.sleepUntil ? Date.parse(swarm.sleepUntil) : NaN;
-  if (Number.isFinite(until) && until > ctx.now.getTime()) return { block: false, swarm };
-  if (input.stop_hook_active === true && swarm.lastTickAt === swarm.lastBlockTick) return { block: false, swarm };
-  return { block: true, reason: swarmBlockReason(swarmLive(swarm), swarm.parallel), swarm: { ...swarm, hookSession, lastBlockTick: swarm.lastTickAt } };
 }
-var hhmm = (d) => d.toISOString().slice(11, 16);
-function blockReason(run2) {
-  const parts = [];
-  parts.push(run2.budget.cycles !== void 0 ? `cycle ${run2.cycle + 1} of ${run2.budget.cycles}` : `cycle ${run2.cycle + 1}`);
-  if (run2.budget.hours !== void 0) parts.push(`until ${hhmm(new Date(Date.parse(run2.startedAt) + run2.budget.hours * 36e5))} UTC`);
-  return `forge infinite mode is active (${parts.join(" / ")}). Run the next cycle as /forge:infinite describes; to end the run create .forge/stop or run /forge:stop.`;
+
+// src/lib/execution-state.ts
+var STAGES = ["brief", "implement", "validate", "verify", "review", "verdict", "integrate"];
+var TASK_STATUSES = ["running", "accepted", "integrated", "conflict", "blocked"];
+var STOPS = ["finished", "stalled", "stopped", "budget", "migrated"];
+var ID = /^[A-Za-z0-9_\-.~:@+]{1,80}$/;
+var MAX_TASKS = 500;
+var isObj3 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
+var str3 = (x) => typeof x === "string" && x ? x : null;
+var iso2 = (x) => typeof x === "string" && !Number.isNaN(Date.parse(x)) ? x : null;
+var int = (x, min, max, dflt) => typeof x === "number" && Number.isInteger(x) ? Math.min(max, Math.max(min, x)) : dflt;
+var oneOf2 = (list, x) => list.includes(x) ? x : null;
+function normalizeTask(x) {
+  if (!isObj3(x)) return null;
+  const status = oneOf2(TASK_STATUSES, x.status);
+  const stage = oneOf2(STAGES, x.stage);
+  const executor = oneOf2(["subagents", "sessions", "manual"], x.executor);
+  const worktree = typeof x.worktree === "string" ? x.worktree : null;
+  const branch = str3(x.branch);
+  const startedAt = iso2(x.startedAt);
+  if (!status || !stage || !executor || worktree === null || !branch || !startedAt) return null;
+  return {
+    status,
+    stage,
+    executor,
+    worktree,
+    branch,
+    startedAt,
+    round: int(x.round, 0, 99, 0),
+    attempts: int(x.attempts, 0, 99, 0),
+    agent: str3(x.agent),
+    updatedAt: iso2(x.updatedAt) ?? startedAt,
+    detail: typeof x.detail === "string" ? x.detail.slice(0, 500) : null
+  };
 }
-var endedReason = (reason) => `the forge infinite run ended (${reason}): do step 4 of /forge:infinite (turn off meta/infinite and report), then stop.`;
-function decideStop(input, run2, ctx) {
-  if (!run2 || !run2.active) return { block: false, run: run2 };
-  const session = typeof input.session_id === "string" && input.session_id ? input.session_id : null;
-  if (run2.sessionId !== null && session !== run2.sessionId) return { block: false, run: run2 };
-  if (ctx.swarmSleeping) return { block: false, run: run2 };
-  const sessionId = run2.sessionId ?? session;
-  const reason = stopReason(run2, ctx);
-  if (reason) return { block: true, reason: endedReason(reason), ended: reason, run: { ...endRun(run2, reason), lastBlockEvents: ctx.ledgerEvents, sessionId } };
-  if (input.stop_hook_active === true && ctx.ledgerEvents === run2.lastBlockEvents) return { block: false, run: run2 };
-  return { block: true, reason: blockReason(run2), run: { ...run2, lastBlockEvents: ctx.ledgerEvents, sessionId, blocksSinceCycle: run2.blocksSinceCycle + 1 } };
+function normalizeExecution(x) {
+  if (!isObj3(x)) return null;
+  const mode = oneOf2(["subagents", "sessions"], x.mode);
+  const kind = oneOf2(["plan", "ephemeral"], x.kind) ?? "plan";
+  const runId = str3(x.runId), project = str3(x.project), base = str3(x.base), branch = str3(x.branch), coordinator = str3(x.coordinator);
+  const startedAt = iso2(x.startedAt);
+  if (!mode || !runId || !project || !base || !branch || !coordinator || !startedAt) return null;
+  const tasks = {};
+  if (isObj3(x.tasks)) {
+    for (const [id2, t] of Object.entries(x.tasks).slice(0, MAX_TASKS)) {
+      const n = ID.test(id2) ? normalizeTask(t) : null;
+      if (n) tasks[id2] = n;
+    }
+  }
+  return {
+    runId,
+    kind,
+    mode,
+    project,
+    base,
+    branch,
+    coordinator,
+    startedAt,
+    tasks,
+    parallel: int(x.parallel, 1, 10, 3),
+    mergeOnFinish: x.mergeOnFinish === true,
+    hookSession: str3(x.hookSession),
+    active: x.active === true,
+    stopReason: oneOf2(STOPS, x.stopReason),
+    stallReason: typeof x.stallReason === "string" ? x.stallReason.slice(0, 1e3) : null,
+    lastStepAt: iso2(x.lastStepAt),
+    lastBlockStep: iso2(x.lastBlockStep),
+    sleepUntil: iso2(x.sleepUntil)
+  };
+}
+function parseExecution(text) {
+  if (typeof text !== "string") return null;
+  try {
+    return normalizeExecution(JSON.parse(text));
+  } catch {
+    return null;
+  }
+}
+function fromSwarm(s2) {
+  return {
+    runId: `swarm-${s2.startedAt}`,
+    kind: "plan",
+    mode: "sessions",
+    parallel: Math.min(10, Math.max(1, s2.parallel)),
+    project: s2.project,
+    base: s2.base,
+    branch: s2.base,
+    mergeOnFinish: s2.mergeAuthorized,
+    coordinator: s2.coordinator,
+    hookSession: s2.hookSession,
+    active: false,
+    stopReason: "migrated",
+    stallReason: null,
+    startedAt: s2.startedAt,
+    lastStepAt: s2.lastTickAt,
+    lastBlockStep: null,
+    sleepUntil: null,
+    tasks: {}
+  };
+}
+
+// src/forge/execution.ts
+var executionFile = (root) => import_node_path4.default.join(root, ".forge", "execution.json");
+var executionTaskFile = (root, task) => import_node_path4.default.join(root, ".forge", "execution", `${task}.json`);
+var runBranch = (project) => `forge/run-${project}`;
+var taskBranch = (task) => `task/${task}`;
+var runWorktree = (root) => import_node_path4.default.join(root, ".claude", "worktrees", "run");
+var taskWorktree = (root, task) => import_node_path4.default.join(root, ".claude", "worktrees", `task-${task}`);
+function writeAtomic(file, text) {
+  (0, import_node_fs4.mkdirSync)(import_node_path4.default.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    (0, import_node_fs4.writeFileSync)(tmp, text);
+    (0, import_node_fs4.renameSync)(tmp, file);
+  } finally {
+    (0, import_node_fs4.rmSync)(tmp, { force: true });
+  }
+}
+function saveExecution(root, e) {
+  forgeDir(root);
+  writeAtomic(executionFile(root), JSON.stringify(e, null, 2) + "\n");
+}
+function readExecution(root) {
+  const file = executionFile(root);
+  if ((0, import_node_fs4.existsSync)(file)) {
+    try {
+      return parseExecution((0, import_node_fs4.readFileSync)(file, "utf8"));
+    } catch {
+      return null;
+    }
+  }
+  const old = readSwarm(root);
+  if (!old) return null;
+  const migrated = fromSwarm(old);
+  saveExecution(root, migrated);
+  (0, import_node_fs4.renameSync)(swarmFile(root), `${swarmFile(root)}.migrated`);
+  return migrated;
+}
+function writePublicTask(root, p) {
+  writeAtomic(executionTaskFile(root, p.task), JSON.stringify(p, null, 2) + "\n");
 }
 
 // src/lib/locale.ts
-var import_node_fs3 = require("node:fs");
-var import_node_path3 = __toESM(require("node:path"), 1);
+var import_node_fs5 = require("node:fs");
+var import_node_path5 = __toESM(require("node:path"), 1);
 
 // src/lib/plan.ts
 var import_yaml = __toESM(require_dist(), 1);
@@ -8263,8 +8495,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path13, errorMaps, issueData } = params;
-  const fullPath = [...path13, ...issueData.path || []];
+  const { data, path: path14, errorMaps, issueData } = params;
+  const fullPath = [...path14, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -8380,11 +8612,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path13, key) {
+  constructor(parent, value, path14, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path13;
+    this._path = path14;
     this._key = key;
   }
   get path() {
@@ -11948,11 +12180,11 @@ function replyIn(locale) {
 }
 function planLocale(root, project) {
   try {
-    const docs = import_node_path3.default.join(root, "docs", "waypoint");
-    const projects = project ? [project] : (0, import_node_fs3.readdirSync)(docs, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+    const docs = import_node_path5.default.join(root, "docs", "waypoint");
+    const projects = project ? [project] : (0, import_node_fs5.readdirSync)(docs, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
     for (const p of projects) {
-      const file = import_node_path3.default.join(docs, p, "plan.yaml");
-      if ((0, import_node_fs3.existsSync)(file)) return parsePlan((0, import_node_fs3.readFileSync)(file, "utf8")).locale ?? null;
+      const file = import_node_path5.default.join(docs, p, "plan.yaml");
+      if ((0, import_node_fs5.existsSync)(file)) return parsePlan((0, import_node_fs5.readFileSync)(file, "utf8")).locale ?? null;
     }
   } catch {
   }
@@ -12005,34 +12237,34 @@ function triage(task, repo, validators, extra) {
   if (!repo.gitOk) reasons.push("git unavailable");
   const wordCount = text.trim().split(/\s+/).length;
   const sized = named.size ? named.size : located.length;
-  let path13;
+  let path14;
   if (greenfield) {
-    path13 = "large";
+    path14 = "large";
     reasons.push("greenfield repository");
   } else if (LARGE.some((re) => re.test(text))) {
-    path13 = "large";
+    path14 = "large";
     reasons.push("architecture-scale wording");
   } else if (sized > 10) {
-    path13 = "large";
+    path14 = "large";
     reasons.push(`${sized} files located`);
   } else if (sized > 3) {
-    path13 = "medium";
+    path14 = "medium";
     reasons.push(`${sized} files located`);
   } else if (sized === 0) {
-    path13 = "small";
+    path14 = "small";
     reasons.push("no files located: the session should judge the scope");
   } else if (sized === 1 && wordCount <= 25 && !RENAME.some((re) => re.test(text))) {
-    path13 = "trivial";
+    path14 = "trivial";
     reasons.push(named.size ? "one named file, short task" : "one file, short task");
   } else {
-    path13 = "small";
+    path14 = "small";
     reasons.push(`${sized} file(s) located`);
   }
-  if (sensitive.length && PATH_ORDER.indexOf(path13) < PATH_ORDER.indexOf("medium")) {
-    path13 = "medium";
+  if (sensitive.length && PATH_ORDER.indexOf(path14) < PATH_ORDER.indexOf("medium")) {
+    path14 = "medium";
     reasons.push(`sensitive zone: ${sensitive.join(", ")}`);
   }
-  return { path: path13, files: located, sensitive, greenfield, validators, reasons };
+  return { path: path14, files: located, sensitive, greenfield, validators, reasons };
 }
 
 // src/forge/brief.ts
@@ -12061,8 +12293,8 @@ function renderBrief(plan, task, opts) {
 }
 
 // src/forge/config.ts
-var import_node_fs4 = require("node:fs");
-var import_node_path4 = __toESM(require("node:path"), 1);
+var import_node_fs6 = require("node:fs");
+var import_node_path6 = __toESM(require("node:path"), 1);
 var import_yaml2 = __toESM(require_dist(), 1);
 var ROLES = ["impl-heavy", "impl", "impl-light", "mech", "review-correctness", "review-security", "review-perf", "verify"];
 var NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
@@ -12088,7 +12320,11 @@ var Schema = external_exports.object({
   }).strict().default({}),
   evidence: external_exports.enum(["upload", "local"]).default("upload"),
   validatorTimeoutSec: external_exports.number().int().positive().max(7200).default(600),
-  swarm: external_exports.object({ parallel: external_exports.number().int().min(1).max(10).default(5) }).strict().default({ parallel: 5 })
+  swarm: external_exports.object({
+    parallel: external_exports.number().int().min(1).max(10).default(3),
+    mode: external_exports.enum(["subagents", "sessions"]).optional(),
+    launcher: external_exports.enum(["bg", "herdr"]).default("bg")
+  }).strict().default({ parallel: 3, launcher: "bg" })
 }).strict();
 var DEFAULTS = {
   profile: "balanced",
@@ -12097,7 +12333,7 @@ var DEFAULTS = {
   verify: { limits: { checks: 8, shots: 10, minutes: 10 } },
   evidence: "upload",
   validatorTimeoutSec: 600,
-  swarm: { parallel: 5 }
+  swarm: { parallel: 3, launcher: "bg" }
 };
 function parseConfig(text) {
   if (text === null || !text.trim()) return structuredClone(DEFAULTS);
@@ -12113,8 +12349,8 @@ function parseConfig(text) {
   return validators ? { ...rest, validators } : rest;
 }
 function loadConfig(root) {
-  const file = import_node_path4.default.join(root, ".forge", "config.yaml");
-  return parseConfig((0, import_node_fs4.existsSync)(file) ? (0, import_node_fs4.readFileSync)(file, "utf8") : null);
+  const file = import_node_path6.default.join(root, ".forge", "config.yaml");
+  return parseConfig((0, import_node_fs6.existsSync)(file) ? (0, import_node_fs6.readFileSync)(file, "utf8") : null);
 }
 var SHIFT = {
   balanced: {},
@@ -12297,8 +12533,8 @@ function synthesize(reviews, weights, validatorsOk, failingValidators = []) {
 
 // src/forge/loop.ts
 var CAP = { medium: 3, large: 4 };
-function decideRound(history, path13) {
-  const cap = CAP[path13];
+function decideRound(history, path14) {
+  const cap = CAP[path14];
   const last = history.at(-1);
   const round = history.filter((h) => h.action !== "accept").length;
   const tierUp = round >= 3;
@@ -12315,8 +12551,8 @@ function decideRound(history, path13) {
 }
 
 // src/forge/proposals.ts
-var import_node_fs5 = require("node:fs");
-var import_node_path5 = __toESM(require("node:path"), 1);
+var import_node_fs7 = require("node:fs");
+var import_node_path7 = __toESM(require("node:path"), 1);
 
 // src/lib/proposals.ts
 var PROPOSAL_CATEGORIES = ["feature", "security", "perf", "quality", "tests", "deps"];
@@ -12324,17 +12560,17 @@ var PROPOSAL_RISKS = ["low", "medium", "high"];
 var PROPOSAL_STATUSES = ["proposed", "approved", "rejected", "discussing", "auto_approved", "done"];
 var MAX_PROPOSAL_TEXT = 4e3;
 var MAX_PROPOSAL_TITLE = 200;
-var str3 = (x) => typeof x === "string";
-var oneOf2 = (list, x) => str3(x) && list.includes(x);
+var str4 = (x) => typeof x === "string";
+var oneOf3 = (list, x) => str4(x) && list.includes(x);
 function normalizeProposal(x) {
   if (!x || typeof x !== "object" || Array.isArray(x)) return null;
   const o = x;
-  if (!oneOf2(PROPOSAL_CATEGORIES, o.category) || !oneOf2(PROPOSAL_RISKS, o.risk) || !oneOf2(PROPOSAL_STATUSES, o.status)) return null;
+  if (!oneOf3(PROPOSAL_CATEGORIES, o.category) || !oneOf3(PROPOSAL_RISKS, o.risk) || !oneOf3(PROPOSAL_STATUSES, o.status)) return null;
   if (o.source !== "scout" && o.source !== "user") return null;
-  if (!str3(o.title) || !o.title.trim() || !str3(o.author)) return null;
-  const text = (v) => str3(v) ? v.slice(0, MAX_PROPOSAL_TEXT) : "";
+  if (!str4(o.title) || !o.title.trim() || !str4(o.author)) return null;
+  const text = (v) => str4(v) ? v.slice(0, MAX_PROPOSAL_TEXT) : "";
   const out = {
-    ts: str3(o.ts) ? o.ts : "",
+    ts: str4(o.ts) ? o.ts : "",
     category: o.category,
     risk: o.risk,
     title: o.title.slice(0, MAX_PROPOSAL_TITLE),
@@ -12345,9 +12581,9 @@ function normalizeProposal(x) {
     source: o.source,
     author: o.author
   };
-  for (const k of ["estimate", "path", "decidedBy", "decidedAt"]) if (str3(o[k])) out[k] = o[k].slice(0, MAX_PROPOSAL_TITLE);
-  if (str3(o.taskId) && /^[A-Za-z0-9_.-]{1,64}$/.test(o.taskId)) out.taskId = o.taskId;
-  if (str3(o.reason)) out.reason = o.reason.slice(0, MAX_PROPOSAL_TEXT);
+  for (const k of ["estimate", "path", "decidedBy", "decidedAt"]) if (str4(o[k])) out[k] = o[k].slice(0, MAX_PROPOSAL_TITLE);
+  if (str4(o.taskId) && /^[A-Za-z0-9_.-]{1,64}$/.test(o.taskId)) out.taskId = o.taskId;
+  if (str4(o.reason)) out.reason = o.reason.slice(0, MAX_PROPOSAL_TEXT);
   return out;
 }
 var canDecide = (status) => status === "proposed" || status === "discussing";
@@ -12356,7 +12592,7 @@ var isActionable = (p) => p.status === "approved" || p.status === "auto_approved
 
 // src/forge/proposals.ts
 var PROPOSAL_ID = /^p\d{14}[0-9a-z]{4}$/;
-var dirOf = (root) => import_node_path5.default.join(root, ".forge", "proposals");
+var dirOf = (root) => import_node_path7.default.join(root, ".forge", "proposals");
 function proposalId(now, rand) {
   const stamp = now.toISOString().replace(/\D/g, "").slice(0, 14);
   let tail = "";
@@ -12365,14 +12601,14 @@ function proposalId(now, rand) {
 }
 function saveProposal(root, id2, doc) {
   forgeDir(root);
-  (0, import_node_fs5.mkdirSync)(dirOf(root), { recursive: true });
-  (0, import_node_fs5.writeFileSync)(import_node_path5.default.join(dirOf(root), `${id2}.json`), JSON.stringify(doc, null, 2) + "\n");
+  (0, import_node_fs7.mkdirSync)(dirOf(root), { recursive: true });
+  (0, import_node_fs7.writeFileSync)(import_node_path7.default.join(dirOf(root), `${id2}.json`), JSON.stringify(doc, null, 2) + "\n");
 }
 function loadOne(root, id2) {
-  const file = import_node_path5.default.join(dirOf(root), `${id2}.json`);
-  if (!(0, import_node_fs5.existsSync)(file)) return null;
+  const file = import_node_path7.default.join(dirOf(root), `${id2}.json`);
+  if (!(0, import_node_fs7.existsSync)(file)) return null;
   try {
-    return normalizeProposal(JSON.parse((0, import_node_fs5.readFileSync)(file, "utf8")));
+    return normalizeProposal(JSON.parse((0, import_node_fs7.readFileSync)(file, "utf8")));
   } catch {
     return null;
   }
@@ -12380,7 +12616,7 @@ function loadOne(root, id2) {
 function loadProposals(root) {
   let names2 = [];
   try {
-    names2 = (0, import_node_fs5.readdirSync)(dirOf(root));
+    names2 = (0, import_node_fs7.readdirSync)(dirOf(root));
   } catch {
     return [];
   }
@@ -12462,7 +12698,7 @@ function autoApprovable(p) {
       return false;
   }
 }
-var norm = (s2) => s2.toLowerCase().replace(/\s+/g, " ").trim();
+var norm2 = (s2) => s2.toLowerCase().replace(/\s+/g, " ").trim();
 var words = (s2) => new Set((s2.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length >= 3));
 var SIMILAR = 0.6;
 function jaccard(a, b) {
@@ -12474,7 +12710,7 @@ function jaccard(a, b) {
 function similarRejected(p, rejected) {
   const mine = words(`${p.title} ${p.rationale}`);
   for (const r2 of rejected) {
-    if (jaccard(mine, words(`${r2.title} ${r2.rationale}`)) >= SIMILAR && norm(r2.evidence).includes(norm(p.evidence))) return r2.id;
+    if (jaccard(mine, words(`${r2.title} ${r2.rationale}`)) >= SIMILAR && norm2(r2.evidence).includes(norm2(p.evidence))) return r2.id;
   }
   return null;
 }
@@ -12486,10 +12722,10 @@ function similarOpen(p, all) {
   }
   return null;
 }
-function safeZone(path13) {
-  if (!path13 || !/^[A-Za-z0-9_./*-]+$/.test(path13) || path13.startsWith("-")) return null;
-  if (path13.startsWith("/") || path13.split("/").includes("..")) return null;
-  return path13;
+function safeZone(path14) {
+  if (!path14 || !/^[A-Za-z0-9_./*-]+$/.test(path14) || path14.startsWith("-")) return null;
+  if (path14.startsWith("/") || path14.split("/").includes("..")) return null;
+  return path14;
 }
 
 // src/forge/to-task.ts
@@ -12526,20 +12762,20 @@ var UsageError = class extends Error {
 };
 
 // src/forge/cli/swarm.ts
-var import_node_fs8 = require("node:fs");
-var import_node_path9 = __toESM(require("node:path"), 1);
+var import_node_fs9 = require("node:fs");
+var import_node_path10 = __toESM(require("node:path"), 1);
 
 // src/forge/validators.ts
-var import_node_fs6 = require("node:fs");
-var import_node_path6 = __toESM(require("node:path"), 1);
+var import_node_fs8 = require("node:fs");
+var import_node_path8 = __toESM(require("node:path"), 1);
 var NPM_ORDER = [["typecheck", "typecheck"], ["type-check", "typecheck"], ["lint", "lint"], ["test", "test"], ["build", "build"]];
 var PLACEHOLDER_TEST = /no test specified/i;
 function onPath(name) {
   const win = process.platform === "win32";
   const exts = win ? ["", ...(process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";").filter(Boolean)] : [""];
-  return (process.env.PATH ?? "").split(import_node_path6.default.delimiter).filter(Boolean).filter((dir) => !(win && /[\\/]WindowsApps[\\/]?$/i.test(dir))).some((dir) => exts.some((ext) => {
+  return (process.env.PATH ?? "").split(import_node_path8.default.delimiter).filter(Boolean).filter((dir) => !(win && /[\\/]WindowsApps[\\/]?$/i.test(dir))).some((dir) => exts.some((ext) => {
     try {
-      return (0, import_node_fs6.existsSync)(import_node_path6.default.join(dir, name + ext));
+      return (0, import_node_fs8.existsSync)(import_node_path8.default.join(dir, name + ext));
     } catch {
       return false;
     }
@@ -12677,293 +12913,101 @@ function markPreexisting(results, baseline) {
 }
 var blocking = (r2) => r2.ok !== true && r2.preexisting !== true;
 
-// src/forge/swarm.ts
-var import_node_fs7 = require("node:fs");
-var import_node_path7 = __toESM(require("node:path"), 1);
-
-// src/lib/deps.ts
-var statusOf = (states, id2) => states[id2]?.status ?? "free";
-function isUnlocked(task, states) {
-  return task.depends_on.every((d) => statusOf(states, d) === "done");
-}
-function isAvailable(task, states) {
-  const st = states[task.id];
-  const status = statusOf(states, task.id);
-  if (status === "free") return true;
-  if (status !== "blocked") return false;
-  const by = st?.blockedBy ?? [];
-  return by.length > 0 && !by.includes("external") && by.every((b) => statusOf(states, b) === "done");
-}
-function availableTasks(plan, states, opts = {}) {
-  const order = new Map(plan.phases.map((p, i) => [p.id, i]));
-  return plan.tasks.map((t, i) => ({ t, i })).filter(({ t }) => isAvailable(t, states) && isUnlocked(t, states) && (!opts.track || t.track === opts.track)).sort((a, b) => order.get(a.t.phase) - order.get(b.t.phase) || a.i - b.i).map((x) => x.t);
-}
-var commitShas = (states, id2) => (Array.isArray(states[id2]?.commits) ? states[id2].commits : []).map((c) => c?.sha).filter((s2) => typeof s2 === "string" && !!s2);
-function notIntegratedDep(plan, states, task, integrated) {
-  return task.depends_on.find((d) => {
-    const dep = plan.tasks.find((t) => t.id === d);
-    return !!dep && dep.track !== task.track && !commitShas(states, d).every((s2) => integrated.has(s2));
-  }) ?? null;
-}
-
-// src/lib/zones.ts
-var WILD = /[*?[{]/;
-var norm2 = (p) => p.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
-function staticPrefix(glob) {
-  const out = [];
-  for (const part of norm2(glob).split("/")) {
-    if (WILD.test(part)) break;
-    out.push(part);
-  }
-  return out.join("/");
-}
-var under = (a, b) => b === "" || a === b || a.startsWith(`${b}/`);
-function globsOverlap(a, b) {
-  const wa = WILD.test(a);
-  const wb = WILD.test(b);
-  if (!wa && !wb) {
-    const na = norm2(a);
-    const nb = norm2(b);
-    return under(na, nb) || under(nb, na);
-  }
-  if (wa && wb) {
-    const pa = staticPrefix(a);
-    const pb = staticPrefix(b);
-    return under(pa, pb) || under(pb, pa);
-  }
-  const literal = norm2(wa ? b : a);
-  const prefix = staticPrefix(wa ? a : b);
-  return under(literal, prefix) || under(prefix, literal);
-}
-function overlappingZones(a, b) {
-  const out = [];
-  for (const x of a) for (const y of b) if (globsOverlap(x, y)) out.push([x, y]);
-  return out;
-}
-
-// src/lib/coordination.ts
-var IDLE_MINUTES = 15;
-var LEASE_CAP_MINUTES = 90;
+// src/forge/schedule.ts
+var STEP_WAIT_SECONDS = 300;
+var HELD = ["running", "accepted", "conflict", "blocked"];
 var ACTIVE = ["claimed", "in_progress"];
-function zonesOf(task, state) {
-  const touched = Array.isArray(state?.zonesTouched) ? state.zonesTouched : [];
-  return [...task.zones, ...touched].filter((z) => typeof z === "string");
-}
-function conflictsFor(plan, states, taskId, sessionId, sessions, now = Date.now()) {
-  const task = plan.tasks.find((t) => t.id === taskId);
-  if (!task) return [];
-  const mine = zonesOf(task, states[taskId]);
-  const out = [];
-  for (const other of plan.tasks) {
-    const st = states[other.id];
-    if (other.id === taskId || !st?.owner || st.owner === sessionId || !ACTIVE.includes(statusOf(states, other.id))) continue;
-    const zones = overlappingZones(mine, zonesOf(other, st));
-    if (zones.length) out.push({ taskId: other.id, owner: st.owner, zones, ...sessions ? { ownerIdle: isIdle(sessions[st.owner], now) } : {} });
-  }
-  return out;
-}
-function isIdle(s2, now, minutes = IDLE_MINUTES) {
-  if (!s2 || s2.status === "idle") return true;
-  const hb = Date.parse(s2.heartbeatAt);
-  if (!Number.isFinite(hb)) return true;
-  const lease = typeof s2.busyUntil === "string" ? Date.parse(s2.busyUntil) : NaN;
-  if (Number.isFinite(lease) && lease - hb <= LEASE_CAP_MINUTES * 6e4 && now < lease) return false;
-  return now - hb > minutes * 6e4;
-}
-function recoverableTasks(plan, states, sessions, now, minutes = IDLE_MINUTES) {
-  return plan.tasks.filter((t) => ACTIVE.includes(statusOf(states, t.id)) && states[t.id]?.owner && isIdle(sessions[states[t.id].owner], now, minutes)).map((t) => ({ taskId: t.id, owner: states[t.id].owner }));
-}
-
-// src/forge/swarm.ts
-var LAUNCH_GRACE_MIN = 10;
-var WAIT_SECONDS = 240;
-var agentNameFor = (project, track) => `wp-${project}-${track}`;
-function decide(input) {
-  const { plan, states, sessions, swarm, now } = input;
-  const integrated = new Set(input.integrated);
-  const agents = new Set(input.agents);
-  const byId = new Map(plan.tasks.map((t) => [t.id, t]));
+function ranker(plan) {
   const phaseAt = new Map(plan.phases.map((p, i) => [p.id, i]));
   const planAt = new Map(plan.tasks.map((t, i) => [t.id, i]));
-  const rank = (t) => (phaseAt.get(t.phase) ?? 0) * 1e6 + (planAt.get(t.id) ?? 0);
-  const done = (id2) => statusOf(states, id2) === "done";
-  const recoverable = new Set(recoverableTasks(plan, states, sessions, now).map((r2) => r2.taskId));
-  const ahead = (track) => input.ahead[track] ?? 0;
-  const sessionOf = (track) => Object.values(sessions).find((s2) => !!s2 && s2.track === track && !isIdle(s2, now)) ?? null;
-  const isLive = (track) => {
-    if (sessionOf(track) || agents.has(agentNameFor(swarm.project, track))) return true;
-    const launched = Date.parse(swarm.fronts[track]?.launchedAt ?? "");
-    return Number.isFinite(launched) && now - launched < LAUNCH_GRACE_MIN * 6e4;
+  return (t) => (phaseAt.get(t.phase) ?? 0) * 1e6 + (planAt.get(t.id) ?? 0);
+}
+function schedule(i) {
+  const { plan, states, sessions, exec, now } = i;
+  const integrated = new Set(i.integrated);
+  const rank = ranker(plan);
+  const byId = new Map(plan.tasks.map((t) => [t.id, t]));
+  const nowIso = new Date(now).toISOString();
+  const tasks = { ...exec.tasks };
+  const held = (id2) => HELD.includes(tasks[id2]?.status);
+  const depIntegrated = (d) => statusOf(states, d) === "done" && commitShas(states, d).every((s2) => integrated.has(s2));
+  const owner = (id2) => states[id2]?.owner ?? null;
+  const claimedByOther = (id2) => {
+    const o = owner(id2);
+    return !!o && o !== exec.coordinator && ACTIVE.includes(statusOf(states, id2)) && sessionLiveness(sessions[o], now) !== "stopped";
   };
-  const shasOf = (id2) => commitShas(states, id2);
-  const notIntegrated = (task) => notIntegratedDep(plan, states, task, integrated);
-  const nextOf = (track) => availableTasks(plan, states, { track })[0] ?? plan.tasks.find((t) => t.track === track && recoverable.has(t.id)) ?? null;
-  const doneTime = (id2) => {
-    const at = Date.parse(states[id2]?.doneAt ?? "");
-    if (Number.isFinite(at)) return at;
-    const ts = (states[id2]?.commits ?? []).map((c) => Date.parse(c.ts)).filter(Number.isFinite);
-    return ts.length ? Math.max(...ts) : -Infinity;
-  };
-  const lastDoneSha = (track) => {
-    const doneTasks = plan.tasks.filter((t) => t.track === track && done(t.id) && shasOf(t.id).length).sort((a, b) => doneTime(b.id) - doneTime(a.id));
-    return doneTasks.length ? shasOf(doneTasks[0].id).at(-1) : null;
-  };
-  const refFor = (track) => {
-    const inCourse = plan.tasks.some((t) => t.track === track && ["claimed", "in_progress"].includes(statusOf(states, t.id)));
-    if (inCourse) return lastDoneSha(track);
-    return ahead(track) > 0 ? `track/${track}` : null;
-  };
-  const live = new Set(plan.tracks.map((t) => t.id).filter(isLive));
-  const fronts = {};
-  const needed = [];
-  const candidates = [];
-  for (const tr of plan.tracks) {
-    const prev = swarm.fronts[tr.id] ?? emptyFront();
-    const tasks = plan.tasks.filter((t) => t.track === tr.id);
-    const s2 = sessionOf(tr.id);
-    const f = {
-      ...emptyFront(),
-      session: prev.session,
-      launchedAt: prev.launchedAt,
-      currentTask: s2?.currentTask ?? (live.has(tr.id) ? prev.currentTask : null),
-      heartbeatAt: s2?.heartbeatAt ?? null,
-      done: tasks.filter((t) => done(t.id)).length,
-      total: tasks.length
-    };
-    fronts[tr.id] = f;
-    if (prev.status === "conflict" || prev.status === "launch-failed") {
-      f.status = prev.status;
-      f.detail = prev.detail;
-      continue;
-    }
-    const next = nextOf(tr.id);
-    if (live.has(tr.id)) {
-      const missing = next ? notIntegrated(next) : null;
-      const from = missing ? byId.get(missing).track : null;
-      if (from && !needed.includes(from)) needed.push(from);
-      f.status = "running";
-      continue;
-    }
-    if (next) {
-      const missing = notIntegrated(next);
-      if (missing) {
-        const from = byId.get(missing).track;
-        f.status = "waiting";
-        f.waitingFor = { task: missing, track: from, reason: "not-integrated" };
-        if (!needed.includes(from)) needed.push(from);
-      } else {
-        f.status = "queued";
-        candidates.push({ track: tr.id, task: next });
-      }
-      continue;
-    }
-    const pending = tasks.filter((t) => !done(t.id)).sort((a, b) => rank(a) - rank(b));
-    if (!pending.length) {
-      f.status = ahead(tr.id) > 0 ? "ready" : "integrated";
-      continue;
-    }
-    const ext = pending.find((t) => statusOf(states, t.id) === "blocked" && (states[t.id]?.blockedBy ?? []).includes("external"));
-    if (ext) {
-      f.status = "blocked";
-      f.detail = ext.id;
-      continue;
-    }
-    const first = pending[0];
-    const dep = first.depends_on.find((d) => !done(d)) ?? (states[first.id]?.blockedBy ?? []).find((b) => b !== "external" && !done(b));
-    f.status = "waiting";
-    f.waitingFor = dep ? { task: dep, track: byId.get(dep)?.track ?? tr.id, reason: "not-done" } : null;
-  }
-  let integrate2 = null;
-  if (swarm.mergeAuthorized) {
-    for (const track of needed) {
-      if (fronts[track]?.status === "conflict") continue;
-      const ref = refFor(track);
-      if (ref && !integrated.has(ref)) {
-        integrate2 = { track, ref };
-        break;
-      }
-    }
-    if (!integrate2) {
-      const firstRank = (track) => Math.min(...plan.tasks.filter((t) => t.track === track).map(rank));
-      const idle = plan.tracks.map((t) => t.id).filter((id2) => !live.has(id2) && ahead(id2) > 0 && fronts[id2].status !== "conflict").map((id2) => ({ id: id2, ref: refFor(id2) })).filter((x) => !!x.ref && !integrated.has(x.ref)).sort((a, b) => firstRank(a.id) - firstRank(b.id));
-      if (idle.length) integrate2 = { track: idle[0].id, ref: idle[0].ref };
-    }
-  } else {
-    for (const id2 of plan.tracks.map((t) => t.id)) {
-      if (!live.has(id2) && ahead(id2) > 0 && ["integrated", "blocked", "waiting"].includes(fronts[id2].status)) fronts[id2].status = "ready";
-    }
-  }
-  const actions = integrate2 ? [{ type: "integrate", ...integrate2 }] : [];
-  const running = [...live].map((id2) => byId.get(fronts[id2]?.currentTask ?? "")).filter((t) => !!t);
-  const chosen = [];
-  let slots = swarm.parallel - live.size;
-  for (const c of [...candidates].sort((a, b) => rank(a.task) - rank(b.task))) {
+  const orphan = (id2) => ACTIVE.includes(statusOf(states, id2)) && !!owner(id2) && owner(id2) !== exec.coordinator && !claimedByOther(id2);
+  const readopt = (id2) => ACTIVE.includes(statusOf(states, id2)) && owner(id2) === exec.coordinator && !tasks[id2];
+  const startable = (t) => !held(t.id) && (isAvailable(t, states) && isUnlocked(t, states) || orphan(t.id) || readopt(t.id)) && t.depends_on.every(depIntegrated) && !claimedByOther(t.id);
+  const actions = [];
+  const accepted = Object.keys(tasks).filter((id2) => tasks[id2].status === "accepted" && byId.has(id2)).sort((a, b) => rank(byId.get(a)) - rank(byId.get(b)));
+  if (accepted.length) actions.push({ type: "integrate", task: accepted[0], ref: tasks[accepted[0]].branch });
+  const runningIds = Object.keys(tasks).filter((id2) => tasks[id2].status === "running");
+  const busy = runningIds.map((id2) => byId.get(id2)).filter((t) => !!t);
+  let slots = exec.parallel - runningIds.length;
+  for (const t of [...plan.tasks].sort((a, b) => rank(a) - rank(b))) {
     if (slots <= 0) break;
-    const busy = conflictsFor(plan, states, c.task.id, "", sessions, now).some((x) => !x.ownerIdle);
-    const clash = [...running, ...chosen].some((t) => overlappingZones(zonesOf(c.task, states[c.task.id]), zonesOf(t, states[t.id])).length > 0);
-    if (busy || clash) continue;
-    chosen.push(c.task);
+    if (!startable(t)) continue;
+    const clash = busy.some((b) => overlappingZones(zonesOf(t, states[t.id]), zonesOf(b, states[b.id])).length > 0);
+    if (clash) continue;
+    tasks[t.id] = { status: "running", stage: "brief", round: 0, worktree: "", branch: `task/${t.id}`, executor: exec.mode, attempts: 0, agent: null, startedAt: nowIso, updatedAt: nowIso, detail: null };
+    busy.push(t);
     slots--;
-    actions.push({ type: "launch", track: c.track });
-    fronts[c.track] = { ...fronts[c.track], status: "running", currentTask: c.task.id, session: agentNameFor(swarm.project, c.track), launchedAt: new Date(now).toISOString() };
+    actions.push({ type: "start", task: t.id });
   }
-  let { active, stopReason: stopReason2 } = swarm;
-  let stallReason = null;
-  const moved = !!integrate2 || chosen.length > 0;
-  if (!moved && plan.tasks.every((t) => done(t.id)) && plan.tracks.every((t) => ahead(t.id) === 0)) {
+  let { active, stopReason: stopReason2, stallReason } = exec;
+  const moving = actions.length > 0 || runningIds.length > 0;
+  const allDone = plan.tasks.every((t) => statusOf(states, t.id) === "done");
+  if (!moving && allDone) {
     actions.push({ type: "finish" });
     active = false;
     stopReason2 = "finished";
-  } else if (!moved && live.size === 0) {
-    stallReason = describeStall(fronts, swarm.mergeAuthorized);
+    stallReason = null;
+  } else if (!moving) {
+    stallReason = describeStall(plan, states, tasks, depIntegrated, claimedByOther);
     actions.push({ type: "stalled", reason: stallReason });
     active = false;
     stopReason2 = "stalled";
   } else {
-    actions.push({ type: "wait", seconds: integrate2 ? 0 : WAIT_SECONDS });
+    actions.push({ type: "wait", seconds: accepted.length ? 0 : STEP_WAIT_SECONDS });
   }
-  return {
-    actions,
-    next: { ...swarm, active, stopReason: stopReason2, stallReason, fronts, lastTickAt: new Date(now).toISOString() },
-    progress: moved || live.size > 0,
-    live: live.size
-  };
+  return { actions, next: { ...exec, tasks, active, stopReason: stopReason2, stallReason, lastStepAt: nowIso } };
 }
-function describeStall(fronts, mergeAuthorized) {
-  const by = (status) => Object.entries(fronts).filter(([, f]) => f.status === status).map(([id2]) => id2);
-  const parts = [];
-  for (const status of ["blocked", "conflict", "launch-failed", "waiting"]) {
-    const ids = by(status);
-    if (ids.length) parts.push(`${status}: ${ids.join(", ")}`);
+function describeStall(plan, states, tasks, depIntegrated, claimedByOther) {
+  const groups = /* @__PURE__ */ new Map();
+  const add = (key, id2) => groups.set(key, [...groups.get(key) ?? [], id2]);
+  for (const t of plan.tasks) {
+    if (statusOf(states, t.id) === "done") continue;
+    const ex = tasks[t.id];
+    if (ex?.status === "conflict") add("conflict", t.id);
+    else if (ex?.status === "blocked" || statusOf(states, t.id) === "blocked") add("blocked", t.id);
+    else if (claimedByOther(t.id)) add(`claimed by ${states[t.id].owner}`, t.id);
+    else {
+      const dep = t.depends_on.find((d) => !depIntegrated(d));
+      if (dep) add(`waits for ${dep} (${statusOf(states, dep) === "done" ? "not integrated" : "not done"})`, t.id);
+    }
   }
-  const ready = by("ready");
-  if (ready.length) parts.push(`ready${mergeAuthorized ? "" : " (no merge authorization)"}: ${ready.join(", ")}`);
-  return parts.join("; ") || "nothing can move";
+  return [...groups].map(([k, ids]) => `${k}: ${ids.join(", ")}`).join("; ") || "nothing can move";
 }
-var swarmFile = (root) => import_node_path7.default.join(root, ".forge", "swarm.json");
-function readSwarm(root) {
-  const file = swarmFile(root);
-  if (!(0, import_node_fs7.existsSync)(file)) return null;
-  try {
-    return parseSwarm((0, import_node_fs7.readFileSync)(file, "utf8"));
-  } catch {
-    return null;
+function widthOf(plan) {
+  const done = /* @__PURE__ */ new Set();
+  let width = 0;
+  for (let guard = 0; guard < plan.tasks.length + 1 && done.size < plan.tasks.length; guard++) {
+    const wave = [];
+    for (const t of plan.tasks) {
+      if (done.has(t.id) || !t.depends_on.every((d) => done.has(d))) continue;
+      if (wave.some((w) => overlappingZones(t.zones, w.zones).length > 0)) continue;
+      wave.push(t);
+    }
+    if (!wave.length) break;
+    width = Math.max(width, wave.length);
+    for (const t of wave) done.add(t.id);
   }
-}
-function saveSwarm(root, s2) {
-  forgeDir(root);
-  const file = swarmFile(root);
-  const tmp = `${file}.${process.pid}.tmp`;
-  try {
-    (0, import_node_fs7.writeFileSync)(tmp, JSON.stringify(s2, null, 2) + "\n");
-    (0, import_node_fs7.renameSync)(tmp, file);
-  } finally {
-    (0, import_node_fs7.rmSync)(tmp, { force: true });
-  }
+  return width;
 }
 
 // src/lib/worktree.ts
-var import_node_path8 = __toESM(require("node:path"), 1);
+var import_node_path9 = __toESM(require("node:path"), 1);
 function mainWorktreeFrom(porcelain) {
   if (typeof porcelain !== "string") return null;
   const line = porcelain.split(/\r?\n/).find((l) => l.startsWith("worktree "));
@@ -12971,27 +13015,102 @@ function mainWorktreeFrom(porcelain) {
 }
 function samePath(a, b) {
   const norm3 = (p) => {
-    const r2 = import_node_path8.default.resolve(p.replace(/\\/g, "/"));
+    const r2 = import_node_path9.default.resolve(p.replace(/\\/g, "/"));
     return process.platform === "win32" ? r2.toLowerCase() : r2;
   };
   return norm3(a) === norm3(b);
 }
 
 // src/forge/cli/swarm.ts
-var ID = /^[A-Za-z0-9_\-.~:@+]{1,80}$/;
-var TAKEOVER_MIN = 30;
+var ID2 = /^[A-Za-z0-9_\-.~:@+]{1,80}$/;
+var TAKEOVER_MIN = 15;
 var MAX_SLEEP_S = 900;
 function readDocs(dir) {
   const out = {};
-  for (const f of (0, import_node_fs8.readdirSync)(dir).filter((x) => x.endsWith(".json"))) {
+  for (const f of (0, import_node_fs9.readdirSync)(dir).filter((x) => x.endsWith(".json"))) {
     try {
-      out[f.slice(0, -5)] = JSON.parse((0, import_node_fs8.readFileSync)(import_node_path9.default.join(dir, f), "utf8"));
+      out[f.slice(0, -5)] = JSON.parse((0, import_node_fs9.readFileSync)(import_node_path10.default.join(dir, f), "utf8"));
     } catch {
     }
   }
   return out;
 }
 var sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+function loadPlanArg(io, planArg, sub) {
+  if (!planArg) throw new UsageError(`swarm ${sub}: --plan is required`);
+  try {
+    return parsePlan((0, import_node_fs9.readFileSync)(import_node_path10.default.resolve(io.cwd, planArg), "utf8"));
+  } catch (e) {
+    throw new UsageError(e instanceof PlanError ? `${planArg}: ${e.issues.join("; ")}` : `swarm ${sub}: cannot read ${planArg}`);
+  }
+}
+var LOCAL_STATE = [":!.forge", ":!.waypoint", ":!.claude"];
+function mergeIn(at, ref, message, scope, timeoutSec, configRoot) {
+  const merging = () => at.git(["rev-parse", "-q", "--verify", "MERGE_HEAD"]) !== null;
+  if (merging()) return { result: "dirty", detail: "an unfinished merge is in progress there (git merge --abort to clear it)" };
+  const dirty = at.git(["status", "--porcelain", "--", ".", ...LOCAL_STATE]);
+  if (dirty === null || dirty.trim() !== "") return { result: "dirty", detail: "it has uncommitted changes" };
+  if (at.git(["rev-parse", "--verify", "-q", `${ref}^{commit}`]) === null) return { result: "conflict", detail: `unknown ref ${ref}` };
+  const pre = at.git(["rev-parse", "HEAD"])?.trim();
+  if (!pre) return { result: "conflict", detail: "cannot read HEAD" };
+  const rollback = (detail) => {
+    const undone = at.git(["merge", "--abort"]) !== null;
+    const clean = undone && at.git(["rev-parse", "HEAD"])?.trim() === pre && !merging();
+    return { result: "conflict", detail: clean ? detail : `rollback failed: needs manual attention (${detail})` };
+  };
+  if (at.git(["merge", "--no-ff", "--no-commit", ref]) === null) {
+    if (!merging()) return { result: "conflict", detail: `git refused to merge ${ref}` };
+    return rollback(`merge conflict with ${ref}`);
+  }
+  if (!merging()) return { result: "merged", sha: pre };
+  let failed;
+  try {
+    const config = loadConfig(configRoot);
+    failed = runValidators(selectValidators(detectValidators(at.repo, config), scope === "final" ? { mode: "final" } : { mode: "heavy", changed: null }), at.exec, timeoutSec).filter((r2) => !r2.ok);
+  } catch (err) {
+    return rollback(`validators could not run: ${err.message}`);
+  }
+  if (failed.length) return rollback(`validators failed after merging ${ref}: ${failed.map((r2) => r2.validator).join(", ")}`);
+  if (at.git(["commit", "--no-edit", "-m", message]) === null || merging()) return rollback(`could not commit the merge of ${ref}`);
+  const sha = at.git(["rev-parse", "HEAD"])?.trim() ?? "";
+  return sha && sha !== pre ? { result: "merged", sha } : rollback(`could not commit the merge of ${ref}`);
+}
+function integrate(rest, io, deps) {
+  const task = rest[0];
+  if (!task || !ID2.test(task)) throw new UsageError("swarm integrate: a task id is required");
+  const e = readExecution(io.cwd);
+  if (!e) throw new UsageError("swarm integrate: no execution (forge swarm start)");
+  const t = e.tasks[task];
+  if (!t || t.status !== "accepted") throw new UsageError(`swarm integrate: ${task} is not accepted`);
+  const at = io.now().toISOString();
+  const out = (v) => ({ code: 0, stdout: JSON.stringify(v) + "\n", stderr: "" });
+  const wt = e.kind === "plan" ? runWorktree(io.cwd) : io.cwd;
+  const target = deps.at(wt);
+  if (e.kind === "plan") {
+    const head = target.git(["rev-parse", "--abbrev-ref", "HEAD"])?.trim();
+    if (head !== e.branch) return out({ result: "run-dirty", detail: `${wt} is on ${head ?? "?"}, not ${e.branch}` });
+  }
+  const config = loadConfig(io.cwd);
+  const r2 = mergeIn(target, t.branch, `forge: integrate ${task}`, "heavy", config.validatorTimeoutSec, wt);
+  const cur = readExecution(io.cwd);
+  if (r2.result === "dirty") return out({ result: "run-dirty", detail: r2.detail });
+  const next = r2.result === "merged" ? { ...cur.tasks[task], status: "integrated", stage: "integrate", updatedAt: at, detail: null } : { ...cur.tasks[task], status: "conflict", detail: r2.detail, updatedAt: at };
+  saveExecution(io.cwd, { ...cur, tasks: { ...cur.tasks, [task]: next } });
+  return out(r2.result === "merged" ? { result: "integrated", sha: r2.sha } : { result: "conflict", detail: r2.detail });
+}
+function mergeFinal(rest, io, deps) {
+  const e = readExecution(io.cwd);
+  if (!e) throw new UsageError("swarm merge: no execution (forge swarm start)");
+  const out = (v) => ({ code: 0, stdout: JSON.stringify(v) + "\n", stderr: "" });
+  if (e.kind !== "plan") return out({ result: "merged", sha: deps.git(["rev-parse", "HEAD"])?.trim() ?? "" });
+  if (!e.mergeOnFinish && !rest.includes("--yes")) return out({ result: "needs-authorization" });
+  const branch = deps.git(["rev-parse", "--abbrev-ref", "HEAD"])?.trim();
+  if (branch !== e.base) return out({ result: "main-dirty", detail: `the main checkout is on ${branch ?? "?"}, not ${e.base}` });
+  const config = loadConfig(io.cwd);
+  const r2 = mergeIn(deps, e.branch, `forge: merge ${e.branch}`, "final", config.validatorTimeoutSec, io.cwd);
+  if (r2.result === "dirty") return out({ result: "main-dirty", detail: `the main checkout ${r2.detail}` });
+  return out(r2.result === "merged" ? { result: "merged", sha: r2.sha } : { result: "conflict", detail: r2.detail });
+}
 function swarmCommand(args, io, deps) {
   const [sub, ...rest] = args;
   const flag = (name) => {
@@ -13003,219 +13122,195 @@ function swarmCommand(args, io, deps) {
   const json = (v) => ({ code: 0, stdout: JSON.stringify(v, null, 2) + "\n", stderr: "" });
   const ok = () => ({ code: 0, stdout: "ok\n", stderr: "" });
   const now = io.now();
-  const iso2 = now.toISOString();
+  const iso3 = now.toISOString();
   const current = () => {
-    const s2 = readSwarm(io.cwd);
-    if (!s2) throw new UsageError(`swarm ${sub}: no swarm (forge swarm start)`);
-    return s2;
+    const e = readExecution(io.cwd);
+    if (!e) throw new UsageError(`swarm ${sub}: no execution (forge swarm start)`);
+    return e;
   };
-  if (["start", "tick", "integrate", "sleep", "mark", "retry"].includes(sub ?? "")) {
+  if (["start", "tick", "integrate", "merge", "sleep", "worktree", "retry"].includes(sub ?? "")) {
     const top = deps.git(["rev-parse", "--show-toplevel"])?.trim();
     const main = mainWorktreeFrom(deps.git(["worktree", "list", "--porcelain"]));
     if (!top || !main || !samePath(top, main)) {
       throw new UsageError(`swarm ${sub}: run it from the main checkout${main ? ` (${main})` : ""}, not from a worktree`);
     }
   }
-  const trackArg = () => {
+  const taskArg = () => {
     const t = rest[0];
-    if (!t || !ID.test(t)) throw new UsageError(`swarm ${sub}: a track id is required`);
+    if (!t || !ID2.test(t)) throw new UsageError(`swarm ${sub}: a task id is required`);
     return t;
   };
   switch (sub) {
     case "start": {
       const project = flag("project");
       const session = flag("session");
-      if (!project || !ID.test(project) || !session || !ID.test(session)) throw new UsageError("swarm start: --project and --session are required");
-      let parallel = loadConfig(io.cwd).swarm.parallel;
+      if (!project || !ID2.test(project) || !session || !ID2.test(session)) throw new UsageError("swarm start: --project and --session are required");
+      const config = loadConfig(io.cwd);
+      let parallel = config.swarm.parallel;
       if (has("parallel")) {
         const v = Number(flag("parallel"));
         if (!Number.isInteger(v) || v < 1 || v > 10) throw new UsageError("swarm start: --parallel must be an integer from 1 to 10");
         parallel = v;
       }
-      if (parallel < 2) throw new UsageError("swarm start: parallel is 1, so there is no swarm; work the plan sequentially");
+      const mode = flag("mode") ?? config.swarm.mode ?? "subagents";
+      if (mode !== "subagents" && mode !== "sessions") throw new UsageError("swarm start: --mode must be subagents or sessions");
+      const kind = flag("kind") ?? "plan";
+      if (kind !== "plan" && kind !== "ephemeral") throw new UsageError("swarm start: --kind must be plan or ephemeral");
       const base = deps.git(["rev-parse", "--abbrev-ref", "HEAD"])?.trim();
       if (!base || base === "HEAD") throw new UsageError("swarm start: the main checkout must be on a branch");
-      const prev = readSwarm(io.cwd);
+      const prev = readExecution(io.cwd);
       if (prev?.active && prev.coordinator !== session) {
-        const last = Date.parse(prev.lastTickAt ?? prev.startedAt);
-        if (now.getTime() - last < TAKEOVER_MIN * 6e4) throw new UsageError(`swarm start: coordinator ${prev.coordinator} is active (last tick ${prev.lastTickAt ?? prev.startedAt})`);
+        const last = Date.parse(prev.lastStepAt ?? prev.startedAt);
+        if (now.getTime() - last < TAKEOVER_MIN * 6e4) throw new UsageError(`swarm start: coordinator ${prev.coordinator} is active (last step ${prev.lastStepAt ?? prev.startedAt})`);
       }
-      const state = prev && prev.active && prev.project === project ? { ...prev, parallel, mergeAuthorized: prev.mergeAuthorized || has("merge"), coordinator: session, hookSession: null, sleepUntil: null } : {
-        active: true,
+      const branch = flag("branch") ?? runBranch(project);
+      if (!/^[A-Za-z0-9_\-./]{1,120}$/.test(branch) || branch.includes("..")) throw new UsageError("swarm start: --branch is not a valid branch name");
+      if (kind === "plan") {
+        if (deps.git(["rev-parse", "--verify", "-q", `refs/heads/${branch}`]) === null && deps.git(["branch", branch, base]) === null) {
+          throw new UsageError(`swarm start: cannot create ${branch} from ${base}`);
+        }
+        const wt = runWorktree(io.cwd);
+        if (!(0, import_node_fs9.existsSync)(wt) && deps.git(["worktree", "add", wt, branch]) === null) throw new UsageError(`swarm start: cannot add the worktree ${wt}`);
+      }
+      const resume = prev && prev.active && prev.project === project && prev.branch === (kind === "plan" ? branch : base);
+      const state = resume ? { ...prev, parallel, mode, mergeOnFinish: prev.mergeOnFinish || has("merge-on-finish"), coordinator: session, hookSession: null, sleepUntil: null } : {
+        runId: `${project}-${iso3.replace(/[:.]/g, "")}`,
+        kind,
+        mode,
         parallel,
-        mergeAuthorized: has("merge"),
         project,
         base,
+        branch: kind === "plan" ? branch : base,
+        mergeOnFinish: has("merge-on-finish"),
         coordinator: session,
         hookSession: null,
-        startedAt: iso2,
-        lastTickAt: null,
-        lastBlockTick: null,
-        sleepUntil: null,
+        active: true,
         stopReason: null,
         stallReason: null,
-        notice: null,
-        fronts: {}
+        startedAt: iso3,
+        lastStepAt: null,
+        lastBlockStep: null,
+        sleepUntil: null,
+        tasks: {}
       };
-      (0, import_node_fs8.rmSync)(stopFile(io.cwd), { force: true });
-      saveSwarm(io.cwd, state);
+      (0, import_node_fs9.rmSync)(stopFile(io.cwd), { force: true });
+      saveExecution(io.cwd, state);
       return json(state);
     }
     case "status": {
-      const state = readSwarm(io.cwd);
+      const state = readExecution(io.cwd);
       return json({ present: state !== null, state });
     }
+    case "propose": {
+      const plan = loadPlanArg(io, flag("plan"), "propose");
+      const width = widthOf(plan);
+      const configured = loadConfig(io.cwd).swarm.mode ?? null;
+      const parallel = width < 2 ? 1 : Math.min(3, width);
+      const reasons = [`${plan.tasks.length} tasks`, `up to ${width} at once (dependencies and zones)`];
+      return json({ width, configured, recommended: { mode: "subagents", parallel }, reasons });
+    }
+    case "worktree": {
+      const task = taskArg();
+      const e = current();
+      const dir = taskWorktree(io.cwd, task);
+      const branch = taskBranch(task);
+      if (!(0, import_node_fs9.existsSync)(dir)) {
+        const exists = deps.git(["rev-parse", "--verify", "-q", `refs/heads/${branch}`]) !== null;
+        const added = exists ? deps.git(["worktree", "add", dir, branch]) : deps.git(["worktree", "add", "-b", branch, dir, e.branch]);
+        if (added === null) throw new UsageError(`swarm worktree: cannot add ${dir} for ${branch}`);
+      }
+      const base = deps.at(dir).git(["rev-parse", "HEAD"])?.trim() ?? null;
+      const t = e.tasks[task] ?? { status: "running", stage: "brief", round: 0, worktree: dir, branch, executor: e.mode, attempts: 0, agent: null, startedAt: iso3, updatedAt: iso3, detail: null };
+      saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, worktree: dir, branch, updatedAt: iso3 } } });
+      return json({ worktree: dir, branch, base });
+    }
+    case "task": {
+      const task = taskArg();
+      const e = current();
+      const prev = e.tasks[task];
+      if (!prev) throw new UsageError(`swarm task: ${task} is not part of this execution`);
+      const stage = flag("stage") ?? prev.stage;
+      if (!STAGES.includes(stage)) throw new UsageError(`swarm task: --stage must be one of ${STAGES.join("|")}`);
+      const status = flag("status") ?? prev.status;
+      if (!["running", "accepted", "blocked"].includes(status) && status !== prev.status) throw new UsageError("swarm task: --status must be running, accepted or blocked");
+      let detail = prev.detail;
+      if (flag("detail-file")) {
+        try {
+          detail = (0, import_node_fs9.readFileSync)(import_node_path10.default.resolve(io.cwd, flag("detail-file")), "utf8").trim().slice(0, 500) || null;
+        } catch {
+          throw new UsageError("swarm task: cannot read --detail-file");
+        }
+      }
+      const round = has("round") ? Number(flag("round")) : prev.round;
+      if (!Number.isInteger(round) || round < 0 || round > 99) throw new UsageError("swarm task: --round must be an integer from 0 to 99");
+      const agent = has("no-agent") ? null : flag("agent") ?? prev.agent;
+      const next = { ...prev, stage, status, round, agent, detail, updatedAt: iso3, ...prev.stage !== stage ? { startedAt: prev.startedAt } : {} };
+      saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: next } });
+      const lease = flag("lease") && !Number.isNaN(Date.parse(flag("lease"))) ? flag("lease") : new Date(now.getTime() + LEASE_MINUTES * 6e4).toISOString();
+      writePublicTask(io.cwd, { task, runId: e.runId, stage, status, agent, round, since: prev.stage === stage ? prev.updatedAt : iso3, updatedAt: iso3, leaseUntil: lease, by: e.coordinator, mode: prev.executor });
+      if (prev.stage !== stage) appendEvent(io.cwd, { ts: iso3, kind: "phase", task, phase: stage });
+      return json(next);
+    }
     case "tick": {
-      const swarm = current();
-      if (!swarm.active) throw new UsageError("swarm tick: the swarm is not active");
-      const planArg = flag("plan");
+      const e = current();
+      if (!e.active) throw new UsageError("swarm tick: the execution is not active");
+      const plan = loadPlanArg(io, flag("plan"), "tick");
       const db = flag("db");
-      const agentsArg = flag("agents");
-      if (!planArg || !db || !agentsArg) throw new UsageError("swarm tick: --plan, --db and --agents are required");
-      const stateDir = import_node_path9.default.resolve(io.cwd, db, "state");
-      const sessionsDir = import_node_path9.default.resolve(io.cwd, db, "sessions");
-      if (!(0, import_node_fs8.existsSync)(stateDir) || !(0, import_node_fs8.existsSync)(sessionsDir)) throw new UsageError("swarm tick: --db must hold the state and sessions listings");
-      let plan;
-      try {
-        plan = parsePlan((0, import_node_fs8.readFileSync)(import_node_path9.default.resolve(io.cwd, planArg), "utf8"));
-      } catch (e) {
-        throw new UsageError(e instanceof PlanError ? `${planArg}: ${e.issues.join("; ")}` : `swarm tick: cannot read ${planArg}`);
-      }
-      let agents;
-      try {
-        agents = JSON.parse((0, import_node_fs8.readFileSync)(import_node_path9.default.resolve(io.cwd, agentsArg), "utf8"));
-      } catch {
-        throw new UsageError("swarm tick: --agents must be a JSON array of names");
-      }
-      if (!Array.isArray(agents)) throw new UsageError("swarm tick: --agents must be a JSON array of names");
+      if (!db) throw new UsageError("swarm tick: --plan and --db are required");
+      const stateDir = import_node_path10.default.resolve(io.cwd, db, "state");
+      const sessionsDir = import_node_path10.default.resolve(io.cwd, db, "sessions");
+      if (!(0, import_node_fs9.existsSync)(stateDir) || !(0, import_node_fs9.existsSync)(sessionsDir)) throw new UsageError("swarm tick: --db must hold the state and sessions listings");
       const states = readDocs(stateDir);
       const sessions = readDocs(sessionsDir);
-      const ahead = {};
-      for (const t of plan.tracks) ahead[t.id] = Number.parseInt(deps.git(["rev-list", "--count", `${swarm.base}..track/${t.id}`]) ?? "0", 10) || 0;
       const integrated = [];
       for (const t of plan.tasks) {
         if (states[t.id]?.status !== "done") continue;
         for (const c of states[t.id]?.commits ?? []) {
-          if (typeof c?.sha === "string" && ID.test(c.sha) && deps.git(["merge-base", "--is-ancestor", c.sha, swarm.base]) !== null) integrated.push(c.sha);
+          if (typeof c?.sha === "string" && ID2.test(c.sha) && deps.git(["merge-base", "--is-ancestor", c.sha, e.branch]) !== null) integrated.push(c.sha);
         }
       }
-      const d = decide({ plan, states, sessions, agents: agents.filter((a) => typeof a === "string"), ahead, integrated, swarm, now: now.getTime() });
-      saveSwarm(io.cwd, d.next);
-      return json({ actions: d.actions, progress: d.progress, live: d.live, parallel: swarm.parallel });
-    }
-    case "mark": {
-      const track = trackArg();
-      if (flag("status") !== "launch-failed") throw new UsageError("swarm mark: --status launch-failed is the only status a skill sets");
-      let detail = null;
-      if (flag("detail-file")) {
-        try {
-          detail = (0, import_node_fs8.readFileSync)(import_node_path9.default.resolve(io.cwd, flag("detail-file")), "utf8").trim().slice(0, 500) || null;
-        } catch {
-          throw new UsageError("swarm mark: cannot read --detail-file");
-        }
-      }
-      const s2 = current();
-      saveSwarm(io.cwd, {
-        ...s2,
-        fronts: { ...s2.fronts, [track]: { ...s2.fronts[track] ?? emptyFront(), status: "launch-failed", detail, launchedAt: null } },
-        notice: { kind: "launch-failed", track, at: iso2 }
-      });
-      return ok();
+      const d = schedule({ plan, states, sessions, exec: e, integrated, now: now.getTime() });
+      saveExecution(io.cwd, d.next);
+      return json({ actions: d.actions, running: Object.values(d.next.tasks).filter((t) => t.status === "running").length, parallel: e.parallel });
     }
     case "retry": {
-      const track = trackArg();
-      const s2 = current();
-      const f = s2.fronts[track];
-      if (!f || f.status !== "conflict" && f.status !== "launch-failed") throw new UsageError(`swarm retry: ${track} is not in conflict or launch-failed`);
-      const revive = !s2.active && s2.stopReason === "stalled";
-      saveSwarm(io.cwd, {
-        ...s2,
+      const task = taskArg();
+      const e = current();
+      const t = e.tasks[task];
+      if (!t || t.status !== "conflict" && t.status !== "blocked") throw new UsageError(`swarm retry: ${task} is not in conflict or blocked`);
+      const revive = !e.active && e.stopReason === "stalled";
+      saveExecution(io.cwd, {
+        ...e,
         ...revive ? { active: true, stopReason: null, stallReason: null } : {},
-        fronts: { ...s2.fronts, [track]: { ...f, status: "queued", detail: null, launchedAt: null } },
-        notice: s2.notice?.track === track ? null : s2.notice
+        tasks: { ...e.tasks, [task]: { ...t, status: "running", stage: "implement", attempts: t.attempts + 1, detail: null, updatedAt: iso3 } }
       });
       return ok();
     }
     case "sleep": {
       const seconds = Number(rest[0]);
       if (!Number.isInteger(seconds) || seconds < 1 || seconds > MAX_SLEEP_S) throw new UsageError(`swarm sleep: seconds must be an integer from 1 to ${MAX_SLEEP_S}`);
-      const s2 = current();
-      saveSwarm(io.cwd, { ...s2, sleepUntil: new Date(now.getTime() + seconds * 1e3).toISOString() });
+      const e = current();
+      saveExecution(io.cwd, { ...e, sleepUntil: new Date(now.getTime() + seconds * 1e3).toISOString() });
       if (has("mark")) return ok();
       (io.sleep ?? sleepSync)(seconds * 1e3);
-      const after = readSwarm(io.cwd);
-      if (after) saveSwarm(io.cwd, { ...after, sleepUntil: null });
+      const after = readExecution(io.cwd);
+      if (after) saveExecution(io.cwd, { ...after, sleepUntil: null });
       return ok();
     }
     case "stop": {
       const reason = flag("reason") ?? "stopped";
       if (reason !== "stopped" && reason !== "budget") throw new UsageError("swarm stop: --reason must be stopped or budget");
-      const s2 = readSwarm(io.cwd);
-      if (s2?.active) saveSwarm(io.cwd, { ...s2, active: false, stopReason: reason, sleepUntil: null });
+      const e = readExecution(io.cwd);
+      if (e?.active) saveExecution(io.cwd, { ...e, active: false, stopReason: reason, sleepUntil: null });
       return ok();
     }
     case "integrate":
       return integrate(rest, io, deps);
+    case "merge":
+      return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError("usage: forge swarm <start --project P --session SID [--parallel N] [--merge]|status|tick --plan P --db DIR --agents FILE|integrate <track> --ref REF|mark <track> --status launch-failed [--detail-file F]|retry <track>|sleep <seconds> [--mark]|stop [--reason stopped|budget]>");
+      throw new UsageError("usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral]|status|propose --plan P|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|tick --plan P --db DIR|integrate <T>|merge|retry <T>|sleep <seconds> [--mark]|stop [--reason stopped|budget]>");
   }
-}
-var LOCAL_STATE = [":!.forge", ":!.waypoint", ":!.claude"];
-var REF = /^(track\/[A-Za-z0-9_\-.~:@+]{1,80}|[0-9a-f]{7,64})$/;
-function integrate(rest, io, deps) {
-  const track = rest[0];
-  const i = rest.indexOf("--ref");
-  const ref = i >= 0 ? rest[i + 1] : void 0;
-  if (!track || !ID.test(track) || !ref || !REF.test(ref)) throw new UsageError("swarm integrate: <track> and --ref track/<id>|<sha> are required");
-  const s2 = readSwarm(io.cwd);
-  if (!s2) throw new UsageError("swarm integrate: no swarm (forge swarm start)");
-  if (!s2.mergeAuthorized) throw new UsageError("swarm integrate: integrating needs the user's authorization (swarm start --merge)");
-  const at = io.now().toISOString();
-  const out = (v) => ({ code: 0, stdout: JSON.stringify(v) + "\n", stderr: "" });
-  const conflict = (detail) => {
-    const cur = readSwarm(io.cwd);
-    saveSwarm(io.cwd, {
-      ...cur,
-      fronts: { ...cur.fronts, [track]: { ...cur.fronts[track] ?? emptyFront(), status: "conflict", detail } },
-      notice: { kind: "conflict", track, at }
-    });
-    return out({ result: "conflict", detail });
-  };
-  const integrated = () => {
-    const cur = readSwarm(io.cwd);
-    saveSwarm(io.cwd, { ...cur, notice: cur.notice?.kind === "main-dirty" ? null : cur.notice });
-    return out({ result: "integrated", detail: null });
-  };
-  const merging = () => deps.git(["rev-parse", "-q", "--verify", "MERGE_HEAD"]) !== null;
-  if (merging()) return conflict("rollback failed: an unfinished integration is in progress in the main checkout (run git merge --abort to clear it)");
-  const branch = deps.git(["rev-parse", "--abbrev-ref", "HEAD"])?.trim();
-  const dirty = deps.git(["status", "--porcelain", "--", ".", ...LOCAL_STATE]);
-  if (branch !== s2.base || dirty === null || dirty.trim() !== "") {
-    const first = s2.notice?.kind !== "main-dirty";
-    if (first) saveSwarm(io.cwd, { ...s2, notice: { kind: "main-dirty", track, at } });
-    return out({ result: "main-dirty", detail: branch !== s2.base ? `the main checkout is on ${branch ?? "?"}, not ${s2.base}` : "the main checkout has uncommitted changes", first });
-  }
-  if (deps.git(["rev-parse", "--verify", "-q", `${ref}^{commit}`]) === null) return conflict(`unknown ref ${ref}`);
-  const preMergeSha = deps.git(["rev-parse", "HEAD"])?.trim();
-  if (!preMergeSha) throw new UsageError("swarm integrate: cannot read HEAD");
-  const rollback = (detail) => {
-    const undone = deps.git(["merge", "--abort"]) !== null;
-    const clean = undone && deps.git(["rev-parse", "HEAD"])?.trim() === preMergeSha && !merging();
-    return conflict(clean ? detail : `rollback failed: the main checkout needs manual attention (${detail})`);
-  };
-  if (deps.git(["merge", "--no-ff", "--no-commit", ref]) === null) {
-    if (!merging()) return conflict(`git refused to merge ${ref} into ${s2.base} (local changes it would overwrite?)`);
-    return rollback(`merge conflict integrating ${ref} into ${s2.base}`);
-  }
-  if (!merging()) return integrated();
-  const config = loadConfig(io.cwd);
-  const failed = runValidators(selectValidators(detectValidators(deps.repo, config), { mode: "heavy", changed: null }), deps.exec, config.validatorTimeoutSec).filter((r2) => !r2.ok);
-  if (failed.length) return rollback(`validators failed after integrating ${ref}: ${failed.map((r2) => r2.validator).join(", ")}`);
-  const committed = deps.git(["commit", "--no-edit", "-m", `swarm: integrate ${track}`]) !== null;
-  if (!committed || merging() || deps.git(["rev-parse", "HEAD"])?.trim() === preMergeSha) {
-    return rollback(`could not commit the integration of ${ref}`);
-  }
-  return integrated();
 }
 
 // src/forge/tools.ts
@@ -13265,26 +13360,26 @@ var killTarget = (pid, pgid) => pgid === pid ? -pid : pid;
 
 // src/forge/local.ts
 var import_node_child_process = require("node:child_process");
-var import_node_fs9 = require("node:fs");
-var import_node_path10 = __toESM(require("node:path"), 1);
+var import_node_fs10 = require("node:fs");
+var import_node_path11 = __toESM(require("node:path"), 1);
 var import_yaml3 = __toESM(require_dist(), 1);
 function mainCheckout(root) {
   try {
     const [gitDir, common] = (0, import_node_child_process.execFileSync)("git", ["rev-parse", "--git-dir", "--git-common-dir"], { cwd: root, encoding: "utf8", timeout: 5e3, stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).split(/\r?\n/).map((l) => l.trim());
     if (!gitDir || !common) return root;
-    const commonDir = import_node_path10.default.resolve(root, common);
-    if (import_node_path10.default.resolve(root, gitDir) === commonDir || import_node_path10.default.basename(commonDir) !== ".git") return root;
-    return import_node_path10.default.dirname(commonDir);
+    const commonDir = import_node_path11.default.resolve(root, common);
+    if (import_node_path11.default.resolve(root, gitDir) === commonDir || import_node_path11.default.basename(commonDir) !== ".git") return root;
+    return import_node_path11.default.dirname(commonDir);
   } catch {
     return root;
   }
 }
-var localFile = (root) => import_node_path10.default.join(mainCheckout(root), ".forge", "local.yaml");
+var localFile = (root) => import_node_path11.default.join(mainCheckout(root), ".forge", "local.yaml");
 var names = (x) => Array.isArray(x) ? [...new Set(x.filter((s2) => typeof s2 === "string" && NAME.test(s2)))] : [];
 function readLocal(root) {
   let raw = null;
   try {
-    raw = (0, import_yaml3.parse)((0, import_node_fs9.readFileSync)(localFile(root), "utf8"));
+    raw = (0, import_yaml3.parse)((0, import_node_fs10.readFileSync)(localFile(root), "utf8"));
   } catch {
     raw = null;
   }
@@ -13303,8 +13398,8 @@ function writeLocal(root, s2) {
   forgeDir(mainCheckout(root));
   const file = localFile(root);
   const tmp = `${file}.${process.pid}.tmp`;
-  (0, import_node_fs9.writeFileSync)(tmp, (0, import_yaml3.stringify)(s2));
-  (0, import_node_fs9.renameSync)(tmp, file);
+  (0, import_node_fs10.writeFileSync)(tmp, (0, import_yaml3.stringify)(s2));
+  (0, import_node_fs10.renameSync)(tmp, file);
 }
 function updateLocal(root, fn) {
   const next = fn(readLocal(root));
@@ -13314,8 +13409,8 @@ function updateLocal(root, fn) {
 
 // src/forge/surfaces.ts
 var import_node_crypto2 = require("node:crypto");
-var import_node_fs10 = require("node:fs");
-var import_node_path11 = __toESM(require("node:path"), 1);
+var import_node_fs11 = require("node:fs");
+var import_node_path12 = __toESM(require("node:path"), 1);
 var import_yaml4 = __toESM(require_dist(), 1);
 function surfaceHash(text) {
   return (0, import_node_crypto2.createHash)("sha256").update(text.replace(/\r\n/g, "\n")).digest("hex").slice(0, 16);
@@ -13347,7 +13442,7 @@ function parseSurface(name, text) {
 function readSurfaces(root) {
   let names2 = [];
   try {
-    names2 = (0, import_node_fs10.readdirSync)(import_node_path11.default.join(root, ".forge", "verify"));
+    names2 = (0, import_node_fs11.readdirSync)(import_node_path12.default.join(root, ".forge", "verify"));
   } catch {
     return [];
   }
@@ -13355,7 +13450,7 @@ function readSurfaces(root) {
     const name = f.slice(0, -3);
     let text = "";
     try {
-      text = (0, import_node_fs10.readFileSync)(import_node_path11.default.join(root, ".forge", "verify", f), "utf8");
+      text = (0, import_node_fs11.readFileSync)(import_node_path12.default.join(root, ".forge", "verify", f), "utf8");
     } catch {
     }
     return parseSurface(name, text);
@@ -13445,12 +13540,12 @@ var USAGE = "usage: forge <triage|brief|validate|verdict|round|log|agents|last|p
 var MAX_OUTPUT = 4 * 1024 * 1024;
 var MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 function readTail(fd) {
-  const size = (0, import_node_fs11.fstatSync)(fd).size;
+  const size = (0, import_node_fs12.fstatSync)(fd).size;
   const len = Math.min(size, MAX_OUTPUT);
   const buf = Buffer.alloc(len);
   let off = 0;
   while (off < len) {
-    const n = (0, import_node_fs11.readSync)(fd, buf, off, len - off, size - len + off);
+    const n = (0, import_node_fs12.readSync)(fd, buf, off, len - off, size - len + off);
     if (n <= 0) break;
     off += n;
   }
@@ -13486,9 +13581,9 @@ function defaultExec(cwd2) {
     let dir;
     let fd;
     try {
-      dir = (0, import_node_fs11.mkdtempSync)(import_node_path12.default.join((0, import_node_os.tmpdir)(), "forge-exec-"));
-      const file = import_node_path12.default.join(dir, "out.log");
-      fd = (0, import_node_fs11.openSync)(file, "w+");
+      dir = (0, import_node_fs12.mkdtempSync)(import_node_path13.default.join((0, import_node_os.tmpdir)(), "forge-exec-"));
+      const file = import_node_path13.default.join(dir, "out.log");
+      fd = (0, import_node_fs12.openSync)(file, "w+");
       const r2 = (0, import_node_child_process2.spawnSync)(process.execPath, ["-e", WRAPPER_SOURCE, "--", cmd, String(timeoutMs), file], {
         cwd: cwd2,
         windowsHide: true,
@@ -13498,7 +13593,7 @@ function defaultExec(cwd2) {
         maxBuffer: 64 * 1024
       });
       const err = r2.error;
-      const timedOut = err?.code === "ETIMEDOUT" || r2.status === TIMEOUT_EXIT && (0, import_node_fs11.existsSync)(`${file}.timeout`);
+      const timedOut = err?.code === "ETIMEDOUT" || r2.status === TIMEOUT_EXIT && (0, import_node_fs12.existsSync)(`${file}.timeout`);
       let output = readTail(fd);
       if (r2.stderr) output += `${output && !output.endsWith("\n") ? "\n" : ""}${r2.stderr}`;
       if (err && !timedOut) output += `${output && !output.endsWith("\n") ? "\n" : ""}${err.message}
@@ -13510,13 +13605,13 @@ function defaultExec(cwd2) {
     } finally {
       if (fd !== void 0) {
         try {
-          (0, import_node_fs11.closeSync)(fd);
+          (0, import_node_fs12.closeSync)(fd);
         } catch {
         }
       }
       if (dir !== void 0) {
         try {
-          (0, import_node_fs11.rmSync)(dir, { recursive: true, force: true });
+          (0, import_node_fs12.rmSync)(dir, { recursive: true, force: true });
         } catch {
         }
       }
@@ -13533,17 +13628,17 @@ function defaultGit(cwd2) {
   };
 }
 var repoReader = (root) => ({
-  exists: (rel) => (0, import_node_fs11.existsSync)(import_node_path12.default.join(root, rel)),
+  exists: (rel) => (0, import_node_fs12.existsSync)(import_node_path13.default.join(root, rel)),
   read: (rel) => {
     try {
-      return (0, import_node_fs11.readFileSync)(import_node_path12.default.join(root, rel), "utf8");
+      return (0, import_node_fs12.readFileSync)(import_node_path13.default.join(root, rel), "utf8");
     } catch {
       return null;
     }
   },
   list: (dir) => {
     try {
-      return (0, import_node_fs11.readdirSync)(import_node_path12.default.join(root, dir ?? ""));
+      return (0, import_node_fs12.readdirSync)(import_node_path13.default.join(root, dir ?? ""));
     } catch {
       return [];
     }
@@ -13553,7 +13648,7 @@ function planTask(cwd2, planArg, id2) {
   if (!planArg || !id2) throw new UsageError("--plan and --task are required");
   let text;
   try {
-    text = (0, import_node_fs11.readFileSync)(import_node_path12.default.resolve(cwd2, planArg), "utf8");
+    text = (0, import_node_fs12.readFileSync)(import_node_path13.default.resolve(cwd2, planArg), "utf8");
   } catch {
     throw new UsageError(`cannot read plan ${planArg}`);
   }
@@ -13569,13 +13664,13 @@ function planTask(cwd2, planArg, id2) {
   return { plan, task };
 }
 function findWaypointCli(scriptPath) {
-  const forgeRoot = import_node_path12.default.resolve(import_node_path12.default.dirname(scriptPath), "..");
-  const dev = import_node_path12.default.join(forgeRoot, "..", "waypoint", "dist", "waypoint.cjs");
-  if ((0, import_node_fs11.existsSync)(dev)) return import_node_path12.default.resolve(dev);
-  const base = import_node_path12.default.join(forgeRoot, "..", "..", "waypoint");
+  const forgeRoot = import_node_path13.default.resolve(import_node_path13.default.dirname(scriptPath), "..");
+  const dev = import_node_path13.default.join(forgeRoot, "..", "waypoint", "dist", "waypoint.cjs");
+  if ((0, import_node_fs12.existsSync)(dev)) return import_node_path13.default.resolve(dev);
+  const base = import_node_path13.default.join(forgeRoot, "..", "..", "waypoint");
   let versions = [];
   try {
-    versions = (0, import_node_fs11.readdirSync)(base);
+    versions = (0, import_node_fs12.readdirSync)(base);
   } catch {
     return null;
   }
@@ -13589,8 +13684,8 @@ function findWaypointCli(scriptPath) {
     return 0;
   };
   for (const v of versions.sort((a, b) => cmp(b, a))) {
-    const f = import_node_path12.default.join(base, v, "dist", "waypoint.cjs");
-    if ((0, import_node_fs11.existsSync)(f)) return import_node_path12.default.resolve(f);
+    const f = import_node_path13.default.join(base, v, "dist", "waypoint.cjs");
+    if ((0, import_node_fs12.existsSync)(f)) return import_node_path13.default.resolve(f);
   }
   return null;
 }
@@ -13598,7 +13693,7 @@ function stopContext(cwd2, now) {
   const proposals = loadProposals(cwd2);
   return {
     now,
-    stopFile: (0, import_node_fs11.existsSync)(stopFile(cwd2)),
+    stopFile: (0, import_node_fs12.existsSync)(stopFile(cwd2)),
     approvedPending: proposals.filter(isActionable).length,
     pendingProposals: proposals.filter((p) => p.status === "proposed" || p.status === "discussing").length
   };
@@ -13608,25 +13703,35 @@ function hookStop(io) {
     const input = JSON.parse(io.stdin ?? "");
     if (!input || typeof input !== "object" || Array.isArray(input)) return "";
     const hookInput = input;
-    const swarm = readSwarm(io.cwd);
-    const sleeping = !!swarm?.active && !!swarm.sleepUntil && Date.parse(swarm.sleepUntil) > io.now().getTime();
+    const exec = readExecution(io.cwd);
+    const sleeping = !!exec?.active && !!exec.sleepUntil && Date.parse(exec.sleepUntil) > io.now().getTime();
     const run2 = parseRun(readRunText(io.cwd));
     if (run2?.active) {
       const d2 = decideStop(hookInput, run2, { ...stopContext(io.cwd, io.now()), ledgerEvents: readEvents(io.cwd).length, swarmSleeping: sleeping });
       if (!d2.block) return "";
       saveRun(io.cwd, d2.run);
       if (d2.ended) appendEvent(io.cwd, { ts: io.now().toISOString(), kind: "cycle", action: "stopped", reason: d2.ended });
-      return JSON.stringify({ decision: "block", reason: d2.reason + replyIn(planLocale(io.cwd, swarm?.project)) }) + "\n";
+      return JSON.stringify({ decision: "block", reason: d2.reason + replyIn(planLocale(io.cwd, exec?.project)) }) + "\n";
     }
-    const d = decideSwarmStop(hookInput, swarm, { now: io.now(), stopFile: (0, import_node_fs11.existsSync)(stopFile(io.cwd)) });
+    const d = decideExecutionStop(hookInput, exec, { now: io.now(), stopFile: (0, import_node_fs12.existsSync)(stopFile(io.cwd)) });
     if (!d.block) return "";
-    saveSwarm(io.cwd, d.swarm);
-    return JSON.stringify({ decision: "block", reason: d.reason + replyIn(planLocale(io.cwd, d.swarm.project)) }) + "\n";
+    saveExecution(io.cwd, d.exec);
+    return JSON.stringify({ decision: "block", reason: d.reason + replyIn(planLocale(io.cwd, d.exec.project)) }) + "\n";
   } catch {
     return "";
   }
 }
 function run(argv, io) {
+  const cwdAt = argv.indexOf("--cwd");
+  if (cwdAt >= 0) {
+    const dir = argv[cwdAt + 1];
+    if (!dir || dir.startsWith("--")) return { code: 2, stdout: "", stderr: "forge: --cwd needs a directory\n" };
+    const abs = import_node_path13.default.resolve(io.cwd, dir);
+    if (!(0, import_node_fs12.existsSync)(abs)) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} does not exist
+` };
+    argv = [...argv.slice(0, cwdAt), ...argv.slice(cwdAt + 2)];
+    io = { ...io, cwd: abs, git: defaultGit(abs), exec: defaultExec(abs) };
+  }
   const [cmd, ...args] = argv;
   const flag = (name) => {
     const i = args.indexOf(`--${name}`);
@@ -13649,7 +13754,7 @@ function run(argv, io) {
           const label = flag("data-file") !== void 0 ? "--data-file" : "--data";
           let parsed;
           try {
-            const raw = flag("data-file") !== void 0 ? (0, import_node_fs11.readFileSync)(import_node_path12.default.resolve(io.cwd, flag("data-file")), "utf8") : flag("data");
+            const raw = flag("data-file") !== void 0 ? (0, import_node_fs12.readFileSync)(import_node_path13.default.resolve(io.cwd, flag("data-file")), "utf8") : flag("data");
             parsed = JSON.parse(raw);
           } catch {
             throw new UsageError(`log: ${label} must be a JSON object`);
@@ -13663,8 +13768,8 @@ function run(argv, io) {
       }
       case "brief": {
         const { plan, task } = planTask(io.cwd, flag("plan"), flag("task"));
-        const design = flag("design") ?? import_node_path12.default.join(import_node_path12.default.dirname(flag("plan")), "design.md");
-        const designPath = (0, import_node_fs11.existsSync)(import_node_path12.default.resolve(io.cwd, design)) ? design.replace(/\\/g, "/") : null;
+        const design = flag("design") ?? import_node_path13.default.join(import_node_path13.default.dirname(flag("plan")), "design.md");
+        const designPath = (0, import_node_fs12.existsSync)(import_node_path13.default.resolve(io.cwd, design)) ? design.replace(/\\/g, "/") : null;
         return ok(renderBrief(plan, task, { planPath: flag("plan").replace(/\\/g, "/"), designPath }));
       }
       case "triage": {
@@ -13676,7 +13781,7 @@ function run(argv, io) {
         let task = textArgs.filter((a) => !a.startsWith("--")).join(" ").trim();
         if (flag("text-file") !== void 0) {
           try {
-            task = (0, import_node_fs11.readFileSync)(import_node_path12.default.resolve(io.cwd, flag("text-file")), "utf8").trim();
+            task = (0, import_node_fs12.readFileSync)(import_node_path13.default.resolve(io.cwd, flag("text-file")), "utf8").trim();
           } catch {
             throw new UsageError("triage: cannot read --text-file");
           }
@@ -13732,7 +13837,7 @@ function run(argv, io) {
           if (flag("baseline") === void 0) throw new UsageError("validate: --baseline needs the JSON a validate run printed on the base commit");
           let baseline;
           try {
-            baseline = JSON.parse((0, import_node_fs11.readFileSync)(import_node_path12.default.resolve(io.cwd, flag("baseline")), "utf8"));
+            baseline = JSON.parse((0, import_node_fs12.readFileSync)(import_node_path13.default.resolve(io.cwd, flag("baseline")), "utf8"));
           } catch {
             throw new UsageError("validate: --baseline must be the JSON written by forge validate");
           }
@@ -13748,14 +13853,14 @@ function run(argv, io) {
         const task = flag("task");
         const dirArg = flag("dir");
         if (!task || !dirArg) throw new UsageError("verdict: --task and --dir are required");
-        const dir = import_node_path12.default.resolve(io.cwd, dirArg);
+        const dir = import_node_path13.default.resolve(io.cwd, dirArg);
         const reviews = {};
         for (const name of ["correctness", "security", "perf"]) {
-          const file = import_node_path12.default.join(dir, `${name}.json`);
-          if ((0, import_node_fs11.existsSync)(file)) reviews[name] = parseReview((0, import_node_fs11.readFileSync)(file, "utf8"));
+          const file = import_node_path13.default.join(dir, `${name}.json`);
+          if ((0, import_node_fs12.existsSync)(file)) reviews[name] = parseReview((0, import_node_fs12.readFileSync)(file, "utf8"));
         }
-        const verifyPath = import_node_path12.default.join(dir, "verify.json");
-        const verifyFile = (0, import_node_fs11.existsSync)(verifyPath) ? parseVerifyFile((0, import_node_fs11.readFileSync)(verifyPath, "utf8")) : void 0;
+        const verifyPath = import_node_path13.default.join(dir, "verify.json");
+        const verifyFile = (0, import_node_fs12.existsSync)(verifyPath) ? parseVerifyFile((0, import_node_fs12.readFileSync)(verifyPath, "utf8")) : void 0;
         if (verifyFile !== void 0) reviews.verify = verifyReview(verifyFile);
         if (!Object.keys(reviews).length) throw new UsageError(`no reviews found in ${dirArg}`);
         let validatorsOk;
@@ -13765,7 +13870,7 @@ function run(argv, io) {
         if (flag("validators")) {
           let results;
           try {
-            results = JSON.parse((0, import_node_fs11.readFileSync)(import_node_path12.default.resolve(io.cwd, flag("validators")), "utf8"));
+            results = JSON.parse((0, import_node_fs12.readFileSync)(import_node_path13.default.resolve(io.cwd, flag("validators")), "utf8"));
           } catch {
             throw new UsageError("verdict: --validators must be the JSON written by forge validate");
           }
@@ -13788,7 +13893,7 @@ function run(argv, io) {
           ts: ts(),
           kind: "verdict",
           task,
-          dir: import_node_path12.default.relative(io.cwd, dir).split(import_node_path12.default.sep).join("/") || ".",
+          dir: import_node_path13.default.relative(io.cwd, dir).split(import_node_path13.default.sep).join("/") || ".",
           action: result.action,
           score: result.score,
           signature: result.signature,
@@ -13797,7 +13902,7 @@ function run(argv, io) {
           minor: result.minor.length
         });
         if (verifyFile !== void 0) {
-          const rel = import_node_path12.default.relative(io.cwd, dir).split(import_node_path12.default.sep).join("/");
+          const rel = import_node_path13.default.relative(io.cwd, dir).split(import_node_path13.default.sep).join("/");
           const evidence = rel.replace(/reviews-(\d+-\d+)$/, "evidence/$1");
           appendEvent(io.cwd, {
             ts: ts(),
@@ -13817,7 +13922,7 @@ function run(argv, io) {
         if (!dir) throw new UsageError("verify-cleanup: --dir is required");
         let pids = [];
         try {
-          const raw = JSON.parse((0, import_node_fs11.readFileSync)(import_node_path12.default.resolve(io.cwd, dir, "pids.json"), "utf8"));
+          const raw = JSON.parse((0, import_node_fs12.readFileSync)(import_node_path13.default.resolve(io.cwd, dir, "pids.json"), "utf8"));
           if (Array.isArray(raw)) pids = raw.filter((p) => Number.isInteger(p));
         } catch {
           pids = [];
@@ -13874,7 +13979,7 @@ function run(argv, io) {
         };
         const readText = (f, what) => {
           try {
-            return (0, import_node_fs11.readFileSync)(import_node_path12.default.resolve(io.cwd, f), "utf8");
+            return (0, import_node_fs12.readFileSync)(import_node_path13.default.resolve(io.cwd, f), "utf8");
           } catch {
             throw new UsageError(`proposals: cannot read ${what}`);
           }
@@ -13946,7 +14051,7 @@ function run(argv, io) {
           case "save": {
             const from = subFlag("from");
             if (!from) throw new UsageError("proposals save: --from is required");
-            const id2 = subFlag("id") ?? import_node_path12.default.basename(from).replace(/(\.db)?\.json$/, "");
+            const id2 = subFlag("id") ?? import_node_path13.default.basename(from).replace(/(\.db)?\.json$/, "");
             if (!PROPOSAL_ID.test(id2)) throw new UsageError("proposals save: a proposal id (p + 14 digits + 4 letters/digits) is required (--id, or a <id>.json / <id>.db.json file name)");
             let doc;
             try {
@@ -13964,11 +14069,11 @@ function run(argv, io) {
           case "pull": {
             const dir = subFlag("dir");
             if (!dir) throw new UsageError("proposals pull: --dir is required");
-            const abs = import_node_path12.default.resolve(io.cwd, dir);
+            const abs = import_node_path13.default.resolve(io.cwd, dir);
             let names2;
-            if (!(0, import_node_fs11.existsSync)(abs)) return ok("0");
+            if (!(0, import_node_fs12.existsSync)(abs)) return ok("0");
             try {
-              names2 = (0, import_node_fs11.readdirSync)(abs);
+              names2 = (0, import_node_fs12.readdirSync)(abs);
             } catch {
               throw new UsageError(`proposals pull: cannot read ${dir}`);
             }
@@ -13979,7 +14084,7 @@ function run(argv, io) {
               if (!PROPOSAL_ID.test(id2)) continue;
               let doc;
               try {
-                doc = normalizeProposal(JSON.parse((0, import_node_fs11.readFileSync)(import_node_path12.default.join(abs, name), "utf8")));
+                doc = normalizeProposal(JSON.parse((0, import_node_fs12.readFileSync)(import_node_path13.default.join(abs, name), "utf8")));
               } catch {
                 continue;
               }
@@ -14032,7 +14137,7 @@ function run(argv, io) {
               if (e instanceof PlanError) throw new UsageError(`proposals to-task: the resulting plan is invalid: ${e.issues.join("; ")}`);
               throw e;
             }
-            (0, import_node_fs11.writeFileSync)(import_node_path12.default.resolve(io.cwd, planArg), next);
+            (0, import_node_fs12.writeFileSync)(import_node_path13.default.resolve(io.cwd, planArg), next);
             const { id: _id, ...doc } = found;
             saveProposal(io.cwd, id2, { ...doc, taskId: task.id });
             appendEvent(io.cwd, { ts: ts(), kind: "proposal", action: "to-task", id: id2, taskId: task.id });
@@ -14057,19 +14162,19 @@ function run(argv, io) {
           return ok("ok");
         }
         if (sub === "learn") {
-          const file = import_node_path12.default.join(io.cwd, surfaceFile(name));
-          if (!(0, import_node_fs11.existsSync)(file)) throw new UsageError(`surfaces learn: ${surfaceFile(name)} does not exist`);
-          if ((0, import_node_fs11.lstatSync)(file).isSymbolicLink()) throw new UsageError(`surfaces learn: ${surfaceFile(name)} is a symlink`);
+          const file = import_node_path13.default.join(io.cwd, surfaceFile(name));
+          if (!(0, import_node_fs12.existsSync)(file)) throw new UsageError(`surfaces learn: ${surfaceFile(name)} does not exist`);
+          if ((0, import_node_fs12.lstatSync)(file).isSymbolicLink()) throw new UsageError(`surfaces learn: ${surfaceFile(name)} is a symlink`);
           let notes;
           try {
-            notes = JSON.parse((0, import_node_fs11.readFileSync)(import_node_path12.default.resolve(io.cwd, flag("notes-file") ?? ""), "utf8"));
+            notes = JSON.parse((0, import_node_fs12.readFileSync)(import_node_path13.default.resolve(io.cwd, flag("notes-file") ?? ""), "utf8"));
           } catch {
             throw new UsageError("surfaces learn: --notes-file must be a JSON array of strings");
           }
           if (!Array.isArray(notes) || !notes.every((n) => typeof n === "string" && n.trim())) throw new UsageError("surfaces learn: --notes-file must be a JSON array of strings");
-          const before = (0, import_node_fs11.readFileSync)(file, "utf8");
+          const before = (0, import_node_fs12.readFileSync)(file, "utf8");
           const r2 = appendLearned(before, ts().slice(0, 10), notes, flag("heading") ?? "Learned");
-          (0, import_node_fs11.writeFileSync)(file, r2.text);
+          (0, import_node_fs12.writeFileSync)(file, r2.text);
           const cur = readLocal(io.cwd).surfaces[name];
           if (cur && cur.state === "allowed" && cur.hash === surfaceHash(before)) updateLocal(io.cwd, (s2) => ({ ...s2, surfaces: { ...s2.surfaces, [name]: { ...cur, hash: surfaceHash(r2.text) } } }));
           return json({ name, count: r2.count });
@@ -14126,7 +14231,12 @@ function run(argv, io) {
         throw new UsageError("usage: forge local get [surfaces.<name>] | set surfaces.<name> allowed|denied|none");
       }
       case "swarm":
-        return swarmCommand(args, io, { git: io.git ?? defaultGit(io.cwd), exec: io.exec ?? defaultExec(io.cwd), repo: repoReader(io.cwd) });
+        return swarmCommand(args, io, {
+          git: io.git ?? defaultGit(io.cwd),
+          exec: io.exec ?? defaultExec(io.cwd),
+          repo: repoReader(io.cwd),
+          at: (dir) => ({ git: defaultGit(dir), exec: defaultExec(dir), repo: repoReader(dir) })
+        });
       case "hook": {
         return { code: 0, stdout: args[0] === "stop" ? hookStop(io) : "", stderr: "" };
       }
@@ -14150,7 +14260,7 @@ function run(argv, io) {
           const current = parseRun(readRunText(io.cwd));
           if (current?.active && stopReason(current, stopContext(io.cwd, io.now())) === null) throw new UsageError("infinite start: a run is already active (forge stop, or forge infinite status)");
           forgeDir(io.cwd);
-          (0, import_node_fs11.rmSync)(stopFile(io.cwd), { force: true });
+          (0, import_node_fs12.rmSync)(stopFile(io.cwd), { force: true });
           const run2 = startRun(io.now(), { ...cycles !== void 0 ? { cycles } : {}, ...hours !== void 0 ? { hours } : {} }, queueMax, session ?? null);
           saveRun(io.cwd, run2);
           return json(run2);
@@ -14169,7 +14279,7 @@ function run(argv, io) {
         let error;
         if (flag("error-file") !== void 0) {
           try {
-            error = (0, import_node_fs11.readFileSync)(import_node_path12.default.resolve(io.cwd, flag("error-file")), "utf8");
+            error = (0, import_node_fs12.readFileSync)(import_node_path13.default.resolve(io.cwd, flag("error-file")), "utf8");
           } catch {
             throw new UsageError("cycle: cannot read --error-file");
           }
@@ -14183,15 +14293,15 @@ function run(argv, io) {
       }
       case "stop": {
         forgeDir(io.cwd);
-        (0, import_node_fs11.writeFileSync)(stopFile(io.cwd), `${ts()}
+        (0, import_node_fs12.writeFileSync)(stopFile(io.cwd), `${ts()}
 `);
         const current = parseRun(readRunText(io.cwd));
         if (current?.active) {
           saveRun(io.cwd, endRun(current, "stopped"));
           appendEvent(io.cwd, { ts: ts(), kind: "cycle", action: "stopped", reason: "stopped" });
         }
-        const swarm = readSwarm(io.cwd);
-        if (swarm?.active) saveSwarm(io.cwd, { ...swarm, active: false, stopReason: "stopped", sleepUntil: null });
+        const exec = readExecution(io.cwd);
+        if (exec?.active) saveExecution(io.cwd, { ...exec, active: false, stopReason: "stopped", sleepUntil: null });
         return ok("ok");
       }
       case "waypoint-cli": {
@@ -14234,7 +14344,7 @@ var cwd = process.cwd();
 var stdin = "";
 if (process.argv[2] === "hook" && !process.stdin.isTTY) {
   try {
-    stdin = (0, import_node_fs12.readFileSync)(0, "utf8");
+    stdin = (0, import_node_fs13.readFileSync)(0, "utf8");
   } catch {
     stdin = "";
   }
