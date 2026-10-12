@@ -69,7 +69,10 @@ describe('status.json', () => {
 
 describe('config', () => {
   it('defaults when there is no file', () => {
-    expect(parseConfig(null)).toEqual({ profile: 'balanced', validatorTimeoutSec: 600, swarm: { parallel: 5 } });
+    expect(parseConfig(null)).toEqual({
+      profile: 'balanced', detect: true, exclude: [], verify: { limits: { checks: 8, shots: 10, minutes: 10 } },
+      evidence: 'upload', validatorTimeoutSec: 600, swarm: { parallel: 5 },
+    });
   });
   it('reads validators and profile', () => {
     const c = parseConfig('profile: economy\nvalidators:\n  - name: unit\n    cmd: npm test\n    kind: test\n');

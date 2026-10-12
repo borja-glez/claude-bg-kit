@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { ExecResult } from './cli/run.js';
 import type { ForgeConfig } from './config.js';
 
-export interface Validator { name: string; cmd: string; kind: 'test' | 'lint' | 'typecheck' | 'build' | 'other'; affects?: string[] }
+export interface Validator { name: string; cmd: string; kind: string; affects?: string[] }
 // A flaky result (failed, then passed on the retry) is ok: true; its first failures are kept for the record.
 export interface ValidatorResult { validator: string; ok: boolean; flaky: boolean; durationMs: number; failures: string[] }
 // list(dir) lists the entries of a directory relative to the repo root (the root itself when omitted).
