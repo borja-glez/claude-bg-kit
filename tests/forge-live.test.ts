@@ -1,0 +1,60 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { run, defaultGit, type Io } from '../src/forge/cli/run.js';
+import { nextLive, liveFile } from '../src/forge/live.js';
+import { saveExecution, readExecution } from '../src/forge/execution.js';
+
+const T = '2026-10-12T12:00:00.000Z';
+describe('nextLive', () => {
+  const ctx = { sessionId: 's1', role: 'coordinator' as const, runId: 'r1', task: null, now: T };
+  it('tracks subagents and the end of the session', () => {
+    let d = nextLive(null, { event: 'SessionStart' }, ctx);
+    expect(d).toMatchObject({ sessionId: 's1', role: 'coordinator', runId: 'r1', ended: false, agents: [] });
+    d = nextLive(d, { event: 'SubagentStart', agentId: 'a1', agentType: 'forge:forge-impl' }, ctx);
+    d = nextLive(d, { event: 'SubagentStart', agentId: 'a1', agentType: 'forge:forge-impl' }, ctx);
+    expect(d.agents).toEqual([{ id: 'a1', type: 'forge:forge-impl', since: T }]);
+    d = nextLive(d, { event: 'SubagentStop', agentId: 'a1' }, ctx);
+    expect(d.agents).toEqual([]);
+    d = nextLive(d, { event: 'SessionEnd' }, ctx);
+    expect(d).toMatchObject({ ended: true, event: 'SessionEnd' });
+  });
+});
+
+describe('forge hook live', () => {
+  let root: string; let io: Io;
+  const git = (...a: string[]) => execFileSync('git', a, { cwd: root, encoding: 'utf8' }).trim();
+  beforeEach(() => {
+    root = mkdtempSync(path.join(tmpdir(), 'forge-live-'));
+    git('init', '-q', '-b', 'main'); git('config', 'user.email', 'a@b.c'); git('config', 'user.name', 't');
+    writeFileSync(path.join(root, 'x.txt'), 'x'); git('add', '.'); git('commit', '-qm', 'init');
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    io = { cwd: root, now: () => new Date(T), git: defaultGit(root) };
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+  const hook = (input: object) => run(['hook', 'live'], { ...io, stdin: JSON.stringify(input) });
+  const exec = (over: object = {}) => saveExecution(root, {
+    runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,
+    coordinator: 'main', hookSession: 's1', active: true, stopReason: null, stallReason: null, startedAt: T, lastStepAt: null, lastBlockStep: null, sleepUntil: null, tasks: {}, ...over,
+  });
+  it('writes nothing without an active execution, or for another session', () => {
+    expect(hook({ session_id: 's1', hook_event_name: 'SubagentStart', agent_id: 'a1', agent_type: 'x' }).stdout).toBe('');
+    expect(existsSync(liveFile(root, 's1'))).toBe(false);
+    exec();
+    hook({ session_id: 's2', hook_event_name: 'SubagentStart', agent_id: 'a1', agent_type: 'x' });
+    expect(existsSync(liveFile(root, 's2'))).toBe(false);
+  });
+  it('records the coordinator signal, and the Stop hook refreshes it', () => {
+    exec();
+    hook({ session_id: 's1', hook_event_name: 'SubagentStart', agent_id: 'a1', agent_type: 'forge:forge-impl' });
+    expect(JSON.parse(readFileSync(liveFile(root, 's1'), 'utf8'))).toMatchObject({ role: 'coordinator', runId: 'r1', agents: [{ id: 'a1' }] });
+    run(['hook', 'stop'], { ...io, now: () => new Date('2026-10-12T12:03:00.000Z'), stdin: JSON.stringify({ session_id: 's1' }) });
+    expect(JSON.parse(readFileSync(liveFile(root, 's1'), 'utf8'))).toMatchObject({ event: 'Stop', ts: '2026-10-12T12:03:00.000Z' });
+  });
+  it('fails open on junk input', () => {
+    exec();
+    expect(run(['hook', 'live'], { ...io, stdin: '{oops' })).toMatchObject({ code: 0, stdout: '' });
+  });
+});

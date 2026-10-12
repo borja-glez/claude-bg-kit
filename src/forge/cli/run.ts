@@ -24,6 +24,7 @@ import { detectValidators, selectValidators, runValidators, markPreexisting, blo
 import { checkTools, missingTools } from '../tools.js';
 import { verifyPlan, cleanupPids, killTarget } from '../verify.js';
 import { readLocal, updateLocal } from '../local.js';
+import { hookLive } from '../live.js';
 import { readSurfaces, detectDrafts, appendLearned, surfaceFile, surfaceHash } from '../surfaces.js';
 
 export interface ExecResult { code: number; output: string; ms: number; timedOut: boolean }
@@ -173,6 +174,7 @@ function stopContext(cwd: string, now: Date): StopContext {
 // (an execution runs inside its cycles); otherwise an active execution decides.
 function hookStop(io: Io): string {
   try {
+    hookLive(io, 'Stop');
     const input: unknown = JSON.parse(io.stdin ?? '');
     if (!input || typeof input !== 'object' || Array.isArray(input)) return '';
     const hookInput = input as { stop_hook_active?: boolean; session_id?: unknown };
@@ -636,7 +638,7 @@ export function run(argv: string[], io: Io): Result {
           at: dir => ({ git: defaultGit(dir), exec: defaultExec(dir), repo: repoReader(dir) }),
         });
       case 'hook': {
-        return { code: 0, stdout: args[0] === 'stop' ? hookStop(io) : '', stderr: '' };
+        return { code: 0, stdout: args[0] === 'stop' ? hookStop(io) : args[0] === 'live' ? hookLive(io) : '', stderr: '' };
       }
       case 'infinite': {
         const sub = args[0];

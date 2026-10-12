@@ -278,4 +278,9 @@ describe('plugin layout', () => {
     expect(md).toMatch(/evidence: local/);
     expect(md).toMatch(/organization-internal|no longer be shared publicly/);
   });
+  it('forge registers the live hooks', () => {
+    const hooks = read('plugins/forge/hooks/hooks.json');
+    for (const ev of ['SessionStart', 'SessionEnd', 'SubagentStart', 'SubagentStop', 'Stop']) expect(hooks).toContain(`"${ev}"`);
+    expect(hooks).toContain('hook live');
+  });
 });
