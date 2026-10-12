@@ -104,6 +104,13 @@ describe('plugin layout', () => {
       expect(read(`plugins/forge/agents/forge-${a}.md`)).toMatch(/Change the project's files with the Edit and Write tools, never with `sed -i`.*forge's own work files.*is fine/s);
     }
   });
+  it('run skill: an ephemeral run is published on the roadmap as loose tasks when there is one', () => {
+    const md = read('plugins/forge/skills/run/SKILL.md');
+    for (const w of ['kind: "plan", loose: []', '**Ephemeral run.**', 'kind: "ephemeral"', '.forge/loose.json', '`queued`', '`accepted` → `running`',
+      'never `plan.yaml` nor `state/T`', 'No roadmap → publish nothing', 'active: false']) {
+      expect(md).toContain(w);
+    }
+  });
   it('the run skill logs done at the end and never commits unrelated changes on its own', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
     expect(md).toContain('7. Log the phase `done`');

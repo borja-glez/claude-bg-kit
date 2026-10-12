@@ -2,7 +2,7 @@ import { computeMetrics, type Metrics } from '../lib/metrics.js';
 import { autoTicks, groupIds, layoutRows, NONE_GROUP, planRange, SPAN, windowAt, windowFor, type GroupBy, type Row, type Win, type Zoom } from '../lib/timeline.js';
 import { burndown, criticalPath, forecast, zoneHeat } from '../lib/insights.js';
 import { escalationCandidates, liveness, sessionLiveness, zonesOf } from '../lib/coordination.js';
-import { TRACK_COLORS, type RunDoc, type EventDoc, type EventType, type InfiniteDoc, type MessageDoc, type MessageType, type MetaDoc, type NoteDoc, type NoteType, type PlanStatus, type PlanView, type SessionDoc, type States, type TaskState, type TaskStatus } from '../lib/types.js';
+import { LOOSE_STATUSES, TRACK_COLORS, type RunDoc, type EventDoc, type EventType, type InfiniteDoc, type MessageDoc, type MessageType, type MetaDoc, type NoteDoc, type NoteType, type PlanStatus, type PlanView, type SessionDoc, type States, type TaskState, type TaskStatus } from '../lib/types.js';
 import { counts, filterNotes, MAX_NOTE, NOTE_TYPES, type NoteFilter } from '../lib/notes.js';
 import { buildVersionColumns, type VersionColumn } from '../lib/versions.js';
 import { canDecide, MAX_PROPOSAL_TEXT, PROPOSAL_CATEGORIES, PROPOSAL_RISKS, PROPOSAL_STATUSES, type ProposalCategory, type ProposalDoc, type ProposalRisk, type ProposalStatus } from '../lib/proposals.js';
@@ -113,6 +113,7 @@ export function renderApp(m: Model, ui: UiState): string {
     ? `${renderProposalsView(m, d, ui, loc)}`
     : `${renderHeader(m, d, x)}
     ${renderCards(m, d, x, loc)}
+    ${renderLoose(m, d)}
     ${renderSessions(m, d)}
     ${renderTimeline(m, d, ui, loc)}
     ${renderInsights(m, d, ui, loc)}`;
@@ -159,7 +160,8 @@ function runPill(m: Model, d: Dict): string {
   const coord = m.sessions[r.coordinator];
   const l = coord ? sessionLiveness(coord, m.now) : 'stopped';
   const extra = l === 'silent' ? ` · ${d.run.silentSince(hhmm(coord?.heartbeatAt))}` : l === 'stopped' ? ` · ${d.run.stoppedSince(hhmm(coord?.heartbeatAt))}` : '';
-  return ` <span class="pill run ${l === 'alive' ? '' : l === 'silent' ? 'warn' : 'stopped'}">${esc(d.run.pill(d.run.mode[r.mode], r.slots.length, r.parallel) + extra)}</span>`;
+  const pill = r.kind === 'ephemeral' ? d.run.loosePill : d.run.pill;
+  return ` <span class="pill run ${l === 'alive' ? '' : l === 'silent' ? 'warn' : 'stopped'}">${esc(pill(d.run.mode[r.mode], r.slots.length, r.parallel) + extra)}</span>`;
 }
 
 const liveDot = (l: 'alive' | 'silent' | 'stopped') => `<span class="dot live-${l}">●</span>`;
@@ -271,12 +273,31 @@ function renderRunBlock(m: Model, d: Dict): string {
     const ex = m.states[s.task]?.exec;
     const l = ex ? liveness(m.now, ex.leaseUntil) : coord ? sessionLiveness(coord, m.now) : 'stopped';
     const age = mins(Date.parse(s.since), m.now);
-    return `<div class="sc slot"><h3>${liveDot(l)} <span class="pe">${esc(s.task)}</span> ${esc(task?.title ?? '')}</h3>
+    const title = task?.title ?? r.loose.find(x => x.id === s.task)?.title ?? '';
+    return `<div class="sc slot"><h3>${liveDot(l)} <span class="pe">${esc(s.task)}</span> ${esc(title)}</h3>
       <div class="mono">${esc(d.run.stage[s.stage] ?? s.stage)}${s.agent ? ` · ${esc(s.agent)}` : ''} · ${esc(d.ago(age))}</div></div>`;
   };
   const free = Math.max(0, r.parallel - r.slots.length);
-  return `<section class="run"><div class="lbl">${esc(d.run.title)} · ${esc(d.run.mode[r.mode])} · ${esc(d.run.slots(r.slots.length, r.parallel))} · ${esc(d.run.coordinator)}: ${esc(r.coordinator)}</div>
+  const head = r.kind === 'ephemeral'
+    ? `${esc(d.run.loosePill(d.run.mode[r.mode], r.slots.length, r.parallel))} · ${esc(d.run.coordinator)}: ${esc(r.coordinator)}`
+    : `${esc(d.run.title)} · ${esc(d.run.mode[r.mode])} · ${esc(d.run.slots(r.slots.length, r.parallel))} · ${esc(d.run.coordinator)}: ${esc(r.coordinator)}`;
+  return `<section class="run"><div class="lbl">${head}</div>
     <div class="sgrid">${r.slots.map(slot).join('')}${Array.from({ length: free }, () => `<div class="sc slot free"><h3>${esc(d.run.free)}</h3></div>`).join('')}</div></section>`;
+}
+
+/** The loose tasks of an active ephemeral run (spec §4.4). They are not plan tasks: no progress, filters, timeline or orphans. */
+function renderLoose(m: Model, d: Dict): string {
+  const r = m.run;
+  if (!r || !r.active || r.kind !== 'ephemeral' || !r.loose.length) return '';
+  // A loose task has no state/T.exec: its dot is the coordinator's liveness, as a slot without one.
+  const coord = m.sessions[r.coordinator];
+  const l = coord ? sessionLiveness(coord, m.now) : 'stopped';
+  const rows = r.loose.map(t => {
+    const status = oneOf(LOOSE_STATUSES, t.status, 'queued');
+    const parts = [d.run.looseStatus[status], t.stage ? d.run.stage[t.stage] ?? t.stage : null, t.agent];
+    return `<li class="lt st-${status}">${liveDot(l)} <span class="k">${esc(t.id)}</span> <span class="lab">${esc(t.title)}</span> <span class="mono">${parts.filter(Boolean).map(p => esc(String(p))).join(' · ')}</span></li>`;
+  }).join('');
+  return `<section class="loose card"><div class="lbl">${esc(d.run.looseTitle)} (${r.loose.length})</div><ul class="lts">${rows}</ul></section>`;
 }
 
 function renderSessionsView(m: Model, d: Dict): string {

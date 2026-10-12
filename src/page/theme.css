@@ -328,6 +328,10 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
 .pill.run.stopped{background:var(--red)}
 section.run{margin-bottom:16px}
 section.run .slot.free{opacity:.45;border-style:dashed}
+section.loose{margin:12px 0}
+section.loose .lts{list-style:none;margin:0;padding:0}
+section.loose .lt{display:flex;gap:8px;align-items:baseline;padding:3px 0}
+section.loose .lt .mono{margin-left:auto}
 .dot.live-alive{color:var(--green)}
 .dot.live-silent{color:var(--yellow)}
 .dot.live-stopped{color:var(--red)}

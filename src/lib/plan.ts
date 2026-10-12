@@ -1,10 +1,10 @@
 import { parse } from 'yaml';
 import { z } from 'zod';
 import { TRACK_COLORS, type Plan } from './types.js';
+import { PLAN_ID_RE as SEG, isPlanId } from './ids.js';
 
-const SEG = /^[A-Za-z0-9_.-]{1,64}$/;
-/** The plan's rule for task, track and phase ids. */
-export const isPlanId = (s: string): boolean => SEG.test(s) && s !== '.' && s !== '..';
+/** The plan's rule for task, track and phase ids (src/lib/ids.ts, free of yaml and zod for the page). */
+export { isPlanId };
 const id = z.string()
   .regex(SEG, 'invalid id (allowed: letters, digits, _ - .; max 64)')
   .refine(s => s !== '.' && s !== '..', 'invalid id');

@@ -1,5 +1,6 @@
 export { normalizeNote } from '../lib/notes.js';
-import { STAGES, type Commit, type EventDoc, type InfiniteDoc, type MessageDoc, type MetaDoc, type PhaseDoc, type PlanTask, type PlanTrack, type RunDoc, type SessionDoc, type Stage, type TaskExec, type TaskState } from '../lib/types.js';
+import { isPlanId } from '../lib/ids.js';
+import { LOOSE_MAX_TASKS, LOOSE_STATUSES, STAGES, type LooseRunTask, type LooseStatus, type Commit, type EventDoc, type InfiniteDoc, type MessageDoc, type MetaDoc, type PhaseDoc, type PlanTask, type PlanTrack, type RunDoc, type SessionDoc, type Stage, type TaskExec, type TaskState } from '../lib/types.js';
 
 // Documents in the shared db are untrusted and may be malformed: coerce them into the shapes the renderer expects.
 type Obj = Record<string, unknown>;
@@ -124,8 +125,27 @@ export function normalizeRun(x: unknown): RunDoc | null {
   const slots = (Array.isArray(x.slots) ? x.slots : []).filter(isObj)
     .filter(s => typeof s.task === 'string' && typeof s.stage === 'string' && (STAGES as readonly unknown[]).includes(s.stage) && typeof s.by === 'string' && isoOrNull(s.since))
     .slice(0, 10).map(s => ({ task: s.task as string, stage: s.stage as Stage, agent: typeof s.agent === 'string' ? s.agent : null, by: s.by as string, since: s.since as string }));
+  const kind = x.kind === 'ephemeral' ? 'ephemeral' : 'plan';
   return { runId: x.runId, mode, parallel, branch: x.branch, mergeOnFinish: x.mergeOnFinish === true, active: x.active === true,
-    stopReason: typeof x.stopReason === 'string' ? x.stopReason : null, coordinator: x.coordinator, slots };
+    stopReason: typeof x.stopReason === 'string' ? x.stopReason : null, coordinator: x.coordinator, slots,
+    kind, loose: kind === 'ephemeral' ? normalizeLoose(x.loose) : [] };
+}
+
+/** meta/run.loose: valid ids (the plan's rule), no repeats, a title, a known status; stage and agent or null. At most LOOSE_MAX_TASKS. */
+function normalizeLoose(x: unknown): LooseRunTask[] {
+  const out: LooseRunTask[] = [];
+  for (const t of arr(x)) {
+    if (out.length >= LOOSE_MAX_TASKS) break;
+    if (!isObj(t) || typeof t.id !== 'string' || !isPlanId(t.id) || out.some(o => o.id === t.id)) continue;
+    const title = typeof t.title === 'string' ? t.title.trim().slice(0, 200) : '';
+    if (!title || !(LOOSE_STATUSES as readonly unknown[]).includes(t.status)) continue;
+    out.push({
+      id: t.id, title, status: t.status as LooseStatus,
+      stage: (STAGES as readonly unknown[]).includes(t.stage) ? (t.stage as Stage) : null,
+      agent: typeof t.agent === 'string' && t.agent ? t.agent.slice(0, 80) : null,
+    });
+  }
+  return out;
 }
 
 /** meta/infinite: active only when exactly true, cycle a non-negative integer (else 0), budget kept only when positive. */

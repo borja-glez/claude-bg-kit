@@ -40,7 +40,14 @@ export interface RunDoc {
   runId: string; mode: 'subagents' | 'sessions'; parallel: number; branch: string; mergeOnFinish: boolean;
   active: boolean; stopReason: string | null; coordinator: string;
   slots: { task: string; stage: Stage; agent: string | null; by: string; since: string }[];
+  kind: 'plan' | 'ephemeral'; loose: LooseRunTask[];
 }
+/** The most requests one ephemeral run takes (spec §4.4); src/forge/loose.ts re-exports it. */
+export const LOOSE_MAX_TASKS = 20;
+export type LooseStatus = 'queued' | 'running' | 'integrated' | 'conflict' | 'blocked';
+export const LOOSE_STATUSES: readonly LooseStatus[] = ['queued', 'running', 'integrated', 'conflict', 'blocked'];
+/** A loose task of an ephemeral run as the roadmap shows it: never a plan task, never a state/T. */
+export interface LooseRunTask { id: string; title: string; status: LooseStatus; stage: Stage | null; agent: string | null }
 /** Who runs a task of a forge execution and how; written by its executor, read by the roadmap, lens and the scheduler. */
 export interface TaskExec {
   runId: string; mode: 'subagents' | 'sessions' | 'manual'; by: string; agent?: string | null;

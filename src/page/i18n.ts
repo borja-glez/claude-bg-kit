@@ -1,4 +1,4 @@
-import type { EventType, MessageType, NoteType, TaskStatus } from '../lib/types.js';
+import type { EventType, LooseStatus, MessageType, NoteType, TaskStatus } from '../lib/types.js';
 import type { ProposalCategory, ProposalRisk, ProposalStatus } from '../lib/proposals.js';
 
 const ago = (es: boolean) => (m: number) =>
@@ -43,6 +43,8 @@ const en = {
     role: { coordinator: 'coordinator', executor: 'executor', manual: 'manual' }, orphan: 'orphaned', lastSignal: (t: string) => `stopped · last signal ${t}`,
     mode: { subagents: 'subagents', sessions: 'sessions' } as Record<string, string>,
     stage: { brief: 'brief', implement: 'implement', validate: 'validate', verify: 'verify', review: 'review', verdict: 'verdict', integrate: 'integrate' } as Record<string, string>,
+    loosePill: (mode: string, n: number, max: number) => `▶ loose tasks · ${mode} ${n}/${max}`, looseTitle: 'Loose tasks',
+    looseStatus: { queued: 'queued', running: 'running', integrated: 'integrated', conflict: 'conflict', blocked: 'blocked' } as Record<LooseStatus, string>,
   },
   infinite: (n: number, max?: number) => `∞ cycle ${n}${max ? `/${max}` : ''}`,
   byTrack: 'By track',
@@ -116,6 +118,8 @@ const es: Dict = {
     role: { coordinator: 'coordinadora', executor: 'ejecutora', manual: 'manual' }, orphan: 'huérfana', lastSignal: (t: string) => `parada · última señal ${t}`,
     mode: { subagents: 'subagentes', sessions: 'sesiones' } as Record<string, string>,
     stage: { brief: 'brief', implement: 'implementar', validate: 'validar', verify: 'verificar', review: 'revisar', verdict: 'veredicto', integrate: 'integrar' } as Record<string, string>,
+    loosePill: (mode: string, n: number, max: number) => `▶ tareas sueltas · ${mode} ${n}/${max}`, looseTitle: 'Tareas sueltas',
+    looseStatus: { queued: 'en cola', running: 'en curso', integrated: 'integrada', conflict: 'conflicto', blocked: 'bloqueada' },
   },
   infinite: (n: number, max?: number) => `∞ ciclo ${n}${max ? `/${max}` : ''}`,
   byTrack: 'Por frentes',

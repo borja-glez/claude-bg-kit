@@ -14,3 +14,7 @@ export function eventId(d: Date, sessionId: string, rand: () => number = Math.ra
   const r = Math.floor(rand() * 36 ** 4).toString(36).padStart(4, '0');
   return `${compactTs(d)}-${sessionId}-${r}`;
 }
+
+/** The plan's rule for task, track and phase ids, also for loose tasks: letters, digits, _ - .; at most 64; not . or .. */
+export const PLAN_ID_RE = /^[A-Za-z0-9_.-]{1,64}$/;
+export const isPlanId = (s: string): boolean => PLAN_ID_RE.test(s) && s !== '.' && s !== '..';

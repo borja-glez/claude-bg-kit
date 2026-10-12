@@ -420,9 +420,80 @@ describe('proposals view', () => {
 });
 
 const runDoc = (over: object = {}) => ({ runId: 'r1', mode: 'subagents' as const, parallel: 3, branch: 'forge/run-demo-shop', mergeOnFinish: false, active: true, stopReason: null, coordinator: 'main',
-  slots: [{ task: 'T002', stage: 'implement' as const, agent: 'forge-impl-heavy', by: 'main', since: new Date(NOW - 7 * 60000).toISOString() }], ...over });
+  slots: [{ task: 'T002', stage: 'implement' as const, agent: 'forge-impl-heavy', by: 'main', since: new Date(NOW - 7 * 60000).toISOString() }], kind: 'plan' as const, loose: [], ...over });
+const looseRun = (over: object = {}) => runDoc({
+  runId: 'loose-1', kind: 'ephemeral' as const, branch: 'main', parallel: 2,
+  slots: [{ task: 'fix-cart', stage: 'implement' as const, agent: 'forge-mech', by: 'main', since: new Date(NOW - 3 * 60000).toISOString() }],
+  loose: [
+    { id: 'fix-cart', title: 'Fix the cart', status: 'running' as const, stage: 'implement' as const, agent: 'forge-mech' },
+    { id: 'docs-typo', title: 'Typo in the README', status: 'queued' as const, stage: null, agent: null },
+    { id: 'bump', title: 'Bump the version', status: 'integrated' as const, stage: 'integrate' as const, agent: null },
+  ],
+  ...over,
+});
+const looseSection = (html: string) => { const i = html.indexOf('<section class="loose'); return i < 0 ? '' : html.slice(i, html.indexOf('</section>', i)); };
 
 describe('execution', () => {
+  it('an ephemeral run reads as loose tasks in the pill and the sessions run block, with the loose titles in its slots', () => {
+    const m = base();
+    m.run = looseRun();
+    m.sessions.main = { ...m.sessions.main, role: 'coordinator', leaseUntil: new Date(NOW + 5 * 60000).toISOString() };
+    expect(renderApp(m, ui())).toContain('▶ tareas sueltas · subagentes 1/2');
+    const sv = renderApp(m, ui({ view: 'sessions' }));
+    expect(sv).toMatch(/<section class="run"><div class="lbl">▶ tareas sueltas · subagentes 1\/2 · coordinadora: main/);
+    expect(sv).not.toContain('▶ ejecución');
+    expect(sv).toContain('Fix the cart');
+    expect(sv).toContain('libre'); // parallel 2, one slot: one free place
+    const en = { ...m, meta: { ...m.meta!, locale: 'en' } };
+    expect(renderApp(en, ui())).toContain('▶ loose tasks · subagents 1/2');
+    expect(renderApp(en, ui({ view: 'sessions' }))).toContain('▶ loose tasks · subagents 1/2 · coordinator: main');
+  });
+  it('the tracking view lists the loose tasks with status, stage, agent and the slot liveness dot', () => {
+    const m = base();
+    m.run = looseRun();
+    m.sessions.main = { ...m.sessions.main, leaseUntil: new Date(NOW + 5 * 60000).toISOString() };
+    const sec = looseSection(renderApp(m, ui()));
+    expect(sec).toContain('Tareas sueltas');
+    expect(sec).toMatch(/live-alive[^]*fix-cart[^]*Fix the cart[^]*en curso · implementar · forge-mech/);
+    expect(sec).toMatch(/docs-typo[^]*Typo in the README[^]*en cola/);
+    expect(sec).toMatch(/bump[^]*Bump the version[^]*integrada · integrar/);
+    m.sessions.main = { ...m.sessions.main, leaseUntil: new Date(NOW - 20 * 60000).toISOString() };
+    expect(looseSection(renderApp(m, ui()))).toContain('live-stopped');
+    expect(looseSection(renderApp({ ...m, meta: { ...m.meta!, locale: 'en' } }, ui()))).toMatch(/Loose tasks[^]*running · implement · forge-mech/);
+    // Only while an ephemeral run is active.
+    expect(looseSection(renderApp({ ...m, run: runDoc() }, ui()))).toBe('');
+    expect(looseSection(renderApp({ ...m, run: looseRun({ active: false }) }, ui()))).toBe('');
+  });
+  it('loose tasks do not count in the plan progress, filters or timeline, and never show as orphaned', () => {
+    const m = base();
+    const open = ui({ expanded: new Set(['F1', 'F2']) });
+    const progress = (h: string) => h.match(/<b>\d+<\/b>\/\d+ (tareas|tasks)/)![0];
+    const before = renderApp(m, open);
+    m.run = looseRun();
+    m.sessions.main = { ...m.sessions.main, leaseUntil: new Date(NOW - 20 * 60000).toISOString() };
+    const html = renderApp(m, open);
+    expect(progress(html)).toBe(progress(before));
+    expect(html.match(/\d+ %/)![0]).toBe(before.match(/\d+ %/)![0]);
+    expect(html).not.toContain('data-task="fix-cart"');
+    expect(html).not.toContain('data-id="fix-cart"');
+    expect(html).not.toContain('huérfana');
+    expect(timelineSvg(m, ui())).not.toContain('fix-cart');
+    expect(renderApp(m, ui({ view: 'versions' }))).not.toContain('fix-cart');
+    expect(renderApp(m, ui({ statuses: ['in_progress'] }))).not.toContain('data-task="fix-cart"');
+  });
+  it('escapes everything a loose task carries', () => {
+    const m = base();
+    m.run = looseRun({
+      coordinator: HOSTILE,
+      slots: [{ task: 'fix-cart', stage: 'implement', agent: HOSTILE, by: 'main', since: new Date(NOW - 60000).toISOString() }],
+      loose: [{ id: 'fix-cart', title: HOSTILE, status: 'running', stage: 'implement', agent: HOSTILE }],
+    });
+    for (const view of ['tracking', 'sessions'] as const) {
+      const html = renderApp(m, ui({ view }));
+      expect(html).not.toContain('<img src=x');
+      expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    }
+  });
   it('run pill: active, then silent and stopped by the coordinator lease', () => {
     const m = base();
     m.run = runDoc();

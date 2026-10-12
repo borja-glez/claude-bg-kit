@@ -18,6 +18,35 @@ describe('normalizeRun / execution fields', () => {
     expect(normalizeState({ status: 'in_progress', exec: { ...exec, since: 'yesterday-ish' } }).exec).toBeUndefined();
     expect(normalizeState({ status: 'in_progress', exec: { ...exec, leaseUntil: 'soon' } }).exec).toBeUndefined();
   });
+  it('normalizeRun keeps the kind and the loose tasks of an ephemeral run, and drops junk', () => {
+    const run = { runId: 'loose-1', mode: 'subagents', parallel: 2, branch: 'main', coordinator: 'main', active: true, slots: [] };
+    const ok = { id: 'fix-cart', title: '  Fix the cart  ', status: 'running', stage: 'implement', agent: 'forge-mech' };
+    const r = normalizeRun({ ...run, kind: 'ephemeral', loose: [
+      ok,
+      { id: 'docs-typo', title: 'Typo', status: 'queued', stage: null, agent: null },
+      { id: '../etc', title: 'x', status: 'queued', stage: null, agent: null },
+      { id: 'fix-cart', title: 'again', status: 'queued', stage: null, agent: null },
+      { id: 'no-title', title: '   ', status: 'queued', stage: null, agent: null },
+      { id: 'bad-status', title: 'x', status: 'accepted', stage: null, agent: null },
+      { id: 'bad-stage', title: 'x', status: 'running', stage: 'deploy', agent: 7 },
+      'junk', null,
+    ] })!;
+    expect(r.kind).toBe('ephemeral');
+    expect(r.loose).toEqual([
+      { id: 'fix-cart', title: 'Fix the cart', status: 'running', stage: 'implement', agent: 'forge-mech' },
+      { id: 'docs-typo', title: 'Typo', status: 'queued', stage: null, agent: null },
+      { id: 'bad-stage', title: 'x', status: 'running', stage: null, agent: null },
+    ]);
+    expect(normalizeRun({ ...run, kind: 'ephemeral', loose: [{ ...ok, title: 'x'.repeat(300) }] })!.loose[0].title).toHaveLength(200);
+    const many = Array.from({ length: 30 }, (_, i) => ({ ...ok, id: `t${i}` }));
+    expect(normalizeRun({ ...run, kind: 'ephemeral', loose: many })!.loose).toHaveLength(20);
+  });
+  it('normalizeRun reads an older meta/run as a plan run without loose tasks', () => {
+    const run = { runId: 'r1', mode: 'subagents', parallel: 3, branch: 'forge/run-x', coordinator: 'main', active: true, slots: [] };
+    expect(normalizeRun(run)).toMatchObject({ kind: 'plan', loose: [] });
+    expect(normalizeRun({ ...run, kind: 'weird', loose: 'x' })).toMatchObject({ kind: 'plan', loose: [] });
+    expect(normalizeRun({ ...run, kind: 'plan', loose: [{ id: 'a', title: 'a', status: 'queued', stage: null, agent: null }] })!.loose).toEqual([]);
+  });
 });
 
 describe('normalizeMeta', () => {

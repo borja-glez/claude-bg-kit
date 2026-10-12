@@ -3,10 +3,10 @@ import path from 'node:path';
 import { forgeDir } from './ledger.js';
 import { isPlanId } from '../lib/plan.js';
 import type { ExecutionState } from '../lib/execution-state.js';
-import type { PlanView, States } from '../lib/types.js';
+import { LOOSE_MAX_TASKS, type PlanView, type States } from '../lib/types.js';
 
-/** The most requests one ephemeral run takes. */
-export const LOOSE_MAX_TASKS = 20;
+/** The most requests one ephemeral run takes (defined in src/lib/types.ts, where the page reads it). */
+export { LOOSE_MAX_TASKS };
 export type LoosePath = 'trivial' | 'small' | 'medium';
 export interface LooseTask { id: string; title: string; path: LoosePath; zones: string[]; depends_on: string[] }
 export interface LooseDoc { runId: string; tasks: LooseTask[] }
