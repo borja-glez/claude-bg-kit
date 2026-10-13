@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { triage, implementerFor, isMechanical, type RepoFacts } from '../src/forge/triage.js';
+import { triage, implementerFor, isMechanical, announce, type RepoFacts } from '../src/forge/triage.js';
 
 const FILES = ['src/app.ts', 'src/auth/login.ts', 'src/util/format.ts', 'src/db/migrations/001.sql', 'package.json', '.github/workflows/ci.yml',
   ...Array.from({ length: 20 }, (_, i) => `src/feature/f${i}.ts`)];
@@ -79,6 +79,96 @@ describe('triage', () => {
     expect(triage('Gestiona la sesión del usuario', repo(), []).sensitive).toEqual(['auth']);
     // Unicode-aware boundaries: no match inside a longer word.
     expect(triage('Revisa la presesión del texto', repo(), []).sensitive).toEqual([]);
+  });
+  it('a one-line quoted text change is trivial: the session finds the file', () => {
+    const tab = triage('Cambia el título de la pestaña del navegador a «Reparto · gastos del piso».', repo(), []);
+    expect(tab.path).toBe('trivial');
+    expect(tab.reasons).toContain('one quoted text change: the session finds the file');
+    expect(triage('change the page title to "Reparto"', repo(), []).path).toBe('trivial');
+    expect(triage('set the button label as “Guardar cambios”', repo(), []).path).toBe('trivial');
+  });
+  it('a quoted change with more work, or everywhere, or without a change verb is not trivial', () => {
+    expect(triage('change the button text to "Save" and add validation', repo(), []).path).not.toBe('trivial');
+    expect(triage('el botón «Añadir gasto» debería decir «Apuntar gasto» en todas partes', repo(), []).path).not.toBe('trivial');
+    expect(triage('cambia el texto de todos los botones a «Guardar»', repo(), []).path).not.toBe('trivial');
+    expect(triage('rename the heading label to "Totals"', repo(), []).path).not.toBe('trivial');
+    const long = `change the page title to "Reparto" ${'because the old one reads oddly on small screens and people complain'}`;
+    expect(triage(long, repo(), []).path).not.toBe('trivial');
+  });
+  it('a file found only through a quoted literal does not make a wider task trivial', () => {
+    const one = (hit: string) => repo({ [hit]: ['src/app.ts'] });
+    expect(triage('change the button text to "Save" and add validation', one('Save'), []).path).toBe('small');
+    expect(triage('Cambia el texto del botón a «Guardar» y añade validación del importe', one('Guardar'), []).path).toBe('small');
+    const r = triage('el botón «Añadir gasto» debería decir «Apuntar gasto» en todas partes', one('Añadir gasto'), []);
+    expect(r.path).toBe('small');
+    expect(r.files).toEqual(['src/app.ts']);
+  });
+  it('a quoted old value found in one file makes a short change trivial under the copy guards', () => {
+    const one = (hit: string) => repo({ [hit]: ['src/feature/f1.ts'] });
+    for (const t of ['cambia «Añadir gasto» por «Apuntar gasto»', 'Cambia el botón «Añadir gasto» por «Apuntar gasto»']) {
+      const r = triage(t, one('Añadir gasto'), []);
+      expect(r, t).toMatchObject({ path: 'trivial', files: ['src/feature/f1.ts'] });
+      expect(r.reasons).toEqual(['one file, short task']);
+    }
+    expect(triage('change "Add expense" to "Log expense"', one('Add expense'), []).path).toBe('trivial');
+    expect(triage('change the "Add expense" button to "Log expense"', one('Add expense'), []).path).toBe('trivial');
+    // No change verb first: the session judges it, and the reason does not claim nothing was found.
+    const prose = triage('el botón «Añadir gasto» debería decir «Apuntar gasto»', one('Añadir gasto'), []);
+    expect(prose.path).toBe('small');
+    expect(prose.reasons.join(' ')).not.toMatch(/no files located/);
+    expect(prose.reasons).toEqual(['quoted text found in 1 file(s)']);
+    expect(announce({ path: 'small', reasons: prose.reasons, implementer: { self: false, agent: 'forge-impl-light' }, fresh: [], catalog: [] }, 'es'))
+      .toBe('Small → forge-impl-light: texto entre comillas en 1 fichero(s). Puedes corregirlo.');
+    // Without a hit there is no file: still small.
+    expect(triage('cambia «Añadir gasto» por «Apuntar gasto»', repo(), []).path).toBe('small');
+  });
+  it('the copy rule pairs verbs with their own prepositions and only a short of/in phrase after the noun', () => {
+    for (const t of [
+      'Replace the text input with a "textarea"',
+      'Replace the tooltip with a "Popover"',
+      'Change the label component to use a "Badge"',
+      'Update the message queue to "durable"',
+    ]) expect(triage(t, repo(), []).path, t).not.toBe('trivial');
+    expect(triage('Cambia el título de la pestaña del navegador a «Reparto», gracias', repo(), []).path).toBe('trivial');
+    expect(triage('Cambia el título de la pestaña del navegador a «Reparto · gastos del piso» por favor', repo(), []).path).toBe('trivial');
+    expect(triage('change the title of the page to "Reparto", please.', repo(), []).path).toBe('trivial');
+  });
+  it('quoted-literal hits never raise the size: a literal found in several files is left out', () => {
+    const many = (n: number) => repo({ Save: FILES.filter(f => f.startsWith('src/feature/')).slice(0, n) });
+    for (const n of [4, 12]) {
+      const r = triage('change the button text to "Save"', many(n), []);
+      expect(r.path).toBe('trivial');
+      expect(r.files).toEqual([]);
+    }
+    expect(triage('change the page title to "Reparto"', repo({ Reparto: ['index.html', 'README.md'] }), []).path).toBe('trivial');
+  });
+  it('the copy rule wants the change verb first, one clause, no condition and the quoted value at the end', () => {
+    for (const t of [
+      'Add a settings page, set its title to "Settings"',
+      'Create a settings page; set its title to "Settings"',
+      'Refactor the cart store; update the heading to "Cart"',
+      'Change the page title to "Reparto", add a favicon',
+      'Change the page title to "Reparto". Add a favicon too.',
+      'update the error message to "Invalid email" when the email field has no @',
+      'Cambia la lógica para que el mensaje se muestre como «Error» solo si falla la red',
+      'Change the message parser to "strict" mode',
+      'Change how totals are computed so the summary text reads as "Total: X"',
+    ]) expect(triage(t, repo(), []).path, t).not.toBe('trivial');
+    expect(triage('please change the page title to "Reparto"', repo(), []).path).toBe('trivial');
+    expect(triage('Por favor, cambia el título de la página a «Reparto».', repo(), []).path).toBe('trivial');
+    expect(triage('can you set the button label to "Save"?', repo(), []).path).toBe('trivial');
+  });
+  it('a quoted text change on a sensitive zone is still raised', () => {
+    expect(triage('cambia el mensaje de error del login a «Credenciales incorrectas»', repo(), []).path).toBe('medium');
+  });
+  it('greps up to three quoted literals as fixed strings, so a quoted old value locates its file', () => {
+    const asked: string[] = [];
+    const r = triage('cambia el texto del botón «Añadir gasto» a «Apuntar gasto»', { ...repo(), grep: w => { asked.push(w); return w === 'Añadir gasto' ? ['src/app.ts'] : []; } }, []);
+    expect(asked).toEqual(['Añadir gasto', 'Apuntar gasto']);
+    expect(r).toMatchObject({ path: 'trivial', files: ['src/app.ts'] });
+    asked.length = 0;
+    triage('replace "one1" "two2" "three3" "four4" "abc" “' + 'x'.repeat(61) + '”', { ...repo(), grep: w => { asked.push(w); return []; } }, []);
+    expect(asked).toEqual(['one1', 'two2', 'three3']);
   });
   it('a huge task text stays fast and greps at most 20 symbols', () => {
     const asked: string[] = [];
