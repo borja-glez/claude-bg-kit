@@ -132,3 +132,19 @@ describe('loadBandModel · execution files', () => {
     expect((await loadBandModel(none.$)).mode).toBe('work');
   });
 });
+
+describe('loadBandModel · design', () => {
+  it('reads dismissed.json next to the critiques for the pending count', async () => {
+    const root = '/repo';
+    const design = readFileSync(new URL('./fixtures/design.md', import.meta.url), 'utf8');
+    const prop = (n: number) => ({ n, category: 'gap', severity: 'major', section: 'riesgos', problem: 'p', change: 'c' });
+    const files = {
+      [`${root}/docs/waypoint/demo-shop/design.md`]: design,
+      [`${root}/.waypoint/demo-shop/critique-r1.json`]: JSON.stringify({ round: 1, version: 1, scope: 'full', proposals: [prop(1), prop(2), prop(3)] }),
+    };
+    expect(await loadBandModel(fake(root, files).$)).toMatchObject({ mode: 'design', pending: 3 });
+    const { $, reads } = fake(root, { ...files, [`${root}/.waypoint/demo-shop/dismissed.json`]: JSON.stringify({ 1: [2, 3] }) });
+    expect(await loadBandModel($)).toMatchObject({ mode: 'design', pending: 1 });
+    expect(reads).toContain(`${root}/.waypoint/demo-shop/dismissed.json`);
+  });
+});

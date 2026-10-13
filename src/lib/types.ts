@@ -150,6 +150,9 @@ export interface NoteDoc {
   answer?: string;
   answeredBy?: string;
   answeredAt?: string;
+  /** Display names of `author` / `answeredBy`, when the writer stored them. */
+  authorName?: string;
+  answeredByName?: string;
   proposalId?: string;
   decision?: NoteDecision;
 }

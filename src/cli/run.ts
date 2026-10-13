@@ -9,23 +9,25 @@ import { availableTasks, commitShas } from '../lib/deps.js';
 import { pickTask, conflictsFor, recoverableTasks, inboxFor, escalationCandidates, IDLE_MINUTES } from '../lib/coordination.js';
 import { parseDesign, changedSections, DesignError } from '../lib/design.js';
 import { importSpec, SpecImportError } from '../lib/design-import.js';
-import { designGate } from '../lib/design-gate.js';
+import { designGate, mergeDismissed, parseDismissed } from '../lib/design-gate.js';
 import { listVersions, nextVersion, parseChangelog, appendChangelog } from '../lib/history.js';
 import { parseCritique, selectProposals, formatProposals, CritiqueError } from '../lib/critique.js';
 import { buildDesignPageData } from '../design-page/build.js';
 import { eventId, sessionIdFrom } from '../lib/ids.js';
 import { computeMetrics } from '../lib/metrics.js';
-import { normalizeNote, notesSince } from '../lib/notes.js';
+import { normalizeNote, notesSince, noteLines } from '../lib/notes.js';
 import { pickProject } from '../mod/model.js';
 import { BRANCH_RE, mainWorktreeFrom } from '../lib/worktree.js';
 import { planLocale, replyIn } from '../lib/locale.js';
 import { launchRun, type Launcher } from '../lib/launcher.js';
+import { roadmapCapabilities, sharingNotice, syncSummary } from '../lib/publish.js';
+import { loadConfig } from '../forge/config.js';
 import type { MessageDoc, NoteDoc, PhaseDoc, PlanView, SessionDoc, TaskState } from '../lib/types.js';
 
 export interface Io { cwd: string; now: () => Date; rand?: () => number; assetsDir: string; stdin?: string; env?: Record<string, string | undefined> }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|design-validate|design-import|design-snapshot|design-changed|design-gate|critique-check|critique-select|design-page|hook> ...`;
+const USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|design-validate|design-import|design-snapshot|design-changed|design-gate|critique-check|critique-select|critique-dismiss|design-page|hook> ...`;
 
 export function run(argv: string[], io: Io): Result {
   const [cmd, ...args] = argv;
@@ -84,7 +86,9 @@ export function run(argv: string[], io: Io): Result {
           .replace('__SNAPSHOT__', () => JSON.stringify(snapshot).replace(/</g, '\\u003c'));
         mkdirSync(path.dirname(out), { recursive: true });
         writeFileSync(out, html);
-        return ok(out);
+        if (!args.includes('--publish-info')) return ok(out);
+        const internal = evidenceUploaded(io.cwd);
+        return ok(JSON.stringify({ out, capabilities: roadmapCapabilities(internal), internal, say: sharingNotice(p, internal) }));
       }
       case 'sync': {
         const p = loadPlan();
@@ -101,7 +105,7 @@ export function run(argv: string[], io: Io): Result {
         });
         mkdirSync(outDir, { recursive: true });
         for (const [file, body] of Object.entries(files)) writeFileSync(file, JSON.stringify(body, null, 2));
-        return ok(JSON.stringify({ batches }));
+        return ok(JSON.stringify({ batches, say: syncSummary(p) }));
       }
       case 'next': {
         const session = flag('session');
@@ -144,8 +148,13 @@ export function run(argv: string[], io: Io): Result {
       case 'notes': {
         const dir = flag('notes');
         if (!dir) return fail('notes cache missing — list notes first');
+        const localeFlag = flag('locale');
+        if (localeFlag !== undefined && localeFlag !== 'es' && localeFlag !== 'en') return fail('notes: --locale must be es or en', 2);
+        // The plan, when given, names the task ids a line may mention and the language when --locale is not given.
+        const plan = flag('plan') !== undefined ? parsePlan(readFileSync(abs(flag('plan')!), 'utf8')) : null;
+        const locale = localeFlag ?? (plan?.locale?.toLowerCase().startsWith('es') ? 'es' : 'en');
         // No notes directory yet means nobody has written a note: not an error.
-        if (!existsSync(abs(dir))) return ok(JSON.stringify({ notes: [], latest: null }));
+        if (!existsSync(abs(dir))) return ok(JSON.stringify({ notes: [], latest: null, say: [], mentions: [] }));
         if (!statSync(abs(dir)).isDirectory()) return fail('notes cache missing — list notes first');
         const all: (NoteDoc & { id: string })[] = [];
         for (const f of readdirSync(abs(dir)).filter(x => x.endsWith('.json')).sort()) {
@@ -156,7 +165,10 @@ export function run(argv: string[], io: Io): Result {
         }
         const stamps = all.flatMap(n => [Date.parse(n.ts), Date.parse(n.answeredAt ?? '')]).filter(t => !Number.isNaN(t));
         const latest = stamps.length ? new Date(Math.max(...stamps)).toISOString() : null;
-        return ok(JSON.stringify({ notes: notesSince(all, flag('since') ?? null), latest }));
+        const since = flag('since') ?? null;
+        const notes = notesSince(all, since);
+        const { say, mentions } = noteLines(notes, since, locale, new Set(plan?.tasks.map(t => t.id) ?? []));
+        return ok(JSON.stringify({ notes, latest, say, mentions }));
       }
       case 'inbox': {
         const session = flag('session');
@@ -363,7 +375,29 @@ export function run(argv: string[], io: Io): Result {
           try { critique = parseCritique(readFileSync(path.join(local, f), 'utf8')); } catch { critique = null; }
           return [{ round: Number(m[1]), critique }];
         });
-        return ok(JSON.stringify(designGate(readChangelog(path.dirname(file)), critiques)));
+        return ok(JSON.stringify(designGate(readChangelog(path.dirname(file)), critiques, readDismissed(local))));
+      }
+      case 'critique-dismiss': {
+        // waypoint critique-dismiss <design> --round <R> <spec>: the spec is the argument after the design that is not --round's value.
+        const usage = 'usage: waypoint critique-dismiss <design.md> --round <R> <all|1,3>';
+        const rest = args.slice(1);
+        const spec = rest.filter((a, i) => a !== '--round' && rest[i - 1] !== '--round')[0];
+        const roundFlag = flag('round');
+        if (!args[0] || args[0].startsWith('--') || !args.includes('--round') || !spec || spec.startsWith('--')) return fail(usage, 2);
+        if (!roundFlag || !/^[1-9]\d*$/.test(roundFlag)) return fail('critique-dismiss: --round must be a positive integer', 2);
+        const round = Number(roundFlag);
+        const d = parseDesign(readFileSync(abs(args[0]), 'utf8'));
+        const local = path.join(io.cwd, '.waypoint', d.meta.project);
+        const critiqueFile = path.join(local, `critique-r${round}.json`);
+        if (!existsSync(critiqueFile)) return fail(`critique-dismiss: no critique for round ${round} (${critiqueFile})`, 2);
+        let numbers: number[];
+        try { numbers = selectProposals(parseCritique(readFileSync(critiqueFile, 'utf8')), spec).map(p => p.n); } catch (e) {
+          if (e instanceof CritiqueError) return fail(`critique-dismiss: ${e.message}`, 2);
+          throw e;
+        }
+        const next = mergeDismissed(readDismissed(local), round, numbers);
+        writeFileSync(path.join(local, 'dismissed.json'), JSON.stringify(next, null, 2) + '\n');
+        return ok(JSON.stringify({ round, dismissed: next[round] }));
       }
       case 'critique-check': {
         const c = parseCritique(readFileSync(abs(args[0]), 'utf8'));
@@ -562,6 +596,19 @@ function readDocs<T = unknown>(dir: string | undefined): Record<string, T> {
       .filter(f => f.endsWith('.json'))
       .map(f => [f.slice(0, -5), JSON.parse(readFileSync(path.join(dir, f), 'utf8')) as T]),
   );
+}
+
+// forge uploads its verification screenshots to the roadmap (the `assets` capability) when the repository has a .forge/
+// directory and its config does not say `evidence: local`. An unreadable config counts as forge's default, upload.
+function evidenceUploaded(root: string): boolean {
+  if (!existsSync(path.join(root, '.forge'))) return false;
+  try { return loadConfig(root).evidence !== 'local'; } catch { return true; }
+}
+
+// .waypoint/<project>/dismissed.json: the proposals the person set aside, by round (missing or junk: none).
+function readDismissed(local: string) {
+  const f = path.join(local, 'dismissed.json');
+  return parseDismissed(existsSync(f) ? readFileSync(f, 'utf8') : null);
 }
 
 function readChangelog(designDir: string) {

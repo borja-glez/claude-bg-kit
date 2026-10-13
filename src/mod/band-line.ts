@@ -10,6 +10,7 @@ export function clip(text: string, max = TITLE_MAX): string {
 export const TEXT = {
   es: {
     design: 'DISEÑO', proposals: 'propuestas', proposal: 'propuesta', critical: 'críticas', criticalOne: 'crítica', noCritique: 'sin crítica aún',
+    pending: 'pendientes', pendingOne: 'pendiente', nothingPending: 'sin pendientes',
     noTask: 'sin tarea en curso', track: 'frente', tasks: 'tareas', overall: 'global', decision: 'decisión pendiente',
     applyAll: 'Aplicar todas', pick: 'Elegir…', round: 'Otra ronda', rewrite: 'Reescribir', interview: 'Preguntarme',
     approve: 'Aprobar', viewDesign: 'Ver diseño', nextTask: 'Siguiente tarea', status: 'Estado',
@@ -22,6 +23,7 @@ export const TEXT = {
   },
   en: {
     design: 'DESIGN', proposals: 'proposals', proposal: 'proposal', critical: 'critical', criticalOne: 'critical', noCritique: 'no critique yet',
+    pending: 'pending', pendingOne: 'pending', nothingPending: 'nothing pending',
     noTask: 'no task in progress', track: 'track', tasks: 'tasks', overall: 'overall', decision: 'decision pending',
     applyAll: 'Apply all', pick: 'Pick…', round: 'Another round', rewrite: 'Rewrite', interview: 'Interview me',
     approve: 'Approve', viewDesign: 'View design', nextTask: 'Next task', status: 'Status',
@@ -48,7 +50,9 @@ export function bandLine(m: BandModel, nowMs: number): string {
   if (m.mode === 'design') {
     const head = `◆ ${t.design} · ${m.project} · v${m.version}`;
     if (m.round === 0) return [`${head} · ${t.noCritique}`, ...autoPart(m)].join(' · ');
-    return [`${head} · ${m.proposals} ${m.proposals === 1 ? t.proposal : t.proposals} · ${m.critical} ${m.critical === 1 ? t.criticalOne : t.critical}`, ...autoPart(m)].join(' · ');
+    // The proposals of every round still undecided, not the latest critique's total.
+    if (m.pending === 0) return [`${head} · ${t.nothingPending}`, ...autoPart(m)].join(' · ');
+    return [`${head} · ${m.pending} ${m.pending === 1 ? t.pendingOne : t.pending} · ${m.pendingCritical} ${m.pendingCritical === 1 ? t.criticalOne : t.critical}`, ...autoPart(m)].join(' · ');
   }
   if (m.mode === 'run') {
     if (m.stalled) return [`▶ ${t.run} ${t.stoppedSfx}`, ...autoPart(m)].join(' · ');
