@@ -285,4 +285,14 @@ describe('real diff sizing', () => {
     expect(announce({ path: 'medium', reasons: ['diff: 1 file(s), 5 line(s)', 'diff touches a sensitive zone: auth'], implementer: { self: false, agent: 'a' }, fresh: [], catalog: [] }, 'es'))
       .toContain('diff: 1 fichero(s), 5 línea(s); el diff toca una zona sensible: auth');
   });
+  it('announce names the implementer of a Large plan task, and keeps the design line without one', () => {
+    const large = { path: 'large' as const, reasons: ['12 files located'], fresh: [], catalog: [] };
+    const why = 'large plan task: impl-heavy (the plan may need to split it)';
+    expect(announce({ ...large, implementer: { self: false, agent: 'forge-impl-heavy' }, why }, 'en'))
+      .toBe(`Large → forge-impl-heavy: ${why}. You can correct it.`);
+    expect(announce({ ...large, implementer: { self: false, agent: 'forge-impl-heavy' }, why }, 'es'))
+      .toBe(`Large → forge-impl-heavy: ${why}. Puedes corregirlo.`);
+    expect(announce({ ...large, implementer: { self: false, agent: null } }, 'en')).toBe('Large: 12 files located; design and plan first. You can correct it.');
+    expect(announce({ ...large, implementer: { self: false, agent: null } }, 'es')).toBe('Large: 12 ficheros; primero diseño y plan. Puedes corregirlo.');
+  });
 });

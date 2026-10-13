@@ -12594,7 +12594,7 @@ function announce(a, locale) {
       line2 = es2 ? `Medium \u2192 ${agent}: ${why}. Antes de lanzarlo te ense\xF1o un plan corto; puedes corregirlo.` : `Medium \u2192 ${agent}: ${why}. I show you a short plan before launching it; you can correct it.`;
       break;
     default:
-      line2 = es2 ? `Large: ${why}; primero dise\xF1o y plan. Puedes corregirlo.` : `Large: ${why}; design and plan first. You can correct it.`;
+      line2 = agent ? es2 ? `Large \u2192 ${agent}: ${why}. Puedes corregirlo.` : `Large \u2192 ${agent}: ${why}. You can correct it.` : es2 ? `Large: ${why}; primero dise\xF1o y plan. Puedes corregirlo.` : `Large: ${why}; design and plan first. You can correct it.`;
   }
   if (!a.fresh.length) return line2;
   const list = a.fresh.map((n) => `${n} (\`${a.catalog.find((v) => v.name === n)?.cmd ?? ""}\`)`).join(", ");

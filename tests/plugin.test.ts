@@ -78,6 +78,12 @@ describe('plugin layout', () => {
       'FORGE waypoint-cli', 'run.json', 'final-validators.json', 'FORGE verdict --task <project>-final', 'final-fix.txt', 'mkdir -p .forge/work/T', 'Commit title prefix', 'blocked path', '`start_prompt`']) expect(md).toContain(w);
     expect(md).not.toContain('report-<n>.md');
   });
+  it('forge run skill sizes and reviews each plan task by its real diff', () => {
+    const md = read('plugins/forge/skills/run/SKILL.md');
+    for (const w of ['--base <base>', 'review.reviewers', 'review.flags', 'implementer.agent']) expect(md).toContain(w);
+    expect(md).not.toMatch(/FORGE verdict[^\n`]*--sensitive --perf/);
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) expect(read(f)).toContain('triage --plan p --task T --base');
+  });
   it('forge Large: approve steps, run.json once, lease, final re-review inputs, start_prompt', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
     for (const w of ['steps 1–3', '`/waypoint:launch` adds the forge suffix', 'only if that file does not exist',

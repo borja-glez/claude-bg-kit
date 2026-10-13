@@ -59,7 +59,7 @@ export function implementerFor(r: Pick<TriageResult, 'path' | 'sensitive'>, text
   switch (r.path) {
     case 'trivial':
       if (opts.plan) return { role: 'mech', self: false, why: 'trivial plan task: delegated to mech, the coordinator never edits task code' };
-      return opts.batch ?{ role: 'mech', self: false, why: 'trivial in a batch: delegated, the session runs several at once' }
+      return opts.batch ? { role: 'mech', self: false, why: 'trivial in a batch: delegated, the session runs several at once' }
         : { role: null, self: true, why: 'trivial: the session does it' };
     case 'small':
       return isMechanical(text) ? { role: 'mech', self: false, why: 'small and mechanical: always delegated to mech' }
@@ -173,7 +173,9 @@ export function announce(a: AnnounceInput, locale: AnnounceLocale): string {
         : `Medium → ${agent}: ${why}. I show you a short plan before launching it; you can correct it.`;
       break;
     default:
-      line = es ? `Large: ${why}; primero diseño y plan. Puedes corregirlo.` : `Large: ${why}; design and plan first. You can correct it.`;
+      // A plan task names its implementer (impl-heavy); a task that is not one is designed and planned first.
+      line = agent ? (es ? `Large → ${agent}: ${why}. Puedes corregirlo.` : `Large → ${agent}: ${why}. You can correct it.`)
+        : es ? `Large: ${why}; primero diseño y plan. Puedes corregirlo.` : `Large: ${why}; design and plan first. You can correct it.`;
   }
   if (!a.fresh.length) return line;
   const list = a.fresh.map(n => `${n} (\`${a.catalog.find(v => v.name === n)?.cmd ?? ''}\`)`).join(', ');
