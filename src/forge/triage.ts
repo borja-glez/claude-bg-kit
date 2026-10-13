@@ -135,7 +135,9 @@ const quotedLiterals = (text: string) => [...text.matchAll(QUOTED)].map(m => (m[
 
 const B = '(?<![\\p{L}\\p{N}_])';
 const E = '(?![\\p{L}\\p{N}_])';
-// A short courtesy may open or close the task.
+// A short courtesy may open or close the task, and so may the method it names («Con forge:», "with forge").
+const METHOD = /^\s*(?:(?:hazlo\s+)?con forge|with forge|f[oó]rjame(?:\s+esto)?|forge it|forge)\s*[:,]\s*/iu;
+const METHOD_END = /[\s,]*(?:con forge|with forge)[\s.!?…]*$/iu;
 const COURTESY = /^\s*(?:please|can you|could you|por favor|puedes)(?![\p{L}\p{N}_])[\s,]*/iu;
 const COURTESY_END = /[\s,]*(?:please|por favor|gracias)[\s.!?…]*$/iu;
 const VERB_EN = 'change|set|update|replace';
@@ -164,7 +166,7 @@ const MAX_COPY_TEXT = 1000;
  */
 function copyGuards(task: string): string | null {
   if (task.length > MAX_COPY_TEXT || RENAME.some(re => re.test(task))) return null;
-  const text = task.replace(COURTESY, '').replace(COURTESY_END, '').trim();
+  const text = task.replace(METHOD, '').replace(METHOD_END, '').replace(COURTESY, '').replace(COURTESY_END, '').trim();
   if (!STARTS_WITH_VERB.test(text)) return null;
   const last = [...text.matchAll(QUOTED)].at(-1);
   // The quoted value ends the task: words after it ("… to "strict" mode") make it something else.

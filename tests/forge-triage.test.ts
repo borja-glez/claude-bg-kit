@@ -133,6 +133,15 @@ describe('triage', () => {
     expect(triage('Cambia el título de la pestaña del navegador a «Reparto · gastos del piso» por favor', repo(), []).path).toBe('trivial');
     expect(triage('change the title of the page to "Reparto", please.', repo(), []).path).toBe('trivial');
   });
+  it('a copy change that names the method first or last is still a copy change (campaign E5.1 as typed)', () => {
+    for (const t of [
+      'Con forge: cambia el título de la pestaña del navegador a «Reparto · gastos del piso».',
+      'Fórjame esto: cambia el título de la pestaña a «Reparto»',
+      'With forge: change the page title to "Reparto"',
+      'cambia el título de la pestaña a «Reparto», con forge',
+    ]) expect(triage(t, repo(), []).path, t).toBe('trivial');
+    expect(triage('Con forge: cambia el título a «Reparto» y añade un favicon', repo(), []).path).not.toBe('trivial');
+  });
   it('quoted-literal hits never raise the size: a literal found in several files is left out', () => {
     const many = (n: number) => repo({ Save: FILES.filter(f => f.startsWith('src/feature/')).slice(0, n) });
     for (const n of [4, 12]) {
