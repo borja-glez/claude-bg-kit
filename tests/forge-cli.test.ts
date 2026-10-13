@@ -876,6 +876,33 @@ describe('forge waypoint-cli', () => {
       expect(run(['proposals', 'decide', id, 'approve', '--reopen'], io).code).toBe(2);
       expect(loadProposals(root)[0].history).toBeUndefined();
     });
+    it('decide on a done proposal says it cannot be reopened, without the --reopen hint', () => {
+      writeFileSync(path.join(root, 'db.json'), JSON.stringify({ ...prop, ts: 't', status: 'done', author: 'session', decidedBy: 'user', decidedAt: 'T1' }));
+      const r = run(['proposals', 'decide', 'p20261011100000nnnn', 'reject', '--from', 'db.json'], io);
+      expect(r.code).toBe(2);
+      expect(r.stderr).toContain('p20261011100000nnnn is done and cannot be reopened');
+      expect(r.stderr).not.toContain('--reopen');
+    });
+    it('decide --reopen --from refuses when the local mirror or a plan task holds the proposal', () => {
+      const id = 'p20261011100000oooo';
+      const db = { ...prop, ts: 't', status: 'approved', author: 'session', decidedBy: 'user', decidedAt: 'T1' };
+      writeFileSync(path.join(root, 'db.json'), JSON.stringify(db));
+      saveProposal(root, id, { ...db, taskId: 'T008' } as ProposalDoc);
+      const mirror = run(['proposals', 'decide', id, 'reject', '--reopen', '--from', 'db.json'], io);
+      expect(mirror.code).toBe(2);
+      expect(mirror.stderr).toContain('task T008');
+      saveProposal(root, id, db as ProposalDoc);
+      const planYaml = (marker: string) => `project: demo\nlocale: es\nversion: "0.1"\ntracks:\n  - { id: backend, name: Backend, color: blue }\nphases:\n  - { id: PX, name: Mejoras }\ntasks:\n  - { id: T009, title: a, track: backend, phase: PX, done_when: x, includes: ${JSON.stringify(`why\n\n${marker}`)} }\n`;
+      mkdirSync(path.join(root, 'docs', 'waypoint', 'demo'), { recursive: true });
+      writeFileSync(path.join(root, 'docs', 'waypoint', 'demo', 'plan.yaml'), planYaml(`(propuesta ${id})`));
+      const plan = run(['proposals', 'decide', id, 'reject', '--reopen', '--from', 'db.json'], io);
+      expect(plan.code).toBe(2);
+      expect(plan.stderr).toContain('task T009');
+      writeFileSync(path.join(root, 'other.yaml'), planYaml(`(proposal ${id})`));
+      writeFileSync(path.join(root, 'docs', 'waypoint', 'demo', 'plan.yaml'), planYaml('(propuesta p20261011100000zzzz)'));
+      expect(run(['proposals', 'decide', id, 'reject', '--reopen', '--from', 'db.json', '--plan', 'other.yaml'], io).code).toBe(2);
+      expect(run(['proposals', 'decide', id, 'reject', '--reopen', '--from', 'db.json'], io).code).toBe(0);
+    });
     it('decide reads the reason from a file and rejects bad ids', () => {
       const { id } = JSON.parse(add().stdout);
       writeFileSync(path.join(root, 'r.txt'), 'not now');
@@ -1096,6 +1123,41 @@ describe('forge waypoint-cli', () => {
       expect(ok.stderr).toBe('');
       expect(readEvents(root).at(-1)).toMatchObject({ action: 'reopen', from: 'approved', to: 'rejected' });
       expect(loadProposals(root)[0].history).toEqual(history);
+    });
+    it('save of approved → done is the normal lifecycle: a plain decide log and no warning', () => {
+      const id = 'p20261011100000kkkk';
+      const db = { ...prop, ts: 't', author: 'session' };
+      saveProposal(root, id, { ...db, status: 'approved', decidedBy: 'user', decidedAt: 'T1' } as ProposalDoc);
+      writeFileSync(path.join(root, 'doc.json'), JSON.stringify({ ...db, status: 'done', decidedBy: 'user', decidedAt: 'T1', taskId: 'T008' }));
+      const r = run(['proposals', 'save', '--from', 'doc.json', '--id', id], io);
+      expect(r.code).toBe(0);
+      expect(r.stderr).toBe('');
+      expect(readEvents(root)).toEqual([{ ts: '2026-10-11T10:00:00.000Z', kind: 'proposal', action: 'decide', id, status: 'done' }]);
+    });
+    it('save counts a chain of reopens over a stale mirror as tracked, and an invented entry as not', () => {
+      const id = 'p20261011100000llll';
+      const db = { ...prop, ts: 't', author: 'session' };
+      saveProposal(root, id, { ...db, status: 'auto_approved', decidedBy: 'forge:policy', decidedAt: 'T1' } as ProposalDoc);
+      const chain = [
+        { status: 'auto_approved', decidedBy: 'forge:policy', decidedAt: 'T1', reopenedBy: 'user:a', reopenedAt: 'T2' },
+        { status: 'rejected', decidedBy: 'user:a', decidedAt: 'T2', reopenedBy: 'user:b', reopenedAt: 'T3' },
+      ];
+      writeFileSync(path.join(root, 'doc.json'), JSON.stringify({ ...db, status: 'approved', decidedBy: 'user:b', decidedAt: 'T3', history: chain }));
+      expect(run(['proposals', 'save', '--from', 'doc.json', '--id', id], io).stderr).toBe('');
+      const invented = [{ status: 'approved', decidedBy: 'someone', decidedAt: 'X', reopenedBy: 'user:c', reopenedAt: 'T4' }];
+      writeFileSync(path.join(root, 'doc.json'), JSON.stringify({ ...db, status: 'rejected', decidedBy: 'user:c', decidedAt: 'T4', history: [...chain, ...invented] }));
+      expect(run(['proposals', 'save', '--from', 'doc.json', '--id', id], io).stderr).toContain('not made through proposals decide --reopen');
+    });
+    it('save keeps a local taskId the roadmap doc does not have yet', () => {
+      const id = 'p20261011100000mmmm';
+      const db = { ...prop, ts: 't', author: 'session', status: 'approved', decidedBy: 'user', decidedAt: 'T1' };
+      saveProposal(root, id, { ...db, taskId: 'T008' } as ProposalDoc);
+      writeFileSync(path.join(root, 'doc.json'), JSON.stringify(db));
+      expect(run(['proposals', 'save', '--from', 'doc.json', '--id', id], io).code).toBe(0);
+      expect(loadProposals(root)[0].taskId).toBe('T008');
+      writeFileSync(path.join(root, 'doc.json'), JSON.stringify({ ...db, taskId: 'T009' }));
+      run(['proposals', 'save', '--from', 'doc.json', '--id', id], io);
+      expect(loadProposals(root)[0].taskId).toBe('T009');
     });
     it('save with an unchanged status logs nothing; --id overrides the file name; bad input is refused', () => {
       const id = 'p20261011100000gggg';

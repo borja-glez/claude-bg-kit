@@ -50,6 +50,11 @@ describe('proposalToTask', () => {
     expect(est('a while')).toBe(30);
     expect(est(undefined)).toBe(30);
     expect(est('0 min')).toBe(30);
+    expect(est('0.4 min')).toBe(30);
+    expect(est('3000000000h')).toBe(30);
+    expect(est('169h')).toBe(30);
+    expect(est('10080 min')).toBe(10080);
+    expect(est('0.6 min')).toBe(1);
   });
   it('honours --track and drops an unsafe path', () => {
     const { task } = proposalToTask(parsePlan(planText('en')), prop({ path: '../x' }), { track: 'ui' });

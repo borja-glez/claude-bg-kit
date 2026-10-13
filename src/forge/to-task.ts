@@ -4,12 +4,21 @@ import { safeZone } from './policy.js';
 
 export const IMPROVEMENTS_PHASE = 'PX';
 
-/** "2h", "1.5 h", "45 min" → minutes; anything else → null. */
+/** The longest estimate a proposal can set: one week, in minutes (the text is untrusted). */
+export const MAX_ESTIMATE_MIN = 7 * 24 * 60;
+
+/** "2h", "1.5 h", "45 min" → whole minutes in 1..MAX_ESTIMATE_MIN; anything else → null. */
 export function estimateMinutes(estimate: string | undefined): number | null {
   const m = /^\s*(\d+(?:[.,]\d+)?)\s*(h|hr|hrs|hours?|horas?|m|min|mins|minutes?|minutos?)\s*$/i.exec(estimate ?? '');
   if (!m) return null;
-  const n = Number(m[1].replace(',', '.')) * (/^h/i.test(m[2]) ? 60 : 1);
-  return n > 0 ? Math.round(n) : null;
+  const n = Math.round(Number(m[1].replace(',', '.')) * (/^h/i.test(m[2]) ? 60 : 1));
+  return n >= 1 && n <= MAX_ESTIMATE_MIN ? n : null;
+}
+
+/** The proposal a task's `includes` came from: the `(propuesta|proposal <id>)` line to-task ends it with. */
+export function proposalOfIncludes(includes: string | undefined): string | null {
+  const m = /\((?:propuesta|proposal) (p\d{14}[0-9a-z]{4})\)\s*$/.exec(includes ?? '');
+  return m ? m[1] : null;
 }
 
 /** The whole rationale, the evidence and a reference to the proposal; undefined when both texts are blank. */

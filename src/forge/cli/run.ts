@@ -17,7 +17,8 @@ import { decideRound } from '../loop.js';
 import { PROPOSAL_ID, proposalId, saveProposal, loadProposals, loadProposal, decideDoc, mirrorProposal, type DecideError } from '../proposals.js';
 import { normalizeProposal, isActionable, canDecide, PROPOSAL_STATUSES, type Decision, type ProposalDoc } from '../../lib/proposals.js';
 import { autoApprovable, similarRejected, similarOpen } from '../policy.js';
-import { proposalToTask } from '../to-task.js';
+import { proposalToTask, proposalOfIncludes } from '../to-task.js';
+import type { PlanTask } from '../../lib/types.js';
 import { parseDocument } from 'yaml';
 import { UsageError } from './errors.js';
 import { swarmCommand } from './swarm.js';
@@ -134,21 +135,6 @@ export const repoReader = (root: string): RepoReader => ({
 });
 
 // The plan and one task of it; a usage error (exit 2) for a missing file, a broken plan or an unknown task.
-/** Why `proposals decide` refused, naming who decided and when, or what blocks the reopen. */
-function decideRefusal(id: string, doc: ProposalDoc, error: DecideError): string {
-  switch (error) {
-    case 'decided': {
-      const who = `${doc.status}${doc.decidedBy ? ` by ${doc.decidedBy}` : ''}${doc.decidedAt ? ` at ${doc.decidedAt}` : ''}`;
-      return `${id} is already decided (${who}); use --reopen after the person confirms`;
-    }
-    case 'done': return `${id} is done; a done proposal cannot be reopened`;
-    case 'tasked': return `${id} has task ${doc.taskId}; drop the task from the plan (and the taskId) before reopening it`;
-    case 'same': return `${id} is already ${doc.status}`;
-    case 'discuss': return '--reopen takes approve or reject, not discuss';
-    case 'open': return `${id} is ${doc.status}, not decided: decide it without --reopen`;
-  }
-}
-
 function planTask(cwd: string, planArg: string | undefined, id: string | undefined) {
   if (!planArg || !id) throw new UsageError('--plan and --task are required');
   let text: string;
@@ -161,6 +147,39 @@ function planTask(cwd: string, planArg: string | undefined, id: string | undefin
   const task = plan.tasks.find(t => t.id === id);
   if (!task) throw new UsageError(`task ${id} is not in ${planArg}`);
   return { plan, task };
+}
+
+/** Why `proposals decide` refused, naming who decided and when, or what blocks the reopen. */
+function decideRefusal(id: string, doc: ProposalDoc, error: DecideError): string {
+  if (doc.status === 'done') return `${id} is done and cannot be reopened`;
+  switch (error) {
+    case 'decided': {
+      const who = `${doc.status}${doc.decidedBy ? ` by ${doc.decidedBy}` : ''}${doc.decidedAt ? ` at ${doc.decidedAt}` : ''}`;
+      return `${id} is already decided (${who}); use --reopen after the person confirms`;
+    }
+    case 'done': return `${id} is done and cannot be reopened`;
+    case 'tasked': return `${id} has task ${doc.taskId}; drop the task from the plan (and the taskId) before reopening it`;
+    case 'same': return `${id} is already ${doc.status}`;
+    case 'discuss': return '--reopen takes approve or reject, not discuss';
+    case 'open': return `${id} is ${doc.status}, not decided: decide it without --reopen`;
+  }
+}
+
+/** The plan task made from a proposal (its `includes` ends with the proposal marker): in --plan, else in any docs/waypoint plan. */
+function plannedTaskOf(cwd: string, id: string, planArg: string | undefined): string | null {
+  let files: string[];
+  if (planArg) files = [path.resolve(cwd, planArg)];
+  else {
+    const docs = path.join(cwd, 'docs', 'waypoint');
+    try { files = readdirSync(docs).map(p => path.join(docs, p, 'plan.yaml')); } catch { files = []; }
+  }
+  for (const f of files) {
+    let tasks: PlanTask[];
+    try { tasks = parsePlan(readFileSync(f, 'utf8')).tasks; } catch { continue; }
+    const hit = tasks.find(t => proposalOfIncludes(t.includes) === id);
+    if (hit) return hit.id;
+  }
+  return null;
 }
 
 // A superpowers plan with the tasks its own executors recorded as complete counted as done (they never tick the boxes).
@@ -686,8 +705,12 @@ export function run(argv: string[], io: Io): Result {
               base = loadProposal(io.cwd, id);
               if (!base) throw new UsageError(`proposals decide: ${id} not found`);
             }
-            const r = decideDoc(base, action as Decision, by, at, reason || undefined, { reopen });
-            if (!r.ok) throw new UsageError(`proposals decide: ${decideRefusal(id, base, r.error)}`);
+            // A reopen also refuses while the proposal has a task anywhere: the db doc, the local mirror (to-task sets it
+            // before the roadmap does) or a plan task made from it.
+            const held = reopen ? base.taskId ?? loadProposal(io.cwd, id)?.taskId ?? plannedTaskOf(io.cwd, id, subFlag('plan')) ?? undefined : undefined;
+            const checked = held !== undefined ? { ...base, taskId: held } : base;
+            const r = decideDoc(checked, action as Decision, by, at, reason || undefined, { reopen });
+            if (!r.ok) throw new UsageError(`proposals decide: ${decideRefusal(id, checked, r.error)}`);
             if (from === undefined) {
               saveProposal(io.cwd, id, r.doc);
               appendEvent(io.cwd, reopen
@@ -712,11 +735,14 @@ export function run(argv: string[], io: Io): Result {
             const logged = (previous ?? 'proposed') !== doc.status;
             // A decided proposal that changes status is a reopen; one made by hand (not through
             // `decide --reopen`) carries no new history entry for the decision it replaced.
-            const reopened = logged && previousDoc !== null && !canDecide(previousDoc.status);
+            // Moving to done is the normal lifecycle, never a reopen.
+            const reopened = logged && previousDoc !== null && !canDecide(previousDoc.status) && doc.status !== 'done';
             if (reopened) appendEvent(io.cwd, { ts: ts(), kind: 'proposal', action: 'reopen', id, from: previousDoc.status, to: doc.status });
             else if (logged) appendEvent(io.cwd, { ts: ts(), kind: 'proposal', action: 'decide', id, status: doc.status });
-            const last = doc.history?.at(-1);
-            const tracked = last !== undefined && last.status === previousDoc?.status && JSON.stringify(last) !== JSON.stringify(previousDoc.history?.at(-1));
+            // Tracked: a history entry the mirror lacks that records the mirror's own decision (status, who, when).
+            const known = new Set((previousDoc?.history ?? []).map(e => JSON.stringify(e)));
+            const tracked = previousDoc !== null && (doc.history ?? []).some(e => !known.has(JSON.stringify(e))
+              && e.status === previousDoc.status && e.decidedBy === previousDoc.decidedBy && e.decidedAt === previousDoc.decidedAt);
             const stderr = reopened && !tracked ? `proposals save: ${id} went from ${previousDoc.status} to ${doc.status} with no new history entry: the change was not made through proposals decide --reopen\n` : '';
             return { ...json({ id, status: doc.status, previous, logged }), stderr };
           }
