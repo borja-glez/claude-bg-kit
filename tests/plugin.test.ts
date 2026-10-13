@@ -85,6 +85,8 @@ describe('plugin layout', () => {
     const step4 = md.split('\n').find(l => l.includes('4. **verify** and **review**: a plan task'))!;
     expect(step4).not.toContain('(the path only goes up)');
     expect(step4).toContain('sets no floor');
+    expect(md).toContain('a Large one to `impl` (`impl-heavy` on a sensitive zone)');
+    expect(md).not.toContain('a Large one to `impl-heavy`)');
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) expect(read(f)).toContain('triage --plan p --task T --base');
   });
   it('forge Large: approve steps, run.json once, lease, final re-review inputs, start_prompt', () => {
