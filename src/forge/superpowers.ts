@@ -5,7 +5,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { parseDesign } from '../lib/design.js';
-import { specTitle } from '../lib/design-import.js';
+import { specH1 } from '../lib/design-import.js';
 import { markDone, parseSpPlan, sddComplete } from '../lib/sp-plan.js';
 
 export interface Superpowers { installed: boolean; version: string | null; installPath: string | null }
@@ -109,31 +109,33 @@ export function spLedgerDone(roots: string[], planAbs: string): number[] {
   return [...done].sort((a, b) => a - b);
 }
 
-// The .md files of a directory changed within the window, newest first.
-function recentMarkdown(dir: string, now: number): { name: string; abs: string; mtime: number }[] {
+/** When git last committed a repo-relative file, in ms, or null when git does not track it. */
+export type CommittedAt = (rel: string) => number | null;
+
+// The .md files of `<root>/<relDir>` changed within the window, newest first. A tracked file is timed by its last
+// commit (a fresh clone or worktree gives every file a new mtime), an untracked one by its mtime.
+function recentMarkdown(root: string, relDir: string, now: number, committedAt?: CommittedAt): { name: string; abs: string; time: number }[] {
   let names: string[];
-  try { names = readdirSync(dir); } catch { return []; }
-  const out: { name: string; abs: string; mtime: number }[] = [];
+  try { names = readdirSync(path.join(root, relDir)); } catch { return []; }
+  const out: { name: string; abs: string; time: number }[] = [];
   for (const name of names) {
     if (!name.endsWith('.md')) continue;
-    const abs = path.join(dir, name);
+    const abs = path.join(root, relDir, name);
     try {
       const st = statSync(abs);
-      if (st.isFile() && now - st.mtimeMs <= SP_WINDOW_MS) out.push({ name, abs, mtime: st.mtimeMs });
+      if (!st.isFile()) continue;
+      const time = committedAt?.(`${relDir}/${name}`) ?? st.mtimeMs;
+      if (now - time <= SP_WINDOW_MS) out.push({ name, abs, time });
     } catch { /* gone meanwhile */ }
   }
-  return out.sort((a, b) => b.mtime - a.mtime);
+  return out.sort((a, b) => b.time - a.time);
 }
 
-function titleOf(file: string): string | null {
-  try {
-    const m = /^#\s+(.+?)\s*#*\s*$/m.exec(readFileSync(file, 'utf8'));
-    return m ? specTitle(m[1]) : null;
-  } catch { return null; }
-}
+const titleOf = (file: string): string | null => { try { return specH1(readFileSync(file, 'utf8')); } catch { return null; } };
 
-/** The specs superpowers wrote in the last 14 days that no docs/waypoint/<project>/design.md names as its `source`. */
-export function spSpecs(root: string, now: number): SpSpec[] {
+/** The specs superpowers wrote in the last 14 days that no docs/waypoint/<project>/design.md names as its `source`, and
+ *  that the user did not turn down. */
+export function spSpecs(root: string, now: number, opts: { committedAt?: CommittedAt; declined?: string[] } = {}): SpSpec[] {
   const cited = new Set<string>();
   let projects: string[] = [];
   try { projects = readdirSync(path.join(root, 'docs', 'waypoint')); } catch { /* no waypoint project */ }
@@ -144,19 +146,19 @@ export function spSpecs(root: string, now: number): SpSpec[] {
     } catch { /* no design, or not a valid one */ }
   }
   const out: SpSpec[] = [];
-  for (const f of recentMarkdown(path.join(root, 'docs', 'superpowers', 'specs'), now)) {
+  for (const f of recentMarkdown(root, 'docs/superpowers/specs', now, opts.committedAt)) {
     const rel = `docs/superpowers/specs/${f.name}`;
-    if (cited.has(rel)) continue;
-    out.push({ path: rel, title: titleOf(f.abs) ?? f.name.replace(/\.md$/, ''), modified: new Date(f.mtime).toISOString() });
+    if (cited.has(rel) || opts.declined?.includes(rel)) continue;
+    out.push({ path: rel, title: titleOf(f.abs) ?? f.name.replace(/\.md$/, ''), modified: new Date(f.time).toISOString() });
     if (out.length === SP_MAX) break;
   }
   return out;
 }
 
 /** The plans superpowers wrote in the last 14 days that still have a task to do; a file that is not a plan is skipped. */
-export function spPlans(root: string, now: number): SpPlanEntry[] {
+export function spPlans(root: string, now: number, opts: { committedAt?: CommittedAt } = {}): SpPlanEntry[] {
   const out: SpPlanEntry[] = [];
-  for (const f of recentMarkdown(path.join(root, 'docs', 'superpowers', 'plans'), now)) {
+  for (const f of recentMarkdown(root, 'docs/superpowers/plans', now, opts.committedAt)) {
     let plan;
     try { plan = markDone(parseSpPlan(readFileSync(f.abs, 'utf8')), spLedgerDone([root], f.abs)); } catch { continue; }
     const done = plan.tasks.filter(t => t.done).length;

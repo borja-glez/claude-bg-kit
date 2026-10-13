@@ -33,6 +33,12 @@ export function specTitle(h1: string): string {
   return h1.replace(/\s*(?:[—–-]|:)\s*(?:diseño|design)\s*$/i, '').trim() || h1.trim();
 }
 
+/** The title of a spec: its first `# ` heading outside code, without a design suffix; null without one. */
+export function specH1(text: string): string | null {
+  const h1 = linesOf(text).find(l => !l.fenced && /^#\s+\S/.test(l.text));
+  return h1 ? specTitle(h1.text.replace(/^#\s+/, '').replace(/\s+#*\s*$/, '')) : null;
+}
+
 /** The first paragraph (not a heading, list, table, quote, comment, rule or code) of these lines, collapsed and clipped. */
 function firstParagraph(lines: Line[]): string | null {
   const para: string[] = [];

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { importSpec, specTitle, SpecImportError, SUMMARY_MAX } from '../src/lib/design-import.js';
+import { importSpec, specH1, specTitle, SpecImportError, SUMMARY_MAX } from '../src/lib/design-import.js';
 import { parseDesign, sectionsOf } from '../src/lib/design.js';
 
 const SPEC = readFileSync(new URL('./fixtures/sp-spec.md', import.meta.url), 'utf8');
@@ -18,6 +18,10 @@ describe('importSpec', () => {
     expect(d.sections.map(s => s.slug)).toEqual(['1-proposito', 'criterios-de-exito', 'fuera-de-alcance', '2-decisiones-tomadas']);
     expect(d.body).toContain('**Fecha:** 2026-10-12');
     expect(d.body).not.toContain('# forge: enrutado');
+  });
+  it('specH1 is the first title outside code, without its design suffix', () => {
+    expect(specH1('```md\n# No\n```\n\n# Yes — diseño\n\n## A\n')).toBe('Yes');
+    expect(specH1('no title\n')).toBeNull();
   });
   it('strips a design suffix from the title', () => {
     expect(specTitle('Cart totals — diseño')).toBe('Cart totals');

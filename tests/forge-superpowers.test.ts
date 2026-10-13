@@ -84,6 +84,25 @@ describe('sp-specs and sp-plans', () => {
     file('.superpowers/sdd/open/progress.md', '# SDD ledger — plan: docs/superpowers/plans/open.md\n\nTask 2: complete (commits a..b, tests: x → 1/1 pass)\n', 0);
     expect(spPlans(project, NOW)).toEqual([]);
   });
+  it('times a tracked file by its last commit, and leaves out declined specs', () => {
+    file('docs/superpowers/specs/fresh-clone.md', '# Old spec\n\n## A\n', 0);
+    file('docs/superpowers/specs/recent.md', '# Recent spec\n\n## A\n', 30);
+    file('docs/superpowers/specs/declined.md', '# Declined\n\n## A\n', 1);
+    // A fresh clone gives every file a new mtime: git's commit time tells the real age.
+    const committedAt = (rel: string) => (rel.endsWith('fresh-clone.md') ? NOW - 20 * DAY : rel.endsWith('recent.md') ? NOW - DAY : null);
+    expect(spSpecs(project, NOW, { committedAt, declined: ['docs/superpowers/specs/declined.md'] }).map(s => s.path)).toEqual(['docs/superpowers/specs/recent.md']);
+  });
+  it('names a spec by its first title outside code', () => {
+    file('docs/superpowers/specs/s.md', '```md\n# Not this\n```\n\n# Real — design\n\n## A\n', 1);
+    expect(spSpecs(project, NOW)[0].title).toBe('Real');
+  });
+  it('sp-specs --decline remembers a spec the user turned down', () => {
+    file('docs/superpowers/specs/a.md', '# A\n\n## X\n', 1);
+    const io: Io = { cwd: project, now: () => new Date(NOW), env: { CLAUDE_CONFIG_DIR: cfg } };
+    expect(JSON.parse(run(['sp-specs', '--decline', 'docs/superpowers/specs/a.md'], io).stdout)).toEqual({ declined: 'docs/superpowers/specs/a.md' });
+    expect(JSON.parse(run(['sp-specs'], io).stdout)).toEqual([]);
+    expect(run(['sp-specs', '--decline', '../x.md'], io).code).toBe(2);
+  });
   it('the CLI prints them, and sp-path finds a skill through CLAUDE_CONFIG_DIR', () => {
     registry({ 'superpowers@m': [install('6.4.1')] });
     file('docs/superpowers/specs/s.md', '# S\n\n## A\n', 1);

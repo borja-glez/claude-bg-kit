@@ -175,6 +175,17 @@ export function findWaypointCli(scriptPath: string): string | null {
 // superpowers as installed for this repository: its main checkout holds the project settings and is the projectPath.
 const superpowersOf = (io: Io, dir: string) => locateSuperpowers({ configDir: claudeConfigDir(io.env ?? process.env), projectDir: mainCheckout(dir) });
 
+// The time git last committed a file of the repository (sp-specs and sp-plans), in ms; null when it does not track it.
+const committedAt = (io: Io, dir: string) => {
+  const git = io.git ?? defaultGit(dir);
+  return (rel: string): number | null => {
+    const s = Number((git(['log', '-1', '--format=%ct', '--', rel]) ?? '').trim());
+    return Number.isInteger(s) && s > 0 ? s * 1000 : null;
+  };
+};
+const declinedSpecs = (s: Record<string, unknown>): string[] =>
+  Array.isArray(s.declinedSpecs) ? s.declinedSpecs.filter((x): x is string => typeof x === 'string').slice(0, 200) : [];
+
 // tdd: superpowers (spec §4.4): the line implementer briefs carry, null when off or when superpowers or its TDD skill is missing.
 function tddFor(io: Io, dir: string) {
   const { tdd } = loadConfig(dir);
@@ -776,10 +787,17 @@ export function run(argv: string[], io: Io): Result {
         if (!skill || skill.startsWith('--')) throw new UsageError('sp-path: the name of a superpowers skill is required');
         return json(spSkillPath(superpowersOf(io, repoDir), skill));
       }
-      case 'sp-specs':
-        return json(spSpecs(repoDir, io.now().getTime()));
+      case 'sp-specs': {
+        if (has('decline')) {
+          const rel = (flag('decline') ?? '').replace(/\\/g, '/');
+          if (!/^docs\/superpowers\/specs\/[^/]+\.md$/.test(rel)) throw new UsageError('sp-specs: --decline needs a docs/superpowers/specs/<file>.md path');
+          updateLocal(io.cwd, s => ({ ...s, declinedSpecs: [...new Set([...declinedSpecs(s), rel])] }));
+          return json({ declined: rel });
+        }
+        return json(spSpecs(repoDir, io.now().getTime(), { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)) }));
+      }
       case 'sp-plans':
-        return json(spPlans(repoDir, io.now().getTime()));
+        return json(spPlans(repoDir, io.now().getTime(), { committedAt: committedAt(io, repoDir) }));
       case 'tdd':
         return json(tddFor(io, repoDir));
       case 'sp-plan': {
