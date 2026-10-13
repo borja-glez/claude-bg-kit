@@ -175,8 +175,20 @@ describe('plugin layout', () => {
   it('forge review skill reviews a branch and never fixes, merges or pushes', () => {
     const md = read('plugins/forge/skills/review/SKILL.md');
     expect(md).toMatch(/^---\r?\nname: review\r?\n/);
-    for (const w of ['git merge-base HEAD', 'review-<branch>-<tag>', '--base-run', 'git switch --detach', 'diff-1.patch', 'FORGE triage', 'review-correctness',
+    for (const w of ['git merge-base HEAD', 'review-<branch>-<tag>', '--base-run', 'git worktree add --detach', 'diff-1.patch', 'FORGE triage', 'review-correctness',
       'review-security', 'review-perf', 'FORGE verdict', 'nothing to review', 'Never merge', 'never push', '/forge:run']) expect(md).toContain(w);
+  });
+  it('final review fixes: review baseline in a temporary worktree, TDD report everywhere, plan ticks committed from a file', () => {
+    const review = read('plugins/forge/skills/review/SKILL.md');
+    for (const w of ['git worktree add --detach', '--cwd <WT>', 'git worktree remove --force <WT>', 'never moves', 'skip the baseline', 'never commits, stashes or discards']) expect(review).toContain(w);
+    expect(review).not.toContain('git switch');
+    const md = read('plugins/forge/skills/run/SKILL.md');
+    const exec = md.slice(md.indexOf('\n## Execution\n'), md.indexOf('\n### Run member\n'));
+    expect(exec).toContain("the implementer's report path when the brief has a `TDD: required` line");
+    for (const w of ['git commit -F .forge/work/<id>/commit-N.txt -- <f>', 'only when `checked` is above 0', "superpowers' own ledger"]) expect(md).toContain(w);
+    expect(md).not.toContain('git commit -m "<plan title>');
+    const rc = read('plugins/forge/agents/forge-review-correctness.md');
+    for (const w of ['changes logic', 'report-<n>.txt', 'do not flag']) expect(rc).toContain(w);
   });
   it('superpowers bridges in the skills: import a spec, run a superpowers plan, TDD', () => {
     const design = read('plugins/waypoint/skills/design/SKILL.md');
