@@ -277,13 +277,90 @@ describe('forge swarm integrate (into the run branch)', () => {
       expect(existsSync(path.join(runWt(), 'partial', 'x'))).toBe(true);
       expect(readExecution(root)!.tasks.T1.status).toBe('conflict');
     });
-    it('a failing install before the merge leaves the task accepted and says why', () => {
-      setupConfig('node -e "console.log(\'offline\');process.exit(1)"');
+    it('a failing install before the merge is run-deps, leaves the task accepted, and is not retried until HEAD or the manifests change', () => {
+      setupConfig(`node -e "require('fs').appendFileSync('${counter.replace(/\\/g, '/')}',process.cwd()+'\\n');console.log('offline');process.exit(1)"`);
       commitIn(runWt(), 'package.json', '{}\n', 'manifest');
       accept('T1', 'a.txt', 'a\n');
       const r = out(run(['swarm', 'integrate', 'T1'], io));
-      expect(r).toMatchObject({ result: 'run-dirty', detail: 'could not install its dependencies before merging task/T1: offline', setup: { ok: false } });
+      expect(r).toMatchObject({ result: 'run-deps', detail: 'could not install its dependencies before merging task/T1: offline', setup: { ok: false } });
       expect(readExecution(root)!.tasks.T1.status).toBe('accepted');
+      expect(installs()).toBe(1);
+      // The next tick at the same HEAD does not run the failing install again.
+      const again = out(run(['swarm', 'integrate', 'T1'], io));
+      expect(again).toMatchObject({ result: 'run-deps', setup: { ok: false } });
+      expect(again.detail).toContain('offline');
+      expect(installs()).toBe(1);
+      // A new HEAD tries again.
+      commitIn(runWt(), 'other.txt', 'o\n', 'run moved');
+      expect(out(run(['swarm', 'integrate', 'T1'], io)).result).toBe('run-deps');
+      expect(installs()).toBe(2);
+    });
+    it('a Yarn PnP tree counts as installed, and a manifest whose install leaves nothing is installed once', () => {
+      // An install that never creates node_modules (a package.json without dependencies).
+      setupConfig(`node -e "require('fs').appendFileSync('${counter.replace(/\\/g, '/')}',process.cwd()+'\\n')"`);
+      commitIn(runWt(), 'package.json', '{}\n', 'manifest');
+      accept('T1', 'a.txt', 'a\n');
+      accept('T2', 'b.txt', 'b\n');
+      expect(out(run(['swarm', 'integrate', 'T1'], io))).toMatchObject({ result: 'integrated', setup: { ok: true } });
+      expect(installs()).toBe(1);
+      const second = out(run(['swarm', 'integrate', 'T2'], io));
+      expect(second.result).toBe('integrated');
+      expect(second.setup).toBeUndefined();
+      expect(installs()).toBe(1);
+      // A changed manifest installs again.
+      commitIn(runWt(), 'package.json', '{"name":"x"}\n', 'manifest changed');
+      accept('T3', 'c.txt', 'c\n');
+      expect(out(run(['swarm', 'integrate', 'T3'], io)).setup).toMatchObject({ ok: true });
+      expect(installs()).toBe(2);
+      // .pnp.cjs: the dependencies are there without node_modules.
+      commitIn(runWt(), '.pnp.cjs', '// pnp\n', 'pnp');
+      commitIn(runWt(), 'package.json', '{"name":"y"}\n', 'manifest changed again');
+      accept('T4', 'd.txt', 'd\n');
+      expect(out(run(['swarm', 'integrate', 'T4'], io)).setup).toBeUndefined();
+      expect(installs()).toBe(2);
+    });
+    it('a rollback that took away the .gitignore covering node_modules/ excludes it, and lists only the other leftovers', () => {
+      setupConfig(INSTALL());
+      // Red once bad.txt is merged in, after writing a build output the merged .gitignore covers.
+      mkdirSync(path.join(runWt(), '.forge'), { recursive: true });
+      writeFileSync(path.join(runWt(), '.forge', 'config.yaml'), 'validators:\n  - name: build\n    cmd: node -e "const f=require(\'fs\');if(f.existsSync(\'bad.txt\')){f.mkdirSync(\'dist\',{recursive:true});process.exit(1)}"\n');
+      const w = out(run(['swarm', 'worktree', 'T1'], io)).worktree;
+      writeFileSync(path.join(w, '.gitignore'), '.forge/\n.claude/\nnode_modules/\ndist/\n');
+      writeFileSync(path.join(w, 'package.json'), '{}\n');
+      writeFileSync(path.join(w, 'bad.txt'), 'x\n');
+      g(w, 'add', '.gitignore', 'package.json', 'bad.txt'); g(w, 'commit', '-qm', 'T1: scaffold');
+      out(run(['swarm', 'task', 'T1', '--stage', 'verdict', '--status', 'accepted'], io));
+      const r = out(run(['swarm', 'integrate', 'T1'], io));
+      expect(r).toMatchObject({ result: 'conflict', setup: { ok: true }, leftovers: ['dist/'] });
+      expect(r.detail).toContain('validators failed');
+      expect(exclude().filter(l => l === 'node_modules/')).toHaveLength(1);
+      expect(existsSync(path.join(runWt(), 'node_modules'))).toBe(true);
+      expect(existsSync(path.join(runWt(), 'dist'))).toBe(true);
+    });
+    it('an install that rewrites a lockfile the merge brought is undone before the rollback, which then succeeds', () => {
+      setupConfig(`node -e "const f=require('fs');f.mkdirSync('node_modules',{recursive:true});if(f.existsSync('package-lock.json'))f.appendFileSync('package-lock.json','\\n')"`);
+      const w = out(run(['swarm', 'worktree', 'T1'], io)).worktree;
+      writeFileSync(path.join(w, 'package.json'), '{}\n');
+      writeFileSync(path.join(w, 'package-lock.json'), '{"lockfileVersion":3}\n');
+      g(w, 'add', 'package.json', 'package-lock.json'); g(w, 'commit', '-qm', 'T1: manifest');
+      out(run(['swarm', 'task', 'T1', '--stage', 'verdict', '--status', 'accepted'], io));
+      const before = g(runWt(), 'rev-parse', 'HEAD');
+      const r = out(run(['swarm', 'integrate', 'T1'], io));
+      expect(r).toMatchObject({ result: 'conflict', detail: 'the dependency install changed tracked files after merging task/T1: package-lock.json' });
+      expect(g(runWt(), 'rev-parse', 'HEAD')).toBe(before);
+      expect(() => g(runWt(), 'rev-parse', '-q', '--verify', 'MERGE_HEAD')).toThrow();
+      expect(g(runWt(), 'status', '--porcelain')).toBe('');
+    });
+    it('integrate names the surfaces the merge changed', () => {
+      const surface = '.forge/verify/web.md';
+      const w = out(run(['swarm', 'worktree', 'T1'], io)).worktree;
+      mkdirSync(path.join(w, '.forge', 'verify'), { recursive: true });
+      writeFileSync(path.join(w, surface), '# web\n');
+      g(w, 'add', '-f', surface); g(w, 'commit', '-qm', 'T1: surface');
+      out(run(['swarm', 'task', 'T1', '--stage', 'verdict', '--status', 'accepted'], io));
+      expect(out(run(['swarm', 'integrate', 'T1'], io))).toMatchObject({ result: 'integrated', surfacesChanged: [surface] });
+      accept('T2', 'b.txt', 'b\n');
+      expect(out(run(['swarm', 'integrate', 'T2'], io)).surfacesChanged).toBeUndefined();
     });
     const where = () => path.join(root, '..', `where-${path.basename(root)}.txt`);
     // The person's final validators record the directory they run in.
@@ -316,6 +393,60 @@ describe('forge swarm integrate (into the run branch)', () => {
       expect(existsSync(path.join(root, 'node_modules'))).toBe(true);
       expect(lastWhere()).toBe(path.resolve(root).toLowerCase());
       rmSync(where(), { force: true });
+    });
+    it('an unmoved final merge onto a checkout with package.json but no node_modules takes no baseline there', () => {
+      commitIn(root, 'package.json', '{}\n', 'manifest');
+      g(runWt(), 'merge', '-q', '--ff-only', 'main');
+      setupConfig(INSTALL(), `${finalValidators()}  - name: red\n    cmd: node -e "process.exit(1)"\n`);
+      accept('T1', 'a.txt', 'a\n');
+      expect(out(run(['swarm', 'integrate', 'T1'], io)).result).toBe('integrated');
+      const r = out(run(['swarm', 'merge', '--yes'], io));
+      // Red in a checkout without dependencies says nothing: it counts against the merge instead of being excused.
+      expect(r).toMatchObject({ result: 'conflict', detail: 'validators failed after merging forge/run-shop: red' });
+      expect(readFileSync(where(), 'utf8').split('\n').filter(Boolean).map(l => path.resolve(l).toLowerCase())).toEqual([path.resolve(runWt()).toLowerCase()]);
+      expect(installs(root)).toBe(0);
+      rmSync(where(), { force: true });
+    });
+    describe('a rejected final merge onto a moved target', () => {
+      // Red once the run's package.json is in: the merge is rolled back after installing in the person's checkout.
+      const NOPKG = '  - name: nopkg\n    cmd: node -e "process.exit(require(\'fs\').readFileSync(\'package.json\',\'utf8\').includes(\'run\')?1:0)"\n';
+      const NOFILE = '  - name: nopkg\n    cmd: node -e "process.exit(require(\'fs\').existsSync(\'package.json\')?1:0)"\n';
+      const rejected = (validator: string, mainManifest: boolean) => {
+        if (mainManifest) {
+          commitIn(root, 'package.json', '{"name":"main"}\n', 'manifest');
+          g(runWt(), 'merge', '-q', '--ff-only', 'main');
+        }
+        setupConfig(INSTALL(), `validators:\n${validator}`);
+        accept('T1', 'package.json', '{"name":"run"}\n');
+        expect(out(run(['swarm', 'integrate', 'T1'], io)).result).toBe('integrated');
+        commitIn(root, 'other.txt', 'o\n', 'main moved');
+      };
+      it('removes the node_modules the attempt created when the restored tree has no manifest', () => {
+        rejected(NOFILE, false);
+        const r = out(run(['swarm', 'merge', '--yes'], io));
+        expect(r).toMatchObject({ result: 'conflict', setup: { ok: true } });
+        expect(r.depsFromRejectedMerge).toBeUndefined();
+        expect(installs(root)).toBe(1);
+        expect(existsSync(path.join(root, 'node_modules'))).toBe(false);
+        expect(git('status', '--porcelain')).toBe('');
+      });
+      it('installs again for the restored tree when it has a manifest', () => {
+        rejected(NOPKG, true);
+        const r = out(run(['swarm', 'merge', '--yes'], io));
+        expect(r).toMatchObject({ result: 'conflict', restoreSetup: { ok: true } });
+        expect(r.depsFromRejectedMerge).toBeUndefined();
+        // Before the baseline (main had no node_modules), after the merge, and for the restored tree.
+        expect(installs(root)).toBe(3);
+      });
+      it('says the dependencies may not match when it can neither reinstall nor remove them', () => {
+        rejected(NOFILE, false);
+        mkdirSync(path.join(root, 'node_modules'));
+        writeFileSync(path.join(root, '.git', 'info', 'exclude'), 'node_modules/\n');
+        const r = out(run(['swarm', 'merge', '--yes'], io));
+        expect(r).toMatchObject({ result: 'conflict', depsFromRejectedMerge: true });
+        expect(r.say).toEqual(['The dependencies in your checkout were installed for the rejected merge of forge/run-shop and may not match your files: reinstall them before you use it.']);
+        expect(existsSync(path.join(root, 'node_modules'))).toBe(true);
+      });
     });
   });
   it('merge: asks without authorization, merges into the base with it, refuses a dirty main checkout', () => {
