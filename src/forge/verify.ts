@@ -1,17 +1,22 @@
 // The rule for tool verification (spec §5.1): never on Trivial or Small unless the task asks; on Medium and Large a
 // surface is a candidate when the diff touches its `affects`, or always when it has none. Permission comes from
-// local.yaml (denied drops the surface; unknown asks). Missing tools are reported, never a reason to drop.
+// local.yaml (denied drops the surface; unknown asks). Missing and unknown tools are reported, never a reason to drop.
 import { globMatch } from './validators.js';
 import type { Draft, Surface } from './surfaces.js';
 import type { LocalState } from './local.js';
 
-export interface PlanSurface { name: string; permission: 'allowed' | 'ask' | 'changed'; match: string | null; missing: string[] }
+export interface Ask { question: string; options: string[] }
+export interface PlanSurface {
+  name: string; permission: 'allowed' | 'ask' | 'changed'; match: string | null; missing: string[]; unknown: string[];
+  // What the question to the user shows (the CLI adds them): the change since the allowance (changed) and the question.
+  diff?: string | null; commits?: string[]; ask?: Ask;
+}
 export interface VerifyPlan { eligible: boolean; surfaces: PlanSurface[]; drafts: { name: string; match: string }[]; reason: string }
 
 const firstMatch = (globs: string[], changed: string[] | null): string | undefined =>
   changed?.find(f => globs.some(g => globMatch(g, f)));
 
-export function verifyPlan(i: { path: string; asked: boolean; changed: string[] | null; surfaces: Surface[]; drafts: Draft[]; local: LocalState; missing: (s: Surface) => string[] }): VerifyPlan {
+export function verifyPlan(i: { path: string; asked: boolean; changed: string[] | null; surfaces: Surface[]; drafts: Draft[]; local: LocalState; tools: (s: Surface) => { missing: string[]; unknown: string[] } }): VerifyPlan {
   if ((i.path === 'trivial' || i.path === 'small') && !i.asked) return { eligible: false, surfaces: [], drafts: [], reason: `${i.path}: no tool verification unless the task asks for it` };
   const surfaces: PlanSurface[] = [];
   for (const s of i.surfaces) {
@@ -25,7 +30,8 @@ export function verifyPlan(i: { path: string; asked: boolean; changed: string[] 
     }
     // An allowance covers the content it was given for: an edited surface (another commit, a PR) asks again.
     const permission = perm?.state !== 'allowed' ? 'ask' : perm.hash === s.hash ? 'allowed' : 'changed';
-    surfaces.push({ name: s.name, permission, match, missing: i.missing(s) });
+    const { missing, unknown } = i.tools(s);
+    surfaces.push({ name: s.name, permission, match, missing, unknown });
   }
   const drafts = i.drafts
     .filter(d => !i.surfaces.some(s => s.name === d.name) && !i.local.proposed.includes(d.name))
@@ -34,6 +40,23 @@ export function verifyPlan(i: { path: string; asked: boolean; changed: string[] 
   const reason = i.changed === null ? 'the diff is unknown: only surfaces without affects are candidates'
     : surfaces.length ? surfaces.map(s => `${s.name}${s.match ? ` (${s.match})` : ''}`).join(', ') : 'no surface matches the diff';
   return { eligible, surfaces, drafts, reason };
+}
+
+/** The question about a surface that is not allowed, with the three fixed answers (allow, skip this time, deny). */
+export function askFor(s: Pick<Surface, 'name' | 'title' | 'tools'>, permission: 'ask' | 'changed', es: boolean): Ask {
+  const options = es ? ['Sí, siempre', 'No, esta vez', 'Nunca en este proyecto'] : ['Yes, always', 'Not this time', 'Never in this project'];
+  if (permission === 'changed') return { question: es ? `¿Verifico ${s.name} con estas instrucciones?` : `Verify ${s.name} with these instructions?`, options };
+  const tools = s.tools.length ? `, ${es ? 'con' : 'with'} ${s.tools.join(', ')}` : '';
+  return { question: es ? `¿Verifico ${s.name} (${s.title}${tools})?` : `Verify ${s.name} (${s.title}${tools})?`, options };
+}
+
+/** At most `max` lines of `text`, then a line saying how many more there are. */
+export function capLines(text: string, max: number, es: boolean): string {
+  const lines = text.replace(/\n$/, '').split('\n');
+  const more = lines.length - max;
+  if (more <= 0) return text;
+  const note = es ? `… (${more} ${more === 1 ? 'línea más' : 'líneas más'})` : `… (${more} more ${more === 1 ? 'line' : 'lines'})`;
+  return `${[...lines.slice(0, max), note].join('\n')}\n`;
 }
 
 /** Kills each pid (its whole tree); `kill` returns false when the process is already gone. A pid <= 1, this

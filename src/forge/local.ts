@@ -1,14 +1,20 @@
 // .forge/local.yaml: what forge knows about this machine (surface permissions, validators already announced,
 // drafts already proposed). Ignored by git; read leniently, written atomically, unknown keys kept.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse, stringify } from 'yaml';
 import { AUTONOMIES, NAME, WORKFLOWS, type Autonomy, type Workflow } from './config.js';
-import { forgeDir } from './ledger.js';
+import { endsMidLine, forgeDir } from './ledger.js';
+import { lineDigest } from './surfaces.js';
 
-// A permission is tied to the surface's content (its hash, see surfaces.ts): a changed surface asks again.
-export interface SurfacePermission { state: 'allowed' | 'denied'; hash: string | null }
+// A permission is tied to the surface's content (its permissionHash, see surfaces.ts): a changed surface asks again.
+// An allowance also keeps the git blob of the file as allowed and the commit then (when git was there), so a changed
+// surface can be shown as a diff.
+export interface SurfacePermission { state: 'allowed' | 'denied'; hash: string | null; blob?: string; commit?: string }
+
+/** A git object id (sha1 or sha256): what a blob or a commit of local.yaml must be before it reaches git. */
+export const OBJECT_ID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 export interface LocalState {
   surfaces: Record<string, SurfacePermission>; known: string[]; proposed: string[];
   workflow?: Workflow; autonomy?: Autonomy;
@@ -42,7 +48,13 @@ export function readLocal(root: string): LocalState {
     for (const [k, v] of Object.entries(o.surfaces)) {
       if (!NAME.test(k) || !v || typeof v !== 'object' || Array.isArray(v)) continue;
       const p = v as Record<string, unknown>;
-      if (p.state === 'allowed' || p.state === 'denied') surfaces[k] = { state: p.state, hash: typeof p.hash === 'string' ? p.hash : null };
+      if (p.state === 'allowed' || p.state === 'denied') {
+        surfaces[k] = {
+          state: p.state, hash: typeof p.hash === 'string' ? p.hash : null,
+          ...(typeof p.blob === 'string' && OBJECT_ID.test(p.blob) ? { blob: p.blob } : {}),
+          ...(typeof p.commit === 'string' && OBJECT_ID.test(p.commit) ? { commit: p.commit } : {}),
+        };
+      }
     }
   }
   // workflow and autonomy (spec §5.4): a value that is not one of theirs is ignored, so config.yaml or `ask` decides.
@@ -66,4 +78,41 @@ export function updateLocal(root: string, fn: (s: LocalState) => LocalState): Lo
   const next = fn(readLocal(root));
   writeLocal(root, next);
   return next;
+}
+
+/** .forge/learned.jsonl in the main checkout: one `{surface, digest, ts}` per line `surfaces learn` appended to a surface
+ *  (see permissionHash). Ignored by git like local.yaml, and only ever appended to. */
+export const learnedFile = (root: string) => path.join(mainCheckout(root), '.forge', 'learned.jsonl');
+
+/** Records the lines appended to a surface, one appendFileSync per line (never read-modify-write), so parallel tasks
+ *  never lose each other's records. */
+export function recordLearned(root: string, surface: string, lines: string[], ts: string): void {
+  if (!lines.length) return;
+  const main = mainCheckout(root);
+  forgeDir(main);
+  const file = path.join(main, '.forge', 'learned.jsonl');
+  // A line left half-written by a crash must not swallow the next record.
+  let lead = endsMidLine(file) ? '\n' : '';
+  for (const l of lines) {
+    appendFileSync(file, `${lead}${JSON.stringify({ surface, digest: lineDigest(l), ts })}\n`);
+    lead = '';
+  }
+}
+
+/** The recorded digests per surface; a missing file or a bad line counts as nothing recorded. */
+export function readLearned(root: string): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  let text = '';
+  try { text = readFileSync(learnedFile(root), 'utf8'); } catch { return out; }
+  for (const line of text.split('\n')) {
+    let r: unknown;
+    try { r = JSON.parse(line); } catch { continue; }
+    if (!r || typeof r !== 'object') continue;
+    const { surface, digest } = r as Record<string, unknown>;
+    if (typeof surface !== 'string' || !NAME.test(surface) || typeof digest !== 'string' || !/^[0-9a-f]{16}$/.test(digest)) continue;
+    const set = out.get(surface) ?? new Set<string>();
+    set.add(digest);
+    out.set(surface, set);
+  }
+  return out;
 }

@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { readLocal, writeLocal, updateLocal, localFile } from '../src/forge/local.js';
 import { forgeDir } from '../src/forge/ledger.js';
+import { surfaceHash } from '../src/forge/surfaces.js';
+import { run } from '../src/forge/cli/run.js';
 
 let root: string;
 beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-local-')); });
@@ -25,6 +27,25 @@ describe('local.yaml', () => {
     mkdirSync(path.join(root, '.forge'));
     writeFileSync(localFile(root), 'surfaces:\n  web: { state: allowed, hash: abc }\n  app: { state: maybe }\n  api: allowed\n  cli: { state: denied }\n  "bad name": { state: denied }\nknown: [unit, unit, "x y", 3]\nproposed: [android]\nmine: 1\n');
     expect(readLocal(root)).toEqual({ surfaces: { web: { state: 'allowed', hash: 'abc' }, cli: { state: 'denied', hash: null } }, known: ['unit'], proposed: ['android'], mine: 1 });
+  });
+  it('keeps the blob and the commit of an allowance when they are object ids, drops anything else', () => {
+    mkdirSync(path.join(root, '.forge'));
+    const sha = 'a'.repeat(40);
+    writeFileSync(localFile(root), `surfaces:\n  web: { state: allowed, hash: abc, blob: ${sha}, commit: ${'b'.repeat(64)} }\n  app: { state: allowed, hash: abc, blob: "--output=x", commit: HEAD }\n  cli: { state: allowed, hash: abc, blob: 3 }\n`);
+    expect(readLocal(root).surfaces).toEqual({
+      web: { state: 'allowed', hash: 'abc', blob: sha, commit: 'b'.repeat(64) },
+      app: { state: 'allowed', hash: 'abc' },
+      cli: { state: 'allowed', hash: 'abc' },
+    });
+  });
+  it('an allowance stored before learned records existed stays allowed', () => {
+    const text = '# Web\n\nRun it.\n\n## Aprendido\n- 2026-10-01: tarda 15 s\n';
+    mkdirSync(path.join(root, '.forge', 'verify'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'verify', 'web.md'), text);
+    // What local.yaml held before: the hash of the whole file, no blob, no commit.
+    writeFileSync(localFile(root), `surfaces:\n  web: { state: allowed, hash: ${surfaceHash(text)} }\n`);
+    const out = JSON.parse(run(['verify-plan', '--task', 't', '--path', 'medium', '--base', 'x'], { cwd: root, now: () => new Date(), git: () => null }).stdout);
+    expect(out.surfaces).toEqual([{ name: 'web', permission: 'allowed', match: null, missing: [], unknown: [] }]);
   });
   it('keeps a valid workflow and autonomy and ignores an invalid one', () => {
     mkdirSync(path.join(root, '.forge'));
