@@ -7,8 +7,8 @@ Triage by size, the right model for each role, your own tools first, independent
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.12.0](https://img.shields.io/badge/version-0.12.0-fab387?style=flat-square)
-![depends on waypoint ^0.17.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.17.0-cba6f7?style=flat-square)
+![version 0.13.0](https://img.shields.io/badge/version-0.13.0-fab387?style=flat-square)
+![depends on waypoint ^0.18.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.18.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -48,7 +48,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depends on [waypoint](../waypoint/README.md) ^0.17.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
+forge depends on [waypoint](../waypoint/README.md) ^0.18.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
 
 ## Usage
 
@@ -125,7 +125,7 @@ forge works next to [superpowers](https://github.com/obra/superpowers) and reuse
 
 **Routing.** forge puts a short rule in each new session (a `SessionStart` hook) and, on prompts that look like coding work, a one-line hint (`UserPromptSubmit`): before any other process skill, superpowers' included, the session runs `forge:route`. It triages the request, and trivial and small work go on without it. For Medium and larger work it asks once who does it: forge, superpowers, «superpowers diseña, forge construye» (brainstorming writes the spec, forge builds from it) or «superpowers planifica, forge ejecuta» (superpowers writes the plan, forge executes it); without superpowers, forge or no forge. The recommended option comes first. While superpowers designs or plans, the prompt hook reminds the session that chose the route to hand over to forge. A recent spec is recommended only when the request asks to build it. The hooks stay quiet inside forge's own executions and infinite runs, and with `workflow: superpowers` or `workflow: off`.
 
-**Preferences.** `workflow:` (`ask`, `forge`, `superpowers`, `superpowers-design`, `superpowers-plan`, or `off` for no forge) and `autonomy:` (`ask`, `auto`) go in `.forge/config.yaml` (the team's) or `.forge/local.yaml` (yours: `forge local set workflow <w>|none`, `forge local set autonomy ask|auto|none`). What the request says wins, then `local.yaml`, then `config.yaml`, then `ask`; `forge prefs` prints the result and where each value came from.
+**Preferences.** `workflow:` (`ask`, `forge`, `superpowers`, `superpowers-design`, `superpowers-plan`, or `off` for no forge) and `autonomy:` (`ask`, `auto`) go in `.forge/config.yaml` (the team's) or in your own `local.yaml`, which lives in the repository's git directory (`.git/forge/local.yaml`), where no commit can change it (`forge local set workflow <w>|none`, `forge local set autonomy ask|auto|none`). What the request says wins, then `local.yaml`, then `config.yaml`, then `ask`; `forge prefs` prints the result and where each value came from.
 
 **Auto mode.** With `autonomy: auto`, `/forge:run --auto` or a request that says so, forge asks only at launch, in one message: changes in the tree that are not the task's, whether to merge the run branch at the end (Large), and the budget (infinite mode). Then it decides alone and records each decision (`triage --autonomy auto`, `swarm start --autonomy auto`): the route, raising the path, applying the critic's critical and major proposals (up to 3 rounds), approving the design when `waypoint design-gate` allows it, confirming the plan and choosing the mode. Any other doubt becomes a question note and the safe path. It never merges into main without the launch answer, pushes, deletes, publishes beyond the private roadmap, touches changes that are not the task's or surface permissions, starts infinite mode without a budget, closes escalations or decides proposals outside the policy. In infinite mode with auto, a Large task is designed, approved and planned on the infinite branch instead of being blocked.
 
@@ -239,7 +239,7 @@ Tests and reviewers read the code; verification **uses** the result. A **surface
 
 ## Configuration
 
-`.forge/` in the project holds `config.yaml`, `verify/` (the surfaces), the ledger, `local.yaml`, `status.json` (the last task, with `taskStartedAt`, `stageSince`, `stages` (seconds per phase) and `doneAt` for lens's timings), `work/<task-id>/` (briefs, diffs, reports, reviews, verification evidence), `proposals/`, `run.json`, `execution/` (the execution and its baselines; each task in `execution.json` records `finishedAt` when it is integrated, blocked or adopted with `swarm retry <T> --adopt`), `live/` (the local signal) and `usage/`. Git ignores everything in it except `config.yaml` and `verify/*.md`.
+`.forge/` in the project holds `config.yaml`, `verify/` (the surfaces), the ledger, `status.json` (the last task, with `taskStartedAt`, `stageSince`, `stages` (seconds per phase) and `doneAt` for lens's timings), `work/<task-id>/` (briefs, diffs, reports, reviews, verification evidence), `proposals/`, `run.json`, `execution/` (the execution and its baselines; each task in `execution.json` records `finishedAt` when it is integrated, blocked or adopted with `swarm retry <T> --adopt`), `live/` (the local signal) and `usage/`. Git ignores everything in it except `config.yaml` and `verify/*.md`.
 
 ```yaml
 profile: balanced              # balanced | economy | quality
@@ -296,7 +296,7 @@ Pair from Settings > Devices and weigh: the weight must show on the main screen.
 - 2026-10-15: the app takes about 40 s to start the first time.
 ```
 
-**Permissions.** `.forge/local.yaml` (not in git) holds your allow or deny per surface, and the first time a surface would run, the session asks. The permission is tied to the file's content (a hash of the whole file): if anyone edits the surface, for example in a commit or a PR, it asks again and shows what changed. forge re-blesses its own `Learned` notes, so those never trigger the question, but lines added by anyone else do.
+**Permissions.** Your allow or deny per surface lives inside the repository's git directory (`.git/forge/surfaces.json`, shared by every worktree), where no commit, PR or branch can write it, and the first time a surface would run, the session asks. (Up to forge 0.12 your permissions and preferences lived in `.forge/local.yaml`; forge no longer reads that file, because a commit could replace it, so after updating it asks once again for each surface and for your workflow preference.) The permission is tied to the file's content (a hash of the whole file, except the `Learned` lines forge added itself): if anyone edits the surface, for example in a commit, a PR or a task, it asks again, shows the diff since you allowed it and offers «yes, always», «not this time» and «never in this project». `surfaces learn` records each line it adds in `.git/forge/learned.jsonl`, so forge's own notes never trigger the question, also when parallel tasks add notes to their own copies; lines added by anyone else do. Only you grant a permission: the session never re-allows a surface a task changed.
 
 **Matching.**
 
@@ -311,7 +311,7 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 <details>
 <summary><b>Tasks and review</b></summary>
 
-- `triage [--task id] [--batch] [--autonomy auto|ask] (<text> | --text-file f)` - classify a task: path, files, sensitive zones, validators and the `implementer` (role, agent, self, why). `--batch` marks one request of several, so a Trivial one goes to `mech`. `--text-file` reads the text from a file, so it never goes through a shell. `--autonomy auto` records that the task runs in auto mode.
+- `triage [--task id] [--batch] [--autonomy auto|ask] [--locale es|en] (<text> | --text-file f)` - classify a task: path, files, sensitive zones, validators and the `implementer` (role, agent, self, why). `--batch` marks one request of several, so a Trivial one goes to `mech`. `--text-file` reads the text from a file, so it never goes through a shell. `--autonomy auto` records that the task runs in auto mode. It also prints `announce`, the line the session shows (path, reason, implementer and new validators, in the `--locale` language, else the plan's), `gate` (`plan` for Medium: the short plan comes first) and, while `.forge/.gitignore` is not in git, `untracked`. A short request that changes one quoted text («change the page title to "X"») is Trivial.
 - `triage --plan p --task T` - triage a plan task from its zones and `done_when`; it prints the `implementer` too.
 - `brief --plan p --task T [--design d]` - print a task brief built from a waypoint plan task, including the `Commit title prefix` line that implementers use.
 - `brief --superpowers-plan f --task N` - print the brief of task N of a superpowers plan: the plan's header and global constraints, the task's body verbatim and the rules forge adds (plus the TDD line with `tdd: superpowers`).
@@ -326,11 +326,11 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 - `route set --task id --chosen o --by user|auto [--spec f] [--plan f] [--session s]` - keep the chosen route in `.forge/route.json` and record the `route` decision; only the session `--session` names is reminded of it.
 - `route stage --stage s [--task id] [--spec f] [--plan f]` - move a pending route on (`designing`, `planning`, `handed-off`, `done`).
 - `hook route-session` / `hook route-prompt` - the routing hooks (SessionStart, UserPromptSubmit); they print nothing on any error.
-- `local set workflow <w>|none` / `local set autonomy ask|auto|none` - your own preferences in `.forge/local.yaml`.
+- `local set workflow <w>|none` / `local set autonomy ask|auto|none` - your own preferences in `.git/forge/local.yaml`.
 - `validate [--affected a,b | --all] [--path trivial|small|medium|large] [--base sha] [--final] [--task id] [--base-run | --baseline f]` - run the project validators that apply (see Matching); `--base` gives the diff that e2e `affects` are matched against, `--final` selects the final review's set. `--base-run` marks a run on the base commit, before any change; `--baseline f` takes that run's JSON and marks a failure the base already had `preexisting`, which neither the exit code nor the verdict counts. A test runner that finds no tests passes as `skipped: "no-tests"`.
 - `verdict --task id --dir d [--validators f] [--sensitive] [--perf]` - weigh the reviewers' JSON files into a score. A reviewer is listed with `invalid: true` when its output was unusable (`dropped: 0`, counted as an abstention) or when some of its findings were dropped (`dropped` > 0; the review keeps its verdict and still scores, and the skill records the dropped findings as a ruling).
 - `round --task id --path medium|large` - decide the next step of the review loop (`done`, `resume`, `fresh-stronger`, `redo`, `breaker`, `stalled`; `tierUp` from round 3).
-- `log --kind k [--task id] [--data json | --data-file f]` - append to the ledger.
+- `log --kind k [--task id] [--data json | --data-file f]` - append to the ledger. A `triage` entry that raises the path may carry a `why`, which the next `announce` names.
 - `decision add --data-file f [--task id]` - record a decision forge took (strict JSON: `point`, `what`, `chosen`, `why`, `by`, optional `alternatives`, `weight`, `revert`, `undo`, `safePath`, `revertOf`, `task`, `runId`); prints it with its number `n` and keeps `.forge/decisions.json`, the summary lens and the band read. During an active execution it carries the run's id.
 - `decision list [--task id] [--run id] [--since iso] [--all] [--auto]` - the decisions, numbered; with no filter, those of the latest scope. `--auto` leaves out your own answers.
 - `decision show <n>` - one decision, with its `undo`.
@@ -338,9 +338,10 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 - `last --task id` - the path, last phase event, last verdict and last round of a task.
 - `agents` - agent names for the active profile.
 - `surfaces [learn --name N --notes-file F [--heading H] | proposed --name N]` - list the surfaces and detected drafts; append notes to a surface's `Learned` section; mark a draft as proposed.
-- `tools [--surface N]` - check which of the tools a surface lists are on the PATH.
-- `local get [surfaces.<name>] | set surfaces.<name> allowed|denied|none` - read or write surface permissions in `.forge/local.yaml`.
-- `verify-plan --task id --path p --base sha [--asked]` - decide whether verification runs and which surfaces are candidates.
+- `tools [--surface N]` - check the tools a surface lists: `found` (on the PATH or among the MCP servers configured for Claude Code: plugins, `.claude.json`, `.mcp.json`), `missing` (a known program that is not installed) or `unknown`.
+- `local get [surfaces.<name>] | set surfaces.<name> allowed|denied|none [--expect <hash>]` - read or write surface permissions in `.git/forge/surfaces.json`; `allowed` also keeps the allowed text (a git blob) so a later change can be shown as a diff, and with `--expect` it refuses when the surface changed after `verify-plan` printed that hash.
+- `verify-plan --task id --path p --base sha [--asked] [--locale es|en]` - decide whether verification runs and which surfaces are candidates; a changed surface comes with its `diff`, its `commits` and the question to ask (`ask`).
+- `verify-result --task id --dir d` - record the result of a `verify.json` outside a verdict (a Small task, a check by hand), so lens shows the task finished.
 - `verify-cleanup --dir d` - stop the processes `forge-verify` left running (from `pids.json`).
 - `waypoint-cli` - print the absolute path of waypoint's `waypoint.cjs` (found next to this plugin, highest version); exits with 2 when it is not found.
 
@@ -362,7 +363,7 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 <summary><b>Infinite mode and execution</b></summary>
 
 - `infinite start --cycles N | --hours H`, `infinite status`, `cycle --progress yes|no`, `stop`
-- `swarm start --project P --session SID [--mode subagents|sessions] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F]` - start or resume an execution (`--kind ephemeral --tasks F` starts an ephemeral one from the JSON file F of loose tasks and writes its state to `.forge/loose.json`); creates the run branch and its worktree (or brings a stale one up to its base, `baseSync`) and prints the `setup` result. Run it from the main checkout.
+- `swarm start --project P --session SID [--mode subagents|sessions] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F]` - start or resume an execution (`--kind ephemeral --tasks F` starts an ephemeral one from the JSON file F of loose tasks and writes its state to `.forge/loose.json`); creates the run branch and its worktree (or brings a stale one up to its base, `baseSync`) and prints the `setup` result and `announce`, the lines the session shows (mode and N, branch, where to open the app, the final merge and how to stop it; `--locale es|en` for an ephemeral run). It also sets git's union merge for `.forge/verify/*.md` (in `.git/info/attributes`), so `Learned` notes added by parallel tasks merge without conflicts. Run it from the main checkout.
 - `swarm status` - the execution state, per task.
 - `swarm propose --plan P | --tasks F` - the plan's (or the loose tasks') width and the recommended mode and N.
 - `swarm worktree <task> [--member SID]` - create the task's worktree and branch (and run `swarm.setup`); `--member` is for a member session, which creates its own.
@@ -373,8 +374,8 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 - `swarm takeover --session SID [--db dir]` - take over the coordinator when it is stopped; a run member cannot. The coordinator becomes `SID`, and the Stop hook binds to that session at its next stop.
 - `swarm task <task> --stage S [--agent A | --no-agent] [--round N] [--status running|accepted|blocked] [--detail-file F] [--lease ISO]` - record the task's stage, agent and round; `swarm task <task> --drop` forgets a task whose claim was lost.
 - `swarm tick [--plan p --db dir] [--agents F]` - decide what to launch, nudge, relaunch and integrate; in an ephemeral execution it takes no `--plan` or `--db` (`--db` is a copy of the roadmap's `state` and `sessions` documents; `--agents` is a JSON file of the background sessions, `[{name, state: working|idle}]`).
-- `swarm integrate <task>` - merge an accepted task into the run branch, comparing the validators with the baseline.
-- `swarm merge [--yes]` - merge the run branch into your branch; without `--yes` it needs the permission given at start.
+- `swarm integrate <task> [--retry-deps]` - merge an accepted task into the run branch, comparing the validators with the baseline. It installs the dependencies again when the merge brings or changes a manifest or lockfile (`setup`), puts them back after a merge it rolls back, and prints `newValidators` and `say`, the lines the session shows (new validators, validators excused as already failing). An install that fails answers `run-deps` and is not retried until the manifests change, or with `--retry-deps`.
+- `swarm merge [--yes] [--retry-deps]` - merge the run branch into your branch; without `--yes` it needs the permission given at start. When your branch has not moved, the merged tree is the run branch's, so the validators run in the run worktree and nothing is installed in your checkout.
 - `swarm retry <T> [--adopt]` - put a task in conflict or blocked back to work. `--adopt` gives the conflicting task of an executor or manual session one fix round with the coordinator's subagents; it refuses if the holder's worktree is dirty.
 - `.forge/loose.json` - the state of an ephemeral execution (its loose tasks, with title, zones and dependencies).
 - `swarm sleep <seconds> [--mark]` - wait between ticks (up to 900 s); `--mark` only records the wake-up time.

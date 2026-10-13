@@ -6,7 +6,7 @@
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.17.0](https://img.shields.io/badge/versi%C3%B3n-0.17.0-cba6f7?style=flat-square)
+![versión 0.18.0](https://img.shields.io/badge/versi%C3%B3n-0.18.0-cba6f7?style=flat-square)
 ![requiere sesión en claude.ai](https://img.shields.io/badge/requiere-sesi%C3%B3n%20en%20claude.ai-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -73,7 +73,9 @@ Un recorrido típico:
 
 `/waypoint:design new --from docs/superpowers/specs/<fichero>.md` parte de un spec escrito con superpowers: sus secciones se copian tal cual y la página del diseño dice «Importado de».
 
-Con el modo auto de forge, `/waypoint:design approve --auto` aprueba sin preguntar solo cuando `waypoint design-gate` dice que la última crítica no dejó ninguna propuesta critical sin aplicar.
+Una propuesta que no aplicas sigue pendiente entre rondas: la banda cuenta las pendientes de todas las rondas, el crítico de la ronda siguiente no las repite y `approve` lista las critical y major que siguen abiertas y te pide aplicarlas o descartarlas.
+
+Con el modo auto de forge, `/waypoint:design approve --auto` aprueba sin preguntar solo cuando `waypoint design-gate` dice que no queda ninguna propuesta critical sin aplicar en ninguna ronda.
 
 Con [forge](../forge/README.es.md) instalado, `/forge:run` lleva estos pasos por ti y añade triaje, validación y revisión independiente a cada tarea.
 
@@ -143,10 +145,10 @@ Las skills ejecutan la CLI como `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" 
 
 | Grupo | Comandos |
 | --- | --- |
-| Diseño | `design-import <spec> --project P --out D`, `design-validate`, `design-snapshot`, `design-changed`, `design-gate <design.md>`, `critique-check`, `critique-select`, `design-page` |
-| Plan y página | `validate`, `hash` (imprime el hash del plan, para detectar un roadmap desactualizado), `page`, `sync`, `clean-cache` |
+| Diseño | `design-import <spec> --project P --out D`, `design-validate`, `design-snapshot`, `design-changed`, `design-gate <design.md>` (con las propuestas `pending` de todas las rondas), `critique-check`, `critique-select`, `critique-dismiss <design.md> --round R <all\|1,3>`, `design-page` |
+| Plan y página | `validate`, `hash` (imprime el hash del plan, para detectar un roadmap desactualizado), `page [--publish-info]` (las capacidades con las que publicar y la línea que avisa de que la página queda interna), `sync` (con la línea del informe: URL y cuentas), `clean-cache` |
 | Trabajo | `next [--base <rama>]`, `conflicts`, `recover`, `status`, `commit-info` |
-| Sesiones | `launch <frente> [--swarm <id> --base <rama>]`, `launch <plan> <T> --task --run R --coordinator SID --base B [--launcher bg|herdr]`, `inbox`, `escalations`, `notes`, `session-id` |
+| Sesiones | `launch <frente> [--swarm <id> --base <rama>]`, `launch <plan> <T> --task --run R --coordinator SID --base B [--launcher bg|herdr]`, `inbox`, `escalations`, `notes [--plan p] [--locale es\|en]` (con una línea que decir por cada nota de una persona), `session-id` |
 | Utilidades | `event-id`, `now` |
 
 ## Permisos
