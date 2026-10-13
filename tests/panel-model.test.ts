@@ -221,6 +221,10 @@ describe('forgeFromStatus', () => {
     expect(forgeFromStatus(JSON.stringify(STATUS), NOW)).toEqual({ ...rest, brief: null, accepted: [], verify: null, briefs: null });
     expect(forgeFromStatus(JSON.stringify(STATUS), NOW, 4)).toMatchObject({ briefs: 4 });
   });
+  it('keeps auto mode from status.json', () => {
+    expect(forgeFromStatus(JSON.stringify({ ...STATUS, autonomy: 'auto' }), NOW)).toMatchObject({ autonomy: 'auto' });
+    expect(forgeFromStatus(JSON.stringify(STATUS), NOW)).not.toHaveProperty('autonomy');
+  });
   it('is null for junk, invalid fields or a status older than a day', () => {
     expect(forgeFromStatus('', NOW)).toBeNull();
     expect(forgeFromStatus('{"task":', NOW)).toBeNull();

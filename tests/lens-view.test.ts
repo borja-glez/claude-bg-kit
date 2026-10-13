@@ -17,6 +17,7 @@ const T: CardTexts = {
   forgeSaves: usd => `forge saves ${usd}`, pricesAsOf: 'prices as of', drift: 'differs from /cost',
   noReview: 'no independent review', gVerify: 'verification', blocked: 'blocked',
   autoDecisions: n => `${n} automatic decision${n === 1 ? '' : 's'}`,
+  autoMode: 'auto mode',
 };
 const FORGE: NonNullable<PanelModel['forge']> = {
   task: 'orders', path: 'large', phase: 'implement', agent: 'forge-impl-heavy', validators: [{ name: 'test', ok: true }],
@@ -138,6 +139,11 @@ describe('lens cards', () => {
     expect(alt).toContain('briefs 2/5');
     expect(alt).toContain('heavy forge-impl-heavy');
     expect(alt).toContain('accept 0.96');
+  });
+  it('the forge card says when the task runs in auto mode', () => {
+    const auto = buildCards({ ...EMPTY, forge: { ...FORGE, autonomy: 'auto' } }, T, 0).find(c => c.title === FORGE.task)!;
+    expect(auto.subtitle).toMatch(/ · auto mode$/);
+    expect(buildCards({ ...EMPTY, forge: FORGE }, T, 0).find(c => c.title === FORGE.task)!.subtitle ?? '').not.toContain('auto mode');
   });
   it('the forge card counts the automatic decisions and names the last major one, even with no forge task', () => {
     const [card] = buildCards({ ...EMPTY, decisions: { count: 3, autonomy: 'auto', lastMajor: 'design approved (v4)' } }, T, 0);

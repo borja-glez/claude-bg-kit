@@ -18,7 +18,7 @@ export interface CardTexts {
   sUsage: string; effort: string; effortLevel: (e: string) => string; thisSession: string; run: string; gMain: string; gImpl: string;
   gReview: string; gPlan: string; gOther: string; tracking: string; withoutForge: string; withoutForgeNote: string;
   forgeCosts: (usd: string, pct: number) => string; forgeSaves: (usd: string) => string; pricesAsOf: string; drift: string; various: string;
-  noReview: string; gVerify: string; blocked: string; autoDecisions: (n: number) => string;
+  noReview: string; gVerify: string; blocked: string; autoDecisions: (n: number) => string; autoMode: string;
 }
 
 const modelRight = (s: { model?: string; effort?: string }, t: CardTexts): string | undefined =>
@@ -113,7 +113,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     out.push({
       icon: SECTION_ICON.forge, title: f?.task ?? 'forge', hue: SECTION_HUE.forge,
       chip: f?.path ? { text: f.path, hue: PATH_HUE[f.path] ?? 'peach' } : inf?.active ? { text: '∞', hue: 'mauve' } : undefined,
-      subtitle: f && forgePhase(f) ? `${t.sForge} · ${forgePhase(f)}` : undefined, blocks,
+      subtitle: f && (forgePhase(f) || f.autonomy === 'auto') ? [t.sForge, forgePhase(f), f.autonomy === 'auto' && t.autoMode].filter(Boolean).join(' · ') : undefined, blocks,
     });
   }
 
