@@ -19,7 +19,7 @@ import { normalizeNote, notesSince, noteLines } from '../lib/notes.js';
 import { pickProject } from '../mod/model.js';
 import { BRANCH_RE, mainWorktreeFrom } from '../lib/worktree.js';
 import { planLocale, replyIn } from '../lib/locale.js';
-import { launchRun, type Launcher } from '../lib/launcher.js';
+import { launchRun, EFFORTS, MODELS, type Launcher, type Effort, type Model } from '../lib/launcher.js';
 import { roadmapCapabilities, sharingNotice, syncSummary } from '../lib/publish.js';
 import { loadConfig } from '../forge/config.js';
 import type { MessageDoc, NoteDoc, PhaseDoc, PlanView, SessionDoc, TaskState } from '../lib/types.js';
@@ -188,7 +188,19 @@ export function run(argv: string[], io: Io): Result {
         } else if (!p.tracks.some(t => t.id === track)) return fail(`launch: unknown track ${track ?? ''}`);
         const SAFE_ID = /^[A-Za-z0-9_.~:@+][A-Za-z0-9_\-.~:@+]{0,79}$/;
         const val = (f: string) => { const i = args.indexOf(f); const v = i >= 0 ? args[i + 1] : undefined; return v && !v.startsWith('--') ? v : undefined; };
+        // A member session's own effort and model: closed lists, so they go into the shell command unquoted.
+        let effort: Effort | undefined, model: Model | undefined;
         if (taskMode) {
+          if (args.includes('--effort')) {
+            const v = val('--effort');
+            if (!v || !(EFFORTS as readonly string[]).includes(v)) return fail(`launch --task: --effort must be one of ${EFFORTS.join(', ')}`, 2);
+            effort = v as Effort;
+          }
+          if (args.includes('--model')) {
+            const v = val('--model');
+            if (!v || !(MODELS as readonly string[]).includes(v)) return fail(`launch --task: --model must be one of ${MODELS.join(', ')}`, 2);
+            model = v as Model;
+          }
           const runId = val('--run'), coordinator = val('--coordinator'), taskBase = val('--base');
           if (!runId || !SAFE_ID.test(runId)) return fail('launch --task: --run needs the execution id', 2);
           if (!coordinator || !SAFE_ID.test(coordinator)) return fail('launch --task: --coordinator needs the coordinator session id', 2);
@@ -214,10 +226,11 @@ export function run(argv: string[], io: Io): Result {
           const taskWt = path.join(root, '.claude', 'worktrees', `task-${track}`);
           const taskBranch = `task/${track}`;
           const taskName = `wp-${p.project}-${track}`;
-          const taskPrompt = `/forge:run --plan ${args[0]} --task ${track} — run member of ${val('--coordinator')}: work only ${track}, then stop`;
-          const taskCommand = `claude --bg --name ${taskName} "${taskPrompt}"`;
+          const taskPrompt = `/forge:member --plan ${args[0]} --task ${track} — run member of ${val('--coordinator')}: work only ${track}, then stop`;
+          const taskFlags = `${effort ? ` --effort ${effort}` : ''}${model ? ` --model ${model}` : ''}`;
+          const taskCommand = `claude --bg --name ${taskName}${taskFlags} "${taskPrompt}"`;
           // The launcher is resolved before any branch or worktree exists: a refused one leaves nothing behind.
-          const taskRun = launchRun(launcher as Launcher, { name: taskName, prompt: taskPrompt, worktree: taskWt });
+          const taskRun = launchRun(launcher as Launcher, { name: taskName, prompt: taskPrompt, worktree: taskWt, effort, model });
           if (taskRun === null) return fail('launch: herdr cannot open panes from the command line; use launcher bg', 2);
           if (!existsSync(taskWt)) {
             const exists = git('branch', '--list', taskBranch) !== '';

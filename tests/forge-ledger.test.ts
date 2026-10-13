@@ -72,7 +72,7 @@ describe('config', () => {
   it('defaults when there is no file', () => {
     expect(parseConfig(null)).toEqual({
       profile: 'balanced', detect: true, exclude: [], verify: { limits: { checks: 8, shots: 10, minutes: 10 } },
-      evidence: 'upload', validatorTimeoutSec: 600, swarm: { parallel: 3, launcher: 'bg' }, tdd: 'off',
+      evidence: 'upload', validatorTimeoutSec: 600, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' } }, tdd: 'off',
     });
   });
   it('reads validators and profile', () => {
@@ -102,7 +102,7 @@ describe('config', () => {
 
 describe('parseConfig swarm', () => {
   it('defaults parallel to 3', () => {
-    expect(parseConfig('profile: economy\n').swarm).toEqual({ parallel: 3, launcher: 'bg' });
+    expect(parseConfig('profile: economy\n').swarm).toEqual({ parallel: 3, launcher: 'bg', member: { effort: 'medium' } });
   });
   it('reads parallel from 1 to 10', () => {
     expect(parseConfig('swarm:\n  parallel: 1\n').swarm.parallel).toBe(1);

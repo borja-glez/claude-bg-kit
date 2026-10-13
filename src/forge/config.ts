@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse } from 'yaml';
 import { z } from 'zod';
+import { EFFORTS, MODELS, type Effort, type Model } from '../lib/launcher.js';
 
 export type Profile = 'balanced' | 'economy' | 'quality';
 export const ROLES = ['impl-heavy', 'impl', 'impl-light', 'mech', 'review-correctness', 'review-security', 'review-perf', 'verify'] as const;
@@ -19,7 +20,12 @@ export interface ValidatorSpec { name: string; cmd: string; kind?: string; affec
 export interface VerifyLimits { checks: number; shots: number; minutes: number }
 export interface ForgeConfig {
   profile: Profile; validators?: ValidatorSpec[]; detect: boolean; exclude: string[];
-  verify: { limits: VerifyLimits }; evidence: 'upload' | 'local'; validatorTimeoutSec: number; swarm: { parallel: number; mode?: 'subagents' | 'sessions'; launcher: 'bg' | 'herdr'; setup?: string };
+  verify: { limits: VerifyLimits }; evidence: 'upload' | 'local'; validatorTimeoutSec: number; swarm: {
+    parallel: number; mode?: 'subagents' | 'sessions'; launcher: 'bg' | 'herdr';
+    /** How a sessions-mode member is launched: its own effort, and a model only when set (else the person's default). */
+    member: { effort: Effort; model?: Model };
+    setup?: string;
+  };
   tdd: 'off' | 'superpowers';
   workflow?: Workflow; autonomy?: Autonomy;
 }
@@ -52,13 +58,17 @@ const Schema = z.object({
     parallel: z.number().int().min(1).max(10).default(3),
     mode: z.enum(['subagents', 'sessions']).optional(),
     launcher: z.enum(['bg', 'herdr']).default('bg'),
+    member: z.object({
+      effort: z.enum(EFFORTS).default('medium'),
+      model: z.enum(MODELS).optional(),
+    }).strict().default({ effort: 'medium' }),
     setup: z.string().min(1).max(500).optional(),
-  }).strict().default({ parallel: 3, launcher: 'bg' }),
+  }).strict().default({ parallel: 3, launcher: 'bg', member: { effort: 'medium' } }),
 }).strict();
 
 const DEFAULTS: ForgeConfig = {
   profile: 'balanced', detect: true, exclude: [], verify: { limits: { checks: 8, shots: 10, minutes: 10 } },
-  evidence: 'upload', validatorTimeoutSec: 600, swarm: { parallel: 3, launcher: 'bg' }, tdd: 'off',
+  evidence: 'upload', validatorTimeoutSec: 600, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' } }, tdd: 'off',
 };
 
 export function parseConfig(text: string | null): ForgeConfig {

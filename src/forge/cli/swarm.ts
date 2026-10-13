@@ -272,6 +272,14 @@ function addTaskWorktree(deps: SwarmDeps, main: string, task: string, runBranch:
   return { worktree: dir, branch, base: deps.at(dir).git(['rev-parse', 'HEAD'])?.trim() ?? null, setup };
 }
 
+/** The `waypoint launch` arguments of a sessions-mode member of task <T>, with its effort, model and launcher from the config. */
+function memberLaunch(root: string, planPath: string, task: string, e: ExecutionState): string[] {
+  const { swarm } = loadConfig(root);
+  return ['launch', planPath, task, '--task', '--run', e.runId, '--coordinator', e.coordinator, '--base', e.branch,
+    '--effort', swarm.member.effort, ...(swarm.member.model ? ['--model', swarm.member.model] : []),
+    ...(swarm.launcher === 'herdr' ? ['--launcher', 'herdr'] : [])];
+}
+
 /** What `tick` and `next` schedule from: the plan, the roadmap listings and the done commits already on the run branch. */
 function readTickInput(io: Io, deps: SwarmDeps, e: ExecutionState, planArg: string | undefined, db: string | undefined, sub: string) {
   const plan = loadPlanArg(io, planArg, sub);
@@ -980,7 +988,12 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       }
       const d = schedule({ plan, states, sessions, exec: e, integrated, now: now.getTime(), publicTasks, agents });
       saveExecution(io.cwd, d.next);
-      return json({ actions: d.actions, running: Object.values(d.next.tasks).filter(t => t.status === 'running').length, parallel: e.parallel });
+      // In sessions mode a start carries the whole `waypoint launch` argument list: the coordinator runs it as is.
+      const planPath = flag('plan');
+      const actions = e.mode === 'sessions' && planPath
+        ? d.actions.map(a => a.type === 'start' ? { ...a, launch: memberLaunch(io.cwd, planPath, a.task, e) } : a)
+        : d.actions;
+      return json({ actions, running: Object.values(d.next.tasks).filter(t => t.status === 'running').length, parallel: e.parallel });
     }
     case 'retry': {
       const task = taskArg();
@@ -1065,7 +1078,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         `Resume from ${t.branch} in this worktree: read the brief in ${memberWork} if it exists (else write it as the brief stage says), do not redo a step whose output file is already written, and continue from the last stage.`, '',
       ].join('\n'));
       saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, attempts: attempt, startedAt: iso, nudgedAt: null, updatedAt: iso } } });
-      return json({ task, attempt, note, launch: ['launch', planPath, task, '--task', '--run', e.runId, '--coordinator', e.coordinator, '--base', e.branch] });
+      return json({ task, attempt, note, launch: memberLaunch(io.cwd, planPath, task, e) });
     }
     case 'sleep': {
       const seconds = Number(rest[0]);
