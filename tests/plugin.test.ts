@@ -154,6 +154,19 @@ describe('plugin layout', () => {
       expect(forge).toContain(`) ${dep},`);
     }
   });
+  it('implementers follow the TDD line and the correctness reviewer checks its evidence', () => {
+    for (const a of ['forge-impl-heavy', 'forge-impl', 'forge-impl-light', 'forge-mech', 'forge-fable']) {
+      expect(read(`plugins/forge/agents/${a}.md`)).toContain('When the brief has a `TDD: required` line');
+    }
+    const rc = read('plugins/forge/agents/forge-review-correctness.md');
+    for (const w of ['`TDD: required`', "implementer's report", '"important"', 'failing run']) expect(rc).toContain(w);
+  });
+  it('forge review skill reviews a branch and never fixes, merges or pushes', () => {
+    const md = read('plugins/forge/skills/review/SKILL.md');
+    expect(md).toMatch(/^---\r?\nname: review\r?\n/);
+    for (const w of ['git merge-base HEAD', 'review-<branch>-<tag>', '--base-run', 'git switch --detach', 'diff-1.patch', 'FORGE triage', 'review-correctness',
+      'review-security', 'review-perf', 'FORGE verdict', 'nothing to review', 'Never merge', 'never push', '/forge:run']) expect(md).toContain(w);
+  });
   it('superpowers bridges in the skills: import a spec, run a superpowers plan, TDD', () => {
     const design = read('plugins/waypoint/skills/design/SKILL.md');
     for (const w of ['new --from <spec>', 'waypoint design-import', '--round 0', 'another round (recommended)', 'approve now', 'source:', '`docs/superpowers/` is in `.gitignore`']) expect(design).toContain(w);
