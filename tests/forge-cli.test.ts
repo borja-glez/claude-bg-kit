@@ -306,6 +306,12 @@ describe('forge CLI', () => {
     expect(JSON.parse(run(['triage', '--task', 'rw', 'add a dark mode toggle'], io).stdout).announce).toMatch(/^Medium → forge-impl: touches the cart totals and its tests\./);
     // Another task keeps the CLI reasons.
     expect(JSON.parse(run(['triage', '--task', 'other', 'add a dark mode toggle'], io).stdout).announce).toMatch(/no files located/);
+    // A logged why is one line, without a trailing stop, before the length check.
+    writeFileSync(path.join(root, 'multi.json'), JSON.stringify({ path: 'large', why: ' touches the cart totals.\n  and   tests.; ' }));
+    expect(run(['log', '--kind', 'triage', '--task', 'rw2', '--data-file', 'multi.json'], io).code).toBe(0);
+    expect(readEvents(root).at(-1)!.why).toBe('touches the cart totals. and tests');
+    writeFileSync(path.join(root, 'spaced.json'), JSON.stringify({ path: 'large', why: `${'x   '.repeat(99)}y\n\n\n` }));
+    expect(run(['log', '--kind', 'triage', '--task', 'rw2', '--data-file', 'spaced.json'], io).code).toBe(0);
     writeFileSync(path.join(root, 'long.json'), JSON.stringify({ path: 'large', why: 'x'.repeat(201) }));
     writeFileSync(path.join(root, 'num.json'), JSON.stringify({ path: 'large', why: 3 }));
     expect(run(['log', '--kind', 'triage', '--task', 'rw', '--data-file', 'long.json'], io).code).toBe(2);
@@ -336,6 +342,18 @@ describe('forge CLI', () => {
     expect(JSON.parse(run(['triage', 'fix the typo in a.ts'], dio).stdout)).not.toHaveProperty('untracked');
     // When git does not answer, nothing is claimed.
     expect(JSON.parse(run(['triage', 'fix the typo in a.ts'], { ...dio, git: () => null }).stdout)).not.toHaveProperty('untracked');
+  });
+  it('triage does not name .forge/.gitignore when the repository ignores .forge/', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'forge-ignored-'));
+    const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...a], { cwd: dir, encoding: 'utf8' });
+    git('init', '-q');
+    for (const f of ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts']) writeFileSync(path.join(dir, f), 'export {};\n');
+    writeFileSync(path.join(dir, '.gitignore'), '.forge/\n');
+    git('add', '.');
+    git('commit', '-q', '-m', 'init');
+    const out = JSON.parse(run(['triage', 'fix the typo in a.ts'], { cwd: dir, now: io.now }).stdout);
+    expect(existsSync(path.join(dir, '.forge', '.gitignore'))).toBe(true);
+    expect(out).not.toHaveProperty('untracked');
   });
   it('triage needs the task text', () => {
     expect(run(['triage'], io).code).toBe(2);
@@ -716,6 +734,14 @@ it('triage --plan with zones that match nothing still answers', () => {
   const es = JSON.parse(run(['triage', '--plan', 'plan.yaml', '--task', 'T001', '--locale', 'es'], io).stdout);
   expect(es.announce).toContain('las zonas no casan con ningún fichero versionado (¿ficheros nuevos?)');
   expect(es.gate).toBe(es.path === 'medium' ? 'plan' : null);
+});
+it('triage --plan takes the locale from that plan before the first project under docs/waypoint', () => {
+  mkdirSync(path.join(root, 'docs', 'waypoint', 'aaa'), { recursive: true });
+  writeFileSync(path.join(root, 'docs', 'waypoint', 'aaa', 'plan.yaml'), PLAN_YAML.replace('project: shop', 'project: aaa\nlocale: en'));
+  writeFileSync(path.join(root, 'plan.yaml'), PLAN_YAML.replace('project: shop', 'project: shop\nlocale: es').replace('src/auth/**', 'src/new/**'));
+  io.git = args => (args.includes('ls-files') ? 'src/app.ts\na\nb\nc\nd\n' : args.includes('rev-list') ? '7\n' : '');
+  expect(JSON.parse(run(['triage', '--plan', 'plan.yaml', '--task', 'T001'], io).stdout).announce).toContain('zona sensible: auth');
+  expect(JSON.parse(run(['triage', '--plan', 'plan.yaml', '--task', 'T001', '--locale', 'en'], io).stdout).announce).toContain('sensitive zone: auth');
 });
 
 describe('forge waypoint-cli', () => {

@@ -95,12 +95,45 @@ describe('triage', () => {
     const long = `change the page title to "Reparto" ${'because the old one reads oddly on small screens and people complain'}`;
     expect(triage(long, repo(), []).path).not.toBe('trivial');
   });
+  it('a file found only through a quoted literal does not make a wider task trivial', () => {
+    const one = (hit: string) => repo({ [hit]: ['src/app.ts'] });
+    expect(triage('change the button text to "Save" and add validation', one('Save'), []).path).toBe('small');
+    expect(triage('Cambia el texto del botón a «Guardar» y añade validación del importe', one('Guardar'), []).path).toBe('small');
+    const r = triage('el botón «Añadir gasto» debería decir «Apuntar gasto» en todas partes', one('Añadir gasto'), []);
+    expect(r.path).toBe('small');
+    expect(r.files).toEqual(['src/app.ts']);
+  });
+  it('quoted-literal hits never raise the size: a literal found in several files is left out', () => {
+    const many = (n: number) => repo({ Save: FILES.filter(f => f.startsWith('src/feature/')).slice(0, n) });
+    for (const n of [4, 12]) {
+      const r = triage('change the button text to "Save"', many(n), []);
+      expect(r.path).toBe('trivial');
+      expect(r.files).toEqual([]);
+    }
+    expect(triage('change the page title to "Reparto"', repo({ Reparto: ['index.html', 'README.md'] }), []).path).toBe('trivial');
+  });
+  it('the copy rule wants the change verb first, one clause, no condition and the quoted value at the end', () => {
+    for (const t of [
+      'Add a settings page, set its title to "Settings"',
+      'Create a settings page; set its title to "Settings"',
+      'Refactor the cart store; update the heading to "Cart"',
+      'Change the page title to "Reparto", add a favicon',
+      'Change the page title to "Reparto". Add a favicon too.',
+      'update the error message to "Invalid email" when the email field has no @',
+      'Cambia la lógica para que el mensaje se muestre como «Error» solo si falla la red',
+      'Change the message parser to "strict" mode',
+      'Change how totals are computed so the summary text reads as "Total: X"',
+    ]) expect(triage(t, repo(), []).path, t).not.toBe('trivial');
+    expect(triage('please change the page title to "Reparto"', repo(), []).path).toBe('trivial');
+    expect(triage('Por favor, cambia el título de la página a «Reparto».', repo(), []).path).toBe('trivial');
+    expect(triage('can you set the button label to "Save"?', repo(), []).path).toBe('trivial');
+  });
   it('a quoted text change on a sensitive zone is still raised', () => {
     expect(triage('cambia el mensaje de error del login a «Credenciales incorrectas»', repo(), []).path).toBe('medium');
   });
   it('greps up to three quoted literals as fixed strings, so a quoted old value locates its file', () => {
     const asked: string[] = [];
-    const r = triage('el botón «Añadir gasto» debería decir «Apuntar gasto»', { ...repo(), grep: w => { asked.push(w); return w === 'Añadir gasto' ? ['src/app.ts'] : []; } }, []);
+    const r = triage('cambia el texto del botón «Añadir gasto» a «Apuntar gasto»', { ...repo(), grep: w => { asked.push(w); return w === 'Añadir gasto' ? ['src/app.ts'] : []; } }, []);
     expect(asked).toEqual(['Añadir gasto', 'Apuntar gasto']);
     expect(r).toMatchObject({ path: 'trivial', files: ['src/app.ts'] });
     asked.length = 0;

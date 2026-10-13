@@ -294,7 +294,8 @@ export function run(argv: string[], io: Io): Result {
         }
         // A raise logged by the session may say why; the next triage of the task announces it.
         if (kind === 'triage' && data.why !== undefined) {
-          const why = typeof data.why === 'string' ? data.why.trim() : null;
+          // One line without a trailing stop: the announcement adds its own.
+          const why = typeof data.why === 'string' ? data.why.replace(/\s+/g, ' ').trim().replace(/[\s.;:,]+$/, '').trim() : null;
           if (why === null || why.length > MAX_WHY) throw new UsageError(`log: a triage why must be a string of at most ${MAX_WHY} characters`);
           data = { ...data, why };
         }
@@ -330,7 +331,8 @@ export function run(argv: string[], io: Io): Result {
           try { task = readFileSync(path.resolve(io.cwd, flag('text-file')!), 'utf8').trim(); } catch { throw new UsageError('triage: cannot read --text-file'); }
         }
         if (has('plan') && flag('plan') === undefined) throw new UsageError('triage: --plan needs a plan file');
-        const planned = flag('plan') !== undefined ? planTask(io.cwd, flag('plan'), flag('task')).task : null;
+        const plannedDoc = flag('plan') !== undefined ? planTask(io.cwd, flag('plan'), flag('task')) : null;
+        const planned = plannedDoc?.task ?? null;
         if (planned) task = taskText(planned);
         if (has('superpowers-plan') && flag('superpowers-plan') === undefined) throw new UsageError('triage: --superpowers-plan needs a plan file');
         // A superpowers plan: its title, goal and pending tasks are the text, the files those tasks list are its files.
@@ -395,11 +397,13 @@ export function run(argv: string[], io: Io): Result {
         if (fresh.length || known.some(n => !names.includes(n))) updateLocal(io.cwd, s => ({ ...s, known: names }));
         appendEvent(io.cwd, { ts: ts(), kind: 'triage', ...(flag('task') ? { task: flag('task') } : {}), ...result, ...auto });
         // Output only, like `implementer`: the exact line the session prints, and whether a short plan comes first.
-        const locale = localeArg ?? (planLocale(io.cwd)?.toLowerCase().split(/[-_]/)[0] === 'es' ? 'es' : 'en');
+        // The locale: the flag, else the plan passed with --plan, else the plan under docs/waypoint, else English.
+        const locale = localeArg ?? ((plannedDoc?.plan.locale ?? planLocale(io.cwd))?.toLowerCase().split(/[-_]/)[0] === 'es' ? 'es' : 'en');
         const line = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh, catalog }, locale as AnnounceLocale);
         const gate = result.path === 'medium' ? 'plan' : null;
-        // forgeDir creates .forge/.gitignore and no step commits it: say so while git does not track it.
-        const untracked = listed !== null && existsSync(path.join(io.cwd, '.forge', '.gitignore')) && !tracked.includes('.forge/.gitignore')
+        // forgeDir creates .forge/.gitignore and no step commits it: say so while git lists it as untracked and not
+        // ignored (a repository that ignores .forge/ has opted out).
+        const untracked = listed !== null && lines(git(['ls-files', '--others', '--exclude-standard', '--', '.forge/.gitignore'])).length
           ? { untracked: ['.forge/.gitignore'] } : {};
         return json({ ...result, catalog, new: fresh, implementer, announce: line, gate, ...untracked, ...auto });
       }

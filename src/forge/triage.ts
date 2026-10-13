@@ -132,22 +132,32 @@ const MAX_QUOTED = 3;
 const quotedLiterals = (text: string) => [...text.matchAll(QUOTED)].map(m => (m[1] ?? m[2] ?? m[3]).trim())
   .filter(q => q.length >= 4 && q.length <= 60).slice(0, MAX_QUOTED);
 
-// A one-line copy change: change verb, then a UI-text noun, then to/as, then a quoted value.
+// A one-line copy change: the change verb opens the task, a UI-text noun follows within four words, then to/as and
+// a quoted value that ends the task.
 const B = '(?<![\\p{L}\\p{N}_])';
 const E = '(?![\\p{L}\\p{N}_])';
-const COPY = new RegExp(`${B}(?:change|set|update|replace|cambia|pon|actualiza|sustituye|reemplaza)${E}.*?`
-  + `${B}(?:title|text|label|heading|placeholder|tooltip|message|copy|caption|t[ií]tulo|texto|etiqueta|encabezado|mensaje|leyenda|r[oó]tulo)(?:s|es)?${E}.*?`
+// A short courtesy prefix may come before the verb.
+const COURTESY = /^\s*(?:please|can you|could you|por favor|puedes)(?![\p{L}\p{N}_])[\s,]*/iu;
+const COPY = new RegExp(`^(?:change|set|update|replace|cambia|pon|actualiza|sustituye|reemplaza)${E}(?:\\s+\\S+){0,4}?\\s+`
+  + `(?:title|text|label|heading|placeholder|tooltip|message|copy|caption|t[ií]tulo|texto|etiqueta|encabezado|mensaje|leyenda|r[oó]tulo)(?:s|es)?${E}.*?`
   + `${B}(?:to|as|a|por|como)\\s+[«"“]`, 'iu');
-// Words that widen a copy change past one place (checked outside the quotes).
-const WIDE = new RegExp(`${B}(?:and|also|then|plus|every|all|everywhere|y|además|luego|también|todas?|todos?|cada)${E}`, 'iu');
+// Words that widen a copy change past one place or make it conditional (checked outside the quotes).
+const WIDE = new RegExp(`${B}(?:and|also|then|plus|every|all|everywhere|when|if|unless|only|so|y|además|luego|también|todas?|todos?|cada|cuando|si|solo|sólo|para que)${E}`, 'iu');
+// A second clause outside the quotes: a stop, or a comma, followed by more words.
+const CLAUSE_BREAK = /[;.!?,]\s*[\p{L}\p{N}]/u;
 const MAX_COPY_WORDS = 20;
-// The copy rule only reads short tasks: it also keeps the two lazy scans of COPY cheap.
+// The copy rule only reads short tasks: it also keeps the lazy scan of COPY cheap.
 const MAX_COPY_TEXT = 1000;
-function isCopyChange(text: string): boolean {
-  if (text.length > MAX_COPY_TEXT || RENAME.some(re => re.test(text))) return false;
+function isCopyChange(task: string): boolean {
+  if (task.length > MAX_COPY_TEXT || RENAME.some(re => re.test(task))) return false;
+  const text = task.replace(COURTESY, '').trim();
+  const quotes = [...text.matchAll(QUOTED)];
+  const last = quotes.at(-1);
+  // The quoted value ends the task: words after it ("… to "strict" mode") make it something else.
+  if (!last || !/^[\s.!?…]*$/u.test(text.slice(last.index! + last[0].length))) return false;
   const outside = text.replace(QUOTED, ' ');
   const words = outside.split(/\s+/).filter(w => /[\p{L}\p{N}]/u.test(w));
-  return words.length <= MAX_COPY_WORDS && !WIDE.test(outside) && COPY.test(text);
+  return words.length <= MAX_COPY_WORDS && !WIDE.test(outside) && !CLAUSE_BREAK.test(outside) && COPY.test(text);
 }
 
 // Path-like tokens: something/with/slashes or name.ext.
@@ -169,17 +179,23 @@ export function triage(task: string, repo: RepoFacts, validators: string[], extr
   const words = new Set([...text.matchAll(/`([^`]+)`/g)].map(m => m[1].trim()).filter(w => /^[\w.$]{3,}$/.test(w)));
   for (const w of text.split(/[^A-Za-z0-9_]+/)) if (isSymbol(w)) words.add(w);
   for (const w of [...words].slice(0, MAX_SYMBOLS)) for (const f of repo.grep(w).slice(0, MAX_PER_SYMBOL)) files.add(f);
-  // A quoted old value (a title, a label) locates the file that holds it.
-  for (const q of quotedLiterals(text)) for (const f of repo.grep(q).slice(0, MAX_PER_SYMBOL)) files.add(f);
+  // A quoted old value (a title, a label) locates the file of a copy change: only a literal found in exactly one file
+  // counts, and never toward the size (a new value is often a common word that sits in many files).
+  const quoteFiles = new Set<string>();
+  for (const q of quotedLiterals(text)) {
+    const hits = repo.grep(q);
+    if (hits.length === 1) quoteFiles.add(hits[0]);
+  }
 
-  const located = [...files].sort().slice(0, MAX_FILES);
+  const located = [...new Set([...files, ...quoteFiles])].sort().slice(0, MAX_FILES);
   const sensitive = ZONES.filter(z => z.text.some(re => re.test(text)) || extra?.zones.includes(z.zone) || located.some(f => z.path.test(f))).map(z => z.zone);
   // Greenfield only when git answered: a failed git call says nothing about the repository.
   const greenfield = repo.gitOk && (repo.commits === 0 || repo.files.length < 5);
   if (!repo.gitOk) reasons.push('git unavailable');
   const wordCount = text.trim().split(/\s+/).length;
   // Files the task names set its size; where its symbols also appear (tests, callers) does not lift it.
-  const sized = named.size ? named.size : located.length;
+  // Files found only through a quoted literal are left out: the copy rule alone may use them.
+  const sized = named.size ? named.size : Math.min(files.size, MAX_FILES);
 
   let path: PathName;
   if (greenfield) { path = 'large'; reasons.push('greenfield repository'); }
