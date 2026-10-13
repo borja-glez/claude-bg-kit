@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, existsSync, mkdtempSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, mkdtempSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -397,20 +397,27 @@ describe('plugin layout', () => {
     for (const w of ['state/T', 'forge: {path', 'proposals pull', 'TV']) expect(md).toContain(w);
   });
   it('forge agents fix model, effort and maxTurns', () => {
-    const expected: Record<string, [string, string | null]> = {
-      'forge-impl-heavy': ['opus', 'xhigh'], 'forge-impl': ['opus', 'medium'], 'forge-impl-light': ['sonnet', null], 'forge-mech': ['haiku', null],
-      'forge-review-correctness': ['opus', 'xhigh'], 'forge-review-security': ['opus', 'xhigh'], 'forge-review-perf': ['opus', 'xhigh'], 'forge-fable': ['fable', null],
-      'forge-planner': ['opus', 'xhigh'],
+    const expected: Record<string, [string, string]> = {
+      'forge-impl-heavy': ['opus', 'xhigh'], 'forge-impl': ['opus', 'medium'], 'forge-impl-light': ['sonnet', 'medium'], 'forge-mech': ['haiku', 'low'],
+      'forge-review-correctness': ['opus', 'xhigh'], 'forge-review-security': ['opus', 'xhigh'], 'forge-review-perf': ['opus', 'xhigh'], 'forge-fable': ['fable', 'high'],
+      'forge-planner': ['opus', 'xhigh'], 'forge-scout': ['opus', 'medium'], 'forge-verify': ['sonnet', 'high'], 'forge-verify-heavy': ['opus', 'high'],
     };
-    for (const [name, [model, effort]] of Object.entries(expected)) {
+    const agents = readdirSync(new URL('../plugins/forge/agents/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3));
+    expect(agents.length).toBeGreaterThan(0);
+    for (const name of agents) {
       const md = read(`plugins/forge/agents/${name}.md`);
       const head = md.split(/\r?\n---\r?\n/)[0];
-      expect(head).toMatch(new RegExp(`^---\r?\nname: ${name}\r?\n`));
+      expect(head, `${name} frontmatter`).toMatch(new RegExp(`^---\r?\nname: ${name}\r?\n`));
+      expect(head, `${name} must declare model`).toMatch(/\nmodel: \S+\r?(\n|$)/);
+      expect(head, `${name} must declare effort`).toMatch(/\neffort: (low|medium|high|xhigh|max)\r?(\n|$)/);
+      expect(head, `${name} maxTurns`).toMatch(/\nmaxTurns: \d+/);
+      expect(head, `${name} description`).toMatch(/\ndescription: .+/);
+      expect(expected[name], `${name} missing from expected model/effort table`).toBeDefined();
+      const [model, effort] = expected[name];
       expect(head).toMatch(new RegExp(`\nmodel: ${model}\r?(\n|$)`));
-      if (effort) expect(head).toMatch(new RegExp(`\neffort: ${effort}\r?(\n|$)`));
-      expect(head).toMatch(/\nmaxTurns: \d+/);
-      expect(head).toMatch(/\ndescription: .+/);
+      expect(head).toMatch(new RegExp(`\neffort: ${effort}\r?(\n|$)`));
     }
+    expect(agents.sort()).toEqual(Object.keys(expected).sort());
     expect(read('plugins/forge/agents/forge-fable.md')).toMatch(/only when the user explicitly asks/i);
   });
   it('forge planner writes a plan waypoint accepts, implementers report in .txt', () => {

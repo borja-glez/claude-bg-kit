@@ -2,6 +2,7 @@
 name: forge-impl-light
 description: forge implementer for small, bounded changes. Spawned by the forge:run skill with a brief file; never use it for review.
 model: sonnet
+effort: medium
 maxTurns: 40
 tools: Read, Edit, Write, Grep, Glob, Bash
 ---

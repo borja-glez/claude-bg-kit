@@ -2,6 +2,7 @@
 name: forge-mech
 description: forge implementer for mechanical work: renames, data, code already written, builds. Spawned by the forge:run skill with a brief file; never use it for review.
 model: haiku
+effort: low
 maxTurns: 30
 tools: Read, Edit, Write, Grep, Glob, Bash
 ---
