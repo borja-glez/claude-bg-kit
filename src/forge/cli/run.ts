@@ -7,7 +7,7 @@ import { parseRun, startRun, recordCycle, stopReason, endRun, readRunText, saveR
 import { decideStop, decideExecutionStop, bindHookSession } from '../hook.js';
 import { readExecution, saveExecution } from '../execution.js';
 import { planLocale, replyIn } from '../../lib/locale.js';
-import { triage, implementerFor, zonesFromPaths, PATH_ORDER, type PathName } from '../triage.js';
+import { triage, implementerFor, zonesFromPaths, announce, PATH_ORDER, type PathName, type AnnounceLocale } from '../triage.js';
 import { parsePlan, PlanError } from '../../lib/plan.js';
 import { renderBrief, taskText, tddLine } from '../brief.js';
 import { loadConfig, agentFor, ROLES, ConfigError, NAME, WORKFLOWS, AUTONOMIES } from '../config.js';
@@ -42,6 +42,7 @@ type Result = { code: number; stdout: string; stderr: string };
 const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|infinite|cycle|swarm|stop|hook> ...';
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const MAX_GIT_OUTPUT = 256 * 1024 * 1024;
+const MAX_WHY = 200;
 
 // Reads at most the last MAX_OUTPUT bytes of a file, flagging truncation.
 function readTail(fd: number): string {
@@ -291,6 +292,12 @@ export function run(argv: string[], io: Io): Result {
           if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new UsageError(`log: ${label} must be a JSON object`);
           data = parsed as Record<string, unknown>;
         }
+        // A raise logged by the session may say why; the next triage of the task announces it.
+        if (kind === 'triage' && data.why !== undefined) {
+          const why = typeof data.why === 'string' ? data.why.trim() : null;
+          if (why === null || why.length > MAX_WHY) throw new UsageError(`log: a triage why must be a string of at most ${MAX_WHY} characters`);
+          data = { ...data, why };
+        }
         const task = flag('task');
         appendEvent(io.cwd, { ...data, ts: ts(), kind: kind as LedgerKind, ...(task ? { task } : {}) });
         return ok('ok');
@@ -314,7 +321,7 @@ export function run(argv: string[], io: Io): Result {
       }
       case 'triage': {
         const textArgs = [...args];
-        for (const f of ['--task', '--text-file', '--plan', '--superpowers-plan', '--autonomy']) {
+        for (const f of ['--task', '--text-file', '--plan', '--superpowers-plan', '--autonomy', '--locale']) {
           const i = textArgs.indexOf(f);
           if (i >= 0) textArgs.splice(i, 2);
         }
@@ -341,6 +348,8 @@ export function run(argv: string[], io: Io): Result {
         const autonomy = flag('autonomy');
         if (has('autonomy') && autonomy !== 'auto' && autonomy !== 'ask') throw new UsageError('triage: --autonomy must be auto or ask');
         const auto = autonomy === 'auto' ? { autonomy: 'auto' as const } : {};
+        const localeArg = flag('locale');
+        if (has('locale') && localeArg !== 'es' && localeArg !== 'en') throw new UsageError('triage: --locale must be es or en');
         if (!task) throw new UsageError('triage: the task text is required');
         const git = io.git ?? defaultGit(io.cwd);
         const lines = (out: string | null) => (out ?? '').split('\n').map(s => s.trim()).filter(Boolean);
@@ -362,13 +371,20 @@ export function run(argv: string[], io: Io): Result {
         // A superpowers plan runs on the Medium path, one task after another: its tasks build on each other.
         if (spFiles) { result.path = 'medium'; result.reasons.push('superpowers plan: the Medium path, its tasks in order'); }
         // The ratchet: a repeated triage of the same task never lowers the path it already reached.
+        // A raise the session logged with a `why` explains the path better than the CLI reasons: the announcement uses it.
+        let raiseWhy: string | null = null;
         if (flag('task')) {
           const rank = (p: unknown) => PATH_ORDER.indexOf(p as PathName);
-          const prior = readEvents(io.cwd).filter(e => e.kind === 'triage' && e.task === flag('task') && rank(e.path) >= 0)
-            .reduce<PathName | null>((max, e) => (max === null || rank(e.path) > rank(max) ? e.path as PathName : max), null);
+          const logged = readEvents(io.cwd).filter(e => e.kind === 'triage' && e.task === flag('task') && rank(e.path) >= 0);
+          const prior = logged.reduce<PathName | null>((max, e) => (max === null || rank(e.path) > rank(max) ? e.path as PathName : max), null);
           if (prior && rank(prior) > rank(result.path)) {
             result.path = prior;
             result.reasons.push(`ratchet: kept ${prior} from an earlier triage of this task`);
+          }
+          // The latest raise to the path kept that says why (later triages of the same path log none).
+          if (prior && prior === result.path) {
+            const raise = logged.filter(e => e.path === prior && typeof e.why === 'string' && e.why).at(-1);
+            raiseWhy = raise ? raise.why as string : null;
           }
         }
         const impl = implementerFor(result, task, { batch: has('batch') });
@@ -378,7 +394,14 @@ export function run(argv: string[], io: Io): Result {
         // `known` mirrors what exists now: new names are added, vanished ones dropped silently.
         if (fresh.length || known.some(n => !names.includes(n))) updateLocal(io.cwd, s => ({ ...s, known: names }));
         appendEvent(io.cwd, { ts: ts(), kind: 'triage', ...(flag('task') ? { task: flag('task') } : {}), ...result, ...auto });
-        return json({ ...result, catalog, new: fresh, implementer, ...auto });
+        // Output only, like `implementer`: the exact line the session prints, and whether a short plan comes first.
+        const locale = localeArg ?? (planLocale(io.cwd)?.toLowerCase().split(/[-_]/)[0] === 'es' ? 'es' : 'en');
+        const line = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh, catalog }, locale as AnnounceLocale);
+        const gate = result.path === 'medium' ? 'plan' : null;
+        // forgeDir creates .forge/.gitignore and no step commits it: say so while git does not track it.
+        const untracked = listed !== null && existsSync(path.join(io.cwd, '.forge', '.gitignore')) && !tracked.includes('.forge/.gitignore')
+          ? { untracked: ['.forge/.gitignore'] } : {};
+        return json({ ...result, catalog, new: fresh, implementer, announce: line, gate, ...untracked, ...auto });
       }
       case 'validate': {
         const config = loadConfig(repoDir);

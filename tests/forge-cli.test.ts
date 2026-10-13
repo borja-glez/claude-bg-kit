@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run, defaultExec, type Io } from '../src/forge/cli/run.js';
@@ -242,6 +243,99 @@ describe('forge CLI', () => {
     const third = JSON.parse(run(['triage', 'fix a typo in a.ts'], { ...io, git }).stdout);
     expect(third.new).toEqual(['test:e2e']);
     expect(readLocal(root).known).toEqual(['test:e2e']);
+  });
+  it('triage hands over the announcement line and the gate, in English by default', () => {
+    io.git = args => (args.includes('ls-files') ? 'src/a.ts\nsrc/b.ts\nsrc/c.ts\nsrc/d.ts\nsrc/e.ts\n' : args[0] === 'rev-list' ? '12\n' : '');
+    const trivial = JSON.parse(run(['triage', 'fix the typo in src/a.ts'], io).stdout);
+    expect(trivial.announce).toBe('Trivial: one named file, short task; I do it myself. You can correct it.');
+    expect(trivial.gate).toBeNull();
+    const small = JSON.parse(run(['triage', 'add a dark mode toggle'], io).stdout);
+    expect(small.announce).toBe('Small → forge-impl-light: no files located: the session should judge the scope. You can correct it.');
+    const medium = JSON.parse(run(['triage', 'change the password check in src/a.ts'], io).stdout);
+    expect(medium.announce).toBe('Medium → forge-impl-heavy: one named file, short task; sensitive zone: auth. I show you a short plan before launching it; you can correct it.');
+    expect(medium.gate).toBe('plan');
+    const large = JSON.parse(run(['triage', 'redesign the plugin architecture'], io).stdout);
+    expect(large.announce).toBe('Large: architecture-scale wording; design and plan first. You can correct it.');
+    expect(large.gate).toBeNull();
+    // Output only: the ledger event keeps its shape.
+    expect(readEvents(root).at(-1)).not.toHaveProperty('announce');
+    expect(readEvents(root).at(-1)).not.toHaveProperty('gate');
+  });
+  it('triage --locale es announces in Spanish, with the reasons translated', () => {
+    io.git = args => (args.includes('ls-files') ? 'src/a.ts\nsrc/b.ts\nsrc/c.ts\nsrc/d.ts\nsrc/e.ts\n' : args[0] === 'rev-list' ? '12\n' : '');
+    expect(JSON.parse(run(['triage', '--locale', 'es', 'fix the typo in src/a.ts'], io).stdout).announce)
+      .toBe('Trivial: un fichero nombrado, tarea corta; lo hago yo. Puedes corregirlo.');
+    expect(JSON.parse(run(['triage', '--locale', 'es', 'añade un modo oscuro'], io).stdout).announce)
+      .toBe('Small → forge-impl-light: no localizo ficheros: decide la sesión. Puedes corregirlo.');
+    expect(JSON.parse(run(['triage', '--locale', 'es', 'cambia el mensaje de error del login a «Credenciales incorrectas»'], io).stdout).announce)
+      .toBe('Medium → forge-impl-heavy: un cambio de texto entre comillas; zona sensible: auth. Antes de lanzarlo te enseño un plan corto; puedes corregirlo.');
+    expect(JSON.parse(run(['triage', '--locale', 'es', 'Rediseña la arquitectura del plugin'], io).stdout).announce)
+      .toBe('Large: la tarea habla de arquitectura; primero diseño y plan. Puedes corregirlo.');
+    // The locale flag is not part of the task text.
+    expect(readEvents(root).at(-1)!.reasons).not.toContain('es');
+    expect(run(['triage', '--locale', 'fr', 'add a toggle'], io).code).toBe(2);
+  });
+  it('triage takes the locale from the plan when no flag is given, and --locale wins over it', () => {
+    io.git = args => (args.includes('ls-files') ? 'src/a.ts\nsrc/b.ts\nsrc/c.ts\nsrc/d.ts\nsrc/e.ts\n' : args[0] === 'rev-list' ? '12\n' : '');
+    mkdirSync(path.join(root, 'docs', 'waypoint', 'demo'), { recursive: true });
+    writeFileSync(path.join(root, 'docs', 'waypoint', 'demo', 'plan.yaml'), PLAN_YAML.replace('project: shop', 'project: shop\nlocale: es'));
+    expect(JSON.parse(run(['triage', 'add a dark mode toggle'], io).stdout).announce).toMatch(/^Small → forge-impl-light: no localizo ficheros/);
+    expect(JSON.parse(run(['triage', '--locale', 'en', 'add a dark mode toggle'], io).stdout).announce).toMatch(/^Small → forge-impl-light: no files located/);
+  });
+  it('triage adds a line for new validators with their commands', () => {
+    writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'x', lint: 'y' } }));
+    const git = (args: string[]) => (args.includes('ls-files') ? 'a.ts\nb.ts\nc.ts\nd.ts\ne.ts\n' : args[0] === 'rev-list' ? '5\n' : '');
+    const first = JSON.parse(run(['triage', '--locale', 'es', 'fix a typo in a.ts'], { ...io, git }).stdout);
+    expect(first.announce.split('\n')).toEqual([
+      'Trivial: un fichero nombrado, tarea corta; lo hago yo. Puedes corregirlo.',
+      'Validadores nuevos: lint (`npm run lint`), test (`npm test`).',
+    ]);
+    expect(JSON.parse(run(['triage', 'fix a typo in a.ts'], { ...io, git }).stdout).announce).not.toContain('\n');
+    writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'x', lint: 'y', typecheck: 'z' } }));
+    expect(JSON.parse(run(['triage', 'fix a typo in a.ts'], { ...io, git }).stdout).announce.split('\n')[1]).toBe('New validators: typecheck (`npm run typecheck`).');
+  });
+  it('a logged triage raise carries its why into the announcement of the next triage', () => {
+    io.git = args => (args.includes('ls-files') ? 'src/a.ts\nsrc/b.ts\nsrc/c.ts\nsrc/d.ts\nsrc/e.ts\n' : args[0] === 'rev-list' ? '12\n' : '');
+    writeFileSync(path.join(root, 'raise.json'), JSON.stringify({ path: 'medium', why: '  touches the cart totals and its tests  ' }));
+    expect(run(['log', '--kind', 'triage', '--task', 'rw', '--data-file', 'raise.json'], io).code).toBe(0);
+    expect(readEvents(root).at(-1)).toMatchObject({ kind: 'triage', task: 'rw', path: 'medium', why: 'touches the cart totals and its tests' });
+    const out = JSON.parse(run(['triage', '--task', 'rw', '--locale', 'es', 'add a dark mode toggle'], io).stdout);
+    expect(out.path).toBe('medium');
+    expect(out.announce).toBe('Medium → forge-impl: touches the cart totals and its tests. Antes de lanzarlo te enseño un plan corto; puedes corregirlo.');
+    // The triage it just logged has no why: the raise's why still wins the next time.
+    expect(JSON.parse(run(['triage', '--task', 'rw', 'add a dark mode toggle'], io).stdout).announce).toMatch(/^Medium → forge-impl: touches the cart totals and its tests\./);
+    // Another task keeps the CLI reasons.
+    expect(JSON.parse(run(['triage', '--task', 'other', 'add a dark mode toggle'], io).stdout).announce).toMatch(/no files located/);
+    writeFileSync(path.join(root, 'long.json'), JSON.stringify({ path: 'large', why: 'x'.repeat(201) }));
+    writeFileSync(path.join(root, 'num.json'), JSON.stringify({ path: 'large', why: 3 }));
+    expect(run(['log', '--kind', 'triage', '--task', 'rw', '--data-file', 'long.json'], io).code).toBe(2);
+    expect(run(['log', '--kind', 'triage', '--task', 'rw', '--data-file', 'num.json'], io).code).toBe(2);
+  });
+  it('triage --plan and --superpowers-plan also hand over the announcement and the gate', () => {
+    io.git = args => (args.includes('ls-files') ? 'src/a.ts\nsrc/b.ts\nsrc/c.ts\nsrc/d.ts\nsrc/e.ts\n' : args[0] === 'rev-list' ? '12\n' : '');
+    mkdirSync(path.join(root, 'docs', 'superpowers', 'plans'), { recursive: true });
+    writeFileSync(path.join(root, 'docs', 'superpowers', 'plans', 'p.md'), '# Cart Plan\n\n**Goal:** a cart.\n\n### Task 1: Add the cart\n\n**Files:**\n- Create: `src/cart.ts`\n\n- [ ] **Step 1: write it**\n');
+    const sp = JSON.parse(run(['triage', '--superpowers-plan', 'docs/superpowers/plans/p.md', '--locale', 'en'], io).stdout);
+    expect(sp).toMatchObject({ path: 'medium', gate: 'plan' });
+    expect(sp.announce).toMatch(/^Medium → forge-impl: .*superpowers plan: the Medium path, its tasks in order\. I show you a short plan/);
+  });
+  it('triage names .forge/.gitignore as untracked until it is committed', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'forge-untracked-'));
+    const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...a], { cwd: dir, encoding: 'utf8' });
+    git('init', '-q');
+    for (const f of ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts']) writeFileSync(path.join(dir, f), 'export {};\n');
+    git('add', '.');
+    git('commit', '-q', '-m', 'init');
+    const dio: Io = { cwd: dir, now: io.now };
+    const before = JSON.parse(run(['triage', 'fix the typo in a.ts'], dio).stdout);
+    expect(existsSync(path.join(dir, '.forge', '.gitignore'))).toBe(true);
+    expect(before.untracked).toEqual(['.forge/.gitignore']);
+    expect(readEvents(dir).at(-1)).not.toHaveProperty('untracked');
+    git('add', '.forge/.gitignore');
+    git('commit', '-q', '-m', 'forge');
+    expect(JSON.parse(run(['triage', 'fix the typo in a.ts'], dio).stdout)).not.toHaveProperty('untracked');
+    // When git does not answer, nothing is claimed.
+    expect(JSON.parse(run(['triage', 'fix the typo in a.ts'], { ...dio, git: () => null }).stdout)).not.toHaveProperty('untracked');
   });
   it('triage needs the task text', () => {
     expect(run(['triage'], io).code).toBe(2);
@@ -618,6 +712,10 @@ it('triage --plan with zones that match nothing still answers', () => {
   expect(out.files).toEqual([]);
   expect(out.sensitive).toContain('auth');
   expect(out.reasons.join(' ')).toMatch(/zones match no tracked file/);
+  // The announcement translates the CLI reason; a plan's triage also carries the gate.
+  const es = JSON.parse(run(['triage', '--plan', 'plan.yaml', '--task', 'T001', '--locale', 'es'], io).stdout);
+  expect(es.announce).toContain('las zonas no casan con ningún fichero versionado (¿ficheros nuevos?)');
+  expect(es.gate).toBe(es.path === 'medium' ? 'plan' : null);
 });
 
 describe('forge waypoint-cli', () => {

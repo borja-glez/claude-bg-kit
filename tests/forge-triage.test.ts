@@ -80,6 +80,33 @@ describe('triage', () => {
     // Unicode-aware boundaries: no match inside a longer word.
     expect(triage('Revisa la presesión del texto', repo(), []).sensitive).toEqual([]);
   });
+  it('a one-line quoted text change is trivial: the session finds the file', () => {
+    const tab = triage('Cambia el título de la pestaña del navegador a «Reparto · gastos del piso».', repo(), []);
+    expect(tab.path).toBe('trivial');
+    expect(tab.reasons).toContain('one quoted text change: the session finds the file');
+    expect(triage('change the page title to "Reparto"', repo(), []).path).toBe('trivial');
+    expect(triage('set the button label as “Guardar cambios”', repo(), []).path).toBe('trivial');
+  });
+  it('a quoted change with more work, or everywhere, or without a change verb is not trivial', () => {
+    expect(triage('change the button text to "Save" and add validation', repo(), []).path).not.toBe('trivial');
+    expect(triage('el botón «Añadir gasto» debería decir «Apuntar gasto» en todas partes', repo(), []).path).not.toBe('trivial');
+    expect(triage('cambia el texto de todos los botones a «Guardar»', repo(), []).path).not.toBe('trivial');
+    expect(triage('rename the heading label to "Totals"', repo(), []).path).not.toBe('trivial');
+    const long = `change the page title to "Reparto" ${'because the old one reads oddly on small screens and people complain'}`;
+    expect(triage(long, repo(), []).path).not.toBe('trivial');
+  });
+  it('a quoted text change on a sensitive zone is still raised', () => {
+    expect(triage('cambia el mensaje de error del login a «Credenciales incorrectas»', repo(), []).path).toBe('medium');
+  });
+  it('greps up to three quoted literals as fixed strings, so a quoted old value locates its file', () => {
+    const asked: string[] = [];
+    const r = triage('el botón «Añadir gasto» debería decir «Apuntar gasto»', { ...repo(), grep: w => { asked.push(w); return w === 'Añadir gasto' ? ['src/app.ts'] : []; } }, []);
+    expect(asked).toEqual(['Añadir gasto', 'Apuntar gasto']);
+    expect(r).toMatchObject({ path: 'trivial', files: ['src/app.ts'] });
+    asked.length = 0;
+    triage('replace "one1" "two2" "three3" "four4" "abc" “' + 'x'.repeat(61) + '”', { ...repo(), grep: w => { asked.push(w); return []; } }, []);
+    expect(asked).toEqual(['one1', 'two2', 'three3']);
+  });
   it('a huge task text stays fast and greps at most 20 symbols', () => {
     const asked: string[] = [];
     const big = Array.from({ length: 40 }, (_, i) => `symbolNumber${i}`).join(' ') + ' ' + 'a'.repeat(100_000) + ' ' + 'x.'.repeat(20_000);
