@@ -88,6 +88,16 @@ export function rejectedDepsSay(es: boolean, ref: string): string {
     : `The dependencies in your checkout were installed for the rejected merge of ${ref} and may not match your files: reinstall them before you use it.`;
 }
 
+const KEPT_SHOWN = 10;
+
+/** Tracked files of the person's that changed during a rejected merge's install and were left as they are (touchedKept). */
+export function keptFilesSay(es: boolean, ref: string, files: string[]): string {
+  const more = files.length - KEPT_SHOWN;
+  const list = files.slice(0, KEPT_SHOWN).map(codeSpan).join(', ') + (more > 0 ? (es ? ` y ${more} más` : ` and ${more} more`) : '');
+  return es ? `Estos archivos de tu copia de trabajo cambiaron durante la instalación de dependencias de la integración rechazada de ${ref} y se han dejado como están; revísalos: ${list}.`
+    : `These files of your checkout changed during the dependency install for the rejected merge of ${ref} and were left as they are; check them: ${list}.`;
+}
+
 /** What an integration brought the person should hear of: each validator that appeared, and those that already failed. */
 export function integratedSay(es: boolean, branch: string, newValidators: { name: string; cmd: string }[], preexisting: string[]): string[] {
   const lines = newValidators.map(v => (es ? `Nuevo validador ${v.name}: ${codeSpan(v.cmd)}` : `New validator ${v.name}: ${codeSpan(v.cmd)}`));

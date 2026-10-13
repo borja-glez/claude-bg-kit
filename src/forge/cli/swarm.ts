@@ -20,7 +20,7 @@ import { mainWorktreeFrom, samePath } from '../../lib/worktree.js';
 import { mainCheckout, updateLocal } from '../local.js';
 import { readMember, writeMember, isMemberId } from '../members.js';
 import { parseLooseTasks, planOfLoose, statesOfLoose, writeLoose, readLoose, type LooseTask } from '../loose.js';
-import { startAnnounce, integratedSay, rejectedDepsSay, VENV_HINT } from '../swarm.js';
+import { startAnnounce, integratedSay, rejectedDepsSay, keptFilesSay, VENV_HINT } from '../swarm.js';
 
 export interface GitDeps { git: (args: string[]) => string | null; exec: (cmd: string, timeoutSec: number) => ExecResult; repo: RepoReader }
 export interface SwarmDeps extends GitDeps { at: (dir: string) => GitDeps }
@@ -192,9 +192,11 @@ function runInstall(at: GitDeps, cmd: string, timeoutSec: number): { setup: NonN
 
 // What forge last learned installing in one directory (.forge/execution/deps/<hash of the directory>.json): the
 // manifests its last successful install was for, and whether that left dependencies (a manifest without any installs
-// nothing, and is not installed again); and a failed install before a merge, with the HEAD it failed at.
+// nothing, and is not installed again); lastFailed when its last install failed instead (what that left matches no
+// manifests); and a failed install before a merge, with the HEAD it failed at.
 interface DepsMemo {
   ok?: { manifests: string; cmd: string; deps: boolean };
+  lastFailed?: true;
   failed?: { head: string; manifests: string; cmd: string; setup: NonNullable<SetupResult> };
 }
 const memoFile = (cacheDir: string, dir: string) => path.join(cacheDir, 'deps', `${createHash('sha1').update(path.resolve(dir)).digest('hex').slice(0, 16)}.json`);
@@ -205,7 +207,7 @@ function readMemo(file: string): DepsMemo {
     const s = o.failed?.setup;
     // A remembered failure is shown again: only a well-formed one.
     const failedOk = !!s && typeof s.cmd === 'string' && typeof s.ok === 'boolean' && Array.isArray(s.tail) && s.tail.every(l => typeof l === 'string');
-    return { ...(o.ok ? { ok: o.ok } : {}), ...(o.failed && failedOk ? { failed: o.failed } : {}) };
+    return { ...(o.ok ? { ok: o.ok } : {}), ...(o.lastFailed === true ? { lastFailed: true } : {}), ...(o.failed && failedOk ? { failed: o.failed } : {}) };
   } catch { return {}; }
 }
 function writeMemo(file: string, m: DepsMemo): void {
@@ -214,9 +216,12 @@ function writeMemo(file: string, m: DepsMemo): void {
 
 const lastLine = (s: NonNullable<SetupResult>) => s.tail[s.tail.length - 1] ?? 'no output';
 
+// A NUL-separated (-z) list of paths: git writes each name as it is, so a name it would quote (a quote, a backslash, a
+// control character) stays the exact literal path.
+const nulList = (s: string | null) => (s ?? '').split('\0').filter(Boolean);
+
 // Changed tracked files, forge's own state aside; paths from the top level.
-const trackedChanges = (at: GitDeps) => (at.git(['-c', 'core.quotePath=false', 'diff', '--name-only', '--', '.', ...LOCAL_STATE]) ?? '')
-  .split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+const trackedChanges = (at: GitDeps) => nulList(at.git(['diff', '--name-only', '-z', '--', '.', ...LOCAL_STATE]));
 
 /** The worktree that has `branch` checked out, from `git worktree list --porcelain`; null when none. */
 function worktreeHolding(porcelain: string | null, branch: string): string | null {
@@ -308,16 +313,16 @@ interface MergeOpts {
   setup: string | undefined;
   /** The final merge: the run worktree, clean on the tip of `ref`, with its dependencies installed. */
   runAt?: GitDeps | null;
-  /** `at` is the person's own checkout (an ephemeral run, the final merge): a node_modules a rejected merge created is
-   *  removed, and dependencies that may not match are said. */
+  /** `at` is the person's own checkout (an ephemeral run, the final merge): dependencies are installed before the merge
+   *  only when missing, a node_modules a rejected merge created is removed, and dependencies that may not match and
+   *  files a rejected merge's install changed are said. */
   personal: boolean;
   /** Forget a remembered failed install before the merge (a transient failure): it runs again at the same HEAD. */
   retryDeps?: boolean;
 }
 
 // The untracked paths git does not ignore, forge's own state aside (a directory collapsed into `dir/`).
-const untracked = (at: GitDeps) => (at.git(['-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '--directory', '--', '.', ...LOCAL_STATE]) ?? '')
-  .split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+const untracked = (at: GitDeps) => nulList(at.git(['ls-files', '-z', '--others', '--exclude-standard', '--directory', '--', '.', ...LOCAL_STATE]));
 
 // A baseline is only valid for the same scope and target (worktree, config and environment differ between them).
 const baselineFile = (cacheDir: string, key: string, sha: string) => path.join(cacheDir, 'baseline', `${key}-${sha}.json`);
@@ -359,12 +364,16 @@ function mergeIn(at: GitDeps, ref: string, o: MergeOpts): MergeOutcome {
   let setup: NonNullable<SetupResult> | undefined;
   let created = false;
   let installs = 0;
-  /** Installs with `cmd`, remembering a success for these manifests. */
+  /**
+   * Installs with `cmd`, remembering a success for these manifests; a failure (after the merge, or for the tree a
+   * rollback restored) forgets the last success, so the next check before a baseline installs again.
+   */
   const installWith = (cmd: string) => {
     const manifests = manifestHash(at);
     const d = runInstall(at, cmd, o.timeoutSec);
     created ||= d.created;
-    if (d.setup.ok) remember({ ...memo(), ok: { manifests, cmd, deps: hasDeps(at) } });
+    const { ok: _was, lastFailed: _failed, ...rest } = memo();
+    remember(d.setup.ok ? { ...rest, ok: { manifests, cmd, deps: hasDeps(at) } } : { ...rest, lastFailed: true });
     return d.setup;
   };
   const install = (): boolean => {
@@ -422,13 +431,16 @@ function mergeIn(at: GitDeps, ref: string, o: MergeOpts): MergeOutcome {
   // The final merge into a target that has not moved since the run branched: the merged tree is the run tip's, which
   // the run worktree validates with its own dependencies; nothing is installed in the person's checkout.
   const unmoved = !!o.runAt && at.git(['merge-base', '--is-ancestor', 'HEAD', ref]) !== null;
-  // The tip's dependencies are missing, or forge's last install here was for other manifests (a manifest changed by
-  // hand, a restore that failed): installed before the baseline.
+  // The tip's dependencies are missing: installed before the baseline. In the run worktree, which is forge's, also when
+  // forge's last install there failed or was for other manifests (a manifest changed by hand). The person's checkout
+  // only gets missing ones: dependencies they installed themselves for a change of their own are never reinstalled on
+  // a guess.
   const stale = () => {
     if (!at.repo.exists('package.json')) return false;
     if (!hasDeps(at)) return true;
-    const ok = memo().ok;
-    return !!ok && ok.manifests !== manifestHash(at);
+    if (o.personal) return false;
+    const m = memo();
+    return !!m.lastFailed || (!!m.ok && m.ok.manifests !== manifestHash(at));
   };
   if (!unmoved && stale()) {
     const cmd = depsCmd(at, o.setup);
@@ -483,7 +495,7 @@ function mergeIn(at: GitDeps, ref: string, o: MergeOpts): MergeOutcome {
       const touched = trackedChanges(at).filter(p => !edited.has(p));
       // A file the merge changed and the install rewrote blocks `git merge --abort`: back to its merged version (the
       // install's own edit). Any other changed file may hold someone's edit: kept as it is, and said.
-      const mergedPaths = new Set((at.git(['-c', 'core.quotePath=false', 'diff', '--cached', '--name-only', pre]) ?? '').split(/\r?\n/).map(l => l.trim()).filter(Boolean));
+      const mergedPaths = new Set(nulList(at.git(['diff', '--cached', '--name-only', '-z', pre])));
       const reset = touched.filter(p => mergedPaths.has(p));
       const kept = touched.filter(p => !mergedPaths.has(p));
       if (reset.length) at.git(['checkout', '--', ...reset.map(p => `:(top,literal)${p}`)]);
@@ -541,17 +553,23 @@ function localeArg(rest: string[], sub: string): 'es' | 'en' | null {
 const spanish = (given: 'es' | 'en' | null, root: string, project: string) =>
   given ? given === 'es' : (planLocale(root, project) ?? '').toLowerCase().split(/[-_]/)[0] === 'es';
 
-// What the coordinator passes on of a merge attempt: the installs that ran, what a rollback left behind and whether the
-// person's dependencies may be the rejected merge's (with the line to tell them).
-function attemptExtras(r: MergeOutcome, es: boolean, ref: string) {
+// What the coordinator passes on of a merge attempt: the installs that ran, what a rollback left behind, whether the
+// person's dependencies may be the rejected merge's and, in the person's checkout (`personal`), the files of theirs its
+// install changed; with the lines to tell them.
+function attemptExtras(r: MergeOutcome, es: boolean, ref: string, personal: boolean) {
   const failed = r.result === 'merged' ? null : r;
+  const say = [
+    ...(failed?.depsFromRejectedMerge ? [rejectedDepsSay(es, ref)] : []),
+    ...(personal && failed?.touchedKept?.length ? [keptFilesSay(es, ref, failed.touchedKept)] : []),
+  ];
   return {
     ...(r.setup ? { setup: r.setup } : {}),
     ...(r.leftovers ? { leftovers: r.leftovers } : {}),
     ...(failed?.touchedKept ? { touchedKept: failed.touchedKept } : {}),
     ...(failed?.restoreSetup ? { restoreSetup: failed.restoreSetup } : {}),
     ...(failed?.restoreChanged ? { restoreChanged: failed.restoreChanged } : {}),
-    ...(failed?.depsFromRejectedMerge ? { depsFromRejectedMerge: true, say: [rejectedDepsSay(es, ref)] } : {}),
+    ...(failed?.depsFromRejectedMerge ? { depsFromRejectedMerge: true } : {}),
+    ...(say.length ? { say } : {}),
   };
 }
 
@@ -575,13 +593,14 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
     throw new UsageError(`swarm integrate: the main checkout is on ${head ?? '?'}, not ${e.branch} (the branch this ephemeral run started from); switch back to ${e.branch} to integrate ${task}`);
   }
   const config = loadConfig(io.cwd);
+  const personal = e.kind !== 'plan';
   const r = mergeIn(target, t.branch, {
     message: `forge: integrate ${task}`, scope: 'heavy', timeoutSec: config.validatorTimeoutSec, configRoot: wt,
-    cacheDir: path.join(io.cwd, '.forge', 'execution'), target: 'run', setup: config.swarm.setup, personal: e.kind !== 'plan',
+    cacheDir: path.join(io.cwd, '.forge', 'execution'), target: 'run', setup: config.swarm.setup, personal,
     retryDeps: rest.includes('--retry-deps'),
   });
   const es = spanish(locale, io.cwd, e.project);
-  const extras = attemptExtras(r, es, t.branch);
+  const extras = attemptExtras(r, es, t.branch, personal);
   const cur = readExecution(io.cwd)!;
   // Neither the target nor its dependencies are ready: the task stays accepted.
   if (r.result === 'dirty') return out({ result: 'run-dirty', detail: r.detail, ...extras });
@@ -617,7 +636,7 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
     cacheDir: path.join(io.cwd, '.forge', 'execution'), target: 'main', setup: config.swarm.setup,
     runAt: cleanRunWorktree(deps, runWorktree(io.cwd), e.branch), personal: true, retryDeps: rest.includes('--retry-deps'),
   });
-  const extras = attemptExtras(r, spanish(locale, io.cwd, e.project), e.branch);
+  const extras = attemptExtras(r, spanish(locale, io.cwd, e.project), e.branch, true);
   if (r.result === 'dirty') return out({ result: 'main-dirty', detail: `the main checkout ${r.detail}`, ...extras });
   if (r.result === 'deps') return out({ result: 'main-deps', detail: `the main checkout ${r.detail}`, ...extras });
   return out(r.result === 'merged' ? { result: 'merged', sha: r.sha, preexisting: r.preexisting, ...extras } : { result: 'conflict', detail: r.detail, ...extras });

@@ -326,6 +326,43 @@ describe('forge swarm integrate (into the run branch)', () => {
       expect(out(run(['swarm', 'integrate', 'T3'], io))).toMatchObject({ result: 'integrated', setup: { ok: true } });
       expect(installs()).toBe(before + 1);
     });
+    it('after an install that failed, even the reinstall of the restored tree, the next integration installs before its baseline', () => {
+      setupConfig(INSTALL());
+      commitIn(runWt(), 'package.json', '{"name":"one"}\n', 'manifest');
+      accept('T1', 'a.txt', 'a\n');
+      expect(out(run(['swarm', 'integrate', 'T1'], io))).toMatchObject({ result: 'integrated', setup: { ok: true } });
+      expect(installs()).toBe(1);
+      // T2 bumps the manifest while the registry is down: the install after the merge fails, and so does the one for
+      // the restored tree, which leaves a partial node_modules behind.
+      accept('T2', 'package.json', '{"name":"two"}\n');
+      setupConfig(`node -e "require('fs').mkdirSync('node_modules/partial',{recursive:true});console.log('offline');process.exit(1)"`);
+      expect(out(run(['swarm', 'integrate', 'T2'], io))).toMatchObject({ result: 'conflict', detail: 'dependencies could not be installed after merging task/T2: offline', restoreSetup: { ok: false } });
+      // Back online: an integration that merges no manifest installs before its baseline all the same, once.
+      setupConfig(INSTALL());
+      accept('T3', 'c.txt', 'c\n');
+      expect(out(run(['swarm', 'integrate', 'T3'], io))).toMatchObject({ result: 'integrated', setup: { ok: true } });
+      expect(installs()).toBe(2);
+      accept('T4', 'd.txt', 'd\n');
+      expect(out(run(['swarm', 'integrate', 'T4'], io)).setup).toBeUndefined();
+      expect(installs()).toBe(2);
+    });
+    it('a name git would quote stays exact: the install\'s edit of it is undone before the rollback and its leftover is listed as it is', () => {
+      // git quotes DEL even with core.quotePath=false, and Windows allows it in a file name; a quote, a backslash and
+      // a tab only where the platform allows them.
+      const odd = process.platform === 'win32' ? 'odd\x7f.txt' : 'odd"\\\t\x7f.txt';
+      setupConfig(`node -e "const f=require('fs');f.mkdirSync('node_modules',{recursive:true});for(const n of f.readdirSync('.'))if(n.startsWith('odd')){f.appendFileSync(n,'x\\n');f.writeFileSync('left'+n.slice(3),'')}"`);
+      const w = out(run(['swarm', 'worktree', 'T1'], io)).worktree;
+      writeFileSync(path.join(w, 'package.json'), '{}\n');
+      writeFileSync(path.join(w, odd), 'o\n');
+      g(w, 'add', '--', 'package.json', `:(literal)${odd}`); g(w, 'commit', '-qm', 'T1: odd name');
+      out(run(['swarm', 'task', 'T1', '--stage', 'verdict', '--status', 'accepted'], io));
+      const before = g(runWt(), 'rev-parse', 'HEAD');
+      const r = out(run(['swarm', 'integrate', 'T1'], io));
+      expect(r).toMatchObject({ result: 'conflict', detail: `the dependency install changed tracked files after merging task/T1: ${odd}`, leftovers: [`left${odd.slice(3)}`] });
+      expect(g(runWt(), 'rev-parse', 'HEAD')).toBe(before);
+      expect(() => g(runWt(), 'rev-parse', '-q', '--verify', 'MERGE_HEAD')).toThrow();
+      expect(existsSync(path.join(runWt(), odd))).toBe(false);
+    });
     it('a successful install that leaves untracked files reports them as leftovers of the merge', () => {
       setupConfig(`node -e "const f=require('fs');f.mkdirSync('node_modules',{recursive:true});if(f.existsSync('package.json'))f.writeFileSync('package-lock.json','{}')"`);
       const w = out(run(['swarm', 'worktree', 'T1'], io)).worktree;
@@ -386,6 +423,8 @@ describe('forge swarm integrate (into the run branch)', () => {
       const before = g(runWt(), 'rev-parse', 'HEAD');
       const r = out(run(['swarm', 'integrate', 'T1'], io));
       expect(r).toMatchObject({ result: 'conflict', detail: 'the dependency install changed tracked files after merging task/T1: base.txt, package-lock.json', touchedKept: ['base.txt'] });
+      // The run worktree is forge's: no line for the person.
+      expect(r.say).toBeUndefined();
       expect(g(runWt(), 'rev-parse', 'HEAD')).toBe(before);
       expect(() => g(runWt(), 'rev-parse', '-q', '--verify', 'MERGE_HEAD')).toThrow();
       // Never discarded: whoever edited base.txt meanwhile keeps the edit.
