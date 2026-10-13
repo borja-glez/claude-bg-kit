@@ -25,6 +25,19 @@ function engineBand(on: On) {
   });
 }
 
+// What the real engine answers at the bottom of the chain when nothing draws beneath the plugin.
+function engineBottom(on: On) {
+  on('ui.render', { component: 'AbovePrompt' }, () => ({ type: 'engine', ref: 0 }) as RenderElement);
+}
+
+// Another plugin's band beneath this one, which the band must stack instead of hiding.
+function otherBand(on: On) {
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
+    const { Text } = $.ui.resolve(e);
+    return h(Text, {}, 'other band') as RenderElement;
+  });
+}
+
 const DESIGN: WaypointBand = {
   mode: 'design', project: 'demo', locale: 'en', version: 3, round: 2, proposals: 2, critical: 1, pending: 2, pendingCritical: 1,
   designUrl: 'https://claude.ai/artifact/design',
@@ -41,6 +54,7 @@ const RUN: WaypointBand = {
 };
 
 test('the Spanish design band says one pending proposal and one critical in the singular', async ($, on) => {
+  engineBottom(on);
   serveBand(on, () => ({ ...DESIGN, locale: 'es', pending: 1, pendingCritical: 1 }) as WaypointBand);
   const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
   expect(await ui.find({ type: 'Text', text: '◆ DISEÑO · demo · v3 · 1 pendiente · 1 crítica' })).toBeDefined();
@@ -48,6 +62,7 @@ test('the Spanish design band says one pending proposal and one critical in the 
 });
 
 test('the design band counts the proposals still pending from every round, not the latest critique', async ($, on) => {
+  engineBottom(on);
   serveBand(on, () => ({ ...DESIGN, proposals: 4, critical: 0, pending: 0, pendingCritical: 0 }) as WaypointBand);
   const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
   expect(await ui.find({ type: 'Text', text: '◆ DESIGN · demo · v3 · nothing pending' })).toBeDefined();
@@ -55,6 +70,7 @@ test('the design band counts the proposals still pending from every round, not t
 });
 
 test('design band shows counts and submits commands', async ($, on) => {
+  engineBottom(on);
   const sent: string[] = [];
   const filled: string[] = [];
   recordCommands(on, sent);
@@ -116,6 +132,7 @@ test('work band runs /waypoint:work, the cross hides it and a new session shows 
 });
 
 test('the run band shows the execution, stops it and offers no per-session work buttons', async ($, on) => {
+  engineBottom(on);
   const sent: string[] = [];
   recordCommands(on, sent);
   serveBand(on, () => RUN);
@@ -132,7 +149,32 @@ test('the run band shows the execution, stops it and offers no per-session work 
   }
 });
 
+for (const [mode, model, line, button] of [['work', WORK, /^● /, 'next-task'], ['run', RUN, /^▶ /, 'stop-run']] as const) {
+  test(`the ${mode} band stacks over another plugin's band beneath, which stays after the cross`, async ($, on) => {
+    serveBand(on, () => model);
+    otherBand(on);
+    mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+    on('session.start', (_$, e) => ({ cwd: e.cwd }));
+    for (const surface of SURFACES) {
+      await $.session.start({ cwd: '.', surface, isInteractive: true });
+      const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
+      expect(await ui.find({ key: button })).toBeDefined();
+      expect(await ui.find({ key: 'dismiss' })).toBeDefined();
+      const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text);
+      const ours = texts.findIndex(t => line.test(t));
+      expect(ours).toBeGreaterThanOrEqual(0);
+      expect(texts.indexOf('other band')).toBeGreaterThan(ours);
+      await ui.press({ key: 'dismiss' });
+      expect(await ui.find({ key: button })).toBeUndefined();
+      expect(await ui.find({ type: 'Button' })).toBeUndefined();
+      expect(await ui.find({ text: 'other band' })).toBeDefined();
+      await ui.unmount();
+    }
+  });
+}
+
 test('a swarm member work band is marked', async ($, on) => {
+  engineBottom(on);
   serveBand(on, () => ({ ...WORK, swarm: true }));
   mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
   const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
@@ -141,6 +183,7 @@ test('a swarm member work band is marked', async ($, on) => {
 });
 
 test('a session without a track counts the plan tasks instead of naming a track', async ($, on) => {
+  engineBottom(on);
   serveBand(on, () => ({ ...WORK, track: null, sid: 'main', current: null }));
   const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
   const line = await ui.find({ type: 'Text', text: /^● main · / });
@@ -150,6 +193,7 @@ test('a session without a track counts the plan tasks instead of naming a track'
 });
 
 test('a command that cannot run is left in the prompt with a toast', async ($, on) => {
+  engineBottom(on);
   const filled: string[] = [];
   const toasts: string[] = [];
   on('command.run', () => { throw new Error('unknown command'); });
@@ -166,6 +210,7 @@ test('a command that cannot run is left in the prompt with a toast', async ($, o
 });
 
 test('a link that is not http(s) is shown as text', async ($, on) => {
+  engineBottom(on);
   serveBand(on, () => ({ ...DESIGN, designUrl: 'javascript:alert(1)' }));
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
@@ -245,6 +290,7 @@ function serveFiles(on: On, files: Record<string, string> = FILES, listed: strin
 }
 
 test('session start reads the project files and shows the work band', async ($, on) => {
+  engineBottom(on);
   serveFiles(on);
   mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
@@ -259,6 +305,7 @@ test('session start reads the project files and shows the work band', async ($, 
 });
 
 test('the periodic refresh redraws a running task with its new minutes', async ($, on) => {
+  engineBottom(on);
   serveFiles(on);
   const clock = mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
@@ -288,6 +335,7 @@ test('a root without docs/waypoint leaves the band to the engine', async ($, on)
 });
 
 test('a folder without plan.yaml or design.md is not a project, even with a session', async ($, on) => {
+  engineBottom(on);
   const design = '---\ntitle: Demo\nproject: demo\nlocale: en\nsummary: A demo.\nstart_prompt: /waypoint:work\n---\n\nIntro.\n\n## Scope\n\nText.\n';
   serveFiles(on, {
     [`${ROOT}/docs/waypoint/demo/design.md`]: design,
@@ -323,6 +371,7 @@ test('a second session start keeps one refresh timer, and session end stops it',
 const LENS = { name: 'lens', description: 'Show the lens progress panel', source: 'plugin' as const, plugin: 'lens' };
 
 test('the Panel button shows only when /lens exists, and runs it', async ($, on) => {
+  engineBottom(on);
   serveFiles(on);
   mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
@@ -362,6 +411,7 @@ test('with no waypoint project and open todos, waypoint draws nothing', async ($
 });
 
 test('a /lens registered after the session start shows the Panel button a second later', async ($, on) => {
+  engineBottom(on);
   serveFiles(on);
   const clock = mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
@@ -378,6 +428,7 @@ test('a /lens registered after the session start shows the Panel button a second
 });
 
 test('a /lens of another plugin is not taken for lens', async ($, on) => {
+  engineBottom(on);
   serveFiles(on);
   mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
@@ -390,6 +441,7 @@ test('a /lens of another plugin is not taken for lens', async ($, on) => {
 });
 
 test('a turn end looks for /lens again', async ($, on) => {
+  engineBottom(on);
   serveFiles(on);
   mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
@@ -407,6 +459,7 @@ test('a turn end looks for /lens again', async ($, on) => {
 });
 
 test('a band with automatic decisions ends with their count and the last major one', async ($, on) => {
+  engineBottom(on);
   serveBand(on, () => ({ ...DESIGN, auto: { count: 2, lastMajor: 'design approved (v3)' } }) as WaypointBand);
   const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
   expect(await ui.find({ type: 'Text', text: '◆ DESIGN · demo · v3 · 2 pending · 1 critical · ⚑ auto · 2 · design approved (v3)' })).toBeDefined();

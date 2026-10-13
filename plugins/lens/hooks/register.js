@@ -13901,8 +13901,9 @@ export const register = (on) => {
     }
   });
   on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
+    const below = await next(e);
     try {
-      if (e.props.hasSurvey || !busy || waypointBand || await read($, hidden)) return next(e);
+      if (e.props.hasSurvey || !busy || waypointBand || await read($, hidden)) return below;
       const ui = $.ui.resolve(e);
       const { Box, Text, Button } = ui;
       const t = lensTexts();
@@ -13936,11 +13937,11 @@ export const register = (on) => {
         const { Svg } = ui;
         const W = Math.max(200, Math.min(1600, cols * 8 - 130));
         const { source, height } = bandSvg({ W, ...o });
-        return /* @__PURE__ */ h(Box, { flexDirection: "row", alignItems: "center", columnGap: 1 }, /* @__PURE__ */ h(Svg, { source, alt: [o.title, o.label, o.detail].filter(Boolean).join(" \xB7 "), width: W, height }), buttons);
+        return /* @__PURE__ */ h(Box, { flexDirection: "column" }, /* @__PURE__ */ h(Box, { flexDirection: "row", alignItems: "center", columnGap: 1 }, /* @__PURE__ */ h(Svg, { source, alt: [o.title, o.label, o.detail].filter(Boolean).join(" \xB7 "), width: W, height }), buttons), below);
       }
-      return /* @__PURE__ */ h(Box, { flexDirection: "row", columnGap: 1 }, termBand(ui, { ...o, columns: cols - 16, spin: agents > 0 }), /* @__PURE__ */ h(Box, { flexDirection: "row", columnGap: 1, flexShrink: 0 }, buttons));
+      return /* @__PURE__ */ h(Box, { flexDirection: "column" }, /* @__PURE__ */ h(Box, { flexDirection: "row", columnGap: 1 }, termBand(ui, { ...o, columns: cols - 16, spin: agents > 0 }), /* @__PURE__ */ h(Box, { flexDirection: "row", columnGap: 1, flexShrink: 0 }, buttons)), below);
     } catch {
-      return next(e);
+      return below;
     }
   });
 };

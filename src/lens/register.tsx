@@ -923,9 +923,11 @@ export const register: Register = on => {
 
   // The band above the prompt while subagents or todos are about and waypoint draws no band of its own: the run's
   // headline with its bar and task cells, then the Panel button. Drawn from module memory: no clock or file call.
+  // The band is one instance per chain: drawing without next(e) hides the bands of the plugins beneath, so ours stacks over them.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const below = await next(e);
     try {
-      if (e.props.hasSurvey || !busy || waypointBand || await read($, hidden)) return next(e);
+      if (e.props.hasSurvey || !busy || waypointBand || await read($, hidden)) return below;
       const ui = $.ui.resolve(e);
       const { Box, Text, Button } = ui;
       const t = lensTexts();
@@ -952,20 +954,26 @@ export const register: Register = on => {
         const W = Math.max(200, Math.min(1600, cols * 8 - 130));
         const { source, height } = bandSvg({ W, ...o });
         return (
-          <Box flexDirection="row" alignItems="center" columnGap={1}>
-            <Svg source={source} alt={[o.title, o.label, o.detail].filter(Boolean).join(' · ')} width={W} height={height} />
-            {buttons}
+          <Box flexDirection="column">
+            <Box flexDirection="row" alignItems="center" columnGap={1}>
+              <Svg source={source} alt={[o.title, o.label, o.detail].filter(Boolean).join(' · ')} width={W} height={height} />
+              {buttons}
+            </Box>
+            {below}
           </Box>
         );
       }
       return (
-        <Box flexDirection="row" columnGap={1}>
-          {termBand(ui as TermUI, { ...o, columns: cols - 16, spin: agents > 0 })}
-          <Box flexDirection="row" columnGap={1} flexShrink={0}>{buttons}</Box>
+        <Box flexDirection="column">
+          <Box flexDirection="row" columnGap={1}>
+            {termBand(ui as TermUI, { ...o, columns: cols - 16, spin: agents > 0 })}
+            <Box flexDirection="row" columnGap={1} flexShrink={0}>{buttons}</Box>
+          </Box>
+          {below}
         </Box>
       );
     } catch {
-      return next(e);
+      return below;
     }
   });
 };

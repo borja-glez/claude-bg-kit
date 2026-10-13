@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing';
-import type { On } from 'claude-code';
+import type { On, RenderElement } from 'claude-code';
 
 const SURFACES = ['terminal', 'desktop'] as const;
 const PANE = 'lens';
@@ -77,6 +77,11 @@ function serveFiles(on: On, files: Record<string, string>, touched: string[] = [
       ? { value: [...names].map(([name, f]) => ({ name, kind: f.kind, size: f.size, mtimeMs: 1, isLink: false })) }
       : { deny: `ENOENT ${e.path}` };
   });
+}
+
+// What the real engine answers at the bottom of the chain when nothing draws beneath the plugin.
+function engineBottom(on: On) {
+  on('ui.render', { component: 'AbovePrompt' }, () => ({ type: 'engine', ref: 0 }) as RenderElement);
 }
 
 function servePanes(on: On) {
@@ -295,6 +300,7 @@ test('without a cycle budget the infinite line shows the cycle alone, even with 
 });
 
 test('the band shows the forge task with its bar while there is activity, as cells on the terminal and SVG on the desktop', async ($, on) => {
+  engineBottom(on);
   serveFiles(on, { ...FORGE, [`${ROOT}/.forge/work/hash/brief-1.md`]: 'b', [`${ROOT}/.forge/work/hash/brief-2.md`]: 'b' });
   servePanes(on);
   const clock = start(on);

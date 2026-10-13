@@ -11549,10 +11549,11 @@ export const register = (on) => {
     return result;
   });
   on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
+    const below = await next(e);
     try {
       const m = await read($, band);
       const isHidden = await read($, hidden);
-      if (isHidden || !m || e.props.hasSurvey || m.mode === "none") return next(e);
+      if (isHidden || !m || e.props.hasSurvey || m.mode === "none") return below;
       const { Box, Text, Button, Link } = $.ui.resolve(e);
       const taskNow = m.mode === "work" && m.current?.startedAt ? await $.clock.now() : 0;
       const line = bandLine(m, taskNow);
@@ -11591,11 +11592,11 @@ export const register = (on) => {
         /* @__PURE__ */ h(Button, { key: "launch", label: t.launch, onPress: fill("/waypoint:launch ") }),
         ...m.roadmapUrl ? [link(m.roadmapUrl, t.roadmap)] : []
       ];
-      return /* @__PURE__ */ h(Box, { flexDirection: "row", flexWrap: "wrap", columnGap: 1 }, /* @__PURE__ */ h(Text, { color: "claude", wrap: "truncate-end" }, line), controls, lens ? /* @__PURE__ */ h(Button, { key: "panel", label: t.panel, onPress: submit("/lens") }) : null, /* @__PURE__ */ h(Button, { key: "dismiss", label: "\xD7", role: "dismiss", onPress: () => {
+      return /* @__PURE__ */ h(Box, { flexDirection: "column" }, /* @__PURE__ */ h(Box, { flexDirection: "row", flexWrap: "wrap", columnGap: 1 }, /* @__PURE__ */ h(Text, { color: "claude", wrap: "truncate-end" }, line), controls, lens ? /* @__PURE__ */ h(Button, { key: "panel", label: t.panel, onPress: submit("/lens") }) : null, /* @__PURE__ */ h(Button, { key: "dismiss", label: "\xD7", role: "dismiss", onPress: () => {
         update($, hidden, () => true).catch(() => void 0);
-      } }));
+      } })), below);
     } catch {
-      return next(e);
+      return below;
     }
   });
 };
