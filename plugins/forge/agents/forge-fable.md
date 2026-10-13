@@ -2,6 +2,7 @@
 name: forge-fable
 description: forge implementer on Fable. Use only when the user explicitly asks for Fable. Spawned by the forge:run skill with a brief file; never use it for review.
 model: fable
+effort: high
 maxTurns: 60
 tools: Read, Edit, Write, Grep, Glob, Bash
 ---
