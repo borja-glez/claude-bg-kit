@@ -66,6 +66,21 @@ describe('forge config', () => {
     expect(agentFor('verify', 'economy')).toBe('forge-verify');
     expect(agentFor('verify', 'quality')).toBe('forge-verify-heavy');
   });
+  it('each profile resolves the five-rung implementer ladder as the design says', () => {
+    expect(ROLES).toContain('impl-high');
+    const ladder = ['mech', 'impl-light', 'impl', 'impl-high', 'impl-heavy'] as const;
+    const map = (profile: 'balanced' | 'economy' | 'quality') => ladder.map(r => agentFor(r, profile));
+    expect(map('balanced')).toEqual(['forge-mech', 'forge-impl-light', 'forge-impl', 'forge-impl-high', 'forge-impl-heavy']);
+    expect(map('economy')).toEqual(['forge-mech', 'forge-impl-light', 'forge-impl-light', 'forge-impl', 'forge-impl-high']);
+    expect(map('quality')).toEqual(['forge-impl-light', 'forge-impl', 'forge-impl-heavy', 'forge-impl-heavy', 'forge-impl-heavy']);
+  });
+  it('FORGE agents lists impl-high for the configured profile', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'forge-agents-'));
+    expect(JSON.parse(run(['agents'], { cwd: root, now: () => new Date() }).stdout).agents['impl-high']).toBe('forge-impl-high');
+    mkdirSync(path.join(root, '.forge'));
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'profile: economy\n');
+    expect(JSON.parse(run(['agents'], { cwd: root, now: () => new Date() }).stdout).agents).toMatchObject({ 'impl-high': 'forge-impl', 'impl-heavy': 'forge-impl-high' });
+  });
   it('NAME is the shared name pattern', () => {
     expect(NAME.test('test:e2e')).toBe(true);
     expect(NAME.test('a b')).toBe(false);

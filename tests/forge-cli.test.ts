@@ -135,6 +135,38 @@ describe('forge CLI', () => {
     for (const sig of ['a', 'b', 'c', 'd']) run(['log', '--kind', 'verdict', '--task', 't1', '--data', `{"action":"fix","score":0.6,"signature":"${sig}"}`], io);
     expect(JSON.parse(run(['round', '--task', 't1', '--path', 'large'], io).stdout)).toMatchObject({ cap: 4, next: 'fresh-stronger', tierUp: true });
   });
+  it('round on Medium after three fix verdicts: the last attempt, on forge-impl-heavy', () => {
+    run(['log', '--kind', 'agent', '--task', 't1-1', '--data', '{"agent":"forge-impl","role":"impl"}'], io);
+    for (const sig of ['a', 'b', 'c']) run(['log', '--kind', 'verdict', '--task', 't1-1', '--data', `{"action":"fix","score":0.6,"signature":"${sig}"}`], io);
+    const r = JSON.parse(run(['round', '--task', 't1-1', '--path', 'medium'], io).stdout);
+    expect(r).toMatchObject({ round: 3, next: 'fresh-stronger', last: true, implementer: { role: 'impl-heavy', agent: 'forge-impl-heavy' } });
+    expect(readEvents(root).at(-1)).toMatchObject({ kind: 'round', task: 't1-1', last: true, implementer: { role: 'impl-heavy', agent: 'forge-impl-heavy' } });
+  });
+  it('round on Large after three fix verdicts from forge-impl climbs one rung, to forge-impl-high', () => {
+    run(['log', '--kind', 'agent', '--task', 't1-1', '--data', '{"agent":"forge-impl","role":"impl"}'], io);
+    // Agents off the ladder (a reviewer, verify, fable) do not name the implementer.
+    run(['log', '--kind', 'agent', '--task', 't1-1', '--data', '{"agent":"forge-review-correctness","role":"review-correctness"}'], io);
+    run(['log', '--kind', 'agent', '--task', 't1-1', '--data', '{"agent":"forge-fable","role":"fable"}'], io);
+    for (const sig of ['a', 'b', 'c']) run(['log', '--kind', 'verdict', '--task', 't1-1', '--data', `{"action":"fix","score":0.6,"signature":"${sig}"}`], io);
+    const r = JSON.parse(run(['round', '--task', 't1-1', '--path', 'large'], io).stdout);
+    expect(r).toMatchObject({ round: 3, next: 'fresh-stronger', last: false, tierUp: true, implementer: { role: 'impl-high', agent: 'forge-impl-high' } });
+  });
+  it('round after one fix resumes the same implementer, resolved with the profile', () => {
+    run(['log', '--kind', 'agent', '--task', 't1-1', '--data', '{"agent":"forge-impl-high","role":"impl-high"}'], io);
+    run(['log', '--kind', 'verdict', '--task', 't1-1', '--data', '{"action":"fix","score":0.6,"signature":"a"}'], io);
+    expect(JSON.parse(run(['round', '--task', 't1-1', '--path', 'medium'], io).stdout))
+      .toMatchObject({ round: 1, next: 'resume', last: false, implementer: { role: 'impl-high', agent: 'forge-impl-high' } });
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'profile: economy\n');
+    expect(JSON.parse(run(['round', '--task', 't1-1', '--path', 'medium'], io).stdout).implementer).toEqual({ role: 'impl-high', agent: 'forge-impl' });
+  });
+  it('round with no implementer logged assumes the one triage gives (impl-high on a sensitive Medium); done names none', () => {
+    run(['log', '--kind', 'triage', '--task', 't1', '--data', '{"path":"medium","sensitive":["auth"]}'], io);
+    run(['log', '--kind', 'verdict', '--task', 't1-1', '--data', '{"action":"fix","score":0.6,"signature":"a"}'], io);
+    expect(JSON.parse(run(['round', '--task', 't1-1', '--path', 'medium'], io).stdout).implementer).toEqual({ role: 'impl-high', agent: 'forge-impl-high' });
+    run(['log', '--kind', 'verdict', '--task', 't1-1', '--data', '{"action":"accept","score":0.9,"signature":""}'], io);
+    expect(JSON.parse(run(['round', '--task', 't1-1', '--path', 'medium'], io).stdout)).toMatchObject({ next: 'done', last: false, implementer: null });
+  });
   it('round refuses a path other than medium or large', () => {
     expect(run(['round', '--task', 't1', '--path', 'small'], io).code).toBe(2);
   });
@@ -143,7 +175,8 @@ describe('forge CLI', () => {
     writeFileSync(path.join(root, '.forge', 'config.yaml'), 'profile: economy\n');
     const map = JSON.parse(run(['agents'], io).stdout);
     expect(map.profile).toBe('economy');
-    expect(map.agents['impl-heavy']).toBe('forge-impl');
+    expect(map.agents['impl-heavy']).toBe('forge-impl-high');
+    expect(map.agents['impl-high']).toBe('forge-impl');
   });
   it('last summarizes one task from the ledger', () => {
     run(['log', '--kind', 'triage', '--task', 't1', '--data', '{"path":"medium"}'], io);
@@ -288,7 +321,7 @@ describe('forge CLI', () => {
     const small = JSON.parse(run(['triage', 'add a dark mode toggle'], io).stdout);
     expect(small.announce).toBe('Small → forge-impl-light: no files located: the session should judge the scope. You can correct it.');
     const medium = JSON.parse(run(['triage', 'change the password check in src/a.ts'], io).stdout);
-    expect(medium.announce).toBe('Medium → forge-impl-heavy: one named file, short task; sensitive zone: auth. I show you a short plan before launching it; you can correct it.');
+    expect(medium.announce).toBe('Medium → forge-impl-high: one named file, short task; sensitive zone: auth. I show you a short plan before launching it; you can correct it.');
     expect(medium.gate).toBe('plan');
     const large = JSON.parse(run(['triage', 'redesign the plugin architecture'], io).stdout);
     expect(large.announce).toBe('Large: architecture-scale wording; design and plan first. You can correct it.');
@@ -335,7 +368,7 @@ describe('forge CLI', () => {
     expect(JSON.parse(run(['triage', '--locale', 'es', 'añade un modo oscuro'], io).stdout).announce)
       .toBe('Small → forge-impl-light: no localizo ficheros: decide la sesión. Puedes corregirlo.');
     expect(JSON.parse(run(['triage', '--locale', 'es', 'cambia el mensaje de error del login a «Credenciales incorrectas»'], io).stdout).announce)
-      .toBe('Medium → forge-impl-heavy: un cambio de texto entre comillas; zona sensible: auth. Antes de lanzarlo te enseño un plan corto; puedes corregirlo.');
+      .toBe('Medium → forge-impl-high: un cambio de texto entre comillas; zona sensible: auth. Antes de lanzarlo te enseño un plan corto; puedes corregirlo.');
     expect(JSON.parse(run(['triage', '--locale', 'es', 'Rediseña la arquitectura del plugin'], io).stdout).announce)
       .toBe('Large: la tarea habla de arquitectura; primero diseño y plan. Puedes corregirlo.');
     // The locale flag is not part of the task text.

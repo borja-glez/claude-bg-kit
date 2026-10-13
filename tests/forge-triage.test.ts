@@ -232,9 +232,9 @@ describe('implementerFor', () => {
     expect(implementerFor({ path: 'trivial', sensitive: [] }, 'fix the typo in src/a.ts')).toEqual({ role: null, self: true, why: 'trivial: the session does it' });
     expect(implementerFor({ path: 'trivial', sensitive: [] }, 'fix the typo in src/a.ts', { batch: true })).toMatchObject({ role: 'mech', self: false });
   });
-  it('medium goes to impl, or impl-heavy on a sensitive zone; large has no implementer yet', () => {
+  it('medium goes to impl, or impl-high on a sensitive zone; large has no implementer yet', () => {
     expect(implementerFor({ path: 'medium', sensitive: [] }, 'x').role).toBe('impl');
-    expect(implementerFor({ path: 'medium', sensitive: ['auth'] }, 'x').role).toBe('impl-heavy');
+    expect(implementerFor({ path: 'medium', sensitive: ['auth'] }, 'x').role).toBe('impl-high');
     expect(implementerFor({ path: 'large', sensitive: [] }, 'x')).toMatchObject({ role: null, self: false });
   });
   it('isMechanical reads English and Spanish wording, not substrings', () => {
@@ -252,16 +252,16 @@ describe('implementerFor', () => {
     expect(isMechanical('move src/a.ts to src/lib/a.ts')).toBe(true);
     expect(isMechanical('fix the typo in the README')).toBe(true);
   });
-  it('a plan task: trivial goes to mech, large to impl (impl-heavy on a sensitive zone), small and medium unchanged', () => {
+  it('a plan task: trivial goes to mech, large to impl (impl-high on a sensitive zone), small and medium unchanged', () => {
     expect(implementerFor({ path: 'trivial', sensitive: [] }, 'fix the typo in src/a.ts', { plan: true }))
       .toEqual({ role: 'mech', self: false, why: 'trivial plan task: delegated to mech, the coordinator never edits task code' });
     expect(implementerFor({ path: 'large', sensitive: [] }, 'x', { plan: true }))
       .toEqual({ role: 'impl', self: false, why: 'large plan task: impl, as a medium one (the plan may need to split it)' });
     expect(implementerFor({ path: 'large', sensitive: ['auth', 'data'] }, 'x', { plan: true }))
-      .toEqual({ role: 'impl-heavy', self: false, why: 'large plan task on a sensitive zone (auth, data): impl-heavy' });
+      .toEqual({ role: 'impl-high', self: false, why: 'large plan task on a sensitive zone (auth, data): impl-high' });
     expect(implementerFor({ path: 'small', sensitive: [] }, 'add a guard for empty carts in src/cart.ts', { plan: true }).role).toBe('impl-light');
     expect(implementerFor({ path: 'medium', sensitive: [] }, 'x', { plan: true }).role).toBe('impl');
-    expect(implementerFor({ path: 'medium', sensitive: ['auth'] }, 'x', { plan: true }).role).toBe('impl-heavy');
+    expect(implementerFor({ path: 'medium', sensitive: ['auth'] }, 'x', { plan: true }).role).toBe('impl-high');
     expect(implementerFor({ path: 'large', sensitive: [] }, 'x', { plan: false })).toMatchObject({ role: null, self: false });
   });
 });

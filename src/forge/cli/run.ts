@@ -2,7 +2,7 @@ import { spawnSync, execFileSync } from 'node:child_process';
 import { existsSync, statSync, lstatSync, readFileSync, readdirSync, openSync, closeSync, fstatSync, readSync, rmSync, mkdtempSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { appendEvent, readEvents, forgeDir, LEDGER_KINDS, type LedgerKind } from '../ledger.js';
+import { appendEvent, readEvents, forgeDir, LEDGER_KINDS, type LedgerKind, type LedgerEvent } from '../ledger.js';
 import { parseRun, startRun, recordCycle, stopReason, endRun, readRunText, saveRun, stopFile, type RunState, type StopContext } from '../run.js';
 import { decideStop, decideExecutionStop, bindHookSession } from '../hook.js';
 import { readExecution, saveExecution } from '../execution.js';
@@ -11,13 +11,13 @@ import { isLocale } from '../../lib/forge-run.js';
 import { isSafeId } from '../../lib/execution-state.js';
 import { samePath } from '../../lib/worktree.js';
 import { treeStartFile, parseStatus, parseSnapshot, treeCheck, type TreeSnapshot } from '../tree.js';
-import { triage, implementerFor, zonesFromPaths, announce, announceReview, isBookkeeping, parseNumstat, diffPath, isPerfTask, reviewFor, PATH_ORDER, ZONE_ORDER, type PathName, type AnnounceLocale } from '../triage.js';
+import { triage, implementerFor, zonesFromPaths, announce, announceReview, isBookkeeping, parseNumstat, diffPath, isPerfTask, reviewFor, PATH_ORDER, ZONE_ORDER, type PathName, type AnnounceLocale, type ImplRole, type Zone } from '../triage.js';
 import { parsePlan, PlanError } from '../../lib/plan.js';
 import { renderBrief, taskText, tddLine } from '../brief.js';
-import { loadConfig, configValue, agentFor, ROLES, ConfigError, NAME, WORKFLOWS, AUTONOMIES } from '../config.js';
+import { loadConfig, configValue, agentFor, ROLES, ConfigError, NAME, WORKFLOWS, AUTONOMIES, type Profile } from '../config.js';
 import { resolvePrefs, isWorkflow, isAutonomy } from '../prefs.js';
 import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, type ReviewerName, type Action, type FailingValidator, type VerifyFile } from '../verdict.js';
-import { decideRound } from '../loop.js';
+import { decideRound, nextImplementer, IMPL_LADDER } from '../loop.js';
 import { PROPOSAL_ID, proposalId, saveProposal, loadProposals, loadProposal, decideDoc, mirrorProposal, type DecideError } from '../proposals.js';
 import { normalizeProposal, isActionable, canDecide, PROPOSAL_STATUSES, type Decision, type ProposalDoc } from '../../lib/proposals.js';
 import { autoApprovable, similarRejected, similarOpen } from '../policy.js';
@@ -203,6 +203,32 @@ const spPlanDone = (text: string, abs: string, dir: string) => markDone(parseSpP
 function spTaskNumber(v: string | undefined): number {
   if (v === undefined || !/^\d{1,4}$/.test(v) || Number(v) < 1) throw new UsageError('--task must be the number of a task of the superpowers plan');
   return Number(v);
+}
+
+/**
+ * `FORGE round` for a task `<T>-<n>` from the ledger: the decision on its verdicts (the last verdict per review dir
+ * counts once) and who implements the attempt it starts, resolved with the profile. The previous implementer is the
+ * last `agent` event of the task whose role is on the ladder (that brief first, then any brief of `<T>`); with none,
+ * the role `implementerFor` gives a plan task of this path and the zones of the task's last triage.
+ */
+export function roundDecision(events: LedgerEvent[], task: string, p: 'medium' | 'large', profile: Profile) {
+  const verdicts = events.filter(e => e.kind === 'verdict' && e.task === task && (e.action === 'accept' || e.action === 'fix' || e.action === 'redo'));
+  // Only the last verdict per review dir counts: re-running a verdict (e.g. when resuming) is not a new round.
+  const lastPerDir = new Map<string, number>();
+  verdicts.forEach((e, i) => { if (typeof e.dir === 'string') lastPerDir.set(e.dir, i); });
+  const history = verdicts
+    .filter((e, i) => typeof e.dir !== 'string' || lastPerDir.get(e.dir) === i)
+    .map(e => ({ action: e.action as Action, score: typeof e.score === 'number' ? e.score : null, signature: String(e.signature ?? '') }));
+  const d = decideRound(history, p);
+  const base = task.replace(/-\d+$/, '');
+  const ofTask = (e: LedgerEvent) => typeof e.task === 'string' && (e.task === base || (e.task.startsWith(`${base}-`) && /^\d+$/.test(e.task.slice(base.length + 1))));
+  const ladder = events.filter(e => e.kind === 'agent' && ofTask(e) && (IMPL_LADDER as readonly unknown[]).includes(e.role));
+  const logged = (ladder.filter(e => e.task === task).at(-1) ?? ladder.at(-1))?.role as ImplRole | undefined;
+  const triaged = events.filter(e => e.kind === 'triage' && ofTask(e)).at(-1);
+  const sensitive = Array.isArray(triaged?.sensitive) ? (triaged!.sensitive as unknown[]).filter((z): z is Zone => (ZONE_ORDER as unknown[]).includes(z)) : [];
+  const current = logged ?? implementerFor({ path: p, sensitive }, '', { plan: true }).role ?? 'impl';
+  const role = nextImplementer(d, current);
+  return { ...d, implementer: role ? { role, agent: agentFor(role, profile) } : null };
 }
 
 // Finds waypoint's CLI from the running forge.cjs: dev layout (plugins/forge, plugins/waypoint) or
@@ -694,15 +720,7 @@ export function run(argv: string[], io: Io): Result {
         const task = flag('task');
         const p = flag('path');
         if (!task || (p !== 'medium' && p !== 'large')) throw new UsageError('round: --task and --path medium|large are required');
-        const verdicts = readEvents(io.cwd)
-          .filter(e => e.kind === 'verdict' && e.task === task && (e.action === 'accept' || e.action === 'fix' || e.action === 'redo'));
-        // Only the last verdict per review dir counts: re-running a verdict (e.g. when resuming) is not a new round.
-        const lastPerDir = new Map<string, number>();
-        verdicts.forEach((e, i) => { if (typeof e.dir === 'string') lastPerDir.set(e.dir, i); });
-        const history = verdicts
-          .filter((e, i) => typeof e.dir !== 'string' || lastPerDir.get(e.dir) === i)
-          .map(e => ({ action: e.action as Action, score: typeof e.score === 'number' ? e.score : null, signature: String(e.signature ?? '') }));
-        const d = decideRound(history, p);
+        const d = roundDecision(readEvents(io.cwd), task, p, loadConfig(repoDir).profile);
         appendEvent(io.cwd, { ts: ts(), kind: 'round', task, ...d });
         return json(d);
       }

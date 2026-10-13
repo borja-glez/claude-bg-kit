@@ -91,7 +91,7 @@ describe('config', () => {
   });
   it('maps roles to agents per profile', () => {
     expect(agentFor('impl-heavy', 'balanced')).toBe('forge-impl-heavy');
-    expect(agentFor('impl-heavy', 'economy')).toBe('forge-impl');
+    expect(agentFor('impl-heavy', 'economy')).toBe('forge-impl-high');
     expect(agentFor('impl', 'economy')).toBe('forge-impl-light');
     expect(agentFor('impl', 'quality')).toBe('forge-impl-heavy');
     expect(agentFor('impl-light', 'quality')).toBe('forge-impl');
