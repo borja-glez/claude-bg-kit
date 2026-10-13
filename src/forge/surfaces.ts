@@ -10,16 +10,26 @@ import type { RepoReader } from './validators.js';
 export interface Surface { name: string; file: string; title: string; affects: string[] | null; tools: string[]; hash: string; error?: string }
 export interface Draft { name: string; affects: string[]; tools: string[]; body: string }
 
-/** The hash of the whole file, line endings normalised. A permission is tied to permissionHash, which is this one
- *  unless `surfaces learn` recorded lines it appended. */
+/** The sha256 (64 hex) of the whole file, line endings normalised. A permission is tied to permissionHash, which is
+ *  this one unless `surfaces learn` recorded lines it appended. */
 export function surfaceHash(text: string): string {
-  return createHash('sha256').update(text.replace(/\r\n/g, '\n')).digest('hex').slice(0, 16);
+  return createHash('sha256').update(text.replace(/\r\n/g, '\n')).digest('hex');
 }
 
-/** What `surfaces learn` records for each line it appends: the first 16 hex of the sha256 of the line, trimmed. */
-export function lineDigest(line: string): string {
-  return createHash('sha256').update(line.replace(/\r\n?/g, '\n').trim()).digest('hex').slice(0, 16);
+/** Whether a stored permission hash covers the surface's hash now: the same, or a 16-hex hash of forge ≤ 0.12 (the
+ *  first 16 hex of the same sha256). */
+export function hashMatches(stored: string | null | undefined, current: string): boolean {
+  if (!stored) return false;
+  return stored === current || (/^[0-9a-f]{16}$/.test(stored) && current.startsWith(stored));
 }
+
+/** What `surfaces learn` records for each line it appends: the sha256 (64 hex) of the line, trimmed. */
+export function lineDigest(line: string): string {
+  return createHash('sha256').update(line.replace(/\r\n?/g, '\n').trim()).digest('hex');
+}
+
+/** The headings of the section where `surfaces learn` writes its notes. */
+export const LEARNED_HEADINGS = ['Learned', 'Aprendido'] as const;
 
 /**
  * What a permission is tied to: surfaceHash of the file without the lines forge appended to its Learned/Aprendido
@@ -100,7 +110,7 @@ export function detectDrafts(repo: RepoReader): Draft[] {
   return out;
 }
 
-const HEADING = /^##\s+(Learned|Aprendido)\s*$/;
+const HEADING = new RegExp(`^##\\s+(${LEARNED_HEADINGS.join('|')})\\s*$`);
 
 /** Lines of the body (`i`: index in t.split('\n'), `at`: offset): after a leading YAML header, outside ``` fences. */
 function bodyLines(t: string): { text: string; at: number; i: number }[] {

@@ -23,12 +23,12 @@ import { UsageError } from './errors.js';
 import { swarmCommand } from './swarm.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, type RepoReader, type Scope } from '../validators.js';
 import { checkTools, mcpInventory, toolGaps } from '../tools.js';
-import { verifyPlan, cleanupPids, killTarget, askFor, capLines, type PlanSurface } from '../verify.js';
-import { readLocal, updateLocal, mainCheckout, readLearned, recordLearned, OBJECT_ID, type SurfacePermission } from '../local.js';
+import { verifyPlan, cleanupPids, killTarget, askFor, capLines, relabelDiff, type PlanSurface } from '../verify.js';
+import { readLocal, readLocalChecked, localWarningText, updateLocal, mainCheckout, readLearned, recordLearned, readPermissions, setPermission, OBJECT_ID, type SurfacePermission } from '../local.js';
 import { memberForHook } from '../members.js';
 import { hookLive } from '../live.js';
 import { hookRoute } from '../route-hooks.js';
-import { readSurfaces, detectDrafts, appendLearned, surfaceFile, permissionHash, type Surface } from '../surfaces.js';
+import { readSurfaces, detectDrafts, appendLearned, surfaceFile, permissionHash, hashMatches, LEARNED_HEADINGS, type Surface } from '../surfaces.js';
 import { addDecision, allDecisions, listDecisions, renderDecisionsMd, DecisionInputError } from '../decisions.js';
 import { TASK_ID, decisionScope, scopeFileName } from '../../lib/decisions.js';
 import { claudeConfigDir, claudeJsonDir, locateSuperpowers, spLedgerDone, spPlans, spSkillPath, spSpecs } from '../superpowers.js';
@@ -189,25 +189,28 @@ function mcpOf(io: Io, dir: string): Set<string> {
   return out;
 }
 
-// The lines `surfaces learn` recorded, per surface. A learned.jsonl that git tracks came with the code (a PR could ship
-// one), not from this machine: it excuses nothing.
-function learnedOf(io: Io): Map<string, Set<string>> {
-  const main = mainCheckout(io.cwd);
-  return defaultGit(main)(['ls-files', '--', '.forge/learned.jsonl'])?.trim() ? new Map() : readLearned(main);
-}
+// The blob of a surface file as it is on disk: no clean filter, which a .gitattributes from a commit could pick.
+const surfaceBlob = (git: (args: string[]) => string | null, file: string): string | null => {
+  const id = git(['hash-object', '-w', '--no-filters', '--', file])?.trim();
+  return id && OBJECT_ID.test(id) ? id : null;
+};
+
+// The `warning` an output that reads local.yaml adds when that file was ignored.
+const localWarning = (w: Parameters<typeof localWarningText>[0] | null, es: boolean) => (w ? { warning: localWarningText(w, es) } : {});
 
 // What the question about a surface that is not allowed shows: for a changed one, the diff from the blob allowed to the
-// file now (capped; null without a stored blob or when git cannot) and the commits since the allowance (the last 3 of
-// the file when its commit is unknown), then the question with its three answers.
+// file now (its header naming the file, capped; null without a stored blob, when git cannot, or when nothing differs)
+// and the commits since the allowance (the last 3 of the file when its commit is unknown), then the question with its
+// three answers.
 function surfaceQuestion(p: PlanSurface, s: Surface, perm: SurfacePermission | undefined, git: (args: string[]) => string | null, es: boolean): PlanSurface {
   if (p.permission === 'allowed') return p;
   if (p.permission === 'ask') return { ...p, ask: askFor(s, 'ask', es) };
   const lines = (out: string | null) => (out ?? '').split('\n').map(l => l.trim()).filter(Boolean);
   let diff: string | null = null;
   if (perm?.blob) {
-    const now = git(['hash-object', '-w', '--', s.file])?.trim();
-    const d = now && OBJECT_ID.test(now) ? git(['diff', '--no-color', '--no-ext-diff', perm.blob, now]) : null;
-    if (d !== null) diff = capLines(d, 120, es);
+    const now = surfaceBlob(git, s.file);
+    const d = now ? git(['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--src-prefix=a/', '--dst-prefix=b/', perm.blob, now]) : null;
+    if (d && now) diff = capLines(relabelDiff(d, perm.blob, now, s.file), 120, es);
   }
   const since = perm?.commit ? git(['log', '--oneline', '-n', '10', `${perm.commit}..HEAD`, '--', s.file]) : null;
   const commits = lines(since ?? git(['log', '--oneline', '-n', '3', '--', s.file]));
@@ -683,7 +686,7 @@ export function run(argv: string[], io: Io): Result {
       case 'surfaces': {
         const [sub] = args;
         if (sub === undefined || sub.startsWith('--')) {
-          const surfaces = readSurfaces(io.cwd, learnedOf(io));
+          const surfaces = readSurfaces(io.cwd, readLearned(io.cwd));
           const local = readLocal(io.cwd);
           const drafts = detectDrafts(repoReader(repoDir)).filter(d => !surfaces.some(s => s.name === d.name) && !local.proposed.includes(d.name));
           return json({ surfaces, drafts });
@@ -698,12 +701,15 @@ export function run(argv: string[], io: Io): Result {
           let notes: unknown;
           try { notes = JSON.parse(readFileSync(path.resolve(io.cwd, flag('notes-file') ?? ''), 'utf8')); } catch { throw new UsageError('surfaces learn: --notes-file must be a JSON array of strings'); }
           if (!Array.isArray(notes) || !notes.every(n => typeof n === 'string' && n.trim())) throw new UsageError('surfaces learn: --notes-file must be a JSON array of strings');
+          // Only the headings permissionHash knows: another one would make the notes unknown text.
+          const heading = flag('heading') ?? 'Learned';
+          if (!(LEARNED_HEADINGS as readonly string[]).includes(heading)) throw new UsageError(`surfaces learn: --heading must be ${LEARNED_HEADINGS.join('|')}`);
           const before = readFileSync(file, 'utf8');
-          // Only a surface allowed as it is now records what it appends (and local.yaml is never touched), so learning on
-          // a changed or never allowed surface cannot make it allowed: its new lines are just more unknown text.
-          const cur = readLocal(io.cwd).surfaces[name];
-          const allowed = cur?.state === 'allowed' && cur.hash === permissionHash(before, learnedOf(io).get(name));
-          const r = appendLearned(before, ts().slice(0, 10), notes as string[], flag('heading') ?? 'Learned');
+          // Only a surface allowed as it is now records what it appends (and the permission is never touched), so learning
+          // on a changed or never allowed surface cannot make it allowed: its new lines are just more unknown text.
+          const cur = readPermissions(io.cwd)[name];
+          const allowed = cur?.state === 'allowed' && hashMatches(cur.hash, permissionHash(before, readLearned(io.cwd).get(name)));
+          const r = appendLearned(before, ts().slice(0, 10), notes as string[], heading);
           writeFileSync(file, r.text);
           if (allowed) recordLearned(io.cwd, name, r.added, ts());
           return json({ name, count: r.count });
@@ -711,12 +717,14 @@ export function run(argv: string[], io: Io): Result {
         throw new UsageError('usage: forge surfaces [learn --name N --notes-file F [--heading H] | proposed --name N]');
       }
       case 'tools': {
-        const all = readSurfaces(io.cwd);
+        // The surfaces of the code checked (--cwd: a task's worktree).
+        const all = readSurfaces(repoDir);
         const one = flag('surface');
         const picked = one === undefined ? all : all.filter(s => s.name === one);
         if (one !== undefined && !picked.length) throw new UsageError(`tools: no surface ${one} in .forge/verify/`);
         const names = picked.flatMap(s => s.tools);
-        return json(checkTools(names, { onPath, inventory: names.length ? mcpOf(io, repoDir) : new Set(), exec: io.exec ?? defaultExec(io.cwd) }));
+        const { warning } = readLocalChecked(io.cwd);
+        return json({ ...checkTools(names, { onPath, inventory: names.length ? mcpOf(io, repoDir) : new Set(), exec: io.exec ?? defaultExec(io.cwd) }), ...localWarning(warning, planLocale(io.cwd) === 'es') });
       }
       case 'verify-plan': {
         const task = flag('task'), p = flag('path'), base = flag('base');
@@ -727,29 +735,34 @@ export function run(argv: string[], io: Io): Result {
         const es = (loc ?? planLocale(io.cwd)) === 'es';
         const git = io.git ?? defaultGit(io.cwd);
         const diff = git(['diff', '--name-only', `${base}..HEAD`]);
-        // The surfaces of the code checked (--cwd: a task's worktree), the permissions of this machine.
-        const surfaces = readSurfaces(repoDir, learnedOf(io));
-        const local = readLocal(io.cwd);
+        // The surfaces of the code checked (--cwd: a task's worktree), the permissions of this repository.
+        const surfaces = readSurfaces(repoDir, readLearned(io.cwd));
+        const { local, warning } = readLocalChecked(io.cwd);
+        const permissions = readPermissions(io.cwd);
         let inventory: Set<string> | null = null;
         const plan = verifyPlan({
           path: p, asked: has('asked'),
           changed: diff === null ? null : diff.split('\n').map(s => s.trim()).filter(Boolean),
-          surfaces, drafts: detectDrafts(repoReader(repoDir)), local,
+          surfaces, drafts: detectDrafts(repoReader(repoDir)), local, permissions,
           tools: s => (s.tools.length ? toolGaps(s.tools, { onPath, inventory: inventory ??= mcpOf(io, repoDir) }) : { missing: [], unknown: [] }),
         });
         appendEvent(io.cwd, { ts: ts(), kind: 'verify', task, planned: plan.eligible, surfaces: plan.surfaces.filter(s => s.permission === 'allowed').map(s => s.name) });
-        return json({ ...plan, surfaces: plan.surfaces.map(ps => surfaceQuestion(ps, surfaces.find(s => s.name === ps.name)!, local.surfaces[ps.name], git, es)) });
+        return json({ ...plan, surfaces: plan.surfaces.map(ps => surfaceQuestion(ps, surfaces.find(s => s.name === ps.name)!, permissions[ps.name], git, es)), ...localWarning(warning, es) });
       }
       case 'local': {
         const [sub, key, value] = args;
         if (sub === 'get') {
-          const s = readLocal(io.cwd);
-          if (key === undefined) return json(s);
+          if (key === undefined) {
+            const { local, warning } = readLocalChecked(io.cwd);
+            return json({ ...local, surfaces: readPermissions(io.cwd), ...localWarning(warning, planLocale(io.cwd) === 'es') });
+          }
           const m = /^surfaces\.(.+)$/.exec(key);
           if (!m) throw new UsageError('local get: the path must be surfaces.<name>');
-          return json(s.surfaces[m[1]] ?? null);
+          return json(readPermissions(io.cwd)[m[1]] ?? null);
         }
         if (sub === 'set' && (key === 'workflow' || key === 'autonomy')) {
+          const { warning } = readLocalChecked(io.cwd);
+          if (warning) throw new UsageError(`local set: ${localWarningText(warning, false)}`);
           if (value === 'none') {
             updateLocal(io.cwd, s => { const next = { ...s }; delete next[key]; return next; });
             return ok('ok');
@@ -763,32 +776,35 @@ export function run(argv: string[], io: Io): Result {
           if (!m || !NAME.test(m[1])) throw new UsageError('local set: the path must be surfaces.<name>');
           if (value !== 'allowed' && value !== 'denied' && value !== 'none') throw new UsageError('local set: the value must be allowed|denied|none');
           // An allowance is tied to what the surface says now (in the code checked, --cwd): a later edit of the file asks
-          // again (verify-plan: changed). It keeps the file's blob and the commit, so that change can be shown as a diff.
-          const surface = readSurfaces(repoDir, learnedOf(io)).find(x => x.name === m[1]);
+          // again (verify-plan: changed). --expect: the hash verify-plan showed, so a file changed since the question is
+          // never allowed. It keeps the file's blob and the commit, so a later change can be shown as a diff.
+          const expected = flag('expect');
+          if (has('expect') && !expected) throw new UsageError('local set: --expect needs the hash verify-plan gave');
+          const surface = readSurfaces(repoDir, readLearned(io.cwd)).find(x => x.name === m[1]);
           if (value === 'allowed' && !surface) throw new UsageError(`local set: .forge/verify/${m[1]}.md does not exist`);
-          let perm: SurfacePermission = { state: 'denied', hash: null };
+          if (value === 'allowed' && expected !== undefined && expected !== surface!.hash) {
+            throw new UsageError(`local set: .forge/verify/${m[1]}.md changed since verify-plan showed it: run verify-plan again`);
+          }
+          let perm: SurfacePermission | null = value === 'none' ? null : { state: 'denied', hash: null };
           if (value === 'allowed') {
             const git = io.git ?? defaultGit(repoDir);
-            const blob = git(['hash-object', '-w', '--', surface!.file])?.trim();
+            const blob = surfaceBlob(git, surface!.file);
             const commit = git(['rev-parse', 'HEAD'])?.trim();
-            perm = { state: 'allowed', hash: surface!.hash, ...(blob && OBJECT_ID.test(blob) ? { blob } : {}), ...(commit && OBJECT_ID.test(commit) ? { commit } : {}) };
+            perm = { state: 'allowed', hash: surface!.hash, ...(blob ? { blob } : {}), ...(commit && OBJECT_ID.test(commit) ? { commit } : {}) };
           }
-          updateLocal(io.cwd, s => {
-            const surfaces = { ...s.surfaces };
-            if (value === 'none') delete surfaces[m[1]];
-            else surfaces[m[1]] = perm;
-            return { ...s, surfaces };
-          });
+          // Kept under the git common dir: outside a repository there is nowhere a commit cannot write.
+          if (!setPermission(io.cwd, m[1], perm) && perm) throw new UsageError('local set: surface permissions need a git repository');
           return ok('ok');
         }
-        throw new UsageError('usage: forge local get [surfaces.<name>] | set surfaces.<name> allowed|denied|none | set workflow <w>|none | set autonomy ask|auto|none');
+        throw new UsageError('usage: forge local get [surfaces.<name>] | set surfaces.<name> allowed [--expect <hash>]|denied|none | set workflow <w>|none | set autonomy ask|auto|none');
       }
       case 'prefs': {
         const wf = flag('workflow');
         const au = flag('autonomy');
         if (wf !== undefined && !isWorkflow(wf)) throw new UsageError(`prefs: --workflow must be one of ${WORKFLOWS.join('|')}`);
         if (au !== undefined && !isAutonomy(au)) throw new UsageError(`prefs: --autonomy must be one of ${AUTONOMIES.join('|')}`);
-        return json(resolvePrefs({ ...(wf ? { workflow: wf } : {}), ...(au ? { autonomy: au } : {}) }, readLocal(io.cwd), loadConfig(repoDir)));
+        const { local, warning } = readLocalChecked(io.cwd);
+        return json({ ...resolvePrefs({ ...(wf ? { workflow: wf } : {}), ...(au ? { autonomy: au } : {}) }, local, loadConfig(repoDir)), ...localWarning(warning, planLocale(io.cwd) === 'es') });
       }
       case 'swarm':
         return swarmCommand(args, io, {

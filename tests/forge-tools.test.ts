@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { checkTools, mcpInventory, toolGaps, toolKeys } from '../src/forge/tools.js';
 import { run, type Io } from '../src/forge/cli/run.js';
-import { readLocal } from '../src/forge/local.js';
+import { readLocal, readPermissions } from '../src/forge/local.js';
 import { surfaceHash } from '../src/forge/surfaces.js';
 
 const exec = (out: string, code = 0) => () => ({ code, output: out, ms: 1, timedOut: false });
@@ -86,14 +87,28 @@ describe('mcpInventory', () => {
     // Only the names are read, never the values.
     expect([...s].join(' ')).not.toMatch(/secret|npx|https/);
   });
-  it('.claude.json: the user servers and this project\'s; the project\'s .mcp.json minus its disabled servers', () => {
+  it('.claude.json: the user servers and this project\'s; the project\'s .mcp.json servers the person approved and did not turn off', () => {
     json(path.join(home, '.claude.json'), {
       mcpServers: { stitch: { headers: { Authorization: 'Bearer secret-2' } } },
-      projects: { [fwd(project)]: { mcpServers: { pencil: {} }, disabledMcpjsonServers: ['off-server'] }, 'Z:/other': { mcpServers: { faraway: {} } } },
+      projects: {
+        [fwd(project)]: { mcpServers: { pencil: {} }, enabledMcpjsonServers: ['figma-mcp', 'off-server'], disabledMcpjsonServers: ['off-server'] },
+        'Z:/other': { mcpServers: { faraway: {} }, enableAllProjectMcpServers: true },
+      },
     });
-    json(path.join(project, '.mcp.json'), { mcpServers: { 'figma-mcp': {}, 'off-server': {} } });
-    const s = inv();
-    expect([...s].sort()).toEqual(['figma', 'pencil', 'stitch']);
+    json(path.join(project, '.mcp.json'), { mcpServers: { 'figma-mcp': {}, 'off-server': {}, pending: {} } });
+    expect([...inv()].sort()).toEqual(['figma', 'pencil', 'stitch']);
+  });
+  it('approving every project server comes from this machine\'s settings, never from the shared project settings', () => {
+    json(path.join(project, '.mcp.json'), { mcpServers: { linear: {}, pending: {} } });
+    // .claude/settings.json is in git: a commit could set it.
+    json(path.join(project, '.claude', 'settings.json'), { enableAllProjectMcpServers: true, enabledMcpjsonServers: ['linear'] });
+    expect(inv().size).toBe(0);
+    json(path.join(project, '.claude', 'settings.local.json'), { enabledMcpjsonServers: ['linear'] });
+    expect([...inv()]).toEqual(['linear']);
+    json(path.join(cfg, 'settings.json'), { enableAllProjectMcpServers: true });
+    expect([...inv()].sort()).toEqual(['linear', 'pending']);
+    json(path.join(home, '.claude.json'), { projects: { [fwd(project)]: { disabledMcpjsonServers: ['pending'] } } });
+    expect([...inv()]).toEqual(['linear']);
   });
   it('reads the legacy .config.json of the config dir first, as Claude Code does', () => {
     json(path.join(home, '.claude.json'), { mcpServers: { fromhome: {} } });
@@ -105,6 +120,7 @@ describe('mcpInventory', () => {
     json(path.join(cfg, 'plugins', 'installed_plugins.json'), 'garbage');
     json(path.join(home, '.claude.json'), '{ not json');
     json(path.join(project, '.mcp.json'), { mcpServers: { ok: {} } });
+    json(path.join(project, '.claude', 'settings.local.json'), { enableAllProjectMcpServers: true });
     expect([...inv()]).toEqual(['ok']);
     json(path.join(project, '.mcp.json'), { mcpServers: ['not', 'a', 'map'] });
     expect(inv().size).toBe(0);
@@ -115,15 +131,17 @@ describe('forge local', () => {
   let root: string; let io: Io;
   beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-localcli-')); io = { cwd: root, now: () => new Date('2026-10-12T10:00:00Z') }; });
   it('set and get a surface permission tied to its content; none removes it', () => {
+    execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
     mkdirSync(path.join(root, '.forge', 'verify'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'verify', 'web.md'), '# Web\nRun it.\n');
     expect(run(['local', 'set', 'surfaces.web', 'allowed'], io).code).toBe(0);
-    expect(JSON.parse(run(['local', 'get', 'surfaces.web'], io).stdout)).toEqual({ state: 'allowed', hash: surfaceHash('# Web\nRun it.\n') });
+    expect(JSON.parse(run(['local', 'get', 'surfaces.web'], io).stdout)).toMatchObject({ state: 'allowed', hash: surfaceHash('# Web\nRun it.\n') });
     expect(run(['local', 'set', 'surfaces.nope', 'allowed'], io).code).toBe(2); // allowing needs the file, to hash it
     expect(run(['local', 'set', 'surfaces.nope', 'denied'], io).code).toBe(0);
     expect(run(['local', 'set', 'surfaces.web', 'none'], io).code).toBe(0);
-    expect(readLocal(root).surfaces).toEqual({ nope: { state: 'denied', hash: null } });
+    expect(readPermissions(root)).toEqual({ nope: { state: 'denied', hash: null } });
     expect(JSON.parse(run(['local', 'get'], io).stdout)).toEqual({ surfaces: { nope: { state: 'denied', hash: null } }, known: [], proposed: [] });
+    expect(readLocal(root)).toEqual({ known: [], proposed: [] });
   });
   it('refuses other paths and values', () => {
     expect(run(['local', 'set', 'known', 'x'], io).code).toBe(2);
@@ -139,6 +157,17 @@ describe('forge local', () => {
     expect(JSON.parse(run(['tools'], io).stdout).tools).toEqual({ 'chrome-mcp': 'unknown', 'definitely-not-a-tool-xyz': 'unknown', './definitely-not-a-tool-xyz': 'missing' });
     expect(JSON.parse(run(['tools', '--surface', 'web'], io).stdout).tools).toEqual({ 'chrome-mcp': 'unknown' });
     expect(run(['tools', '--surface', 'nope'], io).code).toBe(2);
+    expect(JSON.parse(run(['tools'], io).stdout)).not.toHaveProperty('warning');
+  });
+  it('tools --cwd reads the surfaces of that directory', () => {
+    const other = mkdtempSync(path.join(tmpdir(), 'forge-tools-other-'));
+    io = { ...io, env: { CLAUDE_CONFIG_DIR: mkdtempSync(path.join(tmpdir(), 'forge-tools-cfg-')) } };
+    mkdirSync(path.join(root, '.forge', 'verify'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'verify', 'web.md'), '---\ntools: [chrome-mcp]\n---\n');
+    mkdirSync(path.join(other, '.forge', 'verify'), { recursive: true });
+    writeFileSync(path.join(other, '.forge', 'verify', 'app.md'), '---\ntools: [xcrun-not-here]\n---\n');
+    expect(JSON.parse(run(['tools', '--cwd', other], io).stdout).tools).toEqual({ 'xcrun-not-here': 'unknown' });
+    expect(run(['tools', '--cwd', other, '--surface', 'web'], io).code).toBe(2);
   });
   it('tools finds an MCP server of an installed plugin through CLAUDE_CONFIG_DIR, and .claude.json inside it', () => {
     const cfg = mkdtempSync(path.join(tmpdir(), 'forge-tools-cfg-'));

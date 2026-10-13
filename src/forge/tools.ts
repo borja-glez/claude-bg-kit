@@ -85,9 +85,12 @@ const strs = (x: unknown): string[] => (Array.isArray(x) ? x.filter((s): s is st
 /**
  * The MCP servers Claude Code is configured with for this project, as toolKeys: the enabled plugins (their names and the
  * servers they declare), .claude.json (the user's servers and this project's, keyed by its path with forward slashes;
- * the legacy `<configDir>/.config.json` first when it exists, as Claude Code does) and the project's .mcp.json minus the
- * servers the project turned off (disabledMcpjsonServers). `homeDir` is where .claude.json lives (claudeJsonDir).
- * Only names are read, never the values (they can hold tokens). Fail-open: an unreadable file adds nothing.
+ * the legacy `<configDir>/.config.json` first when it exists, as Claude Code does) and the servers of the project's
+ * .mcp.json the person approved (enabledMcpjsonServers, or enableAllProjectMcpServers) and did not turn off
+ * (disabledMcpjsonServers). An approval counts only from this machine (.claude.json, the project's settings.local.json,
+ * the user's settings.json), never from the project's settings.json that a commit can change; the rest are unknown.
+ * `homeDir` is where .claude.json lives (claudeJsonDir). Only names are read, never the values (they can hold
+ * tokens). Fail-open: an unreadable file adds nothing.
  */
 export function mcpInventory(opts: { configDir: string; homeDir: string; projectDir: string }): Set<string> {
   const names: string[] = [];
@@ -98,6 +101,12 @@ export function mcpInventory(opts: { configDir: string; homeDir: string; project
   const legacy = path.join(opts.configDir, '.config.json');
   const global = readJson(existsSync(legacy) ? legacy : path.join(opts.homeDir, '.claude.json'));
   const disabled = new Set<string>();
+  const approved = new Set<string>();
+  let approveAll = false;
+  const approvals = (o: Record<string, unknown>) => {
+    for (const n of strs(o.enabledMcpjsonServers)) approved.add(n);
+    if (o.enableAllProjectMcpServers === true) approveAll = true;
+  };
   if (isObj(global)) {
     names.push(...serverNames(global, false));
     const key = path.resolve(opts.projectDir).replace(/\\/g, '/');
@@ -106,13 +115,21 @@ export function mcpInventory(opts: { configDir: string; homeDir: string; project
     for (const [k, v] of Object.entries(projects)) {
       if (!same(k) || !isObj(v)) continue;
       names.push(...serverNames(v, false));
+      approvals(v);
       for (const d of strs(v.disabledMcpjsonServers)) disabled.add(d);
     }
   }
-  for (const f of [path.join(opts.projectDir, '.claude', 'settings.local.json'), path.join(opts.projectDir, '.claude', 'settings.json')]) {
+  // [settings file, whether it is this machine's]: turning a server off counts from any of them.
+  const settings: [string, boolean][] = [
+    [path.join(opts.projectDir, '.claude', 'settings.local.json'), true], [path.join(opts.configDir, 'settings.json'), true],
+    [path.join(opts.projectDir, '.claude', 'settings.json'), false],
+  ];
+  for (const [f, mine] of settings) {
     const s = readJson(f);
-    if (isObj(s)) for (const d of strs(s.disabledMcpjsonServers)) disabled.add(d);
+    if (!isObj(s)) continue;
+    if (mine) approvals(s);
+    for (const d of strs(s.disabledMcpjsonServers)) disabled.add(d);
   }
-  names.push(...serverNames(readJson(path.join(opts.projectDir, '.mcp.json')), false).filter(n => !disabled.has(n)));
+  names.push(...serverNames(readJson(path.join(opts.projectDir, '.mcp.json')), false).filter(n => !disabled.has(n) && (approveAll || approved.has(n))));
   return new Set(names.flatMap(toolKeys));
 }
