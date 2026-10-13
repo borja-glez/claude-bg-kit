@@ -16,7 +16,9 @@ const COPY_REASON = 'one quoted text change: the session finds the file';
 const es = (stems: string, words: string) =>
   new RegExp(`(?<![\\p{L}\\p{N}_])(?:(?:${stems})\\p{L}*|(?:${words})(?![\\p{L}\\p{N}_]))`, 'iu');
 const ZONES: { zone: Zone; text: RegExp[]; path: RegExp }[] = [
-  { zone: 'auth', text: [/\b(auth\w*|login|logout|passwords?|passwd|tokens?|jwt|oauth|sessions?|permissions?|crypto|secrets?)\b/i, es('autentic|contraseñ|permis|secret', 'sesi[oó]n|sesiones')], path: /(^|\/)(auth|security|crypto)(\/|\.)/i },
+  // «session»/«sesión» alone usually names a Claude Code session: it counts only next to an authentication word.
+  { zone: 'auth', text: [/\b(auth\w*|login|logout|passwords?|passwd|tokens?|jwt|oauth|session (tokens?|cookies?|ids?|hijack\w*|fixation)|login sessions?|permissions?|crypto|secrets?)\b/i,
+    es('autentic|contraseñ|permis|secret', 'sesi[oó]n(?:es)? (?:del?|de los) usuarios?|(?:inici|cerr|cierr)\\p{L}* (?:de )?sesi[oó]n|(?:cookies?|tokens?) de sesi[oó]n')], path: /(^|\/)(auth|security|crypto)(\/|\.)/i },
   { zone: 'data', text: [/\b(migrations?|schema|database|sql|prisma|orm)\b/i, es('migraci', 'bases? de datos|esquemas?')], path: /(^|\/)(migrations?|db|schema)(\/|\.)|\.sql$/i },
   { zone: 'public-api', text: [/\b(public api|endpoints?|openapi|swagger|graphql)\b/i, es('endpoint', 'apis? p[uú]blicas?')], path: /(^|\/)(api|routes)\//i },
   { zone: 'deps', text: [/\b(dependenc(y|ies)|upgrade|npm install|pip install)\b/i, es('dependencia', 'actualizar? dependencias')], path: /(^|\/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|Cargo\.(toml|lock)|go\.(mod|sum))$/i },
