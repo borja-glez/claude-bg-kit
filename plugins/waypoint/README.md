@@ -6,7 +6,7 @@
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.15.0](https://img.shields.io/badge/version-0.15.0-cba6f7?style=flat-square)
+![version 0.16.0](https://img.shields.io/badge/version-0.16.0-cba6f7?style=flat-square)
 ![requires claude.ai login](https://img.shields.io/badge/requires-claude.ai%20login-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -54,7 +54,7 @@ Requires a claude.ai login (for the artifacts) and Node ≥ 20. Restart Claude C
 
 | Command | What it does |
 | --- | --- |
-| `/waypoint:design [new\|round\|apply <all\|1,3>\|rewrite\|interview\|approve]` | Write a design document, improve it in critic rounds and approve it. The approved design seeds the plan. |
+| `/waypoint:design [new [--from <spec>]\|round\|apply <all\|1,3>\|rewrite\|interview\|approve]` | Write a design document (or import a superpowers spec with `new --from`), improve it in critic rounds and approve it. The approved design seeds the plan. |
 | `/waypoint:plan` | Write or sync `docs/waypoint/<project>/plan.yaml` and publish the live roadmap. |
 | `/waypoint:work [track]` | Take tasks one by one; the roadmap updates live. |
 | `/waypoint:status` | Progress summary. |
@@ -70,6 +70,8 @@ A typical run:
 /waypoint:plan                    # plan.yaml + the roadmap URL
 /waypoint:work                    # or launch a session per track
 ```
+
+`/waypoint:design new --from docs/superpowers/specs/<file>.md` starts from a spec written with superpowers: its sections are copied as they are, and the design page says «Imported from».
 
 With [forge](../forge/README.md) installed, `/forge:run` drives these steps for you and adds triage, validation and independent review to each task.
 
@@ -137,7 +139,7 @@ The skills run the CLI as `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" <comma
 
 | Group | Commands |
 | --- | --- |
-| Design | `design-validate`, `design-snapshot`, `design-changed`, `critique-check`, `critique-select`, `design-page` |
+| Design | `design-import <spec> --project P --out D`, `design-validate`, `design-snapshot`, `design-changed`, `critique-check`, `critique-select`, `design-page` |
 | Plan and page | `validate`, `hash` (prints the plan hash, used to detect an out-of-date roadmap), `page`, `sync`, `clean-cache` |
 | Work | `next [--base <branch>]`, `conflicts`, `recover`, `status`, `commit-info` |
 | Sessions | `launch <track> [--swarm <id> --base <branch>]`, `launch <plan> <T> --task --run R --coordinator SID --base B [--launcher bg|herdr]`, `inbox`, `escalations`, `notes`, `session-id` |

@@ -7,8 +7,8 @@ Triage by size, the right model for each role, your own tools first, independent
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.10.0](https://img.shields.io/badge/version-0.10.0-fab387?style=flat-square)
-![depends on waypoint ^0.15.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.15.0-cba6f7?style=flat-square)
+![version 0.11.0](https://img.shields.io/badge/version-0.11.0-fab387?style=flat-square)
+![depends on waypoint ^0.16.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.16.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -22,6 +22,7 @@ Triage by size, the right model for each role, your own tools first, independent
 - [Paths](#paths)
 - [Agents](#agents)
 - [The Large path](#the-large-path)
+- [With superpowers](#with-superpowers)
 - [Execution modes](#execution-modes)
 - [Infinite mode](#infinite-mode)
 - [Proposals](#proposals)
@@ -46,7 +47,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depends on [waypoint](../waypoint/README.md) ^0.15.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
+forge depends on [waypoint](../waypoint/README.md) ^0.16.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
 
 ## Usage
 
@@ -54,6 +55,9 @@ forge depends on [waypoint](../waypoint/README.md) ^0.15.0, which is installed w
 | --- | --- |
 | `/forge:run <task>` | Triage the task and work it on the path its size calls for. |
 | `/forge:run --parallel N <task>` | Same, running up to N tasks at once on the Large path (3 by default, max 10). |
+| `/forge:run --from-spec <spec> <task>` | Start the Large path from a superpowers spec, imported as the design's first version. |
+| `/forge:run --superpowers-plan <plan>` | Run a superpowers plan task by task on the Medium path, with validators, review and verdict. |
+| `/forge:review [<base>]` | Review a branch with forge's validators and reviewers, without fixing it. |
 | `/forge:infinite [--cycles N] [--hours H]` | Unattended improvement cycles within a budget. |
 | `/forge:decide <id> approve\|reject\|comment <text>` | Decide or comment on a proposal from any session. |
 | `/forge:decisions [revert <n>]` | List what forge decided without asking, and undo one after your confirmation. |
@@ -105,6 +109,15 @@ Implementers write their report to `report-<n>.txt` and also include it in their
 4. When the tasks are done, `review-correctness` reviews the whole branch against the design and the plan, with at most one fix and one re-review. The re-review gets fresh validators and a fresh diff, and a `redo` verdict is treated as a fix.
 
 The run's base is kept in `.forge/work/<project>/run.json`, written once after the design is approved. While a task runs, the coordinator renews a lease (`leaseUntil`, 10 minutes) on the task's state and on its own waypoint session, so parallel sessions do not recover a task that is still being worked. Besides the lease, the coordinator leaves a local signal in `.forge/live/` (see [Live signal](#live-signal)).
+
+## With superpowers
+
+forge works next to [superpowers](https://github.com/obra/superpowers) and reuses what it wrote. It finds it in `installed_plugins.json` (under `CLAUDE_CONFIG_DIR` when set); when superpowers is missing or turned off, these bridges stay quiet.
+
+- **A spec becomes the design.** `/forge:run --from-spec <spec>` (or `/waypoint:design new --from <spec>`) imports a brainstorming spec as the design's first version: same sections, «Imported from» on its page, and the pillars taken from the spec. forge recommends a critic round, then follows the Large path. Without the flag, the Large path offers once to start from a spec superpowers wrote in the last 14 days.
+- **A plan runs through forge.** `/forge:run --superpowers-plan <plan>` takes the plan's unfinished `### Task N`, in order and one at a time, on the Medium path: each one becomes a brief with its steps verbatim, goes through validators, verify, reviewers and the verdict, and its boxes are ticked when it is accepted.
+- **TDD.** With `tdd: superpowers` in `.forge/config.yaml`, every implementer brief asks the implementer to follow superpowers' `test-driven-development` skill and to report the failing run and then the passing one; the correctness reviewer flags a missing one as important.
+- **Review any branch.** `/forge:review [<base>]` reviews a branch against its base (by default, where it left the default branch): validators against a baseline of the base, correctness, security on sensitive zones and perf when asked, and a scored verdict. It never fixes or merges; it offers `/forge:run` with the findings.
 
 ## Execution modes
 
@@ -235,6 +248,7 @@ verify:
   limits: { checks: 8, shots: 10, minutes: 10 }   # optional; these are the defaults
 evidence: upload               # upload | local; default upload
 validatorTimeoutSec: 600
+tdd: off                       # off | superpowers: implementers follow superpowers' TDD skill
 swarm:
   parallel: 3                  # tasks at once; 1 runs one at a time; max 10
   mode: subagents              # optional: subagents | sessions
@@ -288,6 +302,13 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 - `triage [--task id] [--batch] (<text> | --text-file f)` - classify a task: path, files, sensitive zones, validators and the `implementer` (role, agent, self, why). `--batch` marks one request of several, so a Trivial one goes to `mech`. `--text-file` reads the text from a file, so it never goes through a shell.
 - `triage --plan p --task T` - triage a plan task from its zones and `done_when`; it prints the `implementer` too.
 - `brief --plan p --task T [--design d]` - print a task brief built from a waypoint plan task, including the `Commit title prefix` line that implementers use.
+- `brief --superpowers-plan f --task N` - print the brief of task N of a superpowers plan: the plan's header and global constraints, the task's body verbatim and the rules forge adds (plus the TDD line with `tdd: superpowers`).
+- `triage --task id --superpowers-plan f` - triage a superpowers plan from its pending tasks and their files; the path is always Medium.
+- `sp-plan tasks <f>` - a superpowers plan's header and tasks (`n`, `title`, `files`, `steps`, `done`).
+- `sp-plan check <f> --task N` - tick the boxes of task N only (never inside code), keeping the file's line endings.
+- `sp-specs` / `sp-plans` - the specs (not imported yet) and the plans (with tasks left) superpowers wrote here in the last 14 days, 3 at most.
+- `sp-path <skill>` - the `SKILL.md` of a superpowers skill, or `null` when superpowers is not installed for this project.
+- `tdd` - the config's `tdd`, whether superpowers is installed, and the TDD line briefs carry (`null` when off or not installed).
 - `validate [--affected a,b | --all] [--path trivial|small|medium|large] [--base sha] [--final] [--task id] [--base-run | --baseline f]` - run the project validators that apply (see Matching); `--base` gives the diff that e2e `affects` are matched against, `--final` selects the final review's set. `--base-run` marks a run on the base commit, before any change; `--baseline f` takes that run's JSON and marks a failure the base already had `preexisting`, which neither the exit code nor the verdict counts. A test runner that finds no tests passes as `skipped: "no-tests"`.
 - `verdict --task id --dir d [--validators f] [--sensitive] [--perf]` - weigh the reviewers' JSON files into a score. A reviewer is listed with `invalid: true` when its output was unusable (`dropped: 0`, counted as an abstention) or when some of its findings were dropped (`dropped` > 0; the review keeps its verdict and still scores, and the skill records the dropped findings as a ruling).
 - `round --task id --path medium|large` - decide the next step of the review loop (`done`, `resume`, `fresh-stronger`, `redo`, `breaker`, `stalled`; `tierUp` from round 3).

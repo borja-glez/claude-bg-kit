@@ -135,11 +135,22 @@ describe('plugin layout', () => {
     expect(md).toMatch(/bundles several independent changes/);
     expect(md).toMatch(/adds new behaviour with its tests/);
   });
-  it('versions: forge 0.10.0, waypoint 0.15.0', () => {
+  it('versions: forge 0.11.0, waypoint 0.16.0', () => {
     const forge = JSON.parse(read('plugins/forge/.claude-plugin/plugin.json'));
-    expect(forge.version).toBe('0.10.0');
-    expect(forge.dependencies).toEqual([{ name: 'waypoint', version: '^0.15.0' }]);
-    expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.15.0');
+    expect(forge.version).toBe('0.11.0');
+    expect(forge.dependencies).toEqual([{ name: 'waypoint', version: '^0.16.0' }]);
+    expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.16.0');
+  });
+  it('READMEs describe the superpowers bridges', () => {
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
+      const md = read(f);
+      for (const s of ['/forge:review', '--from-spec', '--superpowers-plan', 'tdd: superpowers', '`sp-plan tasks <f>`', '`sp-plan check <f> --task N`', '`sp-specs`', '`sp-plans`',
+        '`sp-path <skill>`', '`tdd`', '`brief --superpowers-plan f --task N`', '`triage --task id --superpowers-plan f`']) expect(md).toContain(s);
+    }
+    for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) {
+      const md = read(f);
+      for (const s of ['new --from', 'design-import']) expect(md).toContain(s);
+    }
   });
   it('README version badges and dependency lines match the manifests', () => {
     const v = (p: string) => JSON.parse(read(`plugins/${p}/.claude-plugin/plugin.json`)).version as string;
@@ -230,9 +241,9 @@ describe('plugin layout', () => {
     for (const w of ['design-snapshot', 'design-changed', 'critique-check', 'critique-select', 'design-page', 'rewrite', 'interview', 'approve', '--since', 'applied']) expect(md).toContain(w);
     expect(read('plugins/waypoint/skills/plan/SKILL.md')).toContain('plan.yaml does not exist yet');
   });
-  it('forge manifest depends on waypoint ^0.15.0 and ships its CLI', () => {
+  it('forge manifest depends on waypoint ^0.16.0 and ships its CLI', () => {
     const p = JSON.parse(read('plugins/forge/.claude-plugin/plugin.json'));
-    expect(p).toMatchObject({ name: 'forge', version: '0.10.0', dependencies: [{ name: 'waypoint', version: '^0.15.0' }] });
+    expect(p).toMatchObject({ name: 'forge', version: '0.11.0', dependencies: [{ name: 'waypoint', version: '^0.16.0' }] });
     expect(existsSync(new URL('../plugins/forge/dist/forge.cjs', import.meta.url))).toBe(true);
   });
   it('forge scout agent: frontmatter and rules', () => {

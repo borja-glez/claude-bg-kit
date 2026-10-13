@@ -7,8 +7,8 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.10.0](https://img.shields.io/badge/versi%C3%B3n-0.10.0-fab387?style=flat-square)
-![depende de waypoint ^0.15.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.15.0-cba6f7?style=flat-square)
+![versión 0.11.0](https://img.shields.io/badge/versi%C3%B3n-0.11.0-fab387?style=flat-square)
+![depende de waypoint ^0.16.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.16.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -22,6 +22,7 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 - [Caminos](#caminos)
 - [Agentes](#agentes)
 - [El camino Large](#el-camino-large)
+- [Con superpowers](#con-superpowers)
 - [Modos de ejecución](#modos-de-ejecución)
 - [Modo infinito](#modo-infinito)
 - [Propuestas](#propuestas)
@@ -46,7 +47,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depende de [waypoint](../waypoint/README.es.md) ^0.15.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
+forge depende de [waypoint](../waypoint/README.es.md) ^0.16.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
 
 ## Uso
 
@@ -54,6 +55,9 @@ forge depende de [waypoint](../waypoint/README.es.md) ^0.15.0, que se instala co
 | --- | --- |
 | `/forge:run <tarea>` | Hace el triaje de la tarea y la trabaja por el camino que pide su tamaño. |
 | `/forge:run --parallel N <tarea>` | Lo mismo, ejecutando hasta N tareas a la vez en el camino Large (3 por defecto, máximo 10). |
+| `/forge:run --from-spec <spec> <tarea>` | Empieza el camino Large desde un spec de superpowers, importado como primera versión del diseño. |
+| `/forge:run --superpowers-plan <plan>` | Ejecuta un plan de superpowers tarea a tarea por el camino Medium, con validadores, revisión y veredicto. |
+| `/forge:review [<base>]` | Revisa una rama con los validadores y revisores de forge, sin arreglar nada. |
 | `/forge:infinite [--cycles N] [--hours H]` | Ciclos de mejora desatendidos dentro de un presupuesto. |
 | `/forge:decide <id> approve\|reject\|comment <texto>` | Decide o comenta una propuesta desde cualquier sesión. |
 | `/forge:decisions [revert <n>]` | Lista lo que forge decidió sin preguntar y deshace una decisión tras tu confirmación. |
@@ -105,6 +109,15 @@ Los implementadores escriben su informe en `report-<n>.txt` y también lo incluy
 4. Al acabar las tareas, `review-correctness` revisa toda la rama contra el diseño y el plan, con como mucho un arreglo y una segunda revisión. La segunda revisión recibe validadores y diff nuevos, y un veredicto `redo` se trata como un arreglo.
 
 La base de la ejecución se guarda en `.forge/work/<proyecto>/run.json`, que se escribe una vez tras aprobar el diseño. Mientras una tarea corre, la coordinadora renueva una concesión (`leaseUntil`, 10 minutos) en el estado de la tarea y en su propia sesión de waypoint, para que las sesiones en paralelo no le quiten una tarea que sigue en marcha. Además de la concesión, la coordinadora deja una señal local en `.forge/live/` (mira [Señal en vivo](#señal-en-vivo)).
+
+## Con superpowers
+
+forge trabaja junto a [superpowers](https://github.com/obra/superpowers) y aprovecha lo que ya escribió. Lo encuentra en `installed_plugins.json` (bajo `CLAUDE_CONFIG_DIR` si está definida); si superpowers no está o está desactivado, estos puentes no hacen nada.
+
+- **Un spec se convierte en el diseño.** `/forge:run --from-spec <spec>` (o `/waypoint:design new --from <spec>`) importa un spec de brainstorming como primera versión del diseño: las mismas secciones, «Importado de» en su página y los pilares sacados del spec. forge recomienda una ronda del crítico y sigue por el camino Large. Sin el flag, el camino Large ofrece una vez partir de un spec que superpowers escribió en los últimos 14 días.
+- **Un plan pasa por forge.** `/forge:run --superpowers-plan <plan>` toma las `### Task N` sin terminar del plan, en orden y de una en una, por el camino Medium: cada una se convierte en un brief con sus pasos literales, pasa por validadores, verify, revisores y veredicto, y sus casillas se marcan al aceptarse.
+- **TDD.** Con `tdd: superpowers` en `.forge/config.yaml`, cada brief de implementador pide seguir la skill `test-driven-development` de superpowers e informar de la ejecución en rojo y después de la ejecución en verde; el revisor de corrección marca como importante que falte.
+- **Revisar cualquier rama.** `/forge:review [<base>]` revisa una rama contra su base (por defecto, donde salió de la rama principal): validadores contra una línea base de la base, corrección, seguridad en zonas sensibles y rendimiento si se pide, y un veredicto puntuado. Nunca arregla ni integra; ofrece `/forge:run` con los hallazgos.
 
 ## Modos de ejecución
 
@@ -235,6 +248,7 @@ verify:
   limits: { checks: 8, shots: 10, minutes: 10 }   # opcional; estos son los valores por defecto
 evidence: upload               # upload | local; por defecto upload
 validatorTimeoutSec: 600
+tdd: off                       # off | superpowers: los implementadores siguen la skill de TDD de superpowers
 swarm:
   parallel: 3                  # tareas a la vez; 1 ejecuta una cada vez; máximo 10
   mode: subagents              # opcional: subagents | sessions
@@ -288,6 +302,13 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 - `triage [--task id] [--batch] (<texto> | --text-file f)` - clasifica una tarea: camino, ficheros, zonas sensibles, validadores y el `implementer` (rol, agente, self, why). `--batch` marca una petición de varias, así que una Trivial va a `mech`. `--text-file` lee el texto de un fichero, para que nunca pase por un shell.
 - `triage --plan p --task T` - hace el triaje de una tarea del plan a partir de sus zonas y su `done_when`; imprime también el `implementer`.
 - `brief --plan p --task T [--design d]` - imprime el brief de una tarea del plan de waypoint, con la línea `Commit title prefix` que usan los implementadores.
+- `brief --superpowers-plan f --task N` - imprime el brief de la tarea N de un plan de superpowers: la cabecera y las restricciones globales del plan, el cuerpo literal de la tarea y las reglas que añade forge (y la línea TDD con `tdd: superpowers`).
+- `triage --task id --superpowers-plan f` - clasifica un plan de superpowers por sus tareas pendientes y sus ficheros; el camino es siempre Medium.
+- `sp-plan tasks <f>` - la cabecera y las tareas de un plan de superpowers (`n`, `title`, `files`, `steps`, `done`).
+- `sp-plan check <f> --task N` - marca solo las casillas de la tarea N (nunca dentro de código), con los finales de línea del fichero como estaban.
+- `sp-specs` / `sp-plans` - los specs (aún sin importar) y los planes (con tareas pendientes) que superpowers escribió aquí en los últimos 14 días, 3 como mucho.
+- `sp-path <skill>` - el `SKILL.md` de una skill de superpowers, o `null` si superpowers no está instalado para este proyecto.
+- `tdd` - el `tdd` de la configuración, si superpowers está instalado y la línea TDD que llevan los briefs (`null` si está en `off` o no está instalado).
 - `validate [--affected a,b | --all] [--path trivial|small|medium|large] [--base sha] [--final] [--task id] [--base-run | --baseline f]` - ejecuta los validadores del proyecto que tocan (ver Coincidencias); `--base` da el diff contra el que se casan los `affects` de e2e, `--final` elige el conjunto de la revisión final. `--base-run` marca una ejecución sobre el commit base, antes de cualquier cambio; `--baseline f` toma el JSON de esa ejecución y marca `preexisting` un fallo que la base ya tenía, que no cuenta ni en el código de salida ni en el veredicto. Un runner de tests que no encuentra tests pasa como `skipped: "no-tests"`.
 - `verdict --task id --dir d [--validators f] [--sensitive] [--perf]` - pondera los JSON de los revisores en una nota. Un revisor aparece con `invalid: true` si su salida no servía (`dropped: 0`, cuenta como abstención) o si se descartaron algunos de sus hallazgos (`dropped` > 0; la revisión mantiene su veredicto y puntúa, y la skill registra los hallazgos descartados como resolución).
 - `round --task id --path medium|large` - decide el siguiente paso del bucle de revisión (`done`, `resume`, `fresh-stronger`, `redo`, `breaker`, `stalled`; `tierUp` desde la ronda 3).
