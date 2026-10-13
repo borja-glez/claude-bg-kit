@@ -26,9 +26,10 @@ describe('normalizeDecision', () => {
     expect(normalizeDecision({ ts: TS, kind: 'decision', what: 'execution not started', why: 'diverged', safePath: 'end the cycle' }))
       .toMatchObject({ point: 'safe-path', chosen: 'end the cycle' });
   });
-  it('reads the old takeover without taking its session id for `by`', () => {
+  it('reads the old takeover as the user\'s decision without taking its session id for `by`', () => {
     expect(normalizeDecision({ ts: TS, kind: 'decision', what: 'takeover', previous: 'old', by: 'new-sid' }))
-      .toMatchObject({ point: 'takeover', by: 'unattended', chosen: 'takeover', why: '' });
+      .toMatchObject({ point: 'takeover', by: 'user', chosen: 'takeover', why: '' });
+    expect(normalizeDecision({ ts: TS, kind: 'decision', what: 'other thing', by: 'some-sid' })).toMatchObject({ by: 'unattended' });
   });
   it('is null without a ts or a usable what, and cleans and clips text', () => {
     expect(normalizeDecision({ kind: 'decision', what: 'x' })).toBeNull();
@@ -97,8 +98,11 @@ describe('decisions.json', () => {
     expect(decisionsSummary('{"ts":', now)).toBeNull();
     expect(decisionsSummary(undefined, now)).toBeNull();
     expect(decisionsSummary(JSON.stringify(doc) + ' '.repeat(DECISIONS_MAX), now)).toBeNull();
+    // A clock ahead by a few minutes is fine; a summary dated further in the future never goes stale, so it is refused.
+    expect(decisionsSummary(JSON.stringify(doc), Date.parse(TS) - 60_000)).not.toBeNull();
+    expect(decisionsSummary(JSON.stringify(doc), Date.parse(TS) - 10 * 60_000)).toBeNull();
   });
   it('clean makes one line', () => {
-    expect(clean(' a\n\tb‮ c ', 10)).toBe('a b c');
+    expect(clean(` a\n\tb${String.fromCharCode(0x202e)} c `, 10)).toBe('a b c');
   });
 });

@@ -14,6 +14,8 @@ export const LIMITS = { what: 200, chosen: 200, alternative: 200, alternatives: 
 export const DECISIONS_MAX = 16 * 1024;
 export const DECISIONS_WINDOW_MS = 24 * 3600_000;
 const LAST_MAX = 5;
+/** A summary dated further ahead than this (a wrong clock) would never go stale: it is not shown. */
+const FUTURE_SKEW_MS = 5 * 60_000;
 const SHORT = 80;
 
 export const SHA = /^[0-9a-f]{7,40}$/i;
@@ -41,9 +43,13 @@ const str = (x: unknown): x is string => typeof x === 'string';
 const oneOf = <T extends string>(list: readonly T[], x: unknown): T | null => (str(x) && (list as readonly string[]).includes(x) ? (x as T) : null);
 const notDots = (s: string) => s !== '.' && s !== '..';
 
-/** One line: C0, DEL and C1 controls and bidi overrides become spaces, whitespace collapses, clipped to `max`. */
+const cp = (n: number) => String.fromCharCode(n);
+// C0, DEL and C1 controls and the bidi overrides (U+202A to U+202E, U+2066 to U+2069), built from code points so the
+// source never holds an invisible character.
 // eslint-disable-next-line no-control-regex
-export const clean = (s: string, max: number): string => s.replace(/[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+const UNSAFE = new RegExp(`[\\x00-\\x1f\\x7f-\\x9f${cp(0x202a)}-${cp(0x202e)}${cp(0x2066)}-${cp(0x2069)}]`, 'g');
+/** One line: C0, DEL and C1 controls and bidi overrides become spaces, whitespace collapses, clipped to `max`. */
+export const clean = (s: string, max: number): string => s.replace(UNSAFE, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 const text = (x: unknown, max: number): string | null => (str(x) ? clean(x, max) || null : null);
 const ident = (x: unknown, re: RegExp): string | null => (str(x) && re.test(x) && notDots(x) ? x : null);
 
@@ -85,7 +91,8 @@ export function normalizeUndo(x: unknown): DecisionUndo | null {
 /**
  * A ledger `decision` event as a Decision, or null without a ts or a usable `what`. Events written before forge 0.10
  * read as follows: no `point` → `safe-path` with a `safePath`, `takeover` for the swarm's takeover, else `other`; a
- * `by` that is not auto|unattended|user (the old takeover wrote a session id there) → `unattended`; no `chosen` → the
+ * `by` that is not auto|unattended|user → `user` for a takeover (the old one wrote a session id there), else
+ * `unattended`; no `chosen` → the
  * `safePath`, else the `what`.
  */
 export function normalizeDecision(x: unknown): Decision | null {
@@ -103,7 +110,8 @@ export function normalizeDecision(x: unknown): Decision | null {
     chosen: text(x.chosen, LIMITS.chosen) ?? safePath ?? what,
     alternatives,
     why: text(x.why, LIMITS.why) ?? '',
-    by: oneOf(DECISION_BY, x.by) ?? 'unattended',
+    // The old takeover wrote a session id in `by`: the user asked that session to go on, so it is the user's decision.
+    by: oneOf(DECISION_BY, x.by) ?? (point === 'takeover' ? 'user' : 'unattended'),
     weight: x.weight === 'major' || x.weight === 'minor' ? x.weight : weightOf(point),
     revert: text(x.revert, LIMITS.revert),
     undo: normalizeUndo(x.undo),
@@ -183,6 +191,6 @@ export function decisionsSummary(text: string | undefined, now: number): Decisio
   try { doc = normalizeDecisionsDoc(JSON.parse(text)); } catch { return null; }
   if (!doc || doc.count < 1) return null;
   const t = Date.parse(doc.ts);
-  if (!Number.isFinite(t) || !Number.isFinite(now) || now - t > DECISIONS_WINDOW_MS) return null;
+  if (!Number.isFinite(t) || !Number.isFinite(now) || now - t > DECISIONS_WINDOW_MS || t - now > FUTURE_SKEW_MS) return null;
   return { count: doc.count, autonomy: doc.autonomy, lastMajor: doc.lastMajor?.what ?? null };
 }

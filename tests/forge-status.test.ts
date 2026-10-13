@@ -70,7 +70,8 @@ describe('deriveStatus', () => {
     expect(deriveStatus(base, { ts: '2', kind: 'verdict', task: 't', action: 'reject', score: 'x' })?.verdict).toEqual({ action: 'reject', score: null });
   });
   it('strips C1 controls and bidi overrides/isolates too', () => {
-    expect(cleanText('a\u0085b\u009bc‮d‪e⁦f⁩g\u007fh')).toBe('abcdefgh');
+    const cp = (n: number) => String.fromCharCode(n);
+    expect(cleanText(`a\u0085b\u009bc${cp(0x202e)}d${cp(0x202a)}e${cp(0x2066)}f${cp(0x2069)}g\u007fh`)).toBe('abcdefgh');
     expect(cleanText('ñ é  x')).toBe('ñ é  x');
   });
   it('strips control characters and clips to 80', () => {
