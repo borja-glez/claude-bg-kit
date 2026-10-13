@@ -360,7 +360,7 @@ describe('forge swarm (execution)', () => {
     expect(readExecution(root)).toMatchObject({ coordinator: 'new', hookSession: null });
     expect(readFileSync(path.join(root, '.forge', 'ledger.jsonl'), 'utf8')).toContain('"what":"takeover"');
     const takeover = readFileSync(path.join(root, '.forge', 'ledger.jsonl'), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)).find(e => e.what === 'takeover');
-    expect(takeover).toMatchObject({ kind: 'decision', point: 'takeover', by: 'user', chosen: 'new', previous: 'old', session: 'new' });
+    expect(takeover).toMatchObject({ kind: 'decision', point: 'takeover', by: 'user', chosen: 'new', previous: 'old', session: 'new', runId: e.runId });
   });
   it('takeover takes the liveliest of the signal and the lease, and falls back to the last step', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'old'], io));

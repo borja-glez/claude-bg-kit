@@ -83,6 +83,8 @@ describe('renderDecisionsMd', () => {
     expect(es).toContain('- **Cómo revertir:** /forge:decisions revert 1');
     expect(renderDecisionsMd(list, 'reparto', 'en-GB')).toContain('# Automatic decisions · reparto');
     expect(renderDecisionsMd([{ ...list[0], revert: null, alternatives: [] }], 'reparto', 'en')).toContain('- **How to undo:** cannot be undone automatically');
+    const none = { ...list[0], revert: null, undo: { type: 'none' as const, reason: 'el ratchet solo sube' } };
+    expect(renderDecisionsMd([none], 'reparto', 'es')).toContain('- **Cómo revertir:** no se puede revertir de forma automática: el ratchet solo sube');
   });
 });
 

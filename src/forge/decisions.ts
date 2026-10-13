@@ -73,7 +73,11 @@ export function addDecision(root: string, raw: unknown, ctx: { ts: string; task?
     ...(task ? { task } : {}), ...(runId ? { runId } : {}),
   };
   appendEvent(root, event);
-  const n = readEvents(root).filter(e => e.kind === 'decision').length;
+  // Our own event's position: another session may append right after it, so the count after the append is not enough.
+  const line = JSON.stringify(event);
+  const all = readEvents(root).filter(e => e.kind === 'decision');
+  let n = all.length;
+  for (let i = all.length - 1; i >= 0; i--) if (JSON.stringify(all[i]) === line) { n = i + 1; break; }
   saveDecisionsDoc(root, event, n);
   return { n, event };
 }
@@ -128,7 +132,8 @@ export function renderDecisionsMd(list: Numbered[], scope: string, locale: strin
   for (const d of list) {
     out.push(`## ${d.n}. ${d.what}`, '', `- **${t.chosen}:** ${d.chosen}`);
     if (d.alternatives.length) out.push(`- **${t.alternatives}:** ${d.alternatives.join(', ')}`);
-    out.push(`- **${t.why}:** ${d.why || '—'}`, `- **${t.revert}:** ${d.revert ?? t.noRevert}`, `- **${t.when}:** ${d.ts} · ${d.by} · ${d.weight}`, '');
+    const howTo = d.revert ?? (d.undo?.type === 'none' ? `${t.noRevert}: ${d.undo.reason}` : t.noRevert);
+    out.push(`- **${t.why}:** ${d.why || '—'}`, `- **${t.revert}:** ${howTo}`, `- **${t.when}:** ${d.ts} · ${d.by} · ${d.weight}`, '');
   }
   return out.join('\n');
 }
