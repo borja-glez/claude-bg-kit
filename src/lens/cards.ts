@@ -3,7 +3,7 @@
 import type { PanelModel } from './model.js';
 import type { Block, Card } from './svg.js';
 import {
-  SECTION_HUE, SECTION_ICON, PATH_HUE, tierOf, stagesFor, forgePhase, roadmapCells, briefCells, todoCells, superpowersCells,
+  SECTION_HUE, SECTION_ICON, PATH_HUE, tierOf, stagesFor, forgePhase, forgeDone, roadmapCells, briefCells, todoCells, superpowersCells,
   ratio, duration, span, fmtTokens, fmtUsd, type Hue,
 } from './view.js';
 import { shortModelName } from '../lib/prices.js';
@@ -98,7 +98,8 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
         blocks.push({ kind: 'bar', ratio: ratio(c.done, c.total), hue: SECTION_HUE.forge, moving: c.done < c.total, label: t.briefs, right: `${c.done}/${c.total}` });
         blocks.push({ kind: 'cells', cells: c.cells });
       }
-      if (f.agent) {
+      // A finished task has no agent at work, whatever the status still names.
+      if (f.agent && !forgeDone(f)) {
         const tier = tierOf(f.agent);
         const live = m.subagents.find(s => tierOf(s.type).label === tier.label);
         blocks.push({ kind: 'row', dot: tier.hue, spinning: !!live, tag: { text: tier.label, hue: tier.hue }, text: live?.description ?? f.agent, right: [live && modelRight(live, t), duration(live?.seconds)].filter(Boolean).join('  ') || undefined });

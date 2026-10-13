@@ -22,7 +22,7 @@ describe('deriveStatus', () => {
       ts: '5', task: 'hash', path: 'medium', phase: 'review', agent: 'forge-review-security',
       validators: [{ name: 'test', ok: true }, { name: 'lint', ok: false }], verdict: { action: 'accept', score: 0.97 }, round: 0, cap: 3,
       brief: 1, accepted: [1], verify: null,
-      taskStartedAt: '2', stageSince: '5', stages: {}, doneAt: null,
+      taskStartedAt: '2', stageSince: '5', stages: {}, doneAt: null, lastAt: '9',
     });
   });
   it('tracks the brief in progress and the accepted briefs, from phase events and brief ids', () => {
@@ -49,7 +49,7 @@ describe('deriveStatus', () => {
     expect(apply([...run, { ts: '5', kind: 'triage', task: 'o', path: 'large' }])).toMatchObject({ path: 'large', phase: 'implement', agent: 'forge-impl', accepted: [1] });
     expect(apply([...run, { ts: '5', kind: 'triage', task: 'o', path: 'large', reasons: ['x'] }])).toEqual({
       ts: '5', task: 'o', path: 'large', phase: '', agent: null, validators: [], verdict: null, round: null, cap: null, brief: null, accepted: [], verify: null,
-      taskStartedAt: '5', stageSince: '5', stages: {}, doneAt: null,
+      taskStartedAt: '5', stageSince: '5', stages: {}, doneAt: null, lastAt: '5',
     });
   });
   it('reads a status written before brief and accepted existed', () => {
@@ -188,5 +188,75 @@ describe('deriveStatus timings', () => {
     expect(normalizeStatus({ ...base, taskStartedAt: 7, stages: 'x', doneAt: 'y'.repeat(100) })).toMatchObject({ taskStartedAt: null, stages: {}, doneAt: null });
     const many = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`p${i}`, i]));
     expect(Object.keys(normalizeStatus({ ...base, stages: many })!.stages)).toHaveLength(20);
+  });
+});
+
+describe('deriveStatus closes a light task', () => {
+  const T = (s: number) => new Date(Date.parse('2026-10-12T10:00:00.000Z') + s * 1000).toISOString();
+  const triage = (path: string) => ({ ts: T(0), kind: 'triage', task: 'f', path, reasons: [] });
+  it('a done phase also clears the agent', () => {
+    const s = apply([triage('medium'), { ts: T(10), kind: 'agent', task: 'f', agent: 'forge-impl' }, { ts: T(20), kind: 'phase', task: 'f', phase: 'done' }])!;
+    expect(s).toMatchObject({ doneAt: T(20), agent: null });
+  });
+  it('a passing validate of a trivial task itself finishes it; a failing, baseline, brief or non-trivial one does not', () => {
+    const ok = { ts: T(30), kind: 'validate', task: 'f', ok: true, results: [{ validator: 'test', ok: true }] };
+    const done = apply([triage('trivial'), ok])!;
+    expect(done).toMatchObject({ doneAt: T(30), stageSince: T(30), stages: { triage: 30 } });
+    expect(apply([triage('trivial'), { ...ok, ok: false }])!.doneAt).toBeNull();
+    expect(apply([triage('trivial'), { ...ok, baseline: true }])!.doneAt).toBeNull();
+    expect(apply([triage('trivial'), { ...ok, task: 'f-1' }])!.doneAt).toBeNull();
+    expect(apply([triage('small'), ok])!.doneAt).toBeNull();
+    // A second passing validate keeps the first finish.
+    expect(deriveStatus(done, { ...ok, ts: T(90) })!.doneAt).toBe(T(30));
+  });
+  it('an agent launched after the task closed reopens it', () => {
+    const s = apply([triage('trivial'), { ts: T(30), kind: 'validate', task: 'f', ok: true, results: [] }, { ts: T(60), kind: 'agent', task: 'f', agent: 'forge-verify' }])!;
+    expect(s).toMatchObject({ doneAt: null, stageSince: T(60), agent: 'forge-verify', stages: { triage: 30 } });
+  });
+  it('an agent after a done phase moves the phase off done: verify for the verify agent, else the last stage', () => {
+    const medium = [triage('medium'), { ts: T(10), kind: 'phase', task: 'f', phase: 'implement' }, { ts: T(50), kind: 'phase', task: 'f', phase: 'review' },
+      { ts: T(80), kind: 'verdict', task: 'f-1', action: 'accept', score: 0.9 }, { ts: T(100), kind: 'phase', task: 'f', phase: 'done' }];
+    const impl = apply([...medium, { ts: T(200), kind: 'agent', task: 'f', agent: 'forge-impl' }])!;
+    // The accept belonged to the finished run: a new agent is new work, so it no longer reads as accepted.
+    expect(impl).toMatchObject({ phase: 'review', doneAt: null, agent: 'forge-impl', verdict: null, accepted: [1] });
+    expect(apply([...medium, { ts: T(200), kind: 'agent', task: 'f', agent: 'forge-verify' }])!.phase).toBe('verify');
+    const light = apply([triage('small'), { ts: T(100), kind: 'phase', task: 'f', phase: 'done' }, { ts: T(200), kind: 'agent', task: 'f', agent: 'forge-impl-light' }])!;
+    expect(light).toMatchObject({ phase: '', doneAt: null });
+    // Finished again by a verify result (light) or a done phase.
+    expect(deriveStatus(light, { ts: T(300), kind: 'verify', task: 'f', result: 'pass', passed: 1, total: 1 })!.doneAt).toBe(T(300));
+    expect(deriveStatus(impl, { ts: T(300), kind: 'phase', task: 'f', phase: 'done' })!).toMatchObject({ doneAt: T(300), agent: null });
+  });
+  it('a ratchet that raises a closed task\'s path reopens it', () => {
+    const closed = apply([triage('trivial'), { ts: T(30), kind: 'validate', task: 'f', ok: true, results: [] }])!;
+    expect(deriveStatus(closed, { ts: T(60), kind: 'triage', task: 'f', path: 'medium' })!).toMatchObject({ path: 'medium', doneAt: null, stageSince: T(60) });
+    expect(deriveStatus(closed, { ts: T(60), kind: 'triage', task: 'f', path: 'trivial' })!.doneAt).toBe(T(30));
+  });
+  it('a verify result clears the verify agent and finishes a trivial or small task', () => {
+    const run = [triage('small'), { ts: T(60), kind: 'agent', task: 'f', agent: 'forge-verify' }, { ts: T(70), kind: 'verify', task: 'f', planned: true, surfaces: ['web'] }];
+    const res = { ts: T(200), kind: 'verify', task: 'f', result: 'pass', passed: 2, total: 2 };
+    const s = apply([...run, res])!;
+    expect(s).toMatchObject({ agent: null, doneAt: T(200), stageSince: T(200), stages: { triage: 200 }, verify: { result: 'pass', passed: 2, total: 2 } });
+    expect(apply([...run, { ...res, task: 'f-1' }])!).toMatchObject({ agent: null, doneAt: T(200) });
+    // Only the verify agent is cleared; Medium and Large finish by verdict, not by the verify result.
+    const medium = apply([triage('medium'), { ts: T(60), kind: 'agent', task: 'f', agent: 'forge-verify-heavy' }, res])!;
+    expect(medium).toMatchObject({ agent: null, doneAt: null });
+    expect(apply([triage('small'), { ts: T(60), kind: 'agent', task: 'f', agent: 'forge-impl' }, res])!).toMatchObject({ agent: 'forge-impl', doneAt: T(200) });
+    // A plan alone is no result.
+    expect(apply(run)!).toMatchObject({ agent: 'forge-verify', doneAt: null });
+  });
+  it('keeps lastAt, the time of the task\'s latest event of any kind', () => {
+    const s = apply([triage('small'), { ts: T(60), kind: 'agent', task: 'f', agent: 'forge-verify' }, { ts: T(90), kind: 'verify', task: 'f-1', planned: true, surfaces: [] }, { ts: T(500), kind: 'agent', task: 'other', agent: 'x' }])!;
+    expect(s).toMatchObject({ ts: T(0), lastAt: T(90) });
+    expect(normalizeStatus(JSON.parse(JSON.stringify(s)))!.lastAt).toBe(T(90));
+    expect(normalizeStatus({ ...s, lastAt: undefined })!.lastAt).toBeNull();
+  });
+  it('the B016 run: small, forge-verify launched with no phase logged, then its result', () => {
+    const s = apply([
+      triage('small'),
+      { ts: T(542), kind: 'validate', task: 'f', ok: true, results: [{ validator: 'test', ok: true }] },
+      { ts: T(600), kind: 'agent', task: 'f', agent: 'forge-verify' },
+      { ts: T(700), kind: 'verify', task: 'f', result: 'pass', passed: 3, total: 3 },
+    ])!;
+    expect(s).toMatchObject({ agent: null, doneAt: T(700), verify: { result: 'pass' }, lastAt: T(700) });
   });
 });

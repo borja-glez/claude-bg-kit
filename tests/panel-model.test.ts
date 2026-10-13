@@ -265,6 +265,49 @@ describe('forge timings', () => {
   });
 });
 
+describe('forge light task left open', () => {
+  // The B016 status: a Small task, forge-verify launched and its result never logged, nothing logged for 40 minutes.
+  const B016 = {
+    ts: at(49), task: 'fecha-corta', path: 'small', phase: '', agent: 'forge-verify', validators: [{ name: 'test', ok: true }],
+    verdict: null, round: null, cap: null, brief: null, accepted: [],
+    verify: { planned: true, surfaces: ['web'], result: null, passed: null, total: null, evidence: null, reason: null },
+    taskStartedAt: at(49), stageSince: at(49), stages: {}, doneAt: null, lastAt: at(40),
+  };
+  it('a trivial or small task silent for over 30 minutes is drawn finished: no clock, no agent', () => {
+    const f = forgeFromStatus(JSON.stringify(B016), NOW, 1)!;
+    expect(f.agent).toBeNull();
+    expect(f.timing).toEqual({ taskSeconds: 540, done: true, stages: [{ name: 'triage', seconds: 540, live: false }] });
+    expect(f).not.toHaveProperty('lastAt');
+    expect(forgeFromStatus(JSON.stringify({ ...B016, path: 'trivial' }), NOW)!.timing!.done).toBe(true);
+  });
+  it('a light task heard from in the last 30 minutes, or with no lastAt, still runs', () => {
+    const recent = forgeFromStatus(JSON.stringify({ ...B016, lastAt: at(29) }), NOW)!;
+    expect(recent).toMatchObject({ agent: 'forge-verify', timing: { done: false, taskSeconds: 2940 } });
+    expect(recent.timing!.stages[0].live).toBe(true);
+    expect(forgeFromStatus(JSON.stringify({ ...B016, lastAt: undefined }), NOW)!.timing!.done).toBe(false);
+  });
+  it('is not guessed while a subagent of the task agent\'s tier still runs', () => {
+    const live = forgeFromStatus(JSON.stringify(B016), NOW, 1, ['forge:forge-verify'])!;
+    expect(live).toMatchObject({ agent: 'forge-verify', timing: { done: false } });
+    expect(forgeFromStatus(JSON.stringify(B016), NOW, 1, ['forge:forge-impl'])!.timing!.done).toBe(true);
+    const m = buildPanelModel({ band: { mode: 'none' }, now: NOW, forgeStatus: JSON.stringify(B016),
+      activity: act({ subagents: [{ id: 'a', type: 'forge:forge-verify', since: NOW - 60_000 }] }) });
+    expect(m.forge!.timing!.done).toBe(false);
+  });
+  it('the band key changes when the task turns done', () => {
+    const m = buildPanelModel({ band: { mode: 'none' }, now: NOW, forgeStatus: JSON.stringify({ ...B016, agent: null, lastAt: at(29) }), activity: act() });
+    const later = buildPanelModel({ band: { mode: 'none' }, now: NOW + 2 * 60_000, forgeStatus: JSON.stringify({ ...B016, agent: null, lastAt: at(29) }), activity: act() });
+    expect(later.forge!.timing!.done).toBe(true);
+    expect(bandKey(later)).not.toBe(bandKey(m));
+  });
+  it('medium and large are unchanged', () => {
+    for (const path of ['medium', 'large']) {
+      const f = forgeFromStatus(JSON.stringify({ ...B016, path }), NOW)!;
+      expect(f).toMatchObject({ agent: 'forge-verify', timing: { done: false } });
+    }
+  });
+});
+
 describe('forgeFromStatus', () => {
   it('maps a valid status.json without its ts', () => {
     const { ts: _ts, ...rest } = STATUS;
