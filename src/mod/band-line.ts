@@ -1,6 +1,8 @@
 import type { BandModel } from './model.js';
 
 const TITLE_MAX = 40;
+// A slot's task id in the run line: loose task ids (`<slug>-<tag>`) run up to 45 characters.
+const SLOT_ID_MAX = 20;
 
 export function clip(text: string, max = TITLE_MAX): string {
   const chars = Array.from(String(text).replace(/\s+/g, ' ').trim());
@@ -57,7 +59,7 @@ export function bandLine(m: BandModel, nowMs: number): string {
   if (m.mode === 'run') {
     if (m.stalled) return [`▶ ${t.run} ${t.stoppedSfx}`, ...autoPart(m)].join(' · ');
     const parts = [`▶ ${t.run}`, `${m.executor === 'sessions' ? t.sessions : t.subagents} ${m.running}/${m.parallel}`,
-      ...m.slots.map(s => `${s.task} ${t.stage[s.stage as keyof typeof t.stage] ?? s.stage}${s.round > 1 ? ` (r${s.round})` : ''}`),
+      ...m.slots.map(s => `${clip(s.task, SLOT_ID_MAX)} ${t.stage[s.stage as keyof typeof t.stage] ?? s.stage}${s.round > 1 ? ` (r${s.round})` : ''}`),
       `${m.integrated}/${m.total}`, `${t.integratedN} ${m.integrated}`];
     if (m.worst !== 'alive') parts.push(`⚠ ${m.worst === 'silent' ? t.silentSfx : t.stoppedSfx}`);
     parts.push(...autoPart(m));
