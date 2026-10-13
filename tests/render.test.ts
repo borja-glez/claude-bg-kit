@@ -317,6 +317,7 @@ describe('notes view', () => {
       note({ id: 'h"><script>', type: 'question', author: HOSTILE, text: HOSTILE, taskId: 'T001' }),
       note({ id: 'h2', author: `session:${HOSTILE}`, text: HOSTILE, answer: HOSTILE, type: 'question', taskId: 'T001' }),
       note({ id: 'h3', author: 'user:x"><script>', text: HOSTILE, taskId: '"><script>' }),
+      note({ id: 'h4', type: 'decision', text: HOSTILE, taskId: 'T001', decision: { point: 'other', what: HOSTILE, chosen: HOSTILE, alternatives: [HOSTILE], why: HOSTILE, revert: HOSTILE, auto: true } }),
     ];
     for (const view of ['tracking', 'versions', 'sessions', 'notes'] as const) {
       clean(renderApp({ ...base(), notes: bad, me: 'user:u1', profiles: { 'x"><script>': HOSTILE } }, ui({ view, modal: 'T001', draft: { type: 'idea', text: HOSTILE }, answering: 'h"><script>', answerDraft: HOSTILE })));

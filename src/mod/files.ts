@@ -74,32 +74,28 @@ async function readJsonDir($: Engine, dir: string, max: number, keep: (name: str
   return out;
 }
 
-// The execution the coordinator writes in the main checkout, whichever worktree this session is in.
-async function loadExecution($: Engine, root: string): Promise<Pick<BandFiles, 'execution' | 'execTasks' | 'live'>> {
+// The main checkout's .forge, listed once per refresh whichever worktree this session is in: the execution the
+// coordinator writes (with its task files and live signals) and forge's decisions summary (a few hundred bytes; not
+// read above DECISIONS_MAX).
+async function loadForge($: Engine, root: string): Promise<Pick<BandFiles, 'execution' | 'execTasks' | 'live' | 'decisions'>> {
   try {
     const main = mainCheckoutFrom(root, (await readOpt($, join(root, '.git'))) ?? null);
     const dir = join(main, '.forge');
     const entries = await listOpt($, dir);
+    const out: Pick<BandFiles, 'execution' | 'execTasks' | 'live' | 'decisions'> = {};
+    const dec = entries.find(f => f.kind === 'file' && f.name === 'decisions.json');
+    if (dec && dec.size <= DECISIONS_MAX) out.decisions = await readOpt($, join(dir, 'decisions.json'));
     const exec = entries.find(f => f.kind === 'file' && f.name === 'execution.json');
-    if (!exec || exec.size > EXEC_MAX) return {};
+    if (!exec || exec.size > EXEC_MAX) return out;
     const execution = await readOpt($, join(dir, 'execution.json'));
-    if (execution === undefined) return {};
-    const out: Pick<BandFiles, 'execution' | 'execTasks' | 'live'> = { execution };
+    if (execution === undefined) return out;
+    out.execution = execution;
     if (entries.some(f => f.kind === 'dir' && f.name === 'execution')) {
       out.execTasks = await readJsonDir($, join(dir, 'execution'), EXEC_TASKS_MAX, name => SAFE_TASK.test(name));
     }
     if (entries.some(f => f.kind === 'dir' && f.name === 'live')) out.live = await readJsonDir($, join(dir, 'live'), LIVE_MAX, () => true);
     return out;
   } catch { return {}; }
-}
-
-// forge's decisions summary (a few hundred bytes; not read above DECISIONS_MAX), kept in the main checkout's .forge/
-// whichever worktree this session is in, like the execution.
-async function loadDecisions($: Engine, root: string): Promise<string | undefined> {
-  const main = mainCheckoutFrom(root, (await readOpt($, join(root, '.git'))) ?? null);
-  const dir = join(main, '.forge');
-  const f = (await listOpt($, dir)).find(x => x.kind === 'file' && x.name === 'decisions.json');
-  return f && f.size <= DECISIONS_MAX ? readOpt($, join(dir, 'decisions.json')) : undefined;
 }
 
 export async function loadBandModel($: Engine): Promise<BandModel> {
@@ -123,8 +119,7 @@ export async function loadBandModel($: Engine): Promise<BandModel> {
     session: await readOpt($, join(pstate, 'session.json')),
     states: await readCollection($, join(pstate, 'dbcache', 'state')),
     messages: await readCollection($, join(pstate, 'dbcache', 'messages')),
-    ...(await loadExecution($, root)),
-    decisions: await loadDecisions($, root),
+    ...(await loadForge($, root)),
     critiques,
   };
   return buildBandModel(project, files);

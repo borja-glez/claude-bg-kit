@@ -5,8 +5,9 @@ import { loadBandModel, type Engine } from '../src/mod/files.js';
 const plan = readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8');
 
 // A fake engine over a map of absolute path -> text; directories are derived from the paths.
-function fake(root: string, files: Record<string, string>, over: Record<string, { size?: number; mtimeMs?: number }> = {}): { $: Engine; reads: string[] } {
+function fake(root: string, files: Record<string, string>, over: Record<string, { size?: number; mtimeMs?: number }> = {}): { $: Engine; reads: string[]; lists: string[] } {
   const reads: string[] = [];
+  const lists: string[] = [];
   const entries = (dir: string) => {
     const seen = new Map<string, { name: string; kind: 'file' | 'dir'; size: number; mtimeMs: number }>();
     for (const [p, text] of Object.entries(files)) {
@@ -23,13 +24,13 @@ function fake(root: string, files: Record<string, string>, over: Record<string, 
     session: { root: async () => root },
     fs: {
       read: async (p: string) => { reads.push(p); if (!(p in files)) throw new Error('ENOENT'); return files[p]; },
-      list: async (d: string) => { const e = entries(d); if (!e.length) throw new Error('ENOENT'); return e; },
+      list: async (d: string) => { lists.push(d); const e = entries(d); if (!e.length) throw new Error('ENOENT'); return e; },
       exists: async (p: string) => p in files,
       stat: async (p: string) => { if (!(p in files)) throw new Error('ENOENT'); return { mtimeMs: over[p]?.mtimeMs ?? 1 }; },
     },
     clock: { now: async () => Date.now() },
   } as unknown as Engine;
-  return { $, reads };
+  return { $, reads, lists };
 }
 
 const now = Date.now();
@@ -63,6 +64,12 @@ describe('loadBandModel · decisions', () => {
     const { $, reads } = fake(root, { ...base(root), [`${root}/.forge/decisions.json`]: doc() }, { [`${root}/.forge/decisions.json`]: { size: 17 * 1024 } });
     expect(await loadBandModel($)).not.toHaveProperty('auto');
     expect(reads).not.toContain(`${root}/.forge/decisions.json`);
+  });
+  it('lists the main checkout .forge once per refresh, for the execution and the decisions', async () => {
+    const root = '/repo';
+    const { $, lists } = fake(root, { ...base(root), [`${root}/.forge/execution.json`]: EXEC, [`${root}/.forge/decisions.json`]: doc() });
+    expect(await loadBandModel($)).toMatchObject({ auto: { count: 2 } });
+    expect(lists.filter(d => d === `${root}/.forge`)).toHaveLength(1);
   });
 });
 
