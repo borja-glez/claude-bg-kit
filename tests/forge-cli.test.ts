@@ -964,6 +964,13 @@ describe('forge waypoint-cli', () => {
         expect(plan.tasks.map(t => t.id)).toEqual(['T001', 'T002']);
         expect(plan.tasks[1].title).toBe(title);
       });
+      it('a long multi-line rationale reaches plan.yaml whole and parses back intact', () => {
+        const rationale = `${'Primera línea larga del motivo, con «comillas» y: dos puntos. '.repeat(8)}\n- un punto\n- otro: con # almohadilla\n\nY un final por fecha`;
+        const id = approved({ rationale, evidence: 'grep: 3' });
+        expect(run(['proposals', 'to-task', id, '--plan', 'plan.yaml'], io).code).toBe(0);
+        const plan = parsePlan(readFileSync(path.join(root, 'plan.yaml'), 'utf8'));
+        expect(plan.tasks[1].includes).toBe(`${rationale}\n\nEvidence: grep: 3\n\n(proposal ${id})`);
+      });
       it('refuses a rejected proposal', () => {
         const id = JSON.parse(add().stdout).id;
         run(['proposals', 'decide', id, 'reject'], io);
