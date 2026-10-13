@@ -117,6 +117,9 @@ describe('plugin layout', () => {
     expect(steps).toContain('never compute the ladder by hand');
     expect(steps).toContain('`impl-high` when the design marks the task delicate');
     expect(md).toContain('one fix by `impl-heavy`');
+    for (const s of [steps, member]) expect(s).toContain('`FORGE log --kind agent --task <T>-<n> --data-file <f>` (`{"agent":"<name>","role":"<role>"}`)');
+    expect(md).not.toMatch(/When `last` is true the printed implementer is `impl-heavy`/);
+    expect(md).toContain('or `impl-high` for delicate or important work');
     expect(member).not.toContain('a Large task you cannot do unattended');
     expect(member).toContain('waypoint:work');
     expect(member).toMatch(/[Ll]ost task/);
