@@ -14637,6 +14637,7 @@ var RULE = /^\s*-{3,}\s*$/;
 function linesOf(text2) {
   const out = [];
   let fence = null;
+  let openAt = null;
   for (const piece of text2.split(/(?<=\n)/)) {
     const eol = /\r?\n$/.exec(piece)?.[0] ?? "";
     const t = piece.slice(0, piece.length - eol.length);
@@ -14647,10 +14648,13 @@ function linesOf(text2) {
       continue;
     }
     const open = /^\s*(`{3,}|~{3,})/.exec(t);
-    if (open) fence = open[1];
+    if (open) {
+      fence = open[1];
+      openAt = out.length;
+    }
     out.push({ text: t, eol, fenced: !!open });
   }
-  return out;
+  return { lines: out, openAt: fence ? openAt : null };
 }
 function rangesOf(lines) {
   const out = [];
@@ -14710,7 +14714,8 @@ function taskOf(lines, r2) {
   return { n: r2.n, title: r2.title, files, steps, done: steps > 0 && checked === steps };
 }
 function scan(text2) {
-  const lines = linesOf(text2);
+  const { lines, openAt } = linesOf(text2);
+  if (openAt !== null) throw new SpPlanError(`unclosed code fence opened at line ${openAt + 1}`);
   const ranges = rangesOf(lines);
   if (!ranges.length) throw new SpPlanError('no "### Task N: <title>" section: this is not a superpowers plan');
   const seen = /* @__PURE__ */ new Set();
@@ -14737,6 +14742,18 @@ function parseSpPlan(text2) {
     constraints: constraintsOf(lines),
     tasks: ranges.map((r2) => taskOf(lines, r2))
   };
+}
+function sddComplete(ledger, planRel) {
+  const first = /^#\s*SDD ledger\s*[—–-]\s*plan:\s*(.+?)\s*$/m.exec(ledger.split(/\r?\n/)[0] ?? "");
+  const rel = planRel.replace(/\\/g, "/").replace(/^\.\//, "");
+  const named = first ? first[1].replace(/\\/g, "/").replace(/^\.\//, "") : null;
+  if (!named || !rel || named !== rel && !named.endsWith(`/${rel}`)) return [];
+  const done = /* @__PURE__ */ new Set();
+  for (const m of ledger.matchAll(/^Task (\d{1,4}): complete\b/gm)) done.add(Number(m[1]));
+  return [...done].sort((a, b) => a - b);
+}
+function markDone(plan, done) {
+  return { ...plan, tasks: plan.tasks.map((t) => done.includes(t.n) ? { ...t, done: true } : t) };
 }
 function checkSpTask(text2, n) {
   const { lines, ranges } = scan(text2);
@@ -14845,6 +14862,36 @@ function spSkillPath(sp, skill) {
   const f = import_node_path17.default.join(sp.installPath, "skills", skill, "SKILL.md");
   return (0, import_node_fs16.existsSync)(f) ? f : null;
 }
+function spLedgerDone(roots, planAbs) {
+  const done = /* @__PURE__ */ new Set();
+  const slug = import_node_path17.default.basename(planAbs).replace(/\.md$/i, "");
+  for (const root of [...new Set(roots.map((r2) => import_node_path17.default.resolve(r2)))]) {
+    const rel = import_node_path17.default.relative(root, planAbs).split(import_node_path17.default.sep).join("/");
+    if (!rel || rel.startsWith("..") || import_node_path17.default.isAbsolute(rel)) continue;
+    const base = import_node_path17.default.join(root, ".superpowers", "sdd");
+    let names2 = [];
+    try {
+      names2 = (0, import_node_fs16.readdirSync)(base);
+    } catch {
+      continue;
+    }
+    for (const name of names2) {
+      if (name !== slug && !name.startsWith(`${slug}-`)) continue;
+      const dir = import_node_path17.default.join(base, name);
+      let marker = null;
+      try {
+        marker = (0, import_node_fs16.readFileSync)(import_node_path17.default.join(dir, "plan-path"), "utf8").trim().replace(/\\/g, "/");
+      } catch {
+      }
+      if (marker !== null && marker !== rel) continue;
+      try {
+        for (const n of sddComplete((0, import_node_fs16.readFileSync)(import_node_path17.default.join(dir, "progress.md"), "utf8"), rel)) done.add(n);
+      } catch {
+      }
+    }
+  }
+  return [...done].sort((a, b) => a - b);
+}
 function recentMarkdown(dir, now) {
   let names2;
   try {
@@ -14900,7 +14947,7 @@ function spPlans(root, now) {
   for (const f of recentMarkdown(import_node_path17.default.join(root, "docs", "superpowers", "plans"), now)) {
     let plan;
     try {
-      plan = parseSpPlan((0, import_node_fs16.readFileSync)(f.abs, "utf8"));
+      plan = markDone(parseSpPlan((0, import_node_fs16.readFileSync)(f.abs, "utf8")), spLedgerDone([root], f.abs));
     } catch {
       continue;
     }
@@ -15040,6 +15087,7 @@ function planTask(cwd2, planArg, id2) {
   if (!task) throw new UsageError(`task ${id2} is not in ${planArg}`);
   return { plan, task };
 }
+var spPlanDone = (text2, abs, dir) => markDone(parseSpPlan(text2), spLedgerDone([dir, mainCheckout(dir)], abs));
 function spTaskNumber(v) {
   if (v === void 0 || !/^\d{1,4}$/.test(v) || Number(v) < 1) throw new UsageError("--task must be the number of a task of the superpowers plan");
   return Number(v);
@@ -15213,7 +15261,7 @@ function run(argv, io) {
           const file = flag("superpowers-plan");
           let sp;
           try {
-            sp = parseSpPlan((0, import_node_fs17.readFileSync)(import_node_path18.default.resolve(io.cwd, file), "utf8"));
+            sp = spPlanDone((0, import_node_fs17.readFileSync)(import_node_path18.default.resolve(io.cwd, file), "utf8"), import_node_path18.default.resolve(io.cwd, file), repoDir);
           } catch (e) {
             throw new UsageError(e instanceof SpPlanError ? `triage: ${file}: ${e.message}` : `triage: cannot read ${file}`);
           }
@@ -15770,7 +15818,7 @@ function run(argv, io) {
         }
         try {
           if (sub === "tasks") {
-            const { plan, tasks } = parseSpPlan(text2);
+            const { plan, tasks } = spPlanDone(text2, abs, repoDir);
             return json({ plan, tasks });
           }
           const n = spTaskNumber(flag("task"));
