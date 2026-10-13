@@ -37,7 +37,10 @@ const EXEC: NonNullable<PanelModel['execution']> = {
 describe('lens view', () => {
   it('colours agents by level, the implementer ladder from cool to warm', () => {
     expect(tierOf('forge:forge-mech')).toMatchObject({ label: 'mech', rank: 1 });
-    expect(tierOf('forge-impl-heavy')).toMatchObject({ label: 'heavy', hue: 'mauve', rank: 4 });
+    expect(tierOf('forge-impl')).toMatchObject({ label: 'impl', hue: 'blue', rank: 3 });
+    expect(tierOf('forge:forge-impl-high')).toMatchObject({ label: 'high', hue: 'lavender', rank: 4 });
+    expect(tierOf('forge-impl-heavy')).toMatchObject({ label: 'heavy', hue: 'mauve', rank: 5 });
+    expect(tierOf('forge-fable')).toMatchObject({ label: 'fable', rank: 6 });
     expect(tierOf('forge:forge-review-security')).toMatchObject({ label: 'security', hue: 'red' });
     expect(tierOf('Explore')).toMatchObject({ label: 'Explore', hue: 'lavender' });
     expect(tierOf(null).label).toBe('?');
