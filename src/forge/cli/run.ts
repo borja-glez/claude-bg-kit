@@ -10,7 +10,8 @@ import { planLocale, replyIn } from '../../lib/locale.js';
 import { triage, implementerFor, zonesFromPaths, PATH_ORDER, type PathName } from '../triage.js';
 import { parsePlan, PlanError } from '../../lib/plan.js';
 import { renderBrief, taskText, tddLine } from '../brief.js';
-import { loadConfig, agentFor, ROLES, ConfigError, NAME } from '../config.js';
+import { loadConfig, agentFor, ROLES, ConfigError, NAME, WORKFLOWS, AUTONOMIES } from '../config.js';
+import { resolvePrefs, isWorkflow, isAutonomy } from '../prefs.js';
 import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, type ReviewerName, type Action, type FailingValidator } from '../verdict.js';
 import { decideRound } from '../loop.js';
 import { PROPOSAL_ID, proposalId, saveProposal, loadProposals, decideLocal, decideDoc, mirrorProposal } from '../proposals.js';
@@ -36,7 +37,7 @@ export interface ExecResult { code: number; output: string; ms: number; timedOut
 export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined> }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|decision|agents|last|proposals|surfaces|tools|local|verify-plan|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|infinite|cycle|swarm|stop|hook> ...';
+const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|decision|agents|last|proposals|surfaces|tools|local|prefs|verify-plan|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|infinite|cycle|swarm|stop|hook> ...';
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 
@@ -695,6 +696,15 @@ export function run(argv: string[], io: Io): Result {
           if (!m) throw new UsageError('local get: the path must be surfaces.<name>');
           return json(s.surfaces[m[1]] ?? null);
         }
+        if (sub === 'set' && (key === 'workflow' || key === 'autonomy')) {
+          if (value === 'none') {
+            updateLocal(io.cwd, s => { const next = { ...s }; delete next[key]; return next; });
+            return ok('ok');
+          }
+          if (key === 'workflow' ? !isWorkflow(value) : !isAutonomy(value)) throw new UsageError(`local set: ${key} must be one of ${(key === 'workflow' ? WORKFLOWS : AUTONOMIES).join('|')}|none`);
+          updateLocal(io.cwd, s => ({ ...s, [key]: value }));
+          return ok('ok');
+        }
         if (sub === 'set') {
           const m = /^surfaces\.(.+)$/.exec(key ?? '');
           if (!m || !NAME.test(m[1])) throw new UsageError('local set: the path must be surfaces.<name>');
@@ -710,7 +720,14 @@ export function run(argv: string[], io: Io): Result {
           });
           return ok('ok');
         }
-        throw new UsageError('usage: forge local get [surfaces.<name>] | set surfaces.<name> allowed|denied|none');
+        throw new UsageError('usage: forge local get [surfaces.<name>] | set surfaces.<name> allowed|denied|none | set workflow <w>|none | set autonomy ask|auto|none');
+      }
+      case 'prefs': {
+        const wf = flag('workflow');
+        const au = flag('autonomy');
+        if (wf !== undefined && !isWorkflow(wf)) throw new UsageError(`prefs: --workflow must be one of ${WORKFLOWS.join('|')}`);
+        if (au !== undefined && !isAutonomy(au)) throw new UsageError(`prefs: --autonomy must be one of ${AUTONOMIES.join('|')}`);
+        return json(resolvePrefs({ ...(wf ? { workflow: wf } : {}), ...(au ? { autonomy: au } : {}) }, readLocal(io.cwd), loadConfig(repoDir)));
       }
       case 'swarm':
         return swarmCommand(args, io, {
