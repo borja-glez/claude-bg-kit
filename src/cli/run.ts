@@ -8,6 +8,7 @@ import { normalizeMeta, normalizePhase } from '../page/normalize.js';
 import { availableTasks, commitShas } from '../lib/deps.js';
 import { pickTask, conflictsFor, recoverableTasks, inboxFor, escalationCandidates, IDLE_MINUTES } from '../lib/coordination.js';
 import { parseDesign, changedSections, DesignError } from '../lib/design.js';
+import { importSpec, SpecImportError } from '../lib/design-import.js';
 import { listVersions, nextVersion, parseChangelog, appendChangelog } from '../lib/history.js';
 import { parseCritique, selectProposals, formatProposals, CritiqueError } from '../lib/critique.js';
 import { buildDesignPageData } from '../design-page/build.js';
@@ -23,7 +24,7 @@ import type { MessageDoc, NoteDoc, PhaseDoc, PlanView, SessionDoc, TaskState } f
 export interface Io { cwd: string; now: () => Date; rand?: () => number; assetsDir: string; stdin?: string; env?: Record<string, string | undefined> }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|design-validate|design-snapshot|design-changed|critique-check|critique-select|design-page|hook> ...`;
+const USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|design-validate|design-import|design-snapshot|design-changed|critique-check|critique-select|design-page|hook> ...`;
 
 export function run(argv: string[], io: Io): Result {
   const [cmd, ...args] = argv;
@@ -272,6 +273,36 @@ export function run(argv: string[], io: Io): Result {
         const log = readChangelog(path.dirname(abs(args[0])));
         const sections = d.sections.length;
         return ok(`ok: ${d.words} words, ${sections} sections, v${log[log.length - 1]?.version ?? 0}`);
+      }
+      case 'design-import': {
+        const spec = args[0];
+        const project = flag('project');
+        const out = flag('out');
+        if (!spec || spec.startsWith('--') || !project || !out) return fail('usage: waypoint design-import <spec.md> --project <id> [--locale <l>] --out <design.md>', 2);
+        if (!/^[A-Za-z0-9_.-]{1,64}$/.test(project) || project === '.' || project === '..') return fail(`design-import: invalid project id ${project}`, 2);
+        const target = abs(out);
+        if (existsSync(target)) return fail(`design-import: ${out} already exists; an import never overwrites a design`, 2);
+        let text: string;
+        try { text = readFileSync(abs(spec), 'utf8'); } catch { return fail(`design-import: cannot read ${spec}`, 2); }
+        // `source` is relative to the repository (the git top level of the spec), else to the working directory.
+        let source = path.relative(io.cwd, abs(spec)).split(path.sep).join('/');
+        try {
+          const top = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: path.dirname(abs(spec)), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+          const rel = path.relative(path.resolve(top), abs(spec)).split(path.sep).join('/');
+          if (!rel.startsWith('..') && !path.isAbsolute(rel)) source = rel;
+        } catch { /* not a git repository */ }
+        let design: string;
+        try { design = importSpec(text, { project, locale: flag('locale') ?? 'en', source }); } catch (e) {
+          if (e instanceof SpecImportError) return fail(`design-import: ${e.message}`, 2);
+          throw e;
+        }
+        const d = parseDesign(design);
+        mkdirSync(path.dirname(target), { recursive: true });
+        try { writeFileSync(target, design, { flag: 'wx' }); } catch (e) {
+          if ((e as NodeJS.ErrnoException).code === 'EEXIST') return fail(`design-import: ${out} already exists; an import never overwrites a design`, 2);
+          throw e;
+        }
+        return ok(JSON.stringify({ path: target, title: d.meta.title, sections: d.sections.length, words: d.words, source }));
       }
       case 'design-snapshot': {
         const file = abs(args[0]);

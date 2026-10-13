@@ -12,6 +12,7 @@ const MetaSchema = z.object({
   start_prompt: z.string().min(1).default('/waypoint:work <track>'),
   status: z.enum(['draft', 'approved']).default('draft'),
   artifact: z.string().url().optional(),
+  source: z.string().min(1).max(300).optional(),
 });
 
 export type DesignMeta = z.infer<typeof MetaSchema>;
