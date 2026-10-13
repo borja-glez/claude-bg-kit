@@ -30,12 +30,13 @@ import { readSurfaces, detectDrafts, appendLearned, surfaceFile, surfaceHash } f
 import { addDecision, allDecisions, listDecisions, renderDecisionsMd, DecisionInputError } from '../decisions.js';
 import { TASK_ID, decisionScope, scopeFileName } from '../../lib/decisions.js';
 import { claudeConfigDir, locateSuperpowers, spPlans, spSkillPath, spSpecs } from '../superpowers.js';
+import { checkSpTask, parseSpPlan, renderSpBrief, SpPlanError } from '../../lib/sp-plan.js';
 
 export interface ExecResult { code: number; output: string; ms: number; timedOut: boolean }
 export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined> }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|decision|agents|last|proposals|surfaces|tools|local|verify-plan|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|infinite|cycle|swarm|stop|hook> ...';
+const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|decision|agents|last|proposals|surfaces|tools|local|verify-plan|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|infinite|cycle|swarm|stop|hook> ...';
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 
@@ -141,6 +142,12 @@ function planTask(cwd: string, planArg: string | undefined, id: string | undefin
   const task = plan.tasks.find(t => t.id === id);
   if (!task) throw new UsageError(`task ${id} is not in ${planArg}`);
   return { plan, task };
+}
+
+// The number of a `### Task N` of a superpowers plan, from --task.
+function spTaskNumber(v: string | undefined): number {
+  if (v === undefined || !/^\d{1,4}$/.test(v) || Number(v) < 1) throw new UsageError('--task must be the number of a task of the superpowers plan');
+  return Number(v);
 }
 
 // Finds waypoint's CLI from the running forge.cjs: dev layout (plugins/forge, plugins/waypoint) or
@@ -258,6 +265,17 @@ export function run(argv: string[], io: Io): Result {
         return ok('ok');
       }
       case 'brief': {
+        if (has('superpowers-plan')) {
+          const file = flag('superpowers-plan');
+          if (!file) throw new UsageError('brief: --superpowers-plan needs a plan file');
+          const n = spTaskNumber(flag('task'));
+          let text: string;
+          try { text = readFileSync(path.resolve(io.cwd, file), 'utf8'); } catch { throw new UsageError(`brief: cannot read ${file}`); }
+          try { return ok(renderSpBrief(text, n, { planPath: file.replace(/\\/g, '/'), tdd: null })); } catch (e) {
+            if (e instanceof SpPlanError) throw new UsageError(`brief: ${file}: ${e.message}`);
+            throw e;
+          }
+        }
         const { plan, task } = planTask(io.cwd, flag('plan'), flag('task'));
         const design = flag('design') ?? path.join(path.dirname(flag('plan')!), 'design.md');
         const designPath = existsSync(path.resolve(io.cwd, design)) ? design.replace(/\\/g, '/') : null;
@@ -265,7 +283,7 @@ export function run(argv: string[], io: Io): Result {
       }
       case 'triage': {
         const textArgs = [...args];
-        for (const f of ['--task', '--text-file', '--plan']) {
+        for (const f of ['--task', '--text-file', '--plan', '--superpowers-plan']) {
           const i = textArgs.indexOf(f);
           if (i >= 0) textArgs.splice(i, 2);
         }
@@ -276,6 +294,19 @@ export function run(argv: string[], io: Io): Result {
         if (has('plan') && flag('plan') === undefined) throw new UsageError('triage: --plan needs a plan file');
         const planned = flag('plan') !== undefined ? planTask(io.cwd, flag('plan'), flag('task')).task : null;
         if (planned) task = taskText(planned);
+        if (has('superpowers-plan') && flag('superpowers-plan') === undefined) throw new UsageError('triage: --superpowers-plan needs a plan file');
+        // A superpowers plan: its title, goal and pending tasks are the text, the files those tasks list are its files.
+        let spFiles: string[] | null = null;
+        if (flag('superpowers-plan') !== undefined) {
+          const file = flag('superpowers-plan')!;
+          let sp;
+          try { sp = parseSpPlan(readFileSync(path.resolve(io.cwd, file), 'utf8')); } catch (e) {
+            throw new UsageError(e instanceof SpPlanError ? `triage: ${file}: ${e.message}` : `triage: cannot read ${file}`);
+          }
+          const pending = sp.tasks.filter(t => !t.done);
+          task = [sp.plan.title, sp.plan.goal, ...pending.map(t => t.title)].filter(Boolean).join('. ');
+          spFiles = [...new Set(pending.flatMap(t => t.files))];
+        }
         if (!task) throw new UsageError('triage: the task text is required');
         const git = io.git ?? defaultGit(io.cwd);
         const lines = (out: string | null) => (out ?? '').split('\n').map(s => s.trim()).filter(Boolean);
@@ -288,11 +319,14 @@ export function run(argv: string[], io: Io): Result {
         const grep = (w: string) => lines(git(['-c', 'core.quotePath=false', 'grep', '-l', '-I', '--fixed-strings', '-w', '-e', w])).filter(f => !bookkeeping(f));
         const tracked = lines(listed);
         const zoneFiles = planned ? tracked.filter(f => planned.zones.some(z => globMatch(z, f))) : [];
-        const extra = planned ? { files: zoneFiles, zones: zonesFromPaths(planned.zones) } : undefined;
+        const extra = planned ? { files: zoneFiles, zones: zonesFromPaths(planned.zones) }
+          : spFiles ? { files: tracked.filter(f => spFiles!.includes(f)), zones: zonesFromPaths(spFiles) } : undefined;
         const catalog = detectValidators(repoReader(repoDir), loadConfig(repoDir)).map(v => ({ name: v.name, cmd: v.cmd, kind: v.kind, source: v.source }));
         const names = catalog.map(v => v.name);
         const result = triage(task, { files: tracked, commits, gitOk: listed !== null, grep }, names, extra);
         if (planned?.zones.length && !zoneFiles.length) result.reasons.push('zones match no tracked file (new files?)');
+        // A superpowers plan runs on the Medium path, one task after another: its tasks build on each other.
+        if (spFiles) { result.path = 'medium'; result.reasons.push('superpowers plan: the Medium path, its tasks in order'); }
         // The ratchet: a repeated triage of the same task never lowers the path it already reached.
         if (flag('task')) {
           const rank = (p: unknown) => PATH_ORDER.indexOf(p as PathName);
@@ -735,6 +769,23 @@ export function run(argv: string[], io: Io): Result {
         return json(spSpecs(repoDir, io.now().getTime()));
       case 'sp-plans':
         return json(spPlans(repoDir, io.now().getTime()));
+      case 'sp-plan': {
+        const [sub, file] = args;
+        if ((sub !== 'tasks' && sub !== 'check') || !file || file.startsWith('--')) throw new UsageError('usage: forge sp-plan tasks <plan.md> | check <plan.md> --task N');
+        const abs = path.resolve(io.cwd, file);
+        let text: string;
+        try { text = readFileSync(abs, 'utf8'); } catch { throw new UsageError(`sp-plan: cannot read ${file}`); }
+        try {
+          if (sub === 'tasks') { const { plan, tasks } = parseSpPlan(text); return json({ plan, tasks }); }
+          const n = spTaskNumber(flag('task'));
+          const r = checkSpTask(text, n);
+          if (r.checked) writeFileSync(abs, r.text);
+          return json({ task: n, checked: r.checked });
+        } catch (e) {
+          if (e instanceof SpPlanError) throw new UsageError(`sp-plan: ${file}: ${e.message}`);
+          throw e;
+        }
+      }
       case 'agents': {
         const { profile } = loadConfig(io.cwd);
         return json({ profile, agents: Object.fromEntries(ROLES.map(r => [r, agentFor(r, profile)])) });

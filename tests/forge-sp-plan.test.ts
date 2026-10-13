@@ -1,6 +1,9 @@
-import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { checkSpTask, parseSpPlan, renderSpBrief, SpPlanError } from '../src/lib/sp-plan.js';
+import { run, type Io } from '../src/forge/cli/run.js';
 
 // LF here whatever git checked out; the CRLF case is built from it.
 const PLAN = readFileSync(new URL('./fixtures/sp-plan.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
@@ -75,5 +78,58 @@ describe('renderSpBrief', () => {
   it('adds the TDD line when given, and refuses an unknown task', () => {
     expect(renderSpBrief(PLAN, 2, { planPath: 'p.md', tdd: TDD })).toContain(`\n${TDD}\n`);
     expect(() => renderSpBrief(PLAN, 7, { planPath: 'p.md' })).toThrow(SpPlanError);
+  });
+});
+
+describe('forge sp-plan, brief and triage with a superpowers plan', () => {
+  const F = 'docs/superpowers/plans/cart.md';
+  let root: string;
+  let io: Io;
+  beforeEach(() => {
+    root = mkdtempSync(path.join(tmpdir(), 'forge-sp-'));
+    mkdirSync(path.join(root, 'docs', 'superpowers', 'plans'), { recursive: true });
+    writeFileSync(path.join(root, F), PLAN.replace(/\n/g, '\r\n'));
+    io = { cwd: root, now: () => new Date('2026-10-13T10:00:00.000Z'), git: () => null };
+  });
+  it('tasks prints the plan and its tasks', () => {
+    const r = JSON.parse(run(['sp-plan', 'tasks', F], io).stdout);
+    expect(r.plan).toMatchObject({ title: 'Cart Totals', goal: 'Show the cart total with taxes on the checkout page.' });
+    expect(r.tasks.map((t: { n: number; done: boolean }) => [t.n, t.done])).toEqual([[1, true], [2, false], [3, false]]);
+  });
+  it('check ticks one task in the file, keeping CRLF, and is idempotent', () => {
+    expect(JSON.parse(run(['sp-plan', 'check', F, '--task', '2'], io).stdout)).toEqual({ task: 2, checked: 2 });
+    const text = readFileSync(path.join(root, F), 'utf8');
+    expect(text).toContain('- [x] **Step 3: Commit**\r\n');
+    expect(text.replace(/\r\n/g, '')).not.toContain('\n');
+    expect(JSON.parse(run(['sp-plan', 'check', F, '--task', '2'], io).stdout)).toEqual({ task: 2, checked: 0 });
+  });
+  it('refuses an unknown task, a missing --task, a plan without tasks and a missing file, leaving the plan as it was', () => {
+    const before = readFileSync(path.join(root, F), 'utf8');
+    for (const argv of [['sp-plan', 'check', F, '--task', '9'], ['sp-plan', 'check', F], ['sp-plan', 'check', F, '--task', 'x'], ['brief', '--superpowers-plan', F, '--task', '9'],
+      ['brief', '--superpowers-plan', F], ['sp-plan', 'tasks', 'missing.md'], ['sp-plan', 'nope', F], ['sp-plan', 'tasks']]) {
+      expect(run(argv, io).code).toBe(2);
+    }
+    expect(run(['sp-plan', 'check', F, '--task', '9'], io).stderr).toContain('task 9 is not in the plan');
+    expect(run(['brief', '--superpowers-plan', F, '--task', '9'], io).stderr).toContain('task 9 is not in the plan');
+    writeFileSync(path.join(root, 'empty.md'), '# Plan\n\nno tasks\n');
+    expect(run(['sp-plan', 'tasks', 'empty.md'], io).code).toBe(2);
+    expect(run(['brief', '--superpowers-plan', 'empty.md', '--task', '1'], io).code).toBe(2);
+    expect(readFileSync(path.join(root, F), 'utf8')).toBe(before);
+  });
+  it('brief prints the brief of one task', () => {
+    const r = run(['brief', '--superpowers-plan', F, '--task', '2'], io);
+    expect(r.code).toBe(0);
+    expect(r.stdout.startsWith('# Task 2 — Taxes')).toBe(true);
+    expect(r.stdout).toContain(`Plan: ${F}`);
+  });
+  it('triage takes the pending tasks and their files, and always takes the Medium path', () => {
+    const tracked = ['src/cart/total.ts', 'src/ui/Checkout.tsx', 'src/a.ts', 'src/b.ts', 'src/c.ts', 'README.md'].join('\n');
+    const git = (a: string[]) => (a.includes('ls-files') ? `${tracked}\n` : a.includes('rev-list') ? '40\n' : null);
+    const r = JSON.parse(run(['triage', '--task', 'cart', '--superpowers-plan', F], { ...io, git }).stdout);
+    expect(r.path).toBe('medium');
+    expect(r.files).toEqual(expect.arrayContaining(['src/cart/total.ts', 'src/ui/Checkout.tsx']));
+    expect(r.reasons).toContain('superpowers plan: the Medium path, its tasks in order');
+    expect(r.implementer).toMatchObject({ role: 'impl' });
+    expect(run(['triage', '--task', 'cart', '--superpowers-plan'], { ...io, git }).code).toBe(2);
   });
 });
