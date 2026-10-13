@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, existsSync
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { run, defaultGit, type Io } from '../src/forge/cli/run.js';
+import { run, defaultGit, defaultExec, repoReader, type Io } from '../src/forge/cli/run.js';
 import { readExecution, saveExecution, executionTaskFile } from '../src/forge/execution.js';
 import { normalizeExecution } from '../src/lib/execution-state.js';
 import { setupFor, swarmCommand } from '../src/forge/cli/swarm.js';
@@ -246,6 +246,21 @@ describe('forge swarm (execution)', () => {
       try { gr('worktree', 'prune'); } catch { /* ignore */ }
       rmSync(box, { recursive: true, force: true });
     }
+  });
+  it('start finds the git dir on a git that echoes --path-format back (older than 2.31)', () => {
+    // git < 2.31 prints an unknown rev-parse flag back and exits 0.
+    const old = (dir: string) => {
+      const real = defaultGit(dir);
+      return (args: string[]) => {
+        if (!args.includes('--path-format=absolute')) return real(args);
+        const rest = real(args.filter(a => a !== '--path-format=absolute'));
+        return rest === null ? null : `--path-format=absolute\n${rest}`;
+      };
+    };
+    const deps = { git: old(root), exec: defaultExec(root), repo: repoReader(root), at: (dir: string) => ({ git: old(dir), exec: defaultExec(dir), repo: repoReader(dir) }) };
+    const s = out(swarmCommand(['start', '--project', 'shop', '--session', 'main'], io, deps));
+    expect(s.attributesError).toBeUndefined();
+    expect(readFileSync(path.join(root, '.git', 'info', 'attributes'), 'utf8')).toContain('/.forge/verify/*.md merge=union');
   });
   it('start reports an info/attributes it cannot write and still starts', () => {
     mkdirSync(path.join(root, '.git', 'info', 'attributes'), { recursive: true });
