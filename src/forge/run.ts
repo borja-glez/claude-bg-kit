@@ -12,11 +12,12 @@ export const NO_PROGRESS_LIMIT = 3;
 export const NO_CYCLE_BLOCKS = 2;
 const MAX_ERROR = 2000;
 
-export function startRun(now: Date, budget: RunState['budget'], queueMax = DEFAULT_QUEUE_MAX, sessionId: string | null = null): RunState {
+export function startRun(now: Date, budget: RunState['budget'], queueMax = DEFAULT_QUEUE_MAX, sessionId: string | null = null, locale: string | null = null): RunState {
   return {
     mode: 'infinite', active: true, startedAt: now.toISOString(),
     budget: { ...(budget.cycles !== undefined ? { cycles: budget.cycles } : {}), ...(budget.hours !== undefined ? { hours: budget.hours } : {}) },
     cycle: 0, noProgress: 0, lastError: null, repeatedError: false, lastBlockEvents: null, queueMax, sessionId, blocksSinceCycle: 0,
+    ...(locale ? { locale } : {}),
   };
 }
 

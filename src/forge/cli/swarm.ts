@@ -5,12 +5,12 @@ import { UsageError } from './errors.js';
 import type { ExecResult, Io } from './run.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { loadConfig } from '../config.js';
-import { stopFile } from '../run.js';
+import { stopFile, parseRun, readRunText } from '../run.js';
 import { appendEvent } from '../ledger.js';
 import { readExecution, saveExecution, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree } from '../execution.js';
 import { schedule, widthOf, relaunchOrBlock, RELAUNCH_CAP, type BgAgent } from '../schedule.js';
 import { LEASE_MINUTES, sessionLiveness } from '../../lib/coordination.js';
-import { planLocale } from '../../lib/locale.js';
+import { planLocale, sessionReply } from '../../lib/locale.js';
 import { signalLiveness } from '../../lib/execution-view.js';
 import { liveFile } from '../live.js';
 import { STAGES, normalizePublicTask, normalizeLive, normalizeExecution, isSafeId, isRunBranch, type ExecutionState, type ExecTask, type PublicTask } from '../../lib/execution-state.js';
@@ -851,12 +851,14 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
           }
         }
       }
+      // The person's language (--locale): a resume keeps the recorded one unless a new flag is given.
+      const lang = locale ? { locale } : {};
       const state: ExecutionState = resume && prev
-        ? { ...prev, parallel, mode, mergeOnFinish: prev.mergeOnFinish || has('merge-on-finish'), coordinator: session, hookSession: null, sleepUntil: null, ...auto }
+        ? { ...prev, parallel, mode, mergeOnFinish: prev.mergeOnFinish || has('merge-on-finish'), coordinator: session, hookSession: null, sleepUntil: null, ...auto, ...lang }
         : {
             runId: `${project}-${iso.replace(/[:.]/g, '')}`, kind, mode, parallel, project, base, branch: kind === 'plan' ? branch : base,
             mergeOnFinish: has('merge-on-finish'), coordinator: session, hookSession: null, active: true, stopReason: null, stallReason: null,
-            startedAt: iso, lastStepAt: null, lastBlockStep: null, sleepUntil: null, tasks: {}, ...auto,
+            startedAt: iso, lastStepAt: null, lastBlockStep: null, sleepUntil: null, tasks: {}, ...auto, ...lang,
           };
       // An execution that would not read back (an id outside the safe rule) is refused rather than saved.
       if (!normalizeExecution(state)) throw new UsageError('swarm start: --project, --session and the run branch must use letters, digits, _ - . (and / in the branch), at most 120 characters');
@@ -1065,7 +1067,10 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       // A newer sleep (or a --mark) may have replaced it meanwhile: only clear the value this call set.
       const after = readExecution(io.cwd);
       if (after && after.sleepUntil === until) saveExecution(io.cwd, { ...after, sleepUntil: null });
-      return ok();
+      // The coordinator wakes on this output: it repeats the language to answer in, when one is known.
+      const run = parseRun(readRunText(io.cwd));
+      const reply = sessionReply(run?.active ? run : null, after ?? e, () => planLocale(io.cwd, e.project));
+      return reply ? { code: 0, stdout: `woke.${reply}\n`, stderr: '' } : ok();
     }
     case 'stop': {
       const reason = flag('reason') ?? 'stopped';

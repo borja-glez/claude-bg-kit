@@ -342,6 +342,21 @@ describe('forge swarm (execution)', () => {
     expect(run(['swarm', 'sleep', '60'], io).code).toBe(0);
     expect(readExecution(root)!.sleepUntil).toBeNull();
   });
+  it('start --locale stores the person language (resume keeps it unless a new flag is given); sleep repeats it on waking', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    expect(readExecution(root)).not.toHaveProperty('locale');
+    // No locale known anywhere (plan.yaml is not under docs/waypoint): the plain answer.
+    expect(run(['swarm', 'sleep', '60'], io).stdout).toBe('ok\n');
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--locale', 'es'], io)).locale).toBe('es');
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io)).locale).toBe('es');
+    expect(run(['swarm', 'sleep', '60'], io).stdout).toBe('woke. Tell the user in Spanish (es), the language they write in.\n');
+    expect(run(['swarm', 'sleep', '60', '--mark'], io).stdout).toBe('ok\n');
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--locale', 'en'], io)).locale).toBe('en');
+    expect(normalizeExecution({ ...readExecution(root), locale: 'not a locale' })).not.toHaveProperty('locale');
+    // The infinite run's locale goes first.
+    expect(run(['infinite', 'start', '--cycles', '3', '--locale', 'es'], io).code).toBe(0);
+    expect(run(['swarm', 'sleep', '60'], io).stdout).toBe('woke. Tell the user in Spanish (es), the language they write in.\n');
+  });
   it('propose caps the recommendation with swarm.parallel', () => {
     writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators: []\nswarm:\n  parallel: 1\n');
     expect(out(run(['swarm', 'propose', '--plan', 'plan.yaml'], io))).toMatchObject({ width: 2, recommended: { parallel: 1 } });

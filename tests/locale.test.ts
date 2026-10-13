@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { planLocale, replyIn } from '../src/lib/locale.js';
+import { planLocale, replyIn, sessionReply } from '../src/lib/locale.js';
 
 describe('replyIn', () => {
   it('names the plan language so a hook text does not drag the session into English', () => {
@@ -10,6 +10,22 @@ describe('replyIn', () => {
     expect(replyIn('pt-BR')).toContain('Portuguese (pt)');
     expect(replyIn('xx')).toContain('«xx»');
     expect(replyIn(null)).toBe(' Tell the user in their own language.');
+  });
+  it('names the language the person writes in when it comes from the run or the execution', () => {
+    expect(replyIn('es', 'person')).toBe(' Tell the user in Spanish (es), the language they write in.');
+    expect(replyIn('en', 'person')).toBe(' Tell the user in English (en), the language they write in.');
+    expect(replyIn('xx', 'person')).toBe(' Tell the user in «xx», the language they write in.');
+    expect(replyIn(null, 'person')).toBe(' Tell the user in their own language.');
+    expect(replyIn('es', 'plan')).toBe(" Tell the user in Spanish (es), the plan's language.");
+  });
+});
+
+describe('sessionReply', () => {
+  it('prefers the run, then the execution, then the plan; null when none is known', () => {
+    expect(sessionReply({ locale: 'es' }, { locale: 'en' }, () => 'fr')).toBe(' Tell the user in Spanish (es), the language they write in.');
+    expect(sessionReply(null, { locale: 'en' }, () => 'fr')).toBe(' Tell the user in English (en), the language they write in.');
+    expect(sessionReply({}, null, () => 'fr')).toBe(" Tell the user in French (fr), the plan's language.");
+    expect(sessionReply(null, null, () => null)).toBeNull();
   });
 });
 
@@ -23,5 +39,12 @@ describe('planLocale', () => {
     expect(planLocale(root, 'demo')).toBe('es');
     expect(planLocale(root)).toBe('es');
     expect(planLocale(root, 'other')).toBeNull();
+  });
+  it('is null for a plan without locale (no English default)', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'locale-'));
+    mkdirSync(path.join(root, 'docs', 'waypoint', 'demo'), { recursive: true });
+    writeFileSync(path.join(root, 'docs', 'waypoint', 'demo', 'plan.yaml'), plan('es').replace('locale: es\n', ''));
+    expect(planLocale(root, 'demo')).toBeNull();
+    expect(planLocale(root)).toBeNull();
   });
 });

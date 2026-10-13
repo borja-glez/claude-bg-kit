@@ -1,6 +1,7 @@
 import { STAGES, type Stage } from './types.js';
 import type { SwarmState } from './swarm-state.js';
 import { isPlanId } from './plan.js';
+import { isLocale } from './forge-run.js';
 
 /**
  * The one rule for a session or run id that names a file or reaches the model's context: no `:` (an NTFS stream),
@@ -34,6 +35,8 @@ export interface ExecutionState {
   planned?: number;
   /** Started in auto mode (spec §5.5): the coordinator keeps deciding alone when it resumes. */
   autonomy?: 'auto';
+  /** The language the person writes in (`swarm start --locale`), repeated to the coordinator at each wake. */
+  locale?: string;
 }
 
 // STAGES lives in types.ts (pure, so the roadmap page can bundle it without this file's yaml/zod imports); re-exported here.
@@ -110,6 +113,7 @@ export function normalizeExecution(x: unknown, now?: number): ExecutionState | n
     lastStepAt: iso(x.lastStepAt), lastBlockStep: iso(x.lastBlockStep), sleepUntil: iso(x.sleepUntil),
     ...(typeof x.planned === 'number' && Number.isInteger(x.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x.planned)) } : {}),
     ...(x.autonomy === 'auto' ? { autonomy: 'auto' as const } : {}),
+    ...(isLocale(x.locale) ? { locale: x.locale } : {}),
   };
 }
 

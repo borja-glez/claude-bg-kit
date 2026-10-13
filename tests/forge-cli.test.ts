@@ -9,6 +9,7 @@ import { readLocal } from '../src/forge/local.js';
 import { saveProposal, loadProposals } from '../src/forge/proposals.js';
 import type { ProposalDoc } from '../src/lib/proposals.js';
 import { parsePlan } from '../src/lib/plan.js';
+import { parseStatus } from '../src/forge/tree.js';
 
 let root: string;
 let io: Io;
@@ -652,6 +653,88 @@ describe('forge infinite', () => {
     expect(run(['infinite', 'start', '--cycles', '1', '--session', 'abc'], { ...io, cwd: other }).code).toBe(0);
     expect(run(['hook', 'stop'], { ...io, cwd: other, stdin: '{"session_id":"zzz"}' }).stdout).toBe('');
     expect(JSON.parse(run(['hook', 'stop'], { ...io, cwd: other, stdin: '{"session_id":"abc"}' }).stdout).decision).toBe('block');
+  });
+  it('infinite start --locale keeps the person language; the hook, cycle and status repeat it', () => {
+    expect(run(['infinite', 'start', '--cycles', '3', '--locale', 'spanish'], io).code).toBe(2);
+    expect(run(['infinite', 'start', '--cycles', '3', '--locale'], io).code).toBe(2);
+    expect(existsSync(runFile())).toBe(false);
+    // A plan without locale says nothing about the language: the run's locale decides.
+    mkdirSync(path.join(root, 'docs', 'waypoint', 'demo'), { recursive: true });
+    writeFileSync(path.join(root, 'docs', 'waypoint', 'demo', 'plan.yaml'), 'project: demo\nversion: "0.1"\ntracks: [{ id: a, name: A, color: blue }]\nphases: [{ id: F1, name: One }]\ntasks:\n  - { id: T001, title: x, track: a, phase: F1, done_when: y }\n');
+    expect(run(['infinite', 'start', '--cycles', '3', '--locale', 'es'], io).code).toBe(0);
+    expect(readRun().locale).toBe('es');
+    const says = ' Tell the user in Spanish (es), the language they write in.';
+    expect(JSON.parse(hook('{}').stdout).reason).toMatch(new RegExp(`${says.replace(/[()]/g, '\\$&')}$`));
+    expect(JSON.parse(run(['cycle', '--progress', 'yes'], io).stdout)).toMatchObject({ cycle: 1, locale: 'es', reply: says.trim() });
+    expect(JSON.parse(run(['infinite', 'status'], io).stdout)).toMatchObject({ valid: true, reply: says.trim() });
+  });
+  it('a plan without locale no longer makes the hook say English', () => {
+    mkdirSync(path.join(root, 'docs', 'waypoint', 'demo'), { recursive: true });
+    writeFileSync(path.join(root, 'docs', 'waypoint', 'demo', 'plan.yaml'), 'project: demo\nversion: "0.1"\ntracks: [{ id: a, name: A, color: blue }]\nphases: [{ id: F1, name: One }]\ntasks:\n  - { id: T001, title: x, track: a, phase: F1, done_when: y }\n');
+    run(['infinite', 'start', '--cycles', '3'], io);
+    const reason = JSON.parse(hook('{}').stdout).reason as string;
+    expect(reason).not.toContain('English');
+    expect(reason).toMatch(/Tell the user in their own language\.$/);
+    expect(JSON.parse(run(['infinite', 'status'], io).stdout).reply).toBeNull();
+  });
+});
+
+describe('forge tree', () => {
+  const git = (...a: string[]) => execFileSync('git', a, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const repo = () => {
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 't@t'); git('config', 'user.name', 't'); git('config', 'core.autocrlf', 'false');
+    writeFileSync(path.join(root, '.gitignore'), '.forge/\nbuild/\n');
+    writeFileSync(path.join(root, 'a.txt'), 'a\n');
+    writeFileSync(path.join(root, 'b.txt'), 'b\n');
+    git('add', '.'); git('commit', '-q', '-m', 'init');
+    return git('rev-parse', 'HEAD').trim();
+  };
+  const check = (base: string) => JSON.parse(run(['tree', 'check', '--task', 'T1', '--base', base], io).stdout);
+  it('parseStatus splits untracked from changed and skips the source of a rename', () => {
+    expect(parseStatus(' M a.txt\0R  new.txt\0old.txt\0?? n e w.txt\0A  added.txt\0')).toEqual({ untracked: ['n e w.txt'], modified: ['a.txt', 'new.txt', 'added.txt'] });
+  });
+  it('lists the task commits, the files that appeared and the ones changed after the snapshot; never ignored ones', () => {
+    const base = repo();
+    writeFileSync(path.join(root, 'before.txt'), 'there before\n');
+    writeFileSync(path.join(root, 'b.txt'), 'b dirty before\n');
+    expect(run(['tree', 'snapshot', '--task', 'T1'], io).code).toBe(0);
+    const snap = JSON.parse(readFileSync(path.join(root, '.forge', 'work', 'T1', 'tree-start.json'), 'utf8'));
+    expect(snap.head).toBe(base);
+    // The task commits c.txt; the person creates mine.txt and edits a.txt; a build output is ignored.
+    writeFileSync(path.join(root, 'c.txt'), 'c\n');
+    git('add', 'c.txt'); git('commit', '-q', '-m', 'task');
+    mkdirSync(path.join(root, 'conf'));
+    writeFileSync(path.join(root, 'conf', 'mine.txt'), 'by hand\n');
+    writeFileSync(path.join(root, 'a.txt'), 'edited by hand\n');
+    mkdirSync(path.join(root, 'build'));
+    writeFileSync(path.join(root, 'build', 'out.js'), 'x\n');
+    const out = check(base);
+    expect(out.task).toEqual(['c.txt']);
+    expect(out.appeared).toEqual(['conf/mine.txt']);
+    expect(out.changed).toEqual(['a.txt']);
+    expect(out.snapshot).toMatchObject({ head: base });
+    expect(JSON.stringify(out)).not.toContain('build/');
+    expect(JSON.stringify(out)).not.toContain('before.txt');
+  });
+  it('without a snapshot lists every untracked and modified path (fail safe)', () => {
+    const base = repo();
+    writeFileSync(path.join(root, 'new.txt'), 'n\n');
+    writeFileSync(path.join(root, 'a.txt'), 'changed\n');
+    const out = check(base);
+    expect(out).toMatchObject({ snapshot: null, task: [], appeared: ['new.txt'], changed: ['a.txt'] });
+  });
+  it('caps each list and counts the rest; refuses a bad task or base', () => {
+    const base = repo();
+    run(['tree', 'snapshot', '--task', 'T1'], io);
+    for (let i = 0; i < 205; i++) writeFileSync(path.join(root, `n${String(i).padStart(3, '0')}.txt`), 'x\n');
+    const out = check(base);
+    expect(out.appeared).toHaveLength(200);
+    expect(out.more).toMatchObject({ appeared: 5 });
+    expect(run(['tree', 'snapshot'], io).code).toBe(2);
+    expect(run(['tree', 'snapshot', '--task', '../x'], io).code).toBe(2);
+    expect(run(['tree', 'check', '--task', 'T1'], io).code).toBe(2);
+    expect(run(['tree', 'check', '--task', 'T1', '--base', 'nope'], io).code).toBe(2);
   });
 });
 
