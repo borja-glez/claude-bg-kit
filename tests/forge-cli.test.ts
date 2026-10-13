@@ -314,6 +314,8 @@ describe('forge CLI', () => {
     expect(JSON.parse(run(['triage', '--locale', 'en', 'add a dark mode toggle'], io).stdout).announce).toMatch(/^Small → forge-impl-light: no files located/);
   });
   it('triage adds a line for new validators with their commands', () => {
+    // The validators already announced are remembered under the git common dir: the project is a repository.
+    execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
     writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'x', lint: 'y' } }));
     const git = (args: string[]) => (args.includes('ls-files') ? 'a.ts\nb.ts\nc.ts\nd.ts\ne.ts\n' : args[0] === 'rev-list' ? '5\n' : '');
     const first = JSON.parse(run(['triage', '--locale', 'es', 'fix a typo in a.ts'], { ...io, git }).stdout);
