@@ -36,7 +36,7 @@ A decision you take in place of the user because nobody is there to ask (an unat
 
 ## Autonomy
 
-forge asks at its gates unless autonomy is `auto`. It is `auto` when `FORGE prefs` resolves `autonomy: auto` (your own `local.yaml` in the git directory over `.forge/config.yaml`), with `/forge:run --auto`, or when the request says so ("en automático", "sin preguntarme", "modo auto", "on auto", "without asking"); a request that asks to be asked wins the other way (`FORGE prefs --autonomy ask`). Auto is `### Unattended` from the start, plus approving the design and the plan:
+forge asks at its gates unless autonomy is `auto`. It is `auto` when `FORGE prefs` resolves `autonomy: auto` (`.forge/local.yaml` over `.forge/config.yaml`), with `/forge:run --auto`, or when the request says so ("en automático", "sin preguntarme", "modo auto", "on auto", "without asking"); a request that asks to be asked wins the other way (`FORGE prefs --autonomy ask`). Auto is `### Unattended` from the start, plus approving the design and the plan:
 - **Record it:** `FORGE triage --autonomy auto …` in `## 1. Triage`, and `FORGE swarm start --autonomy auto …` in Execution step 1.
 - **Questions only at launch,** all in one message (AskUserQuestion), and none after:
   - changes in the tree that are not the task's (never automated: commit, stash or leave them, as `Rules for every path` says);
