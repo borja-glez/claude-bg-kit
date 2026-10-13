@@ -149,6 +149,79 @@ describe('forge swarm (execution)', () => {
     expect(setupFor(files(['yarn.lock']), undefined)).toEqual({ cmd: 'yarn install --frozen-lockfile' });
     expect(setupFor(files([]), undefined)).toBeNull();
     expect(setupFor(files(['package-lock.json', '.venv']), 'make deps')).toEqual({ cmd: 'make deps' });
+    expect(setupFor(files(['package.json', 'bun.lock']), undefined)).toEqual({ cmd: 'bun install --frozen-lockfile' });
+    expect(setupFor(files(['package.json', 'bun.lockb']), undefined)).toEqual({ cmd: 'bun install --frozen-lockfile' });
+    expect(setupFor(files(['package.json', 'npm-shrinkwrap.json']), undefined)).toEqual({ cmd: 'npm ci' });
+    // No lockfile: an install that writes none, so no untracked lockfile appears.
+    expect(setupFor(files(['package.json']), undefined)).toEqual({ cmd: 'npm install --no-package-lock' });
+    expect(setupFor(files(['package.json']), 'make deps')).toEqual({ cmd: 'make deps' });
+  });
+  it('start announces the run in English without a plan locale: new, resumed, with and without merge on finish', () => {
+    const s = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--merge-on-finish'], io));
+    expect(s.announce).toEqual([
+      'Execution running: subagents mode, 3 tasks at a time, branch forge/run-shop.',
+      'To see the app with the work, open it from .claude/worktrees/run.',
+      'When it ends, if the final review passes, I merge forge/run-shop into main.',
+      '/forge:stop stops it.',
+    ]);
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--mode', 'sessions', '--parallel', '1'], io)).announce)
+      .toEqual([`Resuming the execution ${s.runId}: sessions mode, 1 at a time, branch forge/run-shop.`]);
+    expect(run(['swarm', 'stop'], io).code).toBe(0);
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--parallel', '1'], io)).announce).toEqual([
+      'Execution running: subagents mode, 1 task at a time, branch forge/run-shop.',
+      'To see the app with the work, open it from .claude/worktrees/run.',
+      'When it ends I merge nothing without asking you.',
+      '/forge:stop stops it.',
+    ]);
+  });
+  it('start announces the run in the plan language, and --locale chooses', () => {
+    mkdirSync(path.join(root, 'docs', 'waypoint', 'shop'), { recursive: true });
+    writeFileSync(path.join(root, 'docs', 'waypoint', 'shop', 'plan.yaml'), PLAN);
+    const s = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--mode', 'sessions', '--parallel', '1'], io));
+    expect(s.announce).toEqual([
+      'Ejecución en marcha: modo sesiones, 1 tarea a la vez, rama forge/run-shop.',
+      'Para ver la app con el trabajo, ábrela desde .claude/worktrees/run.',
+      'Al acabar no integro nada sin preguntarte.',
+      '/forge:stop la detiene.',
+    ]);
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io)).announce)
+      .toEqual([`Retomo la ejecución ${s.runId}: modo subagentes, 3 a la vez, rama forge/run-shop.`]);
+    expect(run(['swarm', 'stop'], io).code).toBe(0);
+    const merging = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--merge-on-finish'], io));
+    expect(merging.announce[2]).toBe('Al acabar, si la revisión final pasa, integro forge/run-shop en main.');
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--locale', 'en'], io)).announce[0]).toMatch(/^Resuming the execution /);
+  });
+  it('start refuses a --locale other than es or en before creating anything', () => {
+    const r = run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--locale', 'fr'], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('--locale');
+    expect(existsSync(path.join(root, '.claude', 'worktrees', 'run'))).toBe(false);
+    expect(readExecution(root)).toBeNull();
+  });
+  it('start announces a failed setup with its command, or that none is configured, and the last line of its output', () => {
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators: []\nswarm:\n  setup: node -e "console.log(\'no network\');process.exit(3)"\n');
+    const s = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    expect(s.setup).toMatchObject({ ok: false });
+    expect(s.announce).toHaveLength(5);
+    expect(s.announce[4]).toBe('The worktree setup `node -e "console.log(\'no network\');process.exit(3)"` failed: no network');
+    expect(run(['swarm', 'stop'], io).code).toBe(0);
+    git('worktree', 'remove', '--force', path.join(root, '.claude', 'worktrees', 'run'));
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators: []\n');
+    mkdirSync(path.join(root, '.venv'));
+    const es = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--locale', 'es'], io));
+    expect(es.announce[es.announce.length - 1]).toBe('No hay ningún comando de preparación configurado (swarm.setup en .forge/config.yaml): python project: set swarm.setup in .forge/config.yaml to create the venv in each worktree');
+    expect(run(['swarm', 'stop'], io).code).toBe(0);
+    git('worktree', 'remove', '--force', path.join(root, '.claude', 'worktrees', 'run'));
+    const en = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    expect(en.announce[en.announce.length - 1]).toBe('No setup command is configured (swarm.setup in .forge/config.yaml): python project: set swarm.setup in .forge/config.yaml to create the venv in each worktree');
+  });
+  it('start makes git merge the surfaces with the union driver: one line in info/attributes, the rest kept', () => {
+    const attributes = path.join(root, '.git', 'info', 'attributes');
+    writeFileSync(attributes, '*.png binary');
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    expect(readFileSync(attributes, 'utf8').split(/\r?\n/).filter(Boolean)).toEqual(['*.png binary', '/.forge/verify/*.md merge=union']);
+    expect(git('status', '--porcelain')).toBe('');
   });
   it('task --drop forgets a task lost in a claim race, so the next tick leaves it to its owner', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
@@ -481,6 +554,12 @@ describe('forge swarm (execution)', () => {
       expect(e).toMatchObject({ kind: 'ephemeral', mode: 'subagents', base: 'main', branch: 'main', parallel: 2, loose: 3 });
       expect(existsSync(path.join(root, '.claude', 'worktrees', 'run'))).toBe(false);
       expect(readLoose(root, e.runId)?.tasks.map((t: { id: string }) => t.id)).toEqual(['fix-a', 'fix-b', 'fix-c']);
+    });
+    it('start announces the loose tasks, in English by default and in Spanish with --locale es', () => {
+      expect(out(start()).announce).toEqual(['3 loose tasks, 2 at a time; each goes into main as soon as it is accepted. /forge:stop stops it.']);
+      expect(readFileSync(path.join(root, '.git', 'info', 'attributes'), 'utf8')).toContain('/.forge/verify/*.md merge=union');
+      expect(run(['swarm', 'stop'], io).code).toBe(0);
+      expect(out(start('--locale', 'es')).announce).toEqual(['3 tareas sueltas, 2 a la vez; cada una entra en main en cuanto se acepta. /forge:stop la detiene.']);
     });
     it('start refuses sessions mode, a missing or invalid --tasks, and an unmerged task branch, before writing anything', () => {
       expect(start('--mode', 'sessions').code).toBe(2);

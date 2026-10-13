@@ -20,3 +20,56 @@ export function saveSwarm(root: string, s: SwarmState): void {
     renameSync(tmp, file);
   } finally { rmSync(tmp, { force: true }); }
 }
+
+// The lines the coordinator prints to the person as they are (`announce` of `swarm start`, `say` of `swarm integrate`).
+
+export interface StartFacts {
+  es: boolean; kind: 'plan' | 'ephemeral'; resume: boolean; runId: string; mode: 'subagents' | 'sessions'; parallel: number;
+  branch: string; base: string; mergeOnFinish: boolean; loose: number;
+  setup: { cmd: string | null; ok: boolean; tail: string[] } | null;
+}
+
+/** How the execution was set up: the mode, the width, the branch, where to see the work and what happens at the end. */
+export function startAnnounce(f: StartFacts): string[] {
+  const mode = f.es ? (f.mode === 'sessions' ? 'sesiones' : 'subagentes') : f.mode;
+  const lines: string[] = [];
+  if (f.resume) {
+    lines.push(f.es ? `Retomo la ejecución ${f.runId}: modo ${mode}, ${f.parallel} a la vez, rama ${f.branch}.`
+      : `Resuming the execution ${f.runId}: ${mode} mode, ${f.parallel} at a time, branch ${f.branch}.`);
+  } else if (f.kind === 'ephemeral') {
+    const tasks = f.es ? (f.loose === 1 ? 'tarea suelta' : 'tareas sueltas') : (f.loose === 1 ? 'loose task' : 'loose tasks');
+    lines.push(f.es ? `${f.loose} ${tasks}, ${f.parallel} a la vez; cada una entra en ${f.branch} en cuanto se acepta. /forge:stop la detiene.`
+      : `${f.loose} ${tasks}, ${f.parallel} at a time; each goes into ${f.branch} as soon as it is accepted. /forge:stop stops it.`);
+  } else if (f.es) {
+    lines.push(
+      `Ejecución en marcha: modo ${mode}, ${f.parallel} ${f.parallel === 1 ? 'tarea' : 'tareas'} a la vez, rama ${f.branch}.`,
+      'Para ver la app con el trabajo, ábrela desde .claude/worktrees/run.',
+      f.mergeOnFinish ? `Al acabar, si la revisión final pasa, integro ${f.branch} en ${f.base}.` : 'Al acabar no integro nada sin preguntarte.',
+      '/forge:stop la detiene.',
+    );
+  } else {
+    lines.push(
+      `Execution running: ${mode} mode, ${f.parallel} ${f.parallel === 1 ? 'task' : 'tasks'} at a time, branch ${f.branch}.`,
+      'To see the app with the work, open it from .claude/worktrees/run.',
+      f.mergeOnFinish ? `When it ends, if the final review passes, I merge ${f.branch} into ${f.base}.` : 'When it ends I merge nothing without asking you.',
+      '/forge:stop stops it.',
+    );
+  }
+  if (f.setup && !f.setup.ok) {
+    const last = f.setup.tail[f.setup.tail.length - 1] ?? (f.es ? 'sin salida' : 'no output');
+    lines.push(f.setup.cmd === null
+      ? (f.es ? `No hay ningún comando de preparación configurado (swarm.setup en .forge/config.yaml): ${last}` : `No setup command is configured (swarm.setup in .forge/config.yaml): ${last}`)
+      : (f.es ? `La preparación del worktree con \`${f.setup.cmd}\` falló: ${last}` : `The worktree setup \`${f.setup.cmd}\` failed: ${last}`));
+  }
+  return lines;
+}
+
+/** What an integration brought the person should hear of: each validator that appeared, and those that already failed. */
+export function integratedSay(es: boolean, branch: string, newValidators: { name: string; cmd: string }[], preexisting: string[]): string[] {
+  const lines = newValidators.map(v => (es ? `Nuevo validador ${v.name}: \`${v.cmd}\`` : `New validator ${v.name}: \`${v.cmd}\``));
+  if (preexisting.length) {
+    lines.push(es ? `Validadores que ya fallaban en ${branch} y no cuentan: ${preexisting.join(', ')}.`
+      : `Validators that already failed on ${branch} and do not count: ${preexisting.join(', ')}.`);
+  }
+  return lines;
+}

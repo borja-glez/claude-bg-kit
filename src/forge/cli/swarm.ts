@@ -1,8 +1,8 @@
-import { existsSync, statSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, statSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import path from 'node:path';
 import { UsageError } from './errors.js';
 import type { ExecResult, Io } from './run.js';
-import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, type RepoReader, type ValidatorResult } from '../validators.js';
+import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { loadConfig } from '../config.js';
 import { stopFile } from '../run.js';
 import { appendEvent } from '../ledger.js';
@@ -16,9 +16,10 @@ import { STAGES, normalizePublicTask, normalizeLive, normalizeExecution, isSafeI
 import { parsePlan, PlanError, isPlanId } from '../../lib/plan.js';
 import type { SessionDoc, Stage, TaskState } from '../../lib/types.js';
 import { mainWorktreeFrom, samePath } from '../../lib/worktree.js';
-import { mainCheckout } from '../local.js';
+import { mainCheckout, updateLocal } from '../local.js';
 import { readMember, writeMember, isMemberId } from '../members.js';
 import { parseLooseTasks, planOfLoose, statesOfLoose, writeLoose, readLoose, type LooseTask } from '../loose.js';
+import { startAnnounce, integratedSay } from '../swarm.js';
 
 export interface GitDeps { git: (args: string[]) => string | null; exec: (cmd: string, timeoutSec: number) => ExecResult; repo: RepoReader }
 export interface SwarmDeps extends GitDeps { at: (dir: string) => GitDeps }
@@ -40,14 +41,24 @@ const VENV_HINT = 'python project: set swarm.setup in .forge/config.yaml to crea
 export type SetupPlan = { cmd: string } | { cmd: null; hint: string } | null;
 export type SetupResult = { cmd: string | null; ok: boolean; tail: string[] } | null;
 
-/** What prepares a new worktree: swarm.setup, else the install command of the main checkout's lockfile. */
+/** What prepares a worktree: swarm.setup, else the install command of its lockfile, else npm for a bare package.json. */
 export function setupFor(repo: RepoReader, configured: string | undefined): SetupPlan {
   if (configured) return { cmd: configured };
   if (repo.exists('.venv')) return { cmd: null, hint: VENV_HINT };
-  if (repo.exists('package-lock.json')) return { cmd: 'npm ci' };
+  if (repo.exists('package-lock.json') || repo.exists('npm-shrinkwrap.json')) return { cmd: 'npm ci' };
   if (repo.exists('pnpm-lock.yaml')) return { cmd: 'pnpm install --frozen-lockfile' };
   if (repo.exists('yarn.lock')) return { cmd: 'yarn install --frozen-lockfile' };
+  if (repo.exists('bun.lock') || repo.exists('bun.lockb')) return { cmd: 'bun install --frozen-lockfile' };
+  // No lockfile: an install that writes none, so no untracked lockfile appears in the worktree.
+  if (repo.exists('package.json')) return { cmd: 'npm install --no-package-lock' };
   return null;
+}
+
+/** The setup's outcome: its last 20 output lines, a timeout said as the last one. */
+function setupResult(cmd: string, r: ExecResult, timeoutSec: number): NonNullable<SetupResult> {
+  const tail = r.output.split(/\r?\n/).filter(l => l.trim());
+  if (r.timedOut) tail.push(`timeout after ${timeoutSec} s`);
+  return { cmd, ok: r.code === 0 && !r.timedOut, tail: tail.slice(-20) };
 }
 
 /** Runs the setup in a worktree just created; a failure is reported, never thrown. */
@@ -61,9 +72,65 @@ function runSetup(deps: SwarmDeps, dir: string, root: string): SetupResult {
   const plan = setupFor(repo, config.swarm.setup);
   if (!plan) return null;
   if (plan.cmd === null) return { cmd: null, ok: false, tail: [plan.hint] };
-  const r = deps.at(dir).exec(plan.cmd, config.validatorTimeoutSec);
-  return { cmd: plan.cmd, ok: r.code === 0 && !r.timedOut, tail: r.output.split(/\r?\n/).filter(l => l.trim()).slice(-20) };
+  return setupResult(plan.cmd, deps.at(dir).exec(plan.cmd, config.validatorTimeoutSec), config.validatorTimeoutSec);
 }
+
+const DEPS_DIR = 'node_modules';
+// The manifests and lockfiles whose change in a merge means the dependencies are installed again.
+const DEP_FILES = [':(glob)**/package.json', 'package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock*'];
+const LEARNED_UNION = '/.forge/verify/*.md merge=union';
+
+/** Appends `line` to `file` unless a line of it already says it; whatever else the file holds stays. */
+function appendOnce(file: string, line: string): void {
+  let text = '';
+  try { text = readFileSync(file, 'utf8'); } catch { /* a missing file is created */ }
+  if (text.split(/\r?\n/).some(l => l.trim() === line)) return;
+  mkdirSync(path.dirname(file), { recursive: true });
+  appendFileSync(file, `${text && !text.endsWith('\n') ? '\n' : ''}${line}\n`);
+}
+
+/** `<git common dir>/<rel>`, the files every worktree of the repository shares; null when git cannot say. */
+function commonFile(at: GitDeps, rel: string): string | null {
+  const [top, common] = (at.git(['rev-parse', '--show-toplevel', '--git-common-dir']) ?? '').split(/\r?\n/).map(l => l.trim());
+  return top && common ? path.join(path.resolve(top, common), rel) : null;
+}
+
+/**
+ * node_modules/ goes to info/exclude when nothing ignores it in `at` (a greenfield tree, or a rollback that took the
+ * .gitignore away): once, shared by every worktree. A failure leaves it untracked, which the next status reports.
+ */
+function excludeDeps(at: GitDeps): void {
+  if (at.git(['check-ignore', '-q', DEPS_DIR]) !== null) return;
+  const file = commonFile(at, path.join('info', 'exclude'));
+  if (!file) return;
+  try { appendOnce(file, `${DEPS_DIR}/`); } catch { /* reported as untracked by the next status */ }
+}
+
+/** git's union driver for the surfaces (both sides' learned notes stay), in info/attributes: no commit. An error, or null. */
+function unionLearned(deps: GitDeps): string | null {
+  const file = commonFile(deps, path.join('info', 'attributes'));
+  if (!file) return 'cannot find the git directory';
+  try { appendOnce(file, LEARNED_UNION); return null; } catch (e) { return (e as Error).message; }
+}
+
+const needsDeps = (at: GitDeps) => at.repo.exists('package.json') && !at.repo.exists(DEPS_DIR);
+
+/**
+ * Installs the dependencies of the package.json at the root of `at` with setupFor's command (swarm.setup wins); a
+ * node_modules/ it creates is excluded when nothing ignores it. A failure is reported, never thrown.
+ */
+function ensureDeps(at: GitDeps, configured: string | undefined, timeoutSec: number): { setup: NonNullable<SetupResult>; created: boolean } | null {
+  // A .venv says nothing about a node manifest: swarm.setup or the node lockfiles choose.
+  const plan = setupFor({ ...at.repo, exists: rel => rel !== '.venv' && at.repo.exists(rel) }, configured);
+  if (!plan || plan.cmd === null) return null;
+  const had = at.repo.exists(DEPS_DIR);
+  const setup = setupResult(plan.cmd, at.exec(plan.cmd, timeoutSec), timeoutSec);
+  const created = !had && at.repo.exists(DEPS_DIR);
+  if (created) excludeDeps(at);
+  return { setup, created };
+}
+
+const lastLine = (s: NonNullable<SetupResult>) => s.tail[s.tail.length - 1] ?? 'no output';
 
 /** The worktree that has `branch` checked out, from `git worktree list --porcelain`; null when none. */
 function worktreeHolding(porcelain: string | null, branch: string): string | null {
@@ -135,7 +202,24 @@ function readTickInput(io: Io, deps: SwarmDeps, e: ExecutionState, planArg: stri
 
 const LOCAL_STATE = [':!.forge', ':!.waypoint', ':!.claude'];
 
-type MergeOutcome = { result: 'merged'; sha: string; preexisting: string[] } | { result: 'dirty' | 'conflict'; detail: string };
+type NewValidator = { name: string; cmd: string };
+// setup: the last dependency install of the attempt, when one ran. leftovers: the untracked paths, not ignored, that the
+// attempt left behind (nothing is deleted).
+type MergeOutcome =
+  | { result: 'merged'; sha: string; preexisting: string[]; newValidators: NewValidator[]; setup?: SetupResult }
+  | { result: 'dirty' | 'conflict'; detail: string; setup?: SetupResult; leftovers?: string[] };
+
+interface MergeOpts {
+  message: string; scope: 'heavy' | 'final'; timeoutSec: number; configRoot: string; cacheDir: string; target: 'run' | 'main';
+  /** swarm.setup of the main checkout, which installs the dependencies (setupFor). */
+  setup: string | undefined;
+  /** The final merge: the run worktree, clean on the tip of `ref`, with its dependencies installed. */
+  runAt?: GitDeps | null;
+}
+
+// The untracked paths git does not ignore, forge's own state aside (a directory collapsed into `dir/`).
+const untracked = (at: GitDeps) => (at.git(['-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '--directory', '--', '.', ...LOCAL_STATE]) ?? '')
+  .split(/\r?\n/).map(l => l.trim()).filter(Boolean);
 
 // A baseline is only valid for the same scope and target (worktree, config and environment differ between them).
 const baselineFile = (cacheDir: string, key: string, sha: string) => path.join(cacheDir, 'baseline', `${key}-${sha}.json`);
@@ -151,9 +235,12 @@ function writeBaseline(cacheDir: string, key: string, sha: string, results: unkn
 /**
  * Merges `ref` into the branch checked out at `at` with --no-ff, runs the validators there and commits `message`.
  * A conflict or a red validator is rolled back to the pre-merge sha; a merge left half-done is never touched.
+ * The validators get the dependencies of a package.json first (ensureDeps): before the baseline when `at` has none,
+ * and after the merge when it changed a manifest or a lockfile or they are still missing.
  */
-function mergeIn(at: GitDeps, ref: string, message: string, scope: 'heavy' | 'final', timeoutSec: number, configRoot: string, cacheDir: string, target: 'run' | 'main'): MergeOutcome {
-  const key = `${scope}-${target}`;
+function mergeIn(at: GitDeps, ref: string, o: MergeOpts): MergeOutcome {
+  const key = `${o.scope}-${o.target}`;
+  const selection: Scope = o.scope === 'final' ? { mode: 'final' } : { mode: 'heavy', changed: null };
   const merging = () => at.git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']) !== null;
   if (merging()) return { result: 'dirty', detail: 'an unfinished merge is in progress there (git merge --abort to clear it)' };
   const dirty = at.git(['status', '--porcelain', '--', '.', ...LOCAL_STATE]);
@@ -161,46 +248,121 @@ function mergeIn(at: GitDeps, ref: string, message: string, scope: 'heavy' | 'fi
   if (at.git(['rev-parse', '--verify', '-q', `${ref}^{commit}`]) === null) return { result: 'conflict', detail: `unknown ref ${ref}` };
   const pre = at.git(['rev-parse', 'HEAD'])?.trim();
   if (!pre) return { result: 'conflict', detail: 'cannot read HEAD' };
+  const before = new Set(untracked(at));
+  let setup: NonNullable<SetupResult> | undefined;
+  let created = false;
+  let installed = false;
+  const install = (): boolean => {
+    const d = ensureDeps(at, o.setup, o.timeoutSec);
+    if (!d) return true;
+    installed = true;
+    setup = d.setup;
+    created ||= d.created;
+    return d.setup.ok;
+  };
+  const leftovers = () => {
+    // A node_modules/ this attempt created is not noise once the merge whose .gitignore covered it is undone.
+    if (created) excludeDeps(at);
+    return untracked(at).filter(p => !before.has(p));
+  };
+  const withSetup = () => (setup ? { setup } : {});
   const rollback = (detail: string): MergeOutcome => {
     const undone = at.git(['merge', '--abort']) !== null;
     const clean = undone && at.git(['rev-parse', 'HEAD'])?.trim() === pre && !merging();
-    return { result: 'conflict', detail: clean ? detail : `rollback failed: needs manual attention (${detail})` };
+    return { result: 'conflict', detail: clean ? detail : `rollback failed: needs manual attention (${detail})`, ...withSetup(), leftovers: leftovers() };
   };
-  // What the target's tip already fails is not caused by this merge: validators red there are "preexisting".
-  let baseline: unknown = readBaseline(cacheDir, key, pre);
-  if (baseline === null) {
-    try {
-      const config0 = loadConfig(configRoot);
-      baseline = runValidators(selectValidators(detectValidators(at.repo, config0), scope === 'final' ? { mode: 'final' } : { mode: 'heavy', changed: null }), at.exec, timeoutSec);
-      writeBaseline(cacheDir, key, pre, baseline);
-    } catch { baseline = []; }
+  // The final merge into a target that has not moved since the run branched: the merged tree is the run tip's, which
+  // the run worktree validates with its own dependencies; nothing is installed in the person's checkout.
+  const unmoved = !!o.runAt && at.git(['merge-base', '--is-ancestor', 'HEAD', ref]) !== null;
+  if (!unmoved && needsDeps(at)) {
+    if (!install()) return { result: 'dirty', detail: `could not install its dependencies before merging ${ref}: ${lastLine(setup!)}`, ...withSetup(), leftovers: leftovers() };
     const left = at.git(['status', '--porcelain', '--', '.', ...LOCAL_STATE]);
-    if (left === null || left.trim() !== '') return { result: 'dirty', detail: `the validators left changes in the worktree: ${(left ?? '').split(/\r?\n/).filter(Boolean).slice(0, 5).join(', ')}` };
+    if (left === null || left.trim() !== '') return { result: 'dirty', detail: `the dependency install left changes in the worktree: ${(left ?? '').split(/\r?\n/).filter(Boolean).slice(0, 5).join(', ')}`, ...withSetup(), leftovers: leftovers() };
+  }
+  // What the target detects before the merge: the validators detected only after it are new.
+  let detected0: Validator[] | null = null;
+  try { detected0 = detectValidators(at.repo, loadConfig(o.configRoot)); } catch { detected0 = null; }
+  // What the target's tip already fails is not caused by this merge: validators red there are "preexisting".
+  let baseline: unknown = readBaseline(o.cacheDir, key, pre);
+  if (baseline === null) {
+    // Without its dependencies the tip would fail everything, which would excuse every failure after the merge.
+    if (unmoved && needsDeps(at)) baseline = [];
+    else {
+      try {
+        baseline = detected0 ? runValidators(selectValidators(detected0, selection), at.exec, o.timeoutSec) : [];
+        if (detected0) writeBaseline(o.cacheDir, key, pre, baseline);
+      } catch { baseline = []; }
+      const left = at.git(['status', '--porcelain', '--', '.', ...LOCAL_STATE]);
+      if (left === null || left.trim() !== '') return { result: 'dirty', detail: `the validators left changes in the worktree: ${(left ?? '').split(/\r?\n/).filter(Boolean).slice(0, 5).join(', ')}`, ...withSetup() };
+    }
   }
   if (at.git(['merge', '--no-ff', '--no-commit', ref]) === null) {
-    if (!merging()) return { result: 'conflict', detail: `git refused to merge ${ref}` };
+    if (!merging()) return { result: 'conflict', detail: `git refused to merge ${ref}`, ...withSetup() };
     return rollback(`merge conflict with ${ref}`);
   }
-  if (!merging()) return { result: 'merged', sha: pre, preexisting: [] };
+  if (!merging()) return { result: 'merged', sha: pre, preexisting: [], newValidators: [], ...withSetup() };
+  // The index holds the merged tree (HEAD is still the pre-merge commit until the commit below).
+  const merged = at.git(['write-tree'])?.trim() || null;
+  const inRun = !!o.runAt && merged !== null && merged === (at.git(['rev-parse', '--verify', '-q', `${ref}^{tree}`])?.trim() || null);
+  const v = inRun ? o.runAt! : at;
+  if (!inRun && at.repo.exists('package.json')) {
+    const changed = at.git(['diff', '--name-only', pre, '--', ...DEP_FILES]);
+    // An unreadable diff counts as a change: installing again is safer than validating without dependencies.
+    if (changed === null || changed.trim() !== '' || (!installed && !at.repo.exists(DEPS_DIR))) {
+      if (!install()) return rollback(`dependencies could not be installed after merging ${ref}: ${lastLine(setup!)}`);
+      const touched = at.git(['diff', '--name-only']);
+      if (touched === null || touched.trim() !== '') return rollback(`the dependency install changed tracked files after merging ${ref}: ${(touched ?? '').split(/\r?\n/).filter(Boolean).slice(0, 5).join(', ')}`);
+    }
+  }
   let results: ValidatorResult[];
+  let detected: Validator[];
   try {
-    const config = loadConfig(configRoot);
-    results = markPreexisting(runValidators(selectValidators(detectValidators(at.repo, config), scope === 'final' ? { mode: 'final' } : { mode: 'heavy', changed: null }), at.exec, timeoutSec), baseline);
+    detected = detectValidators(v.repo, loadConfig(o.configRoot));
+    results = markPreexisting(runValidators(selectValidators(detected, selection), v.exec, o.timeoutSec), baseline);
   } catch (err) {
     return rollback(`validators could not run: ${(err as Error).message}`);
   }
   const failed = results.filter(blocking);
   if (failed.length) return rollback(`validators failed after merging ${ref}: ${failed.map(r => r.validator).join(', ')}`);
-  if (at.git(['commit', '--no-edit', '-m', message]) === null || merging()) return rollback(`could not commit the merge of ${ref}`);
+  if (at.git(['commit', '--no-edit', '-m', o.message]) === null || merging()) return rollback(`could not commit the merge of ${ref}`);
   const sha = at.git(['rev-parse', 'HEAD'])?.trim() ?? '';
   if (!sha || sha === pre) return rollback(`could not commit the merge of ${ref}`);
-  writeBaseline(cacheDir, key, sha, results);
-  return { result: 'merged', sha, preexisting: results.filter(r => r.preexisting).map(r => r.validator) };
+  writeBaseline(o.cacheDir, key, sha, results);
+  const newValidators = detected0 ? detected.filter(d => !detected0!.some(b => b.name === d.name)).map(d => ({ name: d.name, cmd: d.cmd })) : [];
+  return { result: 'merged', sha, preexisting: results.filter(r => r.preexisting).map(r => r.validator), newValidators, ...withSetup() };
 }
+
+/** The run worktree when it is on the tip of `branch` with nothing uncommitted (its tree is the branch's); else null. */
+function cleanRunWorktree(deps: SwarmDeps, wt: string, branch: string): GitDeps | null {
+  if (!existsSync(wt)) return null;
+  const at = deps.at(wt);
+  const tip = deps.git(['rev-parse', '--verify', '-q', `refs/heads/${branch}`])?.trim();
+  if (!tip || at.git(['rev-parse', 'HEAD'])?.trim() !== tip) return null;
+  if (at.git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']) !== null) return null;
+  const status = at.git(['status', '--porcelain', '--', '.', ...LOCAL_STATE]);
+  return status !== null && status.trim() === '' ? at : null;
+}
+
+/** --locale es|en; null when not given. */
+function localeArg(rest: string[], sub: string): 'es' | 'en' | null {
+  const i = rest.indexOf('--locale');
+  if (i < 0) return null;
+  const v = rest[i + 1];
+  if (v !== 'es' && v !== 'en') throw new UsageError(`swarm ${sub}: --locale must be es or en`);
+  return v;
+}
+
+/** Spanish when --locale es, or without --locale when the plan's locale is Spanish; else English. */
+const spanish = (given: 'es' | 'en' | null, root: string, project: string) =>
+  given ? given === 'es' : (planLocale(root, project) ?? '').toLowerCase().split(/[-_]/)[0] === 'es';
+
+// What the coordinator passes on of a merge attempt: the install that ran and what a rollback left behind.
+const attemptExtras = (r: MergeOutcome) => ({ ...(r.setup ? { setup: r.setup } : {}), ...('leftovers' in r && r.leftovers ? { leftovers: r.leftovers } : {}) });
 
 function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
   const task = rest[0];
   if (!task || !isPlanId(task)) throw new UsageError('swarm integrate: a task id is required');
+  const locale = localeArg(rest, 'integrate');
   const e = readExecution(io.cwd);
   if (!e) throw new UsageError('swarm integrate: no execution (forge swarm start)');
   const t = e.tasks[task];
@@ -217,14 +379,23 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
     throw new UsageError(`swarm integrate: the main checkout is on ${head ?? '?'}, not ${e.branch} (the branch this ephemeral run started from); switch back to ${e.branch} to integrate ${task}`);
   }
   const config = loadConfig(io.cwd);
-  const r = mergeIn(target, t.branch, `forge: integrate ${task}`, 'heavy', config.validatorTimeoutSec, wt, path.join(io.cwd, '.forge', 'execution'), 'run');
+  const r = mergeIn(target, t.branch, {
+    message: `forge: integrate ${task}`, scope: 'heavy', timeoutSec: config.validatorTimeoutSec, configRoot: wt,
+    cacheDir: path.join(io.cwd, '.forge', 'execution'), target: 'run', setup: config.swarm.setup,
+  });
   const cur = readExecution(io.cwd)!;
-  if (r.result === 'dirty') return out({ result: 'run-dirty', detail: r.detail });
+  if (r.result === 'dirty') return out({ result: 'run-dirty', detail: r.detail, ...attemptExtras(r) });
   const next: ExecTask = r.result === 'merged'
     ? { ...cur.tasks[task], status: 'integrated', stage: 'integrate', updatedAt: at, detail: null, finishedAt: at }
     : { ...cur.tasks[task], status: 'conflict', detail: r.detail, updatedAt: at };
   saveExecution(io.cwd, { ...cur, tasks: { ...cur.tasks, [task]: next } });
-  return out(r.result === 'merged' ? { result: 'integrated', sha: r.sha, preexisting: r.preexisting } : { result: 'conflict', detail: r.detail });
+  if (r.result !== 'merged') return out({ result: 'conflict', detail: r.detail, ...attemptExtras(r) });
+  // Announced here: a later triage must not announce them again.
+  if (r.newValidators.length) {
+    try { updateLocal(io.cwd, s => ({ ...s, known: [...new Set([...s.known, ...r.newValidators.map(v => v.name)])] })); } catch { /* a later triage announces them again */ }
+  }
+  const say = integratedSay(spanish(locale, io.cwd, e.project), e.branch, r.newValidators, r.preexisting);
+  return out({ result: 'integrated', sha: r.sha, preexisting: r.preexisting, newValidators: r.newValidators, say, ...attemptExtras(r) });
 }
 
 function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
@@ -236,9 +407,13 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
   const branch = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
   if (branch !== e.base) return out({ result: 'main-dirty', detail: `the main checkout is on ${branch ?? '?'}, not ${e.base}` });
   const config = loadConfig(io.cwd);
-  const r = mergeIn(deps, e.branch, `forge: merge ${e.branch}`, 'final', config.validatorTimeoutSec, io.cwd, path.join(io.cwd, '.forge', 'execution'), 'main');
-  if (r.result === 'dirty') return out({ result: 'main-dirty', detail: `the main checkout ${r.detail}` });
-  return out(r.result === 'merged' ? { result: 'merged', sha: r.sha, preexisting: r.preexisting } : { result: 'conflict', detail: r.detail });
+  const r = mergeIn(deps, e.branch, {
+    message: `forge: merge ${e.branch}`, scope: 'final', timeoutSec: config.validatorTimeoutSec, configRoot: io.cwd,
+    cacheDir: path.join(io.cwd, '.forge', 'execution'), target: 'main', setup: config.swarm.setup,
+    runAt: cleanRunWorktree(deps, runWorktree(io.cwd), e.branch),
+  });
+  if (r.result === 'dirty') return out({ result: 'main-dirty', detail: `the main checkout ${r.detail}`, ...attemptExtras(r) });
+  return out(r.result === 'merged' ? { result: 'merged', sha: r.sha, preexisting: r.preexisting, ...attemptExtras(r) } : { result: 'conflict', detail: r.detail, ...attemptExtras(r) });
 }
 
 export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
@@ -360,6 +535,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       if (mode !== 'subagents' && mode !== 'sessions') throw new UsageError('swarm start: --mode must be subagents or sessions');
       if (has('autonomy') && flag('autonomy') !== 'auto' && flag('autonomy') !== 'ask') throw new UsageError('swarm start: --autonomy must be auto or ask');
       const auto = flag('autonomy') === 'auto' ? { autonomy: 'auto' as const } : {};
+      const locale = localeArg(rest, 'start');
       const base = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
       if (!base || base === 'HEAD') throw new UsageError('swarm start: the main checkout must be on a branch');
       const prev = readExecution(io.cwd);
@@ -463,13 +639,19 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       for (const tb of moves) {
         if (deps.git(['branch', '-D', tb]) === null) throw new UsageError(`swarm start: cannot delete ${tb}; if a worktree still holds it, run git worktree prune or remove that worktree (git worktree remove)`);
       }
+      // Learned notes two tasks append to the same surface are merged by git's union driver, never left as a conflict.
+      const attributesError = unionLearned(deps);
       rmSync(stopFile(io.cwd), { force: true });
       saveExecution(io.cwd, state);
       if (kind === 'ephemeral' && !resume) writeLoose(io.cwd, { runId: state.runId, tasks: loose });
       const looseOut = kind === 'ephemeral'
         ? { loose: loose.length, ...(ignoredTasks ? { ignoredTasks: true, message: `the ephemeral run ${state.runId} is resumed with its own ${loose.length} tasks; --tasks was ignored (start a new run for new requests once this one ends)` } : {}) }
         : {};
-      return json({ ...state, setup, baseSync, ...looseOut });
+      const announce = startAnnounce({
+        es: spanish(locale, io.cwd, project), kind, resume, runId: state.runId, mode: state.mode, parallel: state.parallel,
+        branch: state.branch, base: state.base, mergeOnFinish: state.mergeOnFinish, loose: loose.length, setup,
+      });
+      return json({ ...state, setup, baseSync, ...looseOut, announce, ...(attributesError ? { attributesError } : {}) });
     }
     case 'status': {
       const state = readExecution(io.cwd);
@@ -706,6 +888,6 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     case 'merge':
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError('usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F]|status|propose --plan P|--tasks F|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T>|merge|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID [--db DIR]>');
+      throw new UsageError('usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale es|en]|status|propose --plan P|--tasks F|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en]|merge|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID [--db DIR]>');
   }
 }
