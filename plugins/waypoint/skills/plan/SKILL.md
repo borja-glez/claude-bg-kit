@@ -54,12 +54,12 @@ Everything local lives in `.waypoint/<project>/` (`<project>` = the plan's `proj
 
 ## 3. Publish the roadmap page
 
-1. `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" page <plan> --out .waypoint/<project>/roadmap.html`
-2. If `artifacts.roadmap` is empty: publish with the Artifact tool — `file_path: .waypoint/<project>/roadmap.html`, `icon: "map"`, `description` one sentence in the user's language, and exactly these capabilities:
+1. `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" page <plan> --out .waypoint/<project>/roadmap.html --publish-info` → `{out, capabilities, internal, say}`. When `say` is not null, print it as it is, in the message that gives the roadmap's URL: it tells the person the page will be internal to their organization.
+2. If `artifacts.roadmap` is empty: publish with the Artifact tool — `file_path: .waypoint/<project>/roadmap.html`, `icon: "map"`, `description` one sentence in the user's language, and `capabilities` exactly as step 1 printed them, which are these:
    ```json
    {"db": {"rules": [{"path": "", "read": "view", "write": "admin"}, {"path": "notes", "read": "view", "write": "interact"}, {"path": "proposals", "read": "view", "write": "interact"}]}, "user": {"scopes": ["profile"]}, "downloads": true, "assets": {}}
    ```
-   Leave out `"assets": {}` when `.forge/config.yaml` has `evidence: local` (or forge is not installed): `assets` stores forge's verification screenshots, and an artifact that declares it is organization-internal, so it can no longer be shared publicly. The first time you add it, tell the user that in one line. Contributors can then write notes and decide proposals only; everything else needs Editor. `downloads` lets a viewer save the timeline as SVG or PNG (they confirm each save). You write through ArtifactData as the owner, which the rules never limit. Write the returned URL into `artifacts.roadmap` in plan.yaml.
+   without `"assets": {}` when `.forge/config.yaml` has `evidence: local` (or forge is not used here): `assets` stores forge's verification screenshots, and an artifact that declares it is organization-internal, so it can no longer be shared publicly. That is what step 1's `say` tells the person. Contributors can then write notes and decide proposals only; everything else needs Editor. `downloads` lets a viewer save the timeline as SVG or PNG (they confirm each save). You write through ArtifactData as the owner, which the rules never limit. Write the returned URL into `artifacts.roadmap` in plan.yaml.
 3. If it already exists and the plugin was updated or the user asks (after updating the plugin, run this step so the page gets the new views): publish again with `url: <artifacts.roadmap>` and the same file, omitting `capabilities` to keep them. Exception: a roadmap first published by waypoint 0.9.4 or earlier (or when you cannot tell) lacks `downloads` (the timeline export), and one from 0.7.x or earlier also the proposals rule (and, from 0.5.0 or earlier, the notes rule and the profile scope) — republish it once passing the capabilities from step 2 explicitly; after that, omit them again. A roadmap published by waypoint 0.10.x or earlier lacks `assets`: when forge evidence is on, republish it once passing the capabilities from step 2 explicitly (with `assets`), telling the user about the sharing change.
 
 ## 4. Sync the database
@@ -68,11 +68,11 @@ Run sync only from the main checkout (`MAIN_REPO` = the path on the first `workt
 
 1. For each of the collections `meta`, `plan` and `state`: first `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" clean-cache <plan> <collection>` so stale files never leak, then ArtifactData `list` (`url` = roadmap, `query: {limit: 1000}`, `out_dir: .waypoint/<project>/dbcache`). Each result lists every document with its version.
 2. Write `.waypoint/<project>/known.json` mapping collection → doc id → version exactly as listed, e.g. `{"meta":{"project":3},"plan":{"F1":2},"state":{"T001":5}}` (empty collections → `{}`).
-3. `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" sync <plan> --known .waypoint/<project>/known.json --states .waypoint/<project>/dbcache/state --out .waypoint/<project>/sync --session <your session id or main>` prints `{"batches":[[...],[...]]}`.
+3. `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" sync <plan> --known .waypoint/<project>/known.json --states .waypoint/<project>/dbcache/state --out .waypoint/<project>/sync --session <your session id or main>` prints `{"batches":[[...],[...]], "say": "<the report line of §5>"}`.
 4. For each batch, in order: ArtifactData `batch` with `writes` = that array, unchanged.
    - `version_mismatch` → someone wrote meanwhile: redo steps 1–4.
 5. Commit `plan.yaml` (message: `Update waypoint plan`), following the repository's commit rules.
 
 ## 5. Report
 
-One short message: roadmap URL, number of tasks/phases/tracks, and how to start working (`/waypoint:work [track]`).
+One short message: the `say` that `sync` printed in §4 (roadmap URL and the number of tasks, phases and tracks), as it is, then how to start working (`/waypoint:work [track]`). When forge drives the session, `/forge:run` gives this report itself and says that forge runs the tasks.

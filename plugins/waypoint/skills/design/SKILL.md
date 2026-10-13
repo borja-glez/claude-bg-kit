@@ -52,21 +52,21 @@ If the front matter has `status: approved`, the plan was derived from this desig
 3. Run `waypoint design-validate DESIGN` and fix every reported issue until it passes.
 4. `waypoint design-snapshot DESIGN --note "<initial draft, in the user's language>" --round 0` (prints `{"version","path"}`). After an import the note is "<imported from <spec>, in the user's language>".
 5. Commit with the message `Design v1` (pathspecs as above; include the `.gitignore` if you edited it for `.waypoint/`).
-6. Publish (see **Publish**) and offer the first round. After an import, offer **another round (recommended)**, since the spec has not been through the critic, or **approve now**.
+6. Publish (see **Publish**), give the URL and offer the first round, then **end the turn**. After an import, offer **another round (recommended)**, since the spec has not been through the critic, or **approve now**. A round runs only when the user asks for it, also when forge drives the session; the one exception is forge's auto mode, which calls `round --auto` itself.
 
 ## round
 
 1. `R` = max(the `round` of the last changelog entry, the highest number N among the `LOCAL/critique-r<N>.json` files) + 1; `V` = the current version (the `version` of the last changelog entry).
 2. If there is no earlier critique in `LOCAL` (R = 1), use `scope: full` and every section. Otherwise run `waypoint design-changed DESIGN --since <version of LOCAL/critique-r<R-1>.json>` (prints `{"since","changed","scope"}`) and take `scope` and `changed`. If `changed` is empty (nothing was edited since the last critique), tell the user and ask whether to run a full review (`scope: full`) or stop. If that critique file (or its version in history) is missing, use `scope: full` and every section.
-3. Launch the critic with the Agent tool (`subagent_type: "waypoint:design-critic"`; if that type is not found, try `"design-critic"`). Pass it: the path of `DESIGN`, `R`, `V`, the scope, the slugs, the user's language and the output path `LOCAL/critique-r<R>.json`.
+3. Launch the critic with the Agent tool (`subagent_type: "waypoint:design-critic"`; if that type is not found, try `"design-critic"`). Pass it: the path of `DESIGN`, `R`, `V`, the scope, the slugs, the user's language, the output path `LOCAL/critique-r<R>.json` and, when R > 1, the proposals still open from earlier rounds: the `pending` list of `waypoint design-gate DESIGN` with each one's `problem` (from its `LOCAL/critique-r<N>.json`), so it neither repeats them as new nor treats them as solved.
 4. `waypoint critique-check LOCAL/critique-r<R>.json --round <R> --version <V> --design DESIGN --locale <locale>` (it also rejects a critique whose round or version differ, or whose `section` is not a slug of `DESIGN` or `_intro`). If it fails, launch the critic again with the same inputs plus the reported problems; if the check still fails, show the errors and stop.
-5. Show the numbered proposals as they are, plus one summary line (how many proposals, how many critical), and the options: `apply all`, `apply 1,3`, `round`, `rewrite`, `interview`, `approve`. End the turn.
+5. Show the numbered proposals as they are, plus one summary line (how many proposals, how many critical, and how many are still open from earlier rounds, per `design-gate`'s `pendingCounts`), and the options: `apply all`, `apply 1,3`, `round`, `rewrite`, `interview`, `approve`. End the turn.
 
 ## apply <spec>
 
 `spec` is `all` or a comma list such as `1,3`.
 
-If no critique exists in `LOCAL`, tell the user to run `round` first. If the latest critique was already folded in by a rewrite (a changelog note "full rewrite" with that round), warn before applying it again. Also compare the critique's `version` with the current version `V`; if they differ, warn that the critique may be stale (the design changed after it was written) and ask whether to apply anyway. Apply the approved-design rule above before editing.
+If no critique exists in `LOCAL`, tell the user to run `round` first. If the latest critique was already folded in by a rewrite (a changelog note `round R: rewrite`, or an older "full rewrite", with that round), warn before applying it again. Also compare the critique's `version` with the current version `V`; if they differ, warn that the critique may be stale (the design changed after it was written) and ask whether to apply anyway. Apply the approved-design rule above before editing.
 
 1. `waypoint critique-select LOCAL/critique-r<R>.json <spec>` (`R` = the latest critique file that exists); it prints the chosen proposals.
 2. Apply each chosen proposal by editing `DESIGN` (Edit), faithful to its `change`. Apply only the selected proposals and change nothing else in `DESIGN`.
@@ -80,7 +80,7 @@ If no critique exists in `LOCAL`, tell the user to run `round` first. If the lat
 
 1. Write a complete improved version to `LOCAL/design.rewrite.md` (same front matter; fold in the open proposals of the latest critique).
 2. Show the real diff: `git diff --no-index --word-diff DESIGN LOCAL/design.rewrite.md` (exit code 1 only means they differ), plus a summary of the main differences.
-3. Ask whether to accept. If yes: apply the approved-design rule above, then copy it over `DESIGN` (with `status: draft` in its front matter), run `design-validate`, `design-snapshot` with the note "full rewrite" (in the user's language) and `--round <R of the latest critique file>` (omit `--round` if there is no critique), commit `Design v<N>: rewrite` (pathspecs as above) and publish. If no: leave `LOCAL/design.rewrite.md`; it is overwritten next time.
+3. Ask whether to accept. If yes: apply the approved-design rule above, then copy it over `DESIGN` (with `status: draft` in its front matter), run `design-validate`, `design-snapshot` with the note `round R: rewrite — <summary, in the user's language>` and `--round R` (`R` = the latest critique file; that prefix tells `design-gate` the rewrite folded in its proposals; without a critique, the note "full rewrite" in the user's language and no `--round`), commit `Design v<N>: rewrite` (pathspecs as above) and publish. If no: leave `LOCAL/design.rewrite.md`; it is overwritten next time.
 
 ## interview
 
@@ -88,7 +88,7 @@ Apply the approved-design rule above before the first edit. Ask questions one at
 
 ## approve
 
-1. List the `critical` proposals of the latest critique. Treat one as applied only if a changelog note for that round names its number, or you applied it in this conversation. If any remain (or you are unsure), show them and ask for explicit confirmation; do not continue without a yes. With `--auto`: do not ask. Run `waypoint design-gate DESIGN`; with `canAutoApprove: true` go on (the snapshot note of step 2 is "approved (auto)"); otherwise stop and say why (its `criticalPending`, or that no critique round was run yet).
+1. Run `waypoint design-gate DESIGN`. Its `pending` lists the proposals of every round that were neither applied (a changelog note `round R: applied …` names them), nor folded in by a rewrite, nor dismissed. When it is not empty, show the `critical` and `major` ones, one line each (`r<round>·<n> [severity] <section> — <problem>`, the problem from that round's critique file), and the `minor` ones as one count, then ask once: apply them first (`apply`, which works on the latest critique: for an earlier round, edit `DESIGN` faithfully to each proposal's `change` and snapshot with the note `round R: applied <numbers> — …` of its round), or dismiss them and approve. Do not continue without an explicit answer. On dismiss: `waypoint critique-dismiss DESIGN --round <R> <numbers>` for each round, then go on. With `--auto`: do not ask; with the gate's `canAutoApprove: true` go on (the snapshot note of step 2 is "approved (auto)"); otherwise stop and say why (its `criticalPending`, or that no critique round was run yet).
 2. Set `status: approved` in the front matter, run `design-validate`, run `design-snapshot` with the note "approved" (in the user's language), and commit `Design approved (v<N>)` (pathspecs as above).
 3. Publish.
 4. Run the `waypoint:plan` skill, telling it to start from the approved `design.md`. When forge drives the session (`/forge:run` chose Large), stop after step 3: `/forge:run` continues with `forge-planner`.

@@ -26,7 +26,7 @@ function engineBand(on: On) {
 }
 
 const DESIGN: WaypointBand = {
-  mode: 'design', project: 'demo', locale: 'en', version: 3, round: 2, proposals: 2, critical: 1,
+  mode: 'design', project: 'demo', locale: 'en', version: 3, round: 2, proposals: 2, critical: 1, pending: 2, pendingCritical: 1,
   designUrl: 'https://claude.ai/artifact/design',
 };
 const WORK: WaypointBand = {
@@ -40,10 +40,17 @@ const RUN: WaypointBand = {
   roadmapUrl: 'https://claude.ai/artifact/roadmap',
 };
 
-test('the Spanish design band says one proposal and one critical in the singular', async ($, on) => {
-  serveBand(on, () => ({ ...DESIGN, locale: 'es', proposals: 1, critical: 1 }) as WaypointBand);
+test('the Spanish design band says one pending proposal and one critical in the singular', async ($, on) => {
+  serveBand(on, () => ({ ...DESIGN, locale: 'es', pending: 1, pendingCritical: 1 }) as WaypointBand);
   const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
-  expect(await ui.find({ type: 'Text', text: '◆ DISEÑO · demo · v3 · 1 propuesta · 1 crítica' })).toBeDefined();
+  expect(await ui.find({ type: 'Text', text: '◆ DISEÑO · demo · v3 · 1 pendiente · 1 crítica' })).toBeDefined();
+  await ui.unmount();
+});
+
+test('the design band counts the proposals still pending from every round, not the latest critique', async ($, on) => {
+  serveBand(on, () => ({ ...DESIGN, proposals: 4, critical: 0, pending: 0, pendingCritical: 0 }) as WaypointBand);
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  expect(await ui.find({ type: 'Text', text: '◆ DESIGN · demo · v3 · nothing pending' })).toBeDefined();
   await ui.unmount();
 });
 
@@ -55,7 +62,7 @@ test('design band shows counts and submits commands', async ($, on) => {
   serveBand(on, () => DESIGN);
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
-    expect(await ui.find({ type: 'Text', text: '◆ DESIGN · demo · v3 · 2 proposals · 1 critical' })).toBeDefined();
+    expect(await ui.find({ type: 'Text', text: '◆ DESIGN · demo · v3 · 2 pending · 1 critical' })).toBeDefined();
     for (const key of ['apply-all', 'pick', 'round', 'rewrite', 'interview', 'approve']) {
       expect(await ui.find({ key })).toBeDefined();
     }
@@ -402,6 +409,6 @@ test('a turn end looks for /lens again', async ($, on) => {
 test('a band with automatic decisions ends with their count and the last major one', async ($, on) => {
   serveBand(on, () => ({ ...DESIGN, auto: { count: 2, lastMajor: 'design approved (v3)' } }) as WaypointBand);
   const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
-  expect(await ui.find({ type: 'Text', text: '◆ DESIGN · demo · v3 · 2 proposals · 1 critical · ⚑ auto · 2 · design approved (v3)' })).toBeDefined();
+  expect(await ui.find({ type: 'Text', text: '◆ DESIGN · demo · v3 · 2 pending · 1 critical · ⚑ auto · 2 · design approved (v3)' })).toBeDefined();
   await ui.unmount();
 });

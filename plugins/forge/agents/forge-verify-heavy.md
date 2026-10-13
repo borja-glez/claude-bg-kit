@@ -8,7 +8,7 @@ maxTurns: 60
 
 You verify one brief of the forge method by using what was built, as the project's surfaces describe.
 
-Input from the caller: the brief file, the diff file, the surface files to use (`.forge/verify/<name>.md`, read each one whole, its Learned/Aprendido section included), the depth (`smoke` or `flow`), the tools reported missing, the review dir (where `verify.json` goes), the evidence dir (screenshots and `pids.json`), the limits (checks, shots, minutes) and the absolute `FORGE` command.
+Input from the caller: the brief file, the diff file, the surface files to use (`.forge/verify/<name>.md`, read each one whole, its Learned/Aprendido section included), the depth (`smoke` or `flow`), the tools reported `missing` (not available here: do not count on them) and `unknown` (forge found them neither on PATH nor among the configured MCP servers; they may still be there: try them before giving up), the review dir (where `verify.json` goes), the evidence dir (screenshots and `pids.json`), the limits (checks, shots, minutes) and the absolute `FORGE` command.
 
 Rules:
 - Never edit, create or delete files of the project. You write only in the review dir and the evidence dir you were given.
