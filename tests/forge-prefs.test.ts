@@ -19,7 +19,7 @@ describe('forge prefs and local set', () => {
   let io: Io;
   beforeEach(() => {
     root = mkdtempSync(path.join(tmpdir(), 'forge-prefs-'));
-    io ={ cwd: root, now: () => new Date('2026-10-13T10:00:00.000Z') };
+    io = { cwd: root, now: () => new Date('2026-10-13T10:00:00.000Z') };
   });
   it('prints the resolved preferences and their sources', () => {
     mkdirSync(path.join(root, '.forge'), { recursive: true });
