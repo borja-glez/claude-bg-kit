@@ -22,7 +22,7 @@ Los resultados quedan en `scripts/route-eval/results/<fecha>.json` y `.md`, que 
 
 ## Resultado
 
-13 de octubre de 2026, una pasada, sin calibrar: el texto de los hooks y la descripción de `forge:route` son los iniciales.
+13 de octubre de 2026, dos pasadas y ninguna calibración: el texto de los hooks es el inicial. Las dos pasadas dieron lo mismo. Entre la primera y la segunda, la descripción de `forge:route` ganó la frase «Never in a subagent.». La tabla es la de la segunda pasada, con el texto final.
 
 | prompt | tamaño | idioma | configuración | primera skill | error |
 |---|---|---|---|---|---|
@@ -34,8 +34,8 @@ Los resultados quedan en `scripts/route-eval/results/<fecha>.json` y `.md`, que 
 | l-es-2 | large | es | with-superpowers | forge:route |  |
 | l-en-1 | large | en | with-superpowers | forge:route |  |
 | l-en-2 | large | en | with-superpowers | forge:route |  |
-| t-es | trivial | es | with-superpowers | — | exit 1 |
-| t-en | trivial | en | with-superpowers | — | exit 1 |
+| t-es | trivial | es | with-superpowers | — | exit 1: error_max_turns |
+| t-en | trivial | en | with-superpowers | — | exit 1: error_max_turns |
 | m-es-1 | medium | es | without-superpowers | forge:route |  |
 | m-es-2 | medium | es | without-superpowers | forge:route |  |
 | m-en-1 | medium | en | without-superpowers | forge:route |  |
@@ -44,13 +44,13 @@ Los resultados quedan en `scripts/route-eval/results/<fecha>.json` y `.md`, que 
 | l-es-2 | large | es | without-superpowers | forge:route |  |
 | l-en-1 | large | en | without-superpowers | forge:route |  |
 | l-en-2 | large | en | without-superpowers | forge:route |  |
-| t-es | trivial | es | without-superpowers | — | exit 1 |
-| t-en | trivial | en | without-superpowers | — | exit 1 |
+| t-es | trivial | es | without-superpowers | — | exit 1: error_max_turns |
+| t-en | trivial | en | without-superpowers | — | exit 1: error_max_turns |
 
 - with-superpowers: `forge:route` primero en 8/8 Medium y Large (100 %) y en 0/2 Trivial.
 - without-superpowers: `forge:route` primero en 8/8 Medium y Large (100 %) y en 0/2 Trivial.
 - `PASS`.
 
-En los Trivial la sesión se puso a editar sin cargar ninguna skill y agotó los 2 turnos: eso es el `exit 1`. La pasada no guardaba aún el motivo, así que se añadió el `subtype` del mensaje `result` y se repitió `t-en`. Con superpowers dio `exit 1: error_max_turns` y sin superpowers terminó en 2 turnos, en los dos casos sin cargar ninguna skill.
+En los Trivial la sesión se puso a editar sin cargar ninguna skill y agotó los 2 turnos: eso es el `error_max_turns`. La primera pasada solo mostraba `exit 1`, porque aún no guardaba el `subtype` del mensaje `result`. Se añadió antes de la segunda.
 
-La columna de plugins confirma las dos configuraciones: superpowers aparece solo en `with-superpowers`, y forge y waypoint salen de este checkout.
+En las dos pasadas, la columna de plugins confirma las dos configuraciones: superpowers aparece solo en `with-superpowers`, y forge y waypoint salen de este checkout.
