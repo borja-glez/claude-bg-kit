@@ -11,7 +11,7 @@ import { isLocale } from '../../lib/forge-run.js';
 import { isSafeId } from '../../lib/execution-state.js';
 import { samePath } from '../../lib/worktree.js';
 import { treeStartFile, parseStatus, parseSnapshot, treeCheck, type TreeSnapshot } from '../tree.js';
-import { triage, implementerFor, zonesFromPaths, announce, PATH_ORDER, type PathName, type AnnounceLocale } from '../triage.js';
+import { triage, implementerFor, zonesFromPaths, announce, announceReview, isBookkeeping, parseNumstat, diffPath, isPerfTask, reviewFor, PATH_ORDER, ZONE_ORDER, type PathName, type AnnounceLocale } from '../triage.js';
 import { parsePlan, PlanError } from '../../lib/plan.js';
 import { renderBrief, taskText, tddLine } from '../brief.js';
 import { loadConfig, configValue, agentFor, ROLES, ConfigError, NAME, WORKFLOWS, AUTONOMIES } from '../config.js';
@@ -461,7 +461,7 @@ export function run(argv: string[], io: Io): Result {
       }
       case 'triage': {
         const textArgs = [...args];
-        for (const f of ['--task', '--text-file', '--plan', '--superpowers-plan', '--autonomy', '--locale']) {
+        for (const f of ['--task', '--text-file', '--plan', '--superpowers-plan', '--autonomy', '--locale', '--base']) {
           const i = textArgs.indexOf(f);
           if (i >= 0) textArgs.splice(i, 2);
         }
@@ -492,6 +492,14 @@ export function run(argv: string[], io: Io): Result {
         const localeArg = flag('locale');
         if (has('locale') && localeArg !== 'es' && localeArg !== 'en') throw new UsageError('triage: --locale must be es or en');
         if (!task) throw new UsageError('triage: the task text is required');
+        // --base <sha>: the task is implemented, its real diff from base sizes it again (`flag` would take `-x` for a value).
+        let base: string | null = null;
+        if (has('base')) {
+          const v = args[args.indexOf('--base') + 1];
+          if (!v || v.startsWith('-')) throw new UsageError('triage: --base needs a commit');
+          if (!flag('task')) throw new UsageError('triage: --base needs --task');
+          base = v;
+        }
         const git = io.git ?? defaultGit(io.cwd);
         const lines = (out: string | null) => (out ?? '').split('\n').map(s => s.trim()).filter(Boolean);
         const listed = git(['-c', 'core.quotePath=false', 'ls-files']);
@@ -499,8 +507,7 @@ export function run(argv: string[], io: Io): Result {
         const commits = Number.parseInt((git(['rev-list', '--count', 'HEAD']) ?? '').trim(), 10) || 0;
         // The design, the plan and forge's own notes name every symbol of a planned task: a hit there says nothing
         // about the code the task touches, so the symbol search leaves them out (a task can still name them as paths).
-        const bookkeeping = (f: string) => /^(docs\/waypoint|docs\/superpowers|\.forge|\.waypoint)\//.test(f);
-        const grep = (w: string) => lines(git(['-c', 'core.quotePath=false', 'grep', '-l', '-I', '--fixed-strings', '-w', '-e', w])).filter(f => !bookkeeping(f));
+        const grep = (w: string) => lines(git(['-c', 'core.quotePath=false', 'grep', '-l', '-I', '--fixed-strings', '-w', '-e', w])).filter(f => !isBookkeeping(f));
         const tracked = lines(listed);
         const zoneFiles = planned ? tracked.filter(f => planned.zones.some(z => globMatch(z, f))) : [];
         const extra = planned ? { files: zoneFiles, zones: zonesFromPaths(planned.zones) }
@@ -511,6 +518,18 @@ export function run(argv: string[], io: Io): Result {
         if (planned?.zones.length && !zoneFiles.length) result.reasons.push('zones match no tracked file (new files?)');
         // A superpowers plan runs on the Medium path, one task after another: its tasks build on each other.
         if (spFiles) { result.path = 'medium'; result.reasons.push('superpowers plan: the Medium path, its tasks in order'); }
+        // The real diff only raises: the path is the higher of the text's and the diff's, before the ratchet compares.
+        let diff: { base: string; stat: { files: string[]; lines: number }; path: PathName } | null = null;
+        if (base !== null) {
+          const out = git(['-c', 'core.quotePath=false', 'diff', '--numstat', '--no-renames', `${base}..HEAD`]);
+          if (out === null) throw new UsageError(`triage: cannot diff ${base}..HEAD`);
+          const stat = parseNumstat(out);
+          const d = diffPath(stat);
+          if (PATH_ORDER.indexOf(d.path) > PATH_ORDER.indexOf(result.path)) result.path = d.path;
+          result.sensitive = ZONE_ORDER.filter(z => result.sensitive.includes(z) || d.sensitive.includes(z));
+          result.reasons.push(...d.reasons);
+          diff = { base, stat, path: d.path };
+        }
         // The ratchet: a repeated triage of the same task never lowers the path it already reached.
         // A raise the session logged with a `why` explains the path better than the CLI reasons: the announcement uses it.
         let raiseWhy: string | null = null;
@@ -528,23 +547,37 @@ export function run(argv: string[], io: Io): Result {
             raiseWhy = raise ? raise.why as string : null;
           }
         }
-        const impl = implementerFor(result, task, { batch: has('batch') });
-        const implementer = { ...impl, agent: impl.role ? agentFor(impl.role, loadConfig(repoDir).profile) : null };
+        const impl = implementerFor(result, task, { batch: has('batch'), plan: planned !== null });
+        const profile = loadConfig(repoDir).profile;
+        const implementer = { ...impl, agent: impl.role ? agentFor(impl.role, profile) : null };
         const known = readLocal(io.cwd).known;
         const fresh = names.filter(n => !known.includes(n));
         // `known` mirrors what exists now: new names are added, vanished ones dropped silently.
         if (fresh.length || known.some(n => !names.includes(n))) updateLocal(io.cwd, s => ({ ...s, known: names }));
-        appendEvent(io.cwd, { ts: ts(), kind: 'triage', ...(flag('task') ? { task: flag('task') } : {}), ...result, ...auto });
+        appendEvent(io.cwd, { ts: ts(), kind: 'triage', ...(flag('task') ? { task: flag('task') } : {}), ...result, ...auto,
+          ...(diff ? { diff: { base: diff.base, files: diff.stat.files.length, lines: diff.stat.lines } } : {}) });
         // Output only, like `implementer`: the exact line the session prints, and whether a short plan comes first.
         // The locale: the flag, else the plan passed with --plan, else the plan under docs/waypoint, else English.
         const locale = localeArg ?? ((plannedDoc?.plan.locale ?? planLocale(io.cwd))?.toLowerCase().split(/[-_]/)[0] === 'es' ? 'es' : 'en');
-        const line = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh, catalog }, locale as AnnounceLocale);
-        const gate = result.path === 'medium' ? 'plan' : null;
+        let line = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh, catalog }, locale as AnnounceLocale);
+        let gate: 'plan' | null = result.path === 'medium' ? 'plan' : null;
+        // After the implementation: who reviews it, by its real size. No short plan comes first any more.
+        let reviewed = {};
+        if (diff) {
+          const plan = reviewFor(result.path, result.sensitive, isPerfTask(task));
+          const review = { ...plan, reviewers: plan.reviewers.map(r => ({ ...r, agent: agentFor(r.role, profile) })) };
+          // The new-validators line `announce` appends, kept after the review line.
+          const bare = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh: [], catalog }, locale as AnnounceLocale);
+          line = announceReview({ path: result.path, files: diff.stat.files.length, lines: diff.stat.lines, review: plan }, locale as AnnounceLocale)
+            + line.slice(bare.length);
+          gate = null;
+          reviewed = { diff: { base: diff.base, files: diff.stat.files, lines: diff.stat.lines, path: diff.path }, review };
+        }
         // forgeDir creates .forge/.gitignore and no step commits it: say so while git lists it as untracked and not
         // ignored (a repository that ignores .forge/ has opted out).
         const untracked = listed !== null && lines(git(['ls-files', '--others', '--exclude-standard', '--', '.forge/.gitignore'])).length
           ? { untracked: ['.forge/.gitignore'] } : {};
-        return json({ ...result, catalog, new: fresh, implementer, announce: line, gate, ...untracked, ...auto });
+        return json({ ...result, catalog, new: fresh, implementer, announce: line, gate, ...untracked, ...auto, ...reviewed });
       }
       case 'validate': {
         const config = loadConfig(repoDir);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { triage, implementerFor, isMechanical, announce, type RepoFacts } from '../src/forge/triage.js';
+import { triage, implementerFor, isMechanical, announce, parseNumstat, isBookkeeping, diffPath, DIFF_MEDIUM_LINES, isPerfTask, reviewFor, announceReview, type RepoFacts } from '../src/forge/triage.js';
 
 const FILES = ['src/app.ts', 'src/auth/login.ts', 'src/util/format.ts', 'src/db/migrations/001.sql', 'package.json', '.github/workflows/ci.yml',
   ...Array.from({ length: 20 }, (_, i) => `src/feature/f${i}.ts`)];
@@ -220,5 +220,69 @@ describe('implementerFor', () => {
     expect(isMechanical('apply the patch to src/a.ts')).toBe(true);
     expect(isMechanical('move src/a.ts to src/lib/a.ts')).toBe(true);
     expect(isMechanical('fix the typo in the README')).toBe(true);
+  });
+  it('a plan task: trivial goes to mech, large to impl-heavy, small and medium unchanged', () => {
+    expect(implementerFor({ path: 'trivial', sensitive: [] }, 'fix the typo in src/a.ts', { plan: true }))
+      .toEqual({ role: 'mech', self: false, why: 'trivial plan task: delegated to mech, the coordinator never edits task code' });
+    expect(implementerFor({ path: 'large', sensitive: [] }, 'x', { plan: true }))
+      .toEqual({ role: 'impl-heavy', self: false, why: 'large plan task: impl-heavy (the plan may need to split it)' });
+    expect(implementerFor({ path: 'small', sensitive: [] }, 'add a guard for empty carts in src/cart.ts', { plan: true }).role).toBe('impl-light');
+    expect(implementerFor({ path: 'medium', sensitive: [] }, 'x', { plan: true }).role).toBe('impl');
+    expect(implementerFor({ path: 'medium', sensitive: ['auth'] }, 'x', { plan: true }).role).toBe('impl-heavy');
+    expect(implementerFor({ path: 'large', sensitive: [] }, 'x', { plan: false })).toMatchObject({ role: null, self: false });
+  });
+});
+
+describe('real diff sizing', () => {
+  it('parseNumstat reads text and binary lines, leaves bookkeeping out and skips malformed lines', () => {
+    const out = '10\t2\tsrc/a.ts\n-\t-\tassets/logo.png\n5\t5\t.forge/work/x/brief.md\n3\t0\tdocs/waypoint/p/plan.yaml\ngarbage\n\n1\t1\tsrc/b.ts\n';
+    expect(parseNumstat(out)).toEqual({ files: ['src/a.ts', 'assets/logo.png', 'src/b.ts'], lines: 14 });
+    expect(parseNumstat('')).toEqual({ files: [], lines: 0 });
+    expect(isBookkeeping('.waypoint/x')).toBe(true);
+    expect(isBookkeeping('src/docs/waypoint/x')).toBe(false);
+  });
+  it('diffPath at its edges', () => {
+    const f = (n: number) => Array.from({ length: n }, (_, i) => `src/f${i}.ts`);
+    expect(diffPath({ files: [], lines: 0 })).toEqual({ path: 'trivial', sensitive: [], reasons: ['diff: 0 file(s), 0 line(s)'] });
+    expect(diffPath({ files: f(3), lines: DIFF_MEDIUM_LINES }).path).toBe('small');
+    expect(diffPath({ files: f(4), lines: 10 }).path).toBe('medium');
+    expect(diffPath({ files: f(2), lines: 201 }).path).toBe('medium');
+    expect(diffPath({ files: f(11), lines: 10 }).path).toBe('large');
+    expect(diffPath({ files: ['src/auth/x.ts'], lines: 5 }))
+      .toEqual({ path: 'medium', sensitive: ['auth'], reasons: ['diff: 1 file(s), 5 line(s)', 'diff touches a sensitive zone: auth'] });
+  });
+  it('isPerfTask reads English and Spanish performance wording', () => {
+    expect(isPerfTask('reduce the latency of the search endpoint')).toBe(true);
+    expect(isPerfTask('Optimise the image pipeline')).toBe(true);
+    expect(isPerfTask('fix the memory leak in the cache')).toBe(true);
+    expect(isPerfTask('mejora el rendimiento del listado')).toBe(true);
+    expect(isPerfTask('haz la búsqueda más rápida')).toBe(true);
+    expect(isPerfTask('quita el cuello de botella del import')).toBe(true);
+    expect(isPerfTask('fix the login form')).toBe(false);
+    expect(isPerfTask('añade un botón de exportar')).toBe(false);
+  });
+  it('reviewFor: light below medium, full reviewers by zone and perf from medium up', () => {
+    const light = [{ role: 'review-correctness', model: 'sonnet', effort: 'medium' }];
+    expect(reviewFor('small', ['auth'], true)).toEqual({ light: true, reviewers: light, flags: [] });
+    expect(reviewFor('trivial', [], false)).toEqual({ light: true, reviewers: light, flags: [] });
+    const full = (role: string) => ({ role, model: null, effort: null });
+    expect(reviewFor('medium', [], false)).toEqual({ light: false, reviewers: [full('review-correctness')], flags: [] });
+    expect(reviewFor('medium', ['auth'], false)).toEqual({ light: false, reviewers: [full('review-correctness'), full('review-security')], flags: ['--sensitive'] });
+    expect(reviewFor('large', ['auth'], true))
+      .toEqual({ light: false, reviewers: [full('review-correctness'), full('review-security'), full('review-perf')], flags: ['--sensitive', '--perf'] });
+  });
+  it('announceReview says the real size and who reviews, in English and Spanish', () => {
+    const small = { path: 'small' as const, files: 2, lines: 30, review: reviewFor('small', [], false) };
+    expect(announceReview(small, 'en')).toBe('Real size: 2 file(s), 30 line(s) → Small: one light review (correctness on sonnet).');
+    expect(announceReview(small, 'es')).toBe('Tamaño real: 2 fichero(s), 30 línea(s) → Small: una revisión ligera (correctness en sonnet).');
+    const all = { path: 'medium' as const, files: 5, lines: 90, review: reviewFor('medium', ['auth'], true) };
+    expect(announceReview(all, 'en')).toBe('Real size: 5 file(s), 90 line(s) → Medium: reviewed by correctness, security and perf.');
+    expect(announceReview(all, 'es')).toBe('Tamaño real: 5 fichero(s), 90 línea(s) → Medium: revisan correctness, security y perf.');
+    expect(announceReview({ ...all, path: 'large', review: reviewFor('large', ['auth'], false) }, 'en')).toBe('Real size: 5 file(s), 90 line(s) → Large: reviewed by correctness and security.');
+    expect(announceReview({ ...all, review: reviewFor('medium', [], false) }, 'es')).toBe('Tamaño real: 5 fichero(s), 90 línea(s) → Medium: revisan correctness.');
+  });
+  it('the diff reasons have Spanish', () => {
+    expect(announce({ path: 'medium', reasons: ['diff: 1 file(s), 5 line(s)', 'diff touches a sensitive zone: auth'], implementer: { self: false, agent: 'a' }, fresh: [], catalog: [] }, 'es'))
+      .toContain('diff: 1 fichero(s), 5 línea(s); el diff toca una zona sensible: auth');
   });
 });

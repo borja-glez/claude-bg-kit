@@ -909,6 +909,71 @@ it('triage --plan takes the locale from that plan before the first project under
   expect(JSON.parse(run(['triage', '--plan', 'plan.yaml', '--task', 'T001'], io).stdout).announce).toContain('zona sensible: auth');
   expect(JSON.parse(run(['triage', '--plan', 'plan.yaml', '--task', 'T001', '--locale', 'en'], io).stdout).announce).toContain('sensitive zone: auth');
 });
+describe('triage --base', () => {
+  // A plan task with no sensitive zone and no perf wording.
+  const FOOTER_YAML = PLAN_YAML.replace('Login with password', 'Add a footer link').replace('users can log in', 'the footer shows the link').replace('src/auth/**', 'src/ui/**');
+  const DIFF = ['-c', 'core.quotePath=false', 'diff', '--numstat', '--no-renames', 'abc123..HEAD'];
+  let diffCalls: string[][];
+  const fakeGit = (numstat: string | null) => {
+    diffCalls = [];
+    io.git = args => {
+      if (args.includes('ls-files')) return 'src/ui/footer.ts\nsrc/app.ts\na\nb\nc\n';
+      if (args.includes('rev-list')) return '7\n';
+      if (args.includes('--numstat')) { diffCalls.push(args); return numstat; }
+      return '';
+    };
+  };
+  const triageBase = (...extra: string[]) => run(['triage', '--plan', 'plan.yaml', '--task', 'T001', '--base', 'abc123', ...extra], io);
+  it('a small diff on a plain task: one light review on sonnet, no gate', () => {
+    writeFileSync(path.join(root, 'plan.yaml'), FOOTER_YAML);
+    fakeGit('10\t2\tsrc/ui/footer.ts\n3\t1\tsrc/ui/footer.test.ts\n');
+    const r = triageBase();
+    expect(r.code).toBe(0);
+    expect(diffCalls).toEqual([DIFF]);
+    const out = JSON.parse(r.stdout);
+    expect(out.path).toBe('small');
+    expect(out.diff).toEqual({ base: 'abc123', files: ['src/ui/footer.ts', 'src/ui/footer.test.ts'], lines: 16, path: 'small' });
+    expect(out.review).toEqual({ light: true, flags: [], reviewers: [{ role: 'review-correctness', model: 'sonnet', effort: 'medium', agent: 'forge-review-correctness' }] });
+    expect(out.gate).toBeNull();
+    expect(out.announce).toMatch(/^Real size: 2 file\(s\), 16 line\(s\) → Small: one light review/);
+    expect(readEvents(root).at(-1)).toMatchObject({ kind: 'triage', task: 'T001', path: 'small', diff: { base: 'abc123', files: 2, lines: 16 } });
+  });
+  it('five changed files raise a plain task to medium, reviewed by correctness alone', () => {
+    writeFileSync(path.join(root, 'plan.yaml'), FOOTER_YAML);
+    fakeGit([1, 2, 3, 4, 5].map(i => `1\t1\tsrc/ui/f${i}.ts`).join('\n'));
+    const out = JSON.parse(triageBase().stdout);
+    expect(out.path).toBe('medium');
+    expect(out.review.reviewers.map((x: { role: string }) => x.role)).toEqual(['review-correctness']);
+    expect(out.review.flags).toEqual([]);
+    expect(out.reasons).toContain('diff: 5 file(s), 10 line(s)');
+    // The ratchet: a later plain triage of the task keeps the diff-raised path, and has no diff nor review.
+    const plain = JSON.parse(run(['triage', '--plan', 'plan.yaml', '--task', 'T001'], io).stdout);
+    expect(plain.path).toBe('medium');
+    expect(plain).not.toHaveProperty('review');
+    expect(plain).not.toHaveProperty('diff');
+    expect(readEvents(root).at(-1)).not.toHaveProperty('diff');
+  });
+  it('a diff touching src/auth adds the security review and --sensitive', () => {
+    writeFileSync(path.join(root, 'plan.yaml'), FOOTER_YAML);
+    fakeGit('4\t0\tsrc/auth/guard.ts\n');
+    const out = JSON.parse(triageBase().stdout);
+    expect(out.path).toBe('medium');
+    expect(out.sensitive).toContain('auth');
+    expect(out.review.reviewers.map((x: { role: string }) => x.role)).toEqual(['review-correctness', 'review-security']);
+    expect(out.review.flags).toEqual(['--sensitive']);
+    expect(out.reasons).toContain('diff touches a sensitive zone: auth');
+  });
+  it('--base needs a commit and --task, and a diff git refuses is a usage error', () => {
+    writeFileSync(path.join(root, 'plan.yaml'), FOOTER_YAML);
+    fakeGit('');
+    expect(run(['triage', 'add a footer link', '--base', 'abc123'], io)).toMatchObject({ code: 2, stderr: expect.stringContaining('triage: --base needs --task') });
+    expect(run(['triage', '--plan', 'plan.yaml', '--task', 'T001', '--base'], io)).toMatchObject({ code: 2, stderr: expect.stringContaining('triage: --base needs a commit') });
+    expect(triageBase().code).toBe(0);
+    expect(run(['triage', '--plan', 'plan.yaml', '--task', 'T001', '--base', '-x'], io)).toMatchObject({ code: 2, stderr: expect.stringContaining('triage: --base needs a commit') });
+    fakeGit(null);
+    expect(triageBase()).toMatchObject({ code: 2, stderr: expect.stringContaining('triage: cannot diff abc123..HEAD') });
+  });
+});
 
 describe('forge waypoint-cli', () => {
   const touch = (f: string) => { mkdirSync(path.dirname(f), { recursive: true }); writeFileSync(f, ''); };
