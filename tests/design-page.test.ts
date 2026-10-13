@@ -33,6 +33,12 @@ describe('renderDesignPage', () => {
     expect(html).toContain('data-version="2"');
     expect(html).toContain('ronda 1: &lt;b&gt;rollback&lt;/b&gt;');
   });
+  it('names the spec a design was imported from, escaped, in Spanish and English', () => {
+    const imported = { ...data, meta: { ...data.meta, source: 'docs/superpowers/specs/<x>.md' } };
+    expect(renderDesignPage(imported, 2)).toContain('<p class="imp">Importado de <code>docs/superpowers/specs/&lt;x&gt;.md</code></p>');
+    expect(renderDesignPage({ ...imported, meta: { ...imported.meta, locale: 'en' } }, 2)).toContain('<p class="imp">Imported from <code>');
+    expect(renderDesignPage(data, 2)).not.toContain('class="imp"');
+  });
   it('renders an older version body', () => {
     expect(renderDesignPage(data, 1)).toContain('id="peligros"');
   });

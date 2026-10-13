@@ -15,6 +15,8 @@ header{border-bottom:1px solid var(--s0);padding-bottom:20px}
 .eb{font-family:'Barlow Condensed',sans-serif;font-size:12px;letter-spacing:.16em;color:var(--peach)}
 h1{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:56px;line-height:1;margin:8px 0 12px;text-transform:uppercase;letter-spacing:.01em;overflow-wrap:anywhere}
 .dot{color:var(--peach)}
+.imp{margin:-4px 0 12px;font-size:13px;color:var(--sub0)}
+.imp code{font-family:'JetBrains Mono',monospace;color:var(--lavender);overflow-wrap:anywhere}
 .lead{font-size:17px;line-height:1.55;color:var(--sub1);max-width:70ch;margin:0 0 18px}
 .met{display:flex;flex-wrap:wrap;gap:12px 32px}
 .met div{font-family:'Barlow Condensed',sans-serif;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--o1);min-width:0}

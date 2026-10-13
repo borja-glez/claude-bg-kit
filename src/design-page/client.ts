@@ -3,10 +3,10 @@ import type { DesignPageData } from './build.js';
 const ENT: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (v: unknown): string => String(v ?? '').replace(/[&<>"']/g, c => ENT[c]);
 
-interface Dict { eyebrow: string; version: string; words: string; rounds: string; source: string; prompt: string; copy: string; copied: string; versions: string; toc: string; current: string }
+interface Dict { eyebrow: string; version: string; words: string; rounds: string; source: string; prompt: string; copy: string; copied: string; versions: string; toc: string; current: string; imported: string }
 const DICT: Record<string, Dict> = {
-  en: { eyebrow: 'DESIGN DOCUMENT · EXECUTABLE SPECIFICATION', version: 'Version', words: 'Words', rounds: 'Rounds', source: 'Source', prompt: 'Start prompt', copy: 'Copy prompt', copied: 'Copied', versions: 'Versions', toc: 'Contents', current: 'current' },
-  es: { eyebrow: 'DOCUMENTO DE DISEÑO · ESPECIFICACIÓN EJECUTABLE', version: 'Versión', words: 'Palabras', rounds: 'Rondas', source: 'Fuente', prompt: 'Prompt de arranque', copy: 'Copiar prompt', copied: 'Copiado', versions: 'Versiones', toc: 'Índice', current: 'actual' },
+  en: { eyebrow: 'DESIGN DOCUMENT · EXECUTABLE SPECIFICATION', version: 'Version', words: 'Words', rounds: 'Rounds', source: 'Source', prompt: 'Start prompt', copy: 'Copy prompt', copied: 'Copied', versions: 'Versions', toc: 'Contents', current: 'current', imported: 'Imported from' },
+  es: { eyebrow: 'DOCUMENTO DE DISEÑO · ESPECIFICACIÓN EJECUTABLE', version: 'Versión', words: 'Palabras', rounds: 'Rondas', source: 'Fuente', prompt: 'Prompt de arranque', copy: 'Copiar prompt', copied: 'Copiado', versions: 'Versiones', toc: 'Índice', current: 'actual', imported: 'Importado de' },
 };
 const dictFor = (loc: string | undefined): Dict => DICT[(loc ?? 'en').toLowerCase().split(/[-_]/)[0]] ?? DICT.en;
 
@@ -21,7 +21,7 @@ export function renderDesignPage(data: DesignPageData, version: number): string 
   return `<header>
 <div class="eb">${esc(d.eyebrow)}${v?.date ? ` · ${esc(v.date)}` : ''}</div>
 <h1>${esc(data.meta.title)}<span class="dot">.</span></h1>
-<p class="lead">${esc(data.meta.summary)}</p>
+${data.meta.source ? `<p class="imp">${esc(d.imported)} <code>${esc(data.meta.source)}</code></p>\n` : ''}<p class="lead">${esc(data.meta.summary)}</p>
 <div class="met"><div><b>v${esc(no)}</b>${esc(d.version)}</div><div><b>${esc(v?.words ?? data.words)}</b>${esc(d.words)}</div><div><b>${esc(data.rounds)}</b>${esc(d.rounds)}</div><div><b class="src">${esc(data.source)}</b>${esc(d.source)}</div></div>
 </header>
 <section class="vers"><div class="lbl">${esc(d.versions)}</div><div class="vl">${vers}</div>${v?.note ? `<p class="note">${esc(v.note)}</p>` : ''}</section>
