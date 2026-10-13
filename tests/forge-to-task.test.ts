@@ -25,7 +25,36 @@ describe('proposalToTask', () => {
   it('numbers after the highest T id and uses the first track', () => {
     const { task } = proposalToTask(parsePlan(planText('en')), prop({ path: 'src/**' }), {});
     expect(task).toMatchObject({ id: 'T008', track: 'backend', phase: 'PX', title: 'Cut dead code', done_when: 'Cut dead code — validators pass', zones: ['src/**'], estimate_min: 30, depends_on: [] });
-    expect(task.includes).toHaveLength(300);
+    expect(task.includes).toBe(`${'r'.repeat(400)}\n\n(proposal p20261011100000aaaa)`);
+  });
+  it('keeps the whole rationale, then the evidence and the proposal reference', () => {
+    const rationale = `${'El aviso de vencimiento se calcula mal cuando el usuario cambia de zona horaria; '.repeat(4)}y hay que ordenar el apunte por fecha`;
+    expect(Array.from(rationale).length).toBeGreaterThan(300);
+    const es = proposalToTask(parsePlan(planText('es')), prop({ rationale, evidence: 'src/due.ts:40 usa la hora local' }), {}).task;
+    expect(es.includes).toBe(`${rationale}\n\nEvidencia: src/due.ts:40 usa la hora local\n\n(propuesta p20261011100000aaaa)`);
+    expect(es.includes).toContain('…apunte por fecha'.slice(1));
+    const en = proposalToTask(parsePlan(planText('en')), prop({ rationale: 'why', evidence: 'grep: 3 hits' }), {}).task;
+    expect(en.includes).toBe('why\n\nEvidence: grep: 3 hits\n\n(proposal p20261011100000aaaa)');
+    expect(proposalToTask(parsePlan(planText('en')), prop({ rationale: '', evidence: 'only this' }), {}).task.includes).toBe('Evidence: only this\n\n(proposal p20261011100000aaaa)');
+  });
+  it('leaves includes out when rationale and evidence are blank', () => {
+    const { task } = proposalToTask(parsePlan(planText('en')), prop({ rationale: '', evidence: '  ' }), {});
+    expect(task.includes).toBeUndefined();
+    expect('includes' in task).toBe(false);
+  });
+  it('maps a simple estimate to minutes, else 30', () => {
+    const est = (estimate?: string) => proposalToTask(parsePlan(planText('en')), prop({ estimate }), {}).task.estimate_min;
+    expect(est('2h')).toBe(120);
+    expect(est('45 min')).toBe(45);
+    expect(est('1.5 h')).toBe(90);
+    expect(est('a while')).toBe(30);
+    expect(est(undefined)).toBe(30);
+    expect(est('0 min')).toBe(30);
+    expect(est('0.4 min')).toBe(30);
+    expect(est('3000000000h')).toBe(30);
+    expect(est('169h')).toBe(30);
+    expect(est('10080 min')).toBe(10080);
+    expect(est('0.6 min')).toBe(1);
   });
   it('honours --track and drops an unsafe path', () => {
     const { task } = proposalToTask(parsePlan(planText('en')), prop({ path: '../x' }), { track: 'ui' });

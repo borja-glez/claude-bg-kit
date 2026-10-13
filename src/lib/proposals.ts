@@ -11,11 +11,32 @@ export const MAX_PROPOSAL_TITLE = 200;
 export interface ProposalDoc {
   ts: string; category: ProposalCategory; risk: ProposalRisk; title: string; rationale: string; evidence: string; pillar: string;
   estimate?: string; path?: string; taskId?: string; status: ProposalStatus; decidedBy?: string; decidedAt?: string; reason?: string;
-  source: 'scout' | 'user'; author: string;
+  source: 'scout' | 'user'; author: string; history?: ProposalHistoryEntry[];
 }
+
+/** A decision a reopen replaced: the old status and who decided it, and who reopened it and when. */
+export interface ProposalHistoryEntry {
+  status: ProposalStatus; decidedBy?: string; decidedAt?: string; reason?: string; reopenedBy: string; reopenedAt: string;
+}
+export const MAX_PROPOSAL_HISTORY = 20;
 
 const str = (x: unknown): x is string => typeof x === 'string';
 const oneOf = <T extends string>(list: readonly T[], x: unknown): x is T => str(x) && (list as readonly string[]).includes(x);
+
+/**
+ * Clips to at most `max` code points at a word boundary, ending in «…». Hard cut only when the
+ * last ~30% holds no whitespace (one long token such as a URL). No Node imports: the page bundles this.
+ */
+export function clipWords(s: string, max: number): string {
+  const chars = Array.from(s);
+  if (chars.length <= max) return s;
+  let space = -1;
+  for (let i = Math.min(max - 1, chars.length - 1); i >= 0; i--) if (/\s/.test(chars[i])) { space = i; break; }
+  const hard = chars.slice(0, max - 1).join('');
+  if (space < Math.floor((max - 1) * 0.7)) return hard + '…';
+  const soft = chars.slice(0, space).join('').replace(/[\s.,;:!?¡¿…\-–—]+$/u, '');
+  return (soft || hard) + '…';
+}
 
 /** Strict normalizer for shared (untrusted) proposal docs. */
 export function normalizeProposal(x: unknown): ProposalDoc | null {
@@ -24,16 +45,33 @@ export function normalizeProposal(x: unknown): ProposalDoc | null {
   if (!oneOf(PROPOSAL_CATEGORIES, o.category) || !oneOf(PROPOSAL_RISKS, o.risk) || !oneOf(PROPOSAL_STATUSES, o.status)) return null;
   if (o.source !== 'scout' && o.source !== 'user') return null;
   if (!str(o.title) || !o.title.trim() || !str(o.author)) return null;
-  const text = (v: unknown) => (str(v) ? v.slice(0, MAX_PROPOSAL_TEXT) : '');
+  const text = (v: unknown, max = MAX_PROPOSAL_TEXT) => (str(v) ? clipWords(v, max) : '');
+  // One-line fields: whitespace runs (newlines included) collapse to one space, so they never fake brief lines.
+  const line = (v: unknown) => (str(v) ? clipWords(v.replace(/[\s\x85]+/g, ' ').trim(), MAX_PROPOSAL_TITLE) : '');
   const out: ProposalDoc = {
-    ts: str(o.ts) ? o.ts : '', category: o.category, risk: o.risk, title: o.title.slice(0, MAX_PROPOSAL_TITLE),
-    rationale: text(o.rationale), evidence: text(o.evidence), pillar: text(o.pillar).slice(0, MAX_PROPOSAL_TITLE),
+    ts: str(o.ts) ? o.ts : '', category: o.category, risk: o.risk, title: line(o.title),
+    rationale: text(o.rationale), evidence: text(o.evidence), pillar: line(o.pillar),
     status: o.status, source: o.source, author: o.author,
   };
   for (const k of ['estimate', 'path', 'decidedBy', 'decidedAt'] as const) if (str(o[k])) out[k] = (o[k] as string).slice(0, MAX_PROPOSAL_TITLE);
   if (str(o.taskId) && /^[A-Za-z0-9_.-]{1,64}$/.test(o.taskId)) out.taskId = o.taskId;
-  if (str(o.reason)) out.reason = o.reason.slice(0, MAX_PROPOSAL_TEXT);
+  if (str(o.reason)) out.reason = clipWords(o.reason, MAX_PROPOSAL_TEXT);
+  if (Array.isArray(o.history)) {
+    const history = o.history.map(normalizeHistoryEntry).filter((e): e is ProposalHistoryEntry => e !== null).slice(-MAX_PROPOSAL_HISTORY);
+    if (history.length) out.history = history;
+  }
   return out;
+}
+
+function normalizeHistoryEntry(x: unknown): ProposalHistoryEntry | null {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
+  const o = x as Record<string, unknown>;
+  if (!oneOf(PROPOSAL_STATUSES, o.status) || !str(o.reopenedBy) || !str(o.reopenedAt)) return null;
+  const e: ProposalHistoryEntry = { status: o.status, reopenedBy: o.reopenedBy.slice(0, MAX_PROPOSAL_TITLE), reopenedAt: o.reopenedAt.slice(0, MAX_PROPOSAL_TITLE) };
+  if (str(o.decidedBy)) e.decidedBy = o.decidedBy.slice(0, MAX_PROPOSAL_TITLE);
+  if (str(o.decidedAt)) e.decidedAt = o.decidedAt.slice(0, MAX_PROPOSAL_TITLE);
+  if (str(o.reason)) e.reason = clipWords(o.reason, MAX_PROPOSAL_TEXT);
+  return e;
 }
 
 export const canDecide = (status: ProposalStatus): boolean => status === 'proposed' || status === 'discussing';
