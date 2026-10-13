@@ -11,7 +11,8 @@ export interface PlanSurface {
   // hash: the surface's permission hash now, for `local set surfaces.<name> allowed --expect <hash>`.
   name: string; permission: 'allowed' | 'ask' | 'changed'; match: string | null; missing: string[]; unknown: string[]; hash: string;
   // What the question to the user shows (the CLI adds them): the change since the allowance (changed) and the question.
-  diff?: string | null; commits?: string[]; ask?: Ask;
+  // A diff cut at its cap says so (diffTruncated) and names the file holding all of it (null: it could not be written).
+  diff?: string | null; diffTruncated?: true; diffFile?: string | null; commits?: string[]; ask?: Ask;
 }
 export interface VerifyPlan { eligible: boolean; surfaces: PlanSurface[]; drafts: { name: string; match: string }[]; reason: string }
 

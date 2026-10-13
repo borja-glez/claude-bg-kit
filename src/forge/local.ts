@@ -5,9 +5,10 @@
 // - surfaces.json: the surface permissions;
 // - learned.jsonl: the lines `surfaces learn` appended to a surface.
 // A .forge/local.yaml in the working tree (where forge ≤ 0.12 kept all this) is never read nor written: a commit can
-// ship one under any name. Outside a git repository there is no personal state: nothing is kept, allowed or excused.
+// ship one under any name. Nor can a commit choose the repository (see repository()). Outside a git repository there
+// is no personal state: nothing is kept, allowed or excused.
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse, stringify } from 'yaml';
 import { AUTONOMIES, NAME, WORKFLOWS, type Autonomy, type Workflow } from './config.js';
@@ -32,23 +33,57 @@ function git(cwd: string, args: string[]): string | null {
   try { return execFileSync('git', args, { cwd, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }); } catch { return null; }
 }
 
-/** The main checkout when `root` is a linked git worktree (its common dir is `<main>/.git`), else `root` itself,
- *  also when git is unavailable. */
-export function mainCheckout(root: string): string {
-  const out = git(root, ['rev-parse', '--git-dir', '--git-common-dir']);
-  if (out === null) return root;
-  const [gitDir, common] = out.split(/\r?\n/).map(l => l.trim());
-  if (!gitDir || !common) return root;
-  const commonDir = path.resolve(root, common);
-  if (path.resolve(root, gitDir) === commonDir || path.basename(commonDir) !== '.git') return root;
-  return path.dirname(commonDir);
+interface Repository { gitDir: string; common: string }
+
+// Two paths naming the same directory (links, letter case and 8.3 names resolved); false when either is missing.
+const samePath = (a: string, b: string): boolean => {
+  try { return realpathSync.native(a) === realpathSync.native(b); } catch { return false; }
+};
+
+// Whether git's answer is the repository the top level's .git names: that directory itself; or, for a .git file
+// (`gitdir: <dir>`, relative to the top level), <dir> as both git dir and common dir (a submodule, --separate-git-dir)
+// or, for a linked worktree's `gitdir: <x>/worktrees/<name>`, <x> as the common dir. A commit can ship neither a .git
+// nor what it points to (git refuses paths under .git), so whatever else git answered is refused.
+function namedByTop(top: string, r: Repository): boolean {
+  const dotGit = path.join(top, '.git');
+  try {
+    const st = statSync(dotGit);
+    if (st.isDirectory()) return samePath(r.gitDir, dotGit) && samePath(r.common, dotGit);
+    if (!st.isFile()) return false;
+    const m = /^gitdir: *(.+)$/.exec(readFileSync(dotGit, 'utf8').split(/\r?\n/)[0].trimEnd());
+    if (!m) return false;
+    const dir = path.resolve(top, m[1]);
+    if (!samePath(r.gitDir, dir)) return false;
+    return samePath(r.common, dir) || (path.basename(path.dirname(dir)) === 'worktrees' && samePath(r.common, path.dirname(path.dirname(dir))));
+  } catch { return false; }
 }
 
-/** The repository's git common dir (`.git` of the main checkout, shared by its worktrees), or null outside git. */
+// The repository whose work tree holds `root`, found so that no commit can choose it; null when git fails or answers
+// anything else, which counts as outside git. A plain discovery takes any directory of the work tree holding HEAD,
+// objects/ and refs/ (all shippable in a commit) as an implicit bare repository, so bare repositories count only when
+// named explicitly (command-line config: the found repository's own config cannot undo it), `root` must be inside a
+// work tree, and the answer must be what the top level's .git names (namedByTop), whatever git's options were.
+function repository(root: string): Repository | null {
+  const out = git(root, ['-c', 'safe.bareRepository=explicit', 'rev-parse', '--is-inside-work-tree', '--show-toplevel', '--git-dir', '--git-common-dir']);
+  const [inside, top, gitDir, common] = (out ?? '').split(/\r?\n/).map(l => l.trim());
+  if (inside !== 'true' || !top || !gitDir || !common) return null;
+  const r = { gitDir: path.resolve(root, gitDir), common: path.resolve(root, common) };
+  return namedByTop(path.resolve(root, top), r) ? r : null;
+}
+
+/** The main checkout when `root` is a linked git worktree (its common dir is `<main>/.git`), else `root` itself,
+ *  also when git is unavailable or the repository is not one forge trusts (see repository()). */
+export function mainCheckout(root: string): string {
+  const r = repository(root);
+  if (!r || r.gitDir === r.common || path.basename(r.common) !== '.git') return root;
+  return path.dirname(r.common);
+}
+
+/** The repository's git common dir (`.git` of the main checkout, shared by its worktrees), or null outside git and
+ *  for a repository a commit could have chosen (see repository()). */
 export function gitCommonDir(root: string): string | null {
-  const out = git(root, ['rev-parse', '--git-common-dir'])?.trim();
-  if (!out) return null;
-  const dir = path.resolve(root, out);
+  const dir = repository(root)?.common;
+  if (!dir) return null;
   try { return statSync(dir).isDirectory() ? dir : null; } catch { return null; }
 }
 
