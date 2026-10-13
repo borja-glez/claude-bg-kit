@@ -6,7 +6,7 @@
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.16.0](https://img.shields.io/badge/version-0.16.0-cba6f7?style=flat-square)
+![version 0.17.0](https://img.shields.io/badge/version-0.17.0-cba6f7?style=flat-square)
 ![requires claude.ai login](https://img.shields.io/badge/requires-claude.ai%20login-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -72,6 +72,8 @@ A typical run:
 ```
 
 `/waypoint:design new --from docs/superpowers/specs/<file>.md` starts from a spec written with superpowers: its sections are copied as they are, and the design page says «Imported from».
+
+With forge's auto mode, `/waypoint:design approve --auto` approves without asking only when `waypoint design-gate` says the last critique left no critical proposal unapplied.
 
 With [forge](../forge/README.md) installed, `/forge:run` drives these steps for you and adds triage, validation and independent review to each task.
 
@@ -139,7 +141,7 @@ The skills run the CLI as `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" <comma
 
 | Group | Commands |
 | --- | --- |
-| Design | `design-import <spec> --project P --out D`, `design-validate`, `design-snapshot`, `design-changed`, `critique-check`, `critique-select`, `design-page` |
+| Design | `design-import <spec> --project P --out D`, `design-validate`, `design-snapshot`, `design-changed`, `design-gate <design.md>`, `critique-check`, `critique-select`, `design-page` |
 | Plan and page | `validate`, `hash` (prints the plan hash, used to detect an out-of-date roadmap), `page`, `sync`, `clean-cache` |
 | Work | `next [--base <branch>]`, `conflicts`, `recover`, `status`, `commit-info` |
 | Sessions | `launch <track> [--swarm <id> --base <branch>]`, `launch <plan> <T> --task --run R --coordinator SID --base B [--launcher bg|herdr]`, `inbox`, `escalations`, `notes`, `session-id` |
