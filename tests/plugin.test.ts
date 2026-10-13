@@ -154,6 +154,15 @@ describe('plugin layout', () => {
       expect(forge).toContain(`) ${dep},`);
     }
   });
+  it('decision skills: WP defined, the md locale and place, revert always written, revert rules', () => {
+    const run = read('plugins/forge/skills/run/SKILL.md');
+    const dec = run.slice(run.indexOf('## Decisions'), run.indexOf('## 1. Triage'));
+    for (const w of ['`WP` = `FORGE waypoint-cli`', '--locale <es|en>', 'Always write `revert`', '--cwd .claude/worktrees/run', 'before `FORGE swarm merge`']) expect(dec).toContain(w);
+    expect(run).toMatch(/Before `FORGE swarm merge`, without a roadmap, write and commit the run's decisions file/);
+    const skill = read('plugins/forge/skills/decisions/SKILL.md');
+    for (const w of ['relative to `MAIN`', 'does not exist', 'git log --all --oneline --grep', 'from the `depends_on` of every task left', '"runId"', "two options in the user's language", 'node "<WP>" design-validate', 'node "<WP>" design-snapshot']) expect(skill).toContain(w);
+    expect(skill).not.toContain('"Revertir" / "No"');
+  });
   it('READMEs describe the decisions', () => {
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
       const md = read(f);
