@@ -1500,7 +1500,7 @@ var require_stringify = __commonJS({
         props.push(doc.directives.tagString(tag));
       return props.join(" ");
     }
-    function stringify(item, ctx, onComment, onChompKeep) {
+    function stringify2(item, ctx, onComment, onChompKeep) {
       if (identity.isPair(item))
         return item.toString(ctx, onComment, onChompKeep);
       if (identity.isAlias(item)) {
@@ -1529,7 +1529,7 @@ var require_stringify = __commonJS({
 ${ctx.indent}${str3}`;
     }
     exports2.createStringifyContext = createStringifyContext;
-    exports2.stringify = stringify;
+    exports2.stringify = stringify2;
   }
 });
 
@@ -1539,7 +1539,7 @@ var require_stringifyPair = __commonJS({
     "use strict";
     var identity = require_identity();
     var Scalar = require_Scalar();
-    var stringify = require_stringify();
+    var stringify2 = require_stringify();
     var stringifyComment = require_stringifyComment();
     function stringifyPair({ key, value }, ctx, onComment, onChompKeep) {
       const { allNullValues, doc, indent, indentStep, options: { commentString, indentSeq, simpleKeys } } = ctx;
@@ -1561,7 +1561,7 @@ var require_stringifyPair = __commonJS({
       });
       let keyCommentDone = false;
       let chompKeep = false;
-      let str3 = stringify.stringify(key, ctx, () => keyCommentDone = true, () => chompKeep = true);
+      let str3 = stringify2.stringify(key, ctx, () => keyCommentDone = true, () => chompKeep = true);
       if (!explicitKey && !ctx.inFlow && str3.length > 1024) {
         if (simpleKeys)
           throw new Error("With simple keys, single line scalar must not span more than 1024 characters");
@@ -1613,7 +1613,7 @@ ${indent}:`;
         ctx.indent = ctx.indent.substring(2);
       }
       let valueCommentDone = false;
-      const valueStr = stringify.stringify(value, ctx, () => valueCommentDone = true, () => chompKeep = true);
+      const valueStr = stringify2.stringify(value, ctx, () => valueCommentDone = true, () => chompKeep = true);
       let ws = " ";
       if (keyComment || vsb || vcb) {
         ws = vsb ? "\n" : "";
@@ -1754,7 +1754,7 @@ var require_addPairToJSMap = __commonJS({
     "use strict";
     var log = require_log();
     var merge = require_merge();
-    var stringify = require_stringify();
+    var stringify2 = require_stringify();
     var identity = require_identity();
     var toJS = require_toJS();
     function addPairToJSMap(ctx, map, { key, value }) {
@@ -1790,7 +1790,7 @@ var require_addPairToJSMap = __commonJS({
       if (typeof jsKey !== "object")
         return String(jsKey);
       if (identity.isNode(key) && ctx?.doc) {
-        const strCtx = stringify.createStringifyContext(ctx.doc, {});
+        const strCtx = stringify2.createStringifyContext(ctx.doc, {});
         strCtx.anchors = /* @__PURE__ */ new Set();
         for (const node of ctx.anchors.keys())
           strCtx.anchors.add(node.anchor);
@@ -1857,12 +1857,12 @@ var require_stringifyCollection = __commonJS({
   "node_modules/yaml/dist/stringify/stringifyCollection.js"(exports2) {
     "use strict";
     var identity = require_identity();
-    var stringify = require_stringify();
+    var stringify2 = require_stringify();
     var stringifyComment = require_stringifyComment();
     function stringifyCollection(collection, ctx, options) {
       const flow = ctx.inFlow ?? collection.flow;
-      const stringify2 = flow ? stringifyFlowCollection : stringifyBlockCollection;
-      return stringify2(collection, ctx, options);
+      const stringify3 = flow ? stringifyFlowCollection : stringifyBlockCollection;
+      return stringify3(collection, ctx, options);
     }
     function stringifyBlockCollection({ comment, items }, ctx, { blockItemPrefix, flowChars, itemIndent, onChompKeep, onComment }) {
       const { indent, options: { commentString } } = ctx;
@@ -1887,7 +1887,7 @@ var require_stringifyCollection = __commonJS({
           }
         }
         chompKeep = false;
-        let str4 = stringify.stringify(item, itemCtx, () => comment2 = null, () => chompKeep = true);
+        let str4 = stringify2.stringify(item, itemCtx, () => comment2 = null, () => chompKeep = true);
         if (comment2)
           str4 += stringifyComment.lineComment(str4, itemIndent, commentString(comment2));
         if (chompKeep && comment2)
@@ -1954,7 +1954,7 @@ ${indent}${line}` : "\n";
         }
         if (comment)
           reqNewline = true;
-        let str3 = stringify.stringify(item, itemCtx, () => comment = null);
+        let str3 = stringify2.stringify(item, itemCtx, () => comment = null);
         reqNewline || (reqNewline = lines2.length > linesAtValue || str3.includes("\n"));
         if (i < items.length - 1) {
           str3 += ",";
@@ -3315,7 +3315,7 @@ var require_stringifyDocument = __commonJS({
   "node_modules/yaml/dist/stringify/stringifyDocument.js"(exports2) {
     "use strict";
     var identity = require_identity();
-    var stringify = require_stringify();
+    var stringify2 = require_stringify();
     var stringifyComment = require_stringifyComment();
     function stringifyDocument(doc, options) {
       const lines2 = [];
@@ -3330,7 +3330,7 @@ var require_stringifyDocument = __commonJS({
       }
       if (hasDirectives)
         lines2.push("---");
-      const ctx = stringify.createStringifyContext(doc, options);
+      const ctx = stringify2.createStringifyContext(doc, options);
       const { commentString } = ctx.options;
       if (doc.commentBefore) {
         if (lines2.length !== 1)
@@ -3352,7 +3352,7 @@ var require_stringifyDocument = __commonJS({
           contentComment = doc.contents.comment;
         }
         const onChompKeep = contentComment ? void 0 : () => chompKeep = true;
-        let body = stringify.stringify(doc.contents, ctx, () => contentComment = null, onChompKeep);
+        let body = stringify2.stringify(doc.contents, ctx, () => contentComment = null, onChompKeep);
         if (contentComment)
           body += stringifyComment.lineComment(body, "", commentString(contentComment));
         if ((body[0] === "|" || body[0] === ">") && lines2[lines2.length - 1] === "---") {
@@ -3360,7 +3360,7 @@ var require_stringifyDocument = __commonJS({
         } else
           lines2.push(body);
       } else {
-        lines2.push(stringify.stringify(doc.contents, ctx));
+        lines2.push(stringify2.stringify(doc.contents, ctx));
       }
       if (doc.directives?.docEnd) {
         if (doc.comment) {
@@ -5496,7 +5496,7 @@ var require_cst_scalar = __commonJS({
 var require_cst_stringify = __commonJS({
   "node_modules/yaml/dist/parse/cst-stringify.js"(exports2) {
     "use strict";
-    var stringify = (cst) => "type" in cst ? stringifyToken(cst) : stringifyItem(cst);
+    var stringify2 = (cst) => "type" in cst ? stringifyToken(cst) : stringifyItem(cst);
     function stringifyToken(token) {
       switch (token.type) {
         case "block-scalar": {
@@ -5549,7 +5549,7 @@ var require_cst_stringify = __commonJS({
         res += stringifyToken(value);
       return res;
     }
-    exports2.stringify = stringify;
+    exports2.stringify = stringify2;
   }
 });
 
@@ -7279,7 +7279,7 @@ var require_public_api = __commonJS({
       }
       return doc.toJS(Object.assign({ reviver: _reviver }, options));
     }
-    function stringify(value, replacer, options) {
+    function stringify2(value, replacer, options) {
       let _replacer = null;
       if (typeof replacer === "function" || Array.isArray(replacer)) {
         _replacer = replacer;
@@ -7304,7 +7304,7 @@ var require_public_api = __commonJS({
     exports2.parse = parse3;
     exports2.parseAllDocuments = parseAllDocuments;
     exports2.parseDocument = parseDocument;
-    exports2.stringify = stringify;
+    exports2.stringify = stringify2;
   }
 });
 
@@ -11647,7 +11647,10 @@ var DECISION_POINTS = ["route", "triage", "design-apply", "design-approve", "pla
 var LIMITS = { what: 200, chosen: 200, alternative: 200, alternatives: 10, why: 500, revert: 500, safePath: 200, reason: 300 };
 var DECISIONS_MAX = 16 * 1024;
 var DECISIONS_WINDOW_MS = 24 * 36e5;
-var clean = (s, max) => s.replace(/[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
+var FUTURE_SKEW_MS = 5 * 6e4;
+var cp = (n) => String.fromCharCode(n);
+var UNSAFE = new RegExp(`[\\x00-\\x1f\\x7f-\\x9f${cp(8234)}-${cp(8238)}${cp(8294)}-${cp(8297)}]`, "g");
+var clean = (s, max) => s.replace(UNSAFE, " ").replace(/\s+/g, " ").trim().slice(0, max);
 
 // src/lib/notes.ts
 var NOTE_TYPES = ["decision", "idea", "debt", "question"];
@@ -11907,7 +11910,8 @@ var MetaSchema = external_exports.object({
   pillars: external_exports.array(external_exports.object({ title: external_exports.string().min(1), text: external_exports.string().min(1) })).max(8).default([]),
   start_prompt: external_exports.string().min(1).default("/waypoint:work <track>"),
   status: external_exports.enum(["draft", "approved"]).default("draft"),
-  artifact: external_exports.string().url().optional()
+  artifact: external_exports.string().url().optional(),
+  source: external_exports.string().min(1).max(300).optional()
 });
 var DesignError = class extends Error {
   constructor(issues) {
@@ -11992,6 +11996,70 @@ function changedSections(prev, next) {
     if (slug === "_intro" ? (old ?? "") !== text : old !== text) changed.push(slug);
   }
   return changed;
+}
+
+// src/lib/design-import.ts
+var import_yaml3 = __toESM(require_dist(), 1);
+var SpecImportError = class extends Error {
+};
+var SUMMARY_MAX = 400;
+var PURPOSE = /prop[oó]sito|purpose|overview|resumen|summary|objetivo|goal/i;
+function linesOf(text) {
+  const out = [];
+  let fence = null;
+  for (const piece of text.split(/(?<=\n)/)) {
+    const t = piece.replace(/\r?\n$/, "");
+    if (fence) {
+      out.push({ text: t, fenced: true });
+      const close = /^\s*(`{3,}|~{3,})\s*$/.exec(t);
+      if (close && close[1][0] === fence[0] && close[1].length >= fence.length) fence = null;
+      continue;
+    }
+    const open = /^\s*(`{3,}|~{3,})/.exec(t);
+    if (open) fence = open[1];
+    out.push({ text: t, fenced: !!open });
+  }
+  return out;
+}
+function specTitle(h1) {
+  return h1.replace(/\s*(?:[—–-]|:)\s*(?:diseño|design)\s*$/i, "").trim() || h1.trim();
+}
+function firstParagraph(lines2) {
+  const para = [];
+  for (const l3 of lines2) {
+    const t = l3.text.trim();
+    const plain = !l3.fenced && !!t && !/^(#{1,6}\s|[-*+]\s|\d+[.)]\s|\||>|<!--)/.test(t) && !/^(-{3,}|\*{3,}|_{3,})$/.test(t);
+    if (plain) {
+      para.push(t);
+      continue;
+    }
+    if (para.length) break;
+  }
+  if (!para.length) return null;
+  return para.join(" ").replace(/\s+/g, " ").trim().slice(0, SUMMARY_MAX).trimEnd();
+}
+function importSpec(text, opts) {
+  const src = text.replace(/^﻿/, "");
+  const lines2 = linesOf(src);
+  const h1 = lines2.findIndex((l3) => !l3.fenced && /^#\s+\S/.test(l3.text));
+  if (h1 < 0) throw new SpecImportError('the spec has no "# " title');
+  const after = lines2.slice(h1 + 1);
+  if (!after.some((l3) => !l3.fenced && /^##\s+\S/.test(l3.text))) throw new SpecImportError('the spec has no "## " section');
+  const title = specTitle(lines2[h1].text.replace(/^#\s+/, "").replace(/\s+#*\s*$/, ""));
+  let summary = null;
+  for (let i = 0; i < after.length && summary === null; i++) {
+    const m = after[i].fenced ? null : /^#{2,3}\s+(.+)$/.exec(after[i].text);
+    if (!m || !PURPOSE.test(m[1])) continue;
+    const next = after.findIndex((x2, j2) => j2 > i && !x2.fenced && /^#{2,3}\s/.test(x2.text));
+    summary = firstParagraph(after.slice(i + 1, next < 0 ? after.length : next));
+  }
+  summary ??= firstParagraph(after) ?? title;
+  const meta = { title, project: opts.project, locale: opts.locale, summary, pillars: [], start_prompt: "/waypoint:work <track>", status: "draft", source: opts.source };
+  const body = src.split(/(?<=\n)/).slice(h1 + 1).join("").replace(/^(?:[ \t]*\r?\n)+/, "");
+  return `---
+${(0, import_yaml3.stringify)(meta, { lineWidth: 0 })}---
+
+${body}`;
 }
 
 // src/lib/history.ts
@@ -13628,7 +13696,7 @@ function launchRun(launcher, x2) {
 }
 
 // src/cli/run.ts
-var USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|design-validate|design-snapshot|design-changed|critique-check|critique-select|design-page|hook> ...`;
+var USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|design-validate|design-import|design-snapshot|design-changed|critique-check|critique-select|design-page|hook> ...`;
 function run(argv, io) {
   const [cmd, ...args] = argv;
   const flag = (name) => {
@@ -13869,6 +13937,44 @@ function run(argv, io) {
         const log = readChangelog(import_node_path2.default.dirname(abs(args[0])));
         const sections = d.sections.length;
         return ok(`ok: ${d.words} words, ${sections} sections, v${log[log.length - 1]?.version ?? 0}`);
+      }
+      case "design-import": {
+        const spec = args[0];
+        const project = flag("project");
+        const out = flag("out");
+        if (!spec || spec.startsWith("--") || !project || !out) return fail("usage: waypoint design-import <spec.md> --project <id> [--locale <l>] --out <design.md>", 2);
+        if (!/^[A-Za-z0-9_.-]{1,64}$/.test(project) || project === "." || project === "..") return fail(`design-import: invalid project id ${project}`, 2);
+        const target = abs(out);
+        if ((0, import_node_fs2.existsSync)(target)) return fail(`design-import: ${out} already exists; an import never overwrites a design`, 2);
+        let text;
+        try {
+          text = (0, import_node_fs2.readFileSync)(abs(spec), "utf8");
+        } catch {
+          return fail(`design-import: cannot read ${spec}`, 2);
+        }
+        let source = import_node_path2.default.relative(io.cwd, abs(spec)).split(import_node_path2.default.sep).join("/");
+        try {
+          const top = (0, import_node_child_process.execFileSync)("git", ["rev-parse", "--show-toplevel"], { cwd: import_node_path2.default.dirname(abs(spec)), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+          const rel = import_node_path2.default.relative(import_node_path2.default.resolve(top), abs(spec)).split(import_node_path2.default.sep).join("/");
+          if (!rel.startsWith("..") && !import_node_path2.default.isAbsolute(rel)) source = rel;
+        } catch {
+        }
+        let design;
+        try {
+          design = importSpec(text, { project, locale: flag("locale") ?? "en", source });
+        } catch (e) {
+          if (e instanceof SpecImportError) return fail(`design-import: ${e.message}`, 2);
+          throw e;
+        }
+        const d = parseDesign(design);
+        (0, import_node_fs2.mkdirSync)(import_node_path2.default.dirname(target), { recursive: true });
+        try {
+          (0, import_node_fs2.writeFileSync)(target, design, { flag: "wx" });
+        } catch (e) {
+          if (e.code === "EEXIST") return fail(`design-import: ${out} already exists; an import never overwrites a design`, 2);
+          throw e;
+        }
+        return ok(JSON.stringify({ path: target, title: d.meta.title, sections: d.sections.length, words: d.words, source }));
       }
       case "design-snapshot": {
         const file = abs(args[0]);

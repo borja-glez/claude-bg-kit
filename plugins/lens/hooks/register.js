@@ -47,7 +47,9 @@ var MAX_ACCEPTED = 200;
 var str2 = (x) => typeof x === "string";
 var num = (x) => typeof x === "number" && Number.isFinite(x) ? x : null;
 var isObj = (x) => !!x && typeof x === "object" && !Array.isArray(x);
-var cleanText = (s) => s.replace(/[\x00-\x1f\x7f-\x9f‪-‮⁦-⁩]/g, "").slice(0, CLIP);
+var cp = (n2) => String.fromCharCode(n2);
+var UNSAFE = new RegExp(`[\\x00-\\x1f\\x7f-\\x9f${cp(8234)}-${cp(8238)}${cp(8294)}-${cp(8297)}]`, "g");
+var cleanText = (s) => s.replace(UNSAFE, "").slice(0, CLIP);
 var pathText = (x) => str2(x) ? x.replace(/[\x00-\x1f\x7f-\x9f]/g, "").slice(0, 200) : null;
 var briefNum = (x) => typeof x === "number" && Number.isInteger(x) && x > 0 && x < 1e4 ? x : null;
 function normalizeStatus(x) {
@@ -10957,11 +10959,14 @@ var DECISION_POINTS = ["route", "triage", "design-apply", "design-approve", "pla
 var DECISIONS_MAX = 16 * 1024;
 var DECISIONS_WINDOW_MS = 24 * 36e5;
 var LAST_MAX = 5;
+var FUTURE_SKEW_MS = 5 * 6e4;
 var SHORT = 80;
 var isObj3 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
 var str4 = (x) => typeof x === "string";
 var oneOf3 = (list, x) => str4(x) && list.includes(x) ? x : null;
-var clean = (s, max) => s.replace(/[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
+var cp2 = (n2) => String.fromCharCode(n2);
+var UNSAFE2 = new RegExp(`[\\x00-\\x1f\\x7f-\\x9f${cp2(8234)}-${cp2(8238)}${cp2(8294)}-${cp2(8297)}]`, "g");
+var clean = (s, max) => s.replace(UNSAFE2, " ").replace(/\s+/g, " ").trim().slice(0, max);
 var text = (x, max) => str4(x) ? clean(x, max) || null : null;
 var posInt = (x) => typeof x === "number" && Number.isInteger(x) && x > 0 ? x : null;
 function entryOf(x) {
@@ -10997,7 +11002,7 @@ function decisionsSummary(text2, now) {
   }
   if (!doc || doc.count < 1) return null;
   const t = Date.parse(doc.ts);
-  if (!Number.isFinite(t) || !Number.isFinite(now) || now - t > DECISIONS_WINDOW_MS) return null;
+  if (!Number.isFinite(t) || !Number.isFinite(now) || now - t > DECISIONS_WINDOW_MS || t - now > FUTURE_SKEW_MS) return null;
   return { count: doc.count, autonomy: doc.autonomy, lastMajor: doc.lastMajor?.what ?? null };
 }
 
@@ -11456,7 +11461,8 @@ var MetaSchema = external_exports.object({
   pillars: external_exports.array(external_exports.object({ title: external_exports.string().min(1), text: external_exports.string().min(1) })).max(8).default([]),
   start_prompt: external_exports.string().min(1).default("/waypoint:work <track>"),
   status: external_exports.enum(["draft", "approved"]).default("draft"),
-  artifact: external_exports.string().url().optional()
+  artifact: external_exports.string().url().optional(),
+  source: external_exports.string().min(1).max(300).optional()
 });
 var DesignError = class extends Error {
   constructor(issues) {
@@ -11801,16 +11807,19 @@ async function readJsonDir($, dir, max, keep) {
   }
   return out;
 }
-async function loadExecution($, root) {
+async function loadForge($, root) {
   try {
     const main = mainCheckoutFrom(root, await readOpt($, join(root, ".git")) ?? null);
     const dir = join(main, ".forge");
     const entries = await listOpt($, dir);
+    const out = {};
+    const dec2 = entries.find((f) => f.kind === "file" && f.name === "decisions.json");
+    if (dec2 && dec2.size <= DECISIONS_MAX) out.decisions = await readOpt($, join(dir, "decisions.json"));
     const exec = entries.find((f) => f.kind === "file" && f.name === "execution.json");
-    if (!exec || exec.size > EXEC_MAX) return {};
+    if (!exec || exec.size > EXEC_MAX) return out;
     const execution = await readOpt($, join(dir, "execution.json"));
-    if (execution === void 0) return {};
-    const out = { execution };
+    if (execution === void 0) return out;
+    out.execution = execution;
     if (entries.some((f) => f.kind === "dir" && f.name === "execution")) {
       out.execTasks = await readJsonDir($, join(dir, "execution"), EXEC_TASKS_MAX, (name) => SAFE_TASK.test(name));
     }
@@ -11819,12 +11828,6 @@ async function loadExecution($, root) {
   } catch {
     return {};
   }
-}
-async function loadDecisions($, root) {
-  const main = mainCheckoutFrom(root, await readOpt($, join(root, ".git")) ?? null);
-  const dir = join(main, ".forge");
-  const f = (await listOpt($, dir)).find((x) => x.kind === "file" && x.name === "decisions.json");
-  return f && f.size <= DECISIONS_MAX ? readOpt($, join(dir, "decisions.json")) : void 0;
 }
 async function loadBandModel($) {
   const root = await $.session.root();
@@ -11845,8 +11848,7 @@ async function loadBandModel($) {
     session: await readOpt($, join(pstate, "session.json")),
     states: await readCollection($, join(pstate, "dbcache", "state")),
     messages: await readCollection($, join(pstate, "dbcache", "messages")),
-    ...await loadExecution($, root),
-    decisions: await loadDecisions($, root),
+    ...await loadForge($, root),
     critiques
   };
   return buildBandModel(project, files);
