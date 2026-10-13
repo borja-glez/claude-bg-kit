@@ -54,6 +54,18 @@ describe('parseRun', () => {
     expect(parseRun(JSON.stringify({ ...old }))?.blocksSinceCycle).toBe(0);
     expect(parseRun(JSON.stringify({ ...old, blocksSinceCycle: 1 }))?.blocksSinceCycle).toBe(1);
   });
+  it('keeps a valid locale and ignores a missing or invalid one', () => {
+    const r = startRun(T0, { cycles: 2 }, 10, null, 'es');
+    expect(r.locale).toBe('es');
+    expect(parseRun(JSON.stringify(r))).toEqual(r);
+    expect(parseRun(JSON.stringify({ ...r, locale: 'pt-BR' }))?.locale).toBe('pt-BR');
+    for (const locale of ['', 'spanish', 3, 'es es', null]) {
+      const p = parseRun(JSON.stringify({ ...r, locale }));
+      expect(p).not.toBeNull();
+      expect(p).not.toHaveProperty('locale');
+    }
+    expect(startRun(T0, { cycles: 2 })).not.toHaveProperty('locale');
+  });
 });
 
 describe('recordCycle', () => {

@@ -6,11 +6,15 @@ import { appendEvent, readEvents, forgeDir, LEDGER_KINDS, type LedgerKind } from
 import { parseRun, startRun, recordCycle, stopReason, endRun, readRunText, saveRun, stopFile, type RunState, type StopContext } from '../run.js';
 import { decideStop, decideExecutionStop, bindHookSession } from '../hook.js';
 import { readExecution, saveExecution } from '../execution.js';
-import { planLocale, replyIn } from '../../lib/locale.js';
+import { planLocale, replyIn, sessionReply } from '../../lib/locale.js';
+import { isLocale } from '../../lib/forge-run.js';
+import { isSafeId } from '../../lib/execution-state.js';
+import { samePath } from '../../lib/worktree.js';
+import { treeStartFile, parseStatus, parseSnapshot, treeCheck, type TreeSnapshot } from '../tree.js';
 import { triage, implementerFor, zonesFromPaths, announce, PATH_ORDER, type PathName, type AnnounceLocale } from '../triage.js';
 import { parsePlan, PlanError } from '../../lib/plan.js';
 import { renderBrief, taskText, tddLine } from '../brief.js';
-import { loadConfig, agentFor, ROLES, ConfigError, NAME, WORKFLOWS, AUTONOMIES } from '../config.js';
+import { loadConfig, configValue, agentFor, ROLES, ConfigError, NAME, WORKFLOWS, AUTONOMIES } from '../config.js';
 import { resolvePrefs, isWorkflow, isAutonomy } from '../prefs.js';
 import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, type ReviewerName, type Action, type FailingValidator, type VerifyFile } from '../verdict.js';
 import { decideRound } from '../loop.js';
@@ -39,7 +43,7 @@ export interface ExecResult { code: number; output: string; ms: number; timedOut
 export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined> }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|infinite|cycle|swarm|stop|hook> ...';
+const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|swarm|stop|hook> ...';
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 const MAX_WHY = 200;
@@ -312,13 +316,23 @@ function hookStop(io: Io): string {
       if (!d.block) return '';
       saveRun(io.cwd, d.run);
       if (d.ended) appendEvent(io.cwd, { ts: io.now().toISOString(), kind: 'cycle', action: 'stopped', reason: d.ended });
-      return JSON.stringify({ decision: 'block', reason: d.reason + replyIn(planLocale(io.cwd, exec?.project)) }) + '\n';
+      return JSON.stringify({ decision: 'block', reason: d.reason + (sessionReply(d.run, exec?.active ? exec : null, () => planLocale(io.cwd, exec?.project)) ?? replyIn(null)) }) + '\n';
     }
     const d = decideExecutionStop(hookInput, exec, { now: io.now(), stopFile: existsSync(stopFile(main)) });
     if (!d.block) return '';
     saveExecution(main, d.exec);
-    return JSON.stringify({ decision: 'block', reason: d.reason + replyIn(planLocale(main, d.exec.project)) }) + '\n';
+    // Only an active run speaks for the person: here none is (it decides above).
+    return JSON.stringify({ decision: 'block', reason: d.reason + (sessionReply(null, d.exec, () => planLocale(main, d.exec.project)) ?? replyIn(null)) }) + '\n';
   } catch { return ''; }
+}
+
+// The `reply` of the cycle and infinite status JSON: the sentence that tells the session which language to answer in
+// (the run's, else the active execution's, else the plan's); null when none is known.
+function runReply(cwd: string, run: RunState | null): string | null {
+  const main = mainCheckout(cwd);
+  const exec = readExecution(main);
+  const active = exec?.active ? exec : null;
+  return sessionReply(run, active, () => planLocale(cwd, active?.project))?.trim() ?? null;
 }
 
 // Logs the verify event of a verification (verdict and verify-result share it): its result (`invalid` when verify.json
@@ -888,6 +902,59 @@ export function run(argv: string[], io: Io): Result {
           : which === 'route-session' ? hookRoute(io, 'session') : which === 'route-prompt' ? hookRoute(io, 'prompt') : '';
         return { code: 0, stdout: out, stderr: '' };
       }
+      case 'tree': {
+        // The work tree of the code (--cwd) against the snapshot kept with forge's state (the caller's directory).
+        const sub = args[0];
+        const task = flag('task');
+        const usage = 'usage: forge tree snapshot --task <id> [--force] [--cwd <dir>] | check --task <id> --base <sha> [--cwd <dir>] (the same --cwd as the snapshot; --base is the task\'s own base)';
+        if ((sub !== 'snapshot' && sub !== 'check') || !task) throw new UsageError(usage);
+        if (!isSafeId(task)) throw new UsageError(`tree ${sub}: --task must use letters, digits, _ - . (at most 120)`);
+        const git = io.git ?? defaultGit(repoDir);
+        const top = git(['rev-parse', '--show-toplevel'])?.trim();
+        if (!top) throw new UsageError(`tree ${sub}: ${repoDir} is not a git work tree`);
+        const treeRoot = path.resolve(top);
+        const file = treeStartFile(io.cwd, task);
+        let text: string | null = null;
+        try { text = readFileSync(file, 'utf8'); } catch { text = null; }
+        const stored = parseSnapshot(text);
+        if (sub === 'snapshot') {
+          // The first snapshot stands: a later one would absorb the files the person created in between.
+          if (stored && !has('force')) return ok(`${file} (already taken at ${stored.at}; --force replaces it)`);
+          // .forge/ first, so the .gitignore forgeDir may create is in the snapshot, never a file that "appeared".
+          forgeDir(io.cwd);
+          const status = git(['status', '--porcelain', '-z', '-uall']);
+          if (status === null) throw new UsageError(`tree snapshot: git status failed in ${repoDir}`);
+          const head = git(['rev-parse', '--verify', '-q', 'HEAD'])?.trim() || null;
+          const snap: TreeSnapshot = { task, root: treeRoot, at: ts(), head, ...parseStatus(status) };
+          mkdirSync(path.dirname(file), { recursive: true });
+          writeFileSync(file, JSON.stringify(snap, null, 2) + '\n');
+          return ok(file);
+        }
+        const base = flag('base');
+        if (!base) throw new UsageError(usage);
+        if (base.startsWith('-') || git(['rev-parse', '--verify', '-q', `${base}^{commit}`]) === null) throw new UsageError(`tree check: --base ${base} is not a commit`);
+        const status = git(['status', '--porcelain', '-z', '-uall']);
+        if (status === null) throw new UsageError(`tree check: git status failed in ${repoDir}`);
+        // The task's files: what its commits added or changed (a path it deleted is not its file).
+        const diff = git(['diff', '--name-only', '-z', '--diff-filter=d', `${base}..HEAD`]);
+        if (diff === null) throw new UsageError(`tree check: cannot diff ${base}..HEAD`);
+        // A snapshot of another tree or another task is no baseline: everything is listed (fail safe).
+        const snapshot = stored && stored.task === task && samePath(stored.root, treeRoot) ? stored : null;
+        const out = treeCheck(snapshot, parseStatus(status), diff.split('\0').filter(Boolean));
+        if (snapshot?.head && git(['merge-base', '--is-ancestor', base, snapshot.head]) === null) {
+          out.warning = `--base ${base} is not an ancestor of the snapshot's head ${snapshot.head}: task may list commits that are not the task's`;
+        }
+        return json(out);
+      }
+      case 'config': {
+        // The config of the main checkout, whatever --cwd says: a config the person writes by hand is untracked and
+        // exists only there.
+        const [sub, key] = args;
+        if (sub !== 'get' || !key || key.startsWith('--')) throw new UsageError('usage: forge config get <key> (reads .forge/config.yaml of the main checkout, defaults applied; --cwd does not change it)');
+        const value = configValue(loadConfig(mainCheckout(io.cwd)), key);
+        if (value === undefined) throw new UsageError(`config get: ${key} is not a config key`);
+        return ok(typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? String(value) : JSON.stringify(value));
+      }
       case 'infinite': {
         const sub = args[0];
         if (sub === 'start') {
@@ -904,6 +971,8 @@ export function run(argv: string[], io: Io): Result {
           const queueMax = num('queue-max', posInt, 'a positive integer');
           const session = flag('session');
           if (has('session') && !session) throw new UsageError('infinite start: --session needs a session id');
+          const locale = flag('locale');
+          if (has('locale') && !isLocale(locale)) throw new UsageError('infinite start: --locale must be a language code (es, en, pt-BR…)');
           if (cycles === undefined && hours === undefined) throw new UsageError('infinite start: a budget is required (--cycles N and/or --hours H)');
           // An active run blocks a new one only while nothing stops it: a run whose stop reason is already due
           // (e.g. its session died after a budget ran out or a stop was asked) is replaced.
@@ -911,7 +980,7 @@ export function run(argv: string[], io: Io): Result {
           if (current?.active && stopReason(current, stopContext(io.cwd, io.now())) === null) throw new UsageError('infinite start: a run is already active (forge stop, or forge infinite status)');
           forgeDir(io.cwd);
           rmSync(stopFile(io.cwd), { force: true });
-          const run: RunState = startRun(io.now(), { ...(cycles !== undefined ? { cycles } : {}), ...(hours !== undefined ? { hours } : {}) }, queueMax, session ?? null);
+          const run: RunState = startRun(io.now(), { ...(cycles !== undefined ? { cycles } : {}), ...(hours !== undefined ? { hours } : {}) }, queueMax, session ?? null, locale ?? null);
           saveRun(io.cwd, run);
           return json(run);
         }
@@ -919,9 +988,9 @@ export function run(argv: string[], io: Io): Result {
           const text = readRunText(io.cwd);
           const run = parseRun(text);
           const reason = run?.active ? stopReason(run, stopContext(io.cwd, io.now())) : null;
-          return json({ present: text !== null, valid: run !== null, run, stopReason: reason });
+          return json({ present: text !== null, valid: run !== null, run, stopReason: reason, reply: runReply(io.cwd, run) });
         }
-        throw new UsageError('usage: forge infinite <start --cycles N|--hours H [--queue-max N] [--session ID]|status>');
+        throw new UsageError('usage: forge infinite <start --cycles N|--hours H [--queue-max N] [--session ID] [--locale CODE]|status>');
       }
       case 'cycle': {
         const progress = flag('progress');
@@ -935,7 +1004,7 @@ export function run(argv: string[], io: Io): Result {
         const next = recordCycle(current, { progress: progress === 'yes', ...(error !== undefined ? { error } : {}) });
         saveRun(io.cwd, next);
         appendEvent(io.cwd, { ts: ts(), kind: 'cycle', cycle: next.cycle, progress: progress === 'yes', ...(next.lastError ? { error: next.lastError } : {}) });
-        return json(next);
+        return json({ ...next, reply: runReply(io.cwd, next) });
       }
       case 'stop': {
         forgeDir(io.cwd);

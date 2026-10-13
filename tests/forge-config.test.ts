@@ -1,5 +1,10 @@
-import { describe, it, expect } from 'vitest';
-import { parseConfig, agentFor, ROLES, ConfigError, NAME } from '../src/forge/config.js';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { parseConfig, configValue, agentFor, ROLES, ConfigError, NAME } from '../src/forge/config.js';
+import { run, type Io } from '../src/forge/cli/run.js';
 
 describe('forge config', () => {
   it('defaults: detect on, nothing excluded, verify limits, evidence upload', () => {
@@ -55,5 +60,49 @@ describe('forge config', () => {
   it('NAME is the shared name pattern', () => {
     expect(NAME.test('test:e2e')).toBe(true);
     expect(NAME.test('a b')).toBe(false);
+  });
+  it('configValue reads a key or a dotted path, defaults applied; undefined for an unknown one', () => {
+    expect(configValue(parseConfig(null), 'evidence')).toBe('upload');
+    expect(configValue(parseConfig('swarm:\n  parallel: 2\n'), 'swarm.parallel')).toBe(2);
+    expect(configValue(parseConfig(null), 'nope')).toBeUndefined();
+    expect(configValue(parseConfig(null), 'evidence.x')).toBeUndefined();
+  });
+});
+
+describe('forge config get', () => {
+  let root: string;
+  let io: Io;
+  const git = (...a: string[]) => execFileSync('git', a, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const writeConfig = (text: string) => { mkdirSync(path.join(root, '.forge'), { recursive: true }); writeFileSync(path.join(root, '.forge', 'config.yaml'), text); };
+  beforeEach(() => {
+    root = mkdtempSync(path.join(tmpdir(), 'forge-config-'));
+    io = { cwd: root, now: () => new Date('2026-10-11T10:00:00.000Z') };
+  });
+  it('prints evidence upload with no file, and local once the person creates it mid-run', () => {
+    expect(run(['config', 'get', 'evidence'], io)).toEqual({ code: 0, stdout: 'upload\n', stderr: '' });
+    writeConfig('evidence: local\n');
+    expect(run(['config', 'get', 'evidence'], io).stdout).toBe('local\n');
+    expect(JSON.parse(run(['config', 'get', 'verify.limits'], io).stdout)).toEqual({ checks: 8, shots: 10, minutes: 10 });
+  });
+  it('an invalid config or an unknown key exits 2', () => {
+    writeConfig('evidence: cloud\n');
+    const r = run(['config', 'get', 'evidence'], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('evidence');
+    writeConfig('evidence: local\n');
+    expect(run(['config', 'get', 'nope'], io).code).toBe(2);
+    expect(run(['config', 'get'], io).code).toBe(2);
+  });
+  it('--cwd into a worktree still reads the config of the main checkout', () => {
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 't@t'); git('config', 'user.name', 't');
+    writeFileSync(path.join(root, 'a.txt'), 'a\n');
+    git('add', '.'); git('commit', '-q', '-m', 'init');
+    const wt = path.join(root, 'wt');
+    git('worktree', 'add', '-q', '-b', 'side', wt);
+    writeConfig('evidence: local\n');
+    expect(run(['config', 'get', 'evidence', '--cwd', wt], io).stdout).toBe('local\n');
+    // From inside the worktree too: the hand-made untracked config exists only in the main checkout.
+    expect(run(['config', 'get', 'evidence'], { ...io, cwd: wt }).stdout).toBe('local\n');
   });
 });

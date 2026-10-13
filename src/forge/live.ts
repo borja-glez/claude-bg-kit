@@ -5,6 +5,8 @@ import { readExecution, saveExecution } from './execution.js';
 import { forgeDir } from './ledger.js';
 import { mainCheckout } from './local.js';
 import { memberForHook } from './members.js';
+import { parseRun, readRunText } from './run.js';
+import { planLocale, sessionReply } from '../lib/locale.js';
 import type { Io } from './cli/run.js';
 
 export const liveFile = (main: string, sessionId: string) => path.join(main, '.forge', 'live', `${sessionId}.json`);
@@ -68,7 +70,11 @@ export function hookLive(io: Io, forced?: LiveEvent): string {
       const text = role === 'coordinator'
         ? `forge: this session coordinates the execution ${exec.runId} (${exec.mode}, ${running}/${exec.parallel} running, run branch ${exec.branch}). Resume it with /forge:run → Resume: renew your lease, reconcile each task and keep stepping.`
         : `forge: this session is the ${role} session of ${member?.task ?? 'a task'} in the execution ${exec.runId} coordinated by ${exec.coordinator}. Resume it with /forge:run → Run member: rejoin with FORGE swarm join, renew your lease and continue from your last reported stage.`;
-      return JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } });
+      // A resumed session reads this first: it repeats the language to answer in, when one is known.
+      const run = parseRun(readRunText(main));
+      const project = exec.project;
+      const reply = sessionReply(run?.active ? run : null, exec, () => planLocale(main, project)) ?? '';
+      return JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text + reply } });
     }
   } catch { /* fail-open */ }
   return '';

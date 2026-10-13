@@ -5,12 +5,13 @@ import { UsageError } from './errors.js';
 import type { ExecResult, Io } from './run.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { loadConfig } from '../config.js';
-import { stopFile } from '../run.js';
+import { stopFile, parseRun, readRunText } from '../run.js';
+import { isLocale } from '../../lib/forge-run.js';
 import { appendEvent } from '../ledger.js';
 import { readExecution, saveExecution, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree } from '../execution.js';
 import { schedule, widthOf, relaunchOrBlock, RELAUNCH_CAP, type BgAgent } from '../schedule.js';
 import { LEASE_MINUTES, sessionLiveness } from '../../lib/coordination.js';
-import { planLocale } from '../../lib/locale.js';
+import { planLocale, sessionReply } from '../../lib/locale.js';
 import { signalLiveness } from '../../lib/execution-view.js';
 import { liveFile } from '../live.js';
 import { STAGES, normalizePublicTask, normalizeLive, normalizeExecution, isSafeId, isRunBranch, type ExecutionState, type ExecTask, type PublicTask } from '../../lib/execution-state.js';
@@ -549,9 +550,19 @@ function localeArg(rest: string[], sub: string): 'es' | 'en' | null {
   return v;
 }
 
-/** Spanish when --locale es, or without --locale when the plan's locale is Spanish; else English. */
-const spanish = (given: 'es' | 'en' | null, root: string, project: string) =>
-  given ? given === 'es' : (planLocale(root, project) ?? '').toLowerCase().split(/[-_]/)[0] === 'es';
+/** `start --locale`: the language the person writes in, any language code (es, pt, pt-BR…); null when not given. */
+function personLocaleArg(rest: string[]): string | null {
+  const i = rest.indexOf('--locale');
+  if (i < 0) return null;
+  const v = rest[i + 1];
+  if (!isLocale(v)) throw new UsageError('swarm start: --locale must be a language code (es, en, pt-BR…)');
+  return v;
+}
+
+const isSpanish = (locale: string | null | undefined) => (locale ?? '').toLowerCase().split(/[-_]/)[0] === 'es';
+/** Spanish when the given locale's primary subtag is es, or without one when the plan's locale is Spanish; else English. */
+const spanish = (given: string | null, root: string, project: string) =>
+  given ? isSpanish(given) : isSpanish(planLocale(root, project));
 
 // What the coordinator passes on of a merge attempt: the installs that ran, what a rollback left behind, whether the
 // person's dependencies may be the rejected merge's and, in the person's checkout (`personal`), the files of theirs its
@@ -761,7 +772,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       if (mode !== 'subagents' && mode !== 'sessions') throw new UsageError('swarm start: --mode must be subagents or sessions');
       if (has('autonomy') && flag('autonomy') !== 'auto' && flag('autonomy') !== 'ask') throw new UsageError('swarm start: --autonomy must be auto or ask');
       const auto = flag('autonomy') === 'auto' ? { autonomy: 'auto' as const } : {};
-      const locale = localeArg(rest, 'start');
+      const locale = personLocaleArg(rest);
       const base = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
       if (!base || base === 'HEAD') throw new UsageError('swarm start: the main checkout must be on a branch');
       const prev = readExecution(io.cwd);
@@ -851,12 +862,14 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
           }
         }
       }
+      // The person's language (--locale): a resume keeps the recorded one unless a new flag is given.
+      const lang = locale ? { locale } : {};
       const state: ExecutionState = resume && prev
-        ? { ...prev, parallel, mode, mergeOnFinish: prev.mergeOnFinish || has('merge-on-finish'), coordinator: session, hookSession: null, sleepUntil: null, ...auto }
+        ? { ...prev, parallel, mode, mergeOnFinish: prev.mergeOnFinish || has('merge-on-finish'), coordinator: session, hookSession: null, sleepUntil: null, ...auto, ...lang }
         : {
             runId: `${project}-${iso.replace(/[:.]/g, '')}`, kind, mode, parallel, project, base, branch: kind === 'plan' ? branch : base,
             mergeOnFinish: has('merge-on-finish'), coordinator: session, hookSession: null, active: true, stopReason: null, stallReason: null,
-            startedAt: iso, lastStepAt: null, lastBlockStep: null, sleepUntil: null, tasks: {}, ...auto,
+            startedAt: iso, lastStepAt: null, lastBlockStep: null, sleepUntil: null, tasks: {}, ...auto, ...lang,
           };
       // An execution that would not read back (an id outside the safe rule) is refused rather than saved.
       if (!normalizeExecution(state)) throw new UsageError('swarm start: --project, --session and the run branch must use letters, digits, _ - . (and / in the branch), at most 120 characters');
@@ -874,7 +887,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         ? { loose: loose.length, ...(ignoredTasks ? { ignoredTasks: true, message: `the ephemeral run ${state.runId} is resumed with its own ${loose.length} tasks; --tasks was ignored (start a new run for new requests once this one ends)` } : {}) }
         : {};
       const announce = startAnnounce({
-        es: spanish(locale, io.cwd, project), kind, resume, runId: state.runId, mode: state.mode, parallel: state.parallel,
+        es: spanish(state.locale ?? null, io.cwd, project), kind, resume, runId: state.runId, mode: state.mode, parallel: state.parallel,
         branch: state.branch, base: state.base, mergeOnFinish: state.mergeOnFinish, loose: loose.length, setup,
       });
       return json({ ...state, setup, baseSync, ...looseOut, announce, ...attributes });
@@ -1065,7 +1078,10 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       // A newer sleep (or a --mark) may have replaced it meanwhile: only clear the value this call set.
       const after = readExecution(io.cwd);
       if (after && after.sleepUntil === until) saveExecution(io.cwd, { ...after, sleepUntil: null });
-      return ok();
+      // The coordinator wakes on this output: it repeats the language to answer in, when one is known.
+      const run = parseRun(readRunText(io.cwd));
+      const reply = sessionReply(run?.active ? run : null, after ?? e, () => planLocale(io.cwd, e.project));
+      return reply ? { code: 0, stdout: `woke.${reply}\n`, stderr: '' } : ok();
     }
     case 'stop': {
       const reason = flag('reason') ?? 'stopped';
@@ -1114,6 +1130,6 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     case 'merge':
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError('usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale es|en]|status|propose --plan P|--tasks F|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID [--db DIR]>');
+      throw new UsageError('usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID [--db DIR]>');
   }
 }

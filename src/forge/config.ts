@@ -71,6 +71,16 @@ export function parseConfig(text: string | null): ForgeConfig {
   return validators ? { ...rest, validators } : rest;
 }
 
+/** The value of a key or dotted path (`evidence`, `swarm.parallel`) of a parsed config; undefined when it has none. */
+export function configValue(config: ForgeConfig, key: string): unknown {
+  let at: unknown = config;
+  for (const part of key.split('.')) {
+    if (!at || typeof at !== 'object' || Array.isArray(at) || !Object.prototype.hasOwnProperty.call(at, part)) return undefined;
+    at = (at as Record<string, unknown>)[part];
+  }
+  return at;
+}
+
 export function loadConfig(root: string): ForgeConfig {
   const file = path.join(root, '.forge', 'config.yaml');
   return parseConfig(existsSync(file) ? readFileSync(file, 'utf8') : null);
