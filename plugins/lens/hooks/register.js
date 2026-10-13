@@ -103,6 +103,7 @@ function normalizeStatus(x) {
     stageSince: tsText(x.stageSince),
     stages: stagesOf(x.stages),
     doneAt: tsText(x.doneAt),
+    lastAt: tsText(x.lastAt),
     ...x.autonomy === "auto" ? { autonomy: "auto" } : {}
   };
 }
@@ -11068,6 +11069,8 @@ function stagesFor(path, phase, validated = null, verifyPlanned = false) {
   return out;
 }
 function forgePhase(f) {
+  if ((f.path === "trivial" || f.path === "small") && f.timing?.done) return "done";
+  if (f.timing?.done === false && f.phase.toLowerCase() === "done") return "";
   const total = Math.max(f.briefs ?? 0, f.brief ?? 0);
   const accepted = new Set(f.accepted ?? []);
   const all = total > 0 && Array.from({ length: total }, (_, i) => i + 1).every((n2) => accepted.has(n2));
@@ -11075,14 +11078,18 @@ function forgePhase(f) {
 }
 var count = (cells2) => ({ cells: cells2, done: cells2.filter((c2) => c2 === "done").length, total: cells2.length });
 var roadmapCells = (w) => count([...w.cells ?? ""].map((ch) => LETTER[ch] ?? "pending"));
+var forgeDone = (f) => forgePhase(f) === "done" || f.timing?.done === true;
 function briefCells(f) {
+  const heavy = f.path === "medium" || f.path === "large";
+  const done = !heavy && forgeDone(f);
+  if (!heavy && !done) return null;
   const accepted = new Set(f.accepted ?? []);
   const total = Math.max(f.briefs ?? 0, f.brief ?? 0, ...accepted);
   if (total <= 0) return null;
   const sentBack = f.verdict !== null && f.verdict.action !== "accept";
   const cells2 = [];
   for (let n2 = 1; n2 <= Math.min(total, 60); n2++) {
-    cells2.push(accepted.has(n2) ? "done" : n2 === f.brief ? sentBack && f.round ? "failed" : "active" : "pending");
+    cells2.push(done || accepted.has(n2) ? "done" : n2 === f.brief ? sentBack && f.round ? "failed" : "active" : "pending");
   }
   return count(cells2);
 }
@@ -11437,7 +11444,7 @@ function superpowers(input) {
 var FORGE_WINDOW_MS = 24 * 36e5;
 var MAX_PROPOSALS = 5;
 var PROPOSAL_ID = /^p\d{14}[0-9a-z]{4}$/;
-function forgeFromStatus(text2, now, briefs = null) {
+function forgeFromStatus(text2, now, briefs = null, liveTypes = []) {
   if (typeof text2 !== "string") return null;
   let st;
   try {
@@ -11448,8 +11455,17 @@ function forgeFromStatus(text2, now, briefs = null) {
   if (!st) return null;
   const t = Date.parse(st.ts);
   if (!Number.isFinite(t) || !Number.isFinite(now) || now - t > FORGE_WINDOW_MS) return null;
-  const { ts: _ts, taskStartedAt: _a, stageSince: _b, stages: _c, doneAt: _d, ...forge } = st;
-  return { ...forge, briefs, timing: forgeTiming(st, now) };
+  const { ts: _ts, taskStartedAt: _a, stageSince: _b, stages: _c, doneAt: _d, lastAt: _e, ...forge } = st;
+  const working = !!st.agent && liveTypes.some((t2) => tierOf(t2).label === tierOf(st.agent).label);
+  const left = !working && leftOpen(st, now);
+  const timing = forgeTiming(left ? { ...st, doneAt: st.lastAt } : st, now);
+  return { ...forge, ...left ? { agent: null } : {}, briefs, timing };
+}
+var LEFT_OPEN_MS = 30 * 6e4;
+function leftOpen(st, now) {
+  if (st.path !== "trivial" && st.path !== "small" || st.doneAt) return false;
+  const last = st.lastAt ? Date.parse(st.lastAt) : NaN;
+  return Number.isFinite(last) && Number.isFinite(now) && now - last > LEFT_OPEN_MS;
 }
 function elapsed(from, to, now) {
   const t = from ? Date.parse(from) : NaN;
@@ -11471,6 +11487,8 @@ function forgeTiming(st, now) {
   const current = stageOf(st.phase || "triage");
   const liveSecs = done ? null : elapsed(st.stageSince, now, now);
   if (liveSecs !== null) sums.set(current, (sums.get(current) ?? 0) + liveSecs);
+  const tail = done ? elapsed(st.stageSince, doneMs, now) : null;
+  if (tail) sums.set(current, (sums.get(current) ?? 0) + tail);
   const order = STAGES2;
   const known = order.filter((n2) => sums.has(n2));
   const other = [...sums.keys()].filter((n2) => !order.includes(n2));
@@ -11612,8 +11630,8 @@ function bandKey(model) {
     key.usage = u;
   } else key.usage = usage2;
   if (forge) {
-    const { timing: _timing, ...f } = forge;
-    key.forge = f;
+    const { timing, ...f } = forge;
+    key.forge = { ...f, done: timing?.done ?? null };
   } else key.forge = forge;
   if (rest.execution) {
     const { elapsedSeconds: _e, finished: _f, slots, ...x } = rest.execution;
@@ -11694,7 +11712,7 @@ function buildPanelModel(input) {
     tool: a.tool ? { name: a.tool.name, seconds: secs(now, a.tool.since) } : null,
     turnSeconds: a.turnSince === null || a.turnSince === void 0 ? null : secs(now, a.turnSince),
     ccTasks: cc.length ? { open: cc.filter((t) => !t.done).length, done: cc.filter((t) => t.done).length, recent: cc.slice(-3).map((t) => clip(t.subject)) } : null,
-    forge: input.forgeStatus !== void 0 ? forgeFromStatus(input.forgeStatus, now, input.forgeBriefs ?? null) : null,
+    forge: input.forgeStatus !== void 0 ? forgeFromStatus(input.forgeStatus, now, input.forgeBriefs ?? null, (a.subagents ?? []).map((s) => s.type)) : null,
     infinite: infiniteFromRun(input.forgeRun, input.proposals, now),
     decisions: decisionsSummary(input.forgeDecisions, now),
     // The only plan task title the band model carries is the current one's.
@@ -11806,6 +11824,52 @@ function parseCritique(text2) {
   }
   if (issues.length || !r.success) throw new CritiqueError(issues);
   return r.data;
+}
+
+// src/lib/design-gate.ts
+function appliedIn(changelog, round) {
+  const out = /* @__PURE__ */ new Set();
+  for (const e of changelog) {
+    for (const m of e.note.matchAll(/round\s+(\d+)\s*:\s*applied\s+([\d\s,]+)/gi)) {
+      if (Number(m[1]) !== round) continue;
+      for (const n2 of m[2].split(/[\s,]+/)) if (/^\d+$/.test(n2)) out.add(Number(n2));
+    }
+  }
+  return out;
+}
+function rewroteRound(changelog, round) {
+  return changelog.some((e) => {
+    const m = /^\s*round\s+(\d+)\s*:\s*rewrite/i.exec(e.note);
+    return e.round === round && !!m && Number(m[1]) === round;
+  });
+}
+function parseDismissed(text2) {
+  let raw;
+  try {
+    raw = JSON.parse(text2 ?? "");
+  } catch {
+    return {};
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (!/^[1-9]\d*$/.test(k) || !Array.isArray(v)) continue;
+    const ns = v.filter((n2) => Number.isInteger(n2) && n2 > 0);
+    if (ns.length) out[Number(k)] = [...new Set(ns)].sort((a, b) => a - b);
+  }
+  return out;
+}
+function pendingProposals2(changelog, critiques, dismissed = {}) {
+  const out = [];
+  for (const { round, critique } of [...critiques].sort((a, b) => a.round - b.round)) {
+    if (!critique || rewroteRound(changelog, round)) continue;
+    const applied = appliedIn(changelog, round);
+    const gone = new Set(dismissed[round] ?? []);
+    for (const p of critique.proposals) {
+      if (!applied.has(p.n) && !gone.has(p.n)) out.push({ round, n: p.n, severity: p.severity, section: p.section });
+    }
+  }
+  return out;
 }
 
 // src/lib/design.ts
@@ -12084,24 +12148,26 @@ function designModel(project, f) {
     changelog = [];
   }
   const critiques = Object.entries(f.critiques).map(([name, text2]) => ({ n: Number(/^critique-r(\d+)\.json$/.exec(name)?.[1] ?? NaN), text: text2 })).filter((c2) => Number.isFinite(c2.n)).sort((a, b) => b.n - a.n);
-  let latest = null;
-  let round = 0;
-  for (const c2 of critiques) {
+  const valid = critiques.map((c2) => {
     try {
-      latest = parseCritique(c2.text);
-      round = c2.n;
-      break;
+      return { round: c2.n, critique: parseCritique(c2.text) };
     } catch {
+      return { round: c2.n, critique: null };
     }
-  }
+  });
+  const top = valid.find((c2) => c2.critique !== null);
+  const latest = top?.critique ?? null;
+  const pending = pendingProposals2(changelog, valid, parseDismissed(f.dismissed));
   return {
     mode: "design",
     project,
     locale: d.meta.locale,
     version: changelog.at(-1)?.version ?? 0,
-    round,
+    round: top?.round ?? 0,
     proposals: latest?.proposals.length ?? 0,
     critical: latest?.proposals.filter((p) => p.severity === "critical").length ?? 0,
+    pending: pending.length,
+    pendingCritical: pending.filter((p) => p.severity === "critical").length,
     designUrl: d.meta.artifact ?? null
   };
 }
@@ -12218,6 +12284,7 @@ async function loadBandModel($) {
     plan: await readOpt($, join(pdocs, "plan.yaml")),
     design: await readOpt($, join(pdocs, "design.md")),
     changelog: await readOpt($, join(pdocs, "design", "changelog.json")),
+    dismissed: await readOpt($, join(pstate, "dismissed.json")),
     session: await readOpt($, join(pstate, "session.json")),
     states: await readCollection($, join(pstate, "dbcache", "state")),
     messages: await readCollection($, join(pstate, "dbcache", "messages")),
@@ -12300,7 +12367,7 @@ function buildCards(m, t, nowMs2) {
         blocks.push({ kind: "bar", ratio: ratio(c2.done, c2.total), hue: SECTION_HUE.forge, moving: c2.done < c2.total, label: t.briefs, right: `${c2.done}/${c2.total}` });
         blocks.push({ kind: "cells", cells: c2.cells });
       }
-      if (f.agent) {
+      if (f.agent && !forgeDone(f)) {
         const tier = tierOf(f.agent);
         const live = m.subagents.find((s) => tierOf(s.type).label === tier.label);
         blocks.push({ kind: "row", dot: tier.hue, spinning: !!live, tag: { text: tier.label, hue: tier.hue }, text: live?.description ?? f.agent, right: [live && modelRight(live, t), duration(live?.seconds)].filter(Boolean).join("  ") || void 0 });

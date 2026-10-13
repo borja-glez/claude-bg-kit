@@ -11,7 +11,9 @@ export type WaypointBand =
   | { mode: 'run'; project: string; locale: string; executor: 'subagents' | 'sessions'; running: number; parallel: number;
       integrated: number; total: number; slots: { task: string; stage: string; round: number }[];
       worst: 'alive' | 'silent' | 'stopped'; stalled: boolean; roadmapUrl: string | null; auto?: { count: number; lastMajor: string | null } }
-  | { mode: 'design'; project: string; locale: string; version: number; round: number; proposals: number; critical: number; designUrl: string | null; auto?: { count: number; lastMajor: string | null } };
+  // proposals/critical count the latest critique; pending/pendingCritical the proposals of every round still undecided.
+  | { mode: 'design'; project: string; locale: string; version: number; round: number; proposals: number; critical: number;
+      pending: number; pendingCritical: number; designUrl: string | null; auto?: { count: number; lastMajor: string | null } };
 declare module 'claude-code' {
   interface PluginState {
     waypoint: { band: WaypointBand; hidden: boolean };

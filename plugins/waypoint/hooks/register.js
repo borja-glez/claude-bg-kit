@@ -4183,6 +4183,52 @@ function parseCritique(text2) {
   return r.data;
 }
 
+// src/lib/design-gate.ts
+function appliedIn(changelog, round) {
+  const out = /* @__PURE__ */ new Set();
+  for (const e of changelog) {
+    for (const m of e.note.matchAll(/round\s+(\d+)\s*:\s*applied\s+([\d\s,]+)/gi)) {
+      if (Number(m[1]) !== round) continue;
+      for (const n of m[2].split(/[\s,]+/)) if (/^\d+$/.test(n)) out.add(Number(n));
+    }
+  }
+  return out;
+}
+function rewroteRound(changelog, round) {
+  return changelog.some((e) => {
+    const m = /^\s*round\s+(\d+)\s*:\s*rewrite/i.exec(e.note);
+    return e.round === round && !!m && Number(m[1]) === round;
+  });
+}
+function parseDismissed(text2) {
+  let raw;
+  try {
+    raw = JSON.parse(text2 ?? "");
+  } catch {
+    return {};
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (!/^[1-9]\d*$/.test(k) || !Array.isArray(v)) continue;
+    const ns = v.filter((n) => Number.isInteger(n) && n > 0);
+    if (ns.length) out[Number(k)] = [...new Set(ns)].sort((a, b) => a - b);
+  }
+  return out;
+}
+function pendingProposals(changelog, critiques, dismissed = {}) {
+  const out = [];
+  for (const { round, critique } of [...critiques].sort((a, b) => a.round - b.round)) {
+    if (!critique || rewroteRound(changelog, round)) continue;
+    const applied = appliedIn(changelog, round);
+    const gone = new Set(dismissed[round] ?? []);
+    for (const p of critique.proposals) {
+      if (!applied.has(p.n) && !gone.has(p.n)) out.push({ round, n: p.n, severity: p.severity, section: p.section });
+    }
+  }
+  return out;
+}
+
 // node_modules/yaml/browser/dist/nodes/identity.js
 var ALIAS = Symbol.for("yaml.alias");
 var DOC = Symbol.for("yaml.document");
@@ -11081,24 +11127,26 @@ function designModel(project, f) {
     changelog = [];
   }
   const critiques = Object.entries(f.critiques).map(([name, text2]) => ({ n: Number(/^critique-r(\d+)\.json$/.exec(name)?.[1] ?? NaN), text: text2 })).filter((c) => Number.isFinite(c.n)).sort((a, b) => b.n - a.n);
-  let latest = null;
-  let round = 0;
-  for (const c of critiques) {
+  const valid = critiques.map((c) => {
     try {
-      latest = parseCritique(c.text);
-      round = c.n;
-      break;
+      return { round: c.n, critique: parseCritique(c.text) };
     } catch {
+      return { round: c.n, critique: null };
     }
-  }
+  });
+  const top = valid.find((c) => c.critique !== null);
+  const latest = top?.critique ?? null;
+  const pending = pendingProposals(changelog, valid, parseDismissed(f.dismissed));
   return {
     mode: "design",
     project,
     locale: d.meta.locale,
     version: changelog.at(-1)?.version ?? 0,
-    round,
+    round: top?.round ?? 0,
     proposals: latest?.proposals.length ?? 0,
     critical: latest?.proposals.filter((p) => p.severity === "critical").length ?? 0,
+    pending: pending.length,
+    pendingCritical: pending.filter((p) => p.severity === "critical").length,
     designUrl: d.meta.artifact ?? null
   };
 }
@@ -11117,6 +11165,9 @@ var TEXT = {
     critical: "cr\xEDticas",
     criticalOne: "cr\xEDtica",
     noCritique: "sin cr\xEDtica a\xFAn",
+    pending: "pendientes",
+    pendingOne: "pendiente",
+    nothingPending: "sin pendientes",
     noTask: "sin tarea en curso",
     track: "frente",
     tasks: "tareas",
@@ -11152,6 +11203,9 @@ var TEXT = {
     critical: "critical",
     criticalOne: "critical",
     noCritique: "no critique yet",
+    pending: "pending",
+    pendingOne: "pending",
+    nothingPending: "nothing pending",
     noTask: "no task in progress",
     track: "track",
     tasks: "tasks",
@@ -11191,7 +11245,8 @@ function bandLine(m, nowMs) {
   if (m.mode === "design") {
     const head = `\u25C6 ${t.design} \xB7 ${m.project} \xB7 v${m.version}`;
     if (m.round === 0) return [`${head} \xB7 ${t.noCritique}`, ...autoPart(m)].join(" \xB7 ");
-    return [`${head} \xB7 ${m.proposals} ${m.proposals === 1 ? t.proposal : t.proposals} \xB7 ${m.critical} ${m.critical === 1 ? t.criticalOne : t.critical}`, ...autoPart(m)].join(" \xB7 ");
+    if (m.pending === 0) return [`${head} \xB7 ${t.nothingPending}`, ...autoPart(m)].join(" \xB7 ");
+    return [`${head} \xB7 ${m.pending} ${m.pending === 1 ? t.pendingOne : t.pending} \xB7 ${m.pendingCritical} ${m.pendingCritical === 1 ? t.criticalOne : t.critical}`, ...autoPart(m)].join(" \xB7 ");
   }
   if (m.mode === "run") {
     if (m.stalled) return [`\u25B6 ${t.run} ${t.stoppedSfx}`, ...autoPart(m)].join(" \xB7 ");
@@ -11324,6 +11379,7 @@ async function loadBandModel($) {
     plan: await readOpt($, join(pdocs, "plan.yaml")),
     design: await readOpt($, join(pdocs, "design.md")),
     changelog: await readOpt($, join(pdocs, "design", "changelog.json")),
+    dismissed: await readOpt($, join(pstate, "dismissed.json")),
     session: await readOpt($, join(pstate, "session.json")),
     states: await readCollection($, join(pstate, "dbcache", "state")),
     messages: await readCollection($, join(pstate, "dbcache", "messages")),
