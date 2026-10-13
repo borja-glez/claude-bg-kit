@@ -58,6 +58,13 @@ describe('forge swarm (execution)', () => {
     run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db'], { ...io });
     expect(run(['swarm', 'start', '--project', 'shop', '--session', 'other'], io).code).toBe(2);
   });
+  it('start --autonomy auto keeps auto mode in the execution, also on resume', () => {
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--autonomy', 'auto'], io))).toMatchObject({ autonomy: 'auto' });
+    expect(readExecution(root)?.autonomy).toBe('auto');
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io)).autonomy).toBe('auto');
+    expect(normalizeExecution({ ...readExecution(root), autonomy: 'yes' })).not.toHaveProperty('autonomy');
+    expect(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--autonomy', 'always'], io).code).toBe(2);
+  });
   it('start refuses the base branch, a branch checked out elsewhere and a branch that starts with a dash', () => {
     const base = run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--branch', 'main'], io);
     expect(base.code).toBe(2);

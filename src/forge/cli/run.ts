@@ -312,7 +312,7 @@ export function run(argv: string[], io: Io): Result {
       }
       case 'triage': {
         const textArgs = [...args];
-        for (const f of ['--task', '--text-file', '--plan', '--superpowers-plan']) {
+        for (const f of ['--task', '--text-file', '--plan', '--superpowers-plan', '--autonomy']) {
           const i = textArgs.indexOf(f);
           if (i >= 0) textArgs.splice(i, 2);
         }
@@ -336,6 +336,9 @@ export function run(argv: string[], io: Io): Result {
           task = [sp.plan.title, sp.plan.goal, ...pending.map(t => t.title)].filter(Boolean).join('. ');
           spFiles = [...new Set(pending.flatMap(t => t.files))];
         }
+        const autonomy = flag('autonomy');
+        if (has('autonomy') && autonomy !== 'auto' && autonomy !== 'ask') throw new UsageError('triage: --autonomy must be auto or ask');
+        const auto = autonomy === 'auto' ? { autonomy: 'auto' as const } : {};
         if (!task) throw new UsageError('triage: the task text is required');
         const git = io.git ?? defaultGit(io.cwd);
         const lines = (out: string | null) => (out ?? '').split('\n').map(s => s.trim()).filter(Boolean);
@@ -372,8 +375,8 @@ export function run(argv: string[], io: Io): Result {
         const fresh = names.filter(n => !known.includes(n));
         // `known` mirrors what exists now: new names are added, vanished ones dropped silently.
         if (fresh.length || known.some(n => !names.includes(n))) updateLocal(io.cwd, s => ({ ...s, known: names }));
-        appendEvent(io.cwd, { ts: ts(), kind: 'triage', ...(flag('task') ? { task: flag('task') } : {}), ...result });
-        return json({ ...result, catalog, new: fresh, implementer });
+        appendEvent(io.cwd, { ts: ts(), kind: 'triage', ...(flag('task') ? { task: flag('task') } : {}), ...result, ...auto });
+        return json({ ...result, catalog, new: fresh, implementer, ...auto });
       }
       case 'validate': {
         const config = loadConfig(repoDir);
@@ -906,6 +909,8 @@ export function run(argv: string[], io: Io): Result {
           verdict: lastOf('verdict') ?? null,
           round: lastOf('round') ?? null,
           events: events.length,
+          // Whether the task runs in auto mode: its last fresh triage (a ratchet logged by the session carries none).
+          autonomy: [...events].reverse().find(e => e.kind === 'triage' && Array.isArray(e.reasons))?.autonomy === 'auto' ? 'auto' : null,
         });
       }
       default:

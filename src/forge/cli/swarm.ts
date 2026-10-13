@@ -358,6 +358,8 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       // swarm.mode in the config chooses for plan runs only: an ephemeral run has no plan to launch sessions on.
       const mode = kind === 'ephemeral' ? (flag('mode') ?? 'subagents') : (flag('mode') ?? config.swarm.mode ?? 'subagents');
       if (mode !== 'subagents' && mode !== 'sessions') throw new UsageError('swarm start: --mode must be subagents or sessions');
+      if (has('autonomy') && flag('autonomy') !== 'auto' && flag('autonomy') !== 'ask') throw new UsageError('swarm start: --autonomy must be auto or ask');
+      const auto = flag('autonomy') === 'auto' ? { autonomy: 'auto' as const } : {};
       const base = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
       if (!base || base === 'HEAD') throw new UsageError('swarm start: the main checkout must be on a branch');
       const prev = readExecution(io.cwd);
@@ -448,11 +450,11 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         }
       }
       const state: ExecutionState = resume && prev
-        ? { ...prev, parallel, mode, mergeOnFinish: prev.mergeOnFinish || has('merge-on-finish'), coordinator: session, hookSession: null, sleepUntil: null }
+        ? { ...prev, parallel, mode, mergeOnFinish: prev.mergeOnFinish || has('merge-on-finish'), coordinator: session, hookSession: null, sleepUntil: null, ...auto }
         : {
             runId: `${project}-${iso.replace(/[:.]/g, '')}`, kind, mode, parallel, project, base, branch: kind === 'plan' ? branch : base,
             mergeOnFinish: has('merge-on-finish'), coordinator: session, hookSession: null, active: true, stopReason: null, stallReason: null,
-            startedAt: iso, lastStepAt: null, lastBlockStep: null, sleepUntil: null, tasks: {},
+            startedAt: iso, lastStepAt: null, lastBlockStep: null, sleepUntil: null, tasks: {}, ...auto,
           };
       // An execution that would not read back (an id outside the safe rule) is refused rather than saved.
       if (!normalizeExecution(state)) throw new UsageError('swarm start: --project, --session and the run branch must use letters, digits, _ - . (and / in the branch), at most 120 characters');

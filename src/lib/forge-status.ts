@@ -10,6 +10,8 @@ export type ForgeStatus = {
   brief: number | null; accepted: number[];
   // The verify plan of the current task (from verify-plan) and its result (from verdict), null before any plan.
   verify: { planned: boolean; surfaces: string[]; result: string | null; passed: number | null; total: number | null; evidence: string | null; reason: string | null } | null;
+  // The task runs in auto mode (spec §5.5); absent otherwise.
+  autonomy?: 'auto';
 };
 
 const CLIP = 80;
@@ -65,6 +67,8 @@ export function deriveStatus(prev: ForgeStatus | null, event: unknown): ForgeSta
       : { ts, task, path: '', phase: '', agent: null, validators: [], verdict: null, round: null, cap: null, brief: null, accepted: [], verify: null };
     const next: ForgeStatus = { ...base, ts };
     if (e.kind === 'triage' && str(e.path)) next.path = cleanText(e.path);
+    // A fresh triage says whether the task runs in auto mode; a ratchet (no `reasons`) keeps what the task had.
+    if (fresh && e.autonomy === 'auto') next.autonomy = 'auto';
     if (e.kind === 'phase' && str(e.phase)) next.phase = cleanText(e.phase);
     if (e.kind === 'phase' && briefNum(e.brief) !== null) next.brief = briefNum(e.brief);
     return next;
@@ -125,5 +129,6 @@ export function normalizeStatus(x: unknown): ForgeStatus | null {
       passed: num(x.verify.passed), total: num(x.verify.total),
       evidence: pathText(x.verify.evidence), reason: str(x.verify.reason) ? cleanText(x.verify.reason) : null,
     } : null,
+    ...(x.autonomy === 'auto' ? { autonomy: 'auto' as const } : {}),
   };
 }

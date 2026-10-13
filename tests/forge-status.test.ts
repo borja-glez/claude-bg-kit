@@ -69,6 +69,14 @@ describe('deriveStatus', () => {
     expect(deriveStatus(base, { ts: '2', kind: 'verdict', task: 't', action: 'reject', score: 0 })?.verdict).toEqual({ action: 'reject', score: 0 });
     expect(deriveStatus(base, { ts: '2', kind: 'verdict', task: 't', action: 'reject', score: 'x' })?.verdict).toEqual({ action: 'reject', score: null });
   });
+  it('carries auto mode from a fresh triage, keeps it through a ratchet, and drops it with a new triage', () => {
+    const s1 = deriveStatus(null, { ts: '1', kind: 'triage', task: 't', path: 'large', reasons: [], autonomy: 'auto' })!;
+    expect(s1.autonomy).toBe('auto');
+    expect(deriveStatus(s1, { ts: '2', kind: 'triage', task: 't', path: 'large' })!.autonomy).toBe('auto');
+    expect(deriveStatus(s1, { ts: '3', kind: 'triage', task: 't', path: 'medium', reasons: [] })!).not.toHaveProperty('autonomy');
+    expect(normalizeStatus(JSON.parse(JSON.stringify(s1)))!.autonomy).toBe('auto');
+    expect(normalizeStatus({ ...s1, autonomy: 'yes' })).not.toHaveProperty('autonomy');
+  });
   it('strips C1 controls and bidi overrides/isolates too', () => {
     const cp = (n: number) => String.fromCharCode(n);
     expect(cleanText(`a\u0085b\u009bc${cp(0x202e)}d${cp(0x202a)}e${cp(0x2066)}f${cp(0x2069)}g\u007fh`)).toBe('abcdefgh');
