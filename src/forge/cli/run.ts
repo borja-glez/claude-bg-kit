@@ -26,6 +26,7 @@ import type { PlanTask } from '../../lib/types.js';
 import { parseDocument } from 'yaml';
 import { UsageError } from './errors.js';
 import { swarmCommand } from './swarm.js';
+import { reviewCommand } from './review.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, type RepoReader, type Scope } from '../validators.js';
 import { checkTools, mcpInventory, toolGaps } from '../tools.js';
 import { verifyPlan, cleanupPids, killTarget, askFor, capLines, relabelDiff, type PlanSurface } from '../verify.js';
@@ -44,7 +45,7 @@ export interface ExecResult { code: number; output: string; ms: number; timedOut
 export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined> }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|swarm|stop|hook> ...';
+const USAGE = 'usage: forge <triage|brief|validate|verdict|round|review-prep|review-close|prep|shadow|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|swarm|stop|hook> ...';
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 const MAX_WHY = 200;
@@ -1024,6 +1025,13 @@ export function run(argv: string[], io: Io): Result {
         return swarmCommand(args, io, {
           git: io.git ?? defaultGit(io.cwd), exec: io.exec ?? defaultExec(io.cwd), repo: repoReader(repoDir),
           at: dir => ({ git: defaultGit(dir), exec: defaultExec(dir), repo: repoReader(dir) }),
+        });
+      case 'review-prep':
+      case 'review-close':
+      case 'prep':
+      case 'shadow':
+        return reviewCommand(cmd, args, {
+          cwd: io.cwd, repoDir, now: io.now, git: io.git ?? defaultGit(repoDir), exec: io.exec ?? defaultExec(repoDir), repo: repoReader(repoDir),
         });
       case 'hook': {
         const which = args[0];
