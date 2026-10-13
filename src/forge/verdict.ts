@@ -18,7 +18,11 @@ export interface VerdictResult {
 }
 // New-side line ranges of a fix diff's hunks, per file (path as in `+++ b/<path>`).
 export type FixHunks = Record<string, { start: number; end: number }[]>;
-export interface RoundOptions { round?: number; fixHunks?: FixHunks }
+/**
+ * `root`: the repo dir, to make reviewers' absolute paths relative. `carried`: reviewers whose result was carried
+ * from the previous round: their findings keep the origins they had there instead of being checked against this fix.
+ */
+export interface RoundOptions { round?: number; fixHunks?: FixHunks; root?: string; carried?: ReviewerName[] }
 
 const invalidReview = (): Review => ({ verdict: 'abstain', confidence: 0, findings: [], invalid: true });
 const SEVERITIES = ['critical', 'important', 'minor'] as const;
@@ -56,22 +60,52 @@ function findingOf(v: unknown): Finding | null {
 
 const normPath = (p: string) => p.trim().replace(/\\/g, '/').replace(/^(\.\/)+/, '');
 
+/**
+ * A reviewer's path as the diff names it: backslashes to slashes, no leading `./`, and an absolute path under
+ * `root` (the repo) made relative to it (case-insensitively when the root has a drive letter).
+ */
+export function repoRelative(p: string, root?: string): string {
+  const n = normPath(p);
+  if (!root?.trim()) return n;
+  const r = normPath(root).replace(/\/+$/, '');
+  const drive = /^[A-Za-z]:/.test(r);
+  const [hay, needle] = drive ? [n.toLowerCase(), r.toLowerCase()] : [n, r];
+  return r && hay.startsWith(`${needle}/`) ? normPath(n.slice(r.length + 1)) : n;
+}
+
 // Reads the hunks of a unified diff: the file from each `+++ b/<path>` header (a deleted file, /dev/null,
 // has none) and the new-side range of each `@@ -a,b +c,d @@`. A pure deletion (d = 0) covers line c.
+// The lines of a hunk's body are counted by its ranges, so a removed `-- x` or an added `++ y` (seen as
+// `--- x` and `+++ y`) is never read as a file header.
 export function parseHunks(diff: string): FixHunks {
   const out: FixHunks = {};
   let file: string | null = null;
   let prev = '';
+  let oldLeft = 0, newLeft = 0;
   for (const raw of diff.split('\n')) {
     const line = raw.replace(/\r$/, '');
+    // A body line starts with ' ', '-', '+' or '\'; a new hunk or file ends a body whose counts fell short.
+    if ((oldLeft > 0 || newLeft > 0) && (line.startsWith('@@ ') || line.startsWith('diff '))) oldLeft = newLeft = 0;
+    if (oldLeft > 0 || newLeft > 0) {
+      if (line.startsWith('\\')) continue; // "\ No newline at end of file"
+      if (line.startsWith('-')) oldLeft--;
+      else if (line.startsWith('+')) newLeft--;
+      else { oldLeft--; newLeft--; }
+      prev = '';
+      continue;
+    }
     if (line.startsWith('+++ ') && prev.startsWith('--- ')) {
       const p = line.slice(4).split('\t')[0];
       file = p === '/dev/null' ? null : normPath(p.startsWith('b/') ? p.slice(2) : p);
-    } else if (file) {
-      const m = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(line);
+    } else {
+      const m = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
       if (m) {
-        const start = Number(m[1]), count = m[2] === undefined ? 1 : Number(m[2]);
-        (out[file] ??= []).push({ start, end: start + Math.max(count, 1) - 1 });
+        oldLeft = m[1] === undefined ? 1 : Number(m[1]);
+        newLeft = m[3] === undefined ? 1 : Number(m[3]);
+        if (file) {
+          const start = Number(m[2]), count = m[3] === undefined ? 1 : Number(m[3]);
+          (out[file] ??= []).push({ start, end: start + Math.max(count, 1) - 1 });
+        }
       }
     }
     prev = line;
@@ -80,11 +114,12 @@ export function parseHunks(diff: string): FixHunks {
 }
 
 // Checks a reviewer's origin label against the fix's hunks: an untouched finding whose file and line fall
-// inside a hunk is fix, and one without file or line cannot be shown untouched, so it is fix too.
-export function correctOrigin(f: Finding, hunks: FixHunks): Finding {
+// inside a hunk is fix, and one without file or line cannot be shown untouched, so it is fix too. The
+// finding's path is made relative to `root` (the repo) first.
+export function correctOrigin(f: Finding, hunks: FixHunks, root?: string): Finding {
   if (f.origin !== 'untouched') return f;
   if (!f.file?.trim() || f.line === undefined) return { ...f, origin: 'fix' };
-  const ranges = hunks[normPath(f.file)] ?? [];
+  const ranges = hunks[repoRelative(f.file, root)] ?? [];
   return ranges.some(r => f.line! >= r.start && f.line! <= r.end) ? { ...f, origin: 'fix' } : f;
 }
 
@@ -193,14 +228,17 @@ export function synthesize(reviews: Partial<Record<ReviewerName, Review>>, weigh
   const later = (opts.round ?? 1) >= 2;
   const hunks = opts.fixHunks ?? {};
   const rv: Partial<Record<ReviewerName, Review>> = later
-    ? Object.fromEntries(names.map(n => [n, { ...reviews[n]!, findings: reviews[n]!.findings.map(f => correctOrigin(f, hunks)) }]))
+    ? Object.fromEntries(names.map(n => [n, opts.carried?.includes(n) ? reviews[n]! : { ...reviews[n]!, findings: reviews[n]!.findings.map(f => correctOrigin(f, hunks, opts.root)) }]))
     : reviews;
-  const deferrable = (f: Finding) => later && f.severity === 'important' && f.origin === 'untouched';
+  // A reviewer that says the approach is wrong keeps its findings blocking whatever their origin.
+  const wrong = new Set(names.filter(n => rv[n]!.verdict === 'fail' && rv[n]!.approach === 'wrong').flatMap(n => rv[n]!.findings));
+  const deferrable = (f: Finding) => later && f.severity === 'important' && f.origin === 'untouched' && !wrong.has(f);
   const blocks = (f: Finding) => (f.severity === 'critical' && isEvidence(f)) || f.severity === 'important';
-  // The review as the score and the fail rule see it: failing only on deferrable findings counts as a pass.
+  // The review as the score and the fail rule see it: failing only on deferrable findings counts as a pass,
+  // unless the approach is wrong.
   const effective = (r: Review): Review => {
     const b = r.findings.filter(blocks);
-    return r.verdict === 'fail' && b.length && b.every(deferrable) ? { ...r, verdict: 'pass' } : r;
+    return r.verdict === 'fail' && r.approach !== 'wrong' && b.length && b.every(deferrable) ? { ...r, verdict: 'pass' } : r;
   };
   const answered = names.filter(n => rv[n]!.verdict !== 'abstain');
   const all = answered.flatMap(n => rv[n]!.findings);
