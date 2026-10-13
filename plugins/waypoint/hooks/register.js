@@ -10718,6 +10718,10 @@ function findCycle(plan) {
   return null;
 }
 
+// src/lib/forge-run.ts
+var LOCALE = /^[a-z]{2,3}([-_][A-Za-z0-9]{2,8})?$/;
+var isLocale = (x) => typeof x === "string" && LOCALE.test(x);
+
 // src/lib/execution-state.ts
 var SAFE_ID = /^[A-Za-z0-9_\-.]{1,120}$/;
 var isSafeId = (s) => typeof s === "string" && SAFE_ID.test(s) && s !== "." && s !== "..";
@@ -10801,7 +10805,8 @@ function normalizeExecution(x, now) {
     lastBlockStep: iso(x.lastBlockStep),
     sleepUntil: iso(x.sleepUntil),
     ...typeof x.planned === "number" && Number.isInteger(x.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x.planned)) } : {},
-    ...x.autonomy === "auto" ? { autonomy: "auto" } : {}
+    ...x.autonomy === "auto" ? { autonomy: "auto" } : {},
+    ...isLocale(x.locale) ? { locale: x.locale } : {}
   };
 }
 function parseExecution(text2, now) {
@@ -11085,7 +11090,7 @@ function memberRun(project, sid, f) {
 }
 function runModel(project, f) {
   const exec = parseExecution(f.execution);
-  if (!exec || exec.project !== project) return null;
+  if (!exec || exec.kind !== "ephemeral" && exec.project !== project) return null;
   const tasks = {};
   for (const [id2, t] of Object.entries(f.execTasks ?? {})) {
     const p = normalizePublicTask(json(t));
@@ -11153,6 +11158,7 @@ function designModel(project, f) {
 
 // src/mod/band-line.ts
 var TITLE_MAX = 40;
+var SLOT_ID_MAX = 20;
 function clip(text2, max = TITLE_MAX) {
   const chars = Array.from(String(text2).replace(/\s+/g, " ").trim());
   return chars.length <= max ? chars.join("") : chars.slice(0, max - 1).join("") + "\u2026";
@@ -11253,7 +11259,7 @@ function bandLine(m, nowMs) {
     const parts2 = [
       `\u25B6 ${t.run}`,
       `${m.executor === "sessions" ? t.sessions : t.subagents} ${m.running}/${m.parallel}`,
-      ...m.slots.map((s) => `${s.task} ${t.stage[s.stage] ?? s.stage}${s.round > 1 ? ` (r${s.round})` : ""}`),
+      ...m.slots.map((s) => `${clip(s.task, SLOT_ID_MAX)} ${t.stage[s.stage] ?? s.stage}${s.round > 1 ? ` (r${s.round})` : ""}`),
       `${m.integrated}/${m.total}`,
       `${t.integratedN} ${m.integrated}`
     ];

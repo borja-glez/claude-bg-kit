@@ -13,31 +13,60 @@ var PROPOSAL_RISKS = ["low", "medium", "high"];
 var PROPOSAL_STATUSES = ["proposed", "approved", "rejected", "discussing", "auto_approved", "done"];
 var MAX_PROPOSAL_TEXT = 4e3;
 var MAX_PROPOSAL_TITLE = 200;
+var MAX_PROPOSAL_HISTORY = 20;
 var str = (x) => typeof x === "string";
 var oneOf = (list, x) => str(x) && list.includes(x);
+function clipWords(s, max) {
+  const chars = Array.from(s);
+  if (chars.length <= max) return s;
+  let space = -1;
+  for (let i = Math.min(max - 1, chars.length - 1); i >= 0; i--) if (/\s/.test(chars[i])) {
+    space = i;
+    break;
+  }
+  const hard = chars.slice(0, max - 1).join("");
+  if (space < Math.floor((max - 1) * 0.7)) return hard + "\u2026";
+  const soft = chars.slice(0, space).join("").replace(/[\s.,;:!?¡¿…\-–—]+$/u, "");
+  return (soft || hard) + "\u2026";
+}
 function normalizeProposal(x) {
   if (!x || typeof x !== "object" || Array.isArray(x)) return null;
   const o = x;
   if (!oneOf(PROPOSAL_CATEGORIES, o.category) || !oneOf(PROPOSAL_RISKS, o.risk) || !oneOf(PROPOSAL_STATUSES, o.status)) return null;
   if (o.source !== "scout" && o.source !== "user") return null;
   if (!str(o.title) || !o.title.trim() || !str(o.author)) return null;
-  const text2 = (v) => str(v) ? v.slice(0, MAX_PROPOSAL_TEXT) : "";
+  const text2 = (v, max = MAX_PROPOSAL_TEXT) => str(v) ? clipWords(v, max) : "";
+  const line = (v) => str(v) ? clipWords(v.replace(/[\s\x85]+/g, " ").trim(), MAX_PROPOSAL_TITLE) : "";
   const out = {
     ts: str(o.ts) ? o.ts : "",
     category: o.category,
     risk: o.risk,
-    title: o.title.slice(0, MAX_PROPOSAL_TITLE),
+    title: line(o.title),
     rationale: text2(o.rationale),
     evidence: text2(o.evidence),
-    pillar: text2(o.pillar).slice(0, MAX_PROPOSAL_TITLE),
+    pillar: line(o.pillar),
     status: o.status,
     source: o.source,
     author: o.author
   };
   for (const k of ["estimate", "path", "decidedBy", "decidedAt"]) if (str(o[k])) out[k] = o[k].slice(0, MAX_PROPOSAL_TITLE);
   if (str(o.taskId) && /^[A-Za-z0-9_.-]{1,64}$/.test(o.taskId)) out.taskId = o.taskId;
-  if (str(o.reason)) out.reason = o.reason.slice(0, MAX_PROPOSAL_TEXT);
+  if (str(o.reason)) out.reason = clipWords(o.reason, MAX_PROPOSAL_TEXT);
+  if (Array.isArray(o.history)) {
+    const history = o.history.map(normalizeHistoryEntry).filter((e) => e !== null).slice(-MAX_PROPOSAL_HISTORY);
+    if (history.length) out.history = history;
+  }
   return out;
+}
+function normalizeHistoryEntry(x) {
+  if (!x || typeof x !== "object" || Array.isArray(x)) return null;
+  const o = x;
+  if (!oneOf(PROPOSAL_STATUSES, o.status) || !str(o.reopenedBy) || !str(o.reopenedAt)) return null;
+  const e = { status: o.status, reopenedBy: o.reopenedBy.slice(0, MAX_PROPOSAL_TITLE), reopenedAt: o.reopenedAt.slice(0, MAX_PROPOSAL_TITLE) };
+  if (str(o.decidedBy)) e.decidedBy = o.decidedBy.slice(0, MAX_PROPOSAL_TITLE);
+  if (str(o.decidedAt)) e.decidedAt = o.decidedAt.slice(0, MAX_PROPOSAL_TITLE);
+  if (str(o.reason)) e.reason = clipWords(o.reason, MAX_PROPOSAL_TEXT);
+  return e;
 }
 
 // src/lib/forge-status.ts
@@ -109,6 +138,8 @@ function normalizeStatus(x) {
 }
 
 // src/lib/forge-run.ts
+var LOCALE = /^[a-z]{2,3}([-_][A-Za-z0-9]{2,8})?$/;
+var isLocale = (x) => typeof x === "string" && LOCALE.test(x);
 var isCount = (x) => typeof x === "number" && Number.isInteger(x) && x >= 0;
 var isPositiveInt = (x) => isCount(x) && x > 0;
 var isPositive = (x) => typeof x === "number" && Number.isFinite(x) && x > 0;
@@ -150,6 +181,7 @@ function parseRun(text2) {
     blocksSinceCycle: o.blocksSinceCycle ?? 0
   };
   if (o.stoppedReason !== void 0) run.stoppedReason = o.stoppedReason;
+  if (isLocale(o.locale)) run.locale = o.locale;
   return run;
 }
 
@@ -10653,7 +10685,8 @@ function normalizeExecution(x, now) {
     lastBlockStep: iso(x.lastBlockStep),
     sleepUntil: iso(x.sleepUntil),
     ...typeof x.planned === "number" && Number.isInteger(x.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x.planned)) } : {},
-    ...x.autonomy === "auto" ? { autonomy: "auto" } : {}
+    ...x.autonomy === "auto" ? { autonomy: "auto" } : {},
+    ...isLocale(x.locale) ? { locale: x.locale } : {}
   };
 }
 function parseExecution(text2, now) {
@@ -12106,7 +12139,7 @@ function memberRun(project, sid, f) {
 }
 function runModel(project, f) {
   const exec = parseExecution(f.execution);
-  if (!exec || exec.project !== project) return null;
+  if (!exec || exec.kind !== "ephemeral" && exec.project !== project) return null;
   const tasks = {};
   for (const [id2, t] of Object.entries(f.execTasks ?? {})) {
     const p = normalizePublicTask(json(t));

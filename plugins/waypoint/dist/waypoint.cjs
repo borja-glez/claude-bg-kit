@@ -7260,7 +7260,7 @@ var require_public_api = __commonJS({
       }
       return doc;
     }
-    function parse4(src, reviver, options) {
+    function parse5(src, reviver, options) {
       let _reviver = void 0;
       if (typeof reviver === "function") {
         _reviver = reviver;
@@ -7301,7 +7301,7 @@ var require_public_api = __commonJS({
         return value.toString(options);
       return new Document.Document(value, _replacer, options).toString(options);
     }
-    exports2.parse = parse4;
+    exports2.parse = parse5;
     exports2.parseAllDocuments = parseAllDocuments;
     exports2.parseDocument = parseDocument;
     exports2.stringify = stringify2;
@@ -13738,6 +13738,10 @@ function computeMetrics(plan, states, now, activeSessions = 1) {
   };
 }
 
+// src/lib/forge-run.ts
+var LOCALE = /^[a-z]{2,3}([-_][A-Za-z0-9]{2,8})?$/;
+var isLocale = (x2) => typeof x2 === "string" && LOCALE.test(x2);
+
 // src/lib/execution-view.ts
 var FUTURE_TOLERANCE_MS = 2 * 6e4;
 var AGENT_ALIVE_MS = 3 * 36e5;
@@ -13762,6 +13766,7 @@ var BRANCH_RE = /^[A-Za-z0-9_.\/~:@+][A-Za-z0-9_\-.\/~:@+]{0,199}$/;
 // src/lib/locale.ts
 var import_node_fs = require("node:fs");
 var import_node_path = __toESM(require("node:path"), 1);
+var import_yaml4 = __toESM(require_dist(), 1);
 var NAMES = {
   es: "Spanish",
   en: "English",
@@ -13773,10 +13778,11 @@ var NAMES = {
   gl: "Galician",
   eu: "Basque"
 };
-function replyIn(locale) {
+function replyIn(locale, source = "plan") {
   const code = (locale ?? "").toLowerCase().split(/[-_]/)[0];
   if (!code) return " Tell the user in their own language.";
   const name = NAMES[code];
+  if (source === "person") return ` Tell the user in ${name ? `${name} (${code})` : `\xAB${code}\xBB`}, the language they write in.`;
   return ` Tell the user in ${name ? `${name} (${code})` : `the language \xAB${code}\xBB`}, the plan's language.`;
 }
 function planLocale(root, project) {
@@ -13785,7 +13791,10 @@ function planLocale(root, project) {
     const projects = project ? [project] : (0, import_node_fs.readdirSync)(docs, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
     for (const p of projects) {
       const file = import_node_path.default.join(docs, p, "plan.yaml");
-      if ((0, import_node_fs.existsSync)(file)) return parsePlan((0, import_node_fs.readFileSync)(file, "utf8")).locale ?? null;
+      if (!(0, import_node_fs.existsSync)(file)) continue;
+      const raw = (0, import_yaml4.parse)((0, import_node_fs.readFileSync)(file, "utf8"));
+      const locale = raw && typeof raw === "object" && !Array.isArray(raw) ? raw.locale : null;
+      return isLocale(locale) ? locale : null;
     }
   } catch {
   }
@@ -13829,7 +13838,7 @@ function syncSummary(plan) {
 // src/forge/config.ts
 var import_node_fs2 = require("node:fs");
 var import_node_path2 = __toESM(require("node:path"), 1);
-var import_yaml4 = __toESM(require_dist(), 1);
+var import_yaml5 = __toESM(require_dist(), 1);
 var NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
 var WORKFLOWS = ["ask", "forge", "superpowers", "superpowers-design", "superpowers-plan", "off"];
 var AUTONOMIES = ["ask", "auto"];
@@ -13879,7 +13888,7 @@ function parseConfig(text) {
   if (text === null || !text.trim()) return structuredClone(DEFAULTS);
   let raw;
   try {
-    raw = (0, import_yaml4.parse)(text);
+    raw = (0, import_yaml5.parse)(text);
   } catch (e) {
     throw new ConfigError(`.forge/config.yaml: ${e.message}`);
   }
