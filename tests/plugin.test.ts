@@ -88,9 +88,39 @@ describe('plugin layout', () => {
     const step4 = steps.split('\n').find(l => l.includes('4. **verify** and **review**: a plan task'))!;
     expect(step4).not.toContain('(the path only goes up)');
     expect(step4).toContain('sets no floor');
-    expect(steps).toContain('a Large one to `impl` (`impl-heavy` on a sensitive zone)');
+    expect(steps).toContain('a Large one to `impl` (`impl-high` on a sensitive zone)');
     expect(steps).not.toContain('a Large one to `impl-heavy`)');
+    expect(steps).not.toContain('`impl-heavy` on a sensitive zone');
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) expect(read(f)).toContain('triage --plan p --task T --base');
+  });
+  it('forge-impl-high: opus at high effort, the same text as impl and impl-heavy', () => {
+    const body = (a: string) => read(`plugins/forge/agents/${a}.md`).split(/\r?\n---\r?\n/).slice(1).join('\n---\n')
+      .replace(/^\s*You implement one task of the forge method: [^\n]*\n/, '');
+    const high = read('plugins/forge/agents/forge-impl-high.md');
+    expect(high).toMatch(/\nmaxTurns: 70\r?\n/);
+    expect(high).toMatch(/\nmodel: opus\r?\n/);
+    expect(high).toMatch(/\neffort: high\r?\n/);
+    expect(body('forge-impl-high')).toBe(body('forge-impl'));
+    expect(body('forge-impl-high')).toBe(body('forge-impl-heavy'));
+  });
+  it('forge run texts: five-rung ladder, sensitive and delicate tasks start on impl-high, fix rounds take FORGE round\'s implementer', () => {
+    const md = read('plugins/forge/skills/run/SKILL.md');
+    const steps = read('plugins/forge/skills/run/references/task-steps.md');
+    const member = read('plugins/forge/skills/member/SKILL.md');
+    for (const s of [md, steps, member]) {
+      expect(s).toContain('the implementer `FORGE round` prints');
+      expect(s).not.toMatch(/one tier up (per |up )?the ladder/);
+      expect(s).not.toMatch(/`impl-heavy` (on a sensitive zone|when the design marks|for delicate)/);
+      expect(s).not.toContain('or `impl-heavy` for delicate');
+    }
+    expect(md).toContain('never compute the ladder by hand');
+    expect(steps).toContain('never compute the ladder by hand');
+    expect(steps).toContain('`impl-high` when the design marks the task delicate');
+    expect(md).toContain('one fix by `impl-heavy`');
+    expect(member).not.toContain('a Large task you cannot do unattended');
+    expect(member).toContain('waypoint:work');
+    expect(member).toMatch(/[Ll]ost task/);
+    expect(Buffer.byteLength(member)).toBeLessThan(15 * 1024);
   });
   it('forge Large: approve steps, run.json once, lease, final re-review inputs, start_prompt', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
@@ -114,7 +144,7 @@ describe('plugin layout', () => {
   });
   it('the run skill and every implementer edit with Edit/Write, never sed -i', () => {
     expect(read('plugins/forge/skills/run/SKILL.md')).toMatch(/Change the project's files with the Edit and Write tools, never with `sed -i`.*forge's own work files.*is fine/s);
-    for (const a of ['mech', 'impl', 'impl-light', 'impl-heavy', 'fable']) {
+    for (const a of ['mech', 'impl', 'impl-light', 'impl-high', 'impl-heavy', 'fable']) {
       expect(read(`plugins/forge/agents/forge-${a}.md`)).toMatch(/Change the project's files with the Edit and Write tools, never with `sed -i`.*forge's own work files.*is fine/s);
     }
   });
@@ -205,7 +235,7 @@ describe('plugin layout', () => {
     }
   });
   it('implementers follow the TDD line and the correctness reviewer checks its evidence', () => {
-    for (const a of ['forge-impl-heavy', 'forge-impl', 'forge-impl-light', 'forge-mech', 'forge-fable']) {
+    for (const a of ['forge-impl-heavy', 'forge-impl-high', 'forge-impl','forge-impl-light', 'forge-mech', 'forge-fable']) {
       expect(read(`plugins/forge/agents/${a}.md`)).toContain('When the brief has a `TDD: required` line');
     }
     const rc = read('plugins/forge/agents/forge-review-correctness.md');
@@ -402,7 +432,7 @@ describe('plugin layout', () => {
   });
   it('forge agents fix model, effort and maxTurns', () => {
     const expected: Record<string, [string, string]> = {
-      'forge-impl-heavy': ['opus', 'xhigh'], 'forge-impl': ['opus', 'medium'], 'forge-impl-light': ['sonnet', 'medium'], 'forge-mech': ['haiku', 'low'],
+      'forge-impl-heavy': ['opus', 'xhigh'], 'forge-impl-high': ['opus', 'high'], 'forge-impl':['opus', 'medium'], 'forge-impl-light': ['sonnet', 'medium'], 'forge-mech': ['haiku', 'low'],
       'forge-review-correctness': ['opus', 'xhigh'], 'forge-review-security': ['opus', 'xhigh'], 'forge-review-perf': ['opus', 'xhigh'], 'forge-fable': ['fable', 'high'],
       'forge-planner': ['opus', 'xhigh'], 'forge-scout': ['opus', 'medium'], 'forge-verify': ['sonnet', 'high'], 'forge-verify-heavy': ['opus', 'high'],
     };
@@ -427,7 +457,7 @@ describe('plugin layout', () => {
   it('forge planner writes a plan waypoint accepts, implementers report in .txt', () => {
     const planner = read('plugins/forge/agents/forge-planner.md');
     for (const w of ['design.md', 'status: approved', 'plan.yaml', 'node "<waypoint.cjs>" validate', 'done_when', 'zones', 'never renumber']) expect(planner).toContain(w);
-    for (const a of ['forge-impl-heavy', 'forge-impl', 'forge-impl-light', 'forge-mech', 'forge-fable']) {
+    for (const a of ['forge-impl-heavy', 'forge-impl-high', 'forge-impl', 'forge-impl-light', 'forge-mech', 'forge-fable']) {
       const md = read(`plugins/forge/agents/${a}.md`);
       expect(md).toContain('.txt');
       expect(md).toMatch(/also (put|include) the report in your reply/i);
@@ -464,7 +494,7 @@ describe('plugin layout', () => {
     expect(md).toContain('`FORGE` below means `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs"`');
     for (const w of ['FORGE triage', 'FORGE validate', 'FORGE verdict', 'FORGE round', 'FORGE agents', 'FORGE log', 'FORGE last',
       '## Trivial', '## Small', '## Medium', '## Large', 'ratchet', 'breaker', 'stalled', 'fresh-stronger', '/waypoint:design', 'never push', 'forge-fable', '--text-file', '--data-file', '<id>-<n>', 'BASE=$(git rev-parse HEAD)', 'absolute path',
-      'tier ladder', '`mech` -> `impl-light` -> `impl` -> `impl-heavy`', 'git revert --no-edit $BASE..HEAD', '`invalid: true`',
+      'tier ladder', '`mech` -> `impl-light` -> `impl` -> `impl-high` -> `impl-heavy`','git revert --no-edit $BASE..HEAD', '`invalid: true`',
       '`failures` of every validator with `ok: false` and no `preexisting` in `validators-<n>.json`', '--baseline .forge/work/<id>/baseline-<n>.json', '--base-run', 'FORGE last --task <id>-<n>']) expect(md).toContain(w);
   });
   it('forge run skill: Execution section with the task state machine and the mode choice', () => {
