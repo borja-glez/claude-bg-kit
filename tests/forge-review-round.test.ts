@@ -81,6 +81,13 @@ describe('reviewRound', () => {
     expect(r.spawn.map(s => [s.name, s.mode])).toEqual([['correctness', 'delta'], ['security', 'full'], ['perf', 'full']]);
   });
 
+  it('after a redo every reviewer runs in full mode and nothing is carried', () => {
+    const r = reviewRound(at({ round: 2, redo: true, shadowOpen: true, previous: { 'review-correctness': fail(), 'review-security': pass, 'review-perf': pass }, fixZones: [], fixFiles: [] }));
+    expect(r.spawn.map(s => [s.name, s.mode, s.twin])).toEqual([['correctness', 'full', false], ['security', 'full', false], ['perf', 'full', false]]);
+    expect(r.carried).toEqual([]);
+    expect(r.spawn[0].inputs.fix).toBeUndefined();
+  });
+
   it('a delta round has no twin, even with the shadow test open', () => {
     const r = reviewRound(at({ round: 2, shadowOpen: true, previous: { 'review-correctness': fail(), 'review-security': fail(), 'review-perf': pass }, fixZones: [], fixFiles: [] }));
     expect(r.spawn.filter(s => s.twin)).toEqual([]);

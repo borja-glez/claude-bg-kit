@@ -5,7 +5,7 @@ import { appendEvent, readEvents, type LedgerEvent } from '../ledger.js';
 import { loadConfig, agentFor, type Profile } from '../config.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, type RepoReader, type Scope, type ValidatorResult } from '../validators.js';
 import { PATH_ORDER, zonesFromPaths, type PathName, type ReviewRole } from '../triage.js';
-import { parseReview } from '../verdict.js';
+import { parseReview, type Review } from '../verdict.js';
 import { takeBrief } from '../shadow.js';
 import { reviewRound, reviewerKey, type PreviousResult, type ReviewerKey, type RoundPlan, type RoundReviewer, type TriageReview } from '../review-round.js';
 
@@ -111,25 +111,36 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   let fixFiles: string[] = [];
   const fixFile = path.join(dir, `fix-${n}-${round}.patch`);
   const findingsFile = (name: ReviewerKey) => path.join(roundDir, `previous-${name}.json`);
+  const prevReviews: Partial<Record<ReviewerKey, Review>> = {};
   if (round >= 2) {
     const prevDir = path.join(dir, `reviews-${n}-${round - 1}`);
     for (const role of ROLES) {
       const file = path.join(prevDir, `${reviewerKey(role)}.json`);
       if (!existsSync(file)) continue;
       const r = parseReview(readFileSync(file, 'utf8'));
+      prevReviews[reviewerKey(role)] = r;
       previous[role] = { verdict: r.verdict, findings: r.findings };
     }
     const prevHead = existsSync(path.join(prevDir, 'head.txt')) ? readFileSync(path.join(prevDir, 'head.txt'), 'utf8').trim() : '';
-    // Without the commit the previous round reviewed, the whole diff stands in for the fix.
-    const from = prevHead || baseSha;
-    fixFiles = (deps.git(['diff', '--name-only', `${from}..HEAD`]) ?? '').split('\n').map(s => s.trim()).filter(Boolean);
-    writeFileSync(fixFile, deps.git(['diff', `${from}..HEAD`]) ?? '');
+    // Without the commit the previous round reviewed, or when git cannot diff from it, the whole diff stands in for the fix.
+    const diffFrom = (from: string) => {
+      const names = deps.git(['diff', '--name-only', `${from}..HEAD`]);
+      const patch = names === null ? null : deps.git(['diff', `${from}..HEAD`]);
+      return names === null || patch === null ? null : { names, patch };
+    };
+    const fix = (prevHead ? diffFrom(prevHead) : null) ?? diffFrom(baseSha);
+    if (!fix) throw new UsageError(`review-prep: cannot diff the fix (${prevHead || baseSha}..HEAD)`);
+    fixFiles = fix.names.split('\n').map(s => s.trim()).filter(Boolean);
+    writeFileSync(fixFile, fix.patch);
   }
+  // After a redo the work was started again: every reviewer reviews it in full, nothing is carried.
+  const redo = round >= 2 && events.filter(e => e.kind === 'verdict' && e.task === task).at(-1)?.action === 'redo';
 
-  // A brief spends one shadow brief on its first round only: preparing that round again reuses the first answer.
+  // A brief spends one shadow brief on its first round only, and only when it gets twins (a reviewer at high):
+  // preparing that round again reuses the first answer.
   const planFile = path.join(roundDir, 'review-plan.json');
   const earlier = readJson(planFile) as { shadow?: unknown } | undefined;
-  const twinsAllowed = round === 1 && !review.light && (pathName === 'medium' || pathName === 'large');
+  const twinsAllowed = round === 1 && !review.light && (pathName === 'medium' || pathName === 'large') && review.reviewers.some(r => r.effort === 'high');
   const shadowOpen = twinsAllowed && (earlier && typeof earlier.shadow === 'boolean' ? earlier.shadow : takeBrief(deps.cwd));
 
   const brief = path.join(dir, `brief-${n}.md`);
@@ -137,7 +148,7 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   let tdd = false;
   try { tdd = /^TDD: required/m.test(readFileSync(brief, 'utf8')); } catch { /* no brief file */ }
   const plan: RoundPlan = reviewRound({
-    review, round, path: pathName, previous, fixFiles, fixZones: zonesFromPaths(fixFiles), shadowOpen,
+    review, round, path: pathName, previous, fixFiles, fixZones: zonesFromPaths(fixFiles), shadowOpen, redo,
     files: {
       brief: rel(deps.cwd, brief), diff: rel(deps.cwd, diffFile), validators: rel(deps.cwd, validatorsFile),
       out: rel(deps.cwd, roundDir), shadow: rel(deps.cwd, path.join(roundDir, 'shadow')),
@@ -153,8 +164,11 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
     writeFileSync(findingsFile(s.name), JSON.stringify(blockers, null, 2) + '\n');
   }
   for (const c of plan.carried) {
-    const prev = readJson(path.join(dir, `reviews-${n}-${round - 1}`, `${c.name}.json`));
-    if (prev && typeof prev === 'object' && !Array.isArray(prev)) writeFileSync(path.join(roundDir, `${c.name}.json`), JSON.stringify({ ...prev, carried: true }, null, 2) + '\n');
+    // The file as written when it is plain JSON; else (JSON inside prose or a fence) the result as parsed.
+    const raw = readJson(path.join(dir, `reviews-${n}-${round - 1}`, `${c.name}.json`));
+    const parsed = prevReviews[c.name]!;
+    const prev = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : { verdict: parsed.verdict, confidence: parsed.confidence, findings: parsed.findings };
+    writeFileSync(path.join(roundDir, `${c.name}.json`), JSON.stringify({ ...prev, carried: true }, null, 2) + '\n');
   }
 
   const spawn = plan.spawn.map(s => ({ agent: s.agent, model: s.model, effort: s.effort, mode: s.mode, ...(s.twin ? { twin: true } : {}), role: s.role, inputs: s.inputs }));

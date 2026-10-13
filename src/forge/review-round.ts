@@ -26,6 +26,8 @@ export interface RoundInput {
   fixZones?: Zone[]; fixFiles?: string[];
   /** The shadow test is open and this brief takes twins. */
   shadowOpen?: boolean;
+  /** The previous round's verdict was redo: the work was started again, so nothing is carried and nobody reviews in delta. */
+  redo?: boolean;
   files: RoundFiles;
 }
 export interface SpawnEntry {
@@ -45,7 +47,8 @@ const normPath = (p: string) => p.trim().replace(/\\/g, '/').replace(/^(\.\/)+/,
  * reviewer at high, writing to `files.shadow`. From round 2: a reviewer that did not pass repeats in delta with only
  * its own findings; correctness always repeats in delta; security that passed repeats only when the fix diff touches
  * a sensitive zone, perf that passed only when the fix diff touches a file it flagged; else they are carried.
- * A reviewer the previous round did not have runs in full mode. Delta rounds have no twins.
+ * A reviewer the previous round did not have runs in full mode, and after a redo every reviewer does, none carried.
+ * Rounds after the first have no twins.
  */
 export function reviewRound(input: RoundInput): RoundPlan {
   const { review, files } = input;
@@ -65,6 +68,7 @@ export function reviewRound(input: RoundInput): RoundPlan {
       : [];
     return { round, spawn: [...spawn, ...twins], carried: [], shadow: twins.length > 0 };
   }
+  if (input.redo) return { round, spawn: review.reviewers.map(r => entry(r, 'full', base(r))), carried: [], shadow: false };
 
   const fixFiles = new Set((input.fixFiles ?? []).map(normPath));
   const fixZones = input.fixZones ?? [];

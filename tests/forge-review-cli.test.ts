@@ -107,6 +107,43 @@ describe('forge review-prep', () => {
     expect(JSON.parse(readFileSync(path.join(r2, 'security.json'), 'utf8'))).toMatchObject({ verdict: 'pass', carried: true });
   });
 
+  it('with the shadow test open, a brief whose reviewers are all at xhigh gets no twin and spends no brief', () => {
+    appendEvent(root, { ts: '2026-10-14T09:30:00.000Z', kind: 'triage', task: 'T1', path: 'medium', sensitive: ['auth'],
+      review: { ...review, reviewers: review.reviewers.map(r => ({ ...r, effort: 'xhigh' })) } });
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'shadow.json'), JSON.stringify({ remaining: 2, cases: [] }));
+    const out = JSON.parse(prep().stdout);
+    expect(out.spawn.filter((s: { twin?: boolean }) => s.twin)).toEqual([]);
+    expect(JSON.parse(readFileSync(path.join(root, '.forge', 'shadow.json'), 'utf8')).remaining).toBe(2);
+    expect(JSON.parse(readFileSync(path.join(work(), 'reviews-1-1', 'review-plan.json'), 'utf8')).shadow).toBe(false);
+  });
+
+  it('round 2: a fenced carried file is copied from its parsed result, and an unusable head.txt falls back to the base', () => {
+    prep();
+    const r1 = path.join(work(), 'reviews-1-1');
+    writeFileSync(path.join(r1, 'head.txt'), 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n');
+    writeFileSync(path.join(r1, 'correctness.json'), JSON.stringify({ verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'p' }] }));
+    writeFileSync(path.join(r1, 'security.json'), '```json\n{"verdict":"pass","confidence":0.9,"findings":[]}\n```\n');
+    appendEvent(root, { ts: '2026-10-14T10:05:00.000Z', kind: 'verdict', task: 'T1-1', dir: '.forge/work/T1/reviews-1-1', action: 'fix', score: 0.6, signature: 'x' });
+    const r = prep();
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout).carried).toEqual(['security']);
+    expect(JSON.parse(readFileSync(path.join(work(), 'reviews-1-2', 'security.json'), 'utf8'))).toEqual({ verdict: 'pass', confidence: 0.9, findings: [], carried: true });
+    expect(readFileSync(path.join(work(), 'fix-1-2.patch'), 'utf8')).toContain('+two');
+  });
+
+  it('round 2 after a redo: every reviewer in full mode, nothing carried', () => {
+    prep();
+    const r1 = path.join(work(), 'reviews-1-1');
+    writeFileSync(path.join(r1, 'correctness.json'), JSON.stringify({ verdict: 'fail', confidence: 0.9, findings: [], approach: 'wrong' }));
+    writeFileSync(path.join(r1, 'security.json'), JSON.stringify({ verdict: 'pass', confidence: 0.9, findings: [] }));
+    appendEvent(root, { ts: '2026-10-14T10:05:00.000Z', kind: 'verdict', task: 'T1-1', dir: '.forge/work/T1/reviews-1-1', action: 'redo', score: 0.3, signature: 'x' });
+    const out = JSON.parse(prep().stdout);
+    expect(out.round).toBe(2);
+    expect(out.spawn.map((s: { role: string; mode: string }) => [s.role, s.mode])).toEqual([['review-correctness', 'full'], ['review-security', 'full']]);
+    expect(out.carried).toBeUndefined();
+  });
+
   it('without a triage review it is a usage error', () => {
     const fresh = mkdtempSync(path.join(tmpdir(), 'forge-review-'));
     const r = run(['review-prep', '--task', 'T1-1', '--path', 'medium', '--base', base, '--baseline', path.join(work(), 'baseline-1.json'), '--dir', 'w', '--cwd', wt], { ...io, cwd: fresh });
