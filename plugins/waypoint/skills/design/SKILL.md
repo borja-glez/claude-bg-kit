@@ -1,6 +1,6 @@
 ---
 name: design
-description: Use to create a design document for a very large task and improve it in rounds with a critic, then approve it to create the plan. Triggers: "/waypoint:design", "mejora el diseño", "otra ronda", "aplica las propuestas", "reescribe el diseño", "aprobar diseño".
+description: Use to create a design document for a very large task and improve it in rounds with a critic, then approve it to create the plan. Triggers: "/waypoint:design", "mejora el diseño", "otra ronda", "aplica las propuestas", "reescribe el diseño", "aprobar diseño", "importa el spec", "parte del spec".
 allowed-tools: Bash(node *waypoint.cjs*) Bash(git *) Agent Artifact Read Write Edit
 ---
 
@@ -12,7 +12,7 @@ Talk to the user in their language. Everything stored (front matter keys, JSON f
 
 ## Args and paths
 
-The first token of the arguments is the subcommand: `new`, `round`, `apply <all|1,3>`, `rewrite`, `interview`, `approve`. With no arguments: `new` if `design.md` does not exist, otherwise `round`.
+The first token of the arguments is the subcommand: `new [--from <spec>]`, `round`, `apply <all|1,3>`, `rewrite`, `interview`, `approve`. With no arguments: `new` if `design.md` does not exist, otherwise `round`.
 
 - `DESIGN` = `docs/waypoint/<project>/design.md` (ask which project if there are several).
 - `LOCAL` = `.waypoint/<project>/`. Make sure `.waypoint/` is in the project's `.gitignore`.
@@ -31,6 +31,7 @@ pillars: [{title: <string>, text: <string>}]   # 2-6 recommended
 start_prompt: <string>           # default "/waypoint:work <track>"
 status: draft                    # draft | approved
 artifact: <url>                  # added by Publish
+source: <path>                   # added by design-import: the spec this design was imported from
 ---
 ```
 
@@ -43,12 +44,13 @@ If the front matter has `status: approved`, the plan was derived from this desig
 ## new
 
 0. If `DESIGN` already exists, stop: tell the user it exists (version and status) and offer `round` (improve it) or `rewrite` (replace it with a new version). Never overwrite it.
-1. Ask for the user's draft (text, file or the current conversation) and collect it.
+1. **From a spec** (`new --from <spec>`: a superpowers spec, or any Markdown spec with a `# ` title and `##` sections): `waypoint design-import <spec> --project <project> --locale <user language> --out DESIGN`. `<project>` is the one the user named, else a kebab slug of the spec's file name without its date prefix and its `-design` suffix (`2026-10-12-forge-route-design.md` → `forge-route`). Exit 2: tell the user its message and stop. Then fill `pillars` (2-6, in the spec's own words) in the front matter with Edit and change nothing else: the body stays as the spec wrote it, and `source` names the spec. In many projects `docs/superpowers/` is in `.gitignore`; that does not matter, `DESIGN` goes to git. Skip step 2.
+   **Otherwise** ask for the user's draft (text, file or the current conversation) and collect it.
 2. Write `DESIGN` with the front matter above (`status: draft`, no `artifact`) and a body with `##` sections.
 3. Run `waypoint design-validate DESIGN` and fix every reported issue until it passes.
-4. `waypoint design-snapshot DESIGN --note "<initial draft, in the user's language>" --round 0` (prints `{"version","path"}`).
+4. `waypoint design-snapshot DESIGN --note "<initial draft, in the user's language>" --round 0` (prints `{"version","path"}`). After an import the note is "<imported from <spec>, in the user's language>".
 5. Commit with the message `Design v1` (pathspecs as above; include the `.gitignore` if you edited it for `.waypoint/`).
-6. Publish (see **Publish**) and offer the first round.
+6. Publish (see **Publish**) and offer the first round. After an import, offer **another round (recommended)**, since the spec has not been through the critic, or **approve now**.
 
 ## round
 

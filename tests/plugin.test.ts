@@ -154,6 +154,16 @@ describe('plugin layout', () => {
       expect(forge).toContain(`) ${dep},`);
     }
   });
+  it('superpowers bridges in the skills: import a spec, run a superpowers plan, TDD', () => {
+    const design = read('plugins/waypoint/skills/design/SKILL.md');
+    for (const w of ['new --from <spec>', 'waypoint design-import', '--round 0', 'another round (recommended)', 'approve now', 'source:', '`docs/superpowers/` is in `.gitignore`']) expect(design).toContain(w);
+    const md = read('plugins/forge/skills/run/SKILL.md');
+    for (const w of ['--from-spec <f>', 'FORGE sp-specs', '/waypoint:design new --from', '### Superpowers plan', '--superpowers-plan <f>', 'FORGE sp-plan tasks',
+      'FORGE triage --task <id> --superpowers-plan', 'FORGE brief --superpowers-plan', 'FORGE sp-plan check', 'git ls-files --error-unmatch', 'one after another',
+      'FORGE tdd', 'it starts `TDD: required`', "the implementer's report path", 'superpowers is not installed']) expect(md).toContain(w);
+    expect(md).toMatch(/never `superpowers:executing-plans` nor `superpowers:subagent-driven-development`/);
+    expect(md.split(/\r?\n---\r?\n/)[0]).toMatch(/--superpowers-plan/);
+  });
   it('decision skills: WP defined, the md locale and place, revert always written, revert rules', () => {
     const run = read('plugins/forge/skills/run/SKILL.md');
     const dec = run.slice(run.indexOf('## Decisions'), run.indexOf('## 1. Triage'));
