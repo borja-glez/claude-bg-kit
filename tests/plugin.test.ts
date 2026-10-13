@@ -80,7 +80,7 @@ describe('plugin layout', () => {
   });
   it('forge run skill sizes and reviews each plan task by its real diff', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
-    for (const w of ['--base <base>', 'review.reviewers', 'review.flags', 'implementer.agent']) expect(md).toContain(w);
+    for (const w of ['--task T --cwd <worktree> --base <base>', 'review.reviewers', 'review.flags', "the triage's `implementer.agent`"]) expect(md).toContain(w);
     expect(md).not.toMatch(/FORGE verdict[^\n`]*--sensitive --perf/);
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) expect(read(f)).toContain('triage --plan p --task T --base');
   });
