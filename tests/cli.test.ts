@@ -831,3 +831,21 @@ describe('design-import', () => {
     expect(existsSync(path.join(dir, 'o3.md'))).toBe(false);
   });
 });
+
+describe('design-gate', () => {
+  it('prints the gate from the changelog and the critiques, and refuses a missing design argument', () => {
+    const d = path.join(dir, 'docs', 'waypoint', 'demo-shop');
+    mkdirSync(path.join(d, 'design'), { recursive: true });
+    copyFileSync(new URL('./fixtures/design.md', import.meta.url), path.join(d, 'design.md'));
+    writeFileSync(path.join(d, 'design', 'changelog.json'), JSON.stringify([{ version: 1, date: '2026-10-13', note: 'v1', words: 10, round: 0 }]));
+    const rel = 'docs/waypoint/demo-shop/design.md';
+    expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ version: 1, rounds: 0, canAutoApprove: false });
+    const local = path.join(dir, '.waypoint', 'demo-shop');
+    mkdirSync(local, { recursive: true });
+    writeFileSync(path.join(local, 'critique-r1.json'), JSON.stringify({ round: 1, version: 1, scope: 'full', proposals: [{ n: 1, category: 'gap', severity: 'major', section: '_intro', problem: 'p', change: 'c' }] }));
+    expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ rounds: 1, latestRound: 1, canAutoApprove: true });
+    writeFileSync(path.join(local, 'critique-r2.json'), 'not json');
+    expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ rounds: 1, latestRound: 2, invalid: [2], canAutoApprove: false });
+    expect(run(['design-gate'], io).code).toBe(2);
+  });
+});
