@@ -1,5 +1,5 @@
 import { spawnSync, execFileSync } from 'node:child_process';
-import { existsSync, statSync, lstatSync, readFileSync, readdirSync, openSync, closeSync, fstatSync, readSync, rmSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, statSync, lstatSync, readFileSync, readdirSync, openSync, closeSync, fstatSync, readSync, rmSync, mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { appendEvent, readEvents, forgeDir, LEDGER_KINDS, type LedgerKind } from '../ledger.js';
@@ -9,8 +9,9 @@ import { readExecution, saveExecution } from '../execution.js';
 import { planLocale, replyIn } from '../../lib/locale.js';
 import { triage, implementerFor, zonesFromPaths, PATH_ORDER, type PathName } from '../triage.js';
 import { parsePlan, PlanError } from '../../lib/plan.js';
-import { renderBrief, taskText } from '../brief.js';
-import { loadConfig, agentFor, ROLES, ConfigError, NAME } from '../config.js';
+import { renderBrief, taskText, tddLine } from '../brief.js';
+import { loadConfig, agentFor, ROLES, ConfigError, NAME, WORKFLOWS, AUTONOMIES } from '../config.js';
+import { resolvePrefs, isWorkflow, isAutonomy } from '../prefs.js';
 import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, type ReviewerName, type Action, type FailingValidator } from '../verdict.js';
 import { decideRound } from '../loop.js';
 import { PROPOSAL_ID, proposalId, saveProposal, loadProposals, decideLocal, decideDoc, mirrorProposal } from '../proposals.js';
@@ -26,13 +27,19 @@ import { verifyPlan, cleanupPids, killTarget } from '../verify.js';
 import { readLocal, updateLocal, mainCheckout } from '../local.js';
 import { memberForHook } from '../members.js';
 import { hookLive } from '../live.js';
+import { hookRoute } from '../route-hooks.js';
 import { readSurfaces, detectDrafts, appendLearned, surfaceFile, surfaceHash } from '../surfaces.js';
+import { addDecision, allDecisions, listDecisions, renderDecisionsMd, DecisionInputError } from '../decisions.js';
+import { TASK_ID, decisionScope, scopeFileName } from '../../lib/decisions.js';
+import { claudeConfigDir, locateSuperpowers, spLedgerDone, spPlans, spSkillPath, spSpecs } from '../superpowers.js';
+import { ROUTE_OPTIONS, ROUTE_STAGES, firstStage, isRoutePath, isRouteSession, readRoute, routeOptions, writeRoute, type RouteDoc, type RouteOption, type RouteStage } from '../route.js';
+import { checkSpTask, markDone, parseSpPlan, renderSpBrief, SpPlanError } from '../../lib/sp-plan.js';
 
 export interface ExecResult { code: number; output: string; ms: number; timedOut: boolean }
-export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void }
+export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined> }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|agents|last|proposals|surfaces|tools|local|verify-plan|verify-cleanup|waypoint-cli|infinite|cycle|swarm|stop|hook> ...';
+const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|infinite|cycle|swarm|stop|hook> ...';
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 
@@ -140,6 +147,15 @@ function planTask(cwd: string, planArg: string | undefined, id: string | undefin
   return { plan, task };
 }
 
+// A superpowers plan with the tasks its own executors recorded as complete counted as done (they never tick the boxes).
+const spPlanDone = (text: string, abs: string, dir: string) => markDone(parseSpPlan(text), spLedgerDone([dir, mainCheckout(dir)], abs));
+
+// The number of a `### Task N` of a superpowers plan, from --task.
+function spTaskNumber(v: string | undefined): number {
+  if (v === undefined || !/^\d{1,4}$/.test(v) || Number(v) < 1) throw new UsageError('--task must be the number of a task of the superpowers plan');
+  return Number(v);
+}
+
 // Finds waypoint's CLI from the running forge.cjs: dev layout (plugins/forge, plugins/waypoint) or
 // cache layout (<marketplace>/forge/<ver>, <marketplace>/waypoint/<ver>); the highest version wins.
 // Caveat: after a downgrade a stale higher-version directory left in the cache could be picked.
@@ -157,6 +173,34 @@ export function findWaypointCli(scriptPath: string): string | null {
     if (existsSync(f)) return path.resolve(f);
   }
   return null;
+}
+
+// superpowers as installed for this repository: its main checkout holds the project settings and is the projectPath.
+const superpowersOf = (io: Io, dir: string) => locateSuperpowers({ configDir: claudeConfigDir(io.env ?? process.env), projectDir: mainCheckout(dir) });
+
+// The time git last committed a file of the repository (sp-specs and sp-plans), in ms; null when it does not track it.
+const committedAt = (io: Io, dir: string) => {
+  const git = io.git ?? defaultGit(dir);
+  return (rel: string): number | null => {
+    const s = Number((git(['log', '-1', '--format=%ct', '--', rel]) ?? '').trim());
+    return Number.isInteger(s) && s > 0 ? s * 1000 : null;
+  };
+};
+const declinedSpecs = (s: Record<string, unknown>): string[] =>
+  Array.isArray(s.declinedSpecs) ? s.declinedSpecs.filter((x): x is string => typeof x === 'string').slice(0, 200) : [];
+
+// tdd: superpowers (spec §4.4): the line implementer briefs carry, null when off or when superpowers or its TDD skill is missing.
+function tddFor(io: Io, dir: string) {
+  const { tdd } = loadConfig(dir);
+  const sp = superpowersOf(io, dir);
+  const skill = spSkillPath(sp, 'test-driven-development');
+  return { tdd, installed: sp.installed, version: sp.version, skill, line: tdd === 'superpowers' && skill ? tddLine(skill) : null };
+}
+
+// The TDD line of a brief: an invalid config or a missing superpowers leaves it out (the brief never fails on it), and
+// superpowers is looked for only with tdd: superpowers.
+function briefTdd(io: Io, dir: string): string | null {
+  try { return loadConfig(dir).tdd === 'superpowers' ? tddFor(io, dir).line : null; } catch { return null; }
 }
 
 // What the stop conditions need from the repository: the stop file and the proposal mirror.
@@ -252,14 +296,25 @@ export function run(argv: string[], io: Io): Result {
         return ok('ok');
       }
       case 'brief': {
+        if (has('superpowers-plan')) {
+          const file = flag('superpowers-plan');
+          if (!file) throw new UsageError('brief: --superpowers-plan needs a plan file');
+          const n = spTaskNumber(flag('task'));
+          let text: string;
+          try { text = readFileSync(path.resolve(io.cwd, file), 'utf8'); } catch { throw new UsageError(`brief: cannot read ${file}`); }
+          try { return ok(renderSpBrief(text, n, { planPath: file.replace(/\\/g, '/'), tdd: briefTdd(io, repoDir) })); } catch (e) {
+            if (e instanceof SpPlanError) throw new UsageError(`brief: ${file}: ${e.message}`);
+            throw e;
+          }
+        }
         const { plan, task } = planTask(io.cwd, flag('plan'), flag('task'));
         const design = flag('design') ?? path.join(path.dirname(flag('plan')!), 'design.md');
         const designPath = existsSync(path.resolve(io.cwd, design)) ? design.replace(/\\/g, '/') : null;
-        return ok(renderBrief(plan, task, { planPath: flag('plan')!.replace(/\\/g, '/'), designPath }));
+        return ok(renderBrief(plan, task, { planPath: flag('plan')!.replace(/\\/g, '/'), designPath, tdd: briefTdd(io, repoDir) }));
       }
       case 'triage': {
         const textArgs = [...args];
-        for (const f of ['--task', '--text-file', '--plan']) {
+        for (const f of ['--task', '--text-file', '--plan', '--superpowers-plan', '--autonomy']) {
           const i = textArgs.indexOf(f);
           if (i >= 0) textArgs.splice(i, 2);
         }
@@ -270,6 +325,22 @@ export function run(argv: string[], io: Io): Result {
         if (has('plan') && flag('plan') === undefined) throw new UsageError('triage: --plan needs a plan file');
         const planned = flag('plan') !== undefined ? planTask(io.cwd, flag('plan'), flag('task')).task : null;
         if (planned) task = taskText(planned);
+        if (has('superpowers-plan') && flag('superpowers-plan') === undefined) throw new UsageError('triage: --superpowers-plan needs a plan file');
+        // A superpowers plan: its title, goal and pending tasks are the text, the files those tasks list are its files.
+        let spFiles: string[] | null = null;
+        if (flag('superpowers-plan') !== undefined) {
+          const file = flag('superpowers-plan')!;
+          let sp;
+          try { sp = spPlanDone(readFileSync(path.resolve(io.cwd, file), 'utf8'), path.resolve(io.cwd, file), repoDir); } catch (e) {
+            throw new UsageError(e instanceof SpPlanError ? `triage: ${file}: ${e.message}` : `triage: cannot read ${file}`);
+          }
+          const pending = sp.tasks.filter(t => !t.done);
+          task = [sp.plan.title, sp.plan.goal, ...pending.map(t => t.title)].filter(Boolean).join('. ');
+          spFiles = [...new Set(pending.flatMap(t => t.files))];
+        }
+        const autonomy = flag('autonomy');
+        if (has('autonomy') && autonomy !== 'auto' && autonomy !== 'ask') throw new UsageError('triage: --autonomy must be auto or ask');
+        const auto = autonomy === 'auto' ? { autonomy: 'auto' as const } : {};
         if (!task) throw new UsageError('triage: the task text is required');
         const git = io.git ?? defaultGit(io.cwd);
         const lines = (out: string | null) => (out ?? '').split('\n').map(s => s.trim()).filter(Boolean);
@@ -282,11 +353,14 @@ export function run(argv: string[], io: Io): Result {
         const grep = (w: string) => lines(git(['-c', 'core.quotePath=false', 'grep', '-l', '-I', '--fixed-strings', '-w', '-e', w])).filter(f => !bookkeeping(f));
         const tracked = lines(listed);
         const zoneFiles = planned ? tracked.filter(f => planned.zones.some(z => globMatch(z, f))) : [];
-        const extra = planned ? { files: zoneFiles, zones: zonesFromPaths(planned.zones) } : undefined;
+        const extra = planned ? { files: zoneFiles, zones: zonesFromPaths(planned.zones) }
+          : spFiles ? { files: tracked.filter(f => spFiles!.includes(f)), zones: zonesFromPaths(spFiles) } : undefined;
         const catalog = detectValidators(repoReader(repoDir), loadConfig(repoDir)).map(v => ({ name: v.name, cmd: v.cmd, kind: v.kind, source: v.source }));
         const names = catalog.map(v => v.name);
         const result = triage(task, { files: tracked, commits, gitOk: listed !== null, grep }, names, extra);
         if (planned?.zones.length && !zoneFiles.length) result.reasons.push('zones match no tracked file (new files?)');
+        // A superpowers plan runs on the Medium path, one task after another: its tasks build on each other.
+        if (spFiles) { result.path = 'medium'; result.reasons.push('superpowers plan: the Medium path, its tasks in order'); }
         // The ratchet: a repeated triage of the same task never lowers the path it already reached.
         if (flag('task')) {
           const rank = (p: unknown) => PATH_ORDER.indexOf(p as PathName);
@@ -303,8 +377,8 @@ export function run(argv: string[], io: Io): Result {
         const fresh = names.filter(n => !known.includes(n));
         // `known` mirrors what exists now: new names are added, vanished ones dropped silently.
         if (fresh.length || known.some(n => !names.includes(n))) updateLocal(io.cwd, s => ({ ...s, known: names }));
-        appendEvent(io.cwd, { ts: ts(), kind: 'triage', ...(flag('task') ? { task: flag('task') } : {}), ...result });
-        return json({ ...result, catalog, new: fresh, implementer });
+        appendEvent(io.cwd, { ts: ts(), kind: 'triage', ...(flag('task') ? { task: flag('task') } : {}), ...result, ...auto });
+        return json({ ...result, catalog, new: fresh, implementer, ...auto });
       }
       case 'validate': {
         const config = loadConfig(repoDir);
@@ -627,6 +701,15 @@ export function run(argv: string[], io: Io): Result {
           if (!m) throw new UsageError('local get: the path must be surfaces.<name>');
           return json(s.surfaces[m[1]] ?? null);
         }
+        if (sub === 'set' && (key === 'workflow' || key === 'autonomy')) {
+          if (value === 'none') {
+            updateLocal(io.cwd, s => { const next = { ...s }; delete next[key]; return next; });
+            return ok('ok');
+          }
+          if (key === 'workflow' ? !isWorkflow(value) : !isAutonomy(value)) throw new UsageError(`local set: ${key} must be one of ${(key === 'workflow' ? WORKFLOWS : AUTONOMIES).join('|')}|none`);
+          updateLocal(io.cwd, s => ({ ...s, [key]: value }));
+          return ok('ok');
+        }
         if (sub === 'set') {
           const m = /^surfaces\.(.+)$/.exec(key ?? '');
           if (!m || !NAME.test(m[1])) throw new UsageError('local set: the path must be surfaces.<name>');
@@ -642,7 +725,14 @@ export function run(argv: string[], io: Io): Result {
           });
           return ok('ok');
         }
-        throw new UsageError('usage: forge local get [surfaces.<name>] | set surfaces.<name> allowed|denied|none');
+        throw new UsageError('usage: forge local get [surfaces.<name>] | set surfaces.<name> allowed|denied|none | set workflow <w>|none | set autonomy ask|auto|none');
+      }
+      case 'prefs': {
+        const wf = flag('workflow');
+        const au = flag('autonomy');
+        if (wf !== undefined && !isWorkflow(wf)) throw new UsageError(`prefs: --workflow must be one of ${WORKFLOWS.join('|')}`);
+        if (au !== undefined && !isAutonomy(au)) throw new UsageError(`prefs: --autonomy must be one of ${AUTONOMIES.join('|')}`);
+        return json(resolvePrefs({ ...(wf ? { workflow: wf } : {}), ...(au ? { autonomy: au } : {}) }, readLocal(io.cwd), loadConfig(repoDir)));
       }
       case 'swarm':
         return swarmCommand(args, io, {
@@ -650,7 +740,10 @@ export function run(argv: string[], io: Io): Result {
           at: dir => ({ git: defaultGit(dir), exec: defaultExec(dir), repo: repoReader(dir) }),
         });
       case 'hook': {
-        return { code: 0, stdout: args[0] === 'stop' ? hookStop(io) : args[0] === 'live' ? hookLive(io) : '', stderr: '' };
+        const which = args[0];
+        const out = which === 'stop' ? hookStop(io) : which === 'live' ? hookLive(io)
+          : which === 'route-session' ? hookRoute(io, 'session') : which === 'route-prompt' ? hookRoute(io, 'prompt') : '';
+        return { code: 0, stdout: out, stderr: '' };
       }
       case 'infinite': {
         const sub = args[0];
@@ -720,9 +813,155 @@ export function run(argv: string[], io: Io): Result {
         if (!found) throw new UsageError('waypoint-cli: waypoint.cjs not found next to this forge install; is the waypoint plugin installed?');
         return ok(found);
       }
+      case 'sp-path': {
+        const skill = args[0];
+        if (!skill || skill.startsWith('--')) throw new UsageError('sp-path: the name of a superpowers skill is required');
+        return json(spSkillPath(superpowersOf(io, repoDir), skill));
+      }
+      case 'sp-specs': {
+        if (has('decline')) {
+          const rel = (flag('decline') ?? '').replace(/\\/g, '/');
+          if (!/^docs\/superpowers\/specs\/[^/]+\.md$/.test(rel)) throw new UsageError('sp-specs: --decline needs a docs/superpowers/specs/<file>.md path');
+          updateLocal(io.cwd, s => ({ ...s, declinedSpecs: [...new Set([...declinedSpecs(s), rel])] }));
+          return json({ declined: rel });
+        }
+        return json(spSpecs(repoDir, io.now().getTime(), { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)) }));
+      }
+      case 'sp-plans':
+        return json(spPlans(repoDir, io.now().getTime(), { committedAt: committedAt(io, repoDir) }));
+      case 'route': {
+        const [sub] = args;
+        const paths = (cmdName: string) => {
+          const spec = flag('spec');
+          const plan = flag('plan');
+          for (const [name, v] of [['spec', spec], ['plan', plan]] as const) if (v !== undefined && !isRoutePath(v)) throw new UsageError(`${cmdName}: --${name} is not a plain path`);
+          return { ...(spec ? { spec } : {}), ...(plan ? { plan } : {}) };
+        };
+        if (sub === 'set') {
+          const task = flag('task');
+          const chosen = flag('chosen');
+          const by = flag('by');
+          if (!task || !TASK_ID.test(task)) throw new UsageError('route set: --task <id> is required');
+          if (!(ROUTE_OPTIONS as readonly (string | undefined)[]).includes(chosen)) throw new UsageError(`route set: --chosen must be one of ${ROUTE_OPTIONS.join('|')}`);
+          if (by !== 'user' && by !== 'auto') throw new UsageError('route set: --by must be user or auto');
+          const files = paths('route set');
+          const session = flag('session');
+          if (session !== undefined && !isRouteSession(session)) throw new UsageError('route set: --session is not a plain session id');
+          let why = by === 'user' ? 'the user chose it' : 'the recommended option for this request';
+          if (flag('why-file') !== undefined) {
+            try { why = readFileSync(path.resolve(io.cwd, flag('why-file')!), 'utf8').trim() || why; } catch { throw new UsageError('route set: cannot read --why-file'); }
+          }
+          const doc: RouteDoc = { task, chosen: chosen as RouteOption, by, stage: firstStage(chosen as RouteOption, files), ts: ts(), ...files, ...(session ? { session } : {}) };
+          writeRoute(io.cwd, doc);
+          // The route is a decision like any other: by the user when asked, by auto mode otherwise (spec §5.5).
+          const root = mainCheckout(io.cwd);
+          const exec = readExecution(root);
+          const { n } = addDecision(root, {
+            point: 'route', what: `route of ${task}`, chosen: doc.chosen, why, by,
+            undo: { type: 'none', reason: 'the route only chose who does the work: start the task again to choose another' },
+          }, { ts: ts(), task, runId: exec?.active ? exec.runId : null });
+          return json({ ...doc, decision: n });
+        }
+        if (sub === 'stage') {
+          const stage = flag('stage');
+          if (!(ROUTE_STAGES as readonly (string | undefined)[]).includes(stage)) throw new UsageError(`route stage: --stage must be one of ${ROUTE_STAGES.join('|')}`);
+          const files = paths('route stage');
+          const cur = readRoute(io.cwd);
+          if (!cur || (flag('task') !== undefined && flag('task') !== cur.task)) return json({ updated: false });
+          const next: RouteDoc = { ...cur, stage: stage as RouteStage, ts: ts(), ...files };
+          writeRoute(io.cwd, next);
+          return json({ updated: true, ...next });
+        }
+        if (sub !== undefined && !sub.startsWith('--')) {
+          throw new UsageError('usage: forge route --task id --path p [--workflow w] [--autonomy a] [--run-plan] [--build-spec] | set --task id --chosen o --by user|auto [--spec f] [--plan f] [--why-file f] [--session s] | stage --stage s [--task id] [--spec f] [--plan f]');
+        }
+        const task = flag('task');
+        const p = flag('path');
+        if (!task || !TASK_ID.test(task)) throw new UsageError('route: --task <id> is required');
+        if (!p || !(PATH_ORDER as readonly string[]).includes(p)) throw new UsageError(`route: --path must be one of ${PATH_ORDER.join('|')}`);
+        const wf = flag('workflow');
+        const au = flag('autonomy');
+        if (wf !== undefined && !isWorkflow(wf)) throw new UsageError(`route: --workflow must be one of ${WORKFLOWS.join('|')}`);
+        if (au !== undefined && !isAutonomy(au)) throw new UsageError(`route: --autonomy must be one of ${AUTONOMIES.join('|')}`);
+        const prefs = resolvePrefs({ ...(wf ? { workflow: wf } : {}), ...(au ? { autonomy: au } : {}) }, readLocal(io.cwd), loadConfig(repoDir));
+        const sp = superpowersOf(io, repoDir);
+        const now = io.now().getTime();
+        const specs = sp.installed ? spSpecs(repoDir, now, { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)) }) : [];
+        const plans = sp.installed ? spPlans(repoDir, now, { committedAt: committedAt(io, repoDir) }) : [];
+        return json(routeOptions({ path: p as PathName, prefs, superpowers: { installed: sp.installed, version: sp.version }, specs, plans, runPlan: has('run-plan'), buildSpec: has('build-spec') }));
+      }
+      case 'tdd':
+        return json(tddFor(io, repoDir));
+      case 'sp-plan': {
+        const [sub, file] = args;
+        if ((sub !== 'tasks' && sub !== 'check') || !file || file.startsWith('--')) throw new UsageError('usage: forge sp-plan tasks <plan.md> | check <plan.md> --task N');
+        const abs = path.resolve(io.cwd, file);
+        let text: string;
+        try { text = readFileSync(abs, 'utf8'); } catch { throw new UsageError(`sp-plan: cannot read ${file}`); }
+        try {
+          if (sub === 'tasks') { const { plan, tasks } = spPlanDone(text, abs, repoDir); return json({ plan, tasks }); }
+          const n = spTaskNumber(flag('task'));
+          const r = checkSpTask(text, n);
+          if (r.checked) writeFileSync(abs, r.text);
+          return json({ task: n, checked: r.checked });
+        } catch (e) {
+          if (e instanceof SpPlanError) throw new UsageError(`sp-plan: ${file}: ${e.message}`);
+          throw e;
+        }
+      }
       case 'agents': {
         const { profile } = loadConfig(io.cwd);
         return json({ profile, agents: Object.fromEntries(ROLES.map(r => [r, agentFor(r, profile)])) });
+      }
+      case 'decision': {
+        const [sub, arg] = args;
+        // One record per repository: a run member in its task worktree writes and reads the main checkout's ledger,
+        // where the coordinator's reports, lens, the band and /forge:decisions look.
+        const root = mainCheckout(io.cwd);
+        if (sub === 'add') {
+          const file = flag('data-file');
+          if (!file) throw new UsageError('decision add: --data-file is required');
+          let raw: unknown;
+          try { raw = JSON.parse(readFileSync(path.resolve(io.cwd, file), 'utf8')); } catch { throw new UsageError('decision add: --data-file must be a JSON object'); }
+          if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new UsageError('decision add: --data-file must be a JSON object');
+          const task = flag('task');
+          if (task !== undefined && (!TASK_ID.test(task) || task === '.' || task === '..')) throw new UsageError(`decision add: invalid --task ${task}`);
+          // An active execution names the run the decision belongs to (its scope), unless the data names one.
+          const exec = readExecution(root);
+          try {
+            const { n, event } = addDecision(root, raw, { ts: ts(), ...(task ? { task } : {}), runId: exec?.active ? exec.runId : null });
+            return json({ n, ...event });
+          } catch (e) {
+            if (e instanceof DecisionInputError) throw new UsageError(`decision add: ${e.message}`);
+            throw e;
+          }
+        }
+        if (sub === 'list') {
+          const since = flag('since');
+          if (since !== undefined && !Number.isFinite(Date.parse(since))) throw new UsageError(`decision list: --since must be a date, got ${since}`);
+          return json(listDecisions(root, { task: flag('task'), run: flag('run'), since, all: has('all'), auto: has('auto') }));
+        }
+        if (sub === 'show') {
+          const n = Number(arg);
+          if (!Number.isInteger(n) || n < 1) throw new UsageError('decision show: <n> must be a positive integer');
+          const d = allDecisions(root).find(x => x.n === n);
+          if (!d) throw new UsageError(`decision show: there is no decision ${n}`);
+          return json(d);
+        }
+        if (sub === 'md') {
+          const scope = flag('scope');
+          if (!scope) throw new UsageError('decision md: --scope is required');
+          const outFlag = flag('out');
+          // The file is project content (it goes to git with the work): by default under the code's directory.
+          const out = outFlag !== undefined ? path.resolve(io.cwd, outFlag) : path.join(repoDir, 'docs', 'forge', 'decisions', `${scopeFileName(scope)}.md`);
+          if (!out.endsWith('.md')) throw new UsageError('decision md: --out must be a .md file');
+          const list = allDecisions(root).filter(d => d.by !== 'user' && (decisionScope(d) ?? 'forge') === scope);
+          if (!list.length) return json({ written: false, scope, count: 0 });
+          mkdirSync(path.dirname(out), { recursive: true });
+          writeFileSync(out, renderDecisionsMd(list, scope, flag('locale') ?? 'en'));
+          return json({ written: true, scope, count: list.length, path: out });
+        }
+        throw new UsageError('usage: forge decision add --data-file f [--task id] | list [--task id] [--run id] [--since iso] [--all] [--auto] | show <n> | md --scope s [--out f] [--locale es|en]');
       }
       case 'last': {
         const task = flag('task');
@@ -736,6 +975,8 @@ export function run(argv: string[], io: Io): Result {
           verdict: lastOf('verdict') ?? null,
           round: lastOf('round') ?? null,
           events: events.length,
+          // Whether the task runs in auto mode: its last fresh triage (a ratchet logged by the session carries none).
+          autonomy: [...events].reverse().find(e => e.kind === 'triage' && Array.isArray(e.reasons))?.autonomy === 'auto' ? 'auto' : null,
         });
       }
       default:

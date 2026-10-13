@@ -9,6 +9,7 @@ import { STAGES, stageOf } from './view.js';
 import { summarizeUsage } from './usage-summary.js';
 import { PRICES_AS_OF } from '../lib/prices.js';
 import { freshFinished, type FinishedAgent } from './finished.js';
+import { decisionsSummary } from '../lib/decisions.js';
 
 const CLIP = 80;
 const MAX_RANGE = 1000;
@@ -130,7 +131,7 @@ export type PanelModel = {
   forge: {
     task: string; path: string; phase: string; agent: string | null; validators: { name: string; ok: boolean }[];
     verdict: { action: string; score: number | null } | null; round: number | null; cap: number | null;
-    brief: number | null; accepted: number[]; briefs: number | null;
+    brief: number | null; accepted: number[]; briefs: number | null; autonomy?: 'auto';
     verify?: {
       planned: boolean; surfaces: string[]; result: string | null; passed: number | null; total: number | null;
       evidence: string | null; reason: string | null;
@@ -138,6 +139,7 @@ export type PanelModel = {
     timing?: { taskSeconds: number | null; done: boolean; stages: { name: string; seconds: number; live: boolean }[] } | null;
   } | null;
   infinite: { cycle: number; cyclesMax: number | null; hoursLeft: number | null; active: boolean; autoApproved: string[] } | null;
+  decisions: { count: number; autonomy: 'auto' | 'unattended'; lastMajor: string | null } | null;
   execution: {
     runId: string; mode: 'subagents' | 'sessions'; parallel: number; branch: string; active: boolean;
     stopReason: string | null; stallReason: string | null;
@@ -389,7 +391,7 @@ export function bandKey(model: PanelModel): string {
 
 export function buildPanelModel(input: {
   band: BandModel; ledger?: string; ledgerPlan?: string; planFallback?: string; ledgerMtimeMs?: number;
-  forgeStatus?: string; forgeRun?: string; proposals?: Record<string, string>; forgeBriefs?: number;
+  forgeStatus?: string; forgeRun?: string; proposals?: Record<string, string>; forgeBriefs?: number; forgeDecisions?: string;
   forgeExecution?: string; forgeExecTasks?: Record<string, string>; forgeLive?: Record<string, string>;
   activity: Activity; now: number; locale?: string;
   // `officialOwnUsd`: this session's own computed cost at the moment `officialUsd` was read, for the drift check.
@@ -453,6 +455,7 @@ export function buildPanelModel(input: {
       : null,
     forge: input.forgeStatus !== undefined ? forgeFromStatus(input.forgeStatus, now, input.forgeBriefs ?? null) : null,
     infinite: infiniteFromRun(input.forgeRun, input.proposals, now),
+    decisions: decisionsSummary(input.forgeDecisions, now),
     // The only plan task title the band model carries is the current one's.
     execution: executionFromFiles(input.forgeExecution, input.forgeExecTasks, input.forgeLive, now,
       wp?.current ? { [wp.current.id]: wp.current.title } : undefined),

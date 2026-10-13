@@ -129,7 +129,7 @@ describe('buildPanelModel', () => {
   it('is all-null for an empty project', () => {
     expect(buildPanelModel(base)).toEqual({
       locale: 'en', waypoint: null, superpowers: null, todos: null, subagents: [], subagentsDone: [], tool: null, turnSeconds: null, ccTasks: null,
-      forge: null, infinite: null, execution: null, proposals: [], mainModel: null, usage: null,
+      forge: null, infinite: null, decisions: null, execution: null, proposals: [], mainModel: null, usage: null,
     });
   });
   it('derives waypoint from a work band and takes its locale', () => {
@@ -270,6 +270,10 @@ describe('forgeFromStatus', () => {
     const { ts: _ts, ...rest } = STATUS;
     expect(forgeFromStatus(JSON.stringify(STATUS), NOW)).toEqual({ ...rest, brief: null, accepted: [], verify: null, briefs: null, timing: null });
     expect(forgeFromStatus(JSON.stringify(STATUS), NOW, 4)).toMatchObject({ briefs: 4 });
+  });
+  it('keeps auto mode from status.json', () => {
+    expect(forgeFromStatus(JSON.stringify({ ...STATUS, autonomy: 'auto' }), NOW)).toMatchObject({ autonomy: 'auto' });
+    expect(forgeFromStatus(JSON.stringify(STATUS), NOW)).not.toHaveProperty('autonomy');
   });
   it('is null for junk, invalid fields or a status older than a day', () => {
     expect(forgeFromStatus('', NOW)).toBeNull();
@@ -540,5 +544,25 @@ describe('buildPanelModel finished subagents', () => {
     }) as PanelModel;
     expect(bandKey(mk(10, 5))).toBe(bandKey(mk(99, 77)));
     expect(bandKey(mk(10, 5))).not.toBe(bandKey(mk(10, 5, { tool: { name: 'x' } })));
+  });
+});
+
+describe('buildPanelModel decisions', () => {
+  const now = Date.parse('2026-10-13T12:00:00Z');
+  const base = { band: { mode: 'none' } as const, activity: act(), now };
+  const doc = (o: Record<string, unknown> = {}) => JSON.stringify({
+    ts: '2026-10-13T11:50:00Z', scope: 'orders', count: 2, autonomy: 'auto', last: [],
+    lastMajor: { n: 7, point: 'design-approve', what: 'diseño aprobado (v4)', chosen: 'approve', ts: '2026-10-13T11:50:00Z' }, ...o,
+  });
+  it('summarizes the automatic decisions of the last day', () => {
+    expect(buildPanelModel({ ...base, forgeDecisions: doc() }).decisions).toEqual({ count: 2, autonomy: 'auto', lastMajor: 'diseño aprobado (v4)' });
+    expect(buildPanelModel({ ...base, forgeDecisions: doc({ lastMajor: null }) }).decisions?.lastMajor).toBeNull();
+  });
+  it('is null when absent, stale, empty, corrupt or oversized', () => {
+    expect(buildPanelModel(base).decisions).toBeNull();
+    expect(buildPanelModel({ ...base, forgeDecisions: doc({ ts: '2026-10-12T11:00:00Z' }) }).decisions).toBeNull();
+    expect(buildPanelModel({ ...base, forgeDecisions: doc({ count: 0 }) }).decisions).toBeNull();
+    expect(buildPanelModel({ ...base, forgeDecisions: '{"ts":' }).decisions).toBeNull();
+    expect(buildPanelModel({ ...base, forgeDecisions: doc() + ' '.repeat(16 * 1024) }).decisions).toBeNull();
   });
 });

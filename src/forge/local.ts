@@ -4,12 +4,16 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse, stringify } from 'yaml';
-import { NAME } from './config.js';
+import { AUTONOMIES, NAME, WORKFLOWS, type Autonomy, type Workflow } from './config.js';
 import { forgeDir } from './ledger.js';
 
 // A permission is tied to the surface's content (its hash, see surfaces.ts): a changed surface asks again.
 export interface SurfacePermission { state: 'allowed' | 'denied'; hash: string | null }
-export interface LocalState { surfaces: Record<string, SurfacePermission>; known: string[]; proposed: string[]; [key: string]: unknown }
+export interface LocalState {
+  surfaces: Record<string, SurfacePermission>; known: string[]; proposed: string[];
+  workflow?: Workflow; autonomy?: Autonomy;
+  [key: string]: unknown;
+}
 
 /** The main checkout when `root` is a linked git worktree (its common dir is `<main>/.git`), else `root` itself,
  *  also when git is unavailable. One local.yaml serves every worktree of the repository. */
@@ -41,7 +45,13 @@ export function readLocal(root: string): LocalState {
       if (p.state === 'allowed' || p.state === 'denied') surfaces[k] = { state: p.state, hash: typeof p.hash === 'string' ? p.hash : null };
     }
   }
-  return { ...o, surfaces, known: names(o.known), proposed: names(o.proposed) };
+  // workflow and autonomy (spec §5.4): a value that is not one of theirs is ignored, so config.yaml or `ask` decides.
+  const { workflow, autonomy, ...rest } = o;
+  return {
+    ...rest, surfaces, known: names(o.known), proposed: names(o.proposed),
+    ...((WORKFLOWS as readonly unknown[]).includes(workflow) ? { workflow: workflow as Workflow } : {}),
+    ...((AUTONOMIES as readonly unknown[]).includes(autonomy) ? { autonomy: autonomy as Autonomy } : {}),
+  };
 }
 
 export function writeLocal(root: string, s: LocalState): void {

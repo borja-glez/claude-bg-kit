@@ -5,8 +5,9 @@ import { loadBandModel, type Engine } from '../src/mod/files.js';
 const plan = readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8');
 
 // A fake engine over a map of absolute path -> text; directories are derived from the paths.
-function fake(root: string, files: Record<string, string>, over: Record<string, { size?: number; mtimeMs?: number }> = {}): { $: Engine; reads: string[] } {
+function fake(root: string, files: Record<string, string>, over: Record<string, { size?: number; mtimeMs?: number }> = {}): { $: Engine; reads: string[]; lists: string[] } {
   const reads: string[] = [];
+  const lists: string[] = [];
   const entries = (dir: string) => {
     const seen = new Map<string, { name: string; kind: 'file' | 'dir'; size: number; mtimeMs: number }>();
     for (const [p, text] of Object.entries(files)) {
@@ -23,13 +24,13 @@ function fake(root: string, files: Record<string, string>, over: Record<string, 
     session: { root: async () => root },
     fs: {
       read: async (p: string) => { reads.push(p); if (!(p in files)) throw new Error('ENOENT'); return files[p]; },
-      list: async (d: string) => { const e = entries(d); if (!e.length) throw new Error('ENOENT'); return e; },
+      list: async (d: string) => { lists.push(d); const e = entries(d); if (!e.length) throw new Error('ENOENT'); return e; },
       exists: async (p: string) => p in files,
       stat: async (p: string) => { if (!(p in files)) throw new Error('ENOENT'); return { mtimeMs: over[p]?.mtimeMs ?? 1 }; },
     },
     clock: { now: async () => Date.now() },
   } as unknown as Engine;
-  return { $, reads };
+  return { $, reads, lists };
 }
 
 const now = Date.now();
@@ -42,6 +43,34 @@ const pub = (id: string) => JSON.stringify({ task: id, runId: 'r1', stage: 'revi
 const base = (root: string) => ({
   [`${root}/docs/waypoint/demo-shop/plan.yaml`]: plan,
   [`${root}/.waypoint/demo-shop/session.json`]: JSON.stringify({ sessionId: 'main', track: null }),
+});
+
+describe('loadBandModel · decisions', () => {
+  const doc = () => JSON.stringify({ ts: iso(Date.now() - 60000), scope: 'r1', count: 2, autonomy: 'unattended', last: [], lastMajor: null });
+  it('reads decisions.json from the main checkout when the root is a linked worktree, and ignores the worktree own', async () => {
+    const root = '/repo-w'; const main = '/repo';
+    const { $, reads } = fake(root, {
+      ...base(root),
+      [`${root}/.git`]: `gitdir: ${main}/.git/worktrees/w\n`,
+      [`${main}/.forge/decisions.json`]: doc(),
+      [`${root}/.forge/decisions.json`]: JSON.stringify({ nope: true }),
+    });
+    expect(await loadBandModel($)).toMatchObject({ mode: 'work', auto: { count: 2, lastMajor: null } });
+    expect(reads).toContain(`${main}/.forge/decisions.json`);
+    expect(reads).not.toContain(`${root}/.forge/decisions.json`);
+  });
+  it('does not read an oversized decisions.json', async () => {
+    const root = '/repo';
+    const { $, reads } = fake(root, { ...base(root), [`${root}/.forge/decisions.json`]: doc() }, { [`${root}/.forge/decisions.json`]: { size: 17 * 1024 } });
+    expect(await loadBandModel($)).not.toHaveProperty('auto');
+    expect(reads).not.toContain(`${root}/.forge/decisions.json`);
+  });
+  it('lists the main checkout .forge once per refresh, for the execution and the decisions', async () => {
+    const root = '/repo';
+    const { $, lists } = fake(root, { ...base(root), [`${root}/.forge/execution.json`]: EXEC, [`${root}/.forge/decisions.json`]: doc() });
+    expect(await loadBandModel($)).toMatchObject({ auto: { count: 2 } });
+    expect(lists.filter(d => d === `${root}/.forge`)).toHaveLength(1);
+  });
 });
 
 describe('loadBandModel · execution files', () => {

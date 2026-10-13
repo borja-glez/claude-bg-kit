@@ -7,8 +7,8 @@ Triage by size, the right model for each role, your own tools first, independent
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.10.0](https://img.shields.io/badge/version-0.10.0-fab387?style=flat-square)
-![depends on waypoint ^0.15.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.15.0-cba6f7?style=flat-square)
+![version 0.12.0](https://img.shields.io/badge/version-0.12.0-fab387?style=flat-square)
+![depends on waypoint ^0.17.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.17.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -22,6 +22,8 @@ Triage by size, the right model for each role, your own tools first, independent
 - [Paths](#paths)
 - [Agents](#agents)
 - [The Large path](#the-large-path)
+- [With superpowers](#with-superpowers)
+- [Routing and auto mode](#routing-and-auto-mode)
 - [Execution modes](#execution-modes)
 - [Infinite mode](#infinite-mode)
 - [Proposals](#proposals)
@@ -46,7 +48,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depends on [waypoint](../waypoint/README.md) ^0.15.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
+forge depends on [waypoint](../waypoint/README.md) ^0.17.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
 
 ## Usage
 
@@ -54,8 +56,13 @@ forge depends on [waypoint](../waypoint/README.md) ^0.15.0, which is installed w
 | --- | --- |
 | `/forge:run <task>` | Triage the task and work it on the path its size calls for. |
 | `/forge:run --parallel N <task>` | Same, running up to N tasks at once on the Large path (3 by default, max 10). |
+| `/forge:run --from-spec <spec> [<task>]` | Start the Large path from a superpowers spec, imported as the design's first version. |
+| `/forge:run --superpowers-plan <plan>` | Run a superpowers plan task by task on the Medium path, with validators, review and verdict. |
+| `/forge:run --auto <task>` | Work the task in auto mode: questions only at launch, every decision recorded. |
+| `/forge:review [<base>]` | Review a branch with forge's validators and reviewers, without fixing it. |
 | `/forge:infinite [--cycles N] [--hours H]` | Unattended improvement cycles within a budget. |
 | `/forge:decide <id> approve\|reject\|comment <text>` | Decide or comment on a proposal from any session. |
+| `/forge:decisions [revert <n>]` | List what forge decided without asking, and undo one after your confirmation. |
 | `/forge:verify [surface]` | Check the work by using it (web, emulator, CLI...), or create and edit verification surfaces. |
 | `/forge:stop` | Stop the infinite run or the execution. |
 
@@ -105,6 +112,23 @@ Implementers write their report to `report-<n>.txt` and also include it in their
 
 The run's base is kept in `.forge/work/<project>/run.json`, written once after the design is approved. While a task runs, the coordinator renews a lease (`leaseUntil`, 10 minutes) on the task's state and on its own waypoint session, so parallel sessions do not recover a task that is still being worked. Besides the lease, the coordinator leaves a local signal in `.forge/live/` (see [Live signal](#live-signal)).
 
+## With superpowers
+
+forge works next to [superpowers](https://github.com/obra/superpowers) and reuses what it wrote. It finds it in `installed_plugins.json` (under `CLAUDE_CONFIG_DIR` when set); when superpowers is missing or turned off, these bridges stay quiet.
+
+- **A spec becomes the design.** `/forge:run --from-spec <spec>` (or `/waypoint:design new --from <spec>`) imports a brainstorming spec as the design's first version: same sections, «Imported from» on its page, and the pillars taken from the spec. forge recommends a critic round, then follows the Large path. Without the flag, the Large path offers once to start from a spec superpowers wrote in the last 14 days.
+- **A plan runs through forge.** `/forge:run --superpowers-plan <plan>` takes the plan's unfinished `### Task N`, in order and one at a time, on the Medium path: each one becomes a brief with its steps verbatim, goes through validators, verify, reviewers and the verdict, and its boxes are ticked when it is accepted.
+- **TDD.** With `tdd: superpowers` in `.forge/config.yaml`, every implementer brief asks the implementer to follow superpowers' `test-driven-development` skill and to report the failing run and then the passing one; the correctness reviewer flags a missing one as important.
+- **Review any branch.** `/forge:review [<base>]` reviews a branch against its base (by default, where it left the default branch): validators against a baseline of the base, correctness, security on sensitive zones and perf when asked, and a scored verdict. It never fixes or merges; it offers `/forge:run` with the findings.
+
+## Routing and auto mode
+
+**Routing.** forge puts a short rule in each new session (a `SessionStart` hook) and, on prompts that look like coding work, a one-line hint (`UserPromptSubmit`): before any other process skill, superpowers' included, the session runs `forge:route`. It triages the request, and trivial and small work go on without it. For Medium and larger work it asks once who does it: forge, superpowers, «superpowers diseña, forge construye» (brainstorming writes the spec, forge builds from it) or «superpowers planifica, forge ejecuta» (superpowers writes the plan, forge executes it); without superpowers, forge or no forge. The recommended option comes first. While superpowers designs or plans, the prompt hook reminds the session that chose the route to hand over to forge. A recent spec is recommended only when the request asks to build it. The hooks stay quiet inside forge's own executions and infinite runs, and with `workflow: superpowers` or `workflow: off`.
+
+**Preferences.** `workflow:` (`ask`, `forge`, `superpowers`, `superpowers-design`, `superpowers-plan`, or `off` for no forge) and `autonomy:` (`ask`, `auto`) go in `.forge/config.yaml` (the team's) or `.forge/local.yaml` (yours: `forge local set workflow <w>|none`, `forge local set autonomy ask|auto|none`). What the request says wins, then `local.yaml`, then `config.yaml`, then `ask`; `forge prefs` prints the result and where each value came from.
+
+**Auto mode.** With `autonomy: auto`, `/forge:run --auto` or a request that says so, forge asks only at launch, in one message: changes in the tree that are not the task's, whether to merge the run branch at the end (Large), and the budget (infinite mode). Then it decides alone and records each decision (`triage --autonomy auto`, `swarm start --autonomy auto`): the route, raising the path, applying the critic's critical and major proposals (up to 3 rounds), approving the design when `waypoint design-gate` allows it, confirming the plan and choosing the mode. Any other doubt becomes a question note and the safe path. It never merges into main without the launch answer, pushes, deletes, publishes beyond the private roadmap, touches changes that are not the task's or surface permissions, starts infinite mode without a budget, closes escalations or decides proposals outside the policy. In infinite mode with auto, a Large task is designed, approved and planned on the infinite branch instead of being blocked.
+
 ## Execution modes
 
 <p align="center"><img src="../../docs/assets/swarm.en.svg" alt="A coordinator session on the run branch forge/run-<project> launches an implementer subagent per ready task, each in its own task worktree; tasks are integrated into the run branch one at a time and merged into your branch at the end" width="100%"></p>
@@ -136,7 +160,9 @@ Sequential execution is not a third mode: it is subagents with N = 1.
 
 **Resume and handover.** `claude --resume` of the coordinator or of an executor receives the execution's context on SessionStart. A new session takes over from the coordinator only when it is stopped (`swarm takeover`); otherwise it joins as a manual member. A run member cannot take over. If the run branch is behind its base, `swarm start` brings it up to date (`baseSync`: `created`, `up-to-date`, `fast-forward` or `merged`); on a conflict it refuses and nothing is lost.
 
-**Unattended.** In `/forge:infinite`, under `/goal` and in run members, forge does not ask. It leaves question notes on the roadmap and records every decision with `forge log --kind decision`.
+**Unattended.** In `/forge:infinite`, under `/goal` and in run members, forge does not ask. It leaves question notes on the roadmap and records every decision it takes in your place.
+
+**Decisions.** Each decision forge takes without asking is recorded with what it chose, the alternatives, why and how to undo it (`forge decision add`). With a roadmap it also appears there as a decision note tagged **auto**. Without one it goes to `docs/forge/decisions/<scope>.md`, committed with the work. Every final report ends with an «Automatic decisions» section, lens and the band show how many there were in the last day, and `/forge:decisions revert <n>` undoes one (a `git revert` of its commits, reopening the design, removing the plan tasks it added that have not started, or deleting its branch) after asking you.
 
 **Requests during an execution.** New work lives on the run branch, not on your branch. In the coordinator session, a Trivial or Small request you want now is done in the run worktree with its own commit (or becomes a task that depends on the running one if the files overlap); a Medium request becomes a new plan task that the next tick starts; a Large one or a new block gets its own design and plan without stopping the execution; questions are answered in the session, and what must stay goes as a roadmap note. In another session the same rules apply as a manual member.
 
@@ -232,6 +258,9 @@ verify:
   limits: { checks: 8, shots: 10, minutes: 10 }   # optional; these are the defaults
 evidence: upload               # upload | local; default upload
 validatorTimeoutSec: 600
+tdd: off                       # off | superpowers: implementers follow superpowers' TDD skill
+workflow: ask                  # ask | forge | superpowers | superpowers-design | superpowers-plan | off
+autonomy: ask                  # ask | auto
 swarm:
   parallel: 3                  # tasks at once; 1 runs one at a time; max 10
   mode: subagents              # optional: subagents | sessions
@@ -282,13 +311,30 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 <details>
 <summary><b>Tasks and review</b></summary>
 
-- `triage [--task id] [--batch] (<text> | --text-file f)` - classify a task: path, files, sensitive zones, validators and the `implementer` (role, agent, self, why). `--batch` marks one request of several, so a Trivial one goes to `mech`. `--text-file` reads the text from a file, so it never goes through a shell.
+- `triage [--task id] [--batch] [--autonomy auto|ask] (<text> | --text-file f)` - classify a task: path, files, sensitive zones, validators and the `implementer` (role, agent, self, why). `--batch` marks one request of several, so a Trivial one goes to `mech`. `--text-file` reads the text from a file, so it never goes through a shell. `--autonomy auto` records that the task runs in auto mode.
 - `triage --plan p --task T` - triage a plan task from its zones and `done_when`; it prints the `implementer` too.
 - `brief --plan p --task T [--design d]` - print a task brief built from a waypoint plan task, including the `Commit title prefix` line that implementers use.
+- `brief --superpowers-plan f --task N` - print the brief of task N of a superpowers plan: the plan's header and global constraints, the task's body verbatim and the rules forge adds (plus the TDD line with `tdd: superpowers`).
+- `triage --task id --superpowers-plan f` - triage a superpowers plan from its pending tasks and their files; the path is always Medium.
+- `sp-plan tasks <f>` - a superpowers plan's header and tasks (`n`, `title`, `files`, `steps`, `done`).
+- `sp-plan check <f> --task N` - tick the boxes of task N only (never inside code), keeping the file's line endings.
+- `sp-specs` / `sp-plans` - the specs (not imported yet) and the plans (with tasks left) superpowers wrote here in the last 14 days, 3 at most.
+- `sp-path <skill>` - the `SKILL.md` of a superpowers skill, or `null` when superpowers is not installed for this project.
+- `tdd` - the config's `tdd`, whether superpowers is installed, and the TDD line briefs carry (`null` when off or not installed).
+- `prefs [--workflow w] [--autonomy a]` - the resolved `workflow` and `autonomy`, and where each came from (`request`, `local`, `config`, `default`).
+- `route --task id --path p [--workflow w] [--autonomy a] [--run-plan] [--build-spec]` - the routing options, superpowers and its recent specs and plans, and the recommended option. `--run-plan` and `--build-spec` say the request asks to carry out an existing plan or build an existing spec.
+- `route set --task id --chosen o --by user|auto [--spec f] [--plan f] [--session s]` - keep the chosen route in `.forge/route.json` and record the `route` decision; only the session `--session` names is reminded of it.
+- `route stage --stage s [--task id] [--spec f] [--plan f]` - move a pending route on (`designing`, `planning`, `handed-off`, `done`).
+- `hook route-session` / `hook route-prompt` - the routing hooks (SessionStart, UserPromptSubmit); they print nothing on any error.
+- `local set workflow <w>|none` / `local set autonomy ask|auto|none` - your own preferences in `.forge/local.yaml`.
 - `validate [--affected a,b | --all] [--path trivial|small|medium|large] [--base sha] [--final] [--task id] [--base-run | --baseline f]` - run the project validators that apply (see Matching); `--base` gives the diff that e2e `affects` are matched against, `--final` selects the final review's set. `--base-run` marks a run on the base commit, before any change; `--baseline f` takes that run's JSON and marks a failure the base already had `preexisting`, which neither the exit code nor the verdict counts. A test runner that finds no tests passes as `skipped: "no-tests"`.
 - `verdict --task id --dir d [--validators f] [--sensitive] [--perf]` - weigh the reviewers' JSON files into a score. A reviewer is listed with `invalid: true` when its output was unusable (`dropped: 0`, counted as an abstention) or when some of its findings were dropped (`dropped` > 0; the review keeps its verdict and still scores, and the skill records the dropped findings as a ruling).
 - `round --task id --path medium|large` - decide the next step of the review loop (`done`, `resume`, `fresh-stronger`, `redo`, `breaker`, `stalled`; `tierUp` from round 3).
-- `log --kind k [--task id] [--data json | --data-file f]` - append to the ledger; `--kind decision` records a decision made unattended.
+- `log --kind k [--task id] [--data json | --data-file f]` - append to the ledger.
+- `decision add --data-file f [--task id]` - record a decision forge took (strict JSON: `point`, `what`, `chosen`, `why`, `by`, optional `alternatives`, `weight`, `revert`, `undo`, `safePath`, `revertOf`, `task`, `runId`); prints it with its number `n` and keeps `.forge/decisions.json`, the summary lens and the band read. During an active execution it carries the run's id.
+- `decision list [--task id] [--run id] [--since iso] [--all] [--auto]` - the decisions, numbered; with no filter, those of the latest scope. `--auto` leaves out your own answers.
+- `decision show <n>` - one decision, with its `undo`.
+- `decision md --scope s [--out f] [--locale es|en]` - write the automatic decisions of a scope to `docs/forge/decisions/<scope>.md` (or `--out`); writes nothing when there are none.
 - `last --task id` - the path, last phase event, last verdict and last round of a task.
 - `agents` - agent names for the active profile.
 - `surfaces [learn --name N --notes-file F [--heading H] | proposed --name N]` - list the surfaces and detected drafts; append notes to a surface's `Learned` section; mark a draft as proposed.

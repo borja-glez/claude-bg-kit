@@ -20,7 +20,7 @@ export type LensPanel = {
   forge: {
     task: string; path: string; phase: string; agent: string | null; validators: { name: string; ok: boolean }[];
     verdict: { action: string; score: number | null } | null; round: number | null; cap: number | null;
-    brief: number | null; accepted: number[]; briefs: number | null;
+    brief: number | null; accepted: number[]; briefs: number | null; autonomy?: 'auto';
     verify?: {
       planned: boolean; surfaces: string[]; result: string | null; passed: number | null; total: number | null;
       evidence: string | null; reason: string | null;
@@ -28,6 +28,7 @@ export type LensPanel = {
     timing?: { taskSeconds: number | null; done: boolean; stages: { name: string; seconds: number; live: boolean }[] } | null;
   } | null;
   infinite: { cycle: number; cyclesMax: number | null; hoursLeft: number | null; active: boolean; autoApproved: string[] } | null;
+  decisions: { count: number; autonomy: 'auto' | 'unattended'; lastMajor: string | null } | null;
   execution: {
     runId: string; mode: 'subagents' | 'sessions'; parallel: number; branch: string; active: boolean;
     stopReason: string | null; stallReason: string | null;

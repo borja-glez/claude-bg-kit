@@ -1,3 +1,5 @@
+import type { DecisionPoint } from './decisions.js';
+
 export type TaskStatus = 'free' | 'claimed' | 'in_progress' | 'blocked' | 'done' | 'orphaned';
 export type PlanStatus = 'committed' | 'provisional';
 export const TRACK_COLORS = ['blue', 'mauve', 'teal', 'pink', 'sky', 'flamingo'] as const;
@@ -135,6 +137,10 @@ export interface InfiniteDoc {
 export interface PhaseDoc { id: string; name: string; plan_status: PlanStatus; order: number; tasks: PlanTask[] }
 
 export type NoteType = 'decision' | 'idea' | 'debt' | 'question';
+/** The structured part of a note forge wrote for a decision it took without asking (always `auto: true`). */
+export interface NoteDecision {
+  point: DecisionPoint; what: string; chosen: string; alternatives?: string[]; why: string; revert?: string; auto: true;
+}
 export interface NoteDoc {
   ts: string;
   type: NoteType;
@@ -145,4 +151,5 @@ export interface NoteDoc {
   answeredBy?: string;
   answeredAt?: string;
   proposalId?: string;
+  decision?: NoteDecision;
 }

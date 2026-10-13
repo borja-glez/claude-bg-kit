@@ -7,8 +7,8 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.10.0](https://img.shields.io/badge/versi%C3%B3n-0.10.0-fab387?style=flat-square)
-![depende de waypoint ^0.15.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.15.0-cba6f7?style=flat-square)
+![versión 0.12.0](https://img.shields.io/badge/versi%C3%B3n-0.12.0-fab387?style=flat-square)
+![depende de waypoint ^0.17.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.17.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -22,6 +22,8 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 - [Caminos](#caminos)
 - [Agentes](#agentes)
 - [El camino Large](#el-camino-large)
+- [Con superpowers](#con-superpowers)
+- [Enrutado y modo auto](#enrutado-y-modo-auto)
 - [Modos de ejecución](#modos-de-ejecución)
 - [Modo infinito](#modo-infinito)
 - [Propuestas](#propuestas)
@@ -46,7 +48,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depende de [waypoint](../waypoint/README.es.md) ^0.15.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
+forge depende de [waypoint](../waypoint/README.es.md) ^0.17.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
 
 ## Uso
 
@@ -54,8 +56,13 @@ forge depende de [waypoint](../waypoint/README.es.md) ^0.15.0, que se instala co
 | --- | --- |
 | `/forge:run <tarea>` | Hace el triaje de la tarea y la trabaja por el camino que pide su tamaño. |
 | `/forge:run --parallel N <tarea>` | Lo mismo, ejecutando hasta N tareas a la vez en el camino Large (3 por defecto, máximo 10). |
+| `/forge:run --from-spec <spec> [<tarea>]` | Empieza el camino Large desde un spec de superpowers, importado como primera versión del diseño. |
+| `/forge:run --superpowers-plan <plan>` | Ejecuta un plan de superpowers tarea a tarea por el camino Medium, con validadores, revisión y veredicto. |
+| `/forge:run --auto <tarea>` | Trabaja la tarea en modo auto: preguntas solo al arrancar y cada decisión anotada. |
+| `/forge:review [<base>]` | Revisa una rama con los validadores y revisores de forge, sin arreglar nada. |
 | `/forge:infinite [--cycles N] [--hours H]` | Ciclos de mejora desatendidos dentro de un presupuesto. |
 | `/forge:decide <id> approve\|reject\|comment <texto>` | Decide o comenta una propuesta desde cualquier sesión. |
+| `/forge:decisions [revert <n>]` | Lista lo que forge decidió sin preguntar y deshace una decisión tras tu confirmación. |
 | `/forge:verify [superficie]` | Comprueba el trabajo usándolo (web, emulador, CLI...), o crea y edita superficies de verificación. |
 | `/forge:stop` | Para la ejecución infinita o la ejecución en paralelo. |
 
@@ -105,6 +112,23 @@ Los implementadores escriben su informe en `report-<n>.txt` y también lo incluy
 
 La base de la ejecución se guarda en `.forge/work/<proyecto>/run.json`, que se escribe una vez tras aprobar el diseño. Mientras una tarea corre, la coordinadora renueva una concesión (`leaseUntil`, 10 minutos) en el estado de la tarea y en su propia sesión de waypoint, para que las sesiones en paralelo no le quiten una tarea que sigue en marcha. Además de la concesión, la coordinadora deja una señal local en `.forge/live/` (mira [Señal en vivo](#señal-en-vivo)).
 
+## Con superpowers
+
+forge trabaja junto a [superpowers](https://github.com/obra/superpowers) y aprovecha lo que ya escribió. Lo encuentra en `installed_plugins.json` (bajo `CLAUDE_CONFIG_DIR` si está definida); si superpowers no está o está desactivado, estos puentes no hacen nada.
+
+- **Un spec se convierte en el diseño.** `/forge:run --from-spec <spec>` (o `/waypoint:design new --from <spec>`) importa un spec de brainstorming como primera versión del diseño: las mismas secciones, «Importado de» en su página y los pilares sacados del spec. forge recomienda una ronda del crítico y sigue por el camino Large. Sin el flag, el camino Large ofrece una vez partir de un spec que superpowers escribió en los últimos 14 días.
+- **Un plan pasa por forge.** `/forge:run --superpowers-plan <plan>` toma las `### Task N` sin terminar del plan, en orden y de una en una, por el camino Medium: cada una se convierte en un brief con sus pasos literales, pasa por validadores, verify, revisores y veredicto, y sus casillas se marcan al aceptarse.
+- **TDD.** Con `tdd: superpowers` en `.forge/config.yaml`, cada brief de implementador pide seguir la skill `test-driven-development` de superpowers e informar de la ejecución en rojo y después de la ejecución en verde; el revisor de corrección marca como importante que falte.
+- **Revisar cualquier rama.** `/forge:review [<base>]` revisa una rama contra su base (por defecto, donde salió de la rama principal): validadores contra una línea base de la base, corrección, seguridad en zonas sensibles y rendimiento si se pide, y un veredicto puntuado. Nunca arregla ni integra; ofrece `/forge:run` con los hallazgos.
+
+## Enrutado y modo auto
+
+**Enrutado.** forge pone una regla corta en cada sesión nueva (un hook `SessionStart`) y, en los prompts que parecen trabajo de código, una pista de una línea (`UserPromptSubmit`): antes que cualquier otra skill de proceso, incluidas las de superpowers, la sesión ejecuta `forge:route`. Hace el triaje de la petición, y el trabajo trivial y pequeño sigue sin ella. Para el trabajo Medium o mayor pregunta una vez quién lo hace: forge, superpowers, «superpowers diseña, forge construye» (brainstorming escribe el spec y forge construye a partir de él) o «superpowers planifica, forge ejecuta» (superpowers escribe el plan y forge lo ejecuta); sin superpowers, forge o sin forge. La opción recomendada va primero. Mientras superpowers diseña o planifica, el hook de prompts recuerda a la sesión que eligió la ruta que pase el relevo a forge. Un spec reciente solo se recomienda cuando la petición pide construirlo. Los hooks callan dentro de las ejecuciones y del modo infinito de forge, y con `workflow: superpowers` o `workflow: off`.
+
+**Preferencias.** `workflow:` (`ask`, `forge`, `superpowers`, `superpowers-design`, `superpowers-plan`, u `off` para no usar forge) y `autonomy:` (`ask`, `auto`) van en `.forge/config.yaml` (las del equipo) o en `.forge/local.yaml` (las tuyas: `forge local set workflow <w>|none`, `forge local set autonomy ask|auto|none`). Gana lo que dice la petición, luego `local.yaml`, luego `config.yaml` y luego `ask`; `forge prefs` imprime el resultado y de dónde sale cada valor.
+
+**Modo auto.** Con `autonomy: auto`, `/forge:run --auto` o una petición que lo dice, forge pregunta solo al arrancar, en un único mensaje: los cambios del árbol que no son de la tarea, si integra la rama de ejecución al acabar (Large) y el presupuesto (modo infinito). Después decide solo y anota cada decisión (`triage --autonomy auto`, `swarm start --autonomy auto`): el enrutado, subir de camino, aplicar las propuestas critical y major del crítico (hasta 3 rondas), aprobar el diseño cuando `waypoint design-gate` lo permite, confirmar el plan y elegir el modo. Cualquier otra duda se convierte en una nota-pregunta y en el camino seguro. Nunca integra en main sin la respuesta del arranque, no hace push, no borra, no publica más allá del roadmap privado, no toca cambios ajenos a la tarea ni permisos de superficies, no arranca el infinito sin presupuesto, no cierra escalados ni decide propuestas fuera de la política. En el modo infinito con auto, una tarea Large se diseña, se aprueba y se planifica en la rama del infinito en lugar de bloquearse.
+
 ## Modos de ejecución
 
 <p align="center"><img src="../../docs/assets/swarm.es.svg" alt="Una coordinadora en la rama de ejecución forge/run-<proyecto> lanza un subagente implementador por tarea lista, cada uno en su worktree de tarea; las tareas se integran en la rama de ejecución de una en una y se fusionan en tu rama al final" width="100%"></p>
@@ -136,7 +160,9 @@ La ejecución secuencial no es un tercer modo: es subagents con N = 1.
 
 **Retomar y relevo.** `claude --resume` de la coordinadora o de una ejecutora recibe el contexto de la ejecución en SessionStart. Una sesión nueva toma el relevo de la coordinadora solo si está parada (`swarm takeover`); si no, se une como manual. Un miembro de la ejecución no puede tomar el relevo. Si la rama de ejecución se ha quedado atrás respecto a su base, `swarm start` la pone al día (`baseSync`: `created`, `up-to-date`, `fast-forward` o `merged`); ante un conflicto se niega y no se pierde nada.
 
-**Desatendido.** En `/forge:infinite`, bajo `/goal` y en los miembros de la ejecución, forge no pregunta. Deja notas-pregunta en el roadmap y registra cada decisión con `forge log --kind decision`.
+**Desatendido.** En `/forge:infinite`, bajo `/goal` y en los miembros de la ejecución, forge no pregunta. Deja notas-pregunta en el roadmap y registra cada decisión que toma en tu lugar.
+
+**Decisiones.** Cada decisión que forge toma sin preguntar queda registrada con lo que eligió, las alternativas, el porqué y cómo deshacerla (`forge decision add`). Con roadmap aparece también allí como nota de decisión con la etiqueta **auto**; sin roadmap va a `docs/forge/decisions/<ámbito>.md`, commiteado con el trabajo. Cada informe final acaba con una sección «Decisiones automáticas», lens y la banda enseñan cuántas hubo en el último día, y `/forge:decisions revert <n>` deshace una (un `git revert` de sus commits, reabrir el diseño, quitar las tareas del plan que añadió y no han empezado, o borrar su rama) tras preguntarte.
 
 **Peticiones durante una ejecución.** El trabajo nuevo vive en la rama de ejecución, no en tu rama. En la sesión coordinadora, una petición Trivial o Small que quieres ya se hace en el worktree de la ejecución con su propio commit (o pasa a ser una tarea que depende de la que corre si los ficheros se solapan); una Medium pasa a ser una tarea nueva del plan que el siguiente tick arranca; una Large o un bloque nuevo tiene su propio diseño y plan sin parar la ejecución; las preguntas se responden en la sesión, y lo que debe quedar va como nota del roadmap. En otra sesión valen las mismas reglas como miembro manual.
 
@@ -232,6 +258,9 @@ verify:
   limits: { checks: 8, shots: 10, minutes: 10 }   # opcional; estos son los valores por defecto
 evidence: upload               # upload | local; por defecto upload
 validatorTimeoutSec: 600
+tdd: off                       # off | superpowers: los implementadores siguen la skill de TDD de superpowers
+workflow: ask                  # ask | forge | superpowers | superpowers-design | superpowers-plan | off
+autonomy: ask                  # ask | auto
 swarm:
   parallel: 3                  # tareas a la vez; 1 ejecuta una cada vez; máximo 10
   mode: subagents              # opcional: subagents | sessions
@@ -282,13 +311,30 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 <details>
 <summary><b>Tareas y revisión</b></summary>
 
-- `triage [--task id] [--batch] (<texto> | --text-file f)` - clasifica una tarea: camino, ficheros, zonas sensibles, validadores y el `implementer` (rol, agente, self, why). `--batch` marca una petición de varias, así que una Trivial va a `mech`. `--text-file` lee el texto de un fichero, para que nunca pase por un shell.
+- `triage [--task id] [--batch] [--autonomy auto|ask] (<texto> | --text-file f)` - clasifica una tarea: camino, ficheros, zonas sensibles, validadores y el `implementer` (rol, agente, self, why). `--batch` marca una petición de varias, así que una Trivial va a `mech`. `--text-file` lee el texto de un fichero, para que nunca pase por un shell. `--autonomy auto` anota que la tarea va en modo auto.
 - `triage --plan p --task T` - hace el triaje de una tarea del plan a partir de sus zonas y su `done_when`; imprime también el `implementer`.
 - `brief --plan p --task T [--design d]` - imprime el brief de una tarea del plan de waypoint, con la línea `Commit title prefix` que usan los implementadores.
+- `brief --superpowers-plan f --task N` - imprime el brief de la tarea N de un plan de superpowers: la cabecera y las restricciones globales del plan, el cuerpo literal de la tarea y las reglas que añade forge (y la línea TDD con `tdd: superpowers`).
+- `triage --task id --superpowers-plan f` - clasifica un plan de superpowers por sus tareas pendientes y sus ficheros; el camino es siempre Medium.
+- `sp-plan tasks <f>` - la cabecera y las tareas de un plan de superpowers (`n`, `title`, `files`, `steps`, `done`).
+- `sp-plan check <f> --task N` - marca solo las casillas de la tarea N (nunca dentro de código), con los finales de línea del fichero como estaban.
+- `sp-specs` / `sp-plans` - los specs (aún sin importar) y los planes (con tareas pendientes) que superpowers escribió aquí en los últimos 14 días, 3 como mucho.
+- `sp-path <skill>` - el `SKILL.md` de una skill de superpowers, o `null` si superpowers no está instalado para este proyecto.
+- `tdd` - el `tdd` de la configuración, si superpowers está instalado y la línea TDD que llevan los briefs (`null` si está en `off` o no está instalado).
+- `prefs [--workflow w] [--autonomy a]` - el `workflow` y la `autonomy` que se aplican, y de dónde sale cada uno (`request`, `local`, `config`, `default`).
+- `route --task id --path p [--workflow w] [--autonomy a] [--run-plan] [--build-spec]` - las opciones de enrutado, superpowers y sus specs y planes recientes, y la opción recomendada. `--run-plan` y `--build-spec` dicen que la petición pide ejecutar un plan o construir un spec que ya existen.
+- `route set --task id --chosen o --by user|auto [--spec f] [--plan f] [--session s]` - guarda la ruta elegida en `.forge/route.json` y anota la decisión `route`; solo la sesión que nombra `--session` recibe su recordatorio.
+- `route stage --stage s [--task id] [--spec f] [--plan f]` - avanza una ruta pendiente (`designing`, `planning`, `handed-off`, `done`).
+- `hook route-session` / `hook route-prompt` - los hooks de enrutado (SessionStart, UserPromptSubmit); ante cualquier error no imprimen nada.
+- `local set workflow <w>|none` / `local set autonomy ask|auto|none` - tus preferencias en `.forge/local.yaml`.
 - `validate [--affected a,b | --all] [--path trivial|small|medium|large] [--base sha] [--final] [--task id] [--base-run | --baseline f]` - ejecuta los validadores del proyecto que tocan (ver Coincidencias); `--base` da el diff contra el que se casan los `affects` de e2e, `--final` elige el conjunto de la revisión final. `--base-run` marca una ejecución sobre el commit base, antes de cualquier cambio; `--baseline f` toma el JSON de esa ejecución y marca `preexisting` un fallo que la base ya tenía, que no cuenta ni en el código de salida ni en el veredicto. Un runner de tests que no encuentra tests pasa como `skipped: "no-tests"`.
 - `verdict --task id --dir d [--validators f] [--sensitive] [--perf]` - pondera los JSON de los revisores en una nota. Un revisor aparece con `invalid: true` si su salida no servía (`dropped: 0`, cuenta como abstención) o si se descartaron algunos de sus hallazgos (`dropped` > 0; la revisión mantiene su veredicto y puntúa, y la skill registra los hallazgos descartados como resolución).
 - `round --task id --path medium|large` - decide el siguiente paso del bucle de revisión (`done`, `resume`, `fresh-stronger`, `redo`, `breaker`, `stalled`; `tierUp` desde la ronda 3).
-- `log --kind k [--task id] [--data json | --data-file f]` - añade una entrada al registro; `--kind decision` registra una decisión tomada sin supervisión.
+- `log --kind k [--task id] [--data json | --data-file f]` - añade una entrada al registro.
+- `decision add --data-file f [--task id]` - registra una decisión de forge (JSON estricto: `point`, `what`, `chosen`, `why`, `by` y, si hace falta, `alternatives`, `weight`, `revert`, `undo`, `safePath`, `revertOf`, `task`, `runId`); la imprime con su número `n` y mantiene `.forge/decisions.json`, el resumen que leen lens y la banda. Con una ejecución activa lleva su id.
+- `decision list [--task id] [--run id] [--since iso] [--all] [--auto]` - las decisiones numeradas; sin filtro, las del último ámbito. `--auto` deja fuera tus propias respuestas.
+- `decision show <n>` - una decisión, con su `undo`.
+- `decision md --scope s [--out f] [--locale es|en]` - escribe las decisiones automáticas de un ámbito en `docs/forge/decisions/<ámbito>.md` (o en `--out`); no escribe nada si no hay ninguna.
 - `last --task id` - el camino, el último evento de fase, el último veredicto y la última ronda de una tarea.
 - `agents` - los nombres de los agentes del perfil activo.
 - `surfaces [learn --name N --notes-file F [--heading H] | proposed --name N]` - lista las superficies y los borradores detectados; añade notas a la sección `Aprendido` de una superficie; marca un borrador como propuesto.

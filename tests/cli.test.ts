@@ -7,6 +7,7 @@ import { run, isCommitCommand, type Io } from '../src/cli/run.js';
 import { parsePlan } from '../src/lib/plan.js';
 import { launchRun, HERDR_TEMPLATE } from '../src/lib/launcher.js';
 import { planHash } from '../src/lib/sync.js';
+import { parseDesign } from '../src/lib/design.js';
 
 const FIXTURE = new URL('./fixtures/plan.yaml', import.meta.url);
 let dir: string;
@@ -804,5 +805,47 @@ tasks:
     expect(JSON.parse(next('--base', 'main').stdout).task.id).toBe('B1');
     expect(next('--base', '-x').code).toBe(2);
     expect(next('--base').code).toBe(2);
+  });
+});
+
+describe('design-import', () => {
+  it('imports a spec into a new design.md, never overwrites one and checks its arguments', () => {
+    mkdirSync(path.join(dir, 'docs', 'superpowers', 'specs'), { recursive: true });
+    writeFileSync(path.join(dir, 'docs/superpowers/specs/s.md'), '# Cart totals — design\n\n## Purpose\n\nShow totals.\n\n## Scope\n\nx\n');
+    const args = ['design-import', 'docs/superpowers/specs/s.md', '--project', 'cart', '--locale', 'en', '--out', 'docs/waypoint/cart/design.md'];
+    const r = run(args, io);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ title: 'Cart totals', sections: 2, source: 'docs/superpowers/specs/s.md' });
+    const d = parseDesign(readFileSync(path.join(dir, 'docs/waypoint/cart/design.md'), 'utf8'));
+    expect(d.meta).toMatchObject({ project: 'cart', status: 'draft', summary: 'Show totals.', source: 'docs/superpowers/specs/s.md' });
+    expect(run(['design-validate', 'docs/waypoint/cart/design.md'], io).code).toBe(0);
+    expect(run(args, io).code).toBe(2);
+    expect(run(['design-import', 'docs/superpowers/specs/s.md', '--project', '..', '--out', 'o1.md'], io).code).toBe(2);
+    expect(run(['design-import', 'missing.md', '--project', 'cart', '--out', 'o2.md'], io).code).toBe(2);
+    expect(run(['design-import', 'docs/superpowers/specs/s.md', '--out', 'o4.md'], io).code).toBe(2);
+    // A design the import would make invalid (an empty locale) is refused like any bad argument, and nothing is written.
+    expect(run(['design-import', 'docs/superpowers/specs/s.md', '--project', 'cart2', '--locale', '', '--out', 'o5.md'], io).code).toBe(2);
+    expect(existsSync(path.join(dir, 'o5.md'))).toBe(false);
+    writeFileSync(path.join(dir, 'flat.md'), '# Only a title\n\ntext\n');
+    expect(run(['design-import', 'flat.md', '--project', 'cart', '--out', 'o3.md'], io).code).toBe(2);
+    expect(existsSync(path.join(dir, 'o3.md'))).toBe(false);
+  });
+});
+
+describe('design-gate', () => {
+  it('prints the gate from the changelog and the critiques, and refuses a missing design argument', () => {
+    const d = path.join(dir, 'docs', 'waypoint', 'demo-shop');
+    mkdirSync(path.join(d, 'design'), { recursive: true });
+    copyFileSync(new URL('./fixtures/design.md', import.meta.url), path.join(d, 'design.md'));
+    writeFileSync(path.join(d, 'design', 'changelog.json'), JSON.stringify([{ version: 1, date: '2026-10-13', note: 'v1', words: 10, round: 0 }]));
+    const rel = 'docs/waypoint/demo-shop/design.md';
+    expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ version: 1, rounds: 0, canAutoApprove: false });
+    const local = path.join(dir, '.waypoint', 'demo-shop');
+    mkdirSync(local, { recursive: true });
+    writeFileSync(path.join(local, 'critique-r1.json'), JSON.stringify({ round: 1, version: 1, scope: 'full', proposals: [{ n: 1, category: 'gap', severity: 'major', section: '_intro', problem: 'p', change: 'c' }] }));
+    expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ rounds: 1, latestRound: 1, canAutoApprove: true });
+    writeFileSync(path.join(local, 'critique-r2.json'), 'not json');
+    expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ rounds: 1, latestRound: 2, invalid: [2], canAutoApprove: false });
+    expect(run(['design-gate'], io).code).toBe(2);
   });
 });

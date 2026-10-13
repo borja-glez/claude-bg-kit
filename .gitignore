@@ -4,3 +4,4 @@ node_modules/
 plugins/waypoint/.claude-plugin/types/
 plugins/lens/.claude-plugin/types/
 docs/superpowers/
+scripts/route-eval/results/

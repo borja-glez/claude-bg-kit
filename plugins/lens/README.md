@@ -7,7 +7,7 @@ The model and effort in use, the roadmap, forge stages and executions, superpowe
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.10.0](https://img.shields.io/badge/version-0.10.0-b4befe?style=flat-square)
+![version 0.11.0](https://img.shields.io/badge/version-0.11.0-b4befe?style=flat-square)
 ![no token cost](https://img.shields.io/badge/token%20cost-none-a6e3a1?style=flat-square)
 
 </div>
@@ -76,7 +76,7 @@ Each section is a card in its own colour (the roadmap's Catppuccin palette) and 
 - a verify row when the task was verified: the surfaces used, checks passed out of total, and the result (pass, fail or blocked);
 - the last validators (✓/✗), the verdict with its score, and the review round against its cap.
 
-Below the stages it lists up to 5 pending proposals, each as `title · category · risk` with **Approve** and **Reject** buttons that run `/forge:decide`. While a `/forge:infinite` run is active, the card also shows `∞ N/M · Hh left` and the 3 newest auto-approved proposals.
+Below the stages it lists up to 5 pending proposals, each as `title · category · risk` with **Approve** and **Reject** buttons that run `/forge:decide`. While a `/forge:infinite` run is active, the card also shows `∞ N/M · Hh left` and the 3 newest auto-approved proposals. When forge decided something without asking in the last day, the card also shows `⚑ N automatic decisions` and the last major one (`/forge:decisions` lists them). When the task runs in auto mode, the card's subtitle says so (auto mode).
 
 ## Usage and cost
 

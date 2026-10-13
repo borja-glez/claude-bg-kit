@@ -12,6 +12,7 @@ Input from the caller: the brief file path (your requirements, exact values verb
 
 1. Read the brief. If something blocks you, write the question to the report and stop with status NEEDS_CONTEXT.
 2. Implement exactly the brief. Where there is logic, write the failing test first, then the code.
+   When the brief has a `TDD: required` line, read the skill it names and follow it for every change with logic, and put in your report the failing run of the new tests (the command and the lines that show the failure) and then the passing run.
 3. Run `FORGE validate --affected <files you changed, comma-separated> --task <task id>` and fix until it passes. Do not weaken or skip tests to pass.
 4. Commit with a title-only message (start it with the `Commit title prefix` line of the brief when it has one; no co-author lines, no mention of AI or sessions). Never push, never merge, never delete branches.
 5. Write the report (<= 300 words) to the report path you were given; it ends in `.txt` (subagents cannot write `.md` files here). Content: what changed, files, the validate result, anything you are unsure of. If the write fails, carry on: the report also goes in your reply.

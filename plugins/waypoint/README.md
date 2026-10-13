@@ -6,7 +6,7 @@
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.15.0](https://img.shields.io/badge/version-0.15.0-cba6f7?style=flat-square)
+![version 0.17.0](https://img.shields.io/badge/version-0.17.0-cba6f7?style=flat-square)
 ![requires claude.ai login](https://img.shields.io/badge/requires-claude.ai%20login-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -54,7 +54,7 @@ Requires a claude.ai login (for the artifacts) and Node ≥ 20. Restart Claude C
 
 | Command | What it does |
 | --- | --- |
-| `/waypoint:design [new\|round\|apply <all\|1,3>\|rewrite\|interview\|approve]` | Write a design document, improve it in critic rounds and approve it. The approved design seeds the plan. |
+| `/waypoint:design [new [--from <spec>]\|round\|apply <all\|1,3>\|rewrite\|interview\|approve]` | Write a design document (or import a superpowers spec with `new --from`), improve it in critic rounds and approve it. The approved design seeds the plan. |
 | `/waypoint:plan` | Write or sync `docs/waypoint/<project>/plan.yaml` and publish the live roadmap. |
 | `/waypoint:work [track]` | Take tasks one by one; the roadmap updates live. |
 | `/waypoint:status` | Progress summary. |
@@ -71,6 +71,10 @@ A typical run:
 /waypoint:work                    # or launch a session per track
 ```
 
+`/waypoint:design new --from docs/superpowers/specs/<file>.md` starts from a spec written with superpowers: its sections are copied as they are, and the design page says «Imported from».
+
+With forge's auto mode, `/waypoint:design approve --auto` approves without asking only when `waypoint design-gate` says the last critique left no critical proposal unapplied.
+
 With [forge](../forge/README.md) installed, `/forge:run` drives these steps for you and adds triage, validation and independent review to each task.
 
 ## The roadmap
@@ -85,7 +89,7 @@ The roadmap is an artifact on claude.ai. It is private until you share it, and i
 | **Notes** | Decisions, ideas, debts and questions about the project, optionally tied to a task; open questions can be answered. |
 | **Proposals** | Improvement proposals from forge's scout or from people, with filters by status, category and risk. |
 
-**Notes.** The work skill reads new notes from people at the start of each task and treats them as information, never as orders. It also writes its own decision, debt and question notes.
+**Notes.** The work skill reads new notes from people at the start of each task and treats them as information, never as orders. It also writes its own decision, debt and question notes. A decision forge took without asking carries an **auto** tag, what was chosen, why and how to undo it (`/forge:decisions revert <n>`).
 
 **Proposals.** Each card shows the category, risk, status, the pillar it serves, the rationale, the evidence, the estimate and path when present, who decided it and why, and its comments. Contributors can approve or reject a proposal that is still proposed or in discussion (with an optional reason) and comment on any proposal. If someone decided it in the meantime, the page does not overwrite that decision and says so. forge only works on proposals that are approved or auto-approved.
 
@@ -113,6 +117,8 @@ The roadmap is an artifact on claude.ai. It is private until you share it, and i
 | **Work** | Your track and its progress, the task in progress with its minutes, overall progress, unread messages, a pending decision | Next task, Status, Launch session on track…, Open roadmap |
 | **Run** | The execution (`▶ EXECUTION · subagents 2/3 · T004 review (r2) · … · 3/12 · integrated 3`): mode, tasks running out of the maximum, each task with its stage and round, tasks integrated out of the plan's total (or the batch's); a stalled run shows just `▶ EXECUTION stopped`, and `⚠ no signal` or `⚠ stopped` is appended when the coordinator or a running task goes silent or stops | Status, Stop, Open roadmap |
 
+When forge decided something without asking in the last day, any band ends with `⚑ auto · N · <the last major decision>`.
+
 With [lens](../lens/README.md) installed, a **Panel** button opens the progress panel. If a command cannot run from the band, it is left in the prompt with a note saying "press Enter".
 
 The band is drawn in the terminal and in the Code tab of the desktop app. It is not drawn in the VS Code panel or with `-p`; there, use the commands directly.
@@ -137,7 +143,7 @@ The skills run the CLI as `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" <comma
 
 | Group | Commands |
 | --- | --- |
-| Design | `design-validate`, `design-snapshot`, `design-changed`, `critique-check`, `critique-select`, `design-page` |
+| Design | `design-import <spec> --project P --out D`, `design-validate`, `design-snapshot`, `design-changed`, `design-gate <design.md>`, `critique-check`, `critique-select`, `design-page` |
 | Plan and page | `validate`, `hash` (prints the plan hash, used to detect an out-of-date roadmap), `page`, `sync`, `clean-cache` |
 | Work | `next [--base <branch>]`, `conflicts`, `recover`, `status`, `commit-info` |
 | Sessions | `launch <track> [--swarm <id> --base <branch>]`, `launch <plan> <T> --task --run R --coordinator SID --base B [--launcher bg|herdr]`, `inbox`, `escalations`, `notes`, `session-id` |

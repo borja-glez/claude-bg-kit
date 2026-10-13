@@ -14,6 +14,8 @@ export type ForgeStatus = {
   // started, the seconds of each closed stage keyed by phase name (lowercase; 'triage' before the first phase),
   // and when the task finished (phase done, or a verdict accepting the task itself). null / {} in an older status.
   taskStartedAt: string | null; stageSince: string | null; stages: Record<string, number>; doneAt: string | null;
+  // The task runs in auto mode (spec §5.5); absent otherwise.
+  autonomy?: 'auto';
 };
 
 const CLIP = 80;
@@ -58,8 +60,13 @@ const str = (x: unknown): x is string => typeof x === 'string';
 const num = (x: unknown): number | null => (typeof x === 'number' && Number.isFinite(x) ? x : null);
 const isObj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
 
+const cp = (n: number) => String.fromCharCode(n);
+// The bidi overrides and isolates (U+202A to U+202E, U+2066 to U+2069) built from code points, so the source never
+// holds an invisible character.
+// eslint-disable-next-line no-control-regex
+const UNSAFE = new RegExp(`[\\x00-\\x1f\\x7f-\\x9f${cp(0x202a)}-${cp(0x202e)}${cp(0x2066)}-${cp(0x2069)}]`, 'g');
 /** C0, DEL and C1 control characters and bidi overrides/isolates removed, then clipped to 80. */
-export const cleanText = (s: string): string => s.replace(/[\x00-\x1f\x7f-\x9f‪-‮⁦-⁩]/g, '').slice(0, CLIP);
+export const cleanText = (s: string): string => s.replace(UNSAFE, '').slice(0, CLIP);
 
 const EMPTY_VERIFY: NonNullable<ForgeStatus['verify']> = { planned: false, surfaces: [], result: null, passed: null, total: null, evidence: null, reason: null };
 const pathText = (x: unknown) => (str(x) ? x.replace(/[\x00-\x1f\x7f-\x9f]/g, '').slice(0, 200) : null);
@@ -102,6 +109,8 @@ export function deriveStatus(prev: ForgeStatus | null, event: unknown): ForgeSta
       };
     const next: ForgeStatus = { ...base, ts };
     if (e.kind === 'triage' && str(e.path)) next.path = cleanText(e.path);
+    // A fresh triage says whether the task runs in auto mode; a ratchet (no `reasons`) keeps what the task had.
+    if (fresh && e.autonomy === 'auto') next.autonomy = 'auto';
     if (e.kind === 'phase' && str(e.phase)) {
       const phase = cleanText(e.phase);
       const done = phase.toLowerCase() === 'done';
@@ -179,5 +188,6 @@ export function normalizeStatus(x: unknown): ForgeStatus | null {
     } : null,
     // Absent in a status written before timings existed: no times are shown.
     taskStartedAt: tsText(x.taskStartedAt), stageSince: tsText(x.stageSince), stages: stagesOf(x.stages), doneAt: tsText(x.doneAt),
+    ...(x.autonomy === 'auto' ? { autonomy: 'auto' as const } : {}),
   };
 }

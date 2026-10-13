@@ -7,7 +7,7 @@ El modelo y el esfuerzo en uso, el roadmap, las etapas y ejecuciones de forge, l
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.10.0](https://img.shields.io/badge/versi%C3%B3n-0.10.0-b4befe?style=flat-square)
+![versión 0.11.0](https://img.shields.io/badge/versi%C3%B3n-0.11.0-b4befe?style=flat-square)
 ![sin coste en tokens](https://img.shields.io/badge/coste%20en%20tokens-ninguno-a6e3a1?style=flat-square)
 
 </div>
@@ -76,7 +76,7 @@ Cada sección es una tarjeta con su propio color (la paleta Catppuccin del roadm
 - una fila de verificación cuando la tarea se verificó: las superficies usadas, las comprobaciones superadas sobre el total y el resultado (pass, fail o blocked);
 - los últimos validadores (✓/✗), el veredicto con su nota y la ronda de revisión frente a su límite.
 
-Debajo de las etapas lista hasta 5 propuestas pendientes, cada una como `título · categoría · riesgo` con botones **Aprobar** y **Rechazar** que ejecutan `/forge:decide`. Mientras hay una ejecución `/forge:infinite` activa, la tarjeta también enseña `∞ N/M · quedan H h` y las 3 propuestas autoaprobadas más recientes.
+Debajo de las etapas lista hasta 5 propuestas pendientes, cada una como `título · categoría · riesgo` con botones **Aprobar** y **Rechazar** que ejecutan `/forge:decide`. Mientras hay una ejecución `/forge:infinite` activa, la tarjeta también enseña `∞ N/M · quedan H h` y las 3 propuestas autoaprobadas más recientes. Si forge decidió algo sin preguntar en el último día, la tarjeta enseña además `⚑ N decisiones automáticas` y la última de peso (`/forge:decisions` las lista). Cuando la tarea va en modo auto, el subtítulo de la tarjeta lo dice (modo auto).
 
 ## Consumo y coste
 

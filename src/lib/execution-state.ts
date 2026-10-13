@@ -32,6 +32,8 @@ export interface ExecutionState {
   tasks: Record<string, ExecTask>;
   /** How many tasks the run plans in all (the plan's, or the loose file's), so the total is not just those started. */
   planned?: number;
+  /** Started in auto mode (spec §5.5): the coordinator keeps deciding alone when it resumes. */
+  autonomy?: 'auto';
 }
 
 // STAGES lives in types.ts (pure, so the roadmap page can bundle it without this file's yaml/zod imports); re-exported here.
@@ -107,6 +109,7 @@ export function normalizeExecution(x: unknown, now?: number): ExecutionState | n
     stallReason: typeof x.stallReason === 'string' ? x.stallReason.slice(0, 1000) : null,
     lastStepAt: iso(x.lastStepAt), lastBlockStep: iso(x.lastBlockStep), sleepUntil: iso(x.sleepUntil),
     ...(typeof x.planned === 'number' && Number.isInteger(x.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x.planned)) } : {}),
+    ...(x.autonomy === 'auto' ? { autonomy: 'auto' as const } : {}),
   };
 }
 

@@ -752,13 +752,20 @@ function renderNotesView(m: Model, d: Dict, ui: UiState, loc: string): string {
     const open = t === 'question' && !n.answer;
     const label = open ? d.openQuestion : d.noteType[t];
     const when = fmt(n.ts, loc);
+    const dec = n.decision;
+    const decHtml = dec ? `<div class="ndec">
+        <div><span class="k">${esc(d.decisionChosen)}</span> ${esc(dec.chosen)}${dec.alternatives?.length ? ` <span class="k">(${esc(dec.alternatives.join(', '))})</span>` : ''}</div>
+        <div><span class="k">${esc(d.decisionWhy)}</span> ${esc(dec.why)}</div>
+        ${dec.revert ? `<div><span class="k">${esc(d.decisionRevert)}</span> ${esc(dec.revert)}</div>` : ''}
+      </div>` : '';
     const reply = !open || ro ? '' : ui.answering === n.id
       ? `<div class="areply"><textarea data-role="answer-text" maxlength="${MAX_NOTE}" rows="2" placeholder="${esc(d.answerPlaceholder)}">${esc(ui.answerDraft)}</textarea>
         <button class="btn pri" data-action="answer-send" data-id="${esc(n.id)}">${esc(d.send)}</button></div>`
       : `<button class="btn" data-action="answer-open" data-id="${esc(n.id)}">${esc(d.reply)}</button>`;
     return `<div class="note nb-${t}">
-      <div class="nh"><span class="nt-${t}">${esc(label)}</span><span class="k">${esc(authorLabel(m, d, n.author))}${when ? ` · ${esc(when)}` : ''}</span></div>
+      <div class="nh"><span><span class="nt-${t}">${esc(label)}</span>${dec ? ` <span class="nauto">${esc(d.autoTag)}</span>` : ''}</span><span class="k">${esc(authorLabel(m, d, n.author))}${when ? ` · ${esc(when)}` : ''}</span></div>
       <p>${esc(n.text)}</p>
+      ${decHtml}
       ${n.taskId ? `<button class="chip" data-action="open-task" data-id="${esc(n.taskId)}">${esc(n.taskId)}</button>` : ''}
       ${n.answer ? `<div class="ans"><span class="k">${esc(d.answeredBy)} · ${esc(authorLabel(m, d, n.answeredBy ?? ''))}</span>${esc(n.answer)}</div>` : ''}
       ${reply}

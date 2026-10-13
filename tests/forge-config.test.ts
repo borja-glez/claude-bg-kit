@@ -5,8 +5,19 @@ describe('forge config', () => {
   it('defaults: detect on, nothing excluded, verify limits, evidence upload', () => {
     expect(parseConfig(null)).toEqual({
       profile: 'balanced', detect: true, exclude: [], verify: { limits: { checks: 8, shots: 10, minutes: 10 } },
-      evidence: 'upload', validatorTimeoutSec: 600, swarm: { parallel: 3, launcher: 'bg' },
+      evidence: 'upload', validatorTimeoutSec: 600, swarm: { parallel: 3, launcher: 'bg' }, tdd: 'off',
     });
+  });
+  it('workflow and autonomy: optional, and one of their values', () => {
+    expect(parseConfig(null)).not.toHaveProperty('workflow');
+    expect(parseConfig('workflow: superpowers-design\nautonomy: auto\n')).toMatchObject({ workflow: 'superpowers-design', autonomy: 'auto' });
+    expect(() => parseConfig('workflow: maybe\n')).toThrow(ConfigError);
+    expect(() => parseConfig('autonomy: always\n')).toThrow(ConfigError);
+  });
+  it('tdd: off by default, or superpowers', () => {
+    expect(parseConfig(null).tdd).toBe('off');
+    expect(parseConfig('tdd: superpowers\n').tdd).toBe('superpowers');
+    expect(() => parseConfig('tdd: always\n')).toThrow(ConfigError);
   });
   it('swarm: parallel 3 by default, an optional mode and the launcher', () => {
     expect(parseConfig(null).swarm).toEqual({ parallel: 3, launcher: 'bg' });

@@ -19,6 +19,7 @@ export interface CardTexts {
   gReview: string; gPlan: string; gOther: string; tracking: string; withoutForge: string; withoutForgeNote: string;
   forgeCosts: (usd: string, pct: number) => string; forgeSaves: (usd: string) => string; pricesAsOf: string; drift: string; various: string;
   noReview: string; gVerify: string; blocked: string; active: string; sinceStart: string; taskTime: string;
+  autoDecisions: (n: number) => string; autoMode: string;
 }
 
 const modelRight = (s: { model?: string; effort?: string }, t: CardTexts): string | undefined =>
@@ -69,7 +70,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     });
   }
 
-  if (m.forge || m.infinite?.active) {
+  if (m.forge || m.infinite?.active || m.decisions) {
     const blocks: Block[] = [];
     const f = m.forge;
     if (f) {
@@ -113,10 +114,20 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
       blocks.push({ kind: 'bar', ratio: inf.cyclesMax ? ratio(inf.cycle - 1, inf.cyclesMax) : 0, hue: 'mauve', moving: true, label: `∞ ${t.cycle}`, right });
       for (const title of inf.autoApproved) blocks.push({ kind: 'row', dot: 'green', tag: { text: t.auto, hue: 'green' }, text: title });
     }
+    // What forge decided without asking in the last day (.forge/decisions.json): the count and the last major one.
+    const dec = m.decisions;
+    if (dec) {
+      blocks.push({ kind: 'row', dot: 'yellow', tag: { text: `⚑ ${t.auto}`, hue: 'yellow' }, text: t.autoDecisions(dec.count) });
+      if (dec.lastMajor) blocks.push({ kind: 'text', text: dec.lastMajor, dim: true });
+    }
     out.push({
       icon: SECTION_ICON.forge, title: f?.task ?? 'forge', hue: SECTION_HUE.forge,
       chip: f?.path ? { text: f.path, hue: PATH_HUE[f.path] ?? 'peach' } : inf?.active ? { text: '∞', hue: 'mauve' } : undefined,
-      subtitle: f && forgePhase(f) ? [t.sForge, forgePhase(f), f.timing && span(f.timing.taskSeconds) ? `${f.timing.done ? '✓ ' : ''}${span(f.timing.taskSeconds)}` : null].filter(Boolean).join(' · ') : undefined, blocks,
+      subtitle: f && (forgePhase(f) || f.autonomy === 'auto')
+        ? [t.sForge, forgePhase(f), f.timing && span(f.timing.taskSeconds) ? `${f.timing.done ? '✓ ' : ''}${span(f.timing.taskSeconds)}` : null, f.autonomy === 'auto' && t.autoMode]
+          .filter(Boolean).join(' · ')
+        : undefined,
+      blocks,
     });
   }
 

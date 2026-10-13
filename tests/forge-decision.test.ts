@@ -1,0 +1,162 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import { mkdtempSync, mkdirSync, appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { addDecision, allDecisions, decisionsFile, listDecisions, readDecisionsDoc, renderDecisionsMd, DecisionInputError } from '../src/forge/decisions.js';
+import { readEvents } from '../src/forge/ledger.js';
+import { run, type Io } from '../src/forge/cli/run.js';
+import { saveExecution } from '../src/forge/execution.js';
+
+let root: string;
+beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-dec-')); });
+const at = (m: number) => new Date(Date.parse('2026-10-13T10:00:00.000Z') + m * 60_000).toISOString();
+const INPUT = { point: 'design-approve', what: 'diseño aprobado (v4)', chosen: 'approve', why: 'ronda 2 sin critical', by: 'auto', undo: { type: 'design-reopen', project: 'reparto' } };
+
+describe('addDecision', () => {
+  it('appends a decision with its weight, numbers it and writes the summary', () => {
+    const r = addDecision(root, INPUT, { ts: at(0), task: 'reparto' });
+    expect(r.n).toBe(1);
+    expect(r.event).toMatchObject({ ts: at(0), kind: 'decision', point: 'design-approve', weight: 'major', by: 'auto', task: 'reparto' });
+    expect(readEvents(root)).toHaveLength(1);
+    expect(readDecisionsDoc(root)).toMatchObject({ scope: 'reparto', count: 1, lastMajor: { n: 1 } });
+  });
+  it('takes the task flag over the data, and the run of an active execution when the data has none', () => {
+    expect(addDecision(root, { ...INPUT, task: 'other' }, { ts: at(0), task: 'T1', runId: 'r9' }).event).toMatchObject({ task: 'T1', runId: 'r9' });
+    expect(addDecision(root, { ...INPUT, runId: 'mine' }, { ts: at(1), runId: 'r9' }).event.runId).toBe('mine');
+  });
+  it('counts old decision events in the numbering', () => {
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    appendFileSync(path.join(root, '.forge', 'ledger.jsonl'), JSON.stringify({ ts: at(0), kind: 'decision', what: 'takeover', previous: 'a', by: 'b' }) + '\n');
+    expect(addDecision(root, INPUT, { ts: at(1) }).n).toBe(2);
+  });
+  it('refuses bad input and writes nothing', () => {
+    for (const bad of [{ ...INPUT, point: 'nope' }, { ...INPUT, by: 'robot' }, { ...INPUT, extra: 1 }, { ...INPUT, what: ' ' },
+      { ...INPUT, undo: { type: 'branch-discard', branch: '-rf' } }, { ...INPUT, alternatives: Array(11).fill('x') }, { ...INPUT, task: '../x' }, null, [1]]) {
+      expect(() => addDecision(root, bad, { ts: at(0) })).toThrow(DecisionInputError);
+    }
+    expect(readEvents(root)).toEqual([]);
+    expect(existsSync(decisionsFile(root))).toBe(false);
+  });
+  it('keeps the summary when the user answers', () => {
+    addDecision(root, INPUT, { ts: at(0), task: 'reparto' });
+    addDecision(root, { ...INPUT, point: 'route', by: 'user' }, { ts: at(1), task: 'reparto' });
+    expect(readDecisionsDoc(root)).toMatchObject({ count: 1 });
+  });
+  it('cleans and clips the text it stores', () => {
+    const r = addDecision(root, { ...INPUT, what: `x\u0007${'y'.repeat(300)}` }, { ts: at(0) });
+    expect(String(r.event.what)).toHaveLength(200);
+    expect(String(r.event.what).startsWith('x y')).toBe(true);
+  });
+});
+
+describe('listDecisions', () => {
+  beforeEach(() => {
+    addDecision(root, { ...INPUT, point: 'ruling', by: 'unattended' }, { ts: at(0), task: 'orders-1' });
+    addDecision(root, { ...INPUT, point: 'route', by: 'user' }, { ts: at(1), task: 'orders' });
+    addDecision(root, INPUT, { ts: at(2), task: 'T001', runId: 'r1' });
+  });
+  it('defaults to the scope of the summary', () => {
+    expect(listDecisions(root, {}).map(d => d.n)).toEqual([3]);
+  });
+  it('filters by task (with its briefs), run, since and automatic only', () => {
+    expect(listDecisions(root, { task: 'orders' }).map(d => d.n)).toEqual([1, 2]);
+    expect(listDecisions(root, { task: 'orders', auto: true }).map(d => d.n)).toEqual([1]);
+    expect(listDecisions(root, { run: 'r1' }).map(d => d.n)).toEqual([3]);
+    expect(listDecisions(root, { since: at(1) }).map(d => d.n)).toEqual([2, 3]);
+    expect(listDecisions(root, { all: true })).toHaveLength(3);
+  });
+  it('is empty with no decision', () => {
+    expect(listDecisions(mkdtempSync(path.join(tmpdir(), 'forge-dec-')), {})).toEqual([]);
+  });
+});
+
+describe('renderDecisionsMd', () => {
+  it('lists each decision with what was chosen, why and how to undo it, in es and en', () => {
+    addDecision(root, { ...INPUT, alternatives: ['another round'], revert: '/forge:decisions revert 1' }, { ts: at(0), task: 'reparto' });
+    const list = allDecisions(root);
+    const es = renderDecisionsMd(list, 'reparto', 'es');
+    expect(es).toContain('# Decisiones automáticas · reparto');
+    expect(es).toContain('## 1. diseño aprobado (v4)');
+    expect(es).toContain('- **Elegido:** approve');
+    expect(es).toContain('- **Alternativas:** another round');
+    expect(es).toContain('- **Cómo revertir:** /forge:decisions revert 1');
+    expect(renderDecisionsMd(list, 'reparto', 'en-GB')).toContain('# Automatic decisions · reparto');
+    expect(renderDecisionsMd([{ ...list[0], revert: null, alternatives: [] }], 'reparto', 'en')).toContain('- **How to undo:** cannot be undone automatically');
+    const none = { ...list[0], revert: null, undo: { type: 'none' as const, reason: 'el ratchet solo sube' } };
+    expect(renderDecisionsMd([none], 'reparto', 'es')).toContain('- **Cómo revertir:** no se puede revertir de forma automática: el ratchet solo sube');
+  });
+});
+
+describe('forge decision CLI', () => {
+  let io: Io;
+  beforeEach(() => { io = { cwd: root, now: () => new Date(at(0)) }; });
+  const write = (name: string, v: unknown) => { writeFileSync(path.join(root, name), typeof v === 'string' ? v : JSON.stringify(v)); return name; };
+
+  it('add prints the numbered event; list and show read it back', () => {
+    const r = run(['decision', 'add', '--data-file', write('d.json', INPUT), '--task', 'reparto'], io);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ n: 1, kind: 'decision', ts: at(0), task: 'reparto', weight: 'major' });
+    expect(JSON.parse(run(['decision', 'list'], io).stdout).map((d: { n: number }) => d.n)).toEqual([1]);
+    expect(JSON.parse(run(['decision', 'show', '1'], io).stdout)).toMatchObject({ n: 1, point: 'design-approve', undo: { type: 'design-reopen', project: 'reparto' } });
+    expect(run(['decision', 'show', '2'], io).code).toBe(2);
+    expect(run(['decision', 'show', 'x'], io).code).toBe(2);
+  });
+  it('add takes the run of the active execution', () => {
+    saveExecution(root, {
+      runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,
+      coordinator: 'main', hookSession: null, active: true, stopReason: null, stallReason: null, startedAt: at(0), lastStepAt: null,
+      lastBlockStep: null, sleepUntil: null, tasks: {},
+    });
+    expect(JSON.parse(run(['decision', 'add', '--data-file', write('d.json', INPUT)], io).stdout).runId).toBe('r1');
+  });
+  it('add refuses bad input with exit 2 and writes nothing', () => {
+    expect(run(['decision', 'add'], io).code).toBe(2);
+    expect(run(['decision', 'add', '--data-file', write('bad.json', '{"point":')], io).code).toBe(2);
+    expect(run(['decision', 'add', '--data-file', write('arr.json', [1])], io).code).toBe(2);
+    const r = run(['decision', 'add', '--data-file', write('extra.json', { ...INPUT, extra: true })], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('extra');
+    expect(run(['decision', 'add', '--data-file', write('d.json', INPUT), '--task', 'a/b'], io).code).toBe(2);
+    expect(readEvents(root)).toEqual([]);
+    expect(existsSync(decisionsFile(root))).toBe(false);
+  });
+  it('list checks --since', () => {
+    expect(run(['decision', 'list', '--since', 'yesterday'], io).code).toBe(2);
+  });
+  it('md writes the automatic decisions of a scope under a safe file name, and nothing without them', () => {
+    run(['decision', 'add', '--data-file', write('d.json', INPUT), '--task', 'ns:task'], io);
+    const r = JSON.parse(run(['decision', 'md', '--scope', 'ns:task', '--locale', 'es'], io).stdout);
+    expect(r).toMatchObject({ written: true, scope: 'ns:task', count: 1 });
+    expect(r.path).toBe(path.join(root, 'docs', 'forge', 'decisions', 'ns-task.md'));
+    expect(readFileSync(r.path, 'utf8')).toContain('# Decisiones automáticas · ns:task');
+    expect(JSON.parse(run(['decision', 'md', '--scope', 'nothing'], io).stdout)).toEqual({ written: false, scope: 'nothing', count: 0 });
+    expect(run(['decision', 'md'], io).code).toBe(2);
+    expect(run(['decision', 'md', '--scope', 'ns:task', '--out', 'x.txt'], io).code).toBe(2);
+  });
+  it('a session in a linked worktree (a run member) records and reads decisions in the main checkout', () => {
+    const main = mkdtempSync(path.join(tmpdir(), 'forge-dec-main-'));
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: main, stdio: 'ignore' });
+    git('init', '-q', '-b', 'main');
+    writeFileSync(path.join(main, 'a.txt'), 'a');
+    git('add', 'a.txt');
+    git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'a');
+    const wt = path.join(main, '.claude', 'worktrees', 'task-T1');
+    git('worktree', 'add', '-q', '-b', 'task/T1', wt);
+    writeFileSync(path.join(wt, 'd.json'), JSON.stringify(INPUT));
+    const inWt: Io = { cwd: wt, now: () => new Date(at(0)) };
+    expect(run(['decision', 'add', '--data-file', 'd.json', '--task', 'T1'], inWt).code).toBe(0);
+    expect(readEvents(main).filter(e => e.kind === 'decision')).toHaveLength(1);
+    expect(existsSync(path.join(wt, '.forge', 'ledger.jsonl'))).toBe(false);
+    expect(readDecisionsDoc(main)).toMatchObject({ scope: 'T1', count: 1 });
+    expect(JSON.parse(run(['decision', 'list', '--task', 'T1'], { cwd: main, now: () => new Date(at(1)) }).stdout)).toHaveLength(1);
+    expect(JSON.parse(run(['decision', 'show', '1'], inWt).stdout)).toMatchObject({ n: 1, task: 'T1' });
+    // The file of a project without a roadmap goes with the work, in the worktree.
+    expect(JSON.parse(run(['decision', 'md', '--scope', 'T1'], inWt).stdout).path).toBe(path.join(wt, 'docs', 'forge', 'decisions', 'T1.md'));
+  });
+  it('an unknown subcommand prints its usage', () => {
+    const r = run(['decision', 'nope'], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('usage: forge decision');
+  });
+});

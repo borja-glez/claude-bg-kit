@@ -12,6 +12,7 @@ const MetaSchema = z.object({
   start_prompt: z.string().min(1).default('/waypoint:work <track>'),
   status: z.enum(['draft', 'approved']).default('draft'),
   artifact: z.string().url().optional(),
+  source: z.string().min(1).max(300).optional(),
 });
 
 export type DesignMeta = z.infer<typeof MetaSchema>;
@@ -26,9 +27,11 @@ export class DesignError extends Error {
 }
 
 const FM = /^---\r?\n(?:([\s\S]*?)\r?\n)?---\r?\n?([\s\S]*)$/;
+// A byte order mark some editors put first, from its code point so the source never holds the invisible character.
+const BOM = String.fromCharCode(0xfeff);
 
 export function parseDesign(text: string): Design {
-  const m = FM.exec(text.replace(/^﻿/, ''));
+  const m = FM.exec(text.startsWith(BOM) ? text.slice(1) : text);
   if (!m) throw new DesignError(['missing front matter block (--- ... ---) at the top of design.md']);
   let raw: unknown;
   try { raw = parse(m[1] ?? ''); } catch (e) { throw new DesignError([`YAML: ${(e as Error).message}`]); }

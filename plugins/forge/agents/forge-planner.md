@@ -23,4 +23,6 @@ Input from the caller: the design path (`docs/waypoint/<project>/design.md`, fro
 4. Do not commit and do not publish anything.
 5. Reply with only: status (DONE | BLOCKED), the plan path, and one line per phase: `<phase id> <name>: <n> tasks`.
 
+**Extend mode.** The caller may instead give you `{design, plan, task}`: an approved design with a section `## <T>: <title>` for the plan task `T`, the existing plan.yaml and `T`. Read that section and add to plan.yaml the tasks it needs, in `T`'s track and phase: new ids after the highest, never renumber. Keep `T` as the closing task: its `done_when` stays, and its `depends_on` becomes the new tasks. Run the validation of step 3, do not commit, and reply as in step 5 plus one line `new: <ids>`.
+
 Never spawn subagents.

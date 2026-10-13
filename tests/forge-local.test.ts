@@ -26,6 +26,15 @@ describe('local.yaml', () => {
     writeFileSync(localFile(root), 'surfaces:\n  web: { state: allowed, hash: abc }\n  app: { state: maybe }\n  api: allowed\n  cli: { state: denied }\n  "bad name": { state: denied }\nknown: [unit, unit, "x y", 3]\nproposed: [android]\nmine: 1\n');
     expect(readLocal(root)).toEqual({ surfaces: { web: { state: 'allowed', hash: 'abc' }, cli: { state: 'denied', hash: null } }, known: ['unit'], proposed: ['android'], mine: 1 });
   });
+  it('keeps a valid workflow and autonomy and ignores an invalid one', () => {
+    mkdirSync(path.join(root, '.forge'));
+    writeFileSync(localFile(root), 'workflow: forge\nautonomy: auto\n');
+    expect(readLocal(root)).toMatchObject({ workflow: 'forge', autonomy: 'auto' });
+    writeFileSync(localFile(root), 'workflow: maybe\nautonomy: 3\n');
+    const s = readLocal(root);
+    expect(s).not.toHaveProperty('workflow');
+    expect(s).not.toHaveProperty('autonomy');
+  });
   it('writes atomically and round-trips, keeping unknown keys', () => {
     updateLocal(root, s => ({ ...s, known: ['unit'] }));
     mkdirSync(path.join(root, '.forge'), { recursive: true });

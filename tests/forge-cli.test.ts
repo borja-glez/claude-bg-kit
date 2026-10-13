@@ -167,6 +167,16 @@ describe('forge CLI', () => {
     expect(out.files).toEqual(['src/a.ts']);
     expect(out.path).toBe('trivial');
   });
+  it('triage --autonomy auto records auto mode, and last returns it', () => {
+    writeFileSync(path.join(root, 'task.txt'), 'fix parseConfig in src/config.ts');
+    const r = run(['triage', '--task', 't1', '--text-file', 'task.txt', '--autonomy', 'auto'], io);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout).autonomy).toBe('auto');
+    expect(readEvents(root).at(-1)).toMatchObject({ kind: 'triage', task: 't1', autonomy: 'auto' });
+    expect(JSON.parse(run(['last', '--task', 't1'], io).stdout).autonomy).toBe('auto');
+    expect(JSON.parse(run(['last', '--task', 'other'], io).stdout).autonomy).toBeNull();
+    expect(run(['triage', '--task', 't2', '--text-file', 'task.txt', '--autonomy', 'always'], io).code).toBe(2);
+  });
   it('triage reads the task text from --text-file', () => {
     io.git = () => '';
     writeFileSync(path.join(root, 'task.txt'), 'rename `foo` to bar; $(rm -rf x)\n');

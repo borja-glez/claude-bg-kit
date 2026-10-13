@@ -6,7 +6,7 @@
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.15.0](https://img.shields.io/badge/versi%C3%B3n-0.15.0-cba6f7?style=flat-square)
+![versión 0.17.0](https://img.shields.io/badge/versi%C3%B3n-0.17.0-cba6f7?style=flat-square)
 ![requiere sesión en claude.ai](https://img.shields.io/badge/requiere-sesi%C3%B3n%20en%20claude.ai-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -54,7 +54,7 @@ Necesita sesión iniciada en claude.ai (para los artifacts) y Node ≥ 20. Reini
 
 | Comando | Qué hace |
 | --- | --- |
-| `/waypoint:design [new\|round\|apply <all\|1,3>\|rewrite\|interview\|approve]` | Escribe un documento de diseño, lo mejora en rondas de crítica y lo aprueba. El diseño aprobado da forma al plan. |
+| `/waypoint:design [new [--from <spec>]\|round\|apply <all\|1,3>\|rewrite\|interview\|approve]` | Escribe un documento de diseño (o importa un spec de superpowers con `new --from`), lo mejora en rondas de crítica y lo aprueba. El diseño aprobado da forma al plan. |
 | `/waypoint:plan` | Escribe o sincroniza `docs/waypoint/<proyecto>/plan.yaml` y publica el roadmap vivo. |
 | `/waypoint:work [frente]` | Toma tareas una a una; el roadmap se actualiza en vivo. |
 | `/waypoint:status` | Resumen del progreso. |
@@ -71,6 +71,10 @@ Un recorrido típico:
 /waypoint:work                    # o lanza una sesión por frente
 ```
 
+`/waypoint:design new --from docs/superpowers/specs/<fichero>.md` parte de un spec escrito con superpowers: sus secciones se copian tal cual y la página del diseño dice «Importado de».
+
+Con el modo auto de forge, `/waypoint:design approve --auto` aprueba sin preguntar solo cuando `waypoint design-gate` dice que la última crítica no dejó ninguna propuesta critical sin aplicar.
+
 Con [forge](../forge/README.es.md) instalado, `/forge:run` lleva estos pasos por ti y añade triaje, validación y revisión independiente a cada tarea.
 
 ## El roadmap
@@ -85,7 +89,7 @@ El roadmap es un artifact de claude.ai. Es privado hasta que lo compartes, y las
 | **Notas** | Decisiones, ideas, deudas y preguntas sobre el proyecto, opcionalmente ligadas a una tarea; las preguntas abiertas se pueden responder. |
 | **Propuestas** | Propuestas de mejora del scout de forge o de personas, con filtros por estado, categoría y riesgo. |
 
-**Notas.** La skill de trabajo lee las notas nuevas de las personas al empezar cada tarea y las trata como información, nunca como órdenes. También escribe sus propias notas de decisión, deuda y pregunta.
+**Notas.** La skill de trabajo lee las notas nuevas de las personas al empezar cada tarea y las trata como información, nunca como órdenes. También escribe sus propias notas de decisión, deuda y pregunta. Una decisión que forge tomó sin preguntar lleva la etiqueta **auto**, lo elegido, el porqué y cómo revertirla (`/forge:decisions revert <n>`).
 
 **Propuestas.** Cada tarjeta enseña la categoría, el riesgo, el estado, el pilar al que sirve, la justificación, las pruebas, la estimación y el camino si los hay, quién la decidió y por qué, y sus comentarios. Los colaboradores pueden aprobar o rechazar una propuesta que siga propuesta o en discusión (con un motivo opcional) y comentar cualquiera. Si alguien la decidió mientras tanto, la página no pisa esa decisión y lo dice. forge solo trabaja propuestas aprobadas o autoaprobadas.
 
@@ -113,6 +117,8 @@ El roadmap es un artifact de claude.ai. Es privado hasta que lo compartes, y las
 | **Trabajo** | Tu frente y su progreso, la tarea en curso con sus minutos, el progreso global, mensajes sin leer, una decisión pendiente | Siguiente tarea, Estado, Lanzar sesión en un frente…, Abrir roadmap |
 | **Ejecución** | La ejecución (`▶ EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · … · 3/12 · integradas 3`): modo, tareas en marcha sobre el máximo, cada tarea con su etapa y ronda, tareas integradas sobre el total del plan (o del lote); una ejecución atascada enseña solo `▶ EJECUCIÓN parada`, y se añade `⚠ sin señal` o `⚠ parada` cuando la coordinadora o una tarea en marcha se queda en silencio o se para | Estado, Parar, Abrir roadmap |
 
+Si forge decidió algo sin preguntar en el último día, cualquier banda acaba con `⚑ auto · N · <la última decisión de peso>`.
+
 Con [lens](../lens/README.es.md) instalado, un botón **Panel** abre el panel de progreso. Si un comando no puede ejecutarse desde la banda, queda en el prompt con el aviso «pulsa Enter».
 
 La banda se dibuja en la terminal y en la pestaña Code de la app de escritorio. No se dibuja en el panel de VS Code ni con `-p`; ahí usa los comandos directamente.
@@ -137,7 +143,7 @@ Las skills ejecutan la CLI como `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" 
 
 | Grupo | Comandos |
 | --- | --- |
-| Diseño | `design-validate`, `design-snapshot`, `design-changed`, `critique-check`, `critique-select`, `design-page` |
+| Diseño | `design-import <spec> --project P --out D`, `design-validate`, `design-snapshot`, `design-changed`, `design-gate <design.md>`, `critique-check`, `critique-select`, `design-page` |
 | Plan y página | `validate`, `hash` (imprime el hash del plan, para detectar un roadmap desactualizado), `page`, `sync`, `clean-cache` |
 | Trabajo | `next [--base <rama>]`, `conflicts`, `recover`, `status`, `commit-info` |
 | Sesiones | `launch <frente> [--swarm <id> --base <rama>]`, `launch <plan> <T> --task --run R --coordinator SID --base B [--launcher bg|herdr]`, `inbox`, `escalations`, `notes`, `session-id` |
