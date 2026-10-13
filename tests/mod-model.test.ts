@@ -101,6 +101,27 @@ describe('buildBandModel · work', () => {
     expect(buildBandModel('demo-shop', { ...empty, plan, session, execTasks: { T002: pubDoc } })).toMatchObject({ mode: 'work', run: null });
     expect(buildBandModel('demo-shop', { ...empty, plan, session, execution: EXEC(), execTasks: { T002: pubDoc.replace('"S2"', '"S3"') } })).toMatchObject({ run: null });
   });
+  const LOOSE = 'fecha-corta-en-la-cabecera-del-listado-k3x9';
+  const EPHEMERAL = (over: object = {}) => EXEC({ runId: 'e1', kind: 'ephemeral', project: 'loose', tasks: {
+    [LOOSE]: { status: 'running', stage: 'implement', round: 1, worktree: '/w', branch: `task/${LOOSE}`, executor: 'subagents', attempts: 0, agent: null, startedAt: new Date(Date.now() - 600000).toISOString(), updatedAt: new Date().toISOString(), stageSince: new Date().toISOString(), detail: null },
+    'otra-cosa-a7b2': { status: 'running', stage: 'review', round: 2, worktree: '/w2', branch: 'task/otra-cosa-a7b2', executor: 'subagents', attempts: 0, agent: null, startedAt: new Date(Date.now() - 600000).toISOString(), updatedAt: new Date().toISOString(), stageSince: new Date().toISOString(), detail: null },
+  }, ...over });
+  it('run mode for an ephemeral execution (project loose) in a project with a plan, slot ids clipped in the line', () => {
+    const m = buildBandModel('demo-shop', { ...empty, plan, session: j({ sessionId: 'main', track: null }), execution: EPHEMERAL() });
+    expect(m).toMatchObject({ mode: 'run', project: 'demo-shop', locale: 'es', roadmapUrl: 'https://claude.ai/artifact/abc', running: 2, integrated: 0, total: 2, stalled: false });
+    const line = bandLine(m, 0);
+    expect(line).toContain('▶ EJECUCIÓN · subagentes 2/3 · ');
+    expect(line).toContain('fecha-corta-en-la-c… implementar');
+    expect(line).toContain('otra-cosa-a7b2 revisar (r2)');
+    expect(line).not.toContain(LOOSE);
+  });
+  it('an ephemeral execution that finished falls back to the work band; a member keeps its work band', () => {
+    expect(buildBandModel('demo-shop', { ...empty, plan, session: j({ sessionId: 'main', track: null }), execution: EPHEMERAL({ active: false, stopReason: 'finished' }) }).mode).toBe('work');
+    expect(buildBandModel('demo-shop', { ...empty, plan, session: j({ sessionId: 'x', track: 'backend', launchedBy: 'main' }), execution: EPHEMERAL() }).mode).toBe('work');
+  });
+  it('a plan execution of another project is not drawn as run mode', () => {
+    expect(buildBandModel('demo-shop', { ...empty, plan, session: j({ sessionId: 'main', track: null }), execution: EXEC({ project: 'other-shop' }) }).mode).toBe('work');
+  });
   it('run mode takes worst from a slot whose lease lapsed while the coordinator is alive', () => {
     const pub = JSON.stringify({ task: 'T002', runId: 'r1', stage: 'review', status: 'running', agent: null, round: 2, since: new Date().toISOString(), updatedAt: new Date().toISOString(), leaseUntil: new Date(Date.now() - 3600000).toISOString(), by: 'x', mode: 'subagents' });
     const m = buildBandModel('demo-shop', { ...empty, plan, execution: EXEC(), execTasks: { T002: pub } });
