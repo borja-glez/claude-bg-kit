@@ -163,8 +163,17 @@ describe('lens cards', () => {
     expect(cardAlt(card)).toContain('briefs 1/1');
     expect(card.blocks.find(b => b.kind === 'cells')).toMatchObject({ cells: ['done'] });
     expect(kinds({ ...FORGE, path: 'medium' })).toContain('bar');
+    // A done Medium or Large keeps its accepted, failed and pending briefs.
     const mediumDone = buildCards({ ...EMPTY, forge: { ...FORGE, path: 'medium', timing: done.timing } }, T, 0)[0];
-    expect(cardAlt(mediumDone)).toContain('briefs 5/5');
+    expect(cardAlt(mediumDone)).toContain('briefs 2/5');
+  });
+  it('a done phase with a running clock (the task reopened) is not read as done', () => {
+    const f = { ...FORGE, path: 'medium', phase: 'done', timing: { taskSeconds: 400, done: false, stages: [{ name: 'final', seconds: 200, live: true }] } };
+    expect(forgePhase(f)).toBe('');
+    const card = buildCards({ ...EMPTY, forge: f }, T, 0)[0];
+    expect(card.blocks.some(b => b.kind === 'row')).toBe(true);
+    expect((card.blocks.find(b => b.kind === 'stages') as { stages: { state: string }[] }).stages.every(s => s.state === 'done')).toBe(false);
+    expect(forgePhase({ ...f, timing: { ...f.timing, done: true } })).toBe('done');
   });
   it('draws the agent row only while the task is not done', () => {
     const timing = (d: boolean) => ({ taskSeconds: 60, done: d, stages: [] });

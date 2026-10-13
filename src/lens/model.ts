@@ -5,7 +5,7 @@ import { parseRun } from '../lib/forge-run.js';
 import { FUTURE_SKEW_MS, normalizeLive, normalizePublicTask, parseExecution, type LiveDoc, type PublicTask } from '../lib/execution-state.js';
 import { executionView } from '../lib/execution-view.js';
 import { MAIN, type UsageState } from './usage.js';
-import { STAGES, stageOf } from './view.js';
+import { STAGES, stageOf, tierOf } from './view.js';
 import { summarizeUsage } from './usage-summary.js';
 import { PRICES_AS_OF } from '../lib/prices.js';
 import { freshFinished, type FinishedAgent } from './finished.js';
@@ -230,7 +230,7 @@ export const PROPOSAL_ID = /^p\d{14}[0-9a-z]{4}$/;
  * The forge section from .forge/status.json (which forge keeps up to date on each ledger append): null when it does
  * not parse or validate, or when its task last saw a triage or phase event more than a day ago.
  */
-export function forgeFromStatus(text: string, now: number, briefs: number | null = null): PanelModel['forge'] {
+export function forgeFromStatus(text: string, now: number, briefs: number | null = null, liveTypes: string[] = []): PanelModel['forge'] {
   if (typeof text !== 'string') return null;
   let st;
   try { st = normalizeStatus(JSON.parse(text)); } catch { return null; }
@@ -238,8 +238,10 @@ export function forgeFromStatus(text: string, now: number, briefs: number | null
   const t = Date.parse(st.ts);
   if (!Number.isFinite(t) || !Number.isFinite(now) || now - t > FORGE_WINDOW_MS) return null;
   const { ts: _ts, taskStartedAt: _a, stageSince: _b, stages: _c, doneAt: _d, lastAt: _e, ...forge } = st;
-  // A light task the session never closed: finished at its last event, its agent gone.
-  const left = leftOpen(st, now);
+  // A light task the session never closed: finished at its last event, its agent gone. Not while a subagent of its
+  // agent's tier (the live subagents' types) still runs: that is a long agent, not a forgotten task.
+  const working = !!st.agent && liveTypes.some(t => tierOf(t).label === tierOf(st!.agent).label);
+  const left = !working && leftOpen(st, now);
   const timing = forgeTiming(left ? { ...st, doneAt: st.lastAt } : st, now);
   return { ...forge, ...(left ? { agent: null } : {}), briefs, timing };
 }
@@ -397,7 +399,8 @@ export function bandKey(model: PanelModel): string {
   const { subagentsDone: _done, usage, forge, ...rest } = model;
   const key: Record<string, unknown> = { ...rest };
   if (usage) { const { time: _time, ...u } = usage; key.usage = u; } else key.usage = usage;
-  if (forge) { const { timing: _timing, ...f } = forge; key.forge = f; } else key.forge = forge;
+  // The forge timing's seconds are left out, but not whether the task is done: the band's phase and cells follow it.
+  if (forge) { const { timing, ...f } = forge; key.forge = { ...f, done: timing?.done ?? null }; } else key.forge = forge;
   // The run time, the task times and the finished line are seconds the band never shows.
   if (rest.execution) {
     const { elapsedSeconds: _e, finished: _f, slots, ...x } = rest.execution;
@@ -470,7 +473,7 @@ export function buildPanelModel(input: {
     ccTasks: cc.length
       ? { open: cc.filter(t => !t.done).length, done: cc.filter(t => t.done).length, recent: cc.slice(-3).map(t => clip(t.subject)) }
       : null,
-    forge: input.forgeStatus !== undefined ? forgeFromStatus(input.forgeStatus, now, input.forgeBriefs ?? null) : null,
+    forge: input.forgeStatus !== undefined ? forgeFromStatus(input.forgeStatus, now, input.forgeBriefs ?? null, (a.subagents ?? []).map(s => s.type)) : null,
     infinite: infiniteFromRun(input.forgeRun, input.proposals, now),
     decisions: decisionsSummary(input.forgeDecisions, now),
     // The only plan task title the band model carries is the current one's.

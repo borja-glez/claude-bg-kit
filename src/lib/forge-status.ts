@@ -94,6 +94,11 @@ const isLight = (path: string): boolean => path === 'trivial' || path === 'small
 // forge-verify and forge-verify-heavy.
 const isVerifyAgent = (agent: string | null): boolean => !!agent && agent.startsWith('forge-verify');
 
+// The last stage closed before done (stages keep the order their names first closed in), '' when there is none.
+const lastStage = (stages: Record<string, number>): string =>
+  Object.keys(stages).filter(k => k !== 'done' && k !== 'triage').at(-1) ?? '';
+const PATHS = ['trivial', 'small', 'medium', 'large'];
+
 // The task finished at `ts`: its stage closed. Unchanged when it already was.
 const finish = (s: ForgeStatus, ts: string): ForgeStatus => (s.doneAt ? s : { ...s, stages: closeStage(s, ts), stageSince: ts, doneAt: ts });
 
@@ -128,7 +133,11 @@ function applyEvent(prev: ForgeStatus | null, event: unknown): ForgeStatus | nul
         taskStartedAt: ts, stageSince: ts, stages: {}, doneAt: null, lastAt: tsText(ts),
       };
     const next: ForgeStatus = { ...base, ts };
-    if (e.kind === 'triage' && str(e.path)) next.path = cleanText(e.path);
+    if (e.kind === 'triage' && str(e.path)) {
+      next.path = cleanText(e.path);
+      // A ratchet that raises a finished task's path (Trivial closed by its validate, say) reopens it: more work is due.
+      if (same && base.doneAt && PATHS.indexOf(next.path) > PATHS.indexOf(base.path)) { next.doneAt = null; next.stageSince = ts; }
+    }
     // A fresh triage says whether the task runs in auto mode; a ratchet (no `reasons`) keeps what the task had.
     if (fresh && e.autonomy === 'auto') next.autonomy = 'auto';
     if (e.kind === 'phase' && str(e.phase)) {
@@ -153,8 +162,13 @@ function applyEvent(prev: ForgeStatus | null, event: unknown): ForgeStatus | nul
   switch (e.kind) {
     case 'agent': {
       if (!str(e.agent)) return prev;
+      const agent = cleanText(e.agent);
+      if (!prev.doneAt) return { ...prev, agent };
       // An agent launched after the task closed (a verification, say) is work in progress again; the gap is no stage.
-      return { ...prev, agent: cleanText(e.agent), ...(prev.doneAt ? { doneAt: null, stageSince: ts } : {}) };
+      // A done phase moves to the agent's stage, so nothing reads the task as done; the accept was the finished run's.
+      const phase = prev.phase.toLowerCase() !== 'done' ? prev.phase
+        : isVerifyAgent(agent) ? 'verify' : isLight(prev.path) ? '' : lastStage(prev.stages);
+      return { ...prev, agent, phase, verdict: null, doneAt: null, stageSince: ts };
     }
     case 'validate': {
       const next = { ...cur, validators: validatorsOf(e.results) };

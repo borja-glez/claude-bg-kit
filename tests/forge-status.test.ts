@@ -213,6 +213,24 @@ describe('deriveStatus closes a light task', () => {
     const s = apply([triage('trivial'), { ts: T(30), kind: 'validate', task: 'f', ok: true, results: [] }, { ts: T(60), kind: 'agent', task: 'f', agent: 'forge-verify' }])!;
     expect(s).toMatchObject({ doneAt: null, stageSince: T(60), agent: 'forge-verify', stages: { triage: 30 } });
   });
+  it('an agent after a done phase moves the phase off done: verify for the verify agent, else the last stage', () => {
+    const medium = [triage('medium'), { ts: T(10), kind: 'phase', task: 'f', phase: 'implement' }, { ts: T(50), kind: 'phase', task: 'f', phase: 'review' },
+      { ts: T(80), kind: 'verdict', task: 'f-1', action: 'accept', score: 0.9 }, { ts: T(100), kind: 'phase', task: 'f', phase: 'done' }];
+    const impl = apply([...medium, { ts: T(200), kind: 'agent', task: 'f', agent: 'forge-impl' }])!;
+    // The accept belonged to the finished run: a new agent is new work, so it no longer reads as accepted.
+    expect(impl).toMatchObject({ phase: 'review', doneAt: null, agent: 'forge-impl', verdict: null, accepted: [1] });
+    expect(apply([...medium, { ts: T(200), kind: 'agent', task: 'f', agent: 'forge-verify' }])!.phase).toBe('verify');
+    const light = apply([triage('small'), { ts: T(100), kind: 'phase', task: 'f', phase: 'done' }, { ts: T(200), kind: 'agent', task: 'f', agent: 'forge-impl-light' }])!;
+    expect(light).toMatchObject({ phase: '', doneAt: null });
+    // Finished again by a verify result (light) or a done phase.
+    expect(deriveStatus(light, { ts: T(300), kind: 'verify', task: 'f', result: 'pass', passed: 1, total: 1 })!.doneAt).toBe(T(300));
+    expect(deriveStatus(impl, { ts: T(300), kind: 'phase', task: 'f', phase: 'done' })!).toMatchObject({ doneAt: T(300), agent: null });
+  });
+  it('a ratchet that raises a closed task\'s path reopens it', () => {
+    const closed = apply([triage('trivial'), { ts: T(30), kind: 'validate', task: 'f', ok: true, results: [] }])!;
+    expect(deriveStatus(closed, { ts: T(60), kind: 'triage', task: 'f', path: 'medium' })!).toMatchObject({ path: 'medium', doneAt: null, stageSince: T(60) });
+    expect(deriveStatus(closed, { ts: T(60), kind: 'triage', task: 'f', path: 'trivial' })!.doneAt).toBe(T(30));
+  });
   it('a verify result clears the verify agent and finishes a trivial or small task', () => {
     const run = [triage('small'), { ts: T(60), kind: 'agent', task: 'f', agent: 'forge-verify' }, { ts: T(70), kind: 'verify', task: 'f', planned: true, surfaces: ['web'] }];
     const res = { ts: T(200), kind: 'verify', task: 'f', result: 'pass', passed: 2, total: 2 };

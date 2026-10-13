@@ -286,6 +286,20 @@ describe('forge light task left open', () => {
     expect(recent.timing!.stages[0].live).toBe(true);
     expect(forgeFromStatus(JSON.stringify({ ...B016, lastAt: undefined }), NOW)!.timing!.done).toBe(false);
   });
+  it('is not guessed while a subagent of the task agent\'s tier still runs', () => {
+    const live = forgeFromStatus(JSON.stringify(B016), NOW, 1, ['forge:forge-verify'])!;
+    expect(live).toMatchObject({ agent: 'forge-verify', timing: { done: false } });
+    expect(forgeFromStatus(JSON.stringify(B016), NOW, 1, ['forge:forge-impl'])!.timing!.done).toBe(true);
+    const m = buildPanelModel({ band: { mode: 'none' }, now: NOW, forgeStatus: JSON.stringify(B016),
+      activity: act({ subagents: [{ id: 'a', type: 'forge:forge-verify', since: NOW - 60_000 }] }) });
+    expect(m.forge!.timing!.done).toBe(false);
+  });
+  it('the band key changes when the task turns done', () => {
+    const m = buildPanelModel({ band: { mode: 'none' }, now: NOW, forgeStatus: JSON.stringify({ ...B016, agent: null, lastAt: at(29) }), activity: act() });
+    const later = buildPanelModel({ band: { mode: 'none' }, now: NOW + 2 * 60_000, forgeStatus: JSON.stringify({ ...B016, agent: null, lastAt: at(29) }), activity: act() });
+    expect(later.forge!.timing!.done).toBe(true);
+    expect(bandKey(later)).not.toBe(bandKey(m));
+  });
   it('medium and large are unchanged', () => {
     for (const path of ['medium', 'large']) {
       const f = forgeFromStatus(JSON.stringify({ ...B016, path }), NOW)!;
