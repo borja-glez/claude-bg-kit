@@ -261,6 +261,8 @@ describe('forge CLI', () => {
     expect(JSON.parse(run(['triage', 'build a todo app'], io).stdout)).toMatchObject({ greenfield: true, path: 'large' });
   });
   it('triage lists the catalog, announces validators not yet known, then remembers them', () => {
+    // What forge remembers lives under the git common dir: the project is a repository.
+    execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
     writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'x' } }));
     const git = (args: string[]) => (args[0] === '-c' && args.includes('ls-files') ? 'a.ts\nb.ts\nc.ts\nd.ts\ne.ts\n' : args[0] === 'rev-list' ? '5\n' : '');
     const first = JSON.parse(run(['triage', 'fix a typo in a.ts'], { ...io, git }).stdout);

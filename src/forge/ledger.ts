@@ -26,7 +26,7 @@ export function forgeDir(root: string): string {
 }
 
 // True when the file is non-empty and its last byte is not a newline. Reads only that byte.
-function endsMidLine(file: string): boolean {
+export function endsMidLine(file: string): boolean {
   if (!existsSync(file)) return false;
   const fd = openSync(file, 'r');
   try {

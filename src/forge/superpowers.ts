@@ -22,6 +22,12 @@ export function claudeConfigDir(env: Record<string, string | undefined> = proces
   return env.CLAUDE_CONFIG_DIR?.trim() || path.join(homedir(), '.claude');
 }
 
+/** Where Claude Code keeps .claude.json (user and per-project MCP servers): CLAUDE_CONFIG_DIR when set, else the home
+ *  directory (Claude Code joins `CLAUDE_CONFIG_DIR || homedir()` with `.claude.json`). */
+export function claudeJsonDir(env: Record<string, string | undefined> = process.env): string {
+  return env.CLAUDE_CONFIG_DIR?.trim() || homedir();
+}
+
 const isObj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
 const readJson = (file: string): unknown => { try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return null; } };
 const samePath = (a: string, b: string): boolean => {
@@ -41,39 +47,53 @@ function newer(a: string, b: string): boolean {
   return false;
 }
 
-/** enabledPlugins[key] from the most specific settings file that names it: the project's local, the project's, the user's. */
-function enabled(key: string, configDir: string, projectDir: string): boolean {
-  for (const f of [path.join(projectDir, '.claude', 'settings.local.json'), path.join(projectDir, '.claude', 'settings.json'), path.join(configDir, 'settings.json')]) {
-    const s = readJson(f);
-    const ep = isObj(s) && isObj(s.enabledPlugins) ? s.enabledPlugins : null;
-    if (ep && typeof ep[key] === 'boolean') return ep[key] as boolean;
-  }
-  return true;
+/** The enabledPlugins maps of the settings files, most specific first: the project's local, the project's, the user's. */
+function enabledMaps(configDir: string, projectDir: string): Record<string, unknown>[] {
+  return [path.join(projectDir, '.claude', 'settings.local.json'), path.join(projectDir, '.claude', 'settings.json'), path.join(configDir, 'settings.json')]
+    .map(readJson).flatMap(s => (isObj(s) && isObj(s.enabledPlugins) ? [s.enabledPlugins] : []));
 }
 
+/** enabledPlugins[key] from the most specific settings file that names it; on by default. */
+const enabled = (key: string, maps: Record<string, unknown>[]): boolean => {
+  const m = maps.find(ep => typeof ep[key] === 'boolean');
+  return m ? (m[key] as boolean) : true;
+};
+
+export interface InstalledPlugin { key: string; name: string; installPath: string; version: string }
+
 /**
- * superpowers as installed for this project: an entry `superpowers@<marketplace>` of installed_plugins.json whose
- * installPath exists, installed for the user (or for this project: scope project/local with this projectPath) and not
- * turned off in enabledPlugins. The highest version wins.
+ * The plugins this project gets from installed_plugins.json: entries `<name>@<marketplace>` whose installPath exists,
+ * installed for the user (or for this project: scope project/local with this projectPath) and not turned off in
+ * enabledPlugins. `only` filters by name before anything else is read. Fail-open: none.
  */
-export function locateSuperpowers(opts: { configDir: string; projectDir: string }): Superpowers {
+export function installedPlugins(opts: { configDir: string; projectDir: string }, only?: (name: string) => boolean): InstalledPlugin[] {
   try {
     const file = readJson(path.join(opts.configDir, 'plugins', 'installed_plugins.json'));
     const plugins = isObj(file) && isObj(file.plugins) ? file.plugins : null;
-    if (!plugins) return NONE;
-    let best = NONE;
+    if (!plugins) return [];
+    let maps: Record<string, unknown>[] | null = null;
+    const out: InstalledPlugin[] = [];
     for (const [key, value] of Object.entries(plugins)) {
-      if (!/^superpowers@[^@\s]+$/.test(key) || !enabled(key, opts.configDir, opts.projectDir)) continue;
+      const m = /^([^@\s]+)@[^@\s]+$/.exec(key);
+      if (!m || (only && !only(m[1])) || !enabled(key, maps ??= enabledMaps(opts.configDir, opts.projectDir))) continue;
       for (const e of Array.isArray(value) ? value : [value]) {
         if (!isObj(e) || typeof e.installPath !== 'string' || !existsSync(e.installPath)) continue;
         const scope = typeof e.scope === 'string' ? e.scope : 'user';
         if (scope !== 'user' && scope !== 'managed' && !(typeof e.projectPath === 'string' && samePath(e.projectPath, opts.projectDir))) continue;
-        const version = typeof e.version === 'string' && e.version ? e.version : 'unknown';
-        if (!best.installed || newer(version, best.version ?? '')) best = { installed: true, version, installPath: e.installPath };
+        out.push({ key, name: m[1], installPath: e.installPath, version: typeof e.version === 'string' && e.version ? e.version : 'unknown' });
       }
     }
-    return best;
-  } catch { return NONE; }
+    return out;
+  } catch { return []; }
+}
+
+/** superpowers as installed for this project (installedPlugins): the highest version wins. */
+export function locateSuperpowers(opts: { configDir: string; projectDir: string }): Superpowers {
+  let best = NONE;
+  for (const p of installedPlugins(opts, name => name === 'superpowers')) {
+    if (!best.installed || newer(p.version, best.version ?? '')) best = { installed: true, version: p.version, installPath: p.installPath };
+  }
+  return best;
 }
 
 /** The SKILL.md of one superpowers skill, or null (not installed, no such skill, or a name that is not a plain id). */
