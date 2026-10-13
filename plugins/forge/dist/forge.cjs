@@ -12483,6 +12483,8 @@ var MAX_QUOTED = 3;
 var quotedLiterals = (text2) => [...text2.matchAll(QUOTED)].map((m) => (m[1] ?? m[2] ?? m[3]).trim()).filter((q) => q.length >= 4 && q.length <= 60).slice(0, MAX_QUOTED);
 var B = "(?<![\\p{L}\\p{N}_])";
 var E = "(?![\\p{L}\\p{N}_])";
+var METHOD = /^\s*(?:(?:hazlo\s+)?con forge|with forge|f[oó]rjame(?:\s+esto)?|forge it|forge)\s*[:,]\s*/iu;
+var METHOD_END = /[\s,]*(?:con forge|with forge)[\s.!?…]*$/iu;
 var COURTESY = /^\s*(?:please|can you|could you|por favor|puedes)(?![\p{L}\p{N}_])[\s,]*/iu;
 var COURTESY_END = /[\s,]*(?:please|por favor|gracias)[\s.!?…]*$/iu;
 var VERB_EN = "change|set|update|replace";
@@ -12502,7 +12504,7 @@ var MAX_COPY_WORDS = 20;
 var MAX_COPY_TEXT = 1e3;
 function copyGuards(task) {
   if (task.length > MAX_COPY_TEXT || RENAME.some((re) => re.test(task))) return null;
-  const text2 = task.replace(COURTESY, "").replace(COURTESY_END, "").trim();
+  const text2 = task.replace(METHOD, "").replace(METHOD_END, "").replace(COURTESY, "").replace(COURTESY_END, "").trim();
   if (!STARTS_WITH_VERB.test(text2)) return null;
   const last = [...text2.matchAll(QUOTED)].at(-1);
   if (!last || !/^[\s.!?…]*$/u.test(text2.slice(last.index + last[0].length))) return null;
@@ -15911,10 +15913,10 @@ var VERBS = [
   "develop"
 ];
 var VERB = new RegExp(`(?<![\\p{L}\\p{N}_])(?:${VERBS.join("|")})(?![\\p{L}\\p{N}_])`, "iu");
-var METHOD = /(?<![\p{L}\p{N}_])(?:forge|superpowers)(?![\p{L}\p{N}_])/iu;
+var METHOD2 = /(?<![\p{L}\p{N}_])(?:forge|superpowers)(?![\p{L}\p{N}_])/iu;
 function looksLikeCoding(prompt) {
   const p = prompt.trim();
-  return !!p && !p.startsWith("/") && p.split(/\s+/).length >= 6 && VERB.test(p) && !METHOD.test(p);
+  return !!p && !p.startsWith("/") && p.split(/\s+/).length >= 6 && VERB.test(p) && !METHOD2.test(p);
 }
 function fresh(r2, now) {
   const t = Date.parse(r2.ts);
