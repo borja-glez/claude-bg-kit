@@ -43,8 +43,8 @@ for (const [config, withSuperpowers] of [['with-superpowers', true], ['without-s
     const args = claudeArgs(p.text, { settings, pluginDirs });
     if (dry) { console.log(['claude', ...args.map(a => JSON.stringify(a))].join(' ')); continue; }
     const r = spawnSync('claude', args, { cwd: repo, encoding: 'utf8', timeout: 240_000, maxBuffer: 64 * 1024 * 1024, windowsHide: true });
-    const { firstSkill, plugins } = readStream(r.stdout ?? '');
-    const error = r.error ? r.error.message : r.status !== 0 && !firstSkill ? `exit ${r.status}: ${(r.stderr ?? '').trim().split(/\r?\n/).pop() ?? ''}` : null;
+    const { firstSkill, plugins, stop } = readStream(r.stdout ?? '');
+    const error = r.error ? r.error.message : r.status !== 0 && !firstSkill ? `exit ${r.status}: ${stop ?? (r.stderr ?? '').trim().split(/\r?\n/).pop() ?? ''}` : null;
     results.push({ id: p.id, size: p.size, lang: p.lang, config, firstSkill, plugins, error });
     console.log(`${config} ${p.id}: ${firstSkill ?? '—'}${error ? ` (${error})` : ''}`);
   }

@@ -14,8 +14,15 @@ describe('route-eval', () => {
       line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'forge:route' } }] } }),
       line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: 'superpowers:brainstorming' } }] } }),
     ].join('\n');
-    expect(readStream(stream)).toEqual({ firstSkill: 'forge:route', plugins: ['forge', 'waypoint'] });
-    expect(readStream('')).toEqual({ firstSkill: null, plugins: null });
+    expect(readStream(stream)).toEqual({ firstSkill: 'forge:route', plugins: ['forge', 'waypoint'], stop: null });
+    expect(readStream('')).toEqual({ firstSkill: null, plugins: null, stop: null });
+  });
+  it('reads why the session stopped from its result message', () => {
+    const stream = [
+      line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Edit', input: { file_path: 'a' } }] } }),
+      line({ type: 'result', subtype: 'error_max_turns', is_error: true }),
+    ].join('\n');
+    expect(readStream(stream)).toEqual({ firstSkill: null, plugins: null, stop: 'error_max_turns' });
   });
   it('builds the claude arguments and the settings of each configuration', () => {
     expect(claudeArgs('Add X', { settings: 's.json', pluginDirs: ['/p/forge', '/p/waypoint'] })).toEqual(

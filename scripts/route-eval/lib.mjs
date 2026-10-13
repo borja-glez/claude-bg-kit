@@ -1,9 +1,11 @@
 // The empirical routing test (spec §5.1): pure helpers for run.mjs. Plain JavaScript, so `node` runs it as it is.
 
-/** The first skill a Skill tool_use loads and the plugins the init message lists, from `claude -p` stream-json. */
+/** The first skill a Skill tool_use loads, the plugins the init message lists and why the session stopped (the result
+ *  message's subtype, e.g. `error_max_turns`), from `claude -p` stream-json. */
 export function readStream(text) {
   let firstSkill = null;
   let plugins = null;
+  let stop = null;
   for (const line of String(text).split(/\r?\n/)) {
     if (!line.trim()) continue;
     let ev;
@@ -16,8 +18,9 @@ export function readStream(text) {
       const use = ev.message.content.find(c => c && c.type === 'tool_use' && c.name === 'Skill' && typeof c.input?.skill === 'string');
       if (use) firstSkill = use.input.skill;
     }
+    if (ev.type === 'result' && typeof ev.subtype === 'string') stop = ev.subtype;
   }
-  return { firstSkill, plugins };
+  return { firstSkill, plugins, stop };
 }
 
 /** The arguments of one `claude -p` run: two turns are enough to see which skill loads first. */
