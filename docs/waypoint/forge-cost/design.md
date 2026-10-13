@@ -12,7 +12,7 @@ pillars:
     text: Un hallazgo critical, un validador en rojo o una regresión del arreglo siguen parando la tarea; solo se recorta trabajo que no cambia el resultado.
   - title: Cada sesión lee y hace solo lo suyo
     text: El coordinador y las sesiones miembro cargan el texto de su papel y resuelven cada paso con una llamada al CLI, para que el contexto y los pasos no crezcan sin necesidad.
-start_prompt: /waypoint:work <track>
+start_prompt: /waypoint:work textos — forge drives this session (forge:run Large loop)
 status: approved
 artifact: https://claude.ai/artifact/H4Wr9NBYQgXXeb3fhkW8zA
 ---
