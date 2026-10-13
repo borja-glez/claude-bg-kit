@@ -178,6 +178,12 @@ describe('plugin layout', () => {
     for (const w of ['git merge-base HEAD', 'review-<branch>-<tag>', '--base-run', 'git worktree add --detach', 'diff-1.patch', 'FORGE triage', 'review-correctness',
       'review-security', 'review-perf', 'FORGE verdict', 'nothing to review', 'Never merge', 'never push', '/forge:run']) expect(md).toContain(w);
   });
+  it('forge hooks: the routing hooks on SessionStart and UserPromptSubmit', () => {
+    const h = JSON.parse(read('plugins/forge/hooks/hooks.json')).hooks;
+    expect(h.SessionStart).toEqual(expect.arrayContaining([expect.objectContaining({ matcher: 'startup|clear|compact', hooks: [expect.objectContaining({ command: expect.stringContaining('hook route-session') })] })]));
+    expect(h.UserPromptSubmit[0].hooks[0].command).toContain('hook route-prompt');
+    expect(h.SessionStart).toEqual(expect.arrayContaining([expect.objectContaining({ hooks: [expect.objectContaining({ command: expect.stringContaining('hook live') })] })]));
+  });
   it('plan 2 leftovers in the texts: --from-spec triage, declined specs, review ids and base failures', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
     for (const w of ['**From a spec.** With `--from-spec <f>`', 'The path is Large whatever `FORGE triage` prints', 'FORGE sp-specs --decline <path>']) expect(md).toContain(w);

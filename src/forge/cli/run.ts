@@ -27,6 +27,7 @@ import { verifyPlan, cleanupPids, killTarget } from '../verify.js';
 import { readLocal, updateLocal, mainCheckout } from '../local.js';
 import { memberForHook } from '../members.js';
 import { hookLive } from '../live.js';
+import { hookRoute } from '../route-hooks.js';
 import { readSurfaces, detectDrafts, appendLearned, surfaceFile, surfaceHash } from '../surfaces.js';
 import { addDecision, allDecisions, listDecisions, renderDecisionsMd, DecisionInputError } from '../decisions.js';
 import { TASK_ID, decisionScope, scopeFileName } from '../../lib/decisions.js';
@@ -739,7 +740,10 @@ export function run(argv: string[], io: Io): Result {
           at: dir => ({ git: defaultGit(dir), exec: defaultExec(dir), repo: repoReader(dir) }),
         });
       case 'hook': {
-        return { code: 0, stdout: args[0] === 'stop' ? hookStop(io) : args[0] === 'live' ? hookLive(io) : '', stderr: '' };
+        const which = args[0];
+        const out = which === 'stop' ? hookStop(io) : which === 'live' ? hookLive(io)
+          : which === 'route-session' ? hookRoute(io, 'session') : which === 'route-prompt' ? hookRoute(io, 'prompt') : '';
+        return { code: 0, stdout: out, stderr: '' };
       }
       case 'infinite': {
         const sub = args[0];
