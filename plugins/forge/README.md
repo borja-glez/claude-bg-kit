@@ -344,6 +344,8 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 - `verify-result --task id --dir d` - record the result of a `verify.json` outside a verdict (a Small task, a check by hand), so lens shows the task finished.
 - `verify-cleanup --dir d` - stop the processes `forge-verify` left running (from `pids.json`).
 - `waypoint-cli` - print the absolute path of waypoint's `waypoint.cjs` (found next to this plugin, highest version); exits with 2 when it is not found.
+- `tree snapshot --task id [--cwd d] [--force]` / `tree check --task id --base sha [--cwd d]` - record the tree when a task starts (the first snapshot is kept) and, before closing it, list the files the task's commits hold (`task`) apart from the new (`appeared`) and modified (`changed`) files nobody in the task created: those are the person's, and the session never deletes or reverts them.
+- `config get <key>` - the current value of a `.forge/config.yaml` key of the main checkout, defaults applied (`config get evidence` prints `upload` or `local`); read right before acting, since the person can change it while a task runs.
 
 </details>
 
@@ -362,8 +364,8 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 <details>
 <summary><b>Infinite mode and execution</b></summary>
 
-- `infinite start --cycles N | --hours H`, `infinite status`, `cycle --progress yes|no`, `stop`
-- `swarm start --project P --session SID [--mode subagents|sessions] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F]` - start or resume an execution (`--kind ephemeral --tasks F` starts an ephemeral one from the JSON file F of loose tasks and writes its state to `.forge/loose.json`); creates the run branch and its worktree (or brings a stale one up to its base, `baseSync`) and prints the `setup` result and `announce`, the lines the session shows (mode and N, branch, where to open the app, the final merge and how to stop it; `--locale es|en` for an ephemeral run). It also sets git's union merge for `.forge/verify/*.md` (in `.git/info/attributes`), so `Learned` notes added by parallel tasks merge without conflicts. Run it from the main checkout.
+- `infinite start --cycles N | --hours H [--locale code]`, `infinite status`, `cycle --progress yes|no`, `stop` - `--locale` records the person's language: the Stop hook and every wake remind the session to answer in it.
+- `swarm start --project P --session SID [--mode subagents|sessions] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F]` - start or resume an execution (`--kind ephemeral --tasks F` starts an ephemeral one from the JSON file F of loose tasks and writes its state to `.forge/loose.json`); creates the run branch and its worktree (or brings a stale one up to its base, `baseSync`) and prints the `setup` result and `announce`, the lines the session shows (mode and N, branch, where to open the app, the final merge and how to stop it). `--locale <code>` records the person's language, used for those lines and repeated at every hook block and wake. It also sets git's union merge for `.forge/verify/*.md` (in `.git/info/attributes`), so `Learned` notes added by parallel tasks merge without conflicts. Run it from the main checkout.
 - `swarm status` - the execution state, per task.
 - `swarm propose --plan P | --tasks F` - the plan's (or the loose tasks') width and the recommended mode and N.
 - `swarm worktree <task> [--member SID]` - create the task's worktree and branch (and run `swarm.setup`); `--member` is for a member session, which creates its own.

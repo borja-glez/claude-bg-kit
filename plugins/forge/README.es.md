@@ -344,6 +344,8 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 - `verify-result --task id --dir d` - registra el resultado de un `verify.json` fuera de un veredicto (una tarea Small, una comprobación a mano), para que lens enseñe la tarea terminada.
 - `verify-cleanup --dir d` - detiene los procesos que dejó `forge-verify` (según `pids.json`).
 - `waypoint-cli` - imprime la ruta absoluta del `waypoint.cjs` de waypoint (el de mayor versión junto a este plugin); sale con 2 si no lo encuentra.
+- `tree snapshot --task id [--cwd d] [--force]` / `tree check --task id --base sha [--cwd d]` - guarda el árbol al empezar una tarea (se conserva la primera foto) y, antes de cerrarla, lista los ficheros que contienen los commits de la tarea (`task`) aparte de los nuevos (`appeared`) y modificados (`changed`) que nadie de la tarea creó: esos son de la persona, y la sesión nunca los borra ni los revierte.
+- `config get <clave>` - el valor actual de una clave de `.forge/config.yaml` del checkout principal, con los valores por defecto (`config get evidence` imprime `upload` o `local`); se lee justo antes de actuar, porque la persona puede cambiarlo mientras corre una tarea.
 
 </details>
 
@@ -362,8 +364,8 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 <details>
 <summary><b>Modo infinito y ejecución</b></summary>
 
-- `infinite start --cycles N | --hours H`, `infinite status`, `cycle --progress yes|no`, `stop`
-- `swarm start --project P --session SID [--mode subagents|sessions] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F]` - empieza o reanuda una ejecución (`--kind ephemeral --tasks F` empieza una efímera con el fichero JSON F de tareas sueltas y escribe su estado en `.forge/loose.json`); crea la rama de ejecución y su worktree (o pone al día una atrasada respecto a su base, `baseSync`) e imprime el resultado de `setup` y `announce`, las líneas que enseña la sesión (modo y N, rama, dónde abrir la app, la fusión final y cómo pararla; `--locale es|en` en una efímera). También activa la fusión por unión de git para `.forge/verify/*.md` (en `.git/info/attributes`), así que las notas de `Aprendido` que añaden tareas en paralelo se fusionan sin conflictos. Ejecútalo desde el checkout principal.
+- `infinite start --cycles N | --hours H [--locale código]`, `infinite status`, `cycle --progress yes|no`, `stop` - `--locale` anota el idioma de la persona: el hook Stop y cada despertar recuerdan a la sesión que conteste en él.
+- `swarm start --project P --session SID [--mode subagents|sessions] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F]` - empieza o reanuda una ejecución (`--kind ephemeral --tasks F` empieza una efímera con el fichero JSON F de tareas sueltas y escribe su estado en `.forge/loose.json`); crea la rama de ejecución y su worktree (o pone al día una atrasada respecto a su base, `baseSync`) e imprime el resultado de `setup` y `announce`, las líneas que enseña la sesión (modo y N, rama, dónde abrir la app, la fusión final y cómo pararla). `--locale <código>` anota el idioma de la persona, que se usa en esas líneas y se repite en cada bloqueo del hook y cada despertar. También activa la fusión por unión de git para `.forge/verify/*.md` (en `.git/info/attributes`), así que las notas de `Aprendido` que añaden tareas en paralelo se fusionan sin conflictos. Ejecútalo desde el checkout principal.
 - `swarm status` - el estado de la ejecución, por tarea.
 - `swarm propose --plan P | --tasks F` - el ancho del plan (o de las tareas sueltas) y el modo y la N recomendados.
 - `swarm worktree <tarea> [--member SID]` - crea el worktree y la rama de la tarea (y ejecuta `swarm.setup`); `--member` es para una sesión miembro, que crea el suyo.
