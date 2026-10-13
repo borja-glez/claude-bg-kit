@@ -178,6 +178,13 @@ describe('plugin layout', () => {
     for (const w of ['git merge-base HEAD', 'review-<branch>-<tag>', '--base-run', 'git worktree add --detach', 'diff-1.patch', 'FORGE triage', 'review-correctness',
       'review-security', 'review-perf', 'FORGE verdict', 'nothing to review', 'Never merge', 'never push', '/forge:run']) expect(md).toContain(w);
   });
+  it('forge:route skill: first, steps aside for small work, one question, hands over', () => {
+    const md = read('plugins/forge/skills/route/SKILL.md');
+    expect(md).toMatch(/^---\r?\nname: route\r?\ndescription: Use FIRST — before superpowers:brainstorming, writing-plans or any other process skill — when the user asks for coding work that is more than a trivial edit/);
+    for (const w of ['FORGE triage --task <id> --text-file', 'Trivial or Small', 'workflow: forge', 'FORGE route --task <id> --path <path>', '--run-plan', '(Recomendado)',
+      'superpowers diseña, forge construye', 'superpowers planifica, forge ejecuta', 'sin forge', 'forge local set workflow <option>', 'FORGE route set --task <id> --chosen',
+      'forge:run --from-spec', 'forge:run --superpowers-plan', 'FORGE route stage --stage planning', '/forge:review', '**the user chose**']) expect(md).toContain(w);
+  });
   it('forge hooks: the routing hooks on SessionStart and UserPromptSubmit', () => {
     const h = JSON.parse(read('plugins/forge/hooks/hooks.json')).hooks;
     expect(h.SessionStart).toEqual(expect.arrayContaining([expect.objectContaining({ matcher: 'startup|clear|compact', hooks: [expect.objectContaining({ command: expect.stringContaining('hook route-session') })] })]));
