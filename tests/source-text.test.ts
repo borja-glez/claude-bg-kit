@@ -3,10 +3,10 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 const ROOT = process.cwd();
-// Invisible bidi controls (U+202A to U+202E, U+2066 to U+2069) in source text hide what the code says. Built from code
-// points, so this file never holds them either.
+// Invisible characters in source text hide what the code says: the bidi controls (U+202A to U+202E, U+2066 to U+2069),
+// the BOM (U+FEFF) and the zero-width ones (U+200B to U+200F). Built from code points, so this file never holds them.
 const cp = (n: number) => String.fromCharCode(n);
-const BIDI = new RegExp(`[${cp(0x202a)}-${cp(0x202e)}${cp(0x2066)}-${cp(0x2069)}]`);
+const INVISIBLE = new RegExp(`[${cp(0x202a)}-${cp(0x202e)}${cp(0x2066)}-${cp(0x2069)}${cp(0xfeff)}${cp(0x200b)}-${cp(0x200f)}]`);
 function files(dir: string): string[] {
   const out: string[] = [];
   for (const name of readdirSync(dir)) {
@@ -19,10 +19,10 @@ function files(dir: string): string[] {
 }
 
 describe('source text', () => {
-  it('has no raw bidi control characters', () => {
+  it('has no raw invisible characters (bidi controls, BOM, zero-width)', () => {
     const hits = ['src', 'tests', 'plugins/lens/tests', 'plugins/waypoint/tests']
       .flatMap(d => files(path.join(ROOT, d)))
-      .filter(f => BIDI.test(readFileSync(f, 'utf8')))
+      .filter(f => INVISIBLE.test(readFileSync(f, 'utf8')))
       .map(f => path.relative(ROOT, f).split(path.sep).join('/'));
     expect(hits).toEqual([]);
   });

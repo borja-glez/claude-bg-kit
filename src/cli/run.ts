@@ -296,7 +296,11 @@ export function run(argv: string[], io: Io): Result {
           if (e instanceof SpecImportError) return fail(`design-import: ${e.message}`, 2);
           throw e;
         }
-        const d = parseDesign(design);
+        let d;
+        try { d = parseDesign(design); } catch (e) {
+          if (e instanceof DesignError) return fail(`design-import: ${e.message}`, 2);
+          throw e;
+        }
         mkdirSync(path.dirname(target), { recursive: true });
         try { writeFileSync(target, design, { flag: 'wx' }); } catch (e) {
           if ((e as NodeJS.ErrnoException).code === 'EEXIST') return fail(`design-import: ${out} already exists; an import never overwrites a design`, 2);

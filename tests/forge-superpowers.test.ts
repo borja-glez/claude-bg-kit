@@ -129,6 +129,17 @@ describe('tdd: superpowers', () => {
     expect(JSON.parse(run(['tdd'], { ...io, env: { CLAUDE_CONFIG_DIR: path.join(cfg, 'none') } }).stdout))
       .toEqual({ tdd: 'superpowers', installed: false, version: null, skill: null, line: null });
   });
+  it('a brief never fails on the TDD lookup: an invalid config leaves the line out', () => {
+    registry({ 'superpowers@m': [install('6.4.1')] });
+    copyFileSync(new URL('./fixtures/plan.yaml', import.meta.url), path.join(project, 'plan.yaml'));
+    config('tdd: always\n');
+    const io: Io = { cwd: project, now: () => new Date(), env: { CLAUDE_CONFIG_DIR: cfg } };
+    const id = parsePlan(readFileSync(path.join(project, 'plan.yaml'), 'utf8')).tasks[0].id;
+    const r = run(['brief', '--plan', 'plan.yaml', '--task', id], io);
+    expect(r.code).toBe(0);
+    expect(r.stdout).not.toContain('TDD');
+    expect(run(['tdd'], io).code).toBe(2);
+  });
   it('both briefs carry the line with tdd: superpowers, and none with tdd: off', () => {
     registry({ 'superpowers@m': [install('6.4.1')] });
     config('tdd: superpowers\n');

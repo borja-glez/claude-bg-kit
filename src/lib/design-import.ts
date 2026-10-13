@@ -5,6 +5,8 @@ import { stringify } from 'yaml';
 
 export class SpecImportError extends Error {}
 export const SUMMARY_MAX = 400;
+// A byte order mark some editors put first, from its code point so the source never holds the invisible character.
+const BOM = String.fromCharCode(0xfeff);
 const PURPOSE = /prop[oó]sito|purpose|overview|resumen|summary|objetivo|goal/i;
 
 interface Line { text: string; fenced: boolean }
@@ -53,7 +55,7 @@ function firstParagraph(lines: Line[]): string | null {
 }
 
 export function importSpec(text: string, opts: { project: string; locale: string; source: string }): string {
-  const src = text.replace(/^﻿/, '');
+  const src = text.startsWith(BOM) ? text.slice(1) : text;
   const lines = linesOf(src);
   const h1 = lines.findIndex(l => !l.fenced && /^#\s+\S/.test(l.text));
   if (h1 < 0) throw new SpecImportError('the spec has no "# " title');

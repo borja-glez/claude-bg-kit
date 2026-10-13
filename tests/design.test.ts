@@ -79,7 +79,7 @@ describe('fix round 1: fences, headings, BOM, intro, slugs', () => {
     expect(sectionsOf('## Title ##\n\nx\n')[0].slug).toBe('title');
   });
   it('parses a BOM-prefixed CRLF file', () => {
-    const d = parseDesign('﻿---\r\ntitle: X\r\nproject: p\r\nsummary: S\r\n---\r\n\r\n## A\r\n\r\nb\r\n');
+    const d = parseDesign(`${String.fromCharCode(0xfeff)}---\r\ntitle: X\r\nproject: p\r\nsummary: S\r\n---\r\n\r\n## A\r\n\r\nb\r\n`);
     expect(d.meta.title).toBe('X');
     expect(d.sections[0].slug).toBe('a');
   });

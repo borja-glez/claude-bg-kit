@@ -194,6 +194,12 @@ function tddFor(io: Io, dir: string) {
   return { tdd, installed: sp.installed, version: sp.version, skill, line: tdd === 'superpowers' && skill ? tddLine(skill) : null };
 }
 
+// The TDD line of a brief: an invalid config or a missing superpowers leaves it out (the brief never fails on it), and
+// superpowers is looked for only with tdd: superpowers.
+function briefTdd(io: Io, dir: string): string | null {
+  try { return loadConfig(dir).tdd === 'superpowers' ? tddFor(io, dir).line : null; } catch { return null; }
+}
+
 // What the stop conditions need from the repository: the stop file and the proposal mirror.
 // Approved work still pending = every approved/auto_approved proposal not yet done, with or without a task.
 function stopContext(cwd: string, now: Date): StopContext {
@@ -293,7 +299,7 @@ export function run(argv: string[], io: Io): Result {
           const n = spTaskNumber(flag('task'));
           let text: string;
           try { text = readFileSync(path.resolve(io.cwd, file), 'utf8'); } catch { throw new UsageError(`brief: cannot read ${file}`); }
-          try { return ok(renderSpBrief(text, n, { planPath: file.replace(/\\/g, '/'), tdd: tddFor(io, repoDir).line })); } catch (e) {
+          try { return ok(renderSpBrief(text, n, { planPath: file.replace(/\\/g, '/'), tdd: briefTdd(io, repoDir) })); } catch (e) {
             if (e instanceof SpPlanError) throw new UsageError(`brief: ${file}: ${e.message}`);
             throw e;
           }
@@ -301,7 +307,7 @@ export function run(argv: string[], io: Io): Result {
         const { plan, task } = planTask(io.cwd, flag('plan'), flag('task'));
         const design = flag('design') ?? path.join(path.dirname(flag('plan')!), 'design.md');
         const designPath = existsSync(path.resolve(io.cwd, design)) ? design.replace(/\\/g, '/') : null;
-        return ok(renderBrief(plan, task, { planPath: flag('plan')!.replace(/\\/g, '/'), designPath, tdd: tddFor(io, repoDir).line }));
+        return ok(renderBrief(plan, task, { planPath: flag('plan')!.replace(/\\/g, '/'), designPath, tdd: briefTdd(io, repoDir) }));
       }
       case 'triage': {
         const textArgs = [...args];

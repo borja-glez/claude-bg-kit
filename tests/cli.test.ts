@@ -823,6 +823,9 @@ describe('design-import', () => {
     expect(run(['design-import', 'docs/superpowers/specs/s.md', '--project', '..', '--out', 'o1.md'], io).code).toBe(2);
     expect(run(['design-import', 'missing.md', '--project', 'cart', '--out', 'o2.md'], io).code).toBe(2);
     expect(run(['design-import', 'docs/superpowers/specs/s.md', '--out', 'o4.md'], io).code).toBe(2);
+    // A design the import would make invalid (an empty locale) is refused like any bad argument, and nothing is written.
+    expect(run(['design-import', 'docs/superpowers/specs/s.md', '--project', 'cart2', '--locale', '', '--out', 'o5.md'], io).code).toBe(2);
+    expect(existsSync(path.join(dir, 'o5.md'))).toBe(false);
     writeFileSync(path.join(dir, 'flat.md'), '# Only a title\n\ntext\n');
     expect(run(['design-import', 'flat.md', '--project', 'cart', '--out', 'o3.md'], io).code).toBe(2);
     expect(existsSync(path.join(dir, 'o3.md'))).toBe(false);
