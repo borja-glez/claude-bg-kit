@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { resolvePrefs } from '../src/forge/prefs.js';
@@ -20,9 +19,7 @@ describe('forge prefs and local set', () => {
   let io: Io;
   beforeEach(() => {
     root = mkdtempSync(path.join(tmpdir(), 'forge-prefs-'));
-    // Personal preferences live under the git common dir: the project is a repository.
-    execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
-    io = { cwd: root, now: () => new Date('2026-10-13T10:00:00.000Z') };
+    io ={ cwd: root, now: () => new Date('2026-10-13T10:00:00.000Z') };
   });
   it('prints the resolved preferences and their sources', () => {
     mkdirSync(path.join(root, '.forge'), { recursive: true });
@@ -38,9 +35,7 @@ describe('forge prefs and local set', () => {
   it('saves «sin forge» as workflow: off, in local.yaml and in config.yaml', () => {
     expect(run(['local', 'set', 'workflow', 'off'], io).code).toBe(0);
     expect(JSON.parse(run(['prefs'], io).stdout)).toMatchObject({ workflow: 'off', sources: { workflow: 'local' } });
-    expect(readFileSync(path.join(root, '.git', 'forge', 'local.yaml'), 'utf8')).toMatch(/^workflow: off$/m);
-    expect(existsSync(path.join(root, '.forge', 'local.yaml'))).toBe(false);
-    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    expect(readFileSync(path.join(root, '.forge', 'local.yaml'), 'utf8')).toMatch(/^workflow: off$/m);
     writeFileSync(path.join(root, '.forge', 'config.yaml'), 'workflow: off\n');
     expect(run(['local', 'set', 'workflow', 'none'], io).code).toBe(0);
     expect(JSON.parse(run(['prefs'], io).stdout)).toMatchObject({ workflow: 'off', sources: { workflow: 'config' } });

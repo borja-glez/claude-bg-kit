@@ -1,11 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { checkTools, mcpInventory, toolGaps, toolKeys } from '../src/forge/tools.js';
 import { run, type Io } from '../src/forge/cli/run.js';
-import { readLocal, readPermissions } from '../src/forge/local.js';
+import { readLocal } from '../src/forge/local.js';
 import { surfaceHash } from '../src/forge/surfaces.js';
 
 const exec = (out: string, code = 0) => () => ({ code, output: out, ms: 1, timedOut: false });
@@ -130,8 +129,7 @@ describe('mcpInventory', () => {
 describe('forge local', () => {
   let root: string; let io: Io;
   beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-localcli-')); io = { cwd: root, now: () => new Date('2026-10-12T10:00:00Z') }; });
-  it('set and get a surface permission tied to its content; none removes it', () => {
-    execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
+  it('set and get a surface permission tied to its content, in .forge/local.yaml; none removes it', () => {
     mkdirSync(path.join(root, '.forge', 'verify'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'verify', 'web.md'), '# Web\nRun it.\n');
     expect(run(['local', 'set', 'surfaces.web', 'allowed'], io).code).toBe(0);
@@ -139,9 +137,8 @@ describe('forge local', () => {
     expect(run(['local', 'set', 'surfaces.nope', 'allowed'], io).code).toBe(2); // allowing needs the file, to hash it
     expect(run(['local', 'set', 'surfaces.nope', 'denied'], io).code).toBe(0);
     expect(run(['local', 'set', 'surfaces.web', 'none'], io).code).toBe(0);
-    expect(readPermissions(root)).toEqual({ nope: { state: 'denied', hash: null } });
+    expect(readLocal(root).surfaces).toEqual({ nope: { state: 'denied', hash: null } });
     expect(JSON.parse(run(['local', 'get'], io).stdout)).toEqual({ surfaces: { nope: { state: 'denied', hash: null } }, known: [], proposed: [] });
-    expect(readLocal(root)).toEqual({ known: [], proposed: [] });
   });
   it('refuses other paths and values', () => {
     expect(run(['local', 'set', 'known', 'x'], io).code).toBe(2);

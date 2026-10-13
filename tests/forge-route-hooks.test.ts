@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { looksLikeCoding, routeReminder, routingRule, ROUTE_HINT } from '../src/forge/route-hooks.js';
@@ -78,22 +77,15 @@ describe('forge hook route-session and route-prompt', () => {
     writeRoute(root, { task: 't1', chosen: 'forge', by: 'user', stage: 'done', ts: NOW.toISOString(), session: 'S1' });
     expect(context(hook('route-prompt', PROMPT)).additionalContext).toBe(ROUTE_HINT);
   });
-  // The person's local.yaml, under the git common dir.
+  // The person's .forge/local.yaml.
   const personal = (text: string) => {
-    execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
-    mkdirSync(path.join(root, '.git', 'forge'), { recursive: true });
-    writeFileSync(path.join(root, '.git', 'forge', 'local.yaml'), text);
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'local.yaml'), text);
   };
   it('stays silent with workflow: off, which keeps forge out of the routing', () => {
     personal('workflow: off\n');
     expect(hook('route-prompt', PROMPT).stdout).toBe('');
     expect(hook('route-session', { session_id: 'S1' }).stdout).toBe('');
-  });
-  it('a workflow in the working tree\'s .forge/local.yaml (a commit could ship one) is not read', () => {
-    execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
-    mkdirSync(path.join(root, '.forge'), { recursive: true });
-    writeFileSync(path.join(root, '.forge', 'local.yaml'), 'workflow: off\n');
-    expect(context(hook('route-prompt', PROMPT)).additionalContext).toBe(ROUTE_HINT);
   });
   it('stays silent with workflow: superpowers, where forge already drives the session, and on bad input', () => {
     personal('workflow: superpowers\n');

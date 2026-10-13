@@ -1,7 +1,7 @@
 // forge's routing hooks (spec §5.2). SessionStart (`hook route-session`) puts the routing rule in the session's context;
 // UserPromptSubmit (`hook route-prompt`) reminds a route half done, else hints at forge:route for coding work. Both fail
 // open (any error prints nothing), stay silent where forge already drives the session or the user chose superpowers
-// (or off) in local.yaml, and run two git commands: mainCheckout, and the git common dir where local.yaml lives.
+// (or off) in local.yaml, and run no git beyond mainCheckout.
 import { loadConfig } from './config.js';
 import { readExecution } from './execution.js';
 import { mainCheckout, readLocal } from './local.js';

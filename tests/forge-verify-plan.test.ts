@@ -7,14 +7,19 @@ import { verifyPlan, cleanupPids, killTarget, askFor, capLines } from '../src/fo
 import { surfaceHash, type Surface, type Draft } from '../src/forge/surfaces.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { readEvents } from '../src/forge/ledger.js';
-import { readPermissions, setPermission } from '../src/forge/local.js';
+import { readLocal, writeLocal, type SurfacePermission } from '../src/forge/local.js';
 
 const surf = (name: string, affects: string[] | null, tools: string[] = []): Surface => ({ name, file: `.forge/verify/${name}.md`, title: name, affects, tools, hash: `h-${name}` });
 // An allowance made for the surface as surf() builds it (same hash), and the drafts already proposed.
 const local = (states: Record<string, 'allowed' | 'denied'> = {}, proposed: string[] = []) => ({
-  permissions: Object.fromEntries(Object.entries(states).map(([k, v]) => [k, v === 'allowed' ? { state: 'allowed' as const, hash: `h-${k}` } : { state: 'denied' as const, hash: null }])),
-  local: { proposed },
+  local: {
+    surfaces: Object.fromEntries(Object.entries(states).map(([k, v]) => [k, v === 'allowed' ? { state: 'allowed' as const, hash: `h-${k}` } : { state: 'denied' as const, hash: null }])),
+    proposed,
+  },
 });
+// The surface permissions in local.yaml, and one of them set as `local set` keeps it.
+const readPermissions = (root: string) => readLocal(root).surfaces;
+const setPermission = (root: string, name: string, perm: SurfacePermission) => writeLocal(root, { ...readLocal(root), surfaces: { ...readPermissions(root), [name]: perm } });
 const none = () => ({ missing: [] as string[], unknown: [] as string[] });
 const base = { asked: false, changed: ['src/ui/Cart.tsx'], drafts: [] as Draft[], tools: none };
 
@@ -33,12 +38,15 @@ describe('verifyPlan', () => {
     ]);
     expect(r.eligible).toBe(true);
   });
-  it('only the exact hash allows: a shorter one (forge ≤ 0.12 stored 16 hex) or none asks again', () => {
+  it('the full hash allows, and so does a 16-hex one of forge ≤ 0.12 that it starts with; anything else asks again', () => {
     const full = `${'a'.repeat(16)}${'b'.repeat(48)}`;
-    const perm = (hash: string | null) => ({ permissions: { web: { state: 'allowed' as const, hash } }, local: { proposed: [] } });
+    const perm = (hash: string | null) => ({ local: { surfaces: { web: { state: 'allowed' as const, hash } }, proposed: [] } });
     const plan = (hash: string | null) => verifyPlan({ ...base, path: 'medium', surfaces: [{ ...surf('web', null), hash: full }], ...perm(hash) }).surfaces[0].permission;
     expect(plan(full)).toBe('allowed');
-    expect(plan('a'.repeat(16))).toBe('changed');
+    expect(plan('a'.repeat(16))).toBe('allowed');
+    expect(plan(`${'a'.repeat(15)}c`)).toBe('changed');
+    expect(plan('a'.repeat(17))).toBe('changed');
+    expect(plan('A'.repeat(16))).toBe('changed');
     expect(plan('')).toBe('changed');
     expect(plan(null)).toBe('changed');
   });
@@ -257,7 +265,6 @@ describe('forge verify-plan', () => {
   let root: string; let io: Io;
   beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-vp-')); io = { cwd: root, now: () => new Date('2026-10-12T10:00:00Z') }; });
   it('reads surfaces, permissions and the diff, logs a verify event', () => {
-    execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
     mkdirSync(path.join(root, '.forge', 'verify'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'verify', 'web.md'), '---\naffects: ["src/**"]\n---\n# Web\n');
     expect(run(['local', 'set', 'surfaces.web', 'allowed'], io).code).toBe(0);
