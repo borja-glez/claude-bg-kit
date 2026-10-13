@@ -297,6 +297,37 @@ describe('forge CLI', () => {
     expect(readEvents(root).at(-1)).not.toHaveProperty('announce');
     expect(readEvents(root).at(-1)).not.toHaveProperty('gate');
   });
+  it('triage prints who reviews also without a plan or --base, and logs it in the triage event', () => {
+    io.git = args => (args.includes('ls-files') ? 'src/a.ts\nsrc/b.ts\nsrc/c.ts\nsrc/d.ts\nsrc/e.ts\n' : args[0] === 'rev-list' ? '12\n' : '');
+    const medium = JSON.parse(run(['triage', '--task', 'm1', 'tidy up src/a.ts src/b.ts src/c.ts src/d.ts'], io).stdout);
+    expect(medium.path).toBe('medium');
+    expect(medium.sensitive).toEqual([]);
+    expect(medium.review).toEqual({ light: false, flags: [],
+      reviewers: [{ role: 'review-correctness', model: null, effort: 'high', agent: 'forge-review-correctness' }] });
+    expect(medium).not.toHaveProperty('diff');
+    expect(medium.gate).toBe('plan');
+    expect(readEvents(root).at(-1)).toMatchObject({ kind: 'triage', task: 'm1', path: 'medium', review: medium.review });
+    const auth = JSON.parse(run(['triage', 'change the password check in src/a.ts'], io).stdout);
+    expect(auth.path).toBe('medium');
+    expect(auth.review.reviewers).toEqual([
+      { role: 'review-correctness', model: null, effort: 'xhigh', agent: 'forge-review-correctness' },
+      { role: 'review-security', model: null, effort: 'xhigh', agent: 'forge-review-security' },
+    ]);
+    expect(auth.review.flags).toEqual(['--sensitive']);
+    expect(readEvents(root).at(-1)).toMatchObject({ kind: 'triage', review: auth.review });
+    // --delicate lifts correctness; it is a switch, not part of the task text.
+    const delicate = JSON.parse(run(['triage', '--delicate', 'tidy up src/a.ts src/b.ts src/c.ts src/d.ts'], io).stdout);
+    expect(delicate.review.reviewers[0]).toMatchObject({ role: 'review-correctness', effort: 'xhigh' });
+    expect(delicate.reasons).toEqual(medium.reasons);
+    // A small task gets the light review.
+    expect(JSON.parse(run(['triage', 'add a dark mode toggle'], io).stdout).review)
+      .toEqual({ light: true, flags: [], reviewers: [{ role: 'review-correctness', model: 'sonnet', effort: 'medium', agent: 'forge-review-correctness' }] });
+    // The quality profile puts every reviewer on xhigh.
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'profile: quality\n');
+    const quality = JSON.parse(run(['triage', 'tidy up src/a.ts src/b.ts src/c.ts src/d.ts'], io).stdout);
+    expect(quality.review.reviewers.map((r: { effort: string }) => r.effort)).toEqual(['xhigh']);
+  });
   it('triage --locale es announces in Spanish, with the reasons translated', () => {
     io.git = args => (args.includes('ls-files') ? 'src/a.ts\nsrc/b.ts\nsrc/c.ts\nsrc/d.ts\nsrc/e.ts\n' : args[0] === 'rev-list' ? '12\n' : '');
     expect(JSON.parse(run(['triage', '--locale', 'es', 'fix the typo in src/a.ts'], io).stdout).announce)
@@ -946,10 +977,10 @@ describe('triage --base', () => {
     expect(out.review.reviewers.map((x: { role: string }) => x.role)).toEqual(['review-correctness']);
     expect(out.review.flags).toEqual([]);
     expect(out.reasons).toContain('diff: 5 file(s), 10 line(s)');
-    // The ratchet: a later plain triage of the task keeps the diff-raised path, and has no diff nor review.
+    // The ratchet: a later plain triage of the task keeps the diff-raised path, and has no diff; it still says who reviews.
     const plain = JSON.parse(run(['triage', '--plan', 'plan.yaml', '--task', 'T001'], io).stdout);
     expect(plain.path).toBe('medium');
-    expect(plain).not.toHaveProperty('review');
+    expect(plain.review.reviewers.map((x: { role: string }) => x.role)).toEqual(['review-correctness']);
     expect(plain).not.toHaveProperty('diff');
     expect(readEvents(root).at(-1)).not.toHaveProperty('diff');
   });

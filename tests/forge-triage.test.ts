@@ -298,11 +298,42 @@ describe('real diff sizing', () => {
     const light = [{ role: 'review-correctness', model: 'sonnet', effort: 'medium' }];
     expect(reviewFor('small', ['auth'], true)).toEqual({ light: true, reviewers: light, flags: [] });
     expect(reviewFor('trivial', [], false)).toEqual({ light: true, reviewers: light, flags: [] });
-    const full = (role: string) => ({ role, model: null, effort: null });
-    expect(reviewFor('medium', [], false)).toEqual({ light: false, reviewers: [full('review-correctness')], flags: [] });
-    expect(reviewFor('medium', ['auth'], false)).toEqual({ light: false, reviewers: [full('review-correctness'), full('review-security')], flags: ['--sensitive'] });
+    const full = (role: string, effort: string) => ({ role, model: null, effort });
+    expect(reviewFor('medium', [], false)).toEqual({ light: false, reviewers: [full('review-correctness', 'high')], flags: [] });
+    expect(reviewFor('medium', ['auth'], false))
+      .toEqual({ light: false, reviewers: [full('review-correctness', 'xhigh'), full('review-security', 'xhigh')], flags: ['--sensitive'] });
     expect(reviewFor('large', ['auth'], true))
-      .toEqual({ light: false, reviewers: [full('review-correctness'), full('review-security'), full('review-perf')], flags: ['--sensitive', '--perf'] });
+      .toEqual({ light: false, reviewers: [full('review-correctness', 'xhigh'), full('review-security', 'xhigh'), full('review-perf', 'medium')], flags: ['--sensitive', '--perf'] });
+  });
+  it('reviewFor sets each reviewer effort by the table', () => {
+    const effort = (r: ReturnType<typeof reviewFor>) => Object.fromEntries(r.reviewers.map(x => [x.role, x.effort]));
+    // correctness: high; xhigh when sensitive, delicate, or Large's final review.
+    expect(effort(reviewFor('medium', [], false))).toEqual({ 'review-correctness': 'high' });
+    expect(effort(reviewFor('large', [], false))).toEqual({ 'review-correctness': 'high' });
+    expect(effort(reviewFor('medium', ['data'], false))).toEqual({ 'review-correctness': 'xhigh', 'review-security': 'high' });
+    expect(effort(reviewFor('medium', [], false, { delicate: true }))).toEqual({ 'review-correctness': 'xhigh' });
+    expect(effort(reviewFor('large', [], false, { final: true }))).toEqual({ 'review-correctness': 'xhigh' });
+    // `final` only lifts Large's final review.
+    expect(effort(reviewFor('medium', [], false, { final: true }))).toEqual({ 'review-correctness': 'high' });
+    // security: high, xhigh when the sensitive zones include auth.
+    expect(effort(reviewFor('medium', ['deps', 'ci'], false))['review-security']).toBe('high');
+    expect(effort(reviewFor('medium', ['data', 'auth'], false))['review-security']).toBe('xhigh');
+    // perf: medium, never higher.
+    expect(effort(reviewFor('large', ['auth'], true, { delicate: true, final: true }))['review-perf']).toBe('medium');
+    // Every non-light reviewer keeps the agent's own model.
+    expect(reviewFor('large', ['auth'], true).reviewers.every(r => r.model === null)).toBe(true);
+    // The light review is unchanged, delicate or not.
+    expect(reviewFor('small', [], false, { delicate: true }).reviewers).toEqual([{ role: 'review-correctness', model: 'sonnet', effort: 'medium' }]);
+  });
+  it('reviewFor: the quality profile puts every reviewer on xhigh; balanced and economy use the table', () => {
+    const effort = (r: ReturnType<typeof reviewFor>) => r.reviewers.map(x => x.effort);
+    expect(effort(reviewFor('medium', ['data'], true, { profile: 'quality' }))).toEqual(['xhigh', 'xhigh', 'xhigh']);
+    expect(effort(reviewFor('medium', [], false, { profile: 'quality' }))).toEqual(['xhigh']);
+    expect(effort(reviewFor('medium', ['data'], true, { profile: 'balanced' }))).toEqual(['xhigh', 'high', 'medium']);
+    expect(effort(reviewFor('medium', ['data'], true, { profile: 'economy' }))).toEqual(['xhigh', 'high', 'medium']);
+    expect(effort(reviewFor('medium', [], false, { profile: 'economy' }))).toEqual(['high']);
+    // The light review stays on sonnet medium under quality too.
+    expect(reviewFor('trivial', [], false, { profile: 'quality' }).reviewers).toEqual([{ role: 'review-correctness', model: 'sonnet', effort: 'medium' }]);
   });
   it('announceReview says the real size and who reviews, in English and Spanish', () => {
     const small = { path: 'small' as const, files: 2, lines: 30, review: reviewFor('small', [], false) };

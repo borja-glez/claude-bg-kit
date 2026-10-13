@@ -563,8 +563,11 @@ export function run(argv: string[], io: Io): Result {
         const fresh = names.filter(n => !known.includes(n));
         // `known` mirrors what exists now: new names are added, vanished ones dropped silently.
         if (fresh.length || known.some(n => !names.includes(n))) updateLocal(io.cwd, s => ({ ...s, known: names }));
+        // Who reviews, by the size reached and the configured profile: printed always and logged for review-prep.
+        const reviewPlan = reviewFor(result.path, result.sensitive, isPerfTask(task), { delicate: has('delicate'), profile });
+        const review = { ...reviewPlan, reviewers: reviewPlan.reviewers.map(r => ({ ...r, agent: agentFor(r.role, profile) })) };
         appendEvent(io.cwd, { ts: ts(), kind: 'triage', ...(flag('task') ? { task: flag('task') } : {}), ...(project !== null ? { project } : {}), ...result, ...auto,
-          ...(diff ? { diff: { base: diff.base, files: diff.stat.files.length, lines: diff.stat.lines } } : {}) });
+          ...(diff ? { diff: { base: diff.base, files: diff.stat.files.length, lines: diff.stat.lines } } : {}), review });
         // Output only, like `implementer`: the exact line the session prints, and whether a short plan comes first.
         // The locale: the flag, else the plan passed with --plan, else the plan under docs/waypoint, else English.
         const locale = localeArg ?? ((plannedDoc?.plan.locale ?? planLocale(io.cwd))?.toLowerCase().split(/[-_]/)[0] === 'es' ? 'es' : 'en');
@@ -573,20 +576,18 @@ export function run(argv: string[], io: Io): Result {
         // After the implementation: who reviews it, by its real size. No short plan comes first any more.
         let reviewed = {};
         if (diff) {
-          const plan = reviewFor(result.path, result.sensitive, isPerfTask(task));
-          const review = { ...plan, reviewers: plan.reviewers.map(r => ({ ...r, agent: agentFor(r.role, profile) })) };
           // The new-validators line `announce` appends, kept after the review line.
           const bare = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh: [], catalog }, locale as AnnounceLocale);
-          line = announceReview({ path: result.path, files: diff.stat.files.length, lines: diff.stat.lines, review: plan }, locale as AnnounceLocale)
+          line = announceReview({ path: result.path, files: diff.stat.files.length, lines: diff.stat.lines, review: reviewPlan }, locale as AnnounceLocale)
             + line.slice(bare.length);
           gate = null;
-          reviewed = { diff: { base: diff.base, files: diff.stat.files, lines: diff.stat.lines, path: diff.path }, review };
+          reviewed = { diff: { base: diff.base, files: diff.stat.files, lines: diff.stat.lines, path: diff.path } };
         }
         // forgeDir creates .forge/.gitignore and no step commits it: say so while git lists it as untracked and not
         // ignored (a repository that ignores .forge/ has opted out).
         const untracked = listed !== null && lines(git(['ls-files', '--others', '--exclude-standard', '--', '.forge/.gitignore'])).length
           ? { untracked: ['.forge/.gitignore'] } : {};
-        return json({ ...result, catalog, new: fresh, implementer, announce: line, gate, ...untracked, ...auto, ...reviewed });
+        return json({ ...result, catalog, new: fresh, implementer, announce: line, gate, ...untracked, ...auto, ...reviewed, review });
       }
       case 'validate': {
         const config = loadConfig(repoDir);

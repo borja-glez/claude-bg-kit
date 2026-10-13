@@ -116,12 +116,26 @@ export function isPerfTask(text: string): boolean {
 }
 
 export type ReviewRole = 'review-correctness' | 'review-security' | 'review-perf';
-export interface ReviewPlan { light: boolean; reviewers: { role: ReviewRole; model: 'sonnet' | null; effort: 'medium' | null }[]; flags: ('--sensitive' | '--perf')[] }
-/** Who reviews a task of this size: below Medium one light correctness review, else correctness plus security and perf as they apply. */
-export function reviewFor(path: PathName, sensitive: Zone[], perf: boolean): ReviewPlan {
+export type ReviewEffort = 'medium' | 'high' | 'xhigh';
+export interface ReviewPlan { light: boolean; reviewers: { role: ReviewRole; model: 'sonnet' | null; effort: ReviewEffort }[]; flags: ('--sensitive' | '--perf')[] }
+/** `delicate`: the task was marked delicate; `final`: Large's final review; `profile`: the configured one (quality lifts every reviewer). */
+export interface ReviewOptions { delicate?: boolean; final?: boolean; profile?: 'balanced' | 'economy' | 'quality' }
+/**
+ * Who reviews a task of this size: below Medium one light correctness review (sonnet, medium), else correctness plus
+ * security and perf as they apply, each on the agent's own model with its effort by risk. The table is provisional
+ * until the shadow test: correctness high (xhigh when sensitive, delicate or Large's final review), security high
+ * (xhigh on auth), perf medium; the quality profile puts them all on xhigh.
+ */
+export function reviewFor(path: PathName, sensitive: Zone[], perf: boolean, opts: ReviewOptions = {}): ReviewPlan {
   if (path === 'trivial' || path === 'small') return { light: true, reviewers: [{ role: 'review-correctness', model: 'sonnet', effort: 'medium' }], flags: [] };
   const roles: ReviewRole[] = ['review-correctness', ...(sensitive.length ? ['review-security' as const] : []), ...(perf ? ['review-perf' as const] : [])];
-  return { light: false, reviewers: roles.map(role => ({ role, model: null, effort: null })),
+  const effort = (role: ReviewRole): ReviewEffort => {
+    if (opts.profile === 'quality') return 'xhigh';
+    if (role === 'review-perf') return 'medium';
+    if (role === 'review-security') return sensitive.includes('auth') ? 'xhigh' : 'high';
+    return sensitive.length || opts.delicate || (opts.final && path === 'large') ? 'xhigh' : 'high';
+  };
+  return { light: false, reviewers: roles.map(role => ({ role, model: null, effort: effort(role) })),
     flags: [...(sensitive.length ? ['--sensitive' as const] : []), ...(perf ? ['--perf' as const] : [])] };
 }
 
