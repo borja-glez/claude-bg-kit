@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, utimesSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { claudeConfigDir, locateSuperpowers, spPlans, spSkillPath, spSpecs } from '../src/forge/superpowers.js';
@@ -97,6 +98,8 @@ describe('sp-specs and sp-plans', () => {
     expect(spSpecs(project, NOW)[0].title).toBe('Real');
   });
   it('sp-specs --decline remembers a spec the user turned down', () => {
+    // What forge remembers lives under the git common dir: the project is a repository.
+    execFileSync('git', ['init', '-q'], { cwd: project, stdio: 'ignore' });
     file('docs/superpowers/specs/a.md', '# A\n\n## X\n', 1);
     const io: Io = { cwd: project, now: () => new Date(NOW), env: { CLAUDE_CONFIG_DIR: cfg } };
     expect(JSON.parse(run(['sp-specs', '--decline', 'docs/superpowers/specs/a.md'], io).stdout)).toEqual({ declined: 'docs/superpowers/specs/a.md' });

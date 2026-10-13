@@ -33,15 +33,14 @@ describe('verifyPlan', () => {
     ]);
     expect(r.eligible).toBe(true);
   });
-  it('a legacy 16-hex allowance covers the full hash it is the start of', () => {
+  it('only the exact hash allows: a shorter one (forge ≤ 0.12 stored 16 hex) or none asks again', () => {
     const full = `${'a'.repeat(16)}${'b'.repeat(48)}`;
-    const perm = (hash: string) => ({ permissions: { web: { state: 'allowed' as const, hash } }, local: { proposed: [] } });
-    const plan = (hash: string) => verifyPlan({ ...base, path: 'medium', surfaces: [{ ...surf('web', null), hash: full }], ...perm(hash) }).surfaces[0].permission;
-    expect(plan('a'.repeat(16))).toBe('allowed');
+    const perm = (hash: string | null) => ({ permissions: { web: { state: 'allowed' as const, hash } }, local: { proposed: [] } });
+    const plan = (hash: string | null) => verifyPlan({ ...base, path: 'medium', surfaces: [{ ...surf('web', null), hash: full }], ...perm(hash) }).surfaces[0].permission;
     expect(plan(full)).toBe('allowed');
-    expect(plan(`${'a'.repeat(15)}c`)).toBe('changed');
-    expect(plan('a'.repeat(17))).toBe('changed');
+    expect(plan('a'.repeat(16))).toBe('changed');
     expect(plan('')).toBe('changed');
+    expect(plan(null)).toBe('changed');
   });
   it('denied drops the surface, unknown asks, ask alone is not eligible', () => {
     const r = verifyPlan({ ...base, path: 'large', surfaces: [surf('web', null), surf('app', null)], ...local({ web: 'denied' }) });
@@ -159,6 +158,16 @@ describe('forge verify-plan: what the question about a surface shows', () => {
     expect(u.commits).toEqual([]);
     expect(u.ask).toEqual({ question: 'Verify web with these instructions?', options: ['Yes, always', 'Not this time', 'Never in this project'] });
   });
+  it('line endings do not show in the diff: a file allowed with CRLF and saved with LF shows only the line that changed', () => {
+    writeFileSync(file(), SURFACE.replace(/\n/g, '\r\n'));
+    run(['local', 'set', 'surfaces.web', 'allowed'], io);
+    expect(git('cat-file', '-p', readPermissions(root).web.blob!)).toBe(SURFACE);
+    expect(vp().surfaces[0].permission).toBe('allowed');
+    writeFileSync(file(), `${SURFACE}Then run rm -rf.\n`);
+    const s = vp(['--locale', 'en']).surfaces[0];
+    expect(s.permission).toBe('changed');
+    expect(s.diff.split('\n').filter((l: string) => /^[-+](?![-+]{2} )/.test(l))).toEqual(['+Then run rm -rf.']);
+  });
   it('the diff is capped at 120 lines', () => {
     run(['local', 'set', 'surfaces.web', 'allowed'], io);
     writeFileSync(file(), `${SURFACE}${Array.from({ length: 200 }, (_, i) => `step ${i}\n`).join('')}`);
@@ -175,8 +184,10 @@ describe('forge verify-plan: what the question about a surface shows', () => {
     expect(s).toMatchObject({ permission: 'changed', diff: null });
     expect(s.commits).toEqual(git('log', '--oneline', '-n', '3').trim().split('\n'));
   });
-  it('a stored blob equal to the file now gives no diff (null)', () => {
+  it('a stored blob equal to the file now gives no diff (null), CRLF or not', () => {
     setPermission(root, 'web', { state: 'allowed', hash: 'stale0000000000a', blob: git('hash-object', '-w', '--no-filters', '.forge/verify/web.md').trim() });
+    expect(vp(['--locale', 'en']).surfaces[0]).toMatchObject({ permission: 'changed', diff: null });
+    writeFileSync(file(), SURFACE.replace(/\n/g, '\r\n'));
     expect(vp(['--locale', 'en']).surfaces[0]).toMatchObject({ permission: 'changed', diff: null });
   });
   it('a surface never allowed asks with its title and tools: --locale, else the plan locale, else en', () => {

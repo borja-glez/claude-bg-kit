@@ -170,6 +170,7 @@ describe('forge surfaces CLI', () => {
   let root: string; let io: Io;
   beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-surf-cli-')); io = { cwd: root, now: () => new Date('2026-10-12T10:00:00Z') }; });
   it('lists surfaces and drafts not yet existing or proposed', () => {
+    initRepo(root);
     writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { dev: 'vite' }, devDependencies: { vite: '5' } }));
     writeFileSync(path.join(root, 'capacitor.config.ts'), '');
     mkdirSync(path.join(root, '.forge', 'verify'), { recursive: true });

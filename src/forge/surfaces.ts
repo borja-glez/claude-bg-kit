@@ -16,13 +16,6 @@ export function surfaceHash(text: string): string {
   return createHash('sha256').update(text.replace(/\r\n/g, '\n')).digest('hex');
 }
 
-/** Whether a stored permission hash covers the surface's hash now: the same, or a 16-hex hash of forge ≤ 0.12 (the
- *  first 16 hex of the same sha256). */
-export function hashMatches(stored: string | null | undefined, current: string): boolean {
-  if (!stored) return false;
-  return stored === current || (/^[0-9a-f]{16}$/.test(stored) && current.startsWith(stored));
-}
-
 /** What `surfaces learn` records for each line it appends: the sha256 (64 hex) of the line, trimmed. */
 export function lineDigest(line: string): string {
   return createHash('sha256').update(line.replace(/\r\n?/g, '\n').trim()).digest('hex');

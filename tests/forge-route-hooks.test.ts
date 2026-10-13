@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { looksLikeCoding, routeReminder, routingRule, ROUTE_HINT } from '../src/forge/route-hooks.js';
@@ -77,19 +78,29 @@ describe('forge hook route-session and route-prompt', () => {
     writeRoute(root, { task: 't1', chosen: 'forge', by: 'user', stage: 'done', ts: NOW.toISOString(), session: 'S1' });
     expect(context(hook('route-prompt', PROMPT)).additionalContext).toBe(ROUTE_HINT);
   });
+  // The person's local.yaml, under the git common dir.
+  const personal = (text: string) => {
+    execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
+    mkdirSync(path.join(root, '.git', 'forge'), { recursive: true });
+    writeFileSync(path.join(root, '.git', 'forge', 'local.yaml'), text);
+  };
   it('stays silent with workflow: off, which keeps forge out of the routing', () => {
-    mkdirSync(path.join(root, '.forge'), { recursive: true });
-    writeFileSync(path.join(root, '.forge', 'local.yaml'), 'workflow: off\n');
+    personal('workflow: off\n');
     expect(hook('route-prompt', PROMPT).stdout).toBe('');
     expect(hook('route-session', { session_id: 'S1' }).stdout).toBe('');
   });
-  it('stays silent with workflow: superpowers, where forge already drives the session, and on bad input', () => {
+  it('a workflow in the working tree\'s .forge/local.yaml (a commit could ship one) is not read', () => {
+    execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
     mkdirSync(path.join(root, '.forge'), { recursive: true });
-    writeFileSync(path.join(root, '.forge', 'local.yaml'), 'workflow: superpowers\n');
+    writeFileSync(path.join(root, '.forge', 'local.yaml'), 'workflow: off\n');
+    expect(context(hook('route-prompt', PROMPT)).additionalContext).toBe(ROUTE_HINT);
+  });
+  it('stays silent with workflow: superpowers, where forge already drives the session, and on bad input', () => {
+    personal('workflow: superpowers\n');
     expect(hook('route-prompt', PROMPT).stdout).toBe('');
     expect(hook('route-session', { session_id: 'S1' }).stdout).toBe('');
     // An invalid local value is ignored, so forge routes again.
-    writeFileSync(path.join(root, '.forge', 'local.yaml'), 'workflow: maybe\n');
+    personal('workflow: maybe\n');
     expect(hook('route-prompt', PROMPT).stdout).not.toBe('');
     saveExecution(root, {
       runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,

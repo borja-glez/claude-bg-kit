@@ -1,9 +1,9 @@
 // The rule for tool verification (spec §5.1): never on Trivial or Small unless the task asks; on Medium and Large a
 // surface is a candidate when the diff touches its `affects`, or always when it has none. Permission comes from the
-// store under the git common dir (local.ts: denied drops the surface; unknown asks). Missing and unknown tools are
-// reported, never a reason to drop.
+// store under the git common dir (local.ts: denied drops the surface; unknown asks; an allowance covers its exact
+// hash). Missing and unknown tools are reported, never a reason to drop.
 import { globMatch } from './validators.js';
-import { hashMatches, type Draft, type Surface } from './surfaces.js';
+import type { Draft, Surface } from './surfaces.js';
 import type { LocalState, SurfacePermission } from './local.js';
 
 export interface Ask { question: string; options: string[] }
@@ -34,7 +34,7 @@ export function verifyPlan(i: {
       match = m;
     }
     // An allowance covers the content it was given for: an edited surface (another commit, a PR) asks again.
-    const permission = perm?.state !== 'allowed' ? 'ask' : hashMatches(perm.hash, s.hash) ? 'allowed' : 'changed';
+    const permission = perm?.state !== 'allowed' ? 'ask' : perm.hash === s.hash ? 'allowed' : 'changed';
     const { missing, unknown } = i.tools(s);
     surfaces.push({ name: s.name, permission, match, missing, unknown, hash: s.hash });
   }
