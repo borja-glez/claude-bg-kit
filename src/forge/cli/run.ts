@@ -29,12 +29,13 @@ import { hookLive } from '../live.js';
 import { readSurfaces, detectDrafts, appendLearned, surfaceFile, surfaceHash } from '../surfaces.js';
 import { addDecision, allDecisions, listDecisions, renderDecisionsMd, DecisionInputError } from '../decisions.js';
 import { TASK_ID, decisionScope, scopeFileName } from '../../lib/decisions.js';
+import { claudeConfigDir, locateSuperpowers, spPlans, spSkillPath, spSpecs } from '../superpowers.js';
 
 export interface ExecResult { code: number; output: string; ms: number; timedOut: boolean }
-export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void }
+export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined> }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|decision|agents|last|proposals|surfaces|tools|local|verify-plan|verify-cleanup|waypoint-cli|infinite|cycle|swarm|stop|hook> ...';
+const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|decision|agents|last|proposals|surfaces|tools|local|verify-plan|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|infinite|cycle|swarm|stop|hook> ...';
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 
@@ -160,6 +161,9 @@ export function findWaypointCli(scriptPath: string): string | null {
   }
   return null;
 }
+
+// superpowers as installed for this repository: its main checkout holds the project settings and is the projectPath.
+const superpowersOf = (io: Io, dir: string) => locateSuperpowers({ configDir: claudeConfigDir(io.env ?? process.env), projectDir: mainCheckout(dir) });
 
 // What the stop conditions need from the repository: the stop file and the proposal mirror.
 // Approved work still pending = every approved/auto_approved proposal not yet done, with or without a task.
@@ -722,6 +726,15 @@ export function run(argv: string[], io: Io): Result {
         if (!found) throw new UsageError('waypoint-cli: waypoint.cjs not found next to this forge install; is the waypoint plugin installed?');
         return ok(found);
       }
+      case 'sp-path': {
+        const skill = args[0];
+        if (!skill || skill.startsWith('--')) throw new UsageError('sp-path: the name of a superpowers skill is required');
+        return json(spSkillPath(superpowersOf(io, repoDir), skill));
+      }
+      case 'sp-specs':
+        return json(spSpecs(repoDir, io.now().getTime()));
+      case 'sp-plans':
+        return json(spPlans(repoDir, io.now().getTime()));
       case 'agents': {
         const { profile } = loadConfig(io.cwd);
         return json({ profile, agents: Object.fromEntries(ROLES.map(r => [r, agentFor(r, profile)])) });
