@@ -12510,7 +12510,8 @@ function implementerFor(r2, text2, opts = {}) {
     case "medium":
       return r2.sensitive.length ? { role: "impl-heavy", self: false, why: `medium on a sensitive zone (${r2.sensitive.join(", ")})` } : { role: "impl", self: false, why: "medium" };
     default:
-      return opts.plan ? { role: "impl-heavy", self: false, why: "large plan task: impl-heavy (the plan may need to split it)" } : { role: null, self: false, why: "large: design and plan first" };
+      if (!opts.plan) return { role: null, self: false, why: "large: design and plan first" };
+      return r2.sensitive.length ? { role: "impl-heavy", self: false, why: `large plan task on a sensitive zone (${r2.sensitive.join(", ")}): impl-heavy` } : { role: "impl", self: false, why: "large plan task: impl, as a medium one (the plan may need to split it)" };
   }
 }
 var isBookkeeping = (path22) => /^(docs\/waypoint|docs\/superpowers|\.forge|\.waypoint)\//.test(path22);
@@ -12650,7 +12651,7 @@ function isCopyChange(task) {
 }
 var PATH_TOKEN = /[\w.\-/]*[\w-]\.[A-Za-z0-9]{1,8}\b|[\w.-]+\/[\w.\-/]+/g;
 var isSymbol = (w) => w.length >= 4 && (/[a-z][A-Z]/.test(w) || /^[A-Za-z]+_[A-Za-z0-9_]+$/.test(w));
-function triage(task, repo, validators, extra) {
+function triage(task, repo, validators, extra, opts = {}) {
   const reasons = [];
   const text2 = String(task).slice(0, MAX_TEXT);
   const files = new Set(extra?.files);
@@ -12677,7 +12678,7 @@ function triage(task, repo, validators, extra) {
   const wordCount2 = text2.trim().split(/\s+/).length;
   const sized = named.size ? named.size : Math.min(files.size, MAX_FILES);
   let path22;
-  if (greenfield) {
+  if (greenfield && !opts.ignoreGreenfield) {
     path22 = "large";
     reasons.push("greenfield repository");
   } else if (LARGE.some((re) => re.test(text2))) {
@@ -16735,7 +16736,7 @@ function run(argv, io) {
         const extra = planned ? { files: zoneFiles, zones: zonesFromPaths(planned.zones) } : spFiles ? { files: tracked.filter((f) => spFiles.includes(f)), zones: zonesFromPaths(spFiles) } : void 0;
         const catalog = detectValidators(repoReader(repoDir), loadConfig(repoDir)).map((v) => ({ name: v.name, cmd: v.cmd, kind: v.kind, source: v.source }));
         const names2 = catalog.map((v) => v.name);
-        const result = triage(task, { files: tracked, commits, gitOk: listed !== null, grep }, names2, extra);
+        const result = triage(task, { files: tracked, commits, gitOk: listed !== null, grep }, names2, extra, { ignoreGreenfield: planned !== null });
         if (planned?.zones.length && !zoneFiles.length) result.reasons.push("zones match no tracked file (new files?)");
         if (spFiles) {
           result.path = "medium";
@@ -16747,15 +16748,20 @@ function run(argv, io) {
           if (out === null) throw new UsageError(`triage: cannot diff ${base}..HEAD`);
           const stat = parseNumstat(out);
           const d = diffPath(stat);
-          if (PATH_ORDER.indexOf(d.path) > PATH_ORDER.indexOf(result.path)) result.path = d.path;
           result.sensitive = ZONE_ORDER.filter((z) => result.sensitive.includes(z) || d.sensitive.includes(z));
-          result.reasons.push(...d.reasons);
+          result.path = d.path;
+          result.reasons = [...d.reasons];
+          if (result.sensitive.length && PATH_ORDER.indexOf(result.path) < PATH_ORDER.indexOf("medium")) {
+            result.path = "medium";
+            result.reasons.push(`sensitive zone: ${result.sensitive.join(", ")}`);
+          }
           diff = { base, stat, path: d.path };
         }
+        const project = plannedDoc ? plannedDoc.plan.project : null;
         let raiseWhy = null;
         if (flag("task")) {
           const rank = (p) => PATH_ORDER.indexOf(p);
-          const logged = readEvents(io.cwd).filter((e) => e.kind === "triage" && e.task === flag("task") && rank(e.path) >= 0);
+          const logged = readEvents(io.cwd).filter((e) => e.kind === "triage" && e.task === flag("task") && rank(e.path) >= 0 && (base === null || e.diff !== void 0) && (project === null || e.project === project));
           const prior = logged.reduce((max, e) => max === null || rank(e.path) > rank(max) ? e.path : max, null);
           if (prior && rank(prior) > rank(result.path)) {
             result.path = prior;
@@ -16776,6 +16782,7 @@ function run(argv, io) {
           ts: ts(),
           kind: "triage",
           ...flag("task") ? { task: flag("task") } : {},
+          ...project !== null ? { project } : {},
           ...result,
           ...auto,
           ...diff ? { diff: { base: diff.base, files: diff.stat.files.length, lines: diff.stat.lines } } : {}

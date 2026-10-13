@@ -514,28 +514,37 @@ export function run(argv: string[], io: Io): Result {
           : spFiles ? { files: tracked.filter(f => spFiles!.includes(f)), zones: zonesFromPaths(spFiles) } : undefined;
         const catalog = detectValidators(repoReader(repoDir), loadConfig(repoDir)).map(v => ({ name: v.name, cmd: v.cmd, kind: v.kind, source: v.source }));
         const names = catalog.map(v => v.name);
-        const result = triage(task, { files: tracked, commits, gitOk: listed !== null, grep }, names, extra);
+        // A plan task was already designed and planned: a young repository does not make it Large.
+        const result = triage(task, { files: tracked, commits, gitOk: listed !== null, grep }, names, extra, { ignoreGreenfield: planned !== null });
         if (planned?.zones.length && !zoneFiles.length) result.reasons.push('zones match no tracked file (new files?)');
         // A superpowers plan runs on the Medium path, one task after another: its tasks build on each other.
         if (spFiles) { result.path = 'medium'; result.reasons.push('superpowers plan: the Medium path, its tasks in order'); }
-        // The real diff only raises: the path is the higher of the text's and the diff's, before the ratchet compares.
+        // The real diff alone sizes an implemented task: the text's estimate sets no floor, only a sensitive zone
+        // (its text, its plan zones or its diff) keeps it at Medium.
         let diff: { base: string; stat: { files: string[]; lines: number }; path: PathName } | null = null;
         if (base !== null) {
           const out = git(['-c', 'core.quotePath=false', 'diff', '--numstat', '--no-renames', `${base}..HEAD`]);
           if (out === null) throw new UsageError(`triage: cannot diff ${base}..HEAD`);
           const stat = parseNumstat(out);
           const d = diffPath(stat);
-          if (PATH_ORDER.indexOf(d.path) > PATH_ORDER.indexOf(result.path)) result.path = d.path;
           result.sensitive = ZONE_ORDER.filter(z => result.sensitive.includes(z) || d.sensitive.includes(z));
-          result.reasons.push(...d.reasons);
+          result.path = d.path;
+          result.reasons = [...d.reasons];
+          if (result.sensitive.length && PATH_ORDER.indexOf(result.path) < PATH_ORDER.indexOf('medium')) {
+            result.path = 'medium';
+            result.reasons.push(`sensitive zone: ${result.sensitive.join(', ')}`);
+          }
           diff = { base, stat, path: d.path };
         }
-        // The ratchet: a repeated triage of the same task never lowers the path it already reached.
+        // The ratchet: a repeated triage of the same task never lowers the path it already reached. With --base only the
+        // earlier --base sizings count, and a plan task only counts the triages of its own plan's project (ids repeat).
         // A raise the session logged with a `why` explains the path better than the CLI reasons: the announcement uses it.
+        const project = plannedDoc ? plannedDoc.plan.project : null;
         let raiseWhy: string | null = null;
         if (flag('task')) {
           const rank = (p: unknown) => PATH_ORDER.indexOf(p as PathName);
-          const logged = readEvents(io.cwd).filter(e => e.kind === 'triage' && e.task === flag('task') && rank(e.path) >= 0);
+          const logged = readEvents(io.cwd).filter(e => e.kind === 'triage' && e.task === flag('task') && rank(e.path) >= 0
+            && (base === null || e.diff !== undefined) && (project === null || e.project === project));
           const prior = logged.reduce<PathName | null>((max, e) => (max === null || rank(e.path) > rank(max) ? e.path as PathName : max), null);
           if (prior && rank(prior) > rank(result.path)) {
             result.path = prior;
@@ -554,7 +563,7 @@ export function run(argv: string[], io: Io): Result {
         const fresh = names.filter(n => !known.includes(n));
         // `known` mirrors what exists now: new names are added, vanished ones dropped silently.
         if (fresh.length || known.some(n => !names.includes(n))) updateLocal(io.cwd, s => ({ ...s, known: names }));
-        appendEvent(io.cwd, { ts: ts(), kind: 'triage', ...(flag('task') ? { task: flag('task') } : {}), ...result, ...auto,
+        appendEvent(io.cwd, { ts: ts(), kind: 'triage', ...(flag('task') ? { task: flag('task') } : {}), ...(project !== null ? { project } : {}), ...result, ...auto,
           ...(diff ? { diff: { base: diff.base, files: diff.stat.files.length, lines: diff.stat.lines } } : {}) });
         // Output only, like `implementer`: the exact line the session prints, and whether a short plan comes first.
         // The locale: the flag, else the plan passed with --plan, else the plan under docs/waypoint, else English.

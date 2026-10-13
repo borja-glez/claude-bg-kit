@@ -54,7 +54,8 @@ export type ImplRole = 'mech' | 'impl-light' | 'impl' | 'impl-heavy';
 export interface Implementer { role: ImplRole | null; self: boolean; why: string }
 
 /** Model by size (spec §2): Trivial alone is the session's; Small is always delegated; in a batch a Trivial goes to mech. */
-// A plan task (`plan`): the coordinator never edits task code, so a Trivial goes to mech, and a Large to impl-heavy.
+// A plan task (`plan`): the coordinator never edits task code, so a Trivial goes to mech; a Large one was already
+// designed and planned, so it goes to impl as a Medium one does, and to impl-heavy only on a sensitive zone.
 export function implementerFor(r: Pick<TriageResult, 'path' | 'sensitive'>, text: string, opts: { batch?: boolean; plan?: boolean } = {}): Implementer {
   switch (r.path) {
     case 'trivial':
@@ -68,8 +69,9 @@ export function implementerFor(r: Pick<TriageResult, 'path' | 'sensitive'>, text
       return r.sensitive.length ? { role: 'impl-heavy', self: false, why: `medium on a sensitive zone (${r.sensitive.join(', ')})` }
         : { role: 'impl', self: false, why: 'medium' };
     default:
-      return opts.plan ? { role: 'impl-heavy', self: false, why: 'large plan task: impl-heavy (the plan may need to split it)' }
-        : { role: null, self: false, why: 'large: design and plan first' };
+      if (!opts.plan) return { role: null, self: false, why: 'large: design and plan first' };
+      return r.sensitive.length ? { role: 'impl-heavy', self: false, why: `large plan task on a sensitive zone (${r.sensitive.join(', ')}): impl-heavy` }
+        : { role: 'impl', self: false, why: 'large plan task: impl, as a medium one (the plan may need to split it)' };
   }
 }
 
@@ -173,7 +175,7 @@ export function announce(a: AnnounceInput, locale: AnnounceLocale): string {
         : `Medium → ${agent}: ${why}. I show you a short plan before launching it; you can correct it.`;
       break;
     default:
-      // A plan task names its implementer (impl-heavy); a task that is not one is designed and planned first.
+      // A plan task names its implementer (impl, impl-heavy on a sensitive zone); a task that is not one is designed and planned first.
       line = agent ? (es ? `Large → ${agent}: ${why}. Puedes corregirlo.` : `Large → ${agent}: ${why}. You can correct it.`)
         : es ? `Large: ${why}; primero diseño y plan. Puedes corregirlo.` : `Large: ${why}; design and plan first. You can correct it.`;
   }
@@ -252,7 +254,9 @@ const PATH_TOKEN = /[\w.\-/]*[\w-]\.[A-Za-z0-9]{1,8}\b|[\w.-]+\/[\w.\-/]+/g;
 // Symbols worth a grep: camelCase, PascalCase with an inner capital, snake_case, or `backticked`.
 const isSymbol = (w: string) => w.length >= 4 && (/[a-z][A-Z]/.test(w) || /^[A-Za-z]+_[A-Za-z0-9_]+$/.test(w));
 
-export function triage(task: string, repo: RepoFacts, validators: string[], extra?: { files: string[]; zones: Zone[] }): TriageResult {
+// `ignoreGreenfield`: a plan task was already designed and planned, so a young repository does not make it Large.
+export function triage(task: string, repo: RepoFacts, validators: string[], extra?: { files: string[]; zones: Zone[] },
+  opts: { ignoreGreenfield?: boolean } = {}): TriageResult {
   const reasons: string[] = [];
   // Capped so that the regexes below stay fast on pasted logs or huge specs.
   const text = String(task).slice(0, MAX_TEXT);
@@ -285,7 +289,7 @@ export function triage(task: string, repo: RepoFacts, validators: string[], extr
   const sized = named.size ? named.size : Math.min(files.size, MAX_FILES);
 
   let path: PathName;
-  if (greenfield) { path = 'large'; reasons.push('greenfield repository'); }
+  if (greenfield && !opts.ignoreGreenfield) { path = 'large'; reasons.push('greenfield repository'); }
   else if (LARGE.some(re => re.test(text))) { path = 'large'; reasons.push('architecture-scale wording'); }
   else if (sized > 10) { path = 'large'; reasons.push(`${sized} files located`); }
   else if (sized > 3) { path = 'medium'; reasons.push(`${sized} files located`); }
