@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto';
 
 export type ReviewerName = 'correctness' | 'security' | 'perf' | 'verify';
-export interface Finding { severity: 'critical' | 'important' | 'minor'; file?: string; line?: number; problem: string; fix?: string }
+// origin (fix rounds, delta mode): previous = an earlier finding still open, fix = introduced by the fix,
+// untouched = in code the fix did not touch.
+export type Origin = 'previous' | 'fix' | 'untouched';
+const ORIGINS = ['previous', 'fix', 'untouched'] as const;
+export interface Finding { severity: 'critical' | 'important' | 'minor'; file?: string; line?: number; problem: string; fix?: string; origin?: Origin }
 export interface Review { verdict: 'pass' | 'fail' | 'abstain'; confidence: number; findings: Finding[]; approach?: 'ok' | 'wrong'; invalid?: boolean; dropped?: number }
 export interface FailingValidator { validator: string; failures: string[] }
 export interface Weights { correctness: number; security: number; perf: number; verify: number }
@@ -9,7 +13,12 @@ export type Action = 'accept' | 'fix' | 'redo';
 export interface VerdictResult {
   action: Action; score: number | null; reasons: string[]; critical: Finding[]; important: Finding[]; minor: Finding[];
   reviewers: { name: ReviewerName; verdict: Review['verdict']; confidence: number; weight: number; invalid: boolean; dropped: number }[]; signature: string;
+  // From round 2: important untouched findings left for the person because nothing else opened a round.
+  deferred: Finding[];
 }
+// New-side line ranges of a fix diff's hunks, per file (path as in `+++ b/<path>`).
+export type FixHunks = Record<string, { start: number; end: number }[]>;
+export interface RoundOptions { round?: number; fixHunks?: FixHunks }
 
 const invalidReview = (): Review => ({ verdict: 'abstain', confidence: 0, findings: [], invalid: true });
 const SEVERITIES = ['critical', 'important', 'minor'] as const;
@@ -40,7 +49,43 @@ function findingOf(v: unknown): Finding | null {
   const line = lineOf(f.line);
   if (line !== undefined) out.line = line;
   if (typeof f.fix === 'string') out.fix = f.fix;
+  const origin = typeof f.origin === 'string' ? f.origin.trim().toLowerCase() : '';
+  if ((ORIGINS as readonly string[]).includes(origin)) out.origin = origin as Origin;
   return out;
+}
+
+const normPath = (p: string) => p.trim().replace(/\\/g, '/').replace(/^(\.\/)+/, '');
+
+// Reads the hunks of a unified diff: the file from each `+++ b/<path>` header (a deleted file, /dev/null,
+// has none) and the new-side range of each `@@ -a,b +c,d @@`. A pure deletion (d = 0) covers line c.
+export function parseHunks(diff: string): FixHunks {
+  const out: FixHunks = {};
+  let file: string | null = null;
+  let prev = '';
+  for (const raw of diff.split('\n')) {
+    const line = raw.replace(/\r$/, '');
+    if (line.startsWith('+++ ') && prev.startsWith('--- ')) {
+      const p = line.slice(4).split('\t')[0];
+      file = p === '/dev/null' ? null : normPath(p.startsWith('b/') ? p.slice(2) : p);
+    } else if (file) {
+      const m = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(line);
+      if (m) {
+        const start = Number(m[1]), count = m[2] === undefined ? 1 : Number(m[2]);
+        (out[file] ??= []).push({ start, end: start + Math.max(count, 1) - 1 });
+      }
+    }
+    prev = line;
+  }
+  return out;
+}
+
+// Checks a reviewer's origin label against the fix's hunks: an untouched finding whose file and line fall
+// inside a hunk is fix, and one without file or line cannot be shown untouched, so it is fix too.
+export function correctOrigin(f: Finding, hunks: FixHunks): Finding {
+  if (f.origin !== 'untouched') return f;
+  if (!f.file?.trim() || f.line === undefined) return { ...f, origin: 'fix' };
+  const ranges = hunks[normPath(f.file)] ?? [];
+  return ranges.some(r => f.line! >= r.start && f.line! <= r.end) ? { ...f, origin: 'fix' } : f;
 }
 
 // Reads a reviewer's JSON (possibly wrapped in prose or a fence). Output that cannot be used at all
@@ -139,17 +184,33 @@ function reviewScore(r: Review): number {
   return r.approach === 'wrong' || !concrete ? 0.5 - 0.5 * r.confidence : 0.6 - 0.1 * r.confidence;
 }
 
-export function synthesize(reviews: Partial<Record<ReviewerName, Review>>, weights: Weights, validatorsOk: boolean, failingValidators: FailingValidator[] = []): VerdictResult {
+// From round 2 (opts.round >= 2) origins are checked against opts.fixHunks and an important untouched finding
+// does not open a round by itself: it rides along when something else opens one, and is deferred when the
+// task is accepted. A review whose only blocking findings are such scores as a pass with its confidence,
+// and the signature leaves them out. Round 1, or no opts, behaves as before.
+export function synthesize(reviews: Partial<Record<ReviewerName, Review>>, weights: Weights, validatorsOk: boolean, failingValidators: FailingValidator[] = [], opts: RoundOptions = {}): VerdictResult {
   const names = (Object.keys(reviews) as ReviewerName[]).filter(n => reviews[n]);
-  const answered = names.filter(n => reviews[n]!.verdict !== 'abstain');
-  const all = answered.flatMap(n => reviews[n]!.findings);
+  const later = (opts.round ?? 1) >= 2;
+  const hunks = opts.fixHunks ?? {};
+  const rv: Partial<Record<ReviewerName, Review>> = later
+    ? Object.fromEntries(names.map(n => [n, { ...reviews[n]!, findings: reviews[n]!.findings.map(f => correctOrigin(f, hunks)) }]))
+    : reviews;
+  const deferrable = (f: Finding) => later && f.severity === 'important' && f.origin === 'untouched';
+  const blocks = (f: Finding) => (f.severity === 'critical' && isEvidence(f)) || f.severity === 'important';
+  // The review as the score and the fail rule see it: failing only on deferrable findings counts as a pass.
+  const effective = (r: Review): Review => {
+    const b = r.findings.filter(blocks);
+    return r.verdict === 'fail' && b.length && b.every(deferrable) ? { ...r, verdict: 'pass' } : r;
+  };
+  const answered = names.filter(n => rv[n]!.verdict !== 'abstain');
+  const all = answered.flatMap(n => rv[n]!.findings);
   const critical = all.filter(f => f.severity === 'critical' && isEvidence(f));
-  const important = all.filter(f => f.severity === 'important');
+  let important = all.filter(f => f.severity === 'important');
   const minor = all.filter(f => f.severity === 'minor' || (f.severity === 'critical' && !isEvidence(f)));
-  const failImportant = answered.some(n => reviews[n]!.verdict === 'fail' && reviews[n]!.findings.some(f => f.severity === 'important'));
+  const failImportant = answered.some(n => effective(rv[n]!).verdict === 'fail' && rv[n]!.findings.some(f => f.severity === 'important' && !deferrable(f)));
   const sumW = answered.reduce((s, n) => s + weights[n], 0);
   const score = answered.length && sumW > 0
-    ? round3(answered.reduce((s, n) => s + weights[n] * reviewScore(reviews[n]!), 0) / sumW)
+    ? round3(answered.reduce((s, n) => s + weights[n] * reviewScore(effective(rv[n]!)), 0) / sumW)
     : null;
   const reasons: string[] = [];
   let action: Action;
@@ -169,13 +230,22 @@ export function synthesize(reviews: Partial<Record<ReviewerName, Review>>, weigh
   } else {
     action = 'fix'; reasons.push(`score ${score} between 0.5 and 0.7`);
   }
+  let deferred: Finding[] = [];
+  if (action === 'accept') {
+    deferred = important.filter(deferrable);
+    if (deferred.length) {
+      important = important.filter(f => !deferrable(f));
+      reasons.push(`${deferred.length} untouched important finding(s) deferred`);
+    }
+  }
   const blocking = [
-    ...[...critical, ...important].map(f => `${f.severity}|${f.file ?? ''}|${f.problem.trim().toLowerCase()}`),
+    ...[...critical, ...important].filter(f => !deferrable(f)).map(f => `${f.severity}|${f.file ?? ''}|${f.problem.trim().toLowerCase()}`),
     ...failingValidators.map(v => `validator|${v.validator}|${v.failures.join('\n')}`),
   ].sort();
   const signature = createHash('sha256').update(JSON.stringify(blocking)).digest('hex').slice(0, 16);
   return {
     action, score, reasons, critical, important, minor, signature,
     reviewers: names.map(n => ({ name: n, verdict: reviews[n]!.verdict, confidence: reviews[n]!.confidence, weight: weights[n], invalid: reviews[n]!.invalid === true, dropped: reviews[n]!.dropped ?? 0 })),
+    deferred,
   };
 }
