@@ -352,7 +352,7 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 
 - `proposals add --file f [--author a]` - crea una propuesta local (id `p` + marca de tiempo + 4 caracteres); `--author` tiene prioridad sobre el `author` del fichero.
 - `proposals list [--status s]`
-- `proposals decide <id> approve|reject|discuss [--reason-file f] [--by quién]` - decide la copia local, lo registra e imprime la escritura para el roadmap. Con `--from <doc json de la db>` solo comprueba ese documento e imprime la escritura.
+- `proposals decide <id> approve|reject|discuss [--reason-file f] [--by quién] [--reopen]` - decide la copia local, lo registra e imprime la escritura para el roadmap. Con `--from <doc json de la db>` solo comprueba ese documento e imprime la escritura. Una propuesta ya decidida se rechaza (dice quién y cuándo); `--reopen`, solo después de que la persona lo confirme, cambia una aprobación o un rechazo y guarda la decisión anterior en su `history` (nunca una propuesta `done` ni una ya convertida en tarea).
 - `proposals save --from <doc json de la db> [--id id]` - guarda un documento del roadmap como copia local y registra la decisión si cambió su estado.
 - `proposals pull --dir d` - refresca la copia local desde los documentos `proposals` del roadmap.
 - `proposals policy`, `proposals to-task` - autoaprobación y conversión de propuestas aprobadas en tareas del plan.

@@ -352,7 +352,7 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 
 - `proposals add --file f [--author a]` - create a local proposal (id `p` + timestamp + 4 characters); `--author` wins over an `author` in the file.
 - `proposals list [--status s]`
-- `proposals decide <id> approve|reject|discuss [--reason-file f] [--by who]` - decide the local copy, log it and print the `write` payload. With `--from <db doc json>` it only checks that document and prints the `write`.
+- `proposals decide <id> approve|reject|discuss [--reason-file f] [--by who] [--reopen]` - decide the local copy, log it and print the `write` payload. With `--from <db doc json>` it only checks that document and prints the `write`. A proposal already decided is refused (it says who and when); `--reopen`, used only after the person confirms, changes an approval or a rejection and keeps the earlier decision in its `history` (never a `done` proposal or one already turned into a task).
 - `proposals save --from <db doc json> [--id id]` - store a roadmap document as the local mirror, and log the decision if its status changed.
 - `proposals pull --dir d` - refresh the local mirror from the roadmap's `proposals` documents.
 - `proposals policy`, `proposals to-task` - auto-approval and turning approved proposals into plan tasks.
