@@ -5,11 +5,11 @@
 **Plugins de Claude Code para tareas que no caben en un prompt.**
 Diséñalas, planifícalas, constrúyelas con revisión independiente, ejecútalas en paralelo y sigue cada paso en vivo.
 
-[English](README.md) · **Español**
+[English](README.md) · **Español** · [Historial de cambios](CHANGELOG.md)
 
-![waypoint 0.18.0](https://img.shields.io/badge/waypoint-0.18.0-cba6f7?style=flat-square)
-![forge 0.13.0](https://img.shields.io/badge/forge-0.13.0-fab387?style=flat-square)
-![lens 0.11.1](https://img.shields.io/badge/lens-0.11.1-b4befe?style=flat-square)
+![waypoint 0.18.1](https://img.shields.io/badge/waypoint-0.18.1-cba6f7?style=flat-square)
+![forge 0.14.0](https://img.shields.io/badge/forge-0.14.0-fab387?style=flat-square)
+![lens 0.11.2](https://img.shields.io/badge/lens-0.11.2-b4befe?style=flat-square)
 ![Marketplace de Claude Code](https://img.shields.io/badge/Claude%20Code-marketplace%20bg--kit-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 

@@ -19,7 +19,7 @@ describe('plugin layout', () => {
   });
   it('lens manifest, module and contract exist', () => {
     const p = JSON.parse(read('plugins/lens/.claude-plugin/plugin.json'));
-    expect(p).toMatchObject({ name: 'lens', version: '0.11.1', types: './types/index.d.ts' });
+    expect(p).toMatchObject({ name: 'lens', version: '0.11.2', types: './types/index.d.ts' });
     expect(JSON.parse(read('plugins/lens/hooks/hooks.json'))).toEqual({ modules: ['./register.js'] });
     for (const f of ['hooks/register.js', 'types/index.d.ts', 'README.md']) {
       expect(existsSync(new URL(`../plugins/lens/${f}`, import.meta.url))).toBe(true);
@@ -146,11 +146,11 @@ describe('plugin layout', () => {
     expect(md).toMatch(/bundles several independent changes/);
     expect(md).toMatch(/adds new behaviour with its tests/);
   });
-  it('versions: forge 0.13.0, waypoint 0.18.0', () => {
+  it('versions: forge 0.14.0, waypoint 0.18.1', () => {
     const forge = JSON.parse(read('plugins/forge/.claude-plugin/plugin.json'));
-    expect(forge.version).toBe('0.13.0');
+    expect(forge.version).toBe('0.14.0');
     expect(forge.dependencies).toEqual([{ name: 'waypoint', version: '^0.18.0' }]);
-    expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.18.0');
+    expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.18.1');
   });
   it('skills print the lines the CLI hands over (campaign fixes)', () => {
     const run = read('plugins/forge/skills/run/SKILL.md');
@@ -354,7 +354,7 @@ describe('plugin layout', () => {
   });
   it('forge manifest depends on waypoint ^0.18.0 and ships its CLI', () => {
     const p = JSON.parse(read('plugins/forge/.claude-plugin/plugin.json'));
-    expect(p).toMatchObject({ name: 'forge', version: '0.13.0', dependencies: [{ name: 'waypoint', version: '^0.18.0' }] });
+    expect(p).toMatchObject({ name: 'forge', version: '0.14.0', dependencies: [{ name: 'waypoint', version: '^0.18.0' }] });
     expect(existsSync(new URL('../plugins/forge/dist/forge.cjs', import.meta.url))).toBe(true);
   });
   it('forge scout agent: frontmatter and rules', () => {

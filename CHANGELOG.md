@@ -1,0 +1,475 @@
+# Changelog
+
+All notable changes to the plugins of the bg-kit marketplace. Each plugin has its own version, and one release can
+bump several of them at once (forge 0.14.0, waypoint 0.18.1 and lens 0.11.2 shipped together). Dates are the day a
+version landed on `main`.
+
+This repository starts at waypoint 0.10.0, forge 0.5.0 and lens 0.5.0. The versions before them were published from
+elsewhere and are reconstructed from their READMEs.
+
+- [waypoint](#waypoint)
+- [forge](#forge)
+- [lens](#lens)
+
+## waypoint
+
+### 0.18.1 — 2026-10-13
+
+#### Fixed
+- The band shows forge's ephemeral executions (independent requests run in parallel), with their loose task ids clipped so a long id no longer widens the line.
+- The plan's language is read from `plan.yaml` and accepted only when it is a valid language code, so a malformed `locale` no longer changes the language the CLI replies in.
+- An execution keeps the person's language code in its state, so the band and the replies that read it stay in that language.
+
+### 0.18.0 — 2026-10-13
+
+#### Added
+- The roadmap detail of a done task says how long it took against its estimate (in amber when it went over), and the detail of a claimed or in-progress task says how long it has been running.
+- The Execution block and the Loose tasks section show how long each task has run, the slot durations and, once finished, the time each loose task took.
+- `design-gate` counts the `pending` proposals of every round, and `sync`, `notes` and `page [--publish-info]` hand over the lines to tell the person; `notes` takes `[--plan p] [--locale es|en]`.
+
+#### Changed
+- A proposal you do not apply stays pending across rounds: the band counts the pending ones of every round, the next critic does not repeat them, and `approve` lists the critical and major ones still open.
+- `/waypoint:design approve --auto` approves without asking only when no critical proposal of any round is left unapplied.
+- The skills print the lines the CLI hands over (plan gate, roadmap notice and report) instead of paraphrasing them.
+
+#### Fixed
+- Task detail and loose task times guard against junk, future and sub-minute values.
+
+### 0.17.0 — 2026-10-13
+
+#### Added
+- `waypoint design-gate <design.md>` says whether a design can be approved without asking, from its changelog and critiques.
+- `/waypoint:design approve --auto` uses that gate under forge's auto mode.
+
+#### Fixed
+- `design-import` refuses an invalid design with exit 2.
+- A brief never fails on the TDD lookup.
+
+### 0.16.0 — 2026-10-13
+
+#### Added
+- `/waypoint:design new --from <spec>` and `waypoint design-import <spec> --project P --out D` turn a superpowers spec into a draft `design.md`, copying its sections as they are and recording its source.
+- The design page names the spec a design was imported from («Imported from»).
+
+#### Fixed
+- The band lists the main checkout's `.forge` once per refresh instead of once per worktree.
+
+### 0.15.0 — 2026-10-13
+
+#### Added
+- Any band ends with `⚑ auto · N · <the last major decision>` when forge decided something without asking in the last day.
+- Roadmap notes carry forge's automatic decisions, with what was chosen, why and how to undo it.
+
+### 0.14.0 — 2026-10-12
+
+#### Added
+- The Tracking view has a **Loose tasks** section for forge's ephemeral executions, with the title, status, stage and agent of each request, outside the plan's progress.
+
+#### Changed
+- The Run row of the band counts tasks integrated out of the plan's total and drops the loose pill clause.
+
+#### Fixed
+- The roadmap never takes a loose slot's title or lease from the plan.
+- `launch` resolves the launcher before creating a worktree and refuses unsafe plan paths.
+
+### 0.13.0 — 2026-10-12
+
+#### Added
+- `launch <plan> <T> --task --run R --coordinator SID --base B [--launcher bg|herdr]` starts one forge session per task of an execution, in `.claude/worktrees/task-<T>` on `task/<T>`.
+- `launch --launcher` picks `claude --bg` or a herdr pane.
+- Executor and manual sessions show in the band and in lens with their own liveness.
+
+#### Changed
+- The band's swarm mode is now the run mode.
+
+#### Fixed
+- The roadmap drops a task execution whose `since` or `leaseUntil` is not a date.
+- A coordinator waiting on a long agent reads as alive.
+
+### 0.12.0 — 2026-10-12
+
+#### Added
+- The Sessions view shows the role of each session (coordinator, executor or manual) and its liveness, derived from leases.
+- An Execution block lists each running task with its stage, agent and time, the slots in use out of the maximum and the free ones; orphaned tasks are flagged.
+- The band has a run mode: `▶ EXECUTION · subagents 2/3 · T004 review (r2) · … · 3/12 · integrated 3`, with the worst liveness of the run.
+
+#### Changed
+- The band's Swarm row becomes the Run row, and the docs point to forge's execution modes.
+
+### 0.11.1 — 2026-10-12
+
+#### Fixed
+- The roadmap accepts evidence URLs only from the claude.ai asset host or `/_blob`.
+- The evidence indicator shows upload pending before local-only, and counts local screenshots.
+- The band and lens keep the project's language while no band is drawn.
+- Fixes from the Reparto test run in `launch`.
+
+### 0.11.0 — 2026-10-12
+
+#### Added
+- Verification evidence on the roadmap: a task verified by forge shows a Verification block with the result, the surfaces used, each check with what was expected and observed, and screenshots as thumbnails that open in a lightbox.
+- An evidence indicator in the Tracking view.
+
+#### Changed
+- The README installs the marketplace from GitHub.
+
+### 0.10.0 — 2026-10-12
+
+#### Changed
+- First version in this repository: the README is rewritten with a contents list, badges, a roadmap screenshot, the commands and views as tables, and a CLI reference grouped by purpose.
+- A Spanish README (`README.es.md`) joins the English one.
+
+### Before this repository
+*Reconstructed from the published READMEs; no commit history.*
+
+#### 0.9.0
+- The roadmap header and side nav show a `∞ cycle N` pill (with `/M` when the run has a cycle budget) while forge's infinite run is active, and drop it when the run ends.
+
+#### 0.8.0
+- A Proposals view lists the improvement proposals from forge's scout or from people, newest first, with filters by status, category and risk.
+- Each card shows the category, risk, status, pillar, rationale, evidence, estimate, path, who decided it and its comments; contributors can approve, reject or comment.
+
+#### 0.7.1
+- No change to the README or the commands; a maintenance release.
+
+#### 0.7.0
+- Initial release: `/waypoint:design`, `/waypoint:plan`, `/waypoint:work`, `/waypoint:status` and `/waypoint:launch`.
+- A live roadmap artifact with Tracking, Versions, Sessions and Notes views, coordinated by messages between parallel sessions.
+- The band above the prompt in design and work modes, with a lens **Panel** button.
+- Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
+
+## forge
+
+### 0.14.0 — 2026-10-13
+
+#### Added
+- `triage --base <ref>` sizes an implemented task by its real diff alone (the plan-time estimate sets no floor, a sensitive zone keeps it at Medium) and says who reviews it: one light correctness review on Sonnet for a diff of 3 files and 200 lines or fewer outside sensitive zones, correctness plus security/perf as they apply otherwise.
+- `proposals decide --reopen` changes an already decided proposal and keeps its history; `/forge:decide` uses it only after the person confirms.
+- `tree snapshot` and `tree check` list the files a task did not create, so a task never deletes a file it did not make and a hand edit is never hidden behind the task's commits.
+- `config get` prints the current evidence mode (read right before uploading evidence) and other config values.
+- `swarm start` and `infinite` take `--locale`, and `swarm start` keeps any language code of the person.
+- `integrate --retry-deps` retries a remembered failed dependency install.
+
+#### Changed
+- In an execution, each plan task is implemented by the implementer its triage names (`impl` for a Large plan task, `impl-heavy` only on a sensitive zone) and reviewed by the size of its real diff.
+- Plan tasks ignore the greenfield rule, and their ratchet keeps to their plan's project.
+- Every message to the person is in their language, also after a hook or a wake; the language is kept in the run and execution state and repeated at every wake, and a plan without a locale no longer means English.
+- `forge:decide` answers in the language the person writes in.
+- A copy change that names the method (`Con forge:`, `with forge`) first or last is still Trivial.
+- Surface permissions, preferences and learned records live in `.forge/` again, as in 0.12; legacy 16-hex allowances stay valid.
+- A task made from a proposal keeps its whole rationale and evidence, a proposal's text reaches the brief quoted and is cut at a word, and an estimate stays within a week.
+
+#### Fixed
+- `forge:decide` never writes a proposal's decision by hand; marking a proposal done is not a reopen, and a reopen refuses while any plan holds its task.
+- `tree check` uses the snapshot's directory for a worktree task, keeps the first snapshot, ignores one from another tree or task, and treats an untrusted snapshot as leaving every new or changed file to the person.
+- An integration installs the dependencies a merge needs only when they are missing, reinstalls after a rejected merge, reports the install and what a rollback left, and resets only the files the merge changed.
+- The git directory is found from any subdirectory and never guessed, and the personal state is read only from the repository the work tree names, never from a bare repository a commit ships.
+- Surface tools are found among Claude Code's MCP servers and reported missing only when they are real misses; a changed surface is shown as a diff with its commits, and the skill never offers to allow a surface whose diff was cut.
+- Learned notes merge with the union driver, so parallel tasks keep each other's notes.
+
+### 0.13.0 — 2026-10-13
+
+#### Added
+- Personal state (surface permissions, `local.yaml` preferences, learned records) moves under the repository's git directory (`.git/forge`), where no commit can change it.
+- Triage hands over the announce line, the plan gate (with `--locale` and a logged raise's reason) and names an untracked `.forge/.gitignore`.
+- `verify-result` logs a verification outside a verdict.
+
+#### Changed
+- **Breaking:** forge stops reading `.forge/local.yaml`, so after updating it asks again for each surface and for the workflow preference.
+- A one-line quoted text change is Trivial: triage greps quoted literals, a quoted old value found in one file makes a short change Trivial, and quoted literals never size a triage.
+- The skills print the lines the CLIs hand over (triage, plan gate, execution start, new validators, notes, roadmap notice, report); only the person allows a verify surface, after seeing its whole diff.
+
+#### Fixed
+- Routing recommends a spec only when asked and forge for Large work in auto mode, saves «sin forge» as `workflow: off`, ties a route to its session and stays out of subagents; infinite mode frees a Large task's claim.
+- A finished light task never stays in progress: `done`, a passing trivial validate and a verify result close it.
+- An agent after `done` moves the phase off `done`, and a raising ratchet reopens a closed task.
+
+### 0.12.0 — 2026-10-13
+
+#### Added
+- The `forge:route` skill triages a coding request before any other process skill, asks once who does it (forge, superpowers or a mix) and hands over.
+- Routing hooks put the `forge:route` rule in new sessions (`SessionStart`) and hint at it, or remind a half-done route, on coding prompts (`UserPromptSubmit`).
+- `forge route`, `route set` and `route stage` print the routing options and the recommended one, and keep the chosen route in `.forge/route.json`.
+- Auto mode: with `autonomy: auto`, `/forge:run --auto` or a request that says so, forge asks only at launch and records every decision it takes; triage and `swarm start` record it in `status.json` and the execution.
+- `workflow` and `autonomy` preferences in `.forge/config.yaml` and `local.yaml`, with `forge prefs` and `forge local set`.
+- Infinite mode designs Large tasks in auto mode, and the planner has an extend mode.
+
+#### Fixed
+- A superpowers plan counts the tasks superpowers' own ledger marks complete, and an unclosed code fence is refused instead of hiding the tasks after it.
+- Superpowers briefs carry the plan's Review Focus and the spec path, and `sp-specs`/`sp-plans` time tracked files by their last commit.
+- A declined spec is remembered and not offered again, and a brief never fails on the TDD lookup.
+
+### 0.11.0 — 2026-10-13
+
+#### Added
+- `/forge:review [<base>]` reviews any branch with forge's weighted independent review, without fixing anything, taking its baseline in a temporary worktree.
+- `forge:run --from-spec <spec>` starts the Large path from a superpowers spec, and `--superpowers-plan <plan>` runs a superpowers plan task by task.
+- `sp-plan tasks` and `check` read a superpowers plan, tick one task's boxes and write its brief and triage.
+- `forge tdd` prints the TDD line that goes into every implementer brief when superpowers is present; implementers report their TDD runs and the correctness reviewer checks them.
+- forge finds superpowers, the path of its skills, and the specs and plans it wrote in the project.
+
+#### Fixed
+- Execution reviewers get the implementer's report, and the TDD check spares tasks without logic.
+- Decisions live in the main checkout's ledger, so run members' decisions reach reports, lens and the band.
+- A decisions summary dated in the future is not shown, and an old takeover reads as the user's decision.
+
+### 0.10.0 — 2026-10-13
+
+#### Added
+- A decision record: every decision forge takes without asking is recorded with what it chose, the alternatives, why and how to undo it (`decision add`, `list`, `show`, `md`).
+- The new `/forge:decisions` skill lists those decisions and undoes one (`/forge:decisions revert <n>`); the roadmap shows them as notes tagged auto.
+- `status.json` keeps the task start, the seconds of each stage and when the task finished; an execution task records `finishedAt` when it is integrated, blocked or adopted, so lens and the roadmap show how long tasks took.
+- A takeover of an execution is recorded as the user's decision.
+
+#### Fixed
+- An ephemeral start deletes merged task branches, so reused loose ids start from the tip; `adopt` refuses an unreadable worktree status.
+- Stage seconds survive phases named `constructor` or `__proto__`.
+- The Large report lists the task and the run, and a revert that stops is aborted and never repeated.
+
+### 0.9.0 — 2026-10-12
+
+#### Added
+- Triage names the implementer for the task's size, and a small task is always delegated.
+- Ephemeral executions: batches of independent requests and the parallel briefs of a Medium task run as an ephemeral execution that schedules loose tasks from `.forge/loose.json` and integrates them into the user's branch.
+- The execution records each task's title and the planned count, so lens and the band show titles and the real total.
+- `swarm retry --adopt` gives a member's task in conflict a fix round with the coordinator's subagents.
+
+#### Fixed
+- A `swarm start` never replaces an active execution it is not resuming.
+- The relaunch handover note points at the real brief and its paths.
+- Hooks find members by their hook session id, and a member joins with a warning when that id is unusable.
+- The scheduler mirrors a member's blocked task into the execution.
+- `report` ignores another run's public file.
+
+### 0.8.0 — 2026-10-12
+
+#### Added
+- Sessions mode: executor sessions and manual members (`/forge:run --join`) join a run, report their stage and get a task worktree without writing the execution.
+- The scheduler relaunches and nudges stalled session fronts with a handover note and an attempt cap, integrates member work and waits for a live claim.
+- Resume context at session start, coordinator takeover, and a stale run branch brought up to its base.
+- Executor and manual members write their live signal, and the Stop hook works on the main checkout.
+
+#### Fixed
+- Member ids follow the members rule and members only act on their own tasks.
+- Run members never take the coordinator binding and cannot take over.
+- Execution ids are validated where they are read.
+- A relaunched front gets a lease window before it can be relaunched again.
+
+### 0.7.0 — 2026-10-12
+
+#### Added
+- Execution modes: the Large path runs as an execution on a run branch (`forge/run-<project>`) that drives each task through subagents or background sessions, with `--parallel N` (default 3), task worktrees and a task-level scheduler.
+- `swarm.mode`, `swarm.setup` (installs dependencies in each new execution worktree) and `--cwd` to run any command in a worktree without `cd`.
+- Integrations merge tasks into the run branch worktree and the run into its target at the end, rolling back when the validators cannot run.
+- Visibility: a live signal from the coordinator's hooks, and a shared execution view that lens and the band show with per-task stage, agent and liveness.
+- The Stop hook on the execution never blocks while an agent runs, and `forge stop` ends an active execution.
+
+#### Fixed
+- Infinite mode runs its execution on `forge/run-<project>`, and `swarm start` refuses a run branch it cannot check out.
+- Integrations compare validators with the run branch tip, never target the default branch, and never cache timeouts.
+- A coordinator waiting on a long agent reads as alive, and future timestamps never keep an execution alive.
+- `sleep` clears only its own wake, and `propose` is capped by `swarm.parallel`.
+
+### 0.6.1 — 2026-10-12
+
+#### Fixed
+- `validate --base-run` and `--baseline`: a failure the base commit already had is preexisting and counts neither in the exit code nor in the verdict, and a test runner with no tests passes as skipped.
+- `verify-cleanup` never kills pid 1, itself or its parent, and kills a group only when the pid leads it.
+- The verify result is derived from its checks unless blocked.
+- A detected validator that runs the same command as a manual one is dropped, and a Flutter project gets no Gradle validators.
+- `local.yaml` stays in the main checkout so every worktree shares it.
+- Triage leaves `docs/waypoint`, `docs/superpowers`, `.forge` and `.waypoint` out of the symbol search.
+- Stop hook texts end by asking to answer in the plan's language.
+- The run skill checks each reviewer's file as it finishes and never ends the turn with one missing.
+- `forge-verify` runs at high effort.
+
+### 0.6.0 — 2026-10-12
+
+#### Added
+- Verify surfaces: the new `/forge:verify` skill and the `forge-verify` and `forge-verify-heavy` agents check a brief by using the app the way its surfaces describe (browser, emulator, simulated devices, anything), in parallel with the reviewers.
+- `verify-plan` decides which surfaces a brief verifies, `verify.json` counts in the verdict, and `verify-cleanup` stops leftover processes.
+- Free-text verify surfaces, detected drafts and learned notes, with per-surface permissions in `local.yaml` and a `tools` check.
+- `status.json` carries the verify plan and result, and the roadmap shows verification evidence.
+- Validators are selected by path, kind and `when`; manual and detected validators merge; triage returns the validator catalog and the ones not announced yet.
+- Detection of e2e, bench, Flutter and Gradle validators.
+- Config for detection, free kinds, verify limits and evidence, plus `local.yaml` for machine state with `verify/` ignored in `.forge`.
+
+### 0.5.4 — 2026-10-12
+
+#### Fixed
+- The `done` phase is logged.
+- The run skill asks before committing unrelated changes in the tree.
+- A finished run shows as finished.
+
+### 0.5.3 — 2026-10-12
+
+#### Changed
+- A light path is raised to Medium on contract changes, bundled changes or new behaviour.
+
+### 0.5.2 — 2026-10-12
+
+#### Changed
+- Implementers edit project files with Edit and Write, not `sed` or shell rewrites, so CRLF is not flipped to LF on Windows and a one-line change stays a one-line diff.
+
+### 0.5.1 — 2026-10-12
+
+#### Fixed
+- Triage sizes a task by the files it names: one named file stays Trivial even when its symbol also appears in tests, and renames never go Trivial.
+- Light paths finish in the forge card (no review stages on Trivial and Small).
+
+### 0.5.0 — 2026-10-12
+
+#### Added
+- First version in this repository, imported with waypoint 0.10.0 and lens 0.5.0.
+- Swarm: with `swarm.parallel` of 2 or more (default 5) or `--parallel N`, the Large path and infinite mode run as parallel background sessions per track in their own worktrees, integrated one at a time (`swarm start | status | tick | integrate | mark | retry | sleep | stop`).
+- `/forge:run --parallel N`, profiles (`balanced`, `economy`, `quality`) that step implementers down or up one tier, and `.forge/status.json`, `run.json` and `usage/`.
+- Spanish README (`README.es.md`) and a rewritten, illustrated English README.
+
+#### Changed
+- Infinite mode details are documented: a task triaged as Large is blocked with a question instead of designed unattended, and a stop reason closes the run cleanly.
+- forge depends on waypoint ^0.10.0.
+
+### Before this repository
+*Reconstructed from the published READMEs; no commit history.*
+
+#### 0.4.0
+- Infinite mode: `/forge:infinite [--cycles N] [--hours H]` runs cycles of turning approved proposals into plan tasks, working them and scouting for new proposals within a budget.
+- The `forge-scout` agent writes evidence-backed proposals; `/forge:stop` stops the run.
+- A Stop hook (`hooks/hooks.json`) binds the session to the run and ends it on a stop condition (the `.forge/stop` file, budget used up, no progress, repeated errors).
+- Auto-approval policy: only low-risk, verifiable proposals are approved without the person.
+- Requires waypoint ^0.9.0.
+
+#### 0.3.0
+- Proposals: `proposals add | list | decide | save | pull` and the `/forge:decide` skill to approve, reject or discuss a proposal.
+- Requires waypoint ^0.8.0.
+
+#### 0.2.0
+- The Large path: `forge-planner` agent turns an approved design into a waypoint plan, and `/waypoint:work` runs the forge loop per task.
+- `brief --plan` prints a task brief from a plan task, `triage --plan` triages a plan task, and `waypoint-cli` locates waypoint's CLI.
+- Implementers write their report to `report-<n>.txt`; `verdict` reports dropped findings (`dropped`).
+- Requires waypoint ^0.7.1.
+
+#### 0.1.0
+- Initial release: triage by size into the Trivial, Small, Medium and Large paths, with a model per role (`forge-impl-heavy`, `forge-impl`, `forge-impl-light`, `forge-mech`, `forge-fable` and the correctness, security and perf reviewers).
+- Tool-first validation, a weighted `verdict` and the `round` review loop (up to 4 rounds, tier-up from round 3).
+- CLI: `triage`, `validate`, `verdict`, `round`, `log`, `agents`, `last`; `.forge/config.yaml` with validators and `affects` globs.
+- Requires waypoint ^0.7.0.
+
+## lens
+
+### 0.11.2 — 2026-10-13
+
+#### Added
+- The panel's forge proposals keep their decision history: a reopened proposal carries up to 20 earlier decisions with who decided and why.
+- A forge run or execution started in a given language keeps that locale in its state, and lens reads it.
+
+#### Changed
+- Proposal titles, pillars and quoted texts are cut at a word with an ellipsis instead of mid-word, and titles and pillars stay on one line.
+
+#### Fixed
+- The Execution card shows forge's ephemeral executions, which are not tied to a waypoint project.
+
+### 0.11.1 — 2026-10-13
+
+#### Added
+- The Usage card shows the time worked and the time since start, summed over the run.
+- The forge card shows the task time and how long each stage took.
+- The Execution and Roadmap cards show task times, the run time and the last finished tasks.
+- Finished subagents stay listed for five minutes with how long they ran.
+
+#### Fixed
+- A subagent dropped from the list before its stop is still kept as finished, and a running subagent is never also shown as finished.
+- A light task stays running while its agent's subagent lives, and a light task silent for 30 minutes is drawn as finished.
+- The band redraws when a task turns done, and a done heavy task keeps its brief cells.
+- The Roadmap card shows durations above 24 hours.
+
+### 0.11.0 — 2026-10-13
+
+#### Added
+- The forge card says when the task runs in auto mode.
+
+### 0.10.0 — 2026-10-13
+
+#### Added
+- The forge card counts forge's automatic decisions of the last day and names the last major one.
+
+### 0.9.0 — 2026-10-12
+
+#### Added
+- The Execution card shows each task's title and the real planned total, as the execution now records them.
+
+#### Fixed
+- Plan titles on the Execution card are cleaned of control characters.
+- The README lists the cards in the panel's order.
+
+### 0.8.0 — 2026-10-12
+
+#### Added
+- Executor and manual sessions show in the Execution card with their own liveness.
+
+#### Fixed
+- A coordinator waiting on a long agent reads as alive.
+- Member signals of another run or session are ignored, and an ended member stops its manual row.
+
+### 0.7.0 — 2026-10-12
+
+#### Added
+- An Execution card with per-task stage, agent and liveness.
+- Run stages on the forge card.
+
+### 0.6.1 — 2026-10-12
+
+#### Changed
+- The panel puts Now first and Usage last.
+- The Roadmap and verification rows show upload pending before local-only, and the shot count is dropped from the lens row.
+
+#### Fixed
+- The project language is kept while no band is drawn.
+
+### 0.6.0 — 2026-10-12
+
+#### Added
+- The forge card shows the verify stage, its tier and a result row.
+- The Usage card has a group for verification agents.
+
+### 0.5.3 — 2026-10-12
+
+#### Fixed
+- The forge card logs the done phase and shows finished runs.
+
+### 0.5.2 — 2026-10-12
+
+#### Fixed
+- Usage prices 5-minute cache writes.
+- A finished forge run shows as done.
+
+### 0.5.1 — 2026-10-12
+
+#### Added
+- Each Usage row shows the effort next to the model.
+
+#### Fixed
+- Subagent usage is labelled plainly when no forge group is present.
+- Light paths finish in the forge card.
+
+### 0.5.0 — 2026-10-12
+
+#### Added
+- First version in this repository: the panel with Now, Roadmap, forge, swarm, superpowers, Todos, Subagents, Claude Code tasks and Usage cards, plus the band above the prompt.
+
+### Before this repository
+
+*Reconstructed from the published READMEs; no commit history.*
+
+#### 0.3.0
+- While a `/forge:infinite` run is active, the forge section shows `∞ N/M · Hh left` from `.forge/run.json` (not read above 16 KiB) and `auto: <title>` for the 3 newest auto-approved proposals.
+
+#### 0.2.0
+- A forge section reads `.forge/status.json`: the last task with path and phase, the last agent, validators, verdict score and review round.
+- Up to 5 pending proposals from `.forge/proposals/*.json`, each with **Approve** and **Reject** buttons that run `/forge:decide`.
+
+#### 0.1.0
+- Initial release: the `/lens` side panel with Roadmap, superpowers, Now, Todos, Subagents and Claude Code tasks sections.
+- A minimal band above the prompt with **Panel** and **×** while there are open todos or running subagents.
+
+Not kept: 0.4.0
