@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { EFFORTS, MODELS, type Effort, type Model } from '../lib/launcher.js';
 
 export type Profile = 'balanced' | 'economy' | 'quality';
-export const ROLES = ['impl-heavy', 'impl', 'impl-light', 'mech', 'review-correctness', 'review-security', 'review-perf', 'verify'] as const;
+export const ROLES = ['impl-heavy', 'impl-high', 'impl', 'impl-light', 'mech', 'review-correctness', 'review-security', 'review-perf', 'verify'] as const;
 export type Role = (typeof ROLES)[number];
 export const NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
 /** Who does a coding request (spec §5.4): ask, forge, superpowers, superpowers designing or planning and forge building,
@@ -96,11 +96,11 @@ export function loadConfig(root: string): ForgeConfig {
   return parseConfig(existsSync(file) ? readFileSync(file, 'utf8') : null);
 }
 
-// economy steps implementers down one tier, quality steps them up; reviewers never change; verify gets Opus on quality.
+// economy steps implementers down one rung of the ladder, quality steps them up (impl and impl-high to impl-heavy); reviewers never change; verify gets Opus on quality.
 const SHIFT: Record<Profile, Partial<Record<Role, string>>> = {
   balanced: {},
-  economy: { 'impl-heavy': 'forge-impl', impl: 'forge-impl-light' },
-  quality: { impl: 'forge-impl-heavy', 'impl-light': 'forge-impl', mech: 'forge-impl-light', verify: 'forge-verify-heavy' },
+  economy: { 'impl-heavy': 'forge-impl-high', 'impl-high': 'forge-impl', impl: 'forge-impl-light' },
+  quality: { impl: 'forge-impl-heavy', 'impl-high': 'forge-impl-heavy', 'impl-light': 'forge-impl', mech: 'forge-impl-light', verify: 'forge-verify-heavy' },
 };
 
 export function agentFor(role: Role, profile: Profile): string {

@@ -51,13 +51,14 @@ export function isMechanical(text: string): boolean {
   return MECHANICAL.some(re => re.test(t));
 }
 
-export type ImplRole = 'mech' | 'impl-light' | 'impl' | 'impl-heavy';
+export type ImplRole = 'mech' | 'impl-light' | 'impl' | 'impl-high' | 'impl-heavy';
 /** Who implements a task of this size: `self` = the session itself (Trivial alone); `role` null with self false = Large (design first). */
 export interface Implementer { role: ImplRole | null; self: boolean; why: string }
 
 /** Model by size (spec §2): Trivial alone is the session's; Small is always delegated; in a batch a Trivial goes to mech. */
 // A plan task (`plan`): the coordinator never edits task code, so a Trivial goes to mech; a Large one was already
-// designed and planned, so it goes to impl as a Medium one does, and to impl-heavy only on a sensitive zone.
+// designed and planned, so it goes to impl as a Medium one does, and to impl-high only on a sensitive zone.
+// impl-heavy (xhigh) is kept for the last attempt of a review loop (`nextImplementer` in loop.ts).
 export function implementerFor(r: Pick<TriageResult, 'path' | 'sensitive'>, text: string, opts: { batch?: boolean; plan?: boolean } = {}): Implementer {
   switch (r.path) {
     case 'trivial':
@@ -68,11 +69,11 @@ export function implementerFor(r: Pick<TriageResult, 'path' | 'sensitive'>, text
       return isMechanical(text) ? { role: 'mech', self: false, why: 'small and mechanical: always delegated to mech' }
         : { role: 'impl-light', self: false, why: 'small and bounded: always delegated to impl-light' };
     case 'medium':
-      return r.sensitive.length ? { role: 'impl-heavy', self: false, why: `medium on a sensitive zone (${r.sensitive.join(', ')})` }
+      return r.sensitive.length ? { role: 'impl-high', self: false, why: `medium on a sensitive zone (${r.sensitive.join(', ')})` }
         : { role: 'impl', self: false, why: 'medium' };
     default:
       if (!opts.plan) return { role: null, self: false, why: 'large: design and plan first' };
-      return r.sensitive.length ? { role: 'impl-heavy', self: false, why: `large plan task on a sensitive zone (${r.sensitive.join(', ')}): impl-heavy` }
+      return r.sensitive.length ? { role: 'impl-high', self: false, why: `large plan task on a sensitive zone (${r.sensitive.join(', ')}): impl-high` }
         : { role: 'impl', self: false, why: 'large plan task: impl, as a medium one (the plan may need to split it)' };
   }
 }
@@ -191,7 +192,7 @@ export function announce(a: AnnounceInput, locale: AnnounceLocale): string {
         : `Medium → ${agent}: ${why}. I show you a short plan before launching it; you can correct it.`;
       break;
     default:
-      // A plan task names its implementer (impl, impl-heavy on a sensitive zone); a task that is not one is designed and planned first.
+      // A plan task names its implementer (impl, impl-high on a sensitive zone); a task that is not one is designed and planned first.
       line = agent ? (es ? `Large → ${agent}: ${why}. Puedes corregirlo.` : `Large → ${agent}: ${why}. You can correct it.`)
         : es ? `Large: ${why}; primero diseño y plan. Puedes corregirlo.` : `Large: ${why}; design and plan first. You can correct it.`;
   }
