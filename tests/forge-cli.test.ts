@@ -829,7 +829,52 @@ describe('forge waypoint-cli', () => {
       expect(readEvents(root).at(-1)).toMatchObject({ kind: 'proposal', action: 'decide', id, status: 'approved' });
       const again = run(['proposals', 'decide', id, 'reject', '--by', 'user:me'], io);
       expect(again.code).toBe(2);
-      expect(again.stderr).toContain('already decided');
+      expect(again.stderr).toContain(`${id} is already decided (approved by user:me at 2026-10-11T10:00:00.000Z); use --reopen after the person confirms`);
+    });
+    it('decide --reopen moves a decided proposal, keeps its history and removes the stale reason', () => {
+      const { id } = JSON.parse(add().stdout);
+      writeFileSync(path.join(root, 'r.txt'), 'not now');
+      run(['proposals', 'decide', id, 'reject', '--by', 'user:x', '--reason-file', 'r.txt'], io);
+      const r = run(['proposals', 'decide', id, 'approve', '--reopen', '--by', 'user:y'], io);
+      expect(r.code).toBe(0);
+      const at = '2026-10-11T10:00:00.000Z';
+      const history = [{ status: 'rejected', decidedBy: 'user:x', decidedAt: at, reason: 'not now', reopenedBy: 'user:y', reopenedAt: at }];
+      expect(JSON.parse(r.stdout)).toEqual({ id, status: 'approved', previous: 'rejected', write: { status: 'approved', decidedBy: 'user:y', decidedAt: at, history, reason: { __delete__: true } } });
+      const mirror = loadProposals(root)[0];
+      expect(mirror).toMatchObject({ status: 'approved', decidedBy: 'user:y', history });
+      expect(mirror.reason).toBeUndefined();
+      expect(readEvents(root).at(-1)).toEqual({ ts: at, kind: 'proposal', action: 'reopen', id, from: 'rejected', to: 'approved' });
+      writeFileSync(path.join(root, 'r2.txt'), 'too risky after all');
+      const back = JSON.parse(run(['proposals', 'decide', id, 'reject', '--reopen', '--reason-file', 'r2.txt'], io).stdout);
+      expect(back.write).toMatchObject({ status: 'rejected', decidedBy: 'user', reason: 'too risky after all' });
+      expect(back.write.history).toHaveLength(2);
+    });
+    it('decide --reopen --from works on the db doc and writes or logs nothing', () => {
+      const id = 'p20261011100000hhhh';
+      writeFileSync(path.join(root, 'db.json'), JSON.stringify({ ...prop, ts: 't', status: 'approved', author: 'session', decidedBy: 'o', decidedAt: 'a' }));
+      const r = run(['proposals', 'decide', id, 'reject', '--reopen', '--from', 'db.json', '--by', 'user:me'], io);
+      expect(r.code).toBe(0);
+      expect(JSON.parse(r.stdout)).toEqual({ id, status: 'rejected', previous: 'approved', write: { status: 'rejected', decidedBy: 'user:me', decidedAt: '2026-10-11T10:00:00.000Z',
+        history: [{ status: 'approved', decidedBy: 'o', decidedAt: 'a', reopenedBy: 'user:me', reopenedAt: '2026-10-11T10:00:00.000Z' }] } });
+      expect(loadProposals(root)).toEqual([]);
+      expect(readEvents(root)).toEqual([]);
+    });
+    it('decide --reopen refuses done, a proposal with a task, the same status, discuss and an open proposal', () => {
+      const refuse = (status: string, action: string, over: Record<string, unknown> = {}) => {
+        writeFileSync(path.join(root, 'db.json'), JSON.stringify({ ...prop, ts: 't', status, author: 'session', ...over }));
+        const r = run(['proposals', 'decide', 'p20261011100000iiii', action, '--reopen', '--from', 'db.json'], io);
+        expect(r.code).toBe(2);
+        return r.stderr;
+      };
+      expect(refuse('done', 'reject')).toContain('is done');
+      expect(refuse('approved', 'reject', { taskId: 'T008' })).toContain('task T008');
+      expect(refuse('rejected', 'reject')).toContain('already rejected');
+      expect(refuse('rejected', 'discuss')).toContain('approve or reject');
+      expect(refuse('proposed', 'approve')).toContain('without --reopen');
+      const { id } = JSON.parse(add().stdout);
+      run(['proposals', 'decide', id, 'approve'], io);
+      expect(run(['proposals', 'decide', id, 'approve', '--reopen'], io).code).toBe(2);
+      expect(loadProposals(root)[0].history).toBeUndefined();
     });
     it('decide reads the reason from a file and rejects bad ids', () => {
       const { id } = JSON.parse(add().stdout);
@@ -1034,6 +1079,23 @@ describe('forge waypoint-cli', () => {
       const again = run(['proposals', 'save', '--from', `w/${id}.db.json`], io);
       expect(JSON.parse(again.stdout).logged).toBe(false);
       expect(readEvents(root)).toHaveLength(1);
+    });
+    it('save of a decided proposal with another status logs a reopen, and warns when it carries no new history', () => {
+      const id = 'p20261011100000jjjj';
+      const db = { ...prop, ts: 't', author: 'session' };
+      saveProposal(root, id, { ...db, status: 'rejected', decidedBy: 'user:x', decidedAt: 'T1' } as ProposalDoc);
+      writeFileSync(path.join(root, 'doc.json'), JSON.stringify({ ...db, status: 'approved', decidedBy: 'user:y', decidedAt: 'T2' }));
+      const r = run(['proposals', 'save', '--from', 'doc.json', '--id', id], io);
+      expect(r.code).toBe(0);
+      expect(JSON.parse(r.stdout)).toEqual({ id, status: 'approved', previous: 'rejected', logged: true });
+      expect(r.stderr).toContain('not made through proposals decide --reopen');
+      expect(readEvents(root).at(-1)).toEqual({ ts: '2026-10-11T10:00:00.000Z', kind: 'proposal', action: 'reopen', id, from: 'rejected', to: 'approved' });
+      const history = [{ status: 'approved', decidedBy: 'user:y', decidedAt: 'T2', reopenedBy: 'user:z', reopenedAt: 'T3' }];
+      writeFileSync(path.join(root, 'doc.json'), JSON.stringify({ ...db, status: 'rejected', decidedBy: 'user:z', decidedAt: 'T3', history }));
+      const ok = run(['proposals', 'save', '--from', 'doc.json', '--id', id], io);
+      expect(ok.stderr).toBe('');
+      expect(readEvents(root).at(-1)).toMatchObject({ action: 'reopen', from: 'approved', to: 'rejected' });
+      expect(loadProposals(root)[0].history).toEqual(history);
     });
     it('save with an unchanged status logs nothing; --id overrides the file name; bad input is refused', () => {
       const id = 'p20261011100000gggg';

@@ -28,6 +28,19 @@ describe('normalizeProposal', () => {
     expect(p.title).toMatch(/palabra…$/);
     expect(normalizeProposal({ ...base, rationale: `${'mot, '.repeat(900)}` })!.rationale).toMatch(/mot…$/);
   });
+  it('keeps a validated history: malformed entries dropped, at most the last 20', () => {
+    const entry = { status: 'rejected', decidedBy: 'user:x', decidedAt: '2026-10-13T09:00:00.000Z', reason: 'not now', reopenedBy: 'user:y', reopenedAt: '2026-10-13T10:00:00.000Z' };
+    const p = normalizeProposal({ ...base, status: 'approved', history: [entry, { ...entry, status: 'maybe' }, { ...entry, reopenedBy: 3 }, 'x', null, { ...entry, reason: 5, decidedBy: undefined, extra: 1 }] })!;
+    const { reason: _r, decidedBy: _d, ...bare } = entry;
+    expect(p.history).toEqual([entry, bare]);
+    expect(normalizeProposal({ ...base, history: 'nope' })!.history).toBeUndefined();
+    expect(normalizeProposal(base)!.history).toBeUndefined();
+    const many = Array.from({ length: 25 }, (_, i) => ({ ...entry, reopenedAt: `t${i}` }));
+    const kept = normalizeProposal({ ...base, history: many })!.history!;
+    expect(kept).toHaveLength(20);
+    expect(kept[0].reopenedAt).toBe('t5');
+    expect(kept[19].reopenedAt).toBe('t24');
+  });
   it('keeps a valid taskId and drops an invalid one', () => {
     expect(normalizeProposal({ ...base, taskId: 'T008' })).toMatchObject({ taskId: 'T008' });
     for (const bad of ['', 'a b', 'x'.repeat(65), 'a;b', 5]) expect(normalizeProposal({ ...base, taskId: bad })!.taskId).toBeUndefined();

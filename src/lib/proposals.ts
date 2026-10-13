@@ -11,8 +11,14 @@ export const MAX_PROPOSAL_TITLE = 200;
 export interface ProposalDoc {
   ts: string; category: ProposalCategory; risk: ProposalRisk; title: string; rationale: string; evidence: string; pillar: string;
   estimate?: string; path?: string; taskId?: string; status: ProposalStatus; decidedBy?: string; decidedAt?: string; reason?: string;
-  source: 'scout' | 'user'; author: string;
+  source: 'scout' | 'user'; author: string; history?: ProposalHistoryEntry[];
 }
+
+/** A decision a reopen replaced: the old status and who decided it, and who reopened it and when. */
+export interface ProposalHistoryEntry {
+  status: ProposalStatus; decidedBy?: string; decidedAt?: string; reason?: string; reopenedBy: string; reopenedAt: string;
+}
+export const MAX_PROPOSAL_HISTORY = 20;
 
 const str = (x: unknown): x is string => typeof x === 'string';
 const oneOf = <T extends string>(list: readonly T[], x: unknown): x is T => str(x) && (list as readonly string[]).includes(x);
@@ -48,7 +54,22 @@ export function normalizeProposal(x: unknown): ProposalDoc | null {
   for (const k of ['estimate', 'path', 'decidedBy', 'decidedAt'] as const) if (str(o[k])) out[k] = (o[k] as string).slice(0, MAX_PROPOSAL_TITLE);
   if (str(o.taskId) && /^[A-Za-z0-9_.-]{1,64}$/.test(o.taskId)) out.taskId = o.taskId;
   if (str(o.reason)) out.reason = clipWords(o.reason, MAX_PROPOSAL_TEXT);
+  if (Array.isArray(o.history)) {
+    const history = o.history.map(normalizeHistoryEntry).filter((e): e is ProposalHistoryEntry => e !== null).slice(-MAX_PROPOSAL_HISTORY);
+    if (history.length) out.history = history;
+  }
   return out;
+}
+
+function normalizeHistoryEntry(x: unknown): ProposalHistoryEntry | null {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
+  const o = x as Record<string, unknown>;
+  if (!oneOf(PROPOSAL_STATUSES, o.status) || !str(o.reopenedBy) || !str(o.reopenedAt)) return null;
+  const e: ProposalHistoryEntry = { status: o.status, reopenedBy: o.reopenedBy.slice(0, MAX_PROPOSAL_TITLE), reopenedAt: o.reopenedAt.slice(0, MAX_PROPOSAL_TITLE) };
+  if (str(o.decidedBy)) e.decidedBy = o.decidedBy.slice(0, MAX_PROPOSAL_TITLE);
+  if (str(o.decidedAt)) e.decidedAt = o.decidedAt.slice(0, MAX_PROPOSAL_TITLE);
+  if (str(o.reason)) e.reason = clipWords(o.reason, MAX_PROPOSAL_TEXT);
+  return e;
 }
 
 export const canDecide = (status: ProposalStatus): boolean => status === 'proposed' || status === 'discussing';
