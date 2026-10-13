@@ -14,6 +14,9 @@ export type ForgeStatus = {
   // started, the seconds of each closed stage keyed by phase name (lowercase; 'triage' before the first phase),
   // and when the task finished (phase done, or a verdict accepting the task itself). null / {} in an older status.
   taskStartedAt: string | null; stageSince: string | null; stages: Record<string, number>; doneAt: string | null;
+  // The ts of the task's latest event of any kind (lens's safety net for a light task the session never closed); null
+  // in an older status.
+  lastAt: string | null;
   // The task runs in auto mode (spec §5.5); absent otherwise.
   autonomy?: 'auto';
 };
@@ -86,12 +89,29 @@ const validatorsOf = (results: unknown): ForgeStatus['validators'] =>
     .slice(0, MAX_VALIDATORS)
     .map(r => ({ name: cleanText(r.validator), ok: r.ok === true }));
 
+// The Trivial and Small paths log no review verdict: a passing validate (Trivial) or a verify result finishes them.
+const isLight = (path: string): boolean => path === 'trivial' || path === 'small';
+// forge-verify and forge-verify-heavy.
+const isVerifyAgent = (agent: string | null): boolean => !!agent && agent.startsWith('forge-verify');
+
+// The task finished at `ts`: its stage closed. Unchanged when it already was.
+const finish = (s: ForgeStatus, ts: string): ForgeStatus => (s.doneAt ? s : { ...s, stages: closeStage(s, ts), stageSince: ts, doneAt: ts });
+
 /**
  * Applies one ledger event to the status: a triage or phase event with a task makes that task current (keeping what is
- * known of it when it already was); agent, validate, verdict and round events of the current task or its briefs fill
- * it in. Anything else leaves the status as it was.
+ * known of it when it already was); agent, validate, verdict, round and verify events of the current task or its briefs
+ * fill it in. Anything else leaves the status as it was. Every event of the task moves its lastAt.
  */
 export function deriveStatus(prev: ForgeStatus | null, event: unknown): ForgeStatus | null {
+  const next = applyEvent(prev, event);
+  if (!next || !isObj(event) || !str(event.ts) || !str(event.kind)) return next;
+  // An event that changed nothing still counts when it is of the task (any kind, e.g. a decision).
+  if (next === prev && !ownedBy(next.task, event.task)) return next;
+  const lastAt = tsText(event.ts);
+  return lastAt === next.lastAt ? next : { ...next, lastAt };
+}
+
+function applyEvent(prev: ForgeStatus | null, event: unknown): ForgeStatus | null {
   if (!isObj(event) || !str(event.ts) || !str(event.kind)) return prev;
   const e = event;
   const ts: string = event.ts;
@@ -105,7 +125,7 @@ export function deriveStatus(prev: ForgeStatus | null, event: unknown): ForgeSta
       ? prev!
       : {
         ts, task, path: '', phase: '', agent: null, validators: [], verdict: null, round: null, cap: null, brief: null, accepted: [], verify: null,
-        taskStartedAt: ts, stageSince: ts, stages: {}, doneAt: null,
+        taskStartedAt: ts, stageSince: ts, stages: {}, doneAt: null, lastAt: tsText(ts),
       };
     const next: ForgeStatus = { ...base, ts };
     if (e.kind === 'triage' && str(e.path)) next.path = cleanText(e.path);
@@ -120,6 +140,8 @@ export function deriveStatus(prev: ForgeStatus | null, event: unknown): ForgeSta
         next.stageSince = ts;
         next.doneAt = done ? ts : null;
       }
+      // A finished task has no agent at work.
+      if (done) next.agent = null;
       next.phase = phase;
     }
     if (e.kind === 'phase' && briefNum(e.brief) !== null) next.brief = briefNum(e.brief);
@@ -129,8 +151,16 @@ export function deriveStatus(prev: ForgeStatus | null, event: unknown): ForgeSta
   const n = briefOf(prev.task, e.task);
   const cur = n !== null ? { ...prev, brief: n } : prev;
   switch (e.kind) {
-    case 'agent': return str(e.agent) ? { ...prev, agent: cleanText(e.agent) } : prev;
-    case 'validate': return { ...cur, validators: validatorsOf(e.results) };
+    case 'agent': {
+      if (!str(e.agent)) return prev;
+      // An agent launched after the task closed (a verification, say) is work in progress again; the gap is no stage.
+      return { ...prev, agent: cleanText(e.agent), ...(prev.doneAt ? { doneAt: null, stageSince: ts } : {}) };
+    }
+    case 'validate': {
+      const next = { ...cur, validators: validatorsOf(e.results) };
+      // Trivial logs only its triage and its validate: a passing one of the task itself (not a base-commit run) ends it.
+      return n === null && cur.path === 'trivial' && e.ok === true && e.baseline !== true ? finish(next, ts) : next;
+    }
     case 'verdict': {
       if (!str(e.action)) return prev;
       const accepted = n !== null && e.action === 'accept' && !cur.accepted.includes(n)
@@ -150,8 +180,11 @@ export function deriveStatus(prev: ForgeStatus | null, event: unknown): ForgeSta
         v.surfaces = (Array.isArray(e.surfaces) ? e.surfaces : []).filter(str).slice(0, MAX_VALIDATORS).map(cleanText);
         v.result = null; v.passed = null; v.total = null; v.evidence = null; v.reason = null;
       }
-      if (str(e.result)) { v.result = cleanText(e.result); v.passed = num(e.passed); v.total = num(e.total); v.evidence = pathText(e.evidence); v.reason = str(e.reason) ? cleanText(e.reason) : null; }
-      return { ...cur, verify: v };
+      if (!str(e.result)) return { ...cur, verify: v };
+      v.result = cleanText(e.result); v.passed = num(e.passed); v.total = num(e.total); v.evidence = pathText(e.evidence); v.reason = str(e.reason) ? cleanText(e.reason) : null;
+      // The verification is over: its agent is gone, and a light task (no verdict to come) is finished.
+      const next = { ...cur, verify: v, ...(isVerifyAgent(cur.agent) ? { agent: null } : {}) };
+      return isLight(cur.path) ? finish(next, ts) : next;
     }
     default: return prev;
   }
@@ -188,6 +221,7 @@ export function normalizeStatus(x: unknown): ForgeStatus | null {
     } : null,
     // Absent in a status written before timings existed: no times are shown.
     taskStartedAt: tsText(x.taskStartedAt), stageSince: tsText(x.stageSince), stages: stagesOf(x.stages), doneAt: tsText(x.doneAt),
+    lastAt: tsText(x.lastAt),
     ...(x.autonomy === 'auto' ? { autonomy: 'auto' as const } : {}),
   };
 }

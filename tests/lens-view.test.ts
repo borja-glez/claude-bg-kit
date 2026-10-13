@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { fmtTokens, fmtUsd, usageBandText, barParts, briefCells, forgePhase, headline, stagesFor, tierOf, todoCells, roadmapCells, pct, span, stageOf } from '../src/lens/view.js';
 import { buildCards, cardAlt, type CardTexts } from '../src/lens/cards.js';
 import { bandSvg, cardSvg, fit, xml } from '../src/lens/svg.js';
-import { executionFromFiles, type PanelModel } from '../src/lens/model.js';
+import { executionFromFiles, forgeFromStatus, type PanelModel } from '../src/lens/model.js';
 
 const T: CardTexts = {
   sRoadmap: 'Roadmap', sSuperpowers: 'superpowers', sNow: 'Now', sTodos: 'Todos', sSubagents: 'Subagents', sTasks: 'Tasks', sForge: 'forge',
@@ -153,6 +153,41 @@ describe('lens cards', () => {
     expect(blocks).toContain('design approved (v4)');
     const withTask = buildCards({ ...EMPTY, forge: FORGE, decisions: { count: 1, autonomy: 'unattended', lastMajor: null } }, T, 0).find(c => c.title === FORGE.task)!;
     expect(JSON.stringify(withTask.blocks)).toContain('1 automatic decision"');
+  });
+  it('draws the briefs bar for Medium and Large, or full once the task is done', () => {
+    const kinds = (f: NonNullable<PanelModel['forge']>) => buildCards({ ...EMPTY, forge: f }, T, 0)[0].blocks.map(b => b.kind);
+    const small = { ...FORGE, path: 'small', phase: '', agent: null, verdict: null, round: null, brief: null, accepted: [], briefs: 1 };
+    expect(kinds(small)).not.toContain('bar');
+    const done = { ...small, timing: { taskSeconds: 540, done: true, stages: [{ name: 'triage', seconds: 540, live: false }] } };
+    const card = buildCards({ ...EMPTY, forge: done }, T, 0)[0];
+    expect(cardAlt(card)).toContain('briefs 1/1');
+    expect(card.blocks.find(b => b.kind === 'cells')).toMatchObject({ cells: ['done'] });
+    expect(kinds({ ...FORGE, path: 'medium' })).toContain('bar');
+    const mediumDone = buildCards({ ...EMPTY, forge: { ...FORGE, path: 'medium', timing: done.timing } }, T, 0)[0];
+    expect(cardAlt(mediumDone)).toContain('briefs 5/5');
+  });
+  it('draws the agent row only while the task is not done', () => {
+    const timing = (d: boolean) => ({ taskSeconds: 60, done: d, stages: [] });
+    const kinds = (f: NonNullable<PanelModel['forge']>) => buildCards({ ...EMPTY, forge: f }, T, 0)[0].blocks.map(b => b.kind);
+    expect(kinds({ ...FORGE, timing: timing(false) })).toContain('row');
+    expect(kinds({ ...FORGE, timing: timing(true) })).not.toContain('row');
+    expect(kinds({ ...FORGE, phase: 'done' })).not.toContain('row');
+  });
+  it('the B016 card: a small task left open for 40 minutes is drawn finished', () => {
+    const f = forgeFromStatus(JSON.stringify({
+      ts: '2026-10-12T11:11:00.000Z', task: 'fecha-corta', path: 'small', phase: '', agent: 'forge-verify', validators: [{ name: 'test', ok: true }],
+      verdict: null, round: null, cap: null, brief: null, accepted: [],
+      verify: { planned: true, surfaces: ['web'], result: null, passed: null, total: null, evidence: null, reason: null },
+      taskStartedAt: '2026-10-12T11:11:00.000Z', stageSince: '2026-10-12T11:11:00.000Z', stages: {}, doneAt: null, lastAt: '2026-10-12T11:20:00.000Z',
+    }), Date.parse('2026-10-12T12:00:00.000Z'), 1)!;
+    const card = buildCards({ ...EMPTY, forge: f, subagents: [{ id: 'a', type: 'forge:forge-verify', seconds: 5 }] }, T, 0)[0];
+    const alt = cardAlt(card);
+    expect(card.subtitle).toBe('forge · done · ✓ 9m 00s');
+    expect(alt).not.toContain('…');
+    expect(alt).not.toContain('forge-verify');
+    expect(card.blocks.some(b => b.kind === 'row')).toBe(false);
+    expect((card.blocks.find(b => b.kind === 'stages') as { stages: { state: string }[] }).stages.every(s => s.state === 'done')).toBe(true);
+    expect(alt).toContain('briefs 1/1');
   });
   it('builds nothing from an empty model', () => {
     expect(buildCards(EMPTY, T, 0)).toEqual([]);

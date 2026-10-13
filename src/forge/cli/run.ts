@@ -12,7 +12,7 @@ import { parsePlan, PlanError } from '../../lib/plan.js';
 import { renderBrief, taskText, tddLine } from '../brief.js';
 import { loadConfig, agentFor, ROLES, ConfigError, NAME, WORKFLOWS, AUTONOMIES } from '../config.js';
 import { resolvePrefs, isWorkflow, isAutonomy } from '../prefs.js';
-import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, type ReviewerName, type Action, type FailingValidator } from '../verdict.js';
+import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, type ReviewerName, type Action, type FailingValidator, type VerifyFile } from '../verdict.js';
 import { decideRound } from '../loop.js';
 import { PROPOSAL_ID, proposalId, saveProposal, loadProposals, decideLocal, decideDoc, mirrorProposal } from '../proposals.js';
 import { normalizeProposal, isActionable, PROPOSAL_STATUSES, type Decision } from '../../lib/proposals.js';
@@ -39,7 +39,7 @@ export interface ExecResult { code: number; output: string; ms: number; timedOut
 export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined> }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|infinite|cycle|swarm|stop|hook> ...';
+const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|infinite|cycle|swarm|stop|hook> ...';
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 
@@ -249,6 +249,16 @@ function hookStop(io: Io): string {
   } catch { return ''; }
 }
 
+// Logs the verify event of a verification (verdict and verify-result share it): its result (`invalid` when verify.json
+// did not parse), the checks passed of the total, and the evidence folder that goes with a `reviews-<n>-<k>` dir.
+function logVerifyResult(cwd: string, at: string, task: string, dir: string, verifyFile: VerifyFile | null): { result: string; passed: number; total: number } {
+  const rel = path.relative(cwd, dir).split(path.sep).join('/');
+  const evidence = rel.replace(/reviews-(\d+-\d+)$/, 'evidence/$1');
+  const out = { result: verifyFile?.result ?? 'invalid', passed: verifyFile ? verifyFile.checks.filter(c => c.ok).length : 0, total: verifyFile ? verifyFile.checks.length : 0 };
+  appendEvent(cwd, { ts: at, kind: 'verify', task, ...out, ...(evidence !== rel ? { evidence } : {}), ...(verifyFile?.reason ? { reason: verifyFile.reason } : {}) });
+  return out;
+}
+
 export function run(argv: string[], io: Io): Result {
   // --cwd <dir>: the code lives there (validators, git and the project's files), so a coordinator never has to cd
   // into a worktree (a cd outside a subshell sticks). forge's own state (ledger, .forge/work, the execution) and
@@ -447,14 +457,20 @@ export function run(argv: string[], io: Io): Result {
         // dir lets `round` count a re-run verdict on the same review dir once.
         appendEvent(io.cwd, { ts: ts(), kind: 'verdict', task, dir: path.relative(io.cwd, dir).split(path.sep).join('/') || '.', action: result.action, score: result.score, signature: result.signature,
           critical: result.critical.length, important: result.important.length, minor: result.minor.length });
-        if (verifyFile !== undefined) {
-          const rel = path.relative(io.cwd, dir).split(path.sep).join('/');
-          const evidence = rel.replace(/reviews-(\d+-\d+)$/, 'evidence/$1');
-          appendEvent(io.cwd, { ts: ts(), kind: 'verify', task, result: verifyFile?.result ?? 'invalid',
-            passed: verifyFile ? verifyFile.checks.filter(c => c.ok).length : 0, total: verifyFile ? verifyFile.checks.length : 0,
-            ...(evidence !== rel ? { evidence } : {}), ...(verifyFile?.reason ? { reason: verifyFile.reason } : {}) });
-        }
+        if (verifyFile !== undefined) logVerifyResult(io.cwd, ts(), task, dir, verifyFile);
         return json(result);
+      }
+      case 'verify-result': {
+        // A verification outside a verdict (Small and Trivial have no review): its result logged as verdict logs it.
+        const task = flag('task');
+        const dirArg = flag('dir');
+        if (!task || !dirArg) throw new UsageError('verify-result: --task and --dir are required');
+        const dir = path.resolve(io.cwd, dirArg);
+        const verifyPath = path.join(dir, 'verify.json');
+        if (!existsSync(verifyPath)) throw new UsageError(`verify-result: no verify.json in ${dirArg}`);
+        const verifyFile = parseVerifyFile(readFileSync(verifyPath, 'utf8'));
+        if (!verifyFile) throw new UsageError(`verify-result: ${dirArg}/verify.json is not a usable verify result (result pass|fail|blocked, checks, a reason when blocked)`);
+        return json({ task, ...logVerifyResult(io.cwd, ts(), task, dir, verifyFile) });
       }
       case 'verify-cleanup': {
         const dir = flag('dir');

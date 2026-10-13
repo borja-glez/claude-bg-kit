@@ -237,8 +237,21 @@ export function forgeFromStatus(text: string, now: number, briefs: number | null
   if (!st) return null;
   const t = Date.parse(st.ts);
   if (!Number.isFinite(t) || !Number.isFinite(now) || now - t > FORGE_WINDOW_MS) return null;
-  const { ts: _ts, taskStartedAt: _a, stageSince: _b, stages: _c, doneAt: _d, ...forge } = st;
-  return { ...forge, briefs, timing: forgeTiming(st, now) };
+  const { ts: _ts, taskStartedAt: _a, stageSince: _b, stages: _c, doneAt: _d, lastAt: _e, ...forge } = st;
+  // A light task the session never closed: finished at its last event, its agent gone.
+  const left = leftOpen(st, now);
+  const timing = forgeTiming(left ? { ...st, doneAt: st.lastAt } : st, now);
+  return { ...forge, ...(left ? { agent: null } : {}), briefs, timing };
+}
+
+const LEFT_OPEN_MS = 30 * 60_000;
+
+// A Trivial or Small task with no doneAt and nothing logged for over 30 minutes: the session finished it without
+// saying so (those paths log no done phase nor verdict). Medium and Large are never guessed at.
+function leftOpen(st: { path: string; doneAt: string | null; lastAt: string | null }, now: number): boolean {
+  if ((st.path !== 'trivial' && st.path !== 'small') || st.doneAt) return false;
+  const last = st.lastAt ? Date.parse(st.lastAt) : NaN;
+  return Number.isFinite(last) && Number.isFinite(now) && now - last > LEFT_OPEN_MS;
 }
 
 /** Whole seconds from `from` to `to`; null when `from` is missing or not a date, either end is more than FUTURE_SKEW_MS ahead of now, or the span is negative. */
@@ -265,6 +278,10 @@ function forgeTiming(st: { phase: string; taskStartedAt: string | null; stageSin
   const current = stageOf(st.phase || 'triage');
   const liveSecs = done ? null : elapsed(st.stageSince, now, now);
   if (liveSecs !== null) sums.set(current, (sums.get(current) ?? 0) + liveSecs);
+  // A stage still open at doneAt ends there: a task taken as finished at its last event (forge itself closes the stage
+  // when it sets doneAt, so stageSince is then doneAt).
+  const tail = done ? elapsed(st.stageSince, doneMs, now) : null;
+  if (tail) sums.set(current, (sums.get(current) ?? 0) + tail);
   const order: readonly string[] = STAGES;
   const known = order.filter(n => sums.has(n));
   const other = [...sums.keys()].filter(n => !order.includes(n));

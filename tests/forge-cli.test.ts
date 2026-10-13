@@ -83,6 +83,35 @@ describe('forge CLI', () => {
     writeFileSync(path.join(dir, 'correctness.json'), '{"verdict":"pass","confidence":1,"findings":[]}');
     expect(JSON.parse(run(['verdict', '--task', 't1', '--dir', 'r'], io).stdout).action).toBe('fix');
   });
+  it('verify-result logs the verify result of verify.json, as verdict does, and closes a Small task', () => {
+    run(['log', '--kind', 'triage', '--task', 't1', '--data', '{"path":"small","reasons":[]}'], io);
+    run(['log', '--kind', 'agent', '--task', 't1', '--data', '{"agent":"forge-verify"}'], io);
+    const dir = path.join(root, '.forge', 'work', 't1', 'reviews-1-1');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'verify.json'), JSON.stringify({ surfaces: ['web'], result: 'pass', reason: 'r', checks: [{ id: 1, surface: 'web', name: 'a', ok: true }, { id: 2, surface: 'web', name: 'b', ok: false }] }));
+    const r = run(['verify-result', '--task', 't1', '--dir', '.forge/work/t1/reviews-1-1'], io);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toEqual({ task: 't1', result: 'fail', passed: 1, total: 2 });
+    expect(readEvents(root).at(-1)).toEqual({ ts: '2026-10-11T10:00:00.000Z', kind: 'verify', task: 't1', result: 'fail', passed: 1, total: 2, evidence: '.forge/work/t1/evidence/1-1', reason: 'r' });
+    const status = JSON.parse(readFileSync(path.join(root, '.forge', 'status.json'), 'utf8'));
+    expect(status).toMatchObject({ agent: null, doneAt: '2026-10-11T10:00:00.000Z', verify: { result: 'fail' } });
+  });
+  it('verify-result without verify.json, with an unusable one, or without --task/--dir exits 2 and logs nothing', () => {
+    mkdirSync(path.join(root, 'r'));
+    const missing = run(['verify-result', '--task', 't1', '--dir', 'r'], io);
+    expect(missing.code).toBe(2);
+    expect(missing.stderr).toMatch(/verify\.json/);
+    writeFileSync(path.join(root, 'r', 'verify.json'), '{"result":"maybe"}');
+    const bad = run(['verify-result', '--task', 't1', '--dir', 'r'], io);
+    expect(bad.code).toBe(2);
+    expect(bad.stderr).toMatch(/verify\.json/);
+    expect(run(['verify-result', '--task', 't1'], io).code).toBe(2);
+    expect(run(['verify-result', '--dir', 'r'], io).code).toBe(2);
+    expect(readEvents(root)).toEqual([]);
+  });
+  it('the usage text lists verify-result', () => {
+    expect(run(['nope'], io).stderr).toContain('verify-result');
+  });
   it('round decides from the task verdict history and logs it', () => {
     for (const s of ['0.6', '0.6']) run(['log', '--kind', 'verdict', '--task', 't1', '--data', `{"action":"fix","score":${s},"signature":"x"}`], io);
     const r = JSON.parse(run(['round', '--task', 't1', '--path', 'medium'], io).stdout);

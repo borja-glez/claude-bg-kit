@@ -102,8 +102,10 @@ export function stagesFor(path: string, phase: string, validated: 'ok' | 'failed
   return out;
 }
 
-// The phase to show: a run whose briefs are all accepted is done, even when the session never logged the done phase.
+// The phase to show: a run whose briefs are all accepted is done, even when the session never logged the done phase;
+// so is a finished Trivial or Small task (those paths log no phases).
 export function forgePhase(f: NonNullable<PanelModel['forge']>): string {
+  if ((f.path === 'trivial' || f.path === 'small') && f.timing?.done) return 'done';
   const total = Math.max(f.briefs ?? 0, f.brief ?? 0);
   const accepted = new Set(f.accepted ?? []);
   const all = total > 0 && Array.from({ length: total }, (_, i) => i + 1).every(n => accepted.has(n));
@@ -116,15 +118,21 @@ export const count = (cells: CellState[]): Cells => ({ cells, done: cells.filter
 export const roadmapCells = (w: NonNullable<PanelModel['waypoint']>): Cells =>
   count([...(w.cells ?? '')].map(ch => LETTER[ch] ?? 'pending'));
 
+/** The forge task is over: its phase reads done or its timing ended. */
+export const forgeDone = (f: NonNullable<PanelModel['forge']>): boolean => forgePhase(f) === 'done' || f.timing?.done === true;
+
 // forge's briefs: accepted done, the current one active (failed after a verdict that sent it back), the rest pending.
+// Drawn for Medium and Large only, and every brief done once the task is (a light task's single brief has no verdict).
 export function briefCells(f: NonNullable<PanelModel['forge']>): Cells | null {
+  const done = forgeDone(f);
+  if (f.path !== 'medium' && f.path !== 'large' && !done) return null;
   const accepted = new Set(f.accepted ?? []);
   const total = Math.max(f.briefs ?? 0, f.brief ?? 0, ...accepted);
   if (total <= 0) return null;
   const sentBack = f.verdict !== null && f.verdict.action !== 'accept';
   const cells: CellState[] = [];
   for (let n = 1; n <= Math.min(total, 60); n++) {
-    cells.push(accepted.has(n) ? 'done' : n === f.brief ? (sentBack && f.round ? 'failed' : 'active') : 'pending');
+    cells.push(done || accepted.has(n) ? 'done' : n === f.brief ? (sentBack && f.round ? 'failed' : 'active') : 'pending');
   }
   return count(cells);
 }
