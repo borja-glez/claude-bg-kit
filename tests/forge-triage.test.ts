@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { triage, implementerFor, isMechanical, type RepoFacts } from '../src/forge/triage.js';
+import { triage, implementerFor, isMechanical, announce, type RepoFacts } from '../src/forge/triage.js';
 
 const FILES = ['src/app.ts', 'src/auth/login.ts', 'src/util/format.ts', 'src/db/migrations/001.sql', 'package.json', '.github/workflows/ci.yml',
   ...Array.from({ length: 20 }, (_, i) => `src/feature/f${i}.ts`)];
@@ -102,6 +102,36 @@ describe('triage', () => {
     const r = triage('el botón «Añadir gasto» debería decir «Apuntar gasto» en todas partes', one('Añadir gasto'), []);
     expect(r.path).toBe('small');
     expect(r.files).toEqual(['src/app.ts']);
+  });
+  it('a quoted old value found in one file makes a short change trivial under the copy guards', () => {
+    const one = (hit: string) => repo({ [hit]: ['src/feature/f1.ts'] });
+    for (const t of ['cambia «Añadir gasto» por «Apuntar gasto»', 'Cambia el botón «Añadir gasto» por «Apuntar gasto»']) {
+      const r = triage(t, one('Añadir gasto'), []);
+      expect(r, t).toMatchObject({ path: 'trivial', files: ['src/feature/f1.ts'] });
+      expect(r.reasons).toEqual(['one file, short task']);
+    }
+    expect(triage('change "Add expense" to "Log expense"', one('Add expense'), []).path).toBe('trivial');
+    expect(triage('change the "Add expense" button to "Log expense"', one('Add expense'), []).path).toBe('trivial');
+    // No change verb first: the session judges it, and the reason does not claim nothing was found.
+    const prose = triage('el botón «Añadir gasto» debería decir «Apuntar gasto»', one('Añadir gasto'), []);
+    expect(prose.path).toBe('small');
+    expect(prose.reasons.join(' ')).not.toMatch(/no files located/);
+    expect(prose.reasons).toEqual(['quoted text found in 1 file(s)']);
+    expect(announce({ path: 'small', reasons: prose.reasons, implementer: { self: false, agent: 'forge-impl-light' }, fresh: [], catalog: [] }, 'es'))
+      .toBe('Small → forge-impl-light: texto entre comillas en 1 fichero(s). Puedes corregirlo.');
+    // Without a hit there is no file: still small.
+    expect(triage('cambia «Añadir gasto» por «Apuntar gasto»', repo(), []).path).toBe('small');
+  });
+  it('the copy rule pairs verbs with their own prepositions and only a short of/in phrase after the noun', () => {
+    for (const t of [
+      'Replace the text input with a "textarea"',
+      'Replace the tooltip with a "Popover"',
+      'Change the label component to use a "Badge"',
+      'Update the message queue to "durable"',
+    ]) expect(triage(t, repo(), []).path, t).not.toBe('trivial');
+    expect(triage('Cambia el título de la pestaña del navegador a «Reparto», gracias', repo(), []).path).toBe('trivial');
+    expect(triage('Cambia el título de la pestaña del navegador a «Reparto · gastos del piso» por favor', repo(), []).path).toBe('trivial');
+    expect(triage('change the title of the page to "Reparto", please.', repo(), []).path).toBe('trivial');
   });
   it('quoted-literal hits never raise the size: a literal found in several files is left out', () => {
     const many = (n: number) => repo({ Save: FILES.filter(f => f.startsWith('src/feature/')).slice(0, n) });
