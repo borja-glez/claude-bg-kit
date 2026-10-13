@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parsePlan } from '../src/lib/plan.js';
-import { renderBrief, taskText } from '../src/forge/brief.js';
+import { renderBrief, taskText, tddLine } from '../src/forge/brief.js';
 
 const PLAN = parsePlan(`project: shop
 locale: es
@@ -42,5 +42,11 @@ describe('brief', () => {
     expect(md).not.toContain('Design:');
     expect(md).toContain('Verification: npm test');
     expect(md).toContain('Includes: tabla orders y migración');
+  });
+  it('ends with the TDD line when given', () => {
+    const line = tddLine('/sp/skills/test-driven-development/SKILL.md');
+    expect(line).toBe('TDD: required. Read and follow `/sp/skills/test-driven-development/SKILL.md`. Report the failing run and then the passing run of the new tests.');
+    expect(renderBrief(PLAN, PLAN.tasks[0], { planPath: 'p.yaml', designPath: null, tdd: line }).trimEnd().endsWith(line)).toBe(true);
+    expect(renderBrief(PLAN, PLAN.tasks[0], { planPath: 'p.yaml', designPath: null })).not.toContain('TDD');
   });
 });

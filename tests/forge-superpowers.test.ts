@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { claudeConfigDir, locateSuperpowers, spPlans, spSkillPath, spSpecs } from '../src/forge/superpowers.js';
 import { run, type Io } from '../src/forge/cli/run.js';
+import { parsePlan } from '../src/lib/plan.js';
 
 let cfg: string;
 let project: string;
@@ -90,5 +91,33 @@ describe('sp-specs and sp-plans', () => {
     expect(JSON.parse(run(['sp-path', 'nope'], io).stdout)).toBeNull();
     expect(run(['sp-path'], io).code).toBe(2);
     expect(JSON.parse(run(['sp-path', 'test-driven-development'], { ...io, env: { CLAUDE_CONFIG_DIR: path.join(cfg, 'none') } }).stdout)).toBeNull();
+  });
+});
+
+describe('tdd: superpowers', () => {
+  const config = (text: string) => { mk(path.join(project, '.forge')); writeFileSync(path.join(project, '.forge', 'config.yaml'), text); };
+  it('forge tdd gives the line only with tdd: superpowers and the TDD skill installed', () => {
+    registry({ 'superpowers@m': [install('6.4.1')] });
+    const io: Io = { cwd: project, now: () => new Date(), env: { CLAUDE_CONFIG_DIR: cfg } };
+    expect(JSON.parse(run(['tdd'], io).stdout)).toMatchObject({ tdd: 'off', installed: true, version: '6.4.1', line: null });
+    config('tdd: superpowers\n');
+    const on = JSON.parse(run(['tdd'], io).stdout);
+    expect(on).toMatchObject({ tdd: 'superpowers', installed: true });
+    expect(on.line).toBe(`TDD: required. Read and follow \`${on.skill}\`. Report the failing run and then the passing run of the new tests.`);
+    expect(JSON.parse(run(['tdd'], { ...io, env: { CLAUDE_CONFIG_DIR: path.join(cfg, 'none') } }).stdout))
+      .toEqual({ tdd: 'superpowers', installed: false, version: null, skill: null, line: null });
+  });
+  it('both briefs carry the line with tdd: superpowers, and none with tdd: off', () => {
+    registry({ 'superpowers@m': [install('6.4.1')] });
+    config('tdd: superpowers\n');
+    copyFileSync(new URL('./fixtures/plan.yaml', import.meta.url), path.join(project, 'plan.yaml'));
+    copyFileSync(new URL('./fixtures/sp-plan.md', import.meta.url), path.join(project, 'sp.md'));
+    const io: Io = { cwd: project, now: () => new Date(), env: { CLAUDE_CONFIG_DIR: cfg } };
+    const id = parsePlan(readFileSync(path.join(project, 'plan.yaml'), 'utf8')).tasks[0].id;
+    expect(run(['brief', '--plan', 'plan.yaml', '--task', id], io).stdout).toMatch(/\nTDD: required\. Read and follow `.+SKILL\.md`\. Report the failing run/);
+    expect(run(['brief', '--superpowers-plan', 'sp.md', '--task', '2'], io).stdout).toContain('\nTDD: required. Read and follow `');
+    config('tdd: off\n');
+    expect(run(['brief', '--plan', 'plan.yaml', '--task', id], io).stdout).not.toContain('TDD');
+    expect(run(['brief', '--superpowers-plan', 'sp.md', '--task', '2'], io).stdout).not.toContain('TDD: required');
   });
 });

@@ -9,7 +9,7 @@ import { readExecution, saveExecution } from '../execution.js';
 import { planLocale, replyIn } from '../../lib/locale.js';
 import { triage, implementerFor, zonesFromPaths, PATH_ORDER, type PathName } from '../triage.js';
 import { parsePlan, PlanError } from '../../lib/plan.js';
-import { renderBrief, taskText } from '../brief.js';
+import { renderBrief, taskText, tddLine } from '../brief.js';
 import { loadConfig, agentFor, ROLES, ConfigError, NAME } from '../config.js';
 import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, type ReviewerName, type Action, type FailingValidator } from '../verdict.js';
 import { decideRound } from '../loop.js';
@@ -36,7 +36,7 @@ export interface ExecResult { code: number; output: string; ms: number; timedOut
 export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined> }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|decision|agents|last|proposals|surfaces|tools|local|verify-plan|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|infinite|cycle|swarm|stop|hook> ...';
+const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|decision|agents|last|proposals|surfaces|tools|local|verify-plan|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|infinite|cycle|swarm|stop|hook> ...';
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 
@@ -172,6 +172,14 @@ export function findWaypointCli(scriptPath: string): string | null {
 // superpowers as installed for this repository: its main checkout holds the project settings and is the projectPath.
 const superpowersOf = (io: Io, dir: string) => locateSuperpowers({ configDir: claudeConfigDir(io.env ?? process.env), projectDir: mainCheckout(dir) });
 
+// tdd: superpowers (spec §4.4): the line implementer briefs carry, null when off or when superpowers or its TDD skill is missing.
+function tddFor(io: Io, dir: string) {
+  const { tdd } = loadConfig(dir);
+  const sp = superpowersOf(io, dir);
+  const skill = spSkillPath(sp, 'test-driven-development');
+  return { tdd, installed: sp.installed, version: sp.version, skill, line: tdd === 'superpowers' && skill ? tddLine(skill) : null };
+}
+
 // What the stop conditions need from the repository: the stop file and the proposal mirror.
 // Approved work still pending = every approved/auto_approved proposal not yet done, with or without a task.
 function stopContext(cwd: string, now: Date): StopContext {
@@ -271,7 +279,7 @@ export function run(argv: string[], io: Io): Result {
           const n = spTaskNumber(flag('task'));
           let text: string;
           try { text = readFileSync(path.resolve(io.cwd, file), 'utf8'); } catch { throw new UsageError(`brief: cannot read ${file}`); }
-          try { return ok(renderSpBrief(text, n, { planPath: file.replace(/\\/g, '/'), tdd: null })); } catch (e) {
+          try { return ok(renderSpBrief(text, n, { planPath: file.replace(/\\/g, '/'), tdd: tddFor(io, repoDir).line })); } catch (e) {
             if (e instanceof SpPlanError) throw new UsageError(`brief: ${file}: ${e.message}`);
             throw e;
           }
@@ -279,7 +287,7 @@ export function run(argv: string[], io: Io): Result {
         const { plan, task } = planTask(io.cwd, flag('plan'), flag('task'));
         const design = flag('design') ?? path.join(path.dirname(flag('plan')!), 'design.md');
         const designPath = existsSync(path.resolve(io.cwd, design)) ? design.replace(/\\/g, '/') : null;
-        return ok(renderBrief(plan, task, { planPath: flag('plan')!.replace(/\\/g, '/'), designPath }));
+        return ok(renderBrief(plan, task, { planPath: flag('plan')!.replace(/\\/g, '/'), designPath, tdd: tddFor(io, repoDir).line }));
       }
       case 'triage': {
         const textArgs = [...args];
@@ -769,6 +777,8 @@ export function run(argv: string[], io: Io): Result {
         return json(spSpecs(repoDir, io.now().getTime()));
       case 'sp-plans':
         return json(spPlans(repoDir, io.now().getTime()));
+      case 'tdd':
+        return json(tddFor(io, repoDir));
       case 'sp-plan': {
         const [sub, file] = args;
         if ((sub !== 'tasks' && sub !== 'check') || !file || file.startsWith('--')) throw new UsageError('usage: forge sp-plan tasks <plan.md> | check <plan.md> --task N');
