@@ -55,7 +55,7 @@ forge depende de [waypoint](../waypoint/README.es.md) ^0.16.0, que se instala co
 | --- | --- |
 | `/forge:run <tarea>` | Hace el triaje de la tarea y la trabaja por el camino que pide su tamaño. |
 | `/forge:run --parallel N <tarea>` | Lo mismo, ejecutando hasta N tareas a la vez en el camino Large (3 por defecto, máximo 10). |
-| `/forge:run --from-spec <spec> <tarea>` | Empieza el camino Large desde un spec de superpowers, importado como primera versión del diseño. |
+| `/forge:run --from-spec <spec> [<tarea>]` | Empieza el camino Large desde un spec de superpowers, importado como primera versión del diseño. |
 | `/forge:run --superpowers-plan <plan>` | Ejecuta un plan de superpowers tarea a tarea por el camino Medium, con validadores, revisión y veredicto. |
 | `/forge:review [<base>]` | Revisa una rama con los validadores y revisores de forge, sin arreglar nada. |
 | `/forge:infinite [--cycles N] [--hours H]` | Ciclos de mejora desatendidos dentro de un presupuesto. |

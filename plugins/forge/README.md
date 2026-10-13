@@ -55,7 +55,7 @@ forge depends on [waypoint](../waypoint/README.md) ^0.16.0, which is installed w
 | --- | --- |
 | `/forge:run <task>` | Triage the task and work it on the path its size calls for. |
 | `/forge:run --parallel N <task>` | Same, running up to N tasks at once on the Large path (3 by default, max 10). |
-| `/forge:run --from-spec <spec> <task>` | Start the Large path from a superpowers spec, imported as the design's first version. |
+| `/forge:run --from-spec <spec> [<task>]` | Start the Large path from a superpowers spec, imported as the design's first version. |
 | `/forge:run --superpowers-plan <plan>` | Run a superpowers plan task by task on the Medium path, with validators, review and verdict. |
 | `/forge:review [<base>]` | Review a branch with forge's validators and reviewers, without fixing it. |
 | `/forge:infinite [--cycles N] [--hours H]` | Unattended improvement cycles within a budget. |

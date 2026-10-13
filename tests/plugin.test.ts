@@ -178,6 +178,14 @@ describe('plugin layout', () => {
     for (const w of ['git merge-base HEAD', 'review-<branch>-<tag>', '--base-run', 'git worktree add --detach', 'diff-1.patch', 'FORGE triage', 'review-correctness',
       'review-security', 'review-perf', 'FORGE verdict', 'nothing to review', 'Never merge', 'never push', '/forge:run']) expect(md).toContain(w);
   });
+  it('plan 2 leftovers in the texts: --from-spec triage, declined specs, review ids and base failures', () => {
+    const md = read('plugins/forge/skills/run/SKILL.md');
+    for (const w of ['**From a spec.** With `--from-spec <f>`', 'The path is Large whatever `FORGE triage` prints', 'FORGE sp-specs --decline <path>']) expect(md).toContain(w);
+    const review = read('plugins/forge/skills/review/SKILL.md');
+    for (const w of ['at most 40 characters', 'also failing on the base']) expect(review).toContain(w);
+    expect(read('plugins/forge/README.md')).toContain('`/forge:run --from-spec <spec> [<task>]`');
+    expect(read('plugins/forge/README.es.md')).toContain('`/forge:run --from-spec <spec> [<tarea>]`');
+  });
   it('final review fixes: review baseline in a temporary worktree, TDD report everywhere, plan ticks committed from a file', () => {
     const review = read('plugins/forge/skills/review/SKILL.md');
     for (const w of ['git worktree add --detach', '--cwd <WT>', 'git worktree remove --force <WT>', 'never moves', 'skip the baseline', 'never commits, stashes or discards']) expect(review).toContain(w);
