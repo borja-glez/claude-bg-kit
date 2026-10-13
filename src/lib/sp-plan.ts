@@ -6,6 +6,7 @@ export interface SpTask { n: number; title: string; files: string[]; steps: numb
 export interface SpPlan {
   plan: { title: string; goal: string; architecture: string; techStack: string; spec: string | null };
   constraints: string | null;
+  reviewFocus: string | null;
   tasks: SpTask[];
 }
 export class SpPlanError extends Error {}
@@ -72,9 +73,9 @@ function field(lines: Line[], label: string, stop: number): string {
   return '';
 }
 
-/** The text of `## Global Constraints` (every task's requirements include it), without a closing rule. */
-function constraintsOf(lines: Line[]): string | null {
-  const i = lines.findIndex(l => !l.fenced && /^##\s+Global Constraints\s*$/i.test(l.text));
+/** The text of a `## <title>` section of the plan (Global Constraints, Review Focus), without a closing rule. */
+function sectionText(lines: Line[], title: RegExp): string | null {
+  const i = lines.findIndex(l => !l.fenced && title.test(l.text));
   if (i < 0) return null;
   const body: string[] = [];
   for (let j = i + 1; j < lines.length && (lines[j].fenced || !(/^#{1,2}\s/.test(lines[j].text) || TASK.test(lines[j].text))); j++) body.push(lines[j].text);
@@ -102,6 +103,11 @@ function scan(text: string): { lines: Line[]; ranges: Range[] } {
   const { lines, openAt } = linesOf(text);
   // An unclosed fence would swallow every task after it: refuse rather than report the plan done early.
   if (openAt !== null) throw new SpPlanError(`unclosed code fence opened at line ${openAt + 1}`);
+  // `### Task 1.5:` would read as task 1 again: say what is wrong instead.
+  for (const l of lines) {
+    const sub = l.fenced ? null : /^###\s+Task\s+(\d+\.\d+)/i.exec(l.text);
+    if (sub) throw new SpPlanError(`"### Task ${sub[1]}" has a sub-number: a superpowers plan numbers its tasks 1, 2, 3`);
+  }
   const ranges = rangesOf(lines);
   if (!ranges.length) throw new SpPlanError('no "### Task N: <title>" section: this is not a superpowers plan');
   const seen = new Set<number>();
@@ -124,10 +130,13 @@ export function parseSpPlan(text: string): SpPlan {
   const stop = Math.min(ranges[0].head, firstH2 < 0 ? lines.length : firstH2);
   const h1 = lines.slice(0, stop).find(l => !l.fenced && /^#\s+\S/.test(l.text));
   const title = h1 ? h1.text.replace(/^#\s+/, '').replace(/\s+#*\s*$/, '').replace(/\s*Implementation Plan$/i, '').trim() : '';
-  const spec = field(lines, 'spec', stop).replace(/^`|`$/g, '').trim();
+  const specField = field(lines, 'spec', stop);
+  // The spec is the first backticked path of the field ("`docs/…/x.md`: §4 completo" → the path), else the field.
+  const spec = (/`([^`]+)`/.exec(specField)?.[1] ?? specField).trim();
   return {
     plan: { title, goal: field(lines, 'goal', stop), architecture: field(lines, 'architecture', stop), techStack: field(lines, 'tech stack', stop), spec: spec || null },
-    constraints: constraintsOf(lines),
+    constraints: sectionText(lines, /^##\s+Global Constraints\s*$/i),
+    reviewFocus: sectionText(lines, /^##\s+Review Focus\s*$/i),
     tasks: ranges.map(r => taskOf(lines, r)),
   };
 }
@@ -186,6 +195,7 @@ export function renderSpBrief(text: string, n: number, opts: { planPath: string;
     ...(p.architecture ? [`**Architecture:** ${p.architecture}`, ''] : []),
     ...(p.techStack ? [`**Tech Stack:** ${p.techStack}`, ''] : []),
     ...(parsed.constraints ? ['## Global Constraints', '', parsed.constraints, ''] : []),
+    ...(parsed.reviewFocus ? ['## Review Focus', '', parsed.reviewFocus, ''] : []),
     '## Task',
     '',
     ...body,

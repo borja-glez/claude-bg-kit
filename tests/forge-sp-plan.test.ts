@@ -18,6 +18,7 @@ describe('parseSpPlan', () => {
         techStack: 'TypeScript, vitest', spec: 'docs/superpowers/specs/2026-10-01-cart-totals-design.md',
       },
       constraints: '- Amounts are integers in cents.\n- No new dependencies.',
+      reviewFocus: null,
       tasks: [
         { n: 1, title: 'Total function', files: ['src/cart/total.ts', 'tests/cart/total.test.ts'], steps: 3, done: true },
         { n: 2, title: 'Taxes', files: ['src/cart/total.ts', 'tests/cart/total.test.ts'], steps: 3, done: false },
@@ -27,13 +28,25 @@ describe('parseSpPlan', () => {
   });
   it('a task without boxes is not done, and a plan without a title or header still parses', () => {
     expect(parseSpPlan('### Task 1: x\n\nno boxes\n')).toEqual({
-      plan: { title: '', goal: '', architecture: '', techStack: '', spec: null }, constraints: null,
+      plan: { title: '', goal: '', architecture: '', techStack: '', spec: null }, constraints: null, reviewFocus: null,
       tasks: [{ n: 1, title: 'x', files: [], steps: 0, done: false }],
     });
   });
   it('ignores tasks, boxes and headings inside backtick fences of any length', () => {
     const text = '### Task 1: a\n\n````md\n```\n### Task 2: inside\n- [ ] inside\n```\n## inside\n````\n\n- [ ] real\n';
     expect(parseSpPlan(text).tasks).toEqual([{ n: 1, title: 'a', files: [], steps: 1, done: false }]);
+  });
+  it('reads the Review Focus, takes the spec path out of its paragraph, and explains a sub-numbered task', () => {
+    const text = PLAN
+      .replace('## Global Constraints', '## Review Focus\n\n1. Empty carts.\n\n## Global Constraints')
+      .replace('**Spec:** `docs/superpowers/specs/2026-10-01-cart-totals-design.md`', '**Spec:** `docs/s.md`: §4 and §6');
+    const p = parseSpPlan(text);
+    expect(p.reviewFocus).toBe('1. Empty carts.');
+    expect(p.plan.spec).toBe('docs/s.md');
+    const md = renderSpBrief(text, 2, { planPath: 'p.md' });
+    expect(md).toContain('## Review Focus\n\n1. Empty carts.');
+    expect(md).toContain('Spec: docs/s.md\n');
+    expect(() => parseSpPlan('### Task 1: a\n\n- [ ] x\n\n### Task 1.5: b\n\n- [ ] y\n')).toThrow(/"### Task 1\.5" has a sub-number/);
   });
   it('refuses a code fence left open, naming its line, instead of dropping the tasks after it', () => {
     const open = PLAN.replace('~~~ts\nexport function', '```ts\nexport function');
