@@ -1,0 +1,439 @@
+project: forge-cost
+locale: es
+version: "0.1"
+artifacts:
+  roadmap: https://claude.ai/artifact/PJKWFGL8PBPS2PPVgBFuTK
+versions:
+  - id: "0.1"
+    phases: [F1, F2, F3, F4, F5, F6, F7]
+tracks:
+  - { id: textos, name: Agentes, skills y lens, color: pink }
+  - { id: medida, name: Medida y cierre, color: teal }
+  - { id: sesiones, name: Sesiones miembro, color: sky }
+  - { id: escalera, name: Escalera y triaje, color: mauve }
+  - { id: revision, name: Revisión y rondas, color: blue }
+phases:
+  - { id: F1, name: Esfuerzo fijo, plan_status: committed }
+  - { id: F2, name: Sesiones miembro, plan_status: committed }
+  - { id: F3, name: Escalón impl-high, plan_status: committed }
+  - { id: F4, name: Revisores y rondas, plan_status: committed }
+  - { id: F5, name: Coordinador, plan_status: committed }
+  - { id: F6, name: Cierre de versiones, plan_status: committed }
+  - { id: F7, name: Ajuste con datos reales, plan_status: provisional }
+tasks:
+  # F1 · Esfuerzo fijo
+  - id: T001
+    title: Esfuerzo fijo en impl-light, mech y fable, y el test que lo exige
+    track: textos
+    phase: F1
+    includes: >-
+      Frontmatter: forge-impl-light effort medium, forge-mech effort low y forge-fable effort high. La sesión
+      coordinadora comprobó el 2026-10-13 que Haiku 5.5 admite el esfuerzo: un forge-mech lanzado con effort low quedó
+      registrado en lens como claude-haiku-5-5 low. El test «forge agents fix model, effort and maxTurns» de
+      tests/plugin.test.ts recorre todos los ficheros de plugins/forge/agents/ y falla si alguno no tiene model y effort,
+      sin excepciones.
+    done_when: >-
+      npx vitest run tests/plugin.test.ts en verde; quitar effort de cualquier agente de plugins/forge/agents/ hace fallar
+      el test.
+    verification: npx vitest run tests/plugin.test.ts
+    depends_on: []
+    zones: ["plugins/forge/agents/**", "tests/plugin.test.ts"]
+    estimate_min: 25
+  - id: T002
+    title: Informe de consumo por agente y línea base
+    track: medida
+    phase: F1
+    includes: >-
+      node scripts/usage-report.mjs <dir .forge/usage>... lee los ficheros de uso (formato de src/lens/usage-file.ts) y saca
+      la tabla por agente (modelo, esfuerzo, ejecuciones, pasos, coste medio por ejecución, reparto del coste entre salida,
+      lectura y escritura de caché, con los precios por modelo de src/lib/prices.ts) y el desglose por sesión (etiqueta,
+      coste, bucles). Funciones exportadas con su .d.mts para el test, como scripts/route-eval; ficheros de uso de ejemplo
+      en tests/fixtures/usage/. Después, la línea base: el informe sobre .forge/usage de este repositorio, ../reparto y
+      ../reparto-20261012, guardado en docs/waypoint/forge-cost/medidas/base.md con la fecha, los directorios y las
+      diferencias con la tabla de la sección Contexto del diseño.
+    done_when: >-
+      tests/usage-report.test.ts y npm run typecheck en verde (ejecuciones, pasos, coste medio y reparto calculados sobre
+      los fixtures); medidas/base.md tiene la tabla por agente y el desglose por sesión, con forge-impl-heavy cerca de
+      3,59 $ por ejecución o la diferencia explicada.
+    verification: >-
+      npm run typecheck && npx vitest run tests/usage-report.test.ts && node scripts/usage-report.mjs .forge/usage
+      ../reparto/.forge/usage ../reparto-20261012/.forge/usage
+    depends_on: []
+    zones: ["scripts/usage-report.mjs", "scripts/usage-report.d.mts", "tests/usage-report.test.ts", "tests/fixtures/usage/**", "docs/waypoint/forge-cost/medidas/base.md"]
+    estimate_min: 75
+
+  # F2 · Sesiones miembro
+  - id: T003
+    title: 'Sesiones miembro con esfuerzo propio: configuración, lanzamiento y reanudación'
+    track: sesiones
+    phase: F2
+    includes: >-
+      src/forge/config.ts gana swarm.member {effort, model}: effort es low | medium | high | xhigh | max y por defecto
+      medium; model es opcional, con los mismos valores que acepta waypoint launch --model. src/cli/run.ts y
+      src/lib/launcher.ts: waypoint launch --task acepta --effort y --model, validados contra una lista cerrada (código 2 si
+      no), y los pone en command y en run (claude --bg --name <N> --effort medium "<prompt>", también en la plantilla
+      herdr); el prompt pasa a /forge:member --plan <plan> --task <T> — run member of <SID>: work only <T>, then stop.
+      src/forge/cli/swarm.ts: en modo sessions, la acción start de swarm tick imprime launch, la lista completa de
+      argumentos de waypoint launch con --effort y --model de swarm.member, y swarm relaunch añade esos flags a la launch
+      que ya imprime. src/forge/live.ts: el texto de reanudación de un miembro apunta a /forge:member (el del coordinador
+      sigue en /forge:run). No toques los bundles: los regenera T018.
+    done_when: >-
+      Tests en verde: forge-config (swarm.member.effort medium por defecto, un effort fuera de la lista da ConfigError);
+      cli y launcher (prompt nuevo, flags en command y en run, un --effort o --model fuera de la lista da código 2);
+      forge-exec-cli (start en sessions y relaunch llevan launch con --effort medium y el model configurado); forge-live
+      (el miembro reanuda con /forge:member).
+    verification: >-
+      npm run typecheck && npx vitest run tests/forge-config.test.ts tests/cli.test.ts tests/launcher.test.ts
+      tests/forge-exec-cli.test.ts tests/forge-live.test.ts
+    depends_on: []
+    zones: ["src/forge/config.ts", "tests/forge-config.test.ts", "src/cli/run.ts", "src/lib/launcher.ts", "tests/cli.test.ts", "tests/launcher.test.ts", "src/forge/cli/swarm.ts", "tests/forge-exec-cli.test.ts", "src/forge/live.ts", "tests/forge-live.test.ts"]
+    estimate_min: 120
+  - id: T004
+    title: Skill forge:member y references/task-steps.md
+    track: textos
+    phase: F2
+    includes: >-
+      Mover «A task's steps» de la sección Execution de plugins/forge/skills/run/SKILL.md a
+      plugins/forge/skills/run/references/task-steps.md sin cambiar su contenido; forge:run lo cita donde estaba con la
+      orden de leerlo ahora. Nuevo plugins/forge/skills/member/SKILL.md con solo lo de una sesión miembro: reglas comunes
+      (idioma, editar con Edit/Write, decisiones desatendidas), el alta (pasos 1–4 del setup de waypoint:work, resumidos),
+      join, el relevo, el reclamo, el cierre y la reanudación; para los pasos de la tarea remite a task-steps.md. En
+      forge:run, «Run member» se sustituye por la línea de compatibilidad (un prompt antiguo /forge:run --plan … — run
+      member of … sigue forge:member), y en modo sessions start y relaunch ejecutan node "<WP>" con la launch que imprimen
+      tick y relaunch, sin componer argumentos. Los tests que leían los textos movidos leen el fichero nuevo.
+    done_when: >-
+      tests/plugin.test.ts en verde: task-steps.md tiene los pasos y forge:run ya no los repite; forge:member tiene
+      frontmatter y nombra join, el reclamo, el cierre y task-steps.md; forge:run tiene la línea de compatibilidad, ya no el
+      texto de Run member, y usa la launch de tick y de relaunch tal cual.
+    verification: npx vitest run tests/plugin.test.ts
+    depends_on: [T003]
+    zones: ["plugins/forge/skills/run/**", "plugins/forge/skills/member/**", "tests/plugin.test.ts"]
+    estimate_min: 120
+
+  # F3 · Escalón impl-high
+  - id: T005
+    title: Escalera de cinco peldaños, last y el implementer de round
+    track: escalera
+    phase: F3
+    includes: >-
+      src/forge/triage.ts: ImplRole gana impl-high; implementerFor da impl-high (antes impl-heavy) a una Medium con zona
+      sensible y a una tarea Large de plan con zona sensible. src/forge/config.ts: impl-high en ROLES; economy baja un
+      peldaño (impl-heavy → forge-impl-high, impl-high → forge-impl, impl → forge-impl-light); quality sube (impl e
+      impl-high → forge-impl-heavy, impl-light → forge-impl, mech → forge-impl-light, verify → forge-verify-heavy).
+      src/forge/loop.ts: RoundDecision gana last, verdadero cuando el intento que empieza es el último antes del tope (round
+      3 en Medium, 4 en Large); con last el implementador es impl-heavy venga del peldaño que venga, y si no, fresh-stronger
+      o redo con tierUp suben un peldaño de mech → impl-light → impl → impl-high → impl-heavy. src/forge/cli/run.ts: FORGE
+      round lee del ledger el último evento agent con role de implementador de la tarea e imprime last e implementer {role,
+      agent}, con el agente resuelto por el perfil; el cálculo de round queda en una función exportada que review-close
+      reutilizará. No toques los bundles: los regenera T018.
+    done_when: >-
+      Tests en verde: forge-triage (una Medium sensible da impl-high), forge-config (cada perfil da los agentes del diseño,
+      FORGE agents lista impl-high), forge-loop (last solo en round 3 de Medium y 4 de Large, la subida peldaño a peldaño) y
+      forge-cli (Medium con tres veredictos fix imprime last true e implementer forge-impl-heavy; Large con tres fix tras
+      forge-impl imprime forge-impl-high; con un fix, resume y el mismo implementador).
+    verification: >-
+      npm run typecheck && npx vitest run tests/forge-triage.test.ts tests/forge-config.test.ts tests/forge-loop.test.ts
+      tests/forge-cli.test.ts
+    depends_on: [T003]
+    zones: ["src/forge/triage.ts", "src/forge/config.ts", "src/forge/loop.ts", "src/forge/cli/run.ts", "tests/forge-triage.test.ts", "tests/forge-config.test.ts", "tests/forge-loop.test.ts", "tests/forge-cli.test.ts"]
+    estimate_min: 120
+  - id: T006
+    title: 'forge-impl-high: el agente, lens y forge:run'
+    track: textos
+    phase: F3
+    includes: >-
+      plugins/forge/agents/forge-impl-high.md: model opus, effort high, maxTurns 70 y el mismo texto que forge-impl y
+      forge-impl-heavy, con su entrada en el test de agentes. src/lens/view.ts: TIERS gana forge-impl-high con la etiqueta
+      high, un tono entre el de impl (blue) y el de heavy (mauve) y rank 4; heavy pasa a 5 y fable a 6. forge:run y
+      task-steps.md: la escalera de cinco peldaños; una tarea de plan con zona sensible o marcada como delicada en el diseño
+      empieza en impl-high; en las rondas de arreglo se lanza el implementer que imprime FORGE round, sin calcular la
+      escalera a mano; el arreglo de la revisión final de Large sigue en impl-heavy. No toques los bundles: los regenera
+      T018.
+    done_when: >-
+      tests/plugin.test.ts en verde con forge-impl-high en opus y high, y sin ningún texto de forge:run ni de task-steps.md
+      que mande a impl-heavy a una tarea sensible de entrada o describa la subida a mano; tests/lens-view.test.ts en verde
+      con tierOf('forge-impl-high') de etiqueta high y rank 4, heavy en 5 y fable en 6.
+    verification: npx vitest run tests/plugin.test.ts tests/lens-view.test.ts
+    depends_on: [T001, T004, T005]
+    zones: ["plugins/forge/agents/forge-impl-high.md", "plugins/forge/skills/run/**", "tests/plugin.test.ts", "src/lens/view.ts", "tests/lens-view.test.ts"]
+    estimate_min: 75
+
+  # F4 · Revisores y rondas
+  - id: T007
+    title: Esfuerzo de los revisores y review en todo triage
+    track: escalera
+    phase: F4
+    includes: >-
+      reviewFor (src/forge/triage.ts) rellena effort: correctness high, xhigh con zona sensible, con delicate o en la
+      revisión final de Large (final); security high, xhigh si la zona sensible es auth; perf medium; la revisión ligera
+      sigue en Sonnet medium. Con el perfil quality, todos en xhigh; balanced y economy usan la tabla, provisional hasta la
+      prueba en sombra. src/forge/cli/run.ts: FORGE triage imprime review (revisores con agent, model y effort, y flags)
+      también sin --base, para una Medium fuera de una ejecución; --delicate llega a reviewFor; el evento triage del ledger
+      guarda review para que review-prep lo lea. No toques los bundles: los regenera T018.
+    done_when: >-
+      Tests en verde: forge-triage con cada fila de la tabla, delicate, final y el perfil quality; forge-cli con una Medium
+      sin plan ni --base que imprime review con correctness en high, una Medium en zona auth con correctness y security en
+      xhigh, y el evento triage con review.
+    verification: npm run typecheck && npx vitest run tests/forge-triage.test.ts tests/forge-cli.test.ts
+    depends_on: []
+    zones: ["src/forge/triage.ts", "src/forge/cli/run.ts", "tests/forge-triage.test.ts", "tests/forge-cli.test.ts"]
+    estimate_min: 70
+  - id: T008
+    title: origin y deferred en el veredicto
+    track: revision
+    phase: F4
+    includes: >-
+      src/forge/verdict.ts: Finding gana origin (previous | fix | untouched), leído por parseReview; una función que lee los
+      trozos (@@) de un diff unificado y otra que corrige la etiqueta: un untouched cuyo fichero y línea caen dentro de un
+      trozo del arreglo pasa a fix, y un hallazgo sin fichero o sin línea nunca cuenta como untouched. synthesize recibe la
+      ronda y los trozos del arreglo: desde la ronda 2, un important untouched no abre ronda; si la ronda se abre por otro
+      motivo (un previous, un fix, un validador en rojo o un critical) va en los hallazgos, y si es lo único pendiente la
+      tarea se acepta y el hallazgo sale en deferred. Un critical bloquea siempre. Una revisión cuyos únicos bloqueantes son
+      deferred cuenta como pase con su confianza; la firma de stalled ignora los deferred. No toques los bundles: los
+      regenera T018.
+    done_when: >-
+      tests/forge-verdict.test.ts en verde: los tres orígenes; un untouched dentro de un trozo pasa a fix; uno sin línea no
+      queda como untouched; la ronda 1 no cambia; en la ronda 2 un untouched solo da accept con deferred; con un previous
+      además da fix con el untouched en los hallazgos; un critical untouched da fix; la firma es la misma con y sin deferred.
+    verification: npm run typecheck && npx vitest run tests/forge-verdict.test.ts
+    depends_on: []
+    zones: ["src/forge/verdict.ts", "tests/forge-verdict.test.ts"]
+    estimate_min: 90
+  - id: T009
+    title: 'La prueba en sombra: estado, emparejamiento e informe'
+    track: revision
+    phase: F4
+    includes: >-
+      src/forge/shadow.ts: .forge/shadow.json {remaining, cases} (trabajo de forge, fuera de git); abrirla con N briefs (por
+      defecto 10), cerrarla y restar un brief. Emparejar los bloqueantes (critical e important) de un revisor en high con
+      los de su gemelo en xhigh: casan en el mismo fichero a ±10 líneas, o con un solapamiento de palabras del problema
+      ≥ 0,3. El caso guarda los bloqueantes de xhigh, los que high recuperó, los críticos perdidos y los que solo encontró
+      high. El informe por revisor: casos, bloqueantes de xhigh, recuperados por high en %, críticos perdidos, bloqueantes
+      solo de high, el detalle de cada caso perdido y si cumple la regla (al menos el 90 % y ningún critical perdido). No
+      toques los bundles: los regenera T018.
+    done_when: >-
+      tests/forge-shadow.test.ts en verde: abrir, cerrar y restar; casan a ±10 líneas y no a 11; otro fichero solo casa por
+      solapamiento ≥ 0,3; un critical sin pareja cuenta como perdido; el informe marca un revisor que cumple, uno al 89 % y
+      uno que pierde un critical.
+    verification: npm run typecheck && npx vitest run tests/forge-shadow.test.ts
+    depends_on: []
+    zones: ["src/forge/shadow.ts", "tests/forge-shadow.test.ts"]
+    estimate_min: 75
+  - id: T010
+    title: Quién revisa en cada ronda y FORGE review-prep en la primera
+    track: revision
+    phase: F4
+    includes: >-
+      src/forge/review-round.ts: con el review del triage, la ronda, el resultado de cada revisor en la ronda anterior, las
+      zonas que toca el diff del arreglo y si la prueba en sombra está abierta, devuelve spawn [{agent, model, effort, mode,
+      inputs}] y los revisores arrastrados. Ronda 1: todos en modo full y, con la prueba abierta en una tarea Medium o mayor,
+      un gemelo con effort xhigh por cada revisor en high que escribe en shadow/. Desde la ronda 2: quien falló repite en
+      delta con solo sus hallazgos; correctness repite siempre en delta; security o perf que pasaron solo repiten si el
+      arreglo toca su terreno (security: el diff del arreglo toca una zona sensible; para perf el diseño no lo fija y el
+      criterio elegido se registra como decisión) y si no quedan carried; las rondas delta no llevan gemelo.
+      src/forge/cli/review.ts (nuevo): review-prep --task <id>-<n> --path <p> --base <sha> --baseline <f> --dir <carpeta>
+      [--cwd <worktree>] [--locale] valida contra la línea base y escribe validators-<n>.json, escribe el diff, calcula
+      quién revisa con review-round a partir del review del último triage, y guarda head.txt y review-plan.json; imprime
+      round, el resumen de validadores y spawn. src/forge/cli/run.ts despacha a review.ts review-prep, review-close, prep y
+      shadow (los que aún no existen responden con UsageError). No toques los bundles: los regenera T018.
+    done_when: >-
+      Tests en verde: forge-review-round con cada regla (ronda 1 con y sin prueba abierta, un fallo que repite en delta,
+      correctness siempre en delta, security arrastrado o relanzado por zona sensible, delta sin gemelo); forge-review-cli
+      con una ronda 1 en un repositorio de prueba que escribe validators, diff, head.txt y review-plan.json e imprime spawn
+      con el model y el effort del triage.
+    verification: npm run typecheck && npx vitest run tests/forge-review-round.test.ts tests/forge-review-cli.test.ts
+    depends_on: [T007]
+    zones: ["src/forge/review-round.ts", "src/forge/cli/review.ts", "src/forge/cli/run.ts", "tests/forge-review-round.test.ts", "tests/forge-review-cli.test.ts"]
+    estimate_min: 110
+  - id: T011
+    title: review-prep desde la ronda 2 y FORGE review-close
+    track: revision
+    phase: F4
+    includes: >-
+      Desde la ronda 2, review-prep escribe fix-<n>-<ronda>.patch (del commit de head.txt de la ronda anterior al actual) y
+      los hallazgos bloqueantes de la ronda anterior por revisor; cada revisor en delta recibe el brief, el diff completo,
+      el diff del arreglo y solo sus propios hallazgos; los resultados arrastrados se copian a la carpeta de la ronda con
+      "carried": true. review-close --task <id>-<n> --dir <carpeta> --path <p> comprueba que cada revisor lanzado dejó su
+      fichero (código 3 y missing si falta alguno), corre el veredicto con las banderas de review-plan.json, la ronda y los
+      trozos del arreglo (los carried cuentan como en la ronda anterior), registra los menores y los deferred como rulings,
+      escribe findings-<n>-<ronda>.json e imprime {action, score, next, last, implementer, findings, deferred, invalid} con
+      la función de round. FORGE verdict y FORGE round siguen existiendo. No toques los bundles: los regenera T018.
+    done_when: >-
+      tests/forge-review-cli.test.ts en verde: la ronda 2 escribe el fix patch, cada revisor recibe solo sus hallazgos,
+      correctness va en delta y un security que pasó sin tocar zona sensible queda copiado con carried; un fichero que falta
+      da código 3 con missing; un accept con deferred registra el ruling; un fix escribe findings e imprime implementer y
+      last.
+    verification: npm run typecheck && npx vitest run tests/forge-review-cli.test.ts
+    depends_on: [T005, T008, T010]
+    zones: ["src/forge/cli/review.ts", "tests/forge-review-cli.test.ts"]
+    estimate_min: 110
+  - id: T012
+    title: La prueba en sombra en las rondas y FORGE shadow
+    track: revision
+    phase: F4
+    includes: >-
+      Mientras la prueba tiene briefs, review-prep añade a spawn los gemelos en la primera ronda de cada brief Medium o
+      mayor y resta uno por brief; review-close no cuenta los gemelos en el veredicto, empareja cada par con
+      src/forge/shadow.ts y guarda el caso en .forge/shadow.json. src/forge/cli/shadow.ts, despachado desde review.ts:
+      shadow start --tasks <N> (por defecto 10), shadow stop y shadow report con el informe por revisor para que la persona
+      lo lea. No toques los bundles: los regenera T018.
+    done_when: >-
+      Tests en verde: forge-review-cli (con la prueba abierta, la ronda 1 lanza el gemelo en xhigh hacia shadow/ y resta
+      uno, la ronda 2 no lleva gemelo, el veredicto es el mismo con y sin gemelo, review-close guarda el caso) y
+      forge-shadow-cli (start deja remaining 10, stop la cierra, report imprime el informe, un --tasks no entero da error de
+      uso).
+    verification: npm run typecheck && npx vitest run tests/forge-review-cli.test.ts tests/forge-shadow-cli.test.ts
+    depends_on: [T009, T011]
+    zones: ["src/forge/cli/review.ts", "src/forge/cli/shadow.ts", "tests/forge-review-cli.test.ts", "tests/forge-shadow-cli.test.ts"]
+    estimate_min: 70
+  - id: T013
+    title: Revisores en high con modo delta, y forge:run revisa con review-prep y review-close
+    track: textos
+    phase: F4
+    includes: >-
+      forge-review-correctness, forge-review-security y forge-review-perf pasan a effort high; su texto describe el modo
+      delta (reciben el brief, el diff completo como contexto, el diff del arreglo y solo sus propios hallazgos anteriores;
+      comprueban que están arreglados y que el arreglo no rompe nada) y el origin de cada hallazgo (previous, fix,
+      untouched). forge:run, Medium pasos 3 a 6: FORGE review-prep en lugar de validar y sacar el diff; lanzar exactamente
+      su spawn pasando model y effort al Agent tool (gemelos incluidos, con su carpeta shadow/); FORGE review-close en lugar
+      de verdict y round, relanzar el revisor que salga en missing y seguir next e implementer; los deferred van en el
+      informe final para que la persona decida; verify-plan sigue aparte. task-steps.md: una tarea de plan revisa igual; la
+      revisión final de Large sigue completa (correctness en xhigh con final) y su arreglo en impl-heavy.
+    done_when: >-
+      tests/plugin.test.ts en verde: los tres revisores en opus y high con el modo delta y los tres orígenes; Medium y
+      task-steps.md nombran review-prep, review-close, el model y el effort de spawn, missing y deferred, y ya no llaman a
+      verdict ni a round por separado; la revisión final de Large sigue completa.
+    verification: npx vitest run tests/plugin.test.ts
+    depends_on: [T006, T011, T012]
+    zones: ["plugins/forge/agents/forge-review-*.md", "plugins/forge/skills/run/**", "tests/plugin.test.ts"]
+    estimate_min: 120
+
+  # F5 · Coordinador
+  - id: T014
+    title: FORGE prep y un batch por etapa
+    track: revision
+    phase: F5
+    includes: >-
+      src/forge/cli/review.ts: prep --task <id>-<n> --path <p> [--cwd] registra BASE (el HEAD del worktree), la fase y la
+      línea base (baseline-<n>.json, como validate --all --base-run) en una sola llamada e imprime BASE. forge:run (Medium y
+      Large) y task-steps.md usan FORGE prep en lugar de registrar BASE, la fase y la línea base por separado; en una
+      ejecución, cada cambio de etapa se publica con un único batch de ArtifactData con state/T.exec, state/T.forge y el
+      arrendamiento de sessions/<SID>, en vez de llamadas sueltas. No toques los bundles: los regenera T018.
+    done_when: >-
+      Tests en verde: forge-review-cli (prep escribe baseline-<n>.json, registra la fase con el brief y la base, e imprime el
+      sha de HEAD) y plugin (Medium y task-steps.md nombran FORGE prep, y task-steps.md publica cada etapa con un solo batch
+      con los tres).
+    verification: npm run typecheck && npx vitest run tests/forge-review-cli.test.ts tests/plugin.test.ts
+    depends_on: [T012, T013]
+    zones: ["src/forge/cli/review.ts", "tests/forge-review-cli.test.ts", "plugins/forge/skills/run/**", "tests/plugin.test.ts"]
+    estimate_min: 80
+  - id: T015
+    title: Partir forge:run en referencias
+    track: textos
+    phase: F5
+    includes: >-
+      Mover a plugins/forge/skills/run/references/: Large → large.md, Execution (sin los pasos, ya en task-steps.md) →
+      execution.md, Ephemeral execution → ephemeral.md, Superpowers plan → superpowers-plan.md, Manual member →
+      manual-member.md, Resuming → resuming.md, la tabla completa de Autonomy → autonomy.md y el formato completo de
+      Decisions → decisions.md. Donde estaban queda la orden de leer la referencia ahora (y un resumen de autonomía y
+      decisiones). Los tests de tests/plugin.test.ts que leían esos textos leen el fichero nuevo.
+    done_when: >-
+      Los ocho ficheros existen con su texto, SKILL.md los cita y ya no lo repite, y npx vitest run tests/plugin.test.ts en
+      verde.
+    verification: npx vitest run tests/plugin.test.ts
+    depends_on: [T014]
+    zones: ["plugins/forge/skills/run/**", "tests/plugin.test.ts"]
+    estimate_min: 100
+  - id: T016
+    title: Núcleo de forge:run en 25 KB y los tests del skill partido
+    track: textos
+    phase: F5
+    includes: >-
+      Reescribir plugins/forge/skills/run/SKILL.md con solo encabezado, idioma, ids, reglas comunes, el resumen de
+      decisiones y autonomía, triaje, Trivial, Small y Medium; cada camino empieza con la orden de leer su referencia, y un
+      paso que necesite un comando de una referencia lo nombra en el núcleo. Las citas a secciones de forge:run en
+      forge:member, forge:infinite, los demás skills de forge y waypoint:work (§0, punto 6) apuntan a donde vive ahora cada
+      texto. tests/plugin.test.ts comprueba que toda referencia references/<fichero>.md citada en los skills existe, que el
+      núcleo no pasa de 25 KB y que cada camino abre con la orden de leer su referencia.
+    done_when: >-
+      SKILL.md ocupa 25 600 bytes o menos y npx vitest run tests/plugin.test.ts en verde; borrar una referencia citada o
+      pasar el núcleo de 25 KB hace fallar el test.
+    verification: >-
+      node -e "process.exit(require('fs').statSync('plugins/forge/skills/run/SKILL.md').size <= 25600 ? 0 : 1)" && npx
+      vitest run tests/plugin.test.ts
+    depends_on: [T015]
+    zones: ["plugins/forge/skills/**", "plugins/waypoint/skills/work/SKILL.md", "tests/plugin.test.ts"]
+    estimate_min: 90
+
+  # F6 · Cierre de versiones
+  - id: T017
+    title: Versiones, CHANGELOG y README
+    track: medida
+    phase: F6
+    includes: >-
+      forge 0.15.0 (con la dependencia waypoint ^0.19.0), waypoint 0.19.0 (flags nuevos en launch) y lens 0.11.3 en sus
+      plugin.json, las insignias y líneas de dependencia de los README y los tests de versiones de tests/plugin.test.ts.
+      Una entrada de CHANGELOG.md por plugin. README.md y README.es.md de la raíz y de forge, waypoint y lens cuentan lo que
+      cambia para la persona: swarm.member y waypoint launch --effort/--model, forge:member, el peldaño impl-high y los
+      perfiles, el esfuerzo de los revisores, las rondas delta y los deferred, FORGE shadow, FORGE prep e impl-high en lens.
+    done_when: >-
+      tests/plugin.test.ts en verde con las versiones nuevas y con una prueba que busca en los README en español y en
+      inglés swarm.member, forge:member, impl-high, deferred y shadow; CHANGELOG.md tiene las entradas de forge 0.15.0,
+      waypoint 0.19.0 y lens 0.11.3.
+    verification: npx vitest run tests/plugin.test.ts
+    depends_on: [T016]
+    zones: ["plugins/*/.claude-plugin/plugin.json", "CHANGELOG.md", "README.md", "README.es.md", "plugins/*/README*.md", "tests/plugin.test.ts"]
+    estimate_min: 85
+  - id: T018
+    title: Bundles regenerados y prueba en sombra abierta
+    track: medida
+    phase: F6
+    includes: >-
+      npm run build y commit de lo que genera: plugins/forge/dist, plugins/waypoint/dist,
+      plugins/waypoint/assets/*.template.html, plugins/waypoint/hooks/register.js, plugins/waypoint/types,
+      plugins/lens/hooks y plugins/lens/types; ninguna otra tarea los edita. Con el bundle nuevo, node
+      plugins/forge/dist/forge.cjs shadow start --tasks 10 en este repositorio: el diseño abre la prueba al acabar la fase
+      4, y va aquí porque necesita el bundle regenerado.
+    done_when: >-
+      npm run typecheck, npm test y npm run build en verde y, tras el build, git no ve cambios en plugins/; node
+      plugins/forge/dist/forge.cjs shadow report muestra la prueba abierta con 10 briefs pendientes y ningún caso.
+    verification: >-
+      npm run typecheck && npm test && npm run build && git diff --exit-code -- plugins && node
+      plugins/forge/dist/forge.cjs shadow report
+    depends_on: [T017]
+    zones: ["plugins/forge/dist/**", "plugins/waypoint/dist/**", "plugins/waypoint/assets/*.template.html", "plugins/waypoint/hooks/register.js", "plugins/waypoint/types/**", "plugins/lens/hooks/*.js", "plugins/lens/types/**", ".forge/shadow.json"]
+    estimate_min: 30
+
+  # F7 · Ajuste con datos reales
+  - id: T019
+    title: Fijar el esfuerzo de los revisores con el informe en sombra
+    track: escalera
+    phase: F7
+    includes: >-
+      Cuando la prueba haya gastado sus 10 briefs, guardar la salida de FORGE shadow report en
+      docs/waypoint/forge-cost/medidas/sombra.md con la decisión de la persona por revisor: high se queda si recupera al
+      menos el 90 % de los bloqueantes de su gemelo y no pierde ningún critical; si no, ese revisor vuelve a xhigh por
+      defecto en reviewFor (una línea) y su test lo fija. Los bundles van en la siguiente versión.
+    done_when: >-
+      medidas/sombra.md tiene el informe con remaining 0 y una decisión por revisor tomada por la persona, y
+      tests/forge-triage.test.ts en verde con la tabla que dice ese fichero.
+    verification: npx vitest run tests/forge-triage.test.ts
+    depends_on: [T018]
+    zones: ["docs/waypoint/forge-cost/medidas/sombra.md", "src/forge/triage.ts", "tests/forge-triage.test.ts"]
+    estimate_min: 40
+  - id: T020
+    title: Medir después y comparar con la línea base
+    track: medida
+    phase: F7
+    includes: >-
+      El informe de scripts/usage-report.mjs sobre las siguientes ejecuciones reales (una Medium sensible y una ejecución en
+      modo sessions de al menos 4 tareas) en docs/waypoint/forge-cost/medidas/despues.md, junto a la línea base, con los
+      criterios de éxito: coste por tarea en sessions −30 %, Medium sensible con varias rondas −20 %, rondas por tarea no
+      más de 0,3 por encima, ningún critical perdido en la prueba en sombra. La pieza que no cumpla se revierte y se
+      documenta en el diseño.
+    done_when: >-
+      medidas/despues.md tiene las cifras de antes y después y cada criterio marcado como cumple o no cumple; lo que no
+      cumple tiene su reversión anotada en design.md.
+    depends_on: [T002, T018, T019]
+    zones: ["docs/waypoint/forge-cost/medidas/despues.md", "docs/waypoint/forge-cost/design.md"]
+    estimate_min: 45
