@@ -7395,11 +7395,11 @@ function deriveStatus(prev, event) {
   const ts = event.ts;
   if ((e.kind === "triage" || e.kind === "phase") && str(e.task) && e.task) {
     const task = cleanText(e.task);
-    const fresh = e.kind === "triage" && Array.isArray(e.reasons);
-    const base = prev && prev.task === task && !fresh ? prev : { ts, task, path: "", phase: "", agent: null, validators: [], verdict: null, round: null, cap: null, brief: null, accepted: [], verify: null };
+    const fresh2 = e.kind === "triage" && Array.isArray(e.reasons);
+    const base = prev && prev.task === task && !fresh2 ? prev : { ts, task, path: "", phase: "", agent: null, validators: [], verdict: null, round: null, cap: null, brief: null, accepted: [], verify: null };
     const next = { ...base, ts };
     if (e.kind === "triage" && str(e.path)) next.path = cleanText(e.path);
-    if (fresh && e.autonomy === "auto") next.autonomy = "auto";
+    if (fresh2 && e.autonomy === "auto") next.autonomy = "auto";
     if (e.kind === "phase" && str(e.phase)) next.phase = cleanText(e.phase);
     if (e.kind === "phase" && briefNum(e.brief) !== null) next.brief = briefNum(e.brief);
     return next;
@@ -12365,7 +12365,7 @@ var import_node_path6 = __toESM(require("node:path"), 1);
 var import_yaml2 = __toESM(require_dist(), 1);
 var ROLES = ["impl-heavy", "impl", "impl-light", "mech", "review-correctness", "review-security", "review-perf", "verify"];
 var NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
-var WORKFLOWS = ["ask", "forge", "superpowers", "superpowers-design", "superpowers-plan"];
+var WORKFLOWS = ["ask", "forge", "superpowers", "superpowers-design", "superpowers-plan", "off"];
 var AUTONOMIES = ["ask", "auto"];
 var ConfigError = class extends Error {
 };
@@ -14310,7 +14310,8 @@ function routeOptions(i) {
   }
   let recommended;
   if (i.runPlan && i.plans.length) recommended = { option: "superpowers-plan", why: "an unfinished superpowers plan to carry out: forge executes and reviews each task", plan: i.plans[0].path };
-  else if (i.specs.length) recommended = { option: "superpowers-design", why: "a recent superpowers spec not imported yet: forge builds from it", spec: i.specs[0].path };
+  else if (i.buildSpec && i.specs.length) recommended = { option: "superpowers-design", why: "a recent superpowers spec not imported yet: forge builds from it", spec: i.specs[0].path };
+  else if (i.path === "large" && i.prefs.autonomy === "auto") recommended = { option: "forge", why: "large, in auto mode: forge designs, critiques and approves it without asking" };
   else if (i.path === "large") recommended = { option: "superpowers-design", why: "large and ambiguous: brainstorming clarifies intent, forge builds and reviews" };
   else recommended = { option: "forge", why: "forge triages, implements and reviews it" };
   return { ...base, options: ["forge", "superpowers", "superpowers-design", "superpowers-plan"], recommended };
@@ -14318,6 +14319,7 @@ function routeOptions(i) {
 var routeFile = (root) => import_node_path15.default.join(root, ".forge", "route.json");
 var SAFE_PATH = /^[A-Za-z0-9_./\\: -]{1,300}$/;
 var isRoutePath = (s2) => typeof s2 === "string" && SAFE_PATH.test(s2);
+var isRouteSession = (s2) => typeof s2 === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(s2);
 function normalizeRoute(x) {
   if (!x || typeof x !== "object" || Array.isArray(x)) return null;
   const o = x;
@@ -14327,7 +14329,16 @@ function normalizeRoute(x) {
   const stage = ROUTE_STAGES.includes(o.stage) ? o.stage : null;
   const ts = typeof o.ts === "string" && Number.isFinite(Date.parse(o.ts)) ? o.ts : null;
   if (!task || !chosen || !by || !stage || !ts) return null;
-  return { task, chosen, by, stage, ts, ...isRoutePath(o.spec) ? { spec: o.spec } : {}, ...isRoutePath(o.plan) ? { plan: o.plan } : {} };
+  return {
+    task,
+    chosen,
+    by,
+    stage,
+    ts,
+    ...isRoutePath(o.spec) ? { spec: o.spec } : {},
+    ...isRoutePath(o.plan) ? { plan: o.plan } : {},
+    ...isRouteSession(o.session) ? { session: o.session } : {}
+  };
 }
 function readRoute(root) {
   try {
@@ -14875,10 +14886,12 @@ function looksLikeCoding(prompt) {
   const p = prompt.trim();
   return !!p && !p.startsWith("/") && p.split(/\s+/).length >= 6 && VERB.test(p) && !METHOD.test(p);
 }
-function routeReminder(r2, now) {
-  if (!r2 || r2.stage !== "designing" && r2.stage !== "planning") return null;
+function fresh(r2, now) {
   const t = Date.parse(r2.ts);
-  if (!Number.isFinite(t) || now - t > ROUTE_REMINDER_MS || t - now > 5 * 6e4) return null;
+  return Number.isFinite(t) && now - t <= ROUTE_REMINDER_MS && t - now <= 5 * 6e4;
+}
+function routeReminder(r2, now) {
+  if (!r2 || r2.stage !== "designing" && r2.stage !== "planning" || !fresh(r2, now)) return null;
   if (r2.chosen === "superpowers-design") {
     return `forge: the user routed task ${r2.task} as "${r2.chosen}". When the spec is written and approved, hand off with forge:run --from-spec ${r2.spec ?? "<the spec path>"} instead of writing-plans`;
   }
@@ -14901,12 +14914,18 @@ function hookRoute(io, which) {
     const o = input;
     const sid = typeof o.session_id === "string" && o.session_id ? o.session_id : null;
     const main = mainCheckout(io.cwd);
-    if (resolvePrefs({}, readLocal(io.cwd), loadConfig(io.cwd)).workflow === "superpowers" || forgeDrives(io, main, sid)) return "";
+    const workflow = resolvePrefs({}, readLocal(io.cwd), loadConfig(io.cwd)).workflow;
+    if (workflow === "superpowers" || workflow === "off" || forgeDrives(io, main, sid)) return "";
     if (which === "session") {
       const sp = locateSuperpowers({ configDir: claudeConfigDir(io.env ?? process.env), projectDir: main });
       return JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: routingRule(sp.installed) } });
     }
-    const text2 = routeReminder(readRoute(io.cwd), io.now().getTime()) ?? (typeof o.prompt === "string" && looksLikeCoding(o.prompt) ? ROUTE_HINT : null);
+    const now = io.now().getTime();
+    const route = readRoute(io.cwd);
+    const own = route && (!route.session || route.session === sid) ? route : null;
+    const reminder = routeReminder(own, now);
+    if (!reminder && own?.session && own.stage !== "done" && fresh(own, now)) return "";
+    const text2 = reminder ?? (typeof o.prompt === "string" && looksLikeCoding(o.prompt) ? ROUTE_HINT : null);
     return text2 ? JSON.stringify({ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: text2 } }) : "";
   } catch {
     return "";
@@ -15542,10 +15561,10 @@ function run(argv, io) {
         const impl = implementerFor(result, task, { batch: has("batch") });
         const implementer = { ...impl, agent: impl.role ? agentFor(impl.role, loadConfig(repoDir).profile) : null };
         const known = readLocal(io.cwd).known;
-        const fresh = names2.filter((n) => !known.includes(n));
-        if (fresh.length || known.some((n) => !names2.includes(n))) updateLocal(io.cwd, (s2) => ({ ...s2, known: names2 }));
+        const fresh2 = names2.filter((n) => !known.includes(n));
+        if (fresh2.length || known.some((n) => !names2.includes(n))) updateLocal(io.cwd, (s2) => ({ ...s2, known: names2 }));
         appendEvent(io.cwd, { ts: ts(), kind: "triage", ...flag("task") ? { task: flag("task") } : {}, ...result, ...auto });
-        return json({ ...result, catalog, new: fresh, implementer, ...auto });
+        return json({ ...result, catalog, new: fresh2, implementer, ...auto });
       }
       case "validate": {
         const config = loadConfig(repoDir);
@@ -16093,6 +16112,8 @@ function run(argv, io) {
           if (!ROUTE_OPTIONS.includes(chosen)) throw new UsageError(`route set: --chosen must be one of ${ROUTE_OPTIONS.join("|")}`);
           if (by !== "user" && by !== "auto") throw new UsageError("route set: --by must be user or auto");
           const files = paths("route set");
+          const session = flag("session");
+          if (session !== void 0 && !isRouteSession(session)) throw new UsageError("route set: --session is not a plain session id");
           let why = by === "user" ? "the user chose it" : "the recommended option for this request";
           if (flag("why-file") !== void 0) {
             try {
@@ -16101,7 +16122,7 @@ function run(argv, io) {
               throw new UsageError("route set: cannot read --why-file");
             }
           }
-          const doc = { task: task2, chosen, by, stage: firstStage(chosen, files), ts: ts(), ...files };
+          const doc = { task: task2, chosen, by, stage: firstStage(chosen, files), ts: ts(), ...files, ...session ? { session } : {} };
           writeRoute(io.cwd, doc);
           const root = mainCheckout(io.cwd);
           const exec = readExecution(root);
@@ -16126,7 +16147,7 @@ function run(argv, io) {
           return json({ updated: true, ...next });
         }
         if (sub !== void 0 && !sub.startsWith("--")) {
-          throw new UsageError("usage: forge route --task id --path p [--workflow w] [--autonomy a] [--run-plan] | set --task id --chosen o --by user|auto [--spec f] [--plan f] [--why-file f] | stage --stage s [--task id] [--spec f] [--plan f]");
+          throw new UsageError("usage: forge route --task id --path p [--workflow w] [--autonomy a] [--run-plan] [--build-spec] | set --task id --chosen o --by user|auto [--spec f] [--plan f] [--why-file f] [--session s] | stage --stage s [--task id] [--spec f] [--plan f]");
         }
         const task = flag("task");
         const p = flag("path");
@@ -16141,7 +16162,7 @@ function run(argv, io) {
         const now = io.now().getTime();
         const specs = sp.installed ? spSpecs(repoDir, now, { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)) }) : [];
         const plans = sp.installed ? spPlans(repoDir, now, { committedAt: committedAt(io, repoDir) }) : [];
-        return json(routeOptions({ path: p, prefs, superpowers: { installed: sp.installed, version: sp.version }, specs, plans, runPlan: has("run-plan") }));
+        return json(routeOptions({ path: p, prefs, superpowers: { installed: sp.installed, version: sp.version }, specs, plans, runPlan: has("run-plan"), buildSpec: has("build-spec") }));
       }
       case "tdd":
         return json(tddFor(io, repoDir));
