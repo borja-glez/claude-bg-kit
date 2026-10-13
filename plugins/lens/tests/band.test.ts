@@ -148,6 +148,37 @@ test('the 30 s tick hands the band to waypoint once its project is joined', asyn
   expect(await buttons($)).toEqual([[], []]);
 });
 
+test("the lens minimal band stacks over another plugin's band beneath", async ($, on) => {
+  serveFiles(on, {});
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
+    const { Text } = $.ui.resolve(e);
+    return h(Text, {}, 'other band') as RenderElement;
+  });
+  start(on);
+  on('command.list', () => ({ value: [] }));
+  await $.session.start(SESSION);
+  await $.tool.call(TODOS);
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ plugin: 'lens', surface, component: 'AbovePrompt', props: BAND_PROPS });
+    expect(await ui.find({ key: 'panel' })).toBeDefined();
+    expect(await ui.find({ text: 'other band' })).toBeDefined();
+    // Our band comes first in the column: its Panel button is drawn before the band beneath.
+    const order: string[] = [];
+    const walk = (n: unknown): void => {
+      if (typeof n === 'string') { order.push(n); return; }
+      if (Array.isArray(n)) { n.forEach(walk); return; }
+      if (!n || typeof n !== 'object') return;
+      const el = n as { props?: Record<string, unknown>; children?: unknown };
+      if (typeof el.props?.key === 'string') order.push(`key:${el.props.key}`);
+      walk(el.children);
+    };
+    walk(await ui.drawn());
+    expect(order.indexOf('key:panel')).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf('other band')).toBeGreaterThan(order.indexOf('key:panel'));
+    await ui.unmount();
+  }
+});
+
 test('a waypoint command the engine does not attribute still counts as the waypoint plugin', async ($, on) => {
   serveFiles(on, WAYPOINT_PROJECT);
   engineBand(on);

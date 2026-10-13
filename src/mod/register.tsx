@@ -104,11 +104,13 @@ export const register: Register = on => {
     return result;
   });
 
+  // The band is one instance per chain: drawing without next(e) hides the bands of the plugins beneath, so ours stacks over them.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const below = await next(e);
     try {
       const m = await read($, band);
       const isHidden = await read($, hidden);
-      if (isHidden || !m || e.props.hasSurvey || m.mode === 'none') return next(e);
+      if (isHidden || !m || e.props.hasSurvey || m.mode === 'none') return below;
       const { Box, Text, Button, Link } = $.ui.resolve(e);
       const taskNow = m.mode === 'work' && m.current?.startedAt ? await $.clock.now() : 0;
       const line = bandLine(m, taskNow);
@@ -156,15 +158,18 @@ export const register: Register = on => {
             ...(m.roadmapUrl ? [link(m.roadmapUrl, t.roadmap)] : []),
           ];
       return (
-        <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
-          <Text color="claude" wrap="truncate-end">{line}</Text>
-          {controls}
-          {lens ? <Button key="panel" label={t.panel} onPress={submit('/lens')} /> : null}
-          <Button key="dismiss" label="×" role="dismiss" onPress={() => { update($, hidden, () => true).catch(() => undefined); }} />
+        <Box flexDirection="column">
+          <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
+            <Text color="claude" wrap="truncate-end">{line}</Text>
+            {controls}
+            {lens ? <Button key="panel" label={t.panel} onPress={submit('/lens')} /> : null}
+            <Button key="dismiss" label="×" role="dismiss" onPress={() => { update($, hidden, () => true).catch(() => undefined); }} />
+          </Box>
+          {below}
         </Box>
       );
     } catch {
-      return next(e);
+      return below;
     }
   });
 };
