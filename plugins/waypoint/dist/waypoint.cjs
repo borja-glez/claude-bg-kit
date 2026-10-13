@@ -5622,7 +5622,7 @@ var require_cst = __commonJS({
     var cstScalar = require_cst_scalar();
     var cstStringify = require_cst_stringify();
     var cstVisit = require_cst_visit();
-    var BOM = "\uFEFF";
+    var BOM3 = "\uFEFF";
     var DOCUMENT = "";
     var FLOW_END = "";
     var SCALAR = "";
@@ -5630,7 +5630,7 @@ var require_cst = __commonJS({
     var isScalar = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
     function prettyToken(token) {
       switch (token) {
-        case BOM:
+        case BOM3:
           return "<BOM>";
         case DOCUMENT:
           return "<DOC>";
@@ -5644,7 +5644,7 @@ var require_cst = __commonJS({
     }
     function tokenType(source) {
       switch (source) {
-        case BOM:
+        case BOM3:
           return "byte-order-mark";
         case DOCUMENT:
           return "doc-mode";
@@ -5706,7 +5706,7 @@ var require_cst = __commonJS({
     exports2.setScalarValue = cstScalar.setScalarValue;
     exports2.stringify = cstStringify.stringify;
     exports2.visit = cstVisit.visit;
-    exports2.BOM = BOM;
+    exports2.BOM = BOM3;
     exports2.DOCUMENT = DOCUMENT;
     exports2.FLOW_END = FLOW_END;
     exports2.SCALAR = SCALAR;
@@ -11922,8 +11922,9 @@ var DesignError = class extends Error {
   }
 };
 var FM = /^---\r?\n(?:([\s\S]*?)\r?\n)?---\r?\n?([\s\S]*)$/;
+var BOM = String.fromCharCode(65279);
 function parseDesign(text) {
-  const m = FM.exec(text.replace(/^﻿/, ""));
+  const m = FM.exec(text.startsWith(BOM) ? text.slice(1) : text);
   if (!m) throw new DesignError(["missing front matter block (--- ... ---) at the top of design.md"]);
   let raw;
   try {
@@ -12003,6 +12004,7 @@ var import_yaml3 = __toESM(require_dist(), 1);
 var SpecImportError = class extends Error {
 };
 var SUMMARY_MAX = 400;
+var BOM2 = String.fromCharCode(65279);
 var PURPOSE = /prop[oó]sito|purpose|overview|resumen|summary|objetivo|goal/i;
 function linesOf(text) {
   const out = [];
@@ -12039,7 +12041,7 @@ function firstParagraph(lines2) {
   return para.join(" ").replace(/\s+/g, " ").trim().slice(0, SUMMARY_MAX).trimEnd();
 }
 function importSpec(text, opts) {
-  const src = text.replace(/^﻿/, "");
+  const src = text.startsWith(BOM2) ? text.slice(1) : text;
   const lines2 = linesOf(src);
   const h1 = lines2.findIndex((l3) => !l3.fenced && /^#\s+\S/.test(l3.text));
   if (h1 < 0) throw new SpecImportError('the spec has no "# " title');
@@ -12060,6 +12062,35 @@ function importSpec(text, opts) {
 ${(0, import_yaml3.stringify)(meta, { lineWidth: 0 })}---
 
 ${body}`;
+}
+
+// src/lib/design-gate.ts
+function appliedIn(changelog, round) {
+  const out = /* @__PURE__ */ new Set();
+  for (const e of changelog) {
+    for (const m of e.note.matchAll(/round\s+(\d+)\s*:\s*applied\s+([\d\s,]+)/gi)) {
+      if (Number(m[1]) !== round) continue;
+      for (const n of m[2].split(/[\s,]+/)) if (/^\d+$/.test(n)) out.add(Number(n));
+    }
+  }
+  return out;
+}
+function designGate(changelog, critiques) {
+  const version = changelog[changelog.length - 1]?.version ?? 0;
+  const latestRound = critiques.length ? Math.max(...critiques.map((c) => c.round)) : null;
+  const latest = latestRound === null ? null : critiques.find((c) => c.round === latestRound)?.critique ?? null;
+  const applied = latestRound === null ? /* @__PURE__ */ new Set() : appliedIn(changelog, latestRound);
+  const criticalPending = latest ? latest.proposals.filter((p) => p.severity === "critical" && !applied.has(p.n)).map((p) => p.n) : [];
+  const latestCritiqueVersion = latest?.version ?? null;
+  return {
+    version,
+    rounds: critiques.filter((c) => c.critique !== null).length,
+    latestRound,
+    latestCritiqueVersion,
+    criticalPending,
+    invalid: critiques.filter((c) => c.critique === null).map((c) => c.round).sort((a, b) => a - b),
+    canAutoApprove: latest !== null && criticalPending.length === 0 && latestCritiqueVersion !== null && latestCritiqueVersion <= version
+  };
 }
 
 // src/lib/history.ts
@@ -13696,7 +13727,7 @@ function launchRun(launcher, x2) {
 }
 
 // src/cli/run.ts
-var USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|design-validate|design-import|design-snapshot|design-changed|critique-check|critique-select|design-page|hook> ...`;
+var USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|design-validate|design-import|design-snapshot|design-changed|design-gate|critique-check|critique-select|design-page|hook> ...`;
 function run(argv, io) {
   const [cmd, ...args] = argv;
   const flag = (name) => {
@@ -13966,7 +13997,13 @@ function run(argv, io) {
           if (e instanceof SpecImportError) return fail(`design-import: ${e.message}`, 2);
           throw e;
         }
-        const d = parseDesign(design);
+        let d;
+        try {
+          d = parseDesign(design);
+        } catch (e) {
+          if (e instanceof DesignError) return fail(`design-import: ${e.message}`, 2);
+          throw e;
+        }
         (0, import_node_fs2.mkdirSync)(import_node_path2.default.dirname(target), { recursive: true });
         try {
           (0, import_node_fs2.writeFileSync)(target, design, { flag: "wx" });
@@ -14018,6 +14055,24 @@ function run(argv, io) {
         const total = d.sections.length;
         const count = changed.filter((s) => s !== "_intro").length;
         return ok(JSON.stringify({ since, changed, scope: total === 0 || count * 2 > total ? "full" : "changed" }));
+      }
+      case "design-gate": {
+        if (!args[0] || args[0].startsWith("--")) return fail("usage: waypoint design-gate <design.md>", 2);
+        const file = abs(args[0]);
+        const d = parseDesign((0, import_node_fs2.readFileSync)(file, "utf8"));
+        const local = import_node_path2.default.join(io.cwd, ".waypoint", d.meta.project);
+        const critiques = ((0, import_node_fs2.existsSync)(local) ? (0, import_node_fs2.readdirSync)(local) : []).flatMap((f) => {
+          const m = /^critique-r(\d+)\.json$/.exec(f);
+          if (!m) return [];
+          let critique = null;
+          try {
+            critique = parseCritique((0, import_node_fs2.readFileSync)(import_node_path2.default.join(local, f), "utf8"));
+          } catch {
+            critique = null;
+          }
+          return [{ round: Number(m[1]), critique }];
+        });
+        return ok(JSON.stringify(designGate(readChangelog(import_node_path2.default.dirname(file)), critiques)));
       }
       case "critique-check": {
         const c = parseCritique((0, import_node_fs2.readFileSync)(abs(args[0]), "utf8"));

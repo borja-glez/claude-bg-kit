@@ -18,7 +18,7 @@ export type LensPanel = {
   forge: {
     task: string; path: string; phase: string; agent: string | null; validators: { name: string; ok: boolean }[];
     verdict: { action: string; score: number | null } | null; round: number | null; cap: number | null;
-    brief: number | null; accepted: number[]; briefs: number | null;
+    brief: number | null; accepted: number[]; briefs: number | null; autonomy?: 'auto';
     verify?: {
       planned: boolean; surfaces: string[]; result: string | null; passed: number | null; total: number | null;
       evidence: string | null; reason: string | null;

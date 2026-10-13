@@ -10474,8 +10474,9 @@ var DesignError = class extends Error {
   }
 };
 var FM = /^---\r?\n(?:([\s\S]*?)\r?\n)?---\r?\n?([\s\S]*)$/;
+var BOM2 = String.fromCharCode(65279);
 function parseDesign(text2) {
-  const m = FM.exec(text2.replace(/^﻿/, ""));
+  const m = FM.exec(text2.startsWith(BOM2) ? text2.slice(1) : text2);
   if (!m) throw new DesignError(["missing front matter block (--- ... ---) at the top of design.md"]);
   let raw;
   try {
@@ -10745,7 +10746,8 @@ function normalizeExecution(x) {
     lastStepAt: iso(x.lastStepAt),
     lastBlockStep: iso(x.lastBlockStep),
     sleepUntil: iso(x.sleepUntil),
-    ...typeof x.planned === "number" && Number.isInteger(x.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x.planned)) } : {}
+    ...typeof x.planned === "number" && Number.isInteger(x.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x.planned)) } : {},
+    ...x.autonomy === "auto" ? { autonomy: "auto" } : {}
   };
 }
 function parseExecution(text2) {

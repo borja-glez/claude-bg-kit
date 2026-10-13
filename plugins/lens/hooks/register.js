@@ -83,7 +83,8 @@ function normalizeStatus(x) {
       total: num(x.verify.total),
       evidence: pathText(x.verify.evidence),
       reason: str2(x.verify.reason) ? cleanText(x.verify.reason) : null
-    } : null
+    } : null,
+    ...x.autonomy === "auto" ? { autonomy: "auto" } : {}
   };
 }
 
@@ -10624,7 +10625,8 @@ function normalizeExecution(x) {
     lastStepAt: iso(x.lastStepAt),
     lastBlockStep: iso(x.lastBlockStep),
     sleepUntil: iso(x.sleepUntil),
-    ...typeof x.planned === "number" && Number.isInteger(x.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x.planned)) } : {}
+    ...typeof x.planned === "number" && Number.isInteger(x.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x.planned)) } : {},
+    ...x.autonomy === "auto" ? { autonomy: "auto" } : {}
   };
 }
 function parseExecution(text2) {
@@ -11473,8 +11475,9 @@ var DesignError = class extends Error {
   }
 };
 var FM = /^---\r?\n(?:([\s\S]*?)\r?\n)?---\r?\n?([\s\S]*)$/;
+var BOM2 = String.fromCharCode(65279);
 function parseDesign(text2) {
-  const m = FM.exec(text2.replace(/^﻿/, ""));
+  const m = FM.exec(text2.startsWith(BOM2) ? text2.slice(1) : text2);
   if (!m) throw new DesignError(["missing front matter block (--- ... ---) at the top of design.md"]);
   let raw;
   try {
@@ -12159,7 +12162,7 @@ function buildCards(m, t, nowMs2) {
       title: f?.task ?? "forge",
       hue: SECTION_HUE.forge,
       chip: f?.path ? { text: f.path, hue: PATH_HUE[f.path] ?? "peach" } : inf?.active ? { text: "\u221E", hue: "mauve" } : void 0,
-      subtitle: f && forgePhase(f) ? `${t.sForge} \xB7 ${forgePhase(f)}` : void 0,
+      subtitle: f && (forgePhase(f) || f.autonomy === "auto") ? [t.sForge, forgePhase(f), f.autonomy === "auto" && t.autoMode].filter(Boolean).join(" \xB7 ") : void 0,
       blocks
     });
   }
@@ -13213,6 +13216,7 @@ var TEXT = {
     hoursLeft: (h2) => `quedan ${h2} h`,
     auto: "auto",
     autoDecisions: (n2) => `${n2} ${n2 === 1 ? "decisi\xF3n autom\xE1tica" : "decisiones autom\xE1ticas"}`,
+    autoMode: "modo auto",
     pressEnter: "Comando listo en el prompt: pulsa Enter",
     briefs: "briefs",
     cycle: "ciclo",
@@ -13279,6 +13283,7 @@ var TEXT = {
     hoursLeft: (h2) => `${h2}h left`,
     auto: "auto",
     autoDecisions: (n2) => `${n2} automatic decision${n2 === 1 ? "" : "s"}`,
+    autoMode: "auto mode",
     pressEnter: "Command ready in the prompt: press Enter",
     briefs: "briefs",
     cycle: "cycle",
