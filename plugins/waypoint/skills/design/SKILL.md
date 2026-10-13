@@ -12,7 +12,7 @@ Talk to the user in their language. Everything stored (front matter keys, JSON f
 
 ## Args and paths
 
-The first token of the arguments is the subcommand: `new [--from <spec>]`, `round`, `apply <all|1,3>`, `rewrite`, `interview`, `approve`. With no arguments: `new` if `design.md` does not exist, otherwise `round`.
+The first token of the arguments is the subcommand: `new [--from <spec>]`, `round`, `apply <all|1,3>`, `rewrite`, `interview`, `approve [--auto]`. With no arguments: `new` if `design.md` does not exist, otherwise `round`.
 
 - `DESIGN` = `docs/waypoint/<project>/design.md` (ask which project if there are several).
 - `LOCAL` = `.waypoint/<project>/`. Make sure `.waypoint/` is in the project's `.gitignore`.
@@ -40,6 +40,8 @@ The body is Markdown with `##` sections.
 ## Approved designs
 
 If the front matter has `status: approved`, the plan was derived from this design. Before the first edit of `DESIGN` in `apply`, `rewrite` (when accepting it), or `interview`, warn the user that the design is approved and the plan was derived from it, and ask whether to continue. If no: stop. If yes: set `status: draft` in the front matter, then edit. `round` does not edit `DESIGN`, so it does not ask. The plan is not touched here: after the changes the user re-approves with `approve`, and only then does the `waypoint:plan` skill re-derive or sync the plan by its own rules.
+
+**Auto.** `round`, `apply` and `approve` accept `--auto` when forge's auto mode drives the loop (`/forge:run`, `## Autonomy`): never ask. Where a step would ask, take the safe default and say so in one line: `round` with an empty `changed` list ends the loop (nothing new to review); `apply` with a critique of another version applies nothing (run `round` again); an approved design is reopened (`status: draft`) without asking.
 
 ## new
 
@@ -86,7 +88,7 @@ Apply the approved-design rule above before the first edit. Ask questions one at
 
 ## approve
 
-1. List the `critical` proposals of the latest critique. Treat one as applied only if a changelog note for that round names its number, or you applied it in this conversation. If any remain (or you are unsure), show them and ask for explicit confirmation; do not continue without a yes.
+1. List the `critical` proposals of the latest critique. Treat one as applied only if a changelog note for that round names its number, or you applied it in this conversation. If any remain (or you are unsure), show them and ask for explicit confirmation; do not continue without a yes. With `--auto`: do not ask. Run `waypoint design-gate DESIGN`; with `canAutoApprove: true` go on (the snapshot note of step 2 is "approved (auto)"); otherwise stop and say why (its `criticalPending`, or that no critique round was run yet).
 2. Set `status: approved` in the front matter, run `design-validate`, run `design-snapshot` with the note "approved" (in the user's language), and commit `Design approved (v<N>)` (pathspecs as above).
 3. Publish.
 4. Run the `waypoint:plan` skill, telling it to start from the approved `design.md`. When forge drives the session (`/forge:run` chose Large), stop after step 3: `/forge:run` continues with `forge-planner`.

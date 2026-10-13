@@ -178,6 +178,22 @@ describe('plugin layout', () => {
     for (const w of ['git merge-base HEAD', 'review-<branch>-<tag>', '--base-run', 'git worktree add --detach', 'diff-1.patch', 'FORGE triage', 'review-correctness',
       'review-security', 'review-perf', 'FORGE verdict', 'nothing to review', 'Never merge', 'never push', '/forge:run']) expect(md).toContain(w);
   });
+  it('auto mode in the skills: launch questions, decisions by auto, the design loop and the gate, the never-auto list', () => {
+    const md = read('plugins/forge/skills/run/SKILL.md');
+    const auto = md.slice(md.indexOf('\n## Autonomy\n'), md.indexOf('\n## 1. Triage\n'));
+    for (const w of ['FORGE prefs', '/forge:run --auto', 'FORGE triage --autonomy auto', 'FORGE swarm start --autonomy auto', '«¿Integro la rama de ejecución en `<rama>` al acabar?»',
+      '--merge-on-finish', '`design-apply`', '`design-approve`', '`plan-confirm`', '`mode`', 'waypoint design-gate', '/waypoint:design approve --auto', 'at most 3 rounds',
+      'el diseño necesita tu decisión', 'Never in auto', 'pushing', 'closing escalations', 'forge/run-<project>']) expect(auto).toContain(w);
+    for (const w of ['Never approve it yourself unless autonomy is auto', 'FORGE route stage --stage handed-off', 'FORGE route stage --stage done', '"by": "<auto or unattended>"', 'keeps deciding alone',
+      'not in auto: there a spec is used only with `--from-spec`']) expect(md).toContain(w);
+    expect(md.split(/\r?\n---\r?\n/)[0]).toContain('--auto');
+    const design = read('plugins/waypoint/skills/design/SKILL.md');
+    for (const w of ['approve [--auto]', 'waypoint design-gate DESIGN', 'canAutoApprove', 'approved (auto)', '**Auto.**']) expect(design).toContain(w);
+    const planner = read('plugins/forge/agents/forge-planner.md');
+    for (const w of ['**Extend mode.**', 'closing task', 'never renumber', 'new: <ids>']) expect(planner).toContain(w);
+    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    for (const w of ['autonomy: auto', '`forge-planner` in extend mode', '`plan-confirm`', 'the approved-design rule', 'blocked-large']) expect(inf).toContain(w);
+  });
   it('forge:route skill: first, steps aside for small work, one question, hands over', () => {
     const md = read('plugins/forge/skills/route/SKILL.md');
     expect(md).toMatch(/^---\r?\nname: route\r?\ndescription: Use FIRST — before superpowers:brainstorming, writing-plans or any other process skill — when the user asks for coding work that is more than a trivial edit/);
