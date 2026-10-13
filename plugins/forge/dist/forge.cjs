@@ -13430,6 +13430,10 @@ var import_yaml3 = __toESM(require_dist(), 1);
 function surfaceHash(text2) {
   return (0, import_node_crypto2.createHash)("sha256").update(text2.replace(/\r\n/g, "\n")).digest("hex");
 }
+function hashMatches(stored, current) {
+  if (!stored) return false;
+  return stored === current || /^[0-9a-f]{16}$/.test(stored) && current.startsWith(stored);
+}
 function lineDigest(line2) {
   return (0, import_node_crypto2.createHash)("sha256").update(line2.replace(/\r\n?/g, "\n").trim()).digest("hex");
 }
@@ -13586,137 +13590,70 @@ function appendLearned(text2, date, notes, heading = "Learned") {
 
 // src/forge/local.ts
 var OBJECT_ID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
-function git(cwd2, args) {
-  try {
-    return (0, import_node_child_process.execFileSync)("git", args, { cwd: cwd2, encoding: "utf8", timeout: 5e3, stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
-  } catch {
-    return null;
-  }
-}
-var samePath = (a, b) => {
-  try {
-    return import_node_fs10.realpathSync.native(a) === import_node_fs10.realpathSync.native(b);
-  } catch {
-    return false;
-  }
-};
-function namedByTop(top, r2) {
-  const dotGit = import_node_path10.default.join(top, ".git");
-  try {
-    const st = (0, import_node_fs10.statSync)(dotGit);
-    if (st.isDirectory()) return samePath(r2.gitDir, dotGit) && samePath(r2.common, dotGit);
-    if (!st.isFile()) return false;
-    const m = /^gitdir: *(.+)$/.exec((0, import_node_fs10.readFileSync)(dotGit, "utf8").split(/\r?\n/)[0].trimEnd());
-    if (!m) return false;
-    const dir = import_node_path10.default.resolve(top, m[1]);
-    if (!samePath(r2.gitDir, dir)) return false;
-    return samePath(r2.common, dir) || import_node_path10.default.basename(import_node_path10.default.dirname(dir)) === "worktrees" && samePath(r2.common, import_node_path10.default.dirname(import_node_path10.default.dirname(dir)));
-  } catch {
-    return false;
-  }
-}
-function repository(root) {
-  const out = git(root, ["-c", "safe.bareRepository=explicit", "rev-parse", "--is-inside-work-tree", "--show-toplevel", "--git-dir", "--git-common-dir"]);
-  const [inside, top, gitDir, common] = (out ?? "").split(/\r?\n/).map((l) => l.trim());
-  if (inside !== "true" || !top || !gitDir || !common) return null;
-  const r2 = { gitDir: import_node_path10.default.resolve(root, gitDir), common: import_node_path10.default.resolve(root, common) };
-  return namedByTop(import_node_path10.default.resolve(root, top), r2) ? r2 : null;
-}
 function mainCheckout(root) {
-  const r2 = repository(root);
-  if (!r2 || r2.gitDir === r2.common || import_node_path10.default.basename(r2.common) !== ".git") return root;
-  return import_node_path10.default.dirname(r2.common);
-}
-function gitCommonDir(root) {
-  const dir = repository(root)?.common;
-  if (!dir) return null;
   try {
-    return (0, import_node_fs10.statSync)(dir).isDirectory() ? dir : null;
+    const [gitDir, common] = (0, import_node_child_process.execFileSync)("git", ["rev-parse", "--git-dir", "--git-common-dir"], { cwd: root, encoding: "utf8", timeout: 5e3, stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).split(/\r?\n/).map((l) => l.trim());
+    if (!gitDir || !common) return root;
+    const commonDir2 = import_node_path10.default.resolve(root, common);
+    if (import_node_path10.default.resolve(root, gitDir) === commonDir2 || import_node_path10.default.basename(commonDir2) !== ".git") return root;
+    return import_node_path10.default.dirname(commonDir2);
   } catch {
-    return null;
+    return root;
   }
 }
-var stateFile = (root, name) => {
-  const common = gitCommonDir(root);
-  return common ? import_node_path10.default.join(common, "forge", name) : null;
-};
-function writeAtomic2(file, text2) {
-  (0, import_node_fs10.mkdirSync)(import_node_path10.default.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
-  (0, import_node_fs10.writeFileSync)(tmp, text2);
-  (0, import_node_fs10.renameSync)(tmp, file);
-}
-var localFile = (root) => stateFile(root, "local.yaml");
+var localFile = (root) => import_node_path10.default.join(mainCheckout(root), ".forge", "local.yaml");
 var names = (x) => Array.isArray(x) ? [...new Set(x.filter((s2) => typeof s2 === "string" && NAME.test(s2)))] : [];
-function readAt(file) {
+function readLocal(root) {
   let raw = null;
-  if (file) {
-    try {
-      raw = (0, import_yaml4.parse)((0, import_node_fs10.readFileSync)(file, "utf8"));
-    } catch {
-      raw = null;
-    }
+  try {
+    raw = (0, import_yaml4.parse)((0, import_node_fs10.readFileSync)(localFile(root), "utf8"));
+  } catch {
+    raw = null;
   }
   const o = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const surfaces = {};
+  if (o.surfaces && typeof o.surfaces === "object" && !Array.isArray(o.surfaces)) {
+    for (const [k, v] of Object.entries(o.surfaces)) {
+      if (!NAME.test(k) || !v || typeof v !== "object" || Array.isArray(v)) continue;
+      const p = v;
+      if (p.state === "allowed" || p.state === "denied") {
+        surfaces[k] = {
+          state: p.state,
+          hash: typeof p.hash === "string" ? p.hash : null,
+          ...typeof p.blob === "string" && OBJECT_ID.test(p.blob) ? { blob: p.blob } : {},
+          ...typeof p.commit === "string" && OBJECT_ID.test(p.commit) ? { commit: p.commit } : {}
+        };
+      }
+    }
+  }
   const { workflow, autonomy, ...rest } = o;
   return {
     ...rest,
+    surfaces,
     known: names(o.known),
     proposed: names(o.proposed),
     ...WORKFLOWS.includes(workflow) ? { workflow } : {},
     ...AUTONOMIES.includes(autonomy) ? { autonomy } : {}
   };
 }
-var readLocal = (root) => readAt(localFile(root));
-function updateLocal(root, fn) {
+function writeLocal(root, s2) {
+  forgeDir(mainCheckout(root));
   const file = localFile(root);
-  const next = fn(readAt(file));
-  if (file) writeAtomic2(file, (0, import_yaml4.stringify)(next));
+  const tmp = `${file}.${process.pid}.tmp`;
+  (0, import_node_fs10.writeFileSync)(tmp, (0, import_yaml4.stringify)(s2));
+  (0, import_node_fs10.renameSync)(tmp, file);
+}
+function updateLocal(root, fn) {
+  const next = fn(readLocal(root));
+  writeLocal(root, next);
   return next;
 }
-var permissionsFile = (root) => stateFile(root, "surfaces.json");
-function parsePermissions(x) {
-  const out = {};
-  if (!x || typeof x !== "object" || Array.isArray(x)) return out;
-  for (const [k, v] of Object.entries(x)) {
-    if (!NAME.test(k) || !v || typeof v !== "object" || Array.isArray(v)) continue;
-    const p = v;
-    if (p.state !== "allowed" && p.state !== "denied") continue;
-    out[k] = {
-      state: p.state,
-      hash: typeof p.hash === "string" ? p.hash : null,
-      ...typeof p.blob === "string" && OBJECT_ID.test(p.blob) ? { blob: p.blob } : {},
-      ...typeof p.commit === "string" && OBJECT_ID.test(p.commit) ? { commit: p.commit } : {}
-    };
-  }
-  return out;
-}
-var readPermissionsAt = (file) => {
-  try {
-    return parsePermissions(JSON.parse((0, import_node_fs10.readFileSync)(file, "utf8")));
-  } catch {
-    return {};
-  }
-};
-function readPermissions(root) {
-  const file = permissionsFile(root);
-  return file && (0, import_node_fs10.existsSync)(file) ? readPermissionsAt(file) : {};
-}
-function setPermission(root, name, perm) {
-  const file = permissionsFile(root);
-  if (!file) return false;
-  const next = { ...readPermissionsAt(file) };
-  if (perm) next[name] = perm;
-  else delete next[name];
-  writeAtomic2(file, `${JSON.stringify(next, null, 2)}
-`);
-  return true;
-}
-var learnedFile = (root) => stateFile(root, "learned.jsonl");
+var learnedFile = (root) => import_node_path10.default.join(mainCheckout(root), ".forge", "learned.jsonl");
 function recordLearned(root, surface, lines, ts) {
-  const file = learnedFile(root);
-  if (!lines.length || !file) return;
-  (0, import_node_fs10.mkdirSync)(import_node_path10.default.dirname(file), { recursive: true });
+  if (!lines.length) return;
+  const main = mainCheckout(root);
+  forgeDir(main);
+  const file = import_node_path10.default.join(main, ".forge", "learned.jsonl");
   let lead = endsMidLine(file) ? "\n" : "";
   for (const l of lines) {
     (0, import_node_fs10.appendFileSync)(file, `${lead}${JSON.stringify({ surface, digest: lineDigest(l), ts })}
@@ -13726,10 +13663,9 @@ function recordLearned(root, surface, lines, ts) {
 }
 function readLearned(root) {
   const out = /* @__PURE__ */ new Map();
-  const file = learnedFile(root);
   let text2 = "";
   try {
-    text2 = file ? (0, import_node_fs10.readFileSync)(file, "utf8") : "";
+    text2 = (0, import_node_fs10.readFileSync)(learnedFile(root), "utf8");
   } catch {
     return out;
   }
@@ -13887,7 +13823,7 @@ function mainWorktreeFrom(porcelain) {
   const line2 = porcelain.split(/\r?\n/).find((l) => l.startsWith("worktree "));
   return line2 ? line2.slice("worktree ".length).trim() || null : null;
 }
-function samePath2(a, b) {
+function samePath(a, b) {
   const norm3 = (p) => {
     const r2 = import_node_path13.default.resolve(p.replace(/\\/g, "/"));
     return process.platform === "win32" ? r2.toLowerCase() : r2;
@@ -14531,7 +14467,7 @@ function swarmCommand(args, io, deps) {
   if (["start", "tick", "integrate", "merge", "sleep", "worktree", "retry", "relaunch", "nudge", "takeover"].includes(sub ?? "") && !(sub === "worktree" && has("member"))) {
     const top = deps.git(["rev-parse", "--show-toplevel"])?.trim();
     const main = mainWorktreeFrom(deps.git(["worktree", "list", "--porcelain"]));
-    if (!top || !main || !samePath2(top, main)) {
+    if (!top || !main || !samePath(top, main)) {
       throw new UsageError(`swarm ${sub}: run it from the main checkout${main ? ` (${main})` : ""}, not from a worktree`);
     }
   }
@@ -14671,7 +14607,7 @@ function swarmCommand(args, io, deps) {
         const defaultBranch = deps.git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])?.trim().replace(/^origin\//, "") || (deps.git(["rev-parse", "--verify", "-q", "refs/heads/main"]) !== null ? "main" : deps.git(["rev-parse", "--verify", "-q", "refs/heads/master"]) !== null ? "master" : null);
         if (defaultBranch && branch === defaultBranch) throw new UsageError(`swarm start: ${branch} is the default branch; an execution never integrates into it directly`);
         const holder = worktreeHolding(deps.git(["worktree", "list", "--porcelain"]), branch);
-        if (holder && !samePath2(holder, wt)) throw new UsageError(`swarm start: ${branch} is checked out in another worktree (${holder}); pick another --branch`);
+        if (holder && !samePath(holder, wt)) throw new UsageError(`swarm start: ${branch} is checked out in another worktree (${holder}); pick another --branch`);
         if ((0, import_node_fs14.existsSync)(wt)) {
           const on = deps.at(wt).git(["rev-parse", "--abbrev-ref", "HEAD"])?.trim();
           if (on !== branch) throw new UsageError(`swarm start: ${wt} exists and is on ${on ?? "?"}, not ${branch}; switch it or remove it (git worktree remove)`);
@@ -15316,7 +15252,7 @@ var readJson = (file) => {
     return null;
   }
 };
-var samePath3 = (a, b) => {
+var samePath2 = (a, b) => {
   const x = import_node_path16.default.resolve(a);
   const y = import_node_path16.default.resolve(b);
   return process.platform === "win32" ? x.toLowerCase() === y.toLowerCase() : x === y;
@@ -15351,7 +15287,7 @@ function installedPlugins(opts, only) {
       for (const e of Array.isArray(value) ? value : [value]) {
         if (!isObj4(e) || typeof e.installPath !== "string" || !(0, import_node_fs15.existsSync)(e.installPath)) continue;
         const scope = typeof e.scope === "string" ? e.scope : "user";
-        if (scope !== "user" && scope !== "managed" && !(typeof e.projectPath === "string" && samePath3(e.projectPath, opts.projectDir))) continue;
+        if (scope !== "user" && scope !== "managed" && !(typeof e.projectPath === "string" && samePath2(e.projectPath, opts.projectDir))) continue;
         out.push({ key, name: m[1], installPath: e.installPath, version: typeof e.version === "string" && e.version ? e.version : "unknown" });
       }
     }
@@ -15602,7 +15538,7 @@ function verifyPlan(i) {
   if ((i.path === "trivial" || i.path === "small") && !i.asked) return { eligible: false, surfaces: [], drafts: [], reason: `${i.path}: no tool verification unless the task asks for it` };
   const surfaces = [];
   for (const s2 of i.surfaces) {
-    const perm = i.permissions[s2.name];
+    const perm = i.local.surfaces[s2.name];
     if (perm?.state === "denied") continue;
     let match = null;
     if (s2.affects !== null) {
@@ -15610,7 +15546,7 @@ function verifyPlan(i) {
       if (m === void 0) continue;
       match = m;
     }
-    const permission = perm?.state !== "allowed" ? "ask" : perm.hash === s2.hash ? "allowed" : "changed";
+    const permission = perm?.state !== "allowed" ? "ask" : hashMatches(perm.hash, s2.hash) ? "allowed" : "changed";
     const { missing, unknown } = i.tools(s2);
     surfaces.push({ name: s2.name, permission, match, missing, unknown, hash: s2.hash });
   }
@@ -16310,7 +16246,7 @@ function writeFullDiff(root, name, hash, diff) {
     return null;
   }
 }
-function surfaceQuestion(p, s2, perm, git2, dir, work, es2) {
+function surfaceQuestion(p, s2, perm, git, dir, work, es2) {
   if (p.permission === "allowed") return p;
   if (p.permission === "ask") return { ...p, ask: askFor(s2, "ask", es2) };
   const lines = (out) => (out ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
@@ -16318,21 +16254,21 @@ function surfaceQuestion(p, s2, perm, git2, dir, work, es2) {
   let cut = {};
   if (perm?.blob) {
     const now = surfaceBlob(dir, s2.file);
-    const d = now ? git2(["--no-replace-objects", "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", perm.blob, now]) : null;
+    const d = now ? git(["--no-replace-objects", "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", perm.blob, now]) : null;
     if (d && now) {
       const full = relabelDiff(d, perm.blob, now, s2.file);
       diff = capLines(full, 120, es2);
       if (diff !== full) cut = { diffTruncated: true, diffFile: writeFullDiff(work, s2.name, p.hash, full) };
     }
   }
-  const since = perm?.commit ? git2(["--no-replace-objects", "log", "--oneline", "-n", "10", `${perm.commit}..HEAD`, "--", s2.file]) : null;
-  const commits = lines(since ?? git2(["--no-replace-objects", "log", "--oneline", "-n", "3", "--", s2.file]));
+  const since = perm?.commit ? git(["--no-replace-objects", "log", "--oneline", "-n", "10", `${perm.commit}..HEAD`, "--", s2.file]) : null;
+  const commits = lines(since ?? git(["--no-replace-objects", "log", "--oneline", "-n", "3", "--", s2.file]));
   return { ...p, diff, ...cut, commits, ask: askFor(s2, "changed", es2) };
 }
 var committedAt = (io, dir) => {
-  const git2 = io.git ?? defaultGit(dir);
+  const git = io.git ?? defaultGit(dir);
   return (rel) => {
-    const s2 = Number((git2(["log", "-1", "--format=%ct", "--", rel]) ?? "").trim());
+    const s2 = Number((git(["log", "-1", "--format=%ct", "--", rel]) ?? "").trim());
     return Number.isInteger(s2) && s2 > 0 ? s2 * 1e3 : null;
   };
 };
@@ -16513,12 +16449,12 @@ function run(argv, io) {
         const localeArg2 = flag("locale");
         if (has("locale") && localeArg2 !== "es" && localeArg2 !== "en") throw new UsageError("triage: --locale must be es or en");
         if (!task) throw new UsageError("triage: the task text is required");
-        const git2 = io.git ?? defaultGit(io.cwd);
+        const git = io.git ?? defaultGit(io.cwd);
         const lines = (out) => (out ?? "").split("\n").map((s2) => s2.trim()).filter(Boolean);
-        const listed = git2(["-c", "core.quotePath=false", "ls-files"]);
-        const commits = Number.parseInt((git2(["rev-list", "--count", "HEAD"]) ?? "").trim(), 10) || 0;
+        const listed = git(["-c", "core.quotePath=false", "ls-files"]);
+        const commits = Number.parseInt((git(["rev-list", "--count", "HEAD"]) ?? "").trim(), 10) || 0;
         const bookkeeping = (f) => /^(docs\/waypoint|docs\/superpowers|\.forge|\.waypoint)\//.test(f);
-        const grep = (w) => lines(git2(["-c", "core.quotePath=false", "grep", "-l", "-I", "--fixed-strings", "-w", "-e", w])).filter((f) => !bookkeeping(f));
+        const grep = (w) => lines(git(["-c", "core.quotePath=false", "grep", "-l", "-I", "--fixed-strings", "-w", "-e", w])).filter((f) => !bookkeeping(f));
         const tracked = lines(listed);
         const zoneFiles = planned ? tracked.filter((f) => planned.zones.some((z) => globMatch(z, f))) : [];
         const extra = planned ? { files: zoneFiles, zones: zonesFromPaths(planned.zones) } : spFiles ? { files: tracked.filter((f) => spFiles.includes(f)), zones: zonesFromPaths(spFiles) } : void 0;
@@ -16553,7 +16489,7 @@ function run(argv, io) {
         const locale = localeArg2 ?? ((plannedDoc?.plan.locale ?? planLocale(io.cwd))?.toLowerCase().split(/[-_]/)[0] === "es" ? "es" : "en");
         const line2 = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh: fresh2, catalog }, locale);
         const gate = result.path === "medium" ? "plan" : null;
-        const untracked2 = listed !== null && lines(git2(["ls-files", "--others", "--exclude-standard", "--", ".forge/.gitignore"])).length ? { untracked: [".forge/.gitignore"] } : {};
+        const untracked2 = listed !== null && lines(git(["ls-files", "--others", "--exclude-standard", "--", ".forge/.gitignore"])).length ? { untracked: [".forge/.gitignore"] } : {};
         return json({ ...result, catalog, new: fresh2, implementer, announce: line2, gate, ...untracked2, ...auto });
       }
       case "validate": {
@@ -16912,8 +16848,8 @@ function run(argv, io) {
           const heading = flag("heading") ?? "Learned";
           if (!LEARNED_HEADINGS.includes(heading)) throw new UsageError(`surfaces learn: --heading must be ${LEARNED_HEADINGS.join("|")}`);
           const before = (0, import_node_fs19.readFileSync)(file, "utf8");
-          const cur = readPermissions(io.cwd)[name];
-          const allowed = cur?.state === "allowed" && cur.hash === permissionHash(before, readLearned(io.cwd).get(name));
+          const cur = readLocal(io.cwd).surfaces[name];
+          const allowed = cur?.state === "allowed" && hashMatches(cur.hash, permissionHash(before, readLearned(io.cwd).get(name)));
           const r2 = appendLearned(before, ts().slice(0, 10), notes, heading);
           (0, import_node_fs19.writeFileSync)(file, r2.text);
           if (allowed) recordLearned(io.cwd, name, r2.added, ts());
@@ -16936,11 +16872,10 @@ function run(argv, io) {
         const loc = flag("locale");
         if (has("locale") && loc !== "es" && loc !== "en") throw new UsageError("verify-plan: --locale must be es|en");
         const es2 = (loc ?? planLocale(io.cwd)) === "es";
-        const git2 = io.git ?? defaultGit(io.cwd);
-        const diff = git2(["diff", "--name-only", `${base}..HEAD`]);
+        const git = io.git ?? defaultGit(io.cwd);
+        const diff = git(["diff", "--name-only", `${base}..HEAD`]);
         const surfaces = readSurfaces(repoDir, readLearned(io.cwd));
         const local = readLocal(io.cwd);
-        const permissions = readPermissions(io.cwd);
         let inventory = null;
         const plan = verifyPlan({
           path: p,
@@ -16949,23 +16884,21 @@ function run(argv, io) {
           surfaces,
           drafts: detectDrafts(repoReader(repoDir)),
           local,
-          permissions,
           tools: (s2) => s2.tools.length ? toolGaps(s2.tools, { onPath, inventory: inventory ??= mcpOf(io, repoDir) }) : { missing: [], unknown: [] }
         });
         appendEvent(io.cwd, { ts: ts(), kind: "verify", task, planned: plan.eligible, surfaces: plan.surfaces.filter((s2) => s2.permission === "allowed").map((s2) => s2.name) });
-        return json({ ...plan, surfaces: plan.surfaces.map((ps) => surfaceQuestion(ps, surfaces.find((s2) => s2.name === ps.name), permissions[ps.name], git2, repoDir, io.cwd, es2)) });
+        return json({ ...plan, surfaces: plan.surfaces.map((ps) => surfaceQuestion(ps, surfaces.find((s2) => s2.name === ps.name), local.surfaces[ps.name], git, repoDir, io.cwd, es2)) });
       }
       case "local": {
         const [sub, key, value] = args;
-        const NO_REPO = "local set: forge keeps your settings and surface permissions in the git repository (.git/forge/), and this directory is not in one";
         if (sub === "get") {
-          if (key === void 0) return json({ ...readLocal(io.cwd), surfaces: readPermissions(io.cwd) });
+          const s2 = readLocal(io.cwd);
+          if (key === void 0) return json(s2);
           const m = /^surfaces\.(.+)$/.exec(key);
           if (!m) throw new UsageError("local get: the path must be surfaces.<name>");
-          return json(readPermissions(io.cwd)[m[1]] ?? null);
+          return json(s2.surfaces[m[1]] ?? null);
         }
         if (sub === "set" && (key === "workflow" || key === "autonomy")) {
-          if (!localFile(io.cwd)) throw new UsageError(NO_REPO);
           if (value === "none") {
             updateLocal(io.cwd, (s2) => {
               const next = { ...s2 };
@@ -16989,13 +16922,18 @@ function run(argv, io) {
           if (value === "allowed" && expected !== void 0 && expected !== surface.hash) {
             throw new UsageError(`local set: .forge/verify/${m[1]}.md changed since verify-plan showed it: run verify-plan again`);
           }
-          let perm = value === "none" ? null : { state: "denied", hash: null };
+          let perm = { state: "denied", hash: null };
           if (value === "allowed") {
             const blob = surfaceBlob(repoDir, surface.file);
             const commit = (io.git ?? defaultGit(repoDir))(["rev-parse", "HEAD"])?.trim();
             perm = { state: "allowed", hash: surface.hash, ...blob ? { blob } : {}, ...commit && OBJECT_ID.test(commit) ? { commit } : {} };
           }
-          if (!setPermission(io.cwd, m[1], perm) && perm) throw new UsageError(NO_REPO);
+          updateLocal(io.cwd, (s2) => {
+            const surfaces = { ...s2.surfaces };
+            if (value === "none") delete surfaces[m[1]];
+            else surfaces[m[1]] = perm;
+            return { ...s2, surfaces };
+          });
           return ok("ok");
         }
         throw new UsageError("usage: forge local get [surfaces.<name>] | set surfaces.<name> allowed [--expect <hash>]|denied|none | set workflow <w>|none | set autonomy ask|auto|none");
