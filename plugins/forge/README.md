@@ -123,9 +123,9 @@ forge works next to [superpowers](https://github.com/obra/superpowers) and reuse
 
 ## Routing and auto mode
 
-**Routing.** forge puts a short rule in each new session (a `SessionStart` hook) and, on prompts that look like coding work, a one-line hint (`UserPromptSubmit`): before any other process skill, superpowers' included, the session runs `forge:route`. It triages the request, and trivial and small work go on without it. For Medium and larger work it asks once who does it: forge, superpowers, «superpowers diseña, forge construye» (brainstorming writes the spec, forge builds from it) or «superpowers planifica, forge ejecuta» (superpowers writes the plan, forge executes it); without superpowers, forge or no forge. The recommended option comes first. While superpowers designs or plans, the prompt hook reminds the session to hand over to forge. The hooks stay quiet inside forge's own executions and infinite runs, and with `workflow: superpowers`.
+**Routing.** forge puts a short rule in each new session (a `SessionStart` hook) and, on prompts that look like coding work, a one-line hint (`UserPromptSubmit`): before any other process skill, superpowers' included, the session runs `forge:route`. It triages the request, and trivial and small work go on without it. For Medium and larger work it asks once who does it: forge, superpowers, «superpowers diseña, forge construye» (brainstorming writes the spec, forge builds from it) or «superpowers planifica, forge ejecuta» (superpowers writes the plan, forge executes it); without superpowers, forge or no forge. The recommended option comes first. While superpowers designs or plans, the prompt hook reminds the session that chose the route to hand over to forge. A recent spec is recommended only when the request asks to build it. The hooks stay quiet inside forge's own executions and infinite runs, and with `workflow: superpowers` or `workflow: off`.
 
-**Preferences.** `workflow:` (`ask`, `forge`, `superpowers`, `superpowers-design`, `superpowers-plan`) and `autonomy:` (`ask`, `auto`) go in `.forge/config.yaml` (the team's) or `.forge/local.yaml` (yours: `forge local set workflow <w>|none`, `forge local set autonomy ask|auto|none`). What the request says wins, then `local.yaml`, then `config.yaml`, then `ask`; `forge prefs` prints the result and where each value came from.
+**Preferences.** `workflow:` (`ask`, `forge`, `superpowers`, `superpowers-design`, `superpowers-plan`, or `off` for no forge) and `autonomy:` (`ask`, `auto`) go in `.forge/config.yaml` (the team's) or `.forge/local.yaml` (yours: `forge local set workflow <w>|none`, `forge local set autonomy ask|auto|none`). What the request says wins, then `local.yaml`, then `config.yaml`, then `ask`; `forge prefs` prints the result and where each value came from.
 
 **Auto mode.** With `autonomy: auto`, `/forge:run --auto` or a request that says so, forge asks only at launch, in one message: changes in the tree that are not the task's, whether to merge the run branch at the end (Large), and the budget (infinite mode). Then it decides alone and records each decision (`triage --autonomy auto`, `swarm start --autonomy auto`): the route, raising the path, applying the critic's critical and major proposals (up to 3 rounds), approving the design when `waypoint design-gate` allows it, confirming the plan and choosing the mode. Any other doubt becomes a question note and the safe path. It never merges into main without the launch answer, pushes, deletes, publishes beyond the private roadmap, touches changes that are not the task's or surface permissions, starts infinite mode without a budget, closes escalations or decides proposals outside the policy. In infinite mode with auto, a Large task is designed, approved and planned on the infinite branch instead of being blocked.
 
@@ -259,7 +259,7 @@ verify:
 evidence: upload               # upload | local; default upload
 validatorTimeoutSec: 600
 tdd: off                       # off | superpowers: implementers follow superpowers' TDD skill
-workflow: ask                  # ask | forge | superpowers | superpowers-design | superpowers-plan
+workflow: ask                  # ask | forge | superpowers | superpowers-design | superpowers-plan | off
 autonomy: ask                  # ask | auto
 swarm:
   parallel: 3                  # tasks at once; 1 runs one at a time; max 10
@@ -322,8 +322,8 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 - `sp-path <skill>` - the `SKILL.md` of a superpowers skill, or `null` when superpowers is not installed for this project.
 - `tdd` - the config's `tdd`, whether superpowers is installed, and the TDD line briefs carry (`null` when off or not installed).
 - `prefs [--workflow w] [--autonomy a]` - the resolved `workflow` and `autonomy`, and where each came from (`request`, `local`, `config`, `default`).
-- `route --task id --path p [--workflow w] [--autonomy a] [--run-plan]` - the routing options, superpowers and its recent specs and plans, and the recommended option.
-- `route set --task id --chosen o --by user|auto [--spec f] [--plan f]` - keep the chosen route in `.forge/route.json` and record the `route` decision.
+- `route --task id --path p [--workflow w] [--autonomy a] [--run-plan] [--build-spec]` - the routing options, superpowers and its recent specs and plans, and the recommended option. `--run-plan` and `--build-spec` say the request asks to carry out an existing plan or build an existing spec.
+- `route set --task id --chosen o --by user|auto [--spec f] [--plan f] [--session s]` - keep the chosen route in `.forge/route.json` and record the `route` decision; only the session `--session` names is reminded of it.
 - `route stage --stage s [--task id] [--spec f] [--plan f]` - move a pending route on (`designing`, `planning`, `handed-off`, `done`).
 - `hook route-session` / `hook route-prompt` - the routing hooks (SessionStart, UserPromptSubmit); they print nothing on any error.
 - `local set workflow <w>|none` / `local set autonomy ask|auto|none` - your own preferences in `.forge/local.yaml`.

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { firstStage, normalizeRoute, readRoute, routeOptions } from '../src/forge/route.js';
@@ -12,7 +12,7 @@ const SP = { installed: true, version: '6.4.1' };
 const SPEC = { path: 'docs/superpowers/specs/s.md', title: 'S', modified: '2026-10-12T00:00:00.000Z' };
 const PLAN = { path: 'docs/superpowers/plans/p.md', title: 'P', tasks: 3, done: 1 };
 type Input = Parameters<typeof routeOptions>[0];
-const input = (o: Partial<Input> = {}): Input => ({ path: 'medium', prefs: PREFS, superpowers: SP, specs: [], plans: [], runPlan: false, ...o });
+const input = (o: Partial<Input> = {}): Input => ({ path: 'medium', prefs: PREFS, superpowers: SP, specs: [], plans: [], runPlan: false, buildSpec: false, ...o });
 
 describe('routeOptions', () => {
   it('without superpowers: forge or no forge, forge recommended', () => {
@@ -23,11 +23,23 @@ describe('routeOptions', () => {
   it('with superpowers: four options, and the recommendation in the order of spec §5.3', () => {
     expect(routeOptions(input()).options).toEqual(['forge', 'superpowers', 'superpowers-design', 'superpowers-plan']);
     expect(routeOptions(input({ plans: [PLAN], runPlan: true, specs: [SPEC] })).recommended).toMatchObject({ option: 'superpowers-plan', plan: PLAN.path });
-    expect(routeOptions(input({ plans: [PLAN], specs: [SPEC] })).recommended).toMatchObject({ option: 'superpowers-design', spec: SPEC.path });
+    expect(routeOptions(input({ plans: [PLAN], specs: [SPEC], buildSpec: true })).recommended).toMatchObject({ option: 'superpowers-design', spec: SPEC.path });
     expect(routeOptions(input({ path: 'large' })).recommended).toEqual({ option: 'superpowers-design', why: expect.stringContaining('brainstorming') });
     expect(routeOptions(input()).recommended.option).toBe('forge');
     // A plan nobody asked to carry out is not recommended.
     expect(routeOptions(input({ plans: [PLAN] })).recommended.option).toBe('forge');
+  });
+  it('a recent spec the request does not ask to build is listed, never recommended', () => {
+    const r = routeOptions(input({ specs: [SPEC] }));
+    expect(r.recommended).toEqual({ option: 'forge', why: expect.any(String) });
+    expect(r.specs).toEqual([SPEC.path]);
+    expect(routeOptions(input({ path: 'large', specs: [SPEC] })).recommended).toEqual({ option: 'superpowers-design', why: expect.stringContaining('brainstorming') });
+  });
+  it('in auto mode a Large request without a spec goes to forge, whose design loop never asks', () => {
+    const auto = resolvePrefs({ autonomy: 'auto' }, {}, {});
+    expect(routeOptions(input({ path: 'large', prefs: auto })).recommended).toEqual({ option: 'forge', why: expect.stringContaining('auto mode') });
+    expect(routeOptions(input({ path: 'large', prefs: auto, specs: [SPEC], buildSpec: true })).recommended).toMatchObject({ option: 'superpowers-design', spec: SPEC.path });
+    expect(routeOptions(input({ path: 'large', prefs: auto, plans: [PLAN], runPlan: true })).recommended).toMatchObject({ option: 'superpowers-plan', plan: PLAN.path });
   });
   it('passes the preferences, their sources and the specs and plans through', () => {
     const r = routeOptions(input({ prefs: resolvePrefs({ autonomy: 'auto' }, { workflow: 'forge' }, {}), specs: [SPEC], plans: [PLAN] }));
@@ -48,6 +60,11 @@ describe('route.json', () => {
     expect(normalizeRoute(ok)).toEqual(ok);
     expect(normalizeRoute({ ...ok, chosen: 'magic' })).toBeNull();
     expect(normalizeRoute({ ...ok, spec: 'a"; rm -rf /"' })).toEqual(ok);
+  });
+  it('keeps the session that chose the route, and drops one that is not a plain id', () => {
+    const ok = { task: 't1', chosen: 'superpowers-design', by: 'user', stage: 'designing', ts: '2026-10-13T10:00:00.000Z' };
+    expect(normalizeRoute({ ...ok, session: 'a1b2-c3d4' })).toEqual({ ...ok, session: 'a1b2-c3d4' });
+    expect(normalizeRoute({ ...ok, session: 'x y"' })).toEqual(ok);
   });
 });
 
@@ -85,6 +102,22 @@ describe('forge route CLI', () => {
     expect(allDecisions(root).at(-1)).toMatchObject({ point: 'route', by: 'auto' });
     for (const bad of [['route', 'set', '--task', 't3', '--chosen', 'magic', '--by', 'user'], ['route', 'set', '--task', 't3', '--chosen', 'forge', '--by', 'robot'],
       ['route', 'stage', '--stage', 'later'], ['route', 'set', '--task', 't3', '--chosen', 'forge', '--by', 'user', '--spec', 'a"b']]) expect(run(bad, io).code).toBe(2);
+  });
+  it('recommends building a recent spec only with --build-spec', () => {
+    installSuperpowers();
+    const spec = path.join(root, 'docs', 'superpowers', 'specs', '2026-10-12-cart-design.md');
+    mkdirSync(path.dirname(spec), { recursive: true });
+    writeFileSync(spec, '# Cart\n\nCoupons.\n');
+    utimesSync(spec, io.now(), io.now());
+    const rel = 'docs/superpowers/specs/2026-10-12-cart-design.md';
+    expect(JSON.parse(run(['route', '--task', 't1', '--path', 'medium'], io).stdout)).toMatchObject({ specs: [rel], recommended: { option: 'forge' } });
+    expect(JSON.parse(run(['route', '--task', 't1', '--path', 'medium', '--build-spec'], io).stdout)).toMatchObject({ recommended: { option: 'superpowers-design', spec: rel } });
+  });
+  it('set keeps the session that chose the route', () => {
+    expect(JSON.parse(run(['route', 'set', '--task', 't1', '--chosen', 'superpowers-design', '--by', 'user', '--session', 'sess-1'], io).stdout)).toMatchObject({ session: 'sess-1' });
+    expect(readRoute(root)).toMatchObject({ session: 'sess-1' });
+    expect(JSON.parse(run(['route', 'stage', '--stage', 'planning'], io).stdout)).toMatchObject({ session: 'sess-1' });
+    expect(run(['route', 'set', '--task', 't1', '--chosen', 'forge', '--by', 'user', '--session', 'a b'], io).code).toBe(2);
   });
   it('stage without a route updates nothing', () => {
     expect(JSON.parse(run(['route', 'stage', '--stage', 'done'], io).stdout)).toEqual({ updated: false });

@@ -46,11 +46,15 @@ export function looksLikeCoding(prompt: string): boolean {
   return !!p && !p.startsWith('/') && p.split(/\s+/).length >= 6 && VERB.test(p) && !METHOD.test(p);
 }
 
+/** A route changed in the last 24 hours (and not in the future). */
+function fresh(r: RouteDoc, now: number): boolean {
+  const t = Date.parse(r.ts);
+  return Number.isFinite(t) && now - t <= ROUTE_REMINDER_MS && t - now <= 5 * 60_000;
+}
+
 /** The reminder of a route half done (superpowers designs or plans, forge builds), for 24 hours after its last change. */
 export function routeReminder(r: RouteDoc | null, now: number): string | null {
-  if (!r || (r.stage !== 'designing' && r.stage !== 'planning')) return null;
-  const t = Date.parse(r.ts);
-  if (!Number.isFinite(t) || now - t > ROUTE_REMINDER_MS || t - now > 5 * 60_000) return null;
+  if (!r || (r.stage !== 'designing' && r.stage !== 'planning') || !fresh(r, now)) return null;
   if (r.chosen === 'superpowers-design') {
     return `forge: the user routed task ${r.task} as "${r.chosen}". When the spec is written and approved, hand off with forge:run --from-spec ${r.spec ?? '<the spec path>'} instead of writing-plans`;
   }
@@ -76,14 +80,21 @@ export function hookRoute(io: Io, which: 'session' | 'prompt'): string {
     const o = input as { session_id?: unknown; prompt?: unknown };
     const sid = typeof o.session_id === 'string' && o.session_id ? o.session_id : null;
     const main = mainCheckout(io.cwd);
-    // With workflow: superpowers forge is optional again, as before routing existed.
-    if (resolvePrefs({}, readLocal(io.cwd), loadConfig(io.cwd)).workflow === 'superpowers' || forgeDrives(io, main, sid)) return '';
+    // With workflow: superpowers forge is optional again, as before routing existed; with off it stays out.
+    const workflow = resolvePrefs({}, readLocal(io.cwd), loadConfig(io.cwd)).workflow;
+    if (workflow === 'superpowers' || workflow === 'off' || forgeDrives(io, main, sid)) return '';
     if (which === 'session') {
       const sp = locateSuperpowers({ configDir: claudeConfigDir(io.env ?? process.env), projectDir: main });
       return JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: routingRule(sp.installed) } });
     }
-    const text = routeReminder(readRoute(io.cwd), io.now().getTime())
-      ?? (typeof o.prompt === 'string' && looksLikeCoding(o.prompt) ? ROUTE_HINT : null);
+    const now = io.now().getTime();
+    // A route belongs to the session that chose it: another session's route neither reminds nor silences this one.
+    const route = readRoute(io.cwd);
+    const own = route && (!route.session || route.session === sid) ? route : null;
+    const reminder = routeReminder(own, now);
+    // A session that routed its request recently gets no hint on its follow-up prompts until the route is done.
+    if (!reminder && own?.session && own.stage !== 'done' && fresh(own, now)) return '';
+    const text = reminder ?? (typeof o.prompt === 'string' && looksLikeCoding(o.prompt) ? ROUTE_HINT : null);
     return text ? JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } }) : '';
   } catch { return ''; }
 }

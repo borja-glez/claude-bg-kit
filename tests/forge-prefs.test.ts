@@ -32,6 +32,13 @@ describe('forge prefs and local set', () => {
     expect(run(['local', 'set', 'workflow', 'none'], io).code).toBe(0);
     expect(JSON.parse(run(['prefs'], io).stdout)).toMatchObject({ workflow: 'forge', sources: { workflow: 'config' } });
   });
+  it('saves «sin forge» as workflow: off, in local.yaml and in config.yaml', () => {
+    expect(run(['local', 'set', 'workflow', 'off'], io).code).toBe(0);
+    expect(JSON.parse(run(['prefs'], io).stdout)).toMatchObject({ workflow: 'off', sources: { workflow: 'local' } });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'workflow: off\n');
+    expect(run(['local', 'set', 'workflow', 'none'], io).code).toBe(0);
+    expect(JSON.parse(run(['prefs'], io).stdout)).toMatchObject({ workflow: 'off', sources: { workflow: 'config' } });
+  });
   it('refuses bad values, and a broken config.yaml', () => {
     expect(run(['local', 'set', 'workflow', 'maybe'], io).code).toBe(2);
     expect(run(['local', 'set', 'autonomy', 'always'], io).code).toBe(2);

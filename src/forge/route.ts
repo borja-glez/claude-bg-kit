@@ -23,9 +23,10 @@ export interface RouteOutput {
   options: RouteOption[]; recommended: Recommendation;
 }
 
-/** The options and the recommendation: a plan the request asks to carry out, then a spec to build from, then Large
- *  with superpowers, else forge. Without superpowers: forge or no forge. */
-export function routeOptions(i: { path: PathName; prefs: Prefs; superpowers: { installed: boolean; version: string | null }; specs: SpSpec[]; plans: SpPlanEntry[]; runPlan: boolean }): RouteOutput {
+/** The options and the recommendation: a plan the request asks to carry out, then a spec it asks to build, then Large
+ *  with superpowers (forge in auto mode: brainstorming would ask), else forge. Without superpowers: forge or no forge.
+ *  A recent spec or plan the request does not ask for is only listed: it may be about another task. */
+export function routeOptions(i: { path: PathName; prefs: Prefs; superpowers: { installed: boolean; version: string | null }; specs: SpSpec[]; plans: SpPlanEntry[]; runPlan: boolean; buildSpec: boolean }): RouteOutput {
   const base = {
     workflow: i.prefs.workflow, autonomy: i.prefs.autonomy, sources: i.prefs.sources, superpowers: i.superpowers,
     specs: i.specs.map(s => s.path), plans: i.plans.map(p => ({ path: p.path, tasks: p.tasks, done: p.done })),
@@ -35,17 +36,20 @@ export function routeOptions(i: { path: PathName; prefs: Prefs; superpowers: { i
   }
   let recommended: Recommendation;
   if (i.runPlan && i.plans.length) recommended = { option: 'superpowers-plan', why: 'an unfinished superpowers plan to carry out: forge executes and reviews each task', plan: i.plans[0].path };
-  else if (i.specs.length) recommended = { option: 'superpowers-design', why: 'a recent superpowers spec not imported yet: forge builds from it', spec: i.specs[0].path };
+  else if (i.buildSpec && i.specs.length) recommended = { option: 'superpowers-design', why: 'a recent superpowers spec not imported yet: forge builds from it', spec: i.specs[0].path };
+  else if (i.path === 'large' && i.prefs.autonomy === 'auto') recommended = { option: 'forge', why: 'large, in auto mode: forge designs, critiques and approves it without asking' };
   else if (i.path === 'large') recommended = { option: 'superpowers-design', why: 'large and ambiguous: brainstorming clarifies intent, forge builds and reviews' };
   else recommended = { option: 'forge', why: 'forge triages, implements and reviews it' };
   return { ...base, options: ['forge', 'superpowers', 'superpowers-design', 'superpowers-plan'], recommended };
 }
 
-export interface RouteDoc { task: string; chosen: RouteOption; by: 'user' | 'auto'; stage: RouteStage; ts: string; spec?: string; plan?: string }
+/** `session`: Claude's id of the session that chose the route; only that session is reminded of it. */
+export interface RouteDoc { task: string; chosen: RouteOption; by: 'user' | 'auto'; stage: RouteStage; ts: string; spec?: string; plan?: string; session?: string }
 export const routeFile = (root: string) => path.join(root, '.forge', 'route.json');
 // A path that reaches the model's context through the reminder: no control characters, quotes or angle brackets.
 const SAFE_PATH = /^[A-Za-z0-9_./\\: -]{1,300}$/;
 export const isRoutePath = (s: unknown): s is string => typeof s === 'string' && SAFE_PATH.test(s);
+export const isRouteSession = (s: unknown): s is string => typeof s === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(s);
 
 export function normalizeRoute(x: unknown): RouteDoc | null {
   if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
@@ -56,7 +60,10 @@ export function normalizeRoute(x: unknown): RouteDoc | null {
   const stage = (ROUTE_STAGES as readonly unknown[]).includes(o.stage) ? o.stage as RouteStage : null;
   const ts = typeof o.ts === 'string' && Number.isFinite(Date.parse(o.ts)) ? o.ts : null;
   if (!task || !chosen || !by || !stage || !ts) return null;
-  return { task, chosen, by, stage, ts, ...(isRoutePath(o.spec) ? { spec: o.spec } : {}), ...(isRoutePath(o.plan) ? { plan: o.plan } : {}) };
+  return {
+    task, chosen, by, stage, ts, ...(isRoutePath(o.spec) ? { spec: o.spec } : {}), ...(isRoutePath(o.plan) ? { plan: o.plan } : {}),
+    ...(isRouteSession(o.session) ? { session: o.session } : {}),
+  };
 }
 
 export function readRoute(root: string): RouteDoc | null {

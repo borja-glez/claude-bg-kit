@@ -208,8 +208,17 @@ describe('plugin layout', () => {
     const md = read('plugins/forge/skills/route/SKILL.md');
     expect(md).toMatch(/^---\r?\nname: route\r?\ndescription: Use FIRST — before superpowers:brainstorming, writing-plans or any other process skill — when the user asks for coding work that is more than a trivial edit/);
     for (const w of ['FORGE triage --task <id> --text-file', 'Trivial or Small', 'workflow: forge', 'FORGE route --task <id> --path <path>', '--run-plan', '(Recomendado)',
-      'superpowers diseña, forge construye', 'superpowers planifica, forge ejecuta', 'sin forge', 'forge local set workflow <option>', 'FORGE route set --task <id> --chosen',
+      'superpowers diseña, forge construye', 'superpowers planifica, forge ejecuta', 'sin forge', 'FORGE route set --task <id> --chosen',
       'forge:run --from-spec', 'forge:run --superpowers-plan', 'FORGE route stage --stage planning', '/forge:review', '**the user chose**']) expect(md).toContain(w);
+  });
+  it('forge:route skill after the final review: specs only on request, «sin forge» saved as off, routes tied to the session, never in a subagent', () => {
+    const md = read('plugins/forge/skills/route/SKILL.md');
+    expect(md.split(/\r?\n/).find(l => l.startsWith('description:'))).toContain('Never in a subagent');
+    for (const w of ['--build-spec', '`off`', 'FORGE local set workflow <w>', '--session ${CLAUDE_SESSION_ID}', 'FORGE route stage --stage done', '**In a subagent**']) expect(md).toContain(w);
+    expect(md).not.toContain('forge local set workflow <option>');
+    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    expect(inf).toContain('{status: "free", owner: {"__delete__": true}, claimedAt: {"__delete__": true}, startedAt: {"__delete__": true}}');
+    expect(inf).not.toContain('leave `T` `pending`');
   });
   it('forge hooks: the routing hooks on SessionStart and UserPromptSubmit', () => {
     const h = JSON.parse(read('plugins/forge/hooks/hooks.json')).hooks;

@@ -65,6 +65,24 @@ describe('forge hook route-session and route-prompt', () => {
     writeFileSync(path.join(root, '.forge', 'route.json'), '{"task":');
     expect(context(hook('route-prompt', PROMPT)).additionalContext).toBe(ROUTE_HINT);
   });
+  it("a route belongs to the session that chose it: it reminds only that one, which gets no hint while the route is fresh", () => {
+    writeRoute(root, { task: 't1', chosen: 'superpowers-design', by: 'user', stage: 'designing', ts: NOW.toISOString(), session: 'S1' });
+    expect(context(hook('route-prompt', { session_id: 'S1', prompt: 'hello there' })).additionalContext).toContain('--from-spec');
+    expect(hook('route-prompt', { session_id: 'S2', prompt: 'hello there' }).stdout).toBe('');
+    expect(context(hook('route-prompt', { ...PROMPT, session_id: 'S2' })).additionalContext).toBe(ROUTE_HINT);
+    writeRoute(root, { task: 't1', chosen: 'superpowers', by: 'user', stage: 'handed-off', ts: NOW.toISOString(), session: 'S1' });
+    expect(hook('route-prompt', PROMPT).stdout).toBe('');
+    writeRoute(root, { task: 't1', chosen: 'none', by: 'user', stage: 'handed-off', ts: new Date(NOW.getTime() - 25 * 3600_000).toISOString(), session: 'S1' });
+    expect(context(hook('route-prompt', PROMPT)).additionalContext).toBe(ROUTE_HINT);
+    writeRoute(root, { task: 't1', chosen: 'forge', by: 'user', stage: 'done', ts: NOW.toISOString(), session: 'S1' });
+    expect(context(hook('route-prompt', PROMPT)).additionalContext).toBe(ROUTE_HINT);
+  });
+  it('stays silent with workflow: off, which keeps forge out of the routing', () => {
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'local.yaml'), 'workflow: off\n');
+    expect(hook('route-prompt', PROMPT).stdout).toBe('');
+    expect(hook('route-session', { session_id: 'S1' }).stdout).toBe('');
+  });
   it('stays silent with workflow: superpowers, where forge already drives the session, and on bad input', () => {
     mkdirSync(path.join(root, '.forge'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'local.yaml'), 'workflow: superpowers\n');
