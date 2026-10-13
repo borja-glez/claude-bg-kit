@@ -31,13 +31,14 @@ import { readSurfaces, detectDrafts, appendLearned, surfaceFile, surfaceHash } f
 import { addDecision, allDecisions, listDecisions, renderDecisionsMd, DecisionInputError } from '../decisions.js';
 import { TASK_ID, decisionScope, scopeFileName } from '../../lib/decisions.js';
 import { claudeConfigDir, locateSuperpowers, spLedgerDone, spPlans, spSkillPath, spSpecs } from '../superpowers.js';
+import { ROUTE_OPTIONS, ROUTE_STAGES, firstStage, isRoutePath, readRoute, routeOptions, writeRoute, type RouteDoc, type RouteOption, type RouteStage } from '../route.js';
 import { checkSpTask, markDone, parseSpPlan, renderSpBrief, SpPlanError } from '../../lib/sp-plan.js';
 
 export interface ExecResult { code: number; output: string; ms: number; timedOut: boolean }
 export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined> }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|decision|agents|last|proposals|surfaces|tools|local|prefs|verify-plan|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|infinite|cycle|swarm|stop|hook> ...';
+const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|infinite|cycle|swarm|stop|hook> ...';
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 
@@ -824,6 +825,65 @@ export function run(argv: string[], io: Io): Result {
       }
       case 'sp-plans':
         return json(spPlans(repoDir, io.now().getTime(), { committedAt: committedAt(io, repoDir) }));
+      case 'route': {
+        const [sub] = args;
+        const paths = (cmdName: string) => {
+          const spec = flag('spec');
+          const plan = flag('plan');
+          for (const [name, v] of [['spec', spec], ['plan', plan]] as const) if (v !== undefined && !isRoutePath(v)) throw new UsageError(`${cmdName}: --${name} is not a plain path`);
+          return { ...(spec ? { spec } : {}), ...(plan ? { plan } : {}) };
+        };
+        if (sub === 'set') {
+          const task = flag('task');
+          const chosen = flag('chosen');
+          const by = flag('by');
+          if (!task || !TASK_ID.test(task)) throw new UsageError('route set: --task <id> is required');
+          if (!(ROUTE_OPTIONS as readonly (string | undefined)[]).includes(chosen)) throw new UsageError(`route set: --chosen must be one of ${ROUTE_OPTIONS.join('|')}`);
+          if (by !== 'user' && by !== 'auto') throw new UsageError('route set: --by must be user or auto');
+          const files = paths('route set');
+          let why = by === 'user' ? 'the user chose it' : 'the recommended option for this request';
+          if (flag('why-file') !== undefined) {
+            try { why = readFileSync(path.resolve(io.cwd, flag('why-file')!), 'utf8').trim() || why; } catch { throw new UsageError('route set: cannot read --why-file'); }
+          }
+          const doc: RouteDoc = { task, chosen: chosen as RouteOption, by, stage: firstStage(chosen as RouteOption, files), ts: ts(), ...files };
+          writeRoute(io.cwd, doc);
+          // The route is a decision like any other: by the user when asked, by auto mode otherwise (spec §5.5).
+          const root = mainCheckout(io.cwd);
+          const exec = readExecution(root);
+          const { n } = addDecision(root, {
+            point: 'route', what: `route of ${task}`, chosen: doc.chosen, why, by,
+            undo: { type: 'none', reason: 'the route only chose who does the work: start the task again to choose another' },
+          }, { ts: ts(), task, runId: exec?.active ? exec.runId : null });
+          return json({ ...doc, decision: n });
+        }
+        if (sub === 'stage') {
+          const stage = flag('stage');
+          if (!(ROUTE_STAGES as readonly (string | undefined)[]).includes(stage)) throw new UsageError(`route stage: --stage must be one of ${ROUTE_STAGES.join('|')}`);
+          const files = paths('route stage');
+          const cur = readRoute(io.cwd);
+          if (!cur || (flag('task') !== undefined && flag('task') !== cur.task)) return json({ updated: false });
+          const next: RouteDoc = { ...cur, stage: stage as RouteStage, ts: ts(), ...files };
+          writeRoute(io.cwd, next);
+          return json({ updated: true, ...next });
+        }
+        if (sub !== undefined && !sub.startsWith('--')) {
+          throw new UsageError('usage: forge route --task id --path p [--workflow w] [--autonomy a] [--run-plan] | set --task id --chosen o --by user|auto [--spec f] [--plan f] [--why-file f] | stage --stage s [--task id] [--spec f] [--plan f]');
+        }
+        const task = flag('task');
+        const p = flag('path');
+        if (!task || !TASK_ID.test(task)) throw new UsageError('route: --task <id> is required');
+        if (!p || !(PATH_ORDER as readonly string[]).includes(p)) throw new UsageError(`route: --path must be one of ${PATH_ORDER.join('|')}`);
+        const wf = flag('workflow');
+        const au = flag('autonomy');
+        if (wf !== undefined && !isWorkflow(wf)) throw new UsageError(`route: --workflow must be one of ${WORKFLOWS.join('|')}`);
+        if (au !== undefined && !isAutonomy(au)) throw new UsageError(`route: --autonomy must be one of ${AUTONOMIES.join('|')}`);
+        const prefs = resolvePrefs({ ...(wf ? { workflow: wf } : {}), ...(au ? { autonomy: au } : {}) }, readLocal(io.cwd), loadConfig(repoDir));
+        const sp = superpowersOf(io, repoDir);
+        const now = io.now().getTime();
+        const specs = sp.installed ? spSpecs(repoDir, now, { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)) }) : [];
+        const plans = sp.installed ? spPlans(repoDir, now, { committedAt: committedAt(io, repoDir) }) : [];
+        return json(routeOptions({ path: p as PathName, prefs, superpowers: { installed: sp.installed, version: sp.version }, specs, plans, runPlan: has('run-plan') }));
+      }
       case 'tdd':
         return json(tddFor(io, repoDir));
       case 'sp-plan': {
