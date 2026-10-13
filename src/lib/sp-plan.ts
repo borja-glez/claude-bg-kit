@@ -19,10 +19,12 @@ const FILE = /^\s*[-*+]\s*(?:Create|Modify|Test|Delete|Rename)\s*:\s*`([^`]+)`/i
 const LABEL = /^\*\*([^*]+?):\*\*/;
 const RULE = /^\s*-{3,}\s*$/;
 
-/** Every line with its own end of line, flagged when it is part of a fenced code block (the fence lines included). */
-function linesOf(text: string): Line[] {
+/** Every line with its own end of line, flagged when it is part of a fenced code block (the fence lines included), and
+ *  the index of a fence still open at the end (null when every fence closes). */
+function linesOf(text: string): { lines: Line[]; openAt: number | null } {
   const out: Line[] = [];
   let fence: string | null = null;
+  let openAt: number | null = null;
   for (const piece of text.split(/(?<=\n)/)) {
     const eol = /\r?\n$/.exec(piece)?.[0] ?? '';
     const t = piece.slice(0, piece.length - eol.length);
@@ -33,10 +35,10 @@ function linesOf(text: string): Line[] {
       continue;
     }
     const open = /^\s*(`{3,}|~{3,})/.exec(t);
-    if (open) fence = open[1];
+    if (open) { fence = open[1]; openAt = out.length; }
     out.push({ text: t, eol, fenced: !!open });
   }
-  return out;
+  return { lines: out, openAt: fence ? openAt : null };
 }
 
 /** Each task from its heading to the next task heading or the next `# ` / `## ` heading. */
@@ -97,7 +99,9 @@ function taskOf(lines: Line[], r: Range): SpTask {
 }
 
 function scan(text: string): { lines: Line[]; ranges: Range[] } {
-  const lines = linesOf(text);
+  const { lines, openAt } = linesOf(text);
+  // An unclosed fence would swallow every task after it: refuse rather than report the plan done early.
+  if (openAt !== null) throw new SpPlanError(`unclosed code fence opened at line ${openAt + 1}`);
   const ranges = rangesOf(lines);
   if (!ranges.length) throw new SpPlanError('no "### Task N: <title>" section: this is not a superpowers plan');
   const seen = new Set<number>();
@@ -126,6 +130,26 @@ export function parseSpPlan(text: string): SpPlan {
     constraints: constraintsOf(lines),
     tasks: ranges.map(r => taskOf(lines, r)),
   };
+}
+
+/**
+ * The tasks superpowers' own executors (executing-plans, subagent-driven-development) recorded as complete in a
+ * progress ledger: `Task N: complete …` lines, read only when the ledger's first line (`# SDD ledger — plan: <path>`)
+ * names this plan, repo-relative or absolute. Those executors never tick the plan's boxes.
+ */
+export function sddComplete(ledger: string, planRel: string): number[] {
+  const first = /^#\s*SDD ledger\s*[—–-]\s*plan:\s*(.+?)\s*$/m.exec(ledger.split(/\r?\n/)[0] ?? '');
+  const rel = planRel.replace(/\\/g, '/').replace(/^\.\//, '');
+  const named = first ? first[1].replace(/\\/g, '/').replace(/^\.\//, '') : null;
+  if (!named || !rel || (named !== rel && !named.endsWith(`/${rel}`))) return [];
+  const done = new Set<number>();
+  for (const m of ledger.matchAll(/^Task (\d{1,4}): complete\b/gm)) done.add(Number(m[1]));
+  return [...done].sort((a, b) => a - b);
+}
+
+/** The plan with these tasks counted as done (a ledger's completions next to the ticked boxes). */
+export function markDone(plan: SpPlan, done: number[]): SpPlan {
+  return { ...plan, tasks: plan.tasks.map(t => (done.includes(t.n) ? { ...t, done: true } : t)) };
 }
 
 /** Ticks `- [ ]` → `- [x]` inside task `n` only (never inside code), keeping every line ending as it was. */

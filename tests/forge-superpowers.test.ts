@@ -80,6 +80,9 @@ describe('sp-specs and sp-plans', () => {
     file('docs/superpowers/plans/broken.md', '# no tasks\n', 1);
     file('docs/superpowers/plans/old.md', plan(' '), 30);
     expect(spPlans(project, NOW)).toEqual([{ path: 'docs/superpowers/plans/open.md', title: 'P', tasks: 2, done: 1 }]);
+    // A plan superpowers finished with its own executor (ledger lines, boxes never ticked) is not listed.
+    file('.superpowers/sdd/open/progress.md', '# SDD ledger — plan: docs/superpowers/plans/open.md\n\nTask 2: complete (commits a..b, tests: x → 1/1 pass)\n', 0);
+    expect(spPlans(project, NOW)).toEqual([]);
   });
   it('the CLI prints them, and sp-path finds a skill through CLAUDE_CONFIG_DIR', () => {
     registry({ 'superpowers@m': [install('6.4.1')] });

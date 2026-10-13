@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { parseDesign } from '../lib/design.js';
 import { specTitle } from '../lib/design-import.js';
-import { parseSpPlan } from '../lib/sp-plan.js';
+import { markDone, parseSpPlan, sddComplete } from '../lib/sp-plan.js';
 
 export interface Superpowers { installed: boolean; version: string | null; installPath: string | null }
 export interface SpSpec { path: string; title: string; modified: string }
@@ -83,6 +83,32 @@ export function spSkillPath(sp: Superpowers, skill: string): string | null {
   return existsSync(f) ? f : null;
 }
 
+/**
+ * The tasks of a superpowers plan its own executors recorded as complete, from `<root>/.superpowers/sdd/<slug>[-…]/
+ * progress.md` under each root (the repository and its main checkout), where superpowers keeps one workspace per plan.
+ * A workspace whose `plan-path` marker names another plan is skipped. Fail-open: nothing readable means none.
+ */
+export function spLedgerDone(roots: string[], planAbs: string): number[] {
+  const done = new Set<number>();
+  const slug = path.basename(planAbs).replace(/\.md$/i, '');
+  for (const root of [...new Set(roots.map(r => path.resolve(r)))]) {
+    const rel = path.relative(root, planAbs).split(path.sep).join('/');
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) continue;
+    const base = path.join(root, '.superpowers', 'sdd');
+    let names: string[] = [];
+    try { names = readdirSync(base); } catch { continue; }
+    for (const name of names) {
+      if (name !== slug && !name.startsWith(`${slug}-`)) continue;
+      const dir = path.join(base, name);
+      let marker: string | null = null;
+      try { marker = readFileSync(path.join(dir, 'plan-path'), 'utf8').trim().replace(/\\/g, '/'); } catch { /* a workspace without a marker */ }
+      if (marker !== null && marker !== rel) continue;
+      try { for (const n of sddComplete(readFileSync(path.join(dir, 'progress.md'), 'utf8'), rel)) done.add(n); } catch { /* no ledger */ }
+    }
+  }
+  return [...done].sort((a, b) => a - b);
+}
+
 // The .md files of a directory changed within the window, newest first.
 function recentMarkdown(dir: string, now: number): { name: string; abs: string; mtime: number }[] {
   let names: string[];
@@ -132,7 +158,7 @@ export function spPlans(root: string, now: number): SpPlanEntry[] {
   const out: SpPlanEntry[] = [];
   for (const f of recentMarkdown(path.join(root, 'docs', 'superpowers', 'plans'), now)) {
     let plan;
-    try { plan = parseSpPlan(readFileSync(f.abs, 'utf8')); } catch { continue; }
+    try { plan = markDone(parseSpPlan(readFileSync(f.abs, 'utf8')), spLedgerDone([root], f.abs)); } catch { continue; }
     const done = plan.tasks.filter(t => t.done).length;
     if (done === plan.tasks.length) continue;
     out.push({ path: `docs/superpowers/plans/${f.name}`, title: plan.plan.title || f.name.replace(/\.md$/, ''), tasks: plan.tasks.length, done });

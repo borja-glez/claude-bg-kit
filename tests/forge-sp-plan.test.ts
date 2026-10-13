@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { checkSpTask, parseSpPlan, renderSpBrief, SpPlanError } from '../src/lib/sp-plan.js';
+import { checkSpTask, markDone, parseSpPlan, renderSpBrief, sddComplete, SpPlanError } from '../src/lib/sp-plan.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 
 // LF here whatever git checked out; the CRLF case is built from it.
@@ -35,9 +35,29 @@ describe('parseSpPlan', () => {
     const text = '### Task 1: a\n\n````md\n```\n### Task 2: inside\n- [ ] inside\n```\n## inside\n````\n\n- [ ] real\n';
     expect(parseSpPlan(text).tasks).toEqual([{ n: 1, title: 'a', files: [], steps: 1, done: false }]);
   });
+  it('refuses a code fence left open, naming its line, instead of dropping the tasks after it', () => {
+    const open = PLAN.replace('~~~ts\nexport function', '```ts\nexport function');
+    expect(() => parseSpPlan(open)).toThrow(/unclosed code fence opened at line \d+/);
+  });
   it('refuses a plan without tasks and a task number used twice', () => {
     expect(() => parseSpPlan('# Plan\n\n**Goal:** x\n\n```md\n### Task 1: in code\n```\n')).toThrow(SpPlanError);
     expect(() => parseSpPlan(`${PLAN}\n### Task 2: again\n\n- [ ] x\n`)).toThrow(/task 2 appears twice/);
+  });
+});
+
+describe("superpowers' own progress ledger", () => {
+  const LEDGER = '# SDD ledger — plan: docs/superpowers/plans/cart.md\n\nTask 2: complete (commits a1b2c3d..d4e5f6a, tests: npm test → 3/3 pass)\nTask 3: Ruling: x\n';
+  it('reads the tasks a ledger of this plan marks complete', () => {
+    expect(sddComplete(LEDGER, 'docs/superpowers/plans/cart.md')).toEqual([2]);
+    expect(sddComplete(LEDGER.replace('\n', '\r\n'), 'docs/superpowers/plans/cart.md')).toEqual([2]);
+    expect(sddComplete(LEDGER.replace('plan: docs', 'plan: E:/repo/docs'), 'docs/superpowers/plans/cart.md')).toEqual([2]);
+  });
+  it('ignores a ledger of another plan or without its first line', () => {
+    expect(sddComplete(LEDGER, 'docs/superpowers/plans/other.md')).toEqual([]);
+    expect(sddComplete('Task 2: complete\n', 'docs/superpowers/plans/cart.md')).toEqual([]);
+  });
+  it('markDone sets those tasks done', () => {
+    expect(markDone(parseSpPlan(PLAN), [3]).tasks.map(t => t.done)).toEqual([true, false, true]);
   });
 });
 
@@ -115,6 +135,17 @@ describe('forge sp-plan, brief and triage with a superpowers plan', () => {
     expect(run(['sp-plan', 'tasks', 'empty.md'], io).code).toBe(2);
     expect(run(['brief', '--superpowers-plan', 'empty.md', '--task', '1'], io).code).toBe(2);
     expect(readFileSync(path.join(root, F), 'utf8')).toBe(before);
+  });
+  it("tasks and triage count the tasks superpowers' own ledger marks complete, and ignore another plan's ledger", () => {
+    const ws = path.join(root, '.superpowers', 'sdd', 'cart');
+    mkdirSync(ws, { recursive: true });
+    writeFileSync(path.join(ws, 'progress.md'), `# SDD ledger — plan: ${F}\n\nTask 2: complete (commits a..b, tests: x → 1/1 pass)\n`);
+    expect(JSON.parse(run(['sp-plan', 'tasks', F], io).stdout).tasks.map((t: { done: boolean }) => t.done)).toEqual([true, true, false]);
+    const git = (a: string[]) => (a.includes('ls-files') ? 'src/cart/total.ts\nsrc/ui/Checkout.tsx\nsrc/a.ts\nsrc/b.ts\nsrc/c.ts\n' : a.includes('rev-list') ? '40\n' : null);
+    expect(JSON.parse(run(['triage', '--task', 'cart', '--superpowers-plan', F], { ...io, git }).stdout).files).toEqual(['src/ui/Checkout.tsx']);
+    // A workspace whose marker names another plan is not this plan's.
+    writeFileSync(path.join(ws, 'plan-path'), 'docs/other/cart.md\n');
+    expect(JSON.parse(run(['sp-plan', 'tasks', F], io).stdout).tasks.map((t: { done: boolean }) => t.done)).toEqual([true, false, false]);
   });
   it('brief prints the brief of one task', () => {
     const r = run(['brief', '--superpowers-plan', F, '--task', '2'], io);

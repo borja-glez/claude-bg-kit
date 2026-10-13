@@ -29,8 +29,8 @@ import { hookLive } from '../live.js';
 import { readSurfaces, detectDrafts, appendLearned, surfaceFile, surfaceHash } from '../surfaces.js';
 import { addDecision, allDecisions, listDecisions, renderDecisionsMd, DecisionInputError } from '../decisions.js';
 import { TASK_ID, decisionScope, scopeFileName } from '../../lib/decisions.js';
-import { claudeConfigDir, locateSuperpowers, spPlans, spSkillPath, spSpecs } from '../superpowers.js';
-import { checkSpTask, parseSpPlan, renderSpBrief, SpPlanError } from '../../lib/sp-plan.js';
+import { claudeConfigDir, locateSuperpowers, spLedgerDone, spPlans, spSkillPath, spSpecs } from '../superpowers.js';
+import { checkSpTask, markDone, parseSpPlan, renderSpBrief, SpPlanError } from '../../lib/sp-plan.js';
 
 export interface ExecResult { code: number; output: string; ms: number; timedOut: boolean }
 export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined> }
@@ -143,6 +143,9 @@ function planTask(cwd: string, planArg: string | undefined, id: string | undefin
   if (!task) throw new UsageError(`task ${id} is not in ${planArg}`);
   return { plan, task };
 }
+
+// A superpowers plan with the tasks its own executors recorded as complete counted as done (they never tick the boxes).
+const spPlanDone = (text: string, abs: string, dir: string) => markDone(parseSpPlan(text), spLedgerDone([dir, mainCheckout(dir)], abs));
 
 // The number of a `### Task N` of a superpowers plan, from --task.
 function spTaskNumber(v: string | undefined): number {
@@ -308,7 +311,7 @@ export function run(argv: string[], io: Io): Result {
         if (flag('superpowers-plan') !== undefined) {
           const file = flag('superpowers-plan')!;
           let sp;
-          try { sp = parseSpPlan(readFileSync(path.resolve(io.cwd, file), 'utf8')); } catch (e) {
+          try { sp = spPlanDone(readFileSync(path.resolve(io.cwd, file), 'utf8'), path.resolve(io.cwd, file), repoDir); } catch (e) {
             throw new UsageError(e instanceof SpPlanError ? `triage: ${file}: ${e.message}` : `triage: cannot read ${file}`);
           }
           const pending = sp.tasks.filter(t => !t.done);
@@ -786,7 +789,7 @@ export function run(argv: string[], io: Io): Result {
         let text: string;
         try { text = readFileSync(abs, 'utf8'); } catch { throw new UsageError(`sp-plan: cannot read ${file}`); }
         try {
-          if (sub === 'tasks') { const { plan, tasks } = parseSpPlan(text); return json({ plan, tasks }); }
+          if (sub === 'tasks') { const { plan, tasks } = spPlanDone(text, abs, repoDir); return json({ plan, tasks }); }
           const n = spTaskNumber(flag('task'));
           const r = checkSpTask(text, n);
           if (r.checked) writeFileSync(abs, r.text);
