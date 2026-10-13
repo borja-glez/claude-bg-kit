@@ -37,6 +37,30 @@ describe('triage', () => {
     expect(r.sensitive).toContain('auth');
     expect(r.path).toBe('medium');
   });
+  it('a Claude Code session alone is not the auth zone', () => {
+    for (const t of ['Lo decide la sesión coordinadora', 'Las sesiones miembro trabajan en paralelo', 'each run member session works one task',
+      'Sesiones miembro con esfuerzo propio: configuración, lanzamiento y reanudación', 'the session should judge the scope'])
+      expect(triage(t, repo(), []).sensitive, t).not.toContain('auth');
+  });
+  it('T003 of the forge-cost plan is not the auth zone', () => {
+    const t003 = 'Sesiones miembro con esfuerzo propio: configuración, lanzamiento y reanudación. ' +
+      'src/forge/config.ts gana swarm.member {effort, model}: effort es low | medium | high | xhigh | max y por defecto ' +
+      'medium; model es opcional, con los mismos valores que acepta waypoint launch --model. src/cli/run.ts y ' +
+      'src/lib/launcher.ts: waypoint launch --task acepta --effort y --model, validados contra una lista cerrada (código 2 si ' +
+      'no), y los pone en command y en run (claude --bg --name <N> --effort medium "<prompt>", también en la plantilla ' +
+      'herdr); el prompt pasa a /forge:member --plan <plan> --task <T> — run member of <SID>: work only <T>, then stop. ' +
+      'src/forge/cli/swarm.ts: en modo sessions, la acción start de swarm tick imprime launch, la lista completa de ' +
+      'argumentos de waypoint launch con --effort y --model de swarm.member, y swarm relaunch añade esos flags a la launch ' +
+      'que ya imprime. src/forge/live.ts: el texto de reanudación de un miembro apunta a /forge:member (el del coordinador ' +
+      'sigue en /forge:run). No toques los bundles: los regenera T018.';
+    expect(triage(t003, repo(), []).sensitive).not.toContain('auth');
+  });
+  it('a session in an authentication context is still the auth zone', () => {
+    for (const t of ['Añade el botón de cerrar sesión', 'set the session cookie as httpOnly', 'Permite iniciar sesión con Google',
+      'rotate the session id after sign-in', 'prevent session fixation', 'store the session token', 'keep the login session alive',
+      'Guarda la sesión de usuario', 'Firma la cookie de sesión', 'Caduca el token de sesión', 'Inicia sesión con Google', 'Cierra sesión'])
+      expect(triage(t, repo(), []).sensitive, t).toContain('auth');
+  });
   it('detects data, deps and ci zones from paths', () => {
     expect(triage('edit src/db/migrations/001.sql', repo(), []).sensitive).toContain('data');
     expect(triage('bump a version in package.json', repo(), []).sensitive).toContain('deps');
