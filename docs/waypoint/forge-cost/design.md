@@ -7,7 +7,7 @@ pillars:
   - title: El esfuerzo sigue al riesgo
     text: Cada agente trabaja al nivel que pide la tarea (tamaño, zona sensible, último intento), no al del hábito ni al que hereda de la sesión.
   - title: Medido, no supuesto
-    text: Cada cambio tiene su cifra antes y después en los ficheros de consumo de lens; lo que no se puede medir antes se valida con una réplica.
+    text: Cada cambio tiene su cifra antes y después en los ficheros de consumo de lens; lo que no se puede medir antes se valida con una prueba en sombra.
   - title: Lo que bloquea sigue bloqueando
     text: Un hallazgo critical, un validador en rojo o una regresión del arreglo siguen parando la tarea; solo se recorta trabajo que no cambia el resultado.
   - title: Cada sesión lee y hace solo lo suyo
@@ -89,20 +89,23 @@ El riesgo es que high necesite más rondas. Se vigila en el informe de consumo y
 - El frontmatter de los tres revisores baja a `effort: high`: si un lanzamiento olvida el esfuerzo, sale el caso común y no el caro.
 - `FORGE triage` imprime `review` también fuera de una ejecución (Medium sin plan), y el paso de revisión de Medium lanza exactamente esos revisores pasando `model` y `effort` al Agent tool, como ya hace la ejecución.
 
-La tabla es provisional hasta el resultado de la réplica de la sección siguiente: un revisor cuya versión high no pase la regla de decisión se queda en xhigh por defecto.
+La tabla es provisional hasta el resultado de la prueba en sombra de la sección siguiente: un revisor cuya versión high no pase la regla de decisión vuelve a xhigh por defecto.
 
-## Validación por réplica
+## Validación en sombra
 
-Antes de aprobar el diseño se repiten revisiones históricas para comprobar que high encuentra lo mismo que xhigh.
+La réplica de revisiones históricas no es viable: el worktree de `campaign-fixes` se borró al integrarse y con él casi todas las revisiones que fallaron (sobreviven 2, ninguna de seguridad). La validación se hace sobre trabajo real después del cambio.
 
-- **Casos.** Las revisiones con hallazgos bloqueantes (critical o important) que se conservan: `campaign-fixes` (tareas 1–4, rondas 1–3), `campaign-fixes-2` y `campaign-driver`, unos 12–15 casos, más 3 revisiones que pasaron como control de falsos positivos.
-- **Reconstrucción.** Para cada caso: el commit que se revisó en esa ronda (el último commit de la tarea anterior al veredicto de la ronda, del ledger y `git log`), un worktree temporal en ese commit, el diff `base..commit`, el brief y los validadores regenerados en ese worktree.
-- **Réplica.** Cada caso se revisa dos veces más con el mismo revisor y las mismas entradas: una en high y otra en xhigh. La segunda mide el ruido de xhigh consigo mismo: una revisión xhigh no es la verdad, solo una muestra.
-- **Comparación.** Un juez (agente en Sonnet) empareja los hallazgos bloqueantes de cada réplica con los del original por defecto (mismo fichero y mismo problema, no la misma redacción) y anota los bloqueantes nuevos.
-- **Regla.** high se adopta para un revisor si su recuperación de los bloqueantes originales es al menos el 90 % de la de la réplica xhigh y no pierde ningún critical que xhigh sí recupere.
-- **Coste estimado:** 20–30 lanzamientos de revisor (≈15–25 $) más preparación y juez.
-
-Resultado: pendiente. Se ejecuta mientras se revisa esta versión del diseño, y la tabla de la sección anterior se ajusta con él antes de aprobar.
+- **Arranque.** `FORGE shadow start --tasks <N>` (por defecto 10) abre la prueba en el proyecto y la guarda en `.forge/shadow.json` (`{remaining, cases}`), que es trabajo de forge y no va a git. `FORGE shadow stop` la cierra antes de tiempo.
+- **Gemelos.** Mientras quedan tareas, `review-prep` añade a `spawn`, en la primera ronda de cada brief Medium o mayor, un gemelo por cada revisor que salga en high: el mismo agente con `effort: xhigh` y las mismas entradas, que escribe en `<carpeta>/shadow/`.
+  - El veredicto solo lee el revisor en high; el gemelo no cuenta.
+  - Las rondas `delta` no llevan gemelo.
+  - Cada brief resta uno a `remaining`.
+- **Comparación.** `review-close` empareja los bloqueantes (critical e important) de cada par:
+  - casan si están en el mismo fichero y además a ±10 líneas, o con un solapamiento de palabras del problema ≥ 0,3;
+  - el caso se guarda en `.forge/shadow.json` con los bloqueantes de xhigh, los que high recuperó, los críticos perdidos y los bloqueantes que solo encontró high.
+- **Informe.** `FORGE shadow report` imprime por revisor: casos, bloqueantes de xhigh, recuperados por high (%), críticos perdidos, bloqueantes solo de high y el detalle de cada caso perdido, para que la persona lo lea.
+- **Regla.** high se queda para un revisor si recupera al menos el 90 % de los bloqueantes de su gemelo y no pierde ningún critical. Si no, ese revisor vuelve a xhigh por defecto (una línea en `reviewFor`). La decisión la toma la persona al ver el informe.
+- **Coste:** un gemelo por revisor en high durante N briefs, unos 0,9 $ por brief (≈10 $ con N = 10).
 
 ## Rondas de arreglo
 
@@ -186,7 +189,7 @@ El orden es el que pidió la persona:
 1. **Esfuerzo fijo.** Agentes con `effort`, el test que lo exige y `scripts/usage-report.mjs`. Se mide la línea base con el informe.
 2. **Sesiones miembro.** `swarm.member`, flags de `waypoint launch`, `launch` en `tick` y `relaunch`, `forge:member` y `references/task-steps.md`.
 3. **Escalón `impl-high`.** Agente, escalera, `last` en `round`, `implementer` en la salida de `round`, perfiles y lens.
-4. **Revisores y rondas.** Tabla de esfuerzo (con el resultado de la réplica), `review` en todo triage, modo `delta`, `origin`, convergencia, `review-prep` y `review-close`.
+4. **Revisores y rondas.** Tabla de esfuerzo, `review` en todo triage, modo `delta`, `origin`, convergencia, `review-prep`, `review-close` y la prueba en sombra (`FORGE shadow`). Al acabar, se abre la prueba en este repositorio y los valores se fijan con su informe.
 5. **Coordinador.** `FORGE prep`, el `batch` por etapa y el `SKILL.md` partido.
 
 Cierre: forge 0.15.0, waypoint 0.19.0 (flags nuevos en `launch`) y lens 0.11.3; `CHANGELOG.md` y los README (es/en) con lo que cambia para la persona; bundles regenerados con `npm run build`.
@@ -199,7 +202,7 @@ Cierre: forge 0.15.0, waypoint 0.19.0 (flags nuevos en `launch`) y lens 0.11.3; 
   - coste por tarea en `sessions` −30 %;
   - una Medium sensible con varias rondas −20 %;
   - las rondas por tarea no suben más de 0,3 de media;
-  - ningún critical de la réplica se pierde.
+  - ningún critical de la prueba en sombra se pierde.
 - Si una medida no cumple, se revierte esa pieza (cada fase tiene sus commits) y se documenta por qué en este diseño.
 
 ## Riesgos
