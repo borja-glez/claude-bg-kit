@@ -140,7 +140,7 @@ describe('buildPanelModel', () => {
     expect(m.waypoint?.phase).toEqual((b as { phase: unknown }).phase);
     expect(buildPanelModel({ ...base, band: { ...(b as Extract<typeof b, { mode: 'work' }>), phase: { index: 1, total: 2, name: 'n'.repeat(120) } } }).waypoint?.phase?.name).toBe('n'.repeat(80));
     expect(m.locale).toBe((b as { locale: string }).locale);
-    expect(buildPanelModel({ ...base, band: { mode: 'design', project: 'p', locale: 'es', version: 1, round: 1, proposals: 0, critical: 0, designUrl: null } }).waypoint).toBeNull();
+    expect(buildPanelModel({ ...base, band: { mode: 'design', project: 'p', locale: 'es', version: 1, round: 1, proposals: 0, critical: 0, pending: 0, pendingCritical: 0, designUrl: null } }).waypoint).toBeNull();
   });
   it('uses the given locale without a waypoint plan', () => {
     expect(buildPanelModel({ ...base, locale: 'es' }).locale).toBe('es');

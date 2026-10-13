@@ -116,6 +116,7 @@ export async function loadBandModel($: Engine): Promise<BandModel> {
     plan: await readOpt($, join(pdocs, 'plan.yaml')),
     design: await readOpt($, join(pdocs, 'design.md')),
     changelog: await readOpt($, join(pdocs, 'design', 'changelog.json')),
+    dismissed: await readOpt($, join(pstate, 'dismissed.json')),
     session: await readOpt($, join(pstate, 'session.json')),
     states: await readCollection($, join(pstate, 'dbcache', 'state')),
     messages: await readCollection($, join(pstate, 'dbcache', 'messages')),

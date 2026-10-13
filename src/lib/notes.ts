@@ -3,6 +3,9 @@ import { DECISION_POINTS, LIMITS, clean, type DecisionPoint } from './decisions.
 
 export const NOTE_TYPES: NoteType[] = ['decision', 'idea', 'debt', 'question'];
 export const MAX_NOTE = 2000;
+const MAX_NAME = 80;
+/** The longest note or answer text a `say` line quotes. */
+export const SAY_MAX = 200;
 
 type Note = NoteDoc & { id: string };
 export type NoteFilter = 'all' | NoteType | 'mine' | 'open';
@@ -20,6 +23,9 @@ export function normalizeNote(x: unknown): NoteDoc | null {
   if (str(o.answer)) out.answer = o.answer.slice(0, MAX_NOTE);
   if (str(o.answeredBy)) out.answeredBy = o.answeredBy;
   if (str(o.answeredAt)) out.answeredAt = o.answeredAt;
+  // Optional display names a writer may store next to the user:<id>; never required.
+  if (str(o.authorName) && o.authorName.trim()) out.authorName = clean(o.authorName, MAX_NAME);
+  if (str(o.answeredByName) && o.answeredByName.trim()) out.answeredByName = clean(o.answeredByName, MAX_NAME);
   if (str(o.proposalId) && o.proposalId && !o.proposalId.includes('/')) out.proposalId = o.proposalId;
   const decision = normalizeNoteDecision(o.decision);
   if (decision) out.decision = decision;
@@ -84,6 +90,44 @@ export function notesSince(notes: Note[], since: string | null): Note[] {
     if (ta === tb) return a.i - b.i;
     return ta > tb ? 1 : -1;
   }).map(x => x.n);
+}
+
+const SAY = {
+  es: {
+    note: (who: string | undefined, text: string) => `Nota de ${who ?? 'una persona'} en el roadmap: «${text}»`,
+    answer: (who: string | undefined, text: string) => `Respuesta de ${who ?? 'una persona'} en el roadmap: «${text}»`,
+  },
+  en: {
+    note: (who: string | undefined, text: string) => `${who ? `${who}'s` : "Someone's"} note on the roadmap: "${text}"`,
+    answer: (who: string | undefined, text: string) => `${who ? `${who}'s` : "Someone's"} answer on the roadmap: "${text}"`,
+  },
+};
+
+/** One line, at most SAY_MAX characters (the last one an ellipsis when clipped). */
+function sayText(s: string): string {
+  const chars = Array.from(s.replace(/\s+/g, ' ').trim());
+  return chars.length <= SAY_MAX ? chars.join('') : chars.slice(0, SAY_MAX - 1).join('') + '…';
+}
+
+/**
+ * The lines a session tells the person about the notes `notesSince` returned: one per note a person wrote and one per
+ * answer a person gave (each only when it is the part newer than `since`), in the locale, with the plan task ids each
+ * line names (`taskIds` empty when the plan is unknown).
+ */
+export function noteLines(notes: NoteDoc[], since: string | null, locale: 'es' | 'en', taskIds: ReadonlySet<string>): { say: string[]; mentions: string[][] } {
+  const s = since ? Date.parse(since) : NaN;
+  const fresh = (ts: string | undefined) => Number.isNaN(s) || time(ts) > s;
+  const say: string[] = [];
+  const mentions: string[][] = [];
+  const add = (line: string, text: string) => {
+    say.push(line);
+    mentions.push([...new Set([...text.matchAll(/\bT\d{3,}\b/g)].map(m => m[0]))].filter(id => taskIds.has(id)));
+  };
+  for (const n of notes) {
+    if (n.author.startsWith('user:') && fresh(n.ts)) add(SAY[locale].note(n.authorName, sayText(n.text)), n.text);
+    if (n.answer && n.answeredBy?.startsWith('user:') && fresh(n.answeredAt)) add(SAY[locale].answer(n.answeredByName, sayText(n.answer)), n.answer);
+  }
+  return { say, mentions };
 }
 
 export function counts(notes: NoteDoc[]): Record<NoteType | 'open', number> {

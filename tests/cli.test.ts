@@ -743,7 +743,7 @@ describe('notes command', () => {
   });
   it('latest is null for an empty directory', () => {
     const d = writeNotes({});
-    expect(JSON.parse(run(['notes', '--notes', d], io).stdout)).toEqual({ notes: [], latest: null });
+    expect(JSON.parse(run(['notes', '--notes', d], io).stdout)).toEqual({ notes: [], latest: null, say: [], mentions: [] });
   });
   it('latest covers answeredAt so a second call with it returns nothing', () => {
     const d = writeNotes({ q: { ...note, author: 'session:S', type: 'question', ts: '2026-10-01T00:00:00Z', answer: 'ok', answeredAt: '2026-10-08T00:00:00Z' } });
@@ -762,10 +762,50 @@ describe('notes command', () => {
   it('treats a missing notes directory as no notes yet', () => {
     const r = run(['notes', '--notes', path.join(dir, 'nope')], io);
     expect(r.code).toBe(0);
-    expect(JSON.parse(r.stdout)).toEqual({ notes: [], latest: null });
+    expect(JSON.parse(r.stdout)).toEqual({ notes: [], latest: null, say: [], mentions: [] });
   });
   it('fails with code 1 without --notes', () => {
     expect(run(['notes'], io).code).toBe(1);
+  });
+
+  describe('say: the line to tell the person', () => {
+    const docs = {
+      a: { ...note, text: 'Revisad T002 antes que T999 y T0001' },
+      b: { ...note, ts: '2026-10-06T00:00:00Z', author: 'user:u2', authorName: 'Ana', text: 'línea\n  dos' },
+      q: { ...note, author: 'session:S', type: 'question', ts: '2026-10-01T00:00:00Z', text: '¿T003?', answer: 'sí, T003', answeredBy: 'user:u1', answeredAt: '2026-10-08T00:00:00Z' },
+      s: { ...note, author: 'session:S', ts: '2026-10-07T00:00:00Z', text: 'de una sesión' },
+    };
+    const notes = (...extra: string[]) => JSON.parse(run(['notes', '--notes', writeNotes(docs), '--since', '2026-10-03T00:00:00Z', ...extra], io).stdout);
+    it('in Spanish, one line per person note and per answer, with the tasks of the plan it names', () => {
+      const out = notes('--plan', 'plan.yaml');
+      expect(out.say).toEqual([
+        'Nota de una persona en el roadmap: «Revisad T002 antes que T999 y T0001»',
+        'Nota de Ana en el roadmap: «línea dos»',
+        'Respuesta de una persona en el roadmap: «sí, T003»',
+      ]);
+      expect(out.mentions).toEqual([['T002'], [], ['T003']]);
+    });
+    it('in English from --locale, which wins over the plan', () => {
+      const out = notes('--plan', 'plan.yaml', '--locale', 'en');
+      expect(out.say).toEqual([
+        'Someone\'s note on the roadmap: "Revisad T002 antes que T999 y T0001"',
+        'Ana\'s note on the roadmap: "línea dos"',
+        'Someone\'s answer on the roadmap: "sí, T003"',
+      ]);
+    });
+    it('defaults to English, names no task without a plan and clips long texts to 200 characters', () => {
+      const d = writeNotes({ long: { ...note, text: `T002 ${'x'.repeat(300)}` } });
+      const out = JSON.parse(run(['notes', '--notes', d], io).stdout);
+      expect(out.say).toHaveLength(1);
+      const quoted = /"(.*)"$/.exec(out.say[0])![1];
+      expect(Array.from(quoted)).toHaveLength(200);
+      expect(quoted.endsWith('…')).toBe(true);
+      expect(out.mentions).toEqual([[]]);
+    });
+    it('an empty listing says nothing; a bad --locale is refused', () => {
+      expect(JSON.parse(run(['notes', '--notes', path.join(dir, 'nope')], io).stdout)).toEqual({ notes: [], latest: null, say: [], mentions: [] });
+      expect(run(['notes', '--notes', writeNotes(docs), '--locale', 'fr'], io).code).toBe(2);
+    });
   });
 });
 
@@ -847,5 +887,90 @@ describe('design-gate', () => {
     writeFileSync(path.join(local, 'critique-r2.json'), 'not json');
     expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ rounds: 1, latestRound: 2, invalid: [2], canAutoApprove: false });
     expect(run(['design-gate'], io).code).toBe(2);
+  });
+
+  describe('pending proposals and critique-dismiss', () => {
+    const rel = 'docs/waypoint/demo-shop/design.md';
+    const local = () => path.join(dir, '.waypoint', 'demo-shop');
+    const prop = (n: number, severity: string) => ({ n, category: 'gap', severity, section: '_intro', problem: 'p', change: 'c' });
+    beforeEach(() => {
+      const d = path.join(dir, 'docs', 'waypoint', 'demo-shop');
+      mkdirSync(path.join(d, 'design'), { recursive: true });
+      copyFileSync(new URL('./fixtures/design.md', import.meta.url), path.join(d, 'design.md'));
+      writeFileSync(path.join(d, 'design', 'changelog.json'), JSON.stringify([
+        { version: 1, date: '2026-10-13', note: 'v1', words: 10, round: 0 },
+        { version: 2, date: '2026-10-13', note: 'round 1: applied 1 — a', words: 10, round: 1 },
+      ]));
+      mkdirSync(local(), { recursive: true });
+      writeFileSync(path.join(local(), 'critique-r1.json'), JSON.stringify({ round: 1, version: 1, scope: 'full', proposals: [prop(1, 'major'), prop(2, 'critical'), prop(3, 'minor')] }));
+      writeFileSync(path.join(local(), 'critique-r2.json'), JSON.stringify({ round: 2, version: 2, scope: 'changed', proposals: [] }));
+    });
+    it('design-gate lists the proposals left from earlier rounds, and a skipped critical blocks approval', () => {
+      expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({
+        latestRound: 2, criticalPending: [{ round: 1, n: 2 }], canAutoApprove: false,
+        pending: [{ round: 1, n: 2, severity: 'critical', section: '_intro' }, { round: 1, n: 3, severity: 'minor', section: '_intro' }],
+        pendingCounts: { critical: 1, major: 0, minor: 1 },
+      });
+    });
+    it('critique-dismiss merges the numbers into dismissed.json and the gate stops counting them', () => {
+      const a = run(['critique-dismiss', rel, '--round', '1', '3'], io);
+      expect(a.code).toBe(0);
+      expect(JSON.parse(a.stdout)).toEqual({ round: 1, dismissed: [3] });
+      expect(JSON.parse(run(['critique-dismiss', rel, '--round', '1', '2,3'], io).stdout)).toEqual({ round: 1, dismissed: [2, 3] });
+      expect(JSON.parse(readFileSync(path.join(local(), 'dismissed.json'), 'utf8'))).toEqual({ 1: [2, 3] });
+      expect(JSON.parse(run(['critique-dismiss', rel, '--round', '2', 'all'], io).stdout)).toEqual({ round: 2, dismissed: [] });
+      expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ pending: [], criticalPending: [], canAutoApprove: true });
+    });
+    it('critique-dismiss refuses a bad spec, a missing critique and missing arguments with code 2', () => {
+      expect(run(['critique-dismiss', rel, '--round', '1', '9'], io).code).toBe(2);
+      expect(run(['critique-dismiss', rel, '--round', '1', 'x'], io).code).toBe(2);
+      expect(run(['critique-dismiss', rel, '--round', '7', 'all'], io).code).toBe(2);
+      expect(run(['critique-dismiss', rel, '--round', '0', 'all'], io).code).toBe(2);
+      expect(run(['critique-dismiss', rel, '1'], io).code).toBe(2);
+      expect(run(['critique-dismiss', rel, '--round', '1'], io).code).toBe(2);
+      expect(run(['critique-dismiss'], io).code).toBe(2);
+      expect(existsSync(path.join(local(), 'dismissed.json'))).toBe(false);
+      expect(run(['nope'], io).stderr).toContain('critique-dismiss');
+    });
+  });
+});
+
+describe('page --publish-info and the sync line', () => {
+  const setArtifact = (url: string) => {
+    const p = path.join(dir, 'plan.yaml');
+    writeFileSync(p, readFileSync(p, 'utf8').replace(/^(locale: \w+\n)/m, `$1artifacts:\n  roadmap: ${url}\n`));
+  };
+  const info = () => JSON.parse(run(['page', 'plan.yaml', '--out', 'r.html', '--publish-info'], io).stdout);
+  const caps = { db: { rules: [{ path: '', read: 'view', write: 'admin' }, { path: 'notes', read: 'view', write: 'interact' }, { path: 'proposals', read: 'view', write: 'interact' }] }, user: { scopes: ['profile'] }, downloads: true };
+  it('without .forge the roadmap stays shareable and nothing is said', () => {
+    expect(info()).toEqual({ out: path.join(dir, 'r.html'), capabilities: caps, internal: false, say: null });
+    expect(existsSync(path.join(dir, 'r.html'))).toBe(true);
+  });
+  it('with forge evidence uploaded it declares assets and tells the person once, in the plan language', () => {
+    mkdirSync(path.join(dir, '.forge'));
+    expect(info()).toEqual({ out: path.join(dir, 'r.html'), capabilities: { ...caps, assets: {} }, internal: true,
+      say: 'El roadmap lleva las capturas de verificación de forge, así que queda interno de tu organización y no se puede compartir públicamente (con evidence: local en .forge/config.yaml no se suben).' });
+    const p = path.join(dir, 'plan.yaml');
+    writeFileSync(p, readFileSync(p, 'utf8').replace('locale: es', 'locale: en'));
+    expect(info().say).toBe("The roadmap carries forge's verification screenshots, so it stays internal to your organization and cannot be shared publicly (with evidence: local in .forge/config.yaml they are not uploaded).");
+    setArtifact('https://claude.ai/artifact/r1');
+    expect(info()).toMatchObject({ internal: true, say: null });
+  });
+  it('evidence: local leaves assets out', () => {
+    mkdirSync(path.join(dir, '.forge'));
+    writeFileSync(path.join(dir, '.forge', 'config.yaml'), 'evidence: local\n');
+    expect(info()).toMatchObject({ capabilities: caps, internal: false, say: null });
+  });
+  it('without the flag page prints the bare path as before', () => {
+    expect(run(['page', 'plan.yaml', '--out', 'r.html'], io).stdout).toBe(`${path.join(dir, 'r.html')}\n`);
+  });
+  it('sync says the roadmap url and the counts in the plan language, null without a roadmap', () => {
+    const say = () => JSON.parse(run(['sync', 'plan.yaml', '--out', '.waypoint/sync'], io).stdout).say;
+    expect(say()).toBeNull();
+    setArtifact('https://claude.ai/artifact/r1');
+    expect(say()).toBe('Roadmap: https://claude.ai/artifact/r1 · 6 tareas, 2 fases, 2 frentes.');
+    const p = path.join(dir, 'plan.yaml');
+    writeFileSync(p, readFileSync(p, 'utf8').replace('locale: es', 'locale: en'));
+    expect(say()).toBe('Roadmap: https://claude.ai/artifact/r1 · 6 tasks, 2 phases, 2 tracks.');
   });
 });

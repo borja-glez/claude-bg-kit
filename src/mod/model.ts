@@ -1,6 +1,7 @@
 import { computeMetrics } from '../lib/metrics.js';
 import { escalationCandidates, inboxFor } from '../lib/coordination.js';
 import { parseCritique } from '../lib/critique.js';
+import { parseDismissed, pendingProposals, type GateCritique } from '../lib/design-gate.js';
 import { parseDesign } from '../lib/design.js';
 import { parseChangelog } from '../lib/history.js';
 import { parsePlan } from '../lib/plan.js';
@@ -12,7 +13,7 @@ import { decisionsSummary } from '../lib/decisions.js';
 export interface ProjectEntry { name: string; hasSession: boolean; mtimeMs: number }
 export interface BandFiles {
   plan?: string; session?: string; execution?: string; execTasks?: Record<string, string>; live?: Record<string, string>;
-  design?: string; changelog?: string; decisions?: string;
+  design?: string; changelog?: string; decisions?: string; dismissed?: string;
   states: Record<string, string>; messages: Record<string, string>; critiques: Record<string, string>;
 }
 // In work mode `cells` holds one letter per task of the track (or of the plan), in plan order: d done, a active,
@@ -29,7 +30,9 @@ export type BandModel =
   | { mode: 'run'; project: string; locale: string; executor: 'subagents' | 'sessions'; running: number; parallel: number;
       integrated: number; total: number; slots: { task: string; stage: string; round: number }[];
       worst: 'alive' | 'silent' | 'stopped'; stalled: boolean; roadmapUrl: string | null; auto?: { count: number; lastMajor: string | null } }
-  | { mode: 'design'; project: string; locale: string; version: number; round: number; proposals: number; critical: number; designUrl: string | null; auto?: { count: number; lastMajor: string | null } };
+  // proposals/critical count the latest critique; pending/pendingCritical the proposals of every round still undecided.
+  | { mode: 'design'; project: string; locale: string; version: number; round: number; proposals: number; critical: number;
+      pending: number; pendingCritical: number; designUrl: string | null; auto?: { count: number; lastMajor: string | null } };
 
 function json<T>(text: string | undefined): T | undefined {
   if (text === undefined) return undefined;
@@ -169,15 +172,21 @@ function designModel(project: string, f: BandFiles): BandModel {
     .map(([name, text]) => ({ n: Number(/^critique-r(\d+)\.json$/.exec(name)?.[1] ?? NaN), text }))
     .filter(c => Number.isFinite(c.n))
     .sort((a, b) => b.n - a.n);
-  let latest: ReturnType<typeof parseCritique> | null = null;
-  let round = 0;
-  for (const c of critiques) { try { latest = parseCritique(c.text); round = c.n; break; } catch { /* skip invalid */ } }
+  const valid: GateCritique[] = critiques.map(c => {
+    try { return { round: c.n, critique: parseCritique(c.text) }; } catch { return { round: c.n, critique: null }; }
+  });
+  // The highest round with a valid critique; invalid ones are skipped.
+  const top = valid.find(c => c.critique !== null);
+  const latest = top?.critique ?? null;
+  const pending = pendingProposals(changelog, valid, parseDismissed(f.dismissed));
   return {
     mode: 'design', project, locale: d.meta.locale,
     version: changelog.at(-1)?.version ?? 0,
-    round,
+    round: top?.round ?? 0,
     proposals: latest?.proposals.length ?? 0,
     critical: latest?.proposals.filter(p => p.severity === 'critical').length ?? 0,
+    pending: pending.length,
+    pendingCritical: pending.filter(p => p.severity === 'critical').length,
     designUrl: d.meta.artifact ?? null,
   };
 }

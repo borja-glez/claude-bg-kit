@@ -154,7 +154,24 @@ describe('buildBandModel · design', () => {
   it('reports version, latest critique and the design url', () => {
     const d = design.replace('start_prompt:', 'artifact: https://claude.ai/artifact/des\nstart_prompt:');
     const m = buildBandModel('demo-shop', { ...empty, design: d, changelog, critiques: { 'critique-r1.json': critique } });
-    expect(m).toEqual({ mode: 'design', project: 'demo-shop', locale: 'es', version: 1, round: 1, proposals: 2, critical: 1, designUrl: 'https://claude.ai/artifact/des' });
+    expect(m).toEqual({ mode: 'design', project: 'demo-shop', locale: 'es', version: 1, round: 1, proposals: 2, critical: 1, pending: 2, pendingCritical: 1, designUrl: 'https://claude.ai/artifact/des' });
+  });
+  it('counts the proposals pending from every round: not applied, not rewritten, not dismissed', () => {
+    const r2 = j({ round: 2, version: 2, scope: 'changed', proposals: [{ n: 1, category: 'gap', severity: 'major', section: 'riesgos', problem: 'p', change: 'c' }] });
+    const log = j([{ version: 1, date: '2026-10-11', note: 'v1', words: 40, round: 0 }, { version: 2, date: '2026-10-11', note: 'round 1: applied 1 — x', words: 40, round: 1 }]);
+    const files = { ...empty, design, changelog: log, critiques: { 'critique-r1.json': critique, 'critique-r2.json': r2 } };
+    expect(buildBandModel('demo-shop', files)).toMatchObject({ round: 2, proposals: 1, pending: 2, pendingCritical: 0 });
+    expect(buildBandModel('demo-shop', { ...files, dismissed: j({ 1: [2] }) })).toMatchObject({ pending: 1, pendingCritical: 0 });
+    expect(buildBandModel('demo-shop', { ...files, dismissed: '{junk' })).toMatchObject({ pending: 2 });
+  });
+  it('the design line shows the pending proposals, in es and en, singular and none', () => {
+    const line = (o: object, locale = 'es') => bandLine({ mode: 'design', project: 'p', locale, version: 3, round: 2, proposals: 4, critical: 1, pending: 2, pendingCritical: 1, designUrl: null, ...o } as never, 0);
+    expect(line({})).toBe('◆ DISEÑO · p · v3 · 2 pendientes · 1 crítica');
+    expect(line({ pending: 1, pendingCritical: 0 })).toBe('◆ DISEÑO · p · v3 · 1 pendiente · 0 críticas');
+    expect(line({ pending: 0, pendingCritical: 0 })).toBe('◆ DISEÑO · p · v3 · sin pendientes');
+    expect(line({}, 'en')).toBe('◆ DESIGN · p · v3 · 2 pending · 1 critical');
+    expect(line({ pending: 0, pendingCritical: 0 }, 'en')).toBe('◆ DESIGN · p · v3 · nothing pending');
+    expect(line({ round: 0, pending: 0 })).toBe('◆ DISEÑO · p · v3 · sin crítica aún');
   });
   it('uses the highest round critique and ignores invalid ones', () => {
     const m = buildBandModel('demo-shop', { ...empty, design, changelog, critiques: { 'critique-r1.json': critique, 'critique-r2.json': '{bad' } });
