@@ -13,7 +13,7 @@ pillars:
   - title: Cada sesión lee y hace solo lo suyo
     text: El coordinador y las sesiones miembro cargan el texto de su papel y resuelven cada paso con una llamada al CLI, para que el contexto y los pasos no crezcan sin necesidad.
 start_prompt: /waypoint:work <track>
-status: draft
+status: approved
 artifact: https://claude.ai/artifact/H4Wr9NBYQgXXeb3fhkW8zA
 ---
 
