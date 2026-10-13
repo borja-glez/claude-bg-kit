@@ -87,10 +87,13 @@ export function decideLocal(root: string, id: string, d: Decision, by: string, a
 
 /**
  * Saves a roadmap doc as the local mirror, keeping a local taskId the roadmap doc does not have yet (to-task sets it
- * locally before the roadmap update lands); returns the previous local doc (null when there was none).
+ * locally before the roadmap update lands) while `stillPlanned` says a plan still has that task; returns the previous
+ * local doc (null when there was none).
  */
-export function mirrorProposal(root: string, id: string, doc: ProposalDoc): { previous: ProposalDoc['status'] | null; previousDoc: ProposalDoc | null } {
+export function mirrorProposal(root: string, id: string, doc: ProposalDoc, stillPlanned: (taskId: string) => boolean = () => false):
+  { previous: ProposalDoc['status'] | null; previousDoc: ProposalDoc | null } {
   const prev = loadOne(root, id);
-  saveProposal(root, id, prev?.taskId !== undefined && doc.taskId === undefined ? { ...doc, taskId: prev.taskId } : doc);
+  const keep = prev?.taskId !== undefined && doc.taskId === undefined && stillPlanned(prev.taskId);
+  saveProposal(root, id, keep ? { ...doc, taskId: prev.taskId } : doc);
   return { previous: prev ? prev.status : null, previousDoc: prev };
 }

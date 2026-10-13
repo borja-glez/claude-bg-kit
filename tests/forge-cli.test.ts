@@ -12,6 +12,12 @@ import { parsePlan } from '../src/lib/plan.js';
 
 let root: string;
 let io: Io;
+// docs/waypoint/demo/plan.yaml with the given task lines.
+const writePlan = (dir: string, tasks: string) => {
+  mkdirSync(path.join(dir, 'docs', 'waypoint', 'demo'), { recursive: true });
+  writeFileSync(path.join(dir, 'docs', 'waypoint', 'demo', 'plan.yaml'),
+    `project: demo\nlocale: en\nversion: "0.1"\ntracks:\n  - { id: backend, name: Backend, color: blue }\nphases:\n  - { id: PX, name: Improvements }\ntasks:\n${tasks}`);
+};
 beforeEach(() => {
   root = mkdtempSync(path.join(tmpdir(), 'forge-cli-'));
   io = { cwd: root, now: () => new Date('2026-10-11T10:00:00.000Z') };
@@ -883,11 +889,37 @@ describe('forge waypoint-cli', () => {
       expect(r.stderr).toContain('p20261011100000nnnn is done and cannot be reopened');
       expect(r.stderr).not.toContain('--reopen');
     });
+    it('a local taskId whose task was dropped from the plan does not block save + decide --reopen', () => {
+      const id = 'p20261011100000qqqq';
+      const db = { ...prop, ts: 't', status: 'approved', author: 'session', decidedBy: 'user', decidedAt: 'T1' };
+      saveProposal(root, id, { ...db, taskId: 'T008' } as ProposalDoc);
+      writePlan(root, '  - { id: T001, title: a, track: backend, phase: PX, done_when: x }\n');
+      writeFileSync(path.join(root, `${id}.db.json`), JSON.stringify(db));
+      expect(run(['proposals', 'save', '--from', `${id}.db.json`], io).code).toBe(0);
+      expect(loadProposals(root)[0].taskId).toBeUndefined();
+      saveProposal(root, id, { ...db, taskId: 'T008' } as ProposalDoc);
+      const r = run(['proposals', 'decide', id, 'reject', '--reopen', '--from', `${id}.db.json`], io);
+      expect(r.code).toBe(0);
+      expect(JSON.parse(r.stdout).status).toBe('rejected');
+    });
+    it('decide --reopen with a --plan that cannot be read or parsed is a usage error', () => {
+      const id = 'p20261011100000rrrr';
+      writeFileSync(path.join(root, 'db.json'), JSON.stringify({ ...prop, ts: 't', status: 'approved', author: 'session' }));
+      const missing = run(['proposals', 'decide', id, 'reject', '--reopen', '--from', 'db.json', '--plan', 'nope.yaml'], io);
+      expect(missing.code).toBe(2);
+      expect(missing.stderr).toContain('nope.yaml');
+      writeFileSync(path.join(root, 'bad.yaml'), 'project: [');
+      expect(run(['proposals', 'decide', id, 'reject', '--reopen', '--from', 'db.json', '--plan', 'bad.yaml'], io).code).toBe(2);
+      mkdirSync(path.join(root, 'docs', 'waypoint', 'broken'), { recursive: true });
+      writeFileSync(path.join(root, 'docs', 'waypoint', 'broken', 'plan.yaml'), 'project: [');
+      expect(run(['proposals', 'decide', id, 'reject', '--reopen', '--from', 'db.json'], io).code).toBe(0);
+    });
     it('decide --reopen --from refuses when the local mirror or a plan task holds the proposal', () => {
       const id = 'p20261011100000oooo';
       const db = { ...prop, ts: 't', status: 'approved', author: 'session', decidedBy: 'user', decidedAt: 'T1' };
       writeFileSync(path.join(root, 'db.json'), JSON.stringify(db));
       saveProposal(root, id, { ...db, taskId: 'T008' } as ProposalDoc);
+      writePlan(root, '  - { id: T008, title: a, track: backend, phase: PX, done_when: x }\n');
       const mirror = run(['proposals', 'decide', id, 'reject', '--reopen', '--from', 'db.json'], io);
       expect(mirror.code).toBe(2);
       expect(mirror.stderr).toContain('task T008');
@@ -1034,7 +1066,8 @@ describe('forge waypoint-cli', () => {
         expect(run(['proposals', 'to-task', id, '--plan', 'plan.yaml'], io).code).toBe(0);
         const plan = parsePlan(readFileSync(path.join(root, 'plan.yaml'), 'utf8'));
         expect(plan.tasks.map(t => t.id)).toEqual(['T001', 'T002']);
-        expect(plan.tasks[1].title).toBe(title);
+        // The title is one line (whitespace runs collapse); its quotes, # and brackets stay a plain string.
+        expect(plan.tasks[1].title).toBe('x" - id: EVIL # {oops}: [');
       });
       it('a long multi-line rationale reaches plan.yaml whole and parses back intact', () => {
         const rationale = `${'Primera línea larga del motivo, con «comillas» y: dos puntos. '.repeat(8)}\n- un punto\n- otro: con # almohadilla\n\nY un final por fecha`;
@@ -1152,6 +1185,7 @@ describe('forge waypoint-cli', () => {
       const id = 'p20261011100000mmmm';
       const db = { ...prop, ts: 't', author: 'session', status: 'approved', decidedBy: 'user', decidedAt: 'T1' };
       saveProposal(root, id, { ...db, taskId: 'T008' } as ProposalDoc);
+      writePlan(root, '  - { id: T008, title: a, track: backend, phase: PX, done_when: x }\n');
       writeFileSync(path.join(root, 'doc.json'), JSON.stringify(db));
       expect(run(['proposals', 'save', '--from', 'doc.json', '--id', id], io).code).toBe(0);
       expect(loadProposals(root)[0].taskId).toBe('T008');

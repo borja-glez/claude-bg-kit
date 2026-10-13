@@ -165,21 +165,31 @@ function decideRefusal(id: string, doc: ProposalDoc, error: DecideError): string
   }
 }
 
-/** The plan task made from a proposal (its `includes` ends with the proposal marker): in --plan, else in any docs/waypoint plan. */
-function plannedTaskOf(cwd: string, id: string, planArg: string | undefined): string | null {
-  let files: string[];
-  if (planArg) files = [path.resolve(cwd, planArg)];
-  else {
-    const docs = path.join(cwd, 'docs', 'waypoint');
-    try { files = readdirSync(docs).map(p => path.join(docs, p, 'plan.yaml')); } catch { files = []; }
+/**
+ * The tasks of --plan (a usage error when it cannot be read or parsed), else of every docs/waypoint/<project>/plan.yaml
+ * (an unreadable or broken one is skipped).
+ */
+function planTasksFor(cwd: string, planArg: string | undefined): PlanTask[] {
+  if (planArg) {
+    let text: string;
+    try { text = readFileSync(path.resolve(cwd, planArg), 'utf8'); } catch { throw new UsageError(`cannot read plan ${planArg}`); }
+    try { return parsePlan(text).tasks; } catch (e) {
+      if (e instanceof PlanError) throw new UsageError(`${planArg}: ${e.issues.join('; ')}`);
+      throw new UsageError(`${planArg}: not a valid plan`);
+    }
   }
-  for (const f of files) {
-    let tasks: PlanTask[];
-    try { tasks = parsePlan(readFileSync(f, 'utf8')).tasks; } catch { continue; }
-    const hit = tasks.find(t => proposalOfIncludes(t.includes) === id);
-    if (hit) return hit.id;
-  }
-  return null;
+  const docs = path.join(cwd, 'docs', 'waypoint');
+  let projects: string[];
+  try { projects = readdirSync(docs); } catch { return []; }
+  return projects.flatMap(p => { try { return parsePlan(readFileSync(path.join(docs, p, 'plan.yaml'), 'utf8')).tasks; } catch { return []; } });
+}
+
+/**
+ * The task that holds a proposal in the plans: one made from it (its `includes` ends with the proposal marker), or
+ * the task `taskId` names while a plan still has it. A taskId whose task was dropped holds nothing.
+ */
+function heldTask(tasks: PlanTask[], id: string, taskId: string | undefined): string | undefined {
+  return tasks.find(t => proposalOfIncludes(t.includes) === id)?.id ?? (taskId !== undefined && tasks.some(t => t.id === taskId) ? taskId : undefined);
 }
 
 // A superpowers plan with the tasks its own executors recorded as complete counted as done (they never tick the boxes).
@@ -705,9 +715,9 @@ export function run(argv: string[], io: Io): Result {
               base = loadProposal(io.cwd, id);
               if (!base) throw new UsageError(`proposals decide: ${id} not found`);
             }
-            // A reopen also refuses while the proposal has a task anywhere: the db doc, the local mirror (to-task sets it
-            // before the roadmap does) or a plan task made from it.
-            const held = reopen ? base.taskId ?? loadProposal(io.cwd, id)?.taskId ?? plannedTaskOf(io.cwd, id, subFlag('plan')) ?? undefined : undefined;
+            // A reopen also refuses while the proposal has a task: in the db doc, or in a plan (a task made from it, or
+            // the local mirror's taskId, which to-task sets before the roadmap does, while a plan still has that task).
+            const held = reopen ? base.taskId ?? heldTask(planTasksFor(io.cwd, subFlag('plan')), id, loadProposal(io.cwd, id)?.taskId) : undefined;
             const checked = held !== undefined ? { ...base, taskId: held } : base;
             const r = decideDoc(checked, action as Decision, by, at, reason || undefined, { reopen });
             if (!r.ok) throw new UsageError(`proposals decide: ${decideRefusal(id, checked, r.error)}`);
@@ -731,7 +741,7 @@ export function run(argv: string[], io: Io): Result {
             let doc: ReturnType<typeof normalizeProposal>;
             try { doc = normalizeProposal(JSON.parse(readText(from, '--from'))); } catch (e) { if (e instanceof UsageError) throw e; doc = null; }
             if (!doc) throw new UsageError('proposals save: --from must be a valid proposal doc');
-            const { previous, previousDoc } = mirrorProposal(io.cwd, id, doc);
+            const { previous, previousDoc } = mirrorProposal(io.cwd, id, doc, taskId => heldTask(planTasksFor(io.cwd, subFlag('plan')), id, taskId) === taskId);
             const logged = (previous ?? 'proposed') !== doc.status;
             // A decided proposal that changes status is a reopen; one made by hand (not through
             // `decide --reopen`) carries no new history entry for the decision it replaced.

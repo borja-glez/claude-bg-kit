@@ -46,9 +46,11 @@ export function normalizeProposal(x: unknown): ProposalDoc | null {
   if (o.source !== 'scout' && o.source !== 'user') return null;
   if (!str(o.title) || !o.title.trim() || !str(o.author)) return null;
   const text = (v: unknown, max = MAX_PROPOSAL_TEXT) => (str(v) ? clipWords(v, max) : '');
+  // One-line fields: whitespace runs (newlines included) collapse to one space, so they never fake brief lines.
+  const line = (v: unknown) => (str(v) ? clipWords(v.replace(/[\s\x85]+/g, ' ').trim(), MAX_PROPOSAL_TITLE) : '');
   const out: ProposalDoc = {
-    ts: str(o.ts) ? o.ts : '', category: o.category, risk: o.risk, title: clipWords(o.title, MAX_PROPOSAL_TITLE),
-    rationale: text(o.rationale), evidence: text(o.evidence), pillar: text(o.pillar, MAX_PROPOSAL_TITLE),
+    ts: str(o.ts) ? o.ts : '', category: o.category, risk: o.risk, title: line(o.title),
+    rationale: text(o.rationale), evidence: text(o.evidence), pillar: line(o.pillar),
     status: o.status, source: o.source, author: o.author,
   };
   for (const k of ['estimate', 'path', 'decidedBy', 'decidedAt'] as const) if (str(o[k])) out[k] = (o[k] as string).slice(0, MAX_PROPOSAL_TITLE);
