@@ -61,6 +61,26 @@ tasks:
     depends_on: []
     zones: ["scripts/usage-report.mjs", "scripts/usage-report.d.mts", "tests/usage-report.test.ts", "tests/fixtures/usage/**", "docs/waypoint/forge-cost/medidas/base.md"]
     estimate_min: 75
+  - id: T021
+    title: «Sesión» sola no marca la zona auth
+    track: escalera
+    phase: F1
+    includes: >-
+      src/forge/triage.ts: la zona auth deja de saltar por la palabra session(s) o sesión/sesiones sola, que en forge y
+      waypoint casi siempre nombra una sesión de Claude Code (sesión coordinadora, sesiones miembro) y mandaba tareas sin
+      autenticación a impl-heavy y al revisor de seguridad. Cuenta solo con contexto de autenticación: session token,
+      session cookie, session id/hijack/fixation, login session, sesión de usuario, iniciar/cerrar sesión, cookie de
+      sesión, token de sesión. Las demás palabras de auth (login, password, token, jwt, oauth, permission, crypto, secret…)
+      y la detección por ruta no cambian. Tests en tests/forge-triage.test.ts con frases de este plan («la sesión
+      coordinadora», «sesiones miembro», «each run member session») que ya no dan auth y frases de autenticación
+      («cerrar sesión», «session cookie», «iniciar sesión con Google») que sí.
+    done_when: >-
+      npm run typecheck y npx vitest run tests/forge-triage.test.ts en verde; FORGE triage del texto de T003 de este plan
+      no da sensitive auth.
+    verification: npm run typecheck && npx vitest run tests/forge-triage.test.ts
+    depends_on: []
+    zones: ["src/forge/triage.ts", "tests/forge-triage.test.ts"]
+    estimate_min: 40
 
   # F2 · Sesiones miembro
   - id: T003
