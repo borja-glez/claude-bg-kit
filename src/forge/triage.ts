@@ -54,9 +54,12 @@ export type ImplRole = 'mech' | 'impl-light' | 'impl' | 'impl-heavy';
 export interface Implementer { role: ImplRole | null; self: boolean; why: string }
 
 /** Model by size (spec §2): Trivial alone is the session's; Small is always delegated; in a batch a Trivial goes to mech. */
-export function implementerFor(r: Pick<TriageResult, 'path' | 'sensitive'>, text: string, opts: { batch?: boolean } = {}): Implementer {
+// A plan task (`plan`): the coordinator never edits task code, so a Trivial goes to mech; a Large one was already
+// designed and planned, so it goes to impl as a Medium one does, and to impl-heavy only on a sensitive zone.
+export function implementerFor(r: Pick<TriageResult, 'path' | 'sensitive'>, text: string, opts: { batch?: boolean; plan?: boolean } = {}): Implementer {
   switch (r.path) {
     case 'trivial':
+      if (opts.plan) return { role: 'mech', self: false, why: 'trivial plan task: delegated to mech, the coordinator never edits task code' };
       return opts.batch ? { role: 'mech', self: false, why: 'trivial in a batch: delegated, the session runs several at once' }
         : { role: null, self: true, why: 'trivial: the session does it' };
     case 'small':
@@ -66,8 +69,58 @@ export function implementerFor(r: Pick<TriageResult, 'path' | 'sensitive'>, text
       return r.sensitive.length ? { role: 'impl-heavy', self: false, why: `medium on a sensitive zone (${r.sensitive.join(', ')})` }
         : { role: 'impl', self: false, why: 'medium' };
     default:
-      return { role: null, self: false, why: 'large: design and plan first' };
+      if (!opts.plan) return { role: null, self: false, why: 'large: design and plan first' };
+      return r.sensitive.length ? { role: 'impl-heavy', self: false, why: `large plan task on a sensitive zone (${r.sensitive.join(', ')}): impl-heavy` }
+        : { role: 'impl', self: false, why: 'large plan task: impl, as a medium one (the plan may need to split it)' };
   }
+}
+
+// The design, the plan and forge's own notes: neither a symbol hit there nor a change to them sizes a task.
+export const isBookkeeping = (path: string): boolean => /^(docs\/waypoint|docs\/superpowers|\.forge|\.waypoint)\//.test(path);
+
+/** `git diff --numstat --no-renames`: the changed files in git's order and their added plus deleted lines (a binary counts 0). */
+export function parseNumstat(text: string): { files: string[]; lines: number } {
+  const files: string[] = [];
+  let lines = 0;
+  for (const row of String(text).split('\n')) {
+    const m = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(row.replace(/\r$/, ''));
+    if (!m || isBookkeeping(m[3])) continue;
+    files.push(m[3]);
+    if (m[1] !== '-') lines += Number(m[1]);
+    if (m[2] !== '-') lines += Number(m[2]);
+  }
+  return { files, lines };
+}
+
+export const DIFF_MEDIUM_LINES = 200;
+/** The size of an implemented task, from its real diff: a sensitive zone it touches lifts it to Medium. */
+export function diffPath(stat: { files: string[]; lines: number }): { path: PathName; sensitive: Zone[]; reasons: string[] } {
+  const n = stat.files.length;
+  let path: PathName = n === 0 ? 'trivial' : n > 10 ? 'large' : n > 3 || stat.lines > DIFF_MEDIUM_LINES ? 'medium' : 'small';
+  const sensitive = zonesFromPaths(stat.files);
+  const reasons = [`diff: ${n} file(s), ${stat.lines} line(s)`];
+  if (sensitive.length) {
+    if (PATH_ORDER.indexOf(path) < PATH_ORDER.indexOf('medium')) path = 'medium';
+    reasons.push(`diff touches a sensitive zone: ${sensitive.join(', ')}`);
+  }
+  return { path, sensitive, reasons };
+}
+
+const PERF = [/\b(perf|performance|latency|throughput|benchmarks?|optimi[sz](e|es|ed|ing|ation|ations)|speed\s?up|faster|memory (usage|leaks?))\b/i,
+  es('rendimient|optimiz|latenci', 'más rápid[oa]s?|fugas? de memoria|uso de memoria|cuello de botella')];
+export function isPerfTask(text: string): boolean {
+  const t = String(text).slice(0, MAX_TEXT);
+  return PERF.some(re => re.test(t));
+}
+
+export type ReviewRole = 'review-correctness' | 'review-security' | 'review-perf';
+export interface ReviewPlan { light: boolean; reviewers: { role: ReviewRole; model: 'sonnet' | null; effort: 'medium' | null }[]; flags: ('--sensitive' | '--perf')[] }
+/** Who reviews a task of this size: below Medium one light correctness review, else correctness plus security and perf as they apply. */
+export function reviewFor(path: PathName, sensitive: Zone[], perf: boolean): ReviewPlan {
+  if (path === 'trivial' || path === 'small') return { light: true, reviewers: [{ role: 'review-correctness', model: 'sonnet', effort: 'medium' }], flags: [] };
+  const roles: ReviewRole[] = ['review-correctness', ...(sensitive.length ? ['review-security' as const] : []), ...(perf ? ['review-perf' as const] : [])];
+  return { light: false, reviewers: roles.map(role => ({ role, model: null, effort: null })),
+    flags: [...(sensitive.length ? ['--sensitive' as const] : []), ...(perf ? ['--perf' as const] : [])] };
 }
 
 export type AnnounceLocale = 'es' | 'en';
@@ -87,6 +140,8 @@ const REASONS_ES: [RegExp, string][] = [
   [/^zones match no tracked file \(new files\?\)$/, 'las zonas no casan con ningún fichero versionado (¿ficheros nuevos?)'],
   [/^superpowers plan: the Medium path, its tasks in order$/, 'plan de superpowers: camino Medium, sus tareas en orden'],
   [/^ratchet: kept (\w+) from an earlier triage of this task$/, 'se mantiene $1 de un triage anterior de esta tarea'],
+  [/^diff: (\d+) file\(s\), (\d+) line\(s\)$/, 'diff: $1 fichero(s), $2 línea(s)'],
+  [/^diff touches a sensitive zone: (.+)$/, 'el diff toca una zona sensible: $1'],
 ];
 const reasonEs = (r: string) => {
   const hit = REASONS_ES.find(([re]) => re.test(r));
@@ -120,11 +175,25 @@ export function announce(a: AnnounceInput, locale: AnnounceLocale): string {
         : `Medium → ${agent}: ${why}. I show you a short plan before launching it; you can correct it.`;
       break;
     default:
-      line = es ? `Large: ${why}; primero diseño y plan. Puedes corregirlo.` : `Large: ${why}; design and plan first. You can correct it.`;
+      // A plan task names its implementer (impl, impl-heavy on a sensitive zone); a task that is not one is designed and planned first.
+      line = agent ? (es ? `Large → ${agent}: ${why}. Puedes corregirlo.` : `Large → ${agent}: ${why}. You can correct it.`)
+        : es ? `Large: ${why}; primero diseño y plan. Puedes corregirlo.` : `Large: ${why}; design and plan first. You can correct it.`;
   }
   if (!a.fresh.length) return line;
   const list = a.fresh.map(n => `${n} (\`${a.catalog.find(v => v.name === n)?.cmd ?? ''}\`)`).join(', ');
   return `${line}\n${es ? 'Validadores nuevos' : 'New validators'}: ${list}.`;
+}
+
+/** The line the session prints once a plan task is implemented: its real size and who reviews it. */
+export function announceReview(a: { path: PathName; files: number; lines: number; review: ReviewPlan }, locale: AnnounceLocale): string {
+  const spanish = locale === 'es';
+  const name = a.path[0].toUpperCase() + a.path.slice(1);
+  const names = a.review.reviewers.map(r => r.role.replace(/^review-/, ''));
+  const and = spanish ? ' y ' : ' and ';
+  const list = names.length > 1 ? `${names.slice(0, -1).join(', ')}${and}${names.at(-1)}` : names.join('');
+  if (spanish) return `Tamaño real: ${a.files} fichero(s), ${a.lines} línea(s) → ${name}: `
+    + (a.review.light ? 'una revisión ligera (correctness en sonnet).' : `revisan ${list}.`);
+  return `Real size: ${a.files} file(s), ${a.lines} line(s) → ${name}: ` + (a.review.light ? 'one light review (correctness on sonnet).' : `reviewed by ${list}.`);
 }
 
 // Quoted spans («…», "…", “…”), unbounded so that a long quote never pairs a closing mark with the next opening one.
@@ -185,7 +254,9 @@ const PATH_TOKEN = /[\w.\-/]*[\w-]\.[A-Za-z0-9]{1,8}\b|[\w.-]+\/[\w.\-/]+/g;
 // Symbols worth a grep: camelCase, PascalCase with an inner capital, snake_case, or `backticked`.
 const isSymbol = (w: string) => w.length >= 4 && (/[a-z][A-Z]/.test(w) || /^[A-Za-z]+_[A-Za-z0-9_]+$/.test(w));
 
-export function triage(task: string, repo: RepoFacts, validators: string[], extra?: { files: string[]; zones: Zone[] }): TriageResult {
+// `ignoreGreenfield`: a plan task was already designed and planned, so a young repository does not make it Large.
+export function triage(task: string, repo: RepoFacts, validators: string[], extra?: { files: string[]; zones: Zone[] },
+  opts: { ignoreGreenfield?: boolean } = {}): TriageResult {
   const reasons: string[] = [];
   // Capped so that the regexes below stay fast on pasted logs or huge specs.
   const text = String(task).slice(0, MAX_TEXT);
@@ -218,7 +289,7 @@ export function triage(task: string, repo: RepoFacts, validators: string[], extr
   const sized = named.size ? named.size : Math.min(files.size, MAX_FILES);
 
   let path: PathName;
-  if (greenfield) { path = 'large'; reasons.push('greenfield repository'); }
+  if (greenfield && !opts.ignoreGreenfield) { path = 'large'; reasons.push('greenfield repository'); }
   else if (LARGE.some(re => re.test(text))) { path = 'large'; reasons.push('architecture-scale wording'); }
   else if (sized > 10) { path = 'large'; reasons.push(`${sized} files located`); }
   else if (sized > 3) { path = 'medium'; reasons.push(`${sized} files located`); }

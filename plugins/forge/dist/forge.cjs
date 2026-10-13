@@ -12503,14 +12503,58 @@ function isMechanical(text2) {
 function implementerFor(r2, text2, opts = {}) {
   switch (r2.path) {
     case "trivial":
+      if (opts.plan) return { role: "mech", self: false, why: "trivial plan task: delegated to mech, the coordinator never edits task code" };
       return opts.batch ? { role: "mech", self: false, why: "trivial in a batch: delegated, the session runs several at once" } : { role: null, self: true, why: "trivial: the session does it" };
     case "small":
       return isMechanical(text2) ? { role: "mech", self: false, why: "small and mechanical: always delegated to mech" } : { role: "impl-light", self: false, why: "small and bounded: always delegated to impl-light" };
     case "medium":
       return r2.sensitive.length ? { role: "impl-heavy", self: false, why: `medium on a sensitive zone (${r2.sensitive.join(", ")})` } : { role: "impl", self: false, why: "medium" };
     default:
-      return { role: null, self: false, why: "large: design and plan first" };
+      if (!opts.plan) return { role: null, self: false, why: "large: design and plan first" };
+      return r2.sensitive.length ? { role: "impl-heavy", self: false, why: `large plan task on a sensitive zone (${r2.sensitive.join(", ")}): impl-heavy` } : { role: "impl", self: false, why: "large plan task: impl, as a medium one (the plan may need to split it)" };
   }
+}
+var isBookkeeping = (path22) => /^(docs\/waypoint|docs\/superpowers|\.forge|\.waypoint)\//.test(path22);
+function parseNumstat(text2) {
+  const files = [];
+  let lines = 0;
+  for (const row of String(text2).split("\n")) {
+    const m = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(row.replace(/\r$/, ""));
+    if (!m || isBookkeeping(m[3])) continue;
+    files.push(m[3]);
+    if (m[1] !== "-") lines += Number(m[1]);
+    if (m[2] !== "-") lines += Number(m[2]);
+  }
+  return { files, lines };
+}
+var DIFF_MEDIUM_LINES = 200;
+function diffPath(stat) {
+  const n = stat.files.length;
+  let path22 = n === 0 ? "trivial" : n > 10 ? "large" : n > 3 || stat.lines > DIFF_MEDIUM_LINES ? "medium" : "small";
+  const sensitive = zonesFromPaths(stat.files);
+  const reasons = [`diff: ${n} file(s), ${stat.lines} line(s)`];
+  if (sensitive.length) {
+    if (PATH_ORDER.indexOf(path22) < PATH_ORDER.indexOf("medium")) path22 = "medium";
+    reasons.push(`diff touches a sensitive zone: ${sensitive.join(", ")}`);
+  }
+  return { path: path22, sensitive, reasons };
+}
+var PERF = [
+  /\b(perf|performance|latency|throughput|benchmarks?|optimi[sz](e|es|ed|ing|ation|ations)|speed\s?up|faster|memory (usage|leaks?))\b/i,
+  es("rendimient|optimiz|latenci", "m\xE1s r\xE1pid[oa]s?|fugas? de memoria|uso de memoria|cuello de botella")
+];
+function isPerfTask(text2) {
+  const t = String(text2).slice(0, MAX_TEXT);
+  return PERF.some((re) => re.test(t));
+}
+function reviewFor(path22, sensitive, perf) {
+  if (path22 === "trivial" || path22 === "small") return { light: true, reviewers: [{ role: "review-correctness", model: "sonnet", effort: "medium" }], flags: [] };
+  const roles = ["review-correctness", ...sensitive.length ? ["review-security"] : [], ...perf ? ["review-perf"] : []];
+  return {
+    light: false,
+    reviewers: roles.map((role) => ({ role, model: null, effort: null })),
+    flags: [...sensitive.length ? ["--sensitive"] : [], ...perf ? ["--perf"] : []]
+  };
 }
 var REASONS_ES = [
   [/^git unavailable$/, "git no responde"],
@@ -12526,7 +12570,9 @@ var REASONS_ES = [
   [/^sensitive zone: (.+)$/, "zona sensible: $1"],
   [/^zones match no tracked file \(new files\?\)$/, "las zonas no casan con ning\xFAn fichero versionado (\xBFficheros nuevos?)"],
   [/^superpowers plan: the Medium path, its tasks in order$/, "plan de superpowers: camino Medium, sus tareas en orden"],
-  [/^ratchet: kept (\w+) from an earlier triage of this task$/, "se mantiene $1 de un triage anterior de esta tarea"]
+  [/^ratchet: kept (\w+) from an earlier triage of this task$/, "se mantiene $1 de un triage anterior de esta tarea"],
+  [/^diff: (\d+) file\(s\), (\d+) line\(s\)$/, "diff: $1 fichero(s), $2 l\xEDnea(s)"],
+  [/^diff touches a sensitive zone: (.+)$/, "el diff toca una zona sensible: $1"]
 ];
 var reasonEs = (r2) => {
   const hit = REASONS_ES.find(([re]) => re.test(r2));
@@ -12549,12 +12595,21 @@ function announce(a, locale) {
       line2 = es2 ? `Medium \u2192 ${agent}: ${why}. Antes de lanzarlo te ense\xF1o un plan corto; puedes corregirlo.` : `Medium \u2192 ${agent}: ${why}. I show you a short plan before launching it; you can correct it.`;
       break;
     default:
-      line2 = es2 ? `Large: ${why}; primero dise\xF1o y plan. Puedes corregirlo.` : `Large: ${why}; design and plan first. You can correct it.`;
+      line2 = agent ? es2 ? `Large \u2192 ${agent}: ${why}. Puedes corregirlo.` : `Large \u2192 ${agent}: ${why}. You can correct it.` : es2 ? `Large: ${why}; primero dise\xF1o y plan. Puedes corregirlo.` : `Large: ${why}; design and plan first. You can correct it.`;
   }
   if (!a.fresh.length) return line2;
   const list = a.fresh.map((n) => `${n} (\`${a.catalog.find((v) => v.name === n)?.cmd ?? ""}\`)`).join(", ");
   return `${line2}
 ${es2 ? "Validadores nuevos" : "New validators"}: ${list}.`;
+}
+function announceReview(a, locale) {
+  const spanish2 = locale === "es";
+  const name = a.path[0].toUpperCase() + a.path.slice(1);
+  const names2 = a.review.reviewers.map((r2) => r2.role.replace(/^review-/, ""));
+  const and = spanish2 ? " y " : " and ";
+  const list = names2.length > 1 ? `${names2.slice(0, -1).join(", ")}${and}${names2.at(-1)}` : names2.join("");
+  if (spanish2) return `Tama\xF1o real: ${a.files} fichero(s), ${a.lines} l\xEDnea(s) \u2192 ${name}: ` + (a.review.light ? "una revisi\xF3n ligera (correctness en sonnet)." : `revisan ${list}.`);
+  return `Real size: ${a.files} file(s), ${a.lines} line(s) \u2192 ${name}: ` + (a.review.light ? "one light review (correctness on sonnet)." : `reviewed by ${list}.`);
 }
 var QUOTED = /«([^«»]*)»|"([^"]*)"|“([^“”]*)”/g;
 var MAX_QUOTED = 3;
@@ -12596,7 +12651,7 @@ function isCopyChange(task) {
 }
 var PATH_TOKEN = /[\w.\-/]*[\w-]\.[A-Za-z0-9]{1,8}\b|[\w.-]+\/[\w.\-/]+/g;
 var isSymbol = (w) => w.length >= 4 && (/[a-z][A-Z]/.test(w) || /^[A-Za-z]+_[A-Za-z0-9_]+$/.test(w));
-function triage(task, repo, validators, extra) {
+function triage(task, repo, validators, extra, opts = {}) {
   const reasons = [];
   const text2 = String(task).slice(0, MAX_TEXT);
   const files = new Set(extra?.files);
@@ -12623,7 +12678,7 @@ function triage(task, repo, validators, extra) {
   const wordCount2 = text2.trim().split(/\s+/).length;
   const sized = named.size ? named.size : Math.min(files.size, MAX_FILES);
   let path22;
-  if (greenfield) {
+  if (greenfield && !opts.ignoreGreenfield) {
     path22 = "large";
     reasons.push("greenfield repository");
   } else if (LARGE.some((re) => re.test(text2))) {
@@ -16628,7 +16683,7 @@ function run(argv, io) {
       }
       case "triage": {
         const textArgs = [...args];
-        for (const f of ["--task", "--text-file", "--plan", "--superpowers-plan", "--autonomy", "--locale"]) {
+        for (const f of ["--task", "--text-file", "--plan", "--superpowers-plan", "--autonomy", "--locale", "--base"]) {
           const i = textArgs.indexOf(f);
           if (i >= 0) textArgs.splice(i, 2);
         }
@@ -16664,27 +16719,49 @@ function run(argv, io) {
         const localeArg2 = flag("locale");
         if (has("locale") && localeArg2 !== "es" && localeArg2 !== "en") throw new UsageError("triage: --locale must be es or en");
         if (!task) throw new UsageError("triage: the task text is required");
+        let base = null;
+        if (has("base")) {
+          const v = args[args.indexOf("--base") + 1];
+          if (!v || v.startsWith("-")) throw new UsageError("triage: --base needs a commit");
+          if (!flag("task")) throw new UsageError("triage: --base needs --task");
+          base = v;
+        }
         const git = io.git ?? defaultGit(io.cwd);
         const lines = (out) => (out ?? "").split("\n").map((s2) => s2.trim()).filter(Boolean);
         const listed = git(["-c", "core.quotePath=false", "ls-files"]);
         const commits = Number.parseInt((git(["rev-list", "--count", "HEAD"]) ?? "").trim(), 10) || 0;
-        const bookkeeping = (f) => /^(docs\/waypoint|docs\/superpowers|\.forge|\.waypoint)\//.test(f);
-        const grep = (w) => lines(git(["-c", "core.quotePath=false", "grep", "-l", "-I", "--fixed-strings", "-w", "-e", w])).filter((f) => !bookkeeping(f));
+        const grep = (w) => lines(git(["-c", "core.quotePath=false", "grep", "-l", "-I", "--fixed-strings", "-w", "-e", w])).filter((f) => !isBookkeeping(f));
         const tracked = lines(listed);
         const zoneFiles = planned ? tracked.filter((f) => planned.zones.some((z) => globMatch(z, f))) : [];
         const extra = planned ? { files: zoneFiles, zones: zonesFromPaths(planned.zones) } : spFiles ? { files: tracked.filter((f) => spFiles.includes(f)), zones: zonesFromPaths(spFiles) } : void 0;
         const catalog = detectValidators(repoReader(repoDir), loadConfig(repoDir)).map((v) => ({ name: v.name, cmd: v.cmd, kind: v.kind, source: v.source }));
         const names2 = catalog.map((v) => v.name);
-        const result = triage(task, { files: tracked, commits, gitOk: listed !== null, grep }, names2, extra);
+        const result = triage(task, { files: tracked, commits, gitOk: listed !== null, grep }, names2, extra, { ignoreGreenfield: planned !== null });
         if (planned?.zones.length && !zoneFiles.length) result.reasons.push("zones match no tracked file (new files?)");
         if (spFiles) {
           result.path = "medium";
           result.reasons.push("superpowers plan: the Medium path, its tasks in order");
         }
+        let diff = null;
+        if (base !== null) {
+          const out = git(["-c", "core.quotePath=false", "diff", "--numstat", "--no-renames", `${base}..HEAD`]);
+          if (out === null) throw new UsageError(`triage: cannot diff ${base}..HEAD`);
+          const stat = parseNumstat(out);
+          const d = diffPath(stat);
+          result.sensitive = ZONE_ORDER.filter((z) => result.sensitive.includes(z) || d.sensitive.includes(z));
+          result.path = d.path;
+          result.reasons = [...d.reasons];
+          if (result.sensitive.length && PATH_ORDER.indexOf(result.path) < PATH_ORDER.indexOf("medium")) {
+            result.path = "medium";
+            result.reasons.push(`sensitive zone: ${result.sensitive.join(", ")}`);
+          }
+          diff = { base, stat, path: d.path };
+        }
+        const project = plannedDoc ? plannedDoc.plan.project : null;
         let raiseWhy = null;
         if (flag("task")) {
           const rank = (p) => PATH_ORDER.indexOf(p);
-          const logged = readEvents(io.cwd).filter((e) => e.kind === "triage" && e.task === flag("task") && rank(e.path) >= 0);
+          const logged = readEvents(io.cwd).filter((e) => e.kind === "triage" && e.task === flag("task") && rank(e.path) >= 0 && (base === null || e.diff !== void 0) && (project === null || e.project === project));
           const prior = logged.reduce((max, e) => max === null || rank(e.path) > rank(max) ? e.path : max, null);
           if (prior && rank(prior) > rank(result.path)) {
             result.path = prior;
@@ -16695,17 +16772,35 @@ function run(argv, io) {
             raiseWhy = raise ? raise.why : null;
           }
         }
-        const impl = implementerFor(result, task, { batch: has("batch") });
-        const implementer = { ...impl, agent: impl.role ? agentFor(impl.role, loadConfig(repoDir).profile) : null };
+        const impl = implementerFor(result, task, { batch: has("batch"), plan: planned !== null });
+        const profile = loadConfig(repoDir).profile;
+        const implementer = { ...impl, agent: impl.role ? agentFor(impl.role, profile) : null };
         const known = readLocal(io.cwd).known;
         const fresh2 = names2.filter((n) => !known.includes(n));
         if (fresh2.length || known.some((n) => !names2.includes(n))) updateLocal(io.cwd, (s2) => ({ ...s2, known: names2 }));
-        appendEvent(io.cwd, { ts: ts(), kind: "triage", ...flag("task") ? { task: flag("task") } : {}, ...result, ...auto });
+        appendEvent(io.cwd, {
+          ts: ts(),
+          kind: "triage",
+          ...flag("task") ? { task: flag("task") } : {},
+          ...project !== null ? { project } : {},
+          ...result,
+          ...auto,
+          ...diff ? { diff: { base: diff.base, files: diff.stat.files.length, lines: diff.stat.lines } } : {}
+        });
         const locale = localeArg2 ?? ((plannedDoc?.plan.locale ?? planLocale(io.cwd))?.toLowerCase().split(/[-_]/)[0] === "es" ? "es" : "en");
-        const line2 = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh: fresh2, catalog }, locale);
-        const gate = result.path === "medium" ? "plan" : null;
+        let line2 = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh: fresh2, catalog }, locale);
+        let gate = result.path === "medium" ? "plan" : null;
+        let reviewed = {};
+        if (diff) {
+          const plan = reviewFor(result.path, result.sensitive, isPerfTask(task));
+          const review = { ...plan, reviewers: plan.reviewers.map((r2) => ({ ...r2, agent: agentFor(r2.role, profile) })) };
+          const bare = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh: [], catalog }, locale);
+          line2 = announceReview({ path: result.path, files: diff.stat.files.length, lines: diff.stat.lines, review: plan }, locale) + line2.slice(bare.length);
+          gate = null;
+          reviewed = { diff: { base: diff.base, files: diff.stat.files, lines: diff.stat.lines, path: diff.path }, review };
+        }
         const untracked2 = listed !== null && lines(git(["ls-files", "--others", "--exclude-standard", "--", ".forge/.gitignore"])).length ? { untracked: [".forge/.gitignore"] } : {};
-        return json({ ...result, catalog, new: fresh2, implementer, announce: line2, gate, ...untracked2, ...auto });
+        return json({ ...result, catalog, new: fresh2, implementer, announce: line2, gate, ...untracked2, ...auto, ...reviewed });
       }
       case "validate": {
         const config = loadConfig(repoDir);

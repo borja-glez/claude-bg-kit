@@ -79,7 +79,7 @@ forge depende de [waypoint](../waypoint/README.es.md) ^0.18.0, que se instala co
 | **Trivial** | ninguna | la sesión principal; `mech` cuando es una petición de un lote | validadores del fichero cambiado | ninguna |
 | **Small** | ninguna | siempre delegada: `mech` (Haiku) para trabajo mecánico, `impl-light` (Sonnet) en el resto; la propia sesión solo cuando todo el cambio ya está en su contexto y son 10 líneas o menos | todos los validadores + leer el diff | ninguna |
 | **Medium** | plan corto, sigue salvo que lo pares | `impl` / `impl-heavy` | todos los validadores | correctness (+ security si es sensible) |
-| **Large** | aprobación obligatoria del diseño | `/waypoint:design`, `/waypoint:plan` y luego el bucle Medium por tarea | todos los validadores | correctness + security + perf, y revisión final de toda la rama |
+| **Large** | aprobación obligatoria del diseño | `/waypoint:design`, `/waypoint:plan` y luego cada tarea según su tamaño (Trivial `mech`, Small `mech` / `impl-light`, Medium `impl` / `impl-heavy`, Large `impl` / `impl-heavy`) | todos los validadores | por tarea, según su diff real: una revisión ligera de correctness en Sonnet para Small o menos; si no, correctness (+ security si es sensible, + perf en tareas de rendimiento); y revisión final de toda la rama |
 
 El triaje lee el texto de la tarea, los ficheros que probablemente toque y las zonas sensibles (auth, datos y migraciones, API pública, dependencias, CI), y elige los validadores que aplican. `forge triage` imprime además el `implementer` del tamaño (su rol, agente, si lo hace la propia sesión y por qué), resuelto con el perfil; `--batch` marca una petición de varias.
 
@@ -101,13 +101,13 @@ El triaje lee el texto de la tarea, los ficheros que probablemente toque y las z
 | `forge-planner` | Opus | muy alto | camino Large: convierte un diseño aprobado en un plan de waypoint |
 | `forge-scout` | Opus | medio | modo infinito: propuestas de mejora con pruebas |
 
-Los implementadores escriben su informe en `report-<n>.txt` y también lo incluyen en su respuesta. El perfil `economy` baja un nivel a los implementadores y `quality` los sube; los revisores nunca cambian.
+Los implementadores escriben su informe en `report-<n>.txt` y también lo incluyen en su respuesta. El perfil `economy` baja un nivel a los implementadores y `quality` los sube; los revisores nunca cambian con el perfil. La revisión ligera de una tarea pequeña del plan ejecuta `forge-review-correctness` en Sonnet con esfuerzo medio.
 
 ## El camino Large
 
 1. `/forge:run` ejecuta `/waypoint:design` y **espera a que apruebes el diseño**.
 2. `forge-planner` escribe `plan.yaml` y `/waypoint:plan` publica el roadmap vivo.
-3. `/waypoint:work` reclama cada tarea, y su paso «hacer el trabajo» se convierte en el bucle de forge: `brief --plan`, `triage --plan`, un implementador, los validadores y los tres revisores, durante hasta 4 rondas.
+3. `/waypoint:work` reclama cada tarea, y su paso «hacer el trabajo» se convierte en el bucle de forge: `brief --plan`, `triage --plan` (quién la implementa, según el tamaño de la tarea), un implementador, los validadores, `triage --base` (otra vez el tamaño, ahora solo a partir del diff real) y los revisores que pide ese tamaño, durante hasta 4 rondas. Un diff de 3 ficheros o menos y 200 líneas cambiadas o menos, fuera de zonas sensibles, recibe una revisión ligera de correctness en Sonnet, salvo que la tarea toque una zona sensible (por su texto, sus zonas del plan o su diff); uno mayor recibe correctness, más security en zonas sensibles y perf en tareas de rendimiento.
 4. Al acabar las tareas, `review-correctness` revisa toda la rama contra el diseño y el plan, con como mucho un arreglo y una segunda revisión. La segunda revisión recibe validadores y diff nuevos, y un veredicto `redo` se trata como un arreglo.
 
 La base de la ejecución se guarda en `.forge/work/<proyecto>/run.json`, que se escribe una vez tras aprobar el diseño. Mientras una tarea corre, la coordinadora renueva una concesión (`leaseUntil`, 10 minutos) en el estado de la tarea y en su propia sesión de waypoint, para que las sesiones en paralelo no le quiten una tarea que sigue en marcha. Además de la concesión, la coordinadora deja una señal local en `.forge/live/` (mira [Señal en vivo](#señal-en-vivo)).
@@ -312,7 +312,8 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 <summary><b>Tareas y revisión</b></summary>
 
 - `triage [--task id] [--batch] [--autonomy auto|ask] [--locale es|en] (<texto> | --text-file f)` - clasifica una tarea: camino, ficheros, zonas sensibles, validadores y el `implementer` (rol, agente, self, why). `--batch` marca una petición de varias, así que una Trivial va a `mech`. `--text-file` lee el texto de un fichero, para que nunca pase por un shell. `--autonomy auto` anota que la tarea va en modo auto. Imprime además `announce`, la línea que enseña la sesión (camino, motivo, implementador y validadores nuevos, en el idioma de `--locale` o, si no, en el del plan), `gate` (`plan` en Medium: primero va el plan corto) y, mientras `.forge/.gitignore` no esté en git, `untracked`. Una petición corta que cambia un texto entre comillas («cambia el título de la página a «X»») es Trivial.
-- `triage --plan p --task T` - hace el triaje de una tarea del plan a partir de sus zonas y su `done_when`; imprime también el `implementer`.
+- `triage --plan p --task T` - hace el triaje de una tarea del plan a partir de sus zonas y su `done_when`; imprime también el `implementer`. Una tarea del plan no aplica la regla de repositorio nuevo, y una Large va a `impl` (`impl-heavy` en una zona sensible).
+- `triage --plan p --task T --base sha` (también sin `--plan`, con un texto) - vuelve a medir una tarea ya implementada a partir de su diff real, `git diff --numstat <sha>..HEAD`: más de 3 ficheros o más de 200 líneas cambiadas es Medium, más de 10 ficheros es Large, y una zona sensible es al menos Medium. El tamaño sale solo del diff: una zona sensible pone un suelo de Medium, y también lo ponen las mediciones `--base` anteriores de `T`; en una tarea del plan solo cuentan los triajes del proyecto de su propio plan. Imprime también `diff` (`base`, `files`, `lines`, `path`) y `review` (`light`, los `reviewers` con su `agent`, `model` y `effort`, y los `flags` del veredicto).
 - `brief --plan p --task T [--design d]` - imprime el brief de una tarea del plan de waypoint, con la línea `Commit title prefix` que usan los implementadores.
 - `brief --superpowers-plan f --task N` - imprime el brief de la tarea N de un plan de superpowers: la cabecera y las restricciones globales del plan, el cuerpo literal de la tarea y las reglas que añade forge (y la línea TDD con `tdd: superpowers`).
 - `triage --task id --superpowers-plan f` - clasifica un plan de superpowers por sus tareas pendientes y sus ficheros; el camino es siempre Medium.
