@@ -693,6 +693,8 @@ describe('forge tree', () => {
   const check = (base: string) => JSON.parse(run(['tree', 'check', '--task', 'T1', '--base', base], io).stdout);
   it('parseStatus splits untracked from changed and skips the source of a rename', () => {
     expect(parseStatus(' M a.txt\0R  new.txt\0old.txt\0?? n e w.txt\0A  added.txt\0')).toEqual({ untracked: ['n e w.txt'], modified: ['a.txt', 'new.txt', 'added.txt'] });
+    // A work-tree rename (Y = R) is followed by its source too, even one named like an entry.
+    expect(parseStatus(' R moved.txt\0?? x\0 C copy.txt\0src.txt\0')).toEqual({ untracked: [], modified: ['moved.txt', 'copy.txt'] });
   });
   it('lists the task commits, the files that appeared and the ones changed after the snapshot; never ignored ones', () => {
     const base = repo();
@@ -716,6 +718,52 @@ describe('forge tree', () => {
     expect(out.snapshot).toMatchObject({ head: base });
     expect(JSON.stringify(out)).not.toContain('build/');
     expect(JSON.stringify(out)).not.toContain('before.txt');
+    // A hand edit of a file the task committed is never hidden behind the task's commits.
+    writeFileSync(path.join(root, 'c.txt'), 'c tweaked by hand\n');
+    expect(check(base).changed).toEqual(['a.txt', 'c.txt']);
+  });
+  it('a second snapshot keeps the first (a file that appeared in between is still listed); --force replaces it', () => {
+    const base = repo();
+    const first = run(['tree', 'snapshot', '--task', 'T1'], io);
+    expect(first.code).toBe(0);
+    writeFileSync(path.join(root, 'hand.txt'), 'by hand\n');
+    const again = run(['tree', 'snapshot', '--task', 'T1'], io);
+    expect(again.code).toBe(0);
+    expect(again.stdout).toContain('already taken');
+    expect(check(base).appeared).toEqual(['hand.txt']);
+    expect(run(['tree', 'snapshot', '--task', 'T1', '--force'], io).code).toBe(0);
+    expect(check(base).appeared).toEqual([]);
+  });
+  it('the snapshot never lists the .forge/.gitignore it creates', () => {
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 't@t'); git('config', 'user.name', 't'); git('config', 'core.autocrlf', 'false');
+    writeFileSync(path.join(root, 'a.txt'), 'a\n');
+    git('add', '.'); git('commit', '-q', '-m', 'init');
+    const base = git('rev-parse', 'HEAD').trim();
+    run(['tree', 'snapshot', '--task', 'T1'], io);
+    expect(check(base).appeared).toEqual([]);
+  });
+  it('a snapshot of another tree or another task counts as none; the task excludes deletions; a base off the snapshot warns', () => {
+    const base = repo();
+    const wt = path.join(root, 'wt');
+    git('worktree', 'add', '-q', '-b', 'side', wt);
+    expect(run(['tree', 'snapshot', '--task', 'T1', '--cwd', wt], io).code).toBe(0);
+    expect(JSON.parse(readFileSync(path.join(root, '.forge', 'work', 'T1', 'tree-start.json'), 'utf8'))).toMatchObject({ task: 'T1' });
+    expect(JSON.parse(run(['tree', 'check', '--task', 'T1', '--base', base, '--cwd', wt], io).stdout).snapshot).not.toBeNull();
+    expect(check(base).snapshot).toBeNull();
+    mkdirSync(path.join(root, '.forge', 'work', 'T2'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'work', 'T2', 'tree-start.json'), readFileSync(path.join(root, '.forge', 'work', 'T1', 'tree-start.json')));
+    expect(JSON.parse(run(['tree', 'check', '--task', 'T2', '--base', base, '--cwd', wt], io).stdout).snapshot).toBeNull();
+    // In the main checkout: the task deletes b.txt and adds c.txt.
+    run(['tree', 'snapshot', '--task', 'T3'], io);
+    git('rm', '-q', 'b.txt');
+    writeFileSync(path.join(root, 'c.txt'), 'c\n');
+    git('add', 'c.txt'); git('commit', '-q', '-m', 'task');
+    const t3 = JSON.parse(run(['tree', 'check', '--task', 'T3', '--base', base], io).stdout);
+    expect(t3.task).toEqual(['c.txt']);
+    expect(t3).not.toHaveProperty('warning');
+    const later = git('rev-parse', 'HEAD').trim();
+    expect(JSON.parse(run(['tree', 'check', '--task', 'T3', '--base', later], io).stdout).warning).toContain('not an ancestor');
   });
   it('without a snapshot lists every untracked and modified path (fail safe)', () => {
     const base = repo();

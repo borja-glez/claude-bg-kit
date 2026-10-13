@@ -192,8 +192,18 @@ describe('forge swarm (execution)', () => {
     expect(merging.announce[2]).toBe('Al acabar, si la revisión final pasa, integro forge/run-shop en main.');
     expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--locale', 'en'], io)).announce[0]).toMatch(/^Resuming the execution /);
   });
-  it('start refuses a --locale other than es or en before creating anything', () => {
-    const r = run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--locale', 'fr'], io);
+  it('start takes any language code: stored for the person, Spanish announce only for es', () => {
+    const e = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--locale', 'pt'], io));
+    expect(e.locale).toBe('pt');
+    expect(e.announce[0]).toMatch(/^Execution running: /);
+    expect(run(['swarm', 'sleep', '60'], io).stdout).toBe('woke. Tell the user in Portuguese (pt), the language they write in.\n');
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--locale', 'es-ES'], io)).announce[0]).toMatch(/^Retomo /);
+    expect(readExecution(root)?.locale).toBe('es-ES');
+    // A resume without the flag announces in the stored language.
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io)).announce[0]).toMatch(/^Retomo /);
+  });
+  it('start refuses a --locale that is not a language code before creating anything', () => {
+    const r = run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--locale', 'French!'], io);
     expect(r.code).toBe(2);
     expect(r.stderr).toContain('--locale');
     expect(existsSync(path.join(root, '.claude', 'worktrees', 'run'))).toBe(false);
