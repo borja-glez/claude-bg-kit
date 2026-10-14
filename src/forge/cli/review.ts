@@ -1,13 +1,14 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { UsageError } from './errors.js';
 import { appendEvent, readEvents, type LedgerEvent } from '../ledger.js';
 import { loadConfig, agentFor, type Profile } from '../config.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, type RepoReader, type Scope, type ValidatorResult } from '../validators.js';
 import { PATH_ORDER, zonesFromPaths, type PathName, type ReviewRole } from '../triage.js';
-import { parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, type Review, type ReviewerName, type FailingValidator } from '../verdict.js';
+import { parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, repoRelative, type Finding, type Review, type ReviewerName, type FailingValidator } from '../verdict.js';
 import { roundDecision } from '../round.js';
-import { takeBrief } from '../shadow.js';
+import { buildCase, readShadow, saveShadow, takeBrief } from '../shadow.js';
+import { shadowCommand } from './shadow.js';
 import { reviewRound, reviewerKey, type PreviousResult, type ReviewerKey, type RoundPlan, type RoundReviewer, type TriageReview } from '../review-round.js';
 
 // The review commands. run.ts dispatches here; this module never imports run.ts (that would be a cycle).
@@ -208,7 +209,8 @@ type ValidatorRow = { validator?: unknown; ok?: unknown; failures?: unknown; pre
  * (twins aside) left no file. Else runs the verdict with review-plan.json's flags, the round and the fix diff's hunks
  * (carried results keep their previous origins), logs it on the round dir and the round decision, logs the minor and
  * deferred findings as a ruling, writes `<dir>/findings-<n>-<round>.json` for the implementer when the action is not
- * accept, and prints `{action, score, next, last, implementer, findings, deferred, invalid}`.
+ * accept, saves the case of each shadow twin that left its file in `shadow/` (it never counts in the verdict), and
+ * prints `{action, score, next, last, implementer, findings, deferred, invalid}` (plus `shadow`, the twins compared).
  */
 export function reviewClose(args: string[], deps: ReviewDeps): Result {
   const flag = (name: string) => {
@@ -282,35 +284,57 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
       passed: verifyFile ? verifyFile.checks.filter(c => c.ok).length : 0, total: verifyFile ? verifyFile.checks.length : 0,
       evidence, ...(verifyFile?.reason ? { reason: verifyFile.reason } : {}) });
   }
-  const d = roundDecision(readEvents(deps.cwd), task, p, loadConfig(deps.repoDir).profile);
+  const events = readEvents(deps.cwd);
+  const d = roundDecision(events, task, p, loadConfig(deps.repoDir).profile);
   appendEvent(deps.cwd, { ts, kind: 'round', task, ...d });
   if (result.minor.length || result.deferred.length) {
-    appendEvent(deps.cwd, { ts, kind: 'ruling', task, round, dir: rel(deps.cwd, roundDir),
-      ...(result.minor.length ? { minor: result.minor } : {}), ...(result.deferred.length ? { deferred: result.deferred } : {}) });
+    // Closing the same round again with the same findings does not log the ruling twice.
+    const ruling = { task, round, dir: rel(deps.cwd, roundDir),
+      ...(result.minor.length ? { minor: result.minor } : {}), ...(result.deferred.length ? { deferred: result.deferred } : {}) };
+    const same = JSON.stringify(ruling);
+    const logged = events.some(e => e.kind === 'ruling' && e.task === task && e.dir === ruling.dir
+      && JSON.stringify({ task: e.task, round: e.round, dir: e.dir, ...(e.minor ? { minor: e.minor } : {}), ...(e.deferred ? { deferred: e.deferred } : {}) }) === same);
+    if (!logged) appendEvent(deps.cwd, { ts, kind: 'ruling', ...ruling });
   }
 
   // What the implementer receives (the skill's «Findings to send»): critical and important findings, deferred ones
-  // excluded, and the failures of the validators that block.
+  // excluded, and the failures of the validators that block. An accept removes the file an earlier close of this round left.
   let findings: string | null = null;
+  const findingsPath = path.join(dir, `findings-${n}-${round}.json`);
   if (result.action !== 'accept') {
-    const file = path.join(dir, `findings-${n}-${round}.json`);
-    writeFileSync(file, JSON.stringify({ task, round, action: result.action, findings: [...result.critical, ...result.important], validators: failing }, null, 2) + '\n');
-    findings = rel(deps.cwd, file);
+    writeFileSync(findingsPath, JSON.stringify({ task, round, action: result.action, findings: [...result.critical, ...result.important], validators: failing }, null, 2) + '\n');
+    findings = rel(deps.cwd, findingsPath);
+  } else rmSync(findingsPath, { force: true });
+
+  // The shadow twins (xhigh, in shadow/) never reach the verdict: each one with a file is paired with its high reviewer
+  // and the case saved in .forge/shadow.json, replacing the one an earlier close of this round saved.
+  const twins = names(plan.spawn, x => x.twin === true)
+    .filter(k => existsSync(path.join(roundDir, 'shadow', `${k}.json`)) && existsSync(path.join(roundDir, `${k}.json`)));
+  if (twins.length) {
+    const local = (fs: Finding[]) => fs.map(f => (f.file ? { ...f, file: repoRelative(f.file, deps.repoDir) } : f));
+    const state = readShadow(deps.cwd) ?? { remaining: 0, cases: [] };
+    let cases = state.cases;
+    for (const k of twins) {
+      const high = parseReview(readFileSync(path.join(roundDir, `${k}.json`), 'utf8'));
+      const xhigh = parseReview(readFileSync(path.join(roundDir, 'shadow', `${k}.json`), 'utf8'));
+      cases = [...cases.filter(c => c.task !== task || c.reviewer !== k), buildCase(task, k, local(high.findings), local(xhigh.findings))];
+    }
+    saveShadow(deps.cwd, { ...state, cases });
   }
   return json({
     action: result.action, score: result.score, next: d.next, last: d.last, implementer: d.implementer,
     findings, deferred: result.deferred, invalid: result.reviewers.filter(r => r.invalid).map(r => r.name),
-    round, reasons: result.reasons,
+    round, reasons: result.reasons, ...(twins.length ? { shadow: twins } : {}),
   });
 }
 
-/** `review-prep`, `review-close`, `prep` and `shadow`; the ones not built yet answer with a usage error. */
+/** `review-prep`, `review-close`, `prep` and `shadow` (cli/shadow.ts); the ones not built yet answer with a usage error. */
 export function reviewCommand(cmd: string, args: string[], deps: ReviewDeps): Result {
   switch (cmd) {
     case 'review-prep': return reviewPrep(args, deps);
     case 'review-close': return reviewClose(args, deps);
+    case 'shadow': return shadowCommand(args, deps.cwd);
     case 'prep':
-    case 'shadow':
       throw new UsageError(`${cmd}: not available yet in this forge version`);
     default:
       throw new UsageError(`unknown review command ${cmd}`);

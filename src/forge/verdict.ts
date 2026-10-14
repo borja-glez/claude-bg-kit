@@ -65,10 +65,11 @@ const normPath = (p: string) => p.trim().replace(/\\/g, '/').replace(/^(\.\/)+/,
  * `root` (the repo) made relative to it (case-insensitively when the root has a drive letter).
  */
 export function repoRelative(p: string, root?: string): string {
-  const n = normPath(p);
+  let n = normPath(p);
   if (!root?.trim()) return n;
   const r = normPath(root).replace(/\/+$/, '');
   const drive = /^[A-Za-z]:/.test(r);
+  if (drive && /^\/[A-Za-z]\//.test(n)) n = `${n[1]}:${n.slice(2)}`; // Git Bash's /e/... is E:/...
   const [hay, needle] = drive ? [n.toLowerCase(), r.toLowerCase()] : [n, r];
   return r && hay.startsWith(`${needle}/`) ? normPath(n.slice(r.length + 1)) : n;
 }
