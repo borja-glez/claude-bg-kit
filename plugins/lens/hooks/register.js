@@ -11042,6 +11042,7 @@ var TIERS = {
   "forge-review-correctness": { label: "correctness", hue: "green", rank: null },
   "forge-review-security": { label: "security", hue: "red", rank: null },
   "forge-review-perf": { label: "perf", hue: "yellow", rank: null },
+  "forge-review-final": { label: "final", hue: "green", rank: null },
   "forge-verify": { label: "verify", hue: "sapphire", rank: null },
   "forge-verify-heavy": { label: "verify", hue: "sapphire", rank: null },
   "forge-planner": { label: "planner", hue: "lavender", rank: null },

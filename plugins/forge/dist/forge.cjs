@@ -5350,10 +5350,10 @@ var require_cst_scalar = __commonJS({
         case "|":
         case ">": {
           const he = source.indexOf("\n");
-          const head = source.substring(0, he);
+          const head2 = source.substring(0, he);
           const body = source.substring(he + 1) + "\n";
           const props = [
-            { type: "block-scalar-header", offset, indent, source: head }
+            { type: "block-scalar-header", offset, indent, source: head2 }
           ];
           if (!addEndtoBlockProps(props, end))
             props.push({ type: "newline", offset: -1, indent, source: "\n" });
@@ -5413,19 +5413,19 @@ var require_cst_scalar = __commonJS({
     }
     function setBlockScalarValue(token, source) {
       const he = source.indexOf("\n");
-      const head = source.substring(0, he);
+      const head2 = source.substring(0, he);
       const body = source.substring(he + 1) + "\n";
       if (token.type === "block-scalar") {
         const header = token.props[0];
         if (header.type !== "block-scalar-header")
           throw new Error("Invalid block scalar header");
-        header.source = head;
+        header.source = head2;
         token.source = body;
       } else {
         const { offset } = token;
         const indent = "indent" in token ? token.indent : -1;
         const props = [
-          { type: "block-scalar-header", offset, indent, source: head }
+          { type: "block-scalar-header", offset, indent, source: head2 }
         ];
         if (!addEndtoBlockProps(props, "end" in token ? token.end : void 0))
           props.push({ type: "newline", offset: -1, indent, source: "\n" });
@@ -12500,8 +12500,27 @@ var MECHANICAL = [
   /(?<![\p{L}\p{N}_])aplic(?:a|ar|ando)\s+(?:el|este|ese|un|los|estos)\s+parches?(?![\p{L}\p{N}_])/iu,
   /(?<![\p{L}\p{N}_])(?:mueve|mover|muevo)\s+(?:los?\s+|las?\s+)?(?:archivos?|carpetas?|directorios?|\S*[\w-]\.\w+\s+a\b|\S*\/\S*\s+a\b)/iu
 ];
+var NB = "(?<![\\p{L}\\p{N}_])";
+var NE = "(?![\\p{L}\\p{N}_])";
+var SPANS = /«[^«»]*»|"[^"]*"|“[^“”]*”|`[^`]*`/gu;
+var PROHIBITION = new RegExp(`${NB}(?:no\\s+(?:toques|cambies|edites|modifiques|regeneres|actualices|muevas|renombres|borres)|sin\\s+(?:tocar|cambiar)|(?:do\\s+not|don['\u2019]t|never)\\s+(?:touch|change|edit|modify|regenerate|update|move|rename|delete)|without\\s+(?:touching|changing))${NE}(?:(?!,\\s*(?:pero|y\\s+luego|but|and\\s+then)${NE})(?:[^.;!?\\n]|\\.(?!\\s|$)))*`, "giu");
+var REVIEWER = new RegExp(`${NB}(?:(?:revisor|revisores|revisi\xF3n|reviewer|reviewers|review)\\s+(?:(?:de|of)\\s+)?(?:perf|security|seguridad|correctness)|(?:perf|security|correctness)\\s+(?:reviewer|reviewers|review))${NE}`, "giu");
+var FLAG = /(?<![\p{L}\p{N}_-])--[\p{L}\p{N}][\p{L}\p{N}_-]*/gu;
+var COMPOUND = new RegExp(`${NB}[\\p{L}\\p{N}]+(?:[-_./][\\p{L}\\p{N}]+)+`, "gu");
+var blank = (s2) => " ".repeat(s2.length);
+function stripMentions(text2) {
+  return String(text2).replace(SPANS, blank).replace(PROHIBITION, blank).replace(REVIEWER, blank).replace(FLAG, blank).replace(COMPOUND, (m) => m.replace(/[\p{L}\p{N}]/gu, "x"));
+}
+function head(text2) {
+  const t = text2.replace(METHOD, "").replace(COURTESY, "");
+  const parts = [...t.matchAll(/([\s\S]*?)([.!?:](?=\s|$)|\r?\n|$)/gu)].filter((m) => m[0]).map((m) => ({ s: m[1], end: m[2] }));
+  const full = parts.filter((p) => /[\p{L}\p{N}]/u.test(p.s));
+  if (!full.length) return "";
+  const label = full[0].end === ":" && full[0].s.trim().split(/\s+/).length <= 2 && full.length > 1;
+  return label ? `${full[0].s} ${full[1].s}` : full[0].s;
+}
 function isMechanical(text2) {
-  const t = String(text2).slice(0, MAX_TEXT);
+  const t = head(stripMentions(String(text2).slice(0, MAX_TEXT)));
   return MECHANICAL.some((re) => re.test(t));
 }
 function implementerFor(r2, text2, opts = {}) {
@@ -12548,7 +12567,7 @@ var PERF = [
   es("rendimient|optimiz|latenci", "m\xE1s r\xE1pid[oa]s?|fugas? de memoria|uso de memoria|cuello de botella")
 ];
 function isPerfTask(text2) {
-  const t = String(text2).slice(0, MAX_TEXT);
+  const t = stripMentions(String(text2).slice(0, MAX_TEXT));
   return PERF.some((re) => re.test(t));
 }
 function reviewFor(path24, sensitive, perf, opts = {}) {
@@ -12669,6 +12688,8 @@ var isSymbol = (w) => w.length >= 4 && (/[a-z][A-Z]/.test(w) || /^[A-Za-z]+_[A-Z
 function triage(task, repo, validators, extra, opts = {}) {
   const reasons = [];
   const text2 = String(task).slice(0, MAX_TEXT);
+  const plain = stripMentions(text2);
+  const headText = opts.plan ? stripMentions(String(opts.plan.title).slice(0, MAX_TEXT)) : head(plain);
   const files = new Set(extra?.files);
   const named = /* @__PURE__ */ new Set();
   for (const tok of text2.match(PATH_TOKEN) ?? []) {
@@ -12687,7 +12708,7 @@ function triage(task, repo, validators, extra, opts = {}) {
     if (hits.length === 1) quoteFiles.add(hits[0]);
   }
   const located = [.../* @__PURE__ */ new Set([...files, ...quoteFiles])].sort().slice(0, MAX_FILES);
-  const sensitive = ZONES.filter((z) => z.text.some((re) => re.test(text2)) || extra?.zones.includes(z.zone) || located.some((f) => z.path.test(f))).map((z) => z.zone);
+  const sensitive = ZONES.filter((z) => !opts.plan && z.text.some((re) => re.test(plain)) || extra?.zones.includes(z.zone) || located.some((f) => z.path.test(f))).map((z) => z.zone);
   const greenfield = repo.gitOk && (repo.commits === 0 || repo.files.length < 5);
   if (!repo.gitOk) reasons.push("git unavailable");
   const wordCount2 = text2.trim().split(/\s+/).length;
@@ -12696,7 +12717,7 @@ function triage(task, repo, validators, extra, opts = {}) {
   if (greenfield && !opts.ignoreGreenfield) {
     path24 = "large";
     reasons.push("greenfield repository");
-  } else if (LARGE.some((re) => re.test(text2))) {
+  } else if (LARGE.some((re) => re.test(headText))) {
     path24 = "large";
     reasons.push("architecture-scale wording");
   } else if (sized > 10) {
@@ -12900,7 +12921,7 @@ var EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 var MODELS = ["opus", "sonnet", "haiku"];
 
 // src/forge/config.ts
-var ROLES = ["impl-heavy", "impl-high", "impl", "impl-light", "mech", "review-correctness", "review-security", "review-perf", "verify"];
+var ROLES = ["impl-heavy", "impl-high", "impl", "impl-light", "mech", "review-correctness", "review-security", "review-perf", "review-final", "verify"];
 var NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
 var WORKFLOWS = ["ask", "forge", "superpowers", "superpowers-design", "superpowers-plan", "off"];
 var AUTONOMIES = ["ask", "auto"];
@@ -13108,6 +13129,7 @@ function parseReview(text2) {
     review.dropped = dropped;
     review.invalid = true;
   }
+  if (r2.complete === false || typeof r2.complete === "string" && r2.complete.trim().toLowerCase() === "false") review.incomplete = true;
   return review;
 }
 function weightsFor(opts) {
@@ -13239,7 +13261,7 @@ function synthesize(reviews, weights, validatorsOk, failingValidators = [], opts
     important,
     minor,
     signature,
-    reviewers: names2.map((n) => ({ name: n, verdict: reviews[n].verdict, confidence: reviews[n].confidence, weight: weights[n], invalid: reviews[n].invalid === true, dropped: reviews[n].dropped ?? 0 })),
+    reviewers: names2.map((n) => ({ name: n, verdict: reviews[n].verdict, confidence: reviews[n].confidence, weight: weights[n], invalid: reviews[n].invalid === true, dropped: reviews[n].dropped ?? 0, incomplete: reviews[n].incomplete === true })),
     deferred
   };
 }
@@ -14351,6 +14373,16 @@ function writeMemo(file, m) {
 var lastLine = (s2) => s2.tail[s2.tail.length - 1] ?? "no output";
 var nulList = (s2) => (s2 ?? "").split("\0").filter(Boolean);
 var trackedChanges = (at) => nulList(at.git(["diff", "--name-only", "-z", "--", ".", ...LOCAL_STATE]));
+function restoringRegenerated(at, fn, into) {
+  const listed = at.git(["diff", "--name-only", "-z", "--", ".", ...LOCAL_STATE]);
+  const before = new Set(nulList(listed));
+  try {
+    return fn();
+  } finally {
+    const back = listed === null ? [] : trackedChanges(at).filter((p) => !before.has(p));
+    if (back.length && at.git(["checkout", "--", ...back.map((p) => `:(top,literal)${p}`)]) !== null) into.push(...back);
+  }
+}
 function worktreeHolding(porcelain, branch) {
   let at = null;
   for (const line2 of (porcelain ?? "").split(/\r?\n/)) {
@@ -14449,6 +14481,12 @@ function writeBaseline(cacheDir, key, sha, results) {
   }
 }
 function mergeIn(at, ref, o) {
+  const regenerated = [];
+  const r2 = mergeAttempt(at, ref, o, regenerated);
+  return regenerated.length ? { ...r2, restored: [...new Set(regenerated)] } : r2;
+}
+function mergeAttempt(at, ref, o, regenerated) {
+  const validating = (where2, owned, fn) => owned ? restoringRegenerated(where2, fn, regenerated) : fn();
   const key = `${o.scope}-${o.target}`;
   const selection = o.scope === "final" ? { mode: "final" } : { mode: "heavy", changed: null };
   const merging = () => at.git(["rev-parse", "-q", "--verify", "MERGE_HEAD"]) !== null;
@@ -14569,7 +14607,7 @@ function mergeIn(at, ref, o) {
     if (unmoved && needsDeps(at)) baseline = [];
     else {
       try {
-        baseline = detected0 ? runValidators(selectValidators(detected0, selection), at.exec, o.timeoutSec) : [];
+        baseline = detected0 ? validating(at, !o.personal, () => runValidators(selectValidators(detected0, selection), at.exec, o.timeoutSec)) : [];
         if (detected0) writeBaseline(o.cacheDir, key, pre, baseline);
       } catch {
         baseline = [];
@@ -14608,7 +14646,8 @@ function mergeIn(at, ref, o) {
   let detected2;
   try {
     detected2 = detectValidators(v.repo, loadConfig(o.configRoot));
-    results = markPreexisting(runValidators(selectValidators(detected2, selection), v.exec, o.timeoutSec), baseline);
+    const chosen = selectValidators(detected2, selection);
+    results = markPreexisting(validating(v, inRun || !o.personal, () => runValidators(chosen, v.exec, o.timeoutSec)), baseline);
   } catch (err) {
     return rollback(`validators could not run: ${err.message}`);
   }
@@ -14664,6 +14703,7 @@ function attemptExtras(r2, es2, ref, personal) {
   return {
     ...r2.setup ? { setup: r2.setup } : {},
     ...r2.leftovers ? { leftovers: r2.leftovers } : {},
+    ...r2.restored?.length ? { restored: r2.restored } : {},
     ...failed?.touchedKept ? { touchedKept: failed.touchedKept } : {},
     ...failed?.restoreSetup ? { restoreSetup: failed.restoreSetup } : {},
     ...failed?.restoreChanged ? { restoreChanged: failed.restoreChanged } : {},
@@ -14683,11 +14723,11 @@ function integrate(rest, io, deps) {
   const out = (v) => ({ code: 0, stdout: JSON.stringify(v) + "\n", stderr: "" });
   const wt = e.kind === "plan" ? runWorktree(io.cwd) : io.cwd;
   const target = deps.at(wt);
-  const head = target.git(["rev-parse", "--abbrev-ref", "HEAD"])?.trim();
+  const head2 = target.git(["rev-parse", "--abbrev-ref", "HEAD"])?.trim();
   if (e.kind === "plan") {
-    if (head !== e.branch) return out({ result: "run-dirty", detail: `${wt} is on ${head ?? "?"}, not ${e.branch}` });
-  } else if (head !== e.branch) {
-    throw new UsageError(`swarm integrate: the main checkout is on ${head ?? "?"}, not ${e.branch} (the branch this ephemeral run started from); switch back to ${e.branch} to integrate ${task}`);
+    if (head2 !== e.branch) return out({ result: "run-dirty", detail: `${wt} is on ${head2 ?? "?"}, not ${e.branch}` });
+  } else if (head2 !== e.branch) {
+    throw new UsageError(`swarm integrate: the main checkout is on ${head2 ?? "?"}, not ${e.branch} (the branch this ephemeral run started from); switch back to ${e.branch} to integrate ${task}`);
   }
   const config = loadConfig(io.cwd);
   const personal = e.kind !== "plan";
@@ -15617,8 +15657,8 @@ function reviewPrep(args, deps) {
   const parent = /^(.+)-\d+$/.exec(id2)?.[1];
   const review = triageReview(events, id2, config.profile) ?? (parent ? triageReview(events.filter((e) => e.task === parent), parent, config.profile) : null);
   if (!review) throw new UsageError(`review-prep: no triage of ${id2}${parent ? ` nor of ${parent}` : ""} logged a review: run FORGE triage --task ${id2} first`);
-  const head = (deps.git(["rev-parse", "HEAD"]) ?? "").trim();
-  if (!head) throw new UsageError("review-prep: cannot read HEAD");
+  const head2 = (deps.git(["rev-parse", "HEAD"]) ?? "").trim();
+  if (!head2) throw new UsageError("review-prep: cannot read HEAD");
   const diff = deps.git(["diff", `${baseSha}..HEAD`]);
   if (diff === null) throw new UsageError(`review-prep: cannot diff ${baseSha}..HEAD`);
   const dir = import_node_path18.default.resolve(deps.cwd, dirArg);
@@ -15705,13 +15745,13 @@ function reviewPrep(args, deps) {
     (0, import_node_fs16.writeFileSync)(import_node_path18.default.join(roundDir, `${c.name}.json`), JSON.stringify({ ...prev, carried: true }, null, 2) + "\n");
   }
   const spawn = plan.spawn.map((s2) => ({ agent: s2.agent, model: s2.model, effort: s2.effort, mode: s2.mode, ...s2.twin ? { twin: true } : {}, role: s2.role, inputs: s2.inputs }));
-  (0, import_node_fs16.writeFileSync)(import_node_path18.default.join(roundDir, "head.txt"), head + "\n");
+  (0, import_node_fs16.writeFileSync)(import_node_path18.default.join(roundDir, "head.txt"), head2 + "\n");
   (0, import_node_fs16.writeFileSync)(planFile, JSON.stringify({
     task,
     round,
     path: pathName,
     base: baseSha,
-    head,
+    head: head2,
     light: review.light,
     flags: review.flags,
     shadow: plan.shadow,
@@ -15891,6 +15931,7 @@ function reviewClose(args, deps) {
     findings,
     deferred: result.deferred,
     invalid: result.reviewers.filter((r2) => r2.invalid).map((r2) => r2.name),
+    incomplete: result.reviewers.filter((r2) => r2.incomplete).map((r2) => r2.name),
     round,
     reasons: result.reasons,
     ...twins.length ? { shadow: twins } : {},
@@ -16631,10 +16672,10 @@ function normalizeUndo(x) {
   switch (x.type) {
     case "git-revert": {
       const base = str5(x.base) && SHA.test(x.base) ? x.base : null;
-      const head = str5(x.head) && SHA.test(x.head) ? x.head : null;
-      if (!base || !head) return null;
+      const head2 = str5(x.head) && SHA.test(x.head) ? x.head : null;
+      if (!base || !head2) return null;
       const cwd2 = text(x.cwd, 500);
-      return cwd2 ? { type: "git-revert", base, head, cwd: cwd2 } : { type: "git-revert", base, head };
+      return cwd2 ? { type: "git-revert", base, head: head2, cwd: cwd2 } : { type: "git-revert", base, head: head2 };
     }
     case "design-reopen": {
       const project = ident(x.project, PROJECT_ID);
@@ -17452,6 +17493,11 @@ function run(argv, io) {
           data = { ...data, why };
         }
         const task = flag("task");
+        if (kind === "triage" && task && data.project === void 0) {
+          const exec = readExecution(mainCheckout(io.cwd));
+          const project = exec?.active && exec.kind === "plan" && Object.hasOwn(exec.tasks, task) ? exec.project : readEvents(io.cwd).filter((e) => e.kind === "triage" && e.task === task && typeof e.project === "string" && e.project).at(-1)?.project;
+          if (project) data = { ...data, project };
+        }
         appendEvent(io.cwd, { ...data, ts: ts(), kind, ...task ? { task } : {} });
         return ok("ok");
       }
@@ -17533,7 +17579,14 @@ function run(argv, io) {
         const extra = planned ? { files: zoneFiles, zones: zonesFromPaths(planned.zones) } : spFiles ? { files: tracked.filter((f) => spFiles.includes(f)), zones: zonesFromPaths(spFiles) } : void 0;
         const catalog = detectValidators(repoReader(repoDir), loadConfig(repoDir)).map((v) => ({ name: v.name, cmd: v.cmd, kind: v.kind, source: v.source }));
         const names2 = catalog.map((v) => v.name);
-        const result = triage(task, { files: tracked, commits, gitOk: listed !== null, grep }, names2, extra, { ignoreGreenfield: planned !== null });
+        const result = triage(
+          task,
+          { files: tracked, commits, gitOk: listed !== null, grep },
+          names2,
+          extra,
+          { ignoreGreenfield: planned !== null, ...planned ? { plan: { title: planned.title } } : {} }
+        );
+        const wordText = planned ? planned.title : task;
         if (planned?.zones.length && !zoneFiles.length) result.reasons.push("zones match no tracked file (new files?)");
         if (spFiles) {
           result.path = "medium";
@@ -17569,13 +17622,13 @@ function run(argv, io) {
             raiseWhy = raise ? raise.why : null;
           }
         }
-        const impl = implementerFor(result, task, { batch: has("batch"), plan: planned !== null });
+        const impl = implementerFor(result, wordText, { batch: has("batch"), plan: planned !== null });
         const profile = loadConfig(repoDir).profile;
         const implementer = { ...impl, agent: impl.role ? agentFor(impl.role, profile) : null };
         const known = readLocal(io.cwd).known;
         const fresh2 = names2.filter((n) => !known.includes(n));
         if (fresh2.length || known.some((n) => !names2.includes(n))) updateLocal(io.cwd, (s2) => ({ ...s2, known: names2 }));
-        const reviewPlan = reviewFor(result.path, result.sensitive, isPerfTask(task), { delicate: has("delicate"), profile });
+        const reviewPlan = reviewFor(result.path, result.sensitive, isPerfTask(wordText), { delicate: has("delicate"), profile });
         const review = { ...reviewPlan, reviewers: reviewPlan.reviewers.map((r2) => ({ ...r2, agent: agentFor(r2.role, profile) })) };
         appendEvent(io.cwd, {
           ts: ts(),
@@ -17615,7 +17668,10 @@ function run(argv, io) {
           scope = { mode: "heavy", changed: diff === null ? null : diff.split("\n").map((s2) => s2.trim()).filter(Boolean) };
         }
         const list = selectValidators(all, scope);
-        let results = runValidators(list, io.exec ?? defaultExec(io.cwd), config.validatorTimeoutSec);
+        const validateRun = () => runValidators(list, io.exec ?? defaultExec(io.cwd), config.validatorTimeoutSec);
+        const restored = [];
+        const inRun = io.workdir !== void 0 && samePath(io.workdir, runWorktree(io.cwd));
+        let results = inRun ? restoringRegenerated({ git: io.git ?? defaultGit(repoDir) }, validateRun, restored) : validateRun();
         if (has("baseline")) {
           if (flag("baseline") === void 0) throw new UsageError("validate: --baseline needs the JSON a validate run printed on the base commit");
           let baseline;
@@ -17630,6 +17686,8 @@ function run(argv, io) {
         appendEvent(io.cwd, { ts: ts(), kind: "validate", ...flag("task") ? { task: flag("task") } : {}, ...has("base-run") ? { baseline: true } : {}, ok: allOk, results: results.map((r2) => ({ validator: r2.validator, ok: r2.ok, flaky: r2.flaky, ...r2.skipped ? { skipped: r2.skipped } : {}, ...r2.preexisting ? { preexisting: true } : {}, ...r2.ok ? {} : { failures: r2.failures } })) });
         const out = json3(results, allOk ? 0 : 1);
         if (!list.length) out.stderr = all.length ? "no validators cover the affected paths\n" : "no validators detected: add tests or list validators in .forge/config.yaml\n";
+        if (restored.length) out.stderr += `restored ${restored.length} tracked file(s) the validators regenerated: ${restored.join(", ")}
+`;
         return out;
       }
       case "verdict": {
@@ -17685,7 +17743,7 @@ function run(argv, io) {
           minor: result.minor.length
         });
         if (verifyFile !== void 0) logVerifyResult(io.cwd, ts(), task, dir, verifyFile);
-        return json3(result);
+        return json3({ ...result, invalid: result.reviewers.filter((r2) => r2.invalid).map((r2) => r2.name), incomplete: result.reviewers.filter((r2) => r2.incomplete).map((r2) => r2.name) });
       }
       case "verify-result": {
         const task = flag("task");
@@ -18109,8 +18167,8 @@ function run(argv, io) {
           forgeDir(io.cwd);
           const status2 = git(["status", "--porcelain", "-z", "-uall"]);
           if (status2 === null) throw new UsageError(`tree snapshot: git status failed in ${repoDir}`);
-          const head = git(["rev-parse", "--verify", "-q", "HEAD"])?.trim() || null;
-          const snap = { task, root: treeRoot, at: ts(), head, ...parseStatus(status2) };
+          const head2 = git(["rev-parse", "--verify", "-q", "HEAD"])?.trim() || null;
+          const snap = { task, root: treeRoot, at: ts(), head: head2, ...parseStatus(status2) };
           (0, import_node_fs21.mkdirSync)(import_node_path23.default.dirname(file), { recursive: true });
           (0, import_node_fs21.writeFileSync)(file, JSON.stringify(snap, null, 2) + "\n");
           return ok(file);
