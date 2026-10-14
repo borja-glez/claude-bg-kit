@@ -1057,15 +1057,38 @@ describe('triage --base', () => {
     expect(out.reasons[0]).toMatch(/^diff: 2 file\(s\)/);
     expect(out.reasons.join(' ')).not.toMatch(/ratchet|files located/);
   });
-  it('a sensitive plan zone keeps a one-file diff at medium, with the security review; its wording alone does not', () => {
-    writeFileSync(path.join(root, 'plan.yaml'), FOOTER_YAML.replace('Add a footer link', 'Change the password check').replace('src/ui/**', 'src/auth/**'));
+  it('a sensitive plan zone keeps a one-file diff at medium, with the security review; wording outside the title does not', () => {
+    writeFileSync(path.join(root, 'plan.yaml'), FOOTER_YAML.replace('Add a footer link', 'Change the footer check').replace('src/ui/**', 'src/auth/**'));
     fakeGit('3\t1\tsrc/ui/footer.ts\n');
     const out = JSON.parse(triageBase().stdout);
     expect(out.path).toBe('medium');
     expect(out.review.reviewers.map((x: { role: string }) => x.role)).toEqual(['review-correctness', 'review-security']);
     expect(out.reasons).toEqual(['diff: 1 file(s), 4 line(s)', 'sensitive zone: auth']);
-    writeFileSync(path.join(root, 'plan.yaml'), FOOTER_YAML.replace('Add a footer link', 'Change the password check'));
+    writeFileSync(path.join(root, 'plan.yaml'), FOOTER_YAML.replace('the footer shows the link', 'the password check passes'));
     expect(JSON.parse(triageBase().stdout).sensitive).toEqual([]);
+  });
+  describe('a plan task titled «Login con Google» on src/server/**', () => {
+    const LOGIN_YAML = FOOTER_YAML.replace('Add a footer link', 'Login con Google').replace('src/ui/**', 'src/server/**');
+    const roleList = (out: { review: { reviewers: { role: string }[] } }) => out.review.reviewers.map(x => x.role);
+    it('takes auth from its title: impl-high and the security reviewer', () => {
+      writeFileSync(path.join(root, 'plan.yaml'), LOGIN_YAML);
+      io.git = args => (args.includes('ls-files') ? 'src/server/users.ts\nsrc/app.ts\na\nb\nc\n' : args.includes('rev-list') ? '7\n' : '');
+      const r = run(['triage', '--plan', 'plan.yaml', '--task', 'T001'], io);
+      expect(r.code).toBe(0);
+      expect(r.stdout).toContain('"sensitive": [\n    "auth"\n  ]');
+      const out = JSON.parse(r.stdout);
+      expect(out.sensitive).toEqual(['auth']);
+      expect(out.implementer.role).toBe('impl-high');
+      expect(roleList(out)).toContain('review-security');
+    });
+    it('with --base and a diff on src/server/users.ts alone it stays Medium with security', () => {
+      writeFileSync(path.join(root, 'plan.yaml'), LOGIN_YAML);
+      fakeGit('12\t2\tsrc/server/users.ts\n');
+      const out = JSON.parse(triageBase().stdout);
+      expect(out.path).toBe('medium');
+      expect(out.sensitive).toEqual(['auth']);
+      expect(roleList(out)).toEqual(['review-correctness', 'review-security']);
+    });
   });
   it('across sizings the size only goes up: an earlier --base medium keeps a later one-file diff at medium', () => {
     writeFileSync(path.join(root, 'plan.yaml'), FOOTER_YAML);
@@ -1229,11 +1252,11 @@ tasks:
     expect(roles(out)).toEqual(['review-correctness']);
     expect(out.implementer.role).not.toBe('impl-high');
   });
-  it('T021: its title «Sesión» sola no marca la zona auth gives no auth zone', () => {
+  it('T021: its title «Sesión» sola no marca la zona auth gives auth through the bare word «auth»', () => {
     const out = triagePlan('T021');
-    expect(out.sensitive).toEqual([]);
-    expect(roles(out)).toEqual(['review-correctness']);
-    expect(out.implementer.role).not.toBe('impl-high');
+    expect(out.sensitive).toEqual(['auth']);
+    expect(roles(out)).toEqual(['review-correctness', 'review-security']);
+    expect(out.implementer.role).toBe('impl-high');
   });
   it('T013: its title gives no perf review although its text names forge-review-perf', () => {
     const out = triagePlan('T013');

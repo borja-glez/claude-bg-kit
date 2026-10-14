@@ -400,8 +400,35 @@ describe('a mention in the text does not decide the triage', () => {
     expect(isPerfTask('Revisores en high con modo delta, y forge:run revisa con review-prep y review-close')).toBe(false);
     expect(isPerfTask('forge-review-correctness, forge-review-security y forge-review-perf pasan a effort high')).toBe(false);
   });
-  it('T021: a plan task titled «Sesión» sola no marca la zona auth takes no zone from its words', () => {
-    expect(triage('«Sesión» sola no marca la zona auth', repo(), [], { files: [], zones: [] }, { plan: { title: '«Sesión» sola no marca la zona auth' } }).sensitive).toEqual([]);
+  it('T021: a plan task titled «Sesión» sola no marca la zona auth takes auth from the bare word «auth» in its title', () => {
+    expect(triage('«Sesión» sola no marca la zona auth', repo(), [], { files: [], zones: [] }, { plan: { title: '«Sesión» sola no marca la zona auth' } }).sensitive).toEqual(['auth']);
+  });
+  describe('a plan task also takes its zones from its title, its mentions removed', () => {
+    const planZones = (title: string, files: string[] = [], text = title) =>
+      triage(text, repo(), [], { files, zones: [] }, { plan: { title } }).sensitive;
+    it('«Login con Google» on src/server/users.ts gives auth', () => {
+      expect(planZones('Login con Google', ['src/server/users.ts'])).toEqual(['auth']);
+    });
+    it('«Migración de la tabla de usuarios» gives data', () => {
+      expect(planZones('Migración de la tabla de usuarios')).toEqual(['data']);
+    });
+    it.each([
+      ['T001', 'Esfuerzo fijo en impl-light, mech y fable, y el test que lo exige'],
+      ['T003', 'Sesiones miembro con esfuerzo propio: configuración, lanzamiento y reanudación'],
+      ['T005', 'Escalera de cinco peldaños, last y el implementer de round'],
+      ['T007', 'Esfuerzo de los revisores y review en todo triage'],
+      ['T013', 'Revisores en high con modo delta, y forge:run revisa con review-prep y review-close'],
+      ['T017', 'Versiones, CHANGELOG y README'],
+    ])('%s of the forge-cost plan: its real title gives no zone', (_id, title) => {
+      expect(planZones(title)).toEqual([]);
+    });
+    it('a mention in the title gives no zone', () => {
+      expect(planZones('Ajusta el texto de `--auth`')).toEqual([]);
+      expect(planZones('Renombra «auth» a «login» en los textos')).toEqual([]);
+    });
+    it('includes and done_when still give no zone', () => {
+      expect(planZones('Ajusta el formulario', [], 'Ajusta el formulario. El login valida la password y la migración del schema')).toEqual([]);
+    });
   });
   it('a plan task takes its zones from paths and its Large wording from its title, never from its prose', () => {
     const plan = { plan: { title: 'Versiones, CHANGELOG y README' } };

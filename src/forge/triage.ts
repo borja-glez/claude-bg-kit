@@ -313,8 +313,8 @@ const PATH_TOKEN = /[\w.\-/]*[\w-]\.[A-Za-z0-9]{1,8}\b|[\w.-]+\/[\w.\-/]+/g;
 const isSymbol = (w: string) => w.length >= 4 && (/[a-z][A-Z]/.test(w) || /^[A-Za-z]+_[A-Za-z0-9_]+$/.test(w));
 
 // `ignoreGreenfield`: a plan task was already designed and planned, so a young repository does not make it Large.
-// `plan`: a plan task takes its zones only from paths (its plan zones, the files located) and its Large wording from
-// its title; file location and sizing still read the whole text.
+// `plan`: a plan task takes its zones from paths (its plan zones, the files located) and from its title, and its Large
+// wording from its title; file location and sizing still read the whole text.
 export function triage(task: string, repo: RepoFacts, validators: string[], extra?: { files: string[]; zones: Zone[] },
   opts: { ignoreGreenfield?: boolean; plan?: { title: string } } = {}): TriageResult {
   const reasons: string[] = [];
@@ -342,7 +342,9 @@ export function triage(task: string, repo: RepoFacts, validators: string[], extr
   }
 
   const located = [...new Set([...files, ...quoteFiles])].sort().slice(0, MAX_FILES);
-  const sensitive = ZONES.filter(z => (!opts.plan && z.text.some(re => re.test(plain))) || extra?.zones.includes(z.zone) || located.some(f => z.path.test(f))).map(z => z.zone);
+  // A plan task's words give a zone only through its title (headText); its includes and done_when never do.
+  const zoneText = opts.plan ? headText : plain;
+  const sensitive = ZONES.filter(z => z.text.some(re => re.test(zoneText)) || extra?.zones.includes(z.zone) || located.some(f => z.path.test(f))).map(z => z.zone);
   // Greenfield only when git answered: a failed git call says nothing about the repository.
   const greenfield = repo.gitOk && (repo.commits === 0 || repo.files.length < 5);
   if (!repo.gitOk) reasons.push('git unavailable');
