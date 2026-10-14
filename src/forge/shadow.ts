@@ -7,6 +7,8 @@ import type { Finding } from './verdict.js';
 // Shadow test: for N briefs each reviewer running at high gets an xhigh twin; the cases compare their blockers.
 // The state lives in .forge/shadow.json of the main checkout, as local.yaml does, so every worktree of the repository
 // (a run member's, a task's) sees the test opened there. It is forge work and stays out of git.
+// There is no lock: two worktrees that count a brief at the same moment can each read the file before the other writes,
+// so one count (or one case) may be lost. The trial is advisory and short, so that small race is accepted.
 
 export interface ShadowCase {
   task: string;

@@ -166,6 +166,7 @@ elsewhere and are reconstructed from their READMEs.
 #### Changed
 - Every forge agent pins its `model` and `effort`: `forge-mech` low, `forge-impl-light` medium, `forge-fable` high; the reviewers' frontmatter is high.
 - Reviewer effort follows the risk: correctness high (xhigh on sensitive or delicate work and in Large's final review), security high (xhigh on `auth`), perf medium; the `quality` profile puts them all on xhigh. Every triage prints `review`, also a Medium task outside a plan, and the review launches exactly those reviewers with their model and effort.
+- `/forge:review` follows the triage's review, sized by the branch's real diff (`triage --base`): one light Sonnet review below Medium, else the reviewers at the effort of the table above, and perf when asked (also below Medium). `triage --delicate` marks the work delicate, so correctness reviews at xhigh.
 - `impl-heavy` (xhigh) is kept for the last attempt before the breaker (round 3 on Medium, 4 on Large) and for the fix of Large's final review.
 - The `economy` profile steps implementers down one rung (`impl-heavy` → `forge-impl-high`, `impl-high` → `forge-impl`, `impl` → `forge-impl-light`) and `quality` steps them up (`impl` and `impl-high` → `forge-impl-heavy`).
 - In an execution, each stage change is published in one ArtifactData batch.
@@ -395,7 +396,7 @@ elsewhere and are reconstructed from their READMEs.
 ### 0.11.3 — 2026-10-14
 
 #### Added
-- forge's new `forge-impl-high` implementer shows as `high`, in its own colour between `impl` and `heavy` on the implementer ladder.
+- forge's new `forge-impl-high` implementer shows as `high`, in its own colour, rank 4 of the implementer ladder.
 
 ### 0.11.2 — 2026-10-13
 

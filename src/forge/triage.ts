@@ -128,7 +128,10 @@ export interface ReviewOptions { delicate?: boolean; final?: boolean; profile?: 
  * (xhigh on auth), perf medium; the quality profile puts them all on xhigh.
  */
 export function reviewFor(path: PathName, sensitive: Zone[], perf: boolean, opts: ReviewOptions = {}): ReviewPlan {
-  if (path === 'trivial' || path === 'small') return { light: true, reviewers: [{ role: 'review-correctness', model: 'sonnet', effort: 'medium' }], flags: [] };
+  // Below Medium: the light correctness review, plus review-perf when performance was asked for.
+  if (path === 'trivial' || path === 'small') return { light: true,
+    reviewers: [{ role: 'review-correctness', model: 'sonnet', effort: 'medium' }, ...(perf ? [{ role: 'review-perf' as const, model: null, effort: 'medium' as const }] : [])],
+    flags: perf ? ['--perf'] : [] };
   const roles: ReviewRole[] = ['review-correctness', ...(sensitive.length ? ['review-security' as const] : []), ...(perf ? ['review-perf' as const] : [])];
   const effort = (role: ReviewRole): ReviewEffort => {
     if (opts.profile === 'quality') return 'xhigh';
@@ -208,9 +211,10 @@ export function announceReview(a: { path: PathName; files: number; lines: number
   const names = a.review.reviewers.map(r => r.role.replace(/^review-/, ''));
   const and = spanish ? ' y ' : ' and ';
   const list = names.length > 1 ? `${names.slice(0, -1).join(', ')}${and}${names.at(-1)}` : names.join('');
+  const perf = a.review.reviewers.some(r => r.role === 'review-perf') ? `${and}perf` : '';
   if (spanish) return `Tamaño real: ${a.files} fichero(s), ${a.lines} línea(s) → ${name}: `
-    + (a.review.light ? 'una revisión ligera (correctness en sonnet).' : `revisan ${list}.`);
-  return `Real size: ${a.files} file(s), ${a.lines} line(s) → ${name}: ` + (a.review.light ? 'one light review (correctness on sonnet).' : `reviewed by ${list}.`);
+    + (a.review.light ? `una revisión ligera (correctness en sonnet)${perf}.` : `revisan ${list}.`);
+  return `Real size: ${a.files} file(s), ${a.lines} line(s) → ${name}: ` + (a.review.light ? `one light review (correctness on sonnet)${perf}.` : `reviewed by ${list}.`);
 }
 
 // Quoted spans («…», "…", “…”), unbounded so that a long quote never pairs a closing mark with the next opening one.

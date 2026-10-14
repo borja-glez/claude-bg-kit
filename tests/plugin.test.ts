@@ -287,10 +287,11 @@ describe('plugin layout', () => {
     const md = read('plugins/forge/skills/review/SKILL.md');
     const step4 = md.slice(md.indexOf('4. **Diff and zones.**'), md.indexOf('5. **Brief.**'));
     const step6 = md.slice(md.indexOf('6. **Review.**'), md.indexOf('7. **Report.**'));
-    for (const w of ['«Review its performance too.»', '`review`']) expect(step4).toContain(w);
-    for (const w of ["step-4 triage's `review.reviewers`", "the Agent tool's `effort`", "the Agent tool's `model` when the reviewer's is not null", 'same effort and model'])
-      expect(step6).toContain(w);
+    for (const w of ['«Review its performance too.»', '`review`', 'FORGE triage --task <id> --text-file .forge/work/<id>/task.txt --base <base>']) expect(step4).toContain(w);
+    for (const w of ["step-4 triage's `review.reviewers`", "the Agent tool's `effort`", "the Agent tool's `model` when the reviewer's is not null", 'same effort and model',
+      'each as subagent type `forge:<agent>`']) expect(step6).toContain(w);
     expect(step6).not.toContain('agents from `FORGE agents`');
+    expect(step6).not.toContain('each as its `agent`');
     const run = read('plugins/forge/skills/run/SKILL.md');
     const medium2 = run.slice(run.indexOf('\n2. For each task, write'), run.indexOf('\n3. Do not validate'));
     expect(medium2).toContain('run Triage step 1 again with `--delicate`');

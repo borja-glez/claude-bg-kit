@@ -12552,7 +12552,11 @@ function isPerfTask(text2) {
   return PERF.some((re) => re.test(t));
 }
 function reviewFor(path24, sensitive, perf, opts = {}) {
-  if (path24 === "trivial" || path24 === "small") return { light: true, reviewers: [{ role: "review-correctness", model: "sonnet", effort: "medium" }], flags: [] };
+  if (path24 === "trivial" || path24 === "small") return {
+    light: true,
+    reviewers: [{ role: "review-correctness", model: "sonnet", effort: "medium" }, ...perf ? [{ role: "review-perf", model: null, effort: "medium" }] : []],
+    flags: perf ? ["--perf"] : []
+  };
   const roles = ["review-correctness", ...sensitive.length ? ["review-security"] : [], ...perf ? ["review-perf"] : []];
   const effort = (role) => {
     if (opts.profile === "quality") return "xhigh";
@@ -12618,8 +12622,9 @@ function announceReview(a, locale) {
   const names2 = a.review.reviewers.map((r2) => r2.role.replace(/^review-/, ""));
   const and = spanish2 ? " y " : " and ";
   const list = names2.length > 1 ? `${names2.slice(0, -1).join(", ")}${and}${names2.at(-1)}` : names2.join("");
-  if (spanish2) return `Tama\xF1o real: ${a.files} fichero(s), ${a.lines} l\xEDnea(s) \u2192 ${name}: ` + (a.review.light ? "una revisi\xF3n ligera (correctness en sonnet)." : `revisan ${list}.`);
-  return `Real size: ${a.files} file(s), ${a.lines} line(s) \u2192 ${name}: ` + (a.review.light ? "one light review (correctness on sonnet)." : `reviewed by ${list}.`);
+  const perf = a.review.reviewers.some((r2) => r2.role === "review-perf") ? `${and}perf` : "";
+  if (spanish2) return `Tama\xF1o real: ${a.files} fichero(s), ${a.lines} l\xEDnea(s) \u2192 ${name}: ` + (a.review.light ? `una revisi\xF3n ligera (correctness en sonnet)${perf}.` : `revisan ${list}.`);
+  return `Real size: ${a.files} file(s), ${a.lines} line(s) \u2192 ${name}: ` + (a.review.light ? `one light review (correctness on sonnet)${perf}.` : `reviewed by ${list}.`);
 }
 var QUOTED = /«([^«»]*)»|"([^"]*)"|“([^“”]*)”/g;
 var MAX_QUOTED = 3;

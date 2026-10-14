@@ -294,10 +294,14 @@ describe('real diff sizing', () => {
     expect(isPerfTask('fix the login form')).toBe(false);
     expect(isPerfTask('añade un botón de exportar')).toBe(false);
   });
-  it('reviewFor: light below medium, full reviewers by zone and perf from medium up', () => {
+  it('reviewFor: light below medium (plus perf when asked), full reviewers by zone and perf from medium up', () => {
     const light = [{ role: 'review-correctness', model: 'sonnet', effort: 'medium' }];
-    expect(reviewFor('small', ['auth'], true)).toEqual({ light: true, reviewers: light, flags: [] });
+    const perf = { role: 'review-perf', model: null, effort: 'medium' };
+    expect(reviewFor('small', ['auth'], false)).toEqual({ light: true, reviewers: light, flags: [] });
     expect(reviewFor('trivial', [], false)).toEqual({ light: true, reviewers: light, flags: [] });
+    // A perf request below Medium keeps the light correctness review and adds review-perf.
+    expect(reviewFor('small', ['auth'], true)).toEqual({ light: true, reviewers: [...light, perf], flags: ['--perf'] });
+    expect(reviewFor('trivial', [], true)).toEqual({ light: true, reviewers: [...light, perf], flags: ['--perf'] });
     const full = (role: string, effort: string) => ({ role, model: null, effort });
     expect(reviewFor('medium', [], false)).toEqual({ light: false, reviewers: [full('review-correctness', 'high')], flags: [] });
     expect(reviewFor('medium', ['auth'], false))
@@ -339,6 +343,9 @@ describe('real diff sizing', () => {
     const small = { path: 'small' as const, files: 2, lines: 30, review: reviewFor('small', [], false) };
     expect(announceReview(small, 'en')).toBe('Real size: 2 file(s), 30 line(s) → Small: one light review (correctness on sonnet).');
     expect(announceReview(small, 'es')).toBe('Tamaño real: 2 fichero(s), 30 línea(s) → Small: una revisión ligera (correctness en sonnet).');
+    const smallPerf = { ...small, review: reviewFor('small', [], true) };
+    expect(announceReview(smallPerf, 'en')).toBe('Real size: 2 file(s), 30 line(s) → Small: one light review (correctness on sonnet) and perf.');
+    expect(announceReview(smallPerf, 'es')).toBe('Tamaño real: 2 fichero(s), 30 línea(s) → Small: una revisión ligera (correctness en sonnet) y perf.');
     const all = { path: 'medium' as const, files: 5, lines: 90, review: reviewFor('medium', ['auth'], true) };
     expect(announceReview(all, 'en')).toBe('Real size: 5 file(s), 90 line(s) → Medium: reviewed by correctness, security and perf.');
     expect(announceReview(all, 'es')).toBe('Tamaño real: 5 fichero(s), 90 línea(s) → Medium: revisan correctness, security y perf.');
