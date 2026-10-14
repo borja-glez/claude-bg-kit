@@ -178,8 +178,8 @@ describe('forge review-prep', () => {
     expect(run(['review-close'], io).stderr).toMatch(/review-close/);
   });
 
-  it('prep and shadow answer with a usage error until they exist', () => {
-    for (const cmd of ['prep', 'shadow']) {
+  it('prep answers with a usage error until it exists', () => {
+    for (const cmd of ['prep']) {
       const r = run([cmd], io);
       expect(r.code).toBe(2);
       expect(r.stderr).toContain(cmd);
@@ -269,6 +269,72 @@ describe('forge review-close', () => {
     const again = JSON.parse(close().stdout);
     expect(again).toMatchObject({ action: 'accept', round: 1 });
     expect(new Set(readEvents(root).filter(e => e.kind === 'verdict').map(e => e.dir))).toEqual(new Set(['.forge/work/T1/reviews-1-1']));
+  });
+
+  it('with the shadow test open: the twin does not change the verdict, the case is saved once, round 2 has no twin', () => {
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'shadow.json'), JSON.stringify({ remaining: 2, cases: [] }));
+    const p1 = JSON.parse(prep().stdout);
+    expect(p1.spawn.filter((s: { twin?: boolean }) => s.twin).map((s: { role: string; effort: string; inputs: { out: string } }) => [s.role, s.effort, s.inputs.out]))
+      .toEqual([['review-security', 'xhigh', '.forge/work/T1/reviews-1-1/shadow']]);
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }, { severity: 'minor', problem: 'style' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [{ severity: 'important', file: 'a.txt', line: 1, problem: 'token logged in plain text' }] });
+    // Without the twin's file the round still closes; no case is saved.
+    const without = close();
+    expect(without.code).toBe(0);
+    const a = JSON.parse(without.stdout);
+    expect(JSON.parse(readFileSync(path.join(root, '.forge', 'shadow.json'), 'utf8')).cases).toEqual([]);
+    // With the twin's file (a critical high missed and the same token finding), the verdict is the same.
+    write(path.join(r1(), 'shadow'), 'security', { verdict: 'fail', confidence: 0.9, findings: [
+      { severity: 'critical', file: 'b.txt', line: 20, problem: 'path traversal in upload' },
+      { severity: 'important', file: 'a.txt', line: 2, problem: 'token logged in plain text' },
+    ] });
+    const b = JSON.parse(close().stdout);
+    expect({ action: b.action, score: b.score, findings: b.findings }).toEqual({ action: a.action, score: a.score, findings: a.findings });
+    expect(b.shadow).toEqual(['security']);
+    const findings = JSON.parse(readFileSync(path.join(work(), 'findings-1-1.json'), 'utf8')).findings.map((f: { problem: string }) => f.problem);
+    expect(findings).toEqual(['wrong two', 'token logged in plain text']);
+    const cases = () => JSON.parse(readFileSync(path.join(root, '.forge', 'shadow.json'), 'utf8')).cases;
+    expect(cases()).toHaveLength(1);
+    expect(cases()[0]).toMatchObject({ task: 'T1-1', reviewer: 'security', recovered: [{ problem: 'token logged in plain text' }],
+      missedCritical: [{ problem: 'path traversal in upload' }], highOnly: [] });
+    // Closing the same round again replaces the case and does not log the ruling twice.
+    close();
+    expect(cases()).toHaveLength(1);
+    expect(readEvents(root).filter(e => e.kind === 'ruling')).toHaveLength(1);
+
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo fixed\n');
+    git('commit', '-q', '-am', 'fix');
+    const p2 = JSON.parse(prep().stdout);
+    expect(p2.round).toBe(2);
+    expect(p2.spawn.filter((s: { twin?: boolean }) => s.twin)).toEqual([]);
+    expect(JSON.parse(readFileSync(path.join(root, '.forge', 'shadow.json'), 'utf8')).remaining).toBe(1);
+  });
+
+  it('closing a round again with an accept removes the findings file the earlier fix left', () => {
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    expect(JSON.parse(close().stdout).action).toBe('fix');
+    expect(existsSync(path.join(work(), 'findings-1-1.json'))).toBe(true);
+    write(r1(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    expect(JSON.parse(close().stdout)).toMatchObject({ action: 'accept', findings: null });
+    expect(existsSync(path.join(work(), 'findings-1-1.json'))).toBe(false);
+  });
+
+  it.skipIf(process.platform !== 'win32')('round 2: a Git Bash style /c/... finding path is made repo-relative', () => {
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    close();
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo fixed\n');
+    git('commit', '-q', '-am', 'fix');
+    prep();
+    const bash = '/' + wt[0].toLowerCase() + wt.slice(2).replace(/\\/g, '/') + '/a.txt';
+    write(r2(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: bash, line: 2, problem: 'still wrong', origin: 'untouched' }] });
+    const out = JSON.parse(close().stdout);
+    expect(out.action).toBe('fix');
+    expect(out.deferred).toEqual([]);
   });
 
   it('requires its flags and a prepared round', () => {
