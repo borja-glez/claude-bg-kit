@@ -70,8 +70,8 @@ export function stripMentions(text: string): string {
     .replace(COMPOUND, m => m.replace(/[\p{L}\p{N}]/gu, 'x'));
 }
 // The task's head: its first sentence with some content (up to `.`, `!`, `?` or `:` before whitespace or the end, or a
-// line break), after the method and courtesy that may open it («Con forge:», "please"). A label of one or two words
-// before a colon («Refactor: rewrite …») is not the head: the sentence after it is. A word later in the text describes
+// line break), after the method and courtesy that may open it («Con forge:», "please"). One or two words before a colon
+// («Refactor: rewrite …», «Rename fooBar: it is confusing») read together with the sentence after them. A word later in the text describes
 // something else («… que el validador regeneró»).
 function head(text: string): string {
   const t = text.replace(METHOD, '').replace(COURTESY, '');
@@ -79,7 +79,7 @@ function head(text: string): string {
   const full = parts.filter(p => /[\p{L}\p{N}]/u.test(p.s));
   if (!full.length) return '';
   const label = full[0].end === ':' && full[0].s.trim().split(/\s+/).length <= 2 && full.length > 1;
-  return label ? full[1].s : full[0].s;
+  return label ? `${full[0].s} ${full[1].s}` : full[0].s;
 }
 /** Mechanical: the head of the text, its mentions removed, reads as mechanical work. */
 export function isMechanical(text: string): boolean {

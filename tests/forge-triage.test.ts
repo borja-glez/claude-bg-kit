@@ -440,6 +440,11 @@ describe('a mention in the text does not decide the triage', () => {
     expect(isMechanical('please: rename fooBar to bazQux')).toBe(true);
     expect(isMechanical('Por favor, renombra fooBar a bazQux')).toBe(true);
     expect(isMechanical('Chore: bump the version to 2.1.0')).toBe(true);
+    // A two-word imperative before a colon is part of the head, read with the sentence after it.
+    expect(isMechanical('Renombra fooBar: usa bazQux')).toBe(true);
+    expect(isMechanical('Rename fooBar: it is confusing')).toBe(true);
+    expect(isMechanical('Bump version: 2.1.0')).toBe(true);
+    expect(triage('Rewrite billing: start with the invoices', repo(), []).path).toBe('large');
     // A prohibition ends at a comma that opens the next instruction.
     expect(triage('No cambies la API pública, pero arregla el login', repo(), []).sensitive).toContain('auth');
     expect(triage("Don't touch the README, but fix the login", repo(), []).sensitive).toContain('auth');
