@@ -541,7 +541,13 @@ describe('plugin layout', () => {
     for (const w of ['FORGE swarm propose --plan', 'git -C .claude/worktrees/run diff', '--no-merged forge/run-', '--cwd .claude/worktrees/run']) expect(runRef('large')).toContain(w);
     expect(read('plugins/forge/skills/infinite/SKILL.md')).not.toContain("the tick's `progress`");
     const inf = read('plugins/forge/skills/infinite/SKILL.md');
-    expect(inf).toContain('Execution step');
+    // Citations point to where the text lives now: the references of forge:run.
+    expect(inf).toContain('`references/execution.md` step');
+    for (const s of [inf, read('plugins/forge/skills/stop/SKILL.md')]) for (const w of ['Execution step', 'Large step', '`## Autonomy`', '`## Decisions`']) expect(s).not.toContain(w);
+    expect(read('plugins/forge/skills/review/SKILL.md')).toContain('**Loose ids** in forge:run `references/ephemeral.md`');
+    expect(read('plugins/waypoint/skills/work/SKILL.md')).toContain('`references/large.md` step 3');
+    expect(runRef('decisions')).not.toContain('as the paths below say');
+    expect(runRef('large')).not.toContain('(a run member, below)');
     expect(inf).not.toContain('Swarm step');
     expect(read('plugins/forge/skills/stop/SKILL.md')).toContain('meta/run');
   });
@@ -645,6 +651,38 @@ describe('plugin layout', () => {
     }
     for (const w of ['FORGE swarm propose --plan', 'FORGE swarm integrate <T>', 'FORGE swarm start --project loose', 'FORGE sp-plan check', 'FORGE swarm join --session <SID> --role manual',
       'FORGE swarm takeover', '| `design-apply` |', '"type": "design-reopen"', 'final-validators.json', 'An unattended execution never stops to ask']) expect(run, w).not.toContain(w);
+  });
+  it('forge:run core: at most 25 KB, every cited reference exists, each path opens with the order to read its reference', () => {
+    const run = read('plugins/forge/skills/run/SKILL.md');
+    expect(Buffer.byteLength(run, 'utf8')).toBeLessThanOrEqual(25600);
+    // Every references/<file>.md cited by a skill of forge or waypoint exists in forge:run's references.
+    const files: string[] = [];
+    for (const p of ['forge', 'waypoint']) {
+      for (const s of readdirSync(new URL(`../plugins/${p}/skills/`, import.meta.url))) {
+        const dir = `plugins/${p}/skills/${s}`;
+        if (existsSync(new URL(`../${dir}/SKILL.md`, import.meta.url))) files.push(`${dir}/SKILL.md`);
+        if (existsSync(new URL(`../${dir}/references/`, import.meta.url))) {
+          for (const r of readdirSync(new URL(`../${dir}/references/`, import.meta.url))) if (r.endsWith('.md')) files.push(`${dir}/references/${r}`);
+        }
+      }
+    }
+    let cited = 0;
+    for (const f of files) {
+      for (const m of read(f).matchAll(/references\/([A-Za-z0-9_-]+)\.md/g)) {
+        cited++;
+        expect(existsSync(new URL(`../plugins/forge/skills/run/references/${m[1]}.md`, import.meta.url)), `${f} cites references/${m[1]}.md`).toBe(true);
+      }
+    }
+    expect(cited).toBeGreaterThan(0);
+    // Each path that lives in a reference opens with the order to read it.
+    const lines = run.split(/\r?\n/);
+    for (const [heading, ref] of [['### Superpowers plan', 'superpowers-plan'], ['## Large', 'large'], ['## Execution', 'execution'], ['### Manual member', 'manual-member'],
+      ['### Unattended', 'execution'], ['### Ephemeral execution', 'ephemeral'], ['## Resuming', 'resuming']] as const) {
+      const at = lines.indexOf(heading);
+      expect(at, heading).toBeGreaterThan(-1);
+      const first = lines.slice(at + 1).find(l => l.trim() !== '')!;
+      expect(first, heading).toMatch(new RegExp(`^Read (\`### [A-Za-z ]+\` in )?\`references/${ref}\\.md\` now`));
+    }
   });
   it('reviewers at high with the delta mode; Medium and the task steps review with review-prep and review-close', () => {
     for (const [name, key] of [['correctness', 'correctness'], ['security', 'security'], ['perf', 'perf']]) {

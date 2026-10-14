@@ -69,4 +69,4 @@ A run member never integrates and never merges: the coordinator integrates `task
 
 ## 6. Resume
 
-When SessionStart says to resume this session with /forge:member, it already joined: run `join` again with the same flags (step 1.5), renew both leases and continue from the last stage you reported (`<MAIN>/.forge/execution/<T>.json`, and `.forge/work/<T>/` in this task worktree). A manual member (role `manual`) resumed this way is not a run member: invoke forge:run --join and follow its `### Manual member` instead.
+When SessionStart says to resume this session with /forge:member, it already joined: run `join` again with the same flags (step 1.5), renew both leases and continue from the last stage you reported (`<MAIN>/.forge/execution/<T>.json`, and `.forge/work/<T>/` in this task worktree). A manual member (role `manual`) resumed this way is not a run member: invoke forge:run --join and follow its `### Manual member` (`references/manual-member.md`) instead.
