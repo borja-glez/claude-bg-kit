@@ -207,12 +207,50 @@ describe('forge review-prep', () => {
     expect(run(['review-close'], io).stderr).toMatch(/review-close/);
   });
 
-  it('prep answers with a usage error until it exists', () => {
-    for (const cmd of ['prep']) {
-      const r = run([cmd], io);
+});
+
+describe('forge prep', () => {
+  const head = () => git('rev-parse', 'HEAD');
+
+  it('writes baseline-<n>.json, logs the phase with the brief and the base, and prints the worktree HEAD', () => {
+    rmSync(path.join(work(), 'baseline-1.json'));
+    const r = run(['prep', '--task', 'T1-1', '--path', 'medium', '--cwd', wt], io);
+    expect(r.stderr).toBe('');
+    expect(r.code).toBe(0);
+    const out = JSON.parse(r.stdout);
+    expect(out.base).toBe(head());
+    expect(out.baseline).toBe('.forge/work/T1/baseline-1.json');
+    const baseline = JSON.parse(readFileSync(path.join(work(), 'baseline-1.json'), 'utf8'));
+    expect(baseline.map((v: { validator: string; ok: boolean }) => [v.validator, v.ok])).toEqual([['check', true]]);
+    const events = readEvents(root);
+    const phase = events.filter(e => e.kind === 'phase').at(-1)!;
+    expect(phase).toMatchObject({ task: 'T1', phase: 'implement', brief: 1, base: head() });
+    expect(events.some(e => e.kind === 'validate' && e.task === 'T1-1' && e.baseline === true)).toBe(true);
+  });
+
+  it('a failing validator on the base is recorded in the baseline and prep still exits 0; --phase and --dir are honoured', () => {
+    writeFileSync(path.join(wt, '.forge', 'config.yaml'), 'detect: false\nvalidators:\n  - name: check\n    cmd: node -e "process.exit(1)"\n');
+    const r = run(['prep', '--task', 'T1-2', '--path', 'large', '--phase', 'review', '--dir', 'w/x', '--cwd', wt], io);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ base: head(), baseline: 'w/x/baseline-2.json', failing: ['check'] });
+    const baseline = JSON.parse(readFileSync(path.join(root, 'w', 'x', 'baseline-2.json'), 'utf8'));
+    expect(baseline[0]).toMatchObject({ validator: 'check', ok: false });
+    expect(readEvents(root).filter(e => e.kind === 'phase').at(-1)).toMatchObject({ task: 'T1', phase: 'review', brief: 2, base: head() });
+  });
+
+  it('the baseline then excuses that failure in review-prep', () => {
+    writeFileSync(path.join(wt, '.forge', 'config.yaml'), 'detect: false\nvalidators:\n  - name: check\n    cmd: node -e "process.exit(1)"\n');
+    const b = JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'medium', '--cwd', wt], io).stdout).base;
+    const out = JSON.parse(run(['review-prep', '--task', 'T1-1', '--path', 'medium', '--base', b, '--baseline', '.forge/work/T1/baseline-1.json',
+      '--dir', '.forge/work/T1', '--cwd', wt], io).stdout);
+    expect(out.validators).toMatchObject({ ok: true, preexisting: ['check'] });
+  });
+
+  it('requires --task <id>-<n> and a known --path', () => {
+    for (const a of [['prep'], ['prep', '--task', 'T1-1'], ['prep', '--task', 'T1', '--path', 'medium'], ['prep', '--task', 'T1-1', '--path', 'huge']]) {
+      const r = run([...a, '--cwd', wt], io);
       expect(r.code).toBe(2);
-      expect(r.stderr).toContain(cmd);
-      expect(r.stderr).not.toMatch(/^usage: forge </);
+      expect(r.stderr).toContain('prep');
     }
   });
 });
