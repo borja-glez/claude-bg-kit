@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Finding } from '../src/forge/verdict.js';
@@ -58,6 +59,31 @@ describe('shadow state', () => {
     startShadow(root);
     writeFileSync(shadowFile(root), '{nope');
     expect(readShadow(root)).toBeNull();
+  });
+});
+
+describe('shadow state in a linked worktree', () => {
+  it('a test opened in the main checkout is seen, spent and fed from a worktree', () => {
+    const root = tmp();
+    const main = path.join(root, 'main');
+    mkdirSync(main);
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: main, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 'a@b.c');
+    git('config', 'user.name', 't');
+    writeFileSync(path.join(main, 'a.txt'), 'a\n');
+    git('add', 'a.txt');
+    git('commit', '-qm', 'init');
+    const wt = path.join(root, 'wt');
+    git('worktree', 'add', '-q', wt, '-b', 'task');
+    startShadow(main, 2);
+    expect(readShadow(wt)).toEqual({ remaining: 2, cases: [] });
+    expect(takeBrief(wt)).toBe(true);
+    expect(readShadow(main)?.remaining).toBe(1);
+    addCase(wt, buildCase('T1', 'correctness', [], [f('important', 'x', 'a.ts', 1)]));
+    expect(readShadow(main)?.cases).toHaveLength(1);
+    expect(path.resolve(shadowFile(wt))).toBe(path.resolve(main, '.forge', 'shadow.json'));
+    expect(existsSync(path.join(wt, '.forge', 'shadow.json'))).toBe(false);
   });
 });
 

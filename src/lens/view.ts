@@ -32,13 +32,14 @@ export const SECTION_ICON: Record<SectionId, string> = {
   roadmap: '◆', forge: '◈', superpowers: '✦', todos: '≡', agents: '◎', tasks: '▤', now: '▸',
 };
 
-// An agent's level: forge's implementer ladder from cool to warm, the reviewers by what they judge.
+// An agent's level: forge's implementer ladder from cool to warm, the reviewers by what they judge. impl-high is peach,
+// the one palette hue no other agent uses (lavender is the planner's and the fallback for unknown agents).
 export interface Tier { label: string; hue: Hue; rank: number | null }
 const TIERS: Record<string, Tier> = {
   'forge-mech': { label: 'mech', hue: 'teal', rank: 1 },
   'forge-impl-light': { label: 'light', hue: 'sky', rank: 2 },
   'forge-impl': { label: 'impl', hue: 'blue', rank: 3 },
-  'forge-impl-high': { label: 'high', hue: 'lavender', rank: 4 },
+  'forge-impl-high': { label: 'high', hue: 'peach', rank: 4 },
   'forge-impl-heavy': { label: 'heavy', hue: 'mauve', rank: 5 },
   'forge-fable': { label: 'fable', hue: 'pink', rank: 6 },
   'forge-review-correctness': { label: 'correctness', hue: 'green', rank: null },

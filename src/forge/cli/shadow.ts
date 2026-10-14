@@ -1,7 +1,8 @@
 import { UsageError } from './errors.js';
 import { DEFAULT_SHADOW_BRIEFS, readShadow, renderShadowReport, shadowReport, startShadow, stopShadow } from '../shadow.js';
 
-// `FORGE shadow start|stop|report`: opens, closes and reports the shadow test kept in `<cwd>/.forge/shadow.json`.
+// `FORGE shadow start|stop|report`: opens, closes and reports the shadow test kept in `.forge/shadow.json` of the main
+// checkout (shadow.ts), the same file from every worktree.
 // review.ts dispatches here.
 
 type Result = { code: number; stdout: string; stderr: string };
@@ -20,7 +21,7 @@ const STATUS = {
   en: { none: 'Shadow test: not started', open: (n: number) => `Shadow test: open, ${n} briefs left`, closed: 'Shadow test: closed' },
 };
 
-/** `args` starts with the subcommand; `cwd` is forge's own dir, where `.forge/shadow.json` lives. */
+/** `args` starts with the subcommand; `cwd` is forge's own dir, whose main checkout keeps `.forge/shadow.json`. */
 export function shadowCommand(args: string[], cwd: string): Result {
   const sub = args[0];
   switch (sub) {

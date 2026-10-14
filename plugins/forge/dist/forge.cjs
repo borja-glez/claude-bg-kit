@@ -15302,7 +15302,7 @@ var DEFAULT_SHADOW_BRIEFS = 10;
 var LINE_WINDOW = 10;
 var OVERLAP = 0.3;
 var PASS_RATIO = 0.9;
-var shadowFile = (root) => import_node_path17.default.join(root, ".forge", "shadow.json");
+var shadowFile = (root) => import_node_path17.default.join(mainCheckout(root), ".forge", "shadow.json");
 var isFinding = (x) => !!x && typeof x === "object" && typeof x.problem === "string" && typeof x.severity === "string";
 var isFindings = (x) => Array.isArray(x) && x.every(isFinding);
 function isCase(x) {
@@ -15331,8 +15331,9 @@ function readShadow(root) {
   }
 }
 function saveShadow(root, state) {
-  forgeDir(root);
-  const file = shadowFile(root);
+  const main = mainCheckout(root);
+  forgeDir(main);
+  const file = import_node_path17.default.join(main, ".forge", "shadow.json");
   const tmp = `${file}.${process.pid}.tmp`;
   try {
     (0, import_node_fs15.writeFileSync)(tmp, JSON.stringify(state, null, 2) + "\n");

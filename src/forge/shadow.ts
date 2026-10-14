@@ -1,10 +1,12 @@
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { forgeDir } from './ledger.js';
+import { mainCheckout } from './local.js';
 import type { Finding } from './verdict.js';
 
 // Shadow test: for N briefs each reviewer running at high gets an xhigh twin; the cases compare their blockers.
-// The state lives in .forge/shadow.json, which is forge work and stays out of git.
+// The state lives in .forge/shadow.json of the main checkout, as local.yaml does, so every worktree of the repository
+// (a run member's, a task's) sees the test opened there. It is forge work and stays out of git.
 
 export interface ShadowCase {
   task: string;
@@ -22,7 +24,7 @@ export const LINE_WINDOW = 10;
 export const OVERLAP = 0.3;
 export const PASS_RATIO = 0.9;
 
-export const shadowFile = (root: string) => path.join(root, '.forge', 'shadow.json');
+export const shadowFile = (root: string) => path.join(mainCheckout(root), '.forge', 'shadow.json');
 
 const isFinding = (x: unknown): x is Finding =>
   !!x && typeof x === 'object' && typeof (x as Finding).problem === 'string' && typeof (x as Finding).severity === 'string';
@@ -53,8 +55,9 @@ export function readShadow(root: string): ShadowState | null {
 }
 
 export function saveShadow(root: string, state: ShadowState): void {
-  forgeDir(root);
-  const file = shadowFile(root);
+  const main = mainCheckout(root);
+  forgeDir(main);
+  const file = path.join(main, '.forge', 'shadow.json');
   const tmp = `${file}.${process.pid}.tmp`;
   try {
     writeFileSync(tmp, JSON.stringify(state, null, 2) + '\n');

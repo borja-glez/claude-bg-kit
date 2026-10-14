@@ -11036,7 +11036,7 @@ var TIERS = {
   "forge-mech": { label: "mech", hue: "teal", rank: 1 },
   "forge-impl-light": { label: "light", hue: "sky", rank: 2 },
   "forge-impl": { label: "impl", hue: "blue", rank: 3 },
-  "forge-impl-high": { label: "high", hue: "lavender", rank: 4 },
+  "forge-impl-high": { label: "high", hue: "peach", rank: 4 },
   "forge-impl-heavy": { label: "heavy", hue: "mauve", rank: 5 },
   "forge-fable": { label: "fable", hue: "pink", rank: 6 },
   "forge-review-correctness": { label: "correctness", hue: "green", rank: null },

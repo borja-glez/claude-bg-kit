@@ -283,6 +283,18 @@ describe('plugin layout', () => {
     for (const w of ['git merge-base HEAD', 'review-<branch>-<tag>', '--base-run', 'git worktree add --detach', 'diff-1.patch', 'FORGE triage', 'review-correctness',
       'review-security', 'review-perf', 'FORGE verdict', 'nothing to review', 'Never merge', 'never push', '/forge:run']) expect(md).toContain(w);
   });
+  it('forge review skill spawns the reviewers of its triage with their effort and model; forge:run passes --delicate', () => {
+    const md = read('plugins/forge/skills/review/SKILL.md');
+    const step4 = md.slice(md.indexOf('4. **Diff and zones.**'), md.indexOf('5. **Brief.**'));
+    const step6 = md.slice(md.indexOf('6. **Review.**'), md.indexOf('7. **Report.**'));
+    for (const w of ['«Review its performance too.»', '`review`']) expect(step4).toContain(w);
+    for (const w of ["step-4 triage's `review.reviewers`", "the Agent tool's `effort`", "the Agent tool's `model` when the reviewer's is not null", 'same effort and model'])
+      expect(step6).toContain(w);
+    expect(step6).not.toContain('agents from `FORGE agents`');
+    const run = read('plugins/forge/skills/run/SKILL.md');
+    const medium2 = run.slice(run.indexOf('\n2. For each task, write'), run.indexOf('\n3. Do not validate'));
+    expect(medium2).toContain('run Triage step 1 again with `--delicate`');
+  });
   it('auto mode in the skills: launch questions, decisions by auto, the design loop and the gate, the never-auto list', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
     const summary = md.slice(md.indexOf('\n## Autonomy\n'), md.indexOf('\n## 1. Triage\n'));
