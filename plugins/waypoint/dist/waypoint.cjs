@@ -13873,6 +13873,7 @@ var Schema = external_exports.object({
   tdd: external_exports.enum(["off", "superpowers"]).default("off"),
   workflow: external_exports.enum(WORKFLOWS).optional(),
   autonomy: external_exports.enum(AUTONOMIES).optional(),
+  generated: external_exports.array(external_exports.string().min(1).max(200)).max(50).default([]),
   swarm: external_exports.object({
     parallel: external_exports.number().int().min(1).max(10).default(3),
     mode: external_exports.enum(["subagents", "sessions"]).optional(),
@@ -13892,7 +13893,8 @@ var DEFAULTS = {
   evidence: "upload",
   validatorTimeoutSec: 600,
   swarm: { parallel: 3, launcher: "bg", member: { effort: "medium" } },
-  tdd: "off"
+  tdd: "off",
+  generated: []
 };
 function parseConfig(text) {
   if (text === null || !text.trim()) return structuredClone(DEFAULTS);

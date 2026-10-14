@@ -12708,7 +12708,8 @@ function triage(task, repo, validators, extra, opts = {}) {
     if (hits.length === 1) quoteFiles.add(hits[0]);
   }
   const located = [.../* @__PURE__ */ new Set([...files, ...quoteFiles])].sort().slice(0, MAX_FILES);
-  const sensitive = ZONES.filter((z) => !opts.plan && z.text.some((re) => re.test(plain)) || extra?.zones.includes(z.zone) || located.some((f) => z.path.test(f))).map((z) => z.zone);
+  const zoneText = opts.plan ? headText : plain;
+  const sensitive = ZONES.filter((z) => z.text.some((re) => re.test(zoneText)) || extra?.zones.includes(z.zone) || located.some((f) => z.path.test(f))).map((z) => z.zone);
   const greenfield = repo.gitOk && (repo.commits === 0 || repo.files.length < 5);
   if (!repo.gitOk) reasons.push("git unavailable");
   const wordCount2 = text2.trim().split(/\s+/).length;
@@ -12950,6 +12951,7 @@ var Schema = external_exports.object({
   tdd: external_exports.enum(["off", "superpowers"]).default("off"),
   workflow: external_exports.enum(WORKFLOWS).optional(),
   autonomy: external_exports.enum(AUTONOMIES).optional(),
+  generated: external_exports.array(external_exports.string().min(1).max(200)).max(50).default([]),
   swarm: external_exports.object({
     parallel: external_exports.number().int().min(1).max(10).default(3),
     mode: external_exports.enum(["subagents", "sessions"]).optional(),
@@ -12969,7 +12971,8 @@ var DEFAULTS = {
   evidence: "upload",
   validatorTimeoutSec: 600,
   swarm: { parallel: 3, launcher: "bg", member: { effort: "medium" } },
-  tdd: "off"
+  tdd: "off",
+  generated: []
 };
 function parseConfig(text2) {
   if (text2 === null || !text2.trim()) return structuredClone(DEFAULTS);
@@ -14373,13 +14376,13 @@ function writeMemo(file, m) {
 var lastLine = (s2) => s2.tail[s2.tail.length - 1] ?? "no output";
 var nulList = (s2) => (s2 ?? "").split("\0").filter(Boolean);
 var trackedChanges = (at) => nulList(at.git(["diff", "--name-only", "-z", "--", ".", ...LOCAL_STATE]));
-function restoringRegenerated(at, fn, into) {
+function restoringRegenerated(at, fn, into, only) {
   const listed = at.git(["diff", "--name-only", "-z", "--", ".", ...LOCAL_STATE]);
   const before = new Set(nulList(listed));
   try {
     return fn();
   } finally {
-    const back = listed === null ? [] : trackedChanges(at).filter((p) => !before.has(p));
+    const back = listed === null ? [] : trackedChanges(at).filter((p) => !before.has(p) && (!only || only.some((g) => globMatch(g, p))));
     if (back.length && at.git(["checkout", "--", ...back.map((p) => `:(top,literal)${p}`)]) !== null) into.push(...back);
   }
 }
@@ -14486,7 +14489,13 @@ function mergeIn(at, ref, o) {
   return regenerated.length ? { ...r2, restored: [...new Set(regenerated)] } : r2;
 }
 function mergeAttempt(at, ref, o, regenerated) {
-  const validating = (where2, owned, fn) => owned ? restoringRegenerated(where2, fn, regenerated) : fn();
+  let generated = [];
+  try {
+    generated = loadConfig(o.configRoot).generated;
+  } catch {
+    generated = [];
+  }
+  const validating = (where2, owned, fn) => owned ? restoringRegenerated(where2, fn, regenerated) : generated.length ? restoringRegenerated(where2, fn, regenerated, generated) : fn();
   const key = `${o.scope}-${o.target}`;
   const selection = o.scope === "final" ? { mode: "final" } : { mode: "heavy", changed: null };
   const merging = () => at.git(["rev-parse", "-q", "--verify", "MERGE_HEAD"]) !== null;
@@ -15624,6 +15633,9 @@ function reviewRoundOf(events, task) {
   const dirs = new Set(events.filter((e) => e.kind === "verdict" && e.task === task).map((e, i) => typeof e.dir === "string" ? e.dir : `#${i}`));
   return dirs.size + 1;
 }
+function restoringGenerated(deps, generated, fn, into) {
+  return generated.length ? restoringRegenerated({ git: deps.git }, fn, into, generated) : fn();
+}
 function readJson(file) {
   try {
     return JSON.parse((0, import_node_fs16.readFileSync)(file, "utf8"));
@@ -15667,10 +15679,13 @@ function reviewPrep(args, deps) {
   (0, import_node_fs16.mkdirSync)(roundDir, { recursive: true });
   const changed = deps.git(["diff", "--name-only", `${baseSha}..HEAD`]);
   const scope = pathName === "trivial" || pathName === "small" ? { mode: "small" } : { mode: "heavy", changed: changed === null ? null : changed.split("\n").map((s2) => s2.trim()).filter(Boolean) };
-  const results = markPreexisting(
-    runValidators(selectValidators(detectValidators(deps.repo, config), scope), deps.exec, config.validatorTimeoutSec),
-    baseline
-  );
+  const restored = [];
+  const results = markPreexisting(restoringGenerated(
+    deps,
+    config.generated,
+    () => runValidators(selectValidators(detectValidators(deps.repo, config), scope), deps.exec, config.validatorTimeoutSec),
+    restored
+  ), baseline);
   const ok = results.every((r2) => !blocking(r2));
   const validatorsFile = import_node_path18.default.join(dir, `validators-${n}.json`);
   (0, import_node_fs16.writeFileSync)(validatorsFile, JSON.stringify(results, null, 2) + "\n");
@@ -15765,7 +15780,8 @@ function reviewPrep(args, deps) {
     round,
     validators: { ok, failing, preexisting, file: rel(deps.cwd, validatorsFile) },
     spawn,
-    ...plan.carried.length ? { carried: plan.carried.map((c) => c.name) } : {}
+    ...plan.carried.length ? { carried: plan.carried.map((c) => c.name) } : {},
+    ...restored.length ? { restored } : {}
   };
   if (locale === "es" || locale === "en") out.say = sayPrep(round, ok, failing, plan, locale);
   return json2(out);
@@ -15962,7 +15978,13 @@ function prep(args, deps) {
   if (!base) throw new UsageError("prep: cannot read HEAD");
   const config = loadConfig(deps.repoDir);
   const scope = p === "trivial" || p === "small" ? { mode: "small" } : { mode: "heavy", changed: null };
-  const results = runValidators(selectValidators(detectValidators(deps.repo, config), scope), deps.exec, config.validatorTimeoutSec);
+  const restored = [];
+  const results = restoringGenerated(
+    deps,
+    config.generated,
+    () => runValidators(selectValidators(detectValidators(deps.repo, config), scope), deps.exec, config.validatorTimeoutSec),
+    restored
+  );
   const dir = import_node_path18.default.resolve(deps.cwd, flag("dir") ?? import_node_path18.default.join(".forge", "work", id2));
   (0, import_node_fs16.mkdirSync)(dir, { recursive: true });
   const file = import_node_path18.default.join(dir, `baseline-${n}.json`);
@@ -15970,7 +15992,7 @@ function prep(args, deps) {
   const ts = deps.now().toISOString();
   appendEvent(deps.cwd, { ts, kind: "validate", task, baseline: true, ok: results.every((r2) => !blocking(r2)), results: results.map((r2) => ({ validator: r2.validator, ok: r2.ok, flaky: r2.flaky, ...r2.skipped ? { skipped: r2.skipped } : {}, ...r2.ok ? {} : { failures: r2.failures } })) });
   appendEvent(deps.cwd, { ts, kind: "phase", task: id2, phase, brief: Number(n), base });
-  return json2({ base, baseline: rel(deps.cwd, file), failing: results.filter(blocking).map((r2) => r2.validator) });
+  return json2({ base, baseline: rel(deps.cwd, file), failing: results.filter(blocking).map((r2) => r2.validator), ...restored.length ? { restored } : {} });
 }
 function reviewCommand(cmd, args, deps) {
   switch (cmd) {
@@ -17686,7 +17708,8 @@ function run(argv, io) {
         const validateRun = () => runValidators(list, io.exec ?? defaultExec(io.cwd), config.validatorTimeoutSec);
         const restored = [];
         const inRun = io.workdir !== void 0 && samePath(io.workdir, runWorktree(io.cwd));
-        let results = inRun ? restoringRegenerated({ git: io.git ?? defaultGit(repoDir) }, validateRun, restored) : validateRun();
+        const restoreAt = { git: io.git ?? defaultGit(repoDir) };
+        let results = inRun ? restoringRegenerated(restoreAt, validateRun, restored) : config.generated.length ? restoringRegenerated(restoreAt, validateRun, restored, config.generated) : validateRun();
         if (has("baseline")) {
           if (flag("baseline") === void 0) throw new UsageError("validate: --baseline needs the JSON a validate run printed on the base commit");
           let baseline;
