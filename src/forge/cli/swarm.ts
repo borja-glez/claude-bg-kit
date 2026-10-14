@@ -379,7 +379,8 @@ function mergeIn(at: GitDeps, ref: string, o: MergeOpts): MergeOutcome {
 
 function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: string[]): MergeOutcome {
   // A validator run where `where` is forge's own worktree restores what it regenerated; the person's checkout only the
-  // files the config's `generated` names (nothing when it names none).
+  // files the config's `generated` names (nothing when it names none). The list is read once, before the merge, on
+  // purpose: a task cannot widen what is put back in the person's checkout.
   let generated: string[] = [];
   try { generated = loadConfig(o.configRoot).generated; } catch { generated = []; }
   const validating = <T>(where: GitDeps, owned: boolean, fn: () => T): T =>
