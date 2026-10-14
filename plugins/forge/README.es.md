@@ -276,6 +276,7 @@ verify:
   limits: { checks: 8, shots: 10, minutes: 10 }   # opcional; estos son los valores por defecto
 evidence: upload               # upload | local; por defecto upload
 validatorTimeoutSec: 600
+generated: ["dist/**"]         # salida de compilación versionada que forge restaura tras sus validadores; por defecto []
 tdd: off                       # off | superpowers: los implementadores siguen la skill de TDD de superpowers
 workflow: ask                  # ask | forge | superpowers | superpowers-design | superpowers-plan | off
 autonomy: ask                  # ask | auto
@@ -298,6 +299,7 @@ swarm:
 - `kind` es cualquier nombre hecho de letras, dígitos y `_ . : -` (`test`, `lint`, `e2e`, `a11y`...). `when` dice cuándo se ejecuta un validador: `always`, `medium` (tareas Medium y Large y la revisión final) o `final` (solo la revisión final de una ejecución Large). Un `kind` que forge no conoce vale `medium` por defecto.
 - `verify.limits` admite como máximo `checks: 20`, `shots: 30` y `minutes: 60`.
 - `evidence` es `upload` o `local`, como se describe en [Verificación](#verificación).
+- `generated` lista globs (relativos al repositorio, con `/`, la sintaxis de `affects`; como máximo 50) que nombran ficheros versionados que son salida de compilación, como un bundle que reescribe un validador `build`. Tras cada ejecución de validadores en cualquier checkout (el tuyo incluido: `validate`, `prep`, `review-prep`, un `swarm integrate` efímero), forge restaura los ficheros que coinciden, que la ejecución cambió y que no tenían un cambio tuyo antes, y dice cuáles (`restored`). Su propio worktree de ejecución siempre queda limpio de todo fichero versionado que regeneraron sus validadores, esté en la lista o no.
 
 **Las superficies** viven en `.forge/verify/<nombre>.md`: una cabecera opcional (globs `affects` que hacen candidata a la superficie, y las `tools` que usa), instrucciones en texto libre y notas bajo `## Aprendido`.
 

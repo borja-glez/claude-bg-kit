@@ -628,9 +628,12 @@ export function run(argv: string[], io: Io): Result {
         const list = selectValidators(all, scope);
         const validateRun = () => runValidators(list, io.exec ?? defaultExec(io.cwd), config.validatorTimeoutSec);
         // --cwd the run worktree of this checkout (forge's own): what the validators regenerated there is put back.
+        // Any other checkout: only the files the config's `generated` names (nothing when it names none).
         const restored: string[] = [];
         const inRun = io.workdir !== undefined && samePath(io.workdir, runWorktree(io.cwd));
-        let results = inRun ? restoringRegenerated({ git: io.git ?? defaultGit(repoDir) }, validateRun, restored) : validateRun();
+        const restoreAt = { git: io.git ?? defaultGit(repoDir) };
+        let results = inRun ? restoringRegenerated(restoreAt, validateRun, restored)
+          : config.generated.length ? restoringRegenerated(restoreAt, validateRun, restored, config.generated) : validateRun();
         if (has('baseline')) {
           if (flag('baseline') === undefined) throw new UsageError('validate: --baseline needs the JSON a validate run printed on the base commit');
           let baseline: unknown;

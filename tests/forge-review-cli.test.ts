@@ -40,6 +40,18 @@ beforeEach(() => {
   appendEvent(root, { ts: '2026-10-14T09:00:00.000Z', kind: 'triage', task: 'T1', path: 'medium', sensitive: ['auth'], review });
 });
 
+// A committed gen.txt and a validator that rewrites it, as a build regenerates its committed bundle; `generated` names it
+// unless told otherwise. The config change itself is forge's state (.forge), which no restore looks at.
+const withGenerated = (generated = 'generated: [gen.txt]\n') => {
+  if (!existsSync(path.join(wt, 'gen.txt'))) {
+    writeFileSync(path.join(wt, 'gen.txt'), 'committed\n');
+    git('add', 'gen.txt');
+    git('commit', '-q', '-m', 'gen');
+  }
+  writeFileSync(path.join(wt, '.forge', 'config.yaml'),
+    `${generated}detect: false\nvalidators:\n  - name: check\n    cmd: node -e "require('fs').writeFileSync('gen.txt',String(Date.now()))"\n`);
+};
+
 const prep = (...extra: string[]) => run(['review-prep', '--task', 'T1-1', '--path', 'medium', '--base', base, '--baseline', '.forge/work/T1/baseline-1.json',
   '--dir', '.forge/work/T1', '--cwd', wt, ...extra], io);
 
@@ -231,6 +243,21 @@ describe('forge review-prep', () => {
     for (const s of out.spawn) expect(s.inputs).toMatchObject({ brief: '.forge/work/T1/brief-1.md', diff: '.forge/work/T1/diff-1.patch', fix: '.forge/work/T1/fix-1-2.patch' });
   });
 
+  it('with `generated`, a matching file the validators regenerated is put back and listed in restored', () => {
+    withGenerated();
+    const r = prep();
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout).restored).toEqual(['gen.txt']);
+    expect(git('status', '--porcelain', '--', 'gen.txt')).toBe('');
+  });
+
+  it('without `generated`, nothing is restored and restored is left out', () => {
+    withGenerated('');
+    const r = prep();
+    expect(JSON.parse(r.stdout)).not.toHaveProperty('restored');
+    expect(git('status', '--porcelain', '--', 'gen.txt')).toBe('M gen.txt');
+  });
+
   it('review-close, prep and shadow are dispatched', () => {
     expect(run(['review-close'], io).code).toBe(2);
     expect(run(['review-close'], io).stderr).toMatch(/review-close/);
@@ -273,6 +300,17 @@ describe('forge prep', () => {
     const out = JSON.parse(run(['review-prep', '--task', 'T1-1', '--path', 'medium', '--base', b, '--baseline', '.forge/work/T1/baseline-1.json',
       '--dir', '.forge/work/T1', '--cwd', wt], io).stdout);
     expect(out.validators).toMatchObject({ ok: true, preexisting: ['check'] });
+  });
+
+  it('with `generated`, the baseline run puts back a matching file the validators regenerated and lists it in restored', () => {
+    withGenerated();
+    const out = JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'medium', '--cwd', wt], io).stdout);
+    expect(out).toMatchObject({ base: head(), failing: [], restored: ['gen.txt'] });
+    expect(git('status', '--porcelain', '--', 'gen.txt')).toBe('');
+    withGenerated('');
+    const bare = JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'medium', '--cwd', wt], io).stdout);
+    expect(bare).not.toHaveProperty('restored');
+    expect(git('status', '--porcelain', '--', 'gen.txt')).toBe('M gen.txt');
   });
 
   it('requires --task <id>-<n> and a known --path', () => {

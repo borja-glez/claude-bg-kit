@@ -276,6 +276,7 @@ verify:
   limits: { checks: 8, shots: 10, minutes: 10 }   # optional; these are the defaults
 evidence: upload               # upload | local; default upload
 validatorTimeoutSec: 600
+generated: ["dist/**"]         # tracked build output forge puts back after its validators; default []
 tdd: off                       # off | superpowers: implementers follow superpowers' TDD skill
 workflow: ask                  # ask | forge | superpowers | superpowers-design | superpowers-plan | off
 autonomy: ask                  # ask | auto
@@ -298,6 +299,7 @@ swarm:
 - `kind` is any name made of letters, digits and `_ . : -` (`test`, `lint`, `e2e`, `a11y`...). `when` says when a validator runs: `always`, `medium` (Medium and Large tasks and the final review) or `final` (only the final review of a Large run). A `kind` forge does not know defaults to `medium`.
 - `verify.limits` accepts at most `checks: 20`, `shots: 30` and `minutes: 60`.
 - `evidence` is `upload` or `local`, as described in [Verification](#verification).
+- `generated` lists globs (repo-relative, `/` separators, the syntax of `affects`; at most 50) naming tracked files that are build output, such as a bundle a `build` validator rewrites. After each validator run in any checkout (yours included: `validate`, `prep`, `review-prep`, an ephemeral `swarm integrate`), forge puts back the matching files the run changed and that had no change of yours before it, and says which (`restored`). Its own run worktree is always cleaned of every tracked file its validators regenerated, listed or not.
 
 **Surfaces** live in `.forge/verify/<name>.md`: an optional header (`affects` globs that make the surface a candidate, `tools` it uses), free-text instructions, and notes under `## Learned`.
 

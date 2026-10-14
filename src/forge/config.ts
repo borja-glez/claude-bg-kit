@@ -28,6 +28,8 @@ export interface ForgeConfig {
   };
   tdd: 'off' | 'superpowers';
   workflow?: Workflow; autonomy?: Autonomy;
+  /** Globs of tracked build output: forge puts those files back after its validator runs in any checkout. */
+  generated: string[];
 }
 export class ConfigError extends Error {}
 
@@ -54,6 +56,7 @@ const Schema = z.object({
   tdd: z.enum(['off', 'superpowers']).default('off'),
   workflow: z.enum(WORKFLOWS).optional(),
   autonomy: z.enum(AUTONOMIES).optional(),
+  generated: z.array(z.string().min(1).max(200)).max(50).default([]),
   swarm: z.object({
     parallel: z.number().int().min(1).max(10).default(3),
     mode: z.enum(['subagents', 'sessions']).optional(),
@@ -68,7 +71,7 @@ const Schema = z.object({
 
 const DEFAULTS: ForgeConfig = {
   profile: 'balanced', detect: true, exclude: [], verify: { limits: { checks: 8, shots: 10, minutes: 10 } },
-  evidence: 'upload', validatorTimeoutSec: 600, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' } }, tdd: 'off',
+  evidence: 'upload', validatorTimeoutSec: 600, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' } }, tdd: 'off', generated: [],
 };
 
 export function parseConfig(text: string | null): ForgeConfig {

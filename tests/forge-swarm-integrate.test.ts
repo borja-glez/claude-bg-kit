@@ -229,10 +229,11 @@ describe('forge swarm integrate (into the run branch)', () => {
       expect(git('status', '--porcelain')).toBe('');
       expect(readFileSync(path.join(root, 'gen.txt'), 'utf8')).toBe('committed\n');
     });
-    it('ephemeral (the person\'s checkout): unchanged, the regenerated file stays modified and the integration is run-dirty', () => {
+    // An ephemeral execution on the person's checkout with `config` as its .forge/config.yaml, fix-a and fix-b to do.
+    const ephemeral = (config: string) => {
       commitIn(root, 'gen.txt', 'committed\n', 'gen');
       expect(run(['swarm', 'stop'], io).code).toBe(0);
-      writeFileSync(path.join(root, '.forge', 'config.yaml'), GEN());
+      writeFileSync(path.join(root, '.forge', 'config.yaml'), config);
       writeFileSync(path.join(root, '.forge', 'tasks.json'), JSON.stringify([
         { id: 'fix-a', title: 'fix a', path: 'small', zones: ['a.txt'], depends_on: [] },
         { id: 'fix-b', title: 'fix b', path: 'small', zones: ['b.txt'], depends_on: [] },
@@ -240,14 +241,42 @@ describe('forge swarm integrate (into the run branch)', () => {
       const started = run(['swarm', 'start', '--project', 'loose', '--session', 'main', '--kind', 'ephemeral', '--tasks', '.forge/tasks.json'], io);
       expect(started.stderr).toBe('');
       out(run(['swarm', 'tick'], io));
-      const w = out(run(['swarm', 'worktree', 'fix-a'], io)).worktree;
-      commitIn(w, 'a.txt', 'a\n', 'fix-a: work');
-      out(run(['swarm', 'task', 'fix-a', '--stage', 'verdict', '--status', 'accepted'], io));
+    };
+    const acceptLoose = (task: string, file: string) => {
+      const w = out(run(['swarm', 'worktree', task], io)).worktree;
+      commitIn(w, file, `${file}\n`, `${task}: work`);
+      out(run(['swarm', 'task', task, '--stage', 'verdict', '--status', 'accepted'], io));
+    };
+    it('ephemeral (the person\'s checkout) without `generated`: unchanged, the regenerated file stays modified and the integration is run-dirty', () => {
+      ephemeral(GEN());
+      acceptLoose('fix-a', 'a.txt');
       const r = out(run(['swarm', 'integrate', 'fix-a'], io));
       expect(r.result).toBe('run-dirty');
       expect(r.detail).toContain('gen.txt');
       expect(r.restored).toBeUndefined();
       expect(git('status', '--porcelain')).toBe('M gen.txt');
+    });
+    it('ephemeral with `generated`: the person\'s checkout gets the matching files back and two tasks integrate in a row', () => {
+      ephemeral(`generated: [gen.txt]\n${GEN()}`);
+      acceptLoose('fix-a', 'a.txt');
+      acceptLoose('fix-b', 'b.txt');
+      const first = out(run(['swarm', 'integrate', 'fix-a'], io));
+      expect(first).toMatchObject({ result: 'integrated', restored: ['gen.txt'] });
+      expect(git('status', '--porcelain')).toBe('');
+      expect(git('show', `${first.sha}:gen.txt`)).toBe('committed');
+      expect(out(run(['swarm', 'integrate', 'fix-b'], io))).toMatchObject({ result: 'integrated', restored: ['gen.txt'] });
+      expect(git('status', '--porcelain')).toBe('');
+      expect(readFileSync(path.join(root, 'gen.txt'), 'utf8')).toBe('committed\n');
+    });
+    it('ephemeral with `generated`: a tracked file outside its globs that a validator changes is not put back', () => {
+      commitIn(root, 'other.txt', 'other\n', 'other');
+      ephemeral(`generated: [gen.txt]\nvalidators:\n  - name: gen\n    cmd: node -e "const f=require('fs');f.writeFileSync('gen.txt','x');f.writeFileSync('other.txt','y')"\n`);
+      acceptLoose('fix-a', 'a.txt');
+      const r = out(run(['swarm', 'integrate', 'fix-a'], io));
+      expect(r.result).toBe('run-dirty');
+      expect(r.detail).toContain('other.txt');
+      expect(r.detail).not.toContain('gen.txt');
+      expect(git('status', '--porcelain')).toBe('M other.txt');
     });
   });
   it('rolls back when the validators cannot run (invalid config brought by the task)', () => {

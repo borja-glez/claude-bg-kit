@@ -11,7 +11,17 @@ describe('forge config', () => {
     expect(parseConfig(null)).toEqual({
       profile: 'balanced', detect: true, exclude: [], verify: { limits: { checks: 8, shots: 10, minutes: 10 } },
       evidence: 'upload', validatorTimeoutSec: 600, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' } }, tdd: 'off',
+      generated: [],
     });
+  });
+  it('generated: a list of globs, empty by default, strings only', () => {
+    expect(parseConfig(null).generated).toEqual([]);
+    expect(parseConfig('profile: economy\n').generated).toEqual([]);
+    expect(parseConfig('generated:\n  - plugins/*/dist/**\n  - gen.txt\n').generated).toEqual(['plugins/*/dist/**', 'gen.txt']);
+    expect(configValue(parseConfig('generated: [gen.txt]\n'), 'generated')).toEqual(['gen.txt']);
+    expect(() => parseConfig('generated: [3]\n')).toThrow(ConfigError);
+    expect(() => parseConfig('generated: [""]\n')).toThrow(ConfigError);
+    expect(() => parseConfig('generated: gen.txt\n')).toThrow(ConfigError);
   });
   it('workflow and autonomy: optional, and one of their values', () => {
     expect(parseConfig(null)).not.toHaveProperty('workflow');

@@ -74,4 +74,51 @@ describe('forge validate --cwd', () => {
     expect(r.stderr).toBe('');
     expect(g(wt, 'status', '--porcelain')).toBe('M gen.txt');
   });
+  it('in any other directory restores the files the config\'s `generated` names', () => {
+    const wt = worktree('task-T1', 'task/T1');
+    writeFileSync(path.join(wt, '.forge', 'config.yaml'), `generated: ['gen.*']\n${GEN}`);
+    const r = run(['validate', '--cwd', wt], io);
+    expect(r.code).toBe(0);
+    expect(r.stderr).toBe('restored 1 tracked file(s) the validators regenerated: gen.txt\n');
+    expect(g(wt, 'status', '--porcelain')).toBe('');
+  });
+});
+
+describe('restoringRegenerated with only', () => {
+  it('puts back only the paths that match one of the globs', () => {
+    const into: string[] = [];
+    restoringRegenerated({ git: defaultGit(root) }, () => {
+      writeFileSync(path.join(root, 'gen.txt'), 'regenerated\n');
+      writeFileSync(path.join(root, 'other.txt'), 'changed\n');
+    }, into, ['gen.*']);
+    expect(into).toEqual(['gen.txt']);
+    expect(git('status', '--porcelain')).toBe('M other.txt');
+  });
+});
+
+describe('forge validate in the person\'s checkout', () => {
+  const config = (text: string) => { mkdirSync(path.join(root, '.forge'), { recursive: true }); writeFileSync(path.join(root, '.forge', 'config.yaml'), text); };
+  it('with `generated` puts back a matching file the validators regenerated and says so on stderr', () => {
+    config(`generated:\n  - gen.txt\n${GEN}`);
+    const r = run(['validate'], io);
+    expect(r.code).toBe(0);
+    expect(r.stderr).toBe('restored 1 tracked file(s) the validators regenerated: gen.txt\n');
+    expect(git('status', '--porcelain')).toBe('');
+  });
+  it('with `generated` leaves a matching file that was already modified before the run as the run left it', () => {
+    config(`generated:\n  - gen.txt\n${GEN}`);
+    writeFileSync(path.join(root, 'gen.txt'), 'mine\n');
+    const r = run(['validate'], io);
+    expect(r.code).toBe(0);
+    expect(r.stderr).toBe('');
+    expect(git('status', '--porcelain')).toBe('M gen.txt');
+    expect(readFileSync(path.join(root, 'gen.txt'), 'utf8')).not.toBe('committed\n');
+  });
+  it('without `generated` restores nothing', () => {
+    config(GEN);
+    const r = run(['validate'], io);
+    expect(r.code).toBe(0);
+    expect(r.stderr).toBe('');
+    expect(git('status', '--porcelain')).toBe('M gen.txt');
+  });
 });

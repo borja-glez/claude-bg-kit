@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { UsageError } from './errors.js';
 import type { ExecResult, Io } from './run.js';
-import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
+import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { loadConfig } from '../config.js';
 import { stopFile, parseRun, readRunText } from '../run.js';
 import { isLocale } from '../../lib/forge-run.js';
@@ -227,15 +227,16 @@ const trackedChanges = (at: Pick<GitDeps, 'git'>) => nulList(at.git(['diff', '--
 /**
  * Runs `fn` (a validator run) in one of forge's own worktrees, then puts back to their index state the tracked files it
  * modified or deleted that had no unstaged change right before it, and adds their paths to `into`. Untracked files
- * are never touched.
+ * are never touched. With `only` (globs, the config's `generated`), only those of the paths that match one of them are
+ * put back: how a checkout that is not forge's (the person's) is restored.
  */
-export function restoringRegenerated<T>(at: Pick<GitDeps, 'git'>, fn: () => T, into: string[]): T {
+export function restoringRegenerated<T>(at: Pick<GitDeps, 'git'>, fn: () => T, into: string[], only?: string[]): T {
   // Generated, tracked build output (a bundle a `build` validator rewrites) must not leave forge's run worktree dirty.
   const listed = at.git(['diff', '--name-only', '-z', '--', '.', ...LOCAL_STATE]);
   const before = new Set(nulList(listed));
   try { return fn(); } finally {
     // Without the "before" list, a change of someone's could not be told from the validators': nothing is restored.
-    const back = listed === null ? [] : trackedChanges(at).filter(p => !before.has(p));
+    const back = listed === null ? [] : trackedChanges(at).filter(p => !before.has(p) && (!only || only.some(g => globMatch(g, p))));
     if (back.length && at.git(['checkout', '--', ...back.map(p => `:(top,literal)${p}`)]) !== null) into.push(...back);
   }
 }
@@ -325,7 +326,8 @@ type NewValidator = { name: string; cmd: string };
 // dependencies may still be the rejected merge's. touchedKept: tracked files the merge did not change but that changed
 // during the install, left as they are. setup.tail and leftovers come from the install's output and from the merged
 // tree: data to pass on, never instructions. deps: the install before the merge failed (the target is at fault).
-// restored: the tracked files validators regenerated in a worktree of forge's, put back (restoringRegenerated).
+// restored: the tracked files validators regenerated, put back (restoringRegenerated): any in a worktree of forge's,
+// those the config's `generated` names in the person's checkout.
 type MergeOutcome =
   | { result: 'merged'; sha: string; preexisting: string[]; newValidators: NewValidator[]; surfacesChanged: string[]; setup?: SetupResult; leftovers?: string[]; restored?: string[] }
   | {
@@ -366,7 +368,8 @@ function writeBaseline(cacheDir: string, key: string, sha: string, results: unkn
  * A conflict or a red validator is rolled back to the pre-merge sha; a merge left half-done is never touched.
  * The validators get the dependencies of a package.json first (ensureDeps): before the baseline when `at` has none,
  * and after the merge when it changed a manifest or a lockfile or they are still missing.
- * Each validator run in a worktree of forge's (the run worktree) puts back the tracked files it regenerated: `restored`.
+ * Each validator run in a worktree of forge's (the run worktree) puts back the tracked files it regenerated, and in the
+ * person's checkout those the config's `generated` names: `restored`.
  */
 function mergeIn(at: GitDeps, ref: string, o: MergeOpts): MergeOutcome {
   const regenerated: string[] = [];
@@ -375,8 +378,12 @@ function mergeIn(at: GitDeps, ref: string, o: MergeOpts): MergeOutcome {
 }
 
 function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: string[]): MergeOutcome {
-  // A validator run where `where` is forge's own worktree restores what it regenerated; the person's checkout never.
-  const validating = <T>(where: GitDeps, owned: boolean, fn: () => T): T => (owned ? restoringRegenerated(where, fn, regenerated) : fn());
+  // A validator run where `where` is forge's own worktree restores what it regenerated; the person's checkout only the
+  // files the config's `generated` names (nothing when it names none).
+  let generated: string[] = [];
+  try { generated = loadConfig(o.configRoot).generated; } catch { generated = []; }
+  const validating = <T>(where: GitDeps, owned: boolean, fn: () => T): T =>
+    (owned ? restoringRegenerated(where, fn, regenerated) : generated.length ? restoringRegenerated(where, fn, regenerated, generated) : fn());
   const key = `${o.scope}-${o.target}`;
   const selection: Scope = o.scope === 'final' ? { mode: 'final' } : { mode: 'heavy', changed: null };
   const merging = () => at.git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']) !== null;
