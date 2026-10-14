@@ -1069,7 +1069,7 @@ describe('triage --base', () => {
     fakeGit('');
     expect(JSON.parse(run(['triage', '--plan', 'other.yaml', '--task', 'T001'], io).stdout).path).toBe('large');
     expect(readEvents(root).at(-1)).toMatchObject({ kind: 'triage', task: 'T001', project: 'other' });
-    // A raise logged without a project does not count for a plan task either.
+    // A raise logged after the triage of other.yaml takes the project `other`: it does not count for shop's T001.
     run(['log', '--kind', 'triage', '--task', 'T001', '--data', '{"path":"large"}'], io);
     const out = JSON.parse(run(['triage', '--plan', 'plan.yaml', '--task', 'T001'], io).stdout);
     expect(out.path).not.toBe('large');
@@ -1237,6 +1237,101 @@ tasks:
     const out = triagePlan('T100');
     expect(out.sensitive).toEqual(['auth']);
     expect(roles(out)).toContain('review-security');
+  });
+});
+
+describe('a raise logged with log --kind triage counts for a plan task', () => {
+  // T1 is mechanical work: its plan triage gives small.
+  const RAISE_YAML = (project: string) => `project: ${project}
+locale: es
+version: "0.1"
+tracks: [{ id: a, name: A, color: blue }]
+phases: [{ id: F1, name: One }]
+tasks:
+  - id: T1
+    title: Bundles regenerados y prueba en sombra abierta
+    track: a
+    phase: F1
+    includes: npm run build y commit de lo que genera.
+    done_when: git no ve cambios en plugins/
+    zones: ["plugins/forge/dist/**", "plugins/waypoint/dist/**", "plugins/waypoint/types/**", "plugins/lens/types/**"]
+`;
+  const WHY = 'añade comportamiento nuevo con sus tests';
+  const triageT1 = (plan = 'plan.yaml') => {
+    const r = run(['triage', '--plan', plan, '--task', 'T1'], io);
+    expect(r.code).toBe(0);
+    return JSON.parse(r.stdout);
+  };
+  const raise = (data: Record<string, unknown> = { path: 'medium', why: WHY }) => {
+    writeFileSync(path.join(root, 'raise.json'), JSON.stringify(data));
+    expect(run(['log', '--kind', 'triage', '--task', 'T1', '--data-file', 'raise.json'], io).code).toBe(0);
+    return readEvents(root).at(-1)!;
+  };
+  const activeExecution = (project: string, kind: 'plan' | 'ephemeral' = 'plan', active = true) => {
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    const at = '2026-10-11T09:00:00.000Z';
+    writeFileSync(path.join(root, '.forge', 'execution.json'), JSON.stringify({
+      runId: 'run1', kind, mode: 'subagents', parallel: 1, project, base: 'main', branch: `forge/run-${project}`, mergeOnFinish: false,
+      coordinator: 'coord1', hookSession: null, active, stopReason: null, stallReason: null, startedAt: at, lastStepAt: null,
+      lastBlockStep: null, sleepUntil: null,
+      tasks: { T1: { status: 'running', stage: 'implement', round: 0, worktree: '', branch: 'task/T1', executor: 'subagents', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null } },
+    }));
+  };
+  beforeEach(() => {
+    writeFileSync(path.join(root, 'plan.yaml'), RAISE_YAML('cost'));
+    writeFileSync(path.join(root, 'other.yaml'), RAISE_YAML('other'));
+    io.git = args => (args.includes('ls-files') ? 'src/app.ts\nREADME.md\npackage.json\n' : args.includes('rev-list') ? '7\n' : '');
+  });
+  it('after the plan triage, the raise takes its project and the next triage keeps medium with forge-impl and the why', () => {
+    expect(triageT1().path).toBe('small');
+    expect(raise()).toMatchObject({ kind: 'triage', task: 'T1', path: 'medium', why: WHY, project: 'cost' });
+    const out = triageT1();
+    expect(out.path).toBe('medium');
+    expect(out.implementer.agent).toBe('forge-impl');
+    expect(out.announce).toContain(WHY);
+    expect(out.reasons).toContain('ratchet: kept medium from an earlier triage of this task');
+  });
+  it('a raise logged during an active plan execution with T1 among its tasks takes the execution project', () => {
+    activeExecution('cost');
+    expect(raise()).toMatchObject({ project: 'cost' });
+    expect(triageT1().path).toBe('medium');
+  });
+  it('the active plan execution comes before the latest triage of the task', () => {
+    triageT1('other.yaml');
+    activeExecution('cost');
+    expect(raise()).toMatchObject({ project: 'cost' });
+  });
+  it('an ephemeral or stopped execution does not stamp; a project given in the data is kept', () => {
+    activeExecution('cost', 'ephemeral');
+    expect(raise()).not.toHaveProperty('project');
+    activeExecution('cost', 'plan', false);
+    expect(raise()).not.toHaveProperty('project');
+    activeExecution('cost');
+    expect(raise({ path: 'medium', project: 'given' })).toMatchObject({ project: 'given' });
+  });
+  it('a raise outside any plan has no project, and other kinds are not stamped', () => {
+    expect(raise()).not.toHaveProperty('project');
+    triageT1();
+    expect(run(['log', '--kind', 'phase', '--task', 'T1', '--data', '{"phase":"implement"}'], io).code).toBe(0);
+    expect(readEvents(root).at(-1)).not.toHaveProperty('project');
+  });
+  it('a raise stamped for project A does not lift T1 of project B', () => {
+    triageT1('other.yaml');
+    expect(raise()).toMatchObject({ project: 'other' });
+    const out = triageT1();
+    expect(out.path).toBe('small');
+    expect(out.reasons.join(' ')).not.toMatch(/ratchet/);
+  });
+  it('--base: a raise logged before the implementation sets no floor for the diff sizing', () => {
+    triageT1();
+    raise();
+    io.git = args => (args.includes('ls-files') ? 'src/app.ts\nREADME.md\npackage.json\n' : args.includes('rev-list') ? '7\n'
+      : args.includes('--numstat') ? '3\t1\tplugins/forge/dist/forge.cjs\n' : '');
+    const r = run(['triage', '--plan', 'plan.yaml', '--task', 'T1', '--base', 'abc123'], io);
+    expect(r.code).toBe(0);
+    const out = JSON.parse(r.stdout);
+    expect(out.path).toBe('small');
+    expect(out.reasons.join(' ')).not.toMatch(/ratchet/);
   });
 });
 

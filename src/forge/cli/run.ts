@@ -442,6 +442,15 @@ export function run(argv: string[], io: Io): Result {
           data = { ...data, why };
         }
         const task = flag('task');
+        // A plan task's triage only counts the events of its plan's project (ids repeat between plans): a raise without
+        // one takes the active plan execution's project when the task is one of its tasks, else the project of the
+        // task's latest triage that has one, else none (a task outside any plan).
+        if (kind === 'triage' && task && data.project === undefined) {
+          const exec = readExecution(mainCheckout(io.cwd));
+          const project = exec?.active && exec.kind === 'plan' && Object.hasOwn(exec.tasks, task) ? exec.project
+            : readEvents(io.cwd).filter(e => e.kind === 'triage' && e.task === task && typeof e.project === 'string' && e.project).at(-1)?.project;
+          if (project) data = { ...data, project };
+        }
         appendEvent(io.cwd, { ...data, ts: ts(), kind: kind as LedgerKind, ...(task ? { task } : {}) });
         return ok('ok');
       }
@@ -543,7 +552,8 @@ export function run(argv: string[], io: Io): Result {
           diff = { base, stat, path: d.path };
         }
         // The ratchet: a repeated triage of the same task never lowers the path it already reached. With --base only the
-        // earlier --base sizings count, and a plan task only counts the triages of its own plan's project (ids repeat).
+        // earlier --base sizings count, and a plan task only counts the triages of its own plan's project (ids repeat;
+        // `log --kind triage` stamps a raise with it).
         // A raise the session logged with a `why` explains the path better than the CLI reasons: the announcement uses it.
         const project = plannedDoc ? plannedDoc.plan.project : null;
         let raiseWhy: string | null = null;
