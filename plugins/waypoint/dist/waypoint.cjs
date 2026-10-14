@@ -13802,12 +13802,18 @@ function planLocale(root, project) {
 }
 
 // src/lib/launcher.ts
+var EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+var MODELS = ["opus", "sonnet", "haiku"];
 var HERDR_TEMPLATE = null;
 var quote = (s) => `'${s.split("'").join(`'\\''`)}'`;
+var flags = (x2) => `${x2.effort ? ` --effort ${x2.effort}` : ""}${x2.model ? ` --model ${x2.model}` : ""}`;
+function herdrRun(template, x2) {
+  return template.split("{name}").join(x2.name).split("{cwd}").join(quote(x2.worktree)).split("{command}").join(`claude --name ${x2.name}${flags(x2)} "${x2.prompt}"`);
+}
 function launchRun(launcher, x2) {
-  if (launcher === "bg") return `(cd ${quote(x2.worktree)} && claude --bg --name ${x2.name} "${x2.prompt}")`;
+  if (launcher === "bg") return `(cd ${quote(x2.worktree)} && claude --bg --name ${x2.name}${flags(x2)} "${x2.prompt}")`;
   if (HERDR_TEMPLATE === null) return null;
-  return HERDR_TEMPLATE.split("{name}").join(x2.name).split("{cwd}").join(quote(x2.worktree)).split("{command}").join(`claude --name ${x2.name} "${x2.prompt}"`);
+  return herdrRun(HERDR_TEMPLATE, x2);
 }
 
 // src/lib/publish.ts
@@ -13871,8 +13877,12 @@ var Schema = external_exports.object({
     parallel: external_exports.number().int().min(1).max(10).default(3),
     mode: external_exports.enum(["subagents", "sessions"]).optional(),
     launcher: external_exports.enum(["bg", "herdr"]).default("bg"),
+    member: external_exports.object({
+      effort: external_exports.enum(EFFORTS).default("medium"),
+      model: external_exports.enum(MODELS).optional()
+    }).strict().default({ effort: "medium" }),
     setup: external_exports.string().min(1).max(500).optional()
-  }).strict().default({ parallel: 3, launcher: "bg" })
+  }).strict().default({ parallel: 3, launcher: "bg", member: { effort: "medium" } })
 }).strict();
 var DEFAULTS = {
   profile: "balanced",
@@ -13881,7 +13891,7 @@ var DEFAULTS = {
   verify: { limits: { checks: 8, shots: 10, minutes: 10 } },
   evidence: "upload",
   validatorTimeoutSec: 600,
-  swarm: { parallel: 3, launcher: "bg" },
+  swarm: { parallel: 3, launcher: "bg", member: { effort: "medium" } },
   tdd: "off"
 };
 function parseConfig(text) {
@@ -14060,7 +14070,18 @@ function run(argv, io) {
           const v = i >= 0 ? args[i + 1] : void 0;
           return v && !v.startsWith("--") ? v : void 0;
         };
+        let effort, model;
         if (taskMode) {
+          if (args.includes("--effort")) {
+            const v = val("--effort");
+            if (!v || !EFFORTS.includes(v)) return fail(`launch --task: --effort must be one of ${EFFORTS.join(", ")}`, 2);
+            effort = v;
+          }
+          if (args.includes("--model")) {
+            const v = val("--model");
+            if (!v || !MODELS.includes(v)) return fail(`launch --task: --model must be one of ${MODELS.join(", ")}`, 2);
+            model = v;
+          }
           const runId = val("--run"), coordinator = val("--coordinator"), taskBase = val("--base");
           if (!runId || !SAFE_ID.test(runId)) return fail("launch --task: --run needs the execution id", 2);
           if (!coordinator || !SAFE_ID.test(coordinator)) return fail("launch --task: --coordinator needs the coordinator session id", 2);
@@ -14084,9 +14105,10 @@ function run(argv, io) {
           const taskWt = import_node_path3.default.join(root, ".claude", "worktrees", `task-${track}`);
           const taskBranch = `task/${track}`;
           const taskName = `wp-${p.project}-${track}`;
-          const taskPrompt = `/forge:run --plan ${args[0]} --task ${track} \u2014 run member of ${val("--coordinator")}: work only ${track}, then stop`;
-          const taskCommand = `claude --bg --name ${taskName} "${taskPrompt}"`;
-          const taskRun = launchRun(launcher, { name: taskName, prompt: taskPrompt, worktree: taskWt });
+          const taskPrompt = `/forge:member --plan ${args[0]} --task ${track} \u2014 run member of ${val("--coordinator")}: work only ${track}, then stop`;
+          const taskFlags = `${effort ? ` --effort ${effort}` : ""}${model ? ` --model ${model}` : ""}`;
+          const taskCommand = `claude --bg --name ${taskName}${taskFlags} "${taskPrompt}"`;
+          const taskRun = launchRun(launcher, { name: taskName, prompt: taskPrompt, worktree: taskWt, effort, model });
           if (taskRun === null) return fail("launch: herdr cannot open panes from the command line; use launcher bg", 2);
           if (!(0, import_node_fs3.existsSync)(taskWt)) {
             const exists = git("branch", "--list", taskBranch) !== "";
