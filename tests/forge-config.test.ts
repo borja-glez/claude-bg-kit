@@ -66,6 +66,10 @@ describe('forge config', () => {
     expect(agentFor('verify', 'economy')).toBe('forge-verify');
     expect(agentFor('verify', 'quality')).toBe('forge-verify-heavy');
   });
+  it('the review-final role is forge-review-final in every profile', () => {
+    expect(ROLES).toContain('review-final');
+    for (const p of ['balanced', 'economy', 'quality'] as const) expect(agentFor('review-final', p)).toBe('forge-review-final');
+  });
   it('each profile resolves the five-rung implementer ladder as the design says', () => {
     expect(ROLES).toContain('impl-high');
     const ladder = ['mech', 'impl-light', 'impl', 'impl-high', 'impl-heavy'] as const;

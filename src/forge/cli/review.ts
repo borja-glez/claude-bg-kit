@@ -214,7 +214,8 @@ type ValidatorRow = { validator?: unknown; ok?: unknown; failures?: unknown; pre
  * (carried results keep their previous origins), logs it on the round dir and the round decision, logs the minor and
  * deferred findings as a ruling, writes `<dir>/findings-<n>-<round>.json` for the implementer when the action is not
  * accept, saves the case of each shadow twin that left its file in `shadow/` (it never counts in the verdict), and
- * prints `{action, score, next, last, implementer, findings, deferred, invalid}` (plus `shadow`, the twins compared, and
+ * prints `{action, score, next, last, implementer, findings, deferred, invalid, incomplete}` (`incomplete`: the
+ * reviewers whose file is a draft with `"complete": false`; plus `shadow`, the twins compared, and
  * `shadowSkipped`, the twins whose file, or their high reviewer's, was missing or unparseable).
  */
 export function reviewClose(args: string[], deps: ReviewDeps): Result {
@@ -340,7 +341,7 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   return json({
     action: result.action, score: result.score, next: d.next, last: d.last, implementer: d.implementer,
     findings, deferred: result.deferred, invalid: result.reviewers.filter(r => r.invalid).map(r => r.name),
-    round, reasons: result.reasons, ...(twins.length ? { shadow: twins } : {}), ...(shadowSkipped.length ? { shadowSkipped } : {}),
+    incomplete: result.reviewers.filter(r => r.incomplete).map(r => r.name), round, reasons: result.reasons, ...(twins.length ? { shadow: twins } : {}), ...(shadowSkipped.length ? { shadowSkipped } : {}),
   });
 }
 

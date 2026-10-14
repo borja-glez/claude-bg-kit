@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { EFFORTS, MODELS, type Effort, type Model } from '../lib/launcher.js';
 
 export type Profile = 'balanced' | 'economy' | 'quality';
-export const ROLES = ['impl-heavy', 'impl-high', 'impl', 'impl-light', 'mech', 'review-correctness', 'review-security', 'review-perf', 'verify'] as const;
+export const ROLES = ['impl-heavy', 'impl-high', 'impl', 'impl-light', 'mech', 'review-correctness', 'review-security', 'review-perf', 'review-final', 'verify'] as const;
 export type Role = (typeof ROLES)[number];
 export const NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
 /** Who does a coding request (spec §5.4): ask, forge, superpowers, superpowers designing or planning and forge building,

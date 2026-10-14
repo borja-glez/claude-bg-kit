@@ -491,6 +491,7 @@ describe('plugin layout', () => {
     const expected: Record<string, [string, string]> = {
       'forge-impl-heavy': ['opus', 'xhigh'], 'forge-impl-high': ['opus', 'high'], 'forge-impl':['opus', 'medium'], 'forge-impl-light': ['sonnet', 'medium'], 'forge-mech': ['haiku', 'low'],
       'forge-review-correctness': ['opus', 'high'], 'forge-review-security': ['opus', 'high'], 'forge-review-perf': ['opus', 'high'], 'forge-fable': ['fable', 'high'],
+      'forge-review-final': ['opus', 'xhigh'],
       'forge-planner': ['opus', 'xhigh'], 'forge-scout': ['opus', 'medium'], 'forge-verify': ['sonnet', 'high'], 'forge-verify-heavy': ['opus', 'high'],
     };
     const agents = readdirSync(new URL('../plugins/forge/agents/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3));
@@ -520,7 +521,25 @@ describe('plugin layout', () => {
       expect(md).toMatch(/also (put|include) the report in your reply/i);
       expect(md).toContain('Commit title prefix');
     }
-    expect(read('plugins/forge/agents/forge-review-correctness.md')).toMatch(/final review/i);
+    expect(read('plugins/forge/agents/forge-review-final.md')).toMatch(/final review/i);
+  });
+  it('reviewers write an early draft verdict and update it; the Large final review has its own agent', () => {
+    const final = read('plugins/forge/agents/forge-review-final.md');
+    const head = final.split(/\r?\n---\r?\n/)[0];
+    for (const re of [/\nmodel: opus\r?\n/, /\neffort: xhigh\r?\n/, /\nmaxTurns: 80\r?\n/, /\ntools: Read, Grep, Glob, Bash, Write\r?(\n|$)/]) expect(head).toMatch(re);
+    for (const w of ['design', 'plan', 'done_when', 'correctness.json', 'you have 80 turns', 'never edit']) expect(final, w).toContain(w);
+    for (const a of ['forge-review-correctness', 'forge-review-security', 'forge-review-perf', 'forge-review-final']) {
+      const md = read(`plugins/forge/agents/${a}.md`);
+      for (const w of ['"complete": false', '"complete": true', 'at the latest by your 5th tool call', 'read it and continue from it instead of starting over',
+        'You must write the file even when you pass or abstain']) expect(md, `${a}: ${w}`).toContain(w);
+      expect(md, a).toMatch(/"complete": true \| false/);
+    }
+    for (const a of ['forge-review-correctness', 'forge-review-security', 'forge-review-perf']) expect(read(`plugins/forge/agents/${a}.md`)).toContain('you have 30 turns');
+    const rc = read('plugins/forge/agents/forge-review-correctness.md');
+    expect(rc).not.toMatch(/Final review \(Large path\)/);
+    expect(rc).not.toContain('done_when');
+    expect(runRef('large')).toContain('review-final');
+    for (const s of [read('plugins/forge/skills/run/SKILL.md'), read('plugins/forge/skills/review/SKILL.md'), runRef('large'), runRef('task-steps')]) expect(s).toContain('incomplete');
   });
   it('forge-verify agents: models, no tools list, never edit the project', () => {
     for (const [file, model] of [['forge-verify', 'sonnet'], ['forge-verify-heavy', 'opus']] as const) {
@@ -744,7 +763,8 @@ describe('plugin layout', () => {
     const large = runRef('large');
     expect(large).toContain('FORGE verdict --task <project>-final --dir .forge/work/<project>/final-1');
     expect(large).toContain('one fix by `impl-heavy`');
-    expect((large.match(/final review mode[^\n]*?`effort: xhigh`/g) ?? []).length).toBe(2);
+    expect((large.match(/spawn (the )?`review-final`/g) ?? []).length).toBe(2);
+    expect(large).not.toContain('final review mode');
     expect(large).not.toContain('FORGE review-prep');
     expect(large).not.toContain('FORGE review-close');
     const resume = runRef('resuming');

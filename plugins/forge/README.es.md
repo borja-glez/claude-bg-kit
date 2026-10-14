@@ -100,6 +100,7 @@ El triaje lee el texto de la tarea, los ficheros que probablemente toque y las z
 | `forge-review-correctness` | Opus | alto (según el riesgo) | revisión de corrección |
 | `forge-review-security` | Opus | alto (según el riesgo) | revisión de seguridad |
 | `forge-review-perf` | Opus | alto (según el riesgo) | revisión de rendimiento |
+| `forge-review-final` | Opus | muy alto | la revisión final de Large y su segunda revisión |
 | `forge-verify` | Sonnet | alto | usa el trabajo a través de una superficie e informa con pruebas (`forge-verify-heavy`, Opus, también alto, con el perfil `quality`) |
 | `forge-planner` | Opus | muy alto | camino Large: convierte un diseño aprobado en un plan de waypoint |
 | `forge-scout` | Opus | medio | modo infinito: propuestas de mejora con pruebas |
@@ -110,9 +111,11 @@ Cada agente fija su `model` y su `effort`, así que ninguno hereda los de tu ses
 
 | Revisor | Por defecto | xhigh cuando |
 | --- | --- | --- |
-| correctness | high | la tarea es sensible o delicada, y en la revisión final de Large |
+| correctness | high | la tarea es sensible o delicada |
 | security | high | la zona sensible es `auth` (incluye cripto y secretos) |
 | perf | medium | nunca |
+
+Los revisores escriben pronto un primer veredicto, un borrador con `"complete": false` escrito en sus cinco primeras llamadas a herramientas, lo actualizan cuando encuentran o descartan algo y terminan con la escritura final, `"complete": true`. Un revisor que se queda sin turnos deja su borrador: el veredicto lo puntúa tal cual, lo lista en `incomplete`, y el revisor relanzado retoma el borrador en vez de empezar de cero.
 
 El perfil `quality` deja todos los revisores en xhigh. La revisión ligera de una tarea pequeña del plan ejecuta `forge-review-correctness` en Sonnet con esfuerzo medio.
 
@@ -123,7 +126,7 @@ El perfil `quality` deja todos los revisores en xhigh. La revisión ligera de un
 1. `/forge:run` ejecuta `/waypoint:design` y **espera a que apruebes el diseño**.
 2. `forge-planner` escribe `plan.yaml` y `/waypoint:plan` publica el roadmap vivo.
 3. `/waypoint:work` reclama cada tarea, y su paso «hacer el trabajo» se convierte en el bucle de forge: `brief --plan`, `triage --plan` (quién la implementa, según el tamaño de la tarea), un implementador, los validadores, `triage --base` (otra vez el tamaño, ahora solo a partir del diff real) y los revisores que pide ese tamaño, durante hasta 4 rondas. Un diff de 3 ficheros o menos y 200 líneas cambiadas o menos, fuera de zonas sensibles, recibe una revisión ligera de correctness en Sonnet, salvo que la tarea toque una zona sensible (por su texto, sus zonas del plan o su diff); uno mayor recibe correctness, más security en zonas sensibles y perf en tareas de rendimiento.
-4. Al acabar las tareas, `review-correctness` revisa toda la rama contra el diseño y el plan, con como mucho un arreglo y una segunda revisión. La segunda revisión recibe validadores y diff nuevos, y un veredicto `redo` se trata como un arreglo.
+4. Al acabar las tareas, `forge-review-final` (Opus, xhigh, 80 turnos) revisa toda la rama contra el diseño y el plan, con como mucho un arreglo y una segunda revisión. La segunda revisión recibe validadores y diff nuevos, y un veredicto `redo` se trata como un arreglo.
 
 La base de la ejecución se guarda en `.forge/work/<proyecto>/run.json`, que se escribe una vez tras aprobar el diseño. Mientras una tarea corre, la coordinadora renueva una concesión (`leaseUntil`, 10 minutos) en el estado de la tarea y en su propia sesión de waypoint, para que las sesiones en paralelo no le quiten una tarea que sigue en marcha. Además de la concesión, la coordinadora deja una señal local en `.forge/live/` (mira [Señal en vivo](#señal-en-vivo)).
 
@@ -347,11 +350,11 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 - `hook route-session` / `hook route-prompt` - los hooks de enrutado (SessionStart, UserPromptSubmit); ante cualquier error no imprimen nada.
 - `local set workflow <w>|none` / `local set autonomy ask|auto|none` - tus preferencias en `.forge/local.yaml`.
 - `validate [--affected a,b | --all] [--path trivial|small|medium|large] [--base sha] [--final] [--task id] [--base-run | --baseline f]` - ejecuta los validadores del proyecto que tocan (ver Coincidencias); `--base` da el diff contra el que se casan los `affects` de e2e, `--final` elige el conjunto de la revisión final. `--base-run` marca una ejecución sobre el commit base, antes de cualquier cambio; `--baseline f` toma el JSON de esa ejecución y marca `preexisting` un fallo que la base ya tenía, que no cuenta ni en el código de salida ni en el veredicto. Un runner de tests que no encuentra tests pasa como `skipped: "no-tests"`.
-- `verdict --task id --dir d [--validators f] [--sensitive] [--perf]` - pondera los JSON de los revisores en una nota. Un revisor aparece con `invalid: true` si su salida no servía (`dropped: 0`, cuenta como abstención) o si se descartaron algunos de sus hallazgos (`dropped` > 0; la revisión mantiene su veredicto y puntúa, y la skill registra los hallazgos descartados como resolución).
+- `verdict --task id --dir d [--validators f] [--sensitive] [--perf]` - pondera los JSON de los revisores en una nota. Un revisor aparece con `invalid: true` si su salida no servía (`dropped: 0`, cuenta como abstención) o si se descartaron algunos de sus hallazgos (`dropped` > 0; la revisión mantiene su veredicto y puntúa, y la skill registra los hallazgos descartados como resolución). También imprime `invalid` e `incomplete`, los revisores cuyo fichero no sirve o es un borrador con `"complete": false` (puntúa tal cual).
 - `round --task id --path medium|large` - decide el siguiente paso del bucle de revisión (`done`, `resume`, `fresh-stronger`, `redo`, `breaker`, `stalled`; `tierUp` desde la ronda 3), si el intento es el último (`last`) y el siguiente `implementer` (`role`, `agent`).
 - `prep --task <id>-<n> --path p [--phase ph] [--dir d]` - antes de que empiece un implementador: registra `BASE`, la fase y la línea base de los validadores sobre él en una sola llamada, e imprime `base`, `baseline` y `failing`.
 - `review-prep --task <id>-<n> --path p --base sha --baseline f --dir d [--locale es|en]` - prepara una ronda de revisión: valida contra la línea base, escribe el diff (y desde la ronda 2 el diff del arreglo y los hallazgos anteriores de cada revisor), decide quién revisa y cómo y copia los resultados arrastrados; imprime `round`, `validators`, `say`, `spawn` (`agent`, `model`, `effort`, `mode` `full` o `delta`, `inputs`, `twin`) y `carried`.
-- `review-close --task <id>-<n> --dir d --path medium|large` - cierra la ronda: comprueba que cada revisor lanzado dejó su fichero (sale con código 3 y `missing` si no), pondera el veredicto, registra los hallazgos menores y los `deferred` como rulings, escribe `findings-<n>-<ronda>.json` e imprime `{action, score, next, last, implementer, findings, deferred, invalid}` (más `shadow`).
+- `review-close --task <id>-<n> --dir d --path medium|large` - cierra la ronda: comprueba que cada revisor lanzado dejó su fichero (sale con código 3 y `missing` si no), pondera el veredicto, registra los hallazgos menores y los `deferred` como rulings, escribe `findings-<n>-<ronda>.json` e imprime `{action, score, next, last, implementer, findings, deferred, invalid, incomplete}` (más `shadow`).
 - `shadow start [--tasks N] [--reset] | stop | report [--locale es|en]` - la prueba en sombra de los revisores en high frente a gemelos en xhigh (ver [Agentes](#agentes)); abrirla de nuevo conserva los casos reunidos, `--reset` los borra.
 - `log --kind k [--task id] [--data json | --data-file f]` - añade una entrada al registro. Una entrada `triage` que sube el camino puede llevar un `why`, que nombra el siguiente `announce`.
 - `decision add --data-file f [--task id]` - registra una decisión de forge (JSON estricto: `point`, `what`, `chosen`, `why`, `by` y, si hace falta, `alternatives`, `weight`, `revert`, `undo`, `safePath`, `revertOf`, `task`, `runId`); la imprime con su número `n` y mantiene `.forge/decisions.json`, el resumen que leen lens y la banda. Con una ejecución activa lleva su id.

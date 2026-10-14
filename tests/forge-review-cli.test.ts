@@ -279,7 +279,7 @@ describe('forge review-close', () => {
     expect(r.stderr).toBe('');
     expect(r.code).toBe(0);
     const out = JSON.parse(r.stdout);
-    expect(out).toMatchObject({ action: 'fix', next: 'resume', last: false, findings: '.forge/work/T1/findings-1-1.json', deferred: [], invalid: [] });
+    expect(out).toMatchObject({ action: 'fix', next: 'resume', last: false, findings: '.forge/work/T1/findings-1-1.json', deferred: [], invalid: [], incomplete: [] });
     expect(typeof out.score).toBe('number');
     expect(out.implementer).toMatchObject({ role: expect.any(String), agent: expect.any(String) });
     const findings = JSON.parse(readFileSync(path.join(work(), 'findings-1-1.json'), 'utf8'));
@@ -290,6 +290,15 @@ describe('forge review-close', () => {
     expect(events.find(e => e.kind === 'verdict')).toMatchObject({ task: 'T1-1', dir: '.forge/work/T1/reviews-1-1', action: 'fix' });
     expect(events.find(e => e.kind === 'round')).toMatchObject({ task: 'T1-1', next: 'resume' });
     expect(events.find(e => e.kind === 'ruling')).toMatchObject({ task: 'T1-1', minor: [{ problem: 'style' }] });
+  });
+
+  it('a reviewer whose file is a draft (complete: false) is listed in incomplete and still counts as written', () => {
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }], complete: false });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [], complete: true });
+    const r = close();
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ action: 'fix', invalid: [], incomplete: ['correctness'] });
   });
 
   it('round 2: an accept with a deferred finding logs the ruling; the carried security counts as before', () => {

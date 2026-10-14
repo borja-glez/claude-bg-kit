@@ -137,6 +137,27 @@ it('a clean review has no dropped findings and is not invalid', () => {
   expect(r.invalid).toBeUndefined();
   expect(r.dropped ?? 0).toBe(0);
 });
+describe('a draft review (complete: false)', () => {
+  it('is flagged incomplete (boolean or "false"); missing or true is complete', () => {
+    expect(parseReview('{"verdict":"abstain","confidence":0,"findings":[],"complete":false}')).toEqual({ verdict: 'abstain', confidence: 0, findings: [], incomplete: true });
+    expect(parseReview('{"verdict":"pass","confidence":1,"findings":[],"complete":"false"}').incomplete).toBe(true);
+    expect(parseReview('{"verdict":"pass","confidence":1,"findings":[],"complete":true}').incomplete).toBeUndefined();
+    expect(parseReview('{"verdict":"pass","confidence":1,"findings":[]}').incomplete).toBeUndefined();
+  });
+  it('is scored as written: a draft fail with an important finding blocks', () => {
+    const draft = parseReview('{"verdict":"fail","confidence":0.6,"findings":[{"severity":"important","file":"b.ts","problem":"off by one"}],"complete":false}');
+    const r = synthesize({ correctness: draft }, W, true);
+    expect(r).toMatchObject({ action: 'fix', score: 0.54 });
+    expect(r.important).toHaveLength(1);
+    expect(r.reviewers[0]).toMatchObject({ name: 'correctness', incomplete: true, invalid: false });
+  });
+  it('a draft abstain does not answer', () => {
+    const draft = parseReview('{"verdict":"abstain","confidence":0,"findings":[],"complete":false}');
+    const r = synthesize({ correctness: pass(), security: draft }, W, true);
+    expect(r).toMatchObject({ action: 'accept', score: 1 });
+    expect(r.reviewers.map(x => [x.name, x.incomplete])).toEqual([['correctness', false], ['security', true]]);
+  });
+});
 it('the verdict output reports dropped per reviewer', () => {
   const rev = parseReview('{"verdict":"pass","confidence":1,"findings":[{"severity":"critical","file":"a.ts","description":"x"}]}');
   const out = synthesize({ correctness: rev }, weightsFor({ sensitive: false, perf: false }), true);

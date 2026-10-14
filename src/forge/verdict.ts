@@ -6,13 +6,13 @@ export type ReviewerName = 'correctness' | 'security' | 'perf' | 'verify';
 export type Origin = 'previous' | 'fix' | 'untouched';
 const ORIGINS = ['previous', 'fix', 'untouched'] as const;
 export interface Finding { severity: 'critical' | 'important' | 'minor'; file?: string; line?: number; problem: string; fix?: string; origin?: Origin }
-export interface Review { verdict: 'pass' | 'fail' | 'abstain'; confidence: number; findings: Finding[]; approach?: 'ok' | 'wrong'; invalid?: boolean; dropped?: number }
+export interface Review { verdict: 'pass' | 'fail' | 'abstain'; confidence: number; findings: Finding[]; approach?: 'ok' | 'wrong'; invalid?: boolean; dropped?: number; incomplete?: boolean }
 export interface FailingValidator { validator: string; failures: string[] }
 export interface Weights { correctness: number; security: number; perf: number; verify: number }
 export type Action = 'accept' | 'fix' | 'redo';
 export interface VerdictResult {
   action: Action; score: number | null; reasons: string[]; critical: Finding[]; important: Finding[]; minor: Finding[];
-  reviewers: { name: ReviewerName; verdict: Review['verdict']; confidence: number; weight: number; invalid: boolean; dropped: number }[]; signature: string;
+  reviewers: { name: ReviewerName; verdict: Review['verdict']; confidence: number; weight: number; invalid: boolean; dropped: number; incomplete: boolean }[]; signature: string;
   // From round 2: important untouched findings left for the person because nothing else opened a round.
   deferred: Finding[];
 }
@@ -126,7 +126,8 @@ export function correctOrigin(f: Finding, hunks: FixHunks, root?: string): Findi
 
 // Reads a reviewer's JSON (possibly wrapped in prose or a fence). Output that cannot be used at all
 // (no object, unknown verdict, confidence missing or out of 0..1, findings not a list) abstains
-// with invalid: true.
+// with invalid: true. `"complete": false` (or "false") marks a reviewer's draft, left when it ran out of turns:
+// incomplete: true, scored as written. A missing `complete` is a complete review.
 export function parseReview(text: string | null): Review {
   if (!text) return invalidReview();
   const start = text.indexOf('{');
@@ -147,6 +148,7 @@ export function parseReview(text: string | null): Review {
   const review: Review = { verdict, confidence, findings };
   if (r.approach === 'ok' || r.approach === 'wrong') review.approach = r.approach;
   if (dropped > 0) { review.dropped = dropped; review.invalid = true; }
+  if (r.complete === false || (typeof r.complete === 'string' && r.complete.trim().toLowerCase() === 'false')) review.incomplete = true;
   return review;
 }
 
@@ -284,7 +286,7 @@ export function synthesize(reviews: Partial<Record<ReviewerName, Review>>, weigh
   const signature = createHash('sha256').update(JSON.stringify(blocking)).digest('hex').slice(0, 16);
   return {
     action, score, reasons, critical, important, minor, signature,
-    reviewers: names.map(n => ({ name: n, verdict: reviews[n]!.verdict, confidence: reviews[n]!.confidence, weight: weights[n], invalid: reviews[n]!.invalid === true, dropped: reviews[n]!.dropped ?? 0 })),
+    reviewers: names.map(n => ({ name: n, verdict: reviews[n]!.verdict, confidence: reviews[n]!.confidence, weight: weights[n], invalid: reviews[n]!.invalid === true, dropped: reviews[n]!.dropped ?? 0, incomplete: reviews[n]!.incomplete === true })),
     deferred,
   };
 }

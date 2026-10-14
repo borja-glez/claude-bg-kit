@@ -100,6 +100,7 @@ Triage reads the task text, the files it is likely to touch and the sensitive zo
 | `forge-review-correctness` | Opus | high (by risk) | correctness review |
 | `forge-review-security` | Opus | high (by risk) | security review |
 | `forge-review-perf` | Opus | high (by risk) | performance review |
+| `forge-review-final` | Opus | xhigh | the Large final review and its re-review |
 | `forge-verify` | Sonnet | high | uses the work through a surface and reports evidence (`forge-verify-heavy`, Opus, also high, on the `quality` profile) |
 | `forge-planner` | Opus | xhigh | Large path: turns an approved design into a waypoint plan |
 | `forge-scout` | Opus | medium | infinite mode: evidence-backed improvement proposals |
@@ -110,9 +111,11 @@ Every agent pins its `model` and `effort`, so none inherits your session's. Impl
 
 | Reviewer | Default | xhigh when |
 | --- | --- | --- |
-| correctness | high | the task is sensitive or delicate, and in Large's final review |
+| correctness | high | the task is sensitive or delicate |
 | security | high | the sensitive zone is `auth` (crypto and secrets included) |
 | perf | medium | never |
+
+Reviewers write a first verdict early, a draft with `"complete": false` written within their first five tool calls, update it as they find or clear something and end with the final write, `"complete": true`. A reviewer that runs out of turns leaves its draft: the verdict scores it as written, lists it in `incomplete`, and the respawned reviewer picks the draft up instead of starting over.
 
 The `quality` profile puts every reviewer on xhigh. The light review of a small plan task runs `forge-review-correctness` on Sonnet at medium effort.
 
@@ -123,7 +126,7 @@ The `quality` profile puts every reviewer on xhigh. The light review of a small 
 1. `/forge:run` runs `/waypoint:design` and **waits for you to approve the design**.
 2. `forge-planner` writes `plan.yaml` and `/waypoint:plan` publishes the live roadmap.
 3. `/waypoint:work` claims each task, and its "do the work" step becomes the forge loop: `brief --plan`, `triage --plan` (who implements it, by the task's size), an implementer, the validators, `triage --base` (the size again, now from the real diff alone) and the reviewers that size calls for, for up to 4 rounds. A diff of 3 files or fewer and 200 changed lines or fewer, outside sensitive zones, gets one light correctness review on Sonnet, unless the task touches a sensitive zone (its text, its plan zones or its diff); a larger one gets correctness, plus security on sensitive zones and perf on performance tasks.
-4. When the tasks are done, `review-correctness` reviews the whole branch against the design and the plan, with at most one fix and one re-review. The re-review gets fresh validators and a fresh diff, and a `redo` verdict is treated as a fix.
+4. When the tasks are done, `forge-review-final` (Opus, xhigh, 80 turns) reviews the whole branch against the design and the plan, with at most one fix and one re-review. The re-review gets fresh validators and a fresh diff, and a `redo` verdict is treated as a fix.
 
 The run's base is kept in `.forge/work/<project>/run.json`, written once after the design is approved. While a task runs, the coordinator renews a lease (`leaseUntil`, 10 minutes) on the task's state and on its own waypoint session, so parallel sessions do not recover a task that is still being worked. Besides the lease, the coordinator leaves a local signal in `.forge/live/` (see [Live signal](#live-signal)).
 
@@ -347,11 +350,11 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 - `hook route-session` / `hook route-prompt` - the routing hooks (SessionStart, UserPromptSubmit); they print nothing on any error.
 - `local set workflow <w>|none` / `local set autonomy ask|auto|none` - your own preferences in `.forge/local.yaml`.
 - `validate [--affected a,b | --all] [--path trivial|small|medium|large] [--base sha] [--final] [--task id] [--base-run | --baseline f]` - run the project validators that apply (see Matching); `--base` gives the diff that e2e `affects` are matched against, `--final` selects the final review's set. `--base-run` marks a run on the base commit, before any change; `--baseline f` takes that run's JSON and marks a failure the base already had `preexisting`, which neither the exit code nor the verdict counts. A test runner that finds no tests passes as `skipped: "no-tests"`.
-- `verdict --task id --dir d [--validators f] [--sensitive] [--perf]` - weigh the reviewers' JSON files into a score. A reviewer is listed with `invalid: true` when its output was unusable (`dropped: 0`, counted as an abstention) or when some of its findings were dropped (`dropped` > 0; the review keeps its verdict and still scores, and the skill records the dropped findings as a ruling).
+- `verdict --task id --dir d [--validators f] [--sensitive] [--perf]` - weigh the reviewers' JSON files into a score. A reviewer is listed with `invalid: true` when its output was unusable (`dropped: 0`, counted as an abstention) or when some of its findings were dropped (`dropped` > 0; the review keeps its verdict and still scores, and the skill records the dropped findings as a ruling). It also prints `invalid` and `incomplete`, the reviewers whose file is unusable or a draft with `"complete": false` (scored as written).
 - `round --task id --path medium|large` - decide the next step of the review loop (`done`, `resume`, `fresh-stronger`, `redo`, `breaker`, `stalled`; `tierUp` from round 3), whether the attempt is the `last`, and the next `implementer` (`role`, `agent`).
 - `prep --task <id>-<n> --path p [--phase ph] [--dir d]` - before an implementer starts: record `BASE`, the phase and the validators' baseline on it in one call, and print `base`, `baseline` and `failing`.
 - `review-prep --task <id>-<n> --path p --base sha --baseline f --dir d [--locale es|en]` - prepare a review round: validate against the baseline, write the diff (and from round 2 the fix diff and each reviewer's earlier findings), choose who reviews and how, copy the carried results; prints `round`, `validators`, `say`, `spawn` (`agent`, `model`, `effort`, `mode` `full` or `delta`, `inputs`, `twin`) and `carried`.
-- `review-close --task <id>-<n> --dir d --path medium|large` - close the round: check every spawned reviewer left its file (exit 3 and `missing` if not), weigh the verdict, record minor and `deferred` findings as rulings, write `findings-<n>-<round>.json` and print `{action, score, next, last, implementer, findings, deferred, invalid}` (plus `shadow`).
+- `review-close --task <id>-<n> --dir d --path medium|large` - close the round: check every spawned reviewer left its file (exit 3 and `missing` if not), weigh the verdict, record minor and `deferred` findings as rulings, write `findings-<n>-<round>.json` and print `{action, score, next, last, implementer, findings, deferred, invalid, incomplete}` (plus `shadow`).
 - `shadow start [--tasks N] [--reset] | stop | report [--locale es|en]` - the shadow trial of the reviewers at high against xhigh twins (see [Agents](#agents)); starting again keeps the cases collected, `--reset` clears them.
 - `log --kind k [--task id] [--data json | --data-file f]` - append to the ledger. A `triage` entry that raises the path may carry a `why`, which the next `announce` names.
 - `decision add --data-file f [--task id]` - record a decision forge took (strict JSON: `point`, `what`, `chosen`, `why`, `by`, optional `alternatives`, `weight`, `revert`, `undo`, `safePath`, `revertOf`, `task`, `runId`); prints it with its number `n` and keeps `.forge/decisions.json`, the summary lens and the band read. During an active execution it carries the run's id.

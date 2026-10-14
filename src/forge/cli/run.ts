@@ -678,7 +678,8 @@ export function run(argv: string[], io: Io): Result {
         appendEvent(io.cwd, { ts: ts(), kind: 'verdict', task, dir: path.relative(io.cwd, dir).split(path.sep).join('/') || '.', action: result.action, score: result.score, signature: result.signature,
           critical: result.critical.length, important: result.important.length, minor: result.minor.length });
         if (verifyFile !== undefined) logVerifyResult(io.cwd, ts(), task, dir, verifyFile);
-        return json(result);
+        // invalid and incomplete (a draft with "complete": false) name the reviewers to respawn once.
+        return json({ ...result, invalid: result.reviewers.filter(r => r.invalid).map(r => r.name), incomplete: result.reviewers.filter(r => r.incomplete).map(r => r.name) });
       }
       case 'verify-result': {
         // A verification outside a verdict (Small and Trivial have no review): its result logged as verdict logs it.

@@ -64,6 +64,19 @@ describe('forge CLI', () => {
     writeFileSync(path.join(root, 'validators.json'), '[]');
     const out = JSON.parse(run(['verdict', '--task', 't1', '--dir', 'reviews', '--validators', 'validators.json'], io).stdout);
     expect(out.reviewers.map((x: { name: string; invalid: boolean }) => [x.name, x.invalid])).toEqual([['correctness', false], ['security', true]]);
+    expect(out.invalid).toEqual(['security']);
+    expect(out.incomplete).toEqual([]);
+  });
+  it('verdict reports incomplete reviewers (a draft with complete: false)', () => {
+    const dir = path.join(root, 'reviews');
+    mkdirSync(dir);
+    writeFileSync(path.join(dir, 'correctness.json'), '{"verdict":"pass","confidence":1,"findings":[],"complete":true}');
+    writeFileSync(path.join(dir, 'security.json'), '{"verdict":"abstain","confidence":0,"findings":[],"complete":false}');
+    writeFileSync(path.join(root, 'validators.json'), '[]');
+    const out = JSON.parse(run(['verdict', '--task', 't1', '--dir', 'reviews', '--validators', 'validators.json'], io).stdout);
+    expect(out.incomplete).toEqual(['security']);
+    expect(out.invalid).toEqual([]);
+    expect(out.reviewers.map((x: { name: string; incomplete: boolean }) => [x.name, x.incomplete])).toEqual([['correctness', false], ['security', true]]);
   });
   it('verdict without --validators and no validate event says no validation was recorded', () => {
     const dir = path.join(root, 'r');
