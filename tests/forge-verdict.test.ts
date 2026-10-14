@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, type Review } from '../src/forge/verdict.js';
+import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, parseHunks, correctOrigin, type Review, type Finding } from '../src/forge/verdict.js';
 
 const pass = (confidence = 1, findings: Review['findings'] = []): Review => ({ verdict: 'pass', confidence, findings });
 const fail = (confidence = 1, findings: Review['findings'] = []): Review => ({ verdict: 'fail', confidence, findings });
@@ -188,5 +188,126 @@ describe('verify.json', () => {
   it('a blocked verify never fails the task by itself', () => {
     const r = synthesize({ correctness: pass(), verify: verifyReview(parseVerifyFile(file({ result: 'blocked', reason: 'x', checks: [] }))) }, weightsFor({ sensitive: false, perf: false }), true);
     expect(r.action).toBe('accept');
+  });
+});
+
+describe('fix rounds: origin and deferred', () => {
+  const diff = [
+    'diff --git a/src/a.ts b/src/a.ts',
+    '--- a/src/a.ts',
+    '+++ b/src/a.ts',
+    '@@ -10,3 +10,4 @@ function f() {',
+    ' x',
+    '+++ y',
+    ' z',
+    '@@ -40 +41 @@',
+    '-old',
+    '+new',
+    'diff --git a/src/gone.ts b/src/gone.ts',
+    '--- a/src/gone.ts',
+    '+++ /dev/null',
+    '@@ -1,2 +0,0 @@',
+    '-a',
+    '-b',
+  ].join('\n');
+  const hunks = parseHunks(diff);
+  const imp = (origin: Finding['origin'], file = 'src/a.ts', line: number | null = 100): Finding =>
+    ({ severity: 'important', file, ...(line === null ? {} : { line }), problem: `p-${origin}`, origin });
+
+  it('parseReview reads the three origins and ignores an unknown one', () => {
+    const r = parseReview(JSON.stringify({ verdict: 'fail', confidence: 1, findings: ['previous', 'fix', 'untouched', 'other'].map(o =>
+      ({ severity: 'important', file: 'a.ts', line: 1, problem: o, origin: o })) }));
+    expect(r.findings.map(f => f.origin)).toEqual(['previous', 'fix', 'untouched', undefined]);
+  });
+  it('reads new-side hunks per file from a unified diff', () => {
+    expect(hunks).toEqual({ 'src/a.ts': [{ start: 10, end: 13 }, { start: 41, end: 41 }] });
+  });
+  it('an untouched finding inside a fix hunk becomes fix; outside it stays untouched', () => {
+    expect(correctOrigin(imp('untouched', 'src/a.ts', 12), hunks).origin).toBe('fix');
+    expect(correctOrigin(imp('untouched', './src/a.ts', 41), hunks).origin).toBe('fix');
+    expect(correctOrigin(imp('untouched', 'src/a.ts', 14), hunks).origin).toBe('untouched');
+    expect(correctOrigin(imp('untouched', 'src/b.ts', 12), hunks).origin).toBe('untouched');
+    expect(correctOrigin(imp('previous', 'src/a.ts', 12), hunks).origin).toBe('previous');
+  });
+  it('an untouched finding without file or line never stays untouched', () => {
+    expect(correctOrigin(imp('untouched', 'src/a.ts', null), hunks).origin).not.toBe('untouched');
+    expect(correctOrigin({ severity: 'important', problem: 'x', origin: 'untouched' }, hunks).origin).not.toBe('untouched');
+  });
+  it('round 1 does not change: an untouched important still fixes and nothing is deferred', () => {
+    const rv = { correctness: fail(0.8, [imp('untouched')]) };
+    const plain = synthesize(rv, W, true);
+    expect(synthesize(rv, W, true, [], { round: 1, fixHunks: hunks })).toEqual(plain);
+    expect(plain).toMatchObject({ action: 'fix', deferred: [] });
+    expect(plain.important).toHaveLength(1);
+  });
+  it('round 2: an untouched important alone accepts and goes to deferred', () => {
+    const r = synthesize({ correctness: fail(0.8, [imp('untouched')]), security: pass() }, W, true, [], { round: 2, fixHunks: hunks });
+    // the failing review counts as a pass with its confidence: (.5 * .94 + .3 * 1) / .8 = .9625
+    expect(r).toMatchObject({ action: 'accept', important: [] });
+    expect(r.score).toBeCloseTo(0.9625, 2);
+    expect(r.deferred).toEqual([imp('untouched')]);
+  });
+  it('round 2: with a previous finding as well, fix carries the untouched in the findings', () => {
+    const r = synthesize({ correctness: fail(0.8, [imp('untouched'), imp('previous')]) }, W, true, [], { round: 2, fixHunks: hunks });
+    expect(r.action).toBe('fix');
+    expect(r.important.map(f => f.origin).sort()).toEqual(['previous', 'untouched']);
+    expect(r.deferred).toEqual([]);
+  });
+  it('round 2: a failing validator also opens the round and carries the untouched', () => {
+    const r = synthesize({ correctness: fail(0.8, [imp('untouched')]) }, W, false, [{ validator: 'test', failures: ['x'] }], { round: 2, fixHunks: hunks });
+    expect(r.action).toBe('fix');
+    expect(r.important).toHaveLength(1);
+    expect(r.deferred).toEqual([]);
+  });
+  it('round 2: an untouched inside a fix hunk is fix and blocks', () => {
+    const r = synthesize({ correctness: fail(0.8, [imp('untouched', 'src/a.ts', 11)]) }, W, true, [], { round: 2, fixHunks: hunks });
+    expect(r.action).toBe('fix');
+    expect(r.important[0].origin).toBe('fix');
+  });
+  it('round 2: a critical untouched blocks', () => {
+    const r = synthesize({ correctness: fail(0.8, [{ ...imp('untouched'), severity: 'critical' }]) }, W, true, [], { round: 2, fixHunks: hunks });
+    expect(r.action).toBe('fix');
+    expect(r.critical).toHaveLength(1);
+    expect(r.deferred).toEqual([]);
+  });
+  it('hunk lines are counted by the @@ ranges: a body line starting with --- or +++ is not a file header', () => {
+    const sql = [
+      'diff --git a/db/q.sql b/db/q.sql',
+      '--- a/db/q.sql',
+      '+++ b/db/q.sql',
+      '@@ -5,2 +5,2 @@',
+      '--- old comment',
+      '+++ new comment',
+      ' select 1;',
+      '@@ -20 +20,2 @@',
+      ' x',
+      '+y',
+    ].join('\n');
+    expect(parseHunks(sql)).toEqual({ 'db/q.sql': [{ start: 5, end: 6 }, { start: 20, end: 21 }] });
+  });
+  it('finding paths are made repo-relative before the origin check: absolute, ./ and backslashes', () => {
+    expect(correctOrigin(imp('untouched', '/repo/src/a.ts', 12), hunks, '/repo').origin).toBe('fix');
+    expect(correctOrigin(imp('untouched', 'C:\\repo\\src\\a.ts', 12), hunks, 'C:\\repo').origin).toBe('fix');
+    expect(correctOrigin(imp('untouched', 'c:/Repo/src/a.ts', 12), hunks, 'C:\\repo').origin).toBe('fix');
+    expect(correctOrigin(imp('untouched', '.\\src\\a.ts', 12), hunks).origin).toBe('fix');
+    expect(correctOrigin(imp('untouched', '/elsewhere/src/a.ts', 12), hunks, '/repo').origin).toBe('untouched');
+    const r = synthesize({ correctness: fail(0.8, [imp('untouched', '/repo/src/a.ts', 12)]) }, W, true, [], { round: 2, fixHunks: hunks, root: '/repo' });
+    expect(r.action).toBe('fix');
+  });
+  it('round 2: approach wrong with only untouched findings is not accepted', () => {
+    const wrong = { ...fail(0.2, [imp('untouched')]), approach: 'wrong' as const };
+    const r = synthesize({ correctness: wrong, security: pass() }, W, true, [], { round: 2, fixHunks: hunks });
+    expect(r.action).not.toBe('accept');
+    expect(r.deferred).toEqual([]);
+  });
+  it('the signature is the same with and without deferred findings', () => {
+    const prev = imp('previous');
+    const a = synthesize({ correctness: fail(0.8, [prev]) }, W, true, [], { round: 2, fixHunks: hunks });
+    const b = synthesize({ correctness: fail(0.8, [prev, imp('untouched')]) }, W, true, [], { round: 2, fixHunks: hunks });
+    expect(b.signature).toBe(a.signature);
+    const c = synthesize({ correctness: pass() }, W, true, [], { round: 2, fixHunks: hunks });
+    const d = synthesize({ correctness: fail(0.8, [imp('untouched')]) }, W, true, [], { round: 2, fixHunks: hunks });
+    expect(d.deferred).toHaveLength(1);
+    expect(d.signature).toBe(c.signature);
   });
 });

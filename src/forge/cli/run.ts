@@ -2,7 +2,7 @@ import { spawnSync, execFileSync } from 'node:child_process';
 import { existsSync, statSync, lstatSync, readFileSync, readdirSync, openSync, closeSync, fstatSync, readSync, rmSync, mkdtempSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { appendEvent, readEvents, forgeDir, LEDGER_KINDS, type LedgerKind } from '../ledger.js';
+import { appendEvent, readEvents, forgeDir, LEDGER_KINDS, type LedgerKind, type LedgerEvent } from '../ledger.js';
 import { parseRun, startRun, recordCycle, stopReason, endRun, readRunText, saveRun, stopFile, type RunState, type StopContext } from '../run.js';
 import { decideStop, decideExecutionStop, bindHookSession } from '../hook.js';
 import { readExecution, saveExecution } from '../execution.js';
@@ -14,10 +14,9 @@ import { treeStartFile, parseStatus, parseSnapshot, treeCheck, type TreeSnapshot
 import { triage, implementerFor, zonesFromPaths, announce, announceReview, isBookkeeping, parseNumstat, diffPath, isPerfTask, reviewFor, PATH_ORDER, ZONE_ORDER, type PathName, type AnnounceLocale } from '../triage.js';
 import { parsePlan, PlanError } from '../../lib/plan.js';
 import { renderBrief, taskText, tddLine } from '../brief.js';
-import { loadConfig, configValue, agentFor, ROLES, ConfigError, NAME, WORKFLOWS, AUTONOMIES } from '../config.js';
+import { loadConfig, configValue, agentFor, ROLES, ConfigError, NAME, WORKFLOWS, AUTONOMIES, type Profile } from '../config.js';
 import { resolvePrefs, isWorkflow, isAutonomy } from '../prefs.js';
-import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, type ReviewerName, type Action, type FailingValidator, type VerifyFile } from '../verdict.js';
-import { decideRound } from '../loop.js';
+import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, type ReviewerName, type FailingValidator, type VerifyFile } from '../verdict.js';
 import { PROPOSAL_ID, proposalId, saveProposal, loadProposals, loadProposal, decideDoc, mirrorProposal, type DecideError } from '../proposals.js';
 import { normalizeProposal, isActionable, canDecide, PROPOSAL_STATUSES, type Decision, type ProposalDoc } from '../../lib/proposals.js';
 import { autoApprovable, similarRejected, similarOpen } from '../policy.js';
@@ -26,6 +25,8 @@ import type { PlanTask } from '../../lib/types.js';
 import { parseDocument } from 'yaml';
 import { UsageError } from './errors.js';
 import { swarmCommand } from './swarm.js';
+import { reviewCommand } from './review.js';
+import { roundDecision } from '../round.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, type RepoReader, type Scope } from '../validators.js';
 import { checkTools, mcpInventory, toolGaps } from '../tools.js';
 import { verifyPlan, cleanupPids, killTarget, askFor, capLines, relabelDiff, type PlanSurface } from '../verify.js';
@@ -44,7 +45,7 @@ export interface ExecResult { code: number; output: string; ms: number; timedOut
 export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined> }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = 'usage: forge <triage|brief|validate|verdict|round|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|swarm|stop|hook> ...';
+const USAGE = 'usage: forge <triage|brief|validate|verdict|round|review-prep|review-close|prep|shadow|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|swarm|stop|hook> ...';
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 const MAX_WHY = 200;
@@ -204,6 +205,8 @@ function spTaskNumber(v: string | undefined): number {
   if (v === undefined || !/^\d{1,4}$/.test(v) || Number(v) < 1) throw new UsageError('--task must be the number of a task of the superpowers plan');
   return Number(v);
 }
+
+export { roundDecision };
 
 // Finds waypoint's CLI from the running forge.cjs: dev layout (plugins/forge, plugins/waypoint) or
 // cache layout (<marketplace>/forge/<ver>, <marketplace>/waypoint/<ver>); the highest version wins.
@@ -563,8 +566,11 @@ export function run(argv: string[], io: Io): Result {
         const fresh = names.filter(n => !known.includes(n));
         // `known` mirrors what exists now: new names are added, vanished ones dropped silently.
         if (fresh.length || known.some(n => !names.includes(n))) updateLocal(io.cwd, s => ({ ...s, known: names }));
+        // Who reviews, by the size reached and the configured profile: printed always and logged for review-prep.
+        const reviewPlan = reviewFor(result.path, result.sensitive, isPerfTask(task), { delicate: has('delicate'), profile });
+        const review = { ...reviewPlan, reviewers: reviewPlan.reviewers.map(r => ({ ...r, agent: agentFor(r.role, profile) })) };
         appendEvent(io.cwd, { ts: ts(), kind: 'triage', ...(flag('task') ? { task: flag('task') } : {}), ...(project !== null ? { project } : {}), ...result, ...auto,
-          ...(diff ? { diff: { base: diff.base, files: diff.stat.files.length, lines: diff.stat.lines } } : {}) });
+          ...(diff ? { diff: { base: diff.base, files: diff.stat.files.length, lines: diff.stat.lines } } : {}), review });
         // Output only, like `implementer`: the exact line the session prints, and whether a short plan comes first.
         // The locale: the flag, else the plan passed with --plan, else the plan under docs/waypoint, else English.
         const locale = localeArg ?? ((plannedDoc?.plan.locale ?? planLocale(io.cwd))?.toLowerCase().split(/[-_]/)[0] === 'es' ? 'es' : 'en');
@@ -573,20 +579,18 @@ export function run(argv: string[], io: Io): Result {
         // After the implementation: who reviews it, by its real size. No short plan comes first any more.
         let reviewed = {};
         if (diff) {
-          const plan = reviewFor(result.path, result.sensitive, isPerfTask(task));
-          const review = { ...plan, reviewers: plan.reviewers.map(r => ({ ...r, agent: agentFor(r.role, profile) })) };
           // The new-validators line `announce` appends, kept after the review line.
           const bare = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh: [], catalog }, locale as AnnounceLocale);
-          line = announceReview({ path: result.path, files: diff.stat.files.length, lines: diff.stat.lines, review: plan }, locale as AnnounceLocale)
+          line = announceReview({ path: result.path, files: diff.stat.files.length, lines: diff.stat.lines, review: reviewPlan }, locale as AnnounceLocale)
             + line.slice(bare.length);
           gate = null;
-          reviewed = { diff: { base: diff.base, files: diff.stat.files, lines: diff.stat.lines, path: diff.path }, review };
+          reviewed = { diff: { base: diff.base, files: diff.stat.files, lines: diff.stat.lines, path: diff.path } };
         }
         // forgeDir creates .forge/.gitignore and no step commits it: say so while git lists it as untracked and not
         // ignored (a repository that ignores .forge/ has opted out).
         const untracked = listed !== null && lines(git(['ls-files', '--others', '--exclude-standard', '--', '.forge/.gitignore'])).length
           ? { untracked: ['.forge/.gitignore'] } : {};
-        return json({ ...result, catalog, new: fresh, implementer, announce: line, gate, ...untracked, ...auto, ...reviewed });
+        return json({ ...result, catalog, new: fresh, implementer, announce: line, gate, ...untracked, ...auto, ...reviewed, review });
       }
       case 'validate': {
         const config = loadConfig(repoDir);
@@ -693,15 +697,7 @@ export function run(argv: string[], io: Io): Result {
         const task = flag('task');
         const p = flag('path');
         if (!task || (p !== 'medium' && p !== 'large')) throw new UsageError('round: --task and --path medium|large are required');
-        const verdicts = readEvents(io.cwd)
-          .filter(e => e.kind === 'verdict' && e.task === task && (e.action === 'accept' || e.action === 'fix' || e.action === 'redo'));
-        // Only the last verdict per review dir counts: re-running a verdict (e.g. when resuming) is not a new round.
-        const lastPerDir = new Map<string, number>();
-        verdicts.forEach((e, i) => { if (typeof e.dir === 'string') lastPerDir.set(e.dir, i); });
-        const history = verdicts
-          .filter((e, i) => typeof e.dir !== 'string' || lastPerDir.get(e.dir) === i)
-          .map(e => ({ action: e.action as Action, score: typeof e.score === 'number' ? e.score : null, signature: String(e.signature ?? '') }));
-        const d = decideRound(history, p);
+        const d = roundDecision(readEvents(io.cwd), task, p, loadConfig(repoDir).profile);
         appendEvent(io.cwd, { ts: ts(), kind: 'round', task, ...d });
         return json(d);
       }
@@ -1005,6 +1001,13 @@ export function run(argv: string[], io: Io): Result {
         return swarmCommand(args, io, {
           git: io.git ?? defaultGit(io.cwd), exec: io.exec ?? defaultExec(io.cwd), repo: repoReader(repoDir),
           at: dir => ({ git: defaultGit(dir), exec: defaultExec(dir), repo: repoReader(dir) }),
+        });
+      case 'review-prep':
+      case 'review-close':
+      case 'prep':
+      case 'shadow':
+        return reviewCommand(cmd, args, {
+          cwd: io.cwd, repoDir, now: io.now, git: io.git ?? defaultGit(repoDir), exec: io.exec ?? defaultExec(repoDir), repo: repoReader(repoDir),
         });
       case 'hook': {
         const which = args[0];

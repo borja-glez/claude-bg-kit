@@ -291,9 +291,25 @@ describe('multi-session commands', () => {
       const r = JSON.parse(run(args, io).stdout);
       expect(r).toMatchObject({ branch: 'task/T001', name: 'wp-demo-shop-T001', runId: 'r1', task: 'T001' });
       expect(path.resolve(r.worktree).toLowerCase()).toBe(path.resolve(dir, '.claude', 'worktrees', 'task-T001').toLowerCase());
-      expect(r.prompt).toBe('/forge:run --plan plan.yaml --task T001 — run member of S1: work only T001, then stop');
+      expect(r.prompt).toBe('/forge:member --plan plan.yaml --task T001 — run member of S1: work only T001, then stop');
       expect(r.command).toBe(`claude --bg --name wp-demo-shop-T001 "${r.prompt}"`);
       expect(git('rev-parse', 'task/T001')).toBe(git('rev-parse', 'forge/run-demo-shop'));
+    });
+    it('--effort and --model go into command and run, before the prompt', () => {
+      init();
+      const r = JSON.parse(run([...args, '--effort', 'medium'], io).stdout);
+      expect(r.command).toBe(`claude --bg --name wp-demo-shop-T001 --effort medium "${r.prompt}"`);
+      expect(r.run).toContain(`&& claude --bg --name wp-demo-shop-T001 --effort medium "${r.prompt}")`);
+      const m = JSON.parse(run([...args, '--effort', 'high', '--model', 'sonnet'], io).stdout);
+      expect(m.command).toBe(`claude --bg --name wp-demo-shop-T001 --effort high --model sonnet "${m.prompt}"`);
+      expect(m.run).toContain(`&& claude --bg --name wp-demo-shop-T001 --effort high --model sonnet "${m.prompt}")`);
+    });
+    it('refuses an --effort or --model outside the closed list with code 2, before any worktree', () => {
+      init();
+      for (const bad of [['--effort', 'extreme'], ['--effort'], ['--model', 'gpt-4'], ['--model', 'sonnet;rm'], ['--model']]) {
+        expect(run([...args, ...bad], io).code).toBe(2);
+      }
+      expect(existsSync(path.join(dir, '.claude', 'worktrees', 'task-T001'))).toBe(false);
     });
     it('reuses an existing task branch with its work (relaunch)', () => {
       init();

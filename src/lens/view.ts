@@ -32,14 +32,16 @@ export const SECTION_ICON: Record<SectionId, string> = {
   roadmap: '◆', forge: '◈', superpowers: '✦', todos: '≡', agents: '◎', tasks: '▤', now: '▸',
 };
 
-// An agent's level: forge's implementer ladder from cool to warm, the reviewers by what they judge.
+// An agent's level: forge's implementer ladder ranked 1 to 6 (mostly cool to warm), the reviewers by what they judge. impl-high is peach,
+// the one palette hue no other agent uses (lavender is the planner's and the fallback for unknown agents).
 export interface Tier { label: string; hue: Hue; rank: number | null }
 const TIERS: Record<string, Tier> = {
   'forge-mech': { label: 'mech', hue: 'teal', rank: 1 },
   'forge-impl-light': { label: 'light', hue: 'sky', rank: 2 },
   'forge-impl': { label: 'impl', hue: 'blue', rank: 3 },
-  'forge-impl-heavy': { label: 'heavy', hue: 'mauve', rank: 4 },
-  'forge-fable': { label: 'fable', hue: 'pink', rank: 5 },
+  'forge-impl-high': { label: 'high', hue: 'peach', rank: 4 },
+  'forge-impl-heavy': { label: 'heavy', hue: 'mauve', rank: 5 },
+  'forge-fable': { label: 'fable', hue: 'pink', rank: 6 },
   'forge-review-correctness': { label: 'correctness', hue: 'green', rank: null },
   'forge-review-security': { label: 'security', hue: 'red', rank: null },
   'forge-review-perf': { label: 'perf', hue: 'yellow', rank: null },

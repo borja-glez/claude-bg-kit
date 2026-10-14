@@ -37,6 +37,30 @@ describe('triage', () => {
     expect(r.sensitive).toContain('auth');
     expect(r.path).toBe('medium');
   });
+  it('a Claude Code session alone is not the auth zone', () => {
+    for (const t of ['Lo decide la sesión coordinadora', 'Las sesiones miembro trabajan en paralelo', 'each run member session works one task',
+      'Sesiones miembro con esfuerzo propio: configuración, lanzamiento y reanudación', 'the session should judge the scope'])
+      expect(triage(t, repo(), []).sensitive, t).not.toContain('auth');
+  });
+  it('T003 of the forge-cost plan is not the auth zone', () => {
+    const t003 = 'Sesiones miembro con esfuerzo propio: configuración, lanzamiento y reanudación. ' +
+      'src/forge/config.ts gana swarm.member {effort, model}: effort es low | medium | high | xhigh | max y por defecto ' +
+      'medium; model es opcional, con los mismos valores que acepta waypoint launch --model. src/cli/run.ts y ' +
+      'src/lib/launcher.ts: waypoint launch --task acepta --effort y --model, validados contra una lista cerrada (código 2 si ' +
+      'no), y los pone en command y en run (claude --bg --name <N> --effort medium "<prompt>", también en la plantilla ' +
+      'herdr); el prompt pasa a /forge:member --plan <plan> --task <T> — run member of <SID>: work only <T>, then stop. ' +
+      'src/forge/cli/swarm.ts: en modo sessions, la acción start de swarm tick imprime launch, la lista completa de ' +
+      'argumentos de waypoint launch con --effort y --model de swarm.member, y swarm relaunch añade esos flags a la launch ' +
+      'que ya imprime. src/forge/live.ts: el texto de reanudación de un miembro apunta a /forge:member (el del coordinador ' +
+      'sigue en /forge:run). No toques los bundles: los regenera T018.';
+    expect(triage(t003, repo(), []).sensitive).not.toContain('auth');
+  });
+  it('a session in an authentication context is still the auth zone', () => {
+    for (const t of ['Añade el botón de cerrar sesión', 'set the session cookie as httpOnly', 'Permite iniciar sesión con Google',
+      'rotate the session id after sign-in', 'prevent session fixation', 'store the session token', 'keep the login session alive',
+      'Guarda la sesión de usuario', 'Firma la cookie de sesión', 'Caduca el token de sesión', 'Inicia sesión con Google', 'Cierra sesión'])
+      expect(triage(t, repo(), []).sensitive, t).toContain('auth');
+  });
   it('detects data, deps and ci zones from paths', () => {
     expect(triage('edit src/db/migrations/001.sql', repo(), []).sensitive).toContain('data');
     expect(triage('bump a version in package.json', repo(), []).sensitive).toContain('deps');
@@ -208,9 +232,9 @@ describe('implementerFor', () => {
     expect(implementerFor({ path: 'trivial', sensitive: [] }, 'fix the typo in src/a.ts')).toEqual({ role: null, self: true, why: 'trivial: the session does it' });
     expect(implementerFor({ path: 'trivial', sensitive: [] }, 'fix the typo in src/a.ts', { batch: true })).toMatchObject({ role: 'mech', self: false });
   });
-  it('medium goes to impl, or impl-heavy on a sensitive zone; large has no implementer yet', () => {
+  it('medium goes to impl, or impl-high on a sensitive zone; large has no implementer yet', () => {
     expect(implementerFor({ path: 'medium', sensitive: [] }, 'x').role).toBe('impl');
-    expect(implementerFor({ path: 'medium', sensitive: ['auth'] }, 'x').role).toBe('impl-heavy');
+    expect(implementerFor({ path: 'medium', sensitive: ['auth'] }, 'x').role).toBe('impl-high');
     expect(implementerFor({ path: 'large', sensitive: [] }, 'x')).toMatchObject({ role: null, self: false });
   });
   it('isMechanical reads English and Spanish wording, not substrings', () => {
@@ -228,16 +252,16 @@ describe('implementerFor', () => {
     expect(isMechanical('move src/a.ts to src/lib/a.ts')).toBe(true);
     expect(isMechanical('fix the typo in the README')).toBe(true);
   });
-  it('a plan task: trivial goes to mech, large to impl (impl-heavy on a sensitive zone), small and medium unchanged', () => {
+  it('a plan task: trivial goes to mech, large to impl (impl-high on a sensitive zone), small and medium unchanged', () => {
     expect(implementerFor({ path: 'trivial', sensitive: [] }, 'fix the typo in src/a.ts', { plan: true }))
       .toEqual({ role: 'mech', self: false, why: 'trivial plan task: delegated to mech, the coordinator never edits task code' });
     expect(implementerFor({ path: 'large', sensitive: [] }, 'x', { plan: true }))
       .toEqual({ role: 'impl', self: false, why: 'large plan task: impl, as a medium one (the plan may need to split it)' });
     expect(implementerFor({ path: 'large', sensitive: ['auth', 'data'] }, 'x', { plan: true }))
-      .toEqual({ role: 'impl-heavy', self: false, why: 'large plan task on a sensitive zone (auth, data): impl-heavy' });
+      .toEqual({ role: 'impl-high', self: false, why: 'large plan task on a sensitive zone (auth, data): impl-high' });
     expect(implementerFor({ path: 'small', sensitive: [] }, 'add a guard for empty carts in src/cart.ts', { plan: true }).role).toBe('impl-light');
     expect(implementerFor({ path: 'medium', sensitive: [] }, 'x', { plan: true }).role).toBe('impl');
-    expect(implementerFor({ path: 'medium', sensitive: ['auth'] }, 'x', { plan: true }).role).toBe('impl-heavy');
+    expect(implementerFor({ path: 'medium', sensitive: ['auth'] }, 'x', { plan: true }).role).toBe('impl-high');
     expect(implementerFor({ path: 'large', sensitive: [] }, 'x', { plan: false })).toMatchObject({ role: null, self: false });
   });
 });
@@ -270,20 +294,58 @@ describe('real diff sizing', () => {
     expect(isPerfTask('fix the login form')).toBe(false);
     expect(isPerfTask('añade un botón de exportar')).toBe(false);
   });
-  it('reviewFor: light below medium, full reviewers by zone and perf from medium up', () => {
+  it('reviewFor: light below medium (plus perf when asked), full reviewers by zone and perf from medium up', () => {
     const light = [{ role: 'review-correctness', model: 'sonnet', effort: 'medium' }];
-    expect(reviewFor('small', ['auth'], true)).toEqual({ light: true, reviewers: light, flags: [] });
+    const perf = { role: 'review-perf', model: null, effort: 'medium' };
+    expect(reviewFor('small', ['auth'], false)).toEqual({ light: true, reviewers: light, flags: [] });
     expect(reviewFor('trivial', [], false)).toEqual({ light: true, reviewers: light, flags: [] });
-    const full = (role: string) => ({ role, model: null, effort: null });
-    expect(reviewFor('medium', [], false)).toEqual({ light: false, reviewers: [full('review-correctness')], flags: [] });
-    expect(reviewFor('medium', ['auth'], false)).toEqual({ light: false, reviewers: [full('review-correctness'), full('review-security')], flags: ['--sensitive'] });
+    // A perf request below Medium keeps the light correctness review and adds review-perf.
+    expect(reviewFor('small', ['auth'], true)).toEqual({ light: true, reviewers: [...light, perf], flags: ['--perf'] });
+    expect(reviewFor('trivial', [], true)).toEqual({ light: true, reviewers: [...light, perf], flags: ['--perf'] });
+    const full = (role: string, effort: string) => ({ role, model: null, effort });
+    expect(reviewFor('medium', [], false)).toEqual({ light: false, reviewers: [full('review-correctness', 'high')], flags: [] });
+    expect(reviewFor('medium', ['auth'], false))
+      .toEqual({ light: false, reviewers: [full('review-correctness', 'xhigh'), full('review-security', 'xhigh')], flags: ['--sensitive'] });
     expect(reviewFor('large', ['auth'], true))
-      .toEqual({ light: false, reviewers: [full('review-correctness'), full('review-security'), full('review-perf')], flags: ['--sensitive', '--perf'] });
+      .toEqual({ light: false, reviewers: [full('review-correctness', 'xhigh'), full('review-security', 'xhigh'), full('review-perf', 'medium')], flags: ['--sensitive', '--perf'] });
+  });
+  it('reviewFor sets each reviewer effort by the table', () => {
+    const effort = (r: ReturnType<typeof reviewFor>) => Object.fromEntries(r.reviewers.map(x => [x.role, x.effort]));
+    // correctness: high; xhigh when sensitive, delicate, or Large's final review.
+    expect(effort(reviewFor('medium', [], false))).toEqual({ 'review-correctness': 'high' });
+    expect(effort(reviewFor('large', [], false))).toEqual({ 'review-correctness': 'high' });
+    expect(effort(reviewFor('medium', ['data'], false))).toEqual({ 'review-correctness': 'xhigh', 'review-security': 'high' });
+    expect(effort(reviewFor('medium', [], false, { delicate: true }))).toEqual({ 'review-correctness': 'xhigh' });
+    expect(effort(reviewFor('large', [], false, { final: true }))).toEqual({ 'review-correctness': 'xhigh' });
+    // `final` only lifts Large's final review.
+    expect(effort(reviewFor('medium', [], false, { final: true }))).toEqual({ 'review-correctness': 'high' });
+    // security: high, xhigh when the sensitive zones include auth.
+    expect(effort(reviewFor('medium', ['deps', 'ci'], false))['review-security']).toBe('high');
+    expect(effort(reviewFor('medium', ['data', 'auth'], false))['review-security']).toBe('xhigh');
+    // perf: medium, never higher.
+    expect(effort(reviewFor('large', ['auth'], true, { delicate: true, final: true }))['review-perf']).toBe('medium');
+    // Every non-light reviewer keeps the agent's own model.
+    expect(reviewFor('large', ['auth'], true).reviewers.every(r => r.model === null)).toBe(true);
+    // The light review is unchanged, delicate or not.
+    expect(reviewFor('small', [], false, { delicate: true }).reviewers).toEqual([{ role: 'review-correctness', model: 'sonnet', effort: 'medium' }]);
+  });
+  it('reviewFor: the quality profile puts every reviewer on xhigh; balanced and economy use the table', () => {
+    const effort = (r: ReturnType<typeof reviewFor>) => r.reviewers.map(x => x.effort);
+    expect(effort(reviewFor('medium', ['data'], true, { profile: 'quality' }))).toEqual(['xhigh', 'xhigh', 'xhigh']);
+    expect(effort(reviewFor('medium', [], false, { profile: 'quality' }))).toEqual(['xhigh']);
+    expect(effort(reviewFor('medium', ['data'], true, { profile: 'balanced' }))).toEqual(['xhigh', 'high', 'medium']);
+    expect(effort(reviewFor('medium', ['data'], true, { profile: 'economy' }))).toEqual(['xhigh', 'high', 'medium']);
+    expect(effort(reviewFor('medium', [], false, { profile: 'economy' }))).toEqual(['high']);
+    // The light review stays on sonnet medium under quality too.
+    expect(reviewFor('trivial', [], false, { profile: 'quality' }).reviewers).toEqual([{ role: 'review-correctness', model: 'sonnet', effort: 'medium' }]);
   });
   it('announceReview says the real size and who reviews, in English and Spanish', () => {
     const small = { path: 'small' as const, files: 2, lines: 30, review: reviewFor('small', [], false) };
     expect(announceReview(small, 'en')).toBe('Real size: 2 file(s), 30 line(s) → Small: one light review (correctness on sonnet).');
     expect(announceReview(small, 'es')).toBe('Tamaño real: 2 fichero(s), 30 línea(s) → Small: una revisión ligera (correctness en sonnet).');
+    const smallPerf = { ...small, review: reviewFor('small', [], true) };
+    expect(announceReview(smallPerf, 'en')).toBe('Real size: 2 file(s), 30 line(s) → Small: one light review (correctness on sonnet) and perf.');
+    expect(announceReview(smallPerf, 'es')).toBe('Tamaño real: 2 fichero(s), 30 línea(s) → Small: una revisión ligera (correctness en sonnet) y perf.');
     const all = { path: 'medium' as const, files: 5, lines: 90, review: reviewFor('medium', ['auth'], true) };
     expect(announceReview(all, 'en')).toBe('Real size: 5 file(s), 90 line(s) → Medium: reviewed by correctness, security and perf.');
     expect(announceReview(all, 'es')).toBe('Tamaño real: 5 fichero(s), 90 línea(s) → Medium: revisan correctness, security y perf.');

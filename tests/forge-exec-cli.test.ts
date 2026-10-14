@@ -466,11 +466,40 @@ describe('forge swarm (execution)', () => {
     writeFileSync(path.join(root, 'bad.json'), '{"x":1}');
     expect(run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db', '--agents', 'bad.json'], io).code).toBe(2);
   });
+  it('tick start in subagents mode carries no launch', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    writeDocs(path.join(root, 'db', 'state'), {});
+    writeDocs(path.join(root, 'db', 'sessions'), {});
+    const sub = out(run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db'], io)).actions.filter((a: { type: string }) => a.type === 'start');
+    expect(sub.length).toBeGreaterThan(0);
+    for (const a of sub) expect(a).not.toHaveProperty('launch');
+  });
+  const sessionsStarts = () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--mode', 'sessions'], io));
+    writeDocs(path.join(root, 'db', 'state'), {});
+    writeDocs(path.join(root, 'db', 'sessions'), {});
+    return out(run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db'], io)).actions.filter((a: { type: string }) => a.type === 'start');
+  };
+  const head = (t: string) => ['launch', 'plan.yaml', t, '--task', '--run', readExecution(root)!.runId, '--coordinator', 'main', '--base', 'forge/run-shop'];
+  it('tick start in sessions carries the waypoint launch with --effort medium by default, and relaunch too', () => {
+    const starts = sessionsStarts();
+    expect(starts.length).toBeGreaterThan(0);
+    for (const a of starts) expect(a.launch).toEqual([...head(a.task), '--effort', 'medium']);
+    expect(out(run(['swarm', 'relaunch', starts[0].task, '--plan', 'plan.yaml'], io)).launch).toEqual([...head(starts[0].task), '--effort', 'medium']);
+  });
+  it('tick start and relaunch in sessions take the configured effort, model and the herdr launcher', () => {
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators: []\nswarm:\n  launcher: herdr\n  member:\n    effort: high\n    model: sonnet\n');
+    const starts = sessionsStarts();
+    expect(starts.length).toBeGreaterThan(0);
+    const tail = ['--effort', 'high', '--model', 'sonnet', '--launcher', 'herdr'];
+    for (const a of starts) expect(a.launch).toEqual([...head(a.task), ...tail]);
+    expect(out(run(['swarm', 'relaunch', starts[0].task, '--plan', 'plan.yaml'], io)).launch).toEqual([...head(starts[0].task), ...tail]);
+  });
   it('relaunch counts the attempt, writes the handover note and blocks at the cap', () => {
     sessionsRun();
     const r = out(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io));
     const e = readExecution(root)!;
-    expect(r).toMatchObject({ task: 'T1', attempt: 1, launch: ['launch', 'plan.yaml', 'T1', '--task', '--run', e.runId, '--coordinator', 'main', '--base', 'forge/run-shop'] });
+    expect(r).toMatchObject({ task: 'T1', attempt: 1, launch: ['launch', 'plan.yaml', 'T1', '--task', '--run', e.runId, '--coordinator', 'main', '--base', 'forge/run-shop', '--effort', 'medium'] });
     const note = readFileSync(path.join(root, '.forge', 'work', 'T1', 'handover.md'), 'utf8');
     expect(note).toContain('# Handover: T1 (attempt 1 of 3)');
     // It names the real brief, in the task worktree, and its own main-checkout path; never a task.json.

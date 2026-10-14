@@ -212,7 +212,8 @@ describe('forge hook live', () => {
     joinT9();
     const out = JSON.parse(hook({ session_id: HOOK, hook_event_name: 'SessionStart', source: 'resume' }).stdout);
     expect(out.hookSpecificOutput.additionalContext).toContain('executor session of T1 in the execution r1 coordinated by main');
-    expect(out.hookSpecificOutput.additionalContext).toContain('→ Run member');
+    expect(out.hookSpecificOutput.additionalContext).toContain('Resume it with /forge:member:');
+    expect(out.hookSpecificOutput.additionalContext).not.toContain('/forge:run');
   });
   it('a member of another run, or one that recorded another hook id, is not found by the hook id', () => {
     exec({ mode: 'sessions', hookSession: null });

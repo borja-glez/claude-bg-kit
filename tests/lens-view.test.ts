@@ -37,10 +37,19 @@ const EXEC: NonNullable<PanelModel['execution']> = {
 describe('lens view', () => {
   it('colours agents by level, the implementer ladder from cool to warm', () => {
     expect(tierOf('forge:forge-mech')).toMatchObject({ label: 'mech', rank: 1 });
-    expect(tierOf('forge-impl-heavy')).toMatchObject({ label: 'heavy', hue: 'mauve', rank: 4 });
+    expect(tierOf('forge-impl')).toMatchObject({ label: 'impl', hue: 'blue', rank: 3 });
+    expect(tierOf('forge:forge-impl-high')).toMatchObject({ label: 'high', hue: 'peach', rank: 4 });
+    expect(tierOf('forge-impl-heavy')).toMatchObject({ label: 'heavy', hue: 'mauve', rank: 5 });
+    expect(tierOf('forge-fable')).toMatchObject({ label: 'fable', rank: 6 });
     expect(tierOf('forge:forge-review-security')).toMatchObject({ label: 'security', hue: 'red' });
     expect(tierOf('Explore')).toMatchObject({ label: 'Explore', hue: 'lavender' });
     expect(tierOf(null).label).toBe('?');
+  });
+  it('impl-high has a hue of its own: no other agent nor the fallback for unknown agents uses it', () => {
+    const others = ['forge-mech', 'forge-impl-light', 'forge-impl', 'forge-impl-heavy', 'forge-fable', 'forge-review-correctness', 'forge-review-security',
+      'forge-review-perf', 'forge-verify', 'forge-verify-heavy', 'forge-planner', 'forge-scout', 'design-critic', 'Explore'];
+    const high = tierOf('forge-impl-high').hue;
+    for (const a of others) expect(tierOf(a).hue, a).not.toBe(high);
   });
   it('lays out forge stages by path and marks the current one', () => {
     expect(stagesFor('medium', 'review').map(s => `${s.name}:${s.state}`)).toEqual([

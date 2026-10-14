@@ -10,7 +10,7 @@ describe('forge config', () => {
   it('defaults: detect on, nothing excluded, verify limits, evidence upload', () => {
     expect(parseConfig(null)).toEqual({
       profile: 'balanced', detect: true, exclude: [], verify: { limits: { checks: 8, shots: 10, minutes: 10 } },
-      evidence: 'upload', validatorTimeoutSec: 600, swarm: { parallel: 3, launcher: 'bg' }, tdd: 'off',
+      evidence: 'upload', validatorTimeoutSec: 600, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' } }, tdd: 'off',
     });
   });
   it('workflow and autonomy: optional, and one of their values', () => {
@@ -25,13 +25,22 @@ describe('forge config', () => {
     expect(() => parseConfig('tdd: always\n')).toThrow(ConfigError);
   });
   it('swarm: parallel 3 by default, an optional mode and the launcher', () => {
-    expect(parseConfig(null).swarm).toEqual({ parallel: 3, launcher: 'bg' });
-    expect(parseConfig('swarm:\n  mode: sessions\n  parallel: 2\n').swarm).toEqual({ parallel: 2, mode: 'sessions', launcher: 'bg' });
+    expect(parseConfig(null).swarm).toEqual({ parallel: 3, launcher: 'bg', member: { effort: 'medium' } });
+    expect(parseConfig('swarm:\n  mode: sessions\n  parallel: 2\n').swarm).toEqual({ parallel: 2, mode: 'sessions', launcher: 'bg', member: { effort: 'medium' } });
     expect(() => parseConfig('swarm:\n  mode: threads\n')).toThrow(ConfigError);
     expect(() => parseConfig('swarm:\n  launcher: tmux\n')).toThrow(ConfigError);
   });
+  it('swarm.member: effort medium by default, one of the closed list; model optional, one of the launch models', () => {
+    expect(parseConfig('swarm:\n  parallel: 2\n').swarm.member).toEqual({ effort: 'medium' });
+    expect(parseConfig('swarm:\n  member: {}\n').swarm.member).toEqual({ effort: 'medium' });
+    for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) expect(parseConfig(`swarm:\n  member:\n    effort: ${effort}\n`).swarm.member.effort).toBe(effort);
+    expect(parseConfig('swarm:\n  member:\n    effort: high\n    model: sonnet\n').swarm.member).toEqual({ effort: 'high', model: 'sonnet' });
+    expect(() => parseConfig('swarm:\n  member:\n    effort: extreme\n')).toThrow(ConfigError);
+    expect(() => parseConfig('swarm:\n  member:\n    model: gpt\n')).toThrow(ConfigError);
+    expect(() => parseConfig('swarm:\n  member:\n    turns: 3\n')).toThrow(ConfigError);
+  });
   it('swarm.setup: an optional command of at most 500 characters', () => {
-    expect(parseConfig('swarm:\n  setup: uv sync\n').swarm).toEqual({ parallel: 3, launcher: 'bg', setup: 'uv sync' });
+    expect(parseConfig('swarm:\n  setup: uv sync\n').swarm).toEqual({ parallel: 3, launcher: 'bg', member: { effort: 'medium' }, setup: 'uv sync' });
     expect(() => parseConfig(`swarm:\n  setup: ${'x'.repeat(501)}\n`)).toThrow(ConfigError);
     expect(() => parseConfig('swarm:\n  setup: ""\n')).toThrow(ConfigError);
     expect(() => parseConfig('swarm:\n  setup: 3\n')).toThrow(ConfigError);
@@ -56,6 +65,21 @@ describe('forge config', () => {
     expect(agentFor('verify', 'balanced')).toBe('forge-verify');
     expect(agentFor('verify', 'economy')).toBe('forge-verify');
     expect(agentFor('verify', 'quality')).toBe('forge-verify-heavy');
+  });
+  it('each profile resolves the five-rung implementer ladder as the design says', () => {
+    expect(ROLES).toContain('impl-high');
+    const ladder = ['mech', 'impl-light', 'impl', 'impl-high', 'impl-heavy'] as const;
+    const map = (profile: 'balanced' | 'economy' | 'quality') => ladder.map(r => agentFor(r, profile));
+    expect(map('balanced')).toEqual(['forge-mech', 'forge-impl-light', 'forge-impl', 'forge-impl-high', 'forge-impl-heavy']);
+    expect(map('economy')).toEqual(['forge-mech', 'forge-impl-light', 'forge-impl-light', 'forge-impl', 'forge-impl-high']);
+    expect(map('quality')).toEqual(['forge-impl-light', 'forge-impl', 'forge-impl-heavy', 'forge-impl-heavy', 'forge-impl-heavy']);
+  });
+  it('FORGE agents lists impl-high for the configured profile', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'forge-agents-'));
+    expect(JSON.parse(run(['agents'], { cwd: root, now: () => new Date() }).stdout).agents['impl-high']).toBe('forge-impl-high');
+    mkdirSync(path.join(root, '.forge'));
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'profile: economy\n');
+    expect(JSON.parse(run(['agents'], { cwd: root, now: () => new Date() }).stdout).agents).toMatchObject({ 'impl-high': 'forge-impl', 'impl-heavy': 'forge-impl-high' });
   });
   it('NAME is the shared name pattern', () => {
     expect(NAME.test('test:e2e')).toBe(true);

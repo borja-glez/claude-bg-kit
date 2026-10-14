@@ -16,7 +16,9 @@ const COPY_REASON = 'one quoted text change: the session finds the file';
 const es = (stems: string, words: string) =>
   new RegExp(`(?<![\\p{L}\\p{N}_])(?:(?:${stems})\\p{L}*|(?:${words})(?![\\p{L}\\p{N}_]))`, 'iu');
 const ZONES: { zone: Zone; text: RegExp[]; path: RegExp }[] = [
-  { zone: 'auth', text: [/\b(auth\w*|login|logout|passwords?|passwd|tokens?|jwt|oauth|sessions?|permissions?|crypto|secrets?)\b/i, es('autentic|contraseñ|permis|secret', 'sesi[oó]n|sesiones')], path: /(^|\/)(auth|security|crypto)(\/|\.)/i },
+  // «session»/«sesión» alone usually names a Claude Code session: it counts only next to an authentication word.
+  { zone: 'auth', text: [/\b(auth\w*|login|logout|passwords?|passwd|tokens?|jwt|oauth|session (tokens?|cookies?|ids?|hijack\w*|fixation)|login sessions?|permissions?|crypto|secrets?)\b/i,
+    es('autentic|contraseñ|permis|secret', 'sesi[oó]n(?:es)? (?:del?|de los) usuarios?|(?:inici|cerr|cierr)\\p{L}* (?:de )?sesi[oó]n|(?:cookies?|tokens?) de sesi[oó]n')], path: /(^|\/)(auth|security|crypto)(\/|\.)/i },
   { zone: 'data', text: [/\b(migrations?|schema|database|sql|prisma|orm)\b/i, es('migraci', 'bases? de datos|esquemas?')], path: /(^|\/)(migrations?|db|schema)(\/|\.)|\.sql$/i },
   { zone: 'public-api', text: [/\b(public api|endpoints?|openapi|swagger|graphql)\b/i, es('endpoint', 'apis? p[uú]blicas?')], path: /(^|\/)(api|routes)\//i },
   { zone: 'deps', text: [/\b(dependenc(y|ies)|upgrade|npm install|pip install)\b/i, es('dependencia', 'actualizar? dependencias')], path: /(^|\/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|Cargo\.(toml|lock)|go\.(mod|sum))$/i },
@@ -49,13 +51,14 @@ export function isMechanical(text: string): boolean {
   return MECHANICAL.some(re => re.test(t));
 }
 
-export type ImplRole = 'mech' | 'impl-light' | 'impl' | 'impl-heavy';
+export type ImplRole = 'mech' | 'impl-light' | 'impl' | 'impl-high' | 'impl-heavy';
 /** Who implements a task of this size: `self` = the session itself (Trivial alone); `role` null with self false = Large (design first). */
 export interface Implementer { role: ImplRole | null; self: boolean; why: string }
 
 /** Model by size (spec §2): Trivial alone is the session's; Small is always delegated; in a batch a Trivial goes to mech. */
 // A plan task (`plan`): the coordinator never edits task code, so a Trivial goes to mech; a Large one was already
-// designed and planned, so it goes to impl as a Medium one does, and to impl-heavy only on a sensitive zone.
+// designed and planned, so it goes to impl as a Medium one does, and to impl-high only on a sensitive zone.
+// impl-heavy (xhigh) is kept for the last attempt of a review loop (`nextImplementer` in loop.ts).
 export function implementerFor(r: Pick<TriageResult, 'path' | 'sensitive'>, text: string, opts: { batch?: boolean; plan?: boolean } = {}): Implementer {
   switch (r.path) {
     case 'trivial':
@@ -66,11 +69,11 @@ export function implementerFor(r: Pick<TriageResult, 'path' | 'sensitive'>, text
       return isMechanical(text) ? { role: 'mech', self: false, why: 'small and mechanical: always delegated to mech' }
         : { role: 'impl-light', self: false, why: 'small and bounded: always delegated to impl-light' };
     case 'medium':
-      return r.sensitive.length ? { role: 'impl-heavy', self: false, why: `medium on a sensitive zone (${r.sensitive.join(', ')})` }
+      return r.sensitive.length ? { role: 'impl-high', self: false, why: `medium on a sensitive zone (${r.sensitive.join(', ')})` }
         : { role: 'impl', self: false, why: 'medium' };
     default:
       if (!opts.plan) return { role: null, self: false, why: 'large: design and plan first' };
-      return r.sensitive.length ? { role: 'impl-heavy', self: false, why: `large plan task on a sensitive zone (${r.sensitive.join(', ')}): impl-heavy` }
+      return r.sensitive.length ? { role: 'impl-high', self: false, why: `large plan task on a sensitive zone (${r.sensitive.join(', ')}): impl-high` }
         : { role: 'impl', self: false, why: 'large plan task: impl, as a medium one (the plan may need to split it)' };
   }
 }
@@ -114,12 +117,29 @@ export function isPerfTask(text: string): boolean {
 }
 
 export type ReviewRole = 'review-correctness' | 'review-security' | 'review-perf';
-export interface ReviewPlan { light: boolean; reviewers: { role: ReviewRole; model: 'sonnet' | null; effort: 'medium' | null }[]; flags: ('--sensitive' | '--perf')[] }
-/** Who reviews a task of this size: below Medium one light correctness review, else correctness plus security and perf as they apply. */
-export function reviewFor(path: PathName, sensitive: Zone[], perf: boolean): ReviewPlan {
-  if (path === 'trivial' || path === 'small') return { light: true, reviewers: [{ role: 'review-correctness', model: 'sonnet', effort: 'medium' }], flags: [] };
+export type ReviewEffort = 'medium' | 'high' | 'xhigh';
+export interface ReviewPlan { light: boolean; reviewers: { role: ReviewRole; model: 'sonnet' | null; effort: ReviewEffort }[]; flags: ('--sensitive' | '--perf')[] }
+/** `delicate`: the task was marked delicate; `final`: Large's final review; `profile`: the configured one (quality lifts every reviewer). */
+export interface ReviewOptions { delicate?: boolean; final?: boolean; profile?: 'balanced' | 'economy' | 'quality' }
+/**
+ * Who reviews a task of this size: below Medium one light correctness review (sonnet, medium), else correctness plus
+ * security and perf as they apply, each on the agent's own model with its effort by risk. The table is provisional
+ * until the shadow test: correctness high (xhigh when sensitive, delicate or Large's final review), security high
+ * (xhigh on auth), perf medium; the quality profile puts them all on xhigh.
+ */
+export function reviewFor(path: PathName, sensitive: Zone[], perf: boolean, opts: ReviewOptions = {}): ReviewPlan {
+  // Below Medium: the light correctness review, plus review-perf when performance was asked for.
+  if (path === 'trivial' || path === 'small') return { light: true,
+    reviewers: [{ role: 'review-correctness', model: 'sonnet', effort: 'medium' }, ...(perf ? [{ role: 'review-perf' as const, model: null, effort: 'medium' as const }] : [])],
+    flags: perf ? ['--perf'] : [] };
   const roles: ReviewRole[] = ['review-correctness', ...(sensitive.length ? ['review-security' as const] : []), ...(perf ? ['review-perf' as const] : [])];
-  return { light: false, reviewers: roles.map(role => ({ role, model: null, effort: null })),
+  const effort = (role: ReviewRole): ReviewEffort => {
+    if (opts.profile === 'quality') return 'xhigh';
+    if (role === 'review-perf') return 'medium';
+    if (role === 'review-security') return sensitive.includes('auth') ? 'xhigh' : 'high';
+    return sensitive.length || opts.delicate || (opts.final && path === 'large') ? 'xhigh' : 'high';
+  };
+  return { light: false, reviewers: roles.map(role => ({ role, model: null, effort: effort(role) })),
     flags: [...(sensitive.length ? ['--sensitive' as const] : []), ...(perf ? ['--perf' as const] : [])] };
 }
 
@@ -175,7 +195,7 @@ export function announce(a: AnnounceInput, locale: AnnounceLocale): string {
         : `Medium → ${agent}: ${why}. I show you a short plan before launching it; you can correct it.`;
       break;
     default:
-      // A plan task names its implementer (impl, impl-heavy on a sensitive zone); a task that is not one is designed and planned first.
+      // A plan task names its implementer (impl, impl-high on a sensitive zone); a task that is not one is designed and planned first.
       line = agent ? (es ? `Large → ${agent}: ${why}. Puedes corregirlo.` : `Large → ${agent}: ${why}. You can correct it.`)
         : es ? `Large: ${why}; primero diseño y plan. Puedes corregirlo.` : `Large: ${why}; design and plan first. You can correct it.`;
   }
@@ -191,9 +211,10 @@ export function announceReview(a: { path: PathName; files: number; lines: number
   const names = a.review.reviewers.map(r => r.role.replace(/^review-/, ''));
   const and = spanish ? ' y ' : ' and ';
   const list = names.length > 1 ? `${names.slice(0, -1).join(', ')}${and}${names.at(-1)}` : names.join('');
+  const perf = a.review.reviewers.some(r => r.role === 'review-perf') ? `${and}perf` : '';
   if (spanish) return `Tamaño real: ${a.files} fichero(s), ${a.lines} línea(s) → ${name}: `
-    + (a.review.light ? 'una revisión ligera (correctness en sonnet).' : `revisan ${list}.`);
-  return `Real size: ${a.files} file(s), ${a.lines} line(s) → ${name}: ` + (a.review.light ? 'one light review (correctness on sonnet).' : `reviewed by ${list}.`);
+    + (a.review.light ? `una revisión ligera (correctness en sonnet)${perf}.` : `revisan ${list}.`);
+  return `Real size: ${a.files} file(s), ${a.lines} line(s) → ${name}: ` + (a.review.light ? `one light review (correctness on sonnet)${perf}.` : `reviewed by ${list}.`);
 }
 
 // Quoted spans («…», "…", “…”), unbounded so that a long quote never pairs a closing mark with the next opening one.

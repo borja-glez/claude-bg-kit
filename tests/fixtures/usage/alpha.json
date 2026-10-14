@@ -1,0 +1,5 @@
+{"v":1,"session":"s-alpha","label":"alpha","worktree":"/w/alpha","startedAt":"2026-10-13T10:00:00.000Z","updatedAt":"2026-10-13T11:00:00.000Z","costUsd":9.4,"loops":{
+"main":{"kind":"main","description":null,"model":"claude-opus-5-5","effort":"xhigh","steps":10,"input":0,"output":100000,"cacheRead":10000000,"cacheWrite":250000,"costUsd":6,"unpriced":0},
+"a1":{"kind":"forge:forge-impl-heavy","description":"Brief 1","model":"claude-opus-5-5","effort":"xhigh","steps":20,"input":0,"output":50000,"cacheRead":5000000,"cacheWrite":125000,"costUsd":3,"unpriced":0},
+"a2":{"kind":"forge:forge-review-correctness","description":"Review 1","model":"claude-sonnet-5-5","effort":"high","steps":4,"input":0,"output":10000,"cacheRead":1000000,"cacheWrite":50000,"costUsd":0.4,"unpriced":0}
+},"tracking":{"waypoint":0,"forge":1000},"activeMs":3600000}

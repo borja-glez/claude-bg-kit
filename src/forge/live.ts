@@ -69,7 +69,7 @@ export function hookLive(io: Io, forced?: LiveEvent): string {
       const running = Object.values(exec.tasks).filter(t => t.status === 'running').length;
       const text = role === 'coordinator'
         ? `forge: this session coordinates the execution ${exec.runId} (${exec.mode}, ${running}/${exec.parallel} running, run branch ${exec.branch}). Resume it with /forge:run → Resume: renew your lease, reconcile each task and keep stepping.`
-        : `forge: this session is the ${role} session of ${member?.task ?? 'a task'} in the execution ${exec.runId} coordinated by ${exec.coordinator}. Resume it with /forge:run → Run member: rejoin with FORGE swarm join, renew your lease and continue from your last reported stage.`;
+        : `forge: this session is the ${role} session of ${member?.task ?? 'a task'} in the execution ${exec.runId} coordinated by ${exec.coordinator}. Resume it with /forge:member: rejoin with FORGE swarm join, renew your lease and continue from your last reported stage.`;
       // A resumed session reads this first: it repeats the language to answer in, when one is known.
       const run = parseRun(readRunText(main));
       const project = exec.project;

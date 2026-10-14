@@ -135,6 +135,38 @@ describe('forge CLI', () => {
     for (const sig of ['a', 'b', 'c', 'd']) run(['log', '--kind', 'verdict', '--task', 't1', '--data', `{"action":"fix","score":0.6,"signature":"${sig}"}`], io);
     expect(JSON.parse(run(['round', '--task', 't1', '--path', 'large'], io).stdout)).toMatchObject({ cap: 4, next: 'fresh-stronger', tierUp: true });
   });
+  it('round on Medium after three fix verdicts: the last attempt, on forge-impl-heavy', () => {
+    run(['log', '--kind', 'agent', '--task', 't1-1', '--data', '{"agent":"forge-impl","role":"impl"}'], io);
+    for (const sig of ['a', 'b', 'c']) run(['log', '--kind', 'verdict', '--task', 't1-1', '--data', `{"action":"fix","score":0.6,"signature":"${sig}"}`], io);
+    const r = JSON.parse(run(['round', '--task', 't1-1', '--path', 'medium'], io).stdout);
+    expect(r).toMatchObject({ round: 3, next: 'fresh-stronger', last: true, implementer: { role: 'impl-heavy', agent: 'forge-impl-heavy' } });
+    expect(readEvents(root).at(-1)).toMatchObject({ kind: 'round', task: 't1-1', last: true, implementer: { role: 'impl-heavy', agent: 'forge-impl-heavy' } });
+  });
+  it('round on Large after three fix verdicts from forge-impl climbs one rung, to forge-impl-high', () => {
+    run(['log', '--kind', 'agent', '--task', 't1-1', '--data', '{"agent":"forge-impl","role":"impl"}'], io);
+    // Agents off the ladder (a reviewer, verify, fable) do not name the implementer.
+    run(['log', '--kind', 'agent', '--task', 't1-1', '--data', '{"agent":"forge-review-correctness","role":"review-correctness"}'], io);
+    run(['log', '--kind', 'agent', '--task', 't1-1', '--data', '{"agent":"forge-fable","role":"fable"}'], io);
+    for (const sig of ['a', 'b', 'c']) run(['log', '--kind', 'verdict', '--task', 't1-1', '--data', `{"action":"fix","score":0.6,"signature":"${sig}"}`], io);
+    const r = JSON.parse(run(['round', '--task', 't1-1', '--path', 'large'], io).stdout);
+    expect(r).toMatchObject({ round: 3, next: 'fresh-stronger', last: false, tierUp: true, implementer: { role: 'impl-high', agent: 'forge-impl-high' } });
+  });
+  it('round after one fix resumes the same implementer, resolved with the profile', () => {
+    run(['log', '--kind', 'agent', '--task', 't1-1', '--data', '{"agent":"forge-impl-high","role":"impl-high"}'], io);
+    run(['log', '--kind', 'verdict', '--task', 't1-1', '--data', '{"action":"fix","score":0.6,"signature":"a"}'], io);
+    expect(JSON.parse(run(['round', '--task', 't1-1', '--path', 'medium'], io).stdout))
+      .toMatchObject({ round: 1, next: 'resume', last: false, implementer: { role: 'impl-high', agent: 'forge-impl-high' } });
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'profile: economy\n');
+    expect(JSON.parse(run(['round', '--task', 't1-1', '--path', 'medium'], io).stdout).implementer).toEqual({ role: 'impl-high', agent: 'forge-impl' });
+  });
+  it('round with no implementer logged assumes the one triage gives (impl-high on a sensitive Medium); done names none', () => {
+    run(['log', '--kind', 'triage', '--task', 't1', '--data', '{"path":"medium","sensitive":["auth"]}'], io);
+    run(['log', '--kind', 'verdict', '--task', 't1-1', '--data', '{"action":"fix","score":0.6,"signature":"a"}'], io);
+    expect(JSON.parse(run(['round', '--task', 't1-1', '--path', 'medium'], io).stdout).implementer).toEqual({ role: 'impl-high', agent: 'forge-impl-high' });
+    run(['log', '--kind', 'verdict', '--task', 't1-1', '--data', '{"action":"accept","score":0.9,"signature":""}'], io);
+    expect(JSON.parse(run(['round', '--task', 't1-1', '--path', 'medium'], io).stdout)).toMatchObject({ next: 'done', last: false, implementer: null });
+  });
   it('round refuses a path other than medium or large', () => {
     expect(run(['round', '--task', 't1', '--path', 'small'], io).code).toBe(2);
   });
@@ -143,7 +175,8 @@ describe('forge CLI', () => {
     writeFileSync(path.join(root, '.forge', 'config.yaml'), 'profile: economy\n');
     const map = JSON.parse(run(['agents'], io).stdout);
     expect(map.profile).toBe('economy');
-    expect(map.agents['impl-heavy']).toBe('forge-impl');
+    expect(map.agents['impl-heavy']).toBe('forge-impl-high');
+    expect(map.agents['impl-high']).toBe('forge-impl');
   });
   it('last summarizes one task from the ledger', () => {
     run(['log', '--kind', 'triage', '--task', 't1', '--data', '{"path":"medium"}'], io);
@@ -288,7 +321,7 @@ describe('forge CLI', () => {
     const small = JSON.parse(run(['triage', 'add a dark mode toggle'], io).stdout);
     expect(small.announce).toBe('Small → forge-impl-light: no files located: the session should judge the scope. You can correct it.');
     const medium = JSON.parse(run(['triage', 'change the password check in src/a.ts'], io).stdout);
-    expect(medium.announce).toBe('Medium → forge-impl-heavy: one named file, short task; sensitive zone: auth. I show you a short plan before launching it; you can correct it.');
+    expect(medium.announce).toBe('Medium → forge-impl-high: one named file, short task; sensitive zone: auth. I show you a short plan before launching it; you can correct it.');
     expect(medium.gate).toBe('plan');
     const large = JSON.parse(run(['triage', 'redesign the plugin architecture'], io).stdout);
     expect(large.announce).toBe('Large: architecture-scale wording; design and plan first. You can correct it.');
@@ -297,6 +330,37 @@ describe('forge CLI', () => {
     expect(readEvents(root).at(-1)).not.toHaveProperty('announce');
     expect(readEvents(root).at(-1)).not.toHaveProperty('gate');
   });
+  it('triage prints who reviews also without a plan or --base, and logs it in the triage event', () => {
+    io.git = args => (args.includes('ls-files') ? 'src/a.ts\nsrc/b.ts\nsrc/c.ts\nsrc/d.ts\nsrc/e.ts\n' : args[0] === 'rev-list' ? '12\n' : '');
+    const medium = JSON.parse(run(['triage', '--task', 'm1', 'tidy up src/a.ts src/b.ts src/c.ts src/d.ts'], io).stdout);
+    expect(medium.path).toBe('medium');
+    expect(medium.sensitive).toEqual([]);
+    expect(medium.review).toEqual({ light: false, flags: [],
+      reviewers: [{ role: 'review-correctness', model: null, effort: 'high', agent: 'forge-review-correctness' }] });
+    expect(medium).not.toHaveProperty('diff');
+    expect(medium.gate).toBe('plan');
+    expect(readEvents(root).at(-1)).toMatchObject({ kind: 'triage', task: 'm1', path: 'medium', review: medium.review });
+    const auth = JSON.parse(run(['triage', 'change the password check in src/a.ts'], io).stdout);
+    expect(auth.path).toBe('medium');
+    expect(auth.review.reviewers).toEqual([
+      { role: 'review-correctness', model: null, effort: 'xhigh', agent: 'forge-review-correctness' },
+      { role: 'review-security', model: null, effort: 'xhigh', agent: 'forge-review-security' },
+    ]);
+    expect(auth.review.flags).toEqual(['--sensitive']);
+    expect(readEvents(root).at(-1)).toMatchObject({ kind: 'triage', review: auth.review });
+    // --delicate lifts correctness; it is a switch, not part of the task text.
+    const delicate = JSON.parse(run(['triage', '--delicate', 'tidy up src/a.ts src/b.ts src/c.ts src/d.ts'], io).stdout);
+    expect(delicate.review.reviewers[0]).toMatchObject({ role: 'review-correctness', effort: 'xhigh' });
+    expect(delicate.reasons).toEqual(medium.reasons);
+    // A small task gets the light review.
+    expect(JSON.parse(run(['triage', 'add a dark mode toggle'], io).stdout).review)
+      .toEqual({ light: true, flags: [], reviewers: [{ role: 'review-correctness', model: 'sonnet', effort: 'medium', agent: 'forge-review-correctness' }] });
+    // The quality profile puts every reviewer on xhigh.
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'profile: quality\n');
+    const quality = JSON.parse(run(['triage', 'tidy up src/a.ts src/b.ts src/c.ts src/d.ts'], io).stdout);
+    expect(quality.review.reviewers.map((r: { effort: string }) => r.effort)).toEqual(['xhigh']);
+  });
   it('triage --locale es announces in Spanish, with the reasons translated', () => {
     io.git = args => (args.includes('ls-files') ? 'src/a.ts\nsrc/b.ts\nsrc/c.ts\nsrc/d.ts\nsrc/e.ts\n' : args[0] === 'rev-list' ? '12\n' : '');
     expect(JSON.parse(run(['triage', '--locale', 'es', 'fix the typo in src/a.ts'], io).stdout).announce)
@@ -304,7 +368,7 @@ describe('forge CLI', () => {
     expect(JSON.parse(run(['triage', '--locale', 'es', 'añade un modo oscuro'], io).stdout).announce)
       .toBe('Small → forge-impl-light: no localizo ficheros: decide la sesión. Puedes corregirlo.');
     expect(JSON.parse(run(['triage', '--locale', 'es', 'cambia el mensaje de error del login a «Credenciales incorrectas»'], io).stdout).announce)
-      .toBe('Medium → forge-impl-heavy: un cambio de texto entre comillas; zona sensible: auth. Antes de lanzarlo te enseño un plan corto; puedes corregirlo.');
+      .toBe('Medium → forge-impl-high: un cambio de texto entre comillas; zona sensible: auth. Antes de lanzarlo te enseño un plan corto; puedes corregirlo.');
     expect(JSON.parse(run(['triage', '--locale', 'es', 'Rediseña la arquitectura del plugin'], io).stdout).announce)
       .toBe('Large: la tarea habla de arquitectura; primero diseño y plan. Puedes corregirlo.');
     // The locale flag is not part of the task text.
@@ -946,10 +1010,10 @@ describe('triage --base', () => {
     expect(out.review.reviewers.map((x: { role: string }) => x.role)).toEqual(['review-correctness']);
     expect(out.review.flags).toEqual([]);
     expect(out.reasons).toContain('diff: 5 file(s), 10 line(s)');
-    // The ratchet: a later plain triage of the task keeps the diff-raised path, and has no diff nor review.
+    // The ratchet: a later plain triage of the task keeps the diff-raised path, and has no diff; it still says who reviews.
     const plain = JSON.parse(run(['triage', '--plan', 'plan.yaml', '--task', 'T001'], io).stdout);
     expect(plain.path).toBe('medium');
-    expect(plain).not.toHaveProperty('review');
+    expect(plain.review.reviewers.map((x: { role: string }) => x.role)).toEqual(['review-correctness']);
     expect(plain).not.toHaveProperty('diff');
     expect(readEvents(root).at(-1)).not.toHaveProperty('diff');
   });

@@ -7,8 +7,8 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.14.0](https://img.shields.io/badge/versi%C3%B3n-0.14.0-fab387?style=flat-square)
-![depende de waypoint ^0.18.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.18.0-cba6f7?style=flat-square)
+![versión 0.15.0](https://img.shields.io/badge/versi%C3%B3n-0.15.0-fab387?style=flat-square)
+![depende de waypoint ^0.19.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.19.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -38,7 +38,7 @@ Hacer todas las tareas igual malgasta esfuerzo. Una revisión completa de un arr
 - **Proporcionado.** El trabajo trivial se queda en la sesión principal. Solo el trabajo Medium y Large paga revisión independiente.
 - **Herramientas antes que opiniones.** Tus tests, linters, comprobador de tipos y build se ejecutan antes de que ningún revisor lea el diff.
 - **Revisión independiente.** Los revisores son agentes aparte que no escribieron el código. Lo juzgan contra el brief y devuelven veredictos con nota, y forge los pondera en una decisión.
-- **El modelo adecuado para cada papel.** El trabajo mecánico va a Haiku; el delicado, a Opus con esfuerzo muy alto.
+- **El modelo adecuado para cada papel.** El trabajo mecánico va a Haiku, el sensible empieza en Opus con esfuerzo alto y el esfuerzo muy alto se reserva para el último intento, el arreglo de la revisión final de Large y el perfil `quality`. Cada agente fija su modelo y su esfuerzo, así que ninguno hereda los de tu sesión.
 - **Escala.** Los planes grandes se ejecutan como una ejecución de tareas en paralelo, y el modo infinito sigue mejorando el proyecto dentro de un presupuesto.
 
 ## Instalación
@@ -48,7 +48,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depende de [waypoint](../waypoint/README.es.md) ^0.18.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
+forge depende de [waypoint](../waypoint/README.es.md) ^0.19.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
 
 ## Uso
 
@@ -78,30 +78,45 @@ forge depende de [waypoint](../waypoint/README.es.md) ^0.18.0, que se instala co
 | --- | --- | --- | --- | --- |
 | **Trivial** | ninguna | la sesión principal; `mech` cuando es una petición de un lote | validadores del fichero cambiado | ninguna |
 | **Small** | ninguna | siempre delegada: `mech` (Haiku) para trabajo mecánico, `impl-light` (Sonnet) en el resto; la propia sesión solo cuando todo el cambio ya está en su contexto y son 10 líneas o menos | todos los validadores + leer el diff | ninguna |
-| **Medium** | plan corto, sigue salvo que lo pares | `impl` / `impl-heavy` | todos los validadores | correctness (+ security si es sensible) |
-| **Large** | aprobación obligatoria del diseño | `/waypoint:design`, `/waypoint:plan` y luego cada tarea según su tamaño (Trivial `mech`, Small `mech` / `impl-light`, Medium `impl` / `impl-heavy`, Large `impl` / `impl-heavy`) | todos los validadores | por tarea, según su diff real: una revisión ligera de correctness en Sonnet para Small o menos; si no, correctness (+ security si es sensible, + perf en tareas de rendimiento); y revisión final de toda la rama |
+| **Medium** | plan corto, sigue salvo que lo pares | `impl`, `impl-high` en zona sensible | todos los validadores | correctness (+ security si es sensible) |
+| **Large** | aprobación obligatoria del diseño | `/waypoint:design`, `/waypoint:plan` y luego cada tarea según su tamaño (Trivial `mech`, Small `mech` / `impl-light`, Medium y Large `impl`, `impl-high` en zona sensible) | todos los validadores | por tarea, según su diff real: una revisión ligera de correctness en Sonnet para Small o menos; si no, correctness (+ security si es sensible, + perf en tareas de rendimiento); y revisión final de toda la rama |
 
 El triaje lee el texto de la tarea, los ficheros que probablemente toque y las zonas sensibles (auth, datos y migraciones, API pública, dependencias, CI), y elige los validadores que aplican. `forge triage` imprime además el `implementer` del tamaño (su rol, agente, si lo hace la propia sesión y por qué), resuelto con el perfil; `--batch` marca una petición de varias.
 
-**El bucle de revisión.** Los revisores escriben veredictos en JSON. `forge verdict` los pondera en una nota, y `forge round` decide el siguiente paso: `done`, `resume` (arreglar con el mismo implementador), `fresh-stronger` (un implementador nuevo, un nivel más arriba), `redo`, `breaker` o `stalled`. Desde la ronda 3 sube de nivel, y las tareas Large tienen hasta 4 rondas.
+**El bucle de revisión.** Los revisores escriben veredictos en JSON. `forge verdict` los pondera en una nota, y `forge round` decide el siguiente paso: `done`, `resume` (arreglar con el mismo implementador), `fresh-stronger` (un implementador nuevo, un nivel más arriba), `redo`, `breaker` o `stalled`. Desde la ronda 3 sube de nivel, y las tareas Large tienen hasta 4 rondas. `round` imprime además el `implementer` del siguiente intento, leído del ledger y resuelto con el perfil; el último intento antes del breaker (la ronda 3 en Medium, la 4 en Large) va siempre a `impl-heavy`, venga del peldaño que venga. Antes de que empiece el implementador, `FORGE prep` registra `BASE`, la fase y la línea base de los validadores en una sola llamada. Después la sesión hace cada ronda con dos llamadas: `FORGE review-prep` (validadores, diff, quién revisa y cómo) y, cuando vuelven los revisores, `FORGE review-close` (veredicto, ronda y los hallazgos para el implementador).
+
+**Rondas de arreglo.** Desde la ronda 2, la revisión mira el arreglo, no la tarea entera otra vez. Un revisor que falló repite en modo `delta`: recibe el brief, el diff completo como contexto, el diff del arreglo y solo sus propios hallazgos anteriores, y marca cada hallazgo con su `origin` (`previous`, `fix` o `untouched`). correctness repite siempre; security y perf que pasaron solo repiten si el arreglo entra en su terreno, y si no se arrastra su resultado. Un hallazgo important en código que el arreglo no tocó (`untouched`) ya no abre una ronda por sí solo («se sube al carro»): si la ronda se abre igualmente va al implementador, y si es lo único pendiente la tarea se acepta y el hallazgo te llega como `deferred`, con su fichero y línea, para que decidas. Un hallazgo critical bloquea siempre, sea cual sea su origen.
 
 ## Agentes
 
 | Agente | Modelo | Esfuerzo | Uso |
 | --- | --- | --- | --- |
-| `forge-mech` | Haiku | por defecto | trabajo mecánico: renombrados, datos, código ya escrito, builds |
-| `forge-impl-light` | Sonnet | por defecto | cambios pequeños y acotados |
+| `forge-mech` | Haiku | bajo | trabajo mecánico: renombrados, datos, código ya escrito, builds |
+| `forge-impl-light` | Sonnet | medio | cambios pequeños y acotados |
 | `forge-impl` | Opus | medio | implementación media e investigación |
-| `forge-impl-heavy` | Opus | muy alto | implementación importante o delicada |
-| `forge-fable` | Fable | por defecto | solo cuando lo pides expresamente |
-| `forge-review-correctness` | Opus | muy alto | revisión de corrección |
-| `forge-review-security` | Opus | muy alto | revisión de seguridad |
-| `forge-review-perf` | Opus | muy alto | revisión de rendimiento |
+| `forge-impl-high` | Opus | alto | implementación sensible: donde empieza una tarea Medium o del plan con zona sensible |
+| `forge-impl-heavy` | Opus | muy alto | el último intento de un bucle de revisión y el arreglo de la revisión final de Large |
+| `forge-fable` | Fable | alto | solo cuando lo pides expresamente |
+| `forge-review-correctness` | Opus | alto (según el riesgo) | revisión de corrección |
+| `forge-review-security` | Opus | alto (según el riesgo) | revisión de seguridad |
+| `forge-review-perf` | Opus | alto (según el riesgo) | revisión de rendimiento |
 | `forge-verify` | Sonnet | alto | usa el trabajo a través de una superficie e informa con pruebas (`forge-verify-heavy`, Opus, también alto, con el perfil `quality`) |
 | `forge-planner` | Opus | muy alto | camino Large: convierte un diseño aprobado en un plan de waypoint |
 | `forge-scout` | Opus | medio | modo infinito: propuestas de mejora con pruebas |
 
-Los implementadores escriben su informe en `report-<n>.txt` y también lo incluyen en su respuesta. El perfil `economy` baja un nivel a los implementadores y `quality` los sube; los revisores nunca cambian con el perfil. La revisión ligera de una tarea pequeña del plan ejecuta `forge-review-correctness` en Sonnet con esfuerzo medio.
+Cada agente fija su `model` y su `effort`, así que ninguno hereda los de tu sesión. Los implementadores escriben su informe en `report-<n>.txt` y también lo incluyen en su respuesta. Suben por una escalera de cinco peldaños: `mech` → `impl-light` → `impl` → `impl-high` → `impl-heavy`. El perfil `economy` baja un peldaño a los implementadores (`impl-heavy` → `forge-impl-high`, `impl-high` → `forge-impl`, `impl` → `forge-impl-light`) y `quality` los sube (`impl` e `impl-high` → `forge-impl-heavy`, `impl-light` → `forge-impl`, `mech` → `forge-impl-light`).
+
+**Esfuerzo de los revisores según el riesgo.** Cada revisor se lanza con el esfuerzo que le da el `review` del triaje (todo triaje imprime `review`, también el de una tarea Medium fuera de un plan):
+
+| Revisor | Por defecto | xhigh cuando |
+| --- | --- | --- |
+| correctness | high | la tarea es sensible o delicada, y en la revisión final de Large |
+| security | high | la zona sensible es `auth` (incluye cripto y secretos) |
+| perf | medium | nunca |
+
+El perfil `quality` deja todos los revisores en xhigh. La revisión ligera de una tarea pequeña del plan ejecuta `forge-review-correctness` en Sonnet con esfuerzo medio.
+
+**La prueba en sombra.** `FORGE shadow start [--tasks N]` (10 por defecto) abre una prueba en el proyecto: en los N briefs siguientes de tamaño Medium o mayor que tengan un revisor en high, `review-prep` añade a la ronda 1 un gemelo de cada revisor en high, el mismo agente en xhigh con las mismas entradas. El gemelo nunca cuenta en el veredicto; `review-close` empareja sus hallazgos bloqueantes con los del revisor en high y guarda el caso en `.forge/shadow.json`. `FORGE shadow report` imprime por revisor los casos, los bloqueantes que encontró xhigh, la parte que recuperó high, los critical que perdió y cada caso perdido; `FORGE shadow stop` cierra la prueba antes de tiempo. La regla para leerlo: high se queda para un revisor si recupera al menos el 90 % de los bloqueantes de su gemelo y no pierde ningún critical; si no, ese revisor vuelve a xhigh. Cuesta unos 0,9 $ por brief.
 
 ## El camino Large
 
@@ -119,7 +134,7 @@ forge trabaja junto a [superpowers](https://github.com/obra/superpowers) y aprov
 - **Un spec se convierte en el diseño.** `/forge:run --from-spec <spec>` (o `/waypoint:design new --from <spec>`) importa un spec de brainstorming como primera versión del diseño: las mismas secciones, «Importado de» en su página y los pilares sacados del spec. forge recomienda una ronda del crítico y sigue por el camino Large. Sin el flag, el camino Large ofrece una vez partir de un spec que superpowers escribió en los últimos 14 días.
 - **Un plan pasa por forge.** `/forge:run --superpowers-plan <plan>` toma las `### Task N` sin terminar del plan, en orden y de una en una, por el camino Medium: cada una se convierte en un brief con sus pasos literales, pasa por validadores, verify, revisores y veredicto, y sus casillas se marcan al aceptarse.
 - **TDD.** Con `tdd: superpowers` en `.forge/config.yaml`, cada brief de implementador pide seguir la skill `test-driven-development` de superpowers e informar de la ejecución en rojo y después de la ejecución en verde; el revisor de corrección marca como importante que falte.
-- **Revisar cualquier rama.** `/forge:review [<base>]` revisa una rama contra su base (por defecto, donde salió de la rama principal): validadores contra una línea base de la base, corrección, seguridad en zonas sensibles y rendimiento si se pide, y un veredicto puntuado. Nunca arregla ni integra; ofrece `/forge:run` con los hallazgos.
+- **Revisar cualquier rama.** `/forge:review [<base>]` revisa una rama contra su base (por defecto, donde salió de la rama principal): validadores contra una línea base de la base, la revisión que pide su triaje, medida por el diff real de la rama (una revisión ligera en Sonnet por debajo de Medium; si no, los revisores con el esfuerzo de la tabla de esfuerzo de revisores: corrección, y seguridad en zonas sensibles; rendimiento si se pide, con cualquier tamaño), y un veredicto puntuado. Nunca arregla ni integra; ofrece `/forge:run` con los hallazgos.
 
 ## Enrutado y modo auto
 
@@ -136,7 +151,7 @@ forge trabaja junto a [superpowers](https://github.com/obra/superpowers) y aprov
 En el camino Large y en el modo infinito, forge ejecuta las tareas del plan con **un planificador** que trabaja por tareas: `forge swarm tick` decide qué tareas están listas (sus dependencias están integradas y sus zonas no se solapan) y qué trabajo terminado integrar, hasta `swarm.parallel` a la vez. Hay dos modos:
 
 - **subagents** (el de por defecto). La sesión coordinadora trabaja cada tarea con subagentes en un worktree de git propio.
-- **sessions**. Cada tarea corre en su propia sesión `claude --bg`, llamada `wp-<proyecto>-<T>`, en el worktree `.claude/worktrees/task-<T>`. Esa sesión hace el bucle forge de su única tarea, publica su etapa y nunca integra: integra la coordinadora.
+- **sessions**. Cada tarea corre en su propia sesión `claude --bg`, llamada `wp-<proyecto>-<T>`, en el worktree `.claude/worktrees/task-<T>`. Esa sesión hace el bucle forge de su única tarea con el skill `forge:member` (solo lo que necesita un miembro, con los pasos de la tarea en `references/task-steps.md`), publica su etapa y nunca integra: integra la coordinadora. Se lanza con su propio esfuerzo, `swarm.member.effort` (medium por defecto), y con `swarm.member.model` si lo fijas (si no, tu modelo por defecto), no con los de tu sesión; `swarm tick` y `swarm relaunch` imprimen los argumentos completos de `launch`.
 
 La ejecución secuencial no es un tercer modo: es subagents con N = 1.
 
@@ -266,6 +281,9 @@ swarm:
   mode: subagents              # opcional: subagents | sessions
   setup: npm ci                # opcional: instala las dependencias de un worktree nuevo; por defecto se deduce del lockfile
   launcher: bg                 # bg | herdr; por defecto bg
+  member:                      # cómo se lanza un miembro del modo sessions
+    effort: medium             # low | medium | high | xhigh | max; por defecto medium
+    model: sonnet              # opcional: opus | sonnet | haiku; por defecto tu propio modelo
 ```
 
 `swarm.setup` es un comando de hasta 500 caracteres, que se ejecuta en cada worktree que crea forge. `.forge/config.yaml` es el único fichero de `.forge/` que git sí versiona, así que un `setup` que commitees vale para todo el que ejecute el proyecto.
@@ -311,8 +329,8 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 <details>
 <summary><b>Tareas y revisión</b></summary>
 
-- `triage [--task id] [--batch] [--autonomy auto|ask] [--locale es|en] (<texto> | --text-file f)` - clasifica una tarea: camino, ficheros, zonas sensibles, validadores y el `implementer` (rol, agente, self, why). `--batch` marca una petición de varias, así que una Trivial va a `mech`. `--text-file` lee el texto de un fichero, para que nunca pase por un shell. `--autonomy auto` anota que la tarea va en modo auto. Imprime además `announce`, la línea que enseña la sesión (camino, motivo, implementador y validadores nuevos, en el idioma de `--locale` o, si no, en el del plan), `gate` (`plan` en Medium: primero va el plan corto) y, mientras `.forge/.gitignore` no esté en git, `untracked`. Una petición corta que cambia un texto entre comillas («cambia el título de la página a «X»») es Trivial.
-- `triage --plan p --task T` - hace el triaje de una tarea del plan a partir de sus zonas y su `done_when`; imprime también el `implementer`. Una tarea del plan no aplica la regla de repositorio nuevo, y una Large va a `impl` (`impl-heavy` en una zona sensible).
+- `triage [--task id] [--batch] [--delicate] [--autonomy auto|ask] [--locale es|en] (<texto> | --text-file f)` - clasifica una tarea: camino, ficheros, zonas sensibles, validadores y el `implementer` (rol, agente, self, why). `--batch` marca una petición de varias, así que una Trivial va a `mech`. `--delicate` marca el trabajo como delicado, así que correctness revisa en xhigh. `--text-file` lee el texto de un fichero, para que nunca pase por un shell. `--autonomy auto` anota que la tarea va en modo auto. Imprime además `announce`, la línea que enseña la sesión (camino, motivo, implementador y validadores nuevos, en el idioma de `--locale` o, si no, en el del plan), `gate` (`plan` en Medium: primero va el plan corto) y, mientras `.forge/.gitignore` no esté en git, `untracked`. Una petición corta que cambia un texto entre comillas («cambia el título de la página a «X»») es Trivial.
+- `triage --plan p --task T` - hace el triaje de una tarea del plan a partir de sus zonas y su `done_when`; imprime también el `implementer`. Una tarea del plan no aplica la regla de repositorio nuevo, y una Large va a `impl` (`impl-high` en una zona sensible).
 - `triage --plan p --task T --base sha` (también sin `--plan`, con un texto) - vuelve a medir una tarea ya implementada a partir de su diff real, `git diff --numstat <sha>..HEAD`: más de 3 ficheros o más de 200 líneas cambiadas es Medium, más de 10 ficheros es Large, y una zona sensible es al menos Medium. El tamaño sale solo del diff: una zona sensible pone un suelo de Medium, y también lo ponen las mediciones `--base` anteriores de `T`; en una tarea del plan solo cuentan los triajes del proyecto de su propio plan. Imprime también `diff` (`base`, `files`, `lines`, `path`) y `review` (`light`, los `reviewers` con su `agent`, `model` y `effort`, y los `flags` del veredicto).
 - `brief --plan p --task T [--design d]` - imprime el brief de una tarea del plan de waypoint, con la línea `Commit title prefix` que usan los implementadores.
 - `brief --superpowers-plan f --task N` - imprime el brief de la tarea N de un plan de superpowers: la cabecera y las restricciones globales del plan, el cuerpo literal de la tarea y las reglas que añade forge (y la línea TDD con `tdd: superpowers`).
@@ -330,7 +348,11 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 - `local set workflow <w>|none` / `local set autonomy ask|auto|none` - tus preferencias en `.forge/local.yaml`.
 - `validate [--affected a,b | --all] [--path trivial|small|medium|large] [--base sha] [--final] [--task id] [--base-run | --baseline f]` - ejecuta los validadores del proyecto que tocan (ver Coincidencias); `--base` da el diff contra el que se casan los `affects` de e2e, `--final` elige el conjunto de la revisión final. `--base-run` marca una ejecución sobre el commit base, antes de cualquier cambio; `--baseline f` toma el JSON de esa ejecución y marca `preexisting` un fallo que la base ya tenía, que no cuenta ni en el código de salida ni en el veredicto. Un runner de tests que no encuentra tests pasa como `skipped: "no-tests"`.
 - `verdict --task id --dir d [--validators f] [--sensitive] [--perf]` - pondera los JSON de los revisores en una nota. Un revisor aparece con `invalid: true` si su salida no servía (`dropped: 0`, cuenta como abstención) o si se descartaron algunos de sus hallazgos (`dropped` > 0; la revisión mantiene su veredicto y puntúa, y la skill registra los hallazgos descartados como resolución).
-- `round --task id --path medium|large` - decide el siguiente paso del bucle de revisión (`done`, `resume`, `fresh-stronger`, `redo`, `breaker`, `stalled`; `tierUp` desde la ronda 3).
+- `round --task id --path medium|large` - decide el siguiente paso del bucle de revisión (`done`, `resume`, `fresh-stronger`, `redo`, `breaker`, `stalled`; `tierUp` desde la ronda 3), si el intento es el último (`last`) y el siguiente `implementer` (`role`, `agent`).
+- `prep --task <id>-<n> --path p [--phase ph] [--dir d]` - antes de que empiece un implementador: registra `BASE`, la fase y la línea base de los validadores sobre él en una sola llamada, e imprime `base`, `baseline` y `failing`.
+- `review-prep --task <id>-<n> --path p --base sha --baseline f --dir d [--locale es|en]` - prepara una ronda de revisión: valida contra la línea base, escribe el diff (y desde la ronda 2 el diff del arreglo y los hallazgos anteriores de cada revisor), decide quién revisa y cómo y copia los resultados arrastrados; imprime `round`, `validators`, `say`, `spawn` (`agent`, `model`, `effort`, `mode` `full` o `delta`, `inputs`, `twin`) y `carried`.
+- `review-close --task <id>-<n> --dir d --path medium|large` - cierra la ronda: comprueba que cada revisor lanzado dejó su fichero (sale con código 3 y `missing` si no), pondera el veredicto, registra los hallazgos menores y los `deferred` como rulings, escribe `findings-<n>-<ronda>.json` e imprime `{action, score, next, last, implementer, findings, deferred, invalid}` (más `shadow`).
+- `shadow start [--tasks N] [--reset] | stop | report [--locale es|en]` - la prueba en sombra de los revisores en high frente a gemelos en xhigh (ver [Agentes](#agentes)); abrirla de nuevo conserva los casos reunidos, `--reset` los borra.
 - `log --kind k [--task id] [--data json | --data-file f]` - añade una entrada al registro. Una entrada `triage` que sube el camino puede llevar un `why`, que nombra el siguiente `announce`.
 - `decision add --data-file f [--task id]` - registra una decisión de forge (JSON estricto: `point`, `what`, `chosen`, `why`, `by` y, si hace falta, `alternatives`, `weight`, `revert`, `undo`, `safePath`, `revertOf`, `task`, `runId`); la imprime con su número `n` y mantiene `.forge/decisions.json`, el resumen que leen lens y la banda. Con una ejecución activa lleva su id.
 - `decision list [--task id] [--run id] [--since iso] [--all] [--auto]` - las decisiones numeradas; sin filtro, las del último ámbito. `--auto` deja fuera tus propias respuestas.
@@ -376,7 +398,7 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 - `swarm relaunch <tarea> --plan p` / `swarm nudge <tarea> [--plan p]` - relanza una tarea de sessions parada con una nota de relevo (como mucho 2 veces), o recuerda a una inactiva (el plan da el idioma del recordatorio).
 - `swarm takeover --session SID [--db dir]` - toma el relevo de la coordinadora cuando está parada; un miembro de la ejecución no puede. La coordinadora pasa a ser `SID`, y el hook Stop se ata a esa sesión en su siguiente parada.
 - `swarm task <tarea> --stage S [--agent A | --no-agent] [--round N] [--status running|accepted|blocked] [--detail-file F] [--lease ISO]` - anota la etapa, el agente y la ronda de la tarea; `swarm task <tarea> --drop` olvida una tarea cuya reclamación se perdió.
-- `swarm tick [--plan p --db dir] [--agents F]` - decide qué lanzar, recordar, relanzar e integrar; en una ejecución efímera no lleva `--plan` ni `--db` (`--db` es una copia de los documentos `state` y `sessions` del roadmap; `--agents` es un fichero JSON con las sesiones en segundo plano, `[{name, state: working|idle}]`).
+- `swarm tick [--plan p --db dir] [--agents F]` - decide qué lanzar (un `start` en modo sessions lleva `launch`, los argumentos completos de `waypoint launch` con `--effort` y `--model` de `swarm.member`), recordar, relanzar e integrar; en una ejecución efímera no lleva `--plan` ni `--db` (`--db` es una copia de los documentos `state` y `sessions` del roadmap; `--agents` es un fichero JSON con las sesiones en segundo plano, `[{name, state: working|idle}]`).
 - `swarm integrate <tarea> [--retry-deps]` - fusiona una tarea aceptada en la rama de ejecución, comparando los validadores con la base. Vuelve a instalar las dependencias cuando la fusión trae o cambia un manifiesto o un lockfile (`setup`), las restaura tras una fusión que deshace, e imprime `newValidators` y `say`, las líneas que enseña la sesión (validadores nuevos, validadores que ya fallaban y no cuentan). Una instalación que falla responde `run-deps` y no se reintenta hasta que cambien los manifiestos, o con `--retry-deps`.
 - `swarm merge [--yes] [--retry-deps]` - fusiona la rama de ejecución en tu rama; sin `--yes` necesita el permiso dado al empezar. Si tu rama no se ha movido, el árbol fusionado es el de la rama de ejecución, así que los validadores se ejecutan en el worktree de ejecución y no se instala nada en tu checkout.
 - `swarm retry <T> [--adopt]` - devuelve al trabajo una tarea en conflicto o bloqueada. `--adopt` da a la tarea en conflicto de una sesión ejecutora o manual una ronda de arreglo con los subagentes de la coordinadora; se niega si el worktree de quien la tiene está sucio.
