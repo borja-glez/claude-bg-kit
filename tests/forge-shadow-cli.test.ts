@@ -28,6 +28,19 @@ describe('forge shadow', () => {
     expect(state().remaining).toBe(3);
   });
 
+  it('start again keeps the cases already collected; --reset clears them', () => {
+    startShadow(root, 2);
+    addCase(root, buildCase('T1-1', 'security', [], [{ severity: 'important', problem: 'x' }]));
+    const again = run(['shadow', 'start', '--tasks', '6'], io);
+    expect(again.code).toBe(0);
+    expect(JSON.parse(again.stdout)).toEqual({ remaining: 6, cases: 1 });
+    expect(state().cases).toHaveLength(1);
+    const reset = run(['shadow', 'start', '--reset'], io);
+    expect(reset.code).toBe(0);
+    expect(JSON.parse(reset.stdout)).toEqual({ remaining: 10, cases: 0 });
+    expect(state()).toEqual({ remaining: 10, cases: [] });
+  });
+
   it('a --tasks that is not a positive integer is a usage error', () => {
     for (const bad of ['abc', '2.5', '0', '-1', '3x']) {
       const r = run(['shadow', 'start', '--tasks', bad], io);

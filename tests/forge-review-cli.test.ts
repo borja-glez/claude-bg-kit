@@ -378,6 +378,39 @@ describe('forge review-close', () => {
     expect(JSON.parse(readFileSync(path.join(root, '.forge', 'shadow.json'), 'utf8')).remaining).toBe(1);
   });
 
+  it('a missing twin is listed in review-close output and saves no case', () => {
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'shadow.json'), JSON.stringify({ remaining: 2, cases: [] }));
+    prep();
+    write(r1(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    const out = JSON.parse(close().stdout);
+    expect(out.shadow).toBeUndefined();
+    expect(out.shadowSkipped).toEqual([{ reviewer: 'security', reason: 'missing', file: '.forge/work/T1/reviews-1-1/shadow/security.json' }]);
+    expect(JSON.parse(readFileSync(path.join(root, '.forge', 'shadow.json'), 'utf8')).cases).toEqual([]);
+  });
+
+  it('an unparseable twin or high review saves no case and review-close says so', () => {
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'shadow.json'), JSON.stringify({ remaining: 2, cases: [] }));
+    prep();
+    write(r1(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    writeFileSync(path.join(r1(), 'shadow', 'security.json'), 'the twin ran out of time {not json');
+    const cases = () => JSON.parse(readFileSync(path.join(root, '.forge', 'shadow.json'), 'utf8')).cases;
+    const a = JSON.parse(close().stdout);
+    expect(a.shadow).toBeUndefined();
+    expect(a.shadowSkipped).toEqual([{ reviewer: 'security', reason: 'unparseable', file: '.forge/work/T1/reviews-1-1/shadow/security.json' }]);
+    expect(cases()).toEqual([]);
+    // A readable twin but an unparseable high review: still no case.
+    write(path.join(r1(), 'shadow'), 'security', { verdict: 'fail', confidence: 0.9, findings: [{ severity: 'critical', problem: 'path traversal' }] });
+    writeFileSync(path.join(r1(), 'security.json'), 'garbage');
+    const b = JSON.parse(close().stdout);
+    expect(b.shadow).toBeUndefined();
+    expect(b.shadowSkipped).toEqual([{ reviewer: 'security', reason: 'unparseable', file: '.forge/work/T1/reviews-1-1/security.json' }]);
+    expect(cases()).toEqual([]);
+  });
+
   it('closing a round again with an accept removes the findings file the earlier fix left', () => {
     prep();
     write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }] });

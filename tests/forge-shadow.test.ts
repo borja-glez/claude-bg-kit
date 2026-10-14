@@ -44,6 +44,15 @@ describe('shadow state', () => {
     expect(s?.cases).toHaveLength(1);
     expect(takeBrief(root)).toBe(false);
   });
+  it('starting again keeps the cases collected and resets the briefs left; reset clears them', () => {
+    const root = tmp();
+    startShadow(root, 5);
+    addCase(root, buildCase('T1', 'correctness', [], [f('important', 'x', 'a.ts', 1)]));
+    expect(startShadow(root, 3)).toMatchObject({ remaining: 3, cases: [{ task: 'T1' }] });
+    expect(readShadow(root)?.cases).toHaveLength(1);
+    expect(startShadow(root, 4, { reset: true })).toEqual({ remaining: 4, cases: [] });
+    expect(readShadow(root)).toEqual({ remaining: 4, cases: [] });
+  });
   it('reads a broken file as no test', () => {
     const root = tmp();
     startShadow(root);

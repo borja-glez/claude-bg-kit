@@ -214,7 +214,8 @@ type ValidatorRow = { validator?: unknown; ok?: unknown; failures?: unknown; pre
  * (carried results keep their previous origins), logs it on the round dir and the round decision, logs the minor and
  * deferred findings as a ruling, writes `<dir>/findings-<n>-<round>.json` for the implementer when the action is not
  * accept, saves the case of each shadow twin that left its file in `shadow/` (it never counts in the verdict), and
- * prints `{action, score, next, last, implementer, findings, deferred, invalid}` (plus `shadow`, the twins compared).
+ * prints `{action, score, next, last, implementer, findings, deferred, invalid}` (plus `shadow`, the twins compared, and
+ * `shadowSkipped`, the twins whose file, or their high reviewer's, was missing or unparseable).
  */
 export function reviewClose(args: string[], deps: ReviewDeps): Result {
   const flag = (name: string) => {
@@ -311,16 +312,27 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   } else rmSync(findingsPath, { force: true });
 
   // The shadow twins (xhigh, in shadow/) never reach the verdict: each one with a file is paired with its high reviewer
-  // and the case saved in .forge/shadow.json, replacing the one an earlier close of this round saved.
-  const twins = names(plan.spawn, x => x.twin === true)
-    .filter(k => existsSync(path.join(roundDir, 'shadow', `${k}.json`)) && existsSync(path.join(roundDir, `${k}.json`)));
-  if (twins.length) {
+  // and the case saved in .forge/shadow.json, replacing the one an earlier close of this round saved. A missing file or
+  // one parseReview flags invalid (it would read as no blocking findings) saves no case: it is listed in shadowSkipped.
+  const twins: ReviewerKey[] = [];
+  const shadowSkipped: { reviewer: ReviewerKey; reason: 'missing' | 'unparseable'; file: string }[] = [];
+  const pairs: { k: ReviewerKey; high: Review; xhigh: Review }[] = [];
+  for (const k of names(plan.spawn, x => x.twin === true)) {
+    const highFile = path.join(roundDir, `${k}.json`), twinFile = path.join(roundDir, 'shadow', `${k}.json`);
+    const missing = [twinFile, highFile].find(f => !existsSync(f));
+    if (missing) { shadowSkipped.push({ reviewer: k, reason: 'missing', file: rel(deps.cwd, missing) }); continue; }
+    const high = parseReview(readFileSync(highFile, 'utf8'));
+    const xhigh = parseReview(readFileSync(twinFile, 'utf8'));
+    const bad = xhigh.invalid ? twinFile : high.invalid ? highFile : null;
+    if (bad) { shadowSkipped.push({ reviewer: k, reason: 'unparseable', file: rel(deps.cwd, bad) }); continue; }
+    pairs.push({ k, high, xhigh });
+    twins.push(k);
+  }
+  if (pairs.length) {
     const local = (fs: Finding[]) => fs.map(f => (f.file ? { ...f, file: repoRelative(f.file, deps.repoDir) } : f));
     const state = readShadow(deps.cwd) ?? { remaining: 0, cases: [] };
     let cases = state.cases;
-    for (const k of twins) {
-      const high = parseReview(readFileSync(path.join(roundDir, `${k}.json`), 'utf8'));
-      const xhigh = parseReview(readFileSync(path.join(roundDir, 'shadow', `${k}.json`), 'utf8'));
+    for (const { k, high, xhigh } of pairs) {
       cases = [...cases.filter(c => c.task !== task || c.reviewer !== k), buildCase(task, k, local(high.findings), local(xhigh.findings))];
     }
     saveShadow(deps.cwd, { ...state, cases });
@@ -328,7 +340,7 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   return json({
     action: result.action, score: result.score, next: d.next, last: d.last, implementer: d.implementer,
     findings, deferred: result.deferred, invalid: result.reviewers.filter(r => r.invalid).map(r => r.name),
-    round, reasons: result.reasons, ...(twins.length ? { shadow: twins } : {}),
+    round, reasons: result.reasons, ...(twins.length ? { shadow: twins } : {}), ...(shadowSkipped.length ? { shadowSkipped } : {}),
   });
 }
 

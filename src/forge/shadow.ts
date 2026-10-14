@@ -62,10 +62,13 @@ export function saveShadow(root: string, state: ShadowState): void {
   } finally { rmSync(tmp, { force: true }); }
 }
 
-/** Opens a new shadow test for `briefs` briefs; any previous one is replaced. */
-export function startShadow(root: string, briefs: number = DEFAULT_SHADOW_BRIEFS): ShadowState {
+/**
+ * Opens the shadow test for `briefs` more briefs. The cases already collected stay (starting again only resets the
+ * briefs left); `reset` clears them.
+ */
+export function startShadow(root: string, briefs: number = DEFAULT_SHADOW_BRIEFS, opts: { reset?: boolean } = {}): ShadowState {
   if (!Number.isInteger(briefs) || briefs < 1) throw new Error(`shadow: briefs must be a positive integer, got ${briefs}`);
-  const state: ShadowState = { remaining: briefs, cases: [] };
+  const state: ShadowState = { remaining: briefs, cases: opts.reset ? [] : readShadow(root)?.cases ?? [] };
   saveShadow(root, state);
   return state;
 }

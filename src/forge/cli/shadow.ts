@@ -5,7 +5,7 @@ import { DEFAULT_SHADOW_BRIEFS, readShadow, renderShadowReport, shadowReport, st
 // review.ts dispatches here.
 
 type Result = { code: number; stdout: string; stderr: string };
-const USAGE = 'usage: forge shadow start [--tasks <N>] | stop | report [--locale es|en]';
+const USAGE = 'usage: forge shadow start [--tasks <N>] [--reset] | stop | report [--locale es|en]';
 
 const json = (v: unknown): Result => ({ code: 0, stdout: JSON.stringify(v, null, 2) + '\n', stderr: '' });
 
@@ -31,7 +31,7 @@ export function shadowCommand(args: string[], cwd: string): Result {
         if (v === undefined || !/^\d+$/.test(v) || Number(v) < 1) throw new UsageError('shadow start: --tasks must be a positive integer');
         tasks = Number(v);
       }
-      const s = startShadow(cwd, tasks);
+      const s = startShadow(cwd, tasks, { reset: args.includes('--reset') });
       return json({ remaining: s.remaining, cases: s.cases.length });
     }
     case 'stop': {
