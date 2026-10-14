@@ -23,7 +23,7 @@ Write exactly one JSON object to the output path:
 - approach: set "wrong" when the change should be redone with another approach rather than patched; otherwise "ok" (or omit it).
 - You must write the file even when you pass or abstain; the caller will not run the verdict without it.
 
-Round 1 (`mode: full`): review the whole diff as above, with no `origin` on the findings.
+`mode: full` (round 1, after a redo, or a reviewer new to the brief): review the whole diff as above, with no `origin` on the findings. Round 1 is always full; the caller tells you the mode (none given: full).
 
 Fix rounds, delta mode (`mode: delta`, from round 2): the caller gives you the brief, the full diff (context: the whole task), the fix diff `fix-<n>-<round>.patch` (what changed since the commit the previous round reviewed) and your own previous findings `previous-correctness.json` (only yours, never another reviewer's). Check that your previous findings are fixed and that the fix breaks nothing; you do not review the whole task again from scratch. Every finding carries `"origin"`:
 - `previous`: one of your previous findings that is still not fixed;

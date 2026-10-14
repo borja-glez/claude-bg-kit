@@ -83,8 +83,12 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
 
   const config = loadConfig(deps.repoDir);
   const events = readEvents(deps.cwd);
-  const review = triageReview(events, id, config.profile);
-  if (!review) throw new UsageError(`review-prep: no triage of ${id} logged a review: run FORGE triage --task ${id} first`);
+  // A Medium brief run as a loose task has the id `<parent>-<k>` and no triage of its own: it reviews with the
+  // parent's (that id exactly, never a sibling brief's).
+  const parent = /^(.+)-\d+$/.exec(id)?.[1];
+  const review = triageReview(events, id, config.profile)
+    ?? (parent ? triageReview(events.filter(e => e.task === parent), parent, config.profile) : null);
+  if (!review) throw new UsageError(`review-prep: no triage of ${id}${parent ? ` nor of ${parent}` : ''} logged a review: run FORGE triage --task ${id} first`);
   const head = (deps.git(['rev-parse', 'HEAD']) ?? '').trim();
   if (!head) throw new UsageError('review-prep: cannot read HEAD');
   const diff = deps.git(['diff', `${baseSha}..HEAD`]);

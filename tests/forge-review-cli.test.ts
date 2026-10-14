@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -148,6 +148,35 @@ describe('forge review-prep', () => {
   it('without a triage review it is a usage error', () => {
     const fresh = mkdtempSync(path.join(tmpdir(), 'forge-review-'));
     const r = run(['review-prep', '--task', 'T1-1', '--path', 'medium', '--base', base, '--baseline', path.join(work(), 'baseline-1.json'), '--dir', 'w', '--cwd', wt], { ...io, cwd: fresh });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/triage/);
+  });
+
+  it("a Medium brief run as a loose task (<id>-<n>) falls back to the parent id's triage", () => {
+    // The loose task T1-2's brief 1: its own id has no triage; the Medium task T1 has one.
+    const loose = path.join(root, '.forge', 'work', 'T1-2');
+    mkdirSync(loose, { recursive: true });
+    writeFileSync(path.join(loose, 'brief-1.md'), '# T1-2\n');
+    const r = run(['review-prep', '--task', 'T1-2-1', '--path', 'medium', '--base', base, '--baseline', '.forge/work/T1/baseline-1.json',
+      '--dir', '.forge/work/T1-2', '--cwd', wt], io);
+    expect(r.stderr).toBe('');
+    expect(r.code).toBe(0);
+    const out = JSON.parse(r.stdout);
+    expect(out.spawn.map((s: { agent: string; effort: string }) => [s.agent, s.effort])).toEqual([['forge-review-correctness', 'xhigh'], ['forge-review-security', 'high']]);
+    expect(JSON.parse(readFileSync(path.join(loose, 'reviews-1-1', 'review-plan.json'), 'utf8')).flags).toEqual(['--sensitive']);
+    // A triage of the loose task itself wins over the parent's.
+    appendEvent(root, { ts: '2026-10-14T09:40:00.000Z', kind: 'triage', task: 'T1-2', path: 'medium', sensitive: [],
+      review: { light: false, flags: [], reviewers: [{ role: 'review-correctness', model: null, effort: 'high', agent: 'forge-review-correctness' }] } });
+    rmSync(path.join(loose, 'reviews-1-1'), { recursive: true, force: true });
+    const own = JSON.parse(run(['review-prep', '--task', 'T1-2-1', '--path', 'medium', '--base', base, '--baseline', '.forge/work/T1/baseline-1.json',
+      '--dir', '.forge/work/T1-2', '--cwd', wt], io).stdout);
+    expect(own.spawn.map((s: { agent: string; effort: string }) => [s.agent, s.effort])).toEqual([['forge-review-correctness', 'high']]);
+  });
+
+  it('the parent fallback reads only the parent id, not a sibling brief', () => {
+    const fresh = mkdtempSync(path.join(tmpdir(), 'forge-review-'));
+    appendEvent(fresh, { ts: '2026-10-14T09:00:00.000Z', kind: 'triage', task: 'T1-3', path: 'medium', sensitive: [], review });
+    const r = run(['review-prep', '--task', 'T1-2-1', '--path', 'medium', '--base', base, '--baseline', path.join(work(), 'baseline-1.json'), '--dir', 'w', '--cwd', wt], { ...io, cwd: fresh });
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/triage/);
   });

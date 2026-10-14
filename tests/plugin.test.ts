@@ -527,7 +527,7 @@ describe('plugin layout', () => {
     for (const s of [md, inf]) expect(s).toContain('any other `wait 0` is treated as `wait 300`');
     expect(md).toContain('FORGE swarm task <T> --drop');
     expect(md).not.toContain('`FORGE swarm retry <T>` later');
-    expect(md).toContain('git -C <worktree> diff forge/run-<project>...HEAD');
+    expect(md).toContain('so the review diff review-prep writes (`<base>..HEAD`) holds only this task\'s work');
     expect(md).toContain('FORGE swarm task <T> --lease <NOW + 10 min>');
     expect(md).toContain('commit-info <sha>');
     for (const s of [md, inf]) expect(s).not.toContain('task.json');
@@ -631,6 +631,34 @@ describe('plugin layout', () => {
     const member = read('plugins/forge/skills/member/SKILL.md');
     expect(member).not.toMatch(/FORGE round/);
     expect(Buffer.byteLength(member, 'utf8')).toBeLessThan(15 * 1024);
+  });
+  it('review fixes of T013: loose Medium briefs, twins before the close, deferred handed over, mode passed', () => {
+    const run = read('plugins/forge/skills/run/SKILL.md');
+    const medium = run.slice(run.indexOf('\n## Medium'), run.indexOf('### Superpowers plan'));
+    const steps = read('plugins/forge/skills/run/references/task-steps.md');
+    const member = read('plugins/forge/skills/member/SKILL.md');
+    const ephemeral = run.slice(run.indexOf('\n### Ephemeral execution'), run.indexOf('\n## Resuming'));
+    // 1. A Medium brief's loose task reviews with the Medium task's triage; Trivial and Small keep a plain validate.
+    expect(ephemeral).toMatch(/review-prep[^\n]*the Medium task's triage/);
+    expect(ephemeral).toMatch(/\*\*validate:\*\* Trivial and Small: `FORGE validate --all --path <path>/);
+    // 2. review-close only once every spawned entry has returned, twins included.
+    for (const s of [medium, steps]) expect(s).toContain('only once every spawned entry has returned, twins included');
+    // 3. Deferred findings: written to the main checkout's deferred.json, named in the member's reply, read by the closing reports.
+    for (const s of [steps, member]) expect(s).toContain('<MAIN>/.forge/work/<T>/deferred.json');
+    expect(member).toMatch(/text: "<T> done"[^\n]*deferred\.json/);
+    const end = run.split('\n').find(l => l.startsWith('7. **End.**'))!;
+    expect(end).toContain('.forge/work/<T>/deferred.json');
+    const ephEnd = ephemeral.split('\n').find(l => l.startsWith('4. **End.**'))!;
+    expect(ephEnd).toContain('.forge/work/<T>/deferred.json');
+    expect(Buffer.byteLength(member, 'utf8')).toBeLessThan(15 * 1024);
+    // Minors: the entry's mode goes to the reviewer; full is not only round 1; stale references updated.
+    for (const s of [medium, steps]) expect(s).toMatch(/its `mode`/);
+    for (const name of ['correctness', 'security', 'perf']) {
+      expect(read(`plugins/forge/agents/forge-review-${name}.md`)).toContain('`mode: full` (round 1, after a redo, or a reviewer new to the brief)');
+    }
+    expect(steps).not.toContain("step 4's once it ran");
+    expect(run).not.toContain('used for `validate`, `verdict` and `round`');
+    expect(run).not.toContain('diff forge/run-<project>...HEAD');
   });
   it('forge:member: a small skill with frontmatter, join, the claim, the finish and the task steps', () => {
     const md = read('plugins/forge/skills/member/SKILL.md');
