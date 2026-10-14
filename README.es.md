@@ -7,9 +7,9 @@ Diséñalas, planifícalas, constrúyelas con revisión independiente, ejecútal
 
 [English](README.md) · **Español** · [Historial de cambios](CHANGELOG.md)
 
-![waypoint 0.18.1](https://img.shields.io/badge/waypoint-0.18.1-cba6f7?style=flat-square)
-![forge 0.14.0](https://img.shields.io/badge/forge-0.14.0-fab387?style=flat-square)
-![lens 0.11.2](https://img.shields.io/badge/lens-0.11.2-b4befe?style=flat-square)
+![waypoint 0.19.0](https://img.shields.io/badge/waypoint-0.19.0-cba6f7?style=flat-square)
+![forge 0.15.0](https://img.shields.io/badge/forge-0.15.0-fab387?style=flat-square)
+![lens 0.11.3](https://img.shields.io/badge/lens-0.11.3-b4befe?style=flat-square)
 ![Marketplace de Claude Code](https://img.shields.io/badge/Claude%20Code-marketplace%20bg--kit-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -63,8 +63,8 @@ Una tarea grande pasa por cuatro etapas. Por el camino tomas tres decisiones: ap
 
 1. **Diseño (waypoint).** `/waypoint:design` escribe un documento de diseño. El agente `design-critic` lo revisa por rondas y devuelve propuestas numeradas. Las aplicas, pides otra ronda, haces que Claude te entreviste o lo reescribes. Lo apruebas cuando está bien.
 2. **Plan (waypoint + forge).** `forge-planner` convierte el diseño aprobado en `plan.yaml`: **frentes** (líneas de trabajo independientes; *tracks* en inglés), fases y tareas pequeñas y verificables con los ficheros que toca cada una. `/waypoint:plan` lo publica como **roadmap vivo** en claude.ai. Cualquiera con el enlace ve el progreso, escribe notas y decide propuestas allí.
-3. **Construir (forge).** `/forge:run` hace el triaje de cada tarea por tamaño y elige un camino. Los caminos más pesados pasan por un implementador elegido según la dificultad, luego por los validadores del propio proyecto (tests, lint, tipos, build) y después por hasta tres revisores independientes (correctness, security, perf). Su veredicto ponderado acepta el trabajo o lo devuelve en una ronda de arreglo, con un modelo más fuerte desde la ronda 3.
-4. **Ejecución (forge).** Cuando el plan tiene tareas desbloqueadas, una coordinadora las ejecuta hasta `swarm.parallel` a la vez (3 por defecto). Cada tarea tiene su propio worktree de git y un subagente (modo *subagents*, el de por defecto) o una sesión propia en segundo plano (modo *sessions*), y un planificador decide qué se ejecuta a continuación; una tarea cada vez es simplemente N = 1. Cualquier otra sesión puede unirse a la ejecución como miembro manual y coger una tarea pendiente. El trabajo terminado se integra **de un merge en uno** en la rama de ejecución `forge/run-<proyecto>`, pasando los validadores tras cada merge y comparándolos con lo que ya fallaba allí. Tu checkout no se toca hasta la fusión final, que te pide permiso.
+3. **Construir (forge).** `/forge:run` hace el triaje de cada tarea por tamaño y elige un camino. Los caminos más pesados pasan por un implementador elegido según la dificultad, luego por los validadores del propio proyecto (tests, lint, tipos, build) y después por hasta tres revisores independientes (correctness, security, perf). Su veredicto ponderado acepta el trabajo o lo devuelve en una ronda de arreglo, con un implementador más fuerte desde la ronda 3 y el más fuerte (`impl-heavy`, Opus con esfuerzo muy alto) solo para el último intento. Desde la ronda 2 los revisores miran el arreglo, no la tarea entera otra vez.
+4. **Ejecución (forge).** Cuando el plan tiene tareas desbloqueadas, una coordinadora las ejecuta hasta `swarm.parallel` a la vez (3 por defecto). Cada tarea tiene su propio worktree de git y un subagente (modo *subagents*, el de por defecto) o una sesión propia en segundo plano (modo *sessions*, lanzada con `/forge:member` al esfuerzo que fija `swarm.member`, medium por defecto), y un planificador decide qué se ejecuta a continuación; una tarea cada vez es simplemente N = 1. Cualquier otra sesión puede unirse a la ejecución como miembro manual y coger una tarea pendiente. El trabajo terminado se integra **de un merge en uno** en la rama de ejecución `forge/run-<proyecto>`, pasando los validadores tras cada merge y comparándolos con lo que ya fallaba allí. Tu checkout no se toca hasta la fusión final, que te pide permiso.
 
 El **modo infinito** (`/forge:infinite`) sigue haciendo ciclos dentro de un presupuesto de ciclos u horas. Un scout propone mejoras con pruebas. Las de bajo riesgo y verificables se aprueban solas y el resto te esperan. Las propuestas aprobadas se convierten en tareas nuevas.
 
@@ -78,7 +78,7 @@ Añade el marketplace directamente desde GitHub e instala los plugins que quiera
 claude plugin marketplace add borja-glez/claude-bg-kit
 
 claude plugin install waypoint@bg-kit
-claude plugin install forge@bg-kit     # instala waypoint ^0.18.0 como dependencia
+claude plugin install forge@bg-kit     # instala waypoint ^0.19.0 como dependencia
 claude plugin install lens@bg-kit
 ```
 
@@ -172,7 +172,7 @@ La banda es una línea sobre el prompt que cambia según lo que estés haciendo.
 
 <p align="center"><img src="docs/assets/paths.es.svg" alt="El triaje de forge lleva una tarea al camino Trivial, Small, Medium o Large; la escalera de implementadores y los tres revisores" width="100%"></p>
 
-Lo pequeño sigue siendo barato y lo grande recibe el tratamiento completo: una Small siempre se delega, a `mech` o `impl-light`. Los implementadores van desde Haiku para el trabajo mecánico hasta Opus con esfuerzo muy alto para lo delicado. Los revisores siempre usan Opus con esfuerzo muy alto, y solo actúan cuando los validadores han pasado.
+Lo pequeño sigue siendo barato y lo grande recibe el tratamiento completo: una Small siempre se delega, a `mech` o `impl-light`. Cada agente fija su propio modelo y esfuerzo, así que ninguno hereda los de tu sesión. Los implementadores suben por una escalera de cinco peldaños, desde Haiku para el trabajo mecánico, pasando por `impl-high` (Opus con esfuerzo alto, donde empieza el trabajo sensible), hasta `impl-heavy` (Opus con esfuerzo muy alto), reservado para el último intento. Los revisores usan Opus, solo actúan cuando los validadores han pasado y su esfuerzo depende del riesgo de la tarea: alto por defecto, muy alto en trabajo sensible o delicado y en la revisión final, medio para perf. Una ronda de arreglo revisa solo el arreglo; un hallazgo important en código que el arreglo no tocó ya no abre una ronda por sí solo y te llega como `deferred`. Una prueba en sombra (`FORGE shadow`) lanza gemelos con esfuerzo muy alto de los revisores en alto sobre trabajo real, para que compruebes que el alto encuentra lo mismo.
 
 ### Ejecución en paralelo (forge)
 
@@ -215,6 +215,7 @@ npm run typecheck        # las CLI y las fuentes compartidas
 npm run typecheck:mod    # los mods (src/mod, src/lens)
 npm run build            # regenera dist/, hooks/ y assets/ de cada plugin; sube el resultado
 npm run art              # regenera los SVG de los README en docs/assets
+node scripts/usage-report.mjs <proyecto>/.forge/usage   # coste por agente y por sesión, de los ficheros de consumo de lens
 
 claude plugin validate plugins/<nombre>
 claude plugin test plugins/<nombre>

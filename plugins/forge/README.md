@@ -7,8 +7,8 @@ Triage by size, the right model for each role, your own tools first, independent
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.14.0](https://img.shields.io/badge/version-0.14.0-fab387?style=flat-square)
-![depends on waypoint ^0.18.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.18.0-cba6f7?style=flat-square)
+![version 0.15.0](https://img.shields.io/badge/version-0.15.0-fab387?style=flat-square)
+![depends on waypoint ^0.19.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.19.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -38,7 +38,7 @@ Doing every task the same way wastes effort. A full review of a one-line fix cos
 - **Proportionate.** Trivial work stays in the main session. Only Medium and Large work pays for independent review.
 - **Tools before opinions.** Your tests, linters, type checker and build run before any reviewer reads the diff.
 - **Independent review.** Reviewers are separate agents that never wrote the code. They judge it against the brief and return scored verdicts, and forge weighs those into a decision.
-- **The right model for the role.** Mechanical work goes to Haiku; delicate work goes to Opus at extra-high effort.
+- **The right model for the role.** Mechanical work goes to Haiku, sensitive work starts on Opus at high effort, and extra-high effort is kept for the last attempt. Every agent pins its model and effort, so none inherits your session's.
 - **Scales out.** Big plans run as an execution of parallel tasks, and infinite mode keeps improving the project within a budget.
 
 ## Install
@@ -48,7 +48,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depends on [waypoint](../waypoint/README.md) ^0.18.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
+forge depends on [waypoint](../waypoint/README.md) ^0.19.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
 
 ## Usage
 
@@ -78,30 +78,45 @@ forge depends on [waypoint](../waypoint/README.md) ^0.18.0, which is installed w
 | --- | --- | --- | --- | --- |
 | **Trivial** | none | the main session; `mech` when it is one request of a batch | validators on the changed file | none |
 | **Small** | none | always delegated: `mech` (Haiku) for mechanical work, `impl-light` (Sonnet) otherwise; the session itself only when the whole change is already in its context and is 10 lines or fewer | all validators + reading the diff | none |
-| **Medium** | short plan, continues unless stopped | `impl` / `impl-heavy` | all validators | correctness (+ security when sensitive) |
-| **Large** | mandatory approval of the design | `/waypoint:design`, `/waypoint:plan`, then each task at its own size (Trivial `mech`, Small `mech` / `impl-light`, Medium `impl` / `impl-heavy`, Large `impl` / `impl-heavy`) | all validators | per task, by its real diff: one light correctness review on Sonnet for Small or less, otherwise correctness (+ security when sensitive, + perf on performance tasks); final whole-branch review |
+| **Medium** | short plan, continues unless stopped | `impl`, `impl-high` on a sensitive zone | all validators | correctness (+ security when sensitive) |
+| **Large** | mandatory approval of the design | `/waypoint:design`, `/waypoint:plan`, then each task at its own size (Trivial `mech`, Small `mech` / `impl-light`, Medium and Large `impl`, `impl-high` on a sensitive zone) | all validators | per task, by its real diff: one light correctness review on Sonnet for Small or less, otherwise correctness (+ security when sensitive, + perf on performance tasks); final whole-branch review |
 
 Triage reads the task text, the files it is likely to touch and the sensitive zones (auth, data and migrations, public API, dependencies, CI), and picks the validators that apply. `forge triage` also prints the `implementer` for the size (its role, agent, whether the session does it itself, and why), resolved through the profile; `--batch` marks one request of several.
 
-**The review loop.** Reviewers write JSON verdicts. `forge verdict` weighs them into a score, and `forge round` decides the next step: `done`, `resume` (fix with the same implementer), `fresh-stronger` (a new implementer one tier up), `redo`, `breaker` or `stalled`. From round 3 it moves up a tier, and Large tasks get up to 4 rounds.
+**The review loop.** Reviewers write JSON verdicts. `forge verdict` weighs them into a score, and `forge round` decides the next step: `done`, `resume` (fix with the same implementer), `fresh-stronger` (a new implementer one tier up), `redo`, `breaker` or `stalled`. From round 3 it moves up a tier, and Large tasks get up to 4 rounds. `round` also prints the `implementer` of the next attempt, read from the ledger and resolved through the profile; the last attempt before the breaker (round 3 on Medium, 4 on Large) always goes to `impl-heavy`, from any rung. Before the implementer starts, `FORGE prep` records `BASE`, the phase and the validators' baseline in one call. The session then runs each round with two calls: `FORGE review-prep` (validators, diff, who reviews and how) and, when the reviewers are back, `FORGE review-close` (verdict, round and the findings for the implementer).
+
+**Fix rounds.** From round 2 the review looks at the fix, not the whole task again. A reviewer that failed repeats in `delta` mode: it gets the brief, the full diff as context, the fix diff and only its own earlier findings, and tags each finding with its `origin` (`previous`, `fix` or `untouched`). Correctness always repeats; security and perf that passed repeat only when the fix enters their ground, otherwise their result is carried. An important finding in code the fix did not touch (`untouched`) no longer opens a round by itself: if the round opens anyway it goes to the implementer, and if it is all that is left the task is accepted and the finding is handed to you as `deferred`, with its file and line, for you to decide. A critical finding always blocks, whatever its origin.
 
 ## Agents
 
 | Agent | Model | Effort | Use |
 | --- | --- | --- | --- |
-| `forge-mech` | Haiku | default | mechanical work: renames, data, code already written, builds |
-| `forge-impl-light` | Sonnet | default | small, bounded changes |
+| `forge-mech` | Haiku | low | mechanical work: renames, data, code already written, builds |
+| `forge-impl-light` | Sonnet | medium | small, bounded changes |
 | `forge-impl` | Opus | medium | medium implementation and investigation |
-| `forge-impl-heavy` | Opus | xhigh | important or delicate implementation |
-| `forge-fable` | Fable | default | only when you explicitly ask for it |
-| `forge-review-correctness` | Opus | xhigh | correctness review |
-| `forge-review-security` | Opus | xhigh | security review |
-| `forge-review-perf` | Opus | xhigh | performance review |
+| `forge-impl-high` | Opus | high | sensitive implementation: where a sensitive Medium task or plan task starts |
+| `forge-impl-heavy` | Opus | xhigh | the last attempt of a review loop and the fix of Large's final review |
+| `forge-fable` | Fable | high | only when you explicitly ask for it |
+| `forge-review-correctness` | Opus | high (by risk) | correctness review |
+| `forge-review-security` | Opus | high (by risk) | security review |
+| `forge-review-perf` | Opus | high (by risk) | performance review |
 | `forge-verify` | Sonnet | high | uses the work through a surface and reports evidence (`forge-verify-heavy`, Opus, also high, on the `quality` profile) |
 | `forge-planner` | Opus | xhigh | Large path: turns an approved design into a waypoint plan |
 | `forge-scout` | Opus | medium | infinite mode: evidence-backed improvement proposals |
 
-Implementers write their report to `report-<n>.txt` and also include it in their reply. The `economy` profile steps implementers down one tier and `quality` steps them up; reviewers never change with the profile. The light review of a small plan task runs `forge-review-correctness` on Sonnet at medium effort.
+Every agent pins its `model` and `effort`, so none inherits your session's. Implementers write their report to `report-<n>.txt` and also include it in their reply. They climb a five-rung ladder: `mech` → `impl-light` → `impl` → `impl-high` → `impl-heavy`. The `economy` profile steps implementers down one rung (`impl-heavy` → `forge-impl-high`, `impl-high` → `forge-impl`, `impl` → `forge-impl-light`) and `quality` steps them up (`impl` and `impl-high` → `forge-impl-heavy`, `impl-light` → `forge-impl`, `mech` → `forge-impl-light`).
+
+**Reviewer effort by risk.** Each reviewer is launched with the effort the triage's `review` gives it (every triage prints `review`, also a Medium task outside a plan):
+
+| Reviewer | Default | xhigh when |
+| --- | --- | --- |
+| correctness | high | the task is sensitive or delicate, and in Large's final review |
+| security | high | the sensitive zone is `auth` (crypto and secrets included) |
+| perf | medium | never |
+
+The `quality` profile puts every reviewer on xhigh. The light review of a small plan task runs `forge-review-correctness` on Sonnet at medium effort.
+
+**The shadow trial.** `FORGE shadow start [--tasks N]` (10 by default) opens a trial in the project: for the next N briefs of Medium size or more, `review-prep` adds to round 1 a twin of each reviewer at high, the same agent at xhigh with the same inputs. The twin never counts in the verdict; `review-close` pairs its blocking findings with the high reviewer's and saves the case in `.forge/shadow.json`. `FORGE shadow report` prints per reviewer the cases, the blockers xhigh found, the share high recovered, the criticals it missed and each missed case; `FORGE shadow stop` ends the trial early. The rule to read it: high stays for a reviewer when it recovers at least 90 % of its twin's blockers and misses no critical; otherwise that reviewer goes back to xhigh. About $0.9 per brief.
 
 ## The Large path
 
@@ -136,7 +151,7 @@ forge works next to [superpowers](https://github.com/obra/superpowers) and reuse
 On the Large path and in infinite mode, forge runs the plan's tasks through **one planner** that works per task: `forge swarm tick` decides which tasks are ready (their dependencies are integrated and their zones do not overlap) and which finished work to integrate, up to `swarm.parallel` at once. There are two modes:
 
 - **subagents** (the default). The coordinator session works each task with subagents in a git worktree of its own.
-- **sessions**. Each task runs in its own `claude --bg` session, named `wp-<project>-<T>`, in the worktree `.claude/worktrees/task-<T>`. That session runs the forge loop for its one task, publishes its stage and never integrates: the coordinator does.
+- **sessions**. Each task runs in its own `claude --bg` session, named `wp-<project>-<T>`, in the worktree `.claude/worktrees/task-<T>`. That session runs the forge loop for its one task with the `forge:member` skill (only what a member needs, with the task's steps in `references/task-steps.md`), publishes its stage and never integrates: the coordinator does. It is launched at its own effort, `swarm.member.effort` (medium by default), and on `swarm.member.model` when you set one (else your default model), not at your session's; `swarm tick` and `swarm relaunch` print the full `launch` arguments.
 
 Sequential execution is not a third mode: it is subagents with N = 1.
 
@@ -266,6 +281,9 @@ swarm:
   mode: subagents              # optional: subagents | sessions
   setup: npm ci                # optional: installs a new worktree's dependencies; default deduced from the lockfile
   launcher: bg                 # bg | herdr; default bg
+  member:                      # how a sessions-mode member is launched
+    effort: medium             # low | medium | high | xhigh | max; default medium
+    model: sonnet              # optional: opus | sonnet | haiku; default your own model
 ```
 
 `swarm.setup` is a command of up to 500 characters, run in each worktree forge creates. `.forge/config.yaml` is the one file of `.forge/` that git does track, so a `setup` you commit applies to everyone who runs the project.
@@ -330,7 +348,11 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 - `local set workflow <w>|none` / `local set autonomy ask|auto|none` - your own preferences in `.forge/local.yaml`.
 - `validate [--affected a,b | --all] [--path trivial|small|medium|large] [--base sha] [--final] [--task id] [--base-run | --baseline f]` - run the project validators that apply (see Matching); `--base` gives the diff that e2e `affects` are matched against, `--final` selects the final review's set. `--base-run` marks a run on the base commit, before any change; `--baseline f` takes that run's JSON and marks a failure the base already had `preexisting`, which neither the exit code nor the verdict counts. A test runner that finds no tests passes as `skipped: "no-tests"`.
 - `verdict --task id --dir d [--validators f] [--sensitive] [--perf]` - weigh the reviewers' JSON files into a score. A reviewer is listed with `invalid: true` when its output was unusable (`dropped: 0`, counted as an abstention) or when some of its findings were dropped (`dropped` > 0; the review keeps its verdict and still scores, and the skill records the dropped findings as a ruling).
-- `round --task id --path medium|large` - decide the next step of the review loop (`done`, `resume`, `fresh-stronger`, `redo`, `breaker`, `stalled`; `tierUp` from round 3).
+- `round --task id --path medium|large` - decide the next step of the review loop (`done`, `resume`, `fresh-stronger`, `redo`, `breaker`, `stalled`; `tierUp` from round 3), whether the attempt is the `last`, and the next `implementer` (`role`, `agent`).
+- `prep --task <id>-<n> --path p [--phase ph] [--dir d]` - before an implementer starts: record `BASE`, the phase and the validators' baseline on it in one call, and print `base`, `baseline` and `failing`.
+- `review-prep --task <id>-<n> --path p --base sha --baseline f --dir d [--locale es|en]` - prepare a review round: validate against the baseline, write the diff (and from round 2 the fix diff and each reviewer's earlier findings), choose who reviews and how, copy the carried results; prints `round`, `validators`, `say`, `spawn` (`agent`, `model`, `effort`, `mode` `full` or `delta`, `inputs`, `twin`) and `carried`.
+- `review-close --task <id>-<n> --dir d --path medium|large` - close the round: check every spawned reviewer left its file (exit 3 and `missing` if not), weigh the verdict, record minor and `deferred` findings as rulings, write `findings-<n>-<round>.json` and print `{action, score, next, last, implementer, findings, deferred, invalid}` (plus `shadow`).
+- `shadow start [--tasks N] | stop | report [--locale es|en]` - the shadow trial of the reviewers at high against xhigh twins (see [Agents](#agents)).
 - `log --kind k [--task id] [--data json | --data-file f]` - append to the ledger. A `triage` entry that raises the path may carry a `why`, which the next `announce` names.
 - `decision add --data-file f [--task id]` - record a decision forge took (strict JSON: `point`, `what`, `chosen`, `why`, `by`, optional `alternatives`, `weight`, `revert`, `undo`, `safePath`, `revertOf`, `task`, `runId`); prints it with its number `n` and keeps `.forge/decisions.json`, the summary lens and the band read. During an active execution it carries the run's id.
 - `decision list [--task id] [--run id] [--since iso] [--all] [--auto]` - the decisions, numbered; with no filter, those of the latest scope. `--auto` leaves out your own answers.
@@ -376,7 +398,7 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 - `swarm relaunch <task> --plan p` / `swarm nudge <task> [--plan p]` - restart a stopped sessions task with a handover note (at most 2 times), or remind an idle one (the plan gives the reminder's language).
 - `swarm takeover --session SID [--db dir]` - take over the coordinator when it is stopped; a run member cannot. The coordinator becomes `SID`, and the Stop hook binds to that session at its next stop.
 - `swarm task <task> --stage S [--agent A | --no-agent] [--round N] [--status running|accepted|blocked] [--detail-file F] [--lease ISO]` - record the task's stage, agent and round; `swarm task <task> --drop` forgets a task whose claim was lost.
-- `swarm tick [--plan p --db dir] [--agents F]` - decide what to launch, nudge, relaunch and integrate; in an ephemeral execution it takes no `--plan` or `--db` (`--db` is a copy of the roadmap's `state` and `sessions` documents; `--agents` is a JSON file of the background sessions, `[{name, state: working|idle}]`).
+- `swarm tick [--plan p --db dir] [--agents F]` - decide what to launch (a `start` in sessions mode carries `launch`, the full `waypoint launch` arguments with `--effort` and `--model` from `swarm.member`), nudge, relaunch and integrate; in an ephemeral execution it takes no `--plan` or `--db` (`--db` is a copy of the roadmap's `state` and `sessions` documents; `--agents` is a JSON file of the background sessions, `[{name, state: working|idle}]`).
 - `swarm integrate <task> [--retry-deps]` - merge an accepted task into the run branch, comparing the validators with the baseline. It installs the dependencies again when the merge brings or changes a manifest or lockfile (`setup`), puts them back after a merge it rolls back, and prints `newValidators` and `say`, the lines the session shows (new validators, validators excused as already failing). An install that fails answers `run-deps` and is not retried until the manifests change, or with `--retry-deps`.
 - `swarm merge [--yes] [--retry-deps]` - merge the run branch into your branch; without `--yes` it needs the permission given at start. When your branch has not moved, the merged tree is the run branch's, so the validators run in the run worktree and nothing is installed in your checkout.
 - `swarm retry <T> [--adopt]` - put a task in conflict or blocked back to work. `--adopt` gives the conflicting task of an executor or manual session one fix round with the coordinator's subagents; it refuses if the holder's worktree is dirty.

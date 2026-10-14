@@ -6,7 +6,7 @@
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.18.1](https://img.shields.io/badge/version-0.18.1-cba6f7?style=flat-square)
+![version 0.19.0](https://img.shields.io/badge/version-0.19.0-cba6f7?style=flat-square)
 ![requires claude.ai login](https://img.shields.io/badge/requires-claude.ai%20login-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -129,7 +129,7 @@ The band is drawn in the terminal and in the Code tab of the desktop app. It is 
 
 `/waypoint:launch <track>` creates `.claude/worktrees/<track>` on the branch `track/<track>` and starts a background Claude session there. Each session claims tasks from its track and writes its progress to the roadmap. When two sessions touch the same files, they get an overlap warning. Sessions can hand off or delegate work through messages, which are stored in the roadmap and sent with `SendMessage`. A session that disappears has its task recovered by the others.
 
-forge's sessions mode launches its members with `launch <plan> <T> --task --run R --coordinator SID --base B [--launcher bg|herdr]`: one session per task, in `.claude/worktrees/task-<T>` on `task/<T>`. The band of such a member says "of the execution of <coordinator>". Any session can also join a running execution as a manual member from `/waypoint:work`, and take a pending task. Session ids used with a forge execution must match `[A-Za-z0-9_.-]` (no `~ : @ +`): forge refuses any other.
+forge's sessions mode launches its members with `launch <plan> <T> --task --run R --coordinator SID --base B [--effort e] [--model m] [--launcher bg|herdr]`: one session per task, in `.claude/worktrees/task-<T>` on `task/<T>`, started with `/forge:member`. `--effort` (`low`, `medium`, `high`, `xhigh`, `max`) and `--model` (`opus`, `sonnet`, `haiku`) go into the `claude --bg` command, so the member does not inherit your session's effort; forge passes the ones in its `swarm.member` setting (medium by default) and any other value exits with code 2. The band of such a member says "of the execution of <coordinator>". Any session can also join a running execution as a manual member from `/waypoint:work`, and take a pending task. Session ids used with a forge execution must match `[A-Za-z0-9_.-]` (no `~ : @ +`): forge refuses any other.
 
 For many tracks at once with automatic integration, use forge's [execution modes](../forge/README.md#execution-modes).
 
@@ -148,7 +148,7 @@ The skills run the CLI as `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" <comma
 | Design | `design-import <spec> --project P --out D`, `design-validate`, `design-snapshot`, `design-changed`, `design-gate <design.md>` (with the `pending` proposals of every round), `critique-check`, `critique-select`, `critique-dismiss <design.md> --round R <all\|1,3>`, `design-page` |
 | Plan and page | `validate`, `hash` (prints the plan hash, used to detect an out-of-date roadmap), `page [--publish-info]` (the capabilities to publish with and the line that says the page becomes internal), `sync` (with the report line: URL and counts), `clean-cache` |
 | Work | `next [--base <branch>]`, `conflicts`, `recover`, `status`, `commit-info` |
-| Sessions | `launch <track> [--swarm <id> --base <branch>]`, `launch <plan> <T> --task --run R --coordinator SID --base B [--launcher bg|herdr]`, `inbox`, `escalations`, `notes [--plan p] [--locale es\|en]` (with a line to say per person's note), `session-id` |
+| Sessions | `launch <track> [--swarm <id> --base <branch>]`, `launch <plan> <T> --task --run R --coordinator SID --base B [--effort e] [--model m] [--launcher bg|herdr]`, `inbox`, `escalations`, `notes [--plan p] [--locale es\|en]` (with a line to say per person's note), `session-id` |
 | Helpers | `event-id`, `now` |
 
 ## Permissions

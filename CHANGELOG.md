@@ -1,7 +1,7 @@
 # Changelog
 
 All notable changes to the plugins of the bg-kit marketplace. Each plugin has its own version, and one release can
-bump several of them at once (forge 0.14.0, waypoint 0.18.1 and lens 0.11.2 shipped together). Dates are the day a
+bump several of them at once (forge 0.15.0, waypoint 0.19.0 and lens 0.11.3 shipped together). Dates are the day a
 version landed on `main`.
 
 This repository starts at waypoint 0.10.0, forge 0.5.0 and lens 0.5.0. The versions before them were published from
@@ -12,6 +12,15 @@ elsewhere and are reconstructed from their READMEs.
 - [lens](#lens)
 
 ## waypoint
+
+### 0.19.0 — 2026-10-14
+
+#### Added
+- `launch <plan> <T> --task` takes `--effort` (`low`, `medium`, `high`, `xhigh`, `max`) and `--model` (`opus`, `sonnet`, `haiku`) and puts them in the `claude --bg` command it prints and runs, so a forge run member no longer inherits the person's effort; any other value exits with code 2.
+
+#### Changed
+- A forge run member is launched with `/forge:member` instead of `/forge:run`.
+- `/waypoint:work` points a manual member and the forge loop at forge:run's references (`references/manual-member.md`, `references/large.md`).
 
 ### 0.18.1 — 2026-10-13
 
@@ -139,6 +148,32 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.15.0 — 2026-10-14
+
+#### Added
+- `forge-impl-high` (Opus, high effort), a fifth rung between `impl` and `impl-heavy`: a Medium task or a plan task on a sensitive zone starts there.
+- `swarm.member: {effort, model}` in `.forge/config.yaml`: a sessions-mode member is launched at its own effort (medium by default) and, when set, on its own model; `swarm tick` (each `start`) and `swarm relaunch` print `launch`, the full `waypoint launch` arguments.
+- The `forge:member` skill, with only what a run member needs, and `references/task-steps.md`, a task's steps shared with forge:run; a resumed member is told to resume with `/forge:member`, and an old `/forge:run --plan … — run member of …` prompt still works.
+- `FORGE review-prep` and `FORGE review-close` run a review round in two calls: validators against the baseline, the diff, who reviews and how (`spawn` with `agent`, `model`, `effort` and `mode`), carried results; then the verdict, the round, the findings for the implementer and the `deferred` ones.
+- `FORGE prep` records `BASE`, the phase and the validators' baseline in one call.
+- Fix rounds review only the fix: from round 2 a reviewer that failed repeats in `delta` mode with the fix diff and its own earlier findings, each finding carries its `origin` (`previous`, `fix`, `untouched`), correctness always repeats, and security or perf that passed repeat only when the fix enters their ground (else their result is carried).
+- An important finding in code the fix did not touch no longer opens a round by itself: when it is all that is left the task is accepted and the finding is handed to the person as `deferred`. A critical finding always blocks.
+- `FORGE shadow start [--tasks N] | stop | report`: a trial that runs an xhigh twin of each high reviewer on the first round of the next N briefs, pairs their blocking findings and reports per reviewer what high recovered and missed. The twin never counts in the verdict.
+- `round` prints whether the attempt is the `last` one and the next `implementer`, read from the ledger and resolved through the profile.
+- `scripts/usage-report.mjs` (in the repository): cost per agent and per session from lens's usage files.
+
+#### Changed
+- Every forge agent pins its `model` and `effort`: `forge-mech` low, `forge-impl-light` medium, `forge-fable` high; the reviewers' frontmatter is high.
+- Reviewer effort follows the risk: correctness high (xhigh on sensitive or delicate work and in Large's final review), security high (xhigh on `auth`), perf medium; the `quality` profile puts them all on xhigh. Every triage prints `review`, also a Medium task outside a plan, and the review launches exactly those reviewers with their model and effort.
+- `impl-heavy` (xhigh) is kept for the last attempt before the breaker (round 3 on Medium, 4 on Large) and for the fix of Large's final review.
+- The `economy` profile steps implementers down one rung (`impl-heavy` → `forge-impl-high`, `impl-high` → `forge-impl`, `impl` → `forge-impl-light`) and `quality` steps them up (`impl` and `impl-high` → `forge-impl-heavy`).
+- In an execution, each stage change is published in one ArtifactData batch.
+- forge:run is a core of at most 25 KB plus eight references read when a path is taken (`large`, `execution`, `ephemeral`, `superpowers-plan`, `manual-member`, `resuming`, `autonomy`, `decisions`).
+- Requires waypoint ^0.19.0.
+
+#### Fixed
+- «sesión» or «session» alone no longer marks a task as touching the auth zone.
 
 ### 0.14.0 — 2026-10-13
 
@@ -356,6 +391,11 @@ elsewhere and are reconstructed from their READMEs.
 - Requires waypoint ^0.7.0.
 
 ## lens
+
+### 0.11.3 — 2026-10-14
+
+#### Added
+- forge's new `forge-impl-high` implementer shows as `high`, in its own colour between `impl` and `heavy` on the implementer ladder.
 
 ### 0.11.2 — 2026-10-13
 
