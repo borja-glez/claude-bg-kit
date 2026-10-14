@@ -1,0 +1,26 @@
+# Autonomy
+
+Read from forge:run (`## Autonomy` in `SKILL.md`). `FORGE` and `WP` mean what that skill says.
+
+forge asks at its gates unless autonomy is `auto`. It is `auto` when `FORGE prefs` resolves `autonomy: auto` (`.forge/local.yaml` over `.forge/config.yaml`), with `/forge:run --auto`, or when the request says so ("en automático", "sin preguntarme", "modo auto", "on auto", "without asking"); a request that asks to be asked wins the other way (`FORGE prefs --autonomy ask`). Auto is `### Unattended` (`references/execution.md`) from the start, plus approving the design and the plan:
+- **Record it:** `FORGE triage --autonomy auto …` in `## 1. Triage` (`SKILL.md`), and `FORGE swarm start --autonomy auto …` in `references/execution.md` step 1.
+- **Questions only at launch,** all in one message (AskUserQuestion), and none after:
+  - changes in the tree that are not the task's (never automated: commit, stash or leave them, as `Rules for every path` in `SKILL.md` says);
+  - on the Large path: «¿Integro la rama de ejecución en `<rama>` al acabar?», default no, unless the request already says so («… e intégralo al acabar»); the answer becomes `--merge-on-finish` in `references/execution.md` step 1, which then does not ask again;
+  - in infinite mode: the budget, as always.
+- **Any other doubt** becomes a question note on the roadmap (or a line of the final report without one), and the work takes the safe path of the `### Unattended` table (`references/execution.md`).
+- **What auto decides alone**, each recorded with `FORGE decision add` (`"by": "auto"`, as `references/decisions.md` says):
+
+| Point | Decision | `undo` |
+|---|---|---|
+| `route` | the `recommended` option of `FORGE route` (`forge:route` records it) | `none` (discard the branch or start the task again) |
+| `triage` | raising the path; the ratchet only goes up | `none` |
+| `design-apply` | after each critique round, apply its `critical` and `major` proposals; the `minor` ones are recorded as dismissed | `git-revert` of the design commits |
+| `design-approve` | approve when `waypoint design-gate` prints `canAutoApprove: true` | `design-reopen` |
+| `plan-confirm` | confirm the planner's phase outline | `plan-edit` with the new task ids |
+| `mode` | the mode and N that `FORGE swarm propose` recommends | `none` |
+| `ruling` | with blocking findings (`breaker` or `stalled`): a ruling, the task blocked with a question note, and the other tasks go on | `none` |
+
+- **The design loop in auto** (`references/large.md` step 1): `/waypoint:design round --auto` (round 1 reviews everything), then `/waypoint:design apply <the numbers of its critical and major proposals> --auto` and record `design-apply` (`undo` `git-revert` from the commit before the apply to the one after); when it had `minor` proposals, `node "<WP>" critique-dismiss <design> --round <R> <their numbers>`, so they do not stay pending. When that critique had any `critical`, run another round on what changed, at most 3 rounds in all. Then `/waypoint:design approve --auto`, which approves only when `waypoint design-gate` allows it; record `design-approve`. When `critical` proposals remain after 3 rounds, stop the task with a question note «el diseño necesita tu decisión» that lists them.
+- **Never in auto, at any level:** merging into `main` or the default branch without the launch answer; pushing; deleting branches or files; publishing beyond the private roadmap (also making it internal for the evidence); committing, stashing or discarding changes that are not the task's; surface permissions and their changes; starting infinite mode without a budget; closing escalations; deciding proposals outside the policy.
+- **Branches:** Large works on `forge/run-<project>` and the design commits go to the current branch, as always; Medium and Small work on the current branch, as in ask mode (each brief leaves a `base..HEAD` range that can be reverted).
