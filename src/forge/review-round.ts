@@ -8,8 +8,11 @@ export type ReviewerKey = 'correctness' | 'security' | 'perf';
 /** A reviewer as the triage's `review` lists it, resolved to its agent with the profile. */
 export interface RoundReviewer { role: ReviewRole; agent: string; model: 'sonnet' | null; effort: ReviewEffort }
 export interface TriageReview { light: boolean; reviewers: RoundReviewer[]; flags: string[] }
-/** A reviewer's result in the previous round. */
-export interface PreviousResult { verdict: 'pass' | 'fail' | 'abstain'; findings: Finding[] }
+/**
+ * A reviewer's result in the previous round. `incomplete` (a draft with `"complete": false`) or `invalid` (findings
+ * dropped by the parser): it is never carried, the reviewer repeats.
+ */
+export interface PreviousResult { verdict: 'pass' | 'fail' | 'abstain'; findings: Finding[]; incomplete?: boolean; invalid?: boolean }
 /**
  * Paths the reviewers receive: `out` is the round's review dir and `shadow` the twins' dir; `fix` (the fix diff) and
  * `findings` (a reviewer's own previous findings) only go to delta reviewers; `report` (the implementer's, under TDD)
@@ -46,7 +49,8 @@ const normPath = (p: string) => p.trim().replace(/\\/g, '/').replace(/^(\.\/)+/,
  * Round 1: every reviewer in full mode; with the shadow test open on a Medium or larger brief, an xhigh twin of each
  * reviewer at high, writing to `files.shadow`. From round 2: a reviewer that did not pass repeats in delta with only
  * its own findings; correctness always repeats in delta; security that passed repeats only when the fix diff touches
- * a sensitive zone, perf that passed only when the fix diff touches a file it flagged; else they are carried.
+ * a sensitive zone, perf that passed only when the fix diff touches a file it flagged; else they are carried. A previous
+ * result that was a draft or invalid is never carried: that reviewer repeats in delta.
  * A reviewer the previous round did not have runs in full mode, and after a redo every reviewer does, none carried.
  * Rounds after the first have no twins.
  */
@@ -78,7 +82,7 @@ export function reviewRound(input: RoundInput): RoundPlan {
     const prev = input.previous?.[r.role];
     if (!prev) { spawn.push(entry(r, 'full', base(r))); continue; }
     const name = reviewerKey(r.role);
-    const repeats = prev.verdict !== 'pass'
+    const repeats = prev.verdict !== 'pass' || !!prev.incomplete || !!prev.invalid
       || r.role === 'review-correctness'
       || (r.role === 'review-security' && fixZones.length > 0)
       || (r.role === 'review-perf' && prev.findings.some(f => !!f.file && fixFiles.has(normPath(f.file))));

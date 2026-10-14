@@ -1280,14 +1280,14 @@ tasks:
     expect(run(['log', '--kind', 'triage', '--task', 'T1', '--data-file', 'raise.json'], io).code).toBe(0);
     return readEvents(root).at(-1)!;
   };
-  const activeExecution = (project: string, kind: 'plan' | 'ephemeral' = 'plan', active = true) => {
+  const activeExecution = (project: string, kind: 'plan' | 'ephemeral' = 'plan', active = true, started = ['T1']) => {
     mkdirSync(path.join(root, '.forge'), { recursive: true });
     const at = '2026-10-11T09:00:00.000Z';
     writeFileSync(path.join(root, '.forge', 'execution.json'), JSON.stringify({
       runId: 'run1', kind, mode: 'subagents', parallel: 1, project, base: 'main', branch: `forge/run-${project}`, mergeOnFinish: false,
       coordinator: 'coord1', hookSession: null, active, stopReason: null, stallReason: null, startedAt: at, lastStepAt: null,
       lastBlockStep: null, sleepUntil: null,
-      tasks: { T1: { status: 'running', stage: 'implement', round: 0, worktree: '', branch: 'task/T1', executor: 'subagents', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null } },
+      tasks: Object.fromEntries(started.map(id => [id, { status: 'running', stage: 'implement', round: 0, worktree: '', branch: `task/${id}`, executor: 'subagents', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null }])),
     }));
   };
   beforeEach(() => {
@@ -1306,6 +1306,16 @@ tasks:
   });
   it('a raise logged during an active plan execution with T1 among its tasks takes the execution project', () => {
     activeExecution('cost');
+    expect(raise()).toMatchObject({ project: 'cost' });
+    expect(triageT1().path).toBe('medium');
+  });
+  it('a raise for a task of the execution plan not started yet takes the execution project; an unreadable plan does not', () => {
+    activeExecution('cost', 'plan', true, []);
+    expect(raise()).not.toHaveProperty('project');
+    mkdirSync(path.join(root, 'docs', 'waypoint', 'cost'), { recursive: true });
+    writeFileSync(path.join(root, 'docs', 'waypoint', 'cost', 'plan.yaml'), 'tasks: [not a plan');
+    expect(raise()).not.toHaveProperty('project');
+    writeFileSync(path.join(root, 'docs', 'waypoint', 'cost', 'plan.yaml'), RAISE_YAML('cost'));
     expect(raise()).toMatchObject({ project: 'cost' });
     expect(triageT1().path).toBe('medium');
   });

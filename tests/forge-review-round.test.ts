@@ -68,6 +68,20 @@ describe('reviewRound', () => {
     expect(relaunched.spawn.map(s => [s.name, s.mode])).toEqual([['correctness', 'delta'], ['security', 'delta']]);
   });
 
+  it('round 2: a passed security that was a draft or invalid is not carried: it repeats in delta', () => {
+    const fixed = { fixZones: [], fixFiles: ['src/a.ts'] };
+    for (const flag of [{ incomplete: true }, { invalid: true }]) {
+      const previous = { 'review-correctness': fail(), 'review-security': { ...pass, ...flag }, 'review-perf': pass };
+      const r = reviewRound(at({ round: 2, previous, ...fixed }));
+      expect(r.spawn.map(s => [s.name, s.mode])).toEqual([['correctness', 'delta'], ['security', 'delta']]);
+      expect(r.spawn[1].inputs.findings).toBe('w/reviews-1-R/previous-security.json');
+      expect(r.carried.map(c => c.name)).toEqual(['perf']);
+    }
+    // A complete, valid one is still carried.
+    const ok = { 'review-correctness': fail(), 'review-security': { ...pass, incomplete: false, invalid: false }, 'review-perf': pass };
+    expect(reviewRound(at({ round: 2, previous: ok, ...fixed })).carried.map(c => c.name)).toEqual(['security', 'perf']);
+  });
+
   it('round 2: perf that passed repeats only when the fix touches a file it flagged', () => {
     const perfPassed = { verdict: 'pass' as const, findings: [{ severity: 'minor' as const, file: './src/hot.ts', line: 9, problem: 'slow loop' }] };
     const previous = { 'review-correctness': pass, 'review-security': pass, 'review-perf': perfPassed };

@@ -443,11 +443,17 @@ export function run(argv: string[], io: Io): Result {
         }
         const task = flag('task');
         // A plan task's triage only counts the events of its plan's project (ids repeat between plans): a raise without
-        // one takes the active plan execution's project when the task is one of its tasks, else the project of the
-        // task's latest triage that has one, else none (a task outside any plan).
+        // one takes the active plan execution's project when the task is one of its tasks (started, or in its plan
+        // docs/waypoint/<project>/plan.yaml, an unreadable plan counting as none), else the project of the task's
+        // latest triage that has one, else none (a task outside any plan).
         if (kind === 'triage' && task && data.project === undefined) {
-          const exec = readExecution(mainCheckout(io.cwd));
-          const project = exec?.active && exec.kind === 'plan' && Object.hasOwn(exec.tasks, task) ? exec.project
+          const main = mainCheckout(io.cwd);
+          const exec = readExecution(main);
+          const inPlan = (project: string) => {
+            if (!isSafeId(project)) return false;
+            try { return parsePlan(readFileSync(path.join(main, 'docs', 'waypoint', project, 'plan.yaml'), 'utf8')).tasks.some(t => t.id === task); } catch { return false; }
+          };
+          const project = exec?.active && exec.kind === 'plan' && (Object.hasOwn(exec.tasks, task) || inPlan(exec.project)) ? exec.project
             : readEvents(io.cwd).filter(e => e.kind === 'triage' && e.task === task && typeof e.project === 'string' && e.project).at(-1)?.project;
           if (project) data = { ...data, project };
         }

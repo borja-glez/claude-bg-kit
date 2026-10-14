@@ -125,7 +125,10 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
       if (!existsSync(file)) continue;
       const r = parseReview(readFileSync(file, 'utf8'));
       prevReviews[reviewerKey(role)] = r;
-      previous[role] = { verdict: r.verdict, findings: r.findings };
+      // A draft or an invalid result is never carried; an unusable one (nothing parsed) leaves no previous result,
+      // so the reviewer repeats in full rather than in delta with no findings.
+      if (r.invalid && !r.dropped) continue;
+      previous[role] = { verdict: r.verdict, findings: r.findings, ...(r.incomplete ? { incomplete: true } : {}), ...(r.invalid ? { invalid: true } : {}) };
     }
     const prevHead = existsSync(path.join(prevDir, 'head.txt')) ? readFileSync(path.join(prevDir, 'head.txt'), 'utf8').trim() : '';
     // Without the commit the previous round reviewed, or when git cannot diff from it, the whole diff stands in for the fix.
@@ -216,7 +219,7 @@ type ValidatorRow = { validator?: unknown; ok?: unknown; failures?: unknown; pre
  * accept, saves the case of each shadow twin that left its file in `shadow/` (it never counts in the verdict), and
  * prints `{action, score, next, last, implementer, findings, deferred, invalid, incomplete}` (`incomplete`: the
  * reviewers whose file is a draft with `"complete": false`; plus `shadow`, the twins compared, and
- * `shadowSkipped`, the twins whose file, or their high reviewer's, was missing or unparseable).
+ * `shadowSkipped`, the twins whose file, or their high reviewer's, was missing, unparseable or a draft).
  */
 export function reviewClose(args: string[], deps: ReviewDeps): Result {
   const flag = (name: string) => {
@@ -315,8 +318,9 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   // The shadow twins (xhigh, in shadow/) never reach the verdict: each one with a file is paired with its high reviewer
   // and the case saved in .forge/shadow.json, replacing the one an earlier close of this round saved. A missing file or
   // one parseReview flags invalid (it would read as no blocking findings) saves no case: it is listed in shadowSkipped.
+  // So does a draft (`"complete": false`): it is not a finished review to compare.
   const twins: ReviewerKey[] = [];
-  const shadowSkipped: { reviewer: ReviewerKey; reason: 'missing' | 'unparseable'; file: string }[] = [];
+  const shadowSkipped: { reviewer: ReviewerKey; reason: 'missing' | 'unparseable' | 'incomplete'; file: string }[] = [];
   const pairs: { k: ReviewerKey; high: Review; xhigh: Review }[] = [];
   for (const k of names(plan.spawn, x => x.twin === true)) {
     const highFile = path.join(roundDir, `${k}.json`), twinFile = path.join(roundDir, 'shadow', `${k}.json`);
@@ -326,6 +330,8 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
     const xhigh = parseReview(readFileSync(twinFile, 'utf8'));
     const bad = xhigh.invalid ? twinFile : high.invalid ? highFile : null;
     if (bad) { shadowSkipped.push({ reviewer: k, reason: 'unparseable', file: rel(deps.cwd, bad) }); continue; }
+    const draft = xhigh.incomplete ? twinFile : high.incomplete ? highFile : null;
+    if (draft) { shadowSkipped.push({ reviewer: k, reason: 'incomplete', file: rel(deps.cwd, draft) }); continue; }
     pairs.push({ k, high, xhigh });
     twins.push(k);
   }

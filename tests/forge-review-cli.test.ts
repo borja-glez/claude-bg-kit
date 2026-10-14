@@ -133,6 +133,35 @@ describe('forge review-prep', () => {
     expect(readFileSync(path.join(work(), 'fix-1-2.patch'), 'utf8')).toContain('+two');
   });
 
+  it('round 2: a passing security that was a draft or invalid repeats instead of being carried', () => {
+    const cases: [string, Record<string, unknown> | string, string][] = [
+      ['draft', { verdict: 'pass', confidence: 0.9, findings: [], complete: false }, 'delta'],
+      ['dropped', { verdict: 'pass', confidence: 0.9, findings: [{ severity: 'minor', file: 'a.txt', line: 1, problem: 'm' }, { nonsense: true }] }, 'delta'],
+      ['unusable', 'the reviewer ran out of time {not json', 'full'],
+      ['complete', { verdict: 'pass', confidence: 0.9, findings: [] }, 'carried'],
+    ];
+    prep();
+    const r1 = path.join(work(), 'reviews-1-1');
+    writeFileSync(path.join(r1, 'correctness.json'), JSON.stringify({ verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'p' }] }));
+    appendEvent(root, { ts: '2026-10-14T10:05:00.000Z', kind: 'verdict', task: 'T1-1', dir: '.forge/work/T1/reviews-1-1', action: 'fix', score: 0.6, signature: 'x' });
+    for (const [label, security, expected] of cases) {
+      writeFileSync(path.join(r1, 'security.json'), typeof security === 'string' ? security : JSON.stringify(security));
+      rmSync(path.join(work(), 'reviews-1-2'), { recursive: true, force: true });
+      const out = JSON.parse(prep().stdout);
+      const sec = out.spawn.find((s: { role: string }) => s.role === 'review-security');
+      if (expected === 'carried') {
+        expect(out.carried, label).toEqual(['security']);
+        expect(sec, label).toBeUndefined();
+      } else {
+        expect(out.carried, label).toBeUndefined();
+        expect(sec?.mode, label).toBe(expected);
+        expect(existsSync(path.join(work(), 'reviews-1-2', 'security.json')), label).toBe(false);
+        if (expected === 'delta') expect(sec.inputs.findings, label).toBe('.forge/work/T1/reviews-1-2/previous-security.json');
+        else expect(sec.inputs.findings, label).toBeUndefined();
+      }
+    }
+  });
+
   it('round 2 after a redo: every reviewer in full mode, nothing carried', () => {
     prep();
     const r1 = path.join(work(), 'reviews-1-1');
@@ -417,6 +446,26 @@ describe('forge review-close', () => {
     const b = JSON.parse(close().stdout);
     expect(b.shadow).toBeUndefined();
     expect(b.shadowSkipped).toEqual([{ reviewer: 'security', reason: 'unparseable', file: '.forge/work/T1/reviews-1-1/security.json' }]);
+    expect(cases()).toEqual([]);
+  });
+
+  it('a draft twin or high review saves no case and is listed as incomplete', () => {
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'shadow.json'), JSON.stringify({ remaining: 2, cases: [] }));
+    prep();
+    write(r1(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    write(path.join(r1(), 'shadow'), 'security', { verdict: 'fail', confidence: 0.5, findings: [{ severity: 'critical', problem: 'half read' }], complete: false });
+    const cases = () => JSON.parse(readFileSync(path.join(root, '.forge', 'shadow.json'), 'utf8')).cases;
+    const a = JSON.parse(close().stdout);
+    expect(a.shadow).toBeUndefined();
+    expect(a.shadowSkipped).toEqual([{ reviewer: 'security', reason: 'incomplete', file: '.forge/work/T1/reviews-1-1/shadow/security.json' }]);
+    expect(cases()).toEqual([]);
+    write(path.join(r1(), 'shadow'), 'security', { verdict: 'fail', confidence: 0.9, findings: [{ severity: 'critical', problem: 'path traversal' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [], complete: false });
+    const b = JSON.parse(close().stdout);
+    expect(b.shadow).toBeUndefined();
+    expect(b.shadowSkipped).toEqual([{ reviewer: 'security', reason: 'incomplete', file: '.forge/work/T1/reviews-1-1/security.json' }]);
     expect(cases()).toEqual([]);
   });
 
