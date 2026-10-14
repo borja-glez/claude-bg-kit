@@ -533,7 +533,7 @@ export function run(argv: string[], io: Io): Result {
         const catalog = detectValidators(repoReader(repoDir), loadConfig(repoDir)).map(v => ({ name: v.name, cmd: v.cmd, kind: v.kind, source: v.source }));
         const names = catalog.map(v => v.name);
         // A plan task was already designed and planned: a young repository does not make it Large.
-        // Its zones come only from paths, its Large wording, perf and mechanical character only from its title.
+        // Its zones come from its paths and its title, its Large wording, perf and mechanical character only from its title.
         const result = triage(task, { files: tracked, commits, gitOk: listed !== null, grep }, names, extra,
           { ignoreGreenfield: planned !== null, ...(planned ? { plan: { title: planned.title } } : {}) });
         const wordText = planned ? planned.title : task;
