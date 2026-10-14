@@ -431,6 +431,19 @@ describe('a mention in the text does not decide the triage', () => {
     expect(isPerfTask('Mejora el rendimiento del listado')).toBe(true);
     expect(triage('redesign the plugin architecture', repo(), []).path).toBe('large');
     expect(isMechanical('renombra fooBar a bazQux')).toBe(true);
+    // The method, a courtesy or a short label before a colon do not make the head.
+    expect(triage('Con forge: rediseña la arquitectura del plugin', repo(), []).path).toBe('large');
+    expect(triage('Fórjame: rediseña la arquitectura del plugin', repo(), []).path).toBe('large');
+    expect(triage('forge: redesign the plugin architecture', repo(), []).path).toBe('large');
+    expect(triage('Refactor: rewrite the billing subsystem', repo(), []).path).toBe('large');
+    expect(isMechanical('Con forge: renombra fooBar a bazQux')).toBe(true);
+    expect(isMechanical('please: rename fooBar to bazQux')).toBe(true);
+    expect(isMechanical('Por favor, renombra fooBar a bazQux')).toBe(true);
+    expect(isMechanical('Chore: bump the version to 2.1.0')).toBe(true);
+    // A prohibition ends at a comma that opens the next instruction.
+    expect(triage('No cambies la API pública, pero arregla el login', repo(), []).sensitive).toContain('auth');
+    expect(triage("Don't touch the README, but fix the login", repo(), []).sensitive).toContain('auth');
+    expect(triage('No cambies la API pública, ni el login', repo(), []).sensitive).toEqual([]);
     // A mechanical or Large word after the head describes something else.
     expect(isMechanical('Añade la validación del carrito. Los fixtures los regenera el script')).toBe(false);
     expect(triage('Añade un campo al formulario. Más adelante habrá que rediseñar la arquitectura', repo(), []).path).not.toBe('large');
