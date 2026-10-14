@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { triage, implementerFor, isMechanical, announce, parseNumstat, isBookkeeping, diffPath, DIFF_MEDIUM_LINES, isPerfTask, reviewFor, announceReview, type RepoFacts } from '../src/forge/triage.js';
+import { triage, implementerFor, isMechanical, announce, parseNumstat, isBookkeeping, diffPath, DIFF_MEDIUM_LINES, isPerfTask, reviewFor, announceReview, stripMentions, type RepoFacts } from '../src/forge/triage.js';
 
 const FILES = ['src/app.ts', 'src/auth/login.ts', 'src/util/format.ts', 'src/db/migrations/001.sql', 'package.json', '.github/workflows/ci.yml',
   ...Array.from({ length: 20 }, (_, i) => `src/feature/f${i}.ts`)];
@@ -365,5 +365,74 @@ describe('real diff sizing', () => {
       .toBe(`Large → forge-impl-heavy: ${why}. Puedes corregirlo.`);
     expect(announce({ ...large, implementer: { self: false, agent: null } }, 'en')).toBe('Large: 12 files located; design and plan first. You can correct it.');
     expect(announce({ ...large, implementer: { self: false, agent: null } }, 'es')).toBe('Large: 12 ficheros; primero diseño y plan. Puedes corregirlo.');
+  });
+});
+
+describe('a mention in the text does not decide the triage', () => {
+  // docs/waypoint/forge-cost/plan.yaml, verbatim.
+  const T007_INCLUDES = 'reviewFor (src/forge/triage.ts) rellena effort: correctness high, xhigh con zona sensible, con delicate o en la '
+    + 'revisión final de Large (final); security high, xhigh si la zona sensible es auth; perf medium; la revisión ligera '
+    + 'sigue en Sonnet medium. Con el perfil quality, todos en xhigh; balanced y economy usan la tabla, provisional hasta la '
+    + 'prueba en sombra. src/forge/cli/run.ts: FORGE triage imprime review (revisores con agent, model y effort, y flags) '
+    + 'también sin --base, para una Medium fuera de una ejecución; --delicate llega a reviewFor; el evento triage del ledger '
+    + 'guarda review para que review-prep lo lea. No toques los bundles: los regenera T018.';
+  // .forge/work/forge-fixes/task.txt, the request this change came from.
+  const REQUEST = [
+    'Arreglar cuatro fallos de forge que salieron en la ejecución forge-cost (contexto en .forge/work/forge-cost/coordinator-notes.md y docs/waypoint/forge-cost/design.md):',
+    '',
+    '1. El validador build ensucia la rama de ejecución: `swarm integrate` valida en .claude/worktrees/run con `npm run build`, que reescribe ficheros versionados (plugins/*/dist, plugins/lens/hooks/register.js) y deja el worktree sucio; el siguiente integrate responde run-dirty. Tras validar en el worktree de la ejecución no deben quedar cambios en ficheros versionados que el validador regeneró.',
+    '',
+    '2. El triaje se equivoca por palabras sueltas del texto: una frase como «No toques los bundles: los regenera T018» lo hace mecánico (forge-mech); mencionar «perf», «auth» o «dependencia» en el texto añade revisores de perf o security e impl-high aunque el diff real no toque nada de eso. Que las zonas y el carácter mecánico no salten por menciones de este tipo, con tests de frases reales de docs/waypoint/forge-cost/plan.yaml.',
+    '',
+    '3. El triaje de una tarea de plan ignora una subida registrada: tras `FORGE log --kind triage --task T` con {"path":"medium"}, `FORGE triage --plan p --task T` sigue imprimiendo small y forge-mech. La subida del coordinador debe contar.',
+    '',
+    '4. Algunos revisores agotan sus 30 turnos sin escribir el veredicto (pasó tres veces en forge-cost, una en la revisión final). Que escriban un primer veredicto pronto y lo actualicen, y que la revisión final tenga margen suficiente.',
+    '',
+  ].join('\n');
+  it('T007: its includes, ending in «No toques los bundles: los regenera T018.», are not mechanical', () => {
+    expect(isMechanical(T007_INCLUDES)).toBe(false);
+    expect(isMechanical('No toques los bundles: los regenera T018.')).toBe(false);
+  });
+  it('T018: its title «Bundles regenerados y prueba en sombra abierta» is mechanical', () => {
+    expect(isMechanical('Bundles regenerados y prueba en sombra abierta')).toBe(true);
+  });
+  it('T013: its title gives no perf (the text named forge-review-perf)', () => {
+    expect(isPerfTask('Revisores en high con modo delta, y forge:run revisa con review-prep y review-close')).toBe(false);
+    expect(isPerfTask('forge-review-correctness, forge-review-security y forge-review-perf pasan a effort high')).toBe(false);
+  });
+  it('T021: a plan task titled «Sesión» sola no marca la zona auth takes no zone from its words', () => {
+    expect(triage('«Sesión» sola no marca la zona auth', repo(), [], { files: [], zones: [] }, { plan: { title: '«Sesión» sola no marca la zona auth' } }).sensitive).toEqual([]);
+  });
+  it('a plan task takes its zones from paths and its Large wording from its title, never from its prose', () => {
+    const plan = { plan: { title: 'Versiones, CHANGELOG y README' } };
+    // T017: «con la dependencia waypoint ^0.19.0».
+    expect(triage('Versiones, CHANGELOG y README. forge 0.15.0 (con la dependencia waypoint ^0.19.0), y lo que cambia en la arquitectura', repo(), [], { files: [], zones: [] }, plan))
+      .toMatchObject({ sensitive: [], path: 'small' });
+    expect(triage('Arregla el login con Google', repo(), [], { files: [], zones: ['auth'] }, { plan: { title: 'Arregla el login con Google' } }).sensitive).toEqual(['auth']);
+    expect(triage('x', repo(), [], { files: [], zones: [] }, { plan: { title: 'Rediseña la arquitectura del plugin' } }).path).toBe('large');
+  });
+  it('the request of this change: not large, no zone, no perf', () => {
+    const r = triage(REQUEST, repo(), []);
+    expect(r.path).not.toBe('large');
+    expect(r.sensitive).toEqual([]);
+    expect(isPerfTask(REQUEST)).toBe(false);
+    expect(isMechanical(REQUEST)).toBe(false);
+  });
+  it('stripMentions blanks quotes, compound identifiers, flags, reviewer names and prohibitions', () => {
+    const s = (t: string) => stripMentions(t).replace(/\s+/g, ' ').trim();
+    expect(s('usa «perf» y `auth` con "deps"')).toBe('usa y con');
+    expect(s('el revisor de seguridad y the perf reviewer, review-perf, --perf')).toBe('el y the , xxxxxx-xxxx,');
+    expect(s('mueve src/auth/x.ts a lib')).toBe('mueve xxx/xxxx/x.xx a lib');
+    expect(s('Arregla esto. Do not touch src/a.ts or the login; then ship it')).toBe('Arregla esto. ; then ship it');
+    expect(s('No cambies la API pública! Sin tocar nada.')).toBe('! .');
+  });
+  it('free-text controls keep their zones, perf, Large wording and mechanical character', () => {
+    expect(triage('Arregla el login con Google', repo(), []).sensitive).toContain('auth');
+    expect(isPerfTask('Mejora el rendimiento del listado')).toBe(true);
+    expect(triage('redesign the plugin architecture', repo(), []).path).toBe('large');
+    expect(isMechanical('renombra fooBar a bazQux')).toBe(true);
+    // A mechanical or Large word after the head describes something else.
+    expect(isMechanical('Añade la validación del carrito. Los fixtures los regenera el script')).toBe(false);
+    expect(triage('Añade un campo al formulario. Más adelante habrá que rediseñar la arquitectura', repo(), []).path).not.toBe('large');
   });
 });

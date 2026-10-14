@@ -952,7 +952,8 @@ it('triage --plan uses the task text and its zones, and logs under the task id',
   expect(readEvents(root).at(-1)).toMatchObject({ kind: 'triage', task: 'T001' });
 });
 it('triage --plan with zones that match nothing still answers', () => {
-  writeFileSync(path.join(root, 'plan.yaml'), PLAN_YAML.replace('src/auth/**', 'src/new/**'));
+  // A zone on a sensitive path counts even when no tracked file matches it yet.
+  writeFileSync(path.join(root, 'plan.yaml'), PLAN_YAML.replace('src/auth/**', 'src/auth/new/**'));
   io.git = args => (args.includes('ls-files') ? 'src/app.ts\na\nb\nc\nd\n' : args.includes('rev-list') ? '7\n' : '');
   const r = run(['triage', '--plan', 'plan.yaml', '--task', 'T001'], io);
   expect(r.code).toBe(0);
@@ -968,7 +969,7 @@ it('triage --plan with zones that match nothing still answers', () => {
 it('triage --plan takes the locale from that plan before the first project under docs/waypoint', () => {
   mkdirSync(path.join(root, 'docs', 'waypoint', 'aaa'), { recursive: true });
   writeFileSync(path.join(root, 'docs', 'waypoint', 'aaa', 'plan.yaml'), PLAN_YAML.replace('project: shop', 'project: aaa\nlocale: en'));
-  writeFileSync(path.join(root, 'plan.yaml'), PLAN_YAML.replace('project: shop', 'project: shop\nlocale: es').replace('src/auth/**', 'src/new/**'));
+  writeFileSync(path.join(root, 'plan.yaml'), PLAN_YAML.replace('project: shop', 'project: shop\nlocale: es').replace('src/auth/**', 'src/auth/new/**'));
   io.git = args => (args.includes('ls-files') ? 'src/app.ts\na\nb\nc\nd\n' : args.includes('rev-list') ? '7\n' : '');
   expect(JSON.parse(run(['triage', '--plan', 'plan.yaml', '--task', 'T001'], io).stdout).announce).toContain('zona sensible: auth');
   expect(JSON.parse(run(['triage', '--plan', 'plan.yaml', '--task', 'T001', '--locale', 'en'], io).stdout).announce).toContain('sensitive zone: auth');
@@ -1043,13 +1044,15 @@ describe('triage --base', () => {
     expect(out.reasons[0]).toMatch(/^diff: 2 file\(s\)/);
     expect(out.reasons.join(' ')).not.toMatch(/ratchet|files located/);
   });
-  it('wording on a sensitive zone keeps a one-file diff at medium, with the security review', () => {
-    writeFileSync(path.join(root, 'plan.yaml'), FOOTER_YAML.replace('Add a footer link', 'Change the password check'));
+  it('a sensitive plan zone keeps a one-file diff at medium, with the security review; its wording alone does not', () => {
+    writeFileSync(path.join(root, 'plan.yaml'), FOOTER_YAML.replace('Add a footer link', 'Change the password check').replace('src/ui/**', 'src/auth/**'));
     fakeGit('3\t1\tsrc/ui/footer.ts\n');
     const out = JSON.parse(triageBase().stdout);
     expect(out.path).toBe('medium');
     expect(out.review.reviewers.map((x: { role: string }) => x.role)).toEqual(['review-correctness', 'review-security']);
     expect(out.reasons).toEqual(['diff: 1 file(s), 4 line(s)', 'sensitive zone: auth']);
+    writeFileSync(path.join(root, 'plan.yaml'), FOOTER_YAML.replace('Add a footer link', 'Change the password check'));
+    expect(JSON.parse(triageBase().stdout).sensitive).toEqual([]);
   });
   it('across sizings the size only goes up: an earlier --base medium keeps a later one-file diff at medium', () => {
     writeFileSync(path.join(root, 'plan.yaml'), FOOTER_YAML);
@@ -1090,6 +1093,150 @@ describe('triage --base', () => {
     expect(run(['triage', '--plan', 'plan.yaml', '--task', 'T001', '--base', '-x'], io)).toMatchObject({ code: 2, stderr: expect.stringContaining('triage: --base needs a commit') });
     fakeGit(null);
     expect(triageBase()).toMatchObject({ code: 2, stderr: expect.stringContaining('triage: cannot diff abc123..HEAD') });
+  });
+});
+
+describe('triage --plan: a mention in the text does not decide it (tasks of docs/waypoint/forge-cost/plan.yaml)', () => {
+  // T007, T013, T017, T018 and T021 with their real title, includes, done_when and zones.
+  const COST_YAML = `project: forge-cost
+locale: es
+version: "0.1"
+tracks: [{ id: escalera, name: Escalera, color: blue }]
+phases: [{ id: F4, name: Revision }]
+tasks:
+  - id: T021
+    title: «Sesión» sola no marca la zona auth
+    track: escalera
+    phase: F4
+    includes: >-
+      src/forge/triage.ts: la zona auth deja de saltar por la palabra session(s) o sesión/sesiones sola, que en forge y
+      waypoint casi siempre nombra una sesión de Claude Code (sesión coordinadora, sesiones miembro) y mandaba tareas sin
+      autenticación a impl-heavy y al revisor de seguridad. Cuenta solo con contexto de autenticación: session token,
+      session cookie, session id/hijack/fixation, login session, sesión de usuario, iniciar/cerrar sesión, cookie de
+      sesión, token de sesión. Las demás palabras de auth (login, password, token, jwt, oauth, permission, crypto, secret…)
+      y la detección por ruta no cambian. Tests en tests/forge-triage.test.ts con frases de este plan («la sesión
+      coordinadora», «sesiones miembro», «each run member session») que ya no dan auth y frases de autenticación
+      («cerrar sesión», «session cookie», «iniciar sesión con Google») que sí.
+    done_when: >-
+      npm run typecheck y npx vitest run tests/forge-triage.test.ts en verde; FORGE triage del texto de T003 de este plan
+      no da sensitive auth.
+    zones: ["src/forge/triage.ts", "tests/forge-triage.test.ts"]
+  - id: T007
+    title: Esfuerzo de los revisores y review en todo triage
+    track: escalera
+    phase: F4
+    includes: >-
+      reviewFor (src/forge/triage.ts) rellena effort: correctness high, xhigh con zona sensible, con delicate o en la
+      revisión final de Large (final); security high, xhigh si la zona sensible es auth; perf medium; la revisión ligera
+      sigue en Sonnet medium. Con el perfil quality, todos en xhigh; balanced y economy usan la tabla, provisional hasta la
+      prueba en sombra. src/forge/cli/run.ts: FORGE triage imprime review (revisores con agent, model y effort, y flags)
+      también sin --base, para una Medium fuera de una ejecución; --delicate llega a reviewFor; el evento triage del ledger
+      guarda review para que review-prep lo lea. No toques los bundles: los regenera T018.
+    done_when: >-
+      Tests en verde: forge-triage con cada fila de la tabla, delicate, final y el perfil quality; forge-cli con una Medium
+      sin plan ni --base que imprime review con correctness en high, una Medium en zona auth con correctness y security en
+      xhigh, y el evento triage con review.
+    zones: ["src/forge/triage.ts", "src/forge/cli/run.ts", "tests/forge-triage.test.ts", "tests/forge-cli.test.ts"]
+  - id: T013
+    title: Revisores en high con modo delta, y forge:run revisa con review-prep y review-close
+    track: escalera
+    phase: F4
+    includes: >-
+      forge-review-correctness, forge-review-security y forge-review-perf pasan a effort high; su texto describe el modo
+      delta (reciben el brief, el diff completo como contexto, el diff del arreglo y solo sus propios hallazgos anteriores;
+      comprueban que están arreglados y que el arreglo no rompe nada) y el origin de cada hallazgo (previous, fix,
+      untouched). forge:run, Medium pasos 3 a 6: FORGE review-prep en lugar de validar y sacar el diff; lanzar exactamente
+      su spawn pasando model y effort al Agent tool (gemelos incluidos, con su carpeta shadow/); FORGE review-close en lugar
+      de verdict y round, relanzar el revisor que salga en missing y seguir next e implementer; los deferred van en el
+      informe final para que la persona decida; verify-plan sigue aparte. task-steps.md: una tarea de plan revisa igual; la
+      revisión final de Large sigue completa (correctness en xhigh con final) y su arreglo en impl-heavy.
+    done_when: >-
+      tests/plugin.test.ts en verde: los tres revisores en opus y high con el modo delta y los tres orígenes; Medium y
+      task-steps.md nombran review-prep, review-close, el model y el effort de spawn, missing y deferred, y ya no llaman a
+      verdict ni a round por separado; la revisión final de Large sigue completa.
+    zones: ["plugins/forge/agents/forge-review-*.md", "plugins/forge/skills/run/**", "tests/plugin.test.ts"]
+  - id: T017
+    title: Versiones, CHANGELOG y README
+    track: escalera
+    phase: F4
+    includes: >-
+      forge 0.15.0 (con la dependencia waypoint ^0.19.0), waypoint 0.19.0 (flags nuevos en launch) y lens 0.11.3 en sus
+      plugin.json, las insignias y líneas de dependencia de los README y los tests de versiones de tests/plugin.test.ts.
+      Una entrada de CHANGELOG.md por plugin. README.md y README.es.md de la raíz y de forge, waypoint y lens cuentan lo que
+      cambia para la persona: swarm.member y waypoint launch --effort/--model, forge:member, el peldaño impl-high y los
+      perfiles, el esfuerzo de los revisores, las rondas delta y los deferred, FORGE shadow, FORGE prep e impl-high en lens.
+    done_when: >-
+      tests/plugin.test.ts en verde con las versiones nuevas y con una prueba que busca en los README en español y en
+      inglés swarm.member, forge:member, impl-high, deferred y shadow; CHANGELOG.md tiene las entradas de forge 0.15.0,
+      waypoint 0.19.0 y lens 0.11.3.
+    zones: ["plugins/*/.claude-plugin/plugin.json", "CHANGELOG.md", "README.md", "README.es.md", "plugins/*/README*.md", "tests/plugin.test.ts"]
+  - id: T018
+    title: Bundles regenerados y prueba en sombra abierta
+    track: escalera
+    phase: F4
+    includes: >-
+      npm run build y commit de lo que genera: plugins/forge/dist, plugins/waypoint/dist,
+      plugins/waypoint/assets/*.template.html, plugins/waypoint/hooks/register.js, plugins/waypoint/types,
+      plugins/lens/hooks y plugins/lens/types; ninguna otra tarea los edita. Con el bundle nuevo, node
+      plugins/forge/dist/forge.cjs shadow start --tasks 10 en este repositorio: el diseño abre la prueba al acabar la fase
+      4, y va aquí porque necesita el bundle regenerado.
+    done_when: >-
+      npm run typecheck, npm test y npm run build en verde y, tras el build, git no ve cambios en plugins/; node
+      plugins/forge/dist/forge.cjs shadow report muestra la prueba abierta con 10 briefs pendientes y ningún caso.
+    zones: ["plugins/forge/dist/**", "plugins/waypoint/dist/**", "plugins/waypoint/assets/*.template.html", "plugins/waypoint/hooks/register.js", "plugins/waypoint/types/**", "plugins/lens/hooks/*.js", "plugins/lens/types/**", ".forge/shadow.json"]
+  - id: T100
+    title: Ajusta el formulario
+    track: escalera
+    phase: F4
+    includes: El formulario valida antes de enviar.
+    done_when: el formulario valida
+    zones: ["src/auth/**"]
+`;
+  const TRACKED = ['src/forge/triage.ts', 'src/forge/cli/run.ts', 'tests/forge-triage.test.ts', 'tests/forge-cli.test.ts', 'tests/plugin.test.ts',
+    'plugins/forge/.claude-plugin/plugin.json', 'CHANGELOG.md', 'README.md', 'README.es.md', 'plugins/forge/README.md', 'src/auth/login.ts'];
+  const triagePlan = (id: string) => {
+    writeFileSync(path.join(root, 'plan.yaml'), COST_YAML);
+    io.git = args => (args.includes('ls-files') ? `${TRACKED.join('\n')}\n` : args.includes('rev-list') ? '7\n' : '');
+    const r = run(['triage', '--plan', 'plan.yaml', '--task', id], io);
+    expect(r.code).toBe(0);
+    return JSON.parse(r.stdout);
+  };
+  const roles = (out: { review: { reviewers: { role: string }[] } }) => out.review.reviewers.map(x => x.role);
+  it('T007: «auth», «perf» and «No toques los bundles» in its text give no zone, no perf review, no impl-high, no mech', () => {
+    const out = triagePlan('T007');
+    expect(out.sensitive).toEqual([]);
+    expect(roles(out)).toEqual(['review-correctness']);
+    expect(out.review.flags).toEqual([]);
+    expect(out.implementer.role).not.toBe('impl-high');
+    expect(out.implementer.role).not.toBe('mech');
+  });
+  it('T017: «con la dependencia waypoint ^0.19.0» gives no deps zone', () => {
+    const out = triagePlan('T017');
+    expect(out.sensitive).toEqual([]);
+    expect(roles(out)).toEqual(['review-correctness']);
+    expect(out.implementer.role).not.toBe('impl-high');
+  });
+  it('T021: its title «Sesión» sola no marca la zona auth gives no auth zone', () => {
+    const out = triagePlan('T021');
+    expect(out.sensitive).toEqual([]);
+    expect(roles(out)).toEqual(['review-correctness']);
+    expect(out.implementer.role).not.toBe('impl-high');
+  });
+  it('T013: its title gives no perf review although its text names forge-review-perf', () => {
+    const out = triagePlan('T013');
+    expect(roles(out)).not.toContain('review-perf');
+    expect(out.review.flags).not.toContain('--perf');
+  });
+  it('T018: its title «Bundles regenerados y prueba en sombra abierta» is mechanical work', () => {
+    const out = triagePlan('T018');
+    expect(out.sensitive).toEqual([]);
+    expect(out.path).toBe('small');
+    expect(out.implementer.role).toBe('mech');
+  });
+  it('a plan zone on src/auth/** with a tracked file there still gives auth', () => {
+    const out = triagePlan('T100');
+    expect(out.sensitive).toEqual(['auth']);
+    expect(roles(out)).toContain('review-security');
   });
 });
 

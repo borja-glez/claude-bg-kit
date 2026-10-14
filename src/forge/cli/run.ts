@@ -518,7 +518,10 @@ export function run(argv: string[], io: Io): Result {
         const catalog = detectValidators(repoReader(repoDir), loadConfig(repoDir)).map(v => ({ name: v.name, cmd: v.cmd, kind: v.kind, source: v.source }));
         const names = catalog.map(v => v.name);
         // A plan task was already designed and planned: a young repository does not make it Large.
-        const result = triage(task, { files: tracked, commits, gitOk: listed !== null, grep }, names, extra, { ignoreGreenfield: planned !== null });
+        // Its zones come only from paths, its Large wording, perf and mechanical character only from its title.
+        const result = triage(task, { files: tracked, commits, gitOk: listed !== null, grep }, names, extra,
+          { ignoreGreenfield: planned !== null, ...(planned ? { plan: { title: planned.title } } : {}) });
+        const wordText = planned ? planned.title : task;
         if (planned?.zones.length && !zoneFiles.length) result.reasons.push('zones match no tracked file (new files?)');
         // A superpowers plan runs on the Medium path, one task after another: its tasks build on each other.
         if (spFiles) { result.path = 'medium'; result.reasons.push('superpowers plan: the Medium path, its tasks in order'); }
@@ -559,7 +562,7 @@ export function run(argv: string[], io: Io): Result {
             raiseWhy = raise ? raise.why as string : null;
           }
         }
-        const impl = implementerFor(result, task, { batch: has('batch'), plan: planned !== null });
+        const impl = implementerFor(result, wordText, { batch: has('batch'), plan: planned !== null });
         const profile = loadConfig(repoDir).profile;
         const implementer = { ...impl, agent: impl.role ? agentFor(impl.role, profile) : null };
         const known = readLocal(io.cwd).known;
@@ -567,7 +570,7 @@ export function run(argv: string[], io: Io): Result {
         // `known` mirrors what exists now: new names are added, vanished ones dropped silently.
         if (fresh.length || known.some(n => !names.includes(n))) updateLocal(io.cwd, s => ({ ...s, known: names }));
         // Who reviews, by the size reached and the configured profile: printed always and logged for review-prep.
-        const reviewPlan = reviewFor(result.path, result.sensitive, isPerfTask(task), { delicate: has('delicate'), profile });
+        const reviewPlan = reviewFor(result.path, result.sensitive, isPerfTask(wordText), { delicate: has('delicate'), profile });
         const review = { ...reviewPlan, reviewers: reviewPlan.reviewers.map(r => ({ ...r, agent: agentFor(r.role, profile) })) };
         appendEvent(io.cwd, { ts: ts(), kind: 'triage', ...(flag('task') ? { task: flag('task') } : {}), ...(project !== null ? { project } : {}), ...result, ...auto,
           ...(diff ? { diff: { base: diff.base, files: diff.stat.files.length, lines: diff.stat.lines } } : {}), review });

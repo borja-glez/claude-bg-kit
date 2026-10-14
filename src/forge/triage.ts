@@ -46,8 +46,37 @@ const MECHANICAL = [
   /(?<![\p{L}\p{N}_])aplic(?:a|ar|ando)\s+(?:el|este|ese|un|los|estos)\s+parches?(?![\p{L}\p{N}_])/iu,
   /(?<![\p{L}\p{N}_])(?:mueve|mover|muevo)\s+(?:los?\s+|las?\s+)?(?:archivos?|carpetas?|directorios?|\S*[\w-]\.\w+\s+a\b|\S*\/\S*\s+a\b)/iu,
 ];
+// Mentions: words the task names without asking for them. A quoted or backticked span, a compound identifier
+// (review-perf, src/auth/x.ts, swarm.member), a --flag, a reviewer's name or a prohibition («No toques los bundles: los
+// regenera T018.») says nothing about what the task is: the word checks never read them.
+const NB = '(?<![\\p{L}\\p{N}_])';
+const NE = '(?![\\p{L}\\p{N}_])';
+const SPANS = /«[^«»]*»|"[^"]*"|“[^“”]*”|`[^`]*`/gu;
+// To the end of its sentence: a dot ends it only before whitespace or the end (a path's dots do not).
+const PROHIBITION = new RegExp(`${NB}(?:no\\s+(?:toques|cambies|edites|modifiques|regeneres|actualices|muevas|renombres|borres)`
+  + `|sin\\s+(?:tocar|cambiar)|(?:do\\s+not|don['’]t|never)\\s+(?:touch|change|edit|modify|regenerate|update|move|rename|delete)`
+  + `|without\\s+(?:touching|changing))${NE}(?:[^.;!?\\n]|\\.(?!\\s|$))*`, 'giu');
+const REVIEWER = new RegExp(`${NB}(?:(?:revisor|revisores|revisión|reviewer|reviewers|review)\\s+(?:(?:de|of)\\s+)?(?:perf|security|seguridad|correctness)`
+  + `|(?:perf|security|correctness)\\s+(?:reviewer|reviewers|review))${NE}`, 'giu');
+const FLAG = /(?<![\p{L}\p{N}_-])--[\p{L}\p{N}][\p{L}\p{N}_-]*/gu;
+const COMPOUND = new RegExp(`${NB}[\\p{L}\\p{N}]+(?:[-_./][\\p{L}\\p{N}]+)+`, 'gu');
+const blank = (s: string) => ' '.repeat(s.length);
+/**
+ * The text without its mentions, same length. A compound identifier keeps its separators with every letter or digit
+ * turned into `x` (`src/a.ts` → `xxx/x.xx`): the shape of a path still reads as one («move src/a.ts to …»).
+ */
+export function stripMentions(text: string): string {
+  return String(text).replace(SPANS, blank).replace(PROHIBITION, blank).replace(REVIEWER, blank).replace(FLAG, blank)
+    .replace(COMPOUND, m => m.replace(/[\p{L}\p{N}]/gu, 'x'));
+}
+// The task's head: its first sentence with some content (up to `.`, `!`, `?` or `:` before whitespace or the end, or a
+// line break). A word later in the text describes something else («… que el validador regeneró»).
+function head(text: string): string {
+  return text.split(/[.!?:](?=\s|$)|\r?\n/u).find(s => /[\p{L}\p{N}]/u.test(s)) ?? '';
+}
+/** Mechanical: the head of the text, its mentions removed, reads as mechanical work. */
 export function isMechanical(text: string): boolean {
-  const t = String(text).slice(0, MAX_TEXT);
+  const t = head(stripMentions(String(text).slice(0, MAX_TEXT)));
   return MECHANICAL.some(re => re.test(t));
 }
 
@@ -111,8 +140,9 @@ export function diffPath(stat: { files: string[]; lines: number }): { path: Path
 
 const PERF = [/\b(perf|performance|latency|throughput|benchmarks?|optimi[sz](e|es|ed|ing|ation|ations)|speed\s?up|faster|memory (usage|leaks?))\b/i,
   es('rendimient|optimiz|latenci', 'más rápid[oa]s?|fugas? de memoria|uso de memoria|cuello de botella')];
+/** Performance work: the text, its mentions removed (a plan task passes its title alone). */
 export function isPerfTask(text: string): boolean {
-  const t = String(text).slice(0, MAX_TEXT);
+  const t = stripMentions(String(text).slice(0, MAX_TEXT));
   return PERF.some(re => re.test(t));
 }
 
@@ -276,11 +306,16 @@ const PATH_TOKEN = /[\w.\-/]*[\w-]\.[A-Za-z0-9]{1,8}\b|[\w.-]+\/[\w.\-/]+/g;
 const isSymbol = (w: string) => w.length >= 4 && (/[a-z][A-Z]/.test(w) || /^[A-Za-z]+_[A-Za-z0-9_]+$/.test(w));
 
 // `ignoreGreenfield`: a plan task was already designed and planned, so a young repository does not make it Large.
+// `plan`: a plan task takes its zones only from paths (its plan zones, the files located) and its Large wording from
+// its title; file location and sizing still read the whole text.
 export function triage(task: string, repo: RepoFacts, validators: string[], extra?: { files: string[]; zones: Zone[] },
-  opts: { ignoreGreenfield?: boolean } = {}): TriageResult {
+  opts: { ignoreGreenfield?: boolean; plan?: { title: string } } = {}): TriageResult {
   const reasons: string[] = [];
   // Capped so that the regexes below stay fast on pasted logs or huge specs.
   const text = String(task).slice(0, MAX_TEXT);
+  // The word checks read the text without its mentions; Large wording reads only the head (a plan task's title).
+  const plain = stripMentions(text);
+  const headText = opts.plan ? stripMentions(String(opts.plan.title).slice(0, MAX_TEXT)) : head(plain);
   const files = new Set<string>(extra?.files);
   const named = new Set<string>();
 
@@ -300,7 +335,7 @@ export function triage(task: string, repo: RepoFacts, validators: string[], extr
   }
 
   const located = [...new Set([...files, ...quoteFiles])].sort().slice(0, MAX_FILES);
-  const sensitive = ZONES.filter(z => z.text.some(re => re.test(text)) || extra?.zones.includes(z.zone) || located.some(f => z.path.test(f))).map(z => z.zone);
+  const sensitive = ZONES.filter(z => (!opts.plan && z.text.some(re => re.test(plain))) || extra?.zones.includes(z.zone) || located.some(f => z.path.test(f))).map(z => z.zone);
   // Greenfield only when git answered: a failed git call says nothing about the repository.
   const greenfield = repo.gitOk && (repo.commits === 0 || repo.files.length < 5);
   if (!repo.gitOk) reasons.push('git unavailable');
@@ -311,7 +346,7 @@ export function triage(task: string, repo: RepoFacts, validators: string[], extr
 
   let path: PathName;
   if (greenfield && !opts.ignoreGreenfield) { path = 'large'; reasons.push('greenfield repository'); }
-  else if (LARGE.some(re => re.test(text))) { path = 'large'; reasons.push('architecture-scale wording'); }
+  else if (LARGE.some(re => re.test(headText))) { path = 'large'; reasons.push('architecture-scale wording'); }
   else if (sized > 10) { path = 'large'; reasons.push(`${sized} files located`); }
   else if (sized > 3) { path = 'medium'; reasons.push(`${sized} files located`); }
   else if (sized === 0 && isCopyChange(text)) { path = 'trivial'; reasons.push(COPY_REASON); }
