@@ -8,8 +8,8 @@ Design them, plan them, build them with independent review, run them in parallel
 **English** · [Español](README.es.md) · [Changelog](CHANGELOG.md)
 
 ![waypoint 0.19.0](https://img.shields.io/badge/waypoint-0.19.0-cba6f7?style=flat-square)
-![forge 0.15.0](https://img.shields.io/badge/forge-0.15.0-fab387?style=flat-square)
-![lens 0.11.3](https://img.shields.io/badge/lens-0.11.3-b4befe?style=flat-square)
+![forge 0.15.1](https://img.shields.io/badge/forge-0.15.1-fab387?style=flat-square)
+![lens 0.11.4](https://img.shields.io/badge/lens-0.11.4-b4befe?style=flat-square)
 ![Claude Code plugin marketplace](https://img.shields.io/badge/Claude%20Code-marketplace%20bg--kit-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 

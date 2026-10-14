@@ -7,7 +7,7 @@ The model and effort in use, the roadmap, forge stages and executions, superpowe
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.11.3](https://img.shields.io/badge/version-0.11.3-b4befe?style=flat-square)
+![version 0.11.4](https://img.shields.io/badge/version-0.11.4-b4befe?style=flat-square)
 ![no token cost](https://img.shields.io/badge/token%20cost-none-a6e3a1?style=flat-square)
 
 </div>

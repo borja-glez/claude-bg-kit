@@ -149,6 +149,17 @@ elsewhere and are reconstructed from their READMEs.
 
 ## forge
 
+### 0.15.1 — 2026-10-14
+
+#### Added
+- `forge-review-final` (Opus, xhigh, 80 turns) runs Large's final review and its re-review with a turn budget of its own; the `review-final` role resolves to it in every profile.
+- Reviewers write a first verdict early (`"complete": false`) and update it as they go; their last write says `"complete": true`. `review-close` and `verdict` print `incomplete`, and an incomplete reviewer is respawned once and picks up its own draft.
+
+#### Fixed
+- Validating in the run worktree (`swarm integrate`, a final merge checked there, `validate --cwd` on it) no longer leaves modified the tracked files a validator regenerates, such as a build's bundles: they are restored and listed in `restored`, so the next integration is not `run-dirty`.
+- The triage no longer takes a mention for a request: quoted words, identifiers such as `review-perf`, reviewer names and prohibitions («No toques los bundles…») set no zone, no perf review and no mechanical character; Large wording and the mechanical character read only the task's opening sentence; a plan task takes its zones only from its paths and its diff, and its perf and mechanical character from its title.
+- A raise logged with `log --kind triage` takes the plan's project, so `triage --plan` keeps the raised path for that plan task.
+
 ### 0.15.0 — 2026-10-14
 
 #### Added
@@ -392,6 +403,11 @@ elsewhere and are reconstructed from their READMEs.
 - Requires waypoint ^0.7.0.
 
 ## lens
+
+### 0.11.4 — 2026-10-14
+
+#### Added
+- forge's new `forge-review-final` reviewer shows as `final`, in the correctness colour.
 
 ### 0.11.3 — 2026-10-14
 

@@ -7,7 +7,7 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.15.0](https://img.shields.io/badge/versi%C3%B3n-0.15.0-fab387?style=flat-square)
+![versión 0.15.1](https://img.shields.io/badge/versi%C3%B3n-0.15.1-fab387?style=flat-square)
 ![depende de waypoint ^0.19.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.19.0-cba6f7?style=flat-square)
 
 </div>
