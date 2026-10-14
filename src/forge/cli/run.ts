@@ -5,7 +5,7 @@ import path from 'node:path';
 import { appendEvent, readEvents, forgeDir, LEDGER_KINDS, type LedgerKind, type LedgerEvent } from '../ledger.js';
 import { parseRun, startRun, recordCycle, stopReason, endRun, readRunText, saveRun, stopFile, type RunState, type StopContext } from '../run.js';
 import { decideStop, decideExecutionStop, bindHookSession } from '../hook.js';
-import { readExecution, saveExecution } from '../execution.js';
+import { readExecution, saveExecution, runWorktree } from '../execution.js';
 import { planLocale, replyIn, sessionReply } from '../../lib/locale.js';
 import { isLocale } from '../../lib/forge-run.js';
 import { isSafeId } from '../../lib/execution-state.js';
@@ -24,7 +24,7 @@ import { proposalToTask, proposalOfIncludes } from '../to-task.js';
 import type { PlanTask } from '../../lib/types.js';
 import { parseDocument } from 'yaml';
 import { UsageError } from './errors.js';
-import { swarmCommand } from './swarm.js';
+import { swarmCommand, restoringRegenerated } from './swarm.js';
 import { reviewCommand } from './review.js';
 import { roundDecision } from '../round.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, type RepoReader, type Scope } from '../validators.js';
@@ -607,7 +607,11 @@ export function run(argv: string[], io: Io): Result {
           scope = { mode: 'heavy', changed: diff === null ? null : diff.split('\n').map(s => s.trim()).filter(Boolean) };
         }
         const list = selectValidators(all, scope);
-        let results = runValidators(list, io.exec ?? defaultExec(io.cwd), config.validatorTimeoutSec);
+        const validateRun = () => runValidators(list, io.exec ?? defaultExec(io.cwd), config.validatorTimeoutSec);
+        // --cwd the run worktree of this checkout (forge's own): what the validators regenerated there is put back.
+        const restored: string[] = [];
+        const inRun = io.workdir !== undefined && samePath(io.workdir, runWorktree(io.cwd));
+        let results = inRun ? restoringRegenerated({ git: io.git ?? defaultGit(repoDir) }, validateRun, restored) : validateRun();
         if (has('baseline')) {
           if (flag('baseline') === undefined) throw new UsageError('validate: --baseline needs the JSON a validate run printed on the base commit');
           let baseline: unknown;
@@ -618,6 +622,7 @@ export function run(argv: string[], io: Io): Result {
         appendEvent(io.cwd, { ts: ts(), kind: 'validate', ...(flag('task') ? { task: flag('task') } : {}), ...(has('base-run') ? { baseline: true } : {}), ok: allOk, results: results.map(r => ({ validator: r.validator, ok: r.ok, flaky: r.flaky, ...(r.skipped ? { skipped: r.skipped } : {}), ...(r.preexisting ? { preexisting: true } : {}), ...(r.ok ? {} : { failures: r.failures }) })) });
         const out = json(results, allOk ? 0 : 1);
         if (!list.length) out.stderr = all.length ? 'no validators cover the affected paths\n' : 'no validators detected: add tests or list validators in .forge/config.yaml\n';
+        if (restored.length) out.stderr += `restored ${restored.length} tracked file(s) the validators regenerated: ${restored.join(', ')}\n`;
         return out;
       }
       case 'verdict': {

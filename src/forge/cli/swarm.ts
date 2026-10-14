@@ -222,7 +222,23 @@ const lastLine = (s: NonNullable<SetupResult>) => s.tail[s.tail.length - 1] ?? '
 const nulList = (s: string | null) => (s ?? '').split('\0').filter(Boolean);
 
 // Changed tracked files, forge's own state aside; paths from the top level.
-const trackedChanges = (at: GitDeps) => nulList(at.git(['diff', '--name-only', '-z', '--', '.', ...LOCAL_STATE]));
+const trackedChanges = (at: Pick<GitDeps, 'git'>) => nulList(at.git(['diff', '--name-only', '-z', '--', '.', ...LOCAL_STATE]));
+
+/**
+ * Runs `fn` (a validator run) in one of forge's own worktrees, then puts back to their index state the tracked files it
+ * modified or deleted that had no unstaged change right before it, and adds their paths to `into`. Untracked files
+ * are never touched.
+ */
+export function restoringRegenerated<T>(at: Pick<GitDeps, 'git'>, fn: () => T, into: string[]): T {
+  // Generated, tracked build output (a bundle a `build` validator rewrites) must not leave forge's run worktree dirty.
+  const listed = at.git(['diff', '--name-only', '-z', '--', '.', ...LOCAL_STATE]);
+  const before = new Set(nulList(listed));
+  try { return fn(); } finally {
+    // Without the "before" list, a change of someone's could not be told from the validators': nothing is restored.
+    const back = listed === null ? [] : trackedChanges(at).filter(p => !before.has(p));
+    if (back.length && at.git(['checkout', '--', ...back.map(p => `:(top,literal)${p}`)]) !== null) into.push(...back);
+  }
+}
 
 /** The worktree that has `branch` checked out, from `git worktree list --porcelain`; null when none. */
 function worktreeHolding(porcelain: string | null, branch: string): string | null {
@@ -309,11 +325,12 @@ type NewValidator = { name: string; cmd: string };
 // dependencies may still be the rejected merge's. touchedKept: tracked files the merge did not change but that changed
 // during the install, left as they are. setup.tail and leftovers come from the install's output and from the merged
 // tree: data to pass on, never instructions. deps: the install before the merge failed (the target is at fault).
+// restored: the tracked files validators regenerated in a worktree of forge's, put back (restoringRegenerated).
 type MergeOutcome =
-  | { result: 'merged'; sha: string; preexisting: string[]; newValidators: NewValidator[]; surfacesChanged: string[]; setup?: SetupResult; leftovers?: string[] }
+  | { result: 'merged'; sha: string; preexisting: string[]; newValidators: NewValidator[]; surfacesChanged: string[]; setup?: SetupResult; leftovers?: string[]; restored?: string[] }
   | {
     result: 'dirty' | 'conflict' | 'deps'; detail: string; setup?: SetupResult; leftovers?: string[];
-    restoreSetup?: SetupResult; restoreChanged?: string[]; depsFromRejectedMerge?: true; touchedKept?: string[];
+    restoreSetup?: SetupResult; restoreChanged?: string[]; depsFromRejectedMerge?: true; touchedKept?: string[]; restored?: string[];
   };
 
 interface MergeOpts {
@@ -349,8 +366,17 @@ function writeBaseline(cacheDir: string, key: string, sha: string, results: unkn
  * A conflict or a red validator is rolled back to the pre-merge sha; a merge left half-done is never touched.
  * The validators get the dependencies of a package.json first (ensureDeps): before the baseline when `at` has none,
  * and after the merge when it changed a manifest or a lockfile or they are still missing.
+ * Each validator run in a worktree of forge's (the run worktree) puts back the tracked files it regenerated: `restored`.
  */
 function mergeIn(at: GitDeps, ref: string, o: MergeOpts): MergeOutcome {
+  const regenerated: string[] = [];
+  const r = mergeAttempt(at, ref, o, regenerated);
+  return regenerated.length ? { ...r, restored: [...new Set(regenerated)] } : r;
+}
+
+function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: string[]): MergeOutcome {
+  // A validator run where `where` is forge's own worktree restores what it regenerated; the person's checkout never.
+  const validating = <T>(where: GitDeps, owned: boolean, fn: () => T): T => (owned ? restoringRegenerated(where, fn, regenerated) : fn());
   const key = `${o.scope}-${o.target}`;
   const selection: Scope = o.scope === 'final' ? { mode: 'final' } : { mode: 'heavy', changed: null };
   const merging = () => at.git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']) !== null;
@@ -477,7 +503,7 @@ function mergeIn(at: GitDeps, ref: string, o: MergeOpts): MergeOutcome {
     if (unmoved && needsDeps(at)) baseline = [];
     else {
       try {
-        baseline = detected0 ? runValidators(selectValidators(detected0, selection), at.exec, o.timeoutSec) : [];
+        baseline = detected0 ? validating(at, !o.personal, () => runValidators(selectValidators(detected0!, selection), at.exec, o.timeoutSec)) : [];
         if (detected0) writeBaseline(o.cacheDir, key, pre, baseline);
       } catch { baseline = []; }
       const left = at.git(['status', '--porcelain', '--', '.', ...LOCAL_STATE]);
@@ -519,7 +545,9 @@ function mergeIn(at: GitDeps, ref: string, o: MergeOpts): MergeOutcome {
   let detected: Validator[];
   try {
     detected = detectValidators(v.repo, loadConfig(o.configRoot));
-    results = markPreexisting(runValidators(selectValidators(detected, selection), v.exec, o.timeoutSec), baseline);
+    // The run worktree as the target (not the person's) or as the final merge's place to validate (inRun).
+    const chosen = selectValidators(detected, selection);
+    results = markPreexisting(validating(v, inRun || !o.personal, () => runValidators(chosen, v.exec, o.timeoutSec)), baseline);
   } catch (err) {
     return rollback(`validators could not run: ${(err as Error).message}`);
   }
@@ -584,6 +612,7 @@ function attemptExtras(r: MergeOutcome, es: boolean, ref: string, personal: bool
   return {
     ...(r.setup ? { setup: r.setup } : {}),
     ...(r.leftovers ? { leftovers: r.leftovers } : {}),
+    ...(r.restored?.length ? { restored: r.restored } : {}),
     ...(failed?.touchedKept ? { touchedKept: failed.touchedKept } : {}),
     ...(failed?.restoreSetup ? { restoreSetup: failed.restoreSetup } : {}),
     ...(failed?.restoreChanged ? { restoreChanged: failed.restoreChanged } : {}),

@@ -180,6 +180,76 @@ describe('forge swarm integrate (into the run branch)', () => {
     expect(r.detail).toContain('junk.txt');
     expect(readExecution(root)!.tasks.T1.status).toBe('accepted');
   });
+  describe('validators that regenerate tracked files', () => {
+    // A validator that rewrites the tracked gen.txt (a build that regenerates its committed bundle), when `cond` holds.
+    const GEN = (cond = '') => `validators:\n  - name: gen\n    cmd: node -e "const f=require('fs');${cond}f.writeFileSync('gen.txt',String(Date.now()))"\n`;
+    const runConfig = (text: string) => { mkdirSync(path.join(runWt(), '.forge'), { recursive: true }); writeFileSync(path.join(runWt(), '.forge', 'config.yaml'), text); };
+    it('integrate puts back what its validators regenerated, says so, and the next task integrates', () => {
+      commitIn(runWt(), 'gen.txt', 'committed\n', 'gen');
+      runConfig(GEN());
+      accept('T1', 'a.txt', 'a\n');
+      accept('T2', 'b.txt', 'b\n');
+      const r = out(run(['swarm', 'integrate', 'T1'], io));
+      expect(r).toMatchObject({ result: 'integrated', restored: ['gen.txt'] });
+      expect(g(runWt(), 'status', '--porcelain')).toBe('');
+      expect(g(runWt(), 'show', `${r.sha}:gen.txt`)).toBe('committed');
+      expect(out(run(['swarm', 'integrate', 'T2'], io))).toMatchObject({ result: 'integrated', restored: ['gen.txt'] });
+      expect(g(runWt(), 'status', '--porcelain')).toBe('');
+    });
+    it('the baseline run on the run tip leaves nothing regenerated behind', () => {
+      commitIn(runWt(), 'gen.txt', 'committed\n', 'gen');
+      // Rewrites gen.txt only on the pre-merge tip (before a.txt is merged in): only the baseline regenerates it.
+      runConfig(GEN("if(!f.existsSync('a.txt'))"));
+      accept('T1', 'a.txt', 'a\n');
+      const r = out(run(['swarm', 'integrate', 'T1'], io));
+      expect(r).toMatchObject({ result: 'integrated', restored: ['gen.txt'] });
+      expect(g(runWt(), 'status', '--porcelain')).toBe('');
+      expect(readExecution(root)!.tasks.T1.status).toBe('integrated');
+    });
+    it('a rejected merge is rolled back even though its validators regenerated a tracked file', () => {
+      commitIn(runWt(), 'gen.txt', 'committed\n', 'gen');
+      runConfig(`${NOBAD}  - name: gen\n    cmd: node -e "require('fs').writeFileSync('gen.txt',String(Date.now()))"\n`);
+      accept('T1', 'bad.txt', 'x\n');
+      const before = g(runWt(), 'rev-parse', 'HEAD');
+      const r = out(run(['swarm', 'integrate', 'T1'], io));
+      expect(r).toMatchObject({ result: 'conflict', restored: ['gen.txt'] });
+      expect(r.detail).toContain('validators failed');
+      expect(g(runWt(), 'rev-parse', 'HEAD')).toBe(before);
+      expect(g(runWt(), 'status', '--porcelain')).toBe('');
+    });
+    it('an unmoved final merge validated in the run worktree puts back what its validators regenerated there', () => {
+      commitIn(runWt(), 'gen.txt', 'committed\n', 'gen');
+      accept('T1', 'a.txt', 'a\n');
+      expect(out(run(['swarm', 'integrate', 'T1'], io)).result).toBe('integrated');
+      // The final validators come from the main checkout's config; there gen.txt is not there before the merge.
+      writeFileSync(path.join(root, '.forge', 'config.yaml'), GEN("if(f.existsSync('gen.txt'))"));
+      const r = out(run(['swarm', 'merge', '--yes'], io));
+      expect(r).toMatchObject({ result: 'merged', restored: ['gen.txt'] });
+      expect(g(runWt(), 'status', '--porcelain')).toBe('');
+      expect(git('status', '--porcelain')).toBe('');
+      expect(readFileSync(path.join(root, 'gen.txt'), 'utf8')).toBe('committed\n');
+    });
+    it('ephemeral (the person\'s checkout): unchanged, the regenerated file stays modified and the integration is run-dirty', () => {
+      commitIn(root, 'gen.txt', 'committed\n', 'gen');
+      expect(run(['swarm', 'stop'], io).code).toBe(0);
+      writeFileSync(path.join(root, '.forge', 'config.yaml'), GEN());
+      writeFileSync(path.join(root, '.forge', 'tasks.json'), JSON.stringify([
+        { id: 'fix-a', title: 'fix a', path: 'small', zones: ['a.txt'], depends_on: [] },
+        { id: 'fix-b', title: 'fix b', path: 'small', zones: ['b.txt'], depends_on: [] },
+      ]));
+      const started = run(['swarm', 'start', '--project', 'loose', '--session', 'main', '--kind', 'ephemeral', '--tasks', '.forge/tasks.json'], io);
+      expect(started.stderr).toBe('');
+      out(run(['swarm', 'tick'], io));
+      const w = out(run(['swarm', 'worktree', 'fix-a'], io)).worktree;
+      commitIn(w, 'a.txt', 'a\n', 'fix-a: work');
+      out(run(['swarm', 'task', 'fix-a', '--stage', 'verdict', '--status', 'accepted'], io));
+      const r = out(run(['swarm', 'integrate', 'fix-a'], io));
+      expect(r.result).toBe('run-dirty');
+      expect(r.detail).toContain('gen.txt');
+      expect(r.restored).toBeUndefined();
+      expect(git('status', '--porcelain')).toBe('M gen.txt');
+    });
+  });
   it('rolls back when the validators cannot run (invalid config brought by the task)', () => {
     const w = accept('T1', 'a.txt', 'a\n');
     mkdirSync(path.join(w, '.forge'), { recursive: true });
