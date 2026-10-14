@@ -7,7 +7,7 @@ The model and effort in use, the roadmap, forge stages and executions, superpowe
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.11.2](https://img.shields.io/badge/version-0.11.2-b4befe?style=flat-square)
+![version 0.11.3](https://img.shields.io/badge/version-0.11.3-b4befe?style=flat-square)
 ![no token cost](https://img.shields.io/badge/token%20cost-none-a6e3a1?style=flat-square)
 
 </div>
@@ -50,7 +50,7 @@ lens detects [waypoint](../waypoint/README.md), [forge](../forge/README.md) and 
 
 ## What the panel shows
 
-Each section is a card in its own colour (the roadmap's Catppuccin palette) and appears only when its source exists. Task boxes are coloured by state: done (blue), in progress (orange, pulsing), blocked (yellow), sent back by review (red) and pending (outlined). Agents are coloured by level: forge's implementer ladder runs from cool to warm (mech, light, impl, heavy, fable), and the reviewers by what they judge (correctness, security, perf).
+Each section is a card in its own colour (the roadmap's Catppuccin palette) and appears only when its source exists. Task boxes are coloured by state: done (blue), in progress (orange, pulsing), blocked (yellow), sent back by review (red) and pending (outlined). Agents are coloured by level: forge's implementer ladder runs from cool to warm (mech, light, impl, high, heavy, fable; `high` is `forge-impl-high`, Opus at high effort), and the reviewers by what they judge (correctness, security, perf).
 
 | Card | Source | What you see |
 | --- | --- | --- |

@@ -36,7 +36,7 @@ forge asks at its gates unless autonomy is `auto`: `FORGE prefs` resolves `auton
 
 ## 1. Triage
 
-1. **Run it.** Write the task text to `.forge/work/<id>/task.txt` and run `FORGE triage --task <id> --text-file .forge/work/<id>/task.txt --locale <es|en>` (`es` for Spanish, else `en`). It returns `path`, `files`, `sensitive`, `greenfield`, `validators`, `reasons`, `new` (validators seen for the first time, commands in `catalog`), `implementer` (who implements: `role`, `agent`, `self`, `why`), `announce`, `gate` and, while `.forge/.gitignore` is not in git, `untracked`. Pass `--batch` when the task is one request of several in the message (`references/ephemeral.md`).
+1. **Run it.** Write the task text to `.forge/work/<id>/task.txt` and run `FORGE triage --task <id> --text-file .forge/work/<id>/task.txt --locale <es|en>` (the person's language: `es` for Spanish, else `en`). It returns `path`, `files`, `sensitive`, `greenfield`, `validators`, `reasons`, `new` (validators seen for the first time, commands in `catalog`), `implementer` (who implements: `role`, `agent`, `self`, `why`), `announce`, `gate` and, while `.forge/.gitignore` is not in git, `untracked`. Pass `--batch` when the task is one request of several in the message (`references/ephemeral.md`).
 2. **Raise when needed.** Add your own judgement of ambiguity and risk: you may raise the path, never lower it below the CLI's. The CLI only counts files and words, so read the code the task touches and **raise to at least Medium** when the task:
    - changes behaviour callers rely on: new errors or rejected inputs, a changed signature, different return values;
    - bundles several independent changes;
@@ -111,7 +111,7 @@ Read `references/large.md` now and follow it (subsystem, architecture, much ambi
 
 ## Execution
 
-Read `references/execution.md` now and follow it when this session coordinates the execution of a plan's tasks (`references/large.md` step 3, mode `subagents` or `sessions`, N at once, on the run branch `forge/run-<project>`). A task's steps are in `references/task-steps.md`.
+Read `references/execution.md` now and follow it when this session coordinates the execution of a plan's tasks (`references/large.md` step 3, mode `subagents` or `sessions`, N at once, on `forge/run-<project>`): the start, the tick loop, integration, publishing, the end, requests during an execution and Unattended. A task's steps are in `references/task-steps.md`.
 
 **Run members.** A session launched for one task of the execution (mode `sessions`) runs it with forge:member. A session whose initial prompt is the older `/forge:run --plan <plan> --task <T> — run member of <SID>: work only <T>, then stop` invokes and follows `forge:member` instead of this skill, as does a SessionStart saying "Resume it with /forge:run → Run member".
 

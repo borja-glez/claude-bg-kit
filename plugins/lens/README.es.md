@@ -7,7 +7,7 @@ El modelo y el esfuerzo en uso, el roadmap, las etapas y ejecuciones de forge, l
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.11.2](https://img.shields.io/badge/versi%C3%B3n-0.11.2-b4befe?style=flat-square)
+![versión 0.11.3](https://img.shields.io/badge/versi%C3%B3n-0.11.3-b4befe?style=flat-square)
 ![sin coste en tokens](https://img.shields.io/badge/coste%20en%20tokens-ninguno-a6e3a1?style=flat-square)
 
 </div>
@@ -50,7 +50,7 @@ lens detecta [waypoint](../waypoint/README.es.md), [forge](../forge/README.es.md
 
 ## Qué enseña el panel
 
-Cada sección es una tarjeta con su propio color (la paleta Catppuccin del roadmap) y solo aparece si existe su fuente. Las cajas de tareas tienen el color de su estado: hecha (azul), en curso (naranja, latiendo), bloqueada (amarillo), devuelta por la revisión (rojo) y pendiente (solo contorno). Los agentes tienen el color de su nivel: la escalera de implementadores de forge va de frío a cálido (mech, light, impl, heavy, fable), y los revisores según lo que juzgan (correctness, security, perf).
+Cada sección es una tarjeta con su propio color (la paleta Catppuccin del roadmap) y solo aparece si existe su fuente. Las cajas de tareas tienen el color de su estado: hecha (azul), en curso (naranja, latiendo), bloqueada (amarillo), devuelta por la revisión (rojo) y pendiente (solo contorno). Los agentes tienen el color de su nivel: la escalera de implementadores de forge va de frío a cálido (mech, light, impl, high, heavy, fable; `high` es `forge-impl-high`, Opus con esfuerzo alto), y los revisores según lo que juzgan (correctness, security, perf).
 
 | Tarjeta | Fuente | Qué ves |
 | --- | --- | --- |
