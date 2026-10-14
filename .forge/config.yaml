@@ -1,7 +1,0 @@
-# Build output of build.mjs: forge puts these back after its validators rebuild them.
-generated:
-  - plugins/*/dist/**
-  - plugins/*/hooks/register.js
-  - plugins/lens/hooks/pulse.js
-  - plugins/*/types/index.d.ts
-  - plugins/waypoint/assets/*.template.html
