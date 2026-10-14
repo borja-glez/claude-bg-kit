@@ -1,11 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { UsageError } from './errors.js';
 import { appendEvent, readEvents, type LedgerEvent } from '../ledger.js';
 import { loadConfig, agentFor, type Profile } from '../config.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, type RepoReader, type Scope, type ValidatorResult } from '../validators.js';
 import { PATH_ORDER, zonesFromPaths, type PathName, type ReviewRole } from '../triage.js';
-import { parseReview, type Review } from '../verdict.js';
+import { parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, type Review, type ReviewerName, type FailingValidator } from '../verdict.js';
+import { roundDecision } from '../round.js';
 import { takeBrief } from '../shadow.js';
 import { reviewRound, reviewerKey, type PreviousResult, type ReviewerKey, type RoundPlan, type RoundReviewer, type TriageReview } from '../review-round.js';
 
@@ -199,11 +200,115 @@ function sayPrep(round: number, ok: boolean, failing: string[], plan: RoundPlan,
     + `${plan.carried.length ? `; carried: ${plan.carried.map(c => c.name).join(', ')}` : ''}${twins ? `; ${twins} shadow twin(s)` : ''}.`;
 }
 
+type ValidatorRow = { validator?: unknown; ok?: unknown; failures?: unknown; preexisting?: unknown };
+
+/**
+ * `FORGE review-close --task <T>-<n> --dir <dir> --path medium|large`: closes the last round review-prep prepared in
+ * `<dir>/reviews-<n>-<round>/` (`--dir` may also be that round dir). Exits 3 with `missing` when a reviewer it spawned
+ * (twins aside) left no file. Else runs the verdict with review-plan.json's flags, the round and the fix diff's hunks
+ * (carried results keep their previous origins), logs it on the round dir and the round decision, logs the minor and
+ * deferred findings as a ruling, writes `<dir>/findings-<n>-<round>.json` for the implementer when the action is not
+ * accept, and prints `{action, score, next, last, implementer, findings, deferred, invalid}`.
+ */
+export function reviewClose(args: string[], deps: ReviewDeps): Result {
+  const flag = (name: string) => {
+    const i = args.indexOf(`--${name}`);
+    const v = i >= 0 ? args[i + 1] : undefined;
+    return v === undefined || v.startsWith('--') ? undefined : v;
+  };
+  const task = flag('task'), p = flag('path'), dirArg = flag('dir');
+  if (!task || !p || !dirArg) throw new UsageError('review-close: --task <id>-<n>, --dir and --path are required');
+  const m = TASK_N.exec(task);
+  if (!m) throw new UsageError('review-close: --task must be <id>-<n>');
+  if (p !== 'medium' && p !== 'large') throw new UsageError('review-close: --path must be medium or large');
+  const n = m[2];
+
+  // The round: the given round dir, or the last one review-prep prepared under the work dir.
+  let dir = path.resolve(deps.cwd, dirArg);
+  let round = 0;
+  const own = new RegExp(`^reviews-${n}-(\\d+)$`).exec(path.basename(dir));
+  if (own) { round = Number(own[1]); dir = path.dirname(dir); } else {
+    let entries: string[] = [];
+    try { entries = readdirSync(dir); } catch { /* no work dir */ }
+    for (const e of entries) {
+      const r = new RegExp(`^reviews-${n}-(\\d+)$`).exec(e);
+      if (r && existsSync(path.join(dir, e, 'review-plan.json'))) round = Math.max(round, Number(r[1]));
+    }
+  }
+  const roundDir = path.join(dir, `reviews-${n}-${round}`);
+  const plan = readJson(path.join(roundDir, 'review-plan.json')) as { spawn?: unknown; carried?: unknown; flags?: unknown } | undefined;
+  if (!round || !plan || typeof plan !== 'object') throw new UsageError(`review-close: no review-plan.json for ${task} in ${dirArg}: run FORGE review-prep first`);
+
+  const names = (list: unknown, keep: (x: Record<string, unknown>) => boolean) => (Array.isArray(list) ? list as Record<string, unknown>[] : [])
+    .filter(x => x && typeof x === 'object' && keep(x))
+    .map(x => (typeof x.name === 'string' ? x.name : typeof x.role === 'string' && (ROLES as readonly string[]).includes(x.role) ? reviewerKey(x.role as ReviewRole) : null))
+    .filter((x): x is ReviewerKey => x === 'correctness' || x === 'security' || x === 'perf');
+  const spawned = names(plan.spawn, x => x.twin !== true);
+  const carried = names(plan.carried, () => true);
+  const missing = [...new Set([...spawned, ...carried])].map(k => path.join(roundDir, `${k}.json`)).filter(f => !existsSync(f));
+  if (missing.length) return json({ missing: missing.map(f => rel(deps.cwd, f)) }, 3);
+
+  const reviews: Partial<Record<ReviewerName, Review>> = {};
+  for (const k of ['correctness', 'security', 'perf'] as const) {
+    const file = path.join(roundDir, `${k}.json`);
+    if (existsSync(file)) reviews[k] = parseReview(readFileSync(file, 'utf8'));
+  }
+  const verifyPath = path.join(roundDir, 'verify.json');
+  const verifyFile = existsSync(verifyPath) ? parseVerifyFile(readFileSync(verifyPath, 'utf8')) : undefined;
+  if (verifyFile !== undefined) reviews.verify = verifyReview(verifyFile);
+  if (!Object.keys(reviews).length) throw new UsageError(`review-close: no reviews found in ${rel(deps.cwd, roundDir)}`);
+
+  // Validators as review-prep wrote them; failing ones that already failed on the base commit do not count.
+  const rows = readJson(path.join(dir, `validators-${n}.json`));
+  const arr = Array.isArray(rows) ? (rows as ValidatorRow[]).filter(r => r && typeof r === 'object') : [];
+  const validatorsOk = Array.isArray(rows) && arr.every(r => !blocking(r));
+  const failing: FailingValidator[] = arr.filter(r => blocking(r)).map(r => ({ validator: String(r.validator ?? ''), failures: Array.isArray(r.failures) ? r.failures.map(String) : [] }));
+  const preexisting = arr.filter(r => r.ok !== true && r.preexisting === true).map(r => String(r.validator ?? ''));
+
+  const flags = Array.isArray(plan.flags) ? plan.flags : [];
+  const fixPatch = round >= 2 ? (() => { try { return readFileSync(path.join(dir, `fix-${n}-${round}.patch`), 'utf8'); } catch { return ''; } })() : '';
+  const result = synthesize(reviews, weightsFor({ sensitive: flags.includes('--sensitive'), perf: flags.includes('--perf') }), validatorsOk, failing,
+    { round, fixHunks: parseHunks(fixPatch), root: deps.repoDir, carried });
+  if (!Array.isArray(rows)) result.reasons.push('no validation recorded');
+  if (preexisting.length) result.reasons.push(`already failing on the base commit, not counted: ${preexisting.join(', ')}`);
+
+  const ts = deps.now().toISOString();
+  appendEvent(deps.cwd, { ts, kind: 'verdict', task, dir: rel(deps.cwd, roundDir), action: result.action, score: result.score, signature: result.signature,
+    critical: result.critical.length, important: result.important.length, minor: result.minor.length, deferred: result.deferred.length });
+  if (verifyFile !== undefined) {
+    // As FORGE verdict logs it.
+    const evidence = rel(deps.cwd, roundDir).replace(/reviews-(\d+-\d+)$/, 'evidence/$1');
+    appendEvent(deps.cwd, { ts, kind: 'verify', task, result: verifyFile?.result ?? 'invalid',
+      passed: verifyFile ? verifyFile.checks.filter(c => c.ok).length : 0, total: verifyFile ? verifyFile.checks.length : 0,
+      evidence, ...(verifyFile?.reason ? { reason: verifyFile.reason } : {}) });
+  }
+  const d = roundDecision(readEvents(deps.cwd), task, p, loadConfig(deps.repoDir).profile);
+  appendEvent(deps.cwd, { ts, kind: 'round', task, ...d });
+  if (result.minor.length || result.deferred.length) {
+    appendEvent(deps.cwd, { ts, kind: 'ruling', task, round, dir: rel(deps.cwd, roundDir),
+      ...(result.minor.length ? { minor: result.minor } : {}), ...(result.deferred.length ? { deferred: result.deferred } : {}) });
+  }
+
+  // What the implementer receives (the skill's «Findings to send»): critical and important findings, deferred ones
+  // excluded, and the failures of the validators that block.
+  let findings: string | null = null;
+  if (result.action !== 'accept') {
+    const file = path.join(dir, `findings-${n}-${round}.json`);
+    writeFileSync(file, JSON.stringify({ task, round, action: result.action, findings: [...result.critical, ...result.important], validators: failing }, null, 2) + '\n');
+    findings = rel(deps.cwd, file);
+  }
+  return json({
+    action: result.action, score: result.score, next: d.next, last: d.last, implementer: d.implementer,
+    findings, deferred: result.deferred, invalid: result.reviewers.filter(r => r.invalid).map(r => r.name),
+    round, reasons: result.reasons,
+  });
+}
+
 /** `review-prep`, `review-close`, `prep` and `shadow`; the ones not built yet answer with a usage error. */
 export function reviewCommand(cmd: string, args: string[], deps: ReviewDeps): Result {
   switch (cmd) {
     case 'review-prep': return reviewPrep(args, deps);
-    case 'review-close':
+    case 'review-close': return reviewClose(args, deps);
     case 'prep':
     case 'shadow':
       throw new UsageError(`${cmd}: not available yet in this forge version`);

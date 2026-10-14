@@ -270,6 +270,36 @@ describe('fix rounds: origin and deferred', () => {
     expect(r.critical).toHaveLength(1);
     expect(r.deferred).toEqual([]);
   });
+  it('hunk lines are counted by the @@ ranges: a body line starting with --- or +++ is not a file header', () => {
+    const sql = [
+      'diff --git a/db/q.sql b/db/q.sql',
+      '--- a/db/q.sql',
+      '+++ b/db/q.sql',
+      '@@ -5,2 +5,2 @@',
+      '--- old comment',
+      '+++ new comment',
+      ' select 1;',
+      '@@ -20 +20,2 @@',
+      ' x',
+      '+y',
+    ].join('\n');
+    expect(parseHunks(sql)).toEqual({ 'db/q.sql': [{ start: 5, end: 6 }, { start: 20, end: 21 }] });
+  });
+  it('finding paths are made repo-relative before the origin check: absolute, ./ and backslashes', () => {
+    expect(correctOrigin(imp('untouched', '/repo/src/a.ts', 12), hunks, '/repo').origin).toBe('fix');
+    expect(correctOrigin(imp('untouched', 'C:\\repo\\src\\a.ts', 12), hunks, 'C:\\repo').origin).toBe('fix');
+    expect(correctOrigin(imp('untouched', 'c:/Repo/src/a.ts', 12), hunks, 'C:\\repo').origin).toBe('fix');
+    expect(correctOrigin(imp('untouched', '.\\src\\a.ts', 12), hunks).origin).toBe('fix');
+    expect(correctOrigin(imp('untouched', '/elsewhere/src/a.ts', 12), hunks, '/repo').origin).toBe('untouched');
+    const r = synthesize({ correctness: fail(0.8, [imp('untouched', '/repo/src/a.ts', 12)]) }, W, true, [], { round: 2, fixHunks: hunks, root: '/repo' });
+    expect(r.action).toBe('fix');
+  });
+  it('round 2: approach wrong with only untouched findings is not accepted', () => {
+    const wrong = { ...fail(0.2, [imp('untouched')]), approach: 'wrong' as const };
+    const r = synthesize({ correctness: wrong, security: pass() }, W, true, [], { round: 2, fixHunks: hunks });
+    expect(r.action).not.toBe('accept');
+    expect(r.deferred).toEqual([]);
+  });
   it('the signature is the same with and without deferred findings', () => {
     const prev = imp('previous');
     const a = synthesize({ correctness: fail(0.8, [prev]) }, W, true, [], { round: 2, fixHunks: hunks });
