@@ -222,8 +222,9 @@ describe('plugin layout', () => {
   it('skills print the lines the CLI hands over (campaign fixes)', () => {
     const run = read('plugins/forge/skills/run/SKILL.md');
     for (const s of ['Print `announce` exactly as printed', 'When the triage\'s `gate` is `plan`', '`untracked`', 'git commit -m "forge: track .forge/.gitignore" -- .forge/.gitignore',
-      'FORGE verify-result --task <id>', 'Only the person grants a verify surface\'s permission', 'its `diff` verbatim', '`ask.question` with exactly the three `ask.options`',
-      '`missing` and `unknown` tools', 'allowed --expect <the surface\'s hash from verify-plan>', 'When `diffTruncated` is true']) expect(run).toContain(s);
+      'FORGE verify-result --task <id>', 'Only the person grants a verify surface\'s permission']) expect(run).toContain(s);
+    for (const s of ['its `diff` verbatim', '`ask.question` with exactly the three `ask.options`', '`missing` and `unknown` tools',
+      'allowed --expect <the surface\'s hash from verify-plan>', 'When `diffTruncated` is true']) expect(runRef('verify')).toContain(s);
     expect(runRef('large')).toContain('never launch a round they did not ask for');
     expect(runRef('autonomy')).toContain('critique-dismiss');
     for (const s of ['**Print `announce` as it is, as a message of its own, before step 2**', 'print its `say` lines as they are',
@@ -484,7 +485,8 @@ describe('plugin layout', () => {
   });
   it('forge run skill writes forge state on waypoint tasks', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
-    expect(md).toContain('state/T');
+    expect(md).toContain('references/verify.md');
+    expect(runRef('verify')).toContain('state/T');
     for (const w of ['state/T', 'forge: {path', 'proposals pull', 'TV']) expect(read('plugins/forge/skills/run/references/task-steps.md')).toContain(w);
   });
   it('forge agents fix model, effort and maxTurns', () => {
@@ -556,8 +558,13 @@ describe('plugin layout', () => {
   });
   it('the run skill wires verification in', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
-    for (const s of ['FORGE verify-plan', 'forge-verify', 'FORGE surfaces learn', 'FORGE local set surfaces.', 'verify-skip', 'FORGE verify-cleanup', '--path', '`new`', 'asset: true', 'permission: changed']) expect(md).toContain(s);
+    for (const s of ['FORGE verify-plan', 'forge-verify', 'FORGE local set surfaces.', '--path', '`new`']) expect(md).toContain(s);
     expect(md).toMatch(/explains how to check something[\s\S]*\.forge\/verify\/<name>\.md/);
+    expect(md).toMatch(/[Rr]ead `references\/verify\.md` now and follow `## Before the review`/);
+    expect(md).toMatch(/[Rr]ead `references\/verify\.md` now and follow `## After the verdict`/);
+    const ref = runRef('verify');
+    for (const s of ['## Before the review', '## After the verdict', 'FORGE surfaces learn', 'FORGE local set surfaces.', 'verify-skip', 'FORGE verify-cleanup', 'asset: true', 'permission: changed'])
+      expect(ref, s).toContain(s);
   });
   it('the verify skill exists', () => {
     const md = read('plugins/forge/skills/verify/SKILL.md');
@@ -696,7 +703,7 @@ describe('plugin layout', () => {
   });
   it('forge:run is split into references: each exists, the core cites it and no longer repeats its text', () => {
     const run = read('plugins/forge/skills/run/SKILL.md');
-    for (const f of ['large', 'execution', 'ephemeral', 'superpowers-plan', 'manual-member', 'resuming', 'autonomy', 'decisions']) {
+    for (const f of ['large', 'execution', 'ephemeral', 'superpowers-plan', 'manual-member', 'resuming', 'autonomy', 'decisions', 'verify']) {
       expect(existsSync(new URL(`../plugins/forge/skills/run/references/${f}.md`, import.meta.url)), f).toBe(true);
       expect(run, f).toMatch(new RegExp(`[Rr]ead \`references/${f}\\.md\` now`));
     }
@@ -706,6 +713,7 @@ describe('plugin layout', () => {
   it('forge:run core: at most 25 KB, every cited reference exists, each path opens with the order to read its reference', () => {
     const run = read('plugins/forge/skills/run/SKILL.md');
     expect(Buffer.byteLength(run, 'utf8')).toBeLessThanOrEqual(25600);
+    expect(Buffer.byteLength(run, 'utf8'), 'core keeps a margin: at most 22 KB').toBeLessThanOrEqual(22528);
     // Every references/<file>.md cited by a skill of forge or waypoint exists in forge:run's references.
     const files: string[] = [];
     for (const p of ['forge', 'waypoint']) {

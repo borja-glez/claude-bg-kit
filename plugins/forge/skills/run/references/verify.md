@@ -1,0 +1,22 @@
+# Tool verification
+
+Read from forge:run (`## Medium` step 3b and step 6 in `SKILL.md`). `FORGE`, `<id>` and the Medium steps cited here mean what that skill says.
+
+## Before the review
+
+After each answer below, run `verify-plan` again.
+- Each `drafts` entry: propose the draft (`FORGE surfaces` shows its body) once; on yes, write `.forge/verify/<name>.md` keeping its `affects` and `tools` header as it is (the body in the user's language) and `FORGE local set surfaces.<name> allowed`; on no, `FORGE surfaces proposed --name <name>`. Commit a new surface with the task's work (plus `.forge/.gitignore` when git does not track it yet).
+- Each surface with `permission: changed` (its file changed since the user allowed it): show the change itself, never a summary: its `commits`, then its `diff` verbatim in a ```diff block (`diff` null: `git log -p -n 3 -- .forge/verify/<name>.md`). When `diffTruncated` is true, show the rest from `diffFile` too: never offer «Sí, siempre» on a change the user has not seen whole (no `diffFile`: only the other two options). Ask with AskUserQuestion: `ask.question` with exactly the three `ask.options`, in that order. «Sí, siempre» → `FORGE local set surfaces.<name> allowed --expect <the surface's hash from verify-plan>` (it refuses when the file changed after the question: ask again); «Nunca en este proyecto» → `denied`; «No, esta vez» writes nothing.
+- Each surface with `permission: ask`: ask once the same way with its `ask`; allow with `--expect` as above.
+- Nobody to ask (`### Unattended` in `references/execution.md`, also auto mode): ask and allow nothing; take that table's safe path (not verified, a `verify-skip`, a question note).
+- With `eligible: true`, decide per surface whether it is worth it and the depth (`smoke` or `flow`); a surface without `affects` (`match: null`) only if the diff and its description are related. Each candidate you skip, also when you skip them all: `FORGE log --kind verify-skip --task <id>-<n> --data-file <f>` (`{"surface":"<name>","reason":"<one line>"}`), so the ledger records why.
+- If you verify: spawn `verify` (resolved with `FORGE agents`) **in parallel with the reviewers of Medium step 4**, with the brief, the diff, the chosen surface files, the depth, the `missing` and `unknown` tools (`unknown` may be MCP servers forge cannot see: the agent tries them), review dir `.forge/work/<id>/reviews-<n>-<round>/` and evidence dir `.forge/work/<id>/evidence/<n>-<round>/` (review-prep's `round`), the limits from `.forge/config.yaml`, the absolute FORGE path and, in a fix round, this brief's previous `verify.json`. Never pass it a reviewer's output, nor its output to a reviewer.
+
+## After the verdict
+
+When `verify.json` exists:
+- Its `learned` notes, per surface: write a JSON array of that surface's `note` strings to a file and run `FORGE surfaces learn --name <surface> --notes-file <f> --heading Aprendido` (`Learned` in English); never with Edit: lines `surfaces learn` adds are recorded and never ask for the permission again (also in parallel tasks' copies); a line added any other way does. With a returned `count` over 20, propose to summarise that section. Commit the surface file with the task's work (or the phase-close commit), so the tree is not left dirty.
+- Show its `proposals`; apply one to the surface file with Edit only after the user's yes, then `FORGE local set surfaces.<name> allowed` again (their yes covers that text). Unattended, leave them in a question note.
+- `FORGE verify-cleanup --dir .forge/work/<id>/evidence/<n>-<round>/` (it stops the processes the agent left running; it deletes no files, and neither do you).
+- **Evidence on the roadmap.** Right before uploading, run `FORGE config get evidence` (never reuse a value read earlier). With a roadmap (`state/T`) and `upload`: convert any screenshot over 2 MB to JPEG, upload this pass's screenshots with the Artifact tool (`url: <roadmap url>`, `asset: true`, `file_paths: [...]`, up to 25 per call), then ArtifactData `update state/T` pinned to its version with `evidence: {surfaces, result, passed, total, local: "<evidence dir>", shots: [{url, id, surface, check, ok, expected, observed}]}`, and delete from the roadmap's assets the ids of this task's previous pass. Upload failed: `evidence` without `url`/`id`, with `pending: true`; retry on the task's next update. With `evidence: local` or no roadmap: without `url`/`id`.
+
