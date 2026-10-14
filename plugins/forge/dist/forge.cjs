@@ -107,17 +107,17 @@ var require_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    function visit_(key, node, visitor, path22) {
-      const ctrl = callVisitor(key, node, visitor, path22);
+    function visit_(key, node, visitor, path24) {
+      const ctrl = callVisitor(key, node, visitor, path24);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path22, ctrl);
-        return visit_(key, ctrl, visitor, path22);
+        replaceNode(key, path24, ctrl);
+        return visit_(key, ctrl, visitor, path24);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path22 = Object.freeze(path22.concat(node));
+          path24 = Object.freeze(path24.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = visit_(i, node.items[i], visitor, path22);
+            const ci = visit_(i, node.items[i], visitor, path24);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -128,13 +128,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path22 = Object.freeze(path22.concat(node));
-          const ck = visit_("key", node.key, visitor, path22);
+          path24 = Object.freeze(path24.concat(node));
+          const ck = visit_("key", node.key, visitor, path24);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = visit_("value", node.value, visitor, path22);
+          const cv = visit_("value", node.value, visitor, path24);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -155,17 +155,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node, visitor, path22) {
-      const ctrl = await callVisitor(key, node, visitor, path22);
+    async function visitAsync_(key, node, visitor, path24) {
+      const ctrl = await callVisitor(key, node, visitor, path24);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path22, ctrl);
-        return visitAsync_(key, ctrl, visitor, path22);
+        replaceNode(key, path24, ctrl);
+        return visitAsync_(key, ctrl, visitor, path24);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path22 = Object.freeze(path22.concat(node));
+          path24 = Object.freeze(path24.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = await visitAsync_(i, node.items[i], visitor, path22);
+            const ci = await visitAsync_(i, node.items[i], visitor, path24);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -176,13 +176,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path22 = Object.freeze(path22.concat(node));
-          const ck = await visitAsync_("key", node.key, visitor, path22);
+          path24 = Object.freeze(path24.concat(node));
+          const ck = await visitAsync_("key", node.key, visitor, path24);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = await visitAsync_("value", node.value, visitor, path22);
+          const cv = await visitAsync_("value", node.value, visitor, path24);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -209,23 +209,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node, visitor, path22) {
+    function callVisitor(key, node, visitor, path24) {
       if (typeof visitor === "function")
-        return visitor(key, node, path22);
+        return visitor(key, node, path24);
       if (identity.isMap(node))
-        return visitor.Map?.(key, node, path22);
+        return visitor.Map?.(key, node, path24);
       if (identity.isSeq(node))
-        return visitor.Seq?.(key, node, path22);
+        return visitor.Seq?.(key, node, path24);
       if (identity.isPair(node))
-        return visitor.Pair?.(key, node, path22);
+        return visitor.Pair?.(key, node, path24);
       if (identity.isScalar(node))
-        return visitor.Scalar?.(key, node, path22);
+        return visitor.Scalar?.(key, node, path24);
       if (identity.isAlias(node))
-        return visitor.Alias?.(key, node, path22);
+        return visitor.Alias?.(key, node, path24);
       return void 0;
     }
-    function replaceNode(key, path22, node) {
-      const parent = path22[path22.length - 1];
+    function replaceNode(key, path24, node) {
+      const parent = path24[path24.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node;
       } else if (identity.isPair(parent)) {
@@ -837,10 +837,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path22, value) {
+    function collectionFromPath(schema, path24, value) {
       let v = value;
-      for (let i = path22.length - 1; i >= 0; --i) {
-        const k = path22[i];
+      for (let i = path24.length - 1; i >= 0; --i) {
+        const k = path24[i];
         if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
           const a = [];
           a[k] = v;
@@ -859,7 +859,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path22) => path22 == null || typeof path22 === "object" && !!path22[Symbol.iterator]().next().done;
+    var isEmptyPath = (path24) => path24 == null || typeof path24 === "object" && !!path24[Symbol.iterator]().next().done;
     var Collection = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -889,11 +889,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path22, value) {
-        if (isEmptyPath(path22))
+      addIn(path24, value) {
+        if (isEmptyPath(path24))
           this.add(value);
         else {
-          const [key, ...rest] = path22;
+          const [key, ...rest] = path24;
           const node = this.get(key, true);
           if (identity.isCollection(node))
             node.addIn(rest, value);
@@ -907,8 +907,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path22) {
-        const [key, ...rest] = path22;
+      deleteIn(path24) {
+        const [key, ...rest] = path24;
         if (rest.length === 0)
           return this.delete(key);
         const node = this.get(key, true);
@@ -922,8 +922,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path22, keepScalar) {
-        const [key, ...rest] = path22;
+      getIn(path24, keepScalar) {
+        const [key, ...rest] = path24;
         const node = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -941,8 +941,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path22) {
-        const [key, ...rest] = path22;
+      hasIn(path24) {
+        const [key, ...rest] = path24;
         if (rest.length === 0)
           return this.has(key);
         const node = this.get(key, true);
@@ -952,8 +952,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path22, value) {
-        const [key, ...rest] = path22;
+      setIn(path24, value) {
+        const [key, ...rest] = path24;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -1157,27 +1157,27 @@ var require_stringifyString = __commonJS({
       return true;
     }
     function doubleQuotedString(value, ctx) {
-      const json = JSON.stringify(value);
+      const json3 = JSON.stringify(value);
       if (ctx.options.doubleQuotedAsJSON)
-        return json;
+        return json3;
       const { implicitKey } = ctx;
       const minMultiLineLength = ctx.options.doubleQuotedMinMultiLineLength;
       const indent = ctx.indent || (containsDocumentMarker(value) ? "  " : "");
       let str6 = "";
       let start = 0;
-      for (let i = 0, ch = json[i]; ch; ch = json[++i]) {
-        if (ch === " " && json[i + 1] === "\\" && json[i + 2] === "n") {
-          str6 += json.slice(start, i) + "\\ ";
+      for (let i = 0, ch = json3[i]; ch; ch = json3[++i]) {
+        if (ch === " " && json3[i + 1] === "\\" && json3[i + 2] === "n") {
+          str6 += json3.slice(start, i) + "\\ ";
           i += 1;
           start = i;
           ch = "\\";
         }
         if (ch === "\\")
-          switch (json[i + 1]) {
+          switch (json3[i + 1]) {
             case "u":
               {
-                str6 += json.slice(start, i);
-                const code = json.substr(i + 2, 4);
+                str6 += json3.slice(start, i);
+                const code = json3.substr(i + 2, 4);
                 switch (code) {
                   case "0000":
                     str6 += "\\0";
@@ -1207,23 +1207,23 @@ var require_stringifyString = __commonJS({
                     if (code.substr(0, 2) === "00")
                       str6 += "\\x" + code.substr(2);
                     else
-                      str6 += json.substr(i, 6);
+                      str6 += json3.substr(i, 6);
                 }
                 i += 5;
                 start = i + 1;
               }
               break;
             case "n":
-              if (implicitKey || json[i + 2] === '"' || json.length < minMultiLineLength) {
+              if (implicitKey || json3[i + 2] === '"' || json3.length < minMultiLineLength) {
                 i += 1;
               } else {
-                str6 += json.slice(start, i) + "\n\n";
-                while (json[i + 2] === "\\" && json[i + 3] === "n" && json[i + 4] !== '"') {
+                str6 += json3.slice(start, i) + "\n\n";
+                while (json3[i + 2] === "\\" && json3[i + 3] === "n" && json3[i + 4] !== '"') {
                   str6 += "\n";
                   i += 2;
                 }
                 str6 += indent;
-                if (json[i + 2] === " ")
+                if (json3[i + 2] === " ")
                   str6 += "\\";
                 i += 1;
                 start = i + 1;
@@ -1233,7 +1233,7 @@ var require_stringifyString = __commonJS({
               i += 1;
           }
       }
-      str6 = start ? str6 + json.slice(start) : json;
+      str6 = start ? str6 + json3.slice(start) : json3;
       return implicitKey ? str6 : foldFlowLines.foldFlowLines(str6, indent, foldFlowLines.FOLD_QUOTED, getFoldOptions(ctx, false));
     }
     function singleQuotedString(value, ctx) {
@@ -3468,9 +3468,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path22, value) {
+      addIn(path24, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path22, value);
+          this.contents.addIn(path24, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -3545,14 +3545,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path22) {
-        if (Collection.isEmptyPath(path22)) {
+      deleteIn(path24) {
+        if (Collection.isEmptyPath(path24)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path22) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path24) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -3567,10 +3567,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path22, keepScalar) {
-        if (Collection.isEmptyPath(path22))
+      getIn(path24, keepScalar) {
+        if (Collection.isEmptyPath(path24))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path22, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path24, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -3581,10 +3581,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path22) {
-        if (Collection.isEmptyPath(path22))
+      hasIn(path24) {
+        if (Collection.isEmptyPath(path24))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path22) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path24) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -3601,13 +3601,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path22, value) {
-        if (Collection.isEmptyPath(path22)) {
+      setIn(path24, value) {
+        if (Collection.isEmptyPath(path24)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, Array.from(path22), value);
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path24), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path22, value);
+          this.contents.setIn(path24, value);
         }
       }
       /**
@@ -3655,11 +3655,11 @@ var require_Document = __commonJS({
           throw new Error(`With a null YAML version, the { schema: Schema } option is required`);
       }
       // json & jsonArg are only used from toJSON()
-      toJS({ json, jsonArg, mapAsMap, maxAliasCount, onAnchor, reviver } = {}) {
+      toJS({ json: json3, jsonArg, mapAsMap, maxAliasCount, onAnchor, reviver } = {}) {
         const ctx = {
           anchors: /* @__PURE__ */ new Map(),
           doc: this,
-          keep: !json,
+          keep: !json3,
           mapAsMap: mapAsMap === true,
           mapKeyWarned: false,
           maxAliasCount: typeof maxAliasCount === "number" ? maxAliasCount : 100
@@ -4628,7 +4628,7 @@ var require_resolve_flow_scalar = __commonJS({
       const { offset, type, source, end } = scalar;
       let _type;
       let value;
-      const _onError = (rel, code, msg) => onError(offset + rel, code, msg);
+      const _onError = (rel2, code, msg) => onError(offset + rel2, code, msg);
       switch (type) {
         case "scalar":
           _type = Scalar.Scalar.PLAIN;
@@ -5568,9 +5568,9 @@ var require_cst_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    visit.itemAtPath = (cst, path22) => {
+    visit.itemAtPath = (cst, path24) => {
       let item = cst;
-      for (const [field2, index] of path22) {
+      for (const [field2, index] of path24) {
         const tok = item?.[field2];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -5579,23 +5579,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit.parentCollection = (cst, path22) => {
-      const parent = visit.itemAtPath(cst, path22.slice(0, -1));
-      const field2 = path22[path22.length - 1][0];
+    visit.parentCollection = (cst, path24) => {
+      const parent = visit.itemAtPath(cst, path24.slice(0, -1));
+      const field2 = path24[path24.length - 1][0];
       const coll = parent?.[field2];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path22, item, visitor) {
-      let ctrl = visitor(item, path22);
+    function _visit(path24, item, visitor) {
+      let ctrl = visitor(item, path24);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field2 of ["key", "value"]) {
         const token = item[field2];
         if (token && "items" in token) {
           for (let i = 0; i < token.items.length; ++i) {
-            const ci = _visit(Object.freeze(path22.concat([[field2, i]])), token.items[i], visitor);
+            const ci = _visit(Object.freeze(path24.concat([[field2, i]])), token.items[i], visitor);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -5606,10 +5606,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field2 === "key")
-            ctrl = ctrl(item, path22);
+            ctrl = ctrl(item, path24);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path22) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path24) : ctrl;
     }
     exports2.visit = visit;
   }
@@ -7361,13 +7361,13 @@ var require_dist = __commonJS({
 });
 
 // src/forge/cli/main.ts
-var import_node_fs20 = require("node:fs");
+var import_node_fs22 = require("node:fs");
 
 // src/forge/cli/run.ts
 var import_node_child_process2 = require("node:child_process");
-var import_node_fs19 = require("node:fs");
+var import_node_fs21 = require("node:fs");
 var import_node_os2 = require("node:os");
-var import_node_path21 = __toESM(require("node:path"), 1);
+var import_node_path23 = __toESM(require("node:path"), 1);
 
 // src/forge/ledger.ts
 var import_node_fs = require("node:fs");
@@ -7416,7 +7416,7 @@ var briefOf = (task, t) => str(t) && t.startsWith(`${task}-`) && /^\d+$/.test(t.
 var briefNum = (x) => typeof x === "number" && Number.isInteger(x) && x > 0 && x < 1e4 ? x : null;
 var ownedBy = (task, t) => str(t) && (t === task || t.startsWith(`${task}-`) && /^\d+$/.test(t.slice(task.length + 1)));
 var validatorsOf = (results) => (Array.isArray(results) ? results : []).filter((r2) => isObj(r2) && str(r2.validator)).slice(0, MAX_VALIDATORS).map((r2) => ({ name: cleanText(r2.validator), ok: r2.ok === true }));
-var isLight = (path22) => path22 === "trivial" || path22 === "small";
+var isLight = (path24) => path24 === "trivial" || path24 === "small";
 var isVerifyAgent = (agent) => !!agent && agent.startsWith("forge-verify");
 var lastStage = (stages) => Object.keys(stages).filter((k) => k !== "done" && k !== "triage").at(-1) ?? "";
 var PATHS = ["trivial", "small", "medium", "large"];
@@ -8303,8 +8303,8 @@ var ZodIssueCode = util.arrayToEnum([
   "not_finite"
 ]);
 var quotelessJson = (obj) => {
-  const json = JSON.stringify(obj, null, 2);
-  return json.replace(/"([^"]+)":/g, "$1:");
+  const json3 = JSON.stringify(obj, null, 2);
+  return json3.replace(/"([^"]+)":/g, "$1:");
 };
 var ZodError = class _ZodError extends Error {
   get errors() {
@@ -8515,8 +8515,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path22, errorMaps, issueData } = params;
-  const fullPath = [...path22, ...issueData.path || []];
+  const { data, path: path24, errorMaps, issueData } = params;
+  const fullPath = [...path24, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -8632,11 +8632,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path22, key) {
+  constructor(parent, value, path24, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path22;
+    this._path = path24;
     this._key = key;
   }
   get path() {
@@ -12470,9 +12470,13 @@ var MAX_PER_SYMBOL = 50;
 var MAX_SYMBOLS = 20;
 var MAX_TEXT = 2e4;
 var COPY_REASON = "one quoted text change: the session finds the file";
-var es = (stems, words2) => new RegExp(`(?<![\\p{L}\\p{N}_])(?:(?:${stems})\\p{L}*|(?:${words2})(?![\\p{L}\\p{N}_]))`, "iu");
+var es = (stems, words3) => new RegExp(`(?<![\\p{L}\\p{N}_])(?:(?:${stems})\\p{L}*|(?:${words3})(?![\\p{L}\\p{N}_]))`, "iu");
 var ZONES = [
-  { zone: "auth", text: [/\b(auth\w*|login|logout|passwords?|passwd|tokens?|jwt|oauth|sessions?|permissions?|crypto|secrets?)\b/i, es("autentic|contrase\xF1|permis|secret", "sesi[o\xF3]n|sesiones")], path: /(^|\/)(auth|security|crypto)(\/|\.)/i },
+  // «session»/«sesión» alone usually names a Claude Code session: it counts only next to an authentication word.
+  { zone: "auth", text: [
+    /\b(auth\w*|login|logout|passwords?|passwd|tokens?|jwt|oauth|session (tokens?|cookies?|ids?|hijack\w*|fixation)|login sessions?|permissions?|crypto|secrets?)\b/i,
+    es("autentic|contrase\xF1|permis|secret", "sesi[o\xF3]n(?:es)? (?:del?|de los) usuarios?|(?:inici|cerr|cierr)\\p{L}* (?:de )?sesi[o\xF3]n|(?:cookies?|tokens?) de sesi[o\xF3]n")
+  ], path: /(^|\/)(auth|security|crypto)(\/|\.)/i },
   { zone: "data", text: [/\b(migrations?|schema|database|sql|prisma|orm)\b/i, es("migraci", "bases? de datos|esquemas?")], path: /(^|\/)(migrations?|db|schema)(\/|\.)|\.sql$/i },
   { zone: "public-api", text: [/\b(public api|endpoints?|openapi|swagger|graphql)\b/i, es("endpoint", "apis? p[u\xFA]blicas?")], path: /(^|\/)(api|routes)\//i },
   { zone: "deps", text: [/\b(dependenc(y|ies)|upgrade|npm install|pip install)\b/i, es("dependencia", "actualizar? dependencias")], path: /(^|\/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|Cargo\.(toml|lock)|go\.(mod|sum))$/i },
@@ -12508,13 +12512,13 @@ function implementerFor(r2, text2, opts = {}) {
     case "small":
       return isMechanical(text2) ? { role: "mech", self: false, why: "small and mechanical: always delegated to mech" } : { role: "impl-light", self: false, why: "small and bounded: always delegated to impl-light" };
     case "medium":
-      return r2.sensitive.length ? { role: "impl-heavy", self: false, why: `medium on a sensitive zone (${r2.sensitive.join(", ")})` } : { role: "impl", self: false, why: "medium" };
+      return r2.sensitive.length ? { role: "impl-high", self: false, why: `medium on a sensitive zone (${r2.sensitive.join(", ")})` } : { role: "impl", self: false, why: "medium" };
     default:
       if (!opts.plan) return { role: null, self: false, why: "large: design and plan first" };
-      return r2.sensitive.length ? { role: "impl-heavy", self: false, why: `large plan task on a sensitive zone (${r2.sensitive.join(", ")}): impl-heavy` } : { role: "impl", self: false, why: "large plan task: impl, as a medium one (the plan may need to split it)" };
+      return r2.sensitive.length ? { role: "impl-high", self: false, why: `large plan task on a sensitive zone (${r2.sensitive.join(", ")}): impl-high` } : { role: "impl", self: false, why: "large plan task: impl, as a medium one (the plan may need to split it)" };
   }
 }
-var isBookkeeping = (path22) => /^(docs\/waypoint|docs\/superpowers|\.forge|\.waypoint)\//.test(path22);
+var isBookkeeping = (path24) => /^(docs\/waypoint|docs\/superpowers|\.forge|\.waypoint)\//.test(path24);
 function parseNumstat(text2) {
   const files = [];
   let lines = 0;
@@ -12530,14 +12534,14 @@ function parseNumstat(text2) {
 var DIFF_MEDIUM_LINES = 200;
 function diffPath(stat) {
   const n = stat.files.length;
-  let path22 = n === 0 ? "trivial" : n > 10 ? "large" : n > 3 || stat.lines > DIFF_MEDIUM_LINES ? "medium" : "small";
+  let path24 = n === 0 ? "trivial" : n > 10 ? "large" : n > 3 || stat.lines > DIFF_MEDIUM_LINES ? "medium" : "small";
   const sensitive = zonesFromPaths(stat.files);
   const reasons = [`diff: ${n} file(s), ${stat.lines} line(s)`];
   if (sensitive.length) {
-    if (PATH_ORDER.indexOf(path22) < PATH_ORDER.indexOf("medium")) path22 = "medium";
+    if (PATH_ORDER.indexOf(path24) < PATH_ORDER.indexOf("medium")) path24 = "medium";
     reasons.push(`diff touches a sensitive zone: ${sensitive.join(", ")}`);
   }
-  return { path: path22, sensitive, reasons };
+  return { path: path24, sensitive, reasons };
 }
 var PERF = [
   /\b(perf|performance|latency|throughput|benchmarks?|optimi[sz](e|es|ed|ing|ation|ations)|speed\s?up|faster|memory (usage|leaks?))\b/i,
@@ -12547,12 +12551,18 @@ function isPerfTask(text2) {
   const t = String(text2).slice(0, MAX_TEXT);
   return PERF.some((re) => re.test(t));
 }
-function reviewFor(path22, sensitive, perf) {
-  if (path22 === "trivial" || path22 === "small") return { light: true, reviewers: [{ role: "review-correctness", model: "sonnet", effort: "medium" }], flags: [] };
+function reviewFor(path24, sensitive, perf, opts = {}) {
+  if (path24 === "trivial" || path24 === "small") return { light: true, reviewers: [{ role: "review-correctness", model: "sonnet", effort: "medium" }], flags: [] };
   const roles = ["review-correctness", ...sensitive.length ? ["review-security"] : [], ...perf ? ["review-perf"] : []];
+  const effort = (role) => {
+    if (opts.profile === "quality") return "xhigh";
+    if (role === "review-perf") return "medium";
+    if (role === "review-security") return sensitive.includes("auth") ? "xhigh" : "high";
+    return sensitive.length || opts.delicate || opts.final && path24 === "large" ? "xhigh" : "high";
+  };
   return {
     light: false,
-    reviewers: roles.map((role) => ({ role, model: null, effort: null })),
+    reviewers: roles.map((role) => ({ role, model: null, effort: effort(role) })),
     flags: [...sensitive.length ? ["--sensitive"] : [], ...perf ? ["--perf"] : []]
   };
 }
@@ -12642,8 +12652,8 @@ function copyGuards(task) {
   const last = [...text2.matchAll(QUOTED)].at(-1);
   if (!last || !/^[\s.!?…]*$/u.test(text2.slice(last.index + last[0].length))) return null;
   const outside = text2.replace(QUOTED, " ");
-  const words2 = outside.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w));
-  return words2.length <= MAX_COPY_WORDS && !WIDE.test(outside) && !CLAUSE_BREAK.test(outside) ? text2 : null;
+  const words3 = outside.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w));
+  return words3.length <= MAX_COPY_WORDS && !WIDE.test(outside) && !CLAUSE_BREAK.test(outside) ? text2 : null;
 }
 function isCopyChange(task) {
   const text2 = copyGuards(task);
@@ -12663,9 +12673,9 @@ function triage(task, repo, validators, extra, opts = {}) {
       named.add(f);
     }
   }
-  const words2 = new Set([...text2.matchAll(/`([^`]+)`/g)].map((m) => m[1].trim()).filter((w) => /^[\w.$]{3,}$/.test(w)));
-  for (const w of text2.split(/[^A-Za-z0-9_]+/)) if (isSymbol(w)) words2.add(w);
-  for (const w of [...words2].slice(0, MAX_SYMBOLS)) for (const f of repo.grep(w).slice(0, MAX_PER_SYMBOL)) files.add(f);
+  const words3 = new Set([...text2.matchAll(/`([^`]+)`/g)].map((m) => m[1].trim()).filter((w) => /^[\w.$]{3,}$/.test(w)));
+  for (const w of text2.split(/[^A-Za-z0-9_]+/)) if (isSymbol(w)) words3.add(w);
+  for (const w of [...words3].slice(0, MAX_SYMBOLS)) for (const f of repo.grep(w).slice(0, MAX_PER_SYMBOL)) files.add(f);
   const quoteFiles = /* @__PURE__ */ new Set();
   for (const q of quotedLiterals(text2)) {
     const hits = repo.grep(q);
@@ -12677,43 +12687,43 @@ function triage(task, repo, validators, extra, opts = {}) {
   if (!repo.gitOk) reasons.push("git unavailable");
   const wordCount2 = text2.trim().split(/\s+/).length;
   const sized = named.size ? named.size : Math.min(files.size, MAX_FILES);
-  let path22;
+  let path24;
   if (greenfield && !opts.ignoreGreenfield) {
-    path22 = "large";
+    path24 = "large";
     reasons.push("greenfield repository");
   } else if (LARGE.some((re) => re.test(text2))) {
-    path22 = "large";
+    path24 = "large";
     reasons.push("architecture-scale wording");
   } else if (sized > 10) {
-    path22 = "large";
+    path24 = "large";
     reasons.push(`${sized} files located`);
   } else if (sized > 3) {
-    path22 = "medium";
+    path24 = "medium";
     reasons.push(`${sized} files located`);
   } else if (sized === 0 && isCopyChange(text2)) {
-    path22 = "trivial";
+    path24 = "trivial";
     reasons.push(COPY_REASON);
   } else if (sized === 0 && quoteFiles.size === 1 && copyGuards(text2) !== null) {
-    path22 = "trivial";
+    path24 = "trivial";
     reasons.push("one file, short task");
   } else if (sized === 0 && quoteFiles.size) {
-    path22 = "small";
+    path24 = "small";
     reasons.push(`quoted text found in ${quoteFiles.size} file(s)`);
   } else if (sized === 0) {
-    path22 = "small";
+    path24 = "small";
     reasons.push("no files located: the session should judge the scope");
   } else if (sized === 1 && wordCount2 <= 25 && !RENAME.some((re) => re.test(text2))) {
-    path22 = "trivial";
+    path24 = "trivial";
     reasons.push(named.size ? "one named file, short task" : "one file, short task");
   } else {
-    path22 = "small";
+    path24 = "small";
     reasons.push(`${sized} file(s) located`);
   }
-  if (sensitive.length && PATH_ORDER.indexOf(path22) < PATH_ORDER.indexOf("medium")) {
-    path22 = "medium";
+  if (sensitive.length && PATH_ORDER.indexOf(path24) < PATH_ORDER.indexOf("medium")) {
+    path24 = "medium";
     reasons.push(`sensitive zone: ${sensitive.join(", ")}`);
   }
-  return { path: path22, files: located, sensitive, greenfield, validators, reasons };
+  return { path: path24, files: located, sensitive, greenfield, validators, reasons };
 }
 
 // src/forge/policy.ts
@@ -12789,10 +12799,10 @@ function similarOpen(p, all) {
   }
   return null;
 }
-function safeZone(path22) {
-  if (!path22 || !/^[A-Za-z0-9_./*-]+$/.test(path22) || path22.startsWith("-")) return null;
-  if (path22.startsWith("/") || path22.split("/").includes("..")) return null;
-  return path22;
+function safeZone(path24) {
+  if (!path24 || !/^[A-Za-z0-9_./*-]+$/.test(path24) || path24.startsWith("-")) return null;
+  if (path24.startsWith("/") || path24.split("/").includes("..")) return null;
+  return path24;
 }
 
 // src/forge/to-task.ts
@@ -12879,7 +12889,13 @@ function renderBrief(plan, task, opts) {
 var import_node_fs6 = require("node:fs");
 var import_node_path8 = __toESM(require("node:path"), 1);
 var import_yaml3 = __toESM(require_dist(), 1);
-var ROLES = ["impl-heavy", "impl", "impl-light", "mech", "review-correctness", "review-security", "review-perf", "verify"];
+
+// src/lib/launcher.ts
+var EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+var MODELS = ["opus", "sonnet", "haiku"];
+
+// src/forge/config.ts
+var ROLES = ["impl-heavy", "impl-high", "impl", "impl-light", "mech", "review-correctness", "review-security", "review-perf", "verify"];
 var NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
 var WORKFLOWS = ["ask", "forge", "superpowers", "superpowers-design", "superpowers-plan", "off"];
 var AUTONOMIES = ["ask", "auto"];
@@ -12912,8 +12928,12 @@ var Schema = external_exports.object({
     parallel: external_exports.number().int().min(1).max(10).default(3),
     mode: external_exports.enum(["subagents", "sessions"]).optional(),
     launcher: external_exports.enum(["bg", "herdr"]).default("bg"),
+    member: external_exports.object({
+      effort: external_exports.enum(EFFORTS).default("medium"),
+      model: external_exports.enum(MODELS).optional()
+    }).strict().default({ effort: "medium" }),
     setup: external_exports.string().min(1).max(500).optional()
-  }).strict().default({ parallel: 3, launcher: "bg" })
+  }).strict().default({ parallel: 3, launcher: "bg", member: { effort: "medium" } })
 }).strict();
 var DEFAULTS = {
   profile: "balanced",
@@ -12922,7 +12942,7 @@ var DEFAULTS = {
   verify: { limits: { checks: 8, shots: 10, minutes: 10 } },
   evidence: "upload",
   validatorTimeoutSec: 600,
-  swarm: { parallel: 3, launcher: "bg" },
+  swarm: { parallel: 3, launcher: "bg", member: { effort: "medium" } },
   tdd: "off"
 };
 function parseConfig(text2) {
@@ -12952,8 +12972,8 @@ function loadConfig(root) {
 }
 var SHIFT = {
   balanced: {},
-  economy: { "impl-heavy": "forge-impl", impl: "forge-impl-light" },
-  quality: { impl: "forge-impl-heavy", "impl-light": "forge-impl", mech: "forge-impl-light", verify: "forge-verify-heavy" }
+  economy: { "impl-heavy": "forge-impl-high", "impl-high": "forge-impl", impl: "forge-impl-light" },
+  quality: { impl: "forge-impl-heavy", "impl-high": "forge-impl-heavy", "impl-light": "forge-impl", mech: "forge-impl-light", verify: "forge-verify-heavy" }
 };
 function agentFor(role, profile) {
   return SHIFT[profile][role] ?? `forge-${role}`;
@@ -12976,6 +12996,7 @@ function resolvePrefs(request, local, config) {
 
 // src/forge/verdict.ts
 var import_node_crypto = require("node:crypto");
+var ORIGINS = ["previous", "fix", "untouched"];
 var invalidReview = () => ({ verdict: "abstain", confidence: 0, findings: [], invalid: true });
 var SEVERITIES = ["critical", "important", "minor"];
 function num2(v) {
@@ -12998,7 +13019,62 @@ function findingOf(v) {
   const line2 = lineOf(f.line);
   if (line2 !== void 0) out.line = line2;
   if (typeof f.fix === "string") out.fix = f.fix;
+  const origin = typeof f.origin === "string" ? f.origin.trim().toLowerCase() : "";
+  if (ORIGINS.includes(origin)) out.origin = origin;
   return out;
+}
+var normPath = (p) => p.trim().replace(/\\/g, "/").replace(/^(\.\/)+/, "");
+function repoRelative(p, root) {
+  let n = normPath(p);
+  if (!root?.trim()) return n;
+  const r2 = normPath(root).replace(/\/+$/, "");
+  const drive = /^[A-Za-z]:/.test(r2);
+  if (drive && /^\/[A-Za-z]\//.test(n)) n = `${n[1]}:${n.slice(2)}`;
+  const [hay, needle] = drive ? [n.toLowerCase(), r2.toLowerCase()] : [n, r2];
+  return r2 && hay.startsWith(`${needle}/`) ? normPath(n.slice(r2.length + 1)) : n;
+}
+function parseHunks(diff) {
+  const out = {};
+  let file = null;
+  let prev = "";
+  let oldLeft = 0, newLeft = 0;
+  for (const raw of diff.split("\n")) {
+    const line2 = raw.replace(/\r$/, "");
+    if ((oldLeft > 0 || newLeft > 0) && (line2.startsWith("@@ ") || line2.startsWith("diff "))) oldLeft = newLeft = 0;
+    if (oldLeft > 0 || newLeft > 0) {
+      if (line2.startsWith("\\")) continue;
+      if (line2.startsWith("-")) oldLeft--;
+      else if (line2.startsWith("+")) newLeft--;
+      else {
+        oldLeft--;
+        newLeft--;
+      }
+      prev = "";
+      continue;
+    }
+    if (line2.startsWith("+++ ") && prev.startsWith("--- ")) {
+      const p = line2.slice(4).split("	")[0];
+      file = p === "/dev/null" ? null : normPath(p.startsWith("b/") ? p.slice(2) : p);
+    } else {
+      const m = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line2);
+      if (m) {
+        oldLeft = m[1] === void 0 ? 1 : Number(m[1]);
+        newLeft = m[3] === void 0 ? 1 : Number(m[3]);
+        if (file) {
+          const start = Number(m[2]), count2 = m[3] === void 0 ? 1 : Number(m[3]);
+          (out[file] ??= []).push({ start, end: start + Math.max(count2, 1) - 1 });
+        }
+      }
+    }
+    prev = line2;
+  }
+  return out;
+}
+function correctOrigin(f, hunks, root) {
+  if (f.origin !== "untouched") return f;
+  if (!f.file?.trim() || f.line === void 0) return { ...f, origin: "fix" };
+  const ranges = hunks[repoRelative(f.file, root)] ?? [];
+  return ranges.some((r2) => f.line >= r2.start && f.line <= r2.end) ? { ...f, origin: "fix" } : f;
 }
 function parseReview(text2) {
   if (!text2) return invalidReview();
@@ -13093,16 +13169,26 @@ function reviewScore(r2) {
   const concrete = r2.findings.some((f) => f.severity === "critical" || f.severity === "important");
   return r2.approach === "wrong" || !concrete ? 0.5 - 0.5 * r2.confidence : 0.6 - 0.1 * r2.confidence;
 }
-function synthesize(reviews, weights, validatorsOk, failingValidators = []) {
+function synthesize(reviews, weights, validatorsOk, failingValidators = [], opts = {}) {
   const names2 = Object.keys(reviews).filter((n) => reviews[n]);
-  const answered = names2.filter((n) => reviews[n].verdict !== "abstain");
-  const all = answered.flatMap((n) => reviews[n].findings);
+  const later = (opts.round ?? 1) >= 2;
+  const hunks = opts.fixHunks ?? {};
+  const rv = later ? Object.fromEntries(names2.map((n) => [n, opts.carried?.includes(n) ? reviews[n] : { ...reviews[n], findings: reviews[n].findings.map((f) => correctOrigin(f, hunks, opts.root)) }])) : reviews;
+  const wrong = new Set(names2.filter((n) => rv[n].verdict === "fail" && rv[n].approach === "wrong").flatMap((n) => rv[n].findings));
+  const deferrable = (f) => later && f.severity === "important" && f.origin === "untouched" && !wrong.has(f);
+  const blocks = (f) => f.severity === "critical" && isEvidence(f) || f.severity === "important";
+  const effective = (r2) => {
+    const b = r2.findings.filter(blocks);
+    return r2.verdict === "fail" && r2.approach !== "wrong" && b.length && b.every(deferrable) ? { ...r2, verdict: "pass" } : r2;
+  };
+  const answered = names2.filter((n) => rv[n].verdict !== "abstain");
+  const all = answered.flatMap((n) => rv[n].findings);
   const critical = all.filter((f) => f.severity === "critical" && isEvidence(f));
-  const important = all.filter((f) => f.severity === "important");
+  let important = all.filter((f) => f.severity === "important");
   const minor = all.filter((f) => f.severity === "minor" || f.severity === "critical" && !isEvidence(f));
-  const failImportant = answered.some((n) => reviews[n].verdict === "fail" && reviews[n].findings.some((f) => f.severity === "important"));
+  const failImportant = answered.some((n) => effective(rv[n]).verdict === "fail" && rv[n].findings.some((f) => f.severity === "important" && !deferrable(f)));
   const sumW = answered.reduce((s2, n) => s2 + weights[n], 0);
-  const score = answered.length && sumW > 0 ? round3(answered.reduce((s2, n) => s2 + weights[n] * reviewScore(reviews[n]), 0) / sumW) : null;
+  const score = answered.length && sumW > 0 ? round3(answered.reduce((s2, n) => s2 + weights[n] * reviewScore(effective(rv[n])), 0) / sumW) : null;
   const reasons = [];
   let action;
   if (score === null) {
@@ -13127,8 +13213,16 @@ function synthesize(reviews, weights, validatorsOk, failingValidators = []) {
     action = "fix";
     reasons.push(`score ${score} between 0.5 and 0.7`);
   }
+  let deferred = [];
+  if (action === "accept") {
+    deferred = important.filter(deferrable);
+    if (deferred.length) {
+      important = important.filter((f) => !deferrable(f));
+      reasons.push(`${deferred.length} untouched important finding(s) deferred`);
+    }
+  }
   const blocking2 = [
-    ...[...critical, ...important].map((f) => `${f.severity}|${f.file ?? ""}|${f.problem.trim().toLowerCase()}`),
+    ...[...critical, ...important].filter((f) => !deferrable(f)).map((f) => `${f.severity}|${f.file ?? ""}|${f.problem.trim().toLowerCase()}`),
     ...failingValidators.map((v) => `validator|${v.validator}|${v.failures.join("\n")}`)
   ].sort();
   const signature = (0, import_node_crypto.createHash)("sha256").update(JSON.stringify(blocking2)).digest("hex").slice(0, 16);
@@ -13140,27 +13234,9 @@ function synthesize(reviews, weights, validatorsOk, failingValidators = []) {
     important,
     minor,
     signature,
-    reviewers: names2.map((n) => ({ name: n, verdict: reviews[n].verdict, confidence: reviews[n].confidence, weight: weights[n], invalid: reviews[n].invalid === true, dropped: reviews[n].dropped ?? 0 }))
+    reviewers: names2.map((n) => ({ name: n, verdict: reviews[n].verdict, confidence: reviews[n].confidence, weight: weights[n], invalid: reviews[n].invalid === true, dropped: reviews[n].dropped ?? 0 })),
+    deferred
   };
-}
-
-// src/forge/loop.ts
-var CAP = { medium: 3, large: 4 };
-function decideRound(history, path22) {
-  const cap = CAP[path22];
-  const last = history.at(-1);
-  const round = history.filter((h) => h.action !== "accept").length;
-  const tierUp = round >= 3;
-  if (!last) return { round: 0, cap, next: "resume", reason: "no verdict yet", tierUp };
-  if (last.action === "accept") return { round, cap, next: "done", reason: "accepted", tierUp };
-  const prev = history.at(-2);
-  if (prev && prev.action !== "accept" && prev.signature === last.signature && prev.score === last.score) {
-    return { round, cap, next: "stalled", reason: "same findings and score as the previous round", tierUp };
-  }
-  if (round > cap) return { round, cap, next: "breaker", reason: `round ${round} over the cap of ${cap}`, tierUp };
-  if (last.action === "redo") return { round, cap, next: "redo", reason: `score under 0.5: start again from the brief with another approach${tierUp ? ", with an implementer one tier up" : ""}`, tierUp };
-  if (round <= 2) return { round, cap, next: "resume", reason: `round ${round}: resume the implementer`, tierUp };
-  return { round, cap, next: "fresh-stronger", reason: `round ${round}: fresh implementer one tier up`, tierUp };
 }
 
 // src/forge/proposals.ts
@@ -14019,7 +14095,7 @@ function hookLive(io, forced) {
     }
     if (event === "SessionStart" && !forced) {
       const running = Object.values(exec.tasks).filter((t) => t.status === "running").length;
-      const text2 = role === "coordinator" ? `forge: this session coordinates the execution ${exec.runId} (${exec.mode}, ${running}/${exec.parallel} running, run branch ${exec.branch}). Resume it with /forge:run \u2192 Resume: renew your lease, reconcile each task and keep stepping.` : `forge: this session is the ${role} session of ${member?.task ?? "a task"} in the execution ${exec.runId} coordinated by ${exec.coordinator}. Resume it with /forge:run \u2192 Run member: rejoin with FORGE swarm join, renew your lease and continue from your last reported stage.`;
+      const text2 = role === "coordinator" ? `forge: this session coordinates the execution ${exec.runId} (${exec.mode}, ${running}/${exec.parallel} running, run branch ${exec.branch}). Resume it with /forge:run \u2192 Resume: renew your lease, reconcile each task and keep stepping.` : `forge: this session is the ${role} session of ${member?.task ?? "a task"} in the execution ${exec.runId} coordinated by ${exec.coordinator}. Resume it with /forge:member: rejoin with FORGE swarm join, renew your lease and continue from your last reported stage.`;
       const run2 = parseRun(readRunText(main));
       const project = exec.project;
       const reply = sessionReply(run2?.active ? run2 : null, exec, () => planLocale(main, project)) ?? "";
@@ -14148,7 +14224,7 @@ function runSetup(deps, dir, root) {
   const config = loadConfig(root);
   const wt = deps.at(dir).repo;
   const mainRepo = deps.at(root).repo;
-  const repo = { ...wt, exists: (rel) => rel === ".venv" ? mainRepo.exists(rel) : wt.exists(rel) };
+  const repo = { ...wt, exists: (rel2) => rel2 === ".venv" ? mainRepo.exists(rel2) : wt.exists(rel2) };
   const plan = setupFor(repo, config.swarm.setup);
   if (!plan) return null;
   if (plan.cmd === null) return { cmd: null, ok: false, tail: [plan.hint] };
@@ -14181,8 +14257,8 @@ function commonDir(at) {
   const first = lines(at.git(["rev-parse", "--path-format=absolute", "--git-common-dir"]));
   if (first.length === 1 && import_node_path16.default.isAbsolute(first[0]) && holdsHead(first[0])) return import_node_path16.default.resolve(first[0]);
   const top = toplevel(at);
-  const rel = top ? lines(at.git(["-C", top, "rev-parse", "--git-common-dir"])) : [];
-  const dir = top && rel.length === 1 ? import_node_path16.default.resolve(top, rel[0]) : null;
+  const rel2 = top ? lines(at.git(["-C", top, "rev-parse", "--git-common-dir"])) : [];
+  const dir = top && rel2.length === 1 ? import_node_path16.default.resolve(top, rel2[0]) : null;
   return dir && holdsHead(dir) ? dir : null;
 }
 function infoFile(at, name) {
@@ -14238,7 +14314,7 @@ function manifestHash(at) {
   return h.digest("hex");
 }
 function depsCmd(at, configured) {
-  const plan = setupFor({ ...at.repo, exists: (rel) => rel !== ".venv" && at.repo.exists(rel) }, configured);
+  const plan = setupFor({ ...at.repo, exists: (rel2) => rel2 !== ".venv" && at.repo.exists(rel2) }, configured);
   return plan && plan.cmd !== null ? plan.cmd : null;
 }
 function runInstall(at, cmd, timeoutSec) {
@@ -14311,6 +14387,25 @@ function addTaskWorktree(deps, main, task, runBranch2) {
     setup = runSetup(deps, dir, main);
   }
   return { worktree: dir, branch, base: deps.at(dir).git(["rev-parse", "HEAD"])?.trim() ?? null, setup };
+}
+function memberLaunch(root, planPath, task, e) {
+  const { swarm } = loadConfig(root);
+  return [
+    "launch",
+    planPath,
+    task,
+    "--task",
+    "--run",
+    e.runId,
+    "--coordinator",
+    e.coordinator,
+    "--base",
+    e.branch,
+    "--effort",
+    swarm.member.effort,
+    ...swarm.member.model ? ["--model", swarm.member.model] : [],
+    ...swarm.launcher === "herdr" ? ["--launcher", "herdr"] : []
+  ];
 }
 function readTickInput(io, deps, e, planArg, db, sub) {
   const plan = loadPlanArg(io, planArg, sub);
@@ -14662,7 +14757,7 @@ function swarmCommand(args, io, deps) {
     return v === void 0 || v.startsWith("--") ? void 0 : v;
   };
   const has = (name) => rest.includes(`--${name}`);
-  const json = (v) => ({ code: 0, stdout: JSON.stringify(v, null, 2) + "\n", stderr: "" });
+  const json3 = (v) => ({ code: 0, stdout: JSON.stringify(v, null, 2) + "\n", stderr: "" });
   const ok = () => ({ code: 0, stdout: "ok\n", stderr: "" });
   const now = io.now();
   const iso3 = now.toISOString();
@@ -14712,7 +14807,7 @@ function swarmCommand(args, io, deps) {
       const hookSession = usable2 ?? (before?.runId === e.runId ? before.hookSession : null);
       if (hookSession !== null && hookSession === e.hookSession) throw new UsageError(`swarm join: ${hookSession} coordinates this execution`);
       writeMember(main, { sessionId: session, role, runId: e.runId, task, name: flag("name") ?? null, since: iso3, hookSession });
-      return json({ runId: e.runId, role, task, coordinator: e.coordinator, branch: e.branch, mode: e.mode, project: e.project, ...warning ? { warning } : {} });
+      return json3({ runId: e.runId, role, task, coordinator: e.coordinator, branch: e.branch, mode: e.mode, project: e.project, ...warning ? { warning } : {} });
     }
     case "report": {
       const task = taskArg();
@@ -14739,7 +14834,7 @@ function swarmCommand(args, io, deps) {
       const lease = flag("lease") && !Number.isNaN(Date.parse(flag("lease"))) ? flag("lease") : new Date(now.getTime() + LEASE_MINUTES * 6e4).toISOString();
       const p = { task, runId: e.runId, stage, status, agent: has("no-agent") ? null : flag("agent") ?? null, round, since, updatedAt: iso3, leaseUntil: lease, by: session, mode: member.role === "executor" ? "sessions" : "manual" };
       writePublicTask(main, p);
-      return json(p);
+      return json3(p);
     }
     case "next": {
       const { e, session } = memberCtx(true);
@@ -14747,7 +14842,7 @@ function swarmCommand(args, io, deps) {
       const running = Object.values(e.tasks).filter((t) => t.status === "running").length;
       const d = schedule({ plan, states, sessions, exec: { ...e, coordinator: session, parallel: Math.min(10, running + 1) }, integrated, now: now.getTime() });
       const start = d.actions.find((a) => a.type === "start");
-      return json(start ? { task: start.task, reason: null } : { task: null, reason: d.next.stallReason ?? "nothing is ready" });
+      return json3(start ? { task: start.task, reason: null } : { task: null, reason: d.next.stallReason ?? "nothing is ready" });
     }
     case "start": {
       const project = flag("project");
@@ -14890,11 +14985,11 @@ function swarmCommand(args, io, deps) {
         loose: loose.length,
         setup
       });
-      return json({ ...state, setup, baseSync, ...looseOut, announce: announce2, ...attributes });
+      return json3({ ...state, setup, baseSync, ...looseOut, announce: announce2, ...attributes });
     }
     case "status": {
       const state = readExecution(io.cwd);
-      return json({ present: state !== null, state });
+      return json3({ present: state !== null, state });
     }
     case "propose": {
       const plan = !flag("plan") && has("tasks") ? planOfLoose(loadTasksArg(io, flag("tasks"), "propose")) : loadPlanArg(io, flag("plan"), "propose");
@@ -14903,21 +14998,21 @@ function swarmCommand(args, io, deps) {
       const configured = config.swarm.mode ?? null;
       const parallel = width < 2 ? 1 : Math.min(config.swarm.parallel, width);
       const reasons = [`${plan.tasks.length} tasks`, `up to ${width} at once (dependencies and zones)`];
-      return json({ width, configured, recommended: { mode: "subagents", parallel }, reasons });
+      return json3({ width, configured, recommended: { mode: "subagents", parallel }, reasons });
     }
     case "worktree": {
       if (has("member")) {
         const task2 = taskArg();
         const { main, e: e2, session, m } = memberCtx(true);
         if (m.role === "executor" && m.task !== task2) throw new UsageError(`swarm worktree: ${session} executes ${m.task}, not ${task2}`);
-        return json(addTaskWorktree(deps, main, task2, e2.branch));
+        return json3(addTaskWorktree(deps, main, task2, e2.branch));
       }
       const task = taskArg();
       const e = current();
       const { worktree: dir, branch, base, setup } = addTaskWorktree(deps, io.cwd, task, e.branch);
       const t = e.tasks[task] ?? { status: "running", stage: "brief", round: 0, worktree: dir, branch, executor: e.mode, attempts: 0, agent: null, startedAt: iso3, stageSince: iso3, updatedAt: iso3, detail: null };
       saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, worktree: dir, branch, updatedAt: iso3 } } });
-      return json({ worktree: dir, branch, base, setup });
+      return json3({ worktree: dir, branch, base, setup });
     }
     case "task": {
       const task = taskArg();
@@ -14952,7 +15047,7 @@ function swarmCommand(args, io, deps) {
       const lease = flag("lease") && !Number.isNaN(Date.parse(flag("lease"))) ? flag("lease") : new Date(now.getTime() + LEASE_MINUTES * 6e4).toISOString();
       writePublicTask(io.cwd, { task, runId: e.runId, stage, status, agent, round, since: stageSince, updatedAt: iso3, leaseUntil: lease, by: e.coordinator, mode: prev.executor });
       if (prev.stage !== stage) appendEvent(io.cwd, { ts: iso3, kind: "phase", task, phase: stage });
-      return json(next);
+      return json3(next);
     }
     case "tick": {
       const e = current();
@@ -14987,7 +15082,9 @@ function swarmCommand(args, io, deps) {
       }
       const d = schedule({ plan, states, sessions, exec: e, integrated, now: now.getTime(), publicTasks, agents });
       saveExecution(io.cwd, d.next);
-      return json({ actions: d.actions, running: Object.values(d.next.tasks).filter((t) => t.status === "running").length, parallel: e.parallel });
+      const planPath = flag("plan");
+      const actions = e.mode === "sessions" && planPath ? d.actions.map((a) => a.type === "start" ? { ...a, launch: memberLaunch(io.cwd, planPath, a.task, e) } : a) : d.actions;
+      return json3({ actions, running: Object.values(d.next.tasks).filter((t) => t.status === "running").length, parallel: e.parallel });
     }
     case "retry": {
       const task = taskArg();
@@ -15014,7 +15111,7 @@ function swarmCommand(args, io, deps) {
           tasks: { ...e.tasks, [task]: { ...t, status: "running", stage: "implement", executor: "subagents", worktree, attempts: t.attempts + 1, nudgedAt: null, finishedAt: iso3, updatedAt: iso3, stageSince: iso3 } }
         });
         writePublicTask(io.cwd, { task, runId: e.runId, stage: "implement", status: "running", agent: null, round: t.round, since: iso3, updatedAt: iso3, leaseUntil: new Date(now.getTime() + LEASE_MINUTES * 6e4).toISOString(), by: e.coordinator, mode: "subagents" });
-        return json({ task, adopted: true, previous: t.executor, worktree, branch: t.branch });
+        return json3({ task, adopted: true, previous: t.executor, worktree, branch: t.branch });
       }
       if (!t || t.status !== "conflict" && t.status !== "blocked") throw new UsageError(`swarm retry: ${task} is not in conflict or blocked`);
       const revive = !e.active && e.stopReason === "stalled";
@@ -15047,14 +15144,14 @@ function swarmCommand(args, io, deps) {
         const es2 = (planArg ? loadPlanArg(io, planArg, "nudge").locale : planLocale(io.cwd, e.project)) === "es";
         const text2 = es2 ? `[forge run] ${task}: contin\xFAa con ${t.stage}; si est\xE1s bloqueado, m\xE1rcalo como bloqueado` : `[forge run] ${task}: continue with ${t.stage}; if you are blocked, mark it blocked`;
         saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, nudgedAt: iso3 } } });
-        return json({ task, name: `wp-${e.project}-${task}`, text: text2 });
+        return json3({ task, name: `wp-${e.project}-${task}`, text: text2 });
       }
       const planPath = planArg;
       if (!planPath) throw new UsageError("swarm relaunch: --plan is required");
       const verdict = relaunchOrBlock(task, t.attempts);
       if (verdict.type === "block") {
         saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, status: "blocked", detail: verdict.reason, updatedAt: iso3, finishedAt: iso3 } } });
-        return json({ task, blocked: true, reason: verdict.reason });
+        return json3({ task, blocked: true, reason: verdict.reason });
       }
       const attempt = verdict.attempt;
       const log = deps.git(["log", "--oneline", "-n", "20", `${e.branch}..${t.branch}`])?.trim();
@@ -15078,7 +15175,7 @@ function swarmCommand(args, io, deps) {
         ""
       ].join("\n"));
       saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, attempts: attempt, startedAt: iso3, nudgedAt: null, updatedAt: iso3 } } });
-      return json({ task, attempt, note, launch: ["launch", planPath, task, "--task", "--run", e.runId, "--coordinator", e.coordinator, "--base", e.branch] });
+      return json3({ task, attempt, note, launch: memberLaunch(io.cwd, planPath, task, e) });
     }
     case "sleep": {
       const seconds = Number(rest[0]);
@@ -15110,7 +15207,7 @@ function swarmCommand(args, io, deps) {
       if (!e.active) throw new UsageError("swarm takeover: the execution is not active");
       if (session === e.coordinator || session === e.hookSession) {
         if (e.coordinator !== session || e.hookSession !== null) saveExecution(io.cwd, { ...e, coordinator: session, hookSession: null });
-        return json({ took: "already", runId: e.runId });
+        return json3({ took: "already", runId: e.runId });
       }
       if (readMember(io.cwd, session)?.runId === e.runId) throw new UsageError(`swarm takeover: ${session} is a member of the execution ${e.runId}; a run member cannot take over the coordinator`);
       const previous = e.hookSession ?? e.coordinator;
@@ -15129,10 +15226,10 @@ function swarmCommand(args, io, deps) {
       }
       if (!seen.length) seen.push(now.getTime() - Date.parse(e.lastStepAt ?? e.startedAt) >= TAKEOVER_MIN * 6e4 ? "stopped" : "alive");
       const liveness2 = seen.reduce((a, b) => order.indexOf(b) > order.indexOf(a) ? b : a, "stopped");
-      if (liveness2 !== "stopped") return json({ took: false, previous, liveness: liveness2, joinAs: "manual" });
+      if (liveness2 !== "stopped") return json3({ took: false, previous, liveness: liveness2, joinAs: "manual" });
       saveExecution(io.cwd, { ...e, coordinator: session, hookSession: null, sleepUntil: null });
       appendEvent(io.cwd, { ts: iso3, kind: "decision", point: "takeover", what: "takeover", chosen: session, why: `the coordinator ${previous} stopped`, by: "user", weight: "minor", previous, session, runId: e.runId });
-      return json({ took: true, previous, runId: e.runId, running: Object.entries(e.tasks).filter(([, t]) => t.status === "running").map(([id2]) => id2) });
+      return json3({ took: true, previous, runId: e.runId, running: Object.entries(e.tasks).filter(([, t]) => t.status === "running").map(([id2]) => id2) });
     }
     case "integrate":
       return integrate(rest, io, deps);
@@ -15143,14 +15240,708 @@ function swarmCommand(args, io, deps) {
   }
 }
 
-// src/forge/tools.ts
+// src/forge/cli/review.ts
 var import_node_fs16 = require("node:fs");
 var import_node_path18 = __toESM(require("node:path"), 1);
 
-// src/forge/superpowers.ts
+// src/forge/loop.ts
+var CAP = { medium: 3, large: 4 };
+function decideRound(history, path24) {
+  const cap = CAP[path24];
+  const latest = history.at(-1);
+  const round = history.filter((h) => h.action !== "accept").length;
+  const tierUp = round >= 3;
+  const last = round === cap;
+  const lastNote = last ? " (the last attempt before the breaker: impl-heavy)" : "";
+  if (!latest) return { round: 0, cap, next: "resume", reason: "no verdict yet", tierUp, last: false };
+  if (latest.action === "accept") return { round, cap, next: "done", reason: "accepted", tierUp, last: false };
+  const prev = history.at(-2);
+  if (prev && prev.action !== "accept" && prev.signature === latest.signature && prev.score === latest.score) {
+    return { round, cap, next: "stalled", reason: "same findings and score as the previous round", tierUp, last: false };
+  }
+  if (round > cap) return { round, cap, next: "breaker", reason: `round ${round} over the cap of ${cap}`, tierUp, last: false };
+  if (latest.action === "redo") return { round, cap, next: "redo", reason: `score under 0.5: start again from the brief with another approach${tierUp ? ", with an implementer one tier up" : ""}${lastNote}`, tierUp, last };
+  if (round <= 2) return { round, cap, next: "resume", reason: `round ${round}: resume the implementer${lastNote}`, tierUp, last };
+  return { round, cap, next: "fresh-stronger", reason: `round ${round}: fresh implementer one tier up${lastNote}`, tierUp, last };
+}
+var IMPL_LADDER = ["mech", "impl-light", "impl", "impl-high", "impl-heavy"];
+function stepUp(role) {
+  return IMPL_LADDER[Math.min(IMPL_LADDER.indexOf(role) + 1, IMPL_LADDER.length - 1)];
+}
+function nextImplementer(d, current) {
+  if (d.next !== "resume" && d.next !== "fresh-stronger" && d.next !== "redo") return null;
+  if (d.last) return "impl-heavy";
+  if (d.next === "fresh-stronger" || d.next === "redo" && d.tierUp) return stepUp(current);
+  return current;
+}
+
+// src/forge/round.ts
+function roundDecision(events, task, p, profile) {
+  const verdicts = events.filter((e) => e.kind === "verdict" && e.task === task && (e.action === "accept" || e.action === "fix" || e.action === "redo"));
+  const lastPerDir = /* @__PURE__ */ new Map();
+  verdicts.forEach((e, i) => {
+    if (typeof e.dir === "string") lastPerDir.set(e.dir, i);
+  });
+  const history = verdicts.filter((e, i) => typeof e.dir !== "string" || lastPerDir.get(e.dir) === i).map((e) => ({ action: e.action, score: typeof e.score === "number" ? e.score : null, signature: String(e.signature ?? "") }));
+  const d = decideRound(history, p);
+  const base = task.replace(/-\d+$/, "");
+  const ofTask2 = (e) => typeof e.task === "string" && (e.task === base || e.task.startsWith(`${base}-`) && /^\d+$/.test(e.task.slice(base.length + 1)));
+  const ladder = events.filter((e) => e.kind === "agent" && ofTask2(e) && IMPL_LADDER.includes(e.role));
+  const logged = (ladder.filter((e) => e.task === task).at(-1) ?? ladder.at(-1))?.role;
+  const triaged = events.filter((e) => e.kind === "triage" && ofTask2(e)).at(-1);
+  const sensitive = Array.isArray(triaged?.sensitive) ? triaged.sensitive.filter((z) => ZONE_ORDER.includes(z)) : [];
+  const current = logged ?? implementerFor({ path: p, sensitive }, "", { plan: true }).role ?? "impl";
+  const role = nextImplementer(d, current);
+  return { ...d, implementer: role ? { role, agent: agentFor(role, profile) } : null };
+}
+
+// src/forge/shadow.ts
 var import_node_fs15 = require("node:fs");
-var import_node_os = require("node:os");
 var import_node_path17 = __toESM(require("node:path"), 1);
+var DEFAULT_SHADOW_BRIEFS = 10;
+var LINE_WINDOW = 10;
+var OVERLAP = 0.3;
+var PASS_RATIO = 0.9;
+var shadowFile = (root) => import_node_path17.default.join(root, ".forge", "shadow.json");
+var isFinding = (x) => !!x && typeof x === "object" && typeof x.problem === "string" && typeof x.severity === "string";
+var isFindings = (x) => Array.isArray(x) && x.every(isFinding);
+function isCase(x) {
+  if (!x || typeof x !== "object") return false;
+  const c = x;
+  return typeof c.task === "string" && typeof c.reviewer === "string" && [c.xhigh, c.recovered, c.missed, c.missedCritical, c.highOnly].every(isFindings);
+}
+function parseShadow(text2) {
+  if (text2 == null) return null;
+  try {
+    const o = JSON.parse(text2);
+    if (!o || typeof o !== "object" || !Number.isInteger(o.remaining) || o.remaining < 0) return null;
+    if (!Array.isArray(o.cases) || !o.cases.every(isCase)) return null;
+    return { remaining: o.remaining, cases: o.cases };
+  } catch {
+    return null;
+  }
+}
+function readShadow(root) {
+  const file = shadowFile(root);
+  if (!(0, import_node_fs15.existsSync)(file)) return null;
+  try {
+    return parseShadow((0, import_node_fs15.readFileSync)(file, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function saveShadow(root, state) {
+  forgeDir(root);
+  const file = shadowFile(root);
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    (0, import_node_fs15.writeFileSync)(tmp, JSON.stringify(state, null, 2) + "\n");
+    (0, import_node_fs15.renameSync)(tmp, file);
+  } finally {
+    (0, import_node_fs15.rmSync)(tmp, { force: true });
+  }
+}
+function startShadow(root, briefs = DEFAULT_SHADOW_BRIEFS, opts = {}) {
+  if (!Number.isInteger(briefs) || briefs < 1) throw new Error(`shadow: briefs must be a positive integer, got ${briefs}`);
+  const state = { remaining: briefs, cases: opts.reset ? [] : readShadow(root)?.cases ?? [] };
+  saveShadow(root, state);
+  return state;
+}
+function stopShadow(root) {
+  const s2 = readShadow(root);
+  if (!s2) return null;
+  const state = { ...s2, remaining: 0 };
+  saveShadow(root, state);
+  return state;
+}
+function takeBrief(root) {
+  const s2 = readShadow(root);
+  if (!s2 || s2.remaining <= 0) return false;
+  saveShadow(root, { ...s2, remaining: s2.remaining - 1 });
+  return true;
+}
+var words2 = (s2) => new Set((s2.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length >= 3));
+function jaccard2(a, b) {
+  if (!a.size && !b.size) return 0;
+  let inter = 0;
+  for (const w of a) if (b.has(w)) inter++;
+  return inter / (a.size + b.size - inter);
+}
+var normPath2 = (p) => p.replace(/\\/g, "/").replace(/^\.\//, "");
+function nearby(a, b) {
+  return !!a.file && !!b.file && normPath2(a.file) === normPath2(b.file) && Number.isFinite(a.line) && Number.isFinite(b.line) && Math.abs(a.line - b.line) <= LINE_WINDOW;
+}
+var overlapping = (a, b) => jaccard2(words2(a.problem), words2(b.problem)) >= OVERLAP;
+var isBlocker = (f) => f.severity === "critical" || f.severity === "important";
+function buildCase(task, reviewer, high, xhigh) {
+  const hb = high.filter(isBlocker);
+  const xb = xhigh.filter(isBlocker);
+  const pairOf = new Array(xb.length).fill(-1);
+  const used = /* @__PURE__ */ new Set();
+  for (const test of [nearby, overlapping]) {
+    xb.forEach((x, i) => {
+      if (pairOf[i] >= 0) return;
+      const j = hb.findIndex((h, k) => !used.has(k) && test(x, h));
+      if (j >= 0) {
+        pairOf[i] = j;
+        used.add(j);
+      }
+    });
+  }
+  const recovered = xb.filter((_, i) => pairOf[i] >= 0);
+  const missed = xb.filter((_, i) => pairOf[i] < 0);
+  return {
+    task,
+    reviewer,
+    xhigh: xb,
+    recovered,
+    missed,
+    missedCritical: missed.filter((f) => f.severity === "critical"),
+    highOnly: hb.filter((_, k) => !used.has(k))
+  };
+}
+function shadowReport(cases) {
+  const by = /* @__PURE__ */ new Map();
+  for (const c of cases) by.set(c.reviewer, [...by.get(c.reviewer) ?? [], c]);
+  return [...by.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([reviewer, cs]) => {
+    const xhighBlockers = cs.reduce((n, c) => n + c.xhigh.length, 0);
+    const recovered = cs.reduce((n, c) => n + c.recovered.length, 0);
+    const missedCritical = cs.reduce((n, c) => n + c.missedCritical.length, 0);
+    const ratio = xhighBlockers ? recovered / xhighBlockers : 1;
+    return {
+      reviewer,
+      cases: cs.length,
+      xhighBlockers,
+      recovered,
+      recoveredPct: Math.round(ratio * 100),
+      missedCritical,
+      highOnly: cs.reduce((n, c) => n + c.highOnly.length, 0),
+      missedCases: cs.filter((c) => c.missed.length).map((c) => ({ task: c.task, missed: c.missed })),
+      passes: ratio >= PASS_RATIO && missedCritical === 0
+    };
+  });
+}
+var TEXT = {
+  es: {
+    none: "No hay casos en sombra.",
+    cases: "casos",
+    xhigh: "bloqueantes de xhigh",
+    rec: "recuperados por high",
+    crit: "cr\xEDticos perdidos",
+    only: "solo de high",
+    pass: "cumple",
+    fail: "no cumple",
+    missed: "perdidos"
+  },
+  en: {
+    none: "No shadow cases.",
+    cases: "cases",
+    xhigh: "xhigh blockers",
+    rec: "recovered by high",
+    crit: "criticals missed",
+    only: "high only",
+    pass: "passes",
+    fail: "fails",
+    missed: "missed"
+  }
+};
+var where = (f) => f.file ? f.line != null ? `${f.file}:${f.line}` : f.file : "-";
+function renderShadowReport(report, lang = "es") {
+  const t = TEXT[lang];
+  if (!report.length) return t.none + "\n";
+  const out = [];
+  for (const r2 of report) {
+    out.push(`${r2.reviewer}: ${r2.passes ? t.pass : t.fail}`);
+    out.push(`  ${t.cases}: ${r2.cases} \xB7 ${t.xhigh}: ${r2.xhighBlockers} \xB7 ${t.rec}: ${r2.recovered} (${r2.recoveredPct} %) \xB7 ${t.crit}: ${r2.missedCritical} \xB7 ${t.only}: ${r2.highOnly}`);
+    for (const c of r2.missedCases) {
+      out.push(`  ${c.task} \u2014 ${t.missed}:`);
+      for (const f of c.missed) out.push(`    [${f.severity}] ${where(f)} ${f.problem}`);
+    }
+  }
+  return out.join("\n") + "\n";
+}
+
+// src/forge/cli/shadow.ts
+var USAGE = "usage: forge shadow start [--tasks <N>] [--reset] | stop | report [--locale es|en]";
+var json = (v) => ({ code: 0, stdout: JSON.stringify(v, null, 2) + "\n", stderr: "" });
+function flagOf(args, name) {
+  const i = args.indexOf(`--${name}`);
+  const v = i >= 0 ? args[i + 1] : void 0;
+  return v === void 0 || v.startsWith("--") ? void 0 : v;
+}
+var STATUS = {
+  es: { none: "Prueba en sombra: no iniciada", open: (n) => `Prueba en sombra: abierta, quedan ${n} briefs`, closed: "Prueba en sombra: cerrada" },
+  en: { none: "Shadow test: not started", open: (n) => `Shadow test: open, ${n} briefs left`, closed: "Shadow test: closed" }
+};
+function shadowCommand(args, cwd2) {
+  const sub = args[0];
+  switch (sub) {
+    case "start": {
+      let tasks = DEFAULT_SHADOW_BRIEFS;
+      if (args.includes("--tasks")) {
+        const v = flagOf(args, "tasks");
+        if (v === void 0 || !/^\d+$/.test(v) || Number(v) < 1) throw new UsageError("shadow start: --tasks must be a positive integer");
+        tasks = Number(v);
+      }
+      const s2 = startShadow(cwd2, tasks, { reset: args.includes("--reset") });
+      return json({ remaining: s2.remaining, cases: s2.cases.length });
+    }
+    case "stop": {
+      const s2 = stopShadow(cwd2);
+      return json({ remaining: 0, cases: s2 ? s2.cases.length : 0 });
+    }
+    case "report": {
+      const locale = flagOf(args, "locale");
+      if (args.includes("--locale") && locale !== "es" && locale !== "en") throw new UsageError("shadow report: --locale must be es or en");
+      const lang = locale === "en" ? "en" : "es";
+      const s2 = readShadow(cwd2);
+      const t = STATUS[lang];
+      const status = !s2 ? t.none : s2.remaining > 0 ? t.open(s2.remaining) : t.closed;
+      return { code: 0, stdout: `${status}
+
+${renderShadowReport(shadowReport(s2?.cases ?? []), lang)}`, stderr: "" };
+    }
+    default:
+      throw new UsageError(USAGE);
+  }
+}
+
+// src/forge/review-round.ts
+var reviewerKey = (role) => role.slice("review-".length);
+var normPath3 = (p) => p.trim().replace(/\\/g, "/").replace(/^(\.\/)+/, "");
+function reviewRound(input) {
+  const { review, files } = input;
+  const round = Math.max(1, Math.floor(input.round));
+  const base = (r2) => ({
+    brief: files.brief,
+    diff: files.diff,
+    validators: files.validators,
+    out: files.out,
+    ...r2.role === "review-correctness" && files.report ? { report: files.report } : {}
+  });
+  const entry = (r2, mode, inputs) => ({ role: r2.role, name: reviewerKey(r2.role), agent: r2.agent, model: r2.model, effort: r2.effort, mode, twin: false, inputs });
+  if (round === 1) {
+    const spawn2 = review.reviewers.map((r2) => entry(r2, "full", base(r2)));
+    const shadow = !!input.shadowOpen && !review.light && (input.path === "medium" || input.path === "large");
+    const twins = shadow ? review.reviewers.filter((r2) => r2.effort === "high").map((r2) => ({ ...entry(r2, "full", { ...base(r2), out: files.shadow }), effort: "xhigh", twin: true })) : [];
+    return { round, spawn: [...spawn2, ...twins], carried: [], shadow: twins.length > 0 };
+  }
+  if (input.redo) return { round, spawn: review.reviewers.map((r2) => entry(r2, "full", base(r2))), carried: [], shadow: false };
+  const fixFiles = new Set((input.fixFiles ?? []).map(normPath3));
+  const fixZones = input.fixZones ?? [];
+  const spawn = [];
+  const carried = [];
+  for (const r2 of review.reviewers) {
+    const prev = input.previous?.[r2.role];
+    if (!prev) {
+      spawn.push(entry(r2, "full", base(r2)));
+      continue;
+    }
+    const name = reviewerKey(r2.role);
+    const repeats = prev.verdict !== "pass" || r2.role === "review-correctness" || r2.role === "review-security" && fixZones.length > 0 || r2.role === "review-perf" && prev.findings.some((f) => !!f.file && fixFiles.has(normPath3(f.file)));
+    if (!repeats) {
+      carried.push({ role: r2.role, name, verdict: prev.verdict });
+      continue;
+    }
+    spawn.push(entry(r2, "delta", {
+      ...base(r2),
+      ...files.fix ? { fix: files.fix } : {},
+      ...files.findings ? { findings: files.findings(name) } : {}
+    }));
+  }
+  return { round, spawn, carried, shadow: false };
+}
+
+// src/forge/cli/review.ts
+var ROLES2 = ["review-correctness", "review-security", "review-perf"];
+var EFFORTS2 = ["medium", "high", "xhigh"];
+var TASK_N = /^([A-Za-z0-9_.~:@+]+(?:-[A-Za-z0-9_.~:@+]+)*)-(\d{1,4})$/;
+var json2 = (v, code = 0) => ({ code, stdout: JSON.stringify(v, null, 2) + "\n", stderr: "" });
+var rel = (cwd2, p) => import_node_path18.default.relative(cwd2, p).split(import_node_path18.default.sep).join("/") || ".";
+var ofTask = (base) => (e) => typeof e.task === "string" && (e.task === base || e.task.startsWith(`${base}-`) && /^\d+$/.test(e.task.slice(base.length + 1)));
+function triageReview(events, base, profile) {
+  const last = events.filter((e) => e.kind === "triage" && ofTask(base)(e) && e.review && typeof e.review === "object").at(-1);
+  if (!last) return null;
+  const r2 = last.review;
+  if (!Array.isArray(r2.reviewers)) return null;
+  const reviewers = [];
+  for (const x of r2.reviewers) {
+    if (!x || typeof x !== "object" || !ROLES2.includes(x.role)) continue;
+    const role = x.role;
+    const effort = EFFORTS2.includes(x.effort) ? x.effort : "high";
+    reviewers.push({ role, agent: typeof x.agent === "string" && x.agent ? x.agent : agentFor(role, profile), model: x.model === "sonnet" ? "sonnet" : null, effort });
+  }
+  if (!reviewers.length) return null;
+  return { light: r2.light === true, reviewers, flags: Array.isArray(r2.flags) ? r2.flags.filter((f) => typeof f === "string") : [] };
+}
+function reviewRoundOf(events, task) {
+  const dirs = new Set(events.filter((e) => e.kind === "verdict" && e.task === task).map((e, i) => typeof e.dir === "string" ? e.dir : `#${i}`));
+  return dirs.size + 1;
+}
+function readJson(file) {
+  try {
+    return JSON.parse((0, import_node_fs16.readFileSync)(file, "utf8"));
+  } catch {
+    return void 0;
+  }
+}
+function reviewPrep(args, deps) {
+  const flag = (name) => {
+    const i = args.indexOf(`--${name}`);
+    const v = i >= 0 ? args[i + 1] : void 0;
+    return v === void 0 || v.startsWith("--") ? void 0 : v;
+  };
+  const task = flag("task"), p = flag("path"), baseSha = flag("base"), baselineArg = flag("baseline"), dirArg = flag("dir");
+  if (!task || !p || !baseSha || !baselineArg || !dirArg) throw new UsageError("review-prep: --task <id>-<n>, --path, --base, --baseline and --dir are required");
+  const m = TASK_N.exec(task);
+  if (!m) throw new UsageError("review-prep: --task must be <id>-<n>");
+  if (!PATH_ORDER.includes(p)) throw new UsageError(`review-prep: --path must be one of ${PATH_ORDER.join("|")}`);
+  const locale = flag("locale");
+  if (args.includes("--locale") && locale !== "es" && locale !== "en") throw new UsageError("review-prep: --locale must be es or en");
+  const [, id2, n] = m;
+  const pathName = p;
+  let baseline;
+  try {
+    baseline = JSON.parse((0, import_node_fs16.readFileSync)(import_node_path18.default.resolve(deps.cwd, baselineArg), "utf8"));
+  } catch {
+    throw new UsageError("review-prep: --baseline must be the JSON written by forge validate");
+  }
+  const config = loadConfig(deps.repoDir);
+  const events = readEvents(deps.cwd);
+  const parent = /^(.+)-\d+$/.exec(id2)?.[1];
+  const review = triageReview(events, id2, config.profile) ?? (parent ? triageReview(events.filter((e) => e.task === parent), parent, config.profile) : null);
+  if (!review) throw new UsageError(`review-prep: no triage of ${id2}${parent ? ` nor of ${parent}` : ""} logged a review: run FORGE triage --task ${id2} first`);
+  const head = (deps.git(["rev-parse", "HEAD"]) ?? "").trim();
+  if (!head) throw new UsageError("review-prep: cannot read HEAD");
+  const diff = deps.git(["diff", `${baseSha}..HEAD`]);
+  if (diff === null) throw new UsageError(`review-prep: cannot diff ${baseSha}..HEAD`);
+  const dir = import_node_path18.default.resolve(deps.cwd, dirArg);
+  const round = reviewRoundOf(events, task);
+  const roundDir = import_node_path18.default.join(dir, `reviews-${n}-${round}`);
+  (0, import_node_fs16.mkdirSync)(roundDir, { recursive: true });
+  const changed = deps.git(["diff", "--name-only", `${baseSha}..HEAD`]);
+  const scope = pathName === "trivial" || pathName === "small" ? { mode: "small" } : { mode: "heavy", changed: changed === null ? null : changed.split("\n").map((s2) => s2.trim()).filter(Boolean) };
+  const results = markPreexisting(
+    runValidators(selectValidators(detectValidators(deps.repo, config), scope), deps.exec, config.validatorTimeoutSec),
+    baseline
+  );
+  const ok = results.every((r2) => !blocking(r2));
+  const validatorsFile = import_node_path18.default.join(dir, `validators-${n}.json`);
+  (0, import_node_fs16.writeFileSync)(validatorsFile, JSON.stringify(results, null, 2) + "\n");
+  appendEvent(deps.cwd, { ts: deps.now().toISOString(), kind: "validate", task, ok, results: results.map((r2) => ({ validator: r2.validator, ok: r2.ok, flaky: r2.flaky, ...r2.skipped ? { skipped: r2.skipped } : {}, ...r2.preexisting ? { preexisting: true } : {}, ...r2.ok ? {} : { failures: r2.failures } })) });
+  const diffFile = import_node_path18.default.join(dir, `diff-${n}.patch`);
+  (0, import_node_fs16.writeFileSync)(diffFile, diff);
+  const previous = {};
+  let fixFiles = [];
+  const fixFile = import_node_path18.default.join(dir, `fix-${n}-${round}.patch`);
+  const findingsFile = (name) => import_node_path18.default.join(roundDir, `previous-${name}.json`);
+  const prevReviews = {};
+  if (round >= 2) {
+    const prevDir = import_node_path18.default.join(dir, `reviews-${n}-${round - 1}`);
+    for (const role of ROLES2) {
+      const file = import_node_path18.default.join(prevDir, `${reviewerKey(role)}.json`);
+      if (!(0, import_node_fs16.existsSync)(file)) continue;
+      const r2 = parseReview((0, import_node_fs16.readFileSync)(file, "utf8"));
+      prevReviews[reviewerKey(role)] = r2;
+      previous[role] = { verdict: r2.verdict, findings: r2.findings };
+    }
+    const prevHead = (0, import_node_fs16.existsSync)(import_node_path18.default.join(prevDir, "head.txt")) ? (0, import_node_fs16.readFileSync)(import_node_path18.default.join(prevDir, "head.txt"), "utf8").trim() : "";
+    const diffFrom = (from) => {
+      const names2 = deps.git(["diff", "--name-only", `${from}..HEAD`]);
+      const patch = names2 === null ? null : deps.git(["diff", `${from}..HEAD`]);
+      return names2 === null || patch === null ? null : { names: names2, patch };
+    };
+    const fix = (prevHead ? diffFrom(prevHead) : null) ?? diffFrom(baseSha);
+    if (!fix) throw new UsageError(`review-prep: cannot diff the fix (${prevHead || baseSha}..HEAD)`);
+    fixFiles = fix.names.split("\n").map((s2) => s2.trim()).filter(Boolean);
+    (0, import_node_fs16.writeFileSync)(fixFile, fix.patch);
+  }
+  const redo = round >= 2 && events.filter((e) => e.kind === "verdict" && e.task === task).at(-1)?.action === "redo";
+  const planFile = import_node_path18.default.join(roundDir, "review-plan.json");
+  const earlier = readJson(planFile);
+  const twinsAllowed = round === 1 && !review.light && (pathName === "medium" || pathName === "large") && review.reviewers.some((r2) => r2.effort === "high");
+  const shadowOpen = twinsAllowed && (earlier && typeof earlier.shadow === "boolean" ? earlier.shadow : takeBrief(deps.cwd));
+  const brief = import_node_path18.default.join(dir, `brief-${n}.md`);
+  const report = import_node_path18.default.join(dir, `report-${n}.txt`);
+  let tdd = false;
+  try {
+    tdd = /^TDD: required/m.test((0, import_node_fs16.readFileSync)(brief, "utf8"));
+  } catch {
+  }
+  const plan = reviewRound({
+    review,
+    round,
+    path: pathName,
+    previous,
+    fixFiles,
+    fixZones: zonesFromPaths(fixFiles),
+    shadowOpen,
+    redo,
+    files: {
+      brief: rel(deps.cwd, brief),
+      diff: rel(deps.cwd, diffFile),
+      validators: rel(deps.cwd, validatorsFile),
+      out: rel(deps.cwd, roundDir),
+      shadow: rel(deps.cwd, import_node_path18.default.join(roundDir, "shadow")),
+      ...round >= 2 ? { fix: rel(deps.cwd, fixFile), findings: (name) => rel(deps.cwd, findingsFile(name)) } : {},
+      ...tdd && (0, import_node_fs16.existsSync)(report) ? { report: rel(deps.cwd, report) } : {}
+    }
+  });
+  if (plan.shadow) (0, import_node_fs16.mkdirSync)(import_node_path18.default.join(roundDir, "shadow"), { recursive: true });
+  for (const s2 of plan.spawn.filter((s3) => s3.mode === "delta" && !s3.twin)) {
+    const blockers = (previous[s2.role]?.findings ?? []).filter((f) => f.severity === "critical" || f.severity === "important");
+    (0, import_node_fs16.writeFileSync)(findingsFile(s2.name), JSON.stringify(blockers, null, 2) + "\n");
+  }
+  for (const c of plan.carried) {
+    const raw = readJson(import_node_path18.default.join(dir, `reviews-${n}-${round - 1}`, `${c.name}.json`));
+    const parsed = prevReviews[c.name];
+    const prev = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : { verdict: parsed.verdict, confidence: parsed.confidence, findings: parsed.findings };
+    (0, import_node_fs16.writeFileSync)(import_node_path18.default.join(roundDir, `${c.name}.json`), JSON.stringify({ ...prev, carried: true }, null, 2) + "\n");
+  }
+  const spawn = plan.spawn.map((s2) => ({ agent: s2.agent, model: s2.model, effort: s2.effort, mode: s2.mode, ...s2.twin ? { twin: true } : {}, role: s2.role, inputs: s2.inputs }));
+  (0, import_node_fs16.writeFileSync)(import_node_path18.default.join(roundDir, "head.txt"), head + "\n");
+  (0, import_node_fs16.writeFileSync)(planFile, JSON.stringify({
+    task,
+    round,
+    path: pathName,
+    base: baseSha,
+    head,
+    light: review.light,
+    flags: review.flags,
+    shadow: plan.shadow,
+    spawn,
+    carried: plan.carried
+  }, null, 2) + "\n");
+  const failing = results.filter(blocking).map((r2) => r2.validator);
+  const preexisting = results.filter((r2) => r2.ok !== true && r2.preexisting === true).map((r2) => r2.validator);
+  const out = {
+    round,
+    validators: { ok, failing, preexisting, file: rel(deps.cwd, validatorsFile) },
+    spawn,
+    ...plan.carried.length ? { carried: plan.carried.map((c) => c.name) } : {}
+  };
+  if (locale === "es" || locale === "en") out.say = sayPrep(round, ok, failing, plan, locale);
+  return json2(out);
+}
+function sayPrep(round, ok, failing, plan, locale) {
+  const who = plan.spawn.filter((s2) => !s2.twin).map((s2) => `${s2.name} (${s2.effort}${s2.mode === "delta" ? ", delta" : ""})`).join(", ");
+  const twins = plan.spawn.filter((s2) => s2.twin).length;
+  if (locale === "es") {
+    return `Ronda ${round}: validadores ${ok ? "en verde" : `en rojo (${failing.join(", ")})`}; revisan ${who || "nadie"}${plan.carried.length ? `; se arrastran ${plan.carried.map((c) => c.name).join(", ")}` : ""}${twins ? `; ${twins} gemelo(s) en sombra` : ""}.`;
+  }
+  return `Round ${round}: validators ${ok ? "green" : `red (${failing.join(", ")})`}; reviewing: ${who || "nobody"}${plan.carried.length ? `; carried: ${plan.carried.map((c) => c.name).join(", ")}` : ""}${twins ? `; ${twins} shadow twin(s)` : ""}.`;
+}
+function reviewClose(args, deps) {
+  const flag = (name) => {
+    const i = args.indexOf(`--${name}`);
+    const v = i >= 0 ? args[i + 1] : void 0;
+    return v === void 0 || v.startsWith("--") ? void 0 : v;
+  };
+  const task = flag("task"), p = flag("path"), dirArg = flag("dir");
+  if (!task || !p || !dirArg) throw new UsageError("review-close: --task <id>-<n>, --dir and --path are required");
+  const m = TASK_N.exec(task);
+  if (!m) throw new UsageError("review-close: --task must be <id>-<n>");
+  if (p !== "medium" && p !== "large") throw new UsageError("review-close: --path must be medium or large");
+  const n = m[2];
+  let dir = import_node_path18.default.resolve(deps.cwd, dirArg);
+  let round = 0;
+  const own = new RegExp(`^reviews-${n}-(\\d+)$`).exec(import_node_path18.default.basename(dir));
+  if (own) {
+    round = Number(own[1]);
+    dir = import_node_path18.default.dirname(dir);
+  } else {
+    let entries = [];
+    try {
+      entries = (0, import_node_fs16.readdirSync)(dir);
+    } catch {
+    }
+    for (const e of entries) {
+      const r2 = new RegExp(`^reviews-${n}-(\\d+)$`).exec(e);
+      if (r2 && (0, import_node_fs16.existsSync)(import_node_path18.default.join(dir, e, "review-plan.json"))) round = Math.max(round, Number(r2[1]));
+    }
+  }
+  const roundDir = import_node_path18.default.join(dir, `reviews-${n}-${round}`);
+  const plan = readJson(import_node_path18.default.join(roundDir, "review-plan.json"));
+  if (!round || !plan || typeof plan !== "object") throw new UsageError(`review-close: no review-plan.json for ${task} in ${dirArg}: run FORGE review-prep first`);
+  const names2 = (list, keep) => (Array.isArray(list) ? list : []).filter((x) => x && typeof x === "object" && keep(x)).map((x) => typeof x.name === "string" ? x.name : typeof x.role === "string" && ROLES2.includes(x.role) ? reviewerKey(x.role) : null).filter((x) => x === "correctness" || x === "security" || x === "perf");
+  const spawned = names2(plan.spawn, (x) => x.twin !== true);
+  const carried = names2(plan.carried, () => true);
+  const missing = [.../* @__PURE__ */ new Set([...spawned, ...carried])].map((k) => import_node_path18.default.join(roundDir, `${k}.json`)).filter((f) => !(0, import_node_fs16.existsSync)(f));
+  if (missing.length) return json2({ missing: missing.map((f) => rel(deps.cwd, f)) }, 3);
+  const reviews = {};
+  for (const k of ["correctness", "security", "perf"]) {
+    const file = import_node_path18.default.join(roundDir, `${k}.json`);
+    if ((0, import_node_fs16.existsSync)(file)) reviews[k] = parseReview((0, import_node_fs16.readFileSync)(file, "utf8"));
+  }
+  const verifyPath = import_node_path18.default.join(roundDir, "verify.json");
+  const verifyFile = (0, import_node_fs16.existsSync)(verifyPath) ? parseVerifyFile((0, import_node_fs16.readFileSync)(verifyPath, "utf8")) : void 0;
+  if (verifyFile !== void 0) reviews.verify = verifyReview(verifyFile);
+  if (!Object.keys(reviews).length) throw new UsageError(`review-close: no reviews found in ${rel(deps.cwd, roundDir)}`);
+  const rows = readJson(import_node_path18.default.join(dir, `validators-${n}.json`));
+  const arr = Array.isArray(rows) ? rows.filter((r2) => r2 && typeof r2 === "object") : [];
+  const validatorsOk = Array.isArray(rows) && arr.every((r2) => !blocking(r2));
+  const failing = arr.filter((r2) => blocking(r2)).map((r2) => ({ validator: String(r2.validator ?? ""), failures: Array.isArray(r2.failures) ? r2.failures.map(String) : [] }));
+  const preexisting = arr.filter((r2) => r2.ok !== true && r2.preexisting === true).map((r2) => String(r2.validator ?? ""));
+  const flags = Array.isArray(plan.flags) ? plan.flags : [];
+  const fixPatch = round >= 2 ? (() => {
+    try {
+      return (0, import_node_fs16.readFileSync)(import_node_path18.default.join(dir, `fix-${n}-${round}.patch`), "utf8");
+    } catch {
+      return "";
+    }
+  })() : "";
+  const result = synthesize(
+    reviews,
+    weightsFor({ sensitive: flags.includes("--sensitive"), perf: flags.includes("--perf") }),
+    validatorsOk,
+    failing,
+    { round, fixHunks: parseHunks(fixPatch), root: deps.repoDir, carried }
+  );
+  if (!Array.isArray(rows)) result.reasons.push("no validation recorded");
+  if (preexisting.length) result.reasons.push(`already failing on the base commit, not counted: ${preexisting.join(", ")}`);
+  const ts = deps.now().toISOString();
+  appendEvent(deps.cwd, {
+    ts,
+    kind: "verdict",
+    task,
+    dir: rel(deps.cwd, roundDir),
+    action: result.action,
+    score: result.score,
+    signature: result.signature,
+    critical: result.critical.length,
+    important: result.important.length,
+    minor: result.minor.length,
+    deferred: result.deferred.length
+  });
+  if (verifyFile !== void 0) {
+    const evidence = rel(deps.cwd, roundDir).replace(/reviews-(\d+-\d+)$/, "evidence/$1");
+    appendEvent(deps.cwd, {
+      ts,
+      kind: "verify",
+      task,
+      result: verifyFile?.result ?? "invalid",
+      passed: verifyFile ? verifyFile.checks.filter((c) => c.ok).length : 0,
+      total: verifyFile ? verifyFile.checks.length : 0,
+      evidence,
+      ...verifyFile?.reason ? { reason: verifyFile.reason } : {}
+    });
+  }
+  const events = readEvents(deps.cwd);
+  const d = roundDecision(events, task, p, loadConfig(deps.repoDir).profile);
+  appendEvent(deps.cwd, { ts, kind: "round", task, ...d });
+  if (result.minor.length || result.deferred.length) {
+    const ruling = {
+      task,
+      round,
+      dir: rel(deps.cwd, roundDir),
+      ...result.minor.length ? { minor: result.minor } : {},
+      ...result.deferred.length ? { deferred: result.deferred } : {}
+    };
+    const same = JSON.stringify(ruling);
+    const logged = events.some((e) => e.kind === "ruling" && e.task === task && e.dir === ruling.dir && JSON.stringify({ task: e.task, round: e.round, dir: e.dir, ...e.minor ? { minor: e.minor } : {}, ...e.deferred ? { deferred: e.deferred } : {} }) === same);
+    if (!logged) appendEvent(deps.cwd, { ts, kind: "ruling", ...ruling });
+  }
+  let findings = null;
+  const findingsPath = import_node_path18.default.join(dir, `findings-${n}-${round}.json`);
+  if (result.action !== "accept") {
+    (0, import_node_fs16.writeFileSync)(findingsPath, JSON.stringify({ task, round, action: result.action, findings: [...result.critical, ...result.important], validators: failing }, null, 2) + "\n");
+    findings = rel(deps.cwd, findingsPath);
+  } else (0, import_node_fs16.rmSync)(findingsPath, { force: true });
+  const twins = [];
+  const shadowSkipped = [];
+  const pairs = [];
+  for (const k of names2(plan.spawn, (x) => x.twin === true)) {
+    const highFile = import_node_path18.default.join(roundDir, `${k}.json`), twinFile = import_node_path18.default.join(roundDir, "shadow", `${k}.json`);
+    const missing2 = [twinFile, highFile].find((f) => !(0, import_node_fs16.existsSync)(f));
+    if (missing2) {
+      shadowSkipped.push({ reviewer: k, reason: "missing", file: rel(deps.cwd, missing2) });
+      continue;
+    }
+    const high = parseReview((0, import_node_fs16.readFileSync)(highFile, "utf8"));
+    const xhigh = parseReview((0, import_node_fs16.readFileSync)(twinFile, "utf8"));
+    const bad = xhigh.invalid ? twinFile : high.invalid ? highFile : null;
+    if (bad) {
+      shadowSkipped.push({ reviewer: k, reason: "unparseable", file: rel(deps.cwd, bad) });
+      continue;
+    }
+    pairs.push({ k, high, xhigh });
+    twins.push(k);
+  }
+  if (pairs.length) {
+    const local = (fs) => fs.map((f) => f.file ? { ...f, file: repoRelative(f.file, deps.repoDir) } : f);
+    const state = readShadow(deps.cwd) ?? { remaining: 0, cases: [] };
+    let cases = state.cases;
+    for (const { k, high, xhigh } of pairs) {
+      cases = [...cases.filter((c) => c.task !== task || c.reviewer !== k), buildCase(task, k, local(high.findings), local(xhigh.findings))];
+    }
+    saveShadow(deps.cwd, { ...state, cases });
+  }
+  return json2({
+    action: result.action,
+    score: result.score,
+    next: d.next,
+    last: d.last,
+    implementer: d.implementer,
+    findings,
+    deferred: result.deferred,
+    invalid: result.reviewers.filter((r2) => r2.invalid).map((r2) => r2.name),
+    round,
+    reasons: result.reasons,
+    ...twins.length ? { shadow: twins } : {},
+    ...shadowSkipped.length ? { shadowSkipped } : {}
+  });
+}
+function prep(args, deps) {
+  const flag = (name) => {
+    const i = args.indexOf(`--${name}`);
+    const v = i >= 0 ? args[i + 1] : void 0;
+    return v === void 0 || v.startsWith("--") ? void 0 : v;
+  };
+  const task = flag("task"), p = flag("path");
+  if (!task || !p) throw new UsageError("prep: --task <id>-<n> and --path are required");
+  const m = TASK_N.exec(task);
+  if (!m) throw new UsageError("prep: --task must be <id>-<n>");
+  if (!PATH_ORDER.includes(p)) throw new UsageError(`prep: --path must be one of ${PATH_ORDER.join("|")}`);
+  const phase = flag("phase") ?? "implement";
+  if (args.includes("--phase") && !/^[a-z][a-z0-9-]{0,39}$/.test(phase)) throw new UsageError("prep: --phase must be a phase name (lowercase letters, digits and -)");
+  const [, id2, n] = m;
+  const base = (deps.git(["rev-parse", "HEAD"]) ?? "").trim();
+  if (!base) throw new UsageError("prep: cannot read HEAD");
+  const config = loadConfig(deps.repoDir);
+  const scope = p === "trivial" || p === "small" ? { mode: "small" } : { mode: "heavy", changed: null };
+  const results = runValidators(selectValidators(detectValidators(deps.repo, config), scope), deps.exec, config.validatorTimeoutSec);
+  const dir = import_node_path18.default.resolve(deps.cwd, flag("dir") ?? import_node_path18.default.join(".forge", "work", id2));
+  (0, import_node_fs16.mkdirSync)(dir, { recursive: true });
+  const file = import_node_path18.default.join(dir, `baseline-${n}.json`);
+  (0, import_node_fs16.writeFileSync)(file, JSON.stringify(results, null, 2) + "\n");
+  const ts = deps.now().toISOString();
+  appendEvent(deps.cwd, { ts, kind: "validate", task, baseline: true, ok: results.every((r2) => !blocking(r2)), results: results.map((r2) => ({ validator: r2.validator, ok: r2.ok, flaky: r2.flaky, ...r2.skipped ? { skipped: r2.skipped } : {}, ...r2.ok ? {} : { failures: r2.failures } })) });
+  appendEvent(deps.cwd, { ts, kind: "phase", task: id2, phase, brief: Number(n), base });
+  return json2({ base, baseline: rel(deps.cwd, file), failing: results.filter(blocking).map((r2) => r2.validator) });
+}
+function reviewCommand(cmd, args, deps) {
+  switch (cmd) {
+    case "review-prep":
+      return reviewPrep(args, deps);
+    case "review-close":
+      return reviewClose(args, deps);
+    case "shadow":
+      return shadowCommand(args, deps.cwd);
+    case "prep":
+      return prep(args, deps);
+    default:
+      throw new UsageError(`unknown review command ${cmd}`);
+  }
+}
+
+// src/forge/tools.ts
+var import_node_fs18 = require("node:fs");
+var import_node_path20 = __toESM(require("node:path"), 1);
+
+// src/forge/superpowers.ts
+var import_node_fs17 = require("node:fs");
+var import_node_os = require("node:os");
+var import_node_path19 = __toESM(require("node:path"), 1);
 
 // src/lib/design.ts
 var import_yaml6 = __toESM(require_dist(), 1);
@@ -15392,9 +16183,9 @@ function parseSpPlan(text2) {
 }
 function sddComplete(ledger, planRel) {
   const first = /^#\s*SDD ledger\s*[—–-]\s*plan:\s*(.+?)\s*$/m.exec(ledger.split(/\r?\n/)[0] ?? "");
-  const rel = planRel.replace(/\\/g, "/").replace(/^\.\//, "");
+  const rel2 = planRel.replace(/\\/g, "/").replace(/^\.\//, "");
   const named = first ? first[1].replace(/\\/g, "/").replace(/^\.\//, "") : null;
-  if (!named || !rel || named !== rel && !named.endsWith(`/${rel}`)) return [];
+  if (!named || !rel2 || named !== rel2 && !named.endsWith(`/${rel2}`)) return [];
   const done = /* @__PURE__ */ new Set();
   for (const m of ledger.matchAll(/^Task (\d{1,4}): complete\b/gm)) done.add(Number(m[1]));
   return [...done].sort((a, b) => a - b);
@@ -15451,22 +16242,22 @@ var SP_WINDOW_MS = 14 * 24 * 36e5;
 var SP_MAX = 3;
 var NONE = { installed: false, version: null, installPath: null };
 function claudeConfigDir(env = process.env) {
-  return env.CLAUDE_CONFIG_DIR?.trim() || import_node_path17.default.join((0, import_node_os.homedir)(), ".claude");
+  return env.CLAUDE_CONFIG_DIR?.trim() || import_node_path19.default.join((0, import_node_os.homedir)(), ".claude");
 }
 function claudeJsonDir(env = process.env) {
   return env.CLAUDE_CONFIG_DIR?.trim() || (0, import_node_os.homedir)();
 }
 var isObj4 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
-var readJson = (file) => {
+var readJson2 = (file) => {
   try {
-    return JSON.parse((0, import_node_fs15.readFileSync)(file, "utf8"));
+    return JSON.parse((0, import_node_fs17.readFileSync)(file, "utf8"));
   } catch {
     return null;
   }
 };
 var samePath2 = (a, b) => {
-  const x = import_node_path17.default.resolve(a);
-  const y = import_node_path17.default.resolve(b);
+  const x = import_node_path19.default.resolve(a);
+  const y = import_node_path19.default.resolve(b);
   return process.platform === "win32" ? x.toLowerCase() === y.toLowerCase() : x === y;
 };
 var versionKey = (v) => v.split(/[.+-]/).map((n) => /^\d+$/.test(n) ? Number(n) : 0);
@@ -15480,7 +16271,7 @@ function newer(a, b) {
   return false;
 }
 function enabledMaps(configDir, projectDir) {
-  return [import_node_path17.default.join(projectDir, ".claude", "settings.local.json"), import_node_path17.default.join(projectDir, ".claude", "settings.json"), import_node_path17.default.join(configDir, "settings.json")].map(readJson).flatMap((s2) => isObj4(s2) && isObj4(s2.enabledPlugins) ? [s2.enabledPlugins] : []);
+  return [import_node_path19.default.join(projectDir, ".claude", "settings.local.json"), import_node_path19.default.join(projectDir, ".claude", "settings.json"), import_node_path19.default.join(configDir, "settings.json")].map(readJson2).flatMap((s2) => isObj4(s2) && isObj4(s2.enabledPlugins) ? [s2.enabledPlugins] : []);
 }
 var enabled = (key, maps) => {
   const m = maps.find((ep) => typeof ep[key] === "boolean");
@@ -15488,7 +16279,7 @@ var enabled = (key, maps) => {
 };
 function installedPlugins(opts, only) {
   try {
-    const file = readJson(import_node_path17.default.join(opts.configDir, "plugins", "installed_plugins.json"));
+    const file = readJson2(import_node_path19.default.join(opts.configDir, "plugins", "installed_plugins.json"));
     const plugins = isObj4(file) && isObj4(file.plugins) ? file.plugins : null;
     if (!plugins) return [];
     let maps = null;
@@ -15497,7 +16288,7 @@ function installedPlugins(opts, only) {
       const m = /^([^@\s]+)@[^@\s]+$/.exec(key);
       if (!m || only && !only(m[1]) || !enabled(key, maps ??= enabledMaps(opts.configDir, opts.projectDir))) continue;
       for (const e of Array.isArray(value) ? value : [value]) {
-        if (!isObj4(e) || typeof e.installPath !== "string" || !(0, import_node_fs15.existsSync)(e.installPath)) continue;
+        if (!isObj4(e) || typeof e.installPath !== "string" || !(0, import_node_fs17.existsSync)(e.installPath)) continue;
         const scope = typeof e.scope === "string" ? e.scope : "user";
         if (scope !== "user" && scope !== "managed" && !(typeof e.projectPath === "string" && samePath2(e.projectPath, opts.projectDir))) continue;
         out.push({ key, name: m[1], installPath: e.installPath, version: typeof e.version === "string" && e.version ? e.version : "unknown" });
@@ -15517,33 +16308,33 @@ function locateSuperpowers(opts) {
 }
 function spSkillPath(sp, skill) {
   if (!sp.installed || !sp.installPath || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(skill)) return null;
-  const f = import_node_path17.default.join(sp.installPath, "skills", skill, "SKILL.md");
-  return (0, import_node_fs15.existsSync)(f) ? f : null;
+  const f = import_node_path19.default.join(sp.installPath, "skills", skill, "SKILL.md");
+  return (0, import_node_fs17.existsSync)(f) ? f : null;
 }
 function spLedgerDone(roots, planAbs) {
   const done = /* @__PURE__ */ new Set();
-  const slug = import_node_path17.default.basename(planAbs).replace(/\.md$/i, "");
-  for (const root of [...new Set(roots.map((r2) => import_node_path17.default.resolve(r2)))]) {
-    const rel = import_node_path17.default.relative(root, planAbs).split(import_node_path17.default.sep).join("/");
-    if (!rel || rel.startsWith("..") || import_node_path17.default.isAbsolute(rel)) continue;
-    const base = import_node_path17.default.join(root, ".superpowers", "sdd");
+  const slug = import_node_path19.default.basename(planAbs).replace(/\.md$/i, "");
+  for (const root of [...new Set(roots.map((r2) => import_node_path19.default.resolve(r2)))]) {
+    const rel2 = import_node_path19.default.relative(root, planAbs).split(import_node_path19.default.sep).join("/");
+    if (!rel2 || rel2.startsWith("..") || import_node_path19.default.isAbsolute(rel2)) continue;
+    const base = import_node_path19.default.join(root, ".superpowers", "sdd");
     let names2 = [];
     try {
-      names2 = (0, import_node_fs15.readdirSync)(base);
+      names2 = (0, import_node_fs17.readdirSync)(base);
     } catch {
       continue;
     }
     for (const name of names2) {
       if (name !== slug && !name.startsWith(`${slug}-`)) continue;
-      const dir = import_node_path17.default.join(base, name);
+      const dir = import_node_path19.default.join(base, name);
       let marker = null;
       try {
-        marker = (0, import_node_fs15.readFileSync)(import_node_path17.default.join(dir, "plan-path"), "utf8").trim().replace(/\\/g, "/");
+        marker = (0, import_node_fs17.readFileSync)(import_node_path19.default.join(dir, "plan-path"), "utf8").trim().replace(/\\/g, "/");
       } catch {
       }
-      if (marker !== null && marker !== rel) continue;
+      if (marker !== null && marker !== rel2) continue;
       try {
-        for (const n of sddComplete((0, import_node_fs15.readFileSync)(import_node_path17.default.join(dir, "progress.md"), "utf8"), rel)) done.add(n);
+        for (const n of sddComplete((0, import_node_fs17.readFileSync)(import_node_path19.default.join(dir, "progress.md"), "utf8"), rel2)) done.add(n);
       } catch {
       }
     }
@@ -15553,16 +16344,16 @@ function spLedgerDone(roots, planAbs) {
 function recentMarkdown(root, relDir, now, committedAt2) {
   let names2;
   try {
-    names2 = (0, import_node_fs15.readdirSync)(import_node_path17.default.join(root, relDir));
+    names2 = (0, import_node_fs17.readdirSync)(import_node_path19.default.join(root, relDir));
   } catch {
     return [];
   }
   const out = [];
   for (const name of names2) {
     if (!name.endsWith(".md")) continue;
-    const abs = import_node_path17.default.join(root, relDir, name);
+    const abs = import_node_path19.default.join(root, relDir, name);
     try {
-      const st = (0, import_node_fs15.statSync)(abs);
+      const st = (0, import_node_fs17.statSync)(abs);
       if (!st.isFile()) continue;
       const time = committedAt2?.(`${relDir}/${name}`) ?? st.mtimeMs;
       if (now - time <= SP_WINDOW_MS) out.push({ name, abs, time });
@@ -15573,7 +16364,7 @@ function recentMarkdown(root, relDir, now, committedAt2) {
 }
 var titleOf = (file) => {
   try {
-    return specH1((0, import_node_fs15.readFileSync)(file, "utf8"));
+    return specH1((0, import_node_fs17.readFileSync)(file, "utf8"));
   } catch {
     return null;
   }
@@ -15582,21 +16373,21 @@ function spSpecs(root, now, opts = {}) {
   const cited = /* @__PURE__ */ new Set();
   let projects = [];
   try {
-    projects = (0, import_node_fs15.readdirSync)(import_node_path17.default.join(root, "docs", "waypoint"));
+    projects = (0, import_node_fs17.readdirSync)(import_node_path19.default.join(root, "docs", "waypoint"));
   } catch {
   }
   for (const p of projects) {
     try {
-      const s2 = parseDesign((0, import_node_fs15.readFileSync)(import_node_path17.default.join(root, "docs", "waypoint", p, "design.md"), "utf8")).meta.source;
+      const s2 = parseDesign((0, import_node_fs17.readFileSync)(import_node_path19.default.join(root, "docs", "waypoint", p, "design.md"), "utf8")).meta.source;
       if (s2) cited.add(s2.replace(/\\/g, "/").replace(/^\.\//, ""));
     } catch {
     }
   }
   const out = [];
   for (const f of recentMarkdown(root, "docs/superpowers/specs", now, opts.committedAt)) {
-    const rel = `docs/superpowers/specs/${f.name}`;
-    if (cited.has(rel) || opts.declined?.includes(rel)) continue;
-    out.push({ path: rel, title: titleOf(f.abs) ?? f.name.replace(/\.md$/, ""), modified: new Date(f.time).toISOString() });
+    const rel2 = `docs/superpowers/specs/${f.name}`;
+    if (cited.has(rel2) || opts.declined?.includes(rel2)) continue;
+    out.push({ path: rel2, title: titleOf(f.abs) ?? f.name.replace(/\.md$/, ""), modified: new Date(f.time).toISOString() });
     if (out.length === SP_MAX) break;
   }
   return out;
@@ -15606,7 +16397,7 @@ function spPlans(root, now, opts = {}) {
   for (const f of recentMarkdown(root, "docs/superpowers/plans", now, opts.committedAt)) {
     let plan;
     try {
-      plan = markDone(parseSpPlan((0, import_node_fs15.readFileSync)(f.abs, "utf8")), spLedgerDone([root], f.abs));
+      plan = markDone(parseSpPlan((0, import_node_fs17.readFileSync)(f.abs, "utf8")), spLedgerDone([root], f.abs));
     } catch {
       continue;
     }
@@ -15674,9 +16465,9 @@ function toolGaps(names2, deps) {
   return out;
 }
 var isObj5 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
-var readJson2 = (file) => {
+var readJson3 = (file) => {
   try {
-    return JSON.parse((0, import_node_fs16.readFileSync)(file, "utf8"));
+    return JSON.parse((0, import_node_fs18.readFileSync)(file, "utf8"));
   } catch {
     return null;
   }
@@ -15684,12 +16475,12 @@ var readJson2 = (file) => {
 var serverNames = (x, flat) => !isObj5(x) ? [] : isObj5(x.mcpServers) ? Object.keys(x.mcpServers) : flat && !("mcpServers" in x) ? Object.keys(x) : [];
 function pluginServers(root) {
   const out = [];
-  const fromFile = (rel) => {
-    const f = import_node_path18.default.resolve(root, rel.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, "."));
-    const r2 = import_node_path18.default.relative(root, f);
-    if (!r2.startsWith("..") && !import_node_path18.default.isAbsolute(r2)) out.push(...serverNames(readJson2(f), true));
+  const fromFile = (rel2) => {
+    const f = import_node_path20.default.resolve(root, rel2.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, "."));
+    const r2 = import_node_path20.default.relative(root, f);
+    if (!r2.startsWith("..") && !import_node_path20.default.isAbsolute(r2)) out.push(...serverNames(readJson3(f), true));
   };
-  const manifest = readJson2(import_node_path18.default.join(root, ".claude-plugin", "plugin.json"));
+  const manifest = readJson3(import_node_path20.default.join(root, ".claude-plugin", "plugin.json"));
   const decl = isObj5(manifest) ? manifest.mcpServers : void 0;
   for (const d of Array.isArray(decl) ? decl : [decl]) {
     if (typeof d === "string") fromFile(d);
@@ -15708,8 +16499,8 @@ function mcpInventory(opts) {
     } catch {
     }
   }
-  const legacy = import_node_path18.default.join(opts.configDir, ".config.json");
-  const global = readJson2((0, import_node_fs16.existsSync)(legacy) ? legacy : import_node_path18.default.join(opts.homeDir, ".claude.json"));
+  const legacy = import_node_path20.default.join(opts.configDir, ".config.json");
+  const global = readJson3((0, import_node_fs18.existsSync)(legacy) ? legacy : import_node_path20.default.join(opts.homeDir, ".claude.json"));
   const disabled = /* @__PURE__ */ new Set();
   const approved = /* @__PURE__ */ new Set();
   let approveAll = false;
@@ -15719,7 +16510,7 @@ function mcpInventory(opts) {
   };
   if (isObj5(global)) {
     names2.push(...serverNames(global, false));
-    const key = import_node_path18.default.resolve(opts.projectDir).replace(/\\/g, "/");
+    const key = import_node_path20.default.resolve(opts.projectDir).replace(/\\/g, "/");
     const same = (k) => process.platform === "win32" ? k.replace(/\\/g, "/").toLowerCase() === key.toLowerCase() : k === key;
     const projects = isObj5(global.projects) ? global.projects : {};
     for (const [k, v] of Object.entries(projects)) {
@@ -15730,17 +16521,17 @@ function mcpInventory(opts) {
     }
   }
   const settings = [
-    [import_node_path18.default.join(opts.projectDir, ".claude", "settings.local.json"), true],
-    [import_node_path18.default.join(opts.configDir, "settings.json"), true],
-    [import_node_path18.default.join(opts.projectDir, ".claude", "settings.json"), false]
+    [import_node_path20.default.join(opts.projectDir, ".claude", "settings.local.json"), true],
+    [import_node_path20.default.join(opts.configDir, "settings.json"), true],
+    [import_node_path20.default.join(opts.projectDir, ".claude", "settings.json"), false]
   ];
   for (const [f, mine] of settings) {
-    const s2 = readJson2(f);
+    const s2 = readJson3(f);
     if (!isObj5(s2)) continue;
     if (mine) approvals(s2);
     for (const d of strs2(s2.disabledMcpjsonServers)) disabled.add(d);
   }
-  names2.push(...serverNames(readJson2(import_node_path18.default.join(opts.projectDir, ".mcp.json")), false).filter((n) => !disabled.has(n) && (approveAll || approved.has(n))));
+  names2.push(...serverNames(readJson3(import_node_path20.default.join(opts.projectDir, ".mcp.json")), false).filter((n) => !disabled.has(n) && (approveAll || approved.has(n))));
   return new Set(names2.flatMap(toolKeys));
 }
 
@@ -15801,8 +16592,8 @@ function cleanupPids(pids, kill, protect = [process.pid, process.ppid]) {
 var killTarget = (pid, pgid) => pgid === pid ? -pid : pid;
 
 // src/forge/route.ts
-var import_node_fs17 = require("node:fs");
-var import_node_path19 = __toESM(require("node:path"), 1);
+var import_node_fs19 = require("node:fs");
+var import_node_path21 = __toESM(require("node:path"), 1);
 
 // src/lib/decisions.ts
 var DECISION_POINTS = ["route", "triage", "design-apply", "design-approve", "plan-confirm", "mode", "ruling", "safe-path", "takeover", "revert", "other"];
@@ -15957,7 +16748,7 @@ function routeOptions(i) {
   else recommended = { option: "forge", why: "forge triages, implements and reviews it" };
   return { ...base, options: ["forge", "superpowers", "superpowers-design", "superpowers-plan"], recommended };
 }
-var routeFile = (root) => import_node_path19.default.join(root, ".forge", "route.json");
+var routeFile = (root) => import_node_path21.default.join(root, ".forge", "route.json");
 var SAFE_PATH = /^[A-Za-z0-9_./\\: -]{1,300}$/;
 var isRoutePath = (s2) => typeof s2 === "string" && SAFE_PATH.test(s2);
 var isRouteSession = (s2) => typeof s2 === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(s2);
@@ -15983,7 +16774,7 @@ function normalizeRoute(x) {
 }
 function readRoute(root) {
   try {
-    return normalizeRoute(JSON.parse((0, import_node_fs17.readFileSync)(routeFile(root), "utf8")));
+    return normalizeRoute(JSON.parse((0, import_node_fs19.readFileSync)(routeFile(root), "utf8")));
   } catch {
     return null;
   }
@@ -15993,10 +16784,10 @@ function writeRoute(root, doc) {
   const file = routeFile(root);
   const tmp = `${file}.${process.pid}.tmp`;
   try {
-    (0, import_node_fs17.writeFileSync)(tmp, JSON.stringify(doc, null, 2) + "\n");
-    (0, import_node_fs17.renameSync)(tmp, file);
+    (0, import_node_fs19.writeFileSync)(tmp, JSON.stringify(doc, null, 2) + "\n");
+    (0, import_node_fs19.renameSync)(tmp, file);
   } finally {
-    (0, import_node_fs17.rmSync)(tmp, { force: true });
+    (0, import_node_fs19.rmSync)(tmp, { force: true });
   }
 }
 function firstStage(chosen, has) {
@@ -16113,11 +16904,11 @@ function hookRoute(io, which) {
 }
 
 // src/forge/decisions.ts
-var import_node_fs18 = require("node:fs");
-var import_node_path20 = __toESM(require("node:path"), 1);
+var import_node_fs20 = require("node:fs");
+var import_node_path22 = __toESM(require("node:path"), 1);
 var DecisionInputError = class extends Error {
 };
-var decisionsFile = (root) => import_node_path20.default.join(root, ".forge", "decisions.json");
+var decisionsFile = (root) => import_node_path22.default.join(root, ".forge", "decisions.json");
 var notDots2 = (s2) => s2 !== "." && s2 !== "..";
 var line = (max) => external_exports.string().transform((s2) => clean(s2, max)).pipe(external_exports.string().min(1, "must not be empty"));
 var ident2 = (re) => external_exports.string().regex(re).refine(notDots2, "invalid id");
@@ -16145,7 +16936,7 @@ var Input = external_exports.object({
 }).strict();
 function readDecisionsDoc(root) {
   try {
-    return normalizeDecisionsDoc(JSON.parse((0, import_node_fs18.readFileSync)(decisionsFile(root), "utf8")));
+    return normalizeDecisionsDoc(JSON.parse((0, import_node_fs20.readFileSync)(decisionsFile(root), "utf8")));
   } catch {
     return null;
   }
@@ -16161,10 +16952,10 @@ function saveDecisionsDoc(root, event, n) {
     const file = decisionsFile(root);
     const tmp = `${file}.${process.pid}.tmp`;
     try {
-      (0, import_node_fs18.writeFileSync)(tmp, JSON.stringify(next) + "\n");
-      (0, import_node_fs18.renameSync)(tmp, file);
+      (0, import_node_fs20.writeFileSync)(tmp, JSON.stringify(next) + "\n");
+      (0, import_node_fs20.renameSync)(tmp, file);
     } finally {
-      (0, import_node_fs18.rmSync)(tmp, { force: true });
+      (0, import_node_fs20.rmSync)(tmp, { force: true });
     }
   } catch {
   }
@@ -16257,17 +17048,17 @@ function renderDecisionsMd(list, scope, locale) {
 }
 
 // src/forge/cli/run.ts
-var USAGE = "usage: forge <triage|brief|validate|verdict|round|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|swarm|stop|hook> ...";
+var USAGE2 = "usage: forge <triage|brief|validate|verdict|round|review-prep|review-close|prep|shadow|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|swarm|stop|hook> ...";
 var MAX_OUTPUT = 4 * 1024 * 1024;
 var MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 var MAX_WHY = 200;
 function readTail(fd) {
-  const size = (0, import_node_fs19.fstatSync)(fd).size;
+  const size = (0, import_node_fs21.fstatSync)(fd).size;
   const len = Math.min(size, MAX_OUTPUT);
   const buf = Buffer.alloc(len);
   let off = 0;
   while (off < len) {
-    const n = (0, import_node_fs19.readSync)(fd, buf, off, len - off, size - len + off);
+    const n = (0, import_node_fs21.readSync)(fd, buf, off, len - off, size - len + off);
     if (n <= 0) break;
     off += n;
   }
@@ -16303,9 +17094,9 @@ function defaultExec(cwd2) {
     let dir;
     let fd;
     try {
-      dir = (0, import_node_fs19.mkdtempSync)(import_node_path21.default.join((0, import_node_os2.tmpdir)(), "forge-exec-"));
-      const file = import_node_path21.default.join(dir, "out.log");
-      fd = (0, import_node_fs19.openSync)(file, "w+");
+      dir = (0, import_node_fs21.mkdtempSync)(import_node_path23.default.join((0, import_node_os2.tmpdir)(), "forge-exec-"));
+      const file = import_node_path23.default.join(dir, "out.log");
+      fd = (0, import_node_fs21.openSync)(file, "w+");
       const r2 = (0, import_node_child_process2.spawnSync)(process.execPath, ["-e", WRAPPER_SOURCE, "--", cmd, String(timeoutMs), file], {
         cwd: cwd2,
         windowsHide: true,
@@ -16315,7 +17106,7 @@ function defaultExec(cwd2) {
         maxBuffer: 64 * 1024
       });
       const err = r2.error;
-      const timedOut2 = err?.code === "ETIMEDOUT" || r2.status === TIMEOUT_EXIT && (0, import_node_fs19.existsSync)(`${file}.timeout`);
+      const timedOut2 = err?.code === "ETIMEDOUT" || r2.status === TIMEOUT_EXIT && (0, import_node_fs21.existsSync)(`${file}.timeout`);
       let output = readTail(fd);
       if (r2.stderr) output += `${output && !output.endsWith("\n") ? "\n" : ""}${r2.stderr}`;
       if (err && !timedOut2) output += `${output && !output.endsWith("\n") ? "\n" : ""}${err.message}
@@ -16327,13 +17118,13 @@ function defaultExec(cwd2) {
     } finally {
       if (fd !== void 0) {
         try {
-          (0, import_node_fs19.closeSync)(fd);
+          (0, import_node_fs21.closeSync)(fd);
         } catch {
         }
       }
       if (dir !== void 0) {
         try {
-          (0, import_node_fs19.rmSync)(dir, { recursive: true, force: true });
+          (0, import_node_fs21.rmSync)(dir, { recursive: true, force: true });
         } catch {
         }
       }
@@ -16350,17 +17141,17 @@ function defaultGit(cwd2) {
   };
 }
 var repoReader = (root) => ({
-  exists: (rel) => (0, import_node_fs19.existsSync)(import_node_path21.default.join(root, rel)),
-  read: (rel) => {
+  exists: (rel2) => (0, import_node_fs21.existsSync)(import_node_path23.default.join(root, rel2)),
+  read: (rel2) => {
     try {
-      return (0, import_node_fs19.readFileSync)(import_node_path21.default.join(root, rel), "utf8");
+      return (0, import_node_fs21.readFileSync)(import_node_path23.default.join(root, rel2), "utf8");
     } catch {
       return null;
     }
   },
   list: (dir) => {
     try {
-      return (0, import_node_fs19.readdirSync)(import_node_path21.default.join(root, dir ?? ""));
+      return (0, import_node_fs21.readdirSync)(import_node_path23.default.join(root, dir ?? ""));
     } catch {
       return [];
     }
@@ -16370,7 +17161,7 @@ function planTask(cwd2, planArg, id2) {
   if (!planArg || !id2) throw new UsageError("--plan and --task are required");
   let text2;
   try {
-    text2 = (0, import_node_fs19.readFileSync)(import_node_path21.default.resolve(cwd2, planArg), "utf8");
+    text2 = (0, import_node_fs21.readFileSync)(import_node_path23.default.resolve(cwd2, planArg), "utf8");
   } catch {
     throw new UsageError(`cannot read plan ${planArg}`);
   }
@@ -16408,7 +17199,7 @@ function planTasksFor(cwd2, planArg) {
   if (planArg) {
     let text2;
     try {
-      text2 = (0, import_node_fs19.readFileSync)(import_node_path21.default.resolve(cwd2, planArg), "utf8");
+      text2 = (0, import_node_fs21.readFileSync)(import_node_path23.default.resolve(cwd2, planArg), "utf8");
     } catch {
       throw new UsageError(`cannot read plan ${planArg}`);
     }
@@ -16419,16 +17210,16 @@ function planTasksFor(cwd2, planArg) {
       throw new UsageError(`${planArg}: not a valid plan`);
     }
   }
-  const docs = import_node_path21.default.join(cwd2, "docs", "waypoint");
+  const docs = import_node_path23.default.join(cwd2, "docs", "waypoint");
   let projects;
   try {
-    projects = (0, import_node_fs19.readdirSync)(docs);
+    projects = (0, import_node_fs21.readdirSync)(docs);
   } catch {
     return [];
   }
   return projects.flatMap((p) => {
     try {
-      return parsePlan((0, import_node_fs19.readFileSync)(import_node_path21.default.join(docs, p, "plan.yaml"), "utf8")).tasks;
+      return parsePlan((0, import_node_fs21.readFileSync)(import_node_path23.default.join(docs, p, "plan.yaml"), "utf8")).tasks;
     } catch {
       return [];
     }
@@ -16443,13 +17234,13 @@ function spTaskNumber(v) {
   return Number(v);
 }
 function findWaypointCli(scriptPath) {
-  const forgeRoot = import_node_path21.default.resolve(import_node_path21.default.dirname(scriptPath), "..");
-  const dev = import_node_path21.default.join(forgeRoot, "..", "waypoint", "dist", "waypoint.cjs");
-  if ((0, import_node_fs19.existsSync)(dev)) return import_node_path21.default.resolve(dev);
-  const base = import_node_path21.default.join(forgeRoot, "..", "..", "waypoint");
+  const forgeRoot = import_node_path23.default.resolve(import_node_path23.default.dirname(scriptPath), "..");
+  const dev = import_node_path23.default.join(forgeRoot, "..", "waypoint", "dist", "waypoint.cjs");
+  if ((0, import_node_fs21.existsSync)(dev)) return import_node_path23.default.resolve(dev);
+  const base = import_node_path23.default.join(forgeRoot, "..", "..", "waypoint");
   let versions = [];
   try {
-    versions = (0, import_node_fs19.readdirSync)(base);
+    versions = (0, import_node_fs21.readdirSync)(base);
   } catch {
     return null;
   }
@@ -16463,8 +17254,8 @@ function findWaypointCli(scriptPath) {
     return 0;
   };
   for (const v of versions.sort((a, b) => cmp(b, a))) {
-    const f = import_node_path21.default.join(base, v, "dist", "waypoint.cjs");
-    if ((0, import_node_fs19.existsSync)(f)) return import_node_path21.default.resolve(f);
+    const f = import_node_path23.default.join(base, v, "dist", "waypoint.cjs");
+    if ((0, import_node_fs21.existsSync)(f)) return import_node_path23.default.resolve(f);
   }
   return null;
 }
@@ -16472,14 +17263,14 @@ var superpowersOf = (io, dir) => locateSuperpowers({ configDir: claudeConfigDir(
 function mcpOf(io, dir) {
   const env = io.env ?? process.env;
   const out = /* @__PURE__ */ new Set();
-  for (const projectDir of /* @__PURE__ */ new Set([import_node_path21.default.resolve(dir), import_node_path21.default.resolve(mainCheckout(dir))])) {
+  for (const projectDir of /* @__PURE__ */ new Set([import_node_path23.default.resolve(dir), import_node_path23.default.resolve(mainCheckout(dir))])) {
     for (const n of mcpInventory({ configDir: claudeConfigDir(env), homeDir: claudeJsonDir(env), projectDir })) out.add(n);
   }
   return out;
 }
 function surfaceBlob(dir, file) {
   try {
-    const text2 = Buffer.from((0, import_node_fs19.readFileSync)(import_node_path21.default.join(dir, file)).toString("latin1").replace(/\r\n/g, "\n"), "latin1");
+    const text2 = Buffer.from((0, import_node_fs21.readFileSync)(import_node_path23.default.join(dir, file)).toString("latin1").replace(/\r\n/g, "\n"), "latin1");
     const id2 = (0, import_node_child_process2.execFileSync)("git", ["--no-replace-objects", "hash-object", "-w", "--no-filters", "--stdin"], { cwd: dir, input: text2, encoding: "utf8", timeout: 1e4, stdio: ["pipe", "pipe", "ignore"], windowsHide: true }).trim();
     return OBJECT_ID.test(id2) ? id2 : null;
   } catch {
@@ -16489,22 +17280,22 @@ function surfaceBlob(dir, file) {
 function writeFullDiff(root, name, hash, diff) {
   let dir = root;
   for (const part of [".forge", "work", "surfaces"]) {
-    dir = import_node_path21.default.join(dir, part);
+    dir = import_node_path23.default.join(dir, part);
     try {
-      if ((0, import_node_fs19.lstatSync)(dir).isSymbolicLink()) return null;
+      if ((0, import_node_fs21.lstatSync)(dir).isSymbolicLink()) return null;
     } catch {
     }
   }
-  const file = import_node_path21.default.join(dir, `${name}-${hash.slice(0, 16)}.diff`);
+  const file = import_node_path23.default.join(dir, `${name}-${hash.slice(0, 16)}.diff`);
   const tmp = `${file}.${process.pid}.tmp`;
   try {
-    (0, import_node_fs19.mkdirSync)(dir, { recursive: true });
-    (0, import_node_fs19.writeFileSync)(tmp, diff, { flag: "wx" });
-    (0, import_node_fs19.renameSync)(tmp, file);
+    (0, import_node_fs21.mkdirSync)(dir, { recursive: true });
+    (0, import_node_fs21.writeFileSync)(tmp, diff, { flag: "wx" });
+    (0, import_node_fs21.renameSync)(tmp, file);
     return file;
   } catch {
     try {
-      (0, import_node_fs19.rmSync)(tmp, { force: true });
+      (0, import_node_fs21.rmSync)(tmp, { force: true });
     } catch {
     }
     return null;
@@ -16531,8 +17322,8 @@ function surfaceQuestion(p, s2, perm, git, dir, work, es2) {
 }
 var committedAt = (io, dir) => {
   const git = io.git ?? defaultGit(dir);
-  return (rel) => {
-    const s2 = Number((git(["log", "-1", "--format=%ct", "--", rel]) ?? "").trim());
+  return (rel2) => {
+    const s2 = Number((git(["log", "-1", "--format=%ct", "--", rel2]) ?? "").trim());
     return Number.isInteger(s2) && s2 > 0 ? s2 * 1e3 : null;
   };
 };
@@ -16554,7 +17345,7 @@ function stopContext(cwd2, now) {
   const proposals = loadProposals(cwd2);
   return {
     now,
-    stopFile: (0, import_node_fs19.existsSync)(stopFile(cwd2)),
+    stopFile: (0, import_node_fs21.existsSync)(stopFile(cwd2)),
     approvedPending: proposals.filter(isActionable).length,
     pendingProposals: proposals.filter((p) => p.status === "proposed" || p.status === "discussing").length
   };
@@ -16584,7 +17375,7 @@ function hookStop(io) {
       if (d2.ended) appendEvent(io.cwd, { ts: io.now().toISOString(), kind: "cycle", action: "stopped", reason: d2.ended });
       return JSON.stringify({ decision: "block", reason: d2.reason + (sessionReply(d2.run, exec?.active ? exec : null, () => planLocale(io.cwd, exec?.project)) ?? replyIn(null)) }) + "\n";
     }
-    const d = decideExecutionStop(hookInput, exec, { now: io.now(), stopFile: (0, import_node_fs19.existsSync)(stopFile(main)) });
+    const d = decideExecutionStop(hookInput, exec, { now: io.now(), stopFile: (0, import_node_fs21.existsSync)(stopFile(main)) });
     if (!d.block) return "";
     saveExecution(main, d.exec);
     return JSON.stringify({ decision: "block", reason: d.reason + (sessionReply(null, d.exec, () => planLocale(main, d.exec.project)) ?? replyIn(null)) }) + "\n";
@@ -16599,10 +17390,10 @@ function runReply(cwd2, run2) {
   return sessionReply(run2, active, () => planLocale(cwd2, active?.project))?.trim() ?? null;
 }
 function logVerifyResult(cwd2, at, task, dir, verifyFile) {
-  const rel = import_node_path21.default.relative(cwd2, dir).split(import_node_path21.default.sep).join("/");
-  const evidence = rel.replace(/reviews-(\d+-\d+)$/, "evidence/$1");
+  const rel2 = import_node_path23.default.relative(cwd2, dir).split(import_node_path23.default.sep).join("/");
+  const evidence = rel2.replace(/reviews-(\d+-\d+)$/, "evidence/$1");
   const out = { result: verifyFile?.result ?? "invalid", passed: verifyFile ? verifyFile.checks.filter((c) => c.ok).length : 0, total: verifyFile ? verifyFile.checks.length : 0 };
-  appendEvent(cwd2, { ts: at, kind: "verify", task, ...out, ...evidence !== rel ? { evidence } : {}, ...verifyFile?.reason ? { reason: verifyFile.reason } : {} });
+  appendEvent(cwd2, { ts: at, kind: "verify", task, ...out, ...evidence !== rel2 ? { evidence } : {}, ...verifyFile?.reason ? { reason: verifyFile.reason } : {} });
   return out;
 }
 function run(argv, io) {
@@ -16610,10 +17401,10 @@ function run(argv, io) {
   if (cwdAt >= 0) {
     const dir = argv[cwdAt + 1];
     if (!dir || dir.startsWith("--")) return { code: 2, stdout: "", stderr: "forge: --cwd needs a directory\n" };
-    const abs = import_node_path21.default.resolve(io.cwd, dir);
-    if (!(0, import_node_fs19.existsSync)(abs)) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} does not exist
+    const abs = import_node_path23.default.resolve(io.cwd, dir);
+    if (!(0, import_node_fs21.existsSync)(abs)) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} does not exist
 ` };
-    if (!(0, import_node_fs19.statSync)(abs).isDirectory()) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} is not a directory
+    if (!(0, import_node_fs21.statSync)(abs).isDirectory()) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} is not a directory
 ` };
     argv = [...argv.slice(0, cwdAt), ...argv.slice(cwdAt + 2)];
     io = { ...io, workdir: abs, git: defaultGit(abs), exec: defaultExec(abs) };
@@ -16628,7 +17419,7 @@ function run(argv, io) {
   const has = (name) => args.includes(`--${name}`);
   const ok = (out) => ({ code: 0, stdout: out.endsWith("\n") ? out : `${out}
 `, stderr: "" });
-  const json = (v, code = 0) => ({ code, stdout: JSON.stringify(v, null, 2) + "\n", stderr: "" });
+  const json3 = (v, code = 0) => ({ code, stdout: JSON.stringify(v, null, 2) + "\n", stderr: "" });
   const ts = () => io.now().toISOString();
   try {
     switch (cmd) {
@@ -16641,7 +17432,7 @@ function run(argv, io) {
           const label = flag("data-file") !== void 0 ? "--data-file" : "--data";
           let parsed;
           try {
-            const raw = flag("data-file") !== void 0 ? (0, import_node_fs19.readFileSync)(import_node_path21.default.resolve(io.cwd, flag("data-file")), "utf8") : flag("data");
+            const raw = flag("data-file") !== void 0 ? (0, import_node_fs21.readFileSync)(import_node_path23.default.resolve(io.cwd, flag("data-file")), "utf8") : flag("data");
             parsed = JSON.parse(raw);
           } catch {
             throw new UsageError(`log: ${label} must be a JSON object`);
@@ -16665,7 +17456,7 @@ function run(argv, io) {
           const n = spTaskNumber(flag("task"));
           let text2;
           try {
-            text2 = (0, import_node_fs19.readFileSync)(import_node_path21.default.resolve(io.cwd, file), "utf8");
+            text2 = (0, import_node_fs21.readFileSync)(import_node_path23.default.resolve(io.cwd, file), "utf8");
           } catch {
             throw new UsageError(`brief: cannot read ${file}`);
           }
@@ -16677,8 +17468,8 @@ function run(argv, io) {
           }
         }
         const { plan, task } = planTask(io.cwd, flag("plan"), flag("task"));
-        const design = flag("design") ?? import_node_path21.default.join(import_node_path21.default.dirname(flag("plan")), "design.md");
-        const designPath = (0, import_node_fs19.existsSync)(import_node_path21.default.resolve(io.cwd, design)) ? design.replace(/\\/g, "/") : null;
+        const design = flag("design") ?? import_node_path23.default.join(import_node_path23.default.dirname(flag("plan")), "design.md");
+        const designPath = (0, import_node_fs21.existsSync)(import_node_path23.default.resolve(io.cwd, design)) ? design.replace(/\\/g, "/") : null;
         return ok(renderBrief(plan, task, { planPath: flag("plan").replace(/\\/g, "/"), designPath, tdd: briefTdd(io, repoDir) }));
       }
       case "triage": {
@@ -16690,7 +17481,7 @@ function run(argv, io) {
         let task = textArgs.filter((a) => !a.startsWith("--")).join(" ").trim();
         if (flag("text-file") !== void 0) {
           try {
-            task = (0, import_node_fs19.readFileSync)(import_node_path21.default.resolve(io.cwd, flag("text-file")), "utf8").trim();
+            task = (0, import_node_fs21.readFileSync)(import_node_path23.default.resolve(io.cwd, flag("text-file")), "utf8").trim();
           } catch {
             throw new UsageError("triage: cannot read --text-file");
           }
@@ -16705,7 +17496,7 @@ function run(argv, io) {
           const file = flag("superpowers-plan");
           let sp;
           try {
-            sp = spPlanDone((0, import_node_fs19.readFileSync)(import_node_path21.default.resolve(io.cwd, file), "utf8"), import_node_path21.default.resolve(io.cwd, file), repoDir);
+            sp = spPlanDone((0, import_node_fs21.readFileSync)(import_node_path23.default.resolve(io.cwd, file), "utf8"), import_node_path23.default.resolve(io.cwd, file), repoDir);
           } catch (e) {
             throw new UsageError(e instanceof SpPlanError ? `triage: ${file}: ${e.message}` : `triage: cannot read ${file}`);
           }
@@ -16778,6 +17569,8 @@ function run(argv, io) {
         const known = readLocal(io.cwd).known;
         const fresh2 = names2.filter((n) => !known.includes(n));
         if (fresh2.length || known.some((n) => !names2.includes(n))) updateLocal(io.cwd, (s2) => ({ ...s2, known: names2 }));
+        const reviewPlan = reviewFor(result.path, result.sensitive, isPerfTask(task), { delicate: has("delicate"), profile });
+        const review = { ...reviewPlan, reviewers: reviewPlan.reviewers.map((r2) => ({ ...r2, agent: agentFor(r2.role, profile) })) };
         appendEvent(io.cwd, {
           ts: ts(),
           kind: "triage",
@@ -16785,22 +17578,21 @@ function run(argv, io) {
           ...project !== null ? { project } : {},
           ...result,
           ...auto,
-          ...diff ? { diff: { base: diff.base, files: diff.stat.files.length, lines: diff.stat.lines } } : {}
+          ...diff ? { diff: { base: diff.base, files: diff.stat.files.length, lines: diff.stat.lines } } : {},
+          review
         });
         const locale = localeArg2 ?? ((plannedDoc?.plan.locale ?? planLocale(io.cwd))?.toLowerCase().split(/[-_]/)[0] === "es" ? "es" : "en");
         let line2 = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh: fresh2, catalog }, locale);
         let gate = result.path === "medium" ? "plan" : null;
         let reviewed = {};
         if (diff) {
-          const plan = reviewFor(result.path, result.sensitive, isPerfTask(task));
-          const review = { ...plan, reviewers: plan.reviewers.map((r2) => ({ ...r2, agent: agentFor(r2.role, profile) })) };
           const bare = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh: [], catalog }, locale);
-          line2 = announceReview({ path: result.path, files: diff.stat.files.length, lines: diff.stat.lines, review: plan }, locale) + line2.slice(bare.length);
+          line2 = announceReview({ path: result.path, files: diff.stat.files.length, lines: diff.stat.lines, review: reviewPlan }, locale) + line2.slice(bare.length);
           gate = null;
-          reviewed = { diff: { base: diff.base, files: diff.stat.files, lines: diff.stat.lines, path: diff.path }, review };
+          reviewed = { diff: { base: diff.base, files: diff.stat.files, lines: diff.stat.lines, path: diff.path } };
         }
         const untracked2 = listed !== null && lines(git(["ls-files", "--others", "--exclude-standard", "--", ".forge/.gitignore"])).length ? { untracked: [".forge/.gitignore"] } : {};
-        return json({ ...result, catalog, new: fresh2, implementer, announce: line2, gate, ...untracked2, ...auto, ...reviewed });
+        return json3({ ...result, catalog, new: fresh2, implementer, announce: line2, gate, ...untracked2, ...auto, ...reviewed, review });
       }
       case "validate": {
         const config = loadConfig(repoDir);
@@ -16822,7 +17614,7 @@ function run(argv, io) {
           if (flag("baseline") === void 0) throw new UsageError("validate: --baseline needs the JSON a validate run printed on the base commit");
           let baseline;
           try {
-            baseline = JSON.parse((0, import_node_fs19.readFileSync)(import_node_path21.default.resolve(io.cwd, flag("baseline")), "utf8"));
+            baseline = JSON.parse((0, import_node_fs21.readFileSync)(import_node_path23.default.resolve(io.cwd, flag("baseline")), "utf8"));
           } catch {
             throw new UsageError("validate: --baseline must be the JSON written by forge validate");
           }
@@ -16830,7 +17622,7 @@ function run(argv, io) {
         }
         const allOk = results.every((r2) => !blocking(r2));
         appendEvent(io.cwd, { ts: ts(), kind: "validate", ...flag("task") ? { task: flag("task") } : {}, ...has("base-run") ? { baseline: true } : {}, ok: allOk, results: results.map((r2) => ({ validator: r2.validator, ok: r2.ok, flaky: r2.flaky, ...r2.skipped ? { skipped: r2.skipped } : {}, ...r2.preexisting ? { preexisting: true } : {}, ...r2.ok ? {} : { failures: r2.failures } })) });
-        const out = json(results, allOk ? 0 : 1);
+        const out = json3(results, allOk ? 0 : 1);
         if (!list.length) out.stderr = all.length ? "no validators cover the affected paths\n" : "no validators detected: add tests or list validators in .forge/config.yaml\n";
         return out;
       }
@@ -16838,14 +17630,14 @@ function run(argv, io) {
         const task = flag("task");
         const dirArg = flag("dir");
         if (!task || !dirArg) throw new UsageError("verdict: --task and --dir are required");
-        const dir = import_node_path21.default.resolve(io.cwd, dirArg);
+        const dir = import_node_path23.default.resolve(io.cwd, dirArg);
         const reviews = {};
         for (const name of ["correctness", "security", "perf"]) {
-          const file = import_node_path21.default.join(dir, `${name}.json`);
-          if ((0, import_node_fs19.existsSync)(file)) reviews[name] = parseReview((0, import_node_fs19.readFileSync)(file, "utf8"));
+          const file = import_node_path23.default.join(dir, `${name}.json`);
+          if ((0, import_node_fs21.existsSync)(file)) reviews[name] = parseReview((0, import_node_fs21.readFileSync)(file, "utf8"));
         }
-        const verifyPath = import_node_path21.default.join(dir, "verify.json");
-        const verifyFile = (0, import_node_fs19.existsSync)(verifyPath) ? parseVerifyFile((0, import_node_fs19.readFileSync)(verifyPath, "utf8")) : void 0;
+        const verifyPath = import_node_path23.default.join(dir, "verify.json");
+        const verifyFile = (0, import_node_fs21.existsSync)(verifyPath) ? parseVerifyFile((0, import_node_fs21.readFileSync)(verifyPath, "utf8")) : void 0;
         if (verifyFile !== void 0) reviews.verify = verifyReview(verifyFile);
         if (!Object.keys(reviews).length) throw new UsageError(`no reviews found in ${dirArg}`);
         let validatorsOk;
@@ -16855,7 +17647,7 @@ function run(argv, io) {
         if (flag("validators")) {
           let results;
           try {
-            results = JSON.parse((0, import_node_fs19.readFileSync)(import_node_path21.default.resolve(io.cwd, flag("validators")), "utf8"));
+            results = JSON.parse((0, import_node_fs21.readFileSync)(import_node_path23.default.resolve(io.cwd, flag("validators")), "utf8"));
           } catch {
             throw new UsageError("verdict: --validators must be the JSON written by forge validate");
           }
@@ -16878,7 +17670,7 @@ function run(argv, io) {
           ts: ts(),
           kind: "verdict",
           task,
-          dir: import_node_path21.default.relative(io.cwd, dir).split(import_node_path21.default.sep).join("/") || ".",
+          dir: import_node_path23.default.relative(io.cwd, dir).split(import_node_path23.default.sep).join("/") || ".",
           action: result.action,
           score: result.score,
           signature: result.signature,
@@ -16887,25 +17679,25 @@ function run(argv, io) {
           minor: result.minor.length
         });
         if (verifyFile !== void 0) logVerifyResult(io.cwd, ts(), task, dir, verifyFile);
-        return json(result);
+        return json3(result);
       }
       case "verify-result": {
         const task = flag("task");
         const dirArg = flag("dir");
         if (!task || !dirArg) throw new UsageError("verify-result: --task and --dir are required");
-        const dir = import_node_path21.default.resolve(io.cwd, dirArg);
-        const verifyPath = import_node_path21.default.join(dir, "verify.json");
-        if (!(0, import_node_fs19.existsSync)(verifyPath)) throw new UsageError(`verify-result: no verify.json in ${dirArg}`);
-        const verifyFile = parseVerifyFile((0, import_node_fs19.readFileSync)(verifyPath, "utf8"));
+        const dir = import_node_path23.default.resolve(io.cwd, dirArg);
+        const verifyPath = import_node_path23.default.join(dir, "verify.json");
+        if (!(0, import_node_fs21.existsSync)(verifyPath)) throw new UsageError(`verify-result: no verify.json in ${dirArg}`);
+        const verifyFile = parseVerifyFile((0, import_node_fs21.readFileSync)(verifyPath, "utf8"));
         if (!verifyFile) throw new UsageError(`verify-result: ${dirArg}/verify.json is not a usable verify result (result pass|fail|blocked, checks, a reason when blocked)`);
-        return json({ task, ...logVerifyResult(io.cwd, ts(), task, dir, verifyFile) });
+        return json3({ task, ...logVerifyResult(io.cwd, ts(), task, dir, verifyFile) });
       }
       case "verify-cleanup": {
         const dir = flag("dir");
         if (!dir) throw new UsageError("verify-cleanup: --dir is required");
         let pids = [];
         try {
-          const raw = JSON.parse((0, import_node_fs19.readFileSync)(import_node_path21.default.resolve(io.cwd, dir, "pids.json"), "utf8"));
+          const raw = JSON.parse((0, import_node_fs21.readFileSync)(import_node_path23.default.resolve(io.cwd, dir, "pids.json"), "utf8"));
           if (Array.isArray(raw)) pids = raw.filter((p) => Number.isInteger(p));
         } catch {
           pids = [];
@@ -16932,21 +17724,15 @@ function run(argv, io) {
             }
           }
         };
-        return json(cleanupPids(pids, kill));
+        return json3(cleanupPids(pids, kill));
       }
       case "round": {
         const task = flag("task");
         const p = flag("path");
         if (!task || p !== "medium" && p !== "large") throw new UsageError("round: --task and --path medium|large are required");
-        const verdicts = readEvents(io.cwd).filter((e) => e.kind === "verdict" && e.task === task && (e.action === "accept" || e.action === "fix" || e.action === "redo"));
-        const lastPerDir = /* @__PURE__ */ new Map();
-        verdicts.forEach((e, i) => {
-          if (typeof e.dir === "string") lastPerDir.set(e.dir, i);
-        });
-        const history = verdicts.filter((e, i) => typeof e.dir !== "string" || lastPerDir.get(e.dir) === i).map((e) => ({ action: e.action, score: typeof e.score === "number" ? e.score : null, signature: String(e.signature ?? "") }));
-        const d = decideRound(history, p);
+        const d = roundDecision(readEvents(io.cwd), task, p, loadConfig(repoDir).profile);
         appendEvent(io.cwd, { ts: ts(), kind: "round", task, ...d });
-        return json(d);
+        return json3(d);
       }
       case "proposals": {
         const [sub, ...rest] = args;
@@ -16962,7 +17748,7 @@ function run(argv, io) {
         };
         const readText = (f, what) => {
           try {
-            return (0, import_node_fs19.readFileSync)(import_node_path21.default.resolve(io.cwd, f), "utf8");
+            return (0, import_node_fs21.readFileSync)(import_node_path23.default.resolve(io.cwd, f), "utf8");
           } catch {
             throw new UsageError(`proposals: cannot read ${what}`);
           }
@@ -16995,14 +17781,14 @@ function run(argv, io) {
             const id2 = proposalId(io.now(), io.rand ?? Math.random);
             saveProposal(io.cwd, id2, doc);
             appendEvent(io.cwd, { ts: ts(), kind: "proposal", action: "add", id: id2 });
-            return json({ id: id2, doc });
+            return json3({ id: id2, doc });
           }
           case "list": {
             const status = subFlag("status");
             if (status !== void 0 && !PROPOSAL_STATUSES.includes(status)) throw new UsageError(`proposals list: --status must be one of ${PROPOSAL_STATUSES.join("|")}`);
             const all = loadProposals(io.cwd).filter((p) => status === void 0 || p.status === status);
             all.sort((a, b) => a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : a.id < b.id ? 1 : -1);
-            return json(all);
+            return json3(all);
           }
           case "decide": {
             const [id2, action] = rest;
@@ -17035,15 +17821,15 @@ function run(argv, io) {
               saveProposal(io.cwd, id2, r2.doc);
               appendEvent(io.cwd, reopen ? { ts: at, kind: "proposal", action: "reopen", id: id2, from: base.status, to: r2.doc.status } : { ts: at, kind: "proposal", action: "decide", id: id2, status: r2.doc.status });
             }
-            if (!reopen) return json({ id: id2, status: r2.doc.status, write: writeOf(r2.doc, by, at) });
+            if (!reopen) return json3({ id: id2, status: r2.doc.status, write: writeOf(r2.doc, by, at) });
             const write = { ...writeOf(r2.doc, by, at), history: r2.doc.history };
             if (!r2.doc.reason && base.reason) write.reason = { __delete__: true };
-            return json({ id: id2, status: r2.doc.status, previous: base.status, write });
+            return json3({ id: id2, status: r2.doc.status, previous: base.status, write });
           }
           case "save": {
             const from = subFlag("from");
             if (!from) throw new UsageError("proposals save: --from is required");
-            const id2 = subFlag("id") ?? import_node_path21.default.basename(from).replace(/(\.db)?\.json$/, "");
+            const id2 = subFlag("id") ?? import_node_path23.default.basename(from).replace(/(\.db)?\.json$/, "");
             if (!PROPOSAL_ID.test(id2)) throw new UsageError("proposals save: a proposal id (p + 14 digits + 4 letters/digits) is required (--id, or a <id>.json / <id>.db.json file name)");
             let doc;
             try {
@@ -17062,16 +17848,16 @@ function run(argv, io) {
             const tracked = previousDoc !== null && (doc.history ?? []).some((e) => !known.has(JSON.stringify(e)) && e.status === previousDoc.status && e.decidedBy === previousDoc.decidedBy && e.decidedAt === previousDoc.decidedAt);
             const stderr = reopened && !tracked ? `proposals save: ${id2} went from ${previousDoc.status} to ${doc.status} with no new history entry: the change was not made through proposals decide --reopen
 ` : "";
-            return { ...json({ id: id2, status: doc.status, previous, logged }), stderr };
+            return { ...json3({ id: id2, status: doc.status, previous, logged }), stderr };
           }
           case "pull": {
             const dir = subFlag("dir");
             if (!dir) throw new UsageError("proposals pull: --dir is required");
-            const abs = import_node_path21.default.resolve(io.cwd, dir);
+            const abs = import_node_path23.default.resolve(io.cwd, dir);
             let names2;
-            if (!(0, import_node_fs19.existsSync)(abs)) return ok("0");
+            if (!(0, import_node_fs21.existsSync)(abs)) return ok("0");
             try {
-              names2 = (0, import_node_fs19.readdirSync)(abs);
+              names2 = (0, import_node_fs21.readdirSync)(abs);
             } catch {
               throw new UsageError(`proposals pull: cannot read ${dir}`);
             }
@@ -17082,7 +17868,7 @@ function run(argv, io) {
               if (!PROPOSAL_ID.test(id2)) continue;
               let doc;
               try {
-                doc = normalizeProposal(JSON.parse((0, import_node_fs19.readFileSync)(import_node_path21.default.join(abs, name), "utf8")));
+                doc = normalizeProposal(JSON.parse((0, import_node_fs21.readFileSync)(import_node_path23.default.join(abs, name), "utf8")));
               } catch {
                 continue;
               }
@@ -17100,12 +17886,12 @@ function run(argv, io) {
             const { id: _id, ...doc } = found;
             if (doc.status !== "proposed" || !autoApprovable(doc)) {
               appendEvent(io.cwd, { ts: ts(), kind: "proposal", action: "policy", id: id2, status: doc.status });
-              return json({ id: id2, status: doc.status, write: null });
+              return json3({ id: id2, status: doc.status, write: null });
             }
             const at = ts();
             saveProposal(io.cwd, id2, { ...doc, status: "auto_approved", decidedBy: "forge:policy", decidedAt: at });
             appendEvent(io.cwd, { ts: at, kind: "proposal", action: "policy", id: id2, status: "auto_approved" });
-            return json({ id: id2, status: "auto_approved", write: { status: "auto_approved", decidedBy: "forge:policy", decidedAt: at } });
+            return json3({ id: id2, status: "auto_approved", write: { status: "auto_approved", decidedBy: "forge:policy", decidedAt: at } });
           }
           case "to-task": {
             const id2 = rest[0];
@@ -17135,11 +17921,11 @@ function run(argv, io) {
               if (e instanceof PlanError) throw new UsageError(`proposals to-task: the resulting plan is invalid: ${e.issues.join("; ")}`);
               throw e;
             }
-            (0, import_node_fs19.writeFileSync)(import_node_path21.default.resolve(io.cwd, planArg), next);
+            (0, import_node_fs21.writeFileSync)(import_node_path23.default.resolve(io.cwd, planArg), next);
             const { id: _id, ...doc } = found;
             saveProposal(io.cwd, id2, { ...doc, taskId: task.id });
             appendEvent(io.cwd, { ts: ts(), kind: "proposal", action: "to-task", id: id2, taskId: task.id });
-            return json({ id: id2, taskId: task.id, write: { taskId: task.id } });
+            return json3({ id: id2, taskId: task.id, write: { taskId: task.id } });
           }
           default:
             throw new UsageError("usage: forge proposals <add|list|decide|save|pull|policy|to-task> ...");
@@ -17151,7 +17937,7 @@ function run(argv, io) {
           const surfaces = readSurfaces(io.cwd, readLearned(io.cwd));
           const local = readLocal(io.cwd);
           const drafts = detectDrafts(repoReader(repoDir)).filter((d) => !surfaces.some((s2) => s2.name === d.name) && !local.proposed.includes(d.name));
-          return json({ surfaces, drafts });
+          return json3({ surfaces, drafts });
         }
         const name = flag("name");
         if (!name || !NAME.test(name)) throw new UsageError(`surfaces ${sub}: --name must match ${NAME}`);
@@ -17160,25 +17946,25 @@ function run(argv, io) {
           return ok("ok");
         }
         if (sub === "learn") {
-          const file = import_node_path21.default.join(io.cwd, surfaceFile(name));
-          if (!(0, import_node_fs19.existsSync)(file)) throw new UsageError(`surfaces learn: ${surfaceFile(name)} does not exist`);
-          if ((0, import_node_fs19.lstatSync)(file).isSymbolicLink()) throw new UsageError(`surfaces learn: ${surfaceFile(name)} is a symlink`);
+          const file = import_node_path23.default.join(io.cwd, surfaceFile(name));
+          if (!(0, import_node_fs21.existsSync)(file)) throw new UsageError(`surfaces learn: ${surfaceFile(name)} does not exist`);
+          if ((0, import_node_fs21.lstatSync)(file).isSymbolicLink()) throw new UsageError(`surfaces learn: ${surfaceFile(name)} is a symlink`);
           let notes;
           try {
-            notes = JSON.parse((0, import_node_fs19.readFileSync)(import_node_path21.default.resolve(io.cwd, flag("notes-file") ?? ""), "utf8"));
+            notes = JSON.parse((0, import_node_fs21.readFileSync)(import_node_path23.default.resolve(io.cwd, flag("notes-file") ?? ""), "utf8"));
           } catch {
             throw new UsageError("surfaces learn: --notes-file must be a JSON array of strings");
           }
           if (!Array.isArray(notes) || !notes.every((n) => typeof n === "string" && n.trim())) throw new UsageError("surfaces learn: --notes-file must be a JSON array of strings");
           const heading = flag("heading") ?? "Learned";
           if (!LEARNED_HEADINGS.includes(heading)) throw new UsageError(`surfaces learn: --heading must be ${LEARNED_HEADINGS.join("|")}`);
-          const before = (0, import_node_fs19.readFileSync)(file, "utf8");
+          const before = (0, import_node_fs21.readFileSync)(file, "utf8");
           const cur = readLocal(io.cwd).surfaces[name];
           const allowed = cur?.state === "allowed" && hashMatches(cur.hash, permissionHash(before, readLearned(io.cwd).get(name)));
           const r2 = appendLearned(before, ts().slice(0, 10), notes, heading);
-          (0, import_node_fs19.writeFileSync)(file, r2.text);
+          (0, import_node_fs21.writeFileSync)(file, r2.text);
           if (allowed) recordLearned(io.cwd, name, r2.added, ts());
-          return json({ name, count: r2.count });
+          return json3({ name, count: r2.count });
         }
         throw new UsageError("usage: forge surfaces [learn --name N --notes-file F [--heading H] | proposed --name N]");
       }
@@ -17188,7 +17974,7 @@ function run(argv, io) {
         const picked = one === void 0 ? all : all.filter((s2) => s2.name === one);
         if (one !== void 0 && !picked.length) throw new UsageError(`tools: no surface ${one} in .forge/verify/`);
         const names2 = picked.flatMap((s2) => s2.tools);
-        return json(checkTools(names2, { onPath, inventory: names2.length ? mcpOf(io, repoDir) : /* @__PURE__ */ new Set(), exec: io.exec ?? defaultExec(io.cwd) }));
+        return json3(checkTools(names2, { onPath, inventory: names2.length ? mcpOf(io, repoDir) : /* @__PURE__ */ new Set(), exec: io.exec ?? defaultExec(io.cwd) }));
       }
       case "verify-plan": {
         const task = flag("task"), p = flag("path"), base = flag("base");
@@ -17212,16 +17998,16 @@ function run(argv, io) {
           tools: (s2) => s2.tools.length ? toolGaps(s2.tools, { onPath, inventory: inventory ??= mcpOf(io, repoDir) }) : { missing: [], unknown: [] }
         });
         appendEvent(io.cwd, { ts: ts(), kind: "verify", task, planned: plan.eligible, surfaces: plan.surfaces.filter((s2) => s2.permission === "allowed").map((s2) => s2.name) });
-        return json({ ...plan, surfaces: plan.surfaces.map((ps) => surfaceQuestion(ps, surfaces.find((s2) => s2.name === ps.name), local.surfaces[ps.name], git, repoDir, io.cwd, es2)) });
+        return json3({ ...plan, surfaces: plan.surfaces.map((ps) => surfaceQuestion(ps, surfaces.find((s2) => s2.name === ps.name), local.surfaces[ps.name], git, repoDir, io.cwd, es2)) });
       }
       case "local": {
         const [sub, key, value] = args;
         if (sub === "get") {
           const s2 = readLocal(io.cwd);
-          if (key === void 0) return json(s2);
+          if (key === void 0) return json3(s2);
           const m = /^surfaces\.(.+)$/.exec(key);
           if (!m) throw new UsageError("local get: the path must be surfaces.<name>");
-          return json(s2.surfaces[m[1]] ?? null);
+          return json3(s2.surfaces[m[1]] ?? null);
         }
         if (sub === "set" && (key === "workflow" || key === "autonomy")) {
           if (value === "none") {
@@ -17268,7 +18054,7 @@ function run(argv, io) {
         const au = flag("autonomy");
         if (wf !== void 0 && !isWorkflow(wf)) throw new UsageError(`prefs: --workflow must be one of ${WORKFLOWS.join("|")}`);
         if (au !== void 0 && !isAutonomy(au)) throw new UsageError(`prefs: --autonomy must be one of ${AUTONOMIES.join("|")}`);
-        return json(resolvePrefs({ ...wf ? { workflow: wf } : {}, ...au ? { autonomy: au } : {} }, readLocal(io.cwd), loadConfig(repoDir)));
+        return json3(resolvePrefs({ ...wf ? { workflow: wf } : {}, ...au ? { autonomy: au } : {} }, readLocal(io.cwd), loadConfig(repoDir)));
       }
       case "swarm":
         return swarmCommand(args, io, {
@@ -17276,6 +18062,18 @@ function run(argv, io) {
           exec: io.exec ?? defaultExec(io.cwd),
           repo: repoReader(repoDir),
           at: (dir) => ({ git: defaultGit(dir), exec: defaultExec(dir), repo: repoReader(dir) })
+        });
+      case "review-prep":
+      case "review-close":
+      case "prep":
+      case "shadow":
+        return reviewCommand(cmd, args, {
+          cwd: io.cwd,
+          repoDir,
+          now: io.now,
+          git: io.git ?? defaultGit(repoDir),
+          exec: io.exec ?? defaultExec(repoDir),
+          repo: repoReader(repoDir)
         });
       case "hook": {
         const which = args[0];
@@ -17291,11 +18089,11 @@ function run(argv, io) {
         const git = io.git ?? defaultGit(repoDir);
         const top = git(["rev-parse", "--show-toplevel"])?.trim();
         if (!top) throw new UsageError(`tree ${sub}: ${repoDir} is not a git work tree`);
-        const treeRoot = import_node_path21.default.resolve(top);
+        const treeRoot = import_node_path23.default.resolve(top);
         const file = treeStartFile(io.cwd, task);
         let text2 = null;
         try {
-          text2 = (0, import_node_fs19.readFileSync)(file, "utf8");
+          text2 = (0, import_node_fs21.readFileSync)(file, "utf8");
         } catch {
           text2 = null;
         }
@@ -17307,8 +18105,8 @@ function run(argv, io) {
           if (status2 === null) throw new UsageError(`tree snapshot: git status failed in ${repoDir}`);
           const head = git(["rev-parse", "--verify", "-q", "HEAD"])?.trim() || null;
           const snap = { task, root: treeRoot, at: ts(), head, ...parseStatus(status2) };
-          (0, import_node_fs19.mkdirSync)(import_node_path21.default.dirname(file), { recursive: true });
-          (0, import_node_fs19.writeFileSync)(file, JSON.stringify(snap, null, 2) + "\n");
+          (0, import_node_fs21.mkdirSync)(import_node_path23.default.dirname(file), { recursive: true });
+          (0, import_node_fs21.writeFileSync)(file, JSON.stringify(snap, null, 2) + "\n");
           return ok(file);
         }
         const base = flag("base");
@@ -17323,7 +18121,7 @@ function run(argv, io) {
         if (snapshot?.head && git(["merge-base", "--is-ancestor", base, snapshot.head]) === null) {
           out.warning = `--base ${base} is not an ancestor of the snapshot's head ${snapshot.head}: task may list commits that are not the task's`;
         }
-        return json(out);
+        return json3(out);
       }
       case "config": {
         const [sub, key] = args;
@@ -17354,16 +18152,16 @@ function run(argv, io) {
           const current = parseRun(readRunText(io.cwd));
           if (current?.active && stopReason(current, stopContext(io.cwd, io.now())) === null) throw new UsageError("infinite start: a run is already active (forge stop, or forge infinite status)");
           forgeDir(io.cwd);
-          (0, import_node_fs19.rmSync)(stopFile(io.cwd), { force: true });
+          (0, import_node_fs21.rmSync)(stopFile(io.cwd), { force: true });
           const run2 = startRun(io.now(), { ...cycles !== void 0 ? { cycles } : {}, ...hours !== void 0 ? { hours } : {} }, queueMax, session ?? null, locale ?? null);
           saveRun(io.cwd, run2);
-          return json(run2);
+          return json3(run2);
         }
         if (sub === "status") {
           const text2 = readRunText(io.cwd);
           const run2 = parseRun(text2);
           const reason = run2?.active ? stopReason(run2, stopContext(io.cwd, io.now())) : null;
-          return json({ present: text2 !== null, valid: run2 !== null, run: run2, stopReason: reason, reply: runReply(io.cwd, run2) });
+          return json3({ present: text2 !== null, valid: run2 !== null, run: run2, stopReason: reason, reply: runReply(io.cwd, run2) });
         }
         throw new UsageError("usage: forge infinite <start --cycles N|--hours H [--queue-max N] [--session ID] [--locale CODE]|status>");
       }
@@ -17373,7 +18171,7 @@ function run(argv, io) {
         let error;
         if (flag("error-file") !== void 0) {
           try {
-            error = (0, import_node_fs19.readFileSync)(import_node_path21.default.resolve(io.cwd, flag("error-file")), "utf8");
+            error = (0, import_node_fs21.readFileSync)(import_node_path23.default.resolve(io.cwd, flag("error-file")), "utf8");
           } catch {
             throw new UsageError("cycle: cannot read --error-file");
           }
@@ -17383,11 +18181,11 @@ function run(argv, io) {
         const next = recordCycle(current, { progress: progress === "yes", ...error !== void 0 ? { error } : {} });
         saveRun(io.cwd, next);
         appendEvent(io.cwd, { ts: ts(), kind: "cycle", cycle: next.cycle, progress: progress === "yes", ...next.lastError ? { error: next.lastError } : {} });
-        return json({ ...next, reply: runReply(io.cwd, next) });
+        return json3({ ...next, reply: runReply(io.cwd, next) });
       }
       case "stop": {
         forgeDir(io.cwd);
-        (0, import_node_fs19.writeFileSync)(stopFile(io.cwd), `${ts()}
+        (0, import_node_fs21.writeFileSync)(stopFile(io.cwd), `${ts()}
 `);
         const current = parseRun(readRunText(io.cwd));
         if (current?.active) {
@@ -17406,19 +18204,19 @@ function run(argv, io) {
       case "sp-path": {
         const skill = args[0];
         if (!skill || skill.startsWith("--")) throw new UsageError("sp-path: the name of a superpowers skill is required");
-        return json(spSkillPath(superpowersOf(io, repoDir), skill));
+        return json3(spSkillPath(superpowersOf(io, repoDir), skill));
       }
       case "sp-specs": {
         if (has("decline")) {
-          const rel = (flag("decline") ?? "").replace(/\\/g, "/");
-          if (!/^docs\/superpowers\/specs\/[^/]+\.md$/.test(rel)) throw new UsageError("sp-specs: --decline needs a docs/superpowers/specs/<file>.md path");
-          updateLocal(io.cwd, (s2) => ({ ...s2, declinedSpecs: [.../* @__PURE__ */ new Set([...declinedSpecs(s2), rel])] }));
-          return json({ declined: rel });
+          const rel2 = (flag("decline") ?? "").replace(/\\/g, "/");
+          if (!/^docs\/superpowers\/specs\/[^/]+\.md$/.test(rel2)) throw new UsageError("sp-specs: --decline needs a docs/superpowers/specs/<file>.md path");
+          updateLocal(io.cwd, (s2) => ({ ...s2, declinedSpecs: [.../* @__PURE__ */ new Set([...declinedSpecs(s2), rel2])] }));
+          return json3({ declined: rel2 });
         }
-        return json(spSpecs(repoDir, io.now().getTime(), { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)) }));
+        return json3(spSpecs(repoDir, io.now().getTime(), { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)) }));
       }
       case "sp-plans":
-        return json(spPlans(repoDir, io.now().getTime(), { committedAt: committedAt(io, repoDir) }));
+        return json3(spPlans(repoDir, io.now().getTime(), { committedAt: committedAt(io, repoDir) }));
       case "route": {
         const [sub] = args;
         const paths = (cmdName) => {
@@ -17440,7 +18238,7 @@ function run(argv, io) {
           let why = by === "user" ? "the user chose it" : "the recommended option for this request";
           if (flag("why-file") !== void 0) {
             try {
-              why = (0, import_node_fs19.readFileSync)(import_node_path21.default.resolve(io.cwd, flag("why-file")), "utf8").trim() || why;
+              why = (0, import_node_fs21.readFileSync)(import_node_path23.default.resolve(io.cwd, flag("why-file")), "utf8").trim() || why;
             } catch {
               throw new UsageError("route set: cannot read --why-file");
             }
@@ -17457,17 +18255,17 @@ function run(argv, io) {
             by,
             undo: { type: "none", reason: "the route only chose who does the work: start the task again to choose another" }
           }, { ts: ts(), task: task2, runId: exec?.active ? exec.runId : null });
-          return json({ ...doc, decision: n });
+          return json3({ ...doc, decision: n });
         }
         if (sub === "stage") {
           const stage = flag("stage");
           if (!ROUTE_STAGES.includes(stage)) throw new UsageError(`route stage: --stage must be one of ${ROUTE_STAGES.join("|")}`);
           const files = paths("route stage");
           const cur = readRoute(io.cwd);
-          if (!cur || flag("task") !== void 0 && flag("task") !== cur.task) return json({ updated: false });
+          if (!cur || flag("task") !== void 0 && flag("task") !== cur.task) return json3({ updated: false });
           const next = { ...cur, stage, ts: ts(), ...files };
           writeRoute(io.cwd, next);
-          return json({ updated: true, ...next });
+          return json3({ updated: true, ...next });
         }
         if (sub !== void 0 && !sub.startsWith("--")) {
           throw new UsageError("usage: forge route --task id --path p [--workflow w] [--autonomy a] [--run-plan] [--build-spec] | set --task id --chosen o --by user|auto [--spec f] [--plan f] [--why-file f] [--session s] | stage --stage s [--task id] [--spec f] [--plan f]");
@@ -17485,29 +18283,29 @@ function run(argv, io) {
         const now = io.now().getTime();
         const specs = sp.installed ? spSpecs(repoDir, now, { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)) }) : [];
         const plans = sp.installed ? spPlans(repoDir, now, { committedAt: committedAt(io, repoDir) }) : [];
-        return json(routeOptions({ path: p, prefs, superpowers: { installed: sp.installed, version: sp.version }, specs, plans, runPlan: has("run-plan"), buildSpec: has("build-spec") }));
+        return json3(routeOptions({ path: p, prefs, superpowers: { installed: sp.installed, version: sp.version }, specs, plans, runPlan: has("run-plan"), buildSpec: has("build-spec") }));
       }
       case "tdd":
-        return json(tddFor(io, repoDir));
+        return json3(tddFor(io, repoDir));
       case "sp-plan": {
         const [sub, file] = args;
         if (sub !== "tasks" && sub !== "check" || !file || file.startsWith("--")) throw new UsageError("usage: forge sp-plan tasks <plan.md> | check <plan.md> --task N");
-        const abs = import_node_path21.default.resolve(io.cwd, file);
+        const abs = import_node_path23.default.resolve(io.cwd, file);
         let text2;
         try {
-          text2 = (0, import_node_fs19.readFileSync)(abs, "utf8");
+          text2 = (0, import_node_fs21.readFileSync)(abs, "utf8");
         } catch {
           throw new UsageError(`sp-plan: cannot read ${file}`);
         }
         try {
           if (sub === "tasks") {
             const { plan, tasks } = spPlanDone(text2, abs, repoDir);
-            return json({ plan, tasks });
+            return json3({ plan, tasks });
           }
           const n = spTaskNumber(flag("task"));
           const r2 = checkSpTask(text2, n);
-          if (r2.checked) (0, import_node_fs19.writeFileSync)(abs, r2.text);
-          return json({ task: n, checked: r2.checked });
+          if (r2.checked) (0, import_node_fs21.writeFileSync)(abs, r2.text);
+          return json3({ task: n, checked: r2.checked });
         } catch (e) {
           if (e instanceof SpPlanError) throw new UsageError(`sp-plan: ${file}: ${e.message}`);
           throw e;
@@ -17515,7 +18313,7 @@ function run(argv, io) {
       }
       case "agents": {
         const { profile } = loadConfig(io.cwd);
-        return json({ profile, agents: Object.fromEntries(ROLES.map((r2) => [r2, agentFor(r2, profile)])) });
+        return json3({ profile, agents: Object.fromEntries(ROLES.map((r2) => [r2, agentFor(r2, profile)])) });
       }
       case "decision": {
         const [sub, arg] = args;
@@ -17525,7 +18323,7 @@ function run(argv, io) {
           if (!file) throw new UsageError("decision add: --data-file is required");
           let raw;
           try {
-            raw = JSON.parse((0, import_node_fs19.readFileSync)(import_node_path21.default.resolve(io.cwd, file), "utf8"));
+            raw = JSON.parse((0, import_node_fs21.readFileSync)(import_node_path23.default.resolve(io.cwd, file), "utf8"));
           } catch {
             throw new UsageError("decision add: --data-file must be a JSON object");
           }
@@ -17535,7 +18333,7 @@ function run(argv, io) {
           const exec = readExecution(root);
           try {
             const { n, event } = addDecision(root, raw, { ts: ts(), ...task ? { task } : {}, runId: exec?.active ? exec.runId : null });
-            return json({ n, ...event });
+            return json3({ n, ...event });
           } catch (e) {
             if (e instanceof DecisionInputError) throw new UsageError(`decision add: ${e.message}`);
             throw e;
@@ -17544,26 +18342,26 @@ function run(argv, io) {
         if (sub === "list") {
           const since = flag("since");
           if (since !== void 0 && !Number.isFinite(Date.parse(since))) throw new UsageError(`decision list: --since must be a date, got ${since}`);
-          return json(listDecisions(root, { task: flag("task"), run: flag("run"), since, all: has("all"), auto: has("auto") }));
+          return json3(listDecisions(root, { task: flag("task"), run: flag("run"), since, all: has("all"), auto: has("auto") }));
         }
         if (sub === "show") {
           const n = Number(arg);
           if (!Number.isInteger(n) || n < 1) throw new UsageError("decision show: <n> must be a positive integer");
           const d = allDecisions(root).find((x) => x.n === n);
           if (!d) throw new UsageError(`decision show: there is no decision ${n}`);
-          return json(d);
+          return json3(d);
         }
         if (sub === "md") {
           const scope = flag("scope");
           if (!scope) throw new UsageError("decision md: --scope is required");
           const outFlag = flag("out");
-          const out = outFlag !== void 0 ? import_node_path21.default.resolve(io.cwd, outFlag) : import_node_path21.default.join(repoDir, "docs", "forge", "decisions", `${scopeFileName(scope)}.md`);
+          const out = outFlag !== void 0 ? import_node_path23.default.resolve(io.cwd, outFlag) : import_node_path23.default.join(repoDir, "docs", "forge", "decisions", `${scopeFileName(scope)}.md`);
           if (!out.endsWith(".md")) throw new UsageError("decision md: --out must be a .md file");
           const list = allDecisions(root).filter((d) => d.by !== "user" && (decisionScope(d) ?? "forge") === scope);
-          if (!list.length) return json({ written: false, scope, count: 0 });
-          (0, import_node_fs19.mkdirSync)(import_node_path21.default.dirname(out), { recursive: true });
-          (0, import_node_fs19.writeFileSync)(out, renderDecisionsMd(list, scope, flag("locale") ?? "en"));
-          return json({ written: true, scope, count: list.length, path: out });
+          if (!list.length) return json3({ written: false, scope, count: 0 });
+          (0, import_node_fs21.mkdirSync)(import_node_path23.default.dirname(out), { recursive: true });
+          (0, import_node_fs21.writeFileSync)(out, renderDecisionsMd(list, scope, flag("locale") ?? "en"));
+          return json3({ written: true, scope, count: list.length, path: out });
         }
         throw new UsageError("usage: forge decision add --data-file f [--task id] | list [--task id] [--run id] [--since iso] [--all] [--auto] | show <n> | md --scope s [--out f] [--locale es|en]");
       }
@@ -17572,7 +18370,7 @@ function run(argv, io) {
         if (!task) throw new UsageError("last: --task is required");
         const events = readEvents(io.cwd).filter((e) => e.task === task);
         const lastOf = (kind) => [...events].reverse().find((e) => e.kind === kind);
-        return json({
+        return json3({
           task,
           path: lastOf("triage")?.path ?? null,
           phase: lastOf("phase") ?? null,
@@ -17584,7 +18382,7 @@ function run(argv, io) {
         });
       }
       default:
-        return { code: 2, stdout: "", stderr: `${USAGE}
+        return { code: 2, stdout: "", stderr: `${USAGE2}
 ` };
     }
   } catch (e) {
@@ -17600,7 +18398,7 @@ var cwd = process.cwd();
 var stdin = "";
 if (process.argv[2] === "hook" && !process.stdin.isTTY) {
   try {
-    stdin = (0, import_node_fs20.readFileSync)(0, "utf8");
+    stdin = (0, import_node_fs22.readFileSync)(0, "utf8");
   } catch {
     stdin = "";
   }
