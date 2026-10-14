@@ -194,19 +194,19 @@ describe('plugin layout', () => {
     expect(md).toMatch(/bundles several independent changes/);
     expect(md).toMatch(/adds new behaviour with its tests/);
   });
-  it('versions: forge 0.15.1, waypoint 0.19.0', () => {
+  it('versions: forge 0.15.2, waypoint 0.19.1', () => {
     const forge = JSON.parse(read('plugins/forge/.claude-plugin/plugin.json'));
-    expect(forge.version).toBe('0.15.1');
-    expect(forge.dependencies).toEqual([{ name: 'waypoint', version: '^0.19.0' }]);
-    expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.19.0');
+    expect(forge.version).toBe('0.15.2');
+    expect(forge.dependencies).toEqual([{ name: 'waypoint', version: '^0.19.1' }]);
+    expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.19.1');
   });
-  it('CHANGELOG has the entries of forge 0.15.1, waypoint 0.19.0 and lens 0.11.4', () => {
+  it('CHANGELOG has the entries of forge 0.15.2, waypoint 0.19.1 and lens 0.11.4', () => {
     const md = read('CHANGELOG.md');
     // Each plugin's section, newest version first.
     const section = (p: string) => md.split(/^## /m).find(s => s.startsWith(`${p}\n`) || s.startsWith(`${p}\r\n`)) ?? '';
     const versions = (p: string) => [...section(p).matchAll(/^### (\d+\.\d+\.\d+) — /gm)].map(m => m[1]);
-    expect(versions('waypoint').slice(0, 2)).toEqual(['0.19.0', '0.18.1']);
-    expect(versions('forge').slice(0, 2)).toEqual(['0.15.1', '0.15.0']);
+    expect(versions('waypoint').slice(0, 2)).toEqual(['0.19.1', '0.19.0']);
+    expect(versions('forge').slice(0, 2)).toEqual(['0.15.2', '0.15.1']);
     expect(versions('lens').slice(0, 2)).toEqual(['0.11.4', '0.11.3']);
   });
   it('READMEs in Spanish and English tell the cost changes', () => {
@@ -443,9 +443,9 @@ describe('plugin layout', () => {
     for (const w of ['design-snapshot', 'design-changed', 'critique-check', 'critique-select', 'design-page', 'rewrite', 'interview', 'approve', '--since', 'applied']) expect(md).toContain(w);
     expect(read('plugins/waypoint/skills/plan/SKILL.md')).toContain('plan.yaml does not exist yet');
   });
-  it('forge manifest depends on waypoint ^0.19.0 and ships its CLI', () => {
+  it('forge manifest depends on waypoint ^0.19.1 and ships its CLI', () => {
     const p = JSON.parse(read('plugins/forge/.claude-plugin/plugin.json'));
-    expect(p).toMatchObject({ name: 'forge', version: '0.15.1', dependencies: [{ name: 'waypoint', version: '^0.19.0' }] });
+    expect(p).toMatchObject({ name: 'forge', version: '0.15.2', dependencies: [{ name: 'waypoint', version: '^0.19.1' }] });
     expect(existsSync(new URL('../plugins/forge/dist/forge.cjs', import.meta.url))).toBe(true);
   });
   it('forge scout agent: frontmatter and rules', () => {

@@ -1,7 +1,7 @@
 {
   "name": "forge",
   "description": "An adaptive way of working for Claude Code: triage by size, models by role, tool-first validation and weighted independent review.",
-  "version": "0.15.1",
+  "version": "0.15.2",
   "author": { "name": "Borja" },
-  "dependencies": [{ "name": "waypoint", "version": "^0.19.0" }]
+  "dependencies": [{ "name": "waypoint", "version": "^0.19.1" }]
 }

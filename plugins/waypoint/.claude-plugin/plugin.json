@@ -1,7 +1,7 @@
 {
   "name": "waypoint",
   "description": "Design docs, live roadmap artifacts and multi-session tracking for very large tasks.",
-  "version": "0.19.0",
+  "version": "0.19.1",
   "author": {
     "name": "Borja"
   },

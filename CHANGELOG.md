@@ -13,6 +13,11 @@ elsewhere and are reconstructed from their READMEs.
 
 ## waypoint
 
+### 0.19.1 — 2026-10-14
+
+#### Fixed
+- A `.forge/config.yaml` that declares forge 0.15.2's `generated` list is read instead of rejected.
+
 ### 0.19.0 — 2026-10-14
 
 #### Added
@@ -148,6 +153,18 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.15.2 — 2026-10-14
+
+#### Added
+- `generated` in `.forge/config.yaml`: globs of tracked files that are build output. After each validator run forge puts back the ones the validators rebuilt, also in your own checkout (an ephemeral run's `swarm integrate`, `validate`, `prep`, `review-prep`), and lists them in `restored`; there it never touches a file outside the list.
+
+#### Changed
+- forge:run's tool verification (surfaces, permissions, the verify agent, learned notes and evidence) lives in `references/verify.md`, read only when `verify-plan` finds something to verify, so the core is about 21 KB.
+- Requires waypoint ^0.19.1.
+
+#### Fixed
+- A plan task takes its sensitive zones from its title as well as from its paths, so a task titled with a real login keeps the security review; its description still sets none.
 
 ### 0.15.1 — 2026-10-14
 
