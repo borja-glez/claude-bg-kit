@@ -660,6 +660,24 @@ describe('plugin layout', () => {
     expect(run).not.toContain('used for `validate`, `verdict` and `round`');
     expect(run).not.toContain('diff forge/run-<project>...HEAD');
   });
+  it('FORGE prep folds BASE, the phase and the baseline; each stage change is one batch with state/T.exec, state/T.forge and the lease', () => {
+    const run = read('plugins/forge/skills/run/SKILL.md');
+    const medium = run.slice(run.indexOf('\n## Medium'), run.indexOf('### Superpowers plan'));
+    const steps = read('plugins/forge/skills/run/references/task-steps.md');
+    expect(medium).toContain('FORGE prep --task <id>-<n> --path medium');
+    expect(medium).not.toContain('--base-run');
+    expect(medium).not.toMatch(/record `BASE=\$\(git rev-parse HEAD\)`/);
+    const brief = steps.split('\n').find(l => l.startsWith('1. **brief**'))!;
+    expect(brief).toContain('FORGE prep --task T-1 --path large --cwd <worktree>');
+    expect(brief).not.toContain('--base-run');
+    const head = steps.split('\n').find(l => l.startsWith("**A task's steps**"))!;
+    expect(head).toMatch(/one ArtifactData `batch`/);
+    for (const w of ['`state/T.exec`', '`state/T.forge`', '`sessions/<SID>`', 'leaseUntil']) expect(head).toContain(w);
+    expect(head).not.toMatch(/After each stage change and each verdict also `update state\/T`/);
+    const ephemeral = run.slice(run.indexOf('\n### Ephemeral execution'), run.indexOf('\n## Resuming'));
+    expect(ephemeral).toContain('FORGE prep --task T-1 --path <path> --cwd <worktree>');
+    expect(Buffer.byteLength(read('plugins/forge/skills/member/SKILL.md'), 'utf8')).toBeLessThan(15 * 1024);
+  });
   it('forge:member: a small skill with frontmatter, join, the claim, the finish and the task steps', () => {
     const md = read('plugins/forge/skills/member/SKILL.md');
     expect(md).toMatch(/^---\r?\nname: member\r?\ndescription: .+\r?\n/);

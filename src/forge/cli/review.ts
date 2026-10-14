@@ -332,14 +332,52 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   });
 }
 
-/** `review-prep`, `review-close`, `prep` and `shadow` (cli/shadow.ts); the ones not built yet answer with a usage error. */
+/**
+ * `FORGE prep --task <id>-<n> --path <p> [--phase <name>] [--dir <dir>] [--cwd <worktree>]`: before a brief's work, in
+ * one call, reads BASE (the HEAD of `--cwd`), records what already fails on it into `<dir>/baseline-<n>.json` (as
+ * `validate --all --path <p> --base-run --task <id>-<n>` does; `<dir>` defaults to `.forge/work/<id>`), logs the phase
+ * `{"phase":<name, default implement>,"brief":<n>,"base":<BASE>}` on `<id>` and prints `{base, baseline, failing}`.
+ * A validator failing on BASE is what the baseline is for: prep exits 0.
+ */
+export function prep(args: string[], deps: ReviewDeps): Result {
+  const flag = (name: string) => {
+    const i = args.indexOf(`--${name}`);
+    const v = i >= 0 ? args[i + 1] : undefined;
+    return v === undefined || v.startsWith('--') ? undefined : v;
+  };
+  const task = flag('task'), p = flag('path');
+  if (!task || !p) throw new UsageError('prep: --task <id>-<n> and --path are required');
+  const m = TASK_N.exec(task);
+  if (!m) throw new UsageError('prep: --task must be <id>-<n>');
+  if (!(PATH_ORDER as readonly string[]).includes(p)) throw new UsageError(`prep: --path must be one of ${PATH_ORDER.join('|')}`);
+  const phase = flag('phase') ?? 'implement';
+  if (args.includes('--phase') && !/^[a-z][a-z0-9-]{0,39}$/.test(phase)) throw new UsageError('prep: --phase must be a phase name (lowercase letters, digits and -)');
+  const [, id, n] = m;
+  const base = (deps.git(['rev-parse', 'HEAD']) ?? '').trim();
+  if (!base) throw new UsageError('prep: cannot read HEAD');
+
+  // The baseline, as `validate --all --path <p> --base-run` runs it: on BASE nothing changed yet, so a heavy path runs
+  // every heavy validator (the review's diff later selects among them).
+  const config = loadConfig(deps.repoDir);
+  const scope: Scope = p === 'trivial' || p === 'small' ? { mode: 'small' } : { mode: 'heavy', changed: null };
+  const results = runValidators(selectValidators(detectValidators(deps.repo, config), scope), deps.exec, config.validatorTimeoutSec);
+  const dir = path.resolve(deps.cwd, flag('dir') ?? path.join('.forge', 'work', id));
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `baseline-${n}.json`);
+  writeFileSync(file, JSON.stringify(results, null, 2) + '\n');
+  const ts = deps.now().toISOString();
+  appendEvent(deps.cwd, { ts, kind: 'validate', task, baseline: true, ok: results.every(r => !blocking(r)), results: results.map(r => ({ validator: r.validator, ok: r.ok, flaky: r.flaky, ...(r.skipped ? { skipped: r.skipped } : {}), ...(r.ok ? {} : { failures: r.failures }) })) });
+  appendEvent(deps.cwd, { ts, kind: 'phase', task: id, phase, brief: Number(n), base });
+  return json({ base, baseline: rel(deps.cwd, file), failing: results.filter(blocking).map(r => r.validator) });
+}
+
+/** `review-prep`, `review-close`, `prep` and `shadow` (cli/shadow.ts). */
 export function reviewCommand(cmd: string, args: string[], deps: ReviewDeps): Result {
   switch (cmd) {
     case 'review-prep': return reviewPrep(args, deps);
     case 'review-close': return reviewClose(args, deps);
     case 'shadow': return shadowCommand(args, deps.cwd);
-    case 'prep':
-      throw new UsageError(`${cmd}: not available yet in this forge version`);
+    case 'prep': return prep(args, deps);
     default:
       throw new UsageError(`unknown review command ${cmd}`);
   }
