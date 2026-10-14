@@ -15584,7 +15584,7 @@ function reviewRound(input) {
       continue;
     }
     const name = reviewerKey(r2.role);
-    const repeats = prev.verdict !== "pass" || r2.role === "review-correctness" || r2.role === "review-security" && fixZones.length > 0 || r2.role === "review-perf" && prev.findings.some((f) => !!f.file && fixFiles.has(normPath3(f.file)));
+    const repeats = prev.verdict !== "pass" || !!prev.incomplete || !!prev.invalid || r2.role === "review-correctness" || r2.role === "review-security" && fixZones.length > 0 || r2.role === "review-perf" && prev.findings.some((f) => !!f.file && fixFiles.has(normPath3(f.file)));
     if (!repeats) {
       carried.push({ role: r2.role, name, verdict: prev.verdict });
       continue;
@@ -15689,7 +15689,8 @@ function reviewPrep(args, deps) {
       if (!(0, import_node_fs16.existsSync)(file)) continue;
       const r2 = parseReview((0, import_node_fs16.readFileSync)(file, "utf8"));
       prevReviews[reviewerKey(role)] = r2;
-      previous[role] = { verdict: r2.verdict, findings: r2.findings };
+      if (r2.invalid && !r2.dropped) continue;
+      previous[role] = { verdict: r2.verdict, findings: r2.findings, ...r2.incomplete ? { incomplete: true } : {}, ...r2.invalid ? { invalid: true } : {} };
     }
     const prevHead = (0, import_node_fs16.existsSync)(import_node_path18.default.join(prevDir, "head.txt")) ? (0, import_node_fs16.readFileSync)(import_node_path18.default.join(prevDir, "head.txt"), "utf8").trim() : "";
     const diffFrom = (from) => {
@@ -15908,6 +15909,11 @@ function reviewClose(args, deps) {
     const bad = xhigh.invalid ? twinFile : high.invalid ? highFile : null;
     if (bad) {
       shadowSkipped.push({ reviewer: k, reason: "unparseable", file: rel(deps.cwd, bad) });
+      continue;
+    }
+    const draft = xhigh.incomplete ? twinFile : high.incomplete ? highFile : null;
+    if (draft) {
+      shadowSkipped.push({ reviewer: k, reason: "incomplete", file: rel(deps.cwd, draft) });
       continue;
     }
     pairs.push({ k, high, xhigh });
@@ -17494,8 +17500,17 @@ function run(argv, io) {
         }
         const task = flag("task");
         if (kind === "triage" && task && data.project === void 0) {
-          const exec = readExecution(mainCheckout(io.cwd));
-          const project = exec?.active && exec.kind === "plan" && Object.hasOwn(exec.tasks, task) ? exec.project : readEvents(io.cwd).filter((e) => e.kind === "triage" && e.task === task && typeof e.project === "string" && e.project).at(-1)?.project;
+          const main = mainCheckout(io.cwd);
+          const exec = readExecution(main);
+          const inPlan = (project2) => {
+            if (!isSafeId(project2)) return false;
+            try {
+              return parsePlan((0, import_node_fs21.readFileSync)(import_node_path23.default.join(main, "docs", "waypoint", project2, "plan.yaml"), "utf8")).tasks.some((t) => t.id === task);
+            } catch {
+              return false;
+            }
+          };
+          const project = exec?.active && exec.kind === "plan" && (Object.hasOwn(exec.tasks, task) || inPlan(exec.project)) ? exec.project : readEvents(io.cwd).filter((e) => e.kind === "triage" && e.task === task && typeof e.project === "string" && e.project).at(-1)?.project;
           if (project) data = { ...data, project };
         }
         appendEvent(io.cwd, { ...data, ts: ts(), kind, ...task ? { task } : {} });
