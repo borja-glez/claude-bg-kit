@@ -914,4 +914,11 @@ describe('plugin layout', () => {
     expect(resuming).not.toContain('the Stop hook binds');
     expect(runRef('manual-member')).toContain('FORGE swarm join --session <SID> --role manual --hook-session <CSID>');
   });
+  it('forge:infinite binds its run at start with the Claude id, not at the first Stop (K5-03)', () => {
+    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    expect(inf).toContain('`CSID` = `${CLAUDE_SESSION_ID}`');
+    expect(inf).toContain('FORGE infinite start --cycles N --hours H --session <CSID>');
+    expect(inf).not.toContain('first Stop hook binds');
+    expect(inf).not.toContain('binds to the session that first hits the Stop hook');
+  });
 });

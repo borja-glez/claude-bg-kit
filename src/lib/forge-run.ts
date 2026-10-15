@@ -7,7 +7,7 @@ export interface RunState {
   lastError: string | null; repeatedError: boolean;
   lastBlockEvents: number | null;     // ledger event count at the last block
   stoppedReason?: string; queueMax: number;   // default 10
-  sessionId: string | null;           // the session the run is bound to (null until the first block)
+  sessionId: string | null;           // Claude's id of the session the run is bound to, set by infinite start (null in a run started by forge 0.15)
   blocksSinceCycle: number;           // Stop-hook blocks since the last cycle was recorded (0 when absent in older files)
   locale?: string;                    // the language the person writes in (infinite start --locale); absent when unknown
 }

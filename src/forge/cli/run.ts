@@ -23,6 +23,7 @@ import { autoApprovable, similarRejected, similarOpen } from '../policy.js';
 import { proposalToTask, proposalOfIncludes } from '../to-task.js';
 import type { PlanTask } from '../../lib/types.js';
 import { parseDocument } from 'yaml';
+import { claudeSessionId, noClaudeSession } from '../../lib/claude-session.js';
 import { UsageError } from './errors.js';
 import { swarmCommand, restoringRegenerated } from './swarm.js';
 import { reviewCommand } from './review.js';
@@ -1108,18 +1109,20 @@ export function run(argv: string[], io: Io): Result {
           const cycles = num('cycles', posInt, 'a positive integer');
           const hours = num('hours', n => Number.isFinite(n) && n > 0, 'a positive number');
           const queueMax = num('queue-max', posInt, 'a positive integer');
-          const session = flag('session');
-          if (has('session') && !session) throw new UsageError('infinite start: --session needs a session id');
           const locale = flag('locale');
           if (has('locale') && !isLocale(locale)) throw new UsageError('infinite start: --locale must be a language code (es, en, pt-BR…)');
           if (cycles === undefined && hours === undefined) throw new UsageError('infinite start: a budget is required (--cycles N and/or --hours H)');
-          // An active run blocks a new one only while nothing stops it: a run whose stop reason is already due
-          // (e.g. its session died after a budget ran out or a stop was asked) is replaced.
+          // C1, K5-03: the run is bound to the session that starts it; only that session's Stop hook chains its cycles.
+          const session = claudeSessionId(flag('session'), io.env ?? process.env);
+          if (!session) throw new UsageError(noClaudeSession('infinite start', '--session'));
+          // An active run blocks a new one only while nothing stops it and a session drives it: a run whose stop reason
+          // is already due (e.g. its session died after a budget ran out or a stop was asked), or one left without a
+          // session by forge 0.15 (no Stop hook chains its cycles any more), is replaced.
           const current = parseRun(readRunText(io.cwd));
-          if (current?.active && stopReason(current, stopContext(io.cwd, io.now())) === null) throw new UsageError('infinite start: a run is already active (forge stop, or forge infinite status)');
+          if (current?.active && current.sessionId !== null && stopReason(current, stopContext(io.cwd, io.now())) === null) throw new UsageError('infinite start: a run is already active (forge stop, or forge infinite status)');
           forgeDir(io.cwd);
           rmSync(stopFile(io.cwd), { force: true });
-          const run: RunState = startRun(io.now(), { ...(cycles !== undefined ? { cycles } : {}), ...(hours !== undefined ? { hours } : {}) }, queueMax, session ?? null, locale ?? null);
+          const run: RunState = startRun(io.now(), { ...(cycles !== undefined ? { cycles } : {}), ...(hours !== undefined ? { hours } : {}) }, queueMax, session, locale ?? null);
           saveRun(io.cwd, run);
           return json(run);
         }

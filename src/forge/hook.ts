@@ -50,22 +50,22 @@ export const endedReason = (reason: string): string =>
   `the forge infinite run ended (${reason}): do step 4 of /forge:infinite (turn off meta/infinite and report), then stop.`;
 
 /**
- * The Stop hook's decision. An inactive run (or none) never blocks. A run is bound to one session (on its first
- * block, or up front): a hook call from any other session, or without a session id, is left alone. When a stop
+ * The Stop hook's decision. An inactive run (or none) never blocks. A run is bound to one session when it starts
+ * (`infinite start --session`, or CLAUDE_CODE_SESSION_ID; C1): a hook call from any other session, without a session
+ * id, or for a run without a session (one started by forge 0.15), is left alone and nothing is bound. When a stop
  * reason first appears, the run is marked inactive and the session is blocked once to close it (`ended` holds the
- * reason). Otherwise it blocks; with stop_hook_active it blocks again only when the ledger grew since the last
- * block, so a cycle that records nothing cannot loop. Each block counts toward blocksSinceCycle.
+ * reason). Otherwise it blocks; with stop_hook_active it blocks again only when the ledger grew since the last block,
+ * so a cycle that records nothing cannot loop. Each block counts toward blocksSinceCycle.
  */
 export function decideStop(input: { stop_hook_active?: boolean; session_id?: unknown }, run: RunState | null, ctx: HookContext):
   { block: false; run: RunState | null } | { block: true; reason: string; run: RunState; ended?: string } {
   if (!run || !run.active) return { block: false, run };
   const session = typeof input.session_id === 'string' && input.session_id ? input.session_id : null;
-  if (run.sessionId !== null && session !== run.sessionId) return { block: false, run };
+  if (run.sessionId === null || session !== run.sessionId) return { block: false, run };
   // A sleeping swarm wakes itself from its background `swarm sleep`; a block now would start a cycle with nothing to do.
   if (ctx.swarmSleeping) return { block: false, run };
-  const sessionId = run.sessionId ?? session;
   const reason = stopReason(run, ctx);
-  if (reason) return { block: true, reason: endedReason(reason), ended: reason, run: { ...endRun(run, reason), lastBlockEvents: ctx.ledgerEvents, sessionId } };
+  if (reason) return { block: true, reason: endedReason(reason), ended: reason, run: { ...endRun(run, reason), lastBlockEvents: ctx.ledgerEvents } };
   if (input.stop_hook_active === true && ctx.ledgerEvents === run.lastBlockEvents) return { block: false, run };
-  return { block: true, reason: blockReason(run), run: { ...run, lastBlockEvents: ctx.ledgerEvents, sessionId, blocksSinceCycle: run.blocksSinceCycle + 1 } };
+  return { block: true, reason: blockReason(run), run: { ...run, lastBlockEvents: ctx.ledgerEvents, blocksSinceCycle: run.blocksSinceCycle + 1 } };
 }

@@ -3,13 +3,19 @@ import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync } from 
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { run, defaultExec, type Io } from '../src/forge/cli/run.js';
+import { run as cli, defaultExec, type Io } from '../src/forge/cli/run.js';
+import { startRun, saveRun } from '../src/forge/run.js';
 import { readEvents } from '../src/forge/ledger.js';
 import { readLocal } from '../src/forge/local.js';
 import { saveProposal, loadProposals } from '../src/forge/proposals.js';
 import type { ProposalDoc } from '../src/lib/proposals.js';
 import { parsePlan } from '../src/lib/plan.js';
 import { parseStatus } from '../src/forge/tree.js';
+
+// infinite start binds Claude's session id (C1, K5-03). The tests run inside Claude Code, which sets
+// CLAUDE_CODE_SESSION_ID: io.env is {} so nothing leaks from it, and the id comes as --session s1 unless a test gives its own.
+const run = (argv: string[], io: Io) =>
+  cli(argv[0] === 'infinite' && argv[1] === 'start' && !argv.includes('--session') ? [...argv, '--session', 's1'] : argv, io);
 
 let root: string;
 let io: Io;
@@ -21,7 +27,7 @@ const writePlan = (dir: string, tasks: string) => {
 };
 beforeEach(() => {
   root = mkdtempSync(path.join(tmpdir(), 'forge-cli-'));
-  io = { cwd: root, now: () => new Date('2026-10-11T10:00:00.000Z') };
+  io = { cwd: root, now: () => new Date('2026-10-11T10:00:00.000Z'), env: {} };
 });
 
 describe('forge CLI', () => {
@@ -576,7 +582,15 @@ describe('forge CLI', () => {
 describe('forge infinite', () => {
   const runFile = () => path.join(root, '.forge', 'run.json');
   const readRun = () => JSON.parse(readFileSync(runFile(), 'utf8'));
-  const hook = (stdin: string) => run(['hook', 'stop'], { ...io, stdin });
+  // The run is bound to s1 at start: a hook input without a session id is that session's, unless the test names another.
+  const hook = (stdin: string) => {
+    let input = stdin;
+    try {
+      const o: unknown = JSON.parse(stdin);
+      if (o && typeof o === 'object' && !Array.isArray(o) && !('session_id' in o)) input = JSON.stringify({ ...o, session_id: 's1' });
+    } catch { /* garbage stays garbage */ }
+    return run(['hook', 'stop'], { ...io, stdin: input });
+  };
   const touchStop = () => { mkdirSync(path.join(root, '.forge'), { recursive: true }); writeFileSync(path.join(root, '.forge', 'stop'), 'x\n'); };
   const ended = (reason: string) => ({ decision: 'block', reason: `the forge infinite run ended (${reason}): do step 4 of /forge:infinite (turn off meta/infinite and report), then stop. Tell the user in their own language.` });
   it('infinite start writes run.json and refuses a second start', () => {
@@ -625,7 +639,7 @@ describe('forge infinite', () => {
     expect(readEvents(root).filter(e => e.action === 'stopped')).toHaveLength(1);
   });
   it('a run whose bound session died can be stopped and replaced', () => {
-    run(['infinite', 'start', '--cycles', '3'], io);
+    run(['infinite', 'start', '--cycles', '3', '--session', 'dead'], io);
     expect(JSON.parse(hook('{"session_id":"dead"}').stdout).decision).toBe('block');
     expect(run(['infinite', 'start', '--cycles', '2'], io).code).toBe(2);
     expect(run(['stop'], io).code).toBe(0);
@@ -635,11 +649,11 @@ describe('forge infinite', () => {
     expect(existsSync(path.join(root, '.forge', 'stop'))).toBe(false);
   });
   it('infinite start replaces an active run whose stop reason is due', () => {
-    run(['infinite', 'start', '--hours', '1'], io);
+    run(['infinite', 'start', '--hours', '1', '--session', 'dead'], io);
     expect(JSON.parse(hook('{"session_id":"dead"}').stdout).decision).toBe('block');
     const later = { ...io, now: () => new Date(Date.parse('2026-10-11T10:00:00.000Z') + 2 * 3600_000) };
     expect(run(['infinite', 'start', '--cycles', '1'], later).code).toBe(0);
-    expect(readRun()).toMatchObject({ active: true, budget: { cycles: 1 }, sessionId: null });
+    expect(readRun()).toMatchObject({ active: true, budget: { cycles: 1 }, sessionId: 's1' });
     // A stale stop file also makes an active run replaceable, and the new start removes it.
     touchStop();
     expect(run(['infinite', 'start', '--cycles', '4'], io).code).toBe(0);
@@ -717,25 +731,39 @@ describe('forge infinite', () => {
     expect(JSON.parse(hook('{}').stdout)).toEqual(ended('queue-full'));
     expect(readRun().stoppedReason).toBe('queue-full');
   });
-  it('hook stop binds the run to one session; infinite start --session binds up front', () => {
+  it('hook stop blocks only the session the run was bound to at start (K5-03)', () => {
     run(['infinite', 'start', '--cycles', '9'], io);
-    expect(JSON.parse(hook('{"session_id":"s1"}').stdout).decision).toBe('block');
     expect(readRun().sessionId).toBe('s1');
     const before = readFileSync(runFile(), 'utf8');
     expect(hook('{"session_id":"s2"}').stdout).toBe('');
-    expect(hook('{}').stdout).toBe('');
+    expect(run(['hook', 'stop'], { ...io, stdin: '{}' }).stdout).toBe('');
     expect(readFileSync(runFile(), 'utf8')).toBe(before);
-    run(['cycle', '--progress', 'yes'], io);
     expect(JSON.parse(hook('{"session_id":"s1"}').stdout).decision).toBe('block');
+    run(['cycle', '--progress', 'yes'], io);
     touchStop();
     expect(hook('{"session_id":"s2"}').stdout).toBe('');
     expect(readRun().active).toBe(true);
     expect(JSON.parse(hook('{"session_id":"s1"}').stdout)).toEqual(ended('stop-file'));
-    expect(run(['infinite', 'start', '--cycles', '1', '--session'], { ...io, cwd: mkdtempSync(path.join(tmpdir(), 'forge-cli-')) }).code).toBe(2);
     const other = mkdtempSync(path.join(tmpdir(), 'forge-cli-'));
+    expect(run(['infinite', 'start', '--cycles', '1', '--session'], { ...io, cwd: other }).code).toBe(2);
     expect(run(['infinite', 'start', '--cycles', '1', '--session', 'abc'], { ...io, cwd: other }).code).toBe(0);
     expect(run(['hook', 'stop'], { ...io, cwd: other, stdin: '{"session_id":"zzz"}' }).stdout).toBe('');
     expect(JSON.parse(run(['hook', 'stop'], { ...io, cwd: other, stdin: '{"session_id":"abc"}' }).stdout).decision).toBe('block');
+  });
+  it('infinite start binds the --session id, else CLAUDE_CODE_SESSION_ID, else exits 2 (C1, K5-03)', () => {
+    const r = cli(['infinite', 'start', '--cycles', '3'], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toBe('infinite start: no Claude session id: pass --session <id> or run it from Claude Code (CLAUDE_CODE_SESSION_ID)\n');
+    expect(existsSync(runFile())).toBe(false);
+    expect(cli(['infinite', 'start', '--cycles', '3', '--session', '${CLAUDE_SESSION_ID}'], { ...io, env: { CLAUDE_CODE_SESSION_ID: 'env-s' } }).code).toBe(0);
+    expect(readRun().sessionId).toBe('env-s');
+  });
+  it('infinite start replaces an active run left without a session, and still refuses an active bound one (K5-03)', () => {
+    saveRun(root, startRun(new Date('2026-10-11T09:00:00.000Z'), { cycles: 3 }));
+    expect(readRun()).toMatchObject({ active: true, sessionId: null });
+    expect(run(['infinite', 'start', '--cycles', '2'], io).code).toBe(0);
+    expect(readRun()).toMatchObject({ active: true, budget: { cycles: 2 }, sessionId: 's1', cycle: 0 });
+    expect(run(['infinite', 'start', '--cycles', '2', '--session', 's9'], io).code).toBe(2);
   });
   it('infinite start --locale keeps the person language; the hook, cycle and status repeat it', () => {
     expect(run(['infinite', 'start', '--cycles', '3', '--locale', 'spanish'], io).code).toBe(2);
@@ -1700,7 +1728,7 @@ describe('forge waypoint-cli', () => {
       const doc = { ts: '', category: 'quality', risk: 'low', title: 't', rationale: '', evidence: '', pillar: '', status: 'approved', source: 'scout', author: 's' } as ProposalDoc;
       saveProposal(root, 'p20261011090000aaac', { ...doc, taskId: 'T002' });
       saveProposal(root, 'p20261011090000aaad', { ...doc, status: 'proposed' });
-      expect(JSON.parse(run(['hook', 'stop'], { ...io, stdin: '{}' }).stdout).reason).toContain('forge infinite mode is active');
+      expect(JSON.parse(run(['hook', 'stop'], { ...io, stdin: '{"session_id":"s1"}' }).stdout).reason).toContain('forge infinite mode is active');
       expect(JSON.parse(readFileSync(path.join(root, '.forge', 'run.json'), 'utf8')).active).toBe(true);
     });
     it('decide --from checks the given doc and writes or logs nothing', () => {

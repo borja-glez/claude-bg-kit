@@ -410,7 +410,7 @@ describe('forge swarm (execution)', () => {
     expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--locale', 'en'], io)).locale).toBe('en');
     expect(normalizeExecution({ ...readExecution(root), locale: 'not a locale' })).not.toHaveProperty('locale');
     // The infinite run's locale goes first.
-    expect(run(['infinite', 'start', '--cycles', '3', '--locale', 'es'], io).code).toBe(0);
+    expect(run(['infinite', 'start', '--cycles', '3', '--locale', 'es', '--session', 's1'], io).code).toBe(0);
     expect(run(['swarm', 'sleep', '60'], io).stdout).toBe('woke. Tell the user in Spanish (es), the language they write in.\n');
   });
   it('propose caps the recommendation with swarm.parallel', () => {
