@@ -160,7 +160,11 @@ const MAX_FAILING = 200;
 const DURATION = /\s+[([]?\d+(?:\.\d+)?\s?m?s[)\]]?$/;
 const tidy = (s: string) => s.replace(DURATION, '').replace(/\s+/g, ' ').trim().slice(0, 300);
 // One test per line: pytest (FAILED <id>), go (--- FAIL: <Test>), cargo (test <x> ... FAILED), dotnet (Failed <x>).
-const TEST_LINE = [/^\s*FAILED\s+(\S+)/, /^\s*--- FAIL:\s+(\S+)/, /^test\s+(\S+)\s+\.\.\.\s+FAILED/, /^\s*Failed\s+(\S+)/];
+const TEST_LINE = [/^\s*FAILED\s+(\S+)/, /^\s*--- FAIL:\s+(\S+)/, /^test\s+(\S+)\s+\.\.\.\s+FAILED/, /^\s*Failed\s+(\S+)\s+\[[^\]]+\]\s*$/];
+// Only test runners print these lines; a build's "Failed to compile." is not a test name.
+const TEST_KINDS = new Set(['test', 'e2e', 'other']);
+// A runner-level error that names no test: the names alone cannot say the run is the same as the base's.
+const RUNNER_ERROR = /unhandled (?:errors?|rejections?)|test suite failed to run|error collecting|errors? during collection|^\s*Interrupted:/im;
 const VITEST_FAIL = /^\s*FAIL\s+(.+)$/;
 const VITEST_MARK = /^\s*[×✗]\s+(.+)$/;
 const JEST = /^\s*●\s+(.+)$/;
@@ -176,7 +180,7 @@ export function failingTests(output: string, kind: string): { names: string[]; k
     const t = TSC.exec(l);
     if (t) add(`${t[1].replace(/\\/g, '/')}: ${t[2]} ${t[3]}`);
   }
-  if (kind !== 'typecheck') {
+  if (TEST_KINDS.has(kind)) {
     const fails = lines.map(l => VITEST_FAIL.exec(l)?.[1]).filter((s): s is string => !!s);
     for (const s of fails) add(s);
     // vitest's per-case marks only when no FAIL line names the cases (it prints both forms).
@@ -184,7 +188,8 @@ export function failingTests(output: string, kind: string): { names: string[]; k
     for (const l of lines) { const m = JEST.exec(l); if (m && !/^Console\b/.test(m[1])) add(m[1]); }
     for (const l of lines) for (const re of TEST_LINE) { const m = re.exec(l); if (m) { add(m[1]); break; } }
   }
-  return { names: [...found], known: found.size > 0 };
+  const known = found.size > 0 && !(TEST_KINDS.has(kind) && RUNNER_ERROR.test(lines.join('\n')));
+  return { names: [...found], known };
 }
 
 /** A failing validator as a `say` or a rollback names it: with the tests the baseline did not have, when there are any. */

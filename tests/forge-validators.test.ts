@@ -242,6 +242,14 @@ describe('failingTests (D-06)', () => {
     expect(failingTests('Error: boom\n', 'test')).toEqual({ names: [], known: false });
     expect(failingTests(' FAIL  tests/a.test.ts > adds\n', 'lint')).toEqual({ names: [], known: false });
     expect(failingTests(' FAIL  tests/a.test.ts > adds\n', 'typecheck')).toEqual({ names: [], known: false });
+    // Only test kinds read test names: a build's "Failed to compile." is not one, nor is a dotnet line without a duration.
+    expect(failingTests('Failed to compile.\n', 'build')).toEqual({ names: [], known: false });
+    expect(failingTests('Failed to compile.\n', 'test')).toEqual({ names: [], known: false });
+    expect(failingTests('  Failed Shop.Tests.Adds\n', 'test')).toEqual({ names: [], known: false });
+    // A runner-level error that names no test makes the read unknown.
+    expect(failingTests(' FAIL  a.test.ts > one\n⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯\n', 'test')).toEqual({ names: ['a.test.ts > one'], known: false });
+    expect(failingTests('FAILED t.py::a - x\nERROR collecting t2.py\n', 'test').known).toBe(false);
+    expect(failingTests(' FAIL  a.test.ts\n● Test suite failed to run\n', 'test').known).toBe(false);
   });
 });
 
@@ -263,6 +271,15 @@ describe('markPreexisting by test (D-06)', () => {
     const res = (failures: string[]) => [{ validator: 'build', ok: false, flaky: false, durationMs: 1, failures, failing: [], failingKnown: false }];
     expect(markPreexisting(res(['Error in 4 files (9ms)']), old)[0].preexisting).toBe(true);
     expect(markPreexisting(res(['error in 4 files (9ms)', 'Cannot find module x']), old)[0].preexisting).toBeUndefined();
+  });
+  it('a build red on the base with another Failed to … is not excused; neither is a new runner-level error', () => {
+    const build = [{ validator: 'build', ok: false, failures: ['Failed to compile.'] }];
+    const out = runValidators([{ name: 'build', cmd: 'b', kind: 'build', source: 'detected' }], () => ({ code: 1, output: 'Failed to build the page\n', ms: 1, timedOut: false }), 60);
+    expect(markPreexisting(out, build)[0].preexisting).toBeUndefined();
+    const base = [{ validator: 'test', ok: false, failing: ['a > one'], failingKnown: true, failures: ['FAIL a > one'] }];
+    const now = runValidators([{ name: 'test', cmd: 't', kind: 'test', source: 'detected' }], () => ({ code: 1, output: ' FAIL  a > one\n⎯⎯ Unhandled Errors ⎯⎯\nUnhandled Error\n', ms: 1, timedOut: false }), 60);
+    expect(now[0]).toMatchObject({ failing: ['a > one'], failingKnown: false });
+    expect(markPreexisting(now, base)[0].preexisting).toBeUndefined();
   });
   it('a timeout is never preexisting', () => {
     const base = [{ validator: 'test', ok: false, failures: ['timeout after 600 s'] }];
