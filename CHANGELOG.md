@@ -191,9 +191,10 @@ elsewhere and are reconstructed from their READMEs.
 - Requires waypoint ^0.20.0.
 
 #### Fixed
+- `swarm retry` (and `--adopt`) refuses a closed execution, and `swarm close` of an ephemeral run releases no tasks.
 - A manual member joins again (`/forge:run --join`): the reference no longer passes an empty `--hook-session`.
 
-**Upgrading during a run.** An execution started with 0.15.x has no bound session: it keeps stepping on its own wake-ups and agent returns, and is bound again the next time its coordinator resumes it (`swarm start`). An infinite run started with 0.15.x stops chaining cycles; run `/forge:infinite` again and the new start replaces it.
+**Upgrading during a run.** Under 0.15.x almost every running execution or infinite run was already bound by its first Stop or SubagentStart and keeps working. Only one that 0.15.x had not bound yet has no session: an execution keeps stepping on its own wake-ups and agent returns, and is bound again the next time its coordinator resumes it (`swarm start`); an infinite run stops chaining cycles, so run `/forge:infinite` again and the new start replaces it.
 
 ### 0.15.2 — 2026-10-14
 

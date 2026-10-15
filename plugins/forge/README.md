@@ -64,7 +64,7 @@ forge depends on [waypoint](../waypoint/README.md) ^0.20.0, which is installed w
 | `/forge:decide <id> approve\|reject\|comment <text>` | Decide or comment on a proposal from any session. |
 | `/forge:decisions [revert <n>]` | List what forge decided without asking, and undo one after your confirmation. |
 | `/forge:verify [surface]` | Check the work by using it (web, emulator, CLI...), or create and edit verification surfaces. |
-| `/forge:stop` | Stop the infinite run or the execution. |
+| `/forge:stop` | Stop the infinite run or an active execution, and close an ended one that is not closed yet. |
 
 ```text
 /forge:run Fix the off-by-one in pagination            → Trivial or Small
@@ -168,7 +168,7 @@ Sequential execution is not a third mode: it is subagents with N = 1.
 
 **Integration.** A finished task is merged into the run branch with `forge swarm integrate <task>`, one merge at a time, running the validators after each one. Failures that **already existed** on the run branch do not block: the validators are compared with a baseline cached per scope, target and commit in `.forge/execution/baseline/`, and only new failures roll the merge back (a conflict does too). The final `forge swarm merge` into your branch does the same and answers `merged`, `needs-authorization`, `main-dirty` or `conflict`.
 
-**Stopping.** `/forge:stop` (or `forge stop`) ends the execution: the coordinator sees the stop and finishes its step, and a run whose session is gone is closed anyway. After a stall caused by a conflict or a blocked task, `forge swarm retry <task>` reactivates the execution without another `/forge:run`.
+**Stopping.** `/forge:stop` (or `forge stop`) ends the execution: the coordinator sees the stop and finishes its step, and a run whose session is gone is closed anyway. After a stall caused by a conflict or a blocked task, `forge swarm retry <task>` reactivates the execution without another `/forge:run`; it only revives a stalled execution that is not closed. `/forge:stop` on an ended execution closes it, and a closed execution is final.
 
 **State and visibility.** The state lives in `.forge/execution/` (the run, one file per task) and is mirrored to the roadmap's `meta/run`. The roadmap, lens and the band show it: one row per running task with its stage, agent, duration and liveness. Executor and manual sessions appear with their own liveness.
 
