@@ -105,7 +105,7 @@ If you are blocked by something you cannot resolve: one `batch` —
 
 "Pinned" always means `if_version` = the version last returned for that document: `TV` for `state/T` (from the claim batch), `SV` for `sessions/SID` (from your last write to it), `MV` for `meta/project` (from the `get`). Update the stored version after every write.
 
-When forge drives the session (the user ran `/forge:run` and it chose Large, or the session's initial prompt says forge drives it), forge replaces only the first paragraph of this section ("Work the task with the normal workflow…") with the forge loop described in `/forge:run` → Large (its `references/large.md` step 3). Heartbeat, intermediate commits, leaving a task, zone expansion, delegation, notes, the blocked path and the "Pinned" definitions still apply.
+When forge drives the session (the user ran `/forge:run` and it chose Large), forge replaces only the first paragraph of this section ("Work the task with the normal workflow…") with the forge loop described in `/forge:run` → Large (its `references/large.md` step 3). Heartbeat, intermediate commits, leaving a task, zone expansion, delegation, notes, the blocked path and the "Pinned" definitions still apply.
 
 ## 4. Commit and complete
 

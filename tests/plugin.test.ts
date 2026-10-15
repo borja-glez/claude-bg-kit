@@ -40,9 +40,9 @@ describe('plugin layout', () => {
       expect(md).toMatch(new RegExp(`^---\\r?\\nname: ${s}\\r?\\ndescription: .+\\r?\\n`));
     }
   });
-  it('launch skill: busyUntil rule, --merge, --forge', () => {
+  it('launch skill: busyUntil rule, --merge', () => {
     const md = read('plugins/waypoint/skills/launch/SKILL.md');
-    for (const w of ['busyUntil', '--merge', '--forge', '--no-forge', 'exactly as returned']) expect(md).toContain(w);
+    for (const w of ['busyUntil', '--merge', 'exactly as returned']) expect(md).toContain(w);
   });
   it('work skill documents the multi-session protocol', () => {
     const md = read('plugins/waypoint/skills/work/SKILL.md');
@@ -134,9 +134,9 @@ describe('plugin layout', () => {
   it('forge Large: approve steps, run.json once, lease, final re-review inputs, start_prompt', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');
     const large = runRef('large');
-    for (const w of ['steps 1–3', '`/waypoint:launch` adds the forge suffix', 'only if that file does not exist',
+    for (const w of ['steps 1–3', 'only if that file does not exist',
       'final-validators-2.json', 'final-2.patch', '--dir .forge/work/<project>/final-2 --validators .forge/work/<project>/final-validators-2.json',
-      '`redo` is treated as `fix`', '--no-merged', 'forge drives this session (forge:run Large loop)', 'design-page']) expect(large).toContain(w);
+      '`redo` is treated as `fix`', '--no-merged', 'design-page']) expect(large).toContain(w);
     for (const w of ['keeps its verdict and still scores', 'FORGE log --kind ruling --task <id>-<n>']) expect(md).toContain(w);
     for (const s of [md, large]) expect(s).not.toContain('At the start of a Large run write');
     expect(read('plugins/forge/README.md')).toContain('keeps its verdict and still scores');
@@ -145,7 +145,7 @@ describe('plugin layout', () => {
     const md = read('plugins/waypoint/skills/work/SKILL.md');
     expect(md).toMatch(/forge:run.*Large/s);
     expect(md).toContain('only the first paragraph');
-    expect(md).toContain("the session's initial prompt says forge drives it");
+    expect(md).not.toContain("initial prompt says forge drives it");
     expect(md).toContain('busyUntil');
     expect(md).toContain('90 minutes');
   });
@@ -950,5 +950,13 @@ describe('plugin layout', () => {
     expect(md.slice(md.indexOf('## rewrite'), md.indexOf('## interview'))).toContain('--round R --rewrite');
     expect(md.slice(md.indexOf('## approve'), md.indexOf('## Publish'))).toContain('apply r<R>:<numbers>');
     expect(md).not.toContain('--note "round R: applied');
+  });
+  it('no skill adds or obeys the forge mark of a track session; a track of a forge plan joins as a manual member (J-02)', () => {
+    const skills = fileURLToPath(new URL('../plugins/', import.meta.url));
+    const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
+      .flatMap(d => (d.isDirectory() ? walk(path.join(dir, d.name)) : [path.join(dir, d.name)]));
+    const files = readdirSync(skills).flatMap(p => (existsSync(path.join(skills, p, 'skills')) ? walk(path.join(skills, p, 'skills')) : []));
+    expect(files.filter(f => readFileSync(f, 'utf8').includes('forge drives this session')).map(f => path.relative(skills, f))).toEqual([]);
+    expect(read('plugins/waypoint/skills/launch/SKILL.md')).toContain('(`/waypoint:work` §0.6)');
   });
 });

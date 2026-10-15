@@ -190,7 +190,7 @@ describe('multi-session commands', () => {
   });
 
   describe('launch prompt', () => {
-    const FORGE = ' — forge drives this session (forge:run Large loop)';
+    const MARK = 'forge drives this session (forge:run Large loop)';
     const MERGE = ' — the user authorizes merging track/ui into main at phase close';
     const launch = (...flags: string[]) => {
       const git = (...a: string[]) => execFileSync('git', a, { cwd: dir });
@@ -212,25 +212,22 @@ describe('multi-session commands', () => {
     it('--merge appends the merge authorization', () => {
       expect(launch('--merge').prompt).toBe(`/waypoint:work ui${MERGE}`);
     });
-    it('--forge appends the forge marker', () => {
-      expect(launch('--forge').prompt).toBe(`/waypoint:work ui${FORGE}`);
-    });
-    it('both: forge first, then merge', () => {
-      const r = launch('--merge', '--forge');
-      expect(r.prompt).toBe(`/waypoint:work ui${FORGE}${MERGE}`);
-      expect(r.command).toBe(`claude --bg --name wp-demo-shop-ui "${r.prompt}"`);
-    });
-    it('auto-detects forge from the design start_prompt', () => {
-      writeDesign(`/waypoint:work <track>${FORGE}`);
-      expect(launch().prompt).toBe(`/waypoint:work ui${FORGE}`);
-    });
-    it('--no-forge overrides auto-detection', () => {
-      writeDesign(`/waypoint:work <track>${FORGE}`);
+    it('--forge and --no-forge are accepted and change nothing (J-02)', () => {
+      expect(launch('--forge').prompt).toBe('/waypoint:work ui');
       expect(launch('--no-forge').prompt).toBe('/waypoint:work ui');
     });
+    it('--merge with --forge adds only the merge authorization', () => {
+      const r = launch('--merge', '--forge');
+      expect(r.prompt).toBe(`/waypoint:work ui${MERGE}`);
+      expect(r.command).toBe(`claude --bg --name wp-demo-shop-ui "${r.prompt}"`);
+    });
+    it('a design start_prompt that carries the old forge mark no longer adds it (J-02)', () => {
+      writeDesign(`/waypoint:work <track> — ${MARK}`);
+      expect(launch().prompt).toBe('/waypoint:work ui');
+    });
     const SWARM = ' — swarm member of main: do not merge into the base branch; keep taking tasks of your track and stop when it has no next task';
-    it('--swarm forces the forge marker and appends the swarm rules', () => {
-      expect(launch('--swarm', 'main', '--base', 'HEAD').prompt).toBe(`/waypoint:work ui${FORGE}${SWARM}`);
+    it('--swarm appends the swarm rules, without the forge mark (J-02)', () => {
+      expect(launch('--swarm', 'main', '--base', 'HEAD').prompt).toBe(`/waypoint:work ui${SWARM}`);
     });
     it('--swarm refuses --merge, a missing id and an id with shell characters', () => {
       const r = (...flags: string[]) => run(['launch', 'plan.yaml', 'ui', ...flags], io);

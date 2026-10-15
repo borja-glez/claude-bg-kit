@@ -241,16 +241,9 @@ export function run(argv: string[], io: Io): Result {
         const worktree = path.join(root, '.claude', 'worktrees', track!);
         const branch = `track/${track}`;
         const name = `wp-${p.project}-${track}`;
-        const FORGE_MARK = 'forge drives this session';
-        let forge = args.includes('--forge') || !!swarm;
-        if (!forge && !args.includes('--no-forge')) {
-          const designFile = path.join(path.dirname(abs(args[0])), 'design.md');
-          if (existsSync(designFile)) {
-            try { forge = parseDesign(readFileSync(designFile, 'utf8')).meta.start_prompt.includes(FORGE_MARK); } catch (e) { if (!(e instanceof DesignError)) throw e; }
-          }
-        }
+        // J-02: no forge mark. A track of a plan that a forge execution runs joins it as a manual member by itself
+        // (/waypoint:work §0.6). --forge and --no-forge are still accepted and do nothing, for skills loaded before 0.20.
         const prompt = `/waypoint:work ${track}`
-          + (forge ? ` — ${FORGE_MARK} (forge:run Large loop)` : '')
           + (args.includes('--merge') ? ` — the user authorizes merging ${branch} into main at phase close` : '')
           + (swarm ? ` — swarm member of ${swarm}: do not merge into the base branch; keep taking tasks of your track and stop when it has no next task` : '');
         const command = `claude --bg --name ${name} "${prompt}"`;
