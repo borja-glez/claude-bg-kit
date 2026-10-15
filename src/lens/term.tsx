@@ -56,8 +56,8 @@ function block(ui: TermUI, key: string, b: Block, inner: number): RenderElement 
       const head = b.label || b.right
         ? (
             <Box key={`${key}-h`} flexDirection="row" justifyContent="space-between">
-              <Text dimColor wrap="truncate-end">{b.label ?? ''}</Text>
-              <Text bold>{right}</Text>
+              <Box flexGrow={1} minWidth={0}><Text dimColor wrap="truncate-end">{b.label ?? ''}</Text></Box>
+              <Box flexShrink={0}><Text bold>{right}</Text></Box>
             </Box>
           )
         : null;
@@ -82,12 +82,13 @@ function block(ui: TermUI, key: string, b: Block, inner: number): RenderElement 
         </Box>
       );
     case 'row':
+      // F-03: the dot, the tag and the right text never shrink; only the text between them does, down to nothing.
       return (
         <Box key={key} flexDirection="row" columnGap={1}>
-          {b.spinning ? spinner(ui, `${key}-s`, b.dot) : <Text color={hex(b.dot)}>●</Text>}
-          {b.tag ? <Text color={PALETTE.base} backgroundColor={hex(b.tag.hue)} bold>{` ${b.tag.text} `}</Text> : null}
-          <Box flexGrow={1} flexShrink={1}><Text wrap="truncate-end">{b.text}</Text></Box>
-          {b.right ? <Text dimColor>{b.right}</Text> : null}
+          <Box flexShrink={0}>{b.spinning ? spinner(ui, `${key}-s`, b.dot) : <Text color={hex(b.dot)}>●</Text>}</Box>
+          {b.tag ? <Box flexShrink={0}><Text color={PALETTE.base} backgroundColor={hex(b.tag.hue)} bold>{` ${b.tag.text} `}</Text></Box> : null}
+          <Box flexGrow={1} flexShrink={1} minWidth={0}><Text wrap="truncate-end">{b.text}</Text></Box>
+          {b.right ? <Box flexShrink={0}><Text dimColor>{b.right}</Text></Box> : null}
         </Box>
       );
     case 'text': return <Text key={key} color={b.hue ? hex(b.hue) : undefined} dimColor={b.dim} wrap="truncate-end">{b.text}</Text>;
@@ -107,9 +108,9 @@ export function termCard(ui: TermUI, key: string, card: Card, width: number): Re
   return (
     <Box key={key} flexDirection="column" borderStyle="round" borderColor={hex(card.hue)} paddingX={1}>
       <Box flexDirection="row" columnGap={1}>
-        <Text color={hex(card.hue)} bold>{card.icon}</Text>
-        <Box flexGrow={1} flexShrink={1}><Text bold wrap="truncate-end">{card.title}</Text></Box>
-        {card.chip ? <Text color={PALETTE.base} backgroundColor={hex(card.chip.hue)} bold>{` ${card.chip.text} `}</Text> : null}
+        <Box flexShrink={0}><Text color={hex(card.hue)} bold>{card.icon}</Text></Box>
+        <Box flexGrow={1} flexShrink={1} minWidth={0}><Text bold wrap="truncate-end">{card.title}</Text></Box>
+        {card.chip ? <Box flexShrink={0}><Text color={PALETTE.base} backgroundColor={hex(card.chip.hue)} bold>{` ${card.chip.text} `}</Text></Box> : null}
       </Box>
       {card.subtitle ? <Text dimColor wrap="truncate-end">{card.subtitle}</Text> : null}
       {card.blocks.map((b, i) => block(ui, `${key}-${i}`, b, inner))}

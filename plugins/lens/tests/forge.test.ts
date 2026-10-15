@@ -359,3 +359,45 @@ test('the forge card counts the automatic decisions from .forge/decisions.json',
     await ui.unmount();
   }
 });
+
+test('at 40 columns an execution row keeps its dot, tag and right text whole: only its title shrinks (F-03)', async ($, on) => {
+  const at = (min: number) => new Date(NOW + min * 60_000).toISOString();
+  const TITLE = 'A task title long enough to overflow a pane';
+  const exec = {
+    runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,
+    coordinator: 'main', hookSession: 's1', active: true, stopReason: null, stallReason: null, startedAt: at(-60), lastStepAt: at(-1), lastBlockStep: null, sleepUntil: null,
+    tasks: { T4: { status: 'running', stage: 'review', round: 2, worktree: '/w', branch: 'task/T4', executor: 'subagents', attempts: 0, agent: 'forge-review-correctness', startedAt: at(-20), stageSince: at(-3), updatedAt: at(-1), detail: null, title: TITLE } },
+  };
+  serveFiles(on, { [`${ROOT}/.forge/execution.json`]: JSON.stringify(exec) });
+  servePanes(on);
+  start(on);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: { ...PANE_PROPS, bodyColumns: 40 } });
+  type El = { type?: string; props?: Record<string, unknown>; children?: unknown };
+  const kids = (el: El): El[] => (Array.isArray(el.children) ? el.children : el.children ? [el.children] : []).filter((c): c is El => !!c && typeof c === 'object');
+  const textOf = (n: unknown): string => (typeof n === 'string' ? n : Array.isArray(n) ? n.map(textOf).join('') : n && typeof n === 'object' ? textOf((n as El).children) : '');
+  const boxes: El[] = [];
+  const walk = (n: unknown): void => {
+    if (Array.isArray(n)) { n.forEach(walk); return; }
+    if (!n || typeof n !== 'object') return;
+    const el = n as El;
+    if (el.type === 'Box') boxes.push(el);
+    walk(el.children);
+  };
+  walk(await ui.drawn());
+  // The slot row: a row whose middle part is the task title.
+  const row = boxes.find(b => b.props?.flexDirection === 'row' && b.props?.columnGap === 1 && kids(b).some(c => textOf(c) === TITLE));
+  expect(row).toBeDefined();
+  const parts = kids(row!);
+  expect(parts).toHaveLength(4);
+  const middle = parts.find(c => textOf(c) === TITLE)!;
+  expect(middle).toMatchObject({ type: 'Box', props: { flexGrow: 1, flexShrink: 1, minWidth: 0 } });
+  for (const c of parts.filter(c => c !== middle)) expect(c).toMatchObject({ type: 'Box', props: { flexShrink: 0 } });
+  // The execution card header: icon and chip whole, the title shrinks.
+  const head = boxes.find(b => b.props?.flexDirection === 'row' && kids(b).length === 3 && textOf(kids(b)[0]) === '▶');
+  expect(head).toBeDefined();
+  expect(kids(head!).map(c => c.props?.flexShrink)).toEqual([0, 1, 0]);
+  expect(kids(head!)[1].props?.minWidth).toBe(0);
+  await ui.unmount();
+});
