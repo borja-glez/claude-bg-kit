@@ -13,7 +13,7 @@
     "jsxFragmentFactory": "Fragment"
   },
   "include": [
-    "plugins/waypoint/.claude-plugin/types",
+    "types/claude-code",
     "src/mod/register.tsx",
     "src/mod/state.d.ts",
     "plugins/waypoint/tests",

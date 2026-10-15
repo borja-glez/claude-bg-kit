@@ -169,6 +169,6 @@ The band is a mod (`src/mod/register.tsx`, bundled to `hooks/register.js`):
 
 - `claude plugin validate plugins/waypoint` checks the manifest, the hooks module and its state contract.
 - `claude plugin test plugins/waypoint` runs `plugins/waypoint/tests/*.test.ts` against the engine.
-- `npm run typecheck:mod` type-checks the mod and its tests. It needs the engine's API types in `plugins/waypoint/.claude-plugin/types/` (git-ignored). Claude Code writes them there when it loads the folder with `claude --plugin-dir plugins/waypoint`, or you can copy `types/claude-code.d.ts` from the `plugin-authoring` skill to `plugins/waypoint/.claude-plugin/types/claude-code/index.d.ts`.
+- `npm run typecheck:mod` type-checks the mods (waypoint's band and lens) and their tests against the engine's API types in `types/claude-code/index.d.ts` (git-ignored); `mod-types check` runs first and says how to get them. `npm run mod-types:update` copies there the newest of the copies Claude Code writes when it loads a mod folder (`claude --plugin-dir plugins/waypoint` writes `plugins/waypoint/.claude-plugin/types/claude-code/index.d.ts`) and, in a linked worktree, the main checkout's `types/claude-code/`.
 
 Bump the version in `plugin.json` on every change: the installed plugin cache is keyed by version.
