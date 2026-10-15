@@ -419,6 +419,20 @@ describe('forge swarm (execution)', () => {
     expect(readExecution(root)!.tasks.T1.finishedAt ?? null).toBeNull();
     expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'running', stage: 'implement', attempts: 1 });
   });
+  it('retry and retry --adopt refuse a closed execution and leave execution.json unchanged (C2)', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    out(run(['swarm', 'worktree', 'T1'], io));
+    out(run(['swarm', 'task', 'T1', '--stage', 'integrate', '--status', 'blocked'], io));
+    saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stalled', stallReason: 'T1 is blocked' });
+    out(run(['swarm', 'close'], io));
+    const file = path.join(root, '.forge', 'execution.json');
+    const before = readFileSync(file, 'utf8');
+    const r = run(['swarm', 'retry', 'T1'], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/swarm retry: the execution \S+ is closed; start a new one/);
+    expect(run(['swarm', 'retry', 'T1', '--adopt'], io).code).toBe(2);
+    expect(readFileSync(file, 'utf8')).toBe(before);
+  });
   it('stop marks the execution stopped; sleep --mark records sleepUntil', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     expect(run(['swarm', 'sleep', '300', '--mark'], io).code).toBe(0);
@@ -760,6 +774,13 @@ describe('forge swarm (execution)', () => {
       { id: 'fix-c', title: 'fix c', path: 'small', zones: ['c.txt'], depends_on: ['fix-a'] },
     ]);
     const start = (...extra: string[]) => run(['swarm', 'start', '--project', 'loose', '--session', 'main', '--kind', 'ephemeral', '--tasks', three(), ...extra], io);
+    it('close of an ephemeral run releases nothing: loose tasks have no state/T (final review)', () => {
+      out(start());
+      const e = readExecution(root)!;
+      const at = NOW.toISOString();
+      saveExecution(root, { ...e, active: false, stopReason: 'stopped', tasks: { 'fix-a': { status: 'running', stage: 'implement', round: 1, worktree: '', branch: 'task/fix-a', executor: 'subagents', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null } } });
+      expect(out(run(['swarm', 'close'], io))).toMatchObject({ closed: true, kind: 'ephemeral', release: [], members: [] });
+    });
     it('start keeps the user branch, creates no run worktree and records the loose tasks', () => {
       const e = out(start());
       expect(e).toMatchObject({ kind: 'ephemeral', mode: 'subagents', base: 'main', branch: 'main', parallel: 2, loose: 3 });
