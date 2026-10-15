@@ -32,9 +32,9 @@ h1{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:34px;marg
 .bar.c i{background:var(--done)}
 .bar.over i{background:var(--red)}
 .runs{display:flex;flex-direction:column;gap:10px;margin-top:4px;max-height:280px;overflow:auto}
-.run{cursor:pointer;padding:6px 8px;border-radius:6px;border:1px solid transparent}
-.run:hover{border-color:var(--s1);background:var(--base)}
-.run .t{font-size:17px}
+.runs>.run{cursor:pointer;padding:6px 8px;border-radius:6px;border:1px solid transparent}
+.runs>.run:hover{border-color:var(--s1);background:var(--base)}
+.runs>.run .t{font-size:17px}
 .events{max-height:300px;overflow:auto}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin:8px 0 0}
 .kv dt{color:var(--o1)} .kv dd{margin:0;text-align:right}
@@ -147,11 +147,11 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
 .vhd .ph{font-family:'Barlow Condensed',sans-serif;font-size:24px;font-weight:700}
 .pill.ph-done{color:var(--done)} .pill.ph-in_progress{color:var(--cur)} .pill.ph-committed{color:var(--lavender)} .pill.ph-provisional{color:var(--o1)}
 .cat{width:100%;background:var(--base);border:1px solid var(--s0);border-radius:4px;padding:7px 8px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:6px;text-align:left}
-.cat>span:first-child{display:flex;flex-direction:column;min-width:0}
+.cat>span:first-child{display:flex;flex-direction:column;min-width:0;flex:1 1 auto}
 .cat .cn{font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:600;overflow-wrap:anywhere}
-.pips{font-size:9px;letter-spacing:1px;white-space:nowrap}
-.pips i{font-style:normal}
-.pips .st-free,.pips .st-orphaned{color:var(--s1)}
+.seg{display:flex;flex:0 0 64px;height:6px;border-radius:3px;overflow:hidden;gap:1px;background:var(--s0)}
+.seg i{display:block;min-width:2px}
+.seg .st-done{background:var(--done)} .seg .st-in_progress{background:var(--cur)} .seg .st-blocked{background:var(--blk)} .seg .st-free{background:var(--s1)}
 .tc{background:var(--base);border:1px solid var(--s0);border-radius:4px;margin:0 0 6px 6px;font-size:11.5px;overflow:hidden;cursor:pointer}
 .tc:hover{border-color:var(--lavender)}
 .tc .st{font-family:'Barlow Condensed',sans-serif;font-size:10px;letter-spacing:.1em;padding:2px 7px;text-transform:uppercase;background:color-mix(in srgb,currentColor 18%,transparent)}
@@ -319,7 +319,7 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
   .modal{padding:14px;border-radius:10px}
   .mh{margin:-14px -14px 0;padding:14px 14px 8px}
   .overlay{padding:2vh 8px}
-  .run .t{font-size:15px}
+  .runs>.run .t{font-size:15px}
   /* A narrow axis keeps every other tick label (the grid lines stay). */
   .ticks span:nth-child(even){display:none}
   .sess{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
@@ -336,8 +336,10 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
 .pill.run{background:var(--teal);color:var(--base)}
 .pill.run.warn{background:var(--yellow)}
 .pill.run.stopped{background:var(--red)}
-section.run{margin-bottom:16px}
-section.run .slot.free{opacity:.45;border-style:dashed}
+.exec-sec{margin-bottom:16px}
+.exec-sec .slot.free{opacity:.45;border-style:dashed}
+.exec-sec .slot[data-action]{cursor:pointer}
+.exec-sec .slot[data-action]:hover{border-color:var(--s1)}
 section.loose{margin:12px 0}
 section.loose .lts{list-style:none;margin:0;padding:0}
 section.loose .lt{display:flex;gap:8px;align-items:baseline;padding:3px 0}

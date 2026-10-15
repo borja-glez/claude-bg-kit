@@ -293,14 +293,14 @@ function renderRunBlock(m: Model, d: Dict): string {
     const l = ex ? liveness(m.now, ex.leaseUntil) : coord ? sessionLiveness(coord, m.now) : 'stopped';
     const since = pastMs(s.since, m.now);
     const title = task?.title ?? r.loose.find(x => x.id === s.task)?.title ?? '';
-    return `<div class="sc slot"><h3>${liveDot(l)} <span class="pe">${esc(s.task)}</span> ${esc(title)}</h3>
+    return `<div class="sc slot"${task ? ` data-action="open-task" data-id="${esc(s.task)}"` : ''}><h3>${liveDot(l)} <span class="pe">${esc(s.task)}</span> ${esc(title)}</h3>
       <div class="mono">${esc(d.run.stage[s.stage] ?? s.stage)}${s.agent ? ` · ${esc(s.agent)}` : ''}${since !== null ? ` · ${rel(d, 'lasts', s.since, m.now)}` : ''}</div></div>`;
   };
   const free = Math.max(0, r.parallel - r.slots.length);
   const head = r.kind === 'ephemeral'
     ? `${esc(d.run.loosePill(d.run.mode[r.mode], r.slots.length, r.parallel))} · ${esc(d.run.coordinator)}: ${esc(r.coordinator)}`
     : `${esc(d.run.title)} · ${esc(d.run.mode[r.mode])} · ${esc(d.run.slots(r.slots.length, r.parallel))} · ${esc(d.run.coordinator)}: ${esc(r.coordinator)}`;
-  return `<section class="run"><div class="lbl">${head}</div>
+  return `<section class="exec-sec"><div class="lbl">${head}</div>
     <div class="sgrid">${r.slots.map(slot).join('')}${Array.from({ length: free }, () => `<div class="sc slot free"><h3>${esc(d.run.free)}</h3></div>`).join('')}</div></section>`;
 }
 
@@ -705,6 +705,17 @@ export function categoryKeys(plan: PlanView): string[] {
   return [...new Set(plan.tasks.map(t => `${t.phase}|${t.category ?? '—'}`))];
 }
 
+/** H-02: a category's tasks as one proportional bar: done, in progress (with claimed), blocked, pending (with orphaned). */
+function segBar(d: Dict, tasks: { status: TaskStatus }[]): string {
+  const n = { done: 0, in_progress: 0, blocked: 0, free: 0 };
+  for (const t of tasks) {
+    const s = safeStatus(t.status);
+    n[s === 'claimed' ? 'in_progress' : s === 'orphaned' ? 'free' : s]++;
+  }
+  const parts = (['done', 'in_progress', 'blocked', 'free'] as const).filter(k => n[k] > 0);
+  return `<span class="seg" role="img" aria-label="${esc(d.segLabel(n))}">${parts.map(k => `<i class="st-${k}" style="flex-grow:${n[k]}"></i>`).join('')}</span>`;
+}
+
 function renderVersionsView(m: Model, d: Dict, ui: UiState): string {
   const f = ui.versionFilter;
   const track = f.track && m.plan.tracks.some(t => t.id === f.track) ? f.track : undefined;
@@ -732,15 +743,17 @@ function renderVersionsView(m: Model, d: Dict, ui: UiState): string {
   const body = cols.map(c => {
     const n = m.plan.phases.findIndex(p => p.id === c.phase.id) + 1;
     const ps = c.phase.status;
+    // H-02: a column whose only category is «—» (a plan without categories) lists its tasks without a category button.
+    const bare = c.categories.length === 1 && c.categories[0]!.name === '—';
     const cats = c.categories.map(cat => {
       const key = `${c.phase.id}|${cat.name}`;
-      const closed = ui.collapsed.has(key);
-      const pips = cat.tasks.map(t => `<i class="st-${safeStatus(t.status)}">■</i>`).join('');
+      const closed = !bare && ui.collapsed.has(key);
       const tasks = closed ? '' : cat.tasks.map(t => {
         const st = safeStatus(t.status);
         return `<div class="tc" data-action="open-task" data-id="${esc(t.id)}"><div class="st st-${st}">${ST_ICON[st]} ${esc(d.status[st])}${eviMark(m, d, t.id)}</div><div class="tt"><span class="k">${esc(t.id)}</span> ${esc(t.title)} ${trackTag(m, t.track)}</div></div>`;
       }).join('');
-      return `<button class="cat" data-action="toggle-cat" data-key="${esc(key)}" aria-expanded="${!closed}"><span><span class="cn">${closed ? '›' : '⌄'} ${esc(cat.name)}</span><span class="mono">${esc(d.entries(cat.tasks.length))}</span></span><span class="pips">${pips}</span></button>${tasks}`;
+      if (bare) return tasks;
+      return `<button class="cat" data-action="toggle-cat" data-key="${esc(key)}" aria-expanded="${!closed}"><span><span class="cn">${closed ? '›' : '⌄'} ${esc(cat.name)}</span><span class="mono">${esc(d.entries(cat.tasks.length))}</span></span>${segBar(d, cat.tasks)}</button>${tasks}`;
     }).join('');
     return `<div class="vcol ph-${ps}">
       <div class="vhd"><div class="v">${esc(c.versionId == null ? d.noVersion : d.versionCol(c.versionId))}</div><div class="ph">${esc(d.phaseN(n))}</div><div class="mono">${esc(c.phase.name)}</div>

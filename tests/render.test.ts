@@ -247,7 +247,7 @@ const clean = (html: string) => {
 
 describe('versions view', () => {
   it('renders columns, categories, task cards and a no-version column in es', () => {
-    const m = { ...base(), plan: { ...plan, versions: [{ id: '0.1', phases: ['F1'] }] } };
+    const m = { ...base(), plan: { ...plan, versions: [{ id: '0.1', phases: ['F1'] }], tasks: plan.tasks.map((t, i) => ({ ...t, category: i % 2 ? 'api' : 'ui' })) } };
     const html = renderApp(m, ui({ view: 'versions' }));
     expect(html).toContain('Vista de versiones');
     expect(html).toContain('Versión 0.1');
@@ -272,9 +272,24 @@ describe('versions view', () => {
     const byPhase = renderApp(base(), ui({ view: 'versions', versionFilter: { statuses: [], phaseStatuses: ['provisional'], track: null } }));
     expect(byPhase).toContain('data-id="T004"');
     expect(byPhase).not.toContain('data-id="T001"');
-    const collapsed = renderApp(base(), ui({ view: 'versions', collapsed: new Set(['F1|—']) }));
+    const cats = { ...base(), plan: { ...plan, tasks: plan.tasks.map(t => ({ ...t, category: 'api' })) } };
+    const collapsed = renderApp(cats, ui({ view: 'versions', collapsed: new Set(['F1|api']) }));
     expect(collapsed).not.toContain('data-action="open-task" data-id="T001"');
     expect(collapsed).toContain('data-action="open-task" data-id="T004"');
+  });
+  it('draws a proportional segmented bar per category, in status order, and no pips (H-02)', () => {
+    const m = { ...base(), plan: { ...plan, tasks: plan.tasks.map(t => ({ ...t, category: 'api' })) } };
+    m.states = { ...m.states, T003: { status: 'claimed' }, T004: { status: 'blocked' } };
+    const html = renderApp(m, ui({ view: 'versions' }));
+    const seg = html.slice(html.indexOf('<span class="seg"'), html.indexOf('</span>', html.indexOf('<span class="seg"')));
+    expect(seg).toMatch(/^<span class="seg" role="img" aria-label="[^"]+">/);
+    expect([...seg.matchAll(/<i class="st-(\w+)" style="flex-grow:(\d+)">/g)].map(x => `${x[1]}:${x[2]}`)).toEqual(['done:1', 'in_progress:2']);
+    expect(html).not.toContain('pips');
+  });
+  it('a column whose only category is «—» lists its tasks without a category button (H-02)', () => {
+    const html = renderApp(base(), ui({ view: 'versions' }));
+    expect(html).not.toContain('data-action="toggle-cat"');
+    expect(html).toContain('data-action="open-task" data-id="T001"');
   });
   it('escapes hostile plan values in the versions view', () => {
     const m = base();
@@ -503,7 +518,7 @@ describe('execution', () => {
     m.sessions.main = { ...m.sessions.main, role: 'coordinator', leaseUntil: new Date(NOW + 5 * 60000).toISOString() };
     expect(renderApp(m, ui())).toContain('▶ tareas sueltas · subagentes 1/2');
     const sv = renderApp(m, ui({ view: 'sessions' }));
-    expect(sv).toMatch(/<section class="run"><div class="lbl">▶ tareas sueltas · subagentes 1\/2 · coordinadora: main/);
+    expect(sv).toMatch(/<section class="exec-sec"><div class="lbl">▶ tareas sueltas · subagentes 1\/2 · coordinadora: main/);
     expect(sv).not.toContain('▶ ejecución');
     expect(sv).toContain('Fix the cart');
     expect(sv).toContain('libre'); // parallel 2, one slot: one free place
@@ -546,7 +561,7 @@ describe('execution', () => {
     const m = base();
     m.run = runDoc();
     // The first busy slot's markup (free slots are `sc slot free`).
-    const slotOf = (html: string) => { const i = html.indexOf('<div class="sc slot">'); return html.slice(i, html.indexOf('</div></div>', i)); };
+    const slotOf = (html: string) => { const i = html.indexOf('<div class="sc slot"'); return html.slice(i, html.indexOf('</div></div>', i)); };
     expect(slotOf(renderApp(m, ui({ view: 'sessions' })))).toContain('lleva 7 min');
     m.run = runDoc({ slots: [{ task: 'T002', stage: 'implement' as const, agent: null, by: 'main', since: new Date(NOW + 30 * 60000).toISOString() }] });
     const future = slotOf(renderApp(m, ui({ view: 'sessions' })));
@@ -779,5 +794,25 @@ describe('validators without a result and ?debug=1 (H-04)', () => {
     expect(renderApp(base(), ui())).not.toContain('class="dbg"');
     const evil = { ...m, dropped: { state: [{ doc: 'state/<b>', field: 'x', action: 'dropped' as const, detail: '<img src=x>' }] } };
     expect(renderApp(evil, ui())).not.toContain('<img src=x>');
+  });
+});
+
+describe('the execution of the sessions view (H-10)', () => {
+  it('is an exec-sec section; plan slots open their task, loose slots do not', () => {
+    const m = base();
+    m.run = runDoc();
+    const sv = renderApp(m, ui({ view: 'sessions' }));
+    expect(sv).toContain('<section class="exec-sec">');
+    expect(sv).not.toContain('<section class="run"');
+    expect(sv).toContain('<div class="sc slot" data-action="open-task" data-id="T002">');
+    m.run = looseRun();
+    expect(renderApp(m, ui({ view: 'sessions' }))).not.toMatch(/class="sc slot" data-action/);
+  });
+  it('theme.css styles .runs>.run, never a bare .run, and makes plan slots clickable', () => {
+    expect(CSS).not.toMatch(/(^|[\s,}])\.run[{:\s]/);
+    expect(cssRule(CSS, '.runs>.run')).toContain('cursor:pointer');
+    expect(cssRule(CSS, '.exec-sec .slot[data-action]')).toContain('cursor:pointer');
+    expect(cssRule(CSS, '.seg')).toContain('display:flex');
+    expect(CSS).not.toContain('.pips');
   });
 });

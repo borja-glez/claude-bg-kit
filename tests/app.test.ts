@@ -606,7 +606,9 @@ describe('notes', () => {
   it('switches views, filters, timeline group and version filters', async () => {
     const root = document.createElement('div');
     document.body.appendChild(root);
-    const app = await start({ claude: null, snapshot, root, now: () => NOW });
+    // A plan with categories: one with only «—» has no category buttons (H-02).
+    const withCats = buildDocs({ ...plan, tasks: plan.tasks.map(t => ({ ...t, category: 'api' })) }, '2026-10-11T09:00:00Z');
+    const app = await start({ claude: null, snapshot: withCats, root, now: () => NOW });
     click(root, '[data-action="tgroup"][data-group="track"]');
     await flush();
     expect(app.ui.timelineGroup).toBe('track');
