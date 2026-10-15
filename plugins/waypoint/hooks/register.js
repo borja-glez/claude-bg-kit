@@ -4184,20 +4184,31 @@ function parseCritique(text2) {
 }
 
 // src/lib/design-gate.ts
+var APPLIED_NOTE = /\b(?:round|ronda)\s+(\d+)\s*:\s*(?:applied|aplicad[ao]s?)\s+(\d+(?:\s*(?:,|y|and)\s*\d+)*)/gi;
+var REWRITE_NOTE = /^\s*(?:round|ronda)\s+(\d+)\s*:\s*(?:rewrite|reescritura|reescrit[ao])/i;
+var legacy = (e) => e.applied === void 0 && e.rewrite === void 0;
 function appliedIn(changelog, round) {
   const out = /* @__PURE__ */ new Set();
   for (const e of changelog) {
-    for (const m of e.note.matchAll(/round\s+(\d+)\s*:\s*applied\s+([\d\s,]+)/gi)) {
+    if (e.applied) {
+      for (const n of e.applied[round] ?? []) out.add(n);
+      continue;
+    }
+    if (!legacy(e)) continue;
+    for (const m of e.note.matchAll(APPLIED_NOTE)) {
       if (Number(m[1]) !== round) continue;
-      for (const n of m[2].split(/[\s,]+/)) if (/^\d+$/.test(n)) out.add(Number(n));
+      for (const n of m[2].split(/\s*(?:,|y|and)\s*/i)) if (/^\d+$/.test(n)) out.add(Number(n));
     }
   }
   return out;
 }
 function rewroteRound(changelog, round) {
   return changelog.some((e) => {
-    const m = /^\s*round\s+(\d+)\s*:\s*rewrite/i.exec(e.note);
-    return e.round === round && !!m && Number(m[1]) === round;
+    if (e.round !== round) return false;
+    if (e.rewrite === true) return true;
+    if (!legacy(e)) return false;
+    const m = REWRITE_NOTE.exec(e.note);
+    return !!m && Number(m[1]) === round;
   });
 }
 function parseDismissed(text2) {
@@ -10593,6 +10604,16 @@ var EntrySchema = external_exports.object({
   words: external_exports.number(),
   round: external_exports.number()
 });
+function normalizeApplied(x) {
+  if (!x || typeof x !== "object" || Array.isArray(x)) return null;
+  const out = {};
+  for (const [k, v] of Object.entries(x)) {
+    if (!/^[1-9]\d*$/.test(k) || !Array.isArray(v)) continue;
+    const ns = v.filter((n) => Number.isInteger(n) && n > 0);
+    if (ns.length) out[Number(k)] = [...new Set(ns)].sort((a, b) => a - b);
+  }
+  return Object.keys(out).length ? out : null;
+}
 function parseChangelog(text2) {
   if (!text2 || !text2.trim()) return [];
   let raw;
@@ -10608,7 +10629,9 @@ function parseChangelog(text2) {
       const why = r.error.issues.map((x) => `${x.path.join(".") || "(root)"}: ${x.message}`).join("; ");
       throw new Error(`changelog.json entry ${i} is invalid: ${why}`);
     }
-    return r.data;
+    const raw2 = e;
+    const applied = normalizeApplied(raw2.applied);
+    return { ...r.data, ...applied ? { applied } : {}, ...raw2.rewrite === true ? { rewrite: true } : {} };
   });
 }
 
@@ -10804,6 +10827,9 @@ function normalizeExecution(x, now) {
     lastStepAt: iso(x.lastStepAt),
     lastBlockStep: iso(x.lastBlockStep),
     sleepUntil: iso(x.sleepUntil),
+    // C2: closedBy only means something with a closedAt; an older file has neither.
+    closedAt: iso(x.closedAt),
+    closedBy: iso(x.closedAt) ? oneOf(["merge", "close"], x.closedBy) : null,
     ...typeof x.planned === "number" && Number.isInteger(x.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x.planned)) } : {},
     ...x.autonomy === "auto" ? { autonomy: "auto" } : {},
     ...isLocale(x.locale) ? { locale: x.locale } : {}
@@ -10840,6 +10866,8 @@ function normalizeLive(x) {
 // src/lib/execution-view.ts
 var FUTURE_TOLERANCE_MS = 2 * 6e4;
 var AGENT_ALIVE_MS = 3 * 36e5;
+var STALE_RUN_TTL_MS = 24 * 36e5;
+var lastMovedAt = (e) => e.lastStepAt ?? e.startedAt;
 function usable(ts, now) {
   const t = ts ? Date.parse(ts) : NaN;
   return Number.isFinite(t) && t - now <= FUTURE_TOLERANCE_MS ? t : null;
@@ -10852,7 +10880,12 @@ function signalLiveness(ts, ended, now) {
 }
 function executionView(i) {
   const e = i.exec;
-  if (!e || !e.active && e.stopReason !== "stalled") return null;
+  if (!e || e.closedAt) return null;
+  if (!e.active) {
+    if (e.stopReason !== "stalled") return null;
+    const moved = usable(lastMovedAt(e), i.now);
+    if (moved === null || i.now - moved > STALE_RUN_TTL_MS) return null;
+  }
   const fresh = (d) => {
     const t = usable(d.ts, i.now);
     return t !== null && i.now - t < LIVE_MAX_AGE_HOURS * 36e5;
@@ -10913,7 +10946,8 @@ function executionView(i) {
     orphans: [...slots, ...manual].filter((s) => s.liveness === "stopped").map((s) => s.task),
     agents: signal?.agents ?? [],
     startedAt: e.startedAt,
-    finished
+    finished,
+    frozenAt: e.active ? null : lastMovedAt(e)
   };
 }
 

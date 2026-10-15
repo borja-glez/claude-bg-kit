@@ -10684,6 +10684,9 @@ function normalizeExecution(x, now) {
     lastStepAt: iso(x.lastStepAt),
     lastBlockStep: iso(x.lastBlockStep),
     sleepUntil: iso(x.sleepUntil),
+    // C2: closedBy only means something with a closedAt; an older file has neither.
+    closedAt: iso(x.closedAt),
+    closedBy: iso(x.closedAt) ? oneOf2(["merge", "close"], x.closedBy) : null,
     ...typeof x.planned === "number" && Number.isInteger(x.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x.planned)) } : {},
     ...x.autonomy === "auto" ? { autonomy: "auto" } : {},
     ...isLocale(x.locale) ? { locale: x.locale } : {}
@@ -10758,6 +10761,8 @@ function escalationCandidates(messages) {
 // src/lib/execution-view.ts
 var FUTURE_TOLERANCE_MS = 2 * 6e4;
 var AGENT_ALIVE_MS = 3 * 36e5;
+var STALE_RUN_TTL_MS = 24 * 36e5;
+var lastMovedAt = (e) => e.lastStepAt ?? e.startedAt;
 function usable(ts, now) {
   const t = ts ? Date.parse(ts) : NaN;
   return Number.isFinite(t) && t - now <= FUTURE_TOLERANCE_MS ? t : null;
@@ -10770,7 +10775,12 @@ function signalLiveness(ts, ended, now) {
 }
 function executionView(i) {
   const e = i.exec;
-  if (!e || !e.active && e.stopReason !== "stalled") return null;
+  if (!e || e.closedAt) return null;
+  if (!e.active) {
+    if (e.stopReason !== "stalled") return null;
+    const moved = usable(lastMovedAt(e), i.now);
+    if (moved === null || i.now - moved > STALE_RUN_TTL_MS) return null;
+  }
   const fresh = (d) => {
     const t = usable(d.ts, i.now);
     return t !== null && i.now - t < LIVE_MAX_AGE_HOURS * 36e5;
@@ -10831,7 +10841,8 @@ function executionView(i) {
     orphans: [...slots, ...manual].filter((s) => s.liveness === "stopped").map((s) => s.task),
     agents: signal?.agents ?? [],
     startedAt: e.startedAt,
-    finished: finished2
+    finished: finished2,
+    frozenAt: e.active ? null : lastMovedAt(e)
   };
 }
 
@@ -11586,6 +11597,7 @@ function executionFromFiles(execText, taskTexts = {}, liveTexts = {}, now, title
     return null;
   }
   if (!v) return null;
+  const to = v.frozenAt ? Math.min(now, Date.parse(v.frozenAt)) : now;
   return {
     runId: v.runId,
     mode: v.mode,
@@ -11597,7 +11609,7 @@ function executionFromFiles(execText, taskTexts = {}, liveTexts = {}, now, title
     coordinator: { ...v.coordinator },
     integrated: v.integrated,
     total: v.total,
-    elapsedSeconds: elapsed(v.startedAt, now, now),
+    elapsedSeconds: elapsed(v.startedAt, to, now),
     finished: v.finished.map((f) => ({ task: f.task, seconds: elapsed(f.startedAt, Date.parse(f.finishedAt), now) })).filter((f) => f.seconds !== null),
     // model / effort: lens knows them only for its own session's subagents (from the usage loops), not for these.
     slots: v.slots.map((s) => ({
@@ -11608,8 +11620,8 @@ function executionFromFiles(execText, taskTexts = {}, liveTexts = {}, now, title
       model: null,
       effort: null,
       round: s.round,
-      seconds: secondsSince(s.since, now),
-      taskSeconds: elapsed(s.startedAt, now, now),
+      seconds: secondsSince(s.since, to),
+      taskSeconds: elapsed(s.startedAt, to, now),
       liveness: s.liveness,
       mode: s.mode
     })),
@@ -11617,7 +11629,7 @@ function executionFromFiles(execText, taskTexts = {}, liveTexts = {}, now, title
       task: s.task,
       title: s.title ? clip(s.title) : null,
       stage: s.stage,
-      seconds: secondsSince(s.since, now),
+      seconds: secondsSince(s.since, to),
       liveness: s.liveness,
       by: s.by ?? ""
     })),
@@ -11862,20 +11874,31 @@ function parseCritique(text2) {
 }
 
 // src/lib/design-gate.ts
+var APPLIED_NOTE = /\b(?:round|ronda)\s+(\d+)\s*:\s*(?:applied|aplicad[ao]s?)\s+(\d+(?:\s*(?:,|y|and)\s*\d+)*)/gi;
+var REWRITE_NOTE = /^\s*(?:round|ronda)\s+(\d+)\s*:\s*(?:rewrite|reescritura|reescrit[ao])/i;
+var legacy = (e) => e.applied === void 0 && e.rewrite === void 0;
 function appliedIn(changelog, round) {
   const out = /* @__PURE__ */ new Set();
   for (const e of changelog) {
-    for (const m of e.note.matchAll(/round\s+(\d+)\s*:\s*applied\s+([\d\s,]+)/gi)) {
+    if (e.applied) {
+      for (const n2 of e.applied[round] ?? []) out.add(n2);
+      continue;
+    }
+    if (!legacy(e)) continue;
+    for (const m of e.note.matchAll(APPLIED_NOTE)) {
       if (Number(m[1]) !== round) continue;
-      for (const n2 of m[2].split(/[\s,]+/)) if (/^\d+$/.test(n2)) out.add(Number(n2));
+      for (const n2 of m[2].split(/\s*(?:,|y|and)\s*/i)) if (/^\d+$/.test(n2)) out.add(Number(n2));
     }
   }
   return out;
 }
 function rewroteRound(changelog, round) {
   return changelog.some((e) => {
-    const m = /^\s*round\s+(\d+)\s*:\s*rewrite/i.exec(e.note);
-    return e.round === round && !!m && Number(m[1]) === round;
+    if (e.round !== round) return false;
+    if (e.rewrite === true) return true;
+    if (!legacy(e)) return false;
+    const m = REWRITE_NOTE.exec(e.note);
+    return !!m && Number(m[1]) === round;
   });
 }
 function parseDismissed(text2) {
@@ -12001,6 +12024,16 @@ var EntrySchema = external_exports.object({
   words: external_exports.number(),
   round: external_exports.number()
 });
+function normalizeApplied(x) {
+  if (!x || typeof x !== "object" || Array.isArray(x)) return null;
+  const out = {};
+  for (const [k, v] of Object.entries(x)) {
+    if (!/^[1-9]\d*$/.test(k) || !Array.isArray(v)) continue;
+    const ns = v.filter((n2) => Number.isInteger(n2) && n2 > 0);
+    if (ns.length) out[Number(k)] = [...new Set(ns)].sort((a, b) => a - b);
+  }
+  return Object.keys(out).length ? out : null;
+}
 function parseChangelog(text2) {
   if (!text2 || !text2.trim()) return [];
   let raw;
@@ -12016,7 +12049,9 @@ function parseChangelog(text2) {
       const why = r.error.issues.map((x) => `${x.path.join(".") || "(root)"}: ${x.message}`).join("; ");
       throw new Error(`changelog.json entry ${i} is invalid: ${why}`);
     }
-    return r.data;
+    const raw2 = e;
+    const applied = normalizeApplied(raw2.applied);
+    return { ...r.data, ...applied ? { applied } : {}, ...raw2.rewrite === true ? { rewrite: true } : {} };
   });
 }
 
@@ -12793,7 +12828,7 @@ function block(ui, key, b, inner) {
   switch (b.kind) {
     case "bar": {
       const right = b.right ? ` ${b.right}` : "";
-      const head = b.label || b.right ? /* @__PURE__ */ h(Box, { key: `${key}-h`, flexDirection: "row", justifyContent: "space-between" }, /* @__PURE__ */ h(Text, { dimColor: true, wrap: "truncate-end" }, b.label ?? ""), /* @__PURE__ */ h(Text, { bold: true }, right)) : null;
+      const head = b.label || b.right ? /* @__PURE__ */ h(Box, { key: `${key}-h`, flexDirection: "row", justifyContent: "space-between" }, /* @__PURE__ */ h(Box, { flexGrow: 1, minWidth: 0 }, /* @__PURE__ */ h(Text, { dimColor: true, wrap: "truncate-end" }, b.label ?? "")), /* @__PURE__ */ h(Box, { flexShrink: 0 }, /* @__PURE__ */ h(Text, { bold: true }, right))) : null;
       return /* @__PURE__ */ h(Box, { key, flexDirection: "column" }, head, bar(ui, `${key}-b`, b.ratio, Math.max(4, inner), b.hue, !!b.moving));
     }
     case "cells":
@@ -12801,7 +12836,7 @@ function block(ui, key, b, inner) {
     case "stages":
       return /* @__PURE__ */ h(Box, { key, flexDirection: "row", flexWrap: "wrap" }, b.stages.map((s, i) => /* @__PURE__ */ h(Box, { key: `${key}-${i}`, flexDirection: "row" }, i > 0 ? /* @__PURE__ */ h(Text, { color: s.state === "pending" ? PALETTE.s1 : hex(b.hue) }, "\u2500") : null, /* @__PURE__ */ h(Text, { color: s.state === "pending" ? PALETTE.s2 : hex(b.hue) }, STAGE_GLYPH[s.state]), /* @__PURE__ */ h(Text, { bold: s.state === "active", color: s.state === "active" ? hex(b.hue) : void 0, dimColor: s.state === "pending" }, ` ${s.name} `))));
     case "row":
-      return /* @__PURE__ */ h(Box, { key, flexDirection: "row", columnGap: 1 }, b.spinning ? spinner(ui, `${key}-s`, b.dot) : /* @__PURE__ */ h(Text, { color: hex(b.dot) }, "\u25CF"), b.tag ? /* @__PURE__ */ h(Text, { color: PALETTE.base, backgroundColor: hex(b.tag.hue), bold: true }, ` ${b.tag.text} `) : null, /* @__PURE__ */ h(Box, { flexGrow: 1, flexShrink: 1 }, /* @__PURE__ */ h(Text, { wrap: "truncate-end" }, b.text)), b.right ? /* @__PURE__ */ h(Text, { dimColor: true }, b.right) : null);
+      return /* @__PURE__ */ h(Box, { key, flexDirection: "row", columnGap: 1 }, /* @__PURE__ */ h(Box, { flexShrink: 0 }, b.spinning ? spinner(ui, `${key}-s`, b.dot) : /* @__PURE__ */ h(Text, { color: hex(b.dot) }, "\u25CF")), b.tag ? /* @__PURE__ */ h(Box, { flexShrink: 0 }, /* @__PURE__ */ h(Text, { color: PALETTE.base, backgroundColor: hex(b.tag.hue), bold: true }, ` ${b.tag.text} `)) : null, /* @__PURE__ */ h(Box, { flexGrow: 1, flexShrink: 1, minWidth: 0 }, /* @__PURE__ */ h(Text, { wrap: "truncate-end" }, b.text)), b.right ? /* @__PURE__ */ h(Box, { flexShrink: 0 }, /* @__PURE__ */ h(Text, { dimColor: true }, b.right)) : null);
     case "text":
       return /* @__PURE__ */ h(Text, { key, color: b.hue ? hex(b.hue) : void 0, dimColor: b.dim, wrap: "truncate-end" }, b.text);
     case "chips":
@@ -12811,7 +12846,7 @@ function block(ui, key, b, inner) {
 function termCard(ui, key, card, width) {
   const { Box, Text } = ui;
   const inner = Math.max(6, width - 4);
-  return /* @__PURE__ */ h(Box, { key, flexDirection: "column", borderStyle: "round", borderColor: hex(card.hue), paddingX: 1 }, /* @__PURE__ */ h(Box, { flexDirection: "row", columnGap: 1 }, /* @__PURE__ */ h(Text, { color: hex(card.hue), bold: true }, card.icon), /* @__PURE__ */ h(Box, { flexGrow: 1, flexShrink: 1 }, /* @__PURE__ */ h(Text, { bold: true, wrap: "truncate-end" }, card.title)), card.chip ? /* @__PURE__ */ h(Text, { color: PALETTE.base, backgroundColor: hex(card.chip.hue), bold: true }, ` ${card.chip.text} `) : null), card.subtitle ? /* @__PURE__ */ h(Text, { dimColor: true, wrap: "truncate-end" }, card.subtitle) : null, card.blocks.map((b, i) => block(ui, `${key}-${i}`, b, inner)));
+  return /* @__PURE__ */ h(Box, { key, flexDirection: "column", borderStyle: "round", borderColor: hex(card.hue), paddingX: 1 }, /* @__PURE__ */ h(Box, { flexDirection: "row", columnGap: 1 }, /* @__PURE__ */ h(Box, { flexShrink: 0 }, /* @__PURE__ */ h(Text, { color: hex(card.hue), bold: true }, card.icon)), /* @__PURE__ */ h(Box, { flexGrow: 1, flexShrink: 1, minWidth: 0 }, /* @__PURE__ */ h(Text, { bold: true, wrap: "truncate-end" }, card.title)), card.chip ? /* @__PURE__ */ h(Box, { flexShrink: 0 }, /* @__PURE__ */ h(Text, { color: PALETTE.base, backgroundColor: hex(card.chip.hue), bold: true }, ` ${card.chip.text} `)) : null), card.subtitle ? /* @__PURE__ */ h(Text, { dimColor: true, wrap: "truncate-end" }, card.subtitle) : null, card.blocks.map((b, i) => block(ui, `${key}-${i}`, b, inner)));
 }
 function termBand(ui, o) {
   const { Box, Text } = ui;

@@ -7840,28 +7840,22 @@ function legacyIdle(s2, now, minutes = IDLE_MINUTES) {
 // src/forge/hook.ts
 var executionBlockReason = (running, parallel) => `forge execution is active (${running}/${parallel} running). Step it as /forge:run's Execution section describes; to end it run /forge:stop.`;
 var executionEndedReason = (reason) => `the forge execution ended (${reason}): report it as /forge:run's Execution section says (step 7), then stop.`;
-function bindHookSession(e, session) {
-  if (!e || !e.active || e.hookSession !== null || typeof session !== "string" || !session) return e;
-  return { ...e, hookSession: session };
-}
 function decideExecutionStop(input, exec, ctx) {
   if (!exec || !exec.active) return { block: false, exec };
   const session = typeof input.session_id === "string" && input.session_id ? input.session_id : null;
-  if (exec.hookSession !== null && session !== exec.hookSession) return { block: false, exec };
-  const e = bindHookSession(exec, session);
-  const hookSession = e.hookSession;
+  if (exec.hookSession === null || session !== exec.hookSession) return { block: false, exec };
   if (ctx.stopFile) {
-    const ended = { ...e, active: false, stopReason: "stopped", sleepUntil: null, hookSession };
+    const ended = { ...exec, active: false, stopReason: "stopped", sleepUntil: null };
     return { block: true, reason: executionEndedReason("stopped"), ended: "stopped", exec: ended };
   }
   const now = ctx.now.getTime();
-  const until = e.sleepUntil ? Date.parse(e.sleepUntil) : NaN;
-  if (Number.isFinite(until) && until > now) return { block: false, exec: e };
-  const agentRunning = Object.values(e.tasks).some((t) => t.status === "running" && !!t.agent && now - Date.parse(t.updatedAt) < LEASE_MINUTES * 6e4);
-  if (agentRunning) return { block: false, exec: e };
-  if (input.stop_hook_active === true && e.lastStepAt === e.lastBlockStep) return { block: false, exec: e };
-  const running = Object.values(e.tasks).filter((t) => t.status === "running").length;
-  return { block: true, reason: executionBlockReason(running, e.parallel), exec: { ...e, hookSession, lastBlockStep: e.lastStepAt } };
+  const until = exec.sleepUntil ? Date.parse(exec.sleepUntil) : NaN;
+  if (Number.isFinite(until) && until > now) return { block: false, exec };
+  const agentRunning = Object.values(exec.tasks).some((t) => t.status === "running" && !!t.agent && now - Date.parse(t.updatedAt) < LEASE_MINUTES * 6e4);
+  if (agentRunning) return { block: false, exec };
+  if (input.stop_hook_active === true && exec.lastStepAt === exec.lastBlockStep) return { block: false, exec };
+  const running = Object.values(exec.tasks).filter((t) => t.status === "running").length;
+  return { block: true, reason: executionBlockReason(running, exec.parallel), exec: { ...exec, lastBlockStep: exec.lastStepAt } };
 }
 var hhmm = (d) => d.toISOString().slice(11, 16);
 function blockReason(run2) {
@@ -7874,13 +7868,12 @@ var endedReason = (reason) => `the forge infinite run ended (${reason}): do step
 function decideStop(input, run2, ctx) {
   if (!run2 || !run2.active) return { block: false, run: run2 };
   const session = typeof input.session_id === "string" && input.session_id ? input.session_id : null;
-  if (run2.sessionId !== null && session !== run2.sessionId) return { block: false, run: run2 };
+  if (run2.sessionId === null || session !== run2.sessionId) return { block: false, run: run2 };
   if (ctx.swarmSleeping) return { block: false, run: run2 };
-  const sessionId = run2.sessionId ?? session;
   const reason = stopReason(run2, ctx);
-  if (reason) return { block: true, reason: endedReason(reason), ended: reason, run: { ...endRun(run2, reason), lastBlockEvents: ctx.ledgerEvents, sessionId } };
+  if (reason) return { block: true, reason: endedReason(reason), ended: reason, run: { ...endRun(run2, reason), lastBlockEvents: ctx.ledgerEvents } };
   if (input.stop_hook_active === true && ctx.ledgerEvents === run2.lastBlockEvents) return { block: false, run: run2 };
-  return { block: true, reason: blockReason(run2), run: { ...run2, lastBlockEvents: ctx.ledgerEvents, sessionId, blocksSinceCycle: run2.blocksSinceCycle + 1 } };
+  return { block: true, reason: blockReason(run2), run: { ...run2, lastBlockEvents: ctx.ledgerEvents, blocksSinceCycle: run2.blocksSinceCycle + 1 } };
 }
 
 // src/forge/execution.ts
@@ -12262,6 +12255,9 @@ function normalizeExecution(x, now) {
     lastStepAt: iso2(x.lastStepAt),
     lastBlockStep: iso2(x.lastBlockStep),
     sleepUntil: iso2(x.sleepUntil),
+    // C2: closedBy only means something with a closedAt; an older file has neither.
+    closedAt: iso2(x.closedAt),
+    closedBy: iso2(x.closedAt) ? oneOf2(["merge", "close"], x.closedBy) : null,
     ...typeof x.planned === "number" && Number.isInteger(x.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x.planned)) } : {},
     ...x.autonomy === "auto" ? { autonomy: "auto" } : {},
     ...isLocale(x.locale) ? { locale: x.locale } : {}
@@ -12294,7 +12290,9 @@ function fromSwarm(s2) {
     lastStepAt: s2.lastTickAt,
     lastBlockStep: null,
     sleepUntil: null,
-    tasks: {}
+    tasks: {},
+    closedAt: null,
+    closedBy: null
   };
 }
 function normalizePublicTask(x) {
@@ -13414,6 +13412,14 @@ function mirrorProposal(root, id2, doc, stillPlanned = () => false) {
 // src/forge/cli/run.ts
 var import_yaml8 = __toESM(require_dist(), 1);
 
+// src/lib/claude-session.ts
+function claudeSessionId(flag, env = process.env) {
+  if (isSafeId(flag)) return flag;
+  const v = env.CLAUDE_CODE_SESSION_ID;
+  return isSafeId(v) ? v : null;
+}
+var noClaudeSession = (cmd, flagName) => `${cmd}: no Claude session id: pass ${flagName} <id> or run it from Claude Code (CLAUDE_CODE_SESSION_ID)`;
+
 // src/forge/cli/errors.ts
 var UsageError = class extends Error {
 };
@@ -13718,6 +13724,7 @@ function widthOf(plan) {
 // src/lib/execution-view.ts
 var FUTURE_TOLERANCE_MS = 2 * 6e4;
 var AGENT_ALIVE_MS = 3 * 36e5;
+var STALE_RUN_TTL_MS = 24 * 36e5;
 function usable(ts, now) {
   const t = ts ? Date.parse(ts) : NaN;
   return Number.isFinite(t) && t - now <= FUTURE_TOLERANCE_MS ? t : null;
@@ -14091,13 +14098,9 @@ function hookLive(io, forced) {
     const event = forced ?? named;
     if (!sessionId || !event) return "";
     const main = mainCheckout(io.cwd);
-    let exec = readExecution(main);
+    const exec = readExecution(main);
     if (!exec?.active) return "";
     const found = memberForHook(main, sessionId, exec.runId);
-    if (exec.hookSession === null && event === "SubagentStart" && !found) {
-      exec = { ...exec, hookSession: sessionId };
-      saveExecution(main, exec);
-    }
     const member = exec.hookSession === sessionId ? null : found;
     if (exec.hookSession !== sessionId && !member) return "";
     const role = member ? member.role : "coordinator";
@@ -14720,6 +14723,15 @@ function attemptExtras(r2, es2, ref, personal) {
     ...say.length ? { say } : {}
   };
 }
+function commitInfo(git, sha) {
+  const [cI = "", ...subject] = (git(["show", "-s", "--format=%cI%x09%s", sha]) ?? "").trim().split("	");
+  const second = git(["rev-parse", "--verify", "-q", `${sha}^2`])?.trim() || null;
+  const title = second ? (git(["show", "-s", "--format=%s", second]) ?? "").trim() : subject.join("	");
+  const stat = second ? git(["diff", "--shortstat", `${sha}^1`, sha]) ?? "" : "";
+  const num3 = (re) => Number(stat.match(re)?.[1] ?? 0);
+  const t = Date.parse(cI);
+  return { sha, ts: Number.isFinite(t) ? new Date(t).toISOString() : "", title, add: num3(/(\d+) insertion/), del: num3(/(\d+) deletion/) };
+}
 function integrate(rest, io, deps) {
   const task = rest[0];
   if (!task || !isPlanId(task)) throw new UsageError("swarm integrate: a task id is required");
@@ -14769,6 +14781,7 @@ function integrate(rest, io, deps) {
   return out({
     result: "integrated",
     sha: r2.sha,
+    commit: commitInfo(target.git, r2.sha),
     preexisting: r2.preexisting,
     newValidators: r2.newValidators,
     say,
@@ -14776,12 +14789,19 @@ function integrate(rest, io, deps) {
     ...extras
   });
 }
+function closeEnded(root, at, by) {
+  const cur = readExecution(root);
+  if (!cur || cur.active || cur.closedAt) return false;
+  saveExecution(root, { ...cur, closedAt: at, closedBy: by });
+  return true;
+}
 function mergeFinal(rest, io, deps) {
   const e = readExecution(io.cwd);
   if (!e) throw new UsageError("swarm merge: no execution (forge swarm start)");
   const locale = localeArg(rest, "merge");
   const out = (v) => ({ code: 0, stdout: JSON.stringify(v) + "\n", stderr: "" });
-  if (e.kind !== "plan") return out({ result: "merged", sha: deps.git(["rev-parse", "HEAD"])?.trim() ?? "" });
+  const merged = (v) => out({ ...v, ...closeEnded(io.cwd, io.now().toISOString(), "merge") ? { closed: true } : {} });
+  if (e.kind !== "plan") return merged({ result: "merged", sha: deps.git(["rev-parse", "HEAD"])?.trim() ?? "" });
   if (!e.mergeOnFinish && !rest.includes("--yes")) return out({ result: "needs-authorization" });
   const branch = deps.git(["rev-parse", "--abbrev-ref", "HEAD"])?.trim();
   if (branch !== e.base) return out({ result: "main-dirty", detail: `the main checkout is on ${branch ?? "?"}, not ${e.base}` });
@@ -14801,7 +14821,7 @@ function mergeFinal(rest, io, deps) {
   const extras = attemptExtras(r2, spanish(locale, io.cwd, e.project), e.branch, true);
   if (r2.result === "dirty") return out({ result: "main-dirty", detail: `the main checkout ${r2.detail}`, ...extras });
   if (r2.result === "deps") return out({ result: "main-deps", detail: `the main checkout ${r2.detail}`, ...extras });
-  return out(r2.result === "merged" ? { result: "merged", sha: r2.sha, preexisting: r2.preexisting, ...extras } : { result: "conflict", detail: r2.detail, ...extras });
+  return r2.result === "merged" ? merged({ result: "merged", sha: r2.sha, preexisting: r2.preexisting, ...extras }) : out({ result: "conflict", detail: r2.detail, ...extras });
 }
 function swarmCommand(args, io, deps) {
   const [sub, ...rest] = args;
@@ -14853,12 +14873,11 @@ function swarmCommand(args, io, deps) {
       const task = flag("task") ?? null;
       if (task !== null && !isPlanId(task)) throw new UsageError("swarm join: --task is not a task id");
       if (role === "executor" && !task) throw new UsageError("swarm join: an executor needs --task");
-      if (has("hook-session") && !flag("hook-session")) throw new UsageError("swarm join: --hook-session needs an id");
-      const before = readMember(main, session);
       const given = flag("hook-session");
-      const usable2 = given !== void 0 && isMemberId(given) ? given : null;
-      const warning = given !== void 0 && usable2 === null ? `--hook-session ${given.slice(0, 130)} is not a usable session id (letters, digits, _ - .; max 120): joined without a live signal` : null;
-      const hookSession = usable2 ?? (before?.runId === e.runId ? before.hookSession : null);
+      const id2 = claudeSessionId(given, io.env ?? process.env);
+      const before = readMember(main, session);
+      const hookSession = id2 ?? (before?.runId === e.runId ? before.hookSession : null);
+      const warning = id2 !== null ? null : given ? `--hook-session ${given.slice(0, 130)} is not a usable session id (letters, digits, _ - .; max 120): joined without a live signal` : hookSession === null ? "no Claude session id (--hook-session or CLAUDE_CODE_SESSION_ID): joined without a live signal" : null;
       if (hookSession !== null && hookSession === e.hookSession) throw new UsageError(`swarm join: ${hookSession} coordinates this execution`);
       writeMember(main, { sessionId: session, role, runId: e.runId, task, name: flag("name") ?? null, since: iso3, hookSession });
       return json3({ runId: e.runId, role, task, coordinator: e.coordinator, branch: e.branch, mode: e.mode, project: e.project, ...warning ? { warning } : {} });
@@ -14902,6 +14921,8 @@ function swarmCommand(args, io, deps) {
       const project = flag("project");
       const session = flag("session");
       if (!project || !ID.test(project) || !session || !ID.test(session)) throw new UsageError("swarm start: --project and --session are required");
+      const hook = claudeSessionId(flag("hook-session"), io.env ?? process.env);
+      if (!hook) throw new UsageError(noClaudeSession("swarm start", "--hook-session"));
       const config = loadConfig(io.cwd);
       let parallel = config.swarm.parallel;
       if (has("parallel")) {
@@ -14920,10 +14941,9 @@ function swarmCommand(args, io, deps) {
       const base = deps.git(["rev-parse", "--abbrev-ref", "HEAD"])?.trim();
       if (!base || base === "HEAD") throw new UsageError("swarm start: the main checkout must be on a branch");
       const prev = readExecution(io.cwd);
-      if (prev?.active && prev.coordinator !== session) {
-        const last = Date.parse(prev.lastStepAt ?? prev.startedAt);
-        if (now.getTime() - last < TAKEOVER_MIN * 6e4) throw new UsageError(`swarm start: coordinator ${prev.coordinator} is active (last step ${prev.lastStepAt ?? prev.startedAt})`);
-      }
+      if (prev?.active && prev.coordinator !== session) throw new UsageError(
+        `swarm start: the execution ${prev.runId} is coordinated by ${prev.coordinator}; to go on with it from this session run swarm takeover --session ${session} --hook-session <id> (it checks that ${prev.coordinator} stopped), or join it as a manual member (/forge:run --join)`
+      );
       const branch = flag("branch") ?? runBranch(project);
       if (!isRunBranch(branch)) throw new UsageError("swarm start: --branch is not a valid branch name");
       if (!isMemberId(session)) throw new UsageError("swarm start: --session must use letters, digits, _ - . (at most 120)");
@@ -14995,7 +15015,7 @@ function swarmCommand(args, io, deps) {
         }
       }
       const lang = locale ? { locale } : {};
-      const state = resume && prev ? { ...prev, parallel, mode, mergeOnFinish: prev.mergeOnFinish || has("merge-on-finish"), coordinator: session, hookSession: null, sleepUntil: null, ...auto, ...lang } : {
+      const state = resume && prev ? { ...prev, parallel, mode, mergeOnFinish: prev.mergeOnFinish || has("merge-on-finish"), coordinator: session, hookSession: hook, sleepUntil: null, ...auto, ...lang } : {
         runId: `${project}-${iso3.replace(/[:.]/g, "")}`,
         kind,
         mode,
@@ -15005,7 +15025,7 @@ function swarmCommand(args, io, deps) {
         branch: kind === "plan" ? branch : base,
         mergeOnFinish: has("merge-on-finish"),
         coordinator: session,
-        hookSession: null,
+        hookSession: hook,
         active: true,
         stopReason: null,
         stallReason: null,
@@ -15014,6 +15034,8 @@ function swarmCommand(args, io, deps) {
         lastBlockStep: null,
         sleepUntil: null,
         tasks: {},
+        closedAt: null,
+        closedBy: null,
         ...auto,
         ...lang
       };
@@ -15022,6 +15044,7 @@ function swarmCommand(args, io, deps) {
         if (deps.git(["branch", "-D", tb]) === null) throw new UsageError(`swarm start: cannot delete ${tb}; if a worktree still holds it, run git worktree prune or remove that worktree (git worktree remove)`);
       }
       const attributes = unionLearned(deps);
+      const replaced = prev && !prev.active && !prev.closedAt && !resume ? { runId: prev.runId, stopReason: prev.stopReason } : null;
       (0, import_node_fs14.rmSync)(stopFile(io.cwd), { force: true });
       saveExecution(io.cwd, state);
       if (kind === "ephemeral" && !resume) writeLoose(io.cwd, { runId: state.runId, tasks: loose });
@@ -15039,7 +15062,7 @@ function swarmCommand(args, io, deps) {
         loose: loose.length,
         setup
       });
-      return json3({ ...state, setup, baseSync, ...looseOut, announce: announce2, ...attributes });
+      return json3({ ...state, setup, baseSync, ...looseOut, announce: announce2, ...attributes, ...replaced ? { replaced } : {} });
     }
     case "status": {
       const state = readExecution(io.cwd);
@@ -15253,14 +15276,35 @@ function swarmCommand(args, io, deps) {
       if (e?.active) saveExecution(io.cwd, { ...e, active: false, stopReason: reason, sleepUntil: null });
       return ok();
     }
+    case "close": {
+      const main = mainCheckout(io.cwd);
+      const e = readExecution(main);
+      if (!e) throw new UsageError("swarm close: no execution");
+      if (e.active) throw new UsageError(`swarm close: the execution ${e.runId} is active; stop it first (/forge:stop)`);
+      if (e.closedAt) return json3({ closed: "already", runId: e.runId, closedAt: e.closedAt, closedBy: e.closedBy ?? null });
+      closeEnded(main, iso3, "close");
+      const running = Object.entries(e.tasks).filter(([, t]) => t.status === "running");
+      return json3({
+        closed: true,
+        runId: e.runId,
+        kind: e.kind,
+        stopReason: e.stopReason,
+        closedAt: iso3,
+        // The coordinator's own tasks go back to free on the roadmap; a member's task stays with its session.
+        release: running.filter(([, t]) => t.executor === "subagents").map(([id2]) => id2),
+        members: running.filter(([, t]) => t.executor !== "subagents").map(([id2]) => id2)
+      });
+    }
     case "takeover": {
+      const hook = claudeSessionId(flag("hook-session"), io.env ?? process.env);
+      if (!hook) throw new UsageError(noClaudeSession("swarm takeover", "--hook-session"));
       const session = flag("session");
       if (!session) throw new UsageError("swarm takeover: --session is required");
       if (!isMemberId(session)) throw new UsageError(`swarm takeover: --session ${session.slice(0, 130)} is not a valid session id (letters, digits, _ - .; max 120)`);
       const e = current();
       if (!e.active) throw new UsageError("swarm takeover: the execution is not active");
-      if (session === e.coordinator || session === e.hookSession) {
-        if (e.coordinator !== session || e.hookSession !== null) saveExecution(io.cwd, { ...e, coordinator: session, hookSession: null });
+      if (session === e.coordinator || hook === e.hookSession) {
+        if (e.coordinator !== session || e.hookSession !== hook) saveExecution(io.cwd, { ...e, coordinator: session, hookSession: hook });
         return json3({ took: "already", runId: e.runId });
       }
       if (readMember(io.cwd, session)?.runId === e.runId) throw new UsageError(`swarm takeover: ${session} is a member of the execution ${e.runId}; a run member cannot take over the coordinator`);
@@ -15281,7 +15325,7 @@ function swarmCommand(args, io, deps) {
       if (!seen.length) seen.push(now.getTime() - Date.parse(e.lastStepAt ?? e.startedAt) >= TAKEOVER_MIN * 6e4 ? "stopped" : "alive");
       const liveness2 = seen.reduce((a, b) => order.indexOf(b) > order.indexOf(a) ? b : a, "stopped");
       if (liveness2 !== "stopped") return json3({ took: false, previous, liveness: liveness2, joinAs: "manual" });
-      saveExecution(io.cwd, { ...e, coordinator: session, hookSession: null, sleepUntil: null });
+      saveExecution(io.cwd, { ...e, coordinator: session, hookSession: hook, sleepUntil: null });
       appendEvent(io.cwd, { ts: iso3, kind: "decision", point: "takeover", what: "takeover", chosen: session, why: `the coordinator ${previous} stopped`, by: "user", weight: "minor", previous, session, runId: e.runId });
       return json3({ took: true, previous, runId: e.runId, running: Object.entries(e.tasks).filter(([, t]) => t.status === "running").map(([id2]) => id2) });
     }
@@ -15290,7 +15334,7 @@ function swarmCommand(args, io, deps) {
     case "merge":
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError("usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID [--db DIR]>");
+      throw new UsageError("usage: forge swarm <start --project P --session SID --hook-session ID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID [--db DIR]>");
   }
 }
 
@@ -17431,15 +17475,13 @@ function hookStop(io) {
     if (!input || typeof input !== "object" || Array.isArray(input)) return "";
     const hookInput = input;
     const main = mainCheckout(io.cwd);
-    const read = readExecution(main);
+    const exec = readExecution(main);
     const sid = typeof hookInput.session_id === "string" ? hookInput.session_id : null;
-    const member = read?.active && sid ? memberForHook(main, sid, read.runId) : null;
+    const member = exec?.active && sid ? memberForHook(main, sid, exec.runId) : null;
     if (member) {
       hookLive(io, "Stop");
       return "";
     }
-    const exec = bindHookSession(read, hookInput.session_id);
-    if (exec && exec !== read) saveExecution(main, exec);
     hookLive(io, "Stop");
     const sleeping = !!exec?.active && !!exec.sleepUntil && Date.parse(exec.sleepUntil) > io.now().getTime();
     const run2 = parseRun(readRunText(io.cwd));
@@ -18246,16 +18288,16 @@ function run(argv, io) {
           const cycles = num3("cycles", posInt2, "a positive integer");
           const hours = num3("hours", (n) => Number.isFinite(n) && n > 0, "a positive number");
           const queueMax = num3("queue-max", posInt2, "a positive integer");
-          const session = flag("session");
-          if (has("session") && !session) throw new UsageError("infinite start: --session needs a session id");
           const locale = flag("locale");
           if (has("locale") && !isLocale(locale)) throw new UsageError("infinite start: --locale must be a language code (es, en, pt-BR\u2026)");
           if (cycles === void 0 && hours === void 0) throw new UsageError("infinite start: a budget is required (--cycles N and/or --hours H)");
+          const session = claudeSessionId(flag("session"), io.env ?? process.env);
+          if (!session) throw new UsageError(noClaudeSession("infinite start", "--session"));
           const current = parseRun(readRunText(io.cwd));
-          if (current?.active && stopReason(current, stopContext(io.cwd, io.now())) === null) throw new UsageError("infinite start: a run is already active (forge stop, or forge infinite status)");
+          if (current?.active && current.sessionId !== null && stopReason(current, stopContext(io.cwd, io.now())) === null) throw new UsageError("infinite start: a run is already active (forge stop, or forge infinite status)");
           forgeDir(io.cwd);
           (0, import_node_fs21.rmSync)(stopFile(io.cwd), { force: true });
-          const run2 = startRun(io.now(), { ...cycles !== void 0 ? { cycles } : {}, ...hours !== void 0 ? { hours } : {} }, queueMax, session ?? null, locale ?? null);
+          const run2 = startRun(io.now(), { ...cycles !== void 0 ? { cycles } : {}, ...hours !== void 0 ? { hours } : {} }, queueMax, session, locale ?? null);
           saveRun(io.cwd, run2);
           return json3(run2);
         }

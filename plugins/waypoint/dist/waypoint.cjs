@@ -11684,7 +11684,7 @@ function normalizeNoteDecision(x2) {
   const chosen = line(o.chosen, LIMITS.chosen);
   const why = line(o.why, LIMITS.why);
   if (!what || !chosen || !why) return null;
-  const out = { point: o.point, what, chosen, why, auto: true };
+  const out = { point: o.point, what, chosen, why, auto: o.auto === true };
   const alternatives = Array.isArray(o.alternatives) ? o.alternatives.map((a) => line(a, LIMITS.alternative)).filter(Boolean).slice(0, LIMITS.alternatives) : [];
   if (alternatives.length) out.alternatives = alternatives;
   const revert = line(o.revert, LIMITS.revert);
@@ -11746,19 +11746,31 @@ var isObj = (x2) => typeof x2 === "object" && x2 !== null && !Array.isArray(x2);
 var str2 = (v) => String(v ?? "");
 var arr = (v) => Array.isArray(v) ? v : [];
 var strs = (v) => arr(v).filter((x2) => typeof x2 === "string");
-function normalizeMeta(x2) {
+var kindOf = (v) => v === null ? "null" : Array.isArray(v) ? "array" : typeof v;
+function keepAll(list, keep, field, report) {
+  const out = [];
+  list.forEach((v, i) => {
+    if (keep(v)) out.push(v);
+    else report?.(`${field}[${i}]`, "dropped", kindOf(v));
+  });
+  return out;
+}
+function normalizeMeta(x2, report) {
   if (!isObj(x2)) return null;
   const mt2 = isObj(x2.metrics) ? x2.metrics : {};
   const metrics = { ...mt2 };
   const lc = mt2.lastCommit;
   if (isObj(lc) && typeof lc.sha === "string" && typeof lc.ts === "string") metrics.lastCommit = { sha: lc.sha, ts: lc.ts };
-  else delete metrics.lastCommit;
+  else {
+    delete metrics.lastCommit;
+    if (lc !== void 0) report?.("metrics.lastCommit", "dropped", kindOf(lc));
+  }
   return {
     name: str2(x2.name),
     locale: str2(x2.locale),
     version: str2(x2.version),
     planHash: str2(x2.planHash),
-    tracks: arr(x2.tracks).filter((t) => isObj(t) && typeof t.id === "string" && typeof t.name === "string"),
+    tracks: keepAll(arr(x2.tracks), (t) => isObj(t) && typeof t.id === "string" && typeof t.name === "string", "tracks", report),
     versions: arr(x2.versions).filter(isObj),
     phaseOrder: arr(x2.phaseOrder),
     metrics,
@@ -11768,14 +11780,14 @@ function normalizeMeta(x2) {
 function normalizeTask(t) {
   return { ...t, id: t.id, title: t.title, depends_on: strs(t.depends_on), zones: strs(t.zones), done_when: typeof t.done_when === "string" ? t.done_when : "", track: str2(t.track), phase: str2(t.phase) };
 }
-function normalizePhase(x2) {
+function normalizePhase(x2, report) {
   if (!isObj(x2) || typeof x2.id !== "string") return null;
   return {
     ...x2,
     id: x2.id,
     name: str2(x2.name),
     order: typeof x2.order === "number" && Number.isFinite(x2.order) ? x2.order : 0,
-    tasks: arr(x2.tasks).filter((t) => isObj(t) && typeof t.id === "string" && typeof t.title === "string").map(normalizeTask)
+    tasks: keepAll(arr(x2.tasks), (t) => isObj(t) && typeof t.id === "string" && typeof t.title === "string", "tasks", report).map(normalizeTask)
   };
 }
 
@@ -12098,20 +12110,31 @@ ${body}`;
 }
 
 // src/lib/design-gate.ts
+var APPLIED_NOTE = /\b(?:round|ronda)\s+(\d+)\s*:\s*(?:applied|aplicad[ao]s?)\s+(\d+(?:\s*(?:,|y|and)\s*\d+)*)/gi;
+var REWRITE_NOTE = /^\s*(?:round|ronda)\s+(\d+)\s*:\s*(?:rewrite|reescritura|reescrit[ao])/i;
+var legacy = (e) => e.applied === void 0 && e.rewrite === void 0;
 function appliedIn(changelog, round) {
   const out = /* @__PURE__ */ new Set();
   for (const e of changelog) {
-    for (const m of e.note.matchAll(/round\s+(\d+)\s*:\s*applied\s+([\d\s,]+)/gi)) {
+    if (e.applied) {
+      for (const n of e.applied[round] ?? []) out.add(n);
+      continue;
+    }
+    if (!legacy(e)) continue;
+    for (const m of e.note.matchAll(APPLIED_NOTE)) {
       if (Number(m[1]) !== round) continue;
-      for (const n of m[2].split(/[\s,]+/)) if (/^\d+$/.test(n)) out.add(Number(n));
+      for (const n of m[2].split(/\s*(?:,|y|and)\s*/i)) if (/^\d+$/.test(n)) out.add(Number(n));
     }
   }
   return out;
 }
 function rewroteRound(changelog, round) {
   return changelog.some((e) => {
-    const m = /^\s*round\s+(\d+)\s*:\s*rewrite/i.exec(e.note);
-    return e.round === round && !!m && Number(m[1]) === round;
+    if (e.round !== round) return false;
+    if (e.rewrite === true) return true;
+    if (!legacy(e)) return false;
+    const m = REWRITE_NOTE.exec(e.note);
+    return !!m && Number(m[1]) === round;
   });
 }
 function parseDismissed(text) {
@@ -12174,6 +12197,31 @@ var EntrySchema = external_exports.object({
   words: external_exports.number(),
   round: external_exports.number()
 });
+function normalizeApplied(x2) {
+  if (!x2 || typeof x2 !== "object" || Array.isArray(x2)) return null;
+  const out = {};
+  for (const [k2, v] of Object.entries(x2)) {
+    if (!/^[1-9]\d*$/.test(k2) || !Array.isArray(v)) continue;
+    const ns = v.filter((n) => Number.isInteger(n) && n > 0);
+    if (ns.length) out[Number(k2)] = [...new Set(ns)].sort((a, b) => a - b);
+  }
+  return Object.keys(out).length ? out : null;
+}
+var AppliedError = class extends Error {
+};
+function parseAppliedItems(items, round) {
+  if (!items.length) throw new AppliedError("--applied needs at least one item (r<R>:<numbers> or <numbers>)");
+  const out = {};
+  for (const item of items) {
+    const m = /^(?:r([1-9]\d*):)?([1-9]\d*(?:,[1-9]\d*)*)$/.exec(item);
+    if (!m) throw new AppliedError(`--applied item ${item.slice(0, 40)} is not r<R>:<numbers> nor <numbers>`);
+    if (!m[1] && round === null) throw new AppliedError(`--applied item ${item} has no round: add --round <R> or write it r<R>:${item}`);
+    const r2 = m[1] ? Number(m[1]) : round;
+    if (round !== null && r2 > round) throw new AppliedError(`--applied round ${r2} is after --round ${round}`);
+    out[r2] = [.../* @__PURE__ */ new Set([...out[r2] ?? [], ...m[2].split(",").map(Number)])].sort((a, b) => a - b);
+  }
+  return out;
+}
 function listVersions(files) {
   const set = /* @__PURE__ */ new Set();
   for (const f of files) {
@@ -12201,7 +12249,9 @@ function parseChangelog(text) {
       const why = r2.error.issues.map((x2) => `${x2.path.join(".") || "(root)"}: ${x2.message}`).join("; ");
       throw new Error(`changelog.json entry ${i} is invalid: ${why}`);
     }
-    return r2.data;
+    const raw2 = e;
+    const applied = normalizeApplied(raw2.applied);
+    return { ...r2.data, ...applied ? { applied } : {}, ...raw2.rewrite === true ? { rewrite: true } : {} };
   });
 }
 function appendChangelog(list, e) {
@@ -13745,6 +13795,7 @@ var isLocale = (x2) => typeof x2 === "string" && LOCALE.test(x2);
 // src/lib/execution-view.ts
 var FUTURE_TOLERANCE_MS = 2 * 6e4;
 var AGENT_ALIVE_MS = 3 * 36e5;
+var STALE_RUN_TTL_MS = 24 * 36e5;
 
 // src/mod/model.ts
 function pickProject(entries) {
@@ -13939,7 +13990,7 @@ function run(argv, io) {
     const db = flag("db");
     if (!db) return { view: p, project: p.project, version: p.version };
     const metaFile = import_node_path3.default.join(abs(db), "meta", "project.json");
-    const phases = Object.values(readDocs(import_node_path3.default.join(abs(db), "plan"))).map(normalizePhase).filter((x2) => !!x2);
+    const phases = Object.values(readDocs(import_node_path3.default.join(abs(db), "plan"))).map((d) => normalizePhase(d)).filter((x2) => !!x2);
     const meta = (0, import_node_fs3.existsSync)(metaFile) ? normalizeMeta(JSON.parse((0, import_node_fs3.readFileSync)(metaFile, "utf8"))) : null;
     if (!meta || !phases.length) throw new CacheError("db plan cache missing \u2014 list meta and plan first");
     return { view: planViewFromDocs(meta, phases), project: p.project, version: meta.version || p.version };
@@ -14121,19 +14172,7 @@ function run(argv, io) {
         const worktree = import_node_path3.default.join(root, ".claude", "worktrees", track);
         const branch = `track/${track}`;
         const name = `wp-${p.project}-${track}`;
-        const FORGE_MARK = "forge drives this session";
-        let forge = args.includes("--forge") || !!swarm;
-        if (!forge && !args.includes("--no-forge")) {
-          const designFile = import_node_path3.default.join(import_node_path3.default.dirname(abs(args[0])), "design.md");
-          if ((0, import_node_fs3.existsSync)(designFile)) {
-            try {
-              forge = parseDesign((0, import_node_fs3.readFileSync)(designFile, "utf8")).meta.start_prompt.includes(FORGE_MARK);
-            } catch (e) {
-              if (!(e instanceof DesignError)) throw e;
-            }
-          }
-        }
-        const prompt = `/waypoint:work ${track}` + (forge ? ` \u2014 ${FORGE_MARK} (forge:run Large loop)` : "") + (args.includes("--merge") ? ` \u2014 the user authorizes merging ${branch} into main at phase close` : "") + (swarm ? ` \u2014 swarm member of ${swarm}: do not merge into the base branch; keep taking tasks of your track and stop when it has no next task` : "");
+        const prompt = `/waypoint:work ${track}` + (args.includes("--merge") ? ` \u2014 the user authorizes merging ${branch} into main at phase close` : "") + (swarm ? ` \u2014 swarm member of ${swarm}: do not merge into the base branch; keep taking tasks of your track and stop when it has no next task` : "");
         const command = `claude --bg --name ${name} "${prompt}"`;
         const inWorktree = launchRun(launcher, { name, prompt, worktree });
         if (inWorktree === null) return fail("launch: herdr cannot open panes from the command line; use launcher bg", 2);
@@ -14235,7 +14274,44 @@ function run(argv, io) {
         const roundFlag = flag("round");
         const round = roundFlag !== void 0 ? Number(roundFlag) : log[log.length - 1]?.round ?? 0;
         if (!Number.isInteger(round) || round < 0) return fail("design-snapshot: --round must be a non-negative integer", 2);
-        const next = appendChangelog(log, { version, date: io.now().toISOString().slice(0, 10), note, words: d.words, round });
+        const local = import_node_path3.default.join(io.cwd, ".waypoint", d.meta.project);
+        const critiqueOf = (r2) => {
+          const f = import_node_path3.default.join(local, `critique-r${r2}.json`);
+          if (!(0, import_node_fs3.existsSync)(f)) return null;
+          try {
+            return parseCritique((0, import_node_fs3.readFileSync)(f, "utf8"));
+          } catch {
+            return null;
+          }
+        };
+        let applied = null;
+        const at2 = args.indexOf("--applied");
+        if (at2 >= 0) {
+          const end = args.findIndex((a, i) => i > at2 && a.startsWith("--"));
+          try {
+            applied = parseAppliedItems(args.slice(at2 + 1, end < 0 ? args.length : end), roundFlag !== void 0 ? round : null);
+          } catch (e) {
+            if (e instanceof AppliedError) return fail(`design-snapshot: ${e.message}`, 2);
+            throw e;
+          }
+          for (const [r2, ns] of Object.entries(applied)) {
+            const c = critiqueOf(Number(r2));
+            if (!c) return fail(`design-snapshot: round ${r2} has no critique (${import_node_path3.default.join(local, `critique-r${r2}.json`)})`, 2);
+            const missing = ns.find((n) => !c.proposals.some((p) => p.n === n));
+            if (missing !== void 0) return fail(`design-snapshot: round ${r2} has no proposal ${missing}`, 2);
+          }
+        }
+        const rewrite = args.includes("--rewrite");
+        if (rewrite && (roundFlag === void 0 || !critiqueOf(round))) return fail("design-snapshot: --rewrite needs --round <R> and the critique of that round", 2);
+        const next = appendChangelog(log, {
+          version,
+          date: io.now().toISOString().slice(0, 10),
+          note,
+          words: d.words,
+          round,
+          ...applied ? { applied } : {},
+          ...rewrite ? { rewrite: true } : {}
+        });
         (0, import_node_fs3.mkdirSync)(histDir, { recursive: true });
         const dest = import_node_path3.default.join(histDir, `v${version}.md`);
         try {
@@ -14245,7 +14321,7 @@ function run(argv, io) {
           throw e;
         }
         (0, import_node_fs3.writeFileSync)(import_node_path3.default.join(base, "changelog.json"), JSON.stringify(next, null, 2) + "\n");
-        return ok(JSON.stringify({ version, path: dest }));
+        return ok(JSON.stringify({ version, path: dest, ...applied ? { applied } : {} }));
       }
       case "design-changed": {
         const file = abs(args[0]);
