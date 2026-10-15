@@ -10,7 +10,7 @@ import { pickTask, conflictsFor, recoverableTasks, inboxFor, escalationCandidate
 import { parseDesign, changedSections, DesignError } from '../lib/design.js';
 import { importSpec, SpecImportError } from '../lib/design-import.js';
 import { designGate, mergeDismissed, parseDismissed } from '../lib/design-gate.js';
-import { listVersions, nextVersion, parseChangelog, appendChangelog } from '../lib/history.js';
+import { listVersions, nextVersion, parseChangelog, appendChangelog, parseAppliedItems, AppliedError } from '../lib/history.js';
 import { parseCritique, selectProposals, formatProposals, CritiqueError } from '../lib/critique.js';
 import { buildDesignPageData } from '../design-page/build.js';
 import { eventId, sessionIdFrom } from '../lib/ids.js';
@@ -347,8 +347,35 @@ export function run(argv: string[], io: Io): Result {
         const roundFlag = flag('round');
         const round = roundFlag !== undefined ? Number(roundFlag) : (log[log.length - 1]?.round ?? 0);
         if (!Number.isInteger(round) || round < 0) return fail('design-snapshot: --round must be a non-negative integer', 2);
+        // A-04: what this entry applied, and whether its rewrite folded in its round; all checked before anything is written.
+        const local = path.join(io.cwd, '.waypoint', d.meta.project);
+        const critiqueOf = (r: number) => {
+          const f = path.join(local, `critique-r${r}.json`);
+          if (!existsSync(f)) return null;
+          try { return parseCritique(readFileSync(f, 'utf8')); } catch { return null; }
+        };
+        let applied: Record<number, number[]> | null = null;
+        const at = args.indexOf('--applied');
+        if (at >= 0) {
+          const end = args.findIndex((a, i) => i > at && a.startsWith('--'));
+          try { applied = parseAppliedItems(args.slice(at + 1, end < 0 ? args.length : end), roundFlag !== undefined ? round : null); } catch (e) {
+            if (e instanceof AppliedError) return fail(`design-snapshot: ${e.message}`, 2);
+            throw e;
+          }
+          for (const [r, ns] of Object.entries(applied)) {
+            const c = critiqueOf(Number(r));
+            if (!c) return fail(`design-snapshot: round ${r} has no critique (${path.join(local, `critique-r${r}.json`)})`, 2);
+            const missing = ns.find(n => !c.proposals.some(p => p.n === n));
+            if (missing !== undefined) return fail(`design-snapshot: round ${r} has no proposal ${missing}`, 2);
+          }
+        }
+        const rewrite = args.includes('--rewrite');
+        if (rewrite && (roundFlag === undefined || !critiqueOf(round))) return fail('design-snapshot: --rewrite needs --round <R> and the critique of that round', 2);
         // Pure check first so a stale changelog fails before anything is written.
-        const next = appendChangelog(log, { version, date: io.now().toISOString().slice(0, 10), note, words: d.words, round });
+        const next = appendChangelog(log, {
+          version, date: io.now().toISOString().slice(0, 10), note, words: d.words, round,
+          ...(applied ? { applied } : {}), ...(rewrite ? { rewrite: true as const } : {}),
+        });
         mkdirSync(histDir, { recursive: true });
         const dest = path.join(histDir, `v${version}.md`);
         try { writeFileSync(dest, text, { flag: 'wx' }); } catch (e) {
@@ -356,7 +383,7 @@ export function run(argv: string[], io: Io): Result {
           throw e;
         }
         writeFileSync(path.join(base, 'changelog.json'), JSON.stringify(next, null, 2) + '\n');
-        return ok(JSON.stringify({ version, path: dest }));
+        return ok(JSON.stringify({ version, path: dest, ...(applied ? { applied } : {}) }));
       }
       case 'design-changed': {
         const file = abs(args[0]);

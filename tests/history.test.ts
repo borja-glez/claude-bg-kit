@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { appendChangelog, listVersions, nextVersion, parseChangelog } from '../src/lib/history.js';
+import { appendChangelog, listVersions, nextVersion, normalizeApplied, parseChangelog } from '../src/lib/history.js';
 
 describe('versions', () => {
   it('lists v<N>.md files only, sorted', () => {
@@ -24,6 +24,16 @@ describe('changelog', () => {
   it('appends only increasing versions', () => {
     expect(appendChangelog([e(1)], e(2))).toEqual([e(1), e(2)]);
     expect(() => appendChangelog([e(2)], e(2))).toThrow(/version 2/);
+  });
+  it('keeps a valid applied, sorted and without duplicates, and rewrite: true; drops junk without failing (A-04)', () => {
+    const entry = { version: 2, date: '2026-10-15', note: 'resumen', words: 10, round: 2 };
+    expect(parseChangelog(JSON.stringify([{ ...entry, applied: { 2: [5, 4, 4], 1: [3] }, rewrite: true }]))[0])
+      .toEqual({ ...entry, applied: { 1: [3], 2: [4, 5] }, rewrite: true });
+    for (const junk of [7, 'x', [1, 2], { '01': [1] }, { x: [1] }, { 1: 'a' }, { 1: [0, -1, 1.5, 'x'] }]) {
+      expect(parseChangelog(JSON.stringify([{ ...entry, applied: junk, rewrite: 'yes' }]))[0]).toEqual(entry);
+    }
+    expect(normalizeApplied({ 1: [2, 'x', 2], 3: [], '04': [1] })).toEqual({ 1: [2] });
+    expect(normalizeApplied(null)).toBeNull();
   });
 });
 

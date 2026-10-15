@@ -943,4 +943,12 @@ describe('plugin layout', () => {
     expect(call).toContain('metrics: {tests: <tests>, lastCommit: {sha, ts}}');
     expect(call).not.toContain('if_version:');
   });
+  it('design apply records what it applied with --applied, also across rounds (K3-12)', () => {
+    const md = read('plugins/waypoint/skills/design/SKILL.md');
+    const apply = md.slice(md.indexOf('## apply <spec>'), md.indexOf('## rewrite'));
+    for (const w of ['--applied r<R1>:<numbers>', 'r<R>:<list|all>', 'apply r1:4,5 r2:all']) expect(apply).toContain(w);
+    expect(md.slice(md.indexOf('## rewrite'), md.indexOf('## interview'))).toContain('--round R --rewrite');
+    expect(md.slice(md.indexOf('## approve'), md.indexOf('## Publish'))).toContain('apply r<R>:<numbers>');
+    expect(md).not.toContain('--note "round R: applied');
+  });
 });

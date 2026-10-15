@@ -82,3 +82,41 @@ describe('dismissed.json', () => {
     expect(mergeDismissed({ 1: [6] }, 2, [3, 1])).toEqual({ 1: [6], 2: [1, 3] });
   });
 });
+
+describe('applied and rewrite: structured first, old notes in English or Spanish as a fallback (A-04, K3-01)', () => {
+  const S = (version: number, round: number, applied?: Record<number, number[]>, rewrite?: true, note = 'resumen'): ChangelogEntry =>
+    ({ ...E(version, note, round), ...(applied ? { applied } : {}), ...(rewrite ? { rewrite } : {}) });
+  const sorted = (s: Set<number>) => [...s].sort((a, b) => a - b);
+  it('counts the structured applied numbers of every entry', () => {
+    expect(sorted(appliedIn([S(2, 2, { 1: [4, 5], 2: [2] }), S(3, 2, { 1: [1] })], 1))).toEqual([1, 4, 5]);
+    expect(sorted(appliedIn([S(2, 2, { 1: [4, 5], 2: [2] })], 2))).toEqual([2]);
+  });
+  it('reads the old notes in Spanish and in English', () => {
+    expect(sorted(appliedIn([E(2, 'ronda 1: aplicadas 1,3 — criterio de terminado', 1)], 1))).toEqual([1, 3]);
+    expect(sorted(appliedIn([E(2, 'ronda 1: aplicadas 1, 3 y 5 — x', 1)], 1))).toEqual([1, 3, 5]);
+    expect(sorted(appliedIn([E(2, 'Round 2: Applied 3 and 4', 2)], 2))).toEqual([3, 4]);
+  });
+  it('never passes the note of a structured entry through the regex', () => {
+    expect(sorted(appliedIn([S(2, 1, { 1: [2] }, undefined, 'round 1: applied 7')], 1))).toEqual([2]);
+    expect(rewroteRound([S(2, 2, { 1: [1] }, undefined, 'round 2: rewrite')], 2)).toBe(false);
+  });
+  it('a rewrite folds in its own round, structured or from an old note', () => {
+    expect(rewroteRound([S(3, 2, undefined, true)], 2)).toBe(true);
+    expect(rewroteRound([S(3, 2, undefined, true)], 1)).toBe(false);
+    expect(rewroteRound([E(3, 'ronda 2: reescritura completa', 2)], 2)).toBe(true);
+  });
+  it('structured entries and old notes of the same round count each number once', () => {
+    expect(sorted(appliedIn([E(2, 'ronda 1: aplicadas 1,3 — a', 1), S(3, 1, { 1: [3, 4] })], 1))).toEqual([1, 3, 4]);
+  });
+  it('with the notes of the real reparto changelogs, the applied proposals are no longer pending', () => {
+    const sev = (s: string) => s.split('').map(c => (c === 'M' ? 'major' : 'minor') as 'major' | 'minor');
+    const reparto = [E(1, 'Borrador inicial', 0), E(2, 'ronda 1: aplicadas 1,3 — criterio de terminado de settle con casos fijos', 1), E(3, 'entrevista: formulario', 1), E(4, 'aprobado', 1)];
+    const a = pendingProposals(reparto, [{ round: 1, critique: C(1, 1, sev('MmMMMMmmmmm')) }, { round: 2, critique: C(2, 2, sev('MMmmmmmmm')) }]);
+    expect(a).toHaveLength(18);
+    expect(a.filter(p => p.round === 1).map(p => p.n)).toEqual([2, 4, 5, 6, 7, 8, 9, 10, 11]);
+    const reparto2 = [E(1, 'Borrador inicial', 0), E(2, 'ronda 1: aplicadas 1,2,3,4,5 — tipos de respuesta', 1),
+      E(3, 'ronda 2: aplicadas 1,2,3,4,5,6,7 — dependencias en la Base', 2), E(4, 'entrevista: autorrelleno', 2), E(5, 'aprobado', 2)];
+    const b = pendingProposals(reparto2, [{ round: 1, critique: C(1, 1, sev('MMMMMmmmmm')) }, { round: 2, critique: C(2, 2, sev('MMMmmmm')) }]);
+    expect(b.map(p => `${p.round}.${p.n}`)).toEqual(['1.6', '1.7', '1.8', '1.9', '1.10']);
+  });
+});

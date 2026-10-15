@@ -566,6 +566,35 @@ describe('design commands', () => {
       expect(r.stderr).toContain('Riesgos');
     });
   });
+
+  describe('design-snapshot --applied and --rewrite (A-04, K3-01)', () => {
+    const local = () => path.join(dir, '.waypoint', 'demo-shop');
+    const prop = (n: number) => ({ n, category: 'gap', severity: 'major', section: '_intro', problem: 'p', change: 'c' });
+    const critique = (round: number, count: number) => writeFileSync(path.join(local(), `critique-r${round}.json`),
+      JSON.stringify({ round, version: round, scope: 'full', proposals: Array.from({ length: count }, (_, i) => prop(i + 1)) }));
+    beforeEach(() => { mkdirSync(local(), { recursive: true }); critique(1, 5); critique(2, 3); });
+    it('writes applied by round, sorted and without duplicates, a bare list of --round, and rewrite', () => {
+      const r = run(['design-snapshot', rel, '--note', 'resumen', '--round', '2', '--applied', 'r1:5,4,4', 'r2:2'], io);
+      expect(r.code).toBe(0);
+      expect(JSON.parse(r.stdout)).toMatchObject({ version: 1, applied: { 1: [4, 5], 2: [2] } });
+      expect(changelog()[0]).toMatchObject({ note: 'resumen', round: 2, applied: { 1: [4, 5], 2: [2] } });
+      expect(changelog()[0]).not.toHaveProperty('rewrite');
+      expect(JSON.parse(run(['design-snapshot', rel, '--note', 'x', '--round', '2', '--applied', '1,3'], io).stdout).applied).toEqual({ 2: [1, 3] });
+      expect(run(['design-snapshot', rel, '--note', 'reescrito', '--round', '2', '--rewrite'], io).code).toBe(0);
+      expect(changelog()[2]).toMatchObject({ round: 2, rewrite: true });
+      expect(changelog()[2]).not.toHaveProperty('applied');
+    });
+    it('exits 2 and writes nothing for a bad item, a list without --round, a later round, a missing critique, an unknown number or a bad --rewrite', () => {
+      for (const extra of [
+        ['--round', '2', '--applied'], ['--round', '2', '--applied', 'r1:x'], ['--round', '2', '--applied', 'r01:1'],
+        ['--applied', '1,2'], ['--round', '1', '--applied', 'r2:1'], ['--round', '3', '--applied', 'r3:1'],
+        ['--round', '2', '--applied', 'r1:9'], ['--rewrite'], ['--round', '3', '--rewrite'],
+      ]) expect(run(['design-snapshot', rel, '--note', 'n', ...extra], io).code, extra.join(' ')).toBe(2);
+      expect(run(['design-snapshot', rel, '--note', 'n', '--round', '2', '--applied', 'r1:9'], io).stderr).toBe('design-snapshot: round 1 has no proposal 9\n');
+      expect(existsSync(hist())).toBe(false);
+      expect(existsSync(path.join(ddir(), 'design/changelog.json'))).toBe(false);
+    });
+  });
 });
 
 describe('classic hooks', () => {

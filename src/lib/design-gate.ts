@@ -15,23 +15,35 @@ export interface Gate {
   pending: Pending[]; pendingCounts: { critical: number; major: number; minor: number };
 }
 
-/** The proposal numbers changelog notes record as applied in round R ("round R: applied 1,3 — …", as `apply` writes). */
+/** Notes written before `applied` and `rewrite` existed, in English or Spanish: "round 1: applied 1,3 — …",
+ *  "ronda 1: aplicadas 1, 3 y 5 — …"; "round 2: rewrite — …", "ronda 2: reescritura — …". */
+const APPLIED_NOTE = /\b(?:round|ronda)\s+(\d+)\s*:\s*(?:applied|aplicad[ao]s?)\s+(\d+(?:\s*(?:,|y|and)\s*\d+)*)/gi;
+const REWRITE_NOTE = /^\s*(?:round|ronda)\s+(\d+)\s*:\s*(?:rewrite|reescritura|reescrit[ao])/i;
+/** An entry without the structured fields: its note is the only record of what it applied. */
+const legacy = (e: ChangelogEntry) => e.applied === undefined && e.rewrite === undefined;
+
+/** The proposal numbers the changelog records as applied in round R: each entry's `applied`, else its old note. */
 export function appliedIn(changelog: ChangelogEntry[], round: number): Set<number> {
   const out = new Set<number>();
   for (const e of changelog) {
-    for (const m of e.note.matchAll(/round\s+(\d+)\s*:\s*applied\s+([\d\s,]+)/gi)) {
+    if (e.applied) { for (const n of e.applied[round] ?? []) out.add(n); continue; }
+    if (!legacy(e)) continue;
+    for (const m of e.note.matchAll(APPLIED_NOTE)) {
       if (Number(m[1]) !== round) continue;
-      for (const n of m[2].split(/[\s,]+/)) if (/^\d+$/.test(n)) out.add(Number(n));
+      for (const n of m[2].split(/\s*(?:,|y|and)\s*/i)) if (/^\d+$/.test(n)) out.add(Number(n));
     }
   }
   return out;
 }
 
-/** Whether a rewrite folded in round R's proposals: an entry of round R whose note starts "round R: rewrite". */
+/** Whether a rewrite folded in round R's proposals: an entry of round R with `rewrite: true`, or an old note "round R: rewrite". */
 export function rewroteRound(changelog: ChangelogEntry[], round: number): boolean {
   return changelog.some(e => {
-    const m = /^\s*round\s+(\d+)\s*:\s*rewrite/i.exec(e.note);
-    return e.round === round && !!m && Number(m[1]) === round;
+    if (e.round !== round) return false;
+    if (e.rewrite === true) return true;
+    if (!legacy(e)) return false;
+    const m = REWRITE_NOTE.exec(e.note);
+    return !!m && Number(m[1]) === round;
   });
 }
 
