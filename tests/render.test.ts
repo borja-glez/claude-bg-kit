@@ -877,5 +877,10 @@ describe('timeline phases, labels, ticks and minimap (G-21, H-13, H-12, G-22, H-
     expect(fifteen).toContain('data-group="phase" data-rows="15"');
     expect(fifteen).toContain('viewBox="0 0 1000 48"');
     expect(mm(renderApp({ ...base(), plan: big(30, 343), states: {} }, ui()))).toContain(`data-group="track" data-rows="${plan.tracks.length}"`);
+    // A single phase is one thin bar, not a 35px slab in the 48px box.
+    const one = mm(renderApp({ ...base(), plan: big(1, 5), states: {} }, ui()));
+    const heights = [...one.matchAll(/class="mb [^"]*"[^>]*height="([\d.]+)"/g)].map(x => Number(x[1]));
+    expect(heights.length).toBeGreaterThan(0);
+    for (const hh of heights) expect(hh).toBeLessThanOrEqual(6.4 + 1e-9);
   });
 });

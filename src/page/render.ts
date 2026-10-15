@@ -496,7 +496,7 @@ function renderMinimap(m: Model, d: Dict, win: Win): string {
   const groups = layoutRows(m.plan, m.states, m.now, { from, to }, new Set(), { groupBy }).filter(r => r.kind === 'phase');
   if (!groups.length) return '';
   const VB = 48;
-  const rowH = 44 / groups.length;
+  const rowH = Math.min(44 / groups.length, 8);
   const barH = Math.max(0.6, 0.8 * rowH);
   const bars = groups.map((r, i) => r.bars.map(b => `<rect class="mb ${b.kind}" x="${b.left * 10}" y="${(2 + i * rowH + (rowH - barH) / 2).toFixed(2)}" width="${Math.max(2, b.width * 10)}" height="${barH.toFixed(2)}" rx="1"/>`).join('')).join('');
   const vx = ((win.from - from) / (to - from)) * 1000;
