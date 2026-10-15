@@ -4,15 +4,16 @@ import type { ExecResult } from './cli/run.js';
 import type { ForgeConfig, When } from './config.js';
 import type { LedgerEvent } from './ledger.js';
 
-export interface Validator { name: string; cmd: string; kind: string; affects?: string[]; when?: When; source: 'manual' | 'detected' }
+export interface Validator { name: string; cmd: string; kind: string; affects?: string[]; when?: When; cache?: boolean; source: 'manual' | 'detected' }
 // A flaky result (failed, then passed on the retry) is ok: true; its first failures are kept for the record.
 // skipped: a test runner that found no tests to run passes (there is nothing to check yet, which is not a failure of the
 // change). preexisting: it failed the same way before the change (see markPreexisting), so it does not count against it.
 // failing: the tests (or type errors) the output names as failing, when failingTests could read them (failingKnown);
 // newFailing: those the baseline did not already have.
+// cached: it came from the tree cache (validate-cache.ts), with the clock of the run that produced it.
 export interface ValidatorResult {
   validator: string; ok: boolean; flaky: boolean; durationMs: number; failures: string[];
-  failing?: string[]; failingKnown?: boolean; newFailing?: string[]; skipped?: 'no-tests'; preexisting?: boolean;
+  failing?: string[]; failingKnown?: boolean; newFailing?: string[]; skipped?: 'no-tests'; preexisting?: boolean; cached?: boolean;
 }
 // list(dir) lists the entries of a directory relative to the repo root (the root itself when omitted).
 export interface RepoReader { exists: (rel: string) => boolean; read: (rel: string) => string | null; list: (dir?: string) => string[] }

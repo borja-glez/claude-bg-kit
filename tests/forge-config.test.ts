@@ -6,13 +6,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseConfig, loadConfig, configValue, agentFor, ROLES, ConfigError, NAME } from '../src/forge/config.js';
 import { selectValidators } from '../src/forge/validators.js';
+import { cacheable } from '../src/forge/validate-cache.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 
 describe('forge config', () => {
   it('defaults: detect on, nothing excluded, verify limits, evidence upload', () => {
     expect(parseConfig(null)).toEqual({
       profile: 'balanced', detect: true, exclude: [], verify: { limits: { checks: 8, shots: 10, minutes: 10 } },
-      evidence: 'upload', validatorTimeoutSec: 600, validate: { parallel: 3, retry: 'flaky' }, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' } }, tdd: 'off',
+      evidence: 'upload', validatorTimeoutSec: 600, validate: { cache: true, parallel: 3, retry: 'flaky' }, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' } }, tdd: 'off',
       generated: [],
     });
   });
@@ -37,12 +38,17 @@ describe('forge config', () => {
     expect(() => parseConfig('tdd: always\n')).toThrow(ConfigError);
   });
   it('validate: parallel 3 and retry flaky by default; parallel from 1 to 8; retry flaky, always or never (C-12)', () => {
-    expect(parseConfig(null).validate).toEqual({ parallel: 3, retry: 'flaky' });
-    expect(parseConfig('validate:\n  parallel: 1\n  retry: always\n').validate).toEqual({ parallel: 1, retry: 'always' });
+    expect(parseConfig(null).validate).toEqual({ cache: true, parallel: 3, retry: 'flaky' });
+    expect(parseConfig('validate:\n  parallel: 1\n  retry: always\n').validate).toEqual({ cache: true, parallel: 1, retry: 'always' });
     expect(configValue(parseConfig('validate:\n  retry: never\n'), 'validate.retry')).toBe('never');
     for (const bad of ['validate:\n  parallel: 0\n', 'validate:\n  parallel: 9\n', 'validate:\n  retry: sometimes\n', 'validate:\n  nope: 1\n']) {
       expect(() => parseConfig(bad)).toThrow(ConfigError);
     }
+  });
+  it('validate.cache is true by default; a validator takes an optional cache flag (C6)', () => {
+    expect(parseConfig('validate:\n  cache: false\n').validate).toEqual({ cache: false, parallel: 3, retry: 'flaky' });
+    expect(parseConfig('validators:\n  - name: e2e\n    cmd: npm run e2e\n    kind: e2e\n    cache: true\n').validators?.[0]).toMatchObject({ cache: true });
+    expect(() => parseConfig('validators:\n  - name: e2e\n    cmd: x\n    cache: maybe\n')).toThrow(ConfigError);
   });
   it('swarm: parallel 3 by default, an optional mode and the launcher', () => {
     expect(parseConfig(null).swarm).toEqual({ parallel: 3, launcher: 'bg', member: { effort: 'medium' } });
@@ -172,5 +178,11 @@ describe('this repo validates its mods (I-02)', () => {
     expect(names(['src/page/app.ts'])).not.toContain('mod-tests');
     expect(names(['src/page/app.ts'])).toContain('typecheck-mod');
     expect(selectValidators(manual(), { mode: 'final' }).map(v => v.name)).toContain('mod-tests');
+  });
+  it('mod-tests uses the tree cache (cache: true): its result depends only on the tree, the bundles it builds and the claude CLI', () => {
+    const mt = manual().find(v => v.name === 'mod-tests')!;
+    expect(mt).toMatchObject({ kind: 'e2e', cache: true });
+    expect(cacheable(mt)).toBe(true);
+    expect(manual().find(v => v.name === 'typecheck-mod')?.cache).toBeUndefined();
   });
 });
