@@ -15167,6 +15167,7 @@ function swarmCommand(args, io, deps) {
       const task = taskArg();
       const e = current();
       const t = e.tasks[task];
+      if (e.closedAt) throw new UsageError(`swarm retry: the execution ${e.runId} is closed; start a new one`);
       if (has("adopt")) {
         if (!t || t.status !== "conflict" || t.executor === "subagents") {
           throw new UsageError(`swarm retry: --adopt takes a member's task in conflict (${task} is ${t ? `${t.status}, ${t.executor}` : "not in this execution"})`);
@@ -15291,7 +15292,8 @@ function swarmCommand(args, io, deps) {
         stopReason: e.stopReason,
         closedAt: iso3,
         // The coordinator's own tasks go back to free on the roadmap; a member's task stays with its session.
-        release: running.filter(([, t]) => t.executor === "subagents").map(([id2]) => id2),
+        // A loose task has no state/T to free, so an ephemeral run releases nothing.
+        release: e.kind !== "plan" ? [] : running.filter(([, t]) => t.executor === "subagents").map(([id2]) => id2),
         members: running.filter(([, t]) => t.executor !== "subagents").map(([id2]) => id2)
       });
     }

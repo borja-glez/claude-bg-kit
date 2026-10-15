@@ -10629,9 +10629,9 @@ function parseChangelog(text2) {
       const why = r.error.issues.map((x) => `${x.path.join(".") || "(root)"}: ${x.message}`).join("; ");
       throw new Error(`changelog.json entry ${i} is invalid: ${why}`);
     }
-    const raw2 = e;
-    const applied = normalizeApplied(raw2.applied);
-    return { ...r.data, ...applied ? { applied } : {}, ...raw2.rewrite === true ? { rewrite: true } : {} };
+    const entry = e;
+    const applied = normalizeApplied(entry.applied);
+    return { ...r.data, ...applied ? { applied } : {}, ...entry.rewrite === true ? { rewrite: true } : {} };
   });
 }
 

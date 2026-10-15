@@ -12249,9 +12249,9 @@ function parseChangelog(text) {
       const why = r2.error.issues.map((x2) => `${x2.path.join(".") || "(root)"}: ${x2.message}`).join("; ");
       throw new Error(`changelog.json entry ${i} is invalid: ${why}`);
     }
-    const raw2 = e;
-    const applied = normalizeApplied(raw2.applied);
-    return { ...r2.data, ...applied ? { applied } : {}, ...raw2.rewrite === true ? { rewrite: true } : {} };
+    const entry = e;
+    const applied = normalizeApplied(entry.applied);
+    return { ...r2.data, ...applied ? { applied } : {}, ...entry.rewrite === true ? { rewrite: true } : {} };
   });
 }
 function appendChangelog(list, e) {
