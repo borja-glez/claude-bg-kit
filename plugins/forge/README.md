@@ -7,8 +7,8 @@ Triage by size, the right model for each role, your own tools first, independent
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.15.2](https://img.shields.io/badge/version-0.15.2-fab387?style=flat-square)
-![depends on waypoint ^0.19.1](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.19.1-cba6f7?style=flat-square)
+![version 0.16.0](https://img.shields.io/badge/version-0.16.0-fab387?style=flat-square)
+![depends on waypoint ^0.20.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.20.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -48,7 +48,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depends on [waypoint](../waypoint/README.md) ^0.19.1, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
+forge depends on [waypoint](../waypoint/README.md) ^0.20.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
 
 ## Usage
 
@@ -194,7 +194,7 @@ Sequential execution is not a third mode: it is subagents with N = 1.
 
 ## Infinite mode
 
-`/forge:infinite [--cycles N] [--hours H]` needs an approved waypoint design, a plan and a budget. It asks once when no budget is given, and `forge infinite start` refuses to start without `--cycles` or `--hours`. It runs `forge infinite start`, writes `meta/infinite` to the roadmap and ends the turn. The first Stop hook binds that session to the run, so use one session per checkout.
+`/forge:infinite [--cycles N] [--hours H]` needs an approved waypoint design, a plan and a budget. It asks once when no budget is given, and `forge infinite start` refuses to start without `--cycles` or `--hours`. It runs `forge infinite start`, writes `meta/infinite` to the roadmap and ends the turn. `infinite start` binds the session that runs it, so use one session per checkout.
 
 **Each cycle** forge:
 
@@ -291,6 +291,16 @@ swarm:
 ```
 
 `swarm.setup` is a command of up to 500 characters, run in each worktree forge creates. `.forge/config.yaml` is the one file of `.forge/` that git does track, so a `setup` you commit applies to everyone who runs the project.
+
+A validator whose cost only pays off when certain paths change can be `kind: e2e` with `affects`: in Medium and Large tasks it runs only when the diff touches them, and it always runs in `swarm integrate` and the final review. This repository checks its own mods that way:
+
+```yaml
+validators:
+  - name: mod-tests
+    cmd: npm run build && claude plugin test plugins/lens && claude plugin test plugins/waypoint
+    kind: e2e
+    affects: ["src/mod/**", "src/lens/**", "src/lib/**"]
+```
 
 > **Changed in 0.6.0:** a `validators` list in `.forge/config.yaml` no longer turns detection off; detected validators are used too, and yours win by name. Set `detect: false` for the previous behaviour.
 
@@ -392,24 +402,25 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 <details>
 <summary><b>Infinite mode and execution</b></summary>
 
-- `infinite start --cycles N | --hours H [--locale code]`, `infinite status`, `cycle --progress yes|no`, `stop` - `--locale` records the person's language: the Stop hook and every wake remind the session to answer in it.
-- `swarm start --project P --session SID [--mode subagents|sessions] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F]` - start or resume an execution (`--kind ephemeral --tasks F` starts an ephemeral one from the JSON file F of loose tasks and writes its state to `.forge/loose.json`); creates the run branch and its worktree (or brings a stale one up to its base, `baseSync`) and prints the `setup` result and `announce`, the lines the session shows (mode and N, branch, where to open the app, the final merge and how to stop it). `--locale <code>` records the person's language, used for those lines and repeated at every hook block and wake. It also sets git's union merge for `.forge/verify/*.md` (in `.git/info/attributes`), so `Learned` notes added by parallel tasks merge without conflicts. Run it from the main checkout.
+- `infinite start --cycles N | --hours H --session ID [--locale code]`, `infinite status`, `cycle --progress yes|no`, `stop` - `--session` is Claude's id of the session that drives the run (the skill passes it; else `CLAUDE_CODE_SESSION_ID`, and without either it exits with code 2): only that session's Stop hook chains the cycles. `--locale` records the person's language: the Stop hook and every wake remind the session to answer in it.
+- `swarm start --project P --session SID --hook-session ID [--mode subagents|sessions] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F]` - start or resume an execution (`--kind ephemeral --tasks F` starts an ephemeral one from the JSON file F of loose tasks and writes its state to `.forge/loose.json`). `--hook-session` is Claude's id of the session that runs it (else `CLAUDE_CODE_SESSION_ID`; without either it exits with code 2): its Stop hook steps the execution. Over an active execution coordinated by another session it exits with code 2 and names `swarm takeover`; over an ended one nobody closed it prints `replaced`. It creates the run branch and its worktree (or brings a stale one up to its base, `baseSync`) and prints the `setup` result and `announce`, the lines the session shows (mode and N, branch, where to open the app, the final merge and how to stop it). `--locale <code>` records the person's language, used for those lines and repeated at every hook block and wake. It also sets git's union merge for `.forge/verify/*.md` (in `.git/info/attributes`), so `Learned` notes added by parallel tasks merge without conflicts. Run it from the main checkout.
 - `swarm status` - the execution state, per task.
 - `swarm propose --plan P | --tasks F` - the plan's (or the loose tasks') width and the recommended mode and N.
 - `swarm worktree <task> [--member SID]` - create the task's worktree and branch (and run `swarm.setup`); `--member` is for a member session, which creates its own.
-- `swarm join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]` - register a member in `.forge/members/<SID>.json`. `SID` is its waypoint session id; `--hook-session` is Claude's own session id (the skills pass `${CLAUDE_SESSION_ID}`), which the hooks use to recognise the member; a rejoin without it keeps the one recorded.
+- `swarm join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]` - register a member in `.forge/members/<SID>.json`. `SID` is its waypoint session id; `--hook-session` is Claude's own session id (the skills pass it; else `CLAUDE_CODE_SESSION_ID`), which the hooks use to recognise the member; a rejoin without it keeps the one recorded.
 - `swarm report <task> --session SID --stage S [--status running|accepted|blocked] [--agent A | --no-agent] [--round N] [--lease ISO]` - a member publishes its own stage and live signal (it never writes `execution.json`).
 - `swarm next --plan p --db dir --session SID` - offer a manual member a ready task.
 - `swarm relaunch <task> --plan p` / `swarm nudge <task> [--plan p]` - restart a stopped sessions task with a handover note (at most 2 times), or remind an idle one (the plan gives the reminder's language).
-- `swarm takeover --session SID [--db dir]` - take over the coordinator when it is stopped; a run member cannot. The coordinator becomes `SID`, and the Stop hook binds to that session at its next stop.
+- `swarm takeover --session SID --hook-session ID [--db dir]` - take over the coordinator when it is stopped; a run member cannot. The coordinator becomes `SID`, and `--hook-session` (else `CLAUDE_CODE_SESSION_ID`; without either it exits with code 2) binds this session at once.
 - `swarm task <task> --stage S [--agent A | --no-agent] [--round N] [--status running|accepted|blocked] [--detail-file F] [--lease ISO]` - record the task's stage, agent and round; `swarm task <task> --drop` forgets a task whose claim was lost.
 - `swarm tick [--plan p --db dir] [--agents F]` - decide what to launch (a `start` in sessions mode carries `launch`, the full `waypoint launch` arguments with `--effort` and `--model` from `swarm.member`), nudge, relaunch and integrate; in an ephemeral execution it takes no `--plan` or `--db` (`--db` is a copy of the roadmap's `state` and `sessions` documents; `--agents` is a JSON file of the background sessions, `[{name, state: working|idle}]`).
-- `swarm integrate <task> [--retry-deps]` - merge an accepted task into the run branch, comparing the validators with the baseline. It installs the dependencies again when the merge brings or changes a manifest or lockfile (`setup`), puts them back after a merge it rolls back, and prints `newValidators` and `say`, the lines the session shows (new validators, validators excused as already failing). An install that fails answers `run-deps` and is not retried until the manifests change, or with `--retry-deps`.
+- `swarm integrate <task> [--retry-deps]` - merge an accepted task into the run branch, comparing the validators with the baseline. It installs the dependencies again when the merge brings or changes a manifest or lockfile (`setup`), puts them back after a merge it rolls back, and prints `newValidators` and `say`, the lines the session shows (new validators, validators excused as already failing). An install that fails answers `run-deps` and is not retried until the manifests change, or with `--retry-deps`. On `integrated` it also prints `commit` (`sha`, `ts`, `title`, `add`, `del`), the shape of `waypoint commit-info`, measured as what the task brings.
 - `swarm merge [--yes] [--retry-deps]` - merge the run branch into your branch; without `--yes` it needs the permission given at start. When your branch has not moved, the merged tree is the run branch's, so the validators run in the run worktree and nothing is installed in your checkout.
 - `swarm retry <T> [--adopt]` - put a task in conflict or blocked back to work. `--adopt` gives the conflicting task of an executor or manual session one fix round with the coordinator's subagents; it refuses if the holder's worktree is dirty.
 - `.forge/loose.json` - the state of an ephemeral execution (its loose tasks, with title, zones and dependencies).
 - `swarm sleep <seconds> [--mark]` - wait between ticks (up to 900 s); `--mark` only records the wake-up time.
 - `swarm stop [--reason stopped|budget]`
+- `swarm close` - close an execution that ended (from any worktree; exit 2 while it is active or when there is none): it prints `release`, the coordinator's tasks to put back to free on the roadmap, and `members`, the members' tasks. It never touches git.
 - `stop` - stop the infinite run and the execution.
 - `hook live` - the live-signal hook (stdin: the hook event). It prints nothing.
 - `--cwd <dir>` - on any command, run it as if from that directory (validators, git and the project's files), so a coordinator never has to `cd` into a worktree.

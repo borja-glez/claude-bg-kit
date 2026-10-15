@@ -13,6 +13,28 @@ elsewhere and are reconstructed from their READMEs.
 
 ## waypoint
 
+### 0.20.0 — 2026-10-15
+
+#### Added
+- `design-snapshot --applied r1:4,5 r2:2` and `--rewrite` record in `design/changelog.json` which proposals of which rounds an entry applied, and whether its rewrite folded in its round; `design-gate` and the band read them first. A number its critique lacks, a round after `--round`, a missing critique or a list without `--round` exit with code 2 and write nothing.
+- `/waypoint:design apply r1:4,5 r2:all` applies proposals of several rounds with one snapshot; `approve` applies the pending ones of every round that way.
+- The roadmap takes `?debug=1` (in the query or the hash, kept when the hash changes): a list of what the page dropped or corrected in each document.
+- The roadmap's task detail has ↻: while it is open, new data waits for it (or for the detail to close) instead of repainting under you.
+
+#### Changed
+- `waypoint launch` no longer adds «forge drives this session» to a track's prompt, nor reads it from the design's `start_prompt`; `--forge` and `--no-forge` are accepted and do nothing. A track of a plan that a forge execution runs joins it as a manual member.
+- The roadmap keeps the scroll of every list, the timeline, the versions board and the detail when it repaints, and its 30-second timer only updates the relative times (a full repaint every 5 minutes).
+- Versions draws each category as one proportional bar, and a phase without categories lists its tasks directly. The Execution block of Sessions is its own section, and a plan slot opens its task.
+- The timeline shows each phase id once, with the phase header fixed while you scroll, wider label column, edge ticks inside the edges, bar labels that stop before the now line and the forge badge in the left column. The minimap draws one row per phase (per track past 24 phases).
+- The band stops drawing a forge execution once it is closed, and draws a stalled one for 24 hours at most.
+
+#### Fixed
+- Design proposals applied in rounds whose note is in Spanish («ronda 1: aplicadas 1,3») are no longer counted as pending.
+- The roadmap accepts the validators forge writes without a result (shown as «no result») and numeric verification checks, instead of dropping them.
+- A decision note is labelled «auto» only when forge took it alone; the person's are labelled «yours».
+- The task detail stays above the side bar on a phone, its header with ✕ stays in view, and long paths no longer widen it at 390 px; the side bar stays in view on a desktop with A−/A+ at its foot.
+- `npm run typecheck:mod` compiles against `types/claude-code/` (`npm run mod-types:update` takes it from the engine's copy or from the main checkout), so it passes in any worktree.
+
 ### 0.19.1 — 2026-10-14
 
 #### Fixed
@@ -153,6 +175,25 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.16.0 — 2026-10-15
+
+#### Added
+- `forge swarm close` closes an execution that ended (stalled, stopped, out of budget or finished without a merge) from any worktree, and lists the tasks whose roadmap state goes back to free (`release`) and the members' tasks (`members`). It never touches git. `/forge:stop` uses it: it stops an active execution and closes an inactive one.
+- `swarm integrate` prints the integrated `commit` (`sha`, `ts`, `title`, `add`, `del`), measured as what the task brings; the coordinator writes the task's `summary` and the roadmap's last commit with it.
+
+#### Changed
+- An execution is bound to the Claude session that starts, resumes or takes it over: `swarm start` and `swarm takeover` take `--hook-session <id>` (the skills pass it; the CLI also reads `CLAUDE_CODE_SESSION_ID`) and exit with code 2 without one. The infinite mode is bound the same way by `infinite start --session`. The Stop and SubagentStart hooks no longer bind the first session that stops or starts an agent.
+- `swarm start` never hands an active execution to another session after 15 minutes: it exits with code 2 and names `swarm takeover`, which checks that the coordinator stopped.
+- `swarm merge` closes the execution it merged; `swarm start` over an ended execution nobody closed says which one it replaces (`replaced`).
+- Stopping, stalling or running out of budget frees the coordinator's tasks on the roadmap and publishes the run as inactive.
+- lens and the band draw a stalled execution for 24 hours at most, with its clock stopped at its last step, and never a closed one.
+- Requires waypoint ^0.20.0.
+
+#### Fixed
+- A manual member joins again (`/forge:run --join`): the reference no longer passes an empty `--hook-session`.
+
+**Upgrading during a run.** An execution started with 0.15.x has no bound session: it keeps stepping on its own wake-ups and agent returns, and is bound again the next time its coordinator resumes it (`swarm start`). An infinite run started with 0.15.x stops chaining cycles; run `/forge:infinite` again and the new start replaces it.
 
 ### 0.15.2 — 2026-10-14
 
@@ -420,6 +461,12 @@ elsewhere and are reconstructed from their READMEs.
 - Requires waypoint ^0.7.0.
 
 ## lens
+
+### 0.11.5 — 2026-10-15
+
+#### Fixed
+- In a narrow pane, an execution row keeps its dot, task id and stage whole: only its title is cut. The card and bar headers follow the same rule.
+- A stalled execution is shown for 24 hours at most, with its clock stopped at its last step, and a closed one is not shown.
 
 ### 0.11.4 — 2026-10-14
 

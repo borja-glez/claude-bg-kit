@@ -21,7 +21,7 @@ describe('plugin layout', () => {
   });
   it('lens manifest, module and contract exist', () => {
     const p = JSON.parse(read('plugins/lens/.claude-plugin/plugin.json'));
-    expect(p).toMatchObject({ name: 'lens', version: '0.11.4', types: './types/index.d.ts' });
+    expect(p).toMatchObject({ name: 'lens', version: '0.11.5', types: './types/index.d.ts' });
     expect(JSON.parse(read('plugins/lens/hooks/hooks.json'))).toEqual({ modules: ['./register.js'] });
     for (const f of ['hooks/register.js', 'types/index.d.ts', 'README.md']) {
       expect(existsSync(new URL(`../plugins/lens/${f}`, import.meta.url))).toBe(true);
@@ -194,20 +194,20 @@ describe('plugin layout', () => {
     expect(md).toMatch(/bundles several independent changes/);
     expect(md).toMatch(/adds new behaviour with its tests/);
   });
-  it('versions: forge 0.15.2, waypoint 0.19.1', () => {
+  it('versions: forge 0.16.0, waypoint 0.20.0', () => {
     const forge = JSON.parse(read('plugins/forge/.claude-plugin/plugin.json'));
-    expect(forge.version).toBe('0.15.2');
-    expect(forge.dependencies).toEqual([{ name: 'waypoint', version: '^0.19.1' }]);
-    expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.19.1');
+    expect(forge.version).toBe('0.16.0');
+    expect(forge.dependencies).toEqual([{ name: 'waypoint', version: '^0.20.0' }]);
+    expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.20.0');
   });
-  it('CHANGELOG has the entries of forge 0.15.2, waypoint 0.19.1 and lens 0.11.4', () => {
+  it('CHANGELOG has the entries of forge 0.16.0, waypoint 0.20.0 and lens 0.11.5', () => {
     const md = read('CHANGELOG.md');
     // Each plugin's section, newest version first.
     const section = (p: string) => md.split(/^## /m).find(s => s.startsWith(`${p}\n`) || s.startsWith(`${p}\r\n`)) ?? '';
     const versions = (p: string) => [...section(p).matchAll(/^### (\d+\.\d+\.\d+) — /gm)].map(m => m[1]);
-    expect(versions('waypoint').slice(0, 2)).toEqual(['0.19.1', '0.19.0']);
-    expect(versions('forge').slice(0, 2)).toEqual(['0.15.2', '0.15.1']);
-    expect(versions('lens').slice(0, 2)).toEqual(['0.11.4', '0.11.3']);
+    expect(versions('waypoint').slice(0, 2)).toEqual(['0.20.0', '0.19.1']);
+    expect(versions('forge').slice(0, 2)).toEqual(['0.16.0', '0.15.2']);
+    expect(versions('lens').slice(0, 2)).toEqual(['0.11.5', '0.11.4']);
   });
   it('READMEs in Spanish and English tell the cost changes', () => {
     for (const lang of ['', '.es']) {
@@ -227,7 +227,7 @@ describe('plugin layout', () => {
       'allowed --expect <the surface\'s hash from verify-plan>', 'When `diffTruncated` is true']) expect(runRef('verify')).toContain(s);
     expect(runRef('large')).toContain('never launch a round they did not ask for');
     expect(runRef('autonomy')).toContain('critique-dismiss');
-    for (const s of ['**Print `announce` as it is, as a message of its own, before step 2**', 'rint its `say` lines as they are',
+    for (const s of ['**Print `announce` as it is, as a message of its own, before step 2**', 'Print its `say` lines as they are',
       '`run-deps`', '`main-deps`', '--retry-deps']) expect(runRef('execution')).toContain(s);
     expect(read('plugins/forge/skills/run/references/task-steps.md')).toContain('FORGE triage --plan <plan> --task T --cwd <worktree>');
     const design = read('plugins/waypoint/skills/design/SKILL.md');
@@ -443,9 +443,9 @@ describe('plugin layout', () => {
     for (const w of ['design-snapshot', 'design-changed', 'critique-check', 'critique-select', 'design-page', 'rewrite', 'interview', 'approve', '--since', 'applied']) expect(md).toContain(w);
     expect(read('plugins/waypoint/skills/plan/SKILL.md')).toContain('plan.yaml does not exist yet');
   });
-  it('forge manifest depends on waypoint ^0.19.1 and ships its CLI', () => {
+  it('forge manifest depends on waypoint ^0.20.0 and ships its CLI', () => {
     const p = JSON.parse(read('plugins/forge/.claude-plugin/plugin.json'));
-    expect(p).toMatchObject({ name: 'forge', version: '0.15.2', dependencies: [{ name: 'waypoint', version: '^0.19.1' }] });
+    expect(p).toMatchObject({ name: 'forge', version: '0.16.0', dependencies: [{ name: 'waypoint', version: '^0.20.0' }] });
     expect(existsSync(new URL('../plugins/forge/dist/forge.cjs', import.meta.url))).toBe(true);
   });
   it('forge scout agent: frontmatter and rules', () => {
@@ -870,7 +870,7 @@ describe('plugin layout', () => {
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
       const md = read(f);
       for (const s of ['`swarm relaunch <task> --plan p`', '`swarm nudge <task> [--plan p]`', '`swarm join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]`',
-        '--stage S [--status running|accepted|blocked] [--agent A | --no-agent] [--round N] [--lease ISO]`', '`swarm takeover --session SID [--db dir]`']) {
+        '--stage S [--status running|accepted|blocked] [--agent A | --no-agent] [--round N] [--lease ISO]`', '`swarm takeover --session SID --hook-session ID [--db dir]`']) {
         expect(md).toContain(f.endsWith('es.md') ? s.replace(/<task>/g, '<tarea>') : s);
       }
     }
@@ -958,5 +958,17 @@ describe('plugin layout', () => {
     const files = readdirSync(skills).flatMap(p => (existsSync(path.join(skills, p, 'skills')) ? walk(path.join(skills, p, 'skills')) : []));
     expect(files.filter(f => readFileSync(f, 'utf8').includes('forge drives this session')).map(f => path.relative(skills, f))).toEqual([]);
     expect(read('plugins/waypoint/skills/launch/SKILL.md')).toContain('(`/waypoint:work` §0.6)');
+  });
+  it('READMEs describe swarm close, the Claude session id, the integrated commit and the design loop of wave 0', () => {
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
+      const md = read(f);
+      for (const s of ['`swarm close`', '`swarm start --project P --session SID --hook-session ID', '`swarm takeover --session SID --hook-session ID [--db dir]`',
+        '`infinite start --cycles N | --hours H --session ID', 'CLAUDE_CODE_SESSION_ID', '`commit`', 'kind: e2e']) expect(md).toContain(s);
+      expect(md).not.toContain('Stop hook binds');
+    }
+    for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) {
+      const md = read(f);
+      for (const s of ['--applied', '--rewrite', 'apply r1:4,5 r2:all', '?debug=1', '/waypoint:work` §0.6']) expect(md).toContain(s);
+    }
   });
 });

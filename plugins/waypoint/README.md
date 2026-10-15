@@ -6,7 +6,7 @@
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.19.1](https://img.shields.io/badge/version-0.19.1-cba6f7?style=flat-square)
+![version 0.20.0](https://img.shields.io/badge/version-0.20.0-cba6f7?style=flat-square)
 ![requires claude.ai login](https://img.shields.io/badge/requires-claude.ai%20login-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -75,6 +75,8 @@ A typical run:
 
 A proposal you do not apply stays pending across rounds: the band counts the pending ones of every round, the next round's critic does not repeat them, and `approve` lists the critical and major ones still open and asks you to apply or dismiss them.
 
+Each snapshot records what it applied: `/waypoint:design apply r1:4,5 r2:all` applies proposals of several rounds and calls `design-snapshot --round <R> --applied r1:4,5 r2:…`; a rewrite calls it with `--rewrite`. `design-gate` and the band read those fields, and fall back to the note («round 1: applied 1,3», «ronda 1: aplicadas 1,3») only in older changelogs.
+
 With forge's auto mode, `/waypoint:design approve --auto` approves without asking only when `waypoint design-gate` says no critical proposal of any round is left unapplied.
 
 With [forge](../forge/README.md) installed, `/forge:run` drives these steps for you and adds triage, validation and independent review to each task.
@@ -105,6 +107,8 @@ The roadmap is an artifact on claude.ai. It is private until you share it, and i
 
 **Loose tasks.** When a forge ephemeral execution (several independent requests run in parallel) is active, the Tracking view has a **Loose tasks** section with the title, status, stage and agent of each request (and, once it is integrated or blocked, how long it took, `took 6 min`, when the coordinator publishes it), and the run pill reads `▶ loose tasks · subagents n/N`. They do not count in the plan's progress and never enter `plan.yaml`.
 
+**Debugging the page.** Add `?debug=1` to the roadmap's address (or `#debug=1` to its hash): the page lists, per document, what it dropped or corrected while reading the roadmap's data.
+
 **Permissions.** Contributors can write only notes and proposals. Everything else (plan, state, sessions, events, messages) needs Editor. Claude writes through ArtifactData as the owner, which the rules never limit. Without a signed-in viewer, or when the database refuses a note, the composer is read-only.
 
 > After updating the plugin, run `/waypoint:plan` and republish so the page gets the new views. A roadmap first published by 0.7.x or earlier must be republished once with the new capabilities; the plan skill passes them.
@@ -127,7 +131,7 @@ The band is drawn in the terminal and in the Code tab of the desktop app. It is 
 
 ## Parallel sessions
 
-`/waypoint:launch <track>` creates `.claude/worktrees/<track>` on the branch `track/<track>` and starts a background Claude session there. Each session claims tasks from its track and writes its progress to the roadmap. When two sessions touch the same files, they get an overlap warning. Sessions can hand off or delegate work through messages, which are stored in the roadmap and sent with `SendMessage`. A session that disappears has its task recovered by the others.
+`/waypoint:launch <track>` creates `.claude/worktrees/<track>` on the branch `track/<track>` and starts a background Claude session there. Each session claims tasks from its track and writes its progress to the roadmap. When two sessions touch the same files, they get an overlap warning. Sessions can hand off or delegate work through messages, which are stored in the roadmap and sent with `SendMessage`. A session that disappears has its task recovered by the others. The prompt is `/waypoint:work <track>` (plus the merge authorization with `--merge`); a track of a plan that a forge execution is running joins that execution as a manual member by itself (`/waypoint:work` §0.6).
 
 forge's sessions mode launches its members with `launch <plan> <T> --task --run R --coordinator SID --base B [--effort e] [--model m] [--launcher bg|herdr]`: one session per task, in `.claude/worktrees/task-<T>` on `task/<T>`, started with `/forge:member`. `--effort` (`low`, `medium`, `high`, `xhigh`, `max`) and `--model` (`opus`, `sonnet`, `haiku`) go into the `claude --bg` command, so the member does not inherit your session's effort; forge passes the ones in its `swarm.member` setting (medium by default) and any other value exits with code 2. The band of such a member says "of the execution of <coordinator>". Any session can also join a running execution as a manual member from `/waypoint:work`, and take a pending task. Session ids used with a forge execution must match `[A-Za-z0-9_.-]` (no `~ : @ +`): forge refuses any other.
 
@@ -145,7 +149,7 @@ The skills run the CLI as `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" <comma
 
 | Group | Commands |
 | --- | --- |
-| Design | `design-import <spec> --project P --out D`, `design-validate`, `design-snapshot`, `design-changed`, `design-gate <design.md>` (with the `pending` proposals of every round), `critique-check`, `critique-select`, `critique-dismiss <design.md> --round R <all\|1,3>`, `design-page` |
+| Design | `design-import <spec> --project P --out D`, `design-validate`, `design-snapshot <design.md> --note n [--round R] [--applied r<R>:<n,…>…] [--rewrite]`, `design-changed`, `design-gate <design.md>` (with the `pending` proposals of every round), `critique-check`, `critique-select`, `critique-dismiss <design.md> --round R <all\|1,3>`, `design-page` |
 | Plan and page | `validate`, `hash` (prints the plan hash, used to detect an out-of-date roadmap), `page [--publish-info]` (the capabilities to publish with and the line that says the page becomes internal), `sync` (with the report line: URL and counts), `clean-cache` |
 | Work | `next [--base <branch>]`, `conflicts`, `recover`, `status`, `commit-info` |
 | Sessions | `launch <track> [--swarm <id> --base <branch>]`, `launch <plan> <T> --task --run R --coordinator SID --base B [--effort e] [--model m] [--launcher bg|herdr]`, `inbox`, `escalations`, `notes [--plan p] [--locale es\|en]` (with a line to say per person's note), `session-id` |

@@ -6,7 +6,7 @@
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.19.1](https://img.shields.io/badge/versi%C3%B3n-0.19.1-cba6f7?style=flat-square)
+![versión 0.20.0](https://img.shields.io/badge/versi%C3%B3n-0.20.0-cba6f7?style=flat-square)
 ![requiere sesión en claude.ai](https://img.shields.io/badge/requiere-sesi%C3%B3n%20en%20claude.ai-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -75,6 +75,8 @@ Un recorrido típico:
 
 Una propuesta que no aplicas sigue pendiente entre rondas: la banda cuenta las pendientes de todas las rondas, el crítico de la ronda siguiente no las repite y `approve` lista las critical y major que siguen abiertas y te pide aplicarlas o descartarlas.
 
+Cada snapshot anota lo que aplicó: `/waypoint:design apply r1:4,5 r2:all` aplica propuestas de varias rondas y llama a `design-snapshot --round <R> --applied r1:4,5 r2:…`; una reescritura lo llama con `--rewrite`. `design-gate` y la banda leen esos campos, y solo en changelogs antiguos se apoyan en la nota («round 1: applied 1,3», «ronda 1: aplicadas 1,3»).
+
 Con el modo auto de forge, `/waypoint:design approve --auto` aprueba sin preguntar solo cuando `waypoint design-gate` dice que no queda ninguna propuesta critical sin aplicar en ninguna ronda.
 
 Con [forge](../forge/README.es.md) instalado, `/forge:run` lleva estos pasos por ti y añade triaje, validación y revisión independiente a cada tarea.
@@ -105,6 +107,8 @@ El roadmap es un artifact de claude.ai. Es privado hasta que lo compartes, y las
 
 **Tareas sueltas.** Cuando hay una ejecución efímera de forge (varias peticiones independientes en paralelo), la vista de seguimiento tiene una sección **Tareas sueltas** con el título, estado, etapa y agente de cada petición (y, una vez integrada o bloqueada, cuánto tardó, `tardó 6 min`, cuando la coordinadora lo publica), y la píldora de la ejecución se lee `▶ tareas sueltas · subagentes n/N`. No cuentan en el progreso del plan ni entran en `plan.yaml`.
 
+**Depurar la página.** Añade `?debug=1` a la dirección del roadmap (o `#debug=1` a su hash): la página lista, por documento, lo que descartó o corrigió al leer los datos del roadmap.
+
 **Permisos.** Los colaboradores solo pueden escribir notas y propuestas. Todo lo demás (plan, estado, sesiones, eventos, mensajes) necesita permiso de editor. Claude escribe con ArtifactData como propietario, y las reglas nunca lo limitan. Sin una persona con sesión iniciada, o si la base de datos rechaza una nota, el editor de notas queda en solo lectura.
 
 > Después de actualizar el plugin, ejecuta `/waypoint:plan` y vuelve a publicar para que la página reciba las vistas nuevas. Un roadmap publicado por primera vez con 0.7.x o anterior debe republicarse una vez con las capacidades nuevas; la skill de plan las pasa.
@@ -127,7 +131,7 @@ La banda se dibuja en la terminal y en la pestaña Code de la app de escritorio.
 
 ## Sesiones en paralelo
 
-`/waypoint:launch <frente>` crea `.claude/worktrees/<frente>` en la rama `track/<frente>` y arranca allí una sesión de Claude en segundo plano. Cada sesión reclama tareas de su frente y escribe su progreso en el roadmap. Cuando dos sesiones tocan los mismos ficheros, reciben un aviso de solapamiento. Las sesiones pueden traspasarse o delegarse trabajo con mensajes, que se guardan en el roadmap y se envían con `SendMessage`. Si una sesión desaparece, las demás recuperan su tarea.
+`/waypoint:launch <frente>` crea `.claude/worktrees/<frente>` en la rama `track/<frente>` y arranca allí una sesión de Claude en segundo plano. Cada sesión reclama tareas de su frente y escribe su progreso en el roadmap. Cuando dos sesiones tocan los mismos ficheros, reciben un aviso de solapamiento. Las sesiones pueden traspasarse o delegarse trabajo con mensajes, que se guardan en el roadmap y se envían con `SendMessage`. Si una sesión desaparece, las demás recuperan su tarea. El prompt es `/waypoint:work <frente>` (más la autorización de fusión con `--merge`); un frente de un plan que está ejecutando forge se une solo a esa ejecución como miembro manual (`/waypoint:work` §0.6).
 
 El modo sessions de forge lanza a sus miembros con `launch <plan> <T> --task --run R --coordinator SID --base B [--effort e] [--model m] [--launcher bg|herdr]`: una sesión por tarea, en `.claude/worktrees/task-<T>` sobre `task/<T>`, que arranca con `/forge:member`. `--effort` (`low`, `medium`, `high`, `xhigh`, `max`) y `--model` (`opus`, `sonnet`, `haiku`) van al comando `claude --bg`, así que el miembro no hereda el esfuerzo de tu sesión; forge pasa los de su ajuste `swarm.member` (medium por defecto) y cualquier otro valor sale con código 2. La banda de un miembro así dice «de la ejecución de <coordinadora>». Cualquier sesión puede además unirse desde `/waypoint:work` a una ejecución en marcha como miembro manual y coger una tarea pendiente. Los ids de sesión que se usan con una ejecución de forge deben cumplir `[A-Za-z0-9_.-]` (sin `~ : @ +`): forge rechaza cualquier otro.
 
@@ -145,7 +149,7 @@ Las skills ejecutan la CLI como `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" 
 
 | Grupo | Comandos |
 | --- | --- |
-| Diseño | `design-import <spec> --project P --out D`, `design-validate`, `design-snapshot`, `design-changed`, `design-gate <design.md>` (con las propuestas `pending` de todas las rondas), `critique-check`, `critique-select`, `critique-dismiss <design.md> --round R <all\|1,3>`, `design-page` |
+| Diseño | `design-import <spec> --project P --out D`, `design-validate`, `design-snapshot <design.md> --note n [--round R] [--applied r<R>:<n,…>…] [--rewrite]`, `design-changed`, `design-gate <design.md>` (con las propuestas `pending` de todas las rondas), `critique-check`, `critique-select`, `critique-dismiss <design.md> --round R <all\|1,3>`, `design-page` |
 | Plan y página | `validate`, `hash` (imprime el hash del plan, para detectar un roadmap desactualizado), `page [--publish-info]` (las capacidades con las que publicar y la línea que avisa de que la página queda interna), `sync` (con la línea del informe: URL y cuentas), `clean-cache` |
 | Trabajo | `next [--base <rama>]`, `conflicts`, `recover`, `status`, `commit-info` |
 | Sesiones | `launch <frente> [--swarm <id> --base <rama>]`, `launch <plan> <T> --task --run R --coordinator SID --base B [--effort e] [--model m] [--launcher bg|herdr]`, `inbox`, `escalations`, `notes [--plan p] [--locale es\|en]` (con una línea que decir por cada nota de una persona), `session-id` |

@@ -7,8 +7,8 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.15.2](https://img.shields.io/badge/versi%C3%B3n-0.15.2-fab387?style=flat-square)
-![depende de waypoint ^0.19.1](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.19.1-cba6f7?style=flat-square)
+![versión 0.16.0](https://img.shields.io/badge/versi%C3%B3n-0.16.0-fab387?style=flat-square)
+![depende de waypoint ^0.20.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.20.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -48,7 +48,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depende de [waypoint](../waypoint/README.es.md) ^0.19.1, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
+forge depende de [waypoint](../waypoint/README.es.md) ^0.20.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
 
 ## Uso
 
@@ -194,7 +194,7 @@ La ejecución secuencial no es un tercer modo: es subagents con N = 1.
 
 ## Modo infinito
 
-`/forge:infinite [--cycles N] [--hours H]` necesita un diseño de waypoint aprobado, un plan y un presupuesto. Si no le das presupuesto, lo pregunta una vez, y `forge infinite start` se niega a arrancar sin `--cycles` o `--hours`. Ejecuta `forge infinite start`, escribe `meta/infinite` en el roadmap y termina el turno. El primer hook Stop une esa sesión a la ejecución, así que usa una sola sesión por checkout.
+`/forge:infinite [--cycles N] [--hours H]` necesita un diseño de waypoint aprobado, un plan y un presupuesto. Si no le das presupuesto, lo pregunta una vez, y `forge infinite start` se niega a arrancar sin `--cycles` o `--hours`. Ejecuta `forge infinite start`, escribe `meta/infinite` en el roadmap y termina el turno. `infinite start` liga la sesión que lo ejecuta, así que usa una sola sesión por checkout.
 
 **En cada ciclo** forge:
 
@@ -291,6 +291,16 @@ swarm:
 ```
 
 `swarm.setup` es un comando de hasta 500 caracteres, que se ejecuta en cada worktree que crea forge. `.forge/config.yaml` es el único fichero de `.forge/` que git sí versiona, así que un `setup` que commitees vale para todo el que ejecute el proyecto.
+
+Un validador que solo compensa cuando cambian ciertas rutas puede ser `kind: e2e` con `affects`: en las tareas Medium y Large corre solo si el diff las toca, y siempre en `swarm integrate` y en la revisión final. Este repositorio comprueba así sus propios mods:
+
+```yaml
+validators:
+  - name: mod-tests
+    cmd: npm run build && claude plugin test plugins/lens && claude plugin test plugins/waypoint
+    kind: e2e
+    affects: ["src/mod/**", "src/lens/**", "src/lib/**"]
+```
 
 > **Cambio en 0.6.0:** una lista `validators` en `.forge/config.yaml` ya no desactiva la detección; también se usan los validadores detectados, y los tuyos ganan por nombre. Pon `detect: false` para el comportamiento anterior.
 
@@ -392,24 +402,25 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 <details>
 <summary><b>Modo infinito y ejecución</b></summary>
 
-- `infinite start --cycles N | --hours H [--locale código]`, `infinite status`, `cycle --progress yes|no`, `stop` - `--locale` anota el idioma de la persona: el hook Stop y cada despertar recuerdan a la sesión que conteste en él.
-- `swarm start --project P --session SID [--mode subagents|sessions] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F]` - empieza o reanuda una ejecución (`--kind ephemeral --tasks F` empieza una efímera con el fichero JSON F de tareas sueltas y escribe su estado en `.forge/loose.json`); crea la rama de ejecución y su worktree (o pone al día una atrasada respecto a su base, `baseSync`) e imprime el resultado de `setup` y `announce`, las líneas que enseña la sesión (modo y N, rama, dónde abrir la app, la fusión final y cómo pararla). `--locale <código>` anota el idioma de la persona, que se usa en esas líneas y se repite en cada bloqueo del hook y cada despertar. También activa la fusión por unión de git para `.forge/verify/*.md` (en `.git/info/attributes`), así que las notas de `Aprendido` que añaden tareas en paralelo se fusionan sin conflictos. Ejecútalo desde el checkout principal.
+- `infinite start --cycles N | --hours H --session ID [--locale código]`, `infinite status`, `cycle --progress yes|no`, `stop` - `--session` es el id de Claude de la sesión que lleva el modo infinito (lo pasa la skill; si no, `CLAUDE_CODE_SESSION_ID`, y sin ninguno sale con código 2): solo su hook Stop encadena los ciclos. `--locale` anota el idioma de la persona: el hook Stop y cada despertar recuerdan a la sesión que conteste en él.
+- `swarm start --project P --session SID --hook-session ID [--mode subagents|sessions] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F]` - empieza o reanuda una ejecución (`--kind ephemeral --tasks F` empieza una efímera con el fichero JSON F de tareas sueltas y escribe su estado en `.forge/loose.json`). `--hook-session` es el id de Claude de la sesión que lo ejecuta (si no, `CLAUDE_CODE_SESSION_ID`; sin ninguno sale con código 2): su hook Stop hace avanzar la ejecución. Sobre una ejecución activa que coordina otra sesión sale con código 2 y nombra `swarm takeover`; sobre una terminada que nadie cerró imprime `replaced`. Crea la rama de ejecución y su worktree (o pone al día una atrasada respecto a su base, `baseSync`) e imprime el resultado de `setup` y `announce`, las líneas que enseña la sesión (modo y N, rama, dónde abrir la app, la fusión final y cómo pararla). `--locale <código>` anota el idioma de la persona, que se usa en esas líneas y se repite en cada bloqueo del hook y cada despertar. También activa la fusión por unión de git para `.forge/verify/*.md` (en `.git/info/attributes`), así que las notas de `Aprendido` que añaden tareas en paralelo se fusionan sin conflictos. Ejecútalo desde el checkout principal.
 - `swarm status` - el estado de la ejecución, por tarea.
 - `swarm propose --plan P | --tasks F` - el ancho del plan (o de las tareas sueltas) y el modo y la N recomendados.
 - `swarm worktree <tarea> [--member SID]` - crea el worktree y la rama de la tarea (y ejecuta `swarm.setup`); `--member` es para una sesión miembro, que crea el suyo.
-- `swarm join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]` - registra un miembro en `.forge/members/<SID>.json`. `SID` es su id de sesión de waypoint; `--hook-session` es el id de sesión propio de Claude (las skills pasan `${CLAUDE_SESSION_ID}`), con el que los hooks reconocen al miembro; al volver a unirse sin él se conserva el anotado.
+- `swarm join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]` - registra un miembro en `.forge/members/<SID>.json`. `SID` es su id de sesión de waypoint; `--hook-session` es el id de sesión propio de Claude (lo pasan las skills; si no, `CLAUDE_CODE_SESSION_ID`), con el que los hooks reconocen al miembro; al volver a unirse sin él se conserva el anotado.
 - `swarm report <tarea> --session SID --stage S [--status running|accepted|blocked] [--agent A | --no-agent] [--round N] [--lease ISO]` - un miembro publica su propia etapa y su señal en vivo (nunca escribe `execution.json`).
 - `swarm next --plan p --db dir --session SID` - ofrece a un miembro manual una tarea lista.
 - `swarm relaunch <tarea> --plan p` / `swarm nudge <tarea> [--plan p]` - relanza una tarea de sessions parada con una nota de relevo (como mucho 2 veces), o recuerda a una inactiva (el plan da el idioma del recordatorio).
-- `swarm takeover --session SID [--db dir]` - toma el relevo de la coordinadora cuando está parada; un miembro de la ejecución no puede. La coordinadora pasa a ser `SID`, y el hook Stop se ata a esa sesión en su siguiente parada.
+- `swarm takeover --session SID --hook-session ID [--db dir]` - toma el relevo de la coordinadora cuando está parada; un miembro de la ejecución no puede. La coordinadora pasa a ser `SID`, y `--hook-session` (si no, `CLAUDE_CODE_SESSION_ID`; sin ninguno sale con código 2) liga esta sesión en ese momento.
 - `swarm task <tarea> --stage S [--agent A | --no-agent] [--round N] [--status running|accepted|blocked] [--detail-file F] [--lease ISO]` - anota la etapa, el agente y la ronda de la tarea; `swarm task <tarea> --drop` olvida una tarea cuya reclamación se perdió.
 - `swarm tick [--plan p --db dir] [--agents F]` - decide qué lanzar (un `start` en modo sessions lleva `launch`, los argumentos completos de `waypoint launch` con `--effort` y `--model` de `swarm.member`), recordar, relanzar e integrar; en una ejecución efímera no lleva `--plan` ni `--db` (`--db` es una copia de los documentos `state` y `sessions` del roadmap; `--agents` es un fichero JSON con las sesiones en segundo plano, `[{name, state: working|idle}]`).
-- `swarm integrate <tarea> [--retry-deps]` - fusiona una tarea aceptada en la rama de ejecución, comparando los validadores con la base. Vuelve a instalar las dependencias cuando la fusión trae o cambia un manifiesto o un lockfile (`setup`), las restaura tras una fusión que deshace, e imprime `newValidators` y `say`, las líneas que enseña la sesión (validadores nuevos, validadores que ya fallaban y no cuentan). Una instalación que falla responde `run-deps` y no se reintenta hasta que cambien los manifiestos, o con `--retry-deps`.
+- `swarm integrate <tarea> [--retry-deps]` - fusiona una tarea aceptada en la rama de ejecución, comparando los validadores con la base. Vuelve a instalar las dependencias cuando la fusión trae o cambia un manifiesto o un lockfile (`setup`), las restaura tras una fusión que deshace, e imprime `newValidators` y `say`, las líneas que enseña la sesión (validadores nuevos, validadores que ya fallaban y no cuentan). Una instalación que falla responde `run-deps` y no se reintenta hasta que cambien los manifiestos, o con `--retry-deps`. Con `integrated` imprime también `commit` (`sha`, `ts`, `title`, `add`, `del`), la forma de `waypoint commit-info`, medido como lo que aporta la tarea.
 - `swarm merge [--yes] [--retry-deps]` - fusiona la rama de ejecución en tu rama; sin `--yes` necesita el permiso dado al empezar. Si tu rama no se ha movido, el árbol fusionado es el de la rama de ejecución, así que los validadores se ejecutan en el worktree de ejecución y no se instala nada en tu checkout.
 - `swarm retry <T> [--adopt]` - devuelve al trabajo una tarea en conflicto o bloqueada. `--adopt` da a la tarea en conflicto de una sesión ejecutora o manual una ronda de arreglo con los subagentes de la coordinadora; se niega si el worktree de quien la tiene está sucio.
 - `.forge/loose.json` - el estado de una ejecución efímera (sus tareas sueltas, con título, zonas y dependencias).
 - `swarm sleep <segundos> [--mark]` - espera entre ticks (hasta 900 s); `--mark` solo anota la hora de despertar.
 - `swarm stop [--reason stopped|budget]`
+- `swarm close` - cierra una ejecución terminada (desde cualquier worktree; sale con 2 si está activa o si no hay ninguna): imprime `release`, las tareas de la coordinadora que vuelven a libres en el roadmap, y `members`, las de los miembros. Nunca toca git.
 - `stop` - para la ejecución infinita y la ejecución en paralelo.
 - `hook live` - el hook de la señal en vivo (stdin: el evento del hook). No imprime nada.
 - `--cwd <dir>` - en cualquier comando, lo ejecuta como si fuera desde ese directorio (validadores, git y ficheros del proyecto), para que una coordinadora nunca tenga que hacer `cd` a un worktree.
