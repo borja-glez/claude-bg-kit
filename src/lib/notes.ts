@@ -42,7 +42,7 @@ export function normalizeNoteDecision(x: unknown): NoteDecision | null {
   const chosen = line(o.chosen, LIMITS.chosen);
   const why = line(o.why, LIMITS.why);
   if (!what || !chosen || !why) return null;
-  const out: NoteDecision = { point: o.point as DecisionPoint, what, chosen, why, auto: true };
+  const out: NoteDecision = { point: o.point as DecisionPoint, what, chosen, why, auto: o.auto === true };
   const alternatives = Array.isArray(o.alternatives)
     ? o.alternatives.map(a => line(a, LIMITS.alternative)).filter(Boolean).slice(0, LIMITS.alternatives) : [];
   if (alternatives.length) out.alternatives = alternatives;

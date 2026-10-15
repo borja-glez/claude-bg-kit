@@ -948,3 +948,37 @@ describe('scroll, tick and held repaints (G-01)', () => {
     app.stop();
   });
 });
+
+describe('?debug=1 (H-04)', () => {
+  it('lists, per document, what the normalizers dropped or coerced; a new snapshot replaces the list of its collection', async () => {
+    const f = fakeDb();
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const app = await start({ claude: { use: async (n: string) => (n === 'db' ? f.db : null) }, snapshot, root, now: () => NOW, debug: true });
+    f.push('state', { T1: { status: 'in_progress', forge: { path: 'medium', phase: 'review', validators: ['test', 7] }, exec: { by: 'main' } } });
+    await settle();
+    const text = () => root.querySelector('.dbg')?.textContent ?? '';
+    expect(text()).toContain('state/T1 · forge.validators[0] · coerced · string');
+    expect(text()).toContain('state/T1 · forge.validators[1] · dropped · number');
+    expect(text()).toContain('state/T1 · exec · dropped · no runId');
+    f.push('state', { T1: { status: 'done' } });
+    await settle();
+    expect(text()).not.toContain('forge.validators');
+    app.stop();
+  });
+  it('debug=1 in the hash turns it on and survives the hash rewrites; without it there is no list', async () => {
+    const plain = document.createElement('div');
+    const off = await start({ claude: null, snapshot, root: plain, now: () => NOW });
+    expect(plain.querySelector('.dbg')).toBeNull();
+    off.stop();
+    history.replaceState(null, '', '#debug=1');
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const app = await start({ claude: null, snapshot, root, now: () => NOW });
+    expect(root.querySelector('.dbg')).not.toBeNull();
+    click(root, '[data-view="notes"]');
+    await settle();
+    expect(location.hash).toContain('debug=1');
+    app.stop();
+  });
+});

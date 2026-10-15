@@ -7,6 +7,7 @@ import { counts, filterNotes, MAX_NOTE, NOTE_TYPES, type NoteFilter } from '../l
 import { buildVersionColumns, type VersionColumn } from '../lib/versions.js';
 import { canDecide, MAX_PROPOSAL_TEXT, PROPOSAL_CATEGORIES, PROPOSAL_RISKS, PROPOSAL_STATUSES, type ProposalCategory, type ProposalDoc, type ProposalRisk, type ProposalStatus } from '../lib/proposals.js';
 import { dictFor, type Dict } from './i18n.js';
+import type { Drop } from './normalize.js';
 
 export interface Model {
   meta: MetaDoc | null;
@@ -31,6 +32,9 @@ export interface Model {
   now: number;
   offline: boolean;
   connecting: boolean;
+  /** H-04: `?debug=1` lists what the normalizers dropped or coerced (`dropped`, by collection). */
+  debug?: boolean;
+  dropped?: Record<string, Drop[]>;
 }
 export type View = 'tracking' | 'versions' | 'sessions' | 'notes' | 'proposals';
 export const VIEWS: readonly View[] = ['tracking', 'versions', 'sessions', 'notes', 'proposals'];
@@ -135,7 +139,7 @@ export function renderApp(m: Model, ui: UiState): string {
     ${navBtn('tracking', '≡', d.nav.tracking)}${navBtn('versions', '▥', d.nav.versions)}${navBtn('sessions', '◎', d.nav.sessions)}${navBtn('notes', '✎', d.nav.notes)}${navBtn('proposals', '◇', d.nav.proposals, openProposals)}
     <div class="scale"><button data-action="scale" data-dir="-1" title="${esc(d.tl.smaller)}" aria-label="${esc(d.tl.smaller)}">A−</button><button data-action="scale" data-dir="1" title="${esc(d.tl.larger)}" aria-label="${esc(d.tl.larger)}">A+</button></div></nav>
   <main class="main">
-    ${body}
+    ${body}${renderDebug(m)}
   </main>
   ${ui.modal ? renderTaskModal(m, d, ui.modal, loc) : ''}
   ${ui.modal && ui.shot !== null && m.states[ui.modal]?.evidence ? renderLightbox(d, m.states[ui.modal]!.evidence!, ui.shot) : ''}
@@ -653,13 +657,23 @@ function renderLightbox(d: Dict, e: NonNullable<TaskState['evidence']>, i: numbe
     ${s.expected ? `<div>${esc(d.verify.expected)}: ${esc(s.expected)}</div>` : ''}${s.observed ? `<div>${esc(d.verify.observed)}: ${esc(s.observed)}</div>` : ''}</div></div>`;
 }
 
+/** H-04: with ?debug=1, what the normalizers dropped or coerced, one row per field, at most 200. */
+function renderDebug(m: Model): string {
+  if (!m.debug) return '';
+  const all = Object.values(m.dropped ?? {}).flat();
+  const rows = all.slice(0, 200).map(x => `<li>${esc(`${x.doc} · ${x.field} · ${x.action} · ${x.detail}`)}</li>`).join('');
+  return `<details class="dbg" open><summary>debug · ${all.length}</summary><ul>${rows}</ul></details>`;
+}
+
 function renderForge(d: Dict, f: NonNullable<TaskState['forge']>): string {
   const vals = Array.isArray(f.validators) ? f.validators : [];
   const score = f.verdict && typeof f.verdict.score === 'number' && Number.isFinite(f.verdict.score) ? String(f.verdict.score) : '—';
   const round = f.round != null ? `${num(f.round)}${f.cap != null ? `/${num(f.cap)}` : ''}` : '';
   return `<div class="forge mono"><div><b>${esc(f.path)}</b> · ${esc(f.phase)}</div>
     ${f.agent ? `<div>${esc(d.forge.agent)}: ${esc(f.agent)}</div>` : ''}
-    ${vals.length ? `<div>${esc(d.forge.validators)}: ${vals.map(v => `<span class="${v.ok ? 'ok' : 'del'}">${esc(v.name)} ${v.ok ? '✓' : '✗'}</span>`).join(' ')}</div>` : ''}
+    ${vals.length ? `<div>${esc(d.forge.validators)}: ${vals.map(v => (v.ok === null
+      ? `<span class="muted" title="${esc(d.forge.noResult)}">${esc(v.name)} ·</span>`
+      : `<span class="${v.ok ? 'ok' : 'del'}">${esc(v.name)} ${v.ok ? '✓' : '✗'}</span>`)).join(' ')}</div>` : ''}
     ${f.verdict ? `<div>${esc(d.forge.verdict)}: ${esc(f.verdict.action)} · ${esc(score)}</div>` : ''}
     ${round ? `<div>${esc(d.forge.round)}: ${esc(round)}</div>` : ''}</div>`;
 }
@@ -769,7 +783,7 @@ function renderNotesView(m: Model, d: Dict, ui: UiState, loc: string): string {
         <button class="btn pri" data-action="answer-send" data-id="${esc(n.id)}">${esc(d.send)}</button></div>`
       : `<button class="btn" data-action="answer-open" data-id="${esc(n.id)}">${esc(d.reply)}</button>`;
     return `<div class="note nb-${t}">
-      <div class="nh"><span><span class="nt-${t}">${esc(label)}</span>${dec ? ` <span class="nauto">${esc(d.autoTag)}</span>` : ''}</span><span class="k">${esc(authorLabel(m, d, n.author))}${when ? ` · ${esc(when)}` : ''}</span></div>
+      <div class="nh"><span><span class="nt-${t}">${esc(label)}</span>${dec ? ` <span class="nauto">${esc(dec.auto ? d.autoTag : d.yoursTag)}</span>` : ''}</span><span class="k">${esc(authorLabel(m, d, n.author))}${when ? ` · ${esc(when)}` : ''}</span></div>
       <p>${esc(n.text)}</p>
       ${decHtml}
       ${n.taskId ? `<button class="chip" data-action="open-task" data-id="${esc(n.taskId)}">${esc(n.taskId)}</button>` : ''}

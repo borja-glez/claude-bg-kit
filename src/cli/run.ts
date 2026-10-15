@@ -52,7 +52,7 @@ export function run(argv: string[], io: Io): Result {
     const db = flag('db');
     if (!db) return { view: p, project: p.project, version: p.version };
     const metaFile = path.join(abs(db), 'meta', 'project.json');
-    const phases = Object.values(readDocs<unknown>(path.join(abs(db), 'plan'))).map(normalizePhase).filter((x): x is PhaseDoc => !!x);
+    const phases = Object.values(readDocs<unknown>(path.join(abs(db), 'plan'))).map(d => normalizePhase(d)).filter((x): x is PhaseDoc => !!x);
     const meta = existsSync(metaFile) ? normalizeMeta(JSON.parse(readFileSync(metaFile, 'utf8'))) : null;
     if (!meta || !phases.length) throw new CacheError('db plan cache missing — list meta and plan first');
     return { view: planViewFromDocs(meta, phases), project: p.project, version: meta.version || p.version };

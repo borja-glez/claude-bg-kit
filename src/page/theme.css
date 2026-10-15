@@ -357,3 +357,5 @@ section.loose .lt .mono{margin-left:auto}
 .lightbox img{max-width:100%;max-height:80vh;border-radius:6px}
 .lightbox .cap{color:#fff;font-size:13px;max-width:720px}
 .evidence .warn{color:var(--yellow)}
+.dbg{margin-top:18px;font:11px 'JetBrains Mono',monospace;color:var(--sub0)}
+.dbg ul{margin:6px 0 0;padding-left:16px;overflow-wrap:anywhere}

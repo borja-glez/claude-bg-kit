@@ -152,7 +152,7 @@ describe('normalizeState forge', () => {
     expect(normalizeState({ status: 'in_progress', forge: 'bad' }).forge).toBeUndefined();
     expect(normalizeState({ status: 'in_progress', forge: { path: 1, phase: 'x' } }).forge).toBeUndefined();
     const full = normalizeState({ forge: { path: 'large', phase: 'review', agent: 'a', validators: [{ name: 'test', ok: true }, { name: 1, ok: true }, 'x'], verdict: { action: 'fix', score: 0.5 }, round: 2, cap: 4 } });
-    expect(full.forge).toEqual({ path: 'large', phase: 'review', agent: 'a', validators: [{ name: 'test', ok: true }], verdict: { action: 'fix', score: 0.5 }, round: 2, cap: 4 });
+    expect(full.forge).toEqual({ path: 'large', phase: 'review', agent: 'a', validators: [{ name: 'test', ok: true }, { name: 'x', ok: null }], verdict: { action: 'fix', score: 0.5 }, round: 2, cap: 4 });
     expect(normalizeState({ forge: { path: 'l', phase: 'p', verdict: { action: 'x', score: 'no' } } }).forge?.verdict).toEqual({ action: 'x', score: null });
   });
   it('keeps a valid evidence block and drops unsafe urls and bad entries', () => {
@@ -190,5 +190,30 @@ describe('normalizeInfinite', () => {
       .toEqual({ active: false, cycle: 0, budget: {}, startedAt: '', lastCycleAt: null });
     expect(normalizeInfinite({ active: true, cycle: 2.5, budget: { cycles: 1.5, hours: Infinity } })).toEqual({ active: true, cycle: 0, budget: {}, startedAt: '', lastCycleAt: null });
     expect(normalizeInfinite({ active: true, cycle: 4, budget: 'x' })!.budget).toEqual({});
+  });
+});
+
+describe('report (H-04, G-03)', () => {
+  it('a validator written as a string has no result yet; junk is dropped; the report says each', () => {
+    const got: string[] = [];
+    const s = normalizeState({ forge: { path: 'medium', phase: 'review', validators: ['test', { name: 'lint', ok: true }, 7, { name: 'e2e', ok: null }] } }, (f, a, d) => got.push(`${f} · ${a} · ${d}`));
+    expect(s.forge!.validators).toEqual([{ name: 'test', ok: null }, { name: 'lint', ok: true }, { name: 'e2e', ok: null }]);
+    expect(got).toEqual(['forge.validators[0] · coerced · string', 'forge.validators[2] · dropped · number']);
+  });
+  it('a numeric check is kept as text', () => {
+    const got: string[] = [];
+    const s = normalizeState({ evidence: { result: 'pass', passed: 1, total: 1, shots: [{ surface: 'web', check: 1, ok: true }] } }, (f, a) => got.push(`${f} · ${a}`));
+    expect(s.evidence!.shots[0].check).toBe('1');
+    expect(got).toEqual(['evidence.shots[0].check · coerced']);
+  });
+  it('reports a dropped commit, exec, phase task, run slot and last commit; without a report it only drops', () => {
+    const got: string[] = [];
+    const rep = (f: string, a: string) => { got.push(`${f} · ${a}`); };
+    normalizeState({ exec: { by: 'main' }, commits: [{ sha: 'a', title: 't' }, 5] }, rep);
+    normalizePhase({ id: 'F1', tasks: [{ id: 'T1', title: 't' }, { id: 7 }] }, rep);
+    normalizeRun({ runId: 'r1', mode: 'subagents', branch: 'b', coordinator: 'c', slots: [{ task: 5 }] }, rep);
+    normalizeMeta({ name: 'x', metrics: { lastCommit: { sha: 5 } } }, rep);
+    expect(got).toEqual(['commits[1] · dropped', 'exec · dropped', 'tasks[1] · dropped', 'slots[0] · dropped', 'metrics.lastCommit · dropped']);
+    expect(normalizeState({ exec: { by: 'main' } })).not.toHaveProperty('exec');
   });
 });

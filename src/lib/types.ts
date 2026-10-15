@@ -65,7 +65,7 @@ export interface TaskState {
   commits?: Commit[];
   summary?: string;
   zonesTouched?: string[];
-  forge?: { path: string; phase: string; agent?: string; validators?: { name: string; ok: boolean }[]; verdict?: { action: string; score: number | null }; round?: number; cap?: number };
+  forge?: { path: string; phase: string; agent?: string; validators?: { name: string; ok: boolean | null }[]; verdict?: { action: string; score: number | null }; round?: number; cap?: number };
   exec?: TaskExec;
   evidence?: {
     surfaces: string[]; result: 'pass' | 'fail' | 'blocked'; passed: number; total: number; local?: string; pending?: boolean; reason?: string;
@@ -137,9 +137,9 @@ export interface InfiniteDoc {
 export interface PhaseDoc { id: string; name: string; plan_status: PlanStatus; order: number; tasks: PlanTask[] }
 
 export type NoteType = 'decision' | 'idea' | 'debt' | 'question';
-/** The structured part of a note forge wrote for a decision it took without asking (always `auto: true`). */
+/** The structured part of a decision note: `auto: true` when forge took it without asking, false when the person did. */
 export interface NoteDecision {
-  point: DecisionPoint; what: string; chosen: string; alternatives?: string[]; why: string; revert?: string; auto: true;
+  point: DecisionPoint; what: string; chosen: string; alternatives?: string[]; why: string; revert?: string; auto: boolean;
 }
 export interface NoteDoc {
   ts: string;

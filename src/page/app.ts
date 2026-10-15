@@ -4,7 +4,7 @@ import { clampSpan, panFor, planRange, zoomAround, type Zoom } from '../lib/time
 import { MAX_NOTE, NOTE_TYPES } from '../lib/notes.js';
 import { applyDecision, canDecide, MAX_PROPOSAL_TEXT, normalizeProposal, type Decision, type ProposalDoc } from '../lib/proposals.js';
 import { dictFor } from './i18n.js';
-import { normalizeEvent, normalizeInfinite, normalizeMessage, normalizeMeta, normalizeNote, normalizePhase, normalizeRun, normalizeSession, normalizeState } from './normalize.js';
+import { normalizeEvent, normalizeInfinite, normalizeMessage, normalizeMeta, normalizeNote, normalizePhase, normalizeRun, normalizeSession, normalizeState, type Drop, type Report } from './normalize.js';
 import { decodeView, encodeView } from './urlstate.js';
 import { categoryKeys, esc, NOTE_FILTERS, PROPOSAL_FILTERS, relText, renderApp, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, vfilterStatuses, VFILTER_KEYS, VIEWS, type Model, type RelKind, type ProposalFilterKind, type UiState, type VFilterKey, type View } from './render.js';
 
@@ -13,6 +13,8 @@ export interface Env {
   claude?: { use(name: string): Promise<unknown> } | null;
   snapshot: Snapshot | null;
   root: HTMLElement;
+  /** H-04: list what the normalizers dropped (?debug=1). */
+  debug?: boolean;
   now?: () => number;
   refreshMs?: number;
   /** Timers for the composition ceiling (defaults to the globals; tests pass fakes). */
@@ -48,6 +50,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   };
   // A link carries the view (see urlstate.ts): apply it before the first render.
   const GROUPS = ['phase', 'track', 'session', 'category'] as const;
+  let debugHash = false;
   try {
     const v = decodeView(typeof location !== 'undefined' ? location.hash : '');
     if (v.view && (VIEWS as readonly string[]).includes(v.view)) ui.view = v.view as View;
@@ -58,11 +61,12 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     if (v.status) ui.statuses = v.status.filter(x => (TL_STATUSES as readonly string[]).includes(x));
     if (v.layers) ui.layers = v.layers.filter(x => (TL_LAYERS as readonly string[]).includes(x));
     if (v.q) ui.search = v.q;
+    if (v.debug) debugHash = true;
   } catch { /* no location */ }
   let lastHash = '';
   const writeHash = () => {
     try {
-      const h = encodeView({ view: ui.view, group: ui.timelineGroup, zoom: ui.zoom, span: ui.span, pan: ui.pan, open: [...ui.expanded], status: ui.statuses, q: ui.search.trim(), layers: ui.layers });
+      const h = encodeView({ view: ui.view, group: ui.timelineGroup, zoom: ui.zoom, span: ui.span, pan: ui.pan, open: [...ui.expanded], status: ui.statuses, q: ui.search.trim(), layers: ui.layers, debug: model.debug });
       if (h === lastHash) return;
       lastHash = h;
       history.replaceState(null, '', h || `${location.pathname}${location.search}`);
@@ -94,6 +98,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     now: now(),
     offline: false,
     connecting: true,
+    debug: env.debug === true || debugHash,
+    dropped: {},
   };
 
   // While an IME composition is active, replacing the textarea would cancel it: hold every render
@@ -712,13 +718,20 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   model.offline = false;
   const onErr = () => { model.offline = true; schedule(); };
   const rebuild = () => { if (model.meta && phaseDocs.length) model.plan = planViewFromDocs(model.meta, phaseDocs); };
+  // H-04: with ?debug=1, each snapshot of a collection replaces its list of what the normalizers dropped or coerced.
+  const reporter = (key: string): ((doc: string) => Report | undefined) => {
+    if (!model.debug) return () => undefined;
+    const list: Drop[] = [];
+    model.dropped = { ...model.dropped, [key]: list };
+    return doc => (field, action, detail) => { list.push({ doc, field, action, detail }); };
+  };
   const rows = (s: QSnap) => s.docs.map(x => ({ id: x.id, body: x.data() }));
 
-  unsubs.push(db.doc('meta/project').onSnapshot(((s: Snap) => { if (s.exists) { const mm = normalizeMeta(s.data()); if (mm) { model.meta = mm; rebuild(); } } scheduleData(); }) as never, onErr));
-  unsubs.push(db.doc('meta/run').onSnapshot(((s: Snap) => { model.run = s.exists ? normalizeRun(s.data()) : null; scheduleData(); }) as never, onErr));
+  unsubs.push(db.doc('meta/project').onSnapshot(((s: Snap) => { if (s.exists) { const mm = normalizeMeta(s.data(), reporter('meta/project')('meta/project')); if (mm) { model.meta = mm; rebuild(); } } scheduleData(); }) as never, onErr));
+  unsubs.push(db.doc('meta/run').onSnapshot(((s: Snap) => { model.run = s.exists ? normalizeRun(s.data(), reporter('meta/run')('meta/run')) : null; scheduleData(); }) as never, onErr));
   unsubs.push(db.doc('meta/infinite').onSnapshot(((s: Snap) => { model.infinite = s.exists ? normalizeInfinite(s.data()) : null; scheduleData(); }) as never, onErr));
-  unsubs.push(db.collection('plan').onSnapshot(((s: QSnap) => { const p = rows(s).map(r => normalizePhase(r.body)).filter((x): x is PhaseDoc => x !== null); if (p.length) { phaseDocs = p; rebuild(); } scheduleData(); }) as never, onErr));
-  unsubs.push(db.collection('state').onSnapshot(((s: QSnap) => { model.states = Object.fromEntries(rows(s).map(r => [r.id, normalizeState(r.body)])) as States; scheduleData(); }) as never, onErr));
+  unsubs.push(db.collection('plan').onSnapshot(((s: QSnap) => { const rep = reporter('plan'); const p = rows(s).map(r => normalizePhase(r.body, rep(`plan/${r.id}`))).filter((x): x is PhaseDoc => x !== null); if (p.length) { phaseDocs = p; rebuild(); } scheduleData(); }) as never, onErr));
+  unsubs.push(db.collection('state').onSnapshot(((s: QSnap) => { const rep = reporter('state'); model.states = Object.fromEntries(rows(s).map(r => [r.id, normalizeState(r.body, rep(`state/${r.id}`))])) as States; scheduleData(); }) as never, onErr));
   unsubs.push(db.collection('sessions').onSnapshot(((s: QSnap) => { model.sessions = Object.fromEntries(rows(s).map(r => [r.id, normalizeSession(r.body)])) as Record<string, SessionDoc>; scheduleData(); }) as never, onErr));
   unsubs.push(db.collection('events').orderBy('ts', 'desc').limit(200).onSnapshot(((s: QSnap) => { model.events = rows(s).map(r => ({ ...normalizeEvent(r.body), id: r.id })); scheduleData(); }) as never, onErr));
   unsubs.push(db.collection('messages').orderBy('ts', 'desc').limit(200).onSnapshot(((s: QSnap) => {

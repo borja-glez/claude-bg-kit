@@ -32,7 +32,14 @@ describe('normalizeNote · decision', () => {
   const DEC = { point: 'design-approve', what: 'diseño aprobado (v4)', chosen: 'approve', alternatives: ['another round'], why: 'sin critical', revert: '/forge:decisions revert 7', auto: true };
   it('keeps a valid automatic decision, cleaned', () => {
     const x = normalizeNote({ ts: 't', type: 'decision', author: 'session:S', text: 'd', decision: { ...DEC, what: 'a\u0007b', auto: 'no' } });
-    expect(x?.decision).toEqual({ ...DEC, what: 'a b', auto: true });
+    expect(x?.decision).toEqual({ ...DEC, what: 'a b', auto: false });
+  });
+  it('keeps auto: true only when it is exactly true; any other decision is the person\'s (H-05)', () => {
+    const autoOf = (auto: unknown) => normalizeNoteDecision({ ...DEC, auto })?.auto;
+    expect(autoOf(true)).toBe(true);
+    expect(autoOf(false)).toBe(false);
+    expect(autoOf(undefined)).toBe(false);
+    expect(autoOf('yes')).toBe(false);
   });
   it('drops an unusable decision and keeps the note', () => {
     for (const bad of [null, 'x', [], { ...DEC, point: 'nope' }, { ...DEC, why: ' ' }, { ...DEC, chosen: 3 }]) {

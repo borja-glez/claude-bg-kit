@@ -4,7 +4,7 @@ import type { Zoom } from '../lib/timeline.js';
 
 export interface ViewState {
   view?: string; group?: string; zoom?: Zoom; span?: number; pan?: number;
-  open?: string[]; status?: string[]; q?: string; layers?: string[];
+  open?: string[]; status?: string[]; q?: string; layers?: string[]; debug?: boolean;
 }
 
 const ZOOMS: readonly string[] = ['6h', '1d', '3d', '1w', '1m'];
@@ -25,6 +25,7 @@ export function encodeView(v: ViewState): string {
   if (v.status?.length) p.set('f', v.status.join(','));
   if (v.q) p.set('q', v.q.slice(0, 100));
   if (v.layers?.length) p.set('l', v.layers.join(','));
+  if (v.debug) p.set('debug', '1');
   const s = p.toString();
   return s ? `#${s}` : '';
 }
@@ -45,6 +46,7 @@ export function decodeView(hash: string): ViewState {
   const q = p.get('q');
   if (q) out.q = q.slice(0, 100);
   out.layers = list(p.get('l'), 10);
+  if (p.get('debug') === '1') out.debug = true;
   for (const k of Object.keys(out) as (keyof ViewState)[]) if (out[k] === undefined) delete out[k];
   return out;
 }

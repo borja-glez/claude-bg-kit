@@ -284,6 +284,14 @@ describe('versions view', () => {
 });
 
 describe('notes view', () => {
+  it('labels a decision the person took as theirs, and only an automatic one as auto (H-05)', () => {
+    const mk = (auto: boolean) => note({ id: `d-${auto}`, type: 'decision', decision: { point: 'design-approve', what: 'w', chosen: 'c', why: 'y', auto } });
+    const es = renderApp({ ...base(), notes: [mk(false)] }, ui({ view: 'notes' }));
+    expect(es).toContain('<span class="nauto">tuya</span>');
+    expect(es).not.toContain('<span class="nauto">auto</span>');
+    expect(renderApp({ ...base(), notes: [mk(true)] }, ui({ view: 'notes' }))).toContain('<span class="nauto">auto</span>');
+    expect(renderApp({ ...base(), meta: { ...base().meta!, locale: 'en' }, notes: [mk(false)] }, ui({ view: 'notes' }))).toContain('<span class="nauto">yours</span>');
+  });
   const notes = [
     note({ id: 'n1', type: 'decision', text: 'usar redis', taskId: 'T001' }),
     note({ id: 'n2', type: 'question', text: '¿apple pay?', ts: '2026-10-11T11:40:00Z' }),
@@ -384,7 +392,7 @@ const cssMedia = (css: string, query: string): string =>
   cssBlocks(css).filter(([p]) => p.startsWith('@media') && p.replace(/\s/g, '').includes(query)).map(([, b]) => b).join('\n');
 
 describe('theme.css', () => {
-  const css =readFileSync(new URL('../src/page/theme.css', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../src/page/theme.css', import.meta.url), 'utf8');
   it('keeps selects inside narrow screens (no page scroll at 390px)', () => {
     expect(css).toMatch(/(^|[\s}])select\{[^}]*max-width:100%/);
     expect(css).toMatch(/\.f\.trk select\{[^}]*max-width:100%/);
@@ -752,5 +760,24 @@ describe('theme.css: the modal, the side bar and the detail grid (H-01, H-11, .m
     expect(cssRule(CSS, '.mgrid')).toContain('grid-template-columns:minmax(0,1fr) minmax(0,1.2fr)');
     expect(cssRule(cssMedia(CSS, '(max-width:900px)'), '.mgrid')).toContain('grid-template-columns:minmax(0,1fr)');
     expect(cssRule(CSS, '.mgrid .sec')).toContain('min-width:0;overflow-wrap:anywhere');
+  });
+});
+
+describe('validators without a result and ?debug=1 (H-04)', () => {
+  it('a validator without a result is drawn neutral', () => {
+    const m = base();
+    m.states.T002 = { ...m.states.T002!, forge: { path: 'medium', phase: 'review', validators: [{ name: 'test', ok: null }, { name: 'lint', ok: true }] } };
+    const html = renderApp(m, ui({ modal: 'T002' }));
+    expect(html).toContain('<span class="muted" title="sin resultado">test ·</span>');
+    expect(html).toContain('<span class="ok">lint ✓</span>');
+  });
+  it('with debug the page lists what was dropped or coerced, escaped; without it, nothing', () => {
+    const m = { ...base(), debug: true, dropped: { state: [{ doc: 'state/T1', field: 'forge.validators[0]', action: 'coerced' as const, detail: 'string' }] } };
+    const html = renderApp(m, ui());
+    expect(html).toContain('<details class="dbg" open><summary>debug · 1</summary>');
+    expect(html).toContain('state/T1 · forge.validators[0] · coerced · string');
+    expect(renderApp(base(), ui())).not.toContain('class="dbg"');
+    const evil = { ...m, dropped: { state: [{ doc: 'state/<b>', field: 'x', action: 'dropped' as const, detail: '<img src=x>' }] } };
+    expect(renderApp(evil, ui())).not.toContain('<img src=x>');
   });
 });
