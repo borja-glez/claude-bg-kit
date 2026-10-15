@@ -12,12 +12,18 @@ export interface ExecView {
   agents: { id: string; type: string; since: string }[];
   startedAt: string;
   finished: { task: string; startedAt: string; finishedAt: string }[];
+  /** C2: the instant the clock of an ended run stops (its last movement); null while it is active. */
+  frozenAt: string | null;
 }
 
 /** A timestamp more than this far ahead of now is clock skew or corruption: it is invalid, not a sign of life. */
 const FUTURE_TOLERANCE_MS = 2 * 60000;
 /** An agent listed in a coordinator's signal keeps it alive for this long after it started (the hook prunes it then). */
 const AGENT_ALIVE_MS = 3 * 3600000;
+/** C2: an inactive execution that was not closed is drawn at most this long after its last movement. */
+export const STALE_RUN_TTL_MS = 24 * 3600_000;
+/** C2: the last movement: the last step, else the start. */
+export const lastMovedAt = (e: ExecutionState): string => e.lastStepAt ?? e.startedAt;
 
 /** The time in ms of a usable timestamp, or null: unparseable, or more than FUTURE_TOLERANCE_MS ahead of now. */
 function usable(ts: string | null | undefined, now: number): number | null {
@@ -35,7 +41,14 @@ export function signalLiveness(ts: string | null, ended: boolean, now: number): 
 
 export function executionView(i: { exec: ExecutionState | null; tasks: Record<string, PublicTask>; live: LiveDoc[]; titles?: Record<string, string>; now: number }): ExecView | null {
   const e = i.exec;
-  if (!e || (!e.active && e.stopReason !== 'stalled')) return null;
+  // C2: a closed execution is drawn nowhere. An ended one is drawn only when it stalled (wave 2 adds the other
+  // reasons, by role), and at most STALE_RUN_TTL_MS after its last movement, with its clock stopped there.
+  if (!e || e.closedAt) return null;
+  if (!e.active) {
+    if (e.stopReason !== 'stalled') return null;
+    const moved = usable(lastMovedAt(e), i.now);
+    if (moved === null || i.now - moved > STALE_RUN_TTL_MS) return null;
+  }
   const fresh = (d: LiveDoc) => {
     const t = usable(d.ts, i.now);
     return t !== null && i.now - t < LIVE_MAX_AGE_HOURS * 3600000;
@@ -96,6 +109,6 @@ export function executionView(i: { exec: ExecutionState | null; tasks: Record<st
     coordinator: { liveness: coord, lastSeen }, integrated: ids('integrated').length, total: Math.max(e.planned ?? 0, Object.keys(e.tasks).length),
     slots, queued: ids('accepted'), conflicts: ids('conflict'), blocked: ids('blocked'),
     manual, orphans: [...slots, ...manual].filter(s => s.liveness === 'stopped').map(s => s.task), agents: signal?.agents ?? [],
-    startedAt: e.startedAt, finished,
+    startedAt: e.startedAt, finished, frozenAt: e.active ? null : lastMovedAt(e),
   };
 }

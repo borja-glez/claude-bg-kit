@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { executionView, signalLiveness } from '../src/lib/execution-view.js';
+import { executionView, signalLiveness, STALE_RUN_TTL_MS, lastMovedAt } from '../src/lib/execution-view.js';
 import type { ExecutionState, PublicTask, LiveDoc } from '../src/lib/execution-state.js';
 
 const NOW = Date.parse('2026-10-12T12:00:00.000Z');
@@ -177,5 +177,30 @@ describe('executionView', () => {
     const v = executionView({ exec: exec(), tasks: { T9: memberPub('T9', 'M1', 'manual', 5) }, live: [live(-1), memberLive('M1', 'manual', -1, true)], now: NOW })!;
     expect(v.manual[0]).toMatchObject({ task: 'T9', liveness: 'stopped' });
     expect(v.orphans).toContain('T9');
+  });
+});
+
+describe('executionView lifecycle (C2)', () => {
+  const stalled = (over: Partial<ExecutionState> = {}) => exec({ active: false, stopReason: 'stalled', stallReason: 'x', ...over });
+  const view = (e: ExecutionState) => executionView({ exec: e, tasks: {}, live: [], now: NOW });
+  it('draws a stalled run for 24 h after its last step, with its clock frozen there', () => {
+    expect(STALE_RUN_TTL_MS).toBe(24 * 3600_000);
+    expect(view(stalled({ lastStepAt: at(-23 * 60) }))).toMatchObject({ active: false, frozenAt: at(-23 * 60) });
+    expect(view(stalled({ lastStepAt: at(-25 * 60) }))).toBeNull();
+  });
+  it('counts from the start when the run never stepped', () => {
+    expect(lastMovedAt(stalled({ lastStepAt: null, startedAt: at(-60) }))).toBe(at(-60));
+    expect(view(stalled({ lastStepAt: null, startedAt: at(-23 * 60) }))).toMatchObject({ frozenAt: at(-23 * 60) });
+    expect(view(stalled({ lastStepAt: null, startedAt: at(-25 * 60) }))).toBeNull();
+  });
+  it('never draws a closed run', () => {
+    expect(view(stalled({ closedAt: at(-1), closedBy: 'close' }))).toBeNull();
+    expect(view(exec({ closedAt: at(-1), closedBy: 'merge' }))).toBeNull();
+  });
+  it('an active run has no frozen clock', () => {
+    expect(executionView({ exec: exec(), tasks: {}, live: [live(-1)], now: NOW })!.frozenAt).toBeNull();
+  });
+  it('a stalled run whose last step is a minute ahead of the reader (clock skew) is still drawn', () => {
+    expect(view(stalled({ lastStepAt: at(1) }))).toMatchObject({ frozenAt: at(1) });
   });
 });

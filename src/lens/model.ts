@@ -344,20 +344,22 @@ export function executionFromFiles(execText: string | undefined, taskTexts: Reco
   const clean = titles && Object.fromEntries(Object.entries(titles).map(([id, t]) => [id, cleanText(t)]));
   try { v = executionView({ exec: parseExecution(execText, now), tasks, live, titles: clean, now }); } catch { return null; }
   if (!v) return null;
+  // C2: an ended run's clock stops at its last movement (never past this reader's now).
+  const to = v.frozenAt ? Math.min(now, Date.parse(v.frozenAt)) : now;
   return {
     runId: v.runId, mode: v.mode, parallel: v.parallel, branch: v.branch, active: v.active, stopReason: v.stopReason,
     stallReason: v.stallReason ? clip(v.stallReason) : null,
     coordinator: { ...v.coordinator }, integrated: v.integrated, total: v.total,
-    elapsedSeconds: elapsed(v.startedAt, now, now),
+    elapsedSeconds: elapsed(v.startedAt, to, now),
     finished: v.finished.map(f => ({ task: f.task, seconds: elapsed(f.startedAt, Date.parse(f.finishedAt), now) }))
       .filter((f): f is { task: string; seconds: number } => f.seconds !== null),
     // model / effort: lens knows them only for its own session's subagents (from the usage loops), not for these.
     slots: v.slots.map(s => ({
       task: s.task, title: s.title ? clip(s.title) : null, stage: s.stage, agent: s.agent, model: null, effort: null, round: s.round,
-      seconds: secondsSince(s.since, now), taskSeconds: elapsed(s.startedAt, now, now), liveness: s.liveness, mode: s.mode,
+      seconds: secondsSince(s.since, to), taskSeconds: elapsed(s.startedAt, to, now), liveness: s.liveness, mode: s.mode,
     })),
     manual: v.manual.map(s => ({
-      task: s.task, title: s.title ? clip(s.title) : null, stage: s.stage, seconds: secondsSince(s.since, now), liveness: s.liveness, by: s.by ?? '',
+      task: s.task, title: s.title ? clip(s.title) : null, stage: s.stage, seconds: secondsSince(s.since, to), liveness: s.liveness, by: s.by ?? '',
     })),
     queued: v.queued, conflicts: v.conflicts, blocked: v.blocked, orphans: v.orphans,
   };

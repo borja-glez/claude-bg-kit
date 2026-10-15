@@ -418,6 +418,25 @@ describe('buildPanelModel · execution', () => {
     expect(m.execution).toMatchObject({ mode: 'subagents', parallel: 3, integrated: 1, total: 2, coordinator: { liveness: 'alive' } });
     expect(m.execution!.slots[0]).toMatchObject({ task: 'T4', stage: 'review', round: 2, seconds: 180, liveness: 'alive' });
   });
+  it('a stalled run keeps the same times at any later now, frozen at its last step, and never runs negative (E-05)', () => {
+    const doc = execDoc.replace('"active":true', '"active":false').replace('"stopReason":null', '"stopReason":"stalled"');
+    const at = (ms: number, text = doc) => buildPanelModel({ band: band(), activity: act(), now: ms, forgeExecution: text, forgeExecTasks: {}, forgeLive: {} }).execution!;
+    const a = at(now), b = at(now + 5 * 3600_000);
+    // lastStepAt 11:58 − startedAt 11:00.
+    expect(a.elapsedSeconds).toBe(58 * 60);
+    expect(b.elapsedSeconds).toBe(58 * 60);
+    expect(b.slots[0].taskSeconds).toBe(a.slots[0].taskSeconds);
+    expect(b.slots[0].seconds).toBe(a.slots[0].seconds);
+    // A last step a minute ahead of this reader's clock: the clock stops at now, not past it.
+    const ahead = doc.replace('"lastStepAt":"2026-10-12T11:58:00.000Z"', '"lastStepAt":"2026-10-12T12:01:00.000Z"');
+    expect(at(now, ahead).elapsedSeconds).toBe(3600);
+    // 25 hours later it is no longer drawn.
+    expect(buildPanelModel({ band: band(), activity: act(), now: now + 25 * 3600_000, forgeExecution: doc, forgeExecTasks: {}, forgeLive: {} }).execution).toBeNull();
+  });
+  it('a closed execution is not drawn', () => {
+    const closed = execDoc.replace('"active":true', '"active":false').replace('"stopReason":null', '"stopReason":"stalled","closedAt":"2026-10-12T11:59:00.000Z","closedBy":"close"');
+    expect(buildPanelModel({ band: band(), activity: act(), now, forgeExecution: closed, forgeExecTasks: {}, forgeLive: {} }).execution).toBeNull();
+  });
   it('a coordinator waiting 20 minutes on a long agent is alive and its task is not orphaned', () => {
     const stale = execDoc.replace('"lastStepAt":"2026-10-12T11:58:00.000Z"', '"lastStepAt":"2026-10-12T11:40:00.000Z"');
     const signal = (ended: boolean) => ({ s1: JSON.stringify({ sessionId: 's1', role: 'coordinator', runId: 'r1', task: null, event: 'SubagentStart', ts: '2026-10-12T11:40:00.000Z', agents: [{ id: 'a1', type: 'forge:forge-review-correctness', since: '2026-10-12T11:40:00.000Z' }], ended }) });

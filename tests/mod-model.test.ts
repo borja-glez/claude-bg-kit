@@ -76,6 +76,14 @@ describe('buildBandModel · work', () => {
     const m = buildBandModel('demo-shop', { ...empty, plan, session: j({ sessionId: 'main', track: null }), execution: EXEC() });
     expect(m).toMatchObject({ mode: 'run', executor: 'subagents', running: 1, parallel: 3, integrated: 1, total: 2, slots: [{ task: 'T002', stage: 'review', round: 2 }], worst: 'alive', stalled: false });
   });
+  it('run mode draws a stalled run for 24 h after its last step, and never a closed one (C2, E-05)', () => {
+    const files = (over: object) => ({ ...empty, plan, session: j({ sessionId: 'main', track: null }), execution: EXEC(over) });
+    const stalled = (hoursAgo: number) => ({ active: false, stopReason: 'stalled', stallReason: 'x',
+      lastStepAt: new Date(Date.now() - hoursAgo * 3600000).toISOString(), startedAt: new Date(Date.now() - (hoursAgo + 1) * 3600000).toISOString() });
+    expect(buildBandModel('demo-shop', files(stalled(23)))).toMatchObject({ mode: 'run', stalled: true });
+    expect(buildBandModel('demo-shop', files(stalled(25))).mode).not.toBe('run');
+    expect(buildBandModel('demo-shop', files({ ...stalled(1), closedAt: new Date().toISOString(), closedBy: 'close' })).mode).not.toBe('run');
+  });
   it('run mode turns silent and then stopped when the coordinator stops stepping', () => {
     const old = (min: number) => EXEC({ lastStepAt: new Date(Date.now() - min * 60000).toISOString() });
     expect(buildBandModel('demo-shop', { ...empty, plan, execution: old(8) })).toMatchObject({ mode: 'run', worst: 'silent' });
