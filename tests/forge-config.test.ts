@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { parseConfig, configValue, agentFor, ROLES, ConfigError, NAME } from '../src/forge/config.js';
+import { parseConfig, loadConfig, configValue, agentFor, ROLES, ConfigError, NAME } from '../src/forge/config.js';
+import { selectValidators } from '../src/forge/validators.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 
 describe('forge config', () => {
@@ -142,5 +144,25 @@ describe('forge config get', () => {
     expect(run(['config', 'get', 'evidence', '--cwd', wt], io).stdout).toBe('local\n');
     // From inside the worktree too: the hand-made untracked config exists only in the main checkout.
     expect(run(['config', 'get', 'evidence'], { ...io, cwd: wt }).stdout).toBe('local\n');
+  });
+});
+
+describe('this repo validates its mods (I-02)', () => {
+  const repo = fileURLToPath(new URL('..', import.meta.url));
+  const manual = () => (loadConfig(repo).validators ?? []).map(v => ({ ...v, kind: v.kind ?? 'other', source: 'manual' as const }));
+  it('declares typecheck-mod and mod-tests, with the mod paths in affects', () => {
+    const tm = manual().find(v => v.name === 'typecheck-mod');
+    const mt = manual().find(v => v.name === 'mod-tests');
+    expect(tm).toMatchObject({ cmd: 'npm run typecheck:mod', kind: 'typecheck' });
+    expect(mt).toMatchObject({ cmd: 'npm run build && claude plugin test plugins/lens && claude plugin test plugins/waypoint', kind: 'e2e' });
+    for (const v of [tm!, mt!]) for (const g of ['src/mod/**', 'src/lens/**', 'src/lib/**', 'types/claude-code/**']) expect(v.affects).toContain(g);
+    expect(JSON.parse(readFileSync(path.join(repo, 'package.json'), 'utf8')).scripts['typecheck:mod']).toBe('tsc -p tsconfig.mod.json');
+  });
+  it('mod-tests runs in a Medium or Large review only when the diff touches a mod, and always in the final review', () => {
+    const names = (changed: string[]) => selectValidators(manual(), { mode: 'heavy', changed }).map(v => v.name);
+    expect(names(['src/lens/term.tsx'])).toContain('mod-tests');
+    expect(names(['src/page/app.ts'])).not.toContain('mod-tests');
+    expect(names(['src/page/app.ts'])).toContain('typecheck-mod');
+    expect(selectValidators(manual(), { mode: 'final' }).map(v => v.name)).toContain('mod-tests');
   });
 });

@@ -6,6 +6,19 @@ generated:
   - plugins/*/types/index.d.ts
   - plugins/waypoint/assets/*.template.html
 
+# The mods (waypoint's band and lens) are checked against the engine types in types/claude-code (scripts/mod-types.mjs).
+# mod-tests is e2e so that its affects counts: in Medium and Large it runs only when the diff touches those paths, and
+# it always runs in integrate and the final review. Its harness loads the built bundles, hence the build first.
+validators:
+  - name: typecheck-mod
+    cmd: npm run typecheck:mod
+    kind: typecheck
+    affects: ["src/mod/**", "src/lens/**", "src/lib/**", "plugins/*/tests/**", "types/claude-code/**", "tsconfig.mod.json"]
+  - name: mod-tests
+    cmd: npm run build && claude plugin test plugins/lens && claude plugin test plugins/waypoint
+    kind: e2e
+    affects: ["src/mod/**", "src/lens/**", "src/lib/**", "plugins/*/tests/**", "types/claude-code/**", "tsconfig.mod.json", "build.mjs"]
+
 # Each task worktree forge creates gets the dependencies and the engine types (from the main checkout).
 swarm:
   setup: npm ci && npm run mod-types:update
