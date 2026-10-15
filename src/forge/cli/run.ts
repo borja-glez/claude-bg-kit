@@ -28,7 +28,7 @@ import { UsageError } from './errors.js';
 import { swarmCommand, restoringRegenerated } from './swarm.js';
 import { reviewCommand } from './review.js';
 import { roundDecision } from '../round.js';
-import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, type RepoReader, type Scope } from '../validators.js';
+import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, runOptions, type ExecMany, type RepoReader, type Scope } from '../validators.js';
 import { checkTools, mcpInventory, toolGaps } from '../tools.js';
 import { verifyPlan, cleanupPids, killTarget, askFor, capLines, relabelDiff, type PlanSurface } from '../verify.js';
 import { readLocal, updateLocal, mainCheckout, readLearned, recordLearned, OBJECT_ID, type SurfacePermission } from '../local.js';
@@ -43,7 +43,7 @@ import { ROUTE_OPTIONS, ROUTE_STAGES, firstStage, isRoutePath, isRouteSession, r
 import { checkSpTask, markDone, parseSpPlan, renderSpBrief, SpPlanError } from '../../lib/sp-plan.js';
 
 export interface ExecResult { code: number; output: string; ms: number; timedOut: boolean }
-export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined> }
+export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined> }
 type Result = { code: number; stdout: string; stderr: string };
 
 const USAGE = 'usage: forge <triage|brief|validate|verdict|round|review-prep|review-close|prep|shadow|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|swarm|stop|hook> ...';
@@ -120,6 +120,91 @@ export function defaultExec(cwd: string) {
       return { code: 1, output: `forge: could not run the command: ${(e as Error).message}\n`, ms: Date.now() - t0, timedOut: false };
     } finally {
       if (fd !== undefined) { try { closeSync(fd); } catch { /* ignore */ } }
+      if (dir !== undefined) { try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ } }
+    }
+  };
+}
+
+// Runs inside one node process for a whole batch (execMany): argv = [specFile] (after `--`). The spec holds the commands,
+// each with its log file, the timeout in ms, how many run at once and the file for the results. Each command runs
+// through the shell with stdio on its log and its own timer, which kills its whole process tree as WRAPPER_SOURCE does
+// (taskkill /T on Windows, the process group elsewhere) and records the timeout exit code with timedOut. When every
+// command has ended it writes [{code, ms, timedOut}] in the commands' order and exits 0.
+const MANY_WRAPPER_SOURCE = `
+const { spawn, execFileSync } = require('child_process');
+const fs = require('fs');
+const spec = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+const win = process.platform === 'win32';
+const results = new Array(spec.cmds.length);
+let next = 0, running = 0, done = 0;
+const finish = () => { fs.writeFileSync(spec.out, JSON.stringify(results)); process.exit(0); };
+const start = () => {
+  while (running < spec.concurrency && next < spec.cmds.length) {
+    const i = next++;
+    running++;
+    const t0 = Date.now();
+    const fd = fs.openSync(spec.cmds[i].log, 'a');
+    let timedOut = false, settled = false, timer = null;
+    const settle = code => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      try { fs.closeSync(fd); } catch {}
+      results[i] = { code, ms: Date.now() - t0, timedOut };
+      running--; done++;
+      if (done === spec.cmds.length) finish(); else start();
+    };
+    let child;
+    try { child = spawn(spec.cmds[i].cmd, { shell: true, stdio: ['ignore', fd, fd], detached: !win, windowsHide: true }); }
+    catch (e) { try { fs.writeSync(fd, 'spawn error: ' + e.message + require('os').EOL); } catch {} settle(127); continue; }
+    timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        if (win) execFileSync('taskkill', ['/T', '/F', '/PID', String(child.pid)], { stdio: 'ignore', windowsHide: true });
+        else process.kill(-child.pid, 'SIGKILL');
+      } catch {}
+      settle(${TIMEOUT_EXIT});
+    }, spec.timeoutMs);
+    child.on('error', e => { try { fs.writeSync(fd, 'spawn error: ' + e.message + require('os').EOL); } catch {} settle(127); });
+    child.on('exit', code => settle(code === null ? 1 : code));
+  }
+};
+if (!spec.cmds.length) finish(); else start();
+`;
+
+// A batch of commands in one spawnSync of MANY_WRAPPER_SOURCE (C-12): the CLI stays synchronous, and each command keeps
+// its own log, code and timeout. The batch's own timeout is the per-command one times the waves, plus 15 s.
+export function defaultExecMany(cwd: string): ExecMany {
+  return (cmds: string[], timeoutSec: number, concurrency: number): ExecResult[] => {
+    const t0 = Date.now();
+    let dir: string | undefined;
+    try {
+      dir = mkdtempSync(path.join(tmpdir(), 'forge-many-'));
+      const logs = cmds.map((_, i) => path.join(dir!, `${i}.log`));
+      for (const l of logs) writeFileSync(l, '');
+      const out = path.join(dir, 'out.json');
+      const spec = path.join(dir, 'spec.json');
+      const width = Math.max(1, Math.min(Math.floor(concurrency) || 1, cmds.length || 1));
+      writeFileSync(spec, JSON.stringify({ cmds: cmds.map((cmd, i) => ({ cmd, log: logs[i] })), timeoutMs: timeoutSec * 1000, concurrency: width, out }));
+      const r = spawnSync(process.execPath, ['-e', MANY_WRAPPER_SOURCE, '--', spec], {
+        cwd, windowsHide: true, timeout: timeoutSec * 1000 * Math.ceil(cmds.length / width) + 15000, stdio: ['ignore', 'ignore', 'pipe'], encoding: 'utf8', maxBuffer: 64 * 1024,
+      });
+      let rows: unknown = null;
+      try { rows = JSON.parse(readFileSync(out, 'utf8')); } catch { rows = null; }
+      const err = r.error as NodeJS.ErrnoException | undefined;
+      return cmds.map((_, i) => {
+        let output = '';
+        let fd: number | undefined;
+        try { fd = openSync(logs[i], 'r'); output = readTail(fd); } catch { output = ''; } finally { if (fd !== undefined) { try { closeSync(fd); } catch { /* ignore */ } } }
+        const row = Array.isArray(rows) ? rows[i] as { code?: unknown; ms?: unknown; timedOut?: unknown } | null : null;
+        if (row && typeof row.code === 'number') return { code: row.code, output, ms: typeof row.ms === 'number' ? row.ms : Date.now() - t0, timedOut: row.timedOut === true };
+        // The batch itself died (its own timeout, a crash): a command without a result fails and says why.
+        const why = err ? err.message : (r.stderr || 'the batch of validators ended early').trim();
+        return { code: 1, output: `${output}${output && !output.endsWith('\n') ? '\n' : ''}forge: ${why}\n`, ms: Date.now() - t0, timedOut: err?.code === 'ETIMEDOUT' };
+      });
+    } catch (e) {
+      return cmds.map(() => ({ code: 1, output: `forge: could not run the commands: ${(e as Error).message}\n`, ms: Date.now() - t0, timedOut: false }));
+    } finally {
       if (dir !== undefined) { try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ } }
     }
   };
@@ -403,7 +488,7 @@ export function run(argv: string[], io: Io): Result {
     if (!existsSync(abs)) return { code: 2, stdout: '', stderr: `forge: --cwd ${abs} does not exist\n` };
     if (!statSync(abs).isDirectory()) return { code: 2, stdout: '', stderr: `forge: --cwd ${abs} is not a directory\n` };
     argv = [...argv.slice(0, cwdAt), ...argv.slice(cwdAt + 2)];
-    io = { ...io, workdir: abs, git: defaultGit(abs), exec: defaultExec(abs) };
+    io = { ...io, workdir: abs, git: defaultGit(abs), exec: defaultExec(abs), execMany: defaultExecMany(abs) };
   }
   const repoDir = io.workdir ?? io.cwd;
   const [cmd, ...args] = argv;
@@ -625,7 +710,7 @@ export function run(argv: string[], io: Io): Result {
           scope = { mode: 'heavy', changed: diff === null ? null : diff.split('\n').map(s => s.trim()).filter(Boolean) };
         }
         const list = selectValidators(all, scope);
-        const validateRun = () => runValidators(list, io.exec ?? defaultExec(io.cwd), config.validatorTimeoutSec);
+        const validateRun = () => runValidators(list, io.exec ?? defaultExec(io.cwd), config.validatorTimeoutSec, runOptions(config, readEvents(io.cwd), io.now(), io.execMany));
         // --cwd the run worktree of this checkout (forge's own): what the validators regenerated there is put back.
         // Any other checkout: only the files the config's `generated` names (nothing when it names none).
         const restored: string[] = [];
@@ -1026,15 +1111,15 @@ export function run(argv: string[], io: Io): Result {
       }
       case 'swarm':
         return swarmCommand(args, io, {
-          git: io.git ?? defaultGit(io.cwd), exec: io.exec ?? defaultExec(io.cwd), repo: repoReader(repoDir),
-          at: dir => ({ git: defaultGit(dir), exec: defaultExec(dir), repo: repoReader(dir) }),
+          git: io.git ?? defaultGit(io.cwd), exec: io.exec ?? defaultExec(io.cwd), execMany: io.execMany, repo: repoReader(repoDir),
+          at: dir => ({ git: defaultGit(dir), exec: defaultExec(dir), execMany: defaultExecMany(dir), repo: repoReader(dir) }),
         });
       case 'review-prep':
       case 'review-close':
       case 'prep':
       case 'shadow':
         return reviewCommand(cmd, args, {
-          cwd: io.cwd, repoDir, now: io.now, git: io.git ?? defaultGit(repoDir), exec: io.exec ?? defaultExec(repoDir), repo: repoReader(repoDir),
+          cwd: io.cwd, repoDir, now: io.now, git: io.git ?? defaultGit(repoDir), exec: io.exec ?? defaultExec(repoDir), execMany: io.execMany, repo: repoReader(repoDir),
         });
       case 'hook': {
         const which = args[0];

@@ -72,7 +72,7 @@ describe('config', () => {
   it('defaults when there is no file', () => {
     expect(parseConfig(null)).toEqual({
       profile: 'balanced', detect: true, exclude: [], verify: { limits: { checks: 8, shots: 10, minutes: 10 } },
-      evidence: 'upload', validatorTimeoutSec: 600, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' } }, tdd: 'off',
+      evidence: 'upload', validatorTimeoutSec: 600, validate: { parallel: 3, retry: 'flaky' }, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' } }, tdd: 'off',
       generated: [],
     });
   });

@@ -16,6 +16,8 @@ export type Workflow = (typeof WORKFLOWS)[number];
 export const AUTONOMIES = ['ask', 'auto'] as const;
 export type Autonomy = (typeof AUTONOMIES)[number];
 export type When = 'always' | 'medium' | 'final';
+/** When a failed validator runs again (C-12): after a flaky result in the last 30 days, always, or never. */
+export type RetryPolicy = 'flaky' | 'always' | 'never';
 export interface ValidatorSpec { name: string; cmd: string; kind?: string; affects?: string[]; when?: When }
 export interface VerifyLimits { checks: number; shots: number; minutes: number }
 export interface ForgeConfig {
@@ -26,6 +28,8 @@ export interface ForgeConfig {
     member: { effort: Effort; model?: Model };
     setup?: string;
   };
+  /** How validators run (C-12): at most `parallel` at once, and which failures run again. */
+  validate: { parallel: number; retry: RetryPolicy };
   tdd: 'off' | 'superpowers';
   workflow?: Workflow; autonomy?: Autonomy;
   /** Globs of tracked build output: forge puts those files back after its validator runs in any checkout. */
@@ -53,6 +57,10 @@ const Schema = z.object({
   }).strict().default({}),
   evidence: z.enum(['upload', 'local']).default('upload'),
   validatorTimeoutSec: z.number().int().positive().max(7200).default(600),
+  validate: z.object({
+    parallel: z.number().int().min(1).max(8).default(3),
+    retry: z.enum(['flaky', 'always', 'never']).default('flaky'),
+  }).strict().default({ parallel: 3, retry: 'flaky' }),
   tdd: z.enum(['off', 'superpowers']).default('off'),
   workflow: z.enum(WORKFLOWS).optional(),
   autonomy: z.enum(AUTONOMIES).optional(),
@@ -71,7 +79,7 @@ const Schema = z.object({
 
 const DEFAULTS: ForgeConfig = {
   profile: 'balanced', detect: true, exclude: [], verify: { limits: { checks: 8, shots: 10, minutes: 10 } },
-  evidence: 'upload', validatorTimeoutSec: 600, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' } }, tdd: 'off', generated: [],
+  evidence: 'upload', validatorTimeoutSec: 600, validate: { parallel: 3, retry: 'flaky' }, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' } }, tdd: 'off', generated: [],
 };
 
 export function parseConfig(text: string | null): ForgeConfig {

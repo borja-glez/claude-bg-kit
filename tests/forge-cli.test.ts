@@ -3,9 +3,9 @@ import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync } from 
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { run as cli, defaultExec, type Io } from '../src/forge/cli/run.js';
+import { run as cli, defaultExec, defaultExecMany, type Io } from '../src/forge/cli/run.js';
 import { startRun, saveRun } from '../src/forge/run.js';
-import { readEvents } from '../src/forge/ledger.js';
+import { appendEvent, readEvents } from '../src/forge/ledger.js';
 import { readLocal } from '../src/forge/local.js';
 import { saveProposal, loadProposals } from '../src/forge/proposals.js';
 import type { ProposalDoc } from '../src/lib/proposals.js';
@@ -488,10 +488,23 @@ describe('forge CLI', () => {
     const ran: string[] = [];
     io.exec = cmd => { ran.push(cmd); return { code: cmd === 'npm test' ? 1 : 0, output: 'FAIL x', ms: 3, timedOut: false }; };
     const r = run(['validate', '--affected', 'src/a.ts', '--task', 't1'], io);
-    expect(ran).toEqual(['npm test', 'npm test']);
+    expect(ran).toEqual(['npm test']);
     expect(r.code).toBe(1);
-    expect(JSON.parse(r.stdout)).toEqual([{ validator: 'test', ok: false, flaky: false, durationMs: 6, failures: ['FAIL x'], failing: ['x'], failingKnown: true }]);
+    expect(JSON.parse(r.stdout)).toEqual([{ validator: 'test', ok: false, flaky: false, durationMs: 3, failures: ['FAIL x'], failing: ['x'], failingKnown: true }]);
     expect(readEvents(root).at(-1)).toMatchObject({ kind: 'validate', task: 't1', ok: false });
+  });
+  it('validate retries a failure only for a validator with a flaky history, unless validate.retry says otherwise (C-12)', () => {
+    writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'vitest run' } }));
+    const ran: string[] = [];
+    io.exec = cmd => { ran.push(cmd); return { code: 1, output: 'FAIL x', ms: 3, timedOut: false }; };
+    appendEvent(root, { ts: '2026-10-05T00:00:00.000Z', kind: 'validate', task: 't0', ok: true, results: [{ validator: 'test', ok: true, flaky: true }] });
+    expect(run(['validate', '--all', '--task', 't1'], io).code).toBe(1);
+    expect(ran).toEqual(['npm test', 'npm test']);
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validate:\n  retry: never\n');
+    ran.length = 0;
+    run(['validate', '--all', '--task', 't1'], io);
+    expect(ran).toEqual(['npm test']);
   });
   it('validate --baseline does not count a failure the base commit already had; verdict leaves it out', () => {
     writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'vitest run', build: 'vite build' } }));
@@ -1850,4 +1863,22 @@ describe('forge waypoint-cli', () => {
       expect(JSON.parse(add({ author: 'file', title: 'Split the parser module' }).stdout).doc.author).toBe('file');
     });
   });
+});
+
+describe('defaultExecMany (C-12)', () => {
+  it('runs the commands at once, each with its own output, code and timeout, and survives one that cannot start', () => {
+    const t0 = Date.now();
+    const r = defaultExecMany(root)([
+      'node -e "console.log(\'one\')"', 'node -e "setTimeout(()=>{},30000)"', 'node -e "console.log(\'three\');process.exit(3)"', 'forge-no-such-command-xyz',
+    ], 2, 4);
+    expect(r).toHaveLength(4);
+    expect(r[0]).toMatchObject({ code: 0, timedOut: false });
+    expect(r[0].output).toContain('one');
+    expect(r[1].timedOut).toBe(true);
+    expect(r[2]).toMatchObject({ code: 3, timedOut: false });
+    expect(r[2].output).toContain('three');
+    expect(r[3].code).not.toBe(0);
+    expect(r[3].timedOut).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(15000);
+  }, 30000);
 });

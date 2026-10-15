@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { ExecResult } from './cli/run.js';
 import type { ForgeConfig, When } from './config.js';
+import type { LedgerEvent } from './ledger.js';
 
 export interface Validator { name: string; cmd: string; kind: string; affects?: string[]; when?: When; source: 'manual' | 'detected' }
 // A flaky result (failed, then passed on the retry) is ok: true; its first failures are kept for the record.
@@ -15,6 +16,10 @@ export interface ValidatorResult {
 }
 // list(dir) lists the entries of a directory relative to the repo root (the root itself when omitted).
 export interface RepoReader { exists: (rel: string) => boolean; read: (rel: string) => string | null; list: (dir?: string) => string[] }
+/** Several commands at once (cli/run.ts defaultExecMany): one result per command, in the same order. */
+export type ExecMany = (cmds: string[], timeoutSec: number, concurrency: number) => ExecResult[];
+/** How runValidators runs a list (C-12): the parallel batch and its width, and which failures run again. */
+export interface RunOptions { execMany?: ExecMany; concurrency: number; retry: (v: Validator) => boolean }
 
 const NPM_ORDER: [script: string, kind: Validator['kind']][] = [['typecheck', 'typecheck'], ['type-check', 'typecheck'], ['lint', 'lint'], ['test', 'test'], ['build', 'build']];
 const PLACEHOLDER_TEST = /no test specified/i;
@@ -204,19 +209,62 @@ export function failingLabel(r: Pick<ValidatorResult, 'validator' | 'newFailing'
 const NO_TESTS = /\b(no test files found|no tests found)\b/i;
 const RUNS_TESTS = new Set(['test', 'e2e']);
 
-export function runValidators(list: Validator[], exec: (cmd: string, timeoutSec: number) => ExecResult, timeoutSec: number): ValidatorResult[] {
-  return list.map(v => {
-    const timeout = { failures: [`timeout after ${timeoutSec} s`], failing: [], failingKnown: false };
-    const first = exec(v.cmd, timeoutSec);
-    if (first.code === 0 && !first.timedOut) return { validator: v.name, ok: true, flaky: false, durationMs: first.ms, failures: [], failing: [], failingKnown: true };
-    if (first.timedOut) return { validator: v.name, ok: false, flaky: false, durationMs: first.ms, ...timeout };
-    if (RUNS_TESTS.has(v.kind) && NO_TESTS.test(first.output)) return { validator: v.name, ok: true, flaky: false, durationMs: first.ms, failures: failureLines(first.output), failing: [], failingKnown: true, skipped: 'no-tests' };
-    const second = exec(v.cmd, timeoutSec);
-    if (second.code === 0 && !second.timedOut) return { validator: v.name, ok: true, flaky: true, durationMs: first.ms + second.ms, failures: failureLines(first.output), failing: [], failingKnown: true };
-    if (second.timedOut) return { validator: v.name, ok: false, flaky: false, durationMs: first.ms + second.ms, ...timeout };
-    const f = failingTests(second.output, v.kind);
-    return { validator: v.name, ok: false, flaky: false, durationMs: first.ms + second.ms, failures: failureLines(second.output), failing: f.names, failingKnown: f.known };
-  });
+// Without options: one at a time, every failure retried, as forge 0.16 ran them.
+const SERIAL_RUN: RunOptions = { concurrency: 1, retry: () => true };
+// build rewrites files the others read; e2e and bench want the machine to themselves.
+const SERIAL_KINDS = new Set(['build', 'e2e', 'bench']);
+
+/** The result of one validator from its first run, running it again only when `retry` says so. */
+function settle(v: Validator, first: ExecResult, exec: (cmd: string, timeoutSec: number) => ExecResult, timeoutSec: number, retry: boolean): ValidatorResult {
+  const timeout = { failures: [`timeout after ${timeoutSec} s`], failing: [], failingKnown: false };
+  if (first.code === 0 && !first.timedOut) return { validator: v.name, ok: true, flaky: false, durationMs: first.ms, failures: [], failing: [], failingKnown: true };
+  if (first.timedOut) return { validator: v.name, ok: false, flaky: false, durationMs: first.ms, ...timeout };
+  if (RUNS_TESTS.has(v.kind) && NO_TESTS.test(first.output)) return { validator: v.name, ok: true, flaky: false, durationMs: first.ms, failures: failureLines(first.output), failing: [], failingKnown: true, skipped: 'no-tests' };
+  if (!retry) {
+    const f = failingTests(first.output, v.kind);
+    return { validator: v.name, ok: false, flaky: false, durationMs: first.ms, failures: failureLines(first.output), failing: f.names, failingKnown: f.known };
+  }
+  const second = exec(v.cmd, timeoutSec);
+  if (second.code === 0 && !second.timedOut) return { validator: v.name, ok: true, flaky: true, durationMs: first.ms + second.ms, failures: failureLines(first.output), failing: [], failingKnown: true };
+  if (second.timedOut) return { validator: v.name, ok: false, flaky: false, durationMs: first.ms + second.ms, ...timeout };
+  const f = failingTests(second.output, v.kind);
+  return { validator: v.name, ok: false, flaky: false, durationMs: first.ms + second.ms, failures: failureLines(second.output), failing: f.names, failingKnown: f.known };
+}
+
+/**
+ * Runs a list of validators (C-12). With execMany and a concurrency over 1, typecheck, lint, test and other kinds run
+ * first in one parallel batch; then, one at a time in the list's order, build, e2e and bench, and the retries. A
+ * failure runs again only when `retry` says so (a flaky history). The results keep the list's order.
+ */
+export function runValidators(list: Validator[], exec: (cmd: string, timeoutSec: number) => ExecResult, timeoutSec: number, opts: RunOptions = SERIAL_RUN): ValidatorResult[] {
+  const firsts = new Map<number, ExecResult>();
+  const batch = list.flatMap((v, i) => (SERIAL_KINDS.has(v.kind) ? [] : [i]));
+  if (opts.execMany && opts.concurrency > 1 && batch.length > 1) {
+    const rs = opts.execMany(batch.map(i => list[i].cmd), timeoutSec, opts.concurrency);
+    batch.forEach((i, k) => { if (rs[k]) firsts.set(i, rs[k]); });
+  }
+  return list.map((v, i) => settle(v, firsts.get(i) ?? exec(v.cmd, timeoutSec), exec, timeoutSec, opts.retry(v)));
+}
+
+/** The validators with a flaky result (failed, then passed on its retry) in the ledger's last `days` days. */
+export function flakyHistory(events: LedgerEvent[], now: Date, days = 30): Set<string> {
+  const from = now.getTime() - days * 86400000;
+  const out = new Set<string>();
+  for (const e of events) {
+    if (e.kind !== 'validate' || !Array.isArray(e.results) || !(Date.parse(e.ts) >= from)) continue;
+    for (const r of e.results as unknown[]) {
+      const x = r as { validator?: unknown; flaky?: unknown } | null;
+      if (x && typeof x.validator === 'string' && x.flaky === true) out.add(x.validator);
+    }
+  }
+  return out;
+}
+
+/** How the config runs validators (validate.parallel, validate.retry), the retry rule read from the ledger. */
+export function runOptions(config: Pick<ForgeConfig, 'validate'>, events: LedgerEvent[], now: Date, execMany?: ExecMany): RunOptions {
+  const policy = config.validate.retry;
+  const flaky = policy === 'flaky' ? flakyHistory(events, now) : new Set<string>();
+  return { ...(execMany ? { execMany } : {}), concurrency: config.validate.parallel, retry: v => policy === 'always' || (policy === 'flaky' && flaky.has(v.name)) };
 }
 
 /**

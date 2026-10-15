@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import path from 'node:path';
 import { UsageError } from './errors.js';
 import { appendEvent, readEvents, type LedgerEvent } from '../ledger.js';
-import { loadConfig, agentFor, type Profile } from '../config.js';
-import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, type RepoReader, type Scope, type ValidatorResult } from '../validators.js';
+import { loadConfig, agentFor, type Profile, type ForgeConfig } from '../config.js';
+import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, runOptions, type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { PATH_ORDER, zonesFromPaths, type PathName, type ReviewRole } from '../triage.js';
 import { parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, repoRelative, type Finding, type Review, type ReviewerName, type FailingValidator } from '../verdict.js';
 import { roundDecision } from '../round.js';
@@ -17,7 +17,7 @@ import { reviewRound, reviewerKey, type PreviousResult, type ReviewerKey, type R
 type Result = { code: number; stdout: string; stderr: string };
 type Exec = Parameters<typeof runValidators>[1];
 /** What the review commands need from the caller: forge's own dir (`cwd`), the code's dir (`repoDir`) and its tools. */
-export interface ReviewDeps { cwd: string; repoDir: string; now: () => Date; git: (args: string[]) => string | null; exec: Exec; repo: RepoReader }
+export interface ReviewDeps { cwd: string; repoDir: string; now: () => Date; git: (args: string[]) => string | null; exec: Exec; execMany?: ExecMany; repo: RepoReader }
 
 const ROLES: readonly ReviewRole[] = ['review-correctness', 'review-security', 'review-perf'];
 const EFFORTS = ['medium', 'high', 'xhigh'] as const;
@@ -56,6 +56,13 @@ export function reviewRoundOf(events: LedgerEvent[], task: string): number {
 /** Runs `fn` (a validator run) putting back the tracked files it regenerated that the config's `generated` names. */
 function restoringGenerated<T>(deps: ReviewDeps, generated: string[], fn: () => T, into: string[]): T {
   return generated.length ? restoringRegenerated({ git: deps.git }, fn, into, generated) : fn();
+}
+
+/** A validator run of the review commands: the config's parallel batch and retry rule (C-12), putting back what the
+ *  config's `generated` names. */
+function validateList(deps: ReviewDeps, config: ForgeConfig, list: Validator[], restored: string[]): ValidatorResult[] {
+  const opts = runOptions(config, readEvents(deps.cwd), deps.now(), deps.execMany);
+  return restoringGenerated(deps, config.generated, () => runValidators(list, deps.exec, config.validatorTimeoutSec, opts), restored);
 }
 
 function readJson(file: string): unknown {
@@ -110,8 +117,7 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   const scope: Scope = pathName === 'trivial' || pathName === 'small' ? { mode: 'small' }
     : { mode: 'heavy', changed: changed === null ? null : changed.split('\n').map(s => s.trim()).filter(Boolean) };
   const restored: string[] = [];
-  const results: ValidatorResult[] = markPreexisting(restoringGenerated(deps, config.generated,
-    () => runValidators(selectValidators(detectValidators(deps.repo, config), scope), deps.exec, config.validatorTimeoutSec), restored), baseline);
+  const results: ValidatorResult[] = markPreexisting(validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored), baseline);
   const ok = results.every(r => !blocking(r));
   const validatorsFile = path.join(dir, `validators-${n}.json`);
   writeFileSync(validatorsFile, JSON.stringify(results, null, 2) + '\n');
@@ -388,8 +394,7 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   const config = loadConfig(deps.repoDir);
   const scope: Scope = p === 'trivial' || p === 'small' ? { mode: 'small' } : { mode: 'heavy', changed: null };
   const restored: string[] = [];
-  const results = restoringGenerated(deps, config.generated,
-    () => runValidators(selectValidators(detectValidators(deps.repo, config), scope), deps.exec, config.validatorTimeoutSec), restored);
+  const results = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored);
   const dir = path.resolve(deps.cwd, flag('dir') ?? path.join('.forge', 'work', id));
   mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `baseline-${n}.json`);

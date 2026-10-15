@@ -3,11 +3,11 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { UsageError } from './errors.js';
 import type { ExecResult, Io } from './run.js';
-import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
+import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, runOptions, type ExecMany, type RepoReader, type RunOptions, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { loadConfig } from '../config.js';
 import { stopFile, parseRun, readRunText } from '../run.js';
 import { isLocale } from '../../lib/forge-run.js';
-import { appendEvent } from '../ledger.js';
+import { appendEvent, readEvents } from '../ledger.js';
 import { readExecution, saveExecution, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree } from '../execution.js';
 import { schedule, widthOf, relaunchOrBlock, RELAUNCH_CAP, type BgAgent } from '../schedule.js';
 import { LEASE_MINUTES, sessionLiveness } from '../../lib/coordination.js';
@@ -24,7 +24,7 @@ import { readMember, writeMember, isMemberId } from '../members.js';
 import { parseLooseTasks, planOfLoose, statesOfLoose, writeLoose, readLoose, type LooseTask } from '../loose.js';
 import { startAnnounce, integratedSay, rejectedDepsSay, keptFilesSay, VENV_HINT } from '../swarm.js';
 
-export interface GitDeps { git: (args: string[]) => string | null; exec: (cmd: string, timeoutSec: number) => ExecResult; repo: RepoReader }
+export interface GitDeps { git: (args: string[]) => string | null; exec: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany; repo: RepoReader }
 export interface SwarmDeps extends GitDeps { at: (dir: string) => GitDeps }
 type Result = { code: number; stdout: string; stderr: string };
 
@@ -348,6 +348,8 @@ interface MergeOpts {
   personal: boolean;
   /** Forget a remembered failed install before the merge (a transient failure): it runs again at the same HEAD. */
   retryDeps?: boolean;
+  /** The config's parallel batch and retry rule (C-12); each run adds the execMany of the checkout it validates. */
+  run: RunOptions;
 }
 
 // The untracked paths git does not ignore, forge's own state aside (a directory collapsed into `dir/`).
@@ -512,7 +514,7 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
     if (unmoved && needsDeps(at)) baseline = [];
     else {
       try {
-        baseline = detected0 ? validating(at, !o.personal, () => runValidators(selectValidators(detected0!, selection), at.exec, o.timeoutSec)) : [];
+        baseline = detected0 ? validating(at, !o.personal, () => runValidators(selectValidators(detected0!, selection), at.exec, o.timeoutSec, { ...o.run, execMany: at.execMany })) : [];
         if (detected0) writeBaseline(o.cacheDir, key, pre, baseline);
       } catch { baseline = []; }
       const left = at.git(['status', '--porcelain', '--', '.', ...LOCAL_STATE]);
@@ -556,7 +558,7 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
     detected = detectValidators(v.repo, loadConfig(o.configRoot));
     // The run worktree as the target (not the person's) or as the final merge's place to validate (inRun).
     const chosen = selectValidators(detected, selection);
-    results = markPreexisting(validating(v, inRun || !o.personal, () => runValidators(chosen, v.exec, o.timeoutSec)), baseline);
+    results = markPreexisting(validating(v, inRun || !o.personal, () => runValidators(chosen, v.exec, o.timeoutSec, { ...o.run, execMany: v.execMany })), baseline);
   } catch (err) {
     return rollback(`validators could not run: ${(err as Error).message}`);
   }
@@ -670,6 +672,7 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
     message: `forge: integrate ${task}`, scope: 'heavy', timeoutSec: config.validatorTimeoutSec, configRoot: wt,
     cacheDir: path.join(io.cwd, '.forge', 'execution'), target: 'run', setup: config.swarm.setup, personal,
     retryDeps: rest.includes('--retry-deps'),
+    run: runOptions(config, readEvents(io.cwd), io.now()),
   });
   const es = spanish(locale, io.cwd, e.project);
   const extras = attemptExtras(r, es, t.branch, personal);
@@ -717,6 +720,7 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
     message: `forge: merge ${e.branch}`, scope: 'final', timeoutSec: config.validatorTimeoutSec, configRoot: io.cwd,
     cacheDir: path.join(io.cwd, '.forge', 'execution'), target: 'main', setup: config.swarm.setup,
     runAt: cleanRunWorktree(deps, runWorktree(io.cwd), e.branch), personal: true, retryDeps: rest.includes('--retry-deps'),
+    run: runOptions(config, readEvents(io.cwd), io.now()),
   });
   const extras = attemptExtras(r, spanish(locale, io.cwd, e.project), e.branch, true);
   if (r.result === 'dirty') return out({ result: 'main-dirty', detail: `the main checkout ${r.detail}`, ...extras });

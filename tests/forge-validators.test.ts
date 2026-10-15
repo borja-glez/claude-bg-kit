@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectValidators, selectValidators, runValidators, failureLines, failingTests, failingLabel, globMatch, markPreexisting, blocking, type RepoReader, type Validator, type Scope } from '../src/forge/validators.js';
+import { detectValidators, selectValidators, runValidators, failureLines, failingTests, failingLabel, globMatch, markPreexisting, blocking, flakyHistory, runOptions, type RepoReader, type Validator, type Scope } from '../src/forge/validators.js';
 import { parseConfig } from '../src/forge/config.js';
 
 // list(dir) returns the direct entries of dir, like readdirSync.
@@ -285,5 +285,58 @@ describe('markPreexisting by test (D-06)', () => {
     const base = [{ validator: 'test', ok: false, failures: ['timeout after 600 s'] }];
     const timeout = { validator: 'test', ok: false, flaky: false, durationMs: 1, failures: ['timeout after 600 s'], failing: [], failingKnown: false };
     expect(markPreexisting([timeout], base)[0].preexisting).toBeUndefined();
+  });
+});
+
+describe('validators in parallel, retried only with a flaky history (C-12)', () => {
+  const v = (name: string, kind: string): Validator => ({ name, cmd: name, kind, source: 'detected' });
+  const ok = { code: 0, output: '', ms: 2, timedOut: false };
+  const list = [v('typecheck', 'typecheck'), v('build', 'build'), v('lint', 'lint'), v('test', 'test'), v('e2e', 'e2e'), v('a11y', 'other')];
+  it('runs typecheck, lint, test and other in one parallel batch, then build and e2e one at a time; results keep the list order', () => {
+    const batches: [string[], number][] = [];
+    const ran: string[] = [];
+    const r = runValidators(list, cmd => { ran.push(cmd); return ok; }, 600, {
+      concurrency: 3, retry: () => false, execMany: (cmds, _t, c) => { batches.push([cmds, c]); return cmds.map(() => ok); },
+    });
+    expect(batches).toEqual([[['typecheck', 'lint', 'test', 'a11y'], 3]]);
+    expect(ran).toEqual(['build', 'e2e']);
+    expect(r.map(x => x.validator)).toEqual(list.map(x => x.name));
+  });
+  it('with concurrency 1 or without execMany, one at a time in the list order, as before', () => {
+    const noBatch = () => { throw new Error('no batch with concurrency 1'); };
+    for (const opts of [{ concurrency: 1, retry: () => false, execMany: noBatch }, { concurrency: 3, retry: () => false }]) {
+      const ran: string[] = [];
+      runValidators(list, cmd => { ran.push(cmd); return ok; }, 600, opts);
+      expect(ran).toEqual(list.map(x => x.name));
+    }
+  });
+  it('retries a failure only when retry says so; a retried pass is flaky', () => {
+    const one = [v('test', 'test')];
+    let calls = 0;
+    const r = runValidators(one, () => { calls++; return { code: 1, output: 'FAIL x', ms: 1, timedOut: false }; }, 600, { concurrency: 1, retry: () => false });
+    expect(calls).toBe(1);
+    expect(r[0]).toMatchObject({ ok: false, flaky: false, failing: ['x'] });
+    const codes = [1, 0];
+    calls = 0;
+    const again = runValidators(one, () => { calls++; return { code: codes.shift()!, output: 'FAIL x', ms: 1, timedOut: false }; }, 600, { concurrency: 1, retry: x => x.name === 'test' });
+    expect(calls).toBe(2);
+    expect(again[0]).toMatchObject({ ok: true, flaky: true });
+  });
+  it('flakyHistory keeps the validators with a flaky result in the last 30 days; runOptions applies validate.retry', () => {
+    const now = new Date('2026-10-15T12:00:00.000Z');
+    const events = [
+      { ts: '2026-10-01T00:00:00.000Z', kind: 'validate' as const, results: [{ validator: 'test', ok: true, flaky: true }, { validator: 'lint', ok: true, flaky: false }] },
+      { ts: '2026-08-01T00:00:00.000Z', kind: 'validate' as const, results: [{ validator: 'e2e', ok: true, flaky: true }] },
+      { ts: '2026-10-02T00:00:00.000Z', kind: 'verdict' as const, results: [{ validator: 'build', flaky: true }] },
+      { ts: 'junk', kind: 'validate' as const, results: [{ validator: 'build', flaky: true }] },
+    ];
+    expect([...flakyHistory(events, now)]).toEqual(['test']);
+    const cfg = (retry: string) => parseConfig(`validate:\n  parallel: 2\n  retry: ${retry}\n`);
+    const t = v('test', 'test'), l = v('lint', 'lint');
+    const flaky = runOptions(cfg('flaky'), events, now);
+    expect([flaky.concurrency, flaky.retry(t), flaky.retry(l)]).toEqual([2, true, false]);
+    expect([runOptions(cfg('always'), [], now).retry(l), runOptions(cfg('never'), events, now).retry(t)]).toEqual([true, false]);
+    const many = () => [];
+    expect(runOptions(cfg('flaky'), [], now, many).execMany).toBe(many);
   });
 });

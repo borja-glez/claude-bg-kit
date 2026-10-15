@@ -12,7 +12,7 @@ describe('forge config', () => {
   it('defaults: detect on, nothing excluded, verify limits, evidence upload', () => {
     expect(parseConfig(null)).toEqual({
       profile: 'balanced', detect: true, exclude: [], verify: { limits: { checks: 8, shots: 10, minutes: 10 } },
-      evidence: 'upload', validatorTimeoutSec: 600, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' } }, tdd: 'off',
+      evidence: 'upload', validatorTimeoutSec: 600, validate: { parallel: 3, retry: 'flaky' }, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' } }, tdd: 'off',
       generated: [],
     });
   });
@@ -35,6 +35,14 @@ describe('forge config', () => {
     expect(parseConfig(null).tdd).toBe('off');
     expect(parseConfig('tdd: superpowers\n').tdd).toBe('superpowers');
     expect(() => parseConfig('tdd: always\n')).toThrow(ConfigError);
+  });
+  it('validate: parallel 3 and retry flaky by default; parallel from 1 to 8; retry flaky, always or never (C-12)', () => {
+    expect(parseConfig(null).validate).toEqual({ parallel: 3, retry: 'flaky' });
+    expect(parseConfig('validate:\n  parallel: 1\n  retry: always\n').validate).toEqual({ parallel: 1, retry: 'always' });
+    expect(configValue(parseConfig('validate:\n  retry: never\n'), 'validate.retry')).toBe('never');
+    for (const bad of ['validate:\n  parallel: 0\n', 'validate:\n  parallel: 9\n', 'validate:\n  retry: sometimes\n', 'validate:\n  nope: 1\n']) {
+      expect(() => parseConfig(bad)).toThrow(ConfigError);
+    }
   });
   it('swarm: parallel 3 by default, an optional mode and the launcher', () => {
     expect(parseConfig(null).swarm).toEqual({ parallel: 3, launcher: 'bg', member: { effort: 'medium' } });
