@@ -36,6 +36,16 @@ const LOCAL_STATE = [':(exclude).forge', ':(exclude).waypoint', ':(exclude).clau
 const OBJECT = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const KEY = /^[0-9a-f]{64}$/;
 
+/**
+ * The git the cache must use: bound to the root of the checkout `git` runs in, never to a subdirectory (the tree
+ * pathspec is `.`, so a change outside the subdirectory would be missed and give a false hit). `git` itself when it
+ * cannot name the root.
+ */
+export function cacheGit(git: Git): Git {
+  const top = git(['rev-parse', '--show-toplevel'])?.trim();
+  return top ? args => git(['-C', top, ...args]) : git;
+}
+
 export const cacheDir = (main: string) => path.join(main, '.forge', 'cache', 'validate');
 const excludes = (generated: string[]) => [...LOCAL_STATE, ...generated.map(g => `:(exclude,glob)${g}`)];
 

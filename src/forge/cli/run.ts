@@ -27,7 +27,7 @@ import { claudeSessionId, noClaudeSession } from '../../lib/claude-session.js';
 import { UsageError } from './errors.js';
 import { swarmCommand, restoringRegenerated } from './swarm.js';
 import { reviewCommand } from './review.js';
-import { runWithCache } from '../validate-cache.js';
+import { runWithCache, cacheGit } from '../validate-cache.js';
 import { roundDecision } from '../round.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, runOptions, validateEvent, type ExecMany, type RepoReader, type Scope, type Validator } from '../validators.js';
 import { checkTools, mcpInventory, toolGaps } from '../tools.js';
@@ -733,10 +733,9 @@ export function run(argv: string[], io: Io): Result {
         // The tree cache (C6): an --affected pass and --no-cache never touch it; --final writes it but never reads it.
         // Its git runs at the root of the checkout being validated, never at a subdirectory: a change outside it counts.
         const useCache = config.validate.cache && !has('no-cache') && scope.mode !== 'affected';
-        const top = defaultGit(repoDir)(['rev-parse', '--show-toplevel'])?.trim();
         const t0 = Date.now();
         let results = runWithCache(list, runList, {
-          main: mainCheckout(io.cwd), git: top ? defaultGit(top) : restoreAt.git, repo: repoReader(repoDir), generated: config.generated,
+          main: mainCheckout(io.cwd), git: useCache ? cacheGit(restoreAt.git) : restoreAt.git, repo: repoReader(repoDir), generated: config.generated,
           read: useCache && scope.mode !== 'final', write: useCache, now: io.now,
         });
         const durationMs = Date.now() - t0;

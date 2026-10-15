@@ -590,3 +590,23 @@ describe('the tree cache (C6), with forge in the worktree itself', () => {
     expect(existsSync(path.join(wt, '.forge', 'cache', 'validate'))).toBe(false);
   });
 });
+
+describe('the tree cache (C6), with forge in a subdirectory of the checkout', () => {
+  it('a change outside the subdirectory is seen: the next prep is not served from the cache', () => {
+    const sub = path.join(wt, 'sub');
+    mkdirSync(path.join(sub, '.forge'), { recursive: true });
+    writeFileSync(path.join(sub, '.forge', 'config.yaml'), 'detect: false\nvalidators:\n  - name: check\n    cmd: node -e "process.exit(0)"\n');
+    writeFileSync(path.join(wt, '.git', 'info', 'exclude'), 'sub/.forge/\n'); // forge's own state in sub is not a change
+    const calls: string[] = [];
+    const sio: Io = {
+      cwd: sub, now: () => new Date('2026-10-14T10:00:00.000Z'), env: {},
+      exec: cmd => { calls.push(cmd); return { code: 0, output: '', ms: 5, timedOut: false }; },
+    };
+    expect(JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'medium'], sio).stdout).cached).toEqual([]);
+    expect(JSON.parse(run(['prep', '--task', 'T1-2', '--path', 'medium'], sio).stdout).cached).toEqual(['check']);
+    expect(calls).toHaveLength(1);
+    writeFileSync(path.join(wt, 'a.txt'), 'changed outside sub\n');
+    expect(JSON.parse(run(['prep', '--task', 'T1-3', '--path', 'medium'], sio).stdout).cached).toEqual([]);
+    expect(calls).toHaveLength(2);
+  });
+});
