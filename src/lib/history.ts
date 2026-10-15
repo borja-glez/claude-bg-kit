@@ -75,9 +75,9 @@ export function parseChangelog(text: string | null): ChangelogEntry[] {
       throw new Error(`changelog.json entry ${i} is invalid: ${why}`);
     }
     // EntrySchema keeps the five fields of every entry; applied and rewrite are optional and read tolerantly.
-    const raw = e as Record<string, unknown>;
-    const applied = normalizeApplied(raw.applied);
-    return { ...r.data, ...(applied ? { applied } : {}), ...(raw.rewrite === true ? { rewrite: true as const } : {}) };
+    const entry = e as Record<string, unknown>;
+    const applied = normalizeApplied(entry.applied);
+    return { ...r.data, ...(applied ? { applied } : {}), ...(entry.rewrite === true ? { rewrite: true as const } : {}) };
   });
 }
 
