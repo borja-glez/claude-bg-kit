@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { appendEvent, readEvents, forgeDir, LEDGER_KINDS, type LedgerKind, type LedgerEvent } from '../ledger.js';
 import { parseRun, startRun, recordCycle, stopReason, endRun, readRunText, saveRun, stopFile, type RunState, type StopContext } from '../run.js';
-import { decideStop, decideExecutionStop, bindHookSession } from '../hook.js';
+import { decideStop, decideExecutionStop } from '../hook.js';
 import { readExecution, saveExecution, runWorktree } from '../execution.js';
 import { planLocale, replyIn, sessionReply } from '../../lib/locale.js';
 import { isLocale } from '../../lib/forge-run.js';
@@ -345,16 +345,14 @@ function hookStop(io: Io): string {
     const input: unknown = JSON.parse(io.stdin ?? '');
     if (!input || typeof input !== 'object' || Array.isArray(input)) return '';
     const hookInput = input as { stop_hook_active?: boolean; session_id?: unknown };
-    // An unbound active execution binds to the first session that stops, saved before the signal is written.
     const main = mainCheckout(io.cwd);
-    const read = readExecution(main);
-    // A registered member of this run never takes the coordinator binding nor is blocked on the execution's behalf.
+    // The execution is bound when it starts (C1): the hook only reads it.
+    const exec = readExecution(main);
+    // A registered member of this run is never blocked on the execution's behalf.
     const sid = typeof hookInput.session_id === 'string' ? hookInput.session_id : null;
     // Members are found by the hook id they recorded at join (Claude's session_id, not their waypoint SID).
-    const member = read?.active && sid ? memberForHook(main, sid, read.runId) : null;
+    const member = exec?.active && sid ? memberForHook(main, sid, exec.runId) : null;
     if (member) { hookLive(io, 'Stop'); return ''; }
-    const exec = bindHookSession(read, hookInput.session_id);
-    if (exec && exec !== read) saveExecution(main, exec);
     hookLive(io, 'Stop');
     const sleeping = !!exec?.active && !!exec.sleepUntil && Date.parse(exec.sleepUntil) > io.now().getTime();
     const run = parseRun(readRunText(io.cwd));

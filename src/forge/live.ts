@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { normalizeLive, type LiveDoc } from '../lib/execution-state.js';
-import { readExecution, saveExecution } from './execution.js';
+import { readExecution } from './execution.js';
 import { forgeDir } from './ledger.js';
 import { mainCheckout } from './local.js';
 import { memberForHook } from './members.js';
@@ -31,7 +31,6 @@ export function nextLive(prev: LiveDoc | null, ev: { event: LiveEvent; agentId?:
  * Records this session's local signal when it coordinates an active execution or is a registered member of it; never fails.
  * On a SessionStart (not forced) it returns the SessionStart hook output whose additionalContext tells the coordinator
  * or the member how to resume; in every other case it returns ''.
- * A SubagentStart while the execution is unbound binds it to this session first; a bound one is never rebound.
  */
 export function hookLive(io: Io, forced?: LiveEvent): string {
   try {
@@ -41,16 +40,11 @@ export function hookLive(io: Io, forced?: LiveEvent): string {
     const event = forced ?? named;
     if (!sessionId || !event) return '';
     const main = mainCheckout(io.cwd);
-    let exec = readExecution(main);
+    const exec = readExecution(main);
     if (!exec?.active) return '';
-    // An unbound execution binds to the first session that starts an agent (the Stop hook binds it on a stop).
-    // A registered member of this run never takes the binding. Members are found by their hook id (Claude's
-    // session_id), recorded at join; the hook id is not their waypoint SID.
+    // The execution is bound when it starts (C1): an agent start never binds it. A registered member of this run is
+    // found by its hook id (Claude's session_id), recorded at join; the hook id is not its waypoint SID.
     const found = memberForHook(main, sessionId, exec.runId);
-    if (exec.hookSession === null && event === 'SubagentStart' && !found) {
-      exec = { ...exec, hookSession: sessionId };
-      saveExecution(main, exec);
-    }
     const member = exec.hookSession === sessionId ? null : found;
     if (exec.hookSession !== sessionId && !member) return '';
     const role: LiveDoc['role'] = member ? member.role : 'coordinator';

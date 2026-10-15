@@ -15,6 +15,7 @@ import { planLocale, sessionReply } from '../../lib/locale.js';
 import { signalLiveness } from '../../lib/execution-view.js';
 import { liveFile } from '../live.js';
 import { STAGES, normalizePublicTask, normalizeLive, normalizeExecution, isSafeId, isRunBranch, type ExecutionState, type ExecTask, type PublicTask } from '../../lib/execution-state.js';
+import { claudeSessionId, noClaudeSession } from '../../lib/claude-session.js';
 import { parsePlan, PlanError, isPlanId } from '../../lib/plan.js';
 import type { SessionDoc, Stage, TaskState } from '../../lib/types.js';
 import { mainWorktreeFrom, samePath } from '../../lib/worktree.js';
@@ -750,17 +751,17 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       const task = flag('task') ?? null;
       if (task !== null && !isPlanId(task)) throw new UsageError('swarm join: --task is not a task id');
       if (role === 'executor' && !task) throw new UsageError('swarm join: an executor needs --task');
-      // Claude's own session id, the one its hooks receive: the hooks find the member by it.
-      if (has('hook-session') && !flag('hook-session')) throw new UsageError('swarm join: --hook-session needs an id');
-      // A rejoin without it keeps the hook id this member recorded in the same run.
-      const before = readMember(main, session);
-      // An unsubstituted `${CLAUDE_SESSION_ID}` or another unusable id does not stop the join: the member works without
-      // its own live signal, and the output says so.
+      // Claude's own session id, the one its hooks receive: the hooks find the member by it (C1: the flag, else
+      // CLAUDE_CODE_SESSION_ID). A flag without a value, or an unsubstituted `${CLAUDE_SESSION_ID}`, counts as absent.
       const given = flag('hook-session');
-      const usable = given !== undefined && isMemberId(given) ? given : null;
-      const warning = given !== undefined && usable === null
-        ? `--hook-session ${given.slice(0, 130)} is not a usable session id (letters, digits, _ - .; max 120): joined without a live signal` : null;
-      const hookSession = usable ?? (before?.runId === e.runId ? before.hookSession : null);
+      const id = claudeSessionId(given, io.env ?? process.env);
+      // A rejoin without one keeps the hook id this member recorded in the same run.
+      const before = readMember(main, session);
+      const hookSession = id ?? (before?.runId === e.runId ? before.hookSession : null);
+      // No usable id does not stop the join: the member works without its own live signal, and the output says why.
+      const warning = id !== null ? null
+        : given ? `--hook-session ${given.slice(0, 130)} is not a usable session id (letters, digits, _ - .; max 120): joined without a live signal`
+          : hookSession === null ? 'no Claude session id (--hook-session or CLAUDE_CODE_SESSION_ID): joined without a live signal' : null;
       if (hookSession !== null && hookSession === e.hookSession) throw new UsageError(`swarm join: ${hookSession} coordinates this execution`);
       writeMember(main, { sessionId: session, role, runId: e.runId, task, name: flag('name') ?? null, since: iso, hookSession });
       return json({ runId: e.runId, role, task, coordinator: e.coordinator, branch: e.branch, mode: e.mode, project: e.project, ...(warning ? { warning } : {}) });
@@ -802,6 +803,10 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       const project = flag('project');
       const session = flag('session');
       if (!project || !ID.test(project) || !session || !ID.test(session)) throw new UsageError('swarm start: --project and --session are required');
+      // C1: Claude's id of the session that runs the start, checked before any branch or worktree moves. It becomes the
+      // execution's hookSession, the one session its Stop hook steps (also on a resume, e.g. after a /clear).
+      const hook = claudeSessionId(flag('hook-session'), io.env ?? process.env);
+      if (!hook) throw new UsageError(noClaudeSession('swarm start', '--hook-session'));
       const config = loadConfig(io.cwd);
       let parallel = config.swarm.parallel;
       if (has('parallel')) {
@@ -821,10 +826,10 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       const base = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
       if (!base || base === 'HEAD') throw new UsageError('swarm start: the main checkout must be on a branch');
       const prev = readExecution(io.cwd);
-      if (prev?.active && prev.coordinator !== session) {
-        const last = Date.parse(prev.lastStepAt ?? prev.startedAt);
-        if (now.getTime() - last < TAKEOVER_MIN * 60000) throw new UsageError(`swarm start: coordinator ${prev.coordinator} is active (last step ${prev.lastStepAt ?? prev.startedAt})`);
-      }
+      // D-14: a start never changes the coordinator of an active execution; taking it over is swarm takeover's call.
+      if (prev?.active && prev.coordinator !== session) throw new UsageError(
+        `swarm start: the execution ${prev.runId} is coordinated by ${prev.coordinator}; to go on with it from this session run ` +
+        `swarm takeover --session ${session} --hook-session <id> (it checks that ${prev.coordinator} stopped), or join it as a manual member (/forge:run --join)`);
       const branch = flag('branch') ?? runBranch(project);
       if (!isRunBranch(branch)) throw new UsageError('swarm start: --branch is not a valid branch name');
       // execution.json is read back through the safe id rules: refuse here, before any branch or worktree exists.
@@ -910,10 +915,10 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       // The person's language (--locale): a resume keeps the recorded one unless a new flag is given.
       const lang = locale ? { locale } : {};
       const state: ExecutionState = resume && prev
-        ? { ...prev, parallel, mode, mergeOnFinish: prev.mergeOnFinish || has('merge-on-finish'), coordinator: session, hookSession: null, sleepUntil: null, ...auto, ...lang }
+        ? { ...prev, parallel, mode, mergeOnFinish: prev.mergeOnFinish || has('merge-on-finish'), coordinator: session, hookSession: hook, sleepUntil: null, ...auto, ...lang }
         : {
             runId: `${project}-${iso.replace(/[:.]/g, '')}`, kind, mode, parallel, project, base, branch: kind === 'plan' ? branch : base,
-            mergeOnFinish: has('merge-on-finish'), coordinator: session, hookSession: null, active: true, stopReason: null, stallReason: null,
+            mergeOnFinish: has('merge-on-finish'), coordinator: session, hookSession: hook, active: true, stopReason: null, stallReason: null,
             startedAt: iso, lastStepAt: null, lastBlockStep: null, sleepUntil: null, tasks: {}, ...auto, ...lang,
           };
       // An execution that would not read back (an id outside the safe rule) is refused rather than saved.
@@ -1141,15 +1146,17 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       return ok();
     }
     case 'takeover': {
+      const hook = claudeSessionId(flag('hook-session'), io.env ?? process.env);
+      if (!hook) throw new UsageError(noClaudeSession('swarm takeover', '--hook-session'));
       const session = flag('session');
       if (!session) throw new UsageError('swarm takeover: --session is required');
       if (!isMemberId(session)) throw new UsageError(`swarm takeover: --session ${session.slice(0, 130)} is not a valid session id (letters, digits, _ - .; max 120)`);
       const e = current();
       if (!e.active) throw new UsageError('swarm takeover: the execution is not active');
-      // --session is a waypoint SID, never Claude's hook id: the coordinator becomes it and the hook binding is left
-      // unbound, so the next Stop or SubagentStart of a non-member session (this one) binds its own hook id.
-      if (session === e.coordinator || session === e.hookSession) {
-        if (e.coordinator !== session || e.hookSession !== null) saveExecution(io.cwd, { ...e, coordinator: session, hookSession: null });
+      // --session is the waypoint SID that becomes the coordinator; --hook-session is Claude's id of this session, bound
+      // at once, so its Stop hook steps the execution from now on (C1).
+      if (session === e.coordinator || hook === e.hookSession) {
+        if (e.coordinator !== session || e.hookSession !== hook) saveExecution(io.cwd, { ...e, coordinator: session, hookSession: hook });
         return json({ took: 'already', runId: e.runId });
       }
       // A run member keeps its role: it would otherwise coordinate the task it executes.
@@ -1170,7 +1177,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       if (!seen.length) seen.push(now.getTime() - Date.parse(e.lastStepAt ?? e.startedAt) >= TAKEOVER_MIN * 60000 ? 'stopped' : 'alive');
       const liveness = seen.reduce((a, b) => (order.indexOf(b) > order.indexOf(a) ? b : a), 'stopped' as (typeof order)[number]);
       if (liveness !== 'stopped') return json({ took: false, previous, liveness, joinAs: 'manual' });
-      saveExecution(io.cwd, { ...e, coordinator: session, hookSession: null, sleepUntil: null });
+      saveExecution(io.cwd, { ...e, coordinator: session, hookSession: hook, sleepUntil: null });
       // The user asked this session to go on: their decision, recorded in the decision format (by: user).
       appendEvent(io.cwd, { ts: iso, kind: 'decision', point: 'takeover', what: 'takeover', chosen: session, why: `the coordinator ${previous} stopped`, by: 'user', weight: 'minor', previous, session, runId: e.runId });
       return json({ took: true, previous, runId: e.runId, running: Object.entries(e.tasks).filter(([, t]) => t.status === 'running').map(([id]) => id) });
@@ -1180,6 +1187,6 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     case 'merge':
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError('usage: forge swarm <start --project P --session SID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID [--db DIR]>');
+      throw new UsageError('usage: forge swarm <start --project P --session SID --hook-session ID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID [--db DIR]>');
   }
 }

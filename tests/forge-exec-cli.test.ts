@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, existsSync
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { run, defaultGit, defaultExec, repoReader, type Io } from '../src/forge/cli/run.js';
+import { run as cli, defaultGit, defaultExec, repoReader, type Io } from '../src/forge/cli/run.js';
 import { readExecution, saveExecution, executionTaskFile } from '../src/forge/execution.js';
 import { normalizeExecution } from '../src/lib/execution-state.js';
 import { setupFor, swarmCommand } from '../src/forge/cli/swarm.js';
@@ -11,6 +11,13 @@ import { writeMember } from '../src/forge/members.js';
 import { readLoose } from '../src/forge/loose.js';
 import { samePath } from '../src/lib/worktree.js';
 import { codeSpan, integratedSay, keptFilesSay } from '../src/forge/swarm.js';
+
+// swarm start and takeover bind Claude's session id (C1). The tests run inside Claude Code, which sets
+// CLAUDE_CODE_SESSION_ID: io.env is {} so nothing leaks from it, and the id comes as a flag unless a test gives its own.
+// A start and a takeover come from two different Claude sessions, as in real use.
+const run = (argv: string[], io: Io) =>
+  cli(argv[0] === 'swarm' && (argv[1] === 'start' || argv[1] === 'takeover') && !argv.includes('--hook-session')
+    ? [...argv, '--hook-session', argv[1] === 'start' ? 'hook-main' : 'hook-new'] : argv, io);
 
 const PLAN = `project: shop
 locale: es
@@ -40,7 +47,7 @@ beforeEach(() => {
   git('add', '.'); git('commit', '-qm', 'init');
   mkdirSync(path.join(root, '.forge'), { recursive: true });
   writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators: []\n');
-  io = { cwd: root, now: () => NOW, git: defaultGit(root), sleep: () => undefined };
+  io = { cwd: root, now: () => NOW, git: defaultGit(root), sleep: () => undefined, env: {} };
 });
 afterEach(() => { try { git('worktree', 'prune'); } catch { /* ignore */ } rmSync(root, { recursive: true, force: true }); });
 const writeDocs = (dir: string, docs: Record<string, unknown>) => {
@@ -65,6 +72,45 @@ describe('forge swarm (execution)', () => {
     expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io)).autonomy).toBe('auto');
     expect(normalizeExecution({ ...readExecution(root), autonomy: 'yes' })).not.toHaveProperty('autonomy');
     expect(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--autonomy', 'always'], io).code).toBe(2);
+  });
+  it('start binds the --hook-session id, else CLAUDE_CODE_SESSION_ID of the environment, also on a resume (C1, D-01)', () => {
+    expect(out(cli(['swarm', 'start', '--project', 'shop', '--session', 'main', '--hook-session', 'h1'], io))).toMatchObject({ hookSession: 'h1' });
+    expect(readExecution(root)!.hookSession).toBe('h1');
+    // The same coordinator resumes from another Claude session (after a /clear): that one is bound, explicitly.
+    expect(out(cli(['swarm', 'start', '--project', 'shop', '--session', 'main'], { ...io, env: { CLAUDE_CODE_SESSION_ID: 'h2' } })))
+      .toMatchObject({ coordinator: 'main', hookSession: 'h2' });
+    expect(readExecution(root)!.hookSession).toBe('h2');
+  });
+  it('start without a usable Claude session id exits 2 before creating a branch or a worktree (C1, D-01)', () => {
+    for (const extra of [[], ['--hook-session'], ['--hook-session', '${CLAUDE_SESSION_ID}']]) {
+      const r = cli(['swarm', 'start', '--project', 'shop', '--session', 'main', ...extra], io);
+      expect(r.code).toBe(2);
+      expect(r.stderr).toBe('swarm start: no Claude session id: pass --hook-session <id> or run it from Claude Code (CLAUDE_CODE_SESSION_ID)\n');
+    }
+    expect(readExecution(root)).toBeNull();
+    expect(() => git('rev-parse', '--verify', '-q', 'refs/heads/forge/run-shop')).toThrow();
+    expect(existsSync(path.join(root, '.claude', 'worktrees', 'run'))).toBe(false);
+  });
+  it('start never hands an active execution to another session: it names swarm takeover and changes nothing (D-14)', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    const before = readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8');
+    // No step for 20 minutes: until now a start took the run over in silence after 15.
+    const later = { ...io, now: () => new Date(NOW.getTime() + 20 * 60000) };
+    const r = run(['swarm', 'start', '--project', 'shop', '--session', 'otra'], later);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('swarm takeover --session otra --hook-session <id>');
+    expect(readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8')).toBe(before);
+  });
+  it('takeover binds the --hook-session id of the session that takes over, and exits 2 without one before looking at anything (D-14)', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'old'], io));
+    const later = { ...io, now: () => new Date(NOW.getTime() + 20 * 60000) };
+    const before = readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8');
+    const none = cli(['swarm', 'takeover', '--session', 's2'], later);
+    expect(none.code).toBe(2);
+    expect(none.stderr).toContain('swarm takeover: no Claude session id');
+    expect(readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8')).toBe(before);
+    expect(out(cli(['swarm', 'takeover', '--session', 's2', '--hook-session', 'h2'], later))).toMatchObject({ took: true });
+    expect(readExecution(root)).toMatchObject({ coordinator: 's2', hookSession: 'h2', sleepUntil: null });
   });
   it('start refuses the base branch, a branch checked out elsewhere and a branch that starts with a dash', () => {
     const base = run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--branch', 'main'], io);
@@ -268,7 +314,7 @@ describe('forge swarm (execution)', () => {
       };
     };
     const deps = { git: old(root), exec: defaultExec(root), repo: repoReader(root), at: (dir: string) => ({ git: old(dir), exec: defaultExec(dir), repo: repoReader(dir) }) };
-    const s = out(swarmCommand(['start', '--project', 'shop', '--session', 'main'], io, deps));
+    const s = out(swarmCommand(['start', '--project', 'shop', '--session', 'main', '--hook-session', 'hook-main'], io, deps));
     expect(s.attributesError).toBeUndefined();
     expect(readFileSync(path.join(root, '.git', 'info', 'attributes'), 'utf8')).toContain('/.forge/verify/*.md merge=union');
   });
@@ -564,17 +610,17 @@ describe('forge swarm (execution)', () => {
     expect(out(run(['swarm', 'takeover', '--session', 'new'], io))).toMatchObject({ took: false, previous: 'old', liveness: 'alive', joinAs: 'manual' });
     const later = { ...io, now: () => new Date(NOW.getTime() + 20 * 60000) };
     expect(out(run(['swarm', 'takeover', '--session', 'new'], later))).toMatchObject({ took: true, previous: 'old', runId: e.runId });
-    // The waypoint SID becomes the coordinator; the hook binding waits for this session's next Stop or SubagentStart.
-    expect(readExecution(root)).toMatchObject({ coordinator: 'new', hookSession: null });
-    saveExecution(root, { ...readExecution(root)!, hookSession: 'claude-hook-uuid' });
-    expect(out(run(['swarm', 'takeover', '--session', 'new'], later))).toMatchObject({ took: 'already' });
-    expect(readExecution(root)).toMatchObject({ coordinator: 'new', hookSession: null });
+    // The waypoint SID becomes the coordinator, and Claude's id of the session that took over is bound at once.
+    expect(readExecution(root)).toMatchObject({ coordinator: 'new', hookSession: 'hook-new' });
+    expect(out(run(['swarm', 'takeover', '--session', 'new', '--hook-session', 'claude-hook-uuid'], later))).toMatchObject({ took: 'already' });
+    expect(readExecution(root)).toMatchObject({ coordinator: 'new', hookSession: 'claude-hook-uuid' });
     expect(readFileSync(path.join(root, '.forge', 'ledger.jsonl'), 'utf8')).toContain('"what":"takeover"');
     const takeover = readFileSync(path.join(root, '.forge', 'ledger.jsonl'), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)).find(e => e.what === 'takeover');
     expect(takeover).toMatchObject({ kind: 'decision', point: 'takeover', by: 'user', chosen: 'new', previous: 'old', session: 'new', runId: e.runId });
   });
   it('takeover takes the liveliest of the signal and the lease, and falls back to the last step', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'old'], io));
+    saveExecution(root, { ...readExecution(root)!, hookSession: 'old' });
     const later = { ...io, now: () => new Date(NOW.getTime() + 20 * 60000) };
     // No signal and no lease: a start 20 minutes ago with no step counts as stopped; 5 minutes ago does not.
     expect(out(run(['swarm', 'takeover', '--session', 'new'], { ...io, now: () => new Date(NOW.getTime() + 5 * 60000) }))).toMatchObject({ took: false, liveness: 'alive' });
@@ -950,10 +996,23 @@ describe('forge swarm (execution)', () => {
       const odd = out(run(['swarm', 'join', '--session', 't9', '--role', 'executor', '--task', 'T1', '--hook-session', '${CLAUDE_SESSION_ID}'], wio));
       expect(odd.warning).toMatch(/not a usable session id/);
       expect(member().hookSession).toBe(HOOK);
-      expect(run(['swarm', 'join', '--session', 't9', '--role', 'executor', '--task', 'T1', '--hook-session'], wio).code).toBe(2);
+      // A flag without a value counts as absent: the member keeps the id it recorded (J-01).
+      expect(out(run(['swarm', 'join', '--session', 't9', '--role', 'executor', '--task', 'T1', '--hook-session'], wio)).warning).toBeUndefined();
+      expect(member().hookSession).toBe(HOOK);
       saveExecution(root, { ...readExecution(root)!, hookSession: 'coord-hook' });
       expect(run(['swarm', 'join', '--session', 'M1', '--role', 'manual', '--hook-session', 'coord-hook'], wio).code).toBe(2);
       expect(member().hookSession).toBe(HOOK);
+    });
+    it('join takes the id from the environment when --hook-session comes empty, and joins without a signal when there is none (J-01)', () => {
+      const member = (sid: string) => JSON.parse(readFileSync(path.join(root, '.forge', 'members', `${sid}.json`), 'utf8'));
+      // An unsubstituted ${CLAUDE_SESSION_ID} in a reference reaches Bash as nothing: the flag comes without a value.
+      const r = cli(['swarm', 'join', '--session', 'm1', '--role', 'manual', '--hook-session'], { ...wio, env: { CLAUDE_CODE_SESSION_ID: 'abc-1' } });
+      expect(r.code).toBe(0);
+      expect(JSON.parse(r.stdout).warning).toBeUndefined();
+      expect(member('m1').hookSession).toBe('abc-1');
+      const bare = out(cli(['swarm', 'join', '--session', 'm2', '--role', 'manual', '--hook-session'], wio));
+      expect(bare.warning).toBe('no Claude session id (--hook-session or CLAUDE_CODE_SESSION_ID): joined without a live signal');
+      expect(member('m2').hookSession).toBeNull();
     });
     it('an executor gets a worktree only for its own task', () => {
       out(run(['swarm', 'join', '--session', 'E1', '--role', 'executor', '--task', 'T1'], wio));

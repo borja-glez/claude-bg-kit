@@ -24,8 +24,8 @@ beforeEach(() => {
   commitIn(root, 'base.txt', 'base\n', 'init');
   mkdirSync(path.join(root, '.forge'), { recursive: true });
   writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators: []\n');
-  io = { cwd: root, now: () => new Date('2026-10-12T12:00:00.000Z'), git: defaultGit(root) };
-  out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+  io = { cwd: root, now: () => new Date('2026-10-12T12:00:00.000Z'), git: defaultGit(root), env: {} };
+  out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--hook-session', 'hook-main'], io));
 });
 afterEach(() => { try { git('worktree', 'prune'); } catch { /* ignore */ } rmSync(root, { recursive: true, force: true }); });
 
@@ -238,7 +238,7 @@ describe('forge swarm integrate (into the run branch)', () => {
         { id: 'fix-a', title: 'fix a', path: 'small', zones: ['a.txt'], depends_on: [] },
         { id: 'fix-b', title: 'fix b', path: 'small', zones: ['b.txt'], depends_on: [] },
       ]));
-      const started = run(['swarm', 'start', '--project', 'loose', '--session', 'main', '--kind', 'ephemeral', '--tasks', '.forge/tasks.json'], io);
+      const started = run(['swarm', 'start', '--project', 'loose', '--session', 'main', '--kind', 'ephemeral', '--hook-session', 'hook-main', '--tasks', '.forge/tasks.json'], io);
       expect(started.stderr).toBe('');
       out(run(['swarm', 'tick'], io));
     };

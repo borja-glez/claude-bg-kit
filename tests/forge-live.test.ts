@@ -39,7 +39,7 @@ describe('forge hook live', () => {
     git('init', '-q', '-b', 'main'); git('config', 'user.email', 'a@b.c'); git('config', 'user.name', 't');
     writeFileSync(path.join(root, 'x.txt'), 'x'); git('add', '.'); git('commit', '-qm', 'init');
     mkdirSync(path.join(root, '.forge'), { recursive: true });
-    io = { cwd: root, now: () => new Date(T), git: defaultGit(root) };
+    io = { cwd: root, now: () => new Date(T), git: defaultGit(root), env: {} };
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
   const hook = (input: object) => run(['hook', 'live'], { ...io, stdin: JSON.stringify(input) });
@@ -62,17 +62,19 @@ describe('forge hook live', () => {
     expect(JSON.parse(readFileSync(liveFile(root, 's1'), 'utf8'))).toMatchObject({ event: 'Stop', ts: '2026-10-12T12:03:00.000Z' });
   });
   const runningTask = { T1: { status: 'running', stage: 'implement', round: 1, worktree: '/w', branch: 'task/T1', executor: 'subagents', attempts: 0, agent: 'forge-impl', startedAt: T, stageSince: T, updatedAt: T, detail: null } };
-  it('a Stop while unbound and with an agent running binds the session and writes the signal', () => {
+  it('a Stop of a session while the execution is unbound neither binds it nor writes a signal (D-01)', () => {
     exec({ hookSession: null, tasks: runningTask });
+    const before = readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8');
     expect(run(['hook', 'stop'], { ...io, stdin: JSON.stringify({ session_id: 's1' }) }).stdout).toBe('');
-    expect(readExecution(root)?.hookSession).toBe('s1');
-    expect(JSON.parse(readFileSync(liveFile(root, 's1'), 'utf8'))).toMatchObject({ role: 'coordinator', runId: 'r1', event: 'Stop' });
+    expect(readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8')).toBe(before);
+    expect(existsSync(liveFile(root, 's1'))).toBe(false);
   });
-  it('a SubagentStart while unbound binds the session and the signal lists the agent', () => {
+  it('a SubagentStart of a non-member while the execution is unbound leaves execution.json as it was, writes no signal and prints nothing (E-15)', () => {
     exec({ hookSession: null });
-    hook({ session_id: 's1', hook_event_name: 'SubagentStart', agent_id: 'a1', agent_type: 'forge:forge-impl' });
-    expect(readExecution(root)?.hookSession).toBe('s1');
-    expect(JSON.parse(readFileSync(liveFile(root, 's1'), 'utf8'))).toMatchObject({ agents: [{ id: 'a1', type: 'forge:forge-impl' }] });
+    const before = readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8');
+    expect(hook({ session_id: 's1', hook_event_name: 'SubagentStart', agent_id: 'a1', agent_type: 'forge:forge-impl' }).stdout).toBe('');
+    expect(readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8')).toBe(before);
+    expect(existsSync(liveFile(root, 's1'))).toBe(false);
   });
   it('a SubagentStart from another session never rebinds a bound execution', () => {
     exec({ hookSession: 's1' });
@@ -109,11 +111,12 @@ describe('forge hook live', () => {
     expect(run(['hook', 'stop'], { ...io, stdin: JSON.stringify({ session_id: 's2' }) }).stdout).toBe('');
     expect(JSON.parse(readFileSync(liveFile(root, 's2'), 'utf8'))).toMatchObject({ role: 'executor', event: 'Stop' });
   });
-  it('the Stop hook from a linked worktree reads and saves the execution in the main checkout', () => {
-    exec({ hookSession: null, tasks: runningTask });
+  it('the Stop hook from a linked worktree reads the execution of the main checkout and saves it there', () => {
+    exec();
     const wt = path.join(root, '.claude', 'worktrees', 'run');
     git('worktree', 'add', '-q', wt, '-b', 'forge/run-shop');
-    run(['hook', 'stop'], { ...io, cwd: wt, git: defaultGit(wt), stdin: JSON.stringify({ session_id: 's1' }) });
+    const r = run(['hook', 'stop'], { ...io, cwd: wt, git: defaultGit(wt), stdin: JSON.stringify({ session_id: 's1' }) });
+    expect(JSON.parse(r.stdout).decision).toBe('block');
     expect(readExecution(root)?.hookSession).toBe('s1');
     expect(existsSync(path.join(wt, '.forge', 'execution.json'))).toBe(false);
     expect(existsSync(liveFile(root, 's1'))).toBe(true);
@@ -132,11 +135,11 @@ describe('forge hook live', () => {
     expect(readExecution(root)?.hookSession).toBeNull();
     expect(JSON.parse(readFileSync(liveFile(root, 's2'), 'utf8'))).toMatchObject({ role: 'executor', agents: [{ id: 'a1' }] });
   });
-  it('a non-member Stop still binds an unbound execution', () => {
-    exec({ hookSession: null, tasks: runningTask });
+  it('a Stop of a non-member leaves an unbound execution unbound and does not block', () => {
+    exec({ hookSession: null });
     writeMember(root, { sessionId: 's2', role: 'executor', runId: 'old', task: null, name: null, since: T });
-    run(['hook', 'stop'], { ...io, stdin: JSON.stringify({ session_id: 's2' }) });
-    expect(readExecution(root)?.hookSession).toBe('s2');
+    expect(run(['hook', 'stop'], { ...io, stdin: JSON.stringify({ session_id: 's2' }) }).stdout).toBe('');
+    expect(readExecution(root)?.hookSession).toBeNull();
   });
   it('SessionStart tells the coordinator and a member how to resume', () => {
     exec({ tasks: runningTask });
@@ -159,7 +162,7 @@ describe('forge hook live', () => {
     expect(JSON.parse(hook({ session_id: 's2', hook_event_name: 'SessionStart' }).stdout).hookSpecificOutput.additionalContext)
       .toContain('Tell the user in Spanish (es)');
     // The infinite run's locale goes first.
-    expect(run(['infinite', 'start', '--cycles', '2', '--locale', 'pt'], io).code).toBe(0);
+    expect(run(['infinite', 'start', '--cycles', '2', '--locale', 'pt', '--session', 's1'], io).code).toBe(0);
     expect(JSON.parse(hook({ session_id: 's1', hook_event_name: 'SessionStart' }).stdout).hookSpecificOutput.additionalContext)
       .toContain('Tell the user in Portuguese (pt), the language they write in.');
   });
@@ -219,7 +222,9 @@ describe('forge hook live', () => {
     exec({ mode: 'sessions', hookSession: null });
     joinT9({ runId: 'old' });
     hook({ session_id: HOOK, hook_event_name: 'SubagentStart', agent_id: 'a1', agent_type: 'x' });
-    expect(readExecution(root)?.hookSession).toBe(HOOK);
+    expect(readExecution(root)?.hookSession).toBeNull();
+    expect(existsSync(liveFile(root, 't9'))).toBe(false);
+    expect(existsSync(liveFile(root, HOOK))).toBe(false);
     exec({ mode: 'sessions' });
     writeMember(root, { sessionId: 's7', role: 'manual', runId: 'r1', task: null, name: null, since: T, hookSession: 'other-hook' });
     hook({ session_id: 's7', hook_event_name: 'SessionStart' });

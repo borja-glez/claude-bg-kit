@@ -682,7 +682,7 @@ describe('plugin layout', () => {
       'FORGE swarm relaunch', 'FORGE swarm nudge', 'The new session reads .forge/work/<T>/handover.md first',
       'An unattended execution never stops to ask']) expect(exec).toContain(s);
     expect(runRef('large')).toContain('--mode sessions');
-    expect(runRef('resuming')).toContain('FORGE swarm takeover --session <SID> --db DB');
+    expect(runRef('resuming')).toContain('FORGE swarm takeover --session <SID> --hook-session <CSID> --db DB');
     expect(read('plugins/forge/skills/member/SKILL.md')).toContain('A run member never integrates and never merges');
     for (const s of [runMd, exec]) expect(s).not.toContain('Sessions mode arrives in a later version');
     const manual = runRef('manual-member');
@@ -856,7 +856,7 @@ describe('plugin layout', () => {
     expect(read('plugins/forge/skills/member/SKILL.md')).toContain('FORGE swarm join --session <SID> --role executor --task <T> --name wp-<project>-<T> --hook-session ${CLAUDE_SESSION_ID}');
     const manual = runRef('manual-member');
     const exec = runRef('execution');
-    expect(manual).toContain('FORGE swarm join --session <SID> --role manual --hook-session ${CLAUDE_SESSION_ID}');
+    expect(manual).toContain('FORGE swarm join --session <SID> --role manual --hook-session <CSID>');
     expect(exec).toContain('`start {task}` in mode `sessions`: first `FORGE swarm worktree <T>`');
     expect(manual).toMatch(/5\. \*\*Finish\.\*\* Commits on `task\/<T>`[^\n]*FORGE swarm report <T> --session <SID> --stage verdict --status accepted --no-agent/);
     expect(exec).toContain('it never edits task code itself (except direct requests, below)');
@@ -890,5 +890,28 @@ describe('plugin layout', () => {
     expect(read('plugins/waypoint/README.md')).toContain('Loose tasks');
     expect(read('plugins/waypoint/README.es.md')).toContain('Tareas sueltas');
     expect(read('plugins/forge/README.md')).not.toMatch(/ephemeral[^.]*no roadmap/i);
+  });
+  it('no reference and no agent leans on ${CLAUDE_…} substitution, which only a SKILL.md body gets (C1, J-01)', () => {
+    const plugins = fileURLToPath(new URL('../plugins/', import.meta.url));
+    const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
+      .flatMap(d => (d.isDirectory() ? walk(path.join(dir, d.name)) : [path.join(dir, d.name)]));
+    const files = readdirSync(plugins).flatMap(p => [
+      ...(existsSync(path.join(plugins, p, 'skills')) ? walk(path.join(plugins, p, 'skills')).filter(f => path.basename(f) !== 'SKILL.md') : []),
+      ...(existsSync(path.join(plugins, p, 'agents')) ? readdirSync(path.join(plugins, p, 'agents')).filter(f => f.endsWith('.md')).map(f => path.join(plugins, p, 'agents', f)) : []),
+    ]);
+    expect(files.length).toBeGreaterThan(20);
+    const hits = files.flatMap(f => readFileSync(f, 'utf8').split(/\r?\n/)
+      .flatMap((l, i) => (l.includes('${CLAUDE_') ? [`${path.relative(plugins, f)}:${i + 1}`] : [])));
+    expect(hits).toEqual([]);
+  });
+  it('the skills give the commands that bind a session its Claude id: CSID in SKILL.md, <CSID> in the references (C1)', () => {
+    expect(read('plugins/forge/skills/run/SKILL.md')).toContain('`CSID` = `${CLAUDE_SESSION_ID}`');
+    expect(runRef('execution')).toContain('FORGE swarm start --project <project> --session <SID> --hook-session <CSID>');
+    expect(runRef('ephemeral')).toContain('--session <SID> --hook-session <CSID> --kind ephemeral');
+    expect(runRef('ephemeral')).toContain('--session <its coordinator> --hook-session <CSID> --kind ephemeral');
+    const resuming = runRef('resuming');
+    expect(resuming).toContain('`--session`, `--hook-session <CSID>`');
+    expect(resuming).not.toContain('the Stop hook binds');
+    expect(runRef('manual-member')).toContain('FORGE swarm join --session <SID> --role manual --hook-session <CSID>');
   });
 });

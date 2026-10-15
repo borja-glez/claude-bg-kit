@@ -11,39 +11,29 @@ export const executionEndedReason = (reason: string): string =>
   `the forge execution ended (${reason}): report it as /forge:run's Execution section says (step 7), then stop.`;
 
 /**
- * An active execution whose hookSession is still unbound, bound to this session; anything else unchanged. A bound
- * hookSession is never rebound.
- */
-export function bindHookSession(e: ExecutionState | null, session: unknown): ExecutionState | null {
-  if (!e || !e.active || e.hookSession !== null || typeof session !== 'string' || !session) return e;
-  return { ...e, hookSession: session };
-}
-
-/**
- * The Stop hook's decision for an execution's coordinator. It binds to the first session that stops while it is
- * unbound (blocked or not: the returned exec carries the binding) and leaves the others alone. It never blocks while
- * the coordinator sleeps, nor while an agent of a task is running: that agent's return wakes the session, so a block
- * would only add a turn (and fight a /goal evaluator). With stop_hook_active it blocks again only after a new step.
+ * The Stop hook's decision for an execution's coordinator. The execution is bound when it starts (`swarm start` or
+ * `swarm takeover` with --hook-session, C1): an unbound one, from forge 0.15, blocks no session, and no other session
+ * is ever blocked or bound here. It never blocks while the coordinator sleeps, nor while an agent of a task is
+ * running: that agent's return wakes the session, so a block would only add a turn (and fight a /goal evaluator).
+ * With stop_hook_active it blocks again only after a new step.
  */
 export function decideExecutionStop(input: { stop_hook_active?: boolean; session_id?: unknown }, exec: ExecutionState | null, ctx: { now: Date; stopFile: boolean }):
   { block: false; exec: ExecutionState | null } | { block: true; reason: string; exec: ExecutionState; ended?: string } {
   if (!exec || !exec.active) return { block: false, exec };
   const session = typeof input.session_id === 'string' && input.session_id ? input.session_id : null;
-  if (exec.hookSession !== null && session !== exec.hookSession) return { block: false, exec };
-  const e = bindHookSession(exec, session) as ExecutionState;
-  const hookSession = e.hookSession;
+  if (exec.hookSession === null || session !== exec.hookSession) return { block: false, exec };
   if (ctx.stopFile) {
-    const ended: ExecutionState = { ...e, active: false, stopReason: 'stopped', sleepUntil: null, hookSession };
+    const ended: ExecutionState = { ...exec, active: false, stopReason: 'stopped', sleepUntil: null };
     return { block: true, reason: executionEndedReason('stopped'), ended: 'stopped', exec: ended };
   }
   const now = ctx.now.getTime();
-  const until = e.sleepUntil ? Date.parse(e.sleepUntil) : NaN;
-  if (Number.isFinite(until) && until > now) return { block: false, exec: e };
-  const agentRunning = Object.values(e.tasks).some(t => t.status === 'running' && !!t.agent && now - Date.parse(t.updatedAt) < LEASE_MINUTES * 60000);
-  if (agentRunning) return { block: false, exec: e };
-  if (input.stop_hook_active === true && e.lastStepAt === e.lastBlockStep) return { block: false, exec: e };
-  const running = Object.values(e.tasks).filter(t => t.status === 'running').length;
-  return { block: true, reason: executionBlockReason(running, e.parallel), exec: { ...e, hookSession, lastBlockStep: e.lastStepAt } };
+  const until = exec.sleepUntil ? Date.parse(exec.sleepUntil) : NaN;
+  if (Number.isFinite(until) && until > now) return { block: false, exec };
+  const agentRunning = Object.values(exec.tasks).some(t => t.status === 'running' && !!t.agent && now - Date.parse(t.updatedAt) < LEASE_MINUTES * 60000);
+  if (agentRunning) return { block: false, exec };
+  if (input.stop_hook_active === true && exec.lastStepAt === exec.lastBlockStep) return { block: false, exec };
+  const running = Object.values(exec.tasks).filter(t => t.status === 'running').length;
+  return { block: true, reason: executionBlockReason(running, exec.parallel), exec: { ...exec, lastBlockStep: exec.lastStepAt } };
 }
 
 const hhmm = (d: Date) => d.toISOString().slice(11, 16);

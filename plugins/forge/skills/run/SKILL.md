@@ -5,7 +5,7 @@ description: Do a software task with the forge method - triage by size, the righ
 
 # forge: run a task
 
-`FORGE` below means `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs"`. Work files go in `.forge/work/<task-id>/` (task id: a short kebab-case slug of the task, or the waypoint task id when one is in progress). Keep internal names in English.
+`FORGE` below means `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs"`. Work files go in `.forge/work/<task-id>/` (task id: a short kebab-case slug of the task, or the waypoint task id when one is in progress). Keep internal names in English. `CSID` = `${CLAUDE_SESSION_ID}` (this session's Claude id; references pass it as `<CSID>`; the CLI also reads it from the environment).
 
 **Language.** Every message to the person is in the language they write in, not that of this skill, a CLI output or an agent's reply, also right after a Stop-hook block, a wake or an agent's return (those texts are English for you, never for them). Between tool calls write nothing, or one short line in their language; never paraphrase a step of this skill («Now mirror the stage…»).
 
