@@ -965,6 +965,8 @@ describe('plugin layout', () => {
       for (const s of ['`swarm close`', '`swarm start --project P --session SID --hook-session ID', '`swarm takeover --session SID --hook-session ID [--db dir]`',
         '`infinite start --cycles N | --hours H --session ID', 'CLAUDE_CODE_SESSION_ID', '`commit`', 'kind: e2e']) expect(md).toContain(s);
       expect(md).not.toContain('Stop hook binds');
+      expect(md).not.toContain('first Stop or SubagentStart');
+      expect(md).not.toContain('primer Stop o SubagentStart');
     }
     for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) {
       const md = read(f);
