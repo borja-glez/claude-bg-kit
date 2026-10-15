@@ -921,4 +921,13 @@ describe('plugin layout', () => {
     expect(inf).not.toContain('first Stop hook binds');
     expect(inf).not.toContain('binds to the session that first hits the Stop hook');
   });
+  it('stopping, stalling or closing an execution publishes meta/run inactive and frees the coordinator tasks (A-23)', () => {
+    const step7 = runRef('execution').split('\n').find(l => l.startsWith('7. **End.**'))!;
+    const stop = read('plugins/forge/skills/stop/SKILL.md');
+    for (const s of [step7, stop]) {
+      for (const w of ['FORGE swarm close', 'active: false', 'status: "free"', 'exec: {"__delete__": true}', 'owner: {"__delete__": true}']) expect(s).toContain(w);
+    }
+    for (const w of ['`stalled`', '`stopped`', '`budget`']) expect(step7).toContain(w);
+    expect(stop).toContain('closedAt');
+  });
 });
