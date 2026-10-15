@@ -206,6 +206,25 @@ export function failingLabel(r: Pick<ValidatorResult, 'validator' | 'newFailing'
   return `${r.validator} (${locale === 'es' ? 'nuevos en rojo' : 'new failing'}: ${list})`;
 }
 
+/**
+ * The ledger's `validate` event (C4): the call's clock (`durationMs`), whether every result came from the tree cache
+ * (`cached`), the scope (affected, small, heavy or final) and, per result, its own clock, `cached`, the failing tests
+ * (always, [] when it passed or they could not be read: failingKnown) and the new ones. `extra` carries `baseline: true`
+ * and `integrate`.
+ */
+export function validateEvent(ts: string, task: string | undefined, results: ValidatorResult[], durationMs: number, scope: Scope['mode'], extra: Record<string, unknown> = {}): LedgerEvent {
+  return {
+    ts, kind: 'validate', ...(task ? { task } : {}), ...extra, ok: results.every(r => !blocking(r)), scope, durationMs,
+    cached: results.length > 0 && results.every(r => r.cached === true),
+    results: results.map(r => ({
+      validator: r.validator, ok: r.ok, flaky: r.flaky, durationMs: r.durationMs, cached: r.cached === true,
+      failing: r.failing ?? [], failingKnown: r.failingKnown ?? false,
+      ...(r.newFailing?.length ? { newFailing: r.newFailing } : {}), ...(r.skipped ? { skipped: r.skipped } : {}),
+      ...(r.preexisting ? { preexisting: true } : {}), ...(r.ok ? {} : { failures: r.failures }),
+    })),
+  };
+}
+
 // vitest, jest, mocha and Playwright when the project has no test files yet.
 const NO_TESTS = /\b(no test files found|no tests found)\b/i;
 const RUNS_TESTS = new Set(['test', 'e2e']);

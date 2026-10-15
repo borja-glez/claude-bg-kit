@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -1881,4 +1881,80 @@ describe('defaultExecMany (C-12)', () => {
     expect(r[3].timedOut).toBe(false);
     expect(Date.now() - t0).toBeLessThan(15000);
   }, 30000);
+});
+
+describe('validate and the tree cache (C6)', () => {
+  let repo: string;
+  let ran: string[];
+  let vio: Io;
+  beforeEach(() => {
+    repo = mkdtempSync(path.join(tmpdir(), 'forge-vcache-'));
+    const g = (...a: string[]) => execFileSync('git', a, { cwd: repo, encoding: 'utf8' });
+    g('init', '-q'); g('config', 'user.email', 'a@b.c'); g('config', 'user.name', 't');
+    writeFileSync(path.join(repo, 'a.txt'), 'a\n');
+    g('add', 'a.txt'); g('commit', '-qm', 'init');
+    mkdirSync(path.join(repo, '.forge'));
+    writeFileSync(path.join(repo, '.forge', 'config.yaml'), 'detect: false\nvalidators:\n  - name: unit\n    cmd: unit-cmd\n    kind: test\n  - name: style\n    cmd: lint-cmd\n    kind: lint\n  - name: e2e\n    cmd: e2e-cmd\n    kind: e2e\n');
+    ran = [];
+    vio = { cwd: repo, now: () => new Date('2026-10-11T10:00:00.000Z'), env: {}, exec: cmd => { ran.push(cmd); return { code: 0, output: '', ms: 7, timedOut: false }; } };
+  });
+  it('a heavy run reads and writes it, e2e aside; --no-cache skips it; --final writes and never reads; each event says so', () => {
+    expect(run(['validate', '--all', '--path', 'medium', '--task', 't'], vio).code).toBe(0);
+    expect(ran).toEqual(['unit-cmd', 'lint-cmd', 'e2e-cmd']);
+    ran.length = 0;
+    const again = JSON.parse(run(['validate', '--all', '--path', 'medium', '--task', 't'], vio).stdout);
+    expect(ran).toEqual(['e2e-cmd']);
+    expect(again.map((r: { validator: string; cached?: boolean; durationMs: number }) => [r.validator, r.cached ?? false, r.durationMs])).toEqual([['unit', true, 7], ['style', true, 7], ['e2e', false, 7]]);
+    ran.length = 0;
+    run(['validate', '--all', '--path', 'medium', '--no-cache'], vio);
+    expect(ran).toEqual(['unit-cmd', 'lint-cmd', 'e2e-cmd']);
+    ran.length = 0;
+    run(['validate', '--final'], vio);
+    expect(ran).toEqual(['unit-cmd', 'lint-cmd', 'e2e-cmd']);
+    ran.length = 0;
+    run(['validate', '--all', '--path', 'small'], vio);
+    expect(ran).toEqual([]);
+    const events = readEvents(repo).filter(e => e.kind === 'validate');
+    expect(events.map(e => [e.scope, e.cached])).toEqual([['heavy', false], ['heavy', false], ['heavy', false], ['final', false], ['small', true]]);
+    for (const e of events) expect(typeof e.durationMs).toBe('number');
+  });
+  it('an --affected pass never reads nor writes it; validate.cache: false turns it off', () => {
+    run(['validate', '--affected', 'a.txt'], vio);
+    run(['validate', '--affected', 'a.txt'], vio);
+    expect(ran.filter(c => c === 'lint-cmd')).toHaveLength(2);
+    expect(existsSync(path.join(repo, '.forge', 'cache', 'validate'))).toBe(false);
+    expect(readEvents(repo).filter(e => e.kind === 'validate').at(-1)).toMatchObject({ scope: 'affected', cached: false });
+    writeFileSync(path.join(repo, '.forge', 'config.yaml'), 'validate:\n  cache: false\ndetect: false\nvalidators:\n  - name: style\n    cmd: lint-cmd\n    kind: lint\n');
+    ran.length = 0;
+    run(['validate', '--all'], vio);
+    run(['validate', '--all'], vio);
+    expect(ran).toEqual(['lint-cmd', 'lint-cmd']);
+  });
+  it('--out writes the results to a file as well; --out needs one', () => {
+    const r = run(['validate', '--all', '--out', '.forge/work/t/validators.json'], vio);
+    expect(JSON.parse(readFileSync(path.join(repo, '.forge', 'work', 't', 'validators.json'), 'utf8'))).toEqual(JSON.parse(r.stdout));
+    expect(run(['validate', '--all', '--out'], vio).code).toBe(2);
+    expect(run(['validate', '--all', '--out', '--task', 't'], vio).code).toBe(2);
+  });
+  it('from a subdirectory, a change outside it is still seen: the result is not served from the cache', () => {
+    mkdirSync(path.join(repo, 'sub'));
+    writeFileSync(path.join(repo, 'sub', 'b.txt'), 'b\n');
+    execFileSync('git', ['add', 'sub/b.txt'], { cwd: repo });
+    execFileSync('git', ['commit', '-qm', 'sub'], { cwd: repo });
+    const sub = path.join(repo, 'sub');
+    const inSub: Io = { ...vio, cwd: sub };
+    // forge reads its config from the subdirectory it runs in
+    mkdirSync(path.join(sub, '.forge'));
+    writeFileSync(path.join(sub, '.forge', 'config.yaml'), 'detect: false\nvalidators:\n  - name: style\n    cmd: lint-cmd\n    kind: lint\n');
+    appendFileSync(path.join(repo, '.git', 'info', 'exclude'), 'sub/.forge/\n'); // forge's own state in sub is not a change
+    run(['validate', '--all', '--path', 'medium'], inSub);
+    expect(ran).toEqual(['lint-cmd']);
+    ran.length = 0;
+    run(['validate', '--all', '--path', 'medium'], inSub);
+    expect(ran).toEqual([]);
+    writeFileSync(path.join(repo, 'a.txt'), 'changed outside sub\n');
+    ran.length = 0;
+    run(['validate', '--all', '--path', 'medium'], inSub);
+    expect(ran).toEqual(['lint-cmd']);
+  });
 });

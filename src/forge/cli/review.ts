@@ -3,13 +3,15 @@ import path from 'node:path';
 import { UsageError } from './errors.js';
 import { appendEvent, readEvents, type LedgerEvent } from '../ledger.js';
 import { loadConfig, agentFor, type Profile, type ForgeConfig } from '../config.js';
-import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, runOptions, type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
+import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, runOptions, validateEvent, failingLabel, type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { PATH_ORDER, zonesFromPaths, type PathName, type ReviewRole } from '../triage.js';
 import { parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, repoRelative, type Finding, type Review, type ReviewerName, type FailingValidator } from '../verdict.js';
 import { roundDecision } from '../round.js';
 import { buildCase, readShadow, saveShadow, takeBrief } from '../shadow.js';
 import { shadowCommand } from './shadow.js';
 import { restoringRegenerated } from './swarm.js';
+import { mainCheckout } from '../local.js';
+import { runWithCache } from '../validate-cache.js';
 import { reviewRound, reviewerKey, type PreviousResult, type ReviewerKey, type RoundPlan, type RoundReviewer, type TriageReview } from '../review-round.js';
 
 // The review commands. run.ts dispatches here; this module never imports run.ts (that would be a cycle).
@@ -58,12 +60,19 @@ function restoringGenerated<T>(deps: ReviewDeps, generated: string[], fn: () => 
   return generated.length ? restoringRegenerated({ git: deps.git }, fn, into, generated) : fn();
 }
 
-/** A validator run of the review commands: the config's parallel batch and retry rule (C-12), putting back what the
- *  config's `generated` names. */
-function validateList(deps: ReviewDeps, config: ForgeConfig, list: Validator[], restored: string[]): ValidatorResult[] {
+/** A validator run of the review commands (C6, C-12): through the tree cache of the main checkout, with the config's
+ *  parallel batch and retry rule, putting back what the config's `generated` names. The results are raw (no baseline
+ *  marks); durationMs is the call's clock. */
+function validateList(deps: ReviewDeps, config: ForgeConfig, list: Validator[], restored: string[]): { results: ValidatorResult[]; durationMs: number } {
+  const t0 = Date.now();
   const opts = runOptions(config, readEvents(deps.cwd), deps.now(), deps.execMany);
-  return restoringGenerated(deps, config.generated, () => runValidators(list, deps.exec, config.validatorTimeoutSec, opts), restored);
+  const results = runWithCache(list,
+    misses => restoringGenerated(deps, config.generated, () => runValidators(misses, deps.exec, config.validatorTimeoutSec, opts), restored),
+    { main: mainCheckout(deps.cwd), git: deps.git, repo: deps.repo, generated: config.generated, read: config.validate.cache, write: config.validate.cache, now: deps.now });
+  return { results, durationMs: Date.now() - t0 };
 }
+
+const cachedNames = (results: ValidatorResult[]) => results.filter(r => r.cached === true).map(r => r.validator);
 
 function readJson(file: string): unknown {
   try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return undefined; }
@@ -117,11 +126,12 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   const scope: Scope = pathName === 'trivial' || pathName === 'small' ? { mode: 'small' }
     : { mode: 'heavy', changed: changed === null ? null : changed.split('\n').map(s => s.trim()).filter(Boolean) };
   const restored: string[] = [];
-  const results: ValidatorResult[] = markPreexisting(validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored), baseline);
+  const validation = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored);
+  const results: ValidatorResult[] = markPreexisting(validation.results, baseline);
   const ok = results.every(r => !blocking(r));
   const validatorsFile = path.join(dir, `validators-${n}.json`);
   writeFileSync(validatorsFile, JSON.stringify(results, null, 2) + '\n');
-  appendEvent(deps.cwd, { ts: deps.now().toISOString(), kind: 'validate', task, ok, results: results.map(r => ({ validator: r.validator, ok: r.ok, flaky: r.flaky, ...(r.skipped ? { skipped: r.skipped } : {}), ...(r.preexisting ? { preexisting: true } : {}), ...(r.ok ? {} : { failures: r.failures }) })) });
+  appendEvent(deps.cwd, validateEvent(deps.now().toISOString(), task, results, validation.durationMs, scope.mode));
   const diffFile = path.join(dir, `diff-${n}.patch`);
   writeFileSync(diffFile, diff);
 
@@ -203,22 +213,22 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   const failing = results.filter(blocking).map(r => r.validator);
   const preexisting = results.filter(r => r.ok !== true && r.preexisting === true).map(r => r.validator);
   const out: Record<string, unknown> = {
-    round, validators: { ok, failing, preexisting, file: rel(deps.cwd, validatorsFile) }, spawn,
+    round, validators: { ok, failing, preexisting, file: rel(deps.cwd, validatorsFile) }, spawn, cached: cachedNames(results), durationMs: validation.durationMs,
     ...(plan.carried.length ? { carried: plan.carried.map(c => c.name) } : {}),
     ...(restored.length ? { restored } : {}),
   };
-  if (locale === 'es' || locale === 'en') out.say = sayPrep(round, ok, failing, plan, locale);
+  if (locale === 'es' || locale === 'en') out.say = sayPrep(round, ok, results.filter(blocking).map(r => failingLabel(r, locale)), plan, locale, cachedNames(results).length);
   return json(out);
 }
 
-function sayPrep(round: number, ok: boolean, failing: string[], plan: RoundPlan, locale: 'es' | 'en'): string {
+function sayPrep(round: number, ok: boolean, failing: string[], plan: RoundPlan, locale: 'es' | 'en', cached: number): string {
   const who = plan.spawn.filter(s => !s.twin).map(s => `${s.name} (${s.effort}${s.mode === 'delta' ? ', delta' : ''})`).join(', ');
   const twins = plan.spawn.filter(s => s.twin).length;
   if (locale === 'es') {
-    return `Ronda ${round}: validadores ${ok ? 'en verde' : `en rojo (${failing.join(', ')})`}; revisan ${who || 'nadie'}`
+    return `Ronda ${round}: validadores ${ok ? 'en verde' : `en rojo (${failing.join(', ')})`}${cached ? ` (${cached} de caché)` : ''}; revisan ${who || 'nadie'}`
       + `${plan.carried.length ? `; se arrastran ${plan.carried.map(c => c.name).join(', ')}` : ''}${twins ? `; ${twins} gemelo(s) en sombra` : ''}.`;
   }
-  return `Round ${round}: validators ${ok ? 'green' : `red (${failing.join(', ')})`}; reviewing: ${who || 'nobody'}`
+  return `Round ${round}: validators ${ok ? 'green' : `red (${failing.join(', ')})`}${cached ? ` (${cached} cached)` : ''}; reviewing: ${who || 'nobody'}`
     + `${plan.carried.length ? `; carried: ${plan.carried.map(c => c.name).join(', ')}` : ''}${twins ? `; ${twins} shadow twin(s)` : ''}.`;
 }
 
@@ -369,7 +379,7 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
  * `FORGE prep --task <id>-<n> --path <p> [--phase <name>] [--dir <dir>] [--cwd <worktree>]`: before a brief's work, in
  * one call, reads BASE (the HEAD of `--cwd`), records what already fails on it into `<dir>/baseline-<n>.json` (as
  * `validate --all --path <p> --base-run --task <id>-<n>` does; `<dir>` defaults to `.forge/work/<id>`), logs the phase
- * `{"phase":<name, default implement>,"brief":<n>,"base":<BASE>}` on `<id>` and prints `{base, baseline, failing}`.
+ * `{"phase":<name, default implement>,"brief":<n>,"base":<BASE>}` on `<id>` and prints `{base, baseline, failing, cached, durationMs}` (the baseline comes from the tree cache when BASE's tree was validated: C6, I-06).
  * A validator failing on BASE is what the baseline is for: prep exits 0.
  */
 export function prep(args: string[], deps: ReviewDeps): Result {
@@ -394,15 +404,15 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   const config = loadConfig(deps.repoDir);
   const scope: Scope = p === 'trivial' || p === 'small' ? { mode: 'small' } : { mode: 'heavy', changed: null };
   const restored: string[] = [];
-  const results = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored);
+  const { results, durationMs } = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored);
   const dir = path.resolve(deps.cwd, flag('dir') ?? path.join('.forge', 'work', id));
   mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `baseline-${n}.json`);
   writeFileSync(file, JSON.stringify(results, null, 2) + '\n');
   const ts = deps.now().toISOString();
-  appendEvent(deps.cwd, { ts, kind: 'validate', task, baseline: true, ok: results.every(r => !blocking(r)), results: results.map(r => ({ validator: r.validator, ok: r.ok, flaky: r.flaky, ...(r.skipped ? { skipped: r.skipped } : {}), ...(r.ok ? {} : { failures: r.failures }) })) });
+  appendEvent(deps.cwd, validateEvent(ts, task, results, durationMs, scope.mode, { baseline: true }));
   appendEvent(deps.cwd, { ts, kind: 'phase', task: id, phase, brief: Number(n), base });
-  return json({ base, baseline: rel(deps.cwd, file), failing: results.filter(blocking).map(r => r.validator), ...(restored.length ? { restored } : {}) });
+  return json({ base, baseline: rel(deps.cwd, file), failing: results.filter(blocking).map(r => r.validator), cached: cachedNames(results), durationMs, ...(restored.length ? { restored } : {}) });
 }
 
 /** `review-prep`, `review-close`, `prep` and `shadow` (cli/shadow.ts). */

@@ -153,7 +153,7 @@ export function runWithCache(list: Validator[], run: (misses: Validator[]) => Va
     list.forEach((v, i) => {
       if (!cacheable(v)) return;
       const c = readCached(ctx.main, keyOf(v));
-      if (c && c.name === v.name && c.cmd === v.cmd) hits.set(i, fromCached(c));
+      if (c && c.name === v.name && c.cmd === v.cmd && c.tree === tree) hits.set(i, fromCached(c));
     });
   }
   const misses = list.filter((_, i) => !hits.has(i));

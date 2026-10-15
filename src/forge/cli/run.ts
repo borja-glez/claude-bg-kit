@@ -27,8 +27,9 @@ import { claudeSessionId, noClaudeSession } from '../../lib/claude-session.js';
 import { UsageError } from './errors.js';
 import { swarmCommand, restoringRegenerated } from './swarm.js';
 import { reviewCommand } from './review.js';
+import { runWithCache } from '../validate-cache.js';
 import { roundDecision } from '../round.js';
-import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, runOptions, type ExecMany, type RepoReader, type Scope } from '../validators.js';
+import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, runOptions, validateEvent, type ExecMany, type RepoReader, type Scope, type Validator } from '../validators.js';
 import { checkTools, mcpInventory, toolGaps } from '../tools.js';
 import { verifyPlan, cleanupPids, killTarget, askFor, capLines, relabelDiff, type PlanSurface } from '../verify.js';
 import { readLocal, updateLocal, mainCheckout, readLearned, recordLearned, OBJECT_ID, type SurfacePermission } from '../local.js';
@@ -217,6 +218,14 @@ export function defaultGit(cwd: string) {
     try { return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: MAX_GIT_OUTPUT, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }); }
     catch { return null; }
   };
+}
+
+/** Writes a JSON file through a temporary file and a rename, so a reader never sees half of it (validate --out). */
+function writeJsonAtomic(file: string, value: unknown): void {
+  mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n');
+  renameSync(tmp, file);
 }
 
 export const repoReader = (root: string): RepoReader => ({
@@ -700,6 +709,7 @@ export function run(argv: string[], io: Io): Result {
         const all = detectValidators(repoReader(repoDir), config);
         const p = flag('path');
         if (p !== undefined && !(PATH_ORDER as readonly string[]).includes(p)) throw new UsageError(`validate: --path must be one of ${PATH_ORDER.join('|')}`);
+        if (has('out') && flag('out') === undefined) throw new UsageError('validate: --out needs a file');
         let scope: Scope;
         if (has('final')) scope = { mode: 'final' };
         else if (!has('all') && flag('affected') !== undefined) scope = { mode: 'affected', files: flag('affected')!.split(',').map(s => s.trim()).filter(Boolean) };
@@ -710,14 +720,26 @@ export function run(argv: string[], io: Io): Result {
           scope = { mode: 'heavy', changed: diff === null ? null : diff.split('\n').map(s => s.trim()).filter(Boolean) };
         }
         const list = selectValidators(all, scope);
-        const validateRun = () => runValidators(list, io.exec ?? defaultExec(io.cwd), config.validatorTimeoutSec, runOptions(config, readEvents(io.cwd), io.now(), io.execMany));
+        const opts = runOptions(config, readEvents(io.cwd), io.now(), io.execMany);
         // --cwd the run worktree of this checkout (forge's own): what the validators regenerated there is put back.
         // Any other checkout: only the files the config's `generated` names (nothing when it names none).
         const restored: string[] = [];
         const inRun = io.workdir !== undefined && samePath(io.workdir, runWorktree(io.cwd));
         const restoreAt = { git: io.git ?? defaultGit(repoDir) };
-        let results = inRun ? restoringRegenerated(restoreAt, validateRun, restored)
-          : config.generated.length ? restoringRegenerated(restoreAt, validateRun, restored, config.generated) : validateRun();
+        const runList = (misses: Validator[]) => {
+          const go = () => runValidators(misses, io.exec ?? defaultExec(io.cwd), config.validatorTimeoutSec, opts);
+          return inRun ? restoringRegenerated(restoreAt, go, restored) : config.generated.length ? restoringRegenerated(restoreAt, go, restored, config.generated) : go();
+        };
+        // The tree cache (C6): an --affected pass and --no-cache never touch it; --final writes it but never reads it.
+        // Its git runs at the root of the checkout being validated, never at a subdirectory: a change outside it counts.
+        const useCache = config.validate.cache && !has('no-cache') && scope.mode !== 'affected';
+        const top = defaultGit(repoDir)(['rev-parse', '--show-toplevel'])?.trim();
+        const t0 = Date.now();
+        let results = runWithCache(list, runList, {
+          main: mainCheckout(io.cwd), git: top ? defaultGit(top) : restoreAt.git, repo: repoReader(repoDir), generated: config.generated,
+          read: useCache && scope.mode !== 'final', write: useCache, now: io.now,
+        });
+        const durationMs = Date.now() - t0;
         if (has('baseline')) {
           if (flag('baseline') === undefined) throw new UsageError('validate: --baseline needs the JSON a validate run printed on the base commit');
           let baseline: unknown;
@@ -725,7 +747,9 @@ export function run(argv: string[], io: Io): Result {
           results = markPreexisting(results, baseline);
         }
         const allOk = results.every(r => !blocking(r));
-        appendEvent(io.cwd, { ts: ts(), kind: 'validate', ...(flag('task') ? { task: flag('task') } : {}), ...(has('base-run') ? { baseline: true } : {}), ok: allOk, results: results.map(r => ({ validator: r.validator, ok: r.ok, flaky: r.flaky, ...(r.skipped ? { skipped: r.skipped } : {}), ...(r.preexisting ? { preexisting: true } : {}), ...(r.ok ? {} : { failures: r.failures }) })) });
+        appendEvent(io.cwd, validateEvent(ts(), flag('task'), results, durationMs, scope.mode, has('base-run') ? { baseline: true } : {}));
+        // --out: the same JSON in a file, written whole (a caller in the background reads it when the command is done).
+        if (flag('out') !== undefined) writeJsonAtomic(path.resolve(io.cwd, flag('out')!), results);
         const out = json(results, allOk ? 0 : 1);
         if (!list.length) out.stderr = all.length ? 'no validators cover the affected paths\n' : 'no validators detected: add tests or list validators in .forge/config.yaml\n';
         if (restored.length) out.stderr += `restored ${restored.length} tracked file(s) the validators regenerated: ${restored.join(', ')}\n`;

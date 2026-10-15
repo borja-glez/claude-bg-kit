@@ -307,7 +307,7 @@ describe('forge prep', () => {
     const out = JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'medium', '--cwd', wt], io).stdout);
     expect(out).toMatchObject({ base: head(), failing: [], restored: ['gen.txt'] });
     expect(git('status', '--porcelain', '--', 'gen.txt')).toBe('');
-    withGenerated('');
+    withGenerated('validate:\n  cache: false\n'); // the same command on the same tree would come from the cache
     const bare = JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'medium', '--cwd', wt], io).stdout);
     expect(bare).not.toHaveProperty('restored');
     expect(git('status', '--porcelain', '--', 'gen.txt')).toBe('M gen.txt');
@@ -539,5 +539,54 @@ describe('forge review-close', () => {
     const r = close();
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/review-prep/);
+  });
+});
+
+describe('the tree cache (C6), with forge in the worktree itself', () => {
+  // forge runs in wt itself (no --cwd, which would swap the test's exec for the real one), so `calls` counts every run.
+  let calls: string[];
+  let wio: Io;
+  beforeEach(() => {
+    calls = [];
+    wio = {
+      cwd: wt, now: () => new Date('2026-10-14T10:00:00.000Z'), env: {}, scriptPath: path.join(root, 'forge', 'dist', 'forge.cjs'),
+      exec: cmd => { calls.push(cmd); return { code: 0, output: '', ms: 40, timedOut: false }; },
+    };
+    appendEvent(wt, { ts: '2026-10-14T09:00:00.000Z', kind: 'triage', task: 'T1', path: 'medium', sensitive: [], review });
+  });
+  const reviewPrepArgs = (base: string) => ['review-prep', '--task', 'T1-1', '--path', 'medium', '--base', base, '--baseline', '.forge/work/T1/baseline-1.json', '--dir', '.forge/work/T1', '--locale', 'en'];
+
+  it("prep, the implementer's commit, review-prep and the next brief's prep run the validators twice, not three times", () => {
+    const first = JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'medium'], wio).stdout);
+    expect(first).toMatchObject({ cached: [], durationMs: expect.any(Number) });
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo\nthree\n');
+    git('commit', '-q', '-am', 'work');
+    expect(JSON.parse(run(reviewPrepArgs(first.base), wio).stdout).cached).toEqual([]);
+    const second = JSON.parse(run(['prep', '--task', 'T1-2', '--path', 'medium'], wio).stdout);
+    expect(second.cached).toEqual(['check']);
+    expect(calls).toHaveLength(2);
+    const events = readEvents(wt).filter(e => e.kind === 'validate');
+    expect(events.map(e => [e.task, e.baseline ?? false, e.cached, e.scope])).toEqual([['T1-1', true, false, 'heavy'], ['T1-1', false, false, 'heavy'], ['T1-2', true, true, 'heavy']]);
+    for (const e of events) expect(typeof e.durationMs).toBe('number');
+    expect((events[2].results as Record<string, unknown>[])[0]).toMatchObject({ validator: 'check', cached: true, durationMs: 40, failing: [], failingKnown: true });
+  });
+
+  it('review-prep again on the same tree reads the cache and says so', () => {
+    const base = JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'medium'], wio).stdout).base;
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo\nthree\n');
+    git('commit', '-q', '-am', 'work');
+    expect(JSON.parse(run(reviewPrepArgs(base), wio).stdout).say).not.toContain('cached');
+    const again = JSON.parse(run(reviewPrepArgs(base), wio).stdout);
+    expect(again.cached).toEqual(['check']);
+    expect(again.say).toContain('(1 cached)');
+    expect(calls).toHaveLength(2);
+  });
+
+  it('a dirty tree is neither read nor written', () => {
+    writeFileSync(path.join(wt, 'untracked.txt'), 'x\n');
+    run(['prep', '--task', 'T1-1', '--path', 'medium'], wio);
+    run(['prep', '--task', 'T1-2', '--path', 'medium'], wio);
+    expect(calls).toHaveLength(2);
+    expect(existsSync(path.join(wt, '.forge', 'cache', 'validate'))).toBe(false);
   });
 });

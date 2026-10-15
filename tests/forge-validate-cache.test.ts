@@ -154,4 +154,11 @@ describe('runWithCache (C6)', () => {
     runWithCache([lint], runner, ctx());
     expect(runs).toBe(4);
   });
+  it('an entry whose tree is not the current one is a miss, though it sits at the right key', () => {
+    let runs = 0;
+    const key = cacheKey(g('rev-parse', 'HEAD^{tree}'), lint.cmd, lockHash(repoReader(root)), envKey());
+    writeCached(root, key, entry({ name: 'lint', cmd: lint.cmd, tree: 'f'.repeat(40) }));
+    runWithCache([lint], misses => { runs += misses.length; return misses.map(m => pass(m)); }, ctx({ write: false }));
+    expect(runs).toBe(1);
+  });
 });
