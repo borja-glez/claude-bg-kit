@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run, defaultGit, type Io } from '../src/forge/cli/run.js';
-import { readExecution } from '../src/forge/execution.js';
+import { readExecution, saveExecution } from '../src/forge/execution.js';
 import { readLocal } from '../src/forge/local.js';
 
 let root: string;
@@ -37,6 +37,15 @@ const accept = (task: string, file: string, text: string) => {
 };
 
 describe('forge swarm integrate (into the run branch)', () => {
+  it('merge closes the ended execution it merged; needs-authorization closes nothing (C2, D-05)', () => {
+    accept('T1', 'a.txt', 'a\n');
+    out(run(['swarm', 'integrate', 'T1'], io));
+    saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'finished' });
+    expect(out(run(['swarm', 'merge'], io))).toEqual({ result: 'needs-authorization' });
+    expect(readExecution(root)!.closedAt).toBeNull();
+    expect(out(run(['swarm', 'merge', '--yes'], io))).toMatchObject({ result: 'merged', closed: true });
+    expect(readExecution(root)).toMatchObject({ closedAt: '2026-10-12T12:00:00.000Z', closedBy: 'merge' });
+  });
   it('merges an accepted task into the run branch in its worktree, never in the main checkout', () => {
     accept('T1', 'a.txt', 'a\n');
     expect(out(run(['swarm', 'integrate', 'T1'], io))).toMatchObject({ result: 'integrated' });

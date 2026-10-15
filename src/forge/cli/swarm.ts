@@ -678,12 +678,22 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
   });
 }
 
+/** C2: closes the execution of `root` when it is inactive and still open; true when it did. */
+function closeEnded(root: string, at: string, by: 'merge' | 'close'): boolean {
+  const cur = readExecution(root);
+  if (!cur || cur.active || cur.closedAt) return false;
+  saveExecution(root, { ...cur, closedAt: at, closedBy: by });
+  return true;
+}
+
 function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
   const e = readExecution(io.cwd);
   if (!e) throw new UsageError('swarm merge: no execution (forge swarm start)');
   const locale = localeArg(rest, 'merge');
   const out = (v: unknown): Result => ({ code: 0, stdout: JSON.stringify(v) + '\n', stderr: '' });
-  if (e.kind !== 'plan') return out({ result: 'merged', sha: deps.git(['rev-parse', 'HEAD'])?.trim() ?? '' });
+  // C2: a merged run that already ended is over: closed, so lens, the band and the roadmap stop drawing it.
+  const merged = (v: Record<string, unknown>): Result => out({ ...v, ...(closeEnded(io.cwd, io.now().toISOString(), 'merge') ? { closed: true } : {}) });
+  if (e.kind !== 'plan') return merged({ result: 'merged', sha: deps.git(['rev-parse', 'HEAD'])?.trim() ?? '' });
   if (!e.mergeOnFinish && !rest.includes('--yes')) return out({ result: 'needs-authorization' });
   const branch = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
   if (branch !== e.base) return out({ result: 'main-dirty', detail: `the main checkout is on ${branch ?? '?'}, not ${e.base}` });
@@ -696,7 +706,7 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
   const extras = attemptExtras(r, spanish(locale, io.cwd, e.project), e.branch, true);
   if (r.result === 'dirty') return out({ result: 'main-dirty', detail: `the main checkout ${r.detail}`, ...extras });
   if (r.result === 'deps') return out({ result: 'main-deps', detail: `the main checkout ${r.detail}`, ...extras });
-  return out(r.result === 'merged' ? { result: 'merged', sha: r.sha, preexisting: r.preexisting, ...extras } : { result: 'conflict', detail: r.detail, ...extras });
+  return r.result === 'merged' ? merged({ result: 'merged', sha: r.sha, preexisting: r.preexisting, ...extras }) : out({ result: 'conflict', detail: r.detail, ...extras });
 }
 
 export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
@@ -919,7 +929,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         : {
             runId: `${project}-${iso.replace(/[:.]/g, '')}`, kind, mode, parallel, project, base, branch: kind === 'plan' ? branch : base,
             mergeOnFinish: has('merge-on-finish'), coordinator: session, hookSession: hook, active: true, stopReason: null, stallReason: null,
-            startedAt: iso, lastStepAt: null, lastBlockStep: null, sleepUntil: null, tasks: {}, ...auto, ...lang,
+            startedAt: iso, lastStepAt: null, lastBlockStep: null, sleepUntil: null, tasks: {}, closedAt: null, closedBy: null, ...auto, ...lang,
           };
       // An execution that would not read back (an id outside the safe rule) is refused rather than saved.
       if (!normalizeExecution(state)) throw new UsageError('swarm start: --project, --session and the run branch must use letters, digits, _ - . (and / in the branch), at most 120 characters');
@@ -930,6 +940,8 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       }
       // Learned notes two tasks append to the same surface are merged by git's union driver, never left as a conflict.
       const attributes = unionLearned(deps);
+      // C2: a new run over an ended one that nobody closed replaces it; say which (execution.json keeps one run).
+      const replaced = prev && !prev.active && !prev.closedAt && !resume ? { runId: prev.runId, stopReason: prev.stopReason } : null;
       rmSync(stopFile(io.cwd), { force: true });
       saveExecution(io.cwd, state);
       if (kind === 'ephemeral' && !resume) writeLoose(io.cwd, { runId: state.runId, tasks: loose });
@@ -940,7 +952,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         es: spanish(state.locale ?? null, io.cwd, project), kind, resume, runId: state.runId, mode: state.mode, parallel: state.parallel,
         branch: state.branch, base: state.base, mergeOnFinish: state.mergeOnFinish, loose: loose.length, setup,
       });
-      return json({ ...state, setup, baseSync, ...looseOut, announce, ...attributes });
+      return json({ ...state, setup, baseSync, ...looseOut, announce, ...attributes, ...(replaced ? { replaced } : {}) });
     }
     case 'status': {
       const state = readExecution(io.cwd);
@@ -1145,6 +1157,23 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       if (e?.active) saveExecution(io.cwd, { ...e, active: false, stopReason: reason, sleepUntil: null });
       return ok();
     }
+    case 'close': {
+      // C2: closes an ended execution of the main checkout, from any worktree. It never touches git, worktrees,
+      // branches, live/ or members/: /forge:stop releases the tasks it lists and publishes meta/run.
+      const main = mainCheckout(io.cwd);
+      const e = readExecution(main);
+      if (!e) throw new UsageError('swarm close: no execution');
+      if (e.active) throw new UsageError(`swarm close: the execution ${e.runId} is active; stop it first (/forge:stop)`);
+      if (e.closedAt) return json({ closed: 'already', runId: e.runId, closedAt: e.closedAt, closedBy: e.closedBy ?? null });
+      closeEnded(main, iso, 'close');
+      const running = Object.entries(e.tasks).filter(([, t]) => t.status === 'running');
+      return json({
+        closed: true, runId: e.runId, kind: e.kind, stopReason: e.stopReason, closedAt: iso,
+        // The coordinator's own tasks go back to free on the roadmap; a member's task stays with its session.
+        release: running.filter(([, t]) => t.executor === 'subagents').map(([id]) => id),
+        members: running.filter(([, t]) => t.executor !== 'subagents').map(([id]) => id),
+      });
+    }
     case 'takeover': {
       const hook = claudeSessionId(flag('hook-session'), io.env ?? process.env);
       if (!hook) throw new UsageError(noClaudeSession('swarm takeover', '--hook-session'));
@@ -1187,6 +1216,6 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     case 'merge':
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError('usage: forge swarm <start --project P --session SID --hook-session ID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID [--db DIR]>');
+      throw new UsageError('usage: forge swarm <start --project P --session SID --hook-session ID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID [--db DIR]>');
   }
 }

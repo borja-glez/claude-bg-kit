@@ -56,6 +56,43 @@ const writeDocs = (dir: string, docs: Record<string, unknown>) => {
 };
 
 describe('forge swarm (execution)', () => {
+  it('swarm close closes an inactive execution once, lists the tasks to release and never calls git (C2, D-05)', () => {
+    expect(run(['swarm', 'close'], io)).toMatchObject({ code: 2, stderr: 'swarm close: no execution\n' });
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    const e = readExecution(root)!;
+    const at = NOW.toISOString();
+    const task = (executor: 'subagents' | 'sessions' | 'manual', status: 'running' | 'integrated') =>
+      ({ status, stage: 'implement' as const, round: 1, worktree: '', branch: 'task/x', executor, attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null });
+    saveExecution(root, { ...e, tasks: { T1: task('subagents', 'running'), T2: task('sessions', 'running'), T3: task('subagents', 'integrated') } });
+    const calls: string[][] = [];
+    const deps = { git: (a: string[]) => { calls.push(a); return null; }, exec: defaultExec(root), repo: repoReader(root), at: (): never => { throw new Error('no git'); } };
+    expect(() => swarmCommand(['close'], io, deps)).toThrow(`swarm close: the execution ${e.runId} is active; stop it first (/forge:stop)`);
+    saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stalled', stallReason: 'T2 is blocked' });
+    expect(JSON.parse(swarmCommand(['close'], io, deps).stdout))
+      .toEqual({ closed: true, runId: e.runId, kind: 'plan', stopReason: 'stalled', closedAt: at, release: ['T1'], members: ['T2'] });
+    expect(readExecution(root)).toMatchObject({ active: false, closedAt: at, closedBy: 'close' });
+    expect(JSON.parse(swarmCommand(['close'], io, deps).stdout)).toEqual({ closed: 'already', runId: e.runId, closedAt: at, closedBy: 'close' });
+    expect(calls).toEqual([]);
+  });
+  it('swarm close from a worktree closes the execution of the main checkout and writes nothing in the worktree', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    expect(run(['swarm', 'stop'], io).code).toBe(0);
+    const wt = path.join(root, '.claude', 'worktrees', 'run');
+    expect(out(run(['swarm', 'close'], { ...io, cwd: wt, git: defaultGit(wt) }))).toMatchObject({ closed: true, stopReason: 'stopped', release: [], members: [] });
+    expect(readExecution(root)).toMatchObject({ closedBy: 'close' });
+    expect(existsSync(path.join(wt, '.forge', 'execution.json'))).toBe(false);
+  });
+  it('start over an inactive execution that nobody closed replaces it and says which; over a closed one it says nothing (C2, D-05)', () => {
+    const first = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    run(['swarm', 'stop'], io);
+    const at = (min: number) => ({ ...io, now: () => new Date(NOW.getTime() + min * 60000) });
+    const second = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], at(1)));
+    expect(second.replaced).toEqual({ runId: first.runId, stopReason: 'stopped' });
+    expect(second.runId).not.toBe(first.runId);
+    run(['swarm', 'stop'], at(1));
+    out(run(['swarm', 'close'], at(1)));
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], at(2)))).not.toHaveProperty('replaced');
+  });
   it('start creates the run branch in its own worktree and leaves the main checkout alone', () => {
     const e = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--merge-on-finish'], io));
     expect(e).toMatchObject({ active: true, mode: 'subagents', parallel: 3, base: 'main', branch: 'forge/run-shop', mergeOnFinish: true });

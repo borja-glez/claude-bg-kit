@@ -19,7 +19,7 @@ describe('execution store', () => {
     expect(readExecution(root)).toBeNull();
     const e = { runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false, coordinator: 'main', hookSession: null, active: true, stopReason: null, stallReason: null, startedAt: T, lastStepAt: null, lastBlockStep: null, sleepUntil: null, tasks: {} } as const;
     saveExecution(root, { ...e, tasks: {} });
-    expect(readExecution(root)).toEqual({ ...e, tasks: {} });
+    expect(readExecution(root)).toEqual({ ...e, tasks: {}, closedAt: null, closedBy: null });
   });
   it('migrates an active swarm.json once: stopped, renamed, never relaunched', () => {
     writeFileSync(path.join(root, '.forge', 'swarm.json'), JSON.stringify({

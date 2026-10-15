@@ -6,7 +6,7 @@ const T = '2026-10-12T12:00:00.000Z';
 const base: ExecutionState = {
   runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop',
   mergeOnFinish: false, coordinator: 'main', hookSession: null, active: true, stopReason: null, stallReason: null,
-  startedAt: T, lastStepAt: null, lastBlockStep: null, sleepUntil: null,
+  startedAt: T, lastStepAt: null, lastBlockStep: null, sleepUntil: null, closedAt: null, closedBy: null,
   tasks: {
     T1: { status: 'running', stage: 'implement', round: 1, worktree: '/r/.claude/worktrees/task-T1', branch: 'task/T1', executor: 'subagents', attempts: 0, agent: 'forge-impl', startedAt: T, stageSince: T, updatedAt: T, detail: null },
     T2: { status: 'integrated', stage: 'integrate', round: 1, worktree: '/r/.claude/worktrees/task-T2', branch: 'task/T2', executor: 'subagents', attempts: 0, agent: null, startedAt: T, stageSince: T, updatedAt: T, detail: null },
@@ -14,6 +14,17 @@ const base: ExecutionState = {
 };
 
 describe('execution state', () => {
+  it('reads closedAt and closedBy: null in an older file, null for junk, closedBy only with a closedAt, and they round-trip (C2)', () => {
+    // An execution.json written by forge 0.15 has neither field.
+    const legacy: Record<string, unknown> = { ...base };
+    delete legacy.closedAt; delete legacy.closedBy;
+    expect(normalizeExecution(legacy)).toMatchObject({ closedAt: null, closedBy: null });
+    expect(normalizeExecution({ ...base, closedAt: 'soon', closedBy: 'close' })).toMatchObject({ closedAt: null, closedBy: null });
+    expect(normalizeExecution({ ...base, closedBy: 'merge' })).toMatchObject({ closedAt: null, closedBy: null });
+    expect(normalizeExecution({ ...base, closedAt: T, closedBy: 'nope' })).toMatchObject({ closedAt: T, closedBy: null });
+    const closed: ExecutionState = { ...base, active: false, stopReason: 'stalled', closedAt: T, closedBy: 'close' };
+    expect(parseExecution(JSON.stringify(closed))).toEqual(closed);
+  });
   it('round-trips and lists running tasks', () => {
     expect(parseExecution(JSON.stringify(base))).toEqual(base);
     expect(runningTasks(base)).toEqual(['T1']);

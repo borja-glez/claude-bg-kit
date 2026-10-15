@@ -37,6 +37,10 @@ export interface ExecutionState {
   autonomy?: 'auto';
   /** The language the person writes in (`swarm start --locale`), repeated to the coordinator at each wake. */
   locale?: string;
+  /** C2: when `swarm merge` or `swarm close` closed it; a closed execution is drawn nowhere. Null or absent while open. */
+  closedAt?: string | null;
+  /** C2: what closed it; null without a closedAt. */
+  closedBy?: 'merge' | 'close' | null;
 }
 
 // STAGES lives in types.ts (pure, so the roadmap page can bundle it without this file's yaml/zod imports); re-exported here.
@@ -111,6 +115,8 @@ export function normalizeExecution(x: unknown, now?: number): ExecutionState | n
     stopReason: oneOf(STOPS, x.stopReason),
     stallReason: typeof x.stallReason === 'string' ? x.stallReason.slice(0, 1000) : null,
     lastStepAt: iso(x.lastStepAt), lastBlockStep: iso(x.lastBlockStep), sleepUntil: iso(x.sleepUntil),
+    // C2: closedBy only means something with a closedAt; an older file has neither.
+    closedAt: iso(x.closedAt), closedBy: iso(x.closedAt) ? oneOf(['merge', 'close'] as const, x.closedBy) : null,
     ...(typeof x.planned === 'number' && Number.isInteger(x.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x.planned)) } : {}),
     ...(x.autonomy === 'auto' ? { autonomy: 'auto' as const } : {}),
     ...(isLocale(x.locale) ? { locale: x.locale } : {}),
@@ -128,7 +134,7 @@ export function fromSwarm(s: SwarmState): ExecutionState {
     runId: `swarm-${s.startedAt.replace(/[:.]/g, '')}`, kind: 'plan', mode: 'sessions', parallel: Math.min(10, Math.max(1, s.parallel)),
     project: s.project, base: s.base, branch: s.base, mergeOnFinish: s.mergeAuthorized, coordinator: s.coordinator,
     hookSession: s.hookSession, active: false, stopReason: 'migrated', stallReason: null, startedAt: s.startedAt,
-    lastStepAt: s.lastTickAt, lastBlockStep: null, sleepUntil: null, tasks: {},
+    lastStepAt: s.lastTickAt, lastBlockStep: null, sleepUntil: null, tasks: {}, closedAt: null, closedBy: null,
   };
 }
 
