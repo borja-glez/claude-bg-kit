@@ -365,8 +365,26 @@ describe('timeline tabs', () => {
   });
 });
 
+/** theme.css without comments, and its top-level blocks: [prelude, body] (an @media body holds its own rules). */
+const CSS = readFileSync(new URL('../src/page/theme.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+const cssBlocks = (css: string): [string, string][] => {
+  const out: [string, string][] = [];
+  let depth = 0, start = 0, open = 0;
+  for (let i = 0; i < css.length; i++) {
+    if (css[i] === '{') { if (depth === 0) open = i; depth++; }
+    else if (css[i] === '}') { depth--; if (depth === 0) { out.push([css.slice(start, open).trim(), css.slice(open + 1, i)]); start = i + 1; } }
+  }
+  return out;
+};
+/** Every declaration of the rules whose selector list includes `selector`, joined. */
+const cssRule = (css: string, selector: string): string =>
+  cssBlocks(css).filter(([p]) => !p.startsWith('@') && p.split(',').map(s => s.trim()).includes(selector)).map(([, b]) => b).join(';');
+/** The bodies of the @media blocks whose query includes `query`, joined. */
+const cssMedia = (css: string, query: string): string =>
+  cssBlocks(css).filter(([p]) => p.startsWith('@media') && p.replace(/\s/g, '').includes(query)).map(([, b]) => b).join('\n');
+
 describe('theme.css', () => {
-  const css = readFileSync(new URL('../src/page/theme.css', import.meta.url), 'utf8');
+  const css =readFileSync(new URL('../src/page/theme.css', import.meta.url), 'utf8');
   it('keeps selects inside narrow screens (no page scroll at 390px)', () => {
     expect(css).toMatch(/(^|[\s}])select\{[^}]*max-width:100%/);
     expect(css).toMatch(/\.f\.trk select\{[^}]*max-width:100%/);
@@ -711,5 +729,28 @@ describe('scroll keys and relative times (G-01)', () => {
     const html = renderApp(base(), ui({ modal: 'T002' }));
     expect(html).toContain('<button class="btn" data-action="refresh" data-role="pending" hidden>↻ Actualizar</button>');
     expect(renderApp({ ...base(), meta: { ...base().meta!, locale: 'en' } }, ui({ modal: 'T002' }))).toContain('↻ Update');
+  });
+});
+
+describe('theme.css: the modal, the side bar and the detail grid (H-01, H-11, .mgrid)', () => {
+  const phone = cssMedia(CSS, '(max-width:760px)');
+  const zIndex = (rule: string) => Number(/z-index:(\d+)/.exec(rule)?.[1] ?? NaN);
+  it('the modal sits above the sticky side bar, its header sticks and the page does not scroll under it (H-01)', () => {
+    expect(zIndex(cssRule(CSS, '.overlay'))).toBeGreaterThan(zIndex(cssRule(phone, '.side')));
+    expect(cssRule(CSS, '.overlay')).toContain('overscroll-behavior:contain');
+    expect(cssRule(CSS, '.mh')).toMatch(/position:sticky;top:0/);
+    expect(cssRule(phone, '.mh')).toContain('margin:-14px -14px 0');
+    expect(cssRule(CSS, 'html.wp-modal')).toContain('overflow:hidden');
+    expect(cssRule(CSS, 'html.wp-modal body')).toContain('overflow:hidden');
+  });
+  it('the side bar sticks at window height on a desktop and is the top bar again on a phone (H-11)', () => {
+    const side = cssRule(CSS, '.side');
+    for (const d of ['position:sticky', 'top:0', 'align-self:start', 'height:calc(100vh / var(--z,1))', 'overflow-y:auto']) expect(side).toContain(d);
+    for (const d of ['height:auto', 'overflow-y:visible', 'align-self:auto']) expect(cssRule(phone, '.side')).toContain(d);
+  });
+  it('the detail columns can shrink below their content at 390 px (.mgrid)', () => {
+    expect(cssRule(CSS, '.mgrid')).toContain('grid-template-columns:minmax(0,1fr) minmax(0,1.2fr)');
+    expect(cssRule(cssMedia(CSS, '(max-width:900px)'), '.mgrid')).toContain('grid-template-columns:minmax(0,1fr)');
+    expect(cssRule(CSS, '.mgrid .sec')).toContain('min-width:0;overflow-wrap:anywhere');
   });
 });

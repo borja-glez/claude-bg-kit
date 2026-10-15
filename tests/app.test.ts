@@ -889,6 +889,13 @@ describe('scroll, tick and held repaints (G-01)', () => {
     expect((root.querySelector('[data-role="pending"]') as HTMLButtonElement).hidden).toBe(true);
     app.stop();
   });
+  it('stopping the app with the modal open removes the wp-modal class', async () => {
+    const { root, app } = await boot(fakeDb(), fakeUser());
+    await openT003(root);
+    expect(document.documentElement.classList.contains('wp-modal')).toBe(true);
+    app.stop();
+    expect(document.documentElement.classList.contains('wp-modal')).toBe(false);
+  });
   it('closing the modal paints the data it held back', async () => {
     const f = fakeDb();
     const { root, app } = await boot(f, fakeUser());

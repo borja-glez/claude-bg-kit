@@ -678,6 +678,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   const unsubs: (() => void)[] = [];
   const stop = () => {
     clearInterval(timer);
+    document.documentElement.classList.remove('wp-modal');
     unsubs.splice(0).forEach(u => u());
     env.root.removeEventListener('click', onClick);
     env.root.removeEventListener('change', onChange);
