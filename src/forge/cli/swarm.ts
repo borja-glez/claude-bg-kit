@@ -630,6 +630,21 @@ function attemptExtras(r: MergeOutcome, es: boolean, ref: string, personal: bool
   };
 }
 
+/**
+ * H-16: an integrated commit as `waypoint commit-info` prints it, measured as what the task brings: the diff from the
+ * merge's first parent (`git show --shortstat` prints nothing for a merge) and the subject of its second parent, the
+ * task's last commit. Without a second parent (nothing was merged) the title is the commit's own and add/del are 0.
+ */
+export function commitInfo(git: (args: string[]) => string | null, sha: string): { sha: string; ts: string; title: string; add: number; del: number } {
+  const [cI = '', ...subject] = (git(['show', '-s', '--format=%cI%x09%s', sha]) ?? '').trim().split('\t');
+  const second = git(['rev-parse', '--verify', '-q', `${sha}^2`])?.trim() || null;
+  const title = second ? (git(['show', '-s', '--format=%s', second]) ?? '').trim() : subject.join('\t');
+  const stat = second ? (git(['diff', '--shortstat', `${sha}^1`, sha]) ?? '') : '';
+  const num = (re: RegExp) => Number(stat.match(re)?.[1] ?? 0);
+  const t = Date.parse(cI);
+  return { sha, ts: Number.isFinite(t) ? new Date(t).toISOString() : '', title, add: num(/(\d+) insertion/), del: num(/(\d+) deletion/) };
+}
+
 function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
   const task = rest[0];
   if (!task || !isPlanId(task)) throw new UsageError('swarm integrate: a task id is required');
@@ -673,7 +688,7 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
   }
   const say = integratedSay(es, e.branch, r.newValidators, r.preexisting);
   return out({
-    result: 'integrated', sha: r.sha, preexisting: r.preexisting, newValidators: r.newValidators, say,
+    result: 'integrated', sha: r.sha, commit: commitInfo(target.git, r.sha), preexisting: r.preexisting, newValidators: r.newValidators, say,
     ...(r.surfacesChanged.length ? { surfacesChanged: r.surfacesChanged } : {}), ...extras,
   });
 }

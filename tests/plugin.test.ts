@@ -227,7 +227,7 @@ describe('plugin layout', () => {
       'allowed --expect <the surface\'s hash from verify-plan>', 'When `diffTruncated` is true']) expect(runRef('verify')).toContain(s);
     expect(runRef('large')).toContain('never launch a round they did not ask for');
     expect(runRef('autonomy')).toContain('critique-dismiss');
-    for (const s of ['**Print `announce` as it is, as a message of its own, before step 2**', 'print its `say` lines as they are',
+    for (const s of ['**Print `announce` as it is, as a message of its own, before step 2**', 'rint its `say` lines as they are',
       '`run-deps`', '`main-deps`', '--retry-deps']) expect(runRef('execution')).toContain(s);
     expect(read('plugins/forge/skills/run/references/task-steps.md')).toContain('FORGE triage --plan <plan> --task T --cwd <worktree>');
     const design = read('plugins/waypoint/skills/design/SKILL.md');
@@ -624,7 +624,7 @@ describe('plugin layout', () => {
     expect(md).not.toContain('`FORGE swarm retry <T>` later');
     expect(md).toContain('so the review diff review-prep writes (`<base>..HEAD`) holds only this task\'s work');
     expect(md).toContain('FORGE swarm task <T> --lease <NOW + 10 min>');
-    expect(md).toContain('commit-info <sha>');
+    expect(md).not.toContain('commit-info');
     for (const s of [md, inf]) expect(s).not.toContain('task.json');
     expect(inf).not.toContain('lastTickAt');
   });
@@ -929,5 +929,18 @@ describe('plugin layout', () => {
     }
     for (const w of ['`stalled`', '`stopped`', '`budget`']) expect(step7).toContain(w);
     expect(stop).toContain('closedAt');
+  });
+  it('integrating a task writes its summary in the batch and the last commit in a call of its own (H-16)', () => {
+    const integ = runRef('execution').split('\n').find(l => l.trimStart().startsWith('- `integrate {task}`'))!;
+    const apartAt = integ.indexOf('Then, in a call of its own');
+    expect(apartAt).toBeGreaterThan(0);
+    const batch = integ.slice(integ.indexOf('`integrated` → ArtifactData `batch`'), apartAt);
+    expect(batch).toContain('summary: "');
+    expect(batch).toContain('commits: [<the `commit` that `integrate` printed>]');
+    expect(batch).not.toContain('meta/project');
+    const call = integ.slice(apartAt, integ.indexOf('Print its `say` lines'));
+    expect(call).toContain('update meta/project');
+    expect(call).toContain('metrics: {tests: <tests>, lastCommit: {sha, ts}}');
+    expect(call).not.toContain('if_version:');
   });
 });

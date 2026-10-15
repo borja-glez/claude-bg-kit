@@ -37,6 +37,17 @@ const accept = (task: string, file: string, text: string) => {
 };
 
 describe('forge swarm integrate (into the run branch)', () => {
+  it('integrate prints the commit as commit-info does, measured by what the task brings (H-16)', () => {
+    const w = out(run(['swarm', 'worktree', 'T1'], io)).worktree;
+    commitIn(w, 'base.txt', 'changed\nmore\n', 'T1: rewrite base');
+    commitIn(w, 'b.txt', 'b\n', 'T1: add b');
+    out(run(['swarm', 'task', 'T1', '--stage', 'verdict', '--status', 'accepted'], io));
+    const r = out(run(['swarm', 'integrate', 'T1'], io));
+    expect(r).toMatchObject({ result: 'integrated' });
+    // A merge commit: git show --shortstat prints nothing for it, so commit-info gave 0 and 0.
+    expect(r.commit).toEqual({ sha: r.sha, ts: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.000Z$/), title: 'T1: add b', add: 3, del: 1 });
+    expect(r.commit.sha).toBe(g(runWt(), 'rev-parse', 'HEAD'));
+  });
   it('merge closes the ended execution it merged; needs-authorization closes nothing (C2, D-05)', () => {
     accept('T1', 'a.txt', 'a\n');
     out(run(['swarm', 'integrate', 'T1'], io));
