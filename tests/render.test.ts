@@ -816,3 +816,66 @@ describe('the execution of the sessions view (H-10)', () => {
     expect(CSS).not.toContain('.pips');
   });
 });
+
+describe('timeline phases, labels, ticks and minimap (G-21, H-13, H-12, G-22, H-03)', () => {
+  const rowOf = (html: string, id: string) => {
+    const at = html.indexOf(`<div class="rr" data-task="${id}">`);
+    const next = html.indexOf('<div class="rr', at + 5);
+    return html.slice(at, next < 0 ? undefined : next);
+  };
+  it('a phase row shows its id once, the name apart, and the phase header sticks (G-21, H-13)', () => {
+    const m = { ...base(), plan: { ...plan, phases: plan.phases.map(p => ({ ...p, name: `${p.id} · ${p.name}` })) } };
+    const html = renderApp(m, ui());
+    expect(html).toContain('<span class="k">F1</span> <span class="pn">Base</span>');
+    expect(html).not.toContain('F1 · F1');
+    expect(cssRule(CSS, '.tr.ph')).toContain('text-transform:none');
+    expect(cssRule(CSS, '.tr.ph .pn')).toContain('text-transform:uppercase');
+    expect(cssRule(CSS, '.rr.ph')).toMatch(/position:sticky;top:26px/);
+  });
+  it('hides the tick next to now and pins the edge ticks to the edges (H-12)', () => {
+    const html = renderApp(base(), ui());
+    const at = html.indexOf('<div class="ticks">');
+    const spans = [...html.slice(at, html.indexOf('</div>', at)).matchAll(/<span(?: class="([^"]*)")? style="left:([\d.e-]+)%">/g)].map(x => ({ cls: x[1] ?? '', p: Number(x[2]) }));
+    expect(spans.length).toBeGreaterThan(3);
+    for (const s of spans) {
+      expect(s.cls.includes('edge-l')).toBe(s.p < 3);
+      expect(s.cls.includes('edge-r')).toBe(s.p > 97);
+      // A 1d window puts now at 75 %.
+      expect(s.cls.includes('near-now')).toBe(Math.abs(s.p - 75) < 6);
+    }
+  });
+  it('a label of a bar that ended before now stops before the line, and under 4 points there is none (H-12)', () => {
+    const m = base();
+    const html = renderApp(m, ui({ expanded: new Set(['F1']) }));
+    const gl = /<div class="gl" style="left:([\d.]+)%;max-width:([\d.]+)%">/.exec(rowOf(html, 'T001'))!;
+    expect(Number(gl[1]) + Number(gl[2])).toBeLessThanOrEqual(75 - 0.6 + 0.05);
+    m.states.T001 = { ...m.states.T001!, startedAt: '2026-10-11T11:00:00Z', doneAt: '2026-10-11T11:40:00Z' };
+    expect(rowOf(renderApp(m, ui({ expanded: new Set(['F1']) })), 'T001')).not.toContain('class="gl"');
+  });
+  it('the forge badge sits in the left row; an estimated bar gets no label for it (H-12)', () => {
+    const m = base();
+    m.states.T003 = { status: 'free', forge: { path: 'medium', phase: 'review', verdict: { action: 'accept', score: 0.97 } } };
+    const html = renderApp(m, ui({ expanded: new Set(['F1']), layers: ['forge'] }));
+    const at = html.indexOf('<div class="tr tk" data-action="open-task" data-id="T003"');
+    expect(html.slice(at, html.indexOf('</div>', at))).toContain('class="fg ok"');
+    expect(rowOf(html, 'T003')).not.toContain('class="gl"');
+    expect(rowOf(html, 'T003')).not.toContain('class="fg');
+    for (const [sel, decl] of [['.tl', 'grid-template-columns:clamp(150px,28%,340px) minmax(0,1fr)'], ['.ticks span.edge-l', 'transform:none'],
+      ['.ticks span.edge-r', 'transform:translateX(-100%)'], ['.ticks span.near-now', 'visibility:hidden'], ['.gl', 'text-overflow:ellipsis'], ['.tr .fg', 'margin-left:auto']]) {
+      expect(cssRule(CSS, sel), sel).toContain(decl);
+    }
+  });
+  it('the minimap draws one row per phase, or per track past 24 phases, in a 48-high box (G-22, H-03)', () => {
+    const big = (nPhases: number, nTasks: number) => ({
+      ...plan,
+      versions: [],
+      phases: Array.from({ length: nPhases }, (_, i) => ({ ...plan.phases[0]!, id: `P${i + 1}`, name: `Phase ${i + 1}` })),
+      tasks: Array.from({ length: nTasks }, (_, i) => ({ ...plan.tasks[0]!, id: `T${String(i + 1).padStart(3, '0')}`, title: `t${i}`, phase: `P${(i % nPhases) + 1}`, depends_on: [] })),
+    });
+    const mm = (html: string) => html.slice(html.indexOf('<div class="mm"'), html.indexOf('</svg>', html.indexOf('<div class="mm"')));
+    const fifteen = mm(renderApp({ ...base(), plan: big(15, 343), states: {} }, ui()));
+    expect(fifteen).toContain('data-group="phase" data-rows="15"');
+    expect(fifteen).toContain('viewBox="0 0 1000 48"');
+    expect(mm(renderApp({ ...base(), plan: big(30, 343), states: {} }, ui()))).toContain(`data-group="track" data-rows="${plan.tracks.length}"`);
+  });
+});

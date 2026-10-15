@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parsePlan } from '../src/lib/plan.js';
-import { autoTicks, clipBar, layoutRows, MIN_SPAN, planRange, stepFor, taskSpan, ticks, windowAt, windowFor, zoomAround } from '../src/lib/timeline.js';
+import { autoTicks, clipBar, layoutRows, MIN_SPAN, phaseLabel, phaseName, planRange, stepFor, taskSpan, ticks, windowAt, windowFor, zoomAround } from '../src/lib/timeline.js';
 import type { States } from '../src/lib/types.js';
 
 const plan = parsePlan(readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8'));
@@ -126,5 +126,21 @@ describe('continuous zoom and pan', () => {
     const r = planRange(plan, s, NOW);
     expect(r.from).toBeLessThan(Date.parse('2026-10-10T08:00:00Z'));
     expect(r.to).toBeGreaterThan(NOW);
+  });
+});
+
+describe('phaseName and phaseLabel (G-21)', () => {
+  it('drop a leading copy of the id, case apart, with its separators', () => {
+    expect(phaseName('H0', 'H0 · Base')).toBe('Base');
+    expect(phaseName('p1', 'P1: Setup')).toBe('Setup');
+    expect(phaseName('F2', 'f2 — Pago')).toBe('Pago');
+    expect(phaseName('H1', 'H10 x')).toBe('H10 x');
+    expect(phaseName('F1', 'Base')).toBe('Base');
+    expect(phaseLabel('H0', 'H0 · Base')).toBe('H0 · Base');
+    expect(phaseLabel('H0', 'H0')).toBe('H0');
+  });
+  it('the timeline groups by phase with that label', () => {
+    const p = { ...plan, phases: plan.phases.map(x => ({ ...x, name: `${x.id} · ${x.name}` })) };
+    expect(layoutRows(p, {}, NOW, windowFor('1d', NOW), new Set()).filter(r => r.kind === 'phase').map(r => r.label)).toEqual(['F1 · Base', 'F2 · Checkout']);
   });
 });

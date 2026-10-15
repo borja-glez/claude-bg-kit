@@ -63,6 +63,22 @@ function estimates(plan: PlanView, states: States, now: number): Map<string, { s
   return out;
 }
 
+/**
+ * G-21: a phase's name without a leading copy of its id ("H0 · Base" → "Base", "P1: Setup" → "Setup"): the id, case
+ * apart, followed by the end, a space, ·, :, -, — or ., is taken off with those separators. "H10 x" is not H1's prefix.
+ */
+export function phaseName(id: string, name: string): string {
+  const n = name.trim();
+  if (!n.toLowerCase().startsWith(id.toLowerCase())) return n;
+  const rest = n.slice(id.length);
+  return rest === '' || /^[\s·:\-—.]/.test(rest) ? rest.replace(/^[\s·:\-—.]+/, '').trim() : n;
+}
+/** `id · name` without the repeated id, or only the id when nothing is left of the name. */
+export const phaseLabel = (id: string, name: string): string => {
+  const n = phaseName(id, name);
+  return n ? `${id} · ${n}` : id;
+};
+
 export type GroupBy = 'phase' | 'track' | 'session' | 'category';
 /** The id under which tasks with no owner, or no category, are grouped. */
 export const NONE_GROUP = '_none';
@@ -79,7 +95,7 @@ function groupsFor(
     const none = by === 'session' ? opts?.unassigned ?? 'unassigned' : opts?.uncategorized ?? 'uncategorized';
     return keys.map(k => ({ id: k, label: k === NONE_GROUP ? none : k, tasks: inPhaseOrder(plan.tasks.filter(t => keyOf(t) === k)) }));
   }
-  return plan.phases.map(ph => ({ id: ph.id, label: `${ph.id} · ${ph.name}`, tasks: plan.tasks.filter(t => t.phase === ph.id) }));
+  return plan.phases.map(ph => ({ id: ph.id, label: phaseLabel(ph.id, ph.name), tasks: plan.tasks.filter(t => t.phase === ph.id) }));
 }
 
 /** The ids of the timeline's groups for a grouping, in the order layoutRows draws them. */

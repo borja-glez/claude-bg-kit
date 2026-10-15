@@ -1,5 +1,5 @@
 import { computeMetrics, type Metrics } from '../lib/metrics.js';
-import { autoTicks, groupIds, layoutRows, NONE_GROUP, planRange, SPAN, windowAt, windowFor, type GroupBy, type Row, type Win, type Zoom } from '../lib/timeline.js';
+import { autoTicks, groupIds, layoutRows, NONE_GROUP, phaseLabel, phaseName, planRange, SPAN, windowAt, windowFor, type GroupBy, type Row, type Win, type Zoom } from '../lib/timeline.js';
 import { burndown, criticalPath, forecast, zoneHeat } from '../lib/insights.js';
 import { escalationCandidates, liveness, sessionLiveness, zonesOf } from '../lib/coordination.js';
 import { LOOSE_STATUSES, TRACK_COLORS, type RunDoc, type EventDoc, type EventType, type InfiniteDoc, type MessageDoc, type MessageType, type MetaDoc, type NoteDoc, type NoteType, type PlanStatus, type PlanView, type SessionDoc, type States, type TaskState, type TaskStatus } from '../lib/types.js';
@@ -378,6 +378,11 @@ function timelineRows(m: Model, d: Dict, ui: UiState, win: Win): { rows: Row[]; 
 function groupLabel(m: Model, groupBy: GroupBy, r: Row): string {
   if (groupBy === 'track') return trackTag(m, r.id);
   if (groupBy === 'session' && r.id !== NONE_GROUP) return `◎ ${esc(r.label)}`;
+  // G-21, H-13: the phase id as it is, then its name (upper case by CSS), the id never repeated.
+  if (groupBy === 'phase') {
+    const name = phaseName(r.id, m.plan.phases.find(p => p.id === r.id)?.name ?? '');
+    return `<span class="k">${esc(r.id)}</span>${name ? ` <span class="pn">${esc(name)}</span>` : ''}`;
+  }
   return esc(r.label);
 }
 
@@ -412,18 +417,31 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string): string {
       return `<div class="tr ph" data-action="toggle-phase" data-id="${esc(r.id)}" title="${esc(r.label)} · ${esc(r.counter)}"><span class="chev">${expanded.has(r.id) ? '⌄' : '›'}</span> <span class="lab">${groupLabel(m, groupBy, r)}</span><span class="mini"><i style="width:${pct}%"></i></span><span class="c">${esc(r.counter)}</span></div>`;
     }
     const s = st(r);
-    return `<div class="tr tk${crit.has(r.id) ? ' crit' : ''}" data-action="open-task" data-id="${esc(r.id)}" data-task="${esc(r.id)}" data-deps="${esc(deps(r.id).join(' '))}" title="${esc(r.id)} · ${esc(r.label)} · ${esc(d.status[s])}"><i class="sd st-${s}"></i><span class="k">${esc(r.id)}</span> <span class="lab">${esc(r.label)}</span>${eviMark(m, d, r.id)} ${groupBy === 'track' ? '' : trackTag(m, r.trackId)}</div>`;
+    return `<div class="tr tk${crit.has(r.id) ? ' crit' : ''}" data-action="open-task" data-id="${esc(r.id)}" data-task="${esc(r.id)}" data-deps="${esc(deps(r.id).join(' '))}" title="${esc(r.id)} · ${esc(r.label)} · ${esc(d.status[s])}"><i class="sd st-${s}"></i><span class="k">${esc(r.id)}</span> <span class="lab">${esc(r.label)}</span>${eviMark(m, d, r.id)}${layers.has('forge') ? forgeBadge(m, r.id) : ''} ${groupBy === 'track' ? '' : trackTag(m, r.trackId)}</div>`;
   }).join('');
   const kindLabel = (k: string) => (k === 'estimate' ? d.legend.estimate : k === 'done' ? d.legend.done : k === 'blocked' ? d.legend.blocked : d.legend.current);
   const right = rows.map(r => {
     const task = r.kind === 'task';
     const bars = r.bars.map(b => `<div class="gb ${b.kind}${task && crit.has(r.id) ? ' crit' : ''}" style="left:${b.left}%;width:${b.width}%" title="${esc(task ? `${r.id} · ${r.label}` : r.label)} · ${esc(kindLabel(b.kind))}${r.durationMin != null ? ` · ${r.durationMin} min` : ''}"${task ? ` data-action="open-task" data-id="${esc(r.id)}" data-task="${esc(r.id)}"` : ''}></div>`).join('');
-    const label = task && r.bars[0] && (r.bars[0].kind !== 'estimate' || layers.has('forge'))
-      ? `<div class="gl" style="left:${Math.min(r.bars[0].left + r.bars[0].width + 0.6, 80)}%">${r.bars[0].kind !== 'estimate' ? `${esc(r.label)}${r.durationMin != null ? ` · ${r.durationMin} min` : ''}` : ''}${layers.has('forge') ? forgeBadge(m, r.id) : ''}</div>` : '';
+    // H-12: a label only for a real bar (never for an estimate); it never crosses the now line when its bar ended before
+    // now, and under 4 points there is none (the title keeps it).
+    const b0 = r.bars[0];
+    let label = '';
+    if (task && b0 && b0.kind !== 'estimate') {
+      const left = Math.min(b0.left + b0.width + 0.6, 80);
+      const max = b0.left + b0.width <= nowLeft && left < nowLeft ? Math.min(100 - left, nowLeft - left - 0.6) : 100 - left;
+      if (max >= 4) label = `<div class="gl" style="left:${left}%;max-width:${max.toFixed(1)}%">${esc(r.label)}${r.durationMin != null ? ` · ${r.durationMin} min` : ''}</div>`;
+    }
     return `<div class="rr${r.kind === 'phase' ? ' ph' : ''}"${task ? ` data-task="${esc(r.id)}"` : ''}>${bars}${label}</div>`;
   }).join('');
   const tickList = autoTicks(win, 10, tz);
-  const tickHtml = tickList.map(t => `<span style="left:${pos(t)}%">${esc(fmt(new Date(t).toISOString(), loc, withDate))}</span>`).join('');
+  // H-12: the edge ticks are pinned to their edge, and the one next to the visible now line gives way to it.
+  const nowShown = nowLeft >= 0 && nowLeft <= 100;
+  const tickHtml = tickList.map(t => {
+    const p = pos(t);
+    const cls = [p < 3 ? 'edge-l' : p > 97 ? 'edge-r' : '', nowShown && Math.abs(p - nowLeft) < 6 ? 'near-now' : ''].filter(Boolean).join(' ');
+    return `<span${cls ? ` class="${cls}"` : ''} style="left:${p}%">${esc(fmt(new Date(t).toISOString(), loc, withDate))}</span>`;
+  }).join('');
   const grid = tickList.map(t => `<i style="left:${pos(t)}%"></i>`).join('');
   let band = '';
   if (layers.has('forecast')) {
@@ -469,23 +487,25 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string): string {
   </section>`;
 }
 
-/** The minimap: every task of the plan, compressed over its whole time range, with the visible window marked. */
+/** G-22, H-03: the minimap: one row per phase (per track past 24 phases), compressed over the whole plan, window marked. */
 function renderMinimap(m: Model, d: Dict, win: Win): string {
   const range = planRange(m.plan, m.states, m.now);
   const from = Math.min(range.from, win.from);
   const to = Math.max(range.to, win.to);
-  const all = layoutRows(m.plan, m.states, m.now, { from, to }, new Set(m.plan.phases.map(p => p.id))).filter(r => r.kind === 'task');
-  if (!all.length) return '';
-  const rowH = Math.max(2, Math.min(5, Math.floor(44 / all.length)));
-  const h = all.length * rowH + 4;
-  const bars = all.map((r, i) => r.bars.map(b => `<rect class="mb ${b.kind}" x="${b.left * 10}" y="${2 + i * rowH}" width="${Math.max(2, b.width * 10)}" height="${Math.max(1, rowH - 1)}" rx="1"/>`).join('')).join('');
+  const groupBy: GroupBy = m.plan.phases.length > 24 ? 'track' : 'phase';
+  const groups = layoutRows(m.plan, m.states, m.now, { from, to }, new Set(), { groupBy }).filter(r => r.kind === 'phase');
+  if (!groups.length) return '';
+  const VB = 48;
+  const rowH = 44 / groups.length;
+  const barH = Math.max(0.6, 0.8 * rowH);
+  const bars = groups.map((r, i) => r.bars.map(b => `<rect class="mb ${b.kind}" x="${b.left * 10}" y="${(2 + i * rowH + (rowH - barH) / 2).toFixed(2)}" width="${Math.max(2, b.width * 10)}" height="${barH.toFixed(2)}" rx="1"/>`).join('')).join('');
   const vx = ((win.from - from) / (to - from)) * 1000;
   const vw = ((win.to - win.from) / (to - from)) * 1000;
   const nx = ((m.now - from) / (to - from)) * 1000;
-  return `<div class="mm" data-role="minimap" data-from="${from}" data-to="${to}" title="${esc(d.tl.minimap)}">
-    <svg viewBox="0 0 1000 ${h}" preserveAspectRatio="none" aria-label="${esc(d.tl.minimap)}">${bars}
-      <line class="mnow" x1="${nx}" x2="${nx}" y1="0" y2="${h}"/>
-      <rect class="mv" x="${vx}" y="0.5" width="${Math.max(4, vw)}" height="${h - 1}" rx="3"/></svg></div>`;
+  return `<div class="mm" data-role="minimap" data-from="${from}" data-to="${to}" data-group="${groupBy}" data-rows="${groups.length}" title="${esc(d.tl.minimap)}">
+    <svg viewBox="0 0 1000 ${VB}" preserveAspectRatio="none" aria-label="${esc(d.tl.minimap)}">${bars}
+      <line class="mnow" x1="${nx}" x2="${nx}" y1="0" y2="${VB}"/>
+      <rect class="mv" x="${vx}" y="0.5" width="${Math.max(4, vw)}" height="${VB - 1}" rx="3"/></svg></div>`;
 }
 
 /** The analysis row under the timeline: burndown, critical path with the forecast end, and the code zones. */
@@ -497,7 +517,7 @@ function renderInsights(m: Model, d: Dict, ui: UiState, loc: string): string {
   const scopes = [
     { id: '', label: d.insights.wholePlan, ids: m.plan.tasks.map(t => t.id) },
     ...m.plan.versions.map(v => ({ id: `v:${v.id}`, label: `${d.version} ${v.id}`, ids: m.plan.tasks.filter(t => v.phases.includes(t.phase)).map(t => t.id) })),
-    ...m.plan.phases.map(p => ({ id: `p:${p.id}`, label: `${p.id} · ${p.name}`, ids: m.plan.tasks.filter(t => t.phase === p.id).map(t => t.id) })),
+    ...m.plan.phases.map(p => ({ id: `p:${p.id}`, label: phaseLabel(p.id, p.name), ids: m.plan.tasks.filter(t => t.phase === p.id).map(t => t.id) })),
   ];
   const scope = scopes.find(sc => sc.id === (ui.burnScope ?? '')) ?? scopes[0];
   const bd = burndown(m.plan, m.states, scope.ids, m.now, f?.to ?? null);
