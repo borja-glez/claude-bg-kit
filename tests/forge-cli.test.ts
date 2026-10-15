@@ -490,7 +490,7 @@ describe('forge CLI', () => {
     const r = run(['validate', '--affected', 'src/a.ts', '--task', 't1'], io);
     expect(ran).toEqual(['npm test', 'npm test']);
     expect(r.code).toBe(1);
-    expect(JSON.parse(r.stdout)).toEqual([{ validator: 'test', ok: false, flaky: false, durationMs: 6, failures: ['FAIL x'] }]);
+    expect(JSON.parse(r.stdout)).toEqual([{ validator: 'test', ok: false, flaky: false, durationMs: 6, failures: ['FAIL x'], failing: ['x'], failingKnown: true }]);
     expect(readEvents(root).at(-1)).toMatchObject({ kind: 'validate', task: 't1', ok: false });
   });
   it('validate --baseline does not count a failure the base commit already had; verdict leaves it out', () => {
@@ -565,7 +565,7 @@ describe('forge CLI', () => {
     const other = mkdtempSync(path.join(tmpdir(), 'forge-cwd-'));
     writeFileSync(path.join(other, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "process.exit(1)"' } }));
     mkdirSync(path.join(root, '.forge', 'work', 'T'), { recursive: true });
-    writeFileSync(path.join(root, '.forge', 'work', 'T', 'baseline-1.json'), JSON.stringify([{ validator: 'test', ok: false, flaky: false, failures: [] }]));
+    writeFileSync(path.join(root, '.forge', 'work', 'T', 'baseline-1.json'), JSON.stringify([{ validator: 'test', ok: false, flaky: false, failures: ['> test', '> node -e "process.exit(1)"'] }]));
     const r = run(['validate', '--all', '--cwd', other, '--baseline', '.forge/work/T/baseline-1.json'], { ...io, exec: undefined, git: undefined });
     expect(r.stderr).toBe('');
     expect(JSON.parse(r.stdout)).toEqual([expect.objectContaining({ validator: 'test', ok: false, preexisting: true })]);

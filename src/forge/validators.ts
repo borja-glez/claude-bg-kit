@@ -7,7 +7,12 @@ export interface Validator { name: string; cmd: string; kind: string; affects?: 
 // A flaky result (failed, then passed on the retry) is ok: true; its first failures are kept for the record.
 // skipped: a test runner that found no tests to run passes (there is nothing to check yet, which is not a failure of the
 // change). preexisting: it failed the same way before the change (see markPreexisting), so it does not count against it.
-export interface ValidatorResult { validator: string; ok: boolean; flaky: boolean; durationMs: number; failures: string[]; skipped?: 'no-tests'; preexisting?: boolean }
+// failing: the tests (or type errors) the output names as failing, when failingTests could read them (failingKnown);
+// newFailing: those the baseline did not already have.
+export interface ValidatorResult {
+  validator: string; ok: boolean; flaky: boolean; durationMs: number; failures: string[];
+  failing?: string[]; failingKnown?: boolean; newFailing?: string[]; skipped?: 'no-tests'; preexisting?: boolean;
+}
 // list(dir) lists the entries of a directory relative to the repo root (the root itself when omitted).
 export interface RepoReader { exists: (rel: string) => boolean; read: (rel: string) => string | null; list: (dir?: string) => string[] }
 
@@ -147,32 +152,97 @@ export function failureLines(output: string): string[] {
   return (hits.length ? hits.slice(-20) : lines.slice(-10)).map(l => l.slice(0, 200));
 }
 
+// D-06: the failing tests of a run's whole output (before failureLines cuts it), so a baseline excuses only the tests
+// that already failed, not the whole validator.
+const ESC = String.fromCharCode(27);
+const ANSI = new RegExp(`${ESC}\\[[0-9;]*[A-Za-z]`, 'g');
+const MAX_FAILING = 200;
+const DURATION = /\s+[([]?\d+(?:\.\d+)?\s?m?s[)\]]?$/;
+const tidy = (s: string) => s.replace(DURATION, '').replace(/\s+/g, ' ').trim().slice(0, 300);
+// One test per line: pytest (FAILED <id>), go (--- FAIL: <Test>), cargo (test <x> ... FAILED), dotnet (Failed <x>).
+const TEST_LINE = [/^\s*FAILED\s+(\S+)/, /^\s*--- FAIL:\s+(\S+)/, /^test\s+(\S+)\s+\.\.\.\s+FAILED/, /^\s*Failed\s+(\S+)/];
+const VITEST_FAIL = /^\s*FAIL\s+(.+)$/;
+const VITEST_MARK = /^\s*[×✗]\s+(.+)$/;
+const JEST = /^\s*●\s+(.+)$/;
+// file(line,col): error TSnnnn: message, the position left out (an edit above the error moves it).
+const TSC = /^(.+?)\(\d+,\d+\):\s+error\s+(TS\d+):\s*(.*)$/;
+
+export function failingTests(output: string, kind: string): { names: string[]; known: boolean } {
+  if (kind === 'lint') return { names: [], known: false };
+  const lines = output.replace(ANSI, '').split(/\r?\n/);
+  const found = new Set<string>();
+  const add = (s: string) => { const t = tidy(s); if (t && found.size < MAX_FAILING) found.add(t); };
+  for (const l of lines) {
+    const t = TSC.exec(l);
+    if (t) add(`${t[1].replace(/\\/g, '/')}: ${t[2]} ${t[3]}`);
+  }
+  if (kind !== 'typecheck') {
+    const fails = lines.map(l => VITEST_FAIL.exec(l)?.[1]).filter((s): s is string => !!s);
+    for (const s of fails) add(s);
+    // vitest's per-case marks only when no FAIL line names the cases (it prints both forms).
+    if (!fails.length) for (const l of lines) { const m = VITEST_MARK.exec(l); if (m) add(m[1]); }
+    for (const l of lines) { const m = JEST.exec(l); if (m && !/^Console\b/.test(m[1])) add(m[1]); }
+    for (const l of lines) for (const re of TEST_LINE) { const m = re.exec(l); if (m) { add(m[1]); break; } }
+  }
+  return { names: [...found], known: found.size > 0 };
+}
+
+/** A failing validator as a `say` or a rollback names it: with the tests the baseline did not have, when there are any. */
+export function failingLabel(r: Pick<ValidatorResult, 'validator' | 'newFailing'>, locale: 'es' | 'en' = 'en'): string {
+  const fresh = r.newFailing ?? [];
+  if (!fresh.length) return r.validator;
+  const list = fresh.slice(0, 3).join('; ') + (fresh.length > 3 ? ` (+${fresh.length - 3})` : '');
+  return `${r.validator} (${locale === 'es' ? 'nuevos en rojo' : 'new failing'}: ${list})`;
+}
+
 // vitest, jest, mocha and Playwright when the project has no test files yet.
 const NO_TESTS = /\b(no test files found|no tests found)\b/i;
 const RUNS_TESTS = new Set(['test', 'e2e']);
 
 export function runValidators(list: Validator[], exec: (cmd: string, timeoutSec: number) => ExecResult, timeoutSec: number): ValidatorResult[] {
   return list.map(v => {
+    const timeout = { failures: [`timeout after ${timeoutSec} s`], failing: [], failingKnown: false };
     const first = exec(v.cmd, timeoutSec);
-    if (first.code === 0 && !first.timedOut) return { validator: v.name, ok: true, flaky: false, durationMs: first.ms, failures: [] };
-    if (first.timedOut) return { validator: v.name, ok: false, flaky: false, durationMs: first.ms, failures: [`timeout after ${timeoutSec} s`] };
-    if (RUNS_TESTS.has(v.kind) && NO_TESTS.test(first.output)) return { validator: v.name, ok: true, flaky: false, durationMs: first.ms, failures: failureLines(first.output), skipped: 'no-tests' };
+    if (first.code === 0 && !first.timedOut) return { validator: v.name, ok: true, flaky: false, durationMs: first.ms, failures: [], failing: [], failingKnown: true };
+    if (first.timedOut) return { validator: v.name, ok: false, flaky: false, durationMs: first.ms, ...timeout };
+    if (RUNS_TESTS.has(v.kind) && NO_TESTS.test(first.output)) return { validator: v.name, ok: true, flaky: false, durationMs: first.ms, failures: failureLines(first.output), failing: [], failingKnown: true, skipped: 'no-tests' };
     const second = exec(v.cmd, timeoutSec);
-    if (second.code === 0 && !second.timedOut) return { validator: v.name, ok: true, flaky: true, durationMs: first.ms + second.ms, failures: failureLines(first.output) };
-    return { validator: v.name, ok: false, flaky: false, durationMs: first.ms + second.ms, failures: second.timedOut ? [`timeout after ${timeoutSec} s`] : failureLines(second.output) };
+    if (second.code === 0 && !second.timedOut) return { validator: v.name, ok: true, flaky: true, durationMs: first.ms + second.ms, failures: failureLines(first.output), failing: [], failingKnown: true };
+    if (second.timedOut) return { validator: v.name, ok: false, flaky: false, durationMs: first.ms + second.ms, ...timeout };
+    const f = failingTests(second.output, v.kind);
+    return { validator: v.name, ok: false, flaky: false, durationMs: first.ms + second.ms, failures: failureLines(second.output), failing: f.names, failingKnown: f.known };
   });
 }
 
 /**
- * Marks the failures a baseline already had: the same validator failed on the base commit, before the change, so the
- * change did not cause it (a build that needs a file a later task creates, a suite broken upstream). The baseline is
- * the JSON `forge validate` printed on the base commit.
+ * Marks the failures a baseline already had (D-06): the same validator failed on the base commit, before the change, and
+ * every test it fails now already failed there (a build that needs a file a later task creates, a suite broken
+ * upstream). When either side could not name its failing tests (failingKnown), every failure line, normalized, must
+ * already be there. A timeout is never preexisting. A validator with tests the base did not fail gets `newFailing` and
+ * still counts. The baseline is the JSON `forge validate` printed on the base commit (a forge 0.16 one has only lines).
  */
+const normLine = (l: string) => l.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
+const isTimeout = (r: ValidatorResult) => r.failures.some(f => /^timeout after \d+ s$/.test(f));
 export function markPreexisting(results: ValidatorResult[], baseline: unknown): ValidatorResult[] {
-  const failedBefore = new Set((Array.isArray(baseline) ? baseline : [])
-    .filter((b): b is { validator: string; ok: boolean } => !!b && typeof b === 'object' && typeof (b as { validator?: unknown }).validator === 'string' && (b as { ok?: unknown }).ok === false)
-    .map(b => b.validator));
-  return results.map(r => (!r.ok && failedBefore.has(r.validator) ? { ...r, preexisting: true } : r));
+  const strs = (a: unknown) => (Array.isArray(a) ? a.filter((s): s is string => typeof s === 'string') : []);
+  const before = new Map<string, { failing: string[]; known: boolean; failures: string[] }>();
+  for (const b of Array.isArray(baseline) ? baseline : []) {
+    if (!b || typeof b !== 'object') continue;
+    const x = b as Record<string, unknown>;
+    if (typeof x.validator !== 'string' || x.ok !== false) continue;
+    before.set(x.validator, { failing: strs(x.failing), known: x.failingKnown === true, failures: strs(x.failures) });
+  }
+  return results.map(r => {
+    const b = r.ok ? undefined : before.get(r.validator);
+    if (!b || isTimeout(r)) return r;
+    if (r.failingKnown === true && b.known) {
+      const was = new Set(b.failing);
+      const fresh = (r.failing ?? []).filter(t => !was.has(t));
+      return fresh.length ? { ...r, newFailing: fresh } : { ...r, preexisting: true };
+    }
+    const was = new Set(b.failures.map(normLine));
+    return r.failures.every(l => was.has(normLine(l))) ? { ...r, preexisting: true } : r;
+  });
 }
 
 /** A result that counts against the change: a failure the base did not already have. */

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectValidators, selectValidators, runValidators, failureLines, globMatch, markPreexisting, blocking, type RepoReader, type Validator, type Scope } from '../src/forge/validators.js';
+import { detectValidators, selectValidators, runValidators, failureLines, failingTests, failingLabel, globMatch, markPreexisting, blocking, type RepoReader, type Validator, type Scope } from '../src/forge/validators.js';
 import { parseConfig } from '../src/forge/config.js';
 
 // list(dir) returns the direct entries of dir, like readdirSync.
@@ -166,7 +166,7 @@ describe('runValidators', () => {
   const v = [{ name: 'test', cmd: 'npm test', kind: 'test' as const, source: 'detected' as const }];
   it('passes', () => {
     const r = runValidators(v, () => ({ code: 0, output: 'ok', ms: 5, timedOut: false }), 600);
-    expect(r).toEqual([{ validator: 'test', ok: true, flaky: false, durationMs: 5, failures: [] }]);
+    expect(r).toEqual([{ validator: 'test', ok: true, flaky: false, durationMs: 5, failures: [], failing: [], failingKnown: true }]);
   });
   it('a failure that passes on retry is flaky and does not count', () => {
     const codes = [1, 0];
@@ -177,6 +177,7 @@ describe('runValidators', () => {
     const r = runValidators(v, () => ({ code: 1, output: 'line\nFAIL tests/a.test.ts > adds\nAssertionError: 1 !== 2\n', ms: 1, timedOut: false }), 600);
     expect(r[0]).toMatchObject({ ok: false, flaky: false });
     expect(r[0].failures).toEqual(['FAIL tests/a.test.ts > adds', 'AssertionError: 1 !== 2']);
+    expect(r[0]).toMatchObject({ failing: ['tests/a.test.ts > adds'], failingKnown: true });
   });
   it('a test runner that finds no tests passes as skipped, without a retry', () => {
     let calls = 0;
@@ -195,7 +196,7 @@ describe('runValidators', () => {
       { validator: 'test', ok: false, flaky: false, durationMs: 1, failures: ['y'] },
       { validator: 'lint', ok: true, flaky: false, durationMs: 1, failures: [] },
     ];
-    const marked = markPreexisting(results, [{ validator: 'build', ok: false }, { validator: 'test', ok: true }]);
+    const marked = markPreexisting(results, [{ validator: 'build', ok: false, failures: ['x'] }, { validator: 'test', ok: true }]);
     expect(marked.map(r => r.preexisting ?? false)).toEqual([true, false, false]);
     expect(marked.filter(blocking).map(r => r.validator)).toEqual(['test']);
     expect(markPreexisting(results, 'junk')).toEqual(results);
@@ -205,6 +206,7 @@ describe('runValidators', () => {
     const r = runValidators(v, () => { calls++; return { code: 1, output: '', ms: 600000, timedOut: true }; }, 600);
     expect(calls).toBe(1);
     expect(r[0].failures).toEqual(['timeout after 600 s']);
+    expect(r[0]).toMatchObject({ failing: [], failingKnown: false });
   });
 });
 
@@ -218,5 +220,53 @@ describe('failureLines', () => {
   });
   it('falls back to the last 10 lines when nothing matches', () => {
     expect(failureLines(Array.from({ length: 15 }, (_, i) => `l${i}`).join('\n'))).toEqual(Array.from({ length: 10 }, (_, i) => `l${i + 5}`));
+  });
+});
+
+describe('failingTests (D-06)', () => {
+  it('reads the failing tests of vitest, jest, pytest, go, cargo, dotnet and tsc, without durations', () => {
+    expect(failingTests(' FAIL  tests/a.test.ts > cart > adds\n   × adds 12ms\n', 'test')).toEqual({ names: ['tests/a.test.ts > cart > adds'], known: true });
+    expect(failingTests(' ❯ tests/a.test.ts (2)\n   × adds 5ms\n   ✗ removes 1.2s\n', 'test')).toEqual({ names: ['adds', 'removes'], known: true });
+    expect(failingTests('  ● cart › adds\n\n  ● Console\n', 'test')).toEqual({ names: ['cart › adds'], known: true });
+    expect(failingTests('FAILED tests/test_cart.py::test_adds - AssertionError: x\n', 'test')).toEqual({ names: ['tests/test_cart.py::test_adds'], known: true });
+    expect(failingTests('--- FAIL: TestAdds (0.00s)\n', 'test')).toEqual({ names: ['TestAdds'], known: true });
+    expect(failingTests('test cart::adds ... FAILED\n', 'test')).toEqual({ names: ['cart::adds'], known: true });
+    expect(failingTests('  Failed Shop.Tests.Adds [12 ms]\n', 'test')).toEqual({ names: ['Shop.Tests.Adds'], known: true });
+    expect(failingTests("src\\a.ts(3,5): error TS2322: Type 'string' is not assignable to type 'number'.\n", 'typecheck'))
+      .toEqual({ names: ["src/a.ts: TS2322 Type 'string' is not assignable to type 'number'."], known: true });
+  });
+  it('strips colour codes, keeps at most 200 names, and says when it read nothing', () => {
+    const esc = String.fromCharCode(27);
+    expect(failingTests(`${esc}[31m FAIL ${esc}[39m tests/a.test.ts > adds\n`, 'test').names).toEqual(['tests/a.test.ts > adds']);
+    expect(failingTests(Array.from({ length: 300 }, (_, i) => `--- FAIL: Test${i} (0.00s)`).join('\n'), 'test').names).toHaveLength(200);
+    expect(failingTests('Error: boom\n', 'test')).toEqual({ names: [], known: false });
+    expect(failingTests(' FAIL  tests/a.test.ts > adds\n', 'lint')).toEqual({ names: [], known: false });
+    expect(failingTests(' FAIL  tests/a.test.ts > adds\n', 'typecheck')).toEqual({ names: [], known: false });
+  });
+});
+
+describe('markPreexisting by test (D-06)', () => {
+  const red = (failing: string[], failures = ['x']) => ({ validator: 'test', ok: false, flaky: false, durationMs: 1, failures, failing, failingKnown: failing.length > 0 });
+  it('a validator red on the base is preexisting only when every failing test already failed; the new ones are named', () => {
+    const base = [{ validator: 'test', ok: false, failing: ['a > one'], failingKnown: true, failures: ['FAIL a > one'] }];
+    expect(markPreexisting([red(['a > one'])], base)[0]).toMatchObject({ preexisting: true });
+    const more = markPreexisting([red(['a > one', 'a > two'])], base)[0];
+    expect(more.preexisting).toBeUndefined();
+    expect(more.newFailing).toEqual(['a > two']);
+    expect(blocking(more)).toBe(true);
+    expect(failingLabel(more)).toBe('test (new failing: a > two)');
+    expect(failingLabel(more, 'es')).toBe('test (nuevos en rojo: a > two)');
+    expect(failingLabel({ validator: 'lint' })).toBe('lint');
+  });
+  it('without test names it compares the failure lines, digits and spacing aside, as with a baseline of forge 0.16', () => {
+    const old = [{ validator: 'build', ok: false, failures: ['error in 3 files  (12ms)'] }];
+    const res = (failures: string[]) => [{ validator: 'build', ok: false, flaky: false, durationMs: 1, failures, failing: [], failingKnown: false }];
+    expect(markPreexisting(res(['Error in 4 files (9ms)']), old)[0].preexisting).toBe(true);
+    expect(markPreexisting(res(['error in 4 files (9ms)', 'Cannot find module x']), old)[0].preexisting).toBeUndefined();
+  });
+  it('a timeout is never preexisting', () => {
+    const base = [{ validator: 'test', ok: false, failures: ['timeout after 600 s'] }];
+    const timeout = { validator: 'test', ok: false, flaky: false, durationMs: 1, failures: ['timeout after 600 s'], failing: [], failingKnown: false };
+    expect(markPreexisting([timeout], base)[0].preexisting).toBeUndefined();
   });
 });
