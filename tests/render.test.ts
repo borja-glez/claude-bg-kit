@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { parsePlan } from '../src/lib/plan.js';
 import { buildDocs } from '../src/lib/sync.js';
 import { dictFor } from '../src/page/i18n.js';
-import { esc, renderApp, timelineSvg, type Model, type UiState } from '../src/page/render.js';
+import { esc, relText, renderApp, timelineSvg, VIEWS, type Model, type UiState } from '../src/page/render.js';
 import type { MessageDoc, EventType, NoteDoc, PlanTrack, TaskStatus } from '../src/lib/types.js';
 import type { ProposalDoc } from '../src/lib/proposals.js';
 
@@ -231,7 +231,7 @@ describe('sessions keyed by SID (final fix)', () => {
       const html = renderApp(bad, ui({ view }));
       expect(html).not.toContain('NaN');
     }
-    expect(renderApp(bad, ui())).toContain('T002 · latido —');
+    expect(renderApp(bad, ui())).toContain('T002 · latido <span data-rel="hb" data-ts="garbage">—</span>');
   });
 });
 
@@ -683,5 +683,33 @@ describe('track help', () => {
     expect(html).toContain('title="Frente: línea de trabajo que avanza en paralelo, con su propia sesión, worktree y rama"');
     const versions = renderApp(base(), ui({ view: 'versions' }));
     expect(versions).toContain('class="f trk" title="Frente: línea de trabajo');
+  });
+});
+
+describe('scroll keys and relative times (G-01)', () => {
+  const keys = (html: string) => [...html.matchAll(/data-scroll-key="([^"]+)"/g)].map(x => x[1]);
+  it('every view renders unique scroll keys, and the modal overlay is keyed by its task', () => {
+    const m = { ...base(), proposals: [P(), P({ id: 'p2' })] };
+    for (const view of VIEWS) {
+      const k = keys(renderApp(m, ui({ view, modal: 'T002' })));
+      expect(new Set(k).size, view).toBe(k.length);
+    }
+    const tracking = keys(renderApp(m, ui({ modal: 'T002' })));
+    for (const k of ['side', 'timeline', 'chips:status', 'chips:layers', 'zoom', 'runs', 'events', 'chain', 'modal:T002']) expect(tracking).toContain(k);
+    expect(keys(renderApp(m, ui({ view: 'versions' })))).toContain('vcols');
+    expect(keys(renderApp(m, ui({ view: 'proposals' })))).toEqual(expect.arrayContaining(['evid:p1', 'evid:p2']));
+  });
+  it('relText is what the tick writes, and rel marks the text with its kind and time', () => {
+    const d = dictFor('es');
+    expect(relText(d, 'ago', new Date(NOW - 5 * 60000).toISOString(), NOW)).toBe('hace 5 min');
+    expect(relText(d, 'lasts', new Date(NOW - 7 * 60000).toISOString(), NOW)).toBe('lleva 7 min');
+    expect(relText(d, 'hb', 'garbage', NOW)).toBe('—');
+    expect(relText(d, 'lasts', new Date(NOW + 30 * 60000).toISOString(), NOW)).toBe('');
+    expect(renderApp(base(), ui())).toContain('<span data-rel="hb" data-ts="2026-10-11T11:59:00Z">hace 1 min</span>');
+  });
+  it('the modal has a hidden ↻ that only repaints', () => {
+    const html = renderApp(base(), ui({ modal: 'T002' }));
+    expect(html).toContain('<button class="btn" data-action="refresh" data-role="pending" hidden>↻ Actualizar</button>');
+    expect(renderApp({ ...base(), meta: { ...base().meta!, locale: 'en' } }, ui({ modal: 'T002' }))).toContain('↻ Update');
   });
 });

@@ -6,7 +6,7 @@ import { applyDecision, canDecide, MAX_PROPOSAL_TEXT, normalizeProposal, type De
 import { dictFor } from './i18n.js';
 import { normalizeEvent, normalizeInfinite, normalizeMessage, normalizeMeta, normalizeNote, normalizePhase, normalizeRun, normalizeSession, normalizeState } from './normalize.js';
 import { decodeView, encodeView } from './urlstate.js';
-import { categoryKeys, esc, NOTE_FILTERS, PROPOSAL_FILTERS, renderApp, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, vfilterStatuses, VFILTER_KEYS, VIEWS, type Model, type ProposalFilterKind, type UiState, type VFilterKey, type View } from './render.js';
+import { categoryKeys, esc, NOTE_FILTERS, PROPOSAL_FILTERS, relText, renderApp, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, vfilterStatuses, VFILTER_KEYS, VIEWS, type Model, type RelKind, type ProposalFilterKind, type UiState, type VFilterKey, type View } from './render.js';
 
 export interface Snapshot { meta: MetaDoc; phases: PhaseDoc[] }
 export interface Env {
@@ -102,6 +102,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   let composing = false;
   let deferred = false;
   let ceiling: unknown = null;
+  // G-01: a data render that arrives while the modal is open or a <select> has focus waits (↻ shows it).
+  let pendingData = false;
   const endComposition = () => {
     composing = false;
     if (ceiling !== null) { timers.clearTimeout(ceiling); ceiling = null; }
@@ -112,19 +114,26 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     if (composing) { deferred = true; return; }
     try {
       model.now = now();
+      pendingData = false;
       const active = document.activeElement as HTMLInputElement | null;
       const role = active && env.root.contains(active) ? active.getAttribute?.('data-role') : null;
       const keep = role && TEXT_ROLES.includes(role) ? role : null;
       const caret = keep ? [active!.selectionStart, active!.selectionEnd] : null;
+      // G-01: the scroll of every keyed container, and of the page, survives the repaint.
+      const scrolls = new Map<string, [number, number]>();
+      env.root.querySelectorAll<HTMLElement>('[data-scroll-key]').forEach(el => scrolls.set(el.dataset.scrollKey ?? '', [el.scrollTop, el.scrollLeft]));
+      const page = document.scrollingElement?.scrollTop ?? 0;
       const tlw = env.root.querySelector('[data-role="timeline"]') as HTMLElement | null;
-      const tlTop = tlw?.scrollTop ?? 0;
       const tlFocus = !!tlw && document.activeElement === tlw;
       env.root.innerHTML = renderApp(model, ui);
+      env.root.querySelectorAll<HTMLElement>('[data-scroll-key]').forEach(el => {
+        const s = scrolls.get(el.dataset.scrollKey ?? '');
+        if (s) { el.scrollTop = s[0]; el.scrollLeft = s[1]; }
+      });
+      if (document.scrollingElement && document.scrollingElement.scrollTop !== page) document.scrollingElement.scrollTop = page;
+      document.documentElement.classList.toggle('wp-modal', ui.modal !== null);
       const tlNew = env.root.querySelector('[data-role="timeline"]') as HTMLElement | null;
-      if (tlNew) {
-        tlNew.scrollTop = tlTop;
-        if (tlFocus && !keep) tlNew.focus({ preventScroll: true });
-      }
+      if (tlNew && tlFocus && !keep) tlNew.focus({ preventScroll: true });
       const noteEl = env.root.querySelector('[data-role="tl-note"]');
       if (noteEl) noteEl.textContent = tlNote;
       writeHash();
@@ -155,6 +164,20 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       scheduled = true;
       queueMicrotask(render);
     }
+  };
+  // G-01: renders that come from data (snapshots, the full tick) wait while the modal is open or a <select> of the page
+  // has focus: they mark pendingData and show ↻. Renders from the person's own actions go through schedule().
+  const holding = (): boolean => {
+    const a = document.activeElement;
+    return ui.modal !== null || (!!a && a.tagName === 'SELECT' && env.root.contains(a));
+  };
+  const showPending = () => {
+    const b = env.root.querySelector('[data-role="pending"]') as HTMLElement | null;
+    if (b) b.hidden = false;
+  };
+  const scheduleData = () => {
+    if (holding()) { pendingData = true; showPending(); return; }
+    schedule();
   };
 
   let db: Db | null = null;
@@ -368,6 +391,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     else if (action === 'p-comment-send') { void sendComment(el.dataset.id ?? ''); return; }
     else if (action === 'note-add') { void addNote(); return; }
     else if (action === 'answer-send') { void sendAnswer(el.dataset.id ?? ''); return; }
+    else if (action === 'refresh') { /* ↻: the render below paints what the modal held back */ }
     else return;
     schedule();
   };
@@ -377,7 +401,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     if (action === 'vtrack') { ui.versionFilter.track = el.value || null; }
     else if (action === 'burn-scope') { ui.burnScope = /^(?:[vp]:[\w.-]{1,64})?$/.test(el.value) ? el.value : ''; }
     else if (action === 'note-type') { if (!(NOTE_TYPES as string[]).includes(el.value)) return; ui.draft.type = el.value as NoteType; }
-    else return;
+    else { if (pendingData && el.tagName === 'SELECT') schedule(); return; }
     schedule();
   };
   const onInput = (ev: Event) => {
@@ -400,8 +424,11 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   };
   const onCompEnd = () => endComposition();
   const onFocusOut = (ev: Event) => {
-    const role = (ev.target as HTMLElement | null)?.dataset?.role;
+    const target = ev.target as HTMLElement | null;
+    const role = target?.dataset?.role;
     if (composing && role && DRAFT_ROLES.includes(role)) endComposition();
+    // A <select> that loses focus lets the held data paint.
+    if (pendingData && target?.tagName === 'SELECT') schedule();
   };
   // ---- Timeline: free zoom and pan ----
   // The first wheel zoom, drag or key turns the preset window into a free one (span and pan in ms).
@@ -634,7 +661,20 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   window.addEventListener('pointerup', onPointerUp);
   window.addEventListener('pointercancel', onPointerUp);
   window.addEventListener('resize', applyScale);
-  const timer = setInterval(schedule, env.refreshMs ?? 30000);
+  // G-01: every 30 s only the relative times are rewritten in place; every FULL_EVERY ticks (5 min) a full render comes
+  // by the data path, so it waits while the modal is open or a <select> has focus.
+  const FULL_EVERY = 10;
+  let ticks = 0;
+  const tick = () => {
+    model.now = now();
+    const d = dictFor(typeof model.meta?.locale === 'string' ? model.meta.locale : undefined);
+    env.root.querySelectorAll<HTMLElement>('[data-rel]').forEach(el => {
+      const kind = el.dataset.rel as RelKind;
+      if (kind === 'ago' || kind === 'lasts' || kind === 'hb') el.textContent = relText(d, kind, el.dataset.ts ?? '', model.now);
+    });
+    if (++ticks % FULL_EVERY === 0) scheduleData();
+  };
+  const timer = setInterval(tick, env.refreshMs ?? 30000);
   const unsubs: (() => void)[] = [];
   const stop = () => {
     clearInterval(timer);
@@ -673,25 +713,25 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   const rebuild = () => { if (model.meta && phaseDocs.length) model.plan = planViewFromDocs(model.meta, phaseDocs); };
   const rows = (s: QSnap) => s.docs.map(x => ({ id: x.id, body: x.data() }));
 
-  unsubs.push(db.doc('meta/project').onSnapshot(((s: Snap) => { if (s.exists) { const mm = normalizeMeta(s.data()); if (mm) { model.meta = mm; rebuild(); } } schedule(); }) as never, onErr));
-  unsubs.push(db.doc('meta/run').onSnapshot(((s: Snap) => { model.run = s.exists ? normalizeRun(s.data()) : null; schedule(); }) as never, onErr));
-  unsubs.push(db.doc('meta/infinite').onSnapshot(((s: Snap) => { model.infinite = s.exists ? normalizeInfinite(s.data()) : null; schedule(); }) as never, onErr));
-  unsubs.push(db.collection('plan').onSnapshot(((s: QSnap) => { const p = rows(s).map(r => normalizePhase(r.body)).filter((x): x is PhaseDoc => x !== null); if (p.length) { phaseDocs = p; rebuild(); } schedule(); }) as never, onErr));
-  unsubs.push(db.collection('state').onSnapshot(((s: QSnap) => { model.states = Object.fromEntries(rows(s).map(r => [r.id, normalizeState(r.body)])) as States; schedule(); }) as never, onErr));
-  unsubs.push(db.collection('sessions').onSnapshot(((s: QSnap) => { model.sessions = Object.fromEntries(rows(s).map(r => [r.id, normalizeSession(r.body)])) as Record<string, SessionDoc>; schedule(); }) as never, onErr));
-  unsubs.push(db.collection('events').orderBy('ts', 'desc').limit(200).onSnapshot(((s: QSnap) => { model.events = rows(s).map(r => ({ ...normalizeEvent(r.body), id: r.id })); schedule(); }) as never, onErr));
+  unsubs.push(db.doc('meta/project').onSnapshot(((s: Snap) => { if (s.exists) { const mm = normalizeMeta(s.data()); if (mm) { model.meta = mm; rebuild(); } } scheduleData(); }) as never, onErr));
+  unsubs.push(db.doc('meta/run').onSnapshot(((s: Snap) => { model.run = s.exists ? normalizeRun(s.data()) : null; scheduleData(); }) as never, onErr));
+  unsubs.push(db.doc('meta/infinite').onSnapshot(((s: Snap) => { model.infinite = s.exists ? normalizeInfinite(s.data()) : null; scheduleData(); }) as never, onErr));
+  unsubs.push(db.collection('plan').onSnapshot(((s: QSnap) => { const p = rows(s).map(r => normalizePhase(r.body)).filter((x): x is PhaseDoc => x !== null); if (p.length) { phaseDocs = p; rebuild(); } scheduleData(); }) as never, onErr));
+  unsubs.push(db.collection('state').onSnapshot(((s: QSnap) => { model.states = Object.fromEntries(rows(s).map(r => [r.id, normalizeState(r.body)])) as States; scheduleData(); }) as never, onErr));
+  unsubs.push(db.collection('sessions').onSnapshot(((s: QSnap) => { model.sessions = Object.fromEntries(rows(s).map(r => [r.id, normalizeSession(r.body)])) as Record<string, SessionDoc>; scheduleData(); }) as never, onErr));
+  unsubs.push(db.collection('events').orderBy('ts', 'desc').limit(200).onSnapshot(((s: QSnap) => { model.events = rows(s).map(r => ({ ...normalizeEvent(r.body), id: r.id })); scheduleData(); }) as never, onErr));
   unsubs.push(db.collection('messages').orderBy('ts', 'desc').limit(200).onSnapshot(((s: QSnap) => {
     model.messages = rows(s).map(r => ({ m: normalizeMessage(r.body), id: r.id })).filter((r): r is { m: MessageDoc; id: string } => r.m !== null).map(r => ({ ...r.m, id: r.id }));
-    schedule();
+    scheduleData();
   }) as never, onErr));
   unsubs.push(db.collection('notes').orderBy('ts', 'desc').limit(500).onSnapshot(((s: QSnap) => {
     model.notes = rows(s).map(r => ({ n: normalizeNote(r.body), id: String(r.id) })).filter((r): r is { n: NoteDoc; id: string } => r.n !== null).map(r => ({ ...r.n, id: r.id }));
-    schedule();
+    scheduleData();
   }) as never, onErr));
   unsubs.push(db.collection('proposals').orderBy('ts', 'desc').limit(500).onSnapshot(((s: QSnap) => {
     model.proposals = rows(s).map(r => ({ p: normalizeProposal(r.body), id: String(r.id) }))
       .filter((r): r is { p: ProposalDoc; id: string } => r.p !== null && !!r.id && !r.id.includes('/')).map(r => ({ ...r.p, id: r.id }));
-    schedule();
+    scheduleData();
   }) as never, onErr));
   schedule();
 

@@ -846,3 +846,98 @@ describe('proposals', () => {
     app.stop();
   });
 });
+
+describe('scroll, tick and held repaints (G-01)', () => {
+  const openT003 = async (root: HTMLElement) => {
+    click(root, '[data-action="toggle-phase"][data-id="F1"]');
+    await settle();
+    click(root, '.tr.tk[data-id="T003"]');
+    await settle();
+  };
+  const EVENT = { e9: { ts: '2026-10-11T11:30:00Z', type: 'note', sessionId: 'main', text: 'evento-retenido' } };
+  it('a data snapshot repaints and keeps the scroll of every keyed container', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    click(root, '[data-view="versions"]');
+    await settle();
+    const before = root.querySelector('[data-scroll-key="vcols"]') as HTMLElement;
+    before.scrollLeft = 900;
+    f.push('state', { T001: { status: 'done' } });
+    await settle();
+    const after = root.querySelector('[data-scroll-key="vcols"]') as HTMLElement;
+    expect(after).not.toBe(before);
+    expect(after.scrollLeft).toBe(900);
+    app.stop();
+  });
+  it('with the modal open a snapshot keeps the DOM and shows ↻; ↻ repaints and keeps the overlay scroll', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    await openT003(root);
+    expect(document.documentElement.classList.contains('wp-modal')).toBe(true);
+    (root.querySelector('[data-scroll-key="modal:T003"]') as HTMLElement).scrollTop = 240;
+    const shell = root.querySelector('.shell');
+    f.push('state', { T003: { status: 'in_progress', owner: 'main', summary: 'llega-con-modal' } });
+    await settle();
+    expect(root.querySelector('.shell')).toBe(shell);
+    expect(root.innerHTML).not.toContain('llega-con-modal');
+    const pending = root.querySelector('[data-role="pending"]') as HTMLButtonElement;
+    expect(pending.hidden).toBe(false);
+    pending.click();
+    await settle();
+    expect(root.innerHTML).toContain('llega-con-modal');
+    expect((root.querySelector('[data-scroll-key="modal:T003"]') as HTMLElement).scrollTop).toBe(240);
+    expect((root.querySelector('[data-role="pending"]') as HTMLButtonElement).hidden).toBe(true);
+    app.stop();
+  });
+  it('closing the modal paints the data it held back', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    await openT003(root);
+    f.push('events', EVENT);
+    await settle();
+    expect(root.innerHTML).not.toContain('evento-retenido');
+    click(root, '.modal [data-action="close-modal"]');
+    await settle();
+    expect(root.innerHTML).toContain('evento-retenido');
+    expect(document.documentElement.classList.contains('wp-modal')).toBe(false);
+    app.stop();
+  });
+  it('the 30 s tick rewrites the relative times in place and keeps the DOM', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      const f = fakeDb();
+      let clock = NOW;
+      const root = document.createElement('div');
+      document.body.appendChild(root);
+      const app = await start({ claude: { use: async (n: string) => (n === 'db' ? f.db : n === 'user' ? fakeUser() : null) }, snapshot, root, now: () => clock });
+      await settle();
+      f.push('sessions', { main: { name: 'main', status: 'active', heartbeatAt: new Date(NOW - 2 * 60000).toISOString(), leaseUntil: new Date(NOW + 8 * 60000).toISOString() } });
+      await settle();
+      const rel = root.querySelector('[data-rel="hb"]') as HTMLElement;
+      expect(rel.textContent).toBe('hace 2 min');
+      const shell = root.querySelector('.shell');
+      clock = NOW + 10 * 60000;
+      vi.advanceTimersByTime(30000);
+      expect(root.querySelector('.shell')).toBe(shell);
+      expect(rel.textContent).toBe('hace 12 min');
+      app.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('with a select focused a snapshot waits; it paints when the select loses focus', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    const sel = root.querySelector('select[data-action="burn-scope"]') as HTMLSelectElement;
+    sel.focus();
+    const shell = root.querySelector('.shell');
+    f.push('events', EVENT);
+    await settle();
+    expect(root.querySelector('.shell')).toBe(shell);
+    expect(root.innerHTML).not.toContain('evento-retenido');
+    sel.blur();
+    await settle();
+    expect(root.innerHTML).toContain('evento-retenido');
+    app.stop();
+  });
+});

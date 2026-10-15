@@ -95,9 +95,17 @@ const safeNote = (t: unknown): NoteType => ((NOTE_TYPES as readonly string[]).in
 const oneOf = <T extends string>(list: readonly T[], v: unknown, dflt: T): T => ((list as readonly string[]).includes(v as string) ? (v as T) : dflt);
 const clip = (t: string, n: number): string => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
-// Minutes since the heartbeat, or null when heartbeatAt is not a valid date.
-const hbAge = (s: SessionDoc, now: number): number | null => { const t = Date.parse(s.heartbeatAt); return Number.isFinite(t) ? mins(t, now) : null; };
-const hbText = (d: Dict, age: number | null): string => (age == null ? '—' : d.ago(age));
+/** G-01: the kinds of relative text the 30 s tick rewrites in place. */
+export type RelKind = 'ago' | 'lasts' | 'hb';
+/** The text of a relative time: «hace X» (ago, hb) or «lleva N min» (lasts); for a junk or future time, '—' (hb) or ''. */
+export function relText(d: Dict, kind: RelKind, ts: string, now: number): string {
+  const t = pastMs(ts, now);
+  if (t === null) return kind === 'hb' ? '—' : '';
+  return kind === 'lasts' ? d.lasts(mins(t, now)) : d.ago(mins(t, now));
+}
+/** A relative time the tick can rewrite: its kind and its timestamp travel with it. */
+const rel = (d: Dict, kind: RelKind, ts: string, now: number): string =>
+  `<span data-rel="${kind}" data-ts="${esc(ts)}">${esc(relText(d, kind, ts, now))}</span>`;
 
 export function renderApp(m: Model, ui: UiState): string {
   const d = dictFor(m.meta?.locale);
@@ -123,7 +131,7 @@ export function renderApp(m: Model, ui: UiState): string {
     ${renderTimeline(m, d, ui, loc)}
     ${renderInsights(m, d, ui, loc)}`;
   return `<div class="shell">
-  <nav class="side"><div class="brand">${esc((m.meta?.name ?? '').toUpperCase())}</div>${infinitePill(m, d)}${runPill(m, d)}
+  <nav class="side" data-scroll-key="side"><div class="brand">${esc((m.meta?.name ?? '').toUpperCase())}</div>${infinitePill(m, d)}${runPill(m, d)}
     ${navBtn('tracking', '≡', d.nav.tracking)}${navBtn('versions', '▥', d.nav.versions)}${navBtn('sessions', '◎', d.nav.sessions)}${navBtn('notes', '✎', d.nav.notes)}${navBtn('proposals', '◇', d.nav.proposals, openProposals)}
     <div class="scale"><button data-action="scale" data-dir="-1" title="${esc(d.tl.smaller)}" aria-label="${esc(d.tl.smaller)}">A−</button><button data-action="scale" data-dir="1" title="${esc(d.tl.larger)}" aria-label="${esc(d.tl.larger)}">A+</button></div></nav>
   <main class="main">
@@ -142,7 +150,7 @@ function renderHeader(m: Model, d: Dict, x: Metrics, title = d.title): string {
   return `<header class="hd">
     ${liveLine(m, d)}
     <h1>${esc(title)}${infinitePill(m, d)}${runPill(m, d)}</h1>
-    <div class="meta">${esc(m.meta?.name ?? '')} · ${esc(d.version)} <b>${esc(m.meta?.version ?? '')}</b> · ${esc(d.phase)} <b>${idx}</b>/${m.plan.phases.length} · <b>${x.done}</b>/${x.total} ${esc(d.tasks)} · <span title="${esc(d.trackHelp)}"><b>${m.plan.tracks.length}</b> ${esc(d.tracks)}</span>${tests != null ? ` · <b>${num(tests)}</b> ${esc(d.tests)}` : ''}${lc ? ` · ${esc(d.lastCommit)} <b>${esc(lc.sha.slice(0, 7))}</b> ${esc(d.ago(mins(Date.parse(lc.ts), m.now)))}` : ''}</div>
+    <div class="meta">${esc(m.meta?.name ?? '')} · ${esc(d.version)} <b>${esc(m.meta?.version ?? '')}</b> · ${esc(d.phase)} <b>${idx}</b>/${m.plan.phases.length} · <b>${x.done}</b>/${x.total} ${esc(d.tasks)} · <span title="${esc(d.trackHelp)}"><b>${m.plan.tracks.length}</b> ${esc(d.tracks)}</span>${tests != null ? ` · <b>${num(tests)}</b> ${esc(d.tests)}` : ''}${lc ? ` · ${esc(d.lastCommit)} <b>${esc(lc.sha.slice(0, 7))}</b> ${rel(d, 'ago', lc.ts, m.now)}` : ''}</div>
   </header>`;
 }
 
@@ -175,8 +183,8 @@ const liveDot = (l: 'alive' | 'silent' | 'stopped') => `<span class="dot live-${
 function execLine(m: Model, d: Dict, exec: NonNullable<TaskState['exec']>): string {
   const l = liveness(m.now, exec.leaseUntil);
   const since = pastMs(exec.since, m.now);
-  const parts = [d.run.role.coordinator, d.run.mode[exec.mode] ?? exec.mode, exec.agent, d.run.stage[exec.stage] ?? exec.stage, since !== null ? d.lasts(mins(since, m.now)) : null];
-  return `${liveDot(l)} ${parts.filter(Boolean).map(p => esc(String(p))).join(' · ')}`;
+  const parts = [d.run.role.coordinator, d.run.mode[exec.mode] ?? exec.mode, exec.agent, d.run.stage[exec.stage] ?? exec.stage];
+  return `${liveDot(l)} ${parts.filter(Boolean).map(p => esc(String(p))).join(' · ')}${since !== null ? ` · ${rel(d, 'lasts', exec.since, m.now)}` : ''}`;
 }
 
 /** An in-progress task whose executor's lease stopped. */
@@ -200,7 +208,7 @@ function renderCards(m: Model, d: Dict, x: Metrics, loc: string): string {
     now += `<div class="muted">${esc(d.nothingRunning)}</div>`;
   } else {
     const MAX_RUNNING = 5;
-    now += `<div class="runs">${running.slice(0, MAX_RUNNING).map(t => {
+    now += `<div class="runs" data-scroll-key="runs">${running.slice(0, MAX_RUNNING).map(t => {
       const s = m.states[t.id]!;
       const start = Date.parse(s.startedAt ?? s.claimedAt ?? new Date(m.now).toISOString());
       const el = mins(start, m.now);
@@ -242,7 +250,7 @@ function renderCards(m: Model, d: Dict, x: Metrics, loc: string): string {
   return `<section class="row3">
     <div class="card">${now}</div>
     <div class="card">${prog}</div>
-    <div class="card"><div class="lbl">${esc(d.recent)}</div>${evs ? `<ul class="events">${evs}</ul>` : `<div class="muted">${esc(d.noEvents)}</div>`}</div>
+    <div class="card"><div class="lbl">${esc(d.recent)}</div>${evs ? `<ul class="events" data-scroll-key="events">${evs}</ul>` : `<div class="muted">${esc(d.noEvents)}</div>`}</div>
   </section>`;
 }
 
@@ -260,11 +268,10 @@ function renderSessions(m: Model, d: Dict): string {
   if (!list.length) return '';
   const esca = escalatedSessions(m);
   return `<section class="sess">${list.map(([sid, s]) => {
-    const age = hbAge(s, m.now);
     const idle = sessionLiveness(s, m.now) === 'stopped';
     const warn = esca.has(sid);
     return `<div class="s ${idle ? 'idle' : ''} ${warn ? 'warn' : ''}"><div class="n">${warn ? '⚠' : '<span class="dot">●</span>'} ${esc(s.name)} ${trackTag(m, s.track)}</div>
-      <div class="mono">${esc(s.currentTask ?? '—')} · ${esc(d.heartbeat)} ${esc(hbText(d, age))}</div></div>`;
+      <div class="mono">${esc(s.currentTask ?? '—')} · ${esc(d.heartbeat)} ${rel(d, 'hb', s.heartbeatAt, m.now)}</div></div>`;
   }).join('')}</section>`;
 }
 
@@ -283,7 +290,7 @@ function renderRunBlock(m: Model, d: Dict): string {
     const since = pastMs(s.since, m.now);
     const title = task?.title ?? r.loose.find(x => x.id === s.task)?.title ?? '';
     return `<div class="sc slot"><h3>${liveDot(l)} <span class="pe">${esc(s.task)}</span> ${esc(title)}</h3>
-      <div class="mono">${esc(d.run.stage[s.stage] ?? s.stage)}${s.agent ? ` · ${esc(s.agent)}` : ''}${since !== null ? ` · ${esc(d.lasts(mins(since, m.now)))}` : ''}</div></div>`;
+      <div class="mono">${esc(d.run.stage[s.stage] ?? s.stage)}${s.agent ? ` · ${esc(s.agent)}` : ''}${since !== null ? ` · ${rel(d, 'lasts', s.since, m.now)}` : ''}</div></div>`;
   };
   const free = Math.max(0, r.parallel - r.slots.length);
   const head = r.kind === 'ephemeral'
@@ -318,10 +325,9 @@ function renderSessionsView(m: Model, d: Dict): string {
     const zones = task ? [...new Set(zonesOf(task, m.states[task.id]))] : [];
     const prog = s.track ? x.byTrack[s.track] : undefined;
     const pct = prog && prog.total ? Math.round((num(prog.done) / prog.total) * 100) : 0;
-    const age = hbAge(s, m.now);
     const live = sessionLiveness(s, m.now);
     const idle = live === 'stopped';
-    const hb = idle ? d.run.lastSignal(hhmm(s.heartbeatAt)) : live === 'silent' ? d.run.silentSince(hhmm(s.heartbeatAt)) : hbText(d, age);
+    const hb = idle ? esc(d.run.lastSignal(hhmm(s.heartbeatAt))) : live === 'silent' ? esc(d.run.silentSince(hhmm(s.heartbeatAt))) : rel(d, 'hb', s.heartbeatAt, m.now);
     const warn = esca.has(sid);
     const msgs = m.messages.filter(g => g.from === sid || g.to === sid).slice(0, 6);
     const thread = msgs.length ? `<div class="thread"><div class="lbl ${warn ? 'ye' : ''}">${esc(warn ? d.needsDecision : d.threads)}</div>${msgs.map(g => {
@@ -334,7 +340,7 @@ function renderSessionsView(m: Model, d: Dict): string {
         <dt>${esc(d.field.task)}</dt><dd>${task ? `<span class="pe">${esc(task.id)}</span> ${esc(task.title)}` : esc(s.currentTask ?? '—')}</dd>
         <dt>${esc(d.field.branch)}</dt><dd>${esc(s.branch ?? '—')}</dd>
         <dt>${esc(d.field.agent)}</dt><dd>${esc(s.agentName ?? '—')}</dd>
-        <dt>${esc(d.heartbeat)}</dt><dd>${esc(hb)}</dd>
+        <dt>${esc(d.heartbeat)}</dt><dd>${hb}</dd>
         <dt>${esc(d.field.zones)}</dt><dd>${zones.length ? zones.map(esc).join(' · ') : '—'}</dd>
       </dl>
       ${prog ? `<div class="bar c"><i style="width:${pct}%"></i></div><div class="mono">${num(prog.done)}/${num(prog.total)}</div>` : ''}
@@ -438,14 +444,14 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string): string {
       <input class="search" data-role="search" placeholder="${esc(d.search)}" value="${esc(ui.search)}">
     </div>
     <div class="tools">
-      <div class="chips"><span class="lbl">${esc(d.tl.show)}</span>${TL_STATUSES.map(k => chip('status', k, statusLabel(k), filter.has(k))).join('')}</div>
-      <div class="chips"><span class="lbl">${esc(d.tl.layers)}</span>${TL_LAYERS.map(k => chip('layer', k, layerLabel(k), layers.has(k))).join('')}</div>
-      <div class="zoom">${ZOOMS.map(z => `<button data-action="zoom" data-zoom="${z}" class="${z === preset ? 'on' : ''}">${esc(d.zoom[z])}</button>`).join('')}
+      <div class="chips" data-scroll-key="chips:status"><span class="lbl">${esc(d.tl.show)}</span>${TL_STATUSES.map(k => chip('status', k, statusLabel(k), filter.has(k))).join('')}</div>
+      <div class="chips" data-scroll-key="chips:layers"><span class="lbl">${esc(d.tl.layers)}</span>${TL_LAYERS.map(k => chip('layer', k, layerLabel(k), layers.has(k))).join('')}</div>
+      <div class="zoom" data-scroll-key="zoom">${ZOOMS.map(z => `<button data-action="zoom" data-zoom="${z}" class="${z === preset ? 'on' : ''}">${esc(d.zoom[z])}</button>`).join('')}
         <button data-action="fit">${esc(d.tl.fit)}</button>
         <button data-action="shift" data-dir="-1" aria-label="‹">‹</button><button data-action="shift" data-dir="0">${esc(d.now)}</button><button data-action="shift" data-dir="1" aria-label="›">›</button>
         <button data-action="export" data-format="svg" class="xp" title="${esc(d.tl.export)} SVG">⤓ SVG</button><button data-action="export" data-format="png" class="xp" title="${esc(d.tl.export)} PNG">⤓ PNG</button></div>
     </div>
-    <div class="tlw" data-role="timeline" tabindex="0" aria-label="${esc(d.tl.hint)}">
+    <div class="tlw" data-role="timeline" data-scroll-key="timeline" tabindex="0" aria-label="${esc(d.tl.hint)}">
     <div class="tl">
       <div class="l"><div class="tr axis"></div>${left}</div>
       <div class="r" data-role="tl-canvas"><div class="ticks">${tickHtml}</div><div class="grid">${grid}</div>${band}${right}
@@ -511,7 +517,7 @@ function renderInsights(m: Model, d: Dict, ui: UiState, loc: string): string {
   const scopeSel = `<select data-action="burn-scope" aria-label="${esc(d.insights.scope)}">${scopes.map(sc => `<option value="${esc(sc.id)}"${sc.id === scope.id ? ' selected' : ''}>${esc(sc.label)}</option>`).join('')}</select>`;
   const cp = criticalPath(m.plan, m.states, m.now);
   const chain = cp.ids.length
-    ? `<div class="mono">${esc(d.insights.chain(cp.ids.length, cp.minutes))}</div><ol class="chain">${cp.ids.map(id => {
+    ? `<div class="mono">${esc(d.insights.chain(cp.ids.length, cp.minutes))}</div><ol class="chain" data-scroll-key="chain">${cp.ids.map(id => {
         const t = m.plan.tasks.find(x => x.id === id);
         const raw = m.states[id]?.status ?? 'free';
         const s = Object.hasOwn(d.status, raw) ? raw : 'free';
@@ -522,7 +528,7 @@ function renderInsights(m: Model, d: Dict, ui: UiState, loc: string): string {
   const heat = zoneHeat(m.plan, m.states).slice(0, 12);
   const maxHeat = Math.max(1, ...heat.map(z => z.tasks + z.touched));
   const zones = heat.length
-    ? `<ul class="zones">${heat.map(z => `<li><div class="zn"><span class="mono">${esc(z.zone)}</span><span class="k">${esc(d.insights.zoneLine(z.tasks, z.done, z.active))}${z.touched ? ` · ${esc(d.insights.touched(z.touched))}` : ''}</span></div>
+    ? `<ul class="zones" data-scroll-key="zones">${heat.map(z => `<li><div class="zn"><span class="mono">${esc(z.zone)}</span><span class="k">${esc(d.insights.zoneLine(z.tasks, z.done, z.active))}${z.touched ? ` · ${esc(d.insights.touched(z.touched))}` : ''}</span></div>
         <div class="zb"><i class="zd" style="width:${(z.done / maxHeat) * 100}%"></i><i class="za" style="width:${(z.active / maxHeat) * 100}%"></i><i class="zp" style="width:${(Math.max(0, z.tasks - z.done - z.active) / maxHeat) * 100}%"></i><i class="zt" style="width:${(z.touched / maxHeat) * 100}%"></i></div></li>`).join('')}</ul>`
     : `<div class="muted">${esc(d.insights.noZones)}</div>`;
   return `<section class="insights">
@@ -595,13 +601,13 @@ function renderTaskModal(m: Model, d: Dict, id: string, loc: string): string {
   const est = t.estimate_min ? num(t.estimate_min) : undefined;
   const duration = took === null ? ''
     : s.status === 'done' ? `<div class="mono dur"><span${est && took > est ? ' class="ye"' : ''}>${esc(d.took(took, est))}</span></div>`
-    : `<div class="mono dur">${esc(d.lasts(took))}</div>`;
+    : `<div class="mono dur">${rel(d, 'lasts', start ?? '', m.now)}</div>`;
   const sec = (label: string, body: string) => `<div class="sec"><div class="lbl">${esc(label)}</div><div>${body}</div></div>`;
-  return `<div class="overlay" data-action="close-modal"><div class="modal" role="dialog" aria-modal="true">
+  return `<div class="overlay" data-action="close-modal" data-scroll-key="modal:${esc(t.id)}"><div class="modal" role="dialog" aria-modal="true">
     <div class="mh"><div><span class="k">${esc(t.id)}</span> <span class="t">${esc(t.title)}</span><br>
       <span class="pill st-${status}${isOrphan(m, s) ? ' orphan' : ''}">${esc(isOrphan(m, s) ? d.run.orphan : d.status[status])}</span> <span class="mono">${esc(ph?.name)}${t.category ? ` · ${esc(t.category)}` : ''}</span> ${trackTag(m, t.track)}
       ${s.exec ? `<div class="mono exec">${execLine(m, d, s.exec)}</div>` : ''}</div>
-      <button class="btn" data-action="close-modal" aria-label="${esc(d.close)}">✕</button></div>
+      <div class="mhb"><button class="btn" data-action="refresh" data-role="pending" hidden>↻ ${esc(d.refresh)}</button><button class="btn" data-action="close-modal" aria-label="${esc(d.close)}">✕</button></div></div>
     <div class="mgrid"><div>
       ${sec(d.field.period, period + duration)}
       ${sec(d.field.dependsOn, chips(t.depends_on))}
@@ -728,7 +734,7 @@ function renderVersionsView(m: Model, d: Dict, ui: UiState): string {
       ${cats || `<div class="muted">${esc(d.noTasks)}</div>`}
     </div>`;
   }).join('');
-  return `<section class="versions-view">${filters}<div class="vcols">${body || `<div class="muted">${esc(d.noTasks)}</div>`}</div></section>`;
+  return `<section class="versions-view">${filters}<div class="vcols" data-scroll-key="vcols">${body || `<div class="muted">${esc(d.noTasks)}</div>`}</div></section>`;
 }
 
 function liveLine(m: Model, d: Dict): string {
@@ -820,7 +826,7 @@ function renderProposalsView(m: Model, d: Dict, ui: UiState, loc: string): strin
       <h3>${esc(p.title)}</h3>
       ${p.pillar ? `<div class="mono">${esc(d.pfield.pillar)}: ${esc(p.pillar)}</div>` : ''}
       ${p.rationale ? `<p>${esc(p.rationale)}</p>` : ''}
-      ${p.evidence ? `<div class="lbl">${esc(d.pfield.evidence)}</div><pre class="evid">${esc(p.evidence)}</pre>` : ''}
+      ${p.evidence ? `<div class="lbl">${esc(d.pfield.evidence)}</div><pre class="evid" data-scroll-key="evid:${id}">${esc(p.evidence)}</pre>` : ''}
       ${p.estimate || p.path ? `<div class="mono">${p.estimate ? `${esc(d.pfield.estimate)}: ${esc(p.estimate)}` : ''}${p.estimate && p.path ? ' · ' : ''}${p.path ? `${esc(d.pfield.path)}: ${esc(p.path)}` : ''}</div>` : ''}
       ${decided}
       ${thread}
