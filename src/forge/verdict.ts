@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { findingsMatch } from './finding-match.js';
+import { globMatch } from './validators.js';
 
 export type ReviewerName = 'correctness' | 'security' | 'perf' | 'verify';
 // origin (fix rounds, delta mode): previous = an earlier finding still open, fix = introduced by the fix,
@@ -25,22 +27,37 @@ export interface Finding {
 /** A finding an earlier review of the brief closed; `round` is the last review that had it open (J-06, hardening). */
 export interface ClosedFinding extends Finding { id: string; round: number }
 export interface Review { verdict: 'pass' | 'fail' | 'abstain'; confidence: number; findings: Finding[]; approach?: 'ok' | 'wrong'; invalid?: boolean; dropped?: number; incomplete?: boolean }
-export interface FailingValidator { validator: string; failures: string[] }
+export interface FailingValidator { validator: string; failures: string[]; failing?: string[] }
 export interface Weights { correctness: number; security: number; perf: number; verify: number }
 export type Action = 'accept' | 'fix' | 'redo';
+/** A security finding of a fix round that matches one security already closed (K4-02): the person says whether it is
+ *  inside the threat model before the loop goes on. */
+export interface AskFinding { id?: string; severity: Finding['severity']; file?: string; line?: number; problem: string; earlier: { id: string; round: number; problem: string } }
 export interface VerdictResult {
   action: Action; score: number | null; reasons: string[]; critical: Finding[]; important: Finding[]; minor: Finding[];
   reviewers: { name: ReviewerName; verdict: Review['verdict']; confidence: number; weight: number; invalid: boolean; dropped: number; incomplete: boolean }[]; signature: string;
-  // From round 2: important untouched findings left for the person because nothing else opened a round.
+  // The critical and important findings that do not block, each with its `residual`: on an accept, all of them; on a fix,
+  // the ones that do not ride along to the implementer (hardening, architecture).
   deferred: Finding[];
+  /** Security findings that repeat a closed theme: counted as blocking; the skill asks the person first. */
+  ask: AskFinding[];
 }
 // New-side line ranges of a fix diff's hunks, per file (path as in `+++ b/<path>`).
 export type FixHunks = Record<string, { start: number; end: number }[]>;
 /**
- * `root`: the repo dir, to make reviewers' absolute paths relative. `carried`: reviewers whose result was carried
- * from the previous round: their findings keep the origins they had there instead of being checked against this fix.
+ * `round`: the review number r of the brief. `root`: the repo dir, to make reviewers' absolute paths relative. `carried`:
+ * reviewers whose result was carried from the previous review: their findings keep the origins they had there. `last`: this
+ * review closes the last attempt (the verdicts that did not accept already reach the cap). `personDocs`: globs of the docs
+ * written for people (review.personDocs). `open`: the ids the previous review left open, per reviewer; `closed`: the findings
+ * closed before this review (findings-index.ts). `outOfModel` and `defer`: the ids the person ruled out of the threat model
+ * or deferred as an architecture change (overrides.json).
  */
-export interface RoundOptions { round?: number; fixHunks?: FixHunks; root?: string; carried?: ReviewerName[] }
+export interface RoundOptions {
+  round?: number; fixHunks?: FixHunks; root?: string; carried?: ReviewerName[];
+  last?: boolean; personDocs?: string[];
+  open?: Partial<Record<ReviewerName, string[]>>; closed?: Partial<Record<ReviewerName, ClosedFinding[]>>;
+  outOfModel?: string[]; defer?: string[];
+}
 
 const invalidReview = (): Review => ({ verdict: 'abstain', confidence: 0, findings: [], invalid: true });
 const SEVERITIES = ['critical', 'important', 'minor'] as const;
@@ -249,44 +266,106 @@ function reviewScore(r: Review): number {
   return r.approach === 'wrong' || !concrete ? 0.5 - 0.5 * r.confidence : 0.6 - 0.1 * r.confidence;
 }
 
-// From round 2 (opts.round >= 2) origins are checked against opts.fixHunks and an important untouched finding
-// does not open a round by itself: it rides along when something else opens one, and is deferred when the
-// task is accepted. A review whose only blocking findings are such scores as a pass with its confidence,
-// and the signature leaves them out. Round 1, or no opts, behaves as before.
+// The residuals that go to the implementer with the blocking findings when a round opens (§4.7).
+const RIDES_ALONG: readonly Residual[] = ['untouched', 'docs', 'late-round'];
+
+/**
+ * The verdict of one review of a brief (C-04, §4.7). `opts.round` is the review number r; from r = 2 origins are checked
+ * against opts.fixHunks. A critical with evidence always blocks (a security one that repeats a closed theme is also put to
+ * the person: `ask`). An important blocks in review 1 unless it is only in the person's docs; in review 2 when it is still
+ * open (previous) or the fix brought it (a regression); from review 3 only as a regression. A new finding that matches one
+ * the same reviewer closed is hardening (security: blocking and asked). The last review (opts.last) accepts a fix with green
+ * validators and no critical, leaving what is open as residual cap. A finding that does not block carries its `residual`;
+ * a failing reviewer whose findings all do not block scores as a pass. A fail without any critical or important finding
+ * breaks the rubric (J-05): it does not score and is invalid. Redo needs a score under 0.5 and a failing reviewer that says
+ * the approach is wrong with a finding that blocks (C-06). The signature covers what blocks, by severity and stable id.
+ */
 export function synthesize(reviews: Partial<Record<ReviewerName, Review>>, weights: Weights, validatorsOk: boolean, failingValidators: FailingValidator[] = [], opts: RoundOptions = {}): VerdictResult {
   const names = (Object.keys(reviews) as ReviewerName[]).filter(n => reviews[n]);
-  const later = (opts.round ?? 1) >= 2;
+  const r = Math.max(1, opts.round ?? 1);
+  const later = r >= 2;
+  const last = opts.last === true;
   const hunks = opts.fixHunks ?? {};
-  const rv: Partial<Record<ReviewerName, Review>> = later
-    ? Object.fromEntries(names.map(n => [n, opts.carried?.includes(n) ? reviews[n]! : { ...reviews[n]!, findings: reviews[n]!.findings.map(f => correctOrigin(f, hunks, opts.root)) }]))
-    : reviews;
-  // A reviewer that says the approach is wrong keeps its findings blocking whatever their origin.
-  const wrong = new Set(names.filter(n => rv[n]!.verdict === 'fail' && rv[n]!.approach === 'wrong').flatMap(n => rv[n]!.findings));
-  const deferrable = (f: Finding) => later && f.severity === 'important' && f.origin === 'untouched' && !wrong.has(f);
-  const blocks = (f: Finding) => (f.severity === 'critical' && isEvidence(f)) || f.severity === 'important';
-  // The review as the score and the fail rule see it: failing only on deferrable findings counts as a pass,
+  // J-05: a fail without a critical or important finding breaks the rubric.
+  const rubric = names.filter(n => reviews[n]!.verdict === 'fail' && !reviews[n]!.findings.some(f => f.severity !== 'minor'));
+  const rv: Partial<Record<ReviewerName, Review>> = {};
+  for (const n of names) {
+    const x = reviews[n]!;
+    rv[n] = rubric.includes(n) ? { ...x, verdict: 'abstain', confidence: 0, findings: [], invalid: true }
+      : later && !opts.carried?.includes(n) ? { ...x, findings: x.findings.map(f => correctOrigin(f, hunks, opts.root)) } : x;
+  }
+  const wrongOf = (n: ReviewerName) => rv[n]!.verdict === 'fail' && rv[n]!.approach === 'wrong';
+  const inDocs = (f: Finding) => !!f.file?.trim() && (opts.personDocs ?? []).some(g => globMatch(g, repoRelative(f.file!, opts.root)));
+
+  // §4.7, one finding at a time: does it block, and if not, why (its residual); `earlier` is the closed finding a security
+  // one repeats.
+  type Judged = { blocks: boolean; residual?: Residual; earlier?: ClosedFinding };
+  const judged = new Map<Finding, Judged>();
+  const judge = (f: Finding, n: ReviewerName): Judged => {
+    let j = judged.get(f);
+    if (!j) { j = classify(f, n); judged.set(f, j); }
+    return j;
+  };
+  function classify(f: Finding, n: ReviewerName): Judged {
+    if (f.severity === 'minor') return { blocks: false };
+    if (f.outOfModel || (f.id !== undefined && opts.outOfModel?.includes(f.id))) return { blocks: false, residual: 'out-of-model' };
+    if (f.severity === 'critical' && !isEvidence(f)) return { blocks: false };
+    if (f.id !== undefined && opts.defer?.includes(f.id)) return { blocks: false, residual: 'architecture' };
+    const owner = f.reviewer ?? n;
+    const previous = later && (f.origin === 'previous' || (f.id !== undefined && !!opts.open?.[owner]?.includes(f.id)));
+    const earlier = later && !previous && f.regression !== true ? opts.closed?.[owner]?.find(c => findingsMatch(c, f)) : undefined;
+    if (f.severity === 'critical') return earlier && owner === 'security' && !last ? { blocks: true, earlier } : { blocks: true };
+    if (inDocs(f)) return { blocks: false, residual: 'docs' };
+    if (wrongOf(n)) return last ? { blocks: false, residual: 'cap' } : { blocks: true };
+    if (!later) return { blocks: true };
+    if (previous) return last ? { blocks: false, residual: 'cap' } : r >= 3 ? { blocks: false, residual: 'late-round' } : { blocks: true };
+    if (earlier) return last ? { blocks: false, residual: 'cap' } : owner === 'security' ? { blocks: true, earlier } : { blocks: false, residual: 'hardening' };
+    if (f.origin === 'untouched' && f.regression !== true) return { blocks: false, residual: 'untouched' };
+    return last ? { blocks: false, residual: 'cap' } : { blocks: true };
+  }
+
+  // The review as the score and the fail rule see it: failing only on findings that do not block counts as a pass,
   // unless the approach is wrong.
-  const effective = (r: Review): Review => {
-    const b = r.findings.filter(blocks);
-    return r.verdict === 'fail' && r.approach !== 'wrong' && b.length && b.every(deferrable) ? { ...r, verdict: 'pass' } : r;
+  const effective = (n: ReviewerName): Review => {
+    const x = rv[n]!;
+    if (x.verdict !== 'fail' || x.approach === 'wrong') return x;
+    const heavy = x.findings.filter(f => f.severity !== 'minor');
+    return heavy.length && heavy.every(f => !judge(f, n).blocks) ? { ...x, verdict: 'pass' } : x;
   };
   const answered = names.filter(n => rv[n]!.verdict !== 'abstain');
-  const all = answered.flatMap(n => rv[n]!.findings);
-  const critical = all.filter(f => f.severity === 'critical' && isEvidence(f));
-  let important = all.filter(f => f.severity === 'important');
-  const minor = all.filter(f => f.severity === 'minor' || (f.severity === 'critical' && !isEvidence(f)));
-  const failImportant = answered.some(n => effective(rv[n]!).verdict === 'fail' && rv[n]!.findings.some(f => f.severity === 'important' && !deferrable(f)));
+  const critical: Finding[] = [];
+  let important: Finding[] = [];
+  const minor: Finding[] = [];
+  const residual: Finding[] = [];
+  const ask: AskFinding[] = [];
+  for (const n of answered) {
+    for (const f of rv[n]!.findings) {
+      const j = judge(f, n);
+      if (j.residual === 'out-of-model') { minor.push({ ...f, severity: 'minor', declared: f.severity, outOfModel: true, residual: 'out-of-model' }); continue; }
+      if (f.severity === 'minor' || (f.severity === 'critical' && !isEvidence(f))) { minor.push(f); continue; }
+      if (j.residual) { residual.push({ ...f, residual: j.residual }); continue; }
+      (f.severity === 'critical' ? critical : important).push(f);
+      if (j.earlier) {
+        ask.push({ ...(f.id !== undefined ? { id: f.id } : {}), severity: f.severity, ...(f.file ? { file: f.file } : {}), ...(f.line !== undefined ? { line: f.line } : {}),
+          problem: f.problem, earlier: { id: j.earlier.id, round: j.earlier.round, problem: j.earlier.problem } });
+      }
+    }
+  }
+  const failImportant = answered.some(n => effective(n).verdict === 'fail' && rv[n]!.findings.some(f => f.severity === 'important' && judge(f, n).blocks));
+  const wrongBlocking = answered.some(n => wrongOf(n) && rv[n]!.findings.some(f => judge(f, n).blocks));
   const sumW = answered.reduce((s, n) => s + weights[n], 0);
   const score = answered.length && sumW > 0
-    ? round3(answered.reduce((s, n) => s + weights[n] * reviewScore(effective(rv[n]!)), 0) / sumW)
+    ? round3(answered.reduce((s, n) => s + weights[n] * reviewScore(effective(n)), 0) / sumW)
     : null;
-  const reasons: string[] = [];
+  const reasons: string[] = rubric.map(n => `${n}: fail without a critical or important finding (rubric)`);
   let action: Action;
   if (score === null) {
     action = validatorsOk ? 'accept' : 'fix';
     reasons.push('no reviewer answered: validators decide');
+  } else if (score < 0.5 && wrongBlocking) {
+    action = 'redo'; reasons.push(`score ${score} < 0.5 and a failing reviewer says the approach is wrong`);
   } else if (score < 0.5) {
-    action = 'redo'; reasons.push(`score ${score} < 0.5`);
+    action = 'fix'; reasons.push(`score ${score} < 0.5, but no failing reviewer says approach: wrong with a finding that blocks: fix, not redo`);
   } else if (critical.length) {
     action = 'fix'; reasons.push(`${critical.length} critical finding(s) with evidence`);
   } else if (!validatorsOk) {
@@ -298,22 +377,35 @@ export function synthesize(reviews: Partial<Record<ReviewerName, Review>>, weigh
   } else {
     action = 'fix'; reasons.push(`score ${score} between 0.5 and 0.7`);
   }
-  let deferred: Finding[] = [];
-  if (action === 'accept') {
-    deferred = important.filter(deferrable);
-    if (deferred.length) {
-      important = important.filter(f => !deferrable(f));
-      reasons.push(`${deferred.length} untouched important finding(s) deferred`);
-    }
+  // Rule 7 (C-04): the last review accepts a fix with green validators and no critical; what is open stays as residual cap.
+  if (last && action === 'fix' && validatorsOk && !critical.length) {
+    residual.push(...important.map(f => ({ ...f, residual: 'cap' as const })));
+    important = [];
+    action = 'accept';
   }
+  const capped = residual.filter(f => f.residual === 'cap').length;
+  if (last && action === 'accept' && capped) reasons.push(`accepted at the cap with ${capped} open finding(s)`);
+  const blockingImportant = important;
+  let deferred: Finding[];
+  if (action === 'accept') {
+    deferred = residual;
+    if (residual.length) reasons.push(`${residual.length} finding(s) left open as residual (${[...new Set(residual.map(f => f.residual))].join(', ')})`);
+  } else {
+    important = [...important, ...residual.filter(f => RIDES_ALONG.includes(f.residual!))];
+    deferred = residual.filter(f => !RIDES_ALONG.includes(f.residual!));
+  }
+  // J-06: what blocks, by severity and stable id (file and problem for a finding without one), and the failing validators
+  // by their failing tests (their failure lines when those are unknown). Prefixed v2: so a signature from forge 0.17 or
+  // older, made of the problem's text, never matches; empty when nothing blocks.
+  const key = (f: Finding) => `${f.severity}|${f.id ?? `${f.file ?? ''}|${f.problem.trim().toLowerCase()}`}`;
   const blocking = [
-    ...[...critical, ...important].filter(f => !deferrable(f)).map(f => `${f.severity}|${f.file ?? ''}|${f.problem.trim().toLowerCase()}`),
-    ...failingValidators.map(v => `validator|${v.validator}|${v.failures.join('\n')}`),
+    ...[...critical, ...blockingImportant].map(key),
+    ...failingValidators.map(v => `validator|${v.validator}|${(v.failing?.length ? v.failing : v.failures).join('\n')}`),
   ].sort();
-  const signature = createHash('sha256').update(JSON.stringify(blocking)).digest('hex').slice(0, 16);
+  const signature = blocking.length ? `v2:${createHash('sha256').update(JSON.stringify(blocking)).digest('hex').slice(0, 16)}` : '';
   return {
-    action, score, reasons, critical, important, minor, signature,
-    reviewers: names.map(n => ({ name: n, verdict: reviews[n]!.verdict, confidence: reviews[n]!.confidence, weight: weights[n], invalid: reviews[n]!.invalid === true, dropped: reviews[n]!.dropped ?? 0, incomplete: reviews[n]!.incomplete === true })),
-    deferred,
+    action, score, reasons, critical, important, minor, signature, deferred, ask,
+    reviewers: names.map(n => ({ name: n, verdict: reviews[n]!.verdict, confidence: reviews[n]!.confidence, weight: weights[n],
+      invalid: reviews[n]!.invalid === true || rubric.includes(n), dropped: reviews[n]!.dropped ?? 0, incomplete: reviews[n]!.incomplete === true })),
   };
 }

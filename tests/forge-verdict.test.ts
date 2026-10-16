@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, parseHunks, correctOrigin, type Review, type Finding } from '../src/forge/verdict.js';
+import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, parseHunks, correctOrigin, type Review, type Finding, type ClosedFinding, type RoundOptions } from '../src/forge/verdict.js';
 
 const pass = (confidence = 1, findings: Review['findings'] = []): Review => ({ verdict: 'pass', confidence, findings });
 const fail = (confidence = 1, findings: Review['findings'] = []): Review => ({ verdict: 'fail', confidence, findings });
@@ -112,13 +112,15 @@ describe('synthesize', () => {
     expect(a.score).toBe(b.score);
     expect(a.signature).not.toBe(b.signature);
   });
-  it('score under 0.5 → redo', () => {
-    expect(synthesize({ correctness: fail(0.8), security: pass(0.2) }, W, true).action).toBe('redo');
+  it('score under 0.5 with a failing reviewer that says the approach is wrong → redo', () => {
+    // correctness wrong c=.8 → .1 (w .5), security pass c=.2 → .76 (w .3): .278/.8 = .3475
+    const wrong = { ...fail(0.8, [{ severity: 'important' as const, file: 'a.ts', problem: 'bug' }]), approach: 'wrong' as const };
+    expect(synthesize({ correctness: wrong, security: pass(0.2) }, W, true).action).toBe('redo');
   });
   it('weights renormalise over the reviewers that answered', () => {
-    // correctness pass 1 → 1 (w .5), security fail 1 with no findings → 0 (w .3); perf abstains → 0.5/0.8 = 0.625
-    const r = synthesize({ correctness: pass(), security: fail(), perf: { verdict: 'abstain', confidence: 0, findings: [] } }, W, true);
-    expect(r.score).toBe(0.625);
+    // correctness pass 1 → 1 (w .5), security fail 1 with an important → .5 (w .3); perf abstains → .65/.8 = .8125
+    const r = synthesize({ correctness: pass(), security: fail(1, [{ severity: 'important', file: 'b.ts', problem: 'bug' }]), perf: { verdict: 'abstain', confidence: 0, findings: [] } }, W, true);
+    expect(r.score).toBe(0.813);
   });
   it('all abstain → validators decide', () => {
     const abstain: Review = { verdict: 'abstain', confidence: 0, findings: [] };
@@ -280,7 +282,7 @@ describe('fix rounds: origin and deferred', () => {
     // the failing review counts as a pass with its confidence: (.5 * .94 + .3 * 1) / .8 = .9625
     expect(r).toMatchObject({ action: 'accept', important: [] });
     expect(r.score).toBeCloseTo(0.9625, 2);
-    expect(r.deferred).toEqual([imp('untouched')]);
+    expect(r.deferred).toEqual([{ ...imp('untouched'), residual: 'untouched' }]);
   });
   it('round 2: with a previous finding as well, fix carries the untouched in the findings', () => {
     const r = synthesize({ correctness: fail(0.8, [imp('untouched'), imp('previous')]) }, W, true, [], { round: 2, fixHunks: hunks });
@@ -344,5 +346,143 @@ describe('fix rounds: origin and deferred', () => {
     const d = synthesize({ correctness: fail(0.8, [imp('untouched')]) }, W, true, [], { round: 2, fixHunks: hunks });
     expect(d.deferred).toHaveLength(1);
     expect(d.signature).toBe(c.signature);
+  });
+});
+
+describe('what blocks in each review (C-04, C-06, J-05, J-06, K4-02, K4-09)', () => {
+  const mk = (over: Partial<Finding> = {}): Finding => ({ severity: 'important', file: 'src/a.ts', line: 10, problem: 'p', reviewer: 'correctness', ...over });
+  const closedF1: ClosedFinding = { severity: 'important', file: 'src/a.ts', line: 12, problem: 'the input is not validated', reviewer: 'correctness', id: 'F1', round: 1 };
+  const at = (round: number, extra: RoundOptions = {}): RoundOptions => ({ round, ...extra });
+
+  it('review 1: a new important blocks; one only in the person docs is residual docs and the brief is accepted (K4-09)', () => {
+    expect(synthesize({ correctness: fail(0.8, [mk({ id: 'F1' })]) }, W, true, [], at(1)).action).toBe('fix');
+    const docs = synthesize({ correctness: fail(0.8, [mk({ id: 'F1', file: 'README.md' })]) }, W, true, [], at(1, { personDocs: ['README.md', '**/README.md'] }));
+    expect(docs).toMatchObject({ action: 'accept', important: [] });
+    expect(docs.deferred).toEqual([mk({ id: 'F1', file: 'README.md', residual: 'docs' })]);
+    expect(synthesize({ correctness: fail(0.8, [mk({ id: 'F1', file: 'docs/guide.md' })]) }, W, true, [], at(1, { personDocs: ['README.md'] })).action).toBe('fix');
+  });
+
+  it('review 2: a previous one still open blocks, a regression of the fix blocks, hardening of a closed class is residual and accepts', () => {
+    expect(synthesize({ correctness: fail(0.8, [mk({ id: 'F1', origin: 'previous' })]) }, W, true, [], at(2, { open: { correctness: ['F1'] } })).action).toBe('fix');
+    expect(synthesize({ correctness: fail(0.8, [mk({ id: 'F2', origin: 'fix', file: 'src/b.ts', problem: 'new crash on an empty list' })]) }, W, true, [],
+      at(2, { closed: { correctness: [closedF1] } })).action).toBe('fix');
+    const hardening = synthesize({ correctness: fail(0.8, [mk({ id: 'F2', origin: 'fix', line: 14, problem: 'the input is not validated when it is empty' })]) }, W, true, [],
+      at(2, { closed: { correctness: [closedF1] } }));
+    expect(hardening).toMatchObject({ action: 'accept', ask: [], important: [] });
+    expect(hardening.deferred).toEqual([expect.objectContaining({ id: 'F2', residual: 'hardening' })]);
+    // "regression": true keeps it blocking even when it matches a closed one.
+    expect(synthesize({ correctness: fail(0.8, [mk({ id: 'F2', origin: 'fix', line: 14, regression: true })]) }, W, true, [],
+      at(2, { closed: { correctness: [closedF1] } })).action).toBe('fix');
+  });
+
+  it('from review 3 only criticals and regressions block: a previous important is residual late-round, and rides along when a regression opens the round', () => {
+    const r = synthesize({ correctness: fail(0.8, [mk({ id: 'F1', origin: 'previous' })]) }, W, true, [], at(3, { open: { correctness: ['F1'] } }));
+    expect(r.action).toBe('accept');
+    expect(r.deferred).toEqual([expect.objectContaining({ id: 'F1', residual: 'late-round' })]);
+    const both = synthesize({ correctness: fail(0.8, [mk({ id: 'F1', origin: 'previous' }), mk({ id: 'F3', origin: 'fix', file: 'src/c.ts', problem: 'a new bug' })]) }, W, true, [],
+      at(3, { open: { correctness: ['F1'] } }));
+    expect(both.action).toBe('fix');
+    expect(both.important.map(f => [f.id, f.residual ?? null])).toEqual([['F3', null], ['F1', 'late-round']]);
+    expect(both.deferred).toEqual([]);
+  });
+
+  it('the last review accepts a fix with green validators and no critical, and says how many stay open; red validators or a critical still fix (C-04)', () => {
+    const open = { correctness: ['F1'] };
+    const r = synthesize({ correctness: fail(0.8, [mk({ id: 'F1', origin: 'previous' }), mk({ id: 'F4', origin: 'fix', file: 'src/d.ts', problem: 'a new one' })]) }, W, true, [],
+      at(4, { last: true, open }));
+    expect(r.action).toBe('accept');
+    expect(r.reasons).toContain('accepted at the cap with 2 open finding(s)');
+    expect(r.deferred.map(f => [f.id, f.residual])).toEqual([['F1', 'cap'], ['F4', 'cap']]);
+    expect(synthesize({ correctness: fail(0.8, [mk({ id: 'F1', origin: 'previous' })]) }, W, false, [{ validator: 'test', failures: ['x'] }], at(4, { last: true, open })).action).toBe('fix');
+    expect(synthesize({ correctness: fail(0.8, [mk({ id: 'F5', origin: 'fix', severity: 'critical' })]) }, W, true, [], at(4, { last: true })).action).toBe('fix');
+  });
+
+  it('a security finding of the fix that matches one security closed asks and counts as blocking; ruled out of the model it is minor (K4-02)', () => {
+    const closedS: ClosedFinding = { ...closedF1, reviewer: 'security', problem: 'the path is joined without a check' };
+    const f = mk({ id: 'F2', origin: 'fix', line: 13, reviewer: 'security', problem: 'the path is joined without a check for short names' });
+    const r = synthesize({ security: fail(0.8, [f]) }, W, true, [], at(2, { closed: { security: [closedS] } }));
+    expect(r.action).toBe('fix');
+    expect(r.ask).toEqual([{ id: 'F2', severity: 'important', file: 'src/a.ts', line: 13, problem: f.problem, earlier: { id: 'F1', round: 1, problem: 'the path is joined without a check' } }]);
+    const ruled = synthesize({ security: fail(0.8, [f]) }, W, true, [], at(2, { closed: { security: [closedS] }, outOfModel: ['F2'] }));
+    expect(ruled).toMatchObject({ action: 'accept', ask: [], important: [] });
+    expect(ruled.minor).toEqual([{ ...f, severity: 'minor', declared: 'important', outOfModel: true, residual: 'out-of-model' }]);
+  });
+
+  it('a finding the reviewer marks outOfModel is minor whatever its severity; --defer leaves one as residual architecture', () => {
+    const r = synthesize({ security: fail(0.8, [mk({ id: 'F1', reviewer: 'security', severity: 'critical', outOfModel: true })]) }, W, true, [], at(1));
+    expect(r).toMatchObject({ action: 'accept', critical: [] });
+    expect(r.minor[0]).toMatchObject({ id: 'F1', severity: 'minor', declared: 'critical', outOfModel: true, residual: 'out-of-model' });
+    const d = synthesize({ correctness: fail(0.8, [mk({ id: 'F3', origin: 'previous' })]) }, W, true, [], at(2, { open: { correctness: ['F3'] }, defer: ['F3'] }));
+    expect(d.action).toBe('accept');
+    expect(d.deferred).toEqual([expect.objectContaining({ id: 'F3', residual: 'architecture' })]);
+  });
+
+  it('a fail without a critical or important finding breaks the rubric: invalid, and it does not score (J-05)', () => {
+    const r = synthesize({ correctness: fail(0.9, [{ severity: 'minor', problem: 'naming' }]), security: pass(0.8) }, W, true);
+    expect(r.reviewers.map(x => [x.name, x.verdict, x.invalid])).toEqual([['correctness', 'fail', true], ['security', 'pass', false]]);
+    expect(r.reasons).toContain('correctness: fail without a critical or important finding (rubric)');
+    expect(r).toMatchObject({ action: 'accept', score: 0.94, minor: [] });
+  });
+
+  it('redo only when a failing reviewer says the approach is wrong with a finding that blocks; otherwise a low score is a fix (C-06)', () => {
+    expect(synthesize({ correctness: { ...fail(0.5, [mk({ id: 'F1' })]), approach: 'wrong' } }, W, true).action).toBe('redo');
+    const docsOnly = synthesize({ correctness: { ...fail(0.8, [mk({ id: 'F1', file: 'README.md' })]), approach: 'wrong' } }, W, true, [], at(1, { personDocs: ['README.md'] }));
+    expect(docsOnly.action).toBe('fix');
+    expect(docsOnly.reasons[0]).toMatch(/no failing reviewer says approach: wrong/);
+  });
+
+  it('signs the blocking findings by severity and id: other words and another score give the same signature; nothing blocking gives none (J-06)', () => {
+    const a = synthesize({ correctness: fail(0.8, [mk({ id: 'F1', problem: 'one way to say it' })]) }, W, true);
+    const b = synthesize({ correctness: fail(0.6, [mk({ id: 'F1', problem: 'another way', line: 30 })]) }, W, true);
+    expect(a.score).not.toBe(b.score);
+    expect(a.signature).toBe(b.signature);
+    expect(a.signature).toMatch(/^v2:[0-9a-f]{16}$/);
+    expect(synthesize({ correctness: fail(0.8, [mk({ id: 'F2' })]) }, W, true).signature).not.toBe(a.signature);
+    expect(synthesize({ correctness: pass() }, W, true).signature).toBe('');
+    const red = (failures: string[]) => synthesize({ correctness: pass() }, W, false, [{ validator: 'test', failures, failing: ['a.test.ts > adds'] }]).signature;
+    expect(red(['FAIL a 12ms'])).toBe(red(['FAIL a 30ms']));
+  });
+
+  it('a critical security repeat asks too, also when an express reviewer reports it; a correctness critical that matches a closed one blocks without asking', () => {
+    const closedS: ClosedFinding = { ...closedF1, reviewer: 'security', problem: 'the path is joined without a check' };
+    const crit = mk({ id: 'F2', origin: 'fix', line: 13, reviewer: 'security', severity: 'critical', problem: 'the path is joined without a check for short names' });
+    const express = synthesize({ correctness: fail(0.8, [crit]) }, W, true, [], at(2, { closed: { security: [closedS] } }));
+    expect(express).toMatchObject({ action: 'fix', critical: [crit] });
+    expect(express.ask).toEqual([expect.objectContaining({ id: 'F2', severity: 'critical', earlier: { id: 'F1', round: 1, problem: closedS.problem } })]);
+    const own = synthesize({ correctness: fail(0.8, [mk({ id: 'F2', origin: 'fix', line: 14, severity: 'critical' })]) }, W, true, [], at(2, { closed: { correctness: [closedF1] } }));
+    expect(own).toMatchObject({ action: 'fix', ask: [] });
+    expect(own.critical).toHaveLength(1);
+  });
+
+  it('an id the previous review left open is previous whatever origin the reviewer gives it; an untouched one with regression: true blocks', () => {
+    const r = synthesize({ correctness: fail(0.8, [mk({ id: 'F1', origin: 'fix' })]) }, W, true, [], at(3, { open: { correctness: ['F1'] } }));
+    expect(r.action).toBe('accept');
+    expect(r.deferred).toEqual([expect.objectContaining({ id: 'F1', residual: 'late-round' })]);
+    expect(synthesize({ correctness: fail(0.8, [mk({ id: 'F6', origin: 'untouched', file: 'src/z.ts', line: 100, regression: true })]) }, W, true, [], at(2)).action).toBe('fix');
+  });
+
+  it('when a round opens, docs ride along to the implementer and hardening stays in deferred', () => {
+    const r = synthesize({ correctness: fail(0.8, [
+      mk({ id: 'F1', origin: 'previous' }),
+      mk({ id: 'F2', origin: 'fix', line: 14, problem: 'the input is not validated when it is empty' }),
+      mk({ id: 'F3', origin: 'fix', file: 'README.md' }),
+    ]) }, W, true, [], at(2, { open: { correctness: ['F1'] }, closed: { correctness: [closedF1] }, personDocs: ['README.md'] }));
+    expect(r.action).toBe('fix');
+    expect(r.important.map(f => [f.id, f.residual ?? null])).toEqual([['F1', null], ['F3', 'docs']]);
+    expect(r.deferred.map(f => [f.id, f.residual])).toEqual([['F2', 'hardening']]);
+  });
+
+  it('at the last review an untouched one keeps its residual and hardening is cap; a fix with nothing left blocking turns into an accept (rule 7)', () => {
+    const r = synthesize({ correctness: fail(0.8, [
+      mk({ id: 'F2', origin: 'fix', line: 14, problem: 'the input is not validated when it is empty' }),
+      mk({ id: 'F6', origin: 'untouched', file: 'src/z.ts', line: 100 }),
+    ]) }, W, true, [], at(4, { last: true, closed: { correctness: [closedF1] } }));
+    expect(r.action).toBe('accept');
+    expect(r.deferred.map(f => [f.id, f.residual])).toEqual([['F2', 'cap'], ['F6', 'untouched']]);
+    expect(r.reasons).toContain('accepted at the cap with 1 open finding(s)');
+    // approach: wrong keeps the review failing (score .1) but nothing blocks: a fix by rule 2, an accept by rule 7.
+    const wrong = synthesize({ correctness: { ...fail(0.8, [mk({ id: 'F1', origin: 'previous' })]), approach: 'wrong' } }, W, true, [], at(4, { last: true, open: { correctness: ['F1'] } }));
+    expect(wrong).toMatchObject({ action: 'accept', important: [] });
+    expect(wrong.deferred).toEqual([expect.objectContaining({ id: 'F1', residual: 'cap' })]);
   });
 });
