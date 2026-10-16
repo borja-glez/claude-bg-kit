@@ -59,7 +59,9 @@ export function parseIndex(text: string | null, task: string): FindingsIndex {
     if (!r || typeof r !== 'object') continue;
     const { round, findings } = r as { round?: unknown; findings?: unknown };
     if (!Number.isInteger(round) || (round as number) < 1 || !Array.isArray(findings)) continue;
-    rounds.push({ round: round as number, findings: findings.map(entryOf).filter((f): f is IndexedFinding => f !== null) });
+    const seen = new Set<string>();
+    const kept = findings.map(entryOf).filter((f): f is IndexedFinding => f !== null && !seen.has(f.id) && !!seen.add(f.id));
+    rounds.push({ round: round as number, findings: kept });
   }
   rounds.sort((a, b) => a.round - b.round);
   return { task, next: nextId(rounds), rounds };
@@ -76,7 +78,7 @@ const withoutId = (f: Finding): Finding => { const c = { ...f }; delete c.id; re
  * ids, because `next` counts only the reviews before it.
  */
 export function assignIds(index: FindingsIndex, round: number, reviews: Partial<Record<ReviewerName, Review>>, opts: { express?: boolean } = {}): Partial<Record<ReviewerName, Review>> {
-  const open = (previousOf(index, round)?.findings ?? []).filter(isOpen);
+  const open = (previousOf(index, round)?.findings ?? []).filter((f, i, all) => isOpen(f) && all.findIndex(g => g.id === f.id) === i);
   const taken = new Set<string>();
   const staged = new Map<ReviewerName, Finding[]>();
   for (const n of REVIEWERS) {
@@ -95,7 +97,7 @@ export function assignIds(index: FindingsIndex, round: number, reviews: Partial<
     const pairs = pairFindings(loose.map(x => x.f), free);
     loose.forEach((x, k) => {
       const p = pairs[k] >= 0 ? free[pairs[k]] : undefined;
-      if (p) { list[x.i] = { ...x.f, id: p.id }; taken.add(p.id); }
+      if (p && !taken.has(p.id)) { list[x.i] = { ...x.f, id: p.id }; taken.add(p.id); }
     });
   }
   let next = nextId(before(index, round));

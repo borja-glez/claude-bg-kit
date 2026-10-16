@@ -112,4 +112,21 @@ describe('findings index (J-06)', () => {
     ] }, { round: 'x', findings: [] }, { round: 2 }] }), 'T');
     expect(idx).toEqual({ task: 'T', next: 3, rounds: [{ round: 1, findings: [{ id: 'F2', reviewer: 'correctness', severity: 'important', problem: 'p', status: 'open' }] }] });
   });
+  it('keeps one entry per id within a round, and never hands out an id twice in a review', () => {
+    const e = (id: string, problem: string) => ({ id, reviewer: 'correctness', severity: 'important', file: 'a.ts', line: 1, problem, status: 'open' });
+    const idx = parseIndex(JSON.stringify({ rounds: [{ round: 1, findings: [e('F2', 'first'), e('F2', 'second')] }, { round: 2, findings: [e('F2', 'again')] }] }), 'T');
+    expect(idx.rounds.map(r => r.findings.map(f => f.problem))).toEqual([['first'], ['again']]);
+    const dup: FindingsIndex = { task: 'T', next: 3, rounds: [{ round: 1, findings: [
+      { ...idx.rounds[0].findings[0] }, { ...idx.rounds[0].findings[0], problem: 'second' },
+    ] }] };
+    const out = assignIds(dup, 2, { correctness: fail([imp('one', { origin: 'previous', line: 1, file: 'a.ts' }), imp('two', { origin: 'previous', line: 1, file: 'a.ts' })]) });
+    const got = ids(out.correctness);
+    expect(new Set(got).size).toBe(got.length);
+  });
+
+  it('reads a truncated file and an id above F999 without throwing', () => {
+    expect(parseIndex('{"rounds":[{"round":1,"findings":[{"id":"F1"', 'T')).toEqual({ task: 'T', next: 1, rounds: [] });
+    const big = { id: 'F1000', reviewer: 'security', severity: 'important', problem: 'p', status: 'open' };
+    expect(parseIndex(JSON.stringify({ rounds: [{ round: 1, findings: [big] }] }), 'T')).toEqual({ task: 'T', next: 1, rounds: [{ round: 1, findings: [] }] });
+  });
 });
