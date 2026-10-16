@@ -1,7 +1,6 @@
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, rmSync, statSync, appendFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { parsePlan, PlanError, isPlanId } from '../lib/plan.js';
 import { buildDocs, buildSyncWrites, planHash, planViewFromDocs, type Known, type Write } from '../lib/sync.js';
 import { normalizeMeta, normalizePhase } from '../page/normalize.js';
@@ -16,21 +15,21 @@ import { buildDesignPageData } from '../design-page/build.js';
 import { eventId, eventIds, sessionIdFrom } from '../lib/ids.js';
 import { computeMetrics } from '../lib/metrics.js';
 import { normalizeNote, notesSince, noteLines } from '../lib/notes.js';
-import { pickProject } from '../mod/model.js';
 import { BRANCH_RE, mainWorktreeFrom, samePath } from '../lib/worktree.js';
 import { excludeWorktrees } from '../lib/git-info.js';
-import { mainCheckoutFrom } from '../lib/main-checkout.js';
-import { forgeActivityFrom, forgeRoleOf, MAX_MEMBER_FILES, type ForgeActivity } from '../lib/forge-activity.js';
-import { planLocale, replyIn } from '../lib/locale.js';
+import { isCommitCommand, runHook } from './hooks.js';
 import { launchRun, EFFORTS, MODELS, type Launcher, type Effort, type Model } from '../lib/launcher.js';
 import { roadmapCapabilities, sharingNotice, syncSummary } from '../lib/publish.js';
 import { claudeSessionId, noClaudeSession } from '../lib/claude-session.js';
 import { blockBatch, claimBatch, cleanText, doneBatch, freeBatch, heartbeatBatch, registerBatch, REASON_MAX, SUMMARY_MAX } from '../lib/batches.js';
 import { BOUND_VIAS, MAX_SEATS, isBoundVia, type BoundDoc } from '../lib/bound.js';
-import { boundFile, boundLive, checkoutSid, openTasksOf, pidFromEnv, readBinding, readBindings, readSeats, recordBase, secondSeatOf, seatsDir, writeAtomic, writeBinding } from '../lib/bound-fs.js';
+import { boundFile, boundLive, checkoutSid, openTasksOf, pidFromEnv, readBinding, readSeats, recordBase, secondSeatOf, seatsDir, writeAtomic, writeBinding } from '../lib/bound-fs.js';
 import { isSafeId } from '../lib/execution-state.js';
 import { loadConfig } from '../forge/config.js';
 import type { Commit, MessageDoc, NoteDoc, PhaseDoc, PlanView, SessionDoc, TaskState } from '../lib/types.js';
+
+// The classic hooks live in hooks.ts; the tests import isCommitCommand from here.
+export { isCommitCommand };
 
 export interface Io { cwd: string; now: () => Date; rand?: () => number; assetsDir: string; stdin?: string; env?: Record<string, string | undefined> }
 type Result = { code: number; stdout: string; stderr: string };
@@ -795,140 +794,6 @@ function projectOf(file: string, cwd: string): { project: string; plan: string |
   }
   const p = parsePlan(readFileSync(file, 'utf8'));
   return { project: p.project, plan: rel(file), url: p.artifacts.roadmap ?? null };
-}
-
-// `git [global options] commit`, at the start of the command, after a separator or an opening parenthesis.
-const COMMIT_RE = /(^|[;&|(]\s*|\s)git\s+((-c|-C)\s+\S+\s+|--no-pager\s+)*commit(?![\w-])/;
-
-export function isCommitCommand(cmd: string): boolean {
-  return COMMIT_RE.test(cmd) && !/(^|\s)--dry-run(?![\w-])/.test(cmd);
-}
-
-function lines(file: string): string[] {
-  return existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(l => l.trim()) : [];
-}
-
-const nonEmpty = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v : undefined);
-
-/**
- * A-07: what forge is doing in the main checkout of `root`, read as texts (execution.json, at most MAX_MEMBER_FILES
- * member files, run.json) and interpreted in src/lib: waypoint never imports forge. Nothing is migrated or written.
- */
-function readForgeActivity(root: string): ForgeActivity {
-  const read = (f: string): string | null => { try { return readFileSync(f, 'utf8'); } catch { return null; } };
-  const main = mainCheckoutFrom(root, read(path.join(root, '.git')));
-  const dir = path.join(main, '.forge', 'members');
-  let names: string[] = [];
-  try { names = readdirSync(dir).filter(f => f.endsWith('.json')).slice(0, MAX_MEMBER_FILES); } catch { names = []; }
-  return forgeActivityFrom({
-    execution: read(path.join(main, '.forge', 'execution.json')), members: names.map(n => read(path.join(dir, n))), run: read(path.join(main, '.forge', 'run.json')),
-  });
-}
-
-// Classic hooks: any failure yields empty output so a broken hook never disturbs the session.
-function runHook(sub: string | undefined, io: Io): string {
-  let input: { cwd?: unknown; stop_hook_active?: boolean; session_id?: unknown; tool_input?: { command?: unknown } } = {};
-  try { const v = JSON.parse(io.stdin ?? ''); if (v && typeof v === 'object') input = v; else return ''; } catch { return ''; /* unreadable input: say nothing (never risk a stop loop) */ }
-  // Cheap check first: most Bash calls are not commits and must not pay for project discovery.
-  const cmd = input.tool_input?.command;
-  if (sub === 'post-commit' && (typeof cmd !== 'string' || !isCommitCommand(cmd))) return '';
-  const root = nonEmpty(io.env?.CLAUDE_PROJECT_DIR) ?? nonEmpty(input.cwd) ?? io.cwd;
-  const base = path.join(root, 'docs', 'waypoint');
-  const entries = existsSync(base)
-    ? readdirSync(base, { withFileTypes: true }).filter(d => d.isDirectory()).flatMap(d => {
-        const files = ['plan.yaml', 'design.md'].map(n => path.join(base, d.name, n)).filter(existsSync);
-        if (!files.length) return [];
-        return [{ name: d.name, bindings: readBindings(path.join(root, '.waypoint', d.name)), mtimeMs: Math.max(...files.map(f => statSync(f).mtimeMs)) }];
-      })
-    : [];
-  const project = pickProject(entries, typeof input.session_id === 'string' ? input.session_id : null);
-  if (!project) return '';
-  const wp = path.join(root, '.waypoint', project);
-  const docDir = path.join(base, project);
-  const session = (): { sessionId?: string; track?: string; currentTask?: string } => {
-    try { return JSON.parse(readFileSync(path.join(wp, 'session.json'), 'utf8')) ?? {}; } catch { return {}; }
-  };
-  // The session's task: session.json's currentTask, else the one it owns in the state cache.
-  const currentTask = (s: { sessionId?: string; currentTask?: string }): string | null => {
-    if (s.currentTask) return s.currentTask;
-    if (!s.sessionId) return null;
-    try {
-      const states = readDocs<TaskState>(path.join(wp, 'dbcache', 'state'));
-      return Object.entries(states).find(([, st]) => (st.status === 'in_progress' || st.status === 'claimed') && st.owner === s.sessionId)?.[0] ?? null;
-    } catch { return null; }
-  };
-  // A-07: the task the session has in progress (claimed or in progress in the state cache): its commits are recorded
-  // with its done batch, so the Stop hook does not count them.
-  const ongoingTask = (s: { sessionId?: string; currentTask?: string }): string | null => {
-    const t = currentTask(s);
-    if (!t || !isPlanId(t)) return null;
-    try {
-      const st = JSON.parse(readFileSync(path.join(wp, 'dbcache', 'state', `${t}.json`), 'utf8')) as TaskState;
-      return st.status === 'in_progress' || st.status === 'claimed' ? t : null;
-    } catch { return null; }
-  };
-  const head = (): string => execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-  const headFile = path.join(wp, 'last-head');
-  switch (sub) {
-    case 'session-start': {
-      // The baseline post-commit compares against; no repository (or no commit yet) leaves it as it was.
-      try { const h = head(); mkdirSync(wp, { recursive: true }); writeFileSync(headFile, h + '\n'); } catch { /* not a git repo */ }
-      const planFile = path.join(docDir, 'plan.yaml');
-      let text: string | null = null;
-      if (existsSync(planFile)) {
-        try {
-          const plan = parsePlan(readFileSync(planFile, 'utf8'));
-          const s = session();
-          const taskId = currentTask(s);
-          const cur = taskId ? plan.tasks.find(t => t.id === taskId) : undefined;
-          let open = 0;
-          try {
-            if (s.sessionId) open = Object.values(readDocs<MessageDoc>(path.join(wp, 'dbcache', 'messages'))).filter(m => m.to === s.sessionId && m.status === 'open').length;
-          } catch { open = 0; }
-          text = `waypoint: project ${project} has a live roadmap (${plan.artifacts.roadmap ?? 'not published'}). Session ${s.sessionId ?? 'none'} track ${s.track ?? '-'}. Current task: ${cur ? `${cur.id} ${cur.title}` : 'none'}. Open messages: ${open}. Use /waypoint:work to continue, /waypoint:status for progress.`;
-        } catch { text = null; }
-      }
-      if (text === null && existsSync(path.join(docDir, 'design.md'))) {
-        const d = parseDesign(readFileSync(path.join(docDir, 'design.md'), 'utf8'));
-        if (d.meta.status === 'draft') {
-          const log = readChangelog(docDir);
-          text = `waypoint: design document ${project} v${log[log.length - 1]?.version ?? 0} (draft). Use /waypoint:design to continue the design loop.`;
-        }
-      }
-      return text === null ? '' : JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } });
-    }
-    case 'post-commit': {
-      const task = currentTask(session());
-      if (!task) return '';
-      // Only a commit that moved HEAD is recorded; a failed one (nothing to commit, a hook refused it) is not.
-      const sha = head();
-      const last = existsSync(headFile) ? readFileSync(headFile, 'utf8').trim() : '';
-      if (sha === last) return '';
-      mkdirSync(wp, { recursive: true });
-      writeFileSync(headFile, sha + '\n');
-      appendFileSync(path.join(wp, 'pending-commits.jsonl'), JSON.stringify({ ts: io.now().toISOString(), task, sha, command: (cmd as string).slice(0, 200) }) + '\n');
-      return '';
-    }
-    case 'stop': {
-      if (input.stop_hook_active === true) return '';
-      // A-07: the coordinator or a member of an active forge execution, or the session of forge's infinite run, is
-      // stepped by forge's own Stop hook: waypoint never adds a turn there.
-      if (forgeRoleOf(readForgeActivity(root), typeof input.session_id === 'string' ? input.session_id : null) !== null) return '';
-      const ongoing = ongoingTask(session());
-      const taskOf = (l: string): string | null => { try { const o = JSON.parse(l) as { task?: unknown }; return typeof o?.task === 'string' ? o.task : null; } catch { return null; } };
-      const commits = lines(path.join(wp, 'pending-commits.jsonl')).filter(l => ongoing === null || taskOf(l) !== ongoing);
-      const queued = lines(path.join(wp, 'queue.jsonl'));
-      if (!commits.length && !queued.length) return '';
-      // One reminder per distinct pending set: stopping again with nothing new goes through.
-      const hash = createHash('sha256').update(JSON.stringify([commits, queued])).digest('hex');
-      const ackFile = path.join(wp, 'stop-ack');
-      if (existsSync(ackFile) && readFileSync(ackFile, 'utf8').trim() === hash) return '';
-      writeFileSync(ackFile, hash + '\n');
-      return JSON.stringify({ decision: 'block', reason: `waypoint: ${commits.length} commit(s) / ${queued.length} queued roadmap update(s) are not in the live roadmap yet. Record them (work skill: a \`commit\` event for intermediate commits, or the task's completion), or flush the queue, then remove those lines from .waypoint/${project}/pending-commits.jsonl. You can also stop now; this reminder shows once per change.${replyIn(planLocale(root, project))}` });
-    }
-    default:
-      return '';
-  }
 }
 
 function readDocs<T = unknown>(dir: string | undefined): Record<string, T> {

@@ -61,11 +61,13 @@ describe('plugin layout', () => {
     expect(md).toContain('type: "commit"');
     expect(md).toContain('**Leaving a task.**');
   });
-  it('hooks module wires SessionStart, PostToolUse and Stop', () => {
+  it('hooks module wires SessionStart (with fork), SessionEnd, PostToolUse and Stop (A-03, B-11, K5-06)', () => {
     const h = JSON.parse(read('plugins/waypoint/hooks/hooks.json'));
     expect(h.hooks.SessionStart).toBeDefined();
     expect(h.hooks.PostToolUse).toBeDefined();
     expect(h.hooks.Stop).toBeDefined();
+    expect(h.hooks.SessionStart[0].matcher).toBe('startup|resume|clear|compact|fork');
+    expect(h.hooks.SessionEnd[0].hooks[0].command).toContain('hook session-end');
     expect(h.modules).toEqual(['./register.js']);
     expect(existsSync(new URL('../plugins/waypoint/hooks/register.js', import.meta.url))).toBe(true);
   });
@@ -336,9 +338,9 @@ describe('plugin layout', () => {
   });
   it('forge hooks: the routing hooks on SessionStart and UserPromptSubmit', () => {
     const h = JSON.parse(read('plugins/forge/hooks/hooks.json')).hooks;
-    expect(h.SessionStart).toEqual(expect.arrayContaining([expect.objectContaining({ matcher: 'startup|clear|compact', hooks: [expect.objectContaining({ command: expect.stringContaining('hook route-session') })] })]));
+    expect(h.SessionStart).toEqual(expect.arrayContaining([expect.objectContaining({ matcher: 'startup|clear|compact|fork', hooks: [expect.objectContaining({ command: expect.stringContaining('hook route-session') })] })]));
     expect(h.UserPromptSubmit[0].hooks[0].command).toContain('hook route-prompt');
-    expect(h.SessionStart).toEqual(expect.arrayContaining([expect.objectContaining({ hooks: [expect.objectContaining({ command: expect.stringContaining('hook live') })] })]));
+    expect(h.SessionStart).toEqual(expect.arrayContaining([expect.objectContaining({ matcher: 'startup|resume|clear|compact|fork', hooks: [expect.objectContaining({ command: expect.stringContaining('hook live') })] })]));
   });
   it('plan 2 leftovers in the texts: --from-spec triage, declined specs, review ids and base failures', () => {
     const md = read('plugins/forge/skills/run/SKILL.md');

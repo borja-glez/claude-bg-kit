@@ -45,5 +45,7 @@ describe('forge activity, read by waypoint without importing forge (A-07)', () =
     const lib = readFileSync(new URL('../src/lib/forge-activity.ts', import.meta.url), 'utf8');
     expect(lib).not.toMatch(/from 'node:/);
     expect(lib).not.toMatch(/from '\.\.\/forge\//);
+    const hooks = readFileSync(new URL('../src/cli/hooks.ts', import.meta.url), 'utf8');
+    expect(hooks).not.toMatch(/from '\.\.\/forge\//);
   });
 });

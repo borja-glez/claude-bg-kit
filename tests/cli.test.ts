@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, copyFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, copyFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -764,53 +764,33 @@ describe('design commands', () => {
 });
 
 describe('classic hooks', () => {
-  const wp = () => path.join(dir, '.waypoint', 'demo-shop');
+  const NOW = Date.parse('2026-10-11T10:00:00.000Z');
+  const ago = (min: number) => new Date(NOW - min * 60000).toISOString();
+  const wp = (...p: string[]) => path.join(dir, '.waypoint', 'demo-shop', ...p);
   const docsDir = () => path.join(dir, 'docs', 'waypoint', 'demo-shop');
-  const hook = (sub: string, stdin: unknown) => run(['hook', sub], { ...io, stdin: typeof stdin === 'string' ? stdin : JSON.stringify(stdin) });
-  const setup = (session?: object) => {
-    mkdirSync(docsDir(), { recursive: true });
-    copyFileSync(FIXTURE, path.join(docsDir(), 'plan.yaml'));
-    if (session) {
-      mkdirSync(wp(), { recursive: true });
-      writeFileSync(path.join(wp(), 'session.json'), JSON.stringify(session));
-    }
+  const hook = (sub: string, stdin: unknown, over: Partial<Io> = {}) =>
+    run(['hook', sub], { ...io, env: {}, ...over, stdin: typeof stdin === 'string' ? stdin : JSON.stringify(stdin) });
+  const context = (r: { stdout: string }): string => (r.stdout.trim() ? JSON.parse(r.stdout).hookSpecificOutput.additionalContext : '');
+  const setup = () => { mkdirSync(docsDir(), { recursive: true }); copyFileSync(FIXTURE, path.join(docsDir(), 'plan.yaml')); };
+  /** The seat `sid` (its session.json) bound to the Claude conversation `claude`, as waypoint bind leaves it. */
+  const bindAs = (claude: string, over: Record<string, unknown> = {}, sid = 'backend', seatDir = wp()) => {
+    mkdirSync(seatDir, { recursive: true });
+    if (!existsSync(path.join(seatDir, 'session.json'))) writeFileSync(path.join(seatDir, 'session.json'), JSON.stringify({ sessionId: sid, track: 'backend' }));
+    writeFileSync(path.join(seatDir, 'bound.json'), JSON.stringify({ sid, claude, pid: null, via: 'work', since: ago(30), seenAt: ago(1), endedAt: null, endReason: null, ...over }));
   };
-  const pending = () => path.join(wp(), 'pending-commits.jsonl');
-
-  it('session-start injects roadmap context', () => {
-    setup({ sessionId: 'backend', track: 'backend', currentTask: 'T002' });
-    const r = hook('session-start', {});
-    expect(r.code).toBe(0);
-    const ctx = JSON.parse(r.stdout).hookSpecificOutput;
-    expect(ctx.hookEventName).toBe('SessionStart');
-    expect(ctx.additionalContext).toContain('project demo-shop');
-    expect(ctx.additionalContext).toContain('Session backend');
-    expect(ctx.additionalContext).toContain('/waypoint:work');
-  });
-  it('session-start is silent without docs/waypoint and survives a corrupt plan', () => {
-    const r = hook('session-start', {});
-    expect(r.code).toBe(0);
-    expect(r.stdout.trim()).toBe('');
-    mkdirSync(docsDir(), { recursive: true });
-    writeFileSync(path.join(docsDir(), 'plan.yaml'), 'not: [yaml');
-    const c = hook('session-start', {});
-    expect(c.code).toBe(0);
-    expect(c.stderr).toBe('');
-    expect(c.stdout).not.toMatch(/error|Error|Unexpected/);
-  });
-  it('session-start keeps the roadmap context when the messages cache is corrupt', () => {
-    setup({ sessionId: 'backend', track: 'backend', currentTask: 'T002' });
-    mkdirSync(path.join(wp(), 'dbcache', 'messages'), { recursive: true });
-    writeFileSync(path.join(wp(), 'dbcache', 'messages', 'm1.json'), '{oops');
-    const ctx = JSON.parse(hook('session-start', {}).stdout).hookSpecificOutput.additionalContext;
-    expect(ctx).toContain('project demo-shop');
-    expect(ctx).toContain('Open messages: 0');
-  });
-  // A real repository in the test dir: post-commit records a commit only when HEAD moved.
-  const git = (...a: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], { cwd: dir, encoding: 'utf8' }).trim();
+  const ownTask = (task: string, owner = 'backend', status = 'in_progress') => {
+    mkdirSync(wp('dbcache', 'state'), { recursive: true });
+    writeFileSync(wp('dbcache', 'state', `${task}.json`), JSON.stringify({ status, owner }));
+  };
+  const bound = (seatDir = wp()) => JSON.parse(readFileSync(path.join(seatDir, 'bound.json'), 'utf8'));
+  const pending = (seatDir = wp()) => path.join(seatDir, 'pending-commits.jsonl');
+  const pendingLines = (seatDir = wp()) => (existsSync(pending(seatDir)) ? readFileSync(pending(seatDir), 'utf8').trim().split('\n').filter(Boolean) : []);
+  // A real repository in the test dir.
+  const gitAt = (cwd: string, ...a: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], { cwd, encoding: 'utf8' }).trim();
+  const git = (...a: string[]) => gitAt(dir, ...a);
   const gitInit = () => { git('init', '-q'); git('add', '.'); git('commit', '-q', '-m', 'init'); };
   const commitFile = (name: string) => { writeFileSync(path.join(dir, name), name); git('add', name); git('commit', '-q', '-m', `add ${name}`); return git('rev-parse', 'HEAD'); };
-  const pendingLines = () => (existsSync(pending()) ? readFileSync(pending(), 'utf8').trim().split('\n').filter(Boolean) : []);
+  const NOT_OWNER = ['Current task', 'continue', 'Use /waypoint:work'];
 
   it('isCommitCommand matches real commits only', () => {
     const yes = ['git add . && git commit -m x', 'x; git commit -m y', 'true | git commit -m z', 'git -c user.name=a commit -m x', 'git -C sub commit -m x', 'git --no-pager commit -m x', '(git commit -m x)', 'cd a && (git add . && git commit -m x)'];
@@ -818,160 +798,343 @@ describe('classic hooks', () => {
     for (const c of yes) expect(isCommitCommand(c), c).toBe(true);
     for (const c of no) expect(isCommitCommand(c), c).toBe(false);
   });
-  it('post-commit records a commit only when HEAD moved, with its sha', () => {
-    setup({ sessionId: 'backend', track: 'backend', currentTask: 'T002' });
-    gitInit();
-    mkdirSync(wp(), { recursive: true });
-    writeFileSync(path.join(wp(), 'last-head'), git('rev-parse', 'HEAD'));
-    // A failed commit: HEAD did not move.
-    const r = hook('post-commit', { tool_input: { command: 'git commit -m "nothing to commit"' } });
-    expect(r.code).toBe(0);
-    expect(r.stdout.trim()).toBe('');
-    expect(pendingLines()).toHaveLength(0);
-    const sha = commitFile('a.txt');
-    hook('post-commit', { tool_input: { command: 'git add . && git commit -m "T002: x"' } });
-    expect(pendingLines()).toHaveLength(1);
-    expect(JSON.parse(pendingLines()[0])).toMatchObject({ task: 'T002', sha });
-    expect(readFileSync(path.join(wp(), 'last-head'), 'utf8').trim()).toBe(sha);
-    // The same HEAD again (a retry that failed): not recorded twice.
-    hook('post-commit', { tool_input: { command: 'git commit -m "T002: x"' } });
-    hook('post-commit', { tool_input: { command: 'echo commit' } });
-    expect(pendingLines()).toHaveLength(1);
-  });
-  it('post-commit records the first commit when no head was stored yet', () => {
-    setup({ sessionId: 'backend', track: 'backend', currentTask: 'T002' });
-    gitInit();
-    const sha = commitFile('a.txt');
-    hook('post-commit', { tool_input: { command: 'git commit -m x' } });
-    expect(JSON.parse(pendingLines()[0]).sha).toBe(sha);
-  });
-  it('post-commit skips --dry-run even when HEAD moved', () => {
-    setup({ sessionId: 'backend', track: 'backend', currentTask: 'T002' });
-    gitInit();
-    mkdirSync(wp(), { recursive: true });
-    writeFileSync(path.join(wp(), 'last-head'), git('rev-parse', 'HEAD'));
-    commitFile('a.txt');
-    hook('post-commit', { tool_input: { command: 'git commit --dry-run -m x' } });
-    expect(pendingLines()).toHaveLength(0);
-  });
-  it('post-commit finds the task from the state cache (claimed or in progress)', () => {
-    setup({ sessionId: 'backend', track: 'backend' });
-    gitInit();
-    mkdirSync(path.join(wp(), 'dbcache', 'state'), { recursive: true });
-    writeFileSync(path.join(wp(), 'dbcache', 'state', 'T002.json'), JSON.stringify({ status: 'claimed', owner: 'backend' }));
-    commitFile('a.txt');
-    hook('post-commit', { tool_input: { command: 'git commit -m x' } });
-    expect(JSON.parse(pendingLines()[0]).task).toBe('T002');
-  });
-  it('session-start stores the current HEAD as last-head', () => {
-    setup({ sessionId: 'backend', track: 'backend', currentTask: 'T002' });
-    gitInit();
-    hook('session-start', {});
-    expect(readFileSync(path.join(wp(), 'last-head'), 'utf8').trim()).toBe(git('rev-parse', 'HEAD'));
-  });
-  it('session-start reads the current task from the state cache without currentTask', () => {
-    setup({ sessionId: 'backend', track: 'backend' });
-    mkdirSync(path.join(wp(), 'dbcache', 'state'), { recursive: true });
-    writeFileSync(path.join(wp(), 'dbcache', 'state', 'T001.json'), JSON.stringify({ status: 'done', owner: 'backend' }));
-    writeFileSync(path.join(wp(), 'dbcache', 'state', 'T002.json'), JSON.stringify({ status: 'in_progress', owner: 'backend' }));
-    writeFileSync(path.join(wp(), 'dbcache', 'state', 'T003.json'), JSON.stringify({ status: 'in_progress', owner: 'ui' }));
-    const ctx = JSON.parse(hook('session-start', {}).stdout).hookSpecificOutput.additionalContext;
-    expect(ctx).toContain('Current task: T002 API de pedidos');
-  });
-  it('hooks resolve the project from CLAUDE_PROJECT_DIR, then the input cwd, then the process cwd', () => {
-    setup({ sessionId: 'backend', track: 'backend', currentTask: 'T002' });
-    const elsewhere = mkdtempSync(path.join(tmpdir(), 'wp-else-'));
-    const at = (stdin: object, env?: Record<string, string>) =>
-      run(['hook', 'session-start'], { ...io, cwd: elsewhere, env, stdin: JSON.stringify(stdin) }).stdout.trim();
-    expect(at({})).toBe('');
-    expect(at({ cwd: dir })).toContain('project demo-shop');
-    expect(at({ cwd: elsewhere }, { CLAUDE_PROJECT_DIR: dir })).toContain('project demo-shop');
-    expect(at({ cwd: dir }, { CLAUDE_PROJECT_DIR: elsewhere })).toBe('');
-    expect(run(['hook', 'session-start'], { ...io, stdin: '{}' }).stdout).toContain('project demo-shop');
-  });
-  it('stop blocks while commits are pending, once per distinct pending set', () => {
-    setup({ sessionId: 'backend', track: 'backend', currentTask: 'T002' });
-    expect(hook('stop', {}).stdout.trim()).toBe('');
-    writeFileSync(pending(), '{"ts":"x","task":"T002","command":"git commit","sha":"a"}\n');
-    const r = hook('stop', {});
-    expect(r.code).toBe(0);
-    const out = JSON.parse(r.stdout);
-    expect(out.decision).toBe('block');
-    expect(out.reason).toBe("waypoint: 1 commit(s) / 0 queued roadmap update(s) are not in the live roadmap yet. Record them (work skill: a `commit` event for intermediate commits, or the task's completion), or flush the queue, then remove those lines from .waypoint/demo-shop/pending-commits.jsonl. You can also stop now; this reminder shows once per change. Tell the user in Spanish (es), the plan's language.");
-    // Same pending set: the reminder is not repeated.
-    expect(hook('stop', {}).stdout.trim()).toBe('');
-    // A new line: it blocks again.
-    writeFileSync(pending(), '{"ts":"x","task":"T002","command":"git commit","sha":"a"}\n{"ts":"y","task":"T002","command":"git commit","sha":"b"}\n');
-    expect(JSON.parse(hook('stop', {}).stdout).reason).toContain('2 commit(s)');
-    expect(hook('stop', { stop_hook_active: true }).stdout.trim()).toBe('');
-    const bad = hook('stop', 'not json');
-    expect(bad.code).toBe(0);
-    expect(bad.stdout.trim()).toBe('');
-  });
-  it('stop blocks on queued roadmap updates alone', () => {
-    setup({ sessionId: 'backend', track: 'backend', currentTask: 'T002' });
-    writeFileSync(path.join(wp(), 'queue.jsonl'), '{"op":"set"}\n');
-    const out = JSON.parse(hook('stop', {}).stdout);
-    expect(out.decision).toBe('block');
-    expect(out.reason).toContain('0 commit(s) / 1 queued');
-    expect(hook('stop', {}).stdout.trim()).toBe('');
+
+  describe('session-start (A-02, A-03, B-01, B-10, B-11, J-04, K3-13)', () => {
+    it("gives the owner the full context: seat, track, the seat's task and its open messages", () => {
+      setup(); bindAs('A'); ownTask('T002');
+      mkdirSync(wp('dbcache', 'messages'), { recursive: true });
+      writeFileSync(wp('dbcache', 'messages', 'm1.json'), JSON.stringify({ ts: ago(5), from: 'ui', to: 'backend', type: 'reply', text: 'x', status: 'open' }));
+      const r = hook('session-start', { session_id: 'A', source: 'startup' });
+      expect(JSON.parse(r.stdout).hookSpecificOutput.hookEventName).toBe('SessionStart');
+      const ctx = context(r);
+      for (const w of ['project demo-shop', 'Session backend track backend', 'Current task: T002 API de pedidos', 'Open messages: 1', '/waypoint:work']) expect(ctx).toContain(w);
+    });
+    it("the owner's task is the one its seat has claimed or in progress in the state cache, never a done one or another seat's", () => {
+      setup(); bindAs('A');
+      ownTask('T001', 'backend', 'done'); ownTask('T003', 'ui');
+      expect(context(hook('session-start', { session_id: 'A' }))).toContain('Current task: none');
+      ownTask('T002', 'backend', 'claimed');
+      expect(context(hook('session-start', { session_id: 'A' }))).toContain('Current task: T002 API de pedidos');
+    });
+    it('is silent without docs/waypoint and survives a corrupt plan', () => {
+      expect(hook('session-start', { session_id: 'A' })).toEqual({ code: 0, stdout: '', stderr: '' });
+      mkdirSync(docsDir(), { recursive: true });
+      writeFileSync(path.join(docsDir(), 'plan.yaml'), 'not: [yaml');
+      bindAs('A');
+      const c = hook('session-start', { session_id: 'A' });
+      expect(c.code).toBe(0);
+      expect(c.stderr).toBe('');
+      expect(c.stdout).not.toMatch(/error|Error|Unexpected/);
+    });
+    it('keeps the owner context when the messages cache is corrupt', () => {
+      setup(); bindAs('A');
+      mkdirSync(wp('dbcache', 'messages'), { recursive: true });
+      writeFileSync(wp('dbcache', 'messages', 'm1.json'), '{oops');
+      const ctx = context(hook('session-start', { session_id: 'A' }));
+      expect(ctx).toContain('project demo-shop');
+      expect(ctx).toContain('Open messages: 0');
+    });
+    it('another live session gets one fact for every source, never the task to continue; a fork says so', () => {
+      setup(); bindAs('A'); ownTask('T002');
+      for (const source of ['startup', 'resume', 'clear', 'compact', 'fork']) {
+        const ctx = context(hook('session-start', { session_id: 'B', source }));
+        for (const w of ['Another session (seat backend, seen 1 min ago)', 'T002 "API de pedidos"', 'not bound to the roadmap']) expect(ctx, source).toContain(w);
+        for (const w of NOT_OWNER) expect(ctx, source).not.toContain(w);
+        expect(ctx.includes('fork'), source).toBe(source === 'fork');
+      }
+      expect(bound().claude).toBe('A');
+    });
+    it('a later conversation is offered what was left in progress for 24 hours, and nothing after', () => {
+      setup(); bindAs('A', { endedAt: ago(120), endReason: 'clear' }); ownTask('T002');
+      const ctx = context(hook('session-start', { session_id: 'C', source: 'startup' }));
+      for (const w of ['T002 "API de pedidos"', 'seat backend', 'ended by /clear 2 h ago', '/waypoint:work resume']) expect(ctx).toContain(w);
+      for (const w of NOT_OWNER) expect(ctx).not.toContain(w);
+      const later = context(hook('session-start', { session_id: 'C', source: 'startup' }, { now: () => new Date(NOW + 23 * 3600_000) }));
+      expect(later).toContain('no session is bound to it');
+      expect(later).not.toContain('T002');
+      bindAs('A', { endedAt: ago(0.5), endReason: 'clear' });
+      expect(context(hook('session-start', { session_id: 'C', source: 'clear' }))).toContain('ended by /clear just now');
+      bindAs('A', { seenAt: ago(20) });
+      expect(context(hook('session-start', { session_id: 'C', source: 'startup' }))).toContain('last seen 20 min ago');
+    });
+    it('resume and compact reopen the owner binding; a resume after an hour says how long', () => {
+      setup(); bindAs('A', { endedAt: ago(90), endReason: 'resume' });
+      const ctx = context(hook('session-start', { session_id: 'A', source: 'resume', seconds_since_last_response: 7300 }));
+      expect(ctx.startsWith('Resumed after 2 h. waypoint: project demo-shop')).toBe(true);
+      expect(bound()).toMatchObject({ endedAt: null, endReason: null, seenAt: new Date(NOW).toISOString() });
+      bindAs('A', { endedAt: ago(5), endReason: 'other' });
+      expect(context(hook('session-start', { session_id: 'A', source: 'compact' }))).toContain('Current task: none');
+      expect(bound().endedAt).toBeNull();
+    });
+    it('the coordinator and a member of the execution hear from forge only, and so does anyone else (B-10, K5-10)', () => {
+      setup(); bindAs('claude-member', { via: 'forge-member' });
+      const T = ago(10);
+      mkdirSync(path.join(dir, '.forge', 'members'), { recursive: true });
+      writeFileSync(path.join(dir, '.forge', 'execution.json'), JSON.stringify({ runId: 'r1', kind: 'plan', mode: 'sessions', parallel: 2, project: 'demo-shop', base: 'main', branch: 'forge/run-demo-shop', mergeOnFinish: false,
+        coordinator: 'main', hookSession: 'claude-coord', active: true, stopReason: null, stallReason: null, startedAt: T, lastStepAt: T, lastBlockStep: null, sleepUntil: null, tasks: {} }));
+      writeFileSync(path.join(dir, '.forge', 'members', 'backend.json'), JSON.stringify({ sessionId: 'backend', role: 'executor', runId: 'r1', task: 'T002', name: null, since: T, hookSession: 'claude-member' }));
+      for (const s of ['claude-coord', 'claude-member', 'someone-else']) expect(hook('session-start', { session_id: s, source: 'startup' }).stdout, s).toBe('');
+      // No implicit binding: waypoint's hooks never write forge's files.
+      expect(JSON.parse(readFileSync(path.join(dir, '.forge', 'execution.json'), 'utf8')).hookSession).toBe('claude-coord');
+    });
+    it('without a binding a plan is announced on a fresh start only and a design never; the owner of a draft hears of it (K3-13)', () => {
+      setup();
+      const none = context(hook('session-start', { session_id: 'B', source: 'startup' }));
+      for (const w of ['project demo-shop has a roadmap', 'no session is bound to it']) expect(none).toContain(w);
+      for (const source of ['resume', 'clear', 'compact', 'fork']) expect(hook('session-start', { session_id: 'B', source }).stdout, source).toBe('');
+      rmSync(path.join(docsDir(), 'plan.yaml'));
+      copyFileSync(new URL('./fixtures/design.md', import.meta.url), path.join(docsDir(), 'design.md'));
+      expect(hook('session-start', { session_id: 'B', source: 'startup' }).stdout).toBe('');
+      bindAs('A', { via: 'design' });
+      expect(context(hook('session-start', { session_id: 'A' }))).toContain('design document demo-shop v0 (draft)');
+      writeFileSync(path.join(docsDir(), 'design.md'), readFileSync(path.join(docsDir(), 'design.md'), 'utf8').replace('start_prompt:', 'status: parked\nstart_prompt:'));
+      expect(hook('session-start', { session_id: 'A' }).stdout).toBe('');
+    });
+    it('an input without a session id, with a source or a reason the engine may add later, or broken never fails (Review Focus 5)', () => {
+      setup(); bindAs('A');
+      expect(context(hook('session-start', {}))).toContain('Another session (seat backend');
+      expect(context(hook('session-start', { session_id: 'A', source: 'teleport' }))).toContain('Session backend');
+      expect(hook('session-start', 'not json')).toEqual({ code: 0, stdout: '', stderr: '' });
+      for (const sub of ['post-commit', 'stop', 'session-end']) expect(hook(sub, { tool_input: { command: 'git commit -m x' } }), sub).toEqual({ code: 0, stdout: '', stderr: '' });
+      hook('session-end', { session_id: 'A', reason: 'teleported' });
+      expect(bound()).toMatchObject({ endedAt: new Date(NOW).toISOString(), endReason: 'other' });
+    });
+    it('a corrupt binding, a missing .waypoint or an unreadable seat binds nobody, and no hook fails (§4.10)', () => {
+      setup(); gitInit();
+      const quiet = { code: 0, stdout: '', stderr: '' };
+      const every = (claude: string) => {
+        expect(context(hook('session-start', { session_id: claude, cwd: dir }))).toContain('no session is bound to it');
+        for (const sub of ['post-commit', 'stop', 'session-end']) expect(hook(sub, { session_id: claude, cwd: dir, tool_input: { command: 'git commit -m x' } }), sub).toEqual(quiet);
+      };
+      // No .waypoint at all: nothing is created.
+      every('A');
+      expect(existsSync(path.join(dir, '.waypoint'))).toBe(false);
+      // A corrupt bound.json in the checkout seat, an extra seat whose bound.json cannot be read, another that is a file.
+      bindAs('A'); ownTask('T002');
+      const corrupt = '{"sid":"backend","claude":';
+      writeFileSync(wp('bound.json'), corrupt);
+      mkdirSync(wp('seats', 'main-2', 'bound.json'), { recursive: true });
+      writeFileSync(wp('seats', 'main-3'), 'not a seat');
+      commitFile('a.txt');
+      every('A');
+      expect(readFileSync(wp('bound.json'), 'utf8')).toBe(corrupt);
+      expect(pendingLines()).toHaveLength(0);
+      expect(existsSync(wp('last-head.json'))).toBe(false);
+    });
+    it("stores the owner's HEAD as its base in last-head.json, and nothing for another session", () => {
+      setup(); gitInit(); bindAs('A');
+      hook('session-start', { session_id: 'B', cwd: dir });
+      expect(existsSync(wp('last-head.json'))).toBe(false);
+      hook('session-start', { session_id: 'A', cwd: dir });
+      const lh = JSON.parse(readFileSync(wp('last-head.json'), 'utf8'));
+      expect(lh.session).toBe('A');
+      expect(Object.values(lh.heads)).toEqual([git('rev-parse', 'HEAD')]);
+    });
+    it('resolves the project from CLAUDE_PROJECT_DIR, then the input cwd, then the process cwd', () => {
+      setup();
+      const elsewhere = mkdtempSync(path.join(tmpdir(), 'wp-else-'));
+      const at = (stdin: object, env: Record<string, string> = {}) =>
+        run(['hook', 'session-start'], { ...io, cwd: elsewhere, env, stdin: JSON.stringify(stdin) }).stdout.trim();
+      expect(at({})).toBe('');
+      expect(at({ cwd: dir })).toContain('project demo-shop');
+      expect(at({ cwd: elsewhere }, { CLAUDE_PROJECT_DIR: dir })).toContain('project demo-shop');
+      expect(at({ cwd: dir }, { CLAUDE_PROJECT_DIR: elsewhere })).toBe('');
+      expect(run(['hook', 'session-start'], { ...io, env: {}, stdin: '{}' }).stdout).toContain('project demo-shop');
+    });
   });
 
-  describe('stop during a forge execution (A-07)', () => {
-    const T = '2026-10-11T10:00:00.000Z';
-    const forge = (file: string, v: unknown) => {
-      mkdirSync(path.dirname(path.join(dir, '.forge', file)), { recursive: true });
-      writeFileSync(path.join(dir, '.forge', file), typeof v === 'string' ? v : JSON.stringify(v));
-    };
-    const exec = (over: Record<string, unknown> = {}) => ({
-      runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'demo-shop', base: 'main', branch: 'forge/run-demo-shop', mergeOnFinish: false,
-      coordinator: 'main', hookSession: 'claude-coord', active: true, stopReason: null, stallReason: null, startedAt: T, lastStepAt: null,
-      lastBlockStep: null, sleepUntil: null, tasks: {}, ...over,
+  describe('session-end (A-03)', () => {
+    it('closes every binding of its session with its reason, and touches no other', () => {
+      setup();
+      bindAs('A');
+      bindAs('A', {}, 'main-2', wp('seats', 'main-2'));
+      bindAs('B', {}, 'main-3', wp('seats', 'main-3'));
+      expect(hook('session-end', { session_id: 'A', reason: 'clear' })).toEqual({ code: 0, stdout: '', stderr: '' });
+      for (const seat of [wp(), wp('seats', 'main-2')]) expect(bound(seat)).toMatchObject({ endedAt: new Date(NOW).toISOString(), endReason: 'clear' });
+      expect(bound(wp('seats', 'main-3')).endedAt).toBeNull();
     });
-    const blocks = (sessionId: string) => hook('stop', { session_id: sessionId }).stdout.includes('"decision":"block"');
-    beforeEach(() => {
-      setup({ sessionId: 'backend', track: 'backend' });
-      writeFileSync(pending(), '{"ts":"x","task":"T001","command":"git commit","sha":"a"}\n');
+  });
+
+  describe('post-commit (A-17, B-05)', () => {
+    const commit = (claude: string, command = 'git commit -m x', over: Partial<Io> = {}, extra: Record<string, unknown> = {}) =>
+      hook('post-commit', { session_id: claude, cwd: dir, tool_input: { command }, ...extra }, over);
+    it('records every commit HEAD gained for the owner, whatever the command, and only once', () => {
+      setup(); gitInit(); bindAs('A'); ownTask('T002');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      const sha = commitFile('a.txt');
+      expect(commit('A', 'bash -c "git commit -m T002"')).toEqual({ code: 0, stdout: '', stderr: '' });
+      expect(pendingLines().map(l => JSON.parse(l))).toEqual([{ ts: new Date(NOW).toISOString(), task: 'T002', sha, command: 'bash -c "git commit -m T002"', session: 'A', seat: 'backend' }]);
+      commit('A', 'git commit -m again');
+      commit('A', 'echo nothing moved');
+      expect(pendingLines()).toHaveLength(1);
     });
-    it('does not block the coordinator of an active execution, and still blocks another session', () => {
-      forge('execution.json', exec());
-      expect(blocks('claude-coord')).toBe(false);
-      expect(blocks('someone-else')).toBe(true);
+    it('with no base yet only a commit command records HEAD; a dry run does not', () => {
+      setup(); gitInit(); bindAs('A'); ownTask('T002');
+      const sha = commitFile('a.txt');
+      commit('A', 'git commit --dry-run -m x');
+      expect(pendingLines()).toHaveLength(0);
+      rmSync(wp('last-head.json'), { force: true });
+      commit('A', 'git commit -m x');
+      expect(JSON.parse(pendingLines()[0]).sha).toBe(sha);
     });
-    it('does not block a member of the execution, nor the session of an active infinite run', () => {
-      forge('execution.json', exec());
-      forge('members/backend.json', { sessionId: 'backend', role: 'executor', runId: 'r1', task: 'T002', name: null, since: T, hookSession: 'claude-member' });
-      forge('run.json', { mode: 'infinite', active: true, startedAt: T, budget: { cycles: 3 }, cycle: 0, noProgress: 0, lastError: null, repeatedError: false, lastBlockEvents: null, queueMax: 10, sessionId: 'claude-inf', blocksSinceCycle: 0 });
-      expect(blocks('claude-member')).toBe(false);
-      expect(blocks('claude-inf')).toBe(false);
+    it('finds the task in the state cache, claimed as well as in progress', () => {
+      setup(); gitInit(); bindAs('A'); ownTask('T002', 'backend', 'claimed');
+      commitFile('a.txt');
+      commit('A', 'git commit -m x');
+      expect(JSON.parse(pendingLines()[0]).task).toBe('T002');
     });
-    it('an inactive execution or a broken execution.json gives no role: it blocks as before', () => {
-      forge('execution.json', exec({ active: false, stopReason: 'stopped' }));
-      expect(blocks('claude-coord')).toBe(true);
-      forge('execution.json', '{"runId":');
-      writeFileSync(pending(), '{"ts":"y","task":"T001","command":"git commit","sha":"b"}\n');
-      expect(blocks('claude-coord')).toBe(true);
+    it('a merge records only its own commit, and an amend drops the line of the commit it replaced', () => {
+      setup(); gitInit(); bindAs('A'); ownTask('T002');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      git('checkout', '-q', '-b', 'side');
+      commitFile('s.txt');
+      git('checkout', '-q', '-');
+      git('merge', '--no-ff', '-q', '-m', 'merge side', 'side');
+      const merge = git('rev-parse', 'HEAD');
+      commit('A', 'git merge --no-ff side');
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([merge]);
+      git('commit', '-q', '--amend', '-m', 'merge side, again');
+      const amended = git('rev-parse', 'HEAD');
+      commit('A', 'git commit --amend');
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([amended]);
     });
-    it('the commits of the task the session has in progress do not count; the others still do', () => {
-      writeFileSync(path.join(wp(), 'session.json'), JSON.stringify({ sessionId: 'backend', track: 'backend', currentTask: 'T001' }));
-      mkdirSync(path.join(wp(), 'dbcache', 'state'), { recursive: true });
-      writeFileSync(path.join(wp(), 'dbcache', 'state', 'T001.json'), JSON.stringify({ status: 'in_progress', owner: 'backend' }));
-      expect(blocks('s1')).toBe(false);
-      writeFileSync(pending(), '{"ts":"x","task":"T001","command":"git commit","sha":"a"}\n{"ts":"y","task":"T002","command":"git commit","sha":"b"}\n');
-      const out = JSON.parse(hook('stop', { session_id: 's1' }).stdout);
-      expect(out.reason).toContain('1 commit(s)');
-      // Once the task is done, its commits count again.
-      writeFileSync(path.join(wp(), 'dbcache', 'state', 'T001.json'), JSON.stringify({ status: 'done', owner: 'backend' }));
-      expect(JSON.parse(hook('stop', { session_id: 's1' }).stdout).reason).toContain('2 commit(s)');
+    it('reads HEAD in the worktree of the command, with a base of its own', () => {
+      setup(); gitInit(); bindAs('A'); ownTask('T002');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      const wt = path.join(mkdtempSync(path.join(tmpdir(), 'wp-wt-')), 'wt');
+      git('worktree', 'add', '-q', '-b', 'other', wt);
+      writeFileSync(path.join(wt, 'w.txt'), 'w');
+      gitAt(wt, 'add', 'w.txt');
+      gitAt(wt, 'commit', '-q', '-m', 'in wt');
+      const there = gitAt(wt, 'rev-parse', 'HEAD');
+      commit('A', 'git commit -m "in wt"', { env: { CLAUDE_PROJECT_DIR: dir } }, { cwd: wt });
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([there]);
+      expect(Object.keys(JSON.parse(readFileSync(wp('last-head.json'), 'utf8')).heads)).toHaveLength(2);
     });
-    it('the commits of a task the session has claimed (not yet started) do not count either', () => {
-      writeFileSync(path.join(wp(), 'session.json'), JSON.stringify({ sessionId: 'backend', track: 'backend', currentTask: 'T001' }));
-      mkdirSync(path.join(wp(), 'dbcache', 'state'), { recursive: true });
-      writeFileSync(path.join(wp(), 'dbcache', 'state', 'T001.json'), JSON.stringify({ status: 'claimed', owner: 'backend' }));
-      writeFileSync(pending(), '{"ts":"x","task":"T001","command":"git commit","sha":"a"}\n');
-      expect(blocks('s1')).toBe(false);
-      writeFileSync(pending(), '{"ts":"x","task":"T001","command":"git commit","sha":"a"}\n{"ts":"y","task":"T002","command":"git commit","sha":"b"}\n');
-      expect(JSON.parse(hook('stop', { session_id: 's1' }).stdout).reason).toContain('1 commit(s)');
+    it('another session records nothing, and its commits never reach the seat (A-02)', () => {
+      setup(); gitInit(); bindAs('A'); ownTask('T002');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      commitFile('b.txt');
+      commit('B');
+      expect(pendingLines()).toHaveLength(0);
+    });
+    it('between tasks the base follows HEAD: what was committed with no task open is never given to the next task (Review Focus 2)', () => {
+      setup(); gitInit(); bindAs('A');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      commitFile('between.txt');
+      commit('A', 'git merge main');
+      expect(pendingLines()).toHaveLength(0);
+      ownTask('T002');
+      const sha = commitFile('task.txt');
+      commit('A');
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([sha]);
+    });
+    it('two seats: main-2 records in its own files and the Stop of the checkout seat does not count them (B-05, K5-05)', () => {
+      setup(); gitInit(); bindAs('A'); ownTask('T001');
+      const seat2 = wp('seats', 'main-2');
+      bindAs('C', {}, 'main-2', seat2); ownTask('T003', 'main-2');
+      hook('session-start', { session_id: 'C', cwd: dir });
+      const sha = commitFile('c.txt');
+      commit('C');
+      expect(pendingLines(seat2).map(l => JSON.parse(l))).toEqual([expect.objectContaining({ sha, task: 'T003', seat: 'main-2', session: 'C' })]);
+      expect(pendingLines()).toHaveLength(0);
+      expect(hook('stop', { session_id: 'A' }).stdout).toBe('');
+      ownTask('T003', 'main-2', 'done');
+      expect(JSON.parse(hook('stop', { session_id: 'C' }).stdout).reason).toContain('.waypoint/demo-shop/seats/main-2/pending-commits.jsonl');
+    });
+  });
+
+  describe('stop (B-05, A-07)', () => {
+    it('reminds the owner once per distinct pending set, and never blocks another session (A-02)', () => {
+      setup(); bindAs('A');
+      expect(hook('stop', { session_id: 'A' }).stdout.trim()).toBe('');
+      writeFileSync(pending(), '{"ts":"x","task":"T002","command":"git commit","sha":"a"}\n');
+      expect(hook('stop', { session_id: 'B' }).stdout).toBe('');
+      const out = JSON.parse(hook('stop', { session_id: 'A' }).stdout);
+      expect(out.decision).toBe('block');
+      expect(out.reason).toBe("waypoint: 1 commit(s) / 0 queued roadmap update(s) are not in the live roadmap yet. Record them (work skill: a `commit` event for intermediate commits, or the task's completion), or flush the queue, then remove those lines from .waypoint/demo-shop/pending-commits.jsonl. You can also stop now; this reminder shows once per change. Tell the user in Spanish (es), the plan's language.");
+      expect(hook('stop', { session_id: 'A' }).stdout.trim()).toBe('');
+      writeFileSync(pending(), '{"ts":"x","task":"T002","command":"git commit","sha":"a"}\n{"ts":"y","task":"T002","command":"git commit","sha":"b"}\n');
+      expect(JSON.parse(hook('stop', { session_id: 'A' }).stdout).reason).toContain('2 commit(s)');
+      expect(hook('stop', { session_id: 'A', stop_hook_active: true }).stdout.trim()).toBe('');
+      expect(hook('stop', 'not json')).toEqual({ code: 0, stdout: '', stderr: '' });
+    });
+    it('reminds the owner of queued roadmap updates alone', () => {
+      setup(); bindAs('A');
+      writeFileSync(wp('queue.jsonl'), '{"op":"set"}\n');
+      const out = JSON.parse(hook('stop', { session_id: 'A' }).stdout);
+      expect(out.decision).toBe('block');
+      expect(out.reason).toContain('0 commit(s) / 1 queued');
+      expect(hook('stop', { session_id: 'A' }).stdout.trim()).toBe('');
+    });
+    it("the owner's hooks renew its binding at most once a minute, so another session still finds it alive (Review Focus 3)", () => {
+      setup(); bindAs('A', { seenAt: ago(4) });
+      hook('stop', { session_id: 'A' });
+      expect(bound().seenAt).toBe(new Date(NOW).toISOString());
+      bindAs('A', { seenAt: ago(0.5) });
+      hook('stop', { session_id: 'A' });
+      expect(bound().seenAt).toBe(ago(0.5));
+      bindAs('A', { seenAt: ago(4) });
+      hook('stop', { session_id: 'A' });
+      const later: Io = { ...io, env: {}, now: () => new Date(NOW + 4 * 60000) };
+      expect(run(['bind', 'docs/waypoint/demo-shop/plan.yaml', '--via', 'work', '--claude', 'B'], later).code).toBe(3);
+      bindAs('A', { seenAt: ago(4), endedAt: ago(1), endReason: 'released' });
+      hook('stop', { session_id: 'A' });
+      expect(bound().seenAt).toBe(ago(4));
+    });
+
+    describe('during a forge execution (A-07)', () => {
+      const T = '2026-10-11T09:50:00.000Z';
+      const forge = (file: string, v: unknown) => {
+        mkdirSync(path.dirname(path.join(dir, '.forge', file)), { recursive: true });
+        writeFileSync(path.join(dir, '.forge', file), typeof v === 'string' ? v : JSON.stringify(v));
+      };
+      const exec = (over: Record<string, unknown> = {}) => ({
+        runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'demo-shop', base: 'main', branch: 'forge/run-demo-shop', mergeOnFinish: false,
+        coordinator: 'main', hookSession: 'claude-coord', active: true, stopReason: null, stallReason: null, startedAt: T, lastStepAt: null,
+        lastBlockStep: null, sleepUntil: null, tasks: {}, ...over,
+      });
+      const blocks = (sessionId: string) => hook('stop', { session_id: sessionId }).stdout.includes('"decision":"block"');
+      beforeEach(() => {
+        setup();
+        mkdirSync(wp(), { recursive: true });
+        writeFileSync(pending(), '{"ts":"x","task":"T001","command":"git commit","sha":"a"}\n');
+      });
+      it('never blocks the coordinator, a member of the execution or the infinite run, even bound to the seat', () => {
+        forge('execution.json', exec());
+        forge('members/backend.json', { sessionId: 'backend', role: 'executor', runId: 'r1', task: 'T002', name: null, since: T, hookSession: 'claude-member' });
+        forge('run.json', { mode: 'infinite', active: true, startedAt: T, budget: { cycles: 3 }, cycle: 0, noProgress: 0, lastError: null, repeatedError: false, lastBlockEvents: null, queueMax: 10, sessionId: 'claude-inf', blocksSinceCycle: 0 });
+        for (const s of ['claude-coord', 'claude-member', 'claude-inf']) {
+          bindAs(s, { via: 'forge-run' });
+          expect(blocks(s), s).toBe(false);
+        }
+        bindAs('owner');
+        expect(blocks('owner')).toBe(true);
+      });
+      it('a closed execution or a broken execution.json gives no forge role: the owner is reminded as before', () => {
+        bindAs('claude-coord');
+        forge('execution.json', exec({ active: false, stopReason: 'stopped', closedAt: T, closedBy: 'close' }));
+        expect(blocks('claude-coord')).toBe(true);
+        forge('execution.json', '{"runId":');
+        writeFileSync(pending(), '{"ts":"y","task":"T001","command":"git commit","sha":"b"}\n');
+        expect(blocks('claude-coord')).toBe(true);
+      });
+      it('the commits of the task the seat has in progress do not count; the others still do', () => {
+        bindAs('A');
+        ownTask('T001');
+        expect(blocks('A')).toBe(false);
+        writeFileSync(pending(), '{"ts":"x","task":"T001","command":"git commit","sha":"a"}\n{"ts":"y","task":"T002","command":"git commit","sha":"b"}\n');
+        expect(JSON.parse(hook('stop', { session_id: 'A' }).stdout).reason).toContain('1 commit(s)');
+        ownTask('T001', 'backend', 'done');
+        expect(JSON.parse(hook('stop', { session_id: 'A' }).stdout).reason).toContain('2 commit(s)');
+      });
+      it('the commits of a task the seat has claimed (not yet started) do not count either', () => {
+        bindAs('A');
+        ownTask('T001', 'backend', 'claimed');
+        expect(blocks('A')).toBe(false);
+        writeFileSync(pending(), '{"ts":"x","task":"T001","command":"git commit","sha":"a"}\n{"ts":"y","task":"T002","command":"git commit","sha":"b"}\n');
+        expect(JSON.parse(hook('stop', { session_id: 'A' }).stdout).reason).toContain('1 commit(s)');
+      });
     });
   });
 });

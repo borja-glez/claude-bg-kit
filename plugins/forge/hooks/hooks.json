@@ -1,8 +1,8 @@
 {
   "hooks": {
     "SessionStart": [
-      { "matcher": "startup|resume|clear|compact", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs\" hook live" }] },
-      { "matcher": "startup|clear|compact", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs\" hook route-session" }] }
+      { "matcher": "startup|resume|clear|compact|fork", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs\" hook live" }] },
+      { "matcher": "startup|clear|compact|fork", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs\" hook route-session" }] }
     ],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs\" hook route-prompt" }] }],
     "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs\" hook live" }] }],
