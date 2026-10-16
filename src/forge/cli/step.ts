@@ -5,7 +5,7 @@ import type { Io } from './run.js';
 import { checkPlanProject, commitInfo } from './swarm.js';
 import { readExecution, executionTaskFile, runWorktree, taskBase, writePublicTask } from '../execution.js';
 import { takeStepLock } from '../jobs.js';
-import { appendEvent, readEvents, type LedgerEvent } from '../ledger.js';
+import { appendEvent, readEvents, withEventContext, type LedgerEvent } from '../ledger.js';
 import { eventsOf, isTask, ofTask, readWorkDir, workRel } from '../task-ref.js';
 import { reviewsOf } from '../loop.js';
 import { LEASE_MINUTES } from '../../lib/coordination.js';
@@ -709,7 +709,9 @@ export function swarmStep(rest: string[], io: Io, deps: StepDeps): Result {
       io, deps, planArg, db, runBranch: e0.branch, project: e0.project, locale, rulings, actions: [], after: [],
       iso: () => io.now().toISOString(), agentLease: () => new Date(io.now().getTime() + AGENT_LEASE_MINUTES * 60000).toISOString(),
     };
-    return stepOnce(c, e0, returned, versions, flag('agents'), now);
+    // C4: every event of the step, its own and its commands' (those that name no project), is of the run's project, even
+    // when another plan's triage of the same id came last in the ledger.
+    return withEventContext({ project: c.project }, () => stepOnce(c, e0, returned, versions, flag('agents'), now));
   } finally { lock.release(); }
 }
 

@@ -315,7 +315,7 @@ describe('forge light task left open', () => {
 describe('forgeFromStatus', () => {
   it('maps a valid status.json without its ts', () => {
     const { ts: _ts, ...rest } = STATUS;
-    expect(forgeFromStatus(JSON.stringify(STATUS), NOW)).toEqual({ ...rest, brief: null, accepted: [], verify: null, briefs: null, timing: null });
+    expect(forgeFromStatus(JSON.stringify(STATUS), NOW)).toEqual({ ...rest, brief: null, accepted: [], verify: null, session: null, runId: null, project: null, briefs: null, timing: null });
     expect(forgeFromStatus(JSON.stringify(STATUS), NOW, 4)).toMatchObject({ briefs: 4 });
   });
   it('keeps auto mode from status.json', () => {

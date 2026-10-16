@@ -1,8 +1,9 @@
 import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { deriveStatus, normalizeStatus, type ForgeStatus } from '../lib/forge-status.js';
-import { isSafeId } from '../lib/execution-state.js';
-import { attribute, isTask, projectOf } from './task-ref.js';
+import { isSafeId, parseExecution, type ExecutionState } from '../lib/execution-state.js';
+import { claudeSessionId, type SessionEnv } from '../lib/claude-session.js';
+import { attribute, isTask, projectOf, stampEvent } from './task-ref.js';
 import { mainCheckoutFrom } from '../lib/main-checkout.js';
 import { samePath } from '../lib/worktree.js';
 
@@ -54,6 +55,42 @@ export function endsMidLine(file: string): boolean {
   } finally { closeSync(fd); }
 }
 
+/** C4: what one command stamps its events with (cli/run.ts sets it): Claude's session from the command's environment (a
+ *  test passes {}), and the project its --project or --dir names; without one, the ledger's attribution decides. */
+export interface EventContext { env?: SessionEnv; project?: string | null }
+let context: EventContext = {};
+
+/** Runs `fn` with the context every event it appends is stamped with. What `ctx` leaves out is the enclosing context's:
+ *  a command a swarm step runs that names no project keeps the step's (the run's). */
+export function withEventContext<T>(ctx: EventContext, fn: () => T): T {
+  const prev = context;
+  context = { ...prev, ...ctx };
+  try { return fn(); } finally { context = prev; }
+}
+
+/** The project the context gives an event of `task` that names none: its --project or --dir, else (none, or one that is
+ *  not a safe id) the ledger's. */
+const contextProject = (events: () => readonly LedgerEvent[], task: string): string | null =>
+  context.project === null || isSafeId(context.project) ? context.project : projectOf(events(), task);
+
+/** C4: the event of `root` as the ledger of `target` (ledgerRoot) keeps it, with session, runId and project when they
+ *  apply and it lacks them. Never throws. */
+function stamped(root: string, target: string, event: LedgerEvent): LedgerEvent {
+  try {
+    const task = typeof event.task === 'string' ? event.task : null;
+    let exec: ExecutionState | null = null;
+    if (task && event.runId === undefined) {
+      let gitText: string | null = null;
+      try { gitText = readFileSync(path.join(target, '.git'), 'utf8'); } catch { gitText = null; }
+      const main = mainCheckoutFrom(path.resolve(target), gitText);
+      try { exec = parseExecution(readFileSync(path.join(main, '.forge', 'execution.json'), 'utf8')); } catch { exec = null; }
+    }
+    // A triage without a project opens a loose task's attribution: it is never stamped with an earlier plan's.
+    const project = !task || event.project !== undefined || event.kind === 'triage' ? null : contextProject(() => readEvents(root), task);
+    return stampEvent(event, { session: context.env ? claudeSessionId(null, context.env) : null, exec, project });
+  } catch { return event; }
+}
+
 export function appendEvent(root: string, event: LedgerEvent): void {
   // D-10: a member's events go to the main checkout's ledger, where the coordinator, stats and the roadmap read them;
   // its status.json stays in its worktree, for its own lens.
@@ -63,18 +100,20 @@ export function appendEvent(root: string, event: LedgerEvent): void {
   const file = ledgerFile(target);
   // A line left half-written by a crash must not swallow the next event. The whole line is one append (O_APPEND), so
   // the member and the coordinator writing the same ledger at once never interleave their lines.
-  appendFileSync(file, (endsMidLine(file) ? '\n' : '') + JSON.stringify(event) + '\n');
-  updateStatus(root, event);
+  const e = stamped(root, target, event);
+  appendFileSync(file, (endsMidLine(file) ? '\n' : '') + JSON.stringify(e) + '\n');
+  updateStatus(root, e);
 }
 
 /** Appends a phase event unless the task's last phase event already names that phase for the same brief (C4: a stage
  *  is logged once, whether review-prep or `swarm task`, which names no brief, logs it first). Returns whether it appended. */
 export function appendPhase(root: string, event: LedgerEvent & { task: string; phase: string }): boolean {
   // D-08: the task's last phase event of its own project (ids repeat between plans). An unsafe project counts as none,
-  // as attribute reads it: the phase belongs to the project the ledger gives the task.
+  // as attribute reads it: the phase belongs to the project the command names (C4: the one appendEvent stamps it with),
+  // else to the one the ledger gives the task.
   const events = readEvents(root);
   const owner = attribute(events);
-  const project = isSafeId(event.project) ? event.project : projectOf(events, event.task);
+  const project = isSafeId(event.project) ? event.project : contextProject(() => events, event.task);
   const last = events.filter(e => e.kind === 'phase' && isTask(e, event.task) && owner(e) === project).at(-1);
   if (last && last.phase === event.phase && (last.brief === undefined || event.brief === undefined || last.brief === event.brief)) return false;
   appendEvent(root, event);

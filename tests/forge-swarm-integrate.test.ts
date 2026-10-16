@@ -55,7 +55,8 @@ describe('forge swarm integrate (into the run branch)', () => {
   });
   it('swarm task logs a stage once when review-prep already logged it as a phase (C4)', () => {
     out(run(['swarm', 'worktree', 'T1'], io));
-    run(['log', '--kind', 'phase', '--task', 'T1', '--data', '{"phase":"validate","brief":1,"round":1}'], io);
+    // review-prep of a plan task logs its phase with the run's project (its --dir names it, C4), as swarm task does.
+    run(['log', '--kind', 'phase', '--task', 'T1', '--project', 'shop', '--data', '{"phase":"validate","brief":1,"round":1}'], io);
     out(run(['swarm', 'task', 'T1', '--stage', 'validate'], io));
     out(run(['swarm', 'task', 'T1', '--stage', 'review'], io));
     expect(readEvents(root).filter(e => e.kind === 'phase' && e.task === 'T1').map(e => e.phase)).toEqual(['validate', 'review']);

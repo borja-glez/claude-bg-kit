@@ -22,7 +22,7 @@ describe('deriveStatus', () => {
       ts: '5', task: 'hash', path: 'medium', phase: 'review', agent: 'forge-review-security',
       validators: [{ name: 'test', ok: true }, { name: 'lint', ok: false }], verdict: { action: 'accept', score: 0.97 }, round: 0, cap: 3,
       brief: 1, accepted: [1], verify: null,
-      taskStartedAt: '2', stageSince: '5', stages: {}, doneAt: null, lastAt: '9',
+      taskStartedAt: '2', stageSince: '5', stages: {}, doneAt: null, lastAt: '9', session: null, runId: null, project: null,
     });
   });
   it('tracks the brief in progress and the accepted briefs, from phase events and brief ids', () => {
@@ -49,7 +49,7 @@ describe('deriveStatus', () => {
     expect(apply([...run, { ts: '5', kind: 'triage', task: 'o', path: 'large' }])).toMatchObject({ path: 'large', phase: 'implement', agent: 'forge-impl', accepted: [1] });
     expect(apply([...run, { ts: '5', kind: 'triage', task: 'o', path: 'large', reasons: ['x'] }])).toEqual({
       ts: '5', task: 'o', path: 'large', phase: '', agent: null, validators: [], verdict: null, round: null, cap: null, brief: null, accepted: [], verify: null,
-      taskStartedAt: '5', stageSince: '5', stages: {}, doneAt: null, lastAt: '5',
+      taskStartedAt: '5', stageSince: '5', stages: {}, doneAt: null, lastAt: '5', session: null, runId: null, project: null,
     });
   });
   it('reads a status written before brief and accepted existed', () => {
@@ -285,5 +285,25 @@ describe('deriveStatus: the phase stopped (K2-02)', () => {
     expect(s.stages).toEqual(before.stages);
     expect(s.stages).not.toHaveProperty('stopped');
     expect(apply([...stopped, { ts: '2026-10-16T10:09:00.000Z', kind: 'agent', task: 'T1', agent: 'forge-verify' }])!.phase).toBe('verify');
+  });
+});
+
+describe('deriveStatus: who, which run and which project (C4, D4)', () => {
+  it('session comes from the latest event of the task, runId from the latest that names one, project from its triage or an event that names it', () => {
+    const s = apply([
+      { ts: '1', kind: 'triage', task: 'T1', path: 'large', reasons: [], project: 'shop', session: 'c1' },
+      { ts: '2', kind: 'phase', task: 'T1', phase: 'implement', brief: 1, session: 'c1', runId: 'r1' },
+      { ts: '3', kind: 'validate', task: 'T1-1', results: [], session: 'c2' },
+      { ts: '4', kind: 'agent', task: 'T1-1', agent: 'forge-impl' },
+    ])!;
+    expect(s).toMatchObject({ session: null, runId: 'r1', project: 'shop' });
+    expect(deriveStatus(s, { ts: '5', kind: 'agent', task: 'T1-1', agent: 'x', session: 'c3', project: '../evil' })).toMatchObject({ session: 'c3', runId: 'r1', project: 'shop' });
+    // A new task starts from its own triage.
+    expect(deriveStatus(s, { ts: '6', kind: 'triage', task: 'T2', path: 'small', reasons: [] })).toMatchObject({ task: 'T2', session: null, runId: null, project: null });
+  });
+  it('a status.json written before these fields, or with unsafe ones, reads them as null', () => {
+    const old = normalizeStatus({ ts: '1', task: 't', path: 'small', phase: '', agent: null, validators: [], verdict: null })!;
+    expect(old).toMatchObject({ session: null, runId: null, project: null });
+    expect(normalizeStatus({ ...old, session: 'a b', runId: 7, project: 'shop' })).toMatchObject({ session: null, runId: null, project: 'shop' });
   });
 });

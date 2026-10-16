@@ -833,3 +833,25 @@ describe("swarm step keeps a plan task's files in its project's work folder (D-0
     expect(s.actions.find(a => a.type === 'accepted')).toMatchObject({ task: 'T1' });
   });
 });
+
+describe('every event a step writes carries the run project (C4)', () => {
+  it('its own (the implementer it logs) and its commands\', even when another plan\'s T1 triage is the last one in the ledger', () => {
+    let from = -1;
+    swarmStep(['--plan', 'plan.yaml', '--db', 'db'], io, {
+      cli: argv => {
+        const r = run(argv, io);
+        // Another plan's T1 is triaged while this step starts its T1: the ledger now attributes T1 to web.
+        if (from < 0 && isCmd(argv, 'triage') && argv.includes('T1')) {
+          appendEvent(root, { ts: NOW.toISOString(), kind: 'triage', task: 'T1', path: 'small', reasons: [], project: 'web' });
+          from = readEvents(root).length;
+        }
+        return r;
+      },
+      gitAt: dir => defaultGit(dir),
+    });
+    expect(from).toBeGreaterThan(0);
+    const later = readEvents(root).slice(from).filter(e => typeof e.task === 'string' && /^T1(-\d+)?$/.test(e.task));
+    expect(later.map(e => e.kind)).toEqual(expect.arrayContaining(['phase', 'validate', 'agent']));
+    expect(later.filter(e => e.project !== 'shop')).toEqual([]);
+  });
+});

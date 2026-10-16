@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { attribute, baseOf, eventsOf, idChain, isTask, projectOf, projectOfDir, readWorkDir, resolveProject, workDir, workRel } from '../src/forge/task-ref.js';
+import { attribute, baseOf, eventsOf, idChain, isTask, projectOf, projectOfDir, readWorkDir, resolveProject, stampEvent, workDir, workRel } from '../src/forge/task-ref.js';
+import type { ExecutionState } from '../src/lib/execution-state.js';
 import { roundDecision } from '../src/forge/round.js';
 import { briefStats } from '../src/forge/stats.js';
 import type { LedgerEvent } from '../src/forge/ledger.js';
@@ -95,5 +96,20 @@ describe('task-ref: a task is the pair (project, task) (D-08)', () => {
       ev(5, 'verdict', 'T001-1', { action: 'accept', project: 'a', dir: 'x' }), ev(6, 'verdict', 'T001-1', { action: 'accept', project: 'b', dir: 'y' }),
     ];
     expect(briefStats(events).map(b => [b.acceptedAt.slice(14, 16), b.path])).toEqual([['05', 'medium'], ['06', 'large']]);
+  });
+});
+
+describe('stampEvent (C4)', () => {
+  const exec = { runId: 'r1', active: true, tasks: { T1: {} } } as unknown as ExecutionState;
+  const e = { ts: 't', kind: 'phase' as const, task: 'T1-2', phase: 'x' };
+  it('adds session, runId and project when they apply and the event lacks them', () => {
+    expect(stampEvent(e, { session: 'c1', exec, project: 'shop' })).toEqual({ ...e, session: 'c1', runId: 'r1', project: 'shop' });
+    expect(stampEvent(e, { session: null, exec: { ...exec, active: false }, project: null })).toEqual(e);
+    expect(stampEvent({ ...e, task: 'T9' }, { session: 'a b', exec, project: '../x' })).toEqual({ ...e, task: 'T9' });
+    expect(stampEvent({ ts: 't', kind: 'cycle' }, { session: 'c1', exec, project: 'shop' })).toEqual({ ts: 't', kind: 'cycle', session: 'c1' });
+  });
+  it('an event that names its own session, run or project keeps them', () => {
+    const own = { ...e, session: 'keep', runId: 'r0', project: 'mine' };
+    expect(stampEvent(own, { session: 'c1', exec, project: 'shop' })).toEqual(own);
   });
 });

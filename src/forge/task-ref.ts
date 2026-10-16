@@ -4,7 +4,7 @@
 // with an id here, and nowhere else.
 import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { isSafeId } from '../lib/execution-state.js';
+import { isSafeId, type ExecutionState } from '../lib/execution-state.js';
 import type { LedgerEvent } from './ledger.js';
 
 /** `task`: the id whose events (itself and its briefs `<task>-<n>`) and whose work folder are meant. */
@@ -117,4 +117,21 @@ export function readWorkDir(root: string, ref: TaskRef, events: readonly LedgerE
   const fresh = workDir(root, ref);
   if (ref.project === null || !isSafeId(ref.project)) return fresh;
   return pickWorkDir(fresh, projectOf(events, ref.task) === ref.project ? workDir(root, { project: null, task: ref.task }) : null);
+}
+
+/** C4: what the command that writes an event knows: Claude's session, the main checkout's execution and the task's project. */
+export interface StampContext { session: string | null; exec: ExecutionState | null; project: string | null }
+
+/**
+ * C4: the event with `session` (Claude's id, C1), `runId` (the active execution's, when the event's task or a task it
+ * belongs to is one of its tasks) and `project` (only on an event of a task), each one only when the event lacks it.
+ */
+export function stampEvent(event: LedgerEvent, ctx: StampContext): LedgerEvent {
+  const out: LedgerEvent = { ...event };
+  if (out.session === undefined && isSafeId(ctx.session)) out.session = ctx.session;
+  const task = typeof out.task === 'string' ? out.task : null;
+  const exec = ctx.exec;
+  if (out.runId === undefined && task && exec?.active && idChain(task).some(id => Object.hasOwn(exec.tasks, id))) out.runId = exec.runId;
+  if (out.project === undefined && task && isSafeId(ctx.project)) out.project = ctx.project;
+  return out;
 }

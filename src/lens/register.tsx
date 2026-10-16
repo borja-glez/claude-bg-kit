@@ -212,13 +212,18 @@ async function loadForgeFiles($: Engine, root: string): Promise<PanelFiles> {
   if (!entries.length) { forgeSeen = { dir, entries }; return out; }
   const status = entries.find(f => f.kind === 'file' && f.name === 'status.json');
   if (status && status.size <= FORGE_STATUS_MAX) out.forgeStatus = await readOpt($, join(dir, 'status.json'));
-  // How many briefs the current task has: the brief-<n>.md files in its work folder.
+  // How many briefs the current task has: the brief-<n>.md files in its work folder, .forge/work/<project>/<task> for a
+  // plan task (D-08), else (a loose task, an older status or a task started before) .forge/work/<task>.
   if (out.forgeStatus !== undefined) {
-    let task: string | undefined;
-    try { task = normalizeStatus(JSON.parse(out.forgeStatus))?.task; } catch { /* no task */ }
+    let st: ReturnType<typeof normalizeStatus> = null;
+    try { st = normalizeStatus(JSON.parse(out.forgeStatus)); } catch { st = null; }
+    const task = st?.task;
     if (task && SAFE_TASK.test(task)) {
-      const nums = (await listOpt($, join(dir, 'work', task)))
+      const briefNums = async (folder: string) => (await listOpt($, folder))
         .filter(f => f.kind === 'file').map(f => /^brief-(\d{1,4})\.md$/.exec(f.name)?.[1]).filter(Boolean).map(Number);
+      const project = st?.project;
+      let nums = project && SAFE_TASK.test(project) ? await briefNums(join(dir, 'work', project, task)) : [];
+      if (!nums.length) nums = await briefNums(join(dir, 'work', task));
       if (nums.length) out.forgeBriefs = Math.max(...nums);
     }
   }

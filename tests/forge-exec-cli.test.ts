@@ -1365,6 +1365,12 @@ describe('forge stop stops the execution of the main checkout for real, from any
     expect(existsSync(path.join(root, '.forge', 'members', 'ui.json'))).toBe(false);
     expect(existsSync(path.join(root, '.forge', 'members', 'old.json'))).toBe(true);
     expect(readStatus(root)).toMatchObject({ task: 'T2', phase: 'stopped', doneAt: at });
+    // C4: each stopped phase names its run, though the execution is no longer active when it is logged.
+    const stoppedPhases = readFileSync(path.join(root, '.forge', 'ledger.jsonl'), 'utf8').split('\n').filter(l => l.includes('"phase":"stopped"')).map(l => JSON.parse(l));
+    expect(stoppedPhases).toEqual([
+      expect.objectContaining({ task: 'T1', runId: e.runId, project: 'shop' }), expect.objectContaining({ task: 'T2', runId: e.runId, project: 'shop' }),
+    ]);
+    expect(readStatus(root)).toMatchObject({ runId: e.runId, project: 'shop' });
     expect(JSON.parse(readFileSync(path.join(root, '.forge', 'run.json'), 'utf8'))).toMatchObject({ active: false });
     expect(existsSync(path.join(root, '.forge', 'stop'))).toBe(true);
     expect(existsSync(path.join(wt, '.forge'))).toBe(false);

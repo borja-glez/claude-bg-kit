@@ -1,5 +1,6 @@
 // forge's current task, kept in .forge/status.json: forge updates it on each ledger append, lens reads it.
 // Pure, so both the forge CLI and the lens mod bundle it.
+import { isSafeId } from './execution-state.js';
 
 export type ForgeStatus = {
   ts: string; task: string; path: string; phase: string; agent: string | null;
@@ -17,6 +18,9 @@ export type ForgeStatus = {
   // The ts of the task's latest event of any kind (lens's safety net for a light task the session never closed); null
   // in an older status.
   lastAt: string | null;
+  // C4, D4: Claude's session of the task's latest event, the run of the latest event that names one, and the task's plan
+  // project (its triage's, or one an event names); null in an older status and for a loose task.
+  session: string | null; runId: string | null; project: string | null;
   // The task runs in auto mode (spec §5.5); absent otherwise.
   autonomy?: 'auto';
 };
@@ -113,7 +117,13 @@ export function deriveStatus(prev: ForgeStatus | null, event: unknown): ForgeSta
   // An event that changed nothing still counts when it is of the task (any kind, e.g. a decision).
   if (next === prev && !ownedBy(next.task, event.task)) return next;
   const lastAt = tsText(event.ts);
-  return lastAt === next.lastAt ? next : { ...next, lastAt };
+  // C4: who wrote the task's latest event, the run of the latest one that names it, and the project its triage or an
+  // event names (an event without one never drops it).
+  const session = isSafeId(event.session) ? event.session : null;
+  const runId = isSafeId(event.runId) ? event.runId : next.runId;
+  const project = isSafeId(event.project) ? event.project : next.project;
+  if (lastAt === next.lastAt && session === next.session && runId === next.runId && project === next.project) return next;
+  return { ...next, lastAt, session, runId, project };
 }
 
 function applyEvent(prev: ForgeStatus | null, event: unknown): ForgeStatus | null {
@@ -130,7 +140,7 @@ function applyEvent(prev: ForgeStatus | null, event: unknown): ForgeStatus | nul
       ? prev!
       : {
         ts, task, path: '', phase: '', agent: null, validators: [], verdict: null, round: null, cap: null, brief: null, accepted: [], verify: null,
-        taskStartedAt: ts, stageSince: ts, stages: {}, doneAt: null, lastAt: tsText(ts),
+        taskStartedAt: ts, stageSince: ts, stages: {}, doneAt: null, lastAt: tsText(ts), session: null, runId: null, project: null,
       };
     const next: ForgeStatus = { ...base, ts };
     if (e.kind === 'triage' && str(e.path)) {
@@ -239,6 +249,8 @@ export function normalizeStatus(x: unknown): ForgeStatus | null {
     // Absent in a status written before timings existed: no times are shown.
     taskStartedAt: tsText(x.taskStartedAt), stageSince: tsText(x.stageSince), stages: stagesOf(x.stages), doneAt: tsText(x.doneAt),
     lastAt: tsText(x.lastAt),
+    // Absent in a status written before C4: who, which run and which project are unknown.
+    session: isSafeId(x.session) ? x.session : null, runId: isSafeId(x.runId) ? x.runId : null, project: isSafeId(x.project) ? x.project : null,
     ...(x.autonomy === 'auto' ? { autonomy: 'auto' as const } : {}),
   };
 }

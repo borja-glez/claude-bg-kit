@@ -773,11 +773,13 @@ export function commitInfo(git: (args: string[]) => string | null, sha: string):
   return { sha, ts: Number.isFinite(t) ? new Date(t).toISOString() : '', title, add: num(/(\d+) insertion/), del: num(/(\d+) deletion/) };
 }
 
-/** The two `validate` events of an integration (C4): the run tip's baseline and the merged tree, both on the task. */
-function logValidations(io: Io, task: string, v: Validations | undefined): void {
+/** The two `validate` events of an integration (C4): the run tip's baseline and the merged tree, both on the task, with
+ *  the project of a plan run's task. */
+function logValidations(io: Io, task: string, v: Validations | undefined, project: string | null = null): void {
   const ts = io.now().toISOString();
-  if (v?.baseline) appendEvent(io.cwd, validateEvent(ts, task, v.baseline.results, v.baseline.durationMs, 'heavy', { baseline: true, integrate: 'baseline' }));
-  if (v?.merged) appendEvent(io.cwd, validateEvent(ts, task, v.merged.results, v.merged.durationMs, 'heavy', { integrate: 'merged' }));
+  const own = project ? { project } : {};
+  if (v?.baseline) appendEvent(io.cwd, { ...validateEvent(ts, task, v.baseline.results, v.baseline.durationMs, 'heavy', { baseline: true, integrate: 'baseline' }), ...own });
+  if (v?.merged) appendEvent(io.cwd, { ...validateEvent(ts, task, v.merged.results, v.merged.durationMs, 'heavy', { integrate: 'merged' }), ...own });
 }
 
 function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
@@ -810,7 +812,8 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
     run: runOptions(config, readEvents(io.cwd), io.now()),
     main: io.cwd, cache: { read: cache, write: cache }, now: io.now, slot: io.slot,
   });
-  logValidations(io, task, r.validations);
+  // C4: the events of a plan run's task carry the run's project.
+  logValidations(io, task, r.validations, e.kind === 'plan' && isSafeId(e.project) ? e.project : null);
   const es = spanish(locale, io.cwd, e.project);
   const extras = attemptExtras(r, es, t.branch, personal);
   // Neither the target nor its dependencies are ready: the task stays accepted.
@@ -1241,7 +1244,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       });
       const lease = flag('lease') && !Number.isNaN(Date.parse(flag('lease')!)) ? flag('lease')! : new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString();
       writePublicTask(io.cwd, { task, runId: e.runId, stage: next.stage, status: next.status, agent: next.agent, round: next.round, since: next.stageSince, updatedAt: iso, leaseUntil: lease, by: e.coordinator, mode: base.executor });
-      if (base.stage !== next.stage) appendPhase(io.cwd, { ts: iso, kind: 'phase', task, phase: next.stage });
+      if (base.stage !== next.stage) appendPhase(io.cwd, { ts: iso, kind: 'phase', task, phase: next.stage, ...(e.kind === 'plan' && isSafeId(e.project) ? { project: e.project } : {}) });
       return json(next);
     }
     case 'tick': {

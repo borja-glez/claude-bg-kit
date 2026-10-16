@@ -11,6 +11,7 @@ import { saveProposal, loadProposals } from '../src/forge/proposals.js';
 import type { ProposalDoc } from '../src/lib/proposals.js';
 import { parsePlan } from '../src/lib/plan.js';
 import { parseStatus } from '../src/forge/tree.js';
+import { saveExecution } from '../src/forge/execution.js';
 
 // infinite start binds Claude's session id (C1, K5-03). The tests run inside Claude Code, which sets
 // CLAUDE_CODE_SESSION_ID: io.env is {} so nothing leaks from it, and the id comes as --session s1 unless a test gives its own.
@@ -1421,11 +1422,13 @@ tasks:
     activeExecution('cost');
     expect(raise({ path: 'medium', project: 'given' })).toMatchObject({ project: 'given' });
   });
-  it('a raise outside any plan has no project, and other kinds are not stamped', () => {
+  it('a raise outside any plan has no project; another kind takes the project of its task\'s latest triage (C4)', () => {
     expect(raise()).not.toHaveProperty('project');
-    triageT1();
     expect(run(['log', '--kind', 'phase', '--task', 'T1', '--data', '{"phase":"implement"}'], io).code).toBe(0);
     expect(readEvents(root).at(-1)).not.toHaveProperty('project');
+    triageT1();
+    expect(run(['log', '--kind', 'phase', '--task', 'T1', '--data', '{"phase":"implement"}'], io).code).toBe(0);
+    expect(readEvents(root).at(-1)).toMatchObject({ project: 'cost' });
   });
   it('a raise stamped for project A does not lift T1 of project B', () => {
     triageT1('other.yaml');
@@ -2198,5 +2201,31 @@ describe('triage prints the work folder of the task (D-08)', () => {
     expect(JSON.parse(run(['triage', '--plan', 'plan.yaml', '--task', 'T001'], io).stdout).work).toBe('.forge/work/shop/T001');
     expect(JSON.parse(run(['triage', '--task', 'fix-a', 'add a footer link to the page'], io).stdout).work).toBe('.forge/work/fix-a');
     expect(JSON.parse(run(['triage', 'add a footer link to the page'], io).stdout)).not.toHaveProperty('work');
+  });
+});
+
+describe('every event a command writes carries its session, run and project (C4)', () => {
+  it('session from the environment, runId of the active execution, project from --project or the ledger', () => {
+    const at = '2026-10-11T09:00:00.000Z';
+    const log = (task: string, extra: string[] = [], env: Record<string, string> = { CLAUDE_CODE_SESSION_ID: 'c1' }) =>
+      run(['log', '--kind', 'phase', '--task', task, '--data', '{"phase":"implement"}', ...extra], { ...io, env });
+    appendEvent(root, { ts: at, kind: 'triage', task: 'T1', path: 'large', project: 'shop' });
+    expect(log('T1-1').code).toBe(0);
+    expect(readEvents(root).at(-1)).toMatchObject({ task: 'T1-1', session: 'c1', project: 'shop' });
+    expect(readEvents(root).at(-1)).not.toHaveProperty('runId');
+    saveExecution(root, {
+      runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,
+      coordinator: 'main', hookSession: 'h1', active: true, stopReason: null, stallReason: null, startedAt: at, lastStepAt: null, lastBlockStep: null, sleepUntil: null,
+      tasks: { T1: { status: 'running', stage: 'implement', round: 0, worktree: '', branch: 'task/T1', executor: 'subagents', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null } },
+    });
+    log('T1-1');
+    expect(readEvents(root).at(-1)).toMatchObject({ session: 'c1', runId: 'r1', project: 'shop' });
+    log('T1', ['--project', 'web'], {});
+    expect(readEvents(root).at(-1)).toMatchObject({ project: 'web', runId: 'r1' });
+    expect(readEvents(root).at(-1)).not.toHaveProperty('session');
+    expect(log('T1', ['--project', '../x']).code).toBe(2);
+    // An event that names its own session or project keeps it.
+    run(['log', '--kind', 'phase', '--task', 'T1', '--data', '{"phase":"y","session":"keep","project":"mine"}'], { ...io, env: { CLAUDE_CODE_SESSION_ID: 'c1' } });
+    expect(readEvents(root).at(-1)).toMatchObject({ session: 'keep', project: 'mine' });
   });
 });

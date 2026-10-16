@@ -401,3 +401,21 @@ test('at 40 columns an execution row keeps its dot, tag and right text whole: on
   expect(kids(head!)[1].props?.minWidth).toBe(0);
   await ui.unmount();
 });
+
+test('a plan task counts its briefs in .forge/work/<project>/<task> (D-08)', async ($, on) => {
+  engineBottom(on);
+  serveFiles(on, {
+    ...FORGE, [`${ROOT}/.forge/status.json`]: JSON.stringify({ ...STATUS, project: 'shop' }),
+    [`${ROOT}/.forge/work/shop/hash/brief-1.md`]: 'b', [`${ROOT}/.forge/work/shop/hash/brief-2.md`]: 'b', [`${ROOT}/.forge/work/hash/brief-1.md`]: 'b',
+  });
+  servePanes(on);
+  const clock = start(on);
+  on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'pending', activeForm: 'A' }] });
+  await clock.advance(30000);
+  const props = { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 120, scroll: { offset: 0, bodyRows: 9 }, view: {} };
+  const term = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props });
+  expect(await said(term)).toContain('0/2');
+  await term.unmount();
+});

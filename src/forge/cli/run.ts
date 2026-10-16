@@ -2,7 +2,7 @@ import { spawnSync, execFileSync } from 'node:child_process';
 import { existsSync, statSync, lstatSync, realpathSync, readFileSync, readdirSync, openSync, closeSync, fstatSync, readSync, rmSync, mkdtempSync, writeFileSync, mkdirSync, renameSync, rmdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { appendEvent, readEvents, forgeDir, LEDGER_KINDS, type LedgerKind, type LedgerEvent } from '../ledger.js';
+import { appendEvent, readEvents, forgeDir, withEventContext, LEDGER_KINDS, type EventContext, type LedgerKind, type LedgerEvent } from '../ledger.js';
 import { parseRun, startRun, recordCycle, stopReason, endRun, readRunText, saveRun, stopFile, type RunState, type StopContext } from '../run.js';
 import { decideStop, decideExecutionStop, UNBOUND_WARNING } from '../hook.js';
 import { readExecution, updateExecution, runWorktree, executionTaskFile, writePublicTask } from '../execution.js';
@@ -32,7 +32,7 @@ import { swarmStep } from './step.js';
 import { runWithCache, cacheGit, checkoutPrefix } from '../validate-cache.js';
 import { roundDecision } from '../round.js';
 import { keepEvidence } from '../evidence-copy.js';
-import { eventsOf, isTask, projectOf, readWorkDir, resolveProject, workRel } from '../task-ref.js';
+import { eventsOf, isTask, projectOf, projectOfDir, readWorkDir, resolveProject, workRel } from '../task-ref.js';
 import { computeStats, renderStats, type PlanStates } from '../stats.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, runOptions, validateEvent, planAffected, type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { checkTools, mcpInventory, toolGaps } from '../tools.js';
@@ -789,7 +789,7 @@ function jobOf(argv: string[]): { cmd: string; task: string | null } | null {
  * validation slot before its validators (swarm.validateJobs) and writes its JSON to the file atomically, with
  * `waitedMs` when it is an object; one that failed writes `{error, code}`. Any other command runs as it is.
  */
-export function run(argv: string[], io: Io): Result {
+function runOrJob(argv: string[], io: Io): Result {
   const job = argv.includes('--out') ? jobOf(argv) : null;
   if (!job) return runCommand(argv, io);
   const at = argv.indexOf('--out');
@@ -810,6 +810,25 @@ export function run(argv: string[], io: Io): Result {
     try { writeJsonAtomic(outFile, value); } catch (e) { return { ...r, stderr: `${r.stderr}forge: could not write ${file}: ${(e as Error).message}\n` }; }
     return parsed !== undefined && value !== parsed ? { ...r, stdout: JSON.stringify(value, null, 2) + '\n' } : r;
   });
+}
+
+/** C4: the context the events of one command are stamped with: Claude's session from io.env (a test passes {}) and, for a
+ *  command with --task, the project its --project or its --dir (.forge/work/<project>/<T>) names. */
+function eventContextOf(argv: string[], io: Io): EventContext {
+  const value = (name: string) => {
+    const i = argv.indexOf(`--${name}`);
+    const v = i >= 0 ? argv[i + 1] : undefined;
+    return v !== undefined && !v.startsWith('--') ? v : undefined;
+  };
+  const task = value('task'), flagged = value('project'), dir = value('dir');
+  const project = !task ? undefined : flagged !== undefined ? (isSafeId(flagged) ? flagged : undefined) : dir ? projectOfDir(dir, task) ?? undefined : undefined;
+  return { env: io.env ?? {}, ...(project !== undefined ? { project } : {}) };
+}
+
+/** The forge CLI (see runOrJob): every event a command appends carries its session, run and project (C4). A command a
+ *  swarm step runs (its deps.cli) that names no project keeps the step's (withEventContext). */
+export function run(argv: string[], io: Io): Result {
+  return withEventContext(eventContextOf(argv, io), () => runOrJob(argv, io));
 }
 
 function runCommand(argv: string[], io: Io): Result {
@@ -838,6 +857,8 @@ function runCommand(argv: string[], io: Io): Result {
   const json = (v: unknown, code = 0): Result => ({ code, stdout: JSON.stringify(v, null, 2) + '\n', stderr: '' });
   const ts = () => io.now().toISOString();
   try {
+    // D-08: a --project names a work folder and reaches every event of the command: a safe id only (swarm has its own rules).
+    if (cmd !== 'swarm' && has('project') && !isSafeId(flag('project'))) throw new UsageError(`${cmd}: --project must use letters, digits, _ - . (at most 120)`);
     switch (cmd) {
       case 'log': {
         const kind = flag('kind');
@@ -1642,7 +1663,9 @@ function runCommand(argv: string[], io: Io): Result {
             let p: PublicTask | null = null;
             try { p = normalizePublicTask(JSON.parse(readFileSync(executionTaskFile(main, id), 'utf8'))); } catch { p = null; }
             if (p && p.task === id && p.runId === after.runId) writePublicTask(main, { ...p, status: 'stopped', agent: null, updatedAt: at, leaseUntil: at });
-            appendEvent(main, { ts: at, kind: 'phase', task: id, phase: 'stopped' });
+            // C4: the execution is no longer active, so the stamp would not name its run: the phase names it, and the
+            // project of a plan run's task.
+            appendEvent(main, { ts: at, kind: 'phase', task: id, phase: 'stopped', runId: after.runId, ...(after.kind === 'plan' && isSafeId(after.project) ? { project: after.project } : {}) });
           }
           const listed = listMembers(main, after.runId);
           members = listed.map(m => ({ sessionId: m.sessionId, name: m.name, role: m.role, task: m.task }));
