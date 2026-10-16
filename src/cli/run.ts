@@ -423,11 +423,15 @@ export function run(argv: string[], io: Io): Result {
         const own = checkoutSid(wp, t);
         const resume = args.includes('--resume');
         const takeover = args.includes('--takeover');
-        // I3: a task an earlier conversation left on a seat; --resume without --seat takes that seat.
-        const left = leftSeatOf(readSeats(wp, t), open, t);
+        // I3: a task an earlier conversation left on a seat; --resume without --seat takes that seat, unless this
+        // conversation already holds a live seat with a task open: that one it keeps (M1 would end it otherwise).
+        const seats = readSeats(wp, t);
+        const left = leftSeatOf(seats, open, t);
+        const working = seats.find(s => s.bound?.claude === claude && boundLive(s.bound, t) && !!open[s.sid]);
+        const picked = resume ? working ?? left : undefined;
         let sid: string | null;
         if (seatFlag !== undefined) sid = seatFlag;
-        else if (resume && left) sid = left.sid;
+        else if (picked) sid = picked.sid;
         else if (second) sid = secondSeatOf(wp, claude, open, t);
         else sid = own ?? sessionIdFrom(track ?? 'main');
         if (sid === null) return fail(`bind: every extra seat (main-2 to main-${MAX_SEATS + 1}) is held by a live conversation`, 2);
@@ -435,7 +439,7 @@ export function run(argv: string[], io: Io): Result {
           const fix = seatFlag !== undefined ? 'pick another --seat' : own !== null ? `fix the sessionId of ${rel(path.join(wp, 'session.json'))}` : 'pick another --track';
           return fail(`bind: the seat id ${JSON.stringify(sid.slice(0, 130))} names a folder: only letters, digits, _ . - and no leading - (${fix})`, 2);
         }
-        const seatDir = left && sid === left.sid ? left.dir : second || (own !== null && own !== sid) ? path.join(seatsDir(wp), sid) : wp;
+        const seatDir = picked && sid === picked.sid ? picked.dir : second || (own !== null && own !== sid) ? path.join(seatsDir(wp), sid) : wp;
         const cur = readBinding(seatDir, sid, t);
         const task = open[sid] ?? null;
         const options = ['worktree', 'second-seat', 'takeover'];

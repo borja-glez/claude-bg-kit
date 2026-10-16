@@ -123,6 +123,19 @@ describe('waypoint bind (A-01, B-04, K5-04)', () => {
     expect(startContext('C')).toContain('T003');
     expect(outOf(bind('C', '--resume'))).toMatchObject({ took: 'previous', sid: 'main-2' });
   });
+  it('--resume keeps the seat this conversation holds with a task open; a left seat is only for one without (M1, I3)', () => {
+    bind('A');
+    leftOn('main-2', 'W', 30);
+    openTask('T001', 'main');
+    openTask('T003', 'main-2');
+    expect(outOf(bind('A', '--resume'))).toMatchObject({ took: 'same', sid: 'main', seatDir: '.waypoint/demo-shop' });
+    expect(json(wp('bound.json'))).toMatchObject({ claude: 'A', endedAt: null });
+    expect(json(wp('seats', 'main-2', 'bound.json'))).toMatchObject({ claude: 'W' });
+    // With no task of its own open, --resume takes up the left task, and its old seat ends (one seat per conversation).
+    rmSync(wp('dbcache', 'state', 'T001.json'));
+    expect(outOf(bind('A', '--resume'))).toMatchObject({ took: 'previous', sid: 'main-2' });
+    expect(json(wp('bound.json'))).toMatchObject({ claude: 'A', endReason: 'released' });
+  });
   it('without a task left anywhere --resume binds as before', () => {
     leftOn('main-3', 'X', 5);
     expect(outOf(bind('C', '--resume'))).toMatchObject({ took: 'new', sid: 'main', seatDir: '.waypoint/demo-shop' });
