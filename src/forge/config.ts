@@ -20,6 +20,12 @@ export type When = 'always' | 'medium' | 'final';
 export type RetryPolicy = 'flaky' | 'always' | 'never';
 export interface ValidatorSpec { name: string; cmd: string; kind?: string; affects?: string[]; when?: When; cache?: boolean; affected_cmd?: string }
 export interface VerifyLimits { checks: number; shots: number; minutes: number }
+/** What security judges against (K4-02, §4.8): the person writes it; each entry at most 200 characters. */
+export interface ThreatModel { protects: string[]; trusted: string[]; untrusted: string[]; outOfScope: string[]; notes?: string }
+/** How the review loop converges: the express review (measure 7) and the docs written for people (K4-09). */
+export interface ReviewConfig { express: boolean; personDocs: string[] }
+/** The docs written for people by default: an important finding only there does not open a round (K4-09). */
+export const PERSON_DOCS: readonly string[] = ['README.md', 'README.*.md', '**/README.md', '**/README.*.md', 'CHANGELOG.md', '**/CHANGELOG.md'];
 export interface ForgeConfig {
   profile: Profile; validators?: ValidatorSpec[]; detect: boolean; exclude: string[];
   verify: { limits: VerifyLimits }; evidence: 'upload' | 'local'; validatorTimeoutSec: number; swarm: {
@@ -30,6 +36,9 @@ export interface ForgeConfig {
   };
   /** How validators run: through the tree cache (C6), at most `parallel` at once, and which failures run again (C-12). */
   validate: { cache: boolean; parallel: number; retry: RetryPolicy };
+  /** Without one, security takes the person at the keyboard and the local machine as trusted (decision of the user). */
+  threatModel?: ThreatModel;
+  review: ReviewConfig;
   tdd: 'off' | 'superpowers';
   workflow?: Workflow; autonomy?: Autonomy;
   /** Globs of tracked build output: forge puts those files back after its validator runs in any checkout. */
@@ -68,6 +77,17 @@ const Schema = z.object({
   workflow: z.enum(WORKFLOWS).optional(),
   autonomy: z.enum(AUTONOMIES).optional(),
   generated: z.array(z.string().min(1).max(200)).max(50).default([]),
+  threatModel: z.object({
+    protects: z.array(z.string().min(1).max(200)).min(1).max(10),
+    trusted: z.array(z.string().min(1).max(200)).max(10).default([]),
+    untrusted: z.array(z.string().min(1).max(200)).max(10).default([]),
+    outOfScope: z.array(z.string().min(1).max(200)).max(20).default([]),
+    notes: z.string().min(1).max(1000).optional(),
+  }).strict().optional(),
+  review: z.object({
+    express: z.boolean().default(true),
+    personDocs: z.array(z.string().min(1).max(200)).max(50).default([...PERSON_DOCS]),
+  }).strict().default({ express: true, personDocs: [...PERSON_DOCS] }),
   swarm: z.object({
     parallel: z.number().int().min(1).max(10).default(3),
     mode: z.enum(['subagents', 'sessions']).optional(),
@@ -82,7 +102,7 @@ const Schema = z.object({
 
 const DEFAULTS: ForgeConfig = {
   profile: 'balanced', detect: true, exclude: [], verify: { limits: { checks: 8, shots: 10, minutes: 10 } },
-  evidence: 'upload', validatorTimeoutSec: 600, validate: { cache: true, parallel: 3, retry: 'flaky' }, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' } }, tdd: 'off', generated: [],
+  evidence: 'upload', validatorTimeoutSec: 600, validate: { cache: true, parallel: 3, retry: 'flaky' }, review: { express: true, personDocs: [...PERSON_DOCS] }, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' } }, tdd: 'off', generated: [],
 };
 
 export function parseConfig(text: string | null): ForgeConfig {

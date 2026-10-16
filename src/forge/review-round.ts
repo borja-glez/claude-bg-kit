@@ -16,11 +16,13 @@ export interface PreviousResult { verdict: 'pass' | 'fail' | 'abstain'; findings
 /**
  * Paths the reviewers receive: `out` is the round's review dir and `shadow` the twins' dir; `fix` (the fix diff) and
  * `findings` (a reviewer's own previous findings) only go to delta reviewers; `report` (the implementer's, under TDD)
- * only to correctness.
+ * only to correctness; `threatModel` only to security.
  */
 export interface RoundFiles {
   brief: string; diff: string; validators: string; out: string; shadow: string;
   fix?: string; findings?: (name: ReviewerKey) => string; report?: string;
+  /** The threat model file (K4-02): security only. */
+  threatModel?: string;
 }
 export interface RoundInput {
   review: TriageReview; round: number; path: PathName;
@@ -60,6 +62,7 @@ export function reviewRound(input: RoundInput): RoundPlan {
   const base = (r: RoundReviewer): Record<string, string> => ({
     brief: files.brief, diff: files.diff, validators: files.validators, out: files.out,
     ...(r.role === 'review-correctness' && files.report ? { report: files.report } : {}),
+    ...(r.role === 'review-security' && files.threatModel ? { threatModel: files.threatModel } : {}),
   });
   const entry = (r: RoundReviewer, mode: ReviewMode, inputs: Record<string, string>): SpawnEntry =>
     ({ role: r.role, name: reviewerKey(r.role), agent: r.agent, model: r.model, effort: r.effort, mode, twin: false, inputs });

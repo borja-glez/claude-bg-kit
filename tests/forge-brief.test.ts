@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parsePlan } from '../src/lib/plan.js';
 import { renderBrief, taskText, tddLine } from '../src/forge/brief.js';
+import { renderThreatModel } from '../src/forge/threat-model.js';
 
 const PLAN = parsePlan(`project: shop
 locale: es
@@ -64,5 +65,12 @@ describe('brief', () => {
     expect(line).toBe('TDD: required. Read and follow `/sp/skills/test-driven-development/SKILL.md`. Report the failing run and then the passing run of the new tests.');
     expect(renderBrief(PLAN, PLAN.tasks[0], { planPath: 'p.yaml', designPath: null, tdd: line }).trimEnd().endsWith(line)).toBe(true);
     expect(renderBrief(PLAN, PLAN.tasks[0], { planPath: 'p.yaml', designPath: null })).not.toContain('TDD');
+  });
+  it('carries the threat model section before the TDD line (K4-02)', () => {
+    const tm = renderThreatModel({ protects: ['secrets'], trusted: [], untrusted: [], outOfScope: [] });
+    const md = renderBrief(PLAN, PLAN.tasks[0], { planPath: 'p.yaml', designPath: null, threatModel: tm, tdd: 'TDD: required.' });
+    expect(md).toContain('## Threat model\n\n- Protects: secrets\n');
+    expect(md.indexOf('## Threat model')).toBeLessThan(md.indexOf('TDD: required.'));
+    expect(renderBrief(PLAN, PLAN.tasks[0], { planPath: 'p.yaml', designPath: null })).not.toContain('Threat model');
   });
 });

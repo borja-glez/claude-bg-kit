@@ -113,4 +113,12 @@ describe('reviewRound', () => {
     expect(r.spawn.find(s => s.name === 'correctness')!.inputs.report).toBe('w/report-1.txt');
     expect(r.spawn.find(s => s.name === 'security')!.inputs.report).toBeUndefined();
   });
+  it('the threat model goes to security only, in full and in delta (K4-02)', () => {
+    const tm = { ...files, threatModel: 'w/threat-model.md' };
+    const first = reviewRound(at({ files: tm }));
+    expect(first.spawn.find(s => s.name === 'security')!.inputs.threatModel).toBe('w/threat-model.md');
+    expect(first.spawn.find(s => s.name === 'correctness')!.inputs.threatModel).toBeUndefined();
+    const delta = reviewRound(at({ files: tm, round: 2, previous: { 'review-correctness': pass, 'review-security': fail(), 'review-perf': pass }, fixZones: [], fixFiles: [] }));
+    expect(delta.spawn.find(s => s.name === 'security')!.inputs).toMatchObject({ threatModel: 'w/threat-model.md', findings: 'w/reviews-1-R/previous-security.json' });
+  });
 });

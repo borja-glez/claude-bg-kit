@@ -9,6 +9,7 @@ import { PATH_ORDER, zonesFromPaths, type PathName, type ReviewRole } from '../t
 import { parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, repoRelative, type Finding, type Review, type ReviewerName, type FailingValidator } from '../verdict.js';
 import { roundDecision } from '../round.js';
 import { buildCase, readShadow, saveShadow, takeBrief } from '../shadow.js';
+import { renderThreatModel } from '../threat-model.js';
 import { shadowCommand } from './shadow.js';
 import { restoringRegenerated } from './swarm.js';
 import { mainCheckout } from '../local.js';
@@ -82,6 +83,14 @@ function readJson(file: string): unknown {
   try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return undefined; }
 }
 
+/** K4-02: `<dir>/threat-model.md` from the config's threatModel, rewritten each time; removed when there is none. */
+function writeThreatModel(dir: string, config: ForgeConfig): string | null {
+  const file = path.join(dir, 'threat-model.md');
+  if (!config.threatModel) { rmSync(file, { force: true }); return null; }
+  writeFileSync(file, renderThreatModel(config.threatModel));
+  return file;
+}
+
 /**
  * `FORGE review-prep --task <T>-<n> --path <p> --base <sha> --baseline <f> --dir <dir> [--locale es|en] [--no-cache]`: validates
  * against the baseline into `<dir>/validators-<n>.json`, writes `<dir>/diff-<n>.patch`, decides who reviews with
@@ -126,6 +135,8 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   const round = reviewRoundOf(events, task);
   const roundDir = path.join(dir, `reviews-${n}-${round}`);
   mkdirSync(roundDir, { recursive: true });
+  // K4-02: the threat model goes to the security reviewer (reviewRound adds it to its inputs).
+  const tmFile = writeThreatModel(dir, config);
   // C4: the brief enters validation (logged before the validators run, so the stage's clock includes them).
   appendPhase(deps.cwd, { ts: deps.now().toISOString(), kind: 'phase', task: id, phase: 'validate', brief: Number(n), round });
 
@@ -220,6 +231,7 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
       out: rel(deps.cwd, roundDir), shadow: rel(deps.cwd, path.join(roundDir, 'shadow')),
       ...(round >= 2 ? { fix: rel(deps.cwd, fixFile), findings: (name: ReviewerKey) => rel(deps.cwd, findingsFile(name)) } : {}),
       ...(tdd && existsSync(report) ? { report: rel(deps.cwd, report) } : {}),
+      ...(tmFile ? { threatModel: rel(deps.cwd, tmFile) } : {}),
     },
   });
   if (plan.shadow) mkdirSync(path.join(roundDir, 'shadow'), { recursive: true });
@@ -428,8 +440,9 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
  * `FORGE prep --task <id>-<n> --path <p> [--phase <name>] [--dir <dir>] [--cwd <worktree>] [--no-baseline] [--no-cache]`: before a brief's work, in
  * one call, reads BASE (the HEAD of `--cwd`), records what already fails on it into `<dir>/baseline-<n>.json` (as
  * `validate --all --path <p> --base-run --task <id>-<n>` does; `<dir>` defaults to `.forge/work/<id>`), logs the phase
- * `{"phase":<name, default implement>,"brief":<n>,"base":<BASE>}` on `<id>` and prints `{base, baseline, failing, cached, durationMs, validate}` (the baseline comes from the tree cache when BASE's tree was validated: C6, I-06; never with --no-cache).
+ * `{"phase":<name, default implement>,"brief":<n>,"base":<BASE>}` on `<id>` and prints `{base, baseline, failing, cached, durationMs, validate, threatModel}` (the baseline comes from the tree cache when BASE's tree was validated: C6, I-06; never with --no-cache).
  * validate is the command the implementer runs (J-11). --no-baseline records BASE and the phase without validating (baseline: null; J-13).
+ * It also writes <dir>/threat-model.md from the config's threatModel and prints threatModel, its path or null (K4-02).
  * A validator failing on BASE is what the baseline is for: prep exits 0.
  */
 export function prep(args: string[], deps: ReviewDeps): Result {
@@ -448,6 +461,11 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   const [, id, n] = m;
   const base = (deps.git(['rev-parse', 'HEAD']) ?? '').trim();
   if (!base) throw new UsageError('prep: cannot read HEAD');
+  // K4-02: the threat model the brief and the security reviewer read, written from the config (null without one).
+  const dir = path.resolve(deps.cwd, flag('dir') ?? path.join('.forge', 'work', id));
+  mkdirSync(dir, { recursive: true });
+  const tmFile = writeThreatModel(dir, loadConfig(deps.repoDir));
+  const threatModel = tmFile ? rel(deps.cwd, tmFile) : null;
   // J-11: the implementer's validate command, exactly as it runs it: the tests related to its changes since BASE, the
   // typecheck and the lint, in the code's directory. Paths with / and in double quotes, which every shell takes.
   const slash = (q: string) => path.resolve(q).split(path.sep).join('/');
@@ -455,7 +473,7 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   // J-13: --no-baseline (the Small path) records BASE and the phase and runs no validator.
   if (args.includes('--no-baseline')) {
     appendEvent(deps.cwd, { ts: deps.now().toISOString(), kind: 'phase', task: id, phase, brief: Number(n), base });
-    return json({ base, baseline: null, failing: [], cached: [], durationMs: 0, validate });
+    return json({ base, baseline: null, failing: [], cached: [], durationMs: 0, validate, threatModel });
   }
 
   // The baseline, as `validate --all --path <p> --base-run` runs it: on BASE nothing changed yet, so a heavy path runs
@@ -464,14 +482,12 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   const scope: Scope = p === 'trivial' || p === 'small' ? { mode: 'small' } : { mode: 'heavy', changed: null };
   const restored: string[] = [];
   const { results, durationMs } = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored, args.includes('--no-cache'));
-  const dir = path.resolve(deps.cwd, flag('dir') ?? path.join('.forge', 'work', id));
-  mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `baseline-${n}.json`);
   writeFileSync(file, JSON.stringify(results, null, 2) + '\n');
   const ts = deps.now().toISOString();
   appendEvent(deps.cwd, validateEvent(ts, task, results, durationMs, scope.mode, { baseline: true }));
   appendEvent(deps.cwd, { ts, kind: 'phase', task: id, phase, brief: Number(n), base });
-  return json({ base, baseline: rel(deps.cwd, file), failing: results.filter(blocking).map(r => r.validator), cached: cachedNames(results), durationMs, validate, ...(restored.length ? { restored } : {}) });
+  return json({ base, baseline: rel(deps.cwd, file), failing: results.filter(blocking).map(r => r.validator), cached: cachedNames(results), durationMs, validate, threatModel, ...(restored.length ? { restored } : {}) });
 }
 
 /** `review-prep`, `review-close`, `prep` and `shadow` (cli/shadow.ts). */

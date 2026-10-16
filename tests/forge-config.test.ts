@@ -13,7 +13,7 @@ describe('forge config', () => {
   it('defaults: detect on, nothing excluded, verify limits, evidence upload', () => {
     expect(parseConfig(null)).toEqual({
       profile: 'balanced', detect: true, exclude: [], verify: { limits: { checks: 8, shots: 10, minutes: 10 } },
-      evidence: 'upload', validatorTimeoutSec: 600, validate: { cache: true, parallel: 3, retry: 'flaky' }, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' } }, tdd: 'off',
+      evidence: 'upload', validatorTimeoutSec: 600, validate: { cache: true, parallel: 3, retry: 'flaky' }, review: { express: true, personDocs: ['README.md', 'README.*.md', '**/README.md', '**/README.*.md', 'CHANGELOG.md', '**/CHANGELOG.md'] }, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' } }, tdd: 'off',
       generated: [],
     });
   });
@@ -36,6 +36,24 @@ describe('forge config', () => {
     expect(parseConfig(null).tdd).toBe('off');
     expect(parseConfig('tdd: superpowers\n').tdd).toBe('superpowers');
     expect(() => parseConfig('tdd: always\n')).toThrow(ConfigError);
+  });
+  it('threatModel: optional; protects 1 to 10, trusted and untrusted up to 10, outOfScope up to 20, strings up to 200, notes up to 1000 (K4-02)', () => {
+    expect(parseConfig(null)).not.toHaveProperty('threatModel');
+    expect(parseConfig('threatModel:\n  protects: ["files outside the repo"]\n  untrusted: ["web pages"]\n').threatModel)
+      .toEqual({ protects: ['files outside the repo'], trusted: [], untrusted: ['web pages'], outOfScope: [] });
+    expect(parseConfig('threatModel:\n  protects: [a]\n  notes: a local tool\n').threatModel?.notes).toBe('a local tool');
+    for (const bad of ['threatModel:\n  protects: []\n', `threatModel:\n  protects: ["${'x'.repeat(201)}"]\n`, 'threatModel:\n  trusted: [a]\n',
+      'threatModel:\n  protects: [a]\n  owner: me\n', `threatModel:\n  protects: [a]\n  notes: "${'n'.repeat(1001)}"\n`,
+      `threatModel:\n  protects: [a]\n  outOfScope: [${Array.from({ length: 21 }, (_, i) => `o${i}`).join(', ')}]\n`]) {
+      expect(() => parseConfig(bad), bad).toThrow(ConfigError);
+    }
+  });
+  it('review: express on by default and personDocs the READMEs and changelogs; both can be set (K4-09, measure 7)', () => {
+    expect(parseConfig(null).review).toEqual({ express: true, personDocs: ['README.md', 'README.*.md', '**/README.md', '**/README.*.md', 'CHANGELOG.md', '**/CHANGELOG.md'] });
+    expect(parseConfig('review:\n  express: false\n').review).toMatchObject({ express: false, personDocs: expect.arrayContaining(['README.md']) });
+    expect(parseConfig('review:\n  personDocs: ["docs/guide/**"]\n').review.personDocs).toEqual(['docs/guide/**']);
+    expect(configValue(parseConfig('review:\n  express: false\n'), 'review.express')).toBe(false);
+    for (const bad of ['review:\n  express: maybe\n', 'review:\n  personDocs: README.md\n', 'review:\n  other: 1\n']) expect(() => parseConfig(bad), bad).toThrow(ConfigError);
   });
   it('validate: parallel 3 and retry flaky by default; parallel from 1 to 8; retry flaky, always or never (C-12)', () => {
     expect(parseConfig(null).validate).toEqual({ cache: true, parallel: 3, retry: 'flaky' });

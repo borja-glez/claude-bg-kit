@@ -985,6 +985,14 @@ it('brief prints the plan task, exit 2 for an unknown task or a broken plan', ()
   expect(bad.code).toBe(2);
   expect(bad.stderr).toContain('YAML');
 });
+it("brief adds the threat model of the project's config (K4-02)", () => {
+  writeFileSync(path.join(root, 'plan.yaml'), PLAN_YAML);
+  mkdirSync(path.join(root, '.forge'), { recursive: true });
+  writeFileSync(path.join(root, '.forge', 'config.yaml'), 'threatModel:\n  protects: ["the person\'s files"]\n');
+  const r = run(['brief', '--plan', 'plan.yaml', '--task', 'T001'], io);
+  expect(r.code).toBe(0);
+  expect(r.stdout).toContain("## Threat model\n\n- Protects: the person's files\n");
+});
 it('triage --plan without a value is a usage error, not free text', () => {
   expect(run(['triage', '--plan'], io).code).toBe(2);
   expect(run(['triage', '--plan', '--task', 'T001'], io).code).toBe(2);

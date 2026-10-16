@@ -36,7 +36,7 @@ beforeEach(() => {
   mkdirSync(work(), { recursive: true });
   writeFileSync(path.join(work(), 'brief-1.md'), '# T1\n');
   writeFileSync(path.join(work(), 'baseline-1.json'), '[{"validator":"check","ok":true,"flaky":false,"durationMs":1,"failures":[]}]\n');
-  io = { cwd: root, now: () => new Date('2026-10-14T10:00:00.000Z') };
+  io = { cwd: root, now: () => new Date('2026-10-14T10:00:00.000Z'), env: {} };
   appendEvent(root, { ts: '2026-10-14T09:00:00.000Z', kind: 'triage', task: 'T1', path: 'medium', sensitive: ['auth'], review });
 });
 
@@ -343,6 +343,21 @@ describe('forge prep', () => {
       expect(r.code).toBe(2);
       expect(r.stderr).toContain('prep');
     }
+  });
+  it('with a threat model in the config, prep writes threat-model.md and prints its path; review-prep hands it to security only (K4-02)', () => {
+    writeFileSync(path.join(wt, '.forge', 'config.yaml'), 'threatModel:\n  protects: ["files outside the repository"]\ndetect: false\nvalidators:\n  - name: check\n    cmd: node -e "process.exit(0)"\n');
+    const p = JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'medium', '--cwd', wt], io).stdout);
+    expect(p.threatModel).toBe('.forge/work/T1/threat-model.md');
+    expect(readFileSync(path.join(work(), 'threat-model.md'), 'utf8')).toBe('## Threat model\n\n- Protects: files outside the repository\n');
+    const out = JSON.parse(run(['review-prep', '--task', 'T1-1', '--path', 'medium', '--base', p.base, '--baseline', '.forge/work/T1/baseline-1.json', '--dir', '.forge/work/T1', '--cwd', wt], io).stdout);
+    expect(out.spawn.find((s: { role: string }) => s.role === 'review-security').inputs.threatModel).toBe('.forge/work/T1/threat-model.md');
+    expect(out.spawn.find((s: { role: string }) => s.role === 'review-correctness').inputs.threatModel).toBeUndefined();
+  });
+  it('without a threat model prep prints threatModel null and leaves no threat-model.md, also with --no-baseline', () => {
+    writeFileSync(path.join(work(), 'threat-model.md'), 'stale\n');
+    expect(JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'medium', '--cwd', wt], io).stdout).threatModel).toBeNull();
+    expect(existsSync(path.join(work(), 'threat-model.md'))).toBe(false);
+    expect(JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'small', '--no-baseline', '--cwd', wt], io).stdout).threatModel).toBeNull();
   });
 });
 

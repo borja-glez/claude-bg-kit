@@ -21,7 +21,7 @@ function includesLines(includes: string | undefined): string[] {
 }
 
 // The brief an implementer works from: the plan task's fields verbatim, plus where the plan and design live.
-export function renderBrief(plan: Plan, task: PlanTask, opts: { planPath: string; designPath: string | null; tdd?: string | null }): string {
+export function renderBrief(plan: Plan, task: PlanTask, opts: { planPath: string; designPath: string | null; tdd?: string | null; threatModel?: string | null }): string {
   const lines = [
     `# ${task.id}: ${task.title}`,
     '',
@@ -38,6 +38,7 @@ export function renderBrief(plan: Plan, task: PlanTask, opts: { planPath: string
     ...(opts.designPath ? [`Design: ${opts.designPath}`] : []),
     '',
     'Stay inside the zones where possible; the task is done only when "Done when" holds and the validators pass.',
+    ...(opts.threatModel ? ['', opts.threatModel.trimEnd()] : []),
     ...(opts.tdd ? ['', opts.tdd] : []),
   ];
   return lines.join('\n') + '\n';
