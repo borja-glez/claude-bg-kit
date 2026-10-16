@@ -244,10 +244,10 @@ export function run(argv: string[], io: Io): Result {
         const branch = `track/${track}`;
         const name = `wp-${p.project}-${track}`;
         // J-02: no forge mark. A track of a plan that a forge execution runs joins it as a manual member by itself
-        // (/waypoint:work §0.6). --forge and --no-forge are still accepted and do nothing, for skills loaded before 0.20.
+        // (/waypoint:work §0.5). --forge and --no-forge are still accepted and do nothing, for skills loaded before 0.20.
+        // J-16: --swarm is obsolete (forge launches run members with --task): it keeps its checks and changes nothing.
         const prompt = `/waypoint:work ${track}`
-          + (args.includes('--merge') ? ` — the user authorizes merging ${branch} into main at phase close` : '')
-          + (swarm ? ` — swarm member of ${swarm}: do not merge into the base branch; keep taking tasks of your track and stop when it has no next task` : '');
+          + (args.includes('--merge') ? ` — the user authorizes merging ${branch} into main at phase close` : '');
         const command = `claude --bg --name ${name} "${prompt}"`;
         // `run` starts it from any directory without moving the caller's shell: a cd outside a subshell would
         // leave a coordinator working in the worktree. Single quotes, with any quote in the path escaped.
@@ -258,7 +258,8 @@ export function run(argv: string[], io: Io): Result {
           const exists = git('branch', '--list', branch) !== '';
           git('worktree', 'add', worktree, ...(exists ? [branch] : ['-b', branch, ...(base ? [base] : [])]));
         }
-        return ok(JSON.stringify({ worktree, branch, name, prompt, command, run: inWorktree }));
+        const done = ok(JSON.stringify({ worktree, branch, name, prompt, command, run: inWorktree }));
+        return swarm ? { ...done, stderr: '--swarm is obsolete: forge launches run members with --task\n' } : done;
       }
       case 'status': {
         const { view: p, project, version } = loadView();

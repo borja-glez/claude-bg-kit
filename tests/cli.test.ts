@@ -225,9 +225,12 @@ describe('multi-session commands', () => {
       writeDesign(`/waypoint:work <track> — ${MARK}`);
       expect(launch().prompt).toBe('/waypoint:work ui');
     });
-    const SWARM = ' — swarm member of main: do not merge into the base branch; keep taking tasks of your track and stop when it has no next task';
-    it('--swarm appends the swarm rules, without the forge mark (J-02)', () => {
-      expect(launch('--swarm', 'main', '--base', 'HEAD').prompt).toBe(`/waypoint:work ui${SWARM}`);
+    it('--swarm is obsolete: accepted with a warning, it no longer changes the prompt (J-16)', () => {
+      launch(); // makes the repo
+      const r = run(['launch', 'plan.yaml', 'ui', '--swarm', 'main', '--base', 'HEAD'], io);
+      expect(r.code).toBe(0);
+      expect(r.stderr).toBe('--swarm is obsolete: forge launches run members with --task\n');
+      expect(JSON.parse(r.stdout).prompt).toBe('/waypoint:work ui');
     });
     it('--swarm refuses --merge, a missing id and an id with shell characters', () => {
       const r = (...flags: string[]) => run(['launch', 'plan.yaml', 'ui', ...flags], io);

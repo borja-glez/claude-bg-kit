@@ -1,6 +1,6 @@
 ---
 name: member
-description: Run one task of a forge execution as a run member, in the background session a coordinator launched for it (mode sessions) - join, claim, the task's steps, done and stop. Use when the session's initial prompt is `/forge:member --plan <plan> --task <T> — run member of <SID>: work only <T>, then stop` (also the older `/forge:run --plan <plan> --task <T> — run member of <SID>` form), or when SessionStart says to resume it with /forge:member.
+description: Run one task of a forge execution as a run member, in the background session a coordinator launched for it (mode sessions) - join, claim, the task's steps, done and stop. Use when the session's initial prompt is `/forge:member --plan <plan> --task <T> — run member of <SID>: work only <T>, then stop`, or when SessionStart says to resume it with /forge:member.
 ---
 
 # forge: run member

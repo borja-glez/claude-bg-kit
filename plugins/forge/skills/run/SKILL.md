@@ -103,11 +103,11 @@ Read `references/large.md` now and follow it (subsystem, architecture, much ambi
 
 Read `references/execution.md` now and follow it when this session coordinates the execution of a plan's tasks (`references/large.md` step 3, mode `subagents` or `sessions`, N at once, on `forge/run-<project>`): the start, the tick loop, integration, publishing, the end, requests during an execution and Unattended. A task's steps are in `references/task-steps.md`.
 
-**Run members.** A session launched for one task of the execution (mode `sessions`) runs it with forge:member. A session whose initial prompt is the older `/forge:run --plan <plan> --task <T> — run member of <SID>: work only <T>, then stop` invokes and follows `forge:member` instead of this skill, as does a SessionStart saying "Resume it with /forge:run → Run member".
+**Run members.** A session launched for one task of the execution (mode `sessions`) runs it with forge:member, never with this skill.
 
 ### Manual member
 
-Read `references/manual-member.md` now and follow it with `/forge:run --join` (also what `/waypoint:work` §0 item 6 sends here): a session the user drives joins a running execution and works plan tasks.
+Read `references/manual-member.md` now and follow it with `/forge:run --join` (also what `/waypoint:work` §0 item 5 sends here): a session the user drives joins a running execution and works plan tasks.
 
 ### Unattended
 

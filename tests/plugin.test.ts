@@ -841,10 +841,11 @@ describe('plugin layout', () => {
       'session-id <name>', '`<SID>-2`', 'handover.md', 'Edit and Write', '### Manual member', 'forge:run --join']) expect(md).toContain(w);
     expect(Buffer.byteLength(md, 'utf8')).toBeLessThan(15000);
   });
-  it('forge:run: the compatibility line instead of Run member, and the launch of tick and relaunch as printed', () => {
+  it('forge:run: no old run-member prompt, and the launch of tick and relaunch as printed (J-16)', () => {
     const run = read('plugins/forge/skills/run/SKILL.md');
-    expect(run).toContain('/forge:run --plan <plan> --task <T> — run member of <SID>');
-    expect(run).toMatch(/run member of[^\n]*follows? `?forge:member`?/);
+    expect(run).toContain('**Run members.**');
+    for (const w of ['/forge:run --plan <plan> --task <T> — run member of <SID>', '→ Run member']) expect(run).not.toContain(w);
+    expect(read('plugins/forge/skills/member/SKILL.md')).not.toContain('/forge:run --plan <plan> --task <T>');
     expect(run).not.toContain('### Run member');
     expect(run).not.toContain('FORGE swarm join --session <SID> --role executor');
     expect(run).not.toContain('node "<WP>" launch <plan> <T>');
@@ -963,7 +964,7 @@ describe('plugin layout', () => {
       .flatMap(d => (d.isDirectory() ? walk(path.join(dir, d.name)) : [path.join(dir, d.name)]));
     const files = readdirSync(skills).flatMap(p => (existsSync(path.join(skills, p, 'skills')) ? walk(path.join(skills, p, 'skills')) : []));
     expect(files.filter(f => readFileSync(f, 'utf8').includes('forge drives this session')).map(f => path.relative(skills, f))).toEqual([]);
-    expect(read('plugins/waypoint/skills/launch/SKILL.md')).toContain('(`/waypoint:work` §0.6)');
+    expect(read('plugins/waypoint/skills/launch/SKILL.md')).toContain('(`/waypoint:work` §0.5)');
   });
   it('READMEs describe swarm close, the Claude session id, the integrated commit and the design loop of wave 0', () => {
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
@@ -976,7 +977,7 @@ describe('plugin layout', () => {
     }
     for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) {
       const md = read(f);
-      for (const s of ['--applied', '--rewrite', 'apply r1:4,5 r2:all', '?debug=1', '/waypoint:work` §0.6']) expect(md).toContain(s);
+      for (const s of ['--applied', '--rewrite', 'apply r1:4,5 r2:all', '?debug=1', '/waypoint:work` §0.5']) expect(md).toContain(s);
     }
   });
   it('implementers run the validate command prep printed, never the whole suite, and the skills pass it (J-11)', () => {
@@ -1123,5 +1124,17 @@ describe('plugin layout', () => {
     expect(inf).toContain('`### Unattended` in forge:run `references/execution.md`');
     const row = runRef('execution').split('\n').find(l => l.startsWith('| A Large task |'))!;
     for (const w of ['/forge:infinite', 'autonomy: auto']) expect(row).toContain(w);
+  });
+  it('no skill keeps the swarm member of waypoint launch nor the old run-member prompt (J-16)', () => {
+    const plugins = fileURLToPath(new URL('../plugins/', import.meta.url));
+    const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
+      .flatMap(d => (d.isDirectory() ? walk(path.join(dir, d.name)) : [path.join(dir, d.name)]));
+    const files = readdirSync(plugins).flatMap(p => (existsSync(path.join(plugins, p, 'skills')) ? walk(path.join(plugins, p, 'skills')) : []));
+    for (const w of ['--swarm', '→ Run member', 'swarm member', 'launchedBy', '§0.6', '§0 item 6']) {
+      expect(files.filter(f => readFileSync(f, 'utf8').includes(w)).map(f => path.relative(plugins, f)), w).toEqual([]);
+    }
+    const work = read('plugins/waypoint/skills/work/SKILL.md');
+    expect(work).toMatch(/\n5\. \*\*forge execution\.\*\*/);
+    expect(work).not.toMatch(/\n6\. \*\*forge execution\.\*\*/);
   });
 });
