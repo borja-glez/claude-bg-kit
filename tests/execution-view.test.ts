@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { coordinatorGone, executionView, isVisibleRun, signalLiveness, STALE_RUN_TTL_MS, lastMovedAt } from '../src/lib/execution-view.js';
+import { coordinatorGone, coordinatorLiveness, executionView, isVisibleRun, signalLiveness, STALE_RUN_TTL_MS, lastMovedAt } from '../src/lib/execution-view.js';
 import type { ExecutionState, PublicTask, LiveDoc } from '../src/lib/execution-state.js';
 
 const NOW = Date.parse('2026-10-12T12:00:00.000Z');
@@ -229,6 +229,19 @@ describe('coordinatorGone (B-09, M4): a run without its coordinator, for the ban
   it('an inactive run is not «without a coordinator» by silence: it stopped', () => {
     expect(coordinatorGone(exec({ active: false, stopReason: 'stalled', lastStepAt: at(-60) }), null, NOW)).toBe(false);
     expect(coordinatorGone(null, null, NOW)).toBe(false);
+  });
+  it('a coordinator whose session runs a background job (busy, C-03) waits on it as on an agent; an ended conversation is gone all the same', () => {
+    expect(coordinatorGone(exec({ lastStepAt: at(-30) }), null, NOW, true)).toBe(false);
+    expect(coordinatorGone(exec({ lastStepAt: at(-30) }), idle(-20), NOW, true)).toBe(false);
+    expect(coordinatorGone(exec(), idle(-1, true), NOW, true)).toBe(true);
+  });
+  it('coordinatorLiveness is the liveness coordinatorGone decides by (swarm takeover reports it): silent from 7 minutes, stopped from 12', () => {
+    expect(coordinatorLiveness(exec({ lastStepAt: at(-6) }), null, NOW)).toBe('alive');
+    expect(coordinatorLiveness(exec({ lastStepAt: at(-8) }), null, NOW)).toBe('silent');
+    expect(coordinatorLiveness(exec({ lastStepAt: at(-13) }), null, NOW)).toBe('stopped');
+    expect(coordinatorLiveness(exec({ lastStepAt: at(-13) }), null, NOW, true)).toBe('alive');
+    expect(coordinatorLiveness(exec({ lastStepAt: at(-30) }), live(-20), NOW)).toBe('alive');
+    expect(coordinatorLiveness(exec(), idle(-1, true), NOW, true)).toBe('stopped');
   });
 });
 

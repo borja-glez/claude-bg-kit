@@ -10,6 +10,8 @@ export const executionBlockReason = (running: number, parallel: number): string 
   `forge execution is active (${running}/${parallel} running). Step it as /forge:run's Execution section describes; to end it run /forge:stop.`;
 export const executionEndedReason = (reason: string): string =>
   `the forge execution ended (${reason}): report it as /forge:run's Execution section says (step 7), then stop.`;
+/** §4.6: what swarm status and infinite status add when an active run has no session bound to drive it. */
+export const UNBOUND_WARNING = 'no session is bound to it: run /forge:run --resume (or /forge:infinite) in the session that should drive it';
 
 /**
  * The Stop hook's decision for an execution's coordinator. The execution is bound when it starts (`swarm start` or

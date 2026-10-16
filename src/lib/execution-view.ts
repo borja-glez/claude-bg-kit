@@ -86,17 +86,31 @@ function coordinatorOf(e: ExecutionState, live: readonly LiveDoc[], now: number,
 }
 
 /**
+ * The liveness of run `e`'s coordinator by the rule coordinatorGone decides with, which `swarm takeover` and a resume
+ * from another session report: stopped once its conversation ended (its own signal says so), else as the run band
+ * draws it (coordinatorOf, counted from its last step or its start). `busy`: its session runs a background job
+ * (.forge/jobs/, C-03), which wakes it when it ends: it waits on it as on an agent, alive.
+ */
+export function coordinatorLiveness(e: ExecutionState, signal: LiveDoc | null, now: number, busy = false): Liveness {
+  const own = e.hookSession ? signal : null;
+  if (own?.ended === true) return 'stopped';
+  return busy && e.active ? 'alive' : coordinatorOf(e, own ? [own] : [], now, lastMovedAt(e)).liveness;
+}
+
+/**
  * B-09, M4: run `e` has no coordinator when its conversation ended (its own signal says so), or when the run is active
  * and its coordinator went silent: the run band would draw it stopped (no step nor signal for LIVE_STOPPED_MINUTES, no
  * agent it started still running). A run that never stepped counts from its start, as `swarm takeover` does.
  * `signal` is the coordinator's own live/<hookSession>.json, the one file the band and waypoint's hooks both read, so
  * describeViewer gets the same answer from both (its rule 4 or 5); a run without a hook session has no such file.
+ * `busy` (coordinatorLiveness) only forge's CLI can tell: a job lives by its pid, which the band cannot check. The band
+ * passes none, and so do waypoint's hooks, to keep giving a session the band's role: there a coordinator waiting on a
+ * job for LIVE_STOPPED_MINUTES reads gone, and its [Resume] finds it alive (swarm takeover answers took: false).
  */
-export function coordinatorGone(e: ExecutionState | null, signal: LiveDoc | null, now: number): boolean {
+export function coordinatorGone(e: ExecutionState | null, signal: LiveDoc | null, now: number, busy = false): boolean {
   if (!e) return false;
-  const own = e.hookSession ? signal : null;
-  if (own?.ended === true) return true;
-  return e.active && coordinatorOf(e, own ? [own] : [], now, lastMovedAt(e)).liveness === 'stopped';
+  if (e.hookSession && signal?.ended === true) return true;
+  return e.active && coordinatorLiveness(e, signal, now, busy) === 'stopped';
 }
 
 export function executionView(i: { exec: ExecutionState | null; tasks: Record<string, PublicTask>; live: LiveDoc[]; titles?: Record<string, string>; now: number; role?: ViewerRole }): ExecView | null {

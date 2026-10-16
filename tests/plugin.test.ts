@@ -1308,4 +1308,7 @@ describe('plugin layout', () => {
     const step7 = runRef('execution').split('\n').find(l => l.startsWith('7. **End.**'))!;
     expect(step7).toContain('`running` or `stopped` with `executor` `subagents`');
   });
+  it('the ephemeral run says its tick closes it when it finishes (wave 0 handoff)', () => {
+    expect(runRef('ephemeral')).toContain('`closedBy: merge`');
+  });
 });

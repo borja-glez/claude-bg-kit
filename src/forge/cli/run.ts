@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { appendEvent, readEvents, forgeDir, LEDGER_KINDS, type LedgerKind, type LedgerEvent } from '../ledger.js';
 import { parseRun, startRun, recordCycle, stopReason, endRun, readRunText, saveRun, stopFile, type RunState, type StopContext } from '../run.js';
-import { decideStop, decideExecutionStop } from '../hook.js';
+import { decideStop, decideExecutionStop, UNBOUND_WARNING } from '../hook.js';
 import { readExecution, updateExecution, runWorktree, executionTaskFile, writePublicTask } from '../execution.js';
 import { planLocale, replyIn, sessionReply } from '../../lib/locale.js';
 import { isLocale } from '../../lib/forge-run.js';
@@ -1550,7 +1550,9 @@ function runCommand(argv: string[], io: Io): Result {
           const text = readRunText(runRoot);
           const run = parseRun(text);
           const reason = run?.active ? stopReason(run, stopContext(runRoot, io.now())) : null;
-          return json({ present: text !== null, valid: run !== null, run, stopReason: reason, reply: runReply(runRoot, run) });
+          // §4.6: an active run no session drives (one forge 0.15 started) says so.
+          const unbound = !!run?.active && run.sessionId === null;
+          return json({ present: text !== null, valid: run !== null, run, stopReason: reason, reply: runReply(runRoot, run), ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}) });
         }
         throw new UsageError('usage: forge infinite <start --cycles N|--hours H [--queue-max N] [--session ID] [--locale CODE]|status>');
       }

@@ -118,6 +118,9 @@ describe('forge swarm (execution)', () => {
   it('start binds the --hook-session id, else CLAUDE_CODE_SESSION_ID of the environment, also on a resume (C1, D-01)', () => {
     expect(out(cli(['swarm', 'start', '--project', 'shop', '--session', 'main', '--hook-session', 'h1'], io))).toMatchObject({ hookSession: 'h1' });
     expect(readExecution(root)!.hookSession).toBe('h1');
+    // The /clear ended h1's conversation, and its signal says so: only then may another session rebind the run.
+    mkdirSync(path.join(root, '.forge', 'live'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'live', 'h1.json'), JSON.stringify({ sessionId: 'h1', role: 'coordinator', runId: readExecution(root)!.runId, task: null, event: 'SessionEnd', ts: NOW.toISOString(), agents: [], ended: true }));
     // The same coordinator resumes from another Claude session (after a /clear): that one is bound, explicitly.
     expect(out(cli(['swarm', 'start', '--project', 'shop', '--session', 'main'], { ...io, env: { CLAUDE_CODE_SESSION_ID: 'h2' } })))
       .toMatchObject({ coordinator: 'main', hookSession: 'h2' });
@@ -742,28 +745,41 @@ describe('forge swarm (execution)', () => {
     const takeover = readFileSync(path.join(root, '.forge', 'ledger.jsonl'), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)).find(e => e.what === 'takeover');
     expect(takeover).toMatchObject({ kind: 'decision', point: 'takeover', by: 'user', chosen: 'new', previous: 'old', session: 'new', runId: e.runId });
   });
-  it('takeover takes the liveliest of the signal and the lease, and falls back to the last step', () => {
+  it('takeover decides by the run band\'s rule alone: an ended conversation is gone whatever its roadmap lease, which the band cannot read (--db is still accepted)', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'old'], io));
     saveExecution(root, { ...readExecution(root)!, hookSession: 'old' });
-    const later = { ...io, now: () => new Date(NOW.getTime() + 20 * 60000) };
-    // No signal and no lease: a start 20 minutes ago with no step counts as stopped; 5 minutes ago does not.
-    expect(out(run(['swarm', 'takeover', '--session', 'new'], { ...io, now: () => new Date(NOW.getTime() + 5 * 60000) }))).toMatchObject({ took: false, liveness: 'alive' });
-    // An old signal but a live lease: the lease wins.
+    const later = { ...io, now: () => new Date(NOW.getTime() + 5 * 60000) };
+    // No signal: a start 5 minutes ago with no step is alive.
+    expect(out(run(['swarm', 'takeover', '--session', 'new'], later))).toMatchObject({ took: false, liveness: 'alive' });
+    // Its signal says its conversation ended: gone at once, even with a live lease on the roadmap.
     mkdirSync(path.join(root, '.forge', 'live'), { recursive: true });
-    writeFileSync(path.join(root, '.forge', 'live', 'old.json'), JSON.stringify({ sessionId: 'old', role: 'coordinator', runId: readExecution(root)!.runId, task: null, event: 'Stop', ts: NOW.toISOString(), agents: [], ended: true }));
-    const leaseUntil = new Date(NOW.getTime() + 25 * 60000).toISOString();
-    writeDocs(path.join(root, 'db', 'sessions'), { old: { name: 'c', status: 'active', heartbeatAt: new Date(NOW.getTime() + 19 * 60000).toISOString(), leaseUntil } });
-    expect(out(run(['swarm', 'takeover', '--session', 'new', '--db', 'db'], later)).took).toBe(false);
-    expect(readExecution(root)!.coordinator).toBe('old');
-    expect(out(run(['swarm', 'takeover', '--session', 'new'], later)).took).toBe(true);
+    writeFileSync(path.join(root, '.forge', 'live', 'old.json'), JSON.stringify({ sessionId: 'old', role: 'coordinator', runId: readExecution(root)!.runId, task: null, event: 'SessionEnd', ts: NOW.toISOString(), agents: [], ended: true }));
+    writeDocs(path.join(root, 'db', 'sessions'), { old: { name: 'c', status: 'active', heartbeatAt: new Date(NOW.getTime() + 4 * 60000).toISOString(), leaseUntil: new Date(NOW.getTime() + 25 * 60000).toISOString() } });
+    expect(out(run(['swarm', 'takeover', '--session', 'new', '--db', 'db'], later))).toMatchObject({ took: true, previous: 'old' });
     expect(run(['swarm', 'takeover'], later).code).toBe(2);
   });
-  it('takeover reads the roadmap lease under the coordinator SID even when the hook id differs', () => {
+  it('takeover agrees with the run band (coordinatorGone): gone after 12 minutes without a step or a signal, never while an agent or a job of its session runs (2b carry)', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'old'], io));
-    saveExecution(root, { ...readExecution(root)!, hookSession: '0f3c2a8e-hook' });
-    const later = { ...io, now: () => new Date(NOW.getTime() + 20 * 60000) };
-    writeDocs(path.join(root, 'db', 'sessions'), { old: { name: 'c', status: 'active', heartbeatAt: new Date(NOW.getTime() + 19 * 60000).toISOString(), leaseUntil: new Date(NOW.getTime() + 25 * 60000).toISOString() } });
-    expect(out(run(['swarm', 'takeover', '--session', 'new', '--db', 'db'], later))).toMatchObject({ took: false, previous: '0f3c2a8e-hook', liveness: 'alive' });
+    const e = readExecution(root)!;
+    const after = (min: number) => ({ ...io, now: () => new Date(NOW.getTime() + min * 60000) });
+    // No signal: the start counts, silent from 7 minutes on.
+    expect(out(run(['swarm', 'takeover', '--session', 'new'], after(10)))).toEqual({ took: false, previous: 'hook-main', liveness: 'silent', joinAs: 'manual' });
+    // A coordinator waiting on an agent it started is alive, however old its signal.
+    mkdirSync(path.join(root, '.forge', 'live'), { recursive: true });
+    const signal = path.join(root, '.forge', 'live', 'hook-main.json');
+    writeFileSync(signal, JSON.stringify({ sessionId: 'hook-main', role: 'coordinator', runId: e.runId, task: null, event: 'SubagentStart', ts: NOW.toISOString(), agents: [{ id: 'a1', type: 'forge:forge-impl', since: NOW.toISOString() }], ended: false }));
+    expect(out(run(['swarm', 'takeover', '--session', 'new'], after(20)))).toMatchObject({ took: false, liveness: 'alive' });
+    rmSync(signal);
+    // So is one whose session runs a background job (C-03), which its end wakes; a job of another session says nothing of it.
+    const job = (session: string) => ({ cmd: 'integrate', task: 'T1', out: 'integrate.json', session, startedAt: NOW.toISOString() });
+    withJob(root, job('hook-main'), () => {
+      expect(out(run(['swarm', 'takeover', '--session', 'new'], after(20)))).toMatchObject({ took: false, liveness: 'alive' });
+    });
+    // 13 minutes without a step: gone for the band, so for takeover too (it waited 15 until now).
+    withJob(root, job('another-session'), () => {
+      expect(out(run(['swarm', 'takeover', '--session', 'new'], after(13)))).toMatchObject({ took: true, previous: 'hook-main' });
+    });
+    expect(readExecution(root)).toMatchObject({ coordinator: 'new', hookSession: 'hook-new' });
   });
   it('takeover refuses a member of this run and an invalid session id', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'old'], io));
@@ -1422,5 +1438,68 @@ describe('forge stop stops the execution of the main checkout for real, from any
     expect(out(run(['swarm', 'close'], io))).toMatchObject({ closed: true, members: ['T2'], sessions: [{ sessionId: 'ui', name: 'wp-shop-T2', role: 'executor', task: 'T2' }] });
     expect(existsSync(path.join(root, '.forge', 'members', 'ui.json'))).toBe(false);
     expect(existsSync(path.join(root, '.forge', 'members', 'old.json'))).toBe(true);
+  });
+});
+
+describe('rebinding a run needs the bound conversation to have stopped (wave 0 handoff)', () => {
+  const signal = (runId: string, ended: boolean) => {
+    mkdirSync(path.join(root, '.forge', 'live'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'live', 'hook-main.json'), JSON.stringify({ sessionId: 'hook-main', role: 'coordinator', runId, task: null, event: 'Stop', ts: NOW.toISOString(), agents: [], ended }));
+  };
+  it('a resume from another Claude session is refused while the bound one is alive, and rebinds once it ended', () => {
+    const first = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    signal(first.runId, false);
+    const r = run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--hook-session', 'hook-other'], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain(`the execution ${first.runId} is bound to another Claude session (hook-main, alive)`);
+    expect(readExecution(root)!.hookSession).toBe('hook-main');
+    signal(first.runId, true);
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--hook-session', 'hook-other'], io))).toMatchObject({ hookSession: 'hook-other' });
+  });
+  it('takeover with the same SID from another Claude session answers took: false while the bound one is alive', () => {
+    const first = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    signal(first.runId, false);
+    expect(out(run(['swarm', 'takeover', '--session', 'main', '--hook-session', 'hook-new'], io))).toEqual({ took: false, previous: 'hook-main', liveness: 'alive', joinAs: 'manual' });
+    expect(readExecution(root)!.hookSession).toBe('hook-main');
+    // The same Claude session is always already bound.
+    expect(out(run(['swarm', 'takeover', '--session', 'main', '--hook-session', 'hook-main'], io))).toEqual({ took: 'already', runId: first.runId });
+    signal(first.runId, true);
+    expect(out(run(['swarm', 'takeover', '--session', 'main', '--hook-session', 'hook-new'], io))).toEqual({ took: 'already', runId: first.runId });
+    expect(readExecution(root)!.hookSession).toBe('hook-new');
+  });
+  it('swarm status and infinite status say when no session drives the active run (§4.6)', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    expect(out(run(['swarm', 'status'], io))).not.toHaveProperty('unbound');
+    saveExecution(root, { ...readExecution(root)!, hookSession: null });
+    const warning = 'no session is bound to it: run /forge:run --resume (or /forge:infinite) in the session that should drive it';
+    expect(out(run(['swarm', 'status'], io))).toMatchObject({ unbound: true, warning });
+    saveRun(root, { ...startRun(NOW, { cycles: 2 }), sessionId: null });
+    expect(out(run(['infinite', 'status'], io))).toMatchObject({ unbound: true, warning });
+    saveRun(root, { ...startRun(NOW, { cycles: 2 }), sessionId: 's1' });
+    expect(out(run(['infinite', 'status'], io))).not.toHaveProperty('unbound');
+  });
+});
+
+describe('an ephemeral run is closed by the tick that finishes it (wave 0 handoff)', () => {
+  const at = NOW.toISOString();
+  const done = (id: string, status: 'integrated' | 'blocked') => ({ status, stage: 'integrate' as const, round: 1, worktree: '', branch: `task/${id}`, executor: 'subagents' as const, attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null });
+  // An ephemeral run takes at least 2 tasks: fix-b is integrated, and fix-a ends as `status`.
+  const loose = (status: 'integrated' | 'blocked') => ({ 'fix-a': done('fix-a', status), 'fix-b': done('fix-b', 'integrated') });
+  const startLoose = () => {
+    writeFileSync(path.join(root, '.forge', 'tasks.json'), JSON.stringify(['a', 'b'].map(x => ({ id: `fix-${x}`, title: `fix ${x}`, path: 'small', zones: [`${x}.txt`], depends_on: [] }))));
+    out(run(['swarm', 'start', '--project', 'loose', '--session', 'main', '--kind', 'ephemeral', '--tasks', '.forge/tasks.json'], io));
+    return readExecution(root)!;
+  };
+  it('finished: closed with closedBy merge, since its work is in the branch already', () => {
+    const e = startLoose();
+    saveExecution(root, { ...e, tasks: loose('integrated') });
+    expect(out(run(['swarm', 'tick'], io)).actions).toContainEqual({ type: 'finish' });
+    expect(readExecution(root)).toMatchObject({ active: false, stopReason: 'finished', closedAt: at, closedBy: 'merge' });
+  });
+  it('stalled: it stays open until /forge:stop', () => {
+    const e = startLoose();
+    saveExecution(root, { ...e, tasks: loose('blocked') });
+    out(run(['swarm', 'tick'], io));
+    expect(readExecution(root)).toMatchObject({ active: false, stopReason: 'stalled', closedAt: null });
   });
 });

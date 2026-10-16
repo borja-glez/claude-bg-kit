@@ -11,14 +11,15 @@ import { isLocale } from '../../lib/forge-run.js';
 import { appendEvent, appendPhase, readEvents } from '../ledger.js';
 import { readExecution, updateExecution, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree, type LockDeps } from '../execution.js';
 import { sleepSync } from '../pid.js';
-import { noSlot, type Slot } from '../jobs.js';
+import { liveJobs, noSlot, type Slot } from '../jobs.js';
 import { readMergingFile, takeMerging, removeMergingIf, mergingLive, mergingStaleAt, mergeInFlight, type MergingDoc, type MergingHold } from '../merging.js';
 import { schedule, widthOf, widthProfile, relaunchOrBlock, RELAUNCH_CAP, type BgAgent } from '../schedule.js';
-import { LEASE_MINUTES, sessionLiveness } from '../../lib/coordination.js';
+import { LEASE_MINUTES, type Liveness } from '../../lib/coordination.js';
+import { UNBOUND_WARNING } from '../hook.js';
 import { planLocale, sessionReply } from '../../lib/locale.js';
-import { signalLiveness } from '../../lib/execution-view.js';
+import { coordinatorLiveness } from '../../lib/execution-view.js';
 import { liveFile } from '../live.js';
-import { STAGES, normalizePublicTask, normalizeLive, normalizeExecution, isSafeId, isRunBranch, type ExecutionState, type ExecTask, type PublicTask } from '../../lib/execution-state.js';
+import { STAGES, normalizePublicTask, normalizeLive, normalizeExecution, isSafeId, isRunBranch, type ExecutionState, type ExecTask, type LiveDoc, type PublicTask } from '../../lib/execution-state.js';
 import { claudeSessionId, noClaudeSession } from '../../lib/claude-session.js';
 import { parsePlan, PlanError, isPlanId } from '../../lib/plan.js';
 import type { SessionDoc, Stage, TaskState } from '../../lib/types.js';
@@ -34,7 +35,6 @@ export interface SwarmDeps extends GitDeps { at: (dir: string) => GitDeps }
 type Result = { code: number; stdout: string; stderr: string };
 
 const ID = /^[A-Za-z0-9_\-.~:@+]{1,80}$/;
-const TAKEOVER_MIN = 15;
 const MAX_SLEEP_S = 900;
 
 function readDocs<T>(dir: string): Record<string, T> {
@@ -263,6 +263,23 @@ function memberLaunch(root: string, planPath: string, task: string, e: Execution
   return ['launch', planPath, task, '--task', '--run', e.runId, '--coordinator', e.coordinator, '--base', e.branch,
     '--effort', swarm.member.effort, ...(swarm.member.model ? ['--model', swarm.member.model] : []),
     ...(swarm.launcher === 'herdr' ? ['--launcher', 'herdr'] : [])];
+}
+
+/**
+ * How alive the Claude session bound to `e` is, by the run band's rule (coordinatorGone, through coordinatorLiveness),
+ * so a takeover or a resume from another session goes ahead exactly when the band offers [Resume]: its own signal
+ * (.forge/live/<hookSession>.json) ended, or no step, signal, agent or background job of its session (.forge/jobs/,
+ * which only this side can read) for LIVE_STOPPED_MINUTES. The roadmap lease does not count: the band cannot read it.
+ * A hook id outside the safe rule names no file.
+ */
+function boundLiveness(root: string, e: ExecutionState, now: number): Liveness {
+  const hook = isSafeId(e.hookSession) ? e.hookSession : null;
+  let signal: LiveDoc | null = null;
+  if (hook) {
+    try { signal = normalizeLive(JSON.parse(readFileSync(liveFile(root, hook), 'utf8'))); } catch { signal = null; }
+  }
+  const busy = hook !== null && liveJobs(root, new Date(now)).some(j => j.session === hook);
+  return coordinatorLiveness(e, signal, now, busy);
 }
 
 /** What `tick` and `next` schedule from: the plan, the roadmap listings and the done commits already on the run branch. */
@@ -976,6 +993,12 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       if (prev?.active && !resume) {
         throw new UsageError(`swarm start: the execution ${prev.runId} is active (kind ${prev.kind}); finish it or stop it (forge stop) first; a request during it goes to that run`);
       }
+      // Wave 0 handoff: a resume from another Claude session rebinds only once the bound one stopped, by takeover's
+      // rule; while it lives it still steps its run, and a silent rebind would leave two sessions stepping it.
+      if (resume && prev && prev.hookSession !== null && prev.hookSession !== hook) {
+        const liveness = boundLiveness(io.cwd, prev, now.getTime());
+        if (liveness !== 'stopped') throw new UsageError(`swarm start: the execution ${prev.runId} is bound to another Claude session (${prev.hookSession}, ${liveness}): go on from that conversation, or run /forge:run --resume again once it ends`);
+      }
       if (kind === 'ephemeral') {
         if (resume && prev) {
           // The run keeps the batch it started with: new requests go to the next run.
@@ -1084,7 +1107,9 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
     case 'status': {
       // K2-01: the execution of the main checkout, from any worktree.
       const state = readExecution(mainCheckout(io.cwd));
-      return json({ present: state !== null, state });
+      // §4.6: an active execution that no session drives (forge 0.15 left it unbound) says so.
+      const unbound = !!state?.active && state.hookSession === null;
+      return json({ present: state !== null, state, ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}) });
     }
     case 'propose': {
       const plan = !flag('plan') && has('tasks') ? planOfLoose(loadTasksArg(io, flag('tasks'), 'propose')) : loadPlanArg(io, flag('plan'), 'propose');
@@ -1198,7 +1223,13 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       // The scheduler decides on the execution as it is under the lock, so a swarm task or an integrate that ran
       // meanwhile is never overwritten (I-15).
       let d!: ReturnType<typeof schedule>;
-      update(cur => { d = schedule({ plan, states, sessions, exec: cur ?? e, integrated, now: now.getTime(), publicTasks, agents, merging }); return d.next; });
+      update(cur => {
+        d = schedule({ plan, states, sessions, exec: cur ?? e, integrated, now: now.getTime(), publicTasks, agents, merging });
+        // Wave 0 handoff: an ephemeral run integrates each task into the person's branch as it goes, so the tick that
+        // finishes it finds all its work merged already, and no swarm merge will ever close it: it closes here (C2).
+        if (d.next.kind === 'ephemeral' && !d.next.active && d.next.stopReason === 'finished' && !d.next.closedAt) d = { ...d, next: { ...d.next, closedAt: iso, closedBy: 'merge' } };
+        return d.next;
+      });
       // In sessions mode a start carries the whole `waypoint launch` argument list: the coordinator runs it as is.
       const planPath = flag('plan');
       const actions = e.mode === 'sessions' && planPath
@@ -1364,27 +1395,24 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       if (!e.active) throw new UsageError('swarm takeover: the execution is not active');
       // --session is the waypoint SID that becomes the coordinator; --hook-session is Claude's id of this session, bound
       // at once, so its Stop hook steps the execution from now on (C1).
-      if (session === e.coordinator || hook === e.hookSession) {
-        if (e.coordinator !== session || e.hookSession !== hook) update(cur => cur && { ...cur, coordinator: session, hookSession: hook });
+      // The same Claude session: already bound (its waypoint SID may have changed).
+      if (hook === e.hookSession) {
+        if (e.coordinator !== session) update(cur => cur && { ...cur, coordinator: session });
+        return json({ took: 'already', runId: e.runId });
+      }
+      // The coordinator's SID from another Claude session (a resume, a /clear): it rebinds only once the bound one
+      // stopped (wave 0 handoff); while it lives, this one joins as a manual member.
+      if (session === e.coordinator) {
+        const alive = e.hookSession === null ? 'stopped' : boundLiveness(io.cwd, e, now.getTime());
+        if (alive !== 'stopped') return json({ took: false, previous: e.hookSession, liveness: alive, joinAs: 'manual' });
+        update(cur => cur && { ...cur, hookSession: hook });
         return json({ took: 'already', runId: e.runId });
       }
       // A run member keeps its role: it would otherwise coordinate the task it executes.
       if (readMember(io.cwd, session)?.runId === e.runId) throw new UsageError(`swarm takeover: ${session} is a member of the execution ${e.runId}; a run member cannot take over the coordinator`);
       const previous = e.hookSession ?? e.coordinator;
-      // The liveliest of the local signal and the roadmap lease decides; with neither, the last step does.
-      // A previous id outside the safe rule names no file: it counts as having no signal and no lease.
-      const order = ['stopped', 'silent', 'alive'] as const;
-      const seen: (typeof order)[number][] = [];
-      if (isSafeId(previous)) try {
-        const d = normalizeLive(JSON.parse(readFileSync(liveFile(io.cwd, previous), 'utf8')));
-        if (d) seen.push(signalLiveness(d.ts, d.ended, now.getTime()));
-      } catch { /* no signal */ }
-      // The signal is keyed by the hook id; the roadmap lease by the coordinator's waypoint SID.
-      if (flag('db') && isSafeId(e.coordinator)) {
-        try { seen.push(sessionLiveness(JSON.parse(readFileSync(path.resolve(io.cwd, flag('db')!, 'sessions', `${e.coordinator}.json`), 'utf8')) as SessionDoc, now.getTime())); } catch { /* no lease */ }
-      }
-      if (!seen.length) seen.push(now.getTime() - Date.parse(e.lastStepAt ?? e.startedAt) >= TAKEOVER_MIN * 60000 ? 'stopped' : 'alive');
-      const liveness = seen.reduce((a, b) => (order.indexOf(b) > order.indexOf(a) ? b : a), 'stopped' as (typeof order)[number]);
+      // The run band's rule decides (boundLiveness); --db is still accepted, but the roadmap lease no longer counts.
+      const liveness = boundLiveness(io.cwd, e, now.getTime());
       if (liveness !== 'stopped') return json({ took: false, previous, liveness, joinAs: 'manual' });
       update(cur => cur && { ...cur, coordinator: session, hookSession: hook, sleepUntil: null });
       // The user asked this session to go on: their decision, recorded in the decision format (by: user).
