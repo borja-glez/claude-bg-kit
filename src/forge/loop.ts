@@ -8,7 +8,8 @@ export interface RoundDecision { round: number; cap: number; next: Next; reason:
 const CAP = { medium: 3, large: 4 } as const;
 
 /** `held`: an express review whose correctness did not answer (measure 7): its blocking set is what the delegated
- *  reviewers left open, not a re-review result, so it never counts toward stalled. */
+ *  reviewers left open, not a re-review result, so it never stalls, and a later review compares with the last review
+ *  that was not held. */
 export function decideRound(history: { action: Action; score: number | null; signature: string; held?: boolean }[], path: 'medium' | 'large'): RoundDecision {
   const cap = CAP[path];
   const latest = history.at(-1);
@@ -19,11 +20,12 @@ export function decideRound(history: { action: Action; score: number | null; sig
   const lastNote = last ? ' (the last attempt before the breaker: impl-heavy)' : '';
   if (!latest) return { round: 0, cap, next: 'resume', reason: 'no verdict yet', tierUp, last: false };
   if (latest.action === 'accept') return { round, cap, next: 'done', reason: 'accepted', tierUp, last: false };
-  const prev = history.at(-2);
+  // The review a stall compares with: the last one before this that was not held.
+  const prev = history.slice(0, -1).filter(h => !h.held).at(-1);
   // C-05: the same blocking set, by stable id, as the previous review: the rounds are not converging, whatever the score.
   // An empty signature (nothing blocks) never stalls, and one of forge 0.17 or older (the problem's text, no v2: prefix)
-  // never matches, so an old ledger gives no false stall. A held review is neither side of a stall.
-  if (prev && prev.action !== 'accept' && !latest.held && !prev.held && latest.signature.startsWith('v2:') && prev.signature === latest.signature) {
+  // never matches, so an old ledger gives no false stall. A held review never stalls.
+  if (prev && prev.action !== 'accept' && !latest.held && latest.signature.startsWith('v2:') && prev.signature === latest.signature) {
     return { round, cap, next: 'stalled', reason: 'the same blocking findings as the previous review', tierUp, last: false };
   }
   if (round > cap) return { round, cap, next: 'breaker', reason: `round ${round} over the cap of ${cap}`, tierUp, last: false };

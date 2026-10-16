@@ -24,10 +24,12 @@ describe('decideRound', () => {
     expect(decideRound([v('fix', 0.6, 'x'), v('fix', 0.62, 'x')], 'medium')).toMatchObject({ next: 'stalled', reason: 'the same blocking findings as the previous review' });
     expect(decideRound([v('fix', 0.6, 'x'), v('fix', 0.6, 'y')], 'medium').next).toBe('resume');
   });
-  it('a held review (an express one whose correctness did not answer) never counts toward stalled, as the latest or the previous one', () => {
+  it('a held review (an express one whose correctness did not answer) never stalls, and a later review compares with the last one that was not held', () => {
     const held = (signature: string) => ({ ...v('fix', 0.6, signature), held: true });
     expect(decideRound([v('fix', 0.6, 'x'), held('x')], 'medium')).toMatchObject({ round: 2, next: 'resume' });
-    expect(decideRound([v('fix', 0.6, 'x'), held('x'), v('fix', 0.6, 'x')], 'medium')).toMatchObject({ round: 3, next: 'fresh-stronger' });
+    // Reviews 1 and 3 are real re-review results with the same blocking set: the held review between them hides nothing.
+    expect(decideRound([v('fix', 0.6, 'x'), held('x'), v('fix', 0.6, 'x')], 'medium')).toMatchObject({ round: 3, next: 'stalled' });
+    expect(decideRound([v('fix', 0.6, 'x'), held('x'), v('fix', 0.6, 'y')], 'medium')).toMatchObject({ round: 3, next: 'fresh-stronger' });
     expect(decideRound([v('fix', 0.6, 'x'), v('fix', 0.6, 'x')], 'medium').next).toBe('stalled');
   });
   it('an accept between two reviews with the same blocking set does not stall the later one (C-T4)', () => {
