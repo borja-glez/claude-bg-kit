@@ -798,6 +798,15 @@ describe('classic hooks', () => {
       writeFileSync(path.join(wp(), 'dbcache', 'state', 'T001.json'), JSON.stringify({ status: 'done', owner: 'backend' }));
       expect(JSON.parse(hook('stop', { session_id: 's1' }).stdout).reason).toContain('2 commit(s)');
     });
+    it('the commits of a task the session has claimed (not yet started) do not count either', () => {
+      writeFileSync(path.join(wp(), 'session.json'), JSON.stringify({ sessionId: 'backend', track: 'backend', currentTask: 'T001' }));
+      mkdirSync(path.join(wp(), 'dbcache', 'state'), { recursive: true });
+      writeFileSync(path.join(wp(), 'dbcache', 'state', 'T001.json'), JSON.stringify({ status: 'claimed', owner: 'backend' }));
+      writeFileSync(pending(), '{"ts":"x","task":"T001","command":"git commit","sha":"a"}\n');
+      expect(blocks('s1')).toBe(false);
+      writeFileSync(pending(), '{"ts":"x","task":"T001","command":"git commit","sha":"a"}\n{"ts":"y","task":"T002","command":"git commit","sha":"b"}\n');
+      expect(JSON.parse(hook('stop', { session_id: 's1' }).stdout).reason).toContain('1 commit(s)');
+    });
   });
 });
 

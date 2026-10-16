@@ -6,7 +6,7 @@ import { firstStage, normalizeRoute, readRoute, routeAsk, routeOptions } from '.
 import { resolvePrefs } from '../src/forge/prefs.js';
 import { readLocal } from '../src/forge/local.js';
 import { allDecisions } from '../src/forge/decisions.js';
-import { run, type Io } from '../src/forge/cli/run.js';
+import { run, cleanProbe, type Io } from '../src/forge/cli/run.js';
 
 const PREFS = resolvePrefs({}, {}, {});
 const SP = { installed: true, version: '6.4.1' };
@@ -202,6 +202,31 @@ describe('forge route CLI', () => {
     expect(JSON.parse(run(['route', '--task', 't1', '--text-file', 'req.txt', '--path', 'medium'], io).stdout).stepAside).toBe(false);
     expect(run(['route', '--task', 't1', '--text-file'], io).code).toBe(2);
     // In a directory without .forge/, a probe creates nothing.
+    expect(existsSync(path.join(root, '.forge'))).toBe(false);
+  });
+  it('a probe that exits 2 (an empty text, a bad --path, --workflow or --autonomy) leaves no .forge/ behind either', () => {
+    for (const [text, extra] of [['', []], ['fix the typo in a.ts\n', ['--path', 'huge']], ['fix the typo in a.ts\n', ['--workflow', 'maybe']], ['fix the typo in a.ts\n', ['--autonomy', 'never']]] as const) {
+      mkdirSync(path.join(root, '.forge', 'work', 't1'), { recursive: true });
+      writeFileSync(path.join(root, '.forge', 'work', 't1', 'task.txt'), text);
+      expect(run(['route', '--task', 't1', '--text-file', '.forge/work/t1/task.txt', ...extra], io).code, extra.join(' ') || 'empty').toBe(2);
+      expect(existsSync(path.join(root, '.forge')), extra.join(' ') || 'empty').toBe(false);
+    }
+  });
+  it('cleaned says the task file was deleted even when a directory could not be removed after it', () => {
+    mkdirSync(path.join(root, '.forge', 'work', 't1'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'work', 't1', 'task.txt'), 'x\n');
+    expect(cleanProbe(root, 't1', '.forge/work/t1/task.txt', () => { throw new Error('EBUSY'); })).toBe(true);
+    expect(existsSync(path.join(root, '.forge', 'work', 't1', 'task.txt'))).toBe(false);
+  });
+  it('a workflow pinned to a superpowers option that is not installed asks the person (route/SKILL.md «ask as below»)', () => {
+    writeFileSync(path.join(root, 'req.txt'), 'redesign the plugin architecture\n');
+    const probe = () => JSON.parse(run(['route', '--task', 't1', '--text-file', 'req.txt', '--workflow', 'superpowers-design', '--locale', 'en'], io).stdout);
+    expect(probe().ask).toMatchObject({ question: expect.any(String), options: expect.arrayContaining([expect.objectContaining({ option: 'forge' })]) });
+    installSuperpowers();
+    expect(probe().ask).toBeNull();
+  });
+  it('route set reads --why-file before it writes anything: a missing one leaves local.yaml alone', () => {
+    expect(run(['route', 'set', '--task', 't1', '--chosen', 'forge', '--by', 'user', '--remember', '--why-file', 'missing.txt'], io).code).toBe(2);
     expect(existsSync(path.join(root, '.forge'))).toBe(false);
   });
   it('route set --remember keeps the choice in local.yaml; none without it writes nothing (K1-08)', () => {

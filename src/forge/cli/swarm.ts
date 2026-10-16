@@ -474,6 +474,12 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
   }
   if ('busy' in took) return { result: 'dirty', detail: inFlightDetail(took.busy, place) };
   const hold = marker.hold = took.hold;
+  // Checked again under the marker (mergeIn releases it): an attempt that committed, or a merge someone started, between
+  // the checks above and the take would make `pre` wrong (a duplicate integrate reporting the old sha, a rollback that
+  // could not reach it).
+  if (at.git(['rev-parse', 'HEAD'])?.trim() !== pre || merging()) {
+    return { result: 'dirty', detail: 'HEAD moved or a merge started there while this integration was starting' };
+  }
   const before = new Set(untracked(at));
   // The same list indexTree compares against, taken before the merge (the cache assumes the work tree starts clean).
   const cacheBefore = new Set(untrackedPaths(cacheGit(at.git)));
@@ -823,11 +829,12 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
   // C2: a merged run that already ended is over: closed, so lens, the band and the roadmap stop drawing it.
   const merged = (v: Record<string, unknown>): Result => out({ ...v, ...(closeEnded(io.cwd, io.now().toISOString(), 'merge', { now: io.now, sleep: io.sleep }) ? { closed: true } : {}) });
   if (e.kind !== 'plan') return merged({ result: 'merged', sha: deps.git(['rev-parse', 'HEAD'])?.trim() ?? '' });
-  // D-07: never while an integration is in flight, wherever it merges; its merging.json stays as it is.
+  // D-07: never while an integration is in flight, wherever it merges; its merging.json stays as it is. A result, as
+  // main-dirty is: the coordinator waits for it and runs swarm merge again.
   const inFlight = mergeInFlight(io.cwd, io.now().getTime());
   if (inFlight) {
     const m = inFlight.doc;
-    throw new UsageError(`swarm merge: ${m ? `an integration (${m.task ?? m.ref}, pid ${m.pid}) is merging in ${m.dir}` : 'an integration is starting'}; run swarm merge again once it ends`);
+    return out({ result: 'busy', detail: `${m ? `an integration (${m.task ?? m.ref}, pid ${m.pid}) is merging in ${m.dir}` : 'an integration is starting'}; run swarm merge again once it ends` });
   }
   if (!e.mergeOnFinish && !rest.includes('--yes')) return out({ result: 'needs-authorization' });
   const branch = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();

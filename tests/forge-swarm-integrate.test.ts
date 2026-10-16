@@ -893,6 +893,26 @@ describe('an integration left half-done (D-07)', () => {
     const t = loadConfig(root).validatorTimeoutSec;
     for (const s of seen) expect(Date.parse(s.staleAt) - io.now().getTime()).toBeGreaterThanOrEqual(SLOT_MAX_WAIT_MS + 2 * t * 1000);
   });
+  it('checks again under the marker: HEAD moved or a merge started between the first checks and the take gives run-dirty, and the marker goes', () => {
+    accept('T1', 'a.txt', 'a\n');
+    accept('T2', 'b.txt', 'b\n');
+    for (const meanwhile of [
+      () => commitIn(runWt(), 'other.txt', 'x\n', 'someone else'),
+      () => g(runWt(), 'merge', '--no-ff', '--no-commit', 'task/T2'),
+    ]) {
+      let done = false;
+      // The first git call made while this attempt holds merging.json: someone else acts just before it.
+      const wrapped = (dir: string) => (a: string[]) => { if (!done && existsSync(mergingFile(root))) { done = true; meanwhile(); } return defaultGit(dir)(a); };
+      const r = out(swarmCommand(['integrate', 'T1'], io, hooked(() => undefined, wrapped)));
+      expect(done).toBe(true);
+      expect(r).toMatchObject({ result: 'run-dirty', detail: expect.stringContaining('while this integration was starting') });
+      expect(existsSync(mergingFile(root))).toBe(false);
+      expect(g(runWt(), 'log', '--format=%s')).not.toContain('forge: integrate T1');
+      expect(readExecution(root)!.tasks.T1.status).toBe('accepted');
+    }
+    // The merge someone else started is theirs: left as it was.
+    expect(g(runWt(), 'rev-parse', 'MERGE_HEAD')).toBe(g(runWt(), 'rev-parse', 'task/T2'));
+  });
   it('a live attempt merging in another directory holds the marker too: the integration waits and leaves it as it was', () => {
     accept('T1', 'a.txt', 'a\n');
     const pre = g(runWt(), 'rev-parse', 'HEAD');
@@ -928,9 +948,8 @@ describe('an integration left half-done (D-07)', () => {
     const live = { task: 'T2', pre: g(runWt(), 'rev-parse', 'HEAD'), ref: 'task/T2', startedAt: '2026-10-12T11:59:00.000Z', staleAt: later, dir: dirOf(runWt()), phase: 'baseline' };
     marker({ ...live, pid: process.ppid });
     const before = readFileSync(mergingFile(root), 'utf8');
-    const r = run(['swarm', 'merge', '--yes'], io);
-    expect(r.code).toBe(2);
-    expect(r.stderr).toContain(`swarm merge: an integration (T2, pid ${process.ppid}) is merging in`);
+    // A JSON result, as main-dirty is, not a usage error.
+    expect(out(run(['swarm', 'merge', '--yes'], io))).toMatchObject({ result: 'busy', detail: expect.stringContaining(`an integration (T2, pid ${process.ppid}) is merging in`) });
     expect(readFileSync(mergingFile(root), 'utf8')).toBe(before);
     expect(git('log', '-1', '--format=%s')).toBe('init');
     // Once its process is gone, the merge goes on.

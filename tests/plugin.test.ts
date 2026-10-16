@@ -1199,6 +1199,14 @@ describe('plugin layout', () => {
     expect(runRef('task-steps')).toContain('--dir .forge/work/T/reviews-<n>-<round>');
     expect(runRef('execution')).toContain('it needs only that `brief-1.md` and its implementer');
   });
+  it('the carries of wave 1c reach the text: safePath, the moved base file, swarm merge busy and route set --why-file (W1c final fix wave, group D)', () => {
+    expect(runRef('decisions')).toContain('"safePath"');
+    for (const ref of ['resuming', 'task-steps']) expect(runRef(ref), ref).toContain('base-<n>.json');
+    const exec = runRef('execution');
+    for (const w of ['`busy`', 'neither move the base nor re-run that baseline yourself']) expect(exec, w).toContain(w);
+    expect(runRef('step')).toContain('attended, ask the person whether to stop the run');
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) expect(read(f), f).toContain('[--why-file f]');
+  });
   it('READMEs describe wave 1c: swarm step, background jobs and the lock, a clean session, verify-close, setup, the routing probe and delicate', () => {
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
       const md = read(f);

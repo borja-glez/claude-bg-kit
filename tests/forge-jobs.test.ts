@@ -89,6 +89,19 @@ describe('the forge Stop hook and the jobs (C-03, Review Focus 2)', () => {
     expect(blocks()).toBe(true);
     expect(jobFiles()).toEqual([]);
   });
+  it('waits about 2 s for an execution.lock a live process holds, then lets the session stop without blocking or writing', () => {
+    saveExecution(root, {
+      runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,
+      coordinator: 'main', hookSession: 's1', active: true, stopReason: null, stallReason: null, startedAt: T, lastStepAt: null, lastBlockStep: null, sleepUntil: null, tasks: {},
+    });
+    const before = readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8');
+    writeFileSync(path.join(root, '.forge', 'execution.lock'), JSON.stringify({ pid: process.pid, at: T }));
+    let sleeps = 0;
+    const r = run(['hook', 'stop'], { cwd: root, now, sleep: () => { sleeps++; }, env: {}, stdin: JSON.stringify({ session_id: 's1' }) });
+    expect(r).toMatchObject({ code: 0, stdout: '' });
+    expect(sleeps).toBe(40);
+    expect(readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8')).toBe(before);
+  });
 });
 
 describe('--out (C-03)', () => {

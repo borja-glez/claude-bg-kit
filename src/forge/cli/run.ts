@@ -455,6 +455,9 @@ function stopContext(cwd: string, now: Date): StopContext {
   };
 }
 
+/** How long the Stop hook waits for execution.lock: a hook must not hold the session (the CLI waits LOCK_WAIT_MS). */
+const HOOK_LOCK_WAIT_MS = 2000;
+
 // The Stop hook: fail-open (any error prints nothing); prints a block or nothing. An active infinite run decides first
 // (an execution runs inside its cycles); otherwise an active execution decides.
 function hookStop(io: Io): string {
@@ -485,10 +488,14 @@ function hookStop(io: Io): string {
     const jobs = sid ? liveJobs(main, io.now()).filter(j => j.session === null || j.session === sid) : [];
     const d = decideExecutionStop(hookInput, exec, { now: io.now(), stopFile: existsSync(stopFile(main)), jobs });
     if (!d.block) return '';
-    // Under the lock, only what the hook decided: a swarm step or an integrate that wrote meanwhile is kept (I-15).
-    updateExecution(main, cur => (cur && cur.runId === d.exec.runId
-      ? { ...cur, lastBlockStep: d.exec.lastBlockStep, ...(d.ended ? { active: false, stopReason: d.exec.stopReason, sleepUntil: null } : {}) }
-      : null), { now: io.now, sleep: io.sleep });
+    // Under the lock, only what the hook decided: a swarm step or an integrate that wrote meanwhile is kept (I-15). A
+    // hook never keeps the session waiting: a lock a live process holds for HOOK_LOCK_WAIT_MS lets it stop as if no
+    // block were needed (that process is a step or an integrate of this run, and its end wakes the session).
+    try {
+      updateExecution(main, cur => (cur && cur.runId === d.exec.runId
+        ? { ...cur, lastBlockStep: d.exec.lastBlockStep, ...(d.ended ? { active: false, stopReason: d.exec.stopReason, sleepUntil: null } : {}) }
+        : null), { now: io.now, sleep: io.sleep, waitMs: HOOK_LOCK_WAIT_MS });
+    } catch (e) { if (e instanceof UsageError) return ''; throw e; }
     // Only an active run speaks for the person: here none is (it decides above).
     return JSON.stringify({ decision: 'block', reason: d.reason + (sessionReply(null, d.exec, () => planLocale(main, d.exec.project)) ?? replyIn(null)) }) + '\n';
   } catch { return ''; }
@@ -710,8 +717,9 @@ function triageCore(io: Io, args: string[]): TriageCore {
 /**
  * K1-01: a probe leaves nothing behind. When .forge/ holds only work/<task>/task.txt (the request the skill wrote for
  * it) and no .gitignore, that file and its empty directories go; anything else there, or a text file elsewhere, stays.
+ * True once the task file is gone (the skill writes it again for forge:run), even when a directory then stays.
  */
-function cleanProbe(cwd: string, task: string, textFile: string): boolean {
+export function cleanProbe(cwd: string, task: string, textFile: string, rmdir: (dir: string) => void = rmdirSync): boolean {
   const dir = path.join(cwd, '.forge');
   const file = path.join(dir, 'work', task, 'task.txt');
   if (!samePath(path.resolve(cwd, textFile), file)) return false;
@@ -729,9 +737,9 @@ function cleanProbe(cwd: string, task: string, textFile: string): boolean {
     walk(dir, '');
     if (entries.sort().join('\n') !== ['work/', `work/${task}/`, `work/${task}/task.txt`].join('\n')) return false;
     rmSync(file);
-    for (const d of [path.join(dir, 'work', task), path.join(dir, 'work'), dir]) rmdirSync(d);
-    return true;
   } catch { return false; }
+  try { for (const d of [path.join(dir, 'work', task), path.join(dir, 'work'), dir]) rmdir(d); } catch { /* an empty directory stays: nothing of the person's */ }
+  return true;
 }
 
 /** C-03: the commands that run as a job with --out, and the task each works on. */
@@ -1590,12 +1598,13 @@ function runCommand(argv: string[], io: Io): Result {
           // K1-08: «remember it» keeps the choice as the project's workflow in local.yaml (`off` for none); none without it
           // writes nothing at all: no route.json and no decision.
           const remembered: Workflow | null = has('remember') ? (chosen === 'none' ? 'off' : chosen as Workflow) : null;
-          if (remembered) updateLocal(io.cwd, s => ({ ...s, workflow: remembered }));
-          if (chosen === 'none') return json({ written: false, ...(remembered ? { remembered } : {}) });
+          // Every input is read before anything is written: a --why-file that cannot be read leaves local.yaml alone.
           let why = by === 'user' ? 'the user chose it' : 'the recommended option for this request';
           if (flag('why-file') !== undefined) {
             try { why = readFileSync(path.resolve(io.cwd, flag('why-file')!), 'utf8').trim() || why; } catch { throw new UsageError('route set: cannot read --why-file'); }
           }
+          if (remembered) updateLocal(io.cwd, s => ({ ...s, workflow: remembered }));
+          if (chosen === 'none') return json({ written: false, ...(remembered ? { remembered } : {}) });
           const doc: RouteDoc = { task, chosen: chosen as RouteOption, by, stage: firstStage(chosen as RouteOption, files), ts: ts(), ...files, ...(session ? { session } : {}) };
           writeRoute(io.cwd, doc);
           // The route is a decision like any other: by the user when asked, by auto mode otherwise (spec §5.5).
@@ -1627,13 +1636,20 @@ function runCommand(argv: string[], io: Io): Result {
         if (has('text-file') && flag('text-file') === undefined) throw new UsageError('route: --text-file needs a file');
         // K1-01: with the request's text, a triage that writes nothing (no ledger, status.json nor local.yaml) gives the path.
         const textFile = flag('text-file');
-        const probed = textFile !== undefined ? triageCore(io, ['--task', task, '--text-file', textFile, ...(loc ? ['--locale', loc] : [])]) : null;
-        const p = flag('path') ?? probed?.result.path;
-        if (!p || !(PATH_ORDER as readonly string[]).includes(p)) throw new UsageError(`route: --path must be one of ${PATH_ORDER.join('|')}`);
-        const wf = flag('workflow');
-        const au = flag('autonomy');
-        if (wf !== undefined && !isWorkflow(wf)) throw new UsageError(`route: --workflow must be one of ${WORKFLOWS.join('|')}`);
-        if (au !== undefined && !isAutonomy(au)) throw new UsageError(`route: --autonomy must be one of ${AUTONOMIES.join('|')}`);
+        const inputs = () => {
+          const probed = textFile !== undefined ? triageCore(io, ['--task', task, '--text-file', textFile, ...(loc ? ['--locale', loc] : [])]) : null;
+          const p = flag('path') ?? probed?.result.path;
+          if (!p || !(PATH_ORDER as readonly string[]).includes(p)) throw new UsageError(`route: --path must be one of ${PATH_ORDER.join('|')}`);
+          const wf = flag('workflow');
+          const au = flag('autonomy');
+          if (wf !== undefined && !isWorkflow(wf)) throw new UsageError(`route: --workflow must be one of ${WORKFLOWS.join('|')}`);
+          if (au !== undefined && !isAutonomy(au)) throw new UsageError(`route: --autonomy must be one of ${AUTONOMIES.join('|')}`);
+          return { probed, p, wf, au };
+        };
+        let got: ReturnType<typeof inputs>;
+        // A probe that exits 2 (an empty text, a bad --path, --workflow or --autonomy) leaves nothing behind either.
+        try { got = inputs(); } catch (e) { if (textFile !== undefined && e instanceof UsageError) cleanProbe(io.cwd, task, textFile); throw e; }
+        const { probed, p, wf, au } = got;
         const prefs = resolvePrefs({ ...(wf ? { workflow: wf } : {}), ...(au ? { autonomy: au } : {}) }, readLocal(io.cwd), loadConfig(repoDir));
         const sp = superpowersOf(io, repoDir);
         const now = io.now().getTime();
@@ -1646,9 +1662,12 @@ function runCommand(argv: string[], io: Io): Result {
         const stepAside = PATH_ORDER.indexOf(effective) <= PATH_ORDER.indexOf('small') && prefs.workflow !== 'forge';
         const askLocale: 'es' | 'en' = loc === 'es' || loc === 'en' ? loc : (planLocale(io.cwd) ?? '').toLowerCase().split(/[-_]/)[0] === 'es' ? 'es' : 'en';
         const cleaned = cleanProbe(io.cwd, task, textFile!);
+        // A workflow pinned to a superpowers option that is not installed cannot be applied: the person is asked
+        // (route/SKILL.md «say so and ask as below»), as when nothing is pinned.
+        const unavailable = prefs.workflow.startsWith('superpowers') && !sp.installed;
         return json({
           ...options, probe: { path: probed.result.path, reasons: probed.result.reasons, sensitive: probed.result.sensitive, files: probed.result.files, announce: probed.output.announce },
-          stepAside, ask: prefs.workflow !== 'ask' || prefs.autonomy === 'auto' ? null : routeAsk(options, askLocale), cleaned,
+          stepAside, ask: (prefs.workflow !== 'ask' && !unavailable) || prefs.autonomy === 'auto' ? null : routeAsk(options, askLocale), cleaned,
         });
       }
       case 'tdd':

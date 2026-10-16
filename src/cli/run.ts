@@ -591,7 +591,7 @@ function runHook(sub: string | undefined, io: Io): string {
       return st.status === 'in_progress' || st.status === 'claimed' ? t : null;
     } catch { return null; }
   };
-  const head =(): string => execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  const head = (): string => execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   const headFile = path.join(wp, 'last-head');
   switch (sub) {
     case 'session-start': {

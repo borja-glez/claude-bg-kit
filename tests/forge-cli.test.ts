@@ -2181,4 +2181,12 @@ describe('forge stats (C-09)', () => {
     mkdirSync(path.join(root, 'empty'));
     expect(JSON.parse(run(['setup', '--cwd', 'empty'], io).stdout)).toEqual({ setup: null });
   });
+  it('setup reports an install that fails: ok false and the tail of its output (J-17)', () => {
+    writeFileSync(path.join(root, 'package.json'), '{}');
+    writeFileSync(path.join(root, 'package-lock.json'), '{}');
+    const exec = () => ({ code: 1, output: 'npm ERR! code ENOTFOUND\nnpm ERR! network request failed\n', ms: 1, timedOut: false });
+    const r = run(['setup'], { ...io, exec });
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toEqual({ setup: { cmd: 'npm ci', ok: false, tail: ['npm ERR! code ENOTFOUND', 'npm ERR! network request failed'] } });
+  });
 });
