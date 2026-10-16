@@ -7361,11 +7361,11 @@ var require_dist = __commonJS({
 });
 
 // src/forge/cli/main.ts
-var import_node_fs27 = require("node:fs");
+var import_node_fs28 = require("node:fs");
 
 // src/forge/cli/run.ts
 var import_node_child_process2 = require("node:child_process");
-var import_node_fs26 = require("node:fs");
+var import_node_fs27 = require("node:fs");
 var import_node_os2 = require("node:os");
 var import_node_path28 = __toESM(require("node:path"), 1);
 
@@ -7884,7 +7884,7 @@ function decideStop(input, run2, ctx) {
 }
 
 // src/forge/execution.ts
-var import_node_fs4 = require("node:fs");
+var import_node_fs5 = require("node:fs");
 var import_node_path4 = __toESM(require("node:path"), 1);
 
 // src/forge/cli/errors.ts
@@ -7892,6 +7892,31 @@ var UsageError = class extends Error {
 };
 
 // src/forge/pid.ts
+var import_node_fs3 = require("node:fs");
+function removeFileIf(file, text2) {
+  const aside = `${file}.${process.pid}.gone`;
+  try {
+    (0, import_node_fs3.renameSync)(file, aside);
+  } catch {
+    return false;
+  }
+  let moved = null;
+  try {
+    moved = (0, import_node_fs3.readFileSync)(aside, "utf8");
+  } catch {
+    moved = null;
+  }
+  if (moved === text2) {
+    (0, import_node_fs3.rmSync)(aside, { force: true });
+    return true;
+  }
+  try {
+    (0, import_node_fs3.copyFileSync)(aside, file, import_node_fs3.constants.COPYFILE_EXCL);
+  } catch {
+  }
+  (0, import_node_fs3.rmSync)(aside, { force: true });
+  return false;
+}
 function pidAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -7906,7 +7931,7 @@ function sleepSync(ms) {
 }
 
 // src/forge/swarm.ts
-var import_node_fs3 = require("node:fs");
+var import_node_fs4 = require("node:fs");
 var import_node_path3 = __toESM(require("node:path"), 1);
 
 // src/lib/swarm-state.ts
@@ -7983,9 +8008,9 @@ function parseSwarm(text2) {
 var swarmFile = (root) => import_node_path3.default.join(root, ".forge", "swarm.json");
 function readSwarm(root) {
   const file = swarmFile(root);
-  if (!(0, import_node_fs3.existsSync)(file)) return null;
+  if (!(0, import_node_fs4.existsSync)(file)) return null;
   try {
-    return parseSwarm((0, import_node_fs3.readFileSync)(file, "utf8"));
+    return parseSwarm((0, import_node_fs4.readFileSync)(file, "utf8"));
   } catch {
     return null;
   }
@@ -12362,18 +12387,40 @@ var taskBranch = (task) => `task/${task}`;
 var runWorktree = (root) => import_node_path4.default.join(root, ".claude", "worktrees", "run");
 var taskWorktree = (root, task) => import_node_path4.default.join(root, ".claude", "worktrees", `task-${task}`);
 function writeAtomic(file, text2) {
-  (0, import_node_fs4.mkdirSync)(import_node_path4.default.dirname(file), { recursive: true });
+  (0, import_node_fs5.mkdirSync)(import_node_path4.default.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   try {
-    (0, import_node_fs4.writeFileSync)(tmp, text2);
-    (0, import_node_fs4.renameSync)(tmp, file);
+    (0, import_node_fs5.writeFileSync)(tmp, text2);
+    (0, import_node_fs5.renameSync)(tmp, file);
   } finally {
-    (0, import_node_fs4.rmSync)(tmp, { force: true });
+    (0, import_node_fs5.rmSync)(tmp, { force: true });
   }
 }
 function saveExecution(root, e) {
   forgeDir(root);
   writeAtomic(executionFile(root), JSON.stringify(e, null, 2) + "\n");
+}
+function createIfAbsent(file, text2) {
+  (0, import_node_fs5.mkdirSync)(import_node_path4.default.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    (0, import_node_fs5.writeFileSync)(tmp, text2);
+    try {
+      (0, import_node_fs5.linkSync)(tmp, file);
+      return true;
+    } catch (e) {
+      if (e.code === "EEXIST") return false;
+    }
+  } finally {
+    (0, import_node_fs5.rmSync)(tmp, { force: true });
+  }
+  try {
+    (0, import_node_fs5.writeFileSync)(file, text2, { flag: "wx" });
+    return true;
+  } catch (e) {
+    if (e.code === "EEXIST") return false;
+    throw e;
+  }
 }
 var executionLock = (root) => import_node_path4.default.join(root, ".forge", "execution.lock");
 var LOCK_STALE_MS = 3e4;
@@ -12381,25 +12428,66 @@ var LOCK_RETRY_MS = 50;
 var LOCK_WAIT_MS = 1e4;
 function lockHolder(file) {
   try {
-    const o = JSON.parse((0, import_node_fs4.readFileSync)(file, "utf8"));
+    const o = JSON.parse((0, import_node_fs5.readFileSync)(file, "utf8"));
     return typeof o.pid === "number" && Number.isInteger(o.pid) && typeof o.at === "string" ? { pid: o.pid, at: o.at } : null;
   } catch {
     return null;
   }
 }
+function takeoverGate(root, d) {
+  const gate = `${executionLock(root)}.takeover`;
+  const mine = JSON.stringify({ pid: process.pid, at: d.now().toISOString() });
+  for (let tries = 0; tries < 2; tries++) {
+    try {
+      const fd = (0, import_node_fs5.openSync)(gate, "wx");
+      try {
+        (0, import_node_fs5.writeSync)(fd, mine);
+      } finally {
+        (0, import_node_fs5.closeSync)(fd);
+      }
+      return () => {
+        removeFileIf(gate, mine);
+      };
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+    }
+    let text2;
+    try {
+      text2 = (0, import_node_fs5.readFileSync)(gate, "utf8");
+    } catch {
+      continue;
+    }
+    let at2 = NaN;
+    try {
+      at2 = Date.parse(JSON.parse(text2).at ?? "");
+    } catch {
+      at2 = NaN;
+    }
+    if (!Number.isFinite(at2)) {
+      try {
+        at2 = (0, import_node_fs5.statSync)(gate).mtimeMs;
+      } catch {
+        continue;
+      }
+    }
+    if (d.now().getTime() - at2 < LOCK_STALE_MS) return null;
+    removeFileIf(gate, text2);
+  }
+  return null;
+}
 function acquireLock(root, d) {
   forgeDir(root);
   const file = executionLock(root);
-  const attempts = Math.ceil(LOCK_WAIT_MS / LOCK_RETRY_MS);
+  const attempts = Math.ceil(d.waitMs / LOCK_RETRY_MS);
   let holder = null;
   for (let i = 0; ; i++) {
     const mine = { pid: process.pid, at: d.now().toISOString() };
     try {
-      const fd = (0, import_node_fs4.openSync)(file, "wx");
+      const fd = (0, import_node_fs5.openSync)(file, "wx");
       try {
-        (0, import_node_fs4.writeSync)(fd, JSON.stringify(mine));
+        (0, import_node_fs5.writeSync)(fd, JSON.stringify(mine));
       } finally {
-        (0, import_node_fs4.closeSync)(fd);
+        (0, import_node_fs5.closeSync)(fd);
       }
       return mine;
     } catch (e) {
@@ -12411,14 +12499,23 @@ function acquireLock(root, d) {
     if (h) stale = !d.alive(h.pid) || !(d.now().getTime() - Date.parse(h.at) < LOCK_STALE_MS);
     else {
       try {
-        stale = d.now().getTime() - (0, import_node_fs4.statSync)(file).mtimeMs >= LOCK_STALE_MS;
+        stale = d.now().getTime() - (0, import_node_fs5.statSync)(file).mtimeMs >= LOCK_STALE_MS;
       } catch {
         stale = false;
       }
     }
-    if (stale && JSON.stringify(lockHolder(file)) === JSON.stringify(h)) {
-      (0, import_node_fs4.rmSync)(file, { force: true });
-      if (i < attempts) continue;
+    const release = stale ? takeoverGate(root, d) : null;
+    if (release) {
+      let removed = false;
+      try {
+        if (JSON.stringify(lockHolder(file)) === JSON.stringify(h)) {
+          (0, import_node_fs5.rmSync)(file, { force: true });
+          removed = true;
+        }
+      } finally {
+        release();
+      }
+      if (removed && i < attempts) continue;
     }
     if (i >= attempts) break;
     d.sleep(LOCK_RETRY_MS);
@@ -12427,10 +12524,10 @@ function acquireLock(root, d) {
 }
 function releaseLock(root, mine) {
   const h = lockHolder(executionLock(root));
-  if (h && h.pid === mine.pid && h.at === mine.at) (0, import_node_fs4.rmSync)(executionLock(root), { force: true });
+  if (h && h.pid === mine.pid && h.at === mine.at) (0, import_node_fs5.rmSync)(executionLock(root), { force: true });
 }
 function updateExecution(root, fn, deps = {}) {
-  const d = { now: deps.now ?? (() => /* @__PURE__ */ new Date()), sleep: deps.sleep ?? sleepSync, alive: deps.alive ?? pidAlive };
+  const d = { now: deps.now ?? (() => /* @__PURE__ */ new Date()), sleep: deps.sleep ?? sleepSync, alive: deps.alive ?? pidAlive, waitMs: deps.waitMs ?? LOCK_WAIT_MS };
   const mine = acquireLock(root, d);
   try {
     const next = fn(readExecution(root));
@@ -12442,18 +12539,23 @@ function updateExecution(root, fn, deps = {}) {
 }
 function readExecution(root) {
   const file = executionFile(root);
-  if ((0, import_node_fs4.existsSync)(file)) {
+  const read = () => {
     try {
-      return parseExecution((0, import_node_fs4.readFileSync)(file, "utf8"));
+      return parseExecution((0, import_node_fs5.readFileSync)(file, "utf8"));
     } catch {
       return null;
     }
-  }
+  };
+  if ((0, import_node_fs5.existsSync)(file)) return read();
   const old = readSwarm(root);
   if (!old) return null;
   const migrated = fromSwarm(old);
-  saveExecution(root, migrated);
-  (0, import_node_fs4.renameSync)(swarmFile(root), `${swarmFile(root)}.migrated`);
+  forgeDir(root);
+  if (!createIfAbsent(file, JSON.stringify(migrated, null, 2) + "\n")) return read();
+  try {
+    (0, import_node_fs5.renameSync)(swarmFile(root), `${swarmFile(root)}.migrated`);
+  } catch {
+  }
   return migrated;
 }
 function writePublicTask(root, p) {
@@ -12461,7 +12563,7 @@ function writePublicTask(root, p) {
 }
 
 // src/lib/locale.ts
-var import_node_fs5 = require("node:fs");
+var import_node_fs6 = require("node:fs");
 var import_node_path5 = __toESM(require("node:path"), 1);
 var import_yaml2 = __toESM(require_dist(), 1);
 var NAMES = {
@@ -12491,11 +12593,11 @@ function sessionReply(run2, exec, plan) {
 function planLocale(root, project) {
   try {
     const docs = import_node_path5.default.join(root, "docs", "waypoint");
-    const projects = project ? [project] : (0, import_node_fs5.readdirSync)(docs, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+    const projects = project ? [project] : (0, import_node_fs6.readdirSync)(docs, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
     for (const p of projects) {
       const file = import_node_path5.default.join(docs, p, "plan.yaml");
-      if (!(0, import_node_fs5.existsSync)(file)) continue;
-      const raw = (0, import_yaml2.parse)((0, import_node_fs5.readFileSync)(file, "utf8"));
+      if (!(0, import_node_fs6.existsSync)(file)) continue;
+      const raw = (0, import_yaml2.parse)((0, import_node_fs6.readFileSync)(file, "utf8"));
       const locale = raw && typeof raw === "object" && !Array.isArray(raw) ? raw.locale : null;
       return isLocale(locale) ? locale : null;
     }
@@ -13033,7 +13135,7 @@ function renderThreatModel(tm) {
 }
 
 // src/forge/config.ts
-var import_node_fs6 = require("node:fs");
+var import_node_fs7 = require("node:fs");
 var import_node_path8 = __toESM(require("node:path"), 1);
 var import_yaml3 = __toESM(require_dist(), 1);
 
@@ -13139,7 +13241,7 @@ function configValue(config, key) {
 }
 function loadConfig(root) {
   const file = import_node_path8.default.join(root, ".forge", "config.yaml");
-  return parseConfig((0, import_node_fs6.existsSync)(file) ? (0, import_node_fs6.readFileSync)(file, "utf8") : null);
+  return parseConfig((0, import_node_fs7.existsSync)(file) ? (0, import_node_fs7.readFileSync)(file, "utf8") : null);
 }
 var SHIFT = {
   balanced: {},
@@ -13201,7 +13303,7 @@ function pairFindings(a, b) {
 }
 
 // src/forge/validators.ts
-var import_node_fs7 = require("node:fs");
+var import_node_fs8 = require("node:fs");
 var import_node_path9 = __toESM(require("node:path"), 1);
 var NPM_ORDER = [["typecheck", "typecheck"], ["type-check", "typecheck"], ["lint", "lint"], ["test", "test"], ["build", "build"]];
 var PLACEHOLDER_TEST = /no test specified/i;
@@ -13210,7 +13312,7 @@ function onPath(name) {
   const exts = win ? ["", ...(process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";").filter(Boolean)] : [""];
   return (process.env.PATH ?? "").split(import_node_path9.default.delimiter).filter(Boolean).filter((dir) => !(win && /[\\/]WindowsApps[\\/]?$/i.test(dir))).some((dir) => exts.some((ext) => {
     try {
-      return (0, import_node_fs7.existsSync)(import_node_path9.default.join(dir, name + ext));
+      return (0, import_node_fs8.existsSync)(import_node_path9.default.join(dir, name + ext));
     } catch {
       return false;
     }
@@ -13887,7 +13989,7 @@ function synthesize(reviews, weights, validatorsOk, failingValidators = [], opts
 }
 
 // src/forge/proposals.ts
-var import_node_fs8 = require("node:fs");
+var import_node_fs9 = require("node:fs");
 var import_node_path10 = __toESM(require("node:path"), 1);
 
 // src/lib/proposals.ts
@@ -13966,17 +14068,17 @@ function proposalId(now, rand) {
 }
 function saveProposal(root, id2, doc) {
   forgeDir(root);
-  (0, import_node_fs8.mkdirSync)(dirOf(root), { recursive: true });
-  (0, import_node_fs8.writeFileSync)(import_node_path10.default.join(dirOf(root), `${id2}.json`), JSON.stringify(doc, null, 2) + "\n");
+  (0, import_node_fs9.mkdirSync)(dirOf(root), { recursive: true });
+  (0, import_node_fs9.writeFileSync)(import_node_path10.default.join(dirOf(root), `${id2}.json`), JSON.stringify(doc, null, 2) + "\n");
 }
 function loadProposal(root, id2) {
   return loadOne(root, id2);
 }
 function loadOne(root, id2) {
   const file = import_node_path10.default.join(dirOf(root), `${id2}.json`);
-  if (!(0, import_node_fs8.existsSync)(file)) return null;
+  if (!(0, import_node_fs9.existsSync)(file)) return null;
   try {
-    return normalizeProposal(JSON.parse((0, import_node_fs8.readFileSync)(file, "utf8")));
+    return normalizeProposal(JSON.parse((0, import_node_fs9.readFileSync)(file, "utf8")));
   } catch {
     return null;
   }
@@ -13984,7 +14086,7 @@ function loadOne(root, id2) {
 function loadProposals(root) {
   let names2 = [];
   try {
-    names2 = (0, import_node_fs8.readdirSync)(dirOf(root));
+    names2 = (0, import_node_fs9.readdirSync)(dirOf(root));
   } catch {
     return [];
   }
@@ -14040,13 +14142,13 @@ function claudeSessionId(flag, env = process.env) {
 var noClaudeSession = (cmd, flagName) => `${cmd}: no Claude session id: pass ${flagName} <id> or run it from Claude Code (CLAUDE_CODE_SESSION_ID)`;
 
 // src/forge/cli/swarm.ts
-var import_node_fs17 = require("node:fs");
+var import_node_fs18 = require("node:fs");
 var import_node_path19 = __toESM(require("node:path"), 1);
 var import_node_crypto4 = require("node:crypto");
 
 // src/forge/validate-cache.ts
 var import_node_crypto2 = require("node:crypto");
-var import_node_fs9 = require("node:fs");
+var import_node_fs10 = require("node:fs");
 var import_node_path11 = __toESM(require("node:path"), 1);
 var LOCKFILES = ["package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb", "Cargo.lock", "go.sum", "poetry.lock", "uv.lock", "Pipfile.lock", "packages.lock.json"];
 var MAX_ENTRIES = 500;
@@ -14098,7 +14200,7 @@ function readCached(main, key) {
   if (!KEY.test(key)) return null;
   let x;
   try {
-    x = JSON.parse((0, import_node_fs9.readFileSync)(import_node_path11.default.join(cacheDir(main), `${key}.json`), "utf8"));
+    x = JSON.parse((0, import_node_fs10.readFileSync)(import_node_path11.default.join(cacheDir(main), `${key}.json`), "utf8"));
   } catch {
     return null;
   }
@@ -14113,12 +14215,12 @@ function writeCached(main, key, r2) {
   const tmp = `${file}.${process.pid}.tmp`;
   try {
     forgeDir(main);
-    (0, import_node_fs9.mkdirSync)(cacheDir(main), { recursive: true });
-    (0, import_node_fs9.writeFileSync)(tmp, JSON.stringify(r2) + "\n");
-    (0, import_node_fs9.renameSync)(tmp, file);
+    (0, import_node_fs10.mkdirSync)(cacheDir(main), { recursive: true });
+    (0, import_node_fs10.writeFileSync)(tmp, JSON.stringify(r2) + "\n");
+    (0, import_node_fs10.renameSync)(tmp, file);
   } catch {
     try {
-      (0, import_node_fs9.rmSync)(tmp, { force: true });
+      (0, import_node_fs10.rmSync)(tmp, { force: true });
     } catch {
     }
   }
@@ -14127,7 +14229,7 @@ function pruneCache(main, max = MAX_ENTRIES) {
   const dir = cacheDir(main);
   let files;
   try {
-    files = (0, import_node_fs9.readdirSync)(dir).filter((f) => f.endsWith(".json")).map((f) => ({ f, t: (0, import_node_fs9.statSync)(import_node_path11.default.join(dir, f)).mtimeMs }));
+    files = (0, import_node_fs10.readdirSync)(dir).filter((f) => f.endsWith(".json")).map((f) => ({ f, t: (0, import_node_fs10.statSync)(import_node_path11.default.join(dir, f)).mtimeMs }));
   } catch {
     return;
   }
@@ -14135,7 +14237,7 @@ function pruneCache(main, max = MAX_ENTRIES) {
   files.sort((a, b) => a.t - b.t);
   for (const { f } of files.slice(0, files.length - max)) {
     try {
-      (0, import_node_fs9.rmSync)(import_node_path11.default.join(dir, f), { force: true });
+      (0, import_node_fs10.rmSync)(import_node_path11.default.join(dir, f), { force: true });
     } catch {
     }
   }
@@ -14199,7 +14301,7 @@ function runWithCache(list, run2, ctx) {
 }
 
 // src/forge/jobs.ts
-var import_node_fs10 = require("node:fs");
+var import_node_fs11 = require("node:fs");
 var import_node_path12 = __toESM(require("node:path"), 1);
 var noSlot = (fn) => fn();
 var JOB_MAX_AGE_MS = 2 * 36e5;
@@ -14209,13 +14311,13 @@ var MAX_JOB_FILES = 200;
 var NAME2 = /^[A-Za-z0-9_.-]{1,120}$/;
 var jobsDir = (main) => import_node_path12.default.join(main, ".forge", "jobs");
 function writeJsonAtomic(file, value) {
-  (0, import_node_fs10.mkdirSync)(import_node_path12.default.dirname(file), { recursive: true });
+  (0, import_node_fs11.mkdirSync)(import_node_path12.default.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   try {
-    (0, import_node_fs10.writeFileSync)(tmp, JSON.stringify(value, null, 2) + "\n");
-    (0, import_node_fs10.renameSync)(tmp, file);
+    (0, import_node_fs11.writeFileSync)(tmp, JSON.stringify(value, null, 2) + "\n");
+    (0, import_node_fs11.renameSync)(tmp, file);
   } finally {
-    (0, import_node_fs10.rmSync)(tmp, { force: true });
+    (0, import_node_fs11.rmSync)(tmp, { force: true });
   }
 }
 function normalizeJob(x) {
@@ -14245,7 +14347,7 @@ function writeJob(main, job) {
 function liveJobs(main, now, alive = pidAlive) {
   let names2 = [];
   try {
-    names2 = (0, import_node_fs10.readdirSync)(jobsDir(main)).filter((f) => f.endsWith(".json")).slice(0, MAX_JOB_FILES);
+    names2 = (0, import_node_fs11.readdirSync)(jobsDir(main)).filter((f) => f.endsWith(".json")).slice(0, MAX_JOB_FILES);
   } catch {
     return [];
   }
@@ -14254,14 +14356,14 @@ function liveJobs(main, now, alive = pidAlive) {
     const file = import_node_path12.default.join(jobsDir(main), f);
     let job = null;
     try {
-      job = normalizeJob(JSON.parse((0, import_node_fs10.readFileSync)(file, "utf8")));
+      job = normalizeJob(JSON.parse((0, import_node_fs11.readFileSync)(file, "utf8")));
     } catch {
       job = null;
     }
     if (!job) continue;
     if (!alive(job.pid) || now.getTime() - Date.parse(job.startedAt) > JOB_MAX_AGE_MS) {
       try {
-        (0, import_node_fs10.rmSync)(file, { force: true });
+        (0, import_node_fs11.rmSync)(file, { force: true });
       } catch {
       }
       continue;
@@ -14282,8 +14384,65 @@ function withJob(main, spec, fn) {
   try {
     return fn(job);
   } finally {
-    if (file) (0, import_node_fs10.rmSync)(file, { force: true });
+    if (file) (0, import_node_fs11.rmSync)(file, { force: true });
   }
+}
+var stepLockFile = (main) => import_node_path12.default.join(jobsDir(main), "step.lock");
+var STEP_LOCK_UNREADABLE_MS = 3e4;
+function takeStepLock(main, now, alive = pidAlive) {
+  const file = stepLockFile(main);
+  const holder = (text3) => {
+    try {
+      const o = JSON.parse(text3 ?? "");
+      return typeof o.pid === "number" && Number.isInteger(o.pid) && o.pid > 0 && typeof o.startedAt === "string" && Number.isFinite(Date.parse(o.startedAt)) ? { pid: o.pid, startedAt: o.startedAt } : null;
+    } catch {
+      return null;
+    }
+  };
+  const mine = JSON.stringify({ pid: process.pid, startedAt: now.toISOString() }) + "\n";
+  forgeDir(main);
+  (0, import_node_fs11.mkdirSync)(jobsDir(main), { recursive: true });
+  for (let tries = 0; tries < 2; tries++) {
+    try {
+      const fd = (0, import_node_fs11.openSync)(file, "wx");
+      try {
+        (0, import_node_fs11.writeSync)(fd, mine);
+      } finally {
+        (0, import_node_fs11.closeSync)(fd);
+      }
+      return { release: () => {
+        removeFileIf(file, mine);
+      } };
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+    }
+    let text3;
+    try {
+      text3 = (0, import_node_fs11.readFileSync)(file, "utf8");
+    } catch {
+      continue;
+    }
+    const h2 = holder(text3);
+    let stands;
+    if (h2) stands = h2.pid !== process.pid && alive(h2.pid) && now.getTime() - Date.parse(h2.startedAt) <= JOB_MAX_AGE_MS;
+    else {
+      try {
+        stands = now.getTime() - (0, import_node_fs11.statSync)(file).mtimeMs < STEP_LOCK_UNREADABLE_MS;
+      } catch {
+        stands = false;
+      }
+    }
+    if (stands) return { busy: { pid: h2?.pid ?? null, startedAt: h2?.startedAt ?? null } };
+    removeFileIf(file, text3);
+  }
+  let text2 = null;
+  try {
+    text2 = (0, import_node_fs11.readFileSync)(file, "utf8");
+  } catch {
+    text2 = null;
+  }
+  const h = holder(text2);
+  return { busy: { pid: h?.pid ?? null, startedAt: h?.startedAt ?? null } };
 }
 var before = (a, b) => a.startedAt < b.startedAt || a.startedAt === b.startedAt && a.name < b.name;
 function slotFor(main, job, max, deps) {
@@ -14317,7 +14476,7 @@ function slotFor(main, job, max, deps) {
 }
 
 // src/forge/merging.ts
-var import_node_fs11 = require("node:fs");
+var import_node_fs12 = require("node:fs");
 var import_node_path13 = __toESM(require("node:path"), 1);
 var mergingFile = (main) => import_node_path13.default.join(main, ".forge", "execution", "merging.json");
 var MERGING_UNREADABLE_MS = 3e4;
@@ -14345,13 +14504,13 @@ function readMergingFile(main) {
   const file = mergingFile(main);
   let text2;
   try {
-    text2 = (0, import_node_fs11.readFileSync)(file, "utf8");
+    text2 = (0, import_node_fs12.readFileSync)(file, "utf8");
   } catch {
     return null;
   }
   let mtimeMs = 0;
   try {
-    mtimeMs = (0, import_node_fs11.statSync)(file).mtimeMs;
+    mtimeMs = (0, import_node_fs12.statSync)(file).mtimeMs;
   } catch {
   }
   return { text: text2, doc: parseMerging(text2), mtimeMs };
@@ -14371,29 +14530,7 @@ function mergeInFlight(main, now, alive = pidAlive) {
   return r2 && mergingStands(r2, now, alive) ? r2 : null;
 }
 function removeMergingIf(main, text2) {
-  const file = mergingFile(main);
-  const aside = `${file}.${process.pid}.gone`;
-  try {
-    (0, import_node_fs11.renameSync)(file, aside);
-  } catch {
-    return false;
-  }
-  let moved = null;
-  try {
-    moved = (0, import_node_fs11.readFileSync)(aside, "utf8");
-  } catch {
-    moved = null;
-  }
-  if (moved === text2) {
-    (0, import_node_fs11.rmSync)(aside, { force: true });
-    return true;
-  }
-  try {
-    (0, import_node_fs11.copyFileSync)(aside, file, import_node_fs11.constants.COPYFILE_EXCL);
-  } catch {
-  }
-  (0, import_node_fs11.rmSync)(aside, { force: true });
-  return false;
+  return removeFileIf(mergingFile(main), text2);
 }
 function holding(main, first, firstText) {
   let doc = first;
@@ -14408,12 +14545,12 @@ function holding(main, first, firstText) {
       const file = mergingFile(main);
       const tmp = `${file}.${process.pid}.tmp`;
       try {
-        (0, import_node_fs11.writeFileSync)(tmp, nextText);
-        (0, import_node_fs11.renameSync)(tmp, file);
+        (0, import_node_fs12.writeFileSync)(tmp, nextText);
+        (0, import_node_fs12.renameSync)(tmp, file);
       } catch {
         return false;
       } finally {
-        (0, import_node_fs11.rmSync)(tmp, { force: true });
+        (0, import_node_fs12.rmSync)(tmp, { force: true });
       }
       doc = next;
       text2 = nextText;
@@ -14427,23 +14564,23 @@ function holding(main, first, firstText) {
 }
 function create(main, m) {
   const file = mergingFile(main);
-  (0, import_node_fs11.mkdirSync)(import_node_path13.default.dirname(file), { recursive: true });
+  (0, import_node_fs12.mkdirSync)(import_node_path13.default.dirname(file), { recursive: true });
   const text2 = JSON.stringify(m) + "\n";
   let fd;
   try {
-    fd = (0, import_node_fs11.openSync)(file, "wx");
+    fd = (0, import_node_fs12.openSync)(file, "wx");
   } catch (e) {
     if (e.code === "EEXIST") return null;
     throw e;
   }
   try {
-    (0, import_node_fs11.writeSync)(fd, text2);
+    (0, import_node_fs12.writeSync)(fd, text2);
   } catch (e) {
-    (0, import_node_fs11.closeSync)(fd);
-    (0, import_node_fs11.rmSync)(file, { force: true });
+    (0, import_node_fs12.closeSync)(fd);
+    (0, import_node_fs12.rmSync)(file, { force: true });
     throw e;
   }
-  (0, import_node_fs11.closeSync)(fd);
+  (0, import_node_fs12.closeSync)(fd);
   return text2;
 }
 function takeMerging(main, m, now, alive = pidAlive) {
@@ -14649,18 +14786,18 @@ function signalLiveness(ts, ended, now) {
 }
 
 // src/forge/live.ts
-var import_node_fs15 = require("node:fs");
+var import_node_fs16 = require("node:fs");
 var import_node_path17 = __toESM(require("node:path"), 1);
 
 // src/forge/local.ts
 var import_node_child_process = require("node:child_process");
-var import_node_fs13 = require("node:fs");
+var import_node_fs14 = require("node:fs");
 var import_node_path15 = __toESM(require("node:path"), 1);
 var import_yaml5 = __toESM(require_dist(), 1);
 
 // src/forge/surfaces.ts
 var import_node_crypto3 = require("node:crypto");
-var import_node_fs12 = require("node:fs");
+var import_node_fs13 = require("node:fs");
 var import_node_path14 = __toESM(require("node:path"), 1);
 var import_yaml4 = __toESM(require_dist(), 1);
 function surfaceHash(text2) {
@@ -14704,7 +14841,7 @@ function parseSurface(name, text2, learned) {
 function readSurfaces(root, learned) {
   let names2 = [];
   try {
-    names2 = (0, import_node_fs12.readdirSync)(import_node_path14.default.join(root, ".forge", "verify"));
+    names2 = (0, import_node_fs13.readdirSync)(import_node_path14.default.join(root, ".forge", "verify"));
   } catch {
     return [];
   }
@@ -14712,7 +14849,7 @@ function readSurfaces(root, learned) {
     const name = f.slice(0, -3);
     let text2 = "";
     try {
-      text2 = (0, import_node_fs12.readFileSync)(import_node_path14.default.join(root, ".forge", "verify", f), "utf8");
+      text2 = (0, import_node_fs13.readFileSync)(import_node_path14.default.join(root, ".forge", "verify", f), "utf8");
     } catch {
     }
     return parseSurface(name, text2, learned?.get(name));
@@ -14842,7 +14979,7 @@ var names = (x) => Array.isArray(x) ? [...new Set(x.filter((s2) => typeof s2 ===
 function readLocal(root) {
   let raw = null;
   try {
-    raw = (0, import_yaml5.parse)((0, import_node_fs13.readFileSync)(localFile(root), "utf8"));
+    raw = (0, import_yaml5.parse)((0, import_node_fs14.readFileSync)(localFile(root), "utf8"));
   } catch {
     raw = null;
   }
@@ -14876,8 +15013,8 @@ function writeLocal(root, s2) {
   forgeDir(mainCheckout(root));
   const file = localFile(root);
   const tmp = `${file}.${process.pid}.tmp`;
-  (0, import_node_fs13.writeFileSync)(tmp, (0, import_yaml5.stringify)(s2));
-  (0, import_node_fs13.renameSync)(tmp, file);
+  (0, import_node_fs14.writeFileSync)(tmp, (0, import_yaml5.stringify)(s2));
+  (0, import_node_fs14.renameSync)(tmp, file);
 }
 function updateLocal(root, fn) {
   const next = fn(readLocal(root));
@@ -14892,7 +15029,7 @@ function recordLearned(root, surface, lines, ts) {
   const file = import_node_path15.default.join(main, ".forge", "learned.jsonl");
   let lead = endsMidLine(file) ? "\n" : "";
   for (const l of lines) {
-    (0, import_node_fs13.appendFileSync)(file, `${lead}${JSON.stringify({ surface, digest: lineDigest(l), ts })}
+    (0, import_node_fs14.appendFileSync)(file, `${lead}${JSON.stringify({ surface, digest: lineDigest(l), ts })}
 `);
     lead = "";
   }
@@ -14901,7 +15038,7 @@ function readLearned(root) {
   const out = /* @__PURE__ */ new Map();
   let text2 = "";
   try {
-    text2 = (0, import_node_fs13.readFileSync)(learnedFile(root), "utf8");
+    text2 = (0, import_node_fs14.readFileSync)(learnedFile(root), "utf8");
   } catch {
     return out;
   }
@@ -14923,7 +15060,7 @@ function readLearned(root) {
 }
 
 // src/forge/members.ts
-var import_node_fs14 = require("node:fs");
+var import_node_fs15 = require("node:fs");
 var import_node_path16 = __toESM(require("node:path"), 1);
 
 // src/lib/forge-activity.ts
@@ -14953,7 +15090,7 @@ function normalizeMember(x) {
 function readMember(main, sessionId) {
   if (!isMemberId(sessionId)) return null;
   try {
-    const m = normalizeMember(JSON.parse((0, import_node_fs14.readFileSync)(memberFile(main, sessionId), "utf8")));
+    const m = normalizeMember(JSON.parse((0, import_node_fs15.readFileSync)(memberFile(main, sessionId), "utf8")));
     return m && m.sessionId === sessionId ? m : null;
   } catch {
     return null;
@@ -14965,19 +15102,19 @@ function writeMember(main, input) {
   if (m.hookSession !== null && !isMemberId(m.hookSession)) throw new Error(`invalid member hook session id: ${JSON.stringify(m.hookSession.slice(0, 130))}`);
   forgeDir(main);
   const file = memberFile(main, m.sessionId);
-  (0, import_node_fs14.mkdirSync)(import_node_path16.default.dirname(file), { recursive: true });
+  (0, import_node_fs15.mkdirSync)(import_node_path16.default.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   try {
-    (0, import_node_fs14.writeFileSync)(tmp, JSON.stringify(m, null, 2) + "\n");
-    (0, import_node_fs14.renameSync)(tmp, file);
+    (0, import_node_fs15.writeFileSync)(tmp, JSON.stringify(m, null, 2) + "\n");
+    (0, import_node_fs15.renameSync)(tmp, file);
   } finally {
-    (0, import_node_fs14.rmSync)(tmp, { force: true });
+    (0, import_node_fs15.rmSync)(tmp, { force: true });
   }
 }
 function listMembers(main, runId) {
   let names2 = [];
   try {
-    names2 = (0, import_node_fs14.readdirSync)(import_node_path16.default.join(main, ".forge", "members")).filter((f) => f.endsWith(".json"));
+    names2 = (0, import_node_fs15.readdirSync)(import_node_path16.default.join(main, ".forge", "members")).filter((f) => f.endsWith(".json"));
   } catch {
     return [];
   }
@@ -15025,7 +15162,7 @@ function hookLive(io, forced) {
     const file = liveFile(main, signalId);
     let prev = null;
     try {
-      prev = normalizeLive(JSON.parse((0, import_node_fs15.readFileSync)(file, "utf8")));
+      prev = normalizeLive(JSON.parse((0, import_node_fs16.readFileSync)(file, "utf8")));
     } catch {
       prev = null;
     }
@@ -15035,13 +15172,13 @@ function hookLive(io, forced) {
       { sessionId: signalId, role, runId: exec.runId, task: member?.task ?? null, now: io.now().toISOString() }
     );
     forgeDir(main);
-    (0, import_node_fs15.mkdirSync)(import_node_path17.default.dirname(file), { recursive: true });
+    (0, import_node_fs16.mkdirSync)(import_node_path17.default.dirname(file), { recursive: true });
     const tmp = `${file}.${process.pid}.tmp`;
     try {
-      (0, import_node_fs15.writeFileSync)(tmp, JSON.stringify(doc));
-      (0, import_node_fs15.renameSync)(tmp, file);
+      (0, import_node_fs16.writeFileSync)(tmp, JSON.stringify(doc));
+      (0, import_node_fs16.renameSync)(tmp, file);
     } finally {
-      (0, import_node_fs15.rmSync)(tmp, { force: true });
+      (0, import_node_fs16.rmSync)(tmp, { force: true });
     }
     if (event === "SessionStart" && !forced) {
       const running = Object.values(exec.tasks).filter((t) => t.status === "running").length;
@@ -15057,7 +15194,7 @@ function hookLive(io, forced) {
 }
 
 // src/forge/loose.ts
-var import_node_fs16 = require("node:fs");
+var import_node_fs17 = require("node:fs");
 var import_node_path18 = __toESM(require("node:path"), 1);
 var looseFile = (root) => import_node_path18.default.join(root, ".forge", "loose.json");
 var PATHS2 = ["trivial", "small", "medium"];
@@ -15121,18 +15258,18 @@ function statesOfLoose(e) {
 function writeLoose(root, doc) {
   forgeDir(root);
   const file = looseFile(root);
-  (0, import_node_fs16.mkdirSync)(import_node_path18.default.dirname(file), { recursive: true });
+  (0, import_node_fs17.mkdirSync)(import_node_path18.default.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   try {
-    (0, import_node_fs16.writeFileSync)(tmp, JSON.stringify(doc, null, 2) + "\n");
-    (0, import_node_fs16.renameSync)(tmp, file);
+    (0, import_node_fs17.writeFileSync)(tmp, JSON.stringify(doc, null, 2) + "\n");
+    (0, import_node_fs17.renameSync)(tmp, file);
   } finally {
-    (0, import_node_fs16.rmSync)(tmp, { force: true });
+    (0, import_node_fs17.rmSync)(tmp, { force: true });
   }
 }
 function readLoose(root, runId) {
   try {
-    const raw = JSON.parse((0, import_node_fs16.readFileSync)(looseFile(root), "utf8"));
+    const raw = JSON.parse((0, import_node_fs17.readFileSync)(looseFile(root), "utf8"));
     if (raw.runId !== runId) return null;
     const r2 = parseLooseTasks(raw.tasks);
     return "error" in r2 ? null : { runId, tasks: r2.tasks };
@@ -15147,9 +15284,9 @@ var TAKEOVER_MIN = 15;
 var MAX_SLEEP_S = 900;
 function readDocs(dir) {
   const out = {};
-  for (const f of (0, import_node_fs17.readdirSync)(dir).filter((x) => x.endsWith(".json"))) {
+  for (const f of (0, import_node_fs18.readdirSync)(dir).filter((x) => x.endsWith(".json"))) {
     try {
-      out[f.slice(0, -5)] = JSON.parse((0, import_node_fs17.readFileSync)(import_node_path19.default.join(dir, f), "utf8"));
+      out[f.slice(0, -5)] = JSON.parse((0, import_node_fs18.readFileSync)(import_node_path19.default.join(dir, f), "utf8"));
     } catch {
     }
   }
@@ -15188,12 +15325,12 @@ var hasLine = (text2, line2) => text2.split(/\r?\n/).some((l) => l.trim() === li
 function appendOnce(file, line2) {
   let text2 = "";
   try {
-    text2 = (0, import_node_fs17.readFileSync)(file, "utf8");
+    text2 = (0, import_node_fs18.readFileSync)(file, "utf8");
   } catch (e) {
     if (e.code !== "ENOENT") throw e;
   }
   if (hasLine(text2, line2)) return;
-  (0, import_node_fs17.appendFileSync)(file, `${text2 && !text2.endsWith("\n") ? "\n" : ""}${line2}
+  (0, import_node_fs18.appendFileSync)(file, `${text2 && !text2.endsWith("\n") ? "\n" : ""}${line2}
 `);
 }
 var toplevel = (at2) => at2.git(["rev-parse", "--show-toplevel"])?.trim() || null;
@@ -15202,7 +15339,7 @@ function workdirOf(at2) {
   return top ? import_node_path19.default.join(top, prefix ?? "") : null;
 }
 function commonDir(at2) {
-  const holdsHead = (d) => (0, import_node_fs17.existsSync)(import_node_path19.default.join(d, "HEAD"));
+  const holdsHead = (d) => (0, import_node_fs18.existsSync)(import_node_path19.default.join(d, "HEAD"));
   const lines = (s2) => (s2 ?? "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const first = lines(at2.git(["rev-parse", "--path-format=absolute", "--git-common-dir"]));
   if (first.length === 1 && import_node_path19.default.isAbsolute(first[0]) && holdsHead(first[0])) return import_node_path19.default.resolve(first[0]);
@@ -15215,7 +15352,7 @@ function infoFile(at2, name) {
   const dir = commonDir(at2);
   if (!dir) return null;
   const info = import_node_path19.default.join(dir, "info");
-  if (!(0, import_node_fs17.existsSync)(info)) (0, import_node_fs17.mkdirSync)(info);
+  if (!(0, import_node_fs18.existsSync)(info)) (0, import_node_fs18.mkdirSync)(info);
   return import_node_path19.default.join(info, name);
 }
 function excludeDeps(at2) {
@@ -15233,14 +15370,14 @@ function unionLearned(deps) {
     if (!top || !file) return { attributesError: "cannot find the git directory" };
     let text2 = "";
     try {
-      text2 = (0, import_node_fs17.readFileSync)(file, "utf8");
+      text2 = (0, import_node_fs18.readFileSync)(file, "utf8");
     } catch (e) {
       if (e.code !== "ENOENT") throw e;
     }
     if (hasLine(text2, LEARNED_UNION)) return {};
     let names2 = [];
     try {
-      names2 = (0, import_node_fs17.readdirSync)(import_node_path19.default.join(top, ".forge", "verify")).filter((f) => f.endsWith(".md")).slice(0, 200);
+      names2 = (0, import_node_fs18.readdirSync)(import_node_path19.default.join(top, ".forge", "verify")).filter((f) => f.endsWith(".md")).slice(0, 200);
     } catch {
     }
     const attrs = deps.git(["-C", top, "check-attr", "merge", "--", ...[...names2, "forge-union-probe.md"].map((n) => `.forge/verify/${n}`)]);
@@ -15277,7 +15414,7 @@ function runInstall(at2, cmd, timeoutSec) {
 var memoFile = (cacheDir2, dir) => import_node_path19.default.join(cacheDir2, "deps", `${(0, import_node_crypto4.createHash)("sha1").update(import_node_path19.default.resolve(dir)).digest("hex").slice(0, 16)}.json`);
 function readMemo(file) {
   try {
-    const o = JSON.parse((0, import_node_fs17.readFileSync)(file, "utf8"));
+    const o = JSON.parse((0, import_node_fs18.readFileSync)(file, "utf8"));
     if (!o || typeof o !== "object") return {};
     const s2 = o.failed?.setup;
     const failedOk = !!s2 && typeof s2.cmd === "string" && typeof s2.ok === "boolean" && Array.isArray(s2.tail) && s2.tail.every((l) => typeof l === "string");
@@ -15288,8 +15425,8 @@ function readMemo(file) {
 }
 function writeMemo(file, m) {
   try {
-    (0, import_node_fs17.mkdirSync)(import_node_path19.default.dirname(file), { recursive: true });
-    (0, import_node_fs17.writeFileSync)(file, JSON.stringify(m));
+    (0, import_node_fs18.mkdirSync)(import_node_path19.default.dirname(file), { recursive: true });
+    (0, import_node_fs18.writeFileSync)(file, JSON.stringify(m));
   } catch {
   }
 }
@@ -15317,7 +15454,7 @@ function worktreeHolding(porcelain, branch) {
 function loadPlanArg(io, planArg, sub) {
   if (!planArg) throw new UsageError(`swarm ${sub}: --plan is required`);
   try {
-    return parsePlan((0, import_node_fs17.readFileSync)(import_node_path19.default.resolve(io.cwd, planArg), "utf8"));
+    return parsePlan((0, import_node_fs18.readFileSync)(import_node_path19.default.resolve(io.cwd, planArg), "utf8"));
   } catch (e) {
     throw new UsageError(e instanceof PlanError ? `${planArg}: ${e.issues.join("; ")}` : `swarm ${sub}: cannot read ${planArg}`);
   }
@@ -15326,7 +15463,7 @@ function loadTasksArg(io, file, sub) {
   if (!file) throw new UsageError(`swarm ${sub}: --tasks is required for an ephemeral run`);
   let raw;
   try {
-    raw = JSON.parse((0, import_node_fs17.readFileSync)(import_node_path19.default.resolve(io.cwd, file), "utf8"));
+    raw = JSON.parse((0, import_node_fs18.readFileSync)(import_node_path19.default.resolve(io.cwd, file), "utf8"));
   } catch {
     throw new UsageError(`swarm ${sub}: cannot read ${file}`);
   }
@@ -15338,7 +15475,7 @@ function addTaskWorktree(deps, main, task, runBranch2) {
   const dir = taskWorktree(main, task);
   const branch = taskBranch(task);
   let setup = null;
-  if (!(0, import_node_fs17.existsSync)(dir)) {
+  if (!(0, import_node_fs18.existsSync)(dir)) {
     const g = (args) => deps.git(["-C", main, ...args]);
     const exists = g(["rev-parse", "--verify", "-q", `refs/heads/${branch}`]) !== null;
     const added = exists ? g(["worktree", "add", dir, branch]) : g(["worktree", "add", "-b", branch, dir, runBranch2]);
@@ -15371,7 +15508,7 @@ function readTickInput(io, deps, e, planArg, db, sub) {
   if (!db) throw new UsageError(`swarm ${sub}: --plan and --db are required`);
   const stateDir = import_node_path19.default.resolve(io.cwd, db, "state");
   const sessionsDir = import_node_path19.default.resolve(io.cwd, db, "sessions");
-  if (!(0, import_node_fs17.existsSync)(stateDir) || !(0, import_node_fs17.existsSync)(sessionsDir)) throw new UsageError(`swarm ${sub}: --db must hold the state and sessions listings`);
+  if (!(0, import_node_fs18.existsSync)(stateDir) || !(0, import_node_fs18.existsSync)(sessionsDir)) throw new UsageError(`swarm ${sub}: --db must hold the state and sessions listings`);
   const states = readDocs(stateDir);
   const sessions = readDocs(sessionsDir);
   const integrated = [];
@@ -15388,7 +15525,7 @@ var untracked = (at2) => nulList(at2.git(["ls-files", "-z", "--others", "--exclu
 var baselineFile = (cacheDir2, key, sha) => import_node_path19.default.join(cacheDir2, "baseline", `${key}-${sha}.json`);
 function readBaseline(cacheDir2, key, sha) {
   try {
-    return JSON.parse((0, import_node_fs17.readFileSync)(baselineFile(cacheDir2, key, sha), "utf8"));
+    return JSON.parse((0, import_node_fs18.readFileSync)(baselineFile(cacheDir2, key, sha), "utf8"));
   } catch {
     return null;
   }
@@ -15478,11 +15615,14 @@ function mergeAttempt(at2, ref, o, regenerated, validations, marker) {
   }
   if ("busy" in took) return { result: "dirty", detail: inFlightDetail(took.busy, place) };
   const hold = marker.hold = took.hold;
+  if (at2.git(["rev-parse", "HEAD"])?.trim() !== pre || merging()) {
+    return { result: "dirty", detail: "HEAD moved or a merge started there while this integration was starting" };
+  }
   const before3 = new Set(untracked(at2));
   const cacheBefore = new Set(untrackedPaths(cacheGit(at2.git)));
   const entry2 = () => {
     try {
-      return place ? (0, import_node_fs17.lstatSync)(import_node_path19.default.join(place, DEPS_DIR)) : null;
+      return place ? (0, import_node_fs18.lstatSync)(import_node_path19.default.join(place, DEPS_DIR)) : null;
     } catch {
       return null;
     }
@@ -15532,7 +15672,7 @@ function mergeAttempt(at2, ref, o, regenerated, validations, marker) {
     const now = entry2();
     if (!hadEntry && now?.isDirectory() && !now.isSymbolicLink()) {
       try {
-        (0, import_node_fs17.rmSync)(import_node_path19.default.join(place, DEPS_DIR), { recursive: true, force: true });
+        (0, import_node_fs18.rmSync)(import_node_path19.default.join(place, DEPS_DIR), { recursive: true, force: true });
         created = false;
         return {};
       } catch {
@@ -15661,7 +15801,7 @@ function mergeAttempt(at2, ref, o, regenerated, validations, marker) {
   };
 }
 function cleanRunWorktree(deps, wt, branch) {
-  if (!(0, import_node_fs17.existsSync)(wt)) return null;
+  if (!(0, import_node_fs18.existsSync)(wt)) return null;
   const at2 = deps.at(wt);
   const tip = deps.git(["rev-parse", "--verify", "-q", `refs/heads/${branch}`])?.trim();
   if (!tip || at2.git(["rev-parse", "HEAD"])?.trim() !== tip) return null;
@@ -15803,7 +15943,7 @@ function mergeFinal(rest, io, deps) {
   const inFlight = mergeInFlight(io.cwd, io.now().getTime());
   if (inFlight) {
     const m = inFlight.doc;
-    throw new UsageError(`swarm merge: ${m ? `an integration (${m.task ?? m.ref}, pid ${m.pid}) is merging in ${m.dir}` : "an integration is starting"}; run swarm merge again once it ends`);
+    return out({ result: "busy", detail: `${m ? `an integration (${m.task ?? m.ref}, pid ${m.pid}) is merging in ${m.dir}` : "an integration is starting"}; run swarm merge again once it ends` });
   }
   if (!e.mergeOnFinish && !rest.includes("--yes")) return out({ result: "needs-authorization" });
   const branch = deps.git(["rev-parse", "--abbrev-ref", "HEAD"])?.trim();
@@ -15905,7 +16045,7 @@ function swarmCommand(args, io, deps, ext = {}) {
       if (!Number.isInteger(round) || round < 0 || round > 99) throw new UsageError("swarm report: --round must be an integer from 0 to 99");
       let prev = null;
       try {
-        prev = normalizePublicTask(JSON.parse((0, import_node_fs17.readFileSync)(executionTaskFile(main, task), "utf8")));
+        prev = normalizePublicTask(JSON.parse((0, import_node_fs18.readFileSync)(executionTaskFile(main, task), "utf8")));
       } catch {
         prev = null;
       }
@@ -15978,7 +16118,7 @@ function swarmCommand(args, io, deps, ext = {}) {
           loose = loadTasksArg(io, flag("tasks"), "start");
           for (const t of loose) {
             const dir = taskWorktree(io.cwd, t.id);
-            if ((0, import_node_fs17.existsSync)(dir)) throw new UsageError(`swarm start: ${dir} already exists; remove it (git worktree remove) or use another id`);
+            if ((0, import_node_fs18.existsSync)(dir)) throw new UsageError(`swarm start: ${dir} already exists; remove it (git worktree remove) or use another id`);
             const tb = taskBranch(t.id);
             if (deps.git(["rev-parse", "--verify", "-q", `refs/heads/${tb}`]) === null) continue;
             if (deps.git(["merge-base", "--is-ancestor", tb, base]) === null) throw new UsageError(`swarm start: ${tb} has work not on ${base}; use another id`);
@@ -15994,7 +16134,7 @@ function swarmCommand(args, io, deps, ext = {}) {
         if (defaultBranch && branch === defaultBranch) throw new UsageError(`swarm start: ${branch} is the default branch; an execution never integrates into it directly`);
         const holder = worktreeHolding(deps.git(["worktree", "list", "--porcelain"]), branch);
         if (holder && !samePath(holder, wt)) throw new UsageError(`swarm start: ${branch} is checked out in another worktree (${holder}); pick another --branch`);
-        if ((0, import_node_fs17.existsSync)(wt)) {
+        if ((0, import_node_fs18.existsSync)(wt)) {
           const on = deps.at(wt).git(["rev-parse", "--abbrev-ref", "HEAD"])?.trim();
           if (on !== branch) throw new UsageError(`swarm start: ${wt} exists and is on ${on ?? "?"}, not ${branch}; switch it or remove it (git worktree remove)`);
         }
@@ -16002,7 +16142,7 @@ function swarmCommand(args, io, deps, ext = {}) {
         if (!existed && deps.git(["branch", branch, base]) === null) {
           throw new UsageError(`swarm start: cannot create ${branch} from ${base}`);
         }
-        if (!(0, import_node_fs17.existsSync)(wt)) {
+        if (!(0, import_node_fs18.existsSync)(wt)) {
           if (deps.git(["worktree", "add", wt, branch]) === null) throw new UsageError(`swarm start: cannot add the worktree ${wt}`);
           setup = runSetup(deps, wt, io.cwd);
         }
@@ -16055,7 +16195,7 @@ function swarmCommand(args, io, deps, ext = {}) {
       }
       const attributes = unionLearned(deps);
       const replaced = prev && !prev.active && !prev.closedAt && !resume ? { runId: prev.runId, stopReason: prev.stopReason } : null;
-      (0, import_node_fs17.rmSync)(stopFile(io.cwd), { force: true });
+      (0, import_node_fs18.rmSync)(stopFile(io.cwd), { force: true });
       updateExecution(io.cwd, (cur) => resume && cur && cur.runId === state.runId ? { ...cur, parallel: state.parallel, mode: state.mode, mergeOnFinish: state.mergeOnFinish, coordinator: state.coordinator, hookSession: state.hookSession, sleepUntil: null, ...auto, ...lang } : state, lockDeps);
       if (kind === "ephemeral" && !resume) writeLoose(io.cwd, { runId: state.runId, tasks: loose });
       const looseOut = kind === "ephemeral" ? { loose: loose.length, ...ignoredTasks ? { ignoredTasks: true, message: `the ephemeral run ${state.runId} is resumed with its own ${loose.length} tasks; --tasks was ignored (start a new run for new requests once this one ends)` } : {} } : {};
@@ -16125,7 +16265,7 @@ function swarmCommand(args, io, deps, ext = {}) {
           const { [task]: _dropped, ...tasks } = cur.tasks;
           return { ...cur, tasks };
         });
-        (0, import_node_fs17.rmSync)(executionTaskFile(io.cwd, task), { force: true });
+        (0, import_node_fs18.rmSync)(executionTaskFile(io.cwd, task), { force: true });
         return ok();
       }
       const stageArg = flag("stage");
@@ -16134,7 +16274,7 @@ function swarmCommand(args, io, deps, ext = {}) {
       let detailArg;
       if (flag("detail-file")) {
         try {
-          detailArg = (0, import_node_fs17.readFileSync)(import_node_path19.default.resolve(io.cwd, flag("detail-file")), "utf8").trim().slice(0, 500) || null;
+          detailArg = (0, import_node_fs18.readFileSync)(import_node_path19.default.resolve(io.cwd, flag("detail-file")), "utf8").trim().slice(0, 500) || null;
         } catch {
           throw new UsageError("swarm task: cannot read --detail-file");
         }
@@ -16184,9 +16324,9 @@ function swarmCommand(args, io, deps, ext = {}) {
       const { plan, states, sessions, integrated } = input;
       const publicTasks = {};
       try {
-        for (const f of (0, import_node_fs17.readdirSync)(import_node_path19.default.join(io.cwd, ".forge", "execution")).filter((n) => n.endsWith(".json")).slice(0, 500)) {
+        for (const f of (0, import_node_fs18.readdirSync)(import_node_path19.default.join(io.cwd, ".forge", "execution")).filter((n) => n.endsWith(".json")).slice(0, 500)) {
           try {
-            const p = normalizePublicTask(JSON.parse((0, import_node_fs17.readFileSync)(import_node_path19.default.join(io.cwd, ".forge", "execution", f), "utf8")));
+            const p = normalizePublicTask(JSON.parse((0, import_node_fs18.readFileSync)(import_node_path19.default.join(io.cwd, ".forge", "execution", f), "utf8")));
             if (p && `${p.task}.json` === f) publicTasks[p.task] = p;
           } catch {
           }
@@ -16197,7 +16337,7 @@ function swarmCommand(args, io, deps, ext = {}) {
       if (flag("agents")) {
         let raw;
         try {
-          raw = JSON.parse((0, import_node_fs17.readFileSync)(import_node_path19.default.resolve(io.cwd, flag("agents")), "utf8"));
+          raw = JSON.parse((0, import_node_fs18.readFileSync)(import_node_path19.default.resolve(io.cwd, flag("agents")), "utf8"));
         } catch {
           throw new UsageError("swarm tick: cannot read --agents");
         }
@@ -16274,7 +16414,7 @@ function swarmCommand(args, io, deps, ext = {}) {
       if (planArg) {
         const isFile = (() => {
           try {
-            return (0, import_node_fs17.statSync)(import_node_path19.default.resolve(io.cwd, planArg)).isFile();
+            return (0, import_node_fs18.statSync)(import_node_path19.default.resolve(io.cwd, planArg)).isFile();
           } catch {
             return false;
           }
@@ -16299,8 +16439,8 @@ function swarmCommand(args, io, deps, ext = {}) {
       const commits = log ? log.split(/\r?\n/).map((l) => `  - ${l}`).join("\n") : "  - none";
       const note = import_node_path19.default.join(io.cwd, ".forge", "work", task, "handover.md");
       const memberWork = import_node_path19.default.join(t.worktree || taskWorktree(io.cwd, task), ".forge", "work", task);
-      (0, import_node_fs17.mkdirSync)(import_node_path19.default.dirname(note), { recursive: true });
-      (0, import_node_fs17.writeFileSync)(note, [
+      (0, import_node_fs18.mkdirSync)(import_node_path19.default.dirname(note), { recursive: true });
+      (0, import_node_fs18.writeFileSync)(note, [
         `# Handover: ${task} (attempt ${attempt} of ${RELAUNCH_CAP + 1})`,
         "",
         `- Run: ${e.runId} \xB7 coordinator ${e.coordinator} \xB7 run branch ${e.branch}`,
@@ -16377,13 +16517,13 @@ function swarmCommand(args, io, deps, ext = {}) {
       const order = ["stopped", "silent", "alive"];
       const seen = [];
       if (isSafeId(previous)) try {
-        const d = normalizeLive(JSON.parse((0, import_node_fs17.readFileSync)(liveFile(io.cwd, previous), "utf8")));
+        const d = normalizeLive(JSON.parse((0, import_node_fs18.readFileSync)(liveFile(io.cwd, previous), "utf8")));
         if (d) seen.push(signalLiveness(d.ts, d.ended, now.getTime()));
       } catch {
       }
       if (flag("db") && isSafeId(e.coordinator)) {
         try {
-          seen.push(sessionLiveness(JSON.parse((0, import_node_fs17.readFileSync)(import_node_path19.default.resolve(io.cwd, flag("db"), "sessions", `${e.coordinator}.json`), "utf8")), now.getTime()));
+          seen.push(sessionLiveness(JSON.parse((0, import_node_fs18.readFileSync)(import_node_path19.default.resolve(io.cwd, flag("db"), "sessions", `${e.coordinator}.json`), "utf8")), now.getTime()));
         } catch {
         }
       }
@@ -16407,7 +16547,7 @@ function swarmCommand(args, io, deps, ext = {}) {
 }
 
 // src/forge/cli/review.ts
-var import_node_fs20 = require("node:fs");
+var import_node_fs21 = require("node:fs");
 var import_node_path22 = __toESM(require("node:path"), 1);
 
 // src/forge/loop.ts
@@ -16736,7 +16876,7 @@ function renderHandover(h) {
 }
 
 // src/forge/shadow.ts
-var import_node_fs18 = require("node:fs");
+var import_node_fs19 = require("node:fs");
 var import_node_path20 = __toESM(require("node:path"), 1);
 var DEFAULT_SHADOW_BRIEFS = 10;
 var PASS_RATIO = 0.9;
@@ -16761,9 +16901,9 @@ function parseShadow(text2) {
 }
 function readShadow(root) {
   const file = shadowFile(root);
-  if (!(0, import_node_fs18.existsSync)(file)) return null;
+  if (!(0, import_node_fs19.existsSync)(file)) return null;
   try {
-    return parseShadow((0, import_node_fs18.readFileSync)(file, "utf8"));
+    return parseShadow((0, import_node_fs19.readFileSync)(file, "utf8"));
   } catch {
     return null;
   }
@@ -16774,10 +16914,10 @@ function saveShadow(root, state) {
   const file = import_node_path20.default.join(main, ".forge", "shadow.json");
   const tmp = `${file}.${process.pid}.tmp`;
   try {
-    (0, import_node_fs18.writeFileSync)(tmp, JSON.stringify(state, null, 2) + "\n");
-    (0, import_node_fs18.renameSync)(tmp, file);
+    (0, import_node_fs19.writeFileSync)(tmp, JSON.stringify(state, null, 2) + "\n");
+    (0, import_node_fs19.renameSync)(tmp, file);
   } finally {
-    (0, import_node_fs18.rmSync)(tmp, { force: true });
+    (0, import_node_fs19.rmSync)(tmp, { force: true });
   }
 }
 function startShadow(root, briefs = DEFAULT_SHADOW_BRIEFS, opts = {}) {
@@ -16879,7 +17019,7 @@ function renderShadowReport(report, lang = "es") {
 }
 
 // src/forge/cli/shadow.ts
-var import_node_fs19 = require("node:fs");
+var import_node_fs20 = require("node:fs");
 var import_node_path21 = __toESM(require("node:path"), 1);
 
 // src/forge/review-round.ts
@@ -16971,16 +17111,16 @@ function collectTwins(task, roundDir, plan, deps) {
   const pairs = [];
   for (const k of twinsOf(plan)) {
     const highFile = import_node_path21.default.join(roundDir, `${k}.json`), twinFile = import_node_path21.default.join(roundDir, "shadow", `${k}.json`);
-    if (!(0, import_node_fs19.existsSync)(twinFile)) {
+    if (!(0, import_node_fs20.existsSync)(twinFile)) {
       out.shadowPending.push({ reviewer: k, file: rel(deps.cwd, twinFile) });
       continue;
     }
-    if (!(0, import_node_fs19.existsSync)(highFile)) {
+    if (!(0, import_node_fs20.existsSync)(highFile)) {
       out.shadowSkipped.push({ reviewer: k, reason: "missing", file: rel(deps.cwd, highFile) });
       continue;
     }
-    const high = parseReview((0, import_node_fs19.readFileSync)(highFile, "utf8"));
-    const xhigh = parseReview((0, import_node_fs19.readFileSync)(twinFile, "utf8"));
+    const high = parseReview((0, import_node_fs20.readFileSync)(highFile, "utf8"));
+    const xhigh = parseReview((0, import_node_fs20.readFileSync)(twinFile, "utf8"));
     const bad = xhigh.invalid ? twinFile : high.invalid ? highFile : null;
     if (bad) {
       out.shadowSkipped.push({ reviewer: k, reason: "unparseable", file: rel(deps.cwd, bad) });
@@ -17058,7 +17198,7 @@ ${renderShadowReport(shadowReport(s2?.cases ?? []), lang)}`, stderr: "" };
       }
       let plan;
       try {
-        plan = JSON.parse((0, import_node_fs19.readFileSync)(import_node_path21.default.join(roundDir, "review-plan.json"), "utf8"));
+        plan = JSON.parse((0, import_node_fs20.readFileSync)(import_node_path21.default.join(roundDir, "review-plan.json"), "utf8"));
       } catch {
         plan = void 0;
       }
@@ -17119,14 +17259,14 @@ function validateList(deps, config, list, restored, noCache) {
 var cachedNames = (results) => results.filter((r2) => r2.cached === true).map((r2) => r2.validator);
 function readJson(file) {
   try {
-    return JSON.parse((0, import_node_fs20.readFileSync)(file, "utf8"));
+    return JSON.parse((0, import_node_fs21.readFileSync)(file, "utf8"));
   } catch {
     return void 0;
   }
 }
 function readText(file) {
   try {
-    return (0, import_node_fs20.readFileSync)(file, "utf8");
+    return (0, import_node_fs21.readFileSync)(file, "utf8");
   } catch {
     return null;
   }
@@ -17134,10 +17274,10 @@ function readText(file) {
 function writeThreatModel(dir, config) {
   const file = import_node_path22.default.join(dir, "threat-model.md");
   if (!config.threatModel) {
-    (0, import_node_fs20.rmSync)(file, { force: true });
+    (0, import_node_fs21.rmSync)(file, { force: true });
     return null;
   }
-  (0, import_node_fs20.writeFileSync)(file, renderThreatModel(config.threatModel));
+  (0, import_node_fs21.writeFileSync)(file, renderThreatModel(config.threatModel));
   return file;
 }
 function reviewPrep(args, deps) {
@@ -17157,7 +17297,7 @@ function reviewPrep(args, deps) {
   const pathName = p;
   let baseline;
   try {
-    baseline = JSON.parse((0, import_node_fs20.readFileSync)(import_node_path22.default.resolve(deps.cwd, baselineArg), "utf8"));
+    baseline = JSON.parse((0, import_node_fs21.readFileSync)(import_node_path22.default.resolve(deps.cwd, baselineArg), "utf8"));
   } catch {
     throw new UsageError("review-prep: --baseline must be the JSON written by forge validate");
   }
@@ -17173,7 +17313,7 @@ function reviewPrep(args, deps) {
   const dir = import_node_path22.default.resolve(deps.cwd, dirArg);
   const round = reviewRoundOf(events, task);
   const roundDir = import_node_path22.default.join(dir, `reviews-${n}-${round}`);
-  (0, import_node_fs20.mkdirSync)(roundDir, { recursive: true });
+  (0, import_node_fs21.mkdirSync)(roundDir, { recursive: true });
   const tmFile = writeThreatModel(dir, config);
   const index = parseIndex(readText(import_node_path22.default.join(dir, `findings-index-${n}.json`)), task);
   const reviewsCount = reviewsOf(round, pathName);
@@ -17186,8 +17326,8 @@ function reviewPrep(args, deps) {
     const prevDir = import_node_path22.default.join(dir, `reviews-${n}-${round - 1}`);
     for (const role of ROLES2) {
       const file = import_node_path22.default.join(prevDir, `${reviewerKey(role)}.json`);
-      if (!(0, import_node_fs20.existsSync)(file)) continue;
-      const r2 = parseReview((0, import_node_fs20.readFileSync)(file, "utf8"));
+      if (!(0, import_node_fs21.existsSync)(file)) continue;
+      const r2 = parseReview((0, import_node_fs21.readFileSync)(file, "utf8"));
       prevReviews[reviewerKey(role)] = r2;
       if (r2.invalid && !r2.dropped) continue;
       previous[role] = { verdict: r2.verdict, findings: r2.findings, ...r2.incomplete ? { incomplete: true } : {}, ...r2.invalid ? { invalid: true } : {} };
@@ -17203,7 +17343,7 @@ function reviewPrep(args, deps) {
         previous[role] = { verdict: r2.verdict, findings: r2.findings };
       }
     }
-    const prevHead = (0, import_node_fs20.existsSync)(import_node_path22.default.join(prevDir, "head.txt")) ? (0, import_node_fs20.readFileSync)(import_node_path22.default.join(prevDir, "head.txt"), "utf8").trim() : "";
+    const prevHead = (0, import_node_fs21.existsSync)(import_node_path22.default.join(prevDir, "head.txt")) ? (0, import_node_fs21.readFileSync)(import_node_path22.default.join(prevDir, "head.txt"), "utf8").trim() : "";
     const diffFrom = (from) => {
       const names2 = deps.git(["diff", "--name-only", `${from}..HEAD`]);
       const patch = names2 === null ? null : deps.git(["diff", `${from}..HEAD`]);
@@ -17212,7 +17352,7 @@ function reviewPrep(args, deps) {
     const fix = (prevHead ? diffFrom(prevHead) : null) ?? diffFrom(baseSha);
     if (!fix) throw new UsageError(`review-prep: cannot diff the fix (${prevHead || baseSha}..HEAD)`);
     fixFiles = fix.names.split("\n").map((s2) => s2.trim()).filter(Boolean);
-    (0, import_node_fs20.writeFileSync)(fixFile, fix.patch);
+    (0, import_node_fs21.writeFileSync)(fixFile, fix.patch);
   }
   const redo = round >= 2 && events.filter((e) => e.kind === "verdict" && e.task === task).at(-1)?.action === "redo";
   const lastVerdict = events.filter((e) => e.kind === "verdict" && e.task === task).at(-1);
@@ -17251,23 +17391,23 @@ function reviewPrep(args, deps) {
   const results = markPreexisting(validation.results, baseline);
   const ok = results.every((r2) => !blocking(r2));
   const validatorsFile = import_node_path22.default.join(dir, `validators-${n}.json`);
-  (0, import_node_fs20.writeFileSync)(validatorsFile, JSON.stringify(results, null, 2) + "\n");
+  (0, import_node_fs21.writeFileSync)(validatorsFile, JSON.stringify(results, null, 2) + "\n");
   appendEvent(deps.cwd, validateEvent(deps.now().toISOString(), task, results, validation.durationMs, scope.mode));
   const diffFile = import_node_path22.default.join(dir, `diff-${n}.patch`);
-  (0, import_node_fs20.writeFileSync)(diffFile, diff);
+  (0, import_node_fs21.writeFileSync)(diffFile, diff);
   if (!ok) {
     const sinceVerdict = events.slice(events.map((e) => e.kind === "verdict" && e.task === task).lastIndexOf(true) + 1);
     const k = sinceVerdict.filter((e) => e.kind === "phase" && e.task === id2 && e.phase === "fix" && e.validators === true && e.brief === Number(n)).length;
     if (k < MAX_VALIDATOR_ROUNDS) {
       const blockers = results.filter(blocking);
       const roundFile = import_node_path22.default.join(dir, `validators-fix-${n}-${round}-${k + 1}.json`);
-      (0, import_node_fs20.writeFileSync)(roundFile, JSON.stringify({
+      (0, import_node_fs21.writeFileSync)(roundFile, JSON.stringify({
         task,
         round,
         validators: blockers.map((r2) => ({ validator: r2.validator, failures: r2.failures, failing: r2.failing ?? [], ...r2.newFailing?.length ? { newFailing: r2.newFailing } : {} }))
       }, null, 2) + "\n");
       appendPhase(deps.cwd, { ts: deps.now().toISOString(), kind: "phase", task: id2, phase: "fix", brief: Number(n), round, validators: true });
-      (0, import_node_fs20.rmSync)(import_node_path22.default.join(roundDir, "review-plan.json"), { force: true });
+      (0, import_node_fs21.rmSync)(import_node_path22.default.join(roundDir, "review-plan.json"), { force: true });
       const fixOut = {
         round,
         reviews: reviewsCount,
@@ -17290,7 +17430,7 @@ function reviewPrep(args, deps) {
   const report = import_node_path22.default.join(dir, `report-${n}.txt`);
   let tdd = false;
   try {
-    tdd = /^TDD: required/m.test((0, import_node_fs20.readFileSync)(brief, "utf8"));
+    tdd = /^TDD: required/m.test((0, import_node_fs21.readFileSync)(brief, "utf8"));
   } catch {
   }
   const plan = reviewRound({
@@ -17309,20 +17449,20 @@ function reviewPrep(args, deps) {
       out: rel2(deps.cwd, roundDir),
       shadow: rel2(deps.cwd, import_node_path22.default.join(roundDir, "shadow")),
       ...round >= 2 ? { fix: rel2(deps.cwd, fixFile), findings: (name) => rel2(deps.cwd, findingsFile(name)) } : {},
-      ...tdd && (0, import_node_fs20.existsSync)(report) ? { report: rel2(deps.cwd, report) } : {},
+      ...tdd && (0, import_node_fs21.existsSync)(report) ? { report: rel2(deps.cwd, report) } : {},
       ...tmFile ? { threatModel: rel2(deps.cwd, tmFile) } : {}
     }
   });
-  if (plan.shadow) (0, import_node_fs20.mkdirSync)(import_node_path22.default.join(roundDir, "shadow"), { recursive: true });
+  if (plan.shadow) (0, import_node_fs21.mkdirSync)(import_node_path22.default.join(roundDir, "shadow"), { recursive: true });
   const indexed = index.rounds.some((r2) => r2.round === round - 1);
   for (const s2 of plan.spawn.filter((s3) => s3.mode === "delta" && !s3.twin)) {
     const own = indexed ? previousFindings(index, round, s2.name).map((f) => asPrevious(f)) : (previous[s2.role]?.findings ?? []).filter((f) => f.severity === "critical" || f.severity === "important");
-    (0, import_node_fs20.writeFileSync)(findingsFile(s2.name), JSON.stringify(own, null, 2) + "\n");
+    (0, import_node_fs21.writeFileSync)(findingsFile(s2.name), JSON.stringify(own, null, 2) + "\n");
   }
   writeCarried(plan, dir, n, round, roundDir, prevReviews);
   const spawn = plan.spawn.map(spawnOut);
-  (0, import_node_fs20.writeFileSync)(import_node_path22.default.join(roundDir, "head.txt"), head2 + "\n");
-  (0, import_node_fs20.writeFileSync)(planFile, JSON.stringify({
+  (0, import_node_fs21.writeFileSync)(import_node_path22.default.join(roundDir, "head.txt"), head2 + "\n");
+  (0, import_node_fs21.writeFileSync)(planFile, JSON.stringify({
     task,
     round,
     path: pathName,
@@ -17375,7 +17515,7 @@ function writeCarried(plan, dir, n, round, roundDir, prevReviews) {
     const raw = readJson(import_node_path22.default.join(dir, `reviews-${n}-${round - 1}`, `${c.name}.json`));
     const parsed = prevReviews[c.name];
     const prev = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : parsed ? { verdict: parsed.verdict, confidence: parsed.confidence, findings: parsed.findings } : null;
-    if (prev) (0, import_node_fs20.writeFileSync)(import_node_path22.default.join(roundDir, `${c.name}.json`), JSON.stringify({ ...prev, carried: true }, null, 2) + "\n");
+    if (prev) (0, import_node_fs21.writeFileSync)(import_node_path22.default.join(roundDir, `${c.name}.json`), JSON.stringify({ ...prev, carried: true }, null, 2) + "\n");
   }
 }
 function expressPrep(c) {
@@ -17405,14 +17545,14 @@ function expressPrep(c) {
     }
   });
   if (!plan.express) return null;
-  (0, import_node_fs20.rmSync)(validatorsFile, { force: true });
-  (0, import_node_fs20.writeFileSync)(diffFile, c.diff);
-  (0, import_node_fs20.writeFileSync)(expressFile, JSON.stringify(previousFindings(c.index, round).map((f) => asPrevious(f, true)), null, 2) + "\n");
+  (0, import_node_fs21.rmSync)(validatorsFile, { force: true });
+  (0, import_node_fs21.writeFileSync)(diffFile, c.diff);
+  (0, import_node_fs21.writeFileSync)(expressFile, JSON.stringify(previousFindings(c.index, round).map((f) => asPrevious(f, true)), null, 2) + "\n");
   writeCarried(plan, dir, n, round, roundDir, c.prevReviews);
   const spawn = plan.spawn.map(spawnOut);
   const cmd = `node "${slash(deps.self ?? "forge.cjs")}" validate --all --path ${c.pathName} --base ${c.baseSha} --baseline "${slash(import_node_path22.default.resolve(deps.cwd, c.baselineArg))}" --task ${c.task} --out "${slash(validatorsFile)}"${samePath(deps.repoDir, deps.cwd) ? "" : ` --cwd "${slash(deps.repoDir)}"`}${c.noCache ? " --no-cache" : ""}`;
-  (0, import_node_fs20.writeFileSync)(import_node_path22.default.join(roundDir, "head.txt"), c.head + "\n");
-  (0, import_node_fs20.writeFileSync)(import_node_path22.default.join(roundDir, "review-plan.json"), JSON.stringify({
+  (0, import_node_fs21.writeFileSync)(import_node_path22.default.join(roundDir, "head.txt"), c.head + "\n");
+  (0, import_node_fs21.writeFileSync)(import_node_path22.default.join(roundDir, "review-plan.json"), JSON.stringify({
     task: c.task,
     round,
     path: c.pathName,
@@ -17464,7 +17604,7 @@ function briefOverrides(dir, n) {
   const all = { outOfModel: [], defer: [] };
   let entries = [];
   try {
-    entries = (0, import_node_fs20.readdirSync)(dir);
+    entries = (0, import_node_fs21.readdirSync)(dir);
   } catch {
   }
   for (const e of entries) {
@@ -17519,12 +17659,12 @@ function reviewClose(args, deps) {
   } else {
     let entries = [];
     try {
-      entries = (0, import_node_fs20.readdirSync)(dir);
+      entries = (0, import_node_fs21.readdirSync)(dir);
     } catch {
     }
     for (const e of entries) {
       const r2 = new RegExp(`^reviews-${n}-(\\d+)$`).exec(e);
-      if (r2 && (0, import_node_fs20.existsSync)(import_node_path22.default.join(dir, e, "review-plan.json"))) round = Math.max(round, Number(r2[1]));
+      if (r2 && (0, import_node_fs21.existsSync)(import_node_path22.default.join(dir, e, "review-plan.json"))) round = Math.max(round, Number(r2[1]));
     }
   }
   const roundDir = import_node_path22.default.join(dir, `reviews-${n}-${round}`);
@@ -17533,13 +17673,13 @@ function reviewClose(args, deps) {
   const names2 = (list, keep) => (Array.isArray(list) ? list : []).filter((x) => x && typeof x === "object" && keep(x)).map((x) => typeof x.name === "string" ? x.name : typeof x.role === "string" && ROLES2.includes(x.role) ? reviewerKey(x.role) : null).filter((x) => x === "correctness" || x === "security" || x === "perf");
   const spawned = names2(plan.spawn, (x) => x.twin !== true);
   const carried = names2(plan.carried, () => true);
-  const missing = [.../* @__PURE__ */ new Set([...spawned, ...carried])].map((k) => import_node_path22.default.join(roundDir, `${k}.json`)).filter((f) => !(0, import_node_fs20.existsSync)(f));
+  const missing = [.../* @__PURE__ */ new Set([...spawned, ...carried])].map((k) => import_node_path22.default.join(roundDir, `${k}.json`)).filter((f) => !(0, import_node_fs21.existsSync)(f));
   const validatorsPath = import_node_path22.default.join(dir, `validators-${n}.json`);
-  if (plan.validatorsPending === true && !(0, import_node_fs20.existsSync)(validatorsPath)) missing.push(validatorsPath);
-  if (plan.validatorsPending === true && (0, import_node_fs20.existsSync)(validatorsPath)) {
+  if (plan.validatorsPending === true && !(0, import_node_fs21.existsSync)(validatorsPath)) missing.push(validatorsPath);
+  if (plan.validatorsPending === true && (0, import_node_fs21.existsSync)(validatorsPath)) {
     const doc = readJson(validatorsPath);
     if (!Array.isArray(doc)) {
-      (0, import_node_fs20.rmSync)(validatorsPath, { force: true });
+      (0, import_node_fs21.rmSync)(validatorsPath, { force: true });
       const error = doc && typeof doc === "object" && typeof doc.error === "string" ? doc.error : "not a validate result";
       throw new UsageError(`review-close: the validation of ${task} gave no results (${error}); ${rel2(deps.cwd, validatorsPath)} was removed: run its validators command again`);
     }
@@ -17548,10 +17688,10 @@ function reviewClose(args, deps) {
   const reviews = {};
   for (const k of ["correctness", "security", "perf"]) {
     const file = import_node_path22.default.join(roundDir, `${k}.json`);
-    if ((0, import_node_fs20.existsSync)(file)) reviews[k] = parseReview((0, import_node_fs20.readFileSync)(file, "utf8"));
+    if ((0, import_node_fs21.existsSync)(file)) reviews[k] = parseReview((0, import_node_fs21.readFileSync)(file, "utf8"));
   }
   const verifyPath = import_node_path22.default.join(roundDir, "verify.json");
-  const verifyFile = (0, import_node_fs20.existsSync)(verifyPath) ? parseVerifyFile((0, import_node_fs20.readFileSync)(verifyPath, "utf8")) : void 0;
+  const verifyFile = (0, import_node_fs21.existsSync)(verifyPath) ? parseVerifyFile((0, import_node_fs21.readFileSync)(verifyPath, "utf8")) : void 0;
   if (verifyFile !== void 0) reviews.verify = verifyReview(verifyFile);
   if (!Object.keys(reviews).length) throw new UsageError(`review-close: no reviews found in ${rel2(deps.cwd, roundDir)}`);
   for (const k of Object.keys(reviews)) {
@@ -17569,7 +17709,7 @@ function reviewClose(args, deps) {
   const flags = Array.isArray(plan.flags) ? plan.flags : [];
   const fixPatch = round >= 2 ? (() => {
     try {
-      return (0, import_node_fs20.readFileSync)(import_node_path22.default.join(dir, `fix-${n}-${round}.patch`), "utf8");
+      return (0, import_node_fs21.readFileSync)(import_node_path22.default.join(dir, `fix-${n}-${round}.patch`), "utf8");
     } catch {
       return "";
     }
@@ -17593,7 +17733,7 @@ function reviewClose(args, deps) {
       }
     }
     const kept = overridesOf(import_node_path22.default.join(roundDir, "overrides.json"));
-    (0, import_node_fs20.writeFileSync)(import_node_path22.default.join(roundDir, "overrides.json"), JSON.stringify({
+    (0, import_node_fs21.writeFileSync)(import_node_path22.default.join(roundDir, "overrides.json"), JSON.stringify({
       outOfModel: [.../* @__PURE__ */ new Set([...kept.outOfModel, ...outOfModelArg])],
       defer: [.../* @__PURE__ */ new Set([...kept.defer, ...deferArg])]
     }, null, 2) + "\n");
@@ -17623,11 +17763,11 @@ function reviewClose(args, deps) {
   });
   if (indexText?.trim() && !index.rounds.length) {
     const aside = `${indexPath}.corrupt-${deps.now().toISOString().replace(/[:.]/g, "-")}`;
-    (0, import_node_fs20.renameSync)(indexPath, aside);
+    (0, import_node_fs21.renameSync)(indexPath, aside);
     result.reasons.push(`unreadable findings index set aside as ${rel2(deps.cwd, aside)}`);
   }
   const indexNow = recordRound(index, round, result, answered, { fresh: fresh2 });
-  (0, import_node_fs20.writeFileSync)(indexPath, JSON.stringify(indexNow, null, 2) + "\n");
+  (0, import_node_fs21.writeFileSync)(indexPath, JSON.stringify(indexNow, null, 2) + "\n");
   const carriedResidual = result.action === "accept" && !fresh2 ? carriedResiduals(index, round, result) : [];
   if (carriedResidual.length) {
     result.deferred.push(...carriedResidual);
@@ -17689,9 +17829,9 @@ function reviewClose(args, deps) {
   let findings = null;
   const findingsPath = import_node_path22.default.join(dir, `findings-${n}-${round}.json`);
   if (result.action !== "accept") {
-    (0, import_node_fs20.writeFileSync)(findingsPath, JSON.stringify({ task, round, action: result.action, findings: [...result.critical, ...result.important], validators: failing }, null, 2) + "\n");
+    (0, import_node_fs21.writeFileSync)(findingsPath, JSON.stringify({ task, round, action: result.action, findings: [...result.critical, ...result.important], validators: failing }, null, 2) + "\n");
     findings = rel2(deps.cwd, findingsPath);
-  } else (0, import_node_fs20.rmSync)(findingsPath, { force: true });
+  } else (0, import_node_fs21.rmSync)(findingsPath, { force: true });
   const sha = (v) => {
     if (typeof v !== "string" || !SHA.test(v.trim())) return "";
     return (deps.git(["rev-parse", "--verify", "--quiet", `${v.trim()}^{commit}`]) ?? "").trim();
@@ -17701,7 +17841,7 @@ function reviewClose(args, deps) {
   const handoverFile = import_node_path22.default.join(dir, `handover-${n}-${round}.md`);
   if (d.next === "fresh-stronger" || d.next === "redo") {
     const wrong = Object.values(reviews).filter((r2) => r2?.verdict === "fail" && r2.approach === "wrong").flatMap((r2) => r2.findings.filter((f) => f.severity !== "minor").map((f) => f.problem));
-    (0, import_node_fs20.writeFileSync)(handoverFile, renderHandover({
+    (0, import_node_fs21.writeFileSync)(handoverFile, renderHandover({
       task,
       reviews: reviewsCount,
       brief: rel2(deps.cwd, import_node_path22.default.join(dir, `brief-${n}.md`)),
@@ -17716,9 +17856,13 @@ function reviewClose(args, deps) {
       redo: d.next === "redo" ? { reasons: wrong } : null
     }));
     handover = rel2(deps.cwd, handoverFile);
-  } else (0, import_node_fs20.rmSync)(handoverFile, { force: true });
+  } else (0, import_node_fs21.rmSync)(handoverFile, { force: true });
   const headNow = (deps.git(["rev-parse", "HEAD"]) ?? "").trim();
-  const revert = d.next === "redo" && planBase && headNow && headNow !== planBase ? { base: planBase, head: headNow, args: ["-C", deps.repoDir, "revert", "--no-edit", `${planBase}..HEAD`] } : null;
+  const undo = d.next === "redo" && !!planBase && !!headNow && headNow !== planBase;
+  const revert = undo ? deps.git(["rev-list", "--merges", `${planBase}..HEAD`])?.trim() ? { base: planBase, head: headNow, steps: [
+    ["-C", deps.repoDir, "read-tree", "-u", "--reset", planBase],
+    ["-C", deps.repoDir, "commit", "--allow-empty", "-m", `${id2}: undo the attempt for a redo (back to the tree of ${planBase.slice(0, 12)})`]
+  ] } : { base: planBase, head: headNow, args: ["-C", deps.repoDir, "revert", "--no-edit", `${planBase}..HEAD`] } : null;
   const twins = collectTwins(task, roundDir, plan, deps);
   const deferred = [
     ...result.deferred,
@@ -17771,7 +17915,7 @@ function prep(args, deps) {
     if (!noBaseline || !(e instanceof ConfigError)) throw e;
   }
   const dir = import_node_path22.default.resolve(deps.cwd, flag("dir") ?? import_node_path22.default.join(".forge", "work", id2));
-  (0, import_node_fs20.mkdirSync)(dir, { recursive: true });
+  (0, import_node_fs21.mkdirSync)(dir, { recursive: true });
   const tmFile = config ? writeThreatModel(dir, config) : null;
   const threatModel = tmFile ? rel2(deps.cwd, tmFile) : null;
   const validate = `node "${slash(deps.self ?? "forge.cjs")}" validate --affected --base ${base} --task ${task}${samePath(deps.repoDir, deps.cwd) ? "" : ` --cwd "${slash(deps.repoDir)}"`}`;
@@ -17783,7 +17927,7 @@ function prep(args, deps) {
   const restored = [];
   const { results, durationMs } = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored, args.includes("--no-cache"));
   const file = import_node_path22.default.join(dir, `baseline-${n}.json`);
-  (0, import_node_fs20.writeFileSync)(file, JSON.stringify(results, null, 2) + "\n");
+  (0, import_node_fs21.writeFileSync)(file, JSON.stringify(results, null, 2) + "\n");
   const ts = deps.now().toISOString();
   appendEvent(deps.cwd, validateEvent(ts, task, results, durationMs, scope.mode, { baseline: true }));
   appendEvent(deps.cwd, { ts, kind: "phase", task: id2, phase, brief: Number(n), base });
@@ -17805,33 +17949,58 @@ function reviewCommand(cmd, args, deps) {
 }
 
 // src/forge/cli/step.ts
-var import_node_fs21 = require("node:fs");
+var import_node_fs22 = require("node:fs");
 var import_node_path23 = __toESM(require("node:path"), 1);
 var AGENT_LEASE_MINUTES = 90;
+var ASK_AGAIN_MS = 24 * 36e5;
 var slash2 = (p) => p.split(import_node_path23.default.sep).join("/");
 var readText2 = (f) => {
   try {
-    return (0, import_node_fs21.readFileSync)(f, "utf8");
+    return (0, import_node_fs22.readFileSync)(f, "utf8");
   } catch {
     return null;
   }
 };
 var readJson2 = (f) => {
   try {
-    return JSON.parse((0, import_node_fs21.readFileSync)(f, "utf8"));
+    return JSON.parse((0, import_node_fs22.readFileSync)(f, "utf8"));
   } catch {
     return null;
   }
 };
+var writeJson = (f, v) => (0, import_node_fs22.writeFileSync)(f, JSON.stringify(v, null, 2) + "\n");
 var mtimeOf = (f) => {
   try {
-    return (0, import_node_fs21.statSync)(f).mtimeMs;
+    return (0, import_node_fs22.statSync)(f).mtimeMs;
   } catch {
     return null;
   }
 };
 var asList = (x) => Array.isArray(x) ? x.filter((s2) => typeof s2 === "string") : [];
 var keyOf = (s2) => String(s2.role ?? "").replace(/^review-/, "");
+var isObject = (x) => !!x && typeof x === "object" && !Array.isArray(x);
+var stepError = (task, stderr) => ({ type: "error", task, command: "swarm step", code: 2, stderr });
+function readRulings(rest) {
+  const out = /* @__PURE__ */ new Map();
+  rest.forEach((arg, i) => {
+    if (arg !== "--ruling") return;
+    const v = rest[i + 1];
+    if (v === void 0 || v.startsWith("--")) throw new UsageError("swarm step: --ruling needs <T>:fix|out-of-model|defer:F3[+F5]|review");
+    for (const one of v.split(",").map((s2) => s2.trim()).filter(Boolean)) {
+      const m = /^([^:]+):(?:(fix|out-of-model|review)|defer:([Ff]\d+(?:\+[Ff]\d+)*))$/.exec(one);
+      if (!m || !isPlanId(m[1])) throw new UsageError(`swarm step: --ruling ${one.slice(0, 80)} is not <T>:fix|out-of-model|defer:F3[+F5]|review`);
+      out.set(m[1], m[3] ? { kind: "defer", ids: m[3].toUpperCase().split("+") } : { kind: m[2] });
+    }
+  });
+  return out;
+}
+function readAsked(file) {
+  const raw = readJson2(file);
+  if (!isObject(raw) || typeof raw.at !== "string" || !isObject(raw.close)) return null;
+  const r2 = raw.ruling;
+  const ruling = isObject(r2) && r2.kind === "defer" && asList(r2.ids).length ? { kind: "defer", ids: asList(r2.ids) } : isObject(r2) && (r2.kind === "fix" || r2.kind === "out-of-model" || r2.kind === "review") ? { kind: r2.kind } : void 0;
+  return { ...raw, findings: asList(raw.findings), ruling };
+}
 function readRespawned(file) {
   const raw = readJson2(file);
   const out = {};
@@ -17874,13 +18043,13 @@ function latestRound(work, n) {
   let round = 0;
   let names2 = [];
   try {
-    names2 = (0, import_node_fs21.readdirSync)(work);
+    names2 = (0, import_node_fs22.readdirSync)(work);
   } catch {
     return 0;
   }
   for (const d of names2) {
     const m = new RegExp(`^reviews-${n}-(\\d+)$`).exec(d);
-    if (m && (0, import_node_fs21.existsSync)(import_node_path23.default.join(work, d, "review-plan.json"))) round = Math.max(round, Number(m[1]));
+    if (m && (0, import_node_fs22.existsSync)(import_node_path23.default.join(work, d, "review-plan.json"))) round = Math.max(round, Number(m[1]));
   }
   return round;
 }
@@ -17889,10 +18058,14 @@ function seenOf(work, n, round, base) {
   if (v && typeof v === "object" && typeof v.head === "string" && v.head && typeof v.round === "number" && v.round > round) return v.head;
   return (round ? readText2(import_node_path23.default.join(work, `reviews-${n}-${round}`, "head.txt"))?.trim() : null) || base;
 }
+function lastAgent(c, taskN) {
+  const e = readEvents(c.io.cwd).filter((x) => x.kind === "agent" && x.task === taskN && typeof x.agent === "string" && x.agent).at(-1);
+  return e ? String(e.agent) : null;
+}
 function logAgent(c, taskN, agent, role) {
   const last = readEvents(c.io.cwd).filter((e) => e.kind === "agent" && e.task === taskN).at(-1);
   if (last?.agent === agent && last.role === role) return;
-  appendEvent(c.io.cwd, { ts: c.iso, kind: "agent", task: taskN, agent, role });
+  appendEvent(c.io.cwd, { ts: c.iso(), kind: "agent", task: taskN, agent, role });
 }
 function finished(file) {
   const text2 = readText2(file);
@@ -17907,7 +18080,7 @@ function finished(file) {
 function renewLease(io, e, task, t, now) {
   let prev = null;
   try {
-    prev = normalizePublicTask(JSON.parse((0, import_node_fs21.readFileSync)(executionTaskFile(io.cwd, task), "utf8")));
+    prev = normalizePublicTask(JSON.parse((0, import_node_fs22.readFileSync)(executionTaskFile(io.cwd, task), "utf8")));
   } catch {
     prev = null;
   }
@@ -17922,7 +18095,7 @@ function keptPrep(c, task, worktree) {
   const kept = readJson2(import_node_path23.default.join(work, "prep-1.json"));
   const head2 = c.deps.gitAt(worktree)(["rev-parse", "HEAD"])?.trim();
   const { n, base } = briefOf2(readEvents(c.io.cwd), task);
-  const ok = !!kept && typeof kept === "object" && typeof kept.validate === "string" && !!head2 && kept.base === head2 && base === head2 && n === 1 && (0, import_node_fs21.existsSync)(import_node_path23.default.join(work, "baseline-1.json"));
+  const ok = !!kept && typeof kept === "object" && typeof kept.validate === "string" && !!head2 && kept.base === head2 && base === head2 && n === 1 && (0, import_node_fs22.existsSync)(import_node_path23.default.join(work, "baseline-1.json"));
   return ok ? kept : null;
 }
 function startTask(c, task, resume) {
@@ -17936,8 +18109,8 @@ function startTask(c, task, resume) {
     return false;
   }
   const brief = import_node_path23.default.join(work, "brief-1.md");
-  (0, import_node_fs21.mkdirSync)(import_node_path23.default.join(c.io.cwd, work), { recursive: true });
-  (0, import_node_fs21.writeFileSync)(import_node_path23.default.join(c.io.cwd, brief), `${b.stdout.trimEnd()}
+  (0, import_node_fs22.mkdirSync)(import_node_path23.default.join(c.io.cwd, work), { recursive: true });
+  (0, import_node_fs22.writeFileSync)(import_node_path23.default.join(c.io.cwd, brief), `${b.stdout.trimEnd()}
 
 Worktree: ${slash2(worktree)} (work only inside this directory).
 `);
@@ -17946,11 +18119,11 @@ Worktree: ${slash2(worktree)} (work only inside this directory).
   const kept = resume ? keptPrep(c, task, worktree) : null;
   const pr = kept ?? call(c, task, ["prep", "--task", `${task}-1`, "--path", "large", "--cwd", worktree]);
   if (!pr) return false;
-  if (!kept) (0, import_node_fs21.writeFileSync)(import_node_path23.default.join(c.io.cwd, work, "prep-1.json"), JSON.stringify(pr, null, 2) + "\n");
+  if (!kept) (0, import_node_fs22.writeFileSync)(import_node_path23.default.join(c.io.cwd, work, "prep-1.json"), JSON.stringify(pr, null, 2) + "\n");
   const impl = tri.implementer && typeof tri.implementer === "object" ? tri.implementer : {};
   const agent = typeof impl.agent === "string" ? impl.agent : "forge-impl";
   logAgent(c, `${task}-1`, agent, typeof impl.role === "string" ? impl.role : "impl");
-  if (!call(c, task, ["swarm", "task", task, "--stage", "implement", "--agent", agent, "--round", "0", "--lease", c.agentLease])) return false;
+  if (!call(c, task, ["swarm", "task", task, "--stage", "implement", "--agent", agent, "--round", "0", "--lease", c.agentLease()])) return false;
   c.actions.push({
     type: "spawnImplementer",
     task,
@@ -17966,14 +18139,14 @@ Worktree: ${slash2(worktree)} (work only inside this directory).
   });
   return true;
 }
-function reviewBase(c, task, t, n, base) {
+function reviewBase(c, task, t, n, base, adopted) {
   if (t.attempts < 1) return base;
   const moved = c.deps.gitAt(t.worktree)(["merge-base", "HEAD", c.runBranch])?.trim();
-  if (!moved || moved === base) return base;
+  if (!moved || moved === base && !adopted) return base;
   const work = import_node_path23.default.join(c.io.cwd, ".forge", "work", task);
   const mark = import_node_path23.default.join(work, `base-${n}.json`);
   const kept = readJson2(mark);
-  if (kept && typeof kept === "object" && kept.base === moved && (0, import_node_fs21.existsSync)(import_node_path23.default.join(work, `baseline-${n}.json`))) return moved;
+  if (kept && typeof kept === "object" && kept.base === moved && (0, import_node_fs22.existsSync)(import_node_path23.default.join(work, `baseline-${n}.json`))) return moved;
   const argv = ["validate", "--all", "--path", "large", "--base-run", "--task", `${task}-${n}`, "--cwd", runWorktree(c.io.cwd)];
   const r2 = c.deps.cli(argv);
   let results = null;
@@ -17986,23 +18159,35 @@ function reviewBase(c, task, t, n, base) {
     c.actions.push({ type: "error", task, command: "validate", code: r2.code, stderr: (r2.stderr || r2.stdout).trim().slice(0, 500) });
     return null;
   }
-  (0, import_node_fs21.writeFileSync)(import_node_path23.default.join(work, `baseline-${n}.json`), JSON.stringify(results, null, 2) + "\n");
-  (0, import_node_fs21.writeFileSync)(mark, JSON.stringify({ base: moved, from: base, at: c.iso }, null, 2) + "\n");
+  (0, import_node_fs22.writeFileSync)(import_node_path23.default.join(work, `baseline-${n}.json`), JSON.stringify(results, null, 2) + "\n");
+  (0, import_node_fs22.writeFileSync)(mark, JSON.stringify({ base: moved, from: adopted ? null : base, at: c.iso() }, null, 2) + "\n");
   return moved;
 }
 function implementerBack(c, task, t, told) {
-  const { n, base } = briefOf2(readEvents(c.io.cwd), task);
+  const brief = briefOf2(readEvents(c.io.cwd), task);
+  const { n } = brief;
+  const adopted = !brief.base && t.attempts > 0;
+  const base = brief.base ?? (adopted ? c.deps.gitAt(t.worktree)(["merge-base", "HEAD", c.runBranch])?.trim() || null : null);
   const work = import_node_path23.default.join(".forge", "work", task);
   const abs = import_node_path23.default.join(c.io.cwd, work);
   const report = import_node_path23.default.join(work, `report-${n}.txt`);
   const round = latestRound(abs, n);
+  const given = c.rulings.get(task);
+  if (given?.kind === "defer" && round) {
+    closeRound(c, task, t, n, round, roundOf(c, task, n, round), ["--defer", given.ids.join(",")]);
+    return;
+  }
+  if (given && given.kind !== "review") {
+    c.actions.push(stepError(task, `--ruling ${task}:${given.kind}: no question of ${task} waits for that answer`));
+    return;
+  }
   const head2 = c.deps.gitAt(t.worktree)(["rev-parse", "HEAD"])?.trim() || null;
-  if (t.stage !== "validate") {
+  if (t.stage !== "validate" && !given) {
     const seen = seenOf(abs, n, round, base);
     const committed = !!head2 && !!seen && head2 !== seen;
     let fresh2 = false;
     try {
-      fresh2 = (0, import_node_fs21.statSync)(import_node_path23.default.join(c.io.cwd, report)).mtimeMs > Date.parse(t.stageSince);
+      fresh2 = (0, import_node_fs22.statSync)(import_node_path23.default.join(c.io.cwd, report)).mtimeMs > Date.parse(t.stageSince);
     } catch {
       fresh2 = false;
     }
@@ -18013,12 +18198,12 @@ function implementerBack(c, task, t, told) {
     }
   }
   if (!base) {
-    c.actions.push({ type: "error", task, command: "swarm step", code: 2, stderr: `no phase implement with a base for ${task}: run FORGE prep first` });
+    c.actions.push(stepError(task, `no phase implement with a base for ${task}: run FORGE prep first`));
     return;
   }
   const loc = ["--locale", c.locale];
   if (!call(c, task, ["swarm", "task", task, "--stage", "validate", "--no-agent"])) return;
-  const at2 = reviewBase(c, task, t, n, base);
+  const at2 = reviewBase(c, task, t, n, base, adopted);
   if (!at2) return;
   const tri = call(c, task, ["triage", "--plan", c.planArg, "--task", task, "--cwd", t.worktree, "--base", at2, ...loc]);
   if (!tri) return;
@@ -18042,45 +18227,104 @@ function implementerBack(c, task, t, told) {
   const say = typeof rp.say === "string" ? { say: rp.say } : {};
   const r2 = typeof rp.round === "number" ? rp.round : round + 1;
   if (rp.validatorsRound && typeof rp.validatorsRound === "object") {
-    if (head2) (0, import_node_fs21.writeFileSync)(import_node_path23.default.join(abs, `validators-head-${n}.json`), JSON.stringify({ round: r2, head: head2 }) + "\n");
-    if (!call(c, task, ["swarm", "task", task, "--stage", "implement", ...t.agent ? ["--agent", t.agent] : ["--no-agent"], "--lease", c.agentLease])) return;
-    c.actions.push({ type: "validatorsRound", task, implementer: t.agent, findings: rp.validatorsRound.findings ?? null, ...say });
+    if (head2) (0, import_node_fs22.writeFileSync)(import_node_path23.default.join(abs, `validators-head-${n}.json`), JSON.stringify({ round: r2, head: head2 }) + "\n");
+    const agent = t.agent ?? lastAgent(c, `${task}-${n}`);
+    if (!call(c, task, ["swarm", "task", task, "--stage", "implement", ...agent ? ["--agent", agent] : ["--no-agent"], "--lease", c.agentLease()])) return;
+    c.actions.push({ type: "validatorsRound", task, implementer: agent, findings: rp.validatorsRound.findings ?? null, ...say });
     return;
   }
   const spawn = Array.isArray(rp.spawn) ? rp.spawn : [];
   const first = spawn.find((s2) => s2.twin !== true);
-  if (!call(c, task, ["swarm", "task", task, "--stage", "review", "--agent", String(first?.agent ?? "forge-review-correctness"), "--round", String(r2), "--lease", c.agentLease])) return;
+  if (!call(c, task, ["swarm", "task", task, "--stage", "review", "--agent", String(first?.agent ?? "forge-review-correctness"), "--round", String(r2), "--lease", c.agentLease()])) return;
   if (rp.express === true) {
     c.actions.push({ type: "express", task, round: r2, validate: rp.validators?.cmd ?? null, spawn, ...say });
     return;
   }
   c.actions.push({ type: "spawnReviewers", task, round: r2, path: tri.path ?? null, base: at2, spawn, ...rp.carried ? { carried: rp.carried } : {}, ...say });
 }
-function reviewersBack(c, task, t, told) {
-  const { n } = briefOf2(readEvents(c.io.cwd), task);
+function pendingVerify(c, taskN, roundDir) {
+  const m = readJson2(import_node_path23.default.join(roundDir, "verify-pending.json"));
+  if (!isObject(m) || typeof m.at !== "string") return null;
+  const at2 = m.at;
+  const skipped = new Set(readEvents(c.io.cwd).filter((e) => e.kind === "verify-skip" && e.task === taskN && typeof e.ts === "string" && e.ts >= at2 && typeof e.surface === "string").map((e) => String(e.surface)));
+  const surfaces = (Array.isArray(m.surfaces) ? m.surfaces : []).filter((s2) => isObject(s2) && typeof s2.name === "string" && !skipped.has(s2.name));
+  if (!surfaces.length) return null;
+  const { at: _at, task: _task, ...rest } = m;
+  return { role: "verify", ...rest, surfaces };
+}
+function roundOf(c, task, n, round) {
   const work = import_node_path23.default.join(".forge", "work", task);
   const abs = import_node_path23.default.join(c.io.cwd, work);
-  const round = latestRound(abs, n);
-  if (!round) return;
   const roundDir = import_node_path23.default.join(abs, `reviews-${n}-${round}`);
   const plan = readJson2(import_node_path23.default.join(roundDir, "review-plan.json"));
-  const entries = (Array.isArray(plan?.spawn) ? plan.spawn : []).filter((s2) => s2.twin !== true);
-  const pending = plan?.validatorsPending === true && !(0, import_node_fs21.existsSync)(import_node_path23.default.join(abs, `validators-${n}.json`));
+  const verify = pendingVerify(c, `${task}-${n}`, roundDir);
+  const entries = [...(isObject(plan) && Array.isArray(plan.spawn) ? plan.spawn : []).filter((s2) => s2.twin !== true), ...verify ? [verify] : []];
   const respawnedFile = import_node_path23.default.join(roundDir, "respawned.json");
-  const respawned = readRespawned(respawnedFile);
+  return { work, abs, roundDir, plan: isObject(plan) ? plan : null, entries, respawnedFile, respawned: readRespawned(respawnedFile) };
+}
+function reviewersBack(c, task, t, told) {
+  const { n } = briefOf2(readEvents(c.io.cwd), task);
+  const round = latestRound(import_node_path23.default.join(c.io.cwd, ".forge", "work", task), n);
+  if (!round) return;
+  const r2 = roundOf(c, task, n, round);
+  const asked = readAsked(import_node_path23.default.join(r2.roundDir, "asked.json"));
+  const given = c.rulings.get(task);
+  if (asked) {
+    answer(c, task, t, n, round, r2, asked, given);
+    return;
+  }
+  if (given) {
+    c.actions.push(stepError(task, `--ruling ${task}:${given.kind}: no question of ${task} waits for an answer`));
+    return;
+  }
+  const pending = r2.plan?.validatorsPending === true && !(0, import_node_fs22.existsSync)(import_node_path23.default.join(r2.abs, `validators-${n}.json`));
   const isBack = (s2) => {
-    const file = import_node_path23.default.join(roundDir, `${keyOf(s2)}.json`);
+    const file = import_node_path23.default.join(r2.roundDir, `${keyOf(s2)}.json`);
     if (!finished(file)) return false;
-    const was = respawned[keyOf(s2)];
-    return !was || (mtimeOf(file) ?? 0) > was.mtimeMs || Date.parse(c.iso) - Date.parse(was.at) > AGENT_LEASE_MINUTES * 6e4;
+    const was = r2.respawned[keyOf(s2)];
+    return !was || (mtimeOf(file) ?? 0) > was.mtimeMs || Date.parse(c.iso()) - Date.parse(was.at) > AGENT_LEASE_MINUTES * 6e4;
   };
-  const back = entries.every(isBack) && !pending;
+  const back = r2.entries.every(isBack) && !pending;
   if (!told && !back) return;
-  const r2 = c.deps.cli(["review-close", "--task", `${task}-${n}`, "--dir", slash2(work), "--path", "large", "--cwd", t.worktree, "--locale", c.locale]);
-  if (r2.code === 3) {
+  if (r2.entries.some((s2) => keyOf(s2) === "verify" && !(0, import_node_fs22.existsSync)(import_node_path23.default.join(r2.roundDir, "verify.json")))) {
+    const missing = r2.entries.filter((s2) => !(0, import_node_fs22.existsSync)(import_node_path23.default.join(r2.roundDir, `${keyOf(s2)}.json`))).map((s2) => slash2(import_node_path23.default.join(r2.work, `reviews-${n}-${round}`, `${keyOf(s2)}.json`)));
+    c.actions.push({ type: "reviewMissing", task, missing });
+    return;
+  }
+  closeRound(c, task, t, n, round, r2, []);
+}
+function answer(c, task, t, n, round, r2, asked, given) {
+  const file = import_node_path23.default.join(r2.roundDir, "asked.json");
+  const ruling = given ?? asked.ruling;
+  if (!ruling) {
+    if (!asked.reemitted && Date.parse(c.iso()) - Date.parse(asked.at) > ASK_AGAIN_MS) {
+      c.after.push(() => writeJson(file, { ...asked, reemitted: true }));
+      c.actions.push({ type: "ask", task, close: asked.close });
+    }
+    return;
+  }
+  if (ruling.kind === "review") {
+    c.actions.push(stepError(task, `--ruling ${task}:review is for an implementer back without a commit; ${task} waits for an answer to its question`));
+    return;
+  }
+  const ids = ruling.kind === "defer" ? ruling.ids : ruling.kind === "out-of-model" ? asked.findings : [];
+  if (ruling.kind === "out-of-model" && !ids.length) {
+    c.actions.push(stepError(task, `the question of ${task} names no finding id: answer with --ruling ${task}:defer:<id> or ${task}:fix`));
+    return;
+  }
+  if (given && JSON.stringify(given) !== JSON.stringify(asked.ruling)) writeJson(file, { ...asked, ruling: given });
+  if (ruling.kind === "fix") {
+    follow(c, task, t, n, round, r2, asked.close);
+    return;
+  }
+  closeRound(c, task, t, n, round, r2, [ruling.kind === "defer" ? "--defer" : "--out-of-model", ids.join(",")]);
+}
+function closeRound(c, task, t, n, round, r2, extra) {
+  const res = c.deps.cli(["review-close", "--task", `${task}-${n}`, "--dir", slash2(r2.work), "--path", "large", "--cwd", t.worktree, "--locale", c.locale, ...extra]);
+  if (res.code === 3) {
     const m = (() => {
       try {
-        return JSON.parse(r2.stdout);
+        return JSON.parse(res.stdout);
       } catch {
         return {};
       }
@@ -18088,57 +18332,131 @@ function reviewersBack(c, task, t, told) {
     c.actions.push({ type: "reviewMissing", task, missing: m.missing ?? [] });
     return;
   }
-  if (r2.code !== 0) {
-    c.actions.push({ type: "error", task, command: "review-close", code: r2.code, stderr: (r2.stderr || r2.stdout).trim().slice(0, 500) });
+  let out = null;
+  try {
+    out = res.code === 0 ? JSON.parse(res.stdout) : null;
+  } catch {
+    out = null;
+  }
+  if (!isObject(out)) {
+    c.actions.push({ type: "error", task, command: "review-close", code: res.code, stderr: (res.stderr || res.stdout).trim().slice(0, 500) });
     return;
   }
-  const out = JSON.parse(r2.stdout);
   const again = [.../* @__PURE__ */ new Set([...asList(out.invalid), ...asList(out.incomplete)])];
-  const fresh2 = again.filter((k) => !Object.hasOwn(respawned, k));
+  const fresh2 = again.filter((k) => !Object.hasOwn(r2.respawned, k));
   if (fresh2.length) {
-    const next2 = { ...respawned };
-    for (const k of fresh2) next2[k] = { at: c.iso, mtimeMs: mtimeOf(import_node_path23.default.join(roundDir, `${k}.json`)) ?? 0 };
-    c.after.push(() => (0, import_node_fs21.writeFileSync)(respawnedFile, JSON.stringify(next2, null, 2) + "\n"));
-    c.actions.push({ type: "respawnReviewers", task, reviewers: fresh2, spawn: entries.filter((s2) => fresh2.includes(keyOf(s2))) });
+    const next = { ...r2.respawned };
+    for (const k of fresh2) next[k] = { at: c.iso(), mtimeMs: mtimeOf(import_node_path23.default.join(r2.roundDir, `${k}.json`)) ?? 0 };
+    c.after.push(() => writeJson(r2.respawnedFile, next));
+    c.actions.push({ type: "respawnReviewers", task, reviewers: fresh2, spawn: r2.entries.filter((s2) => fresh2.includes(keyOf(s2))) });
     return;
   }
   if (out.ask) {
+    const asked = isObject(out.ask) && Array.isArray(out.ask.findings) ? out.ask.findings : [];
+    const findings = asked.map((f) => typeof f === "string" ? f : isObject(f) && typeof f.id === "string" ? f.id : null).filter((x) => !!x);
+    writeJson(import_node_path23.default.join(r2.roundDir, "asked.json"), {
+      at: c.iso(),
+      findings,
+      next: out.next ?? null,
+      implementer: out.implementer ?? null,
+      findingsFile: out.findings ?? null,
+      handover: out.handover ?? null,
+      revert: out.revert ?? null,
+      close: out
+    });
     c.actions.push({ type: "ask", task, close: out });
     return;
   }
+  follow(c, task, t, n, round, r2, out);
+}
+function follow(c, task, t, n, round, r2, out) {
+  const verify = closeVerify(c, task, t, n, round, r2);
+  const v = verify ? { verify } : {};
+  const answered = () => (0, import_node_fs22.rmSync)(import_node_path23.default.join(r2.roundDir, "asked.json"), { force: true });
   const next = out.next;
-  const impl = out.implementer && typeof out.implementer === "object" ? out.implementer : null;
+  const impl = isObject(out.implementer) ? out.implementer : null;
   if (next === "done") {
-    const deferred = Array.isArray(out.deferred) && out.deferred.length ? import_node_path23.default.join(work, "deferred.json") : null;
-    if (deferred) (0, import_node_fs21.writeFileSync)(import_node_path23.default.join(c.io.cwd, deferred), JSON.stringify(out.deferred, null, 2) + "\n");
+    const deferred = Array.isArray(out.deferred) && out.deferred.length ? import_node_path23.default.join(r2.work, "deferred.json") : null;
+    if (deferred) writeJson(import_node_path23.default.join(c.io.cwd, deferred), out.deferred);
     if (!call(c, task, ["swarm", "task", task, "--stage", "verdict", "--status", "accepted", "--no-agent"])) return;
-    c.actions.push({ type: "accepted", task, score: out.score ?? null, deferred: deferred && slash2(deferred) });
+    answered();
+    c.actions.push({ type: "accepted", task, score: out.score ?? null, deferred: deferred && slash2(deferred), ...v });
     return;
   }
   if (next === "resume" || next === "fresh-stronger" || next === "redo") {
     const agent = typeof impl?.agent === "string" ? impl.agent : null;
     if (agent) logAgent(c, `${task}-${n}`, agent, typeof impl?.role === "string" ? impl.role : "impl");
-    if (!call(c, task, ["swarm", "task", task, "--stage", "implement", ...agent ? ["--agent", agent] : ["--no-agent"], "--round", String(round + 1), "--lease", c.agentLease])) return;
+    if (!call(c, task, ["swarm", "task", task, "--stage", "implement", ...agent ? ["--agent", agent] : ["--no-agent"], "--round", String(round + 1), "--lease", c.agentLease()])) return;
+    answered();
     c.actions.push({
       type: next === "resume" ? "resumeImplementer" : next === "fresh-stronger" ? "freshImplementer" : "redo",
       task,
       implementer: impl,
       findings: out.findings ?? null,
       ...out.handover ? { handover: out.handover } : {},
-      ...next === "redo" ? { revert: out.revert ?? null } : {}
+      ...next === "redo" ? { revert: out.revert ?? null } : {},
+      ...v
     });
     return;
   }
-  const detail = import_node_path23.default.join(work, "blocked.txt");
-  (0, import_node_fs21.writeFileSync)(import_node_path23.default.join(c.io.cwd, detail), `${String(next)}: ${asList(out.reasons).join("; ")}`.slice(0, 500) + "\n");
+  const detail = import_node_path23.default.join(r2.work, "blocked.txt");
+  (0, import_node_fs22.writeFileSync)(import_node_path23.default.join(c.io.cwd, detail), `${String(next)}: ${asList(out.reasons).join("; ")}`.slice(0, 500) + "\n");
   if (!call(c, task, ["swarm", "task", task, "--status", "blocked", "--detail-file", slash2(detail)])) return;
-  c.actions.push({ type: "blocked", task, next: next ?? null, reasons: asList(out.reasons) });
+  answered();
+  c.actions.push({ type: "blocked", task, next: next ?? null, reasons: asList(out.reasons), ...v });
+}
+function closeVerify(c, task, t, n, round, r2) {
+  if (!(0, import_node_fs22.existsSync)(import_node_path23.default.join(r2.roundDir, "verify.json"))) return null;
+  const keptFile = import_node_path23.default.join(r2.roundDir, "verify-close.json");
+  const kept = readJson2(keptFile);
+  let out = isObject(kept) ? kept : null;
+  if (!out) {
+    out = call(c, task, [
+      "verify-close",
+      "--task",
+      `${task}-${n}`,
+      "--dir",
+      slash2(import_node_path23.default.join(r2.work, `reviews-${n}-${round}`)),
+      "--evidence",
+      slash2(import_node_path23.default.join(r2.work, "evidence", `${n}-${round}`)),
+      "--db",
+      c.db,
+      "--cwd",
+      t.worktree,
+      "--locale",
+      c.locale
+    ]);
+    if (!out) return null;
+    writeJson(keptFile, out);
+  }
+  const files = asList(out.commit);
+  const git = c.deps.gitAt(t.worktree);
+  if (files.length && git(["status", "--porcelain", "--", ...files])?.trim()) {
+    git(["add", "--", ...files]);
+    const committed = git(["commit", "-q", "-m", `${task}: learned notes of its verification`, "--", ...files]) !== null;
+    const head2 = committed ? git(["rev-parse", "HEAD"])?.trim() : null;
+    if (head2) writeJson(import_node_path23.default.join(r2.abs, `validators-head-${n}.json`), { round: round + 1, head: head2 });
+    else c.actions.push({ type: "error", task, command: "git commit", code: 1, stderr: `could not commit ${files.join(", ")} in ${slash2(t.worktree)}: commit them with the task's work` });
+  }
+  const { result, learned, cleanup, evidence, commit, proposals, say } = out;
+  return { result, learned, cleanup, evidence, commit, proposals, say };
 }
 function integrateTask(c, task) {
   const r2 = call(c, task, ["swarm", "integrate", task, "--locale", c.locale]);
   if (!r2) return;
   const { result, ...rest } = r2;
   c.actions.push({ ...rest, type: String(result), task });
+}
+function integratedAgain(c, task, t) {
+  const state = readJson2(import_node_path23.default.resolve(c.io.cwd, c.db, "state", `${task}.json`));
+  if (!isObject(state) || state.status === "done") return;
+  const git = c.deps.gitAt(c.io.cwd);
+  const tip = git(["rev-parse", "--verify", "-q", `refs/heads/${t.branch}^{commit}`])?.trim() || null;
+  const merges = (git(["log", "--merges", "--format=%H %P", c.runBranch]) ?? "").split("\n").map((l) => l.trim().split(" ")).filter((p) => p.length >= 3);
+  const titled = () => (git(["log", "--merges", "--format=%H", "--fixed-strings", `--grep=forge: integrate ${task}`, c.runBranch]) ?? "").split("\n").map((s2) => s2.trim()).find(Boolean);
+  const sha = (tip ? merges.find((p) => p.slice(2).includes(tip))?.[0] : void 0) ?? titled();
+  if (!sha) return;
+  c.actions.push({ type: "integrated", task, sha, commit: commitInfo(git, sha), again: true });
 }
 function forgeOf(events, task, t) {
   const mine = (x) => x.task === task || typeof x.task === "string" && x.task.startsWith(`${task}-`) && /^\d+$/.test(x.task.slice(task.length + 1));
@@ -18162,7 +18480,7 @@ function publishOf(io, e, started, versions, now) {
   const own = new Date(now.getTime() + LEASE_MINUTES * 6e4).toISOString();
   const lease = (task) => {
     try {
-      const p = normalizePublicTask(JSON.parse((0, import_node_fs21.readFileSync)(executionTaskFile(io.cwd, task), "utf8")));
+      const p = normalizePublicTask(JSON.parse((0, import_node_fs22.readFileSync)(executionTaskFile(io.cwd, task), "utf8")));
       if (p && p.runId === e.runId) return p.leaseUntil;
     } catch {
     }
@@ -18234,6 +18552,7 @@ function swarmStep(rest, io, deps) {
   if (rest.includes("--locale") && loc !== "es" && loc !== "en") throw new UsageError("swarm step: --locale must be es or en");
   const returned = new Set((flag("returned") ?? "").split(",").map((s2) => s2.trim()).filter(Boolean));
   for (const task of returned) if (!isPlanId(task)) throw new UsageError(`swarm step: --returned ${task.slice(0, 80)} is not a task id`);
+  const rulings = readRulings(rest);
   const versions = readVersions(io.cwd, flag("versions"));
   const e0 = readExecution(io.cwd);
   if (!e0) throw new UsageError("swarm step: no execution (forge swarm start)");
@@ -18241,18 +18560,47 @@ function swarmStep(rest, io, deps) {
   if (e0.kind !== "plan") throw new UsageError("swarm step: an ephemeral run steps with the single commands (references/ephemeral.md)");
   const locale = loc === "es" || loc === "en" ? loc : (e0.locale ?? "").toLowerCase().split(/[-_]/)[0] === "es" ? "es" : "en";
   const now = io.now();
-  const c = { io, deps, planArg, runBranch: e0.branch, locale, iso: now.toISOString(), agentLease: new Date(now.getTime() + AGENT_LEASE_MINUTES * 6e4).toISOString(), actions: [], after: [] };
+  const lock = takeStepLock(io.cwd, now, deps.alive);
+  if ("busy" in lock) return { code: 0, stdout: JSON.stringify({ busy: lock.busy }, null, 2) + "\n", stderr: "" };
+  try {
+    const c = {
+      io,
+      deps,
+      planArg,
+      db,
+      runBranch: e0.branch,
+      locale,
+      rulings,
+      actions: [],
+      after: [],
+      iso: () => io.now().toISOString(),
+      agentLease: () => new Date(io.now().getTime() + AGENT_LEASE_MINUTES * 6e4).toISOString()
+    };
+    return stepOnce(c, e0, returned, versions, flag("agents"), now);
+  } finally {
+    lock.release();
+  }
+}
+function stepOnce(c, e0, returned, versions, agents, now) {
+  const { io } = c;
   for (const [task, t] of Object.entries(e0.tasks)) if (t.status === "running" && t.executor === "subagents") renewLease(io, e0, task, t, now);
   const started = /* @__PURE__ */ new Set();
+  const ruled = /* @__PURE__ */ new Set();
   for (const [task, t] of Object.entries(e0.tasks)) {
     if (t.status !== "running" || t.executor !== "subagents") continue;
     if (t.stage === "brief") {
       if (startTask(c, task, true)) started.add(task);
-    } else if (t.stage === "implement" || t.stage === "validate") implementerBack(c, task, t, returned.has(task));
-    else if (t.stage === "review") reviewersBack(c, task, t, returned.has(task));
+    } else if (t.stage === "implement" || t.stage === "validate") {
+      ruled.add(task);
+      implementerBack(c, task, t, returned.has(task));
+    } else if (t.stage === "review") {
+      ruled.add(task);
+      reviewersBack(c, task, t, returned.has(task));
+    }
   }
-  const agents = flag("agents");
-  const tick = call(c, null, ["swarm", "tick", "--plan", planArg, "--db", db, ...agents ? ["--agents", agents] : []]);
+  for (const [task, r2] of c.rulings) if (!ruled.has(task)) c.actions.push(stepError(task, `--ruling ${task}:${r2.kind}: ${task} is not a task of this execution back from its implementer or its reviewers`));
+  for (const [task, t] of Object.entries(e0.tasks)) if (t.status === "integrated") integratedAgain(c, task, t);
+  const tick = call(c, null, ["swarm", "tick", "--plan", c.planArg, "--db", c.db, ...agents ? ["--agents", agents] : []]);
   let wait = null;
   for (const a of Array.isArray(tick?.actions) ? tick.actions : []) {
     if (a.type === "start" && e0.mode === "subagents" && typeof a.task === "string") {
@@ -18263,12 +18611,13 @@ function swarmStep(rest, io, deps) {
   }
   const after = readExecution(io.cwd) ?? e0;
   const out = {
+    // The leases it publishes run from now, at the step's end (M7).
     actions: c.actions,
-    publish: publishOf(io, after, started, versions, now),
+    publish: publishOf(io, after, started, versions, io.now()),
     running: Object.values(after.tasks).filter((t) => t.status === "running").length,
     parallel: after.parallel,
     wait,
-    say: stepSay(c.actions, wait, locale)
+    say: stepSay(c.actions, wait, c.locale)
   };
   for (const write of c.after) write();
   return { code: 0, stdout: JSON.stringify(out, null, 2) + "\n", stderr: "" };
@@ -18431,11 +18780,11 @@ function renderStats(s2, locale) {
 }
 
 // src/forge/tools.ts
-var import_node_fs23 = require("node:fs");
+var import_node_fs24 = require("node:fs");
 var import_node_path25 = __toESM(require("node:path"), 1);
 
 // src/forge/superpowers.ts
-var import_node_fs22 = require("node:fs");
+var import_node_fs23 = require("node:fs");
 var import_node_os = require("node:os");
 var import_node_path24 = __toESM(require("node:path"), 1);
 
@@ -18746,7 +19095,7 @@ function claudeJsonDir(env = process.env) {
 var isObj4 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
 var readJson3 = (file) => {
   try {
-    return JSON.parse((0, import_node_fs22.readFileSync)(file, "utf8"));
+    return JSON.parse((0, import_node_fs23.readFileSync)(file, "utf8"));
   } catch {
     return null;
   }
@@ -18784,7 +19133,7 @@ function installedPlugins(opts, only) {
       const m = /^([^@\s]+)@[^@\s]+$/.exec(key);
       if (!m || only && !only(m[1]) || !enabled(key, maps ??= enabledMaps(opts.configDir, opts.projectDir))) continue;
       for (const e of Array.isArray(value) ? value : [value]) {
-        if (!isObj4(e) || typeof e.installPath !== "string" || !(0, import_node_fs22.existsSync)(e.installPath)) continue;
+        if (!isObj4(e) || typeof e.installPath !== "string" || !(0, import_node_fs23.existsSync)(e.installPath)) continue;
         const scope = typeof e.scope === "string" ? e.scope : "user";
         if (scope !== "user" && scope !== "managed" && !(typeof e.projectPath === "string" && samePath2(e.projectPath, opts.projectDir))) continue;
         out.push({ key, name: m[1], installPath: e.installPath, version: typeof e.version === "string" && e.version ? e.version : "unknown" });
@@ -18805,7 +19154,7 @@ function locateSuperpowers(opts) {
 function spSkillPath(sp, skill) {
   if (!sp.installed || !sp.installPath || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(skill)) return null;
   const f = import_node_path24.default.join(sp.installPath, "skills", skill, "SKILL.md");
-  return (0, import_node_fs22.existsSync)(f) ? f : null;
+  return (0, import_node_fs23.existsSync)(f) ? f : null;
 }
 function spLedgerDone(roots, planAbs) {
   const done = /* @__PURE__ */ new Set();
@@ -18816,7 +19165,7 @@ function spLedgerDone(roots, planAbs) {
     const base = import_node_path24.default.join(root, ".superpowers", "sdd");
     let names2 = [];
     try {
-      names2 = (0, import_node_fs22.readdirSync)(base);
+      names2 = (0, import_node_fs23.readdirSync)(base);
     } catch {
       continue;
     }
@@ -18825,12 +19174,12 @@ function spLedgerDone(roots, planAbs) {
       const dir = import_node_path24.default.join(base, name);
       let marker = null;
       try {
-        marker = (0, import_node_fs22.readFileSync)(import_node_path24.default.join(dir, "plan-path"), "utf8").trim().replace(/\\/g, "/");
+        marker = (0, import_node_fs23.readFileSync)(import_node_path24.default.join(dir, "plan-path"), "utf8").trim().replace(/\\/g, "/");
       } catch {
       }
       if (marker !== null && marker !== rel3) continue;
       try {
-        for (const n of sddComplete((0, import_node_fs22.readFileSync)(import_node_path24.default.join(dir, "progress.md"), "utf8"), rel3)) done.add(n);
+        for (const n of sddComplete((0, import_node_fs23.readFileSync)(import_node_path24.default.join(dir, "progress.md"), "utf8"), rel3)) done.add(n);
       } catch {
       }
     }
@@ -18840,7 +19189,7 @@ function spLedgerDone(roots, planAbs) {
 function recentMarkdown(root, relDir, now, committedAt2) {
   let names2;
   try {
-    names2 = (0, import_node_fs22.readdirSync)(import_node_path24.default.join(root, relDir));
+    names2 = (0, import_node_fs23.readdirSync)(import_node_path24.default.join(root, relDir));
   } catch {
     return [];
   }
@@ -18849,7 +19198,7 @@ function recentMarkdown(root, relDir, now, committedAt2) {
     if (!name.endsWith(".md")) continue;
     const abs = import_node_path24.default.join(root, relDir, name);
     try {
-      const st = (0, import_node_fs22.statSync)(abs);
+      const st = (0, import_node_fs23.statSync)(abs);
       if (!st.isFile()) continue;
       const time = committedAt2?.(`${relDir}/${name}`) ?? st.mtimeMs;
       if (now - time <= SP_WINDOW_MS) out.push({ name, abs, time });
@@ -18860,7 +19209,7 @@ function recentMarkdown(root, relDir, now, committedAt2) {
 }
 var titleOf = (file) => {
   try {
-    return specH1((0, import_node_fs22.readFileSync)(file, "utf8"));
+    return specH1((0, import_node_fs23.readFileSync)(file, "utf8"));
   } catch {
     return null;
   }
@@ -18869,12 +19218,12 @@ function spSpecs(root, now, opts = {}) {
   const cited = /* @__PURE__ */ new Set();
   let projects = [];
   try {
-    projects = (0, import_node_fs22.readdirSync)(import_node_path24.default.join(root, "docs", "waypoint"));
+    projects = (0, import_node_fs23.readdirSync)(import_node_path24.default.join(root, "docs", "waypoint"));
   } catch {
   }
   for (const p of projects) {
     try {
-      const s2 = parseDesign((0, import_node_fs22.readFileSync)(import_node_path24.default.join(root, "docs", "waypoint", p, "design.md"), "utf8")).meta.source;
+      const s2 = parseDesign((0, import_node_fs23.readFileSync)(import_node_path24.default.join(root, "docs", "waypoint", p, "design.md"), "utf8")).meta.source;
       if (s2) cited.add(s2.replace(/\\/g, "/").replace(/^\.\//, ""));
     } catch {
     }
@@ -18893,7 +19242,7 @@ function spPlans(root, now, opts = {}) {
   for (const f of recentMarkdown(root, "docs/superpowers/plans", now, opts.committedAt)) {
     let plan;
     try {
-      plan = markDone(parseSpPlan((0, import_node_fs22.readFileSync)(f.abs, "utf8")), spLedgerDone([root], f.abs));
+      plan = markDone(parseSpPlan((0, import_node_fs23.readFileSync)(f.abs, "utf8")), spLedgerDone([root], f.abs));
     } catch {
       continue;
     }
@@ -18963,7 +19312,7 @@ function toolGaps(names2, deps) {
 var isObj5 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
 var readJson4 = (file) => {
   try {
-    return JSON.parse((0, import_node_fs23.readFileSync)(file, "utf8"));
+    return JSON.parse((0, import_node_fs24.readFileSync)(file, "utf8"));
   } catch {
     return null;
   }
@@ -18996,7 +19345,7 @@ function mcpInventory(opts) {
     }
   }
   const legacy = import_node_path25.default.join(opts.configDir, ".config.json");
-  const global = readJson4((0, import_node_fs23.existsSync)(legacy) ? legacy : import_node_path25.default.join(opts.homeDir, ".claude.json"));
+  const global = readJson4((0, import_node_fs24.existsSync)(legacy) ? legacy : import_node_path25.default.join(opts.homeDir, ".claude.json"));
   const disabled = /* @__PURE__ */ new Set();
   const approved = /* @__PURE__ */ new Set();
   let approveAll = false;
@@ -19088,7 +19437,7 @@ function cleanupPids(pids, kill, protect = [process.pid, process.ppid]) {
 var killTarget = (pid, pgid) => pgid === pid ? -pid : pid;
 
 // src/forge/route.ts
-var import_node_fs24 = require("node:fs");
+var import_node_fs25 = require("node:fs");
 var import_node_path26 = __toESM(require("node:path"), 1);
 
 // src/lib/decisions.ts
@@ -19290,7 +19639,7 @@ function normalizeRoute(x) {
 }
 function readRoute(root) {
   try {
-    return normalizeRoute(JSON.parse((0, import_node_fs24.readFileSync)(routeFile(root), "utf8")));
+    return normalizeRoute(JSON.parse((0, import_node_fs25.readFileSync)(routeFile(root), "utf8")));
   } catch {
     return null;
   }
@@ -19300,10 +19649,10 @@ function writeRoute(root, doc) {
   const file = routeFile(root);
   const tmp = `${file}.${process.pid}.tmp`;
   try {
-    (0, import_node_fs24.writeFileSync)(tmp, JSON.stringify(doc, null, 2) + "\n");
-    (0, import_node_fs24.renameSync)(tmp, file);
+    (0, import_node_fs25.writeFileSync)(tmp, JSON.stringify(doc, null, 2) + "\n");
+    (0, import_node_fs25.renameSync)(tmp, file);
   } finally {
-    (0, import_node_fs24.rmSync)(tmp, { force: true });
+    (0, import_node_fs25.rmSync)(tmp, { force: true });
   }
 }
 function firstStage(chosen, has) {
@@ -19420,7 +19769,7 @@ function hookRoute(io, which) {
 }
 
 // src/forge/decisions.ts
-var import_node_fs25 = require("node:fs");
+var import_node_fs26 = require("node:fs");
 var import_node_path27 = __toESM(require("node:path"), 1);
 var DecisionInputError = class extends Error {
 };
@@ -19452,7 +19801,7 @@ var Input = external_exports.object({
 }).strict();
 function readDecisionsDoc(root) {
   try {
-    return normalizeDecisionsDoc(JSON.parse((0, import_node_fs25.readFileSync)(decisionsFile(root), "utf8")));
+    return normalizeDecisionsDoc(JSON.parse((0, import_node_fs26.readFileSync)(decisionsFile(root), "utf8")));
   } catch {
     return null;
   }
@@ -19468,10 +19817,10 @@ function saveDecisionsDoc(root, event, n) {
     const file = decisionsFile(root);
     const tmp = `${file}.${process.pid}.tmp`;
     try {
-      (0, import_node_fs25.writeFileSync)(tmp, JSON.stringify(next) + "\n");
-      (0, import_node_fs25.renameSync)(tmp, file);
+      (0, import_node_fs26.writeFileSync)(tmp, JSON.stringify(next) + "\n");
+      (0, import_node_fs26.renameSync)(tmp, file);
     } finally {
-      (0, import_node_fs25.rmSync)(tmp, { force: true });
+      (0, import_node_fs26.rmSync)(tmp, { force: true });
     }
   } catch {
   }
@@ -19569,12 +19918,12 @@ var MAX_OUTPUT = 4 * 1024 * 1024;
 var MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 var MAX_WHY = 200;
 function readTail(fd) {
-  const size = (0, import_node_fs26.fstatSync)(fd).size;
+  const size = (0, import_node_fs27.fstatSync)(fd).size;
   const len = Math.min(size, MAX_OUTPUT);
   const buf = Buffer.alloc(len);
   let off = 0;
   while (off < len) {
-    const n = (0, import_node_fs26.readSync)(fd, buf, off, len - off, size - len + off);
+    const n = (0, import_node_fs27.readSync)(fd, buf, off, len - off, size - len + off);
     if (n <= 0) break;
     off += n;
   }
@@ -19610,9 +19959,9 @@ function defaultExec(cwd2) {
     let dir;
     let fd;
     try {
-      dir = (0, import_node_fs26.mkdtempSync)(import_node_path28.default.join((0, import_node_os2.tmpdir)(), "forge-exec-"));
+      dir = (0, import_node_fs27.mkdtempSync)(import_node_path28.default.join((0, import_node_os2.tmpdir)(), "forge-exec-"));
       const file = import_node_path28.default.join(dir, "out.log");
-      fd = (0, import_node_fs26.openSync)(file, "w+");
+      fd = (0, import_node_fs27.openSync)(file, "w+");
       const r2 = (0, import_node_child_process2.spawnSync)(process.execPath, ["-e", WRAPPER_SOURCE, "--", cmd, String(timeoutMs), file], {
         cwd: cwd2,
         windowsHide: true,
@@ -19622,7 +19971,7 @@ function defaultExec(cwd2) {
         maxBuffer: 64 * 1024
       });
       const err = r2.error;
-      const timedOut2 = err?.code === "ETIMEDOUT" || r2.status === TIMEOUT_EXIT && (0, import_node_fs26.existsSync)(`${file}.timeout`);
+      const timedOut2 = err?.code === "ETIMEDOUT" || r2.status === TIMEOUT_EXIT && (0, import_node_fs27.existsSync)(`${file}.timeout`);
       let output = readTail(fd);
       if (r2.stderr) output += `${output && !output.endsWith("\n") ? "\n" : ""}${r2.stderr}`;
       if (err && !timedOut2) output += `${output && !output.endsWith("\n") ? "\n" : ""}${err.message}
@@ -19634,13 +19983,13 @@ function defaultExec(cwd2) {
     } finally {
       if (fd !== void 0) {
         try {
-          (0, import_node_fs26.closeSync)(fd);
+          (0, import_node_fs27.closeSync)(fd);
         } catch {
         }
       }
       if (dir !== void 0) {
         try {
-          (0, import_node_fs26.rmSync)(dir, { recursive: true, force: true });
+          (0, import_node_fs27.rmSync)(dir, { recursive: true, force: true });
         } catch {
         }
       }
@@ -19693,13 +20042,13 @@ function defaultExecMany(cwd2) {
     const t0 = Date.now();
     let dir;
     try {
-      dir = (0, import_node_fs26.mkdtempSync)(import_node_path28.default.join((0, import_node_os2.tmpdir)(), "forge-many-"));
+      dir = (0, import_node_fs27.mkdtempSync)(import_node_path28.default.join((0, import_node_os2.tmpdir)(), "forge-many-"));
       const logs = cmds.map((_, i) => import_node_path28.default.join(dir, `${i}.log`));
-      for (const l of logs) (0, import_node_fs26.writeFileSync)(l, "");
+      for (const l of logs) (0, import_node_fs27.writeFileSync)(l, "");
       const out = import_node_path28.default.join(dir, "out.json");
       const spec = import_node_path28.default.join(dir, "spec.json");
       const width = Math.max(1, Math.min(Math.floor(concurrency) || 1, cmds.length || 1));
-      (0, import_node_fs26.writeFileSync)(spec, JSON.stringify({ cmds: cmds.map((cmd, i) => ({ cmd, log: logs[i] })), timeoutMs: timeoutSec * 1e3, concurrency: width, out }));
+      (0, import_node_fs27.writeFileSync)(spec, JSON.stringify({ cmds: cmds.map((cmd, i) => ({ cmd, log: logs[i] })), timeoutMs: timeoutSec * 1e3, concurrency: width, out }));
       const r2 = (0, import_node_child_process2.spawnSync)(process.execPath, ["-e", MANY_WRAPPER_SOURCE, "--", spec], {
         cwd: cwd2,
         windowsHide: true,
@@ -19710,7 +20059,7 @@ function defaultExecMany(cwd2) {
       });
       let rows = null;
       try {
-        rows = JSON.parse((0, import_node_fs26.readFileSync)(out, "utf8"));
+        rows = JSON.parse((0, import_node_fs27.readFileSync)(out, "utf8"));
       } catch {
         rows = null;
       }
@@ -19719,14 +20068,14 @@ function defaultExecMany(cwd2) {
         let output = "";
         let fd;
         try {
-          fd = (0, import_node_fs26.openSync)(logs[i], "r");
+          fd = (0, import_node_fs27.openSync)(logs[i], "r");
           output = readTail(fd);
         } catch {
           output = "";
         } finally {
           if (fd !== void 0) {
             try {
-              (0, import_node_fs26.closeSync)(fd);
+              (0, import_node_fs27.closeSync)(fd);
             } catch {
             }
           }
@@ -19743,7 +20092,7 @@ function defaultExecMany(cwd2) {
     } finally {
       if (dir !== void 0) {
         try {
-          (0, import_node_fs26.rmSync)(dir, { recursive: true, force: true });
+          (0, import_node_fs27.rmSync)(dir, { recursive: true, force: true });
         } catch {
         }
       }
@@ -19760,17 +20109,17 @@ function defaultGit(cwd2) {
   };
 }
 var repoReader = (root) => ({
-  exists: (rel3) => (0, import_node_fs26.existsSync)(import_node_path28.default.join(root, rel3)),
+  exists: (rel3) => (0, import_node_fs27.existsSync)(import_node_path28.default.join(root, rel3)),
   read: (rel3) => {
     try {
-      return (0, import_node_fs26.readFileSync)(import_node_path28.default.join(root, rel3), "utf8");
+      return (0, import_node_fs27.readFileSync)(import_node_path28.default.join(root, rel3), "utf8");
     } catch {
       return null;
     }
   },
   list: (dir) => {
     try {
-      return (0, import_node_fs26.readdirSync)(import_node_path28.default.join(root, dir ?? ""));
+      return (0, import_node_fs27.readdirSync)(import_node_path28.default.join(root, dir ?? ""));
     } catch {
       return [];
     }
@@ -19780,7 +20129,7 @@ function planTask(cwd2, planArg, id2) {
   if (!planArg || !id2) throw new UsageError("--plan and --task are required");
   let text2;
   try {
-    text2 = (0, import_node_fs26.readFileSync)(import_node_path28.default.resolve(cwd2, planArg), "utf8");
+    text2 = (0, import_node_fs27.readFileSync)(import_node_path28.default.resolve(cwd2, planArg), "utf8");
   } catch {
     throw new UsageError(`cannot read plan ${planArg}`);
   }
@@ -19818,7 +20167,7 @@ function planTasksFor(cwd2, planArg) {
   if (planArg) {
     let text2;
     try {
-      text2 = (0, import_node_fs26.readFileSync)(import_node_path28.default.resolve(cwd2, planArg), "utf8");
+      text2 = (0, import_node_fs27.readFileSync)(import_node_path28.default.resolve(cwd2, planArg), "utf8");
     } catch {
       throw new UsageError(`cannot read plan ${planArg}`);
     }
@@ -19832,13 +20181,13 @@ function planTasksFor(cwd2, planArg) {
   const docs = import_node_path28.default.join(cwd2, "docs", "waypoint");
   let projects;
   try {
-    projects = (0, import_node_fs26.readdirSync)(docs);
+    projects = (0, import_node_fs27.readdirSync)(docs);
   } catch {
     return [];
   }
   return projects.flatMap((p) => {
     try {
-      return parsePlan((0, import_node_fs26.readFileSync)(import_node_path28.default.join(docs, p, "plan.yaml"), "utf8")).tasks;
+      return parsePlan((0, import_node_fs27.readFileSync)(import_node_path28.default.join(docs, p, "plan.yaml"), "utf8")).tasks;
     } catch {
       return [];
     }
@@ -19848,7 +20197,7 @@ function planStates(main) {
   const docs = import_node_path28.default.join(main, "docs", "waypoint");
   let projects;
   try {
-    projects = (0, import_node_fs26.readdirSync)(docs);
+    projects = (0, import_node_fs27.readdirSync)(docs);
   } catch {
     return [];
   }
@@ -19856,7 +20205,7 @@ function planStates(main) {
   for (const p of projects) {
     let tasks;
     try {
-      tasks = parsePlan((0, import_node_fs26.readFileSync)(import_node_path28.default.join(docs, p, "plan.yaml"), "utf8")).tasks;
+      tasks = parsePlan((0, import_node_fs27.readFileSync)(import_node_path28.default.join(docs, p, "plan.yaml"), "utf8")).tasks;
     } catch {
       continue;
     }
@@ -19864,13 +20213,13 @@ function planStates(main) {
     const states = {};
     let names2 = [];
     try {
-      names2 = (0, import_node_fs26.readdirSync)(dir).filter((f) => f.endsWith(".json"));
+      names2 = (0, import_node_fs27.readdirSync)(dir).filter((f) => f.endsWith(".json"));
     } catch {
       names2 = [];
     }
     for (const f of names2) {
       try {
-        states[f.slice(0, -5)] = JSON.parse((0, import_node_fs26.readFileSync)(import_node_path28.default.join(dir, f), "utf8"));
+        states[f.slice(0, -5)] = JSON.parse((0, import_node_fs27.readFileSync)(import_node_path28.default.join(dir, f), "utf8"));
       } catch {
       }
     }
@@ -19889,11 +20238,11 @@ function spTaskNumber(v) {
 function findWaypointCli(scriptPath) {
   const forgeRoot = import_node_path28.default.resolve(import_node_path28.default.dirname(scriptPath), "..");
   const dev = import_node_path28.default.join(forgeRoot, "..", "waypoint", "dist", "waypoint.cjs");
-  if ((0, import_node_fs26.existsSync)(dev)) return import_node_path28.default.resolve(dev);
+  if ((0, import_node_fs27.existsSync)(dev)) return import_node_path28.default.resolve(dev);
   const base = import_node_path28.default.join(forgeRoot, "..", "..", "waypoint");
   let versions = [];
   try {
-    versions = (0, import_node_fs26.readdirSync)(base);
+    versions = (0, import_node_fs27.readdirSync)(base);
   } catch {
     return null;
   }
@@ -19908,7 +20257,7 @@ function findWaypointCli(scriptPath) {
   };
   for (const v of versions.sort((a, b) => cmp(b, a))) {
     const f = import_node_path28.default.join(base, v, "dist", "waypoint.cjs");
-    if ((0, import_node_fs26.existsSync)(f)) return import_node_path28.default.resolve(f);
+    if ((0, import_node_fs27.existsSync)(f)) return import_node_path28.default.resolve(f);
   }
   return null;
 }
@@ -19923,7 +20272,7 @@ function mcpOf(io, dir) {
 }
 function surfaceBlob(dir, file) {
   try {
-    const text2 = Buffer.from((0, import_node_fs26.readFileSync)(import_node_path28.default.join(dir, file)).toString("latin1").replace(/\r\n/g, "\n"), "latin1");
+    const text2 = Buffer.from((0, import_node_fs27.readFileSync)(import_node_path28.default.join(dir, file)).toString("latin1").replace(/\r\n/g, "\n"), "latin1");
     const id2 = (0, import_node_child_process2.execFileSync)("git", ["--no-replace-objects", "hash-object", "-w", "--no-filters", "--stdin"], { cwd: dir, input: text2, encoding: "utf8", timeout: 1e4, stdio: ["pipe", "pipe", "ignore"], windowsHide: true }).trim();
     return OBJECT_ID.test(id2) ? id2 : null;
   } catch {
@@ -19935,20 +20284,20 @@ function writeFullDiff(root, name, hash, diff) {
   for (const part of [".forge", "work", "surfaces"]) {
     dir = import_node_path28.default.join(dir, part);
     try {
-      if ((0, import_node_fs26.lstatSync)(dir).isSymbolicLink()) return null;
+      if ((0, import_node_fs27.lstatSync)(dir).isSymbolicLink()) return null;
     } catch {
     }
   }
   const file = import_node_path28.default.join(dir, `${name}-${hash.slice(0, 16)}.diff`);
   const tmp = `${file}.${process.pid}.tmp`;
   try {
-    (0, import_node_fs26.mkdirSync)(dir, { recursive: true });
-    (0, import_node_fs26.writeFileSync)(tmp, diff, { flag: "wx" });
-    (0, import_node_fs26.renameSync)(tmp, file);
+    (0, import_node_fs27.mkdirSync)(dir, { recursive: true });
+    (0, import_node_fs27.writeFileSync)(tmp, diff, { flag: "wx" });
+    (0, import_node_fs27.renameSync)(tmp, file);
     return file;
   } catch {
     try {
-      (0, import_node_fs26.rmSync)(tmp, { force: true });
+      (0, import_node_fs27.rmSync)(tmp, { force: true });
     } catch {
     }
     return null;
@@ -20006,11 +20355,12 @@ function stopContext(cwd2, now) {
   const proposals = loadProposals(cwd2);
   return {
     now,
-    stopFile: (0, import_node_fs26.existsSync)(stopFile(cwd2)),
+    stopFile: (0, import_node_fs27.existsSync)(stopFile(cwd2)),
     approvedPending: proposals.filter(isActionable).length,
     pendingProposals: proposals.filter((p) => p.status === "proposed" || p.status === "discussing").length
   };
 }
+var HOOK_LOCK_WAIT_MS = 2e3;
 function hookStop(io) {
   try {
     const input = JSON.parse(io.stdin ?? "");
@@ -20035,9 +20385,14 @@ function hookStop(io) {
       return JSON.stringify({ decision: "block", reason: d2.reason + (sessionReply(d2.run, exec?.active ? exec : null, () => planLocale(io.cwd, exec?.project)) ?? replyIn(null)) }) + "\n";
     }
     const jobs = sid ? liveJobs(main, io.now()).filter((j) => j.session === null || j.session === sid) : [];
-    const d = decideExecutionStop(hookInput, exec, { now: io.now(), stopFile: (0, import_node_fs26.existsSync)(stopFile(main)), jobs });
+    const d = decideExecutionStop(hookInput, exec, { now: io.now(), stopFile: (0, import_node_fs27.existsSync)(stopFile(main)), jobs });
     if (!d.block) return "";
-    updateExecution(main, (cur) => cur && cur.runId === d.exec.runId ? { ...cur, lastBlockStep: d.exec.lastBlockStep, ...d.ended ? { active: false, stopReason: d.exec.stopReason, sleepUntil: null } : {} } : null, { now: io.now, sleep: io.sleep });
+    try {
+      updateExecution(main, (cur) => cur && cur.runId === d.exec.runId ? { ...cur, lastBlockStep: d.exec.lastBlockStep, ...d.ended ? { active: false, stopReason: d.exec.stopReason, sleepUntil: null } : {} } : null, { now: io.now, sleep: io.sleep, waitMs: HOOK_LOCK_WAIT_MS });
+    } catch (e) {
+      if (e instanceof UsageError) return "";
+      throw e;
+    }
     return JSON.stringify({ decision: "block", reason: d.reason + (sessionReply(null, d.exec, () => planLocale(main, d.exec.project)) ?? replyIn(null)) }) + "\n";
   } catch {
     return "";
@@ -20059,21 +20414,21 @@ function logVerifyResult(cwd2, at2, task, dir, verifyFile) {
 var SHOT_MAX_BYTES = 2 * 1024 * 1024;
 function learnSurface(io, dir, name, notes, heading) {
   const file = import_node_path28.default.join(dir, surfaceFile(name));
-  if (!(0, import_node_fs26.existsSync)(file)) return { reason: `${surfaceFile(name)} does not exist` };
-  if ((0, import_node_fs26.lstatSync)(file).isSymbolicLink()) return { reason: `${surfaceFile(name)} is a symlink` };
-  const before3 = (0, import_node_fs26.readFileSync)(file, "utf8");
+  if (!(0, import_node_fs27.existsSync)(file)) return { reason: `${surfaceFile(name)} does not exist` };
+  if ((0, import_node_fs27.lstatSync)(file).isSymbolicLink()) return { reason: `${surfaceFile(name)} is a symlink` };
+  const before3 = (0, import_node_fs27.readFileSync)(file, "utf8");
   const cur = readLocal(io.cwd).surfaces[name];
   const allowed = cur?.state === "allowed" && hashMatches(cur.hash, permissionHash(before3, readLearned(io.cwd).get(name)));
   const at2 = io.now().toISOString();
   const r2 = appendLearned(before3, at2.slice(0, 10), notes, heading);
-  (0, import_node_fs26.writeFileSync)(file, r2.text);
+  (0, import_node_fs27.writeFileSync)(file, r2.text);
   if (allowed) recordLearned(io.cwd, name, r2.added, at2);
   return { count: r2.count };
 }
 function cleanupEvidence(dir) {
   let pids = [];
   try {
-    const raw = JSON.parse((0, import_node_fs26.readFileSync)(import_node_path28.default.join(dir, "pids.json"), "utf8"));
+    const raw = JSON.parse((0, import_node_fs27.readFileSync)(import_node_path28.default.join(dir, "pids.json"), "utf8"));
     if (Array.isArray(raw)) pids = raw.filter((p) => Number.isInteger(p));
   } catch {
     pids = [];
@@ -20118,7 +20473,7 @@ function triageCore(io, args) {
   let task = textArgs.filter((a) => !a.startsWith("--")).join(" ").trim();
   if (flag("text-file") !== void 0) {
     try {
-      task = (0, import_node_fs26.readFileSync)(import_node_path28.default.resolve(io.cwd, flag("text-file")), "utf8").trim();
+      task = (0, import_node_fs27.readFileSync)(import_node_path28.default.resolve(io.cwd, flag("text-file")), "utf8").trim();
     } catch {
       throw new UsageError("triage: cannot read --text-file");
     }
@@ -20133,7 +20488,7 @@ function triageCore(io, args) {
     const file = flag("superpowers-plan");
     let sp;
     try {
-      sp = spPlanDone((0, import_node_fs26.readFileSync)(import_node_path28.default.resolve(io.cwd, file), "utf8"), import_node_path28.default.resolve(io.cwd, file), repoDir);
+      sp = spPlanDone((0, import_node_fs27.readFileSync)(import_node_path28.default.resolve(io.cwd, file), "utf8"), import_node_path28.default.resolve(io.cwd, file), repoDir);
     } catch (e) {
       throw new UsageError(e instanceof SpPlanError ? `triage: ${file}: ${e.message}` : `triage: cannot read ${file}`);
     }
@@ -20237,15 +20592,15 @@ function triageCore(io, args) {
     output: { ...result, catalog, new: fresh2, implementer, announce: line2, gate, ...auto, ...reviewed, review }
   };
 }
-function cleanProbe(cwd2, task, textFile) {
+function cleanProbe(cwd2, task, textFile, rmdir = import_node_fs27.rmdirSync) {
   const dir = import_node_path28.default.join(cwd2, ".forge");
   const file = import_node_path28.default.join(dir, "work", task, "task.txt");
   if (!samePath(import_node_path28.default.resolve(cwd2, textFile), file)) return false;
   try {
-    if (!(0, import_node_fs26.lstatSync)(dir).isDirectory()) return false;
+    if (!(0, import_node_fs27.lstatSync)(dir).isDirectory()) return false;
     const entries = [];
     const walk = (d, rel3) => {
-      for (const e of (0, import_node_fs26.readdirSync)(d, { withFileTypes: true })) {
+      for (const e of (0, import_node_fs27.readdirSync)(d, { withFileTypes: true })) {
         const r2 = rel3 ? `${rel3}/${e.name}` : e.name;
         entries.push(e.isDirectory() ? `${r2}/` : r2);
         if (e.isDirectory()) walk(import_node_path28.default.join(d, e.name), r2);
@@ -20253,12 +20608,15 @@ function cleanProbe(cwd2, task, textFile) {
     };
     walk(dir, "");
     if (entries.sort().join("\n") !== ["work/", `work/${task}/`, `work/${task}/task.txt`].join("\n")) return false;
-    (0, import_node_fs26.rmSync)(file);
-    for (const d of [import_node_path28.default.join(dir, "work", task), import_node_path28.default.join(dir, "work"), dir]) (0, import_node_fs26.rmdirSync)(d);
-    return true;
+    (0, import_node_fs27.rmSync)(file);
   } catch {
     return false;
   }
+  try {
+    for (const d of [import_node_path28.default.join(dir, "work", task), import_node_path28.default.join(dir, "work"), dir]) rmdir(d);
+  } catch {
+  }
+  return true;
 }
 function jobOf(argv) {
   const [cmd, sub, third] = argv;
@@ -20313,9 +20671,9 @@ function runCommand(argv, io) {
     const dir = argv[cwdAt + 1];
     if (!dir || dir.startsWith("--")) return { code: 2, stdout: "", stderr: "forge: --cwd needs a directory\n" };
     const abs = import_node_path28.default.resolve(io.cwd, dir);
-    if (!(0, import_node_fs26.existsSync)(abs)) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} does not exist
+    if (!(0, import_node_fs27.existsSync)(abs)) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} does not exist
 ` };
-    if (!(0, import_node_fs26.statSync)(abs).isDirectory()) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} is not a directory
+    if (!(0, import_node_fs27.statSync)(abs).isDirectory()) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} is not a directory
 ` };
     argv = [...argv.slice(0, cwdAt), ...argv.slice(cwdAt + 2)];
     io = { ...io, workdir: abs, git: defaultGit(abs), exec: defaultExec(abs), execMany: defaultExecMany(abs) };
@@ -20343,7 +20701,7 @@ function runCommand(argv, io) {
           const label = flag("data-file") !== void 0 ? "--data-file" : "--data";
           let parsed;
           try {
-            const raw = flag("data-file") !== void 0 ? (0, import_node_fs26.readFileSync)(import_node_path28.default.resolve(io.cwd, flag("data-file")), "utf8") : flag("data");
+            const raw = flag("data-file") !== void 0 ? (0, import_node_fs27.readFileSync)(import_node_path28.default.resolve(io.cwd, flag("data-file")), "utf8") : flag("data");
             parsed = JSON.parse(raw);
           } catch {
             throw new UsageError(`log: ${label} must be a JSON object`);
@@ -20363,7 +20721,7 @@ function runCommand(argv, io) {
           const inPlan = (project2) => {
             if (!isSafeId(project2)) return false;
             try {
-              return parsePlan((0, import_node_fs26.readFileSync)(import_node_path28.default.join(main, "docs", "waypoint", project2, "plan.yaml"), "utf8")).tasks.some((t) => t.id === task);
+              return parsePlan((0, import_node_fs27.readFileSync)(import_node_path28.default.join(main, "docs", "waypoint", project2, "plan.yaml"), "utf8")).tasks.some((t) => t.id === task);
             } catch {
               return false;
             }
@@ -20381,7 +20739,7 @@ function runCommand(argv, io) {
           const n = spTaskNumber(flag("task"));
           let text2;
           try {
-            text2 = (0, import_node_fs26.readFileSync)(import_node_path28.default.resolve(io.cwd, file), "utf8");
+            text2 = (0, import_node_fs27.readFileSync)(import_node_path28.default.resolve(io.cwd, file), "utf8");
           } catch {
             throw new UsageError(`brief: cannot read ${file}`);
           }
@@ -20394,7 +20752,7 @@ function runCommand(argv, io) {
         }
         const { plan, task } = planTask(io.cwd, flag("plan"), flag("task"));
         const design = flag("design") ?? import_node_path28.default.join(import_node_path28.default.dirname(flag("plan")), "design.md");
-        const designPath = (0, import_node_fs26.existsSync)(import_node_path28.default.resolve(io.cwd, design)) ? design.replace(/\\/g, "/") : null;
+        const designPath = (0, import_node_fs27.existsSync)(import_node_path28.default.resolve(io.cwd, design)) ? design.replace(/\\/g, "/") : null;
         return ok(renderBrief(plan, task, { planPath: flag("plan").replace(/\\/g, "/"), designPath, tdd: briefTdd(io, repoDir), threatModel: briefThreatModel(repoDir) }));
       }
       case "triage": {
@@ -20470,7 +20828,7 @@ function runCommand(argv, io) {
           if (flag("baseline") === void 0) throw new UsageError("validate: --baseline needs the JSON a validate run printed on the base commit");
           let baseline;
           try {
-            baseline = JSON.parse((0, import_node_fs26.readFileSync)(import_node_path28.default.resolve(io.cwd, flag("baseline")), "utf8"));
+            baseline = JSON.parse((0, import_node_fs27.readFileSync)(import_node_path28.default.resolve(io.cwd, flag("baseline")), "utf8"));
           } catch {
             throw new UsageError("validate: --baseline must be the JSON written by forge validate");
           }
@@ -20494,10 +20852,10 @@ function runCommand(argv, io) {
         const reviews = {};
         for (const name of ["correctness", "security", "perf"]) {
           const file = import_node_path28.default.join(dir, `${name}.json`);
-          if ((0, import_node_fs26.existsSync)(file)) reviews[name] = parseReview((0, import_node_fs26.readFileSync)(file, "utf8"));
+          if ((0, import_node_fs27.existsSync)(file)) reviews[name] = parseReview((0, import_node_fs27.readFileSync)(file, "utf8"));
         }
         const verifyPath = import_node_path28.default.join(dir, "verify.json");
-        const verifyFile = (0, import_node_fs26.existsSync)(verifyPath) ? parseVerifyFile((0, import_node_fs26.readFileSync)(verifyPath, "utf8")) : void 0;
+        const verifyFile = (0, import_node_fs27.existsSync)(verifyPath) ? parseVerifyFile((0, import_node_fs27.readFileSync)(verifyPath, "utf8")) : void 0;
         if (verifyFile !== void 0) reviews.verify = verifyReview(verifyFile);
         if (!Object.keys(reviews).length) throw new UsageError(`no reviews found in ${dirArg}`);
         let validatorsOk;
@@ -20507,7 +20865,7 @@ function runCommand(argv, io) {
         if (flag("validators")) {
           let results;
           try {
-            results = JSON.parse((0, import_node_fs26.readFileSync)(import_node_path28.default.resolve(io.cwd, flag("validators")), "utf8"));
+            results = JSON.parse((0, import_node_fs27.readFileSync)(import_node_path28.default.resolve(io.cwd, flag("validators")), "utf8"));
           } catch {
             throw new UsageError("verdict: --validators must be the JSON written by forge validate");
           }
@@ -20547,8 +20905,8 @@ function runCommand(argv, io) {
         if (!task || !dirArg) throw new UsageError("verify-result: --task and --dir are required");
         const dir = import_node_path28.default.resolve(io.cwd, dirArg);
         const verifyPath = import_node_path28.default.join(dir, "verify.json");
-        if (!(0, import_node_fs26.existsSync)(verifyPath)) throw new UsageError(`verify-result: no verify.json in ${dirArg}`);
-        const verifyFile = parseVerifyFile((0, import_node_fs26.readFileSync)(verifyPath, "utf8"));
+        if (!(0, import_node_fs27.existsSync)(verifyPath)) throw new UsageError(`verify-result: no verify.json in ${dirArg}`);
+        const verifyFile = parseVerifyFile((0, import_node_fs27.readFileSync)(verifyPath, "utf8"));
         if (!verifyFile) throw new UsageError(`verify-result: ${dirArg}/verify.json is not a usable verify result (result pass|fail|blocked, checks, a reason when blocked)`);
         return json3({ task, ...logVerifyResult(io.cwd, ts(), task, dir, verifyFile) });
       }
@@ -20566,7 +20924,7 @@ function runCommand(argv, io) {
         const dir = import_node_path28.default.resolve(io.cwd, dirArg);
         const evidence = import_node_path28.default.resolve(io.cwd, evArg);
         const verifyPath = import_node_path28.default.join(dir, "verify.json");
-        const v = parseVerifyFile((0, import_node_fs26.existsSync)(verifyPath) ? (0, import_node_fs26.readFileSync)(verifyPath, "utf8") : null);
+        const v = parseVerifyFile((0, import_node_fs27.existsSync)(verifyPath) ? (0, import_node_fs27.readFileSync)(verifyPath, "utf8") : null);
         if (!v) throw new UsageError(`verify-close: ${dirArg}/verify.json is not a usable verify result (result pass|fail|blocked, checks, a reason when blocked)`);
         const notes = /* @__PURE__ */ new Map();
         for (const l of v.learned) notes.set(l.surface, [...notes.get(l.surface) ?? [], l.note]);
@@ -20601,7 +20959,7 @@ function runCommand(argv, io) {
         }
         let realEvidence;
         try {
-          realEvidence = (0, import_node_fs26.realpathSync)(evidence);
+          realEvidence = (0, import_node_fs27.realpathSync)(evidence);
         } catch {
           realEvidence = evidence;
         }
@@ -20613,8 +20971,8 @@ function runCommand(argv, io) {
           const file = import_node_path28.default.resolve(evidence, c.shot);
           let real, bytes;
           try {
-            real = (0, import_node_fs26.realpathSync)(file);
-            bytes = (0, import_node_fs26.statSync)(real).size;
+            real = (0, import_node_fs27.realpathSync)(file);
+            bytes = (0, import_node_fs27.statSync)(real).size;
           } catch {
             return [];
           }
@@ -20626,7 +20984,7 @@ function runCommand(argv, io) {
         if (db) {
           const base = task.replace(/-\d+$/, "");
           try {
-            const st = JSON.parse((0, import_node_fs26.readFileSync)(import_node_path28.default.resolve(io.cwd, db, "state", `${base}.json`), "utf8"));
+            const st = JSON.parse((0, import_node_fs27.readFileSync)(import_node_path28.default.resolve(io.cwd, db, "state", `${base}.json`), "utf8"));
             previous = (st.evidence?.shots ?? []).map((s2) => s2?.id).filter((x) => typeof x === "string" && x.length > 0);
           } catch {
             previous = [];
@@ -20671,7 +21029,7 @@ function runCommand(argv, io) {
         };
         const readText3 = (f, what) => {
           try {
-            return (0, import_node_fs26.readFileSync)(import_node_path28.default.resolve(io.cwd, f), "utf8");
+            return (0, import_node_fs27.readFileSync)(import_node_path28.default.resolve(io.cwd, f), "utf8");
           } catch {
             throw new UsageError(`proposals: cannot read ${what}`);
           }
@@ -20778,9 +21136,9 @@ function runCommand(argv, io) {
             if (!dir) throw new UsageError("proposals pull: --dir is required");
             const abs = import_node_path28.default.resolve(io.cwd, dir);
             let names2;
-            if (!(0, import_node_fs26.existsSync)(abs)) return ok("0");
+            if (!(0, import_node_fs27.existsSync)(abs)) return ok("0");
             try {
-              names2 = (0, import_node_fs26.readdirSync)(abs);
+              names2 = (0, import_node_fs27.readdirSync)(abs);
             } catch {
               throw new UsageError(`proposals pull: cannot read ${dir}`);
             }
@@ -20791,7 +21149,7 @@ function runCommand(argv, io) {
               if (!PROPOSAL_ID.test(id2)) continue;
               let doc;
               try {
-                doc = normalizeProposal(JSON.parse((0, import_node_fs26.readFileSync)(import_node_path28.default.join(abs, name), "utf8")));
+                doc = normalizeProposal(JSON.parse((0, import_node_fs27.readFileSync)(import_node_path28.default.join(abs, name), "utf8")));
               } catch {
                 continue;
               }
@@ -20844,7 +21202,7 @@ function runCommand(argv, io) {
               if (e instanceof PlanError) throw new UsageError(`proposals to-task: the resulting plan is invalid: ${e.issues.join("; ")}`);
               throw e;
             }
-            (0, import_node_fs26.writeFileSync)(import_node_path28.default.resolve(io.cwd, planArg), next);
+            (0, import_node_fs27.writeFileSync)(import_node_path28.default.resolve(io.cwd, planArg), next);
             const { id: _id, ...doc } = found;
             saveProposal(io.cwd, id2, { ...doc, taskId: task.id });
             appendEvent(io.cwd, { ts: ts(), kind: "proposal", action: "to-task", id: id2, taskId: task.id });
@@ -20870,11 +21228,11 @@ function runCommand(argv, io) {
         }
         if (sub === "learn") {
           const file = import_node_path28.default.join(io.cwd, surfaceFile(name));
-          if (!(0, import_node_fs26.existsSync)(file)) throw new UsageError(`surfaces learn: ${surfaceFile(name)} does not exist`);
-          if ((0, import_node_fs26.lstatSync)(file).isSymbolicLink()) throw new UsageError(`surfaces learn: ${surfaceFile(name)} is a symlink`);
+          if (!(0, import_node_fs27.existsSync)(file)) throw new UsageError(`surfaces learn: ${surfaceFile(name)} does not exist`);
+          if ((0, import_node_fs27.lstatSync)(file).isSymbolicLink()) throw new UsageError(`surfaces learn: ${surfaceFile(name)} is a symlink`);
           let notes;
           try {
-            notes = JSON.parse((0, import_node_fs26.readFileSync)(import_node_path28.default.resolve(io.cwd, flag("notes-file") ?? ""), "utf8"));
+            notes = JSON.parse((0, import_node_fs27.readFileSync)(import_node_path28.default.resolve(io.cwd, flag("notes-file") ?? ""), "utf8"));
           } catch {
             throw new UsageError("surfaces learn: --notes-file must be a JSON array of strings");
           }
@@ -20912,6 +21270,10 @@ function runCommand(argv, io) {
         if (!PATH_ORDER.includes(p)) throw new UsageError(`verify-plan: --path must be one of ${PATH_ORDER.join("|")}`);
         const loc = flag("locale");
         if (has("locale") && loc !== "es" && loc !== "en") throw new UsageError("verify-plan: --locale must be es|en");
+        const dirArg = flag("dir");
+        const roundDir = dirArg === void 0 ? null : import_node_path28.default.resolve(io.cwd, dirArg);
+        const roundOf2 = roundDir ? /^reviews-(\d+)-(\d+)$/.exec(import_node_path28.default.basename(roundDir)) : null;
+        if (has("dir") && !roundOf2) throw new UsageError("verify-plan: --dir must be a review dir, .forge/work/<id>/reviews-<n>-<round>");
         const es2 = (loc ?? planLocale(io.cwd)) === "es";
         const git = io.git ?? defaultGit(io.cwd);
         const diff = git(["diff", "--name-only", `${base}..HEAD`]);
@@ -20928,6 +21290,25 @@ function runCommand(argv, io) {
           tools: (s2) => s2.tools.length ? toolGaps(s2.tools, { onPath, inventory: inventory ??= mcpOf(io, repoDir) }) : { missing: [], unknown: [] }
         });
         appendEvent(io.cwd, { ts: ts(), kind: "verify", task, planned: plan.eligible, surfaces: plan.surfaces.filter((s2) => s2.permission === "allowed").map((s2) => s2.name) });
+        if (roundDir && roundOf2) {
+          const pending = import_node_path28.default.join(roundDir, "verify-pending.json");
+          const chosen = plan.surfaces.filter((s2) => s2.permission === "allowed");
+          const rel3 = (f) => import_node_path28.default.relative(io.cwd, f).split(import_node_path28.default.sep).join("/");
+          const work = import_node_path28.default.dirname(roundDir);
+          const [, n, round] = roundOf2;
+          if (plan.eligible && chosen.length) {
+            (0, import_node_fs27.mkdirSync)(roundDir, { recursive: true });
+            (0, import_node_fs27.writeFileSync)(pending, JSON.stringify({
+              task,
+              at: ts(),
+              surfaces: chosen.map((s2) => ({ name: s2.name, file: surfaceFile(s2.name), missing: s2.missing, unknown: s2.unknown })),
+              brief: rel3(import_node_path28.default.join(work, `brief-${n}.md`)),
+              diff: rel3(import_node_path28.default.join(work, `diff-${n}.patch`)),
+              dir: rel3(roundDir),
+              evidence: rel3(import_node_path28.default.join(work, "evidence", `${n}-${round}`))
+            }, null, 2) + "\n");
+          } else (0, import_node_fs27.rmSync)(pending, { force: true });
+        }
         return json3({ ...plan, surfaces: plan.surfaces.map((ps) => surfaceQuestion(ps, surfaces.find((s2) => s2.name === ps.name), local.surfaces[ps.name], git, repoDir, io.cwd, es2)) });
       }
       case "local": {
@@ -21027,7 +21408,7 @@ function runCommand(argv, io) {
         const file = treeStartFile(io.cwd, task);
         let text2 = null;
         try {
-          text2 = (0, import_node_fs26.readFileSync)(file, "utf8");
+          text2 = (0, import_node_fs27.readFileSync)(file, "utf8");
         } catch {
           text2 = null;
         }
@@ -21039,8 +21420,8 @@ function runCommand(argv, io) {
           if (status2 === null) throw new UsageError(`tree snapshot: git status failed in ${repoDir}`);
           const head2 = git(["rev-parse", "--verify", "-q", "HEAD"])?.trim() || null;
           const snap = { task, root: treeRoot, at: ts(), head: head2, ...parseStatus(status2) };
-          (0, import_node_fs26.mkdirSync)(import_node_path28.default.dirname(file), { recursive: true });
-          (0, import_node_fs26.writeFileSync)(file, JSON.stringify(snap, null, 2) + "\n");
+          (0, import_node_fs27.mkdirSync)(import_node_path28.default.dirname(file), { recursive: true });
+          (0, import_node_fs27.writeFileSync)(file, JSON.stringify(snap, null, 2) + "\n");
           return ok(file);
         }
         const base = flag("base");
@@ -21086,7 +21467,7 @@ function runCommand(argv, io) {
           const current = parseRun(readRunText(io.cwd));
           if (current?.active && current.sessionId !== null && stopReason(current, stopContext(io.cwd, io.now())) === null) throw new UsageError("infinite start: a run is already active (forge stop, or forge infinite status)");
           forgeDir(io.cwd);
-          (0, import_node_fs26.rmSync)(stopFile(io.cwd), { force: true });
+          (0, import_node_fs27.rmSync)(stopFile(io.cwd), { force: true });
           const run2 = startRun(io.now(), { ...cycles !== void 0 ? { cycles } : {}, ...hours !== void 0 ? { hours } : {} }, queueMax, session, locale ?? null);
           saveRun(io.cwd, run2);
           return json3(run2);
@@ -21105,7 +21486,7 @@ function runCommand(argv, io) {
         let error;
         if (flag("error-file") !== void 0) {
           try {
-            error = (0, import_node_fs26.readFileSync)(import_node_path28.default.resolve(io.cwd, flag("error-file")), "utf8");
+            error = (0, import_node_fs27.readFileSync)(import_node_path28.default.resolve(io.cwd, flag("error-file")), "utf8");
           } catch {
             throw new UsageError("cycle: cannot read --error-file");
           }
@@ -21119,7 +21500,7 @@ function runCommand(argv, io) {
       }
       case "stop": {
         forgeDir(io.cwd);
-        (0, import_node_fs26.writeFileSync)(stopFile(io.cwd), `${ts()}
+        (0, import_node_fs27.writeFileSync)(stopFile(io.cwd), `${ts()}
 `);
         const current = parseRun(readRunText(io.cwd));
         if (current?.active) {
@@ -21170,16 +21551,16 @@ function runCommand(argv, io) {
           const session = flag("session");
           if (session !== void 0 && !isRouteSession(session)) throw new UsageError("route set: --session is not a plain session id");
           const remembered = has("remember") ? chosen === "none" ? "off" : chosen : null;
-          if (remembered) updateLocal(io.cwd, (s2) => ({ ...s2, workflow: remembered }));
-          if (chosen === "none") return json3({ written: false, ...remembered ? { remembered } : {} });
           let why = by === "user" ? "the user chose it" : "the recommended option for this request";
           if (flag("why-file") !== void 0) {
             try {
-              why = (0, import_node_fs26.readFileSync)(import_node_path28.default.resolve(io.cwd, flag("why-file")), "utf8").trim() || why;
+              why = (0, import_node_fs27.readFileSync)(import_node_path28.default.resolve(io.cwd, flag("why-file")), "utf8").trim() || why;
             } catch {
               throw new UsageError("route set: cannot read --why-file");
             }
           }
+          if (remembered) updateLocal(io.cwd, (s2) => ({ ...s2, workflow: remembered }));
+          if (chosen === "none") return json3({ written: false, ...remembered ? { remembered } : {} });
           const doc = { task: task2, chosen, by, stage: firstStage(chosen, files), ts: ts(), ...files, ...session ? { session } : {} };
           writeRoute(io.cwd, doc);
           const root = mainCheckout(io.cwd);
@@ -21213,13 +21594,24 @@ function runCommand(argv, io) {
         if (has("locale") && loc !== "es" && loc !== "en") throw new UsageError("route: --locale must be es or en");
         if (has("text-file") && flag("text-file") === void 0) throw new UsageError("route: --text-file needs a file");
         const textFile = flag("text-file");
-        const probed = textFile !== void 0 ? triageCore(io, ["--task", task, "--text-file", textFile, ...loc ? ["--locale", loc] : []]) : null;
-        const p = flag("path") ?? probed?.result.path;
-        if (!p || !PATH_ORDER.includes(p)) throw new UsageError(`route: --path must be one of ${PATH_ORDER.join("|")}`);
-        const wf = flag("workflow");
-        const au = flag("autonomy");
-        if (wf !== void 0 && !isWorkflow(wf)) throw new UsageError(`route: --workflow must be one of ${WORKFLOWS.join("|")}`);
-        if (au !== void 0 && !isAutonomy(au)) throw new UsageError(`route: --autonomy must be one of ${AUTONOMIES.join("|")}`);
+        const inputs = () => {
+          const probed2 = textFile !== void 0 ? triageCore(io, ["--task", task, "--text-file", textFile, ...loc ? ["--locale", loc] : []]) : null;
+          const p2 = flag("path") ?? probed2?.result.path;
+          if (!p2 || !PATH_ORDER.includes(p2)) throw new UsageError(`route: --path must be one of ${PATH_ORDER.join("|")}`);
+          const wf2 = flag("workflow");
+          const au2 = flag("autonomy");
+          if (wf2 !== void 0 && !isWorkflow(wf2)) throw new UsageError(`route: --workflow must be one of ${WORKFLOWS.join("|")}`);
+          if (au2 !== void 0 && !isAutonomy(au2)) throw new UsageError(`route: --autonomy must be one of ${AUTONOMIES.join("|")}`);
+          return { probed: probed2, p: p2, wf: wf2, au: au2 };
+        };
+        let got;
+        try {
+          got = inputs();
+        } catch (e) {
+          if (textFile !== void 0 && e instanceof UsageError) cleanProbe(io.cwd, task, textFile);
+          throw e;
+        }
+        const { probed, p, wf, au } = got;
         const prefs = resolvePrefs({ ...wf ? { workflow: wf } : {}, ...au ? { autonomy: au } : {} }, readLocal(io.cwd), loadConfig(repoDir));
         const sp = superpowersOf(io, repoDir);
         const now = io.now().getTime();
@@ -21231,11 +21623,12 @@ function runCommand(argv, io) {
         const stepAside = PATH_ORDER.indexOf(effective) <= PATH_ORDER.indexOf("small") && prefs.workflow !== "forge";
         const askLocale = loc === "es" || loc === "en" ? loc : (planLocale(io.cwd) ?? "").toLowerCase().split(/[-_]/)[0] === "es" ? "es" : "en";
         const cleaned = cleanProbe(io.cwd, task, textFile);
+        const unavailable = prefs.workflow.startsWith("superpowers") && !sp.installed;
         return json3({
           ...options,
           probe: { path: probed.result.path, reasons: probed.result.reasons, sensitive: probed.result.sensitive, files: probed.result.files, announce: probed.output.announce },
           stepAside,
-          ask: prefs.workflow !== "ask" || prefs.autonomy === "auto" ? null : routeAsk(options, askLocale),
+          ask: prefs.workflow !== "ask" && !unavailable || prefs.autonomy === "auto" ? null : routeAsk(options, askLocale),
           cleaned
         });
       }
@@ -21247,7 +21640,7 @@ function runCommand(argv, io) {
         const abs = import_node_path28.default.resolve(io.cwd, file);
         let text2;
         try {
-          text2 = (0, import_node_fs26.readFileSync)(abs, "utf8");
+          text2 = (0, import_node_fs27.readFileSync)(abs, "utf8");
         } catch {
           throw new UsageError(`sp-plan: cannot read ${file}`);
         }
@@ -21258,7 +21651,7 @@ function runCommand(argv, io) {
           }
           const n = spTaskNumber(flag("task"));
           const r2 = checkSpTask(text2, n);
-          if (r2.checked) (0, import_node_fs26.writeFileSync)(abs, r2.text);
+          if (r2.checked) (0, import_node_fs27.writeFileSync)(abs, r2.text);
           return json3({ task: n, checked: r2.checked });
         } catch (e) {
           if (e instanceof SpPlanError) throw new UsageError(`sp-plan: ${file}: ${e.message}`);
@@ -21277,7 +21670,7 @@ function runCommand(argv, io) {
           if (!file) throw new UsageError("decision add: --data-file is required");
           let raw;
           try {
-            raw = JSON.parse((0, import_node_fs26.readFileSync)(import_node_path28.default.resolve(io.cwd, file), "utf8"));
+            raw = JSON.parse((0, import_node_fs27.readFileSync)(import_node_path28.default.resolve(io.cwd, file), "utf8"));
           } catch {
             throw new UsageError("decision add: --data-file must be a JSON object");
           }
@@ -21313,8 +21706,8 @@ function runCommand(argv, io) {
           if (!out.endsWith(".md")) throw new UsageError("decision md: --out must be a .md file");
           const list = allDecisions(root).filter((d) => d.by !== "user" && (decisionScope(d) ?? "forge") === scope);
           if (!list.length) return json3({ written: false, scope, count: 0 });
-          (0, import_node_fs26.mkdirSync)(import_node_path28.default.dirname(out), { recursive: true });
-          (0, import_node_fs26.writeFileSync)(out, renderDecisionsMd(list, scope, flag("locale") ?? "en"));
+          (0, import_node_fs27.mkdirSync)(import_node_path28.default.dirname(out), { recursive: true });
+          (0, import_node_fs27.writeFileSync)(out, renderDecisionsMd(list, scope, flag("locale") ?? "en"));
           return json3({ written: true, scope, count: list.length, path: out });
         }
         throw new UsageError("usage: forge decision add --data-file f [--task id] | list [--task id] [--run id] [--since iso] [--all] [--auto] | show <n> | md --scope s [--out f] [--locale es|en]");
@@ -21371,7 +21764,7 @@ var cwd = process.cwd();
 var stdin = "";
 if (process.argv[2] === "hook" && !process.stdin.isTTY) {
   try {
-    stdin = (0, import_node_fs27.readFileSync)(0, "utf8");
+    stdin = (0, import_node_fs28.readFileSync)(0, "utf8");
   } catch {
     stdin = "";
   }
