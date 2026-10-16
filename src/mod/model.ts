@@ -32,9 +32,12 @@ export interface BandFiles {
   now?: number;
 }
 // In work mode `cells` holds one letter per task of the track (or of the plan), in plan order: d done, a active,
-// b blocked, p pending. Every variant carries `viewer`, the role of the conversation that looks (C3): lens reads it
-// from here. build.mjs copies this type as it is into plugins/waypoint/types, so it names no other type and its body
-// has no capitalised word: the role is written out.
+// b blocked, p pending. A notice (spec §4.5) is what a conversation that is not the owner sees: another live one works
+// the roadmap or coordinates a run (kind other-live), or an earlier one left a task, a draft or a run behind (kind
+// previous); its key names the subject for a dismissal: task:<T>, run:<runId>, design:<project> or seat:<sid>.
+// Every variant carries `viewer`, the role of the conversation that looks (C3): lens reads it from here. build.mjs
+// copies this type as it is into plugins/waypoint/types, so it names no other type and its body has no capitalised
+// word: the role is written out.
 export type BandModel = (
   // locale, when known, lets a reader of the band (lens) keep the project's language while no band is drawn.
   | { mode: 'none'; locale?: string }
@@ -50,10 +53,15 @@ export type BandModel = (
   // proposals/critical count the latest critique; pending/pendingCritical the proposals of every round still undecided.
   | { mode: 'design'; project: string; locale: string; version: number; round: number; proposals: number; critical: number;
       pending: number; pendingCritical: number; designUrl: string | null; auto?: { count: number; lastMajor: string | null } }
+  | { mode: 'notice'; project: string; locale: string; kind: 'other-live' | 'previous'; subject: 'task' | 'run' | 'design';
+      seat: string | null; task: string | null; title: string | null; since: string | null; runId: string | null;
+      integrated?: number; total?: number; stopReason?: string | null; roadmapUrl: string | null; key: string }
 ) & { viewer: { role: 'owner' | 'other-live' | 'previous' | 'none'; coordinator: boolean; runId: string | null } };
 
 /** C3: the role of the conversation that looks, as every band publishes it. */
 export type BandViewer = BandModel['viewer'];
+/** §4.5: the band of a conversation that is not the owner. */
+export type NoticeBand = Extract<BandModel, { mode: 'notice' }>;
 /** Nothing to work out (no project, or a plan that does not read): nobody's role. */
 export const NO_VIEWER: BandViewer = { role: 'none', coordinator: false, runId: null };
 /** The band that draws nothing, with the language and the role it knows. */
@@ -157,7 +165,8 @@ function viewerOf(v: Viewer, exec: ExecutionState | null, now: number): BandView
  * The band of the conversation `f.sessionId` for this project (spec §4.5). Its role (describeViewer over the seats'
  * bindings, the execution, its members and the seats' tasks in progress) picks the band: the coordinator sees the run,
  * whole until it is closed; a member of it, its own task with the run's line (B-06); the owner of a seat, its work band,
- * or the draft it is bound to (K3-13); anyone else, nothing. Every band carries the role as `viewer`.
+ * or the draft it is bound to (K3-13); anyone else, a notice when there is something to say. Every band carries the
+ * role as `viewer`.
  */
 export function buildBandModel(project: string, f: BandFiles): BandModel {
   const now = f.now ?? Date.now();
@@ -205,13 +214,49 @@ function roleBand(project: string, f: BandFiles, plan: Plan | null, v: Viewer, e
     if (!plan) return null;
     return workModel(project, f, plan, { sid: b.sid, ...seatInfo(seats, b.sid), task: null, since: null, run: memberRun(project, b.sid, f, exec) }, now, viewer);
   }
-  // Another conversation's binding or execution, or nobody's.
+  // Another conversation's binding or execution: a notice when there is something to say.
+  if (v.role === 'other-live' || v.role === 'previous') return noticeModel(project, f, plan, v, exec, now, viewer);
   return null;
+}
+
+/**
+ * §4.5: what a conversation that is not the owner sees, dim: another live one bound to the roadmap or coordinating a
+ * run (other-live), or what an earlier one left behind (previous): a task in progress, a draft, a run stopped or
+ * without its coordinator. A previous binding with nothing to take up, and another live one where there is no roadmap
+ * (as the start hook says), draw nothing.
+ */
+function noticeModel(project: string, f: BandFiles, plan: Plan | null, v: Viewer, exec: ExecutionState | null, now: number, viewer: BandViewer): BandModel | null {
+  // Declared, so the literal type survives in `base` (an inferred one would widen to string there).
+  const kind: 'other-live' | 'previous' = v.role === 'previous' ? 'previous' : 'other-live';
+  const base = { mode: 'notice' as const, project, locale: plan?.locale ?? knownLocale(f) ?? 'en', kind, since: v.since, roadmapUrl: plan?.artifacts.roadmap ?? null, viewer };
+  const titleOf = (t: string | null): string | null => (t && plan ? plan.tasks.find(x => x.id === t)?.title ?? null : null);
+  if (v.subject === 'execution') {
+    if (!exec) return null;
+    const view = executionView({ exec, tasks: publicTasks(f), live: lives(f), now, role: kind });
+    if (!view) return null;
+    return { ...base, subject: 'run', seat: null, task: null, title: null, runId: exec.runId, integrated: view.integrated, total: view.total,
+      stopReason: exec.active ? null : exec.stopReason, key: `run:${exec.runId}` };
+  }
+  const b = v.binding;
+  if (!b) return null;
+  if (kind === 'other-live') {
+    if (!plan) return null;
+    return { ...base, subject: 'task', seat: b.sid, task: v.task, title: titleOf(v.task), runId: null, key: v.task ? `task:${v.task}` : `seat:${b.sid}` };
+  }
+  // Something to take up (spec §4.2): the draft of a design binding, else the seat's task in progress.
+  if (b.via === 'design') return isDraft(f) ? { ...base, subject: 'design', seat: b.sid, task: null, title: null, runId: null, key: `design:${project}` } : null;
+  if (!v.task || !plan) return null;
+  return { ...base, subject: 'task', seat: b.sid, task: v.task, title: titleOf(v.task), runId: null, key: `task:${v.task}` };
+}
+
+/** Whether the project's design is a draft: a parked or an approved one is not taken up. */
+function isDraft(f: BandFiles): boolean {
+  try { return f.design !== undefined && parseDesign(f.design).meta.status === 'draft'; } catch { return false; }
 }
 
 // forge's automatic decisions of the last day (.forge/decisions.json), on any band that draws.
 function withAuto(m: BandModel, f: BandFiles, now: number): BandModel {
-  if (m.mode === 'none') return m;
+  if (m.mode === 'none' || m.mode === 'notice') return m;
   const s = decisionsSummary(f.decisions, now);
   return s ? { ...m, auto: { count: s.count, lastMajor: s.lastMajor } } : m;
 }

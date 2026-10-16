@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code';
 import type { Register, Timer } from 'claude-code';
-import { noneBand } from './model.js';
+import { noneBand, type NoticeBand } from './model.js';
 import { join, listOpt, loadBandModel, readOpt, type Engine } from './files.js';
 import { bandLine, textsFor } from './band-line.js';
 import { applyWrite, artifactId, writeFailed, writesOf } from './mirror.js';
@@ -112,16 +112,17 @@ export const register: Register = on => {
       const isHidden = await read($, hidden);
       if (isHidden || !m || e.props.hasSurvey || m.mode === 'none') return below;
       const { Box, Text, Button, Link } = $.ui.resolve(e);
-      const taskNow = m.mode === 'work' && m.current?.startedAt ? await $.clock.now() : 0;
-      const line = bandLine(m, taskNow);
+      // A running task's minutes and a notice's age are worked out as the band is drawn; the tick redraws only the first.
+      const drawnAt = m.mode === 'notice' || (m.mode === 'work' && m.current?.startedAt) ? await $.clock.now() : 0;
+      const line = bandLine(m, drawnAt);
       const t = textsFor(m.locale);
       // $.prompt.submit refuses a text that starts with '/': slash commands go through $.command.run.
-      const submit = (line: string) => () => {
-        const [, command = '', args = ''] = /^\/(\S+)\s*(.*)$/.exec(line) ?? [];
+      const submit = (text: string) => () => {
+        const [, command = '', args = ''] = /^\/(\S+)\s*(.*)$/.exec(text) ?? [];
         // When the command cannot run from here, leave it in the prompt for the person to send.
         $.command.run({ command, args }).catch(async () => {
           try {
-            await $.prompt.fill({ text: line, mode: 'replace' });
+            await $.prompt.fill({ text, mode: 'replace' });
             $.ui.toast(t.pressEnter);
           } catch { /* nothing else to do */ }
         });
@@ -131,6 +132,39 @@ export const register: Register = on => {
         ? <Link href={href} label={label} />
         : <Text dimColor>{href}</Text>;
       const fill = (text: string) => () => { $.prompt.fill({ text, mode: 'replace' }).catch(() => undefined); };
+      // B-08: Stop belongs to the coordinator's run band. A member's Stop leaves /forge:stop in the prompt for the person
+      // to confirm, since it stops the whole execution.
+      const fillStop = () => {
+        $.prompt.fill({ text: '/forge:stop', mode: 'replace' }).then(() => { $.ui.toast(t.stopFilled); }).catch(() => undefined);
+      };
+      // §4.5: what a notice offers. Another live session: what it does and where to work instead. What an earlier one
+      // left behind: take it up or let it go. [Close] is /forge:stop, the one entry that stops or closes a run (C2).
+      const noticeControls = (n: NoticeBand) => {
+        if (n.kind === 'other-live') {
+          return n.subject === 'run'
+            ? [
+                <Button key="view" label={t.view} onPress={submit('/waypoint:status')} />,
+                <Button key="join" label={t.join} onPress={submit('/forge:run --join')} />,
+              ]
+            : [
+                <Button key="status" label={t.status} onPress={submit('/waypoint:status')} />,
+                <Button key="other-track" label={t.otherTrack} onPress={fill('/waypoint:launch ')} />,
+                ...(n.roadmapUrl ? [link(n.roadmapUrl, t.roadmap)] : []),
+              ];
+        }
+        if (n.subject === 'run') {
+          return [
+            <Button key="view" label={t.view} onPress={submit('/waypoint:status')} />,
+            <Button key="resume" label={t.resume} onPress={submit('/forge:run --resume')} />,
+            <Button key="close" label={t.close} onPress={submit('/forge:stop')} />,
+          ];
+        }
+        if (n.subject === 'design') return [<Button key="resume" label={t.resume} variant="primary" onPress={submit('/waypoint:design')} />];
+        return [
+          <Button key="resume" label={t.resume} variant="primary" onPress={submit('/waypoint:work resume')} />,
+          ...(n.task ? [<Button key="release" label={`${t.release} ${n.task}`} onPress={submit(`/waypoint:work release ${n.task}`)} />] : []),
+        ];
+      };
       const controls = m.mode === 'design'
         ? [
             ...(m.proposals > 0
@@ -151,16 +185,21 @@ export const register: Register = on => {
               <Button key="stop-run" label={t.stopRun} onPress={submit('/forge:stop')} />,
               ...(m.roadmapUrl ? [link(m.roadmapUrl, t.roadmap)] : []),
             ]
-        : [
-            <Button key="next-task" label={t.nextTask} variant="primary" onPress={submit('/waypoint:work')} />,
-            <Button key="status" label={t.status} onPress={submit('/waypoint:status')} />,
-            <Button key="launch" label={t.launch} onPress={fill('/waypoint:launch ')} />,
-            ...(m.roadmapUrl ? [link(m.roadmapUrl, t.roadmap)] : []),
-          ];
+          : m.mode === 'notice'
+            ? noticeControls(m)
+            : [
+                <Button key="next-task" label={t.nextTask} variant="primary" onPress={submit('/waypoint:work')} />,
+                <Button key="status" label={t.status} onPress={submit('/waypoint:status')} />,
+                <Button key="launch" label={t.launch} onPress={fill('/waypoint:launch ')} />,
+                ...(m.run ? [<Button key="stop-run" label={t.stopRun} onPress={fillStop} />] : []),
+                ...(m.roadmapUrl ? [link(m.roadmapUrl, t.roadmap)] : []),
+              ];
       return (
         <Box flexDirection="column">
           <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
-            <Text color="claude" wrap="truncate-end">{line}</Text>
+            {m.mode === 'notice'
+              ? <Text dimColor wrap="truncate-end">{line}</Text>
+              : <Text color="claude" wrap="truncate-end">{line}</Text>}
             {controls}
             {lens ? <Button key="panel" label={t.panel} onPress={submit('/lens')} /> : null}
             <Button key="dismiss" label="×" role="dismiss" onPress={() => { update($, hidden, () => true).catch(() => undefined); }} />

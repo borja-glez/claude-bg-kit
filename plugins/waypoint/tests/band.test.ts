@@ -56,6 +56,15 @@ const RUN: WaypointBand = {
   slots: [{ task: 'T004', stage: 'review', round: 2 }, { task: 'T008', stage: 'implement', round: 1 }], worst: 'silent', stalled: false,
   roadmapUrl: 'https://claude.ai/artifact/roadmap', viewer: COORDINATOR,
 };
+type Notice = Extract<WaypointBand, { mode: 'notice' }>;
+const PREVIOUS: WaypointBand['viewer'] = { role: 'previous', coordinator: false, runId: null };
+// Another live conversation works T002 on the seat main (C3, spec §4.5); notice(over) varies it.
+const NOTICE: Notice = {
+  mode: 'notice', project: 'demo', locale: 'es', kind: 'other-live', subject: 'task', seat: 'main', task: 'T002', title: 'API de pedidos',
+  since: '2026-10-11T10:00:00.000Z', runId: null, roadmapUrl: 'https://claude.ai/artifact/roadmap', key: 'task:T002',
+  viewer: { role: 'other-live', coordinator: false, runId: null },
+};
+const notice = (over: Partial<Notice> = {}): WaypointBand => ({ ...NOTICE, ...over });
 
 test('the Spanish design band says one pending proposal and one critical in the singular', async ($, on) => {
   engineBottom(on);
@@ -481,4 +490,93 @@ test('a band with automatic decisions ends with their count and the last major o
   const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
   expect(await ui.find({ type: 'Text', text: '◆ DESIGN · demo · v3 · 2 pending · 1 critical · ⚑ auto · 2 · design approved (v3)' })).toBeDefined();
   await ui.unmount();
+});
+
+test('a notice of another session at work is drawn dim with Status, Other track and the roadmap, never Stop (B-02, B-08)', async ($, on) => {
+  engineBottom(on);
+  const sent: string[] = [];
+  const filled: string[] = [];
+  recordCommands(on, sent);
+  on('prompt.fill', (_$, e) => { filled.push(e.text); return { isFilled: true }; });
+  serveBand(on, () => notice());
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
+    const line = await ui.find({ type: 'Text', text: '◦ otra sesión (main) trabaja en T002 · hace 12 min' });
+    expect(line?.props.dimColor).toBe(true);
+    expect(await ui.find({ type: 'Button', text: 'Otro frente' })).toBeDefined();
+    expect(await ui.find({ type: 'Link', text: 'Abrir roadmap' })).toBeDefined();
+    await ui.press({ key: 'status' });
+    expect(sent.at(-1)).toBe('/waypoint:status');
+    await ui.press({ key: 'other-track' });
+    expect(filled.at(-1)).toBe('/waypoint:launch ');
+    for (const key of ['stop-run', 'next-task', 'resume', 'close']) expect(await ui.find({ key }), key).toBeUndefined();
+    await ui.unmount();
+  }
+});
+
+test('the notices of a run and of what an earlier conversation left send their commands (B-07, C2)', async ($, on) => {
+  engineBottom(on);
+  const sent: string[] = [];
+  recordCommands(on, sent);
+  let band = notice();
+  serveBand(on, () => band);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  const run = { subject: 'run', seat: null, task: null, title: null, runId: 'r1', integrated: 3, total: 12, key: 'run:r1' } as const;
+  const cases: { model: WaypointBand; line: string; labels: string[]; presses: [string, string][] }[] = [
+    { model: notice(run), line: '◦ ejecución de forge en curso, la coordina otra sesión · 3/12', labels: ['Ver', 'Unirme'],
+      presses: [['view', '/waypoint:status'], ['join', '/forge:run --join']] },
+    { model: notice({ kind: 'previous', viewer: PREVIOUS }), line: '◌ quedó a medias: T002 API de pedidos (hace 12 min)', labels: ['Retomar', 'Liberar T002'],
+      presses: [['resume', '/waypoint:work resume'], ['release', '/waypoint:work release T002']] },
+    { model: notice({ kind: 'previous', subject: 'design', task: null, title: null, key: 'design:demo', viewer: PREVIOUS }), line: '◌ diseño a medias: demo (hace 12 min)', labels: ['Retomar'],
+      presses: [['resume', '/waypoint:design']] },
+    { model: notice({ ...run, kind: 'previous', stopReason: 'stalled', viewer: PREVIOUS }), line: '◌ ejecución parada: 3/12 integradas (hace 12 min)', labels: ['Ver', 'Retomar', 'Cerrar'],
+      presses: [['view', '/waypoint:status'], ['resume', '/forge:run --resume'], ['close', '/forge:stop']] },
+  ];
+  for (const c of cases) {
+    band = c.model;
+    const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+    expect(await ui.find({ type: 'Text', text: c.line }), c.line).toBeDefined();
+    for (const label of c.labels) expect(await ui.find({ type: 'Button', text: label }), label).toBeDefined();
+    for (const [key, command] of c.presses) {
+      await ui.press({ key });
+      expect(sent.at(-1), key).toBe(command);
+    }
+    expect(await ui.find({ key: 'stop-run' })).toBeUndefined();
+    await ui.unmount();
+  }
+});
+
+test("Stop is the coordinator's: a member's leaves /forge:stop in the prompt with a toast, a seat's owner has none (B-08)", async ($, on) => {
+  engineBottom(on);
+  const sent: string[] = [];
+  const filled: string[] = [];
+  const toasts: string[] = [];
+  recordCommands(on, sent);
+  on('prompt.fill', (_$, e) => { filled.push(e.text); return { isFilled: true }; });
+  on('ui.toast', (_$, e) => { toasts.push(e.text); return { value: undefined }; });
+  let band: WaypointBand = RUN;
+  serveBand(on, () => band);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  const member = { ...WORK, run: { coordinator: 'main', stage: 'implement' }, viewer: { role: 'owner', coordinator: false, runId: 'r1' } } as WaypointBand;
+  for (const surface of SURFACES) {
+    band = RUN;
+    let ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
+    await ui.press({ key: 'stop-run' });
+    expect(sent.at(-1)).toBe('/forge:stop');
+    await ui.unmount();
+    band = member;
+    sent.length = 0;
+    ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
+    expect(await ui.find({ type: 'Button', text: 'Parar' })).toBeDefined();
+    await ui.press({ key: 'stop-run' });
+    expect(sent).toEqual([]);
+    expect(filled.at(-1)).toBe('/forge:stop');
+    expect(toasts.at(-1)).toContain('/forge:stop');
+    await ui.unmount();
+    band = WORK;
+    ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
+    expect(await ui.find({ key: 'stop-run' })).toBeUndefined();
+    await ui.unmount();
+  }
 });

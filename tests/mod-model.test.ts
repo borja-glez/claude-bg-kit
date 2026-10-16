@@ -288,8 +288,9 @@ describe('buildBandModel · the role of who looks (C3, B-02, K5-01)', () => {
       role: j({ sessionId: 'backend', role: 'boss', runId: 'r1', task: 'T002', name: null, since: ago(20), hookSession: 'M' }),
     };
     const f: BandFiles = { ...empty, plan, session: j({ sessionId: 'main', track: null }), execution: EXEC({ mode: 'sessions' }), sessionId: 'M' };
-    // Only junk: M is no member, the run is another conversation's, and nothing is drawn yet (Task 3 adds the notice).
-    expect(buildBandModel('demo-shop', { ...f, members: junk })).toEqual({ mode: 'none', locale: 'es', viewer: { role: 'other-live', coordinator: false, runId: 'r1' } });
+    // Only junk: M is no member, the run is another conversation's, and M sees its notice.
+    expect(buildBandModel('demo-shop', { ...f, members: junk }))
+      .toMatchObject({ mode: 'notice', kind: 'other-live', subject: 'run', runId: 'r1', viewer: { role: 'other-live', coordinator: false, runId: 'r1' } });
     // The junk beside a member that reads: M is still that member.
     expect(buildBandModel('demo-shop', { ...f, members: { ...junk, backend: member } }))
       .toMatchObject({ mode: 'work', sid: 'backend', current: { id: 'T002' }, viewer: { role: 'owner', coordinator: false, runId: 'r1' } });
@@ -371,5 +372,67 @@ describe('buildBandModel · automatic decisions', () => {
   it('without a major decision the band shows only the count', () => {
     const noMajor = j({ ts: new Date().toISOString(), scope: 'x', count: 2, autonomy: 'unattended', last: [], lastMajor: null });
     expect(bandLine(buildBandModel('demo-shop', { ...empty, ...designer, design, decisions: noMajor }), Date.now())).toMatch(/ · ⚑ auto · 2$/);
+  });
+});
+
+describe('buildBandModel · notices (B-02, B-07, K3-13, K5-02)', () => {
+  const session = j({ sessionId: 'backend', track: 'backend' });
+  const states = { T002: j({ status: 'in_progress', owner: 'backend', startedAt: ago(30) }) };
+  /** A is bound to the checkout seat backend, with T002 in progress; B looks. */
+  const withA = (over: object = {}): BandFiles => ({ ...empty, plan, session, states, bindings: { '.': bound('backend', 'A', over) }, sessionId: 'B' });
+  it('another live conversation bound to the seat: a notice with its seat and its task', () => {
+    expect(buildBandModel('demo-shop', withA())).toEqual({
+      mode: 'notice', project: 'demo-shop', locale: 'es', kind: 'other-live', subject: 'task', seat: 'backend', task: 'T002', title: 'API de pedidos',
+      since: expect.any(String), runId: null, roadmapUrl: 'https://claude.ai/artifact/abc', key: 'task:T002',
+      viewer: { role: 'other-live', coordinator: false, runId: null },
+    });
+    expect(buildBandModel('demo-shop', { ...withA(), states: {} })).toMatchObject({ mode: 'notice', kind: 'other-live', task: null, title: null, key: 'seat:backend' });
+  });
+  it('an earlier conversation that left a task: the offer for 24 hours, then nothing (criterion 2)', () => {
+    const ended = ago(120);
+    expect(buildBandModel('demo-shop', withA({ endedAt: ended, endReason: 'clear' }))).toMatchObject({
+      mode: 'notice', kind: 'previous', subject: 'task', seat: 'backend', task: 'T002', title: 'API de pedidos', since: ended, key: 'task:T002',
+      viewer: { role: 'previous', coordinator: false, runId: null },
+    });
+    expect(buildBandModel('demo-shop', withA({ seenAt: ago(25 * 60 + 1), endedAt: ago(25 * 60), endReason: 'clear' }))).toMatchObject({ mode: 'none', viewer: { role: 'none' } });
+    // Nothing to take up: the seat has no task in progress.
+    expect(buildBandModel('demo-shop', { ...withA({ endedAt: ended, endReason: 'clear' }), states: {} })).toMatchObject({ mode: 'none', viewer: { role: 'previous' } });
+  });
+  it('an earlier conversation on a draft: the design offer; a parked design, or another live one on a design without a plan, draws nothing', () => {
+    const f: BandFiles = { ...empty, design, bindings: { '.': bound('main', 'A', { via: 'design', endedAt: ago(60), endReason: 'prompt_input_exit' }) }, sessionId: 'B' };
+    expect(buildBandModel('demo-shop', f)).toMatchObject({ mode: 'notice', kind: 'previous', subject: 'design', seat: 'main', task: null, key: 'design:demo-shop', locale: 'es', roadmapUrl: null });
+    expect(buildBandModel('demo-shop', { ...f, design: design.replace('start_prompt:', 'status: parked\nstart_prompt:') }).mode).toBe('none');
+    expect(buildBandModel('demo-shop', { ...f, bindings: { '.': bound('main', 'A', { via: 'design' }) } }).mode).toBe('none');
+  });
+  it("someone else's execution: running is other-live; stopped, or without its coordinator, is previous for 24 hours (B-07, K5-02)", () => {
+    const f = (over: object, extra: Partial<BandFiles> = {}): BandFiles => ({ ...empty, plan, sessionId: 'B', execution: EXEC(over), ...extra });
+    expect(buildBandModel('demo-shop', f({}))).toMatchObject({
+      mode: 'notice', kind: 'other-live', subject: 'run', seat: null, task: null, runId: 'r1', integrated: 1, total: 2, stopReason: null, key: 'run:r1',
+      viewer: { role: 'other-live', coordinator: false, runId: 'r1' },
+    });
+    const moved = ago(60);
+    const stalled = { active: false, stopReason: 'stalled', stallReason: 'x', lastStepAt: moved };
+    expect(buildBandModel('demo-shop', f(stalled))).toMatchObject({ mode: 'notice', kind: 'previous', subject: 'run', stopReason: 'stalled', since: moved, viewer: { role: 'previous', runId: 'r1' } });
+    const coordinatorLive = j({ sessionId: 's1', role: 'coordinator', runId: 'r1', task: null, event: 'SessionEnd', ts: ago(5), agents: [], ended: true });
+    expect(buildBandModel('demo-shop', f({}, { coordinatorLive }))).toMatchObject({ mode: 'notice', kind: 'previous', subject: 'run', stopReason: null });
+    expect(buildBandModel('demo-shop', f({ ...stalled, lastStepAt: ago(25 * 60) })).mode).toBe('none');
+    expect(buildBandModel('demo-shop', f({ ...stalled, closedAt: ago(1), closedBy: 'close' })).mode).toBe('none');
+    // Its coordinator still sees the run band.
+    expect(buildBandModel('demo-shop', { ...f(stalled), sessionId: 's1' }).mode).toBe('run');
+  });
+  it('the notice lines, in es and en', () => {
+    const n = (o: object, locale = 'es') => bandLine({ mode: 'notice', project: 'demo-shop', locale, kind: 'other-live', subject: 'task', seat: 'main', task: 'T002', title: 'API de pedidos',
+      since: '2026-10-15T11:57:00.000Z', runId: null, roadmapUrl: null, key: 'task:T002', viewer: NO_VIEWER, ...o } as never, Date.parse('2026-10-15T12:00:00.000Z'));
+    expect(n({})).toBe('◦ otra sesión (main) trabaja en T002 · hace 3 min');
+    expect(n({}, 'en')).toBe('◦ another session (main) works on T002 · 3 min ago');
+    expect(n({ task: null, title: null })).toBe('◦ otra sesión (main) está ligada al roadmap · hace 3 min');
+    expect(n({ since: null })).toBe('◦ otra sesión (main) trabaja en T002');
+    expect(n({ subject: 'run', seat: null, task: null, title: null, runId: 'r1', integrated: 3, total: 12 })).toBe('◦ ejecución de forge en curso, la coordina otra sesión · 3/12');
+    expect(n({ kind: 'previous', since: '2026-10-15T10:00:00.000Z' })).toBe('◌ quedó a medias: T002 API de pedidos (hace 2 h)');
+    expect(n({ kind: 'previous', since: '2026-10-15T10:00:00.000Z' }, 'en')).toBe('◌ left in progress: T002 API de pedidos (2 h ago)');
+    expect(n({ kind: 'previous', title: 'Un título muy largo que pasa de cuarenta caracteres con holgura' })).toContain('Un título muy largo que pasa de cuarent…');
+    expect(n({ kind: 'previous', subject: 'design', task: null, title: null })).toBe('◌ diseño a medias: demo-shop (hace 3 min)');
+    expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 12, stopReason: 'stalled', since: '2026-10-13T12:00:00.000Z' })).toBe('◌ ejecución parada: 3/12 integradas (hace 2 d)');
+    expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 12, stopReason: null }, 'en')).toBe('◌ execution without a coordinator: 3/12 integrated (3 min ago)');
   });
 });
