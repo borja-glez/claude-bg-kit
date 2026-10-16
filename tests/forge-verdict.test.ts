@@ -528,6 +528,17 @@ describe('what blocks in each review (C-04, C-06, J-05, J-06, K4-02, K4-09)', ()
     expect(synthesize({ correctness: abstained }, W, false, [{ validator: 'test', failures: ['x'] }], at(2, { hold: { reason: 'held', findings: [held] } })).action).toBe('fix');
   });
 
+  it('the first review after a redo (fresh) is judged as a first review; the last review still applies rule 7 (I4)', () => {
+    const untouched = mk({ id: 'F3', origin: 'untouched', file: 'src/z.ts', line: 100 });
+    expect(synthesize({ correctness: fail(0.8, [untouched]) }, W, true, [], at(3)).action).toBe('accept');
+    const fresh = synthesize({ correctness: fail(0.8, [untouched]) }, W, true, [], at(3, { fresh: true }));
+    expect(fresh).toMatchObject({ action: 'fix', deferred: [] });
+    expect(fresh.important.map(f => f.id)).toEqual(['F3']);
+    const last = synthesize({ correctness: fail(0.8, [mk({ id: 'F3' })]) }, W, true, [], at(4, { fresh: true, last: true }));
+    expect(last.action).toBe('accept');
+    expect(last.deferred).toEqual([expect.objectContaining({ id: 'F3', residual: 'cap' })]);
+  });
+
   it('the signature reads a validator\'s failing tests in any order (J-06)', () => {
     const sig = (failing: string[]) => synthesize({ correctness: pass() }, W, false, [{ validator: 'test', failures: ['x'], failing }]).signature;
     expect(sig(['a.test.ts > adds', 'b.test.ts > subtracts'])).toBe(sig(['b.test.ts > subtracts', 'a.test.ts > adds']));

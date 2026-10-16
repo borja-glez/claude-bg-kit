@@ -556,7 +556,12 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   const indexText = readText(indexPath);
   const index = parseIndex(indexText, task);
   const express = plan.express === true;
-  const withIds = assignIds(index, round, reviews, { express });
+  // I4: the first review after a redo judges an attempt started again: as review 1 (nothing of the reverted attempt is
+  // open, closed or paired with), while it still counts as review n and the last one still accepts at the cap. The
+  // previous verdict is the brief's last one logged on another review dir (a re-close of this one does not count).
+  const roundRel = rel(deps.cwd, roundDir);
+  const fresh = round >= 2 && readEvents(deps.cwd).filter(e => e.kind === 'verdict' && e.task === task && e.dir !== roundRel).at(-1)?.action === 'redo';
+  const withIds = assignIds(index, round, reviews, { express, fresh });
   // An express reviewer answers for the reviewers delegated to it: their open findings it does not name are closing.
   // Safety rule (measure 7): one that did not answer (abstain, invalid, a draft or missing) checked nothing, so it closes
   // nothing, what the delegated reviewers left open stays open and blocks, and the review never accepts (hold); the next
@@ -571,8 +576,8 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   } : undefined;
   const result = synthesize(withIds, weightsFor({ sensitive: flags.includes('--sensitive'), perf: flags.includes('--perf') }), validatorsOk, failing, {
     round, fixHunks: parseHunks(fixPatch), root: deps.repoDir, carried, last: round >= reviewsCount.max, personDocs: config.review.personDocs,
-    open: openIds(index, round), closed: closedFor(index, round, idsOf(withIds), answered), outOfModel: overrides.outOfModel, defer: overrides.defer,
-    ...(hold ? { hold } : {}),
+    open: fresh ? {} : openIds(index, round), closed: fresh ? {} : closedFor(index, round, idsOf(withIds), answered), outOfModel: overrides.outOfModel, defer: overrides.defer,
+    ...(hold ? { hold } : {}), ...(fresh ? { fresh } : {}),
   });
   // An index that exists but cannot be read is set aside next to the new one, never overwritten.
   if (indexText?.trim() && !index.rounds.length) {
@@ -580,11 +585,12 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
     renameSync(indexPath, aside);
     result.reasons.push(`unreadable findings index set aside as ${rel(deps.cwd, aside)}`);
   }
-  const indexNow = recordRound(index, round, result, answered);
+  const indexNow = recordRound(index, round, result, answered, { fresh });
   writeFileSync(indexPath, JSON.stringify(indexNow, null, 2) + '\n');
   // I1: on an accept, the residuals earlier reviews left that no reviewer gets back (hardening, architecture) are still
-  // open: they go to deferred, and so to the ruling and the final report, with this review's own (§4.7).
-  const carriedResidual = result.action === 'accept' ? carriedResiduals(index, round, result) : [];
+  // open: they go to deferred, and so to the ruling and the final report, with this review's own (§4.7). After a redo
+  // they were about the reverted attempt.
+  const carriedResidual = result.action === 'accept' && !fresh ? carriedResiduals(index, round, result) : [];
   if (carriedResidual.length) {
     result.deferred.push(...carriedResidual);
     result.reasons.push(`${carriedResidual.length} residual finding(s) of earlier reviews still open (${[...new Set(carriedResidual.map(f => f.residual))].join(', ')})`);

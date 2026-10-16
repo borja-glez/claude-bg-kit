@@ -60,6 +60,9 @@ export interface RoundOptions {
   /** Measure 7: an express review whose correctness did not answer checked nothing for the reviewers delegated to it.
    *  Their open findings (`findings`) block as they were and the review never accepts; `reason` goes to the reasons. */
   hold?: { reason: string; findings: Finding[] };
+  /** I4: the first review after a redo, of an attempt started again: judged as review 1 (no origins, previous or closed
+   *  findings), while `round` still counts the brief's reviews and `last` still applies. */
+  fresh?: boolean;
 }
 
 const invalidReview = (): Review => ({ verdict: 'abstain', confidence: 0, findings: [], invalid: true });
@@ -290,12 +293,13 @@ const RIDES_ALONG: readonly Residual[] = ['untouched', 'docs', 'late-round'];
  * pass. A fail without an important finding or a critical with evidence breaks the rubric (J-05): it does not score and is
  * invalid. Redo needs a score under 0.5 and a failing reviewer that says the approach is wrong with a finding that blocks
  * (C-06). A held review (opts.hold: an express one whose correctness did not answer, measure 7) never accepts, and the
- * findings it holds block. The signature covers what blocks, by severity and stable id.
+ * findings it holds block. The first review after a redo (opts.fresh) is judged as review 1, though it counts as review r.
+ * The signature covers what blocks, by severity and stable id.
  */
 export function synthesize(reviews: Partial<Record<ReviewerName, Review>>, weights: Weights, validatorsOk: boolean, failingValidators: FailingValidator[] = [], opts: RoundOptions = {}): VerdictResult {
   const names = (Object.keys(reviews) as ReviewerName[]).filter(n => reviews[n]);
   const r = Math.max(1, opts.round ?? 1);
-  const later = r >= 2;
+  const later = r >= 2 && opts.fresh !== true;
   const last = opts.last === true;
   const hunks = opts.fixHunks ?? {};
   // J-05: a fail without an important finding or a critical with evidence breaks the rubric.

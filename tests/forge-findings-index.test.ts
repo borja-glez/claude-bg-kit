@@ -88,6 +88,18 @@ describe('findings index (J-06)', () => {
     expect(carriedResiduals(idx, 2, named).map(f => f.id)).toEqual(['F1']);
   });
 
+  it('after a redo (fresh) nothing of the reverted attempt is paired or carried, and ids go on from the highest (I4)', () => {
+    const one = review(empty(), 1, { correctness: fail([imp('wrong two', { file: 'a.txt', line: 2 })]), security: fail([imp('shared state', { file: 'a.txt', line: 1 })]) }).index;
+    const near = { correctness: fail([imp('the queue drops the last item', { file: 'a.txt', line: 2 })]) };
+    expect(ids(assignIds(one, 2, near).correctness)).toEqual(['F1']);
+    const withIds = assignIds(one, 2, near, { fresh: true });
+    expect(ids(withIds.correctness)).toEqual(['F3']);
+    const heavy = withIds.correctness!.findings;
+    const two = recordRound(one, 2, { critical: [], important: heavy, minor: [], deferred: [] }, ['correctness'], { fresh: true });
+    expect(two.rounds[1].findings.map(f => [f.id, f.status])).toEqual([['F3', 'open']]);
+    expect(two.next).toBe(4);
+  });
+
   it('answeredBy leaves out an abstention, an invalid result and a fail without a critical or important finding', () => {
     expect(answeredBy({ correctness: pass, security: abstain, perf: { ...pass, invalid: true }, verify: fail([{ severity: 'minor', problem: 'm' }]) })).toEqual(['correctness']);
     expect([...idsOf({ correctness: fail([imp('a', { id: 'F2' }), imp('b')]) })]).toEqual(['F2']);

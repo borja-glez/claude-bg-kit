@@ -78,10 +78,11 @@ const withoutId = (f: Finding): Finding => { const c = { ...f }; delete c.id; re
  * reviewer's); 2. else, for a finding the reviewer marks `previous` or gives no origin, the id of the open finding of the
  * same reviewer it pairs with (pairFindings); 3. else F<next>. A finding the reviewer calls new (`fix`, `untouched`) never
  * inherits an id. Minor findings get none. Every finding gets its `reviewer`. Recording this review again gives the same
- * ids, because `next` counts only the reviews before it.
+ * ids, because `next` counts only the reviews before it. After a redo (`fresh`, I4) nothing of the reverted attempt is
+ * open: every finding gets a new id.
  */
-export function assignIds(index: FindingsIndex, round: number, reviews: Partial<Record<ReviewerName, Review>>, opts: { express?: boolean } = {}): Partial<Record<ReviewerName, Review>> {
-  const open = (previousOf(index, round)?.findings ?? []).filter((f, i, all) => isOpen(f) && all.findIndex(g => g.id === f.id) === i);
+export function assignIds(index: FindingsIndex, round: number, reviews: Partial<Record<ReviewerName, Review>>, opts: { express?: boolean; fresh?: boolean } = {}): Partial<Record<ReviewerName, Review>> {
+  const open = opts.fresh ? [] : (previousOf(index, round)?.findings ?? []).filter((f, i, all) => isOpen(f) && all.findIndex(g => g.id === f.id) === i);
   const taken = new Set<string>();
   const staged = new Map<ReviewerName, Finding[]>();
   for (const n of REVIEWERS) {
@@ -143,9 +144,10 @@ const judgedIds = (verdict: Judged) =>
  * every finding with an id the verdict saw, open when it blocks, residual when it carries a `residual`, minor when the CLI
  * lowered it; then each finding the previous review left open that is not here again: closed when its reviewer answered
  * this review (answeredBy, plus the reviewers an express review covered), else carried as it was. A residual no reviewer
- * gets back (hardening, architecture) is always carried as it was: nobody could name it (I1).
+ * gets back (hardening, architecture) is always carried as it was: nobody could name it (I1). After a redo (`fresh`, I4)
+ * the reverted attempt's findings are not carried: they were about code that is gone.
  */
-export function recordRound(index: FindingsIndex, round: number, verdict: Judged, answered: ReviewerName[]): FindingsIndex {
+export function recordRound(index: FindingsIndex, round: number, verdict: Judged, answered: ReviewerName[], opts: { fresh?: boolean } = {}): FindingsIndex {
   const entries: IndexedFinding[] = [];
   const seen = new Set<string>();
   const add = (f: Finding, status: IndexStatus) => {
@@ -156,7 +158,7 @@ export function recordRound(index: FindingsIndex, round: number, verdict: Judged
   for (const f of verdict.important) add(f, f.residual ? 'residual' : 'open');
   for (const f of verdict.deferred) add(f, 'residual');
   for (const f of verdict.minor) add(f, 'minor');
-  for (const o of previousOf(index, round)?.findings ?? []) {
+  for (const o of opts.fresh ? [] : previousOf(index, round)?.findings ?? []) {
     if (seen.has(o.id) || !isOpen(o)) continue;
     entries.push(answered.includes(o.reviewer) && !unsent(o) ? { ...o, status: 'closed' } : o);
   }

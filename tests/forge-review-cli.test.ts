@@ -906,6 +906,36 @@ describe('forge review-close', () => {
     expect(note).toContain('.forge/work/T1/report-1.txt');
   });
 
+  it('the first review after a redo is judged as a first review: a new important near a finding of the reverted attempt blocks under a new id (I4)', () => {
+    noExpress();
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    close();
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo again\n');
+    git('commit', '-q', '-am', 'fix');
+    prep();
+    const wrong = { verdict: 'fail', confidence: 0.9, approach: 'wrong' };
+    write(r2(), 'correctness', { ...wrong, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'still wrong: a counter cannot work', origin: 'previous', id: 'F1' }] });
+    write(r2(), 'security', { ...wrong, findings: [{ severity: 'important', file: 'a.txt', line: 1, problem: 'shared state', origin: 'fix' }] });
+    const redo = JSON.parse(close().stdout);
+    expect(redo).toMatchObject({ action: 'redo', next: 'redo' });
+    git(...redo.revert.args);
+    writeFileSync(path.join(wt, 'a.txt'), 'one\nTWO with a queue\n');
+    git('commit', '-q', '-am', 'redo');
+    expect(JSON.parse(prep().stdout).spawn.map((s: { role: string; mode: string }) => [s.role, s.mode])).toEqual([['review-correctness', 'full'], ['review-security', 'full']]);
+    const r3 = path.join(work(), 'reviews-1-3');
+    write(r3, 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'the queue drops the last item' }] });
+    write(r3, 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    const out = JSON.parse(close().stdout);
+    expect(out).toMatchObject({ action: 'fix', reviews: { n: 3, max: 4 }, deferred: [] });
+    expect(JSON.parse(readFileSync(path.join(work(), 'findings-1-3.json'), 'utf8')).findings.map((f: { id: string }) => f.id)).toEqual(['F3']);
+    const index = JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8'));
+    expect(index.rounds[2].findings.map((f: { id: string; status: string }) => [f.id, f.status])).toEqual([['F3', 'open']]);
+    // Closing it again (the verdict of this review is now the last one logged) still judges it as a first review.
+    expect(JSON.parse(close().stdout)).toMatchObject({ action: 'fix', deferred: [] });
+  });
+
   it('revert is null when HEAD is still BASE or the plan does not say what BASE was; the handover is written anyway', () => {
     run(['review-prep', '--task', 'T1-1', '--path', 'medium', '--base', git('rev-parse', 'HEAD'), '--baseline', '.forge/work/T1/baseline-1.json', '--dir', '.forge/work/T1', '--cwd', wt], io);
     const wrong = { verdict: 'fail', confidence: 0.9, approach: 'wrong', findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'start over' }] };
