@@ -26,6 +26,9 @@ const isOpen = (f: IndexedFinding) => f.status === 'open' || f.status === 'resid
 /** A residual no reviewer gets back to check (hardening, architecture, cap: not SENT): nobody can name it again, so it
  *  stays as it was until a reviewer reports it anew (I1). */
 const unsent = (f: IndexedFinding) => f.status === 'residual' && !(f.residual && SENT.includes(f.residual));
+/** A security finding the person or the reviewer ruled out of the threat model (minor in the index, C-T6): security may
+ *  report it again, and it must keep its id so the ruling still applies. Never open for the blocking table. */
+const ruledOutOfModel = (f: IndexedFinding) => f.status === 'minor' && f.outOfModel === true && f.reviewer === 'security';
 const idNumber = (id: string) => Number(id.slice(1));
 const nextId = (rounds: IndexRound[]) => 1 + Math.max(0, ...rounds.flatMap(r => r.findings.map(f => idNumber(f.id))));
 const before = (index: FindingsIndex, round: number) => index.rounds.filter(r => r.round < round);
@@ -73,30 +76,39 @@ export function parseIndex(text: string | null, task: string): FindingsIndex {
 const withoutId = (f: Finding): Finding => { const c = { ...f }; delete c.id; return c; };
 
 /**
- * Gives every critical and important finding of this review its stable id (J-06): 1. the id the reviewer copied, when it
- * was open in the previous review for that reviewer (for any reviewer in an express review, whose finding stays that
- * reviewer's); 2. else, for a finding the reviewer marks `previous` or gives no origin, the id of the open finding of the
- * same reviewer it pairs with (pairFindings); 3. else F<next>. A finding the reviewer calls new (`fix`, `untouched`) never
- * inherits an id. Minor findings get none. Every finding gets its `reviewer`. Recording this review again gives the same
- * ids, because `next` counts only the reviews before it. After a redo (`fresh`, I4) nothing of the reverted attempt is
- * open: every finding gets a new id.
+ * Gives every critical and important finding of this review its stable id (J-06): 1. the id the reviewer copied on a
+ * finding it calls `previous`, when it was open in the previous review for that reviewer (for any reviewer in an express
+ * review, whose finding stays that reviewer's); 2. else, for a finding the reviewer marks `previous` or gives no origin, or
+ * whose copied id was not kept (C-T11: an id copied onto a finding of another origin, say from the JSON example, is never
+ * taken as is; pairing decides), the id of the open finding of the same reviewer it pairs with (pairFindings); 3. else
+ * F<next>. A finding the reviewer calls new (`fix`, `untouched`) without an id never inherits one. Security's findings
+ * ruled out of the threat model count as open here, so one reported again keeps its id and the ruling (C-T6). Minor
+ * findings get none. Every finding gets its `reviewer`. Recording this review again gives the same ids, because `next`
+ * counts only the reviews before it. After a redo (`fresh`, I4) nothing of the reverted attempt is open: every finding
+ * gets a new id.
  */
 export function assignIds(index: FindingsIndex, round: number, reviews: Partial<Record<ReviewerName, Review>>, opts: { express?: boolean; fresh?: boolean } = {}): Partial<Record<ReviewerName, Review>> {
-  const open = opts.fresh ? [] : (previousOf(index, round)?.findings ?? []).filter((f, i, all) => isOpen(f) && all.findIndex(g => g.id === f.id) === i);
+  const open = opts.fresh ? [] : (previousOf(index, round)?.findings ?? [])
+    .filter((f, i, all) => (isOpen(f) || ruledOutOfModel(f)) && all.findIndex(g => g.id === f.id) === i);
   const taken = new Set<string>();
+  // The findings whose copied id was not kept: pairing decides for them whatever origin they give (C-T11).
+  const hinted = new Set<Finding>();
   const staged = new Map<ReviewerName, Finding[]>();
   for (const n of REVIEWERS) {
     const r = reviews[n];
     if (!r) continue;
     staged.set(n, r.findings.map(f => {
       if (f.severity === 'minor') return withoutId({ ...f, reviewer: n });
-      const e = f.id ? open.find(o => o.id === f.id && !taken.has(o.id) && (o.reviewer === n || opts.express === true)) : undefined;
+      const e = f.id && f.origin === 'previous' ? open.find(o => o.id === f.id && !taken.has(o.id) && (o.reviewer === n || opts.express === true)) : undefined;
       if (e) { taken.add(e.id); return { ...f, id: e.id, reviewer: e.reviewer }; }
-      return withoutId({ ...f, reviewer: n });
+      const g = withoutId({ ...f, reviewer: n });
+      if (f.id) hinted.add(g);
+      return g;
     }));
   }
   for (const [n, list] of staged) {
-    const loose = list.map((f, i) => ({ f, i })).filter(x => x.f.severity !== 'minor' && !x.f.id && (x.f.origin === undefined || x.f.origin === 'previous'));
+    const loose = list.map((f, i) => ({ f, i }))
+      .filter(x => x.f.severity !== 'minor' && !x.f.id && (x.f.origin === undefined || x.f.origin === 'previous' || hinted.has(x.f)));
     const free = open.filter(o => o.reviewer === n && !taken.has(o.id));
     const pairs = pairFindings(loose.map(x => x.f), free);
     loose.forEach((x, k) => {
@@ -218,17 +230,20 @@ export function closedFor(index: FindingsIndex, round: number, present: Set<stri
 }
 
 /** What the previous review left for a delta reviewer to check (its own; every reviewer's for the express reviewer): the
- *  blocking findings and the residuals that went to the implementer, each with its id. */
+ *  blocking findings and the residuals that went to the implementer, each with its id; for security also the findings
+ *  ruled out of the threat model, so it copies their id when it reports one again (C-T6). */
 export function previousFindings(index: FindingsIndex, round: number, reviewer?: ReviewerName): IndexedFinding[] {
   return (previousOf(index, round)?.findings ?? []).filter(f => (reviewer === undefined || f.reviewer === reviewer)
-    && (f.status === 'open' || (f.status === 'residual' && !!f.residual && SENT.includes(f.residual))));
+    && (f.status === 'open' || (f.status === 'residual' && !!f.residual && SENT.includes(f.residual)) || (reviewer === 'security' && ruledOutOfModel(f))));
 }
 
-/** An index entry as a reviewer's previous finding: with its id, and its reviewer for an express reviewer. */
+/** An index entry as a reviewer's previous finding: with its id, and its reviewer for an express reviewer; one ruled out
+ *  of the threat model says so (`outOfModel`). */
 export function asPrevious(f: IndexedFinding, withReviewer = false): Finding & { id: string } {
   return {
     id: f.id, ...(withReviewer ? { reviewer: f.reviewer } : {}), severity: f.severity, ...(f.file ? { file: f.file } : {}),
     ...(f.line !== undefined ? { line: f.line } : {}), problem: f.problem, ...(f.fix ? { fix: f.fix } : {}), ...(f.origin ? { origin: f.origin } : {}),
+    ...(f.outOfModel ? { outOfModel: true } : {}),
   };
 }
 

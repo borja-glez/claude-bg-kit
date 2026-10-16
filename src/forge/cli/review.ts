@@ -3,7 +3,7 @@ import path from 'node:path';
 import { samePath } from '../../lib/worktree.js';
 import { UsageError } from './errors.js';
 import { appendEvent, appendPhase, readEvents, type LedgerEvent } from '../ledger.js';
-import { loadConfig, agentFor, type Profile, type ForgeConfig } from '../config.js';
+import { loadConfig, agentFor, ConfigError, type Profile, type ForgeConfig } from '../config.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, runOptions, validateEvent, failingLabel, type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { PATH_ORDER, zonesFromPaths, type PathName, type ReviewRole } from '../triage.js';
 import { parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, repoRelative, type Finding, type Review, type ReviewerName, type FailingValidator, type AskFinding } from '../verdict.js';
@@ -713,23 +713,27 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   const [, id, n] = m;
   const base = (deps.git(['rev-parse', 'HEAD']) ?? '').trim();
   if (!base) throw new UsageError('prep: cannot read HEAD');
+  // The config, read once. --no-baseline never read it before the threat model, so an invalid one does not stop it
+  // (C-T5): it then writes no threat model; a baseline run still refuses it (exit 2).
+  const noBaseline = args.includes('--no-baseline');
+  let config: ForgeConfig | null = null;
+  try { config = loadConfig(deps.repoDir); } catch (e) { if (!noBaseline || !(e instanceof ConfigError)) throw e; }
   // K4-02: the threat model the brief and the security reviewer read, written from the config (null without one).
   const dir = path.resolve(deps.cwd, flag('dir') ?? path.join('.forge', 'work', id));
   mkdirSync(dir, { recursive: true });
-  const tmFile = writeThreatModel(dir, loadConfig(deps.repoDir));
+  const tmFile = config ? writeThreatModel(dir, config) : null;
   const threatModel = tmFile ? rel(deps.cwd, tmFile) : null;
   // J-11: the implementer's validate command, exactly as it runs it: the tests related to its changes since BASE, the
   // typecheck and the lint, in the code's directory. Paths with / and in double quotes, which every shell takes.
   const validate = `node "${slash(deps.self ?? 'forge.cjs')}" validate --affected --base ${base} --task ${task}${samePath(deps.repoDir, deps.cwd) ? '' : ` --cwd "${slash(deps.repoDir)}"`}`;
   // J-13: --no-baseline (the Small path) records BASE and the phase and runs no validator.
-  if (args.includes('--no-baseline')) {
+  if (noBaseline || !config) {
     appendEvent(deps.cwd, { ts: deps.now().toISOString(), kind: 'phase', task: id, phase, brief: Number(n), base });
     return json({ base, baseline: null, failing: [], cached: [], durationMs: 0, validate, threatModel });
   }
 
   // The baseline, as `validate --all --path <p> --base-run` runs it: on BASE nothing changed yet, so a heavy path runs
   // every heavy validator (the review's diff later selects among them).
-  const config = loadConfig(deps.repoDir);
   const scope: Scope = p === 'trivial' || p === 'small' ? { mode: 'small' } : { mode: 'heavy', changed: null };
   const restored: string[] = [];
   const { results, durationMs } = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored, args.includes('--no-cache'));

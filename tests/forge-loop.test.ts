@@ -24,6 +24,10 @@ describe('decideRound', () => {
     expect(decideRound([v('fix', 0.6, 'x'), v('fix', 0.62, 'x')], 'medium')).toMatchObject({ next: 'stalled', reason: 'the same blocking findings as the previous review' });
     expect(decideRound([v('fix', 0.6, 'x'), v('fix', 0.6, 'y')], 'medium').next).toBe('resume');
   });
+  it('an accept between two reviews with the same blocking set does not stall the later one (C-T4)', () => {
+    expect(decideRound([v('fix', 0.6, 'x'), v('accept', 0.9, 'x'), v('fix', 0.6, 'x')], 'medium').next).not.toBe('stalled');
+    expect(decideRound([v('fix', 0.6, 'x'), v('accept', 0.9), v('fix', 0.6, 'x')], 'medium')).toMatchObject({ round: 2, next: 'resume' });
+  });
   it('nothing blocking never stalls, and a signature of forge 0.17 or older never matches (C-05)', () => {
     expect(decideRound([{ action: 'fix', score: 0.6, signature: '' }, { action: 'fix', score: 0.6, signature: '' }], 'medium').next).toBe('resume');
     expect(decideRound([{ action: 'fix', score: 0.6, signature: 'abc' }, { action: 'fix', score: 0.6, signature: 'abc' }], 'medium').next).toBe('resume');

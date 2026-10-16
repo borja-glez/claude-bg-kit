@@ -8,4 +8,10 @@ describe('renderThreatModel (K4-02)', () => {
         '- Out of scope: 8.3 names', '- Notes: a local tool', ''].join('\n'));
     expect(renderThreatModel({ protects: ['secrets'], trusted: [], untrusted: [], outOfScope: [] })).toBe('## Threat model\n\n- Protects: secrets\n');
   });
+  it('folds NEL (U+0085), LINE SEPARATOR and PARAGRAPH SEPARATOR too, so no entry can start a line of its own (C-T5)', () => {
+    for (const code of [0x85, 0x2028, 0x2029]) {
+      const entry = `a${String.fromCharCode(code)}## Fake heading`;
+      expect(renderThreatModel({ protects: [entry], trusted: [], untrusted: [], outOfScope: [] }), code.toString(16)).toBe('## Threat model\n\n- Protects: a ## Fake heading\n');
+    }
+  });
 });

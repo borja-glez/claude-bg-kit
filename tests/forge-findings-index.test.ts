@@ -51,6 +51,33 @@ describe('findings index (J-06)', () => {
     expect(ids(withIds.correctness)).toEqual(['F3', 'F1', 'F4', 'F5']);
   });
 
+  it('a copied id is honoured only on a finding the reviewer calls previous; otherwise pairing decides (C-T11)', () => {
+    const one = review(empty(), 1, { correctness: fail([imp('null check missing')]) }).index;
+    const far = { file: 'src/far.ts', line: 300 };
+    const r2 = (over: Partial<Finding>) => ids(assignIds(one, 2, { correctness: fail([imp('a new crash on an empty list', { id: 'F1', ...far, ...over })]) }).correctness);
+    expect(r2({ origin: 'previous' })).toEqual(['F1']);
+    // The JSON example's "id" copied onto a new finding, or onto one without origin, takes nobody's id.
+    expect(r2({ origin: 'fix' })).toEqual(['F2']);
+    expect(r2({ origin: 'untouched' })).toEqual(['F2']);
+    expect(r2({})).toEqual(['F2']);
+    // Dropped, the id still lets pairing decide: the same finding mislabelled untouched pairs back with it.
+    expect(ids(assignIds(one, 2, { correctness: fail([imp('null check missing', { id: 'F1', origin: 'untouched' })]) }).correctness)).toEqual(['F1']);
+  });
+
+  it('a finding ruled out of the threat model (minor, outOfModel) keeps its id when security reports it again (C-T6)', () => {
+    const idx = parseIndex(JSON.stringify({ task: 'T', rounds: [{ round: 1, findings: [
+      { id: 'F1', reviewer: 'correctness', severity: 'important', file: 'src/a.ts', line: 10, problem: 'p1', status: 'open' },
+      { id: 'F2', reviewer: 'security', severity: 'important', file: 'src/s.ts', line: 20, problem: 'the path is joined without a check', outOfModel: true, status: 'minor' },
+    ] }] }), 'T');
+    const again = imp('the path is still joined without a check', { file: 'src/s.ts', line: 21 });
+    expect(ids(assignIds(idx, 2, { security: fail([{ ...again, origin: 'previous' }]) }).security)).toEqual(['F2']);
+    expect(ids(assignIds(idx, 2, { security: fail([{ ...again, origin: 'previous', id: 'F2', line: 90 }]) }).security)).toEqual(['F2']);
+    expect(previousFindings(idx, 2, 'security').map(f => f.id)).toEqual(['F2']);
+    // Only security's own: the express reviewer and the others never get it, and it is not open for the table.
+    expect(previousFindings(idx, 2).map(f => f.id)).toEqual(['F1']);
+    expect(openIds(idx, 2)).toEqual({ correctness: ['F1'] });
+  });
+
   it('an express review keeps an id copied from any reviewer, and the finding stays that reviewer\'s', () => {
     const one = review(empty(), 1, { perf: fail([imp('slow loop', { file: 'src/hot.ts', line: 3 })]) }).index;
     const withIds = assignIds(one, 2, { correctness: fail([imp('still slow', { id: 'F1', origin: 'previous', file: 'src/hot.ts', line: 3 })]) }, { express: true });

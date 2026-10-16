@@ -30,7 +30,7 @@ export function decideRound(history: { action: Action; score: number | null; sig
   return { round, cap, next: 'fresh-stronger', reason: `round ${round}: fresh implementer one tier up${lastNote}`, tierUp, last };
 }
 
-/** C-13: a brief's reviews as the person counts them, review  of at most : the cap of fix attempts plus the first
+/** C-13: a brief's reviews as the person counts them, review `n` of at most `max`: the cap of fix attempts plus the first
  *  review (4 on Medium, 5 on Large). CAP itself still counts fixes, for the readers of the round event. */
 export function reviewsOf(round: number, path: string): { n: number; max: number } {
   return { n: round, max: (path === 'large' ? CAP.large : CAP.medium) + 1 };

@@ -359,6 +359,14 @@ describe('forge prep', () => {
     expect(existsSync(path.join(work(), 'threat-model.md'))).toBe(false);
     expect(JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'small', '--no-baseline', '--cwd', wt], io).stdout).threatModel).toBeNull();
   });
+  it('--no-baseline runs on an invalid config as it did before the threat model: BASE and the phase, threatModel null; a baseline run still refuses it (C-T5)', () => {
+    writeFileSync(path.join(wt, '.forge', 'config.yaml'), 'bogus: 1\n');
+    const r = run(['prep', '--task', 'T1-1', '--path', 'small', '--no-baseline', '--cwd', wt], io);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ base: head(), baseline: null, threatModel: null });
+    expect(readEvents(root).filter(e => e.kind === 'phase').at(-1)).toMatchObject({ task: 'T1', phase: 'implement', brief: 1, base: head() });
+    expect(run(['prep', '--task', 'T1-1', '--path', 'medium', '--cwd', wt], io).code).toBe(2);
+  });
 });
 
 describe('forge review-close', () => {
@@ -767,6 +775,26 @@ describe('forge review-close', () => {
     expect(JSON.parse(close().stdout).incomplete).toEqual(['correctness']);
     const index = JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8'));
     expect(index.rounds[1].findings.map((f: { id: string; status: string }) => [f.id, f.status])).toEqual([['F1', 'open']]);
+  });
+
+  it('a finding ruled out of the threat model keeps its id when security reports it again in the next review, so the ruling still applies (C-T6)', () => {
+    noExpress();
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }] });
+    write(r1(), 'security', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'b.txt', line: 20, problem: 'the path from the input is joined without a check' }] });
+    close();
+    expect(JSON.parse(close('--out-of-model', 'F2').stdout).action).toBe('fix');
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo fixed\n');
+    git('commit', '-q', '-am', 'fix');
+    prep();
+    expect(JSON.parse(readFileSync(path.join(r2(), 'previous-security.json'), 'utf8')).map((f: { id: string }) => f.id)).toEqual(['F2']);
+    write(r2(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    write(r2(), 'security', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'b.txt', line: 21, problem: 'the path from the input is still joined without a check', origin: 'previous' }] });
+    const out = JSON.parse(close().stdout);
+    expect(out).toMatchObject({ action: 'accept', ask: null });
+    expect(out.deferred).toEqual([expect.objectContaining({ id: 'F2', residual: 'out-of-model' })]);
+    const index = JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8'));
+    expect(index.rounds[1].findings.map((f: { id: string; status: string }) => [f.id, f.status])).toEqual([['F2', 'minor'], ['F1', 'closed']]);
   });
 
   it('--defer leaves a finding as residual architecture and closes the same review again (§4.8)', () => {
