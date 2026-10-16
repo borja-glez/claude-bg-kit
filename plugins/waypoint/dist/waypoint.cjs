@@ -14212,7 +14212,8 @@ function describeViewer(i) {
   const live = newest(others.filter((b) => bindingLive(b, i.now)), (b) => time2(b.seenAt));
   if (live) return { ...NONE, role: "other-live", subject: "binding", binding: live, since: live.seenAt, task: taskOf(live) };
   const offerAt = (b) => time2(b.endedAt ?? b.seenAt);
-  const prev = newest(others.filter((b) => !bindingLive(b, i.now) && offerAt(b) + PREVIOUS_OFFER_MS > i.now), offerAt);
+  const offered = others.filter((b) => !bindingLive(b, i.now) && offerAt(b) + PREVIOUS_OFFER_MS > i.now);
+  const prev = newest(offered.filter((b) => taskOf(b) !== null), offerAt) ?? newest(offered, offerAt);
   if (prev) return { ...NONE, role: "previous", subject: "binding", binding: prev, since: prev.endedAt ?? prev.seenAt, task: taskOf(prev) };
   return NONE;
 }
@@ -14241,6 +14242,9 @@ var HEADS_MAX = 50;
 var SHA = /^[0-9a-f]{7,64}$/;
 var RENAME_TRIES = 50;
 var RENAME_BUSY = /* @__PURE__ */ new Set(["EPERM", "EACCES", "EBUSY"]);
+var pause1ms = () => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+};
 function readText(file, max) {
   try {
     return (0, import_node_fs3.statSync)(file).size > max ? null : (0, import_node_fs3.readFileSync)(file, "utf8");
@@ -14259,6 +14263,7 @@ function writeAtomic(file, text) {
         return;
       } catch (e) {
         if (i >= RENAME_TRIES || !RENAME_BUSY.has(String(e.code))) throw e;
+        pause1ms();
       }
     }
   } finally {
@@ -14297,9 +14302,10 @@ function readSeats(wpDir, now) {
   }
   return out;
 }
+var PID_MAX = 2147483647;
 var pidFromEnv = (env) => {
   const v = env?.CLAUDE_PID;
-  return v !== void 0 && /^[1-9]\d{0,9}$/.test(v) ? Number(v) : null;
+  return v !== void 0 && /^[1-9]\d{0,9}$/.test(v) && Number(v) <= PID_MAX ? Number(v) : null;
 };
 function boundLive(b, now, alive = pidAlive) {
   return bindingLive(b, now) && (b.pid === null || alive(b.pid));
@@ -14334,6 +14340,19 @@ function secondSeatOf(wpDir, claude, open, now, alive = pidAlive) {
     if (!b || b.claude === claude || !boundLive(b, now, alive) && !open[sid]) return sid;
   }
   return null;
+}
+function leftSeatOf(seats, open, now, alive = pidAlive) {
+  let best = null;
+  let bestAt = -Infinity;
+  for (const s of seats) {
+    if (!s.bound || !open[s.sid] || boundLive(s.bound, now, alive)) continue;
+    const at2 = Date.parse(settleBinding(s.bound, now, alive).endedAt ?? s.bound.seenAt);
+    if (Number.isFinite(at2) && at2 + PREVIOUS_OFFER_MS > now && at2 > bestAt) {
+      best = s;
+      bestAt = at2;
+    }
+  }
+  return best;
 }
 function headOf(cwd) {
   try {
@@ -14398,6 +14417,11 @@ var SHA2 = /^[0-9a-f]{7,64}$/;
 var COMMIT_RE = /(^|[;&|(]\s*|\s)git\s+((-c|-C)\s+\S+\s+|--no-pager\s+)*commit(?![\w-])/;
 function isCommitCommand(cmd) {
   return COMMIT_RE.test(cmd) && !/(^|\s)--dry-run(?![\w-])/.test(cmd);
+}
+var MAKES_RE = /(^|[;&|(]\s*|\s)git\s+((-c|-C)\s+\S+\s+|--no-pager\s+)*(merge|cherry-pick|revert|am)(?![\w-])/;
+var CONTINUE_RE = /(^|[;&|(]\s*|\s)git\s+((-c|-C)\s+\S+\s+|--no-pager\s+)*rebase\s+(-\S+\s+)*--continue(?![\w-])/;
+function makesCommits(cmd) {
+  return isCommitCommand(cmd) || MAKES_RE.test(cmd) || CONTINUE_RE.test(cmd);
 }
 var nonEmpty = (v) => typeof v === "string" && v.trim() ? v : void 0;
 var read = (f) => {
@@ -14501,6 +14525,16 @@ function touch(seat, claude, now, reopen, env) {
   } catch {
   }
 }
+function renewOwn(ctx, io, reopen) {
+  const sid = ctx.sid;
+  if (!sid) return;
+  const mine = ctx.seats.filter((s) => s.bound?.claude === sid);
+  const newest2 = mine.reduce((best, s) => !best || Date.parse(s.bound.seenAt) > Date.parse(best.bound.seenAt) ? s : best, null);
+  for (const s of mine) {
+    const again = reopen && s === newest2;
+    if (again || s.bound.endedAt === null) touch(s, sid, io.now(), again, io.env);
+  }
+}
 function readPlan(docDir) {
   try {
     return parsePlan((0, import_node_fs4.readFileSync)(import_node_path5.default.join(docDir, "plan.yaml"), "utf8"));
@@ -14537,6 +14571,9 @@ function ownerText(ctx, own, plan, source, input) {
   }
   if (!plan) return null;
   const sid = own.bound.sid;
+  if (own.bound.via === "forge-infinite" || own.bound.via === "forge-run" && !ctx.viewer.task) {
+    return `waypoint: this conversation holds seat ${sid} of project ${ctx.project} (${plan.artifacts.roadmap ?? "not published"}) for its forge ${own.bound.via === "forge-infinite" ? "infinite run" : "run"}.`;
+  }
   let track = "-";
   try {
     const s = JSON.parse(read(import_node_path5.default.join(own.seat.dir, "session.json")) ?? "{}");
@@ -14562,13 +14599,13 @@ function sessionStart(io, input) {
   const source = SOURCES.includes(input.source) ? input.source : "startup";
   const say = (text) => text ? JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: text } }) : "";
   const v = ctx.viewer;
+  renewOwn(ctx, io, source === "resume" || source === "compact");
   if (v.subject === "execution") return "";
   const plan = readPlan(ctx.docDir);
   const url = plan?.artifacts.roadmap ?? "not published";
   const title = (t) => plan?.tasks.find((x2) => x2.id === t)?.title ?? "";
   const own = ownSeat(ctx);
   if (own && ctx.sid) {
-    touch(own.seat, ctx.sid, io.now(), source === "resume" || source === "compact", io.env);
     recordBase(own.seat.dir, ctx.sid, nonEmpty(input.cwd) ?? ctx.root);
     return say(ownerText(ctx, own, plan, source, input));
   }
@@ -14595,7 +14632,9 @@ function sessionEnd(root, sid, reason, now) {
   const at2 = now.toISOString();
   for (const n of projectDirs(root)) {
     for (const s of readSeats(import_node_path5.default.join(root, ".waypoint", n), now.getTime())) {
-      if (s.bound && s.bound.claude === sid && s.bound.endedAt === null) writeBinding(boundFile(s.dir), { ...s.bound, endedAt: at2, endReason: endReasonOf(reason) });
+      if (!s.bound || s.bound.claude !== sid || s.bound.endedAt !== null) continue;
+      const cur = readBinding(s.dir, s.sid, now.getTime());
+      if (cur && cur.claude === sid && cur.endedAt === null) writeBinding(boundFile(s.dir), { ...cur, endedAt: at2, endReason: endReasonOf(reason) });
     }
   }
   return "";
@@ -14603,12 +14642,26 @@ function sessionEnd(root, sid, reason, now) {
 function boundAnywhere(root, sid) {
   return projectDirs(root).some((n) => readSeats(import_node_path5.default.join(root, ".waypoint", n)).some((s) => s.bound?.claude === sid));
 }
+function sharedBases(ctx, own, top, head) {
+  let shared = false;
+  const out = [];
+  for (const s of ctx.seats) {
+    const b = s.bound;
+    if (s === own || !b || b.claude === ctx.sid || !bindingLive(b, ctx.now)) continue;
+    const lh = readLastHead(s.dir);
+    const base = lh && lh.session === b.claude ? lh.heads[top] : void 0;
+    if (!base) continue;
+    shared = true;
+    if (base !== head || lines(import_node_path5.default.join(s.dir, "pending-commits.jsonl")).some((l3) => field(l3, "sha") === head)) out.push(base);
+  }
+  return shared ? out : null;
+}
 function postCommit(io, input) {
   const ctx = contextOf(io, input);
+  if (ctx) renewOwn(ctx, io, false);
   const own = ctx ? ownSeat(ctx) : null;
   if (!ctx || !own || !ctx.sid) return "";
   const sid = ctx.sid;
-  touch(own.seat, sid, io.now(), false, io.env);
   const at2 = headOf(nonEmpty(input.cwd) ?? ctx.root);
   if (!at2) return "";
   const lh = readLastHead(own.seat.dir);
@@ -14634,7 +14687,10 @@ function postCommit(io, input) {
   let shas = [];
   if (!last) shas = isCommitCommand(cmd) ? [at2.head] : [];
   else if (last !== at2.head) {
-    shas = (git(["rev-list", "--first-parent", "--reverse", `--max-count=${MAX_COMMITS}`, `${last}..${at2.head}`]) ?? "").split(/\r?\n/).map((s) => s.trim()).filter((s) => SHA2.test(s));
+    const shared = sharedBases(ctx, own.seat, at2.top, at2.head);
+    if (shared === null || makesCommits(cmd)) {
+      shas = (git(["rev-list", "--first-parent", "--reverse", `--max-count=${MAX_COMMITS}`, `${last}..${at2.head}`, ...(shared ?? []).map((b) => `^${b}`)]) ?? "").split(/\r?\n/).map((s) => s.trim()).filter((s) => SHA2.test(s));
+    }
     if (git(["merge-base", "--is-ancestor", last, at2.head]) === null) {
       const all = lines(file);
       let checked = 0;
@@ -14658,9 +14714,9 @@ function postCommit(io, input) {
 }
 function stop(io, input) {
   const ctx = contextOf(io, input);
+  if (ctx) renewOwn(ctx, io, false);
   const own = ctx ? ownSeat(ctx) : null;
   if (!ctx || !own || !ctx.sid) return "";
-  touch(own.seat, ctx.sid, io.now(), false, io.env);
   if (forgeRoleOf({ execution: ctx.forge.any, members: ctx.forge.members, infinite: ctx.forge.infinite }, ctx.sid) !== null) return "";
   const ongoing = ctx.viewer.task;
   const commits = lines(import_node_path5.default.join(own.seat.dir, "pending-commits.jsonl")).filter((l3) => ongoing === null || field(l3, "task") !== ongoing);
@@ -14672,7 +14728,8 @@ function stop(io, input) {
   (0, import_node_fs4.writeFileSync)(ackFile, `${hash}
 `);
   const rel = import_node_path5.default.relative(ctx.root, own.seat.dir).split(import_node_path5.default.sep).join("/");
-  return JSON.stringify({ decision: "block", reason: `waypoint: ${commits.length} commit(s) / ${queued.length} queued roadmap update(s) are not in the live roadmap yet. Record them (work skill: a \`commit\` event for intermediate commits, or the task's completion), or flush the queue, then remove those lines from ${rel}/pending-commits.jsonl. You can also stop now; this reminder shows once per change.${replyIn(planLocale(ctx.root, ctx.project))}` });
+  const count = new Set(commits.map((l3) => field(l3, "sha") ?? l3)).size;
+  return JSON.stringify({ decision: "block", reason: `waypoint: ${count} commit(s) / ${queued.length} queued roadmap update(s) are not in the live roadmap yet. Record them (work skill: a \`commit\` event for intermediate commits, or the task's completion), or flush the queue, then remove those lines from ${rel}/pending-commits.jsonl. You can also stop now; this reminder shows once per change.${replyIn(planLocale(ctx.root, ctx.project))}` });
 }
 function runHook(sub, io) {
   let input;
@@ -15336,8 +15393,12 @@ function run(argv, io) {
         const t = now.getTime();
         const open = openTasksOf(wp);
         const own = checkoutSid(wp, t);
+        const resume = args.includes("--resume");
+        const takeover = args.includes("--takeover");
+        const left = leftSeatOf(readSeats(wp, t), open, t);
         let sid;
         if (seatFlag !== void 0) sid = seatFlag;
+        else if (resume && left) sid = left.sid;
         else if (second) sid = secondSeatOf(wp, claude, open, t);
         else sid = own ?? sessionIdFrom(track ?? "main");
         if (sid === null) return fail(`bind: every extra seat (main-2 to main-${MAX_SEATS + 1}) is held by a live conversation`, 2);
@@ -15345,14 +15406,15 @@ function run(argv, io) {
           const fix = seatFlag !== void 0 ? "pick another --seat" : own !== null ? `fix the sessionId of ${rel(import_node_path7.default.join(wp, "session.json"))}` : "pick another --track";
           return fail(`bind: the seat id ${JSON.stringify(sid.slice(0, 130))} names a folder: only letters, digits, _ . - and no leading - (${fix})`, 2);
         }
-        const seatDir = second || own !== null && own !== sid ? import_node_path7.default.join(seatsDir(wp), sid) : wp;
+        const seatDir = left && sid === left.sid ? left.dir : second || own !== null && own !== sid ? import_node_path7.default.join(seatsDir(wp), sid) : wp;
         const cur = readBinding(seatDir, sid, t);
         const task = open[sid] ?? null;
         const options = ["worktree", "second-seat", "takeover"];
-        const held = (b) => ({ held: { sid, claude: b.claude, via: b.via, seenAt: b.seenAt, task }, options, secondSeat: secondSeatOf(wp, claude, open, t) });
-        const prevOf = (b) => ({ sid, claude: b.claude, endedAt: b.endedAt, endReason: b.endReason, seenAt: b.seenAt, task });
-        const resume = args.includes("--resume");
-        const takeover = args.includes("--takeover");
+        const prevOf = (raw) => {
+          const b = settleBinding(raw, t);
+          return { sid: b.sid, claude: b.claude, endedAt: b.endedAt, endReason: b.endReason, seenAt: b.seenAt, task: open[b.sid] ?? null };
+        };
+        const held = (b) => ({ held: { sid, claude: b.claude, via: b.via, seenAt: b.seenAt, task }, options, secondSeat: secondSeatOf(wp, claude, open, t), ...left?.bound && left.sid !== sid ? { previous: prevOf(left.bound) } : {} });
         let took;
         if (!cur) took = "new";
         else if (cur.claude === claude) took = "same";
@@ -15365,6 +15427,9 @@ function run(argv, io) {
         writeBinding(boundFile(seatDir), { sid, claude, pid: pidFromEnv(io.env), via, since: took === "same" && cur ? cur.since : iso3, seenAt: iso3, endedAt: null, endReason: null });
         const back = readBinding(seatDir, sid, t);
         if (!back || back.claude !== claude) return out(3, back ? held(back) : { held: null, options, secondSeat: null });
+        for (const s of readSeats(wp, t)) {
+          if (s.sid !== sid && s.bound?.claude === claude && s.bound.endedAt === null) writeBinding(boundFile(s.dir), { ...s.bound, endedAt: iso3, endReason: "released" });
+        }
         const sessionFile = import_node_path7.default.join(seatDir, "session.json");
         let session = {};
         try {
@@ -15392,6 +15457,7 @@ function run(argv, io) {
         const claude = claudeSessionId(flag("claude"), io.env ?? {});
         const seats = readSeats(wp, t);
         const seatFlag = flag("seat");
+        if (args.includes("--seat") && (!seatFlag || seatFlag.startsWith("-"))) return fail("release: --seat needs a seat id", 2);
         const seat = seatFlag !== void 0 ? seats.find((s) => s.sid === seatFlag) : (claude ? seats.find((s) => s.bound?.claude === claude) : void 0) ?? seats.find((s) => s.checkout);
         if (!seat) return fail(seatFlag !== void 0 ? `release: no seat ${seatFlag} in ${rel(wp)}` : `release: no seat in ${rel(wp)}`, 2);
         let batch;
@@ -15432,13 +15498,18 @@ function run(argv, io) {
       case "design-park": {
         if (!args[0] || args[0].startsWith("--")) return fail("usage: waypoint design-park <design.md>", 2);
         const file = abs(args[0]);
-        const text = (0, import_node_fs6.readFileSync)(file, "utf8");
+        let text;
+        try {
+          text = (0, import_node_fs6.readFileSync)(file, "utf8");
+        } catch {
+          return fail(`design-park: cannot read ${args[0]}`, 2);
+        }
         const d = parseDesign(text);
         if (d.meta.status === "parked") return ok(JSON.stringify({ path: file, status: "parked", changed: false }));
         if (d.meta.status !== "draft") return fail(`design-park: only a draft design can be parked (this one is ${d.meta.status})`, 2);
         const next = setDesignStatus(text, "parked");
         parseDesign(next);
-        (0, import_node_fs6.writeFileSync)(file, next);
+        writeAtomic(file, next);
         return ok(JSON.stringify({ path: file, status: "parked", changed: true }));
       }
       case "design-import": {

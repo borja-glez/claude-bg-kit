@@ -16160,7 +16160,8 @@ function swarmCommand(args, io, deps, ext = {}) {
         if (!existed && deps.git(["branch", branch, base]) === null) {
           throw new UsageError(`swarm start: cannot create ${branch} from ${base}`);
         }
-        excludeWorktrees(deps.git);
+        const mainDir = mainWorktreeFrom(deps.git(["worktree", "list", "--porcelain"]));
+        excludeWorktrees(mainDir ? (args2) => deps.git(["-C", mainDir, ...args2]) : deps.git);
         if (!(0, import_node_fs19.existsSync)(wt)) {
           if (deps.git(["worktree", "add", wt, branch]) === null) throw new UsageError(`swarm start: cannot add the worktree ${wt}`);
           setup = runSetup(deps, wt, io.cwd);
