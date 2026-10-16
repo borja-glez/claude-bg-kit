@@ -163,17 +163,22 @@ export function selectValidators(all: Validator[], scope: Scope): Validator[] {
   return all.filter(v => runsIn(v, scope) && (scope.mode !== 'affected' || covers(v, scope.files)));
 }
 
-// --affected (C-02): the paths a related-tests command takes. A path outside this set never reaches a shell.
-const SAFE_PATH = /^[A-Za-z0-9_@+.,=/\\ ()-]{1,300}$/;
+// --affected (C-02): the paths a related-tests command takes. A path outside this set never reaches a shell, nor one
+// starting with - (a runner would read it as an option).
+const SAFE_PATH = /^(?!-)[A-Za-z0-9_@+.,=/\\ ()-]{1,300}$/;
 export const MAX_AFFECTED = 100;
-const isTestFile = (f: string) => /(^|\/)tests?\//.test(f) || /\.(test|spec)\.[^/]+$/.test(f) || /(^|\/)test_[^/]*\.py$/.test(f) || /_test\.py$/.test(f);
+const isPytestModule = (f: string) => /(^|\/)test_[^/]*\.py$/.test(f) || /_test\.py$/.test(f);
+const isTestFile = (f: string) => /(^|\/)tests?\//.test(f) || /\.(test|spec)\.[^/]+$/.test(f) || isPytestModule(f);
+// pytest given a file that is not a test module (a conftest, a helper, a fixture) collects nothing or fails (exit 4 or 5).
+const runsPytest = (cmd: string) => /\bpytest\b/.test(cmd);
 export type AffectedRun = { mode: 'cmd'; cmd: string } | { mode: 'skip'; why: string } | { mode: 'full'; why: string };
 
 /**
  * What a test validator runs for `--affected` (C-02): its affectedCmd with {files} (the changed files), {tests} (the
- * changed test files) or {packages} (the ./dirs of the changed .go files), each path quoted ("…" on win32, '…'
- * elsewhere). Bookkeeping and missing paths are left out. More than 100 paths, or one outside SAFE_PATH: the whole
- * validator (`full`). No affectedCmd, or a placeholder with nothing to put in it: `skip`.
+ * changed test files; for pytest only its test modules, test_*.py and *_test.py) or {packages} (the ./dirs of the
+ * changed .go files), each path quoted ("…" on win32, '…' elsewhere). Bookkeeping and missing paths are left out. More
+ * than 100 paths, or one outside SAFE_PATH: the whole validator (`full`). No affectedCmd, or a placeholder with nothing
+ * to put in it: `skip`.
  */
 export function resolveAffected(v: Validator, files: string[], platform: NodeJS.Platform, exists: (rel: string) => boolean): AffectedRun {
   if (!v.affectedCmd) return { mode: 'skip', why: 'it has no related-tests command' };
@@ -184,7 +189,7 @@ export function resolveAffected(v: Validator, files: string[], platform: NodeJS.
   const quote = (f: string) => (platform === 'win32' ? `"${f}"` : `'${f}'`);
   const lists: Record<'files' | 'tests' | 'packages', string[]> = {
     files: live,
-    tests: live.filter(isTestFile),
+    tests: live.filter(runsPytest(v.affectedCmd) ? isPytestModule : isTestFile),
     packages: [...new Set(live.filter(f => f.endsWith('.go')).map(f => { const d = path.posix.dirname(f); return d === '.' ? '.' : `./${d}`; }))],
   };
   let empty = false;

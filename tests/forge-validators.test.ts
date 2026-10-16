@@ -410,14 +410,25 @@ describe('--affected runs the related tests (C-02)', () => {
   it('runs the validator in full for a path no shell may see or too many files, and skips it with nothing related', () => {
     const v = (affectedCmd?: string): Validator => ({ name: 'unit', cmd: 'all', kind: 'test', ...(affectedCmd ? { affectedCmd } : {}), source: 'manual' });
     const all = () => true;
-    for (const bad of ['src/año.ts', "src/it's.ts", 'src/$x.ts', 'src/a;b.ts', 'src/a&b.ts', 'src/`x`.ts', 'src/100%.ts', 'src/a|b.ts']) {
+    for (const bad of ['src/año.ts', "src/it's.ts", 'src/$x.ts', 'src/a;b.ts', 'src/a&b.ts', 'src/`x`.ts', 'src/100%.ts', 'src/a|b.ts', '--root=..', '-x.ts', './-x.ts']) {
       expect(resolveAffected(v('vt {files}'), ['src/a.ts', bad], 'linux', all).mode, bad).toBe('full');
     }
+    // A runner reads a leading - as an option; inside a path it is only a name.
+    expect(resolveAffected(v('vt {files}'), ['src/-x.ts', 'a-b.ts'], 'linux', all)).toEqual({ mode: 'cmd', cmd: "vt 'src/-x.ts' 'a-b.ts'" });
     expect(resolveAffected(v('vt {files}'), Array.from({ length: 101 }, (_, i) => `src/f${i}.ts`), 'linux', all).mode).toBe('full');
     expect(resolveAffected(v('vt {files}'), Array.from({ length: 100 }, (_, i) => `src/f${i}.ts`), 'linux', all).mode).toBe('cmd');
     expect(resolveAffected(v('py {tests}'), ['src/a.py'], 'linux', all).mode).toBe('skip');
     expect(resolveAffected(v('vt {files}'), ['.forge/work/x.json'], 'linux', all).mode).toBe('skip');
     expect(resolveAffected(v(), ['src/a.ts'], 'linux', all).mode).toBe('skip');
+  });
+  it("pytest's {tests} takes only test modules (test_*.py, *_test.py): a conftest, a helper or a fixture alone skips it", () => {
+    const pytest = detectValidators(repo({ 'pytest.ini': '' }), cfg, () => false).find(v => v.name === 'pytest')!;
+    const all = () => true;
+    expect(resolveAffected(pytest, ['tests/conftest.py', 'tests/fixtures/data.json', 'tests/helpers.py', 'tests/test_a.py', 'pkg/b_test.py', 'tests/a.test.ts'], 'linux', all))
+      .toEqual({ mode: 'cmd', cmd: "python -m pytest -q 'tests/test_a.py' 'pkg/b_test.py'" });
+    expect(resolveAffected(pytest, ['tests/conftest.py', 'tests/fixtures/data.json'], 'linux', all).mode).toBe('skip');
+    const manual = { name: 'unit', cmd: 'pytest', kind: 'test', affectedCmd: 'uv run pytest {tests}', source: 'manual' as const };
+    expect(resolveAffected(manual, ['tests/conftest.py', 'tests/test_a.py'], 'linux', all)).toEqual({ mode: 'cmd', cmd: "uv run pytest 'tests/test_a.py'" });
   });
   it('planAffected keeps typecheck as it is, runs the related tests, and skips a test with nothing to run', () => {
     const list: Validator[] = [

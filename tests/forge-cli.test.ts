@@ -2023,6 +2023,20 @@ describe('validate --affected (C-02)', () => {
     expect(JSON.parse(s.stdout)).toEqual([expect.objectContaining({ validator: 'unit', ok: true, skipped: 'not-affected' })]);
     expect(s.stderr).toContain('review-prep runs it in full');
   });
+  it('in a project in a subdirectory, the changed tracked files are its own paths, as the untracked ones are', () => {
+    const sub = path.join(repo, 'pkg');
+    mkdirSync(path.join(sub, 'src'), { recursive: true });
+    mkdirSync(path.join(sub, '.forge'));
+    writeFileSync(path.join(sub, 'src', 'c.ts'), 'c\n');
+    writeFileSync(path.join(sub, '.forge', 'config.yaml'), 'detect: false\nvalidators:\n  - name: unit\n    cmd: unit-all\n    kind: test\n    affected_cmd: unit-related {files}\n');
+    execFileSync('git', ['-c', 'core.autocrlf=false', 'add', '-A'], { cwd: repo });
+    execFileSync('git', ['commit', '-qm', 'pkg'], { cwd: repo });
+    writeFileSync(path.join(sub, 'src', 'c.ts'), 'c2\n');
+    writeFileSync(path.join(sub, 'src', 'd.ts'), 'd\n');
+    writeFileSync(path.join(repo, 'src', 'a.ts'), 'outside the project\n');
+    expect(run(['validate', '--affected', '--base', 'HEAD'], { ...aio, cwd: sub }).code).toBe(0);
+    expect(ran).toEqual([`unit-related ${q('src/c.ts')} ${q('src/d.ts')}`]);
+  });
 });
 
 describe('forge stats (C-09)', () => {

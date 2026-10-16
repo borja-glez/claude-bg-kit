@@ -732,14 +732,15 @@ export function run(argv: string[], io: Io): Result {
         if (p !== undefined && !(PATH_ORDER as readonly string[]).includes(p)) throw new UsageError(`validate: --path must be one of ${PATH_ORDER.join('|')}`);
         if (has('out') && flag('out') === undefined) throw new UsageError('validate: --out needs a file');
         // --affected a,b names the files; bare (or followed by another flag) it takes those changed since --base (HEAD by
-        // default; uncommitted changes included) and the untracked ones, read with -z so git quotes no name.
+        // default; uncommitted changes included) and the untracked ones, read with -z so git quotes no name. Both relative
+        // to the code's directory, as the validators see them (--relative: a project in a subdirectory).
         const affectedFiles = (): string[] => {
           const given = flag('affected');
           if (given !== undefined) return given.split(',').map(s => s.trim()).filter(Boolean);
           const git = io.git ?? defaultGit(repoDir);
           const base = flag('base') ?? 'HEAD';
           if (base.startsWith('-')) throw new UsageError('validate: --base must be a commit');
-          const changed = git(['diff', '--name-only', '-z', base, '--']);
+          const changed = git(['diff', '--name-only', '-z', '--relative', base, '--']);
           if (changed === null) throw new UsageError(`validate --affected: cannot diff against ${base}`);
           const others = git(['ls-files', '-z', '--others', '--exclude-standard']) ?? '';
           return [...new Set([...changed.split('\0'), ...others.split('\0')].filter(Boolean))];
