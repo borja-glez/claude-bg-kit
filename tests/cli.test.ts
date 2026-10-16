@@ -499,8 +499,52 @@ describe('task batches from the CLI (A-14)', () => {
     expect(cli('heartbeat', '--register', '--session', 'be', '--name', 'b', '--agent', 'a', '--branch', 'main', '--worktree', '/r', '--session-version', '0').code).toBe(2);
     expect(existsSync(path.join(dir, 'db', 'state'))).toBe(false);
   });
+  it('an empty --db (the next flag, or nothing) is exit 2: the cache is never written under a flag name', () => {
+    dbOf();
+    writeFileSync(path.join(dir, 'why.txt'), 'Waits.');
+    expect(cli('claim', 'plan.yaml', '--db', '--session', 'be', '--task', 'T001', '--state-version', '3', '--session-version', '7').code).toBe(2);
+    expect(cli('block', 'plan.yaml', '--db', '--session', 'be', '--task', 'T001', '--state-version', '4', '--session-version', '8', '--by', 'T002', '--why-file', 'why.txt').code).toBe(2);
+    expect(cli('block', 'plan.yaml', '--session', 'be', '--task', 'T001', '--state-version', '4', '--session-version', '8', '--by', 'T002', '--why-file', 'why.txt', '--db').code).toBe(2);
+    expect(existsSync(path.join(dir, '--session'))).toBe(false);
+    expect(existsSync(path.join(dir, 'db', 'state'))).toBe(false);
+  });
+  it('done and block need a task of the plan, as claim does: exit 2, and nothing reaches the cache', () => {
+    dbOf();
+    writeFileSync(path.join(dir, 'why.txt'), 'Waits.');
+    expect(cli('done', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T0019', '--state-version', '4', '--session-version', '8', '--meta-version', '2', '--summary-file', 'why.txt').code).toBe(2);
+    expect(cli('block', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T0019', '--state-version', '4', '--session-version', '8', '--by', 'T002', '--why-file', 'why.txt').code).toBe(2);
+    expect(existsSync(path.join(dir, 'db', 'state'))).toBe(false);
+  });
+  it('claim --unblock writes unblocked then started in the order of their ids, and the cache forgets the block', () => {
+    dbOf();
+    writeFileSync(path.join(dir, 'why.txt'), 'Waits for the keys.');
+    expect(cli('block', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T001', '--state-version', '2', '--session-version', '6', '--by', 'external', '--why-file', 'why.txt').code).toBe(0);
+    const cached = () => JSON.parse(readFileSync(path.join(dir, 'db', 'state', 'T001.json'), 'utf8'));
+    expect(cached()).toMatchObject({ status: 'blocked', blockedBy: ['external'], blockedReason: 'Waits for the keys.' });
+    const o = JSON.parse(claim('--unblock').stdout);
+    expect(o.eids).toHaveLength(2);
+    expect(o.eids[0] < o.eids[1]).toBe(true);
+    expect(o.batch.map((w: { collection: string; doc_id: string }) => `${w.collection}/${w.doc_id}`)).toEqual(['state/T001', `events/${o.eids[0]}`, `events/${o.eids[1]}`, 'sessions/be']);
+    expect(o.batch[1].data.type).toBe('unblocked');
+    expect(o.batch[2].data.type).toBe('started');
+    expect(cached()).toMatchObject({ status: 'in_progress', owner: 'be' });
+    expect(cached()).not.toHaveProperty('blockedBy');
+    expect(cached()).not.toHaveProperty('blockedReason');
+  });
+  it('heartbeat --register with an empty --claude takes the id from the environment, so another checkout is still refused', () => {
+    const reg = (env: Record<string, string>, ...extra: string[]) => run(['heartbeat', '--register', '--session', 'be', '--name', 'backend', '--agent', 'work-1', '--branch', 'track/backend', '--worktree', '/repo/wt', '--claude', ...extra], { ...io, env });
+    docsAt('db/sessions', {});
+    expect(JSON.parse(reg({ CLAUDE_CODE_SESSION_ID: 'c-1' }, '--sessions', 'db/sessions').stdout).batch[0].data.claude).toBe('c-1');
+    expect(JSON.parse(reg({}, '--sessions', 'db/sessions').stdout).batch[0].data).not.toHaveProperty('claude');
+    // The other checkout registered with the same empty substitution: the flag name is nobody's id.
+    docsAt('db/sessions', { be: { name: 'be', heartbeatAt: '2026-10-11T09:59:00.000Z', status: 'active', claude: '--sessions', worktree: '/other' } });
+    const held = reg({ CLAUDE_CODE_SESSION_ID: 'c-1' }, '--sessions', 'db/sessions');
+    expect(held.code).toBe(3);
+    expect(JSON.parse(held.stdout)).toEqual({ held: 'be', use: 'be-2' });
+    expect(reg({}, '--sessions', 'db/sessions').code).toBe(3);
+  });
   it('done reads the commit itself and the summary from a file', () => {
-    const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd: dir, encoding: 'utf8' }).trim();
+    const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', '-c', 'core.autocrlf=false', ...a], { cwd: dir, encoding: 'utf8' }).trim();
     git('init', '-q'); git('add', 'plan.yaml'); git('commit', '-qm', 'T001: esquema');
     dbOf();
     writeFileSync(path.join(dir, 'summary.txt'), 'El esquema de pedidos está aplicado.\n');

@@ -20,12 +20,13 @@ describe('task batches (A-14)', () => {
       ],
     });
   });
-  it('claim --unblock drops blockedBy and writes unblocked first; --recovered-from keeps zonesTouched and says from whom', () => {
+  it('claim --unblock drops blockedBy and blockedReason and writes unblocked first, with the first id; --recovered-from keeps zonesTouched and says from whom', () => {
     const u = claimBatch({ sid: 'main', task: 'T019', stateVersion: 7, sessionVersion: 3, now: NOW, eids: ['e1', 'e2'], unblock: true });
     expect(u.eids).toEqual(['e1', 'e2']);
-    expect(u.batch[0].data).toMatchObject({ blockedBy: D });
-    expect(u.batch.map(w => `${w.collection}/${w.doc_id}`)).toEqual(['state/T019', 'events/e2', 'events/e1', 'sessions/main']);
+    expect(u.batch[0].data).toMatchObject({ blockedBy: D, blockedReason: D });
+    expect(u.batch.map(w => `${w.collection}/${w.doc_id}`)).toEqual(['state/T019', 'events/e1', 'events/e2', 'sessions/main']);
     expect(u.batch[1].data).toMatchObject({ type: 'unblocked', taskId: 'T019' });
+    expect(u.batch[2].data).toMatchObject({ type: 'started', taskId: 'T019' });
     const r = claimBatch({ sid: 'main', task: 'T019', stateVersion: 7, sessionVersion: 3, now: NOW, eids: ['e1'], recoveredFrom: 'ui' });
     expect(r.batch[0].data).toEqual({ status: 'in_progress', owner: 'main', claimedAt: T, startedAt: T, recoveredFrom: 'ui' });
     expect(r.batch[1].data).toMatchObject({ type: 'started', text: 'recovered from ui' });
@@ -41,6 +42,12 @@ describe('task batches (A-14)', () => {
     ]);
     const noTests = doneBatch({ sid: 'main', task: 'T019', stateVersion: 8, sessionVersion: 4, metaVersion: 2, now: NOW, eids: ['e1'], commit, summary: 'x' });
     expect(noTests.batch[3].data).toEqual({ metrics: { lastCommit: { sha: 'abc1234', ts: '2026-10-15T11:59:00.000Z' } } });
+  });
+  it('done: the event text is the commit title cleaned, without control or bidi characters', () => {
+    const title = `T019:${String.fromCharCode(9)}log${String.fromCharCode(0x202e)}in${String.fromCharCode(7)}`;
+    const commit = { sha: 'abc1234', ts: '2026-10-15T11:59:00.000Z', title, add: 1, del: 0 };
+    const r = doneBatch({ sid: 'main', task: 'T019', stateVersion: 8, sessionVersion: 4, metaVersion: 2, now: NOW, eids: ['e1'], commit, summary: 'x' });
+    expect(r.batch[1].data).toMatchObject({ type: 'done', text: 'T019: login' });
   });
   it('block: the reason, cleaned, in the event and in state/T.blockedReason', () => {
     const bidi = String.fromCharCode(0x202e);

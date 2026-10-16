@@ -5,10 +5,11 @@ export type SessionEnv = Readonly<Record<string, string | undefined>>;
 
 /**
  * C1: Claude's id of the session that runs a command. The flag when isSafeId accepts it (an unsubstituted
- * `${CLAUDE_SESSION_ID}` or an empty value does not), else CLAUDE_CODE_SESSION_ID of env when valid, else null.
+ * `${CLAUDE_SESSION_ID}` or an empty value does not) and it does not start with "-" (an empty substitution leaves the
+ * next flag there, e.g. `--claude --sessions …`), else CLAUDE_CODE_SESSION_ID of env when valid, else null.
  */
 export function claudeSessionId(flag?: string | null, env: SessionEnv = process.env): string | null {
-  if (isSafeId(flag)) return flag;
+  if (isSafeId(flag) && !flag.startsWith('-')) return flag;
   const v = env.CLAUDE_CODE_SESSION_ID;
   return isSafeId(v) ? v : null;
 }

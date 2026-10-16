@@ -9,6 +9,10 @@ describe('claudeSessionId (C1)', () => {
   it('falls back to the environment for a missing or unusable flag', () => {
     for (const bad of [undefined, null, '', '${CLAUDE_SESSION_ID}', 'a:b', 'x'.repeat(121), '..']) expect(claudeSessionId(bad, env)).toBe('env-1');
   });
+  it('takes a flag value that starts with "-" for the next flag (an empty substitution), never for the id', () => {
+    for (const next of ['--sessions', '--via', '-x']) expect(claudeSessionId(next, env)).toBe('env-1');
+    expect(claudeSessionId('--sessions', {})).toBeNull();
+  });
   it('is null when neither is usable', () => {
     expect(claudeSessionId(undefined, {})).toBeNull();
     expect(claudeSessionId('a:b', { CLAUDE_CODE_SESSION_ID: '' })).toBeNull();

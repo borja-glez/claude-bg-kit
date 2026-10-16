@@ -29,23 +29,25 @@ export interface ClaimInput {
   unblock?: boolean; recoveredFrom?: string | null;
 }
 /**
- * The task in progress, its `started` event (eids[0]; with `unblock`, the `unblocked` one is eids[1] and comes first)
- * and the session with its task and lease. A recovered task keeps its zonesTouched and says from whom.
+ * The task in progress, its `started` event and the session with its task and lease. With `unblock`, `blockedBy` and
+ * `blockedReason` go, and the `unblocked` event comes first: eids[0], then `started` eids[1] (the order of their ids,
+ * which is how the roadmap lists events of the same `ts`). A recovered task keeps its zonesTouched and says from whom.
  */
 export function claimBatch(i: ClaimInput): BatchOut {
   const now = i.now.toISOString();
   const leaseUntil = iso(i.now.getTime() + LEASE_MINUTES * MIN);
   const data: Record<string, unknown> = { status: 'in_progress', owner: i.sid, claimedAt: now, startedAt: now };
   if (i.recoveredFrom) data.recoveredFrom = i.recoveredFrom; else data.zonesTouched = [];
-  if (i.unblock) data.blockedBy = DEL;
+  if (i.unblock) { data.blockedBy = DEL; data.blockedReason = DEL; }
   const eids = i.eids.slice(0, i.unblock ? 2 : 1);
+  const started = eids[eids.length - 1];
   const base = { ts: now, sessionId: i.sid, taskId: i.task };
   return {
     now, eid: eids[0], eids, leaseUntil,
     batch: [
       { op: 'update', collection: 'state', doc_id: i.task, data, if_version: i.stateVersion },
-      ...(i.unblock ? [event(eids[1], { ...base, type: 'unblocked' })] : []),
-      event(eids[0], { ...base, type: 'started', ...(i.recoveredFrom ? { text: `recovered from ${i.recoveredFrom}` } : {}) }),
+      ...(i.unblock ? [event(eids[0], { ...base, type: 'unblocked' })] : []),
+      event(started, { ...base, type: 'started', ...(i.recoveredFrom ? { text: `recovered from ${i.recoveredFrom}` } : {}) }),
       { op: 'update', collection: 'sessions', doc_id: i.sid, data: { currentTask: i.task, heartbeatAt: now, leaseUntil, status: 'active' }, if_version: i.sessionVersion },
     ],
   };
@@ -55,8 +57,8 @@ export interface DoneInput {
   sid: string; task: string; stateVersion: number; sessionVersion: number; metaVersion: number; now: Date; eids: readonly string[];
   commit: Commit; summary: string; tests?: number;
 }
-/** The task done with its commit and summary, the `done` event, the session without a task, and meta/project's last
- *  commit (with `tests` when known: wave 4 moves the metrics out of this batch, A-10). */
+/** The task done with its commit and summary, the `done` event (its text the commit title, cleaned), the session
+ *  without a task, and meta/project's last commit (with `tests` when known: wave 4 moves the metrics out of this batch, A-10). */
 export function doneBatch(i: DoneInput): BatchOut {
   const now = i.now.toISOString();
   const leaseUntil = iso(i.now.getTime() + LEASE_MINUTES * MIN);
@@ -66,7 +68,7 @@ export function doneBatch(i: DoneInput): BatchOut {
     now, eid, eids: [eid], leaseUntil,
     batch: [
       { op: 'update', collection: 'state', doc_id: i.task, data: { status: 'done', doneAt: now, commits: [c], summary: cleanText(i.summary, SUMMARY_MAX) }, if_version: i.stateVersion },
-      event(eid, { ts: now, type: 'done', sessionId: i.sid, taskId: i.task, text: c.title, add: c.add, del: c.del, sha: c.sha }),
+      event(eid, { ts: now, type: 'done', sessionId: i.sid, taskId: i.task, text: cleanText(c.title, SUMMARY_MAX), add: c.add, del: c.del, sha: c.sha }),
       { op: 'update', collection: 'sessions', doc_id: i.sid, data: { currentTask: DEL, heartbeatAt: now, leaseUntil }, if_version: i.sessionVersion },
       { op: 'update', collection: 'meta', doc_id: 'project', data: { metrics: { lastCommit: { sha: c.sha, ts: c.ts }, ...(i.tests !== undefined ? { tests: i.tests } : {}) } }, if_version: i.metaVersion },
     ],

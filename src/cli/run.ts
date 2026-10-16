@@ -70,6 +70,9 @@ export function run(argv: string[], io: Io): Result {
     const sid = flag('session'), task = flag('task');
     if (!sid || !SID_RE.test(sid)) return fail(`${cmd}: --session needs the session id`, 2);
     if (!task || task.startsWith('--') || !isPlanId(task)) return fail(`${cmd}: --task needs a plan task id`, 2);
+    // An empty --db reads the next flag: the mirror would write the cache under `<cwd>/--session/`.
+    const db = flag('db');
+    if (args.includes('--db') && (!db || db.startsWith('-'))) return fail(`${cmd}: --db needs the cache directory`, 2);
     const v: Record<string, number> = {};
     for (const name of versions) {
       const n = posInt(name);
@@ -78,6 +81,8 @@ export function run(argv: string[], io: Io): Result {
     }
     return { sid, task, v };
   };
+  // A task of the runtime plan (the db cache with --db, else the plan file): claim, done and block take no other.
+  const planHas = (task: string): boolean => loadView().view.tasks.some(t => t.id === task);
   // With --db the local cache sees the state write at once (the hooks read the seat's task there); a write the
   // roadmap refuses is replaced by the next listing of `state`.
   const mirror = (batch: Write[]) => { const db = flag('db'); if (db) for (const w of batch) mirrorState(abs(db), w); };
@@ -309,8 +314,7 @@ export function run(argv: string[], io: Io): Result {
       case 'claim': {
         const f = taskFlags('claim', ['state-version', 'session-version']);
         if ('code' in f) return f;
-        const { view } = loadView();
-        if (!view.tasks.some(t => t.id === f.task)) return fail(`claim: unknown task ${f.task}`, 2);
+        if (!planHas(f.task)) return fail(`claim: unknown task ${f.task}`, 2);
         const from = flag('recovered-from');
         if (args.includes('--recovered-from') && (!from || !SID_RE.test(from))) return fail('claim: --recovered-from needs the previous owner', 2);
         const now = io.now();
@@ -325,6 +329,7 @@ export function run(argv: string[], io: Io): Result {
       case 'done': {
         const f = taskFlags('done', ['state-version', 'session-version', 'meta-version']);
         if ('code' in f) return f;
+        if (!planHas(f.task)) return fail(`done: unknown task ${f.task}`, 2);
         const file = flag('summary-file');
         if (!file) return fail('done: --summary-file is required', 2);
         let summary: string;
@@ -345,6 +350,7 @@ export function run(argv: string[], io: Io): Result {
       case 'block': {
         const f = taskFlags('block', ['state-version', 'session-version']);
         if ('code' in f) return f;
+        if (!planHas(f.task)) return fail(`block: unknown task ${f.task}`, 2);
         const by = (flag('by') ?? '').split(',').map(s => s.trim()).filter(Boolean);
         if (!by.length || by.some(b => b !== 'external' && (b.startsWith('--') || !isPlanId(b)))) return fail('block: --by needs task ids or external, comma-separated', 2);
         const file = flag('why-file');
