@@ -146,3 +146,20 @@ describe('decideStop with a sleeping swarm', () => {
     expect(decideStop(A, run, { ...ctx(), swarmSleeping: false }).block).toBe(true);
   });
 });
+
+describe("decideExecutionStop and the agents' leases (D-15)", () => {
+  const ctx = (leases?: Record<string, string>) => ({ now: xnow, stopFile: false, jobs: [], ...(leases ? { leases } : {}) });
+  it("an agent counts as alive while its task's lease runs, never more than 90 minutes after its last report", () => {
+    const fifteen = ex({ tasks: xtask('forge-impl', '2026-10-12T11:45:00.000Z') });
+    // No lease: 10 minutes after the last report, as before.
+    expect(decideExecutionStop({ session_id: 's1' }, fifteen, ctx()).block).toBe(true);
+    expect(decideExecutionStop({ session_id: 's1' }, fifteen, ctx({ T1: '2026-10-12T12:45:00.000Z' })).block).toBe(false);
+    expect(decideExecutionStop({ session_id: 's1' }, fifteen, ctx({ T1: '2026-10-12T11:55:00.000Z' })).block).toBe(true);
+    expect(decideExecutionStop({ session_id: 's1' }, fifteen, ctx({ T1: 'not a date' })).block).toBe(true);
+    // A lease three hours long: the cap of 90 minutes after the last report wins.
+    expect(decideExecutionStop({ session_id: 's1' }, ex({ tasks: xtask('forge-impl', '2026-10-12T10:00:00.000Z') }), ctx({ T1: '2026-10-12T15:00:00.000Z' })).block).toBe(true);
+    expect(decideExecutionStop({ session_id: 's1' }, ex({ tasks: xtask('forge-impl', '2026-10-12T11:00:00.000Z') }), ctx({ T1: '2026-10-12T15:00:00.000Z' })).block).toBe(false);
+    // A task without an agent holds nothing back, whatever its lease.
+    expect(decideExecutionStop({ session_id: 's1' }, ex({ tasks: xtask(null, '2026-10-12T11:58:00.000Z') }), ctx({ T1: '2026-10-12T12:45:00.000Z' })).block).toBe(true);
+  });
+});

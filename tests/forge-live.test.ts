@@ -7,6 +7,7 @@ import { run, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { nextLive, liveFile } from '../src/forge/live.js';
 import { saveExecution, readExecution, writePublicTask, executionTaskFile } from '../src/forge/execution.js';
 import { writeMember } from '../src/forge/members.js';
+import { saveRun, startRun } from '../src/forge/run.js';
 import { executionFromFiles } from '../src/lens/model.js';
 import { buildBandModel } from '../src/mod/model.js';
 
@@ -68,6 +69,40 @@ describe('forge hook live', () => {
     expect(run(['hook', 'stop'], { ...io, stdin: JSON.stringify({ session_id: 's1' }) }).stdout).toBe('');
     expect(readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8')).toBe(before);
     expect(existsSync(liveFile(root, 's1'))).toBe(false);
+  });
+  it("the Stop hook reads the public lease of each running task of the run (D-15)", () => {
+    const t = { T1: { ...runningTask.T1, updatedAt: '2026-10-12T11:45:00.000Z' } };
+    exec({ tasks: t });
+    const stop = () => run(['hook', 'stop'], { ...io, stdin: JSON.stringify({ session_id: 's1' }) }).stdout;
+    expect(JSON.parse(stop()).decision).toBe('block');
+    const lease = { task: 'T1', runId: 'r1', stage: 'implement' as const, status: 'running' as const, agent: 'forge-impl', round: 1, since: T, updatedAt: T, leaseUntil: '2026-10-12T12:30:00.000Z', by: 'main', mode: 'subagents' as const };
+    writePublicTask(root, lease);
+    expect(stop()).toBe('');
+    // The lease of another run says nothing about this one.
+    writePublicTask(root, { ...lease, runId: 'r0' });
+    expect(JSON.parse(stop()).decision).toBe('block');
+  });
+  it('no implicit binding: an unbound execution or infinite run stays unbound, whatever waypoint binding the session holds (B-03, J-03)', () => {
+    // A guard: it passes before and after this plan.
+    const wp = path.join(root, '.waypoint', 'shop');
+    mkdirSync(wp, { recursive: true });
+    const bound = (via: string) => writeFileSync(path.join(wp, 'bound.json'), JSON.stringify({ sid: 'main', claude: 's1', pid: null, via, since: T, seenAt: T, endedAt: null, endReason: null }));
+    bound('forge-run');
+    exec({ hookSession: null, tasks: runningTask });
+    const execFile = path.join(root, '.forge', 'execution.json');
+    const before = readFileSync(execFile, 'utf8');
+    expect(run(['hook', 'stop'], { ...io, stdin: JSON.stringify({ session_id: 's1' }) }).stdout).toBe('');
+    expect(hook({ session_id: 's1', hook_event_name: 'SubagentStart', agent_id: 'a1', agent_type: 'forge:forge-impl' }).stdout).toBe('');
+    hook({ session_id: 's1', hook_event_name: 'SessionStart', source: 'startup' });
+    expect(readFileSync(execFile, 'utf8')).toBe(before);
+    expect(existsSync(liveFile(root, 's1'))).toBe(false);
+    bound('forge-infinite');
+    rmSync(execFile);
+    saveRun(root, { ...startRun(new Date(T), { cycles: 3 }), sessionId: null });
+    const runFile = path.join(root, '.forge', 'run.json');
+    const runBefore = readFileSync(runFile, 'utf8');
+    expect(run(['hook', 'stop'], { ...io, stdin: JSON.stringify({ session_id: 's1' }) }).stdout).toBe('');
+    expect(readFileSync(runFile, 'utf8')).toBe(runBefore);
   });
   it('a SubagentStart of a non-member while the execution is unbound leaves execution.json as it was, writes no signal and prints nothing (E-15)', () => {
     exec({ hookSession: null });

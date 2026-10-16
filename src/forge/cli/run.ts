@@ -5,10 +5,10 @@ import path from 'node:path';
 import { appendEvent, readEvents, forgeDir, LEDGER_KINDS, type LedgerKind, type LedgerEvent } from '../ledger.js';
 import { parseRun, startRun, recordCycle, stopReason, endRun, readRunText, saveRun, stopFile, type RunState, type StopContext } from '../run.js';
 import { decideStop, decideExecutionStop } from '../hook.js';
-import { readExecution, updateExecution, runWorktree } from '../execution.js';
+import { readExecution, updateExecution, runWorktree, executionTaskFile } from '../execution.js';
 import { planLocale, replyIn, sessionReply } from '../../lib/locale.js';
 import { isLocale } from '../../lib/forge-run.js';
-import { isSafeId } from '../../lib/execution-state.js';
+import { isSafeId, normalizePublicTask } from '../../lib/execution-state.js';
 import { samePath } from '../../lib/worktree.js';
 import { treeStartFile, parseStatus, parseSnapshot, treeCheck, type TreeSnapshot } from '../tree.js';
 import { triage, implementerFor, zonesFromPaths, announce, announceReview, isBookkeeping, parseNumstat, diffPath, isPerfTask, reviewFor, PATH_ORDER, ZONE_ORDER, type PathName, type AnnounceLocale, type TriageResult } from '../triage.js';
@@ -486,7 +486,17 @@ function hookStop(io: Io): string {
     // C-03: a job this session launched in the background (prep, review-prep, integrate, step) wakes it when it ends;
     // a member's job, with another session, does not.
     const jobs = sid ? liveJobs(main, io.now()).filter(j => j.session === null || j.session === sid) : [];
-    const d = decideExecutionStop(hookInput, exec, { now: io.now(), stopFile: existsSync(stopFile(main)), jobs });
+    // D-15: the public lease of each running task of this run (.forge/execution/<T>.json), which the skill sets for the
+    // budget of the agent it dispatches.
+    const leases: Record<string, string> = {};
+    for (const [id, t] of Object.entries(exec?.active ? exec.tasks : {})) {
+      if (t.status !== 'running') continue;
+      try {
+        const p = normalizePublicTask(JSON.parse(readFileSync(executionTaskFile(main, id), 'utf8')));
+        if (p && p.task === id && p.runId === exec!.runId) leases[id] = p.leaseUntil;
+      } catch { /* no public file: the default lease */ }
+    }
+    const d = decideExecutionStop(hookInput, exec, { now: io.now(), stopFile: existsSync(stopFile(main)), jobs, leases });
     if (!d.block) return '';
     // Under the lock, only what the hook decided: a swarm step or an integrate that wrote meanwhile is kept (I-15). A
     // hook never keeps the session waiting: a lock a live process holds for HOOK_LOCK_WAIT_MS lets it stop as if no

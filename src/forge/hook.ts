@@ -1,6 +1,6 @@
 import { stopReason, endRun, type RunState, type StopContext } from './run.js';
 
-import { LEASE_MINUTES } from '../lib/coordination.js';
+import { LEASE_CAP_MINUTES, LEASE_MINUTES } from '../lib/coordination.js';
 import type { ExecutionState } from '../lib/execution-state.js';
 import type { JobDoc } from './jobs.js';
 
@@ -18,8 +18,9 @@ export const executionEndedReason = (reason: string): string =>
  * nor while a job of the session runs in the background (C-03): the agent's return or the job's end wakes the session,
  * so a block would only add a turn (and fight a /goal evaluator). With stop_hook_active it blocks again only after a
  * new step.
+ * D-15: an agent lives while its task's public lease runs (`leases`, set for its budget), at most LEASE_CAP_MINUTES after its last report.
  */
-export function decideExecutionStop(input: { stop_hook_active?: boolean; session_id?: unknown }, exec: ExecutionState | null, ctx: { now: Date; stopFile: boolean; jobs: readonly JobDoc[] }):
+export function decideExecutionStop(input: { stop_hook_active?: boolean; session_id?: unknown }, exec: ExecutionState | null, ctx: { now: Date; stopFile: boolean; jobs: readonly JobDoc[]; leases?: Readonly<Record<string, string>> }):
   { block: false; exec: ExecutionState | null } | { block: true; reason: string; exec: ExecutionState; ended?: string } {
   if (!exec || !exec.active) return { block: false, exec };
   const session = typeof input.session_id === 'string' && input.session_id ? input.session_id : null;
@@ -31,7 +32,15 @@ export function decideExecutionStop(input: { stop_hook_active?: boolean; session
   const now = ctx.now.getTime();
   const until = exec.sleepUntil ? Date.parse(exec.sleepUntil) : NaN;
   if (Number.isFinite(until) && until > now) return { block: false, exec };
-  const agentRunning = Object.values(exec.tasks).some(t => t.status === 'running' && !!t.agent && now - Date.parse(t.updatedAt) < LEASE_MINUTES * 60000);
+  // D-15: an agent of a running task lives while its task's public lease runs (the skill sets it for the agent's
+  // budget), never more than LEASE_CAP_MINUTES after the task's last report; without a lease, LEASE_MINUTES after it.
+  const agentRunning = Object.entries(exec.tasks).some(([id, t]) => {
+    if (t.status !== 'running' || !t.agent) return false;
+    const updated = Date.parse(t.updatedAt);
+    if (!Number.isFinite(updated)) return false;
+    const lease = Date.parse(ctx.leases?.[id] ?? '');
+    return now < Math.min(Number.isFinite(lease) ? lease : updated + LEASE_MINUTES * 60000, updated + LEASE_CAP_MINUTES * 60000);
+  });
   if (agentRunning) return { block: false, exec };
   if (ctx.jobs.length) return { block: false, exec };
   if (input.stop_hook_active === true && exec.lastStepAt === exec.lastBlockStep) return { block: false, exec };
