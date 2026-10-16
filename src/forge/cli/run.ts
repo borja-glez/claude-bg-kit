@@ -1316,6 +1316,11 @@ function runCommand(argv: string[], io: Io): Result {
         if (!(PATH_ORDER as readonly string[]).includes(p)) throw new UsageError(`verify-plan: --path must be one of ${PATH_ORDER.join('|')}`);
         const loc = flag('locale');
         if (has('locale') && loc !== 'es' && loc !== 'en') throw new UsageError('verify-plan: --locale must be es|en');
+        // I2: --dir <review dir> (reviews-<n>-<round>): swarm step waits there for the verify agent of the surfaces it chose.
+        const dirArg = flag('dir');
+        const roundDir = dirArg === undefined ? null : path.resolve(io.cwd, dirArg);
+        const roundOf = roundDir ? /^reviews-(\d+)-(\d+)$/.exec(path.basename(roundDir)) : null;
+        if (has('dir') && !roundOf) throw new UsageError('verify-plan: --dir must be a review dir, .forge/work/<id>/reviews-<n>-<round>');
         const es = (loc ?? planLocale(io.cwd)) === 'es';
         const git = io.git ?? defaultGit(io.cwd);
         const diff = git(['diff', '--name-only', `${base}..HEAD`]);
@@ -1330,6 +1335,22 @@ function runCommand(argv: string[], io: Io): Result {
           tools: s => (s.tools.length ? toolGaps(s.tools, { onPath, inventory: inventory ??= mcpOf(io, repoDir) }) : { missing: [], unknown: [] }),
         });
         appendEvent(io.cwd, { ts: ts(), kind: 'verify', task, planned: plan.eligible, surfaces: plan.surfaces.filter(s => s.permission === 'allowed').map(s => s.name) });
+        if (roundDir && roundOf) {
+          // verify-pending.json: the surfaces it can verify (allowed now) and what a verify agent needs to be spawned
+          // again. A surface the coordinator decides not to verify is logged as a verify-skip; with none, no marker.
+          const pending = path.join(roundDir, 'verify-pending.json');
+          const chosen = plan.surfaces.filter(s => s.permission === 'allowed');
+          const rel = (f: string) => path.relative(io.cwd, f).split(path.sep).join('/');
+          const work = path.dirname(roundDir);
+          const [, n, round] = roundOf;
+          if (plan.eligible && chosen.length) {
+            mkdirSync(roundDir, { recursive: true });
+            writeFileSync(pending, JSON.stringify({
+              task, at: ts(), surfaces: chosen.map(s => ({ name: s.name, file: surfaceFile(s.name), missing: s.missing, unknown: s.unknown })),
+              brief: rel(path.join(work, `brief-${n}.md`)), diff: rel(path.join(work, `diff-${n}.patch`)), dir: rel(roundDir), evidence: rel(path.join(work, 'evidence', `${n}-${round}`)),
+            }, null, 2) + '\n');
+          } else rmSync(pending, { force: true });
+        }
         return json({ ...plan, surfaces: plan.surfaces.map(ps => surfaceQuestion(ps, surfaces.find(s => s.name === ps.name)!, local.surfaces[ps.name], git, repoDir, io.cwd, es)) });
       }
       case 'local': {

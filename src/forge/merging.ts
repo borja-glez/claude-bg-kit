@@ -3,10 +3,10 @@
 // `baseline`); it turns to phase `merge` right before `git merge --no-ff --no-commit`, and goes after the commit or the
 // rollback. A process that dies in its merge phase leaves it with MERGE_HEAD: the next attempt in that same worktree
 // aborts that merge, and only that one.
-import { closeSync, constants, copyFileSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import path from 'node:path';
 import { SLOT_MAX_WAIT_MS } from './jobs.js';
-import { pidAlive } from './pid.js';
+import { pidAlive, removeFileIf } from './pid.js';
 
 export type MergingPhase = 'baseline' | 'merge';
 export interface MergingDoc {
@@ -84,21 +84,10 @@ export function mergeInFlight(main: string, now: number, alive: (pid: number) =>
   return r && mergingStands(r, now, alive) ? r : null;
 }
 
-/**
- * Removes the marker only while it still reads `text`. It is moved aside and checked there, so a marker written
- * meanwhile is put back, never deleted (unless a newer one already took the place): of two processes removing the
- * same leftover, one removes it and the other finds the place empty or someone else's.
- */
+/** Removes the marker only while it still reads `text` (removeFileIf): of two processes removing the same leftover, one
+ *  removes it and the other finds the place empty or someone else's. */
 export function removeMergingIf(main: string, text: string): boolean {
-  const file = mergingFile(main);
-  const aside = `${file}.${process.pid}.gone`;
-  try { renameSync(file, aside); } catch { return false; }
-  let moved: string | null = null;
-  try { moved = readFileSync(aside, 'utf8'); } catch { moved = null; }
-  if (moved === text) { rmSync(aside, { force: true }); return true; }
-  try { copyFileSync(aside, file, constants.COPYFILE_EXCL); } catch { /* a newer marker took the place: that one stands */ }
-  rmSync(aside, { force: true });
-  return false;
+  return removeFileIf(mergingFile(main), text);
 }
 
 /** The marker this process took: `stamp` rewrites its phase and staleAt while it is still the one it wrote last

@@ -1190,6 +1190,14 @@ describe('plugin layout', () => {
     expect(inf).toContain('no `swarm step`');
     expect(inf).not.toContain('instead of the merge question');
   });
+  it('the coordinator gives the person\'s answers to the step, which also waits for verify, runs one at a time and reviews an adopted task (W1c final fix wave, group A)', () => {
+    const step = runRef('step');
+    for (const w of ['--ruling <T>:<answer>', '--ruling <T>:review', 'defer:F3[+F5]', '`busy`', '.forge/jobs/step.lock', '`verify-pending.json`', '`verify`']) expect(step, w).toContain(w);
+    const conv = runRef('convergence');
+    for (const w of ['--ruling <T>:fix', '--ruling <T>:defer:']) expect(conv, w).toContain(w);
+    expect(runRef('task-steps')).toContain('--dir .forge/work/T/reviews-<n>-<round>');
+    expect(runRef('execution')).toContain('it needs only that `brief-1.md` and its implementer');
+  });
   it('READMEs describe wave 1c: swarm step, background jobs and the lock, a clean session, verify-close, setup, the routing probe and delicate', () => {
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
       const md = read(f);
