@@ -1,5 +1,5 @@
 import { spawnSync, execFileSync } from 'node:child_process';
-import { existsSync, statSync, lstatSync, readFileSync, readdirSync, openSync, closeSync, fstatSync, readSync, rmSync, mkdtempSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
+import { existsSync, statSync, lstatSync, realpathSync, readFileSync, readdirSync, openSync, closeSync, fstatSync, readSync, rmSync, mkdtempSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { appendEvent, readEvents, forgeDir, LEDGER_KINDS, type LedgerKind, type LedgerEvent } from '../ledger.js';
@@ -52,7 +52,7 @@ export interface ExecResult { code: number; output: string; ms: number; timedOut
 export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined>; slot?: Slot }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = 'usage: forge <triage|brief|validate|stats|verdict|round|review-prep|review-close|prep|shadow|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|swarm|stop|hook> ...';
+const USAGE = 'usage: forge <triage|brief|validate|stats|verdict|round|review-prep|review-close|prep|shadow|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|verify-close|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|swarm|stop|hook> ...';
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 const MAX_WHY = 200;
@@ -513,6 +513,49 @@ function logVerifyResult(cwd: string, at: string, task: string, dir: string, ver
   return out;
 }
 
+/** A screenshot above this is converted to JPEG before it is uploaded to the roadmap. */
+const SHOT_MAX_BYTES = 2 * 1024 * 1024;
+
+/**
+ * `surfaces learn` of one surface: appends the notes under the Learned/Aprendido heading of `<dir>/.forge/verify/<name>.md`
+ * (the code checked) and, when the surface is allowed as it is now, records them in the main checkout, so they never ask
+ * for its permission again. A missing file or a symlink is a reason, not a write.
+ */
+function learnSurface(io: Io, dir: string, name: string, notes: string[], heading: string): { count: number } | { reason: string } {
+  const file = path.join(dir, surfaceFile(name));
+  if (!existsSync(file)) return { reason: `${surfaceFile(name)} does not exist` };
+  if (lstatSync(file).isSymbolicLink()) return { reason: `${surfaceFile(name)} is a symlink` };
+  const before = readFileSync(file, 'utf8');
+  // Only a surface allowed as it is now records what it appends (and local.yaml is never touched), so learning on a
+  // changed or never allowed surface cannot make it allowed: its new lines are just more unknown text.
+  const cur = readLocal(io.cwd).surfaces[name];
+  const allowed = cur?.state === 'allowed' && hashMatches(cur.hash, permissionHash(before, readLearned(io.cwd).get(name)));
+  const at = io.now().toISOString();
+  const r = appendLearned(before, at.slice(0, 10), notes, heading);
+  writeFileSync(file, r.text);
+  if (allowed) recordLearned(io.cwd, name, r.added, at);
+  return { count: r.count };
+}
+
+/** `verify-cleanup` of an evidence dir: stops the processes its pids.json lists (deletes no files). */
+function cleanupEvidence(dir: string): { killed: number[]; gone: number[] } {
+  let pids: number[] = [];
+  try { const raw = JSON.parse(readFileSync(path.join(dir, 'pids.json'), 'utf8')); if (Array.isArray(raw)) pids = raw.filter((p): p is number => Number.isInteger(p)); } catch { pids = []; }
+  const pgid = (pid: number): number | null => {
+    try { const n = Number(execFileSync('ps', ['-o', 'pgid=', '-p', String(pid)], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim()); return Number.isInteger(n) && n > 0 ? n : null; } catch { return null; }
+  };
+  const kill = (pid: number) => {
+    try {
+      if (process.platform === 'win32') execFileSync('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true });
+      else process.kill(killTarget(pid, pgid(pid)), 'SIGTERM');
+      return true;
+    } catch {
+      try { process.kill(pid, 'SIGTERM'); return true; } catch { return false; }
+    }
+  };
+  return cleanupPids(pids, kill);
+}
+
 /** C-03: the commands that run as a job with --out, and the task each works on. */
 function jobOf(argv: string[]): { cmd: string; task: string | null } | null {
   const [cmd, sub, third] = argv;
@@ -909,21 +952,76 @@ function runCommand(argv: string[], io: Io): Result {
       case 'verify-cleanup': {
         const dir = flag('dir');
         if (!dir) throw new UsageError('verify-cleanup: --dir is required');
-        let pids: number[] = [];
-        try { const raw = JSON.parse(readFileSync(path.resolve(io.cwd, dir, 'pids.json'), 'utf8')); if (Array.isArray(raw)) pids = raw.filter((p): p is number => Number.isInteger(p)); } catch { pids = []; }
-        const pgid = (pid: number): number | null => {
-          try { const n = Number(execFileSync('ps', ['-o', 'pgid=', '-p', String(pid)], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim()); return Number.isInteger(n) && n > 0 ? n : null; } catch { return null; }
-        };
-        const kill = (pid: number) => {
+        return json(cleanupEvidence(path.resolve(io.cwd, dir)));
+      }
+      case 'verify-close': {
+        // Measure 10: what `## After the verdict` did in about ten steps, in one call. The skill keeps the upload of the
+        // shots and the `update state/T` with their urls, and shows the proposals to the person.
+        const task = flag('task'), dirArg = flag('dir'), evArg = flag('evidence');
+        if (!task || !dirArg || !evArg) throw new UsageError('verify-close: --task, --dir and --evidence are required');
+        const loc = flag('locale');
+        if (has('locale') && loc !== 'es' && loc !== 'en') throw new UsageError('verify-close: --locale must be es|en');
+        const es = (loc ?? planLocale(io.cwd)) === 'es';
+        const dir = path.resolve(io.cwd, dirArg);
+        const evidence = path.resolve(io.cwd, evArg);
+        const verifyPath = path.join(dir, 'verify.json');
+        const v = parseVerifyFile(existsSync(verifyPath) ? readFileSync(verifyPath, 'utf8') : null);
+        if (!v) throw new UsageError(`verify-close: ${dirArg}/verify.json is not a usable verify result (result pass|fail|blocked, checks, a reason when blocked)`);
+        // 1. The learned notes of each surface, into the code checked (--cwd), as `surfaces learn` adds them.
+        const notes = new Map<string, string[]>();
+        for (const l of v.learned) notes.set(l.surface, [...(notes.get(l.surface) ?? []), l.note]);
+        const learned: Record<string, number> = {};
+        const skipped: { surface: string; reason: string }[] = [];
+        const commit: string[] = [];
+        for (const [name, list] of notes) {
+          if (!NAME.test(name)) { skipped.push({ surface: name.slice(0, 80), reason: 'not a surface name' }); continue; }
+          const r = learnSurface(io, repoDir, name, list, es ? 'Aprendido' : 'Learned');
+          if ('reason' in r) { skipped.push({ surface: name, reason: r.reason }); continue; }
+          learned[name] = r.count;
+          commit.push(surfaceFile(name));
+        }
+        // 2. The processes the verify agent left running.
+        const cleanup = cleanupEvidence(evidence);
+        // 3. The result, once: closing again (or after review-close or verify-result logged it) adds no event.
+        const passed = v.checks.filter(c => c.ok).length, total = v.checks.length;
+        // The `evidence` field logVerifyResult writes: only for a `reviews-<n>-<k>` dir.
+        const relDir = path.relative(io.cwd, dir).split(path.sep).join('/');
+        const evRel = relDir.replace(/reviews-(\d+-\d+)$/, 'evidence/$1');
+        const evField = evRel !== relDir ? evRel : undefined;
+        const last = readEvents(io.cwd).filter(e => e.kind === 'verify' && e.task === task && typeof e.result === 'string').at(-1);
+        if (!last || last.result !== v.result || last.passed !== passed || last.total !== total || last.evidence !== evField) logVerifyResult(io.cwd, ts(), task, dir, v);
+        // 4. Where the evidence goes, read now (the person may have changed it).
+        let mode: 'upload' | 'local' = 'upload';
+        try { mode = loadConfig(mainCheckout(io.cwd)).evidence; } catch { mode = 'upload'; }
+        // 5. This pass's screenshots (inside the evidence dir only, by real path) and the asset ids of the previous pass.
+        let realEvidence: string;
+        try { realEvidence = realpathSync(evidence); } catch { realEvidence = evidence; }
+        const inside = (f: string) => { const r = path.relative(realEvidence, f); return r !== '' && !r.startsWith('..') && !path.isAbsolute(r); };
+        const shots = v.checks.filter(c => c.shot).flatMap(c => {
+          const file = path.resolve(evidence, c.shot!);
+          let real: string, bytes: number;
+          try { real = realpathSync(file); bytes = statSync(real).size; } catch { return []; }
+          if (!inside(real)) return [];
+          return [{ file: path.relative(io.cwd, file).split(path.sep).join('/'), surface: c.surface, check: c.name, ok: c.ok, expected: c.expected, observed: c.observed, bytes, oversize: bytes > SHOT_MAX_BYTES }];
+        });
+        let previous: string[] = [];
+        const db = flag('db');
+        if (db) {
+          const base = task.replace(/-\d+$/, '');
           try {
-            if (process.platform === 'win32') execFileSync('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true });
-            else process.kill(killTarget(pid, pgid(pid)), 'SIGTERM');
-            return true;
-          } catch {
-            try { process.kill(pid, 'SIGTERM'); return true; } catch { return false; }
-          }
-        };
-        return json(cleanupPids(pids, kill));
+            const st = JSON.parse(readFileSync(path.resolve(io.cwd, db, 'state', `${base}.json`), 'utf8')) as { evidence?: { shots?: { id?: unknown }[] } };
+            previous = (st.evidence?.shots ?? []).map(s => s?.id).filter((x): x is string => typeof x === 'string' && x.length > 0);
+          } catch { previous = []; }
+        }
+        const big = shots.filter(s => s.oversize).length;
+        const learnedText = Object.entries(learned).map(([n, k]) => `${n} (${k})`).join(', ');
+        const say = es
+          ? `Verificación ${v.result}: ${passed}/${total} comprobaciones${learnedText ? `; aprendido en ${learnedText}` : ''}${shots.length ? `; ${shots.length} captura(s)${big ? ` (${big} de más de 2 MB)` : ''}` : ''}.`
+          : `Verification ${v.result}: ${passed}/${total} checks${learnedText ? `; learned in ${learnedText}` : ''}${shots.length ? `; ${shots.length} screenshot(s)${big ? ` (${big} over 2 MB)` : ''}` : ''}.`;
+        return json({
+          task, result: v.result, passed, total, learned, ...(skipped.length ? { skipped } : {}), proposals: v.proposals, cleanup,
+          evidence: { mode, dir: path.relative(io.cwd, evidence).split(path.sep).join('/'), shots, previous }, commit, say,
+        });
       }
       case 'round': {
         const task = flag('task');
@@ -1131,14 +1229,8 @@ function runCommand(argv: string[], io: Io): Result {
           // Only the headings permissionHash knows: another one would make the notes unknown text.
           const heading = flag('heading') ?? 'Learned';
           if (!(LEARNED_HEADINGS as readonly string[]).includes(heading)) throw new UsageError(`surfaces learn: --heading must be ${LEARNED_HEADINGS.join('|')}`);
-          const before = readFileSync(file, 'utf8');
-          // Only a surface allowed as it is now records what it appends (and local.yaml is never touched), so learning on
-          // a changed or never allowed surface cannot make it allowed: its new lines are just more unknown text.
-          const cur = readLocal(io.cwd).surfaces[name];
-          const allowed = cur?.state === 'allowed' && hashMatches(cur.hash, permissionHash(before, readLearned(io.cwd).get(name)));
-          const r = appendLearned(before, ts().slice(0, 10), notes as string[], heading);
-          writeFileSync(file, r.text);
-          if (allowed) recordLearned(io.cwd, name, r.added, ts());
+          const r = learnSurface(io, io.cwd, name, notes as string[], heading);
+          if ('reason' in r) throw new UsageError(`surfaces learn: ${r.reason}`);
           return json({ name, count: r.count });
         }
         throw new UsageError('usage: forge surfaces [learn --name N --notes-file F [--heading H] | proposed --name N]');

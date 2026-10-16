@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { appendFileSync, mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { appendFileSync, mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, symlinkSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run as cli, defaultExec, defaultExecMany, type Io } from '../src/forge/cli/run.js';
@@ -2076,5 +2076,64 @@ describe('forge stats (C-09)', () => {
     for (const bad of [['--days', '7', '--since', '2026-10-01'], ['--days', 'x'], ['--days', '0'], ['--since', 'yesterday'], ['--locale', 'fr']]) {
       expect(run(['stats', ...bad], io).code).toBe(2);
     }
+  });
+
+  it('verify-close applies the learned notes, cleans up, records the result once and lists the shots (measure 10)', () => {
+    mkdirSync(path.join(root, '.forge', 'verify'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'verify', 'web.md'), '---\naffects: ["web/**"]\n---\n# Web\n\nOpen the app.\n');
+    const dir = path.join(root, '.forge', 'work', 'T1', 'reviews-1-1');
+    const ev = path.join(root, '.forge', 'work', 'T1', 'evidence', '1-1');
+    mkdirSync(dir, { recursive: true });
+    mkdirSync(ev, { recursive: true });
+    writeFileSync(path.join(ev, '01-home.png'), Buffer.alloc(10));
+    writeFileSync(path.join(ev, '02-cart.png'), Buffer.alloc(2 * 1024 * 1024 + 1));
+    // A pid that existed and is gone: nothing to stop.
+    const dead = spawnSync(process.execPath, ['-e', '']).pid!;
+    writeFileSync(path.join(ev, 'pids.json'), JSON.stringify([dead]));
+    writeFileSync(path.join(dir, 'verify.json'), JSON.stringify({
+      surfaces: ['web'], result: 'pass',
+      checks: [
+        { id: 1, surface: 'web', name: 'home', main: true, ok: true, expected: 'a', observed: 'a', shot: '01-home.png' },
+        { id: 2, surface: 'web', name: 'cart', main: false, ok: true, expected: 'b', observed: 'b', shot: '02-cart.png' },
+        { id: 3, surface: 'web', name: 'escape', main: false, ok: true, expected: 'c', observed: 'c', shot: '../../../../outside.png' },
+      ],
+      learned: [{ surface: 'web', note: 'the dev server takes 5 s to start' }], proposals: [{ surface: 'web', change: 'add the port' }],
+    }));
+    mkdirSync(path.join(root, 'db', 'state'), { recursive: true });
+    writeFileSync(path.join(root, 'db', 'state', 'T1.json'), JSON.stringify({ status: 'in_progress', evidence: { shots: [{ id: 'a1', url: 'u' }, { id: 'a2' }, { url: 'x' }] } }));
+    const args = ['verify-close', '--task', 'T1-1', '--dir', '.forge/work/T1/reviews-1-1', '--evidence', '.forge/work/T1/evidence/1-1', '--db', 'db', '--locale', 'en'];
+    const out = JSON.parse(run(args, io).stdout);
+    expect(out).toMatchObject({
+      task: 'T1-1', result: 'pass', passed: 3, total: 3, learned: { web: 1 }, commit: ['.forge/verify/web.md'],
+      proposals: [{ surface: 'web', change: 'add the port' }], cleanup: { killed: [], gone: [dead] }, evidence: { mode: 'upload', previous: ['a1', 'a2'] },
+    });
+    expect(out.evidence.shots.map((s: { check: string; oversize: boolean; file: string }) => [s.check, s.oversize, s.file]))
+      .toEqual([['home', false, '.forge/work/T1/evidence/1-1/01-home.png'], ['cart', true, '.forge/work/T1/evidence/1-1/02-cart.png']]);
+    expect(readFileSync(path.join(root, '.forge', 'verify', 'web.md'), 'utf8')).toContain('the dev server takes 5 s to start');
+    expect(out.say).toContain('Verification pass');
+    expect(readEvents(root).filter(e => e.kind === 'verify')).toHaveLength(1);
+    run(args, io);
+    expect(readEvents(root).filter(e => e.kind === 'verify')).toHaveLength(1);
+    expect(run(['verify-close', '--task', 'T1-1', '--dir', 'nope', '--evidence', 'nope'], io).code).toBe(2);
+  });
+
+  it('verify-close never lists a shot that resolves outside the evidence dir (absolute path, symlink)', () => {
+    const dir = path.join(root, '.forge', 'work', 'T2', 'reviews-1-1');
+    const ev = path.join(root, '.forge', 'work', 'T2', 'evidence', '1-1');
+    const outside = path.join(root, 'elsewhere');
+    mkdirSync(dir, { recursive: true });
+    mkdirSync(ev, { recursive: true });
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(path.join(outside, 'secret.png'), Buffer.alloc(5));
+    writeFileSync(path.join(ev, 'ok.png'), Buffer.alloc(5));
+    symlinkSync(path.join(outside, 'secret.png'), path.join(ev, 'link.png'), 'file');
+    symlinkSync(outside, path.join(ev, 'dir'), 'junction');
+    const check = (id: number, shot: string) => ({ id, surface: 'web', name: `c${id}`, main: id === 1, ok: true, expected: 'a', observed: 'a', shot });
+    writeFileSync(path.join(dir, 'verify.json'), JSON.stringify({
+      surfaces: ['web'], result: 'pass',
+      checks: [check(1, 'ok.png'), check(2, path.join(outside, 'secret.png')), check(3, 'link.png'), check(4, 'dir/secret.png'), check(5, '../1-1/ok.png')],
+    }));
+    const out = JSON.parse(run(['verify-close', '--task', 'T2-1', '--dir', '.forge/work/T2/reviews-1-1', '--evidence', '.forge/work/T2/evidence/1-1', '--locale', 'en'], io).stdout);
+    expect(out.evidence.shots.map((s: { check: string }) => s.check)).toEqual(['c1', 'c5']);
   });
 });

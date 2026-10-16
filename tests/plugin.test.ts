@@ -1107,4 +1107,9 @@ describe('plugin layout', () => {
     expect(read('plugins/forge/README.md')).not.toContain('up to 4 rounds');
     expect(read('plugins/forge/README.es.md')).not.toContain('hasta 4 rondas');
   });
+
+  it('After the verdict closes a verification with FORGE verify-close (measure 10)', () => {
+    const after = runRef('verify').split('## After the verdict')[1];
+    for (const w of ['FORGE verify-close --task <id>-<n>', '--evidence', '`oversize: true`', '`evidence.previous`', '`commit`', '`proposals`']) expect(after, w).toContain(w);
+  });
 });
