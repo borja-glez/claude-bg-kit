@@ -12551,9 +12551,10 @@ async function nowMs($) {
   }
   return Date.now();
 }
-async function readCollection($, dir) {
+async function readCollection($, dir, keep) {
   const out = {};
-  const files = (await listOpt($, dir)).filter((f) => f.kind === "file" && f.name.endsWith(".json")).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0).slice(0, MAX_DOCS);
+  const sorted = (await listOpt($, dir)).filter((f) => f.kind === "file" && f.name.endsWith(".json")).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  const files = keep === "first" ? sorted.slice(0, MAX_DOCS) : sorted.slice(-MAX_DOCS);
   for (const f of files) {
     const text2 = await readOpt($, join(dir, f.name));
     if (text2 !== void 0) out[f.name.slice(0, -5)] = text2;
@@ -12688,8 +12689,10 @@ async function readBandFiles($) {
     changelog: await readOpt($, join(pdocs, "design", "changelog.json")),
     dismissed: await readOpt($, join(pstate, "dismissed.json")),
     ...chosen.seats,
-    states: await readCollection($, join(pstate, "dbcache", "state")),
-    messages: await readCollection($, join(pstate, "dbcache", "messages")),
+    states: await readCollection($, join(pstate, "dbcache", "state"), "first"),
+    // The newest MAX_DOCS: the band reads them again on every 30 s tick, one engine call each, so it does not count
+    // every message as the start hook does once per session; an open message older than the newest 500 is rare.
+    messages: await readCollection($, join(pstate, "dbcache", "messages"), "last"),
     ...await loadForge($, root, now),
     critiques,
     sessionId: sessionId2,
