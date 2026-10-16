@@ -121,4 +121,25 @@ describe('reviewRound', () => {
     const delta = reviewRound(at({ files: tm, round: 2, previous: { 'review-correctness': pass, 'review-security': fail(), 'review-perf': pass }, fixZones: [], fixFiles: [] }));
     expect(delta.spawn.find(s => s.name === 'security')!.inputs).toMatchObject({ threatModel: 'w/threat-model.md', findings: 'w/reviews-1-R/previous-security.json' });
   });
+
+  it('an express review: one correctness reviewer on Sonnet at medium in delta, the passing reviewers carried, the failing ones delegated (measure 7)', () => {
+    const ex = { ...files, expressFindings: 'w/reviews-1-R/previous-express.json' };
+    const previous = { 'review-correctness': fail(), 'review-security': pass, 'review-perf': fail('src/hot.ts') };
+    const r = reviewRound(at({ files: ex, round: 2, express: true, previous, fixZones: [], fixFiles: ['src/a.ts'] }));
+    expect(r).toMatchObject({ express: true, delegated: ['correctness', 'perf'], carried: [{ role: 'review-security', name: 'security', verdict: 'pass' }], shadow: false });
+    expect(r.spawn).toEqual([{ role: 'review-correctness', name: 'correctness', agent: 'forge-review-correctness', model: 'sonnet', effort: 'medium', mode: 'delta', twin: false, express: true,
+      inputs: { brief: 'w/brief-1.md', diff: 'w/diff-1.patch', validators: 'w/validators-1.json', out: 'w/reviews-1-R', fix: 'w/fix-1-R.patch', findings: 'w/reviews-1-R/previous-express.json' } }]);
+  });
+
+  it('no express review when security repeats, a passing reviewer has to repeat, after a redo, without the findings file or when not asked', () => {
+    const ex = { ...files, expressFindings: 'w/reviews-1-R/previous-express.json' };
+    const ok = { 'review-correctness': fail(), 'review-security': pass, 'review-perf': pass };
+    expect(reviewRound(at({ files: ex, round: 2, express: true, previous: { ...ok, 'review-security': fail() }, fixZones: [], fixFiles: ['src/a.ts'] })).express).toBe(false);
+    expect(reviewRound(at({ files: ex, round: 2, express: true, previous: ok, fixZones: ['auth'], fixFiles: ['src/auth/login.ts'] })).express).toBe(false);
+    expect(reviewRound(at({ files: ex, round: 2, express: true, redo: true, previous: ok, fixZones: [], fixFiles: ['src/a.ts'] })).express).toBe(false);
+    expect(reviewRound(at({ files, round: 2, express: true, previous: ok, fixZones: [], fixFiles: ['src/a.ts'] })).express).toBe(false);
+    const normal = reviewRound(at({ files: ex, round: 2, previous: ok, fixZones: [], fixFiles: ['src/a.ts'] }));
+    expect(normal).toMatchObject({ express: false, delegated: [] });
+    expect(normal.spawn.map(s => [s.name, s.mode, s.express ?? false])).toEqual([['correctness', 'delta', false]]);
+  });
 });

@@ -8,7 +8,7 @@ import { detectValidators, selectValidators, runValidators, markPreexisting, blo
 import { PATH_ORDER, zonesFromPaths, type PathName, type ReviewRole } from '../triage.js';
 import { parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, repoRelative, type Finding, type Review, type ReviewerName, type FailingValidator, type AskFinding } from '../verdict.js';
 import { roundDecision } from '../round.js';
-import { parseIndex, assignIds, answeredBy, idsOf, recordRound, openIds, closedFor, previousFindings, asPrevious, historyLine, renderHandover } from '../findings-index.js';
+import { parseIndex, assignIds, answeredBy, idsOf, recordRound, openIds, closedFor, previousFindings, asPrevious, historyLine, renderHandover, expressCandidate, type FindingsIndex } from '../findings-index.js';
 import { reviewsOf } from '../loop.js';
 import { takeBrief } from '../shadow.js';
 import { renderThreatModel } from '../threat-model.js';
@@ -16,7 +16,7 @@ import { collectTwins, shadowCommand } from './shadow.js';
 import { restoringRegenerated } from './swarm.js';
 import { mainCheckout } from '../local.js';
 import { runWithCache, cacheGit, checkoutPrefix } from '../validate-cache.js';
-import { reviewRound, reviewerKey, type PreviousResult, type ReviewerKey, type RoundPlan, type RoundReviewer, type TriageReview } from '../review-round.js';
+import { reviewRound, reviewerKey, type PreviousResult, type ReviewerKey, type RoundPlan, type RoundReviewer, type SpawnEntry, type TriageReview } from '../review-round.js';
 
 // The review commands. run.ts dispatches here; this module never imports run.ts (that would be a cycle).
 
@@ -107,6 +107,8 @@ function writeThreatModel(dir: string, config: ForgeConfig): string | null {
  * instead (C-08): validators-fix-<n>-<round>-<k>.json, the phase fix with validators: true, spawn [] and
  * validatorsRound {k, max, findings}, at most twice per review. It logs the phases validate and review (with the reviewers).
  * It prints reviews {n, max}, the review of the brief as the person counts it (C-13), which its say begins with.
+ * An express review (measure 7) does not validate: it prints validators {pending, cmd}, the validation to run in the
+ * background, one correctness reviewer on Sonnet and delegated.
  */
 export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   const flag = (name: string) => {
@@ -148,6 +150,54 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   // J-06: the brief's findings index (review-close writes it), for the ids a delta reviewer gets. C-13: review n of max.
   const index = parseIndex(readText(path.join(dir, `findings-index-${n}.json`)), task);
   const reviewsCount = reviewsOf(round, pathName);
+
+  // The previous round: each reviewer's result (a carried one included) and the fix diff from the commit it reviewed.
+  const previous: Partial<Record<ReviewRole, PreviousResult>> = {};
+  let fixFiles: string[] = [];
+  const fixFile = path.join(dir, `fix-${n}-${round}.patch`);
+  const findingsFile = (name: ReviewerKey) => path.join(roundDir, `previous-${name}.json`);
+  const prevReviews: Partial<Record<ReviewerKey, Review>> = {};
+  if (round >= 2) {
+    const prevDir = path.join(dir, `reviews-${n}-${round - 1}`);
+    for (const role of ROLES) {
+      const file = path.join(prevDir, `${reviewerKey(role)}.json`);
+      if (!existsSync(file)) continue;
+      const r = parseReview(readFileSync(file, 'utf8'));
+      prevReviews[reviewerKey(role)] = r;
+      // A draft or an invalid result is never carried; an unusable one (nothing parsed) leaves no previous result,
+      // so the reviewer repeats in full rather than in delta with no findings.
+      if (r.invalid && !r.dropped) continue;
+      previous[role] = { verdict: r.verdict, findings: r.findings, ...(r.incomplete ? { incomplete: true } : {}), ...(r.invalid ? { invalid: true } : {}) };
+    }
+    const prevHead = existsSync(path.join(prevDir, 'head.txt')) ? readFileSync(path.join(prevDir, 'head.txt'), 'utf8').trim() : '';
+    // Without the commit the previous round reviewed, or when git cannot diff from it, the whole diff stands in for the fix.
+    const diffFrom = (from: string) => {
+      const names = deps.git(['diff', '--name-only', `${from}..HEAD`]);
+      const patch = names === null ? null : deps.git(['diff', `${from}..HEAD`]);
+      return names === null || patch === null ? null : { names, patch };
+    };
+    const fix = (prevHead ? diffFrom(prevHead) : null) ?? diffFrom(baseSha);
+    if (!fix) throw new UsageError(`review-prep: cannot diff the fix (${prevHead || baseSha}..HEAD)`);
+    fixFiles = fix.names.split('\n').map(s => s.trim()).filter(Boolean);
+    writeFileSync(fixFile, fix.patch);
+  }
+  // After a redo the work was started again: every reviewer reviews it in full, nothing is carried.
+  const redo = round >= 2 && events.filter(e => e.kind === 'verdict' && e.task === task).at(-1)?.action === 'redo';
+
+  // Measure 7 (§4.9): an express review when the previous review asked for a fix with green validators and left one or
+  // two important findings with file and line, none from security, a regression or out of the model; never after a redo,
+  // on the last review, or with review.express: false. It does not validate here (expressPrep). The validate command it
+  // prints carries BASE unquoted, so only a commit id qualifies.
+  const lastVerdict = events.filter(e => e.kind === 'verdict' && e.task === task).at(-1);
+  const prevSent = readJson(path.join(dir, `findings-${n}-${round - 1}.json`)) as { validators?: unknown } | undefined;
+  if (round >= 2 && !redo && round < reviewsCount.max && (pathName === 'medium' || pathName === 'large') && config.review.express
+    && lastVerdict?.action === 'fix' && Array.isArray(prevSent?.validators) && prevSent!.validators.length === 0 && expressCandidate(index, round)
+    && /^[0-9a-f]{7,64}$/i.test(baseSha)) {
+    const express = expressPrep({ deps, task, id, n, round, pathName, review, previous, prevReviews, fixFiles, dir, roundDir, baseSha,
+      baselineArg, diff, head, tmFile, index, reviewsCount, locale });
+    if (express) return express;
+  }
+
   // C4: the brief enters validation (logged before the validators run, so the stage's clock includes them).
   appendPhase(deps.cwd, { ts: deps.now().toISOString(), kind: 'phase', task: id, phase: 'validate', brief: Number(n), round });
 
@@ -191,39 +241,6 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
     }
   }
 
-  // The previous round: each reviewer's result (a carried one included) and the fix diff from the commit it reviewed.
-  const previous: Partial<Record<ReviewRole, PreviousResult>> = {};
-  let fixFiles: string[] = [];
-  const fixFile = path.join(dir, `fix-${n}-${round}.patch`);
-  const findingsFile = (name: ReviewerKey) => path.join(roundDir, `previous-${name}.json`);
-  const prevReviews: Partial<Record<ReviewerKey, Review>> = {};
-  if (round >= 2) {
-    const prevDir = path.join(dir, `reviews-${n}-${round - 1}`);
-    for (const role of ROLES) {
-      const file = path.join(prevDir, `${reviewerKey(role)}.json`);
-      if (!existsSync(file)) continue;
-      const r = parseReview(readFileSync(file, 'utf8'));
-      prevReviews[reviewerKey(role)] = r;
-      // A draft or an invalid result is never carried; an unusable one (nothing parsed) leaves no previous result,
-      // so the reviewer repeats in full rather than in delta with no findings.
-      if (r.invalid && !r.dropped) continue;
-      previous[role] = { verdict: r.verdict, findings: r.findings, ...(r.incomplete ? { incomplete: true } : {}), ...(r.invalid ? { invalid: true } : {}) };
-    }
-    const prevHead = existsSync(path.join(prevDir, 'head.txt')) ? readFileSync(path.join(prevDir, 'head.txt'), 'utf8').trim() : '';
-    // Without the commit the previous round reviewed, or when git cannot diff from it, the whole diff stands in for the fix.
-    const diffFrom = (from: string) => {
-      const names = deps.git(['diff', '--name-only', `${from}..HEAD`]);
-      const patch = names === null ? null : deps.git(['diff', `${from}..HEAD`]);
-      return names === null || patch === null ? null : { names, patch };
-    };
-    const fix = (prevHead ? diffFrom(prevHead) : null) ?? diffFrom(baseSha);
-    if (!fix) throw new UsageError(`review-prep: cannot diff the fix (${prevHead || baseSha}..HEAD)`);
-    fixFiles = fix.names.split('\n').map(s => s.trim()).filter(Boolean);
-    writeFileSync(fixFile, fix.patch);
-  }
-  // After a redo the work was started again: every reviewer reviews it in full, nothing is carried.
-  const redo = round >= 2 && events.filter(e => e.kind === 'verdict' && e.task === task).at(-1)?.action === 'redo';
-
   // A brief spends one shadow brief on its first round only, and only when it gets twins (a reviewer at high):
   // preparing that round again reuses the first answer.
   const planFile = path.join(roundDir, 'review-plan.json');
@@ -256,15 +273,9 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
       : (previous[s.role]?.findings ?? []).filter(f => f.severity === 'critical' || f.severity === 'important');
     writeFileSync(findingsFile(s.name), JSON.stringify(own, null, 2) + '\n');
   }
-  for (const c of plan.carried) {
-    // The file as written when it is plain JSON; else (JSON inside prose or a fence) the result as parsed.
-    const raw = readJson(path.join(dir, `reviews-${n}-${round - 1}`, `${c.name}.json`));
-    const parsed = prevReviews[c.name]!;
-    const prev = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : { verdict: parsed.verdict, confidence: parsed.confidence, findings: parsed.findings };
-    writeFileSync(path.join(roundDir, `${c.name}.json`), JSON.stringify({ ...prev, carried: true }, null, 2) + '\n');
-  }
+  writeCarried(plan, dir, n, round, roundDir, prevReviews);
 
-  const spawn = plan.spawn.map(s => ({ agent: s.agent, model: s.model, effort: s.effort, mode: s.mode, ...(s.twin ? { twin: true } : {}), role: s.role, inputs: s.inputs }));
+  const spawn = plan.spawn.map(spawnOut);
   writeFileSync(path.join(roundDir, 'head.txt'), head + '\n');
   writeFileSync(planFile, JSON.stringify({
     task, round, path: pathName, base: baseSha, head, light: review.light, flags: review.flags, shadow: plan.shadow,
@@ -301,6 +312,82 @@ function sayValidatorsRound(reviews: { n: number; max: number }, k: number, fail
   return locale === 'es'
     ? `Revisión ${reviews.n} de ${reviews.max}: validadores en rojo (${failing.join(', ')}); ronda de validadores ${k} de ${MAX_VALIDATOR_ROUNDS}: nadie revisa, el implementador los arregla primero.`
     : `Review ${reviews.n} of ${reviews.max}: validators red (${failing.join(', ')}); validators round ${k} of ${MAX_VALIDATOR_ROUNDS}: nobody reviews, the implementer fixes them first.`;
+}
+
+/** A spawn entry as review-prep prints it and review-plan.json keeps it. */
+const spawnOut = (s: SpawnEntry) => ({ agent: s.agent, model: s.model, effort: s.effort, mode: s.mode, ...(s.twin ? { twin: true } : {}), ...(s.express ? { express: true } : {}), role: s.role, inputs: s.inputs });
+
+/** A carried reviewer's previous file, copied into this review with "carried": true: as written when it is plain JSON,
+ *  else as parsed. */
+function writeCarried(plan: RoundPlan, dir: string, n: string, round: number, roundDir: string, prevReviews: Partial<Record<ReviewerKey, Review>>): void {
+  for (const c of plan.carried) {
+    const raw = readJson(path.join(dir, `reviews-${n}-${round - 1}`, `${c.name}.json`));
+    const parsed = prevReviews[c.name]!;
+    const prev = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : { verdict: parsed.verdict, confidence: parsed.confidence, findings: parsed.findings };
+    writeFileSync(path.join(roundDir, `${c.name}.json`), JSON.stringify({ ...prev, carried: true }, null, 2) + '\n');
+  }
+}
+
+interface ExpressCtx {
+  deps: ReviewDeps; task: string; id: string; n: string; round: number; pathName: PathName; review: TriageReview;
+  previous: Partial<Record<ReviewRole, PreviousResult>>; prevReviews: Partial<Record<ReviewerKey, Review>>; fixFiles: string[];
+  dir: string; roundDir: string; baseSha: string; baselineArg: string; diff: string; head: string; tmFile: string | null;
+  index: FindingsIndex; reviewsCount: { n: number; max: number }; locale: string | undefined;
+}
+
+/**
+ * Measure 7 (§4.9): the express review, or null when the plan cannot be one (reviewRound keeps it normal). One correctness
+ * reviewer on Sonnet at medium, in delta, checks the open findings of every reviewer (previous-express.json, with ids and
+ * reviewers); those that passed are carried, those that failed delegated. review-prep does not validate: it removes
+ * validators-<n>.json and prints the validate command to run in the background next to the reviewer; review-close waits
+ * for its file. Logs the phase review with express: true.
+ */
+function expressPrep(c: ExpressCtx): Result | null {
+  const { deps, dir, roundDir, n, round } = c;
+  const at = (f: string) => rel(deps.cwd, f);
+  const validatorsFile = path.join(dir, `validators-${n}.json`);
+  const diffFile = path.join(dir, `diff-${n}.patch`);
+  const expressFile = path.join(roundDir, 'previous-express.json');
+  const plan = reviewRound({
+    review: c.review, round, path: c.pathName, previous: c.previous, fixFiles: c.fixFiles, fixZones: zonesFromPaths(c.fixFiles), express: true,
+    files: {
+      brief: at(path.join(dir, `brief-${n}.md`)), diff: at(diffFile), validators: at(validatorsFile), out: at(roundDir),
+      shadow: at(path.join(roundDir, 'shadow')), fix: at(path.join(dir, `fix-${n}-${round}.patch`)), expressFindings: at(expressFile),
+      findings: (name: ReviewerKey) => at(path.join(roundDir, `previous-${name}.json`)),
+      ...(c.tmFile ? { threatModel: at(c.tmFile) } : {}),
+    },
+  });
+  if (!plan.express) return null;
+  // The validators run in the background next to the reviewer: a file an earlier review left must not count.
+  rmSync(validatorsFile, { force: true });
+  writeFileSync(diffFile, c.diff);
+  writeFileSync(expressFile, JSON.stringify(previousFindings(c.index, round).map(f => asPrevious(f, true)), null, 2) + '\n');
+  writeCarried(plan, dir, n, round, roundDir, c.prevReviews);
+  const spawn = plan.spawn.map(spawnOut);
+  writeFileSync(path.join(roundDir, 'head.txt'), c.head + '\n');
+  writeFileSync(path.join(roundDir, 'review-plan.json'), JSON.stringify({
+    task: c.task, round, path: c.pathName, base: c.baseSha, head: c.head, light: c.review.light, flags: c.review.flags, shadow: false,
+    spawn, carried: plan.carried, express: true, delegated: plan.delegated, validatorsPending: true,
+  }, null, 2) + '\n');
+  appendPhase(deps.cwd, { ts: deps.now().toISOString(), kind: 'phase', task: c.id, phase: 'review', brief: Number(n), round, express: true,
+    reviewers: spawn.map(s => ({ agent: s.agent, role: s.role, effort: s.effort, model: s.model, mode: s.mode })) });
+  // The same form as prep's validate (J-11): paths with / in double quotes, which every shell takes.
+  const slash = (p: string) => path.resolve(p).split(path.sep).join('/');
+  const cmd = `node "${slash(deps.self ?? 'forge.cjs')}" validate --all --path ${c.pathName} --base ${c.baseSha} --baseline "${slash(path.resolve(deps.cwd, c.baselineArg))}"`
+    + ` --task ${c.task} --out "${slash(validatorsFile)}"${samePath(deps.repoDir, deps.cwd) ? '' : ` --cwd "${slash(deps.repoDir)}"`}`;
+  const out: Record<string, unknown> = {
+    round, reviews: c.reviewsCount, express: true, validators: { pending: true, cmd, file: at(validatorsFile) }, spawn,
+    ...(plan.carried.length ? { carried: plan.carried.map(x => x.name) } : {}), delegated: plan.delegated,
+  };
+  if (c.locale === 'es' || c.locale === 'en') out.say = sayExpress(c.reviewsCount, plan, c.locale);
+  return json(out);
+}
+
+function sayExpress(reviews: { n: number; max: number }, plan: RoundPlan, locale: 'es' | 'en'): string {
+  const carried = plan.carried.map(c => c.name).join(', ');
+  return locale === 'es'
+    ? `Revisión ${reviews.n} de ${reviews.max}, exprés: correctness (sonnet, medium) comprueba los hallazgos abiertos mientras los validadores corren en segundo plano${carried ? `; se arrastran ${carried}` : ''}.`
+    : `Review ${reviews.n} of ${reviews.max}, express: correctness (sonnet, medium) checks the open findings while the validators run in the background${carried ? `; carried: ${carried}` : ''}.`;
 }
 
 type ValidatorRow = { validator?: unknown; ok?: unknown; failures?: unknown; failing?: unknown; preexisting?: unknown };
@@ -353,6 +440,8 @@ function askOf(ask: AskFinding[], locale: 'es' | 'en') {
  * finding that repeats a closed theme (K4-02). --out-of-model and --defer keep ids in the review's overrides.json; the
  * overrides of every review of the brief apply. With next fresh-stronger or redo it writes <dir>/handover-<n>-<round>.md
  * for the new implementer and prints its path as handover (C-15); revert is the git args that undo a redo's attempt (J-08), null otherwise.
+ * An express review (measure 7) also lists validators-<n>.json in missing until the background validation writes it;
+ * its verdict and output carry express: true.
  */
 export function reviewClose(args: string[], deps: ReviewDeps): Result {
   const flag = (name: string) => {
@@ -400,6 +489,9 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   const spawned = names(plan.spawn, x => x.twin !== true);
   const carried = names(plan.carried, () => true);
   const missing = [...new Set([...spawned, ...carried])].map(k => path.join(roundDir, `${k}.json`)).filter(f => !existsSync(f));
+  // Measure 7: an express review's validators run in the background; the review closes once their file is there.
+  const validatorsPath = path.join(dir, `validators-${n}.json`);
+  if (plan.validatorsPending === true && !existsSync(validatorsPath)) missing.push(validatorsPath);
   if (missing.length) return json({ missing: missing.map(f => rel(deps.cwd, f)) }, 3);
 
   const reviews: Partial<Record<ReviewerName, Review>> = {};
@@ -444,8 +536,12 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   const indexPath = path.join(dir, `findings-index-${n}.json`);
   const indexText = readText(indexPath);
   const index = parseIndex(indexText, task);
-  const withIds = assignIds(index, round, reviews);
+  const express = plan.express === true;
+  const withIds = assignIds(index, round, reviews, { express });
+  // An express reviewer answers for the reviewers delegated to it: their open findings it does not name are closing.
+  const delegated = Array.isArray(plan.delegated) ? plan.delegated.filter((x): x is ReviewerKey => x === 'correctness' || x === 'security' || x === 'perf') : [];
   const answered = answeredBy(withIds);
+  if (express && answered.includes('correctness')) answered.push(...delegated.filter(k => !answered.includes(k)));
   const result = synthesize(withIds, weightsFor({ sensitive: flags.includes('--sensitive'), perf: flags.includes('--perf') }), validatorsOk, failing, {
     round, fixHunks: parseHunks(fixPatch), root: deps.repoDir, carried, last: round >= reviewsCount.max, personDocs: config.review.personDocs,
     open: openIds(index, round), closed: closedFor(index, round, idsOf(withIds), answered), outOfModel: overrides.outOfModel, defer: overrides.defer,
@@ -465,7 +561,7 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   appendPhase(deps.cwd, { ts, kind: 'phase', task: id, phase: 'verdict', brief: Number(n), round });
   appendEvent(deps.cwd, { ts, kind: 'verdict', task, dir: rel(deps.cwd, roundDir), action: result.action, score: result.score, signature: result.signature,
     critical: result.critical.length, important: result.important.length, minor: result.minor.length, deferred: result.deferred.length, reviews: reviewsCount,
-    ...(result.ask.length ? { ask: result.ask.length } : {}) });
+    ...(result.ask.length ? { ask: result.ask.length } : {}), ...(express ? { express: true } : {}) });
   if (verifyFile !== undefined) {
     // As FORGE verdict logs it.
     const evidence = rel(deps.cwd, roundDir).replace(/reviews-(\d+-\d+)$/, 'evidence/$1');
@@ -530,7 +626,7 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   // shadowPending and saved by FORGE shadow collect when they are back. They never reach the verdict.
   const twins = collectTwins(task, roundDir, plan, deps);
   return json({
-    action: result.action, score: result.score, next: d.next, last: d.last, implementer: d.implementer, reviews: reviewsCount,
+    action: result.action, score: result.score, next: d.next, last: d.last, implementer: d.implementer, reviews: reviewsCount, ...(express ? { express: true } : {}),
     findings, deferred: result.deferred, ask: result.ask.length ? askOf(result.ask, locale === 'es' ? 'es' : 'en') : null, handover, revert,
     invalid: result.reviewers.filter(r => r.invalid).map(r => r.name),
     incomplete: result.reviewers.filter(r => r.incomplete).map(r => r.name), round, reasons: result.reasons, ...(twins.shadow.length ? { shadow: twins.shadow } : {}), ...(twins.shadowSkipped.length ? { shadowSkipped: twins.shadowSkipped } : {}),

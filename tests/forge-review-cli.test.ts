@@ -986,3 +986,112 @@ describe('the tree cache (C6), with forge in a subdirectory of the checkout', ()
     expect(calls).toHaveLength(2);
   });
 });
+
+describe('the express review (measure 7)', () => {
+  const close = (...extra: string[]) => run(['review-close', '--task', 'T1-1', '--dir', '.forge/work/T1', '--path', 'medium', '--cwd', wt, ...extra], io);
+  const write = (dir: string, name: string, v: unknown) => writeFileSync(path.join(dir, `${name}.json`), JSON.stringify(v));
+  const r1 = () => path.join(work(), 'reviews-1-1');
+  const r2 = () => path.join(work(), 'reviews-1-2');
+  // Review 1 asks to fix one important correctness finding with green validators; the implementer commits a fix.
+  const firstReview = () => {
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    expect(JSON.parse(close().stdout)).toMatchObject({ action: 'fix', next: 'resume' });
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo fixed\n');
+    git('commit', '-q', '-am', 'fix');
+  };
+  const slash = (p: string) => path.resolve(p).split(path.sep).join('/');
+
+  it('one correctness reviewer on Sonnet at medium checks the open findings while the validators run apart; review-close waits for their file', () => {
+    firstReview();
+    const validates = () => readEvents(root).filter(e => e.kind === 'validate').length;
+    const before = validates();
+    const self = path.join(root, 'plugin', 'dist', 'forge.cjs');
+    const out = JSON.parse(run(['review-prep', '--task', 'T1-1', '--path', 'medium', '--base', base, '--baseline', '.forge/work/T1/baseline-1.json', '--dir', '.forge/work/T1',
+      '--cwd', wt, '--locale', 'en'], { ...io, scriptPath: self }).stdout);
+    expect(out).toMatchObject({ round: 2, reviews: { n: 2, max: 4 }, express: true, carried: ['security'], delegated: ['correctness'] });
+    expect(out.spawn).toEqual([expect.objectContaining({ role: 'review-correctness', model: 'sonnet', effort: 'medium', mode: 'delta', express: true })]);
+    expect(out.spawn[0].inputs.findings).toBe('.forge/work/T1/reviews-1-2/previous-express.json');
+    expect(out.validators).toEqual({ pending: true, file: '.forge/work/T1/validators-1.json',
+      cmd: `node "${slash(self)}" validate --all --path medium --base ${base} --baseline "${slash(path.join(work(), 'baseline-1.json'))}" --task T1-1 --out "${slash(path.join(work(), 'validators-1.json'))}" --cwd "${slash(wt)}"` });
+    expect(out.say).toMatch(/^Review 2 of 4, express: /);
+    expect(existsSync(path.join(work(), 'validators-1.json'))).toBe(false);
+    expect(validates()).toBe(before);
+    expect(JSON.parse(readFileSync(path.join(r2(), 'previous-express.json'), 'utf8'))).toEqual([{ id: 'F1', reviewer: 'correctness', severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }]);
+    expect(JSON.parse(readFileSync(path.join(r2(), 'review-plan.json'), 'utf8'))).toMatchObject({ express: true, delegated: ['correctness'], validatorsPending: true, base });
+    expect(readEvents(root).filter(e => e.kind === 'phase' && e.phase === 'review').at(-1)).toMatchObject({ express: true, round: 2 });
+    write(r2(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    const waiting = close();
+    expect(waiting.code).toBe(3);
+    expect(JSON.parse(waiting.stdout).missing).toEqual(['.forge/work/T1/validators-1.json']);
+    expect(run(['validate', '--all', '--path', 'medium', '--base', base, '--baseline', '.forge/work/T1/baseline-1.json', '--task', 'T1-1', '--out', '.forge/work/T1/validators-1.json', '--cwd', wt], io).code).toBe(0);
+    const closed = JSON.parse(close().stdout);
+    expect(closed).toMatchObject({ action: 'accept', next: 'done', reviews: { n: 2, max: 4 }, express: true });
+    expect(readEvents(root).filter(e => e.kind === 'verdict').at(-1)).toMatchObject({ express: true });
+    const index = JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8'));
+    expect(index.rounds[1].findings).toEqual([expect.objectContaining({ id: 'F1', status: 'closed' })]);
+  });
+
+  it('when the background validation comes out red, the express review is a fix by validators and counts against the cap', () => {
+    firstReview();
+    expect(JSON.parse(prep().stdout).express).toBe(true);
+    write(r2(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    writeFileSync(path.join(work(), 'validators-1.json'), JSON.stringify([{ validator: 'check', ok: false, flaky: false, durationMs: 1, failures: ['boom'], failing: [], failingKnown: false }]));
+    const out = JSON.parse(close().stdout);
+    expect(out).toMatchObject({ action: 'fix', next: 'resume', reviews: { n: 2, max: 4 } });
+    expect(out.reasons).toContain('validators failing');
+    expect(readEvents(root).filter(e => e.kind === 'verdict' && e.task === 'T1-1')).toHaveLength(2);
+  });
+
+  it('is not used with review.express: false', () => {
+    firstReview();
+    writeFileSync(path.join(wt, '.forge', 'config.yaml'), 'review:\n  express: false\ndetect: false\nvalidators:\n  - name: check\n    cmd: node -e "process.exit(0)"\n');
+    const out = JSON.parse(prep().stdout);
+    expect(out.express).toBeUndefined();
+    expect(out.validators).toMatchObject({ ok: true });
+    expect(out.spawn.map((s: { role: string; mode: string }) => [s.role, s.mode])).toEqual([['review-correctness', 'delta']]);
+  });
+
+  it('is used on review 3 of 4 but never on the last one', () => {
+    // Review k asked for a fix of F1 with green validators, as review-close leaves it.
+    const fixReview = (k: number) => {
+      const dir = path.join(work(), `reviews-1-${k}`);
+      mkdirSync(dir, { recursive: true });
+      write(dir, 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }] });
+      write(dir, 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+      appendEvent(root, { ts: `2026-10-14T09:0${k}:00.000Z`, kind: 'verdict', task: 'T1-1', dir: `.forge/work/T1/reviews-1-${k}`, action: 'fix', score: 0.6, signature: `v2:s${k}` });
+      writeFileSync(path.join(work(), `findings-1-${k}.json`), JSON.stringify({ task: 'T1-1', round: k, action: 'fix', findings: [], validators: [] }));
+      const open = { id: 'F1', reviewer: 'correctness', severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two', status: 'open' };
+      writeFileSync(path.join(work(), 'findings-index-1.json'), JSON.stringify({ task: 'T1-1', next: 2, rounds: Array.from({ length: k }, (_, i) => ({ round: i + 1, findings: [open] })) }));
+    };
+    fixReview(1);
+    fixReview(2);
+    expect(JSON.parse(prep().stdout)).toMatchObject({ round: 3, reviews: { n: 3, max: 4 }, express: true });
+    fixReview(3);
+    const last = JSON.parse(prep().stdout);
+    expect(last).toMatchObject({ round: 4, reviews: { n: 4, max: 4 } });
+    expect(last.express).toBeUndefined();
+  });
+
+  it('is not used when --base is not a commit id: the validate command it prints carries BASE unquoted', () => {
+    firstReview();
+    git('tag', 'start', base);
+    const out = JSON.parse(run(['review-prep', '--task', 'T1-1', '--path', 'medium', '--base', 'start', '--baseline', '.forge/work/T1/baseline-1.json',
+      '--dir', '.forge/work/T1', '--cwd', wt], io).stdout);
+    expect(out.express).toBeUndefined();
+    expect(out.validators).toMatchObject({ ok: true });
+  });
+
+  it('is not used when the finding left open comes from security', () => {
+    prep();
+    write(r1(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    write(r1(), 'security', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'unchecked path' }] });
+    expect(JSON.parse(close().stdout).action).toBe('fix');
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo checked\n');
+    git('commit', '-q', '-am', 'fix');
+    const out = JSON.parse(prep().stdout);
+    expect(out.express).toBeUndefined();
+    expect(out.spawn.map((s: { role: string }) => s.role)).toEqual(['review-correctness', 'review-security']);
+  });
+});

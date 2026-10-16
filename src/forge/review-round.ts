@@ -23,6 +23,8 @@ export interface RoundFiles {
   fix?: string; findings?: (name: ReviewerKey) => string; report?: string;
   /** The threat model file (K4-02): security only. */
   threatModel?: string;
+  /** The open findings of every reviewer, with ids and reviewers, for the express reviewer (measure 7). */
+  expressFindings?: string;
 }
 export interface RoundInput {
   review: TriageReview; round: number; path: PathName;
@@ -33,16 +35,22 @@ export interface RoundInput {
   shadowOpen?: boolean;
   /** The previous round's verdict was redo: the work was started again, so nothing is carried and nobody reviews in delta. */
   redo?: boolean;
+  /** The CLI found the previous review fit for an express review (measure 7): reviewRound decides whether the plan allows it. */
+  express?: boolean;
   files: RoundFiles;
 }
 export interface SpawnEntry {
   role: ReviewRole; name: ReviewerKey; agent: string; model: 'sonnet' | null; effort: ReviewEffort; mode: ReviewMode;
   /** An xhigh shadow twin: the verdict does not read it. */
   twin: boolean;
+  /** The express reviewer (measure 7). */
+  express?: boolean;
   inputs: Record<string, string>;
 }
 export interface CarriedReviewer { role: ReviewRole; name: ReviewerKey; verdict: PreviousResult['verdict'] }
-export interface RoundPlan { round: number; spawn: SpawnEntry[]; carried: CarriedReviewer[]; shadow: boolean }
+/** `express`: one correctness reviewer on Sonnet checks every open finding; `delegated`: the reviewers that failed, whose
+ *  open findings it checks instead of them (they are neither spawned nor carried). */
+export interface RoundPlan { round: number; spawn: SpawnEntry[]; carried: CarriedReviewer[]; shadow: boolean; express: boolean; delegated: ReviewerKey[] }
 
 export const reviewerKey = (role: ReviewRole): ReviewerKey => role.slice('review-'.length) as ReviewerKey;
 const normPath = (p: string) => p.trim().replace(/\\/g, '/').replace(/^(\.\/)+/, '');
@@ -55,6 +63,9 @@ const normPath = (p: string) => p.trim().replace(/\\/g, '/').replace(/^(\.\/)+/,
  * result that was a draft or invalid is never carried: that reviewer repeats in delta.
  * A reviewer the previous round did not have runs in full mode, and after a redo every reviewer does, none carried.
  * Rounds after the first have no twins.
+ * With input.express (measure 7), from round 2 and not after a redo, the plan is one correctness reviewer on Sonnet at
+ * medium in delta (express: true) when every reviewer that would repeat is correctness or one that failed, never
+ * security: the passing ones are carried, the failing ones delegated.
  */
 export function reviewRound(input: RoundInput): RoundPlan {
   const { review, files } = input;
@@ -73,9 +84,9 @@ export function reviewRound(input: RoundInput): RoundPlan {
     const twins = shadow
       ? review.reviewers.filter(r => r.effort === 'high').map(r => ({ ...entry(r, 'full', { ...base(r), out: files.shadow }), effort: 'xhigh' as const, twin: true }))
       : [];
-    return { round, spawn: [...spawn, ...twins], carried: [], shadow: twins.length > 0 };
+    return { round, spawn: [...spawn, ...twins], carried: [], shadow: twins.length > 0, express: false, delegated: [] };
   }
-  if (input.redo) return { round, spawn: review.reviewers.map(r => entry(r, 'full', base(r))), carried: [], shadow: false };
+  if (input.redo) return { round, spawn: review.reviewers.map(r => entry(r, 'full', base(r))), carried: [], shadow: false, express: false, delegated: [] };
 
   const fixFiles = new Set((input.fixFiles ?? []).map(normPath));
   const fixZones = input.fixZones ?? [];
@@ -96,5 +107,20 @@ export function reviewRound(input: RoundInput): RoundPlan {
       ...(files.findings ? { findings: files.findings(name) } : {}),
     }));
   }
-  return { round, spawn, carried, shadow: false };
+  const normal: RoundPlan = { round, spawn, carried, shadow: false, express: false, delegated: [] };
+  // Measure 7 (§4.9): the CLI asks for an express review; it is one only when every reviewer that would repeat is
+  // correctness or one that failed (never security): a passing reviewer that has to repeat keeps the review normal.
+  const correctness = review.reviewers.find(r => r.role === 'review-correctness');
+  if (!input.express || !correctness || !files.expressFindings) return normal;
+  const delegated: ReviewerKey[] = [];
+  for (const s of spawn) {
+    const failed = input.previous?.[s.role]?.verdict === 'fail';
+    if (s.name === 'security' || (s.name !== 'correctness' && !failed)) return normal;
+    if (failed) delegated.push(s.name);
+  }
+  return {
+    round, carried, shadow: false, express: true, delegated,
+    spawn: [{ role: 'review-correctness', name: 'correctness', agent: correctness.agent, model: 'sonnet', effort: 'medium', mode: 'delta', twin: false, express: true,
+      inputs: { brief: files.brief, diff: files.diff, validators: files.validators, out: files.out, ...(files.fix ? { fix: files.fix } : {}), findings: files.expressFindings } }],
+  };
 }

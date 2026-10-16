@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  parseIndex, assignIds, recordRound, answeredBy, idsOf, openIds, closedFor, previousFindings, asPrevious, historyLine, renderHandover, type FindingsIndex,
+  parseIndex, assignIds, recordRound, answeredBy, idsOf, openIds, closedFor, previousFindings, asPrevious, historyLine, renderHandover, expressCandidate, type FindingsIndex,
 } from '../src/forge/findings-index.js';
 import type { Finding, Review, ReviewerName } from '../src/forge/verdict.js';
 
@@ -128,6 +128,19 @@ describe('findings index (J-06)', () => {
     expect(parseIndex('{"rounds":[{"round":1,"findings":[{"id":"F1"', 'T')).toEqual({ task: 'T', next: 1, rounds: [] });
     const big = { id: 'F1000', reviewer: 'security', severity: 'important', problem: 'p', status: 'open' };
     expect(parseIndex(JSON.stringify({ rounds: [{ round: 1, findings: [big] }] }), 'T')).toEqual({ task: 'T', next: 1, rounds: [{ round: 1, findings: [] }] });
+  });
+
+  it('expressCandidate: one or two important findings left open, each with file and line, none from security, a regression or out of the model (measure 7)', () => {
+    const of = (findings: object[]) => parseIndex(JSON.stringify({ task: 'T', rounds: [{ round: 1, findings }] }), 'T');
+    const open = (over: object = {}) => ({ id: 'F1', reviewer: 'correctness', severity: 'important', file: 'a.ts', line: 3, problem: 'p', status: 'open', ...over });
+    expect(expressCandidate(of([open()]), 2)).toBe(true);
+    expect(expressCandidate(of([open(), open({ id: 'F2', reviewer: 'perf' }), open({ id: 'F3', status: 'closed' }), open({ id: 'F4', status: 'residual', residual: 'untouched' })]), 2)).toBe(true);
+    expect(expressCandidate(of([open(), open({ id: 'F2' }), open({ id: 'F3' })]), 2)).toBe(false);
+    expect(expressCandidate(of([]), 2)).toBe(false);
+    for (const over of [{ severity: 'critical' }, { reviewer: 'security' }, { regression: true }, { outOfModel: true }, { line: undefined }, { file: undefined }]) {
+      expect(expressCandidate(of([open(over)]), 2), JSON.stringify(over)).toBe(false);
+    }
+    expect(expressCandidate(of([open()]), 1)).toBe(false);
   });
 });
 

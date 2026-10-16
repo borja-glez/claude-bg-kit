@@ -163,6 +163,15 @@ export function openIds(index: FindingsIndex, round: number): Partial<Record<Rev
   return out;
 }
 
+/** Measure 7 (§4.9): the previous review left open one or two findings, all important, each with file and line, none
+ *  from security, a regression or out of the model. The CLI checks the rest (fix with green validators, no redo, not the
+ *  last review, review.express). */
+export function expressCandidate(index: FindingsIndex, round: number): boolean {
+  const open = (previousOf(index, round)?.findings ?? []).filter(f => f.status === 'open');
+  return open.length >= 1 && open.length <= 2 && open.every(f => f.severity === 'important' && !!f.file && f.line !== undefined
+    && f.regression !== true && f.outOfModel !== true && f.reviewer !== 'security');
+}
+
 /**
  * The findings closed before review `round`, per reviewer, each with the last review that had it open: those earlier
  * reviews closed, and those the previous review left open that this one does not name (`present`) when their reviewer
