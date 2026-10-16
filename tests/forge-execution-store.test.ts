@@ -99,7 +99,7 @@ describe('updateExecution and execution.lock (I-15)', () => {
     expect(readFileSync(executionFile(root), 'utf8')).toBe(before);
   });
   it('no command writes execution.json without the lock: no saveExecution( left in the CLI or the live hook', () => {
-    for (const f of ['src/forge/cli/swarm.ts', 'src/forge/cli/run.ts', 'src/forge/cli/review.ts', 'src/forge/live.ts']) {
+    for (const f of ['src/forge/cli/swarm.ts', 'src/forge/cli/run.ts', 'src/forge/cli/review.ts', 'src/forge/cli/step.ts', 'src/forge/live.ts']) {
       expect(readFileSync(new URL(`../${f}`, import.meta.url), 'utf8'), f).not.toMatch(/\bsaveExecution\(/);
     }
   });

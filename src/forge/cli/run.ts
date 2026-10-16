@@ -28,6 +28,7 @@ import { claudeSessionId, noClaudeSession } from '../../lib/claude-session.js';
 import { UsageError } from './errors.js';
 import { swarmCommand, restoringRegenerated } from './swarm.js';
 import { reviewCommand } from './review.js';
+import { swarmStep } from './step.js';
 import { runWithCache, cacheGit, checkoutPrefix } from '../validate-cache.js';
 import { roundDecision } from '../round.js';
 import { computeStats, renderStats, type PlanStates } from '../stats.js';
@@ -1232,7 +1233,7 @@ function runCommand(argv: string[], io: Io): Result {
         return swarmCommand(args, io, {
           git: io.git ?? defaultGit(io.cwd), exec: io.exec ?? defaultExec(io.cwd), execMany: io.execMany, repo: repoReader(repoDir),
           at: dir => ({ git: defaultGit(dir), exec: defaultExec(dir), execMany: defaultExecMany(dir), repo: repoReader(dir) }),
-        });
+        }, { step: rest => swarmStep(rest, io, { cli: argv => run(argv, io), gitAt: dir => defaultGit(dir) }) });
       case 'review-prep':
       case 'review-close':
       case 'prep':

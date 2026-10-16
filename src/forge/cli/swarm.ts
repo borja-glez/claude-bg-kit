@@ -846,7 +846,7 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
   return r.result === 'merged' ? merged({ result: 'merged', sha: r.sha, preexisting: r.preexisting, ...extras }) : out({ result: 'conflict', detail: r.detail, ...extras });
 }
 
-export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
+export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { step?: (rest: string[]) => Result } = {}): Result {
   const [sub, ...rest] = args;
   const flag = (name: string) => {
     const i = rest.indexOf(`--${name}`);
@@ -866,7 +866,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
   // I-15: every write of execution.json reads it again under its lock and changes only what this command changes.
   const lockDeps: LockDeps = { now: io.now, sleep: io.sleep };
   const update = (fn: (cur: ExecutionState | null) => ExecutionState | null) => updateExecution(io.cwd, fn, lockDeps);
-  if (['start', 'tick', 'integrate', 'merge', 'sleep', 'worktree', 'retry', 'relaunch', 'nudge', 'takeover'].includes(sub ?? '') && !(sub === 'worktree' && has('member'))) {
+  if (['start', 'tick', 'integrate', 'merge', 'sleep', 'worktree', 'retry', 'relaunch', 'nudge', 'takeover', 'step'].includes(sub ?? '') && !(sub === 'worktree' && has('member'))) {
     const top = deps.git(['rev-parse', '--show-toplevel'])?.trim();
     const main = mainWorktreeFrom(deps.git(['worktree', 'list', '--porcelain']));
     if (!top || !main || !samePath(top, main)) {
@@ -1396,11 +1396,15 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       appendEvent(io.cwd, { ts: iso, kind: 'decision', point: 'takeover', what: 'takeover', chosen: session, why: `the coordinator ${previous} stopped`, by: 'user', weight: 'minor', previous, session, runId: e.runId });
       return json({ took: true, previous, runId: e.runId, running: Object.entries(e.tasks).filter(([, t]) => t.status === 'running').map(([id]) => id) });
     }
+    case 'step':
+      // D-12: cli/step.ts, given by run.ts (it calls the CLI itself: no import of run.ts here).
+      if (!ext.step) throw new UsageError('swarm step: not available here');
+      return ext.step(rest);
     case 'integrate':
       return integrate(rest, io, deps);
     case 'merge':
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError('usage: forge swarm <start --project P --session SID --hook-session ID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F [--locale es|en]|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps] [--no-cache]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID [--db DIR]>');
+      throw new UsageError('usage: forge swarm <start --project P --session SID --hook-session ID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F [--locale es|en]|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|step --plan P --db DIR [--agents F] [--returned T1,T2] [--versions F] [--locale es|en]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps] [--no-cache]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID [--db DIR]>');
   }
 }
