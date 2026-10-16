@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import path from 'node:path';
 import { samePath } from '../../lib/worktree.js';
 import { UsageError } from './errors.js';
-import { appendEvent, readEvents, type LedgerEvent } from '../ledger.js';
+import { appendEvent, appendPhase, readEvents, type LedgerEvent } from '../ledger.js';
 import { loadConfig, agentFor, type Profile, type ForgeConfig } from '../config.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, runOptions, validateEvent, failingLabel, type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { PATH_ORDER, zonesFromPaths, type PathName, type ReviewRole } from '../triage.js';
@@ -24,6 +24,8 @@ export interface ReviewDeps { cwd: string; repoDir: string; now: () => Date; git
 
 const ROLES: readonly ReviewRole[] = ['review-correctness', 'review-security', 'review-perf'];
 const EFFORTS = ['medium', 'high', 'xhigh'] as const;
+// C-08: red validators go back to the implementer without reviewers at most this many times per review.
+const MAX_VALIDATOR_ROUNDS = 2;
 const TASK_N = /^([A-Za-z0-9_.~:@+]+(?:-[A-Za-z0-9_.~:@+]+)*)-(\d{1,4})$/;
 
 const json = (v: unknown, code = 0): Result => ({ code, stdout: JSON.stringify(v, null, 2) + '\n', stderr: '' });
@@ -84,7 +86,9 @@ function readJson(file: string): unknown {
  * against the baseline into `<dir>/validators-<n>.json`, writes `<dir>/diff-<n>.patch`, decides who reviews with
  * reviewRound from the task's last triage and saves `head.txt` and `review-plan.json` in `<dir>/reviews-<n>-<round>/`.
  * From round 2 it also writes the fix diff and each reviewer's previous blocking findings, and copies the carried
- * results with `"carried": true`.
+ * results with `"carried": true`. With validators red that the baseline does not excuse it opens a validators round
+ * instead (C-08): validators-fix-<n>-<round>-<k>.json, the phase fix with validators: true, spawn [] and
+ * validatorsRound {k, max, findings}, at most twice per review. It logs the phases validate and review (with the reviewers).
  */
 export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   const flag = (name: string) => {
@@ -121,6 +125,8 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   const round = reviewRoundOf(events, task);
   const roundDir = path.join(dir, `reviews-${n}-${round}`);
   mkdirSync(roundDir, { recursive: true });
+  // C4: the brief enters validation (logged before the validators run, so the stage's clock includes them).
+  appendPhase(deps.cwd, { ts: deps.now().toISOString(), kind: 'phase', task: id, phase: 'validate', brief: Number(n), round });
 
   // Validation, as `FORGE validate --all --path <p> --base <sha> --baseline <f>` runs it.
   const changed = deps.git(['diff', '--name-only', `${baseSha}..HEAD`]);
@@ -135,6 +141,32 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   appendEvent(deps.cwd, validateEvent(deps.now().toISOString(), task, results, validation.durationMs, scope.mode));
   const diffFile = path.join(dir, `diff-${n}.patch`);
   writeFileSync(diffFile, diff);
+
+  // C-08: validators red that BASE did not have go back to the implementer before anyone reviews: a validators round,
+  // at most MAX_VALIDATOR_ROUNDS per review (counted since the brief's last verdict). It writes no verdict, so it never
+  // counts against the cap; after them, the review is planned as before and the verdict is a fix by validators.
+  if (!ok) {
+    const sinceVerdict = events.slice(events.map(e => e.kind === 'verdict' && e.task === task).lastIndexOf(true) + 1);
+    const k = sinceVerdict.filter(e => e.kind === 'phase' && e.task === id && e.phase === 'fix' && e.validators === true && e.brief === Number(n)).length;
+    if (k < MAX_VALIDATOR_ROUNDS) {
+      const blockers = results.filter(blocking);
+      const roundFile = path.join(dir, `validators-fix-${n}-${round}-${k + 1}.json`);
+      writeFileSync(roundFile, JSON.stringify({
+        task, round, validators: blockers.map(r => ({ validator: r.validator, failures: r.failures, failing: r.failing ?? [], ...(r.newFailing?.length ? { newFailing: r.newFailing } : {}) })),
+      }, null, 2) + '\n');
+      appendPhase(deps.cwd, { ts: deps.now().toISOString(), kind: 'phase', task: id, phase: 'fix', brief: Number(n), round, validators: true });
+      // A plan an earlier preparation of this round left would let review-close close a review nobody did.
+      rmSync(path.join(roundDir, 'review-plan.json'), { force: true });
+      const fixOut: Record<string, unknown> = {
+        round,
+        validators: { ok, failing: blockers.map(r => r.validator), preexisting: results.filter(r => r.ok !== true && r.preexisting === true).map(r => r.validator), file: rel(deps.cwd, validatorsFile) },
+        spawn: [], validatorsRound: { k: k + 1, max: MAX_VALIDATOR_ROUNDS, findings: rel(deps.cwd, roundFile) },
+        cached: cachedNames(results), durationMs: validation.durationMs, ...(restored.length ? { restored } : {}),
+      };
+      if (locale === 'es' || locale === 'en') fixOut.say = sayValidatorsRound(round, k + 1, blockers.map(r => failingLabel(r, locale)), locale);
+      return json(fixOut);
+    }
+  }
 
   // The previous round: each reviewer's result (a carried one included) and the fix diff from the commit it reviewed.
   const previous: Partial<Record<ReviewRole, PreviousResult>> = {};
@@ -211,6 +243,10 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
     spawn, carried: plan.carried,
   }, null, 2) + '\n');
 
+  // C4: who reviews this round, logged before they are spawned.
+  appendPhase(deps.cwd, { ts: deps.now().toISOString(), kind: 'phase', task: id, phase: 'review', brief: Number(n), round,
+    reviewers: spawn.map(s => ({ agent: s.agent, role: s.role, effort: s.effort, model: s.model, mode: s.mode, ...(s.twin === true ? { twin: true } : {}) })) });
+
   const failing = results.filter(blocking).map(r => r.validator);
   const preexisting = results.filter(r => r.ok !== true && r.preexisting === true).map(r => r.validator);
   const out: Record<string, unknown> = {
@@ -231,6 +267,12 @@ function sayPrep(round: number, ok: boolean, failing: string[], plan: RoundPlan,
   }
   return `Round ${round}: validators ${ok ? 'green' : `red (${failing.join(', ')})`}${cached ? ` (${cached} cached)` : ''}; reviewing: ${who || 'nobody'}`
     + `${plan.carried.length ? `; carried: ${plan.carried.map(c => c.name).join(', ')}` : ''}${twins ? `; ${twins} shadow twin(s)` : ''}.`;
+}
+
+function sayValidatorsRound(round: number, k: number, failing: string[], locale: 'es' | 'en'): string {
+  return locale === 'es'
+    ? `Ronda ${round}: validadores en rojo (${failing.join(', ')}); ronda de validadores ${k} de ${MAX_VALIDATOR_ROUNDS}: nadie revisa, el implementador los arregla primero.`
+    : `Round ${round}: validators red (${failing.join(', ')}); validators round ${k} of ${MAX_VALIDATOR_ROUNDS}: nobody reviews, the implementer fixes them first.`;
 }
 
 type ValidatorRow = { validator?: unknown; ok?: unknown; failures?: unknown; preexisting?: unknown };
@@ -257,7 +299,7 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   const m = TASK_N.exec(task);
   if (!m) throw new UsageError('review-close: --task must be <id>-<n>');
   if (p !== 'medium' && p !== 'large') throw new UsageError('review-close: --path must be medium or large');
-  const n = m[2];
+  const [, id, n] = m;
 
   // The round: the given round dir, or the last one review-prep prepared under the work dir.
   let dir = path.resolve(deps.cwd, dirArg);
@@ -309,6 +351,7 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   if (preexisting.length) result.reasons.push(`already failing on the base commit, not counted: ${preexisting.join(', ')}`);
 
   const ts = deps.now().toISOString();
+  appendPhase(deps.cwd, { ts, kind: 'phase', task: id, phase: 'verdict', brief: Number(n), round });
   appendEvent(deps.cwd, { ts, kind: 'verdict', task, dir: rel(deps.cwd, roundDir), action: result.action, score: result.score, signature: result.signature,
     critical: result.critical.length, important: result.important.length, minor: result.minor.length, deferred: result.deferred.length });
   if (verifyFile !== undefined) {
@@ -321,6 +364,10 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   const events = readEvents(deps.cwd);
   const d = roundDecision(events, task, p, loadConfig(deps.repoDir).profile);
   appendEvent(deps.cwd, { ts, kind: 'round', task, ...d });
+  // C4: a verdict that sends the brief back to an implementer opens its fix stage.
+  if (result.action !== 'accept' && (d.next === 'resume' || d.next === 'fresh-stronger' || d.next === 'redo')) {
+    appendPhase(deps.cwd, { ts, kind: 'phase', task: id, phase: 'fix', brief: Number(n), round });
+  }
   if (result.minor.length || result.deferred.length) {
     // Closing the same round again with the same findings does not log the ruling twice.
     const ruling = { task, round, dir: rel(deps.cwd, roundDir),

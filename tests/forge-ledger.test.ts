@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdtempSync, readFileSync, appendFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { appendEvent, readEvents, readStatus, forgeDir } from '../src/forge/ledger.js';
+import { appendEvent, appendPhase, readEvents, readStatus, forgeDir } from '../src/forge/ledger.js';
 import { parseConfig, agentFor, ConfigError } from '../src/forge/config.js';
 
 let root: string;
@@ -17,6 +17,14 @@ describe('ledger', () => {
     appendEvent(root, { ts: '2026-10-11T10:00:00.000Z', kind: 'triage', task: 't1', path: 'small' });
     appendEvent(root, { ts: '2026-10-11T10:01:00.000Z', kind: 'phase', task: 't1', phase: 'implement' });
     expect(readEvents(root).map(e => e.kind)).toEqual(['triage', 'phase']);
+  });
+  it('appendPhase skips the phase a task is already in and appends any other (C4)', () => {
+    expect(appendPhase(root, { ts: '1', kind: 'phase', task: 'A', phase: 'validate', brief: 1, round: 1 })).toBe(true);
+    expect(appendPhase(root, { ts: '2', kind: 'phase', task: 'A', phase: 'validate', brief: 1, round: 1 })).toBe(false);
+    expect(appendPhase(root, { ts: '3', kind: 'phase', task: 'B', phase: 'validate' })).toBe(true);
+    expect(appendPhase(root, { ts: '4', kind: 'phase', task: 'A', phase: 'review', brief: 1, round: 1 })).toBe(true);
+    expect(appendPhase(root, { ts: '5', kind: 'phase', task: 'A', phase: 'validate', brief: 1, round: 2 })).toBe(true);
+    expect(readEvents(root).map(e => `${e.task}:${e.phase}`)).toEqual(['A:validate', 'B:validate', 'A:review', 'A:validate']);
   });
   it('skips a half-written line and keeps appending after it', () => {
     appendEvent(root, { ts: 'a', kind: 'triage', task: 't1' });

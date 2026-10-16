@@ -8,7 +8,7 @@ import { detectValidators, selectValidators, runValidators, markPreexisting, blo
 import { loadConfig } from '../config.js';
 import { stopFile, parseRun, readRunText } from '../run.js';
 import { isLocale } from '../../lib/forge-run.js';
-import { appendEvent, readEvents } from '../ledger.js';
+import { appendEvent, appendPhase, readEvents } from '../ledger.js';
 import { readExecution, saveExecution, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree } from '../execution.js';
 import { schedule, widthOf, relaunchOrBlock, RELAUNCH_CAP, type BgAgent } from '../schedule.js';
 import { LEASE_MINUTES, sessionLiveness } from '../../lib/coordination.js';
@@ -1058,7 +1058,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: next } });
       const lease = flag('lease') && !Number.isNaN(Date.parse(flag('lease')!)) ? flag('lease')! : new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString();
       writePublicTask(io.cwd, { task, runId: e.runId, stage, status, agent, round, since: stageSince, updatedAt: iso, leaseUntil: lease, by: e.coordinator, mode: prev.executor });
-      if (prev.stage !== stage) appendEvent(io.cwd, { ts: iso, kind: 'phase', task, phase: stage });
+      if (prev.stage !== stage) appendPhase(io.cwd, { ts: iso, kind: 'phase', task, phase: stage });
       return json(next);
     }
     case 'tick': {

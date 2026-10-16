@@ -49,6 +49,13 @@ describe('forge swarm integrate (into the run branch)', () => {
     expect(r.commit).toEqual({ sha: r.sha, ts: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.000Z$/), title: 'T1: add b', add: 3, del: 1 });
     expect(r.commit.sha).toBe(g(runWt(), 'rev-parse', 'HEAD'));
   });
+  it('swarm task logs a stage once when review-prep already logged it as a phase (C4)', () => {
+    out(run(['swarm', 'worktree', 'T1'], io));
+    run(['log', '--kind', 'phase', '--task', 'T1', '--data', '{"phase":"validate","brief":1,"round":1}'], io);
+    out(run(['swarm', 'task', 'T1', '--stage', 'validate'], io));
+    out(run(['swarm', 'task', 'T1', '--stage', 'review'], io));
+    expect(readEvents(root).filter(e => e.kind === 'phase' && e.task === 'T1').map(e => e.phase)).toEqual(['validate', 'review']);
+  });
   it('merge closes the ended execution it merged; needs-authorization closes nothing (C2, D-05)', () => {
     accept('T1', 'a.txt', 'a\n');
     out(run(['swarm', 'integrate', 'T1'], io));

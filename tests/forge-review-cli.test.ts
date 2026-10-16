@@ -80,11 +80,28 @@ describe('forge review-prep', () => {
     expect(readEvents(root).some(e => e.kind === 'validate' && e.task === 'T1-1' && e.ok === true)).toBe(true);
   });
 
-  it('a failing validator is summarised and review-prep still plans the review', () => {
+  it('red validators open a validators round: nobody reviews, no plan, no verdict; the third time it plans the review (C-08)', () => {
+    expect(JSON.parse(prep().stdout).spawn).toHaveLength(2);
+    expect(existsSync(path.join(work(), 'reviews-1-1', 'review-plan.json'))).toBe(true);
     writeFileSync(path.join(wt, '.forge', 'config.yaml'), 'detect: false\nvalidators:\n  - name: check\n    cmd: node -e "process.exit(1)"\n');
-    const out = JSON.parse(prep().stdout);
-    expect(out.validators).toMatchObject({ ok: false, failing: ['check'] });
-    expect(out.spawn).toHaveLength(2);
+    for (const k of [1, 2]) {
+      const out = JSON.parse(prep('--locale', 'en').stdout);
+      expect(out.validators).toMatchObject({ ok: false, failing: ['check'] });
+      expect(out.spawn).toEqual([]);
+      expect(out.validatorsRound).toEqual({ k, max: 2, findings: `.forge/work/T1/validators-fix-1-1-${k}.json` });
+      expect(out.say).toContain(`${k} of 2`);
+      expect(JSON.parse(readFileSync(path.join(root, out.validatorsRound.findings), 'utf8'))).toMatchObject({ task: 'T1-1', round: 1, validators: [{ validator: 'check', failing: [] }] });
+      // The plan an earlier preparation of this round left is gone: review-close cannot close a review nobody did.
+      expect(existsSync(path.join(work(), 'reviews-1-1', 'review-plan.json'))).toBe(false);
+    }
+    const events = readEvents(root);
+    expect(events.some(e => e.kind === 'verdict')).toBe(false);
+    expect(events.filter(e => e.kind === 'phase' && e.phase === 'fix').map(e => [e.brief, e.round, e.validators])).toEqual([[1, 1, true], [1, 1, true]]);
+    const third = JSON.parse(prep().stdout);
+    expect(third.validatorsRound).toBeUndefined();
+    expect(third.validators).toMatchObject({ ok: false, failing: ['check'] });
+    expect(third.spawn).toHaveLength(2);
+    expect(existsSync(path.join(work(), 'reviews-1-1', 'review-plan.json'))).toBe(true);
   });
 
   it('with the shadow test open, round 1 adds an xhigh twin of the high reviewer writing to shadow/', () => {
@@ -346,7 +363,7 @@ describe('forge review-close', () => {
 
   it('a fix writes the findings for the implementer and prints implementer and last', () => {
     writeFileSync(path.join(wt, '.forge', 'config.yaml'), 'detect: false\nvalidators:\n  - name: check\n    cmd: node -e "console.log(\'boom\');process.exit(1)"\n');
-    prep();
+    for (let i = 0; i < 3; i++) prep(); // two validators rounds first (C-08), then the review
     write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }, { severity: 'minor', file: 'a.txt', problem: 'style' }] });
     write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
     const r = close();
@@ -540,6 +557,29 @@ describe('forge review-close', () => {
     expect(out.deferred).toEqual([]);
   });
 
+  it('logs the phases of a brief in order, with its brief, round and reviewers, the verdict phase before the verdict (E-03, C4)', () => {
+    run(['prep', '--task', 'T1-1', '--path', 'medium', '--cwd', wt], io);
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    expect(JSON.parse(close().stdout).action).toBe('fix');
+    const events = readEvents(root);
+    const phases = events.filter(e => e.kind === 'phase' && e.task === 'T1');
+    expect(phases.map(e => [e.phase, e.brief, e.round ?? null])).toEqual([['implement', 1, null], ['validate', 1, 1], ['review', 1, 1], ['verdict', 1, 1], ['fix', 1, 1]]);
+    expect(phases[2].reviewers).toEqual([
+      { agent: 'forge-review-correctness', role: 'review-correctness', effort: 'xhigh', model: null, mode: 'full' },
+      { agent: 'forge-review-security', role: 'review-security', effort: 'high', model: null, mode: 'full' },
+    ]);
+    const kinds = events.map(e => (e.kind === 'phase' ? `phase:${e.phase}` : e.kind));
+    expect(kinds.indexOf('phase:verdict')).toBeLessThan(kinds.indexOf('verdict'));
+  });
+  it('an accept logs the verdict phase and no fix', () => {
+    prep();
+    write(r1(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    expect(JSON.parse(close().stdout).action).toBe('accept');
+    expect(readEvents(root).filter(e => e.kind === 'phase' && e.task === 'T1').map(e => e.phase)).toEqual(['validate', 'review', 'verdict']);
+  });
   it('requires its flags and a prepared round', () => {
     expect(run(['review-close', '--task', 'T1-1', '--dir', '.forge/work/T1'], io).code).toBe(2);
     expect(run(['review-close', '--task', 'T1', '--dir', '.forge/work/T1', '--path', 'medium'], io).code).toBe(2);

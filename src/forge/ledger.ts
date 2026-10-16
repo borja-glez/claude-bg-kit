@@ -45,6 +45,15 @@ export function appendEvent(root: string, event: LedgerEvent): void {
   updateStatus(root, event);
 }
 
+/** Appends a phase event unless the task's last phase event already names that phase (C4: a stage is logged once,
+ *  whether review-prep or `swarm task` logs it first). Returns whether it appended. */
+export function appendPhase(root: string, event: LedgerEvent & { task: string; phase: string }): boolean {
+  const last = readEvents(root).filter(e => e.kind === 'phase' && e.task === event.task).at(-1);
+  if (last && last.phase === event.phase) return false;
+  appendEvent(root, event);
+  return true;
+}
+
 // .forge/status.json follows the ledger one event at a time, so readers (lens) never read the whole ledger.
 // A missing or corrupt status starts over from this event; any failure here leaves the append done.
 function updateStatus(root: string, event: LedgerEvent): void {
