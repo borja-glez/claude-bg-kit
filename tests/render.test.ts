@@ -534,7 +534,7 @@ describe('execution', () => {
       slots: [{ task: planTask.id, stage: 'implement' as const, agent: 'forge-mech', by: 'main', since: new Date(NOW - 3 * 60000).toISOString() }],
       loose: [{ id: planTask.id, title: 'Loose namesake', status: 'running' as const, stage: 'implement' as const, agent: 'forge-mech' }],
     });
-    m.sessions.main = { ...m.sessions.main, leaseUntil: new Date(NOW - 20 * 60000).toISOString() };
+    m.sessions.main = { ...m.sessions.main, heartbeatAt: new Date(NOW - 40 * 60000).toISOString(), leaseUntil: new Date(NOW - 20 * 60000).toISOString() };
     const sv = renderApp(m, ui({ view: 'sessions' }));
     const slot = sv.slice(sv.indexOf('<div class="sc slot"'), sv.indexOf('</h3>', sv.indexOf('<div class="sc slot"')));
     expect(slot).toContain('Loose namesake');
@@ -550,7 +550,7 @@ describe('execution', () => {
     expect(sec).toMatch(/live-alive[^]*fix-cart[^]*Fix the cart[^]*en curso · implementar · forge-mech/);
     expect(sec).toMatch(/docs-typo[^]*Typo in the README[^]*en cola/);
     expect(sec).toMatch(/bump[^]*Bump the version[^]*integrada · integrar/);
-    m.sessions.main = { ...m.sessions.main, leaseUntil: new Date(NOW - 20 * 60000).toISOString() };
+    m.sessions.main = { ...m.sessions.main, heartbeatAt: new Date(NOW - 40 * 60000).toISOString(), leaseUntil: new Date(NOW - 20 * 60000).toISOString() };
     expect(looseSection(renderApp(m, ui()))).toContain('live-stopped');
     expect(looseSection(renderApp({ ...m, meta: { ...m.meta!, locale: 'en' } }, ui()))).toMatch(/Loose tasks[^]*running · implement · forge-mech/);
     // Only while an ephemeral run is active.
@@ -616,7 +616,7 @@ describe('execution', () => {
     const progress = (h: string) => h.match(/<b>\d+<\/b>\/\d+ (tareas|tasks)/)![0];
     const before = renderApp(m, open);
     m.run = looseRun();
-    m.sessions.main = { ...m.sessions.main, leaseUntil: new Date(NOW - 20 * 60000).toISOString() };
+    m.sessions.main = { ...m.sessions.main, heartbeatAt: new Date(NOW - 40 * 60000).toISOString(), leaseUntil: new Date(NOW - 20 * 60000).toISOString() };
     const html = renderApp(m, open);
     expect(progress(html)).toBe(progress(before));
     expect(html.match(/\d+ %/)![0]).toBe(before.match(/\d+ %/)![0]);
@@ -645,15 +645,15 @@ describe('execution', () => {
     m.run = runDoc();
     m.sessions.main = { ...m.sessions.main, leaseUntil: new Date(NOW + 5 * 60000).toISOString() };
     expect(renderApp(m, ui())).toContain('▶ ejecución · subagentes 1/3');
-    m.sessions.main = { ...m.sessions.main, leaseUntil: new Date(NOW - 2 * 60000).toISOString() };
+    m.sessions.main = { ...m.sessions.main, heartbeatAt: new Date(NOW - 40 * 60000).toISOString(), leaseUntil: new Date(NOW - 2 * 60000).toISOString() };
     expect(renderApp(m, ui())).toMatch(/sin señal desde \d\d:\d\d/);
-    m.sessions.main = { ...m.sessions.main, leaseUntil: new Date(NOW - 20 * 60000).toISOString() };
+    m.sessions.main = { ...m.sessions.main, heartbeatAt: new Date(NOW - 40 * 60000).toISOString(), leaseUntil: new Date(NOW - 20 * 60000).toISOString() };
     expect(renderApp(m, ui())).toMatch(/parada desde \d\d:\d\d/);
   });
   it('sessions view: run block with slots and free places; session cards show role and stopped state', () => {
     const m = base();
     m.run = runDoc();
-    m.sessions.main = { ...m.sessions.main, role: 'coordinator', leaseUntil: new Date(NOW - 20 * 60000).toISOString() };
+    m.sessions.main = { ...m.sessions.main, role: 'coordinator', heartbeatAt: new Date(NOW - 40 * 60000).toISOString(), leaseUntil: new Date(NOW - 20 * 60000).toISOString() };
     const html = renderApp(m, ui({ view: 'sessions' }));
     expect(html).toContain('1/3 plazas');
     expect(html).toContain('libre');

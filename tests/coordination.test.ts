@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parsePlan } from '../src/lib/plan.js';
-import { conflictsFor, escalationCandidates, inboxFor, isIdle, liveness, pickTask, recoverableTasks, sessionLiveness, threadKey, LEASE_MINUTES, SILENT_MINUTES } from '../src/lib/coordination.js';
+import { conflictsFor, escalationCandidates, inboxFor, isIdle, leaseOf, liveness, pickTask, recoverableTasks, sessionLiveness, threadKey, LEASE_MINUTES, SILENT_MINUTES } from '../src/lib/coordination.js';
 import type { MessageDoc, SessionDoc, States } from '../src/lib/types.js';
 
 const base = parsePlan(readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8'));
@@ -63,7 +63,9 @@ describe('isIdle / recoverableTasks', () => {
     const hb = NOW - 40 * MIN;
     const leased = (until: number): SessionDoc => ({ ...sessions.be, heartbeatAt: new Date(hb).toISOString(), busyUntil: new Date(until).toISOString() });
     expect(isIdle(leased(hb + 60 * MIN), NOW)).toBe(false);
-    expect(isIdle(leased(NOW - MIN), NOW)).toBe(true);
+    // A-05: a lease that ended reads silent for 5 minutes, as every lease does, then stopped.
+    expect(isIdle(leased(NOW - MIN), NOW)).toBe(false);
+    expect(isIdle(leased(NOW - 6 * MIN), NOW)).toBe(true);
     expect(isIdle(leased(hb + 120 * MIN), NOW)).toBe(true);
     expect(isIdle(leased(hb + 90 * MIN), NOW)).toBe(false);
     expect(isIdle({ ...leased(hb + 60 * MIN), status: 'idle' }, NOW)).toBe(true);
@@ -202,9 +204,10 @@ describe('liveness', () => {
   it('reads a session by its lease, and falls back to the heartbeat window without one', () => {
     const base = { name: 'x', status: 'active' as const };
     expect(sessionLiveness({ ...base, heartbeatAt: at(-60), leaseUntil: at(3) }, t0)).toBe('alive');
-    expect(sessionLiveness({ ...base, heartbeatAt: at(-1), leaseUntil: at(-7) }, t0)).toBe('stopped');
+    expect(sessionLiveness({ ...base, heartbeatAt: at(-1), leaseUntil: at(-7) }, t0)).toBe('alive');
     // Without leaseUntil: the old rule (15 min of heartbeat, busyUntil within its cap).
-    expect(sessionLiveness({ ...base, heartbeatAt: at(-14) }, t0)).toBe('alive');
+    expect(sessionLiveness({ ...base, heartbeatAt: at(-9) }, t0)).toBe('alive');
+    expect(sessionLiveness({ ...base, heartbeatAt: at(-14) }, t0)).toBe('silent');
     expect(sessionLiveness({ ...base, heartbeatAt: at(-16) }, t0)).toBe('stopped');
     expect(sessionLiveness({ ...base, heartbeatAt: at(-1), status: 'idle' }, t0)).toBe('stopped');
     expect(sessionLiveness(undefined, t0)).toBe('stopped');
@@ -213,5 +216,20 @@ describe('liveness', () => {
     const base = { name: 'x', status: 'active' as const, heartbeatAt: at(-30) };
     expect(isIdle({ ...base, leaseUntil: at(-2) }, t0)).toBe(false);
     expect(isIdle({ ...base, leaseUntil: at(-6) }, t0)).toBe(true);
+  });
+  it('A-05: one life: an old leaseUntil no longer hides a fresh heartbeat, and a document without a lease stops 15 minutes after it', () => {
+    const base = { name: 'x', status: 'active' as const };
+    const fresh = { ...base, heartbeatAt: at(-1), leaseUntil: at(-120) };
+    expect(leaseOf(fresh)).toBe(t0 + 9 * 60000);
+    expect(isIdle(fresh, t0)).toBe(false);
+    expect(sessionLiveness(fresh, t0)).toBe('alive');
+    const states: States = { T001: { status: 'in_progress', owner: 'be' } };
+    expect(recoverableTasks(plan, states, { be: fresh }, t0)).toEqual([]);
+    expect(isIdle({ ...base, heartbeatAt: at(-16) }, t0)).toBe(true);
+    expect(isIdle({ ...base, heartbeatAt: at(-14) }, t0)).toBe(false);
+    expect(isIdle({ ...base, heartbeatAt: at(-100) }, t0, 120)).toBe(false);
+    expect(leaseOf(undefined)).toBeNull();
+    expect(leaseOf({ ...base, heartbeatAt: 'nope' })).toBeNull();
+    expect(liveness(t0, t0 + 60000)).toBe('alive');
   });
 });

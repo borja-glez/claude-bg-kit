@@ -4,8 +4,9 @@ import type { MessageDoc, PlanTask, PlanView, SessionDoc, States, TaskState } fr
 
 export interface Conflict { taskId: string; owner: string; zones: [string, string][]; ownerIdle?: boolean }
 type Sessions = Record<string, SessionDoc | undefined>;
+/** A session without a lease of its own is idle this long after its heartbeat (LEASE_MINUTES + SILENT_MINUTES); recover --minutes changes it. */
 export const IDLE_MINUTES = 15;
-/** A `busyUntil` lease counts only up to this many minutes after its heartbeat; a longer one is ignored. */
+/** No lease runs more than this many minutes after the step that set it (an old `busyUntil` past it is ignored). */
 export const LEASE_CAP_MINUTES = 90;
 /** A lease is renewed for this long at each step or heartbeat. */
 export const LEASE_MINUTES = 10;
@@ -58,34 +59,37 @@ export function pickTask(plan: PlanView, states: States, opts: { sessionId: stri
   return first ? result(first, conflicts(first.id)) : { task: null, resumed: false, unblock: false, conflicts: [] };
 }
 
+/**
+ * A-05, the one life of a session document: the latest of its `leaseUntil`, its heartbeat plus `beatMinutes`
+ * (LEASE_MINUTES by default) and, for an older document, a `busyUntil` no more than LEASE_CAP_MINUTES after that
+ * heartbeat. Null when none is readable. An old lease no longer hides a fresh heartbeat.
+ */
+export function leaseOf(s: SessionDoc | undefined, beatMinutes = LEASE_MINUTES): number | null {
+  if (!s) return null;
+  const t = (x: unknown): number => (typeof x === 'string' ? Date.parse(x) : NaN);
+  const beat = t(s.heartbeatAt);
+  const busy = t(s.busyUntil);
+  const all = [t(s.leaseUntil), beat + beatMinutes * 60000, busy - beat <= LEASE_CAP_MINUTES * 60000 ? busy : NaN].filter(Number.isFinite);
+  return all.length ? Math.max(...all) : null;
+}
+
+/** Idle: it said so, or its lease (leaseOf) ended more than SILENT_MINUTES ago. `minutes` is how long after a heartbeat
+ *  that happens for a document without a longer lease (recover --minutes), 15 by default. */
 export function isIdle(s: SessionDoc | undefined, now: number, minutes = IDLE_MINUTES): boolean {
-  if (s && s.status !== 'idle' && typeof s.leaseUntil === 'string') return liveness(now, s.leaseUntil) === 'stopped';
-  return legacyIdle(s, now, minutes);
+  return !s || s.status === 'idle' || liveness(now, leaseOf(s, Math.max(0, minutes - SILENT_MINUTES))) === 'stopped';
 }
 
 /** Derived by whoever reads it: nothing ever writes «stopped», a lease that is not renewed becomes it. */
-export function liveness(now: number, leaseUntil: string | null | undefined): Liveness {
-  const until = typeof leaseUntil === 'string' ? Date.parse(leaseUntil) : NaN;
+export function liveness(now: number, leaseUntil: string | number | null | undefined): Liveness {
+  const until = typeof leaseUntil === 'number' ? leaseUntil : typeof leaseUntil === 'string' ? Date.parse(leaseUntil) : NaN;
   if (!Number.isFinite(until)) return 'stopped';
   if (now < until) return 'alive';
   return now - until < SILENT_MINUTES * 60000 ? 'silent' : 'stopped';
 }
 
-/** A session with a lease is read by it; one without (older waypoint) by the heartbeat window, as before. */
+/** A session's liveness: its one lease (leaseOf), stopped when it said it is idle. */
 export function sessionLiveness(s: SessionDoc | undefined, now: number): Liveness {
-  if (!s || s.status === 'idle') return 'stopped';
-  if (typeof s.leaseUntil === 'string') return liveness(now, s.leaseUntil);
-  return legacyIdle(s, now) ? 'stopped' : 'alive';
-}
-
-function legacyIdle(s: SessionDoc | undefined, now: number, minutes = IDLE_MINUTES): boolean {
-  if (!s || s.status === 'idle') return true;
-  const hb = Date.parse(s.heartbeatAt);
-  if (!Number.isFinite(hb)) return true;
-  // A lease (busyUntil) keeps a session busy on a long step past the heartbeat window, within the cap.
-  const lease = typeof s.busyUntil === 'string' ? Date.parse(s.busyUntil) : NaN;
-  if (Number.isFinite(lease) && lease - hb <= LEASE_CAP_MINUTES * 60000 && now < lease) return false;
-  return now - hb > minutes * 60000;
+  return !s || s.status === 'idle' ? 'stopped' : liveness(now, leaseOf(s));
 }
 
 export function recoverableTasks(

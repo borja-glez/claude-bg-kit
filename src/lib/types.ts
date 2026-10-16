@@ -82,10 +82,12 @@ export interface SessionDoc {
   track?: string | null;
   currentTask?: string;
   heartbeatAt: string;
-  /** ISO time: a lease that keeps the session non-idle during a long step (capped, see isIdle). */
+  /** Read only from older documents (A-05): `waypoint heartbeat --busy-until` writes `leaseUntil` instead. */
   busyUntil?: string;
   branch?: string;
   agentName?: string;
+  /** Claude's id (C1) of the conversation that registered this session (`waypoint heartbeat --register`). */
+  claude?: string;
   worktree?: string;
   /** The coordinator SID when a forge swarm launched this session. */
   launchedBy?: string;

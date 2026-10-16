@@ -58,7 +58,7 @@ describe('schedule', () => {
     const p = plan([task('T1')]);
     const claimed = (leaseUntil: string): Partial<ScheduleInput> => ({
       plan: p, states: { T1: { status: 'in_progress', owner: 'manual-1' } },
-      sessions: { 'manual-1': { name: 'm', status: 'active', heartbeatAt: at(-1), leaseUntil, role: 'manual' } },
+      sessions: { 'manual-1': { name: 'm', status: 'active', heartbeatAt: at(-45), leaseUntil, role: 'manual' } },
     });
     expect(starts(schedule(input(claimed(at(5)))))).toEqual([]);
     expect(starts(schedule(input(claimed(at(-2)))))).toEqual([]);
@@ -133,7 +133,7 @@ describe('schedule', () => {
   const sess = (id: string, status: 'running' | 'accepted' = 'running', over: object = {}) => ({
     [id]: { ...running(id, status)[id], executor: 'sessions' as const, ...over },
   });
-  const live = (leaseUntil: string) => ({ name: 'x', status: 'active' as const, heartbeatAt: at(-1), leaseUntil, role: 'executor' as const });
+  const live = (leaseUntil: string) => ({ name: 'x', status: 'active' as const, heartbeatAt: at(-45), leaseUntil, role: 'executor' as const });
   const pubT = (task: string, over: object = {}) => ({ task, runId: 'r1', stage: 'review' as const, status: 'running' as const, agent: 'forge-review-correctness', round: 2, since: at(-2), updatedAt: at(-1), leaseUntil: at(8), by: 'S2', mode: 'sessions' as const, ...over });
 
   it("copies a member's public stage into the execution", () => {
