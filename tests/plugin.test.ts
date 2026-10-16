@@ -1258,11 +1258,17 @@ describe('plugin layout', () => {
     const bindAt = ex.indexOf('bind <plan> --via forge-run --claude <CSID>');
     expect(bindAt).toBeGreaterThan(-1);
     expect(bindAt).toBeLessThan(ex.indexOf('FORGE swarm start --project <project> --session <SID>'));
-    for (const w of ['--second-seat', '--takeover', 'AskUserQuestion']) expect(ex.slice(bindAt, ex.indexOf('FORGE swarm start --project <project>')), w).toContain(w);
+    // Exit 4 prints no sid: both rebind with --resume, so the run never goes on unbound.
+    const exBind = ex.slice(bindAt, ex.indexOf('FORGE swarm start --project <project>'));
+    for (const w of ['--second-seat', '--takeover', 'AskUserQuestion', 'Exit 4', '--resume']) expect(exBind, w).toContain(w);
+    expect(exBind).not.toContain('say so in one line and go on');
     const inf = read('plugins/forge/skills/infinite/SKILL.md');
     const infBind = inf.indexOf('bind <plan> --via forge-infinite --claude <CSID>');
     expect(infBind).toBeGreaterThan(-1);
     expect(infBind).toBeLessThan(inf.indexOf('FORGE infinite start --cycles'));
+    const infText = inf.slice(infBind, inf.indexOf('FORGE infinite start --cycles'));
+    for (const w of ['--second-seat', 'Exit 4', '--resume']) expect(infText, w).toContain(w);
+    expect(infText).not.toContain('say so in one line and go on');
   });
   it('READMEs describe wave 2a: seats and bindings, the roles, the new commands and SessionEnd', () => {
     for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) {
