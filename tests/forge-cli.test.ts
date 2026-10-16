@@ -2126,14 +2126,42 @@ describe('forge stats (C-09)', () => {
     mkdirSync(outside, { recursive: true });
     writeFileSync(path.join(outside, 'secret.png'), Buffer.alloc(5));
     writeFileSync(path.join(ev, 'ok.png'), Buffer.alloc(5));
-    symlinkSync(path.join(outside, 'secret.png'), path.join(ev, 'link.png'), 'file');
+    // A file symlink needs a privilege on Windows (and some CI): without it that case is skipped, the others stay.
+    let fileLink = true;
+    try { symlinkSync(path.join(outside, 'secret.png'), path.join(ev, 'link.png'), 'file'); } catch (e) {
+      if (!['EPERM', 'EACCES'].includes((e as NodeJS.ErrnoException).code ?? '')) throw e;
+      fileLink = false;
+    }
     symlinkSync(outside, path.join(ev, 'dir'), 'junction');
     const check = (id: number, shot: string) => ({ id, surface: 'web', name: `c${id}`, main: id === 1, ok: true, expected: 'a', observed: 'a', shot });
     writeFileSync(path.join(dir, 'verify.json'), JSON.stringify({
       surfaces: ['web'], result: 'pass',
-      checks: [check(1, 'ok.png'), check(2, path.join(outside, 'secret.png')), check(3, 'link.png'), check(4, 'dir/secret.png'), check(5, '../1-1/ok.png')],
+      checks: [check(1, 'ok.png'), check(2, path.join(outside, 'secret.png')), ...(fileLink ? [check(3, 'link.png')] : []), check(4, 'dir/secret.png'), check(5, '../1-1/ok.png')],
     }));
     const out = JSON.parse(run(['verify-close', '--task', 'T2-1', '--dir', '.forge/work/T2/reviews-1-1', '--evidence', '.forge/work/T2/evidence/1-1', '--locale', 'en'], io).stdout);
     expect(out.evidence.shots.map((s: { check: string }) => s.check)).toEqual(['c1', 'c5']);
+  });
+
+  it('verify-close with --cwd writes the learned notes into that worktree and records their digests in the main checkout', () => {
+    const body = '---\naffects: ["web/**"]\n---\n# Web\n\nOpen the app.\n';
+    const wt = path.join(root, 'wt');
+    for (const base of [root, wt]) {
+      mkdirSync(path.join(base, '.forge', 'verify'), { recursive: true });
+      writeFileSync(path.join(base, '.forge', 'verify', 'web.md'), body);
+    }
+    expect(run(['local', 'set', 'surfaces.web', 'allowed'], io).code).toBe(0);
+    const dir = path.join(root, '.forge', 'work', 'T3', 'reviews-1-1');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'verify.json'), JSON.stringify({
+      surfaces: ['web'], result: 'pass',
+      checks: [{ id: 1, surface: 'web', name: 'home', main: true, ok: true, expected: 'a', observed: 'a' }],
+      learned: [{ surface: 'web', note: 'port 3000' }],
+    }));
+    const r = run(['verify-close', '--task', 'T3-1', '--dir', '.forge/work/T3/reviews-1-1', '--evidence', '.forge/work/T3/evidence/1-1', '--cwd', 'wt', '--locale', 'en'], io);
+    expect(JSON.parse(r.stdout)).toMatchObject({ learned: { web: 1 }, commit: ['.forge/verify/web.md'] });
+    expect(readFileSync(path.join(wt, '.forge', 'verify', 'web.md'), 'utf8')).toContain('port 3000');
+    expect(readFileSync(path.join(root, '.forge', 'verify', 'web.md'), 'utf8')).toBe(body);
+    expect(readFileSync(path.join(root, '.forge', 'learned.jsonl'), 'utf8')).toContain('"surface":"web"');
+    expect(existsSync(path.join(wt, '.forge', 'learned.jsonl'))).toBe(false);
   });
 });
