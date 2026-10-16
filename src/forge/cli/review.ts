@@ -500,23 +500,28 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   } else rmSync(findingsPath, { force: true });
 
   // C-15: a new implementer (fresh-stronger or redo) starts from a handover with the history of the brief's reviews.
+  // BASE and HEAD come from files in the round dir: only a commit that resolves is used, never text that git could read as an option.
+  const sha = (v: unknown): string => {
+    if (typeof v !== 'string' || !/^[0-9a-f]{7,64}$/i.test(v.trim())) return '';
+    return (deps.git(['rev-parse', '--verify', '--quiet', `${v.trim()}^{commit}`]) ?? '').trim();
+  };
+  const planBase = sha(plan.base);
   let handover: string | null = null;
+  const handoverFile = path.join(dir, `handover-${n}-${round}.md`);
   if (d.next === 'fresh-stronger' || d.next === 'redo') {
-    const file = path.join(dir, `handover-${n}-${round}.md`);
     const wrong = Object.values(reviews).filter(r => r?.verdict === 'fail' && r.approach === 'wrong')
       .flatMap(r => r!.findings.filter(f => f.severity !== 'minor').map(f => f.problem));
-    writeFileSync(file, renderHandover({
+    writeFileSync(handoverFile, renderHandover({
       task, reviews: reviewsCount, brief: rel(deps.cwd, path.join(dir, `brief-${n}.md`)), diff: rel(deps.cwd, path.join(dir, `diff-${n}.patch`)),
-      base: typeof plan.base === 'string' ? plan.base : '', head: readText(path.join(roundDir, 'head.txt'))?.trim() ?? '',
+      base: planBase, head: sha(readText(path.join(roundDir, 'head.txt'))),
       open: [...result.critical, ...result.important], residual: result.deferred, history: historyLine(indexNow),
       validators: failing.map(v => v.validator), report: rel(deps.cwd, path.join(dir, `report-${n}.txt`)),
       redo: d.next === 'redo' ? { reasons: wrong } : null,
     }));
-    handover = rel(deps.cwd, file);
-  }
+    handover = rel(deps.cwd, handoverFile);
+  } else rmSync(handoverFile, { force: true });
   // J-08: a redo undoes the attempt without rewriting history; the skill runs git with these args as printed. Null when
-  // HEAD is still BASE, or when the plan does not say what BASE was (one written by forge 0.17).
-  const planBase = typeof plan.base === 'string' ? plan.base : '';
+  // HEAD is still BASE, or when the plan has no BASE that resolves to a commit (one written by forge 0.17, or edited).
   const headNow = (deps.git(['rev-parse', 'HEAD']) ?? '').trim();
   const revert = d.next === 'redo' && planBase && headNow && headNow !== planBase
     ? { base: planBase, head: headNow, args: ['-C', deps.repoDir, 'revert', '--no-edit', `${planBase}..HEAD`] } : null;

@@ -828,7 +828,7 @@ describe('forge review-close', () => {
     expect(out.revert).toEqual({ base, head: git('rev-parse', 'HEAD'), args: ['-C', wt, 'revert', '--no-edit', `${base}..HEAD`] });
     const note = readFileSync(path.join(work(), 'handover-1-1.md'), 'utf8');
     expect(note.split('\n')[0]).toBe('# Handover: T1-1, review 1 of 4 (the attempt was reverted: start again from the brief with another approach)');
-    expect(note).toContain('a counter cannot work here: use a queue');
+    expect(note).toContain('"a counter cannot work here: use a queue"');
     expect(note).toContain('.forge/work/T1/report-1.txt');
   });
 
@@ -844,6 +844,24 @@ describe('forge review-close', () => {
     writeFileSync(planFile, JSON.stringify(plan));
     expect(JSON.parse(close().stdout)).toMatchObject({ next: 'redo', revert: null });
     expect(readFileSync(path.join(work(), 'handover-1-1.md'), 'utf8')).toContain('(base unknown, head ');
+    // A BASE that is not a commit hash, or does not resolve, is never printed as git args (option injection).
+    for (const bad of ['--abort', '-x', 'HEAD~1', 'deadbeefdeadbeef']) {
+      writeFileSync(planFile, JSON.stringify({ ...plan, base: bad }));
+      expect(JSON.parse(close().stdout)).toMatchObject({ next: 'redo', revert: null });
+      expect(readFileSync(path.join(work(), 'handover-1-1.md'), 'utf8')).toContain('(base unknown, head ');
+    }
+  });
+
+  it('a later close of the round that sends nobody to a new implementer removes the stale handover', () => {
+    prep();
+    const wrong = { verdict: 'fail', confidence: 0.9, approach: 'wrong', findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'start over' }] };
+    write(r1(), 'correctness', wrong);
+    write(r1(), 'security', wrong);
+    expect(JSON.parse(close().stdout).handover).toBe('.forge/work/T1/handover-1-1.md');
+    write(r1(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    expect(JSON.parse(close().stdout)).toMatchObject({ action: 'accept', handover: null });
+    expect(existsSync(path.join(work(), 'handover-1-1.md'))).toBe(false);
   });
 
   it('fresh-stronger writes the handover: the open findings to fix and the reviews so far; resume writes none (C-15)', () => {
@@ -856,7 +874,7 @@ describe('forge review-close', () => {
     expect(out).toMatchObject({ action: 'fix', next: 'fresh-stronger', last: true, handover: '.forge/work/T1/handover-1-3.md', revert: null });
     const note = readFileSync(path.join(work(), 'handover-1-3.md'), 'utf8');
     expect(note.split('\n')[0]).toBe('# Handover: T1-1, review 3 of 4');
-    expect(note).toContain('  - F1 [important] a.txt:2 — two is still wrong — compare with the spec');
+    expect(note).toContain('  - F1 [important] a.txt:2 — "two is still wrong" — "compare with the spec"');
     expect(note).toContain('- Reviews so far: 3: F1 open');
     expect(note).toContain('- Validators now: green');
   });
