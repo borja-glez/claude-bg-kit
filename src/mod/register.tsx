@@ -181,8 +181,8 @@ export const register: Register = on => {
         // When the command cannot run from here, leave it in the prompt for the person to send.
         $.command.run({ command, args }).catch(async () => {
           try {
-            await $.prompt.fill({ text, mode: 'replace' });
-            $.ui.toast(t.pressEnter);
+            const r = await $.prompt.fill({ text, mode: 'replace' });
+            if (r.isFilled) $.ui.toast(t.pressEnter);
           } catch { /* nothing else to do */ }
         });
       };

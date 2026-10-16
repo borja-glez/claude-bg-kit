@@ -13,6 +13,24 @@ elsewhere and are reconstructed from their READMEs.
 
 ## waypoint
 
+### 0.23.0 — 2026-10-16
+
+#### Added
+- The band knows who looks at it (`$.session.id()`) and draws by role. The conversation bound to the seat sees its work band, or its design band while the draft is its own. Another live conversation sees a dim notice instead, «◦ another session (main) works on T019 · 3 min ago», with Status, Other track and the roadmap; a forge execution coordinated by another session is a notice with View and Join (`/forge:run --join`).
+- What an earlier conversation left behind is offered for 24 hours as a notice: a task («◌ left in progress: T019 …») with Resume (`/waypoint:work resume`) and Release T019 (`/waypoint:work release T019`), a draft with Resume (`/waypoint:design resume`, which binds it and shows its state without running a critique), and an execution stopped or without its coordinator with View, Resume (`/forge:run --resume`) and Close (`/forge:stop`). Close on an execution that is still active without its coordinator only leaves `/forge:stop` in the prompt to confirm.
+- Every band model carries `viewer: { role, coordinator, runId }` (`runId` only when the band is about the execution), and `mode: 'notice'` is a new variant of the published `WaypointBand`.
+
+#### Changed
+- A member of a forge execution sees its own task with the line of the execution, never the coordinator's run band. Only the coordinator's band has Stop; a member's leaves `/forge:stop` in the prompt to confirm.
+- The coordinator sees an execution that stopped, ran out of budget or finished without a merge until it is closed; anyone else sees it as a notice for 24 hours after it last moved.
+- A draft design is drawn only for the conversation bound to it.
+- × on a notice is kept in the plugin's store, shared by your conversations, per checkout, project, kind of notice and subject until the notice would end (a day for another session's work and for an offer already past its window), so a new task or execution shows again; × on your own band still lasts the session, and a `/clear` shows it again.
+- `/clear` and a resume inside the process no longer stop the band's refresh, and the band shows the new conversation's role at once.
+- The band's 30 s tick renews this conversation's live binding once a minute; it never reopens one that ended. The CLI and the hooks read a `bound.json` found empty or half written once more before they give up on it.
+- The band strips control and bidirectional characters from the titles it shows.
+- The band picks the project of this conversation's binding, else the one with the latest activity.
+- A conversation that was open before this version has no binding, so it sees no band until its next `/waypoint:work`.
+
 ### 0.22.0 — 2026-10-16
 
 #### Added
@@ -215,6 +233,11 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.19.2 — 2026-10-16
+
+#### Changed
+- Requires waypoint ^0.23.0.
 
 ### 0.19.1 — 2026-10-16
 
@@ -588,6 +611,11 @@ elsewhere and are reconstructed from their READMEs.
 - Requires waypoint ^0.7.0.
 
 ## lens
+
+### 0.11.8 — 2026-10-16
+
+#### Changed
+- The roadmap section of the panel follows the role of the conversation, as waypoint's band does: only the conversation bound to the seat, or forge's coordinator and the members of its run, get it.
 
 ### 0.11.7 — 2026-10-16
 

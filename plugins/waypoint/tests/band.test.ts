@@ -230,6 +230,26 @@ test('a command that cannot run is left in the prompt with a toast', async ($, o
   }
 });
 
+test('a command left in the prompt gets the press-Enter toast only when the prompt took it', async ($, on) => {
+  engineBottom(on);
+  const filled: string[] = [];
+  const toasts: string[] = [];
+  let takes = true;
+  on('command.run', () => { throw new Error('unknown command'); });
+  on('prompt.fill', (_$, e) => { filled.push(e.text); return { isFilled: takes }; });
+  on('ui.toast', (_$, e) => { toasts.push(e.text); return { value: undefined }; });
+  serveBand(on, () => DESIGN);
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  takes = false;
+  await ui.press({ key: 'approve' });
+  expect(filled.at(-1)).toBe('/waypoint:design approve');
+  expect(toasts).toEqual([]);
+  takes = true;
+  await ui.press({ key: 'approve' });
+  expect(toasts.at(-1)).toBe('Command ready in the prompt: press Enter');
+  await ui.unmount();
+});
+
 test('a link that is not http(s) is shown as text', async ($, on) => {
   engineBottom(on);
   serveBand(on, () => ({ ...DESIGN, designUrl: 'javascript:alert(1)' }));
