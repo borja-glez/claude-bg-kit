@@ -13,6 +13,16 @@ elsewhere and are reconstructed from their READMEs.
 
 ## waypoint
 
+### 0.21.0 — 2026-10-16
+
+#### Added
+- A plan task takes `delicate: true` (`waypoint validate` accepts it; the roadmap ignores it): forge gives it a stronger implementer and a deeper correctness review.
+
+#### Changed
+- The Stop hook no longer stops a session that coordinates or is a member of an active forge execution, nor the session of forge's infinite run: forge's own Stop hook steps those. The commits of the task the session has in progress no longer count either; they are recorded with its completion.
+- `waypoint launch --swarm` is obsolete: still accepted, with a warning, it no longer changes the prompt. `/waypoint:work` lost its «Swarm member» setup, and the forge execution item of §0 is now §0.5.
+- With forge 0.19's `swarm.validateJobs` in `.forge/config.yaml`, waypoint still reads the config (it bundles forge's schema).
+
 ### 0.20.2 — 2026-10-16
 
 #### Fixed
@@ -185,6 +195,32 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.19.0 — 2026-10-16
+
+#### Added
+- `swarm step`: one step of a plan execution in one command, run in the background. It renews the leases, prepares the review of each implementer that came back (or hands over its report), closes the reviews that are back, starts the tasks the tick schedules (worktree, brief, triage and prep) and integrates at most one, and prints the actions and the data of the roadmap batch. It waits for the reviewers it respawned, takes up a task a previous step left at `brief` or `validate`, and after a conflict retry reviews from the base the task merged.
+- `--out <file>` on `prep`, `review-prep`, `validate`, `swarm integrate` and `swarm step`: the command runs as a job of `.forge/jobs/` while the coordinator waits in the background, writes its JSON to the file (with `waitedMs`) and waits for one of `swarm.validateJobs` validation slots (2 by default). The Stop hook does not block while a job of its session is alive. `validate` refuses a `--out` that is not the one right after the command.
+- A clean session for the coordinator: the start questions are answered once in the design session and kept in `.forge/work/<project>/launch.json`; `/clear` and `/forge:run --execute <project>` start the run with them.
+- `verify-close`: the learned notes, the cleanup, the result and the list of screenshots of a verification in one call.
+- `setup [--cwd dir]`: installs a worktree's dependencies as `swarm` does; `/forge:review` uses it.
+- `route --text-file` probes a request without writing anything and prints `probe`, `stepAside` and one question in two parts (`ask`); `route set --remember` keeps the choice as the project's `workflow`.
+- `swarm propose` prints the plan's width wave by wave (`profile`), its longest chain, the zones that serialize it, `mostlySerial` and a `say` line; a mostly serial plan offers to replan.
+- `delicate: true` on a plan task: `triage --plan` gives it `impl-high` and correctness at xhigh, and `brief` says so. The planner reads `FORGE stats --json` (the fixed cost of a task here) and marks it.
+- `review-prep` of an express review writes the validation command it prints to `review-plan.json` (`validatorsCmd`), so the coordinator reads it again from there.
+
+#### Changed
+- Every write of `.forge/execution.json` that depends on what it holds takes `.forge/execution.lock` (30 s, retried for 10 s, then exit 2), so a tick, a `swarm task` and an integration in the background never overwrite each other; `swarm task` and `swarm retry` change only their own fields.
+- The coordinator runs `swarm step`, `prep`, `review-prep` and `swarm integrate` in the background, asks mode, final merge and where to run in one question, and turns a doubt that blocks nothing into a question note; a message from the person during a run first marks a sleep. Every coordinator turn ends with a marked sleep, and `/forge:infinite` cycles run the single commands in the foreground.
+- The planner no longer creates tasks under about 15 minutes, keeps chains short, gives each task its own test file and scales `estimate_min` with the measured ratio.
+- forge:route costs one call and one question; a request it steps aside from, or one routed to «no forge» without remembering it, leaves no `.forge/` behind.
+- Medium briefs run in parallel only when three are independent, or two of more than about 20 minutes each.
+- `/forge:infinite` cites forge:run's decisions reference and the «A Large task» row of Unattended instead of repeating them. The old `/forge:run --plan … run member of` prompt and «→ Run member» are gone from the skills.
+- `review-close` exits 2 and removes an express validators file that holds no results.
+- Requires waypoint ^0.21.0.
+
+#### Fixed
+- An integration whose process died in the middle of its merge no longer blocks the run as `run-dirty` forever: the next one aborts that merge (only one of its own, in the same worktree, with HEAD where it started) and says `recovered`; no tick integrates while a merge is in flight. `.forge/execution/merging.json` is exclusive for a whole integration (phases `baseline` and `merge`), and `swarm merge` refuses while one is live.
 
 ### 0.18.0 — 2026-10-16
 
@@ -515,6 +551,11 @@ elsewhere and are reconstructed from their READMEs.
 - Requires waypoint ^0.7.0.
 
 ## lens
+
+### 0.11.6 — 2026-10-16
+
+#### Changed
+- Built with waypoint 0.21's plan schema (`delicate` on a task). Nothing lens shows changes.
 
 ### 0.11.5 — 2026-10-15
 

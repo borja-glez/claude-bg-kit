@@ -6,7 +6,7 @@
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.20.2](https://img.shields.io/badge/version-0.20.2-cba6f7?style=flat-square)
+![version 0.21.0](https://img.shields.io/badge/version-0.21.0-cba6f7?style=flat-square)
 ![requires claude.ai login](https://img.shields.io/badge/requires-claude.ai%20login-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -35,7 +35,7 @@ A task that spans dozens of steps and several sessions loses its thread: what wa
 ## Features
 
 - **Design in rounds.** A `design-critic` agent reviews the design document and returns numbered proposals with their critical points. You apply all or some of them, ask for another round, have Claude interview you, or rewrite, until you approve it.
-- **A plan in the repo.** `docs/waypoint/<project>/plan.yaml` holds tracks, phases and tasks, each with its zones (the files it touches), `done_when` and an estimate. The approved design seeds it.
+- **A plan in the repo.** `docs/waypoint/<project>/plan.yaml` holds tracks, phases and tasks, each with its zones (the files it touches), `done_when` and an estimate. The approved design seeds it. A task forge must handle with care carries `delicate: true` (the roadmap ignores it).
 - **A live roadmap.** The plan is published as a claude.ai artifact that updates while Claude works. Its views are Tracking (by phase or by track), Versions, Sessions, Notes and Proposals, with filters, a zoomable timeline, dependencies, a minimap, export and a phone layout.
 - **Parallel sessions.** `/waypoint:launch <track>` starts a background session in its own git worktree. Sessions show up in the roadmap and coordinate through messages: overlap warnings, handoffs and delegation.
 - **A band above the prompt** that shows where you are and runs the next command with one click.
@@ -141,7 +141,7 @@ For many tracks at once with automatic integration, use forge's [execution modes
 
 - **SessionStart** injects the roadmap or design context into a new, resumed, cleared or compacted session.
 - **PostToolUse** (Bash) records each `git commit` that moved HEAD, with its `sha`, in `.waypoint/<project>/pending-commits.jsonl`. Failed commits and `--dry-run` are not recorded. The work skill records intermediate commits as `commit` events and removes their lines, and empties the file when it completes or leaves a task.
-- **Stop** reminds you once per distinct pending set while `pending-commits.jsonl` or `queue.jsonl` has lines, so no commit or roadmap write is lost. Stopping again with nothing new goes through, and it never blocks when the Stop hook is already active.
+- **Stop** reminds you once per distinct pending set while `pending-commits.jsonl` or `queue.jsonl` has lines, so no commit or roadmap write is lost. Stopping again with nothing new goes through, and it never blocks when the Stop hook is already active. It never stops a session that coordinates or is a member of an active forge execution, nor the session of forge's infinite run (forge's own Stop hook steps them), and the commits of the task you have in progress only count once it is done.
 
 ## CLI reference
 

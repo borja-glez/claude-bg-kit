@@ -6,7 +6,7 @@
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.20.2](https://img.shields.io/badge/versi%C3%B3n-0.20.2-cba6f7?style=flat-square)
+![versión 0.21.0](https://img.shields.io/badge/versi%C3%B3n-0.21.0-cba6f7?style=flat-square)
 ![requiere sesión en claude.ai](https://img.shields.io/badge/requiere-sesi%C3%B3n%20en%20claude.ai-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -35,7 +35,7 @@ Una tarea de decenas de pasos y varias sesiones pierde el hilo: qué se decidió
 ## Características
 
 - **Diseño por rondas.** Un agente `design-critic` revisa el documento de diseño y devuelve propuestas numeradas con sus puntos críticos. Aplicas todas o algunas, pides otra ronda, haces que Claude te entreviste o lo reescribes, hasta que lo apruebas.
-- **El plan en el repo.** `docs/waypoint/<proyecto>/plan.yaml` contiene frentes, fases y tareas, cada una con sus zonas (los ficheros que toca), `done_when` y una estimación. El diseño aprobado le da forma.
+- **El plan en el repo.** `docs/waypoint/<proyecto>/plan.yaml` contiene frentes, fases y tareas, cada una con sus zonas (los ficheros que toca), `done_when` y una estimación. El diseño aprobado le da forma. Una tarea que forge debe tratar con cuidado lleva `delicate: true` (el roadmap lo ignora).
 - **Un roadmap vivo.** El plan se publica como artifact de claude.ai y se actualiza mientras Claude trabaja. Sus vistas son Seguimiento (por fases o por frentes), Versiones, Sesiones, Notas y Propuestas, con filtros, línea temporal con zoom, dependencias, minimapa, exportación y diseño para móvil.
 - **Sesiones en paralelo.** `/waypoint:launch <frente>` arranca una sesión en segundo plano en su propio worktree de git. Las sesiones aparecen en el roadmap y se coordinan con mensajes: avisos de solapamiento, traspasos y delegación.
 - **Una banda sobre el prompt** que enseña dónde estás y ejecuta el siguiente comando con un clic.
@@ -141,7 +141,7 @@ Para muchos frentes a la vez con integración automática, usa los [modos de eje
 
 - **SessionStart** inyecta el contexto del roadmap o del diseño en una sesión nueva, reanudada, limpiada o compactada.
 - **PostToolUse** (Bash) registra cada `git commit` que movió HEAD, con su `sha`, en `.waypoint/<proyecto>/pending-commits.jsonl`. No se registran los commits fallidos ni los `--dry-run`. La skill de trabajo registra los commits intermedios como eventos `commit` y quita sus líneas, y vacía el fichero al completar o dejar una tarea.
-- **Stop** te avisa una vez por cada conjunto distinto de pendientes mientras `pending-commits.jsonl` o `queue.jsonl` tengan líneas, para que no se pierda ningún commit ni escritura en el roadmap. Si vuelves a parar sin nada nuevo, deja pasar, y nunca bloquea cuando el hook Stop ya está activo.
+- **Stop** te avisa una vez por cada conjunto distinto de pendientes mientras `pending-commits.jsonl` o `queue.jsonl` tengan líneas, para que no se pierda ningún commit ni escritura en el roadmap. Si vuelves a parar sin nada nuevo, deja pasar, y nunca bloquea cuando el hook Stop ya está activo. Nunca para a una sesión que coordina o es miembro de una ejecución activa de forge, ni a la sesión del modo infinito de forge (las lleva el hook Stop de forge), y los commits de la tarea que tienes en curso solo cuentan cuando termina.
 
 ## Referencia de la CLI
 

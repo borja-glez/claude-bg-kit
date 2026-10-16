@@ -21,7 +21,7 @@ describe('plugin layout', () => {
   });
   it('lens manifest, module and contract exist', () => {
     const p = JSON.parse(read('plugins/lens/.claude-plugin/plugin.json'));
-    expect(p).toMatchObject({ name: 'lens', version: '0.11.5', types: './types/index.d.ts' });
+    expect(p).toMatchObject({ name: 'lens', version: '0.11.6', types: './types/index.d.ts' });
     expect(JSON.parse(read('plugins/lens/hooks/hooks.json'))).toEqual({ modules: ['./register.js'] });
     for (const f of ['hooks/register.js', 'types/index.d.ts', 'README.md']) {
       expect(existsSync(new URL(`../plugins/lens/${f}`, import.meta.url))).toBe(true);
@@ -195,20 +195,20 @@ describe('plugin layout', () => {
     expect(md).toMatch(/bundles several independent changes/);
     expect(md).toMatch(/adds new behaviour with its tests/);
   });
-  it('versions: forge 0.18.0, waypoint 0.20.2', () => {
+  it('versions: forge 0.19.0, waypoint 0.21.0', () => {
     const forge = JSON.parse(read('plugins/forge/.claude-plugin/plugin.json'));
-    expect(forge.version).toBe('0.18.0');
-    expect(forge.dependencies).toEqual([{ name: 'waypoint', version: '^0.20.2' }]);
-    expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.20.2');
+    expect(forge.version).toBe('0.19.0');
+    expect(forge.dependencies).toEqual([{ name: 'waypoint', version: '^0.21.0' }]);
+    expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.21.0');
   });
-  it('CHANGELOG has the entries of forge 0.18.0, waypoint 0.20.2 and lens 0.11.5', () => {
+  it('CHANGELOG has the entries of forge 0.19.0, waypoint 0.21.0 and lens 0.11.6', () => {
     const md = read('CHANGELOG.md');
     // Each plugin's section, newest version first.
     const section = (p: string) => md.split(/^## /m).find(s => s.startsWith(`${p}\n`) || s.startsWith(`${p}\r\n`)) ?? '';
     const versions = (p: string) => [...section(p).matchAll(/^### (\d+\.\d+\.\d+) — /gm)].map(m => m[1]);
-    expect(versions('waypoint').slice(0, 2)).toEqual(['0.20.2', '0.20.1']);
-    expect(versions('forge').slice(0, 2)).toEqual(['0.18.0', '0.17.0']);
-    expect(versions('lens').slice(0, 2)).toEqual(['0.11.5', '0.11.4']);
+    expect(versions('waypoint').slice(0, 2)).toEqual(['0.21.0', '0.20.2']);
+    expect(versions('forge').slice(0, 2)).toEqual(['0.19.0', '0.18.0']);
+    expect(versions('lens').slice(0, 2)).toEqual(['0.11.6', '0.11.5']);
   });
   it('READMEs in Spanish and English tell the cost changes', () => {
     for (const lang of ['', '.es']) {
@@ -241,7 +241,7 @@ describe('plugin layout', () => {
   it('READMEs describe routing and auto mode', () => {
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
       const md = read(f);
-      for (const s of ['forge:route', '/forge:run --auto', 'workflow:', 'autonomy:', '`prefs [--workflow w] [--autonomy a]`', '`route --task id --path p', '`route set --task id --chosen o --by user|auto',
+      for (const s of ['forge:route', '/forge:run --auto', 'workflow:', 'autonomy:', '`prefs [--workflow w] [--autonomy a]`', '`route --task id (--path p | --text-file f','`route set --task id --chosen o --by user|auto',
         '`route stage --stage s', 'hook route-session', 'hook route-prompt', '`local set workflow <w>|none`', '--autonomy auto']) expect(md).toContain(s);
     }
     for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) for (const s of ['design-gate', 'approve --auto']) expect(read(f)).toContain(s);
@@ -444,9 +444,9 @@ describe('plugin layout', () => {
     for (const w of ['design-snapshot', 'design-changed', 'critique-check', 'critique-select', 'design-page', 'rewrite', 'interview', 'approve', '--since', 'applied']) expect(md).toContain(w);
     expect(read('plugins/waypoint/skills/plan/SKILL.md')).toContain('plan.yaml does not exist yet');
   });
-  it('forge manifest depends on waypoint ^0.20.2 and ships its CLI', () => {
+  it('forge manifest depends on waypoint ^0.21.0 and ships its CLI', () => {
     const p = JSON.parse(read('plugins/forge/.claude-plugin/plugin.json'));
-    expect(p).toMatchObject({ name: 'forge', version: '0.18.0', dependencies: [{ name: 'waypoint', version: '^0.20.2' }] });
+    expect(p).toMatchObject({ name: 'forge', version: '0.19.0', dependencies: [{ name: 'waypoint', version: '^0.21.0' }] });
     expect(existsSync(new URL('../plugins/forge/dist/forge.cjs', import.meta.url))).toBe(true);
   });
   it('forge scout agent: frontmatter and rules', () => {
@@ -1189,5 +1189,18 @@ describe('plugin layout', () => {
     const inf = read('plugins/forge/skills/infinite/SKILL.md');
     expect(inf).toContain('no `swarm step`');
     expect(inf).not.toContain('instead of the merge question');
+  });
+  it('READMEs describe wave 1c: swarm step, background jobs and the lock, a clean session, verify-close, setup, the routing probe and delicate', () => {
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
+      const md = read(f);
+      for (const s of ['`swarm step --plan P --db DIR', '.forge/jobs/', 'validateJobs:', '.forge/execution.lock', 'merging.json', '`recovered`', '/forge:run --execute <project>',
+        'launch.json', '`verify-close --task', '`setup [--cwd dir]`', '`route --task id (--path p | --text-file f', '--remember', '`profile`', '`mostlySerial`',
+        'delicate: true', 'FORGE stats --json', '--out <file>']) expect(md, `${f}: ${s}`).toContain(s);
+    }
+    for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) {
+      const md = read(f);
+      for (const s of ['delicate: true', '§0.5']) expect(md, `${f}: ${s}`).toContain(s);
+      expect(md).not.toContain('--swarm');
+    }
   });
 });
