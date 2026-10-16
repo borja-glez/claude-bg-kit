@@ -576,8 +576,8 @@ describe('plugin layout', () => {
     expect(md).toMatch(/^---\r?\nname: run\r?\ndescription: .+\r?\n/);
     expect(md).toContain('`FORGE` below means `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs"`');
     for (const w of ['FORGE triage', 'FORGE validate', 'FORGE review-prep', 'FORGE review-close', 'FORGE agents', 'FORGE log', 'FORGE last',
-      '## Trivial', '## Small', '## Medium', '## Large', '## Resuming', 'ratchet', 'breaker', 'stalled', 'fresh-stronger', 'never push', 'forge-fable', '--text-file', '--data-file', '<id>-<n>', 'BASE=$(git rev-parse HEAD)', 'absolute path',
-      'tier ladder', '`mech` -> `impl-light` -> `impl` -> `impl-high` -> `impl-heavy`','git revert --no-edit $BASE..HEAD', '`invalid: true`',
+      '## Trivial', '## Small', '## Medium', '## Large', '## Resuming', 'ratchet', 'breaker', 'stalled', 'fresh-stronger', 'never push', 'forge-fable', '--text-file', '--data-file', '<id>-<n>', 'FORGE prep --task <id>-1 --path small --no-baseline', 'absolute path',
+      'tier ladder', '`mech` -> `impl-light` -> `impl` -> `impl-high` -> `impl-heavy`','git revert --no-edit <BASE>..HEAD', '`invalid: true`',
       '`failures` of every validator with `ok: false` and no `preexisting` in `validators-<n>.json`', '--baseline .forge/work/<id>/baseline-<n>.json']) expect(md).toContain(w);
     for (const w of ['FORGE verdict', '/waypoint:design']) expect(runRef('large')).toContain(w);
     expect(runRef('execution')).toContain('--base-run');
@@ -972,5 +972,45 @@ describe('plugin layout', () => {
       const md = read(f);
       for (const s of ['--applied', '--rewrite', 'apply r1:4,5 r2:all', '?debug=1', '/waypoint:work` §0.6']) expect(md).toContain(s);
     }
+  });
+  it('implementers run the validate command prep printed, never the whole suite, and the skills pass it (J-11)', () => {
+    const impls = ['forge-impl-heavy', 'forge-impl-high', 'forge-impl', 'forge-impl-light', 'forge-mech', 'forge-fable'];
+    const lines = (a: string) => read(`plugins/forge/agents/${a}.md`).split(/\r?\n/);
+    const step3 = (a: string) => lines(a).find(l => l.startsWith('3. '))!;
+    const input = (a: string) => lines(a).find(l => l.startsWith('Input from the caller:'))!;
+    for (const a of impls) {
+      expect(step3(a), a).toBe(step3('forge-impl'));
+      expect(input(a), a).toBe(input('forge-impl'));
+      expect(read(`plugins/forge/agents/${a}.md`), a).not.toContain('FORGE validate --affected <files you changed');
+    }
+    const run = read('plugins/forge/skills/run/SKILL.md').split(/\r?\n/);
+    const small1 = run.find(l => l.startsWith('1. A Small task is **always delegated**'))!;
+    const medium2 = run.find(l => l.startsWith('2. For each task, write'))!;
+    const steps2 = runRef('task-steps').split(/\r?\n/).find(l => l.startsWith('2. **implement**'))!;
+    const brief = runRef('ephemeral').split(/\r?\n/).find(l => l.includes('- **brief:**'))!;
+    const member = read('plugins/forge/skills/member/SKILL.md').split(/\r?\n/).find(l => l.startsWith('**Implementer.**'))!;
+    const manual = runRef('manual-member').split(/\r?\n/).find(l => l.startsWith('2. **Take a pending task**'))!;
+    for (const [label, s] of [['small1', small1], ['medium2', medium2], ['steps2', steps2], ['brief', brief], ['member', member], ['manual', manual]]) {
+      expect(s, label).toContain('`validate`');
+    }
+  });
+  it('no forge:run file keeps BASE in a shell variable; Small takes it from prep --no-baseline (J-13)', () => {
+    const dir = fileURLToPath(new URL('../plugins/forge/skills/run/', import.meta.url));
+    const files = ['SKILL.md', ...readdirSync(path.join(dir, 'references')).map(f => `references/${f}`)];
+    for (const f of files) {
+      const text = readFileSync(path.join(dir, f), 'utf8');
+      expect(text, f).not.toContain('$BASE');
+      expect(text, f).not.toContain('BASE=$(');
+    }
+    expect(read('plugins/forge/skills/member/SKILL.md')).not.toContain('$BASE');
+    const run = read('plugins/forge/skills/run/SKILL.md');
+    expect(run).toContain('FORGE prep --task <id>-1 --path small --no-baseline');
+    expect(run).toContain('`<BASE>`');
+  });
+  it('a validators round sends the implementer back without reviewers (C-08)', () => {
+    const run = read('plugins/forge/skills/run/SKILL.md').split(/\r?\n/);
+    expect(run.find(l => l.startsWith('3. Do not validate or write the diff yourself'))).toContain('`validatorsRound`');
+    const step3 = runRef('task-steps').split(/\r?\n/).find(l => l.startsWith('3. **validate**'))!;
+    for (const w of ['`validatorsRound`', 'FORGE swarm task <T> --stage implement']) expect(step3).toContain(w);
   });
 });
