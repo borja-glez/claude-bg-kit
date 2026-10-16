@@ -15901,7 +15901,7 @@ function decideRound(history, path26) {
   if (!latest) return { round: 0, cap, next: "resume", reason: "no verdict yet", tierUp, last: false };
   if (latest.action === "accept") return { round, cap, next: "done", reason: "accepted", tierUp, last: false };
   const prev = history.at(-2);
-  if (prev && prev.action !== "accept" && latest.signature.startsWith("v2:") && prev.signature === latest.signature) {
+  if (prev && prev.action !== "accept" && !latest.held && !prev.held && latest.signature.startsWith("v2:") && prev.signature === latest.signature) {
     return { round, cap, next: "stalled", reason: "the same blocking findings as the previous review", tierUp, last: false };
   }
   if (round > cap) return { round, cap, next: "breaker", reason: `round ${round} over the cap of ${cap}`, tierUp, last: false };
@@ -15930,7 +15930,7 @@ function roundDecision(events, task, p, profile) {
   verdicts.forEach((e, i) => {
     if (typeof e.dir === "string") lastPerDir.set(e.dir, i);
   });
-  const history = verdicts.filter((e, i) => typeof e.dir !== "string" || lastPerDir.get(e.dir) === i).map((e) => ({ action: e.action, score: typeof e.score === "number" ? e.score : null, signature: String(e.signature ?? "") }));
+  const history = verdicts.filter((e, i) => typeof e.dir !== "string" || lastPerDir.get(e.dir) === i).map((e) => ({ action: e.action, score: typeof e.score === "number" ? e.score : null, signature: String(e.signature ?? ""), ...e.held === true ? { held: true } : {} }));
   const d = decideRound(history, p);
   const base = task.replace(/-\d+$/, "");
   const ofTask2 = (e) => typeof e.task === "string" && (e.task === base || e.task.startsWith(`${base}-`) && /^\d+$/.test(e.task.slice(base.length + 1)));
@@ -15953,7 +15953,8 @@ var RESIDUALS = ["untouched", "hardening", "late-round", "cap", "docs", "out-of-
 var SENT = ["untouched", "docs", "late-round"];
 var isOpen = (f) => f.status === "open" || f.status === "residual";
 var unsent = (f) => f.status === "residual" && !(f.residual && SENT.includes(f.residual));
-var ruledOutOfModel = (f) => f.status === "minor" && f.outOfModel === true && f.reviewer === "security";
+var outOfModelEntry = (f) => f.status === "minor" && f.outOfModel === true;
+var ruledOutOfModel = (f) => outOfModelEntry(f) && f.reviewer === "security";
 var idNumber = (id2) => Number(id2.slice(1));
 var nextId = (rounds) => 1 + Math.max(0, ...rounds.flatMap((r2) => r2.findings.map((f) => idNumber(f.id))));
 var before = (index, round) => index.rounds.filter((r2) => r2.round < round);
@@ -15994,11 +15995,11 @@ function parseIndex(text2, task) {
   const rounds = [];
   for (const r2 of Array.isArray(list) ? list : []) {
     if (!r2 || typeof r2 !== "object") continue;
-    const { round, findings } = r2;
+    const { round, findings, fresh: fresh2 } = r2;
     if (!Number.isInteger(round) || round < 1 || !Array.isArray(findings)) continue;
     const seen = /* @__PURE__ */ new Set();
     const kept = findings.map(entryOf).filter((f) => f !== null && !seen.has(f.id) && !!seen.add(f.id));
-    rounds.push({ round, findings: kept });
+    rounds.push({ round, findings: kept, ...fresh2 === true ? { fresh: true } : {} });
   }
   rounds.sort((a, b) => a.round - b.round);
   return { task, next: nextId(rounds), rounds };
@@ -16011,7 +16012,7 @@ var withoutId = (f) => {
 function assignIds(index, round, reviews, opts = {}) {
   const open = opts.fresh ? [] : (previousOf(index, round)?.findings ?? []).filter((f, i, all) => (isOpen(f) || ruledOutOfModel(f)) && all.findIndex((g) => g.id === f.id) === i);
   const taken = /* @__PURE__ */ new Set();
-  const hinted = /* @__PURE__ */ new Set();
+  const hinted = /* @__PURE__ */ new Map();
   const staged = /* @__PURE__ */ new Map();
   for (const n of REVIEWERS) {
     const r2 = reviews[n];
@@ -16024,12 +16025,19 @@ function assignIds(index, round, reviews, opts = {}) {
         return { ...f, id: e.id, reviewer: e.reviewer };
       }
       const g = withoutId({ ...f, reviewer: n });
-      if (f.id) hinted.add(g);
+      if (f.id) hinted.set(g, f.id);
       return g;
     }));
   }
   for (const [n, list] of staged) {
-    const loose = list.map((f, i) => ({ f, i })).filter((x) => x.f.severity !== "minor" && !x.f.id && (x.f.origin === void 0 || x.f.origin === "previous" || hinted.has(x.f)));
+    list.forEach((f, i) => {
+      const named = hinted.has(f) ? open.find((o) => o.id === hinted.get(f) && o.reviewer === n && !taken.has(o.id)) : void 0;
+      if (named && pairFindings([f], [named])[0] === 0) {
+        list[i] = { ...f, id: named.id };
+        taken.add(named.id);
+      }
+    });
+    const loose = list.map((f, i) => ({ f, i })).filter((x) => x.f.severity !== "minor" && !x.f.id && !hinted.has(x.f) && (x.f.origin === void 0 || x.f.origin === "previous"));
     const free = open.filter((o) => o.reviewer === n && !taken.has(o.id));
     const pairs = pairFindings(loose.map((x) => x.f), free);
     loose.forEach((x, k) => {
@@ -16087,10 +16095,15 @@ function recordRound(index, round, verdict, answered, opts = {}) {
   for (const f of verdict.deferred) add(f, "residual");
   for (const f of verdict.minor) add(f, "minor");
   for (const o of opts.fresh ? [] : previousOf(index, round)?.findings ?? []) {
-    if (seen.has(o.id) || !isOpen(o)) continue;
+    if (seen.has(o.id)) continue;
+    if (outOfModelEntry(o)) {
+      entries.push(o);
+      continue;
+    }
+    if (!isOpen(o)) continue;
     entries.push(answered.includes(o.reviewer) && !unsent(o) ? { ...o, status: "closed" } : o);
   }
-  const rounds = [...index.rounds.filter((r2) => r2.round !== round), { round, findings: entries }].sort((a, b) => a.round - b.round);
+  const rounds = [...index.rounds.filter((r2) => r2.round !== round), { round, findings: entries, ...opts.fresh ? { fresh: true } : {} }].sort((a, b) => a.round - b.round);
   return { task: index.task, next: nextId(rounds), rounds };
 }
 function carriedResiduals(index, round, verdict) {
@@ -16106,6 +16119,22 @@ function carriedResiduals(index, round, verdict) {
     ...f.origin ? { origin: f.origin } : {},
     ...f.regression ? { regression: true } : {},
     ...f.residual ? { residual: f.residual } : {}
+  }));
+}
+function carriedOutOfModel(index, round, verdict) {
+  const seen = judgedIds(verdict);
+  return (previousOf(index, round)?.findings ?? []).filter((f) => outOfModelEntry(f) && !seen.has(f.id)).map((f) => ({
+    id: f.id,
+    reviewer: f.reviewer,
+    severity: "minor",
+    declared: f.severity,
+    ...f.file ? { file: f.file } : {},
+    ...f.line !== void 0 ? { line: f.line } : {},
+    problem: f.problem,
+    ...f.fix ? { fix: f.fix } : {},
+    ...f.origin ? { origin: f.origin } : {},
+    outOfModel: true,
+    residual: "out-of-model"
   }));
 }
 function openIds(index, round) {
@@ -16128,8 +16157,10 @@ function closedFor(index, round, present, answered) {
     id: f.id,
     round: at2
   });
+  const earlier = before(index, round);
+  const from = Math.max(0, earlier.map((r2) => r2.fresh === true).lastIndexOf(true));
   const lastOpen = /* @__PURE__ */ new Map();
-  for (const r2 of before(index, round)) {
+  for (const r2 of earlier.slice(from)) {
     for (const f of r2.findings) {
       if (f.status === "closed") push(f, lastOpen.get(f.id) ?? r2.round);
       else lastOpen.set(f.id, r2.round);
@@ -17089,7 +17120,9 @@ function reviewClose(args, deps) {
     deferred: result.deferred.length,
     reviews: reviewsCount,
     ...result.ask.length ? { ask: result.ask.length } : {},
-    ...express ? { express: true } : {}
+    ...express ? { express: true } : {},
+    // A held review never counts toward stalled (roundDecision): its blocking set is not a re-review result.
+    ...held ? { held: true } : {}
   });
   if (verifyFile !== void 0) {
     const evidence = rel2(deps.cwd, roundDir).replace(/reviews-(\d+-\d+)$/, "evidence/$1");
@@ -17156,7 +17189,11 @@ function reviewClose(args, deps) {
   const headNow = (deps.git(["rev-parse", "HEAD"]) ?? "").trim();
   const revert = d.next === "redo" && planBase && headNow && headNow !== planBase ? { base: planBase, head: headNow, args: ["-C", deps.repoDir, "revert", "--no-edit", `${planBase}..HEAD`] } : null;
   const twins = collectTwins(task, roundDir, plan, deps);
-  const deferred = [...result.deferred, ...result.minor.filter((f) => f.residual === "out-of-model")];
+  const deferred = [
+    ...result.deferred,
+    ...result.minor.filter((f) => f.residual === "out-of-model"),
+    ...result.action === "accept" && !fresh2 ? carriedOutOfModel(index, round, result) : []
+  ];
   return json2({
     action: result.action,
     score: result.score,
