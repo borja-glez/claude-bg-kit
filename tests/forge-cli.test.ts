@@ -2003,3 +2003,21 @@ describe('validate --affected (C-02)', () => {
     expect(s.stderr).toContain('review-prep runs it in full');
   });
 });
+
+describe('forge stats (C-09)', () => {
+  it('prints the clock of the accepted briefs as JSON or as a table, and refuses two windows or a bad one', () => {
+    appendEvent(root, { ts: '2026-10-01T09:00:00.000Z', kind: 'triage', task: 'A', path: 'medium' });
+    appendEvent(root, { ts: '2026-10-01T09:00:00.000Z', kind: 'phase', task: 'A', phase: 'implement', brief: 1 });
+    appendEvent(root, { ts: '2026-10-01T09:10:00.000Z', kind: 'phase', task: 'A', phase: 'review', brief: 1, round: 1 });
+    appendEvent(root, { ts: '2026-10-01T09:15:00.000Z', kind: 'verdict', task: 'A-1', dir: 'd', action: 'accept' });
+    const r = run(['stats', '--json'], io);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ briefs: 1, firstPass: 1, byPath: { medium: { briefs: 1 } }, byBrief: [{ task: 'A-1', totalMs: 15 * 60000 }] });
+    expect(JSON.parse(run(['stats', '--days', '7', '--json'], io).stdout).briefs).toBe(0);
+    expect(JSON.parse(run(['stats', '--since', '2026-09-30', '--json'], io).stdout).briefs).toBe(1);
+    expect(run(['stats', '--locale', 'es'], io).stdout).toContain('| medium | 1 | 15.0 | 10.0 |');
+    for (const bad of [['--days', '7', '--since', '2026-10-01'], ['--days', 'x'], ['--days', '0'], ['--since', 'yesterday'], ['--locale', 'fr']]) {
+      expect(run(['stats', ...bad], io).code).toBe(2);
+    }
+  });
+});

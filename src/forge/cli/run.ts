@@ -29,6 +29,7 @@ import { swarmCommand, restoringRegenerated } from './swarm.js';
 import { reviewCommand } from './review.js';
 import { runWithCache, cacheGit } from '../validate-cache.js';
 import { roundDecision } from '../round.js';
+import { computeStats, renderStats, type PlanStates } from '../stats.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, runOptions, validateEvent, planAffected, type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { checkTools, mcpInventory, toolGaps } from '../tools.js';
 import { verifyPlan, cleanupPids, killTarget, askFor, capLines, relabelDiff, type PlanSurface } from '../verify.js';
@@ -47,7 +48,7 @@ export interface ExecResult { code: number; output: string; ms: number; timedOut
 export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined> }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = 'usage: forge <triage|brief|validate|verdict|round|review-prep|review-close|prep|shadow|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|swarm|stop|hook> ...';
+const USAGE = 'usage: forge <triage|brief|validate|stats|verdict|round|review-prep|review-close|prep|shadow|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|swarm|stop|hook> ...';
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 const MAX_WHY = 200;
@@ -282,6 +283,26 @@ function planTasksFor(cwd: string, planArg: string | undefined): PlanTask[] {
   let projects: string[];
   try { projects = readdirSync(docs); } catch { return []; }
   return projects.flatMap(p => { try { return parsePlan(readFileSync(path.join(docs, p, 'plan.yaml'), 'utf8')).tasks; } catch { return []; } });
+}
+
+/** Each docs/waypoint/<p>/plan.yaml of `main` with its roadmap states cached in .waypoint/<p>/dbcache/state (FORGE stats).
+ *  An unreadable plan is skipped; a corrupt state doc counts as none. */
+function planStates(main: string): PlanStates[] {
+  const docs = path.join(main, 'docs', 'waypoint');
+  let projects: string[];
+  try { projects = readdirSync(docs); } catch { return []; }
+  const out: PlanStates[] = [];
+  for (const p of projects) {
+    let tasks: PlanTask[];
+    try { tasks = parsePlan(readFileSync(path.join(docs, p, 'plan.yaml'), 'utf8')).tasks; } catch { continue; }
+    const dir = path.join(main, '.waypoint', p, 'dbcache', 'state');
+    const states: Record<string, unknown> = {};
+    let names: string[] = [];
+    try { names = readdirSync(dir).filter(f => f.endsWith('.json')); } catch { names = []; }
+    for (const f of names) { try { states[f.slice(0, -5)] = JSON.parse(readFileSync(path.join(dir, f), 'utf8')); } catch { /* skipped */ } }
+    out.push({ project: p, tasks, states });
+  }
+  return out;
 }
 
 /**
@@ -1445,6 +1466,26 @@ export function run(argv: string[], io: Io): Result {
           return json({ written: true, scope, count: list.length, path: out });
         }
         throw new UsageError('usage: forge decision add --data-file f [--task id] | list [--task id] [--run id] [--since iso] [--all] [--auto] | show <n> | md --scope s [--out f] [--locale es|en]');
+      }
+      case 'stats': {
+        // C-09: the clock of the accepted briefs of the main checkout's ledger (where every worktree's forge writes).
+        if (has('days') && has('since')) throw new UsageError('stats: use --days or --since, not both');
+        let from: number | null = null;
+        if (has('days')) {
+          const d = Number(flag('days'));
+          if (!Number.isInteger(d) || d < 1 || d > 3650) throw new UsageError('stats: --days must be a whole number of days from 1 to 3650');
+          from = io.now().getTime() - d * 86400000;
+        }
+        if (has('since')) {
+          const t = Date.parse(flag('since') ?? '');
+          if (Number.isNaN(t)) throw new UsageError('stats: --since must be an ISO date');
+          from = t;
+        }
+        const locale = flag('locale') ?? 'en';
+        if (locale !== 'es' && locale !== 'en') throw new UsageError('stats: --locale must be es or en');
+        const main = mainCheckout(io.cwd);
+        const s = computeStats({ events: readEvents(main), plans: planStates(main), from });
+        return has('json') ? json(s) : ok(renderStats(s, locale));
       }
       case 'last': {
         const task = flag('task');
