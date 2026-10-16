@@ -14354,6 +14354,8 @@ function leftSeatOf(seats, open, now, alive = pidAlive) {
   }
   return best;
 }
+var RECORDED_MAX = 20;
+var RECORDED_TOPS = 10;
 function headOf(cwd) {
   try {
     const [top, head] = (0, import_node_child_process.execFileSync)("git", ["-C", cwd, "rev-parse", "--show-toplevel", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).split(/\r?\n/).map((l3) => l3.trim());
@@ -14370,21 +14372,30 @@ function readLastHead(seatDir) {
     if (!o || !isSafeId(o.session) || !o.heads || typeof o.heads !== "object" || Array.isArray(o.heads)) return null;
     const heads = {};
     for (const [k2, v] of Object.entries(o.heads).slice(-HEADS_MAX)) if (typeof v === "string" && SHA.test(v)) heads[k2] = v;
-    return { session: o.session, heads };
+    const recorded = {};
+    if (o.recorded && typeof o.recorded === "object" && !Array.isArray(o.recorded)) {
+      for (const [k2, v] of Object.entries(o.recorded).slice(-RECORDED_TOPS)) {
+        if (Array.isArray(v)) recorded[k2] = v.filter((s) => typeof s === "string" && SHA.test(s)).slice(-RECORDED_MAX);
+      }
+    }
+    return { session: o.session, heads, recorded };
   } catch {
     return null;
   }
 }
 function writeLastHead(seatDir, doc) {
-  writeAtomic(lastHeadFile(seatDir), `${JSON.stringify({ session: doc.session, heads: Object.fromEntries(Object.entries(doc.heads).slice(-HEADS_MAX)) })}
+  const recorded = Object.fromEntries(Object.entries(doc.recorded ?? {}).filter(([, v]) => v.length).slice(-RECORDED_TOPS).map(([k2, v]) => [k2, v.slice(-RECORDED_MAX)]));
+  const out = { session: doc.session, heads: Object.fromEntries(Object.entries(doc.heads).slice(-HEADS_MAX)), ...Object.keys(recorded).length ? { recorded } : {} };
+  writeAtomic(lastHeadFile(seatDir), `${JSON.stringify(out)}
 `);
 }
 function recordBase(seatDir, session, cwd) {
   const at2 = headOf(cwd);
   if (!at2) return;
   const lh = readLastHead(seatDir);
-  const heads = lh && lh.session === session ? lh.heads : {};
-  if (heads[at2.top] !== at2.head) writeLastHead(seatDir, { session, heads: { ...heads, [at2.top]: at2.head } });
+  const mine = lh && lh.session === session ? lh : null;
+  const heads = mine?.heads ?? {};
+  if (heads[at2.top] !== at2.head) writeLastHead(seatDir, { session, heads: { ...heads, [at2.top]: at2.head }, recorded: mine?.recorded });
 }
 
 // src/mod/model.ts
@@ -14642,19 +14653,26 @@ function sessionEnd(root, sid, reason, now) {
 function boundAnywhere(root, sid) {
   return projectDirs(root).some((n) => readSeats(import_node_path5.default.join(root, ".waypoint", n)).some((s) => s.bound?.claude === sid));
 }
-function sharedBases(ctx, own, top, head) {
-  let shared = false;
-  const out = [];
+function othersOn(ctx, own, top, head) {
+  let live = false;
+  const seen = /* @__PURE__ */ new Set();
   for (const s of ctx.seats) {
     const b = s.bound;
-    if (s === own || !b || b.claude === ctx.sid || !bindingLive(b, ctx.now)) continue;
+    if (s === own || !b || b.claude === ctx.sid) continue;
     const lh = readLastHead(s.dir);
-    const base = lh && lh.session === b.claude ? lh.heads[top] : void 0;
-    if (!base) continue;
-    shared = true;
-    if (base !== head || lines(import_node_path5.default.join(s.dir, "pending-commits.jsonl")).some((l3) => field(l3, "sha") === head)) out.push(base);
+    if (!lh || lh.session !== b.claude) continue;
+    const base = lh.heads[top];
+    const recorded = lh.recorded?.[top] ?? [];
+    if (base && bindingLive(b, ctx.now)) live = true;
+    for (const r2 of recorded) seen.add(r2);
+    if (base && (base !== head || recorded.includes(head))) seen.add(base);
   }
-  return shared ? out : null;
+  return { live, seen };
+}
+function ownShare(range, seen) {
+  const k2 = range.reduce((at2, s, i) => seen.has(s) ? i : at2, -1);
+  if (k2 < 0) return range;
+  return k2 < range.length - 1 ? range.slice(k2 + 1) : range.filter((s) => !seen.has(s));
 }
 function postCommit(io, input) {
   const ctx = contextOf(io, input);
@@ -14665,10 +14683,14 @@ function postCommit(io, input) {
   const at2 = headOf(nonEmpty(input.cwd) ?? ctx.root);
   if (!at2) return "";
   const lh = readLastHead(own.seat.dir);
-  const heads = lh && lh.session === sid ? lh.heads : {};
+  const mine = lh && lh.session === sid ? lh : null;
+  const heads = mine?.heads ?? {};
+  const recorded = mine?.recorded ?? {};
   const last = heads[at2.top];
+  let newest2 = null;
   const save = () => {
-    if (last !== at2.head) writeLastHead(own.seat.dir, { session: sid, heads: { ...heads, [at2.top]: at2.head } });
+    if (last === at2.head && !newest2) return;
+    writeLastHead(own.seat.dir, { session: sid, heads: { ...heads, [at2.top]: at2.head }, recorded: newest2 ? { ...recorded, [at2.top]: [...recorded[at2.top] ?? [], newest2] } : recorded });
   };
   const task = ctx.viewer.task;
   if (!task) {
@@ -14687,9 +14709,10 @@ function postCommit(io, input) {
   let shas = [];
   if (!last) shas = isCommitCommand(cmd) ? [at2.head] : [];
   else if (last !== at2.head) {
-    const shared = sharedBases(ctx, own.seat, at2.top, at2.head);
-    if (shared === null || makesCommits(cmd)) {
-      shas = (git(["rev-list", "--first-parent", "--reverse", `--max-count=${MAX_COMMITS}`, `${last}..${at2.head}`, ...(shared ?? []).map((b) => `^${b}`)]) ?? "").split(/\r?\n/).map((s) => s.trim()).filter((s) => SHA2.test(s));
+    const others = othersOn(ctx, own.seat, at2.top, at2.head);
+    if (!others.live || makesCommits(cmd)) {
+      const range = (git(["rev-list", "--first-parent", "--reverse", `--max-count=${MAX_COMMITS}`, `${last}..${at2.head}`]) ?? "").split(/\r?\n/).map((s) => s.trim()).filter((s) => SHA2.test(s));
+      shas = ownShare(range, others.seen);
     }
     if (git(["merge-base", "--is-ancestor", last, at2.head]) === null) {
       const all = lines(file);
@@ -14706,9 +14729,12 @@ function postCommit(io, input) {
   }
   const have = new Set(lines(file).map((l3) => field(l3, "sha")));
   const ts = io.now().toISOString();
-  const add = shas.filter((s) => !have.has(s)).map((sha) => `${JSON.stringify({ ts, task, sha, command: cmd.slice(0, 200), session: sid, seat: own.bound.sid })}
-`);
-  if (add.length) (0, import_node_fs4.appendFileSync)(file, add.join(""));
+  const fresh = shas.filter((s) => !have.has(s));
+  if (fresh.length) {
+    (0, import_node_fs4.appendFileSync)(file, fresh.map((sha) => `${JSON.stringify({ ts, task, sha, command: cmd.slice(0, 200), session: sid, seat: own.bound.sid })}
+`).join(""));
+    newest2 = fresh[fresh.length - 1];
+  }
   save();
   return "";
 }
@@ -15395,10 +15421,13 @@ function run(argv, io) {
         const own = checkoutSid(wp, t);
         const resume = args.includes("--resume");
         const takeover = args.includes("--takeover");
-        const left = leftSeatOf(readSeats(wp, t), open, t);
+        const seats = readSeats(wp, t);
+        const left = leftSeatOf(seats, open, t);
+        const working = seats.find((s) => s.bound?.claude === claude && boundLive(s.bound, t) && !!open[s.sid]);
+        const picked = resume ? working ?? left : void 0;
         let sid;
         if (seatFlag !== void 0) sid = seatFlag;
-        else if (resume && left) sid = left.sid;
+        else if (picked) sid = picked.sid;
         else if (second) sid = secondSeatOf(wp, claude, open, t);
         else sid = own ?? sessionIdFrom(track ?? "main");
         if (sid === null) return fail(`bind: every extra seat (main-2 to main-${MAX_SEATS + 1}) is held by a live conversation`, 2);
@@ -15406,7 +15435,7 @@ function run(argv, io) {
           const fix = seatFlag !== void 0 ? "pick another --seat" : own !== null ? `fix the sessionId of ${rel(import_node_path7.default.join(wp, "session.json"))}` : "pick another --track";
           return fail(`bind: the seat id ${JSON.stringify(sid.slice(0, 130))} names a folder: only letters, digits, _ . - and no leading - (${fix})`, 2);
         }
-        const seatDir = left && sid === left.sid ? left.dir : second || own !== null && own !== sid ? import_node_path7.default.join(seatsDir(wp), sid) : wp;
+        const seatDir = picked && sid === picked.sid ? picked.dir : second || own !== null && own !== sid ? import_node_path7.default.join(seatsDir(wp), sid) : wp;
         const cur = readBinding(seatDir, sid, t);
         const task = open[sid] ?? null;
         const options = ["worktree", "second-seat", "takeover"];
