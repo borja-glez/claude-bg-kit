@@ -1,6 +1,6 @@
 ---
 name: run
-description: Do a software task with the forge method - triage by size, the right model per step, tool-first validation and weighted independent review; the Large path coordinates an execution of subagents or background sessions on a run branch (--parallel N, default 3), and independent requests in one message or independent Medium briefs run in parallel as an ephemeral execution. Use for any coding task the user asks to "forge", or /forge:run <task> [--parallel N]; `--from-spec <spec>` starts Large from a superpowers spec, `--superpowers-plan <plan>` runs a superpowers plan; `--auto` (or `autonomy: auto`) asks only at launch and records its decisions; /forge:run --join joins a running execution as a manual member.
+description: Do a software task with the forge method - triage by size, the right model per step, tool-first validation and weighted independent review; the Large path coordinates an execution of subagents or background sessions on a run branch (--parallel N, default 3), and independent requests in one message or independent Medium briefs run in parallel as an ephemeral execution. Use for any coding task the user asks to "forge", or /forge:run <task> [--parallel N]; `--from-spec <spec>` starts Large from a superpowers spec, `--superpowers-plan <plan>` runs a superpowers plan; `--auto` (or `autonomy: auto`) asks only at launch and records its decisions; /forge:run --execute <project> starts a prepared execution; /forge:run --join joins a running execution as a manual member.
 ---
 
 # forge: run a task
@@ -35,6 +35,8 @@ A decision you take in place of the user because nobody is there to ask (unatten
 forge asks at its gates unless autonomy is `auto`: `FORGE prefs` resolves `autonomy: auto`, `/forge:run --auto`, or the request says so ("en automático", "sin preguntarme", "modo auto"). In auto it asks only at launch, takes the safe paths of `### Unattended` (`references/execution.md`) and records every decision it takes alone; it never merges into the default branch without the launch answer, pushes, deletes branches or files, or touches changes that are not the task's. When autonomy is `auto`, read `references/autonomy.md` now and follow it (what auto decides alone, the launch questions, the design loop).
 
 ## 1. Triage
+
+`--execute <project>`: no triage, go to `## Execution`.
 
 1. **Run it.** Write the task text to `.forge/work/<id>/task.txt` and run `FORGE triage --task <id> --text-file .forge/work/<id>/task.txt --locale <es|en>` (the person's language: `es` for Spanish, else `en`). It returns `path`, `files`, `sensitive`, `greenfield`, `validators`, `reasons`, `new` (validators seen for the first time, commands in `catalog`), `implementer` (who implements: `role`, `agent`, `self`, `why`), `announce`, `gate` and, while `.forge/.gitignore` is not in git, `untracked`. Pass `--batch` when the task is one request of several in the message (`references/ephemeral.md`).
 2. **Raise when needed.** Add your own judgement of ambiguity and risk: you may raise the path, never lower it below the CLI's. The CLI only counts files and words, so read the code the task touches and **raise to at least Medium** when the task:
@@ -101,7 +103,7 @@ Read `references/large.md` now and follow it (subsystem, architecture, much ambi
 
 ## Execution
 
-Read `references/execution.md` now and follow it when this session coordinates the execution of a plan's tasks (`references/large.md` step 3, mode `subagents` or `sessions`, N at once, on `forge/run-<project>`): the start, the tick loop, integration, publishing, the end, requests during an execution and Unattended. A task's steps are in `references/task-steps.md`. `/forge:run --execute <project>` (a clean session, after `/clear`) starts the execution `references/large.md` step 3 prepared: `references/execution.md` step 1.
+Read `references/execution.md` now and follow it when this session coordinates the execution of a plan's tasks (`references/large.md` step 3, mode `subagents` or `sessions`, N at once, on `forge/run-<project>`): the start, the tick loop, integration, publishing, the end, requests during an execution and Unattended. A task's steps are in `references/task-steps.md`. `--execute <project>` (after `/clear`, from `references/large.md` step 3): `references/execution.md` step 1.
 
 **Run members.** A session launched for one task of the execution (mode `sessions`) runs it with forge:member, never with this skill.
 

@@ -1207,6 +1207,16 @@ describe('plugin layout', () => {
     expect(runRef('step')).toContain('attended, ask the person whether to stop the run');
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) expect(read(f), f).toContain('[--why-file f]');
   });
+  it('the step\'s fallback runs in the foreground, a twin is collected, launch.json outlives a failed start and --execute skips triage (W1c final fix wave, group E)', () => {
+    const step = runRef('step').split('\n');
+    const read2 = step.find(l => l.startsWith('2. **Read**'))!;
+    for (const w of ['timeout: 600000', 'not active', 'Execution step 7']) expect(read2, w).toContain(w);
+    expect(step.find(l => l.includes('`twin: true`'))).toContain('FORGE shadow collect --task');
+    expect(runRef('execution').split('\n').find(l => l.startsWith('1. **Start (once).**'))).toContain('printed its `runId`');
+    const run = read('plugins/forge/skills/run/SKILL.md').replace(/\r\n/g, '\n');
+    expect(run.split('\n').find(l => l.startsWith('description:'))).toContain('/forge:run --execute <project>');
+    expect(run.slice(run.indexOf('## 1. Triage'), run.indexOf('1. **Run it.**'))).toContain('`--execute <project>`');
+  });
   it('READMEs describe wave 1c: swarm step, background jobs and the lock, a clean session, verify-close, setup, the routing probe and delicate', () => {
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
       const md = read(f);
