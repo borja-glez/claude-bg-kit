@@ -42,7 +42,8 @@ describe('forge config', () => {
     expect(parseConfig('threatModel:\n  protects: ["files outside the repo"]\n  untrusted: ["web pages"]\n').threatModel)
       .toEqual({ protects: ['files outside the repo'], trusted: [], untrusted: ['web pages'], outOfScope: [] });
     expect(parseConfig('threatModel:\n  protects: [a]\n  notes: a local tool\n').threatModel?.notes).toBe('a local tool');
-    for (const bad of ['threatModel:\n  protects: []\n', `threatModel:\n  protects: ["${'x'.repeat(201)}"]\n`, 'threatModel:\n  trusted: [a]\n',
+    // Only outOfScope (what a skill would add to a config without a threatModel) is not a threat model: protects is required.
+    for (const bad of ['threatModel:\n  outOfScope: ["Windows 8.3 short names"]\n', 'threatModel:\n  protects: []\n', `threatModel:\n  protects: ["${'x'.repeat(201)}"]\n`, 'threatModel:\n  trusted: [a]\n',
       'threatModel:\n  protects: [a]\n  owner: me\n', `threatModel:\n  protects: [a]\n  notes: "${'n'.repeat(1001)}"\n`,
       `threatModel:\n  protects: [a]\n  outOfScope: [${Array.from({ length: 21 }, (_, i) => `o${i}`).join(', ')}]\n`]) {
       expect(() => parseConfig(bad), bad).toThrow(ConfigError);
@@ -169,6 +170,15 @@ describe('forge config get', () => {
     writeConfig('evidence: local\n');
     expect(run(['config', 'get', 'nope'], io).code).toBe(2);
     expect(run(['config', 'get'], io).code).toBe(2);
+  });
+  it('config get threatModel is the check after editing it: exit 2 without protects, the section as JSON with it (I5)', () => {
+    writeConfig('threatModel:\n  outOfScope: ["Windows 8.3 short names"]\n');
+    const r = run(['config', 'get', 'threatModel'], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('protects');
+    writeConfig('threatModel:\n  protects: ["the person\'s files and git history outside the task\'s worktree"]\n  outOfScope: ["Windows 8.3 short names"]\n');
+    expect(JSON.parse(run(['config', 'get', 'threatModel'], io).stdout)).toEqual({
+      protects: ["the person's files and git history outside the task's worktree"], trusted: [], untrusted: [], outOfScope: ['Windows 8.3 short names'] });
   });
   it('--cwd into a worktree still reads the config of the main checkout', () => {
     git('init', '-q', '-b', 'main');

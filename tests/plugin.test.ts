@@ -1087,6 +1087,10 @@ describe('plugin layout', () => {
     expect(steps).not.toContain('unless a `redo` starts a new brief');
     for (const w of ['`revert.args`', 'FORGE shadow collect --task', '`handover`', 'NEEDS_CONTEXT', '`threatModel`', '`validators.cmd`']) expect(steps, w).toContain(w);
   });
+  it('convergence.md: a theme added to threatModel.outOfScope also needs protects without a threatModel, and the config is checked after the edit (I5)', () => {
+    const line = runRef('convergence').split(/\r?\n/).find(l => l.includes('threatModel.outOfScope'));
+    for (const w of ['`protects`', 'FORGE config get threatModel']) expect(line, w).toContain(w);
+  });
   it('forge READMEs describe the convergence of wave 1b: reviews, ids, residuals, the express review, the threat model, the handover and shadow collect', () => {
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
       const md = read(f);
