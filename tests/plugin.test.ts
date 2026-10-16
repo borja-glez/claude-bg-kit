@@ -520,7 +520,12 @@ describe('plugin layout', () => {
     for (const a of ['forge-impl-heavy', 'forge-impl-high', 'forge-impl', 'forge-impl-light', 'forge-mech', 'forge-fable']) {
       const md = read(`plugins/forge/agents/${a}.md`);
       expect(md).toContain('.txt');
-      expect(md).toMatch(/also (put|include) the report in your reply/i);
+      // J-10: the report goes in the reply only when writing its file failed, after the marker.
+      expect(md).not.toMatch(/also (put|include) the report in your reply/i);
+      const inReply = md.split(/\r?\n/).filter(l => l.includes('report in your reply'));
+      expect(inReply, a).toHaveLength(1);
+      expect(inReply[0].startsWith('5. '), a).toBe(true);
+      expect(inReply[0], a).toContain('`--- report ---`');
       expect(md).toContain('Commit title prefix');
     }
     expect(read('plugins/forge/agents/forge-review-final.md')).toMatch(/final review/i);
@@ -1025,6 +1030,19 @@ describe('plugin layout', () => {
       for (const cmd of ['- `validate ', '- `prep --task', '- `review-prep --task', '- `swarm integrate ']) {
         expect(lines.find(l => l.startsWith(cmd))?.split('` - ')[0], `${f}: ${cmd}`).toContain('[--no-cache]');
       }
+    }
+  });
+  it('implementers: the same Fix round section in all six, the failing test first only under TDD: required, a reply of two lines (J-07, J-10, J-18, K4-03)', () => {
+    const impls = ['forge-impl-heavy', 'forge-impl-high', 'forge-impl', 'forge-impl-light', 'forge-mech', 'forge-fable'];
+    const text = (a: string) => read(`plugins/forge/agents/${a}.md`).replace(/\r\n/g, '\n');
+    const fixRound = (a: string) => text(a).slice(text(a).indexOf('\n## Fix round\n'));
+    for (const a of impls) {
+      expect(text(a), a).toContain('\n## Fix round\n');
+      expect(fixRound(a), a).toBe(fixRound('forge-impl'));
+      for (const w of ['NEEDS_CONTEXT', '"residual"', '`<id>: fixed in <file>:<line>`', 'handover']) expect(fixRound(a), `${a}: ${w}`).toContain(w);
+      const lines = text(a).split('\n');
+      for (const l of lines.filter(x => /failing test first/i.test(x))) expect(l, a).toContain('`TDD: required`');
+      expect(lines.find(l => l.startsWith('6. ')), a).toContain('`<status> <commit SHA>`');
     }
   });
 });
