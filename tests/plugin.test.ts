@@ -1087,6 +1087,12 @@ describe('plugin layout', () => {
     expect(steps).not.toContain('unless a `redo` starts a new brief');
     for (const w of ['`revert.args`', 'FORGE shadow collect --task', '`handover`', 'NEEDS_CONTEXT', '`threatModel`', '`validators.cmd`']) expect(steps, w).toContain(w);
   });
+  it('forge:run Medium: every step starts its own line, 0 to 7 in order (I6)', () => {
+    const run = read('plugins/forge/skills/run/SKILL.md').replace(/\r\n/g, '\n');
+    const medium = run.slice(run.indexOf('\n## Medium'), run.indexOf('### Superpowers plan'));
+    expect(medium).toMatch(/^5\. Each time a reviewer finishes/m);
+    expect(medium.match(/^\d+b?\. /gm)).toEqual(['0. ', '1. ', '2. ', '3. ', '3b. ', '4. ', '5. ', '6. ', '7. ']);
+  });
   it('convergence.md: a theme added to threatModel.outOfScope also needs protects without a threatModel, and the config is checked after the edit (I5)', () => {
     const line = runRef('convergence').split(/\r?\n/).find(l => l.includes('threatModel.outOfScope'));
     for (const w of ['`protects`', 'FORGE config get threatModel']) expect(line, w).toContain(w);
