@@ -10727,7 +10727,7 @@ var statusOf = (states, id2) => states[id2]?.status ?? "free";
 // src/lib/coordination.ts
 var SILENT_MINUTES = 5;
 function liveness(now, leaseUntil) {
-  const until = typeof leaseUntil === "string" ? Date.parse(leaseUntil) : NaN;
+  const until = typeof leaseUntil === "number" ? leaseUntil : typeof leaseUntil === "string" ? Date.parse(leaseUntil) : NaN;
   if (!Number.isFinite(until)) return "stopped";
   if (now < until) return "alive";
   return now - until < SILENT_MINUTES * 6e4 ? "silent" : "stopped";
@@ -10764,6 +10764,15 @@ var FUTURE_TOLERANCE_MS = 2 * 6e4;
 var AGENT_ALIVE_MS = 3 * 36e5;
 var STALE_RUN_TTL_MS = 24 * 36e5;
 var lastMovedAt = (e) => e.lastStepAt ?? e.startedAt;
+var VISIBLE_STOPS = ["stalled", "stopped", "budget", "finished"];
+function isVisibleRun(e, now, role) {
+  if (!e || e.closedAt) return false;
+  if (e.active) return true;
+  if (!e.stopReason || !VISIBLE_STOPS.includes(e.stopReason)) return false;
+  if (role === "owner") return true;
+  const moved = usable(lastMovedAt(e), now);
+  return moved !== null && now < moved + STALE_RUN_TTL_MS;
+}
 function usable(ts, now) {
   const t = ts ? Date.parse(ts) : NaN;
   return Number.isFinite(t) && t - now <= FUTURE_TOLERANCE_MS ? t : null;
@@ -10776,12 +10785,7 @@ function signalLiveness(ts, ended, now) {
 }
 function executionView(i) {
   const e = i.exec;
-  if (!e || e.closedAt) return null;
-  if (!e.active) {
-    if (e.stopReason !== "stalled") return null;
-    const moved = usable(lastMovedAt(e), i.now);
-    if (moved === null || i.now - moved > STALE_RUN_TTL_MS) return null;
-  }
+  if (!e || !isVisibleRun(e, i.now, i.role ?? "none")) return null;
   const fresh = (d) => {
     const t = usable(d.ts, i.now);
     return t !== null && i.now - t < LIVE_MAX_AGE_HOURS * 36e5;
@@ -11940,7 +11944,7 @@ var MetaSchema = external_exports.object({
   summary: external_exports.string().min(1),
   pillars: external_exports.array(external_exports.object({ title: external_exports.string().min(1), text: external_exports.string().min(1) })).max(8).default([]),
   start_prompt: external_exports.string().min(1).default("/waypoint:work <track>"),
-  status: external_exports.enum(["draft", "approved"]).default("draft"),
+  status: external_exports.enum(["draft", "approved", "parked"]).default("draft"),
   artifact: external_exports.string().url().optional(),
   source: external_exports.string().min(1).max(300).optional()
 });
@@ -12073,11 +12077,23 @@ function parsed(rows) {
   }
   return out;
 }
-function pickProject(entries) {
-  const withSession = entries.filter((e) => e.hasSession);
-  const pool = withSession.length ? withSession : entries;
-  if (!pool.length) return null;
-  return [...pool].sort((a, b) => b.mtimeMs - a.mtimeMs)[0].name;
+function pickProject(entries, sessionId2) {
+  if (!entries.length) return null;
+  const time = (s) => {
+    const t = s ? Date.parse(s) : NaN;
+    return Number.isFinite(t) ? t : -Infinity;
+  };
+  const at = (b) => Math.max(time(b.seenAt), time(b.endedAt));
+  const activity2 = (e) => Math.max(e.mtimeMs, ...e.bindings.map(at));
+  const ownAt = (e) => Math.max(-Infinity, ...e.bindings.filter((b) => b.claude === sessionId2).map(at));
+  const own = sessionId2 ? entries.filter((e) => ownAt(e) > -Infinity) : [];
+  const score = (e) => own.length ? [ownAt(e), activity2(e)] : [activity2(e)];
+  const better = (a, b) => {
+    const sa = score(a), sb = score(b);
+    for (let i = 0; i < sa.length; i++) if (sa[i] !== sb[i]) return sb[i] > sa[i] ? 1 : -1;
+    return 0;
+  };
+  return [...own.length ? own : entries].sort(better)[0].name;
 }
 function buildBandModel(project, f) {
   try {
@@ -12178,6 +12194,7 @@ function memberRun(project, sid, f) {
 function runModel(project, f) {
   const exec = parseExecution(f.execution);
   if (!exec || exec.kind !== "ephemeral" && exec.project !== project) return null;
+  if (!exec.active && exec.stopReason !== "stalled") return null;
   const tasks = {};
   for (const [id2, t] of Object.entries(f.execTasks ?? {})) {
     const p = normalizePublicTask(json(t));
@@ -12298,8 +12315,7 @@ async function projectEntries($, root) {
   for (const d of dirs) {
     const times = [await mtime($, join(docs, d.name, "plan.yaml")), await mtime($, join(docs, d.name, "design.md"))].filter((t) => t !== null);
     if (!times.length) continue;
-    const hasSession = await $.fs.exists(join(root, ".waypoint", d.name, "session.json")).catch(() => false);
-    entries.push({ name: d.name, hasSession, mtimeMs: Math.max(...times) });
+    entries.push({ name: d.name, bindings: [], mtimeMs: Math.max(...times) });
   }
   return entries;
 }
@@ -12341,7 +12357,7 @@ async function loadForge($, root) {
 }
 async function loadBandModel($) {
   const root = await $.session.root();
-  const project = pickProject(await projectEntries($, root));
+  const project = pickProject(await projectEntries($, root), null);
   if (!project) return { mode: "none" };
   const pdocs = join(root, "docs", "waypoint", project);
   const pstate = join(root, ".waypoint", project);
