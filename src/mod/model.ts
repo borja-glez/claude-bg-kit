@@ -147,10 +147,11 @@ function memberRun(project: string, sid: string, f: BandFiles): { coordinator: s
 }
 
 // This project's plan execution, or forge's ephemeral one of this checkout (its project is always `loose`).
-// One that is no longer active draws nothing unless it stalled, as executionView decides.
+// Until the band knows the role of who looks (wave 2b), of the runs that ended it draws only a stalled one.
 function runModel(project: string, f: BandFiles): BandModel | null {
   const exec = parseExecution(f.execution);
   if (!exec || (exec.kind !== 'ephemeral' && exec.project !== project)) return null;
+  if (!exec.active && exec.stopReason !== 'stalled') return null;
   const tasks: Record<string, PublicTask> = {};
   for (const [id, t] of Object.entries(f.execTasks ?? {})) { const p = normalizePublicTask(json(t)); if (p && p.task === id) tasks[id] = p; }
   const live = Object.values(f.live ?? {}).map(t => normalizeLive(json(t))).filter((d): d is LiveDoc => d !== null);

@@ -1,5 +1,6 @@
 import { liveness, type Liveness } from './coordination.js';
-import { LIVE_MAX_AGE_HOURS, LIVE_SILENT_MINUTES, LIVE_STOPPED_MINUTES, type ExecutionState, type LiveDoc, type PublicTask } from './execution-state.js';
+import { LIVE_MAX_AGE_HOURS, LIVE_SILENT_MINUTES, LIVE_STOPPED_MINUTES, type ExecStopReason, type ExecutionState, type LiveDoc, type PublicTask } from './execution-state.js';
+import type { ViewerRole } from './viewer-role.js';
 import type { Stage } from './types.js';
 
 export interface ExecSlot { task: string; title: string | null; stage: Stage; agent: string | null; round: number; since: string; liveness: Liveness; mode: 'subagents' | 'sessions' | 'manual'; by: string | null; startedAt: string | null }
@@ -25,6 +26,24 @@ export const STALE_RUN_TTL_MS = 24 * 3600_000;
 /** C2: the last movement: the last step, else the start. */
 export const lastMovedAt = (e: ExecutionState): string => e.lastStepAt ?? e.startedAt;
 
+/** C2: the stop reasons of an ended run that is still drawn until it is closed (a merge closes a finished one). */
+export const VISIBLE_STOPS: readonly ExecStopReason[] = ['stalled', 'stopped', 'budget', 'finished'];
+
+/**
+ * C2, the one visibility rule of an execution: a closed run is drawn nowhere and an active one for everyone. An ended
+ * one is drawn only for a reason of VISIBLE_STOPS: for its owner (the coordinator or a member of its run) until it is
+ * closed, without a time limit; for anyone else while less than STALE_RUN_TTL_MS passed since its last movement, and an
+ * unreadable date draws nothing.
+ */
+export function isVisibleRun(e: ExecutionState | null, now: number, role: ViewerRole): boolean {
+  if (!e || e.closedAt) return false;
+  if (e.active) return true;
+  if (!e.stopReason || !VISIBLE_STOPS.includes(e.stopReason)) return false;
+  if (role === 'owner') return true;
+  const moved = usable(lastMovedAt(e), now);
+  return moved !== null && now < moved + STALE_RUN_TTL_MS;
+}
+
 /** The time in ms of a usable timestamp, or null: unparseable, or more than FUTURE_TOLERANCE_MS ahead of now. */
 function usable(ts: string | null | undefined, now: number): number | null {
   const t = ts ? Date.parse(ts) : NaN;
@@ -39,16 +58,10 @@ export function signalLiveness(ts: string | null, ended: boolean, now: number): 
   return age < LIVE_SILENT_MINUTES * 60000 ? 'alive' : age < LIVE_STOPPED_MINUTES * 60000 ? 'silent' : 'stopped';
 }
 
-export function executionView(i: { exec: ExecutionState | null; tasks: Record<string, PublicTask>; live: LiveDoc[]; titles?: Record<string, string>; now: number }): ExecView | null {
+export function executionView(i: { exec: ExecutionState | null; tasks: Record<string, PublicTask>; live: LiveDoc[]; titles?: Record<string, string>; now: number; role?: ViewerRole }): ExecView | null {
   const e = i.exec;
-  // C2: a closed execution is drawn nowhere. An ended one is drawn only when it stalled (wave 2 adds the other
-  // reasons, by role), and at most STALE_RUN_TTL_MS after its last movement, with its clock stopped there.
-  if (!e || e.closedAt) return null;
-  if (!e.active) {
-    if (e.stopReason !== 'stalled') return null;
-    const moved = usable(lastMovedAt(e), i.now);
-    if (moved === null || i.now - moved > STALE_RUN_TTL_MS) return null;
-  }
+  // C2: one rule, isVisibleRun. Without a role the reader is not the run's owner: the 24-hour limit applies.
+  if (!e || !isVisibleRun(e, i.now, i.role ?? 'none')) return null;
   const fresh = (d: LiveDoc) => {
     const t = usable(d.ts, i.now);
     return t !== null && i.now - t < LIVE_MAX_AGE_HOURS * 3600000;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { executionView, signalLiveness, STALE_RUN_TTL_MS, lastMovedAt } from '../src/lib/execution-view.js';
+import { executionView, isVisibleRun, signalLiveness, STALE_RUN_TTL_MS, lastMovedAt } from '../src/lib/execution-view.js';
 import type { ExecutionState, PublicTask, LiveDoc } from '../src/lib/execution-state.js';
 
 const NOW = Date.parse('2026-10-12T12:00:00.000Z');
@@ -84,7 +84,7 @@ describe('executionView', () => {
   });
   it('null without an execution or for a finished one; a stalled one stays to say why', () => {
     expect(executionView({ exec: null, tasks: {}, live: [], now: NOW })).toBeNull();
-    expect(executionView({ exec: exec({ active: false, stopReason: 'finished' }), tasks: {}, live: [], now: NOW })).toBeNull();
+    expect(executionView({ exec: exec({ active: false, stopReason: 'migrated' }), tasks: {}, live: [], now: NOW })).toBeNull();
     expect(executionView({ exec: exec({ active: false, stopReason: 'stalled', stallReason: 'blocked: T1' }), tasks: {}, live: [], now: NOW })).toMatchObject({ active: false, stallReason: 'blocked: T1', coordinator: { liveness: 'stopped' } });
   });
   it('a coordinator waiting on a long agent stays alive, and so does the slot of an agent task', () => {
@@ -202,5 +202,35 @@ describe('executionView lifecycle (C2)', () => {
   });
   it('a stalled run whose last step is a minute ahead of the reader (clock skew) is still drawn', () => {
     expect(view(stalled({ lastStepAt: at(1) }))).toMatchObject({ frozenAt: at(1) });
+  });
+});
+
+describe('isVisibleRun (C2, B-07, K5-02)', () => {
+  const ended = (stopReason: ExecutionState['stopReason'], over: Partial<ExecutionState> = {}) => exec({ active: false, stopReason, lastStepAt: at(-60), ...over });
+  it('an active run is drawn for anyone, an ended one only for a listed reason, a closed one for nobody', () => {
+    for (const role of ['owner', 'other-live', 'previous', 'none'] as const) {
+      expect(isVisibleRun(exec(), NOW, role)).toBe(true);
+      for (const r of ['stalled', 'stopped', 'budget', 'finished'] as const) expect(isVisibleRun(ended(r), NOW, role), `${r} ${role}`).toBe(true);
+      expect(isVisibleRun(ended('migrated'), NOW, role)).toBe(false);
+      expect(isVisibleRun(ended('stopped', { closedAt: at(-1), closedBy: 'close' }), NOW, role)).toBe(false);
+      expect(isVisibleRun(exec({ closedAt: at(-1), closedBy: 'merge' }), NOW, role)).toBe(false);
+      expect(isVisibleRun(null, NOW, role)).toBe(false);
+    }
+  });
+  it('its owner sees an ended run until it is closed; anyone else within 24 h of its last movement', () => {
+    const old = ended('stopped', { lastStepAt: at(-30 * 60) });
+    expect(isVisibleRun(old, NOW, 'owner')).toBe(true);
+    expect(isVisibleRun(old, NOW, 'other-live')).toBe(false);
+    const edge = (msBefore: number) => ended('budget', { lastStepAt: new Date(NOW - STALE_RUN_TTL_MS + msBefore).toISOString() });
+    expect(isVisibleRun(edge(1000), NOW, 'previous')).toBe(true);
+    expect(isVisibleRun(edge(-1000), NOW, 'previous')).toBe(false);
+    expect(isVisibleRun(ended('stalled', { lastStepAt: 'nope', startedAt: 'nope' }), NOW, 'none')).toBe(false);
+  });
+  it('executionView draws exactly what isVisibleRun says, as someone who is not the owner unless told the role', () => {
+    const cases = [exec(), ended('finished'), ended('migrated'), ended('stopped', { lastStepAt: at(-30 * 60) }), ended('stalled', { closedAt: at(-1), closedBy: 'close' })];
+    for (const e of cases) {
+      expect(executionView({ exec: e, tasks: {}, live: [], now: NOW }) !== null).toBe(isVisibleRun(e, NOW, 'none'));
+      expect(executionView({ exec: e, tasks: {}, live: [], now: NOW, role: 'owner' }) !== null).toBe(isVisibleRun(e, NOW, 'owner'));
+    }
   });
 });

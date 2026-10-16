@@ -479,10 +479,10 @@ describe('buildPanelModel · execution', () => {
     expect(bandKey(mk(10))).toBe(bandKey(mk(99)));
     expect(bandKey(mk(10))).not.toBe(bandKey({ ...mk(10), execution: { ...mk(10).execution!, integrated: 5 } }));
   });
-  it('is null without a file, with junk, or for a finished execution', () => {
+  it('is null without a file, with junk, or for a migrated execution', () => {
     expect(buildPanelModel({ band: band(), activity: act(), now }).execution).toBeNull();
     expect(buildPanelModel({ band: band(), activity: act(), now, forgeExecution: '{oops' }).execution).toBeNull();
-    expect(buildPanelModel({ band: band(), activity: act(), now, forgeExecution: execDoc.replace('"active":true', '"active":false').replace('"stopReason":null', '"stopReason":"finished"') }).execution).toBeNull();
+    expect(buildPanelModel({ band: band(), activity: act(), now, forgeExecution: execDoc.replace('"active":true', '"active":false').replace('"stopReason":null', '"stopReason":"migrated"') }).execution).toBeNull();
   });
 });
 

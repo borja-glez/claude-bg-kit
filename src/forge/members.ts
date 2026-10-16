@@ -1,36 +1,15 @@
 import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { forgeDir } from './ledger.js';
-import { isPlanId } from '../lib/plan.js';
-import { isSafeId } from '../lib/execution-state.js';
+// MemberDoc and its normalizer are pure and live in src/lib (waypoint's hooks and describeViewer read them too).
+import { isMemberId, normalizeMember, type MemberDoc } from '../lib/member-doc.js';
+export { isMemberId, normalizeMember };
+export type { MemberDoc, MemberRole } from '../lib/member-doc.js';
 import { memberOfHook } from '../lib/forge-activity.js';
 
-export type MemberRole = 'executor' | 'manual';
-/**
- * A member of an execution. `sessionId` is its waypoint SID (the roadmap id the skills pass with --session, which names
- * the member file and its live signal); `hookSession` is Claude's own session id, the `session_id` its hooks receive.
- * The two differ: the SID comes from a track name, the hook id is Claude's UUID.
- */
-export interface MemberDoc { sessionId: string; role: MemberRole; runId: string; task: string | null; name: string | null; since: string; hookSession: string | null }
 /** What writeMember takes: a member written without a hook id has none. */
 export type MemberInput = Omit<MemberDoc, 'hookSession'> & { hookSession?: string | null };
-/** The one rule for a member's session id: it names a file, so no `:` (an NTFS stream), `/` or `..` (shared with execution.json). */
-export const isMemberId = (s: string): boolean => isSafeId(s);
 export const memberFile = (main: string, sessionId: string) => path.join(main, '.forge', 'members', `${sessionId}.json`);
-
-export function normalizeMember(x: unknown): MemberDoc | null {
-  if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
-  const o = x as Record<string, unknown>;
-  const sessionId = typeof o.sessionId === 'string' && isMemberId(o.sessionId) ? o.sessionId : null;
-  const role = o.role === 'executor' || o.role === 'manual' ? o.role : null;
-  const runId = typeof o.runId === 'string' && o.runId ? o.runId.slice(0, 120) : null;
-  const since = typeof o.since === 'string' && !Number.isNaN(Date.parse(o.since)) ? o.since : null;
-  if (!sessionId || !role || !runId || !since) return null;
-  const task = typeof o.task === 'string' && isPlanId(o.task) ? o.task : null;
-  const name = typeof o.name === 'string' && o.name ? o.name.slice(0, 80) : null;
-  const hookSession = typeof o.hookSession === 'string' && isMemberId(o.hookSession) ? o.hookSession : null;
-  return { sessionId, role, runId, task, name, since, hookSession };
-}
 
 export function readMember(main: string, sessionId: string): MemberDoc | null {
   if (!isMemberId(sessionId)) return null;
