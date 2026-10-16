@@ -7,8 +7,8 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.16.0](https://img.shields.io/badge/versi%C3%B3n-0.16.0-fab387?style=flat-square)
-![depende de waypoint ^0.20.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.20.0-cba6f7?style=flat-square)
+![versión 0.17.0](https://img.shields.io/badge/versi%C3%B3n-0.17.0-fab387?style=flat-square)
+![depende de waypoint ^0.20.1](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.20.1-cba6f7?style=flat-square)
 
 </div>
 
@@ -28,6 +28,7 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 - [Modo infinito](#modo-infinito)
 - [Propuestas](#propuestas)
 - [Verificación](#verificación)
+- [Validación](#validación)
 - [Configuración](#configuración)
 - [Referencia de la CLI](#referencia-de-la-cli)
 
@@ -48,7 +49,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depende de [waypoint](../waypoint/README.es.md) ^0.20.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
+forge depende de [waypoint](../waypoint/README.es.md) ^0.20.1, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
 
 ## Uso
 
@@ -255,6 +256,17 @@ Los tests y los revisores leen el código; la verificación **usa** el resultado
 
 **Pruebas en el roadmap.** Con `evidence: upload` (el valor por defecto) las capturas se suben al roadmap y aparecen en el detalle de la tarea. Subirlas hace que el roadmap sea **interno de la organización**, así que ya no se puede compartir públicamente; forge te lo avisa una vez. Con `evidence: local` no se sube nada y el roadmap sigue pudiendo compartirse públicamente. En ambos casos las pruebas quedan en `.forge/work/`.
 
+## Validación
+
+Tus propias herramientas se ejecutan antes de que ningún revisor lea el diff, y forge las hace baratas:
+
+- **Una ejecución por árbol.** El resultado de un validador se guarda por el árbol sobre el que corrió (`.forge/cache/validate/` en el checkout principal): el árbol de un commit sin nada sin confirmar (salvo los ficheros de `generated`), el comando del validador, los lockfiles y la plataforma. `prep`, `review-prep`, `validate` y `swarm integrate` la leen y la escriben, así que el árbol que validó la revisión no se vuelve a validar en la línea base del brief siguiente ni en la integración. Un árbol sucio, una pasada `--affected`, un timeout, `bench` y un validador `e2e` nunca se cachean (un `e2e` sí, con `cache: true`); `validate --final` la escribe pero nunca la lee, y `--no-cache` o `validate.cache: false` la apagan.
+- **El implementador corre los tests relacionados.** `prep` imprime `validate`, el comando que el implementador corre tal cual: `validate --affected --base <BASE>` corre los tests relacionados con lo que cambió desde la base del brief (`vitest related`, `jest --findRelatedTests`, los ficheros de test cambiados con pytest, los paquetes cambiados con go, o el `affected_cmd` de un validador), el typecheck y el lint, nunca la suite completa. Un validador de tests sin comando de tests relacionados se salta ahí (`skipped: "not-affected"`); `review-prep` lo corre completo.
+- **En paralelo.** Los validadores `typecheck`, `lint`, `test` y `other` corren a la vez (`validate.parallel`, 3 por defecto); `build`, `e2e` y `bench` corren después, de uno en uno. Un fallo se repite solo si ese validador salió `flaky` en los últimos 30 días (`validate.retry: flaky`), o siempre, o nunca.
+- **Fallos que ya estaban.** Un validador en rojo en la base solo se excusa si todos los tests que falla ya fallaban allí (por nombre de test, o por sus líneas de fallo si no se pueden leer los nombres); un test nuevo en rojo sale en `newFailing` y bloquea.
+- **Una ronda de validadores.** Cuando `review-prep` encuentra validadores en rojo que la base no tenía, nadie revisa: imprime `validatorsRound` y el implementador los arregla primero. Como mucho dos rondas así por revisión, y no cuentan en el tope de revisiones.
+- **El reloj.** Cada evento `validate` del ledger lleva `durationMs`, `cached` y `scope`, y se registran las fases `implement`, `validate`, `review`, `verdict` y `fix`; `forge stats` las convierte en el tiempo que se lleva cada etapa.
+
 ## Configuración
 
 `.forge/` en el proyecto contiene `config.yaml`, `verify/` (las superficies), el registro, `local.yaml` (tus preferencias y los permisos de las superficies), `learned.jsonl` (las líneas de `Aprendido` que añadió forge), `status.json` (la última tarea, con `taskStartedAt`, `stageSince`, `stages` (segundos por fase) y `doneAt` para los tiempos de lens), `work/<id-de-tarea>/` (briefs, diffs, informes, revisiones, pruebas de verificación), `proposals/`, `run.json`, `execution/` (la ejecución y sus bases; cada tarea de `execution.json` guarda `finishedAt` al integrarse, bloquearse o adoptarse con `swarm retry <T> --adopt`), `live/` (la señal local) y `usage/`. Git ignora todo lo que hay dentro salvo `config.yaml` y `verify/*.md`.
@@ -268,6 +280,7 @@ validators:                    # manuales
     cmd: npm test
     kind: test                 # letras, dígitos y _ . : -
     affects: ["src/**", "test/**"]
+    affected_cmd: npx vitest related --run --passWithNoTests {files}   # opcional: lo que corre validate --affected
   - name: a11y
     cmd: npm run a11y
     kind: a11y
@@ -276,6 +289,10 @@ verify:
   limits: { checks: 8, shots: 10, minutes: 10 }   # opcional; estos son los valores por defecto
 evidence: upload               # upload | local; por defecto upload
 validatorTimeoutSec: 600
+validate:
+  cache: true                  # la caché por árbol (.forge/cache/validate); por defecto true
+  parallel: 3                  # validadores a la vez, de 1 a 8; con 1 van de uno en uno
+  retry: flaky                 # flaky | always | never: un fallo se repite solo con historial flaky (30 días)
 generated: ["dist/**"]         # salida de compilación versionada que forge restaura tras sus validadores; por defecto []
 tdd: off                       # off | superpowers: los implementadores siguen la skill de TDD de superpowers
 workflow: ask                  # ask | forge | superpowers | superpowers-design | superpowers-plan | off
@@ -310,6 +327,8 @@ validators:
 - `verify.limits` admite como máximo `checks: 20`, `shots: 30` y `minutes: 60`.
 - `evidence` es `upload` o `local`, como se describe en [Verificación](#verificación).
 - `generated` lista globs (relativos al repositorio, con `/`, la sintaxis de `affects`; como máximo 50) que nombran ficheros versionados que son salida de compilación, como un bundle que reescribe un validador `build`. Tras cada ejecución de validadores en cualquier checkout (el tuyo incluido: `validate`, `prep`, `review-prep`, un `swarm integrate` efímero), forge restaura los ficheros que coinciden, que la ejecución cambió y que no tenían un cambio tuyo antes, y dice cuáles (`restored`). Su propio worktree de ejecución siempre queda limpio de todo fichero versionado que regeneraron sus validadores, esté en la lista o no.
+- `validate.cache` (por defecto `true`), `validate.parallel` (de 1 a 8, por defecto 3) y `validate.retry` (`flaky`, `always` o `never`, por defecto `flaky`) se describen en [Validación](#validación).
+- El `affected_cmd` de un validador es lo que corre `validate --affected` para un validador `test` en lugar de `cmd`: debe llevar `{files}` (los ficheros cambiados), `{tests}` (los ficheros de test cambiados) o `{packages}` (los paquetes de go cambiados), y forge pone cada ruta entre comillas. `cache: true` deja que un validador `e2e` use la caché por árbol, cuando su resultado solo depende del árbol; `cache: false` deja fuera de ella a cualquier validador.
 
 **Las superficies** viven en `.forge/verify/<nombre>.md`: una cabecera opcional (globs `affects` que hacen candidata a la superficie, y las `tools` que usa), instrucciones en texto libre y notas bajo `## Aprendido`.
 
@@ -361,11 +380,11 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 - `route stage --stage s [--task id] [--spec f] [--plan f]` - avanza una ruta pendiente (`designing`, `planning`, `handed-off`, `done`).
 - `hook route-session` / `hook route-prompt` - los hooks de enrutado (SessionStart, UserPromptSubmit); ante cualquier error no imprimen nada.
 - `local set workflow <w>|none` / `local set autonomy ask|auto|none` - tus preferencias en `.forge/local.yaml`.
-- `validate [--affected a,b | --all] [--path trivial|small|medium|large] [--base sha] [--final] [--task id] [--base-run | --baseline f]` - ejecuta los validadores del proyecto que tocan (ver Coincidencias); `--base` da el diff contra el que se casan los `affects` de e2e, `--final` elige el conjunto de la revisión final. `--base-run` marca una ejecución sobre el commit base, antes de cualquier cambio; `--baseline f` toma el JSON de esa ejecución y marca `preexisting` un fallo que la base ya tenía, que no cuenta ni en el código de salida ni en el veredicto. Un runner de tests que no encuentra tests pasa como `skipped: "no-tests"`.
+- `validate [--affected [a,b] | --all] [--path trivial|small|medium|large] [--base sha] [--final] [--task id] [--base-run | --baseline f] [--no-cache] [--out f]` - ejecuta los validadores del proyecto que tocan (ver Coincidencias y [Validación](#validación)); `--base` da el diff contra el que se casan los `affects` de e2e, `--final` elige el conjunto de la revisión final. `--affected` sin lista toma los ficheros cambiados desde `--base` (HEAD por defecto; con lo no confirmado y los ficheros sin seguir) y corre los tests relacionados. `--base-run` marca una ejecución sobre el commit base, antes de cualquier cambio; `--baseline f` toma el JSON de esa ejecución y marca `preexisting` un fallo que la base ya tenía, que no cuenta ni en el código de salida ni en el veredicto. Un runner de tests que no encuentra tests pasa como `skipped: "no-tests"`. `--no-cache` se salta la caché por árbol; `--out f` escribe además el JSON en `f`.
 - `verdict --task id --dir d [--validators f] [--sensitive] [--perf]` - pondera los JSON de los revisores en una nota. Un revisor aparece con `invalid: true` si su salida no servía (`dropped: 0`, cuenta como abstención) o si se descartaron algunos de sus hallazgos (`dropped` > 0; la revisión mantiene su veredicto y puntúa, y la skill registra los hallazgos descartados como resolución). También imprime `invalid` e `incomplete`, los revisores cuyo fichero no sirve o es un borrador con `"complete": false` (puntúa tal cual).
 - `round --task id --path medium|large` - decide el siguiente paso del bucle de revisión (`done`, `resume`, `fresh-stronger`, `redo`, `breaker`, `stalled`; `tierUp` desde la ronda 3), si el intento es el último (`last`) y el siguiente `implementer` (`role`, `agent`).
-- `prep --task <id>-<n> --path p [--phase ph] [--dir d]` - antes de que empiece un implementador: registra `BASE`, la fase y la línea base de los validadores sobre él en una sola llamada, e imprime `base`, `baseline` y `failing`.
-- `review-prep --task <id>-<n> --path p --base sha --baseline f --dir d [--locale es|en]` - prepara una ronda de revisión: valida contra la línea base, escribe el diff (y desde la ronda 2 el diff del arreglo y los hallazgos anteriores de cada revisor), decide quién revisa y cómo y copia los resultados arrastrados; imprime `round`, `validators`, `say`, `spawn` (`agent`, `model`, `effort`, `mode` `full` o `delta`, `inputs`, `twin`) y `carried`.
+- `prep --task <id>-<n> --path p [--phase ph] [--dir d] [--no-baseline]` - antes de que empiece un implementador: registra `BASE`, la fase y la línea base de los validadores sobre él en una sola llamada (de la caché por árbol si ese árbol ya se validó), e imprime `base`, `baseline`, `failing`, `cached`, `durationMs` y `validate`, el comando que corre el implementador. `--no-baseline` (el camino Small) registra `BASE` y la fase sin validar.
+- `review-prep --task <id>-<n> --path p --base sha --baseline f --dir d [--locale es|en]` - prepara una ronda de revisión: valida contra la línea base, escribe el diff (y desde la ronda 2 el diff del arreglo y los hallazgos anteriores de cada revisor), decide quién revisa y cómo y copia los resultados arrastrados; imprime `round`, `validators`, `say`, `spawn` (`agent`, `model`, `effort`, `mode` `full` o `delta`, `inputs`, `twin`) y `carried`. Con validadores en rojo que la base no tenía imprime en su lugar `validatorsRound` (`k`, `max`, `findings`) y un `spawn` vacío, como mucho dos veces por revisión. Imprime también `cached` y `durationMs`.
 - `review-close --task <id>-<n> --dir d --path medium|large` - cierra la ronda: comprueba que cada revisor lanzado dejó su fichero (sale con código 3 y `missing` si no), pondera el veredicto, registra los hallazgos menores y los `deferred` como rulings, escribe `findings-<n>-<ronda>.json` e imprime `{action, score, next, last, implementer, findings, deferred, invalid, incomplete}` (más `shadow`).
 - `shadow start [--tasks N] [--reset] | stop | report [--locale es|en]` - la prueba en sombra de los revisores en high frente a gemelos en xhigh (ver [Agentes](#agentes)); abrirla de nuevo conserva los casos reunidos, `--reset` los borra.
 - `log --kind k [--task id] [--data json | --data-file f]` - añade una entrada al registro. Una entrada `triage` que sube el camino puede llevar un `why`, que nombra el siguiente `announce`.
@@ -374,6 +393,7 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 - `decision show <n>` - una decisión, con su `undo`.
 - `decision md --scope s [--out f] [--locale es|en]` - escribe las decisiones automáticas de un ámbito en `docs/forge/decisions/<ámbito>.md` (o en `--out`); no escribe nada si no hay ninguna.
 - `last --task id` - el camino, el último evento de fase, el último veredicto y la última ronda de una tarea.
+- `stats [--days N | --since iso] [--json] [--locale es|en]` - el reloj de los briefs aceptados según el ledger del checkout principal: por brief y por camino, el tiempo en `implement`, `validate`, `review`, `verdict` y `fix`, la parte de los validadores y los aciertos de caché, el coste fijo de un brief aceptado a la primera (`overheadMin`) y, con 5 tareas de plan o más, el tiempo real entre el estimado (`estimate`).
 - `agents` - los nombres de los agentes del perfil activo.
 - `surfaces [learn --name N --notes-file F [--heading H] | proposed --name N]` - lista las superficies y los borradores detectados; añade notas a la sección `Aprendido` de una superficie; marca un borrador como propuesto.
 - `tools [--surface N]` - comprueba las herramientas que lista una superficie: `found` (en el PATH o entre los servidores MCP configurados para Claude Code: plugins, `.claude.json`, `.mcp.json`), `missing` (un programa conocido que no está instalado) o `unknown`.

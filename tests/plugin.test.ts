@@ -194,19 +194,19 @@ describe('plugin layout', () => {
     expect(md).toMatch(/bundles several independent changes/);
     expect(md).toMatch(/adds new behaviour with its tests/);
   });
-  it('versions: forge 0.16.0, waypoint 0.20.0', () => {
+  it('versions: forge 0.17.0, waypoint 0.20.1', () => {
     const forge = JSON.parse(read('plugins/forge/.claude-plugin/plugin.json'));
-    expect(forge.version).toBe('0.16.0');
-    expect(forge.dependencies).toEqual([{ name: 'waypoint', version: '^0.20.0' }]);
-    expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.20.0');
+    expect(forge.version).toBe('0.17.0');
+    expect(forge.dependencies).toEqual([{ name: 'waypoint', version: '^0.20.1' }]);
+    expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.20.1');
   });
-  it('CHANGELOG has the entries of forge 0.16.0, waypoint 0.20.0 and lens 0.11.5', () => {
+  it('CHANGELOG has the entries of forge 0.17.0, waypoint 0.20.1 and lens 0.11.5', () => {
     const md = read('CHANGELOG.md');
     // Each plugin's section, newest version first.
     const section = (p: string) => md.split(/^## /m).find(s => s.startsWith(`${p}\n`) || s.startsWith(`${p}\r\n`)) ?? '';
     const versions = (p: string) => [...section(p).matchAll(/^### (\d+\.\d+\.\d+) — /gm)].map(m => m[1]);
-    expect(versions('waypoint').slice(0, 2)).toEqual(['0.20.0', '0.19.1']);
-    expect(versions('forge').slice(0, 2)).toEqual(['0.16.0', '0.15.2']);
+    expect(versions('waypoint').slice(0, 2)).toEqual(['0.20.1', '0.20.0']);
+    expect(versions('forge').slice(0, 2)).toEqual(['0.17.0', '0.16.0']);
     expect(versions('lens').slice(0, 2)).toEqual(['0.11.5', '0.11.4']);
   });
   it('READMEs in Spanish and English tell the cost changes', () => {
@@ -443,9 +443,9 @@ describe('plugin layout', () => {
     for (const w of ['design-snapshot', 'design-changed', 'critique-check', 'critique-select', 'design-page', 'rewrite', 'interview', 'approve', '--since', 'applied']) expect(md).toContain(w);
     expect(read('plugins/waypoint/skills/plan/SKILL.md')).toContain('plan.yaml does not exist yet');
   });
-  it('forge manifest depends on waypoint ^0.20.0 and ships its CLI', () => {
+  it('forge manifest depends on waypoint ^0.20.1 and ships its CLI', () => {
     const p = JSON.parse(read('plugins/forge/.claude-plugin/plugin.json'));
-    expect(p).toMatchObject({ name: 'forge', version: '0.16.0', dependencies: [{ name: 'waypoint', version: '^0.20.0' }] });
+    expect(p).toMatchObject({ name: 'forge', version: '0.17.0', dependencies: [{ name: 'waypoint', version: '^0.20.1' }] });
     expect(existsSync(new URL('../plugins/forge/dist/forge.cjs', import.meta.url))).toBe(true);
   });
   it('forge scout agent: frontmatter and rules', () => {
@@ -1012,5 +1012,14 @@ describe('plugin layout', () => {
     expect(run.find(l => l.startsWith('3. Do not validate or write the diff yourself'))).toContain('`validatorsRound`');
     const step3 = runRef('task-steps').split(/\r?\n/).find(l => l.startsWith('3. **validate**'))!;
     for (const w of ['`validatorsRound`', 'FORGE swarm task <T> --stage implement']) expect(step3).toContain(w);
+  });
+  it('forge READMEs describe the validation of wave 1a: the tree cache, --affected, the parallel batch, the validators round and stats', () => {
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
+      const md = read(f);
+      for (const s of ['.forge/cache/validate', 'affected_cmd', 'cache: true', 'parallel: 3', 'retry: flaky', '`validatorsRound`', '`newFailing`',
+        'skipped: "not-affected"', '`stats [--days N | --since iso] [--json] [--locale es|en]`', '--no-cache', '--out f', '--no-baseline']) {
+        expect(md, `${f}: ${s}`).toContain(s);
+      }
+    }
   });
 });

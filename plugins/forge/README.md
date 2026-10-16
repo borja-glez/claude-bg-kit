@@ -7,8 +7,8 @@ Triage by size, the right model for each role, your own tools first, independent
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.16.0](https://img.shields.io/badge/version-0.16.0-fab387?style=flat-square)
-![depends on waypoint ^0.20.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.20.0-cba6f7?style=flat-square)
+![version 0.17.0](https://img.shields.io/badge/version-0.17.0-fab387?style=flat-square)
+![depends on waypoint ^0.20.1](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.20.1-cba6f7?style=flat-square)
 
 </div>
 
@@ -28,6 +28,7 @@ Triage by size, the right model for each role, your own tools first, independent
 - [Infinite mode](#infinite-mode)
 - [Proposals](#proposals)
 - [Verification](#verification)
+- [Validation](#validation)
 - [Configuration](#configuration)
 - [CLI reference](#cli-reference)
 
@@ -48,7 +49,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depends on [waypoint](../waypoint/README.md) ^0.20.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
+forge depends on [waypoint](../waypoint/README.md) ^0.20.1, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
 
 ## Usage
 
@@ -255,6 +256,17 @@ Tests and reviewers read the code; verification **uses** the result. A **surface
 
 **Evidence on the roadmap.** With `evidence: upload` (the default) the screenshots are uploaded to the roadmap and appear in the task detail. Uploading makes the roadmap **organization-internal**, so it can no longer be shared publicly; forge tells you once. With `evidence: local` nothing is uploaded and the roadmap stays publicly shareable. Evidence stays under `.forge/work/` either way.
 
+## Validation
+
+Your own tools run before any reviewer reads the diff, and forge keeps them cheap:
+
+- **One run per tree.** A validator's result is cached by the tree it ran on (`.forge/cache/validate/` in the main checkout): the tree of a commit with nothing uncommitted (the `generated` files aside), the validator's command, the lockfiles and the platform. `prep`, `review-prep`, `validate` and `swarm integrate` read and write it, so the tree a review validated is not validated again by the next brief's baseline or by the integration. A dirty tree, an `--affected` pass, a timeout, `bench` and an `e2e` validator are never cached (an `e2e` one is with `cache: true`); `validate --final` writes it but never reads it, and `--no-cache` or `validate.cache: false` turn it off.
+- **The implementer runs the related tests.** `prep` prints `validate`, the command the implementer runs as given: `validate --affected --base <BASE>` runs the tests related to what changed since the brief's base (`vitest related`, `jest --findRelatedTests`, the changed test files for pytest, the changed packages for go, or a validator's `affected_cmd`), the typecheck and the lint, never the whole suite. A test validator without a related-tests command is skipped there (`skipped: "not-affected"`); `review-prep` runs it in full.
+- **In parallel.** `typecheck`, `lint`, `test` and `other` validators run at once (`validate.parallel`, 3 by default); `build`, `e2e` and `bench` run after them, one at a time. A failure runs again only when that validator was flaky in the last 30 days (`validate.retry: flaky`), or always, or never.
+- **Failures that were already there.** A validator red on the base is excused only when every test it fails already failed there (by test name, or by its failure lines when the names cannot be read); a new failing test is named in `newFailing` and blocks.
+- **A validators round.** When `review-prep` finds validators red that the base did not have, nobody reviews: it prints `validatorsRound` and the implementer fixes them first. At most two such rounds per review, and they do not count against the review cap.
+- **The clock.** Every `validate` event of the ledger carries `durationMs`, `cached` and `scope`, and the phases `implement`, `validate`, `review`, `verdict` and `fix` are logged; `forge stats` turns them into the time each stage takes.
+
 ## Configuration
 
 `.forge/` in the project holds `config.yaml`, `verify/` (the surfaces), the ledger, `local.yaml` (your preferences and surface permissions), `learned.jsonl` (the `Learned` lines forge added), `status.json` (the last task, with `taskStartedAt`, `stageSince`, `stages` (seconds per phase) and `doneAt` for lens's timings), `work/<task-id>/` (briefs, diffs, reports, reviews, verification evidence), `proposals/`, `run.json`, `execution/` (the execution and its baselines; each task in `execution.json` records `finishedAt` when it is integrated, blocked or adopted with `swarm retry <T> --adopt`), `live/` (the local signal) and `usage/`. Git ignores everything in it except `config.yaml` and `verify/*.md`.
@@ -268,6 +280,7 @@ validators:                    # manual
     cmd: npm test
     kind: test                 # letters, digits and _ . : -
     affects: ["src/**", "test/**"]
+    affected_cmd: npx vitest related --run --passWithNoTests {files}   # optional: what validate --affected runs
   - name: a11y
     cmd: npm run a11y
     kind: a11y
@@ -276,6 +289,10 @@ verify:
   limits: { checks: 8, shots: 10, minutes: 10 }   # optional; these are the defaults
 evidence: upload               # upload | local; default upload
 validatorTimeoutSec: 600
+validate:
+  cache: true                  # the tree cache (.forge/cache/validate); default true
+  parallel: 3                  # validators at once, 1 to 8; 1 runs them one at a time
+  retry: flaky                 # flaky | always | never: a failure runs again only after a flaky history (30 days)
 generated: ["dist/**"]         # tracked build output forge puts back after its validators; default []
 tdd: off                       # off | superpowers: implementers follow superpowers' TDD skill
 workflow: ask                  # ask | forge | superpowers | superpowers-design | superpowers-plan | off
@@ -310,6 +327,8 @@ validators:
 - `verify.limits` accepts at most `checks: 20`, `shots: 30` and `minutes: 60`.
 - `evidence` is `upload` or `local`, as described in [Verification](#verification).
 - `generated` lists globs (repo-relative, `/` separators, the syntax of `affects`; at most 50) naming tracked files that are build output, such as a bundle a `build` validator rewrites. After each validator run in any checkout (yours included: `validate`, `prep`, `review-prep`, an ephemeral `swarm integrate`), forge puts back the matching files the run changed and that had no change of yours before it, and says which (`restored`). Its own run worktree is always cleaned of every tracked file its validators regenerated, listed or not.
+- `validate.cache` (default `true`), `validate.parallel` (1 to 8, default 3) and `validate.retry` (`flaky`, `always` or `never`, default `flaky`) are described in [Validation](#validation).
+- A validator's `affected_cmd` is what `validate --affected` runs for a `test` validator instead of `cmd`: it must hold `{files}` (the changed files), `{tests}` (the changed test files) or `{packages}` (the changed go packages), and forge quotes each path. `cache: true` lets an `e2e` validator use the tree cache, when its result depends only on the tree; `cache: false` keeps any validator out of it.
 
 **Surfaces** live in `.forge/verify/<name>.md`: an optional header (`affects` globs that make the surface a candidate, `tools` it uses), free-text instructions, and notes under `## Learned`.
 
@@ -361,11 +380,11 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 - `route stage --stage s [--task id] [--spec f] [--plan f]` - move a pending route on (`designing`, `planning`, `handed-off`, `done`).
 - `hook route-session` / `hook route-prompt` - the routing hooks (SessionStart, UserPromptSubmit); they print nothing on any error.
 - `local set workflow <w>|none` / `local set autonomy ask|auto|none` - your own preferences in `.forge/local.yaml`.
-- `validate [--affected a,b | --all] [--path trivial|small|medium|large] [--base sha] [--final] [--task id] [--base-run | --baseline f]` - run the project validators that apply (see Matching); `--base` gives the diff that e2e `affects` are matched against, `--final` selects the final review's set. `--base-run` marks a run on the base commit, before any change; `--baseline f` takes that run's JSON and marks a failure the base already had `preexisting`, which neither the exit code nor the verdict counts. A test runner that finds no tests passes as `skipped: "no-tests"`.
+- `validate [--affected [a,b] | --all] [--path trivial|small|medium|large] [--base sha] [--final] [--task id] [--base-run | --baseline f] [--no-cache] [--out f]` - run the project validators that apply (see Matching and [Validation](#validation)); `--base` gives the diff that e2e `affects` are matched against, `--final` selects the final review's set. `--affected` without a list takes the files changed since `--base` (HEAD by default; uncommitted changes and untracked files included) and runs the related tests. `--base-run` marks a run on the base commit, before any change; `--baseline f` takes that run's JSON and marks a failure the base already had `preexisting`, which neither the exit code nor the verdict counts. A test runner that finds no tests passes as `skipped: "no-tests"`. `--no-cache` skips the tree cache; `--out f` also writes the JSON to `f`.
 - `verdict --task id --dir d [--validators f] [--sensitive] [--perf]` - weigh the reviewers' JSON files into a score. A reviewer is listed with `invalid: true` when its output was unusable (`dropped: 0`, counted as an abstention) or when some of its findings were dropped (`dropped` > 0; the review keeps its verdict and still scores, and the skill records the dropped findings as a ruling). It also prints `invalid` and `incomplete`, the reviewers whose file is unusable or a draft with `"complete": false` (scored as written).
 - `round --task id --path medium|large` - decide the next step of the review loop (`done`, `resume`, `fresh-stronger`, `redo`, `breaker`, `stalled`; `tierUp` from round 3), whether the attempt is the `last`, and the next `implementer` (`role`, `agent`).
-- `prep --task <id>-<n> --path p [--phase ph] [--dir d]` - before an implementer starts: record `BASE`, the phase and the validators' baseline on it in one call, and print `base`, `baseline` and `failing`.
-- `review-prep --task <id>-<n> --path p --base sha --baseline f --dir d [--locale es|en]` - prepare a review round: validate against the baseline, write the diff (and from round 2 the fix diff and each reviewer's earlier findings), choose who reviews and how, copy the carried results; prints `round`, `validators`, `say`, `spawn` (`agent`, `model`, `effort`, `mode` `full` or `delta`, `inputs`, `twin`) and `carried`.
+- `prep --task <id>-<n> --path p [--phase ph] [--dir d] [--no-baseline]` - before an implementer starts: record `BASE`, the phase and the validators' baseline on it in one call (from the tree cache when that tree was validated), and print `base`, `baseline`, `failing`, `cached`, `durationMs` and `validate`, the command the implementer runs. `--no-baseline` (the Small path) records `BASE` and the phase without validating.
+- `review-prep --task <id>-<n> --path p --base sha --baseline f --dir d [--locale es|en]` - prepare a review round: validate against the baseline, write the diff (and from round 2 the fix diff and each reviewer's earlier findings), choose who reviews and how, copy the carried results; prints `round`, `validators`, `say`, `spawn` (`agent`, `model`, `effort`, `mode` `full` or `delta`, `inputs`, `twin`) and `carried`. With validators red that the base did not have it prints `validatorsRound` (`k`, `max`, `findings`) and an empty `spawn` instead, at most twice per review. It also prints `cached` and `durationMs`.
 - `review-close --task <id>-<n> --dir d --path medium|large` - close the round: check every spawned reviewer left its file (exit 3 and `missing` if not), weigh the verdict, record minor and `deferred` findings as rulings, write `findings-<n>-<round>.json` and print `{action, score, next, last, implementer, findings, deferred, invalid, incomplete}` (plus `shadow`).
 - `shadow start [--tasks N] [--reset] | stop | report [--locale es|en]` - the shadow trial of the reviewers at high against xhigh twins (see [Agents](#agents)); starting again keeps the cases collected, `--reset` clears them.
 - `log --kind k [--task id] [--data json | --data-file f]` - append to the ledger. A `triage` entry that raises the path may carry a `why`, which the next `announce` names.
@@ -374,6 +393,7 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 - `decision show <n>` - one decision, with its `undo`.
 - `decision md --scope s [--out f] [--locale es|en]` - write the automatic decisions of a scope to `docs/forge/decisions/<scope>.md` (or `--out`); writes nothing when there are none.
 - `last --task id` - the path, last phase event, last verdict and last round of a task.
+- `stats [--days N | --since iso] [--json] [--locale es|en]` - the clock of the accepted briefs from the main checkout's ledger: per brief and per path, the time in `implement`, `validate`, `review`, `verdict` and `fix`, the validators' share and the cache hits, the fixed cost of a brief accepted at once (`overheadMin`) and, with 5 plan tasks or more, real over estimated time (`estimate`).
 - `agents` - agent names for the active profile.
 - `surfaces [learn --name N --notes-file F [--heading H] | proposed --name N]` - list the surfaces and detected drafts; append notes to a surface's `Learned` section; mark a draft as proposed.
 - `tools [--surface N]` - check the tools a surface lists: `found` (on the PATH or among the MCP servers configured for Claude Code: plugins, `.claude.json`, `.mcp.json`), `missing` (a known program that is not installed) or `unknown`.

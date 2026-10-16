@@ -13,6 +13,11 @@ elsewhere and are reconstructed from their READMEs.
 
 ## waypoint
 
+### 0.20.1 — 2026-10-16
+
+#### Fixed
+- With forge 0.17's keys in `.forge/config.yaml` (`validate`, a validator's `cache` or `affected_cmd`), waypoint still reads the config (it bundles forge's schema): `evidence: local` keeps the roadmap free of uploaded screenshots.
+
 ### 0.20.0 — 2026-10-15
 
 #### Added
@@ -175,6 +180,27 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.17.0 — 2026-10-16
+
+#### Added
+- A validation cache by tree (`.forge/cache/validate` in the main checkout): a validator's result is kept under the tree of a commit with nothing uncommitted, its command, the lockfiles and the platform, and `prep`, `review-prep`, `validate` and `swarm integrate` read it, so the tree a review validated is not validated again by the next brief's baseline or by the integration. `bench`, a timeout, an `--affected` pass and an `e2e` validator without `cache: true` are never cached; `validate --final` writes it and never reads it; `--no-cache` and `validate.cache: false` turn it off.
+- `forge stats [--days N | --since ISO] [--json] [--locale es|en]`: per accepted brief and per path, the time in `implement`, `validate`, `review`, `verdict` and `fix`, the validators' share of the clock and the cache hits, the clock and the fixed cost of a brief accepted at its first review, and real over estimated time of the plan tasks.
+- The ledger records the phases `validate` and `review` (with the reviewers) from `review-prep`, and `verdict` and `fix` from `review-close`; every `validate` event carries `durationMs`, `cached` and `scope`, and per result its clock, `cached` and the failing tests; `swarm integrate` logs its baseline and its merged validation.
+- A validators round: when `review-prep` finds validators red that the base did not have, nobody reviews; it prints `validatorsRound` and the implementer fixes them first, at most twice per review and without counting against the cap.
+- `prep` prints `validate`, the exact command the implementer runs, and takes `--no-baseline` (the Small path); `validate` takes `--out <file>` and `--no-cache`; a validator takes `affected_cmd` and `cache`; the config takes `validate.cache`, `validate.parallel` and `validate.retry`.
+
+#### Changed
+- `validate --affected` runs the tests related to what changed (`vitest related`, `jest --findRelatedTests`, the changed test files for pytest, the changed packages for go, or a validator's `affected_cmd`) instead of the whole suite; without a list it takes the files changed since `--base` and the untracked ones. A test validator with nothing related to run is skipped as `not-affected`, and `review-prep` runs it in full. Implementers run the command `prep` prints and never the whole suite.
+- Validators run in a parallel batch (`typecheck`, `lint`, `test` and `other`; 3 at once by default), then `build`, `e2e` and `bench` one at a time. A failure is retried only when that validator was flaky in the last 30 days (`validate.retry`).
+- `swarm integrate` validates the run tip and the merged tree through the cache: a merge whose tree the task's review already validated runs nothing after it. The per-sha baselines of `.forge/execution/baseline/` are read for one more version and no longer written.
+- Requires waypoint ^0.20.1.
+
+#### Fixed
+- A validator already red on the base no longer excuses every failure: only the tests that already failed (by name, or by the failure lines when the names cannot be read); a new failing test blocks and is named in `newFailing`.
+- `validate --affected --base <sha>` no longer falls back to the whole heavy set.
+- The run skill writes BASE out literally (`<BASE>`): a shell variable did not survive between Bash calls.
+- `scripts/usage-report.mjs` ranks sessions by the sum of their loops, with the recorded cost in its own column, and adds the time by forge stage.
 
 ### 0.16.0 — 2026-10-15
 
