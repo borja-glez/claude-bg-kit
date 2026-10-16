@@ -58,27 +58,53 @@ export function signalLiveness(ts: string | null, ended: boolean, now: number): 
   return age < LIVE_SILENT_MINUTES * 60000 ? 'alive' : age < LIVE_STOPPED_MINUTES * 60000 ? 'silent' : 'stopped';
 }
 
-export function executionView(i: { exec: ExecutionState | null; tasks: Record<string, PublicTask>; live: LiveDoc[]; titles?: Record<string, string>; now: number; role?: ViewerRole }): ExecView | null {
-  const e = i.exec;
-  // C2: one rule, isVisibleRun. Without a role the reader is not the run's owner: the 24-hour limit applies.
-  if (!e || !isVisibleRun(e, i.now, i.role ?? 'none')) return null;
-  const fresh = (d: LiveDoc) => {
-    const t = usable(d.ts, i.now);
-    return t !== null && i.now - t < LIVE_MAX_AGE_HOURS * 3600000;
-  };
+/** A signal with a usable ts less than LIVE_MAX_AGE_HOURS old; an older one is a leftover of a past session. */
+const freshSignal = (d: LiveDoc, now: number): boolean => {
+  const t = usable(d.ts, now);
+  return t !== null && now - t < LIVE_MAX_AGE_HOURS * 3600000;
+};
+
+/**
+ * The coordinator of run `e` as the run band draws it: its freshest valid signal of this run (and of its hook session)
+ * among `live`, its last sign of life (that signal or `stepAt`), whether it waits on an agent, and its liveness.
+ */
+function coordinatorOf(e: ExecutionState, live: readonly LiveDoc[], now: number, stepAt: string | null): { signal: LiveDoc | null; lastSeen: string | null; waiting: boolean; liveness: Liveness } {
   // Of the matching coordinator signals, the one with the most recent valid ts.
-  const signal = i.live
-    .filter(d => fresh(d) && d.role === 'coordinator' && d.runId === e.runId && (!e.hookSession || d.sessionId === e.hookSession))
+  const signal = live
+    .filter(d => freshSignal(d, now) && d.role === 'coordinator' && d.runId === e.runId && (!e.hookSession || d.sessionId === e.hookSession))
     .reduce<LiveDoc | null>((best, d) => (!best || Date.parse(d.ts) > Date.parse(best.ts) ? d : best), null);
-  const candidates = [signal?.ts ?? null, e.lastStepAt].map(ts => ({ ts, t: usable(ts, i.now) })).filter((c): c is { ts: string; t: number } => c.t !== null);
+  const candidates = [signal?.ts ?? null, stepAt].map(ts => ({ ts, t: usable(ts, now) })).filter((c): c is { ts: string; t: number } => c.t !== null);
   const lastSeen = candidates.length ? candidates.reduce((a, b) => (b.t > a.t ? b : a)).ts : null;
   // A coordinator waiting on a long agent does not step: it stays alive while its signal (not ended) lists an agent
   // started within AGENT_ALIVE_MS. SessionEnd and that bound cap how long a dead coordinator can read alive.
   const waiting = !!e.active && !!signal && !signal.ended && signal.agents.some(a => {
-    const t = usable(a.since, i.now);
-    return t !== null && i.now - t < AGENT_ALIVE_MS;
+    const t = usable(a.since, now);
+    return t !== null && now - t < AGENT_ALIVE_MS;
   });
-  const coord: Liveness = !e.active ? 'stopped' : signal?.ended ? 'stopped' : waiting ? 'alive' : signalLiveness(lastSeen, false, i.now);
+  const liveness: Liveness = !e.active ? 'stopped' : signal?.ended ? 'stopped' : waiting ? 'alive' : signalLiveness(lastSeen, false, now);
+  return { signal, lastSeen, waiting, liveness };
+}
+
+/**
+ * B-09, M4: run `e` has no coordinator when its conversation ended (its own signal says so), or when the run is active
+ * and its coordinator went silent: the run band would draw it stopped (no step nor signal for LIVE_STOPPED_MINUTES, no
+ * agent it started still running). A run that never stepped counts from its start, as `swarm takeover` does.
+ * `signal` is the coordinator's own live/<hookSession>.json, the one file the band and waypoint's hooks both read, so
+ * describeViewer gets the same answer from both (its rule 4 or 5); a run without a hook session has no such file.
+ */
+export function coordinatorGone(e: ExecutionState | null, signal: LiveDoc | null, now: number): boolean {
+  if (!e) return false;
+  const own = e.hookSession ? signal : null;
+  if (own?.ended === true) return true;
+  return e.active && coordinatorOf(e, own ? [own] : [], now, lastMovedAt(e)).liveness === 'stopped';
+}
+
+export function executionView(i: { exec: ExecutionState | null; tasks: Record<string, PublicTask>; live: LiveDoc[]; titles?: Record<string, string>; now: number; role?: ViewerRole }): ExecView | null {
+  const e = i.exec;
+  // C2: one rule, isVisibleRun. Without a role the reader is not the run's owner: the 24-hour limit applies.
+  if (!e || !isVisibleRun(e, i.now, i.role ?? 'none')) return null;
+  const fresh = (d: LiveDoc) => freshSignal(d, i.now);
+  const { signal, lastSeen, waiting, liveness: coord } = coordinatorOf(e, i.live, i.now, e.lastStepAt);
   // A slot owned by a member session lives by that session: the more alive of its lease and its own fresh signal.
   // An ended signal is stopped at once, even with a lease still running.
   const rank = { stopped: 0, silent: 1, alive: 2 } as const;

@@ -11,7 +11,8 @@ import { parseDesign } from '../lib/design.js';
 import { parseChangelog } from '../lib/history.js';
 import { planLocale, replyIn } from '../lib/locale.js';
 import { mainCheckoutFrom } from '../lib/main-checkout.js';
-import { isSafeId, normalizeLive, parseExecution, type ExecutionState } from '../lib/execution-state.js';
+import { FORGE_DOC_MAX_BYTES, isSafeId, normalizeLive, parseExecution, type ExecutionState, type LiveDoc } from '../lib/execution-state.js';
+import { coordinatorGone } from '../lib/execution-view.js';
 import { parseRun, type RunState } from '../lib/forge-run.js';
 import { forgeRoleOf, MAX_MEMBER_FILES } from '../lib/forge-activity.js';
 import { normalizeMember, type MemberDoc } from '../lib/member-doc.js';
@@ -55,6 +56,8 @@ export function makesCommits(cmd: string): boolean {
 
 const nonEmpty = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v : undefined);
 const read = (f: string): string | null => { try { return readFileSync(f, 'utf8'); } catch { return null; } };
+/** A file's text when it is at most `max` bytes, as the band reads it; null when it is missing or bigger. */
+const readCapped = (f: string, max: number): string | null => { try { return statSync(f).size > max ? null : readFileSync(f, 'utf8'); } catch { return null; } };
 const lines = (file: string): string[] => (read(file) ?? '').split('\n').filter(l => l.trim());
 const field = (l: string, k: 'sha' | 'task'): string | null => {
   try { const o = JSON.parse(l) as Record<string, unknown> | null; const v = o?.[k]; return typeof v === 'string' ? v : null; } catch { return null; }
@@ -72,7 +75,7 @@ interface ForgeFiles {
   any: ExecutionState | null;
   members: MemberDoc[];
   infinite: RunState | null;
-  /** The coordinator's live signal says its conversation ended. */
+  /** The run has no coordinator: its conversation ended, or it went silent (coordinatorGone). */
   coordinatorEnded: boolean;
 }
 
@@ -87,14 +90,17 @@ function readForge(root: string, project: string, now: number): ForgeFiles {
   const members = names.flatMap(n => {
     try { const m = normalizeMember(JSON.parse(read(path.join(dir, 'members', n)) ?? 'null')); return m ? [m] : []; } catch { return []; }
   });
-  let coordinatorEnded = false;
+  // B-09, M4: the coordinator's own signal, as the band reads it, says whether the run lost its coordinator.
+  let signal: LiveDoc | null = null;
   if (exec && isSafeId(exec.hookSession)) {
-    try { coordinatorEnded = normalizeLive(JSON.parse(read(path.join(dir, 'live', `${exec.hookSession}.json`)) ?? 'null'))?.ended === true; } catch { coordinatorEnded = false; }
+    try { signal = normalizeLive(JSON.parse(readCapped(path.join(dir, 'live', `${exec.hookSession}.json`), FORGE_DOC_MAX_BYTES) ?? 'null')); } catch { signal = null; }
   }
-  return { exec, any, members, infinite: parseRun(read(path.join(dir, 'run.json'))), coordinatorEnded };
+  return { exec, any, members, infinite: parseRun(read(path.join(dir, 'run.json'))), coordinatorEnded: coordinatorGone(exec, signal, now) };
 }
 
 interface Ctx { root: string; project: string; wp: string; docDir: string; now: number; sid: string | null; seats: Seat[]; viewer: Viewer; forge: ForgeFiles }
+/** The role of a hook input without a valid session id (rule 8). */
+const NOBODY: Viewer = { role: 'none', subject: null, binding: null, member: null, coordinator: false, since: null, task: null };
 
 /** §4.3, the common preamble: the projects with their bindings, the one of this session, forge's files, the seats'
  *  tasks in progress, and the role. Null without a project. */
@@ -119,7 +125,8 @@ function contextOf(io: Io, input: HookInput): Ctx | null {
   const seats = seatsOf.get(project) ?? [];
   const forge = readForge(root, project, now);
   const run = forge.exec;
-  const viewer = describeViewer({
+  // §4.3 point 1 (M1): without a valid session id the role is none; only session-start acts on it.
+  const viewer = sid === null ? NOBODY : describeViewer({
     bound: seats.flatMap(s => (s.bound ? [s.bound] : [])),
     execution: run,
     members: run ? forge.members.filter(m => m.runId === run.runId) : [],
@@ -154,19 +161,23 @@ function touch(seat: Seat, claude: string, now: Date, reopen: boolean, env: Io['
 }
 
 /**
- * C1: every hook of a conversation renews its own live bindings in the project, whatever its role's subject (a
+ * C1: every hook of a conversation renews its own live binding in the project, whatever its role's subject (a
  * coordinator or a member is an owner by execution, and still holds its seat through its binding). On a resume or a
- * compact the newest of its bindings is also reopened (§4.1), unless it was released.
+ * compact the newest of its bindings is reopened instead (§4.1), unless it was released. M5: only that one binding is
+ * renewed, the newest by its last renewal (the checkout seat first on a tie, as the band picks it); any other lapses,
+ * so a seat a bind of this conversation released, and that a renewal raced back to life, does not stay held.
  */
 function renewOwn(ctx: Ctx, io: Io, reopen: boolean): void {
   const sid = ctx.sid;
   if (!sid) return;
-  const mine = ctx.seats.filter((s): s is Seat & { bound: BoundDoc } => s.bound?.claude === sid);
-  const newest = mine.reduce<(typeof mine)[number] | null>((best, s) => (!best || Date.parse(s.bound.seenAt) > Date.parse(best.bound.seenAt) ? s : best), null);
-  for (const s of mine) {
-    const again = reopen && s === newest;
-    if (again || s.bound.endedAt === null) touch(s, sid, io.now(), again, io.env);
-  }
+  type Own = Seat & { bound: BoundDoc };
+  const newestOf = (list: Own[]): Own | null =>
+    list.reduce<Own | null>((best, s) => (!best || Date.parse(s.bound.seenAt) > Date.parse(best.bound.seenAt) ? s : best), null);
+  const mine = ctx.seats.filter((s): s is Own => s.bound?.claude === sid);
+  const newest = newestOf(mine);
+  const again = reopen && newest !== null && newest.bound.endReason !== 'released';
+  const target = again ? newest : newestOf(mine.filter(s => s.bound.endedAt === null));
+  if (target) touch(target, sid, io.now(), again, io.env);
 }
 
 function readPlan(docDir: string): Plan | null {

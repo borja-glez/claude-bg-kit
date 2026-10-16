@@ -943,7 +943,14 @@ describe('classic hooks', () => {
     });
     it('an input without a session id, with a source or a reason the engine may add later, or broken never fails (Review Focus 5)', () => {
       setup(); bindAs('A');
-      expect(context(hook('session-start', {}))).toContain('Another session (seat backend');
+      // M1, spec §4.3 point 1: without a valid session id only session-start acts, with role none.
+      for (const input of [{}, { session_id: null }, { session_id: '../x' }]) {
+        const none = context(hook('session-start', input));
+        expect(none, JSON.stringify(input)).toBe('waypoint: project demo-shop has a roadmap (not published); no session is bound to it.');
+      }
+      bindAs('A', { endedAt: ago(30), endReason: 'clear' }); ownTask('T002');
+      expect(context(hook('session-start', {}))).not.toContain('left in progress');
+      bindAs('A');
       expect(context(hook('session-start', { session_id: 'A', source: 'teleport' }))).toContain('Session backend');
       expect(hook('session-start', 'not json')).toEqual({ code: 0, stdout: '', stderr: '' });
       for (const sub of ['post-commit', 'stop', 'session-end']) expect(hook(sub, { tool_input: { command: 'git commit -m x' } }), sub).toEqual({ code: 0, stdout: '', stderr: '' });
@@ -1284,6 +1291,21 @@ describe('classic hooks', () => {
       bindAs('A', { seenAt: ago(4), endedAt: ago(1), endReason: 'released' });
       hook('stop', { session_id: 'A' });
       expect(bound().seenAt).toBe(ago(4));
+    });
+    it('renew only the newest of the conversation\'s live bindings in the project; the others lapse, as the band does (M5)', () => {
+      setup();
+      // backend was released by A's bind --second-seat, and a renewal raced it back to life: two live bindings of A.
+      bindAs('A', { seenAt: ago(3) });
+      bindAs('A', { seenAt: ago(2) }, 'main-2', wp('seats', 'main-2'));
+      hook('stop', { session_id: 'A' });
+      expect(bound(wp('seats', 'main-2')).seenAt).toBe(new Date(NOW).toISOString());
+      expect(bound().seenAt).toBe(ago(3));
+      // A resume reopens and renews the newest one only.
+      bindAs('A', { seenAt: ago(3) });
+      bindAs('A', { seenAt: ago(2), endedAt: ago(1), endReason: 'resume' }, 'main-2', wp('seats', 'main-2'));
+      hook('session-start', { session_id: 'A', source: 'resume' });
+      expect(bound(wp('seats', 'main-2'))).toMatchObject({ seenAt: new Date(NOW).toISOString(), endedAt: null, endReason: null });
+      expect(bound().seenAt).toBe(ago(3));
     });
 
     describe('during a forge execution (A-07)', () => {

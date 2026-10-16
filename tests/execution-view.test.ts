@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { executionView, isVisibleRun, signalLiveness, STALE_RUN_TTL_MS, lastMovedAt } from '../src/lib/execution-view.js';
+import { coordinatorGone, executionView, isVisibleRun, signalLiveness, STALE_RUN_TTL_MS, lastMovedAt } from '../src/lib/execution-view.js';
 import type { ExecutionState, PublicTask, LiveDoc } from '../src/lib/execution-state.js';
 
 const NOW = Date.parse('2026-10-12T12:00:00.000Z');
@@ -202,6 +202,33 @@ describe('executionView lifecycle (C2)', () => {
   });
   it('a stalled run whose last step is a minute ahead of the reader (clock skew) is still drawn', () => {
     expect(view(stalled({ lastStepAt: at(1) }))).toMatchObject({ frozenAt: at(1) });
+  });
+});
+
+describe('coordinatorGone (B-09, M4): a run without its coordinator, for the band and the hooks alike', () => {
+  it('its own signal says its conversation ended, whatever the run', () => {
+    expect(coordinatorGone(exec(), idle(-1, true), NOW)).toBe(true);
+    expect(coordinatorGone(exec({ active: false, stopReason: 'stopped' }), idle(-1, true), NOW)).toBe(true);
+    expect(coordinatorGone(exec({ hookSession: null }), idle(-1, true), NOW)).toBe(false);
+  });
+  it('an active run whose coordinator the run band draws stopped: no step nor signal for 12 minutes, no agent running', () => {
+    expect(coordinatorGone(exec({ lastStepAt: at(-3 * 24 * 60) }), null, NOW)).toBe(true);
+    expect(coordinatorGone(exec({ lastStepAt: at(-12) }), null, NOW)).toBe(true);
+    expect(coordinatorGone(exec({ lastStepAt: at(-11) }), null, NOW)).toBe(false);
+    expect(coordinatorGone(exec({ lastStepAt: at(-30) }), idle(-2), NOW)).toBe(false);
+    expect(coordinatorGone(exec({ lastStepAt: at(-30) }), live(-20), NOW)).toBe(false);
+    expect(coordinatorGone(exec({ lastStepAt: at(-30) }), idle(-20), NOW)).toBe(true);
+    // A signal of another run, or of another session, says nothing of this coordinator.
+    expect(coordinatorGone(exec({ lastStepAt: at(-30) }), { ...idle(-1), runId: 'r0' }, NOW)).toBe(true);
+    expect(coordinatorGone(exec({ lastStepAt: at(-30) }), { ...idle(-1), sessionId: 'other' }, NOW)).toBe(true);
+  });
+  it('a run that never stepped counts from its start, as swarm takeover does', () => {
+    expect(coordinatorGone(exec({ lastStepAt: null, startedAt: at(-5) }), null, NOW)).toBe(false);
+    expect(coordinatorGone(exec({ lastStepAt: null, startedAt: at(-13) }), null, NOW)).toBe(true);
+  });
+  it('an inactive run is not «without a coordinator» by silence: it stopped', () => {
+    expect(coordinatorGone(exec({ active: false, stopReason: 'stalled', lastStepAt: at(-60) }), null, NOW)).toBe(false);
+    expect(coordinatorGone(null, null, NOW)).toBe(false);
   });
 });
 

@@ -73,6 +73,8 @@ const NOTICE: Notice = {
   viewer: { role: 'other-live', coordinator: false, runId: null },
 };
 const notice = (over: Partial<Notice> = {}): WaypointBand => ({ ...NOTICE, ...over });
+/** The key under which × keeps a notice of project demo in the checkout /repo (K5-08, M7: a JSON list). */
+const dismissedKey = (kind: Notice['kind'], key: string) => JSON.stringify(['/repo', 'demo', kind, key]);
 
 test('the Spanish design band says one pending proposal and one critical in the singular', async ($, on) => {
   engineBottom(on);
@@ -546,6 +548,24 @@ test('a notice of another session at work is drawn dim with Status, Other track 
   }
 });
 
+test('a notice of another session on the design offers Status and the roadmap, not Other track (M3)', async ($, on) => {
+  engineBottom(on);
+  const sent: string[] = [];
+  recordCommands(on, sent);
+  serveBand(on, () => notice({ subject: 'design', task: null, title: null, key: 'design:demo' }));
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
+    const line = await ui.find({ type: 'Text', text: '◦ otra sesión (main) trabaja en el diseño · hace 12 min' });
+    expect(line?.props.dimColor).toBe(true);
+    expect(await ui.find({ type: 'Link', text: 'Abrir roadmap' })).toBeDefined();
+    await ui.press({ key: 'status' });
+    expect(sent.at(-1)).toBe('/waypoint:status');
+    for (const key of ['other-track', 'resume', 'join', 'stop-run']) expect(await ui.find({ key }), key).toBeUndefined();
+    await ui.unmount();
+  }
+});
+
 test('the notices of a run and of what an earlier conversation left send their commands (B-07, C2)', async ($, on) => {
   engineBottom(on);
   const sent: string[] = [];
@@ -761,6 +781,29 @@ test('a band hidden with × before /clear does not hide what the next conversati
   await ui.unmount();
 });
 
+test('× on its own band does not hide that another session took the seat over: the next tick shows the notice (M2)', async ($, on) => {
+  engineBottom(on);
+  const files = { ...FILES };
+  serveFiles(on, files);
+  const clock = mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  await ui.press({ key: 'dismiss' });
+  expect(await ui.find({ key: 'next-task' })).toBeUndefined();
+  // The same band on the next tick stays hidden.
+  await clock.advance(30000);
+  await ui.redraw();
+  expect(await ui.find({ key: 'next-task' })).toBeUndefined();
+  // Another conversation runs bind --takeover on the seat.
+  files[`${ROOT}/.waypoint/demo/bound.json`] = BOUND({ claude: 'conv-9', since: '2026-10-11T10:05:40.000Z', seenAt: '2026-10-11T10:05:40.000Z' });
+  await clock.advance(30000);
+  await ui.redraw();
+  expect(await ui.find({ type: 'Text', text: '◦ otra sesión (S1) trabaja en T002 · hace 1 min' })).toBeDefined();
+  expect(await ui.find({ key: 'other-track' })).toBeDefined();
+  await ui.unmount();
+});
+
 test("the 30 s tick renews this conversation's binding once a minute, and no other (C3)", async ($, on) => {
   engineBottom(on);
   const files: Record<string, string> = { ...FILES, [`${ROOT}/.waypoint/demo/seats/main-2/bound.json`]: BOUND({ sid: 'main-2', claude: 'conv-2', seenAt: '2026-10-11T10:00:00.000Z' }) };
@@ -813,7 +856,7 @@ test('× on a notice is kept per checkout, project, kind and subject until the n
   let ui = await mount();
   await ui.press({ key: 'dismiss' });
   await ui.redraw();
-  expect(store.dismissed).toEqual({ '/repo|demo|previous|task:T002': '2026-10-12T10:00:00.000Z' });
+  expect(store.dismissed).toEqual({ [dismissedKey('previous', 'task:T002')]: '2026-10-12T10:00:00.000Z' });
   expect(await ui.find({ key: 'resume' })).toBeUndefined();
   expect(await ui.find({ text: 'engine band' })).toBeDefined();
   await ui.unmount();
@@ -836,14 +879,14 @@ test('× on a notice is kept per checkout, project, kind and subject until the n
   ui = await mount();
   await ui.press({ key: 'dismiss' });
   await ui.redraw();
-  expect(store.dismissed).toMatchObject({ '/repo|demo|other-live|seat:main': '2026-10-12T10:12:30.000Z' });
+  expect(store.dismissed).toMatchObject({ [dismissedKey('other-live', 'seat:main')]: '2026-10-12T10:12:30.000Z' });
   await ui.unmount();
 });
 
 test('a notice dismissed in an earlier session stays hidden; an expired dismissal or a junk store hides nothing (K5-08, Review Focus 5)', async ($, on) => {
   engineBand(on);
   serveFiles(on, {});
-  const store = memoryStore(on, { dismissed: { '/repo|demo|previous|task:T002': '2026-10-12T10:00:00.000Z', '/repo|demo|other-live|seat:main': '2026-10-11T10:00:00.000Z' } });
+  const store = memoryStore(on, { dismissed: { [dismissedKey('previous', 'task:T002')]: '2026-10-12T10:00:00.000Z', [dismissedKey('other-live', 'seat:main')]: '2026-10-11T10:00:00.000Z' } });
   mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
   let band = notice({ kind: 'previous', viewer: PREVIOUS });
@@ -857,7 +900,8 @@ test('a notice dismissed in an earlier session stays hidden; an expired dismissa
   ui = await mount();
   expect(await ui.find({ key: 'other-track' })).toBeDefined();
   await ui.unmount();
-  for (const junk of [['/repo|demo|previous|task:T002'], 'nope', { '/repo|demo|previous|task:T002': 'tomorrow' }]) {
+  // An earlier version's |-joined key is junk too (M7): its notice shows once more.
+  for (const junk of [[dismissedKey('previous', 'task:T002')], 'nope', { [dismissedKey('previous', 'task:T002')]: 'tomorrow' }, { '/repo|demo|previous|task:T002': '2026-10-12T10:00:00.000Z' }]) {
     store.dismissed = junk;
     await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
     band = notice({ kind: 'previous', viewer: PREVIOUS });
@@ -866,7 +910,7 @@ test('a notice dismissed in an earlier session stays hidden; an expired dismissa
     await ui.unmount();
   }
   // Dismissing another live session's work on T002 does not hide the offer it leaves once it ends.
-  store.dismissed = { '/repo|demo|other-live|task:T002': '2026-10-12T10:12:30.000Z' };
+  store.dismissed = { [dismissedKey('other-live', 'task:T002')]: '2026-10-12T10:12:30.000Z' };
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   band = notice();
   ui = await mount();
@@ -875,6 +919,30 @@ test('a notice dismissed in an earlier session stays hidden; an expired dismissa
   band = notice({ kind: 'previous', viewer: PREVIOUS });
   ui = await mount();
   expect(await ui.find({ key: 'resume' })).toBeDefined();
+  await ui.unmount();
+});
+
+test('a notice dismissed before a hot reload stays hidden though no session start reads the store again (M6)', async ($, on) => {
+  engineBand(on);
+  serveFiles(on, {});
+  const store = memoryStore(on, { dismissed: { [dismissedKey('previous', 'task:T009')]: '2026-10-12T10:00:00.000Z' } });
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  let band = notice({ kind: 'previous', task: 'T009', title: 'Pagos', key: 'task:T009', viewer: PREVIOUS });
+  serveBand(on, () => band);
+  const mount = () => $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  let ui = await mount();
+  expect(await ui.find({ key: 'resume' })).toBeUndefined();
+  expect(await ui.find({ text: 'engine band' })).toBeDefined();
+  await ui.unmount();
+  // Read once: another notice still shows, and the store is not asked again on every draw.
+  store.dismissed = {};
+  band = notice({ kind: 'previous', viewer: PREVIOUS });
+  ui = await mount();
+  expect(await ui.find({ key: 'resume' })).toBeDefined();
+  await ui.unmount();
+  band = notice({ kind: 'previous', task: 'T009', title: 'Pagos', key: 'task:T009', viewer: PREVIOUS });
+  ui = await mount();
+  expect(await ui.find({ key: 'resume' })).toBeUndefined();
   await ui.unmount();
 });
 

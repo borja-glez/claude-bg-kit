@@ -5,7 +5,7 @@ import { parseDismissed, pendingProposals, type GateCritique } from '../lib/desi
 import { parseDesign } from '../lib/design.js';
 import { parseChangelog } from '../lib/history.js';
 import { parsePlan } from '../lib/plan.js';
-import { executionView, isVisibleRun } from '../lib/execution-view.js';
+import { coordinatorGone, executionView, isVisibleRun } from '../lib/execution-view.js';
 import { isSafeId, normalizeLive, normalizePublicTask, parseExecution, type ExecutionState, type LiveDoc, type PublicTask } from '../lib/execution-state.js';
 import type { MessageDoc, Plan, States } from '../lib/types.js';
 import { decisionsSummary } from '../lib/decisions.js';
@@ -146,10 +146,6 @@ function membersOf(f: BandFiles, runId: string): MemberDoc[] {
     return m && m.runId === runId ? [m] : [];
   });
 }
-/** B-09: the live signal of the run's coordinator says its conversation ended. */
-function coordinatorEnded(exec: ExecutionState | null, text: string | undefined): boolean {
-  return !!exec?.hookSession && normalizeLive(json(text))?.ended === true;
-}
 /**
  * C3: the role as the band publishes it. runId names the execution only when the role is about it (its coordinator,
  * a member, or another conversation's run), while it is drawn for that role (C2: for its coordinator and members until
@@ -161,9 +157,12 @@ function viewerOf(v: Viewer, exec: ExecutionState | null, now: number): BandView
   const runId = exec && v.subject === 'execution' && isVisibleRun(exec, now, ownsRun ? 'owner' : 'none') ? exec.runId : null;
   return { role: v.role, coordinator: v.coordinator, runId };
 }
-/** What describeViewer reads of forge: the execution, the members of its run and whether its coordinator ended (B-09). */
+/**
+ * What describeViewer reads of forge: the execution, the members of its run, and whether it has no coordinator: its
+ * conversation ended or it went silent (B-09, M4), by its own signal as the hooks read it.
+ */
 function runInput(exec: ExecutionState | null, f: BandFiles, now: number): Pick<ViewerInput, 'execution' | 'members' | 'coordinatorEnded'> {
-  return { execution: exec, members: exec ? membersOf(f, exec.runId) : [], coordinatorEnded: coordinatorEnded(exec, f.coordinatorLive) };
+  return { execution: exec, members: exec ? membersOf(f, exec.runId) : [], coordinatorEnded: coordinatorGone(exec, normalizeLive(json(f.coordinatorLive)), now) };
 }
 /** The role from the execution alone, with no binding: there is no waypoint project whose seats could be held. */
 function forgeViewer(exec: ExecutionState | null, f: BandFiles, now: number): BandViewer {
@@ -193,10 +192,11 @@ export function buildBandModel(project: string, f: BandFiles): BandModel {
     try { if (f.plan !== undefined) plan = parsePlan(f.plan); } catch { plan = null; }
     const exec = projectExecution(project, f, now);
     const seats = seatsOf(f, now);
+    const sessionId = isSafeId(f.sessionId) ? f.sessionId : null;
     const v = describeViewer({
       bound: seats.flatMap(s => (s.bound ? [s.bound] : [])),
       ...runInput(exec, f, now),
-      sessionId: isSafeId(f.sessionId) ? f.sessionId : null,
+      sessionId,
       now,
       openTasks: openTasksFrom(parsed<States[string]>(f.states) as States),
     });
@@ -210,6 +210,9 @@ export function buildBandModel(project: string, f: BandFiles): BandModel {
     if (f.plan === undefined && f.design === undefined) return noneBand(knownLocale(f), forgeViewer(exec, f, now));
     // A plan that does not read: nothing to work out.
     if (f.plan !== undefined && !plan) return noneBand(knownLocale(f));
+    // M1: a conversation whose id the engine could not give owns nothing, and a notice could be about its own seat:
+    // nothing is drawn, and its role is still published.
+    if (sessionId === null) return noneBand(knownLocale(f), viewer);
     const m = roleBand(project, f, plan, v, exec, seats, now, viewer);
     if (m) return withAuto(m, f, now);
     return noneBand(knownLocale(f), viewer);
@@ -238,10 +241,10 @@ function roleBand(project: string, f: BandFiles, plan: Plan | null, v: Viewer, e
 }
 
 /**
- * §4.5: what a conversation that is not the owner sees, dim: another live one bound to the roadmap or coordinating a
- * run (other-live), or what an earlier one left behind (previous): a task in progress, a draft, a run stopped or
- * without its coordinator. A previous binding with nothing to take up, and another live one where there is no roadmap
- * (as the start hook says), draw nothing.
+ * §4.5: what a conversation that is not the owner sees, dim: another live one bound to the roadmap or to its design, or
+ * coordinating a run (other-live), or what an earlier one left behind (previous): a task in progress, a draft, a run
+ * stopped or without its coordinator. A previous binding with nothing to take up, and another live one where there is
+ * no roadmap (as the start hook says), draw nothing.
  */
 function noticeModel(project: string, f: BandFiles, plan: Plan | null, v: Viewer, exec: ExecutionState | null, now: number, viewer: BandViewer): BandModel | null {
   // Declared, so the literal type survives in `base` (an inferred one would widen to string there).
@@ -260,6 +263,8 @@ function noticeModel(project: string, f: BandFiles, plan: Plan | null, v: Viewer
   if (!b) return null;
   if (kind === 'other-live') {
     if (!plan) return null;
+    // M3: a conversation bound for the design works the design, not the roadmap.
+    if (b.via === 'design') return { ...base, subject: 'design', seat: b.sid, task: null, title: null, runId: null, key: `design:${project}` };
     return { ...base, subject: 'task', seat: b.sid, task: v.task, title: titleOf(v.task), runId: null, key: v.task ? `task:${v.task}` : `seat:${b.sid}` };
   }
   // Something to take up (spec §4.2): the draft of a design binding, else the seat's task in progress.

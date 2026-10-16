@@ -262,21 +262,44 @@ describe("renewBindings (C3): the band keeps this conversation's bindings alive"
     JSON.stringify({ sid, claude, pid: null, via: 'work', since: t(-60), seenAt: t(seenMin), endedAt: null, endReason: null, ...over });
   const root = '/repo';
   const shop = `${root}/.waypoint/shop`;
-  it('moves seenAt of its own live bindings a minute or more old, in every project and seat, and touches no other', async () => {
+  it('moves seenAt of its own live binding a minute or more old, in every project and seat, and touches no other', async () => {
     const files: Record<string, string> = {
       [`${shop}/session.json`]: JSON.stringify({ sessionId: 'main' }),
-      [`${shop}/bound.json`]: b('main', ID, -2),
+      [`${shop}/bound.json`]: b('main', 'conv-8', -2),
       [`${shop}/seats/main-2/bound.json`]: b('main-2', ID, -RENEW_MS / 60000),
       [`${shop}/seats/main-3/bound.json`]: b('main-3', 'conv-9', -2),
-      [`${root}/.waypoint/web/bound.json`]: b('main', ID, -0.5),
+      [`${root}/.waypoint/web/bound.json`]: b('main', ID, -2),
+      [`${root}/.waypoint/docs/bound.json`]: b('main', ID, -0.5),
     };
     const before = { ...files };
     const { $, writes } = fake(root, files, { at: () => at });
     expect(await renewBindings($)).toBe(2);
-    expect(writes).toEqual([`${shop}/bound.json`, `${shop}/seats/main-2/bound.json`]);
-    expect(JSON.parse(files[`${shop}/bound.json`])).toEqual({ ...JSON.parse(before[`${shop}/bound.json`]), seenAt: t(0) });
-    expect(files[`${shop}/seats/main-3/bound.json`]).toBe(before[`${shop}/seats/main-3/bound.json`]);
-    expect(files[`${root}/.waypoint/web/bound.json`]).toBe(before[`${root}/.waypoint/web/bound.json`]);
+    expect(writes.sort()).toEqual([`${shop}/seats/main-2/bound.json`, `${root}/.waypoint/web/bound.json`]);
+    expect(JSON.parse(files[`${shop}/seats/main-2/bound.json`])).toEqual({ ...JSON.parse(before[`${shop}/seats/main-2/bound.json`]), seenAt: t(0) });
+    for (const p of [`${shop}/bound.json`, `${shop}/seats/main-3/bound.json`, `${root}/.waypoint/docs/bound.json`]) expect(files[p], p).toBe(before[p]);
+  });
+  it('renews only the newest of its live bindings in a project; the others lapse (M5: a seat a bind released stays released)', async () => {
+    const files: Record<string, string> = {
+      [`${shop}/session.json`]: JSON.stringify({ sessionId: 'main' }),
+      // main was released by this conversation's bind --second-seat, and a renewal raced it back to life.
+      [`${shop}/bound.json`]: b('main', ID, -3),
+      [`${shop}/seats/main-2/bound.json`]: b('main-2', ID, -2),
+    };
+    const before = { ...files };
+    const { $, writes } = fake(root, files, { at: () => at });
+    expect(await renewBindings($)).toBe(1);
+    expect(writes).toEqual([`${shop}/seats/main-2/bound.json`]);
+    expect(files[`${shop}/bound.json`]).toBe(before[`${shop}/bound.json`]);
+    // The same renewal time: the checkout seat is the one kept, as the hooks and describeViewer pick it.
+    const tie: Record<string, string> = { ...before, [`${shop}/seats/main-2/bound.json`]: b('main-2', ID, -3) };
+    const again = fake(root, tie, { at: () => at });
+    expect(await renewBindings(again.$)).toBe(1);
+    expect(again.writes).toEqual([`${shop}/bound.json`]);
+    // An ended binding is not a live one: the newest live is renewed even when an ended one is newer.
+    const ended: Record<string, string> = { ...before, [`${shop}/seats/main-2/bound.json`]: b('main-2', ID, -2, { endedAt: t(-1), endReason: 'clear' }) };
+    const third = fake(root, ended, { at: () => at });
+    expect(await renewBindings(third.$)).toBe(1);
+    expect(third.writes).toEqual([`${shop}/bound.json`]);
   });
   it('never renews an ended binding, nor one an end or a takeover rewrote between its read and its write (Review Focus 3)', async () => {
     const ended = fake(root, { [`${shop}/bound.json`]: b('main', ID, -2, { endedAt: t(-1), endReason: 'clear' }) }, { at: () => at });
@@ -321,10 +344,11 @@ describe("renewBindings (C3): the band keeps this conversation's bindings alive"
     expect(files[`${shop}/bound.json`]).toBe(fresh);
   });
   it('swallows a write the engine refuses and goes on with the next binding', async () => {
+    const web = `${root}/.waypoint/web`;
     const files: Record<string, string> = {
       [`${shop}/session.json`]: JSON.stringify({ sessionId: 'main' }),
       [`${shop}/bound.json`]: b('main', ID, -2),
-      [`${shop}/seats/main-2/bound.json`]: b('main-2', ID, -2),
+      [`${web}/bound.json`]: b('main', ID, -2),
     };
     const { $ } = fake(root, files, { at: () => at });
     const tried: string[] = [];
@@ -334,7 +358,7 @@ describe("renewBindings (C3): the band keeps this conversation's bindings alive"
       files[p] = text;
     } } } as Engine;
     expect(await renewBindings(refusing)).toBe(1);
-    expect(tried).toEqual([`${shop}/bound.json`, `${shop}/seats/main-2/bound.json`]);
-    expect(JSON.parse(files[`${shop}/seats/main-2/bound.json`]).seenAt).toBe(t(0));
+    expect(tried.sort()).toEqual([`${shop}/bound.json`, `${web}/bound.json`]);
+    expect(JSON.parse(files[`${web}/bound.json`]).seenAt).toBe(t(0));
   });
 });

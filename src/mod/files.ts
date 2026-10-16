@@ -1,9 +1,9 @@
 import type { EngineInterface } from 'claude-code';
 import { mainCheckoutFrom } from '../lib/main-checkout.js';
-import { buildBandModel, executionViewer, noneBand, pickProject, seatsOf, type BandFiles, type BandModel, type ProjectEntry } from './model.js';
+import { buildBandModel, executionViewer, noneBand, pickProject, seatsOf, type BandFiles, type BandModel, type BandSeat, type ProjectEntry } from './model.js';
 import { DECISIONS_MAX } from '../lib/decisions.js';
 import { BOUND_MAX_BYTES, MAX_SEATS, parseBound, type BoundDoc } from '../lib/bound.js';
-import { isSafeId, parseExecution } from '../lib/execution-state.js';
+import { FORGE_DOC_MAX_BYTES, isSafeId, parseExecution } from '../lib/execution-state.js';
 
 export type Engine = EngineInterface;
 
@@ -111,7 +111,7 @@ async function projectEntries($: Engine, root: string, now: number): Promise<Pro
 }
 
 const EXEC_MAX = 64 * 1024;
-const EXEC_FILE_MAX = 8 * 1024;
+const EXEC_FILE_MAX = FORGE_DOC_MAX_BYTES;
 const EXEC_TASKS_MAX = 50;
 const LIVE_MAX = 20;
 /** C3: at most this many member files are read, the newest first. */
@@ -220,8 +220,8 @@ export async function loadBandModel($: Engine): Promise<BandModel> {
  * of $.session.id() for its own seat that has not ended moves its seenAt to now when RENEW_MS or more passed since its
  * last renewal. It is read again just before the write and must still pass that rule, so an end, a release or a
  * takeover written meanwhile is never undone, an ended binding is never reopened, and a renewal the hooks made
- * meanwhile is not repeated (spec §4.10). No other binding is touched, and a write the engine refuses is left for the
- * next tick. Returns how many it renewed.
+ * meanwhile is not repeated (spec §4.10). Only the newest of them in each project is renewed (M5), no other binding is
+ * touched, and a write the engine refuses is left for the next tick. Returns how many it renewed.
  */
 export async function renewBindings($: Engine): Promise<number> {
   const id = await sessionIdOf($);
@@ -234,16 +234,19 @@ export async function renewBindings($: Engine): Promise<number> {
   const projects = (await listOpt($, join(root, '.waypoint'))).filter(d => d.kind === 'dir').slice(0, MAX_PROJECTS);
   for (const p of projects) {
     const wp = join(root, '.waypoint', p.name);
-    for (const s of seatsOf(await seatFiles($, wp), now)) {
-      if (!due(s.bound, s.sid)) continue;
-      const file = s.checkout ? join(wp, 'bound.json') : join(wp, 'seats', s.sid, 'bound.json');
-      const cur = parseBound(await readOpt($, file), now);
-      if (!due(cur, s.sid)) continue;
-      try {
-        await $.fs.write(file, `${JSON.stringify({ ...cur, seenAt: new Date(now).toISOString() }, null, 2)}\n`);
-        renewed++;
-      } catch { /* the next tick tries again */ }
-    }
+    // M5: only the newest of its live bindings in the project is renewed (the newest renewal, the checkout seat first
+    // on a tie, as describeViewer and the hooks pick it); any other lapses. A seat that a bind of this conversation
+    // released, and that a renewal raced back to life, does not stay held.
+    const mine = seatsOf(await seatFiles($, wp), now).filter(s => s.bound?.claude === id && s.bound.endedAt === null);
+    const s = mine.reduce<BandSeat | null>((best, x) => (!best || Date.parse(x.bound!.seenAt) > Date.parse(best.bound!.seenAt) ? x : best), null);
+    if (!s || !due(s.bound, s.sid)) continue;
+    const file = s.checkout ? join(wp, 'bound.json') : join(wp, 'seats', s.sid, 'bound.json');
+    const cur = parseBound(await readOpt($, file), now);
+    if (!due(cur, s.sid)) continue;
+    try {
+      await $.fs.write(file, `${JSON.stringify({ ...cur, seenAt: new Date(now).toISOString() }, null, 2)}\n`);
+      renewed++;
+    } catch { /* the next tick tries again */ }
   }
   return renewed;
 }

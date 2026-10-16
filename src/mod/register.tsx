@@ -9,13 +9,19 @@ import { applyWrite, artifactId, writeFailed, writesOf } from './mirror.js';
 const band = atom({ plugin: 'waypoint', key: 'band' } as const, noneBand());
 const hidden = atom({ plugin: 'waypoint', key: 'hidden' } as const, false);
 
+/** The bands of the conversation's own work, which × hides for the process. */
+const OWN_BANDS: readonly string[] = ['work', 'run', 'design'];
+
 let refreshing = false;
 let timer: Timer | null = null;
 let lensRecheck: Timer | null = null;
 
-// K5-08: the notices dismissed with ×, read from $.store at each session start and after each write.
+// K5-08: the notices dismissed with ×, read from $.store at each session start and after each write. M6: a hot reload
+// starts the module over without a session start, so the first notice drawn reads them too (once: `dismissalsLoaded`).
 let dismissals: Dismissals = {};
+let dismissalsLoaded = false;
 async function loadDismissals($: Engine): Promise<void> {
+  dismissalsLoaded = true;
   try { dismissals = normalizeDismissals(await $.store.get(DISMISS_STORE_KEY), await nowMs($)); } catch { /* keep what is in memory */ }
 }
 async function rootOf($: Engine): Promise<string> {
@@ -49,7 +55,12 @@ async function refresh($: Engine): Promise<void> {
       try {
         const model = await loadBandModel($);
         const current = await read($, band);
-        if (JSON.stringify(current) !== JSON.stringify(model)) await update($, band, () => model);
+        if (JSON.stringify(current) !== JSON.stringify(model)) {
+          await update($, band, () => model);
+          // M2: a takeover turns this conversation's own band into another's notice; the × pressed on its own band does
+          // not hide that it lost the seat (its hooks stop recording from then on).
+          if (model.mode === 'notice' && OWN_BANDS.includes(current.mode)) await update($, hidden, () => false);
+        }
       } catch {
         // leave the band as it was
       }
@@ -169,7 +180,10 @@ export const register: Register = on => {
       const isHidden = await read($, hidden);
       if (isHidden || !m || e.props.hasSurvey || m.mode === 'none') return below;
       // K5-08: a notice dismissed with × stays hidden for as long as that notice lasts.
-      if (m.mode === 'notice' && isDismissed(dismissals, dismissalKey(await rootOf($), m.project, m.kind, m.key), await nowMs($))) return below;
+      if (m.mode === 'notice') {
+        if (!dismissalsLoaded) await loadDismissals($);
+        if (isDismissed(dismissals, dismissalKey(await rootOf($), m.project, m.kind, m.key), await nowMs($))) return below;
+      }
       const { Box, Text, Button, Link } = $.ui.resolve(e);
       // A running task's minutes and a notice's age are worked out as the band is drawn; the tick redraws only the first.
       const drawnAt = m.mode === 'notice' || (m.mode === 'work' && m.current?.startedAt) ? await $.clock.now() : 0;
@@ -211,7 +225,8 @@ export const register: Register = on => {
               ]
             : [
                 <Button key="status" label={t.status} onPress={submit('/waypoint:status')} />,
-                <Button key="other-track" label={t.otherTrack} onPress={fill('/waypoint:launch ')} />,
+                // A session on the design holds no track: there is no other one to launch.
+                ...(n.subject === 'design' ? [] : [<Button key="other-track" label={t.otherTrack} onPress={fill('/waypoint:launch ')} />]),
                 ...(n.roadmapUrl ? [link(n.roadmapUrl, t.roadmap)] : []),
               ];
         }

@@ -274,6 +274,10 @@ describe('buildBandModel · the role of who looks (C3, B-02, K5-01)', () => {
       expect(m.mode, String(id)).not.toBe('work');
       expect(m.mode, String(id)).not.toBe('run');
       expect(m.viewer.role, String(id)).not.toBe('owner');
+      // M1: nor a notice, which could be about its own seat; the role is still published.
+      expect(m, String(id)).toEqual({ mode: 'none', locale: 'es', viewer: { role: 'other-live', coordinator: false, runId: 'r1' } });
+      // Without the run: the owner of the seat is not told that another session works its task.
+      expect(buildBandModel('demo-shop', { ...files('A'), sessionId: id }), String(id)).toEqual({ mode: 'none', locale: 'es', viewer: { role: 'other-live', coordinator: false, runId: null } });
     }
   });
   it("with neither a plan nor a design nothing is drawn, but the role still comes from forge's execution (I2)", () => {
@@ -406,6 +410,13 @@ describe('buildBandModel · notices (B-02, B-07, K3-13, K5-02)', () => {
     // Nothing to take up: the seat has no task in progress.
     expect(buildBandModel('demo-shop', { ...withA({ endedAt: ended, endReason: 'clear' }), states: {} })).toMatchObject({ mode: 'none', viewer: { role: 'previous' } });
   });
+  it('another live conversation bound for the design: a design notice of its own, never «bound to the roadmap» (M3)', () => {
+    const f: BandFiles = { ...empty, plan, design, session: j({ sessionId: 'main' }), bindings: { '.': bound('main', 'D', { via: 'design' }) }, sessionId: 'X' };
+    const m = buildBandModel('demo-shop', f);
+    expect(m).toMatchObject({ mode: 'notice', kind: 'other-live', subject: 'design', seat: 'main', task: null, title: null, key: 'design:demo-shop',
+      viewer: { role: 'other-live', coordinator: false, runId: null } });
+    expect(bandLine(m, Date.now())).toBe('◦ otra sesión (main) trabaja en el diseño · hace 1 min');
+  });
   it('an earlier conversation on a draft: the design offer; a parked design, or another live one on a design without a plan, draws nothing', () => {
     const f: BandFiles = { ...empty, design, bindings: { '.': bound('main', 'A', { via: 'design', endedAt: ago(60), endReason: 'prompt_input_exit' }) }, sessionId: 'B' };
     expect(buildBandModel('demo-shop', f)).toMatchObject({ mode: 'notice', kind: 'previous', subject: 'design', seat: 'main', task: null, key: 'design:demo-shop', locale: 'es', roadmapUrl: null });
@@ -428,6 +439,26 @@ describe('buildBandModel · notices (B-02, B-07, K3-13, K5-02)', () => {
     // Its coordinator still sees the run band.
     expect(buildBandModel('demo-shop', { ...f(stalled), sessionId: 's1' }).mode).toBe('run');
   });
+  it('an active run whose coordinator went silent (no step nor signal for 12 minutes, no agent running) has no coordinator (M4)', () => {
+    const f = (over: object, extra: Partial<BandFiles> = {}): BandFiles => ({ ...empty, plan, sessionId: 'B', execution: EXEC(over), ...extra });
+    // Killed three days ago without a SessionEnd: the offer to close it, which only fills /forge:stop (stopReason null).
+    const dead = ago(3 * 24 * 60);
+    expect(buildBandModel('demo-shop', f({ lastStepAt: dead, startedAt: ago(3 * 24 * 60 + 60) }))).toMatchObject({
+      mode: 'notice', kind: 'previous', subject: 'run', runId: 'r1', stopReason: null, since: dead, viewer: { role: 'previous', coordinator: false, runId: 'r1' },
+    });
+    expect(buildBandModel('demo-shop', f({ lastStepAt: ago(13) }))).toMatchObject({ mode: 'notice', kind: 'previous', stopReason: null });
+    // Silent but not stopped yet, or waiting on an agent it started: still running, coordinated by another session.
+    expect(buildBandModel('demo-shop', f({ lastStepAt: ago(8) }))).toMatchObject({ mode: 'notice', kind: 'other-live', subject: 'run' });
+    const waiting = j({ sessionId: 's1', role: 'coordinator', runId: 'r1', task: null, event: 'SubagentStart', ts: ago(20), agents: [{ id: 'a1', type: 'forge:forge-impl', since: ago(20) }], ended: false });
+    expect(buildBandModel('demo-shop', f({ lastStepAt: ago(20) }, { coordinatorLive: waiting }))).toMatchObject({ mode: 'notice', kind: 'other-live' });
+    // A fresh signal keeps it alive whatever the last step; a run that never stepped counts from its start.
+    const fresh = j({ sessionId: 's1', role: 'coordinator', runId: 'r1', task: null, event: 'PostToolUse', ts: ago(1), agents: [], ended: false });
+    expect(buildBandModel('demo-shop', f({ lastStepAt: ago(60) }, { coordinatorLive: fresh }))).toMatchObject({ mode: 'notice', kind: 'other-live' });
+    expect(buildBandModel('demo-shop', f({ lastStepAt: null, startedAt: ago(5) }))).toMatchObject({ mode: 'notice', kind: 'other-live' });
+    expect(buildBandModel('demo-shop', f({ lastStepAt: null, startedAt: ago(13) }))).toMatchObject({ mode: 'notice', kind: 'previous', stopReason: null });
+    // Its coordinator still sees it as its own run.
+    expect(buildBandModel('demo-shop', { ...f({ lastStepAt: dead }), sessionId: 's1' })).toMatchObject({ mode: 'run', viewer: { coordinator: true } });
+  });
   it('only a plan run can be joined: the notice of an ephemeral one says so (I1, swarm join refuses it)', () => {
     expect(buildBandModel('demo-shop', { ...empty, plan, sessionId: 'X', execution: EPHEMERAL() }))
       .toMatchObject({ mode: 'notice', kind: 'other-live', subject: 'run', runId: 'e1', joinable: false });
@@ -439,12 +470,18 @@ describe('buildBandModel · notices (B-02, B-07, K3-13, K5-02)', () => {
     expect(n({})).toBe('◦ otra sesión (main) trabaja en T002 · hace 3 min');
     expect(n({}, 'en')).toBe('◦ another session (main) works on T002 · 3 min ago');
     expect(n({ task: null, title: null })).toBe('◦ otra sesión (main) está ligada al roadmap · hace 3 min');
+    expect(n({ subject: 'design', task: null, title: null, key: 'design:demo-shop' })).toBe('◦ otra sesión (main) trabaja en el diseño · hace 3 min');
+    expect(n({ subject: 'design', task: null, title: null, key: 'design:demo-shop' }, 'en')).toBe('◦ another session (main) is working on the design · 3 min ago');
     expect(n({ since: null })).toBe('◦ otra sesión (main) trabaja en T002');
     expect(n({ subject: 'run', seat: null, task: null, title: null, runId: 'r1', integrated: 3, total: 12 })).toBe('◦ ejecución de forge en curso, la coordina otra sesión · 3/12');
     expect(n({ kind: 'previous', since: '2026-10-15T10:00:00.000Z' })).toBe('◌ quedó a medias: T002 API de pedidos (hace 2 h)');
     expect(n({ kind: 'previous', since: '2026-10-15T10:00:00.000Z' }, 'en')).toBe('◌ left in progress: T002 API de pedidos (2 h ago)');
     expect(n({ kind: 'previous', title: 'Un título muy largo que pasa de cuarenta caracteres con holgura' })).toContain('Un título muy largo que pasa de cuarent…');
     expect(n({ kind: 'previous', subject: 'design', task: null, title: null })).toBe('◌ diseño a medias: demo-shop (hace 3 min)');
+    // M7: the project is a folder name nobody checks: one line, without controls, at most 40 characters.
+    const c = (...codes: number[]) => String.fromCharCode(...codes);
+    expect(n({ kind: 'previous', subject: 'design', task: null, title: null, project: `a|b${c(0x1b)}[2J${c(0x202e)}${'x'.repeat(60)}` }))
+      .toBe(`◌ diseño a medias: a|b [2J${'x'.repeat(32)}… (hace 3 min)`);
     expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 12, stopReason: 'stalled', since: '2026-10-13T12:00:00.000Z' })).toBe('◌ ejecución parada: 3/12 integradas (hace 2 d)');
     expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 12, stopReason: null }, 'en')).toBe('◌ execution without a coordinator: 3/12 integrated (3 min ago)');
   });

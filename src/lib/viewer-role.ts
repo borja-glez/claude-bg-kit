@@ -29,7 +29,8 @@ export interface ViewerInput {
   members: readonly MemberDoc[];
   sessionId: string | null;
   now: number;
-  /** The coordinator's live signal says its conversation ended (live/<hookSession>.json with `ended`). */
+  /** The run has no coordinator: its live signal says its conversation ended (live/<hookSession>.json with `ended`), or it
+   *  went silent (coordinatorGone in execution-view.ts, M4): rule 5 instead of rule 4. */
   coordinatorEnded?: boolean;
   /** Seat SID → its task claimed or in progress. */
   openTasks?: Readonly<Record<string, string>>;

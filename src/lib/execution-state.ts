@@ -163,6 +163,9 @@ export const LIVE_SILENT_MINUTES = 7;
 export const LIVE_STOPPED_MINUTES = 12;
 /** Signals older than this are leftovers of past sessions: readers ignore them. */
 export const LIVE_MAX_AGE_HOURS = 24;
+/** A live signal, a member file or a task file of the execution larger than this is not read (the band and waypoint's
+ *  hooks alike). */
+export const FORGE_DOC_MAX_BYTES = 8 * 1024;
 export function normalizeLive(x: unknown): LiveDoc | null {
   if (!isObj(x)) return null;
   const sessionId = str(x.sessionId), ts = iso(x.ts);

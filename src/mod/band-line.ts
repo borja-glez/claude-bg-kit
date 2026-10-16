@@ -32,6 +32,7 @@ export const TEXT = {
     stopFilled: '/forge:stop está en el prompt: pulsa Enter para parar toda la ejecución',
     ago: 'hace {ago}',
     noticeOtherTask: 'otra sesión ({seat}) trabaja en {task}', noticeOtherBound: 'otra sesión ({seat}) está ligada al roadmap',
+    noticeOtherDesign: 'otra sesión ({seat}) trabaja en el diseño',
     noticeOtherRun: 'ejecución de forge en curso, la coordina otra sesión · {i}/{t}',
     noticePrevTask: 'quedó a medias: {task} {title}', noticePrevDesign: 'diseño a medias: {project}',
     noticeRunStopped: 'ejecución parada: {i}/{t} integradas', noticeRunOrphan: 'ejecución sin coordinadora: {i}/{t} integradas',
@@ -52,6 +53,7 @@ export const TEXT = {
     stopFilled: '/forge:stop is in the prompt: press Enter to stop the whole execution',
     ago: '{ago} ago',
     noticeOtherTask: 'another session ({seat}) works on {task}', noticeOtherBound: 'another session ({seat}) is bound to the roadmap',
+    noticeOtherDesign: 'another session ({seat}) is working on the design',
     noticeOtherRun: 'forge execution running, coordinated by another session · {i}/{t}',
     noticePrevTask: 'left in progress: {task} {title}', noticePrevDesign: 'design left in progress: {project}',
     noticeRunStopped: 'execution stopped: {i}/{t} integrated', noticeRunOrphan: 'execution without a coordinator: {i}/{t} integrated',
@@ -78,14 +80,15 @@ export function agoText(since: string | null, nowMs: number): string | null {
 // §4.5: a notice, dim and without a clock of its own: ◦ for another live session, ◌ for what an earlier one left behind.
 function noticeLine(m: NoticeBand, nowMs: number, t: Texts): string {
   const vals: Record<string, string> = {
-    seat: m.seat ?? '', task: m.task ?? '', title: m.title ? clip(m.title) : '', project: m.project,
+    // The project is a folder name under docs/waypoint/ that nothing checks: clipped as a title is (M7).
+    seat: m.seat ?? '', task: m.task ?? '', title: m.title ? clip(m.title) : '', project: clip(m.project),
     i: String(m.integrated ?? 0), t: String(m.total ?? 0),
   };
   const fill = (s: string) => s.replace(/\{(seat|task|title|project|i|t)\}/g, (_, k: string) => vals[k]).replace(/\s+/g, ' ').trim();
   const ago = agoText(m.since, nowMs);
   if (m.kind === 'other-live') {
     if (m.subject === 'run') return `◦ ${fill(t.noticeOtherRun)}`;
-    const head = `◦ ${fill(m.task ? t.noticeOtherTask : t.noticeOtherBound)}`;
+    const head = `◦ ${fill(m.subject === 'design' ? t.noticeOtherDesign : m.task ? t.noticeOtherTask : t.noticeOtherBound)}`;
     return ago ? `${head} · ${t.ago.replace('{ago}', ago)}` : head;
   }
   const text = m.subject === 'run' ? (m.stopReason ? t.noticeRunStopped : t.noticeRunOrphan) : m.subject === 'design' ? t.noticePrevDesign : t.noticePrevTask;
