@@ -3,6 +3,8 @@ import path from 'node:path';
 import { forgeDir } from './ledger.js';
 import { mainCheckout } from './local.js';
 import type { Finding } from './verdict.js';
+import { pairFindings } from './finding-match.js';
+export { findingsMatch, LINE_WINDOW, OVERLAP } from './finding-match.js';
 
 // Shadow test: for N briefs each reviewer running at high gets an xhigh twin; the cases compare their blockers.
 // The state lives in .forge/shadow.json of the main checkout, as local.yaml does, so every worktree of the repository
@@ -22,8 +24,6 @@ export interface ShadowCase {
 export interface ShadowState { remaining: number; cases: ShadowCase[] }
 
 export const DEFAULT_SHADOW_BRIEFS = 10;
-export const LINE_WINDOW = 10;
-export const OVERLAP = 0.3;
 export const PASS_RATIO = 0.9;
 
 export const shadowFile = (root: string) => path.join(mainCheckout(root), '.forge', 'shadow.json');
@@ -100,42 +100,14 @@ export function addCase(root: string, c: ShadowCase): void {
   saveShadow(root, { ...s, cases: [...s.cases, c] });
 }
 
-const words = (s: string): Set<string> => new Set((s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter(w => w.length >= 3));
-
-function jaccard(a: Set<string>, b: Set<string>): number {
-  if (!a.size && !b.size) return 0;
-  let inter = 0;
-  for (const w of a) if (b.has(w)) inter++;
-  return inter / (a.size + b.size - inter);
-}
-
-const normPath = (p: string) => p.replace(/\\/g, '/').replace(/^\.\//, '');
-
-function nearby(a: Finding, b: Finding): boolean {
-  return !!a.file && !!b.file && normPath(a.file) === normPath(b.file)
-    && Number.isFinite(a.line) && Number.isFinite(b.line) && Math.abs(a.line! - b.line!) <= LINE_WINDOW;
-}
-
-const overlapping = (a: Finding, b: Finding) => jaccard(words(a.problem), words(b.problem)) >= OVERLAP;
-
-/** Same file within ±10 lines, or problem word overlap (Jaccard) >= 0.3. */
-export const findingsMatch = (a: Finding, b: Finding): boolean => nearby(a, b) || overlapping(a, b);
-
 const isBlocker = (f: Finding) => f.severity === 'critical' || f.severity === 'important';
 
 /** Pairs the blockers of a high reviewer with those of its xhigh twin, one to one (location pairs first). */
 export function buildCase(task: string, reviewer: string, high: Finding[], xhigh: Finding[]): ShadowCase {
   const hb = high.filter(isBlocker);
   const xb = xhigh.filter(isBlocker);
-  const pairOf = new Array<number>(xb.length).fill(-1);
-  const used = new Set<number>();
-  for (const test of [nearby, overlapping]) {
-    xb.forEach((x, i) => {
-      if (pairOf[i] >= 0) return;
-      const j = hb.findIndex((h, k) => !used.has(k) && test(x, h));
-      if (j >= 0) { pairOf[i] = j; used.add(j); }
-    });
-  }
+  const pairOf = pairFindings(xb, hb);
+  const used = new Set(pairOf.filter(j => j >= 0));
   const recovered = xb.filter((_, i) => pairOf[i] >= 0);
   const missed = xb.filter((_, i) => pairOf[i] < 0);
   return {

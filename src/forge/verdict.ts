@@ -5,7 +5,25 @@ export type ReviewerName = 'correctness' | 'security' | 'perf' | 'verify';
 // untouched = in code the fix did not touch.
 export type Origin = 'previous' | 'fix' | 'untouched';
 const ORIGINS = ['previous', 'fix', 'untouched'] as const;
-export interface Finding { severity: 'critical' | 'important' | 'minor'; file?: string; line?: number; problem: string; fix?: string; origin?: Origin }
+/** Why a critical or important finding does not block (C-04, §4.7): the CLI sets it. */
+export type Residual = 'untouched' | 'hardening' | 'late-round' | 'cap' | 'docs' | 'out-of-model' | 'architecture';
+export interface Finding {
+  severity: 'critical' | 'important' | 'minor'; file?: string; line?: number; problem: string; fix?: string; origin?: Origin;
+  /** The finding's stable id within its brief (F1, F2…): a delta reviewer copies it; the CLI assigns it (J-06). */
+  id?: string;
+  /** Set by the CLI: whose finding it is (an express reviewer reports other reviewers' ones). */
+  reviewer?: ReviewerName;
+  /** The reviewer says the fix broke behaviour that worked before it (delta mode). */
+  regression?: boolean;
+  /** Security: it needs an attacker or a capability the threat model trusts, or the model lists it out of scope (K4-02). */
+  outOfModel?: boolean;
+  /** Set by the CLI: why it does not block. */
+  residual?: Residual;
+  /** Set by the CLI: the severity the reviewer gave a finding the CLI lowered to minor (outOfModel). */
+  declared?: 'critical' | 'important' | 'minor';
+}
+/** A finding an earlier review of the brief closed; `round` is the last review that had it open (J-06, hardening). */
+export interface ClosedFinding extends Finding { id: string; round: number }
 export interface Review { verdict: 'pass' | 'fail' | 'abstain'; confidence: number; findings: Finding[]; approach?: 'ok' | 'wrong'; invalid?: boolean; dropped?: number; incomplete?: boolean }
 export interface FailingValidator { validator: string; failures: string[] }
 export interface Weights { correctness: number; security: number; perf: number; verify: number }
@@ -41,6 +59,9 @@ function lineOf(v: unknown): number | undefined {
   return m ? Number(m[1]) : undefined;
 }
 
+// A flag as reviewers write it: true or the string "true".
+const isTrue = (v: unknown): boolean => v === true || (typeof v === 'string' && v.trim().toLowerCase() === 'true');
+
 // One finding, leniently: an unknown severity counts as important, a null file is no file, and a
 // finding without a problem is dropped (null) rather than voiding the whole review.
 function findingOf(v: unknown): Finding | null {
@@ -55,6 +76,12 @@ function findingOf(v: unknown): Finding | null {
   if (typeof f.fix === 'string') out.fix = f.fix;
   const origin = typeof f.origin === 'string' ? f.origin.trim().toLowerCase() : '';
   if ((ORIGINS as readonly string[]).includes(origin)) out.origin = origin as Origin;
+  // J-06 / K4-02: the id a delta reviewer copied and the reviewer's own flags, as leniently as the rest. The reviewer,
+  // the residual and a declared severity are the CLI's: never read from a reviewer's file.
+  const id = typeof f.id === 'string' ? f.id.trim().toUpperCase() : '';
+  if (/^F\d{1,3}$/.test(id)) out.id = id;
+  if (isTrue(f.regression)) out.regression = true;
+  if (isTrue(f.outOfModel)) out.outOfModel = true;
   return out;
 }
 
@@ -166,7 +193,7 @@ export interface VerifyFile {
 }
 
 const s = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
-const truthy = (v: unknown) => v === true || (typeof v === 'string' && v.trim().toLowerCase() === 'true');
+const truthy = isTrue;
 
 // forge-verify's file, read as leniently as a reviewer's: JSON inside prose or a fence; a check without `shot` keeps
 // null; `ok` as "true" counts. Null when unusable: no object, an unknown result, checks not a list, blocked without reason.

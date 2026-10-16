@@ -33,6 +33,20 @@ describe('parseReview', () => {
     const r = parseReview('{"verdict":"fail","confidence":0.6,"approach":"wrong","findings":[{"severity":"critical"},"text",{"severity":"critical","file":"a.ts","problem":"real"}]}');
     expect(r).toEqual({ verdict: 'fail', confidence: 0.6, approach: 'wrong', invalid: true, dropped: 2, findings: [{ severity: 'critical', file: 'a.ts', problem: 'real' }] });
   });
+  it('reads id (F1 to F999, any case), regression and outOfModel (true or "true"); a malformed id is dropped; reviewer and residual are never read (J-06, K4-02)', () => {
+    const r = parseReview(JSON.stringify({ verdict: 'fail', confidence: 1, findings: [
+      { severity: 'important', file: 'a.ts', line: 1, problem: 'a', id: 'f3', regression: 'true' },
+      { severity: 'important', file: 'a.ts', line: 2, problem: 'b', id: 'F0001', outOfModel: true },
+      { severity: 'minor', problem: 'c', id: 7, regression: false, reviewer: 'security', residual: 'cap', declared: 'critical' },
+      { severity: 'important', problem: 'd', id: 'X1', outOfModel: 'yes' },
+    ] }));
+    expect(r.findings).toEqual([
+      { severity: 'important', file: 'a.ts', line: 1, problem: 'a', id: 'F3', regression: true },
+      { severity: 'important', file: 'a.ts', line: 2, problem: 'b', outOfModel: true },
+      { severity: 'minor', problem: 'c' },
+      { severity: 'important', problem: 'd' },
+    ]);
+  });
 });
 
 describe('weightsFor', () => {
