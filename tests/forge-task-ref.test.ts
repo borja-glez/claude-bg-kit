@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { attribute, baseOf, eventsOf, idChain, isTask, projectOf, projectOfDir, readWorkDir, resolveProject, workDir, workRel } from '../src/forge/task-ref.js';
@@ -59,6 +59,24 @@ describe('task-ref: a task is the pair (project, task) (D-08)', () => {
     expect(readWorkDir(root, { project: 'web', task: 'T1' }, events)).toBe(at('web', 'T1'));
     mkdirSync(at('shop', 'T1'), { recursive: true });
     expect(readWorkDir(root, { project: 'shop', task: 'T1' }, events)).toBe(at('shop', 'T1'));
+  });
+  it('a folder a command only made never takes a task away from the folder that holds its brief', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'forge-task-ref-'));
+    const at = (...p: string[]) => path.join(root, '.forge', 'work', ...p);
+    const shop = { project: 'shop', task: 'T1' };
+    const events = [ev(1, 'triage', 'T1', { project: 'shop' })];
+    // The task started in the older folder; verify-plan --dir then made the project's.
+    mkdirSync(at('T1'), { recursive: true });
+    writeFileSync(at('T1', 'brief-1.md'), 'brief\n');
+    mkdirSync(at('shop', 'T1', 'reviews-1-1'), { recursive: true });
+    expect(readWorkDir(root, shop, events)).toBe(at('T1'));
+    // Not this project's by the ledger: its brief is another task's, and the project's folder is read.
+    expect(readWorkDir(root, shop, [ev(1, 'triage', 'T1', { project: 'web' })])).toBe(at('shop', 'T1'));
+    // A brief in the project's folder: that one, first.
+    writeFileSync(at('shop', 'T1', 'brief-1.md'), 'brief\n');
+    expect(readWorkDir(root, shop, events)).toBe(at('shop', 'T1'));
+    // A loose task has one folder.
+    expect(readWorkDir(root, { project: null, task: 'T1' }, events)).toBe(at('T1'));
   });
   it('two plans with T001 share no rounds: roundDecision of B never sees the verdicts of A', () => {
     const events = [

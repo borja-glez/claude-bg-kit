@@ -2,7 +2,7 @@
 // event is attributed by the last triage of its id. A plan task's work folder is .forge/work/<project>/<T>/, a loose
 // task's .forge/work/<T>/; readers accept the older folder too. Every reader of src/forge compares an event's task
 // with an id here, and nowhere else.
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { isSafeId } from '../lib/execution-state.js';
 import type { LedgerEvent } from './ledger.js';
@@ -94,11 +94,27 @@ export const workDir = (root: string, ref: TaskRef): string => path.join(root, .
 /** The same folder relative to the checkout, with `/`: what the CLI prints as `work`. */
 export const workRel = (ref: TaskRef): string => folderOf(ref).join('/');
 
-/** The folder to read: the project's when it exists; else the older .forge/work/<T> when it exists and the ledger says it
- *  is this project's; else the project's. */
+/** Whether a work folder holds a brief (brief-<n>.md): a task's folder in use, not one a command only made. */
+function holdsBrief(dir: string): boolean {
+  try { return readdirSync(dir).some(f => /^brief-\d+\.md$/.test(f)); } catch { return false; }
+}
+
+/**
+ * Of a task's folder by project (`fresh`) and its older one (`old`; null when it is not this task's): the one that holds
+ * a brief, the project's first; else the one that exists, the project's first; else the project's. A folder a command
+ * only made (verify-plan --dir, a handover note) never takes a running task away from the folder with its brief.
+ */
+export function pickWorkDir(fresh: string, old: string | null): string {
+  if (holdsBrief(fresh)) return fresh;
+  if (old !== null && holdsBrief(old)) return old;
+  if (existsSync(fresh) || old === null || !existsSync(old)) return fresh;
+  return old;
+}
+
+/** The folder to read (pickWorkDir): the project's, or the older .forge/work/<T> while the ledger says it is this
+ *  project's. */
 export function readWorkDir(root: string, ref: TaskRef, events: readonly LedgerEvent[]): string {
   const fresh = workDir(root, ref);
-  if (existsSync(fresh) || ref.project === null) return fresh;
-  const old = workDir(root, { project: null, task: ref.task });
-  return existsSync(old) && projectOf(events, ref.task) === ref.project ? old : fresh;
+  if (ref.project === null || !isSafeId(ref.project)) return fresh;
+  return pickWorkDir(fresh, projectOf(events, ref.task) === ref.project ? workDir(root, { project: null, task: ref.task }) : null);
 }

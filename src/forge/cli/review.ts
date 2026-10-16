@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { samePath } from '../../lib/worktree.js';
+import { isSafeId } from '../../lib/execution-state.js';
 import { UsageError } from './errors.js';
 import { appendEvent, appendPhase, readEvents, type LedgerEvent } from '../ledger.js';
 import { loadConfig, agentFor, ConfigError, type Profile, type ForgeConfig } from '../config.js';
@@ -772,6 +773,7 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   try { config = loadConfig(deps.repoDir); } catch (e) { if (!noBaseline || !(e instanceof ConfigError)) throw e; }
   // K4-02: the threat model the brief and the security reviewer read, written from the config (null without one).
   // D-08: without --dir, the task's work folder: its project's, or the older one the ledger still gives it.
+  if (flag('dir') === undefined && !isSafeId(id)) throw new UsageError(`prep: --task ${task.slice(0, 80)}: no work folder can be named after its id (letters, digits, _ - . only); pass --dir`);
   const ledger = readEvents(deps.cwd);
   const dir = flag('dir') !== undefined ? path.resolve(deps.cwd, flag('dir')!)
     : readWorkDir(deps.cwd, { project: resolveProject({ flag: flag('project'), task: id, events: ledger }), task: id }, ledger);

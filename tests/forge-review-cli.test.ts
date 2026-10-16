@@ -1587,4 +1587,9 @@ describe('prep without --dir writes into the work folder of the task (D-08)', ()
     appendEvent(root, { ts: '2026-10-14T09:40:00.000Z', kind: 'triage', task: 'T1', path: 'medium', project: 'shop', reasons: [] });
     expect(JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'medium', '--cwd', wt], io).stdout).baseline).toBe('.forge/work/T1/baseline-1.json');
   });
+  it('an id no folder can be named after is a usage error without --dir', () => {
+    const r = run(['prep', '--task', 'a:b-1', '--path', 'medium', '--cwd', wt], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('--dir');
+  });
 });

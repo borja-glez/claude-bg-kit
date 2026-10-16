@@ -509,6 +509,7 @@ describe('swarm step: a verification (I2)', () => {
     expect(s.actions.find(a => a.task === 'T1')).toMatchObject({ type: 'accepted' });
     expect(s.calls.filter(a => isCmd(a, 'verify-close'))).toEqual([]);
     expect(run(['verify-plan', '--task', 'T1-1', '--path', 'large', '--base', 'HEAD', '--dir', '.forge/work/shop/T1', '--cwd', wt('T1')], io)).toMatchObject({ code: 2, stderr: expect.stringContaining('--dir must be a review dir') });
+    expect(run(['verify-plan', '--task', 'T1-1', '--path', 'large', '--base', 'HEAD', '--dir', '.forge/work/shop/T1', '--cwd', wt('T1')], io).stderr).toContain('.forge/work/<project>/<T>/reviews-<n>-<round>');
   });
 });
 
@@ -519,7 +520,9 @@ describe('swarm step: a member task adopted after a conflict (I3)', () => {
     const iso = NOW.toISOString();
     saveExecution(root, { ...e, tasks: { T1: { status: 'conflict', stage: 'integrate', round: 1, worktree: '', branch: 'task/T1', executor: 'manual', attempts: 0, agent: null, startedAt: iso, stageSince: iso, updatedAt: iso, detail: 'conflict', title: 'T1' } } });
     const adopted = out(run(['swarm', 'retry', 'T1', '--adopt'], io));
-    const work = path.join(root, '.forge', 'work', 'shop', 'T1');
+    // D-08: adopt prints the task's work folder, where the coordinator writes its brief.
+    expect(adopted.work).toBe('.forge/work/shop/T1');
+    const work = path.join(root, adopted.work);
     mkdirSync(work, { recursive: true });
     writeFileSync(path.join(work, 'brief-1.md'), 'brief\n');
     commitIn(adopted.worktree, 'src/t1/a.ts', 'x\n', 'T1: fix the conflict');
@@ -807,5 +810,26 @@ describe("swarm step keeps a plan task's files in its project's work folder (D-0
     expect(s2.actions.find(a => a.type === 'accepted')).toMatchObject({ task: 'T1' });
     expect(s2.actions.find(a => a.type === 'integrated')).toMatchObject({ task: 'T1', commit: { title: 'T1: a' } });
     expect(existsSync(path.join(root, '.forge', 'work', 'shop', 'T1'))).toBe(false);
+  });
+  it('a task at review in .forge/work/T1 stays there when verify-plan --dir makes .forge/work/shop/T1', () => {
+    step();
+    const old = path.join(root, '.forge', 'work', 'T1');
+    renameSync(path.join(root, '.forge', 'work', 'shop', 'T1'), old);
+    mkdirSync(path.join(wt('T1'), '.forge', 'verify'), { recursive: true });
+    writeFileSync(path.join(wt('T1'), '.forge', 'verify', 'web.md'), '---\naffects: ["src/t1/**"]\n---\n# Web\n\nOpen the app.\n');
+    g(wt('T1'), 'add', '-f', '.forge/verify/web.md'); g(wt('T1'), 'commit', '-qm', 'T1: the web surface');
+    commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
+    expect(run(['local', 'set', 'surfaces.web', 'allowed', '--cwd', wt('T1')], io).code).toBe(0);
+    writeFileSync(path.join(old, 'report-1.txt'), 'done\n');
+    const review = step().actions.find(a => a.task === 'T1')!;
+    expect(review).toMatchObject({ type: 'spawnReviewers', round: 1 });
+    expect(stageOf('T1')).toBe('review');
+    // The coordinator names the round by the new form (<WORK>): verify-plan makes the project's folder.
+    expect(out(run(['verify-plan', '--task', 'T1-1', '--path', 'large', '--base', String(review.base), '--dir', '.forge/work/shop/T1/reviews-1-1', '--cwd', wt('T1')], io)).eligible).toBe(true);
+    expect(existsSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'reviews-1-1', 'verify-pending.json'))).toBe(true);
+    for (const k of spawned(review)) writeFileSync(path.join(old, 'reviews-1-1', `${k}.json`), pass);
+    const s = stepWith(() => false);
+    expect(s.calls.find(a => isCmd(a, 'review-close'))).toEqual(expect.arrayContaining(['--dir', '.forge/work/T1']));
+    expect(s.actions.find(a => a.type === 'accepted')).toMatchObject({ task: 'T1' });
   });
 });

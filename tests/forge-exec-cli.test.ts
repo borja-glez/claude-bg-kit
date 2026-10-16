@@ -567,7 +567,7 @@ describe('forge swarm (execution)', () => {
       T2: { ...e.tasks.T2, status: 'conflict', executor: 'manual', worktree: '' },
     } });
     const r1 = out(run(['swarm', 'retry', 'T1', '--adopt'], io));
-    expect(r1).toMatchObject({ task: 'T1', adopted: true, previous: 'sessions', branch: 'task/T1' });
+    expect(r1).toMatchObject({ task: 'T1', adopted: true, previous: 'sessions', branch: 'task/T1', work: '.forge/work/shop/T1' });
     expect(samePath(r1.worktree, wt1)).toBe(true);
     const r2 = out(run(['swarm', 'retry', 'T2', '--adopt'], io));
     expect(r2.previous).toBe('manual');
@@ -703,6 +703,16 @@ describe('forge swarm (execution)', () => {
     expect(t.startedAt).toBe(NOW.toISOString());
     expect(t.nudgedAt ?? null).toBeNull();
     expect(readFileSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'handover.md'), 'utf8')).toContain('work on t1');
+  });
+  it("relaunch names the member's older work folder when its brief is there (a member started before D-08)", () => {
+    sessionsRun();
+    const memberRoot = out(run(['swarm', 'worktree', 'T1'], io)).worktree as string;
+    const old = path.join(memberRoot, '.forge', 'work', 'T1');
+    mkdirSync(old, { recursive: true });
+    writeFileSync(path.join(old, 'brief-1.md'), '# T1\n');
+    out(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io));
+    const note = readFileSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'handover.md'), 'utf8');
+    expect(note).toContain(`${old} (the brief is brief-<n>.md there`);
   });
   it('relaunch refuses a blocked and an accepted task', () => {
     sessionsRun();

@@ -31,7 +31,7 @@ import { readMember, writeMember, isMemberId, listMembers, memberFile } from '..
 import { parseLooseTasks, planOfLoose, statesOfLoose, writeLoose, readLoose, type LooseTask } from '../loose.js';
 import { startAnnounce, integratedSay, rejectedDepsSay, keptFilesSay, proposeSay, VENV_HINT } from '../swarm.js';
 import type { PriorCommit } from '../brief.js';
-import { workDir, workRel } from '../task-ref.js';
+import { pickWorkDir, workDir, workRel } from '../task-ref.js';
 import { cleanText } from '../../lib/forge-status.js';
 
 export interface GitDeps { git: (args: string[]) => string | null; exec: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany; repo: RepoReader }
@@ -1308,7 +1308,8 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
           };
         });
         writePublicTask(io.cwd, { task, runId: e.runId, stage: 'implement', status: 'running', agent: null, round: adopted.round, since: iso, updatedAt: iso, leaseUntil: new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString(), by: e.coordinator, mode: 'subagents' });
-        return json({ task, adopted: true, previous: adopted.executor, worktree, branch: t.branch });
+        // D-08: `work`, the task's work folder in the main checkout, where the coordinator writes its brief.
+        return json({ task, adopted: true, previous: adopted.executor, worktree, branch: t.branch, work: workRel({ project: e.project, task }) });
       }
       const retryable = (x: ExecTask | undefined): x is ExecTask => !!x && (x.status === 'conflict' || x.status === 'blocked');
       if (!retryable(t)) throw new UsageError(`swarm retry: ${task} is not in conflict or blocked`);
@@ -1359,7 +1360,9 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       const note = path.join(workDir(io.cwd, ref), 'handover.md');
       // A run member keeps its work files (brief-<n>.md, report-<n>.txt, validators-<n>.json, reviews-<n>-<round>/)
       // in .forge/work/<project>/<T>/ of its own task worktree, where it runs; only this note lives in the main checkout.
-      const memberWork = workDir(t.worktree || taskWorktree(io.cwd, task), ref);
+      // A member started before D-08 has them in the older .forge/work/<T>/ there: the folder with its brief is named.
+      const memberRoot = t.worktree || taskWorktree(io.cwd, task);
+      const memberWork = pickWorkDir(workDir(memberRoot, ref), workDir(memberRoot, { project: null, task }));
       mkdirSync(path.dirname(note), { recursive: true });
       writeFileSync(note, [
         `# Handover: ${task} (attempt ${attempt} of ${RELAUNCH_CAP + 1})`, '',

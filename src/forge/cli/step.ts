@@ -130,8 +130,8 @@ function briefOf(events: LedgerEvent[], task: string): { n: number; base: string
 }
 
 /** D-08: a task's work folder, relative to the main checkout: the project's, or the older .forge/work/<T> of a task the
- *  execution started before this version. Every file the step reads or writes for the task goes there, and so does the
- *  --dir of each command it runs for it. */
+ *  execution started before this version, whichever holds its brief (readWorkDir). Every file the step reads or writes
+ *  for the task goes there, and so does the --dir of each command it runs for it. */
 const workOf = (c: Ctx, task: string, events: readonly LedgerEvent[]): string =>
   path.relative(c.io.cwd, readWorkDir(c.io.cwd, { project: c.project, task }, events));
 

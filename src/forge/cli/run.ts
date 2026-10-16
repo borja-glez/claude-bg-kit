@@ -1377,7 +1377,7 @@ function runCommand(argv: string[], io: Io): Result {
         const dirArg = flag('dir');
         const roundDir = dirArg === undefined ? null : path.resolve(io.cwd, dirArg);
         const roundOf = roundDir ? /^reviews-(\d+)-(\d+)$/.exec(path.basename(roundDir)) : null;
-        if (has('dir') && !roundOf) throw new UsageError('verify-plan: --dir must be a review dir, .forge/work/<id>/reviews-<n>-<round>');
+        if (has('dir') && !roundOf) throw new UsageError('verify-plan: --dir must be a review dir, .forge/work/<project>/<T>/reviews-<n>-<round> (a loose task: .forge/work/<id>/reviews-<n>-<round>)');
         const es = (loc ?? planLocale(io.cwd)) === 'es';
         const git = io.git ?? defaultGit(io.cwd);
         const diff = git(['diff', '--name-only', `${base}..HEAD`]);
