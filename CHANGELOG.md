@@ -197,7 +197,7 @@ elsewhere and are reconstructed from their READMEs.
 
 #### Changed
 - What blocks depends on the review: a critical always; an important in review 1, a previous one still open in review 2, and any new problem the fix brought (a finding of the fix that matches nothing already closed, or one marked `regression`); from review 3 only criticals and those new problems. Hardening of a class the same reviewer closed (from security, forge asks you instead), an important finding only in the docs for people and what is still open at the last review stay as `residual` and are handed over in `deferred`, with the findings out of the threat model; the last review accepts a fix with green validators and no critical.
-- The first review after a redo judges the new attempt as a first review: nothing of the reverted attempt stays open or is matched.
+- The first review after a redo judges the new attempt as a first review: nothing of the reverted attempt stays open or is matched, and what it closed never makes a later finding `hardening`.
 - `stalled` compares the blocking findings by id, not their text or the score; `redo` needs a failing reviewer that says the approach is wrong with a finding that blocks; a fail without a critical or important finding is `invalid` (the rubric) and runs again once.
 - Reviewers share a verdict rule and a confidence scale, have severities of their own and run at most one focused test file instead of repeating the validators. Implementers follow a «Fix round» section, write the failing test first only under `TDD: required`, and reply in two lines.
 - Shadow twins no longer hold a review: `review-close` lists the ones still out in `shadowPending`.
