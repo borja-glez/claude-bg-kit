@@ -12,6 +12,13 @@ export const runBranch = (project: string) => `forge/run-${project}`;
 export const taskBranch = (task: string) => `task/${task}`;
 export const runWorktree = (root: string) => path.join(root, '.claude', 'worktrees', 'run');
 export const taskWorktree = (root: string, task: string) => path.join(root, '.claude', 'worktrees', `task-${task}`);
+/**
+ * The BASE of a task branch: where it forks from the run branch, `git merge-base HEAD <runBranch>` with `git` run in the
+ * task's worktree. The one rule for it (swarm worktree, the step's review): a conflict retry that merged the run branch
+ * moves it to the tip it merged (1c), and an earlier attempt's commits stay above it (D-02). Null when git cannot say.
+ */
+export const taskBase = (git: (args: string[]) => string | null, runBranch: string): string | null =>
+  git(['merge-base', 'HEAD', runBranch])?.trim() || null;
 
 export type { PublicTask } from '../lib/execution-state.js';
 

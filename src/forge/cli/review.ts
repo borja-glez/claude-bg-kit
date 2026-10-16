@@ -720,8 +720,11 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
 }
 
 /**
- * `FORGE prep --task <id>-<n> --path <p> [--phase <name>] [--dir <dir>] [--cwd <worktree>] [--no-baseline] [--no-cache]`: before a brief's work, in
- * one call, reads BASE (the HEAD of `--cwd`), records what already fails on it into `<dir>/baseline-<n>.json` (as
+ * `FORGE prep --task <id>-<n> --path <p> [--phase <name>] [--dir <dir>] [--cwd <worktree>] [--base <sha>] [--no-baseline] [--no-cache]`: before a brief's work, in
+ * one call, reads BASE (the HEAD of `--cwd`, or `--base`: D-02, the `base` swarm worktree printed for a task resumed on
+ * its branch, HEAD or a commit below it; the phase and the output then carry `head`, the HEAD this brief's work starts on,
+ * and the baseline is still the worktree's, so a caller that wants it on BASE passes --no-baseline and takes it where
+ * BASE's tree is), records what already fails on it into `<dir>/baseline-<n>.json` (as
  * `validate --all --path <p> --base-run --task <id>-<n>` does; `<dir>` defaults to `.forge/work/<id>`), logs the phase
  * `{"phase":<name, default implement>,"brief":<n>,"base":<BASE>}` on `<id>` and prints `{base, baseline, failing, cached, durationMs, validate, threatModel}` (the baseline comes from the tree cache when BASE's tree was validated: C6, I-06; never with --no-cache).
  * validate is the command the implementer runs (J-11). --no-baseline records BASE and the phase without validating (baseline: null; J-13).
@@ -742,8 +745,18 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   const phase = flag('phase') ?? 'implement';
   if (args.includes('--phase') && !/^[a-z][a-z0-9-]{0,39}$/.test(phase)) throw new UsageError('prep: --phase must be a phase name (lowercase letters, digits and -)');
   const [, id, n] = m;
-  const base = (deps.git(['rev-parse', 'HEAD']) ?? '').trim();
-  if (!base) throw new UsageError('prep: cannot read HEAD');
+  const head = (deps.git(['rev-parse', 'HEAD']) ?? '').trim();
+  if (!head) throw new UsageError('prep: cannot read HEAD');
+  let base = head;
+  if (args.includes('--base')) {
+    const given = flag('base');
+    if (!given) throw new UsageError('prep: --base needs a commit');
+    const sha = (deps.git(['rev-parse', '--verify', '-q', `${given}^{commit}`]) ?? '').trim();
+    if (!SHA.test(sha) || deps.git(['merge-base', '--is-ancestor', sha, 'HEAD']) === null) throw new UsageError(`prep: --base ${given.slice(0, 80)} is not HEAD or a commit below it`);
+    base = sha;
+  }
+  // Where this brief's work starts, when BASE is below it (the step tells by it whether the implementer committed).
+  const started = base === head ? {} : { head };
   // The config, read once. --no-baseline never read it before the threat model, so an invalid one does not stop it
   // (C-T5): it then writes no threat model; a baseline run still refuses it (exit 2).
   const noBaseline = args.includes('--no-baseline');
@@ -759,8 +772,8 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   const validate = `node "${slash(deps.self ?? 'forge.cjs')}" validate --affected --base ${base} --task ${task}${samePath(deps.repoDir, deps.cwd) ? '' : ` --cwd "${slash(deps.repoDir)}"`}`;
   // J-13: --no-baseline (the Small path) records BASE and the phase and runs no validator.
   if (noBaseline || !config) {
-    appendEvent(deps.cwd, { ts: deps.now().toISOString(), kind: 'phase', task: id, phase, brief: Number(n), base });
-    return json({ base, baseline: null, failing: [], cached: [], durationMs: 0, validate, threatModel });
+    appendEvent(deps.cwd, { ts: deps.now().toISOString(), kind: 'phase', task: id, phase, brief: Number(n), base, ...started });
+    return json({ base, ...started, baseline: null, failing: [], cached: [], durationMs: 0, validate, threatModel });
   }
 
   // The baseline, as `validate --all --path <p> --base-run` runs it: on BASE nothing changed yet, so a heavy path runs
@@ -772,8 +785,8 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   writeFileSync(file, JSON.stringify(results, null, 2) + '\n');
   const ts = deps.now().toISOString();
   appendEvent(deps.cwd, validateEvent(ts, task, results, durationMs, scope.mode, { baseline: true }));
-  appendEvent(deps.cwd, { ts, kind: 'phase', task: id, phase, brief: Number(n), base });
-  return json({ base, baseline: rel(deps.cwd, file), failing: results.filter(blocking).map(r => r.validator), cached: cachedNames(results), durationMs, validate, threatModel, ...(restored.length ? { restored } : {}) });
+  appendEvent(deps.cwd, { ts, kind: 'phase', task: id, phase, brief: Number(n), base, ...started });
+  return json({ base, ...started, baseline: rel(deps.cwd, file), failing: results.filter(blocking).map(r => r.validator), cached: cachedNames(results), durationMs, validate, threatModel, ...(restored.length ? { restored } : {}) });
 }
 
 /** `review-prep`, `review-close`, `prep` and `shadow` (cli/shadow.ts). */

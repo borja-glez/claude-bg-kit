@@ -3,7 +3,7 @@ import path from 'node:path';
 import { UsageError } from './errors.js';
 import type { Io } from './run.js';
 import { commitInfo } from './swarm.js';
-import { readExecution, executionTaskFile, runWorktree, writePublicTask } from '../execution.js';
+import { readExecution, executionTaskFile, runWorktree, taskBase, writePublicTask } from '../execution.js';
 import { takeStepLock } from '../jobs.js';
 import { appendEvent, readEvents, type LedgerEvent } from '../ledger.js';
 import { reviewsOf } from '../loop.js';
@@ -114,10 +114,11 @@ function call(c: Ctx, task: string | null, argv: string[]): Json | null {
   return null;
 }
 
-/** The brief a task is on and its BASE: its last phase `implement` with a base (prep logs it); brief 1 without one. */
-function briefOf(events: LedgerEvent[], task: string): { n: number; base: string | null } {
+/** The brief a task is on and its BASE: its last phase `implement` with a base (prep logs it); brief 1 without one. `head`:
+ *  the commit the brief's work started on, which prep logs only when BASE is below it (D-02: a task resumed on its branch). */
+function briefOf(events: LedgerEvent[], task: string): { n: number; base: string | null; head: string | null } {
   const e = events.filter(x => x.kind === 'phase' && x.task === task && x.phase === 'implement' && typeof x.base === 'string' && x.base).at(-1);
-  return { n: typeof e?.brief === 'number' && e.brief >= 1 ? e.brief : 1, base: e ? String(e.base) : null };
+  return { n: typeof e?.brief === 'number' && e.brief >= 1 ? e.brief : 1, base: e ? String(e.base) : null, head: typeof e?.head === 'string' && e.head ? e.head : null };
 }
 
 /** The last review round review-prep prepared for brief `n` in the work dir; 0 when none. */
@@ -136,13 +137,14 @@ function latestRound(work: string, n: number): number {
  * The commit the implementer of brief `n` was last handed back on, so one back without a new commit only has its report:
  * the HEAD the step recorded in validators-head-<n>.json for round k (its last validators round, since review-prep keeps
  * no plan of that round; or the commit of a verification's learned notes after review k-1, closeVerify) when k comes
- * after the last review round prepared, else the HEAD that review saw, else BASE. Whatever the step records for round k
- * always precedes the review of round k, so only a later round number makes it the newer one.
+ * after the last review round prepared, else the HEAD that review saw, else `start`, the commit the brief's work started
+ * on (BASE, or the HEAD above it of a task resumed on its branch). Whatever the step records for round k always precedes
+ * the review of round k, so only a later round number makes it the newer one.
  */
-function seenOf(work: string, n: number, round: number, base: string | null): string | null {
+function seenOf(work: string, n: number, round: number, start: string | null): string | null {
   const v = readJson(path.join(work, `validators-head-${n}.json`)) as Json | null;
   if (v && typeof v === 'object' && typeof v.head === 'string' && v.head && typeof v.round === 'number' && v.round > round) return v.head;
-  return (round ? readText(path.join(work, `reviews-${n}-${round}`, 'head.txt'))?.trim() : null) || base;
+  return (round ? readText(path.join(work, `reviews-${n}-${round}`, 'head.txt'))?.trim() : null) || start;
 }
 
 /** The implementer last logged for `<T>-<n>`; null when none was. */
@@ -181,14 +183,17 @@ function renewLease(io: Io, e: ExecutionState, task: string, t: ExecTask, now: D
 }
 
 /** prep's output for brief 1 that a resumed start can use again: the one the step kept (prep-1.json) when the ledger's
- *  last phase implement with a base is brief 1 on that same BASE, which is still the worktree's HEAD, and its baseline is there. */
-function keptPrep(c: Ctx, task: string, worktree: string): Json | null {
+ *  last phase implement with a base is brief 1 on that same BASE (the worktree's HEAD, or `resumedBase` below it for a
+ *  task resumed on its branch, D-02), it started on the worktree's HEAD as it is now, and its baseline is there (a resumed
+ *  task has none until its first review: reviewBase takes it). */
+function keptPrep(c: Ctx, task: string, worktree: string, resumedBase: string | null): Json | null {
   const work = path.join(c.io.cwd, '.forge', 'work', task);
   const kept = readJson(path.join(work, 'prep-1.json')) as Json | null;
   const head = c.deps.gitAt(worktree)(['rev-parse', 'HEAD'])?.trim();
   const { n, base } = briefOf(readEvents(c.io.cwd), task);
-  const ok = !!kept && typeof kept === 'object' && typeof kept.validate === 'string' && !!head && kept.base === head && base === head && n === 1
-    && existsSync(path.join(work, 'baseline-1.json'));
+  const want = resumedBase ?? head;
+  const ok = !!kept && typeof kept === 'object' && typeof kept.validate === 'string' && !!head && kept.base === want && (kept.head ?? kept.base) === head
+    && base === want && n === 1 && (resumedBase !== null || existsSync(path.join(work, 'baseline-1.json')));
   return ok ? kept : null;
 }
 
@@ -197,22 +202,30 @@ function keptPrep(c: Ctx, task: string, worktree: string): Json | null {
  * implementer, handed out only once its stage is recorded. A start a previous step left half done (`resume`: the task
  * is still at stage brief, a command failed or the step died) runs again from what it lacks: swarm worktree returns
  * the worktree already there, the brief and the triage are cheap and run again (the triage names the implementer), and
- * prep is skipped when it already recorded this BASE (keptPrep). Every failure is an error action again.
+ * prep is skipped when it already recorded this BASE (keptPrep). Every failure is an error action again. A task resumed
+ * on its branch (D-02: swarm worktree printed `resumed`, its BASE below the commits of an earlier attempt) is briefed with
+ * those commits (prior.json), and prep records that BASE, the one the review diffs from, with no baseline on the
+ * worktree's tree: its first review takes it where BASE is (reviewBase).
  */
 function startTask(c: Ctx, task: string, resume: boolean): boolean {
   const w = call(c, task, ['swarm', 'worktree', task]);
   if (!w || typeof w.worktree !== 'string') return false;
   const worktree = w.worktree;
+  const resumedBase = w.resumed === true && typeof w.base === 'string' && w.base ? w.base : null;
   const work = path.join('.forge', 'work', task);
-  const b = c.deps.cli(['brief', '--plan', c.planArg, '--task', task]);
+  mkdirSync(path.join(c.io.cwd, work), { recursive: true });
+  // D-02: a task resumed on its branch is briefed with its earlier attempt's commits, which are reviewed with it.
+  const prior = Array.isArray(w.prior) && w.prior.length ? path.join(work, 'prior.json') : null;
+  if (prior) writeFileSync(path.join(c.io.cwd, prior), JSON.stringify(w.prior, null, 2) + '\n');
+  const b = c.deps.cli(['brief', '--plan', c.planArg, '--task', task, ...(prior ? ['--prior-file', slash(prior)] : [])]);
   if (b.code !== 0) { c.actions.push({ type: 'error', task, command: 'brief', code: b.code, stderr: b.stderr.trim().slice(0, 500) }); return false; }
   const brief = path.join(work, 'brief-1.md');
   mkdirSync(path.join(c.io.cwd, work), { recursive: true });
   writeFileSync(path.join(c.io.cwd, brief), `${b.stdout.trimEnd()}\n\nWorktree: ${slash(worktree)} (work only inside this directory).\n`);
   const tri = call(c, task, ['triage', '--plan', c.planArg, '--task', task, '--cwd', worktree, '--locale', c.locale]);
   if (!tri) return false;
-  const kept = resume ? keptPrep(c, task, worktree) : null;
-  const pr = kept ?? call(c, task, ['prep', '--task', `${task}-1`, '--path', 'large', '--cwd', worktree]);
+  const kept = resume ? keptPrep(c, task, worktree, resumedBase) : null;
+  const pr = kept ?? call(c, task, ['prep', '--task', `${task}-1`, '--path', 'large', '--cwd', worktree, ...(resumedBase ? ['--base', resumedBase, '--no-baseline'] : [])]);
   if (!pr) return false;
   if (!kept) writeFileSync(path.join(c.io.cwd, work, 'prep-1.json'), JSON.stringify(pr, null, 2) + '\n');
   const impl = (tri.implementer && typeof tri.implementer === 'object' ? tri.implementer : {}) as Json;
@@ -229,17 +242,20 @@ function startTask(c: Ctx, task: string, resume: boolean): boolean {
 
 /**
  * The BASE a task's review diffs from. A retried task (a conflict sent it back and its implementer merged the run branch
- * into it) forks from the run branch where it merged it: `git merge-base HEAD <run branch>` in its worktree, so the
+ * into it) forks from the run branch where it merged it: its taskBase, `git merge-base HEAD <run branch>` in its worktree, so the
  * diff holds only its own work, not the tasks integrated meanwhile. When that moved from prep's BASE, the baseline runs
  * again in the run worktree (at that tip, or the closest tree there once another task was integrated since) into
- * baseline-<n>.json, once: base-<n>.json records the BASE it ran on. The ledger keeps prep's phase (forge stats counts a
- * brief from its last phase implement). An adopted task (I3: its member prepared it in its own worktree and ledger, so
- * `base` is already that merge-base and there is no baseline here) gets its baseline the same way. Null after an error action.
+ * baseline-<n>.json, once: base-<n>.json records the BASE it ran on (`from`: the BASE it replaced, null when it is the
+ * same). The ledger keeps prep's phase (forge stats counts a brief from its last phase implement). `rebaseline`: the
+ * brief has no baseline on its BASE, so it runs there even when BASE did not move: an adopted task (I3: its member
+ * prepared it in its own worktree and ledger, so `base` is already that merge-base and there is no baseline here) and a
+ * task resumed on its branch (D-02: prep logged its BASE below the commits of the earlier attempt and took none). Null
+ * after an error action.
  */
-function reviewBase(c: Ctx, task: string, t: ExecTask, n: number, base: string, adopted: boolean): string | null {
-  if (t.attempts < 1) return base;
-  const moved = c.deps.gitAt(t.worktree)(['merge-base', 'HEAD', c.runBranch])?.trim();
-  if (!moved || (moved === base && !adopted)) return base;
+function reviewBase(c: Ctx, task: string, t: ExecTask, n: number, base: string, rebaseline: boolean): string | null {
+  if (t.attempts < 1 && !rebaseline) return base;
+  const moved = taskBase(c.deps.gitAt(t.worktree), c.runBranch);
+  if (!moved || (moved === base && !rebaseline)) return base;
   const work = path.join(c.io.cwd, '.forge', 'work', task);
   const mark = path.join(work, `base-${n}.json`);
   const kept = readJson(mark) as Json | null;
@@ -254,7 +270,7 @@ function reviewBase(c: Ctx, task: string, t: ExecTask, n: number, base: string, 
     return null;
   }
   writeFileSync(path.join(work, `baseline-${n}.json`), JSON.stringify(results, null, 2) + '\n');
-  writeFileSync(mark, JSON.stringify({ base: moved, from: adopted ? null : base, at: c.iso() }, null, 2) + '\n');
+  writeFileSync(mark, JSON.stringify({ base: moved, from: moved === base ? null : base, at: c.iso() }, null, 2) + '\n');
   return moved;
 }
 
@@ -267,13 +283,15 @@ function reviewBase(c: Ctx, task: string, t: ExecTask, n: number, base: string, 
  * The person's answer after its report (--ruling): `review` (M8: the finding was already fixed, or is wrong) prepares the
  * next review on the same HEAD; `defer:F3` («keep the architecture», convergence.md) closes its last round again with
  * those ids and follows that. A task adopted after a conflict (I3) has no phase implement with a base in this ledger
- * (its member prepared it in its own): its BASE is where it forks from the run branch, as reviewBase moves it.
+ * (its member prepared it in its own): its BASE is where it forks from the run branch (taskBase), as reviewBase moves it.
+ * A task resumed on its branch (D-02) has its BASE below the commits of the earlier attempt: the commit its brief's work
+ * started on (briefOf's `head`) is what it was handed, so one back without a commit of its own only has its report.
  */
 function implementerBack(c: Ctx, task: string, t: ExecTask, told: boolean): void {
   const brief = briefOf(readEvents(c.io.cwd), task);
   const { n } = brief;
   const adopted = !brief.base && t.attempts > 0;
-  const base = brief.base ?? (adopted ? c.deps.gitAt(t.worktree)(['merge-base', 'HEAD', c.runBranch])?.trim() || null : null);
+  const base = brief.base ?? (adopted ? taskBase(c.deps.gitAt(t.worktree), c.runBranch) : null);
   const work = path.join('.forge', 'work', task);
   const abs = path.join(c.io.cwd, work);
   const report = path.join(work, `report-${n}.txt`);
@@ -283,7 +301,7 @@ function implementerBack(c: Ctx, task: string, t: ExecTask, told: boolean): void
   if (given && given.kind !== 'review') { c.actions.push(stepError(task, `--ruling ${task}:${given.kind}: no question of ${task} waits for that answer`)); return; }
   const head = c.deps.gitAt(t.worktree)(['rev-parse', 'HEAD'])?.trim() || null;
   if (t.stage !== 'validate' && !given) {
-    const seen = seenOf(abs, n, round, base);
+    const seen = seenOf(abs, n, round, brief.head ?? base);
     const committed = !!head && !!seen && head !== seen;
     let fresh = false;
     try { fresh = statSync(path.join(c.io.cwd, report)).mtimeMs > Date.parse(t.stageSince); } catch { fresh = false; }
@@ -293,7 +311,7 @@ function implementerBack(c: Ctx, task: string, t: ExecTask, told: boolean): void
   if (!base) { c.actions.push(stepError(task, `no phase implement with a base for ${task}: run FORGE prep first`)); return; }
   const loc = ['--locale', c.locale];
   if (!call(c, task, ['swarm', 'task', task, '--stage', 'validate', '--no-agent'])) return;
-  const at = reviewBase(c, task, t, n, base, adopted);
+  const at = reviewBase(c, task, t, n, base, adopted || brief.head !== null);
   if (!at) return;
   const tri = call(c, task, ['triage', '--plan', c.planArg, '--task', task, '--cwd', t.worktree, '--base', at, ...loc]);
   if (!tri) return;

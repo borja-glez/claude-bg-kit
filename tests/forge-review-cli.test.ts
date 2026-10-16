@@ -367,6 +367,28 @@ describe('forge prep', () => {
     expect(readEvents(root).filter(e => e.kind === 'phase').at(-1)).toMatchObject({ task: 'T1', phase: 'implement', brief: 1, base: head() });
     expect(run(['prep', '--task', 'T1-1', '--path', 'medium', '--cwd', wt], io).code).toBe(2);
   });
+  it('--base takes BASE at a commit below HEAD (D-02: a task resumed past it), and keeps HEAD as where the brief\'s work starts', () => {
+    const r = run(['prep', '--task', 'T1-1', '--path', 'medium', '--base', base, '--cwd', wt], io);
+    expect(r.stderr).toBe('');
+    expect(r.code).toBe(0);
+    const out = JSON.parse(r.stdout);
+    expect(out).toMatchObject({ base, head: head() });
+    expect(out.validate).toContain(`--base ${base} `);
+    expect(readEvents(root).filter(e => e.kind === 'phase').at(-1)).toMatchObject({ task: 'T1', phase: 'implement', brief: 1, base, head: head() });
+    // BASE at HEAD is the plain prep: no head.
+    const same = JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'medium', '--base', head(), '--cwd', wt], io).stdout);
+    expect(same.base).toBe(head());
+    expect(same).not.toHaveProperty('head');
+    expect(readEvents(root).filter(e => e.kind === 'phase').at(-1)).not.toHaveProperty('head');
+  });
+  it('--base refuses a commit that is not HEAD or below it, and a missing one', () => {
+    const side = git('commit-tree', `${base}^{tree}`, '-m', 'side');
+    for (const b of [[side], ['nope'], []]) {
+      const r = run(['prep', '--task', 'T1-1', '--path', 'medium', '--base', ...b, '--cwd', wt], io);
+      expect(r.code, b.join(' ')).toBe(2);
+      expect(r.stderr).toContain('prep: --base');
+    }
+  });
 });
 
 describe('forge review-close', () => {

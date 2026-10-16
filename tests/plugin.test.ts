@@ -1311,4 +1311,9 @@ describe('plugin layout', () => {
   it('the ephemeral run says its tick closes it when it finishes (wave 0 handoff)', () => {
     expect(runRef('ephemeral')).toContain('`closedBy: merge`');
   });
+  it('the task steps, the ephemeral run and the member brief a resumed task with its earlier commits (D-02)', () => {
+    for (const s of [runRef('task-steps'), runRef('ephemeral'), read('plugins/forge/skills/member/SKILL.md')]) {
+      for (const w of ['`prior`', 'prior.json', '--prior-file']) expect(s).toContain(w);
+    }
+  });
 });

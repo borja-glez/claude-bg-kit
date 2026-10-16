@@ -9,7 +9,7 @@ import { loadConfig } from '../config.js';
 import { stopFile, parseRun, readRunText } from '../run.js';
 import { isLocale } from '../../lib/forge-run.js';
 import { appendEvent, appendPhase, readEvents } from '../ledger.js';
-import { readExecution, updateExecution, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree, type LockDeps } from '../execution.js';
+import { readExecution, updateExecution, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree, taskBase, type LockDeps } from '../execution.js';
 import { sleepSync } from '../pid.js';
 import { liveJobs, noSlot, type Slot } from '../jobs.js';
 import { readMergingFile, takeMerging, removeMergingIf, mergingLive, mergingStaleAt, mergeInFlight, type MergingDoc, type MergingHold } from '../merging.js';
@@ -30,6 +30,8 @@ import { mainCheckout, updateLocal } from '../local.js';
 import { readMember, writeMember, isMemberId, listMembers, memberFile } from '../members.js';
 import { parseLooseTasks, planOfLoose, statesOfLoose, writeLoose, readLoose, type LooseTask } from '../loose.js';
 import { startAnnounce, integratedSay, rejectedDepsSay, keptFilesSay, proposeSay, VENV_HINT } from '../swarm.js';
+import type { PriorCommit } from '../brief.js';
+import { cleanText } from '../../lib/forge-status.js';
 
 export interface GitDeps { git: (args: string[]) => string | null; exec: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany; repo: RepoReader }
 export interface SwarmDeps extends GitDeps { at: (dir: string) => GitDeps }
@@ -242,20 +244,34 @@ function loadTasksArg(io: Io, file: string | undefined, sub: string): LooseTask[
 /**
  * The worktree `task-<T>` of the main checkout on `task/<T>` (created from `runBranch` when the branch is new), with
  * swarm.setup run when it is created. Shared by the coordinator's `swarm worktree` and a member's `--member`.
+ * D-02: `base` is where the task left the run branch, so an earlier attempt's commits are in its diff, and `prior` lists them.
  */
-function addTaskWorktree(deps: SwarmDeps, main: string, task: string, runBranch: string): { worktree: string; branch: string; base: string | null; setup: SetupResult } {
+function addTaskWorktree(deps: SwarmDeps, main: string, task: string, runBranch: string): { worktree: string; branch: string; base: string | null; setup: SetupResult; resumed: boolean; prior: PriorCommit[] } {
   const dir = taskWorktree(main, task);
   const branch = taskBranch(task);
   let setup: SetupResult = null;
-  if (!existsSync(dir)) {
+  let existed = existsSync(dir);
+  if (!existed) {
     const g = (args: string[]) => deps.git(['-C', main, ...args]);
     excludeWorktrees(g);
     const exists = g(['rev-parse', '--verify', '-q', `refs/heads/${branch}`]) !== null;
+    // A branch that outlived its worktree also brings the earlier attempt.
+    existed = exists;
     const added = exists ? g(['worktree', 'add', dir, branch]) : g(['worktree', 'add', '-b', branch, dir, runBranch]);
     if (added === null) throw new UsageError(`swarm worktree: cannot add ${dir} for ${branch}`);
     setup = runSetup(deps, dir, main);
   }
-  return { worktree: dir, branch, base: deps.at(dir).git(['rev-parse', 'HEAD'])?.trim() ?? null, setup };
+  const at = deps.at(dir).git;
+  const head = at(['rev-parse', 'HEAD'])?.trim() || null;
+  const base = taskBase(at, runBranch) ?? head;
+  let prior: PriorCommit[] = [];
+  if (existed && base && head && base !== head) {
+    const log = at(['log', '--reverse', '--max-count=50', '--format=%H%x09%s', `${base}..HEAD`]) ?? '';
+    // A commit title is the project's text: without controls nor bidi characters, as the brief prints it (parsePrior).
+    prior = log.split(/\r?\n/).filter(Boolean).map(l => { const [sha, ...title] = l.split('\t'); return { sha, title: cleanText(title.join('\t')) }; })
+      .filter(p => /^[0-9a-f]{7,64}$/.test(p.sha));
+  }
+  return { worktree: dir, branch, base, setup, resumed: prior.length > 0, prior };
 }
 
 /** The `waypoint launch` arguments of a sessions-mode member of task <T>, with its effort, model and launcher from the config. */
@@ -1140,10 +1156,11 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       }
       const task = taskArg();
       const e = notEnded(current());
-      const { worktree: dir, branch, base, setup } = addTaskWorktree(deps, io.cwd, task, e.branch);
+      const added = addTaskWorktree(deps, io.cwd, task, e.branch);
+      const { worktree: dir, branch } = added;
       const t: ExecTask = e.tasks[task] ?? { status: 'running', stage: 'brief', round: 0, worktree: dir, branch, executor: e.mode, attempts: 0, agent: null, startedAt: iso, stageSince: iso, updatedAt: iso, detail: null };
       update(cur => cur && { ...notEnded(cur), tasks: { ...cur.tasks, [task]: { ...(cur.tasks[task] ?? t), worktree: dir, branch, updatedAt: iso } } });
-      return json({ worktree: dir, branch, base, setup });
+      return json(added);
     }
     case 'task': {
       const task = taskArg();

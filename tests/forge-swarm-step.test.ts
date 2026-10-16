@@ -678,3 +678,46 @@ describe('swarm step: the person presses Stop while a step starts a task (K2-02)
     expect(e.tasks.T1?.stage ?? 'brief').toBe('brief');
   });
 });
+
+describe('swarm step briefs a resumed task with its earlier attempt (D-02)', () => {
+  it('writes prior.json and the brief carries the commits the task branch already had', () => {
+    // task/T1 survived an earlier attempt, with its worktree: the tick starts T1 again on it.
+    g(root, 'worktree', 'add', '-q', '-b', 'task/T1', wt('T1'), 'forge/run-shop');
+    commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: first try');
+    step();
+    const work = path.join(root, '.forge', 'work', 'T1');
+    expect(readFileSync(path.join(work, 'brief-1.md'), 'utf8')).toContain('## Previous attempt');
+    expect(JSON.parse(readFileSync(path.join(work, 'prior.json'), 'utf8'))).toEqual([{ sha: g(wt('T1'), 'rev-parse', 'HEAD'), title: 'T1: first try' }]);
+  });
+  it('prep, the implementer and the review take the BASE swarm worktree printed: the review diffs the earlier commits too, on a baseline run in the run worktree', () => {
+    const fork = g(root, 'rev-parse', 'forge/run-shop');
+    g(root, 'worktree', 'add', '-q', '-b', 'task/T1', wt('T1'), 'forge/run-shop');
+    commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: first try');
+    const s = stepWith(() => false);
+    const prep = s.calls.find(a => isCmd(a, 'prep') && a.includes('T1-1'))!;
+    expect(prep[prep.indexOf('--base') + 1]).toBe(fork);
+    expect(s.actions.find(a => a.type === 'spawnImplementer' && a.task === 'T1')).toMatchObject({ base: fork, validate: expect.stringContaining(`--base ${fork} `) });
+    expect(readEvents(root).filter(e => e.kind === 'phase' && e.task === 'T1').at(-1)).toMatchObject({ base: fork, head: g(wt('T1'), 'rev-parse', 'HEAD') });
+    // Back with no commit of its own: its report is handed over; the earlier attempt alone is not sent to review.
+    writeFileSync(path.join(root, '.forge', 'work', 'T1', 'report-1.txt'), 'NEEDS_CONTEXT: which format?\n');
+    expect(step('--returned', 'T1').actions.filter(a => a.task === 'T1')).toEqual([{ type: 'readReport', task: 'T1', report: '.forge/work/T1/report-1.txt' }]);
+    commitIn(wt('T1'), 'src/t1/b.ts', 'y\n', 'T1: b');
+    const r = stepWith(() => false, '--returned', 'T1');
+    expect(r.actions.find(a => a.task === 'T1')).toMatchObject({ type: 'spawnReviewers', base: fork });
+    const diff = readFileSync(path.join(root, '.forge', 'work', 'T1', 'diff-1.patch'), 'utf8');
+    for (const f of ['src/t1/a.ts', 'src/t1/b.ts']) expect(diff).toContain(f);
+    // The worktree is past BASE: what already failed there is not excused; the baseline runs where the run branch is.
+    const runWt = path.join(root, '.claude', 'worktrees', 'run');
+    expect(r.calls.filter(a => isCmd(a, 'validate'))).toEqual([['validate', '--all', '--path', 'large', '--base-run', '--task', 'T1-1', '--cwd', runWt]]);
+    expect(JSON.parse(readFileSync(path.join(root, '.forge', 'work', 'T1', 'base-1.json'), 'utf8'))).toMatchObject({ base: fork, from: null });
+  });
+  it('a start left at stage brief after its prep reuses that prep on the same BASE and HEAD', () => {
+    g(root, 'worktree', 'add', '-q', '-b', 'task/T1', wt('T1'), 'forge/run-shop');
+    commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: first try');
+    const s = stepWith(argv => isCmd(argv, 'swarm', 'task', 'T1') && argv.includes('implement'));
+    expect(s.actions).toContainEqual(expect.objectContaining({ type: 'error', task: 'T1', command: 'swarm task' }));
+    const again = stepWith(() => false);
+    expect(again.calls.filter(a => isCmd(a, 'prep'))).toEqual([]);
+    expect(again.actions.find(a => a.type === 'spawnImplementer' && a.task === 'T1')).toMatchObject({ base: g(root, 'rev-parse', 'forge/run-shop') });
+  });
+});

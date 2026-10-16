@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parsePlan } from '../src/lib/plan.js';
-import { renderBrief, taskText, tddLine } from '../src/forge/brief.js';
+import { renderBrief, taskText, tddLine, parsePrior, priorSection } from '../src/forge/brief.js';
 import { renderThreatModel } from '../src/forge/threat-model.js';
 
 const PLAN = parsePlan(`project: shop
@@ -76,5 +76,28 @@ describe('brief', () => {
     expect(md).toContain('## Threat model\n\n- Protects: secrets\n');
     expect(md.indexOf('## Threat model')).toBeLessThan(md.indexOf('TDD: required.'));
     expect(renderBrief(PLAN, PLAN.tasks[0], { planPath: 'p.yaml', designPath: null })).not.toContain('Threat model');
+  });
+});
+
+describe('the previous attempt of a resumed task (D-02)', () => {
+  const sha = 'a'.repeat(40);
+  it('parsePrior takes the prior list of swarm worktree and refuses anything else', () => {
+    expect(parsePrior([{ sha, title: 'T1: first try' }])).toEqual([{ sha, title: 'T1: first try' }]);
+    expect(parsePrior([])).toEqual([]);
+    expect(parsePrior([{ sha, title: `bad${String.fromCharCode(0x202e)}title` }])).toEqual([{ sha, title: 'badtitle' }]);
+    for (const bad of [{ sha }, [{ sha: 'zz', title: 'x' }], [{ sha, title: 3 }], 'x', null]) expect(parsePrior(bad)).toBeNull();
+    expect(parsePrior(Array.from({ length: 60 }, () => ({ sha, title: 't' })))).toHaveLength(50);
+  });
+  it('priorSection lists each commit with its short sha and says they are reviewed with the task', () => {
+    const s = priorSection('T1', [{ sha, title: 'T1: first try' }]);
+    expect(s.startsWith('## Previous attempt\n')).toBe(true);
+    expect(s).toContain('task/T1');
+    expect(s).toContain('- aaaaaaa T1: first try');
+  });
+  it('renderBrief ends with that section after the TDD line, only when prior is not empty', () => {
+    const md = renderBrief(PLAN, PLAN.tasks[0], { planPath: 'p.yaml', designPath: null, tdd: 'TDD: required.', prior: [{ sha, title: 'T001: first try' }] });
+    expect(md.trimEnd().endsWith(priorSection('T001', [{ sha, title: 'T001: first try' }]).trimEnd())).toBe(true);
+    expect(md.indexOf('TDD: required.')).toBeLessThan(md.indexOf('## Previous attempt'));
+    expect(renderBrief(PLAN, PLAN.tasks[0], { planPath: 'p.yaml', designPath: null, prior: [] })).not.toContain('Previous attempt');
   });
 });

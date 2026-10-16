@@ -1544,3 +1544,47 @@ describe('an ephemeral run is closed by the tick that finishes it (wave 0 handof
     expect(readExecution(root)).toMatchObject({ active: false, stopReason: 'stalled', closedAt: null });
   });
 });
+
+describe('a task resumed in its worktree is reviewed with its earlier commits (D-02)', () => {
+  const g = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, encoding: 'utf8' }).trim();
+  it('swarm worktree takes BASE where the task left the run branch and lists the earlier attempt', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    const fork = git('rev-parse', 'forge/run-shop');
+    const first = out(run(['swarm', 'worktree', 'T1'], io));
+    expect(first).toMatchObject({ base: fork, resumed: false, prior: [] });
+    writeFileSync(path.join(first.worktree, 'one.txt'), '1\n');
+    g(first.worktree, 'add', 'one.txt'); g(first.worktree, 'commit', '-qm', 'T1: first try');
+    const runWt = path.join(root, '.claude', 'worktrees', 'run');
+    writeFileSync(path.join(runWt, 'other.txt'), 'o\n');
+    g(runWt, 'add', 'other.txt'); g(runWt, 'commit', '-qm', 'T2 integrated meanwhile');
+    const again = out(run(['swarm', 'worktree', 'T1'], io));
+    expect(again).toMatchObject({ base: fork, resumed: true, prior: [{ sha: g(first.worktree, 'rev-parse', 'HEAD'), title: 'T1: first try' }] });
+  });
+  it('a branch that outlived its worktree is resumed too; a new worktree is not', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    const fork = git('rev-parse', 'forge/run-shop');
+    const first = out(run(['swarm', 'worktree', 'T1'], io));
+    writeFileSync(path.join(first.worktree, 'one.txt'), '1\n');
+    g(first.worktree, 'add', 'one.txt'); g(first.worktree, 'commit', '-qm', 'T1: first try');
+    const sha = g(first.worktree, 'rev-parse', 'HEAD');
+    git('worktree', 'remove', first.worktree);
+    expect(out(run(['swarm', 'worktree', 'T1'], io))).toMatchObject({ base: fork, resumed: true, prior: [{ sha, title: 'T1: first try' }] });
+    expect(out(run(['swarm', 'worktree', 'T2'], io))).toMatchObject({ base: fork, resumed: false, prior: [] });
+  });
+  it('brief --prior-file adds the earlier attempt; without --plan it prints that section alone', () => {
+    writeFileSync(path.join(root, 'prior.json'), JSON.stringify([{ sha: 'b'.repeat(40), title: 'T1: first try' }]));
+    const full = run(['brief', '--plan', 'plan.yaml', '--task', 'T1', '--prior-file', 'prior.json'], io);
+    expect(full.code).toBe(0);
+    expect(full.stdout).toContain('## Previous attempt');
+    expect(full.stdout).toContain('- bbbbbbb T1: first try');
+    expect(run(['brief', '--plan', 'plan.yaml', '--task', 'T1'], io).stdout).not.toContain('## Previous attempt');
+    expect(run(['brief', '--task', 'T1', '--prior-file', 'prior.json'], io).stdout.startsWith('## Previous attempt\n')).toBe(true);
+    writeFileSync(path.join(root, 'bad.json'), '{"sha":1}');
+    expect(run(['brief', '--task', 'T1', '--prior-file', 'bad.json'], io).code).toBe(2);
+    expect(run(['brief', '--prior-file', 'prior.json'], io).code).toBe(2);
+    // A superpowers plan's brief would drop the section: refused, never silent.
+    writeFileSync(path.join(root, 'sp.md'), '### Task 1: x\n\n- [ ] a\n');
+    expect(run(['brief', '--superpowers-plan', 'sp.md', '--task', '1'], io).code).toBe(0);
+    expect(run(['brief', '--superpowers-plan', 'sp.md', '--task', '1', '--prior-file', 'prior.json'], io)).toMatchObject({ code: 2, stderr: expect.stringContaining('--prior-file') });
+  });
+});

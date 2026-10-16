@@ -12,8 +12,8 @@ import { isSafeId, normalizePublicTask, type PublicTask } from '../../lib/execut
 import { samePath } from '../../lib/worktree.js';
 import { treeStartFile, parseStatus, parseSnapshot, treeCheck, type TreeSnapshot } from '../tree.js';
 import { triage, implementerFor, zonesFromPaths, announce, announceReview, isBookkeeping, parseNumstat, diffPath, isPerfTask, reviewFor, PATH_ORDER, ZONE_ORDER, type PathName, type AnnounceLocale, type TriageResult } from '../triage.js';
-import { parsePlan, PlanError } from '../../lib/plan.js';
-import { renderBrief, taskText, tddLine } from '../brief.js';
+import { parsePlan, PlanError, isPlanId } from '../../lib/plan.js';
+import { renderBrief, taskText, tddLine, parsePrior, priorSection, type PriorCommit } from '../brief.js';
 import { renderThreatModel } from '../threat-model.js';
 import { loadConfig, configValue, agentFor, ROLES, ConfigError, NAME, WORKFLOWS, AUTONOMIES, type Profile, type Workflow } from '../config.js';
 import { resolvePrefs, isWorkflow, isAutonomy } from '../prefs.js';
@@ -875,6 +875,24 @@ function runCommand(argv: string[], io: Io): Result {
         return ok('ok');
       }
       case 'brief': {
+        // D-02: the earlier attempt of a task resumed on its branch (the `prior` swarm worktree printed).
+        let prior: PriorCommit[] | null = null;
+        if (has('prior-file')) {
+          const f = flag('prior-file');
+          if (!f) throw new UsageError('brief: --prior-file needs a file');
+          let raw: unknown;
+          try { raw = JSON.parse(readFileSync(path.resolve(io.cwd, f), 'utf8')); } catch { throw new UsageError(`brief: cannot read ${f}`); }
+          prior = parsePrior(raw);
+          if (!prior) throw new UsageError(`brief: ${f} is not the prior list swarm worktree prints ([{sha, title}])`);
+          // Without a plan (a loose task's brief is written by hand), only the section, to append to it.
+          if (!has('plan') && !has('superpowers-plan')) {
+            const task = flag('task');
+            if (!task || !isPlanId(task)) throw new UsageError('brief: --prior-file without --plan needs --task <id>');
+            return { code: 0, stdout: prior.length ? priorSection(task, prior) : '', stderr: '' };
+          }
+          // A superpowers plan's brief has no task branch of its own: never drop the section silently.
+          if (has('superpowers-plan')) throw new UsageError('brief: --prior-file goes with --plan, or alone with --task <id>');
+        }
         if (has('superpowers-plan')) {
           const file = flag('superpowers-plan');
           if (!file) throw new UsageError('brief: --superpowers-plan needs a plan file');
@@ -889,7 +907,7 @@ function runCommand(argv: string[], io: Io): Result {
         const { plan, task } = planTask(io.cwd, flag('plan'), flag('task'));
         const design = flag('design') ?? path.join(path.dirname(flag('plan')!), 'design.md');
         const designPath = existsSync(path.resolve(io.cwd, design)) ? design.replace(/\\/g, '/') : null;
-        return ok(renderBrief(plan, task, { planPath: flag('plan')!.replace(/\\/g, '/'), designPath, tdd: briefTdd(io, repoDir), threatModel: briefThreatModel(repoDir) }));
+        return ok(renderBrief(plan, task, { planPath: flag('plan')!.replace(/\\/g, '/'), designPath, tdd: briefTdd(io, repoDir), threatModel: briefThreatModel(repoDir), prior }));
       }
       case 'triage': {
         const t = triageCore(io, args);
