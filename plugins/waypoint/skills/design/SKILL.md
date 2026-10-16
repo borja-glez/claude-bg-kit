@@ -12,12 +12,13 @@ Talk to the user in their language. Everything stored (front matter keys, JSON f
 
 ## Args and paths
 
-The first token of the arguments is the subcommand: `new [--from <spec>]`, `round`, `apply <all|1,3>`, `rewrite`, `interview`, `approve [--auto]`. With no arguments: `new` if `design.md` does not exist, otherwise `round`.
+The first token of the arguments is the subcommand: `new [--from <spec>]`, `round`, `apply <all|1,3>`, `rewrite`, `interview`, `approve [--auto]`, `park`. With no arguments: `new` if `design.md` does not exist, otherwise `round`.
 
 - `DESIGN` = `docs/waypoint/<project>/design.md` (ask which project if there are several).
 - `LOCAL` = `.waypoint/<project>/`. Make sure `.waypoint/` is in the project's `.gitignore`.
 - **Commits** always use pathspecs so nothing else that is staged or modified gets swept in: `git add <paths>` then `git commit -m "<message>" -- <paths>`, where `<paths>` = `DESIGN docs/waypoint/<project>/design/` (plus the `.gitignore` in the first commit of `new`). Follow the repository's commit rules (message style, attribution) for the message.
 - `docs/waypoint/<project>/design/history/v<N>.md` and `design/changelog.json` belong to `design-snapshot`: never edit them by hand.
+- **Binding.** Before the first step of `round`, `apply`, `rewrite` and `interview`, and in `new` once `DESIGN` exists (right after its step 3; `bind` reads the file): `waypoint bind DESIGN --via design --claude ${CLAUDE_SESSION_ID}`, so the start context and the band of the draft are this conversation's. Exit 3 or 4 (another conversation holds the project's seat, or left a task of its plan in progress there): run it again with `--second-seat` and say in one line which conversation keeps the main seat. With `status: parked` in `DESIGN`, set it back to `draft` with Edit before the subcommand's first step.
 
 `DESIGN` starts with this front matter:
 
@@ -29,7 +30,7 @@ locale: <user language, e.g. es> # default en
 summary: <string>
 pillars: [{title: <string>, text: <string>}]   # 2-6 recommended
 start_prompt: <string>           # default "/waypoint:work <track>"
-status: draft                    # draft | approved
+status: draft                    # draft | approved | parked
 artifact: <url>                  # added by Publish
 source: <path>                   # added by design-import: the spec this design was imported from
 ---
@@ -92,6 +93,15 @@ Apply the approved-design rule above before the first edit. Ask questions one at
 2. Set `status: approved` in the front matter, run `design-validate`, run `design-snapshot` with the note "approved" (in the user's language), and commit `Design approved (v<N>)` (pathspecs as above).
 3. Publish.
 4. Run the `waypoint:plan` skill, telling it to start from the approved `design.md`. When forge drives the session (`/forge:run` chose Large), stop after step 3: `/forge:run` continues with `forge-planner`.
+
+## park
+
+Sets the design aside: a parked design is neither announced at session start nor drawn in the band until a subcommand takes it up again.
+
+1. `waypoint design-park DESIGN` (it sets `status: parked`; exit 2: only a draft is parked).
+2. Commit with the message `Design parked (v<N>)` (`N` = the `version` of the last changelog entry; pathspecs as above).
+3. `waypoint release DESIGN --claude ${CLAUDE_SESSION_ID}` (it ends this conversation's binding).
+4. Tell the user in one line that the design is parked and that `/waypoint:design round` takes it up again.
 
 ## Publish
 

@@ -40,13 +40,14 @@ describe('plugin layout', () => {
       expect(md).toMatch(new RegExp(`^---\\r?\\nname: ${s}\\r?\\ndescription: .+\\r?\\n`));
     }
   });
-  it('launch skill: busyUntil rule, --merge', () => {
+  it('launch skill: lease rule, --merge', () => {
     const md = read('plugins/waypoint/skills/launch/SKILL.md');
-    for (const w of ['busyUntil', '--merge', 'exactly as returned']) expect(md).toContain(w);
+    for (const w of ['leaseUntil', '--merge', 'exactly as returned']) expect(md).toContain(w);
+    expect(md).not.toContain('busyUntil');
   });
   it('work skill documents the multi-session protocol', () => {
     const md = read('plugins/waypoint/skills/work/SKILL.md');
-    for (const w of ['SendMessage', 'ListAgents', ' inbox ', ' recover ', ' conflicts ', 'escalation', 'seen.json', 'MAIN_REPO', 'yields', '{heartbeatAt: NOW, status: "active"}']) expect(md).toContain(w);
+    for (const w of ['SendMessage', 'ListAgents', ' inbox ', ' recover ', ' conflicts ', 'escalation', 'seen.json', 'MAIN_REPO', 'yields']) expect(md).toContain(w);
   });
   it('work skill reads and writes roadmap notes', () => {
     const md = read('plugins/waypoint/skills/work/SKILL.md');
@@ -149,7 +150,7 @@ describe('plugin layout', () => {
     expect(md).toMatch(/forge:run.*Large/s);
     expect(md).toContain('only the first paragraph');
     expect(md).not.toContain("initial prompt says forge drives it");
-    expect(md).toContain('busyUntil');
+    expect(md).toContain('--busy-until');
     expect(md).toContain('90 minutes');
   });
   it('waypoint design approve stops before planning when forge drives the session', () => {
@@ -1233,5 +1234,20 @@ describe('plugin layout', () => {
       for (const s of ['delicate: true', '§0.5']) expect(md, `${f}: ${s}`).toContain(s);
       expect(md).not.toContain('--swarm');
     }
+  });
+  it('the skills bind the conversation to its seat, and work lets the CLI build its batches (wave 2a)', () => {
+    const work = read('plugins/waypoint/skills/work/SKILL.md');
+    for (const w of ['bind <plan> --via work --claude ${CLAUDE_SESSION_ID}', '--second-seat', '--takeover', '--resume', 'heartbeat --register', '--sessions DB/sessions',
+      'waypoint.cjs" claim <plan> --db DB', '--recovered-from', '`solo`', 'waypoint.cjs" done <plan> --db DB', '--summary-file <SEAT>/summary.txt',
+      'waypoint.cjs" block <plan> --db DB', '--why-file <SEAT>/block-reason.txt', '--busy-until', '--idle', 'waiting_on', '--base <MAIN_BRANCH>',
+      'release <plan> --seat <SID> --free <T>', '<SEAT>/pending-commits.jsonl', '<SEAT>/seen.json', '<SEAT>/queue.jsonl', 'git status --porcelain --untracked-files=no',
+      '## 7. Release', '**Arguments.**']) expect(work, w).toContain(w);
+    for (const w of ['PREV_AGENT', 'busyUntil:', '.waypoint/<project>/pending-commits.jsonl', '.waypoint/<project>/queue.jsonl', 'git -C MAIN_REPO status',
+      'git -C MAIN_REPO rev-parse', '{status: "blocked", blockedBy:', '{status: "done", doneAt: NOW', 'type: "started", sessionId: SID']) expect(work, w).not.toContain(w);
+    const design = read('plugins/waypoint/skills/design/SKILL.md');
+    for (const w of ['bind DESIGN --via design --claude ${CLAUDE_SESSION_ID}', '--second-seat', '## park', 'design-park DESIGN', 'release DESIGN --claude ${CLAUDE_SESSION_ID}']) expect(design, w).toContain(w);
+    expect(runRef('execution')).toContain('bind <plan> --via forge-run --claude <CSID>');
+    expect(read('plugins/forge/skills/member/SKILL.md')).toContain('bind <plan> --via forge-member --claude ${CLAUDE_SESSION_ID}');
+    expect(read('plugins/forge/skills/infinite/SKILL.md')).toContain('bind <plan> --via forge-infinite --claude <CSID>');
   });
 });
