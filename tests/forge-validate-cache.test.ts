@@ -65,6 +65,19 @@ describe('the tree a validator sees (C6)', () => {
     writeFileSync(path.join(root, 'a.txt'), 'edited after the merge\n');
     expect(indexTree(defaultGit(root), [], new Set(untrackedPaths(defaultGit(root))))).toBeNull();
   });
+  it('a new file inside an untracked directory that was already there is seen (no collapsed dir/)', () => {
+    mkdirSync(path.join(root, 'pending'));
+    writeFileSync(path.join(root, 'pending', 'old.txt'), 'old\n');
+    writeFileSync(path.join(root, 'a.txt'), 'merged\n');
+    g('add', 'a.txt');
+    const before = new Set(untrackedPaths(defaultGit(root)));
+    expect(before.has('pending/old.txt')).toBe(true);
+    const staged = g('write-tree');
+    expect(indexTree(defaultGit(root), [], before)).toBe(staged);
+    writeFileSync(path.join(root, 'pending', 'new.txt'), 'new\n');
+    expect(untrackedPaths(defaultGit(root))).toContain('pending/new.txt');
+    expect(indexTree(defaultGit(root), [], before)).toBeNull();
+  });
 });
 
 describe('the cache key and its entries (C6)', () => {

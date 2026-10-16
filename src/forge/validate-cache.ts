@@ -59,7 +59,7 @@ export function cleanTree(git: Git, generated: string[]): string | null {
 
 /** The untracked paths git does not ignore, local state aside (a directory collapsed into `dir/`). */
 export function untrackedPaths(git: Git): string[] {
-  return (git(['ls-files', '-z', '--others', '--exclude-standard', '--directory', '--', '.', ...LOCAL_STATE]) ?? '').split('\0').filter(Boolean);
+  return (git(['ls-files', '-z', '--others', '--exclude-standard', '--', '.', ...LOCAL_STATE]) ?? '').split('\0').filter(Boolean);
 }
 
 /**

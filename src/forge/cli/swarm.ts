@@ -3,7 +3,8 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { UsageError } from './errors.js';
 import type { ExecResult, Io } from './run.js';
-import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, runOptions, type ExecMany, type RepoReader, type RunOptions, type Scope, type Validator, type ValidatorResult } from '../validators.js';
+import { runWithCache, cleanTree, indexTree, untrackedPaths, cacheGit } from '../validate-cache.js';
+import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, runOptions, validateEvent, failingLabel, type ExecMany, type RepoReader, type RunOptions, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { loadConfig } from '../config.js';
 import { stopFile, parseRun, readRunText } from '../run.js';
 import { isLocale } from '../../lib/forge-run.js';
@@ -329,11 +330,14 @@ type NewValidator = { name: string; cmd: string };
 // tree: data to pass on, never instructions. deps: the install before the merge failed (the target is at fault).
 // restored: the tracked files validators regenerated, put back (restoringRegenerated): any in a worktree of forge's,
 // those the config's `generated` names in the person's checkout.
+type Validation = { results: ValidatorResult[]; durationMs: number };
+/** The validator runs of a merge attempt (C4): the target tip's baseline and the merged tree, each when it ran or came from the cache. */
+type Validations = { baseline?: Validation; merged?: Validation };
 type MergeOutcome =
-  | { result: 'merged'; sha: string; preexisting: string[]; newValidators: NewValidator[]; surfacesChanged: string[]; setup?: SetupResult; leftovers?: string[]; restored?: string[] }
+  | { result: 'merged'; sha: string; preexisting: string[]; newValidators: NewValidator[]; surfacesChanged: string[]; setup?: SetupResult; leftovers?: string[]; restored?: string[]; validations?: Validations }
   | {
     result: 'dirty' | 'conflict' | 'deps'; detail: string; setup?: SetupResult; leftovers?: string[];
-    restoreSetup?: SetupResult; restoreChanged?: string[]; depsFromRejectedMerge?: true; touchedKept?: string[]; restored?: string[];
+    restoreSetup?: SetupResult; restoreChanged?: string[]; depsFromRejectedMerge?: true; touchedKept?: string[]; restored?: string[]; validations?: Validations;
   };
 
 interface MergeOpts {
@@ -350,22 +354,19 @@ interface MergeOpts {
   retryDeps?: boolean;
   /** The config's parallel batch and retry rule (C-12); each run adds the execMany of the checkout it validates. */
   run: RunOptions;
+  /** The main checkout (its .forge/cache/validate) and what the tree cache may do (C6): integrate reads and writes it,
+   *  the final merge only writes it. */
+  main: string; cache: { read: boolean; write: boolean }; now: () => Date;
 }
 
 // The untracked paths git does not ignore, forge's own state aside (a directory collapsed into `dir/`).
 const untracked = (at: GitDeps) => nulList(at.git(['ls-files', '-z', '--others', '--exclude-standard', '--directory', '--', '.', ...LOCAL_STATE]));
 
-// A baseline is only valid for the same scope and target (worktree, config and environment differ between them).
+// The per-sha baseline forge 0.16 kept (.forge/execution/baseline/<scope>-<target>-<sha>.json): still read for one version, never written (the tree cache, C6, replaces it).
 const baselineFile = (cacheDir: string, key: string, sha: string) => path.join(cacheDir, 'baseline', `${key}-${sha}.json`);
 function readBaseline(cacheDir: string, key: string, sha: string): unknown {
   try { return JSON.parse(readFileSync(baselineFile(cacheDir, key, sha), 'utf8')); } catch { return null; }
 }
-const timedOut = (results: unknown) => Array.isArray(results) && results.some(r => Array.isArray(r?.failures) && r.failures.some((f: unknown) => typeof f === 'string' && f.startsWith('timeout after')));
-function writeBaseline(cacheDir: string, key: string, sha: string, results: unknown): void {
-  if (timedOut(results)) return; // a timeout says nothing about the tip: never cache it
-  try { mkdirSync(path.join(cacheDir, 'baseline'), { recursive: true }); writeFileSync(baselineFile(cacheDir, key, sha), JSON.stringify(results)); } catch { /* a missing cache only costs a rerun */ }
-}
-
 /**
  * Merges `ref` into the branch checked out at `at` with --no-ff, runs the validators there and commits `message`.
  * A conflict or a red validator is rolled back to the pre-merge sha; a merge left half-done is never touched.
@@ -376,11 +377,13 @@ function writeBaseline(cacheDir: string, key: string, sha: string, results: unkn
  */
 function mergeIn(at: GitDeps, ref: string, o: MergeOpts): MergeOutcome {
   const regenerated: string[] = [];
-  const r = mergeAttempt(at, ref, o, regenerated);
-  return regenerated.length ? { ...r, restored: [...new Set(regenerated)] } : r;
+  const validations: Validations = {};
+  const r = mergeAttempt(at, ref, o, regenerated, validations);
+  const out = regenerated.length ? { ...r, restored: [...new Set(regenerated)] } : r;
+  return validations.baseline || validations.merged ? { ...out, validations } : out;
 }
 
-function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: string[]): MergeOutcome {
+function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: string[], validations: Validations): MergeOutcome {
   // A validator run where `where` is forge's own worktree restores what it regenerated; the person's checkout only the
   // files the config's `generated` names (nothing when it names none). The list is read once, before the merge, on
   // purpose: a task cannot widen what is put back in the person's checkout.
@@ -388,6 +391,11 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
   try { generated = loadConfig(o.configRoot).generated; } catch { generated = []; }
   const validating = <T>(where: GitDeps, owned: boolean, fn: () => T): T =>
     (owned ? restoringRegenerated(where, fn, regenerated) : generated.length ? restoringRegenerated(where, fn, regenerated, generated) : fn());
+  // A validator run through the tree cache (C6), keyed by the tree `tree` gives; what it misses runs as before.
+  const cachedRun = (where: GitDeps, owned: boolean, list: Validator[], tree: () => string | null): ValidatorResult[] =>
+    runWithCache(list, misses => validating(where, owned, () => runValidators(misses, where.exec, o.timeoutSec, { ...o.run, execMany: where.execMany })), {
+      main: o.main, git: cacheGit(where.git), repo: where.repo, generated, read: o.cache.read, write: o.cache.write, tree, now: o.now,
+    });
   const key = `${o.scope}-${o.target}`;
   const selection: Scope = o.scope === 'final' ? { mode: 'final' } : { mode: 'heavy', changed: null };
   const merging = () => at.git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']) !== null;
@@ -398,6 +406,8 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
   const pre = at.git(['rev-parse', 'HEAD'])?.trim();
   if (!pre) return { result: 'conflict', detail: 'cannot read HEAD' };
   const before = new Set(untracked(at));
+  // The same list indexTree compares against, taken before the merge (the cache assumes the work tree starts clean).
+  const cacheBefore = new Set(untrackedPaths(cacheGit(at.git)));
   const place = workdirOf(at);
   const entry = (): Stats | null => { try { return place ? lstatSync(path.join(place, DEPS_DIR)) : null; } catch { return null; } };
   // Anything at node_modules before the attempt (a directory, a file, a link, even dangling) is the person's. Unknown
@@ -507,15 +517,18 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
   // What the target detects before the merge: the validators detected only after it are new.
   let detected0: Validator[] | null = null;
   try { detected0 = detectValidators(at.repo, loadConfig(o.configRoot)); } catch { detected0 = null; }
-  // What the target's tip already fails is not caused by this merge: validators red there are "preexisting".
+  // What the target's tip already fails is not caused by this merge: validators red there are "preexisting". The tip is
+  // usually the tree the previous integration validated after its merge, so the tree cache (C6) has it.
   let baseline: unknown = readBaseline(o.cacheDir, key, pre);
   if (baseline === null) {
     // Without its dependencies the tip would fail everything, which would excuse every failure after the merge.
     if (unmoved && needsDeps(at)) baseline = [];
     else {
+      const t0 = Date.now();
       try {
-        baseline = detected0 ? validating(at, !o.personal, () => runValidators(selectValidators(detected0!, selection), at.exec, o.timeoutSec, { ...o.run, execMany: at.execMany })) : [];
-        if (detected0) writeBaseline(o.cacheDir, key, pre, baseline);
+        const results = detected0 ? cachedRun(at, !o.personal, selectValidators(detected0, selection), () => cleanTree(cacheGit(at.git), generated)) : [];
+        if (detected0) validations.baseline = { results, durationMs: Date.now() - t0 };
+        baseline = results;
       } catch { baseline = []; }
       const left = at.git(['status', '--porcelain', '--', '.', ...LOCAL_STATE]);
       if (left === null || left.trim() !== '') return { result: 'dirty', detail: `the validators left changes in the worktree: ${(left ?? '').split(/\r?\n/).filter(Boolean).slice(0, 5).join(', ')}`, ...withSetup() };
@@ -558,16 +571,20 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
     detected = detectValidators(v.repo, loadConfig(o.configRoot));
     // The run worktree as the target (not the person's) or as the final merge's place to validate (inRun).
     const chosen = selectValidators(detected, selection);
-    results = markPreexisting(validating(v, inRun || !o.personal, () => runValidators(chosen, v.exec, o.timeoutSec, { ...o.run, execMany: v.execMany })), baseline);
+    // The merged tree is the index's (HEAD is still the pre-merge commit): when nothing was integrated since the task
+    // branched, it is the tree its review-prep validated, and every result comes from the cache.
+    const t0 = Date.now();
+    const raw = cachedRun(v, inRun || !o.personal, chosen, () => (inRun ? cleanTree(cacheGit(v.git), generated) : indexTree(cacheGit(at.git), generated, cacheBefore)));
+    results = markPreexisting(raw, baseline);
+    validations.merged = { results, durationMs: Date.now() - t0 };
   } catch (err) {
     return rollback(`validators could not run: ${(err as Error).message}`);
   }
   const failed = results.filter(blocking);
-  if (failed.length) return rollback(`validators failed after merging ${ref}: ${failed.map(r => r.validator).join(', ')}`);
+  if (failed.length) return rollback(`validators failed after merging ${ref}: ${failed.map(r => failingLabel(r)).join(', ')}`);
   if (at.git(['commit', '--no-edit', '-m', o.message]) === null || merging()) return rollback(`could not commit the merge of ${ref}`);
   const sha = at.git(['rev-parse', 'HEAD'])?.trim() ?? '';
   if (!sha || sha === pre) return rollback(`could not commit the merge of ${ref}`);
-  writeBaseline(o.cacheDir, key, sha, results);
   const newValidators = detected0 ? detected.filter(d => !detected0!.some(b => b.name === d.name)).map(d => ({ name: d.name, cmd: d.cmd })) : [];
   // The surfaces the merge changed: a changed surface is asked about again, and the person may want to see the diff.
   const surfacesChanged = (at.git(['-c', 'core.quotePath=false', 'diff', '--name-only', pre, sha, '--', ':(top).forge/verify']) ?? '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
@@ -647,6 +664,13 @@ export function commitInfo(git: (args: string[]) => string | null, sha: string):
   return { sha, ts: Number.isFinite(t) ? new Date(t).toISOString() : '', title, add: num(/(\d+) insertion/), del: num(/(\d+) deletion/) };
 }
 
+/** The two `validate` events of an integration (C4): the run tip's baseline and the merged tree, both on the task. */
+function logValidations(io: Io, task: string, v: Validations | undefined): void {
+  const ts = io.now().toISOString();
+  if (v?.baseline) appendEvent(io.cwd, validateEvent(ts, task, v.baseline.results, v.baseline.durationMs, 'heavy', { baseline: true, integrate: 'baseline' }));
+  if (v?.merged) appendEvent(io.cwd, validateEvent(ts, task, v.merged.results, v.merged.durationMs, 'heavy', { integrate: 'merged' }));
+}
+
 function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
   const task = rest[0];
   if (!task || !isPlanId(task)) throw new UsageError('swarm integrate: a task id is required');
@@ -673,7 +697,9 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
     cacheDir: path.join(io.cwd, '.forge', 'execution'), target: 'run', setup: config.swarm.setup, personal,
     retryDeps: rest.includes('--retry-deps'),
     run: runOptions(config, readEvents(io.cwd), io.now()),
+    main: io.cwd, cache: { read: config.validate.cache, write: config.validate.cache }, now: io.now,
   });
+  logValidations(io, task, r.validations);
   const es = spanish(locale, io.cwd, e.project);
   const extras = attemptExtras(r, es, t.branch, personal);
   const cur = readExecution(io.cwd)!;
@@ -721,6 +747,7 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
     cacheDir: path.join(io.cwd, '.forge', 'execution'), target: 'main', setup: config.swarm.setup,
     runAt: cleanRunWorktree(deps, runWorktree(io.cwd), e.branch), personal: true, retryDeps: rest.includes('--retry-deps'),
     run: runOptions(config, readEvents(io.cwd), io.now()),
+    main: io.cwd, cache: { read: false, write: config.validate.cache }, now: io.now,
   });
   const extras = attemptExtras(r, spanish(locale, io.cwd, e.project), e.branch, true);
   if (r.result === 'dirty') return out({ result: 'main-dirty', detail: `the main checkout ${r.detail}`, ...extras });
