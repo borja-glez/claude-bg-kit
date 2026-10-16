@@ -483,15 +483,18 @@ describe('forge CLI', () => {
   it('unknown command prints usage, exit 2', () => {
     expect(run(['bogus'], io).code).toBe(2);
   });
-  it('validate runs the selected validators, logs them and exits 1 on a failure', () => {
+  it('validate --affected runs the tests related to the given files, logs them and exits 1 on a failure', () => {
     writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'vitest run', build: 'esbuild' } }));
+    mkdirSync(path.join(root, 'src'));
+    writeFileSync(path.join(root, 'src', 'a.ts'), 'a\n');
     const ran: string[] = [];
-    io.exec = cmd => { ran.push(cmd); return { code: cmd === 'npm test' ? 1 : 0, output: 'FAIL x', ms: 3, timedOut: false }; };
+    io.exec = cmd => { ran.push(cmd); return { code: 1, output: 'FAIL x', ms: 3, timedOut: false }; };
     const r = run(['validate', '--affected', 'src/a.ts', '--task', 't1'], io);
-    expect(ran).toEqual(['npm test']);
+    const q = process.platform === 'win32' ? '"src/a.ts"' : "'src/a.ts'";
+    expect(ran).toEqual([`npx vitest related --run --passWithNoTests ${q}`]);
     expect(r.code).toBe(1);
     expect(JSON.parse(r.stdout)).toEqual([{ validator: 'test', ok: false, flaky: false, durationMs: 3, failures: ['FAIL x'], failing: ['x'], failingKnown: true }]);
-    expect(readEvents(root).at(-1)).toMatchObject({ kind: 'validate', task: 't1', ok: false });
+    expect(readEvents(root).at(-1)).toMatchObject({ kind: 'validate', task: 't1', ok: false, scope: 'affected' });
   });
   it('validate retries a failure only for a validator with a flaky history, unless validate.retry says otherwise (C-12)', () => {
     writeFileSync(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'vitest run' } }));
@@ -1956,5 +1959,47 @@ describe('validate and the tree cache (C6)', () => {
     ran.length = 0;
     run(['validate', '--all', '--path', 'medium'], inSub);
     expect(ran).toEqual(['lint-cmd']);
+  });
+});
+
+describe('validate --affected (C-02)', () => {
+  let repo: string;
+  let ran: string[];
+  let aio: Io;
+  const q = (f: string) => (process.platform === 'win32' ? `"${f}"` : `'${f}'`);
+  beforeEach(() => {
+    repo = mkdtempSync(path.join(tmpdir(), 'forge-affected-'));
+    const g = (...a: string[]) => execFileSync('git', a, { cwd: repo, encoding: 'utf8' });
+    g('init', '-q'); g('config', 'user.email', 'a@b.c'); g('config', 'user.name', 't');
+    mkdirSync(path.join(repo, 'src'));
+    writeFileSync(path.join(repo, 'src', 'a.ts'), 'a\n');
+    writeFileSync(path.join(repo, 'src', 'b.ts'), 'b\n');
+    g('add', '-A'); g('commit', '-qm', 'init');
+    mkdirSync(path.join(repo, '.forge'));
+    writeFileSync(path.join(repo, '.forge', 'config.yaml'), 'detect: false\nvalidators:\n  - name: unit\n    cmd: unit-all\n    kind: test\n    affected_cmd: unit-related {files}\n  - name: style\n    cmd: lint-all\n    kind: lint\n  - name: pack\n    cmd: build-all\n    kind: build\n');
+    ran = [];
+    aio = { cwd: repo, now: () => new Date('2026-10-11T10:00:00.000Z'), env: {}, exec: cmd => { ran.push(cmd); return { code: 0, output: '', ms: 1, timedOut: false }; } };
+  });
+  it('without a list it takes the files changed since --base (uncommitted ones included) and the untracked ones', () => {
+    writeFileSync(path.join(repo, 'src', 'a.ts'), 'a2\n');
+    writeFileSync(path.join(repo, 'src', 'new file.test.ts'), 'n\n');
+    const r = run(['validate', '--affected', '--base', 'HEAD', '--task', 't-1'], aio);
+    expect(r.code).toBe(0);
+    expect(ran).toEqual([`unit-related ${q('src/a.ts')} ${q('src/new file.test.ts')}`, 'lint-all']);
+    expect(readEvents(repo).filter(e => e.kind === 'validate').at(-1)).toMatchObject({ task: 't-1', scope: 'affected', cached: false });
+  });
+  it('a path no shell may see makes the test run in full, with a note; a test without a related-tests command is skipped', () => {
+    writeFileSync(path.join(repo, 'src', 'año.ts'), 'x\n');
+    const r = run(['validate', '--affected', '--base', 'HEAD'], aio);
+    expect(ran).toEqual(['unit-all', 'lint-all']);
+    expect(r.stderr).toContain('unit: ');
+    expect(r.stderr).toContain('runs in full');
+    writeFileSync(path.join(repo, '.forge', 'config.yaml'), 'detect: false\nvalidators:\n  - name: unit\n    cmd: unit-all\n    kind: test\n');
+    ran.length = 0;
+    const s = run(['validate', '--affected', 'src/a.ts'], aio);
+    expect(s.code).toBe(0);
+    expect(ran).toEqual([]);
+    expect(JSON.parse(s.stdout)).toEqual([expect.objectContaining({ validator: 'unit', ok: true, skipped: 'not-affected' })]);
+    expect(s.stderr).toContain('review-prep runs it in full');
   });
 });

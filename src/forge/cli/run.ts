@@ -29,7 +29,7 @@ import { swarmCommand, restoringRegenerated } from './swarm.js';
 import { reviewCommand } from './review.js';
 import { runWithCache, cacheGit } from '../validate-cache.js';
 import { roundDecision } from '../round.js';
-import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, runOptions, validateEvent, type ExecMany, type RepoReader, type Scope, type Validator } from '../validators.js';
+import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, runOptions, validateEvent, planAffected, type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { checkTools, mcpInventory, toolGaps } from '../tools.js';
 import { verifyPlan, cleanupPids, killTarget, askFor, capLines, relabelDiff, type PlanSurface } from '../verify.js';
 import { readLocal, updateLocal, mainCheckout, readLearned, recordLearned, OBJECT_ID, type SurfacePermission } from '../local.js';
@@ -710,9 +710,22 @@ export function run(argv: string[], io: Io): Result {
         const p = flag('path');
         if (p !== undefined && !(PATH_ORDER as readonly string[]).includes(p)) throw new UsageError(`validate: --path must be one of ${PATH_ORDER.join('|')}`);
         if (has('out') && flag('out') === undefined) throw new UsageError('validate: --out needs a file');
+        // --affected a,b names the files; bare (or followed by another flag) it takes those changed since --base (HEAD by
+        // default; uncommitted changes included) and the untracked ones, read with -z so git quotes no name.
+        const affectedFiles = (): string[] => {
+          const given = flag('affected');
+          if (given !== undefined) return given.split(',').map(s => s.trim()).filter(Boolean);
+          const git = io.git ?? defaultGit(repoDir);
+          const base = flag('base') ?? 'HEAD';
+          if (base.startsWith('-')) throw new UsageError('validate: --base must be a commit');
+          const changed = git(['diff', '--name-only', '-z', base, '--']);
+          if (changed === null) throw new UsageError(`validate --affected: cannot diff against ${base}`);
+          const others = git(['ls-files', '-z', '--others', '--exclude-standard']) ?? '';
+          return [...new Set([...changed.split('\0'), ...others.split('\0')].filter(Boolean))];
+        };
         let scope: Scope;
         if (has('final')) scope = { mode: 'final' };
-        else if (!has('all') && flag('affected') !== undefined) scope = { mode: 'affected', files: flag('affected')!.split(',').map(s => s.trim()).filter(Boolean) };
+        else if (!has('all') && has('affected')) scope = { mode: 'affected', files: affectedFiles() };
         else if (p === 'trivial' || p === 'small') scope = { mode: 'small' };
         else {
           const base = flag('base');
@@ -720,6 +733,10 @@ export function run(argv: string[], io: Io): Result {
           scope = { mode: 'heavy', changed: diff === null ? null : diff.split('\n').map(s => s.trim()).filter(Boolean) };
         }
         const list = selectValidators(all, scope);
+        // --affected (C-02): a test validator runs only the tests related to the files (its affectedCmd); in full when a
+        // path cannot go into a shell or there are too many; not at all (skipped: not-affected) when nothing relates.
+        const plan = scope.mode === 'affected' ? planAffected(list, scope.files, process.platform, repoReader(repoDir).exists)
+          : { run: list, skipped: new Map<string, ValidatorResult>(), notes: [] as string[] };
         const opts = runOptions(config, readEvents(io.cwd), io.now(), io.execMany);
         // --cwd the run worktree of this checkout (forge's own): what the validators regenerated there is put back.
         // Any other checkout: only the files the config's `generated` names (nothing when it names none).
@@ -734,10 +751,12 @@ export function run(argv: string[], io: Io): Result {
         // Its git runs at the root of the checkout being validated, never at a subdirectory: a change outside it counts.
         const useCache = config.validate.cache && !has('no-cache') && scope.mode !== 'affected';
         const t0 = Date.now();
-        let results = runWithCache(list, runList, {
+        const ran = runWithCache(plan.run, runList, {
           main: mainCheckout(io.cwd), git: useCache ? cacheGit(restoreAt.git) : restoreAt.git, repo: repoReader(repoDir), generated: config.generated,
           read: useCache && scope.mode !== 'final', write: useCache, now: io.now,
         });
+        let k = 0;
+        let results = list.map(v => plan.skipped.get(v.name) ?? ran[k++]);
         const durationMs = Date.now() - t0;
         if (has('baseline')) {
           if (flag('baseline') === undefined) throw new UsageError('validate: --baseline needs the JSON a validate run printed on the base commit');
@@ -751,6 +770,7 @@ export function run(argv: string[], io: Io): Result {
         if (flag('out') !== undefined) writeJsonAtomic(path.resolve(io.cwd, flag('out')!), results);
         const out = json(results, allOk ? 0 : 1);
         if (!list.length) out.stderr = all.length ? 'no validators cover the affected paths\n' : 'no validators detected: add tests or list validators in .forge/config.yaml\n';
+        out.stderr += plan.notes.map(n => `${n}\n`).join('');
         if (restored.length) out.stderr += `restored ${restored.length} tracked file(s) the validators regenerated: ${restored.join(', ')}\n`;
         return out;
       }
@@ -1143,6 +1163,7 @@ export function run(argv: string[], io: Io): Result {
       case 'shadow':
         return reviewCommand(cmd, args, {
           cwd: io.cwd, repoDir, now: io.now, git: io.git ?? defaultGit(repoDir), exec: io.exec ?? defaultExec(repoDir), execMany: io.execMany, repo: repoReader(repoDir),
+          self: io.scriptPath ?? process.argv[1],
         });
       case 'hook': {
         const which = args[0];

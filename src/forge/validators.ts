@@ -3,8 +3,9 @@ import path from 'node:path';
 import type { ExecResult } from './cli/run.js';
 import type { ForgeConfig, When } from './config.js';
 import type { LedgerEvent } from './ledger.js';
+import { isBookkeeping } from './triage.js';
 
-export interface Validator { name: string; cmd: string; kind: string; affects?: string[]; when?: When; cache?: boolean; source: 'manual' | 'detected' }
+export interface Validator { name: string; cmd: string; kind: string; affects?: string[]; when?: When; cache?: boolean; affectedCmd?: string; source: 'manual' | 'detected' }
 // A flaky result (failed, then passed on the retry) is ok: true; its first failures are kept for the record.
 // skipped: a test runner that found no tests to run passes (there is nothing to check yet, which is not a failure of the
 // change). preexisting: it failed the same way before the change (see markPreexisting), so it does not count against it.
@@ -13,7 +14,7 @@ export interface Validator { name: string; cmd: string; kind: string; affects?: 
 // cached: it came from the tree cache (validate-cache.ts), with the clock of the run that produced it.
 export interface ValidatorResult {
   validator: string; ok: boolean; flaky: boolean; durationMs: number; failures: string[];
-  failing?: string[]; failingKnown?: boolean; newFailing?: string[]; skipped?: 'no-tests'; preexisting?: boolean; cached?: boolean;
+  failing?: string[]; failingKnown?: boolean; newFailing?: string[]; skipped?: 'no-tests' | 'not-affected'; preexisting?: boolean; cached?: boolean;
 }
 // list(dir) lists the entries of a directory relative to the repo root (the root itself when omitted).
 export interface RepoReader { exists: (rel: string) => boolean; read: (rel: string) => string | null; list: (dir?: string) => string[] }
@@ -62,6 +63,14 @@ function dotnetTarget(rootEntries: string[]): string | null {
 const E2E_SCRIPTS = ['e2e', 'test:e2e', 'test:integration'];
 const CONFIGS = (base: string) => ['ts', 'js', 'mjs', 'cjs'].map(e => `${base}.${e}`);
 
+/** The related-tests command (C-02) of a package.json test script run by vitest or jest, with the package manager's runner. */
+function relatedCmd(body: string, runner: string): { affectedCmd?: string } {
+  const x = runner === 'pnpm' ? 'pnpm exec' : runner === 'yarn' ? 'yarn' : runner === 'bun' ? 'bunx' : 'npx';
+  if (/\bvitest\b/.test(body)) return { affectedCmd: `${x} vitest related --run --passWithNoTests {files}` };
+  if (/\bjest\b/.test(body)) return { affectedCmd: `${x} jest --findRelatedTests --passWithNoTests {files}` };
+  return {};
+}
+
 function detected(repo: RepoReader, which: (name: string) => boolean, platform: NodeJS.Platform): Validator[] {
   const out: Validator[] = [];
   const push = (v: Omit<Validator, 'source'>) => out.push({ ...v, source: 'detected' });
@@ -77,7 +86,7 @@ function detected(repo: RepoReader, which: (name: string) => boolean, platform: 
       if (script === 'test' && PLACEHOLDER_TEST.test(body)) continue;
       if (kind === 'typecheck' && out.some(v => v.kind === 'typecheck')) continue;
       const cmd = script === 'test' ? `${runner} test` : runner === 'yarn' ? `yarn ${script}` : `${runner} run ${script}`;
-      push({ name: script, cmd, kind });
+      push({ name: script, cmd, kind, ...(script === 'test' ? relatedCmd(body, runner) : {}) });
     }
   }
   const run = (s: string) => (runner === 'yarn' ? `yarn ${s}` : `${runner} run ${s}`);
@@ -90,9 +99,12 @@ function detected(repo: RepoReader, which: (name: string) => boolean, platform: 
     if (['.detoxrc', '.detoxrc.js', '.detoxrc.json', 'detox.config.js'].some(f => repo.exists(f))) push({ name: 'detox', cmd: 'npx detox test', kind: 'e2e' });
   }
   if (has('bench')) push({ name: 'bench', cmd: run('bench'), kind: 'bench' });
-  if (usesPytest(repo)) push({ name: 'pytest', cmd: `${pythonFor(repo, which)} -m pytest -q`, kind: 'test' });
+  if (usesPytest(repo)) {
+    const py = pythonFor(repo, which);
+    push({ name: 'pytest', cmd: `${py} -m pytest -q`, kind: 'test', affectedCmd: `${py} -m pytest -q {tests}` });
+  }
   if (repo.exists('Cargo.toml')) push({ name: 'cargo-test', cmd: 'cargo test', kind: 'test' });
-  if (repo.exists('go.mod')) { push({ name: 'go-vet', cmd: 'go vet ./...', kind: 'lint' }); push({ name: 'go-test', cmd: 'go test ./...', kind: 'test' }); }
+  if (repo.exists('go.mod')) { push({ name: 'go-vet', cmd: 'go vet ./...', kind: 'lint' }); push({ name: 'go-test', cmd: 'go test ./...', kind: 'test', affectedCmd: 'go test {packages}' }); }
   const dotnet = dotnetTarget(repo.list());
   if (dotnet) push({ name: 'dotnet-test', cmd: `dotnet test ${/\s/.test(dotnet) ? `"${dotnet}"` : dotnet}`, kind: 'test' });
   if (repo.exists('pubspec.yaml')) { push({ name: 'flutter-analyze', cmd: 'flutter analyze', kind: 'lint' }); push({ name: 'flutter-test', cmd: 'flutter test', kind: 'test' }); }
@@ -113,7 +125,7 @@ function detected(repo: RepoReader, which: (name: string) => boolean, platform: 
 // the same command as a manual one (whitespace collapsed) is dropped: the manual one already runs it.
 const sameCmd = (cmd: string) => cmd.replace(/\s+/g, ' ').trim();
 export function detectValidators(repo: RepoReader, config: ForgeConfig, which: (name: string) => boolean = onPath, platform: NodeJS.Platform = process.platform): Validator[] {
-  const manual = (config.validators ?? []).map(v => ({ ...v, kind: v.kind ?? 'other', source: 'manual' as const }));
+  const manual = (config.validators ?? []).map(({ affected_cmd, ...v }) => ({ ...v, ...(affected_cmd ? { affectedCmd: affected_cmd } : {}), kind: v.kind ?? 'other', source: 'manual' as const }));
   if (!config.detect) return manual;
   const byName = new Map(manual.map(v => [v.name, v]));
   const manualCmds = new Set(manual.map(v => sameCmd(v.cmd)));
@@ -149,6 +161,56 @@ function runsIn(v: Validator, scope: Scope): boolean {
 
 export function selectValidators(all: Validator[], scope: Scope): Validator[] {
   return all.filter(v => runsIn(v, scope) && (scope.mode !== 'affected' || covers(v, scope.files)));
+}
+
+// --affected (C-02): the paths a related-tests command takes. A path outside this set never reaches a shell.
+const SAFE_PATH = /^[A-Za-z0-9_@+.,=/\\ ()-]{1,300}$/;
+export const MAX_AFFECTED = 100;
+const isTestFile = (f: string) => /(^|\/)tests?\//.test(f) || /\.(test|spec)\.[^/]+$/.test(f) || /(^|\/)test_[^/]*\.py$/.test(f) || /_test\.py$/.test(f);
+export type AffectedRun = { mode: 'cmd'; cmd: string } | { mode: 'skip'; why: string } | { mode: 'full'; why: string };
+
+/**
+ * What a test validator runs for `--affected` (C-02): its affectedCmd with {files} (the changed files), {tests} (the
+ * changed test files) or {packages} (the ./dirs of the changed .go files), each path quoted ("…" on win32, '…'
+ * elsewhere). Bookkeeping and missing paths are left out. More than 100 paths, or one outside SAFE_PATH: the whole
+ * validator (`full`). No affectedCmd, or a placeholder with nothing to put in it: `skip`.
+ */
+export function resolveAffected(v: Validator, files: string[], platform: NodeJS.Platform, exists: (rel: string) => boolean): AffectedRun {
+  if (!v.affectedCmd) return { mode: 'skip', why: 'it has no related-tests command' };
+  const live = [...new Set(files.map(f => f.replace(/\\/g, '/').replace(/^\.\//, '')))].filter(f => f && !isBookkeeping(f) && exists(f));
+  if (live.length > MAX_AFFECTED) return { mode: 'full', why: `more than ${MAX_AFFECTED} changed files` };
+  const unsafe = live.find(f => !SAFE_PATH.test(f));
+  if (unsafe !== undefined) return { mode: 'full', why: `the path ${JSON.stringify(unsafe.slice(0, 80))} cannot go into a shell command` };
+  const quote = (f: string) => (platform === 'win32' ? `"${f}"` : `'${f}'`);
+  const lists: Record<'files' | 'tests' | 'packages', string[]> = {
+    files: live,
+    tests: live.filter(isTestFile),
+    packages: [...new Set(live.filter(f => f.endsWith('.go')).map(f => { const d = path.posix.dirname(f); return d === '.' ? '.' : `./${d}`; }))],
+  };
+  let empty = false;
+  const cmd = v.affectedCmd.replace(/\{(files|tests|packages)\}/g, (_, k: 'files' | 'tests' | 'packages') => {
+    if (!lists[k].length) empty = true;
+    return lists[k].map(quote).join(' ');
+  });
+  return empty ? { mode: 'skip', why: 'no changed file relates to its tests' } : { mode: 'cmd', cmd };
+}
+
+/** An --affected run of a selected list: test validators go through resolveAffected; typecheck, lint and other run as they are. */
+export function planAffected(list: Validator[], files: string[], platform: NodeJS.Platform, exists: (rel: string) => boolean): { run: Validator[]; skipped: Map<string, ValidatorResult>; notes: string[] } {
+  const run: Validator[] = [];
+  const skipped = new Map<string, ValidatorResult>();
+  const notes: string[] = [];
+  for (const v of list) {
+    if (v.kind !== 'test') { run.push(v); continue; }
+    const a = resolveAffected(v, files, platform, exists);
+    if (a.mode === 'cmd') run.push({ ...v, cmd: a.cmd });
+    else if (a.mode === 'full') { run.push(v); notes.push(`${v.name}: ${a.why}; it runs in full`); }
+    else {
+      skipped.set(v.name, { validator: v.name, ok: true, flaky: false, durationMs: 0, failures: [], failing: [], failingKnown: true, skipped: 'not-affected' });
+      notes.push(`${v.name}: ${a.why}; review-prep runs it in full`);
+    }
+  }
+  return { run, skipped, notes };
 }
 
 const FAILURE = /(fail|error|✗|×|assert|panic|exception)/i;

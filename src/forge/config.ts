@@ -18,7 +18,7 @@ export type Autonomy = (typeof AUTONOMIES)[number];
 export type When = 'always' | 'medium' | 'final';
 /** When a failed validator runs again (C-12): after a flaky result in the last 30 days, always, or never. */
 export type RetryPolicy = 'flaky' | 'always' | 'never';
-export interface ValidatorSpec { name: string; cmd: string; kind?: string; affects?: string[]; when?: When; cache?: boolean }
+export interface ValidatorSpec { name: string; cmd: string; kind?: string; affects?: string[]; when?: When; cache?: boolean; affected_cmd?: string }
 export interface VerifyLimits { checks: number; shots: number; minutes: number }
 export interface ForgeConfig {
   profile: Profile; validators?: ValidatorSpec[]; detect: boolean; exclude: string[];
@@ -48,6 +48,7 @@ const Schema = z.object({
     affects: z.array(z.string().min(1)).optional(),
     when: z.enum(['always', 'medium', 'final']).optional(),
     cache: z.boolean().optional(),
+    affected_cmd: z.string().min(1).max(500).refine(s => /\{(files|tests|packages)\}/.test(s), { message: 'must contain {files}, {tests} or {packages}' }).optional(),
   }).strict()).optional(),
   verify: z.object({
     limits: z.object({

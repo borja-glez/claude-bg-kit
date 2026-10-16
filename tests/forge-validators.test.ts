@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectValidators, selectValidators, runValidators, failureLines, failingTests, failingLabel, globMatch, markPreexisting, blocking, flakyHistory, runOptions, type RepoReader, type Validator, type Scope } from '../src/forge/validators.js';
+import { detectValidators, selectValidators, runValidators, failureLines, failingTests, failingLabel, globMatch, markPreexisting, blocking, flakyHistory, runOptions, resolveAffected, planAffected, type RepoReader, type Validator, type Scope } from '../src/forge/validators.js';
 import { parseConfig } from '../src/forge/config.js';
 
 // list(dir) returns the direct entries of dir, like readdirSync.
@@ -338,5 +338,53 @@ describe('validators in parallel, retried only with a flaky history (C-12)', () 
     expect([runOptions(cfg('always'), [], now).retry(l), runOptions(cfg('never'), events, now).retry(t)]).toEqual([true, false]);
     const many = () => [];
     expect(runOptions(cfg('flaky'), [], now, many).execMany).toBe(many);
+  });
+});
+
+describe('--affected runs the related tests (C-02)', () => {
+  const pkg = (scripts: Record<string, string>) => JSON.stringify({ scripts });
+  const testOf = (files: Record<string, string>) => detectValidators(repo(files), cfg, () => false).find(v => v.kind === 'test');
+  it('detects the related-tests command of vitest, jest, pytest and go, with the package manager runner', () => {
+    expect(testOf({ 'package.json': pkg({ test: 'vitest run' }) })?.affectedCmd).toBe('npx vitest related --run --passWithNoTests {files}');
+    expect(testOf({ 'package.json': pkg({ test: 'vitest' }), 'pnpm-lock.yaml': '' })?.affectedCmd).toBe('pnpm exec vitest related --run --passWithNoTests {files}');
+    expect(testOf({ 'package.json': pkg({ test: 'jest --ci' }), 'yarn.lock': '' })?.affectedCmd).toBe('yarn jest --findRelatedTests --passWithNoTests {files}');
+    expect(testOf({ 'package.json': pkg({ test: 'jest' }), 'bun.lock': '' })?.affectedCmd).toBe('bunx jest --findRelatedTests --passWithNoTests {files}');
+    expect(testOf({ 'package.json': pkg({ test: 'mocha' }) })?.affectedCmd).toBeUndefined();
+    expect(testOf({ 'pytest.ini': '' })?.affectedCmd).toBe('python -m pytest -q {tests}');
+    expect(testOf({ 'go.mod': '' })?.affectedCmd).toBe('go test {packages}');
+    const manual = detectValidators(repo({}), parseConfig('detect: false\nvalidators:\n  - name: unit\n    cmd: make test\n    kind: test\n    affected_cmd: make test-files {files}\n'));
+    expect(manual).toEqual([{ name: 'unit', cmd: 'make test', kind: 'test', affectedCmd: 'make test-files {files}', source: 'manual' }]);
+  });
+  it('resolves {files}, {tests} and {packages}, quoted for the shell, without bookkeeping or missing paths', () => {
+    const v = (affectedCmd: string): Validator => ({ name: 'unit', cmd: 'all', kind: 'test', affectedCmd, source: 'manual' });
+    const exists = (f: string) => !f.startsWith('gone/');
+    const files = ['src/a.ts', 'src/con espacio.ts', 'tests/a.test.ts', 'docs/waypoint/p/plan.yaml', 'gone/x.ts', 'pkg/b.go', 'b_test.py'];
+    expect(resolveAffected(v('vt {files}'), files, 'linux', exists)).toEqual({ mode: 'cmd', cmd: "vt 'src/a.ts' 'src/con espacio.ts' 'tests/a.test.ts' 'pkg/b.go' 'b_test.py'" });
+    expect(resolveAffected(v('vt {files}'), ['src/a.ts', 'src/con espacio.ts'], 'win32', exists)).toEqual({ mode: 'cmd', cmd: 'vt "src/a.ts" "src/con espacio.ts"' });
+    expect(resolveAffected(v('py {tests}'), files, 'linux', exists)).toEqual({ mode: 'cmd', cmd: "py 'tests/a.test.ts' 'b_test.py'" });
+    expect(resolveAffected(v('go test {packages}'), [...files, 'main.go'], 'linux', exists)).toEqual({ mode: 'cmd', cmd: "go test './pkg' '.'" });
+  });
+  it('runs the validator in full for a path no shell may see or too many files, and skips it with nothing related', () => {
+    const v = (affectedCmd?: string): Validator => ({ name: 'unit', cmd: 'all', kind: 'test', ...(affectedCmd ? { affectedCmd } : {}), source: 'manual' });
+    const all = () => true;
+    for (const bad of ['src/año.ts', "src/it's.ts", 'src/$x.ts', 'src/a;b.ts', 'src/a&b.ts', 'src/`x`.ts', 'src/100%.ts', 'src/a|b.ts']) {
+      expect(resolveAffected(v('vt {files}'), ['src/a.ts', bad], 'linux', all).mode, bad).toBe('full');
+    }
+    expect(resolveAffected(v('vt {files}'), Array.from({ length: 101 }, (_, i) => `src/f${i}.ts`), 'linux', all).mode).toBe('full');
+    expect(resolveAffected(v('vt {files}'), Array.from({ length: 100 }, (_, i) => `src/f${i}.ts`), 'linux', all).mode).toBe('cmd');
+    expect(resolveAffected(v('py {tests}'), ['src/a.py'], 'linux', all).mode).toBe('skip');
+    expect(resolveAffected(v('vt {files}'), ['.forge/work/x.json'], 'linux', all).mode).toBe('skip');
+    expect(resolveAffected(v(), ['src/a.ts'], 'linux', all).mode).toBe('skip');
+  });
+  it('planAffected keeps typecheck as it is, runs the related tests, and skips a test with nothing to run', () => {
+    const list: Validator[] = [
+      { name: 'typecheck', cmd: 'tsc', kind: 'typecheck', source: 'detected' },
+      { name: 'test', cmd: 'npm test', kind: 'test', affectedCmd: 'npx vitest related --run --passWithNoTests {files}', source: 'detected' },
+      { name: 'pytest', cmd: 'python -m pytest -q', kind: 'test', affectedCmd: 'python -m pytest -q {tests}', source: 'detected' },
+    ];
+    const p = planAffected(list, ['src/a.ts'], 'linux', () => true);
+    expect(p.run.map(x => x.cmd)).toEqual(['tsc', "npx vitest related --run --passWithNoTests 'src/a.ts'"]);
+    expect([...p.skipped.values()]).toEqual([{ validator: 'pytest', ok: true, flaky: false, durationMs: 0, failures: [], failing: [], failingKnown: true, skipped: 'not-affected' }]);
+    expect(p.notes).toEqual(['pytest: no changed file relates to its tests; review-prep runs it in full']);
   });
 });

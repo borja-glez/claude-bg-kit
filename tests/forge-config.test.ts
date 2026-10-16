@@ -50,6 +50,11 @@ describe('forge config', () => {
     expect(parseConfig('validators:\n  - name: e2e\n    cmd: npm run e2e\n    kind: e2e\n    cache: true\n').validators?.[0]).toMatchObject({ cache: true });
     expect(() => parseConfig('validators:\n  - name: e2e\n    cmd: x\n    cache: maybe\n')).toThrow(ConfigError);
   });
+  it('a validator affected_cmd must hold {files}, {tests} or {packages}, in at most 500 characters (C-02)', () => {
+    expect(parseConfig('validators:\n  - name: unit\n    cmd: make test\n    affected_cmd: make test-files {files}\n').validators?.[0]).toMatchObject({ affected_cmd: 'make test-files {files}' });
+    expect(() => parseConfig('validators:\n  - name: unit\n    cmd: make test\n    affected_cmd: make test\n')).toThrow(ConfigError);
+    expect(() => parseConfig(`validators:\n  - name: unit\n    cmd: x\n    affected_cmd: ${'x'.repeat(500)} {files}\n`)).toThrow(ConfigError);
+  });
   it('swarm: parallel 3 by default, an optional mode and the launcher', () => {
     expect(parseConfig(null).swarm).toEqual({ parallel: 3, launcher: 'bg', member: { effort: 'medium' } });
     expect(parseConfig('swarm:\n  mode: sessions\n  parallel: 2\n').swarm).toEqual({ parallel: 2, mode: 'sessions', launcher: 'bg', member: { effort: 'medium' } });

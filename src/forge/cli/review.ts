@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { samePath } from '../../lib/worktree.js';
 import { UsageError } from './errors.js';
 import { appendEvent, readEvents, type LedgerEvent } from '../ledger.js';
 import { loadConfig, agentFor, type Profile, type ForgeConfig } from '../config.js';
@@ -19,7 +20,7 @@ import { reviewRound, reviewerKey, type PreviousResult, type ReviewerKey, type R
 type Result = { code: number; stdout: string; stderr: string };
 type Exec = Parameters<typeof runValidators>[1];
 /** What the review commands need from the caller: forge's own dir (`cwd`), the code's dir (`repoDir`) and its tools. */
-export interface ReviewDeps { cwd: string; repoDir: string; now: () => Date; git: (args: string[]) => string | null; exec: Exec; execMany?: ExecMany; repo: RepoReader }
+export interface ReviewDeps { cwd: string; repoDir: string; now: () => Date; git: (args: string[]) => string | null; exec: Exec; execMany?: ExecMany; repo: RepoReader; self?: string }
 
 const ROLES: readonly ReviewRole[] = ['review-correctness', 'review-security', 'review-perf'];
 const EFFORTS = ['medium', 'high', 'xhigh'] as const;
@@ -376,10 +377,11 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
 }
 
 /**
- * `FORGE prep --task <id>-<n> --path <p> [--phase <name>] [--dir <dir>] [--cwd <worktree>]`: before a brief's work, in
+ * `FORGE prep --task <id>-<n> --path <p> [--phase <name>] [--dir <dir>] [--cwd <worktree>] [--no-baseline]`: before a brief's work, in
  * one call, reads BASE (the HEAD of `--cwd`), records what already fails on it into `<dir>/baseline-<n>.json` (as
  * `validate --all --path <p> --base-run --task <id>-<n>` does; `<dir>` defaults to `.forge/work/<id>`), logs the phase
- * `{"phase":<name, default implement>,"brief":<n>,"base":<BASE>}` on `<id>` and prints `{base, baseline, failing, cached, durationMs}` (the baseline comes from the tree cache when BASE's tree was validated: C6, I-06).
+ * `{"phase":<name, default implement>,"brief":<n>,"base":<BASE>}` on `<id>` and prints `{base, baseline, failing, cached, durationMs, validate}` (the baseline comes from the tree cache when BASE's tree was validated: C6, I-06).
+ * validate is the command the implementer runs (J-11). --no-baseline records BASE and the phase without validating (baseline: null; J-13).
  * A validator failing on BASE is what the baseline is for: prep exits 0.
  */
 export function prep(args: string[], deps: ReviewDeps): Result {
@@ -398,6 +400,15 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   const [, id, n] = m;
   const base = (deps.git(['rev-parse', 'HEAD']) ?? '').trim();
   if (!base) throw new UsageError('prep: cannot read HEAD');
+  // J-11: the implementer's validate command, exactly as it runs it: the tests related to its changes since BASE, the
+  // typecheck and the lint, in the code's directory. Paths with / and in double quotes, which every shell takes.
+  const slash = (q: string) => path.resolve(q).split(path.sep).join('/');
+  const validate = `node "${slash(deps.self ?? 'forge.cjs')}" validate --affected --base ${base} --task ${task}${samePath(deps.repoDir, deps.cwd) ? '' : ` --cwd "${slash(deps.repoDir)}"`}`;
+  // J-13: --no-baseline (the Small path) records BASE and the phase and runs no validator.
+  if (args.includes('--no-baseline')) {
+    appendEvent(deps.cwd, { ts: deps.now().toISOString(), kind: 'phase', task: id, phase, brief: Number(n), base });
+    return json({ base, baseline: null, failing: [], cached: [], durationMs: 0, validate });
+  }
 
   // The baseline, as `validate --all --path <p> --base-run` runs it: on BASE nothing changed yet, so a heavy path runs
   // every heavy validator (the review's diff later selects among them).
@@ -412,7 +423,7 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   const ts = deps.now().toISOString();
   appendEvent(deps.cwd, validateEvent(ts, task, results, durationMs, scope.mode, { baseline: true }));
   appendEvent(deps.cwd, { ts, kind: 'phase', task: id, phase, brief: Number(n), base });
-  return json({ base, baseline: rel(deps.cwd, file), failing: results.filter(blocking).map(r => r.validator), cached: cachedNames(results), durationMs, ...(restored.length ? { restored } : {}) });
+  return json({ base, baseline: rel(deps.cwd, file), failing: results.filter(blocking).map(r => r.validator), cached: cachedNames(results), durationMs, validate, ...(restored.length ? { restored } : {}) });
 }
 
 /** `review-prep`, `review-close`, `prep` and `shadow` (cli/shadow.ts). */

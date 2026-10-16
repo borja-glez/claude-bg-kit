@@ -268,6 +268,13 @@ describe('forge review-prep', () => {
 describe('forge prep', () => {
   const head = () => git('rev-parse', 'HEAD');
 
+  it('prints validate, the exact command the implementer runs: the related tests since BASE, in the worktree (J-11)', () => {
+    const self = path.join(root, 'plugin dir', 'dist', 'forge.cjs');
+    const out = JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'medium', '--cwd', wt], { ...io, scriptPath: self }).stdout);
+    const slash = (p: string) => path.resolve(p).split(path.sep).join('/');
+    expect(out.validate).toBe(`node "${slash(self)}" validate --affected --base ${head()} --task T1-1 --cwd "${slash(wt)}"`);
+  });
+
   it('writes baseline-<n>.json, logs the phase with the brief and the base, and prints the worktree HEAD', () => {
     rmSync(path.join(work(), 'baseline-1.json'));
     const r = run(['prep', '--task', 'T1-1', '--path', 'medium', '--cwd', wt], io);
@@ -580,6 +587,18 @@ describe('the tree cache (C6), with forge in the worktree itself', () => {
     expect(again.cached).toEqual(['check']);
     expect(again.say).toContain('(1 cached)');
     expect(calls).toHaveLength(2);
+  });
+
+  it('prep --no-baseline records BASE and the phase without validating (J-13)', () => {
+    const r = run(['prep', '--task', 'T1-1', '--path', 'small', '--no-baseline'], wio);
+    expect(r.code).toBe(0);
+    const out = JSON.parse(r.stdout);
+    expect(out).toMatchObject({ base: git('rev-parse', 'HEAD'), baseline: null, failing: [], cached: [] });
+    expect(out.validate).toContain(` validate --affected --base ${out.base} --task T1-1`);
+    expect(out.validate).not.toContain('--cwd');
+    expect(calls).toEqual([]);
+    expect(readEvents(wt).some(e => e.kind === 'validate')).toBe(false);
+    expect(readEvents(wt).filter(e => e.kind === 'phase').at(-1)).toMatchObject({ task: 'T1', phase: 'implement', brief: 1, base: out.base });
   });
 
   it('a dirty tree is neither read nor written', () => {
