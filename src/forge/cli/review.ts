@@ -690,9 +690,17 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   } else rmSync(handoverFile, { force: true });
   // J-08: a redo undoes the attempt without rewriting history; the skill runs git with these args as printed. Null when
   // HEAD is still BASE, or when the plan has no BASE that resolves to a commit (one written by forge 0.17, or edited).
+  // A merge in the range (a conflict retry merged the run branch into the task, and BASE moved to the tip it merged):
+  // `git revert` stops on it, and `-m 1` would also undo the run branch's work it brought. Then `steps`, git argument
+  // lists the skill runs in order, restore BASE's tree in one commit: the run branch's work in BASE stays, the attempt goes.
   const headNow = (deps.git(['rev-parse', 'HEAD']) ?? '').trim();
-  const revert = d.next === 'redo' && planBase && headNow && headNow !== planBase
-    ? { base: planBase, head: headNow, args: ['-C', deps.repoDir, 'revert', '--no-edit', `${planBase}..HEAD`] } : null;
+  const undo = d.next === 'redo' && !!planBase && !!headNow && headNow !== planBase;
+  const revert = undo
+    ? deps.git(['rev-list', '--merges', `${planBase}..HEAD`])?.trim()
+      ? { base: planBase, head: headNow, steps: [['-C', deps.repoDir, 'read-tree', '-u', '--reset', planBase],
+        ['-C', deps.repoDir, 'commit', '--allow-empty', '-m', `${id}: undo the attempt for a redo (back to the tree of ${planBase.slice(0, 12)})`]] }
+      : { base: planBase, head: headNow, args: ['-C', deps.repoDir, 'revert', '--no-edit', `${planBase}..HEAD`] }
+    : null;
 
   // C-11: the shadow twins never hold the review: the ones already back are saved now, the rest are listed in
   // shadowPending and saved by FORGE shadow collect when they are back. They never reach the verdict.

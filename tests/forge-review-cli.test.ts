@@ -1040,6 +1040,36 @@ describe('forge review-close', () => {
     expect(note).toContain('.forge/work/T1/report-1.txt');
   });
 
+  it('a redo after the task merged the run branch prints revert steps that restore BASE\'s tree in one commit, never git revert over the merge', () => {
+    // A conflict retry: the run branch (with work of its own) merged into the task; BASE moved to the run tip it merged.
+    const task = git('rev-parse', '--abbrev-ref', 'HEAD');
+    git('checkout', '-q', '-b', 'run', base);
+    writeFileSync(path.join(wt, 'r.txt'), 'run work\n');
+    git('add', 'r.txt');
+    git('commit', '-q', '-m', 'run: another task');
+    const runTip = git('rev-parse', 'HEAD');
+    git('checkout', '-q', task);
+    git('merge', '-q', '--no-ff', '-m', 'T1: merge the run branch', 'run');
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo\nthree\n');
+    git('commit', '-q', '-am', 'T1: more');
+    base = runTip;
+    prep();
+    const wrong = { verdict: 'fail', confidence: 0.9, approach: 'wrong', findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'a counter cannot work here: use a queue' }] };
+    write(r1(), 'correctness', wrong);
+    write(r1(), 'security', { ...wrong, findings: [{ severity: 'important', file: 'a.txt', line: 1, problem: 'the state is shared between requests' }] });
+    const out = JSON.parse(close().stdout);
+    expect(out).toMatchObject({ next: 'redo', revert: { base: runTip, head: git('rev-parse', 'HEAD') } });
+    expect(out.revert.args).toBeUndefined();
+    expect(out.revert.steps).toEqual([['-C', wt, 'read-tree', '-u', '--reset', runTip], ['-C', wt, 'commit', '--allow-empty', '-m', expect.stringContaining('T1')]]);
+    expect(JSON.stringify(out.revert)).not.toContain('"-m","1"');
+    for (const s of out.revert.steps as string[][]) git(...s);
+    expect(git('rev-parse', 'HEAD^{tree}')).toBe(git('rev-parse', `${runTip}^{tree}`));
+    const text = (f: string) => readFileSync(path.join(wt, f), 'utf8').replace(/\r\n/g, '\n');
+    expect(text('r.txt')).toBe('run work\n');
+    expect(text('a.txt')).toBe('one\n');
+    expect(git('status', '--porcelain')).toBe('');
+    expect(() => git('rev-parse', '-q', '--verify', 'REVERT_HEAD')).toThrow();
+  });
   it('the first review after a redo is judged as a first review: a new important near a finding of the reverted attempt blocks under a new id (I4)', () => {
     noExpress();
     prep();

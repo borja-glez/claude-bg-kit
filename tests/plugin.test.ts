@@ -583,7 +583,7 @@ describe('plugin layout', () => {
     expect(md).toContain('`FORGE` below means `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs"`');
     for (const w of ['FORGE triage', 'FORGE validate', 'FORGE review-prep', 'FORGE review-close', 'FORGE agents', 'FORGE log', 'FORGE last',
       '## Trivial', '## Small', '## Medium', '## Large', '## Resuming', 'ratchet', 'breaker', 'stalled', 'fresh-stronger', 'never push', 'forge-fable', '--text-file', '--data-file', '<id>-<n>', 'FORGE prep --task <id>-1 --path small --no-baseline', 'absolute path',
-      'tier ladder', '`mech` -> `impl-light` -> `impl` -> `impl-high` -> `impl-heavy`','`revert.args`', '`invalid: true`',
+      'tier ladder', '`mech` -> `impl-light` -> `impl` -> `impl-high` -> `impl-heavy`','`revert`', '`invalid: true`',
       '`failures` of every validator with `ok: false` and no `preexisting` in `validators-<n>.json`', '--baseline .forge/work/<id>/baseline-<n>.json']) expect(md).toContain(w);
     for (const w of ['FORGE verdict', '/waypoint:design']) expect(runRef('large')).toContain(w);
     expect(runRef('execution')).toContain('--base-run');
@@ -1079,15 +1079,16 @@ describe('plugin layout', () => {
     const steps = runRef('task-steps');
     const conv = runRef('convergence');
     for (const s of [medium, steps]) expect(s).toContain('references/convergence.md');
-    for (const w of ['`revert.args`', '`handover`', '`threatModel`', '`express: true`', 'Threat model: <that path>']) expect(medium, w).toContain(w);
+    for (const w of ['`revert`', '`handover`', '`threatModel`', '`express: true`', 'Threat model: <that path>']) expect(medium, w).toContain(w);
     expect(medium).not.toContain('git revert --no-edit');
     for (const w of ['FORGE shadow collect --task', '`shadowPending`', '`ask`', '--out-of-model', '--defer', 'NEEDS_CONTEXT', '`validators.cmd`', 'run_in_background',
-      '`residual`', '`reviews`', 'threatModel.outOfScope', '"point": "ruling"', 'AskUserQuestion']) expect(conv, w).toContain(w);
+      '`residual`', '`reviews`', 'threatModel.outOfScope', '"point": "ruling"', 'AskUserQuestion', '`revert.args`', '`revert.steps`', 'git revert -m 1']) expect(conv, w).toContain(w);
     expect(medium).toMatch(/FORGE review-close --task <id>-<n>[^`]*--locale <es\|en>/);
     expect(steps).toMatch(/FORGE review-close --task T-<n>[^`]*--locale <es\|en>/);
     expect(medium).toContain('one line per finding with its id, `residual`, file and line');
     expect(steps).not.toContain('unless a `redo` starts a new brief');
-    for (const w of ['`revert.args`', 'FORGE shadow collect --task', '`handover`', 'NEEDS_CONTEXT', '`threatModel`', '`validators.cmd`']) expect(steps, w).toContain(w);
+    for (const w of ['`revert`', 'FORGE shadow collect --task', '`handover`', 'NEEDS_CONTEXT', '`threatModel`', '`validators.cmd`']) expect(steps, w).toContain(w);
+    expect(runRef('step')).toContain('`revert.steps`');
   });
   it('forge:run Medium: every step starts its own line, 0 to 7 in order (I6)', () => {
     const run = read('plugins/forge/skills/run/SKILL.md').replace(/\r\n/g, '\n');

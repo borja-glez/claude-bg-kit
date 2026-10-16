@@ -84,7 +84,7 @@ Several files or some design; moderate risk.
    - `done`: next task.
    - `resume`: send the findings to the same implementer (resume it), then repeat from step 3.
    - `fresh-stronger`: a fresh implementer, the one printed, with the brief, the `handover`, the report and the findings to send; repeat from step 3.
-   - `redo`: run git with `revert.args` as printed to undo the attempt (`null`: nothing to undo), then a fresh implementer, the one printed, starts again from the brief another way with the `handover`; repeat from step 3.
+   - `redo`: undo the attempt with `revert` as `references/convergence.md` says (`null`: nothing to undo), then a fresh implementer, the one printed, starts again from the brief another way with the `handover`; repeat from step 3.
    - `breaker` or `stalled`: stop the loop. If what is open blocks the work, tell the user and ask; otherwise record the open findings as a ruling (`FORGE log --kind ruling --data-file <file>`) and continue, telling the user at the end.
    - `tierUp: true` (from round 3) and `fresh-stronger` are one single step up, not two, and `last: true` sends the attempt to `impl-heavy`: the printed `implementer` already applies both.
    After the verdict, when `verify.json` exists, read `references/verify.md` now and follow `## After the verdict`.
