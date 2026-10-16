@@ -140,7 +140,7 @@ describe('forge CLI', () => {
     expect(run(['nope'], io).stderr).toContain('verify-result');
   });
   it('round decides from the task verdict history and logs it', () => {
-    for (const s of ['0.6', '0.6']) run(['log', '--kind', 'verdict', '--task', 't1', '--data', `{"action":"fix","score":${s},"signature":"x"}`], io);
+    for (const s of ['0.6', '0.6']) run(['log', '--kind', 'verdict', '--task', 't1', '--data', `{"action":"fix","score":${s},"signature":"v2:x"}`], io);
     const r = JSON.parse(run(['round', '--task', 't1', '--path', 'medium'], io).stdout);
     expect(r.next).toBe('stalled');
     expect(readEvents(root).at(-1)).toMatchObject({ kind: 'round', task: 't1', next: 'stalled' });

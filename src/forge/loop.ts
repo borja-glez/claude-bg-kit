@@ -18,13 +18,22 @@ export function decideRound(history: { action: Action; score: number | null; sig
   if (!latest) return { round: 0, cap, next: 'resume', reason: 'no verdict yet', tierUp, last: false };
   if (latest.action === 'accept') return { round, cap, next: 'done', reason: 'accepted', tierUp, last: false };
   const prev = history.at(-2);
-  if (prev && prev.action !== 'accept' && prev.signature === latest.signature && prev.score === latest.score) {
-    return { round, cap, next: 'stalled', reason: 'same findings and score as the previous round', tierUp, last: false };
+  // C-05: the same blocking set, by stable id, as the previous review: the rounds are not converging, whatever the score.
+  // An empty signature (nothing blocks) never stalls, and one of forge 0.17 or older (the problem's text, no v2: prefix)
+  // never matches, so an old ledger gives no false stall.
+  if (prev && prev.action !== 'accept' && latest.signature.startsWith('v2:') && prev.signature === latest.signature) {
+    return { round, cap, next: 'stalled', reason: 'the same blocking findings as the previous review', tierUp, last: false };
   }
   if (round > cap) return { round, cap, next: 'breaker', reason: `round ${round} over the cap of ${cap}`, tierUp, last: false };
   if (latest.action === 'redo') return { round, cap, next: 'redo', reason: `score under 0.5: start again from the brief with another approach${tierUp ? ', with an implementer one tier up' : ''}${lastNote}`, tierUp, last };
   if (round <= 2) return { round, cap, next: 'resume', reason: `round ${round}: resume the implementer${lastNote}`, tierUp, last };
   return { round, cap, next: 'fresh-stronger', reason: `round ${round}: fresh implementer one tier up${lastNote}`, tierUp, last };
+}
+
+/** C-13: a brief's reviews as the person counts them, review  of at most : the cap of fix attempts plus the first
+ *  review (4 on Medium, 5 on Large). CAP itself still counts fixes, for the readers of the round event. */
+export function reviewsOf(round: number, path: string): { n: number; max: number } {
+  return { n: round, max: (path === 'large' ? CAP.large : CAP.medium) + 1 };
 }
 
 /** The implementer ladder, lowest rung first. */

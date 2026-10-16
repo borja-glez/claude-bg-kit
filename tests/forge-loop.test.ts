@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { decideRound, nextImplementer, stepUp, IMPL_LADDER } from '../src/forge/loop.js';
+import { decideRound, nextImplementer, stepUp, reviewsOf, IMPL_LADDER } from '../src/forge/loop.js';
 
-const v = (action: 'accept' | 'fix' | 'redo', score: number | null, signature = 's') => ({ action, score, signature });
+const v = (action: 'accept' | 'fix' | 'redo', score: number | null, signature = 's') => ({ action, score, signature: `v2:${signature}` });
 
 describe('decideRound', () => {
   it('accept is done', () => { expect(decideRound([v('fix', 0.6, 'a'), v('accept', 0.9)], 'medium').next).toBe('done'); });
@@ -19,9 +19,20 @@ describe('decideRound', () => {
     expect(decideRound(four, 'large').next).toBe('fresh-stronger');
     expect(decideRound([...four, v('fix', 0.6, 'e')], 'large').next).toBe('breaker');
   });
-  it('the same failures with the same score twice in a row stalls', () => {
+  it('the same blocking set (by id) as the previous review stalls, whatever the score (C-05)', () => {
     expect(decideRound([v('fix', 0.6, 'x'), v('fix', 0.6, 'x')], 'medium').next).toBe('stalled');
-    expect(decideRound([v('fix', 0.6, 'x'), v('fix', 0.62, 'x')], 'medium').next).toBe('resume');
+    expect(decideRound([v('fix', 0.6, 'x'), v('fix', 0.62, 'x')], 'medium')).toMatchObject({ next: 'stalled', reason: 'the same blocking findings as the previous review' });
+    expect(decideRound([v('fix', 0.6, 'x'), v('fix', 0.6, 'y')], 'medium').next).toBe('resume');
+  });
+  it('nothing blocking never stalls, and a signature of forge 0.17 or older never matches (C-05)', () => {
+    expect(decideRound([{ action: 'fix', score: 0.6, signature: '' }, { action: 'fix', score: 0.6, signature: '' }], 'medium').next).toBe('resume');
+    expect(decideRound([{ action: 'fix', score: 0.6, signature: 'abc' }, { action: 'fix', score: 0.6, signature: 'abc' }], 'medium').next).toBe('resume');
+    expect(decideRound([{ action: 'fix', score: 0.6, signature: 'abc' }, v('fix', 0.6, 'abc')], 'medium').next).toBe('resume');
+  });
+  it('reviewsOf counts the reviews of a brief: at most 4 on Medium and 5 on Large (C-13)', () => {
+    expect(reviewsOf(2, 'medium')).toEqual({ n: 2, max: 4 });
+    expect(reviewsOf(1, 'large')).toEqual({ n: 1, max: 5 });
+    expect(reviewsOf(1, 'small')).toEqual({ n: 1, max: 4 });
   });
   it('tierUp is set from round 3, including a redo', () => {
     expect(decideRound([v('fix', 0.6, 'a')], 'medium').tierUp).toBe(false);
