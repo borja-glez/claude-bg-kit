@@ -13899,6 +13899,7 @@ var import_yaml5 = __toESM(require_dist(), 1);
 var NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
 var WORKFLOWS = ["ask", "forge", "superpowers", "superpowers-design", "superpowers-plan", "off"];
 var AUTONOMIES = ["ask", "auto"];
+var PERSON_DOCS = ["README.md", "README.*.md", "**/README.md", "**/README.*.md", "CHANGELOG.md", "**/CHANGELOG.md"];
 var ConfigError = class extends Error {
 };
 var Schema = external_exports.object({
@@ -13932,6 +13933,17 @@ var Schema = external_exports.object({
   workflow: external_exports.enum(WORKFLOWS).optional(),
   autonomy: external_exports.enum(AUTONOMIES).optional(),
   generated: external_exports.array(external_exports.string().min(1).max(200)).max(50).default([]),
+  threatModel: external_exports.object({
+    protects: external_exports.array(external_exports.string().min(1).max(200)).min(1).max(10),
+    trusted: external_exports.array(external_exports.string().min(1).max(200)).max(10).default([]),
+    untrusted: external_exports.array(external_exports.string().min(1).max(200)).max(10).default([]),
+    outOfScope: external_exports.array(external_exports.string().min(1).max(200)).max(20).default([]),
+    notes: external_exports.string().min(1).max(1e3).optional()
+  }).strict().optional(),
+  review: external_exports.object({
+    express: external_exports.boolean().default(true),
+    personDocs: external_exports.array(external_exports.string().min(1).max(200)).max(50).default([...PERSON_DOCS])
+  }).strict().default({ express: true, personDocs: [...PERSON_DOCS] }),
   swarm: external_exports.object({
     parallel: external_exports.number().int().min(1).max(10).default(3),
     mode: external_exports.enum(["subagents", "sessions"]).optional(),
@@ -13951,6 +13963,7 @@ var DEFAULTS = {
   evidence: "upload",
   validatorTimeoutSec: 600,
   validate: { cache: true, parallel: 3, retry: "flaky" },
+  review: { express: true, personDocs: [...PERSON_DOCS] },
   swarm: { parallel: 3, launcher: "bg", member: { effort: "medium" } },
   tdd: "off",
   generated: []
