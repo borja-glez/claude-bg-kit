@@ -15900,8 +15900,8 @@ function decideRound(history, path26) {
   const lastNote = last ? " (the last attempt before the breaker: impl-heavy)" : "";
   if (!latest) return { round: 0, cap, next: "resume", reason: "no verdict yet", tierUp, last: false };
   if (latest.action === "accept") return { round, cap, next: "done", reason: "accepted", tierUp, last: false };
-  const prev = history.at(-2);
-  if (prev && prev.action !== "accept" && !latest.held && !prev.held && latest.signature.startsWith("v2:") && prev.signature === latest.signature) {
+  const prev = history.slice(0, -1).filter((h) => !h.held).at(-1);
+  if (prev && prev.action !== "accept" && !latest.held && latest.signature.startsWith("v2:") && prev.signature === latest.signature) {
     return { round, cap, next: "stalled", reason: "the same blocking findings as the previous review", tierUp, last: false };
   }
   if (round > cap) return { round, cap, next: "breaker", reason: `round ${round} over the cap of ${cap}`, tierUp, last: false };
@@ -16037,7 +16037,7 @@ function assignIds(index, round, reviews, opts = {}) {
         taken.add(named.id);
       }
     });
-    const loose = list.map((f, i) => ({ f, i })).filter((x) => x.f.severity !== "minor" && !x.f.id && !hinted.has(x.f) && (x.f.origin === void 0 || x.f.origin === "previous"));
+    const loose = list.map((f, i) => ({ f, i })).filter((x) => x.f.severity !== "minor" && !x.f.id && (x.f.origin === void 0 || x.f.origin === "previous"));
     const free = open.filter((o) => o.reviewer === n && !taken.has(o.id));
     const pairs = pairFindings(loose.map((x) => x.f), free);
     loose.forEach((x, k) => {
