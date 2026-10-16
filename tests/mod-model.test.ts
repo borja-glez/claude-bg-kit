@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { buildBandModel, NO_VIEWER, openTasksFrom, pickProject, type BandFiles } from '../src/mod/model.js';
-import { bandLine } from '../src/mod/band-line.js';
+import { bandLine, clip } from '../src/mod/band-line.js';
 
 const plan = readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8')
   .replace('version: "0.1"', 'version: "0.1"\nartifacts:\n  roadmap: https://claude.ai/artifact/abc');
@@ -434,5 +434,18 @@ describe('buildBandModel · notices (B-02, B-07, K3-13, K5-02)', () => {
     expect(n({ kind: 'previous', subject: 'design', task: null, title: null })).toBe('◌ diseño a medias: demo-shop (hace 3 min)');
     expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 12, stopReason: 'stalled', since: '2026-10-13T12:00:00.000Z' })).toBe('◌ ejecución parada: 3/12 integradas (hace 2 d)');
     expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 12, stopReason: null }, 'en')).toBe('◌ execution without a coordinator: 3/12 integrated (3 min ago)');
+  });
+  it('a title loses its control and bidi characters, in a notice and in the work band', () => {
+    const c = (...codes: number[]) => String.fromCharCode(...codes);
+    // A bell and a C1 CSI become spaces; the bidi overrides and isolates go.
+    const dirty = `API${c(0x202e)} de${c(0x07)}pedidos${c(0x2066)}${c(0x9b)}${c(0x2069)}${c(0x202a, 0x202b, 0x202c, 0x202d, 0x2067, 0x2068)}`;
+    expect(clip(dirty)).toBe('API de pedidos');
+    expect(clip(`${c(0x1b)}[31m${'x'.repeat(50)}`)).toBe(`[31m${'x'.repeat(35)}…`);
+    const notice = bandLine({ mode: 'notice', project: 'demo-shop', locale: 'es', kind: 'previous', subject: 'task', seat: 'main', task: 'T002', title: dirty,
+      since: null, runId: null, roadmapUrl: null, key: 'task:T002', viewer: NO_VIEWER } as never, 0);
+    expect(notice).toBe('◌ quedó a medias: T002 API de pedidos');
+    const work = bandLine({ mode: 'work', project: 'p', locale: 'es', sid: 'main', track: null, roadmapUrl: null, current: { id: 'T002', title: dirty },
+      trackDone: 0, trackTotal: 2, percent: 0, inbox: 0, escalation: false, phase: null, cells: 'ap', swarm: false, run: null, viewer: NO_VIEWER } as never, 0);
+    expect(work).toBe('● main · T002 API de pedidos · tareas 0/2 · global 0 %');
   });
 });

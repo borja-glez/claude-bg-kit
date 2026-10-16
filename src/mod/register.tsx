@@ -132,13 +132,16 @@ export const register: Register = on => {
         ? <Link href={href} label={label} />
         : <Text dimColor>{href}</Text>;
       const fill = (text: string) => () => { $.prompt.fill({ text, mode: 'replace' }).catch(() => undefined); };
-      // B-08: Stop belongs to the coordinator's run band. A member's Stop leaves /forge:stop in the prompt for the person
-      // to confirm, since it stops the whole execution.
+      // B-08: Stop belongs to the coordinator's run band. A member's Stop, and [Close] on a run still active without its
+      // coordinator, leave /forge:stop in the prompt for the person to confirm, since it stops the whole execution; the
+      // toast says so only once the prompt holds it.
       const fillStop = () => {
-        $.prompt.fill({ text: '/forge:stop', mode: 'replace' }).then(() => { $.ui.toast(t.stopFilled); }).catch(() => undefined);
+        $.prompt.fill({ text: '/forge:stop', mode: 'replace' }).then(r => { if (r.isFilled) $.ui.toast(t.stopFilled); }).catch(() => undefined);
       };
       // §4.5: what a notice offers. Another live session: what it does and where to work instead. What an earlier one
-      // left behind: take it up or let it go. [Close] is /forge:stop, the one entry that stops or closes a run (C2).
+      // left behind: take it up or let it go. [Close] is /forge:stop, the one entry that stops or closes a run (C2): sent
+      // at once for a run already stopped, only filled for one still active (stopReason null), which it would stop.
+      // [Resume] of a draft binds this conversation to it without a critique round (design resume).
       const noticeControls = (n: NoticeBand) => {
         if (n.kind === 'other-live') {
           return n.subject === 'run'
@@ -156,10 +159,10 @@ export const register: Register = on => {
           return [
             <Button key="view" label={t.view} onPress={submit('/waypoint:status')} />,
             <Button key="resume" label={t.resume} onPress={submit('/forge:run --resume')} />,
-            <Button key="close" label={t.close} onPress={submit('/forge:stop')} />,
+            <Button key="close" label={t.close} onPress={n.stopReason ? submit('/forge:stop') : fillStop} />,
           ];
         }
-        if (n.subject === 'design') return [<Button key="resume" label={t.resume} variant="primary" onPress={submit('/waypoint:design')} />];
+        if (n.subject === 'design') return [<Button key="resume" label={t.resume} variant="primary" onPress={submit('/waypoint:design resume')} />];
         return [
           <Button key="resume" label={t.resume} variant="primary" onPress={submit('/waypoint:work resume')} />,
           ...(n.task ? [<Button key="release" label={`${t.release} ${n.task}`} onPress={submit(`/waypoint:work release ${n.task}`)} />] : []),

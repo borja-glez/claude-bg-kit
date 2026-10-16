@@ -529,7 +529,7 @@ test('the notices of a run and of what an earlier conversation left send their c
     { model: notice({ kind: 'previous', viewer: PREVIOUS }), line: '◌ quedó a medias: T002 API de pedidos (hace 12 min)', labels: ['Retomar', 'Liberar T002'],
       presses: [['resume', '/waypoint:work resume'], ['release', '/waypoint:work release T002']] },
     { model: notice({ kind: 'previous', subject: 'design', task: null, title: null, key: 'design:demo', viewer: PREVIOUS }), line: '◌ diseño a medias: demo (hace 12 min)', labels: ['Retomar'],
-      presses: [['resume', '/waypoint:design']] },
+      presses: [['resume', '/waypoint:design resume']] },
     { model: notice({ ...run, kind: 'previous', stopReason: 'stalled', viewer: PREVIOUS }), line: '◌ ejecución parada: 3/12 integradas (hace 12 min)', labels: ['Ver', 'Retomar', 'Cerrar'],
       presses: [['view', '/waypoint:status'], ['resume', '/forge:run --resume'], ['close', '/forge:stop']] },
   ];
@@ -577,6 +577,38 @@ test("Stop is the coordinator's: a member's leaves /forge:stop in the prompt wit
     band = WORK;
     ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
     expect(await ui.find({ key: 'stop-run' })).toBeUndefined();
+    await ui.unmount();
+  }
+});
+
+test('[Close] on a run still active without its coordinator only fills /forge:stop, with a toast once the prompt holds it (B-08)', async ($, on) => {
+  engineBottom(on);
+  const sent: string[] = [];
+  const filled: string[] = [];
+  const toasts: string[] = [];
+  let takes = true;
+  recordCommands(on, sent);
+  on('prompt.fill', (_$, e) => { filled.push(e.text); return { isFilled: takes }; });
+  on('ui.toast', (_$, e) => { toasts.push(e.text); return { value: undefined }; });
+  serveBand(on, () => notice({ subject: 'run', seat: null, task: null, title: null, runId: 'r1', integrated: 3, total: 12, key: 'run:r1', kind: 'previous', stopReason: null, viewer: PREVIOUS }));
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  for (const surface of SURFACES) {
+    takes = true;
+    sent.length = 0;
+    toasts.length = 0;
+    const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
+    expect(await ui.find({ type: 'Text', text: '◌ ejecución sin coordinadora: 3/12 integradas (hace 12 min)' })).toBeDefined();
+    for (const label of ['Ver', 'Retomar', 'Cerrar']) expect(await ui.find({ type: 'Button', text: label }), label).toBeDefined();
+    await ui.press({ key: 'close' });
+    expect(sent).toEqual([]);
+    expect(filled.at(-1)).toBe('/forge:stop');
+    expect(toasts.at(-1)).toContain('/forge:stop');
+    // A prompt that does not take the text (a dialog, headless) gets no toast.
+    takes = false;
+    toasts.length = 0;
+    await ui.press({ key: 'close' });
+    expect(sent).toEqual([]);
+    expect(toasts).toEqual([]);
     await ui.unmount();
   }
 });

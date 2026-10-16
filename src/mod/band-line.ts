@@ -4,8 +4,15 @@ const TITLE_MAX = 40;
 // A slot's task id in the run line: loose task ids (`<slug>-<tag>`) run up to 45 characters.
 const SLOT_ID_MAX = 20;
 
+// As cleanText (src/lib/batches.ts): bidi controls reorder what a reader sees; they are built from their code points, so
+// none is written in this file. C0 and C1 controls become spaces.
+const BIDI = new RegExp(`[${[0x061c, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069].map(c => String.fromCharCode(c)).join('')}]`, 'g');
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
+
+/** A title or an id as the band shows it: one line, without control or bidi characters, at most `max` characters. */
 export function clip(text: string, max = TITLE_MAX): string {
-  const chars = Array.from(String(text).replace(/\s+/g, ' ').trim());
+  const chars = Array.from(String(text).replace(CONTROL, ' ').replace(BIDI, '').replace(/\s+/g, ' ').trim());
   return chars.length <= max ? chars.join('') : chars.slice(0, max - 1).join('') + '…';
 }
 

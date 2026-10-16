@@ -12,7 +12,7 @@ Talk to the user in their language. Everything stored (front matter keys, JSON f
 
 ## Args and paths
 
-The first token of the arguments is the subcommand: `new [--from <spec>]`, `round`, `apply <all|1,3>`, `rewrite`, `interview`, `approve [--auto]`, `park`. With no arguments: `new` if `design.md` does not exist, otherwise `round`.
+The first token of the arguments is the subcommand: `new [--from <spec>]`, `round`, `apply <all|1,3>`, `rewrite`, `interview`, `approve [--auto]`, `resume`, `park`. With no arguments: `new` if `design.md` does not exist, otherwise `round`.
 
 - `DESIGN` = `docs/waypoint/<project>/design.md` (ask which project if there are several).
 - `LOCAL` = `.waypoint/<project>/`. Make sure `.waypoint/` is in the project's `.gitignore`.
@@ -93,6 +93,15 @@ Apply the approved-design rule above before the first edit. Ask questions one at
 2. Set `status: approved` in the front matter, run `design-validate`, run `design-snapshot` with the note "approved" (in the user's language), and commit `Design approved (v<N>)` (pathspecs as above).
 3. Publish.
 4. Run the `waypoint:plan` skill, telling it to start from the approved `design.md`. When forge drives the session (`/forge:run` chose Large), stop after step 3: `/forge:run` continues with `forge-planner`.
+
+## resume
+
+Takes up a draft an earlier conversation left (the band's [Resume]): it binds this conversation to it and shows where it stands. It never runs a round: the critic runs only when the user asks for `round`.
+
+1. With `status: approved` in `DESIGN`, say in one line that the design is approved and the plan was derived from it, and stop. With `status: parked`, set it back to `draft` with Edit.
+2. `waypoint bind DESIGN --via design --resume --claude ${CLAUDE_SESSION_ID}` (`--resume` takes the seat the earlier conversation left). Exit 3 or 4: run it again with `--second-seat` and say in one line which conversation keeps the main seat, as in **Binding** above.
+3. `waypoint design-gate DESIGN` → its `version`, `pending` and `pendingCounts`.
+4. Show the version, the design's URL (`artifact` in the front matter) when it has one, and the pending proposals: the `critical` and `major` ones one line each (`r<round>·<n> [severity] <section> — <problem>`, the problem from that round's critique file), the `minor` ones as one count, or that none is pending. Then the options: `apply r<R>:<numbers>`, `round`, `rewrite`, `interview`, `approve`, `park`. **End the turn.**
 
 ## park
 

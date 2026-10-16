@@ -1284,4 +1284,14 @@ describe('plugin layout', () => {
       for (const s of ['--via forge-run', 'info/exclude']) expect(md, `${f}: ${s}`).toContain(s);
     }
   });
+  it("design resume, the band's [Resume] of a draft, binds with --resume and never launches the critic (audit-w2b 3)", () => {
+    const design = read('plugins/waypoint/skills/design/SKILL.md');
+    const subcommands = design.split('\n').find(l => l.startsWith('The first token of the arguments is the subcommand:')) ?? '';
+    expect(subcommands).toContain('`resume`');
+    const at = design.indexOf('\n## resume\n');
+    expect(at).toBeGreaterThan(-1);
+    const section = design.slice(at + 1, design.indexOf('\n## ', at + 1));
+    for (const w of ['waypoint bind DESIGN --via design --resume --claude ${CLAUDE_SESSION_ID}', '--second-seat', 'waypoint design-gate DESIGN']) expect(section, w).toContain(w);
+    for (const w of ['design-critic', 'critique-check', 'design-snapshot']) expect(section, w).not.toContain(w);
+  });
 });
