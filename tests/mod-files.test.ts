@@ -6,6 +6,7 @@ import { loadBandFiles, loadBandModel, renewBindings, RENEW_MS, type Engine } fr
 import { openTasksFrom, seatsOf } from '../src/mod/model.js';
 import { checkoutSid, openTasksOf, readSeats } from '../src/lib/bound-fs.js';
 import { BOUND_REREAD_MS } from '../src/lib/bound.js';
+import { eventId } from '../src/lib/ids.js';
 
 const plan = readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8');
 /** The Claude conversation looking at the band ($.session.id()). */
@@ -275,6 +276,23 @@ describe('loadBandFiles · who looks, and the seats of its project (C3, A-15)', 
     expect(Object.keys(states)).toHaveLength(500);
     expect(openTasksFrom(states)).toEqual({ early: 'S0100' });
     expect(openTasksOf(path.join(onDisk(f, root), '.waypoint', 'demo-shop'))).toEqual({ early: 'S0100' });
+  });
+  it("keeps the newest 500 messages, by their time-ordered ids: an open one addressed to the seat counts in its inbox (round 2)", async () => {
+    const root = '/repo';
+    const f: Record<string, string> = { ...base(root) };
+    // Probe 3: 600 messages named by event id; only the newest, the 600th, is open and addressed to seat main.
+    const ids: string[] = [];
+    for (let i = 0; i < 600; i++) {
+      const id = eventId(new Date(now - (600 - i) * 60000), 'ui');
+      ids.push(id);
+      f[`${root}/.waypoint/demo-shop/dbcache/messages/${id}.json`] = JSON.stringify({ ts: iso(now - (600 - i) * 60000), from: 'ui', to: i === 599 ? 'main' : 'ui', type: 'reply', taskId: 'T002', text: 'x', status: i === 599 ? 'open' : 'resolved' });
+    }
+    const loaded = await loadBandFiles(fake(root, f).$);
+    const kept = Object.keys(loaded!.files.messages);
+    expect(kept).toHaveLength(500);
+    expect(kept).toContain(ids[599]);
+    expect(kept).not.toContain(ids[99]);
+    expect(await loadBandModel(fake(root, f).$)).toMatchObject({ mode: 'work', sid: 'main', inbox: 1 });
   });
   it('reads a bound.json found empty or broken once more after a short wait, as the CLI does; one still broken is no binding (spec §4.10)', async () => {
     const root = '/repo';

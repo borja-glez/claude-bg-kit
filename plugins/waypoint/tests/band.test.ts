@@ -946,6 +946,76 @@ test('a notice dismissed before a hot reload stays hidden though no session star
   await ui.unmount();
 });
 
+// The dismissals of notice task:T009, kept until far ahead of any clock.
+const T009_DISMISSED = { [dismissedKey('previous', 'task:T009')]: '2999-01-01T00:00:00.000Z' };
+const T009 = () => notice({ kind: 'previous', task: 'T009', title: 'Pagos', key: 'task:T009', viewer: PREVIOUS });
+// Real time, for a wait the engine's clock does not drive (the mod types know no timers: reached through globalThis).
+const timers = globalThis as unknown as { setTimeout(fn: () => void, ms: number): unknown };
+const sleepMs = (ms: number) => new Promise<void>(r => { timers.setTimeout(r, ms); });
+
+test('the dismissals two surfaces wait for are read once, and both are drawn again when the read ends (M6, round 2)', async ($, on) => {
+  // What the engine draws beneath the plugin, counted: one per draw of the band.
+  let draws = 0;
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
+    draws++;
+    const { Text } = $.ui.resolve(e);
+    return h(Text, {}, 'engine band') as RenderElement;
+  });
+  serveFiles(on, {});
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  // The store answers only once released; `asked` counts its reads.
+  let release = () => {};
+  const held = new Promise<void>(r => { release = r; });
+  let asked = 0;
+  on('store.get', async (_$, e) => {
+    asked++;
+    await held;
+    return { value: e.key === 'dismissed' ? T009_DISMISSED : undefined };
+  });
+  serveBand(on, T009);
+  // Two surfaces draw the notice at once, before any session start (a hot reload).
+  const terminal = $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  const desktop = $.ui.mount({ plugin: 'waypoint', surface: 'desktop', component: 'AbovePrompt', props: PROPS });
+  for (let i = 0; i < 200 && asked === 0; i++) await sleepMs(5);
+  await sleepMs(50);
+  const before = draws;
+  release();
+  const uis = await Promise.all([terminal, desktop]);
+  for (let i = 0; i < 100 && draws < before + 2; i++) await sleepMs(5);
+  // With no redraw asked here, neither surface shows the dismissed notice: each waited for the one read, or was drawn
+  // again when it ended.
+  for (const [n, ui] of uis.entries()) {
+    expect(await ui.find({ key: 'resume' }), SURFACES[n]).toBeUndefined();
+    expect(await ui.find({ text: 'engine band' }), SURFACES[n]).toBeDefined();
+  }
+  expect(asked).toBe(1);
+  expect(draws).toBeGreaterThanOrEqual(before + 2);
+  for (const ui of uis) await ui.unmount();
+});
+
+test('a first read of the dismissals that fails is tried again on the next draw, and nothing loops on it (M6, round 2)', async ($, on) => {
+  engineBand(on);
+  serveFiles(on, {});
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  let fails = true;
+  let asked = 0;
+  on('store.get', (_$, e) => {
+    asked++;
+    return fails ? { deny: 'store busy' } : { value: e.key === 'dismissed' ? T009_DISMISSED : undefined };
+  });
+  serveBand(on, T009);
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  // Nothing could be read: the notice shows, and nothing asks the store again until the next draw.
+  expect(await ui.find({ key: 'resume' })).toBeDefined();
+  await sleepMs(50);
+  expect(asked).toBe(1);
+  fails = false;
+  await ui.redraw();
+  expect(await ui.find({ key: 'resume' })).toBeUndefined();
+  expect(asked).toBe(2);
+  await ui.unmount();
+});
+
 test('a store that refuses the write still hides the dismissed notice in this process (Review Focus 5)', async ($, on) => {
   engineBand(on);
   serveFiles(on, {});

@@ -17,12 +17,30 @@ let timer: Timer | null = null;
 let lensRecheck: Timer | null = null;
 
 // K5-08: the notices dismissed with ×, read from $.store at each session start and after each write. M6: a hot reload
-// starts the module over without a session start, so the first notice drawn reads them too (once: `dismissalsLoaded`).
+// starts the module over without a session start, so a notice about to be drawn reads them too, until one read
+// resolved (`dismissalsLoaded`).
 let dismissals: Dismissals = {};
 let dismissalsLoaded = false;
-async function loadDismissals($: Engine): Promise<void> {
-  dismissalsLoaded = true;
-  try { dismissals = normalizeDismissals(await $.store.get(DISMISS_STORE_KEY), await nowMs($)); } catch { /* keep what is in memory */ }
+let dismissalsReading: Promise<void> | null = null;
+/** Reads the dismissals from the store; whether the read resolved (a refused one keeps what is in memory). */
+async function loadDismissals($: Engine): Promise<boolean> {
+  try {
+    dismissals = normalizeDismissals(await $.store.get(DISMISS_STORE_KEY), await nowMs($));
+    dismissalsLoaded = true;
+    return true;
+  } catch { return false; }
+}
+/**
+ * The read a notice waits for before it is drawn: one at a time, so a second surface drawing meanwhile waits for the
+ * same read rather than drawing without it. Once it resolved, every instance is drawn again: a draw the engine did not
+ * wait for may show a dismissed notice. A refused read redraws nothing (the next draw tries again, never a loop).
+ */
+function readDismissals($: Engine): Promise<void> {
+  dismissalsReading ??= loadDismissals($).then(read => {
+    dismissalsReading = null;
+    if (read) $.ui.invalidate('ui.render');
+  });
+  return dismissalsReading;
 }
 async function rootOf($: Engine): Promise<string> {
   try { return await $.session.root(); } catch { return ''; }
@@ -181,7 +199,7 @@ export const register: Register = on => {
       if (isHidden || !m || e.props.hasSurvey || m.mode === 'none') return below;
       // K5-08: a notice dismissed with × stays hidden for as long as that notice lasts.
       if (m.mode === 'notice') {
-        if (!dismissalsLoaded) await loadDismissals($);
+        if (!dismissalsLoaded) await readDismissals($);
         if (isDismissed(dismissals, dismissalKey(await rootOf($), m.project, m.kind, m.key), await nowMs($))) return below;
       }
       const { Box, Text, Button, Link } = $.ui.resolve(e);
