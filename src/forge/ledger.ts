@@ -3,6 +3,8 @@ import path from 'node:path';
 import { deriveStatus, normalizeStatus, type ForgeStatus } from '../lib/forge-status.js';
 import { isSafeId } from '../lib/execution-state.js';
 import { attribute, isTask, projectOf } from './task-ref.js';
+import { mainCheckoutFrom } from '../lib/main-checkout.js';
+import { samePath } from '../lib/worktree.js';
 
 export const LEDGER_KINDS = ['triage', 'phase', 'agent', 'validate', 'verdict', 'round', 'ruling', 'cycle', 'proposal', 'verify', 'verify-skip', 'decision'] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
@@ -15,6 +17,19 @@ const GITIGNORE_05 = '*\n!.gitignore\n!config.yaml\n';
 const forgePath = (root: string) => path.join(root, '.forge');
 const ledgerFile = (root: string) => path.join(forgePath(root), 'ledger.jsonl');
 export const statusFile = (root: string) => path.join(forgePath(root), 'status.json');
+
+/**
+ * D-10: the directory whose ledger records an event of `root`: the main checkout when `root` is one of forge's task
+ * worktrees (`<main>/.claude/worktrees/task-*`, told by its .git file, without calling git), else `root` itself.
+ */
+export function ledgerRoot(root: string): string {
+  const name = path.basename(path.resolve(root));
+  if (!name.startsWith('task-')) return root;
+  let text: string;
+  try { text = readFileSync(path.join(root, '.git'), 'utf8'); } catch { return root; }
+  const main = mainCheckoutFrom(path.resolve(root), text);
+  return samePath(path.join(main, '.claude', 'worktrees', name), root) ? main : root;
+}
 
 export function forgeDir(root: string): string {
   const dir = forgePath(root);
@@ -40,9 +55,14 @@ export function endsMidLine(file: string): boolean {
 }
 
 export function appendEvent(root: string, event: LedgerEvent): void {
-  forgeDir(root);
-  const file = ledgerFile(root);
-  // A line left half-written by a crash must not swallow the next event.
+  // D-10: a member's events go to the main checkout's ledger, where the coordinator, stats and the roadmap read them;
+  // its status.json stays in its worktree, for its own lens.
+  const target = ledgerRoot(root);
+  forgeDir(target);
+  if (target !== root) forgeDir(root);
+  const file = ledgerFile(target);
+  // A line left half-written by a crash must not swallow the next event. The whole line is one append (O_APPEND), so
+  // the member and the coordinator writing the same ledger at once never interleave their lines.
   appendFileSync(file, (endsMidLine(file) ? '\n' : '') + JSON.stringify(event) + '\n');
   updateStatus(root, event);
 }
@@ -81,11 +101,31 @@ export function readStatus(root: string): ForgeStatus | null {
 }
 
 export function readEvents(root: string): LedgerEvent[] {
+  const target = ledgerRoot(root);
+  if (target === root) return parseLedger(ledgerLines(root));
+  // D-10: a task worktree's own ledger holds what it wrote before its events went to the main checkout's: read first.
+  // A line both hold (copied over) is one event: the main ledger's copy is left out, once per copy the worktree has.
+  const own = ledgerLines(root);
+  const left = new Map<string, number>();
+  for (const line of own) left.set(line, (left.get(line) ?? 0) + 1);
+  const main = ledgerLines(target).filter(line => {
+    const n = left.get(line) ?? 0;
+    if (n) left.set(line, n - 1);
+    return !n;
+  });
+  return parseLedger([...own, ...main]);
+}
+
+/** The non-empty lines of `root`'s ledger, trimmed. */
+function ledgerLines(root: string): string[] {
   const file = ledgerFile(root);
   if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8').split('\n').map(l => l.trim()).filter(Boolean);
+}
+
+function parseLedger(lines: readonly string[]): LedgerEvent[] {
   const out: LedgerEvent[] = [];
-  for (const line of readFileSync(file, 'utf8').split('\n')) {
-    if (!line.trim()) continue;
+  for (const line of lines) {
     try {
       const e = JSON.parse(line);
       if (e && typeof e === 'object' && typeof e.ts === 'string' && (LEDGER_KINDS as readonly string[]).includes(e.kind)

@@ -31,6 +31,7 @@ import { reviewCommand } from './review.js';
 import { swarmStep } from './step.js';
 import { runWithCache, cacheGit, checkoutPrefix } from '../validate-cache.js';
 import { roundDecision } from '../round.js';
+import { keepEvidence } from '../evidence-copy.js';
 import { eventsOf, isTask, projectOf, readWorkDir, resolveProject, workRel } from '../task-ref.js';
 import { computeStats, renderStats, type PlanStates } from '../stats.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, runOptions, validateEvent, planAffected, type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
@@ -538,7 +539,10 @@ function logVerifyResult(cwd: string, at: string, task: string, dir: string, ver
   const rel = path.relative(cwd, dir).split(path.sep).join('/');
   const evidence = rel.replace(/reviews-(\d+-\d+)$/, 'evidence/$1');
   const out = { result: verifyFile?.result ?? 'invalid', passed: verifyFile ? verifyFile.checks.filter(c => c.ok).length : 0, total: verifyFile ? verifyFile.checks.length : 0 };
-  appendEvent(cwd, { ts: at, kind: 'verify', task, ...out, ...(evidence !== rel ? { evidence } : {}), ...(verifyFile?.reason ? { reason: verifyFile.reason } : {}) });
+  // K2-04: from a forge task worktree, verify.json and the evidence are copied to the main checkout first.
+  const { skipped } = keepEvidence(cwd, dir);
+  appendEvent(cwd, { ts: at, kind: 'verify', task, ...out, ...(evidence !== rel ? { evidence } : {}), ...(verifyFile?.reason ? { reason: verifyFile.reason } : {}),
+    ...(skipped.length ? { evidenceSkipped: skipped } : {}) });
   return out;
 }
 

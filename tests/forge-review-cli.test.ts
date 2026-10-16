@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync, rmSync, openSync, ftruncateSync, closeSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { appendEvent, readEvents } from '../src/forge/ledger.js';
+import { EVIDENCE_COPY_MAX, keepEvidence } from '../src/forge/evidence-copy.js';
 
 let root: string;
 let wt: string;
@@ -1591,5 +1592,69 @@ describe('prep without --dir writes into the work folder of the task (D-08)', ()
     const r = run(['prep', '--task', 'a:b-1', '--path', 'medium', '--cwd', wt], io);
     expect(r.code).toBe(2);
     expect(r.stderr).toContain('--dir');
+  });
+});
+
+describe('a verification in a forge task worktree reaches the main checkout (D-10, K2-04)', () => {
+  it('verify-result copies verify.json and the evidence and logs in the main ledger', () => {
+    const main = mkdtempSync(path.join(tmpdir(), 'forge-k204-'));
+    const g = (cwd: string, ...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd, encoding: 'utf8' }).trim();
+    g(main, 'init', '-q', '-b', 'main'); writeFileSync(path.join(main, '.gitignore'), '.forge/\n.claude/\n'); g(main, 'add', '.'); g(main, 'commit', '-qm', 'init');
+    const task = path.join(main, '.claude', 'worktrees', 'task-T1');
+    g(main, 'worktree', 'add', '-q', '-b', 'task/T1', task);
+    const rd = '.forge/work/shop/T1/reviews-1-1';
+    const shot = '.forge/work/shop/T1/evidence/1-1/01-home.png';
+    mkdirSync(path.join(task, rd), { recursive: true });
+    mkdirSync(path.dirname(path.join(task, shot)), { recursive: true });
+    writeFileSync(path.join(task, rd, 'verify.json'), JSON.stringify({ result: 'pass', checks: [{ id: 1, ok: true }] }));
+    writeFileSync(path.join(task, shot), 'png');
+    const r = run(['verify-result', '--task', 'T1-1', '--dir', rd], { cwd: task, now: () => new Date('2026-10-16T10:00:00.000Z'), env: {} });
+    expect(r.code).toBe(0);
+    expect(readFileSync(path.join(main, rd, 'verify.json'), 'utf8')).toContain('"pass"');
+    expect(readFileSync(path.join(main, shot), 'utf8')).toBe('png');
+    expect(readEvents(main).at(-1)).toMatchObject({ kind: 'verify', task: 'T1-1', result: 'pass', evidence: '.forge/work/shop/T1/evidence/1-1' });
+    expect(existsSync(path.join(task, '.forge', 'ledger.jsonl'))).toBe(false);
+    // What does not fit under the cap is named (the event says it as evidenceSkipped).
+    expect(keepEvidence(task, rd, 1).skipped).toEqual([`${rd}/verify.json`, shot]);
+  });
+
+  it('review-close copies them too, and a file over the 50 MB cap stays out and is named as evidenceSkipped', () => {
+    const main = mkdtempSync(path.join(tmpdir(), 'forge-k204-close-'));
+    const g = (cwd: string, ...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd, encoding: 'utf8' }).trim();
+    g(main, 'init', '-q', '-b', 'main'); writeFileSync(path.join(main, '.gitignore'), '.forge/\n.claude/\n'); writeFileSync(path.join(main, 'a.txt'), 'one\n');
+    g(main, 'add', '.'); g(main, 'commit', '-qm', 'init');
+    const head = g(main, 'rev-parse', 'HEAD');
+    const task = path.join(main, '.claude', 'worktrees', 'task-T1');
+    g(main, 'worktree', 'add', '-q', '-b', 'task/T1', task);
+    writeFileSync(path.join(task, 'a.txt'), 'one\ntwo\n');
+    g(task, 'commit', '-qam', 'change');
+    mkdirSync(path.join(task, '.forge', 'work', 'shop', 'T1'), { recursive: true });
+    writeFileSync(path.join(task, '.forge', 'config.yaml'), 'detect: false\nvalidators:\n  - name: check\n    cmd: node -e "process.exit(0)"\n');
+    writeFileSync(path.join(task, '.forge', 'work', 'shop', 'T1', 'brief-1.md'), '# T1\n');
+    writeFileSync(path.join(task, '.forge', 'work', 'shop', 'T1', 'baseline-1.json'), '[{"validator":"check","ok":true,"flaky":false,"durationMs":1,"failures":[]}]\n');
+    const tio: Io = { cwd: task, now: () => new Date('2026-10-16T10:00:00.000Z'), env: {} };
+    appendEvent(task, { ts: '2026-10-16T09:00:00.000Z', kind: 'triage', task: 'T1', project: 'shop', path: 'medium', review });
+    const dirArg = '.forge/work/shop/T1';
+    expect(run(['review-prep', '--task', 'T1-1', '--path', 'medium', '--base', head, '--baseline', `${dirArg}/baseline-1.json`, '--dir', dirArg, '--cwd', task], tio).code).toBe(0);
+    const rd = `${dirArg}/reviews-1-1`;
+    for (const k of ['correctness', 'security']) writeFileSync(path.join(task, rd, `${k}.json`), JSON.stringify({ verdict: 'pass', confidence: 0.9, findings: [] }));
+    writeFileSync(path.join(task, rd, 'verify.json'), JSON.stringify({ result: 'pass', checks: [{ id: 1, ok: true }] }));
+    const shot = `${dirArg}/evidence/1-1/01-home.png`, big = `${dirArg}/evidence/1-1/02-big.webm`;
+    mkdirSync(path.dirname(path.join(task, shot)), { recursive: true });
+    writeFileSync(path.join(task, shot), 'png');
+    // Its size without writing its bytes.
+    const fd = openSync(path.join(task, big), 'w');
+    try { ftruncateSync(fd, EVIDENCE_COPY_MAX + 1); } finally { closeSync(fd); }
+    try {
+      const r = run(['review-close', '--task', 'T1-1', '--dir', dirArg, '--path', 'medium', '--cwd', task], tio);
+      expect(r.stderr).toBe('');
+      expect(r.code).toBe(0);
+      expect(readFileSync(path.join(main, rd, 'verify.json'), 'utf8')).toContain('"pass"');
+      expect(readFileSync(path.join(main, shot), 'utf8')).toBe('png');
+      expect(existsSync(path.join(main, big))).toBe(false);
+      expect(readEvents(main).filter(e => e.kind === 'verify').at(-1)).toMatchObject({ task: 'T1-1', result: 'pass', evidence: `${dirArg}/evidence/1-1`, evidenceSkipped: [big] });
+      expect(readEvents(main).some(e => e.kind === 'verdict' && e.task === 'T1-1')).toBe(true);
+      expect(existsSync(path.join(task, '.forge', 'ledger.jsonl'))).toBe(false);
+    } finally { rmSync(path.join(task, big), { force: true }); }
   });
 });

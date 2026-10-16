@@ -10,6 +10,7 @@ import { PATH_ORDER, zonesFromPaths, type PathName, type ReviewRole } from '../t
 import { parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, repoRelative, type Finding, type Review, type ReviewerName, type FailingValidator, type AskFinding } from '../verdict.js';
 import { roundDecision } from '../round.js';
 import { eventsOf, isTask, ofTask, readWorkDir, resolveProject } from '../task-ref.js';
+import { keepEvidence } from '../evidence-copy.js';
 import { parseIndex, assignIds, answeredBy, idsOf, recordRound, carriedResiduals, carriedOutOfModel, openIds, closedFor, previousFindings, asPrevious, historyLine, renderHandover, expressCandidate, type FindingsIndex } from '../findings-index.js';
 import { reviewsOf } from '../loop.js';
 import { takeBrief } from '../shadow.js';
@@ -643,9 +644,11 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   if (verifyFile !== undefined) {
     // As FORGE verdict logs it.
     const evidence = rel(deps.cwd, roundDir).replace(/reviews-(\d+-\d+)$/, 'evidence/$1');
+    // K2-04: from a forge task worktree, verify.json and the evidence are copied to the main checkout first.
+    const kept = keepEvidence(deps.cwd, roundDir);
     appendEvent(deps.cwd, { ts, kind: 'verify', task, result: verifyFile?.result ?? 'invalid',
       passed: verifyFile ? verifyFile.checks.filter(c => c.ok).length : 0, total: verifyFile ? verifyFile.checks.length : 0,
-      evidence, ...(verifyFile?.reason ? { reason: verifyFile.reason } : {}) });
+      evidence, ...(verifyFile?.reason ? { reason: verifyFile.reason } : {}), ...(kept.skipped.length ? { evidenceSkipped: kept.skipped } : {}) });
   }
   // The whole ledger goes to roundDecision, which filters by the pair itself: the events of a loose brief `<parent>-<k>`
   // are attributed by its parent's triage, which `events` (those of `<id>` and its briefs) does not hold.
