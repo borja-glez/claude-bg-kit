@@ -7,7 +7,7 @@ import { buildDocs, buildSyncWrites, planHash, planViewFromDocs, type Known, typ
 import { normalizeMeta, normalizePhase } from '../page/normalize.js';
 import { availableTasks, commitShas } from '../lib/deps.js';
 import { pickTask, conflictsFor, recoverableTasks, inboxFor, escalationCandidates, isIdle, IDLE_MINUTES } from '../lib/coordination.js';
-import { parseDesign, changedSections, DesignError } from '../lib/design.js';
+import { parseDesign, changedSections, DesignError, setDesignStatus } from '../lib/design.js';
 import { importSpec, SpecImportError } from '../lib/design-import.js';
 import { designGate, mergeDismissed, parseDismissed } from '../lib/design-gate.js';
 import { listVersions, nextVersion, parseChangelog, appendChangelog, parseAppliedItems, AppliedError } from '../lib/history.js';
@@ -34,7 +34,7 @@ import type { Commit, MessageDoc, NoteDoc, PhaseDoc, PlanView, SessionDoc, TaskS
 export interface Io { cwd: string; now: () => Date; rand?: () => number; assetsDir: string; stdin?: string; env?: Record<string, string | undefined> }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|bind|release|design-validate|design-import|design-snapshot|design-changed|design-gate|critique-check|critique-select|critique-dismiss|design-page|hook> ...`;
+const USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|critique-check|critique-select|critique-dismiss|design-page|hook> ...`;
 
 export function run(argv: string[], io: Io): Result {
   const [cmd, ...args] = argv;
@@ -500,6 +500,19 @@ export function run(argv: string[], io: Io): Result {
         const log = readChangelog(path.dirname(abs(args[0])));
         const sections = d.sections.length;
         return ok(`ok: ${d.words} words, ${sections} sections, v${log[log.length - 1]?.version ?? 0}`);
+      }
+      case 'design-park': {
+        // K3-13: a parked design is not announced at session start nor drawn in the band; only a draft is parked.
+        if (!args[0] || args[0].startsWith('--')) return fail('usage: waypoint design-park <design.md>', 2);
+        const file = abs(args[0]);
+        const text = readFileSync(file, 'utf8');
+        const d = parseDesign(text);
+        if (d.meta.status === 'parked') return ok(JSON.stringify({ path: file, status: 'parked', changed: false }));
+        if (d.meta.status !== 'draft') return fail(`design-park: only a draft design can be parked (this one is ${d.meta.status})`, 2);
+        const next = setDesignStatus(text, 'parked');
+        parseDesign(next);
+        writeFileSync(file, next);
+        return ok(JSON.stringify({ path: file, status: 'parked', changed: true }));
       }
       case 'design-import': {
         const spec = args[0];

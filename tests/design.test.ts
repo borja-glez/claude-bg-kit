@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { changedSections, DesignError, parseDesign, sectionsOf, slugify, wordCount } from '../src/lib/design.js';
+import { changedSections, DesignError, parseDesign, sectionsOf, setDesignStatus, slugify, wordCount } from '../src/lib/design.js';
 
 const fixture = readFileSync(new URL('./fixtures/design.md', import.meta.url), 'utf8');
 const issuesOf = (t: string) => { try { parseDesign(t); } catch (e) { if (e instanceof DesignError) return e.issues; throw e; } throw new Error('expected DesignError'); };
@@ -33,6 +33,25 @@ describe('parseDesign', () => {
   it('rejects a missing or broken front matter block', () => {
     expect(issuesOf('## Just a body')[0]).toMatch(/front matter/);
     expect(issuesOf('---\ntitle: [unclosed\n---\nx')[0]).toMatch(/^YAML: /);
+  });
+
+  it('accepts status parked, and setDesignStatus changes only the front matter (K3-13)', () => {
+    expect(parseDesign('---\ntitle: X\nproject: p\nsummary: S\nstatus: parked\n---\nbody\n').meta.status).toBe('parked');
+    const parked = setDesignStatus(fixture, 'parked');
+    expect(parseDesign(parked).meta.status).toBe('parked');
+    expect(parked.slice(parked.indexOf('\n---\n'))).toBe(fixture.slice(fixture.indexOf('\n---\n')));
+    const back = setDesignStatus(parked, 'draft');
+    expect(parseDesign(back).meta.status).toBe('draft');
+    expect(back.match(/^status:/gm)).toHaveLength(1);
+    const crlf = setDesignStatus('---\r\ntitle: X\r\nproject: p\r\nsummary: S\r\nstatus: draft\r\n---\r\nbody\r\n', 'parked');
+    expect(crlf).toBe('---\r\ntitle: X\r\nproject: p\r\nsummary: S\r\nstatus: parked\r\n---\r\nbody\r\n');
+    const bom = String.fromCharCode(0xfeff);
+    expect(setDesignStatus(`${bom}${fixture}`, 'parked').startsWith(`${bom}---`)).toBe(true);
+  });
+
+  it('setDesignStatus leaves a status line in the body alone', () => {
+    const t = '---\ntitle: X\nproject: p\nsummary: S\n---\nbody\nstatus: approved\n';
+    expect(setDesignStatus(t, 'parked')).toBe('---\ntitle: X\nproject: p\nsummary: S\nstatus: parked\n---\nbody\nstatus: approved\n');
   });
 });
 

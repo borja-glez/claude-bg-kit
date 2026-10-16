@@ -681,6 +681,19 @@ describe('design commands', () => {
     expect(data.meta.title).toBe('A __DATA__ b __TITLE__');
   });
 
+  it('design-park parks a draft once, and refuses an approved design (K3-13)', () => {
+    const r = run(['design-park', rel], io);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ status: 'parked', changed: true });
+    expect(parseDesign(readFileSync(path.join(dir, rel), 'utf8')).meta.status).toBe('parked');
+    expect(JSON.parse(run(['design-park', rel], io).stdout).changed).toBe(false);
+    writeFileSync(path.join(dir, rel), readFileSync(path.join(dir, rel), 'utf8').replace('status: parked', 'status: approved'));
+    const no = run(['design-park', rel], io);
+    expect(no.code).toBe(2);
+    expect(no.stderr).toContain('only a draft design can be parked');
+    expect(run(['design-park'], io).code).toBe(2);
+  });
+
   describe('critique-check against the design', () => {
     const prop = (section: string) => ({ n: 1, category: 'risk', severity: 'major', section, problem: 'p', change: 'c' });
     const write = (name: string, c: object) => writeFileSync(path.join(dir, name), JSON.stringify(c));

@@ -10,7 +10,7 @@ const MetaSchema = z.object({
   summary: z.string().min(1),
   pillars: z.array(z.object({ title: z.string().min(1), text: z.string().min(1) })).max(8).default([]),
   start_prompt: z.string().min(1).default('/waypoint:work <track>'),
-  status: z.enum(['draft', 'approved']).default('draft'),
+  status: z.enum(['draft', 'approved', 'parked']).default('draft'),
   artifact: z.string().url().optional(),
   source: z.string().min(1).max(300).optional(),
 });
@@ -39,6 +39,22 @@ export function parseDesign(text: string): Design {
   if (!r.success) throw new DesignError(r.error.issues.map(i => `${i.path.join('.') || '(root)'}: ${i.message}`));
   const body = m[2];
   return { meta: r.data, body, sections: sectionsOf(body), words: wordCount(body) };
+}
+
+/**
+ * K3-13: the design text with its front matter's `status` set: the `status:` line replaced, or added before the closing
+ * `---`. The body, the line endings and a leading BOM stay as they are.
+ */
+export function setDesignStatus(text: string, status: DesignMeta['status']): string {
+  const bom = text.startsWith(BOM) ? BOM : '';
+  const rest = bom ? text.slice(1) : text;
+  const m = /^(---\r?\n)([\s\S]*?)(\r?\n---(?:\r?\n|$))/.exec(rest);
+  if (!m) throw new DesignError(['missing front matter block (--- ... ---) at the top of design.md']);
+  const eol = m[1].endsWith('\r\n') ? '\r\n' : '\n';
+  const lines = m[2].split(/\r?\n/);
+  const at = lines.findIndex(l => /^status\s*:/.test(l));
+  if (at >= 0) lines[at] = `status: ${status}`; else lines.push(`status: ${status}`);
+  return `${bom}${m[1]}${lines.join(eol)}${m[3]}${rest.slice(m[0].length)}`;
 }
 
 export function slugify(heading: string): string {
