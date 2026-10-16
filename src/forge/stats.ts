@@ -3,6 +3,7 @@
 // (no clocks, no phases but implement) gives what it can: its time falls in implement.
 import type { LedgerEvent } from './ledger.js';
 import type { PlanTask } from '../lib/types.js';
+import { attribute, isTask } from './task-ref.js';
 
 export const STAGE_NAMES = ['implement', 'validate', 'review', 'verdict', 'fix'] as const;
 export type StageName = (typeof STAGE_NAMES)[number];
@@ -39,9 +40,10 @@ export function quantiles(values: number[]): Quantiles | null {
   return { p50: q(0.5), p80: q(0.8) };
 }
 
-/** The path of a task's last triage before index `before` (a loose `<parent>-<k>` falls back to its parent's), else 'unknown'. */
-function pathOf(events: LedgerEvent[], id: string, before: number): string {
-  const of = (t: string) => events.slice(0, before).filter(e => e.kind === 'triage' && e.task === t && typeof e.path === 'string').at(-1)?.path as string | undefined;
+/** The path of a task's last triage of its project before index `before` (a loose `<parent>-<k>` falls back to its
+ *  parent's), else 'unknown'. */
+function pathOf(events: LedgerEvent[], id: string, before: number, owner: (e: LedgerEvent) => string | null, project: string | null): string {
+  const of = (t: string) => events.slice(0, before).filter(e => e.kind === 'triage' && isTask(e, t) && owner(e) === project && typeof e.path === 'string').at(-1)?.path as string | undefined;
   const parent = /^(.+)-\d+$/.exec(id)?.[1];
   return of(id) ?? (parent ? of(parent) : undefined) ?? 'unknown';
 }
@@ -54,17 +56,21 @@ function pathOf(events: LedgerEvent[], id: string, before: number): string {
  */
 export function briefStats(events: LedgerEvent[]): BriefStat[] {
   const out: BriefStat[] = [];
+  // D-08: a brief's window holds only its project's events (ids repeat between plans).
+  const owner = attribute(events);
   events.forEach((p, i) => {
     if (p.kind !== 'phase' || p.phase !== 'implement' || typeof p.task !== 'string' || typeof p.brief !== 'number') return;
     const id = p.task, n = p.brief, brief = `${id}-${n}`;
-    const j = events.findIndex((e, k) => k > i && e.kind === 'verdict' && e.task === brief && e.action === 'accept');
+    const project = owner(p);
+    const mine = (e: LedgerEvent, t: string) => isTask(e, t) && owner(e) === project;
+    const j = events.findIndex((e, k) => k > i && e.kind === 'verdict' && mine(e, brief) && e.action === 'accept');
     if (j < 0) return;
-    if (events.slice(i + 1, j).some(e => e.kind === 'phase' && e.task === id && e.phase === 'implement' && e.brief === n)) return;
+    if (events.slice(i + 1, j).some(e => e.kind === 'phase' && mine(e, id) && e.phase === 'implement' && e.brief === n)) return;
     let b = i;
     for (let k = i - 1; k >= 0; k--) {
       const e = events[k];
       if (e.ts !== p.ts) break;
-      if (e.kind === 'validate' && e.task === brief && e.baseline === true) { b = k; break; }
+      if (e.kind === 'validate' && mine(e, brief) && e.baseline === true) { b = k; break; }
     }
     const baselineMs = b < i ? num(events[b].durationMs) : 0;
     const start = at(p) - baselineMs, end = at(events[j]);
@@ -72,7 +78,7 @@ export function briefStats(events: LedgerEvent[]): BriefStat[] {
     const stages = zero();
     stages.validate += baselineMs;
     const phases: LedgerEvent[] = [];
-    for (let k = i; k < j; k++) if (events[k].kind === 'phase' && events[k].task === id) phases.push(events[k]);
+    for (let k = i; k < j; k++) if (events[k].kind === 'phase' && mine(events[k], id)) phases.push(events[k]);
     phases.sort((a, c) => at(a) - at(c));
     phases.forEach((e, x) => {
       const next = Math.min(x + 1 < phases.length ? at(phases[x + 1]) : end, end);
@@ -82,16 +88,16 @@ export function briefStats(events: LedgerEvent[]): BriefStat[] {
     let implementValidateMs = 0;
     for (let k = b; k <= j; k++) {
       const e = events[k];
-      if (e.kind !== 'validate' || e.task !== brief) continue;
+      if (e.kind !== 'validate' || !mine(e, brief)) continue;
       if (e.scope === 'affected') { implementValidateMs += num(e.durationMs); continue; }
       validators.ms += num(e.durationMs);
       for (const r of Array.isArray(e.results) ? e.results as { cached?: unknown }[] : []) {
         if (r && r.cached === true) validators.cached++; else validators.runs++;
       }
     }
-    const dirs = new Set(events.slice(i, j + 1).filter(e => e.kind === 'verdict' && e.task === brief).map((e, x) => (typeof e.dir === 'string' ? e.dir : `#${x}`)));
+    const dirs = new Set(events.slice(i, j + 1).filter(e => e.kind === 'verdict' && mine(e, brief)).map((e, x) => (typeof e.dir === 'string' ? e.dir : `#${x}`)));
     out.push({
-      task: brief, path: pathOf(events, id, j), startedAt: new Date(start).toISOString(), acceptedAt: events[j].ts, totalMs: end - start,
+      task: brief, path: pathOf(events, id, j, owner, project), startedAt: new Date(start).toISOString(), acceptedAt: events[j].ts, totalMs: end - start,
       stages, validators, implementValidateMs, reviews: dirs.size, express: phases.some(e => e.phase === 'review' && e.express === true),
     });
   });

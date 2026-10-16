@@ -1,6 +1,7 @@
 import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { deriveStatus, normalizeStatus, type ForgeStatus } from '../lib/forge-status.js';
+import { attribute, isTask, projectOf } from './task-ref.js';
 
 export const LEDGER_KINDS = ['triage', 'phase', 'agent', 'validate', 'verdict', 'round', 'ruling', 'cycle', 'proposal', 'verify', 'verify-skip', 'decision'] as const;
 export type LedgerKind = (typeof LEDGER_KINDS)[number];
@@ -48,7 +49,11 @@ export function appendEvent(root: string, event: LedgerEvent): void {
 /** Appends a phase event unless the task's last phase event already names that phase for the same brief (C4: a stage
  *  is logged once, whether review-prep or `swarm task`, which names no brief, logs it first). Returns whether it appended. */
 export function appendPhase(root: string, event: LedgerEvent & { task: string; phase: string }): boolean {
-  const last = readEvents(root).filter(e => e.kind === 'phase' && e.task === event.task).at(-1);
+  // D-08: the task's last phase event of its own project (ids repeat between plans).
+  const events = readEvents(root);
+  const owner = attribute(events);
+  const project = typeof event.project === 'string' ? event.project : projectOf(events, event.task);
+  const last = events.filter(e => e.kind === 'phase' && isTask(e, event.task) && owner(e) === project).at(-1);
   if (last && last.phase === event.phase && (last.brief === undefined || event.brief === undefined || last.brief === event.brief)) return false;
   appendEvent(root, event);
   return true;
@@ -82,7 +87,7 @@ export function readEvents(root: string): LedgerEvent[] {
     try {
       const e = JSON.parse(line);
       if (e && typeof e === 'object' && typeof e.ts === 'string' && (LEDGER_KINDS as readonly string[]).includes(e.kind)
-        && (e.task === undefined || typeof e.task === 'string')) out.push(e);
+        && ['undefined', 'string'].includes(typeof e.task)) out.push(e);
     } catch { /* a half-written line */ }
   }
   return out;

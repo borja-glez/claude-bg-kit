@@ -6,6 +6,7 @@ import { commitInfo } from './swarm.js';
 import { readExecution, executionTaskFile, runWorktree, taskBase, writePublicTask } from '../execution.js';
 import { takeStepLock } from '../jobs.js';
 import { appendEvent, readEvents, type LedgerEvent } from '../ledger.js';
+import { eventsOf, isTask, ofTask } from '../task-ref.js';
 import { reviewsOf } from '../loop.js';
 import { LEASE_MINUTES } from '../../lib/coordination.js';
 import { normalizePublicTask, type ExecTask, type ExecutionState, type PublicTask } from '../../lib/execution-state.js';
@@ -24,7 +25,11 @@ type Versions = { state: Record<string, number>; sessions: Record<string, number
 type Ruling = { kind: 'fix' | 'out-of-model' | 'review' } | { kind: 'defer'; ids: string[] };
 /** `after`: writes the step makes only as its last act, once every command ran (see reviewersBack). `iso` and
  *  `agentLease` are read from io.now() when they are used (M7): a step can wait for a slot and validate for minutes. */
-interface Ctx { io: Io; deps: StepDeps; planArg: string; db: string; runBranch: string; locale: 'es' | 'en'; iso: () => string; agentLease: () => string; rulings: Map<string, Ruling>; actions: StepAction[]; after: (() => void)[] }
+interface Ctx {
+  io: Io; deps: StepDeps; planArg: string; db: string; runBranch: string; locale: 'es' | 'en'; iso: () => string; agentLease: () => string; rulings: Map<string, Ruling>; actions: StepAction[]; after: (() => void)[];
+  /** D-08: the project of the plan execution. */
+  project: string;
+}
 /** respawned.json of a review round: each reviewer respawned once, when, and the mtime of the file it was respawned on. */
 type Respawned = Record<string, { at: string; mtimeMs: number }>;
 /**
@@ -114,10 +119,13 @@ function call(c: Ctx, task: string | null, argv: string[]): Json | null {
   return null;
 }
 
+/** D-08: the ledger events of `task` (itself and its briefs) of the execution's project: ids repeat between plans. */
+const ledgerOf = (c: Ctx, task: string): LedgerEvent[] => eventsOf(readEvents(c.io.cwd), { project: c.project, task });
+
 /** The brief a task is on and its BASE: its last phase `implement` with a base (prep logs it); brief 1 without one. `head`:
  *  the commit the brief's work started on, which prep logs only when BASE is below it (D-02: a task resumed on its branch). */
 function briefOf(events: LedgerEvent[], task: string): { n: number; base: string | null; head: string | null } {
-  const e = events.filter(x => x.kind === 'phase' && x.task === task && x.phase === 'implement' && typeof x.base === 'string' && x.base).at(-1);
+  const e = events.filter(x => x.kind === 'phase' && isTask(x, task) && x.phase === 'implement' && typeof x.base === 'string' && x.base).at(-1);
   return { n: typeof e?.brief === 'number' && e.brief >= 1 ? e.brief : 1, base: e ? String(e.base) : null, head: typeof e?.head === 'string' && e.head ? e.head : null };
 }
 
@@ -149,14 +157,14 @@ function seenOf(work: string, n: number, round: number, start: string | null): s
 
 /** The implementer last logged for `<T>-<n>`; null when none was. */
 function lastAgent(c: Ctx, taskN: string): string | null {
-  const e = readEvents(c.io.cwd).filter(x => x.kind === 'agent' && x.task === taskN && typeof x.agent === 'string' && x.agent).at(-1);
+  const e = ledgerOf(c, taskN).filter(x => x.kind === 'agent' && isTask(x, taskN) && typeof x.agent === 'string' && x.agent).at(-1);
   return e ? String(e.agent) : null;
 }
 
 /** Logs the implementer handed out for `<T>-<n>` (review-close reads its rung), once: a hand-out a later step retries,
  *  with the same agent and role as the last one logged for that brief, adds nothing. */
 function logAgent(c: Ctx, taskN: string, agent: string, role: string): void {
-  const last = readEvents(c.io.cwd).filter(e => e.kind === 'agent' && e.task === taskN).at(-1);
+  const last = ledgerOf(c, taskN).filter(e => e.kind === 'agent' && isTask(e, taskN)).at(-1);
   if (last?.agent === agent && last.role === role) return;
   appendEvent(c.io.cwd, { ts: c.iso(), kind: 'agent', task: taskN, agent, role });
 }
@@ -190,7 +198,7 @@ function keptPrep(c: Ctx, task: string, worktree: string, resumedBase: string | 
   const work = path.join(c.io.cwd, '.forge', 'work', task);
   const kept = readJson(path.join(work, 'prep-1.json')) as Json | null;
   const head = c.deps.gitAt(worktree)(['rev-parse', 'HEAD'])?.trim();
-  const { n, base } = briefOf(readEvents(c.io.cwd), task);
+  const { n, base } = briefOf(ledgerOf(c, task), task);
   const want = resumedBase ?? head;
   const ok = !!kept && typeof kept === 'object' && typeof kept.validate === 'string' && !!head && kept.base === want && (kept.head ?? kept.base) === head
     && base === want && n === 1 && (resumedBase !== null || existsSync(path.join(work, 'baseline-1.json')));
@@ -288,7 +296,7 @@ function reviewBase(c: Ctx, task: string, t: ExecTask, n: number, base: string, 
  * started on (briefOf's `head`) is what it was handed, so one back without a commit of its own only has its report.
  */
 function implementerBack(c: Ctx, task: string, t: ExecTask, told: boolean): void {
-  const brief = briefOf(readEvents(c.io.cwd), task);
+  const brief = briefOf(ledgerOf(c, task), task);
   const { n } = brief;
   const adopted = !brief.base && t.attempts > 0;
   const base = brief.base ?? (adopted ? taskBase(c.deps.gitAt(t.worktree), c.runBranch) : null);
@@ -349,7 +357,7 @@ function pendingVerify(c: Ctx, taskN: string, roundDir: string): Json | null {
   const m = readJson(path.join(roundDir, 'verify-pending.json'));
   if (!isObject(m) || typeof m.at !== 'string') return null;
   const at = m.at;
-  const skipped = new Set(readEvents(c.io.cwd).filter(e => e.kind === 'verify-skip' && e.task === taskN && typeof e.ts === 'string' && e.ts >= at && typeof e.surface === 'string').map(e => String(e.surface)));
+  const skipped = new Set(ledgerOf(c, taskN).filter(e => e.kind === 'verify-skip' && isTask(e, taskN) && typeof e.ts === 'string' && e.ts >= at && typeof e.surface === 'string').map(e => String(e.surface)));
   const surfaces = (Array.isArray(m.surfaces) ? m.surfaces : []).filter((s): s is Json => isObject(s) && typeof s.name === 'string' && !skipped.has(s.name));
   if (!surfaces.length) return null;
   const { at: _at, task: _task, ...rest } = m;
@@ -377,7 +385,7 @@ function roundOf(c: Ctx, task: string, n: number, round: number): Round {
  * respawns that reviewer again. A round whose close asked the person (asked.json, I1) is closed again only with their answer.
  */
 function reviewersBack(c: Ctx, task: string, t: ExecTask, told: boolean): void {
-  const { n } = briefOf(readEvents(c.io.cwd), task);
+  const { n } = briefOf(ledgerOf(c, task), task);
   const round = latestRound(path.join(c.io.cwd, '.forge', 'work', task), n);
   if (!round) return;
   const r = roundOf(c, task, n, round);
@@ -567,7 +575,7 @@ function integratedAgain(c: Ctx, task: string, t: ExecTask): void {
 
 /** state/T.forge (C7, v1): the task's path, stage, agent, last validators, last verdict and its review count. */
 function forgeOf(events: LedgerEvent[], task: string, t: ExecTask): Json {
-  const mine = (x: LedgerEvent) => x.task === task || (typeof x.task === 'string' && x.task.startsWith(`${task}-`) && /^\d+$/.test(x.task.slice(task.length + 1)));
+  const mine = ofTask(task);
   const tri = events.filter(x => x.kind === 'triage' && mine(x) && typeof x.path === 'string').at(-1);
   const p = typeof tri?.path === 'string' ? tri.path : 'large';
   const val = events.filter(x => x.kind === 'validate' && mine(x) && x.baseline !== true && Array.isArray(x.results)).at(-1);
@@ -595,7 +603,7 @@ function publishOf(io: Io, e: ExecutionState, started: Set<string>, versions: Ve
   const tasks = Object.entries(e.tasks).filter(([, t]) => t.executor === 'subagents' && (t.status === 'running' || t.status === 'accepted')).map(([task, t]) => ({
     task, version: versions.state[task] ?? null, ...(started.has(task) ? { claim: true } : {}),
     exec: { runId: e.runId, mode: 'subagents', by: e.coordinator, agent: t.agent, stage: t.stage, round: t.round, since: t.stageSince, leaseUntil: lease(task) },
-    forge: forgeOf(events, task, t),
+    forge: forgeOf(eventsOf(events, { project: e.project, task }), task, t),
   }));
   // The coordinator's own lease is never shorter than one it set for an agent that is still running.
   const leaseUntil = tasks.reduce((max, x) => (x.exec.leaseUntil > max ? x.exec.leaseUntil : max), own);
@@ -683,7 +691,7 @@ export function swarmStep(rest: string[], io: Io, deps: StepDeps): Result {
   if ('busy' in lock) return { code: 0, stdout: JSON.stringify({ busy: lock.busy }, null, 2) + '\n', stderr: '' };
   try {
     const c: Ctx = {
-      io, deps, planArg, db, runBranch: e0.branch, locale, rulings, actions: [], after: [],
+      io, deps, planArg, db, runBranch: e0.branch, project: e0.project, locale, rulings, actions: [], after: [],
       iso: () => io.now().toISOString(), agentLease: () => new Date(io.now().getTime() + AGENT_LEASE_MINUTES * 60000).toISOString(),
     };
     return stepOnce(c, e0, returned, versions, flag('agents'), now);

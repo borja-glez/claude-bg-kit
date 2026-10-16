@@ -8,6 +8,7 @@ import { detectValidators, selectValidators, runValidators, markPreexisting, blo
 import { PATH_ORDER, zonesFromPaths, type PathName, type ReviewRole } from '../triage.js';
 import { parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, repoRelative, type Finding, type Review, type ReviewerName, type FailingValidator, type AskFinding } from '../verdict.js';
 import { roundDecision } from '../round.js';
+import { eventsOf, isTask, ofTask, resolveProject } from '../task-ref.js';
 import { parseIndex, assignIds, answeredBy, idsOf, recordRound, carriedResiduals, carriedOutOfModel, openIds, closedFor, previousFindings, asPrevious, historyLine, renderHandover, expressCandidate, type FindingsIndex } from '../findings-index.js';
 import { reviewsOf } from '../loop.js';
 import { takeBrief } from '../shadow.js';
@@ -39,10 +40,6 @@ const slash = (p: string) => path.resolve(p).split(path.sep).join('/');
 /** A commit id as written: what may stand unquoted in a printed command or be handed to git as BASE. */
 const SHA = /^[0-9a-f]{7,64}$/i;
 
-/** The id `<T>` of a task `<T>-<n>` and the events that belong to it (`<T>` itself or any `<T>-<k>`). */
-const ofTask = (base: string) => (e: LedgerEvent) =>
-  typeof e.task === 'string' && (e.task === base || (e.task.startsWith(`${base}-`) && /^\d+$/.test(e.task.slice(base.length + 1))));
-
 /** The `review` the task's last triage logged, its reviewers resolved to agents with the profile. Null when none. */
 export function triageReview(events: LedgerEvent[], base: string, profile: Profile): TriageReview | null {
   const last = events.filter(e => e.kind === 'triage' && ofTask(base)(e) && e.review && typeof e.review === 'object').at(-1);
@@ -62,7 +59,7 @@ export function triageReview(events: LedgerEvent[], base: string, profile: Profi
 
 /** The round a brief's review is in: 1 + the review dirs that already have a verdict (a re-run verdict counts once). */
 export function reviewRoundOf(events: LedgerEvent[], task: string): number {
-  const dirs = new Set(events.filter(e => e.kind === 'verdict' && e.task === task).map((e, i) => (typeof e.dir === 'string' ? e.dir : `#${i}`)));
+  const dirs = new Set(events.filter(e => e.kind === 'verdict' && isTask(e, task)).map((e, i) => (typeof e.dir === 'string' ? e.dir : `#${i}`)));
   return dirs.size + 1;
 }
 
@@ -135,12 +132,16 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   try { baseline = JSON.parse(readFileSync(path.resolve(deps.cwd, baselineArg), 'utf8')); } catch { throw new UsageError('review-prep: --baseline must be the JSON written by forge validate'); }
 
   const config = loadConfig(deps.repoDir);
-  const events = readEvents(deps.cwd);
+  // D-08: only this task's events of its project (ids repeat between plans): --project, else the folder --dir names,
+  // else the ledger's attribution.
+  const all = readEvents(deps.cwd);
+  const project = resolveProject({ flag: flag('project'), dir: dirArg, task: id, events: all });
+  const events = eventsOf(all, { project, task: id });
   // A Medium brief run as a loose task has the id `<parent>-<k>` and no triage of its own: it reviews with the
   // parent's (that id exactly, never a sibling brief's).
   const parent = /^(.+)-\d+$/.exec(id)?.[1];
   const review = triageReview(events, id, config.profile)
-    ?? (parent ? triageReview(events.filter(e => e.task === parent), parent, config.profile) : null);
+    ?? (parent ? triageReview(eventsOf(all, { project, task: parent }).filter(e => isTask(e, parent)), parent, config.profile) : null);
   if (!review) throw new UsageError(`review-prep: no triage of ${id}${parent ? ` nor of ${parent}` : ''} logged a review: run FORGE triage --task ${id} first`);
   const head = (deps.git(['rev-parse', 'HEAD']) ?? '').trim();
   if (!head) throw new UsageError('review-prep: cannot read HEAD');
@@ -202,13 +203,13 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
     writeFileSync(fixFile, fix.patch);
   }
   // After a redo the work was started again: every reviewer reviews it in full, nothing is carried.
-  const redo = round >= 2 && events.filter(e => e.kind === 'verdict' && e.task === task).at(-1)?.action === 'redo';
+  const redo = round >= 2 && events.filter(e => e.kind === 'verdict' && isTask(e, task)).at(-1)?.action === 'redo';
 
   // Measure 7 (§4.9): an express review when the previous review asked for a fix with green validators and left one or
   // two important findings with file and line, none from security, a regression or out of the model; never after a redo,
   // on the last review, or with review.express: false. It does not validate here (expressPrep). The validate command it
   // prints carries BASE unquoted, so only a commit id qualifies.
-  const lastVerdict = events.filter(e => e.kind === 'verdict' && e.task === task).at(-1);
+  const lastVerdict = events.filter(e => e.kind === 'verdict' && isTask(e, task)).at(-1);
   const prevSent = readJson(path.join(dir, `findings-${n}-${round - 1}.json`)) as { validators?: unknown } | undefined;
   if (round >= 2 && !redo && round < reviewsCount.max && (pathName === 'medium' || pathName === 'large') && config.review.express
     && lastVerdict?.action === 'fix' && Array.isArray(prevSent?.validators) && prevSent!.validators.length === 0 && expressCandidate(index, round)
@@ -239,8 +240,8 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   // at most MAX_VALIDATOR_ROUNDS per review (counted since the brief's last verdict). It writes no verdict, so it never
   // counts against the cap; after them, the review is planned as before and the verdict is a fix by validators.
   if (!ok) {
-    const sinceVerdict = events.slice(events.map(e => e.kind === 'verdict' && e.task === task).lastIndexOf(true) + 1);
-    const k = sinceVerdict.filter(e => e.kind === 'phase' && e.task === id && e.phase === 'fix' && e.validators === true && e.brief === Number(n)).length;
+    const sinceVerdict = events.slice(events.map(e => e.kind === 'verdict' && isTask(e, task)).lastIndexOf(true) + 1);
+    const k = sinceVerdict.filter(e => e.kind === 'phase' && isTask(e, id) && e.phase === 'fix' && e.validators === true && e.brief === Number(n)).length;
     if (k < MAX_VALIDATOR_ROUNDS) {
       const blockers = results.filter(blocking);
       const roundFile = path.join(dir, `validators-fix-${n}-${round}-${k + 1}.json`);
@@ -570,7 +571,11 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   // open, closed or paired with), while it still counts as review n and the last one still accepts at the cap. The
   // previous verdict is the brief's last one logged on another review dir (a re-close of this one does not count).
   const roundRel = rel(deps.cwd, roundDir);
-  const fresh = round >= 2 && readEvents(deps.cwd).filter(e => e.kind === 'verdict' && e.task === task && e.dir !== roundRel).at(-1)?.action === 'redo';
+  // D-08: only this task's events of its project (ids repeat between plans): --project, else the folder --dir names,
+  // else the ledger's attribution.
+  const before = readEvents(deps.cwd);
+  const project = resolveProject({ flag: flag('project'), dir: dirArg, task: id, events: before });
+  const fresh = round >= 2 && eventsOf(before, { project, task: id }).filter(e => e.kind === 'verdict' && isTask(e, task) && e.dir !== roundRel).at(-1)?.action === 'redo';
   const withIds = assignIds(index, round, reviews, { express, fresh });
   const open = fresh ? {} : openIds(index, round);
   // Rulings on findings stay for the brief: the ids given now are kept in this review's overrides.json, and the overrides
@@ -641,8 +646,11 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
       passed: verifyFile ? verifyFile.checks.filter(c => c.ok).length : 0, total: verifyFile ? verifyFile.checks.length : 0,
       evidence, ...(verifyFile?.reason ? { reason: verifyFile.reason } : {}) });
   }
-  const events = readEvents(deps.cwd);
-  const d = roundDecision(events, task, p, config.profile);
+  // The whole ledger goes to roundDecision, which filters by the pair itself: the events of a loose brief `<parent>-<k>`
+  // are attributed by its parent's triage, which `events` (those of `<id>` and its briefs) does not hold.
+  const all = readEvents(deps.cwd);
+  const events = eventsOf(all, { project, task: id });
+  const d = roundDecision(all, task, p, config.profile, project);
   appendEvent(deps.cwd, { ts, kind: 'round', task, ...d, reviews: reviewsCount });
   // C4: a verdict that sends the brief back to an implementer opens its fix stage.
   if (result.action !== 'accept' && (d.next === 'resume' || d.next === 'fresh-stronger' || d.next === 'redo')) {
@@ -653,7 +661,7 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
     const ruling = { task, round, dir: rel(deps.cwd, roundDir),
       ...(result.minor.length ? { minor: result.minor } : {}), ...(result.deferred.length ? { deferred: result.deferred } : {}) };
     const same = JSON.stringify(ruling);
-    const logged = events.some(e => e.kind === 'ruling' && e.task === task && e.dir === ruling.dir
+    const logged = events.some(e => e.kind === 'ruling' && isTask(e, task) && e.dir === ruling.dir
       && JSON.stringify({ task: e.task, round: e.round, dir: e.dir, ...(e.minor ? { minor: e.minor } : {}), ...(e.deferred ? { deferred: e.deferred } : {}) }) === same);
     if (!logged) appendEvent(deps.cwd, { ts, kind: 'ruling', ...ruling });
   }

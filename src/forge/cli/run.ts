@@ -31,6 +31,7 @@ import { reviewCommand } from './review.js';
 import { swarmStep } from './step.js';
 import { runWithCache, cacheGit, checkoutPrefix } from '../validate-cache.js';
 import { roundDecision } from '../round.js';
+import { eventsOf, isTask, projectOf, resolveProject } from '../task-ref.js';
 import { computeStats, renderStats, type PlanStates } from '../stats.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, runOptions, validateEvent, planAffected, type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { checkTools, mcpInventory, toolGaps } from '../tools.js';
@@ -684,15 +685,16 @@ function triageCore(io: Io, args: string[]): TriageCore {
     diff = { base, stat, path: d.path };
   }
   // The ratchet: a repeated triage of the same task never lowers the path it already reached. With --base only the
-  // earlier --base sizings count, and a plan task only counts the triages of its own plan's project (ids repeat;
-  // `log --kind triage` stamps a raise with it).
+  // earlier --base sizings count, and a task only counts the triages of its own project (D-08: ids repeat between plans;
+  // `log --kind triage` stamps a raise with it; a loose task's are those of no project).
   // A raise the session logged with a `why` explains the path better than the CLI reasons: the announcement uses it.
   const project = plannedDoc ? plannedDoc.plan.project : null;
   let raiseWhy: string | null = null;
-  if (flag('task')) {
+  const id = flag('task');
+  if (id) {
     const rank = (p: unknown) => PATH_ORDER.indexOf(p as PathName);
-    const logged = readEvents(io.cwd).filter(e => e.kind === 'triage' && e.task === flag('task') && rank(e.path) >= 0
-      && (base === null || e.diff !== undefined) && (project === null || e.project === project));
+    const logged = eventsOf(readEvents(io.cwd), { project, task: id }).filter(e => e.kind === 'triage' && isTask(e, id) && rank(e.path) >= 0
+      && (base === null || e.diff !== undefined));
     const prior = logged.reduce<PathName | null>((max, e) => (max === null || rank(e.path) > rank(max) ? e.path as PathName : max), null);
     if (prior && rank(prior) > rank(result.path)) {
       result.path = prior;
@@ -859,7 +861,7 @@ function runCommand(argv: string[], io: Io): Result {
         // A plan task's triage only counts the events of its plan's project (ids repeat between plans): a raise without
         // one takes the active plan execution's project when the task is one of its tasks (started, or in its plan
         // docs/waypoint/<project>/plan.yaml, an unreadable plan counting as none), else the project of the task's
-        // latest triage that has one, else none (a task outside any plan).
+        // latest triage, none when that triage was of a loose task (D-08).
         if (kind === 'triage' && task && data.project === undefined) {
           const main = mainCheckout(io.cwd);
           const exec = readExecution(main);
@@ -868,7 +870,7 @@ function runCommand(argv: string[], io: Io): Result {
             try { return parsePlan(readFileSync(path.join(main, 'docs', 'waypoint', project, 'plan.yaml'), 'utf8')).tasks.some(t => t.id === task); } catch { return false; }
           };
           const project = exec?.active && exec.kind === 'plan' && (Object.hasOwn(exec.tasks, task) || inPlan(exec.project)) ? exec.project
-            : readEvents(io.cwd).filter(e => e.kind === 'triage' && e.task === task && typeof e.project === 'string' && e.project).at(-1)?.project;
+            : projectOf(readEvents(io.cwd), task);
           if (project) data = { ...data, project };
         }
         appendEvent(io.cwd, { ...data, ts: ts(), kind: kind as LedgerKind, ...(task ? { task } : {}) });
@@ -1022,7 +1024,10 @@ function runCommand(argv: string[], io: Io): Result {
           failing = arr.filter(r => r && typeof r === 'object' && blocking(r)).map(r => ({ validator: String(r.validator ?? ''), failures: Array.isArray(r.failures) ? r.failures.map(String) : [] }));
           preexisting = arr.filter(r => r && typeof r === 'object' && r.ok !== true && r.preexisting === true).map(r => String(r.validator ?? ''));
         } else {
-          const lastValidate = [...readEvents(io.cwd)].reverse().find(e => e.kind === 'validate' && e.task === task && e.baseline !== true);
+          // D-08: the last validation of this task of its project (--project, the folder --dir names, or the ledger's).
+          const ledger = readEvents(io.cwd);
+          const mine = eventsOf(ledger, { project: resolveProject({ flag: flag('project'), dir: dirArg, task, events: ledger }), task });
+          const lastValidate = [...mine].reverse().find(e => e.kind === 'validate' && isTask(e, task) && e.baseline !== true);
           recorded = lastValidate !== undefined;
           validatorsOk = lastValidate?.ok === true;
           const rs = Array.isArray(lastValidate?.results) ? lastValidate!.results as { validator?: unknown; ok?: unknown; failures?: unknown; preexisting?: unknown }[] : [];
@@ -1090,7 +1095,9 @@ function runCommand(argv: string[], io: Io): Result {
         const relDir = path.relative(io.cwd, dir).split(path.sep).join('/');
         const evRel = relDir.replace(/reviews-(\d+-\d+)$/, 'evidence/$1');
         const evField = evRel !== relDir ? evRel : undefined;
-        const last = readEvents(io.cwd).filter(e => e.kind === 'verify' && e.task === task && typeof e.result === 'string').at(-1);
+        const ledger = readEvents(io.cwd);
+        const last = eventsOf(ledger, { project: resolveProject({ flag: flag('project'), dir: dirArg, task, events: ledger }), task })
+          .filter(e => e.kind === 'verify' && isTask(e, task) && typeof e.result === 'string').at(-1);
         if (!last || last.result !== v.result || last.passed !== passed || last.total !== total || last.evidence !== evField) logVerifyResult(io.cwd, ts(), task, dir, v);
         // 4. Where the evidence goes, read now (the person may have changed it).
         let mode: 'upload' | 'local' = 'upload';
@@ -1129,7 +1136,8 @@ function runCommand(argv: string[], io: Io): Result {
         const task = flag('task');
         const p = flag('path');
         if (!task || (p !== 'medium' && p !== 'large')) throw new UsageError('round: --task and --path medium|large are required');
-        const d = roundDecision(readEvents(io.cwd), task, p, loadConfig(repoDir).profile);
+        const ledger = readEvents(io.cwd);
+        const d = roundDecision(ledger, task, p, loadConfig(repoDir).profile, resolveProject({ flag: flag('project'), task, events: ledger }));
         appendEvent(io.cwd, { ts: ts(), kind: 'round', task, ...d });
         return json(d);
       }
@@ -1853,7 +1861,8 @@ function runCommand(argv: string[], io: Io): Result {
       case 'last': {
         const task = flag('task');
         if (!task) throw new UsageError('last: --task is required');
-        const events = readEvents(io.cwd).filter(e => e.task === task);
+        const ledger = readEvents(io.cwd);
+        const events = eventsOf(ledger, { project: resolveProject({ flag: flag('project'), task, events: ledger }), task }).filter(e => isTask(e, task));
         const lastOf = (kind: LedgerKind) => [...events].reverse().find(e => e.kind === kind);
         return json({
           task,
