@@ -1022,7 +1022,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       const plan = !flag('plan') && has('tasks') ? planOfLoose(loadTasksArg(io, flag('tasks'), 'propose')) : loadPlanArg(io, flag('plan'), 'propose');
       const locale = localeArg(rest, 'propose');
       const p = widthProfile(plan);
-      const width = p.profile.reduce((a, b) => Math.max(a, b), 0);
+      const width = widthOf(plan);
       const config = loadConfig(io.cwd);
       const configured = config.swarm.mode ?? null;
       const parallel = width < 2 ? 1 : Math.min(config.swarm.parallel, width);

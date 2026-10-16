@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { schedule, widthOf, widthProfile, relaunchOrBlock, STEP_WAIT_SECONDS, NUDGE_MINUTES, RELAUNCH_CAP, type ScheduleInput } from '../src/forge/schedule.js';
+import { proposeSay } from '../src/forge/swarm.js';
 import type { ExecutionState } from '../src/lib/execution-state.js';
 import type { PlanView, PlanTask, States } from '../src/lib/types.js';
 
@@ -111,6 +112,14 @@ describe('schedule', () => {
     expect(two.chain).toEqual({ length: 4, tasks: ['A1', 'A2', 'A3', 'A4'] });
     expect(widthProfile(plan([])).profile).toEqual([]);
     expect(widthOf(plan([]))).toBe(0);
+  });
+  it('proposeSay: singular for one task and one wave, only the count for an empty plan', () => {
+    const one = widthProfile(plan([task('T1')]));
+    expect(proposeSay(false, 1, one)).toBe('1 task in 1 wave: 1. Longest chain: T1 (1).');
+    expect(proposeSay(true, 1, one)).toBe('1 tarea en 1 tanda: 1. Cadena más larga: T1 (1).');
+    const none = widthProfile(plan([]));
+    expect(proposeSay(false, 0, none)).toBe('0 tasks.');
+    expect(proposeSay(true, 0, none)).toBe('0 tareas.');
   });
 
   const sess = (id: string, status: 'running' | 'accepted' = 'running', over: object = {}) => ({

@@ -114,7 +114,13 @@ export function proposeSay(es: boolean, tasks: number, p: Pick<WidthProfile, 'pr
   const waves = p.profile.join('·');
   const chain = `${p.chain.tasks.join('→')} (${p.chain.length})`;
   const zones = p.serializing.map(z => `${z.zone} (${z.tasks.length} ${es ? 'tareas' : 'tasks'})`).join(', ');
-  return es
-    ? `${tasks} tareas en ${p.profile.length} tandas: ${waves}. Cadena más larga: ${chain}.${zones ? ` Zonas que serializan: ${zones}.` : ''}`
-    : `${tasks} tasks in ${p.profile.length} waves: ${waves}. Longest chain: ${chain}.${zones ? ` Zones that serialize: ${zones}.` : ''}`;
+  const w = p.profile.length;
+  if (es) {
+    const count = `${tasks} ${tasks === 1 ? 'tarea' : 'tareas'}`;
+    if (!tasks) return `${count}.`;
+    return `${count} en ${w} ${w === 1 ? 'tanda' : 'tandas'}: ${waves}. Cadena más larga: ${chain}.${zones ? ` Zonas que serializan: ${zones}.` : ''}`;
+  }
+  const count = `${tasks} ${tasks === 1 ? 'task' : 'tasks'}`;
+  if (!tasks) return `${count}.`;
+  return `${count} in ${w} ${w === 1 ? 'wave' : 'waves'}: ${waves}. Longest chain: ${chain}.${zones ? ` Zones that serialize: ${zones}.` : ''}`;
 }
