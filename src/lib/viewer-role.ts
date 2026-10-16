@@ -1,5 +1,7 @@
 // C3: the role of the session that looks at a checkout's roadmap and its forge execution: owner, other-live, previous
 // or none. Pure, without Node imports: waypoint's hooks, the band (wave 2b), forge's live hook and lens (wave 3) share it.
+// It judges a binding by its lease alone (bindingLive). The hooks pass bindings already settled by their pid
+// (bound-fs.ts settleBinding, Node only); the band passes them raw (M6).
 import type { BoundDoc } from './bound.js';
 import type { ExecutionState } from './execution-state.js';
 import type { MemberDoc } from './member-doc.js';

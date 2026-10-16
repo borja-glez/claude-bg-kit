@@ -885,6 +885,19 @@ describe('classic hooks', () => {
       expect(context(hook('session-start', { session_id: 'A', source: 'compact' }))).toContain('Current task: none');
       expect(bound().endedAt).toBeNull();
     });
+    it('an owner bound for the infinite run, or for a forge run with no task open, hears one fact, not the work skill (M8)', () => {
+      setup();
+      for (const via of ['forge-infinite', 'forge-run']) {
+        bindAs('A', { via });
+        for (const source of ['compact', 'resume']) {
+          const ctx = context(hook('session-start', { session_id: 'A', source }));
+          expect(ctx, `${via} ${source}`).toContain('seat backend');
+          for (const w of NOT_OWNER) expect(ctx, `${via} ${source}`).not.toContain(w);
+        }
+      }
+      ownTask('T002');
+      expect(context(hook('session-start', { session_id: 'A', source: 'compact' }))).toContain('Current task: T002');
+    });
     it('a released binding stays released through a compact or a resume: neither reopened nor renewed, and the seat stays free', () => {
       setup();
       for (const source of ['compact', 'resume']) {
@@ -1180,6 +1193,11 @@ describe('classic hooks', () => {
       expect(JSON.parse(hook('stop', { session_id: 'A' }).stdout).reason).toContain('2 commit(s)');
       expect(hook('stop', { session_id: 'A', stop_hook_active: true }).stdout.trim()).toBe('');
       expect(hook('stop', 'not json')).toEqual({ code: 0, stdout: '', stderr: '' });
+    });
+    it('counts a commit once even when parallel hooks wrote its line twice (M3)', () => {
+      setup(); bindAs('A');
+      writeFileSync(pending(), '{"ts":"x","task":"T002","command":"git commit","sha":"a"}\n{"ts":"x","task":"T002","command":"git commit","sha":"a"}\n');
+      expect(JSON.parse(hook('stop', { session_id: 'A' }).stdout).reason).toContain('waypoint: 1 commit(s)');
     });
     it('reminds the owner of queued roadmap updates alone', () => {
       setup(); bindAs('A');

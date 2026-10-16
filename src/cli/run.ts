@@ -455,6 +455,10 @@ export function run(argv: string[], io: Io): Result {
         // Two binds on one seat at once: each renames its own file in; the one that reads another's back lost.
         const back = readBinding(seatDir, sid, t);
         if (!back || back.claude !== claude) return out(3, back ? held(back) : { held: null, options, secondSeat: null });
+        // M1: one conversation, one seat of the project: its other live bindings end as released (never reopened).
+        for (const s of readSeats(wp, t)) {
+          if (s.sid !== sid && s.bound?.claude === claude && s.bound.endedAt === null) writeBinding(boundFile(s.dir), { ...s.bound, endedAt: iso, endReason: 'released' });
+        }
         // The seat's session.json: created when missing, never changing a field it already has (B-12).
         const sessionFile = path.join(seatDir, 'session.json');
         let session: Record<string, unknown> = {};

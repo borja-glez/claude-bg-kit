@@ -2,6 +2,9 @@
 // `.waypoint/<p>/seats/<sid>/` an extra one (main-2…); each holds its session.json, bound.json, pending-commits.jsonl,
 // queue.jsonl, stop-ack, seen.json and last-head.json. Node only: waypoint's CLI and hooks use it, and the band reads
 // the same files through $.fs (wave 2b).
+// M6: the pid rule (pidAlive, and through it boundLive, settleBinding, leftSeatOf and secondSeatOf) is Node-only. The
+// band reads the raw bindings and cannot apply it: a binding whose process died stays live there until its lease ends
+// (5 minutes), while the hooks, which settle what they read, already see it ended.
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';

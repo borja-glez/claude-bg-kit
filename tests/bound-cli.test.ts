@@ -127,6 +127,23 @@ describe('waypoint bind (A-01, B-04, K5-04)', () => {
     leftOn('main-3', 'X', 5);
     expect(outOf(bind('C', '--resume'))).toMatchObject({ took: 'new', sid: 'main', seatDir: '.waypoint/demo-shop' });
   });
+  it("a bind ends this conversation's other live bindings in the project: one conversation, one seat (M1)", () => {
+    bind('A');
+    bind('B', '--seat', 'main-3');
+    expect(outOf(bind('A', '--seat', 'main-2'))).toMatchObject({ took: 'new', sid: 'main-2' });
+    expect(json(wp('bound.json'))).toMatchObject({ claude: 'A', endedAt: at(0), endReason: 'released' });
+    expect(json(wp('seats', 'main-2', 'bound.json'))).toMatchObject({ claude: 'A', endedAt: null });
+    expect(json(wp('seats', 'main-3', 'bound.json'))).toMatchObject({ claude: 'B', endedAt: null });
+  });
+  it('the holder binding again with --seat <its sid> (work §1.1) is took: same and renews its binding (M2)', () => {
+    bind('A');
+    bind('B', '--second-seat');
+    io = { ...io, now: () => new Date(NOW + 3 * 60000) };
+    expect(outOf(bind('A', '--seat', 'main'))).toMatchObject({ took: 'same', sid: 'main', seatDir: '.waypoint/demo-shop' });
+    expect(json(wp('bound.json'))).toMatchObject({ since: at(0), seenAt: at(3) });
+    expect(outOf(bind('B', '--seat', 'main-2'))).toMatchObject({ took: 'same', sid: 'main-2', seatDir: '.waypoint/demo-shop/seats/main-2' });
+    expect(bind('C', '--seat', 'main').code).toBe(3);
+  });
   it('a lapsed lease without a task binds at once', () => {
     holder({ seenAt: at(-6) });
     expect(outOf(bind('B'))).toMatchObject({ took: 'previous', previous: { claude: 'A', task: null } });

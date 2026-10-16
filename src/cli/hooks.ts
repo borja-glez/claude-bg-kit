@@ -17,7 +17,7 @@ import { forgeRoleOf, MAX_MEMBER_FILES } from '../lib/forge-activity.js';
 import { normalizeMember, type MemberDoc } from '../lib/member-doc.js';
 import { endReasonOf, parseBound, type BoundDoc } from '../lib/bound.js';
 import { bindingLive, describeViewer, type Viewer } from '../lib/viewer-role.js';
-import { boundFile, headOf, openTasksOf, pidFromEnv, readLastHead, readSeats, recordBase, settleBinding, writeBinding, writeLastHead, type Seat } from '../lib/bound-fs.js';
+import { boundFile, headOf, openTasksOf, pidFromEnv, readBinding, readLastHead, readSeats, recordBase, settleBinding, writeBinding, writeLastHead, type Seat } from '../lib/bound-fs.js';
 import { pickProject, type ProjectEntry } from '../mod/model.js';
 import type { MessageDoc, Plan } from '../lib/types.js';
 import type { Io } from './run.js';
@@ -191,7 +191,8 @@ function whenText(b: BoundDoc, now: number): string {
   return b.endedAt !== null && b.endReason !== null ? `${ENDED[b.endReason]} ${ago}` : `last seen ${ago}`;
 }
 
-/** The owner's context (B-01): the one of before, with its seat's task; a design's owner hears of its draft only. */
+/** The owner's context (B-01): the one of before, with its seat's task; a design's owner hears of its draft only, and
+ *  one bound for a forge run with nothing open hears one fact (M8). */
 function ownerText(ctx: Ctx, own: { seat: Seat; bound: BoundDoc }, plan: Plan | null, source: Source, input: HookInput): string | null {
   if (own.bound.via === 'design') {
     const v = draftVersion(ctx.docDir);
@@ -199,6 +200,10 @@ function ownerText(ctx: Ctx, own: { seat: Seat; bound: BoundDoc }, plan: Plan | 
   }
   if (!plan) return null;
   const sid = own.bound.sid;
+  // M8: bound for forge's infinite run, or for a forge run with no task open: one fact, not the work skill.
+  if (own.bound.via === 'forge-infinite' || (own.bound.via === 'forge-run' && !ctx.viewer.task)) {
+    return `waypoint: this conversation holds seat ${sid} of project ${ctx.project} (${plan.artifacts.roadmap ?? 'not published'}) for its forge ${own.bound.via === 'forge-infinite' ? 'infinite run' : 'run'}.`;
+  }
   let track = '-';
   try {
     const s = JSON.parse(read(path.join(own.seat.dir, 'session.json')) ?? '{}') as { track?: unknown } | null;
@@ -265,7 +270,10 @@ function sessionEnd(root: string, sid: string, reason: unknown, now: Date): stri
   const at = now.toISOString();
   for (const n of projectDirs(root)) {
     for (const s of readSeats(path.join(root, '.waypoint', n), now.getTime())) {
-      if (s.bound && s.bound.claude === sid && s.bound.endedAt === null) writeBinding(boundFile(s.dir), { ...s.bound, endedAt: at, endReason: endReasonOf(reason) });
+      if (!s.bound || s.bound.claude !== sid || s.bound.endedAt !== null) continue;
+      // M7: read again just before the write, so a takeover that landed since the listing is never undone.
+      const cur = readBinding(s.dir, s.sid, now.getTime());
+      if (cur && cur.claude === sid && cur.endedAt === null) writeBinding(boundFile(s.dir), { ...cur, endedAt: at, endReason: endReasonOf(reason) });
     }
   }
   return '';
@@ -373,7 +381,9 @@ function stop(io: Io, input: HookInput): string {
   if ((read(ackFile) ?? '').trim() === hash) return '';
   writeFileSync(ackFile, `${hash}\n`);
   const rel = path.relative(ctx.root, own.seat.dir).split(path.sep).join('/');
-  return JSON.stringify({ decision: 'block', reason: `waypoint: ${commits.length} commit(s) / ${queued.length} queued roadmap update(s) are not in the live roadmap yet. Record them (work skill: a \`commit\` event for intermediate commits, or the task's completion), or flush the queue, then remove those lines from ${rel}/pending-commits.jsonl. You can also stop now; this reminder shows once per change.${replyIn(planLocale(ctx.root, ctx.project))}` });
+  // M3: parallel hooks may append one sha twice; it is one commit.
+  const count = new Set(commits.map(l => field(l, 'sha') ?? l)).size;
+  return JSON.stringify({ decision: 'block', reason: `waypoint: ${count} commit(s) / ${queued.length} queued roadmap update(s) are not in the live roadmap yet. Record them (work skill: a \`commit\` event for intermediate commits, or the task's completion), or flush the queue, then remove those lines from ${rel}/pending-commits.jsonl. You can also stop now; this reminder shows once per change.${replyIn(planLocale(ctx.root, ctx.project))}` });
 }
 
 /** The classic hooks' entry: `waypoint hook session-start|session-end|post-commit|stop`, the input on stdin. */
