@@ -13,6 +13,11 @@ elsewhere and are reconstructed from their READMEs.
 
 ## waypoint
 
+### 0.20.2 — 2026-10-16
+
+#### Fixed
+- With forge 0.18's keys in `.forge/config.yaml` (`threatModel`, `review`), waypoint still reads the config (it bundles forge's schema): `evidence: local` keeps the roadmap free of uploaded screenshots.
+
 ### 0.20.1 — 2026-10-16
 
 #### Fixed
@@ -180,6 +185,26 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.18.0 — 2026-10-16
+
+#### Added
+- Stable finding ids: every critical and important finding of a brief keeps an id (`F1`, `F2`…) across its reviews, in `findings-index-<n>.json`; a delta reviewer gets its open findings with their ids and copies them.
+- `threatModel` in `.forge/config.yaml` (what it protects, who and what it trusts, what it does not, what is out of scope): `forge brief` and `prep` hand it to the brief and the security reviewer, which marks what is outside it `outOfModel` (minor). Without one, the person at the keyboard and the local machine are trusted and the inputs from elsewhere are not.
+- An express review: when a fix leaves one or two important findings with file and line, none from security, one correctness reviewer on Sonnet at medium checks them while the validators run in the background (`review.express: false` turns it off).
+- `review-close` writes `handover-<n>-<round>.md` for a new implementer (`fresh-stronger`, `redo`), prints `revert` for a redo and `ask` when security repeats a theme it already closed, and takes `--out-of-model`, `--defer` and `--locale`. `forge shadow collect` saves the shadow twins that come back after a review closed. `review.personDocs` lists the docs written for people.
+- `reviews: {n, max}` in the output of `review-prep` and `review-close` and in the `verdict` and `round` events.
+
+#### Changed
+- What blocks depends on the review: a critical always; an important in review 1, a previous one still open in review 2, and a regression the fix brought; from review 3 only criticals and regressions. Hardening of a class the same reviewer closed, an important finding only in the docs for people and what is still open at the last review stay as `residual` and are handed over in `deferred`; the last review accepts a fix with green validators and no critical.
+- `stalled` compares the blocking findings by id, not their text or the score; `redo` needs a failing reviewer that says the approach is wrong with a finding that blocks; a fail without a critical or important finding is `invalid` (the rubric) and runs again once.
+- Reviewers share a verdict rule and a confidence scale, have severities of their own and run at most one focused test file instead of repeating the validators. Implementers follow a «Fix round» section, write the failing test first only under `TDD: required`, and reply in two lines.
+- Shadow twins no longer hold a review: `review-close` lists the ones still out in `shadowPending`.
+- A brief gets up to 4 reviews on Medium and 5 on Large, and the skill and the README count reviews.
+- Requires waypoint ^0.20.2.
+
+#### Fixed
+- A redo no longer starts a new brief number: `review-close` prints the `revert` git arguments and the skill runs them as printed.
 
 ### 0.17.0 — 2026-10-16
 
