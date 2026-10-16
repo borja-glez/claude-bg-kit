@@ -7,6 +7,7 @@ import { readLocal, writeLocal, updateLocal, localFile, mainCheckout } from '../
 import { forgeDir } from '../src/forge/ledger.js';
 import { surfaceHash } from '../src/forge/surfaces.js';
 import { run, type Io } from '../src/forge/cli/run.js';
+import { samePath } from '../src/lib/worktree.js';
 
 let root: string;
 beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'forge-local-')); });
@@ -127,6 +128,23 @@ describe('local.yaml in a linked worktree', () => {
     expect(readLocal(main).surfaces).toEqual({ web: { state: 'denied', hash: null } });
     expect(path.resolve(mainCheckout(wt))).toBe(path.resolve(main));
     expect(mainCheckout(main)).toBe(main);
+  });
+  it('from a subdirectory, of the main checkout or of a linked worktree, is the main checkout (K2-01)', () => {
+    const main = path.join(root, 'main');
+    mkdirSync(path.join(main, 'src', 'deep'), { recursive: true });
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: main, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 'a@b.c');
+    git('config', 'user.name', 't');
+    writeFileSync(path.join(main, 'src', 'deep', 'a.txt'), 'a\n');
+    git('add', '.');
+    git('commit', '-qm', 'init');
+    const wt = path.join(root, 'wt');
+    git('worktree', 'add', '-q', wt, '-b', 'track');
+    for (const dir of [path.join(main, 'src'), path.join(main, 'src', 'deep'), path.join(wt, 'src', 'deep')]) expect(samePath(mainCheckout(dir), main), dir).toBe(true);
+    updateLocal(path.join(main, 'src'), s => ({ ...s, known: ['unit'] }));
+    expect(existsSync(path.join(main, 'src', '.forge'))).toBe(false);
+    expect(readLocal(main).known).toEqual(['unit']);
   });
 });
 

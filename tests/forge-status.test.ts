@@ -272,4 +272,18 @@ describe('deriveStatus: the phase stopped (K2-02)', () => {
     expect(deriveStatus(s, { ts: '2026-10-16T10:06:00.000Z', kind: 'phase', task: 'T1', phase: 'stopped' })!.doneAt).toBe('2026-10-16T10:05:00.000Z');
     expect(deriveStatus(s, { ts: '2026-10-16T10:07:00.000Z', kind: 'phase', task: 'T1', phase: 'implement' })).toMatchObject({ phase: 'implement', doneAt: null });
   });
+  it('an agent after stopped moves the phase off stopped as after done: its last stage (or verify), the stages it ran kept', () => {
+    const stopped = [
+      { ts: '2026-10-16T10:00:00.000Z', kind: 'triage', task: 'T1', path: 'large', reasons: [] },
+      { ts: '2026-10-16T10:01:00.000Z', kind: 'phase', task: 'T1', phase: 'implement' },
+      { ts: '2026-10-16T10:03:00.000Z', kind: 'phase', task: 'T1', phase: 'review' },
+      { ts: '2026-10-16T10:05:00.000Z', kind: 'phase', task: 'T1', phase: 'stopped' },
+    ];
+    const before = apply(stopped)!;
+    const s = apply([...stopped, { ts: '2026-10-16T10:09:00.000Z', kind: 'agent', task: 'T1-1', agent: 'forge-impl' }])!;
+    expect(s).toMatchObject({ phase: 'review', agent: 'forge-impl', doneAt: null, stageSince: '2026-10-16T10:09:00.000Z' });
+    expect(s.stages).toEqual(before.stages);
+    expect(s.stages).not.toHaveProperty('stopped');
+    expect(apply([...stopped, { ts: '2026-10-16T10:09:00.000Z', kind: 'agent', task: 'T1', agent: 'forge-verify' }])!.phase).toBe('verify');
+  });
 });

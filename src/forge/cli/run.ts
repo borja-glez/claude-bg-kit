@@ -1595,6 +1595,12 @@ function runCommand(argv: string[], io: Io): Result {
         }, { now: io.now, sleep: io.sleep }) : null;
         let release: { task: string; write: { op: 'update'; collection: 'state'; doc_id: string; data: Record<string, unknown> } }[] = [];
         let members: { sessionId: string; name: string | null; role: string; task: string | null }[] = [];
+        // The Claude sessions of this run: the coordinator's (the execution's hook session), its members' and the
+        // infinite run's.
+        const own = new Set<string>();
+        const ofRun = after ?? readExecution(main);
+        if (ofRun?.hookSession) own.add(ofRun.hookSession);
+        if (current?.sessionId) own.add(current.sessionId);
         if (after) {
           for (const id of stopped) {
             let p: PublicTask | null = null;
@@ -1604,16 +1610,17 @@ function runCommand(argv: string[], io: Io): Result {
           }
           const listed = listMembers(main, after.runId);
           members = listed.map(m => ({ sessionId: m.sessionId, name: m.name, role: m.role, task: m.task }));
-          for (const m of listed) rmSync(memberFile(main, m.sessionId), { force: true });
+          for (const m of listed) { if (m.hookSession) own.add(m.hookSession); rmSync(memberFile(main, m.sessionId), { force: true }); }
           // A-23: the coordinator's own tasks go back to free on the roadmap; a member's task stays with its session, and a
           // loose task has no state/T. No if_version: the skill pins each write to the version it lists.
           const del = { __delete__: true };
           release = after.kind !== 'plan' ? [] : stopped.filter(id => after.tasks[id]?.executor === 'subagents')
             .map(id => ({ task: id, write: { op: 'update' as const, collection: 'state' as const, doc_id: id, data: { status: 'free', owner: del, claimedAt: del, startedAt: del, exec: del } } }));
         }
-        // forge stop kills nothing: a background job (a swarm step, an integrate, a validate…) still running finishes its
-        // current step. They are named so the person knows what is still at work.
-        const running = liveJobs(main, io.now()).map(j => ({ name: j.name, task: j.task }));
+        // forge stop kills nothing: a background job of this run (a swarm step, an integrate, a validate…: one of its
+        // sessions', or one with no session) still running finishes its current step. They are named so the person knows
+        // what is still at work; another conversation's jobs are not this run's.
+        const running = liveJobs(main, io.now()).filter(j => j.session === null || own.has(j.session)).map(j => ({ name: j.name, task: j.task }));
         return json({ main, run: { stopped: !!current?.active }, execution: after ? { runId: after.runId, stopped } : null, release, members, running });
       }
       case 'waypoint-cli': {

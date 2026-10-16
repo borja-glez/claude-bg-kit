@@ -657,3 +657,24 @@ describe('swarm step: one at a time (I4)', () => {
     expect(JSON.parse(readFileSync(path.join(root, '.forge', 'work', 'run', 'step.json'), 'utf8'))).toMatchObject({ busy: { pid: process.ppid } });
   });
 });
+
+describe('swarm step: the person presses Stop while a step starts a task (K2-02)', () => {
+  // The tick of the step started T1 and T2; /forge:stop runs (forge stop, then swarm close) just before the step's
+  // `swarm worktree T1`, or between it and `swarm task T1 --stage implement`. Whatever the step does after, it starts nothing.
+  it.each(['worktree', 'task'])('stopped and closed before the step\'s swarm %s T1: no task runs, no implementer, no claim', sub => {
+    let pressed = false;
+    const s = stepWith(argv => {
+      if (!pressed && isCmd(argv, 'swarm', sub, 'T1')) { pressed = true; out(run(['stop'], io)); out(run(['swarm', 'close'], io)); }
+      return false;
+    });
+    expect(pressed).toBe(true);
+    expect(s.actions).toContainEqual(expect.objectContaining({ type: 'error', task: 'T1', command: `swarm ${sub}`, code: 2 }));
+    expect(s.actions.filter(a => a.type === 'spawnImplementer')).toEqual([]);
+    expect(s.publish.tasks.filter(x => x.claim)).toEqual([]);
+    expect(s.running).toBe(0);
+    const e = readExecution(root)!;
+    expect(e).toMatchObject({ active: false, stopReason: 'stopped', closedBy: 'close' });
+    expect(Object.entries(e.tasks).filter(([, t]) => t.status === 'running')).toEqual([]);
+    expect(e.tasks.T1?.stage ?? 'brief').toBe('brief');
+  });
+});

@@ -167,7 +167,9 @@ function applyEvent(prev: ForgeStatus | null, event: unknown): ForgeStatus | nul
       if (!prev.doneAt) return { ...prev, agent };
       // An agent launched after the task closed (a verification, say) is work in progress again; the gap is no stage.
       // A done phase moves to the agent's stage, so nothing reads the task as done; the accept was the finished run's.
-      const phase = prev.phase.toLowerCase() !== 'done' ? prev.phase
+      // K2-02: a stopped phase, final like done, moves the same way: no stage reads as stopped while an agent works.
+      const closed = prev.phase.toLowerCase() === 'done' || prev.phase.toLowerCase() === 'stopped';
+      const phase = !closed ? prev.phase
         : isVerifyAgent(agent) ? 'verify' : isLight(prev.path) ? '' : lastStage(prev.stages);
       return { ...prev, agent, phase, verdict: null, doneAt: null, stageSince: ts };
     }

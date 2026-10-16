@@ -24,15 +24,17 @@ export interface LocalState {
   [key: string]: unknown;
 }
 
-/** The main checkout when `root` is a linked git worktree (its common dir is `<main>/.git`), else `root` itself,
- *  also when git is unavailable. One local.yaml serves every worktree of the repository. */
+/** The main checkout when `root` is a linked git worktree (its common dir is `<main>/.git`), else the top level of
+ *  `root`'s checkout (`root` itself at the top, and also when git is unavailable). K2-01: from a subdirectory it is
+ *  still the top level, so nothing of forge's lands in that subdirectory. One local.yaml serves every worktree. */
 export function mainCheckout(root: string): string {
   try {
-    const [gitDir, common] = execFileSync('git', ['rev-parse', '--git-dir', '--git-common-dir'], { cwd: root, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })
+    const [gitDir, common, top, cdup] = execFileSync('git', ['rev-parse', '--git-dir', '--git-common-dir', '--show-toplevel', '--show-cdup'], { cwd: root, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })
       .split(/\r?\n/).map(l => l.trim());
     if (!gitDir || !common) return root;
     const commonDir = path.resolve(root, common);
-    if (path.resolve(root, gitDir) === commonDir || path.basename(commonDir) !== '.git') return root;
+    // At the top (no way up) it is `root` as given: git prints the top level resolved (forward slashes, symlinks followed).
+    if (path.resolve(root, gitDir) === commonDir || path.basename(commonDir) !== '.git') return cdup && top ? path.resolve(top) : root;
     return path.dirname(commonDir);
   } catch { return root; }
 }

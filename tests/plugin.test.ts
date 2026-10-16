@@ -1303,7 +1303,7 @@ describe('plugin layout', () => {
   });
   it('forge stop prints what to release, the stop skill releases each task once, and step 7 also frees stopped tasks (K2-02)', () => {
     const stop = read('plugins/forge/skills/stop/SKILL.md');
-    for (const w of ['`release`', '`members`', '`write`', 'if_version', 'FORGE swarm close']) expect(stop).toContain(w);
+    for (const w of ['`release`', '`members`', '`write`', 'if_version', 'FORGE swarm close', '{closed, runId, stopReason, release, members, sessions}']) expect(stop).toContain(w);
     expect(stop).not.toContain('.forge/members/');
     const step7 = runRef('execution').split('\n').find(l => l.startsWith('7. **End.**'))!;
     expect(step7).toContain('`running` or `stopped` with `executor` `subagents`');

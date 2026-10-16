@@ -25,7 +25,7 @@ import type { SessionDoc, Stage, TaskState } from '../../lib/types.js';
 import { mainWorktreeFrom, samePath } from '../../lib/worktree.js';
 import { appendOnce, excludeWorktrees, gitToplevel, hasLine, infoFile } from '../../lib/git-info.js';
 import { mainCheckout, updateLocal } from '../local.js';
-import { readMember, writeMember, isMemberId } from '../members.js';
+import { readMember, writeMember, isMemberId, listMembers, memberFile } from '../members.js';
 import { parseLooseTasks, planOfLoose, statesOfLoose, writeLoose, readLoose, type LooseTask } from '../loose.js';
 import { startAnnounce, integratedSay, rejectedDepsSay, keptFilesSay, proposeSay, VENV_HINT } from '../swarm.js';
 
@@ -836,6 +836,13 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
     if (!e) throw new UsageError(`swarm ${sub}: no execution (forge swarm start)`);
     return e;
   };
+  // K2-02: an execution forge stop stopped, or one closed, stays as it is: a step or an agent still at work when the person
+  // stopped it records nothing more. One that is only inactive (stalled) still moves: swarm retry revives it.
+  const notEnded = (x: ExecutionState): ExecutionState => {
+    if (x.closedAt) throw new UsageError(`swarm ${sub}: the execution ${x.runId} is closed; nothing of it moves any more`);
+    if (!x.active && x.stopReason === 'stopped') throw new UsageError(`swarm ${sub}: the execution ${x.runId} is stopped (forge stop); nothing of it moves any more`);
+    return x;
+  };
   // I-15: every write of execution.json reads it again under its lock and changes only what this command changes.
   const lockDeps: LockDeps = { now: io.now, sleep: io.sleep };
   const update = (fn: (cur: ExecutionState | null) => ExecutionState | null) => updateExecution(io.cwd, fn, lockDeps);
@@ -1104,10 +1111,10 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
         return json(addTaskWorktree(deps, main, task, e.branch));
       }
       const task = taskArg();
-      const e = current();
+      const e = notEnded(current());
       const { worktree: dir, branch, base, setup } = addTaskWorktree(deps, io.cwd, task, e.branch);
       const t: ExecTask = e.tasks[task] ?? { status: 'running', stage: 'brief', round: 0, worktree: dir, branch, executor: e.mode, attempts: 0, agent: null, startedAt: iso, stageSince: iso, updatedAt: iso, detail: null };
-      update(cur => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...(cur.tasks[task] ?? t), worktree: dir, branch, updatedAt: iso } } });
+      update(cur => cur && { ...notEnded(cur), tasks: { ...cur.tasks, [task]: { ...(cur.tasks[task] ?? t), worktree: dir, branch, updatedAt: iso } } });
       return json({ worktree: dir, branch, base, setup });
     }
     case 'task': {
@@ -1121,6 +1128,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
         rmSync(executionTaskFile(io.cwd, task), { force: true });
         return ok();
       }
+      notEnded(e);
       const stageArg = flag('stage') as Stage | undefined;
       if (stageArg !== undefined && !STAGES.includes(stageArg)) throw new UsageError(`swarm task: --stage must be one of ${STAGES.join('|')}`);
       const statusArg = flag('status') as ExecTask['status'] | undefined;
@@ -1135,6 +1143,8 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       const build = (base: ExecTask): ExecTask => {
         const stage = stageArg ?? base.stage;
         const status = statusArg ?? base.status;
+        // K2-02: a task forge stop stopped never runs again in this execution (a new swarm start makes a new one).
+        if (base.status === 'stopped' && status !== 'stopped') throw new UsageError(`swarm task: ${task} is stopped (forge stop) and stays stopped`);
         if (!['running', 'accepted', 'blocked'].includes(status) && status !== base.status) throw new UsageError('swarm task: --status must be running, accepted or blocked');
         const stageSince = base.stage !== stage ? iso : base.stageSince;
         // Blocked now (it was not): the task's time ends here. Back to running: the next finish writes it again.
@@ -1148,6 +1158,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       let next = build(prev);
       update(cur => {
         if (!cur) return null;
+        notEnded(cur);
         base = cur.tasks[task] ?? prev;
         next = build(base);
         return { ...cur, tasks: { ...cur.tasks, [task]: next } };
@@ -1321,7 +1332,9 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
     }
     case 'close': {
       // C2: closes an ended execution of the main checkout, from any worktree. It never touches git, worktrees,
-      // branches, live/ or members/: /forge:stop releases the tasks it lists and publishes meta/run.
+      // branches or live/: /forge:stop releases the tasks it lists and publishes meta/run. K2-02: like forge stop, it
+      // removes the member files of the run and lists them in `sessions`, so /forge:stop messages a stalled run's members
+      // too; after forge stop there are none left.
       const main = mainCheckout(io.cwd);
       const e = readExecution(main);
       if (!e) throw new UsageError('swarm close: no execution');
@@ -1330,12 +1343,15 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       closeEnded(main, iso, 'close', lockDeps);
       // K2-02: forge stop leaves the tasks it stopped as stopped: they are released like running ones.
       const open = Object.entries(e.tasks).filter(([, t]) => t.status === 'running' || t.status === 'stopped');
+      const sessions = listMembers(main, e.runId).map(m => ({ sessionId: m.sessionId, name: m.name, role: m.role, task: m.task }));
+      for (const m of sessions) rmSync(memberFile(main, m.sessionId), { force: true });
       return json({
         closed: true, runId: e.runId, kind: e.kind, stopReason: e.stopReason, closedAt: iso,
         // The coordinator's own tasks go back to free on the roadmap; a member's task stays with its session.
         // A loose task has no state/T to free, so an ephemeral run releases nothing.
         release: e.kind !== 'plan' ? [] : open.filter(([, t]) => t.executor === 'subagents').map(([id]) => id),
         members: open.filter(([, t]) => t.executor !== 'subagents').map(([id]) => id),
+        sessions,
       });
     }
     case 'takeover': {

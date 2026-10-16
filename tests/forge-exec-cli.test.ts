@@ -74,7 +74,7 @@ describe('forge swarm (execution)', () => {
     expect(() => swarmCommand(['close'], io, deps)).toThrow(`swarm close: the execution ${e.runId} is active; stop it first (/forge:stop)`);
     saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stalled', stallReason: 'T2 is blocked' });
     expect(JSON.parse(swarmCommand(['close'], io, deps).stdout))
-      .toEqual({ closed: true, runId: e.runId, kind: 'plan', stopReason: 'stalled', closedAt: at, release: ['T1'], members: ['T2'] });
+      .toEqual({ closed: true, runId: e.runId, kind: 'plan', stopReason: 'stalled', closedAt: at, release: ['T1'], members: ['T2'], sessions: [] });
     expect(readExecution(root)).toMatchObject({ active: false, closedAt: at, closedBy: 'close' });
     expect(JSON.parse(swarmCommand(['close'], io, deps).stdout)).toEqual({ closed: 'already', runId: e.runId, closedAt: at, closedBy: 'close' });
     expect(calls).toEqual([]);
@@ -1296,7 +1296,7 @@ describe('forge swarm (execution)', () => {
 
 describe('forge stop stops the execution of the main checkout for real, from any worktree (K2-01, K2-02)', () => {
   const at = NOW.toISOString();
-  const task = (executor: 'subagents' | 'sessions', status: 'running' | 'integrated' = 'running') =>
+  const task = (executor: 'subagents' | 'sessions', status: 'running' | 'integrated' | 'stopped' = 'running') =>
     ({ status, stage: 'implement' as const, round: 1, worktree: '', branch: 'task/x', executor, attempts: 0, agent: 'forge-impl', startedAt: at, stageSince: at, updatedAt: at, detail: null });
   it('running tasks become stopped, their leases end, the run members go, and it prints what to release', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
@@ -1327,7 +1327,8 @@ describe('forge stop stops the execution of the main checkout for real, from any
     expect(existsSync(path.join(root, '.forge', 'stop'))).toBe(true);
     expect(existsSync(path.join(wt, '.forge'))).toBe(false);
     // swarm close afterwards lists the same tasks to release: stopping never empties it.
-    expect(out(run(['swarm', 'close'], io))).toMatchObject({ closed: true, release: ['T1'], members: ['T2'] });
+    // Its members were messaged from forge stop's list and their files are gone: swarm close names none again.
+    expect(out(run(['swarm', 'close'], io))).toMatchObject({ closed: true, release: ['T1'], members: ['T2'], sessions: [] });
     // Nothing active any more: a second stop releases nothing and logs no phase.
     const phases = readFileSync(path.join(root, '.forge', 'ledger.jsonl'), 'utf8').split('\n').filter(l => l.includes('"phase":"stopped"')).length;
     expect(out(run(['stop'], w))).toMatchObject({ run: { stopped: false }, execution: null, release: [], members: [] });
@@ -1348,12 +1349,78 @@ describe('forge stop stops the execution of the main checkout for real, from any
     expect(out(run(['stop'], w))).toMatchObject({ run: { stopped: true } });
     expect(JSON.parse(readFileSync(path.join(wt, '.forge', 'run.json'), 'utf8'))).toMatchObject({ active: false });
   });
-  it('names the background jobs still running: stop kills nothing, they finish their current step', () => {
+  it('names the background jobs of this run still running (the coordinator\'s, a member\'s or of no session): stop kills nothing, they finish their current step', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    const e = readExecution(root)!;
+    saveExecution(root, { ...e, tasks: { T2: task('sessions') } });
+    writeMember(root, { sessionId: 'ui', role: 'executor', runId: e.runId, task: 'T2', name: 'wp-shop-T2', since: at, hookSession: 'h2' });
     const wt = path.join(root, '.claude', 'worktrees', 'run');
     const w = { ...io, cwd: wt, git: defaultGit(wt) };
-    const seen = withJob(root, { cmd: 'step', task: 'T1', out: 'step.json', session: 'hook-main', startedAt: at }, job => ({ job, r: out(run(['stop'], w)) }));
-    expect(seen.r.running).toEqual([{ name: seen.job.name, task: 'T1' }]);
+    const job = (cmd: string, t: string | null, session: string | null) => ({ cmd, task: t, out: `${cmd}.json`, session, startedAt: at });
+    // A step job has no task (jobOf). hook-main is the coordinator's hook session (swarm start), h2 the member's; a job of
+    // another conversation is not this run's.
+    const seen = withJob(root, job('step', null, 'hook-main'), step =>
+      withJob(root, job('validate', 'T2-1', 'h2'), member =>
+        withJob(root, job('prep', 'T9-1', null), loose =>
+          withJob(root, job('integrate', 'T1', 'another-session'), () => ({ names: [step.name, member.name, loose.name], r: out(run(['stop'], w)) })))));
+    const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
+    expect([...seen.r.running].sort(byName)).toEqual([{ name: seen.names[0], task: null }, { name: seen.names[1], task: 'T2-1' }, { name: seen.names[2], task: 'T9-1' }].sort(byName));
     expect(out(run(['stop'], w)).running).toEqual([]);
+  });
+  it('from a subdirectory of the main checkout, swarm status, infinite status and stop act on the main checkout and write nothing there (K2-01)', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    out(run(['infinite', 'start', '--cycles', '2', '--session', 's1'], io));
+    const runId = readExecution(root)!.runId;
+    const sub = path.join(root, 'src');
+    mkdirSync(sub, { recursive: true });
+    const s = { ...io, cwd: sub, git: defaultGit(sub) };
+    expect(out(run(['swarm', 'status'], s))).toMatchObject({ present: true, state: { runId, active: true } });
+    expect(out(run(['infinite', 'status'], s))).toMatchObject({ present: true, valid: true, run: { active: true } });
+    const r = out(run(['stop'], s));
+    expect(samePath(r.main, root)).toBe(true);
+    expect(r).toMatchObject({ run: { stopped: true }, execution: { runId } });
+    expect(readExecution(root)).toMatchObject({ active: false, stopReason: 'stopped' });
+    expect(existsSync(path.join(root, '.forge', 'stop'))).toBe(true);
+    expect(existsSync(path.join(sub, '.forge'))).toBe(false);
+  });
+  it('a stopped or closed execution stays as it is: swarm task (but --drop) and swarm worktree exit 2; a stalled one still takes them; no task leaves stopped', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    const e = readExecution(root)!;
+    saveExecution(root, { ...e, tasks: { T1: task('subagents'), T2: task('subagents', 'stopped') } });
+    // Even in an execution that runs, a stopped task stays stopped.
+    expect(run(['swarm', 'task', 'T2', '--status', 'running'], io).code).toBe(2);
+    expect(readExecution(root)!.tasks.T2.status).toBe('stopped');
+    // Stalled is only inactive: its tasks still move and it takes worktrees (swarm retry revives it).
+    saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stalled' });
+    expect(out(run(['swarm', 'task', 'T1', '--stage', 'validate'], io))).toMatchObject({ status: 'running', stage: 'validate' });
+    expect(out(run(['swarm', 'worktree', 'T3'], io))).toHaveProperty('worktree');
+    saveExecution(root, { ...readExecution(root)!, active: true, stopReason: null });
+    out(run(['stop'], io));
+    for (const argv of [['swarm', 'task', 'T1', '--stage', 'review'], ['swarm', 'task', 'T1', '--status', 'running'], ['swarm', 'worktree', 'T2']]) {
+      const r = run(argv, io);
+      expect(r.code, argv.join(' ')).toBe(2);
+      expect(r.stderr, argv.join(' ')).toContain('stopped');
+    }
+    expect(existsSync(path.join(root, '.claude', 'worktrees', 'task-T2'))).toBe(false);
+    expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'stopped', stage: 'validate' });
+    out(run(['swarm', 'close'], io));
+    for (const argv of [['swarm', 'task', 'T1', '--stage', 'review'], ['swarm', 'worktree', 'T2']]) {
+      const r = run(argv, io);
+      expect(r.code, argv.join(' ')).toBe(2);
+      expect(r.stderr, argv.join(' ')).toContain('closed');
+    }
+    // --drop forgets a task whatever the execution.
+    expect(run(['swarm', 'task', 'T1', '--drop'], io).code).toBe(0);
+    expect(readExecution(root)!.tasks.T1).toBeUndefined();
+  });
+  it('swarm close of an execution nobody stopped lists the members of its run in sessions and removes their files (K2-02)', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    const e = readExecution(root)!;
+    saveExecution(root, { ...e, active: false, stopReason: 'stalled', tasks: { T2: task('sessions') } });
+    writeMember(root, { sessionId: 'ui', role: 'executor', runId: e.runId, task: 'T2', name: 'wp-shop-T2', since: at, hookSession: 'h2' });
+    writeMember(root, { sessionId: 'old', role: 'manual', runId: 'another-run', task: null, name: null, since: at });
+    expect(out(run(['swarm', 'close'], io))).toMatchObject({ closed: true, members: ['T2'], sessions: [{ sessionId: 'ui', name: 'wp-shop-T2', role: 'executor', task: 'T2' }] });
+    expect(existsSync(path.join(root, '.forge', 'members', 'ui.json'))).toBe(false);
+    expect(existsSync(path.join(root, '.forge', 'members', 'old.json'))).toBe(true);
   });
 });
