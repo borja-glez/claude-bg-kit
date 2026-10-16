@@ -23,7 +23,9 @@ export interface ForgeStats {
 const MIN = 60000;
 const MIN_ESTIMATED = 5;
 const at = (e: LedgerEvent) => Date.parse(e.ts);
-const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) && x >= 0 ? x : 0);
+// A duration beyond ~115 days is junk, not a clock: it counts as unknown (0).
+const MAX_MS = 1e10;
+const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= MAX_MS ? x : 0);
 const isStage = (p: unknown): p is StageName => (STAGE_NAMES as readonly unknown[]).includes(p);
 const zero = (): StageMs => ({ implement: 0, validate: 0, review: 0, verdict: 0, fix: 0 });
 const round1 = (x: number) => Math.round(x * 10) / 10;
@@ -66,13 +68,14 @@ export function briefStats(events: LedgerEvent[]): BriefStat[] {
     }
     const baselineMs = b < i ? num(events[b].durationMs) : 0;
     const start = at(p) - baselineMs, end = at(events[j]);
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return;
+    if (!Number.isFinite(new Date(start).getTime()) || !Number.isFinite(end) || end < start) return;
     const stages = zero();
     stages.validate += baselineMs;
     const phases: LedgerEvent[] = [];
     for (let k = i; k < j; k++) if (events[k].kind === 'phase' && events[k].task === id) phases.push(events[k]);
+    phases.sort((a, c) => at(a) - at(c));
     phases.forEach((e, x) => {
-      const next = x + 1 < phases.length ? at(phases[x + 1]) : end;
+      const next = Math.min(x + 1 < phases.length ? at(phases[x + 1]) : end, end);
       if (isStage(e.phase) && Number.isFinite(next)) stages[e.phase] += Math.max(0, next - at(e));
     });
     const validators = { runs: 0, cached: 0, ms: 0 };
@@ -132,7 +135,7 @@ export function computeStats(input: { events: LedgerEvent[]; plans: PlanStates[]
     reviewsMean: byBrief.length ? round2(sum(byBrief, b => b.reviews) / byBrief.length) : 0,
     briefMin: quantiles(first(byBrief).map(b => b.totalMs / MIN)),
     // The fixed cost (C-07): the clock of a brief accepted at once minus the implementer's writing (implement and fix).
-    overheadMin: quantiles(first(byBrief).map(b => (b.totalMs - b.stages.implement - b.stages.fix) / MIN)),
+    overheadMin: quantiles(first(byBrief).map(b => Math.max(0, b.totalMs - b.stages.implement - b.stages.fix) / MIN)),
     validatorShare: share(byBrief), cacheHits: hits(byBrief), stages: meanStages(byBrief), byPath,
     estimate: estimateOf(input.plans, input.from), byBrief,
   };

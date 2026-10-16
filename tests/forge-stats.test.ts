@@ -97,4 +97,22 @@ describe('FORGE stats (C-09)', () => {
       expect(text).toContain('| unknown | 1 | 10.0 | 10.0 | 0.0 | 0.0 | 0.0 | 0.0 |');
     }
   });
+  it('survives junk: absurd or non-numeric durations, a verdict before its implement, phases out of order', () => {
+    const junk = [
+      ev(0, 'validate', { task: 'J-1', baseline: true, ok: true, durationMs: 1e300, results: [] }),
+      ev(0, 'phase', { task: 'J', phase: 'implement', brief: 1 }),
+      ev(1, 'validate', { task: 'J-1', ok: true, durationMs: '5', results: 'x' }),
+      ev(2, 'verdict', { task: 'J-1', action: 'accept' }),
+      ev(-5, 'verdict', { task: 'K-1', action: 'accept' }),
+      ev(10, 'phase', { task: 'K', phase: 'implement', brief: 1 }),
+      ev(120, 'phase', { task: 'K', phase: 'review', brief: 1 }),
+      ev(30, 'verdict', { task: 'K-1', action: 'accept' }),
+    ];
+    const b = briefStats(junk);
+    expect(b.map(x => x.task)).toEqual(['J-1', 'K-1']);
+    expect(b[0]).toMatchObject({ totalMs: 2 * MIN, validators: { ms: 0 } });
+    for (const x of b) expect(Object.values(x.stages).reduce((a, c) => a + c, 0)).toBeLessThanOrEqual(x.totalMs);
+    const s = computeStats({ events: junk, plans: [], from: null });
+    expect(s.overheadMin!.p50).toBeGreaterThanOrEqual(0);
+  });
 });
