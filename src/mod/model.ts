@@ -5,11 +5,13 @@ import { parseDismissed, pendingProposals, type GateCritique } from '../lib/desi
 import { parseDesign } from '../lib/design.js';
 import { parseChangelog } from '../lib/history.js';
 import { parsePlan } from '../lib/plan.js';
-import { executionView } from '../lib/execution-view.js';
-import { isSafeId, normalizeLive, normalizePublicTask, parseExecution, type LiveDoc, type PublicTask } from '../lib/execution-state.js';
-import type { MessageDoc, States } from '../lib/types.js';
+import { executionView, isVisibleRun } from '../lib/execution-view.js';
+import { isSafeId, normalizeLive, normalizePublicTask, parseExecution, type ExecutionState, type LiveDoc, type PublicTask } from '../lib/execution-state.js';
+import type { MessageDoc, Plan, States } from '../lib/types.js';
 import { decisionsSummary } from '../lib/decisions.js';
 import { MAX_SEATS, parseBound, type BoundDoc } from '../lib/bound.js';
+import { normalizeMember, type MemberDoc } from '../lib/member-doc.js';
+import { describeViewer, type Viewer } from '../lib/viewer-role.js';
 
 export interface ProjectEntry { name: string; bindings: readonly BoundDoc[]; mtimeMs: number }
 export interface BandFiles {
@@ -30,8 +32,10 @@ export interface BandFiles {
   now?: number;
 }
 // In work mode `cells` holds one letter per task of the track (or of the plan), in plan order: d done, a active,
-// b blocked, p pending.
-export type BandModel =
+// b blocked, p pending. Every variant carries `viewer`, the role of the conversation that looks (C3): lens reads it
+// from here. build.mjs copies this type as it is into plugins/waypoint/types, so it names no other type and its body
+// has no capitalised word: the role is written out.
+export type BandModel = (
   // locale, when known, lets a reader of the band (lens) keep the project's language while no band is drawn.
   | { mode: 'none'; locale?: string }
   | { mode: 'work'; project: string; locale: string; sid: string; track: string | null; roadmapUrl: string | null;
@@ -45,7 +49,17 @@ export type BandModel =
       worst: 'alive' | 'silent' | 'stopped'; stalled: boolean; roadmapUrl: string | null; auto?: { count: number; lastMajor: string | null } }
   // proposals/critical count the latest critique; pending/pendingCritical the proposals of every round still undecided.
   | { mode: 'design'; project: string; locale: string; version: number; round: number; proposals: number; critical: number;
-      pending: number; pendingCritical: number; designUrl: string | null; auto?: { count: number; lastMajor: string | null } };
+      pending: number; pendingCritical: number; designUrl: string | null; auto?: { count: number; lastMajor: string | null } }
+) & { viewer: { role: 'owner' | 'other-live' | 'previous' | 'none'; coordinator: boolean; runId: string | null } };
+
+/** C3: the role of the conversation that looks, as every band publishes it. */
+export type BandViewer = BandModel['viewer'];
+/** Nothing to work out (no project, or a plan that does not read): nobody's role. */
+export const NO_VIEWER: BandViewer = { role: 'none', coordinator: false, runId: null };
+/** The band that draws nothing, with the language and the role it knows. */
+export function noneBand(locale?: string, viewer: BandViewer = NO_VIEWER): BandModel {
+  return locale ? { mode: 'none', locale, viewer: { ...viewer } } : { mode: 'none', viewer: { ...viewer } };
+}
 
 function json<T>(text: string | undefined): T | undefined {
   if (text === undefined) return undefined;
@@ -101,26 +115,101 @@ export function seatsOf(f: Pick<BandFiles, 'session' | 'bindings' | 'seatSession
   return out;
 }
 
+/** Each seat's task claimed or in progress in the state cache (SID → its task), the first by id: openTasksOf on disk. */
+export function openTasksFrom(states: States): Record<string, string> {
+  const open = new Map<string, string>();
+  for (const id of Object.keys(states).sort()) {
+    const s = states[id];
+    if ((s?.status === 'claimed' || s?.status === 'in_progress') && typeof s.owner === 'string' && !open.has(s.owner)) open.set(s.owner, id);
+  }
+  return Object.fromEntries(open);
+}
+
+/** The execution this roadmap is about: this project's plan run, or forge's ephemeral one of the checkout (project loose). */
+function projectExecution(project: string, f: BandFiles, now: number): ExecutionState | null {
+  const e = parseExecution(f.execution, now);
+  return e && (e.kind === 'ephemeral' || e.project === project) ? e : null;
+}
+/** The members of run `runId` (.forge/members/*.json). */
+function membersOf(f: BandFiles, runId: string): MemberDoc[] {
+  return Object.values(f.members ?? {}).flatMap(text => {
+    const m = normalizeMember(json(text));
+    return m && m.runId === runId ? [m] : [];
+  });
+}
+/** B-09: the live signal of the run's coordinator says its conversation ended. */
+function coordinatorEnded(exec: ExecutionState | null, text: string | undefined): boolean {
+  return !!exec?.hookSession && normalizeLive(json(text))?.ended === true;
+}
+/**
+ * C3: the role as the band publishes it. runId is the execution this conversation looks at while it is drawn for its
+ * role (C2: for its coordinator and members until it is closed, for anyone else STALE_RUN_TTL_MS after it last moved).
+ */
+function viewerOf(v: Viewer, exec: ExecutionState | null, now: number): BandViewer {
+  const ownsRun = v.role === 'owner' && v.subject === 'execution';
+  return { role: v.role, coordinator: v.coordinator, runId: exec && isVisibleRun(exec, now, ownsRun ? 'owner' : 'none') ? exec.runId : null };
+}
+
+/**
+ * The band of the conversation `f.sessionId` for this project (spec §4.5). Its role (describeViewer over the seats'
+ * bindings, the execution, its members and the seats' tasks in progress) picks the band: the coordinator sees the run,
+ * whole until it is closed; a member of it, its own task with the run's line (B-06); the owner of a seat, its work band,
+ * or the draft it is bound to (K3-13); anyone else, nothing. Every band carries the role as `viewer`.
+ */
 export function buildBandModel(project: string, f: BandFiles): BandModel {
+  const now = f.now ?? Date.now();
   try {
-    if (f.plan !== undefined && f.execution !== undefined) {
-      // Only the coordinator of this project's execution: a member (session.json has launchedBy) keeps its work band.
-      const member = json<{ launchedBy?: unknown }>(f.session)?.launchedBy;
-      const isMember = typeof member === 'string' && !!member;
-      const r = isMember ? null : runModel(project, f);
-      if (r) return withAuto(r, f);
+    let plan: Plan | null = null;
+    try { if (f.plan !== undefined) plan = parsePlan(f.plan); } catch { plan = null; }
+    const exec = projectExecution(project, f, now);
+    const seats = seatsOf(f, now);
+    const v = describeViewer({
+      bound: seats.flatMap(s => (s.bound ? [s.bound] : [])),
+      execution: exec,
+      members: exec ? membersOf(f, exec.runId) : [],
+      sessionId: isSafeId(f.sessionId) ? f.sessionId : null,
+      now,
+      coordinatorEnded: coordinatorEnded(exec, f.coordinatorLive),
+      openTasks: openTasksFrom(parsed<States[string]>(f.states) as States),
+    });
+    const viewer = viewerOf(v, exec, now);
+    // Rule 1: the coordinator's run band, which never needed the plan.
+    if (v.coordinator && exec) {
+      const r = runModel(project, f, exec, plan, now, viewer);
+      if (r) return withAuto(r, f, now);
     }
-    if (f.plan !== undefined && f.session !== undefined) return withAuto(workModel(project, f), f);
-    if (f.design !== undefined) return withAuto(designModel(project, f), f);
+    // No plan nor design to read, or a plan that does not read: nothing to work out.
+    if ((f.plan === undefined && f.design === undefined) || (f.plan !== undefined && !plan)) return noneBand(knownLocale(f));
+    const m = roleBand(project, f, plan, v, exec, seats, now, viewer);
+    if (m) return withAuto(m, f, now);
+    return noneBand(knownLocale(f), viewer);
   } catch { /* any parse failure hides the band */ }
-  const locale = knownLocale(f);
-  return locale ? { mode: 'none', locale } : { mode: 'none' };
+  return noneBand(knownLocale(f));
+}
+
+/** The band of anyone but the coordinator: a member's work band, the owner's work or design band, or null. */
+function roleBand(project: string, f: BandFiles, plan: Plan | null, v: Viewer, exec: ExecutionState | null, seats: readonly BandSeat[], now: number, viewer: BandViewer): BandModel | null {
+  if (v.role === 'owner' && v.member && exec) {
+    // B-06: a member sees its own task with the line of the execution, never the coordinator's run band.
+    if (!plan) return null;
+    const m = v.member;
+    return workModel(project, f, plan, { sid: m.sessionId, ...seatInfo(seats, m.sessionId), task: m.task, since: m.since, run: memberLine(project, m, f, exec) }, now, viewer);
+  }
+  if (v.role === 'owner' && v.binding) {
+    const b = v.binding;
+    // K3-13: a design is drawn only for the conversation bound to it, and only while it is a draft.
+    if (b.via === 'design') return f.design !== undefined ? designModel(project, f, viewer) : null;
+    if (!plan) return null;
+    return workModel(project, f, plan, { sid: b.sid, ...seatInfo(seats, b.sid), task: null, since: null, run: memberRun(project, b.sid, f, exec) }, now, viewer);
+  }
+  // Another conversation's binding or execution, or nobody's.
+  return null;
 }
 
 // forge's automatic decisions of the last day (.forge/decisions.json), on any band that draws.
-function withAuto(m: BandModel, f: BandFiles): BandModel {
+function withAuto(m: BandModel, f: BandFiles, now: number): BandModel {
   if (m.mode === 'none') return m;
-  const s = decisionsSummary(f.decisions, Date.now());
+  const s = decisionsSummary(f.decisions, now);
   return s ? { ...m, auto: { count: s.count, lastMajor: s.lastMajor } } : m;
 }
 
@@ -151,24 +240,33 @@ function recentDone(tasks: { id: string; estimate_min?: number }[], states: Stat
   return out.sort((a, b) => b.at - a.at).slice(0, RECENT_DONE).map(({ at: _at, ...r }) => r);
 }
 
-function workModel(project: string, f: BandFiles): BandModel {
-  let plan;
-  try { plan = parsePlan(f.plan!); } catch { return { mode: 'none' }; }
-  const session = json<{ sessionId?: string; track?: string | null; launchedBy?: string }>(f.session) ?? {};
-  const sid = typeof session.sessionId === 'string' ? session.sessionId : 'main';
-  const track = typeof session.track === 'string' ? session.track : null;
+/** The seat a work band is drawn for: its id, its track and swarm mark, the task a member works and since when, and
+ *  the member's line of its execution. */
+interface WorkSeat { sid: string; track: string | null; swarm: boolean; task: string | null; since: string | null; run: { coordinator: string; stage: string } | null }
+
+/** The track and the swarm mark of seat `sid`, from its session.json (the checkout's, or the one of seats/<sid>/). */
+function seatInfo(seats: readonly BandSeat[], sid: string): { track: string | null; swarm: boolean } {
+  const s = json<{ track?: unknown; launchedBy?: unknown }>(seats.find(x => x.sid === sid)?.session) ?? {};
+  return { track: typeof s.track === 'string' ? s.track : null, swarm: typeof s.launchedBy === 'string' && !!s.launchedBy };
+}
+
+function workModel(project: string, f: BandFiles, plan: Plan, seat: WorkSeat, now: number, viewer: BandViewer): BandModel {
+  const { sid, track } = seat;
   const states = parsed<States[string]>(f.states) as States;
   const messages = parsed<MessageDoc>(f.messages);
-  const m = computeMetrics(plan, states, Date.now());
-  const own = plan.tasks.find(t => states[t.id]?.owner === sid && ['claimed', 'in_progress'].includes(states[t.id]?.status ?? ''));
+  const m = computeMetrics(plan, states, now);
+  // A member works the task of its member file; any other seat, the one it has claimed or in progress.
+  const own = seat.task
+    ? plan.tasks.find(t => t.id === seat.task)
+    : plan.tasks.find(t => states[t.id]?.owner === sid && ['claimed', 'in_progress'].includes(states[t.id]?.status ?? ''));
   const byTrack = track ? m.byTrack[track] : undefined;
-  // The phase of the session's task, else the first phase not done.
+  // The phase of the seat's task, else the first phase not done.
   const phaseAt = own ? plan.phases.findIndex(p => p.id === own.phase) : -1;
   const pi = phaseAt >= 0 ? phaseAt : plan.phases.findIndex(p => m.byPhase[p.id]?.status !== 'done');
   return {
     mode: 'work', project, locale: plan.locale, sid, track,
     roadmapUrl: plan.artifacts.roadmap ?? null,
-    current: own ? { id: own.id, title: own.title, startedAt: states[own.id]?.startedAt, estimateMin: own.estimate_min } : null,
+    current: own ? { id: own.id, title: own.title, startedAt: states[own.id]?.startedAt ?? seat.since ?? undefined, estimateMin: own.estimate_min } : null,
     trackDone: byTrack?.done ?? m.done, trackTotal: byTrack?.total ?? m.total,
     percent: m.percent,
     inbox: inboxFor(messages, sid).length,
@@ -176,48 +274,52 @@ function workModel(project: string, f: BandFiles): BandModel {
       || escalationCandidates(messages).some(c => c.sessions.includes(sid)),
     phase: pi >= 0 ? { index: pi + 1, total: plan.phases.length, name: plan.phases[pi].name } : null,
     cells: plan.tasks.filter(t => !track || t.track === track).slice(0, MAX_CELLS).map(t => CELL[states[t.id]?.status ?? 'free'] ?? 'p').join(''),
-    swarm: typeof session.launchedBy === 'string' && !!session.launchedBy,
-    run: memberRun(project, sid, f),
-    recentDone: recentDone(plan.tasks.filter(t => !track || t.track === track), states, Date.now()),
+    swarm: seat.swarm,
+    run: seat.run,
+    recentDone: recentDone(plan.tasks.filter(t => !track || t.track === track), states, now),
+    viewer,
   };
 }
 
-// The execution of this project this session works for (it owns a public task of the run), else null.
-function memberRun(project: string, sid: string, f: BandFiles): { coordinator: string; stage: string } | null {
-  try {
-    const exec = parseExecution(f.execution);
-    if (!exec || !exec.active || exec.project !== project) return null;
-    for (const t of Object.values(f.execTasks ?? {})) {
-      const p = normalizePublicTask(json(t));
-      if (p && p.by === sid && p.runId === exec.runId) return { coordinator: exec.coordinator, stage: p.stage };
-    }
-  } catch { /* no run line */ }
+// The execution of this project a seat works for (it owns a public task of the run), else null.
+function memberRun(project: string, sid: string, f: BandFiles, exec: ExecutionState | null): { coordinator: string; stage: string } | null {
+  if (!exec || !exec.active || exec.project !== project) return null;
+  for (const t of Object.values(f.execTasks ?? {})) {
+    const p = normalizePublicTask(json(t));
+    if (p && p.by === sid && p.runId === exec.runId) return { coordinator: exec.coordinator, stage: p.stage };
+  }
   return null;
 }
 
-// This project's plan execution, or forge's ephemeral one of this checkout (its project is always `loose`).
-// Until the band knows the role of who looks (wave 2b), of the runs that ended it draws only a stalled one.
-function runModel(project: string, f: BandFiles): BandModel | null {
-  const exec = parseExecution(f.execution);
-  if (!exec || (exec.kind !== 'ephemeral' && exec.project !== project)) return null;
-  if (!exec.active && exec.stopReason !== 'stalled') return null;
-  const tasks: Record<string, PublicTask> = {};
-  for (const [id, t] of Object.entries(f.execTasks ?? {})) { const p = normalizePublicTask(json(t)); if (p && p.task === id) tasks[id] = p; }
-  const live = Object.values(f.live ?? {}).map(t => normalizeLive(json(t))).filter((d): d is LiveDoc => d !== null);
-  const v = executionView({ exec, tasks, live, now: Date.now() });
+/** B-06: a member's line of its execution: the stage of its public task, else the run's own record of its task. */
+function memberLine(project: string, m: MemberDoc, f: BandFiles, exec: ExecutionState): { coordinator: string; stage: string } {
+  return memberRun(project, m.sessionId, f, exec)
+    ?? { coordinator: exec.coordinator, stage: (m.task ? exec.tasks[m.task]?.stage : undefined) ?? 'execution' };
+}
+
+const publicTasks = (f: BandFiles): Record<string, PublicTask> => {
+  const out: Record<string, PublicTask> = {};
+  for (const [id, t] of Object.entries(f.execTasks ?? {})) { const p = normalizePublicTask(json(t)); if (p && p.task === id) out[id] = p; }
+  return out;
+};
+const lives = (f: BandFiles): LiveDoc[] => Object.values(f.live ?? {}).map(t => normalizeLive(json(t))).filter((d): d is LiveDoc => d !== null);
+
+// Rule 1, the coordinator's band: this project's plan execution or forge's ephemeral one of this checkout, whole until
+// it is closed, also once it stopped (C2: isVisibleRun for its owner, without the 24-hour limit).
+function runModel(project: string, f: BandFiles, exec: ExecutionState, plan: Plan | null, now: number, viewer: BandViewer): BandModel | null {
+  const v = executionView({ exec, tasks: publicTasks(f), live: lives(f), now, role: 'owner' });
   if (!v) return null;
   const rank = { alive: 0, silent: 1, stopped: 2 } as const;
   const worst = [v.coordinator.liveness, ...v.slots.map(s => s.liveness)].reduce((a, b) => (rank[b] > rank[a] ? b : a), 'alive' as 'alive' | 'silent' | 'stopped');
-  let plan; try { plan = parsePlan(f.plan!); } catch { plan = null; }
   return {
     mode: 'run', project, locale: plan?.locale ?? 'en', executor: v.mode, running: v.slots.length, parallel: v.parallel, integrated: v.integrated, total: v.total,
-    slots: v.slots.slice(0, 2).map(s => ({ task: s.task, stage: s.stage, round: s.round })), worst, stalled: !v.active, roadmapUrl: plan?.artifacts.roadmap ?? null,
+    slots: v.slots.slice(0, 2).map(s => ({ task: s.task, stage: s.stage, round: s.round })), worst, stalled: !v.active, roadmapUrl: plan?.artifacts.roadmap ?? null, viewer,
   };
 }
 
-function designModel(project: string, f: BandFiles): BandModel {
+function designModel(project: string, f: BandFiles, viewer: BandViewer): BandModel {
   const d = parseDesign(f.design!);
-  if (d.meta.status !== 'draft') return { mode: 'none', locale: d.meta.locale };
+  if (d.meta.status !== 'draft') return noneBand(d.meta.locale, viewer);
   let changelog: ReturnType<typeof parseChangelog> = [];
   try { changelog = parseChangelog(f.changelog ?? null); } catch { changelog = []; }
   const critiques = Object.entries(f.critiques)
@@ -240,5 +342,6 @@ function designModel(project: string, f: BandFiles): BandModel {
     pending: pending.length,
     pendingCritical: pending.filter(p => p.severity === 'critical').length,
     designUrl: d.meta.artifact ?? null,
+    viewer,
   };
 }

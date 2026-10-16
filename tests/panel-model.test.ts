@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { buildBandModel } from '../src/mod/model.js';
+import { buildBandModel, noneBand, NO_VIEWER } from '../src/mod/model.js';
 import { newUsage, recordStep, labelLoop, closeTurn } from '../src/lens/usage.js';
 import { FINISHED_TTL_MS } from '../src/lens/finished.js';
 import { buildPanelModel, bandKey, usageTime, elapsed, forgeFromStatus, parsePlanTasks, parseSddLedger, summarizeTodos, type Activity, type PanelModel } from '../src/lens/model.js';
@@ -39,10 +39,14 @@ no steps
 `;
 
 const act = (o: Partial<Activity> = {}): Activity => ({ tool: null, turnSince: null, todos: undefined, subagents: [], ccTasks: [], ...o });
+// The work band of the conversation A, bound to the checkout seat main.
 const band = () => buildBandModel('p', {
   plan: readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8'),
   session: JSON.stringify({ sessionId: 'main', track: null }), states: {}, messages: {}, critiques: {},
+  sessionId: 'A',
+  bindings: { '.': JSON.stringify({ sid: 'main', claude: 'A', pid: null, via: 'work', since: new Date().toISOString(), seenAt: new Date().toISOString(), endedAt: null, endReason: null }) },
 });
+const NONE_BAND = noneBand();
 
 describe('parseSddLedger', () => {
   it('reads plan path, expands ranges and finds the current fix round', () => {
@@ -125,7 +129,7 @@ describe('summarizeTodos', () => {
 });
 
 describe('buildPanelModel', () => {
-  const base = { band: { mode: 'none' } as const, activity: act(), now: 100_000 };
+  const base = { band: NONE_BAND, activity: act(), now: 100_000 };
   it('is all-null for an empty project', () => {
     expect(buildPanelModel(base)).toEqual({
       locale: 'en', waypoint: null, superpowers: null, todos: null, subagents: [], subagentsDone: [], tool: null, turnSeconds: null, ccTasks: null,
@@ -140,7 +144,7 @@ describe('buildPanelModel', () => {
     expect(m.waypoint?.phase).toEqual((b as { phase: unknown }).phase);
     expect(buildPanelModel({ ...base, band: { ...(b as Extract<typeof b, { mode: 'work' }>), phase: { index: 1, total: 2, name: 'n'.repeat(120) } } }).waypoint?.phase?.name).toBe('n'.repeat(80));
     expect(m.locale).toBe((b as { locale: string }).locale);
-    expect(buildPanelModel({ ...base, band: { mode: 'design', project: 'p', locale: 'es', version: 1, round: 1, proposals: 0, critical: 0, pending: 0, pendingCritical: 0, designUrl: null } }).waypoint).toBeNull();
+    expect(buildPanelModel({ ...base, band: { mode: 'design', project: 'p', locale: 'es', version: 1, round: 1, proposals: 0, critical: 0, pending: 0, pendingCritical: 0, designUrl: null, viewer: NO_VIEWER } }).waypoint).toBeNull();
   });
   it('uses the given locale without a waypoint plan', () => {
     expect(buildPanelModel({ ...base, locale: 'es' }).locale).toBe('es');
@@ -290,13 +294,13 @@ describe('forge light task left open', () => {
     const live = forgeFromStatus(JSON.stringify(B016), NOW, 1, ['forge:forge-verify'])!;
     expect(live).toMatchObject({ agent: 'forge-verify', timing: { done: false } });
     expect(forgeFromStatus(JSON.stringify(B016), NOW, 1, ['forge:forge-impl'])!.timing!.done).toBe(true);
-    const m = buildPanelModel({ band: { mode: 'none' }, now: NOW, forgeStatus: JSON.stringify(B016),
+    const m = buildPanelModel({ band: NONE_BAND, now: NOW, forgeStatus: JSON.stringify(B016),
       activity: act({ subagents: [{ id: 'a', type: 'forge:forge-verify', since: NOW - 60_000 }] }) });
     expect(m.forge!.timing!.done).toBe(false);
   });
   it('the band key changes when the task turns done', () => {
-    const m = buildPanelModel({ band: { mode: 'none' }, now: NOW, forgeStatus: JSON.stringify({ ...B016, agent: null, lastAt: at(29) }), activity: act() });
-    const later = buildPanelModel({ band: { mode: 'none' }, now: NOW + 2 * 60_000, forgeStatus: JSON.stringify({ ...B016, agent: null, lastAt: at(29) }), activity: act() });
+    const m = buildPanelModel({ band: NONE_BAND, now: NOW, forgeStatus: JSON.stringify({ ...B016, agent: null, lastAt: at(29) }), activity: act() });
+    const later = buildPanelModel({ band: NONE_BAND, now: NOW + 2 * 60_000, forgeStatus: JSON.stringify({ ...B016, agent: null, lastAt: at(29) }), activity: act() });
     expect(later.forge!.timing!.done).toBe(true);
     expect(bandKey(later)).not.toBe(bandKey(m));
   });
@@ -334,7 +338,7 @@ describe('forgeFromStatus', () => {
 });
 
 describe('buildPanelModel forge', () => {
-  const base = { band: { mode: 'none' } as const, activity: act(), now: NOW };
+  const base = { band: NONE_BAND, activity: act(), now: NOW };
   const doc = (o: Record<string, unknown>) => JSON.stringify({
     ts: '2026-10-11T10:00:00.000Z', category: 'perf', risk: 'low', title: 'Cache it', rationale: '', evidence: '', pillar: '',
     status: 'proposed', source: 'scout', author: 'scout', ...o,
@@ -367,7 +371,7 @@ describe('buildPanelModel forge', () => {
 });
 
 describe('buildPanelModel infinite', () => {
-  const base = { band: { mode: 'none' } as const, activity: act(), now: NOW };
+  const base = { band: NONE_BAND, activity: act(), now: NOW };
   const RUN = {
     mode: 'infinite', active: true, startedAt: at(90), budget: { cycles: 10, hours: 3 }, cycle: 3, noProgress: 0,
     lastError: null, repeatedError: false, lastBlockEvents: null, queueMax: 10, sessionId: null,
@@ -487,7 +491,7 @@ describe('buildPanelModel · execution', () => {
 });
 
 describe('buildPanelModel usage', () => {
-  const base = { band: { mode: 'none' } as const, activity: act(), now: 100_000 };
+  const base = { band: NONE_BAND, activity: act(), now: 100_000 };
   const U = (i: number, o: number) => ({ input_tokens: i, output_tokens: o, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 });
   const session = () => {
     const s = newUsage(0);
@@ -577,26 +581,26 @@ describe('buildPanelModel finished subagents', () => {
   it('lists fresh finished subagents with their seconds, clipped, without the internal time', () => {
     const now = 1_000_000;
     const m = buildPanelModel({
-      band: { mode: 'none' }, now,
+      band: NONE_BAND, now,
       activity: act({ finished: [
         { id: 'a1', type: 'forge:forge-impl', description: 'd'.repeat(120), model: 'claude-sonnet-5-5', seconds: 95, at: now - 1000 },
         { id: 'a2', type: 'Explore', seconds: 5, at: now - FINISHED_TTL_MS - 1 },
       ] }),
     });
     expect(m.subagentsDone).toEqual([{ id: 'a1', type: 'forge:forge-impl', description: 'd'.repeat(80), model: 'claude-sonnet-5-5', seconds: 95 }]);
-    expect(buildPanelModel({ band: { mode: 'none' }, now, activity: act() }).subagentsDone).toEqual([]);
+    expect(buildPanelModel({ band: NONE_BAND, now, activity: act() }).subagentsDone).toEqual([]);
   });
 
   it('the band key ignores the finished subagents (the band shows no times)', () => {
     const now = 1_000_000;
-    const a = buildPanelModel({ band: { mode: 'none' }, now, activity: act() });
-    const b = buildPanelModel({ band: { mode: 'none' }, now, activity: act({ finished: [{ id: 'x', type: 'Explore', seconds: 3, at: now }] }) });
+    const a = buildPanelModel({ band: NONE_BAND, now, activity: act() });
+    const b = buildPanelModel({ band: NONE_BAND, now, activity: act({ finished: [{ id: 'x', type: 'Explore', seconds: 3, at: now }] }) });
     expect(JSON.stringify(a)).not.toBe(JSON.stringify(b));
     expect(bandKey(a)).toBe(bandKey(b));
   });
 
   it('the band key ignores the usage time and the forge timing, but not other changes', () => {
-    const base = buildPanelModel({ band: { mode: 'none' }, now: 1_000_000, activity: act() });
+    const base = buildPanelModel({ band: NONE_BAND, now: 1_000_000, activity: act() });
     const forge = { task: 't', path: 'small', phase: 'implement', agent: null, validators: [], verdict: null, round: null, cap: null, brief: null, accepted: [], briefs: null };
     const usage = { rows: [], total: 1 } as unknown as NonNullable<PanelModel['usage']>;
     const mk = (secs: number, time: number, extra: object = {}) => ({
@@ -611,7 +615,7 @@ describe('buildPanelModel finished subagents', () => {
 
 describe('buildPanelModel decisions', () => {
   const now = Date.parse('2026-10-13T12:00:00Z');
-  const base = { band: { mode: 'none' } as const, activity: act(), now };
+  const base = { band: NONE_BAND, activity: act(), now };
   const doc = (o: Record<string, unknown> = {}) => JSON.stringify({
     ts: '2026-10-13T11:50:00Z', scope: 'orders', count: 2, autonomy: 'auto', last: [],
     lastMajor: { n: 7, point: 'design-approve', what: 'diseño aprobado (v4)', chosen: 'approve', ts: '2026-10-13T11:50:00Z' }, ...o,

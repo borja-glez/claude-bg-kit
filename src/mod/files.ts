@@ -1,6 +1,6 @@
 import type { EngineInterface } from 'claude-code';
 import { mainCheckoutFrom } from '../lib/main-checkout.js';
-import { buildBandModel, pickProject, seatsOf, type BandFiles, type BandModel, type ProjectEntry } from './model.js';
+import { buildBandModel, noneBand, pickProject, seatsOf, type BandFiles, type BandModel, type ProjectEntry } from './model.js';
 import { DECISIONS_MAX } from '../lib/decisions.js';
 import { BOUND_MAX_BYTES, MAX_SEATS, parseBound, type BoundDoc } from '../lib/bound.js';
 import { isSafeId, parseExecution } from '../lib/execution-state.js';
@@ -203,7 +203,7 @@ export async function loadBandFiles($: Engine): Promise<{ project: string; files
 
 export async function loadBandModel($: Engine): Promise<BandModel> {
   const loaded = await loadBandFiles($);
-  return loaded ? buildBandModel(loaded.project, loaded.files) : { mode: 'none' };
+  return loaded ? buildBandModel(loaded.project, loaded.files) : noneBand();
 }
 
 /**

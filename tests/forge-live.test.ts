@@ -251,9 +251,9 @@ describe('forge hook live', () => {
     const after = files();
     expect(Object.keys(after.live)).toEqual(['t9']);
     expect(executionFromFiles(after.execution, after.execTasks, after.live, now.getTime())!.slots[0]).toMatchObject({ task: 'T1', liveness: 'alive' });
-    const band = buildBandModel('shop', { states: {}, messages: {}, critiques: {}, plan: 'x', ...after });
+    const band = buildBandModel('shop', { states: {}, messages: {}, critiques: {}, plan: 'x', sessionId: 's1', ...after });
     expect(band).toMatchObject({ mode: 'run', executor: 'sessions', worst: 'alive' });
-    expect(buildBandModel('shop', { states: {}, messages: {}, critiques: {}, plan: 'x', ...before })).toMatchObject({ mode: 'run', worst: 'stopped' });
+    expect(buildBandModel('shop', { states: {}, messages: {}, critiques: {}, plan: 'x', sessionId: 's1', ...before })).toMatchObject({ mode: 'run', worst: 'stopped' });
   });
   it('writes nothing for a session whose member file is junk', () => {
     exec();

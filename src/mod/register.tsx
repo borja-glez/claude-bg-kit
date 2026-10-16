@@ -1,11 +1,11 @@
 import { atom, read, update } from 'claude-code';
 import type { Register, Timer } from 'claude-code';
-import type { BandModel } from './model.js';
+import { noneBand } from './model.js';
 import { join, listOpt, loadBandModel, readOpt, type Engine } from './files.js';
 import { bandLine, textsFor } from './band-line.js';
 import { applyWrite, artifactId, writeFailed, writesOf } from './mirror.js';
 
-const band = atom({ plugin: 'waypoint', key: 'band' } as const, { mode: 'none' } as BandModel);
+const band = atom({ plugin: 'waypoint', key: 'band' } as const, noneBand());
 const hidden = atom({ plugin: 'waypoint', key: 'hidden' } as const, false);
 
 let refreshing = false;

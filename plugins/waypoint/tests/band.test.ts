@@ -38,19 +38,23 @@ function otherBand(on: On) {
   });
 }
 
+// The role of the conversation looking at each band (C3): a seat's owner, the run's coordinator, nobody.
+const OWNER: WaypointBand['viewer'] = { role: 'owner', coordinator: false, runId: null };
+const COORDINATOR: WaypointBand['viewer'] = { role: 'owner', coordinator: true, runId: 'r1' };
+const NOBODY: WaypointBand['viewer'] = { role: 'none', coordinator: false, runId: null };
 const DESIGN: WaypointBand = {
   mode: 'design', project: 'demo', locale: 'en', version: 3, round: 2, proposals: 2, critical: 1, pending: 2, pendingCritical: 1,
-  designUrl: 'https://claude.ai/artifact/design',
+  designUrl: 'https://claude.ai/artifact/design', viewer: OWNER,
 };
 const WORK: WaypointBand = {
   mode: 'work', project: 'demo', locale: 'es', sid: 'S1', track: 'core', roadmapUrl: 'https://claude.ai/artifact/roadmap',
   current: { id: 'T3', title: 'A very long task title that goes well beyond forty characters', startedAt: '2026-10-11T10:00:00.000Z', estimateMin: 30 },
-  trackDone: 2, trackTotal: 5, percent: 40, inbox: 1, escalation: true, phase: { index: 1, total: 2, name: 'Base' }, cells: 'ddapp', swarm: false, run: null,
+  trackDone: 2, trackTotal: 5, percent: 40, inbox: 1, escalation: true, phase: { index: 1, total: 2, name: 'Base' }, cells: 'ddapp', swarm: false, run: null, viewer: OWNER,
 };
 const RUN: WaypointBand = {
   mode: 'run', project: 'demo', locale: 'es', executor: 'subagents', running: 2, parallel: 3, integrated: 3, total: 12,
   slots: [{ task: 'T004', stage: 'review', round: 2 }, { task: 'T008', stage: 'implement', round: 1 }], worst: 'silent', stalled: false,
-  roadmapUrl: 'https://claude.ai/artifact/roadmap',
+  roadmapUrl: 'https://claude.ai/artifact/roadmap', viewer: COORDINATOR,
 };
 
 test('the Spanish design band says one pending proposal and one critical in the singular', async ($, on) => {
@@ -93,7 +97,7 @@ test('design band shows counts and submits commands', async ($, on) => {
 
 test('no band model leaves the band to the engine', async ($, on) => {
   engineBand(on);
-  serveBand(on, () => ({ mode: 'none' }));
+  serveBand(on, () => ({ mode: 'none', viewer: NOBODY }));
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
     expect(await ui.find({ text: 'engine band' })).toBeDefined();

@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code';
 import type { Register, Timer } from 'claude-code';
-import type { BandModel } from '../mod/model.js';
+import { noneBand, type BandModel } from '../mod/model.js';
 import { buildPanelModel, bandKey, parseSddLedger, summarizeTodos, FORGE_RUN_MAX, FORGE_EXEC_MAX, FORGE_EXEC_FILE_MAX, FORGE_EXEC_TASKS_MAX, FORGE_LIVE_MAX, PROPOSAL_ID, type Activity, type PanelModel } from './model.js';
 import { clip, join, listOpt, loadBandModel, mtime, nowMs, readOpt, MAX_DOCS, type Engine } from '../mod/files.js';
 import { normalizeStatus } from '../lib/forge-status.js';
@@ -49,7 +49,7 @@ const MAX_TODOS = 200;
 // Whether there is activity worth a band of its own (open todos or recent subagents) when no waypoint band shows.
 let busy = false;
 // The roadmap section, read from the waypoint project's files at the panel's pace while the pane is open.
-let roadmap: BandModel = { mode: 'none' };
+let roadmap: BandModel = noneBand();
 
 type PanelFiles = {
   ledger?: string; ledgerPlan?: string; planFallback?: string; ledgerMtimeMs?: number;
@@ -684,7 +684,7 @@ export const register: Register = on => {
     resetUsage();
     try { await syncUsageStart($); } catch { /* counted from the first refresh that reads it */ }
     waypointBand = false;
-    roadmap = { mode: 'none' };
+    roadmap = noneBand();
     try { if (await read($, hidden)) await update($, hidden, () => false); } catch { /* ignore */ }
     try { await $.command.register({ name: 'lens', description: 'Show the lens progress panel', immediate: true }); } catch { /* ignore */ }
     // One timer per environment: a later session start replaces it rather than adding another.
