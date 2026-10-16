@@ -1137,4 +1137,13 @@ describe('plugin layout', () => {
     expect(work).toMatch(/\n5\. \*\*forge execution\.\*\*/);
     expect(work).not.toMatch(/\n6\. \*\*forge execution\.\*\*/);
   });
+
+  it('the planner reads the measured fixed cost and marks delicate tasks (C-07, J-14)', () => {
+    expect(runRef('large')).toContain('FORGE stats --json > .forge/work/<project>/stats.json');
+    const planner = read('plugins/forge/agents/forge-planner.md');
+    for (const w of ['**Fixed cost.**', 'overheadMin.p50', 'estimate.ratio', 'delicate: true', 'estimate_min', 'delicate?']) expect(planner, w).toContain(w);
+    expect(planner).not.toContain('(≤ ~60 min)');
+    // Extend mode and its contract stay.
+    for (const w of ['**Extend mode.**', 'closing task', 'never renumber', 'new: <ids>']) expect(planner).toContain(w);
+  });
 });
