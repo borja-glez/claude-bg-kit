@@ -457,10 +457,14 @@ function askOf(ask: AskFinding[], locale: 'es' | 'en') {
  * Every critical and important finding gets its stable id in <dir>/findings-index-<n>.json (J-06), and the verdict
  * applies the blocking table of the review (C-04): it prints reviews {n, max} (C-13) and ask, the question for a security
  * finding that repeats a closed theme (K4-02). --out-of-model and --defer keep ids in the review's overrides.json; the
- * overrides of every review of the brief apply. With next fresh-stronger or redo it writes <dir>/handover-<n>-<round>.md
+ * overrides of every review of the brief apply. They take only ids of this review or left open by the previous one: any
+ * other id exits 2 and writes nothing (M2). `deferred` also lists the findings out of the threat model (M1) and, on an
+ * accept, the residuals and out-of-model findings earlier reviews left that nobody re-checked (I1, M1). The first review
+ * after a redo is judged as review 1 against nothing of the reverted attempt, while it still counts as review n (I4).
+ * With next fresh-stronger or redo it writes <dir>/handover-<n>-<round>.md
  * for the new implementer and prints its path as handover (C-15); revert is the git args that undo a redo's attempt (J-08), null otherwise.
  * An express review (measure 7) also lists validators-<n>.json in missing until the background validation writes it;
- * its verdict and output carry express: true.
+ * its verdict and output carry express: true, and a held one (its correctness did not answer) never counts toward stalled.
  */
 export function reviewClose(args: string[], deps: ReviewDeps): Result {
   const flag = (name: string) => {
