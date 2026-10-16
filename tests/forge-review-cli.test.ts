@@ -1094,4 +1094,54 @@ describe('the express review (measure 7)', () => {
     expect(out.express).toBeUndefined();
     expect(out.spawn.map((s: { role: string }) => s.role)).toEqual(['review-correctness', 'review-security']);
   });
+
+  const green = () => writeFileSync(path.join(work(), 'validators-1.json'), JSON.stringify([{ validator: 'check', ok: true, flaky: false, durationMs: 1, failures: [] }]));
+  const indexRound = (k: number) => JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8')).rounds.find((r: { round: number }) => r.round === k).findings;
+
+  for (const [label, file] of [
+    ['abstains', JSON.stringify({ verdict: 'abstain', confidence: 0, findings: [] })],
+    ['is a draft', JSON.stringify({ verdict: 'pass', confidence: 0.9, findings: [], complete: false })],
+    ['is invalid', 'the reviewer ran out of time {not json'],
+  ] as const) {
+    it(`when the express correctness ${label}, the review never accepts: the delegated finding stays open and the next review is a normal one`, () => {
+      firstReview();
+      expect(JSON.parse(prep().stdout).express).toBe(true);
+      writeFileSync(path.join(r2(), 'correctness.json'), file);
+      green();
+      const out = JSON.parse(close().stdout);
+      expect(out).toMatchObject({ action: 'fix', express: true, reviews: { n: 2, max: 4 } });
+      expect(out.reasons.some((x: string) => /correctness did not answer/.test(x))).toBe(true);
+      expect(indexRound(2)).toEqual([expect.objectContaining({ id: 'F1', reviewer: 'correctness', status: 'open' })]);
+      expect(JSON.parse(readFileSync(path.join(work(), 'findings-1-2.json'), 'utf8')).findings).toEqual([expect.objectContaining({ id: 'F1', reviewer: 'correctness' })]);
+      const next = JSON.parse(prep().stdout);
+      expect(next).toMatchObject({ round: 3, validators: { ok: true } });
+      expect(next.express).toBeUndefined();
+      expect(next.spawn.map((s: { role: string; model: unknown; effort: string }) => [s.role, s.model, s.effort])).toEqual([['review-correctness', null, 'xhigh']]);
+    });
+  }
+
+  it('a passing express correctness answers for perf, delegated to it: the finding perf left open closes in the index', () => {
+    appendEvent(root, { ts: '2026-10-14T09:30:00.000Z', kind: 'triage', task: 'T1', path: 'medium', sensitive: ['auth'],
+      review: { ...review, flags: ['--sensitive', '--perf'], reviewers: [...review.reviewers, { role: 'review-perf', model: null, effort: 'medium', agent: 'forge-review-perf' }] } });
+    prep();
+    write(r1(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    write(r1(), 'perf', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'slow two' }] });
+    expect(JSON.parse(close().stdout).action).toBe('fix');
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo faster\n');
+    git('commit', '-q', '-am', 'fix');
+    expect(JSON.parse(prep().stdout)).toMatchObject({ express: true, carried: ['security'], delegated: ['perf'] });
+    expect(JSON.parse(readFileSync(path.join(r2(), 'previous-express.json'), 'utf8'))).toEqual([expect.objectContaining({ id: 'F1', reviewer: 'perf' })]);
+    write(r2(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    green();
+    expect(JSON.parse(close().stdout)).toMatchObject({ action: 'accept', express: true });
+    expect(indexRound(2)).toEqual([expect.objectContaining({ id: 'F1', reviewer: 'perf', status: 'closed' })]);
+  });
+
+  it('with --no-cache the validate command it prints skips the cache too', () => {
+    firstReview();
+    const out = JSON.parse(prep('--no-cache').stdout);
+    expect(out.express).toBe(true);
+    expect(out.validators.cmd).toMatch(/ --cwd "[^"]+" --no-cache$/);
+  });
 });

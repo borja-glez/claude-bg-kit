@@ -33,6 +33,10 @@ const TASK_N = /^([A-Za-z0-9_.~:@+]+(?:-[A-Za-z0-9_.~:@+]+)*)-(\d{1,4})$/;
 
 const json = (v: unknown, code = 0): Result => ({ code, stdout: JSON.stringify(v, null, 2) + '\n', stderr: '' });
 const rel = (cwd: string, p: string) => path.relative(cwd, p).split(path.sep).join('/') || '.';
+/** A path as the printed commands give it (J-11): absolute, with /, for double quotes, which every shell takes. */
+const slash = (p: string) => path.resolve(p).split(path.sep).join('/');
+/** A commit id as written: what may stand unquoted in a printed command or be handed to git as BASE. */
+const SHA = /^[0-9a-f]{7,64}$/i;
 
 /** The id `<T>` of a task `<T>-<n>` and the events that belong to it (`<T>` itself or any `<T>-<k>`). */
 const ofTask = (base: string) => (e: LedgerEvent) =>
@@ -192,9 +196,9 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   const prevSent = readJson(path.join(dir, `findings-${n}-${round - 1}.json`)) as { validators?: unknown } | undefined;
   if (round >= 2 && !redo && round < reviewsCount.max && (pathName === 'medium' || pathName === 'large') && config.review.express
     && lastVerdict?.action === 'fix' && Array.isArray(prevSent?.validators) && prevSent!.validators.length === 0 && expressCandidate(index, round)
-    && /^[0-9a-f]{7,64}$/i.test(baseSha)) {
+    && SHA.test(baseSha)) {
     const express = expressPrep({ deps, task, id, n, round, pathName, review, previous, prevReviews, fixFiles, dir, roundDir, baseSha,
-      baselineArg, diff, head, tmFile, index, reviewsCount, locale });
+      baselineArg, diff, head, tmFile, index, reviewsCount, locale, noCache: args.includes('--no-cache') });
     if (express) return express;
   }
 
@@ -332,7 +336,7 @@ interface ExpressCtx {
   deps: ReviewDeps; task: string; id: string; n: string; round: number; pathName: PathName; review: TriageReview;
   previous: Partial<Record<ReviewRole, PreviousResult>>; prevReviews: Partial<Record<ReviewerKey, Review>>; fixFiles: string[];
   dir: string; roundDir: string; baseSha: string; baselineArg: string; diff: string; head: string; tmFile: string | null;
-  index: FindingsIndex; reviewsCount: { n: number; max: number }; locale: string | undefined;
+  index: FindingsIndex; reviewsCount: { n: number; max: number }; locale: string | undefined; noCache: boolean;
 }
 
 /**
@@ -371,10 +375,9 @@ function expressPrep(c: ExpressCtx): Result | null {
   }, null, 2) + '\n');
   appendPhase(deps.cwd, { ts: deps.now().toISOString(), kind: 'phase', task: c.id, phase: 'review', brief: Number(n), round, express: true,
     reviewers: spawn.map(s => ({ agent: s.agent, role: s.role, effort: s.effort, model: s.model, mode: s.mode })) });
-  // The same form as prep's validate (J-11): paths with / in double quotes, which every shell takes.
-  const slash = (p: string) => path.resolve(p).split(path.sep).join('/');
+  // The same form as prep's validate (J-11): paths with / in double quotes, which every shell takes; --no-cache as given.
   const cmd = `node "${slash(deps.self ?? 'forge.cjs')}" validate --all --path ${c.pathName} --base ${c.baseSha} --baseline "${slash(path.resolve(deps.cwd, c.baselineArg))}"`
-    + ` --task ${c.task} --out "${slash(validatorsFile)}"${samePath(deps.repoDir, deps.cwd) ? '' : ` --cwd "${slash(deps.repoDir)}"`}`;
+    + ` --task ${c.task} --out "${slash(validatorsFile)}"${samePath(deps.repoDir, deps.cwd) ? '' : ` --cwd "${slash(deps.repoDir)}"`}${c.noCache ? ' --no-cache' : ''}`;
   const out: Record<string, unknown> = {
     round, reviews: c.reviewsCount, express: true, validators: { pending: true, cmd, file: at(validatorsFile) }, spawn,
     ...(plan.carried.length ? { carried: plan.carried.map(x => x.name) } : {}), delegated: plan.delegated,
@@ -539,12 +542,21 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   const express = plan.express === true;
   const withIds = assignIds(index, round, reviews, { express });
   // An express reviewer answers for the reviewers delegated to it: their open findings it does not name are closing.
+  // Safety rule (measure 7): one that did not answer (abstain, invalid, a draft or missing) checked nothing, so it closes
+  // nothing, what the delegated reviewers left open stays open and blocks, and the review never accepts (hold); the next
+  // review-prep plans a normal review, since reviewRound wants a usable previous correctness.
   const delegated = Array.isArray(plan.delegated) ? plan.delegated.filter((x): x is ReviewerKey => x === 'correctness' || x === 'security' || x === 'perf') : [];
-  const answered = answeredBy(withIds);
-  if (express && answered.includes('correctness')) answered.push(...delegated.filter(k => !answered.includes(k)));
+  const answered = answeredBy(withIds).filter(k => !(express && k === 'correctness' && withIds.correctness?.incomplete === true));
+  const held = express && !answered.includes('correctness');
+  if (express && !held) answered.push(...delegated.filter(k => !answered.includes(k)));
+  const hold = held ? {
+    reason: 'express review: correctness did not answer (abstain, invalid, draft or missing), so what the reviewers delegated to it left open stays open; the next review is a normal one',
+    findings: delegated.flatMap(k => previousFindings(index, round, k)).filter(f => f.status === 'open').map(f => asPrevious(f, true)),
+  } : undefined;
   const result = synthesize(withIds, weightsFor({ sensitive: flags.includes('--sensitive'), perf: flags.includes('--perf') }), validatorsOk, failing, {
     round, fixHunks: parseHunks(fixPatch), root: deps.repoDir, carried, last: round >= reviewsCount.max, personDocs: config.review.personDocs,
     open: openIds(index, round), closed: closedFor(index, round, idsOf(withIds), answered), outOfModel: overrides.outOfModel, defer: overrides.defer,
+    ...(hold ? { hold } : {}),
   });
   // An index that exists but cannot be read is set aside next to the new one, never overwritten.
   if (indexText?.trim() && !index.rounds.length) {
@@ -598,7 +610,7 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   // C-15: a new implementer (fresh-stronger or redo) starts from a handover with the history of the brief's reviews.
   // BASE and HEAD come from files in the round dir: only a commit that resolves is used, never text that git could read as an option.
   const sha = (v: unknown): string => {
-    if (typeof v !== 'string' || !/^[0-9a-f]{7,64}$/i.test(v.trim())) return '';
+    if (typeof v !== 'string' || !SHA.test(v.trim())) return '';
     return (deps.git(['rev-parse', '--verify', '--quiet', `${v.trim()}^{commit}`]) ?? '').trim();
   };
   const planBase = sha(plan.base);
@@ -666,7 +678,6 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   const threatModel = tmFile ? rel(deps.cwd, tmFile) : null;
   // J-11: the implementer's validate command, exactly as it runs it: the tests related to its changes since BASE, the
   // typecheck and the lint, in the code's directory. Paths with / and in double quotes, which every shell takes.
-  const slash = (q: string) => path.resolve(q).split(path.sep).join('/');
   const validate = `node "${slash(deps.self ?? 'forge.cjs')}" validate --affected --base ${base} --task ${task}${samePath(deps.repoDir, deps.cwd) ? '' : ` --cwd "${slash(deps.repoDir)}"`}`;
   // J-13: --no-baseline (the Small path) records BASE and the phase and runs no validator.
   if (args.includes('--no-baseline')) {

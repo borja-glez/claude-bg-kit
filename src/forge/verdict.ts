@@ -57,6 +57,9 @@ export interface RoundOptions {
   last?: boolean; personDocs?: string[];
   open?: Partial<Record<ReviewerName, string[]>>; closed?: Partial<Record<ReviewerName, ClosedFinding[]>>;
   outOfModel?: string[]; defer?: string[];
+  /** Measure 7: an express review whose correctness did not answer checked nothing for the reviewers delegated to it.
+   *  Their open findings (`findings`) block as they were and the review never accepts; `reason` goes to the reasons. */
+  hold?: { reason: string; findings: Finding[] };
 }
 
 const invalidReview = (): Review => ({ verdict: 'abstain', confidence: 0, findings: [], invalid: true });
@@ -281,7 +284,8 @@ const RIDES_ALONG: readonly Residual[] = ['untouched', 'docs', 'late-round'];
  * A finding that does not block carries its `residual`; a failing reviewer whose findings all do not block scores as a
  * pass. A fail without an important finding or a critical with evidence breaks the rubric (J-05): it does not score and is
  * invalid. Redo needs a score under 0.5 and a failing reviewer that says the approach is wrong with a finding that blocks
- * (C-06). The signature covers what blocks, by severity and stable id.
+ * (C-06). A held review (opts.hold: an express one whose correctness did not answer, measure 7) never accepts, and the
+ * findings it holds block. The signature covers what blocks, by severity and stable id.
  */
 export function synthesize(reviews: Partial<Record<ReviewerName, Review>>, weights: Weights, validatorsOk: boolean, failingValidators: FailingValidator[] = [], opts: RoundOptions = {}): VerdictResult {
   const names = (Object.keys(reviews) as ReviewerName[]).filter(n => reviews[n]);
@@ -387,6 +391,14 @@ export function synthesize(reviews: Partial<Record<ReviewerName, Review>>, weigh
     important = [];
     action = 'accept';
     reasons.push('the last review accepts a fix with green validators and no critical (rule 7)');
+  }
+  // Measure 7: a held review (opts.hold, never the last one) never accepts; the findings it holds block once each, those
+  // a reviewer still names already counted as judged.
+  if (opts.hold) {
+    const named = new Set([...critical, ...important, ...minor, ...residual].map(f => f.id).filter(Boolean));
+    for (const f of opts.hold.findings) if (!f.id || !named.has(f.id)) (f.severity === 'critical' ? critical : important).push(f);
+    if (action === 'accept') action = 'fix';
+    reasons.push(opts.hold.reason);
   }
   const capped = residual.filter(f => f.residual === 'cap').length;
   if (last && action === 'accept' && capped) reasons.push(`accepted at the cap with ${capped} open finding(s)`);

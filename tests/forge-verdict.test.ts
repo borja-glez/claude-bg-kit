@@ -504,6 +504,20 @@ describe('what blocks in each review (C-04, C-06, J-05, J-06, K4-02, K4-09)', ()
     expect(synthesize({ correctness: pass(1, [{ severity: 'critical', problem: 'vibes' }]) }, W, true).action).toBe('accept');
   });
 
+  it('a hold (an express review whose correctness did not answer, measure 7) never accepts: its findings block once each and its reason is given', () => {
+    const held = mk({ id: 'F1', reviewer: 'perf', origin: 'previous' });
+    const abstained: Review = { verdict: 'abstain', confidence: 0, findings: [] };
+    const r = synthesize({ correctness: abstained, security: pass(0.9) }, W, true, [], at(2, { hold: { reason: 'held', findings: [held] } }));
+    expect(r).toMatchObject({ action: 'fix', critical: [], important: [held], deferred: [] });
+    expect(r.reasons).toContain('held');
+    expect(r.signature).toMatch(/^v2:[0-9a-f]{16}$/);
+    // A finding a reviewer still names is not added twice; red validators stay a fix.
+    const named = synthesize({ correctness: fail(0.8, [mk({ id: 'F1', origin: 'previous' })]) }, W, true, [],
+      at(2, { open: { correctness: ['F1'] }, hold: { reason: 'held', findings: [mk({ id: 'F1', origin: 'previous' })] } }));
+    expect(named.important.map(f => f.id)).toEqual(['F1']);
+    expect(synthesize({ correctness: abstained }, W, false, [{ validator: 'test', failures: ['x'] }], at(2, { hold: { reason: 'held', findings: [held] } })).action).toBe('fix');
+  });
+
   it('the signature reads a validator\'s failing tests in any order (J-06)', () => {
     const sig = (failing: string[]) => synthesize({ correctness: pass() }, W, false, [{ validator: 'test', failures: ['x'], failing }]).signature;
     expect(sig(['a.test.ts > adds', 'b.test.ts > subtracts'])).toBe(sig(['b.test.ts > subtracts', 'a.test.ts > adds']));

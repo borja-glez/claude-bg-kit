@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reviewRound, type RoundInput, type TriageReview } from '../src/forge/review-round.js';
+import { reviewRound, type PreviousResult, type RoundInput, type TriageReview } from '../src/forge/review-round.js';
 
 const files = { brief: 'w/brief-1.md', diff: 'w/diff-1.patch', validators: 'w/validators-1.json', out: 'w/reviews-1-R', shadow: 'w/reviews-1-R/shadow',
   fix: 'w/fix-1-R.patch', findings: (name: string) => `w/reviews-1-R/previous-${name}.json` };
@@ -141,5 +141,18 @@ describe('reviewRound', () => {
     const normal = reviewRound(at({ files: ex, round: 2, previous: ok, fixZones: [], fixFiles: ['src/a.ts'] }));
     expect(normal).toMatchObject({ express: false, delegated: [] });
     expect(normal.spawn.map(s => [s.name, s.mode, s.express ?? false])).toEqual([['correctness', 'delta', false]]);
+  });
+
+  it('no express review when correctness would repeat in full or its previous result is not a usable pass or fail (measure 7)', () => {
+    const ex = { ...files, expressFindings: 'w/reviews-1-R/previous-express.json' };
+    const plan = (correctness?: PreviousResult) => reviewRound(at({ files: ex, round: 2, express: true, fixZones: [], fixFiles: ['src/a.ts'],
+      previous: { 'review-security': pass, 'review-perf': fail('src/hot.ts'), ...(correctness ? { 'review-correctness': correctness } : {}) } }));
+    const missing = plan();
+    expect(missing).toMatchObject({ express: false, delegated: [] });
+    expect(missing.spawn.map(s => [s.name, s.mode, s.model, s.effort])).toEqual([['correctness', 'full', null, 'xhigh'], ['perf', 'delta', null, 'medium']]);
+    for (const c of [{ verdict: 'abstain' as const, findings: [] }, { ...pass, incomplete: true }, { ...fail(), invalid: true }]) {
+      expect(plan(c).express, JSON.stringify(c)).toBe(false);
+    }
+    expect(plan(pass)).toMatchObject({ express: true, delegated: ['perf'] });
   });
 });

@@ -65,7 +65,8 @@ const normPath = (p: string) => p.trim().replace(/\\/g, '/').replace(/^(\.\/)+/,
  * Rounds after the first have no twins.
  * With input.express (measure 7), from round 2 and not after a redo, the plan is one correctness reviewer on Sonnet at
  * medium in delta (express: true) when every reviewer that would repeat is correctness or one that failed, never
- * security: the passing ones are carried, the failing ones delegated.
+ * security, all of them in delta, and correctness's previous result is a usable pass or fail: the passing ones are
+ * carried, the failing ones delegated.
  */
 export function reviewRound(input: RoundInput): RoundPlan {
   const { review, files } = input;
@@ -109,9 +110,13 @@ export function reviewRound(input: RoundInput): RoundPlan {
   }
   const normal: RoundPlan = { round, spawn, carried, shadow: false, express: false, delegated: [] };
   // Measure 7 (§4.9): the CLI asks for an express review; it is one only when every reviewer that would repeat is
-  // correctness or one that failed (never security): a passing reviewer that has to repeat keeps the review normal.
+  // correctness or one that failed (never security): a passing reviewer that has to repeat keeps the review normal. Every
+  // one of them must repeat in delta, and correctness's previous result must be a usable pass or fail (not missing, an
+  // abstain, a draft or invalid): the express reviewer never stands in for a full review.
   const correctness = review.reviewers.find(r => r.role === 'review-correctness');
-  if (!input.express || !correctness || !files.expressFindings) return normal;
+  const prevCorrectness = input.previous?.['review-correctness'];
+  const usable = !!prevCorrectness && (prevCorrectness.verdict === 'pass' || prevCorrectness.verdict === 'fail') && !prevCorrectness.incomplete && !prevCorrectness.invalid;
+  if (!input.express || !correctness || !files.expressFindings || !usable || spawn.some(s => s.mode !== 'delta')) return normal;
   const delegated: ReviewerKey[] = [];
   for (const s of spawn) {
     const failed = input.previous?.[s.role]?.verdict === 'fail';
