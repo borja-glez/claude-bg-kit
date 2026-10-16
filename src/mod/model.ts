@@ -142,12 +142,15 @@ function coordinatorEnded(exec: ExecutionState | null, text: string | undefined)
   return !!exec?.hookSession && normalizeLive(json(text))?.ended === true;
 }
 /**
- * C3: the role as the band publishes it. runId is the execution this conversation looks at while it is drawn for its
- * role (C2: for its coordinator and members until it is closed, for anyone else STALE_RUN_TTL_MS after it last moved).
+ * C3: the role as the band publishes it. runId names the execution only when the role is about it (its coordinator,
+ * a member, or another conversation's run), while it is drawn for that role (C2: for its coordinator and members until
+ * it is closed, for anyone else STALE_RUN_TTL_MS after it last moved). A role by a binding names no run: a seat's owner
+ * beside another's run must not read as its member.
  */
 function viewerOf(v: Viewer, exec: ExecutionState | null, now: number): BandViewer {
   const ownsRun = v.role === 'owner' && v.subject === 'execution';
-  return { role: v.role, coordinator: v.coordinator, runId: exec && isVisibleRun(exec, now, ownsRun ? 'owner' : 'none') ? exec.runId : null };
+  const runId = exec && v.subject === 'execution' && isVisibleRun(exec, now, ownsRun ? 'owner' : 'none') ? exec.runId : null;
+  return { role: v.role, coordinator: v.coordinator, runId };
 }
 
 /**

@@ -159,8 +159,9 @@ describe('buildBandModel · work', () => {
     // Without its public task, the stage is the run's own record of the task.
     expect(buildBandModel('demo-shop', { ...f, sessionId: 'M', execTasks: {} })).toMatchObject({ mode: 'work', run: { coordinator: 'main', stage: 'review' } });
     // The same files: the coordinator sees the run band, the seat's owner its own work band.
-    expect(buildBandModel('demo-shop', { ...f, sessionId: 's1' }).mode).toBe('run');
-    expect(buildBandModel('demo-shop', { ...f, sessionId: 'A' })).toMatchObject({ mode: 'work', sid: 'main', run: null });
+    expect(buildBandModel('demo-shop', { ...f, sessionId: 's1' })).toMatchObject({ mode: 'run', viewer: { role: 'owner', coordinator: true, runId: 'r1' } });
+    // The seat's owner beside another's run: the run is not its own, so its viewer names none.
+    expect(buildBandModel('demo-shop', { ...f, sessionId: 'A' })).toMatchObject({ mode: 'work', sid: 'main', run: null, viewer: { role: 'owner', coordinator: false, runId: null } });
   });
   it("a seat that works for a sessions run names it in its work band; without an execution run is null", () => {
     const session = j({ sessionId: 'S2', track: 'backend', launchedBy: 'main' });
