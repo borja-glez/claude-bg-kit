@@ -35,9 +35,12 @@ export function conflictsFor(plan: PlanView, states: States, taskId: string, ses
   return out;
 }
 
+export interface Waiting { taskId: string; dependsOn: string }
+
 /**
- * With `integrated` (the shas already in a swarm's base branch), a task whose dependency in another track is done
- * but not integrated yet is skipped: its code is not in the base the session works from.
+ * With `integrated` (the shas already in the base branch the session works from), a task whose dependency in another
+ * track is done but not integrated yet is skipped: its code is not in that base. A-09: those tasks come back in
+ * `waiting_on` (with the dependency they wait for), so the session can say why it has nothing to take.
  */
 export function pickTask(plan: PlanView, states: States, opts: { sessionId: string; track?: string; sessions?: Sessions; now?: number; integrated?: ReadonlySet<string> }) {
   const conflicts = (id: string) => conflictsFor(plan, states, id, opts.sessionId, opts.sessions, opts.now);
@@ -45,18 +48,27 @@ export function pickTask(plan: PlanView, states: States, opts: { sessionId: stri
   if (own.resumed && own.task) {
     return { task: own.task, resumed: true, unblock: false, conflicts: conflicts(own.task.id) };
   }
-  const candidates = availableTasks(plan, states, opts).filter(t => {
+  const open = availableTasks(plan, states, opts).filter(t => {
     const owner = states[t.id]?.owner;
-    return (!owner || owner === opts.sessionId) && (!opts.integrated || !notIntegratedDep(plan, states, t, opts.integrated));
+    return !owner || owner === opts.sessionId;
   });
-  const result = (task: PlanTask, conflicts: Conflict[]) => ({ task, resumed: false, unblock: statusOf(states, task.id) === 'blocked', conflicts });
+  const waiting: Waiting[] = [];
+  if (opts.integrated) {
+    for (const t of open) {
+      const dep = notIntegratedDep(plan, states, t, opts.integrated);
+      if (dep) waiting.push({ taskId: t.id, dependsOn: dep });
+    }
+  }
+  const candidates = open.filter(t => !waiting.some(w => w.taskId === t.id));
+  const extra = waiting.length ? { waiting_on: waiting } : {};
+  const result = (task: PlanTask, conflicts: Conflict[]) => ({ task, resumed: false, unblock: statusOf(states, task.id) === 'blocked', conflicts, ...extra });
   // Conflicts with an idle owner do not steer the choice (that owner is not working), but are still reported.
   for (const c of candidates) {
     const cs = conflicts(c.id);
     if (!cs.some(x => !x.ownerIdle)) return result(c, cs);
   }
   const first = candidates[0];
-  return first ? result(first, conflicts(first.id)) : { task: null, resumed: false, unblock: false, conflicts: [] };
+  return first ? result(first, conflicts(first.id)) : { task: null, resumed: false, unblock: false, conflicts: [], ...extra };
 }
 
 /**

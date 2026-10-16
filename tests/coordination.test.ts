@@ -175,9 +175,13 @@ describe('pickTask with integrated commits (swarm members)', () => {
     T001: { status: 'done' }, T002: { status: 'done' }, T003: { status: 'done', commits: [{ sha: 'u3', ts: '', title: '', add: 0, del: 0 }] },
     T004: { status: 'done', commits: [{ sha: 'b4', ts: '', title: '', add: 0, del: 0 }, { sha: 'b4b', ts: '', title: '', add: 0, del: 0 }] },
   };
-  it('skips a task whose dependency in another track is not integrated', () => {
-    expect(pickTask(base, states, { sessionId: 'ui', track: 'ui', integrated: new Set(['b4']) }).task).toBeNull();
-    expect(pickTask(base, states, { sessionId: 'ui', track: 'ui', integrated: new Set(['b4', 'b4b']) }).task?.id).toBe('T005');
+  it('skips a task whose dependency in another track is not integrated, and says which one it waits for (A-09)', () => {
+    expect(pickTask(base, states, { sessionId: 'ui', track: 'ui', integrated: new Set(['b4']) }))
+      .toMatchObject({ task: null, waiting_on: [{ taskId: 'T005', dependsOn: 'T004' }] });
+    const ok = pickTask(base, states, { sessionId: 'ui', track: 'ui', integrated: new Set(['b4', 'b4b']) });
+    expect(ok.task?.id).toBe('T005');
+    expect(ok).not.toHaveProperty('waiting_on');
+    expect(pickTask(base, states, { sessionId: 'ui', track: 'ui' })).not.toHaveProperty('waiting_on');
   });
   it('ignores dependencies in the same track and done tasks without commits', () => {
     const s: States = { ...states, T004: { status: 'done' } };

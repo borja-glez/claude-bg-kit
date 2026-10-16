@@ -942,10 +942,12 @@ tasks:
     mkdirSync(path.join(dir, 'st'), { recursive: true });
     writeFileSync(path.join(dir, 'st', 'A1.json'), JSON.stringify({ status: 'done', commits: [{ sha, ts: '', title: 'A1', add: 1, del: 0 }] }));
     const next = (...extra: string[]) => run(['next', 'plan.yaml', '--states', 'st', '--session', 'b', '--track', 'b', ...extra], io);
-    expect(JSON.parse(next('--base', 'main').stdout).task).toBeNull();
+    expect(JSON.parse(next('--base', 'main').stdout)).toMatchObject({ task: null, waiting_on: [{ taskId: 'B1', dependsOn: 'A1' }] });
     expect(JSON.parse(next().stdout).task.id).toBe('B1');
     git('merge', '-q', '--no-ff', '-m', 'swarm: integrate a', 'track/a');
-    expect(JSON.parse(next('--base', 'main').stdout).task.id).toBe('B1');
+    const merged = JSON.parse(next('--base', 'main').stdout);
+    expect(merged.task.id).toBe('B1');
+    expect(merged).not.toHaveProperty('waiting_on');
     expect(next('--base', '-x').code).toBe(2);
     expect(next('--base').code).toBe(2);
   });
