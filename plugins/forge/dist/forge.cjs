@@ -18354,7 +18354,7 @@ function closeRound(c, task, t, n, round, r2, extra) {
   if (out.ask) {
     const asked = isObject(out.ask) && Array.isArray(out.ask.findings) ? out.ask.findings : [];
     const findings = asked.map((f) => typeof f === "string" ? f : isObject(f) && typeof f.id === "string" ? f.id : null).filter((x) => !!x);
-    writeJson(import_node_path23.default.join(r2.roundDir, "asked.json"), {
+    const doc = {
       at: c.iso(),
       findings,
       next: out.next ?? null,
@@ -18363,7 +18363,8 @@ function closeRound(c, task, t, n, round, r2, extra) {
       handover: out.handover ?? null,
       revert: out.revert ?? null,
       close: out
-    });
+    };
+    c.after.push(() => writeJson(import_node_path23.default.join(r2.roundDir, "asked.json"), doc));
     c.actions.push({ type: "ask", task, close: out });
     return;
   }
@@ -18453,7 +18454,7 @@ function integratedAgain(c, task, t) {
   const git = c.deps.gitAt(c.io.cwd);
   const tip = git(["rev-parse", "--verify", "-q", `refs/heads/${t.branch}^{commit}`])?.trim() || null;
   const merges = (git(["log", "--merges", "--format=%H %P", c.runBranch]) ?? "").split("\n").map((l) => l.trim().split(" ")).filter((p) => p.length >= 3);
-  const titled = () => (git(["log", "--merges", "--format=%H", "--fixed-strings", `--grep=forge: integrate ${task}`, c.runBranch]) ?? "").split("\n").map((s2) => s2.trim()).find(Boolean);
+  const titled = () => (git(["log", "--merges", "--format=%H%x09%s", c.runBranch]) ?? "").split("\n").map((l) => l.trim().split("	")).find(([, subject]) => subject === `forge: integrate ${task}`)?.[0];
   const sha = (tip ? merges.find((p) => p.slice(2).includes(tip))?.[0] : void 0) ?? titled();
   if (!sha) return;
   c.actions.push({ type: "integrated", task, sha, commit: commitInfo(git, sha), again: true });
