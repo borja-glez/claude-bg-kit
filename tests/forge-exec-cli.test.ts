@@ -673,12 +673,12 @@ describe('forge swarm (execution)', () => {
     const r = out(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io));
     const e = readExecution(root)!;
     expect(r).toMatchObject({ task: 'T1', attempt: 1, launch: ['launch', 'plan.yaml', 'T1', '--task', '--run', e.runId, '--coordinator', 'main', '--base', 'forge/run-shop', '--effort', 'medium'] });
-    const note = readFileSync(path.join(root, '.forge', 'work', 'T1', 'handover.md'), 'utf8');
+    const note = readFileSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'handover.md'), 'utf8');
     expect(note).toContain('# Handover: T1 (attempt 1 of 3)');
     // It names the real brief, in the task worktree, and its own main-checkout path; never a task.json.
     expect(note).not.toContain('task.json');
-    expect(note).toContain(`${path.join(e.tasks.T1.worktree || path.join(root, '.claude', 'worktrees', 'task-T1'), '.forge', 'work', 'T1')} (the brief is brief-<n>.md there`);
-    expect(note).toContain(`This note: ${path.join(root, '.forge', 'work', 'T1', 'handover.md')} (main checkout ${root})`);
+    expect(note).toContain(`${path.join(e.tasks.T1.worktree || path.join(root, '.claude', 'worktrees', 'task-T1'), '.forge', 'work', 'shop', 'T1')} (the brief is brief-<n>.md there`);
+    expect(note).toContain(`This note: ${path.join(root, '.forge', 'work', 'shop', 'T1', 'handover.md')} (main checkout ${root})`);
     expect(e.tasks.T1.attempts).toBe(1);
     out(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io));
     expect(out(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io))).toEqual({ task: 'T1', blocked: true, reason: 'the session of T1 stopped 3 times' });
@@ -702,7 +702,7 @@ describe('forge swarm (execution)', () => {
     const t = readExecution(root)!.tasks.T1;
     expect(t.startedAt).toBe(NOW.toISOString());
     expect(t.nudgedAt ?? null).toBeNull();
-    expect(readFileSync(path.join(root, '.forge', 'work', 'T1', 'handover.md'), 'utf8')).toContain('work on t1');
+    expect(readFileSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'handover.md'), 'utf8')).toContain('work on t1');
   });
   it('relaunch refuses a blocked and an accepted task', () => {
     sessionsRun();
@@ -1139,6 +1139,8 @@ describe('forge swarm (execution)', () => {
       const before = readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8');
       const w = out(run(['swarm', 'worktree', 'T2', '--member', 'M1'], wio));
       expect(w.branch).toBe('task/T2');
+      // D-08: the task's work folder, by its project, the same relative path in the main checkout and in its worktree.
+      expect(w.work).toBe('.forge/work/shop/T2');
       expect(path.resolve(w.worktree).toLowerCase()).toBe(path.resolve(root, '.claude', 'worktrees', 'task-T2').toLowerCase());
       expect(existsSync(path.join(root, '.claude', 'worktrees', 'task-T2', 'plan.yaml'))).toBe(true);
       expect(readFileSync(path.join(root, '.forge', 'execution.json'), 'utf8')).toBe(before);
@@ -1586,5 +1588,17 @@ describe('a task resumed in its worktree is reviewed with its earlier commits (D
     writeFileSync(path.join(root, 'sp.md'), '### Task 1: x\n\n- [ ] a\n');
     expect(run(['brief', '--superpowers-plan', 'sp.md', '--task', '1'], io).code).toBe(0);
     expect(run(['brief', '--superpowers-plan', 'sp.md', '--task', '1', '--prior-file', 'prior.json'], io)).toMatchObject({ code: 2, stderr: expect.stringContaining('--prior-file') });
+  });
+});
+
+describe('swarm worktree prints the work folder of the task (D-08)', () => {
+  it('by project in a plan execution, by id in an ephemeral one', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    expect(out(run(['swarm', 'worktree', 'T1'], io))).toMatchObject({ work: '.forge/work/shop/T1' });
+    expect(run(['swarm', 'stop'], io).code).toBe(0);
+    // An ephemeral run takes two tasks at least.
+    writeFileSync(path.join(root, '.forge', 'tasks.json'), JSON.stringify(['a', 'b'].map(x => ({ id: `fix-${x}`, title: `fix ${x}`, path: 'small', zones: [`${x}.txt`], depends_on: [] }))));
+    out(run(['swarm', 'start', '--project', 'loose', '--session', 'main', '--kind', 'ephemeral', '--tasks', '.forge/tasks.json'], io));
+    expect(out(run(['swarm', 'worktree', 'fix-a'], io))).toMatchObject({ work: '.forge/work/fix-a' });
   });
 });

@@ -1576,3 +1576,15 @@ describe('the express review (measure 7)', () => {
     expect(out.validators.cmd).toMatch(/ --cwd "[^"]+" --no-cache$/);
   });
 });
+
+describe('prep without --dir writes into the work folder of the task (D-08)', () => {
+  it("a plan task's baseline goes to .forge/work/<project>/<T>; a task started before keeps its older folder", () => {
+    appendEvent(root, { ts: '2026-10-14T09:30:00.000Z', kind: 'triage', task: 'T2', path: 'medium', project: 'shop', reasons: [] });
+    const r = run(['prep', '--task', 'T2-1', '--path', 'medium', '--cwd', wt], io);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout).baseline).toBe('.forge/work/shop/T2/baseline-1.json');
+    // T1 already has .forge/work/T1 (from the beforeEach), and the ledger gives it project shop now: it stays there.
+    appendEvent(root, { ts: '2026-10-14T09:40:00.000Z', kind: 'triage', task: 'T1', path: 'medium', project: 'shop', reasons: [] });
+    expect(JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'medium', '--cwd', wt], io).stdout).baseline).toBe('.forge/work/T1/baseline-1.json');
+  });
+});

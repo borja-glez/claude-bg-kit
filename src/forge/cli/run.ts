@@ -10,7 +10,7 @@ import { planLocale, replyIn, sessionReply } from '../../lib/locale.js';
 import { isLocale } from '../../lib/forge-run.js';
 import { isSafeId, normalizePublicTask, type PublicTask } from '../../lib/execution-state.js';
 import { samePath } from '../../lib/worktree.js';
-import { treeStartFile, parseStatus, parseSnapshot, treeCheck, type TreeSnapshot } from '../tree.js';
+import { parseStatus, parseSnapshot, treeCheck, type TreeSnapshot } from '../tree.js';
 import { triage, implementerFor, zonesFromPaths, announce, announceReview, isBookkeeping, parseNumstat, diffPath, isPerfTask, reviewFor, PATH_ORDER, ZONE_ORDER, type PathName, type AnnounceLocale, type TriageResult } from '../triage.js';
 import { parsePlan, PlanError, isPlanId } from '../../lib/plan.js';
 import { renderBrief, taskText, tddLine, parsePrior, priorSection, type PriorCommit } from '../brief.js';
@@ -31,7 +31,7 @@ import { reviewCommand } from './review.js';
 import { swarmStep } from './step.js';
 import { runWithCache, cacheGit, checkoutPrefix } from '../validate-cache.js';
 import { roundDecision } from '../round.js';
-import { eventsOf, isTask, projectOf, resolveProject } from '../task-ref.js';
+import { eventsOf, isTask, projectOf, readWorkDir, resolveProject, workRel } from '../task-ref.js';
 import { computeStats, renderStats, type PlanStates } from '../stats.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, runOptions, validateEvent, planAffected, type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { checkTools, mcpInventory, toolGaps } from '../tools.js';
@@ -922,7 +922,9 @@ function runCommand(argv: string[], io: Io): Result {
         // not ignored (a repository that ignores .forge/ has opted out). Asked after the writes, which may have made it.
         const git = io.git ?? defaultGit(io.cwd);
         const untracked = (git(['ls-files', '--others', '--exclude-standard', '--', '.forge/.gitignore']) ?? '').trim() ? { untracked: ['.forge/.gitignore'] } : {};
-        return json({ ...t.output, ...untracked });
+        // D-08: the task's work folder, by project for a plan task (.forge/work/<project>/<id>).
+        const work = t.task && isSafeId(t.task) ? { work: workRel({ project: t.project, task: t.task }) } : {};
+        return json({ ...t.output, ...work, ...untracked });
       }
       case 'validate': {
         const config = loadConfig(repoDir);
@@ -1494,7 +1496,9 @@ function runCommand(argv: string[], io: Io): Result {
         const top = git(['rev-parse', '--show-toplevel'])?.trim();
         if (!top) throw new UsageError(`tree ${sub}: ${repoDir} is not a git work tree`);
         const treeRoot = path.resolve(top);
-        const file = treeStartFile(io.cwd, task);
+        // D-08: the task's work folder: its project's, or the older one the ledger still gives it.
+        const ledger = readEvents(io.cwd);
+        const file = path.join(readWorkDir(io.cwd, { project: resolveProject({ flag: flag('project'), task, events: ledger }), task }, ledger), 'tree-start.json');
         let text: string | null = null;
         try { text = readFileSync(file, 'utf8'); } catch { text = null; }
         const stored = parseSnapshot(text);

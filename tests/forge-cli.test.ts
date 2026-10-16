@@ -2190,3 +2190,13 @@ describe('forge stats (C-09)', () => {
     expect(JSON.parse(r.stdout)).toEqual({ setup: { cmd: 'npm ci', ok: false, tail: ['npm ERR! code ENOTFOUND', 'npm ERR! network request failed'] } });
   });
 });
+
+describe('triage prints the work folder of the task (D-08)', () => {
+  it('by project for a plan task, the id alone for a loose one, none without --task', () => {
+    writeFileSync(path.join(root, 'plan.yaml'), 'project: shop\nlocale: en\nversion: "1"\ntracks:\n  - { id: a, name: A, color: blue }\nphases:\n  - { id: p1, name: P1 }\ntasks:\n  - { id: T001, title: Add a footer link, track: a, phase: p1, done_when: the footer shows it, zones: [src/ui/**] }\n');
+    io.git = () => '';
+    expect(JSON.parse(run(['triage', '--plan', 'plan.yaml', '--task', 'T001'], io).stdout).work).toBe('.forge/work/shop/T001');
+    expect(JSON.parse(run(['triage', '--task', 'fix-a', 'add a footer link to the page'], io).stdout).work).toBe('.forge/work/fix-a');
+    expect(JSON.parse(run(['triage', 'add a footer link to the page'], io).stdout)).not.toHaveProperty('work');
+  });
+});

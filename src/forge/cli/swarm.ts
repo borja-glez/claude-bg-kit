@@ -31,6 +31,7 @@ import { readMember, writeMember, isMemberId, listMembers, memberFile } from '..
 import { parseLooseTasks, planOfLoose, statesOfLoose, writeLoose, readLoose, type LooseTask } from '../loose.js';
 import { startAnnounce, integratedSay, rejectedDepsSay, keptFilesSay, proposeSay, VENV_HINT } from '../swarm.js';
 import type { PriorCommit } from '../brief.js';
+import { workDir, workRel } from '../task-ref.js';
 import { cleanText } from '../../lib/forge-status.js';
 
 export interface GitDeps { git: (args: string[]) => string | null; exec: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany; repo: RepoReader }
@@ -1165,7 +1166,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
         const task = taskArg();
         const { main, e, session, m } = memberCtx(true);
         if (m!.role === 'executor' && m!.task !== task) throw new UsageError(`swarm worktree: ${session} executes ${m!.task}, not ${task}`);
-        return json(addTaskWorktree(deps, main, task, e.branch));
+        return json({ ...addTaskWorktree(deps, main, task, e.branch), work: workRel({ project: e.project, task }) });
       }
       const task = taskArg();
       const e = notEnded(current());
@@ -1173,7 +1174,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       const { worktree: dir, branch } = added;
       const t: ExecTask = e.tasks[task] ?? { status: 'running', stage: 'brief', round: 0, worktree: dir, branch, executor: e.mode, attempts: 0, agent: null, startedAt: iso, stageSince: iso, updatedAt: iso, detail: null };
       update(cur => cur && { ...notEnded(cur), tasks: { ...cur.tasks, [task]: { ...(cur.tasks[task] ?? t), worktree: dir, branch, updatedAt: iso } } });
-      return json(added);
+      return json({ ...added, work: workRel({ project: e.kind === 'plan' ? e.project : null, task }) });
     }
     case 'task': {
       const task = taskArg();
@@ -1353,10 +1354,12 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       const attempt = verdict.attempt;
       const log = deps.git(['log', '--oneline', '-n', '20', `${e.branch}..${t.branch}`])?.trim();
       const commits = log ? log.split(/\r?\n/).map(l => `  - ${l}`).join('\n') : '  - none';
-      const note = path.join(io.cwd, '.forge', 'work', task, 'handover.md');
+      // D-08: the task's work folder, by project; the note goes to the main checkout's, the member works in its worktree's.
+      const ref = { project: e.kind === 'plan' ? e.project : null, task };
+      const note = path.join(workDir(io.cwd, ref), 'handover.md');
       // A run member keeps its work files (brief-<n>.md, report-<n>.txt, validators-<n>.json, reviews-<n>-<round>/)
-      // in .forge/work/<T>/ of its own task worktree, where it runs; only this note lives in the main checkout.
-      const memberWork = path.join(t.worktree || taskWorktree(io.cwd, task), '.forge', 'work', task);
+      // in .forge/work/<project>/<T>/ of its own task worktree, where it runs; only this note lives in the main checkout.
+      const memberWork = workDir(t.worktree || taskWorktree(io.cwd, task), ref);
       mkdirSync(path.dirname(note), { recursive: true });
       writeFileSync(note, [
         `# Handover: ${task} (attempt ${attempt} of ${RELAUNCH_CAP + 1})`, '',

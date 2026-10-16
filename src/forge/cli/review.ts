@@ -8,7 +8,7 @@ import { detectValidators, selectValidators, runValidators, markPreexisting, blo
 import { PATH_ORDER, zonesFromPaths, type PathName, type ReviewRole } from '../triage.js';
 import { parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, repoRelative, type Finding, type Review, type ReviewerName, type FailingValidator, type AskFinding } from '../verdict.js';
 import { roundDecision } from '../round.js';
-import { eventsOf, isTask, ofTask, resolveProject } from '../task-ref.js';
+import { eventsOf, isTask, ofTask, readWorkDir, resolveProject } from '../task-ref.js';
 import { parseIndex, assignIds, answeredBy, idsOf, recordRound, carriedResiduals, carriedOutOfModel, openIds, closedFor, previousFindings, asPrevious, historyLine, renderHandover, expressCandidate, type FindingsIndex } from '../findings-index.js';
 import { reviewsOf } from '../loop.js';
 import { takeBrief } from '../shadow.js';
@@ -733,7 +733,7 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
  * its branch, HEAD or a commit below it; the phase and the output then carry `head`, the HEAD this brief's work starts on,
  * and the baseline is still the worktree's, so a caller that wants it on BASE passes --no-baseline and takes it where
  * BASE's tree is), records what already fails on it into `<dir>/baseline-<n>.json` (as
- * `validate --all --path <p> --base-run --task <id>-<n>` does; `<dir>` defaults to `.forge/work/<id>`), logs the phase
+ * `validate --all --path <p> --base-run --task <id>-<n>` does; `<dir>` defaults to the task's work folder, `.forge/work/<project>/<id>` for a plan task), logs the phase
  * `{"phase":<name, default implement>,"brief":<n>,"base":<BASE>}` on `<id>` and prints `{base, baseline, failing, cached, durationMs, validate, threatModel}` (the baseline comes from the tree cache when BASE's tree was validated: C6, I-06; never with --no-cache).
  * validate is the command the implementer runs (J-11). --no-baseline records BASE and the phase without validating (baseline: null; J-13).
  * It also writes <dir>/threat-model.md from the config's threatModel and prints threatModel, its path or null (K4-02).
@@ -771,7 +771,10 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   let config: ForgeConfig | null = null;
   try { config = loadConfig(deps.repoDir); } catch (e) { if (!noBaseline || !(e instanceof ConfigError)) throw e; }
   // K4-02: the threat model the brief and the security reviewer read, written from the config (null without one).
-  const dir = path.resolve(deps.cwd, flag('dir') ?? path.join('.forge', 'work', id));
+  // D-08: without --dir, the task's work folder: its project's, or the older one the ledger still gives it.
+  const ledger = readEvents(deps.cwd);
+  const dir = flag('dir') !== undefined ? path.resolve(deps.cwd, flag('dir')!)
+    : readWorkDir(deps.cwd, { project: resolveProject({ flag: flag('project'), task: id, events: ledger }), task: id }, ledger);
   mkdirSync(dir, { recursive: true });
   const tmFile = config ? writeThreatModel(dir, config) : null;
   const threatModel = tmFile ? rel(deps.cwd, tmFile) : null;

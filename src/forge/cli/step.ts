@@ -6,7 +6,7 @@ import { checkPlanProject, commitInfo } from './swarm.js';
 import { readExecution, executionTaskFile, runWorktree, taskBase, writePublicTask } from '../execution.js';
 import { takeStepLock } from '../jobs.js';
 import { appendEvent, readEvents, type LedgerEvent } from '../ledger.js';
-import { eventsOf, isTask, ofTask } from '../task-ref.js';
+import { eventsOf, isTask, ofTask, readWorkDir, workRel } from '../task-ref.js';
 import { reviewsOf } from '../loop.js';
 import { LEASE_MINUTES } from '../../lib/coordination.js';
 import { normalizePublicTask, type ExecTask, type ExecutionState, type PublicTask } from '../../lib/execution-state.js';
@@ -129,6 +129,12 @@ function briefOf(events: LedgerEvent[], task: string): { n: number; base: string
   return { n: typeof e?.brief === 'number' && e.brief >= 1 ? e.brief : 1, base: e ? String(e.base) : null, head: typeof e?.head === 'string' && e.head ? e.head : null };
 }
 
+/** D-08: a task's work folder, relative to the main checkout: the project's, or the older .forge/work/<T> of a task the
+ *  execution started before this version. Every file the step reads or writes for the task goes there, and so does the
+ *  --dir of each command it runs for it. */
+const workOf = (c: Ctx, task: string, events: readonly LedgerEvent[]): string =>
+  path.relative(c.io.cwd, readWorkDir(c.io.cwd, { project: c.project, task }, events));
+
 /** The last review round review-prep prepared for brief `n` in the work dir; 0 when none. */
 function latestRound(work: string, n: number): number {
   let round = 0;
@@ -193,9 +199,8 @@ function renewLease(io: Io, e: ExecutionState, task: string, t: ExecTask, now: D
 /** prep's output for brief 1 that a resumed start can use again: the one the step kept (prep-1.json) when the ledger's
  *  last phase implement with a base is brief 1 on that same BASE (the worktree's HEAD, or `resumedBase` below it for a
  *  task resumed on its branch, D-02), it started on the worktree's HEAD as it is now, and its baseline is there (a resumed
- *  task has none until its first review: reviewBase takes it). */
-function keptPrep(c: Ctx, task: string, worktree: string, resumedBase: string | null): Json | null {
-  const work = path.join(c.io.cwd, '.forge', 'work', task);
+ *  task has none until its first review: reviewBase takes it). `work`: the task's work folder, absolute. */
+function keptPrep(c: Ctx, task: string, work: string, worktree: string, resumedBase: string | null): Json | null {
   const kept = readJson(path.join(work, 'prep-1.json')) as Json | null;
   const head = c.deps.gitAt(worktree)(['rev-parse', 'HEAD'])?.trim();
   const { n, base } = briefOf(ledgerOf(c, task), task);
@@ -220,7 +225,8 @@ function startTask(c: Ctx, task: string, resume: boolean): boolean {
   if (!w || typeof w.worktree !== 'string') return false;
   const worktree = w.worktree;
   const resumedBase = w.resumed === true && typeof w.base === 'string' && w.base ? w.base : null;
-  const work = path.join('.forge', 'work', task);
+  // D-08: a task that starts always uses its project's folder; from then on workOf finds it there.
+  const work = workRel({ project: c.project, task });
   mkdirSync(path.join(c.io.cwd, work), { recursive: true });
   // D-02: a task resumed on its branch is briefed with its earlier attempt's commits, which are reviewed with it.
   const prior = Array.isArray(w.prior) && w.prior.length ? path.join(work, 'prior.json') : null;
@@ -232,8 +238,8 @@ function startTask(c: Ctx, task: string, resume: boolean): boolean {
   writeFileSync(path.join(c.io.cwd, brief), `${b.stdout.trimEnd()}\n\nWorktree: ${slash(worktree)} (work only inside this directory).\n`);
   const tri = call(c, task, ['triage', '--plan', c.planArg, '--task', task, '--cwd', worktree, '--locale', c.locale]);
   if (!tri) return false;
-  const kept = resume ? keptPrep(c, task, worktree, resumedBase) : null;
-  const pr = kept ?? call(c, task, ['prep', '--task', `${task}-1`, '--path', 'large', '--cwd', worktree, ...(resumedBase ? ['--base', resumedBase, '--no-baseline'] : [])]);
+  const kept = resume ? keptPrep(c, task, path.join(c.io.cwd, work), worktree, resumedBase) : null;
+  const pr = kept ?? call(c, task, ['prep', '--task', `${task}-1`, '--path', 'large', '--dir', work, '--cwd', worktree, ...(resumedBase ? ['--base', resumedBase, '--no-baseline'] : [])]);
   if (!pr) return false;
   if (!kept) writeFileSync(path.join(c.io.cwd, work, 'prep-1.json'), JSON.stringify(pr, null, 2) + '\n');
   const impl = (tri.implementer && typeof tri.implementer === 'object' ? tri.implementer : {}) as Json;
@@ -258,13 +264,12 @@ function startTask(c: Ctx, task: string, resume: boolean): boolean {
  * brief has no baseline on its BASE, so it runs there even when BASE did not move: an adopted task (I3: its member
  * prepared it in its own worktree and ledger, so `base` is already that merge-base and there is no baseline here) and a
  * task resumed on its branch (D-02: prep logged its BASE below the commits of the earlier attempt and took none). Null
- * after an error action.
+ * after an error action. `work`: the task's work folder (workOf), absolute.
  */
-function reviewBase(c: Ctx, task: string, t: ExecTask, n: number, base: string, rebaseline: boolean): string | null {
+function reviewBase(c: Ctx, task: string, t: ExecTask, n: number, base: string, rebaseline: boolean, work: string): string | null {
   if (t.attempts < 1 && !rebaseline) return base;
   const moved = taskBase(c.deps.gitAt(t.worktree), c.runBranch);
   if (!moved || (moved === base && !rebaseline)) return base;
-  const work = path.join(c.io.cwd, '.forge', 'work', task);
   const mark = path.join(work, `base-${n}.json`);
   const kept = readJson(mark) as Json | null;
   if (kept && typeof kept === 'object' && kept.base === moved && existsSync(path.join(work, `baseline-${n}.json`))) return moved;
@@ -277,6 +282,8 @@ function reviewBase(c: Ctx, task: string, t: ExecTask, n: number, base: string, 
     c.actions.push({ type: 'error', task, command: 'validate', code: r.code, stderr: (r.stderr || r.stdout).trim().slice(0, 500) });
     return null;
   }
+  // An adopted task (I3) may have no work folder in the main checkout yet.
+  mkdirSync(work, { recursive: true });
   writeFileSync(path.join(work, `baseline-${n}.json`), JSON.stringify(results, null, 2) + '\n');
   writeFileSync(mark, JSON.stringify({ base: moved, from: moved === base ? null : base, at: c.iso() }, null, 2) + '\n');
   return moved;
@@ -296,16 +303,17 @@ function reviewBase(c: Ctx, task: string, t: ExecTask, n: number, base: string, 
  * started on (briefOf's `head`) is what it was handed, so one back without a commit of its own only has its report.
  */
 function implementerBack(c: Ctx, task: string, t: ExecTask, told: boolean): void {
-  const brief = briefOf(ledgerOf(c, task), task);
+  const events = readEvents(c.io.cwd);
+  const brief = briefOf(eventsOf(events, { project: c.project, task }), task);
   const { n } = brief;
   const adopted = !brief.base && t.attempts > 0;
   const base = brief.base ?? (adopted ? taskBase(c.deps.gitAt(t.worktree), c.runBranch) : null);
-  const work = path.join('.forge', 'work', task);
+  const work = workOf(c, task, events);
   const abs = path.join(c.io.cwd, work);
   const report = path.join(work, `report-${n}.txt`);
   const round = latestRound(abs, n);
   const given = c.rulings.get(task);
-  if (given?.kind === 'defer' && round) { closeRound(c, task, t, n, round, roundOf(c, task, n, round), ['--defer', given.ids.join(',')]); return; }
+  if (given?.kind === 'defer' && round) { closeRound(c, task, t, n, round, roundOf(c, task, work, n, round), ['--defer', given.ids.join(',')]); return; }
   if (given && given.kind !== 'review') { c.actions.push(stepError(task, `--ruling ${task}:${given.kind}: no question of ${task} waits for that answer`)); return; }
   const head = c.deps.gitAt(t.worktree)(['rev-parse', 'HEAD'])?.trim() || null;
   if (t.stage !== 'validate' && !given) {
@@ -319,7 +327,7 @@ function implementerBack(c: Ctx, task: string, t: ExecTask, told: boolean): void
   if (!base) { c.actions.push(stepError(task, `no phase implement with a base for ${task}: run FORGE prep first`)); return; }
   const loc = ['--locale', c.locale];
   if (!call(c, task, ['swarm', 'task', task, '--stage', 'validate', '--no-agent'])) return;
-  const at = reviewBase(c, task, t, n, base, adopted || brief.head !== null);
+  const at = reviewBase(c, task, t, n, base, adopted || brief.head !== null, abs);
   if (!at) return;
   const tri = call(c, task, ['triage', '--plan', c.planArg, '--task', task, '--cwd', t.worktree, '--base', at, ...loc]);
   if (!tri) return;
@@ -364,8 +372,8 @@ function pendingVerify(c: Ctx, taskN: string, roundDir: string): Json | null {
   return { role: 'verify', ...rest, surfaces };
 }
 
-function roundOf(c: Ctx, task: string, n: number, round: number): Round {
-  const work = path.join('.forge', 'work', task);
+/** Round `round` of brief `n` in the task's work folder `work` (workOf, relative to the main checkout). */
+function roundOf(c: Ctx, task: string, work: string, n: number, round: number): Round {
   const abs = path.join(c.io.cwd, work);
   const roundDir = path.join(abs, `reviews-${n}-${round}`);
   const plan = readJson(path.join(roundDir, 'review-plan.json'));
@@ -385,10 +393,12 @@ function roundOf(c: Ctx, task: string, n: number, round: number): Round {
  * respawns that reviewer again. A round whose close asked the person (asked.json, I1) is closed again only with their answer.
  */
 function reviewersBack(c: Ctx, task: string, t: ExecTask, told: boolean): void {
-  const { n } = briefOf(ledgerOf(c, task), task);
-  const round = latestRound(path.join(c.io.cwd, '.forge', 'work', task), n);
+  const events = readEvents(c.io.cwd);
+  const { n } = briefOf(eventsOf(events, { project: c.project, task }), task);
+  const work = workOf(c, task, events);
+  const round = latestRound(path.join(c.io.cwd, work), n);
   if (!round) return;
-  const r = roundOf(c, task, n, round);
+  const r = roundOf(c, task, work, n, round);
   const asked = readAsked(path.join(r.roundDir, 'asked.json'));
   const given = c.rulings.get(task);
   if (asked) { answer(c, task, t, n, round, r, asked, given); return; }

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { workDir } from './task-ref.js';
 
 // What a task found in the work tree when it started, and what changed since that it did not do: the session asks the
 // person before it touches a file the task did not create (a config they wrote by hand mid-task, for one).
@@ -13,7 +14,8 @@ export interface TreeCheck {
 }
 
 export const TREE_CAP = 200;
-export const treeStartFile = (root: string, task: string) => path.join(root, '.forge', 'work', task, 'tree-start.json');
+/** D-08: the snapshot lives in the task's work folder (.forge/work/<project>/<T> for a plan task). */
+export const treeStartFile = (root: string, task: string, project: string | null = null) => path.join(workDir(root, { project, task }), 'tree-start.json');
 
 /** `git status --porcelain -z -uall` split into untracked paths and tracked ones changed (staged or not); ignored never appear. */
 export function parseStatus(z: string): { untracked: string[]; modified: string[] } {

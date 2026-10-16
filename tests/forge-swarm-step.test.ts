@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, existsSync, readdirSync, renameSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -72,9 +72,9 @@ describe('forge swarm step (D-12)', () => {
     const s = step('--versions', 'versions.json');
     const starts = s.actions.filter(a => a.type === 'spawnImplementer');
     expect(starts.map(a => a.task)).toEqual(['T1', 'T2']);
-    expect(starts[0]).toMatchObject({ agent: expect.stringMatching(/^forge-/), brief: '.forge/work/T1/brief-1.md', report: '.forge/work/T1/report-1.txt', worktree: wt('T1') });
+    expect(starts[0]).toMatchObject({ agent: expect.stringMatching(/^forge-/), brief: '.forge/work/shop/T1/brief-1.md', report: '.forge/work/shop/T1/report-1.txt', worktree: wt('T1') });
     expect(starts[0].validate).toEqual(expect.stringContaining('validate --affected --base'));
-    expect(readFileSync(path.join(root, '.forge', 'work', 'T1', 'brief-1.md'), 'utf8')).toContain('work only inside this directory');
+    expect(readFileSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'brief-1.md'), 'utf8')).toContain('work only inside this directory');
     expect(readExecution(root)!.tasks.T1).toMatchObject({ stage: 'implement', agent: starts[0].agent });
     expect(readEvents(root).filter(e => e.kind === 'agent' && e.task === 'T1-1')).toHaveLength(1);
     const t1 = s.publish.tasks.find(x => x.task === 'T1')!;
@@ -89,13 +89,13 @@ describe('forge swarm step (D-12)', () => {
   it('an implementer back with a commit gets its reviewers; reviewers back close the task, and the tick integrates it with its commit (H-16)', () => {
     step();
     commitIn(wt('T1'), 'src/t1/a.ts', 'export const a = 1;\n', 'T1: a');
-    writeFileSync(path.join(root, '.forge', 'work', 'T1', 'report-1.txt'), 'done\n');
+    writeFileSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'report-1.txt'), 'done\n');
     const review = step().actions.find(a => a.task === 'T1')!;
     expect(review).toMatchObject({ type: 'spawnReviewers', round: 1 });
     const spawn = (review.spawn as { role: string; twin?: boolean }[]).filter(e => !e.twin);
     expect(spawn.map(e => e.role)).toContain('review-correctness');
     expect(readExecution(root)!.tasks.T1.stage).toBe('review');
-    const dir = path.join(root, '.forge', 'work', 'T1', 'reviews-1-1');
+    const dir = path.join(root, '.forge', 'work', 'shop', 'T1', 'reviews-1-1');
     for (const e of spawn) writeFileSync(path.join(dir, `${e.role.replace(/^review-/, '')}.json`), pass);
     const s = step();
     expect(s.actions.find(a => a.type === 'accepted')).toMatchObject({ task: 'T1' });
@@ -106,19 +106,19 @@ describe('forge swarm step (D-12)', () => {
   });
   it('an implementer back without a commit hands its report over; a review draft is not closed (Review Focus 4)', () => {
     step();
-    writeFileSync(path.join(root, '.forge', 'work', 'T2', 'report-1.txt'), 'NEEDS_CONTEXT: which format?\n');
-    expect(step('--returned', 'T2').actions).toContainEqual({ type: 'readReport', task: 'T2', report: '.forge/work/T2/report-1.txt' });
+    writeFileSync(path.join(root, '.forge', 'work', 'shop', 'T2', 'report-1.txt'), 'NEEDS_CONTEXT: which format?\n');
+    expect(step('--returned', 'T2').actions).toContainEqual({ type: 'readReport', task: 'T2', report: '.forge/work/shop/T2/report-1.txt' });
     expect(readExecution(root)!.tasks.T2.stage).toBe('implement');
     commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
     step('--returned', 'T1');
-    writeFileSync(path.join(root, '.forge', 'work', 'T1', 'reviews-1-1', 'correctness.json'), JSON.stringify({ verdict: 'pass', confidence: 0.5, findings: [], complete: false }));
+    writeFileSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'reviews-1-1', 'correctness.json'), JSON.stringify({ verdict: 'pass', confidence: 0.5, findings: [], complete: false }));
     expect(step().actions.filter(a => a.task === 'T1')).toEqual([]);
     expect(readExecution(root)!.tasks.T1.stage).toBe('review');
   });
   it('a command that fails for one task is an error action of that task, and the step goes on (Review Focus 4)', () => {
     step();
     commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
-    rmSync(path.join(root, '.forge', 'work', 'T1', 'baseline-1.json'));
+    rmSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'baseline-1.json'));
     const s = step('--returned', 'T1');
     expect(s.actions).toContainEqual(expect.objectContaining({ type: 'error', task: 'T1', command: 'review-prep', code: 2 }));
     expect(s.publish.tasks.map(x => x.task).sort()).toEqual(['T1', 'T2']);
@@ -127,7 +127,7 @@ describe('forge swarm step (D-12)', () => {
     step();
     commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
     const review = step('--returned', 'T1').actions.find(a => a.task === 'T1')!;
-    const dir = path.join(root, '.forge', 'work', 'T1');
+    const dir = path.join(root, '.forge', 'work', 'shop', 'T1');
     const roundDir = path.join(dir, 'reviews-1-1');
     // The round as an express review leaves it: its validators run in the background and their file is pending.
     const planFile = path.join(roundDir, 'review-plan.json');
@@ -144,7 +144,7 @@ describe('forge swarm step (D-12)', () => {
     step();
     commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
     const review = step('--returned', 'T1').actions.find(a => a.task === 'T1')!;
-    const dir = path.join(root, '.forge', 'work', 'T1', 'reviews-1-1');
+    const dir = path.join(root, '.forge', 'work', 'shop', 'T1', 'reviews-1-1');
     for (const e of (review.spawn as { role: string; twin?: boolean }[]).filter(e => !e.twin)) {
       writeFileSync(path.join(dir, `${e.role.replace(/^review-/, '')}.json`), e.role === 'review-correctness' ? '{"verdict":"maybe"}' : pass);
     }
@@ -164,7 +164,7 @@ describe('forge swarm step (D-12)', () => {
     step();
     commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
     const review = step('--returned', 'T1').actions.find(a => a.task === 'T1')!;
-    const dir = path.join(root, '.forge', 'work', 'T1', 'reviews-1-1');
+    const dir = path.join(root, '.forge', 'work', 'shop', 'T1', 'reviews-1-1');
     for (const e of (review.spawn as { role: string; twin?: boolean }[]).filter(e => !e.twin)) {
       writeFileSync(path.join(dir, `${e.role.replace(/^review-/, '')}.json`), e.role === 'review-correctness' ? '{"verdict":"maybe"}' : pass);
     }
@@ -205,7 +205,7 @@ describe('forge swarm step (D-12)', () => {
   it('a task left at stage validate by a failing review-prep is taken up by each step, with no --returned, until its review is prepared', () => {
     step();
     commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
-    const baseline = path.join(root, '.forge', 'work', 'T1', 'baseline-1.json');
+    const baseline = path.join(root, '.forge', 'work', 'shop', 'T1', 'baseline-1.json');
     rmSync(baseline);
     expect(step('--returned', 'T1').actions).toContainEqual(expect.objectContaining({ type: 'error', task: 'T1', command: 'review-prep' }));
     expect(stageOf('T1')).toBe('validate');
@@ -222,7 +222,7 @@ describe('forge swarm step (D-12)', () => {
     expect(stageOf('T1')).toBe('validate');
     expect(step().actions.find(a => a.task === 'T1')).toMatchObject({ type: 'spawnReviewers', round: 1 });
     expect(stageOf('T1')).toBe('review');
-    expect(readdirSync(path.join(root, '.forge', 'work', 'T1')).filter(d => d.startsWith('reviews-'))).toEqual(['reviews-1-1']);
+    expect(readdirSync(path.join(root, '.forge', 'work', 'shop', 'T1')).filter(d => d.startsWith('reviews-'))).toEqual(['reviews-1-1']);
   });
   it('after a validators round, an implementer back with no new commit hands its report over (C-08)', () => {
     step();
@@ -231,10 +231,10 @@ describe('forge swarm step (D-12)', () => {
     commitIn(wt('T1'), 'bad.txt', 'x\n', 'T1: bad');
     expect(step('--returned', 'T1').actions.find(a => a.task === 'T1')).toMatchObject({ type: 'validatorsRound' });
     expect(stageOf('T1')).toBe('implement');
-    writeFileSync(path.join(root, '.forge', 'work', 'T1', 'report-1.txt'), 'BLOCKED: the check needs a server\n');
-    expect(step('--returned', 'T1').actions.filter(a => a.task === 'T1')).toEqual([{ type: 'readReport', task: 'T1', report: '.forge/work/T1/report-1.txt' }]);
+    writeFileSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'report-1.txt'), 'BLOCKED: the check needs a server\n');
+    expect(step('--returned', 'T1').actions.filter(a => a.task === 'T1')).toEqual([{ type: 'readReport', task: 'T1', report: '.forge/work/shop/T1/report-1.txt' }]);
     expect(stageOf('T1')).toBe('implement');
-    expect(existsSync(path.join(root, '.forge', 'work', 'T1', 'validators-fix-1-1-2.json'))).toBe(false);
+    expect(existsSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'validators-fix-1-1-2.json'))).toBe(false);
   });
   it('after a conflict retry the review diffs from the run-branch tip the implementer merged, on a baseline run there, once', () => {
     const accept = (task: string) => out(run(['swarm', 'task', task, '--stage', 'verdict', '--status', 'accepted', '--no-agent'], io));
@@ -271,12 +271,12 @@ describe('forge swarm step (D-12)', () => {
     expect(baseOf(s.calls, 'triage')).toBe(moved);
     expect(baseOf(s.calls, 'review-prep')).toBe(moved);
     expect(s.calls.filter(a => isCmd(a, 'validate'))).toEqual([['validate', '--all', '--path', 'large', '--base-run', '--task', 'T3-1', '--cwd', runWt]]);
-    const diff = readFileSync(path.join(root, '.forge', 'work', 'T3', 'diff-1.patch'), 'utf8');
+    const diff = readFileSync(path.join(root, '.forge', 'work', 'shop', 'T3', 'diff-1.patch'), 'utf8');
     expect(diff).toContain('src/t3/c.ts');
     expect(diff).not.toContain('src/t2/b.ts');
-    expect(JSON.parse(readFileSync(path.join(root, '.forge', 'work', 'T3', 'base-1.json'), 'utf8'))).toMatchObject({ base: moved });
+    expect(JSON.parse(readFileSync(path.join(root, '.forge', 'work', 'shop', 'T3', 'base-1.json'), 'utf8'))).toMatchObject({ base: moved });
     // The next round keeps that base and does not run the baseline again.
-    const dir = path.join(root, '.forge', 'work', 'T3', 'reviews-1-1');
+    const dir = path.join(root, '.forge', 'work', 'shop', 'T3', 'reviews-1-1');
     for (const e of (s.actions.find(a => a.task === 'T3')!.spawn as { role: string; twin?: boolean }[]).filter(e => !e.twin)) {
       writeFileSync(path.join(dir, `${e.role.replace(/^review-/, '')}.json`), JSON.stringify({ verdict: 'fail', confidence: 0.9, findings: [{ severity: 'important', file: 'src/t3/c.ts', line: 1, problem: 'wrong' }] }));
     }
@@ -294,7 +294,7 @@ describe('forge swarm step (D-12)', () => {
     const s = stepWith(() => false, '--returned', 'T1');
     expect(s.actions.find(a => a.task === 'T1')).toMatchObject({ type: 'spawnReviewers', base });
     expect(s.calls.filter(a => isCmd(a, 'validate'))).toEqual([]);
-    expect(existsSync(path.join(root, '.forge', 'work', 'T1', 'base-1.json'))).toBe(false);
+    expect(existsSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'base-1.json'))).toBe(false);
   });
   it('says every action it can emit, in both locales', () => {
     const types = ['spawnImplementer', 'spawnReviewers', 'express', 'validatorsRound', 'readReport', 'reviewMissing', 'respawnReviewers', 'accepted',
@@ -341,13 +341,13 @@ const reviewedT1 = () => {
   commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
   const review = step('--returned', 'T1').actions.find(a => a.task === 'T1')!;
   expect(review).toMatchObject({ type: 'spawnReviewers', round: 1 });
-  const dir = path.join(root, '.forge', 'work', 'T1', 'reviews-1-1');
+  const dir = path.join(root, '.forge', 'work', 'shop', 'T1', 'reviews-1-1');
   for (const e of (review.spawn as { role: string; twin?: boolean }[]).filter(e => !e.twin)) writeFileSync(path.join(dir, `${e.role.replace(/^review-/, '')}.json`), pass);
   return { review, dir };
 };
 // review-close as it prints for a repeated security theme (K4-02): ask set, next resume.
 const ASK_CLOSE = {
-  action: 'fix', score: 0.6, next: 'resume', last: false, implementer: { agent: 'forge-impl', role: 'impl' }, findings: '.forge/work/T1/findings-1-1.json',
+  action: 'fix', score: 0.6, next: 'resume', last: false, implementer: { agent: 'forge-impl', role: 'impl' }, findings: '.forge/work/shop/T1/findings-1-1.json',
   deferred: [], ask: { kind: 'repeat-theme', question: 'q', options: [], findings: [{ id: 'F1', severity: 'important', problem: 'p', earlier: { id: 'F0', round: 1, problem: 'e' } }] },
   handover: null, revert: null, invalid: [], incomplete: [], round: 1, reasons: [],
 };
@@ -367,7 +367,7 @@ describe('swarm step: the person rules on a question (I1, M8)', () => {
     const first = stepClosing(() => ASK_CLOSE);
     expect(first.actions.filter(a => a.task === 'T1')).toEqual([expect.objectContaining({ type: 'ask', task: 'T1', close: expect.objectContaining({ next: 'resume' }) })]);
     expect(first.closes).toHaveLength(1);
-    expect(JSON.parse(readFileSync(path.join(dir, 'asked.json'), 'utf8'))).toMatchObject({ findings: ['F1'], next: 'resume', implementer: { agent: 'forge-impl' }, findingsFile: '.forge/work/T1/findings-1-1.json', handover: null, revert: null });
+    expect(JSON.parse(readFileSync(path.join(dir, 'asked.json'), 'utf8'))).toMatchObject({ findings: ['F1'], next: 'resume', implementer: { agent: 'forge-impl' }, findingsFile: '.forge/work/shop/T1/findings-1-1.json', handover: null, revert: null });
     for (const extra of [[], ['--returned', 'T1']]) {
       const again = stepClosing(() => ASK_CLOSE, ...extra);
       expect(again.closes, extra.join(' ')).toEqual([]);
@@ -409,7 +409,7 @@ describe('swarm step: the person rules on a question (I1, M8)', () => {
     expect(JSON.parse(readFileSync(path.join(dir, 'asked.json'), 'utf8')).ruling).toEqual({ kind: 'fix' });
     const s = stepClosing(() => ASK_CLOSE);
     expect(s.closes).toEqual([]);
-    expect(s.actions.filter(a => a.task === 'T1')).toEqual([expect.objectContaining({ type: 'resumeImplementer', implementer: { agent: 'forge-impl', role: 'impl' }, findings: '.forge/work/T1/findings-1-1.json' })]);
+    expect(s.actions.filter(a => a.task === 'T1')).toEqual([expect.objectContaining({ type: 'resumeImplementer', implementer: { agent: 'forge-impl', role: 'impl' }, findings: '.forge/work/shop/T1/findings-1-1.json' })]);
     expect(readExecution(root)!.tasks.T1).toMatchObject({ stage: 'implement', agent: 'forge-impl', round: 2 });
     expect(existsSync(path.join(dir, 'asked.json'))).toBe(false);
   });
@@ -427,7 +427,7 @@ describe('swarm step: the person rules on a question (I1, M8)', () => {
     reviewedT1();
     stepClosing(() => ({ ...ASK_CLOSE, ask: null }));
     expect(stageOf('T1')).toBe('implement');
-    writeFileSync(path.join(root, '.forge', 'work', 'T1', 'report-1.txt'), 'NEEDS_CONTEXT: this needs another storage format\n');
+    writeFileSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'report-1.txt'), 'NEEDS_CONTEXT: this needs another storage format\n');
     expect(step('--returned', 'T1').actions.find(a => a.task === 'T1')).toMatchObject({ type: 'readReport' });
     const s = stepClosing(argv => ({ ...ASK_CLOSE, ask: null, ...(argv.includes('--defer') ? { action: 'accept', next: 'done', findings: null } : {}) }), '--ruling', 'T1:defer:F3+F5');
     expect(s.closes).toHaveLength(1);
@@ -438,7 +438,7 @@ describe('swarm step: the person rules on a question (I1, M8)', () => {
     step();
     commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
     const review = step('--returned', 'T1').actions.find(a => a.task === 'T1')!;
-    const dir = path.join(root, '.forge', 'work', 'T1');
+    const dir = path.join(root, '.forge', 'work', 'shop', 'T1');
     for (const e of (review.spawn as { role: string; twin?: boolean }[]).filter(e => !e.twin)) {
       writeFileSync(path.join(dir, 'reviews-1-1', `${e.role.replace(/^review-/, '')}.json`), JSON.stringify({ verdict: 'fail', confidence: 0.9, findings: [{ severity: 'important', file: 'src/t1/a.ts', line: 1, problem: 'wrong' }] }));
     }
@@ -465,10 +465,10 @@ describe('swarm step: a verification (I2)', () => {
     expect(run(['local', 'set', 'surfaces.web', 'allowed', '--cwd', wt('T1')], io).code).toBe(0);
     const review = step('--returned', 'T1').actions.find(a => a.task === 'T1')!;
     expect(review).toMatchObject({ type: 'spawnReviewers', round: 1 });
-    const plan = out(run(['verify-plan', '--task', 'T1-1', '--path', 'large', '--base', String(review.base), '--dir', '.forge/work/T1/reviews-1-1', '--cwd', wt('T1'), '--locale', 'en'], io));
+    const plan = out(run(['verify-plan', '--task', 'T1-1', '--path', 'large', '--base', String(review.base), '--dir', '.forge/work/shop/T1/reviews-1-1', '--cwd', wt('T1'), '--locale', 'en'], io));
     expect(plan.eligible).toBe(true);
-    const dir = path.join(root, '.forge', 'work', 'T1', 'reviews-1-1');
-    expect(JSON.parse(readFileSync(path.join(dir, 'verify-pending.json'), 'utf8'))).toMatchObject({ task: 'T1-1', surfaces: [expect.objectContaining({ name: 'web' })], evidence: '.forge/work/T1/evidence/1-1' });
+    const dir = path.join(root, '.forge', 'work', 'shop', 'T1', 'reviews-1-1');
+    expect(JSON.parse(readFileSync(path.join(dir, 'verify-pending.json'), 'utf8'))).toMatchObject({ task: 'T1-1', surfaces: [expect.objectContaining({ name: 'web' })], evidence: '.forge/work/shop/T1/evidence/1-1' });
     for (const e of (review.spawn as { role: string; twin?: boolean }[]).filter(e => !e.twin)) writeFileSync(path.join(dir, `${e.role.replace(/^review-/, '')}.json`), pass);
     return dir;
   };
@@ -486,7 +486,7 @@ describe('swarm step: a verification (I2)', () => {
     const accepted = s.actions.find(a => a.task === 'T1' && a.type === 'accepted')!;
     expect(accepted).toMatchObject({ verify: { result: 'pass', learned: { web: 1 }, cleanup: { killed: [], gone: [] }, commit: ['.forge/verify/web.md'], evidence: expect.objectContaining({ mode: 'upload' }), say: expect.stringContaining('pass') } });
     expect(s.calls.filter(a => isCmd(a, 'verify-close'))).toHaveLength(1);
-    expect(s.calls.find(a => isCmd(a, 'verify-close'))).toEqual(expect.arrayContaining(['--evidence', '.forge/work/T1/evidence/1-1', '--db', 'db', '--cwd', wt('T1')]));
+    expect(s.calls.find(a => isCmd(a, 'verify-close'))).toEqual(expect.arrayContaining(['--evidence', '.forge/work/shop/T1/evidence/1-1', '--db', 'db', '--cwd', wt('T1')]));
     // The note is in the surface, committed with the task's work before the tick integrates it.
     expect(g(wt('T1'), 'show', 'HEAD:.forge/verify/web.md')).toContain('the dev server takes 5 s');
     expect(g(wt('T1'), 'status', '--porcelain')).toBe('');
@@ -508,7 +508,7 @@ describe('swarm step: a verification (I2)', () => {
     const s = stepWith(() => false);
     expect(s.actions.find(a => a.task === 'T1')).toMatchObject({ type: 'accepted' });
     expect(s.calls.filter(a => isCmd(a, 'verify-close'))).toEqual([]);
-    expect(run(['verify-plan', '--task', 'T1-1', '--path', 'large', '--base', 'HEAD', '--dir', '.forge/work/T1', '--cwd', wt('T1')], io)).toMatchObject({ code: 2, stderr: expect.stringContaining('--dir must be a review dir') });
+    expect(run(['verify-plan', '--task', 'T1-1', '--path', 'large', '--base', 'HEAD', '--dir', '.forge/work/shop/T1', '--cwd', wt('T1')], io)).toMatchObject({ code: 2, stderr: expect.stringContaining('--dir must be a review dir') });
   });
 });
 
@@ -519,7 +519,7 @@ describe('swarm step: a member task adopted after a conflict (I3)', () => {
     const iso = NOW.toISOString();
     saveExecution(root, { ...e, tasks: { T1: { status: 'conflict', stage: 'integrate', round: 1, worktree: '', branch: 'task/T1', executor: 'manual', attempts: 0, agent: null, startedAt: iso, stageSince: iso, updatedAt: iso, detail: 'conflict', title: 'T1' } } });
     const adopted = out(run(['swarm', 'retry', 'T1', '--adopt'], io));
-    const work = path.join(root, '.forge', 'work', 'T1');
+    const work = path.join(root, '.forge', 'work', 'shop', 'T1');
     mkdirSync(work, { recursive: true });
     writeFileSync(path.join(work, 'brief-1.md'), 'brief\n');
     commitIn(adopted.worktree, 'src/t1/a.ts', 'x\n', 'T1: fix the conflict');
@@ -583,14 +583,14 @@ describe('swarm step: robustness (M1, M2, M7, M9)', () => {
   it('redo: stage implement at the next round, its revert carried (M9)', () => {
     reviewedT1();
     const revert = { base: 'b', head: 'h', args: ['-C', wt('T1'), 'revert', '--no-edit', 'b..HEAD'] };
-    const s = stepClosing(() => ({ ...ASK_CLOSE, ask: null, next: 'redo', implementer: { agent: 'forge-impl-high', role: 'impl-high' }, handover: '.forge/work/T1/handover-1-1.md', revert }));
-    expect(s.actions.filter(a => a.task === 'T1')).toEqual([expect.objectContaining({ type: 'redo', implementer: { agent: 'forge-impl-high', role: 'impl-high' }, handover: '.forge/work/T1/handover-1-1.md', revert })]);
+    const s = stepClosing(() => ({ ...ASK_CLOSE, ask: null, next: 'redo', implementer: { agent: 'forge-impl-high', role: 'impl-high' }, handover: '.forge/work/shop/T1/handover-1-1.md', revert }));
+    expect(s.actions.filter(a => a.task === 'T1')).toEqual([expect.objectContaining({ type: 'redo', implementer: { agent: 'forge-impl-high', role: 'impl-high' }, handover: '.forge/work/shop/T1/handover-1-1.md', revert })]);
     expect(readExecution(root)!.tasks.T1).toMatchObject({ stage: 'implement', agent: 'forge-impl-high', round: 2 });
   });
   it('freshImplementer carries its handover; the new implementer is logged (M9)', () => {
     reviewedT1();
-    const s = stepClosing(() => ({ ...ASK_CLOSE, ask: null, next: 'fresh-stronger', implementer: { agent: 'forge-impl-high', role: 'impl-high' }, handover: '.forge/work/T1/handover-1-1.md' }));
-    expect(s.actions.find(a => a.task === 'T1')).toMatchObject({ type: 'freshImplementer', handover: '.forge/work/T1/handover-1-1.md', implementer: { agent: 'forge-impl-high' } });
+    const s = stepClosing(() => ({ ...ASK_CLOSE, ask: null, next: 'fresh-stronger', implementer: { agent: 'forge-impl-high', role: 'impl-high' }, handover: '.forge/work/shop/T1/handover-1-1.md' }));
+    expect(s.actions.find(a => a.task === 'T1')).toMatchObject({ type: 'freshImplementer', handover: '.forge/work/shop/T1/handover-1-1.md', implementer: { agent: 'forge-impl-high' } });
     expect(readEvents(root).filter(e => e.kind === 'agent' && e.task === 'T1-1').at(-1)).toMatchObject({ agent: 'forge-impl-high', role: 'impl-high' });
     expect(stageOf('T1')).toBe('implement');
   });
@@ -598,14 +598,14 @@ describe('swarm step: robustness (M1, M2, M7, M9)', () => {
     reviewedT1();
     const s = stepClosing(() => ({ ...ASK_CLOSE, ask: null, next: 'breaker', reasons: ['the same finding three times'] }));
     expect(s.actions.find(a => a.task === 'T1')).toMatchObject({ type: 'blocked', next: 'breaker', reasons: ['the same finding three times'] });
-    expect(readFileSync(path.join(root, '.forge', 'work', 'T1', 'blocked.txt'), 'utf8')).toContain('breaker: the same finding three times');
+    expect(readFileSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'blocked.txt'), 'utf8')).toContain('breaker: the same finding three times');
     expect(readExecution(root)!.tasks.T1.status).toBe('blocked');
   });
   it('an express review closes normally once its validators file arrives (M9)', () => {
     step();
     commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
     const review = step('--returned', 'T1').actions.find(a => a.task === 'T1')!;
-    const dir = path.join(root, '.forge', 'work', 'T1');
+    const dir = path.join(root, '.forge', 'work', 'shop', 'T1');
     const planFile = path.join(dir, 'reviews-1-1', 'review-plan.json');
     writeFileSync(planFile, JSON.stringify({ ...JSON.parse(readFileSync(planFile, 'utf8')), express: true, validatorsPending: true }));
     rmSync(path.join(dir, 'validators-1.json'), { force: true });
@@ -685,7 +685,7 @@ describe('swarm step briefs a resumed task with its earlier attempt (D-02)', () 
     g(root, 'worktree', 'add', '-q', '-b', 'task/T1', wt('T1'), 'forge/run-shop');
     commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: first try');
     step();
-    const work = path.join(root, '.forge', 'work', 'T1');
+    const work = path.join(root, '.forge', 'work', 'shop', 'T1');
     expect(readFileSync(path.join(work, 'brief-1.md'), 'utf8')).toContain('## Previous attempt');
     expect(JSON.parse(readFileSync(path.join(work, 'prior.json'), 'utf8'))).toEqual([{ sha: g(wt('T1'), 'rev-parse', 'HEAD'), title: 'T1: first try' }]);
   });
@@ -699,17 +699,17 @@ describe('swarm step briefs a resumed task with its earlier attempt (D-02)', () 
     expect(s.actions.find(a => a.type === 'spawnImplementer' && a.task === 'T1')).toMatchObject({ base: fork, validate: expect.stringContaining(`--base ${fork} `) });
     expect(readEvents(root).filter(e => e.kind === 'phase' && e.task === 'T1').at(-1)).toMatchObject({ base: fork, head: g(wt('T1'), 'rev-parse', 'HEAD') });
     // Back with no commit of its own: its report is handed over; the earlier attempt alone is not sent to review.
-    writeFileSync(path.join(root, '.forge', 'work', 'T1', 'report-1.txt'), 'NEEDS_CONTEXT: which format?\n');
-    expect(step('--returned', 'T1').actions.filter(a => a.task === 'T1')).toEqual([{ type: 'readReport', task: 'T1', report: '.forge/work/T1/report-1.txt' }]);
+    writeFileSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'report-1.txt'), 'NEEDS_CONTEXT: which format?\n');
+    expect(step('--returned', 'T1').actions.filter(a => a.task === 'T1')).toEqual([{ type: 'readReport', task: 'T1', report: '.forge/work/shop/T1/report-1.txt' }]);
     commitIn(wt('T1'), 'src/t1/b.ts', 'y\n', 'T1: b');
     const r = stepWith(() => false, '--returned', 'T1');
     expect(r.actions.find(a => a.task === 'T1')).toMatchObject({ type: 'spawnReviewers', base: fork });
-    const diff = readFileSync(path.join(root, '.forge', 'work', 'T1', 'diff-1.patch'), 'utf8');
+    const diff = readFileSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'diff-1.patch'), 'utf8');
     for (const f of ['src/t1/a.ts', 'src/t1/b.ts']) expect(diff).toContain(f);
     // The worktree is past BASE: what already failed there is not excused; the baseline runs where the run branch is.
     const runWt = path.join(root, '.claude', 'worktrees', 'run');
     expect(r.calls.filter(a => isCmd(a, 'validate'))).toEqual([['validate', '--all', '--path', 'large', '--base-run', '--task', 'T1-1', '--cwd', runWt]]);
-    expect(JSON.parse(readFileSync(path.join(root, '.forge', 'work', 'T1', 'base-1.json'), 'utf8'))).toMatchObject({ base: fork, from: null });
+    expect(JSON.parse(readFileSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'base-1.json'), 'utf8'))).toMatchObject({ base: fork, from: null });
   });
   it('a start left at stage brief after its prep reuses that prep on the same BASE and HEAD', () => {
     g(root, 'worktree', 'add', '-q', '-b', 'task/T1', wt('T1'), 'forge/run-shop');
@@ -757,10 +757,55 @@ describe('a run is the project of its plan (D-08)', () => {
     commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
     const review = step('--returned', 'T1').actions.find(a => a.task === 'T1')!;
     expect(review).toMatchObject({ type: 'spawnReviewers', round: 1, base: t1.base });
-    const dir = path.join(root, '.forge', 'work', 'T1', 'reviews-1-1');
+    const dir = path.join(root, '.forge', 'work', 'shop', 'T1', 'reviews-1-1');
     for (const e of (review.spawn as { role: string; twin?: boolean }[]).filter(e => !e.twin)) {
       writeFileSync(path.join(dir, `${e.role.replace(/^review-/, '')}.json`), JSON.stringify({ verdict: 'fail', confidence: 0.9, findings: [{ severity: 'important', file: 'src/t1/a.ts', line: 1, problem: 'wrong' }] }));
     }
     expect(step().actions.find(a => a.task === 'T1')).toMatchObject({ type: 'resumeImplementer', implementer: { role: t1.role } });
+  });
+});
+
+describe("swarm step keeps a plan task's files in its project's work folder (D-08)", () => {
+  const spawned = (a: Action) => (a.spawn as { role: string; twin?: boolean }[]).filter(e => !e.twin).map(e => e.role.replace(/^review-/, ''));
+  it('start, review, a respawn, accept and integrate: every file is in .forge/work/shop/T1, none in .forge/work/T1', () => {
+    const work = path.join(root, '.forge', 'work', 'shop', 'T1');
+    const s0 = stepWith(() => false);
+    expect(s0.actions.find(a => a.task === 'T1')).toMatchObject({ type: 'spawnImplementer', brief: '.forge/work/shop/T1/brief-1.md', report: '.forge/work/shop/T1/report-1.txt' });
+    expect(s0.calls.find(a => isCmd(a, 'prep') && a.includes('T1-1'))).toEqual(expect.arrayContaining(['--dir', '.forge/work/shop/T1']));
+    for (const f of ['brief-1.md', 'prep-1.json', 'baseline-1.json']) expect(existsSync(path.join(work, f)), f).toBe(true);
+    commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
+    writeFileSync(path.join(work, 'report-1.txt'), 'done\n');
+    const s1 = stepWith(() => false);
+    const review = s1.actions.find(a => a.task === 'T1')!;
+    expect(review).toMatchObject({ type: 'spawnReviewers', round: 1 });
+    expect(s1.calls.find(a => isCmd(a, 'review-prep'))).toEqual(expect.arrayContaining(['--baseline', '.forge/work/shop/T1/baseline-1.json', '--dir', '.forge/work/shop/T1']));
+    const roundDir = path.join(work, 'reviews-1-1');
+    for (const k of spawned(review)) writeFileSync(path.join(roundDir, `${k}.json`), k === 'correctness' ? '{"verdict":"maybe"}' : pass);
+    expect(step().actions.find(a => a.task === 'T1')).toMatchObject({ type: 'respawnReviewers', reviewers: ['correctness'] });
+    expect(existsSync(path.join(roundDir, 'respawned.json'))).toBe(true);
+    writeFileSync(path.join(roundDir, 'correctness.json'), pass);
+    const s2 = stepWith(() => false);
+    expect(s2.calls.find(a => isCmd(a, 'review-close'))).toEqual(expect.arrayContaining(['--dir', '.forge/work/shop/T1']));
+    expect(s2.actions.find(a => a.type === 'accepted')).toMatchObject({ task: 'T1' });
+    expect(s2.actions.find(a => a.type === 'integrated')).toMatchObject({ task: 'T1', commit: { title: 'T1: a' } });
+    expect(existsSync(path.join(root, '.forge', 'work', 'T1'))).toBe(false);
+  });
+  it('a task an earlier version started in .forge/work/T1 goes on there: review, accept, integrate', () => {
+    step();
+    // What an earlier version left: T1's files in .forge/work/T1; the ledger gives T1 the project shop (its triage --plan).
+    const old = path.join(root, '.forge', 'work', 'T1');
+    renameSync(path.join(root, '.forge', 'work', 'shop', 'T1'), old);
+    commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
+    writeFileSync(path.join(old, 'report-1.txt'), 'done\n');
+    const s1 = stepWith(() => false);
+    const review = s1.actions.find(a => a.task === 'T1')!;
+    expect(review).toMatchObject({ type: 'spawnReviewers', round: 1 });
+    expect(s1.calls.find(a => isCmd(a, 'review-prep'))).toEqual(expect.arrayContaining(['--baseline', '.forge/work/T1/baseline-1.json', '--dir', '.forge/work/T1']));
+    for (const k of spawned(review)) writeFileSync(path.join(old, 'reviews-1-1', `${k}.json`), pass);
+    const s2 = stepWith(() => false);
+    expect(s2.calls.find(a => isCmd(a, 'review-close'))).toEqual(expect.arrayContaining(['--dir', '.forge/work/T1']));
+    expect(s2.actions.find(a => a.type === 'accepted')).toMatchObject({ task: 'T1' });
+    expect(s2.actions.find(a => a.type === 'integrated')).toMatchObject({ task: 'T1', commit: { title: 'T1: a' } });
+    expect(existsSync(path.join(root, '.forge', 'work', 'shop', 'T1'))).toBe(false);
   });
 });
