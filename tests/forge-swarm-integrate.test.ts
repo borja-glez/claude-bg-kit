@@ -219,6 +219,23 @@ describe('forge swarm integrate (into the run branch)', () => {
     for (const e of validates) expect(typeof e.durationMs).toBe('number');
     rmSync(counter, { force: true });
   });
+  it('--no-cache neither reads nor writes the tree cache: both validations run (a cached red result may be flaky)', () => {
+    const counter = path.join(root, '..', `cnt-${path.basename(root)}.txt`);
+    const count = counted(counter);
+    const w = accept('T1', 'a.txt', 'a\n');
+    // The merged tree is in the cache, as review-prep leaves it in the task worktree.
+    mkdirSync(path.join(w, '.forge'), { recursive: true });
+    writeFileSync(path.join(w, '.forge', 'config.yaml'), readFileSync(path.join(runWt(), '.forge', 'config.yaml'), 'utf8'));
+    expect(run(['validate', '--all', '--path', 'large', '--cwd', w], io).code).toBe(0);
+    const cacheDir = path.join(root, '.forge', 'cache', 'validate');
+    const before = readdirSync(cacheDir).sort();
+    expect(out(run(['swarm', 'integrate', 'T1', '--no-cache'], io)).result).toBe('integrated');
+    expect(count()).toBe(3); // the run tip's baseline and the merged tree, none from the cache
+    expect(readdirSync(cacheDir).sort()).toEqual(before);
+    const validates = readEvents(root).filter(e => e.kind === 'validate' && e.task === 'T1');
+    expect(validates.map(e => [e.integrate, e.cached])).toEqual([['baseline', false], ['merged', false]]);
+    rmSync(counter, { force: true });
+  });
   it('a validator red on the run tip still blocks a merge that adds a failing test, and the detail names it (D-06)', () => {
     const OLD_NEW = "validators:\n  - name: web\n    cmd: node -e \"console.log('FAIL tests/a.test.ts > old');if(require('fs').existsSync('n.txt'))console.log('FAIL tests/a.test.ts > new');process.exit(1)\"\n";
     mkdirSync(path.join(runWt(), '.forge'), { recursive: true });

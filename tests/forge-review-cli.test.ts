@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -647,6 +647,24 @@ describe('the tree cache (C6), with forge in the worktree itself', () => {
     run(['prep', '--task', 'T1-2', '--path', 'medium'], wio);
     expect(calls).toHaveLength(2);
     expect(existsSync(path.join(wt, '.forge', 'cache', 'validate'))).toBe(false);
+  });
+
+  it('--no-cache: prep and review-prep neither read nor write it (a cached red result may be flaky)', () => {
+    const dir = path.join(wt, '.forge', 'cache', 'validate');
+    const entries = () => (existsSync(dir) ? readdirSync(dir).length : 0);
+    const base = JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'medium', '--no-cache'], wio).stdout).base;
+    expect(entries()).toBe(0);
+    run(['prep', '--task', 'T1-1', '--path', 'medium'], wio);
+    expect(entries()).toBe(1);
+    expect(JSON.parse(run(['prep', '--task', 'T1-1', '--path', 'medium', '--no-cache'], wio).stdout).cached).toEqual([]);
+    expect(calls).toHaveLength(3);
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo\nthree\n');
+    git('commit', '-q', '-am', 'work');
+    expect(JSON.parse(run([...reviewPrepArgs(base), '--no-cache'], wio).stdout).cached).toEqual([]);
+    expect(entries()).toBe(1);
+    expect(JSON.parse(run(reviewPrepArgs(base), wio).stdout).cached).toEqual([]);
+    expect(JSON.parse(run([...reviewPrepArgs(base), '--no-cache'], wio).stdout).cached).toEqual([]);
+    expect(calls).toHaveLength(6);
   });
 });
 

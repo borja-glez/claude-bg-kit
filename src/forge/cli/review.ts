@@ -63,13 +63,13 @@ function restoringGenerated<T>(deps: ReviewDeps, generated: string[], fn: () => 
   return generated.length ? restoringRegenerated({ git: deps.git }, fn, into, generated) : fn();
 }
 
-/** A validator run of the review commands (C6, C-12): through the tree cache of the main checkout, with the config's
- *  parallel batch and retry rule, putting back what the config's `generated` names. The results are raw (no baseline
- *  marks); durationMs is the call's clock. */
-function validateList(deps: ReviewDeps, config: ForgeConfig, list: Validator[], restored: string[]): { results: ValidatorResult[]; durationMs: number } {
+/** A validator run of the review commands (C6, C-12): through the tree cache of the main checkout (unless --no-cache or
+ *  validate.cache: false), with the config's parallel batch and retry rule, putting back what the config's `generated`
+ *  names. The results are raw (no baseline marks); durationMs is the call's clock. */
+function validateList(deps: ReviewDeps, config: ForgeConfig, list: Validator[], restored: string[], noCache: boolean): { results: ValidatorResult[]; durationMs: number } {
   const t0 = Date.now();
   const opts = runOptions(config, readEvents(deps.cwd), deps.now(), deps.execMany);
-  const use = config.validate.cache;
+  const use = config.validate.cache && !noCache;
   const results = runWithCache(list,
     misses => restoringGenerated(deps, config.generated, () => runValidators(misses, deps.exec, config.validatorTimeoutSec, opts), restored),
     { main: mainCheckout(deps.cwd), git: use ? cacheGit(deps.git) : deps.git, dir: use ? checkoutPrefix(deps.git) : null, repo: deps.repo, generated: config.generated, read: use, write: use, now: deps.now });
@@ -83,7 +83,7 @@ function readJson(file: string): unknown {
 }
 
 /**
- * `FORGE review-prep --task <T>-<n> --path <p> --base <sha> --baseline <f> --dir <dir> [--locale es|en]`: validates
+ * `FORGE review-prep --task <T>-<n> --path <p> --base <sha> --baseline <f> --dir <dir> [--locale es|en] [--no-cache]`: validates
  * against the baseline into `<dir>/validators-<n>.json`, writes `<dir>/diff-<n>.patch`, decides who reviews with
  * reviewRound from the task's last triage and saves `head.txt` and `review-plan.json` in `<dir>/reviews-<n>-<round>/`.
  * From round 2 it also writes the fix diff and each reviewer's previous blocking findings, and copies the carried
@@ -134,7 +134,7 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   const scope: Scope = pathName === 'trivial' || pathName === 'small' ? { mode: 'small' }
     : { mode: 'heavy', changed: changed === null ? null : changed.split('\n').map(s => s.trim()).filter(Boolean) };
   const restored: string[] = [];
-  const validation = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored);
+  const validation = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored, args.includes('--no-cache'));
   const results: ValidatorResult[] = markPreexisting(validation.results, baseline);
   const ok = results.every(r => !blocking(r));
   const validatorsFile = path.join(dir, `validators-${n}.json`);
@@ -425,10 +425,10 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
 }
 
 /**
- * `FORGE prep --task <id>-<n> --path <p> [--phase <name>] [--dir <dir>] [--cwd <worktree>] [--no-baseline]`: before a brief's work, in
+ * `FORGE prep --task <id>-<n> --path <p> [--phase <name>] [--dir <dir>] [--cwd <worktree>] [--no-baseline] [--no-cache]`: before a brief's work, in
  * one call, reads BASE (the HEAD of `--cwd`), records what already fails on it into `<dir>/baseline-<n>.json` (as
  * `validate --all --path <p> --base-run --task <id>-<n>` does; `<dir>` defaults to `.forge/work/<id>`), logs the phase
- * `{"phase":<name, default implement>,"brief":<n>,"base":<BASE>}` on `<id>` and prints `{base, baseline, failing, cached, durationMs, validate}` (the baseline comes from the tree cache when BASE's tree was validated: C6, I-06).
+ * `{"phase":<name, default implement>,"brief":<n>,"base":<BASE>}` on `<id>` and prints `{base, baseline, failing, cached, durationMs, validate}` (the baseline comes from the tree cache when BASE's tree was validated: C6, I-06; never with --no-cache).
  * validate is the command the implementer runs (J-11). --no-baseline records BASE and the phase without validating (baseline: null; J-13).
  * A validator failing on BASE is what the baseline is for: prep exits 0.
  */
@@ -463,7 +463,7 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   const config = loadConfig(deps.repoDir);
   const scope: Scope = p === 'trivial' || p === 'small' ? { mode: 'small' } : { mode: 'heavy', changed: null };
   const restored: string[] = [];
-  const { results, durationMs } = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored);
+  const { results, durationMs } = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored, args.includes('--no-cache'));
   const dir = path.resolve(deps.cwd, flag('dir') ?? path.join('.forge', 'work', id));
   mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `baseline-${n}.json`);

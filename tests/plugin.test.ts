@@ -1020,6 +1020,11 @@ describe('plugin layout', () => {
         'skipped: "not-affected"', '`stats [--days N | --since iso] [--json] [--locale es|en]`', '--no-cache', '--out f', '--no-baseline']) {
         expect(md, `${f}: ${s}`).toContain(s);
       }
+      // Every command that reads the tree cache takes --no-cache.
+      const lines = md.split(/\r?\n/);
+      for (const cmd of ['- `validate ', '- `prep --task', '- `review-prep --task', '- `swarm integrate ']) {
+        expect(lines.find(l => l.startsWith(cmd))?.split('` - ')[0], `${f}: ${cmd}`).toContain('[--no-cache]');
+      }
     }
   });
 });
