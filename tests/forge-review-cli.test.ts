@@ -1319,6 +1319,35 @@ describe('the express review (measure 7)', () => {
     expect(readEvents(root).filter(e => e.kind === 'verdict' && e.task === 'T1-1')).toHaveLength(2);
   });
 
+  it('a background validation that gave no results ({error, code} from --out) stops review-close with exit 2 and its error, and its file goes (C-03)', () => {
+    firstReview();
+    expect(JSON.parse(prep().stdout).express).toBe(true);
+    write(r2(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    writeFileSync(path.join(work(), 'validators-1.json'), JSON.stringify({ error: 'validate: --baseline must be the JSON written by forge validate', code: 2 }));
+    const stopped = close();
+    expect(stopped).toMatchObject({ code: 2, stdout: '', stderr: expect.stringContaining('validate: --baseline must be the JSON written by forge validate') });
+    expect(existsSync(path.join(work(), 'validators-1.json'))).toBe(false);
+    // No verdict for the round: it waits for the file again, which validators.cmd run once more in the foreground writes.
+    expect(readEvents(root).filter(e => e.kind === 'verdict' && e.task === 'T1-1')).toHaveLength(1);
+    expect(close()).toMatchObject({ code: 3 });
+  });
+
+  it('the printed express command with a bad --baseline: review-close says why and drops its file; run again, the review closes (C-03)', () => {
+    firstReview();
+    const printed = JSON.parse(prep().stdout);
+    write(r2(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    const argv = (printed.validators.cmd as string).match(/"[^"]*"|\S+/g)!.map(t => t.replace(/^"(.*)"$/, '$1')).slice(2);
+    const baseline = readFileSync(path.join(work(), 'baseline-1.json'), 'utf8');
+    writeFileSync(path.join(work(), 'baseline-1.json'), 'not json');
+    expect(run(argv, io).code).toBe(2);
+    expect(JSON.parse(readFileSync(path.join(work(), 'validators-1.json'), 'utf8'))).toEqual({ error: 'validate: --baseline must be the JSON written by forge validate', code: 2 });
+    expect(close()).toMatchObject({ code: 2, stderr: expect.stringContaining('validate: --baseline must be the JSON written by forge validate') });
+    expect(JSON.parse(close().stdout).missing).toEqual(['.forge/work/T1/validators-1.json']);
+    writeFileSync(path.join(work(), 'baseline-1.json'), baseline);
+    expect(run(argv, io).code).toBe(0);
+    expect(JSON.parse(close().stdout)).toMatchObject({ action: 'accept', next: 'done' });
+  });
+
   it('is not used with review.express: false', () => {
     firstReview();
     writeFileSync(path.join(wt, '.forge', 'config.yaml'), 'review:\n  express: false\ndetect: false\nvalidators:\n  - name: check\n    cmd: node -e "process.exit(0)"\n');

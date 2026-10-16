@@ -5,6 +5,7 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { isSafeId } from '../lib/execution-state.js';
+import { forgeDir } from './ledger.js';
 import { pidAlive } from './pid.js';
 
 export interface JobDoc {
@@ -77,11 +78,12 @@ export function liveJobs(main: string, now: Date, alive: (pid: number) => boolea
 }
 
 /** Runs `fn` as a job: its file is written first and removed in a finally. A file that cannot be written only costs a
- *  Stop-hook block (the session is stepped again). */
+ *  Stop-hook block (the session is stepped again). .forge comes with its .gitignore (forgeDir), so a job file of a
+ *  repo's first forge command is never untracked. */
 export function withJob<T>(main: string, spec: { cmd: string; task: string | null; out: string; session: string | null; startedAt: string }, fn: (job: JobDoc) => T): T {
   const job: JobDoc = { name: jobName(spec.cmd, spec.task, process.pid), cmd: spec.cmd, task: spec.task, pid: process.pid, startedAt: spec.startedAt, out: spec.out, session: spec.session };
   let file: string | null = null;
-  try { file = writeJob(main, job); } catch { file = null; }
+  try { forgeDir(main); file = writeJob(main, job); } catch { file = null; }
   try { return fn(job); } finally { if (file) rmSync(file, { force: true }); }
 }
 
@@ -92,6 +94,7 @@ const before = (a: JobDoc, b: JobDoc) => a.startedAt < b.startedAt || (a.started
  * The validation slot of `job` (C-03): before its validators run it waits while `max` other live jobs hold a slot or
  * queue ahead of it, polling every SLOT_POLL_MS (at most SLOT_MAX_WAIT_MS: then it goes on). `waited()` is the time it
  * waited, in ms. Without its job file (it could not be written) it never waits.
+ * The limit is soft: there is no lock, so two jobs that look at the same moment can both take the last slot.
  */
 export function slotFor(main: string, job: JobDoc, max: number, deps: { now: () => Date; sleep: (ms: number) => void; alive?: (pid: number) => boolean }): { slot: Slot; waited: () => number } {
   let waited = 0;

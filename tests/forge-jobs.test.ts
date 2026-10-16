@@ -6,6 +6,7 @@ import path from 'node:path';
 import { jobsDir, liveJobs, withJob, slotFor, normalizeJob, JOB_MAX_AGE_MS, SLOT_POLL_MS, type JobDoc } from '../src/forge/jobs.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { saveExecution } from '../src/forge/execution.js';
+import { readEvents } from '../src/forge/ledger.js';
 
 let root: string;
 const T = '2026-10-12T12:00:00.000Z';
@@ -42,6 +43,8 @@ describe('jobs (C-03)', () => {
     });
     expect(seen).toEqual([[`prep-T1-1-${process.pid}.json`]]);
     expect(jobFiles()).toEqual([]);
+    // The jobs live under .forge, whose .gitignore keeps them out of git from a repo's first forge command.
+    expect(readFileSync(path.join(root, '.forge', '.gitignore'), 'utf8')).toMatch(/^\*\n/);
     expect(() => withJob(root, { cmd: 'step', task: null, out: 'o.json', session: null, startedAt: T }, () => { throw new Error('x'); })).toThrow('x');
     expect(jobFiles()).toEqual([]);
   });
@@ -124,6 +127,13 @@ describe('--out (C-03)', () => {
     expect(run(['validate', '--all', '--no-cache', '--out', '.forge/work/v.json'], waiting).code).toBe(0);
     expect(sleeps).toBe(2);
     expect(jobFiles()).toEqual([]);
+  });
+  it('an --out that reaches validate (a flag before the command, a second --out) exits 2 and validates nothing', () => {
+    for (const argv of [['--cwd', root, 'validate', '--all', '--out', '.forge/work/v.json'], ['validate', '--all', '--out', '.forge/work/a.json', '--out', '.forge/work/v.json']]) {
+      expect(run(argv, io), argv.join(' ')).toMatchObject({ code: 2, stderr: expect.stringContaining('validate: --out') });
+    }
+    expect(existsSync(path.join(root, '.forge', 'work', 'v.json'))).toBe(false);
+    expect(readEvents(root).filter(e => e.kind === 'validate')).toEqual([]);
   });
   it('a command that fails writes {error, code} to its file', () => {
     const r = run(['review-prep', '--task', 'T1-1', '--out', '.forge/work/T1/rp.json'], io);

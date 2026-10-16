@@ -517,6 +517,17 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   // Measure 7: an express review's validators run in the background; the review closes once their file is there.
   const validatorsPath = path.join(dir, `validators-${n}.json`);
   if (plan.validatorsPending === true && !existsSync(validatorsPath)) missing.push(validatorsPath);
+  // C-03: a background validation that failed without results (a bad --baseline, an invalid config) left {error, code}
+  // through --out. It is no verdict on the code: the file goes, so the next close waits for it again and the skill runs
+  // validators.cmd once more in the foreground (and tells the person and stops if that fails too).
+  if (plan.validatorsPending === true && existsSync(validatorsPath)) {
+    const doc = readJson(validatorsPath);
+    if (!Array.isArray(doc)) {
+      rmSync(validatorsPath, { force: true });
+      const error = doc && typeof doc === 'object' && typeof (doc as { error?: unknown }).error === 'string' ? (doc as { error: string }).error : 'not a validate result';
+      throw new UsageError(`review-close: the validation of ${task} gave no results (${error}); ${rel(deps.cwd, validatorsPath)} was removed: run its validators command again`);
+    }
+  }
   if (missing.length) return json({ missing: missing.map(f => rel(deps.cwd, f)) }, 3);
 
   const reviews: Partial<Record<ReviewerName, Review>> = {};

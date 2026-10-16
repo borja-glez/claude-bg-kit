@@ -781,6 +781,9 @@ function runCommand(argv: string[], io: Io): Result {
         const all = detectValidators(repoReader(repoDir), config);
         const p = flag('path');
         if (p !== undefined && !(PATH_ORDER as readonly string[]).includes(p)) throw new UsageError(`validate: --path must be one of ${PATH_ORDER.join('|')}`);
+        // --out belongs to run() (C-03), which takes one when the command comes first. One that reaches here (a flag before
+        // the command, a second --out) would be ignored and its file never written.
+        if (has('out')) throw new UsageError('validate: --out is taken once, with the command first: forge validate … --out <file> (--cwd after validate)');
         // --affected a,b names the files; bare (or followed by another flag) it takes those changed since --base (HEAD by
         // default; uncommitted changes included) and the untracked ones, read with -z so git quotes no name. Both relative
         // to the code's directory, as the validators see them (--relative: a project in a subdirectory).
