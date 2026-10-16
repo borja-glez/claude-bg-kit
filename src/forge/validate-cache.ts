@@ -1,6 +1,7 @@
-// The validation cache by tree (C6): a validator's result is kept under the tree it ran on, its resolved command, the
-// lockfiles and the platform, so the same tree is never validated twice (prep's baseline, review-prep, validate and
-// swarm integrate share it). It lives in the main checkout, shared by every worktree: the key never depends on a path.
+// The validation cache by tree (C6): a validator's result is kept under the tree it ran on, the directory it ran in
+// (relative to its checkout's root), its resolved command, the lockfiles and the platform, so the same tree is never
+// validated twice (prep's baseline, review-prep, validate and swarm integrate share it). It lives in the main checkout,
+// shared by every worktree: the key never depends on an absolute path.
 // A missing, broken or foreign entry is a miss and a failed write is ignored: the cache never fails a validation.
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -19,6 +20,9 @@ export interface CacheCtx {
   main: string;
   /** git in the checkout being validated, and its files (the lockfiles are read from there). */
   git: Git; repo: RepoReader;
+  /** Where the validators run, relative to the checkout's root (checkoutPrefix): the same tree and command in another
+   *  directory is another result. Null (git cannot say): the cache is neither read nor written. */
+  dir: string | null;
   /** The config's generated globs: their changes do not make a tree dirty. */
   generated: string[];
   read: boolean; write: boolean;
@@ -44,6 +48,15 @@ const KEY = /^[0-9a-f]{64}$/;
 export function cacheGit(git: Git): Git {
   const top = git(['rev-parse', '--show-toplevel'])?.trim();
   return top ? args => git(['-C', top, ...args]) : git;
+}
+
+/**
+ * Where the validators run, relative to the root of their checkout: `git rev-parse --show-prefix` of the git that runs
+ * there ('' at the root, so every worktree shares the root's entries; `sub/` below it). Null when git cannot say.
+ */
+export function checkoutPrefix(git: Git): string | null {
+  const out = git(['rev-parse', '--show-prefix']);
+  return out === null ? null : out.replace(/\r?\n$/, '');
 }
 
 export const cacheDir = (main: string) => path.join(main, '.forge', 'cache', 'validate');
@@ -88,9 +101,9 @@ export function lockHash(repo: RepoReader): string {
 
 export const envKey = (platform: string = process.platform, version: string = process.versions.node): string => `${platform}-${version.split('.')[0]}`;
 
-/** The key of one validator's result: sha256 of the tree, its resolved command, the lockfiles' hash and the environment. */
-export function cacheKey(tree: string, cmd: string, lock: string, env: string): string {
-  return createHash('sha256').update([tree, cmd, lock, env].join('\0')).digest('hex');
+/** The key of one validator's result: sha256 of the tree, the directory it runs in, its resolved command, the lockfiles' hash and the environment. */
+export function cacheKey(tree: string, dir: string, cmd: string, lock: string, env: string): string {
+  return createHash('sha256').update([tree, dir, cmd, lock, env].join('\0')).digest('hex');
 }
 
 const strings = (a: unknown) => Array.isArray(a) && a.every(s => typeof s === 'string');
@@ -148,16 +161,19 @@ const toCached = (v: Validator, r: ValidatorResult, tree: string, at: string): C
 /**
  * Runs `list` through the cache: each cacheable validator found under the current tree comes back with `cached: true`
  * and the clock of the run that produced it; the rest go to `run` (in the list's order) and, when the tree is still
- * the same after it, every cacheable result that is not a timeout is written. A dirty tree is neither read nor written.
- * The results keep the list's order and are raw: no baseline marks (markPreexisting runs on them after).
+ * the same after it, every cacheable result that is not a timeout is written. A dirty tree, or an unknown directory, is
+ * neither read nor written. The results keep the list's order and are raw: no baseline marks (markPreexisting runs on
+ * them after).
  */
 export function runWithCache(list: Validator[], run: (misses: Validator[]) => ValidatorResult[], ctx: CacheCtx): ValidatorResult[] {
   const treeOf = ctx.tree ?? (() => cleanTree(ctx.git, ctx.generated));
-  const tree = ctx.read || ctx.write ? treeOf() : null;
+  const dir = ctx.dir;
+  if (dir === null || !(ctx.read || ctx.write)) return run(list);
+  const tree = treeOf();
   if (tree === null) return run(list);
   const lock = lockHash(ctx.repo);
   const env = ctx.env ?? envKey();
-  const keyOf = (v: Validator) => cacheKey(tree, v.cmd, lock, env);
+  const keyOf = (v: Validator) => cacheKey(tree, dir, v.cmd, lock, env);
   const hits = new Map<number, ValidatorResult>();
   if (ctx.read) {
     list.forEach((v, i) => {

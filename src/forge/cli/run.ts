@@ -27,7 +27,7 @@ import { claudeSessionId, noClaudeSession } from '../../lib/claude-session.js';
 import { UsageError } from './errors.js';
 import { swarmCommand, restoringRegenerated } from './swarm.js';
 import { reviewCommand } from './review.js';
-import { runWithCache, cacheGit } from '../validate-cache.js';
+import { runWithCache, cacheGit, checkoutPrefix } from '../validate-cache.js';
 import { roundDecision } from '../round.js';
 import { computeStats, renderStats, type PlanStates } from '../stats.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, runOptions, validateEvent, planAffected, type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
@@ -769,11 +769,13 @@ export function run(argv: string[], io: Io): Result {
           return inRun ? restoringRegenerated(restoreAt, go, restored) : config.generated.length ? restoringRegenerated(restoreAt, go, restored, config.generated) : go();
         };
         // The tree cache (C6): an --affected pass and --no-cache never touch it; --final writes it but never reads it.
-        // Its git runs at the root of the checkout being validated, never at a subdirectory: a change outside it counts.
+        // Its git runs at the root of the checkout being validated, never at a subdirectory: a change outside it counts;
+        // the subdirectory the validators run in is part of the key (dir).
         const useCache = config.validate.cache && !has('no-cache') && scope.mode !== 'affected';
         const t0 = Date.now();
         const ran = runWithCache(plan.run, runList, {
-          main: mainCheckout(io.cwd), git: useCache ? cacheGit(restoreAt.git) : restoreAt.git, repo: repoReader(repoDir), generated: config.generated,
+          main: mainCheckout(io.cwd), git: useCache ? cacheGit(restoreAt.git) : restoreAt.git, dir: useCache ? checkoutPrefix(restoreAt.git) : null,
+          repo: repoReader(repoDir), generated: config.generated,
           read: useCache && scope.mode !== 'final', write: useCache, now: io.now,
         });
         let k = 0;

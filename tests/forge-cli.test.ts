@@ -1960,6 +1960,27 @@ describe('validate and the tree cache (C6)', () => {
     run(['validate', '--all', '--path', 'medium'], inSub);
     expect(ran).toEqual(['lint-cmd']);
   });
+  it('two subdirectories with the same command on the same tree: the red one is not served the green one\'s result', () => {
+    // The real exec (--cwd swaps it in): each project's check fails when a `fail` file sits next to it.
+    for (const d of ['sub-a', 'sub-b']) {
+      mkdirSync(path.join(repo, d, '.forge'), { recursive: true });
+      writeFileSync(path.join(repo, d, 'check.js'), "process.exit(require('fs').existsSync('fail') ? 1 : 0)\n");
+      writeFileSync(path.join(repo, d, '.forge', 'config.yaml'), 'detect: false\nvalidators:\n  - name: check\n    cmd: node check.js\n    kind: test\n');
+    }
+    writeFileSync(path.join(repo, 'sub-b', 'fail'), 'x\n');
+    execFileSync('git', ['-c', 'core.autocrlf=false', 'add', '-A'], { cwd: repo });
+    execFileSync('git', ['commit', '-qm', 'two projects'], { cwd: repo });
+    const rio: Io = { cwd: repo, now: vio.now, env: {} };
+    const check = (dir: string) => {
+      const r = run(['validate', '--all', '--cwd', dir], rio);
+      const [res] = JSON.parse(r.stdout) as { validator: string; ok: boolean; cached?: boolean }[];
+      return [r.code, res.validator, res.ok, res.cached ?? false];
+    };
+    expect(check('sub-a')).toEqual([0, 'check', true, false]);
+    expect(check('sub-b')).toEqual([1, 'check', false, false]);
+    expect(check('sub-a')).toEqual([0, 'check', true, true]);
+    expect(check('sub-b')).toEqual([1, 'check', false, true]);
+  }, 30000);
 });
 
 describe('validate --affected (C-02)', () => {

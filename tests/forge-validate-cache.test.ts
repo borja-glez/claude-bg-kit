@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readdirSync, existsSync,
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { cleanTree, indexTree, untrackedPaths, lockHash, cacheKey, envKey, readCached, writeCached, pruneCache, cacheDir, cacheable, runWithCache, type CachedResult, type CacheCtx } from '../src/forge/validate-cache.js';
+import { cleanTree, indexTree, untrackedPaths, lockHash, cacheKey, envKey, readCached, writeCached, pruneCache, cacheDir, cacheable, runWithCache, checkoutPrefix, type CachedResult, type CacheCtx } from '../src/forge/validate-cache.js';
 import { defaultGit, repoReader } from '../src/forge/cli/run.js';
 import type { Validator, ValidatorResult } from '../src/forge/validators.js';
 
@@ -16,7 +16,7 @@ const entry = (over: Partial<CachedResult> = {}): CachedResult => ({
 });
 const KEY = 'b'.repeat(64);
 const ctx = (over: Partial<CacheCtx> = {}): CacheCtx => ({
-  main: root, git: defaultGit(root), repo: repoReader(root), generated: [], read: true, write: true, now: () => new Date('2026-10-15T10:00:00.000Z'), ...over,
+  main: root, git: defaultGit(root), dir: '', repo: repoReader(root), generated: [], read: true, write: true, now: () => new Date('2026-10-15T10:00:00.000Z'), ...over,
 });
 
 beforeEach(() => {
@@ -81,13 +81,21 @@ describe('the tree a validator sees (C6)', () => {
 });
 
 describe('the cache key and its entries (C6)', () => {
-  it('the key changes with the tree, the command, the lockfiles and the environment', () => {
-    const k = cacheKey('t', 'npm test', 'l', 'win32-22');
+  it('the key changes with the tree, the directory, the command, the lockfiles and the environment', () => {
+    const k = cacheKey('t', '', 'npm test', 'l', 'win32-22');
     expect(k).toMatch(/^[0-9a-f]{64}$/);
-    for (const other of [cacheKey('u', 'npm test', 'l', 'win32-22'), cacheKey('t', 'npm run test', 'l', 'win32-22'), cacheKey('t', 'npm test', 'm', 'win32-22'), cacheKey('t', 'npm test', 'l', 'linux-22')]) {
+    for (const other of [cacheKey('u', '', 'npm test', 'l', 'win32-22'), cacheKey('t', 'sub/', 'npm test', 'l', 'win32-22'), cacheKey('t', '', 'npm run test', 'l', 'win32-22'),
+      cacheKey('t', '', 'npm test', 'm', 'win32-22'), cacheKey('t', '', 'npm test', 'l', 'linux-22')]) {
       expect(other).not.toBe(k);
     }
     expect(envKey('win32', '22.9.0')).toBe('win32-22');
+  });
+  it('the directory is the prefix git gives where the validators run: empty at the root, null outside a repository', () => {
+    mkdirSync(path.join(root, 'sub a', 'deep'), { recursive: true });
+    expect(checkoutPrefix(defaultGit(root))).toBe('');
+    expect(checkoutPrefix(defaultGit(path.join(root, 'sub a', 'deep')))).toBe('sub a/deep/');
+    const plain = mkdtempSync(path.join(tmpdir(), 'forge-vcache-plain-'));
+    try { expect(checkoutPrefix(defaultGit(plain))).toBeNull(); } finally { rmSync(plain, { recursive: true, force: true }); }
   });
   it('lockHash is empty without lockfiles and follows their content', () => {
     expect(lockHash(repoReader(root))).toBe('');
@@ -162,16 +170,30 @@ describe('runWithCache (C6)', () => {
     expect(runs).toBe(2);
     runWithCache([unit], runner, ctx({ read: false, write: false }));
     expect(runs).toBe(3);
-    const key = cacheKey(g('rev-parse', 'HEAD^{tree}'), lint.cmd, lockHash(repoReader(root)), envKey());
+    const key = cacheKey(g('rev-parse', 'HEAD^{tree}'), '', lint.cmd, lockHash(repoReader(root)), envKey());
     writeCached(root, key, entry({ name: 'lint', cmd: 'other-cmd' }));
     runWithCache([lint], runner, ctx());
     expect(runs).toBe(4);
   });
   it('an entry whose tree is not the current one is a miss, though it sits at the right key', () => {
     let runs = 0;
-    const key = cacheKey(g('rev-parse', 'HEAD^{tree}'), lint.cmd, lockHash(repoReader(root)), envKey());
+    const key = cacheKey(g('rev-parse', 'HEAD^{tree}'), '', lint.cmd, lockHash(repoReader(root)), envKey());
     writeCached(root, key, entry({ name: 'lint', cmd: lint.cmd, tree: 'f'.repeat(40) }));
     runWithCache([lint], misses => { runs += misses.length; return misses.map(m => pass(m)); }, ctx({ write: false }));
     expect(runs).toBe(1);
+  });
+  it('the same tree and command run in another directory is another entry; an unknown directory is neither read nor written', () => {
+    const results: Record<string, ValidatorResult> = { 'sub-a/': pass(unit), 'sub-b/': { ...pass(unit), ok: false, failures: ['FAIL x'], failing: ['x'] } };
+    let runs = 0;
+    const at = (dir: string | null) => runWithCache([unit], misses => { runs += misses.length; return misses.map(() => results[dir ?? 'sub-b/']); }, ctx({ dir }));
+    expect(at('sub-a/')[0]).toMatchObject({ ok: true });
+    expect(at('sub-b/')[0]).toMatchObject({ ok: false });
+    expect(at('sub-b/')[0]).toMatchObject({ ok: false, cached: true });
+    expect(at('sub-a/')[0]).toMatchObject({ ok: true, cached: true });
+    expect(runs).toBe(2);
+    rmSync(cacheDir(root), { recursive: true, force: true });
+    expect(at(null)[0].cached).toBeUndefined();
+    expect(existsSync(cacheDir(root))).toBe(false);
+    expect(runs).toBe(3);
   });
 });

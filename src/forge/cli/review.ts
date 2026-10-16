@@ -12,7 +12,7 @@ import { buildCase, readShadow, saveShadow, takeBrief } from '../shadow.js';
 import { shadowCommand } from './shadow.js';
 import { restoringRegenerated } from './swarm.js';
 import { mainCheckout } from '../local.js';
-import { runWithCache, cacheGit } from '../validate-cache.js';
+import { runWithCache, cacheGit, checkoutPrefix } from '../validate-cache.js';
 import { reviewRound, reviewerKey, type PreviousResult, type ReviewerKey, type RoundPlan, type RoundReviewer, type TriageReview } from '../review-round.js';
 
 // The review commands. run.ts dispatches here; this module never imports run.ts (that would be a cycle).
@@ -69,9 +69,10 @@ function restoringGenerated<T>(deps: ReviewDeps, generated: string[], fn: () => 
 function validateList(deps: ReviewDeps, config: ForgeConfig, list: Validator[], restored: string[]): { results: ValidatorResult[]; durationMs: number } {
   const t0 = Date.now();
   const opts = runOptions(config, readEvents(deps.cwd), deps.now(), deps.execMany);
+  const use = config.validate.cache;
   const results = runWithCache(list,
     misses => restoringGenerated(deps, config.generated, () => runValidators(misses, deps.exec, config.validatorTimeoutSec, opts), restored),
-    { main: mainCheckout(deps.cwd), git: config.validate.cache ? cacheGit(deps.git) : deps.git, repo: deps.repo, generated: config.generated, read: config.validate.cache, write: config.validate.cache, now: deps.now });
+    { main: mainCheckout(deps.cwd), git: use ? cacheGit(deps.git) : deps.git, dir: use ? checkoutPrefix(deps.git) : null, repo: deps.repo, generated: config.generated, read: use, write: use, now: deps.now });
   return { results, durationMs: Date.now() - t0 };
 }
 

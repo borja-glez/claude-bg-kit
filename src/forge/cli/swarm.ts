@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { UsageError } from './errors.js';
 import type { ExecResult, Io } from './run.js';
-import { runWithCache, cleanTree, indexTree, untrackedPaths, cacheGit } from '../validate-cache.js';
+import { runWithCache, cleanTree, indexTree, untrackedPaths, cacheGit, checkoutPrefix } from '../validate-cache.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, runOptions, validateEvent, failingLabel, type ExecMany, type RepoReader, type RunOptions, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { loadConfig } from '../config.js';
 import { stopFile, parseRun, readRunText } from '../run.js';
@@ -391,10 +391,12 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
   try { generated = loadConfig(o.configRoot).generated; } catch { generated = []; }
   const validating = <T>(where: GitDeps, owned: boolean, fn: () => T): T =>
     (owned ? restoringRegenerated(where, fn, regenerated) : generated.length ? restoringRegenerated(where, fn, regenerated, generated) : fn());
-  // A validator run through the tree cache (C6), keyed by the tree `tree` gives; what it misses runs as before.
+  // A validator run through the tree cache (C6), keyed by the tree `tree` gives and the directory `where` runs them in;
+  // what it misses runs as before.
   const cachedRun = (where: GitDeps, owned: boolean, list: Validator[], tree: () => string | null): ValidatorResult[] =>
     runWithCache(list, misses => validating(where, owned, () => runValidators(misses, where.exec, o.timeoutSec, { ...o.run, execMany: where.execMany })), {
-      main: o.main, git: cacheGit(where.git), repo: where.repo, generated, read: o.cache.read, write: o.cache.write, tree, now: o.now,
+      main: o.main, git: cacheGit(where.git), dir: o.cache.read || o.cache.write ? checkoutPrefix(where.git) : null, repo: where.repo, generated,
+      read: o.cache.read, write: o.cache.write, tree, now: o.now,
     });
   const key = `${o.scope}-${o.target}`;
   const selection: Scope = o.scope === 'final' ? { mode: 'final' } : { mode: 'heavy', changed: null };
