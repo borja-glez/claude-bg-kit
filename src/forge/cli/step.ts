@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import path from 'node:path';
 import { UsageError } from './errors.js';
 import type { Io } from './run.js';
+import { commitInfo } from './swarm.js';
 import { readExecution, executionTaskFile, runWorktree, writePublicTask } from '../execution.js';
 import { takeStepLock } from '../jobs.js';
 import { appendEvent, readEvents, type LedgerEvent } from '../ledger.js';
@@ -21,8 +22,9 @@ export type StepAction = { type: string; task?: string; [k: string]: unknown };
 type Versions = { state: Record<string, number>; sessions: Record<string, number> };
 /** I1, M8: the person's answer for a task, given to a step with `--ruling <T>:<answer>`. */
 type Ruling = { kind: 'fix' | 'out-of-model' | 'review' } | { kind: 'defer'; ids: string[] };
-/** `after`: writes the step makes only as its last act, once every command ran (see reviewersBack). */
-interface Ctx { io: Io; deps: StepDeps; planArg: string; db: string; runBranch: string; locale: 'es' | 'en'; iso: string; agentLease: string; rulings: Map<string, Ruling>; actions: StepAction[]; after: (() => void)[] }
+/** `after`: writes the step makes only as its last act, once every command ran (see reviewersBack). `iso` and
+ *  `agentLease` are read from io.now() when they are used (M7): a step can wait for a slot and validate for minutes. */
+interface Ctx { io: Io; deps: StepDeps; planArg: string; db: string; runBranch: string; locale: 'es' | 'en'; iso: () => string; agentLease: () => string; rulings: Map<string, Ruling>; actions: StepAction[]; after: (() => void)[] }
 /** respawned.json of a review round: each reviewer respawned once, when, and the mtime of the file it was respawned on. */
 type Respawned = Record<string, { at: string; mtimeMs: number }>;
 /**
@@ -143,12 +145,18 @@ function seenOf(work: string, n: number, round: number, base: string | null): st
   return (round ? readText(path.join(work, `reviews-${n}-${round}`, 'head.txt'))?.trim() : null) || base;
 }
 
+/** The implementer last logged for `<T>-<n>`; null when none was. */
+function lastAgent(c: Ctx, taskN: string): string | null {
+  const e = readEvents(c.io.cwd).filter(x => x.kind === 'agent' && x.task === taskN && typeof x.agent === 'string' && x.agent).at(-1);
+  return e ? String(e.agent) : null;
+}
+
 /** Logs the implementer handed out for `<T>-<n>` (review-close reads its rung), once: a hand-out a later step retries,
  *  with the same agent and role as the last one logged for that brief, adds nothing. */
 function logAgent(c: Ctx, taskN: string, agent: string, role: string): void {
   const last = readEvents(c.io.cwd).filter(e => e.kind === 'agent' && e.task === taskN).at(-1);
   if (last?.agent === agent && last.role === role) return;
-  appendEvent(c.io.cwd, { ts: c.iso, kind: 'agent', task: taskN, agent, role });
+  appendEvent(c.io.cwd, { ts: c.iso(), kind: 'agent', task: taskN, agent, role });
 }
 
 /** A reviewer's file that is there and is not a draft (`"complete": false`); one that is not JSON is review-close's to judge. */
@@ -211,7 +219,7 @@ function startTask(c: Ctx, task: string, resume: boolean): boolean {
   const agent = typeof impl.agent === 'string' ? impl.agent : 'forge-impl';
   // The skill spawns it from this action: the step logs it, as task-steps step 2 says (review-close reads the rung).
   logAgent(c, `${task}-1`, agent, typeof impl.role === 'string' ? impl.role : 'impl');
-  if (!call(c, task, ['swarm', 'task', task, '--stage', 'implement', '--agent', agent, '--round', '0', '--lease', c.agentLease])) return false;
+  if (!call(c, task, ['swarm', 'task', task, '--stage', 'implement', '--agent', agent, '--round', '0', '--lease', c.agentLease()])) return false;
   c.actions.push({
     type: 'spawnImplementer', task, agent, role: impl.role ?? null, brief: slash(brief), report: slash(path.join(work, 'report-1.txt')),
     validate: pr.validate ?? null, worktree, base: pr.base ?? null, ...(w.setup ? { setup: w.setup } : {}), ...(tri.announce ? { announce: tri.announce } : {}),
@@ -246,7 +254,7 @@ function reviewBase(c: Ctx, task: string, t: ExecTask, n: number, base: string, 
     return null;
   }
   writeFileSync(path.join(work, `baseline-${n}.json`), JSON.stringify(results, null, 2) + '\n');
-  writeFileSync(mark, JSON.stringify({ base: moved, from: adopted ? null : base, at: c.iso }, null, 2) + '\n');
+  writeFileSync(mark, JSON.stringify({ base: moved, from: adopted ? null : base, at: c.iso() }, null, 2) + '\n');
   return moved;
 }
 
@@ -297,13 +305,15 @@ function implementerBack(c: Ctx, task: string, t: ExecTask, told: boolean): void
   if (rp.validatorsRound && typeof rp.validatorsRound === 'object') {
     // The commit this validators round sends back (seenOf): back without a newer one, the implementer only has its report.
     if (head) writeFileSync(path.join(abs, `validators-head-${n}.json`), JSON.stringify({ round: r, head }) + '\n');
-    if (!call(c, task, ['swarm', 'task', task, '--stage', 'implement', ...(t.agent ? ['--agent', t.agent] : ['--no-agent']), '--lease', c.agentLease])) return;
-    c.actions.push({ type: 'validatorsRound', task, implementer: t.agent, findings: (rp.validatorsRound as Json).findings ?? null, ...say });
+    // M1: taken up at stage validate (recorded with no agent), the implementer is the last one logged for this brief.
+    const agent = t.agent ?? lastAgent(c, `${task}-${n}`);
+    if (!call(c, task, ['swarm', 'task', task, '--stage', 'implement', ...(agent ? ['--agent', agent] : ['--no-agent']), '--lease', c.agentLease()])) return;
+    c.actions.push({ type: 'validatorsRound', task, implementer: agent, findings: (rp.validatorsRound as Json).findings ?? null, ...say });
     return;
   }
   const spawn = Array.isArray(rp.spawn) ? rp.spawn as Json[] : [];
   const first = spawn.find(s => s.twin !== true);
-  if (!call(c, task, ['swarm', 'task', task, '--stage', 'review', '--agent', String(first?.agent ?? 'forge-review-correctness'), '--round', String(r), '--lease', c.agentLease])) return;
+  if (!call(c, task, ['swarm', 'task', task, '--stage', 'review', '--agent', String(first?.agent ?? 'forge-review-correctness'), '--round', String(r), '--lease', c.agentLease()])) return;
   if (rp.express === true) {
     c.actions.push({ type: 'express', task, round: r, validate: (rp.validators as Json | undefined)?.cmd ?? null, spawn, ...say });
     return;
@@ -362,7 +372,7 @@ function reviewersBack(c: Ctx, task: string, t: ExecTask, told: boolean): void {
     const file = path.join(r.roundDir, `${keyOf(s)}.json`);
     if (!finished(file)) return false;
     const was = r.respawned[keyOf(s)];
-    return !was || (mtimeOf(file) ?? 0) > was.mtimeMs || Date.parse(c.iso) - Date.parse(was.at) > AGENT_LEASE_MINUTES * 60000;
+    return !was || (mtimeOf(file) ?? 0) > was.mtimeMs || Date.parse(c.iso()) - Date.parse(was.at) > AGENT_LEASE_MINUTES * 60000;
   };
   const back = r.entries.every(isBack) && !pending;
   if (!told && !back) return;
@@ -385,7 +395,7 @@ function answer(c: Ctx, task: string, t: ExecTask, n: number, round: number, r: 
   const file = path.join(r.roundDir, 'asked.json');
   const ruling = given ?? asked.ruling;
   if (!ruling) {
-    if (!asked.reemitted && Date.parse(c.iso) - Date.parse(asked.at) > ASK_AGAIN_MS) {
+    if (!asked.reemitted && Date.parse(c.iso()) - Date.parse(asked.at) > ASK_AGAIN_MS) {
       c.after.push(() => writeJson(file, { ...asked, reemitted: true }));
       c.actions.push({ type: 'ask', task, close: asked.close });
     }
@@ -415,7 +425,7 @@ function closeRound(c: Ctx, task: string, t: ExecTask, n: number, round: number,
   const fresh = again.filter(k => !Object.hasOwn(r.respawned, k));
   if (fresh.length) {
     const next: Respawned = { ...r.respawned };
-    for (const k of fresh) next[k] = { at: c.iso, mtimeMs: mtimeOf(path.join(r.roundDir, `${k}.json`)) ?? 0 };
+    for (const k of fresh) next[k] = { at: c.iso(), mtimeMs: mtimeOf(path.join(r.roundDir, `${k}.json`)) ?? 0 };
     c.after.push(() => writeJson(r.respawnedFile, next));
     c.actions.push({ type: 'respawnReviewers', task, reviewers: fresh, spawn: r.entries.filter(s => fresh.includes(keyOf(s))) });
     return;
@@ -425,7 +435,7 @@ function closeRound(c: Ctx, task: string, t: ExecTask, n: number, round: number,
     const asked = isObject(out.ask) && Array.isArray(out.ask.findings) ? out.ask.findings : [];
     const findings = asked.map(f => (typeof f === 'string' ? f : isObject(f) && typeof f.id === 'string' ? f.id : null)).filter((x): x is string => !!x);
     writeJson(path.join(r.roundDir, 'asked.json'), {
-      at: c.iso, findings, next: out.next ?? null, implementer: out.implementer ?? null, findingsFile: out.findings ?? null,
+      at: c.iso(), findings, next: out.next ?? null, implementer: out.implementer ?? null, findingsFile: out.findings ?? null,
       handover: out.handover ?? null, revert: out.revert ?? null, close: out,
     });
     c.actions.push({ type: 'ask', task, close: out });
@@ -456,7 +466,7 @@ function follow(c: Ctx, task: string, t: ExecTask, n: number, round: number, r: 
   if (next === 'resume' || next === 'fresh-stronger' || next === 'redo') {
     const agent = typeof impl?.agent === 'string' ? impl.agent : null;
     if (agent) logAgent(c, `${task}-${n}`, agent, typeof impl?.role === 'string' ? impl.role : 'impl');
-    if (!call(c, task, ['swarm', 'task', task, '--stage', 'implement', ...(agent ? ['--agent', agent] : ['--no-agent']), '--round', String(round + 1), '--lease', c.agentLease])) return;
+    if (!call(c, task, ['swarm', 'task', task, '--stage', 'implement', ...(agent ? ['--agent', agent] : ['--no-agent']), '--round', String(round + 1), '--lease', c.agentLease()])) return;
     answered();
     c.actions.push({
       type: next === 'resume' ? 'resumeImplementer' : next === 'fresh-stronger' ? 'freshImplementer' : 'redo', task, implementer: impl, findings: out.findings ?? null,
@@ -512,6 +522,24 @@ function integrateTask(c: Ctx, task: string): void {
   if (!r) return;
   const { result, ...rest } = r;
   c.actions.push({ ...rest, type: String(result), task });
+}
+
+/**
+ * M2: a task the execution has integrated while its roadmap state (DB/state/<T>.json, as the skill listed it) is not
+ * `done`: the step that integrated it may have died before its output, or the `done` batch failed. Its `integrated`
+ * action comes again with the commit of the run branch's merge of task/<T> (the merge whose second parent is its tip,
+ * else the one titled `forge: integrate <T>`). A state the list did not bring says nothing: no action.
+ */
+function integratedAgain(c: Ctx, task: string, t: ExecTask): void {
+  const state = readJson(path.resolve(c.io.cwd, c.db, 'state', `${task}.json`));
+  if (!isObject(state) || state.status === 'done') return;
+  const git = c.deps.gitAt(c.io.cwd);
+  const tip = git(['rev-parse', '--verify', '-q', `refs/heads/${t.branch}^{commit}`])?.trim() || null;
+  const merges = (git(['log', '--merges', '--format=%H %P', c.runBranch]) ?? '').split('\n').map(l => l.trim().split(' ')).filter(p => p.length >= 3);
+  const titled = () => (git(['log', '--merges', '--format=%H', '--fixed-strings', `--grep=forge: integrate ${task}`, c.runBranch]) ?? '').split('\n').map(s => s.trim()).find(Boolean);
+  const sha = (tip ? merges.find(p => p.slice(2).includes(tip))?.[0] : undefined) ?? titled();
+  if (!sha) return;
+  c.actions.push({ type: 'integrated', task, sha, commit: commitInfo(git, sha), again: true });
 }
 
 /** state/T.forge (C7, v1): the task's path, stage, agent, last validators, last verdict and its review count. */
@@ -631,8 +659,11 @@ export function swarmStep(rest: string[], io: Io, deps: StepDeps): Result {
   const lock = takeStepLock(io.cwd, now, deps.alive);
   if ('busy' in lock) return { code: 0, stdout: JSON.stringify({ busy: lock.busy }, null, 2) + '\n', stderr: '' };
   try {
-    return stepOnce({ io, deps, planArg, db, runBranch: e0.branch, locale, iso: now.toISOString(), agentLease: new Date(now.getTime() + AGENT_LEASE_MINUTES * 60000).toISOString(), rulings, actions: [], after: [] },
-      e0, returned, versions, flag('agents'), now);
+    const c: Ctx = {
+      io, deps, planArg, db, runBranch: e0.branch, locale, rulings, actions: [], after: [],
+      iso: () => io.now().toISOString(), agentLease: () => new Date(io.now().getTime() + AGENT_LEASE_MINUTES * 60000).toISOString(),
+    };
+    return stepOnce(c, e0, returned, versions, flag('agents'), now);
   } finally { lock.release(); }
 }
 
@@ -650,6 +681,7 @@ function stepOnce(c: Ctx, e0: ExecutionState, returned: Set<string>, versions: V
     else if (t.stage === 'review') { ruled.add(task); reviewersBack(c, task, t, returned.has(task)); }
   }
   for (const [task, r] of c.rulings) if (!ruled.has(task)) c.actions.push(stepError(task, `--ruling ${task}:${r.kind}: ${task} is not a task of this execution back from its implementer or its reviewers`));
+  for (const [task, t] of Object.entries(e0.tasks)) if (t.status === 'integrated') integratedAgain(c, task, t);
   // 3. The tick.
   const tick = call(c, null, ['swarm', 'tick', '--plan', c.planArg, '--db', c.db, ...(agents ? ['--agents', agents] : [])]);
   let wait: number | null = null;
@@ -662,7 +694,8 @@ function stepOnce(c: Ctx, e0: ExecutionState, returned: Set<string>, versions: V
   // 4. What the roadmap batch publishes.
   const after = readExecution(io.cwd) ?? e0;
   const out = {
-    actions: c.actions, publish: publishOf(io, after, started, versions, now),
+    // The leases it publishes run from now, at the step's end (M7).
+    actions: c.actions, publish: publishOf(io, after, started, versions, io.now()),
     running: Object.values(after.tasks).filter(t => t.status === 'running').length, parallel: after.parallel, wait, say: stepSay(c.actions, wait, c.locale),
   };
   // 5. Last, the writes that must not outlive a step that died before its output (respawned.json, asked.json's re-ask).

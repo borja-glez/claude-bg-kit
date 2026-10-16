@@ -515,6 +515,84 @@ describe('swarm step: a member task adopted after a conflict (I3)', () => {
   });
 });
 
+describe('swarm step: robustness (M1, M2, M7, M9)', () => {
+  it('a validators round taken up at stage validate names the implementer the step logged and records its stage with it (M1)', () => {
+    const s0 = step();
+    const agent = String(s0.actions.find(a => a.task === 'T1')!.agent);
+    mkdirSync(path.join(wt('T1'), '.forge'), { recursive: true });
+    writeFileSync(path.join(wt('T1'), '.forge', 'config.yaml'), 'detect: false\nvalidators:\n  - name: check\n    cmd: node -e "process.exit(require(\'fs\').existsSync(\'bad.txt\')?1:0)"\n');
+    commitIn(wt('T1'), 'bad.txt', 'x\n', 'T1: bad');
+    const failed = stepWith(argv => isCmd(argv, 'review-prep'), '--returned', 'T1');
+    expect(failed.actions).toContainEqual(expect.objectContaining({ type: 'error', task: 'T1', command: 'review-prep' }));
+    expect(readExecution(root)!.tasks.T1).toMatchObject({ stage: 'validate', agent: null });
+    expect(step().actions.find(a => a.task === 'T1')).toMatchObject({ type: 'validatorsRound', implementer: agent });
+    expect(readExecution(root)!.tasks.T1).toMatchObject({ stage: 'implement', agent });
+  });
+  it('a task integrated whose roadmap state is not done gets its integrated action again, with its commit (M2)', () => {
+    step();
+    commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
+    out(run(['swarm', 'task', 'T1', '--stage', 'verdict', '--status', 'accepted', '--no-agent'], io));
+    const first = step().actions.find(a => a.type === 'integrated')!;
+    expect(first).toMatchObject({ task: 'T1', commit: { title: 'T1: a' } });
+    writeFileSync(path.join(root, 'db', 'state', 'T1.json'), JSON.stringify({ status: 'in_progress', version: 3 }));
+    expect(step().actions.filter(a => a.task === 'T1')).toEqual([expect.objectContaining({ type: 'integrated', task: 'T1', sha: (first.commit as { sha: string }).sha, commit: first.commit })]);
+    writeFileSync(path.join(root, 'db', 'state', 'T1.json'), JSON.stringify({ status: 'done', version: 4 }));
+    expect(step().actions.filter(a => a.task === 'T1')).toEqual([]);
+  });
+  it('stamps each hand-out with the time it happens, not the time the step started (M7)', () => {
+    let k = 0;
+    io = { ...io, now: () => new Date(NOW.getTime() + 60000 * k++) };
+    step();
+    const leaseOf = (task: string) => JSON.parse(readFileSync(path.join(root, '.forge', 'execution', `${task}.json`), 'utf8')).leaseUntil as string;
+    expect(Date.parse(leaseOf('T2'))).toBeGreaterThan(Date.parse(leaseOf('T1')));
+  });
+  it('redo: stage implement at the next round, its revert carried (M9)', () => {
+    reviewedT1();
+    const revert = { base: 'b', head: 'h', args: ['-C', wt('T1'), 'revert', '--no-edit', 'b..HEAD'] };
+    const s = stepClosing(() => ({ ...ASK_CLOSE, ask: null, next: 'redo', implementer: { agent: 'forge-impl-high', role: 'impl-high' }, handover: '.forge/work/T1/handover-1-1.md', revert }));
+    expect(s.actions.filter(a => a.task === 'T1')).toEqual([expect.objectContaining({ type: 'redo', implementer: { agent: 'forge-impl-high', role: 'impl-high' }, handover: '.forge/work/T1/handover-1-1.md', revert })]);
+    expect(readExecution(root)!.tasks.T1).toMatchObject({ stage: 'implement', agent: 'forge-impl-high', round: 2 });
+  });
+  it('freshImplementer carries its handover; the new implementer is logged (M9)', () => {
+    reviewedT1();
+    const s = stepClosing(() => ({ ...ASK_CLOSE, ask: null, next: 'fresh-stronger', implementer: { agent: 'forge-impl-high', role: 'impl-high' }, handover: '.forge/work/T1/handover-1-1.md' }));
+    expect(s.actions.find(a => a.task === 'T1')).toMatchObject({ type: 'freshImplementer', handover: '.forge/work/T1/handover-1-1.md', implementer: { agent: 'forge-impl-high' } });
+    expect(readEvents(root).filter(e => e.kind === 'agent' && e.task === 'T1-1').at(-1)).toMatchObject({ agent: 'forge-impl-high', role: 'impl-high' });
+    expect(stageOf('T1')).toBe('implement');
+  });
+  it('blocked: blocked.txt with its reasons, and the task blocked (M9)', () => {
+    reviewedT1();
+    const s = stepClosing(() => ({ ...ASK_CLOSE, ask: null, next: 'breaker', reasons: ['the same finding three times'] }));
+    expect(s.actions.find(a => a.task === 'T1')).toMatchObject({ type: 'blocked', next: 'breaker', reasons: ['the same finding three times'] });
+    expect(readFileSync(path.join(root, '.forge', 'work', 'T1', 'blocked.txt'), 'utf8')).toContain('breaker: the same finding three times');
+    expect(readExecution(root)!.tasks.T1.status).toBe('blocked');
+  });
+  it('an express review closes normally once its validators file arrives (M9)', () => {
+    step();
+    commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
+    const review = step('--returned', 'T1').actions.find(a => a.task === 'T1')!;
+    const dir = path.join(root, '.forge', 'work', 'T1');
+    const planFile = path.join(dir, 'reviews-1-1', 'review-plan.json');
+    writeFileSync(planFile, JSON.stringify({ ...JSON.parse(readFileSync(planFile, 'utf8')), express: true, validatorsPending: true }));
+    rmSync(path.join(dir, 'validators-1.json'), { force: true });
+    for (const e of (review.spawn as { role: string; twin?: boolean }[]).filter(e => !e.twin)) writeFileSync(path.join(dir, 'reviews-1-1', `${e.role.replace(/^review-/, '')}.json`), pass);
+    const waiting = stepWith(() => false);
+    expect(waiting.actions.filter(a => a.task === 'T1')).toEqual([]);
+    expect(waiting.calls.filter(a => isCmd(a, 'review-close'))).toEqual([]);
+    writeFileSync(path.join(dir, 'validators-1.json'), '[]\n');
+    expect(step().actions.find(a => a.task === 'T1')).toMatchObject({ type: 'accepted' });
+  });
+  it('in mode sessions, the tick\'s start passes through with its launch (M9)', () => {
+    expect(run(['swarm', 'stop'], io).code).toBe(0);
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--mode', 'sessions'], io));
+    const s = stepWith(() => false);
+    const starts = s.actions.filter(a => a.type === 'start');
+    expect(starts.map(a => a.task)).toEqual(['T1', 'T2']);
+    for (const a of starts) expect(a.launch).toEqual(expect.arrayContaining(['launch']));
+    expect(s.calls.filter(a => isCmd(a, 'brief') || isCmd(a, 'prep'))).toEqual([]);
+  });
+});
+
 describe('swarm step: one at a time (I4)', () => {
   const lockFile = () => path.join(root, '.forge', 'jobs', 'step.lock');
   const stepAlive = (alive: boolean) => {
