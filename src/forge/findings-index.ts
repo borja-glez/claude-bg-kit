@@ -23,6 +23,9 @@ const RESIDUALS: readonly Residual[] = ['untouched', 'hardening', 'late-round', 
 const SENT: readonly Residual[] = ['untouched', 'docs', 'late-round'];
 
 const isOpen = (f: IndexedFinding) => f.status === 'open' || f.status === 'residual';
+/** A residual no reviewer gets back to check (hardening, architecture, cap: not SENT): nobody can name it again, so it
+ *  stays as it was until a reviewer reports it anew (I1). */
+const unsent = (f: IndexedFinding) => f.status === 'residual' && !(f.residual && SENT.includes(f.residual));
 const idNumber = (id: string) => Number(id.slice(1));
 const nextId = (rounds: IndexRound[]) => 1 + Math.max(0, ...rounds.flatMap(r => r.findings.map(f => idNumber(f.id))));
 const before = (index: FindingsIndex, round: number) => index.rounds.filter(r => r.round < round);
@@ -131,13 +134,18 @@ function entry(f: Finding, status: IndexStatus): IndexedFinding | null {
   };
 }
 
+type Judged = Pick<VerdictResult, 'critical' | 'important' | 'minor' | 'deferred'>;
+const judgedIds = (verdict: Judged) =>
+  new Set([...verdict.critical, ...verdict.important, ...verdict.deferred, ...verdict.minor].map(f => f.id).filter((id): id is string => !!id));
+
 /**
  * The index with this review recorded, replacing an earlier record of the same review (closing it again counts once):
  * every finding with an id the verdict saw, open when it blocks, residual when it carries a `residual`, minor when the CLI
  * lowered it; then each finding the previous review left open that is not here again: closed when its reviewer answered
- * this review (answeredBy, plus the reviewers an express review covered), else carried as it was.
+ * this review (answeredBy, plus the reviewers an express review covered), else carried as it was. A residual no reviewer
+ * gets back (hardening, architecture) is always carried as it was: nobody could name it (I1).
  */
-export function recordRound(index: FindingsIndex, round: number, verdict: Pick<VerdictResult, 'critical' | 'important' | 'minor' | 'deferred'>, answered: ReviewerName[]): FindingsIndex {
+export function recordRound(index: FindingsIndex, round: number, verdict: Judged, answered: ReviewerName[]): FindingsIndex {
   const entries: IndexedFinding[] = [];
   const seen = new Set<string>();
   const add = (f: Finding, status: IndexStatus) => {
@@ -150,10 +158,22 @@ export function recordRound(index: FindingsIndex, round: number, verdict: Pick<V
   for (const f of verdict.minor) add(f, 'minor');
   for (const o of previousOf(index, round)?.findings ?? []) {
     if (seen.has(o.id) || !isOpen(o)) continue;
-    entries.push(answered.includes(o.reviewer) ? { ...o, status: 'closed' } : o);
+    entries.push(answered.includes(o.reviewer) && !unsent(o) ? { ...o, status: 'closed' } : o);
   }
   const rounds = [...index.rounds.filter(r => r.round !== round), { round, findings: entries }].sort((a, b) => a.round - b.round);
   return { task: index.task, next: nextId(rounds), rounds };
+}
+
+/** I1: the residuals the previous review left that no reviewer gets back (hardening, architecture) and this verdict does
+ *  not name: recordRound carries them as they were, and an accept lists them in its deferred, as findings with their
+ *  `residual` (§4.7: on an accept every residual goes to deferred and the final report). */
+export function carriedResiduals(index: FindingsIndex, round: number, verdict: Judged): Finding[] {
+  const seen = judgedIds(verdict);
+  return (previousOf(index, round)?.findings ?? []).filter(f => unsent(f) && !seen.has(f.id)).map(f => ({
+    id: f.id, reviewer: f.reviewer, severity: f.severity, ...(f.file ? { file: f.file } : {}), ...(f.line !== undefined ? { line: f.line } : {}),
+    problem: f.problem, ...(f.fix ? { fix: f.fix } : {}), ...(f.origin ? { origin: f.origin } : {}), ...(f.regression ? { regression: true } : {}),
+    ...(f.residual ? { residual: f.residual } : {}),
+  }));
 }
 
 /** The ids the review before `round` left open (blocking or residual), per reviewer. */

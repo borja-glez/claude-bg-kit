@@ -8,7 +8,7 @@ import { detectValidators, selectValidators, runValidators, markPreexisting, blo
 import { PATH_ORDER, zonesFromPaths, type PathName, type ReviewRole } from '../triage.js';
 import { parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, repoRelative, type Finding, type Review, type ReviewerName, type FailingValidator, type AskFinding } from '../verdict.js';
 import { roundDecision } from '../round.js';
-import { parseIndex, assignIds, answeredBy, idsOf, recordRound, openIds, closedFor, previousFindings, asPrevious, historyLine, renderHandover, expressCandidate, type FindingsIndex } from '../findings-index.js';
+import { parseIndex, assignIds, answeredBy, idsOf, recordRound, carriedResiduals, openIds, closedFor, previousFindings, asPrevious, historyLine, renderHandover, expressCandidate, type FindingsIndex } from '../findings-index.js';
 import { reviewsOf } from '../loop.js';
 import { takeBrief } from '../shadow.js';
 import { renderThreatModel } from '../threat-model.js';
@@ -566,6 +566,13 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   }
   const indexNow = recordRound(index, round, result, answered);
   writeFileSync(indexPath, JSON.stringify(indexNow, null, 2) + '\n');
+  // I1: on an accept, the residuals earlier reviews left that no reviewer gets back (hardening, architecture) are still
+  // open: they go to deferred, and so to the ruling and the final report, with this review's own (§4.7).
+  const carriedResidual = result.action === 'accept' ? carriedResiduals(index, round, result) : [];
+  if (carriedResidual.length) {
+    result.deferred.push(...carriedResidual);
+    result.reasons.push(`${carriedResidual.length} residual finding(s) of earlier reviews still open (${[...new Set(carriedResidual.map(f => f.residual))].join(', ')})`);
+  }
   if (!Array.isArray(rows)) result.reasons.push('no validation recorded');
   if (preexisting.length) result.reasons.push(`already failing on the base commit, not counted: ${preexisting.join(', ')}`);
 

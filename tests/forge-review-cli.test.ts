@@ -827,6 +827,56 @@ describe('forge review-close', () => {
     expect(index.rounds[1].findings.map((f: { id: string; status: string }) => [f.id, f.status])).toEqual([['F2', 'open'], ['F3', 'residual'], ['F1', 'closed']]);
   });
 
+  it('a finding deferred as architecture at a fix review stays residual through a review that cannot see it, and the accept lists it in deferred (I1)', () => {
+    noExpress();
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [
+      { severity: 'important', file: 'b.txt', line: 20, problem: 'the state should live in the store' },
+      { severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    close();
+    const deferred = JSON.parse(close('--defer', 'F1').stdout);
+    expect(deferred).toMatchObject({ action: 'fix', deferred: [expect.objectContaining({ id: 'F1', residual: 'architecture' })] });
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo fixed\n');
+    git('commit', '-q', '-am', 'fix');
+    prep();
+    expect(JSON.parse(readFileSync(path.join(r2(), 'previous-correctness.json'), 'utf8')).map((f: { id: string }) => f.id)).toEqual(['F2']);
+    write(r2(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    const out = JSON.parse(close().stdout);
+    expect(out).toMatchObject({ action: 'accept', next: 'done' });
+    expect(out.deferred).toEqual([expect.objectContaining({ id: 'F1', reviewer: 'correctness', residual: 'architecture', file: 'b.txt', line: 20 })]);
+    const index = JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8'));
+    expect(index.rounds[1].findings.map((f: { id: string; status: string }) => [f.id, f.status])).toEqual([['F2', 'closed'], ['F1', 'residual']]);
+    expect(readEvents(root).filter(e => e.kind === 'ruling').at(-1)).toMatchObject({ round: 2, deferred: [{ id: 'F1', residual: 'architecture' }] });
+    expect(readEvents(root).filter(e => e.kind === 'verdict').at(-1)).toMatchObject({ action: 'accept', deferred: 1 });
+  });
+
+  it('a hardening residual of review 2 is still listed when review 3 accepts (I1)', () => {
+    noExpress();
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [
+      { severity: 'important', file: 'a.txt', line: 2, problem: 'the second line is not validated' },
+      { severity: 'important', file: 'b.txt', line: 20, problem: 'loop never ends on empty input' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    close();
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo checked\n');
+    git('commit', '-q', '-am', 'fix');
+    prep();
+    write(r2(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [
+      { severity: 'important', file: 'b.txt', line: 20, problem: 'loop never ends on empty input', origin: 'previous', id: 'F2' },
+      { severity: 'important', file: 'a.txt', line: 2, problem: 'the second line is not validated when it is empty', origin: 'fix' }] });
+    expect(JSON.parse(close().stdout)).toMatchObject({ action: 'fix', deferred: [expect.objectContaining({ id: 'F3', residual: 'hardening' })] });
+    writeFileSync(path.join(wt, 'b.txt'), 'b\n'.repeat(29) + 'end\n');
+    git('commit', '-q', '-am', 'fix 2');
+    prep();
+    write(path.join(work(), 'reviews-1-3'), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    const out = JSON.parse(close().stdout);
+    expect(out).toMatchObject({ action: 'accept', next: 'done' });
+    expect(out.deferred).toEqual([expect.objectContaining({ id: 'F3', residual: 'hardening' })]);
+    const index = JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8'));
+    expect(index.rounds[2].findings.map((f: { id: string; status: string }) => [f.id, f.status])).toEqual([['F2', 'closed'], ['F3', 'residual']]);
+  });
+
   it('an unreadable findings index is set aside as .corrupt-<timestamp> before the new one is written, never overwritten', () => {
     prep();
     writeFileSync(path.join(work(), 'findings-index-1.json'), '{"rounds": [oops');

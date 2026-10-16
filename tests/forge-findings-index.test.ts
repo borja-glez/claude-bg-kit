@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  parseIndex, assignIds, recordRound, answeredBy, idsOf, openIds, closedFor, previousFindings, asPrevious, historyLine, renderHandover, expressCandidate, type FindingsIndex,
+  parseIndex, assignIds, recordRound, answeredBy, idsOf, openIds, closedFor, previousFindings, asPrevious, historyLine, renderHandover, expressCandidate, carriedResiduals, type FindingsIndex,
 } from '../src/forge/findings-index.js';
 import type { Finding, Review, ReviewerName } from '../src/forge/verdict.js';
 
@@ -67,6 +67,25 @@ describe('findings index (J-06)', () => {
     expect(again.index.rounds).toHaveLength(2);
     expect(again.index.rounds[1].findings.map(f => [f.id, f.status])).toEqual([['F3', 'open'], ['F1', 'closed'], ['F2', 'open']]);
     expect(openIds(again.index, 3)).toEqual({ correctness: ['F3'], security: ['F2'] });
+  });
+
+  it('a residual no reviewer gets back (hardening, architecture) stays as it was when nobody names it; one sent to the reviewer closes (I1)', () => {
+    const idx = parseIndex(JSON.stringify({ task: 'T', rounds: [{ round: 1, findings: [
+      { id: 'F1', reviewer: 'correctness', severity: 'important', file: 'b.ts', line: 20, problem: 'state in the store', status: 'residual', residual: 'architecture' },
+      { id: 'F2', reviewer: 'correctness', severity: 'important', problem: 'p2', status: 'open' },
+      { id: 'F3', reviewer: 'correctness', severity: 'important', problem: 'p3', status: 'residual', residual: 'hardening' },
+      { id: 'F4', reviewer: 'correctness', severity: 'important', problem: 'p4', status: 'residual', residual: 'untouched' },
+    ] }] }), 'T');
+    const none = { critical: [], important: [], minor: [], deferred: [] };
+    const two = recordRound(idx, 2, none, ['correctness']);
+    expect(two.rounds[1].findings.map(f => [f.id, f.status, f.residual ?? null])).toEqual([
+      ['F1', 'residual', 'architecture'], ['F2', 'closed', null], ['F3', 'residual', 'hardening'], ['F4', 'closed', 'untouched']]);
+    expect(carriedResiduals(idx, 2, none)).toEqual([
+      { id: 'F1', reviewer: 'correctness', severity: 'important', file: 'b.ts', line: 20, problem: 'state in the store', residual: 'architecture' },
+      { id: 'F3', reviewer: 'correctness', severity: 'important', problem: 'p3', residual: 'hardening' }]);
+    // Named again in this review, it is this review's finding, not a carried one.
+    const named = { ...none, deferred: [{ id: 'F3', reviewer: 'correctness' as const, severity: 'important' as const, problem: 'p3 again', residual: 'hardening' as const }] };
+    expect(carriedResiduals(idx, 2, named).map(f => f.id)).toEqual(['F1']);
   });
 
   it('answeredBy leaves out an abstention, an invalid result and a fail without a critical or important finding', () => {
