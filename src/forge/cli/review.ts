@@ -173,6 +173,20 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
       if (r.invalid && !r.dropped) continue;
       previous[role] = { verdict: r.verdict, findings: r.findings, ...(r.incomplete ? { incomplete: true } : {}), ...(r.invalid ? { invalid: true } : {}) };
     }
+    // I2: a reviewer delegated to an express review has no file of its own there. Its previous result is what the index
+    // says the express reviewer left of its findings: a fail with the ones still open, else a pass with the express
+    // reviewer's confidence. So it repeats in delta with its previous-<name>.json, or is carried, never in full.
+    const prevPlan = readJson(path.join(prevDir, 'review-plan.json')) as { express?: unknown; delegated?: unknown } | undefined;
+    if (prevPlan?.express === true && Array.isArray(prevPlan.delegated) && index.rounds.some(r => r.round === round - 1)) {
+      for (const role of ROLES) {
+        const name = reviewerKey(role);
+        if (!prevPlan.delegated.includes(name) || prevReviews[name]) continue;
+        const open = previousFindings(index, round, name).map(f => asPrevious(f));
+        const r: Review = { verdict: open.length ? 'fail' : 'pass', confidence: prevReviews.correctness?.confidence ?? 0, findings: open };
+        prevReviews[name] = r;
+        previous[role] = { verdict: r.verdict, findings: r.findings };
+      }
+    }
     const prevHead = existsSync(path.join(prevDir, 'head.txt')) ? readFileSync(path.join(prevDir, 'head.txt'), 'utf8').trim() : '';
     // Without the commit the previous round reviewed, or when git cannot diff from it, the whole diff stands in for the fix.
     const diffFrom = (from: string) => {
@@ -322,13 +336,15 @@ function sayValidatorsRound(reviews: { n: number; max: number }, k: number, fail
 const spawnOut = (s: SpawnEntry) => ({ agent: s.agent, model: s.model, effort: s.effort, mode: s.mode, ...(s.twin ? { twin: true } : {}), ...(s.express ? { express: true } : {}), role: s.role, inputs: s.inputs });
 
 /** A carried reviewer's previous file, copied into this review with "carried": true: as written when it is plain JSON,
- *  else as parsed. */
+ *  else as parsed; a reviewer delegated to an express review has no file there, so it gets the result the index gave it
+ *  (I2). Nothing to carry writes nothing: review-close then lists the file as missing. */
 function writeCarried(plan: RoundPlan, dir: string, n: string, round: number, roundDir: string, prevReviews: Partial<Record<ReviewerKey, Review>>): void {
   for (const c of plan.carried) {
     const raw = readJson(path.join(dir, `reviews-${n}-${round - 1}`, `${c.name}.json`));
-    const parsed = prevReviews[c.name]!;
-    const prev = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : { verdict: parsed.verdict, confidence: parsed.confidence, findings: parsed.findings };
-    writeFileSync(path.join(roundDir, `${c.name}.json`), JSON.stringify({ ...prev, carried: true }, null, 2) + '\n');
+    const parsed = prevReviews[c.name];
+    const prev = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw
+      : parsed ? { verdict: parsed.verdict, confidence: parsed.confidence, findings: parsed.findings } : null;
+    if (prev) writeFileSync(path.join(roundDir, `${c.name}.json`), JSON.stringify({ ...prev, carried: true }, null, 2) + '\n');
   }
 }
 

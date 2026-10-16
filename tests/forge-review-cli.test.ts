@@ -1226,6 +1226,55 @@ describe('the express review (measure 7)', () => {
     expect(indexRound(2)).toEqual([expect.objectContaining({ id: 'F1', reviewer: 'perf', status: 'open' })]);
   });
 
+  // Review 1: correctness F1 on a.txt:2, security passes, perf F2 on b.txt:20; then the express review 2 (delegated:
+  // correctness and perf) and its fix commit, with `express2` the express correctness's file.
+  const afterExpress = (express2: unknown) => {
+    withPerf();
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    write(r1(), 'perf', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'b.txt', line: 20, problem: 'slow loop over b' }] });
+    expect(JSON.parse(close().stdout).action).toBe('fix');
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo fixed\n');
+    git('commit', '-q', '-am', 'fix');
+    expect(JSON.parse(prep().stdout)).toMatchObject({ express: true, carried: ['security'], delegated: ['correctness', 'perf'] });
+    write(r2(), 'correctness', express2);
+    green();
+    expect(JSON.parse(close().stdout)).toMatchObject({ action: 'fix', express: true });
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo fixed again\n');
+    git('commit', '-q', '-am', 'fix 2');
+  };
+  const r3 = () => path.join(work(), 'reviews-1-3');
+
+  it('after an express review asks for a fix, a reviewer delegated to it with a finding still open repeats in delta with it, never in full (I2)', () => {
+    afterExpress({ verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'b.txt', line: 20, problem: 'slow loop over b', origin: 'previous', id: 'F2' }] });
+    expect(indexRound(2).map((f: { id: string; reviewer: string; status: string }) => [f.id, f.reviewer, f.status])).toEqual([['F2', 'perf', 'open'], ['F1', 'correctness', 'closed']]);
+    // Express again (one important left open, green validators): perf is delegated again, not reviewing in full.
+    const express = JSON.parse(prep().stdout);
+    expect(express).toMatchObject({ round: 3, express: true });
+    expect(express.delegated).toContain('perf');
+    expect(JSON.parse(readFileSync(path.join(r3(), 'previous-express.json'), 'utf8'))).toEqual([expect.objectContaining({ id: 'F2', reviewer: 'perf' })]);
+    // A normal review 3: perf in delta with its open finding.
+    writeFileSync(path.join(wt, '.forge', 'config.yaml'), 'review:\n  express: false\ndetect: false\nvalidators:\n  - name: check\n    cmd: node -e "process.exit(0)"\n');
+    const normal = JSON.parse(prep().stdout);
+    const perf = normal.spawn.find((s: { role: string }) => s.role === 'review-perf');
+    expect(perf).toMatchObject({ mode: 'delta' });
+    expect(perf.inputs.findings).toBe('.forge/work/T1/reviews-1-3/previous-perf.json');
+    expect(JSON.parse(readFileSync(path.join(r3(), 'previous-perf.json'), 'utf8'))).toEqual([{ id: 'F2', severity: 'important', file: 'b.txt', line: 20, problem: 'slow loop over b', origin: 'previous' }]);
+  });
+
+  it('after an express review asks for a fix, a reviewer delegated to it whose findings it closed is carried as a pass (I2)', () => {
+    afterExpress({ verdict: 'fail', confidence: 0.7, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'still wrong two', origin: 'previous', id: 'F1' }] });
+    expect(indexRound(2).map((f: { id: string; status: string }) => [f.id, f.status])).toEqual([['F1', 'open'], ['F2', 'closed']]);
+    const out = JSON.parse(prep().stdout);
+    expect(out.carried).toEqual(expect.arrayContaining(['security', 'perf']));
+    expect(out.spawn.map((s: { role: string }) => s.role)).not.toContain('review-perf');
+    expect(JSON.parse(readFileSync(path.join(r3(), 'perf.json'), 'utf8'))).toEqual({ verdict: 'pass', confidence: 0.7, findings: [], carried: true });
+    write(r3(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    green();
+    expect(JSON.parse(close().stdout)).toMatchObject({ action: 'accept', next: 'done' });
+  });
+
   it('with --no-cache the validate command it prints skips the cache too', () => {
     firstReview();
     const out = JSON.parse(prep('--no-cache').stdout);
