@@ -3,6 +3,8 @@ import path from 'node:path';
 import { UsageError } from './errors.js';
 import { DEFAULT_SHADOW_BRIEFS, buildCase, readShadow, renderShadowReport, saveShadow, shadowReport, startShadow, stopShadow } from '../shadow.js';
 import { parseReview, repoRelative, type Finding, type Review } from '../verdict.js';
+import { reviewerKey } from '../review-round.js';
+import type { ReviewRole } from '../triage.js';
 
 // `FORGE shadow start|stop|report|collect`: opens, closes and reports the shadow test kept in `.forge/shadow.json` of the main
 // checkout (shadow.ts), the same file from every worktree.
@@ -19,7 +21,7 @@ export interface TwinsCollected {
   shadowSkipped: { reviewer: TwinKey; reason: 'missing' | 'unparseable' | 'incomplete'; file: string }[];
   shadowPending: { reviewer: TwinKey; file: string }[];
 }
-const KEY_OF_ROLE: Record<string, TwinKey> = { 'review-correctness': 'correctness', 'review-security': 'security', 'review-perf': 'perf' };
+const isKey = (k: unknown): k is TwinKey => k === 'correctness' || k === 'security' || k === 'perf';
 const rel = (cwd: string, p: string) => path.relative(cwd, p).split(path.sep).join('/') || '.';
 
 /** The twins a review plan spawned (its `twin: true` entries), by reviewer. */
@@ -27,8 +29,8 @@ function twinsOf(plan: unknown): TwinKey[] {
   const spawn = plan && typeof plan === 'object' ? (plan as { spawn?: unknown }).spawn : undefined;
   return (Array.isArray(spawn) ? spawn as Record<string, unknown>[] : [])
     .filter(x => !!x && typeof x === 'object' && x.twin === true)
-    .map(x => (x.name === 'correctness' || x.name === 'security' || x.name === 'perf' ? x.name as TwinKey : typeof x.role === 'string' ? KEY_OF_ROLE[x.role] : undefined))
-    .filter((x): x is TwinKey => !!x);
+    .map(x => (isKey(x.name) ? x.name : typeof x.role === 'string' && x.role.startsWith('review-') ? reviewerKey(x.role as ReviewRole) : undefined))
+    .filter(isKey);
 }
 
 /**
@@ -109,9 +111,18 @@ export function shadowCommand(args: string[], deps: { cwd: string; repoDir: stri
       const task = flagOf(args, 'task'), dirArg = flagOf(args, 'dir');
       if (!task || !/^.+-\d{1,4}$/.test(task) || !dirArg) throw new UsageError('shadow collect: --task <id>-<n> and --dir <its review dir, reviews-<n>-<round>> are required');
       const roundDir = path.resolve(cwd, dirArg);
+      // The dir must be a review dir of this very brief, inside a .forge/work tree.
+      const n = task.slice(task.lastIndexOf('-') + 1);
+      const norm = (p: string) => { const s = p.split(path.sep).join('/'); return process.platform === 'win32' ? s.toLowerCase() : s; };
+      const m = /^reviews-(\d+)-\d+$/.exec(path.basename(roundDir));
+      if (!m || Number(m[1]) !== Number(n) || !`/${norm(roundDir)}/`.includes('/.forge/work/')) {
+        throw new UsageError(`shadow collect: --dir must be this brief's reviews-${n}-<round> dir under a .forge/work/ tree`);
+      }
       let plan: unknown;
       try { plan = JSON.parse(readFileSync(path.join(roundDir, 'review-plan.json'), 'utf8')); } catch { plan = undefined; }
       if (!plan || typeof plan !== 'object') throw new UsageError(`shadow collect: no review-plan.json in ${dirArg}`);
+      const planTask = (plan as { task?: unknown }).task;
+      if (typeof planTask === 'string' && planTask !== task) throw new UsageError(`shadow collect: ${dirArg} belongs to ${planTask}, not ${task}`);
       return json(collectTwins(task, roundDir, plan, deps));
     }
     default:

@@ -118,4 +118,23 @@ describe('forge shadow', () => {
     expect(run(['shadow', 'collect', '--dir', '.forge/work/T1/reviews-1-1'], io).code).toBe(2);
     expect(run(['shadow', 'collect', '--task', 'T1', '--dir', '.forge/work/T1/reviews-1-1'], io).code).toBe(2);
   });
+
+  it('collect refuses a dir that is not a review dir of that brief under .forge/work, and saves nothing', () => {
+    startShadow(root, 3);
+    const mk = (rel: string, task: string) => {
+      const d = path.join(root, rel);
+      mkdirSync(path.join(d, 'shadow'), { recursive: true });
+      writeFileSync(path.join(d, 'review-plan.json'), JSON.stringify({ task, round: 1, spawn: [{ role: 'review-security', twin: true }] }));
+      writeFileSync(path.join(d, 'security.json'), JSON.stringify({ verdict: 'pass', confidence: 0.9, findings: [] }));
+      writeFileSync(path.join(d, 'shadow', 'security.json'), JSON.stringify({ verdict: 'pass', confidence: 0.9, findings: [] }));
+    };
+    mk('outside/reviews-1-1', 'T1-1');
+    mk('.forge/work/T1/reviews-2-1', 'T1-2');
+    mk('.forge/work/T1/reviews-1-1', 'T9-1');
+    expect(run(['shadow', 'collect', '--task', 'T1-1', '--dir', '..'], io).code).toBe(2);
+    expect(run(['shadow', 'collect', '--task', 'T1-1', '--dir', path.join(root, 'outside', 'reviews-1-1')], io).code).toBe(2);
+    expect(run(['shadow', 'collect', '--task', 'T1-1', '--dir', '.forge/work/T1/reviews-2-1'], io).code).toBe(2);
+    expect(run(['shadow', 'collect', '--task', 'T1-1', '--dir', '.forge/work/T1/reviews-1-1'], io).code).toBe(2);
+    expect(state().cases).toEqual([]);
+  });
 });
