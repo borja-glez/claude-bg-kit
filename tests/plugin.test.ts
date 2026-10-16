@@ -1081,6 +1081,9 @@ describe('plugin layout', () => {
     expect(medium).not.toContain('git revert --no-edit');
     for (const w of ['FORGE shadow collect --task', '`shadowPending`', '`ask`', '--out-of-model', '--defer', 'NEEDS_CONTEXT', '`validators.cmd`', 'run_in_background',
       '`residual`', '`reviews`', 'threatModel.outOfScope', '"point": "ruling"', 'AskUserQuestion']) expect(conv, w).toContain(w);
+    expect(medium).toMatch(/FORGE review-close --task <id>-<n>[^`]*--locale <es\|en>/);
+    expect(steps).toMatch(/FORGE review-close --task T-<n>[^`]*--locale <es\|en>/);
+    expect(medium).toContain('one line per finding with its id, `residual`, file and line');
     expect(steps).not.toContain('unless a `redo` starts a new brief');
     for (const w of ['`revert.args`', 'FORGE shadow collect --task', '`handover`', 'NEEDS_CONTEXT', '`threatModel`', '`validators.cmd`']) expect(steps, w).toContain(w);
   });
