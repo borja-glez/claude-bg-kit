@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { samePath } from '../../lib/worktree.js';
 import { UsageError } from './errors.js';
@@ -6,8 +6,10 @@ import { appendEvent, appendPhase, readEvents, type LedgerEvent } from '../ledge
 import { loadConfig, agentFor, type Profile, type ForgeConfig } from '../config.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, runOptions, validateEvent, failingLabel, type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { PATH_ORDER, zonesFromPaths, type PathName, type ReviewRole } from '../triage.js';
-import { parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, repoRelative, type Finding, type Review, type ReviewerName, type FailingValidator } from '../verdict.js';
+import { parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, repoRelative, type Finding, type Review, type ReviewerName, type FailingValidator, type AskFinding } from '../verdict.js';
 import { roundDecision } from '../round.js';
+import { parseIndex, assignIds, answeredBy, idsOf, recordRound, openIds, closedFor, previousFindings, asPrevious } from '../findings-index.js';
+import { reviewsOf } from '../loop.js';
 import { buildCase, readShadow, saveShadow, takeBrief } from '../shadow.js';
 import { renderThreatModel } from '../threat-model.js';
 import { shadowCommand } from './shadow.js';
@@ -83,6 +85,10 @@ function readJson(file: string): unknown {
   try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return undefined; }
 }
 
+function readText(file: string): string | null {
+  try { return readFileSync(file, 'utf8'); } catch { return null; }
+}
+
 /** K4-02: `<dir>/threat-model.md` from the config's threatModel, rewritten each time; removed when there is none. */
 function writeThreatModel(dir: string, config: ForgeConfig): string | null {
   const file = path.join(dir, 'threat-model.md');
@@ -95,10 +101,12 @@ function writeThreatModel(dir: string, config: ForgeConfig): string | null {
  * `FORGE review-prep --task <T>-<n> --path <p> --base <sha> --baseline <f> --dir <dir> [--locale es|en] [--no-cache]`: validates
  * against the baseline into `<dir>/validators-<n>.json`, writes `<dir>/diff-<n>.patch`, decides who reviews with
  * reviewRound from the task's last triage and saves `head.txt` and `review-plan.json` in `<dir>/reviews-<n>-<round>/`.
- * From round 2 it also writes the fix diff and each reviewer's previous blocking findings, and copies the carried
+ * From round 2 it also writes the fix diff and each delta reviewer's previous findings (with their ids from
+ * findings-index-<n>.json when it has the previous review: J-06), and copies the carried
  * results with `"carried": true`. With validators red that the baseline does not excuse it opens a validators round
  * instead (C-08): validators-fix-<n>-<round>-<k>.json, the phase fix with validators: true, spawn [] and
  * validatorsRound {k, max, findings}, at most twice per review. It logs the phases validate and review (with the reviewers).
+ * It prints reviews {n, max}, the review of the brief as the person counts it (C-13), which its say begins with.
  */
 export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   const flag = (name: string) => {
@@ -137,6 +145,9 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   mkdirSync(roundDir, { recursive: true });
   // K4-02: the threat model goes to the security reviewer (reviewRound adds it to its inputs).
   const tmFile = writeThreatModel(dir, config);
+  // J-06: the brief's findings index (review-close writes it), for the ids a delta reviewer gets. C-13: review n of max.
+  const index = parseIndex(readText(path.join(dir, `findings-index-${n}.json`)), task);
+  const reviewsCount = reviewsOf(round, pathName);
   // C4: the brief enters validation (logged before the validators run, so the stage's clock includes them).
   appendPhase(deps.cwd, { ts: deps.now().toISOString(), kind: 'phase', task: id, phase: 'validate', brief: Number(n), round });
 
@@ -170,12 +181,12 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
       // A plan an earlier preparation of this round left would let review-close close a review nobody did.
       rmSync(path.join(roundDir, 'review-plan.json'), { force: true });
       const fixOut: Record<string, unknown> = {
-        round,
+        round, reviews: reviewsCount,
         validators: { ok, failing: blockers.map(r => r.validator), preexisting: results.filter(r => r.ok !== true && r.preexisting === true).map(r => r.validator), file: rel(deps.cwd, validatorsFile) },
         spawn: [], validatorsRound: { k: k + 1, max: MAX_VALIDATOR_ROUNDS, findings: rel(deps.cwd, roundFile) },
         cached: cachedNames(results), durationMs: validation.durationMs, ...(restored.length ? { restored } : {}),
       };
-      if (locale === 'es' || locale === 'en') fixOut.say = sayValidatorsRound(round, k + 1, blockers.map(r => failingLabel(r, locale)), locale);
+      if (locale === 'es' || locale === 'en') fixOut.say = sayValidatorsRound(reviewsCount, k + 1, blockers.map(r => failingLabel(r, locale)), locale);
       return json(fixOut);
     }
   }
@@ -236,10 +247,14 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   });
   if (plan.shadow) mkdirSync(path.join(roundDir, 'shadow'), { recursive: true });
 
-  // Delta reviewers get their own blocking findings only; a carried result is copied with "carried": true.
+  // Delta reviewers get only their own findings the previous review left open (blocking, or residual sent to the
+  // implementer), each with its stable id, from the brief's index (J-06); a brief without a record of that review (begun
+  // before forge 0.18) gets its own blocking findings as parsed. A carried result is copied with "carried": true.
+  const indexed = index.rounds.some(r => r.round === round - 1);
   for (const s of plan.spawn.filter(s => s.mode === 'delta' && !s.twin)) {
-    const blockers = (previous[s.role]?.findings ?? []).filter(f => f.severity === 'critical' || f.severity === 'important');
-    writeFileSync(findingsFile(s.name), JSON.stringify(blockers, null, 2) + '\n');
+    const own = indexed ? previousFindings(index, round, s.name).map(f => asPrevious(f))
+      : (previous[s.role]?.findings ?? []).filter(f => f.severity === 'critical' || f.severity === 'important');
+    writeFileSync(findingsFile(s.name), JSON.stringify(own, null, 2) + '\n');
   }
   for (const c of plan.carried) {
     // The file as written when it is plain JSON; else (JSON inside prose or a fence) the result as parsed.
@@ -263,36 +278,69 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   const failing = results.filter(blocking).map(r => r.validator);
   const preexisting = results.filter(r => r.ok !== true && r.preexisting === true).map(r => r.validator);
   const out: Record<string, unknown> = {
-    round, validators: { ok, failing, preexisting, file: rel(deps.cwd, validatorsFile) }, spawn, cached: cachedNames(results), durationMs: validation.durationMs,
+    round, reviews: reviewsCount, validators: { ok, failing, preexisting, file: rel(deps.cwd, validatorsFile) }, spawn, cached: cachedNames(results), durationMs: validation.durationMs,
     ...(plan.carried.length ? { carried: plan.carried.map(c => c.name) } : {}),
     ...(restored.length ? { restored } : {}),
   };
-  if (locale === 'es' || locale === 'en') out.say = sayPrep(round, ok, results.filter(blocking).map(r => failingLabel(r, locale)), plan, locale, cachedNames(results).length);
+  if (locale === 'es' || locale === 'en') out.say = sayPrep(reviewsCount, ok, results.filter(blocking).map(r => failingLabel(r, locale)), plan, locale, cachedNames(results).length);
   return json(out);
 }
 
-function sayPrep(round: number, ok: boolean, failing: string[], plan: RoundPlan, locale: 'es' | 'en', cached: number): string {
+function sayPrep(reviews: { n: number; max: number }, ok: boolean, failing: string[], plan: RoundPlan, locale: 'es' | 'en', cached: number): string {
   const who = plan.spawn.filter(s => !s.twin).map(s => `${s.name} (${s.effort}${s.mode === 'delta' ? ', delta' : ''})`).join(', ');
   const twins = plan.spawn.filter(s => s.twin).length;
   if (locale === 'es') {
-    return `Ronda ${round}: validadores ${ok ? 'en verde' : `en rojo (${failing.join(', ')})`}${cached ? ` (${cached} de caché)` : ''}; revisan ${who || 'nadie'}`
+    return `Revisión ${reviews.n} de ${reviews.max}: validadores ${ok ? 'en verde' : `en rojo (${failing.join(', ')})`}${cached ? ` (${cached} de caché)` : ''}; revisan ${who || 'nadie'}`
       + `${plan.carried.length ? `; se arrastran ${plan.carried.map(c => c.name).join(', ')}` : ''}${twins ? `; ${twins} gemelo(s) en sombra` : ''}.`;
   }
-  return `Round ${round}: validators ${ok ? 'green' : `red (${failing.join(', ')})`}${cached ? ` (${cached} cached)` : ''}; reviewing: ${who || 'nobody'}`
+  return `Review ${reviews.n} of ${reviews.max}: validators ${ok ? 'green' : `red (${failing.join(', ')})`}${cached ? ` (${cached} cached)` : ''}; reviewing: ${who || 'nobody'}`
     + `${plan.carried.length ? `; carried: ${plan.carried.map(c => c.name).join(', ')}` : ''}${twins ? `; ${twins} shadow twin(s)` : ''}.`;
 }
 
-function sayValidatorsRound(round: number, k: number, failing: string[], locale: 'es' | 'en'): string {
+function sayValidatorsRound(reviews: { n: number; max: number }, k: number, failing: string[], locale: 'es' | 'en'): string {
   return locale === 'es'
-    ? `Ronda ${round}: validadores en rojo (${failing.join(', ')}); ronda de validadores ${k} de ${MAX_VALIDATOR_ROUNDS}: nadie revisa, el implementador los arregla primero.`
-    : `Round ${round}: validators red (${failing.join(', ')}); validators round ${k} of ${MAX_VALIDATOR_ROUNDS}: nobody reviews, the implementer fixes them first.`;
+    ? `Revisión ${reviews.n} de ${reviews.max}: validadores en rojo (${failing.join(', ')}); ronda de validadores ${k} de ${MAX_VALIDATOR_ROUNDS}: nadie revisa, el implementador los arregla primero.`
+    : `Review ${reviews.n} of ${reviews.max}: validators red (${failing.join(', ')}); validators round ${k} of ${MAX_VALIDATOR_ROUNDS}: nobody reviews, the implementer fixes them first.`;
 }
 
-type ValidatorRow = { validator?: unknown; ok?: unknown; failures?: unknown; preexisting?: unknown };
+type ValidatorRow = { validator?: unknown; ok?: unknown; failures?: unknown; failing?: unknown; preexisting?: unknown };
+const FINDING_ID = /^F\d{1,3}$/;
+type Overrides = { outOfModel: string[]; defer: string[] };
+
+/** One review's overrides.json, read leniently (K4-02, §4.8). */
+function overridesOf(file: string): Overrides {
+  const raw = readJson(file) as Partial<Record<keyof Overrides, unknown>> | undefined;
+  const ids = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && FINDING_ID.test(x)) : []);
+  return { outOfModel: ids(raw?.outOfModel), defer: ids(raw?.defer) };
+}
+
+/** The overrides of every review of brief n (`reviews-<n>-*\/overrides.json`): a ruling on a finding stays for the brief. */
+function briefOverrides(dir: string, n: string): Overrides {
+  const all: Overrides = { outOfModel: [], defer: [] };
+  let entries: string[] = [];
+  try { entries = readdirSync(dir); } catch { /* no work dir */ }
+  for (const e of entries) {
+    if (!new RegExp(`^reviews-${n}-\\d+$`).test(e)) continue;
+    const o = overridesOf(path.join(dir, e, 'overrides.json'));
+    all.outOfModel.push(...o.outOfModel);
+    all.defer.push(...o.defer);
+  }
+  return { outOfModel: [...new Set(all.outOfModel)], defer: [...new Set(all.defer)] };
+}
+
+/** The question review-close puts to the person when security repeats a closed theme (K4-02, §4.8). */
+function askOf(ask: AskFinding[], locale: 'es' | 'en') {
+  const pairs = ask.map(a => `${a.earlier.id} → ${a.id ?? '?'}`).join(', ');
+  return locale === 'es'
+    ? { kind: 'repeat-theme', findings: ask, question: `Security encontró otra variante de un problema ya arreglado (${pairs}). ¿Entra en lo que quieres proteger?`,
+      options: [{ label: 'Sí, arréglalo', option: 'fix' }, { label: 'No, queda fuera del modelo', option: 'out-of-model' }] }
+    : { kind: 'repeat-theme', findings: ask, question: `Security found another variant of a problem already fixed (${pairs}). Is it inside what you want to protect?`,
+      options: [{ label: 'Yes, fix it', option: 'fix' }, { label: 'No, it is out of the model', option: 'out-of-model' }] };
+}
 
 /**
- * `FORGE review-close --task <T>-<n> --dir <dir> --path medium|large`: closes the last round review-prep prepared in
- * `<dir>/reviews-<n>-<round>/` (`--dir` may also be that round dir). Exits 3 with `missing` when a reviewer it spawned
+ * `FORGE review-close --task <T>-<n> --dir <dir> --path medium|large [--locale es|en] [--out-of-model F2,F5] [--defer F3]`:
+ * closes the last round review-prep prepared in `<dir>/reviews-<n>-<round>/` (`--dir` may also be that round dir). Exits 3 with `missing` when a reviewer it spawned
  * (twins aside) left no file. Else runs the verdict with review-plan.json's flags, the round and the fix diff's hunks
  * (carried results keep their previous origins), logs it on the round dir and the round decision, logs the minor and
  * deferred findings as a ruling, writes `<dir>/findings-<n>-<round>.json` for the implementer when the action is not
@@ -300,6 +348,10 @@ type ValidatorRow = { validator?: unknown; ok?: unknown; failures?: unknown; pre
  * prints `{action, score, next, last, implementer, findings, deferred, invalid, incomplete}` (`incomplete`: the
  * reviewers whose file is a draft with `"complete": false`; plus `shadow`, the twins compared, and
  * `shadowSkipped`, the twins whose file, or their high reviewer's, was missing, unparseable or a draft).
+ * Every critical and important finding gets its stable id in <dir>/findings-index-<n>.json (J-06), and the verdict
+ * applies the blocking table of the review (C-04): it prints reviews {n, max} (C-13) and ask, the question for a security
+ * finding that repeats a closed theme (K4-02). --out-of-model and --defer keep ids in the review's overrides.json; the
+ * overrides of every review of the brief apply.
  */
 export function reviewClose(args: string[], deps: ReviewDeps): Result {
   const flag = (name: string) => {
@@ -312,6 +364,16 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   const m = TASK_N.exec(task);
   if (!m) throw new UsageError('review-close: --task must be <id>-<n>');
   if (p !== 'medium' && p !== 'large') throw new UsageError('review-close: --path must be medium or large');
+  const locale = flag('locale');
+  if (args.includes('--locale') && locale !== 'es' && locale !== 'en') throw new UsageError('review-close: --locale must be es or en');
+  // K4-02 / §4.8: ids the person ruled out of the threat model, or left open as an architecture change.
+  const idsArg = (name: string): string[] => {
+    if (!args.includes(`--${name}`)) return [];
+    const list = (flag(name) ?? '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+    if (!list.length || !list.every(x => FINDING_ID.test(x))) throw new UsageError(`review-close: --${name} takes finding ids such as F3,F5`);
+    return list;
+  };
+  const outOfModelArg = idsArg('out-of-model'), deferArg = idsArg('defer');
   const [, id, n] = m;
 
   // The round: the given round dir, or the last one review-prep prepared under the work dir.
@@ -327,7 +389,7 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
     }
   }
   const roundDir = path.join(dir, `reviews-${n}-${round}`);
-  const plan = readJson(path.join(roundDir, 'review-plan.json')) as { spawn?: unknown; carried?: unknown; flags?: unknown } | undefined;
+  const plan = readJson(path.join(roundDir, 'review-plan.json')) as { spawn?: unknown; carried?: unknown; flags?: unknown; base?: unknown; express?: unknown; delegated?: unknown; validatorsPending?: unknown } | undefined;
   if (!round || !plan || typeof plan !== 'object') throw new UsageError(`review-close: no review-plan.json for ${task} in ${dirArg}: run FORGE review-prep first`);
 
   const names = (list: unknown, keep: (x: Record<string, unknown>) => boolean) => (Array.isArray(list) ? list as Record<string, unknown>[] : [])
@@ -348,25 +410,60 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   const verifyFile = existsSync(verifyPath) ? parseVerifyFile(readFileSync(verifyPath, 'utf8')) : undefined;
   if (verifyFile !== undefined) reviews.verify = verifyReview(verifyFile);
   if (!Object.keys(reviews).length) throw new UsageError(`review-close: no reviews found in ${rel(deps.cwd, roundDir)}`);
+  // Paths as the diff names them, so the index, the matching and the implementer's file compare like with like (J-06).
+  for (const k of Object.keys(reviews) as ReviewerName[]) {
+    reviews[k] = { ...reviews[k]!, findings: reviews[k]!.findings.map(f => (f.file ? { ...f, file: repoRelative(f.file, deps.repoDir) } : f)) };
+  }
 
   // Validators as review-prep wrote them; failing ones that already failed on the base commit do not count.
   const rows = readJson(path.join(dir, `validators-${n}.json`));
   const arr = Array.isArray(rows) ? (rows as ValidatorRow[]).filter(r => r && typeof r === 'object') : [];
   const validatorsOk = Array.isArray(rows) && arr.every(r => !blocking(r));
-  const failing: FailingValidator[] = arr.filter(r => blocking(r)).map(r => ({ validator: String(r.validator ?? ''), failures: Array.isArray(r.failures) ? r.failures.map(String) : [] }));
+  const failing: FailingValidator[] = arr.filter(r => blocking(r)).map(r => ({ validator: String(r.validator ?? ''), failures: Array.isArray(r.failures) ? r.failures.map(String) : [],
+    failing: Array.isArray(r.failing) ? r.failing.map(String) : [] }));
   const preexisting = arr.filter(r => r.ok !== true && r.preexisting === true).map(r => String(r.validator ?? ''));
 
   const flags = Array.isArray(plan.flags) ? plan.flags : [];
   const fixPatch = round >= 2 ? (() => { try { return readFileSync(path.join(dir, `fix-${n}-${round}.patch`), 'utf8'); } catch { return ''; } })() : '';
-  const result = synthesize(reviews, weightsFor({ sensitive: flags.includes('--sensitive'), perf: flags.includes('--perf') }), validatorsOk, failing,
-    { round, fixHunks: parseHunks(fixPatch), root: deps.repoDir, carried });
+  // C-13: review n of max; the last one accepts a fix with green validators and no critical (C-04, rule 7).
+  const config = loadConfig(deps.repoDir);
+  const reviewsCount = reviewsOf(round, p);
+  // Rulings on findings stay for the brief: the ids given now are kept in this review's overrides.json, and the overrides
+  // of every review of brief n apply (K4-02, §4.8).
+  if (outOfModelArg.length || deferArg.length) {
+    const kept = overridesOf(path.join(roundDir, 'overrides.json'));
+    writeFileSync(path.join(roundDir, 'overrides.json'), JSON.stringify({
+      outOfModel: [...new Set([...kept.outOfModel, ...outOfModelArg])], defer: [...new Set([...kept.defer, ...deferArg])],
+    }, null, 2) + '\n');
+  }
+  const overrides = briefOverrides(dir, n);
+  // J-06: every critical and important finding gets its stable id from the brief's index; what the previous review left
+  // open and nobody names now is closing (a new finding that matches it is hardening). `open` is looked up with the ids
+  // assignIds gave (copied or paired), so a still-open finding its reviewer mislabels keeps blocking as previous.
+  const indexPath = path.join(dir, `findings-index-${n}.json`);
+  const indexText = readText(indexPath);
+  const index = parseIndex(indexText, task);
+  const withIds = assignIds(index, round, reviews);
+  const answered = answeredBy(withIds);
+  const result = synthesize(withIds, weightsFor({ sensitive: flags.includes('--sensitive'), perf: flags.includes('--perf') }), validatorsOk, failing, {
+    round, fixHunks: parseHunks(fixPatch), root: deps.repoDir, carried, last: round >= reviewsCount.max, personDocs: config.review.personDocs,
+    open: openIds(index, round), closed: closedFor(index, round, idsOf(withIds), answered), outOfModel: overrides.outOfModel, defer: overrides.defer,
+  });
+  // An index that exists but cannot be read is set aside next to the new one, never overwritten.
+  if (indexText?.trim() && !index.rounds.length) {
+    const aside = `${indexPath}.corrupt-${deps.now().toISOString().replace(/[:.]/g, '-')}`;
+    renameSync(indexPath, aside);
+    result.reasons.push(`unreadable findings index set aside as ${rel(deps.cwd, aside)}`);
+  }
+  writeFileSync(indexPath, JSON.stringify(recordRound(index, round, result, answered), null, 2) + '\n');
   if (!Array.isArray(rows)) result.reasons.push('no validation recorded');
   if (preexisting.length) result.reasons.push(`already failing on the base commit, not counted: ${preexisting.join(', ')}`);
 
   const ts = deps.now().toISOString();
   appendPhase(deps.cwd, { ts, kind: 'phase', task: id, phase: 'verdict', brief: Number(n), round });
   appendEvent(deps.cwd, { ts, kind: 'verdict', task, dir: rel(deps.cwd, roundDir), action: result.action, score: result.score, signature: result.signature,
-    critical: result.critical.length, important: result.important.length, minor: result.minor.length, deferred: result.deferred.length });
+    critical: result.critical.length, important: result.important.length, minor: result.minor.length, deferred: result.deferred.length, reviews: reviewsCount,
+    ...(result.ask.length ? { ask: result.ask.length } : {}) });
   if (verifyFile !== undefined) {
     // As FORGE verdict logs it.
     const evidence = rel(deps.cwd, roundDir).replace(/reviews-(\d+-\d+)$/, 'evidence/$1');
@@ -375,8 +472,8 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
       evidence, ...(verifyFile?.reason ? { reason: verifyFile.reason } : {}) });
   }
   const events = readEvents(deps.cwd);
-  const d = roundDecision(events, task, p, loadConfig(deps.repoDir).profile);
-  appendEvent(deps.cwd, { ts, kind: 'round', task, ...d });
+  const d = roundDecision(events, task, p, config.profile);
+  appendEvent(deps.cwd, { ts, kind: 'round', task, ...d, reviews: reviewsCount });
   // C4: a verdict that sends the brief back to an implementer opens its fix stage.
   if (result.action !== 'accept' && (d.next === 'resume' || d.next === 'fresh-stronger' || d.next === 'redo')) {
     appendPhase(deps.cwd, { ts, kind: 'phase', task: id, phase: 'fix', brief: Number(n), round });
@@ -430,8 +527,9 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
     saveShadow(deps.cwd, { ...state, cases });
   }
   return json({
-    action: result.action, score: result.score, next: d.next, last: d.last, implementer: d.implementer,
-    findings, deferred: result.deferred, invalid: result.reviewers.filter(r => r.invalid).map(r => r.name),
+    action: result.action, score: result.score, next: d.next, last: d.last, implementer: d.implementer, reviews: reviewsCount,
+    findings, deferred: result.deferred, ask: result.ask.length ? askOf(result.ask, locale === 'es' ? 'es' : 'en') : null,
+    invalid: result.reviewers.filter(r => r.invalid).map(r => r.name),
     incomplete: result.reviewers.filter(r => r.incomplete).map(r => r.name), round, reasons: result.reasons, ...(twins.length ? { shadow: twins } : {}), ...(shadowSkipped.length ? { shadowSkipped } : {}),
   });
 }

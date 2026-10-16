@@ -366,6 +366,10 @@ describe('forge review-close', () => {
   const r1 = () => path.join(work(), 'reviews-1-1');
   const r2 = () => path.join(work(), 'reviews-1-2');
   const write = (dir: string, name: string, v: unknown) => writeFileSync(path.join(dir, `${name}.json`), JSON.stringify(v));
+  // A review 2 with one or two important findings left (green validators, none from security) is an express one by default
+  // (measure 7): the tests of the normal review 2 turn it off.
+  const noExpress = () => writeFileSync(path.join(wt, '.forge', 'config.yaml'),
+    'review:\n  express: false\ndetect: false\nvalidators:\n  - name: check\n    cmd: node -e "process.exit(0)"\n');
 
   it('a reviewer that left no file: code 3 with missing, no verdict logged', () => {
     prep();
@@ -408,6 +412,7 @@ describe('forge review-close', () => {
   });
 
   it('round 2: an accept with a deferred finding logs the ruling; the carried security counts as before', () => {
+    noExpress();
     prep();
     write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }] });
     write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
@@ -429,8 +434,9 @@ describe('forge review-close', () => {
   });
 
   it('round 2: an untouched finding given as an absolute path inside the fix diff is fix and blocks', () => {
+    noExpress();
     prep();
-    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }] });
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'b.txt', line: 25, problem: 'old smell in the loop' }] });
     write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
     close();
     writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo fixed\n');
@@ -440,7 +446,7 @@ describe('forge review-close', () => {
     const out = JSON.parse(close().stdout);
     expect(out.action).toBe('fix');
     expect(out.deferred).toEqual([]);
-    expect(JSON.parse(readFileSync(path.join(work(), 'findings-1-2.json'), 'utf8')).findings[0]).toMatchObject({ problem: 'still wrong', origin: 'fix' });
+    expect(JSON.parse(readFileSync(path.join(work(), 'findings-1-2.json'), 'utf8')).findings[0]).toMatchObject({ problem: 'still wrong', origin: 'fix', file: 'a.txt', id: 'F2' });
   });
 
   it('closing the same round again uses the same round and dir', () => {
@@ -558,8 +564,9 @@ describe('forge review-close', () => {
   });
 
   it.skipIf(process.platform !== 'win32')('round 2: a Git Bash style /c/... finding path is made repo-relative', () => {
+    noExpress();
     prep();
-    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }] });
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'b.txt', line: 25, problem: 'old smell in the loop' }] });
     write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
     close();
     writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo fixed\n');
@@ -601,6 +608,213 @@ describe('forge review-close', () => {
     const r = close();
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/review-prep/);
+  });
+
+  it('review-prep and review-close count reviews n of max (4 on Medium, 5 on Large) in their output, the say and the verdict and round events (C-13)', () => {
+    expect(JSON.parse(prep('--locale', 'en').stdout)).toMatchObject({ round: 1, reviews: { n: 1, max: 4 } });
+    expect(JSON.parse(prep('--locale', 'en').stdout).say).toMatch(/^Review 1 of 4: /);
+    expect(JSON.parse(prep('--locale', 'es').stdout).say).toMatch(/^Revisión 1 de 4: /);
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    expect(JSON.parse(close().stdout).reviews).toEqual({ n: 1, max: 4 });
+    const events = readEvents(root);
+    expect(events.filter(e => e.kind === 'verdict').at(-1)!.reviews).toEqual({ n: 1, max: 4 });
+    expect(events.filter(e => e.kind === 'round').at(-1)).toMatchObject({ reviews: { n: 1, max: 4 }, round: 1, cap: 3 });
+    expect(JSON.parse(run(['review-close', '--task', 'T1-1', '--dir', '.forge/work/T1', '--path', 'large', '--cwd', wt], io).stdout).reviews).toEqual({ n: 1, max: 5 });
+    expect(readEvents(root).filter(e => e.kind === 'round').at(-1)).toMatchObject({ reviews: { n: 1, max: 5 }, cap: 4 });
+  });
+
+  it('gives each critical and important finding a stable id: kept when the delta reviewer copies it, inherited by a reworded previous one, new otherwise (J-06)', () => {
+    noExpress();
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [
+      { severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' },
+      { severity: 'important', file: 'b.txt', line: 20, problem: 'loop never ends on empty input' },
+      { severity: 'minor', file: 'a.txt', problem: 'style' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    expect(JSON.parse(close().stdout).action).toBe('fix');
+    const index1 = JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8'));
+    expect(index1.rounds[0].findings.map((f: { id: string; reviewer: string; status: string }) => [f.id, f.reviewer, f.status]))
+      .toEqual([['F1', 'correctness', 'open'], ['F2', 'correctness', 'open']]);
+    expect(JSON.parse(readFileSync(path.join(work(), 'findings-1-1.json'), 'utf8')).findings.map((f: { id: string }) => f.id)).toEqual(['F1', 'F2']);
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo fixed\n');
+    git('commit', '-q', '-am', 'fix');
+    prep();
+    expect(JSON.parse(readFileSync(path.join(r2(), 'previous-correctness.json'), 'utf8')).map((f: { id: string }) => f.id)).toEqual(['F1', 'F2']);
+    write(r2(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [
+      { severity: 'important', file: 'a.txt', line: 2, problem: 'still wrong', origin: 'previous', id: 'F1' },
+      { severity: 'important', file: 'b.txt', line: 22, problem: 'the empty input case spins forever', origin: 'previous' },
+      { severity: 'important', file: 'b.txt', line: 5, problem: 'new header parse bug', origin: 'fix' }] });
+    expect(JSON.parse(close().stdout).action).toBe('fix');
+    expect(JSON.parse(readFileSync(path.join(work(), 'findings-1-2.json'), 'utf8')).findings.map((f: { id: string }) => f.id)).toEqual(['F1', 'F2', 'F3']);
+    const index2 = JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8'));
+    expect(index2.rounds.map((r: { round: number }) => r.round)).toEqual([1, 2]);
+  });
+
+  it('the same blocking ids as the previous review, in other words and with another score, stall the loop (C-05)', () => {
+    noExpress();
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    expect(JSON.parse(close().stdout).next).toBe('resume');
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo again\n');
+    git('commit', '-q', '-am', 'fix');
+    prep();
+    write(r2(), 'correctness', { verdict: 'fail', confidence: 0.6, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'the second line is still not right', origin: 'previous', id: 'F1' }] });
+    expect(JSON.parse(close().stdout)).toMatchObject({ action: 'fix', next: 'stalled' });
+    const verdicts = readEvents(root).filter(e => e.kind === 'verdict');
+    expect(verdicts[1].signature).toBe(verdicts[0].signature);
+    expect(verdicts[1].score).not.toBe(verdicts[0].score);
+    expect(String(verdicts[1].signature)).toMatch(/^v2:/);
+  });
+
+  it('a new finding of the fix that matches one the same reviewer closes is hardening: residual, and the brief is accepted (C-04)', () => {
+    noExpress();
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'the second line is not validated' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    close();
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo checked\n');
+    git('commit', '-q', '-am', 'fix');
+    prep();
+    write(r2(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'the second line is not validated when it is empty', origin: 'fix' }] });
+    const out = JSON.parse(close().stdout);
+    expect(out).toMatchObject({ action: 'accept', next: 'done', ask: null });
+    expect(out.deferred).toEqual([expect.objectContaining({ id: 'F2', reviewer: 'correctness', residual: 'hardening' })]);
+    const index = JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8'));
+    expect(index.rounds[1].findings.map((f: { id: string; status: string }) => [f.id, f.status])).toEqual([['F2', 'residual'], ['F1', 'closed']]);
+  });
+
+  it('security finding another variant of a closed one asks the person; --out-of-model closes the same review again with it as minor and keeps it (K4-02)', () => {
+    prep();
+    write(r1(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    write(r1(), 'security', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'the path from the input is joined without a check' }] });
+    expect(JSON.parse(close().stdout).action).toBe('fix');
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo checked\n');
+    git('commit', '-q', '-am', 'fix');
+    prep();
+    write(r2(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    write(r2(), 'security', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'the path from the input is joined without a check for 8.3 short names', origin: 'fix' }] });
+    const asked = JSON.parse(close('--locale', 'es').stdout);
+    expect(asked.action).toBe('fix');
+    expect(asked.ask).toMatchObject({ kind: 'repeat-theme', findings: [{ id: 'F2', severity: 'important', file: 'a.txt', line: 2, earlier: { id: 'F1', round: 1 } }] });
+    expect(asked.ask.question).toContain('F1 → F2');
+    expect(asked.ask.options.map((o: { option: string }) => o.option)).toEqual(['fix', 'out-of-model']);
+    expect(readEvents(root).filter(e => e.kind === 'verdict').at(-1)).toMatchObject({ ask: 1 });
+    const ruled = JSON.parse(close('--out-of-model', 'F2').stdout);
+    expect(ruled).toMatchObject({ action: 'accept', next: 'done', ask: null });
+    expect(JSON.parse(readFileSync(path.join(r2(), 'overrides.json'), 'utf8'))).toEqual({ outOfModel: ['F2'], defer: [] });
+    // Closing again without the flag still honours it, and logs the ruling once.
+    expect(JSON.parse(close().stdout).action).toBe('accept');
+    const rulings = readEvents(root).filter(e => e.kind === 'ruling');
+    expect(rulings).toHaveLength(1);
+    expect(rulings[0].minor).toEqual([expect.objectContaining({ id: 'F2', severity: 'minor', declared: 'important', outOfModel: true, residual: 'out-of-model' })]);
+    expect(close('--out-of-model', 'nope').code).toBe(2);
+    expect(close('--defer').code).toBe(2);
+  });
+
+  it('--defer leaves a finding as residual architecture and closes the same review again (§4.8)', () => {
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'the state should live in the store' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    expect(JSON.parse(close().stdout).action).toBe('fix');
+    const out = JSON.parse(close('--defer', 'f1').stdout);
+    expect(out).toMatchObject({ action: 'accept', next: 'done' });
+    expect(out.deferred).toEqual([expect.objectContaining({ id: 'F1', residual: 'architecture' })]);
+    expect(JSON.parse(readFileSync(path.join(r1(), 'overrides.json'), 'utf8'))).toEqual({ outOfModel: [], defer: ['F1'] });
+  });
+
+  it('an important finding only in the person docs (README.md) is residual docs and the brief is accepted (K4-09)', () => {
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'README.md', line: 3, problem: 'the usage line is out of date' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    const out = JSON.parse(close().stdout);
+    expect(out).toMatchObject({ action: 'accept', findings: null });
+    expect(out.deferred).toEqual([expect.objectContaining({ id: 'F1', residual: 'docs', file: 'README.md' })]);
+  });
+
+  it('the last review (4 of 4 on Medium) accepts a fix with green validators and no critical; what is open stays as residual cap (C-04)', () => {
+    for (const k of [1, 2, 3]) appendEvent(root, { ts: `2026-10-14T09:0${k}:00.000Z`, kind: 'verdict', task: 'T1-1', dir: `.forge/work/T1/reviews-1-${k}`, action: 'fix', score: 0.6, signature: `v2:s${k}` });
+    expect(JSON.parse(prep().stdout)).toMatchObject({ round: 4, reviews: { n: 4, max: 4 } });
+    const r4 = path.join(work(), 'reviews-1-4');
+    write(r4, 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'still wrong' }] });
+    write(r4, 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    const out = JSON.parse(close().stdout);
+    expect(out).toMatchObject({ action: 'accept', next: 'done' });
+    expect(out.reasons).toContain('accepted at the cap with 1 open finding(s)');
+    expect(out.deferred).toEqual([expect.objectContaining({ problem: 'still wrong', residual: 'cap' })]);
+  });
+
+  it('a brief begun before forge 0.18 (no findings index, a text signature): the delta reviewer gets its parsed findings and the old signature never stalls', () => {
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    appendEvent(root, { ts: '2026-10-14T10:05:00.000Z', kind: 'verdict', task: 'T1-1', dir: '.forge/work/T1/reviews-1-1', action: 'fix', score: 0.6, signature: '3f2a9c0d1e5b7a64' });
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo again\n');
+    git('commit', '-q', '-am', 'fix');
+    prep();
+    expect(existsSync(path.join(work(), 'findings-index-1.json'))).toBe(false);
+    expect(JSON.parse(readFileSync(path.join(r2(), 'previous-correctness.json'), 'utf8'))).toEqual([{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }]);
+    write(r2(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two', origin: 'previous' }] });
+    expect(JSON.parse(close().stdout)).toMatchObject({ action: 'fix', next: 'resume' });
+    expect(JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8')).rounds.map((r: { round: number }) => r.round)).toEqual([2]);
+  });
+
+  it('round 2: a finding still open whose reviewer copies its id but calls it untouched is previous and blocks (J-06)', () => {
+    noExpress();
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'b.txt', line: 25, problem: 'old smell in the loop' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    close();
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo fixed\n');
+    git('commit', '-q', '-am', 'fix');
+    prep();
+    // b.txt is outside the fix diff: only the id the reviewer copied says it is the open F1.
+    write(r2(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'b.txt', line: 25, problem: 'old smell in the loop', origin: 'untouched', id: 'F1' }] });
+    const out = JSON.parse(close().stdout);
+    expect(out).toMatchObject({ action: 'fix', deferred: [] });
+    const sent = JSON.parse(readFileSync(path.join(work(), 'findings-1-2.json'), 'utf8')).findings;
+    expect(sent).toEqual([expect.objectContaining({ id: 'F1', origin: 'untouched' })]);
+    expect(sent[0].residual).toBeUndefined();
+  });
+
+  it('a fix can defer too: the hardening finding is reported, logged and indexed as residual, and not sent to the implementer (C-04)', () => {
+    noExpress();
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [
+      { severity: 'important', file: 'a.txt', line: 2, problem: 'the second line is not validated' },
+      { severity: 'important', file: 'b.txt', line: 20, problem: 'loop never ends on empty input' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    close();
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo checked\n');
+    git('commit', '-q', '-am', 'fix');
+    prep();
+    write(r2(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [
+      { severity: 'important', file: 'b.txt', line: 20, problem: 'loop never ends on empty input', origin: 'previous', id: 'F2' },
+      { severity: 'important', file: 'a.txt', line: 2, problem: 'the second line is not validated when it is empty', origin: 'fix' }] });
+    const out = JSON.parse(close().stdout);
+    expect(out.action).toBe('fix');
+    expect(out.deferred).toEqual([expect.objectContaining({ id: 'F3', reviewer: 'correctness', residual: 'hardening' })]);
+    expect(JSON.parse(readFileSync(path.join(work(), 'findings-1-2.json'), 'utf8')).findings.map((f: { id: string }) => f.id)).toEqual(['F2']);
+    expect(readEvents(root).filter(e => e.kind === 'verdict').at(-1)).toMatchObject({ action: 'fix', deferred: 1 });
+    expect(readEvents(root).filter(e => e.kind === 'ruling').at(-1)).toMatchObject({ round: 2, deferred: [{ id: 'F3', residual: 'hardening' }] });
+    const index = JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8'));
+    expect(index.rounds[1].findings.map((f: { id: string; status: string }) => [f.id, f.status])).toEqual([['F2', 'open'], ['F3', 'residual'], ['F1', 'closed']]);
+  });
+
+  it('an unreadable findings index is set aside as .corrupt-<timestamp> before the new one is written, never overwritten', () => {
+    prep();
+    writeFileSync(path.join(work(), 'findings-index-1.json'), '{"rounds": [oops');
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    expect(JSON.parse(close().stdout).action).toBe('fix');
+    const aside = () => readdirSync(work()).filter(f => f.startsWith('findings-index-1.json.corrupt-'));
+    expect(aside()).toEqual(['findings-index-1.json.corrupt-2026-10-14T10-00-00-000Z']);
+    expect(readFileSync(path.join(work(), aside()[0]), 'utf8')).toBe('{"rounds": [oops');
+    expect(JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8')).rounds.map((r: { round: number }) => r.round)).toEqual([1]);
+    // A readable index is rewritten in place: closing again sets nothing else aside.
+    close();
+    expect(aside()).toHaveLength(1);
   });
 });
 
