@@ -10,7 +10,8 @@ export interface IndexedFinding {
   id: string; reviewer: ReviewerName; severity: Finding['severity']; file?: string; line?: number; problem: string;
   fix?: string; origin?: Origin; regression?: boolean; outOfModel?: boolean; residual?: Residual; status: IndexStatus;
 }
-export interface IndexRound { round: number; findings: IndexedFinding[] }
+/** `fresh`: the first review after a redo (I4); what reviews before it closed was about the reverted attempt. */
+export interface IndexRound { round: number; findings: IndexedFinding[]; fresh?: true }
 export interface FindingsIndex { task: string; next: number; rounds: IndexRound[] }
 
 const ID = /^F\d{1,3}$/;
@@ -65,11 +66,11 @@ export function parseIndex(text: string | null, task: string): FindingsIndex {
   const rounds: IndexRound[] = [];
   for (const r of Array.isArray(list) ? list : []) {
     if (!r || typeof r !== 'object') continue;
-    const { round, findings } = r as { round?: unknown; findings?: unknown };
+    const { round, findings, fresh } = r as { round?: unknown; findings?: unknown; fresh?: unknown };
     if (!Number.isInteger(round) || (round as number) < 1 || !Array.isArray(findings)) continue;
     const seen = new Set<string>();
     const kept = findings.map(entryOf).filter((f): f is IndexedFinding => f !== null && !seen.has(f.id) && !!seen.add(f.id));
-    rounds.push({ round: round as number, findings: kept });
+    rounds.push({ round: round as number, findings: kept, ...(fresh === true ? { fresh: true as const } : {}) });
   }
   rounds.sort((a, b) => a.round - b.round);
   return { task, next: nextId(rounds), rounds };
@@ -183,7 +184,7 @@ export function recordRound(index: FindingsIndex, round: number, verdict: Judged
     if (!isOpen(o)) continue;
     entries.push(answered.includes(o.reviewer) && !unsent(o) ? { ...o, status: 'closed' } : o);
   }
-  const rounds = [...index.rounds.filter(r => r.round !== round), { round, findings: entries }].sort((a, b) => a.round - b.round);
+  const rounds = [...index.rounds.filter(r => r.round !== round), { round, findings: entries, ...(opts.fresh ? { fresh: true as const } : {}) }].sort((a, b) => a.round - b.round);
   return { task: index.task, next: nextId(rounds), rounds };
 }
 
@@ -230,7 +231,8 @@ export function expressCandidate(index: FindingsIndex, round: number): boolean {
 /**
  * The findings closed before review `round`, per reviewer, each with the last review that had it open: those earlier
  * reviews closed, and those the previous review left open that this one does not name (`present`) when their reviewer
- * answered it. A new finding that matches one of them is hardening (§4.7).
+ * answered it. A new finding that matches one of them is hardening (§4.7). The reviews before the last fresh one (the
+ * first after a redo) are skipped: what they closed was about the reverted attempt (I4).
  */
 export function closedFor(index: FindingsIndex, round: number, present: Set<string>, answered: ReviewerName[]): Partial<Record<ReviewerName, ClosedFinding[]>> {
   const out: Partial<Record<ReviewerName, ClosedFinding[]>> = {};
@@ -238,8 +240,10 @@ export function closedFor(index: FindingsIndex, round: number, present: Set<stri
     severity: f.severity, ...(f.file ? { file: f.file } : {}), ...(f.line !== undefined ? { line: f.line } : {}),
     problem: f.problem, reviewer: f.reviewer, id: f.id, round: at,
   });
+  const earlier = before(index, round);
+  const from = Math.max(0, earlier.map(r => r.fresh === true).lastIndexOf(true));
   const lastOpen = new Map<string, number>();
-  for (const r of before(index, round)) {
+  for (const r of earlier.slice(from)) {
     for (const f of r.findings) {
       if (f.status === 'closed') push(f, lastOpen.get(f.id) ?? r.round);
       else lastOpen.set(f.id, r.round);

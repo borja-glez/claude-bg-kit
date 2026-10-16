@@ -1051,6 +1051,44 @@ describe('forge review-close', () => {
     expect(JSON.parse(close().stdout)).toMatchObject({ action: 'fix', deferred: [] });
   });
 
+  it('after a redo, no later review takes what the reverted attempt closed for a closed theme: a new finding of the fix like it blocks (I4)', () => {
+    noExpress();
+    const large = (cmd: string, extra: string[]) => JSON.parse(run([cmd, '--task', 'T1-1', '--path', 'large', '--dir', '.forge/work/T1', '--cwd', wt, ...extra], io).stdout);
+    const prepL = () => large('review-prep', ['--base', base, '--baseline', '.forge/work/T1/baseline-1.json']);
+    const closeL = () => large('review-close', []);
+    const rd = (k: number) => path.join(work(), `reviews-1-${k}`);
+    const commit = (file: string, text: string) => { writeFileSync(path.join(wt, file), text); git('commit', '-q', '-am', 'fix'); };
+    prepL();
+    write(rd(1), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [
+      { severity: 'important', file: 'a.txt', line: 2, problem: 'the second line is not validated' },
+      { severity: 'important', file: 'b.txt', line: 20, problem: 'the counter overflows' }] });
+    write(rd(1), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    expect(closeL().action).toBe('fix');
+    commit('a.txt', 'one\ntwo validated\n');
+    prepL();
+    const wrong = { verdict: 'fail', confidence: 0.9, approach: 'wrong' };
+    write(rd(2), 'correctness', { ...wrong, findings: [{ severity: 'important', file: 'b.txt', line: 20, problem: 'still overflows: a counter cannot work', origin: 'previous', id: 'F2' }] });
+    write(rd(2), 'security', { ...wrong, findings: [{ severity: 'important', file: 'b.txt', line: 1, problem: 'shared state', origin: 'fix' }] });
+    const redo = closeL();
+    expect(redo.next).toBe('redo');
+    git(...redo.revert.args);
+    noExpress(); // the revert also undid the config change the fix commits carried
+    commit('b.txt', 'q\n'.repeat(30));
+    prepL();
+    write(rd(3), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'b.txt', line: 5, problem: 'the queue drops the last item' }] });
+    write(rd(3), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    expect(closeL().action).toBe('fix');
+    commit('b.txt', 'q\n'.repeat(29) + 'r\n');
+    prepL();
+    // Like F1, which the reverted attempt closed at review 2: a new problem of this attempt's fix, not hardening.
+    write(rd(4), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'the second line is not validated again', origin: 'fix' }] });
+    const out = closeL();
+    expect(out).toMatchObject({ action: 'fix', reviews: { n: 4, max: 5 }, deferred: [] });
+    expect(JSON.parse(readFileSync(path.join(work(), 'findings-1-4.json'), 'utf8')).findings.map((f: { id: string }) => f.id)).toEqual(['F5']);
+    expect(JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8')).rounds.map((r: { round: number; fresh?: boolean }) => [r.round, r.fresh === true]))
+      .toEqual([[1, false], [2, false], [3, true], [4, false]]);
+  });
+
   it('revert is null when HEAD is still BASE or the plan does not say what BASE was; the handover is written anyway', () => {
     run(['review-prep', '--task', 'T1-1', '--path', 'medium', '--base', git('rev-parse', 'HEAD'), '--baseline', '.forge/work/T1/baseline-1.json', '--dir', '.forge/work/T1', '--cwd', wt], io);
     const wrong = { verdict: 'fail', confidence: 0.9, approach: 'wrong', findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'start over' }] };

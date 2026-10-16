@@ -133,6 +133,22 @@ describe('findings index (J-06)', () => {
     expect(recordRound(idx, 2, none, [], { fresh: true }).rounds[1].findings).toEqual([]);
   });
 
+  it('the index marks the first review after a redo (fresh), and closedFor reads from the last such review on (I4)', () => {
+    const e = (id: string, file: string, line: number, status: string) => ({ id, reviewer: 'correctness', severity: 'important', file, line, problem: `p ${id}`, status });
+    const idx = parseIndex(JSON.stringify({ task: 'T', rounds: [
+      { round: 1, findings: [e('F1', 'a.ts', 2, 'open')] },
+      { round: 2, findings: [e('F1', 'a.ts', 2, 'closed')] },
+      { round: 3, fresh: true, findings: [e('F4', 'b.ts', 5, 'open')] },
+    ] }), 'T');
+    expect(idx.rounds.map(r => r.fresh === true)).toEqual([false, false, true]);
+    expect(idx.rounds[0]).not.toHaveProperty('fresh');
+    expect(closedFor(idx, 3, new Set(), ['correctness'])).toEqual({ correctness: [expect.objectContaining({ id: 'F1', round: 1 })] });
+    expect(closedFor(idx, 4, new Set(), ['correctness'])).toEqual({ correctness: [expect.objectContaining({ id: 'F4', round: 3 })] });
+    const none = { critical: [], important: [], minor: [], deferred: [] };
+    expect(recordRound(idx, 3, none, [], { fresh: true }).rounds[2].fresh).toBe(true);
+    expect(recordRound(idx, 4, none, ['correctness']).rounds[3]).not.toHaveProperty('fresh');
+  });
+
   it('after a redo (fresh) nothing of the reverted attempt is paired or carried, and ids go on from the highest (I4)', () => {
     const one = review(empty(), 1, { correctness: fail([imp('wrong two', { file: 'a.txt', line: 2 })]), security: fail([imp('shared state', { file: 'a.txt', line: 1 })]) }).index;
     const near = { correctness: fail([imp('the queue drops the last item', { file: 'a.txt', line: 2 })]) };
