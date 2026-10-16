@@ -7,7 +7,9 @@ export interface RoundDecision { round: number; cap: number; next: Next; reason:
 
 const CAP = { medium: 3, large: 4 } as const;
 
-export function decideRound(history: { action: Action; score: number | null; signature: string }[], path: 'medium' | 'large'): RoundDecision {
+/** `held`: an express review whose correctness did not answer (measure 7): its blocking set is what the delegated
+ *  reviewers left open, not a re-review result, so it never counts toward stalled. */
+export function decideRound(history: { action: Action; score: number | null; signature: string; held?: boolean }[], path: 'medium' | 'large'): RoundDecision {
   const cap = CAP[path];
   const latest = history.at(-1);
   const round = history.filter(h => h.action !== 'accept').length;
@@ -20,8 +22,8 @@ export function decideRound(history: { action: Action; score: number | null; sig
   const prev = history.at(-2);
   // C-05: the same blocking set, by stable id, as the previous review: the rounds are not converging, whatever the score.
   // An empty signature (nothing blocks) never stalls, and one of forge 0.17 or older (the problem's text, no v2: prefix)
-  // never matches, so an old ledger gives no false stall.
-  if (prev && prev.action !== 'accept' && latest.signature.startsWith('v2:') && prev.signature === latest.signature) {
+  // never matches, so an old ledger gives no false stall. A held review is neither side of a stall.
+  if (prev && prev.action !== 'accept' && !latest.held && !prev.held && latest.signature.startsWith('v2:') && prev.signature === latest.signature) {
     return { round, cap, next: 'stalled', reason: 'the same blocking findings as the previous review', tierUp, last: false };
   }
   if (round > cap) return { round, cap, next: 'breaker', reason: `round ${round} over the cap of ${cap}`, tierUp, last: false };

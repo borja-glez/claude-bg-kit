@@ -20,7 +20,7 @@ export function roundDecision(events: LedgerEvent[], task: string, p: 'medium' |
   verdicts.forEach((e, i) => { if (typeof e.dir === 'string') lastPerDir.set(e.dir, i); });
   const history = verdicts
     .filter((e, i) => typeof e.dir !== 'string' || lastPerDir.get(e.dir) === i)
-    .map(e => ({ action: e.action as Action, score: typeof e.score === 'number' ? e.score : null, signature: String(e.signature ?? '') }));
+    .map(e => ({ action: e.action as Action, score: typeof e.score === 'number' ? e.score : null, signature: String(e.signature ?? ''), ...(e.held === true ? { held: true } : {}) }));
   const d = decideRound(history, p);
   const base = task.replace(/-\d+$/, '');
   const ofTask = (e: LedgerEvent) => typeof e.task === 'string' && (e.task === base || (e.task.startsWith(`${base}-`) && /^\d+$/.test(e.task.slice(base.length + 1))));

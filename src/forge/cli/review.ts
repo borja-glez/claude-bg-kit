@@ -612,7 +612,9 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   appendPhase(deps.cwd, { ts, kind: 'phase', task: id, phase: 'verdict', brief: Number(n), round });
   appendEvent(deps.cwd, { ts, kind: 'verdict', task, dir: rel(deps.cwd, roundDir), action: result.action, score: result.score, signature: result.signature,
     critical: result.critical.length, important: result.important.length, minor: result.minor.length, deferred: result.deferred.length, reviews: reviewsCount,
-    ...(result.ask.length ? { ask: result.ask.length } : {}), ...(express ? { express: true } : {}) });
+    ...(result.ask.length ? { ask: result.ask.length } : {}), ...(express ? { express: true } : {}),
+    // A held review never counts toward stalled (roundDecision): its blocking set is not a re-review result.
+    ...(held ? { held: true } : {}) });
   if (verifyFile !== undefined) {
     // As FORGE verdict logs it.
     const evidence = rel(deps.cwd, roundDir).replace(/reviews-(\d+-\d+)$/, 'evidence/$1');

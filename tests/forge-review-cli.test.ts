@@ -1358,8 +1358,10 @@ describe('the express review (measure 7)', () => {
       writeFileSync(path.join(r2(), 'correctness.json'), file);
       green();
       const out = JSON.parse(close().stdout);
-      expect(out).toMatchObject({ action: 'fix', express: true, reviews: { n: 2, max: 4 } });
+      // The held set is not a re-review result: it never stalls the loop, the next review is a normal one.
+      expect(out).toMatchObject({ action: 'fix', next: 'resume', express: true, reviews: { n: 2, max: 4 } });
       expect(out.reasons.some((x: string) => /correctness did not answer/.test(x))).toBe(true);
+      expect(readEvents(root).filter(e => e.kind === 'verdict').at(-1)).toMatchObject({ express: true, held: true });
       expect(indexRound(2)).toEqual([expect.objectContaining({ id: 'F1', reviewer: 'correctness', status: 'open' })]);
       expect(JSON.parse(readFileSync(path.join(work(), 'findings-1-2.json'), 'utf8')).findings).toEqual([expect.objectContaining({ id: 'F1', reviewer: 'correctness' })]);
       const next = JSON.parse(prep().stdout);
