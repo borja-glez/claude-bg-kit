@@ -1,4 +1,4 @@
-import { existsSync, statSync, lstatSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync, appendFileSync, type Stats } from 'node:fs';
+import { existsSync, statSync, lstatSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync, type Stats } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { UsageError } from './errors.js';
@@ -23,6 +23,7 @@ import { claudeSessionId, noClaudeSession } from '../../lib/claude-session.js';
 import { parsePlan, PlanError, isPlanId } from '../../lib/plan.js';
 import type { SessionDoc, Stage, TaskState } from '../../lib/types.js';
 import { mainWorktreeFrom, samePath } from '../../lib/worktree.js';
+import { appendOnce, excludeWorktrees, gitToplevel, hasLine, infoFile } from '../../lib/git-info.js';
 import { mainCheckout, updateLocal } from '../local.js';
 import { readMember, writeMember, isMemberId } from '../members.js';
 import { parseLooseTasks, planOfLoose, statesOfLoose, writeLoose, readLoose, type LooseTask } from '../loose.js';
@@ -87,49 +88,13 @@ const DEP_FILES = [':(glob)**/package.json', 'package-lock.json', 'npm-shrinkwra
 const MANIFESTS = ['package.json', 'package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb'];
 const LEARNED_UNION = '/.forge/verify/*.md merge=union';
 
-const hasLine = (text: string, line: string) => text.split(/\r?\n/).some(l => l.trim() === line);
-
-/** Appends `line` to `file` unless a line of it already says it; whatever else the file holds stays. */
-function appendOnce(file: string, line: string): void {
-  let text = '';
-  try { text = readFileSync(file, 'utf8'); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
-  if (hasLine(text, line)) return;
-  appendFileSync(file, `${text && !text.endsWith('\n') ? '\n' : ''}${line}\n`);
-}
-
 /** The top level of the worktree `at` runs in; null when git cannot say. */
-const toplevel = (at: GitDeps) => at.git(['rev-parse', '--show-toplevel'])?.trim() || null;
+const toplevel = (at: GitDeps) => gitToplevel(at.git);
 
 /** The directory `at` runs in: its top level plus the prefix git reports there. */
 function workdirOf(at: GitDeps): string | null {
   const [top, prefix] = (at.git(['rev-parse', '--show-toplevel', '--show-prefix']) ?? '').split(/\r?\n/).map(l => l.trim());
   return top ? path.join(top, prefix ?? '') : null;
-}
-
-/**
- * The repository's common git directory (shared by every worktree), absolute. git prints it relative to the directory
- * it runs in, so it is asked for an absolute path; a git older than 2.31 echoes that flag back instead, and then it runs
- * at the top level and the answer is resolved from there. Null unless the directory exists and holds HEAD: forge never
- * creates a git directory, nor writes into a guessed one.
- */
-function commonDir(at: GitDeps): string | null {
-  const holdsHead = (d: string) => existsSync(path.join(d, 'HEAD'));
-  const lines = (s: string | null | undefined) => (s ?? '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  const first = lines(at.git(['rev-parse', '--path-format=absolute', '--git-common-dir']));
-  if (first.length === 1 && path.isAbsolute(first[0]) && holdsHead(first[0])) return path.resolve(first[0]);
-  const top = toplevel(at);
-  const rel = top ? lines(at.git(['-C', top, 'rev-parse', '--git-common-dir'])) : [];
-  const dir = top && rel.length === 1 ? path.resolve(top, rel[0]) : null;
-  return dir && holdsHead(dir) ? dir : null;
-}
-
-/** `<common dir>/info/<name>`; creates only info/ inside an existing git directory. Null without one; throws on fs errors. */
-function infoFile(at: GitDeps, name: string): string | null {
-  const dir = commonDir(at);
-  if (!dir) return null;
-  const info = path.join(dir, 'info');
-  if (!existsSync(info)) mkdirSync(info);
-  return path.join(info, name);
 }
 
 /**
@@ -139,7 +104,7 @@ function infoFile(at: GitDeps, name: string): string | null {
 function excludeDeps(at: GitDeps): void {
   if (at.git(['check-ignore', '-q', DEPS_DIR]) !== null) return;
   try {
-    const file = infoFile(at, 'exclude');
+    const file = infoFile(at.git, 'exclude');
     if (file) appendOnce(file, `${DEPS_DIR}/`);
   } catch { /* reported as untracked by the next status */ }
 }
@@ -152,7 +117,7 @@ function excludeDeps(at: GitDeps): void {
 function unionLearned(deps: GitDeps): { attributesError?: string; attributesSkipped?: string } {
   try {
     const top = toplevel(deps);
-    const file = infoFile(deps, 'attributes');
+    const file = infoFile(deps.git, 'attributes');
     if (!top || !file) return { attributesError: 'cannot find the git directory' };
     let text = '';
     try { text = readFileSync(file, 'utf8'); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
@@ -283,6 +248,7 @@ function addTaskWorktree(deps: SwarmDeps, main: string, task: string, runBranch:
   let setup: SetupResult = null;
   if (!existsSync(dir)) {
     const g = (args: string[]) => deps.git(['-C', main, ...args]);
+    excludeWorktrees(g);
     const exists = g(['rev-parse', '--verify', '-q', `refs/heads/${branch}`]) !== null;
     const added = exists ? g(['worktree', 'add', dir, branch]) : g(['worktree', 'add', '-b', branch, dir, runBranch]);
     if (added === null) throw new UsageError(`swarm worktree: cannot add ${dir} for ${branch}`);
@@ -1043,6 +1009,8 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
         if (!existed && deps.git(['branch', branch, base]) === null) {
           throw new UsageError(`swarm start: cannot create ${branch} from ${base}`);
         }
+        // A-08: the run and task worktrees never show as untracked, also without a .gitignore entry for them.
+        excludeWorktrees(deps.git);
         if (!existsSync(wt)) {
           if (deps.git(['worktree', 'add', wt, branch]) === null) throw new UsageError(`swarm start: cannot add the worktree ${wt}`);
           setup = runSetup(deps, wt, io.cwd);

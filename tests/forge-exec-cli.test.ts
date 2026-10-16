@@ -1250,4 +1250,16 @@ describe('forge swarm (execution)', () => {
     expect(run(['swarm', 'sleep', '300', '--mark'], io).code).toBe(0);
     expect(stop()).toBe('');
   });
+  it('swarm start and swarm worktree add .claude/worktrees/ to info/exclude once when nothing ignores it (A-08)', () => {
+    writeFileSync(path.join(root, '.gitignore'), '.forge/\n');
+    git('add', '.gitignore'); git('commit', '-qm', 'no .claude in .gitignore');
+    const none = path.join(mkdtempSync(path.join(tmpdir(), 'forge-noexcl-')), 'excludes');
+    writeFileSync(none, '');
+    git('config', 'core.excludesFile', none);
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    out(run(['swarm', 'worktree', 'T1'], io));
+    const lines = readFileSync(path.join(root, '.git', 'info', 'exclude'), 'utf8').split(/\r?\n/);
+    expect(lines.filter(l => l === '.claude/worktrees/')).toHaveLength(1);
+    expect(git('status', '--porcelain')).not.toContain('.claude');
+  });
 });

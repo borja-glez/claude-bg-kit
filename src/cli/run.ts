@@ -18,6 +18,7 @@ import { computeMetrics } from '../lib/metrics.js';
 import { normalizeNote, notesSince, noteLines } from '../lib/notes.js';
 import { pickProject } from '../mod/model.js';
 import { BRANCH_RE, mainWorktreeFrom, samePath } from '../lib/worktree.js';
+import { excludeWorktrees } from '../lib/git-info.js';
 import { mainCheckoutFrom } from '../lib/main-checkout.js';
 import { forgeActivityFrom, forgeRoleOf, MAX_MEMBER_FILES, type ForgeActivity } from '../lib/forge-activity.js';
 import { planLocale, replyIn } from '../lib/locale.js';
@@ -253,6 +254,10 @@ export function run(argv: string[], io: Io): Result {
         const git = (...a: string[]) => execFileSync('git', a, { cwd: io.cwd, encoding: 'utf8' }).trim();
         // Worktrees always live under the main checkout, even when this runs inside another worktree.
         const root = mainWorktreeFrom(git('worktree', 'list', '--porcelain')) ?? git('rev-parse', '--show-toplevel');
+        // A-08: the worktrees never show as untracked, also without a .gitignore entry for them (at the main checkout).
+        const excludeHere = () => excludeWorktrees(a => {
+          try { return execFileSync('git', a, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; }
+        });
         if (taskMode) {
           // Same worktree and branch names as `forge swarm worktree <T>`: every execution mode shares the work of a task.
           const taskWt = path.join(root, '.claude', 'worktrees', `task-${track}`);
@@ -265,6 +270,7 @@ export function run(argv: string[], io: Io): Result {
           const taskRun = launchRun(launcher as Launcher, { name: taskName, prompt: taskPrompt, worktree: taskWt, effort, model });
           if (taskRun === null) return fail('launch: herdr cannot open panes from the command line; use launcher bg', 2);
           if (!existsSync(taskWt)) {
+            excludeHere();
             const exists = git('branch', '--list', taskBranch) !== '';
             git('worktree', 'add', taskWt, ...(exists ? [taskBranch] : ['-b', taskBranch, base!]));
           }
@@ -285,6 +291,7 @@ export function run(argv: string[], io: Io): Result {
         if (inWorktree === null) return fail('launch: herdr cannot open panes from the command line; use launcher bg', 2);
         // Only once the launcher resolved: a refused one leaves no branch nor worktree behind.
         if (!existsSync(worktree)) {
+          excludeHere();
           const exists = git('branch', '--list', branch) !== '';
           git('worktree', 'add', worktree, ...(exists ? [branch] : ['-b', branch, ...(base ? [base] : [])]));
         }

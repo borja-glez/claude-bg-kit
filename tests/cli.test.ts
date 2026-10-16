@@ -280,6 +280,18 @@ describe('multi-session commands', () => {
       expect(run(['launch', 'plan.yaml', 'ui', '--base'], io).code).toBe(2);
       expect(run(['launch', 'plan.yaml', 'ui', '--base', 'main'], io).code).toBe(0);
     });
+    it('adds .claude/worktrees/ to info/exclude once when nothing ignores it, so git status stays clean (A-08)', () => {
+      init();
+      // No global ignore file either: the user's own may already ignore .claude/.
+      const none = path.join(mkdtempSync(path.join(tmpdir(), 'wp-noexcl-')), 'excludes');
+      writeFileSync(none, '');
+      git(dir, 'config', 'core.excludesFile', none);
+      expect(run(['launch', 'plan.yaml', 'ui'], io).code).toBe(0);
+      expect(run(['launch', 'plan.yaml', 'backend'], io).code).toBe(0);
+      const lines = readFileSync(path.join(dir, '.git', 'info', 'exclude'), 'utf8').split(/\r?\n/);
+      expect(lines.filter(l => l === '.claude/worktrees/')).toHaveLength(1);
+      expect(git(dir, 'status', '--porcelain')).not.toContain('.claude');
+    });
   });
 
   describe('launch --task', () => {
