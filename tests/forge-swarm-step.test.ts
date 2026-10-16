@@ -380,6 +380,24 @@ describe('swarm step: the person rules on a question (I1, M8)', () => {
     expect(later.actions.filter(a => a.task === 'T1')).toEqual([]);
     expect(later.closes).toEqual([]);
   });
+  it('a step killed after it asked keeps no asked.json: the next step closes again and asks again', () => {
+    const { dir } = reviewedT1();
+    let closes = 0;
+    expect(() => swarmStep(['--plan', 'plan.yaml', '--db', 'db'], io, {
+      cli: argv => {
+        if (isCmd(argv, 'review-close')) { closes++; return { code: 0, stdout: JSON.stringify(ASK_CLOSE), stderr: '' }; }
+        if (isCmd(argv, 'swarm', 'tick')) throw new Error('killed');
+        return run(argv, io);
+      },
+      gitAt: d => defaultGit(d),
+    })).toThrow('killed');
+    expect(closes).toBe(1);
+    expect(existsSync(path.join(dir, 'asked.json'))).toBe(false);
+    const again = stepClosing(() => ASK_CLOSE);
+    expect(again.closes).toHaveLength(1);
+    expect(again.actions.filter(a => a.task === 'T1')).toEqual([expect.objectContaining({ type: 'ask' })]);
+    expect(existsSync(path.join(dir, 'asked.json'))).toBe(true);
+  });
   it('--ruling T:fix follows the next review-close kept: the implementer resumes at stage implement', () => {
     const { dir } = reviewedT1();
     stepClosing(() => ASK_CLOSE);
@@ -538,6 +556,22 @@ describe('swarm step: robustness (M1, M2, M7, M9)', () => {
     expect(step().actions.filter(a => a.task === 'T1')).toEqual([expect.objectContaining({ type: 'integrated', task: 'T1', sha: (first.commit as { sha: string }).sha, commit: first.commit })]);
     writeFileSync(path.join(root, 'db', 'state', 'T1.json'), JSON.stringify({ status: 'done', version: 4 }));
     expect(step().actions.filter(a => a.task === 'T1')).toEqual([]);
+  });
+  it('finds an integration by its exact title when the task branch moved since: T1 is never T10\'s merge (M2)', () => {
+    step();
+    commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
+    out(run(['swarm', 'task', 'T1', '--stage', 'verdict', '--status', 'accepted', '--no-agent'], io));
+    const first = step().actions.find(a => a.type === 'integrated')!;
+    expect(first).toMatchObject({ task: 'T1' });
+    // A later merge titled for T10 on the run branch, and task/T1 moved on: its tip is no merge's second parent now.
+    const runWt = path.join(root, '.claude', 'worktrees', 'run');
+    g(runWt, 'checkout', '-q', '-b', 'side');
+    commitIn(runWt, 'side.txt', 'x\n', 'side');
+    g(runWt, 'checkout', '-q', 'forge/run-shop');
+    g(runWt, 'merge', '-q', '--no-ff', '-m', 'forge: integrate T10', 'side');
+    commitIn(wt('T1'), 'src/t1/b.ts', 'y\n', 'T1: after');
+    writeFileSync(path.join(root, 'db', 'state', 'T1.json'), JSON.stringify({ status: 'in_progress', version: 3 }));
+    expect(step().actions.find(a => a.task === 'T1')).toMatchObject({ type: 'integrated', again: true, sha: (first.commit as { sha: string }).sha });
   });
   it('stamps each hand-out with the time it happens, not the time the step started (M7)', () => {
     let k = 0;

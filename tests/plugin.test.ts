@@ -1205,6 +1205,8 @@ describe('plugin layout', () => {
     const exec = runRef('execution');
     for (const w of ['`busy`', 'neither move the base nor re-run that baseline yourself']) expect(exec, w).toContain(w);
     expect(runRef('step')).toContain('attended, ask the person whether to stop the run');
+    expect(runRef('step')).toContain('give the ruling again, corrected, on the next step');
+    expect(read('plugins/forge/skills/infinite/SKILL.md')).toContain('`busy` → an integration is still merging');
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) expect(read(f), f).toContain('[--why-file f]');
   });
   it('the step\'s fallback runs in the foreground, a twin is collected, launch.json outlives a failed start and --execute skips triage (W1c final fix wave, group E)', () => {

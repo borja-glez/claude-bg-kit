@@ -432,12 +432,15 @@ function closeRound(c: Ctx, task: string, t: ExecTask, n: number, round: number,
   }
   if (out.ask) {
     // I1: the person answers it (the skill steps again with --ruling); until then the next steps close nothing here.
+    // asked.json is written as the step's last act (Ctx.after): a step that dies before its output leaves none, so the
+    // next step closes again and asks again instead of keeping a question nobody saw until the re-ask.
     const asked = isObject(out.ask) && Array.isArray(out.ask.findings) ? out.ask.findings : [];
     const findings = asked.map(f => (typeof f === 'string' ? f : isObject(f) && typeof f.id === 'string' ? f.id : null)).filter((x): x is string => !!x);
-    writeJson(path.join(r.roundDir, 'asked.json'), {
+    const doc = {
       at: c.iso(), findings, next: out.next ?? null, implementer: out.implementer ?? null, findingsFile: out.findings ?? null,
       handover: out.handover ?? null, revert: out.revert ?? null, close: out,
-    });
+    };
+    c.after.push(() => writeJson(path.join(r.roundDir, 'asked.json'), doc));
     c.actions.push({ type: 'ask', task, close: out });
     return;
   }
@@ -536,7 +539,9 @@ function integratedAgain(c: Ctx, task: string, t: ExecTask): void {
   const git = c.deps.gitAt(c.io.cwd);
   const tip = git(['rev-parse', '--verify', '-q', `refs/heads/${t.branch}^{commit}`])?.trim() || null;
   const merges = (git(['log', '--merges', '--format=%H %P', c.runBranch]) ?? '').split('\n').map(l => l.trim().split(' ')).filter(p => p.length >= 3);
-  const titled = () => (git(['log', '--merges', '--format=%H', '--fixed-strings', `--grep=forge: integrate ${task}`, c.runBranch]) ?? '').split('\n').map(s => s.trim()).find(Boolean);
+  // By its exact subject: a grep for «forge: integrate T1» would also find T10's.
+  const titled = () => (git(['log', '--merges', '--format=%H%x09%s', c.runBranch]) ?? '').split('\n')
+    .map(l => l.trim().split('\t')).find(([, subject]) => subject === `forge: integrate ${task}`)?.[0];
   const sha = (tip ? merges.find(p => p.slice(2).includes(tip))?.[0] : undefined) ?? titled();
   if (!sha) return;
   c.actions.push({ type: 'integrated', task, sha, commit: commitInfo(git, sha), again: true });
