@@ -445,7 +445,7 @@ export function run(argv: string[], io: Io): Result {
           return { sid: b.sid, claude: b.claude, endedAt: b.endedAt, endReason: b.endReason, seenAt: b.seenAt, task: open[b.sid] ?? null };
         };
         // Exit 3 also names a task another seat left, so the person can resume it there (I3).
-        const held = (b: BoundDoc) => ({ held: { sid, claude: b.claude, via: b.via, seenAt: b.seenAt, task }, options, secondSeat: secondSeatOf(wp, claude, open, t), ...(left?.bound ? { previous: prevOf(left.bound) } : {}) });
+        const held = (b: BoundDoc) => ({ held: { sid, claude: b.claude, via: b.via, seenAt: b.seenAt, task }, options, secondSeat: secondSeatOf(wp, claude, open, t), ...(left?.bound && left.sid !== sid ? { previous: prevOf(left.bound) } : {}) });
         let took: 'new' | 'same' | 'takeover' | 'previous';
         if (!cur) took = 'new';
         else if (cur.claude === claude) took = 'same';
