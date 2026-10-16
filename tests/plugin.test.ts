@@ -582,7 +582,7 @@ describe('plugin layout', () => {
     expect(md).toContain('`FORGE` below means `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs"`');
     for (const w of ['FORGE triage', 'FORGE validate', 'FORGE review-prep', 'FORGE review-close', 'FORGE agents', 'FORGE log', 'FORGE last',
       '## Trivial', '## Small', '## Medium', '## Large', '## Resuming', 'ratchet', 'breaker', 'stalled', 'fresh-stronger', 'never push', 'forge-fable', '--text-file', '--data-file', '<id>-<n>', 'FORGE prep --task <id>-1 --path small --no-baseline', 'absolute path',
-      'tier ladder', '`mech` -> `impl-light` -> `impl` -> `impl-high` -> `impl-heavy`','git revert --no-edit <BASE>..HEAD', '`invalid: true`',
+      'tier ladder', '`mech` -> `impl-light` -> `impl` -> `impl-high` -> `impl-heavy`','`revert.args`', '`invalid: true`',
       '`failures` of every validator with `ok: false` and no `preexisting` in `validators-<n>.json`', '--baseline .forge/work/<id>/baseline-<n>.json']) expect(md).toContain(w);
     for (const w of ['FORGE verdict', '/waypoint:design']) expect(runRef('large')).toContain(w);
     expect(runRef('execution')).toContain('--base-run');
@@ -795,8 +795,8 @@ describe('plugin layout', () => {
     // 1. A Medium brief's loose task reviews with the Medium task's triage; Trivial and Small keep a plain validate.
     expect(ephemeral).toMatch(/review-prep[^\n]*the Medium task's triage/);
     expect(ephemeral).toMatch(/\*\*validate:\*\* Trivial and Small: `FORGE validate --all --path <path>/);
-    // 2. review-close only once every spawned entry has returned, twins included.
-    for (const s of [medium, steps]) expect(s).toContain('only once every spawned entry has returned, twins included');
+    // 2. review-close no longer waits for the shadow twins (C-11).
+    for (const s of [medium, steps]) expect(s).not.toContain('twins included');
     // 3. Deferred findings: written to the main checkout's deferred.json, named in the member's reply, read by the closing reports.
     for (const s of [steps, member]) expect(s).toContain('<MAIN>/.forge/work/<T>/deferred.json');
     expect(member).toMatch(/text: "<T> done"[^\n]*deferred\.json/);
@@ -1069,5 +1069,19 @@ describe('plugin layout', () => {
     expect(read('plugins/forge/agents/forge-review-correctness.md')).toContain('`express: true`');
     const security = read('plugins/forge/agents/forge-review-security.md');
     for (const w of ['"outOfModel": true', '`threatModel`']) expect(security, w).toContain(w);
+  });
+
+  it('forge:run and the task steps close without waiting for twins, follow ask, handover and revert, and run an express review\'s validators in the background (C-11, C-13, C-15, J-08, K4-02, measure 7)', () => {
+    const run = read('plugins/forge/skills/run/SKILL.md');
+    const medium = run.slice(run.indexOf('\n## Medium'), run.indexOf('### Superpowers plan'));
+    const steps = runRef('task-steps');
+    const conv = runRef('convergence');
+    for (const s of [medium, steps]) expect(s).toContain('references/convergence.md');
+    for (const w of ['`revert.args`', '`handover`', '`threatModel`', '`express: true`', 'Threat model: <that path>']) expect(medium, w).toContain(w);
+    expect(medium).not.toContain('git revert --no-edit');
+    for (const w of ['FORGE shadow collect --task', '`shadowPending`', '`ask`', '--out-of-model', '--defer', 'NEEDS_CONTEXT', '`validators.cmd`', 'run_in_background',
+      '`residual`', '`reviews`', 'threatModel.outOfScope', '"point": "ruling"', 'AskUserQuestion']) expect(conv, w).toContain(w);
+    expect(steps).not.toContain('unless a `redo` starts a new brief');
+    for (const w of ['`revert.args`', 'FORGE shadow collect --task', '`handover`', 'NEEDS_CONTEXT', '`threatModel`', '`validators.cmd`']) expect(steps, w).toContain(w);
   });
 });
