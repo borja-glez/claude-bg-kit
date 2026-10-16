@@ -11,6 +11,8 @@ import { writeMember } from '../src/forge/members.js';
 import { readLoose } from '../src/forge/loose.js';
 import { samePath } from '../src/lib/worktree.js';
 import { codeSpan, integratedSay, keptFilesSay } from '../src/forge/swarm.js';
+import { mergingFile } from '../src/forge/merging.js';
+import { STEP_WAIT_SECONDS } from '../src/forge/schedule.js';
 
 // swarm start and takeover bind Claude's session id (C1). The tests run inside Claude Code, which sets
 // CLAUDE_CODE_SESSION_ID: io.env is {} so nothing leaks from it, and the id comes as a flag unless a test gives its own.
@@ -950,6 +952,27 @@ describe('forge swarm (execution)', () => {
       expect(git('log', '-1', '--format=%s')).toBe('forge: integrate fix-a');
       expect(git('rev-parse', '--abbrev-ref', 'HEAD')).toBe('main');
       expect(tick().filter((a: { type: string }) => a.type === 'start').map((a: { task: string }) => a.task)).toEqual(['fix-c']);
+    });
+    it('a tick while a live merge is in flight (merging.json) integrates nothing and waits; a stale one does not count (D-07)', () => {
+      out(start());
+      const tick = () => out(run(['swarm', 'tick'], io)).actions as { type: string; seconds?: number }[];
+      tick();
+      const w = out(run(['swarm', 'worktree', 'fix-a'], io)).worktree;
+      writeFileSync(path.join(w, 'a.txt'), 'a\n');
+      execFileSync('git', ['add', 'a.txt'], { cwd: w }); execFileSync('git', ['commit', '-qm', 'fix-a: work'], { cwd: w });
+      out(run(['swarm', 'task', 'fix-a', '--stage', 'verdict', '--status', 'accepted'], io));
+      const at = (min: number) => new Date(NOW.getTime() + min * 60000).toISOString();
+      const marker = (staleAt: string) => {
+        mkdirSync(path.dirname(mergingFile(root)), { recursive: true });
+        writeFileSync(mergingFile(root), JSON.stringify({ task: 'fix-b', pre: git('rev-parse', 'HEAD'), ref: 'task/fix-b', pid: process.ppid, startedAt: at(-1), staleAt, dir: root }));
+      };
+      marker(at(60));
+      const busy = tick();
+      expect(busy.some(a => a.type === 'integrate')).toBe(false);
+      expect(busy.at(-1)).toEqual({ type: 'wait', seconds: STEP_WAIT_SECONDS });
+      expect(readExecution(root)).toMatchObject({ active: true, stopReason: null });
+      marker(at(-1));
+      expect(tick()[0]).toEqual({ type: 'integrate', task: 'fix-a', ref: 'task/fix-a' });
     });
     it('a rejected integration into the user checkout removes the node_modules it created, or says the dependencies may not match', () => {
       const counter = path.join(root, '..', `inst-${path.basename(root)}.txt`);

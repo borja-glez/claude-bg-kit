@@ -75,6 +75,14 @@ describe('schedule', () => {
     expect(r.actions.filter(a => a.type === 'integrate')).toHaveLength(1);
     expect(r.actions.at(-1)).toEqual({ type: 'wait', seconds: 0 });
   });
+  it('with a merge in flight (merging.json) it emits no integrate and waits instead of stalling (D-07)', () => {
+    const p = plan([task('T1')]);
+    const base = { plan: p, exec: exec({ tasks: running('T1', 'accepted') }), states: { T1: { status: 'in_progress' as const, owner: 'main' } } };
+    const busy = schedule(input({ ...base, merging: true }));
+    expect(busy.actions).toEqual([{ type: 'wait', seconds: STEP_WAIT_SECONDS }]);
+    expect(busy.next).toMatchObject({ active: true, stopReason: null });
+    expect(schedule(input(base)).actions).toEqual([{ type: 'integrate', task: 'T1', ref: 'task/T1' }, { type: 'wait', seconds: 0 }]);
+  });
   it('finishes when every task is done and nothing waits to be integrated', () => {
     const r = schedule(input({ plan: plan([task('T1')]), states: { T1: { status: 'done' } }, exec: exec({ tasks: running('T1', 'integrated' as never) }) }));
     expect(r.actions).toEqual([{ type: 'finish' }]);

@@ -12,6 +12,7 @@ import { appendEvent, appendPhase, readEvents } from '../ledger.js';
 import { readExecution, updateExecution, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree, type LockDeps } from '../execution.js';
 import { sleepSync } from '../pid.js';
 import { noSlot, type Slot } from '../jobs.js';
+import { readMerging, writeMerging, clearMerging, mergingLive, mergingFile } from '../merging.js';
 import { schedule, widthOf, widthProfile, relaunchOrBlock, RELAUNCH_CAP, type BgAgent } from '../schedule.js';
 import { LEASE_MINUTES, sessionLiveness } from '../../lib/coordination.js';
 import { planLocale, sessionReply } from '../../lib/locale.js';
@@ -333,10 +334,10 @@ type Validation = { results: ValidatorResult[]; durationMs: number };
 /** The validator runs of a merge attempt (C4): the target tip's baseline and the merged tree, each when it ran or came from the cache. */
 type Validations = { baseline?: Validation; merged?: Validation };
 type MergeOutcome =
-  | { result: 'merged'; sha: string; preexisting: string[]; newValidators: NewValidator[]; surfacesChanged: string[]; setup?: SetupResult; leftovers?: string[]; restored?: string[]; validations?: Validations }
+  | { result: 'merged'; sha: string; preexisting: string[]; newValidators: NewValidator[]; surfacesChanged: string[]; setup?: SetupResult; leftovers?: string[]; restored?: string[]; validations?: Validations; recovered?: { task: string | null; pre: string } }
   | {
     result: 'dirty' | 'conflict' | 'deps'; detail: string; setup?: SetupResult; leftovers?: string[];
-    restoreSetup?: SetupResult; restoreChanged?: string[]; depsFromRejectedMerge?: true; touchedKept?: string[]; restored?: string[]; validations?: Validations;
+    restoreSetup?: SetupResult; restoreChanged?: string[]; depsFromRejectedMerge?: true; touchedKept?: string[]; restored?: string[]; validations?: Validations; recovered?: { task: string | null; pre: string };
   };
 
 interface MergeOpts {
@@ -358,6 +359,8 @@ interface MergeOpts {
   main: string; cache: { read: boolean; write: boolean }; now: () => Date;
   /** C-03: the validation slot of a merge run with --out in the background (swarm.validateJobs). */
   slot?: Slot;
+  /** D-07: the task the merge integrates, for merging.json (none for the final merge). */
+  task?: string | null;
 }
 
 // The untracked paths git does not ignore, forge's own state aside (a directory collapsed into `dir/`).
@@ -369,19 +372,55 @@ function readBaseline(cacheDir: string, key: string, sha: string): unknown {
   try { return JSON.parse(readFileSync(baselineFile(cacheDir, key, sha), 'utf8')); } catch { return null; }
 }
 /**
+ * D-07, before a merge attempt in `at`. A marker of a live process merging in this same worktree: it waits (`dirty`).
+ * An unfinished merge (MERGE_HEAD) that forge left here, whose process died or ran out of time, with HEAD still where
+ * it started: `git merge --abort`, checked, and the attempt goes on (`recovered`). Any other unfinished merge is
+ * someone's: `dirty`, untouched. Null when there is nothing to do.
+ */
+function recoverMerge(at: GitDeps, o: MergeOpts): MergeOutcome | { recovered: { task: string | null; pre: string } } | null {
+  const marker = readMerging(o.main);
+  const place = workdirOf(at);
+  const here = !!marker && !!place && samePath(marker.dir, place);
+  const now = o.now().getTime();
+  if (here && mergingLive(marker, now)) return { result: 'dirty', detail: `another integration (${marker!.task ?? marker!.ref}, pid ${marker!.pid}) is merging there` };
+  if (at.git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']) === null) {
+    // A leftover of an attempt that died before its merge: nothing to undo.
+    if (here) rmSync(mergingFile(o.main), { force: true });
+    return null;
+  }
+  if (!here || at.git(['rev-parse', 'HEAD'])?.trim() !== marker!.pre) return { result: 'dirty', detail: 'an unfinished merge is in progress there (git merge --abort to clear it)' };
+  at.git(['merge', '--abort']);
+  if (at.git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']) !== null || at.git(['rev-parse', 'HEAD'])?.trim() !== marker!.pre) {
+    return { result: 'dirty', detail: 'an unfinished merge forge left there could not be aborted (git merge --abort by hand)' };
+  }
+  rmSync(mergingFile(o.main), { force: true });
+  return { recovered: { task: marker!.task, pre: marker!.pre } };
+}
+
+/**
  * Merges `ref` into the branch checked out at `at` with --no-ff, runs the validators there and commits `message`.
- * A conflict or a red validator is rolled back to the pre-merge sha; a merge left half-done is never touched.
+ * A conflict or a red validator is rolled back to the pre-merge sha; a merge left half-done is never touched, unless
+ * forge left it there and its process died (recoverMerge).
  * The validators get the dependencies of a package.json first (ensureDeps): before the baseline when `at` has none,
  * and after the merge when it changed a manifest or a lockfile or they are still missing.
  * Each validator run in a worktree of forge's (the run worktree) puts back the tracked files it regenerated, and in the
  * person's checkout those the config's `generated` names: `restored`.
  */
 function mergeIn(at: GitDeps, ref: string, o: MergeOpts): MergeOutcome {
+  // D-07: a merge forge left half-done here, whose process died, is aborted first; anyone else's stops the attempt.
+  const recovery = recoverMerge(at, o);
+  if (recovery && 'result' in recovery) return recovery;
   const regenerated: string[] = [];
   const validations: Validations = {};
-  const r = mergeAttempt(at, ref, o, regenerated, validations);
-  const out = regenerated.length ? { ...r, restored: [...new Set(regenerated)] } : r;
-  return validations.baseline || validations.merged ? { ...out, validations } : out;
+  try {
+    const r = mergeAttempt(at, ref, o, regenerated, validations);
+    const withRestored = regenerated.length ? { ...r, restored: [...new Set(regenerated)] } : r;
+    const out = validations.baseline || validations.merged ? { ...withRestored, validations } : withRestored;
+    return recovery ? { ...out, recovered: recovery.recovered } : out;
+  } finally {
+    // The marker of this attempt goes after its commit, its rollback or a throw.
+    clearMerging(o.main);
+  }
 }
 
 function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: string[], validations: Validations): MergeOutcome {
@@ -537,6 +576,13 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
       if (left === null || left.trim() !== '') return { result: 'dirty', detail: `the validators left changes in the worktree: ${(left ?? '').split(/\r?\n/).filter(Boolean).slice(0, 5).join(', ')}`, ...withSetup() };
     }
   }
+  // D-07: the merge in flight, so a later attempt tells its own leftover from someone's (mergeIn removes it).
+  try {
+    writeMerging(o.main, {
+      task: o.task ?? null, pre, ref, pid: process.pid, startedAt: o.now().toISOString(),
+      staleAt: new Date(o.now().getTime() + (o.timeoutSec * Math.max(1, detected0?.length ?? 1) + 600) * 1000).toISOString(), dir: place ?? '',
+    });
+  } catch { /* without a marker a dead merge is left for the person, as before */ }
   if (at.git(['merge', '--no-ff', '--no-commit', ref]) === null) {
     if (!merging()) return { result: 'conflict', detail: `git refused to merge ${ref}`, ...withSetup() };
     return rollback(`merge conflict with ${ref}`);
@@ -642,6 +688,7 @@ function attemptExtras(r: MergeOutcome, es: boolean, ref: string, personal: bool
   ];
   return {
     ...(r.setup ? { setup: r.setup } : {}),
+    ...(r.recovered ? { recovered: r.recovered } : {}),
     ...(r.leftovers ? { leftovers: r.leftovers } : {}),
     ...(r.restored?.length ? { restored: r.restored } : {}),
     ...(failed?.touchedKept ? { touchedKept: failed.touchedKept } : {}),
@@ -698,7 +745,7 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
   // --no-cache: neither read nor write the tree cache (a red result it holds may have been flaky).
   const cache = config.validate.cache && !rest.includes('--no-cache');
   const r = mergeIn(target, t.branch, {
-    message: `forge: integrate ${task}`, scope: 'heavy', timeoutSec: config.validatorTimeoutSec, configRoot: wt,
+    message: `forge: integrate ${task}`, task, scope: 'heavy', timeoutSec: config.validatorTimeoutSec, configRoot: wt,
     cacheDir: path.join(io.cwd, '.forge', 'execution'), target: 'run', setup: config.swarm.setup, personal,
     retryDeps: rest.includes('--retry-deps'),
     run: runOptions(config, readEvents(io.cwd), io.now()),
@@ -1124,10 +1171,12 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         if (!Array.isArray(raw)) throw new UsageError('swarm tick: --agents must be a JSON array of {name, state}');
         agents = raw.filter((a): a is BgAgent => !!a && typeof a === 'object' && typeof a.name === 'string' && (a.state === 'working' || a.state === 'idle')).slice(0, 100);
       }
+      // D-07: a live merge of swarm integrate is in flight (merging.json): this tick integrates nothing.
+      const merging = mergingLive(readMerging(io.cwd), now.getTime());
       // The scheduler decides on the execution as it is under the lock, so a swarm task or an integrate that ran
       // meanwhile is never overwritten (I-15).
       let d!: ReturnType<typeof schedule>;
-      update(cur => { d = schedule({ plan, states, sessions, exec: cur ?? e, integrated, now: now.getTime(), publicTasks, agents }); return d.next; });
+      update(cur => { d = schedule({ plan, states, sessions, exec: cur ?? e, integrated, now: now.getTime(), publicTasks, agents, merging }); return d.next; });
       // In sessions mode a start carries the whole `waypoint launch` argument list: the coordinator runs it as is.
       const planPath = flag('plan');
       const actions = e.mode === 'sessions' && planPath

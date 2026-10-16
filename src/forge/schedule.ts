@@ -26,6 +26,8 @@ export interface ScheduleInput {
   publicTasks?: Record<string, PublicTask>;
   /** null: unknown (ListAgents could not be read). */
   agents?: BgAgent[] | null;
+  /** D-07: a merge of `swarm integrate` is in flight (merging.json): no integrate this tick. */
+  merging?: boolean;
 }
 /** With agents running, the coordinator steps at least this often (it also renews its lease then). */
 export const STEP_WAIT_SECONDS = 300;
@@ -102,7 +104,7 @@ export function schedule(i: ScheduleInput): { actions: ScheduleAction[]; next: E
   const actions: ScheduleAction[] = [];
   const accepted = Object.keys(tasks).filter(id => tasks[id].status === 'accepted' && byId.has(id))
     .sort((a, b) => rank(byId.get(a)!) - rank(byId.get(b)!));
-  if (accepted.length) actions.push({ type: 'integrate', task: accepted[0], ref: tasks[accepted[0]].branch });
+  if (accepted.length && !i.merging) actions.push({ type: 'integrate', task: accepted[0], ref: tasks[accepted[0]].branch });
 
   // Session fronts: relaunch a dead session (block it at the cap), nudge a live one that sits idle. Before counting
   // runningIds, so a task blocked here frees its slot.
@@ -142,7 +144,8 @@ export function schedule(i: ScheduleInput): { actions: ScheduleAction[]; next: E
   }
 
   let { active, stopReason, stallReason } = exec;
-  const moving = actions.length > 0 || runningIds.length > 0;
+  // An accepted task waiting for a merge in flight is movement, not a stall.
+  const moving = actions.length > 0 || runningIds.length > 0 || (!!i.merging && accepted.length > 0);
   const allDone = plan.tasks.every(t => statusOf(states, t.id) === 'done');
   if (!moving && allDone) {
     actions.push({ type: 'finish' });
@@ -155,7 +158,7 @@ export function schedule(i: ScheduleInput): { actions: ScheduleAction[]; next: E
     actions.push({ type: 'stalled', reason: stallReason });
     active = false; stopReason = 'stalled';
   } else {
-    actions.push({ type: 'wait', seconds: accepted.length ? 0 : STEP_WAIT_SECONDS });
+    actions.push({ type: 'wait', seconds: actions.some(a => a.type === 'integrate') ? 0 : STEP_WAIT_SECONDS });
   }
   return { actions, next: { ...exec, tasks, active, stopReason, stallReason, lastStepAt: nowIso, planned: plan.tasks.length } };
 }
