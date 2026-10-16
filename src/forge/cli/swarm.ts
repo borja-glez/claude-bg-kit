@@ -68,7 +68,7 @@ function setupResult(cmd: string, r: ExecResult, timeoutSec: number): NonNullabl
 }
 
 /** Runs the setup in a worktree just created; a failure is reported, never thrown. */
-function runSetup(deps: SwarmDeps, dir: string, root: string): SetupResult {
+export function runSetup(deps: SwarmDeps, dir: string, root: string): SetupResult {
   const config = loadConfig(root);
   // Lockfiles are read in the new worktree itself, never in the caller's. A .venv is untracked, so a fresh worktree
   // never has one: that hint looks at the main checkout.

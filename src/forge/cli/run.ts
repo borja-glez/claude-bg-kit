@@ -26,7 +26,7 @@ import type { PlanTask } from '../../lib/types.js';
 import { parseDocument } from 'yaml';
 import { claudeSessionId, noClaudeSession } from '../../lib/claude-session.js';
 import { UsageError } from './errors.js';
-import { swarmCommand, restoringRegenerated } from './swarm.js';
+import { swarmCommand, restoringRegenerated, runSetup } from './swarm.js';
 import { reviewCommand } from './review.js';
 import { swarmStep } from './step.js';
 import { runWithCache, cacheGit, checkoutPrefix } from '../validate-cache.js';
@@ -52,7 +52,7 @@ export interface ExecResult { code: number; output: string; ms: number; timedOut
 export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined>; slot?: Slot }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = 'usage: forge <triage|brief|validate|stats|verdict|round|review-prep|review-close|prep|shadow|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|verify-close|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|swarm|stop|hook> ...';
+const USAGE = 'usage: forge <triage|brief|validate|stats|verdict|round|review-prep|review-close|prep|shadow|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|verify-close|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|swarm|setup|stop|hook> ...';
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 const MAX_WHY = 200;
@@ -1289,6 +1289,17 @@ function runCommand(argv: string[], io: Io): Result {
           return json({ name, count: r.count });
         }
         throw new UsageError('usage: forge surfaces [learn --name N --notes-file F [--heading H] | proposed --name N]');
+      }
+      case 'setup': {
+        // J-17: the dependencies of a directory (--cwd: a worktree) installed as swarm installs a task worktree's:
+        // swarm.setup of the main checkout's config, else the install command of the directory's lockfile.
+        const main = mainCheckout(io.cwd);
+        const defaults = (dir: string) => ({ git: defaultGit(dir), exec: defaultExec(dir), repo: repoReader(dir) });
+        const setup = runSetup({
+          git: io.git ?? defaultGit(repoDir), exec: io.exec ?? defaultExec(repoDir), repo: repoReader(repoDir),
+          at: dir => (samePath(dir, repoDir) ? { git: io.git ?? defaultGit(dir), exec: io.exec ?? defaultExec(dir), repo: repoReader(dir) } : defaults(dir)),
+        }, repoDir, main);
+        return json({ setup });
       }
       case 'tools': {
         // The surfaces of the code checked (--cwd: a task's worktree).

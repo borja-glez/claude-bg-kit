@@ -1112,4 +1112,16 @@ describe('plugin layout', () => {
     const after = runRef('verify').split('## After the verdict')[1];
     for (const w of ['FORGE verify-close --task <id>-<n>', '--evidence', '`oversize: true`', '`evidence.previous`', '`commit`', '`proposals`']) expect(after, w).toContain(w);
   });
+
+  it('FORGE setup is the one rule to install a worktree; infinite cites decisions.md and the Unattended row (J-17)', () => {
+    const review = read('plugins/forge/skills/review/SKILL.md');
+    expect(review).toContain('FORGE setup --cwd <WT>');
+    expect(review).not.toContain('npm ci');
+    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    expect(inf).toContain('skills/run/references/decisions.md');
+    expect(inf).not.toContain('"what": "execution not started"');
+    expect(inf).toContain('`### Unattended` in forge:run `references/execution.md`');
+    const row = runRef('execution').split('\n').find(l => l.startsWith('| A Large task |'))!;
+    for (const w of ['/forge:infinite', 'autonomy: auto']) expect(row).toContain(w);
+  });
 });

@@ -45,7 +45,7 @@ An execution is unattended when it runs under `/forge:infinite`, when this sessi
 | Situation | Safe path |
 |---|---|
 | A verify surface not allowed, or changed | Not verified in that step: `verify-skip` logged, plus the question note. |
-| A Large task | Blocked with the question; the others go on. |
+| A Large task | Blocked with the question; the others go on. Under `/forge:infinite` with `autonomy: auto` it is not blocked: it is designed on the infinite branch and planned in extend mode (`/forge:infinite` §3.3, **Large triage**). |
 | A conflict that repeats | Escalated; the task stays blocked or in conflict and the others go on. |
 | A proposal outside the policy | Left pending for the user. |
 

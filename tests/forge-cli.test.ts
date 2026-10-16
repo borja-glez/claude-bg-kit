@@ -2164,4 +2164,21 @@ describe('forge stats (C-09)', () => {
     expect(readFileSync(path.join(root, '.forge', 'learned.jsonl'), 'utf8')).toContain('"surface":"web"');
     expect(existsSync(path.join(wt, '.forge', 'learned.jsonl'))).toBe(false);
   });
+
+  it('setup installs the dependencies of a directory as swarm does: the lockfile, or swarm.setup in --cwd (J-17)', () => {
+    writeFileSync(path.join(root, 'package.json'), '{}');
+    writeFileSync(path.join(root, 'package-lock.json'), '{}');
+    const cmds: string[] = [];
+    const exec = (cmd: string) => { cmds.push(cmd); return { code: 0, output: 'added 3 packages\n', ms: 1, timedOut: false }; };
+    expect(JSON.parse(run(['setup'], { ...io, exec }).stdout)).toEqual({ setup: { cmd: 'npm ci', ok: true, tail: ['added 3 packages'] } });
+    expect(cmds).toEqual(['npm ci']);
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), `swarm:\n  setup: node -e "require('fs').writeFileSync('setup-ran','1')"\n`);
+    mkdirSync(path.join(root, 'wt'));
+    expect(JSON.parse(run(['setup', '--cwd', 'wt'], io).stdout).setup).toMatchObject({ ok: true });
+    expect(existsSync(path.join(root, 'wt', 'setup-ran'))).toBe(true);
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators: []\n');
+    mkdirSync(path.join(root, 'empty'));
+    expect(JSON.parse(run(['setup', '--cwd', 'empty'], io).stdout)).toEqual({ setup: null });
+  });
 });
