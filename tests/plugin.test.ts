@@ -1267,7 +1267,10 @@ describe('plugin layout', () => {
   it('READMEs describe wave 2a: seats and bindings, the roles, the new commands and SessionEnd', () => {
     for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) {
       const md = read(f);
-      for (const s of ['bound.json', 'seats/main-2/', '`bind <plan|design> --via v', '`release <plan>', '`claim`', '`done`', '`block --why-file f`', '`heartbeat [--register]',
+      // A `|` inside a table cell is escaped, or the row splits into extra cells.
+      const row = md.split('\n').find(l => /^\| (Sessions|Sesiones) \|/.test(l)) ?? '';
+      expect(row.split(/(?<!\\)\|/).length, `${f}: Sessions row cells`).toBe(4);
+      for (const s of ['bound.json', 'seats/main-2/', '`bind <plan\\|design> --via v', '`release <plan>', '`claim`', '`done`', '`block --why-file f`', '`heartbeat [--register]',
         '`design-park <design.md>`', '**SessionEnd**', '/waypoint:work resume', '/waypoint:work release', 'waiting_on', 'info/exclude', 'last-head.json']) expect(md, `${f}: ${s}`).toContain(s);
     }
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {

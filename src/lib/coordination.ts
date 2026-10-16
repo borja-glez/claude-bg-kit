@@ -4,7 +4,8 @@ import type { MessageDoc, PlanTask, PlanView, SessionDoc, States, TaskState } fr
 
 export interface Conflict { taskId: string; owner: string; zones: [string, string][]; ownerIdle?: boolean }
 type Sessions = Record<string, SessionDoc | undefined>;
-/** A session without a lease of its own is idle this long after its heartbeat (LEASE_MINUTES + SILENT_MINUTES); recover --minutes changes it. */
+/** A session without a lease of its own is idle this long after its heartbeat (LEASE_MINUTES + SILENT_MINUTES); recover --minutes changes it
+ *  (below SILENT_MINUTES it acts as SILENT_MINUTES: the silence after a lease always runs). */
 export const IDLE_MINUTES = 15;
 /** No lease runs more than this many minutes after the step that set it (an old `busyUntil` past it is ignored). */
 export const LEASE_CAP_MINUTES = 90;

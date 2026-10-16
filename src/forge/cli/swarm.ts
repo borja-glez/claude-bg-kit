@@ -1009,8 +1009,10 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
         if (!existed && deps.git(['branch', branch, base]) === null) {
           throw new UsageError(`swarm start: cannot create ${branch} from ${base}`);
         }
-        // A-08: the run and task worktrees never show as untracked, also without a .gitignore entry for them.
-        excludeWorktrees(deps.git);
+        // A-08: the run and task worktrees never show as untracked, also without a .gitignore entry for them. Asked at
+        // the main checkout, as addTaskWorktree does: the ignore rules are read from where git runs.
+        const mainDir = mainWorktreeFrom(deps.git(['worktree', 'list', '--porcelain']));
+        excludeWorktrees(mainDir ? args => deps.git(['-C', mainDir, ...args]) : deps.git);
         if (!existsSync(wt)) {
           if (deps.git(['worktree', 'add', wt, branch]) === null) throw new UsageError(`swarm start: cannot add the worktree ${wt}`);
           setup = runSetup(deps, wt, io.cwd);

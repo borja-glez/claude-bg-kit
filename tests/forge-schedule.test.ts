@@ -191,6 +191,14 @@ describe('schedule', () => {
     expect(r.actions).toEqual([{ type: 'wait', seconds: STEP_WAIT_SECONDS }]);
     expect(r.next).toMatchObject({ active: true, stopReason: null });
   });
+  it('A-05: a heartbeat a minute old keeps a claim whose leaseUntil ended 30 minutes ago: no start, no relaunch', () => {
+    const beating = { name: 'x', status: 'active' as const, heartbeatAt: at(-1), leaseUntil: at(-30), role: 'executor' as const };
+    expect(starts(schedule(input({ plan: plan([task('T1')]), states: { T1: { status: 'in_progress', owner: 'M1' } }, sessions: { M1: { ...beating, role: 'manual' } } })))).toEqual([]);
+    const r = schedule(input({ plan: plan([task('T1')]), states: { T1: { status: 'in_progress', owner: 'S2' } }, sessions: { S2: beating }, agents: [],
+      exec: exec({ mode: 'sessions', tasks: sess('T1', 'running', { startedAt: at(-30) }) }) }));
+    expect(r.actions.some(a => a.type === 'relaunch' || a.type === 'block')).toBe(false);
+    expect(r.next.tasks.T1.status).toBe('running');
+  });
   it('relaunches a sessions task whose owner stopped and is not listed, then blocks at the cap', () => {
     const base = { plan: plan([task('T1')]), states: { T1: { status: 'in_progress' as const, owner: 'S2' } }, sessions: { S2: live(at(-30)) } };
     const old = { startedAt: at(-11) };

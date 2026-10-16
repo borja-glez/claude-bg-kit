@@ -128,7 +128,7 @@ describe('waypoint CLI', () => {
   });
 
   it('commit-info reads the last commit', () => {
-    const git = (...a: string[]) => execFileSync('git', a, { cwd: dir });
+    const git = (...a: string[]) => execFileSync('git', ['-c', 'core.autocrlf=false', ...a], { cwd: dir });
     git('init', '-q');
     git('-c', 'user.email=a@b.c', '-c', 'user.name=t', 'add', 'plan.yaml');
     git('-c', 'user.email=a@b.c', '-c', 'user.name=t', 'commit', '-qm', 'T001: Esquema de pedidos');
@@ -175,7 +175,7 @@ describe('multi-session commands', () => {
   });
 
   it('launch creates the worktree once and reuses it', () => {
-    const git = (...a: string[]) => execFileSync('git', a, { cwd: dir });
+    const git = (...a: string[]) => execFileSync('git', ['-c', 'core.autocrlf=false', ...a], { cwd: dir });
     git('init', '-q');
     git('-c', 'user.email=a@b.c', '-c', 'user.name=t', 'add', '.');
     git('-c', 'user.email=a@b.c', '-c', 'user.name=t', 'commit', '-qm', 'init');
@@ -194,7 +194,7 @@ describe('multi-session commands', () => {
     const MARK = 'forge drives this session (forge:run Large loop)';
     const MERGE = ' — the user authorizes merging track/ui into main at phase close';
     const launch = (...flags: string[]) => {
-      const git = (...a: string[]) => execFileSync('git', a, { cwd: dir });
+      const git = (...a: string[]) => execFileSync('git', ['-c', 'core.autocrlf=false', ...a], { cwd: dir });
       if (!existsSync(path.join(dir, '.git'))) {
         git('init', '-q');
         git('-c', 'user.email=a@b.c', '-c', 'user.name=t', 'add', '.');
@@ -244,7 +244,7 @@ describe('multi-session commands', () => {
   });
 
   describe('launch root and base', () => {
-    const git = (cwd: string, ...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd, encoding: 'utf8' }).trim();
+    const git = (cwd: string, ...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', '-c', 'core.autocrlf=false', ...a], { cwd, encoding: 'utf8' }).trim();
     const init = () => {
       git(dir, 'init', '-q', '-b', 'main');
       git(dir, 'add', '.');
@@ -296,7 +296,7 @@ describe('multi-session commands', () => {
   });
 
   describe('launch --task', () => {
-    const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd: dir, encoding: 'utf8' }).trim();
+    const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', '-c', 'core.autocrlf=false', ...a], { cwd: dir, encoding: 'utf8' }).trim();
     const init = () => { git('init', '-q', '-b', 'main'); git('add', '.'); git('commit', '-qm', 'init'); git('branch', 'forge/run-demo-shop'); };
     const args = ['launch', 'plan.yaml', 'T001', '--task', '--run', 'r1', '--coordinator', 'S1', '--base', 'forge/run-demo-shop'];
     it('creates task/<T> from the run branch and a forge run member prompt', () => {
@@ -723,6 +723,16 @@ describe('design commands', () => {
     expect(no.code).toBe(2);
     expect(no.stderr).toContain('only a draft design can be parked');
     expect(run(['design-park'], io).code).toBe(2);
+  });
+  it('design-park on a missing or unreadable design says so cleanly and writes nothing', () => {
+    const missing = run(['design-park', 'docs/waypoint/nope/design.md'], io);
+    expect(missing).toMatchObject({ code: 2, stdout: '' });
+    expect(missing.stderr).toBe('design-park: cannot read docs/waypoint/nope/design.md\n');
+    writeFileSync(path.join(dir, rel), '---\ntitle: x\n---\nhola\n');
+    const broken = run(['design-park', rel], io);
+    expect(broken.code).toBe(1);
+    expect(broken.stderr).not.toMatch(/^error:|\n\s+at /);
+    expect(readFileSync(path.join(dir, rel), 'utf8')).toBe('---\ntitle: x\n---\nhola\n');
   });
 
   describe('critique-check against the design', () => {
@@ -1426,7 +1436,7 @@ describe('notes command', () => {
 });
 
 describe('next --base (swarm members)', () => {
-  const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd: dir, encoding: 'utf8' }).trim();
+  const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', '-c', 'core.autocrlf=false', ...a], { cwd: dir, encoding: 'utf8' }).trim();
   const PLAN = `project: shop
 locale: es
 version: "1"

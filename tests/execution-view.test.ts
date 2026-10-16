@@ -82,7 +82,7 @@ describe('executionView', () => {
     expect(v.slots[0].liveness).toBe('stopped');
     expect(v.orphans).toEqual(['T1']);
   });
-  it('null without an execution or for a finished one; a stalled one stays to say why', () => {
+  it('null without an execution or for a migrated one; a stalled one stays to say why', () => {
     expect(executionView({ exec: null, tasks: {}, live: [], now: NOW })).toBeNull();
     expect(executionView({ exec: exec({ active: false, stopReason: 'migrated' }), tasks: {}, live: [], now: NOW })).toBeNull();
     expect(executionView({ exec: exec({ active: false, stopReason: 'stalled', stallReason: 'blocked: T1' }), tasks: {}, live: [], now: NOW })).toMatchObject({ active: false, stallReason: 'blocked: T1', coordinator: { liveness: 'stopped' } });

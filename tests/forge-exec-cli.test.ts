@@ -1262,4 +1262,31 @@ describe('forge swarm (execution)', () => {
     expect(lines.filter(l => l === '.claude/worktrees/')).toHaveLength(1);
     expect(git('status', '--porcelain')).not.toContain('.claude');
   });
+  const excludeText = () => { const f = path.join(root, '.git', 'info', 'exclude'); return existsSync(f) ? readFileSync(f, 'utf8') : ''; };
+  it('an ignore that already covers .claude/worktrees/ (the .gitignore, or a global one) writes nothing to info/exclude (A-08)', () => {
+    const before = excludeText();
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    out(run(['swarm', 'worktree', 'T1'], io));
+    expect(excludeText()).toBe(before);
+    writeFileSync(path.join(root, '.gitignore'), '.forge/\n');
+    git('add', '.gitignore'); git('commit', '-qm', 'no .claude in .gitignore');
+    const global = path.join(mkdtempSync(path.join(tmpdir(), 'forge-glob-')), 'excludes');
+    writeFileSync(global, '.claude/\n');
+    git('config', 'core.excludesFile', global);
+    out(run(['swarm', 'worktree', 'T2'], io));
+    expect(excludeText()).toBe(before);
+  });
+  it('swarm start asks git about the ignore at the main checkout, wherever its git runs (A-08)', () => {
+    const before = excludeText();
+    // Anchored at the top: only the main checkout's .claude/ is ignored, which a git run in a subdirectory would miss.
+    writeFileSync(path.join(root, '.gitignore'), '.forge/\n/.claude/\n');
+    git('add', '.gitignore'); git('commit', '-qm', 'anchored');
+    const none = path.join(mkdtempSync(path.join(tmpdir(), 'forge-noexcl-')), 'excludes');
+    writeFileSync(none, '');
+    git('config', 'core.excludesFile', none);
+    const sub = path.join(root, 'src');
+    mkdirSync(sub, { recursive: true });
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], { ...io, git: defaultGit(sub) }));
+    expect(excludeText()).toBe(before);
+  });
 });

@@ -22,9 +22,10 @@ export const lastHeadFile = (seatDir: string): string => path.join(seatDir, 'las
 const HEADS_MAX = 50;
 const SHA = /^[0-9a-f]{7,64}$/;
 /** Windows refuses a rename onto a file another process renames or opens at that same instant (EPERM, EACCES, EBUSY);
- *  that clears within microseconds, so the rename is tried again, at once, up to this many times. */
+ *  that clears quickly, so the rename is tried again after 1 ms, up to this many times. */
 const RENAME_TRIES = 50;
 const RENAME_BUSY = new Set(['EPERM', 'EACCES', 'EBUSY']);
+const pause1ms = (): void => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1); };
 
 function readText(file: string, max: number): string | null {
   try { return statSync(file).size > max ? null : readFileSync(file, 'utf8'); } catch { return null; }
@@ -38,6 +39,7 @@ export function writeAtomic(file: string, text: string): void {
     for (let i = 1; ; i++) {
       try { renameSync(tmp, file); return; } catch (e) {
         if (i >= RENAME_TRIES || !RENAME_BUSY.has(String((e as NodeJS.ErrnoException).code))) throw e;
+        pause1ms();
       }
     }
   } finally { rmSync(tmp, { force: true }); }
@@ -80,10 +82,12 @@ export function readSeats(wpDir: string, now?: number): Seat[] {
 }
 export const readBindings = (wpDir: string, now?: number): BoundDoc[] => readSeats(wpDir, now).flatMap(s => (s.bound ? [s.bound] : []));
 
-/** The pid a binding records: CLAUDE_PID of the environment when it is a positive integer. */
+/** The largest pid there can be (a signed 32-bit integer). */
+const PID_MAX = 2147483647;
+/** The pid a binding records: CLAUDE_PID of the environment when it is a positive integer no larger than PID_MAX. */
 export const pidFromEnv = (env?: Readonly<Record<string, string | undefined>>): number | null => {
   const v = env?.CLAUDE_PID;
-  return v !== undefined && /^[1-9]\d{0,9}$/.test(v) ? Number(v) : null;
+  return v !== undefined && /^[1-9]\d{0,9}$/.test(v) && Number(v) <= PID_MAX ? Number(v) : null;
 };
 /** A binding is live by its lease and, when it recorded a pid, while that process exists (the pid only shortens it). */
 export function boundLive(b: BoundDoc, now: number, alive: (pid: number) => boolean = pidAlive): boolean {

@@ -151,7 +151,10 @@ describe('waypoint bind (A-01, B-04, K5-04)', () => {
   it('an owner whose process is gone counts as ended: exit 4 with a task, 0 without; a live process holds it', () => {
     holder({ pid: 2147483646 });
     openTask('T002', 'main');
-    expect(bind('B').code).toBe(4);
+    const r = bind('B');
+    expect(r.code).toBe(4);
+    // previous says what the hooks see: ended at its last renewal.
+    expect(outOf(r).previous).toMatchObject({ endedAt: at(-1), endReason: null, task: 'T002' });
     rmSync(wp('dbcache'), { recursive: true });
     expect(bind('B').code).toBe(0);
     holder({ pid: process.pid });
@@ -226,6 +229,10 @@ describe('waypoint release', () => {
   it('a seat it does not know, or a --db without its directory, is exit 2; a broken bound.json is released as no binding', () => {
     bind('A');
     expect(run(['release', PLAN, '--claude', 'A', '--seat', 'main-7'], io).code).toBe(2);
+    // --seat with no value, also as the last argument, names no seat: exit 2, and the binding stays.
+    expect(run(['release', PLAN, '--claude', 'A', '--seat'], io).code).toBe(2);
+    expect(run(['release', PLAN, '--seat', '--claude', 'A'], io).code).toBe(2);
+    expect(json(wp('bound.json')).endedAt).toBeNull();
     expect(run(['release', PLAN, '--claude', 'A', '--free', 'T002', '--state-version', '4', '--db', '--seat'], io).code).toBe(2);
     writeFileSync(wp('bound.json'), '{oops');
     expect(outOf(run(['release', PLAN, '--claude', 'A'], io))).toMatchObject({ released: false, sid: 'main' });
@@ -243,7 +250,8 @@ describe('the seats on disk (spec §4.10)', () => {
   });
   it('CLAUDE_PID is a pid only as a positive integer', () => {
     expect(pidFromEnv({ CLAUDE_PID: '4242' })).toBe(4242);
-    for (const v of [undefined, '', '0', '-3', '1.5', 'abc', '0x10', ' 42']) expect(pidFromEnv({ CLAUDE_PID: v }), String(v)).toBeNull();
+    expect(pidFromEnv({ CLAUDE_PID: '2147483647' })).toBe(2147483647);
+    for (const v of [undefined, '', '0', '-3', '1.5', 'abc', '0x10', ' 42', '2147483648', '9999999999']) expect(pidFromEnv({ CLAUDE_PID: v }), String(v)).toBeNull();
   });
   it('a binding live by its lease whose process is gone reads as ended at its last renewal, and is not live', () => {
     const b: BoundDoc = { sid: 'main', claude: 'A', pid: 7, via: 'work', since: at(-60), seenAt: at(-1), endedAt: null, endReason: null };

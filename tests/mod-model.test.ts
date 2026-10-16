@@ -35,6 +35,27 @@ describe('pickProject (A-15)', () => {
     expect(pickProject([{ name: 'a', bindings: [], mtimeMs: 1 }], 'A')).toBe('a');
     expect(pickProject([], 'A')).toBeNull();
   });
+  it("the end of this session's binding is its activity too: one ended later beats one renewed earlier", () => {
+    const entries = [
+      { name: 'live', bindings: [bound('A', T(9))], mtimeMs: ms(1) },
+      { name: 'ended', bindings: [bound('A', T(7), T(10))], mtimeMs: ms(1) },
+    ];
+    expect(pickProject(entries, 'A')).toBe('ended');
+  });
+  it('ties keep the first listed, and between own bindings of the same time the files decide', () => {
+    expect(pickProject([{ name: 'a', bindings: [bound('A', T(9))], mtimeMs: ms(1) }, { name: 'b', bindings: [bound('A', T(9))], mtimeMs: ms(1) }], 'A')).toBe('a');
+    expect(pickProject([{ name: 'a', bindings: [bound('A', T(9))], mtimeMs: ms(1) }, { name: 'b', bindings: [bound('A', T(9))], mtimeMs: ms(10) }], 'A')).toBe('b');
+    expect(pickProject([{ name: 'a', bindings: [], mtimeMs: ms(3) }, { name: 'b', bindings: [], mtimeMs: ms(3) }], null)).toBe('a');
+  });
+  it('dates that do not parse give no activity: such a binding of this session does not make its project the own one', () => {
+    // Unreachable through the hooks (normalizeBound drops such a binding first); pickProject still never throws on it.
+    const entries = [
+      { name: 'broken', bindings: [bound('A', 'not a date', 'nor this')], mtimeMs: ms(1) },
+      { name: 'files', bindings: [], mtimeMs: ms(5) },
+    ];
+    expect(pickProject(entries, 'A')).toBe('files');
+    expect(pickProject([{ name: 'broken', bindings: [bound('A', 'not a date')], mtimeMs: ms(1) }], 'A')).toBe('broken');
+  });
 });
 
 describe('buildBandModel · work', () => {

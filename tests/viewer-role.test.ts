@@ -68,6 +68,43 @@ describe('describeViewer (C3, spec §4.2)', () => {
     expect(viewerRole(input({ sessionId: null, bound: bound(), execution: exec({ hookSession: null }) }))).toBe('other-live');
     expect(viewerRole(input({ sessionId: null, bound: bound({ seenAt: at(-30) }) }))).toBe('previous');
   });
+  it('precedence: rule 1 before 2, 2 before 3, 5 before 6 and 7, 6 before 7', () => {
+    // 1 > 2: the coordinator, also listed as a member of its run.
+    expect(describeViewer(input({ sessionId: 'C', execution: exec(), members: [member({ hookSession: 'C' })] }))).toMatchObject({ role: 'owner', coordinator: true, member: null });
+    // 2 > 3: a member with a binding of its own is an owner by its execution.
+    expect(describeViewer(input({ sessionId: 'M', execution: exec(), members: [member()], bound: bound({ claude: 'M' }) }))).toMatchObject({ role: 'owner', subject: 'execution', binding: null, task: 'T2' });
+    // 5 > 6 and 7: a run left behind comes before a live binding and an ended one.
+    const left = exec({ active: false, stopReason: 'stalled' });
+    const ended = bound({ sid: 'main-2', claude: 'D', seenAt: at(-30), endedAt: at(-30), endReason: 'clear' });
+    expect(describeViewer(input({ sessionId: 'B', execution: left, bound: [bound(), ended] }))).toMatchObject({ role: 'previous', subject: 'execution' });
+    expect(describeViewer(input({ sessionId: 'B', execution: left, bound: [ended] }))).toMatchObject({ role: 'previous', subject: 'execution' });
+    // 6 > 7: a live binding comes before one that ended later than it was renewed.
+    const justEnded = bound({ sid: 'main-2', claude: 'D', seenAt: at(-1), endedAt: at(-0.5), endReason: 'clear' });
+    expect(describeViewer(input({ sessionId: 'B', bound: [bound({ seenAt: at(-4) }), justEnded] }))).toMatchObject({ role: 'other-live', binding: { sid: 'main' } });
+  });
+  it('rule 2 with an execution that is no longer visible falls through to the own binding (rule 3)', () => {
+    const own = bound({ claude: 'M' });
+    expect(describeViewer(input({ sessionId: 'M', execution: exec({ active: false, stopReason: 'migrated' }), members: [member()], bound: own })))
+      .toMatchObject({ role: 'owner', subject: 'binding', binding: own });
+    expect(describeViewer(input({ sessionId: 'M', execution: exec({ active: false, stopReason: 'stopped', closedAt: at(-1) }), members: [member()], bound: own })).subject).toBe('binding');
+  });
+  it('among bindings of several conversations the own one is picked; a seenAt tie keeps the first listed', () => {
+    const mine1 = bound({ sid: 'main-2', seenAt: at(-2) });
+    const mine2 = bound({ sid: 'main-3', seenAt: at(-2) });
+    const other = bound({ sid: 'main', claude: 'D', seenAt: at(-1) });
+    expect(describeViewer(input({ sessionId: 'A', bound: [other, mine1, mine2] })).binding).toBe(mine1);
+    expect(describeViewer(input({ sessionId: 'A', bound: [other, mine2, mine1] })).binding).toBe(mine2);
+    // Rule 7: the newest end wins, and a tie keeps the first listed.
+    const e1 = bound({ sid: 'main-2', claude: 'D', endedAt: at(-20), endReason: 'clear' });
+    const e2 = bound({ sid: 'main-3', claude: 'E', endedAt: at(-20), endReason: 'clear' });
+    const e3 = bound({ sid: 'main-4', claude: 'F', endedAt: at(-50), endReason: 'clear' });
+    expect(describeViewer(input({ sessionId: 'B', bound: [e3, e1, e2] })).binding).toBe(e1);
+    expect(describeViewer(input({ sessionId: 'B', bound: [e3, e2, e1] })).binding).toBe(e2);
+  });
+  it('the single-object form of bound is read by rules 6 and 7 as a list of one', () => {
+    expect(describeViewer(input({ sessionId: 'B', bound: bound(), openTasks: { main: 'T019' } }))).toMatchObject({ role: 'other-live', subject: 'binding', task: 'T019' });
+    expect(describeViewer(input({ sessionId: 'B', bound: bound({ endedAt: at(-5), endReason: 'logout' }), openTasks: { main: 'T019' } }))).toMatchObject({ role: 'previous', subject: 'binding', task: 'T019' });
+  });
   it('the order: an execution comes before the bindings, and the own binding before anyone else', () => {
     expect(viewerRole(input({ sessionId: 'B', execution: exec(), bound: bound() }))).toBe('other-live');
     expect(describeViewer(input({ sessionId: 'A', execution: exec(), bound: bound() })).subject).toBe('binding');

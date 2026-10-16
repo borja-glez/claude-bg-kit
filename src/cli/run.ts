@@ -23,7 +23,7 @@ import { roadmapCapabilities, sharingNotice, syncSummary } from '../lib/publish.
 import { claudeSessionId, noClaudeSession } from '../lib/claude-session.js';
 import { blockBatch, claimBatch, cleanText, doneBatch, freeBatch, heartbeatBatch, registerBatch, REASON_MAX, SUMMARY_MAX } from '../lib/batches.js';
 import { BOUND_VIAS, MAX_SEATS, isBoundVia, type BoundDoc } from '../lib/bound.js';
-import { boundFile, boundLive, checkoutSid, leftSeatOf, openTasksOf, pidFromEnv, readBinding, readSeats, recordBase, secondSeatOf, seatsDir, writeAtomic, writeBinding } from '../lib/bound-fs.js';
+import { boundFile, boundLive, checkoutSid, leftSeatOf, openTasksOf, pidFromEnv, readBinding, readSeats, recordBase, secondSeatOf, seatsDir, settleBinding, writeAtomic, writeBinding } from '../lib/bound-fs.js';
 import { isSafeId } from '../lib/execution-state.js';
 import { loadConfig } from '../forge/config.js';
 import type { Commit, MessageDoc, NoteDoc, PhaseDoc, PlanView, SessionDoc, TaskState } from '../lib/types.js';
@@ -439,7 +439,11 @@ export function run(argv: string[], io: Io): Result {
         const cur = readBinding(seatDir, sid, t);
         const task = open[sid] ?? null;
         const options = ['worktree', 'second-seat', 'takeover'];
-        const prevOf = (b: BoundDoc) => ({ sid: b.sid, claude: b.claude, endedAt: b.endedAt, endReason: b.endReason, seenAt: b.seenAt, task: open[b.sid] ?? null });
+        // As the hooks see it: one live by its lease whose process is gone ended at its last renewal.
+        const prevOf = (raw: BoundDoc) => {
+          const b = settleBinding(raw, t);
+          return { sid: b.sid, claude: b.claude, endedAt: b.endedAt, endReason: b.endReason, seenAt: b.seenAt, task: open[b.sid] ?? null };
+        };
         // Exit 3 also names a task another seat left, so the person can resume it there (I3).
         const held = (b: BoundDoc) => ({ held: { sid, claude: b.claude, via: b.via, seenAt: b.seenAt, task }, options, secondSeat: secondSeatOf(wp, claude, open, t), ...(left?.bound ? { previous: prevOf(left.bound) } : {}) });
         let took: 'new' | 'same' | 'takeover' | 'previous';
@@ -482,6 +486,8 @@ export function run(argv: string[], io: Io): Result {
         const claude = claudeSessionId(flag('claude'), io.env ?? {});
         const seats = readSeats(wp, t);
         const seatFlag = flag('seat');
+        // An empty substitution leaves the next flag, or nothing, where the seat goes: that names no seat.
+        if (args.includes('--seat') && (!seatFlag || seatFlag.startsWith('-'))) return fail('release: --seat needs a seat id', 2);
         const seat = seatFlag !== undefined ? seats.find(s => s.sid === seatFlag) : (claude ? seats.find(s => s.bound?.claude === claude) : undefined) ?? seats.find(s => s.checkout);
         if (!seat) return fail(seatFlag !== undefined ? `release: no seat ${seatFlag} in ${rel(wp)}` : `release: no seat in ${rel(wp)}`, 2);
         let batch: Write[] | undefined;
@@ -519,13 +525,14 @@ export function run(argv: string[], io: Io): Result {
         // K3-13: a parked design is not announced at session start nor drawn in the band; only a draft is parked.
         if (!args[0] || args[0].startsWith('--')) return fail('usage: waypoint design-park <design.md>', 2);
         const file = abs(args[0]);
-        const text = readFileSync(file, 'utf8');
+        let text: string;
+        try { text = readFileSync(file, 'utf8'); } catch { return fail(`design-park: cannot read ${args[0]}`, 2); }
         const d = parseDesign(text);
         if (d.meta.status === 'parked') return ok(JSON.stringify({ path: file, status: 'parked', changed: false }));
         if (d.meta.status !== 'draft') return fail(`design-park: only a draft design can be parked (this one is ${d.meta.status})`, 2);
         const next = setDesignStatus(text, 'parked');
         parseDesign(next);
-        writeFileSync(file, next);
+        writeAtomic(file, next);
         return ok(JSON.stringify({ path: file, status: 'parked', changed: true }));
       }
       case 'design-import': {

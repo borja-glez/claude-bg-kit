@@ -190,6 +190,23 @@ describe('pickTask with integrated commits (swarm members)', () => {
   it('without integrated nothing changes', () => {
     expect(pickTask(base, states, { sessionId: 'ui', track: 'ui' }).task?.id).toBe('T005');
   });
+  describe('waiting_on (A-09)', () => {
+    const t = (id: string, track: string, deps: string[] = []) => ({ id, title: id, track, phase: 'F1', done_when: 'x', depends_on: deps, zones: [`src/${id}/**`] });
+    const p = { ...base, tasks: [t('B1', 'backend'), t('B2', 'backend'), t('U1', 'ui', ['B1', 'B2']), t('U2', 'ui', ['B2']), t('U3', 'ui', ['B9']), t('U4', 'ui')] };
+    const done = (sha: string) => ({ status: 'done' as const, commits: [{ sha, ts: '', title: '', add: 0, del: 0 }] });
+    // B9 left the plan; its state is still done, with a commit not in the base.
+    const s: States = { B1: done('b1'), B2: done('b2'), B9: done('b9') };
+    it('lists each waiting task once, in plan order, with its first dependency not integrated', () => {
+      expect(pickTask(p, s, { sessionId: 'ui', track: 'ui', integrated: new Set() })).toMatchObject({ waiting_on: [{ taskId: 'U1', dependsOn: 'B1' }, { taskId: 'U2', dependsOn: 'B2' }] });
+      expect(pickTask(p, s, { sessionId: 'ui', track: 'ui', integrated: new Set(['b1']) })).toMatchObject({ waiting_on: [{ taskId: 'U1', dependsOn: 'B2' }, { taskId: 'U2', dependsOn: 'B2' }] });
+    });
+    it('a dependency removed from the plan is waited for no more, and waiting_on comes along with the task found', () => {
+      const r = pickTask(p, s, { sessionId: 'ui', track: 'ui', integrated: new Set() });
+      expect(r).toMatchObject({ task: { id: 'U3' }, waiting_on: [{ taskId: 'U1' }, { taskId: 'U2' }] });
+      const rest = pickTask(p, { ...s, U3: { status: 'done' } }, { sessionId: 'ui', track: 'ui', integrated: new Set() });
+      expect(rest).toMatchObject({ task: { id: 'U4' }, waiting_on: [{ taskId: 'U1' }, { taskId: 'U2' }] });
+    });
+  });
 });
 
 describe('liveness', () => {
@@ -205,11 +222,11 @@ describe('liveness', () => {
     expect(liveness(t0, null)).toBe('stopped');
     expect(liveness(t0, 'nonsense')).toBe('stopped');
   });
-  it('reads a session by its lease, and falls back to the heartbeat window without one', () => {
+  it('reads a session by its lease, the later of leaseUntil and the heartbeat plus 10 minutes (A-05)', () => {
     const base = { name: 'x', status: 'active' as const };
     expect(sessionLiveness({ ...base, heartbeatAt: at(-60), leaseUntil: at(3) }, t0)).toBe('alive');
     expect(sessionLiveness({ ...base, heartbeatAt: at(-1), leaseUntil: at(-7) }, t0)).toBe('alive');
-    // Without leaseUntil: the old rule (15 min of heartbeat, busyUntil within its cap).
+    // Without leaseUntil, the heartbeat alone: alive for 10 minutes, silent for 5 more, then stopped.
     expect(sessionLiveness({ ...base, heartbeatAt: at(-9) }, t0)).toBe('alive');
     expect(sessionLiveness({ ...base, heartbeatAt: at(-14) }, t0)).toBe('silent');
     expect(sessionLiveness({ ...base, heartbeatAt: at(-16) }, t0)).toBe('stopped');
@@ -220,6 +237,13 @@ describe('liveness', () => {
     const base = { name: 'x', status: 'active' as const, heartbeatAt: at(-30) };
     expect(isIdle({ ...base, leaseUntil: at(-2) }, t0)).toBe(false);
     expect(isIdle({ ...base, leaseUntil: at(-6) }, t0)).toBe(true);
+  });
+  it('recover --minutes below 5 acts as 5: the silence after a heartbeat always runs', () => {
+    const beat = (min: number) => ({ name: 'x', status: 'active' as const, heartbeatAt: at(min) });
+    for (const minutes of [0, 1, 5]) {
+      expect(isIdle(beat(-4.9), t0, minutes), String(minutes)).toBe(false);
+      expect(isIdle(beat(-5.1), t0, minutes), String(minutes)).toBe(true);
+    }
   });
   it('A-05: one life: an old leaseUntil no longer hides a fresh heartbeat, and a document without a lease stops 15 minutes after it', () => {
     const base = { name: 'x', status: 'active' as const };

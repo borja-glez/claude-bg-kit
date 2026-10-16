@@ -9,8 +9,12 @@ import type {
 
 /** A, checked to be assignable to B. */
 type Fits<A extends B, B> = A;
-type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+/** Both ways; `any` on either side is never the same (it would pass both checks). */
+type IsAny<T> = 0 extends 1 & T ? true : false;
+type Same<A, B> = IsAny<A> extends true ? false : IsAny<B> extends true ? false : [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type Assert<T extends true> = T;
+// The check bites: a field the engine types as `any` would otherwise pass for any union.
+export type AnyIsNeverSame = Assert<Same<Same<any, 'startup'>, false>>;
 
 export type SessionFits = Fits<EngineInterface['session'], SessionApiContract>;
 export type StoreFits = Fits<EngineInterface['store'], StoreContract>;
