@@ -11,7 +11,7 @@ import type { MessageDoc, Plan, States } from '../lib/types.js';
 import { decisionsSummary } from '../lib/decisions.js';
 import { MAX_SEATS, parseBound, type BoundDoc } from '../lib/bound.js';
 import { normalizeMember, type MemberDoc } from '../lib/member-doc.js';
-import { describeViewer, type Viewer } from '../lib/viewer-role.js';
+import { describeViewer, type Viewer, type ViewerInput } from '../lib/viewer-role.js';
 
 export interface ProjectEntry { name: string; bindings: readonly BoundDoc[]; mtimeMs: number }
 export interface BandFiles {
@@ -53,16 +53,17 @@ export type BandModel = (
   // proposals/critical count the latest critique; pending/pendingCritical the proposals of every round still undecided.
   | { mode: 'design'; project: string; locale: string; version: number; round: number; proposals: number; critical: number;
       pending: number; pendingCritical: number; designUrl: string | null; auto?: { count: number; lastMajor: string | null } }
+  // joinable, on a notice about a run: whether forge takes members in it (an active plan run; an ephemeral one never).
   | { mode: 'notice'; project: string; locale: string; kind: 'other-live' | 'previous'; subject: 'task' | 'run' | 'design';
       seat: string | null; task: string | null; title: string | null; since: string | null; runId: string | null;
-      integrated?: number; total?: number; stopReason?: string | null; roadmapUrl: string | null; key: string }
+      integrated?: number; total?: number; stopReason?: string | null; joinable?: boolean; roadmapUrl: string | null; key: string }
 ) & { viewer: { role: 'owner' | 'other-live' | 'previous' | 'none'; coordinator: boolean; runId: string | null } };
 
 /** C3: the role of the conversation that looks, as every band publishes it. */
 export type BandViewer = BandModel['viewer'];
 /** §4.5: the band of a conversation that is not the owner. */
 export type NoticeBand = Extract<BandModel, { mode: 'notice' }>;
-/** Nothing to work out (no project, or a plan that does not read): nobody's role. */
+/** Nothing to work out (no project and no execution, or a plan that does not read): nobody's role. */
 export const NO_VIEWER: BandViewer = { role: 'none', coordinator: false, runId: null };
 /** The band that draws nothing, with the language and the role it knows. */
 export function noneBand(locale?: string, viewer: BandViewer = NO_VIEWER): BandModel {
@@ -160,6 +161,23 @@ function viewerOf(v: Viewer, exec: ExecutionState | null, now: number): BandView
   const runId = exec && v.subject === 'execution' && isVisibleRun(exec, now, ownsRun ? 'owner' : 'none') ? exec.runId : null;
   return { role: v.role, coordinator: v.coordinator, runId };
 }
+/** What describeViewer reads of forge: the execution, the members of its run and whether its coordinator ended (B-09). */
+function runInput(exec: ExecutionState | null, f: BandFiles, now: number): Pick<ViewerInput, 'execution' | 'members' | 'coordinatorEnded'> {
+  return { execution: exec, members: exec ? membersOf(f, exec.runId) : [], coordinatorEnded: coordinatorEnded(exec, f.coordinatorLive) };
+}
+/** The role from the execution alone, with no binding: there is no waypoint project whose seats could be held. */
+function forgeViewer(exec: ExecutionState | null, f: BandFiles, now: number): BandViewer {
+  return viewerOf(describeViewer({ bound: null, ...runInput(exec, f, now), sessionId: isSafeId(f.sessionId) ? f.sessionId : null, now }), exec, now);
+}
+/**
+ * I2: the role of the conversation that looks at a checkout without a waypoint project (neither a plan nor a design):
+ * from forge's execution there, of any kind, and its members, so forge's coordinator of a run in a repository without a
+ * roadmap still publishes `{ role: 'owner', coordinator: true, runId }` (C3: lens reads the role only from the band).
+ */
+export function executionViewer(f: BandFiles): BandViewer {
+  const now = f.now ?? Date.now();
+  try { return forgeViewer(parseExecution(f.execution, now), f, now); } catch { return { ...NO_VIEWER }; }
+}
 
 /**
  * The band of the conversation `f.sessionId` for this project (spec §4.5). Its role (describeViewer over the seats'
@@ -177,11 +195,9 @@ export function buildBandModel(project: string, f: BandFiles): BandModel {
     const seats = seatsOf(f, now);
     const v = describeViewer({
       bound: seats.flatMap(s => (s.bound ? [s.bound] : [])),
-      execution: exec,
-      members: exec ? membersOf(f, exec.runId) : [],
+      ...runInput(exec, f, now),
       sessionId: isSafeId(f.sessionId) ? f.sessionId : null,
       now,
-      coordinatorEnded: coordinatorEnded(exec, f.coordinatorLive),
       openTasks: openTasksFrom(parsed<States[string]>(f.states) as States),
     });
     const viewer = viewerOf(v, exec, now);
@@ -190,8 +206,10 @@ export function buildBandModel(project: string, f: BandFiles): BandModel {
       const r = runModel(project, f, exec, plan, now, viewer);
       if (r) return withAuto(r, f, now);
     }
-    // No plan nor design to read, or a plan that does not read: nothing to work out.
-    if ((f.plan === undefined && f.design === undefined) || (f.plan !== undefined && !plan)) return noneBand(knownLocale(f));
+    // No plan nor design: no waypoint project, nothing drawn, and the role from the execution alone (I2).
+    if (f.plan === undefined && f.design === undefined) return noneBand(knownLocale(f), forgeViewer(exec, f, now));
+    // A plan that does not read: nothing to work out.
+    if (f.plan !== undefined && !plan) return noneBand(knownLocale(f));
     const m = roleBand(project, f, plan, v, exec, seats, now, viewer);
     if (m) return withAuto(m, f, now);
     return noneBand(knownLocale(f), viewer);
@@ -234,8 +252,9 @@ function noticeModel(project: string, f: BandFiles, plan: Plan | null, v: Viewer
     if (!exec) return null;
     const view = executionView({ exec, tasks: publicTasks(f), live: lives(f), now, role: kind });
     if (!view) return null;
+    // Only an active plan run takes members: `forge swarm join` refuses an ephemeral one.
     return { ...base, subject: 'run', seat: null, task: null, title: null, runId: exec.runId, integrated: view.integrated, total: view.total,
-      stopReason: exec.active ? null : exec.stopReason, key: `run:${exec.runId}` };
+      stopReason: exec.active ? null : exec.stopReason, joinable: exec.active && exec.kind === 'plan', key: `run:${exec.runId}` };
   }
   const b = v.binding;
   if (!b) return null;

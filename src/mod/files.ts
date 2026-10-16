@@ -1,6 +1,6 @@
 import type { EngineInterface } from 'claude-code';
 import { mainCheckoutFrom } from '../lib/main-checkout.js';
-import { buildBandModel, noneBand, pickProject, seatsOf, type BandFiles, type BandModel, type ProjectEntry } from './model.js';
+import { buildBandModel, executionViewer, noneBand, pickProject, seatsOf, type BandFiles, type BandModel, type ProjectEntry } from './model.js';
 import { DECISIONS_MAX } from '../lib/decisions.js';
 import { BOUND_MAX_BYTES, MAX_SEATS, parseBound, type BoundDoc } from '../lib/bound.js';
 import { isSafeId, parseExecution } from '../lib/execution-state.js';
@@ -168,13 +168,21 @@ async function loadForge($: Engine, root: string, now: number): Promise<ForgeFil
  * latest activity (A-15), with this conversation's id and the engine's clock (C3). Null without a project.
  */
 export async function loadBandFiles($: Engine): Promise<{ project: string; files: BandFiles } | null> {
+  const read = await readBandFiles($);
+  return read.project ? { project: read.project, files: read.files } : null;
+}
+
+/** As loadBandFiles; without a project, forge's files alone (I2: the role still comes from its execution). */
+async function readBandFiles($: Engine): Promise<{ project: string | null; files: BandFiles }> {
   const root = await $.session.root();
   const now = await nowMs($);
   const sessionId = await sessionIdOf($);
   const projects = await projectEntries($, root, now);
   const project = pickProject(projects.map(p => p.entry), sessionId);
   const chosen = projects.find(p => p.entry.name === project);
-  if (!project || !chosen) return null;
+  if (!project || !chosen) {
+    return { project: null, files: { states: {}, messages: {}, critiques: {}, ...(await loadForge($, root, now)), sessionId, now } };
+  }
   const pdocs = join(root, 'docs', 'waypoint', project);
   const pstate = join(root, '.waypoint', project);
   const critiques: Record<string, string> = {};
@@ -201,9 +209,10 @@ export async function loadBandFiles($: Engine): Promise<{ project: string; files
   return { project, files };
 }
 
+/** The band of this conversation; without a waypoint project it draws nothing, with the role from forge's execution (I2). */
 export async function loadBandModel($: Engine): Promise<BandModel> {
-  const loaded = await loadBandFiles($);
-  return loaded ? buildBandModel(loaded.project, loaded.files) : noneBand();
+  const { project, files } = await readBandFiles($);
+  return project ? buildBandModel(project, files) : noneBand(undefined, executionViewer(files));
 }
 
 /**

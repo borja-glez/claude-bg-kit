@@ -276,6 +276,14 @@ describe('buildBandModel · the role of who looks (C3, B-02, K5-01)', () => {
       expect(m.viewer.role, String(id)).not.toBe('owner');
     }
   });
+  it("with neither a plan nor a design nothing is drawn, but the role still comes from forge's execution (I2)", () => {
+    const member = j({ sessionId: 'backend', role: 'executor', runId: 'r1', task: 'T002', name: null, since: ago(20), hookSession: 'M' });
+    const f: BandFiles = { ...empty, execution: EXEC({ mode: 'sessions' }), members: { backend: member } };
+    expect(buildBandModel('demo-shop', { ...f, sessionId: 'M' })).toEqual({ mode: 'none', viewer: { role: 'owner', coordinator: false, runId: 'r1' } });
+    expect(buildBandModel('demo-shop', { ...f, sessionId: 'X' })).toEqual({ mode: 'none', viewer: { role: 'other-live', coordinator: false, runId: 'r1' } });
+    // A plan that does not read still publishes no role (spec §4.5).
+    expect(buildBandModel('demo-shop', { ...f, plan: 'not: [yaml', sessionId: 'M' })).toEqual({ mode: 'none', viewer: NO_VIEWER });
+  });
   it("openTasksFrom: each seat's task claimed or in progress, the first by id", () => {
     expect(openTasksFrom({ T003: { status: 'in_progress', owner: 'main' }, T001: { status: 'claimed', owner: 'main' }, T002: { status: 'done', owner: 'ui' }, T004: { status: 'blocked', owner: 'ui' } } as never))
       .toEqual({ main: 'T001' });
@@ -407,7 +415,7 @@ describe('buildBandModel · notices (B-02, B-07, K3-13, K5-02)', () => {
   it("someone else's execution: running is other-live; stopped, or without its coordinator, is previous for 24 hours (B-07, K5-02)", () => {
     const f = (over: object, extra: Partial<BandFiles> = {}): BandFiles => ({ ...empty, plan, sessionId: 'B', execution: EXEC(over), ...extra });
     expect(buildBandModel('demo-shop', f({}))).toMatchObject({
-      mode: 'notice', kind: 'other-live', subject: 'run', seat: null, task: null, runId: 'r1', integrated: 1, total: 2, stopReason: null, key: 'run:r1',
+      mode: 'notice', kind: 'other-live', subject: 'run', seat: null, task: null, runId: 'r1', integrated: 1, total: 2, stopReason: null, key: 'run:r1', joinable: true,
       viewer: { role: 'other-live', coordinator: false, runId: 'r1' },
     });
     const moved = ago(60);
@@ -419,6 +427,11 @@ describe('buildBandModel · notices (B-02, B-07, K3-13, K5-02)', () => {
     expect(buildBandModel('demo-shop', f({ ...stalled, closedAt: ago(1), closedBy: 'close' })).mode).toBe('none');
     // Its coordinator still sees the run band.
     expect(buildBandModel('demo-shop', { ...f(stalled), sessionId: 's1' }).mode).toBe('run');
+  });
+  it('only a plan run can be joined: the notice of an ephemeral one says so (I1, swarm join refuses it)', () => {
+    expect(buildBandModel('demo-shop', { ...empty, plan, sessionId: 'X', execution: EPHEMERAL() }))
+      .toMatchObject({ mode: 'notice', kind: 'other-live', subject: 'run', runId: 'e1', joinable: false });
+    expect(buildBandModel('demo-shop', { ...empty, plan, sessionId: 'X', execution: EXEC() })).toMatchObject({ mode: 'notice', subject: 'run', joinable: true });
   });
   it('the notice lines, in es and en', () => {
     const n = (o: object, locale = 'es') => bandLine({ mode: 'notice', project: 'demo-shop', locale, kind: 'other-live', subject: 'task', seat: 'main', task: 'T002', title: 'API de pedidos',

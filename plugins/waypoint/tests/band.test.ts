@@ -554,9 +554,12 @@ test('the notices of a run and of what an earlier conversation left send their c
   serveBand(on, () => band);
   mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
   const run = { subject: 'run', seat: null, task: null, title: null, runId: 'r1', integrated: 3, total: 12, key: 'run:r1' } as const;
-  const cases: { model: WaypointBand; line: string; labels: string[]; presses: [string, string][] }[] = [
-    { model: notice(run), line: '◦ ejecución de forge en curso, la coordina otra sesión · 3/12', labels: ['Ver', 'Unirme'],
+  const cases: { model: WaypointBand; line: string; labels: string[]; presses: [string, string][]; absent?: string[] }[] = [
+    { model: notice({ ...run, joinable: true }), line: '◦ ejecución de forge en curso, la coordina otra sesión · 3/12', labels: ['Ver', 'Unirme'],
       presses: [['view', '/waypoint:status'], ['join', '/forge:run --join']] },
+    // I1: an ephemeral run takes no members (swarm join refuses it), so its notice offers no Join.
+    { model: notice({ ...run, joinable: false }), line: '◦ ejecución de forge en curso, la coordina otra sesión · 3/12', labels: ['Ver'],
+      presses: [['view', '/waypoint:status']], absent: ['join'] },
     { model: notice({ kind: 'previous', viewer: PREVIOUS }), line: '◌ quedó a medias: T002 API de pedidos (hace 12 min)', labels: ['Retomar', 'Liberar T002'],
       presses: [['resume', '/waypoint:work resume'], ['release', '/waypoint:work release T002']] },
     { model: notice({ kind: 'previous', subject: 'design', task: null, title: null, key: 'design:demo', viewer: PREVIOUS }), line: '◌ diseño a medias: demo (hace 12 min)', labels: ['Retomar'],
@@ -573,6 +576,7 @@ test('the notices of a run and of what an earlier conversation left send their c
       await ui.press({ key });
       expect(sent.at(-1), key).toBe(command);
     }
+    for (const key of c.absent ?? []) expect(await ui.find({ key }), key).toBeUndefined();
     expect(await ui.find({ key: 'stop-run' })).toBeUndefined();
     await ui.unmount();
   }

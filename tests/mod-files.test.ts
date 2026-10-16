@@ -236,6 +236,15 @@ describe('loadBandFiles · who looks, and the seats of its project (C3, A-15)', 
     expect(loaded?.files.members).not.toHaveProperty('m0');
     expect(loaded?.files.coordinatorLive).toBe(f[coordinator]);
   });
+  it("without a waypoint project the band draws nothing but still publishes the role from forge's execution (I2)", async () => {
+    const root = '/repo';
+    // forge's ephemeral run of a checkout with no docs/waypoint, coordinated by the conversation that looks.
+    const ephemeral = JSON.stringify({ ...JSON.parse(EXEC), runId: 'e1', kind: 'ephemeral', project: 'loose', tasks: { 'abc-k3x9': task('running') } });
+    const files = { [`${root}/.forge/execution.json`]: ephemeral };
+    expect(await loadBandModel(fake(root, files).$)).toEqual({ mode: 'none', viewer: { role: 'owner', coordinator: true, runId: 'e1' } });
+    expect(await loadBandModel(fake(root, files, { id: 'conv-9' }).$)).toEqual({ mode: 'none', viewer: { role: 'other-live', coordinator: false, runId: 'e1' } });
+    expect(await loadBandModel(fake(root, {}).$)).toEqual({ mode: 'none', viewer: { role: 'none', coordinator: false, runId: null } });
+  });
   it('a session id the engine cannot give, or an unsafe one, is null, and the files still load (Review Focus 1)', async () => {
     const root = '/repo';
     for (const id of [null, 'a b', '../x']) {

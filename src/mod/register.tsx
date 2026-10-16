@@ -203,10 +203,11 @@ export const register: Register = on => {
       // [Resume] of a draft binds this conversation to it without a critique round (design resume).
       const noticeControls = (n: NoticeBand) => {
         if (n.kind === 'other-live') {
+          // Join only where forge takes members: an ephemeral run refuses them (joinable false).
           return n.subject === 'run'
             ? [
                 <Button key="view" label={t.view} onPress={submit('/waypoint:status')} />,
-                <Button key="join" label={t.join} onPress={submit('/forge:run --join')} />,
+                ...(n.joinable ? [<Button key="join" label={t.join} onPress={submit('/forge:run --join')} />] : []),
               ]
             : [
                 <Button key="status" label={t.status} onPress={submit('/waypoint:status')} />,
