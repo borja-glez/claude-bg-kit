@@ -10,6 +10,7 @@ import { stopFile, parseRun, readRunText } from '../run.js';
 import { isLocale } from '../../lib/forge-run.js';
 import { appendEvent, appendPhase, readEvents } from '../ledger.js';
 import { readExecution, updateExecution, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree, type LockDeps } from '../execution.js';
+import { sleepSync } from '../pid.js';
 import { schedule, widthOf, relaunchOrBlock, RELAUNCH_CAP, type BgAgent } from '../schedule.js';
 import { LEASE_MINUTES, sessionLiveness } from '../../lib/coordination.js';
 import { planLocale, sessionReply } from '../../lib/locale.js';
@@ -252,9 +253,6 @@ function worktreeHolding(porcelain: string | null, branch: string): string | nul
   }
   return null;
 }
-
-// Blocks the process for ms without spinning; the coordinator runs `swarm sleep` in the background.
-const sleepSync = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 function loadPlanArg(io: Io, planArg: string | undefined, sub: string) {
   if (!planArg) throw new UsageError(`swarm ${sub}: --plan is required`);
@@ -1055,25 +1053,40 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         rmSync(executionTaskFile(io.cwd, task), { force: true });
         return ok();
       }
-      const stage = (flag('stage') ?? prev.stage) as Stage;
-      if (!STAGES.includes(stage)) throw new UsageError(`swarm task: --stage must be one of ${STAGES.join('|')}`);
-      const status = (flag('status') ?? prev.status) as ExecTask['status'];
-      if (!['running', 'accepted', 'blocked'].includes(status) && status !== prev.status) throw new UsageError('swarm task: --status must be running, accepted or blocked');
-      let detail = prev.detail;
+      const stageArg = flag('stage') as Stage | undefined;
+      if (stageArg !== undefined && !STAGES.includes(stageArg)) throw new UsageError(`swarm task: --stage must be one of ${STAGES.join('|')}`);
+      const statusArg = flag('status') as ExecTask['status'] | undefined;
+      let detailArg: string | null | undefined;
       if (flag('detail-file')) {
-        try { detail = readFileSync(path.resolve(io.cwd, flag('detail-file')!), 'utf8').trim().slice(0, 500) || null; } catch { throw new UsageError('swarm task: cannot read --detail-file'); }
+        try { detailArg = readFileSync(path.resolve(io.cwd, flag('detail-file')!), 'utf8').trim().slice(0, 500) || null; } catch { throw new UsageError('swarm task: cannot read --detail-file'); }
       }
-      const round = has('round') ? Number(flag('round')) : prev.round;
-      if (!Number.isInteger(round) || round < 0 || round > 99) throw new UsageError('swarm task: --round must be an integer from 0 to 99');
-      const agent = has('no-agent') ? null : (flag('agent') ?? prev.agent);
-      const stageSince = prev.stage !== stage ? iso : prev.stageSince;
-      // Blocked now (it was not): the task's time ends here. Back to running: the next finish writes it again.
-      const finishedAt = status === 'blocked' && prev.status !== 'blocked' ? iso : status === 'running' && prev.finishedAt ? null : prev.finishedAt;
-      const next: ExecTask = { ...prev, stage, status, round, agent, detail, updatedAt: iso, stageSince, ...(finishedAt !== undefined ? { finishedAt } : {}) };
-      update(cur => cur && { ...cur, tasks: { ...cur.tasks, [task]: next } });
+      const roundArg = has('round') ? Number(flag('round')) : undefined;
+      if (roundArg !== undefined && (!Number.isInteger(roundArg) || roundArg < 0 || roundArg > 99)) throw new UsageError('swarm task: --round must be an integer from 0 to 99');
+      const agentArg = has('no-agent') ? null : flag('agent');
+      // Only the fields given here change; the rest keep what the task holds when the lock is taken (I-15).
+      const build = (base: ExecTask): ExecTask => {
+        const stage = stageArg ?? base.stage;
+        const status = statusArg ?? base.status;
+        if (!['running', 'accepted', 'blocked'].includes(status) && status !== base.status) throw new UsageError('swarm task: --status must be running, accepted or blocked');
+        const stageSince = base.stage !== stage ? iso : base.stageSince;
+        // Blocked now (it was not): the task's time ends here. Back to running: the next finish writes it again.
+        const finishedAt = status === 'blocked' && base.status !== 'blocked' ? iso : status === 'running' && base.finishedAt ? null : base.finishedAt;
+        return {
+          ...base, stage, status, round: roundArg ?? base.round, agent: agentArg === undefined ? base.agent : agentArg,
+          detail: detailArg === undefined ? base.detail : detailArg, updatedAt: iso, stageSince, ...(finishedAt !== undefined ? { finishedAt } : {}),
+        };
+      };
+      let base = prev;
+      let next = build(prev);
+      update(cur => {
+        if (!cur) return null;
+        base = cur.tasks[task] ?? prev;
+        next = build(base);
+        return { ...cur, tasks: { ...cur.tasks, [task]: next } };
+      });
       const lease = flag('lease') && !Number.isNaN(Date.parse(flag('lease')!)) ? flag('lease')! : new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString();
-      writePublicTask(io.cwd, { task, runId: e.runId, stage, status, agent, round, since: stageSince, updatedAt: iso, leaseUntil: lease, by: e.coordinator, mode: prev.executor });
-      if (prev.stage !== stage) appendPhase(io.cwd, { ts: iso, kind: 'phase', task, phase: stage });
+      writePublicTask(io.cwd, { task, runId: e.runId, stage: next.stage, status: next.status, agent: next.agent, round: next.round, since: next.stageSince, updatedAt: iso, leaseUntil: lease, by: e.coordinator, mode: base.executor });
+      if (base.stage !== next.stage) appendPhase(io.cwd, { ts: iso, kind: 'phase', task, phase: next.stage });
       return json(next);
     }
     case 'tick': {
@@ -1117,10 +1130,14 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       const e = current();
       const t = e.tasks[task];
       if (e.closedAt) throw new UsageError(`swarm retry: the execution ${e.runId} is closed; start a new one`);
+      // Checked on the read above and again under the lock, on the task as it is then: a write that landed since is
+      // kept, and a task no longer in that state is left alone (I-15). Only an execution still stalled then is revived.
+      const revived = (x: ExecutionState) => !x.active && x.stopReason === 'stalled';
       if (has('adopt')) {
-        if (!t || t.status !== 'conflict' || t.executor === 'subagents') {
-          throw new UsageError(`swarm retry: --adopt takes a member's task in conflict (${task} is ${t ? `${t.status}, ${t.executor}` : 'not in this execution'})`);
-        }
+        const adoptable = (x: ExecTask | undefined): x is ExecTask => !!x && x.status === 'conflict' && x.executor !== 'subagents';
+        const notAdoptable = (x: ExecTask | undefined) =>
+          new UsageError(`swarm retry: --adopt takes a member's task in conflict (${task} is ${x ? `${x.status}, ${x.executor}` : 'not in this execution'})`);
+        if (!adoptable(t)) throw notAdoptable(t);
         if (deps.git(['rev-parse', '--verify', '-q', `refs/heads/${t.branch}`]) === null) throw new UsageError(`swarm retry: ${t.branch} does not exist`);
         // The fix round runs where the branch already is (a member's task-<T>, or the manual session's own worktree).
         const holder = worktreeHolding(deps.git(['worktree', 'list', '--porcelain']), t.branch);
@@ -1133,19 +1150,30 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
           }
         }
         const worktree = holder ?? addTaskWorktree(deps, io.cwd, task, e.branch).worktree;
-        const revive = !e.active && e.stopReason === 'stalled';
-        update(cur => cur && {
-          ...cur, ...(revive ? { active: true, stopReason: null, stallReason: null } : {}),
-          tasks: { ...cur.tasks, [task]: { ...t, status: 'running', stage: 'implement', executor: 'subagents', worktree, attempts: t.attempts + 1, nudgedAt: null, finishedAt: iso, updatedAt: iso, stageSince: iso } },
+        let adopted = t;
+        update(cur => {
+          if (!cur) return null;
+          const base = cur.tasks[task] ?? t;
+          if (!adoptable(base)) throw notAdoptable(base);
+          adopted = base;
+          return {
+            ...cur, ...(revived(cur) ? { active: true, stopReason: null, stallReason: null } : {}),
+            tasks: { ...cur.tasks, [task]: { ...base, status: 'running', stage: 'implement', executor: 'subagents', worktree, attempts: base.attempts + 1, nudgedAt: null, finishedAt: iso, updatedAt: iso, stageSince: iso } },
+          };
         });
-        writePublicTask(io.cwd, { task, runId: e.runId, stage: 'implement', status: 'running', agent: null, round: t.round, since: iso, updatedAt: iso, leaseUntil: new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString(), by: e.coordinator, mode: 'subagents' });
-        return json({ task, adopted: true, previous: t.executor, worktree, branch: t.branch });
+        writePublicTask(io.cwd, { task, runId: e.runId, stage: 'implement', status: 'running', agent: null, round: adopted.round, since: iso, updatedAt: iso, leaseUntil: new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString(), by: e.coordinator, mode: 'subagents' });
+        return json({ task, adopted: true, previous: adopted.executor, worktree, branch: t.branch });
       }
-      if (!t || (t.status !== 'conflict' && t.status !== 'blocked')) throw new UsageError(`swarm retry: ${task} is not in conflict or blocked`);
-      const revive = !e.active && e.stopReason === 'stalled';
-      update(cur => cur && {
-        ...cur, ...(revive ? { active: true, stopReason: null, stallReason: null } : {}),
-        tasks: { ...cur.tasks, [task]: { ...t, status: 'running', stage: 'implement', attempts: t.attempts + 1, detail: null, finishedAt: null, updatedAt: iso, stageSince: iso } },
+      const retryable = (x: ExecTask | undefined): x is ExecTask => !!x && (x.status === 'conflict' || x.status === 'blocked');
+      if (!retryable(t)) throw new UsageError(`swarm retry: ${task} is not in conflict or blocked`);
+      update(cur => {
+        if (!cur) return null;
+        const base = cur.tasks[task] ?? t;
+        if (!retryable(base)) throw new UsageError(`swarm retry: ${task} is not in conflict or blocked`);
+        return {
+          ...cur, ...(revived(cur) ? { active: true, stopReason: null, stallReason: null } : {}),
+          tasks: { ...cur.tasks, [task]: { ...base, status: 'running', stage: 'implement', attempts: base.attempts + 1, detail: null, finishedAt: null, updatedAt: iso, stageSince: iso } },
+        };
       });
       return ok();
     }

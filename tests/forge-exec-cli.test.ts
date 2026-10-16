@@ -4,8 +4,8 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run as cli, defaultGit, defaultExec, repoReader, type Io } from '../src/forge/cli/run.js';
-import { readExecution, saveExecution, executionTaskFile } from '../src/forge/execution.js';
-import { normalizeExecution } from '../src/lib/execution-state.js';
+import { readExecution, saveExecution, executionTaskFile, executionLock } from '../src/forge/execution.js';
+import { normalizeExecution, type ExecTask, type ExecutionState } from '../src/lib/execution-state.js';
 import { setupFor, swarmCommand } from '../src/forge/cli/swarm.js';
 import { writeMember } from '../src/forge/members.js';
 import { readLoose } from '../src/forge/loose.js';
@@ -419,6 +419,58 @@ describe('forge swarm (execution)', () => {
     expect(readExecution(root)!.tasks.T1.finishedAt ?? null).toBeNull();
     expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'running', stage: 'implement', attempts: 1 });
   });
+
+  // I-15: another command holds execution.lock; while this one waits for it (after its own read), that command writes
+  // the execution and lets go.
+  const meanwhile = (change: (e: ExecutionState) => ExecutionState): Io => {
+    writeFileSync(executionLock(root), JSON.stringify({ pid: process.pid, at: NOW.toISOString() }));
+    let done = false;
+    return { ...io, sleep: () => {
+      if (done) return;
+      done = true;
+      saveExecution(root, change(readExecution(root)!));
+      rmSync(executionLock(root));
+    } };
+  };
+  const onT1 = (c: Partial<ExecTask>) => (e: ExecutionState): ExecutionState => ({ ...e, tasks: { ...e.tasks, T1: { ...e.tasks.T1, ...c } } });
+  it('swarm task changes only the fields it sets, on the task as it is under the lock: a write since its read is kept (I-15)', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    out(run(['swarm', 'worktree', 'T1'], io));
+    out(run(['swarm', 'task', 'T1', '--stage', 'verdict', '--status', 'accepted'], io));
+    // A background integrate of T1 lands while `swarm task T1 --round 2` waits for the lock.
+    const integrated = { status: 'integrated', stage: 'integrate', finishedAt: '2026-10-12T12:01:00.000Z' } as const;
+    const next = out(run(['swarm', 'task', 'T1', '--round', '2'], meanwhile(onT1(integrated))));
+    expect(next).toMatchObject({ ...integrated, round: 2 });
+    expect(readExecution(root)!.tasks.T1).toMatchObject({ ...integrated, round: 2 });
+    expect(JSON.parse(readFileSync(executionTaskFile(root, 'T1'), 'utf8'))).toMatchObject({ status: 'integrated', stage: 'integrate', round: 2 });
+  });
+  it('swarm retry changes only the fields it sets, and revives the execution only while it is still stalled under the lock (I-15)', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    out(run(['swarm', 'worktree', 'T1'], io));
+    const stall = () => {
+      out(run(['swarm', 'task', 'T1', '--status', 'blocked'], io));
+      saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stalled', stallReason: 'T1 is blocked' });
+    };
+    stall();
+    // Another command raises the attempts and the round of T1 while `swarm retry T1` waits for the lock.
+    expect(run(['swarm', 'retry', 'T1'], meanwhile(onT1({ attempts: 2, round: 3 }))).code).toBe(0);
+    expect(readExecution(root)).toMatchObject({ active: true, stopReason: null });
+    expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'running', stage: 'implement', attempts: 3, round: 3, detail: null });
+    // The person stops the execution meanwhile: the task is retried, the stop is kept.
+    stall();
+    expect(run(['swarm', 'retry', 'T1'], meanwhile(e => ({ ...e, stopReason: 'stopped', stallReason: null }))).code).toBe(0);
+    expect(readExecution(root)).toMatchObject({ active: false, stopReason: 'stopped' });
+    expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'running', attempts: 4 });
+  });
+  it('swarm retry leaves alone a task that is no longer in conflict or blocked once it holds the lock (I-15)', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    out(run(['swarm', 'worktree', 'T1'], io));
+    out(run(['swarm', 'task', 'T1', '--status', 'blocked'], io));
+    const r = run(['swarm', 'retry', 'T1'], meanwhile(onT1({ status: 'running', agent: 'forge-impl' })));
+    expect(r).toMatchObject({ code: 2, stderr: 'swarm retry: T1 is not in conflict or blocked\n' });
+    expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'running', agent: 'forge-impl', attempts: 0 });
+    expect(existsSync(executionLock(root))).toBe(false);
+  });
   it('retry and retry --adopt refuse a closed execution and leave execution.json unchanged (C2)', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     out(run(['swarm', 'worktree', 'T1'], io));
@@ -513,6 +565,15 @@ describe('forge swarm (execution)', () => {
     const acts = out(run(['swarm', 'tick', '--plan', 'plan.yaml', '--db', 'db'], io)).actions;
     expect(acts.filter((a: { task?: string }) => a.task === 'T1')).toEqual([]);
     expect(readExecution(root)!.tasks.T1.status).toBe('running');
+  });
+  it('retry --adopt takes over the task as it is under the lock: a write since its read is kept (I-15)', () => {
+    sessionsRun();
+    out(run(['swarm', 'worktree', 'T1'], io));
+    saveExecution(root, onT1({ status: 'conflict', detail: 'merge conflict' })(readExecution(root)!));
+    const r = out(run(['swarm', 'retry', 'T1', '--adopt'], meanwhile(onT1({ round: 4, detail: 'merge conflict with task/T2' }))));
+    expect(r).toMatchObject({ task: 'T1', adopted: true, previous: 'sessions' });
+    expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'running', stage: 'implement', executor: 'subagents', attempts: 1, round: 4, detail: 'merge conflict with task/T2' });
+    expect(JSON.parse(readFileSync(executionTaskFile(root, 'T1'), 'utf8'))).toMatchObject({ round: 4, mode: 'subagents' });
   });
   it('retry --adopt refuses a subagents task, a task not in conflict and a missing branch', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
