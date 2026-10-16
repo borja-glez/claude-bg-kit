@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run as cli, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { readExecution, saveExecution } from '../src/forge/execution.js';
-import { readEvents } from '../src/forge/ledger.js';
+import { appendEvent, readEvents } from '../src/forge/ledger.js';
 import { swarmStep, stepSay } from '../src/forge/cli/step.js';
 
 // swarm start binds Claude's session id (C1): io.env is {} and the id comes as a flag.
@@ -719,5 +719,48 @@ describe('swarm step briefs a resumed task with its earlier attempt (D-02)', () 
     const again = stepWith(() => false);
     expect(again.calls.filter(a => isCmd(a, 'prep'))).toEqual([]);
     expect(again.actions.find(a => a.type === 'spawnImplementer' && a.task === 'T1')).toMatchObject({ base: g(root, 'rev-parse', 'forge/run-shop') });
+  });
+});
+
+describe('a run is the project of its plan (D-08)', () => {
+  it('swarm start and swarm step refuse a plan of another project, before anything moves', () => {
+    writeFileSync(path.join(root, 'web.yaml'), PLAN.replace('project: shop', 'project: web'));
+    const runId = readExecution(root)!.runId;
+    const start = run(['swarm', 'start', '--project', 'shop-v2', '--session', 'main', '--plan', 'plan.yaml'], io);
+    expect(start.code).toBe(2);
+    expect(start.stderr).toContain('the plan says project "shop" but the run is "shop-v2"');
+    expect(start.stderr).toContain('--project shop');
+    expect(g(root, 'branch', '--list', 'forge/run-shop-v2')).toBe('');
+    expect(readExecution(root)!.runId).toBe(runId);
+    // The plan of the run's own project resumes it as before.
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--plan', 'plan.yaml'], io)).runId).toBe(runId);
+    const s = run(['swarm', 'step', '--plan', 'web.yaml', '--db', 'db'], io);
+    expect(s.code).toBe(2);
+    expect(s.stderr).toContain('the plan says project "web" but the run is "shop"');
+    expect(s.stderr).toContain('--project web');
+    expect(existsSync(wt('T1'))).toBe(false);
+    expect(readExecution(root)!.tasks).toEqual({});
+    expect(readEvents(root).filter(e => e.kind === 'triage')).toEqual([]);
+  });
+  it("a step keeps apart the events of another plan's T1 in the same ledger: its round, its implementer and its BASE", () => {
+    const web = { project: 'web' };
+    const at = (min: number) => `2026-10-12T11:${String(min).padStart(2, '0')}:00.000Z`;
+    // The plan web ran its own T1 in this checkout before.
+    appendEvent(root, { ts: at(0), kind: 'triage', task: 'T1', path: 'large', ...web });
+    const t1 = step().actions.find(a => a.type === 'spawnImplementer' && a.task === 'T1')!;
+    expect(t1.role).not.toBe('mech');
+    // ...and goes on with it while shop's T1 runs: each of its events carries its project (C4).
+    appendEvent(root, { ts: at(1), kind: 'agent', task: 'T1-1', agent: 'forge-mech', role: 'mech', ...web });
+    appendEvent(root, { ts: at(2), kind: 'verdict', task: 'T1-1', dir: '.forge/work/web/T1/reviews-1-1', action: 'fix', score: 0.4, signature: 'v2:a', ...web });
+    appendEvent(root, { ts: at(3), kind: 'verdict', task: 'T1-1', dir: '.forge/work/web/T1/reviews-1-2', action: 'fix', score: 0.4, signature: 'v2:b', ...web });
+    appendEvent(root, { ts: at(4), kind: 'phase', task: 'T1', phase: 'implement', brief: 2, base: 'feedfacefeedfacefeedfacefeedfacefeedface', ...web });
+    commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
+    const review = step('--returned', 'T1').actions.find(a => a.task === 'T1')!;
+    expect(review).toMatchObject({ type: 'spawnReviewers', round: 1, base: t1.base });
+    const dir = path.join(root, '.forge', 'work', 'T1', 'reviews-1-1');
+    for (const e of (review.spawn as { role: string; twin?: boolean }[]).filter(e => !e.twin)) {
+      writeFileSync(path.join(dir, `${e.role.replace(/^review-/, '')}.json`), JSON.stringify({ verdict: 'fail', confidence: 0.9, findings: [{ severity: 'important', file: 'src/t1/a.ts', line: 1, problem: 'wrong' }] }));
+    }
+    expect(step().actions.find(a => a.task === 'T1')).toMatchObject({ type: 'resumeImplementer', implementer: { role: t1.role } });
   });
 });

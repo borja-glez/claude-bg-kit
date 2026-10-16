@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import path from 'node:path';
 import { UsageError } from './errors.js';
 import type { Io } from './run.js';
-import { commitInfo } from './swarm.js';
+import { checkPlanProject, commitInfo } from './swarm.js';
 import { readExecution, executionTaskFile, runWorktree, taskBase, writePublicTask } from '../execution.js';
 import { takeStepLock } from '../jobs.js';
 import { appendEvent, readEvents, type LedgerEvent } from '../ledger.js';
@@ -10,7 +10,7 @@ import { eventsOf, isTask, ofTask } from '../task-ref.js';
 import { reviewsOf } from '../loop.js';
 import { LEASE_MINUTES } from '../../lib/coordination.js';
 import { normalizePublicTask, type ExecTask, type ExecutionState, type PublicTask } from '../../lib/execution-state.js';
-import { isPlanId } from '../../lib/plan.js';
+import { isPlanId, parsePlan } from '../../lib/plan.js';
 
 // D-12: `FORGE swarm step`, one step of a plan execution in one process. It calls the CLI itself (deps.cli) for each
 // command, so every one of them behaves as when the skill runs it alone (its --cwd, its events, the lock).
@@ -685,6 +685,11 @@ export function swarmStep(rest: string[], io: Io, deps: StepDeps): Result {
   if (!e0) throw new UsageError('swarm step: no execution (forge swarm start)');
   if (!e0.active) throw new UsageError('swarm step: the execution is not active');
   if (e0.kind !== 'plan') throw new UsageError('swarm step: an ephemeral run steps with the single commands (references/ephemeral.md)');
+  // D-08: the plan must be of the run's project, or its tasks' events would be another project's: refused before anything
+  // runs. A plan that cannot be read is the tick's to report, as before.
+  let planProject: string | null = null;
+  try { planProject = parsePlan(readFileSync(path.resolve(io.cwd, planArg), 'utf8')).project; } catch { planProject = null; }
+  if (planProject !== null) checkPlanProject('step', planArg, planProject, e0.project);
   const locale: 'es' | 'en' = loc === 'es' || loc === 'en' ? loc : (e0.locale ?? '').toLowerCase().split(/[-_]/)[0] === 'es' ? 'es' : 'en';
   const now = io.now();
   const lock = takeStepLock(io.cwd, now, deps.alive);

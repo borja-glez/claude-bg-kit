@@ -34,6 +34,15 @@ describe('ledger', () => {
     expect(appendPhase(root, { ts: '5', kind: 'phase', task: 'A', phase: 'review', brief: 2, round: 1 })).toBe(false);
     expect(readEvents(root).map(e => `${e.phase}:${e.brief ?? '-'}`)).toEqual(['validate:1', 'validate:2', 'review:-']);
   });
+  it('appendPhase dedupes within the project the phase belongs to; an unsafe project counts as none, never as a new one (D-08)', () => {
+    appendEvent(root, { ts: '1', kind: 'triage', task: 'A', project: 'shop' });
+    expect(appendPhase(root, { ts: '2', kind: 'phase', task: 'A', phase: 'implement' })).toBe(true);
+    expect(appendPhase(root, { ts: '3', kind: 'phase', task: 'A', phase: 'implement', project: '../x' })).toBe(false);
+    expect(appendPhase(root, { ts: '4', kind: 'phase', task: 'A', phase: 'implement', project: 'shop' })).toBe(false);
+    expect(appendPhase(root, { ts: '5', kind: 'phase', task: 'A', phase: 'implement', project: 'web' })).toBe(true);
+    expect(appendPhase(root, { ts: '6', kind: 'phase', task: 'A', phase: 'implement', project: 'web' })).toBe(false);
+    expect(readEvents(root).filter(e => e.kind === 'phase').map(e => e.ts)).toEqual(['2', '5']);
+  });
   it('skips a half-written line and keeps appending after it', () => {
     appendEvent(root, { ts: 'a', kind: 'triage', task: 't1' });
     appendFileSync(path.join(root, '.forge', 'ledger.jsonl'), '{"ts":"b","kind":"pha');

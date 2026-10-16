@@ -231,6 +231,14 @@ function loadPlanArg(io: Io, planArg: string | undefined, sub: string) {
   }
 }
 
+/** D-08: a plan run's tasks are the pairs (its project, T), and its triages stamp the plan's `project`: a plan of another
+ *  project would log them under that one, and the run would find none of their events. The run's project counts: such a
+ *  plan is refused (exit 2), never followed. */
+export function checkPlanProject(sub: string, planArg: string, planProject: string, project: string): void {
+  if (planProject === project) return;
+  throw new UsageError(`swarm ${sub}: the plan says project "${planProject}" but the run is "${project}": fix the project of ${planArg} or start the run with --project ${planProject}`);
+}
+
 /** The loose tasks of an ephemeral run, from the JSON file `--tasks` names. */
 function loadTasksArg(io: Io, file: string | undefined, sub: string): LooseTask[] {
   if (!file) throw new UsageError(`swarm ${sub}: --tasks is required for an ephemeral run`);
@@ -968,6 +976,11 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       const project = flag('project');
       const session = flag('session');
       if (!project || !ID.test(project) || !session || !ID.test(session)) throw new UsageError('swarm start: --project and --session are required');
+      // D-08: --plan, the plan the run executes, must be of this project; checked before anything else is read or moves.
+      if (has('plan')) {
+        const plan = loadPlanArg(io, flag('plan'), 'start');
+        checkPlanProject('start', flag('plan')!, plan.project, project);
+      }
       // C1: Claude's id of the session that runs the start, checked before any branch or worktree moves. It becomes the
       // execution's hookSession, the one session its Stop hook steps (also on a resume, e.g. after a /clear).
       const hook = claudeSessionId(flag('hook-session'), io.env ?? process.env);
@@ -1448,6 +1461,6 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
     case 'merge':
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError('usage: forge swarm <start --project P --session SID --hook-session ID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F [--locale es|en]|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|step --plan P --db DIR [--agents F] [--returned T1,T2] [--versions F] [--locale es|en]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps] [--no-cache]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID [--db DIR]>');
+      throw new UsageError('usage: forge swarm <start --project P --session SID --hook-session ID [--plan P] [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F [--locale es|en]|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|step --plan P --db DIR [--agents F] [--returned T1,T2] [--versions F] [--locale es|en]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps] [--no-cache]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID [--db DIR]>');
   }
 }
