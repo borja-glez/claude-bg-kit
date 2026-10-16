@@ -89,6 +89,44 @@ describe('waypoint bind (A-01, B-04, K5-04)', () => {
     expect(outOf(bind('B', '--resume'))).toMatchObject({ took: 'previous', sid: 'main' });
     expect(json(wp('bound.json'))).toMatchObject({ claude: 'B', since: at(0), endedAt: null });
   });
+  /** An earlier conversation's binding of the extra seat `sid`, ended `min` minutes ago by /clear. */
+  const leftOn = (sid: string, claude: string, min: number) => {
+    mkdirSync(wp('seats', sid), { recursive: true });
+    writeFileSync(wp('seats', sid, 'bound.json'), JSON.stringify({ sid, claude, pid: null, via: 'work', since: at(-90), seenAt: at(-min), endedAt: at(-min), endReason: 'clear' }));
+  };
+  const startContext = (claude: string) => {
+    const r = run(['hook', 'session-start'], { ...io, stdin: JSON.stringify({ session_id: claude, source: 'startup' }) });
+    return r.stdout.trim() ? JSON.parse(r.stdout).hookSpecificOutput.additionalContext as string : '';
+  };
+  it('--resume takes the seat an earlier conversation left its task on, also a second seat next to a live one (I3)', () => {
+    holder();
+    leftOn('main-2', 'W', 30);
+    openTask('T003', 'main-2');
+    expect(outOf(bind('C', '--resume'))).toMatchObject({ took: 'previous', sid: 'main-2', seatDir: '.waypoint/demo-shop/seats/main-2', previous: { sid: 'main-2', claude: 'W', task: 'T003' } });
+    expect(json(wp('seats', 'main-2', 'bound.json'))).toMatchObject({ claude: 'C', endedAt: null });
+    expect(json(wp('bound.json')).claude).toBe('A');
+    expect(startContext('C')).toContain('Current task: T003');
+  });
+  it('exit 3 names a task another seat left, so the person can resume it there (I3)', () => {
+    holder();
+    leftOn('main-2', 'W', 30);
+    openTask('T003', 'main-2');
+    const r = bind('C');
+    expect(r.code).toBe(3);
+    expect(outOf(r)).toMatchObject({ held: { sid: 'main', claude: 'A' }, previous: { sid: 'main-2', claude: 'W', endedAt: at(-30), endReason: 'clear', task: 'T003' } });
+    expect(outOf(bind('C', '--seat', 'main-2', '--resume'))).toMatchObject({ took: 'previous', sid: 'main-2' });
+  });
+  it('a newer ended binding without a task does not hide an older one that has a task (I3)', () => {
+    leftOn('main-2', 'W', 60);
+    openTask('T003', 'main-2');
+    leftOn('main-3', 'X', 5);
+    expect(startContext('C')).toContain('T003');
+    expect(outOf(bind('C', '--resume'))).toMatchObject({ took: 'previous', sid: 'main-2' });
+  });
+  it('without a task left anywhere --resume binds as before', () => {
+    leftOn('main-3', 'X', 5);
+    expect(outOf(bind('C', '--resume'))).toMatchObject({ took: 'new', sid: 'main', seatDir: '.waypoint/demo-shop' });
+  });
   it('a lapsed lease without a task binds at once', () => {
     holder({ seenAt: at(-6) });
     expect(outOf(bind('B'))).toMatchObject({ took: 'previous', previous: { claude: 'A', task: null } });

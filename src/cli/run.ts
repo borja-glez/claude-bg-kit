@@ -23,7 +23,7 @@ import { roadmapCapabilities, sharingNotice, syncSummary } from '../lib/publish.
 import { claudeSessionId, noClaudeSession } from '../lib/claude-session.js';
 import { blockBatch, claimBatch, cleanText, doneBatch, freeBatch, heartbeatBatch, registerBatch, REASON_MAX, SUMMARY_MAX } from '../lib/batches.js';
 import { BOUND_VIAS, MAX_SEATS, isBoundVia, type BoundDoc } from '../lib/bound.js';
-import { boundFile, boundLive, checkoutSid, openTasksOf, pidFromEnv, readBinding, readSeats, recordBase, secondSeatOf, seatsDir, writeAtomic, writeBinding } from '../lib/bound-fs.js';
+import { boundFile, boundLive, checkoutSid, leftSeatOf, openTasksOf, pidFromEnv, readBinding, readSeats, recordBase, secondSeatOf, seatsDir, writeAtomic, writeBinding } from '../lib/bound-fs.js';
 import { isSafeId } from '../lib/execution-state.js';
 import { loadConfig } from '../forge/config.js';
 import type { Commit, MessageDoc, NoteDoc, PhaseDoc, PlanView, SessionDoc, TaskState } from '../lib/types.js';
@@ -421,8 +421,13 @@ export function run(argv: string[], io: Io): Result {
         const t = now.getTime();
         const open = openTasksOf(wp);
         const own = checkoutSid(wp, t);
+        const resume = args.includes('--resume');
+        const takeover = args.includes('--takeover');
+        // I3: a task an earlier conversation left on a seat; --resume without --seat takes that seat.
+        const left = leftSeatOf(readSeats(wp, t), open, t);
         let sid: string | null;
         if (seatFlag !== undefined) sid = seatFlag;
+        else if (resume && left) sid = left.sid;
         else if (second) sid = secondSeatOf(wp, claude, open, t);
         else sid = own ?? sessionIdFrom(track ?? 'main');
         if (sid === null) return fail(`bind: every extra seat (main-2 to main-${MAX_SEATS + 1}) is held by a live conversation`, 2);
@@ -430,14 +435,13 @@ export function run(argv: string[], io: Io): Result {
           const fix = seatFlag !== undefined ? 'pick another --seat' : own !== null ? `fix the sessionId of ${rel(path.join(wp, 'session.json'))}` : 'pick another --track';
           return fail(`bind: the seat id ${JSON.stringify(sid.slice(0, 130))} names a folder: only letters, digits, _ . - and no leading - (${fix})`, 2);
         }
-        const seatDir = second || (own !== null && own !== sid) ? path.join(seatsDir(wp), sid) : wp;
+        const seatDir = left && sid === left.sid ? left.dir : second || (own !== null && own !== sid) ? path.join(seatsDir(wp), sid) : wp;
         const cur = readBinding(seatDir, sid, t);
         const task = open[sid] ?? null;
         const options = ['worktree', 'second-seat', 'takeover'];
-        const held = (b: BoundDoc) => ({ held: { sid, claude: b.claude, via: b.via, seenAt: b.seenAt, task }, options, secondSeat: secondSeatOf(wp, claude, open, t) });
-        const prevOf = (b: BoundDoc) => ({ sid, claude: b.claude, endedAt: b.endedAt, endReason: b.endReason, seenAt: b.seenAt, task });
-        const resume = args.includes('--resume');
-        const takeover = args.includes('--takeover');
+        const prevOf = (b: BoundDoc) => ({ sid: b.sid, claude: b.claude, endedAt: b.endedAt, endReason: b.endReason, seenAt: b.seenAt, task: open[b.sid] ?? null });
+        // Exit 3 also names a task another seat left, so the person can resume it there (I3).
+        const held = (b: BoundDoc) => ({ held: { sid, claude: b.claude, via: b.via, seenAt: b.seenAt, task }, options, secondSeat: secondSeatOf(wp, claude, open, t), ...(left?.bound ? { previous: prevOf(left.bound) } : {}) });
         let took: 'new' | 'same' | 'takeover' | 'previous';
         if (!cur) took = 'new';
         else if (cur.claude === claude) took = 'same';

@@ -7,7 +7,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { BOUND_MAX_BYTES, MAX_SEATS, parseBound, type BoundDoc } from './bound.js';
 import { isSafeId } from './execution-state.js';
-import { bindingLive } from './viewer-role.js';
+import { bindingLive, PREVIOUS_OFFER_MS } from './viewer-role.js';
 import { pidAlive } from './pid.js';
 
 export { pidAlive };
@@ -118,6 +118,19 @@ export function secondSeatOf(wpDir: string, claude: string, open: Readonly<Recor
     if (!b || b.claude === claude || (!boundLive(b, now, alive) && !open[sid])) return sid;
   }
   return null;
+}
+
+/** I3: the seat an earlier conversation left with a task in progress (its binding not live, still offered for
+ *  PREVIOUS_OFFER_MS, and a task open), the newest by its end or last renewal; null without one. */
+export function leftSeatOf(seats: readonly Seat[], open: Readonly<Record<string, string>>, now: number, alive: (pid: number) => boolean = pidAlive): Seat | null {
+  let best: Seat | null = null;
+  let bestAt = -Infinity;
+  for (const s of seats) {
+    if (!s.bound || !open[s.sid] || boundLive(s.bound, now, alive)) continue;
+    const at = Date.parse(settleBinding(s.bound, now, alive).endedAt ?? s.bound.seenAt);
+    if (Number.isFinite(at) && at + PREVIOUS_OFFER_MS > now && at > bestAt) { best = s; bestAt = at; }
+  }
+  return best;
 }
 
 /** last-head.json: the base post-commit compares HEAD with, per conversation and worktree (A-17). */

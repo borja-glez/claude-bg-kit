@@ -1156,7 +1156,10 @@ describe('plugin layout', () => {
     const exec = runRef('execution');
     const lines = exec.split('\n');
     const step1 = lines.find(l => l.startsWith('1. **Start (once).**'))!;
-    expect(step1).not.toContain('AskUserQuestion');
+    // The start questions are never asked again; only the bind's seat question (I4) is asked here.
+    const seatQuestion = step1.slice(step1.indexOf('**Bind first**'), step1.indexOf('Run `FORGE swarm start'));
+    expect(seatQuestion).toContain('AskUserQuestion');
+    expect(step1.replace(seatQuestion, '')).not.toContain('AskUserQuestion');
     for (const w of ['launch.json', '/forge:run --execute <project>']) expect(step1).toContain(w);
     const integ = lines.find(l => l.trimStart().startsWith('- `integrate {task}`'))!;
     for (const w of ['run_in_background', '--out .forge/work/run/integrate-<T>.json']) expect(integ).toContain(w);
@@ -1249,6 +1252,17 @@ describe('plugin layout', () => {
     expect(runRef('execution')).toContain('bind <plan> --via forge-run --claude <CSID>');
     expect(read('plugins/forge/skills/member/SKILL.md')).toContain('bind <plan> --via forge-member --claude ${CLAUDE_SESSION_ID}');
     expect(read('plugins/forge/skills/infinite/SKILL.md')).toContain('bind <plan> --via forge-infinite --claude <CSID>');
+  });
+  it('the coordinator and the infinite run bind before they start, so a held seat never becomes the SID of a run (I4)', () => {
+    const ex = runRef('execution');
+    const bindAt = ex.indexOf('bind <plan> --via forge-run --claude <CSID>');
+    expect(bindAt).toBeGreaterThan(-1);
+    expect(bindAt).toBeLessThan(ex.indexOf('FORGE swarm start --project <project> --session <SID>'));
+    for (const w of ['--second-seat', '--takeover', 'AskUserQuestion']) expect(ex.slice(bindAt, ex.indexOf('FORGE swarm start --project <project>')), w).toContain(w);
+    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    const infBind = inf.indexOf('bind <plan> --via forge-infinite --claude <CSID>');
+    expect(infBind).toBeGreaterThan(-1);
+    expect(infBind).toBeLessThan(inf.indexOf('FORGE infinite start --cycles'));
   });
   it('READMEs describe wave 2a: seats and bindings, the roles, the new commands and SessionEnd', () => {
     for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) {

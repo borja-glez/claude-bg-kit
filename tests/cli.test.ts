@@ -544,6 +544,24 @@ describe('task batches from the CLI (A-14)', () => {
     expect(cached()).not.toHaveProperty('blockedBy');
     expect(cached()).not.toHaveProperty('blockedReason');
   });
+  it('a refused recovery claim: the cache says ours until state is listed again, and next then does not resume it (I2)', () => {
+    dbOf();
+    docsAt('db/state', { T001: { status: 'in_progress', owner: 'gone', zonesTouched: [] } });
+    docsAt('db/sessions', {
+      gone: { name: 'gone', heartbeatAt: '2026-10-11T08:00:00.000Z', status: 'active' },
+      be: { name: 'be', heartbeatAt: '2026-10-11T09:59:00.000Z', status: 'active' },
+      rival: { name: 'rival', heartbeatAt: '2026-10-11T09:59:00.000Z', status: 'active' },
+    });
+    expect(claim('--recovered-from', 'gone').code).toBe(0);
+    const next = () => JSON.parse(cli('next', 'plan.yaml', '--db', 'db', '--states', 'db/state', '--sessions', 'db/sessions', '--session', 'be', '--track', 'backend').stdout);
+    // The roadmap refuses the batch (version_mismatch: rival recovered T001 first), but the mirror already wrote it.
+    expect(next()).toMatchObject({ task: { id: 'T001' }, resumed: true });
+    // work §1.6: list state again, then step 7.
+    docsAt('db/state', { T001: { status: 'in_progress', owner: 'rival', zonesTouched: [], recoveredFrom: 'gone' } });
+    const n = next();
+    expect(n.resumed).toBe(false);
+    expect(n.task?.id).not.toBe('T001');
+  });
   it('heartbeat --register with an empty --claude takes the id from the environment, so another checkout is still refused', () => {
     const reg = (env: Record<string, string>, ...extra: string[]) => run(['heartbeat', '--register', '--session', 'be', '--name', 'backend', '--agent', 'work-1', '--branch', 'track/backend', '--worktree', '/repo/wt', '--claude', ...extra], { ...io, env });
     docsAt('db/sessions', {});

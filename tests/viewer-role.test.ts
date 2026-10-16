@@ -49,6 +49,12 @@ describe('describeViewer (C3, spec §4.2)', () => {
     expect(describeViewer(input({ sessionId: 'B', bound: bound({ endedAt: at(-60), endReason: 'clear' }) }))).toMatchObject({ role: 'previous', subject: 'binding', since: at(-60) });
     expect(describeViewer(input({ sessionId: 'B', bound: bound({ seenAt: at(-10) }) }))).toMatchObject({ role: 'previous', since: at(-10) });
   });
+  it('rule 7 prefers the newest binding left with a task over a newer one without, and falls back to the newest (I3)', () => {
+    const left = bound({ sid: 'main-2', claude: 'W', seenAt: at(-60), endedAt: at(-60), endReason: 'clear' });
+    const newer = bound({ sid: 'main-3', claude: 'X', seenAt: at(-5), endedAt: at(-5), endReason: 'clear' });
+    expect(describeViewer(input({ sessionId: 'C', bound: [left, newer], openTasks: { 'main-2': 'T003' } }))).toMatchObject({ role: 'previous', binding: left, since: at(-60), task: 'T003' });
+    expect(describeViewer(input({ sessionId: 'C', bound: [left, newer] }))).toMatchObject({ role: 'previous', binding: newer, task: null });
+  });
   it('rule 8: nothing else is none', () => {
     expect(describeViewer(input())).toEqual({ role: 'none', subject: null, binding: null, member: null, coordinator: false, since: null, task: null });
   });

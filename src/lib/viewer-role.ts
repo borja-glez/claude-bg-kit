@@ -47,7 +47,8 @@ const newest = (list: readonly BoundDoc[], at: (b: BoundDoc) => number): BoundDo
  * C3: what the session `sessionId` is to this roadmap and its execution, by the rules of spec §4.2, the first that
  * holds: 1 the coordinator of a visible execution, 2 a member of its run, 3 its own binding (ended or not: the same
  * conversation resumed), 4 an active execution of another session, 5 one that ended or whose coordinator's
- * conversation ended, 6 another live binding, 7 a binding that ended or lapsed within PREVIOUS_OFFER_MS, 8 none.
+ * conversation ended, 6 another live binding, 7 a binding that ended or lapsed within PREVIOUS_OFFER_MS (the newest
+ * with a task open, else the newest), 8 none.
  * Whether a `previous` binding has something to take up (a task, a draft) is for whoever draws it to say.
  */
 export function describeViewer(i: ViewerInput): Viewer {
@@ -74,7 +75,9 @@ export function describeViewer(i: ViewerInput): Viewer {
   const live = newest(others.filter(b => bindingLive(b, i.now)), b => time(b.seenAt));
   if (live) return { ...NONE, role: 'other-live', subject: 'binding', binding: live, since: live.seenAt, task: taskOf(live) };
   const offerAt = (b: BoundDoc) => time(b.endedAt ?? b.seenAt);
-  const prev = newest(others.filter(b => !bindingLive(b, i.now) && offerAt(b) + PREVIOUS_OFFER_MS > i.now), offerAt);
+  // I3: a binding left with a task in progress comes before a newer one with nothing open.
+  const offered = others.filter(b => !bindingLive(b, i.now) && offerAt(b) + PREVIOUS_OFFER_MS > i.now);
+  const prev = newest(offered.filter(b => taskOf(b) !== null), offerAt) ?? newest(offered, offerAt);
   if (prev) return { ...NONE, role: 'previous', subject: 'binding', binding: prev, since: prev.endedAt ?? prev.seenAt, task: taskOf(prev) };
   return NONE;
 }
