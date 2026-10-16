@@ -45,11 +45,11 @@ export function appendEvent(root: string, event: LedgerEvent): void {
   updateStatus(root, event);
 }
 
-/** Appends a phase event unless the task's last phase event already names that phase (C4: a stage is logged once,
- *  whether review-prep or `swarm task` logs it first). Returns whether it appended. */
+/** Appends a phase event unless the task's last phase event already names that phase for the same brief (C4: a stage
+ *  is logged once, whether review-prep or `swarm task`, which names no brief, logs it first). Returns whether it appended. */
 export function appendPhase(root: string, event: LedgerEvent & { task: string; phase: string }): boolean {
   const last = readEvents(root).filter(e => e.kind === 'phase' && e.task === event.task).at(-1);
-  if (last && last.phase === event.phase) return false;
+  if (last && last.phase === event.phase && (last.brief === undefined || event.brief === undefined || last.brief === event.brief)) return false;
   appendEvent(root, event);
   return true;
 }

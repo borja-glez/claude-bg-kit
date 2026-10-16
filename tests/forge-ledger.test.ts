@@ -26,6 +26,14 @@ describe('ledger', () => {
     expect(appendPhase(root, { ts: '5', kind: 'phase', task: 'A', phase: 'validate', brief: 1, round: 2 })).toBe(true);
     expect(readEvents(root).map(e => `${e.task}:${e.phase}`)).toEqual(['A:validate', 'B:validate', 'A:review', 'A:validate']);
   });
+  it("appendPhase logs another brief's same phase; a phase without a brief (swarm task) still counts as the same", () => {
+    expect(appendPhase(root, { ts: '1', kind: 'phase', task: 'A', phase: 'validate', brief: 1, round: 1 })).toBe(true);
+    expect(appendPhase(root, { ts: '2', kind: 'phase', task: 'A', phase: 'validate', brief: 2, round: 1 })).toBe(true);
+    expect(appendPhase(root, { ts: '3', kind: 'phase', task: 'A', phase: 'validate' })).toBe(false);
+    expect(appendPhase(root, { ts: '4', kind: 'phase', task: 'A', phase: 'review' })).toBe(true);
+    expect(appendPhase(root, { ts: '5', kind: 'phase', task: 'A', phase: 'review', brief: 2, round: 1 })).toBe(false);
+    expect(readEvents(root).map(e => `${e.phase}:${e.brief ?? '-'}`)).toEqual(['validate:1', 'validate:2', 'review:-']);
+  });
   it('skips a half-written line and keeps appending after it', () => {
     appendEvent(root, { ts: 'a', kind: 'triage', task: 't1' });
     appendFileSync(path.join(root, '.forge', 'ledger.jsonl'), '{"ts":"b","kind":"pha');
