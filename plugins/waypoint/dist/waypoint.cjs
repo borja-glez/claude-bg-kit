@@ -13910,7 +13910,9 @@ var Schema = external_exports.object({
     cmd: external_exports.string().min(1),
     kind: external_exports.string().regex(NAME).optional(),
     affects: external_exports.array(external_exports.string().min(1)).optional(),
-    when: external_exports.enum(["always", "medium", "final"]).optional()
+    when: external_exports.enum(["always", "medium", "final"]).optional(),
+    cache: external_exports.boolean().optional(),
+    affected_cmd: external_exports.string().min(1).max(500).refine((s) => /\{(files|tests|packages)\}/.test(s), { message: "must contain {files}, {tests} or {packages}" }).optional()
   }).strict()).optional(),
   verify: external_exports.object({
     limits: external_exports.object({
@@ -13921,6 +13923,11 @@ var Schema = external_exports.object({
   }).strict().default({}),
   evidence: external_exports.enum(["upload", "local"]).default("upload"),
   validatorTimeoutSec: external_exports.number().int().positive().max(7200).default(600),
+  validate: external_exports.object({
+    cache: external_exports.boolean().default(true),
+    parallel: external_exports.number().int().min(1).max(8).default(3),
+    retry: external_exports.enum(["flaky", "always", "never"]).default("flaky")
+  }).strict().default({ cache: true, parallel: 3, retry: "flaky" }),
   tdd: external_exports.enum(["off", "superpowers"]).default("off"),
   workflow: external_exports.enum(WORKFLOWS).optional(),
   autonomy: external_exports.enum(AUTONOMIES).optional(),
@@ -13943,6 +13950,7 @@ var DEFAULTS = {
   verify: { limits: { checks: 8, shots: 10, minutes: 10 } },
   evidence: "upload",
   validatorTimeoutSec: 600,
+  validate: { cache: true, parallel: 3, retry: "flaky" },
   swarm: { parallel: 3, launcher: "bg", member: { effort: "medium" } },
   tdd: "off",
   generated: []
