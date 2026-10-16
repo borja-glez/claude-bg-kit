@@ -294,15 +294,15 @@ const FILES: Record<string, string> = {
 // The host hands the hooks absolute paths in the platform's own form (E:\repo\... on Windows); compare them as /repo/...
 const norm = (path: string) => path.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '');
 
-// The conversation looking at the band is `id()` ($.session.id()); what the plugin writes lands in `files`, and its
-// path in `written`. $.session.root() answers `root()`, and refuses while it is null.
-function serveFiles(on: On, files: Record<string, string> = { ...FILES }, listed: string[] = [], id: () => string = () => SESSION_ID, written: string[] = [], root: () => string | null = () => ROOT) {
+// The conversation looking at the band is `id()` ($.session.id(), which may answer later); what the plugin writes lands
+// in `files`, and its path in `written`. $.session.root() answers `root()`, and refuses while it is null.
+function serveFiles(on: On, files: Record<string, string> = { ...FILES }, listed: string[] = [], id: () => string | Promise<string> = () => SESSION_ID, written: string[] = [], root: () => string | null = () => ROOT) {
   const entry = (name: string, kind: 'file' | 'dir') => ({ name, kind, size: 0, mtimeMs: 1, isLink: false });
   on('session.root', () => {
     const value = root();
     return value === null ? { deny: 'no root' } : { value };
   });
-  on('session.id', () => ({ value: id() }));
+  on('session.id', async () => ({ value: await id() }));
   on('fs.write', (_$, e) => { written.push(norm(e.path)); files[norm(e.path)] = e.text; return { value: undefined }; });
   on('fs.read', (_$, e) => {
     const text = files[norm(e.path)];
@@ -674,6 +674,45 @@ test('a conversation that starts in a process whose timer an end stopped gets on
   before = docsListed();
   await clock.advance(30000);
   expect(docsListed() - before).toBe(1);
+});
+
+test('a /clear while a refresh still runs with the old id gets one more refresh after it, with the new conversation (K5-07)', async ($, on) => {
+  engineBottom(on);
+  const files = { ...FILES };
+  let id = SESSION_ID;
+  // While `held`, $.session.id() answers the id of the moment it was asked, once released; `asked` says it was.
+  let held: Promise<void> | null = null;
+  let release = () => {};
+  let asked = () => {};
+  serveFiles(on, files, [], () => {
+    const then = id;
+    if (!held) return then;
+    asked();
+    return held.then(() => then);
+  });
+  const clock = mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  on('turn.complete', () => ({ text: '' }));
+  on('classic.SessionStart', () => ({}));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  expect(await ui.find({ key: 'next-task' })).toBeDefined();
+  held = new Promise(r => { release = r; });
+  const askedOnce = new Promise<void>(r => { asked = r; });
+  // A turn's refresh asks the id, gets conv-1 and waits; meanwhile SessionEnd closes the binding and /clear starts conv-2.
+  const turn = $.turn.complete({ answer: '', durationMs: 1, isAborted: false, reason: 'answer', turnId: 't1' });
+  await askedOnce;
+  held = null;
+  files[`${ROOT}/.waypoint/demo/bound.json`] = BOUND({ endedAt: '2026-10-11T10:05:00.000Z', endReason: 'clear' });
+  id = 'conv-2';
+  await $.classic.SessionStart({ source: 'clear' });
+  release();
+  await turn;
+  await clock.advance(1);
+  await ui.redraw();
+  expect(await ui.find({ key: 'resume' })).toBeDefined();
+  expect(await ui.find({ key: 'next-task' })).toBeUndefined();
+  await ui.unmount();
 });
 
 test('a band hidden with × before /clear does not hide what the next conversation is offered (Review Focus 4)', async ($, on) => {

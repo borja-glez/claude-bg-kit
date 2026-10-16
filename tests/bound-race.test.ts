@@ -6,11 +6,12 @@ import { run, type Io } from '../src/cli/run.js';
 import { checkoutSid, readBinding } from '../src/lib/bound-fs.js';
 import type { BoundDoc } from '../src/lib/bound.js';
 
-const race = vi.hoisted(() => ({ rival: null as string | null, failRenames: 0, boundReads: 0, emptyAt: [] as number[] }));
+const race = vi.hoisted(() => ({ rival: null as string | null, failRenames: 0, boundReads: 0, torn: false }));
 
 // Windows refuses a rename onto a file that another process renames at that same instant (EPERM). The reads of a
-// bound.json are counted from 0, and those in `emptyAt` find it empty, as the band's $.fs.write (not atomic) can leave
-// it for an instant.
+// bound.json are counted from 1; with `torn`, every even-numbered one finds it empty, as the band's $.fs.write (not
+// atomic) can leave it for an instant. A reader that reads again once gets the whole text whatever the order of the
+// reads: after the first, every reader finds the file empty first.
 vi.mock('node:fs', async importOriginal => {
   const real = await importOriginal<typeof import('node:fs')>();
   return {
@@ -24,7 +25,8 @@ vi.mock('node:fs', async importOriginal => {
     },
     readFileSync: ((file: Parameters<typeof real.readFileSync>[0], options?: Parameters<typeof real.readFileSync>[1]) => {
       if (String(file).endsWith('bound.json')) {
-        if (race.emptyAt.includes(race.boundReads++)) return '';
+        race.boundReads++;
+        if (race.torn && race.boundReads % 2 === 0) return '';
       }
       return real.readFileSync(file, options);
     }) as typeof real.readFileSync,
@@ -56,7 +58,7 @@ beforeEach(() => {
   race.rival = null;
   race.failRenames = 0;
   race.boundReads = 0;
-  race.emptyAt = [];
+  race.torn = false;
   dir = mkdtempSync(path.join(tmpdir(), 'wp-bind-race-'));
   mkdirSync(path.join(dir, 'docs', 'waypoint', 'demo-shop'), { recursive: true });
   copyFileSync(new URL('./fixtures/plan.yaml', import.meta.url), path.join(dir, PLAN));
@@ -111,18 +113,20 @@ describe('a binding caught while the band writes it (spec §4.10)', () => {
   };
   it('a reader that finds bound.json empty reads it once more and gets the binding', () => {
     seat(JSON.stringify(live));
-    race.emptyAt = [0, 2];
+    race.torn = true;
     expect(readBinding(wp(), 'main', NOW)).toEqual(live);
-    expect(race.boundReads).toBe(2);
+    expect(race.boundReads).toBe(1);
+    expect(readBinding(wp(), 'main', NOW)).toEqual(live);
+    expect(race.boundReads).toBe(3);
     expect(checkoutSid(wp(), NOW)).toBe('main');
-    expect(race.boundReads).toBe(4);
+    expect(race.boundReads).toBe(5);
   });
-  it('waypoint bind does not take a live seat as a new one when the read it decides on finds it empty', () => {
+  it('waypoint bind does not take a live seat as a new one when its reads find bound.json empty first', () => {
     seat(JSON.stringify(live));
     writeFileSync(wp('session.json'), JSON.stringify({ sessionId: 'main' }));
-    // Read 0 lists the seats; read 1 is the seat's binding just before bind writes its own.
-    race.emptyAt = [1];
+    race.torn = true;
     const r = bind('B');
+    race.torn = false;
     expect(r.code).toBe(3);
     expect(JSON.parse(r.stdout).held).toMatchObject({ sid: 'main', claude: 'A' });
     expect(json(wp('bound.json')).claude).toBe('A');

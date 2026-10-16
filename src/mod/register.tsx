@@ -36,15 +36,24 @@ async function dismissNotice($: Engine, n: NoticeBand): Promise<void> {
   } catch { /* hidden for this process only */ }
 }
 
+// A refresh asked while one runs is not dropped: what the running one read may be the old conversation's (a /clear
+// meanwhile), so it reads once more when it ends ($.session.id() is asked again each time).
+let refreshPending = false;
+
 async function refresh($: Engine): Promise<void> {
-  if (refreshing) return;
+  if (refreshing) { refreshPending = true; return; }
   refreshing = true;
   try {
-    const model = await loadBandModel($);
-    const current = await read($, band);
-    if (JSON.stringify(current) !== JSON.stringify(model)) await update($, band, () => model);
-  } catch {
-    // leave the band as it was
+    do {
+      refreshPending = false;
+      try {
+        const model = await loadBandModel($);
+        const current = await read($, band);
+        if (JSON.stringify(current) !== JSON.stringify(model)) await update($, band, () => model);
+      } catch {
+        // leave the band as it was
+      }
+    } while (refreshPending);
   } finally {
     refreshing = false;
   }

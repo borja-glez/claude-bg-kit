@@ -24,6 +24,11 @@ describe('notice dismissals (K5-08)', () => {
     expect(dismissalUntil({ kind: 'other-live', since: at(-2) }, NOW)).toBe(at(24));
     expect(dismissalUntil({ kind: 'previous', since: null }, NOW)).toBe(at(24));
   });
+  it('a previous notice whose offer already ended (a run that has not moved for over a day) stays dismissed a day from now', () => {
+    expect(dismissalUntil({ kind: 'previous', since: at(-30) }, NOW)).toBe(at(24));
+    expect(dismissalUntil({ kind: 'previous', since: at(-24) }, NOW)).toBe(at(24));
+    expect(dismissalUntil({ kind: 'previous', since: 'not a date' }, NOW)).toBe(at(24));
+  });
   it('the stored map keeps only strings to dates still ahead; anything else is no dismissal (Review Focus 5)', () => {
     expect(normalizeDismissals({ a: at(1), b: at(-1), c: 'tomorrow', d: 3 }, NOW)).toEqual({ a: at(1) });
     for (const junk of [null, undefined, 'x', ['a'], 42]) expect(normalizeDismissals(junk, NOW)).toEqual({});

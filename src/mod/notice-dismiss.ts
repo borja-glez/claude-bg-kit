@@ -27,10 +27,14 @@ export function normalizeDismissals(x: unknown, now: number): Dismissals {
   }));
 }
 
-/** Until when a notice stays dismissed: the end of its offer for a previous one, a day from now for another live one. */
+/**
+ * Until when a notice stays dismissed: the end of its offer for a previous one, a day from now for another live one. A
+ * previous notice whose offer already ended (a run whose coordinator left, last moved over a day ago) also gets a day
+ * from now, so the × never stores a date already past.
+ */
 export function dismissalUntil(n: { kind: NoticeKind; since: string | null }, now: number): string {
-  const since = n.since ? Date.parse(n.since) : NaN;
-  return new Date(n.kind === 'previous' && Number.isFinite(since) ? since + PREVIOUS_OFFER_MS : now + OTHER_LIVE_DISMISS_MS).toISOString();
+  const offerEnds = (n.since ? Date.parse(n.since) : NaN) + PREVIOUS_OFFER_MS;
+  return new Date(n.kind === 'previous' && Number.isFinite(offerEnds) && offerEnds > now ? offerEnds : now + OTHER_LIVE_DISMISS_MS).toISOString();
 }
 
 /** The map with `key` dismissed until `until`: what expired is dropped, the key moves to the end, the newest DISMISS_MAX stay. */
