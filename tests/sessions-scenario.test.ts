@@ -71,8 +71,8 @@ function diskEngine(root: string, id: string, at: number): Engine {
   } as unknown as Engine;
 }
 
-describe("the band of each conversation follows its role (spec §1, criteria 1 and 2; I-07)", () => {
-  it('A sees its work band, B a notice, C after /clear the offer for 24 hours, and its own band once it takes it up', async () => {
+/** A temporary repository with the demo plan, the CLI and the hooks over it, and the band as each conversation sees it. */
+function scenario() {
     const dir = mkdtempSync(path.join(tmpdir(), 'wp-scenario-band-'));
     const git = (...a: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], { cwd: dir, encoding: 'utf8' }).trim();
     const PLAN = 'docs/waypoint/demo-shop/plan.yaml';
@@ -86,6 +86,14 @@ describe("the band of each conversation follows its role (spec §1, criteria 1 a
     const bind = (claude: string, ...flags: string[]) => run(['bind', PLAN, '--via', 'work', '--claude', claude, ...flags], io());
     /** The band as the mod draws it for the conversation `id`, from the checkout's real files. */
     const band = (id: string, at = now) => loadBandModel(diskEngine(dir, id, at));
+    return { PLAN, io, hook, wp, bind, band, advance: (ms: number) => { now += ms; }, at: () => now };
+}
+
+const HOUR = 3600_000;
+
+describe("the band of each conversation follows its role (spec §1, criteria 1 and 2; I-07)", () => {
+  it('A sees its work band, B a notice, C after /clear the offer for 24 hours, and its own band once it takes it up', async () => {
+    const { hook, wp, bind, band, advance, at } = scenario();
 
     // A binds the checkout seat and works T002: its work band, with Next task.
     expect(JSON.parse(bind('A').stdout)).toMatchObject({ took: 'new', sid: 'main' });
@@ -94,18 +102,47 @@ describe("the band of each conversation follows its role (spec §1, criteria 1 a
     expect(await band('A')).toMatchObject({ mode: 'work', sid: 'main', current: { id: 'T002' }, viewer: { role: 'owner', coordinator: false, runId: null } });
 
     // B opens next to it: a dim notice of who works what, never the work band (criterion 1).
-    now += 60_000;
+    advance(60_000);
     expect(await band('B')).toMatchObject({ mode: 'notice', kind: 'other-live', subject: 'task', seat: 'main', task: 'T002', key: 'task:T002', viewer: { role: 'other-live' } });
 
-    // A runs /clear: C is offered T002 for 24 hours and takes nothing by itself (criterion 2).
-    hook('session-end', { session_id: 'A', reason: 'clear' });
+    // A runs /clear: the hook answers nothing, and C is offered T002 for 24 hours without taking anything (criterion 2).
+    const ended = at();
+    const out = hook('session-end', { session_id: 'A', reason: 'clear' });
+    expect(out.stdout).toBe('');
+    expect(out.code).toBe(0);
     expect(await band('C')).toMatchObject({ mode: 'notice', kind: 'previous', subject: 'task', task: 'T002', title: 'API de pedidos', viewer: { role: 'previous' } });
-    expect(await band('C', now + 25 * 3600_000)).toMatchObject({ mode: 'none', viewer: { role: 'none' } });
     expect(JSON.parse(readFileSync(wp('bound.json'), 'utf8')).claude).toBe('A');
+
+    // Both sides of the 24 hours: the offer holds while now < end + 24 h (a strict bound) and is gone at the edge.
+    expect(await band('C', ended + 24 * HOUR - 1000)).toMatchObject({ mode: 'notice', kind: 'previous', task: 'T002' });
+    expect(await band('C', ended + 24 * HOUR - 1)).toMatchObject({ mode: 'notice', kind: 'previous', task: 'T002' });
+    expect(await band('C', ended + 24 * HOUR)).toMatchObject({ mode: 'none', viewer: { role: 'none' } });
+    expect(await band('C', ended + 24 * HOUR + 1)).toMatchObject({ mode: 'none', viewer: { role: 'none' } });
 
     // C takes it up ([Retomar] is /waypoint:work resume, which binds with --resume): the band is now C's.
     expect(JSON.parse(bind('C', '--resume').stdout)).toMatchObject({ took: 'previous', sid: 'main' });
     expect(await band('C')).toMatchObject({ mode: 'work', current: { id: 'T002' }, viewer: { role: 'owner' } });
     expect(await band('A')).toMatchObject({ mode: 'notice', kind: 'other-live' });
+  });
+
+  it("C's offer carries what [Retomar] and [Liberar T002] send, and releasing makes the offer go away and frees the task", async () => {
+    const { PLAN, io, hook, wp, bind, band, advance } = scenario();
+    expect(JSON.parse(bind('A').stdout)).toMatchObject({ took: 'new', sid: 'main' });
+    mkdirSync(wp('dbcache', 'state'), { recursive: true });
+    writeFileSync(wp('dbcache', 'state', 'T002.json'), JSON.stringify({ status: 'in_progress', owner: 'main' }));
+    advance(60_000);
+    hook('session-end', { session_id: 'A', reason: 'clear' });
+
+    // The notice names the task the two buttons act on. Their labels and commands (Retomar → /waypoint:work resume,
+    // Liberar T002 → /waypoint:work release T002) are drawn from it by the mod and checked in plugins/waypoint/tests/band.test.ts.
+    expect(await band('C')).toMatchObject({ mode: 'notice', kind: 'previous', subject: 'task', task: 'T002' });
+
+    // [Liberar T002] is the skill's §7: `release --seat <SID> --free <T> --state-version <V>`, then its batch is applied to the cache.
+    const rel = run(['release', PLAN, '--seat', 'main', '--claude', 'C', '--free', 'T002', '--state-version', '1'], io());
+    expect(rel.code).toBe(0);
+    expect(JSON.parse(rel.stdout)).toMatchObject({ sid: 'main', batch: [{ op: 'update', collection: 'state', doc_id: 'T002' }] });
+    expect(JSON.parse(readFileSync(wp('dbcache', 'state', 'T002.json'), 'utf8'))).toMatchObject({ status: 'free' });
+    expect(JSON.parse(readFileSync(wp('dbcache', 'state', 'T002.json'), 'utf8')).owner).toBeUndefined();
+    expect(await band('C')).toMatchObject({ mode: 'none' });
   });
 });
