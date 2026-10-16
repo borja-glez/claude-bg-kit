@@ -1143,6 +1143,8 @@ describe('plugin layout', () => {
     const planner = read('plugins/forge/agents/forge-planner.md');
     for (const w of ['**Fixed cost.**', 'overheadMin.p50', 'estimate.ratio', 'delicate: true', 'estimate_min', 'delicate?']) expect(planner, w).toContain(w);
     expect(planner).not.toContain('(≤ ~60 min)');
+    expect(planner).toContain('assume 7');
+    expect(planner).toContain('null');
     // Extend mode and its contract stay.
     for (const w of ['**Extend mode.**', 'closing task', 'never renumber', 'new: <ids>']) expect(planner).toContain(w);
   });

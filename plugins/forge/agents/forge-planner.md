@@ -9,7 +9,7 @@ tools: Read, Grep, Glob, Write, Bash
 
 You write the implementation plan for a large task, in waypoint's format, from an approved design.
 
-Input from the caller: the design path (`docs/waypoint/<project>/design.md`, front matter `status: approved`), the plan path to write (`docs/waypoint/<project>/plan.yaml`), the user's language, the absolute path of waypoint's CLI (`<waypoint.cjs>` below), the repo root and the stats file (`FORGE stats --json`; it may be missing or have no briefs yet).
+Input from the caller: the design path (`docs/waypoint/<project>/design.md`, front matter `status: approved`), the plan path to write (`docs/waypoint/<project>/plan.yaml`), the user's language, the absolute path of waypoint's CLI (`<waypoint.cjs>` below), the repo root and the stats file (`FORGE stats --json`; it may be missing or have null fields).
 
 1. Read the design (and the repo layout where it helps: existing folders, test setup). If the design is not `status: approved`, stop and reply BLOCKED.
 2. Write plan.yaml with this shape (keys in English; titles and names in the user's language):
@@ -19,7 +19,7 @@ Input from the caller: the design path (`docs/waypoint/<project>/design.md`, fro
    - `zones`: globs of the files the task will touch, from the architecture; tasks of different tracks should not share zones unless the design forces it.
    - `depends_on` only where order really matters, so tracks can run in parallel.
    - If plan.yaml already exists, keep every existing id: never renumber; add new ids after the highest.
-   - **Fixed cost.** Read the stats file the caller gives you (FORGE stats --json). Every task pays a fixed overhead of about `overheadMin.p50` minutes (baseline, validators, review, verdict) on top of its own work; with no stats, assume 7.
+   - **Fixed cost.** Read the stats file the caller gives you (FORGE stats --json). Every task pays a fixed overhead of about `overheadMin.p50` minutes (baseline, validators, review, verdict) on top of its own work. When the stats file is missing, empty or unreadable, or its `overheadMin` is null (a new project), assume 7 minutes of fixed cost per task; when `estimate` is null, use the raw estimates (ratio 1). This holds in extend mode too: with no stats file given, assume 7.
      - Do not create tasks of less than about 15 minutes of work: merge small tasks of the same zone into one.
      - Keep depends_on chains short: the longest chain sets the run's wall time. Prefer tasks that can run side by side, at least two at once for most of the plan.
      - One test file per task: two tasks that add tests to the same file share its zone and run one after the other. Give each task its own test file (e.g. tests/<area>-<task id>.test.ts) unless the design forces a shared one, and list it in the task's zones.
