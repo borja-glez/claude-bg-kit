@@ -6,6 +6,8 @@ import { forgeDir } from './ledger.js';
 import { mainCheckout } from './local.js';
 import { memberForHook } from './members.js';
 import { parseRun, readRunText } from './run.js';
+import { endRoute } from './route.js';
+import { endReasonOf } from '../lib/bound.js';
 import { planLocale, sessionReply } from '../lib/locale.js';
 import type { Io } from './cli/run.js';
 
@@ -34,12 +36,18 @@ export function nextLive(prev: LiveDoc | null, ev: { event: LiveEvent; agentId?:
  */
 export function hookLive(io: Io, forced?: LiveEvent): string {
   try {
-    const input = JSON.parse(io.stdin ?? '') as { session_id?: unknown; hook_event_name?: unknown; agent_id?: unknown; agent_type?: unknown };
+    const input = JSON.parse(io.stdin ?? '') as { session_id?: unknown; hook_event_name?: unknown; agent_id?: unknown; agent_type?: unknown; reason?: unknown };
     const sessionId = typeof input.session_id === 'string' && SAFE.test(input.session_id) ? input.session_id : null;
     const named = (EVENTS as readonly unknown[]).includes(input.hook_event_name) ? input.hook_event_name as LiveEvent : null;
     const event = forced ?? named;
     if (!sessionId || !event) return '';
     const main = mainCheckout(io.cwd);
+    // K1-13: this session's route records how its conversation ended, whatever forge does with an execution. A route it
+    // cannot write never costs the coordinator's or a member's signal below.
+    if (event === 'SessionEnd' && !forced) {
+      const reason = endReasonOf(input.reason);
+      try { endRoute(main, sessionId, reason === 'released' ? 'other' : reason, io.now().toISOString()); } catch { /* the route is a reminder */ }
+    }
     const exec = readExecution(main);
     if (!exec?.active) return '';
     // The execution is bound when it starts (C1): an agent start never binds it. A registered member of this run is

@@ -1,9 +1,10 @@
-// forge:route's choices (spec §5.3): the options for a coding request and the recommended one, and .forge/route.json,
+// forge:route's choices (spec §5.3): the options for a coding request and the recommended one, and .forge/route/<session>.json,
 // the route a session chose while superpowers designs or plans and forge builds (the prompt hook reminds it).
-import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { forgeDir } from './ledger.js';
 import { TASK_ID } from '../lib/decisions.js';
+import { isSafeId } from '../lib/execution-state.js';
 import type { PathName } from './triage.js';
 import type { Prefs } from './prefs.js';
 import type { SpPlanEntry, SpSpec } from './superpowers.js';
@@ -74,13 +75,28 @@ export function routeAsk(r: Pick<RouteOutput, 'options' | 'recommended'>, locale
   };
 }
 
-/** `session`: Claude's id of the session that chose the route; only that session is reminded of it. */
-export interface RouteDoc { task: string; chosen: RouteOption; by: 'user' | 'auto'; stage: RouteStage; ts: string; spec?: string; plan?: string; session?: string }
-export const routeFile = (root: string) => path.join(root, '.forge', 'route.json');
+/** K1-13: how the conversation that chose a route ended (its SessionEnd `reason`). */
+export const ROUTE_END_REASONS = ['clear', 'resume', 'logout', 'prompt_input_exit', 'other'] as const;
+export type RouteEndReason = (typeof ROUTE_END_REASONS)[number];
+
+/**
+ * `session`: Claude's id of the session that chose the route; its file is .forge/route/<session>.json and only that
+ * session is reminded of it (K1-04). `endedAt`/`endReason`: when and how that conversation ended (forge's live hook).
+ */
+export interface RouteDoc {
+  task: string; chosen: RouteOption; by: 'user' | 'auto'; stage: RouteStage; ts: string; spec?: string; plan?: string; session?: string;
+  endedAt?: string; endReason?: RouteEndReason;
+}
+/** K1-04: each session's route, in the main checkout. */
+export const routeDir = (root: string) => path.join(root, '.forge', 'route');
+export const routeFile = (root: string, session: string) => path.join(routeDir(root), `${session}.json`);
+/** The single route file of forge 0.19: read only by the session it names, then moved to its own file (K1-05). */
+export const legacyRouteFile = (root: string) => path.join(root, '.forge', 'route.json');
 // A path that reaches the model's context through the reminder: no control characters, quotes or angle brackets.
 const SAFE_PATH = /^[A-Za-z0-9_./\\: -]{1,300}$/;
 export const isRoutePath = (s: unknown): s is string => typeof s === 'string' && SAFE_PATH.test(s);
-export const isRouteSession = (s: unknown): s is string => typeof s === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(s);
+/** A session id that names a route file: C1's rule. */
+export const isRouteSession = (s: unknown): s is string => isSafeId(s);
 
 export function normalizeRoute(x: unknown): RouteDoc | null {
   if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
@@ -94,18 +110,56 @@ export function normalizeRoute(x: unknown): RouteDoc | null {
   return {
     task, chosen, by, stage, ts, ...(isRoutePath(o.spec) ? { spec: o.spec } : {}), ...(isRoutePath(o.plan) ? { plan: o.plan } : {}),
     ...(isRouteSession(o.session) ? { session: o.session } : {}),
+    ...(typeof o.endedAt === 'string' && Number.isFinite(Date.parse(o.endedAt)) ? { endedAt: o.endedAt } : {}),
+    ...((ROUTE_END_REASONS as readonly unknown[]).includes(o.endReason) ? { endReason: o.endReason as RouteEndReason } : {}),
   };
 }
 
-export function readRoute(root: string): RouteDoc | null {
-  try { return normalizeRoute(JSON.parse(readFileSync(routeFile(root), 'utf8'))); } catch { return null; }
+/**
+ * This session's route (K1-04): its own file; else an older .forge/route.json that names this session, which moves to
+ * that file (K1-05: one without a session counts for nobody). Null without a safe session id.
+ */
+export function readRoute(root: string, session: string | null | undefined): RouteDoc | null {
+  if (!isRouteSession(session)) return null;
+  try {
+    const doc = normalizeRoute(JSON.parse(readFileSync(routeFile(root, session), 'utf8')));
+    if (doc?.session === session) return doc;
+  } catch { /* none yet, or corrupt */ }
+  try {
+    const old = normalizeRoute(JSON.parse(readFileSync(legacyRouteFile(root), 'utf8')));
+    if (old?.session !== session) return null;
+    writeRoute(root, old);
+    rmSync(legacyRouteFile(root), { force: true });
+    return old;
+  } catch { return null; }
 }
 
+/** Writes a route to its session's file; a route without a safe session names no file and is refused. */
 export function writeRoute(root: string, doc: RouteDoc): void {
+  if (!isRouteSession(doc.session)) throw new Error('a route needs the Claude session that chose it');
   forgeDir(root);
-  const file = routeFile(root);
+  const file = routeFile(root, doc.session);
+  mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   try { writeFileSync(tmp, JSON.stringify(doc, null, 2) + '\n'); renameSync(tmp, file); } finally { rmSync(tmp, { force: true }); }
+}
+
+/** Every session's route (50 at most): what route-session reads after /clear or in a fork (K1-13). */
+export function listRoutes(root: string): RouteDoc[] {
+  let names: string[] = [];
+  try { names = readdirSync(routeDir(root)).filter(n => n.endsWith('.json')).slice(0, 50); } catch { return []; }
+  return names.flatMap(n => {
+    try {
+      const doc = normalizeRoute(JSON.parse(readFileSync(path.join(routeDir(root), n), 'utf8')));
+      return doc && `${doc.session}.json` === n ? [doc] : [];
+    } catch { return []; }
+  });
+}
+
+/** K1-13: the conversation of `session` ended (SessionEnd): its route records when and why, once. */
+export function endRoute(root: string, session: string, reason: RouteEndReason, at: string): void {
+  const doc = readRoute(root, session);
+  if (doc && !doc.endedAt) writeRoute(root, { ...doc, endedAt: at, endReason: reason });
 }
 
 /** Where a route starts: superpowers designs (or plans) first, unless that spec (or plan) already exists. */

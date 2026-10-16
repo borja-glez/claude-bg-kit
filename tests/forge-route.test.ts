@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { firstStage, normalizeRoute, readRoute, routeAsk, routeOptions } from '../src/forge/route.js';
+import { firstStage, listRoutes, normalizeRoute, readRoute, routeAsk, routeOptions, writeRoute } from '../src/forge/route.js';
 import { resolvePrefs } from '../src/forge/prefs.js';
 import { readLocal } from '../src/forge/local.js';
 import { allDecisions } from '../src/forge/decisions.js';
@@ -84,7 +85,7 @@ describe('forge route CLI', () => {
   beforeEach(() => {
     root = mkdtempSync(path.join(tmpdir(), 'forge-route-'));
     cfg = mkdtempSync(path.join(tmpdir(), 'forge-route-cfg-'));
-    io = { cwd: root, now: () => new Date('2026-10-13T10:00:00.000Z'), env: { CLAUDE_CONFIG_DIR: cfg } };
+    io = { cwd: root, now: () => new Date('2026-10-13T10:00:00.000Z'), env: { CLAUDE_CONFIG_DIR: cfg, CLAUDE_CODE_SESSION_ID: 'sess-0' } };
   });
   const installSuperpowers = () => {
     const p = path.join(cfg, 'plugins', 'cache', 'm', 'superpowers', '6.4.1');
@@ -103,7 +104,7 @@ describe('forge route CLI', () => {
   });
   it('set writes the route and records the route decision; stage moves it on', () => {
     expect(JSON.parse(run(['route', 'set', '--task', 't1', '--chosen', 'superpowers-plan', '--by', 'user'], io).stdout)).toMatchObject({ task: 't1', chosen: 'superpowers-plan', by: 'user', stage: 'designing' });
-    expect(readRoute(root)).toMatchObject({ stage: 'designing' });
+    expect(readRoute(root, 'sess-0')).toMatchObject({ stage: 'designing', session: 'sess-0' });
     expect(allDecisions(root).at(-1)).toMatchObject({ point: 'route', chosen: 'superpowers-plan', by: 'user', task: 't1', weight: 'major' });
     expect(JSON.parse(run(['route', 'stage', '--stage', 'planning', '--plan', 'docs/superpowers/plans/p.md'], io).stdout)).toMatchObject({ updated: true, stage: 'planning', plan: 'docs/superpowers/plans/p.md' });
     expect(JSON.parse(run(['route', 'stage', '--task', 'other', '--stage', 'done'], io).stdout)).toEqual({ updated: false });
@@ -124,8 +125,8 @@ describe('forge route CLI', () => {
   });
   it('set keeps the session that chose the route', () => {
     expect(JSON.parse(run(['route', 'set', '--task', 't1', '--chosen', 'superpowers-design', '--by', 'user', '--session', 'sess-1'], io).stdout)).toMatchObject({ session: 'sess-1' });
-    expect(readRoute(root)).toMatchObject({ session: 'sess-1' });
-    expect(JSON.parse(run(['route', 'stage', '--stage', 'planning'], io).stdout)).toMatchObject({ session: 'sess-1' });
+    expect(readRoute(root, 'sess-1')).toMatchObject({ session: 'sess-1' });
+    expect(JSON.parse(run(['route', 'stage', '--stage', 'planning', '--session', 'sess-1'], io).stdout)).toMatchObject({ session: 'sess-1' });
     expect(run(['route', 'set', '--task', 't1', '--chosen', 'forge', '--by', 'user', '--session', 'a b'], io).code).toBe(2);
   });
   it('stage without a route updates nothing', () => {
@@ -236,5 +237,72 @@ describe('forge route CLI', () => {
     expect(readLocal(root).workflow).toBe('forge');
     expect(JSON.parse(run(['route', 'set', '--task', 't2', '--chosen', 'none', '--by', 'user', '--remember'], io).stdout)).toEqual({ written: false, remembered: 'off' });
     expect(readLocal(root).workflow).toBe('off');
+  });
+});
+
+describe('one route per session (K1-04, K1-05)', () => {
+  let root: string;
+  let io: Io;
+  beforeEach(() => {
+    root = mkdtempSync(path.join(tmpdir(), 'forge-route-sess-'));
+    io = { cwd: root, now: () => new Date('2026-10-13T10:00:00.000Z'), env: {} };
+  });
+  it('route set of A and B leave two files, and route stage of B never touches the route of A', () => {
+    expect(run(['route', 'set', '--task', 't1', '--chosen', 'superpowers-design', '--by', 'user', '--session', 'A'], io).code).toBe(0);
+    expect(run(['route', 'set', '--task', 't2', '--chosen', 'superpowers-plan', '--by', 'user', '--session', 'B'], io).code).toBe(0);
+    expect(readdirSync(path.join(root, '.forge', 'route')).sort()).toEqual(['A.json', 'B.json']);
+    expect(JSON.parse(run(['route', 'stage', '--stage', 'done'], { ...io, env: { CLAUDE_CODE_SESSION_ID: 'B' } }).stdout)).toMatchObject({ updated: true, task: 't2', stage: 'done' });
+    expect(JSON.parse(run(['route', 'stage', '--stage', 'done', '--task', 't1', '--session', 'B'], io).stdout)).toEqual({ updated: false });
+    expect(readRoute(root, 'A')).toMatchObject({ task: 't1', stage: 'designing' });
+  });
+  it('without a session set and stage exit 2; an older route.json without one counts for nobody, and with one it moves to that session', () => {
+    expect(run(['route', 'set', '--task', 't1', '--chosen', 'forge', '--by', 'user'], io).code).toBe(2);
+    expect(run(['route', 'stage', '--stage', 'done'], io).code).toBe(2);
+    expect(JSON.parse(run(['route', 'set', '--task', 't1', '--chosen', 'none', '--by', 'user'], io).stdout)).toEqual({ written: false });
+    const legacy = path.join(root, '.forge', 'route.json');
+    const doc = { task: 't1', chosen: 'superpowers-design', by: 'user', stage: 'designing', ts: '2026-10-13T10:00:00.000Z' };
+    mkdirSync(path.dirname(legacy), { recursive: true });
+    writeFileSync(legacy, JSON.stringify(doc));
+    expect(readRoute(root, 'A')).toBeNull();
+    writeFileSync(legacy, JSON.stringify({ ...doc, session: 'A' }));
+    expect(readRoute(root, 'B')).toBeNull();
+    expect(readRoute(root, 'A')).toMatchObject({ task: 't1', session: 'A' });
+    expect(existsSync(legacy)).toBe(false);
+    expect(existsSync(path.join(root, '.forge', 'route', 'A.json'))).toBe(true);
+    for (const bad of [null, '', '../x', 'a b']) expect(readRoute(root, bad)).toBeNull();
+  });
+  it('a session id that is not safe never names a file: set and stage exit 2, writeRoute refuses it, and a file that names another session is not this one', () => {
+    for (const bad of ['../x', 'a b', '..', 'a:b']) {
+      expect(run(['route', 'set', '--task', 't1', '--chosen', 'forge', '--by', 'user', '--session', bad], io).code, bad).toBe(2);
+      expect(run(['route', 'set', '--task', 't1', '--chosen', 'none', '--by', 'user', '--session', bad], io).code, bad).toBe(2);
+      expect(run(['route', 'stage', '--stage', 'done', '--session', bad], io).code, bad).toBe(2);
+    }
+    expect(existsSync(path.join(root, '.forge'))).toBe(false);
+    const doc = { task: 't1', chosen: 'forge' as const, by: 'user' as const, stage: 'handed-off' as const, ts: '2026-10-13T10:00:00.000Z' };
+    expect(() => writeRoute(root, doc)).toThrow(/session/);
+    expect(() => writeRoute(root, { ...doc, session: '../x' })).toThrow(/session/);
+    // A file named for A that says B (copied by hand) is neither A's nor B's.
+    mkdirSync(path.join(root, '.forge', 'route'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'route', 'A.json'), JSON.stringify({ ...doc, session: 'B' }));
+    expect(readRoute(root, 'A')).toBeNull();
+    expect(readRoute(root, 'B')).toBeNull();
+    expect(listRoutes(root)).toEqual([]);
+  });
+  it('route set --remember without a session leaves local.yaml alone: every input is read before anything is written', () => {
+    expect(run(['route', 'set', '--task', 't1', '--chosen', 'forge', '--by', 'user', '--remember'], io).code).toBe(2);
+    expect(existsSync(path.join(root, '.forge'))).toBe(false);
+  });
+  it('from a linked worktree, set and stage keep the route in the main checkout', () => {
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: root, encoding: 'utf8' }).trim();
+    git('init', '-q', '-b', 'main'); git('config', 'user.email', 'a@b.c'); git('config', 'user.name', 't');
+    writeFileSync(path.join(root, 'x.txt'), 'x'); git('add', '.'); git('commit', '-qm', 'init');
+    const wt = path.join(root, 'wt');
+    git('worktree', 'add', '-q', wt, '-b', 'w');
+    const inWt = { ...io, cwd: wt, env: { CLAUDE_CODE_SESSION_ID: 'W1' } };
+    expect(run(['route', 'set', '--task', 't1', '--chosen', 'superpowers-design', '--by', 'user'], inWt).code).toBe(0);
+    expect(existsSync(path.join(root, '.forge', 'route', 'W1.json'))).toBe(true);
+    expect(existsSync(path.join(wt, '.forge', 'route'))).toBe(false);
+    expect(JSON.parse(run(['route', 'stage', '--stage', 'done'], inWt).stdout)).toMatchObject({ updated: true, stage: 'done' });
+    expect(readRoute(root, 'W1')).toMatchObject({ stage: 'done' });
   });
 });

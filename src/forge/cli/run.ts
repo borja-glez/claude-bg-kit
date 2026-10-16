@@ -1719,10 +1719,13 @@ function runCommand(argv: string[], io: Io): Result {
           if (!(ROUTE_OPTIONS as readonly (string | undefined)[]).includes(chosen)) throw new UsageError(`route set: --chosen must be one of ${ROUTE_OPTIONS.join('|')}`);
           if (by !== 'user' && by !== 'auto') throw new UsageError('route set: --by must be user or auto');
           const files = paths('route set');
-          const session = flag('session');
-          if (session !== undefined && !isRouteSession(session)) throw new UsageError('route set: --session is not a plain session id');
+          // K1-04, K1-05 (C1): the route is this Claude session's, in .forge/route/<session>.json of the main checkout. It is
+          // read with the other inputs, before anything is written; only none, which writes no route, goes without one.
+          if (has('session') && !isRouteSession(flag('session'))) throw new UsageError('route set: --session is not a plain session id');
+          const session = claudeSessionId(flag('session'), io.env ?? process.env);
+          if (!session && chosen !== 'none') throw new UsageError(noClaudeSession('route set', '--session'));
           // K1-08: «remember it» keeps the choice as the project's workflow in local.yaml (`off` for none); none without it
-          // writes nothing at all: no route.json and no decision.
+          // writes nothing at all: no route file and no decision.
           const remembered: Workflow | null = has('remember') ? (chosen === 'none' ? 'off' : chosen as Workflow) : null;
           // Every input is read before anything is written: a --why-file that cannot be read leaves local.yaml alone.
           let why = by === 'user' ? 'the user chose it' : 'the recommended option for this request';
@@ -1731,10 +1734,11 @@ function runCommand(argv: string[], io: Io): Result {
           }
           if (remembered) updateLocal(io.cwd, s => ({ ...s, workflow: remembered }));
           if (chosen === 'none') return json({ written: false, ...(remembered ? { remembered } : {}) });
-          const doc: RouteDoc = { task, chosen: chosen as RouteOption, by, stage: firstStage(chosen as RouteOption, files), ts: ts(), ...files, ...(session ? { session } : {}) };
-          writeRoute(io.cwd, doc);
-          // The route is a decision like any other: by the user when asked, by auto mode otherwise (spec §5.5).
+          // Not none: the session was required above.
+          const doc: RouteDoc = { task, chosen: chosen as RouteOption, by, stage: firstStage(chosen as RouteOption, files), ts: ts(), ...files, session: session! };
           const root = mainCheckout(io.cwd);
+          writeRoute(root, doc);
+          // The route is a decision like any other: by the user when asked, by auto mode otherwise (spec §5.5).
           const exec = readExecution(root);
           const { n } = addDecision(root, {
             point: 'route', what: `route of ${task}`, chosen: doc.chosen, why, by,
@@ -1746,14 +1750,19 @@ function runCommand(argv: string[], io: Io): Result {
           const stage = flag('stage');
           if (!(ROUTE_STAGES as readonly (string | undefined)[]).includes(stage)) throw new UsageError(`route stage: --stage must be one of ${ROUTE_STAGES.join('|')}`);
           const files = paths('route stage');
-          const cur = readRoute(io.cwd);
+          if (has('session') && !isRouteSession(flag('session'))) throw new UsageError('route stage: --session is not a plain session id');
+          const session = claudeSessionId(flag('session'), io.env ?? process.env);
+          if (!session) throw new UsageError(noClaudeSession('route stage', '--session'));
+          // K1-04: only this session's route moves; another session's is never touched.
+          const main = mainCheckout(io.cwd);
+          const cur = readRoute(main, session);
           if (!cur || (flag('task') !== undefined && flag('task') !== cur.task)) return json({ updated: false });
           const next: RouteDoc = { ...cur, stage: stage as RouteStage, ts: ts(), ...files };
-          writeRoute(io.cwd, next);
+          writeRoute(main, next);
           return json({ updated: true, ...next });
         }
         if (sub !== undefined && !sub.startsWith('--')) {
-          throw new UsageError('usage: forge route --task id (--path p | --text-file f [--path p]) [--locale es|en] [--workflow w] [--autonomy a] [--run-plan] [--build-spec] | set --task id --chosen o --by user|auto [--spec f] [--plan f] [--why-file f] [--session s] [--remember] | stage --stage s [--task id] [--spec f] [--plan f]');
+          throw new UsageError('usage: forge route --task id (--path p | --text-file f [--path p]) [--locale es|en] [--workflow w] [--autonomy a] [--run-plan] [--build-spec] | set --task id --chosen o --by user|auto [--spec f] [--plan f] [--why-file f] [--session s] [--remember] | stage --stage s [--task id] [--spec f] [--plan f] [--session s]');
         }
         const task = flag('task');
         if (!task || !TASK_ID.test(task)) throw new UsageError('route: --task <id> is required');

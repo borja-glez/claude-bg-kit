@@ -2,12 +2,14 @@
 // UserPromptSubmit (`hook route-prompt`) reminds a route half done, else hints at forge:route for coding work. Both fail
 // open (any error prints nothing), stay silent where forge already drives the session or the user chose superpowers
 // (or off) in local.yaml, and run no git beyond mainCheckout.
+import path from 'node:path';
 import { loadConfig } from './config.js';
 import { readExecution } from './execution.js';
+import { readStatus } from './ledger.js';
 import { mainCheckout, readLocal } from './local.js';
 import { memberForHook } from './members.js';
 import { resolvePrefs } from './prefs.js';
-import { readRoute, ROUTE_REMINDER_MS, type RouteDoc } from './route.js';
+import { listRoutes, readRoute, ROUTE_REMINDER_MS, type RouteDoc } from './route.js';
 import { parseRun, readRunText } from './run.js';
 import { claudeConfigDir, locateSuperpowers } from './superpowers.js';
 import type { Io } from './cli/run.js';
@@ -64,36 +66,75 @@ export function routeReminder(r: RouteDoc | null, now: number): string | null {
   return null;
 }
 
-// forge already drives this session: it coordinates or is a member of an active execution, or runs the infinite mode.
+/** K1-12: a forge task of this session counts as open this long after its last event. */
+export const OPEN_TASK_MS = 24 * 3600_000;
+/** K1-13: after /clear, the earlier conversation's half-done route is named when it ended this recently. */
+export const CLEAR_CARRY_MS = 10 * 60_000;
+
+/** K1-09: a task worktree or the run worktree of forge (`.claude/worktrees/task-*`, `run`): forge drives whatever happens there. */
+export const inForgeWorktree = (cwd: string): boolean => /[\\/]\.claude[\\/]worktrees[\\/](?:task-[^\\/]+|run)(?:[\\/]|$)/.test(path.resolve(cwd));
+
+/**
+ * K1-13: the line route-session adds after the rule. After /clear, the half-done route the earlier conversation ended by
+ * /clear in the last 10 minutes; in a fork, the only half-done route of a conversation still open. A reminder, never a
+ * copy: the route stays that session's.
+ */
+export function carriedRoute(routes: readonly RouteDoc[], source: string, sid: string | null, now: number): string | null {
+  const half = (r: RouteDoc) => r.session !== sid && routeReminder(r, now) !== null;
+  if (source === 'clear') {
+    const endedAt = (r: RouteDoc) => Date.parse(r.endedAt ?? '');
+    const r = routes.filter(x => half(x) && x.endReason === 'clear' && now - endedAt(x) <= CLEAR_CARRY_MS && endedAt(x) - now <= 5 * 60_000)
+      .sort((a, b) => endedAt(b) - endedAt(a))[0];
+    return r ? `forge: before /clear this conversation routed task ${r.task} as "${r.chosen}" and it is half done (${r.stage}). ${routeReminder(r, now)}` : null;
+  }
+  if (source === 'fork') {
+    const open = routes.filter(x => half(x) && !x.endedAt);
+    return open.length === 1 ? `forge: the original conversation routed task ${open[0].task} as "${open[0].chosen}" and it is half done (${open[0].stage}). ${routeReminder(open[0], now)}` : null;
+  }
+  return null;
+}
+
+// forge already drives this session: it coordinates or is a member of an active execution, runs the infinite mode, or
+// has a forge task of its own open (K1-12: its status.json names this session, is not done and moved in the last 24 h).
+// forge writes status.json where its commands run: the session's directory, which is the main checkout's top level
+// unless the session started in a subdirectory, so both are read.
 function forgeDrives(io: Io, main: string, sid: string | null): boolean {
   if (!sid) return false;
   const exec = readExecution(main);
   if (exec?.active && (exec.hookSession === sid || memberForHook(main, sid, exec.runId))) return true;
   const run = parseRun(readRunText(io.cwd));
-  return !!run?.active && run.sessionId === sid;
+  if (run?.active && run.sessionId === sid) return true;
+  return [...new Set([io.cwd, main])].some(dir => {
+    const st = readStatus(dir);
+    const last = st ? Date.parse(st.lastAt ?? st.ts) : NaN;
+    return !!st && st.session === sid && st.doneAt === null && Number.isFinite(last) && io.now().getTime() - last < OPEN_TASK_MS;
+  });
 }
 
 export function hookRoute(io: Io, which: 'session' | 'prompt'): string {
   try {
     const input: unknown = JSON.parse(io.stdin ?? '');
     if (!input || typeof input !== 'object' || Array.isArray(input)) return '';
-    const o = input as { session_id?: unknown; prompt?: unknown };
+    const o = input as { session_id?: unknown; prompt?: unknown; source?: unknown };
     const sid = typeof o.session_id === 'string' && o.session_id ? o.session_id : null;
+    // K1-09: in a task or run worktree of forge, forge drives whatever happens: no rule and no hint.
+    if (inForgeWorktree(io.cwd)) return '';
     const main = mainCheckout(io.cwd);
     // With workflow: superpowers forge is optional again, as before routing existed; with off it stays out.
     const workflow = resolvePrefs({}, readLocal(io.cwd), loadConfig(io.cwd)).workflow;
     if (workflow === 'superpowers' || workflow === 'off' || forgeDrives(io, main, sid)) return '';
     if (which === 'session') {
       const sp = locateSuperpowers({ configDir: claudeConfigDir(io.env ?? process.env), projectDir: main });
-      return JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: routingRule(sp.installed) } });
+      // K1-13: after /clear or in a fork, the route the earlier conversation left half done follows the rule.
+      const carried = typeof o.source === 'string' ? carriedRoute(listRoutes(main), o.source, sid, io.now().getTime()) : null;
+      return JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: routingRule(sp.installed) + (carried ? `\n${carried}` : '') } });
     }
     const now = io.now().getTime();
-    // A route belongs to the session that chose it: another session's route neither reminds nor silences this one.
-    const route = readRoute(io.cwd);
-    const own = route && (!route.session || route.session === sid) ? route : null;
+    // K1-04: a route is its session's own file; another session's route neither reminds nor silences this one.
+    const own = readRoute(main, sid);
     const reminder = routeReminder(own, now);
     // A session that routed its request recently gets no hint on its follow-up prompts until the route is done.
-    if (!reminder && own?.session && own.stage !== 'done' && fresh(own, now)) return '';
+    if (!reminder && own && own.stage !== 'done' && fresh(own, now)) return '';
     const text = reminder ?? (typeof o.prompt === 'string' && looksLikeCoding(o.prompt) ? ROUTE_HINT : null);
     return text ? JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } }) : '';
   } catch { return ''; }
