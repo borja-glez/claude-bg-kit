@@ -222,6 +222,14 @@ describe('triage', () => {
 });
 
 describe('implementerFor', () => {
+  it('a delicate task goes to impl-high: any plan task, a loose Small or Medium one (J-14)', () => {
+    expect(implementerFor({ path: 'trivial', sensitive: [] }, 'x', { plan: true, delicate: true })).toEqual({ role: 'impl-high', self: false, why: 'delicate plan task' });
+    expect(implementerFor({ path: 'large', sensitive: [] }, 'x', { plan: true, delicate: true })).toEqual({ role: 'impl-high', self: false, why: 'delicate plan task' });
+    expect(implementerFor({ path: 'medium', sensitive: [] }, 'x', { delicate: true })).toEqual({ role: 'impl-high', self: false, why: 'delicate task' });
+    expect(implementerFor({ path: 'trivial', sensitive: [] }, 'x', { delicate: true })).toMatchObject({ role: null, self: true });
+    expect(implementerFor({ path: 'large', sensitive: [] }, 'x', { delicate: true })).toMatchObject({ role: null, self: false });
+    expect(implementerFor({ path: 'medium', sensitive: [] }, 'x', { plan: true })).toMatchObject({ role: 'impl' });
+  });
   it('a small task is always delegated: mech when mechanical, impl-light otherwise', () => {
     expect(implementerFor({ path: 'small', sensitive: [] }, 'rename formatPrice to formatAmount')).toMatchObject({ role: 'mech', self: false });
     expect(implementerFor({ path: 'small', sensitive: [] }, 'Renombra formatPrice en src/util/format.ts')).toMatchObject({ role: 'mech', self: false });

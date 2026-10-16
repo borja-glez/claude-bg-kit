@@ -17,6 +17,9 @@ export interface PlanTask {
   depends_on: string[];
   zones: string[];
   estimate_min?: number;
+  /** J-14: mistakes here are expensive or hard to see (concurrency, migrations, security boundaries, data formats other
+   *  code reads): forge gives it impl-high and correctness at xhigh. */
+  delicate?: boolean;
 }
 export interface PlanPhase { id: string; name: string; plan_status: PlanStatus }
 export interface PlanTrack { id: string; name: string; color: TrackColor }

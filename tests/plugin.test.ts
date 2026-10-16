@@ -121,11 +121,12 @@ describe('plugin layout', () => {
     }
     expect(md).toContain('never compute the ladder by hand');
     expect(steps).toContain('never compute the ladder by hand');
-    expect(steps).toContain('`impl-high` when the design marks the task delicate');
+    expect(steps).not.toContain('when the design marks the task delicate');
     expect(runRef('large')).toContain('one fix by `impl-heavy`');
     for (const s of [steps, member]) expect(s).toContain('`FORGE log --kind agent --task <T>-<n> --data-file <f>` (`{"agent":"<name>","role":"<role>"}`)');
     expect(md).not.toMatch(/When `last` is true the printed implementer is `impl-heavy`/);
-    expect(md).toContain('or `impl-high` for delicate or important work');
+    expect(md).not.toContain('or `impl-high` for delicate or important work');
+    for (const s of [md, steps, member]) expect(s).toContain('`delicate`');
     expect(member).not.toContain('a Large task you cannot do unattended');
     expect(member).toContain('waypoint:work');
     expect(member).toMatch(/[Ll]ost task/);
@@ -772,7 +773,7 @@ describe('plugin layout', () => {
     expect(medium).toContain('FORGE verify-plan');
     expect(medium).toMatch(/7\. [^\n]*`deferred`[^\n]*file and line/);
     expect(steps).toContain('--path large');
-    expect(steps).toContain('--delicate');
+    expect(steps).not.toContain('--delicate');
     const large = runRef('large');
     expect(large).toContain('FORGE verdict --task <project>-final --dir .forge/work/<project>/final-1');
     expect(large).toContain('one fix by `impl-heavy`');

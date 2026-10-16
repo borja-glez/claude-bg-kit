@@ -701,7 +701,9 @@ export function run(argv: string[], io: Io): Result {
             raiseWhy = raise ? raise.why as string : null;
           }
         }
-        const impl = implementerFor(result, wordText, { batch: has('batch'), plan: planned !== null });
+        // J-14: the plan's `delicate`, or --delicate for a task the person calls delicate.
+        const delicate = planned?.delicate === true || has('delicate');
+        const impl = implementerFor(result, wordText, { batch: has('batch'), plan: planned !== null, delicate });
         const profile = loadConfig(repoDir).profile;
         const implementer = { ...impl, agent: impl.role ? agentFor(impl.role, profile) : null };
         const known = readLocal(io.cwd).known;
@@ -709,7 +711,7 @@ export function run(argv: string[], io: Io): Result {
         // `known` mirrors what exists now: new names are added, vanished ones dropped silently.
         if (fresh.length || known.some(n => !names.includes(n))) updateLocal(io.cwd, s => ({ ...s, known: names }));
         // Who reviews, by the size reached and the configured profile: printed always and logged for review-prep.
-        const reviewPlan = reviewFor(result.path, result.sensitive, isPerfTask(wordText), { delicate: has('delicate'), profile });
+        const reviewPlan = reviewFor(result.path, result.sensitive, isPerfTask(wordText), { delicate, profile });
         const review = { ...reviewPlan, reviewers: reviewPlan.reviewers.map(r => ({ ...r, agent: agentFor(r.role, profile) })) };
         appendEvent(io.cwd, { ts: ts(), kind: 'triage', ...(flag('task') ? { task: flag('task') } : {}), ...(project !== null ? { project } : {}), ...result, ...auto,
           ...(diff ? { diff: { base: diff.base, files: diff.stat.files.length, lines: diff.stat.lines } } : {}), review });

@@ -20,6 +20,13 @@ describe('parsePlan', () => {
     expect(p.artifacts).toEqual({});
   });
 
+  it('takes delicate as a boolean of a task (J-14)', () => {
+    const p = parsePlan(fixture.replace('    estimate_min: 20\n', '    estimate_min: 20\n    delicate: true\n'));
+    expect(p.tasks[0].delicate).toBe(true);
+    expect(p.tasks[1].delicate).toBeUndefined();
+    expect(issuesOf(fixture.replace('    estimate_min: 20\n', '    estimate_min: 20\n    delicate: "yes"\n')).some(i => i.startsWith('tasks.0.delicate'))).toBe(true);
+  });
+
   it('reports every reference problem at once', () => {
     const bad = fixture
       .replace('track: ui\n    phase: F1', 'track: frontend\n    phase: F9')

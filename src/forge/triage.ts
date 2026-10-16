@@ -95,7 +95,12 @@ export interface Implementer { role: ImplRole | null; self: boolean; why: string
 // A plan task (`plan`): the coordinator never edits task code, so a Trivial goes to mech; a Large one was already
 // designed and planned, so it goes to impl as a Medium one does, and to impl-high only on a sensitive zone.
 // impl-heavy (xhigh) is kept for the last attempt of a review loop (`nextImplementer` in loop.ts).
-export function implementerFor(r: Pick<TriageResult, 'path' | 'sensitive'>, text: string, opts: { batch?: boolean; plan?: boolean } = {}): Implementer {
+export function implementerFor(r: Pick<TriageResult, 'path' | 'sensitive'>, text: string, opts: { batch?: boolean; plan?: boolean; delicate?: boolean } = {}): Implementer {
+  // J-14: a delicate task (marked in its plan, or called so with --delicate) gets impl-high: any plan task, and a loose
+  // task the session delegates anyway (Small and Medium; a Trivial one stays the session's, a Large one plans first).
+  if (opts.delicate && (opts.plan || r.path === 'small' || r.path === 'medium')) {
+    return { role: 'impl-high', self: false, why: opts.plan ? 'delicate plan task' : 'delicate task' };
+  }
   switch (r.path) {
     case 'trivial':
       if (opts.plan) return { role: 'mech', self: false, why: 'trivial plan task: delegated to mech, the coordinator never edits task code' };

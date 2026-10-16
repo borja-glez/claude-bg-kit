@@ -21,6 +21,7 @@ const TaskSchema = z.object({
   depends_on: z.array(id).default([]),
   zones: z.array(z.string().min(1)).default([]),
   estimate_min: z.number().positive().optional(),
+  delicate: z.boolean().optional(),
 });
 
 const PlanSchema = z.object({

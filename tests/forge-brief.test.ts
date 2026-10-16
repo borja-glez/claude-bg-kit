@@ -66,6 +66,10 @@ describe('brief', () => {
     expect(renderBrief(PLAN, PLAN.tasks[0], { planPath: 'p.yaml', designPath: null, tdd: line }).trimEnd().endsWith(line)).toBe(true);
     expect(renderBrief(PLAN, PLAN.tasks[0], { planPath: 'p.yaml', designPath: null })).not.toContain('TDD');
   });
+  it('says Delicate: yes for a task the plan marks delicate (J-14)', () => {
+    expect(renderBrief(PLAN, { ...PLAN.tasks[0], delicate: true }, { planPath: 'p.yaml', designPath: null })).toContain('\nDelicate: yes\n');
+    expect(renderBrief(PLAN, PLAN.tasks[0], { planPath: 'p.yaml', designPath: null })).not.toContain('Delicate:');
+  });
   it('carries the threat model section before the TDD line (K4-02)', () => {
     const tm = renderThreatModel({ protects: ['secrets'], trusted: [], untrusted: [], outOfScope: [] });
     const md = renderBrief(PLAN, PLAN.tasks[0], { planPath: 'p.yaml', designPath: null, threatModel: tm, tdd: 'TDD: required.' });

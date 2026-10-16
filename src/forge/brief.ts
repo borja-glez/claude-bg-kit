@@ -33,6 +33,7 @@ export function renderBrief(plan: Plan, task: PlanTask, opts: { planPath: string
     `Zones: ${task.zones.length ? task.zones.join(', ') : '(none listed)'}`,
     ...(task.depends_on.length ? [`Depends on: ${task.depends_on.join(', ')}`] : []),
     ...(task.estimate_min ? [`Estimate: ${task.estimate_min} min`] : []),
+    ...(task.delicate ? ['Delicate: yes'] : []),
     '',
     `Plan: ${opts.planPath}`,
     ...(opts.designPath ? [`Design: ${opts.designPath}`] : []),

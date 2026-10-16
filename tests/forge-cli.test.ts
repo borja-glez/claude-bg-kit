@@ -1016,6 +1016,20 @@ it('triage --plan uses the task text and its zones, and logs under the task id',
   expect(out.sensitive).toContain('auth');
   expect(readEvents(root).at(-1)).toMatchObject({ kind: 'triage', task: 'T001' });
 });
+it('triage --plan of a task the plan marks delicate gives impl-high and correctness at xhigh (J-14)', () => {
+  const plan = PLAN_YAML.replace('Login with password', 'Tidy the parser').replace('users can log in', 'parser tidied').replace('src/auth/**', 'src/parser/**');
+  writeFileSync(path.join(root, 'plan.yaml'), plan.replace('    zones: ["src/parser/**"]\n', '    zones: ["src/parser/**"]\n    delicate: true\n'));
+  io.git = args => (args.includes('ls-files') ? 'src/parser/a.ts\nsrc/parser/b.ts\nsrc/parser/c.ts\nsrc/parser/d.ts\nsrc/app.ts\n' : args.includes('rev-list') ? '7\n' : '');
+  const out = JSON.parse(run(['triage', '--plan', 'plan.yaml', '--task', 'T001'], io).stdout);
+  expect(out.path).toBe('medium');
+  expect(out.implementer).toMatchObject({ role: 'impl-high', agent: 'forge-impl-high', why: 'delicate plan task' });
+  const effort = (o: { review: { reviewers: { role: string; effort: string }[] } }) => o.review.reviewers.find(r => r.role === 'review-correctness')!.effort;
+  expect(effort(out)).toBe('xhigh');
+  writeFileSync(path.join(root, 'plan.yaml'), plan);
+  const plain = JSON.parse(run(['triage', '--plan', 'plan.yaml', '--task', 'T001'], io).stdout);
+  expect(plain.implementer.role).toBe('impl');
+  expect(effort(plain)).toBe('high');
+});
 it('triage --plan with zones that match nothing still answers', () => {
   // A zone on a sensitive path counts even when no tracked file matches it yet.
   writeFileSync(path.join(root, 'plan.yaml'), PLAN_YAML.replace('src/auth/**', 'src/auth/new/**'));
