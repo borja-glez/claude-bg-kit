@@ -14073,6 +14073,10 @@ function parseExecution(text, now) {
     return null;
   }
 }
+var LIVE_SILENT_MINUTES = 7;
+var LIVE_STOPPED_MINUTES = 12;
+var LIVE_MAX_AGE_HOURS = 24;
+var FORGE_DOC_MAX_BYTES = 8 * 1024;
 function normalizeLive(x2) {
   if (!isObj2(x2)) return null;
   const sessionId = str3(x2.sessionId), ts = iso(x2.ts);
@@ -14082,8 +14086,53 @@ function normalizeLive(x2) {
   return { sessionId, role, ts, agents, runId: str3(x2.runId), task: str3(x2.task), event: (str3(x2.event) ?? "").slice(0, 40), ended: x2.ended === true };
 }
 
+// src/lib/execution-view.ts
+var FUTURE_TOLERANCE_MS = 2 * 6e4;
+var AGENT_ALIVE_MS = 3 * 36e5;
+var STALE_RUN_TTL_MS = 24 * 36e5;
+var lastMovedAt = (e) => e.lastStepAt ?? e.startedAt;
+var VISIBLE_STOPS = ["stalled", "stopped", "budget", "finished"];
+function isVisibleRun(e, now, role) {
+  if (!e || e.closedAt) return false;
+  if (e.active) return true;
+  if (!e.stopReason || !VISIBLE_STOPS.includes(e.stopReason)) return false;
+  if (role === "owner") return true;
+  const moved = usable(lastMovedAt(e), now);
+  return moved !== null && now < moved + STALE_RUN_TTL_MS;
+}
+function usable(ts, now) {
+  const t = ts ? Date.parse(ts) : NaN;
+  return Number.isFinite(t) && t - now <= FUTURE_TOLERANCE_MS ? t : null;
+}
+function signalLiveness(ts, ended, now) {
+  const t = usable(ts, now);
+  if (ended || t === null) return "stopped";
+  const age = Math.max(0, now - t);
+  return age < LIVE_SILENT_MINUTES * 6e4 ? "alive" : age < LIVE_STOPPED_MINUTES * 6e4 ? "silent" : "stopped";
+}
+var freshSignal = (d, now) => {
+  const t = usable(d.ts, now);
+  return t !== null && now - t < LIVE_MAX_AGE_HOURS * 36e5;
+};
+function coordinatorOf(e, live, now, stepAt) {
+  const signal = live.filter((d) => freshSignal(d, now) && d.role === "coordinator" && d.runId === e.runId && (!e.hookSession || d.sessionId === e.hookSession)).reduce((best, d) => !best || Date.parse(d.ts) > Date.parse(best.ts) ? d : best, null);
+  const candidates = [signal?.ts ?? null, stepAt].map((ts) => ({ ts, t: usable(ts, now) })).filter((c) => c.t !== null);
+  const lastSeen = candidates.length ? candidates.reduce((a, b) => b.t > a.t ? b : a).ts : null;
+  const waiting = !!e.active && !!signal && !signal.ended && signal.agents.some((a) => {
+    const t = usable(a.since, now);
+    return t !== null && now - t < AGENT_ALIVE_MS;
+  });
+  const liveness2 = !e.active ? "stopped" : signal?.ended ? "stopped" : waiting ? "alive" : signalLiveness(lastSeen, false, now);
+  return { signal, lastSeen, waiting, liveness: liveness2 };
+}
+function coordinatorGone(e, signal, now) {
+  if (!e) return false;
+  const own = e.hookSession ? signal : null;
+  if (own?.ended === true) return true;
+  return e.active && coordinatorOf(e, own ? [own] : [], now, lastMovedAt(e)).liveness === "stopped";
+}
+
 // src/lib/forge-activity.ts
-var MAX_MEMBER_FILES = 200;
 function memberOfHook(members, sessionId, runId) {
   const byHook = members.find((m) => m.runId === runId && m.hookSession === sessionId);
   if (byHook) return byHook;
@@ -14101,6 +14150,10 @@ function forgeRoleOf(a, sessionId) {
 
 // src/lib/member-doc.ts
 var isMemberId = (s) => isSafeId(s);
+var MEMBERS_MAX = 50;
+function newestMemberFiles(files) {
+  return files.filter((f) => f.name.endsWith(".json") && isMemberId(f.name.slice(0, -5)) && f.size <= FORGE_DOC_MAX_BYTES).sort((a, b) => b.mtimeMs - a.mtimeMs || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)).slice(0, MEMBERS_MAX);
+}
 function normalizeMember(x2) {
   if (!x2 || typeof x2 !== "object" || Array.isArray(x2)) return null;
   const o = x2;
@@ -14120,6 +14173,9 @@ var BOUND_VIAS = ["work", "design", "forge-run", "forge-member", "forge-infinite
 var BOUND_END_REASONS = ["clear", "resume", "logout", "prompt_input_exit", "other", "released"];
 var MAX_SEATS = 10;
 var BOUND_MAX_BYTES = 4096;
+var SESSION_MAX_BYTES = 8 * 1024;
+var BOUND_REREAD_MS = 8;
+var CACHE_DOCS_MAX = 500;
 var isBoundVia = (x2) => BOUND_VIAS.includes(x2);
 var isEndReason = (x2) => BOUND_END_REASONS.includes(x2);
 var endReasonOf = (x2) => isEndReason(x2) && x2 !== "released" ? x2 : "other";
@@ -14154,25 +14210,6 @@ function parseBound(text, now) {
   } catch {
     return null;
   }
-}
-
-// src/lib/execution-view.ts
-var FUTURE_TOLERANCE_MS = 2 * 6e4;
-var AGENT_ALIVE_MS = 3 * 36e5;
-var STALE_RUN_TTL_MS = 24 * 36e5;
-var lastMovedAt = (e) => e.lastStepAt ?? e.startedAt;
-var VISIBLE_STOPS = ["stalled", "stopped", "budget", "finished"];
-function isVisibleRun(e, now, role) {
-  if (!e || e.closedAt) return false;
-  if (e.active) return true;
-  if (!e.stopReason || !VISIBLE_STOPS.includes(e.stopReason)) return false;
-  if (role === "owner") return true;
-  const moved = usable(lastMovedAt(e), now);
-  return moved !== null && now < moved + STALE_RUN_TTL_MS;
-}
-function usable(ts, now) {
-  const t = ts ? Date.parse(ts) : NaN;
-  return Number.isFinite(t) && t - now <= FUTURE_TOLERANCE_MS ? t : null;
 }
 
 // src/lib/viewer-role.ts
@@ -14242,7 +14279,6 @@ var HEADS_MAX = 50;
 var SHA = /^[0-9a-f]{7,64}$/;
 var RENAME_TRIES = 50;
 var RENAME_BUSY = /* @__PURE__ */ new Set(["EPERM", "EACCES", "EBUSY"]);
-var REREAD_MS = 8;
 var pause = (ms) => {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 };
@@ -14258,7 +14294,7 @@ function readBound(file, now) {
   const text = readText(file, BOUND_MAX_BYTES);
   const b = parseBound(text, now);
   if (b || text === null) return b;
-  pause(REREAD_MS);
+  pause(BOUND_REREAD_MS);
   return parseBound(readText(file, BOUND_MAX_BYTES), now);
 }
 function writeAtomic(file, text) {
@@ -14289,7 +14325,7 @@ function writeBinding(file, doc) {
 }
 function checkoutSid(wpDir, now) {
   try {
-    const s = JSON.parse((0, import_node_fs3.readFileSync)(import_node_path4.default.join(wpDir, "session.json"), "utf8"));
+    const s = JSON.parse(readText(import_node_path4.default.join(wpDir, "session.json"), SESSION_MAX_BYTES) ?? "");
     if (typeof s?.sessionId === "string" && s.sessionId) return s.sessionId;
   } catch {
   }
@@ -14327,7 +14363,7 @@ function openTasksOf(wpDir) {
   const dir = import_node_path4.default.join(wpDir, "dbcache", "state");
   let names = [];
   try {
-    names = (0, import_node_fs3.readdirSync)(dir).filter((f) => f.endsWith(".json")).sort().slice(0, 1e3);
+    names = (0, import_node_fs3.readdirSync)(dir).filter((f) => f.endsWith(".json")).sort().slice(0, CACHE_DOCS_MAX);
   } catch {
     return out;
   }
@@ -14451,6 +14487,13 @@ var read = (f) => {
     return null;
   }
 };
+var readCapped = (f, max) => {
+  try {
+    return (0, import_node_fs4.statSync)(f).size > max ? null : (0, import_node_fs4.readFileSync)(f, "utf8");
+  } catch {
+    return null;
+  }
+};
 var lines = (file) => (read(file) ?? "").split("\n").filter((l3) => l3.trim());
 var field = (l3, k2) => {
   try {
@@ -14474,30 +14517,39 @@ function readForge(root, project, now) {
   const dir = import_node_path5.default.join(main, ".forge");
   const any = parseExecution(read(import_node_path5.default.join(dir, "execution.json")), now);
   const exec = any && (any.kind === "ephemeral" || any.project === project) ? any : null;
-  let names = [];
+  const mdir = import_node_path5.default.join(dir, "members");
+  let files = [];
   try {
-    names = (0, import_node_fs4.readdirSync)(import_node_path5.default.join(dir, "members")).filter((f) => f.endsWith(".json")).slice(0, MAX_MEMBER_FILES);
+    files = (0, import_node_fs4.readdirSync)(mdir, { withFileTypes: true }).filter((d) => d.isFile() && d.name.endsWith(".json")).flatMap((d) => {
+      try {
+        const st2 = (0, import_node_fs4.statSync)(import_node_path5.default.join(mdir, d.name));
+        return [{ name: d.name, size: st2.size, mtimeMs: st2.mtimeMs }];
+      } catch {
+        return [];
+      }
+    });
   } catch {
-    names = [];
+    files = [];
   }
-  const members = names.flatMap((n) => {
+  const members = newestMemberFiles(files).flatMap((f) => {
     try {
-      const m = normalizeMember(JSON.parse(read(import_node_path5.default.join(dir, "members", n)) ?? "null"));
+      const m = normalizeMember(JSON.parse(read(import_node_path5.default.join(mdir, f.name)) ?? "null"));
       return m ? [m] : [];
     } catch {
       return [];
     }
   });
-  let coordinatorEnded = false;
+  let signal = null;
   if (exec && isSafeId(exec.hookSession)) {
     try {
-      coordinatorEnded = normalizeLive(JSON.parse(read(import_node_path5.default.join(dir, "live", `${exec.hookSession}.json`)) ?? "null"))?.ended === true;
+      signal = normalizeLive(JSON.parse(readCapped(import_node_path5.default.join(dir, "live", `${exec.hookSession}.json`), FORGE_DOC_MAX_BYTES) ?? "null"));
     } catch {
-      coordinatorEnded = false;
+      signal = null;
     }
   }
-  return { exec, any, members, infinite: parseRun(read(import_node_path5.default.join(dir, "run.json"))), coordinatorEnded };
+  return { exec, any, members, infinite: parseRun(read(import_node_path5.default.join(dir, "run.json"))), coordinatorEnded: coordinatorGone(exec, signal, now) };
 }
+var NOBODY = { role: "none", subject: null, binding: null, member: null, coordinator: false, since: null, task: null };
 function contextOf(io, input) {
   const root = rootOf(io, input);
   const now = io.now().getTime();
@@ -14518,7 +14570,7 @@ function contextOf(io, input) {
   const seats = seatsOf.get(project) ?? [];
   const forge = readForge(root, project, now);
   const run2 = forge.exec;
-  const viewer = describeViewer({
+  const viewer = sid === null ? NOBODY : describeViewer({
     bound: seats.flatMap((s) => s.bound ? [s.bound] : []),
     execution: run2,
     members: run2 ? forge.members.filter((m) => m.runId === run2.runId) : [],
@@ -14548,12 +14600,12 @@ function touch(seat, claude, now, reopen, env) {
 function renewOwn(ctx, io, reopen) {
   const sid = ctx.sid;
   if (!sid) return;
+  const newestOf = (list) => list.reduce((best, s) => !best || Date.parse(s.bound.seenAt) > Date.parse(best.bound.seenAt) ? s : best, null);
   const mine = ctx.seats.filter((s) => s.bound?.claude === sid);
-  const newest2 = mine.reduce((best, s) => !best || Date.parse(s.bound.seenAt) > Date.parse(best.bound.seenAt) ? s : best, null);
-  for (const s of mine) {
-    const again = reopen && s === newest2;
-    if (again || s.bound.endedAt === null) touch(s, sid, io.now(), again, io.env);
-  }
+  const newest2 = newestOf(mine);
+  const again = reopen && newest2 !== null && newest2.bound.endReason !== "released";
+  const target = again ? newest2 : newestOf(mine.filter((s) => s.bound.endedAt === null));
+  if (target) touch(target, sid, io.now(), again, io.env);
 }
 function readPlan(docDir) {
   try {

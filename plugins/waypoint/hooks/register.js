@@ -10848,6 +10848,7 @@ function normalizePublicTask(x) {
 var LIVE_SILENT_MINUTES = 7;
 var LIVE_STOPPED_MINUTES = 12;
 var LIVE_MAX_AGE_HOURS = 24;
+var FORGE_DOC_MAX_BYTES = 8 * 1024;
 function normalizeLive(x) {
   if (!isObj(x)) return null;
   const sessionId = str(x.sessionId), ts = iso(x.ts);
@@ -10881,21 +10882,32 @@ function signalLiveness(ts, ended, now) {
   const age = Math.max(0, now - t);
   return age < LIVE_SILENT_MINUTES * 6e4 ? "alive" : age < LIVE_STOPPED_MINUTES * 6e4 ? "silent" : "stopped";
 }
+var freshSignal = (d, now) => {
+  const t = usable(d.ts, now);
+  return t !== null && now - t < LIVE_MAX_AGE_HOURS * 36e5;
+};
+function coordinatorOf(e, live, now, stepAt) {
+  const signal = live.filter((d) => freshSignal(d, now) && d.role === "coordinator" && d.runId === e.runId && (!e.hookSession || d.sessionId === e.hookSession)).reduce((best, d) => !best || Date.parse(d.ts) > Date.parse(best.ts) ? d : best, null);
+  const candidates = [signal?.ts ?? null, stepAt].map((ts) => ({ ts, t: usable(ts, now) })).filter((c) => c.t !== null);
+  const lastSeen = candidates.length ? candidates.reduce((a, b) => b.t > a.t ? b : a).ts : null;
+  const waiting = !!e.active && !!signal && !signal.ended && signal.agents.some((a) => {
+    const t = usable(a.since, now);
+    return t !== null && now - t < AGENT_ALIVE_MS;
+  });
+  const liveness2 = !e.active ? "stopped" : signal?.ended ? "stopped" : waiting ? "alive" : signalLiveness(lastSeen, false, now);
+  return { signal, lastSeen, waiting, liveness: liveness2 };
+}
+function coordinatorGone(e, signal, now) {
+  if (!e) return false;
+  const own = e.hookSession ? signal : null;
+  if (own?.ended === true) return true;
+  return e.active && coordinatorOf(e, own ? [own] : [], now, lastMovedAt(e)).liveness === "stopped";
+}
 function executionView(i) {
   const e = i.exec;
   if (!e || !isVisibleRun(e, i.now, i.role ?? "none")) return null;
-  const fresh = (d) => {
-    const t = usable(d.ts, i.now);
-    return t !== null && i.now - t < LIVE_MAX_AGE_HOURS * 36e5;
-  };
-  const signal = i.live.filter((d) => fresh(d) && d.role === "coordinator" && d.runId === e.runId && (!e.hookSession || d.sessionId === e.hookSession)).reduce((best, d) => !best || Date.parse(d.ts) > Date.parse(best.ts) ? d : best, null);
-  const candidates = [signal?.ts ?? null, e.lastStepAt].map((ts) => ({ ts, t: usable(ts, i.now) })).filter((c) => c.t !== null);
-  const lastSeen = candidates.length ? candidates.reduce((a, b) => b.t > a.t ? b : a).ts : null;
-  const waiting = !!e.active && !!signal && !signal.ended && signal.agents.some((a) => {
-    const t = usable(a.since, i.now);
-    return t !== null && i.now - t < AGENT_ALIVE_MS;
-  });
-  const coord = !e.active ? "stopped" : signal?.ended ? "stopped" : waiting ? "alive" : signalLiveness(lastSeen, false, i.now);
+  const fresh = (d) => freshSignal(d, i.now);
+  const { signal, lastSeen, waiting, liveness: coord } = coordinatorOf(e, i.live, i.now, e.lastStepAt);
   const rank = { stopped: 0, silent: 1, alive: 2 };
   const memberLiveness = (p) => {
     const d = i.live.filter((x) => fresh(x) && x.sessionId === p.by && x.runId === e.runId).reduce((best, x) => !best || Date.parse(x.ts) > Date.parse(best.ts) ? x : best, null);
@@ -11006,6 +11018,9 @@ var BOUND_VIAS = ["work", "design", "forge-run", "forge-member", "forge-infinite
 var BOUND_END_REASONS = ["clear", "resume", "logout", "prompt_input_exit", "other", "released"];
 var MAX_SEATS = 10;
 var BOUND_MAX_BYTES = 4096;
+var SESSION_MAX_BYTES = 8 * 1024;
+var BOUND_REREAD_MS = 8;
+var CACHE_DOCS_MAX = 500;
 var isBoundVia = (x) => BOUND_VIAS.includes(x);
 var isEndReason = (x) => BOUND_END_REASONS.includes(x);
 function date(x, now) {
@@ -11043,6 +11058,10 @@ function parseBound(text2, now) {
 
 // src/lib/member-doc.ts
 var isMemberId = (s) => isSafeId(s);
+var MEMBERS_MAX = 50;
+function newestMemberFiles(files) {
+  return files.filter((f) => f.name.endsWith(".json") && isMemberId(f.name.slice(0, -5)) && f.size <= FORGE_DOC_MAX_BYTES).sort((a, b) => b.mtimeMs - a.mtimeMs || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)).slice(0, MEMBERS_MAX);
+}
 function normalizeMember(x) {
   if (!x || typeof x !== "object" || Array.isArray(x)) return null;
   const o = x;
@@ -11147,11 +11166,14 @@ function pickProject(entries, sessionId) {
   };
   return [...own.length ? own : entries].sort(better)[0].name;
 }
+function checkoutSidOf(session, bound, now) {
+  const named = json(session)?.sessionId;
+  return typeof named === "string" && named ? named : parseBound(bound, now)?.sid ?? null;
+}
 function seatsOf(f, now) {
   const texts = f.bindings ?? {};
-  const named = json(f.session)?.sessionId;
   const checkoutBound = parseBound(texts["."], now);
-  const sid = typeof named === "string" && named ? named : checkoutBound?.sid ?? null;
+  const sid = checkoutSidOf(f.session, texts["."], now);
   const out = [];
   if (sid !== null && isSafeId(sid)) out.push({ sid, checkout: true, bound: checkoutBound?.sid === sid ? checkoutBound : null, session: f.session });
   const extra = Object.keys(texts).filter((k) => k !== "." && k !== sid && isSafeId(k)).sort().slice(0, MAX_SEATS);
@@ -11179,13 +11201,24 @@ function membersOf(f, runId) {
     return m && m.runId === runId ? [m] : [];
   });
 }
-function coordinatorEnded(exec, text2) {
-  return !!exec?.hookSession && normalizeLive(json(text2))?.ended === true;
-}
 function viewerOf(v, exec, now) {
   const ownsRun = v.role === "owner" && v.subject === "execution";
   const runId = exec && v.subject === "execution" && isVisibleRun(exec, now, ownsRun ? "owner" : "none") ? exec.runId : null;
   return { role: v.role, coordinator: v.coordinator, runId };
+}
+function runInput(exec, f, now) {
+  return { execution: exec, members: exec ? membersOf(f, exec.runId) : [], coordinatorEnded: coordinatorGone(exec, normalizeLive(json(f.coordinatorLive)), now) };
+}
+function forgeViewer(exec, f, now) {
+  return viewerOf(describeViewer({ bound: null, ...runInput(exec, f, now), sessionId: isSafeId(f.sessionId) ? f.sessionId : null, now }), exec, now);
+}
+function executionViewer(f) {
+  const now = f.now ?? Date.now();
+  try {
+    return forgeViewer(parseExecution(f.execution, now), f, now);
+  } catch {
+    return { ...NO_VIEWER };
+  }
 }
 function buildBandModel(project, f) {
   const now = f.now ?? Date.now();
@@ -11198,39 +11231,41 @@ function buildBandModel(project, f) {
     }
     const exec = projectExecution(project, f, now);
     const seats = seatsOf(f, now);
+    const sessionId = isSafeId(f.sessionId) ? f.sessionId : null;
+    const states = parsed(f.states);
     const v = describeViewer({
       bound: seats.flatMap((s) => s.bound ? [s.bound] : []),
-      execution: exec,
-      members: exec ? membersOf(f, exec.runId) : [],
-      sessionId: isSafeId(f.sessionId) ? f.sessionId : null,
+      ...runInput(exec, f, now),
+      sessionId,
       now,
-      coordinatorEnded: coordinatorEnded(exec, f.coordinatorLive),
-      openTasks: openTasksFrom(parsed(f.states))
+      openTasks: openTasksFrom(states)
     });
     const viewer = viewerOf(v, exec, now);
     if (v.coordinator && exec) {
       const r = runModel(project, f, exec, plan, now, viewer);
       if (r) return withAuto(r, f, now);
     }
-    if (f.plan === void 0 && f.design === void 0 || f.plan !== void 0 && !plan) return noneBand(knownLocale(f));
-    const m = roleBand(project, f, plan, v, exec, seats, now, viewer);
+    if (f.plan === void 0 && f.design === void 0) return noneBand(knownLocale(f), forgeViewer(exec, f, now));
+    if (f.plan !== void 0 && !plan) return noneBand(knownLocale(f));
+    if (sessionId === null) return noneBand(knownLocale(f), viewer);
+    const m = roleBand(project, f, plan, states, v, exec, seats, now, viewer);
     if (m) return withAuto(m, f, now);
     return noneBand(knownLocale(f), viewer);
   } catch {
   }
   return noneBand(knownLocale(f));
 }
-function roleBand(project, f, plan, v, exec, seats, now, viewer) {
+function roleBand(project, f, plan, states, v, exec, seats, now, viewer) {
   if (v.role === "owner" && v.member && exec) {
     if (!plan) return null;
     const m = v.member;
-    return workModel(project, f, plan, { sid: m.sessionId, ...seatInfo(seats, m.sessionId), task: m.task, since: m.since, run: memberLine(project, m, f, exec) }, now, viewer);
+    return workModel(project, f, plan, states, { sid: m.sessionId, ...seatInfo(seats, m.sessionId), task: m.task, since: m.since, run: memberLine(project, m, f, exec) }, now, viewer);
   }
   if (v.role === "owner" && v.binding) {
     const b = v.binding;
     if (b.via === "design") return f.design !== void 0 ? designModel(project, f, viewer) : null;
     if (!plan) return null;
-    return workModel(project, f, plan, { sid: b.sid, ...seatInfo(seats, b.sid), task: null, since: null, run: memberRun(project, b.sid, f, exec) }, now, viewer);
+    return workModel(project, f, plan, states, { sid: b.sid, ...seatInfo(seats, b.sid), task: null, since: null, run: memberRun(project, b.sid, f, exec) }, now, viewer);
   }
   if (v.role === "other-live" || v.role === "previous") return noticeModel(project, f, plan, v, exec, now, viewer);
   return null;
@@ -11253,6 +11288,7 @@ function noticeModel(project, f, plan, v, exec, now, viewer) {
       integrated: view.integrated,
       total: view.total,
       stopReason: exec.active ? null : exec.stopReason,
+      joinable: exec.active && exec.kind === "plan",
       key: `run:${exec.runId}`
     };
   }
@@ -11260,6 +11296,7 @@ function noticeModel(project, f, plan, v, exec, now, viewer) {
   if (!b) return null;
   if (kind === "other-live") {
     if (!plan) return null;
+    if (b.via === "design") return { ...base, subject: "design", seat: b.sid, task: null, title: null, runId: null, key: `design:${project}` };
     return { ...base, subject: "task", seat: b.sid, task: v.task, title: titleOf(v.task), runId: null, key: v.task ? `task:${v.task}` : `seat:${b.sid}` };
   }
   if (b.via === "design") return isDraft(f) ? { ...base, subject: "design", seat: b.sid, task: null, title: null, runId: null, key: `design:${project}` } : null;
@@ -11309,9 +11346,8 @@ function seatInfo(seats, sid) {
   const s = json(seats.find((x) => x.sid === sid)?.session) ?? {};
   return { track: typeof s.track === "string" ? s.track : null, swarm: typeof s.launchedBy === "string" && !!s.launchedBy };
 }
-function workModel(project, f, plan, seat, now, viewer) {
+function workModel(project, f, plan, states, seat, now, viewer) {
   const { sid, track } = seat;
-  const states = parsed(f.states);
   const messages = parsed(f.messages);
   const m = computeMetrics(plan, states, now);
   const own = seat.task ? plan.tasks.find((t) => t.id === seat.task) : plan.tasks.find((t) => states[t.id]?.owner === sid && ["claimed", "in_progress"].includes(states[t.id]?.status ?? ""));
@@ -11478,6 +11514,7 @@ var TEXT = {
     ago: "hace {ago}",
     noticeOtherTask: "otra sesi\xF3n ({seat}) trabaja en {task}",
     noticeOtherBound: "otra sesi\xF3n ({seat}) est\xE1 ligada al roadmap",
+    noticeOtherDesign: "otra sesi\xF3n ({seat}) trabaja en el dise\xF1o",
     noticeOtherRun: "ejecuci\xF3n de forge en curso, la coordina otra sesi\xF3n \xB7 {i}/{t}",
     noticePrevTask: "qued\xF3 a medias: {task} {title}",
     noticePrevDesign: "dise\xF1o a medias: {project}",
@@ -11531,6 +11568,7 @@ var TEXT = {
     ago: "{ago} ago",
     noticeOtherTask: "another session ({seat}) works on {task}",
     noticeOtherBound: "another session ({seat}) is bound to the roadmap",
+    noticeOtherDesign: "another session ({seat}) is working on the design",
     noticeOtherRun: "forge execution running, coordinated by another session \xB7 {i}/{t}",
     noticePrevTask: "left in progress: {task} {title}",
     noticePrevDesign: "design left in progress: {project}",
@@ -11551,10 +11589,11 @@ function agoText(since, nowMs2) {
 }
 function noticeLine(m, nowMs2, t) {
   const vals = {
+    // The project is a folder name under docs/waypoint/ that nothing checks: clipped as a title is (M7).
     seat: m.seat ?? "",
     task: m.task ?? "",
     title: m.title ? clip(m.title) : "",
-    project: m.project,
+    project: clip(m.project),
     i: String(m.integrated ?? 0),
     t: String(m.total ?? 0)
   };
@@ -11562,7 +11601,7 @@ function noticeLine(m, nowMs2, t) {
   const ago = agoText(m.since, nowMs2);
   if (m.kind === "other-live") {
     if (m.subject === "run") return `\u25E6 ${fill(t.noticeOtherRun)}`;
-    const head2 = `\u25E6 ${fill(m.task ? t.noticeOtherTask : t.noticeOtherBound)}`;
+    const head2 = `\u25E6 ${fill(m.subject === "design" ? t.noticeOtherDesign : m.task ? t.noticeOtherTask : t.noticeOtherBound)}`;
     return ago ? `${head2} \xB7 ${t.ago.replace("{ago}", ago)}` : head2;
   }
   const text2 = m.subject === "run" ? m.stopReason ? t.noticeRunStopped : t.noticeRunOrphan : m.subject === "design" ? t.noticePrevDesign : t.noticePrevTask;
@@ -11614,7 +11653,7 @@ function bandLine(m, nowMs2) {
 }
 
 // src/mod/files.ts
-var MAX_DOCS = 500;
+var MAX_DOCS = CACHE_DOCS_MAX;
 var MAX_PROJECTS = 50;
 var RENEW_MS = 6e4;
 var join = (...parts) => parts.join("/");
@@ -11649,7 +11688,7 @@ async function nowMs($) {
 }
 async function readCollection($, dir) {
   const out = {};
-  const files = (await listOpt($, dir)).filter((f) => f.kind === "file" && f.name.endsWith(".json")).slice(0, MAX_DOCS);
+  const files = (await listOpt($, dir)).filter((f) => f.kind === "file" && f.name.endsWith(".json")).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0).slice(0, MAX_DOCS);
   for (const f of files) {
     const text2 = await readOpt($, join(dir, f.name));
     if (text2 !== void 0) out[f.name.slice(0, -5)] = text2;
@@ -11673,19 +11712,28 @@ async function readSmall($, path, max) {
   }
   return readOpt($, path);
 }
-var SESSION_FILE_MAX = 8 * 1024;
-async function seatFiles($, wp) {
+async function readBoundText($, path, now) {
+  const text2 = await readSmall($, path, BOUND_MAX_BYTES);
+  if (text2 === void 0 || parseBound(text2, now) !== null) return text2;
+  try {
+    await $.clock.sleep(BOUND_REREAD_MS);
+  } catch {
+  }
+  return readSmall($, path, BOUND_MAX_BYTES);
+}
+async function seatFiles($, wp, now) {
   const bindings = {};
   const seatSessions = {};
-  const session = await readSmall($, join(wp, "session.json"), SESSION_FILE_MAX);
-  const own = await readSmall($, join(wp, "bound.json"), BOUND_MAX_BYTES);
+  const session = await readSmall($, join(wp, "session.json"), SESSION_MAX_BYTES);
+  const own = await readBoundText($, join(wp, "bound.json"), now);
   if (own !== void 0) bindings["."] = own;
-  const names = (await listOpt($, join(wp, "seats"))).filter((d) => d.kind === "dir" && isSafeId(d.name)).map((d) => d.name).sort().slice(0, MAX_SEATS + 1);
+  const checkout = checkoutSidOf(session, own, now);
+  const names = (await listOpt($, join(wp, "seats"))).filter((d) => d.kind === "dir" && isSafeId(d.name) && d.name !== checkout).map((d) => d.name).sort().slice(0, MAX_SEATS);
   for (const n of names) {
-    const text2 = await readSmall($, join(wp, "seats", n, "bound.json"), BOUND_MAX_BYTES);
+    const text2 = await readBoundText($, join(wp, "seats", n, "bound.json"), now);
     if (text2 === void 0) continue;
     bindings[n] = text2;
-    const s = await readSmall($, join(wp, "seats", n, "session.json"), SESSION_FILE_MAX);
+    const s = await readSmall($, join(wp, "seats", n, "session.json"), SESSION_MAX_BYTES);
     if (s !== void 0) seatSessions[n] = s;
   }
   return { session, bindings, seatSessions };
@@ -11697,26 +11745,28 @@ async function projectEntries($, root, now) {
   for (const d of dirs) {
     const times = [await mtime($, join(docs, d.name, "plan.yaml")), await mtime($, join(docs, d.name, "design.md"))].filter((t) => t !== null);
     if (!times.length) continue;
-    const seats = await seatFiles($, join(root, ".waypoint", d.name));
+    const seats = await seatFiles($, join(root, ".waypoint", d.name), now);
     const bindings = seatsOf(seats, now).flatMap((s) => s.bound ? [s.bound] : []);
     out.push({ entry: { name: d.name, bindings, mtimeMs: Math.max(...times) }, seats });
   }
   return out;
 }
 var EXEC_MAX = 64 * 1024;
-var EXEC_FILE_MAX = 8 * 1024;
+var EXEC_FILE_MAX = FORGE_DOC_MAX_BYTES;
 var EXEC_TASKS_MAX = 50;
 var LIVE_MAX = 20;
-var MEMBERS_MAX = 50;
 var SAFE_TASK = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,80}$/;
-async function readJsonDir($, dir, max, keep) {
+async function readEach($, dir, files) {
   const out = {};
-  const files = (await listOpt($, dir)).filter((f) => f.kind === "file" && f.name.endsWith(".json") && f.size <= EXEC_FILE_MAX && keep(f.name.slice(0, -5))).sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, max);
   for (const f of files) {
     const text2 = await readOpt($, join(dir, f.name));
     if (text2 !== void 0) out[f.name.slice(0, -5)] = text2;
   }
   return out;
+}
+async function readJsonDir($, dir, max, keep) {
+  const files = (await listOpt($, dir)).filter((f) => f.kind === "file" && f.name.endsWith(".json") && f.size <= EXEC_FILE_MAX && keep(f.name.slice(0, -5))).sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, max);
+  return readEach($, dir, files);
 }
 async function loadForge($, root, now) {
   try {
@@ -11735,7 +11785,10 @@ async function loadForge($, root, now) {
       out.execTasks = await readJsonDir($, join(dir, "execution"), EXEC_TASKS_MAX, (name) => SAFE_TASK.test(name));
     }
     if (entries.some((f) => f.kind === "dir" && f.name === "live")) out.live = await readJsonDir($, join(dir, "live"), LIVE_MAX, () => true);
-    if (entries.some((f) => f.kind === "dir" && f.name === "members")) out.members = await readJsonDir($, join(dir, "members"), MEMBERS_MAX, (name) => isSafeId(name));
+    if (entries.some((f) => f.kind === "dir" && f.name === "members")) {
+      const members = join(dir, "members");
+      out.members = await readEach($, members, newestMemberFiles((await listOpt($, members)).filter((f) => f.kind === "file")));
+    }
     const hook = parseExecution(execution, now)?.hookSession;
     if (hook && isSafeId(hook)) {
       const signal = out.live?.[hook] ?? await readSmall($, join(dir, "live", `${hook}.json`), EXEC_FILE_MAX);
@@ -11746,14 +11799,16 @@ async function loadForge($, root, now) {
     return {};
   }
 }
-async function loadBandFiles($) {
+async function readBandFiles($) {
   const root = await $.session.root();
   const now = await nowMs($);
   const sessionId = await sessionIdOf($);
   const projects = await projectEntries($, root, now);
   const project = pickProject(projects.map((p) => p.entry), sessionId);
   const chosen = projects.find((p) => p.entry.name === project);
-  if (!project || !chosen) return null;
+  if (!project || !chosen) {
+    return { project: null, files: { states: {}, messages: {}, critiques: {}, ...await loadForge($, root, now), sessionId, now } };
+  }
   const pdocs = join(root, "docs", "waypoint", project);
   const pstate = join(root, ".waypoint", project);
   const critiques = {};
@@ -11778,8 +11833,8 @@ async function loadBandFiles($) {
   return { project, files };
 }
 async function loadBandModel($) {
-  const loaded = await loadBandFiles($);
-  return loaded ? buildBandModel(loaded.project, loaded.files) : noneBand();
+  const { project, files } = await readBandFiles($);
+  return project ? buildBandModel(project, files) : noneBand(void 0, executionViewer(files));
 }
 async function renewBindings($) {
   const id2 = await sessionIdOf($);
@@ -11791,17 +11846,17 @@ async function renewBindings($) {
   const projects = (await listOpt($, join(root, ".waypoint"))).filter((d) => d.kind === "dir").slice(0, MAX_PROJECTS);
   for (const p of projects) {
     const wp = join(root, ".waypoint", p.name);
-    for (const s of seatsOf(await seatFiles($, wp), now)) {
-      if (!due(s.bound, s.sid)) continue;
-      const file = s.checkout ? join(wp, "bound.json") : join(wp, "seats", s.sid, "bound.json");
-      const cur = parseBound(await readOpt($, file), now);
-      if (!due(cur, s.sid)) continue;
-      try {
-        await $.fs.write(file, `${JSON.stringify({ ...cur, seenAt: new Date(now).toISOString() }, null, 2)}
+    const mine = seatsOf(await seatFiles($, wp, now), now).filter((s2) => s2.bound?.claude === id2 && s2.bound.endedAt === null);
+    const s = mine.reduce((best, x) => !best || Date.parse(x.bound.seenAt) > Date.parse(best.bound.seenAt) ? x : best, null);
+    if (!s || !due(s.bound, s.sid)) continue;
+    const file = s.checkout ? join(wp, "bound.json") : join(wp, "seats", s.sid, "bound.json");
+    const cur = parseBound(await readOpt($, file), now);
+    if (!due(cur, s.sid)) continue;
+    try {
+      await $.fs.write(file, `${JSON.stringify({ ...cur, seenAt: new Date(now).toISOString() }, null, 2)}
 `);
-        renewed++;
-      } catch {
-      }
+      renewed++;
+    } catch {
     }
   }
   return renewed;
@@ -11811,13 +11866,21 @@ async function renewBindings($) {
 var DISMISS_STORE_KEY = "dismissed";
 var DISMISS_MAX = 200;
 var OTHER_LIVE_DISMISS_MS = 24 * 36e5;
-var dismissalKey = (root, project, kind, key) => `${root}|${project}|${kind}|${key}`;
+var dismissalKey = (root, project, kind, key) => JSON.stringify([root, project, kind, key]);
+function isDismissalKey(k) {
+  try {
+    const v = JSON.parse(k);
+    return Array.isArray(v) && v.length === 4 && v.every((x) => typeof x === "string");
+  } catch {
+    return false;
+  }
+}
 function normalizeDismissals(x, now) {
   if (!x || typeof x !== "object" || Array.isArray(x)) return {};
   return Object.fromEntries(Object.entries(x).filter((entry) => {
     const [k, v] = entry;
     const t = typeof v === "string" ? Date.parse(v) : NaN;
-    return k !== "" && Number.isFinite(t) && t > now;
+    return isDismissalKey(k) && Number.isFinite(t) && t > now;
   }));
 }
 function dismissalUntil(n, now) {
@@ -11891,11 +11954,14 @@ var writeFailed = (text2) => typeof text2 === "string" && /version_mismatch|not 
 // src/mod/register.tsx
 var band = atom({ plugin: "waypoint", key: "band" }, noneBand());
 var hidden = atom({ plugin: "waypoint", key: "hidden" }, false);
+var OWN_BANDS = ["work", "run", "design"];
 var refreshing = false;
 var timer = null;
 var lensRecheck = null;
 var dismissals = {};
+var dismissalsLoaded = false;
 async function loadDismissals($) {
+  dismissalsLoaded = true;
   try {
     dismissals = normalizeDismissals(await $.store.get(DISMISS_STORE_KEY), await nowMs($));
   } catch {
@@ -11938,7 +12004,10 @@ async function refresh($) {
       try {
         const model = await loadBandModel($);
         const current = await read($, band);
-        if (JSON.stringify(current) !== JSON.stringify(model)) await update($, band, () => model);
+        if (JSON.stringify(current) !== JSON.stringify(model)) {
+          await update($, band, () => model);
+          if (model.mode === "notice" && OWN_BANDS.includes(current.mode)) await update($, hidden, () => false);
+        }
       } catch {
       }
     } while (refreshPending);
@@ -12058,7 +12127,10 @@ export const register = (on) => {
       const m = await read($, band);
       const isHidden = await read($, hidden);
       if (isHidden || !m || e.props.hasSurvey || m.mode === "none") return below;
-      if (m.mode === "notice" && isDismissed(dismissals, dismissalKey(await rootOf($), m.project, m.kind, m.key), await nowMs($))) return below;
+      if (m.mode === "notice") {
+        if (!dismissalsLoaded) await loadDismissals($);
+        if (isDismissed(dismissals, dismissalKey(await rootOf($), m.project, m.kind, m.key), await nowMs($))) return below;
+      }
       const { Box, Text, Button, Link } = $.ui.resolve(e);
       const drawnAt = m.mode === "notice" || m.mode === "work" && m.current?.startedAt ? await $.clock.now() : 0;
       const line = bandLine(m, drawnAt);
@@ -12086,10 +12158,11 @@ export const register = (on) => {
         if (n.kind === "other-live") {
           return n.subject === "run" ? [
             /* @__PURE__ */ h(Button, { key: "view", label: t.view, onPress: submit("/waypoint:status") }),
-            /* @__PURE__ */ h(Button, { key: "join", label: t.join, onPress: submit("/forge:run --join") })
+            ...n.joinable ? [/* @__PURE__ */ h(Button, { key: "join", label: t.join, onPress: submit("/forge:run --join") })] : []
           ] : [
             /* @__PURE__ */ h(Button, { key: "status", label: t.status, onPress: submit("/waypoint:status") }),
-            /* @__PURE__ */ h(Button, { key: "other-track", label: t.otherTrack, onPress: fill("/waypoint:launch ") }),
+            // A session on the design holds no track: there is no other one to launch.
+            ...n.subject === "design" ? [] : [/* @__PURE__ */ h(Button, { key: "other-track", label: t.otherTrack, onPress: fill("/waypoint:launch ") })],
             ...n.roadmapUrl ? [link(n.roadmapUrl, t.roadmap)] : []
           ];
         }

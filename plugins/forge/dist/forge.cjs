@@ -12371,6 +12371,7 @@ function normalizePublicTask(x) {
 }
 var LIVE_SILENT_MINUTES = 7;
 var LIVE_STOPPED_MINUTES = 12;
+var FORGE_DOC_MAX_BYTES = 8 * 1024;
 function normalizeLive(x) {
   if (!isObj3(x)) return null;
   const sessionId = str3(x.sessionId), ts = iso2(x.ts);
