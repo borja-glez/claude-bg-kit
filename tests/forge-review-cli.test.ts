@@ -860,6 +860,23 @@ describe('forge review-close', () => {
     expect(index.rounds[1].findings.map((f: { id: string; status: string }) => [f.id, f.status])).toEqual([['F1', 'open']]);
   });
 
+  it('a stray id on a new finding of the fix next to the finding just fixed takes nobody\'s id: hardening, and the brief is accepted (C-T11)', () => {
+    noExpress();
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'the second line is not validated' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    close();
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo validated\n');
+    git('commit', '-q', '-am', 'fix');
+    prep();
+    write(r2(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 3, problem: 'an empty input now throws', origin: 'fix', id: 'F3' }] });
+    const out = JSON.parse(close().stdout);
+    expect(out).toMatchObject({ action: 'accept', next: 'done' });
+    expect(out.deferred).toEqual([expect.objectContaining({ id: 'F2', residual: 'hardening' })]);
+    const index = JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8'));
+    expect(index.rounds[1].findings.map((f: { id: string; status: string }) => [f.id, f.status])).toEqual([['F2', 'residual'], ['F1', 'closed']]);
+  });
+
   it('round 2: a finding still open whose reviewer copies its id but calls it untouched is previous and blocks (J-06)', () => {
     noExpress();
     prep();

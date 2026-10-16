@@ -78,21 +78,21 @@ const withoutId = (f: Finding): Finding => { const c = { ...f }; delete c.id; re
 /**
  * Gives every critical and important finding of this review its stable id (J-06): 1. the id the reviewer copied on a
  * finding it calls `previous`, when it was open in the previous review for that reviewer (for any reviewer in an express
- * review, whose finding stays that reviewer's); 2. else, for a finding the reviewer marks `previous` or gives no origin, or
- * whose copied id was not kept (C-T11: an id copied onto a finding of another origin, say from the JSON example, is never
- * taken as is; pairing decides), the id of the open finding of the same reviewer it pairs with (pairFindings); 3. else
- * F<next>. A finding the reviewer calls new (`fix`, `untouched`) without an id never inherits one. Security's findings
- * ruled out of the threat model count as open here, so one reported again keeps its id and the ruling (C-T6). Minor
- * findings get none. Every finding gets its `reviewer`. Recording this review again gives the same ids, because `next`
- * counts only the reviews before it. After a redo (`fresh`, I4) nothing of the reverted attempt is open: every finding
- * gets a new id.
+ * review, whose finding stays that reviewer's); 2. else, for a finding whose copied id was not kept (C-T11: an id copied
+ * onto a finding of another origin, say from the JSON example, is never taken as is), that id only when the finding pairs
+ * with the open entry it names, never another one's; for a finding without an id the reviewer marks `previous` or gives
+ * no origin, the id of the open finding of the same reviewer it pairs with (pairFindings); 3. else F<next>. A finding
+ * the reviewer calls new (`fix`, `untouched`) without an id never inherits one. Security's findings ruled out of the
+ * threat model count as open here, so one reported again keeps its id and the ruling (C-T6). Minor findings get none.
+ * Every finding gets its `reviewer`. Recording this review again gives the same ids, because `next` counts only the
+ * reviews before it. After a redo (`fresh`, I4) nothing of the reverted attempt is open: every finding gets a new id.
  */
 export function assignIds(index: FindingsIndex, round: number, reviews: Partial<Record<ReviewerName, Review>>, opts: { express?: boolean; fresh?: boolean } = {}): Partial<Record<ReviewerName, Review>> {
   const open = opts.fresh ? [] : (previousOf(index, round)?.findings ?? [])
     .filter((f, i, all) => (isOpen(f) || ruledOutOfModel(f)) && all.findIndex(g => g.id === f.id) === i);
   const taken = new Set<string>();
-  // The findings whose copied id was not kept: pairing decides for them whatever origin they give (C-T11).
-  const hinted = new Set<Finding>();
+  // The findings whose copied id was not kept, with that id: each may pair only with the open entry it names (C-T11).
+  const hinted = new Map<Finding, string>();
   const staged = new Map<ReviewerName, Finding[]>();
   for (const n of REVIEWERS) {
     const r = reviews[n];
@@ -102,13 +102,17 @@ export function assignIds(index: FindingsIndex, round: number, reviews: Partial<
       const e = f.id && f.origin === 'previous' ? open.find(o => o.id === f.id && !taken.has(o.id) && (o.reviewer === n || opts.express === true)) : undefined;
       if (e) { taken.add(e.id); return { ...f, id: e.id, reviewer: e.reviewer }; }
       const g = withoutId({ ...f, reviewer: n });
-      if (f.id) hinted.add(g);
+      if (f.id) hinted.set(g, f.id);
       return g;
     }));
   }
   for (const [n, list] of staged) {
+    list.forEach((f, i) => {
+      const named = hinted.has(f) ? open.find(o => o.id === hinted.get(f) && o.reviewer === n && !taken.has(o.id)) : undefined;
+      if (named && pairFindings([f], [named])[0] === 0) { list[i] = { ...f, id: named.id }; taken.add(named.id); }
+    });
     const loose = list.map((f, i) => ({ f, i }))
-      .filter(x => x.f.severity !== 'minor' && !x.f.id && (x.f.origin === undefined || x.f.origin === 'previous' || hinted.has(x.f)));
+      .filter(x => x.f.severity !== 'minor' && !x.f.id && !hinted.has(x.f) && (x.f.origin === undefined || x.f.origin === 'previous'));
     const free = open.filter(o => o.reviewer === n && !taken.has(o.id));
     const pairs = pairFindings(loose.map(x => x.f), free);
     loose.forEach((x, k) => {

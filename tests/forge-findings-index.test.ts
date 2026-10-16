@@ -62,6 +62,9 @@ describe('findings index (J-06)', () => {
     expect(r2({})).toEqual(['F2']);
     // Dropped, the id still lets pairing decide: the same finding mislabelled untouched pairs back with it.
     expect(ids(assignIds(one, 2, { correctness: fail([imp('null check missing', { id: 'F1', origin: 'untouched' })]) }).correctness)).toEqual(['F1']);
+    // But only with the entry it named: a stray id next to another open finding never takes that finding's id.
+    expect(ids(assignIds(one, 2, { correctness: fail([imp('an empty input now throws', { id: 'F7', origin: 'fix', line: 11 })]) }).correctness)).toEqual(['F2']);
+    expect(ids(assignIds(one, 2, { correctness: fail([imp('an empty input now throws', { id: 'F7', line: 11 })]) }).correctness)).toEqual(['F2']);
   });
 
   it('a finding ruled out of the threat model (minor, outOfModel) keeps its id when security reports it again (C-T6)', () => {
