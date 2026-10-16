@@ -12918,7 +12918,7 @@ function renderBrief(plan, task, opts) {
 }
 
 // src/forge/threat-model.ts
-var oneLine = (s2) => s2.replace(/\s+/g, " ").trim();
+var oneLine = (s2) => s2.replace(/[\s\u0085]+/g, " ").trim();
 function renderThreatModel(tm) {
   const lines = ["## Threat model", ""];
   for (const s2 of tm.protects) lines.push(`- Protects: ${oneLine(s2)}`);
@@ -13613,6 +13613,7 @@ function verifyReview(v) {
 }
 var round3 = (n) => Math.round(n * 1e3) / 1e3;
 var isEvidence = (f) => !!f.file?.trim() && !!f.problem.trim();
+var breaksRubric = (r2) => r2.verdict === "fail" && !r2.findings.some((f) => f.severity === "important" || f.severity === "critical" && isEvidence(f));
 function reviewScore(r2) {
   if (r2.verdict === "pass") return 0.7 + 0.3 * r2.confidence;
   const concrete = r2.findings.some((f) => f.severity === "critical" || f.severity === "important");
@@ -13622,10 +13623,10 @@ var RIDES_ALONG = ["untouched", "docs", "late-round"];
 function synthesize(reviews, weights, validatorsOk, failingValidators = [], opts = {}) {
   const names2 = Object.keys(reviews).filter((n) => reviews[n]);
   const r2 = Math.max(1, opts.round ?? 1);
-  const later = r2 >= 2;
+  const later = r2 >= 2 && opts.fresh !== true;
   const last = opts.last === true;
   const hunks = opts.fixHunks ?? {};
-  const rubric = names2.filter((n) => reviews[n].verdict === "fail" && !reviews[n].findings.some((f) => f.severity === "important" || f.severity === "critical" && isEvidence(f)));
+  const rubric = names2.filter((n) => breaksRubric(reviews[n]));
   const rv = {};
   for (const n of names2) {
     const x = reviews[n];
@@ -15951,6 +15952,8 @@ var ORIGINS2 = ["previous", "fix", "untouched"];
 var RESIDUALS = ["untouched", "hardening", "late-round", "cap", "docs", "out-of-model", "architecture"];
 var SENT = ["untouched", "docs", "late-round"];
 var isOpen = (f) => f.status === "open" || f.status === "residual";
+var unsent = (f) => f.status === "residual" && !(f.residual && SENT.includes(f.residual));
+var ruledOutOfModel = (f) => f.status === "minor" && f.outOfModel === true && f.reviewer === "security";
 var idNumber = (id2) => Number(id2.slice(1));
 var nextId = (rounds) => 1 + Math.max(0, ...rounds.flatMap((r2) => r2.findings.map((f) => idNumber(f.id))));
 var before = (index, round) => index.rounds.filter((r2) => r2.round < round);
@@ -16006,24 +16009,27 @@ var withoutId = (f) => {
   return c;
 };
 function assignIds(index, round, reviews, opts = {}) {
-  const open = (previousOf(index, round)?.findings ?? []).filter((f, i, all) => isOpen(f) && all.findIndex((g) => g.id === f.id) === i);
+  const open = opts.fresh ? [] : (previousOf(index, round)?.findings ?? []).filter((f, i, all) => (isOpen(f) || ruledOutOfModel(f)) && all.findIndex((g) => g.id === f.id) === i);
   const taken = /* @__PURE__ */ new Set();
+  const hinted = /* @__PURE__ */ new Set();
   const staged = /* @__PURE__ */ new Map();
   for (const n of REVIEWERS) {
     const r2 = reviews[n];
     if (!r2) continue;
     staged.set(n, r2.findings.map((f) => {
       if (f.severity === "minor") return withoutId({ ...f, reviewer: n });
-      const e = f.id ? open.find((o) => o.id === f.id && !taken.has(o.id) && (o.reviewer === n || opts.express === true)) : void 0;
+      const e = f.id && f.origin === "previous" ? open.find((o) => o.id === f.id && !taken.has(o.id) && (o.reviewer === n || opts.express === true)) : void 0;
       if (e) {
         taken.add(e.id);
         return { ...f, id: e.id, reviewer: e.reviewer };
       }
-      return withoutId({ ...f, reviewer: n });
+      const g = withoutId({ ...f, reviewer: n });
+      if (f.id) hinted.add(g);
+      return g;
     }));
   }
   for (const [n, list] of staged) {
-    const loose = list.map((f, i) => ({ f, i })).filter((x) => x.f.severity !== "minor" && !x.f.id && (x.f.origin === void 0 || x.f.origin === "previous"));
+    const loose = list.map((f, i) => ({ f, i })).filter((x) => x.f.severity !== "minor" && !x.f.id && (x.f.origin === void 0 || x.f.origin === "previous" || hinted.has(x.f)));
     const free = open.filter((o) => o.reviewer === n && !taken.has(o.id));
     const pairs = pairFindings(loose.map((x) => x.f), free);
     loose.forEach((x, k) => {
@@ -16044,7 +16050,7 @@ function assignIds(index, round, reviews, opts = {}) {
 function answeredBy(reviews) {
   return REVIEWERS.filter((n) => {
     const r2 = reviews[n];
-    return !!r2 && r2.verdict !== "abstain" && r2.invalid !== true && !(r2.verdict === "fail" && !r2.findings.some((f) => f.severity !== "minor"));
+    return !!r2 && r2.verdict !== "abstain" && r2.invalid !== true && r2.incomplete !== true && !breaksRubric(r2);
   });
 }
 var idsOf = (reviews) => new Set(Object.values(reviews).flatMap((r2) => r2?.findings.map((f) => f.id).filter((id2) => !!id2) ?? []));
@@ -16065,7 +16071,8 @@ function entry(f, status) {
     status
   };
 }
-function recordRound(index, round, verdict, answered) {
+var judgedIds = (verdict) => new Set([...verdict.critical, ...verdict.important, ...verdict.deferred, ...verdict.minor].map((f) => f.id).filter((id2) => !!id2));
+function recordRound(index, round, verdict, answered, opts = {}) {
   const entries = [];
   const seen = /* @__PURE__ */ new Set();
   const add = (f, status) => {
@@ -16079,12 +16086,27 @@ function recordRound(index, round, verdict, answered) {
   for (const f of verdict.important) add(f, f.residual ? "residual" : "open");
   for (const f of verdict.deferred) add(f, "residual");
   for (const f of verdict.minor) add(f, "minor");
-  for (const o of previousOf(index, round)?.findings ?? []) {
+  for (const o of opts.fresh ? [] : previousOf(index, round)?.findings ?? []) {
     if (seen.has(o.id) || !isOpen(o)) continue;
-    entries.push(answered.includes(o.reviewer) ? { ...o, status: "closed" } : o);
+    entries.push(answered.includes(o.reviewer) && !unsent(o) ? { ...o, status: "closed" } : o);
   }
   const rounds = [...index.rounds.filter((r2) => r2.round !== round), { round, findings: entries }].sort((a, b) => a.round - b.round);
   return { task: index.task, next: nextId(rounds), rounds };
+}
+function carriedResiduals(index, round, verdict) {
+  const seen = judgedIds(verdict);
+  return (previousOf(index, round)?.findings ?? []).filter((f) => unsent(f) && !seen.has(f.id)).map((f) => ({
+    id: f.id,
+    reviewer: f.reviewer,
+    severity: f.severity,
+    ...f.file ? { file: f.file } : {},
+    ...f.line !== void 0 ? { line: f.line } : {},
+    problem: f.problem,
+    ...f.fix ? { fix: f.fix } : {},
+    ...f.origin ? { origin: f.origin } : {},
+    ...f.regression ? { regression: true } : {},
+    ...f.residual ? { residual: f.residual } : {}
+  }));
 }
 function openIds(index, round) {
   const out = {};
@@ -16118,7 +16140,7 @@ function closedFor(index, round, present, answered) {
   return out;
 }
 function previousFindings(index, round, reviewer) {
-  return (previousOf(index, round)?.findings ?? []).filter((f) => (reviewer === void 0 || f.reviewer === reviewer) && (f.status === "open" || f.status === "residual" && !!f.residual && SENT.includes(f.residual)));
+  return (previousOf(index, round)?.findings ?? []).filter((f) => (reviewer === void 0 || f.reviewer === reviewer) && (f.status === "open" || f.status === "residual" && !!f.residual && SENT.includes(f.residual) || reviewer === "security" && ruledOutOfModel(f)));
 }
 function asPrevious(f, withReviewer = false) {
   return {
@@ -16129,7 +16151,8 @@ function asPrevious(f, withReviewer = false) {
     ...f.line !== void 0 ? { line: f.line } : {},
     problem: f.problem,
     ...f.fix ? { fix: f.fix } : {},
-    ...f.origin ? { origin: f.origin } : {}
+    ...f.origin ? { origin: f.origin } : {},
+    ...f.outOfModel ? { outOfModel: true } : {}
   };
 }
 function historyLine(index) {
@@ -16154,7 +16177,8 @@ function renderHandover(h) {
     `- Reviews so far: ${h.history || "none"}`,
     `- Validators now: ${h.validators.length ? `failing ${h.validators.join(", ")}` : "green"}`,
     `- Earlier reports: ${h.report} (its Fix round lines say what was tried)`,
-    "Start from the current HEAD and do not redo what is closed."
+    // M5: a redo is not a fix round: the new implementer starts again from the brief.
+    h.redo ? "Implement the brief again with another approach; the findings say what to avoid." : "Start from the current HEAD and do not redo what is closed."
   ];
   return lines.join("\n") + "\n";
 }
@@ -16615,6 +16639,17 @@ function reviewPrep(args, deps) {
       if (r2.invalid && !r2.dropped) continue;
       previous[role] = { verdict: r2.verdict, findings: r2.findings, ...r2.incomplete ? { incomplete: true } : {}, ...r2.invalid ? { invalid: true } : {} };
     }
+    const prevPlan = readJson(import_node_path20.default.join(prevDir, "review-plan.json"));
+    if (prevPlan?.express === true && Array.isArray(prevPlan.delegated) && index.rounds.some((r2) => r2.round === round - 1)) {
+      for (const role of ROLES2) {
+        const name = reviewerKey(role);
+        if (!prevPlan.delegated.includes(name) || prevReviews[name]) continue;
+        const open = previousFindings(index, round, name).map((f) => asPrevious(f));
+        const r2 = { verdict: open.length ? "fail" : "pass", confidence: prevReviews.correctness?.confidence ?? 0, findings: open };
+        prevReviews[name] = r2;
+        previous[role] = { verdict: r2.verdict, findings: r2.findings };
+      }
+    }
     const prevHead = (0, import_node_fs18.existsSync)(import_node_path20.default.join(prevDir, "head.txt")) ? (0, import_node_fs18.readFileSync)(import_node_path20.default.join(prevDir, "head.txt"), "utf8").trim() : "";
     const diffFrom = (from) => {
       const names2 = deps.git(["diff", "--name-only", `${from}..HEAD`]);
@@ -16786,8 +16821,8 @@ function writeCarried(plan, dir, n, round, roundDir, prevReviews) {
   for (const c of plan.carried) {
     const raw = readJson(import_node_path20.default.join(dir, `reviews-${n}-${round - 1}`, `${c.name}.json`));
     const parsed = prevReviews[c.name];
-    const prev = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : { verdict: parsed.verdict, confidence: parsed.confidence, findings: parsed.findings };
-    (0, import_node_fs18.writeFileSync)(import_node_path20.default.join(roundDir, `${c.name}.json`), JSON.stringify({ ...prev, carried: true }, null, 2) + "\n");
+    const prev = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : parsed ? { verdict: parsed.verdict, confidence: parsed.confidence, findings: parsed.findings } : null;
+    if (prev) (0, import_node_fs18.writeFileSync)(import_node_path20.default.join(roundDir, `${c.name}.json`), JSON.stringify({ ...prev, carried: true }, null, 2) + "\n");
   }
 }
 function expressPrep(c) {
@@ -16979,7 +17014,22 @@ function reviewClose(args, deps) {
   })() : "";
   const config = loadConfig(deps.repoDir);
   const reviewsCount = reviewsOf(round, p);
+  const indexPath = import_node_path20.default.join(dir, `findings-index-${n}.json`);
+  const indexText = readText(indexPath);
+  const index = parseIndex(indexText, task);
+  const express = plan.express === true;
+  const roundRel = rel2(deps.cwd, roundDir);
+  const fresh2 = round >= 2 && readEvents(deps.cwd).filter((e) => e.kind === "verdict" && e.task === task && e.dir !== roundRel).at(-1)?.action === "redo";
+  const withIds = assignIds(index, round, reviews, { express, fresh: fresh2 });
+  const open = fresh2 ? {} : openIds(index, round);
   if (outOfModelArg.length || deferArg.length) {
+    const known = [.../* @__PURE__ */ new Set([...idsOf(withIds), ...Object.values(open).flatMap((v) => v ?? [])])].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
+    for (const [name, list] of [["out-of-model", outOfModelArg], ["defer", deferArg]]) {
+      const unknown = list.filter((x) => !known.includes(x));
+      if (unknown.length) {
+        throw new UsageError(`review-close: --${name} ${unknown.join(",")}: no finding of this review, nor one the previous review left open, has that id; nothing was written (ids: ${known.join(", ") || "none"})`);
+      }
+    }
     const kept = overridesOf(import_node_path20.default.join(roundDir, "overrides.json"));
     (0, import_node_fs18.writeFileSync)(import_node_path20.default.join(roundDir, "overrides.json"), JSON.stringify({
       outOfModel: [.../* @__PURE__ */ new Set([...kept.outOfModel, ...outOfModelArg])],
@@ -16987,13 +17037,8 @@ function reviewClose(args, deps) {
     }, null, 2) + "\n");
   }
   const overrides = briefOverrides(dir, n);
-  const indexPath = import_node_path20.default.join(dir, `findings-index-${n}.json`);
-  const indexText = readText(indexPath);
-  const index = parseIndex(indexText, task);
-  const express = plan.express === true;
-  const withIds = assignIds(index, round, reviews, { express });
   const delegated = Array.isArray(plan.delegated) ? plan.delegated.filter((x) => x === "correctness" || x === "security" || x === "perf") : [];
-  const answered = answeredBy(withIds).filter((k) => !(express && k === "correctness" && withIds.correctness?.incomplete === true));
+  const answered = answeredBy(withIds);
   const held = express && !answered.includes("correctness");
   if (express && !held) answered.push(...delegated.filter((k) => !answered.includes(k)));
   const hold = held ? {
@@ -17007,19 +17052,25 @@ function reviewClose(args, deps) {
     carried,
     last: round >= reviewsCount.max,
     personDocs: config.review.personDocs,
-    open: openIds(index, round),
-    closed: closedFor(index, round, idsOf(withIds), answered),
+    open,
+    closed: fresh2 ? {} : closedFor(index, round, idsOf(withIds), answered),
     outOfModel: overrides.outOfModel,
     defer: overrides.defer,
-    ...hold ? { hold } : {}
+    ...hold ? { hold } : {},
+    ...fresh2 ? { fresh: fresh2 } : {}
   });
   if (indexText?.trim() && !index.rounds.length) {
     const aside = `${indexPath}.corrupt-${deps.now().toISOString().replace(/[:.]/g, "-")}`;
     (0, import_node_fs18.renameSync)(indexPath, aside);
     result.reasons.push(`unreadable findings index set aside as ${rel2(deps.cwd, aside)}`);
   }
-  const indexNow = recordRound(index, round, result, answered);
+  const indexNow = recordRound(index, round, result, answered, { fresh: fresh2 });
   (0, import_node_fs18.writeFileSync)(indexPath, JSON.stringify(indexNow, null, 2) + "\n");
+  const carriedResidual = result.action === "accept" && !fresh2 ? carriedResiduals(index, round, result) : [];
+  if (carriedResidual.length) {
+    result.deferred.push(...carriedResidual);
+    result.reasons.push(`${carriedResidual.length} residual finding(s) of earlier reviews still open (${[...new Set(carriedResidual.map((f) => f.residual))].join(", ")})`);
+  }
   if (!Array.isArray(rows)) result.reasons.push("no validation recorded");
   if (preexisting.length) result.reasons.push(`already failing on the base commit, not counted: ${preexisting.join(", ")}`);
   const ts = deps.now().toISOString();
@@ -17105,6 +17156,7 @@ function reviewClose(args, deps) {
   const headNow = (deps.git(["rev-parse", "HEAD"]) ?? "").trim();
   const revert = d.next === "redo" && planBase && headNow && headNow !== planBase ? { base: planBase, head: headNow, args: ["-C", deps.repoDir, "revert", "--no-edit", `${planBase}..HEAD`] } : null;
   const twins = collectTwins(task, roundDir, plan, deps);
+  const deferred = [...result.deferred, ...result.minor.filter((f) => f.residual === "out-of-model")];
   return json2({
     action: result.action,
     score: result.score,
@@ -17114,7 +17166,7 @@ function reviewClose(args, deps) {
     reviews: reviewsCount,
     ...express ? { express: true } : {},
     findings,
-    deferred: result.deferred,
+    deferred,
     ask: result.ask.length ? askOf(result.ask, locale === "es" ? "es" : "en") : null,
     handover,
     revert,
@@ -17143,16 +17195,22 @@ function prep(args, deps) {
   const [, id2, n] = m;
   const base = (deps.git(["rev-parse", "HEAD"]) ?? "").trim();
   if (!base) throw new UsageError("prep: cannot read HEAD");
+  const noBaseline = args.includes("--no-baseline");
+  let config = null;
+  try {
+    config = loadConfig(deps.repoDir);
+  } catch (e) {
+    if (!noBaseline || !(e instanceof ConfigError)) throw e;
+  }
   const dir = import_node_path20.default.resolve(deps.cwd, flag("dir") ?? import_node_path20.default.join(".forge", "work", id2));
   (0, import_node_fs18.mkdirSync)(dir, { recursive: true });
-  const tmFile = writeThreatModel(dir, loadConfig(deps.repoDir));
+  const tmFile = config ? writeThreatModel(dir, config) : null;
   const threatModel = tmFile ? rel2(deps.cwd, tmFile) : null;
   const validate = `node "${slash(deps.self ?? "forge.cjs")}" validate --affected --base ${base} --task ${task}${samePath(deps.repoDir, deps.cwd) ? "" : ` --cwd "${slash(deps.repoDir)}"`}`;
-  if (args.includes("--no-baseline")) {
+  if (noBaseline || !config) {
     appendEvent(deps.cwd, { ts: deps.now().toISOString(), kind: "phase", task: id2, phase, brief: Number(n), base });
     return json2({ base, baseline: null, failing: [], cached: [], durationMs: 0, validate, threatModel });
   }
-  const config = loadConfig(deps.repoDir);
   const scope = p === "trivial" || p === "small" ? { mode: "small" } : { mode: "heavy", changed: null };
   const restored = [];
   const { results, durationMs } = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored, args.includes("--no-cache"));
