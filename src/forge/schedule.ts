@@ -178,10 +178,19 @@ function describeStall(plan: PlanView, states: States, tasks: Record<string, Exe
   return [...groups].map(([k, ids]) => `${k}: ${ids.join(', ')}`).join('; ') || 'nothing can move';
 }
 
-/** The most tasks that can run at once: start every startable non-overlapping task, mark them done, repeat. */
-export function widthOf(plan: PlanView): number {
+/**
+ * D-19: the plan wave by wave (start every startable task whose zones do not overlap, mark them done, repeat), the
+ * longest chain of depends_on, the zones three tasks or more share (most shared first) and whether the plan is mostly
+ * serial: 6 tasks or more and at least half of its waves one task wide.
+ */
+export interface WidthProfile {
+  waves: string[][]; profile: number[]; chain: { length: number; tasks: string[] };
+  serializing: { zone: string; tasks: string[] }[]; mostlySerial: boolean;
+}
+
+export function widthProfile(plan: PlanView): WidthProfile {
   const done = new Set<string>();
-  let width = 0;
+  const waves: string[][] = [];
   for (let guard = 0; guard < plan.tasks.length + 1 && done.size < plan.tasks.length; guard++) {
     const wave: PlanTask[] = [];
     for (const t of plan.tasks) {
@@ -190,8 +199,44 @@ export function widthOf(plan: PlanView): number {
       wave.push(t);
     }
     if (!wave.length) break;
-    width = Math.max(width, wave.length);
+    waves.push(wave.map(t => t.id));
     for (const t of wave) done.add(t.id);
   }
-  return width;
+  // The longest chain that ends in each task, memoized; a cycle (never in a parsed plan) is cut where it closes.
+  const byId = new Map(plan.tasks.map(t => [t.id, t]));
+  const memo = new Map<string, string[]>();
+  const longest = (id: string, seen: Set<string>): string[] => {
+    const known = memo.get(id);
+    if (known) return known;
+    if (seen.has(id)) return [];
+    seen.add(id);
+    let best: string[] = [];
+    for (const d of byId.get(id)?.depends_on ?? []) {
+      if (!byId.has(d)) continue;
+      const c = longest(d, seen);
+      if (c.length > best.length) best = c;
+    }
+    seen.delete(id);
+    const chain = [...best, id];
+    memo.set(id, chain);
+    return chain;
+  };
+  let chain: string[] = [];
+  for (const t of plan.tasks) {
+    const c = longest(t.id, new Set());
+    if (c.length > chain.length) chain = c;
+  }
+  const byZone = new Map<string, string[]>();
+  for (const t of plan.tasks) for (const z of new Set(t.zones)) byZone.set(z, [...(byZone.get(z) ?? []), t.id]);
+  const serializing = [...byZone].filter(([, ids]) => ids.length >= 3)
+    .sort((a, b) => b[1].length - a[1].length || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .map(([zone, tasks]) => ({ zone, tasks }));
+  const profile = waves.map(w => w.length);
+  const mostlySerial = plan.tasks.length >= 6 && profile.filter(n => n === 1).length * 2 >= profile.length;
+  return { waves, profile, chain: { length: chain.length, tasks: chain }, serializing, mostlySerial };
+}
+
+/** The most tasks that can run at once: the widest wave of widthProfile (0 without tasks). */
+export function widthOf(plan: PlanView): number {
+  return widthProfile(plan).profile.reduce((a, b) => Math.max(a, b), 0);
 }

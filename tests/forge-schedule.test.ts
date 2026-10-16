@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { schedule, widthOf, relaunchOrBlock, STEP_WAIT_SECONDS, NUDGE_MINUTES, RELAUNCH_CAP, type ScheduleInput } from '../src/forge/schedule.js';
+import { schedule, widthOf, widthProfile, relaunchOrBlock, STEP_WAIT_SECONDS, NUDGE_MINUTES, RELAUNCH_CAP, type ScheduleInput } from '../src/forge/schedule.js';
 import type { ExecutionState } from '../src/lib/execution-state.js';
 import type { PlanView, PlanTask, States } from '../src/lib/types.js';
 
@@ -91,6 +91,26 @@ describe('schedule', () => {
     expect(widthOf(plan([task('T1'), task('T2', ['T1']), task('T3', ['T2'])]))).toBe(1);
     expect(widthOf(plan([task('T1'), task('T2', ['T1']), task('T3', ['T1']), task('T4', ['T1'])]))).toBe(3);
     expect(widthOf(plan([task('T1', [], ['src/x/**']), task('T2', [], ['src/x/a.ts'])]))).toBe(1);
+  });
+  it('widthProfile: the waves, the longest chain, the zones that serialize and a mostly serial plan (D-19)', () => {
+    // Six tasks that all add tests to one shared file: one at a time, as forge-cost's plan ran.
+    const shared = (id: string) => task(id, [], [`src/${id}/**`, 'tests/plugin.test.ts']);
+    expect(widthProfile(plan(['T1', 'T2', 'T3', 'T4', 'T5', 'T6'].map(shared)))).toEqual({
+      waves: [['T1'], ['T2'], ['T3'], ['T4'], ['T5'], ['T6']], profile: [1, 1, 1, 1, 1, 1], chain: { length: 1, tasks: ['T1'] },
+      serializing: [{ zone: 'tests/plugin.test.ts', tasks: ['T1', 'T2', 'T3', 'T4', 'T5', 'T6'] }], mostlySerial: true,
+    });
+    const wide = widthProfile(plan([task('T1'), task('T2', ['T1']), task('T3', ['T2']), task('T4'), task('T5', ['T1']), task('T6')]));
+    expect(wide).toEqual({
+      waves: [['T1', 'T4', 'T6'], ['T2', 'T5'], ['T3']], profile: [3, 2, 1], chain: { length: 3, tasks: ['T1', 'T2', 'T3'] }, serializing: [], mostlySerial: false,
+    });
+    // Two zones of three tasks or more, most shared first.
+    const two = widthProfile(plan([
+      task('A1', [], ['a.ts', 'b.ts']), task('A2', ['A1'], ['a.ts', 'b.ts']), task('A3', ['A2'], ['a.ts', 'b.ts']), task('A4', ['A3'], ['a.ts']),
+    ]));
+    expect(two.serializing).toEqual([{ zone: 'a.ts', tasks: ['A1', 'A2', 'A3', 'A4'] }, { zone: 'b.ts', tasks: ['A1', 'A2', 'A3'] }]);
+    expect(two.chain).toEqual({ length: 4, tasks: ['A1', 'A2', 'A3', 'A4'] });
+    expect(widthProfile(plan([])).profile).toEqual([]);
+    expect(widthOf(plan([]))).toBe(0);
   });
 
   const sess = (id: string, status: 'running' | 'accepted' = 'running', over: object = {}) => ({

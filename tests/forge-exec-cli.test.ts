@@ -186,6 +186,13 @@ describe('forge swarm (execution)', () => {
   it('propose recommends subagents with the real width, sequential when it is 1', () => {
     expect(out(run(['swarm', 'propose', '--plan', 'plan.yaml'], io))).toMatchObject({ width: 2, recommended: { mode: 'subagents', parallel: 2 }, configured: null });
   });
+  it('propose prints the width profile and a say line in the plan language, or in --locale (D-19)', () => {
+    const p = out(run(['swarm', 'propose', '--plan', 'plan.yaml'], io));
+    expect(p).toMatchObject({ width: 2, profile: [2, 1], chain: { length: 2, tasks: ['T1', 'T3'] }, serializing: [], mostlySerial: false });
+    expect(p.say).toBe('3 tareas en 2 tandas: 2·1. Cadena más larga: T1→T3 (2).');
+    expect(out(run(['swarm', 'propose', '--plan', 'plan.yaml', '--locale', 'en'], io)).say).toBe('3 tasks in 2 waves: 2·1. Longest chain: T1→T3 (2).');
+    expect(run(['swarm', 'propose', '--plan', 'plan.yaml', '--locale', 'fr'], io).code).toBe(2);
+  });
   it('tick starts tasks, worktree creates each from the run branch, task records the stage', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     writeDocs(path.join(root, 'db', 'state'), {});

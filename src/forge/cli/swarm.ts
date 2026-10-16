@@ -11,7 +11,7 @@ import { isLocale } from '../../lib/forge-run.js';
 import { appendEvent, appendPhase, readEvents } from '../ledger.js';
 import { readExecution, updateExecution, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree, type LockDeps } from '../execution.js';
 import { sleepSync } from '../pid.js';
-import { schedule, widthOf, relaunchOrBlock, RELAUNCH_CAP, type BgAgent } from '../schedule.js';
+import { schedule, widthOf, widthProfile, relaunchOrBlock, RELAUNCH_CAP, type BgAgent } from '../schedule.js';
 import { LEASE_MINUTES, sessionLiveness } from '../../lib/coordination.js';
 import { planLocale, sessionReply } from '../../lib/locale.js';
 import { signalLiveness } from '../../lib/execution-view.js';
@@ -24,7 +24,7 @@ import { mainWorktreeFrom, samePath } from '../../lib/worktree.js';
 import { mainCheckout, updateLocal } from '../local.js';
 import { readMember, writeMember, isMemberId } from '../members.js';
 import { parseLooseTasks, planOfLoose, statesOfLoose, writeLoose, readLoose, type LooseTask } from '../loose.js';
-import { startAnnounce, integratedSay, rejectedDepsSay, keptFilesSay, VENV_HINT } from '../swarm.js';
+import { startAnnounce, integratedSay, rejectedDepsSay, keptFilesSay, proposeSay, VENV_HINT } from '../swarm.js';
 
 export interface GitDeps { git: (args: string[]) => string | null; exec: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany; repo: RepoReader }
 export interface SwarmDeps extends GitDeps { at: (dir: string) => GitDeps }
@@ -1020,12 +1020,19 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     }
     case 'propose': {
       const plan = !flag('plan') && has('tasks') ? planOfLoose(loadTasksArg(io, flag('tasks'), 'propose')) : loadPlanArg(io, flag('plan'), 'propose');
-      const width = widthOf(plan);
+      const locale = localeArg(rest, 'propose');
+      const p = widthProfile(plan);
+      const width = p.profile.reduce((a, b) => Math.max(a, b), 0);
       const config = loadConfig(io.cwd);
       const configured = config.swarm.mode ?? null;
       const parallel = width < 2 ? 1 : Math.min(config.swarm.parallel, width);
       const reasons = [`${plan.tasks.length} tasks`, `up to ${width} at once (dependencies and zones)`];
-      return json({ width, configured, recommended: { mode: 'subagents', parallel }, reasons });
+      // D-19: how wide the plan is wave by wave, its longest chain and the zones that serialize it, said in one line.
+      const es = locale ? locale === 'es' : isSpanish((plan as { locale?: string }).locale);
+      return json({
+        width, configured, recommended: { mode: 'subagents', parallel }, reasons,
+        profile: p.profile, chain: p.chain, serializing: p.serializing, mostlySerial: p.mostlySerial, say: proposeSay(es, plan.tasks.length, p),
+      });
     }
     case 'worktree': {
       if (has('member')) {
@@ -1309,6 +1316,6 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     case 'merge':
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError('usage: forge swarm <start --project P --session SID --hook-session ID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps] [--no-cache]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID [--db DIR]>');
+      throw new UsageError('usage: forge swarm <start --project P --session SID --hook-session ID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F [--locale es|en]|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps] [--no-cache]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID [--db DIR]>');
   }
 }

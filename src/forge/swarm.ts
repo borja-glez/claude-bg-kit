@@ -2,6 +2,7 @@ import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'nod
 import path from 'node:path';
 import { forgeDir } from './ledger.js';
 import { parseSwarm, type SwarmState } from '../lib/swarm-state.js';
+import type { WidthProfile } from './schedule.js';
 
 export const swarmFile = (root: string) => path.join(root, '.forge', 'swarm.json');
 
@@ -106,4 +107,14 @@ export function integratedSay(es: boolean, branch: string, newValidators: { name
       : `Validators that already failed on ${branch} and do not count: ${preexisting.join(', ')}.`);
   }
   return lines;
+}
+
+/** D-19: the line `swarm propose` prints: tasks and waves, the longest chain, and the zones that serialize the plan. */
+export function proposeSay(es: boolean, tasks: number, p: Pick<WidthProfile, 'profile' | 'chain' | 'serializing'>): string {
+  const waves = p.profile.join('·');
+  const chain = `${p.chain.tasks.join('→')} (${p.chain.length})`;
+  const zones = p.serializing.map(z => `${z.zone} (${z.tasks.length} ${es ? 'tareas' : 'tasks'})`).join(', ');
+  return es
+    ? `${tasks} tareas en ${p.profile.length} tandas: ${waves}. Cadena más larga: ${chain}.${zones ? ` Zonas que serializan: ${zones}.` : ''}`
+    : `${tasks} tasks in ${p.profile.length} waves: ${waves}. Longest chain: ${chain}.${zones ? ` Zones that serialize: ${zones}.` : ''}`;
 }
