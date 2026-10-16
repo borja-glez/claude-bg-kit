@@ -7610,7 +7610,7 @@ function appendEvent(root, event) {
 }
 function appendPhase(root, event) {
   const last = readEvents(root).filter((e) => e.kind === "phase" && e.task === event.task).at(-1);
-  if (last && last.phase === event.phase) return false;
+  if (last && last.phase === event.phase && (last.brief === void 0 || event.brief === void 0 || last.brief === event.brief)) return false;
   appendEvent(root, event);
   return true;
 }
@@ -13456,6 +13456,10 @@ function cacheGit(git) {
   const top = git(["rev-parse", "--show-toplevel"])?.trim();
   return top ? (args) => git(["-C", top, ...args]) : git;
 }
+function checkoutPrefix(git) {
+  const out = git(["rev-parse", "--show-prefix"]);
+  return out === null ? null : out.replace(/\r?\n$/, "");
+}
 var cacheDir = (main) => import_node_path10.default.join(main, ".forge", "cache", "validate");
 var excludes = (generated) => [...LOCAL_STATE, ...generated.map((g) => `:(exclude,glob)${g}`)];
 function cleanTree(git, generated) {
@@ -13485,8 +13489,8 @@ function lockHash(repo) {
   return any ? hash.digest("hex") : "";
 }
 var envKey = (platform = process.platform, version = process.versions.node) => `${platform}-${version.split(".")[0]}`;
-function cacheKey(tree, cmd, lock, env) {
-  return (0, import_node_crypto2.createHash)("sha256").update([tree, cmd, lock, env].join("\0")).digest("hex");
+function cacheKey(tree, dir, cmd, lock, env) {
+  return (0, import_node_crypto2.createHash)("sha256").update([tree, dir, cmd, lock, env].join("\0")).digest("hex");
 }
 var strings = (a) => Array.isArray(a) && a.every((s2) => typeof s2 === "string");
 function readCached(main, key) {
@@ -13564,11 +13568,13 @@ var toCached = (v, r2, tree, at2) => ({
 });
 function runWithCache(list, run2, ctx) {
   const treeOf = ctx.tree ?? (() => cleanTree(ctx.git, ctx.generated));
-  const tree = ctx.read || ctx.write ? treeOf() : null;
+  const dir = ctx.dir;
+  if (dir === null || !(ctx.read || ctx.write)) return run2(list);
+  const tree = treeOf();
   if (tree === null) return run2(list);
   const lock = lockHash(ctx.repo);
   const env = ctx.env ?? envKey();
-  const keyOf = (v) => cacheKey(tree, v.cmd, lock, env);
+  const keyOf = (v) => cacheKey(tree, dir, v.cmd, lock, env);
   const hits = /* @__PURE__ */ new Map();
   if (ctx.read) {
     list.forEach((v, i) => {
@@ -13723,9 +13729,11 @@ function runsIn(v, scope) {
 function selectValidators(all, scope) {
   return all.filter((v) => runsIn(v, scope) && (scope.mode !== "affected" || covers(v, scope.files)));
 }
-var SAFE_PATH = /^[A-Za-z0-9_@+.,=/\\ ()-]{1,300}$/;
+var SAFE_PATH = /^(?!-)[A-Za-z0-9_@+.,=/\\ ()-]{1,300}$/;
 var MAX_AFFECTED = 100;
-var isTestFile = (f) => /(^|\/)tests?\//.test(f) || /\.(test|spec)\.[^/]+$/.test(f) || /(^|\/)test_[^/]*\.py$/.test(f) || /_test\.py$/.test(f);
+var isPytestModule = (f) => /(^|\/)test_[^/]*\.py$/.test(f) || /_test\.py$/.test(f);
+var isTestFile = (f) => /(^|\/)tests?\//.test(f) || /\.(test|spec)\.[^/]+$/.test(f) || isPytestModule(f);
+var runsPytest = (cmd) => /\bpytest\b/.test(cmd);
 function resolveAffected(v, files, platform, exists) {
   if (!v.affectedCmd) return { mode: "skip", why: "it has no related-tests command" };
   const live = [...new Set(files.map((f) => f.replace(/\\/g, "/").replace(/^\.\//, "")))].filter((f) => f && !isBookkeeping(f) && exists(f));
@@ -13735,7 +13743,7 @@ function resolveAffected(v, files, platform, exists) {
   const quote = (f) => platform === "win32" ? `"${f}"` : `'${f}'`;
   const lists = {
     files: live,
-    tests: live.filter(isTestFile),
+    tests: live.filter(runsPytest(v.affectedCmd) ? isPytestModule : isTestFile),
     packages: [...new Set(live.filter((f) => f.endsWith(".go")).map((f) => {
       const d = import_node_path11.default.posix.dirname(f);
       return d === "." ? "." : `./${d}`;
@@ -13780,24 +13788,30 @@ var ANSI = new RegExp(`${ESC}\\[[0-9;]*[A-Za-z]`, "g");
 var MAX_FAILING = 200;
 var DURATION = /\s+[([]?\d+(?:\.\d+)?\s?m?s[)\]]?$/;
 var tidy = (s2) => s2.replace(DURATION, "").replace(/\s+/g, " ").trim().slice(0, 300);
-var TEST_LINE = [/^\s*FAILED\s+(\S+)/, /^\s*--- FAIL:\s+(\S+)/, /^test\s+(\S+)\s+\.\.\.\s+FAILED/, /^\s*Failed\s+(\S+)\s+\[[^\]]+\]\s*$/];
+var TEST_LINE = [/^\s*FAILED\s+(\S+)/, /^\s*ERROR\s+(\S+::\S+)/, /^\s*--- FAIL:\s+(\S+)/, /^test\s+(\S+)\s+\.\.\.\s+FAILED/, /^\s*Failed\s+(\S+)\s+\[[^\]]+\]\s*$/];
 var TEST_KINDS = /* @__PURE__ */ new Set(["test", "e2e", "other"]);
 var RUNNER_ERROR = /unhandled (?:errors?|rejections?)|test suite failed to run|error collecting|errors? during collection|^\s*Interrupted:/im;
 var VITEST_FAIL = /^\s*FAIL\s+(.+)$/;
 var VITEST_MARK = /^\s*[×✗]\s+(.+)$/;
 var JEST = /^\s*●\s+(.+)$/;
 var TSC = /^(.+?)\(\d+,\d+\):\s+error\s+(TS\d+):\s*(.*)$/;
+var TSC_ANY = /\berror TS\d+:/;
 function failingTests(output, kind) {
   if (kind === "lint") return { names: [], known: false };
   const lines = output.replace(ANSI, "").split(/\r?\n/);
   const found = /* @__PURE__ */ new Set();
+  let capped = false;
+  let unread = false;
   const add = (s2) => {
     const t = tidy(s2);
-    if (t && found.size < MAX_FAILING) found.add(t);
+    if (!t || found.has(t)) return;
+    if (found.size < MAX_FAILING) found.add(t);
+    else capped = true;
   };
   for (const l of lines) {
     const t = TSC.exec(l);
     if (t) add(`${t[1].replace(/\\/g, "/")}: ${t[2]} ${t[3]}`);
+    else if (TSC_ANY.test(l)) unread = true;
   }
   if (TEST_KINDS.has(kind)) {
     const fails = lines.map((l) => VITEST_FAIL.exec(l)?.[1]).filter((s2) => !!s2);
@@ -13818,7 +13832,7 @@ function failingTests(output, kind) {
       }
     }
   }
-  const known = found.size > 0 && !(TEST_KINDS.has(kind) && RUNNER_ERROR.test(lines.join("\n")));
+  const known = kind !== "build" && found.size > 0 && !capped && !unread && !(TEST_KINDS.has(kind) && RUNNER_ERROR.test(lines.join("\n")));
   return { names: [...found], known };
 }
 function failingLabel(r2, locale = "en") {
@@ -13919,7 +13933,8 @@ function markPreexisting(results, baseline) {
       return fresh2.length ? { ...r2, newFailing: fresh2 } : { ...r2, preexisting: true };
     }
     const was = new Set(b.failures.map(normLine));
-    return r2.failures.every((l) => was.has(normLine(l))) ? { ...r2, preexisting: true } : r2;
+    const same = r2.failures.length ? r2.failures.every((l) => was.has(normLine(l))) : !b.failures.length;
+    return same ? { ...r2, preexisting: true } : r2;
   });
 }
 var blocking = (r2) => r2.ok !== true && r2.preexisting !== true;
@@ -14842,6 +14857,7 @@ function mergeAttempt(at2, ref, o, regenerated, validations) {
   const cachedRun = (where2, owned, list, tree) => runWithCache(list, (misses) => validating(where2, owned, () => runValidators(misses, where2.exec, o.timeoutSec, { ...o.run, execMany: where2.execMany })), {
     main: o.main,
     git: cacheGit(where2.git),
+    dir: o.cache.read || o.cache.write ? checkoutPrefix(where2.git) : null,
     repo: where2.repo,
     generated,
     read: o.cache.read,
@@ -15112,6 +15128,7 @@ function integrate(rest, io, deps) {
   }
   const config = loadConfig(io.cwd);
   const personal = e.kind !== "plan";
+  const cache = config.validate.cache && !rest.includes("--no-cache");
   const r2 = mergeIn(target, t.branch, {
     message: `forge: integrate ${task}`,
     scope: "heavy",
@@ -15124,7 +15141,7 @@ function integrate(rest, io, deps) {
     retryDeps: rest.includes("--retry-deps"),
     run: runOptions(config, readEvents(io.cwd), io.now()),
     main: io.cwd,
-    cache: { read: config.validate.cache, write: config.validate.cache },
+    cache: { read: cache, write: cache },
     now: io.now
   });
   logValidations(io, task, r2.validations);
@@ -15705,7 +15722,7 @@ function swarmCommand(args, io, deps) {
     case "merge":
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError("usage: forge swarm <start --project P --session SID --hook-session ID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID [--db DIR]>");
+      throw new UsageError("usage: forge swarm <start --project P --session SID --hook-session ID [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps] [--no-cache]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID [--db DIR]>");
   }
 }
 
@@ -16052,13 +16069,14 @@ function reviewRoundOf(events, task) {
 function restoringGenerated(deps, generated, fn, into) {
   return generated.length ? restoringRegenerated({ git: deps.git }, fn, into, generated) : fn();
 }
-function validateList(deps, config, list, restored) {
+function validateList(deps, config, list, restored, noCache) {
   const t0 = Date.now();
   const opts = runOptions(config, readEvents(deps.cwd), deps.now(), deps.execMany);
+  const use = config.validate.cache && !noCache;
   const results = runWithCache(
     list,
     (misses) => restoringGenerated(deps, config.generated, () => runValidators(misses, deps.exec, config.validatorTimeoutSec, opts), restored),
-    { main: mainCheckout(deps.cwd), git: config.validate.cache ? cacheGit(deps.git) : deps.git, repo: deps.repo, generated: config.generated, read: config.validate.cache, write: config.validate.cache, now: deps.now }
+    { main: mainCheckout(deps.cwd), git: use ? cacheGit(deps.git) : deps.git, dir: use ? checkoutPrefix(deps.git) : null, repo: deps.repo, generated: config.generated, read: use, write: use, now: deps.now }
   );
   return { results, durationMs: Date.now() - t0 };
 }
@@ -16108,7 +16126,7 @@ function reviewPrep(args, deps) {
   const changed = deps.git(["diff", "--name-only", `${baseSha}..HEAD`]);
   const scope = pathName === "trivial" || pathName === "small" ? { mode: "small" } : { mode: "heavy", changed: changed === null ? null : changed.split("\n").map((s2) => s2.trim()).filter(Boolean) };
   const restored = [];
-  const validation = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored);
+  const validation = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored, args.includes("--no-cache"));
   const results = markPreexisting(validation.results, baseline);
   const ok = results.every((r2) => !blocking(r2));
   const validatorsFile = import_node_path19.default.join(dir, `validators-${n}.json`);
@@ -16453,7 +16471,7 @@ function prep(args, deps) {
   const config = loadConfig(deps.repoDir);
   const scope = p === "trivial" || p === "small" ? { mode: "small" } : { mode: "heavy", changed: null };
   const restored = [];
-  const { results, durationMs } = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored);
+  const { results, durationMs } = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored, args.includes("--no-cache"));
   const dir = import_node_path19.default.resolve(deps.cwd, flag("dir") ?? import_node_path19.default.join(".forge", "work", id2));
   (0, import_node_fs17.mkdirSync)(dir, { recursive: true });
   const file = import_node_path19.default.join(dir, `baseline-${n}.json`);
@@ -18468,7 +18486,7 @@ function run(argv, io) {
           const git = io.git ?? defaultGit(repoDir);
           const base = flag("base") ?? "HEAD";
           if (base.startsWith("-")) throw new UsageError("validate: --base must be a commit");
-          const changed = git(["diff", "--name-only", "-z", base, "--"]);
+          const changed = git(["diff", "--name-only", "-z", "--relative", base, "--"]);
           if (changed === null) throw new UsageError(`validate --affected: cannot diff against ${base}`);
           const others = git(["ls-files", "-z", "--others", "--exclude-standard"]) ?? "";
           return [...new Set([...changed.split("\0"), ...others.split("\0")].filter(Boolean))];
@@ -18497,6 +18515,7 @@ function run(argv, io) {
         const ran = runWithCache(plan.run, runList, {
           main: mainCheckout(io.cwd),
           git: useCache ? cacheGit(restoreAt.git) : restoreAt.git,
+          dir: useCache ? checkoutPrefix(restoreAt.git) : null,
           repo: repoReader(repoDir),
           generated: config.generated,
           read: useCache && scope.mode !== "final",
