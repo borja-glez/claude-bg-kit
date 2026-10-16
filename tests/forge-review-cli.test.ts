@@ -900,6 +900,25 @@ describe('forge review-close', () => {
     expect(index.rounds[1].findings.map((f: { id: string; status: string }) => [f.id, f.status])).toEqual([['F2', 'residual'], ['F1', 'closed']]);
   });
 
+  for (const origin of ['previous', undefined]) {
+    it(`a still-open finding reported again with a wrong id and ${origin ? 'origin previous' : 'no origin'} pairs back with its id and blocks (C-T11)`, () => {
+      noExpress();
+      prep();
+      write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'b.txt', line: 20, problem: 'the loop never ends on empty input' }] });
+      write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+      close();
+      writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo validated\n');
+      git('commit', '-q', '-am', 'fix');
+      prep();
+      write(r2(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'b.txt', line: 20, problem: 'the loop never ends on empty input', id: 'F9', ...(origin ? { origin } : {}) }] });
+      const out = JSON.parse(close().stdout);
+      expect(out).toMatchObject({ action: 'fix', deferred: [] });
+      expect(JSON.parse(readFileSync(path.join(work(), 'findings-1-2.json'), 'utf8')).findings.map((f: { id: string }) => f.id)).toEqual(['F1']);
+      const index = JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8'));
+      expect(index.rounds[1].findings.map((f: { id: string; status: string }) => [f.id, f.status])).toEqual([['F1', 'open']]);
+    });
+  }
+
   it('round 2: a finding still open whose reviewer copies its id but calls it untouched is previous and blocks (J-06)', () => {
     noExpress();
     prep();
