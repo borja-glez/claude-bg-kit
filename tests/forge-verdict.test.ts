@@ -484,5 +484,29 @@ describe('what blocks in each review (C-04, C-06, J-05, J-06, K4-02, K4-09)', ()
     const wrong = synthesize({ correctness: { ...fail(0.8, [mk({ id: 'F1', origin: 'previous' })]), approach: 'wrong' } }, W, true, [], at(4, { last: true, open: { correctness: ['F1'] } }));
     expect(wrong).toMatchObject({ action: 'accept', important: [] });
     expect(wrong.deferred).toEqual([expect.objectContaining({ id: 'F1', residual: 'cap' })]);
+    expect(wrong.reasons).toContain('the last review accepts a fix with green validators and no critical (rule 7)');
+  });
+
+  it('the last review says when it turns a fix into an accept, also with nothing left at the cap (rule 7)', () => {
+    const r = synthesize({ correctness: { ...fail(0.8, [mk({ id: 'F3', file: 'README.md' })]), approach: 'wrong' } }, W, true, [], at(4, { last: true, personDocs: ['README.md'] }));
+    expect(r.action).toBe('accept');
+    expect(r.reasons).toContain('the last review accepts a fix with green validators and no critical (rule 7)');
+    expect(r.reasons.some(x => x.startsWith('accepted at the cap'))).toBe(false);
+    expect(r.deferred).toEqual([expect.objectContaining({ id: 'F3', residual: 'docs' })]);
+  });
+
+  it('a fail whose only non-minor finding is a critical without evidence breaks the rubric too; a pass carrying one still accepts (J-05)', () => {
+    // only security scores: pass c=.8 → .94
+    const r = synthesize({ correctness: fail(0.9, [{ severity: 'critical', problem: 'vibes' }]), security: pass(0.8) }, W, true);
+    expect(r.reviewers.map(x => [x.name, x.invalid])).toEqual([['correctness', true], ['security', false]]);
+    expect(r.reasons).toContain('correctness: fail without a critical or important finding (rubric)');
+    expect(r).toMatchObject({ action: 'accept', score: 0.94, minor: [] });
+    expect(synthesize({ correctness: pass(1, [{ severity: 'critical', problem: 'vibes' }]) }, W, true).action).toBe('accept');
+  });
+
+  it('the signature reads a validator\'s failing tests in any order (J-06)', () => {
+    const sig = (failing: string[]) => synthesize({ correctness: pass() }, W, false, [{ validator: 'test', failures: ['x'], failing }]).signature;
+    expect(sig(['a.test.ts > adds', 'b.test.ts > subtracts'])).toBe(sig(['b.test.ts > subtracts', 'a.test.ts > adds']));
+    expect(sig(['a.test.ts > adds'])).not.toBe(sig(['b.test.ts > subtracts']));
   });
 });

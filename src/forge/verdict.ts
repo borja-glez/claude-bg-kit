@@ -37,7 +37,7 @@ export interface VerdictResult {
   action: Action; score: number | null; reasons: string[]; critical: Finding[]; important: Finding[]; minor: Finding[];
   reviewers: { name: ReviewerName; verdict: Review['verdict']; confidence: number; weight: number; invalid: boolean; dropped: number; incomplete: boolean }[]; signature: string;
   // The critical and important findings that do not block, each with its `residual`: on an accept, all of them; on a fix,
-  // the ones that do not ride along to the implementer (hardening, architecture).
+  // the ones that do not ride along to the implementer (hardening, architecture, and cap on a fix at the last review).
   deferred: Finding[];
   /** Security findings that repeat a closed theme: counted as blocking; the skill asks the person first. */
   ask: AskFinding[];
@@ -273,12 +273,15 @@ const RIDES_ALONG: readonly Residual[] = ['untouched', 'docs', 'late-round'];
  * The verdict of one review of a brief (C-04, §4.7). `opts.round` is the review number r; from r = 2 origins are checked
  * against opts.fixHunks. A critical with evidence always blocks (a security one that repeats a closed theme is also put to
  * the person: `ask`). An important blocks in review 1 unless it is only in the person's docs; in review 2 when it is still
- * open (previous) or the fix brought it (a regression); from review 3 only as a regression. A new finding that matches one
- * the same reviewer closed is hardening (security: blocking and asked). The last review (opts.last) accepts a fix with green
- * validators and no critical, leaving what is open as residual cap. A finding that does not block carries its `residual`;
- * a failing reviewer whose findings all do not block scores as a pass. A fail without any critical or important finding
- * breaks the rubric (J-05): it does not score and is invalid. Redo needs a score under 0.5 and a failing reviewer that says
- * the approach is wrong with a finding that blocks (C-06). The signature covers what blocks, by severity and stable id.
+ * open (previous) or the fix brought it (a regression); from review 3 only as a regression, except that a failing reviewer
+ * that says `approach: wrong` keeps its importants blocking (not the docs ones) in any review before the last, so a redo
+ * stays possible (inherited, C-06). A new finding that matches one the same reviewer closed is hardening (security:
+ * blocking and asked).
+ * The last review (opts.last) accepts a fix with green validators and no critical, leaving what is open as residual cap.
+ * A finding that does not block carries its `residual`; a failing reviewer whose findings all do not block scores as a
+ * pass. A fail without an important finding or a critical with evidence breaks the rubric (J-05): it does not score and is
+ * invalid. Redo needs a score under 0.5 and a failing reviewer that says the approach is wrong with a finding that blocks
+ * (C-06). The signature covers what blocks, by severity and stable id.
  */
 export function synthesize(reviews: Partial<Record<ReviewerName, Review>>, weights: Weights, validatorsOk: boolean, failingValidators: FailingValidator[] = [], opts: RoundOptions = {}): VerdictResult {
   const names = (Object.keys(reviews) as ReviewerName[]).filter(n => reviews[n]);
@@ -286,8 +289,9 @@ export function synthesize(reviews: Partial<Record<ReviewerName, Review>>, weigh
   const later = r >= 2;
   const last = opts.last === true;
   const hunks = opts.fixHunks ?? {};
-  // J-05: a fail without a critical or important finding breaks the rubric.
-  const rubric = names.filter(n => reviews[n]!.verdict === 'fail' && !reviews[n]!.findings.some(f => f.severity !== 'minor'));
+  // J-05: a fail without an important finding or a critical with evidence breaks the rubric.
+  const rubric = names.filter(n => reviews[n]!.verdict === 'fail'
+    && !reviews[n]!.findings.some(f => f.severity === 'important' || (f.severity === 'critical' && isEvidence(f))));
   const rv: Partial<Record<ReviewerName, Review>> = {};
   for (const n of names) {
     const x = reviews[n]!;
@@ -382,6 +386,7 @@ export function synthesize(reviews: Partial<Record<ReviewerName, Review>>, weigh
     residual.push(...important.map(f => ({ ...f, residual: 'cap' as const })));
     important = [];
     action = 'accept';
+    reasons.push('the last review accepts a fix with green validators and no critical (rule 7)');
   }
   const capped = residual.filter(f => f.residual === 'cap').length;
   if (last && action === 'accept' && capped) reasons.push(`accepted at the cap with ${capped} open finding(s)`);
@@ -395,12 +400,12 @@ export function synthesize(reviews: Partial<Record<ReviewerName, Review>>, weigh
     deferred = residual.filter(f => !RIDES_ALONG.includes(f.residual!));
   }
   // J-06: what blocks, by severity and stable id (file and problem for a finding without one), and the failing validators
-  // by their failing tests (their failure lines when those are unknown). Prefixed v2: so a signature from forge 0.17 or
-  // older, made of the problem's text, never matches; empty when nothing blocks.
+  // by their failing tests, in any order (their failure lines when those are unknown). Prefixed v2: so a signature from
+  // forge 0.17 or older, made of the problem's text, never matches; empty when nothing blocks.
   const key = (f: Finding) => `${f.severity}|${f.id ?? `${f.file ?? ''}|${f.problem.trim().toLowerCase()}`}`;
   const blocking = [
     ...[...critical, ...blockingImportant].map(key),
-    ...failingValidators.map(v => `validator|${v.validator}|${(v.failing?.length ? v.failing : v.failures).join('\n')}`),
+    ...failingValidators.map(v => `validator|${v.validator}|${(v.failing?.length ? [...v.failing].sort() : v.failures).join('\n')}`),
   ].sort();
   const signature = blocking.length ? `v2:${createHash('sha256').update(JSON.stringify(blocking)).digest('hex').slice(0, 16)}` : '';
   return {
