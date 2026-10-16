@@ -18,12 +18,8 @@ export function removeFileIf(file: string, text: string): boolean {
   return false;
 }
 
-/** True when a process with this pid exists: signal 0 checks without touching it, and EPERM means it exists under
- *  another user. A pid that is not a positive integer is never alive. */
-export function pidAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; }
-}
+/** The one liveness rule, shared with waypoint's bindings (which cannot import src/forge). */
+export { pidAlive } from '../lib/pid.js';
 
 /** Blocks the process for ms without spinning. */
 export function sleepSync(ms: number): void {

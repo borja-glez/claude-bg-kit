@@ -24,14 +24,17 @@ import { planLocale, replyIn } from '../lib/locale.js';
 import { launchRun, EFFORTS, MODELS, type Launcher, type Effort, type Model } from '../lib/launcher.js';
 import { roadmapCapabilities, sharingNotice, syncSummary } from '../lib/publish.js';
 import { claudeSessionId, noClaudeSession } from '../lib/claude-session.js';
-import { blockBatch, claimBatch, cleanText, doneBatch, heartbeatBatch, registerBatch, REASON_MAX, SUMMARY_MAX } from '../lib/batches.js';
+import { blockBatch, claimBatch, cleanText, doneBatch, freeBatch, heartbeatBatch, registerBatch, REASON_MAX, SUMMARY_MAX } from '../lib/batches.js';
+import { BOUND_VIAS, MAX_SEATS, isBoundVia, type BoundDoc } from '../lib/bound.js';
+import { boundFile, boundLive, checkoutSid, openTasksOf, pidFromEnv, readBinding, readSeats, recordBase, secondSeatOf, seatsDir, writeAtomic, writeBinding } from '../lib/bound-fs.js';
+import { isSafeId } from '../lib/execution-state.js';
 import { loadConfig } from '../forge/config.js';
 import type { Commit, MessageDoc, NoteDoc, PhaseDoc, PlanView, SessionDoc, TaskState } from '../lib/types.js';
 
 export interface Io { cwd: string; now: () => Date; rand?: () => number; assetsDir: string; stdin?: string; env?: Record<string, string | undefined> }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|design-validate|design-import|design-snapshot|design-changed|design-gate|critique-check|critique-select|critique-dismiss|design-page|hook> ...`;
+const USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|bind|release|design-validate|design-import|design-snapshot|design-changed|design-gate|critique-check|critique-select|critique-dismiss|design-page|hook> ...`;
 
 export function run(argv: string[], io: Io): Result {
   const [cmd, ...args] = argv;
@@ -386,6 +389,112 @@ export function run(argv: string[], io: Io): Result {
         if (busy !== undefined && (idle || !Number.isFinite(Date.parse(busy)))) return fail('heartbeat: --busy-until needs an ISO time, and not with --idle', 2);
         return ok(JSON.stringify(heartbeatBatch({ sid, sessionVersion: sv, now, busyUntil: busy !== undefined ? new Date(busy) : null, idle })));
       }
+      case 'bind': {
+        // C3: bind this conversation to a seat of the checkout; never a seat another live conversation holds.
+        if (!args[0] || args[0].startsWith('--')) return fail('usage: waypoint bind <plan.yaml|design.md> --via work|design|forge-run|forge-member|forge-infinite [--claude <id>] [--seat <sid> | --second-seat] [--track <t>] [--resume] [--takeover]', 2);
+        const via = flag('via');
+        if (!isBoundVia(via)) return fail(`bind: --via must be one of ${BOUND_VIAS.join(', ')}`, 2);
+        const claude = claudeSessionId(flag('claude'), io.env ?? {});
+        if (!claude) return fail(noClaudeSession('bind', '--claude'), 2);
+        // An empty substitution leaves the next flag where the value goes: `--seat --resume` names no seat.
+        const valueOf = (name: string): string | null | undefined => {
+          if (!args.includes(`--${name}`)) return undefined;
+          const v = flag(name);
+          return v && !v.startsWith('-') ? v : null;
+        };
+        const seatFlag = valueOf('seat');
+        const track = valueOf('track');
+        if (seatFlag === null || track === null) return fail('bind: --seat and --track need a value', 2);
+        const second = args.includes('--second-seat');
+        if (second && seatFlag !== undefined) return fail('bind: --seat and --second-seat exclude each other', 2);
+        const target = projectOf(abs(args[0]), io.cwd);
+        if (!target) return fail(`bind: ${args[0]} is not in a project folder with a valid id`, 2);
+        const wp = path.join(io.cwd, '.waypoint', target.project);
+        const rel = (p: string) => path.relative(io.cwd, p).split(path.sep).join('/') || '.';
+        const now = io.now();
+        const t = now.getTime();
+        const open = openTasksOf(wp);
+        const own = checkoutSid(wp, t);
+        let sid: string | null;
+        if (seatFlag !== undefined) sid = seatFlag;
+        else if (second) sid = secondSeatOf(wp, claude, open, t);
+        else sid = own ?? sessionIdFrom(track ?? 'main');
+        if (sid === null) return fail(`bind: every extra seat (main-2 to main-${MAX_SEATS + 1}) is held by a live conversation`, 2);
+        if (!isSafeId(sid) || sid.startsWith('-')) {
+          const fix = seatFlag !== undefined ? 'pick another --seat' : own !== null ? `fix the sessionId of ${rel(path.join(wp, 'session.json'))}` : 'pick another --track';
+          return fail(`bind: the seat id ${JSON.stringify(sid.slice(0, 130))} names a folder: only letters, digits, _ . - and no leading - (${fix})`, 2);
+        }
+        const seatDir = second || (own !== null && own !== sid) ? path.join(seatsDir(wp), sid) : wp;
+        const cur = readBinding(seatDir, sid, t);
+        const task = open[sid] ?? null;
+        const options = ['worktree', 'second-seat', 'takeover'];
+        const held = (b: BoundDoc) => ({ held: { sid, claude: b.claude, via: b.via, seenAt: b.seenAt, task }, options, secondSeat: secondSeatOf(wp, claude, open, t) });
+        const prevOf = (b: BoundDoc) => ({ sid, claude: b.claude, endedAt: b.endedAt, endReason: b.endReason, seenAt: b.seenAt, task });
+        const resume = args.includes('--resume');
+        const takeover = args.includes('--takeover');
+        let took: 'new' | 'same' | 'takeover' | 'previous';
+        if (!cur) took = 'new';
+        else if (cur.claude === claude) took = 'same';
+        else if (boundLive(cur, t)) {
+          if (!takeover) return out(3, held(cur));
+          took = 'takeover';
+        } else if (task && !resume && !takeover) return out(4, { previous: prevOf(cur), options: ['resume', 'release'] });
+        else took = 'previous';
+        const iso = now.toISOString();
+        writeBinding(boundFile(seatDir), { sid, claude, pid: pidFromEnv(io.env), via, since: took === 'same' && cur ? cur.since : iso, seenAt: iso, endedAt: null, endReason: null });
+        // Two binds on one seat at once: each renames its own file in; the one that reads another's back lost.
+        const back = readBinding(seatDir, sid, t);
+        if (!back || back.claude !== claude) return out(3, back ? held(back) : { held: null, options, secondSeat: null });
+        // The seat's session.json: created when missing, never changing a field it already has (B-12).
+        const sessionFile = path.join(seatDir, 'session.json');
+        let session: Record<string, unknown> = {};
+        try { const v: unknown = JSON.parse(readFileSync(sessionFile, 'utf8')); if (v && typeof v === 'object' && !Array.isArray(v)) session = v as Record<string, unknown>; } catch { session = {}; }
+        const merged = { ...(target.plan ? { plan: target.plan, url: target.url } : {}), sessionId: sid, track: track ?? null, ...session };
+        if (Object.keys(merged).length !== Object.keys(session).length) writeAtomic(sessionFile, `${JSON.stringify(merged, null, 2)}\n`);
+        recordBase(seatDir, claude, io.cwd);
+        return out(0, { took, sid, seatDir: rel(seatDir), sessionFile: rel(sessionFile), claude, via, ...(cur && (took === 'takeover' || took === 'previous') ? { previous: prevOf(cur) } : {}) });
+      }
+      case 'release': {
+        if (!args[0] || args[0].startsWith('--')) return fail('usage: waypoint release <plan.yaml|design.md> [--seat <sid>] [--claude <id>] [--free <T> --state-version <V> [--session-version <SV>] [--db <dir>]]', 2);
+        // An empty --db value reads the next flag: the mirror would write the cache under `<cwd>/--seat/`.
+        const dbFlag = flag('db');
+        if (args.includes('--db') && (!dbFlag || dbFlag.startsWith('-'))) return fail('release: --db needs the cache directory', 2);
+        const target = projectOf(abs(args[0]), io.cwd);
+        if (!target) return fail(`release: ${args[0]} is not in a project folder with a valid id`, 2);
+        const wp = path.join(io.cwd, '.waypoint', target.project);
+        const rel = (p: string) => path.relative(io.cwd, p).split(path.sep).join('/') || '.';
+        const now = io.now();
+        const t = now.getTime();
+        const claude = claudeSessionId(flag('claude'), io.env ?? {});
+        const seats = readSeats(wp, t);
+        const seatFlag = flag('seat');
+        const seat = seatFlag !== undefined ? seats.find(s => s.sid === seatFlag) : (claude ? seats.find(s => s.bound?.claude === claude) : undefined) ?? seats.find(s => s.checkout);
+        if (!seat) return fail(seatFlag !== undefined ? `release: no seat ${seatFlag} in ${rel(wp)}` : `release: no seat in ${rel(wp)}`, 2);
+        let batch: Write[] | undefined;
+        const db = dbFlag !== undefined ? abs(dbFlag) : path.join(wp, 'dbcache');
+        const free = flag('free');
+        if (free !== undefined) {
+          if (!isPlanId(free)) return fail('release: --free needs a task id', 2);
+          const v = posInt('state-version');
+          if (v === null) return fail('release: --state-version must be a positive integer', 2);
+          const svFlag = flag('session-version');
+          const sv = svFlag === undefined ? null : posInt('session-version');
+          if (svFlag !== undefined && sv === null) return fail('release: --session-version must be a positive integer', 2);
+          let owner: unknown = null;
+          try { owner = (JSON.parse(readFileSync(path.join(db, 'state', `${free}.json`), 'utf8')) as { owner?: unknown }).owner; } catch { owner = null; }
+          if (owner !== seat.sid) return fail(`release: ${free} is not held by seat ${seat.sid} in the state cache (list state first)`, 2);
+          batch = freeBatch({ sid: seat.sid, task: free, stateVersion: v, sessionVersion: sv });
+        }
+        const b = seat.bound;
+        if (b && b.claude !== claude && boundLive(b, t)) return fail(`release: ${seat.sid} is bound to another live session`, 3);
+        let released = false;
+        if (b && b.claude === claude && b.endedAt === null) {
+          writeBinding(boundFile(seat.dir), { ...b, endedAt: now.toISOString(), endReason: 'released' });
+          released = true;
+        }
+        if (batch) mirrorState(db, batch[0]);
+        return out(0, { released, sid: seat.sid, seatDir: rel(seat.dir), now: now.toISOString(), ...(batch ? { batch } : {}) });
+      }
       case 'design-validate': {
         const d = parseDesign(readFileSync(abs(args[0]), 'utf8'));
         const log = readChangelog(path.dirname(abs(args[0])));
@@ -636,8 +745,7 @@ function mirrorState(db: string, write: Write): void {
     if (v && typeof v === 'object' && (v as { __delete__?: unknown }).__delete__ === true) delete cur[k];
     else cur[k] = v;
   }
-  mkdirSync(path.dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify(cur));
+  writeAtomic(file, JSON.stringify(cur));
 }
 
 /** A-14: another checkout uses `sid`: its sessions document has a live lease, another Claude id and another worktree. */
@@ -649,6 +757,24 @@ function heldElsewhere(doc: SessionDoc | undefined, now: number, claude: string 
 function freeSid(sid: string, sessions: Record<string, SessionDoc>, now: number, claude: string | null, worktree: string): string {
   for (let n = 2; n < 100; n++) if (!heldElsewhere(sessions[`${sid}-${n}`], now, claude, worktree)) return `${sid}-${n}`;
   return `${sid}-100`;
+}
+
+/** The project a plan names (or a design's folder), its plan path relative to cwd (a design without a plan has none)
+ *  and its roadmap. Null when a design's folder is not a valid project id; a plan or design that does not read throws. */
+function projectOf(file: string, cwd: string): { project: string; plan: string | null; url: string | null } | null {
+  const rel = (p: string) => path.relative(cwd, p).split(path.sep).join('/');
+  if (path.basename(file) === 'design.md') {
+    parseDesign(readFileSync(file, 'utf8'));
+    const project = path.basename(path.dirname(file));
+    if (!isPlanId(project)) return null;
+    const planFile = path.join(path.dirname(file), 'plan.yaml');
+    if (!existsSync(planFile)) return { project, plan: null, url: null };
+    let url: string | null = null;
+    try { url = parsePlan(readFileSync(planFile, 'utf8')).artifacts.roadmap ?? null; } catch { url = null; }
+    return { project, plan: rel(planFile), url };
+  }
+  const p = parsePlan(readFileSync(file, 'utf8'));
+  return { project: p.project, plan: rel(file), url: p.artifacts.roadmap ?? null };
 }
 
 // `git [global options] commit`, at the start of the command, after a separator or an opening parenthesis.
