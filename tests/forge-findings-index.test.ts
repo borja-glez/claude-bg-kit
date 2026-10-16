@@ -105,6 +105,11 @@ describe('findings index (J-06)', () => {
     expect([...idsOf({ correctness: fail([imp('a', { id: 'F2' }), imp('b')]) })]).toEqual(['F2']);
   });
 
+  it('answeredBy leaves out a draft (complete: false): a reviewer that ran out of turns closes nothing (M3)', () => {
+    expect(answeredBy({ correctness: { ...pass, incomplete: true }, security: pass })).toEqual(['security']);
+    expect(answeredBy({ correctness: { ...fail([imp('a')]), incomplete: true } })).toEqual([]);
+  });
+
   it('answeredBy applies the verdict\'s rubric: a fail whose only finding is a critical without a file breaks it and answers nothing (J-05)', () => {
     expect(answeredBy({ correctness: fail([{ severity: 'critical', problem: 'something looks off somewhere' }]), security: pass })).toEqual(['security']);
     expect(answeredBy({ correctness: fail([{ severity: 'critical', file: 'src/a.ts', problem: 'crash' }]) })).toEqual(['correctness']);
@@ -216,6 +221,9 @@ describe('the handover (C-15)', () => {
     ].join('\n'));
     const redo = renderHandover({ task: 'T1-1', reviews: { n: 1, max: 4 }, brief: 'b', diff: 'd', base: '', head: '', open: [], residual: [], history: '', validators: [], report: 'r',
       redo: { reasons: ['use a queue'] } });
+    // A redo is not a fix round: its last line sends the new implementer back to the brief (M5).
+    expect(h.trimEnd().split('\n').at(-1)).toBe('Start from the current HEAD and do not redo what is closed.');
+    expect(redo.trimEnd().split('\n').at(-1)).toBe('Implement the brief again with another approach; the findings say what to avoid.');
     expect(redo.split('\n').slice(0, 8)).toEqual([
       '# Handover: T1-1, review 1 of 4 (the attempt was reverted: start again from the brief with another approach)',
       '- Brief: b · Whole diff so far: d (base unknown, head unknown)',

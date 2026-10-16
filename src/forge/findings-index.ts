@@ -112,12 +112,12 @@ export function assignIds(index: FindingsIndex, round: number, reviews: Partial<
   return out;
 }
 
-/** The reviewers whose result counts for closing findings: not abstaining, not invalid, and not breaking the verdict's
- *  rubric (breaksRubric, J-05). */
+/** The reviewers whose result counts for closing findings: not abstaining, not invalid, not a draft (`complete: false`:
+ *  it may have run out of turns before re-checking a finding) and not breaking the verdict's rubric (breaksRubric, J-05). */
 export function answeredBy(reviews: Partial<Record<ReviewerName, Review>>): ReviewerName[] {
   return REVIEWERS.filter(n => {
     const r = reviews[n];
-    return !!r && r.verdict !== 'abstain' && r.invalid !== true && !breaksRubric(r);
+    return !!r && r.verdict !== 'abstain' && r.invalid !== true && r.incomplete !== true && !breaksRubric(r);
   });
 }
 
@@ -266,7 +266,8 @@ export function renderHandover(h: HandoverInput): string {
     `- Reviews so far: ${h.history || 'none'}`,
     `- Validators now: ${h.validators.length ? `failing ${h.validators.join(', ')}` : 'green'}`,
     `- Earlier reports: ${h.report} (its Fix round lines say what was tried)`,
-    'Start from the current HEAD and do not redo what is closed.',
+    // M5: a redo is not a fix round: the new implementer starts again from the brief.
+    h.redo ? 'Implement the brief again with another approach; the findings say what to avoid.' : 'Start from the current HEAD and do not redo what is closed.',
   ];
   return lines.join('\n') + '\n';
 }

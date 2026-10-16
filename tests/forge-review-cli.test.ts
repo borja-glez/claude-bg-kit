@@ -722,6 +722,53 @@ describe('forge review-close', () => {
     expect(close('--defer').code).toBe(2);
   });
 
+  it('a finding out of the threat model stays minor in the verdict and is listed in deferred with residual out-of-model (M1)', () => {
+    prep();
+    write(r1(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    write(r1(), 'security', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'an attacker with a shell can edit the file', outOfModel: true }] });
+    const out = JSON.parse(close().stdout);
+    expect(out).toMatchObject({ action: 'accept', next: 'done' });
+    expect(out.deferred).toEqual([expect.objectContaining({ id: 'F1', reviewer: 'security', file: 'a.txt', line: 2, residual: 'out-of-model', severity: 'minor', declared: 'important' })]);
+    const ruling = readEvents(root).filter(e => e.kind === 'ruling').at(-1)!;
+    expect(ruling.minor).toEqual([expect.objectContaining({ id: 'F1', residual: 'out-of-model' })]);
+    expect(ruling.deferred).toBeUndefined();
+  });
+
+  it('--defer and --out-of-model refuse an id that is neither in this review nor left open by the previous one, and write nothing (M2)', () => {
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'the state should live in the store' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    expect(JSON.parse(close().stdout).action).toBe('fix');
+    const verdicts = () => readEvents(root).filter(e => e.kind === 'verdict').length;
+    const before = verdicts();
+    for (const flag of ['--defer', '--out-of-model']) {
+      const r = close(flag, 'F9');
+      expect(r.code, flag).toBe(2);
+      expect(r.stderr, flag).toContain('F9');
+      expect(r.stderr, flag).toContain('F1');
+      expect(existsSync(path.join(r1(), 'overrides.json')), flag).toBe(false);
+    }
+    expect(close('--defer', 'F1,F9').code).toBe(2);
+    expect(existsSync(path.join(r1(), 'overrides.json'))).toBe(false);
+    expect(verdicts()).toBe(before);
+    expect(close('--defer', 'F1').code).toBe(0);
+  });
+
+  it('a draft (complete: false) closes nothing: the finding it did not reach stays open (M3)', () => {
+    noExpress();
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    close();
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo fixed\n');
+    git('commit', '-q', '-am', 'fix');
+    prep();
+    write(r2(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [], complete: false });
+    expect(JSON.parse(close().stdout).incomplete).toEqual(['correctness']);
+    const index = JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8'));
+    expect(index.rounds[1].findings.map((f: { id: string; status: string }) => [f.id, f.status])).toEqual([['F1', 'open']]);
+  });
+
   it('--defer leaves a finding as residual architecture and closes the same review again (§4.8)', () => {
     prep();
     write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'the state should live in the store' }] });

@@ -540,15 +540,6 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   // C-13: review n of max; the last one accepts a fix with green validators and no critical (C-04, rule 7).
   const config = loadConfig(deps.repoDir);
   const reviewsCount = reviewsOf(round, p);
-  // Rulings on findings stay for the brief: the ids given now are kept in this review's overrides.json, and the overrides
-  // of every review of brief n apply (K4-02, §4.8).
-  if (outOfModelArg.length || deferArg.length) {
-    const kept = overridesOf(path.join(roundDir, 'overrides.json'));
-    writeFileSync(path.join(roundDir, 'overrides.json'), JSON.stringify({
-      outOfModel: [...new Set([...kept.outOfModel, ...outOfModelArg])], defer: [...new Set([...kept.defer, ...deferArg])],
-    }, null, 2) + '\n');
-  }
-  const overrides = briefOverrides(dir, n);
   // J-06: every critical and important finding gets its stable id from the brief's index; what the previous review left
   // open and nobody names now is closing (a new finding that matches it is hardening). `open` is looked up with the ids
   // assignIds gave (copied or paired), so a still-open finding its reviewer mislabels keeps blocking as previous.
@@ -562,12 +553,31 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   const roundRel = rel(deps.cwd, roundDir);
   const fresh = round >= 2 && readEvents(deps.cwd).filter(e => e.kind === 'verdict' && e.task === task && e.dir !== roundRel).at(-1)?.action === 'redo';
   const withIds = assignIds(index, round, reviews, { express, fresh });
+  const open = fresh ? {} : openIds(index, round);
+  // Rulings on findings stay for the brief: the ids given now are kept in this review's overrides.json, and the overrides
+  // of every review of brief n apply (K4-02, §4.8). M2: only ids of this review or left open by the previous one: a
+  // mistyped id would otherwise rule silently on whatever finding gets it later. One that is not refuses the whole call.
+  if (outOfModelArg.length || deferArg.length) {
+    const known = [...new Set([...idsOf(withIds), ...Object.values(open).flatMap(v => v ?? [])])].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
+    for (const [name, list] of [['out-of-model', outOfModelArg], ['defer', deferArg]] as const) {
+      const unknown = list.filter(x => !known.includes(x));
+      if (unknown.length) {
+        throw new UsageError(`review-close: --${name} ${unknown.join(',')}: no finding of this review, nor one the previous review left open, has that id; nothing was written (ids: ${known.join(', ') || 'none'})`);
+      }
+    }
+    const kept = overridesOf(path.join(roundDir, 'overrides.json'));
+    writeFileSync(path.join(roundDir, 'overrides.json'), JSON.stringify({
+      outOfModel: [...new Set([...kept.outOfModel, ...outOfModelArg])], defer: [...new Set([...kept.defer, ...deferArg])],
+    }, null, 2) + '\n');
+  }
+  const overrides = briefOverrides(dir, n);
   // An express reviewer answers for the reviewers delegated to it: their open findings it does not name are closing.
   // Safety rule (measure 7): one that did not answer (abstain, invalid, a draft or missing) checked nothing, so it closes
   // nothing, what the delegated reviewers left open stays open and blocks, and the review never accepts (hold); the next
-  // review-prep plans a normal review, since reviewRound wants a usable previous correctness.
+  // review-prep plans a normal review, since reviewRound wants a usable previous correctness. A draft never closes a
+  // finding, in any review (answeredBy).
   const delegated = Array.isArray(plan.delegated) ? plan.delegated.filter((x): x is ReviewerKey => x === 'correctness' || x === 'security' || x === 'perf') : [];
-  const answered = answeredBy(withIds).filter(k => !(express && k === 'correctness' && withIds.correctness?.incomplete === true));
+  const answered = answeredBy(withIds);
   const held = express && !answered.includes('correctness');
   if (express && !held) answered.push(...delegated.filter(k => !answered.includes(k)));
   const hold = held ? {
@@ -576,7 +586,7 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   } : undefined;
   const result = synthesize(withIds, weightsFor({ sensitive: flags.includes('--sensitive'), perf: flags.includes('--perf') }), validatorsOk, failing, {
     round, fixHunks: parseHunks(fixPatch), root: deps.repoDir, carried, last: round >= reviewsCount.max, personDocs: config.review.personDocs,
-    open: fresh ? {} : openIds(index, round), closed: fresh ? {} : closedFor(index, round, idsOf(withIds), answered), outOfModel: overrides.outOfModel, defer: overrides.defer,
+    open, closed: fresh ? {} : closedFor(index, round, idsOf(withIds), answered), outOfModel: overrides.outOfModel, defer: overrides.defer,
     ...(hold ? { hold } : {}), ...(fresh ? { fresh } : {}),
   });
   // An index that exists but cannot be read is set aside next to the new one, never overwritten.
@@ -666,9 +676,12 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   // C-11: the shadow twins never hold the review: the ones already back are saved now, the rest are listed in
   // shadowPending and saved by FORGE shadow collect when they are back. They never reach the verdict.
   const twins = collectTwins(task, roundDir, plan, deps);
+  // M1: findings out of the threat model are minor in the verdict (and in the ruling), and deferred lists them too, with
+  // residual out-of-model, so the report that closes the work shows every residual (§4.7).
+  const deferred = [...result.deferred, ...result.minor.filter(f => f.residual === 'out-of-model')];
   return json({
     action: result.action, score: result.score, next: d.next, last: d.last, implementer: d.implementer, reviews: reviewsCount, ...(express ? { express: true } : {}),
-    findings, deferred: result.deferred, ask: result.ask.length ? askOf(result.ask, locale === 'es' ? 'es' : 'en') : null, handover, revert,
+    findings, deferred, ask: result.ask.length ? askOf(result.ask, locale === 'es' ? 'es' : 'en') : null, handover, revert,
     invalid: result.reviewers.filter(r => r.invalid).map(r => r.name),
     incomplete: result.reviewers.filter(r => r.incomplete).map(r => r.name), round, reasons: result.reasons, ...(twins.shadow.length ? { shadow: twins.shadow } : {}), ...(twins.shadowSkipped.length ? { shadowSkipped: twins.shadowSkipped } : {}),
     ...(twins.shadowPending.length ? { shadowPending: twins.shadowPending } : {}),
