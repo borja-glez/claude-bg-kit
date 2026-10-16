@@ -499,16 +499,24 @@ describe('forge review-close', () => {
     expect(JSON.parse(readFileSync(path.join(root, '.forge', 'shadow.json'), 'utf8')).remaining).toBe(1);
   });
 
-  it('a missing twin is listed in review-close output and saves no case', () => {
+  it('review-close does not wait for a twin: one still out is listed in shadowPending, and shadow collect saves it when it is back (C-11)', () => {
     mkdirSync(path.join(root, '.forge'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'shadow.json'), JSON.stringify({ remaining: 2, cases: [] }));
     prep();
     write(r1(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
     write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
     const out = JSON.parse(close().stdout);
+    expect(out.action).toBe('accept');
     expect(out.shadow).toBeUndefined();
-    expect(out.shadowSkipped).toEqual([{ reviewer: 'security', reason: 'missing', file: '.forge/work/T1/reviews-1-1/shadow/security.json' }]);
+    expect(out.shadowSkipped).toBeUndefined();
+    expect(out.shadowPending).toEqual([{ reviewer: 'security', file: '.forge/work/T1/reviews-1-1/shadow/security.json' }]);
     expect(JSON.parse(readFileSync(path.join(root, '.forge', 'shadow.json'), 'utf8')).cases).toEqual([]);
+    write(path.join(r1(), 'shadow'), 'security', { verdict: 'fail', confidence: 0.9, findings: [{ severity: 'critical', file: 'a.txt', line: 1, problem: 'path traversal' }] });
+    const late = run(['shadow', 'collect', '--task', 'T1-1', '--dir', '.forge/work/T1/reviews-1-1'], io);
+    expect(late.code).toBe(0);
+    expect(JSON.parse(late.stdout)).toEqual({ shadow: ['security'], shadowSkipped: [], shadowPending: [] });
+    expect(JSON.parse(readFileSync(path.join(root, '.forge', 'shadow.json'), 'utf8')).cases)
+      .toEqual([expect.objectContaining({ task: 'T1-1', reviewer: 'security', missedCritical: [expect.objectContaining({ problem: 'path traversal' })] })]);
   });
 
   it('an unparseable twin or high review saves no case and review-close says so', () => {

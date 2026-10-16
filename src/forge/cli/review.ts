@@ -10,9 +10,9 @@ import { parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, syn
 import { roundDecision } from '../round.js';
 import { parseIndex, assignIds, answeredBy, idsOf, recordRound, openIds, closedFor, previousFindings, asPrevious, historyLine, renderHandover } from '../findings-index.js';
 import { reviewsOf } from '../loop.js';
-import { buildCase, readShadow, saveShadow, takeBrief } from '../shadow.js';
+import { takeBrief } from '../shadow.js';
 import { renderThreatModel } from '../threat-model.js';
-import { shadowCommand } from './shadow.js';
+import { collectTwins, shadowCommand } from './shadow.js';
 import { restoringRegenerated } from './swarm.js';
 import { mainCheckout } from '../local.js';
 import { runWithCache, cacheGit, checkoutPrefix } from '../validate-cache.js';
@@ -344,10 +344,10 @@ function askOf(ask: AskFinding[], locale: 'es' | 'en') {
  * (twins aside) left no file. Else runs the verdict with review-plan.json's flags, the round and the fix diff's hunks
  * (carried results keep their previous origins), logs it on the round dir and the round decision, logs the minor and
  * deferred findings as a ruling, writes `<dir>/findings-<n>-<round>.json` for the implementer when the action is not
- * accept, saves the case of each shadow twin that left its file in `shadow/` (it never counts in the verdict), and
+ * accept, saves the case of each shadow twin already back in `shadow/` and lists the others in shadowPending (C-11; it never counts in the verdict), and
  * prints `{action, score, next, last, implementer, findings, deferred, invalid, incomplete}` (`incomplete`: the
  * reviewers whose file is a draft with `"complete": false`; plus `shadow`, the twins compared, and
- * `shadowSkipped`, the twins whose file, or their high reviewer's, was missing, unparseable or a draft).
+ * `shadowSkipped`, the twins whose file, or their high reviewer's, was unparseable or a draft).
  * Every critical and important finding gets its stable id in <dir>/findings-index-<n>.json (J-06), and the verdict
  * applies the blocking table of the review (C-04): it prints reviews {n, max} (C-13) and ask, the question for a security
  * finding that repeats a closed theme (K4-02). --out-of-model and --defer keep ids in the review's overrides.json; the
@@ -526,40 +526,15 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   const revert = d.next === 'redo' && planBase && headNow && headNow !== planBase
     ? { base: planBase, head: headNow, args: ['-C', deps.repoDir, 'revert', '--no-edit', `${planBase}..HEAD`] } : null;
 
-  // The shadow twins (xhigh, in shadow/) never reach the verdict: each one with a file is paired with its high reviewer
-  // and the case saved in .forge/shadow.json, replacing the one an earlier close of this round saved. A missing file or
-  // one parseReview flags invalid (it would read as no blocking findings) saves no case: it is listed in shadowSkipped.
-  // So does a draft (`"complete": false`): it is not a finished review to compare.
-  const twins: ReviewerKey[] = [];
-  const shadowSkipped: { reviewer: ReviewerKey; reason: 'missing' | 'unparseable' | 'incomplete'; file: string }[] = [];
-  const pairs: { k: ReviewerKey; high: Review; xhigh: Review }[] = [];
-  for (const k of names(plan.spawn, x => x.twin === true)) {
-    const highFile = path.join(roundDir, `${k}.json`), twinFile = path.join(roundDir, 'shadow', `${k}.json`);
-    const missing = [twinFile, highFile].find(f => !existsSync(f));
-    if (missing) { shadowSkipped.push({ reviewer: k, reason: 'missing', file: rel(deps.cwd, missing) }); continue; }
-    const high = parseReview(readFileSync(highFile, 'utf8'));
-    const xhigh = parseReview(readFileSync(twinFile, 'utf8'));
-    const bad = xhigh.invalid ? twinFile : high.invalid ? highFile : null;
-    if (bad) { shadowSkipped.push({ reviewer: k, reason: 'unparseable', file: rel(deps.cwd, bad) }); continue; }
-    const draft = xhigh.incomplete ? twinFile : high.incomplete ? highFile : null;
-    if (draft) { shadowSkipped.push({ reviewer: k, reason: 'incomplete', file: rel(deps.cwd, draft) }); continue; }
-    pairs.push({ k, high, xhigh });
-    twins.push(k);
-  }
-  if (pairs.length) {
-    const local = (fs: Finding[]) => fs.map(f => (f.file ? { ...f, file: repoRelative(f.file, deps.repoDir) } : f));
-    const state = readShadow(deps.cwd) ?? { remaining: 0, cases: [] };
-    let cases = state.cases;
-    for (const { k, high, xhigh } of pairs) {
-      cases = [...cases.filter(c => c.task !== task || c.reviewer !== k), buildCase(task, k, local(high.findings), local(xhigh.findings))];
-    }
-    saveShadow(deps.cwd, { ...state, cases });
-  }
+  // C-11: the shadow twins never hold the review: the ones already back are saved now, the rest are listed in
+  // shadowPending and saved by FORGE shadow collect when they are back. They never reach the verdict.
+  const twins = collectTwins(task, roundDir, plan, deps);
   return json({
     action: result.action, score: result.score, next: d.next, last: d.last, implementer: d.implementer, reviews: reviewsCount,
     findings, deferred: result.deferred, ask: result.ask.length ? askOf(result.ask, locale === 'es' ? 'es' : 'en') : null, handover, revert,
     invalid: result.reviewers.filter(r => r.invalid).map(r => r.name),
-    incomplete: result.reviewers.filter(r => r.incomplete).map(r => r.name), round, reasons: result.reasons, ...(twins.length ? { shadow: twins } : {}), ...(shadowSkipped.length ? { shadowSkipped } : {}),
+    incomplete: result.reviewers.filter(r => r.incomplete).map(r => r.name), round, reasons: result.reasons, ...(twins.shadow.length ? { shadow: twins.shadow } : {}), ...(twins.shadowSkipped.length ? { shadowSkipped: twins.shadowSkipped } : {}),
+    ...(twins.shadowPending.length ? { shadowPending: twins.shadowPending } : {}),
   });
 }
 
@@ -622,7 +597,7 @@ export function reviewCommand(cmd: string, args: string[], deps: ReviewDeps): Re
   switch (cmd) {
     case 'review-prep': return reviewPrep(args, deps);
     case 'review-close': return reviewClose(args, deps);
-    case 'shadow': return shadowCommand(args, deps.cwd);
+    case 'shadow': return shadowCommand(args, deps);
     case 'prep': return prep(args, deps);
     default:
       throw new UsageError(`unknown review command ${cmd}`);

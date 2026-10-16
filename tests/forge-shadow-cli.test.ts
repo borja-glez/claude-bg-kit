@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run, type Io } from '../src/forge/cli/run.js';
@@ -11,7 +11,7 @@ const state = () => JSON.parse(readFileSync(path.join(root, '.forge', 'shadow.js
 
 beforeEach(() => {
   root = mkdtempSync(path.join(tmpdir(), 'forge-shadow-cli-'));
-  io = { cwd: root, now: () => new Date('2026-10-14T10:00:00.000Z') };
+  io = { cwd: root, now: () => new Date('2026-10-14T10:00:00.000Z'), env: {} };
 });
 
 describe('forge shadow', () => {
@@ -92,5 +92,30 @@ describe('forge shadow', () => {
     expect(run(['shadow'], io).code).toBe(2);
     expect(run(['shadow', 'go'], io).code).toBe(2);
     expect(run(['shadow', 'report', '--locale', 'fr'], io).code).toBe(2);
+  });
+
+  it('collect saves the case of a twin that came back after review-close, and lists one still out as pending (C-11)', () => {
+    startShadow(root, 3);
+    const dir = path.join(root, '.forge', 'work', 'T1', 'reviews-1-1');
+    mkdirSync(path.join(dir, 'shadow'), { recursive: true });
+    writeFileSync(path.join(dir, 'review-plan.json'), JSON.stringify({ task: 'T1-1', round: 1, spawn: [
+      { agent: 'forge-review-security', role: 'review-security', effort: 'high', mode: 'full', inputs: {} },
+      { agent: 'forge-review-security', role: 'review-security', effort: 'xhigh', mode: 'full', twin: true, inputs: {} },
+      { agent: 'forge-review-perf', role: 'review-perf', effort: 'high', mode: 'full', inputs: {} },
+      { agent: 'forge-review-perf', role: 'review-perf', effort: 'xhigh', mode: 'full', twin: true, inputs: {} },
+    ] }));
+    writeFileSync(path.join(dir, 'security.json'), JSON.stringify({ verdict: 'pass', confidence: 0.9, findings: [] }));
+    writeFileSync(path.join(dir, 'perf.json'), JSON.stringify({ verdict: 'pass', confidence: 0.9, findings: [] }));
+    writeFileSync(path.join(dir, 'shadow', 'security.json'), JSON.stringify({ verdict: 'fail', confidence: 0.9, findings: [{ severity: 'critical', file: 'a.ts', line: 3, problem: 'path traversal' }] }));
+    const r = run(['shadow', 'collect', '--task', 'T1-1', '--dir', '.forge/work/T1/reviews-1-1'], io);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toEqual({ shadow: ['security'], shadowSkipped: [], shadowPending: [{ reviewer: 'perf', file: '.forge/work/T1/reviews-1-1/shadow/perf.json' }] });
+    expect(state().cases).toEqual([expect.objectContaining({ task: 'T1-1', reviewer: 'security', missedCritical: [expect.objectContaining({ problem: 'path traversal' })] })]);
+    // Collecting again replaces the case of that review.
+    run(['shadow', 'collect', '--task', 'T1-1', '--dir', '.forge/work/T1/reviews-1-1'], io);
+    expect(state().cases).toHaveLength(1);
+    expect(run(['shadow', 'collect', '--task', 'T1-1', '--dir', 'nowhere'], io).code).toBe(2);
+    expect(run(['shadow', 'collect', '--dir', '.forge/work/T1/reviews-1-1'], io).code).toBe(2);
+    expect(run(['shadow', 'collect', '--task', 'T1', '--dir', '.forge/work/T1/reviews-1-1'], io).code).toBe(2);
   });
 });
