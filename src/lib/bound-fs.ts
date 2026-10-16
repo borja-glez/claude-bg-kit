@@ -140,8 +140,14 @@ export function leftSeatOf(seats: readonly Seat[], open: Readonly<Record<string,
   return best;
 }
 
-/** last-head.json: the base post-commit compares HEAD with, per conversation and worktree (A-17). */
-export interface LastHead { session: string; heads: Record<string, string> }
+/**
+ * last-head.json: the base post-commit compares HEAD with, per conversation and worktree (A-17), and per worktree the
+ * newest commit of each of this seat's recordings (C2: what another seat on the same worktree must not take).
+ */
+export interface LastHead { session: string; heads: Record<string, string>; recorded?: Record<string, string[]> }
+/** At most this many recordings are remembered per worktree, for this many worktrees. */
+const RECORDED_MAX = 20;
+const RECORDED_TOPS = 10;
 /** The top level (resolved) and HEAD of the worktree `cwd`; null outside a repository or before its first commit. */
 export function headOf(cwd: string): { top: string; head: string } | null {
   try {
@@ -154,21 +160,30 @@ export function readLastHead(seatDir: string): LastHead | null {
   const text = readText(lastHeadFile(seatDir), 64 * 1024);
   if (text === null) return null;
   try {
-    const o = JSON.parse(text) as { session?: unknown; heads?: unknown } | null;
+    const o = JSON.parse(text) as { session?: unknown; heads?: unknown; recorded?: unknown } | null;
     if (!o || !isSafeId(o.session) || !o.heads || typeof o.heads !== 'object' || Array.isArray(o.heads)) return null;
     const heads: Record<string, string> = {};
     for (const [k, v] of Object.entries(o.heads as Record<string, unknown>).slice(-HEADS_MAX)) if (typeof v === 'string' && SHA.test(v)) heads[k] = v;
-    return { session: o.session, heads };
+    const recorded: Record<string, string[]> = {};
+    if (o.recorded && typeof o.recorded === 'object' && !Array.isArray(o.recorded)) {
+      for (const [k, v] of Object.entries(o.recorded as Record<string, unknown>).slice(-RECORDED_TOPS)) {
+        if (Array.isArray(v)) recorded[k] = v.filter((s): s is string => typeof s === 'string' && SHA.test(s)).slice(-RECORDED_MAX);
+      }
+    }
+    return { session: o.session, heads, recorded };
   } catch { return null; }
 }
 export function writeLastHead(seatDir: string, doc: LastHead): void {
-  writeAtomic(lastHeadFile(seatDir), `${JSON.stringify({ session: doc.session, heads: Object.fromEntries(Object.entries(doc.heads).slice(-HEADS_MAX)) })}\n`);
+  const recorded = Object.fromEntries(Object.entries(doc.recorded ?? {}).filter(([, v]) => v.length).slice(-RECORDED_TOPS).map(([k, v]) => [k, v.slice(-RECORDED_MAX)]));
+  const out = { session: doc.session, heads: Object.fromEntries(Object.entries(doc.heads).slice(-HEADS_MAX)), ...(Object.keys(recorded).length ? { recorded } : {}) };
+  writeAtomic(lastHeadFile(seatDir), `${JSON.stringify(out)}\n`);
 }
 /** HEAD of the worktree `cwd` becomes the base of `session` there; another conversation's file starts over. */
 export function recordBase(seatDir: string, session: string, cwd: string): void {
   const at = headOf(cwd);
   if (!at) return;
   const lh = readLastHead(seatDir);
-  const heads = lh && lh.session === session ? lh.heads : {};
-  if (heads[at.top] !== at.head) writeLastHead(seatDir, { session, heads: { ...heads, [at.top]: at.head } });
+  const mine = lh && lh.session === session ? lh : null;
+  const heads = mine?.heads ?? {};
+  if (heads[at.top] !== at.head) writeLastHead(seatDir, { session, heads: { ...heads, [at.top]: at.head }, recorded: mine?.recorded });
 }

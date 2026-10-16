@@ -1168,6 +1168,59 @@ describe('classic hooks', () => {
       expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([a1, a2]);
       expect(pendingLines(seat2).map(l => JSON.parse(l).sha)).toEqual([b1, b2, b3, b4]);
     });
+    describe('two seats in one worktree: the edges (C2)', () => {
+      const seat2 = () => wp('seats', 'main-2');
+      const shas = (seat = wp()) => pendingLines(seat).map(l => JSON.parse(l).sha);
+      const twoSeats = () => {
+        setup(); writeFileSync(path.join(dir, '.gitignore'), '.waypoint/\n'); gitInit();
+        bindAs('A', {}, 'main'); ownTask('T001', 'main');
+        bindAs('B', {}, 'main-2', seat2()); ownTask('T003', 'main-2');
+        hook('session-start', { session_id: 'A', cwd: dir });
+        hook('session-start', { session_id: 'B', cwd: dir });
+      };
+      it('what a seat recorded stays its own after it ended: the position rule does not hand it to the other', () => {
+        twoSeats();
+        const b1 = commitFile('b1.txt');
+        commit('B', 'git commit -m b1');
+        hook('session-end', { session_id: 'B', reason: 'prompt_input_exit' });
+        commit('A', 'npm test');
+        expect(shas()).toEqual([]);
+        const a1 = commitFile('a1.txt');
+        commit('A', 'git commit -m a1');
+        expect(shas()).toEqual([a1]);
+        expect(shas(seat2())).toEqual([b1]);
+      });
+      it('a commit command that makes nothing takes nothing, also once the other seat removed its line', () => {
+        twoSeats();
+        commitFile('b1.txt');
+        commit('B', 'git commit -m b1');
+        writeFileSync(pending(seat2()), '');
+        commit('A', 'git add -A && git commit -m wip');
+        expect(shas()).toEqual([]);
+      });
+      it("a long command's commit that the other seat recorded first is never lost: a duplicate at worst", () => {
+        twoSeats();
+        // A runs `git commit -m a1 && git push`; during the push B commits and its hook runs; then A's hook.
+        const a1 = commitFile('a1.txt');
+        const b1 = commitFile('b1.txt');
+        commit('B', 'git commit -m b1');
+        commit('A', 'git commit -m a1 && git push');
+        expect(shas()).toEqual([a1]);
+        expect(shas(seat2())).toEqual([a1, b1]);
+      });
+      it("another seat's pull is not this seat's: its base marks what it saw", () => {
+        twoSeats();
+        git('checkout', '-q', '-b', 'upstream');
+        const p1 = commitFile('p1.txt');
+        git('checkout', '-q', '-');
+        git('merge', '-q', '--ff-only', 'upstream');
+        commit('B', 'git pull');
+        const a1 = commitFile('a1.txt');
+        commit('A', 'git commit -m a1');
+        expect(shas()).toEqual([a1]);
+        expect(shas(seat2())).not.toContain(p1);
+      });
+    });
     it('the commands that make commits on HEAD: commit, merge, cherry-pick, revert, rebase --continue and am (C2)', () => {
       const yes = ['git commit -m x', 'git merge --no-ff side', 'git -c a=b cherry-pick abc', 'x && git revert HEAD', 'git rebase --continue', 'git rebase -q --continue', 'git am < p.patch'];
       const no = ['git merge-base a b', 'git pull', 'git rebase main', 'git status', 'npm test', 'git log --grep merge', 'git amend'];

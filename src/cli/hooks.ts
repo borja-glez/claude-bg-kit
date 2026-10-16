@@ -285,32 +285,47 @@ function boundAnywhere(root: string, sid: string): boolean {
 }
 
 /**
- * C2: the bases in the worktree `top` of the other live seats of the project whose conversations work it too (their
- * last-head.json has it): HEAD moves for all of them. A base at HEAD whose seat has not recorded HEAD is left out: that
- * conversation's hook may have run between this command's commit and this hook. Null when no other seat works there.
+ * C2: what the other seats of the project saw of the worktree `top`, from their last-head.json (for the conversation
+ * bound to them, live or ended): the newest commit of each of their recordings, and their base unless that base is HEAD
+ * and they did not record it (their hook may have run between this command's commit and this hook). `live`: another
+ * live seat works this worktree, so HEAD moves for both and only a command that makes commits records.
  */
-function sharedBases(ctx: Ctx, own: Seat, top: string, head: string): string[] | null {
-  let shared = false;
-  const out: string[] = [];
+function othersOn(ctx: Ctx, own: Seat, top: string, head: string): { live: boolean; seen: Set<string> } {
+  let live = false;
+  const seen = new Set<string>();
   for (const s of ctx.seats) {
     const b = s.bound;
-    if (s === own || !b || b.claude === ctx.sid || !bindingLive(b, ctx.now)) continue;
+    if (s === own || !b || b.claude === ctx.sid) continue;
     const lh = readLastHead(s.dir);
-    const base = lh && lh.session === b.claude ? lh.heads[top] : undefined;
-    if (!base) continue;
-    shared = true;
-    if (base !== head || lines(path.join(s.dir, 'pending-commits.jsonl')).some(l => field(l, 'sha') === head)) out.push(base);
+    if (!lh || lh.session !== b.claude) continue;
+    const base = lh.heads[top];
+    const recorded = lh.recorded?.[top] ?? [];
+    if (base && bindingLive(b, ctx.now)) live = true;
+    for (const r of recorded) seen.add(r);
+    if (base && (base !== head || recorded.includes(head))) seen.add(base);
   }
-  return shared ? out : null;
+  return { live, seen };
+}
+
+/**
+ * C2: of the commits HEAD gained (oldest first), this seat's: the ones after the last commit another seat saw; when
+ * none comes after it (this command's commit came first and the other recorded it too, or the command made nothing),
+ * the range without the commits the others saw. A commit two seats record is better than one neither does.
+ */
+function ownShare(range: string[], seen: ReadonlySet<string>): string[] {
+  const k = range.reduce((at, s, i) => (seen.has(s) ? i : at), -1);
+  if (k < 0) return range;
+  return k < range.length - 1 ? range.slice(k + 1) : range.filter(s => !seen.has(s));
 }
 
 /**
  * A-17, B-05: for the owner by binding only (another session leaves before git; an owner by forge records through
  * integrate). The commits HEAD gained in the worktree of the command since this conversation's base there (first
  * parent, at most MAX_COMMITS) go to <seat>/pending-commits.jsonl; with no base yet only a commit command's HEAD does.
- * When another live seat works the same worktree (C2), only a command that makes commits records, and not what the
- * other conversation had already seen (its base). After an amend, a rebase or a reset, the lines HEAD no longer reaches
- * go. With no task open the base follows HEAD, so nothing committed between tasks is given to the next one.
+ * When another live seat works the same worktree (C2), only a command that makes commits records; and what another
+ * seat, live or ended, already saw or recorded there is not taken (ownShare). After an amend, a rebase or a reset, the
+ * lines HEAD no longer reaches go. With no task open the base follows HEAD, so nothing committed between tasks is given
+ * to the next one.
  */
 function postCommit(io: Io, input: HookInput): string {
   const ctx = contextOf(io, input);
@@ -321,9 +336,16 @@ function postCommit(io: Io, input: HookInput): string {
   const at = headOf(nonEmpty(input.cwd) ?? ctx.root);
   if (!at) return '';
   const lh = readLastHead(own.seat.dir);
-  const heads = lh && lh.session === sid ? lh.heads : {};
+  const mine = lh && lh.session === sid ? lh : null;
+  const heads = mine?.heads ?? {};
+  const recorded = mine?.recorded ?? {};
   const last = heads[at.top];
-  const save = () => { if (last !== at.head) writeLastHead(own.seat.dir, { session: sid, heads: { ...heads, [at.top]: at.head } }); };
+  // The newest commit this hook records: the seat's marker of what is its own (C2).
+  let newest: string | null = null;
+  const save = () => {
+    if (last === at.head && !newest) return;
+    writeLastHead(own.seat.dir, { session: sid, heads: { ...heads, [at.top]: at.head }, recorded: newest ? { ...recorded, [at.top]: [...(recorded[at.top] ?? []), newest] } : recorded });
+  };
   const task = ctx.viewer.task;
   if (!task) { save(); return ''; }
   const file = path.join(own.seat.dir, 'pending-commits.jsonl');
@@ -334,10 +356,11 @@ function postCommit(io: Io, input: HookInput): string {
   let shas: string[] = [];
   if (!last) shas = isCommitCommand(cmd) ? [at.head] : [];
   else if (last !== at.head) {
-    const shared = sharedBases(ctx, own.seat, at.top, at.head);
-    if (shared === null || makesCommits(cmd)) {
-      shas = (git(['rev-list', '--first-parent', '--reverse', `--max-count=${MAX_COMMITS}`, `${last}..${at.head}`, ...(shared ?? []).map(b => `^${b}`)]) ?? '')
+    const others = othersOn(ctx, own.seat, at.top, at.head);
+    if (!others.live || makesCommits(cmd)) {
+      const range = (git(['rev-list', '--first-parent', '--reverse', `--max-count=${MAX_COMMITS}`, `${last}..${at.head}`]) ?? '')
         .split(/\r?\n/).map(s => s.trim()).filter(s => SHA.test(s));
+      shas = ownShare(range, others.seen);
     }
     // An amend, a rebase or a reset: the old base is no longer under HEAD, nor are the commits it replaced.
     if (git(['merge-base', '--is-ancestor', last, at.head]) === null) {
@@ -354,8 +377,11 @@ function postCommit(io: Io, input: HookInput): string {
   }
   const have = new Set(lines(file).map(l => field(l, 'sha')));
   const ts = io.now().toISOString();
-  const add = shas.filter(s => !have.has(s)).map(sha => `${JSON.stringify({ ts, task, sha, command: cmd.slice(0, 200), session: sid, seat: own.bound.sid })}\n`);
-  if (add.length) appendFileSync(file, add.join(''));
+  const fresh = shas.filter(s => !have.has(s));
+  if (fresh.length) {
+    appendFileSync(file, fresh.map(sha => `${JSON.stringify({ ts, task, sha, command: cmd.slice(0, 200), session: sid, seat: own.bound.sid })}\n`).join(''));
+    newest = fresh[fresh.length - 1];
+  }
   save();
   return '';
 }
