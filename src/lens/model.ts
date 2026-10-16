@@ -237,7 +237,9 @@ export function forgeFromStatus(text: string, now: number, briefs: number | null
   if (!st) return null;
   const t = Date.parse(st.ts);
   if (!Number.isFinite(t) || !Number.isFinite(now) || now - t > FORGE_WINDOW_MS) return null;
-  const { ts: _ts, taskStartedAt: _a, stageSince: _b, stages: _c, doneAt: _d, lastAt: _e, ...forge } = st;
+  // C4: who wrote the task's last event, its run and its project are forge's: nothing here draws them, and a session
+  // that comes and goes between events must not change the band key.
+  const { ts: _ts, taskStartedAt: _a, stageSince: _b, stages: _c, doneAt: _d, lastAt: _e, session: _s, runId: _r, project: _p, ...forge } = st;
   // A light task the session never closed: finished at its last event, its agent gone. Not while a subagent of its
   // agent's tier (the live subagents' types) still runs: that is a long agent, not a forgotten task.
   const working = !!st.agent && liveTypes.some(t => tierOf(t).label === tierOf(st!.agent).label);

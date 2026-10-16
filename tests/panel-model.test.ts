@@ -315,8 +315,14 @@ describe('forge light task left open', () => {
 describe('forgeFromStatus', () => {
   it('maps a valid status.json without its ts', () => {
     const { ts: _ts, ...rest } = STATUS;
-    expect(forgeFromStatus(JSON.stringify(STATUS), NOW)).toEqual({ ...rest, brief: null, accepted: [], verify: null, session: null, runId: null, project: null, briefs: null, timing: null });
+    expect(forgeFromStatus(JSON.stringify(STATUS), NOW)).toEqual({ ...rest, brief: null, accepted: [], verify: null, briefs: null, timing: null });
     expect(forgeFromStatus(JSON.stringify(STATUS), NOW, 4)).toMatchObject({ briefs: 4 });
+  });
+  it('leaves out who wrote the last event, its run and its project: nothing draws them, so the band key never follows them (C4)', () => {
+    const stamped = JSON.stringify({ ...STATUS, session: 'c1', runId: 'r1', project: 'shop' });
+    expect(forgeFromStatus(stamped, NOW)).toEqual(forgeFromStatus(JSON.stringify(STATUS), NOW));
+    const model = (forgeStatus: string) => buildPanelModel({ band: NONE_BAND, now: NOW, forgeStatus, activity: act() });
+    expect(bandKey(model(stamped))).toBe(bandKey(model(JSON.stringify({ ...STATUS, session: null, runId: 'r2', project: null }))));
   });
   it('keeps auto mode from status.json', () => {
     expect(forgeFromStatus(JSON.stringify({ ...STATUS, autonomy: 'auto' }), NOW)).toMatchObject({ autonomy: 'auto' });

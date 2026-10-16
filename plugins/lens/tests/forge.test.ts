@@ -419,3 +419,22 @@ test('a plan task counts its briefs in .forge/work/<project>/<task> (D-08)', asy
   expect(await said(term)).toContain('0/2');
   await term.unmount();
 });
+
+test('a project id as long as forge allows (120 characters) still finds its briefs folder', async ($, on) => {
+  const project = 'p'.repeat(120);
+  engineBottom(on);
+  serveFiles(on, {
+    ...FORGE, [`${ROOT}/.forge/status.json`]: JSON.stringify({ ...STATUS, project }),
+    [`${ROOT}/.forge/work/${project}/hash/brief-1.md`]: 'b', [`${ROOT}/.forge/work/${project}/hash/brief-3.md`]: 'b', [`${ROOT}/.forge/work/hash/brief-1.md`]: 'b',
+  });
+  servePanes(on);
+  const clock = start(on);
+  on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'pending', activeForm: 'A' }] });
+  await clock.advance(30000);
+  const props = { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 120, scroll: { offset: 0, bodyRows: 9 }, view: {} };
+  const term = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props });
+  expect(await said(term)).toContain('0/3');
+  await term.unmount();
+});

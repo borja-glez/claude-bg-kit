@@ -59,7 +59,8 @@ type PanelFiles = {
 // The last model built, kept in module memory for the band (which draws without reading $.state or files).
 let bandModel: PanelModel | null = null;
 let bandJson = '';
-const SAFE_TASK = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,80}$/;
+// An id that names a folder or file: isSafeId's rule (src/lib/execution-state.ts), up to 120 characters, as forge names them.
+const SAFE_TASK = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,120}$/;
 let panelFiles: PanelFiles = {};
 let paneUp = false;
 let panelTimer: Timer | null = null;

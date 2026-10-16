@@ -2220,12 +2220,32 @@ describe('every event a command writes carries its session, run and project (C4)
     });
     log('T1-1');
     expect(readEvents(root).at(-1)).toMatchObject({ session: 'c1', runId: 'r1', project: 'shop' });
-    log('T1', ['--project', 'web'], {});
-    expect(readEvents(root).at(-1)).toMatchObject({ project: 'web', runId: 'r1' });
+    log('T1', ['--project', 'shop'], {});
+    expect(readEvents(root).at(-1)).toMatchObject({ project: 'shop', runId: 'r1' });
     expect(readEvents(root).at(-1)).not.toHaveProperty('session');
+    // Another plan's T1 is not the run's (D-08): it never takes shop's runId.
+    log('T1', ['--project', 'web'], {});
+    expect(readEvents(root).at(-1)).toMatchObject({ project: 'web' });
+    expect(readEvents(root).at(-1)).not.toHaveProperty('runId');
     expect(log('T1', ['--project', '../x']).code).toBe(2);
     // An event that names its own session or project keeps it.
     run(['log', '--kind', 'phase', '--task', 'T1', '--data', '{"phase":"y","session":"keep","project":"mine"}'], { ...io, env: { CLAUDE_CODE_SESSION_ID: 'c1' } });
     expect(readEvents(root).at(-1)).toMatchObject({ session: 'keep', project: 'mine' });
+    expect(readEvents(root).at(-1)).not.toHaveProperty('runId');
+  });
+  it('an ephemeral run stamps its loose tasks\' events, never a plan task\'s of the same id', () => {
+    const at = '2026-10-11T09:00:00.000Z';
+    saveExecution(root, {
+      runId: 'e1', kind: 'ephemeral', mode: 'subagents', parallel: 3, project: 'loose', base: 'main', branch: 'main', mergeOnFinish: false,
+      coordinator: 'main', hookSession: 'h1', active: true, stopReason: null, stallReason: null, startedAt: at, lastStepAt: null, lastBlockStep: null, sleepUntil: null,
+      tasks: { L1: { status: 'running', stage: 'implement', round: 0, worktree: '', branch: 'task/L1', executor: 'subagents', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null } },
+    });
+    const log = (extra: string[] = []) => run(['log', '--kind', 'phase', '--task', 'L1-1', '--data', '{"phase":"implement"}', ...extra], io);
+    log();
+    expect(readEvents(root).at(-1)).toMatchObject({ task: 'L1-1', runId: 'e1' });
+    expect(readEvents(root).at(-1)).not.toHaveProperty('project');
+    log(['--project', 'shop']);
+    expect(readEvents(root).at(-1)).toMatchObject({ project: 'shop' });
+    expect(readEvents(root).at(-1)).not.toHaveProperty('runId');
   });
 });

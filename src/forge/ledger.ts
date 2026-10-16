@@ -85,9 +85,14 @@ function stamped(root: string, target: string, event: LedgerEvent): LedgerEvent 
       const main = mainCheckoutFrom(path.resolve(target), gitText);
       try { exec = parseExecution(readFileSync(path.join(main, '.forge', 'execution.json'), 'utf8')); } catch { exec = null; }
     }
-    // A triage without a project opens a loose task's attribution: it is never stamped with an earlier plan's.
-    const project = !task || event.project !== undefined || event.kind === 'triage' ? null : contextProject(() => readEvents(root), task);
-    return stampEvent(event, { session: context.env ? claudeSessionId(null, context.env) : null, exec, project });
+    // The event's project: the one it names, else the command's or the ledger's (attribute's order). A triage without a
+    // project opens a loose task's attribution: it is never stamped with an earlier plan's.
+    const project = !task ? null : isSafeId(event.project) ? event.project
+      : event.kind === 'triage' ? null : contextProject(() => readEvents(root), task);
+    // D-08: a run's id goes only to its own tasks' events: a plan run's project, or a loose task for an ephemeral run.
+    // Another plan's task of the same id is not the run's.
+    const ofRun = exec && (exec.kind === 'plan' ? project === exec.project : project === null) ? exec : null;
+    return stampEvent(event, { session: context.env ? claudeSessionId(null, context.env) : null, exec: ofRun, project });
   } catch { return event; }
 }
 
