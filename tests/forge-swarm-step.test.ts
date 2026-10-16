@@ -6,6 +6,7 @@ import path from 'node:path';
 import { run as cli, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { readExecution } from '../src/forge/execution.js';
 import { readEvents } from '../src/forge/ledger.js';
+import { swarmStep, stepSay } from '../src/forge/cli/step.js';
 
 // swarm start binds Claude's session id (C1): io.env is {} and the id comes as a flag.
 const run = (argv: string[], io: Io) =>
@@ -39,6 +40,17 @@ const commitIn = (cwd: string, file: string, text: string, msg: string) => {
   g(cwd, 'add', file); g(cwd, 'commit', '-qm', msg);
 };
 const pass = JSON.stringify({ verdict: 'pass', confidence: 0.9, findings: [] });
+const isCmd = (argv: string[], ...head: string[]) => head.every((h, i) => argv[i] === h);
+// The step with its CLI calls recorded, and the ones `fail` picks failing (exit 2), as a command of the step can.
+const stepWith = (fail: (argv: string[]) => boolean, ...extra: string[]) => {
+  const calls: string[][] = [];
+  const r = swarmStep(['--plan', 'plan.yaml', '--db', 'db', ...extra], io, {
+    cli: argv => { calls.push(argv); return fail(argv) ? { code: 2, stdout: '', stderr: `forced: ${argv.slice(0, 2).join(' ')}\n` } : run(argv, io); },
+    gitAt: dir => defaultGit(dir),
+  });
+  return { ...(JSON.parse(r.stdout) as ReturnType<typeof step>), calls };
+};
+const stageOf = (task: string) => readExecution(root)!.tasks[task].stage;
 
 beforeEach(() => {
   root = mkdtempSync(path.join(tmpdir(), 'forge-step-'));
@@ -127,6 +139,121 @@ describe('forge swarm step (D-12)', () => {
     expect(existsSync(path.join(dir, 'validators-1.json'))).toBe(false);
     expect(readExecution(root)!.tasks.T1.stage).toBe('review');
     expect(step().actions.filter(a => a.task === 'T1')).toEqual([]);
+  });
+  it('a reviewer respawned for an invalid file is waited for, and a step that dies before its end respawns it again (Review Focus 4)', () => {
+    step();
+    commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
+    const review = step('--returned', 'T1').actions.find(a => a.task === 'T1')!;
+    const dir = path.join(root, '.forge', 'work', 'T1', 'reviews-1-1');
+    for (const e of (review.spawn as { role: string; twin?: boolean }[]).filter(e => !e.twin)) {
+      writeFileSync(path.join(dir, `${e.role.replace(/^review-/, '')}.json`), e.role === 'review-correctness' ? '{"verdict":"maybe"}' : pass);
+    }
+    // Killed after its close (here, in its tick): no respawn is recorded without its action, so the next step respawns again.
+    expect(() => swarmStep(['--plan', 'plan.yaml', '--db', 'db'], io, {
+      cli: argv => { if (isCmd(argv, 'swarm', 'tick')) throw new Error('killed'); return run(argv, io); }, gitAt: d => defaultGit(d),
+    })).toThrow('killed');
+    expect(existsSync(path.join(dir, 'respawned.json'))).toBe(false);
+    expect(step().actions).toContainEqual(expect.objectContaining({ type: 'respawnReviewers', task: 'T1', reviewers: ['correctness'] }));
+    // Nothing new: the step waits for the respawned reviewer and never closes on its invalid file.
+    expect(step().actions.filter(a => a.task === 'T1')).toEqual([]);
+    expect(stageOf('T1')).toBe('review');
+    writeFileSync(path.join(dir, 'correctness.json'), pass);
+    expect(step().actions.find(a => a.task === 'T1')).toMatchObject({ type: 'accepted' });
+  });
+  it('a respawned reviewer that never wrote again is waited for only while its lease lasts: then its result stands', () => {
+    step();
+    commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
+    const review = step('--returned', 'T1').actions.find(a => a.task === 'T1')!;
+    const dir = path.join(root, '.forge', 'work', 'T1', 'reviews-1-1');
+    for (const e of (review.spawn as { role: string; twin?: boolean }[]).filter(e => !e.twin)) {
+      writeFileSync(path.join(dir, `${e.role.replace(/^review-/, '')}.json`), e.role === 'review-correctness' ? '{"verdict":"maybe"}' : pass);
+    }
+    expect(step().actions.find(a => a.task === 'T1')).toMatchObject({ type: 'respawnReviewers' });
+    io = { ...io, now: () => new Date(NOW.getTime() + 89 * 60000) };
+    expect(step().actions.filter(a => a.task === 'T1')).toEqual([]);
+    io = { ...io, now: () => new Date(NOW.getTime() + 91 * 60000) };
+    const late = step().actions.filter(a => a.task === 'T1');
+    expect(late.length).toBeGreaterThan(0);
+    expect(late.map(a => a.type)).not.toContain('respawnReviewers');
+    expect(stageOf('T1')).not.toBe('review');
+  });
+  it('a start left at stage brief by a failing prep is started again by each step until it hands its implementer out', () => {
+    const failPrep = (argv: string[]) => isCmd(argv, 'prep') && argv.includes('T1-1');
+    for (let i = 0; i < 2; i++) {
+      const s = stepWith(failPrep);
+      expect(s.actions).toContainEqual(expect.objectContaining({ type: 'error', task: 'T1', command: 'prep', code: 2 }));
+      expect(s.actions.filter(a => a.type === 'spawnImplementer').map(a => a.task)).toEqual(i === 0 ? ['T2'] : []);
+      expect(stageOf('T1')).toBe('brief');
+    }
+    const s = stepWith(() => false);
+    expect(s.actions.filter(a => a.type === 'spawnImplementer').map(a => a.task)).toEqual(['T1']);
+    expect(stageOf('T1')).toBe('implement');
+    expect(s.publish.tasks.find(x => x.task === 'T1')).toMatchObject({ claim: true, exec: { stage: 'implement' } });
+    expect(readEvents(root).filter(e => e.kind === 'agent' && e.task === 'T1-1')).toHaveLength(1);
+  });
+  it('an implementer whose stage could not be recorded is not handed out; the next step hands it out without running prep again', () => {
+    const s = stepWith(argv => isCmd(argv, 'swarm', 'task', 'T1') && argv.includes('implement'));
+    expect(s.actions).toContainEqual(expect.objectContaining({ type: 'error', task: 'T1', command: 'swarm task' }));
+    expect(s.actions.filter(a => a.type === 'spawnImplementer').map(a => a.task)).toEqual(['T2']);
+    expect(stageOf('T1')).toBe('brief');
+    const again = stepWith(() => false);
+    expect(again.actions.filter(a => a.type === 'spawnImplementer')).toEqual([expect.objectContaining({ task: 'T1', worktree: wt('T1'), validate: expect.stringContaining('validate --affected --base') })]);
+    expect(again.calls.filter(a => isCmd(a, 'prep'))).toEqual([]);
+    expect(stageOf('T1')).toBe('implement');
+    expect(readEvents(root).filter(e => e.kind === 'agent' && e.task === 'T1-1')).toHaveLength(1);
+  });
+  it('a task left at stage validate by a failing review-prep is taken up by each step, with no --returned, until its review is prepared', () => {
+    step();
+    commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
+    const baseline = path.join(root, '.forge', 'work', 'T1', 'baseline-1.json');
+    rmSync(baseline);
+    expect(step('--returned', 'T1').actions).toContainEqual(expect.objectContaining({ type: 'error', task: 'T1', command: 'review-prep' }));
+    expect(stageOf('T1')).toBe('validate');
+    expect(step().actions).toContainEqual(expect.objectContaining({ type: 'error', task: 'T1', command: 'review-prep' }));
+    writeFileSync(baseline, '[]\n');
+    expect(step().actions.find(a => a.task === 'T1')).toMatchObject({ type: 'spawnReviewers', round: 1 });
+    expect(stageOf('T1')).toBe('review');
+  });
+  it('a review prepared whose stage could not be recorded is handed out by the next step on the same round', () => {
+    step();
+    commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
+    const s = stepWith(argv => isCmd(argv, 'swarm', 'task', 'T1') && argv.includes('review'), '--returned', 'T1');
+    expect(s.actions.filter(a => a.task === 'T1').map(a => [a.type, a.command])).toEqual([['error', 'swarm task']]);
+    expect(stageOf('T1')).toBe('validate');
+    expect(step().actions.find(a => a.task === 'T1')).toMatchObject({ type: 'spawnReviewers', round: 1 });
+    expect(stageOf('T1')).toBe('review');
+    expect(readdirSync(path.join(root, '.forge', 'work', 'T1')).filter(d => d.startsWith('reviews-'))).toEqual(['reviews-1-1']);
+  });
+  it('after a validators round, an implementer back with no new commit hands its report over (C-08)', () => {
+    step();
+    mkdirSync(path.join(wt('T1'), '.forge'), { recursive: true });
+    writeFileSync(path.join(wt('T1'), '.forge', 'config.yaml'), 'detect: false\nvalidators:\n  - name: check\n    cmd: node -e "process.exit(require(\'fs\').existsSync(\'bad.txt\')?1:0)"\n');
+    commitIn(wt('T1'), 'bad.txt', 'x\n', 'T1: bad');
+    expect(step('--returned', 'T1').actions.find(a => a.task === 'T1')).toMatchObject({ type: 'validatorsRound' });
+    expect(stageOf('T1')).toBe('implement');
+    writeFileSync(path.join(root, '.forge', 'work', 'T1', 'report-1.txt'), 'BLOCKED: the check needs a server\n');
+    expect(step('--returned', 'T1').actions.filter(a => a.task === 'T1')).toEqual([{ type: 'readReport', task: 'T1', report: '.forge/work/T1/report-1.txt' }]);
+    expect(stageOf('T1')).toBe('implement');
+    expect(existsSync(path.join(root, '.forge', 'work', 'T1', 'validators-fix-1-1-2.json'))).toBe(false);
+  });
+  it('says every action it can emit, in both locales', () => {
+    const types = ['spawnImplementer', 'spawnReviewers', 'express', 'validatorsRound', 'readReport', 'reviewMissing', 'respawnReviewers', 'accepted',
+      'resumeImplementer', 'freshImplementer', 'redo', 'ask', 'blocked', 'integrated', 'conflict', 'run-dirty', 'run-deps', 'error',
+      'start', 'relaunch', 'nudge', 'block', 'finish', 'stalled'];
+    for (const locale of ['es', 'en'] as const) {
+      for (const type of types) {
+        const runWide = type === 'finish' || type === 'stalled';
+        const said = stepSay([{ type, ...(runWide ? {} : { task: 'T9' }), agent: 'forge-impl', command: 'prep', reason: 'why' }], 300, locale);
+        expect(said, `${type} (${locale})`).not.toBe(stepSay([], 300, locale));
+        if (!runWide) expect(said, `${type} (${locale})`).toContain('T9');
+      }
+    }
+  });
+  it('refuses an ephemeral run: it steps with the single commands', () => {
+    expect(run(['swarm', 'stop'], io).code).toBe(0);
+    writeFileSync(path.join(root, '.forge', 'tasks.json'), JSON.stringify(['x1', 'x2'].map(id => ({ id, title: id, path: 'small', zones: [`${id}.txt`], depends_on: [] }))));
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--kind', 'ephemeral', '--tasks', '.forge/tasks.json'], io));
+    expect(run(['swarm', 'step', '--plan', 'plan.yaml', '--db', 'db'], io)).toMatchObject({ code: 2, stderr: expect.stringContaining('an ephemeral run steps with the single commands') });
   });
   it('with --out it writes step.json and leaves no job behind (C-03)', () => {
     const r = run(['swarm', 'step', '--plan', 'plan.yaml', '--db', 'db', '--out', '.forge/work/run/step.json'], io);
