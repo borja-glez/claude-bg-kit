@@ -386,16 +386,18 @@ function expressPrep(c: ExpressCtx): Result | null {
   writeFileSync(expressFile, JSON.stringify(previousFindings(c.index, round).map(f => asPrevious(f, true)), null, 2) + '\n');
   writeCarried(plan, dir, n, round, roundDir, c.prevReviews);
   const spawn = plan.spawn.map(spawnOut);
-  writeFileSync(path.join(roundDir, 'head.txt'), c.head + '\n');
-  writeFileSync(path.join(roundDir, 'review-plan.json'), JSON.stringify({
-    task: c.task, round, path: c.pathName, base: c.baseSha, head: c.head, light: c.review.light, flags: c.review.flags, shadow: false,
-    spawn, carried: plan.carried, express: true, delegated: plan.delegated, validatorsPending: true,
-  }, null, 2) + '\n');
-  appendPhase(deps.cwd, { ts: deps.now().toISOString(), kind: 'phase', task: c.id, phase: 'review', brief: Number(n), round, express: true,
-    reviewers: spawn.map(s => ({ agent: s.agent, role: s.role, effort: s.effort, model: s.model, mode: s.mode })) });
   // The same form as prep's validate (J-11): paths with / in double quotes, which every shell takes; --no-cache as given.
   const cmd = `node "${slash(deps.self ?? 'forge.cjs')}" validate --all --path ${c.pathName} --base ${c.baseSha} --baseline "${slash(path.resolve(deps.cwd, c.baselineArg))}"`
     + ` --task ${c.task} --out "${slash(validatorsFile)}"${samePath(deps.repoDir, deps.cwd) ? '' : ` --cwd "${slash(deps.repoDir)}"`}${c.noCache ? ' --no-cache' : ''}`;
+  writeFileSync(path.join(roundDir, 'head.txt'), c.head + '\n');
+  // validatorsCmd: the coordinator reads the command again from here when it must run it once more (a validation that
+  // gave no results, a missing validators file), also after its context was compacted.
+  writeFileSync(path.join(roundDir, 'review-plan.json'), JSON.stringify({
+    task: c.task, round, path: c.pathName, base: c.baseSha, head: c.head, light: c.review.light, flags: c.review.flags, shadow: false,
+    spawn, carried: plan.carried, express: true, delegated: plan.delegated, validatorsPending: true, validatorsCmd: cmd,
+  }, null, 2) + '\n');
+  appendPhase(deps.cwd, { ts: deps.now().toISOString(), kind: 'phase', task: c.id, phase: 'review', brief: Number(n), round, express: true,
+    reviewers: spawn.map(s => ({ agent: s.agent, role: s.role, effort: s.effort, model: s.model, mode: s.mode })) });
   const out: Record<string, unknown> = {
     round, reviews: c.reviewsCount, express: true, validators: { pending: true, cmd, file: at(validatorsFile) }, spawn,
     ...(plan.carried.length ? { carried: plan.carried.map(x => x.name) } : {}), delegated: plan.delegated,

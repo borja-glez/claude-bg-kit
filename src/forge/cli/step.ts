@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import path from 'node:path';
 import { UsageError } from './errors.js';
 import type { Io } from './run.js';
-import { readExecution, executionTaskFile, writePublicTask } from '../execution.js';
+import { readExecution, executionTaskFile, runWorktree, writePublicTask } from '../execution.js';
 import { appendEvent, readEvents, type LedgerEvent } from '../ledger.js';
 import { reviewsOf } from '../loop.js';
 import { LEASE_MINUTES } from '../../lib/coordination.js';
@@ -18,7 +18,7 @@ export interface StepDeps { cli: (argv: string[]) => Result; gitAt: (dir: string
 export type StepAction = { type: string; task?: string; [k: string]: unknown };
 type Versions = { state: Record<string, number>; sessions: Record<string, number> };
 /** `after`: writes the step makes only as its last act, once every command ran (see reviewersBack). */
-interface Ctx { io: Io; deps: StepDeps; planArg: string; locale: 'es' | 'en'; iso: string; agentLease: string; actions: StepAction[]; after: (() => void)[] }
+interface Ctx { io: Io; deps: StepDeps; planArg: string; runBranch: string; locale: 'es' | 'en'; iso: string; agentLease: string; actions: StepAction[]; after: (() => void)[] }
 /** respawned.json of a review round: each reviewer respawned once, when, and the mtime of the file it was respawned on. */
 type Respawned = Record<string, { at: string; mtimeMs: number }>;
 
@@ -177,6 +177,36 @@ function startTask(c: Ctx, task: string, resume: boolean): boolean {
 }
 
 /**
+ * The BASE a task's review diffs from. A retried task (a conflict sent it back and its implementer merged the run branch
+ * into it) forks from the run branch where it merged it: `git merge-base HEAD <run branch>` in its worktree, so the
+ * diff holds only its own work, not the tasks integrated meanwhile. When that moved from prep's BASE, the baseline runs
+ * again in the run worktree (at that tip, or the closest tree there once another task was integrated since) into
+ * baseline-<n>.json, once: base-<n>.json records the BASE it ran on. The ledger keeps prep's phase (forge stats counts a
+ * brief from its last phase implement). Null after an error action.
+ */
+function reviewBase(c: Ctx, task: string, t: ExecTask, n: number, base: string): string | null {
+  if (t.attempts < 1) return base;
+  const moved = c.deps.gitAt(t.worktree)(['merge-base', 'HEAD', c.runBranch])?.trim();
+  if (!moved || moved === base) return base;
+  const work = path.join(c.io.cwd, '.forge', 'work', task);
+  const mark = path.join(work, `base-${n}.json`);
+  const kept = readJson(mark) as Json | null;
+  if (kept && typeof kept === 'object' && kept.base === moved && existsSync(path.join(work, `baseline-${n}.json`))) return moved;
+  const argv = ['validate', '--all', '--path', 'large', '--base-run', '--task', `${task}-${n}`, '--cwd', runWorktree(c.io.cwd)];
+  const r = c.deps.cli(argv);
+  let results: unknown = null;
+  try { results = JSON.parse(r.stdout); } catch { results = null; }
+  // A baseline that fails validators exits 1 with its results: that is what it records.
+  if ((r.code !== 0 && r.code !== 1) || !Array.isArray(results)) {
+    c.actions.push({ type: 'error', task, command: 'validate', code: r.code, stderr: (r.stderr || r.stdout).trim().slice(0, 500) });
+    return null;
+  }
+  writeFileSync(path.join(work, `baseline-${n}.json`), JSON.stringify(results, null, 2) + '\n');
+  writeFileSync(mark, JSON.stringify({ base: moved, from: base, at: c.iso }, null, 2) + '\n');
+  return moved;
+}
+
+/**
  * An implementer that may be back: with a commit newer than the one it was handed back on (seenOf), its review is
  * prepared; without one, its report is handed over. At stage validate it is back with a commit already (a step moved it
  * there for one and could not finish its review): each step goes on from there, told or not. review-prep then prepares
@@ -201,9 +231,11 @@ function implementerBack(c: Ctx, task: string, t: ExecTask, told: boolean): void
   if (!base) { c.actions.push({ type: 'error', task, command: 'swarm step', code: 2, stderr: `no phase implement with a base for ${task}: run FORGE prep first` }); return; }
   const loc = ['--locale', c.locale];
   if (!call(c, task, ['swarm', 'task', task, '--stage', 'validate', '--no-agent'])) return;
-  const tri = call(c, task, ['triage', '--plan', c.planArg, '--task', task, '--cwd', t.worktree, '--base', base, ...loc]);
+  const at = reviewBase(c, task, t, n, base);
+  if (!at) return;
+  const tri = call(c, task, ['triage', '--plan', c.planArg, '--task', task, '--cwd', t.worktree, '--base', at, ...loc]);
   if (!tri) return;
-  const rp = call(c, task, ['review-prep', '--task', `${task}-${n}`, '--path', 'large', '--base', base, '--baseline', slash(path.join(work, `baseline-${n}.json`)),
+  const rp = call(c, task, ['review-prep', '--task', `${task}-${n}`, '--path', 'large', '--base', at, '--baseline', slash(path.join(work, `baseline-${n}.json`)),
     '--dir', slash(work), '--cwd', t.worktree, ...loc]);
   if (!rp) return;
   const say = typeof rp.say === 'string' ? { say: rp.say } : {};
@@ -222,7 +254,7 @@ function implementerBack(c: Ctx, task: string, t: ExecTask, told: boolean): void
     c.actions.push({ type: 'express', task, round: r, validate: (rp.validators as Json | undefined)?.cmd ?? null, spawn, ...say });
     return;
   }
-  c.actions.push({ type: 'spawnReviewers', task, round: r, path: tri.path ?? null, base, spawn, ...(rp.carried ? { carried: rp.carried } : {}), ...say });
+  c.actions.push({ type: 'spawnReviewers', task, round: r, path: tri.path ?? null, base: at, spawn, ...(rp.carried ? { carried: rp.carried } : {}), ...say });
 }
 
 /**
@@ -417,7 +449,7 @@ export function swarmStep(rest: string[], io: Io, deps: StepDeps): Result {
   if (e0.kind !== 'plan') throw new UsageError('swarm step: an ephemeral run steps with the single commands (references/ephemeral.md)');
   const locale: 'es' | 'en' = loc === 'es' || loc === 'en' ? loc : (e0.locale ?? '').toLowerCase().split(/[-_]/)[0] === 'es' ? 'es' : 'en';
   const now = io.now();
-  const c: Ctx = { io, deps, planArg, locale, iso: now.toISOString(), agentLease: new Date(now.getTime() + AGENT_LEASE_MINUTES * 60000).toISOString(), actions: [], after: [] };
+  const c: Ctx = { io, deps, planArg, runBranch: e0.branch, locale, iso: now.toISOString(), agentLease: new Date(now.getTime() + AGENT_LEASE_MINUTES * 60000).toISOString(), actions: [], after: [] };
 
   // 1. The local lease of each task the coordinator drives with subagents.
   for (const [task, t] of Object.entries(e0.tasks)) if (t.status === 'running' && t.executor === 'subagents') renewLease(io, e0, task, t, now);

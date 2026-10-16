@@ -1288,6 +1288,8 @@ describe('the express review (measure 7)', () => {
     expect(validates()).toBe(before);
     expect(JSON.parse(readFileSync(path.join(r2(), 'previous-express.json'), 'utf8'))).toEqual([{ id: 'F1', reviewer: 'correctness', severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }]);
     expect(JSON.parse(readFileSync(path.join(r2(), 'review-plan.json'), 'utf8'))).toMatchObject({ express: true, delegated: ['correctness'], validatorsPending: true, base });
+    // The command also lives in the round's plan, where the coordinator reads it again (a step's error, a missing file).
+    expect(JSON.parse(readFileSync(path.join(r2(), 'review-plan.json'), 'utf8')).validatorsCmd).toBe(out.validators.cmd);
     expect(readEvents(root).filter(e => e.kind === 'phase' && e.phase === 'review').at(-1)).toMatchObject({ express: true, round: 2 });
     write(r2(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
     const waiting = close();

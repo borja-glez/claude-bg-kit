@@ -236,6 +236,66 @@ describe('forge swarm step (D-12)', () => {
     expect(stageOf('T1')).toBe('implement');
     expect(existsSync(path.join(root, '.forge', 'work', 'T1', 'validators-fix-1-1-2.json'))).toBe(false);
   });
+  it('after a conflict retry the review diffs from the run-branch tip the implementer merged, on a baseline run there, once', () => {
+    const accept = (task: string) => out(run(['swarm', 'task', task, '--stage', 'verdict', '--status', 'accepted', '--no-agent'], io));
+    // What the coordinator publishes on `integrated`: the roadmap shows the task done.
+    const done = (task: string) => writeFileSync(path.join(root, 'db', 'state', `${task}.json`), JSON.stringify({ status: 'done', version: 2 }));
+    const runWt = path.join(root, '.claude', 'worktrees', 'run');
+    step();
+    commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
+    accept('T1');
+    expect(step().actions.find(a => a.type === 'integrated')).toMatchObject({ task: 'T1' });
+    done('T1');
+    // T3 (after T1) starts on the run branch with T1; T2 is integrated meanwhile.
+    expect(step().actions.filter(a => a.type === 'spawnImplementer').map(a => a.task)).toEqual(['T3']);
+    const oldBase = g(wt('T3'), 'rev-parse', 'HEAD');
+    commitIn(wt('T2'), 'shared.txt', 'two\n', 'T2: shared');
+    commitIn(wt('T2'), 'src/t2/b.ts', 'y\n', 'T2: b');
+    accept('T2');
+    expect(step().actions.find(a => a.type === 'integrated')).toMatchObject({ task: 'T2' });
+    done('T2');
+    const moved = g(runWt, 'rev-parse', 'HEAD');
+    commitIn(wt('T3'), 'shared.txt', 'three\n', 'T3: shared');
+    commitIn(wt('T3'), 'src/t3/c.ts', 'z\n', 'T3: c');
+    accept('T3');
+    expect(step().actions.find(a => a.task === 'T3')).toMatchObject({ type: 'conflict' });
+    // The retry: its implementer merges the run branch into task/T3 and resolves the conflict.
+    expect(run(['swarm', 'retry', 'T3'], io).code).toBe(0);
+    try { g(wt('T3'), 'merge', '-q', 'forge/run-shop'); } catch { /* the conflict on shared.txt */ }
+    writeFileSync(path.join(wt('T3'), 'shared.txt'), 'two and three\n');
+    g(wt('T3'), 'add', 'shared.txt'); g(wt('T3'), 'commit', '-qm', 'T3: merge the run branch');
+    expect(moved).not.toBe(oldBase);
+    const s = stepWith(() => false, '--returned', 'T3');
+    expect(s.actions.find(a => a.task === 'T3')).toMatchObject({ type: 'spawnReviewers', base: moved });
+    const baseOf = (calls: string[][], cmd: string) => { const a = calls.find(x => isCmd(x, cmd) && x.some(v => v.startsWith('T3')))!; return a[a.indexOf('--base') + 1]; };
+    expect(baseOf(s.calls, 'triage')).toBe(moved);
+    expect(baseOf(s.calls, 'review-prep')).toBe(moved);
+    expect(s.calls.filter(a => isCmd(a, 'validate'))).toEqual([['validate', '--all', '--path', 'large', '--base-run', '--task', 'T3-1', '--cwd', runWt]]);
+    const diff = readFileSync(path.join(root, '.forge', 'work', 'T3', 'diff-1.patch'), 'utf8');
+    expect(diff).toContain('src/t3/c.ts');
+    expect(diff).not.toContain('src/t2/b.ts');
+    expect(JSON.parse(readFileSync(path.join(root, '.forge', 'work', 'T3', 'base-1.json'), 'utf8'))).toMatchObject({ base: moved });
+    // The next round keeps that base and does not run the baseline again.
+    const dir = path.join(root, '.forge', 'work', 'T3', 'reviews-1-1');
+    for (const e of (s.actions.find(a => a.task === 'T3')!.spawn as { role: string; twin?: boolean }[]).filter(e => !e.twin)) {
+      writeFileSync(path.join(dir, `${e.role.replace(/^review-/, '')}.json`), JSON.stringify({ verdict: 'fail', confidence: 0.9, findings: [{ severity: 'important', file: 'src/t3/c.ts', line: 1, problem: 'wrong' }] }));
+    }
+    expect(step().actions.find(a => a.task === 'T3')).toMatchObject({ type: 'resumeImplementer' });
+    commitIn(wt('T3'), 'src/t3/c.ts', 'fixed\n', 'T3: fix');
+    const again = stepWith(() => false, '--returned', 'T3');
+    expect(again.actions.find(a => a.task === 'T3')?.type).toMatch(/^(spawnReviewers|express)$/);
+    for (const cmd of ['triage', 'review-prep']) expect(baseOf(again.calls, cmd), cmd).toBe(moved);
+    expect(again.calls.filter(a => isCmd(a, 'validate'))).toEqual([]);
+  });
+  it('a task never retried keeps the BASE prep recorded and runs no baseline again', () => {
+    step();
+    const base = g(wt('T1'), 'rev-parse', 'HEAD');
+    commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
+    const s = stepWith(() => false, '--returned', 'T1');
+    expect(s.actions.find(a => a.task === 'T1')).toMatchObject({ type: 'spawnReviewers', base });
+    expect(s.calls.filter(a => isCmd(a, 'validate'))).toEqual([]);
+    expect(existsSync(path.join(root, '.forge', 'work', 'T1', 'base-1.json'))).toBe(false);
+  });
   it('says every action it can emit, in both locales', () => {
     const types = ['spawnImplementer', 'spawnReviewers', 'express', 'validatorsRound', 'readReport', 'reviewMissing', 'respawnReviewers', 'accepted',
       'resumeImplementer', 'freshImplementer', 'redo', 'ask', 'blocked', 'integrated', 'conflict', 'run-dirty', 'run-deps', 'error',
