@@ -5,7 +5,7 @@ import path from 'node:path';
 import { appendEvent, readEvents, forgeDir, LEDGER_KINDS, type LedgerKind, type LedgerEvent } from '../ledger.js';
 import { parseRun, startRun, recordCycle, stopReason, endRun, readRunText, saveRun, stopFile, type RunState, type StopContext } from '../run.js';
 import { decideStop, decideExecutionStop } from '../hook.js';
-import { readExecution, saveExecution, runWorktree } from '../execution.js';
+import { readExecution, updateExecution, runWorktree } from '../execution.js';
 import { planLocale, replyIn, sessionReply } from '../../lib/locale.js';
 import { isLocale } from '../../lib/forge-run.js';
 import { isSafeId } from '../../lib/execution-state.js';
@@ -487,7 +487,10 @@ function hookStop(io: Io): string {
     }
     const d = decideExecutionStop(hookInput, exec, { now: io.now(), stopFile: existsSync(stopFile(main)) });
     if (!d.block) return '';
-    saveExecution(main, d.exec);
+    // Under the lock, only what the hook decided: a swarm step or an integrate that wrote meanwhile is kept (I-15).
+    updateExecution(main, cur => (cur && cur.runId === d.exec.runId
+      ? { ...cur, lastBlockStep: d.exec.lastBlockStep, ...(d.ended ? { active: false, stopReason: d.exec.stopReason, sleepUntil: null } : {}) }
+      : null), { now: io.now, sleep: io.sleep });
     // Only an active run speaks for the person: here none is (it decides above).
     return JSON.stringify({ decision: 'block', reason: d.reason + (sessionReply(null, d.exec, () => planLocale(main, d.exec.project)) ?? replyIn(null)) }) + '\n';
   } catch { return ''; }
@@ -1318,7 +1321,7 @@ export function run(argv: string[], io: Io): Result {
           appendEvent(io.cwd, { ts: ts(), kind: 'cycle', action: 'stopped', reason: 'stopped' });
         }
         const exec = readExecution(io.cwd);
-        if (exec?.active) saveExecution(io.cwd, { ...exec, active: false, stopReason: 'stopped', sleepUntil: null });
+        if (exec?.active) updateExecution(io.cwd, cur => (cur?.active ? { ...cur, active: false, stopReason: 'stopped', sleepUntil: null } : null), { now: io.now, sleep: io.sleep });
         return ok('ok');
       }
       case 'waypoint-cli': {

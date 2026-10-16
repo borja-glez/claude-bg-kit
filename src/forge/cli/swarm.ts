@@ -9,7 +9,7 @@ import { loadConfig } from '../config.js';
 import { stopFile, parseRun, readRunText } from '../run.js';
 import { isLocale } from '../../lib/forge-run.js';
 import { appendEvent, appendPhase, readEvents } from '../ledger.js';
-import { readExecution, saveExecution, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree } from '../execution.js';
+import { readExecution, updateExecution, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree, type LockDeps } from '../execution.js';
 import { schedule, widthOf, relaunchOrBlock, RELAUNCH_CAP, type BgAgent } from '../schedule.js';
 import { LEASE_MINUTES, sessionLiveness } from '../../lib/coordination.js';
 import { planLocale, sessionReply } from '../../lib/locale.js';
@@ -706,14 +706,17 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
   logValidations(io, task, r.validations);
   const es = spanish(locale, io.cwd, e.project);
   const extras = attemptExtras(r, es, t.branch, personal);
-  const cur = readExecution(io.cwd)!;
   // Neither the target nor its dependencies are ready: the task stays accepted.
   if (r.result === 'dirty') return out({ result: 'run-dirty', detail: r.detail, ...extras });
   if (r.result === 'deps') return out({ result: 'run-deps', detail: r.detail, ...extras });
-  const next: ExecTask = r.result === 'merged'
-    ? { ...cur.tasks[task], status: 'integrated', stage: 'integrate', updatedAt: at, detail: null, finishedAt: at }
-    : { ...cur.tasks[task], status: 'conflict', detail: r.detail, updatedAt: at };
-  saveExecution(io.cwd, { ...cur, tasks: { ...cur.tasks, [task]: next } });
+  // Under the lock, on the execution as it is now: a tick or a swarm task that ran during the merge is kept (I-15).
+  updateExecution(io.cwd, cur => {
+    if (!cur?.tasks[task]) return null;
+    const next: ExecTask = r.result === 'merged'
+      ? { ...cur.tasks[task], status: 'integrated', stage: 'integrate', updatedAt: at, detail: null, finishedAt: at }
+      : { ...cur.tasks[task], status: 'conflict', detail: r.detail, updatedAt: at };
+    return { ...cur, tasks: { ...cur.tasks, [task]: next } };
+  }, { now: io.now, sleep: io.sleep });
   if (r.result !== 'merged') return out({ result: 'conflict', detail: r.detail, ...extras });
   // Announced here: a later triage must not announce them again.
   if (r.newValidators.length) {
@@ -727,11 +730,14 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
 }
 
 /** C2: closes the execution of `root` when it is inactive and still open; true when it did. */
-function closeEnded(root: string, at: string, by: 'merge' | 'close'): boolean {
-  const cur = readExecution(root);
-  if (!cur || cur.active || cur.closedAt) return false;
-  saveExecution(root, { ...cur, closedAt: at, closedBy: by });
-  return true;
+function closeEnded(root: string, at: string, by: 'merge' | 'close', deps: LockDeps): boolean {
+  let closed = false;
+  updateExecution(root, cur => {
+    if (!cur || cur.active || cur.closedAt) return null;
+    closed = true;
+    return { ...cur, closedAt: at, closedBy: by };
+  }, deps);
+  return closed;
 }
 
 function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
@@ -740,7 +746,7 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
   const locale = localeArg(rest, 'merge');
   const out = (v: unknown): Result => ({ code: 0, stdout: JSON.stringify(v) + '\n', stderr: '' });
   // C2: a merged run that already ended is over: closed, so lens, the band and the roadmap stop drawing it.
-  const merged = (v: Record<string, unknown>): Result => out({ ...v, ...(closeEnded(io.cwd, io.now().toISOString(), 'merge') ? { closed: true } : {}) });
+  const merged = (v: Record<string, unknown>): Result => out({ ...v, ...(closeEnded(io.cwd, io.now().toISOString(), 'merge', { now: io.now, sleep: io.sleep }) ? { closed: true } : {}) });
   if (e.kind !== 'plan') return merged({ result: 'merged', sha: deps.git(['rev-parse', 'HEAD'])?.trim() ?? '' });
   if (!e.mergeOnFinish && !rest.includes('--yes')) return out({ result: 'needs-authorization' });
   const branch = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
@@ -776,6 +782,9 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
     if (!e) throw new UsageError(`swarm ${sub}: no execution (forge swarm start)`);
     return e;
   };
+  // I-15: every write of execution.json reads it again under its lock and changes only what this command changes.
+  const lockDeps: LockDeps = { now: io.now, sleep: io.sleep };
+  const update = (fn: (cur: ExecutionState | null) => ExecutionState | null) => updateExecution(io.cwd, fn, lockDeps);
   if (['start', 'tick', 'integrate', 'merge', 'sleep', 'worktree', 'retry', 'relaunch', 'nudge', 'takeover'].includes(sub ?? '') && !(sub === 'worktree' && has('member'))) {
     const top = deps.git(['rev-parse', '--show-toplevel'])?.trim();
     const main = mainWorktreeFrom(deps.git(['worktree', 'list', '--porcelain']));
@@ -993,7 +1002,10 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       // C2: a new run over an ended one that nobody closed replaces it; say which (execution.json keeps one run).
       const replaced = prev && !prev.active && !prev.closedAt && !resume ? { runId: prev.runId, stopReason: prev.stopReason } : null;
       rmSync(stopFile(io.cwd), { force: true });
-      saveExecution(io.cwd, state);
+      // A resume keeps what changed meanwhile and takes only this start's fields.
+      updateExecution(io.cwd, cur => (resume && cur && cur.runId === state.runId
+        ? { ...cur, parallel: state.parallel, mode: state.mode, mergeOnFinish: state.mergeOnFinish, coordinator: state.coordinator, hookSession: state.hookSession, sleepUntil: null, ...auto, ...lang }
+        : state), lockDeps);
       if (kind === 'ephemeral' && !resume) writeLoose(io.cwd, { runId: state.runId, tasks: loose });
       const looseOut = kind === 'ephemeral'
         ? { loose: loose.length, ...(ignoredTasks ? { ignoredTasks: true, message: `the ephemeral run ${state.runId} is resumed with its own ${loose.length} tasks; --tasks was ignored (start a new run for new requests once this one ends)` } : {}) }
@@ -1029,7 +1041,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       const e = current();
       const { worktree: dir, branch, base, setup } = addTaskWorktree(deps, io.cwd, task, e.branch);
       const t: ExecTask = e.tasks[task] ?? { status: 'running', stage: 'brief', round: 0, worktree: dir, branch, executor: e.mode, attempts: 0, agent: null, startedAt: iso, stageSince: iso, updatedAt: iso, detail: null };
-      saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, worktree: dir, branch, updatedAt: iso } } });
+      update(cur => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...(cur.tasks[task] ?? t), worktree: dir, branch, updatedAt: iso } } });
       return json({ worktree: dir, branch, base, setup });
     }
     case 'task': {
@@ -1039,8 +1051,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       if (!prev) throw new UsageError(`swarm task: ${task} is not part of this execution`);
       if (has('drop')) {
         // A claim race lost to another session: forget the task so the next tick sees that session's claim.
-        const { [task]: _dropped, ...tasks } = e.tasks;
-        saveExecution(io.cwd, { ...e, tasks });
+        update(cur => { if (!cur) return null; const { [task]: _dropped, ...tasks } = cur.tasks; return { ...cur, tasks }; });
         rmSync(executionTaskFile(io.cwd, task), { force: true });
         return ok();
       }
@@ -1059,7 +1070,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       // Blocked now (it was not): the task's time ends here. Back to running: the next finish writes it again.
       const finishedAt = status === 'blocked' && prev.status !== 'blocked' ? iso : status === 'running' && prev.finishedAt ? null : prev.finishedAt;
       const next: ExecTask = { ...prev, stage, status, round, agent, detail, updatedAt: iso, stageSince, ...(finishedAt !== undefined ? { finishedAt } : {}) };
-      saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: next } });
+      update(cur => cur && { ...cur, tasks: { ...cur.tasks, [task]: next } });
       const lease = flag('lease') && !Number.isNaN(Date.parse(flag('lease')!)) ? flag('lease')! : new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString();
       writePublicTask(io.cwd, { task, runId: e.runId, stage, status, agent, round, since: stageSince, updatedAt: iso, leaseUntil: lease, by: e.coordinator, mode: prev.executor });
       if (prev.stage !== stage) appendPhase(io.cwd, { ts: iso, kind: 'phase', task, phase: stage });
@@ -1090,8 +1101,10 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         if (!Array.isArray(raw)) throw new UsageError('swarm tick: --agents must be a JSON array of {name, state}');
         agents = raw.filter((a): a is BgAgent => !!a && typeof a === 'object' && typeof a.name === 'string' && (a.state === 'working' || a.state === 'idle')).slice(0, 100);
       }
-      const d = schedule({ plan, states, sessions, exec: e, integrated, now: now.getTime(), publicTasks, agents });
-      saveExecution(io.cwd, d.next);
+      // The scheduler decides on the execution as it is under the lock, so a swarm task or an integrate that ran
+      // meanwhile is never overwritten (I-15).
+      let d!: ReturnType<typeof schedule>;
+      update(cur => { d = schedule({ plan, states, sessions, exec: cur ?? e, integrated, now: now.getTime(), publicTasks, agents }); return d.next; });
       // In sessions mode a start carries the whole `waypoint launch` argument list: the coordinator runs it as is.
       const planPath = flag('plan');
       const actions = e.mode === 'sessions' && planPath
@@ -1121,18 +1134,18 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         }
         const worktree = holder ?? addTaskWorktree(deps, io.cwd, task, e.branch).worktree;
         const revive = !e.active && e.stopReason === 'stalled';
-        saveExecution(io.cwd, {
-          ...e, ...(revive ? { active: true, stopReason: null, stallReason: null } : {}),
-          tasks: { ...e.tasks, [task]: { ...t, status: 'running', stage: 'implement', executor: 'subagents', worktree, attempts: t.attempts + 1, nudgedAt: null, finishedAt: iso, updatedAt: iso, stageSince: iso } },
+        update(cur => cur && {
+          ...cur, ...(revive ? { active: true, stopReason: null, stallReason: null } : {}),
+          tasks: { ...cur.tasks, [task]: { ...t, status: 'running', stage: 'implement', executor: 'subagents', worktree, attempts: t.attempts + 1, nudgedAt: null, finishedAt: iso, updatedAt: iso, stageSince: iso } },
         });
         writePublicTask(io.cwd, { task, runId: e.runId, stage: 'implement', status: 'running', agent: null, round: t.round, since: iso, updatedAt: iso, leaseUntil: new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString(), by: e.coordinator, mode: 'subagents' });
         return json({ task, adopted: true, previous: t.executor, worktree, branch: t.branch });
       }
       if (!t || (t.status !== 'conflict' && t.status !== 'blocked')) throw new UsageError(`swarm retry: ${task} is not in conflict or blocked`);
       const revive = !e.active && e.stopReason === 'stalled';
-      saveExecution(io.cwd, {
-        ...e, ...(revive ? { active: true, stopReason: null, stallReason: null } : {}),
-        tasks: { ...e.tasks, [task]: { ...t, status: 'running', stage: 'implement', attempts: t.attempts + 1, detail: null, finishedAt: null, updatedAt: iso, stageSince: iso } },
+      update(cur => cur && {
+        ...cur, ...(revive ? { active: true, stopReason: null, stallReason: null } : {}),
+        tasks: { ...cur.tasks, [task]: { ...t, status: 'running', stage: 'implement', attempts: t.attempts + 1, detail: null, finishedAt: null, updatedAt: iso, stageSince: iso } },
       });
       return ok();
     }
@@ -1153,7 +1166,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         const es = (planArg ? loadPlanArg(io, planArg, 'nudge').locale : planLocale(io.cwd, e.project)) === 'es';
         const text = es ? `[forge run] ${task}: continúa con ${t.stage}; si estás bloqueado, márcalo como bloqueado`
           : `[forge run] ${task}: continue with ${t.stage}; if you are blocked, mark it blocked`;
-        saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, nudgedAt: iso } } });
+        update(cur => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...(cur.tasks[task] ?? t), nudgedAt: iso } } });
         return json({ task, name: `wp-${e.project}-${task}`, text });
       }
       const planPath = planArg;
@@ -1161,7 +1174,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       // The cap and the reason live in schedule.ts: one rule for the scheduler and this command.
       const verdict = relaunchOrBlock(task, t.attempts);
       if (verdict.type === 'block') {
-        saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, status: 'blocked', detail: verdict.reason, updatedAt: iso, finishedAt: iso } } });
+        update(cur => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...(cur.tasks[task] ?? t), status: 'blocked', detail: verdict.reason, updatedAt: iso, finishedAt: iso } } });
         return json({ task, blocked: true, reason: verdict.reason });
       }
       const attempt = verdict.attempt;
@@ -1182,7 +1195,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         `- Work files of the earlier attempts: ${memberWork} (the brief is brief-<n>.md there, with report-<n>.txt, validators-<n>.json and reviews-<n>-<round>/)`, '',
         `Resume from ${t.branch} in this worktree: read the brief in ${memberWork} if it exists (else write it as the brief stage says), do not redo a step whose output file is already written, and continue from the last stage.`, '',
       ].join('\n'));
-      saveExecution(io.cwd, { ...e, tasks: { ...e.tasks, [task]: { ...t, attempts: attempt, startedAt: iso, nudgedAt: null, updatedAt: iso } } });
+      update(cur => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...(cur.tasks[task] ?? t), attempts: attempt, startedAt: iso, nudgedAt: null, updatedAt: iso } } });
       return json({ task, attempt, note, launch: memberLaunch(io.cwd, planPath, task, e) });
     }
     case 'sleep': {
@@ -1190,12 +1203,12 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       if (!Number.isInteger(seconds) || seconds < 1 || seconds > MAX_SLEEP_S) throw new UsageError(`swarm sleep: seconds must be an integer from 1 to ${MAX_SLEEP_S}`);
       const e = current();
       const until = new Date(now.getTime() + seconds * 1000).toISOString();
-      saveExecution(io.cwd, { ...e, sleepUntil: until });
+      update(cur => cur && { ...cur, sleepUntil: until });
       if (has('mark')) return ok();
       (io.sleep ?? sleepSync)(seconds * 1000);
       // A newer sleep (or a --mark) may have replaced it meanwhile: only clear the value this call set.
       const after = readExecution(io.cwd);
-      if (after && after.sleepUntil === until) saveExecution(io.cwd, { ...after, sleepUntil: null });
+      if (after && after.sleepUntil === until) update(cur => (cur && cur.sleepUntil === until ? { ...cur, sleepUntil: null } : null));
       // The coordinator wakes on this output: it repeats the language to answer in, when one is known.
       const run = parseRun(readRunText(io.cwd));
       const reply = sessionReply(run?.active ? run : null, after ?? e, () => planLocale(io.cwd, e.project));
@@ -1205,7 +1218,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       const reason = flag('reason') ?? 'stopped';
       if (reason !== 'stopped' && reason !== 'budget') throw new UsageError('swarm stop: --reason must be stopped or budget');
       const e = readExecution(io.cwd);
-      if (e?.active) saveExecution(io.cwd, { ...e, active: false, stopReason: reason, sleepUntil: null });
+      if (e?.active) update(cur => (cur?.active ? { ...cur, active: false, stopReason: reason, sleepUntil: null } : null));
       return ok();
     }
     case 'close': {
@@ -1216,7 +1229,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       if (!e) throw new UsageError('swarm close: no execution');
       if (e.active) throw new UsageError(`swarm close: the execution ${e.runId} is active; stop it first (/forge:stop)`);
       if (e.closedAt) return json({ closed: 'already', runId: e.runId, closedAt: e.closedAt, closedBy: e.closedBy ?? null });
-      closeEnded(main, iso, 'close');
+      closeEnded(main, iso, 'close', lockDeps);
       const running = Object.entries(e.tasks).filter(([, t]) => t.status === 'running');
       return json({
         closed: true, runId: e.runId, kind: e.kind, stopReason: e.stopReason, closedAt: iso,
@@ -1237,7 +1250,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       // --session is the waypoint SID that becomes the coordinator; --hook-session is Claude's id of this session, bound
       // at once, so its Stop hook steps the execution from now on (C1).
       if (session === e.coordinator || hook === e.hookSession) {
-        if (e.coordinator !== session || e.hookSession !== hook) saveExecution(io.cwd, { ...e, coordinator: session, hookSession: hook });
+        if (e.coordinator !== session || e.hookSession !== hook) update(cur => cur && { ...cur, coordinator: session, hookSession: hook });
         return json({ took: 'already', runId: e.runId });
       }
       // A run member keeps its role: it would otherwise coordinate the task it executes.
@@ -1258,7 +1271,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
       if (!seen.length) seen.push(now.getTime() - Date.parse(e.lastStepAt ?? e.startedAt) >= TAKEOVER_MIN * 60000 ? 'stopped' : 'alive');
       const liveness = seen.reduce((a, b) => (order.indexOf(b) > order.indexOf(a) ? b : a), 'stopped' as (typeof order)[number]);
       if (liveness !== 'stopped') return json({ took: false, previous, liveness, joinAs: 'manual' });
-      saveExecution(io.cwd, { ...e, coordinator: session, hookSession: hook, sleepUntil: null });
+      update(cur => cur && { ...cur, coordinator: session, hookSession: hook, sleepUntil: null });
       // The user asked this session to go on: their decision, recorded in the decision format (by: user).
       appendEvent(io.cwd, { ts: iso, kind: 'decision', point: 'takeover', what: 'takeover', chosen: session, why: `the coordinator ${previous} stopped`, by: 'user', weight: 'minor', previous, session, runId: e.runId });
       return json({ took: true, previous, runId: e.runId, running: Object.entries(e.tasks).filter(([, t]) => t.status === 'running').map(([id]) => id) });
