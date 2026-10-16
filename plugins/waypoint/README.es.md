@@ -6,7 +6,7 @@
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.21.0](https://img.shields.io/badge/versi%C3%B3n-0.21.0-cba6f7?style=flat-square)
+![versión 0.22.0](https://img.shields.io/badge/versi%C3%B3n-0.22.0-cba6f7?style=flat-square)
 ![requiere sesión en claude.ai](https://img.shields.io/badge/requiere-sesi%C3%B3n%20en%20claude.ai-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -23,6 +23,7 @@
 - [El roadmap](#el-roadmap)
 - [La banda](#la-banda)
 - [Sesiones en paralelo](#sesiones-en-paralelo)
+- [Sesiones: asiento y vínculo](#sesiones-asiento-y-vínculo)
 - [Hooks](#hooks)
 - [Referencia de la CLI](#referencia-de-la-cli)
 - [Permisos](#permisos)
@@ -131,17 +132,36 @@ La banda se dibuja en la terminal y en la pestaña Code de la app de escritorio.
 
 ## Sesiones en paralelo
 
-`/waypoint:launch <frente>` crea `.claude/worktrees/<frente>` en la rama `track/<frente>` y arranca allí una sesión de Claude en segundo plano. Cada sesión reclama tareas de su frente y escribe su progreso en el roadmap. Cuando dos sesiones tocan los mismos ficheros, reciben un aviso de solapamiento. Las sesiones pueden traspasarse o delegarse trabajo con mensajes, que se guardan en el roadmap y se envían con `SendMessage`. Si una sesión desaparece, las demás recuperan su tarea. El prompt es `/waypoint:work <frente>` (más la autorización de fusión con `--merge`); un frente de un plan que está ejecutando forge se une solo a esa ejecución como miembro manual (`/waypoint:work` §0.5).
+`/waypoint:launch <frente>` crea `.claude/worktrees/<frente>` en la rama `track/<frente>` y arranca allí una sesión de Claude en segundo plano. Cada sesión reclama tareas de su frente y escribe su progreso en el roadmap. Cuando dos sesiones tocan los mismos ficheros, reciben un aviso de solapamiento. Las sesiones pueden traspasarse o delegarse trabajo con mensajes, que se guardan en el roadmap y se envían con `SendMessage`. Si una sesión desaparece, las demás recuperan su tarea. El prompt es `/waypoint:work <frente>` (más la autorización de fusión con `--merge`); un frente de un plan que está ejecutando forge se une solo a esa ejecución como miembro manual (`/waypoint:work` §0.5). Sus worktrees no salen en `git status`: se añaden a `.git/info/exclude` si nada los ignora.
 
 El modo sessions de forge lanza a sus miembros con `launch <plan> <T> --task --run R --coordinator SID --base B [--effort e] [--model m] [--launcher bg|herdr]`: una sesión por tarea, en `.claude/worktrees/task-<T>` sobre `task/<T>`, que arranca con `/forge:member`. `--effort` (`low`, `medium`, `high`, `xhigh`, `max`) y `--model` (`opus`, `sonnet`, `haiku`) van al comando `claude --bg`, así que el miembro no hereda el esfuerzo de tu sesión; forge pasa los de su ajuste `swarm.member` (medium por defecto) y cualquier otro valor sale con código 2. La banda de un miembro así dice «de la ejecución de <coordinadora>». Cualquier sesión puede además unirse desde `/waypoint:work` a una ejecución en marcha como miembro manual y coger una tarea pendiente. Los ids de sesión que se usan con una ejecución de forge deben cumplir `[A-Za-z0-9_.-]` (sin `~ : @ +`): forge rechaza cualquier otro.
 
 Para muchos frentes a la vez con integración automática, usa los [modos de ejecución](../forge/README.es.md#modos-de-ejecución) de forge.
 
+## Sesiones: asiento y vínculo
+
+El trabajo del roadmap de un checkout es de una conversación a la vez. `.waypoint/<proyecto>/session.json` es el **asiento** (su id, `main` o el frente, es el documento `sessions/<SID>` del roadmap) y `.waypoint/<proyecto>/bound.json` es el **vínculo** de ese asiento con la conversación de Claude que lo trabaja: `{sid, claude, pid, via, since, seenAt, endedAt, endReason}`. Lo crean `/waypoint:work`, `/waypoint:design`, `/forge:run`, `/forge:member` y `/forge:infinite` con `waypoint bind`; lo cierran el hook `SessionEnd` y `waypoint release`. Caduca 5 minutos después de su última renovación, o al instante si el proceso que registró ya no existe. Un vínculo liberado sigue liberado, incluso tras un compact o un resume.
+
+Cada sesión calcula su papel con esos ficheros, y los hooks actúan según él:
+
+| Papel | Quién | Qué recibe |
+| --- | --- | --- |
+| dueña | la conversación ligada al asiento | el contexto de arranque con su tarea, sus commits apuntados, el aviso del Stop |
+| dueña por forge | la coordinadora de forge y los miembros de su ejecución | nada de estos hooks: les habla el hook de forge |
+| otra viva | cualquier otra conversación mientras la dueña sigue viva | una línea al arrancar que dice quién trabaja el roadmap; nada más |
+| previa | una conversación posterior cuando la dueña terminó (`/clear`, salir, un cierre inesperado) con una tarea a medias, durante 24 horas | una línea al arrancar que nombra la tarea que quedó a medias: `/waypoint:work resume` la retoma y `/waypoint:work release` la libera en el roadmap |
+| ninguna | cualquier otra | una línea en un arranque nuevo si el proyecto tiene plan |
+
+`/waypoint:work` nunca toma un asiento que tiene otra conversación viva (`waypoint bind` sale con 3): ofrece, por este orden, un frente en un worktree (`/waypoint:launch`), un segundo asiento en este checkout (`main-2`, en `.waypoint/<proyecto>/seats/main-2/`, con sus propios ficheros) o un relevo explícito. Si la conversación anterior terminó con una tarea a medias, `bind` sale con 4 y pregunta antes. Tras `/clear` la conversación nueva recibe la oferta de la anterior, no su herencia: no se retoma nada hasta que lo digas. La dueña conserva el vínculo al terminar una tarea. Una conversación abierta antes de la 0.22 no tiene vínculo, ni contexto de arranque, hasta su siguiente `/waypoint:work`.
+
+La skill de trabajo ya no compone las escrituras de una tarea en el roadmap: `waypoint claim`, `done`, `block --why-file f` (que además rellena `state/T.blockedReason`) y `heartbeat` las imprimen listas, con `now`, los ids de evento y el lease, y cada latido renueva `leaseUntil`. Una sesión de frente pide `next` con `--base` y para con `waiting_on` cuando su siguiente tarea espera trabajo de otro frente que aún no está en la base.
+
 ## Hooks
 
-- **SessionStart** inyecta el contexto del roadmap o del diseño en una sesión nueva, reanudada, limpiada o compactada.
-- **PostToolUse** (Bash) registra cada `git commit` que movió HEAD, con su `sha`, en `.waypoint/<proyecto>/pending-commits.jsonl`. No se registran los commits fallidos ni los `--dry-run`. La skill de trabajo registra los commits intermedios como eventos `commit` y quita sus líneas, y vacía el fichero al completar o dejar una tarea.
-- **Stop** te avisa una vez por cada conjunto distinto de pendientes mientras `pending-commits.jsonl` o `queue.jsonl` tengan líneas, para que no se pierda ningún commit ni escritura en el roadmap. Si vuelves a parar sin nada nuevo, deja pasar, y nunca bloquea cuando el hook Stop ya está activo. Nunca para a una sesión que coordina o es miembro de una ejecución activa de forge, ni a la sesión del modo infinito de forge (las lleva el hook Stop de forge), y los commits de la tarea que tienes en curso solo cuentan cuando termina.
+- **SessionStart** (sesión nueva, reanudada, limpiada, compactada o bifurcada) da a la dueña del asiento el contexto del roadmap o del borrador con su tarea; cualquier otra sesión recibe una línea que dice quién trabaja el roadmap, o la oferta de lo que una conversación anterior dejó a medias; la coordinadora y los miembros de una ejecución de forge lo oyen de forge. Una conversación reanudada o compactada reabre su vínculo, salvo que lo hubiera liberado.
+- **SessionEnd** cierra los vínculos de esta conversación, con el motivo (`clear`, `resume`, `logout`, `prompt_input_exit`, `other`).
+- **PostToolUse** (Bash), solo para la dueña, apunta en `<asiento>/pending-commits.jsonl` cada commit que HEAD ganó en el worktree del comando desde su base de `last-head.json` (primer padre, 20 como mucho: un merge de main añade solo su propio commit), y quita las líneas de los commits que se llevó un amend, un rebase o un reset. Lo que se commitea mientras el asiento no tiene tarea abierta nunca se da a la siguiente. La skill de trabajo registra los commits intermedios como eventos `commit` y quita sus líneas, y vacía el fichero al completar o dejar una tarea.
+- **Stop**, solo para la dueña, te avisa una vez por cada conjunto distinto de pendientes mientras `pending-commits.jsonl` o `queue.jsonl` del asiento tengan líneas, para que no se pierda ningún commit ni escritura en el roadmap. Nunca para a una sesión que coordina o es miembro de una ejecución activa de forge, ni a la sesión del modo infinito de forge, y los commits de la tarea que tienes en curso solo cuentan cuando termina. Si vuelves a parar sin nada nuevo, deja pasar, y nunca bloquea cuando el hook Stop ya está activo.
 
 ## Referencia de la CLI
 
@@ -149,10 +169,10 @@ Las skills ejecutan la CLI como `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" 
 
 | Grupo | Comandos |
 | --- | --- |
-| Diseño | `design-import <spec> --project P --out D`, `design-validate`, `design-snapshot <design.md> --note n [--round R] [--applied r<R>:<n,…>…] [--rewrite]`, `design-changed`, `design-gate <design.md>` (con las propuestas `pending` de todas las rondas), `critique-check`, `critique-select`, `critique-dismiss <design.md> --round R <all\|1,3>`, `design-page` |
+| Diseño | `design-import <spec> --project P --out D`, `design-validate`, `design-snapshot <design.md> --note n [--round R] [--applied r<R>:<n,…>…] [--rewrite]`, `design-changed`, `design-gate <design.md>` (con las propuestas `pending` de todas las rondas), `critique-check`, `critique-select`, `critique-dismiss <design.md> --round R <all\|1,3>`, `design-page`, `design-park <design.md>` |
 | Plan y página | `validate`, `hash` (imprime el hash del plan, para detectar un roadmap desactualizado), `page [--publish-info]` (las capacidades con las que publicar y la línea que avisa de que la página queda interna), `sync` (con la línea del informe: URL y cuentas), `clean-cache` |
-| Trabajo | `next [--base <rama>]`, `conflicts`, `recover`, `status`, `commit-info` |
-| Sesiones | `launch <frente> [--base <rama>]`, `launch <plan> <T> --task --run R --coordinator SID --base B [--effort e] [--model m] [--launcher bg|herdr]`, `inbox`, `escalations`, `notes [--plan p] [--locale es\|en]` (con una línea que decir por cada nota de una persona), `session-id` |
+| Trabajo | `next [--base <rama>]` (con `waiting_on`), `conflicts`, `recover`, `status`, `commit-info`, `claim`, `done`, `block --why-file f`, `heartbeat [--register] [--busy-until t] [--idle]` (cada uno imprime `{now, eid, eids, leaseUntil, batch}`) |
+| Sesiones | `launch <frente> [--base <rama>]`, `launch <plan> <T> --task --run R --coordinator SID --base B [--effort e] [--model m] [--launcher bg|herdr]`, `inbox`, `escalations`, `notes [--plan p] [--locale es\|en]` (con una línea que decir por cada nota de una persona), `session-id`, `bind <plan|design> --via v [--seat s \| --second-seat] [--resume] [--takeover]`, `release <plan> [--seat s] [--free T --state-version V]` |
 | Utilidades | `event-id`, `now` |
 
 ## Permisos

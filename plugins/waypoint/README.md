@@ -6,7 +6,7 @@
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.21.0](https://img.shields.io/badge/version-0.21.0-cba6f7?style=flat-square)
+![version 0.22.0](https://img.shields.io/badge/version-0.22.0-cba6f7?style=flat-square)
 ![requires claude.ai login](https://img.shields.io/badge/requires-claude.ai%20login-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -23,6 +23,7 @@
 - [The roadmap](#the-roadmap)
 - [The band](#the-band)
 - [Parallel sessions](#parallel-sessions)
+- [Sessions: seat and binding](#sessions-seat-and-binding)
 - [Hooks](#hooks)
 - [CLI reference](#cli-reference)
 - [Permissions](#permissions)
@@ -131,17 +132,36 @@ The band is drawn in the terminal and in the Code tab of the desktop app. It is 
 
 ## Parallel sessions
 
-`/waypoint:launch <track>` creates `.claude/worktrees/<track>` on the branch `track/<track>` and starts a background Claude session there. Each session claims tasks from its track and writes its progress to the roadmap. When two sessions touch the same files, they get an overlap warning. Sessions can hand off or delegate work through messages, which are stored in the roadmap and sent with `SendMessage`. A session that disappears has its task recovered by the others. The prompt is `/waypoint:work <track>` (plus the merge authorization with `--merge`); a track of a plan that a forge execution is running joins that execution as a manual member by itself (`/waypoint:work` §0.5).
+`/waypoint:launch <track>` creates `.claude/worktrees/<track>` on the branch `track/<track>` and starts a background Claude session there. Each session claims tasks from its track and writes its progress to the roadmap. When two sessions touch the same files, they get an overlap warning. Sessions can hand off or delegate work through messages, which are stored in the roadmap and sent with `SendMessage`. A session that disappears has its task recovered by the others. The prompt is `/waypoint:work <track>` (plus the merge authorization with `--merge`); a track of a plan that a forge execution is running joins that execution as a manual member by itself (`/waypoint:work` §0.5). Their worktrees are kept out of `git status` through `.git/info/exclude` when nothing ignores them.
 
 forge's sessions mode launches its members with `launch <plan> <T> --task --run R --coordinator SID --base B [--effort e] [--model m] [--launcher bg|herdr]`: one session per task, in `.claude/worktrees/task-<T>` on `task/<T>`, started with `/forge:member`. `--effort` (`low`, `medium`, `high`, `xhigh`, `max`) and `--model` (`opus`, `sonnet`, `haiku`) go into the `claude --bg` command, so the member does not inherit your session's effort; forge passes the ones in its `swarm.member` setting (medium by default) and any other value exits with code 2. The band of such a member says "of the execution of <coordinator>". Any session can also join a running execution as a manual member from `/waypoint:work`, and take a pending task. Session ids used with a forge execution must match `[A-Za-z0-9_.-]` (no `~ : @ +`): forge refuses any other.
 
 For many tracks at once with automatic integration, use forge's [execution modes](../forge/README.md#execution-modes).
 
+## Sessions: seat and binding
+
+The roadmap work of a checkout belongs to one conversation at a time. `.waypoint/<project>/session.json` is the **seat** (its id, `main` or the track, is the `sessions/<SID>` document of the roadmap) and `.waypoint/<project>/bound.json` is the **binding** of that seat to the Claude conversation that works it: `{sid, claude, pid, via, since, seenAt, endedAt, endReason}`. `/waypoint:work`, `/waypoint:design`, `/forge:run`, `/forge:member` and `/forge:infinite` make it with `waypoint bind`; the `SessionEnd` hook and `waypoint release` close it. It lapses 5 minutes after its last renewal, or at once when the process it recorded is gone. A binding that was released stays released, even through a compact or a resume.
+
+Each session works out its role from those files, and the hooks act by it:
+
+| Role | Who | What it gets |
+| --- | --- | --- |
+| owner | the conversation bound to the seat | the start context with its task, its commits recorded, the Stop reminder |
+| owner by forge | forge's coordinator and the members of its run | nothing from these hooks: forge's own hooks speak to them |
+| another live one | any other conversation while the owner is alive | one line at start that says who works the roadmap; nothing else |
+| previous | a later conversation after the owner ended (`/clear`, exit, a crash) leaving a task in progress, for 24 hours | one line at start that names the task left in progress: `/waypoint:work resume` takes it up, `/waypoint:work release` frees it on the roadmap |
+| none | anyone else | one line on a fresh start when the project has a plan |
+
+`/waypoint:work` never takes a seat another live conversation holds (`waypoint bind` exits 3): it offers, in this order, a track in a worktree (`/waypoint:launch`), a second seat in this checkout (`main-2`, in `.waypoint/<project>/seats/main-2/`, with its own files) or an explicit takeover. When the earlier conversation ended with a task in progress, `bind` exits 4 and asks first. After `/clear` the new conversation is the previous one's offer, not its heir: nothing is taken up until you say so. The owner keeps its binding after finishing a task. A conversation that was open before 0.22 has no binding, and no start context, until its next `/waypoint:work`.
+
+The work skill no longer composes the roadmap writes of a task: `waypoint claim`, `done`, `block --why-file f` (which also fills `state/T.blockedReason`) and `heartbeat` print them ready, with `now`, the event ids and the lease, and every heartbeat renews `leaseUntil`. A track session asks `next` with `--base` and stops on `waiting_on` when its next task waits for another track's work that is not in the base yet.
+
 ## Hooks
 
-- **SessionStart** injects the roadmap or design context into a new, resumed, cleared or compacted session.
-- **PostToolUse** (Bash) records each `git commit` that moved HEAD, with its `sha`, in `.waypoint/<project>/pending-commits.jsonl`. Failed commits and `--dry-run` are not recorded. The work skill records intermediate commits as `commit` events and removes their lines, and empties the file when it completes or leaves a task.
-- **Stop** reminds you once per distinct pending set while `pending-commits.jsonl` or `queue.jsonl` has lines, so no commit or roadmap write is lost. Stopping again with nothing new goes through, and it never blocks when the Stop hook is already active. It never stops a session that coordinates or is a member of an active forge execution, nor the session of forge's infinite run (forge's own Stop hook steps them), and the commits of the task you have in progress only count once it is done.
+- **SessionStart** (new, resumed, cleared, compacted or forked session) gives the seat's owner the roadmap or draft context with its task; any other session gets one line that says who works the roadmap, or the offer of what an earlier conversation left in progress; the coordinator and the members of a forge execution hear from forge instead. A resumed or compacted conversation reopens its binding, unless it was released.
+- **SessionEnd** closes this conversation's bindings, with the reason (`clear`, `resume`, `logout`, `prompt_input_exit`, `other`).
+- **PostToolUse** (Bash), for the owner only, records in `<seat>/pending-commits.jsonl` every commit HEAD gained in the worktree of the command since its base in `last-head.json` (first parent, 20 at most, so a merge from main adds only its own commit), and drops the lines of commits an amend, a rebase or a reset took away. What is committed while the seat has no task open is never given to the next task. The work skill records intermediate commits as `commit` events and removes their lines, and empties the file when it completes or leaves a task.
+- **Stop**, for the owner only, reminds you once per distinct pending set while the seat's `pending-commits.jsonl` or `queue.jsonl` has lines, so no commit or roadmap write is lost. It never stops a session that coordinates or is a member of an active forge execution, nor the session of forge's infinite run, and the commits of the task you have in progress only count once it is done. Stopping again with nothing new goes through, and it never blocks when the Stop hook is already active.
 
 ## CLI reference
 
@@ -149,10 +169,10 @@ The skills run the CLI as `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" <comma
 
 | Group | Commands |
 | --- | --- |
-| Design | `design-import <spec> --project P --out D`, `design-validate`, `design-snapshot <design.md> --note n [--round R] [--applied r<R>:<n,…>…] [--rewrite]`, `design-changed`, `design-gate <design.md>` (with the `pending` proposals of every round), `critique-check`, `critique-select`, `critique-dismiss <design.md> --round R <all\|1,3>`, `design-page` |
+| Design | `design-import <spec> --project P --out D`, `design-validate`, `design-snapshot <design.md> --note n [--round R] [--applied r<R>:<n,…>…] [--rewrite]`, `design-changed`, `design-gate <design.md>` (with the `pending` proposals of every round), `critique-check`, `critique-select`, `critique-dismiss <design.md> --round R <all\|1,3>`, `design-page`, `design-park <design.md>` |
 | Plan and page | `validate`, `hash` (prints the plan hash, used to detect an out-of-date roadmap), `page [--publish-info]` (the capabilities to publish with and the line that says the page becomes internal), `sync` (with the report line: URL and counts), `clean-cache` |
-| Work | `next [--base <branch>]`, `conflicts`, `recover`, `status`, `commit-info` |
-| Sessions | `launch <track> [--base <branch>]`, `launch <plan> <T> --task --run R --coordinator SID --base B [--effort e] [--model m] [--launcher bg|herdr]`, `inbox`, `escalations`, `notes [--plan p] [--locale es\|en]` (with a line to say per person's note), `session-id` |
+| Work | `next [--base <branch>]` (with `waiting_on`), `conflicts`, `recover`, `status`, `commit-info`, `claim`, `done`, `block --why-file f`, `heartbeat [--register] [--busy-until t] [--idle]` (each prints `{now, eid, eids, leaseUntil, batch}`) |
+| Sessions | `launch <track> [--base <branch>]`, `launch <plan> <T> --task --run R --coordinator SID --base B [--effort e] [--model m] [--launcher bg|herdr]`, `inbox`, `escalations`, `notes [--plan p] [--locale es\|en]` (with a line to say per person's note), `session-id`, `bind <plan|design> --via v [--seat s \| --second-seat] [--resume] [--takeover]`, `release <plan> [--seat s] [--free T --state-version V]` |
 | Helpers | `event-id`, `now` |
 
 ## Permissions

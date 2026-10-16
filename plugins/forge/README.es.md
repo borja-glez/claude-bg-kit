@@ -7,8 +7,8 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.19.0](https://img.shields.io/badge/versi%C3%B3n-0.19.0-fab387?style=flat-square)
-![depende de waypoint ^0.21.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.21.0-cba6f7?style=flat-square)
+![versión 0.19.1](https://img.shields.io/badge/versi%C3%B3n-0.19.1-fab387?style=flat-square)
+![depende de waypoint ^0.22.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.22.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -49,7 +49,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depende de [waypoint](../waypoint/README.es.md) ^0.21.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
+forge depende de [waypoint](../waypoint/README.es.md) ^0.22.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
 
 ## Uso
 
@@ -169,7 +169,7 @@ La ejecución secuencial no es un tercer modo: es subagents con N = 1.
 
 **Avanzar en segundo plano.** La coordinadora avanza una ejecución de plan con `forge swarm step`, en segundo plano: un solo comando renueva los leases, prepara la revisión de cada implementador que volvió (o entrega su informe), cierra las revisiones que han vuelto, arranca las tareas que programa el tick (worktree, brief, triaje y prep) e integra como mucho una; imprime las acciones que hacer y los datos de un único batch del roadmap. Solo corre un paso a la vez (`.forge/jobs/step.lock`; otro responde `busy`). Cuando una revisión te pregunta algo (un tema de seguridad que se repite, un cambio de arquitectura), tu respuesta llega al paso siguiente como `--ruling <T>:fix|out-of-model|defer:F3|review`, y hasta entonces no cierra nada de esa tarea. Si `verify-plan --dir` eligió superficies, el paso espera también al agente de verificación y la cierra con `verify-close`, con un commit de sus notas aprendidas en el worktree de la tarea. La tarea de un miembro adoptada tras un conflicto solo necesita su brief y su implementador: el paso la revisa desde donde se separa de la rama de ejecución. `prep`, `review-prep`, `validate` y `swarm integrate` aceptan también `--out <file>`: mientras corre, cada uno es un trabajo en `.forge/jobs/`, el hook Stop no bloquea, y como mucho `swarm.validateJobs` de ellos (2 por defecto) corren sus validadores a la vez. Toda escritura de `.forge/execution.json` toma `.forge/execution.lock`, así que un tick y una integración en segundo plano nunca se pisan; un cerrojo caducado lo toma un solo proceso a la vez, y el hook Stop lo espera como mucho unos 2 s. Una integración tiene `.forge/execution/merging.json` desde su línea base hasta su commit o su retroceso (y vuelve a comprobar HEAD en cuanto lo tiene), y `swarm merge` responde `busy` mientras haya una viva. Si su proceso murió a mitad del merge, la siguiente integración en ese worktree aborta ese merge y lo dice con `recovered`, y ningún tick integra mientras haya un merge en vuelo. Una duda que no bloquea se convierte en una nota-pregunta, y la ejecución sigue. Cada turno de la coordinadora termina con una espera marcada (`swarm sleep --mark`), y los ciclos de `/forge:infinite` corren los comandos sueltos en primer plano.
 
-**Worktrees por tarea.** Cada tarea tiene `.claude/worktrees/task-<tarea>` en la rama `task/<tarea>` (`forge swarm worktree <tarea>`). Nada más crear un worktree, forge instala sus dependencias con `swarm.setup` de `.forge/config.yaml`. Sin él, el comando se deduce del lockfile: `npm ci` para `package-lock.json`, `pnpm install --frozen-lockfile` para `pnpm-lock.yaml`, `yarn install --frozen-lockfile` para `yarn.lock`. Un `.venv` de Python no tiene un valor por defecto seguro: pon `swarm.setup`. El resultado (su comando y las últimas líneas de salida) se te enseña, y una instalación fallida nunca para la ejecución.
+**Worktrees por tarea.** Cada tarea tiene `.claude/worktrees/task-<tarea>` en la rama `task/<tarea>` (`forge swarm worktree <tarea>`). Nada más crear un worktree, forge instala sus dependencias con `swarm.setup` de `.forge/config.yaml`. Sin él, el comando se deduce del lockfile: `npm ci` para `package-lock.json`, `pnpm install --frozen-lockfile` para `pnpm-lock.yaml`, `yarn install --frozen-lockfile` para `yarn.lock`. Un `.venv` de Python no tiene un valor por defecto seguro: pon `swarm.setup`. El resultado (su comando y las últimas líneas de salida) se te enseña, y una instalación fallida nunca para la ejecución. `swarm start` y `swarm worktree` añaden `.claude/worktrees/` a `.git/info/exclude` si nada lo ignora, así los worktrees nunca salen en `git status`.
 
 **Integración.** Una tarea terminada se fusiona en la rama de ejecución con `forge swarm integrate <tarea>`, de un merge en uno, pasando los validadores tras cada uno. Los fallos que **ya existían** en la rama de ejecución no bloquean: los validadores se comparan con una base guardada por ámbito, destino y commit en `.forge/execution/baseline/`, y solo los fallos nuevos deshacen el merge (un conflicto también). El `forge swarm merge` final a tu rama hace lo mismo y responde `merged`, `needs-authorization`, `busy`, `main-dirty` o `conflict`.
 
@@ -181,7 +181,7 @@ La ejecución secuencial no es un tercer modo: es subagents con N = 1.
 
 **Sesiones manuales.** Cualquier sesión donde ejecutes `/waypoint:work`, o le pidas «coge una tarea pendiente», se une a la ejecución con el rol `manual` en cualquier momento (`swarm join`). Coge tareas con el mismo planificador (`swarm next`), trabaja en su propio worktree de tarea (`swarm worktree <T> --member`) y publica sus etapas (`swarm report`); la coordinadora integra su trabajo. Un miembro solo actúa sobre su propia tarea y nunca escribe `execution.json`.
 
-**Retomar y relevo.** `claude --resume` de la coordinadora o de una ejecutora recibe el contexto de la ejecución en SessionStart. Una sesión nueva toma el relevo de la coordinadora solo si está parada (`swarm takeover`); si no, se une como manual. Un miembro de la ejecución no puede tomar el relevo. Si la rama de ejecución se ha quedado atrás respecto a su base, `swarm start` la pone al día (`baseSync`: `created`, `up-to-date`, `fast-forward` o `merged`); ante un conflicto se niega y no se pierde nada.
+**Retomar y relevo.** `claude --resume` de la coordinadora o de una ejecutora recibe el contexto de la ejecución en SessionStart. Una sesión nueva toma el relevo de la coordinadora solo si está parada (`swarm takeover`); si no, se une como manual. Un miembro de la ejecución no puede tomar el relevo. Si la rama de ejecución se ha quedado atrás respecto a su base, `swarm start` la pone al día (`baseSync`: `created`, `up-to-date`, `fast-forward` o `merged`); ante un conflicto se niega y no se pierde nada. `/forge:run`, `/forge:member` y `/forge:infinite` ligan además el asiento del roadmap de waypoint a su conversación (`waypoint bind --via forge-run`, `forge-member` o `forge-infinite`), así la banda y el contexto de arranque del roadmap son de la coordinadora y de los miembros, nunca de otra sesión.
 
 **Desatendido.** En `/forge:infinite`, bajo `/goal` y en los miembros de la ejecución, forge no pregunta. Deja notas-pregunta en el roadmap y registra cada decisión que toma en tu lugar.
 

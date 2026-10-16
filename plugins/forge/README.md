@@ -7,8 +7,8 @@ Triage by size, the right model for each role, your own tools first, independent
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.19.0](https://img.shields.io/badge/version-0.19.0-fab387?style=flat-square)
-![depends on waypoint ^0.21.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.21.0-cba6f7?style=flat-square)
+![version 0.19.1](https://img.shields.io/badge/version-0.19.1-fab387?style=flat-square)
+![depends on waypoint ^0.22.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.22.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -49,7 +49,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depends on [waypoint](../waypoint/README.md) ^0.21.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
+forge depends on [waypoint](../waypoint/README.md) ^0.22.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
 
 ## Usage
 
@@ -169,7 +169,7 @@ Sequential execution is not a third mode: it is subagents with N = 1.
 
 **Stepping in the background.** The coordinator advances a plan execution with `forge swarm step`, run in the background: one command renews the leases, prepares the review of each implementer that came back (or hands over its report), closes the reviews that are back, starts the tasks the tick schedules (worktree, brief, triage and prep) and integrates at most one; it prints the actions to take and the data of one roadmap batch. Only one step runs at a time (`.forge/jobs/step.lock`; another answers `busy`). When a review asks you something (a security theme that repeats, an architectural change), your answer reaches the next step as `--ruling <T>:fix|out-of-model|defer:F3|review`, and until then it closes nothing for that task. When `verify-plan --dir` chose surfaces, the step waits for the verify agent too and closes the verification with `verify-close`, committing its learned notes in the task's worktree. A member's task adopted after a conflict needs only its brief and its implementer: the step reviews it from where it forks from the run branch. `prep`, `review-prep`, `validate` and `swarm integrate` take `--out <file>` too: while one runs it is a job in `.forge/jobs/`, the Stop hook does not block, and at most `swarm.validateJobs` of them (2 by default) run their validators at once. Every write of `.forge/execution.json` takes `.forge/execution.lock`, so a tick and an integration in the background never overwrite each other; a stale lock is taken over by one process at a time, and the Stop hook waits for it at most about 2 s. An integration holds `.forge/execution/merging.json` from its baseline to its commit or rollback (it checks HEAD again once it holds it), and `swarm merge` answers `busy` while one is live. When its process died mid-merge, the next integration in that worktree aborts that merge and says `recovered`, and no tick integrates while a merge is in flight. A doubt that blocks nothing becomes a question note, and the run goes on. Every turn of the coordinator ends with a marked sleep (`swarm sleep --mark`), and the cycles of `/forge:infinite` run the single commands in the foreground.
 
-**Task worktrees.** Each task gets `.claude/worktrees/task-<task>` on the branch `task/<task>` (`forge swarm worktree <task>`). Right after creating a worktree, forge installs its dependencies with `swarm.setup` in `.forge/config.yaml`. Without it, the command is deduced from the lockfile: `npm ci` for `package-lock.json`, `pnpm install --frozen-lockfile` for `pnpm-lock.yaml`, `yarn install --frozen-lockfile` for `yarn.lock`. A Python `.venv` has no safe default: set `swarm.setup`. The result (its command and the last lines of output) is shown to you, and a failed install never stops the run.
+**Task worktrees.** Each task gets `.claude/worktrees/task-<task>` on the branch `task/<task>` (`forge swarm worktree <task>`). Right after creating a worktree, forge installs its dependencies with `swarm.setup` in `.forge/config.yaml`. Without it, the command is deduced from the lockfile: `npm ci` for `package-lock.json`, `pnpm install --frozen-lockfile` for `pnpm-lock.yaml`, `yarn install --frozen-lockfile` for `yarn.lock`. A Python `.venv` has no safe default: set `swarm.setup`. The result (its command and the last lines of output) is shown to you, and a failed install never stops the run. `swarm start` and `swarm worktree` add `.claude/worktrees/` to `.git/info/exclude` when nothing ignores it, so the worktrees never show in `git status`.
 
 **Integration.** A finished task is merged into the run branch with `forge swarm integrate <task>`, one merge at a time, running the validators after each one. Failures that **already existed** on the run branch do not block: the validators are compared with a baseline cached per scope, target and commit in `.forge/execution/baseline/`, and only new failures roll the merge back (a conflict does too). The final `forge swarm merge` into your branch does the same and answers `merged`, `needs-authorization`, `busy`, `main-dirty` or `conflict`.
 
@@ -181,7 +181,7 @@ Sequential execution is not a third mode: it is subagents with N = 1.
 
 **Manual sessions.** Any session where you run `/waypoint:work`, or ask it to "take a pending task", joins the execution with the role `manual` at any time (`swarm join`). It takes tasks with the same planner (`swarm next`), works in its own task worktree (`swarm worktree <T> --member`) and reports its stages (`swarm report`); the coordinator integrates its work. A member only acts on its own task and never writes `execution.json`.
 
-**Resume and handover.** `claude --resume` of the coordinator or of an executor receives the execution's context on SessionStart. A new session takes over from the coordinator only when it is stopped (`swarm takeover`); otherwise it joins as a manual member. A run member cannot take over. If the run branch is behind its base, `swarm start` brings it up to date (`baseSync`: `created`, `up-to-date`, `fast-forward` or `merged`); on a conflict it refuses and nothing is lost.
+**Resume and handover.** `claude --resume` of the coordinator or of an executor receives the execution's context on SessionStart. A new session takes over from the coordinator only when it is stopped (`swarm takeover`); otherwise it joins as a manual member. A run member cannot take over. If the run branch is behind its base, `swarm start` brings it up to date (`baseSync`: `created`, `up-to-date`, `fast-forward` or `merged`); on a conflict it refuses and nothing is lost. `/forge:run`, `/forge:member` and `/forge:infinite` also bind waypoint's roadmap seat to their conversation (`waypoint bind --via forge-run`, `forge-member` or `forge-infinite`), so the band and the start context of the roadmap are the coordinator's and the members', never another session's.
 
 **Unattended.** In `/forge:infinite`, under `/goal` and in run members, forge does not ask. It leaves question notes on the roadmap and records every decision it takes in your place.
 

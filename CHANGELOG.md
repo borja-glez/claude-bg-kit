@@ -13,6 +13,25 @@ elsewhere and are reconstructed from their READMEs.
 
 ## waypoint
 
+### 0.22.0 — 2026-10-16
+
+#### Added
+- Seats and bindings. `.waypoint/<project>/session.json` is the checkout's seat and `.waypoint/<project>/bound.json` binds it to the Claude conversation that works it; `seats/<sid>/` holds a second seat (`main-2`…). `waypoint bind` never takes a seat a live conversation holds (exit 3, with a track in a worktree, a second seat or an explicit takeover, in that order) and asks before taking up what an earlier one left in progress (exit 4); `waypoint release [--free T]` ends a binding or frees its task. A seat id is a safe folder name with no leading `-`, and a binding that lapsed or whose process is gone counts as ended.
+- Every hook works out the role of its session: owner, another live one, a previous one or none. A new `SessionEnd` hook closes the conversation's bindings, and `SessionStart` also runs on a fork. The post-commit, Stop and SessionStart hooks act for the owner by binding only.
+- `waypoint claim`, `done`, `block --why-file` and `heartbeat [--register] [--busy-until] [--idle]` print the roadmap batch of a task ready to apply (`{now, eid, eids, leaseUntil, batch}`). `done` and `block` need a task of the plan (exit 2 otherwise). `block` also writes `state/T.blockedReason`; `claim --unblock` deletes `blockedBy` and `blockedReason` and puts the `unblocked` event before `started`; `claim` says `solo` when no other session is alive; with `--db` the local cache sees the write at once (an empty `--db` value is exit 2).
+- `/waypoint:work resume` and `/waypoint:work release [T]`; `/waypoint:design park` and `waypoint design-park`: a parked design is neither announced nor drawn.
+- `next --base` adds `waiting_on` when the next task of a track waits for a dependency of another track that is not in the base yet.
+
+#### Changed
+- The start context, the commit records and the Stop reminder belong to the seat's owner: another conversation in the same checkout gets one line that says who works the roadmap, never «Current task… continue», and its commits and stops are its own. After `/clear` the new conversation is offered «left in progress: T» for 24 hours and takes it only when asked.
+- `/waypoint:work` no longer composes the task batches nor asks for `now` and `event-id` per event; a track session passes `--base` to `next`, and the checks of the main checkout run `git status --porcelain --untracked-files=no` there.
+- One life for a session: every heartbeat renews `leaseUntil`, and a session is alive while the latest of its lease, its heartbeat plus 10 minutes and an older `busyUntil` runs, so an old lease no longer hides a fresh heartbeat.
+- The PostToolUse hook records, for the owner, every commit HEAD gained in the worktree of the command (first parent, 20 at most: a merge from main adds only its own commit) and drops the lines of commits an amend, a rebase or a reset took away; `last-head.json` keeps the base per conversation and worktree, and what is committed with no task open is never given to the next one.
+- The hooks pick the project of the conversation's binding, else the one with the latest activity; a `session.json` alone no longer wins.
+- A binding that was released stays released through a compact and a resume. `bind` and `release` write atomically and retry a rename Windows refuses; the process check of a binding is the one of `src/lib/pid.ts`.
+- `waypoint launch` adds `.claude/worktrees/` to `.git/info/exclude` when nothing ignores it.
+- A conversation that was open before this version has no binding, and no start context, until its next `/waypoint:work`.
+
 ### 0.21.0 — 2026-10-16
 
 #### Added
@@ -195,6 +214,14 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.19.1 — 2026-10-16
+
+#### Changed
+- `/forge:run`, `/forge:member` and `/forge:infinite` bind waypoint's roadmap seat to the conversation that runs them (`waypoint bind --via forge-run|forge-member|forge-infinite`), so the band and the start context of the roadmap are theirs and no other session's.
+- `swarm start` and `swarm worktree` add `.claude/worktrees/` to `.git/info/exclude` when nothing ignores it.
+- The `hook live` and `hook route-session` SessionStart hooks also run on a fork.
+- Requires waypoint ^0.22.0.
 
 ### 0.19.0 — 2026-10-16
 
@@ -560,6 +587,11 @@ elsewhere and are reconstructed from their READMEs.
 - Requires waypoint ^0.7.0.
 
 ## lens
+
+### 0.11.7 — 2026-10-16
+
+#### Changed
+- A stopped execution, one that ran out of budget or a finished one nobody merged or closed is shown for 24 hours after its last step, as a stalled one already was.
 
 ### 0.11.6 — 2026-10-16
 
