@@ -10,10 +10,12 @@ generated:
 # mod-tests is e2e so that its affects counts: in Medium and Large it runs only when the diff touches those paths, and
 # it always runs in integrate and the final review. Its harness loads the built bundles, hence the build first.
 # cache: true lets forge reuse its result on a tree it already validated: it depends only on the tree, the bundles it builds and the claude CLI.
+# typecheck-mod reads types/claude-code, which git ignores, so the tree cache cannot see it change: cache: false.
 validators:
   - name: typecheck-mod
     cmd: npm run typecheck:mod
     kind: typecheck
+    cache: false
     affects: ["src/mod/**", "src/lens/**", "src/lib/**", "plugins/*/tests/**", "types/claude-code/**", "tsconfig.mod.json"]
   - name: mod-tests
     cmd: npm run build && claude plugin test plugins/lens && claude plugin test plugins/waypoint

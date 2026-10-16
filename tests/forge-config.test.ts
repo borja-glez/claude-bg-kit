@@ -188,6 +188,10 @@ describe('this repo validates its mods (I-02)', () => {
     const mt = manual().find(v => v.name === 'mod-tests')!;
     expect(mt).toMatchObject({ kind: 'e2e', cache: true });
     expect(cacheable(mt)).toBe(true);
-    expect(manual().find(v => v.name === 'typecheck-mod')?.cache).toBeUndefined();
+  });
+  it('typecheck-mod never uses it (cache: false): it reads types/claude-code, which git ignores and the key never sees', () => {
+    const tm = manual().find(v => v.name === 'typecheck-mod')!;
+    expect(tm.cache).toBe(false);
+    expect(cacheable(tm)).toBe(false);
   });
 });
