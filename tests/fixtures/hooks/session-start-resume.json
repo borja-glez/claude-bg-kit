@@ -1,0 +1,1 @@
+{ "session_id": "fixture-session", "transcript_path": "/tmp/fixture.jsonl", "cwd": "/repo", "hook_event_name": "SessionStart", "source": "resume", "model": "claude-fixture", "seconds_since_last_response": 5400 }
