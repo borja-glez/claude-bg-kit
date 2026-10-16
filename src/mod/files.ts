@@ -1,13 +1,15 @@
 import type { EngineInterface } from 'claude-code';
 import { mainCheckoutFrom } from '../lib/main-checkout.js';
-import { buildBandModel, executionViewer, noneBand, pickProject, seatsOf, type BandFiles, type BandModel, type BandSeat, type ProjectEntry } from './model.js';
+import { buildBandModel, checkoutSidOf, executionViewer, noneBand, pickProject, seatsOf, type BandFiles, type BandModel, type BandSeat, type ProjectEntry } from './model.js';
 import { DECISIONS_MAX } from '../lib/decisions.js';
-import { BOUND_MAX_BYTES, MAX_SEATS, parseBound, type BoundDoc } from '../lib/bound.js';
+import { BOUND_MAX_BYTES, BOUND_REREAD_MS, CACHE_DOCS_MAX, MAX_SEATS, parseBound, SESSION_MAX_BYTES, type BoundDoc } from '../lib/bound.js';
 import { FORGE_DOC_MAX_BYTES, isSafeId, parseExecution } from '../lib/execution-state.js';
+import { newestMemberFiles } from '../lib/member-doc.js';
 
 export type Engine = EngineInterface;
 
-export const MAX_DOCS = 500;
+/** At most this many documents of a collection, by name (the state cache: as openTasksOf on disk). */
+export const MAX_DOCS = CACHE_DOCS_MAX;
 /** At most this many project folders of .waypoint/ are looked at for this conversation's bindings, as the hooks do. */
 const MAX_PROJECTS = 50;
 /** C3: the band's tick renews a binding of this conversation when this long passed since its last renewal. */
@@ -36,9 +38,11 @@ export async function nowMs($: Engine): Promise<number> {
   return Date.now();
 }
 
+/** A cache collection's documents by id: the first MAX_DOCS `.json` files by name, whatever order the listing gives. */
 export async function readCollection($: Engine, dir: string): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
-  const files = (await listOpt($, dir)).filter(f => f.kind === 'file' && f.name.endsWith('.json')).slice(0, MAX_DOCS);
+  const files = (await listOpt($, dir)).filter(f => f.kind === 'file' && f.name.endsWith('.json'))
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)).slice(0, MAX_DOCS);
   for (const f of files) {
     const text = await readOpt($, join(dir, f.name));
     if (text !== undefined) out[f.name.slice(0, -5)] = text;
@@ -65,28 +69,40 @@ async function readSmall($: Engine, path: string, max: number): Promise<string |
   return readOpt($, path);
 }
 
-const SESSION_FILE_MAX = 8 * 1024;
 type SeatFiles = Pick<BandFiles, 'session' | 'bindings' | 'seatSessions'>;
 
 /**
- * C3: what the band reads of a project's seats in .waypoint/<p>/: the checkout seat's session.json and bound.json
- * (key '.'), and for the extra seats of seats/<sid>/ their bound.json and session.json (key '<sid>'). Folders whose name
- * is not a safe id are skipped and a bound.json over BOUND_MAX_BYTES is not read; seatsOf decides the rest.
+ * A bound.json's text, read as the CLI's readBound reads it: the band's own renewal writes it in place, so a text that
+ * is empty or does not read as a binding is read once more after BOUND_REREAD_MS (spec §4.10). One still broken is
+ * left as it is, and seatsOf finds no binding in it.
  */
-async function seatFiles($: Engine, wp: string): Promise<SeatFiles> {
+async function readBoundText($: Engine, path: string, now: number): Promise<string | undefined> {
+  const text = await readSmall($, path, BOUND_MAX_BYTES);
+  if (text === undefined || parseBound(text, now) !== null) return text;
+  try { await $.clock.sleep(BOUND_REREAD_MS); } catch { /* read again at once */ }
+  return readSmall($, path, BOUND_MAX_BYTES);
+}
+
+/**
+ * C3: what the band reads of a project's seats in .waypoint/<p>/: the checkout seat's session.json and bound.json
+ * (key '.'), and for the extra seats of seats/<sid>/ their bound.json and session.json (key '<sid>'). The extra seats
+ * are taken as readSeats takes them on disk: the folders with a safe name other than the checkout seat's own id, the
+ * first MAX_SEATS by name; then one without a bound.json is skipped. A file over its size cap is not read.
+ */
+async function seatFiles($: Engine, wp: string, now: number): Promise<SeatFiles> {
   const bindings: Record<string, string> = {};
   const seatSessions: Record<string, string> = {};
-  const session = await readSmall($, join(wp, 'session.json'), SESSION_FILE_MAX);
-  const own = await readSmall($, join(wp, 'bound.json'), BOUND_MAX_BYTES);
+  const session = await readSmall($, join(wp, 'session.json'), SESSION_MAX_BYTES);
+  const own = await readBoundText($, join(wp, 'bound.json'), now);
   if (own !== undefined) bindings['.'] = own;
-  // One more than MAX_SEATS: a folder may carry the checkout seat's own id, which seatsOf leaves out.
+  const checkout = checkoutSidOf(session, own, now);
   const names = (await listOpt($, join(wp, 'seats')))
-    .filter(d => d.kind === 'dir' && isSafeId(d.name)).map(d => d.name).sort().slice(0, MAX_SEATS + 1);
+    .filter(d => d.kind === 'dir' && isSafeId(d.name) && d.name !== checkout).map(d => d.name).sort().slice(0, MAX_SEATS);
   for (const n of names) {
-    const text = await readSmall($, join(wp, 'seats', n, 'bound.json'), BOUND_MAX_BYTES);
+    const text = await readBoundText($, join(wp, 'seats', n, 'bound.json'), now);
     if (text === undefined) continue;
     bindings[n] = text;
-    const s = await readSmall($, join(wp, 'seats', n, 'session.json'), SESSION_FILE_MAX);
+    const s = await readSmall($, join(wp, 'seats', n, 'session.json'), SESSION_MAX_BYTES);
     if (s !== undefined) seatSessions[n] = s;
   }
   return { session, bindings, seatSessions };
@@ -103,7 +119,7 @@ async function projectEntries($: Engine, root: string, now: number): Promise<Pro
   for (const d of dirs) {
     const times = [await mtime($, join(docs, d.name, 'plan.yaml')), await mtime($, join(docs, d.name, 'design.md'))].filter(t => t !== null);
     if (!times.length) continue;
-    const seats = await seatFiles($, join(root, '.waypoint', d.name));
+    const seats = await seatFiles($, join(root, '.waypoint', d.name), now);
     const bindings = seatsOf(seats, now).flatMap(s => (s.bound ? [s.bound] : []));
     out.push({ entry: { name: d.name, bindings, mtimeMs: Math.max(...times) }, seats });
   }
@@ -114,20 +130,23 @@ const EXEC_MAX = 64 * 1024;
 const EXEC_FILE_MAX = FORGE_DOC_MAX_BYTES;
 const EXEC_TASKS_MAX = 50;
 const LIVE_MAX = 20;
-/** C3: at most this many member files are read, the newest first. */
-const MEMBERS_MAX = 50;
 const SAFE_TASK = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,80}$/;
 
-async function readJsonDir($: Engine, dir: string, max: number, keep: (name: string) => boolean): Promise<Record<string, string>> {
+/** The texts of `files` in `dir`, by name without `.json`; one that cannot be read is left out. */
+async function readEach($: Engine, dir: string, files: readonly { name: string }[]): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
-  const files = (await listOpt($, dir))
-    .filter(f => f.kind === 'file' && f.name.endsWith('.json') && f.size <= EXEC_FILE_MAX && keep(f.name.slice(0, -5)))
-    .sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, max);
   for (const f of files) {
     const text = await readOpt($, join(dir, f.name));
     if (text !== undefined) out[f.name.slice(0, -5)] = text;
   }
   return out;
+}
+
+async function readJsonDir($: Engine, dir: string, max: number, keep: (name: string) => boolean): Promise<Record<string, string>> {
+  const files = (await listOpt($, dir))
+    .filter(f => f.kind === 'file' && f.name.endsWith('.json') && f.size <= EXEC_FILE_MAX && keep(f.name.slice(0, -5)))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, max);
+  return readEach($, dir, files);
 }
 
 type ForgeFiles = Pick<BandFiles, 'execution' | 'execTasks' | 'live' | 'decisions' | 'members' | 'coordinatorLive'>;
@@ -152,7 +171,11 @@ async function loadForge($: Engine, root: string, now: number): Promise<ForgeFil
       out.execTasks = await readJsonDir($, join(dir, 'execution'), EXEC_TASKS_MAX, name => SAFE_TASK.test(name));
     }
     if (entries.some(f => f.kind === 'dir' && f.name === 'live')) out.live = await readJsonDir($, join(dir, 'live'), LIVE_MAX, () => true);
-    if (entries.some(f => f.kind === 'dir' && f.name === 'members')) out.members = await readJsonDir($, join(dir, 'members'), MEMBERS_MAX, name => isSafeId(name));
+    // The members waypoint's hooks read too (newestMemberFiles), so both give a session the same role.
+    if (entries.some(f => f.kind === 'dir' && f.name === 'members')) {
+      const members = join(dir, 'members');
+      out.members = await readEach($, members, newestMemberFiles((await listOpt($, members)).filter(f => f.kind === 'file')));
+    }
     // B-09: whether the coordinator's conversation ended, from its own signal.
     const hook = parseExecution(execution, now)?.hookSession;
     if (hook && isSafeId(hook)) {
@@ -237,7 +260,7 @@ export async function renewBindings($: Engine): Promise<number> {
     // M5: only the newest of its live bindings in the project is renewed (the newest renewal, the checkout seat first
     // on a tie, as describeViewer and the hooks pick it); any other lapses. A seat that a bind of this conversation
     // released, and that a renewal raced back to life, does not stay held.
-    const mine = seatsOf(await seatFiles($, wp), now).filter(s => s.bound?.claude === id && s.bound.endedAt === null);
+    const mine = seatsOf(await seatFiles($, wp, now), now).filter(s => s.bound?.claude === id && s.bound.endedAt === null);
     const s = mine.reduce<BandSeat | null>((best, x) => (!best || Date.parse(x.bound!.seenAt) > Date.parse(best.bound!.seenAt) ? x : best), null);
     if (!s || !due(s.bound, s.sid)) continue;
     const file = s.checkout ? join(wp, 'bound.json') : join(wp, 'seats', s.sid, 'bound.json');

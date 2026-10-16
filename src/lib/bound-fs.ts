@@ -8,7 +8,7 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { BOUND_MAX_BYTES, MAX_SEATS, parseBound, type BoundDoc } from './bound.js';
+import { BOUND_MAX_BYTES, BOUND_REREAD_MS, CACHE_DOCS_MAX, MAX_SEATS, parseBound, SESSION_MAX_BYTES, type BoundDoc } from './bound.js';
 import { isSafeId } from './execution-state.js';
 import { bindingLive, PREVIOUS_OFFER_MS } from './viewer-role.js';
 import { pidAlive } from './pid.js';
@@ -25,8 +25,6 @@ const SHA = /^[0-9a-f]{7,64}$/;
  *  that clears quickly, so the rename is tried again after 1 ms, up to this many times. */
 const RENAME_TRIES = 50;
 const RENAME_BUSY = new Set(['EPERM', 'EACCES', 'EBUSY']);
-/** A bound.json found empty or broken is read once more after this long (see readBound). */
-const REREAD_MS = 8;
 const pause = (ms: number): void => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); };
 const pause1ms = (): void => pause(1);
 
@@ -35,14 +33,14 @@ function readText(file: string, max: number): string | null {
 }
 /**
  * A bound.json's binding. The band renews one with $.fs.write, which is not atomic: a reader may find the file empty or
- * half written for an instant. A text that is empty or does not parse is read once more after REREAD_MS; one still
- * broken is no binding (spec §4.10). A missing file is none at once.
+ * half written for an instant. A text that is empty or does not parse is read once more after BOUND_REREAD_MS; one
+ * still broken is no binding (spec §4.10). A missing file is none at once. The band reads it the same way.
  */
 function readBound(file: string, now?: number): BoundDoc | null {
   const text = readText(file, BOUND_MAX_BYTES);
   const b = parseBound(text, now);
   if (b || text === null) return b;
-  pause(REREAD_MS);
+  pause(BOUND_REREAD_MS);
   return parseBound(readText(file, BOUND_MAX_BYTES), now);
 }
 /** A reader sees the old text or the new one, never a part: the text goes to a temporary file that is renamed in. */
@@ -70,10 +68,11 @@ export function writeBinding(file: string, doc: BoundDoc): void {
   writeAtomic(file, `${JSON.stringify(doc, null, 2)}\n`);
 }
 
-/** The checkout seat's id as written: the sessionId of its session.json, else the sid of its bound.json; null with neither. */
+/** The checkout seat's id as written: the sessionId of its session.json (not read over SESSION_MAX_BYTES, as the band
+ *  does), else the sid of its bound.json; null with neither. */
 export function checkoutSid(wpDir: string, now?: number): string | null {
   try {
-    const s = JSON.parse(readFileSync(path.join(wpDir, 'session.json'), 'utf8')) as { sessionId?: unknown } | null;
+    const s = JSON.parse(readText(path.join(wpDir, 'session.json'), SESSION_MAX_BYTES) ?? '') as { sessionId?: unknown } | null;
     if (typeof s?.sessionId === 'string' && s.sessionId) return s.sessionId;
   } catch { /* no session.json: the binding may name the seat */ }
   return readBound(boundFile(wpDir), now)?.sid ?? null;
@@ -114,12 +113,13 @@ export function settleBinding(b: BoundDoc, now: number, alive: (pid: number) => 
   return bindingLive(b, now) && b.pid !== null && !alive(b.pid) ? { ...b, endedAt: b.seenAt } : b;
 }
 
-/** Each seat's task in progress, from the state cache (`dbcache/state`): SID → its task `claimed` or `in_progress`. */
+/** Each seat's task in progress, from the state cache (`dbcache/state`, the first CACHE_DOCS_MAX files by name, as the
+ *  band reads them): SID → its task `claimed` or `in_progress`. */
 export function openTasksOf(wpDir: string): Record<string, string> {
   const out = Object.create(null) as Record<string, string>;
   const dir = path.join(wpDir, 'dbcache', 'state');
   let names: string[] = [];
-  try { names = readdirSync(dir).filter(f => f.endsWith('.json')).sort().slice(0, 1000); } catch { return out; }
+  try { names = readdirSync(dir).filter(f => f.endsWith('.json')).sort().slice(0, CACHE_DOCS_MAX); } catch { return out; }
   for (const f of names) {
     try {
       const st = JSON.parse(readFileSync(path.join(dir, f), 'utf8')) as { status?: unknown; owner?: unknown } | null;

@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { loadBandFiles, loadBandModel, renewBindings, RENEW_MS, type Engine } from '../src/mod/files.js';
+import { openTasksFrom, seatsOf } from '../src/mod/model.js';
+import { checkoutSid, openTasksOf, readSeats } from '../src/lib/bound-fs.js';
+import { BOUND_REREAD_MS } from '../src/lib/bound.js';
 
 const plan = readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8');
 /** The Claude conversation looking at the band ($.session.id()). */
@@ -18,13 +23,15 @@ interface FakeOptions {
 }
 
 // A fake engine over a map of absolute path -> text; directories are derived from the paths. What the plugin writes
-// lands in `files`, and its path in `writes`.
-function fake(root: string, files: Record<string, string>, o: FakeOptions = {}): { $: Engine; reads: string[]; lists: string[]; writes: string[] } {
+// lands in `files`, and its path in `writes`; `stats` and `sleeps` record $.fs.stat and $.clock.sleep.
+function fake(root: string, files: Record<string, string>, o: FakeOptions = {}): { $: Engine; reads: string[]; lists: string[]; writes: string[]; stats: string[]; sleeps: number[] } {
   const over = o.over ?? {};
   const id = o.id === undefined ? ID : o.id;
   const reads: string[] = [];
   const lists: string[] = [];
   const writes: string[] = [];
+  const stats: string[] = [];
+  const sleeps: number[] = [];
   const entries = (dir: string) => {
     const seen = new Map<string, { name: string; kind: 'file' | 'dir'; size: number; mtimeMs: number }>();
     for (const [p, text] of Object.entries(files)) {
@@ -46,12 +53,23 @@ function fake(root: string, files: Record<string, string>, o: FakeOptions = {}):
       read: async (p: string) => { o.beforeRead?.(p); reads.push(p); if (!(p in files)) throw new Error('ENOENT'); return files[p]; },
       list: async (d: string) => { lists.push(d); const e = entries(d); if (!e.length) throw new Error('ENOENT'); return e; },
       exists: async (p: string) => p in files,
-      stat: async (p: string) => { if (!(p in files)) throw new Error('ENOENT'); return { mtimeMs: over[p]?.mtimeMs ?? 1, size: over[p]?.size ?? files[p].length }; },
+      stat: async (p: string) => { stats.push(p); if (!(p in files)) throw new Error('ENOENT'); return { mtimeMs: over[p]?.mtimeMs ?? 1, size: over[p]?.size ?? files[p].length }; },
       write: async (p: string, text: string) => { writes.push(p); files[p] = text; },
     },
-    clock: { now: async () => (o.at ? o.at() : Date.now()) },
+    clock: { now: async () => (o.at ? o.at() : Date.now()), sleep: async (ms: number) => { sleeps.push(ms); } },
   } as unknown as Engine;
-  return { $, reads, lists, writes };
+  return { $, reads, lists, writes, stats, sleeps };
+}
+
+/** The same files on disk, under a new temporary folder standing for `root`: the CLI's readers see what the band sees. */
+function onDisk(files: Record<string, string>, root: string): string {
+  const dir = mkdtempSync(path.join(tmpdir(), 'band-disk-'));
+  for (const [p, text] of Object.entries(files)) {
+    const to = path.join(dir, p.slice(root.length + 1));
+    mkdirSync(path.dirname(to), { recursive: true });
+    writeFileSync(to, text);
+  }
+  return dir;
 }
 
 const now = Date.now();
@@ -208,18 +226,78 @@ describe('loadBandFiles · who looks, and the seats of its project (C3, A-15)', 
     expect(reads).toContain(`${root}/docs/waypoint/mine/plan.yaml`);
     expect(reads).not.toContain(`${root}/docs/waypoint/old/plan.yaml`);
   });
-  it('reads at most MAX_SEATS + 1 seat folders by name, never an unsafe one nor a binding over 4 KiB', async () => {
+  it("looks at MAX_SEATS seat folders by name, never the checkout seat's own nor an unsafe one, and reads no binding over 4 KiB", async () => {
     const root = '/repo';
     const f: Record<string, string> = { ...base(root) };
     for (let n = 2; n <= 14; n++) f[`${root}/.waypoint/demo-shop/seats/main-${n}/bound.json`] = bound(`main-${n}`, `c${n}`);
     f[`${root}/.waypoint/demo-shop/seats/a:b/bound.json`] = bound('main', 'x');
+    // A folder named as the checkout seat is no extra seat (readSeats leaves it out before it counts).
+    f[`${root}/.waypoint/demo-shop/seats/main/bound.json`] = bound('main', 'z');
     const big = `${root}/.waypoint/demo-shop/seats/main-10/bound.json`;
-    const { $, reads } = fake(root, f, { over: { [big]: { size: 5000 } } });
+    const { $, reads, stats } = fake(root, f, { over: { [big]: { size: 5000 } } });
     const loaded = await loadBandFiles($);
-    expect(reads.filter(r => /\/seats\/[^/]+\/bound\.json$/.test(r)).length).toBeLessThanOrEqual(11);
+    const seatBound = /\/seats\/[^/]+\/bound\.json$/;
+    expect(stats.filter(p => seatBound.test(p))).toHaveLength(10);
+    expect(reads.filter(r => seatBound.test(r))).toHaveLength(9);
     expect(reads).not.toContain(big);
-    expect(reads.some(r => r.includes('/seats/a:b/'))).toBe(false);
-    expect(Object.keys(loaded?.files.bindings ?? {})).not.toContain('main-10');
+    expect(stats.some(r => r.includes('/seats/a:b/') || r.includes('/seats/main/'))).toBe(false);
+    expect(Object.keys(loaded?.files.bindings ?? {}).sort()).toEqual(['.', 'main-11', 'main-12', 'main-13', 'main-14', 'main-2', 'main-3', 'main-4', 'main-5', 'main-6']);
+  });
+  it('the seats with a binding are the ones the CLI reads: the folders by name first, then those without bound.json skipped (readSeats)', async () => {
+    const root = '/repo';
+    const f: Record<string, string> = { ...base(root) };
+    for (let n = 2; n <= 14; n++) if (n !== 3) f[`${root}/.waypoint/demo-shop/seats/main-${n}/bound.json`] = bound(`main-${n}`, `c${n}`);
+    // A seat whose conversation never bound it still takes its place among the MAX_SEATS.
+    f[`${root}/.waypoint/demo-shop/seats/main-3/session.json`] = JSON.stringify({ sessionId: 'main-3', track: null });
+    const loaded = await loadBandFiles(fake(root, f).$);
+    const band = seatsOf(loaded!.files, now).filter(s => s.bound).map(s => s.sid);
+    const cli = readSeats(path.join(onDisk(f, root), '.waypoint', 'demo-shop'), now).filter(s => s.bound).map(s => s.sid);
+    expect(band).toEqual(cli);
+    expect(band).not.toContain('main-7');
+  });
+  it("a checkout seat's session.json over 8 KiB is read by neither the band nor the CLI: its binding names the seat (one rule)", async () => {
+    const root = '/repo';
+    const f: Record<string, string> = { ...base(root), [`${root}/.waypoint/demo-shop/session.json`]: JSON.stringify({ sessionId: 'big', pad: 'x'.repeat(9000) }) };
+    const loaded = await loadBandFiles(fake(root, f).$);
+    expect(seatsOf(loaded!.files, now)[0]).toMatchObject({ sid: 'main', checkout: true });
+    expect(checkoutSid(path.join(onDisk(f, root), '.waypoint', 'demo-shop'), now)).toBe('main');
+  });
+  it("the seats' open tasks come from the same 500 state files, by name, as openTasksOf reads (one cap)", async () => {
+    const root = '/repo';
+    const f: Record<string, string> = { ...base(root) };
+    // 600 cache files, listed last name first: a task beyond the 500th by name is out of both reads.
+    for (let i = 599; i >= 0; i--) {
+      const doc = i === 550 ? { status: 'in_progress', owner: 'late' } : i === 100 ? { status: 'claimed', owner: 'early' } : { status: 'done' };
+      f[`${root}/.waypoint/demo-shop/dbcache/state/S${String(i).padStart(4, '0')}.json`] = JSON.stringify(doc);
+    }
+    const loaded = await loadBandFiles(fake(root, f).$);
+    const states = Object.fromEntries(Object.entries(loaded!.files.states).map(([k, v]) => [k, JSON.parse(v)]));
+    expect(Object.keys(states)).toHaveLength(500);
+    expect(openTasksFrom(states)).toEqual({ early: 'S0100' });
+    expect(openTasksOf(path.join(onDisk(f, root), '.waypoint', 'demo-shop'))).toEqual({ early: 'S0100' });
+  });
+  it('reads a bound.json found empty or broken once more after a short wait, as the CLI does; one still broken is no binding (spec §4.10)', async () => {
+    const root = '/repo';
+    const file = `${root}/.waypoint/demo-shop/bound.json`;
+    const files: Record<string, string> = { ...base(root) };
+    const whole = files[file];
+    for (const torn of ['', '{"sid":"main","claude":']) {
+      let n = 0;
+      const { $, reads, sleeps } = fake(root, files, { beforeRead: p => { if (p === file) files[p] = ++n === 1 ? torn : whole; } });
+      expect(await loadBandModel($), JSON.stringify(torn)).toMatchObject({ mode: 'work', viewer: { role: 'owner' } });
+      expect(reads.filter(p => p === file), JSON.stringify(torn)).toHaveLength(2);
+      expect(sleeps).toEqual([BOUND_REREAD_MS]);
+    }
+    files[file] = '{"sid":"main"';
+    const broken = fake(root, files);
+    expect(await loadBandModel(broken.$)).toMatchObject({ mode: 'none' });
+    expect(broken.reads.filter(p => p === file)).toHaveLength(2);
+    // A whole binding is read once.
+    files[file] = whole;
+    const once = fake(root, files);
+    await loadBandModel(once.$);
+    expect(once.reads.filter(p => p === file)).toHaveLength(1);
+    expect(once.sleeps).toEqual([]);
   });
   it("reads the newest 50 members and the coordinator's own signal, also when it is not among the 20 newest", async () => {
     const root = '/repo';

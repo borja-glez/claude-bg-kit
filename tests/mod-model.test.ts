@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { buildBandModel, NO_VIEWER, openTasksFrom, pickProject, type BandFiles } from '../src/mod/model.js';
 import { bandLine, clip } from '../src/mod/band-line.js';
@@ -228,6 +228,15 @@ describe('buildBandModel · work', () => {
     const msg = (from: string, to: string, type = 'reply') => j({ ts: '2026-10-11T10:00:00Z', from, to, type, taskId: 'T002', text: 'x', status: 'open' });
     const m = buildBandModel('demo-shop', { ...empty, plan, session, ...ownerOf('backend'), messages: { a: msg('ui', 'backend', 'escalation') } });
     expect(m).toMatchObject({ mode: 'work', escalation: true });
+  });
+  it('parses each state of the cache once per build, for the role and the band alike', () => {
+    const f = files();
+    const texts = new Set(Object.values(f.states));
+    const spy = vi.spyOn(JSON, 'parse');
+    try {
+      expect(buildBandModel('demo-shop', f)).toMatchObject({ mode: 'work', current: { id: 'T002' } });
+      expect(spy.mock.calls.filter(([text]) => texts.has(text as string))).toHaveLength(texts.size);
+    } finally { spy.mockRestore(); }
   });
   it('survives corrupt files; a plan that does not read is nothing to work out', () => {
     const m = buildBandModel('demo-shop', { ...empty, plan, session, ...ownerOf('backend'), states: { T001: '{oops' }, messages: { x: 'nope' } });

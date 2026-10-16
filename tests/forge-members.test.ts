@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalizeMember, readMember, writeMember, listMembers, memberFile, isMemberId, findMemberByHook, memberForHook } from '../src/forge/members.js';
+import { MEMBERS_MAX, newestMemberFiles } from '../src/lib/member-doc.js';
 
 const T = '2026-10-12T12:00:00.000Z';
 describe('members', () => {
@@ -53,5 +54,18 @@ describe('members', () => {
     expect(memberForHook(root, 's3', 'r2')).toBeNull();
     expect(memberForHook(root, 's4', 'r1')).toBeNull();
     expect(memberForHook(root, '../x', 'r1')).toBeNull();
+  });
+});
+
+describe('newestMemberFiles: which member files the band and waypoint\'s hooks read (one rule)', () => {
+  const f = (name: string, mtimeMs: number, size = 100) => ({ name, mtimeMs, size });
+  it('the MEMBERS_MAX newest .json files of a safe name and at most 8 KiB, the newest first, by name on a tie', () => {
+    const files = [f('b.json', 5), f('a.json', 5), f('old.json', 1), f('big.json', 9, 8 * 1024 + 1), f('edge.json', 8, 8 * 1024), f('notes.txt', 9), f('a b.json', 9), f('..json', 9)];
+    expect(newestMemberFiles(files).map(x => x.name)).toEqual(['edge.json', 'a.json', 'b.json', 'old.json']);
+    const many = Array.from({ length: 60 }, (_, i) => f(`m${i}.json`, i));
+    const picked = newestMemberFiles(many).map(x => x.name);
+    expect(picked).toHaveLength(MEMBERS_MAX);
+    expect(picked[0]).toBe('m59.json');
+    expect(picked).not.toContain('m9.json');
   });
 });

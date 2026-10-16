@@ -14,8 +14,8 @@ import { mainCheckoutFrom } from '../lib/main-checkout.js';
 import { FORGE_DOC_MAX_BYTES, isSafeId, normalizeLive, parseExecution, type ExecutionState, type LiveDoc } from '../lib/execution-state.js';
 import { coordinatorGone } from '../lib/execution-view.js';
 import { parseRun, type RunState } from '../lib/forge-run.js';
-import { forgeRoleOf, MAX_MEMBER_FILES } from '../lib/forge-activity.js';
-import { normalizeMember, type MemberDoc } from '../lib/member-doc.js';
+import { forgeRoleOf } from '../lib/forge-activity.js';
+import { newestMemberFiles, normalizeMember, type MemberDoc } from '../lib/member-doc.js';
 import { endReasonOf, parseBound, type BoundDoc } from '../lib/bound.js';
 import { bindingLive, describeViewer, type Viewer } from '../lib/viewer-role.js';
 import { boundFile, headOf, openTasksOf, pidFromEnv, readBinding, readLastHead, readSeats, recordBase, settleBinding, writeBinding, writeLastHead, type Seat } from '../lib/bound-fs.js';
@@ -85,10 +85,16 @@ function readForge(root: string, project: string, now: number): ForgeFiles {
   const dir = path.join(main, '.forge');
   const any = parseExecution(read(path.join(dir, 'execution.json')), now);
   const exec = any && (any.kind === 'ephemeral' || any.project === project) ? any : null;
-  let names: string[] = [];
-  try { names = readdirSync(path.join(dir, 'members')).filter(f => f.endsWith('.json')).slice(0, MAX_MEMBER_FILES); } catch { names = []; }
-  const members = names.flatMap(n => {
-    try { const m = normalizeMember(JSON.parse(read(path.join(dir, 'members', n)) ?? 'null')); return m ? [m] : []; } catch { return []; }
+  // The member files the band reads too (newestMemberFiles), so both give a session the same role.
+  const mdir = path.join(dir, 'members');
+  let files: { name: string; size: number; mtimeMs: number }[] = [];
+  try {
+    files = readdirSync(mdir, { withFileTypes: true }).filter(d => d.isFile() && d.name.endsWith('.json')).flatMap(d => {
+      try { const st = statSync(path.join(mdir, d.name)); return [{ name: d.name, size: st.size, mtimeMs: st.mtimeMs }]; } catch { return []; }
+    });
+  } catch { files = []; }
+  const members = newestMemberFiles(files).flatMap(f => {
+    try { const m = normalizeMember(JSON.parse(read(path.join(mdir, f.name)) ?? 'null')); return m ? [m] : []; } catch { return []; }
   });
   // B-09, M4: the coordinator's own signal, as the band reads it, says whether the run lost its coordinator.
   let signal: LiveDoc | null = null;

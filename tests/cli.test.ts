@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, copyFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, copyFileSync, existsSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -1348,6 +1348,26 @@ describe('classic hooks', () => {
         expect(blocks('claude-coord')).toBe(false);
         bindAs('owner');
         expect(blocks('owner')).toBe(true);
+      });
+      it("read the members as the band does: the 50 newest files of 8 KiB or less, so both give one session the same role", () => {
+        forge('execution.json', exec({ mode: 'sessions' }));
+        bindAs('claude-member', { via: 'forge-member' });
+        const member = { sessionId: 'backend', role: 'executor', runId: 'r1', task: 'T002', name: null, since: T, hookSession: 'claude-member' };
+        const file = path.join(dir, '.forge', 'members', 'backend.json');
+        const at = (ms: number) => { const d = new Date(Date.now() + ms); utimesSync(file, d, d); };
+        for (let i = 0; i < 50; i++) forge(`members/m${i}.json`, { sessionId: `m${i}`, role: 'executor', runId: 'r0', task: null, name: null, since: T, hookSession: null });
+        // Among the 50 newest: the run's member, which forge steps (no reminder).
+        forge('members/backend.json', member);
+        at(3600_000);
+        expect(blocks('claude-member')).toBe(false);
+        // The 51st newest is not read: the session is the seat's owner, reminded of its commits.
+        at(-86_400_000);
+        expect(blocks('claude-member')).toBe(true);
+        // Nor is a member file over 8 KiB, however new.
+        writeFileSync(pending(), '{"ts":"y","task":"T001","command":"git commit","sha":"b"}\n');
+        forge('members/backend.json', { ...member, pad: 'x'.repeat(9000) });
+        at(3600_000);
+        expect(blocks('claude-member')).toBe(true);
       });
       it('a closed execution or a broken execution.json gives no forge role: the owner is reminded as before', () => {
         bindAs('claude-coord');

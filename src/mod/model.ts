@@ -104,6 +104,12 @@ export function pickProject(entries: readonly ProjectEntry[], sessionId: string 
 /** C3: a seat of the project as the band reads it (readSeats does the same on disk). */
 export interface BandSeat { sid: string; checkout: boolean; bound: BoundDoc | null; session: string | undefined }
 
+/** The checkout seat's id from the texts of its session.json and bound.json, as checkoutSid reads them on disk. */
+export function checkoutSidOf(session: string | undefined, bound: string | undefined, now?: number): string | null {
+  const named = json<{ sessionId?: unknown }>(session)?.sessionId;
+  return typeof named === 'string' && named ? named : parseBound(bound, now)?.sid ?? null;
+}
+
 /**
  * The project's seats from their files' texts: the checkout seat (its id from session.json, else from its own
  * bound.json) and up to MAX_SEATS extra seats, by name, never the checkout seat's own id. A binding that does not read,
@@ -111,9 +117,8 @@ export interface BandSeat { sid: string; checkout: boolean; bound: BoundDoc | nu
  */
 export function seatsOf(f: Pick<BandFiles, 'session' | 'bindings' | 'seatSessions'>, now?: number): BandSeat[] {
   const texts = f.bindings ?? {};
-  const named = json<{ sessionId?: unknown }>(f.session)?.sessionId;
   const checkoutBound = parseBound(texts['.'], now);
-  const sid = typeof named === 'string' && named ? named : checkoutBound?.sid ?? null;
+  const sid = checkoutSidOf(f.session, texts['.'], now);
   const out: BandSeat[] = [];
   if (sid !== null && isSafeId(sid)) out.push({ sid, checkout: true, bound: checkoutBound?.sid === sid ? checkoutBound : null, session: f.session });
   const extra = Object.keys(texts).filter(k => k !== '.' && k !== sid && isSafeId(k)).sort().slice(0, MAX_SEATS);
@@ -193,12 +198,14 @@ export function buildBandModel(project: string, f: BandFiles): BandModel {
     const exec = projectExecution(project, f, now);
     const seats = seatsOf(f, now);
     const sessionId = isSafeId(f.sessionId) ? f.sessionId : null;
+    // The state cache, parsed once for the role and the work band.
+    const states = parsed<States[string]>(f.states) as States;
     const v = describeViewer({
       bound: seats.flatMap(s => (s.bound ? [s.bound] : [])),
       ...runInput(exec, f, now),
       sessionId,
       now,
-      openTasks: openTasksFrom(parsed<States[string]>(f.states) as States),
+      openTasks: openTasksFrom(states),
     });
     const viewer = viewerOf(v, exec, now);
     // Rule 1: the coordinator's run band, which never needed the plan.
@@ -213,7 +220,7 @@ export function buildBandModel(project: string, f: BandFiles): BandModel {
     // M1: a conversation whose id the engine could not give owns nothing, and a notice could be about its own seat:
     // nothing is drawn, and its role is still published.
     if (sessionId === null) return noneBand(knownLocale(f), viewer);
-    const m = roleBand(project, f, plan, v, exec, seats, now, viewer);
+    const m = roleBand(project, f, plan, states, v, exec, seats, now, viewer);
     if (m) return withAuto(m, f, now);
     return noneBand(knownLocale(f), viewer);
   } catch { /* any parse failure hides the band */ }
@@ -221,19 +228,19 @@ export function buildBandModel(project: string, f: BandFiles): BandModel {
 }
 
 /** The band of anyone but the coordinator: a member's work band, the owner's work or design band, or null. */
-function roleBand(project: string, f: BandFiles, plan: Plan | null, v: Viewer, exec: ExecutionState | null, seats: readonly BandSeat[], now: number, viewer: BandViewer): BandModel | null {
+function roleBand(project: string, f: BandFiles, plan: Plan | null, states: States, v: Viewer, exec: ExecutionState | null, seats: readonly BandSeat[], now: number, viewer: BandViewer): BandModel | null {
   if (v.role === 'owner' && v.member && exec) {
     // B-06: a member sees its own task with the line of the execution, never the coordinator's run band.
     if (!plan) return null;
     const m = v.member;
-    return workModel(project, f, plan, { sid: m.sessionId, ...seatInfo(seats, m.sessionId), task: m.task, since: m.since, run: memberLine(project, m, f, exec) }, now, viewer);
+    return workModel(project, f, plan, states, { sid: m.sessionId, ...seatInfo(seats, m.sessionId), task: m.task, since: m.since, run: memberLine(project, m, f, exec) }, now, viewer);
   }
   if (v.role === 'owner' && v.binding) {
     const b = v.binding;
     // K3-13: a design is drawn only for the conversation bound to it, and only while it is a draft.
     if (b.via === 'design') return f.design !== undefined ? designModel(project, f, viewer) : null;
     if (!plan) return null;
-    return workModel(project, f, plan, { sid: b.sid, ...seatInfo(seats, b.sid), task: null, since: null, run: memberRun(project, b.sid, f, exec) }, now, viewer);
+    return workModel(project, f, plan, states, { sid: b.sid, ...seatInfo(seats, b.sid), task: null, since: null, run: memberRun(project, b.sid, f, exec) }, now, viewer);
   }
   // Another conversation's binding or execution: a notice when there is something to say.
   if (v.role === 'other-live' || v.role === 'previous') return noticeModel(project, f, plan, v, exec, now, viewer);
@@ -322,9 +329,8 @@ function seatInfo(seats: readonly BandSeat[], sid: string): { track: string | nu
   return { track: typeof s.track === 'string' ? s.track : null, swarm: typeof s.launchedBy === 'string' && !!s.launchedBy };
 }
 
-function workModel(project: string, f: BandFiles, plan: Plan, seat: WorkSeat, now: number, viewer: BandViewer): BandModel {
+function workModel(project: string, f: BandFiles, plan: Plan, states: States, seat: WorkSeat, now: number, viewer: BandViewer): BandModel {
   const { sid, track } = seat;
-  const states = parsed<States[string]>(f.states) as States;
   const messages = parsed<MessageDoc>(f.messages);
   const m = computeMetrics(plan, states, now);
   // A member works the task of its member file; any other seat, the one it has claimed or in progress.
