@@ -65,6 +65,8 @@ export interface TaskState {
   startedAt?: string;
   doneAt?: string;
   blockedBy?: string[];
+  /** Why it is blocked, as `waypoint block --why-file` wrote it (at most 300 characters, one line). */
+  blockedReason?: string;
   commits?: Commit[];
   summary?: string;
   zonesTouched?: string[];

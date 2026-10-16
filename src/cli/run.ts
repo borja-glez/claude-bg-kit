@@ -3,33 +3,35 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { parsePlan, PlanError, isPlanId } from '../lib/plan.js';
-import { buildDocs, buildSyncWrites, planHash, planViewFromDocs, type Known } from '../lib/sync.js';
+import { buildDocs, buildSyncWrites, planHash, planViewFromDocs, type Known, type Write } from '../lib/sync.js';
 import { normalizeMeta, normalizePhase } from '../page/normalize.js';
 import { availableTasks, commitShas } from '../lib/deps.js';
-import { pickTask, conflictsFor, recoverableTasks, inboxFor, escalationCandidates, IDLE_MINUTES } from '../lib/coordination.js';
+import { pickTask, conflictsFor, recoverableTasks, inboxFor, escalationCandidates, isIdle, IDLE_MINUTES } from '../lib/coordination.js';
 import { parseDesign, changedSections, DesignError } from '../lib/design.js';
 import { importSpec, SpecImportError } from '../lib/design-import.js';
 import { designGate, mergeDismissed, parseDismissed } from '../lib/design-gate.js';
 import { listVersions, nextVersion, parseChangelog, appendChangelog, parseAppliedItems, AppliedError } from '../lib/history.js';
 import { parseCritique, selectProposals, formatProposals, CritiqueError } from '../lib/critique.js';
 import { buildDesignPageData } from '../design-page/build.js';
-import { eventId, sessionIdFrom } from '../lib/ids.js';
+import { eventId, eventIds, sessionIdFrom } from '../lib/ids.js';
 import { computeMetrics } from '../lib/metrics.js';
 import { normalizeNote, notesSince, noteLines } from '../lib/notes.js';
 import { pickProject } from '../mod/model.js';
-import { BRANCH_RE, mainWorktreeFrom } from '../lib/worktree.js';
+import { BRANCH_RE, mainWorktreeFrom, samePath } from '../lib/worktree.js';
 import { mainCheckoutFrom } from '../lib/main-checkout.js';
 import { forgeActivityFrom, forgeRoleOf, MAX_MEMBER_FILES, type ForgeActivity } from '../lib/forge-activity.js';
 import { planLocale, replyIn } from '../lib/locale.js';
 import { launchRun, EFFORTS, MODELS, type Launcher, type Effort, type Model } from '../lib/launcher.js';
 import { roadmapCapabilities, sharingNotice, syncSummary } from '../lib/publish.js';
+import { claudeSessionId, noClaudeSession } from '../lib/claude-session.js';
+import { blockBatch, claimBatch, cleanText, doneBatch, heartbeatBatch, registerBatch, REASON_MAX, SUMMARY_MAX } from '../lib/batches.js';
 import { loadConfig } from '../forge/config.js';
-import type { MessageDoc, NoteDoc, PhaseDoc, PlanView, SessionDoc, TaskState } from '../lib/types.js';
+import type { Commit, MessageDoc, NoteDoc, PhaseDoc, PlanView, SessionDoc, TaskState } from '../lib/types.js';
 
 export interface Io { cwd: string; now: () => Date; rand?: () => number; assetsDir: string; stdin?: string; env?: Record<string, string | undefined> }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|design-validate|design-import|design-snapshot|design-changed|design-gate|critique-check|critique-select|critique-dismiss|design-page|hook> ...`;
+const USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|design-validate|design-import|design-snapshot|design-changed|design-gate|critique-check|critique-select|critique-dismiss|design-page|hook> ...`;
 
 export function run(argv: string[], io: Io): Result {
   const [cmd, ...args] = argv;
@@ -59,6 +61,26 @@ export function run(argv: string[], io: Io): Result {
     if (!meta || !phases.length) throw new CacheError('db plan cache missing — list meta and plan first');
     return { view: planViewFromDocs(meta, phases), project: p.project, version: meta.version || p.version };
   };
+  // A-14: the flags every task batch takes; a wrong one is exit 2. A code-3 or code-4 answer prints its JSON on stdout.
+  const out = (code: number, value: unknown): Result => ({ code, stdout: `${JSON.stringify(value)}\n`, stderr: '' });
+  const posInt = (name: string): number | null => { const v = flag(name); return v !== undefined && /^[1-9]\d{0,9}$/.test(v) ? Number(v) : null; };
+  // No leading "-" (sessionIdFrom never makes one): `--session $SID --task …` with an empty SID reads `--task`, not an id.
+  const SID_RE = /^[A-Za-z0-9_.~:@+][A-Za-z0-9_\-.~:@+]{0,79}$/;
+  const taskFlags = (cmd: string, versions: string[]): { sid: string; task: string; v: Record<string, number> } | Result => {
+    const sid = flag('session'), task = flag('task');
+    if (!sid || !SID_RE.test(sid)) return fail(`${cmd}: --session needs the session id`, 2);
+    if (!task || task.startsWith('--') || !isPlanId(task)) return fail(`${cmd}: --task needs a plan task id`, 2);
+    const v: Record<string, number> = {};
+    for (const name of versions) {
+      const n = posInt(name);
+      if (n === null) return fail(`${cmd}: --${name} must be a positive integer`, 2);
+      v[name] = n;
+    }
+    return { sid, task, v };
+  };
+  // With --db the local cache sees the state write at once (the hooks read the seat's task there); a write the
+  // roadmap refuses is replaced by the next listing of `state`.
+  const mirror = (batch: Write[]) => { const db = flag('db'); if (db) for (const w of batch) mirrorState(abs(db), w); };
 
   try {
     switch (cmd) {
@@ -282,13 +304,81 @@ export function run(argv: string[], io: Io): Result {
         return ok(eventId(io.now(), args[0] ?? 'main', io.rand));
       case 'now':
         return ok(io.now().toISOString());
-      case 'commit-info': {
-        const rev = args[0] ?? 'HEAD';
-        const git = (...a: string[]) => execFileSync('git', a, { cwd: io.cwd, encoding: 'utf8' });
-        const [sha, ts, ...title] = git('log', '-1', '--format=%H%x09%cI%x09%s', rev).trim().split('\t');
-        const stat = git('show', '--shortstat', '--format=', rev);
-        const num = (re: RegExp) => Number(stat.match(re)?.[1] ?? 0);
-        return ok(JSON.stringify({ sha, ts: new Date(ts).toISOString(), title: title.join('\t'), add: num(/(\d+) insertion/), del: num(/(\d+) deletion/) }));
+      case 'commit-info':
+        return ok(JSON.stringify(commitInfo(io.cwd, args[0] ?? 'HEAD')));
+      case 'claim': {
+        const f = taskFlags('claim', ['state-version', 'session-version']);
+        if ('code' in f) return f;
+        const { view } = loadView();
+        if (!view.tasks.some(t => t.id === f.task)) return fail(`claim: unknown task ${f.task}`, 2);
+        const from = flag('recovered-from');
+        if (args.includes('--recovered-from') && (!from || !SID_RE.test(from))) return fail('claim: --recovered-from needs the previous owner', 2);
+        const now = io.now();
+        const sessions = optSessions();
+        // solo: no other session of the listing is alive, so nobody can have claimed at the same time.
+        const solo = !!sessions && Object.entries(sessions).every(([id, s]) => id === f.sid || isIdle(s, now.getTime()));
+        const unblock = args.includes('--unblock');
+        const r = claimBatch({ sid: f.sid, task: f.task, stateVersion: f.v['state-version'], sessionVersion: f.v['session-version'], now, eids: eventIds(now, f.sid, unblock ? 2 : 1, io.rand), unblock, recoveredFrom: from ?? null });
+        mirror(r.batch);
+        return ok(JSON.stringify({ ...r, solo }));
+      }
+      case 'done': {
+        const f = taskFlags('done', ['state-version', 'session-version', 'meta-version']);
+        if ('code' in f) return f;
+        const file = flag('summary-file');
+        if (!file) return fail('done: --summary-file is required', 2);
+        let summary: string;
+        try { summary = readFileSync(abs(file), 'utf8'); } catch { return fail(`done: cannot read ${file}`, 2); }
+        if (!cleanText(summary, SUMMARY_MAX)) return fail('done: the summary file is empty', 2);
+        const tests = flag('tests');
+        if (tests !== undefined && !/^\d{1,9}$/.test(tests)) return fail('done: --tests must be a whole number', 2);
+        const rev = flag('rev') ?? 'HEAD';
+        if (!BRANCH_RE.test(rev)) return fail('done: --rev needs a commit', 2);
+        const now = io.now();
+        const r = doneBatch({
+          sid: f.sid, task: f.task, stateVersion: f.v['state-version'], sessionVersion: f.v['session-version'], metaVersion: f.v['meta-version'],
+          now, eids: eventIds(now, f.sid, 1, io.rand), commit: commitInfo(io.cwd, rev), summary, ...(tests !== undefined ? { tests: Number(tests) } : {}),
+        });
+        mirror(r.batch);
+        return ok(JSON.stringify(r));
+      }
+      case 'block': {
+        const f = taskFlags('block', ['state-version', 'session-version']);
+        if ('code' in f) return f;
+        const by = (flag('by') ?? '').split(',').map(s => s.trim()).filter(Boolean);
+        if (!by.length || by.some(b => b !== 'external' && (b.startsWith('--') || !isPlanId(b)))) return fail('block: --by needs task ids or external, comma-separated', 2);
+        const file = flag('why-file');
+        if (!file) return fail('block: --why-file is required', 2);
+        let reason: string;
+        try { reason = readFileSync(abs(file), 'utf8'); } catch { return fail(`block: cannot read ${file}`, 2); }
+        if (!cleanText(reason, REASON_MAX)) return fail('block: the reason file is empty', 2);
+        const now = io.now();
+        const r = blockBatch({ sid: f.sid, task: f.task, stateVersion: f.v['state-version'], sessionVersion: f.v['session-version'], now, eids: eventIds(now, f.sid, 1, io.rand), by, reason });
+        mirror(r.batch);
+        return ok(JSON.stringify(r));
+      }
+      case 'heartbeat': {
+        const sid = flag('session');
+        if (!sid || !SID_RE.test(sid)) return fail('heartbeat: --session needs the session id', 2);
+        const now = io.now();
+        if (args.includes('--register')) {
+          const need = (n: string): string | null => { const v = flag(n); return v && !v.startsWith('--') ? v.slice(0, 200) : null; };
+          const name = need('name'), agent = need('agent'), branch = need('branch'), worktree = need('worktree');
+          if (!name || !agent || !branch || !worktree) return fail('heartbeat --register: --name, --agent, --branch and --worktree are required', 2);
+          const svFlag = flag('session-version');
+          const sv = svFlag === undefined ? null : posInt('session-version');
+          if (svFlag !== undefined && sv === null) return fail('heartbeat: --session-version must be a positive integer', 2);
+          const claude = claudeSessionId(flag('claude'), io.env ?? {});
+          const sessions = optSessions();
+          if (sessions && heldElsewhere(sessions[sid], now.getTime(), claude, worktree)) return out(3, { held: sid, use: freeSid(sid, sessions, now.getTime(), claude, worktree) });
+          return ok(JSON.stringify(registerBatch({ sid, now, name, agent, branch, worktree, track: need('track'), claude, sessionVersion: sv })));
+        }
+        const sv = posInt('session-version');
+        if (sv === null) return fail('heartbeat: --session-version must be a positive integer', 2);
+        const idle = args.includes('--idle');
+        const busy = flag('busy-until');
+        if (busy !== undefined && (idle || !Number.isFinite(Date.parse(busy)))) return fail('heartbeat: --busy-until needs an ISO time, and not with --idle', 2);
+        return ok(JSON.stringify(heartbeatBatch({ sid, sessionVersion: sv, now, busyUntil: busy !== undefined ? new Date(busy) : null, idle })));
       }
       case 'design-validate': {
         const d = parseDesign(readFileSync(abs(args[0]), 'utf8'));
@@ -519,6 +609,40 @@ function integratedShas(plan: PlanView, states: Record<string, TaskState>, base:
     }
   }
   return out;
+}
+
+/** commit-info: a commit's sha, committer date, title and line counts. */
+function commitInfo(cwd: string, rev: string): Commit {
+  const git = (...a: string[]) => execFileSync('git', a, { cwd, encoding: 'utf8' });
+  const [sha, ts, ...title] = git('log', '-1', '--format=%H%x09%cI%x09%s', rev).trim().split('\t');
+  const stat = git('show', '--shortstat', '--format=', rev);
+  const num = (re: RegExp) => Number(stat.match(re)?.[1] ?? 0);
+  return { sha, ts: new Date(ts).toISOString(), title: title.join('\t'), add: num(/(\d+) insertion/), del: num(/(\d+) deletion/) };
+}
+
+/** A state write applied to the local cache (`<db>/state/<T>.json`): its fields set, `{__delete__: true}` ones removed. */
+function mirrorState(db: string, write: Write): void {
+  if (write.collection !== 'state' || !write.data || !isPlanId(write.doc_id)) return;
+  const file = path.join(db, 'state', `${write.doc_id}.json`);
+  let cur: Record<string, unknown> = {};
+  try { const v: unknown = JSON.parse(readFileSync(file, 'utf8')); if (v && typeof v === 'object' && !Array.isArray(v)) cur = v as Record<string, unknown>; } catch { cur = {}; }
+  for (const [k, v] of Object.entries(write.data)) {
+    if (v && typeof v === 'object' && (v as { __delete__?: unknown }).__delete__ === true) delete cur[k];
+    else cur[k] = v;
+  }
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify(cur));
+}
+
+/** A-14: another checkout uses `sid`: its sessions document has a live lease, another Claude id and another worktree. */
+function heldElsewhere(doc: SessionDoc | undefined, now: number, claude: string | null, worktree: string): boolean {
+  return !!doc && !isIdle(doc, now) && (claude === null || doc.claude !== claude) && !(typeof doc.worktree === 'string' && samePath(doc.worktree, worktree));
+}
+
+/** The first `<sid>-N` (N ≥ 2) no other checkout holds. */
+function freeSid(sid: string, sessions: Record<string, SessionDoc>, now: number, claude: string | null, worktree: string): string {
+  for (let n = 2; n < 100; n++) if (!heldElsewhere(sessions[`${sid}-${n}`], now, claude, worktree)) return `${sid}-${n}`;
+  return `${sid}-100`;
 }
 
 // `git [global options] commit`, at the start of the command, after a separator or an opening parenthesis.

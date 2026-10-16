@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { run, isCommitCommand, type Io } from '../src/cli/run.js';
 import { parsePlan } from '../src/lib/plan.js';
 import { launchRun, HERDR_TEMPLATE } from '../src/lib/launcher.js';
-import { planHash } from '../src/lib/sync.js';
+import { buildDocs, planHash } from '../src/lib/sync.js';
 import { parseDesign } from '../src/lib/design.js';
 
 const FIXTURE = new URL('./fixtures/plan.yaml', import.meta.url);
@@ -440,6 +440,103 @@ describe('residual fix: --sessions guard', () => {
     mkdirSync(path.join(dir, 'c/sessions'), { recursive: true });
     expect(run(['next', 'plan.yaml', '--sessions', 'c/sessions', '--session', 'be'], io).code).toBe(0);
     expect(run(['conflicts', 'plan.yaml', '--sessions', 'c/sessions', '--session', 'be', '--task', 'T001'], io).code).toBe(0);
+  });
+});
+
+describe('task batches from the CLI (A-14)', () => {
+  const docsAt = (sub: string, docs: Record<string, unknown>) => {
+    const d = path.join(dir, sub);
+    mkdirSync(d, { recursive: true });
+    for (const [id, body] of Object.entries(docs)) writeFileSync(path.join(d, `${id}.json`), JSON.stringify(body));
+    return sub;
+  };
+  // The runtime plan as the roadmap holds it (meta and plan listings), from the fixture.
+  const dbOf = () => {
+    const { meta, phases } = buildDocs(parsePlan(readFileSync(path.join(dir, 'plan.yaml'), 'utf8')), '2026-10-11T10:00:00.000Z');
+    docsAt('db/meta', { project: meta });
+    docsAt('db/plan', Object.fromEntries(phases.map(p => [p.id, p])));
+    return 'db';
+  };
+  const cli = (...a: string[]) => run(a, { ...io, env: {} });
+  const claim = (...extra: string[]) => cli('claim', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T001', '--state-version', '3', '--session-version', '7', ...extra);
+
+  it('claim prints the batch of a start with its lease, solo from the sessions listing, and the cache sees the claim at once', () => {
+    dbOf();
+    docsAt('db/sessions', { be: { name: 'be', heartbeatAt: '2026-10-11T09:59:00.000Z', status: 'active' }, gone: { name: 'gone', heartbeatAt: '2026-10-11T08:00:00.000Z', status: 'active' } });
+    const r = claim('--sessions', 'db/sessions');
+    expect(r.code).toBe(0);
+    const o = JSON.parse(r.stdout);
+    expect(o).toMatchObject({ now: '2026-10-11T10:00:00.000Z', eid: '20261011T100000000Z-be-0000', leaseUntil: '2026-10-11T10:10:00.000Z', solo: true });
+    expect(o.batch.map((w: { op: string; collection: string; doc_id: string }) => `${w.op} ${w.collection}/${w.doc_id}`))
+      .toEqual(['update state/T001', `set events/${o.eid}`, 'update sessions/be']);
+    expect(o.batch[0]).toMatchObject({ if_version: 3, data: { status: 'in_progress', owner: 'be', zonesTouched: [] } });
+    expect(o.batch[2]).toMatchObject({ if_version: 7, data: { currentTask: 'T001', leaseUntil: '2026-10-11T10:10:00.000Z', status: 'active' } });
+    // Review Focus 1: with --db the local cache shows the claim before any new listing, so the hooks know the task.
+    expect(JSON.parse(readFileSync(path.join(dir, 'db', 'state', 'T001.json'), 'utf8'))).toMatchObject({ status: 'in_progress', owner: 'be' });
+    docsAt('db/sessions', { ui: { name: 'ui', heartbeatAt: '2026-10-11T09:58:00.000Z', status: 'active' } });
+    expect(JSON.parse(claim('--sessions', 'db/sessions').stdout).solo).toBe(false);
+    expect(JSON.parse(claim().stdout).solo).toBe(false);
+  });
+  it('versions, ids and the task are checked: exit 2', () => {
+    dbOf();
+    expect(cli('claim', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T001', '--state-version', 'x', '--session-version', '7').code).toBe(2);
+    expect(cli('claim', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T001', '--state-version', '0', '--session-version', '7').code).toBe(2);
+    expect(cli('claim', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', '../T1', '--state-version', '1', '--session-version', '7').code).toBe(2);
+    expect(cli('claim', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T999', '--state-version', '1', '--session-version', '7').code).toBe(2);
+    expect(cli('claim', 'plan.yaml', '--db', 'db', '--task', 'T001', '--state-version', '1', '--session-version', '7').code).toBe(2);
+    expect(cli('heartbeat', '--session', 'be').code).toBe(2);
+    expect(cli('heartbeat', '--session', 'be', '--session-version', '2', '--busy-until', 'soon').code).toBe(2);
+  });
+  it('an empty value (the next flag right after --session, --task, --by or --recovered-from) is exit 2, not an id', () => {
+    dbOf();
+    writeFileSync(path.join(dir, 'why.txt'), 'Waits.');
+    expect(cli('claim', 'plan.yaml', '--db', 'db', '--session', '--task', 'T001', '--state-version', '1', '--session-version', '7').code).toBe(2);
+    expect(cli('claim', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T001', '--state-version', '1', '--session-version', '7', '--recovered-from', '--unblock').code).toBe(2);
+    expect(cli('block', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', '--state-version', '4', '--session-version', '8', '--by', 'T002', '--why-file', 'why.txt').code).toBe(2);
+    expect(cli('block', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T001', '--state-version', '4', '--session-version', '8', '--by', '--why-file', 'why.txt').code).toBe(2);
+    expect(cli('heartbeat', '--session', '--session-version', '2').code).toBe(2);
+    expect(cli('done', 'plan.yaml', '--db', 'db', '--session', '', '--task', 'T001', '--state-version', '4', '--session-version', '8', '--meta-version', '2', '--summary-file', 'why.txt').code).toBe(2);
+    expect(cli('heartbeat', '--register', '--session', 'be', '--name', 'b', '--agent', 'a', '--branch', 'main', '--worktree', '/r', '--session-version', '0').code).toBe(2);
+    expect(existsSync(path.join(dir, 'db', 'state'))).toBe(false);
+  });
+  it('done reads the commit itself and the summary from a file', () => {
+    const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd: dir, encoding: 'utf8' }).trim();
+    git('init', '-q'); git('add', 'plan.yaml'); git('commit', '-qm', 'T001: esquema');
+    dbOf();
+    writeFileSync(path.join(dir, 'summary.txt'), 'El esquema de pedidos está aplicado.\n');
+    const r = cli('done', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T001', '--state-version', '4', '--session-version', '8', '--meta-version', '2', '--summary-file', 'summary.txt', '--tests', '12');
+    expect(r.code).toBe(0);
+    const o = JSON.parse(r.stdout);
+    const sha = git('rev-parse', 'HEAD');
+    expect(o.batch[0]).toMatchObject({ if_version: 4, data: { status: 'done', summary: 'El esquema de pedidos está aplicado.', commits: [{ sha, title: 'T001: esquema' }] } });
+    expect(o.batch[1].data).toMatchObject({ type: 'done', sha, text: 'T001: esquema' });
+    expect(o.batch[3]).toMatchObject({ collection: 'meta', if_version: 2, data: { metrics: { lastCommit: { sha }, tests: 12 } } });
+    expect(JSON.parse(readFileSync(path.join(dir, 'db', 'state', 'T001.json'), 'utf8')).status).toBe('done');
+    expect(cli('done', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T001', '--state-version', '4', '--session-version', '8', '--meta-version', '2').code).toBe(2);
+    expect(cli('done', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T001', '--state-version', '4', '--session-version', '8', '--meta-version', '2', '--summary-file', 'summary.txt', '--rev', '--all').code).toBe(2);
+  });
+  it('block --why-file writes the reason in the blocked event and in state/T.blockedReason', () => {
+    dbOf();
+    writeFileSync(path.join(dir, 'why.txt'), `Waits for the payments API\nkeys.${String.fromCharCode(0x202e)}`);
+    const o = JSON.parse(cli('block', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T001', '--state-version', '4', '--session-version', '8', '--by', 'T002,external', '--why-file', 'why.txt').stdout);
+    expect(o.batch[0].data).toEqual({ status: 'blocked', blockedBy: ['T002', 'external'], blockedReason: 'Waits for the payments API keys.' });
+    expect(o.batch[1].data).toMatchObject({ type: 'blocked', text: 'Waits for the payments API keys.' });
+    writeFileSync(path.join(dir, 'empty.txt'), ' \n');
+    for (const bad of [['--by', 'T002', '--why-file', 'empty.txt'], ['--by', 'T002'], ['--by', 'a b', '--why-file', 'why.txt'], ['--why-file', 'why.txt']]) {
+      expect(cli('block', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T001', '--state-version', '4', '--session-version', '8', ...bad).code, bad.join(' ')).toBe(2);
+    }
+  });
+  it('heartbeat renews leaseUntil; --register keeps the Claude id and refuses a SID another checkout holds alive', () => {
+    expect(JSON.parse(cli('heartbeat', '--session', 'be', '--session-version', '2').stdout).batch[0])
+      .toEqual({ op: 'update', collection: 'sessions', doc_id: 'be', data: { heartbeatAt: '2026-10-11T10:00:00.000Z', leaseUntil: '2026-10-11T10:10:00.000Z', status: 'active' }, if_version: 2 });
+    const reg = (...extra: string[]) => cli('heartbeat', '--register', '--session', 'be', '--name', 'backend', '--agent', 'work-1', '--branch', 'track/backend', '--worktree', '/repo/wt', '--claude', 'c-1', ...extra);
+    expect(JSON.parse(reg().stdout).batch[0]).toMatchObject({ op: 'set', data: { claude: 'c-1', worktree: '/repo/wt', status: 'active' } });
+    docsAt('db/sessions', { be: { name: 'be', heartbeatAt: '2026-10-11T09:59:00.000Z', status: 'active', claude: 'c-9', worktree: '/other' } });
+    const held = reg('--sessions', 'db/sessions');
+    expect(held.code).toBe(3);
+    expect(JSON.parse(held.stdout)).toEqual({ held: 'be', use: 'be-2' });
+    docsAt('db/sessions', { be: { name: 'be', heartbeatAt: '2026-10-11T09:59:00.000Z', status: 'active', claude: 'c-9', worktree: '/repo/wt' } });
+    expect(reg('--sessions', 'db/sessions', '--session-version', '3').code).toBe(0);
   });
 });
 
