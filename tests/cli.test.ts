@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { run, isCommitCommand, type Io } from '../src/cli/run.js';
+import { makesCommits } from '../src/cli/hooks.js';
 import { parsePlan } from '../src/lib/plan.js';
 import { launchRun, HERDR_TEMPLATE } from '../src/lib/launcher.js';
 import { buildDocs, planHash } from '../src/lib/sync.js';
@@ -1095,6 +1096,43 @@ describe('classic hooks', () => {
       commit('A');
       expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([sha]);
     });
+    it("two seats in one worktree: each records only what its own commit commands made, and the other's Bash calls only move its base (C2)", () => {
+      setup(); writeFileSync(path.join(dir, '.gitignore'), '.waypoint/\n'); gitInit();
+      bindAs('A', {}, 'main'); ownTask('T001', 'main');
+      const seat2 = wp('seats', 'main-2');
+      bindAs('B', {}, 'main-2', seat2); ownTask('T003', 'main-2');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      hook('session-start', { session_id: 'B', cwd: dir });
+      // Each commit is followed by the hook of the conversation that made it; the other's Bash calls come in between.
+      const a1 = commitFile('a1.txt');
+      commit('A', 'git commit -m a1');
+      commit('B', 'npm test');
+      const b1 = commitFile('b1.txt');
+      commit('B', 'git commit -m b1');
+      // A commits again with no Bash call of its own since b1 (its edits went through the Edit tool).
+      const a2 = commitFile('a2.txt');
+      commit('A', 'git add a2.txt && git commit -m a2');
+      commit('B', 'ls');
+      const b2 = commitFile('b2.txt');
+      commit('B', 'git cherry-pick --continue');
+      commit('A', 'npm test');
+      // A commit command that makes nothing (a pre-commit hook refused it) right after the other's commit takes nothing.
+      const b3 = commitFile('b3.txt');
+      commit('B', 'git commit -m b3');
+      commit('A', 'git commit -m refused');
+      // A's Bash call ends between B's commit and B's hook: B still records its commit.
+      const b4 = commitFile('b4.txt');
+      commit('A', 'ls');
+      commit('B', 'git commit -m b4');
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([a1, a2]);
+      expect(pendingLines(seat2).map(l => JSON.parse(l).sha)).toEqual([b1, b2, b3, b4]);
+    });
+    it('the commands that make commits on HEAD: commit, merge, cherry-pick, revert, rebase --continue and am (C2)', () => {
+      const yes = ['git commit -m x', 'git merge --no-ff side', 'git -c a=b cherry-pick abc', 'x && git revert HEAD', 'git rebase --continue', 'git rebase -q --continue', 'git am < p.patch'];
+      const no = ['git merge-base a b', 'git pull', 'git rebase main', 'git status', 'npm test', 'git log --grep merge', 'git amend'];
+      for (const c of yes) expect(makesCommits(c), c).toBe(true);
+      for (const c of no) expect(makesCommits(c), c).toBe(false);
+    });
     it('two seats: main-2 records in its own files and the Stop of the checkout seat does not count them (B-05, K5-05)', () => {
       setup(); gitInit(); bindAs('A'); ownTask('T001');
       const seat2 = wp('seats', 'main-2');
@@ -1213,6 +1251,37 @@ describe('classic hooks', () => {
         expect(blocks('A')).toBe(false);
         writeFileSync(pending(), '{"ts":"x","task":"T001","command":"git commit","sha":"a"}\n{"ts":"y","task":"T002","command":"git commit","sha":"b"}\n');
         expect(JSON.parse(hook('stop', { session_id: 'A' }).stdout).reason).toContain('1 commit(s)');
+      });
+      const PLAN = 'docs/waypoint/demo-shop/plan.yaml';
+      const atMin = (min: number, cwd = dir): Io => ({ ...io, cwd, env: {}, now: () => new Date(NOW + min * 60000) });
+      it("the coordinator's hooks renew its own binding whatever its role, so the seat stays held through the run (C1)", () => {
+        expect(run(['bind', PLAN, '--via', 'forge-run', '--claude', 'claude-coord'], atMin(0)).code).toBe(0);
+        forge('execution.json', exec());
+        ownTask('T001', 'main');
+        for (const min of [2, 4, 6, 8]) {
+          hook('stop', { session_id: 'claude-coord' }, atMin(min));
+          hook('post-commit', { session_id: 'claude-coord', tool_input: { command: 'ls' } }, atMin(min));
+        }
+        expect(bound().seenAt).toBe(new Date(NOW + 8 * 60000).toISOString());
+        const b = run(['bind', PLAN, '--via', 'work', '--claude', 'B'], atMin(9));
+        expect(b.code).toBe(3);
+        expect(JSON.parse(b.stdout).held.claude).toBe('claude-coord');
+      });
+      it("a member's hooks renew its binding in its task worktree the same way (C1)", () => {
+        writeFileSync(path.join(dir, '.gitignore'), '.waypoint/\n.forge/\n.claude/\n');
+        gitInit();
+        const wt = path.join(dir, '.claude', 'worktrees', 'task-T002');
+        git('worktree', 'add', '-q', '-b', 'task/T002', wt);
+        expect(run(['bind', PLAN, '--via', 'forge-member', '--claude', 'claude-member'], atMin(0, wt)).code).toBe(0);
+        forge('execution.json', exec({ mode: 'sessions' }));
+        forge('members/T002.json', { sessionId: 'T002', role: 'executor', runId: 'r1', task: 'T002', name: null, since: T, hookSession: 'claude-member' });
+        for (const min of [2, 4, 6, 8]) {
+          hook('stop', { session_id: 'claude-member', cwd: wt }, atMin(min, wt));
+          hook('post-commit', { session_id: 'claude-member', cwd: wt, tool_input: { command: 'ls' } }, atMin(min, wt));
+        }
+        const b = run(['bind', PLAN, '--via', 'work', '--claude', 'B'], atMin(9, wt));
+        expect(b.code).toBe(3);
+        expect(JSON.parse(b.stdout).held.claude).toBe('claude-member');
       });
     });
   });

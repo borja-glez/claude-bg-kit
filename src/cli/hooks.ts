@@ -16,7 +16,7 @@ import { parseRun, type RunState } from '../lib/forge-run.js';
 import { forgeRoleOf, MAX_MEMBER_FILES } from '../lib/forge-activity.js';
 import { normalizeMember, type MemberDoc } from '../lib/member-doc.js';
 import { endReasonOf, parseBound, type BoundDoc } from '../lib/bound.js';
-import { describeViewer, type Viewer } from '../lib/viewer-role.js';
+import { bindingLive, describeViewer, type Viewer } from '../lib/viewer-role.js';
 import { boundFile, headOf, openTasksOf, pidFromEnv, readLastHead, readSeats, recordBase, settleBinding, writeBinding, writeLastHead, type Seat } from '../lib/bound-fs.js';
 import { pickProject, type ProjectEntry } from '../mod/model.js';
 import type { MessageDoc, Plan } from '../lib/types.js';
@@ -42,6 +42,15 @@ const COMMIT_RE = /(^|[;&|(]\s*|\s)git\s+((-c|-C)\s+\S+\s+|--no-pager\s+)*commit
 
 export function isCommitCommand(cmd: string): boolean {
   return COMMIT_RE.test(cmd) && !/(^|\s)--dry-run(?![\w-])/.test(cmd);
+}
+
+// The other git commands that make commits on HEAD: merge, cherry-pick, revert, am and rebase --continue.
+const MAKES_RE = /(^|[;&|(]\s*|\s)git\s+((-c|-C)\s+\S+\s+|--no-pager\s+)*(merge|cherry-pick|revert|am)(?![\w-])/;
+const CONTINUE_RE = /(^|[;&|(]\s*|\s)git\s+((-c|-C)\s+\S+\s+|--no-pager\s+)*rebase\s+(-\S+\s+)*--continue(?![\w-])/;
+
+/** C2: a command whose commits a seat records when another live seat works the same worktree (one HEAD for both). */
+export function makesCommits(cmd: string): boolean {
+  return isCommitCommand(cmd) || MAKES_RE.test(cmd) || CONTINUE_RE.test(cmd);
 }
 
 const nonEmpty = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v : undefined);
@@ -128,7 +137,7 @@ function ownSeat(ctx: Ctx): { seat: Seat; bound: BoundDoc } | null {
 }
 
 /**
- * Until the band renews it (wave 2b), the owner's own hooks keep its binding alive: seenAt moves at most once a minute,
+ * Until the band renews it (wave 2b), the conversation's own hooks keep its binding alive: seenAt moves at most once a minute,
  * re-read first so a takeover written meanwhile is never undone. `reopen` (a resumed or compacted conversation, §4.1)
  * also clears its end and records this process's pid, unless the end was a release: that one is deliberate, and no
  * SessionEnd comes before a compact, so only a new bind undoes it. A renewal that cannot be written is left for the
@@ -142,6 +151,22 @@ function touch(seat: Seat, claude: string, now: Date, reopen: boolean, env: Io['
     if (!again && (cur.endedAt !== null || now.getTime() - Date.parse(cur.seenAt) < RENEW_MS)) return;
     writeBinding(boundFile(seat.dir), { ...cur, seenAt: now.toISOString(), ...(again ? { endedAt: null, endReason: null, pid: pidFromEnv(env) } : {}) });
   } catch { /* the binding keeps its last renewal */ }
+}
+
+/**
+ * C1: every hook of a conversation renews its own live bindings in the project, whatever its role's subject (a
+ * coordinator or a member is an owner by execution, and still holds its seat through its binding). On a resume or a
+ * compact the newest of its bindings is also reopened (§4.1), unless it was released.
+ */
+function renewOwn(ctx: Ctx, io: Io, reopen: boolean): void {
+  const sid = ctx.sid;
+  if (!sid) return;
+  const mine = ctx.seats.filter((s): s is Seat & { bound: BoundDoc } => s.bound?.claude === sid);
+  const newest = mine.reduce<(typeof mine)[number] | null>((best, s) => (!best || Date.parse(s.bound.seenAt) > Date.parse(best.bound.seenAt) ? s : best), null);
+  for (const s of mine) {
+    const again = reopen && s === newest;
+    if (again || s.bound.endedAt === null) touch(s, sid, io.now(), again, io.env);
+  }
 }
 
 function readPlan(docDir: string): Plan | null {
@@ -199,6 +224,8 @@ function sessionStart(io: Io, input: HookInput): string {
   const source: Source = (SOURCES as readonly unknown[]).includes(input.source) ? (input.source as Source) : 'startup';
   const say = (text: string | null): string => (text ? JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } }) : '');
   const v = ctx.viewer;
+  // A resumed or compacted conversation reopens its binding (§4.1), whatever its role.
+  renewOwn(ctx, io, source === 'resume' || source === 'compact');
   // B-10, K5-10: an owner by forge (the coordinator, a member of the run) hears from forge's live hook; so does anyone
   // who looks at that run.
   if (v.subject === 'execution') return '';
@@ -207,8 +234,7 @@ function sessionStart(io: Io, input: HookInput): string {
   const title = (t: string) => plan?.tasks.find(x => x.id === t)?.title ?? '';
   const own = ownSeat(ctx);
   if (own && ctx.sid) {
-    // A resumed or compacted conversation reopens its binding (§4.1), and HEAD is its base for post-commit.
-    touch(own.seat, ctx.sid, io.now(), source === 'resume' || source === 'compact', io.env);
+    // HEAD is the owner's base for post-commit.
     recordBase(own.seat.dir, ctx.sid, nonEmpty(input.cwd) ?? ctx.root);
     return say(ownerText(ctx, own, plan, source, input));
   }
@@ -251,18 +277,39 @@ function boundAnywhere(root: string, sid: string): boolean {
 }
 
 /**
+ * C2: the bases in the worktree `top` of the other live seats of the project whose conversations work it too (their
+ * last-head.json has it): HEAD moves for all of them. A base at HEAD whose seat has not recorded HEAD is left out: that
+ * conversation's hook may have run between this command's commit and this hook. Null when no other seat works there.
+ */
+function sharedBases(ctx: Ctx, own: Seat, top: string, head: string): string[] | null {
+  let shared = false;
+  const out: string[] = [];
+  for (const s of ctx.seats) {
+    const b = s.bound;
+    if (s === own || !b || b.claude === ctx.sid || !bindingLive(b, ctx.now)) continue;
+    const lh = readLastHead(s.dir);
+    const base = lh && lh.session === b.claude ? lh.heads[top] : undefined;
+    if (!base) continue;
+    shared = true;
+    if (base !== head || lines(path.join(s.dir, 'pending-commits.jsonl')).some(l => field(l, 'sha') === head)) out.push(base);
+  }
+  return shared ? out : null;
+}
+
+/**
  * A-17, B-05: for the owner by binding only (another session leaves before git; an owner by forge records through
  * integrate). The commits HEAD gained in the worktree of the command since this conversation's base there (first
  * parent, at most MAX_COMMITS) go to <seat>/pending-commits.jsonl; with no base yet only a commit command's HEAD does.
- * After an amend, a rebase or a reset, the lines HEAD no longer reaches go. With no task open the base follows HEAD,
- * so nothing committed between tasks is given to the next one.
+ * When another live seat works the same worktree (C2), only a command that makes commits records, and not what the
+ * other conversation had already seen (its base). After an amend, a rebase or a reset, the lines HEAD no longer reaches
+ * go. With no task open the base follows HEAD, so nothing committed between tasks is given to the next one.
  */
 function postCommit(io: Io, input: HookInput): string {
   const ctx = contextOf(io, input);
+  if (ctx) renewOwn(ctx, io, false);
   const own = ctx ? ownSeat(ctx) : null;
   if (!ctx || !own || !ctx.sid) return '';
   const sid = ctx.sid;
-  touch(own.seat, sid, io.now(), false, io.env);
   const at = headOf(nonEmpty(input.cwd) ?? ctx.root);
   if (!at) return '';
   const lh = readLastHead(own.seat.dir);
@@ -279,8 +326,11 @@ function postCommit(io: Io, input: HookInput): string {
   let shas: string[] = [];
   if (!last) shas = isCommitCommand(cmd) ? [at.head] : [];
   else if (last !== at.head) {
-    shas = (git(['rev-list', '--first-parent', '--reverse', `--max-count=${MAX_COMMITS}`, `${last}..${at.head}`]) ?? '')
-      .split(/\r?\n/).map(s => s.trim()).filter(s => SHA.test(s));
+    const shared = sharedBases(ctx, own.seat, at.top, at.head);
+    if (shared === null || makesCommits(cmd)) {
+      shas = (git(['rev-list', '--first-parent', '--reverse', `--max-count=${MAX_COMMITS}`, `${last}..${at.head}`, ...(shared ?? []).map(b => `^${b}`)]) ?? '')
+        .split(/\r?\n/).map(s => s.trim()).filter(s => SHA.test(s));
+    }
     // An amend, a rebase or a reset: the old base is no longer under HEAD, nor are the commits it replaced.
     if (git(['merge-base', '--is-ancestor', last, at.head]) === null) {
       const all = lines(file);
@@ -309,9 +359,9 @@ function postCommit(io: Io, input: HookInput): string {
  */
 function stop(io: Io, input: HookInput): string {
   const ctx = contextOf(io, input);
+  if (ctx) renewOwn(ctx, io, false);
   const own = ctx ? ownSeat(ctx) : null;
   if (!ctx || !own || !ctx.sid) return '';
-  touch(own.seat, ctx.sid, io.now(), false, io.env);
   if (forgeRoleOf({ execution: ctx.forge.any, members: ctx.forge.members, infinite: ctx.forge.infinite }, ctx.sid) !== null) return '';
   const ongoing = ctx.viewer.task;
   const commits = lines(path.join(own.seat.dir, 'pending-commits.jsonl')).filter(l => ongoing === null || field(l, 'task') !== ongoing);
