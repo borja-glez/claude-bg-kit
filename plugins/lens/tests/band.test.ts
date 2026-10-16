@@ -6,12 +6,14 @@ const SURFACES = ['terminal', 'desktop'] as const;
 const BAND_PROPS = { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 9 }, view: {} };
 const NOW = Date.parse('2026-10-11T10:05:00.000Z');
 const ROOT = '/repo';
+const SESSION_ID = 'conv-1';
 
 const norm = (path: string) => path.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '');
 
 // A file system answered from memory; every path read, listed or stat'ed is recorded in `reads`.
 function serveFiles(on: On, files: Record<string, { text: string; mtimeMs: number }>, reads: string[] = []) {
   on('session.root', () => ({ value: ROOT }));
+  on('session.id', () => ({ value: SESSION_ID }));
   on('fs.read', (_$, e) => {
     reads.push(norm(e.path));
     const f = files[norm(e.path)];
@@ -78,6 +80,10 @@ const PLAN_ONLY = { [`${ROOT}/docs/waypoint/shop/plan.yaml`]: { text: SHOP_PLAN,
 const WAYPOINT_PROJECT = {
   ...PLAN_ONLY,
   [`${ROOT}/.waypoint/shop/session.json`]: { text: JSON.stringify({ sessionId: 'S1', track: 'backend' }), mtimeMs: 1 },
+  [`${ROOT}/.waypoint/shop/bound.json`]: {
+    text: JSON.stringify({ sid: 'S1', claude: SESSION_ID, pid: null, via: 'work', since: '2026-10-11T09:00:00.000Z', seenAt: '2026-10-11T10:04:00.000Z', endedAt: null, endReason: null }),
+    mtimeMs: 1,
+  },
 };
 const WAYPOINT_COMMAND = { name: 'waypoint:work', description: 'Work', source: 'plugin' as const, plugin: 'waypoint' };
 

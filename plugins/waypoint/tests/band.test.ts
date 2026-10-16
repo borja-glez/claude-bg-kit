@@ -222,6 +222,13 @@ test('a link that is not http(s) is shown as text', async ($, on) => {
 
 // A small project on a file system answered from memory: one plan, a session and two task states.
 const ROOT = '/repo';
+const SESSION_ID = 'conv-1';
+// The checkout seat S1 bound to the conversation looking at the band, renewed a minute before the tests' clock (10:05),
+// as waypoint bind and the band's tick leave it (C3).
+const BOUND = (over: Record<string, unknown> = {}) => JSON.stringify({
+  sid: 'S1', claude: SESSION_ID, pid: null, via: 'work', since: '2026-10-11T09:00:00.000Z', seenAt: '2026-10-11T10:04:00.000Z',
+  endedAt: null, endReason: null, ...over,
+});
 const PLAN = `project: demo
 locale: es
 version: "0.1"
@@ -258,6 +265,7 @@ tasks:
 const FILES: Record<string, string> = {
   [`${ROOT}/docs/waypoint/demo/plan.yaml`]: PLAN,
   [`${ROOT}/.waypoint/demo/session.json`]: JSON.stringify({ sessionId: 'S1', track: 'backend' }),
+  [`${ROOT}/.waypoint/demo/bound.json`]: BOUND(),
   [`${ROOT}/.waypoint/demo/dbcache/state/T001.json`]: JSON.stringify({ status: 'done', owner: 'S1' }),
   [`${ROOT}/.waypoint/demo/dbcache/state/T002.json`]: JSON.stringify({ status: 'in_progress', owner: 'S1', startedAt: '2026-10-11T10:00:00.000Z' }),
 };
@@ -265,9 +273,13 @@ const FILES: Record<string, string> = {
 // The host hands the hooks absolute paths in the platform's own form (E:\repo\... on Windows); compare them as /repo/...
 const norm = (path: string) => path.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '');
 
-function serveFiles(on: On, files: Record<string, string> = FILES, listed: string[] = []) {
+// The conversation looking at the band is `id()` ($.session.id()); what the plugin writes lands in `files`, and its
+// path in `written`.
+function serveFiles(on: On, files: Record<string, string> = { ...FILES }, listed: string[] = [], id: () => string = () => SESSION_ID, written: string[] = []) {
   const entry = (name: string, kind: 'file' | 'dir') => ({ name, kind, size: 0, mtimeMs: 1, isLink: false });
   on('session.root', () => ({ value: ROOT }));
+  on('session.id', () => ({ value: id() }));
+  on('fs.write', (_$, e) => { written.push(norm(e.path)); files[norm(e.path)] = e.text; return { value: undefined }; });
   on('fs.read', (_$, e) => {
     const text = files[norm(e.path)];
     return text !== undefined ? { value: text } : { deny: `ENOENT ${e.path}` };
@@ -339,6 +351,7 @@ test('a folder without plan.yaml or design.md is not a project, even with a sess
   const design = '---\ntitle: Demo\nproject: demo\nlocale: en\nsummary: A demo.\nstart_prompt: /waypoint:work\n---\n\nIntro.\n\n## Scope\n\nText.\n';
   serveFiles(on, {
     [`${ROOT}/docs/waypoint/demo/design.md`]: design,
+    [`${ROOT}/.waypoint/demo/bound.json`]: BOUND({ sid: 'main', via: 'design' }),
     [`${ROOT}/docs/waypoint/notes/README.md`]: '# notes',
     [`${ROOT}/.waypoint/notes/session.json`]: JSON.stringify({ sessionId: 'S9' }),
   });
@@ -352,7 +365,7 @@ test('a folder without plan.yaml or design.md is not a project, even with a sess
 
 test('a second session start keeps one refresh timer, and session end stops it', async ($, on) => {
   const listed: string[] = [];
-  serveFiles(on, FILES, listed);
+  serveFiles(on, { ...FILES }, listed);
   const clock = mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }));

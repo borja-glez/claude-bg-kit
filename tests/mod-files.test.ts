@@ -1,13 +1,30 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { loadBandModel, type Engine } from '../src/mod/files.js';
+import { loadBandFiles, loadBandModel, renewBindings, RENEW_MS, type Engine } from '../src/mod/files.js';
 
 const plan = readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8');
+/** The Claude conversation looking at the band ($.session.id()). */
+const ID = 'conv-1';
 
-// A fake engine over a map of absolute path -> text; directories are derived from the paths.
-function fake(root: string, files: Record<string, string>, over: Record<string, { size?: number; mtimeMs?: number }> = {}): { $: Engine; reads: string[]; lists: string[] } {
+interface FakeOptions {
+  /** Sizes and mtimes by path, for list and stat. */
+  over?: Record<string, { size?: number; mtimeMs?: number }>;
+  /** What $.session.id() answers; null: it rejects. */
+  id?: string | null;
+  /** The engine's clock. */
+  at?: () => number;
+  /** Called before each read, with its path. */
+  beforeRead?: (path: string) => void;
+}
+
+// A fake engine over a map of absolute path -> text; directories are derived from the paths. What the plugin writes
+// lands in `files`, and its path in `writes`.
+function fake(root: string, files: Record<string, string>, o: FakeOptions = {}): { $: Engine; reads: string[]; lists: string[]; writes: string[] } {
+  const over = o.over ?? {};
+  const id = o.id === undefined ? ID : o.id;
   const reads: string[] = [];
   const lists: string[] = [];
+  const writes: string[] = [];
   const entries = (dir: string) => {
     const seen = new Map<string, { name: string; kind: 'file' | 'dir'; size: number; mtimeMs: number }>();
     for (const [p, text] of Object.entries(files)) {
@@ -15,34 +32,44 @@ function fake(root: string, files: Record<string, string>, over: Record<string, 
       const rest = p.slice(dir.length + 1);
       const name = rest.split('/')[0];
       const isFile = !rest.includes('/');
-      const o = over[p] ?? {};
-      seen.set(name, { name, kind: isFile ? 'file' : 'dir', size: isFile ? (o.size ?? text.length) : 0, mtimeMs: o.mtimeMs ?? 1 });
+      const x = over[p] ?? {};
+      seen.set(name, { name, kind: isFile ? 'file' : 'dir', size: isFile ? (x.size ?? text.length) : 0, mtimeMs: x.mtimeMs ?? 1 });
     }
     return [...seen.values()];
   };
   const $ = {
-    session: { root: async () => root },
+    session: {
+      root: async () => root,
+      id: async () => { if (id === null) throw new Error('no session id'); return id; },
+    },
     fs: {
-      read: async (p: string) => { reads.push(p); if (!(p in files)) throw new Error('ENOENT'); return files[p]; },
+      read: async (p: string) => { o.beforeRead?.(p); reads.push(p); if (!(p in files)) throw new Error('ENOENT'); return files[p]; },
       list: async (d: string) => { lists.push(d); const e = entries(d); if (!e.length) throw new Error('ENOENT'); return e; },
       exists: async (p: string) => p in files,
-      stat: async (p: string) => { if (!(p in files)) throw new Error('ENOENT'); return { mtimeMs: over[p]?.mtimeMs ?? 1 }; },
+      stat: async (p: string) => { if (!(p in files)) throw new Error('ENOENT'); return { mtimeMs: over[p]?.mtimeMs ?? 1, size: over[p]?.size ?? files[p].length }; },
+      write: async (p: string, text: string) => { writes.push(p); files[p] = text; },
     },
-    clock: { now: async () => Date.now() },
+    clock: { now: async () => (o.at ? o.at() : Date.now()) },
   } as unknown as Engine;
-  return { $, reads, lists };
+  return { $, reads, lists, writes };
 }
 
 const now = Date.now();
 const iso = (ms: number) => new Date(ms).toISOString();
 const task = (status: string, extra: object = {}) => ({ status, stage: 'implement', round: 1, worktree: '/w', branch: 'b', executor: 'subagents', attempts: 0, agent: null, startedAt: iso(now - 600000), updatedAt: iso(now), stageSince: iso(now), detail: null, ...extra });
-const EXEC = JSON.stringify({ runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'demo-shop', base: 'main', branch: 'forge/run', mergeOnFinish: false, coordinator: 'main', hookSession: null, active: true, stopReason: null, stallReason: null,
+// The coordinator of this execution is the conversation looking at the band.
+const EXEC = JSON.stringify({ runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'demo-shop', base: 'main', branch: 'forge/run', mergeOnFinish: false, coordinator: 'main', hookSession: ID, active: true, stopReason: null, stallReason: null,
   startedAt: iso(now - 3600000), lastStepAt: iso(now - 60000), lastBlockStep: null, sleepUntil: null, tasks: { T002: task('running'), T001: task('integrated') } });
 const pub = (id: string) => JSON.stringify({ task: id, runId: 'r1', stage: 'review', status: 'running', agent: null, round: 3, since: iso(now), updatedAt: iso(now), leaseUntil: iso(now + 600000), by: 'x', mode: 'subagents' });
+/** The binding of seat `sid` to the conversation `claude`, renewed a minute ago (C3). */
+const bound = (sid: string, claude = ID, over: object = {}) =>
+  JSON.stringify({ sid, claude, pid: null, via: 'work', since: iso(now - 3600_000), seenAt: iso(now - 60_000), endedAt: null, endReason: null, ...over });
 
+// The checkout seat main, bound to the conversation looking at the band.
 const base = (root: string) => ({
   [`${root}/docs/waypoint/demo-shop/plan.yaml`]: plan,
   [`${root}/.waypoint/demo-shop/session.json`]: JSON.stringify({ sessionId: 'main', track: null }),
+  [`${root}/.waypoint/demo-shop/bound.json`]: bound('main'),
 });
 
 describe('loadBandModel · decisions', () => {
@@ -61,7 +88,7 @@ describe('loadBandModel · decisions', () => {
   });
   it('does not read an oversized decisions.json', async () => {
     const root = '/repo';
-    const { $, reads } = fake(root, { ...base(root), [`${root}/.forge/decisions.json`]: doc() }, { [`${root}/.forge/decisions.json`]: { size: 17 * 1024 } });
+    const { $, reads } = fake(root, { ...base(root), [`${root}/.forge/decisions.json`]: doc() }, { over: { [`${root}/.forge/decisions.json`]: { size: 17 * 1024 } } });
     expect(await loadBandModel($)).not.toHaveProperty('auto');
     expect(reads).not.toContain(`${root}/.forge/decisions.json`);
   });
@@ -119,13 +146,13 @@ describe('loadBandModel · execution files', () => {
       [`${root}/.forge/execution/T003.json`]: 'not json{',
       [`${root}/.forge/execution/T004.json`]: pub('T004'),
       [`${root}/.forge/live/big.json`]: '{}',
-    }, { [`${root}/.forge/execution/T004.json`]: { size: 9 * 1024 }, [`${root}/.forge/live/big.json`]: { size: 9 * 1024 } });
+    }, { over: { [`${root}/.forge/execution/T004.json`]: { size: 9 * 1024 }, [`${root}/.forge/live/big.json`]: { size: 9 * 1024 } } });
     const m = await loadBandModel($);
     expect(m).toMatchObject({ mode: 'run', slots: [{ task: 'T002' }] });
     expect(reads).not.toContain(`${root}/.forge/execution/T004.json`);
     expect(reads).not.toContain(`${root}/.forge/live/big.json`);
 
-    const oversized = fake(root, { ...base(root), [`${root}/.forge/execution.json`]: EXEC }, { [`${root}/.forge/execution.json`]: { size: 65 * 1024 } });
+    const oversized = fake(root, { ...base(root), [`${root}/.forge/execution.json`]: EXEC }, { over: { [`${root}/.forge/execution.json`]: { size: 65 * 1024 } } });
     expect((await loadBandModel(oversized.$)).mode).toBe('work');
 
     const none = fake(root, base(root));
@@ -140,11 +167,165 @@ describe('loadBandModel · design', () => {
     const prop = (n: number) => ({ n, category: 'gap', severity: 'major', section: 'riesgos', problem: 'p', change: 'c' });
     const files = {
       [`${root}/docs/waypoint/demo-shop/design.md`]: design,
+      [`${root}/.waypoint/demo-shop/bound.json`]: bound('main', ID, { via: 'design' }),
       [`${root}/.waypoint/demo-shop/critique-r1.json`]: JSON.stringify({ round: 1, version: 1, scope: 'full', proposals: [prop(1), prop(2), prop(3)] }),
     };
     expect(await loadBandModel(fake(root, files).$)).toMatchObject({ mode: 'design', pending: 3 });
     const { $, reads } = fake(root, { ...files, [`${root}/.waypoint/demo-shop/dismissed.json`]: JSON.stringify({ 1: [2, 3] }) });
     expect(await loadBandModel($)).toMatchObject({ mode: 'design', pending: 1 });
     expect(reads).toContain(`${root}/.waypoint/demo-shop/dismissed.json`);
+  });
+});
+
+describe('loadBandFiles · who looks, and the seats of its project (C3, A-15)', () => {
+  it('passes the session id, the clock and the bindings of the project seats', async () => {
+    const root = '/repo';
+    const at = Date.now();
+    const { $ } = fake(root, {
+      ...base(root),
+      [`${root}/.waypoint/demo-shop/seats/main-2/bound.json`]: bound('main-2', 'conv-2'),
+      [`${root}/.waypoint/demo-shop/seats/main-2/session.json`]: JSON.stringify({ sessionId: 'main-2', track: 'ui' }),
+    }, { at: () => at });
+    const loaded = await loadBandFiles($);
+    expect(loaded?.project).toBe('demo-shop');
+    expect(loaded?.files).toMatchObject({ sessionId: ID, now: at, session: JSON.stringify({ sessionId: 'main', track: null }) });
+    expect(Object.keys(loaded?.files.bindings ?? {}).sort()).toEqual(['.', 'main-2']);
+    expect(loaded?.files.seatSessions).toEqual({ 'main-2': JSON.stringify({ sessionId: 'main-2', track: 'ui' }) });
+  });
+  it("prefers the project of this conversation's binding, else the latest activity (A-15)", async () => {
+    const root = '/repo';
+    const files = {
+      [`${root}/docs/waypoint/old/plan.yaml`]: plan,
+      [`${root}/docs/waypoint/mine/plan.yaml`]: plan,
+      [`${root}/.waypoint/mine/session.json`]: JSON.stringify({ sessionId: 'main', track: null }),
+      [`${root}/.waypoint/mine/bound.json`]: bound('main', ID, { since: iso(now - 7200_000), seenAt: iso(now - 3600_000) }),
+    };
+    const over = { [`${root}/docs/waypoint/old/plan.yaml`]: { mtimeMs: now }, [`${root}/docs/waypoint/mine/plan.yaml`]: { mtimeMs: 1 } };
+    expect((await loadBandFiles(fake(root, files, { over }).$))?.project).toBe('mine');
+    expect((await loadBandFiles(fake(root, files, { over, id: 'conv-2' }).$))?.project).toBe('old');
+    const { $, reads } = fake(root, files, { over });
+    await loadBandModel($);
+    expect(reads).toContain(`${root}/docs/waypoint/mine/plan.yaml`);
+    expect(reads).not.toContain(`${root}/docs/waypoint/old/plan.yaml`);
+  });
+  it('reads at most MAX_SEATS + 1 seat folders by name, never an unsafe one nor a binding over 4 KiB', async () => {
+    const root = '/repo';
+    const f: Record<string, string> = { ...base(root) };
+    for (let n = 2; n <= 14; n++) f[`${root}/.waypoint/demo-shop/seats/main-${n}/bound.json`] = bound(`main-${n}`, `c${n}`);
+    f[`${root}/.waypoint/demo-shop/seats/a:b/bound.json`] = bound('main', 'x');
+    const big = `${root}/.waypoint/demo-shop/seats/main-10/bound.json`;
+    const { $, reads } = fake(root, f, { over: { [big]: { size: 5000 } } });
+    const loaded = await loadBandFiles($);
+    expect(reads.filter(r => /\/seats\/[^/]+\/bound\.json$/.test(r)).length).toBeLessThanOrEqual(11);
+    expect(reads).not.toContain(big);
+    expect(reads.some(r => r.includes('/seats/a:b/'))).toBe(false);
+    expect(Object.keys(loaded?.files.bindings ?? {})).not.toContain('main-10');
+  });
+  it("reads the newest 50 members and the coordinator's own signal, also when it is not among the 20 newest", async () => {
+    const root = '/repo';
+    const f: Record<string, string> = { ...base(root), [`${root}/.forge/execution.json`]: EXEC };
+    const over: Record<string, { size?: number; mtimeMs?: number }> = {};
+    for (let i = 0; i < 60; i++) { const p = `${root}/.forge/members/m${i}.json`; f[p] = '{}'; over[p] = { mtimeMs: i + 1 }; }
+    for (let i = 0; i < 25; i++) { const p = `${root}/.forge/live/s${i}.json`; f[p] = '{}'; over[p] = { mtimeMs: 100 + i }; }
+    const coordinator = `${root}/.forge/live/${ID}.json`;
+    f[coordinator] = JSON.stringify({ sessionId: ID, role: 'coordinator', runId: 'r1', ts: iso(now), event: 'SessionEnd', ended: true });
+    over[coordinator] = { mtimeMs: 0 };
+    const loaded = await loadBandFiles(fake(root, f, { over }).$);
+    expect(Object.keys(loaded?.files.members ?? {})).toHaveLength(50);
+    expect(loaded?.files.members).toHaveProperty('m59');
+    expect(loaded?.files.members).not.toHaveProperty('m0');
+    expect(loaded?.files.coordinatorLive).toBe(f[coordinator]);
+  });
+  it('a session id the engine cannot give, or an unsafe one, is null, and the files still load (Review Focus 1)', async () => {
+    const root = '/repo';
+    for (const id of [null, 'a b', '../x']) {
+      const loaded = await loadBandFiles(fake(root, base(root), { id }).$);
+      expect(loaded?.files.sessionId, String(id)).toBeNull();
+      expect(loaded?.project).toBe('demo-shop');
+    }
+  });
+});
+
+describe("renewBindings (C3): the band keeps this conversation's bindings alive", () => {
+  const at = Date.parse('2026-10-15T12:00:00.000Z');
+  const t = (min: number) => new Date(at + min * 60000).toISOString();
+  const b = (sid: string, claude: string, seenMin: number, over: object = {}) =>
+    JSON.stringify({ sid, claude, pid: null, via: 'work', since: t(-60), seenAt: t(seenMin), endedAt: null, endReason: null, ...over });
+  const root = '/repo';
+  const shop = `${root}/.waypoint/shop`;
+  it('moves seenAt of its own live bindings a minute or more old, in every project and seat, and touches no other', async () => {
+    const files: Record<string, string> = {
+      [`${shop}/session.json`]: JSON.stringify({ sessionId: 'main' }),
+      [`${shop}/bound.json`]: b('main', ID, -2),
+      [`${shop}/seats/main-2/bound.json`]: b('main-2', ID, -RENEW_MS / 60000),
+      [`${shop}/seats/main-3/bound.json`]: b('main-3', 'conv-9', -2),
+      [`${root}/.waypoint/web/bound.json`]: b('main', ID, -0.5),
+    };
+    const before = { ...files };
+    const { $, writes } = fake(root, files, { at: () => at });
+    expect(await renewBindings($)).toBe(2);
+    expect(writes).toEqual([`${shop}/bound.json`, `${shop}/seats/main-2/bound.json`]);
+    expect(JSON.parse(files[`${shop}/bound.json`])).toEqual({ ...JSON.parse(before[`${shop}/bound.json`]), seenAt: t(0) });
+    expect(files[`${shop}/seats/main-3/bound.json`]).toBe(before[`${shop}/seats/main-3/bound.json`]);
+    expect(files[`${root}/.waypoint/web/bound.json`]).toBe(before[`${root}/.waypoint/web/bound.json`]);
+  });
+  it('never renews an ended binding, nor one an end or a takeover rewrote between its read and its write (Review Focus 3)', async () => {
+    const ended = fake(root, { [`${shop}/bound.json`]: b('main', ID, -2, { endedAt: t(-1), endReason: 'clear' }) }, { at: () => at });
+    expect(await renewBindings(ended.$)).toBe(0);
+    expect(ended.writes).toEqual([]);
+    for (const meanwhile of [b('main', 'conv-9', 0), b('main', ID, -2, { endedAt: t(0), endReason: 'clear' })]) {
+      const files: Record<string, string> = { [`${shop}/bound.json`]: b('main', ID, -2) };
+      let seen = 0;
+      const two = fake(root, files, { at: () => at, beforeRead: p => { if (p === `${shop}/bound.json` && ++seen === 2) files[p] = meanwhile; } });
+      expect(await renewBindings(two.$)).toBe(0);
+      expect(files[`${shop}/bound.json`]).toBe(meanwhile);
+    }
+  });
+  it('writes nothing without a session id (Review Focus 1)', async () => {
+    const { $, writes } = fake(root, { [`${shop}/bound.json`]: b('main', ID, -2) }, { at: () => at, id: null });
+    expect(await renewBindings($)).toBe(0);
+    expect(writes).toEqual([]);
+  });
+  it("agrees with the hooks (Ruling 1): a released binding stays released, an ended one is never reopened, another conversation's is untouched", async () => {
+    const files: Record<string, string> = {
+      [`${shop}/session.json`]: JSON.stringify({ sessionId: 'main' }),
+      // Released by a bind of this conversation elsewhere (M1) or by waypoint release, an hour ago.
+      [`${shop}/bound.json`]: b('main', ID, -60, { endedAt: t(-60), endReason: 'released' }),
+      // Ended by a /clear long ago: the band never clears an end, as only a resume or a compact hook does.
+      [`${shop}/seats/main-2/bound.json`]: b('main-2', ID, -30, { endedAt: t(-30), endReason: 'clear' }),
+      // Another conversation's binding, live but stale: only its own conversation renews it.
+      [`${shop}/seats/main-3/bound.json`]: b('main-3', 'conv-9', -4),
+    };
+    const before = { ...files };
+    const { $, writes } = fake(root, files, { at: () => at });
+    expect(await renewBindings($)).toBe(0);
+    expect(writes).toEqual([]);
+    expect(files).toEqual(before);
+  });
+  it('renews at most once a minute: a binding the hooks renewed between its read and its write is left as they wrote it', async () => {
+    const files: Record<string, string> = { [`${shop}/bound.json`]: b('main', ID, -2) };
+    const fresh = b('main', ID, -0.25);
+    let seen = 0;
+    const { $, writes } = fake(root, files, { at: () => at, beforeRead: p => { if (p === `${shop}/bound.json` && ++seen === 2) files[p] = fresh; } });
+    expect(await renewBindings($)).toBe(0);
+    expect(writes).toEqual([]);
+    expect(files[`${shop}/bound.json`]).toBe(fresh);
+  });
+  it('swallows a write the engine refuses and goes on with the next binding', async () => {
+    const files: Record<string, string> = {
+      [`${shop}/session.json`]: JSON.stringify({ sessionId: 'main' }),
+      [`${shop}/bound.json`]: b('main', ID, -2),
+      [`${shop}/seats/main-2/bound.json`]: b('main-2', ID, -2),
+    };
+    const { $ } = fake(root, files, { at: () => at });
+    const tried: string[] = [];
+    const refusing = { ...$, fs: { ...$.fs, write: async (p: string, text: string) => {
+      tried.push(p);
+      if (p === `${shop}/bound.json`) throw new Error('EACCES');
+      files[p] = text;
+    } } } as Engine;
+    expect(await renewBindings(refusing)).toBe(1);
+    expect(tried).toEqual([`${shop}/bound.json`, `${shop}/seats/main-2/bound.json`]);
+    expect(JSON.parse(files[`${shop}/seats/main-2/bound.json`]).seenAt).toBe(t(0));
   });
 });

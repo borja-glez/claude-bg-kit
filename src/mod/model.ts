@@ -6,16 +6,28 @@ import { parseDesign } from '../lib/design.js';
 import { parseChangelog } from '../lib/history.js';
 import { parsePlan } from '../lib/plan.js';
 import { executionView } from '../lib/execution-view.js';
-import { normalizeLive, normalizePublicTask, parseExecution, type LiveDoc, type PublicTask } from '../lib/execution-state.js';
+import { isSafeId, normalizeLive, normalizePublicTask, parseExecution, type LiveDoc, type PublicTask } from '../lib/execution-state.js';
 import type { MessageDoc, States } from '../lib/types.js';
 import { decisionsSummary } from '../lib/decisions.js';
-import type { BoundDoc } from '../lib/bound.js';
+import { MAX_SEATS, parseBound, type BoundDoc } from '../lib/bound.js';
 
 export interface ProjectEntry { name: string; bindings: readonly BoundDoc[]; mtimeMs: number }
 export interface BandFiles {
   plan?: string; session?: string; execution?: string; execTasks?: Record<string, string>; live?: Record<string, string>;
   design?: string; changelog?: string; decisions?: string; dismissed?: string;
   states: Record<string, string>; messages: Record<string, string>; critiques: Record<string, string>;
+  /** C3: the project's bindings by seat: '.' is the checkout seat's bound.json, '<sid>' the one in seats/<sid>/. */
+  bindings?: Record<string, string>;
+  /** The session.json of each extra seat, by its sid (the checkout seat's is `session`). */
+  seatSessions?: Record<string, string>;
+  /** The main checkout's .forge/members/*.json, by file name. */
+  members?: Record<string, string>;
+  /** The live signal of the execution's coordinator, .forge/live/<hookSession>.json. */
+  coordinatorLive?: string;
+  /** $.session.id() of the conversation that looks; null or absent: it owns nothing. */
+  sessionId?: string | null;
+  /** The engine's clock in ms; absent: Date.now(). */
+  now?: number;
 }
 // In work mode `cells` holds one letter per task of the track (or of the plan), in plan order: d done, a active,
 // b blocked, p pending.
@@ -64,6 +76,29 @@ export function pickProject(entries: readonly ProjectEntry[], sessionId: string 
     return 0;
   };
   return [...(own.length ? own : entries)].sort(better)[0].name;
+}
+
+/** C3: a seat of the project as the band reads it (readSeats does the same on disk). */
+export interface BandSeat { sid: string; checkout: boolean; bound: BoundDoc | null; session: string | undefined }
+
+/**
+ * The project's seats from their files' texts: the checkout seat (its id from session.json, else from its own
+ * bound.json) and up to MAX_SEATS extra seats, by name, never the checkout seat's own id. A binding that does not read,
+ * comes from the future or names another seat is none. The band never checks a pid: only the CLI and the hooks can.
+ */
+export function seatsOf(f: Pick<BandFiles, 'session' | 'bindings' | 'seatSessions'>, now?: number): BandSeat[] {
+  const texts = f.bindings ?? {};
+  const named = json<{ sessionId?: unknown }>(f.session)?.sessionId;
+  const checkoutBound = parseBound(texts['.'], now);
+  const sid = typeof named === 'string' && named ? named : checkoutBound?.sid ?? null;
+  const out: BandSeat[] = [];
+  if (sid !== null && isSafeId(sid)) out.push({ sid, checkout: true, bound: checkoutBound?.sid === sid ? checkoutBound : null, session: f.session });
+  const extra = Object.keys(texts).filter(k => k !== '.' && k !== sid && isSafeId(k)).sort().slice(0, MAX_SEATS);
+  for (const k of extra) {
+    const b = parseBound(texts[k], now);
+    out.push({ sid: k, checkout: false, bound: b?.sid === k ? b : null, session: f.seatSessions?.[k] });
+  }
+  return out;
 }
 
 export function buildBandModel(project: string, f: BandFiles): BandModel {

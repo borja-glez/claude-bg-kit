@@ -15,6 +15,7 @@ const NOW = Date.parse('2026-10-11T10:05:00.000Z');
 
 // A superpowers run on a file system answered from memory: an older and a newer ledger, and the newer one's plan.
 const ROOT = '/repo';
+const SESSION_ID = 'conv-1';
 const PLAN = ['# Plan', ...Array.from({ length: 9 }, (_, i) => `### Task ${i + 1}: Step ${i + 1}\n- [ ] do it`)].join('\n');
 const BASE_FILES: Record<string, { text: string; mtimeMs: number }> = {
   [`${ROOT}/.superpowers/sdd/old/progress.md`]: { text: '# SDD ledger — plan: docs/old.md\n## Progress\nTask 1: complete\n', mtimeMs: 1 },
@@ -46,6 +47,7 @@ async function said(ui: { drawn: () => Promise<unknown> }): Promise<string> {
 function serveFiles(on: On, reads: string[], extra: Record<string, { text: string; mtimeMs: number }> = {}) {
   const FILES = { ...BASE_FILES, ...extra };
   on('session.root', () => ({ value: ROOT }));
+  on('session.id', () => ({ value: SESSION_ID }));
   on('fs.read', (_$, e) => {
     reads.push(norm(e.path));
     const f = FILES[norm(e.path)];
@@ -326,6 +328,10 @@ tasks:
 const SHOP: Record<string, { text: string; mtimeMs: number }> = {
   [`${ROOT}/docs/waypoint/shop/plan.yaml`]: { text: SHOP_PLAN, mtimeMs: 1 },
   [`${ROOT}/.waypoint/shop/session.json`]: { text: JSON.stringify({ sessionId: 'S1', track: 'backend' }), mtimeMs: 1 },
+  [`${ROOT}/.waypoint/shop/bound.json`]: {
+    text: JSON.stringify({ sid: 'S1', claude: SESSION_ID, pid: null, via: 'work', since: '2026-10-11T09:00:00.000Z', seenAt: '2026-10-11T10:04:00.000Z', endedAt: null, endReason: null }),
+    mtimeMs: 1,
+  },
   [`${ROOT}/.waypoint/shop/dbcache/state/T001.json`]: {
     text: JSON.stringify({ status: 'in_progress', owner: 'S1', startedAt: '2026-10-11T10:00:00.000Z' }), mtimeMs: 1,
   },

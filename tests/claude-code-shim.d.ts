@@ -9,7 +9,8 @@ declare module 'claude-code' {
       read(path: string): Promise<string>;
       list(path: string): Promise<{ name: string; kind: 'file' | 'dir'; size: number; mtimeMs: number }[]>;
       exists(path: string): Promise<boolean>;
-      stat(path: string): Promise<{ mtimeMs: number }>;
+      stat(path: string): Promise<{ mtimeMs: number; size: number }>;
+      write(path: string, text: string): Promise<void>;
     };
   }
 }
