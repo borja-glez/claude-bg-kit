@@ -260,3 +260,16 @@ describe('deriveStatus closes a light task', () => {
     expect(s).toMatchObject({ agent: null, doneAt: T(700), verify: { result: 'pass' }, lastAt: T(700) });
   });
 });
+
+describe('deriveStatus: the phase stopped (K2-02)', () => {
+  it('ends the task like done: doneAt, no agent; a repeated stopped keeps the first, another phase reopens it', () => {
+    const s = apply([
+      { ts: '2026-10-16T10:00:00.000Z', kind: 'triage', task: 'T1', path: 'large', reasons: [] },
+      { ts: '2026-10-16T10:01:00.000Z', kind: 'agent', task: 'T1-1', agent: 'forge-impl' },
+      { ts: '2026-10-16T10:05:00.000Z', kind: 'phase', task: 'T1', phase: 'stopped' },
+    ])!;
+    expect(s).toMatchObject({ phase: 'stopped', doneAt: '2026-10-16T10:05:00.000Z', agent: null });
+    expect(deriveStatus(s, { ts: '2026-10-16T10:06:00.000Z', kind: 'phase', task: 'T1', phase: 'stopped' })!.doneAt).toBe('2026-10-16T10:05:00.000Z');
+    expect(deriveStatus(s, { ts: '2026-10-16T10:07:00.000Z', kind: 'phase', task: 'T1', phase: 'implement' })).toMatchObject({ phase: 'implement', doneAt: null });
+  });
+});

@@ -873,7 +873,7 @@ describe('plugin layout', () => {
     for (const s of [runMd, exec]) expect(s).not.toContain('on `integrated` only');
     expect(exec).toContain('(`/waypoint:plan`)');
     const stop = read('plugins/forge/skills/stop/SKILL.md');
-    expect(stop).toContain('whose `runId` is the `runId` remembered in step 1');
+    expect(stop).toContain('If `FORGE stop` printed `members`');
     expect(stop).toContain('do not report it');
     expect(stop).toContain('whose `name` is null');
     expect(read('plugins/waypoint/skills/work/SKILL.md')).toContain('no `~ : @ +`');
@@ -1300,5 +1300,12 @@ describe('plugin layout', () => {
       for (const s of ['viewer', '`notice`', '$.session.id()', '$.store', '/waypoint:work resume', '/waypoint:work release T019', '/forge:run --join', '/forge:run --resume', '/forge:stop'])
         expect(md, `${f}: ${s}`).toContain(s);
     }
+  });
+  it('forge stop prints what to release, the stop skill releases each task once, and step 7 also frees stopped tasks (K2-02)', () => {
+    const stop = read('plugins/forge/skills/stop/SKILL.md');
+    for (const w of ['`release`', '`members`', '`write`', 'if_version', 'FORGE swarm close']) expect(stop).toContain(w);
+    expect(stop).not.toContain('.forge/members/');
+    const step7 = runRef('execution').split('\n').find(l => l.startsWith('7. **End.**'))!;
+    expect(step7).toContain('`running` or `stopped` with `executor` `subagents`');
   });
 });

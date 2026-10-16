@@ -14,7 +14,8 @@ const RUN_BRANCH = /^[A-Za-z0-9_./][A-Za-z0-9_\-./]{0,119}$/;
 export const isRunBranch = (s: unknown): s is string => typeof s === 'string' && RUN_BRANCH.test(s) && !s.includes('..');
 
 export type ExecMode = 'subagents' | 'sessions';
-export type ExecTaskStatus = 'running' | 'accepted' | 'integrated' | 'conflict' | 'blocked';
+/** stopped (D3): forge stop stopped the task while it ran; swarm close and the end of a run release it like a running one. */
+export type ExecTaskStatus = 'running' | 'accepted' | 'integrated' | 'conflict' | 'blocked' | 'stopped';
 export interface ExecTask {
   status: ExecTaskStatus; stage: Stage; round: number; worktree: string; branch: string;
   executor: 'subagents' | 'sessions' | 'manual'; attempts: number; agent: string | null;
@@ -45,7 +46,7 @@ export interface ExecutionState {
 
 // STAGES lives in types.ts (pure, so the roadmap page can bundle it without this file's yaml/zod imports); re-exported here.
 export { STAGES };
-const TASK_STATUSES: readonly ExecTaskStatus[] = ['running', 'accepted', 'integrated', 'conflict', 'blocked'];
+const TASK_STATUSES: readonly ExecTaskStatus[] = ['running', 'accepted', 'integrated', 'conflict', 'blocked', 'stopped'];
 const STOPS: readonly ExecStopReason[] = ['finished', 'stalled', 'stopped', 'budget', 'migrated'];
 const MAX_TASKS = 500;
 

@@ -1075,7 +1075,8 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       return json({ ...state, setup, baseSync, ...looseOut, announce, ...attributes, ...(replaced ? { replaced } : {}) });
     }
     case 'status': {
-      const state = readExecution(io.cwd);
+      // K2-01: the execution of the main checkout, from any worktree.
+      const state = readExecution(mainCheckout(io.cwd));
       return json({ present: state !== null, state });
     }
     case 'propose': {
@@ -1327,13 +1328,14 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       if (e.active) throw new UsageError(`swarm close: the execution ${e.runId} is active; stop it first (/forge:stop)`);
       if (e.closedAt) return json({ closed: 'already', runId: e.runId, closedAt: e.closedAt, closedBy: e.closedBy ?? null });
       closeEnded(main, iso, 'close', lockDeps);
-      const running = Object.entries(e.tasks).filter(([, t]) => t.status === 'running');
+      // K2-02: forge stop leaves the tasks it stopped as stopped: they are released like running ones.
+      const open = Object.entries(e.tasks).filter(([, t]) => t.status === 'running' || t.status === 'stopped');
       return json({
         closed: true, runId: e.runId, kind: e.kind, stopReason: e.stopReason, closedAt: iso,
         // The coordinator's own tasks go back to free on the roadmap; a member's task stays with its session.
         // A loose task has no state/T to free, so an ephemeral run releases nothing.
-        release: e.kind !== 'plan' ? [] : running.filter(([, t]) => t.executor === 'subagents').map(([id]) => id),
-        members: running.filter(([, t]) => t.executor !== 'subagents').map(([id]) => id),
+        release: e.kind !== 'plan' ? [] : open.filter(([, t]) => t.executor === 'subagents').map(([id]) => id),
+        members: open.filter(([, t]) => t.executor !== 'subagents').map(([id]) => id),
       });
     }
     case 'takeover': {

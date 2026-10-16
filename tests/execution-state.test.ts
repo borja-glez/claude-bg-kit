@@ -123,3 +123,15 @@ describe('execution state', () => {
     expect(normalizeExecution(fromSwarm(s))).toMatchObject({ runId: 'swarm-2026-10-12T120000000Z', hookSession: 'h1' });
   });
 });
+
+describe('the stopped task status (D3, K2-02)', () => {
+  it('a task stopped by forge stop reads back as stopped, in execution.json and in its public file', () => {
+    const at = '2026-10-16T10:00:00.000Z';
+    const e = normalizeExecution({
+      runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', coordinator: 'main', startedAt: at,
+      tasks: { T1: { status: 'stopped', stage: 'implement', round: 1, worktree: '/w', branch: 'task/T1', executor: 'subagents', attempts: 0, agent: null, startedAt: at } },
+    });
+    expect(e?.tasks.T1.status).toBe('stopped');
+    expect(normalizePublicTask({ task: 'T1', runId: 'r1', stage: 'implement', status: 'stopped', agent: null, round: 1, since: at, updatedAt: at, leaseUntil: at, by: 'main', mode: 'subagents' })?.status).toBe('stopped');
+  });
+});

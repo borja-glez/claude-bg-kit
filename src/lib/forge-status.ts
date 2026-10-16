@@ -96,7 +96,7 @@ const isVerifyAgent = (agent: string | null): boolean => !!agent && agent.starts
 
 // The last stage closed before done (stages keep the order their names first closed in), '' when there is none.
 const lastStage = (stages: Record<string, number>): string =>
-  Object.keys(stages).filter(k => k !== 'done' && k !== 'triage').at(-1) ?? '';
+  Object.keys(stages).filter(k => k !== 'done' && k !== 'stopped' && k !== 'triage').at(-1) ?? '';
 const PATHS = ['trivial', 'small', 'medium', 'large'];
 
 // The task finished at `ts`: its stage closed. Unchanged when it already was.
@@ -142,7 +142,8 @@ function applyEvent(prev: ForgeStatus | null, event: unknown): ForgeStatus | nul
     if (fresh && e.autonomy === 'auto') next.autonomy = 'auto';
     if (e.kind === 'phase' && str(e.phase)) {
       const phase = cleanText(e.phase);
-      const done = phase.toLowerCase() === 'done';
+      // K2-02: forge stop ends a task with the phase stopped, final like done.
+      const done = phase.toLowerCase() === 'done' || phase.toLowerCase() === 'stopped';
       // A repeated done keeps the first; any other phase after done reopens the task (that gap is no stage).
       if (!(done && base.doneAt)) {
         if (same && !base.doneAt) next.stages = closeStage(base, ts);

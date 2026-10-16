@@ -5,10 +5,10 @@ import path from 'node:path';
 import { appendEvent, readEvents, forgeDir, LEDGER_KINDS, type LedgerKind, type LedgerEvent } from '../ledger.js';
 import { parseRun, startRun, recordCycle, stopReason, endRun, readRunText, saveRun, stopFile, type RunState, type StopContext } from '../run.js';
 import { decideStop, decideExecutionStop } from '../hook.js';
-import { readExecution, updateExecution, runWorktree, executionTaskFile } from '../execution.js';
+import { readExecution, updateExecution, runWorktree, executionTaskFile, writePublicTask } from '../execution.js';
 import { planLocale, replyIn, sessionReply } from '../../lib/locale.js';
 import { isLocale } from '../../lib/forge-run.js';
-import { isSafeId, normalizePublicTask } from '../../lib/execution-state.js';
+import { isSafeId, normalizePublicTask, type PublicTask } from '../../lib/execution-state.js';
 import { samePath } from '../../lib/worktree.js';
 import { treeStartFile, parseStatus, parseSnapshot, treeCheck, type TreeSnapshot } from '../tree.js';
 import { triage, implementerFor, zonesFromPaths, announce, announceReview, isBookkeeping, parseNumstat, diffPath, isPerfTask, reviewFor, PATH_ORDER, ZONE_ORDER, type PathName, type AnnounceLocale, type TriageResult } from '../triage.js';
@@ -36,7 +36,7 @@ import { detectValidators, selectValidators, runValidators, markPreexisting, blo
 import { checkTools, mcpInventory, toolGaps } from '../tools.js';
 import { verifyPlan, cleanupPids, killTarget, askFor, capLines, relabelDiff, type PlanSurface } from '../verify.js';
 import { readLocal, updateLocal, mainCheckout, readLearned, recordLearned, OBJECT_ID, type SurfacePermission } from '../local.js';
-import { memberForHook } from '../members.js';
+import { memberForHook, listMembers, memberFile } from '../members.js';
 import { hookLive } from '../live.js';
 import { hookRoute } from '../route-hooks.js';
 import { liveJobs, noSlot, slotFor, withJob, writeJsonAtomic, type Slot } from '../jobs.js';
@@ -455,6 +455,16 @@ function stopContext(cwd: string, now: Date): StopContext {
   };
 }
 
+/**
+ * K2-01: the directory of the infinite run: the main checkout, wherever forge runs from; this directory only when it
+ * alone holds a run.json (a run an older forge started in a worktree).
+ */
+function runRootOf(cwd: string): string {
+  const main = mainCheckout(cwd);
+  if (samePath(main, cwd)) return main;
+  return readRunText(main) === null && readRunText(cwd) !== null ? cwd : main;
+}
+
 /** How long the Stop hook waits for execution.lock: a hook must not hold the session (the CLI waits LOCK_WAIT_MS). */
 const HOOK_LOCK_WAIT_MS = 2000;
 
@@ -475,13 +485,14 @@ function hookStop(io: Io): string {
     if (member) { hookLive(io, 'Stop'); return ''; }
     hookLive(io, 'Stop');
     const sleeping = !!exec?.active && !!exec.sleepUntil && Date.parse(exec.sleepUntil) > io.now().getTime();
-    const run = parseRun(readRunText(io.cwd));
+    const runRoot = runRootOf(io.cwd);
+    const run = parseRun(readRunText(runRoot));
     if (run?.active) {
-      const d = decideStop(hookInput, run, { ...stopContext(io.cwd, io.now()), ledgerEvents: readEvents(io.cwd).length, swarmSleeping: sleeping });
+      const d = decideStop(hookInput, run, { ...stopContext(runRoot, io.now()), ledgerEvents: readEvents(runRoot).length, swarmSleeping: sleeping });
       if (!d.block) return '';
-      saveRun(io.cwd, d.run);
-      if (d.ended) appendEvent(io.cwd, { ts: io.now().toISOString(), kind: 'cycle', action: 'stopped', reason: d.ended });
-      return JSON.stringify({ decision: 'block', reason: d.reason + (sessionReply(d.run, exec?.active ? exec : null, () => planLocale(io.cwd, exec?.project)) ?? replyIn(null)) }) + '\n';
+      saveRun(runRoot, d.run);
+      if (d.ended) appendEvent(runRoot, { ts: io.now().toISOString(), kind: 'cycle', action: 'stopped', reason: d.ended });
+      return JSON.stringify({ decision: 'block', reason: d.reason + (sessionReply(d.run, exec?.active ? exec : null, () => planLocale(runRoot, exec?.project)) ?? replyIn(null)) }) + '\n';
     }
     // C-03: a job this session launched in the background (prep, review-prep, integrate, step) wakes it when it ends;
     // a member's job, with another session, does not.
@@ -1522,19 +1533,24 @@ function runCommand(argv: string[], io: Io): Result {
           // An active run blocks a new one only while nothing stops it and a session drives it: a run whose stop reason
           // is already due (e.g. its session died after a budget ran out or a stop was asked), or one left without a
           // session by forge 0.15 (no Stop hook chains its cycles any more), is replaced.
-          const current = parseRun(readRunText(io.cwd));
-          if (current?.active && current.sessionId !== null && stopReason(current, stopContext(io.cwd, io.now())) === null) throw new UsageError('infinite start: a run is already active (forge stop, or forge infinite status)');
-          forgeDir(io.cwd);
-          rmSync(stopFile(io.cwd), { force: true });
+          // K2-01: the run lives in the main checkout, whichever worktree starts it; an older run left in this
+          // directory still counts as the active one.
+          const runRoot = runRootOf(io.cwd);
+          const current = parseRun(readRunText(runRoot));
+          if (current?.active && current.sessionId !== null && stopReason(current, stopContext(runRoot, io.now())) === null) throw new UsageError('infinite start: a run is already active (forge stop, or forge infinite status)');
+          const main = mainCheckout(io.cwd);
+          forgeDir(main);
+          rmSync(stopFile(main), { force: true });
           const run: RunState = startRun(io.now(), { ...(cycles !== undefined ? { cycles } : {}), ...(hours !== undefined ? { hours } : {}) }, queueMax, session, locale ?? null);
-          saveRun(io.cwd, run);
+          saveRun(main, run);
           return json(run);
         }
         if (sub === 'status') {
-          const text = readRunText(io.cwd);
+          const runRoot = runRootOf(io.cwd);
+          const text = readRunText(runRoot);
           const run = parseRun(text);
-          const reason = run?.active ? stopReason(run, stopContext(io.cwd, io.now())) : null;
-          return json({ present: text !== null, valid: run !== null, run, stopReason: reason, reply: runReply(io.cwd, run) });
+          const reason = run?.active ? stopReason(run, stopContext(runRoot, io.now())) : null;
+          return json({ present: text !== null, valid: run !== null, run, stopReason: reason, reply: runReply(runRoot, run) });
         }
         throw new UsageError('usage: forge infinite <start --cycles N|--hours H [--queue-max N] [--session ID] [--locale CODE]|status>');
       }
@@ -1545,26 +1561,60 @@ function runCommand(argv: string[], io: Io): Result {
         if (flag('error-file') !== undefined) {
           try { error = readFileSync(path.resolve(io.cwd, flag('error-file')!), 'utf8'); } catch { throw new UsageError('cycle: cannot read --error-file'); }
         }
-        const current = parseRun(readRunText(io.cwd));
+        const runRoot = runRootOf(io.cwd);
+        const current = parseRun(readRunText(runRoot));
         if (!current?.active) throw new UsageError('cycle: no active run (forge infinite start)');
         const next = recordCycle(current, { progress: progress === 'yes', ...(error !== undefined ? { error } : {}) });
-        saveRun(io.cwd, next);
-        appendEvent(io.cwd, { ts: ts(), kind: 'cycle', cycle: next.cycle, progress: progress === 'yes', ...(next.lastError ? { error: next.lastError } : {}) });
-        return json({ ...next, reply: runReply(io.cwd, next) });
+        saveRun(runRoot, next);
+        appendEvent(runRoot, { ts: ts(), kind: 'cycle', cycle: next.cycle, progress: progress === 'yes', ...(next.lastError ? { error: next.lastError } : {}) });
+        return json({ ...next, reply: runReply(runRoot, next) });
       }
       case 'stop': {
-        forgeDir(io.cwd);
+        // K2-01: forge's run and execution are the main checkout's, wherever this runs from.
+        const main = mainCheckout(io.cwd);
+        const runRoot = runRootOf(io.cwd);
+        const at = ts();
         // The stop file stays so the bound session, if alive, exits cleanly; the run is closed here so a dead
         // session never keeps it active.
-        writeFileSync(stopFile(io.cwd), `${ts()}\n`);
-        const current = parseRun(readRunText(io.cwd));
+        for (const dir of samePath(main, runRoot) ? [main] : [main, runRoot]) { forgeDir(dir); writeFileSync(stopFile(dir), `${at}\n`); }
+        const current = parseRun(readRunText(runRoot));
         if (current?.active) {
-          saveRun(io.cwd, endRun(current, 'stopped'));
-          appendEvent(io.cwd, { ts: ts(), kind: 'cycle', action: 'stopped', reason: 'stopped' });
+          saveRun(runRoot, endRun(current, 'stopped'));
+          appendEvent(runRoot, { ts: at, kind: 'cycle', action: 'stopped', reason: 'stopped' });
         }
-        const exec = readExecution(io.cwd);
-        if (exec?.active) updateExecution(io.cwd, cur => (cur?.active ? { ...cur, active: false, stopReason: 'stopped', sleepUntil: null } : null), { now: io.now, sleep: io.sleep });
-        return ok('ok');
+        // K2-02: an active execution stops for real. Its running tasks become stopped, keeping executor, branch and
+        // worktree for swarm close; their public files expire now; their forge status ends with the phase stopped;
+        // its members are listed and their files removed. forge stop never closes it: /forge:stop runs swarm close.
+        let stopped: string[] = [];
+        const after = readExecution(main)?.active ? updateExecution(main, cur => {
+          if (!cur?.active) return null;
+          stopped = Object.entries(cur.tasks).filter(([, t]) => t.status === 'running').map(([id]) => id);
+          const tasks = { ...cur.tasks };
+          for (const id of stopped) tasks[id] = { ...tasks[id], status: 'stopped', agent: null, detail: 'stopped by forge stop', updatedAt: at };
+          return { ...cur, tasks, active: false, stopReason: 'stopped', sleepUntil: null };
+        }, { now: io.now, sleep: io.sleep }) : null;
+        let release: { task: string; write: { op: 'update'; collection: 'state'; doc_id: string; data: Record<string, unknown> } }[] = [];
+        let members: { sessionId: string; name: string | null; role: string; task: string | null }[] = [];
+        if (after) {
+          for (const id of stopped) {
+            let p: PublicTask | null = null;
+            try { p = normalizePublicTask(JSON.parse(readFileSync(executionTaskFile(main, id), 'utf8'))); } catch { p = null; }
+            if (p && p.task === id && p.runId === after.runId) writePublicTask(main, { ...p, status: 'stopped', agent: null, updatedAt: at, leaseUntil: at });
+            appendEvent(main, { ts: at, kind: 'phase', task: id, phase: 'stopped' });
+          }
+          const listed = listMembers(main, after.runId);
+          members = listed.map(m => ({ sessionId: m.sessionId, name: m.name, role: m.role, task: m.task }));
+          for (const m of listed) rmSync(memberFile(main, m.sessionId), { force: true });
+          // A-23: the coordinator's own tasks go back to free on the roadmap; a member's task stays with its session, and a
+          // loose task has no state/T. No if_version: the skill pins each write to the version it lists.
+          const del = { __delete__: true };
+          release = after.kind !== 'plan' ? [] : stopped.filter(id => after.tasks[id]?.executor === 'subagents')
+            .map(id => ({ task: id, write: { op: 'update' as const, collection: 'state' as const, doc_id: id, data: { status: 'free', owner: del, claimedAt: del, startedAt: del, exec: del } } }));
+        }
+        // forge stop kills nothing: a background job (a swarm step, an integrate, a validate…) still running finishes its
+        // current step. They are named so the person knows what is still at work.
+        const running = liveJobs(main, io.now()).map(j => ({ name: j.name, task: j.task }));
+        return json({ main, run: { stopped: !!current?.active }, execution: after ? { runId: after.runId, stopped } : null, release, members, running });
       }
       case 'waypoint-cli': {
         const found = findWaypointCli(io.scriptPath ?? process.argv[1] ?? '');
