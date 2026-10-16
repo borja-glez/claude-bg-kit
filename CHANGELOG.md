@@ -16,9 +16,9 @@ elsewhere and are reconstructed from their READMEs.
 ### 0.23.0 — 2026-10-16
 
 #### Added
-- The band knows who looks at it (`$.session.id()`) and draws by role. The conversation bound to the seat sees its work band, or its design band while the draft is its own. Another live conversation sees a dim notice instead, «◦ another session (main) works on T019 · 3 min ago», with Status, Other track and the roadmap; a forge execution coordinated by another session is a notice with View and Join (`/forge:run --join`).
-- What an earlier conversation left behind is offered for 24 hours as a notice: a task («◌ left in progress: T019 …») with Resume (`/waypoint:work resume`) and Release T019 (`/waypoint:work release T019`), a draft with Resume (`/waypoint:design resume`, which binds it and shows its state without running a critique), and an execution stopped or without its coordinator with View, Resume (`/forge:run --resume`) and Close (`/forge:stop`). Close on an execution that is still active without its coordinator only leaves `/forge:stop` in the prompt to confirm.
-- Every band model carries `viewer: { role, coordinator, runId }` (`runId` only when the band is about the execution), and `mode: 'notice'` is a new variant of the published `WaypointBand`.
+- The band knows who looks at it (`$.session.id()`) and draws by role. The conversation bound to the seat sees its work band, or its design band while the draft is its own. Another live conversation sees a dim notice instead, «◦ another session (main) works on T019 · 3 min ago», with Status, Other track and the roadmap, or «◦ another session (main) is working on the design» with Status and the roadmap when that one is bound for the design; a forge execution coordinated by another session is a notice with View, and Join (`/forge:run --join`) only on a plan run, since forge's ephemeral run takes no members.
+- What an earlier conversation left behind is offered for 24 hours as a notice: a task («◌ left in progress: T019 …») with Resume (`/waypoint:work resume`) and Release T019 (`/waypoint:work release T019`), a draft with Resume (`/waypoint:design resume`, which binds it and shows its state without running a critique), and an execution stopped or without its coordinator with View, Resume (`/forge:run --resume`) and Close (`/forge:stop`). Close on an execution that is still active without its coordinator only leaves `/forge:stop` in the prompt to confirm. An active execution is without its coordinator when the coordinator's conversation ended, or when it went silent: no step nor signal for 12 minutes and no agent running.
+- Every band model carries `viewer: { role, coordinator, runId }` (`runId` only when the band is about the execution), and `mode: 'notice'` is a new variant of the published `WaypointBand`; a run notice says whether the run can be joined (`joinable`). In a checkout without a waypoint project the band draws nothing, but it still carries the role from forge's execution, so forge's coordinator reads as `{ role: 'owner', coordinator: true, runId }`.
 
 #### Changed
 - A member of a forge execution sees its own task with the line of the execution, never the coordinator's run band. Only the coordinator's band has Stop; a member's leaves `/forge:stop` in the prompt to confirm.
@@ -615,7 +615,7 @@ elsewhere and are reconstructed from their READMEs.
 ### 0.11.8 — 2026-10-16
 
 #### Changed
-- The roadmap section of the panel follows the role of the conversation, as waypoint's band does: only the conversation bound to the seat, or forge's coordinator and the members of its run, get it.
+- The roadmap section of the panel is filled only for the conversation whose band is the work band (the one bound to the seat, or a member of a forge run); another session's notice leaves it empty.
 
 ### 0.11.7 — 2026-10-16
 
