@@ -27,7 +27,7 @@ import { roadmapCapabilities, sharingNotice, syncSummary } from '../lib/publish.
 import { claudeSessionId, noClaudeSession } from '../lib/claude-session.js';
 import { blockBatch, claimBatch, cleanText, doneBatch, freeBatch, heartbeatBatch, registerBatch, REASON_MAX, SUMMARY_MAX } from '../lib/batches.js';
 import { BOUND_VIAS, MAX_SEATS, isBoundVia, type BoundDoc } from '../lib/bound.js';
-import { boundFile, boundLive, checkoutSid, openTasksOf, pidFromEnv, readBinding, readSeats, recordBase, secondSeatOf, seatsDir, writeAtomic, writeBinding } from '../lib/bound-fs.js';
+import { boundFile, boundLive, checkoutSid, openTasksOf, pidFromEnv, readBinding, readBindings, readSeats, recordBase, secondSeatOf, seatsDir, writeAtomic, writeBinding } from '../lib/bound-fs.js';
 import { isSafeId } from '../lib/execution-state.js';
 import { loadConfig } from '../forge/config.js';
 import type { Commit, MessageDoc, NoteDoc, PhaseDoc, PlanView, SessionDoc, TaskState } from '../lib/types.js';
@@ -838,10 +838,10 @@ function runHook(sub: string | undefined, io: Io): string {
     ? readdirSync(base, { withFileTypes: true }).filter(d => d.isDirectory()).flatMap(d => {
         const files = ['plan.yaml', 'design.md'].map(n => path.join(base, d.name, n)).filter(existsSync);
         if (!files.length) return [];
-        return [{ name: d.name, hasSession: existsSync(path.join(root, '.waypoint', d.name, 'session.json')), mtimeMs: Math.max(...files.map(f => statSync(f).mtimeMs)) }];
+        return [{ name: d.name, bindings: readBindings(path.join(root, '.waypoint', d.name)), mtimeMs: Math.max(...files.map(f => statSync(f).mtimeMs)) }];
       })
     : [];
-  const project = pickProject(entries);
+  const project = pickProject(entries, typeof input.session_id === 'string' ? input.session_id : null);
   if (!project) return '';
   const wp = path.join(root, '.waypoint', project);
   const docDir = path.join(base, project);

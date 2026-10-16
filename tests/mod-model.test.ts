@@ -9,19 +9,31 @@ const design = readFileSync(new URL('./fixtures/design.md', import.meta.url), 'u
 const j = (v: unknown) => JSON.stringify(v);
 const empty = { states: {}, messages: {}, critiques: {} };
 
-describe('pickProject', () => {
-  it('prefers the project with a session, then the only one, then the newest', () => {
-    expect(pickProject([{ name: 'a', hasSession: false, mtimeMs: 9 }, { name: 'b', hasSession: true, mtimeMs: 1 }])).toBe('b');
-    expect(pickProject([{ name: 'a', hasSession: false, mtimeMs: 1 }])).toBe('a');
-    expect(pickProject([{ name: 'a', hasSession: false, mtimeMs: 1 }, { name: 'b', hasSession: false, mtimeMs: 5 }])).toBe('b');
-    expect(pickProject([])).toBeNull();
+describe('pickProject (A-15)', () => {
+  const bound = (claude: string, seenAt: string, endedAt: string | null = null) =>
+    ({ sid: 'main', claude, pid: null, via: 'work' as const, since: seenAt, seenAt, endedAt, endReason: endedAt ? 'clear' as const : null });
+  const T = (h: number) => `2026-10-15T${String(h).padStart(2, '0')}:00:00.000Z`;
+  const ms = (h: number) => Date.parse(T(h));
+  it("prefers the project of this session's binding, the newest when several", () => {
+    const entries = [
+      { name: 'old', bindings: [], mtimeMs: ms(11) },
+      { name: 'mine', bindings: [bound('A', T(8))], mtimeMs: ms(1) },
+      { name: 'other', bindings: [bound('B', T(10))], mtimeMs: ms(2) },
+      { name: 'mine-too', bindings: [bound('A', T(9))], mtimeMs: ms(1) },
+    ];
+    expect(pickProject(entries, 'A')).toBe('mine-too');
+    expect(pickProject(entries, 'B')).toBe('other');
   });
-  it('among several projects with a session, picks the newest', () => {
-    expect(pickProject([
-      { name: 'old', hasSession: true, mtimeMs: 1 },
-      { name: 'free', hasSession: false, mtimeMs: 99 },
-      { name: 'new', hasSession: true, mtimeMs: 7 },
-    ])).toBe('new');
+  it('otherwise the latest activity: a plan or design file, or a binding renewed or ended', () => {
+    const entries = [
+      { name: 'files', bindings: [], mtimeMs: ms(9) },
+      { name: 'bound', bindings: [bound('B', T(7), T(10))], mtimeMs: ms(1) },
+    ];
+    expect(pickProject(entries, 'C')).toBe('bound');
+    expect(pickProject(entries, null)).toBe('bound');
+    expect(pickProject([{ name: 'a', bindings: [], mtimeMs: 1 }, { name: 'b', bindings: [], mtimeMs: 5 }], null)).toBe('b');
+    expect(pickProject([{ name: 'a', bindings: [], mtimeMs: 1 }], 'A')).toBe('a');
+    expect(pickProject([], 'A')).toBeNull();
   });
 });
 

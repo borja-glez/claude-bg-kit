@@ -50,8 +50,8 @@ async function projectEntries($: Engine, root: string): Promise<ProjectEntry[]> 
   for (const d of dirs) {
     const times = [await mtime($, join(docs, d.name, 'plan.yaml')), await mtime($, join(docs, d.name, 'design.md'))].filter(t => t !== null);
     if (!times.length) continue;
-    const hasSession = await $.fs.exists(join(root, '.waypoint', d.name, 'session.json')).catch(() => false);
-    entries.push({ name: d.name, hasSession, mtimeMs: Math.max(...times) });
+    // Until the band reads the bindings and its own session id (wave 2b), the newest project wins.
+    entries.push({ name: d.name, bindings: [], mtimeMs: Math.max(...times) });
   }
   return entries;
 }
@@ -100,7 +100,7 @@ async function loadForge($: Engine, root: string): Promise<Pick<BandFiles, 'exec
 
 export async function loadBandModel($: Engine): Promise<BandModel> {
   const root = await $.session.root();
-  const project = pickProject(await projectEntries($, root));
+  const project = pickProject(await projectEntries($, root), null);
   if (!project) return { mode: 'none' };
   const pdocs = join(root, 'docs', 'waypoint', project);
   const pstate = join(root, '.waypoint', project);
