@@ -227,8 +227,9 @@ const ANSI = new RegExp(`${ESC}\\[[0-9;]*[A-Za-z]`, 'g');
 const MAX_FAILING = 200;
 const DURATION = /\s+[([]?\d+(?:\.\d+)?\s?m?s[)\]]?$/;
 const tidy = (s: string) => s.replace(DURATION, '').replace(/\s+/g, ' ').trim().slice(0, 300);
-// One test per line: pytest (FAILED <id>), go (--- FAIL: <Test>), cargo (test <x> ... FAILED), dotnet (Failed <x>).
-const TEST_LINE = [/^\s*FAILED\s+(\S+)/, /^\s*--- FAIL:\s+(\S+)/, /^test\s+(\S+)\s+\.\.\.\s+FAILED/, /^\s*Failed\s+(\S+)\s+\[[^\]]+\]\s*$/];
+// One test per line: pytest (FAILED <id>, and ERROR <file>::<test> for a setup or fixture error), go (--- FAIL: <Test>),
+// cargo (test <x> ... FAILED), dotnet (Failed <x>).
+const TEST_LINE = [/^\s*FAILED\s+(\S+)/, /^\s*ERROR\s+(\S+::\S+)/, /^\s*--- FAIL:\s+(\S+)/, /^test\s+(\S+)\s+\.\.\.\s+FAILED/, /^\s*Failed\s+(\S+)\s+\[[^\]]+\]\s*$/];
 // Only test runners print these lines; a build's "Failed to compile." is not a test name.
 const TEST_KINDS = new Set(['test', 'e2e', 'other']);
 // A runner-level error that names no test: the names alone cannot say the run is the same as the base's.
@@ -238,15 +239,29 @@ const VITEST_MARK = /^\s*[×✗]\s+(.+)$/;
 const JEST = /^\s*●\s+(.+)$/;
 // file(line,col): error TSnnnn: message, the position left out (an edit above the error moves it).
 const TSC = /^(.+?)\(\d+,\d+\):\s+error\s+(TS\d+):\s*(.*)$/;
+// Any tsc error: one TSC cannot read (no location, as TS2688 or TS18003, or the --pretty form) names nothing.
+const TSC_ANY = /\berror TS\d+:/;
 
+/**
+ * The names a run's output gives its failures, and whether they are all of them (known). Unknown: lint and build (a
+ * bundler's own errors name nothing the patterns read), a tsc error without a location, a runner-level error, or more
+ * than MAX_FAILING names (one left out could be new).
+ */
 export function failingTests(output: string, kind: string): { names: string[]; known: boolean } {
   if (kind === 'lint') return { names: [], known: false };
   const lines = output.replace(ANSI, '').split(/\r?\n/);
   const found = new Set<string>();
-  const add = (s: string) => { const t = tidy(s); if (t && found.size < MAX_FAILING) found.add(t); };
+  let capped = false;
+  let unread = false;
+  const add = (s: string) => {
+    const t = tidy(s);
+    if (!t || found.has(t)) return;
+    if (found.size < MAX_FAILING) found.add(t); else capped = true;
+  };
   for (const l of lines) {
     const t = TSC.exec(l);
     if (t) add(`${t[1].replace(/\\/g, '/')}: ${t[2]} ${t[3]}`);
+    else if (TSC_ANY.test(l)) unread = true;
   }
   if (TEST_KINDS.has(kind)) {
     const fails = lines.map(l => VITEST_FAIL.exec(l)?.[1]).filter((s): s is string => !!s);
@@ -256,7 +271,7 @@ export function failingTests(output: string, kind: string): { names: string[]; k
     for (const l of lines) { const m = JEST.exec(l); if (m && !/^Console\b/.test(m[1])) add(m[1]); }
     for (const l of lines) for (const re of TEST_LINE) { const m = re.exec(l); if (m) { add(m[1]); break; } }
   }
-  const known = found.size > 0 && !(TEST_KINDS.has(kind) && RUNNER_ERROR.test(lines.join('\n')));
+  const known = kind !== 'build' && found.size > 0 && !capped && !unread && !(TEST_KINDS.has(kind) && RUNNER_ERROR.test(lines.join('\n')));
   return { names: [...found], known };
 }
 
@@ -353,8 +368,9 @@ export function runOptions(config: Pick<ForgeConfig, 'validate'>, events: Ledger
  * Marks the failures a baseline already had (D-06): the same validator failed on the base commit, before the change, and
  * every test it fails now already failed there (a build that needs a file a later task creates, a suite broken
  * upstream). When either side could not name its failing tests (failingKnown), every failure line, normalized, must
- * already be there. A timeout is never preexisting. A validator with tests the base did not fail gets `newFailing` and
- * still counts. The baseline is the JSON `forge validate` printed on the base commit (a forge 0.16 one has only lines).
+ * already be there; a run with no failure line at all only matches a base with none either. A timeout is never
+ * preexisting. A validator with tests the base did not fail gets `newFailing` and still counts. The baseline is the JSON
+ * `forge validate` printed on the base commit (a forge 0.16 one has only lines).
  */
 const normLine = (l: string) => l.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
 const isTimeout = (r: ValidatorResult) => r.failures.some(f => /^timeout after \d+ s$/.test(f));
@@ -376,7 +392,8 @@ export function markPreexisting(results: ValidatorResult[], baseline: unknown): 
       return fresh.length ? { ...r, newFailing: fresh } : { ...r, preexisting: true };
     }
     const was = new Set(b.failures.map(normLine));
-    return r.failures.every(l => was.has(normLine(l))) ? { ...r, preexisting: true } : r;
+    const same = r.failures.length ? r.failures.every(l => was.has(normLine(l))) : !b.failures.length;
+    return same ? { ...r, preexisting: true } : r;
   });
 }
 

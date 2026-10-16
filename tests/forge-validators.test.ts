@@ -238,7 +238,11 @@ describe('failingTests (D-06)', () => {
   it('strips colour codes, keeps at most 200 names, and says when it read nothing', () => {
     const esc = String.fromCharCode(27);
     expect(failingTests(`${esc}[31m FAIL ${esc}[39m tests/a.test.ts > adds\n`, 'test').names).toEqual(['tests/a.test.ts > adds']);
-    expect(failingTests(Array.from({ length: 300 }, (_, i) => `--- FAIL: Test${i} (0.00s)`).join('\n'), 'test').names).toHaveLength(200);
+    const many = (n: number) => Array.from({ length: n }, (_, i) => `--- FAIL: Test${i} (0.00s)`).join('\n');
+    expect(failingTests(many(300), 'test').names).toHaveLength(200);
+    // A name left out past the cap could be a new one: the read is unknown; exactly 200 left nothing out.
+    expect(failingTests(many(300), 'test').known).toBe(false);
+    expect(failingTests(many(200) + '\n--- FAIL: Test0 (0.00s)', 'test')).toMatchObject({ known: true });
     expect(failingTests('Error: boom\n', 'test')).toEqual({ names: [], known: false });
     expect(failingTests(' FAIL  tests/a.test.ts > adds\n', 'lint')).toEqual({ names: [], known: false });
     expect(failingTests(' FAIL  tests/a.test.ts > adds\n', 'typecheck')).toEqual({ names: [], known: false });
@@ -250,6 +254,18 @@ describe('failingTests (D-06)', () => {
     expect(failingTests(' FAIL  a.test.ts > one\n⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯\n', 'test')).toEqual({ names: ['a.test.ts > one'], known: false });
     expect(failingTests('FAILED t.py::a - x\nERROR collecting t2.py\n', 'test').known).toBe(false);
     expect(failingTests(' FAIL  a.test.ts\n● Test suite failed to run\n', 'test').known).toBe(false);
+  });
+  it('a pytest setup or fixture error names its test (ERROR <id>)', () => {
+    expect(failingTests('FAILED tests/test_a.py::test_x - assert 0\nERROR tests/test_b.py::test_y - Exception: fixture boom\n1 failed, 2 passed, 1 error in 0.11s\n', 'test'))
+      .toEqual({ names: ['tests/test_a.py::test_x', 'tests/test_b.py::test_y'], known: true });
+  });
+  it('a tsc error without a location makes the read unknown; a build is never read by names', () => {
+    const located = "src/a.ts(3,5): error TS2322: Type 'string' is not assignable to type 'number'.\n";
+    const name = "src/a.ts: TS2322 Type 'string' is not assignable to type 'number'.";
+    expect(failingTests(located + "error TS2688: Cannot find type definition file for 'node'.\n", 'typecheck')).toEqual({ names: [name], known: false });
+    expect(failingTests(located + "error TS18003: No inputs were found in config file 'tsconfig.json'.\n", 'typecheck').known).toBe(false);
+    expect(failingTests(located, 'typecheck').known).toBe(true);
+    expect(failingTests(located, 'build')).toEqual({ names: [name], known: false });
   });
 });
 
@@ -285,6 +301,33 @@ describe('markPreexisting by test (D-06)', () => {
     const base = [{ validator: 'test', ok: false, failures: ['timeout after 600 s'] }];
     const timeout = { validator: 'test', ok: false, flaky: false, durationMs: 1, failures: ['timeout after 600 s'], failing: [], failingKnown: false };
     expect(markPreexisting([timeout], base)[0].preexisting).toBeUndefined();
+  });
+  // The base and the change, each run through runValidators with its own output.
+  const redRun = (name: string, kind: string, output: string) =>
+    runValidators([{ name, cmd: name, kind, source: 'detected' }], () => ({ code: 1, output, ms: 1, timedOut: false }), 60);
+  const newFailure = (name: string, kind: string, base: string, now: string) => markPreexisting(redRun(name, kind, now), redRun(name, kind, base))[0];
+  it('a new pytest setup error beside a failure the base had is new', () => {
+    const m = newFailure('pytest', 'test', 'FAILED tests/test_a.py::test_x - assert 0\n1 failed, 3 passed in 0.10s\n',
+      'FAILED tests/test_a.py::test_x - assert 0\nERROR tests/test_b.py::test_y - Exception: fixture boom\n1 failed, 2 passed, 1 error in 0.11s\n');
+    expect(m.newFailing).toEqual(['tests/test_b.py::test_y']);
+    expect(blocking(m)).toBe(true);
+  });
+  it('a new tsc error without a location, or a bundler error after a known tsc one, is not excused', () => {
+    const located = "src/a.ts(3,5): error TS2322: Type 'string' is not assignable to type 'number'.\n";
+    for (const extra of ["error TS2688: Cannot find type definition file for 'node'.\n", "error TS18003: No inputs were found in config file 'tsconfig.json'.\n"]) {
+      expect(blocking(newFailure('typecheck', 'typecheck', located, located + extra)), extra).toBe(true);
+    }
+    expect(blocking(newFailure('build', 'build', located, `${located}✘ [ERROR] Could not resolve "./b"\n\n    src/c.ts:1:17:\n`))).toBe(true);
+    expect(blocking(newFailure('build', 'build', located, located))).toBe(false);
+  });
+  it('a new failing test past the 200 names a run keeps is not excused', () => {
+    const many = (n: number) => Array.from({ length: n }, (_, i) => `--- FAIL: Test${i} (0.00s)`).join('\n');
+    expect(blocking(newFailure('go-test', 'test', many(250), `${many(250)}\n--- FAIL: TestBrandNew (0.00s)\n`))).toBe(true);
+  });
+  it('a run that prints nothing is excused only by a base that printed nothing either', () => {
+    const silent = { validator: 'test', ok: false, flaky: false, durationMs: 1, failures: [], failing: [], failingKnown: false };
+    expect(markPreexisting([silent], [{ validator: 'test', ok: false, failures: ['FAIL a > one'] }])[0].preexisting).toBeUndefined();
+    expect(markPreexisting([silent], [{ validator: 'test', ok: false, failures: [] }])[0].preexisting).toBe(true);
   });
 });
 
