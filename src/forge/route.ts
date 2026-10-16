@@ -43,6 +43,37 @@ export function routeOptions(i: { path: PathName; prefs: Prefs; superpowers: { i
   return { ...base, options: ['forge', 'superpowers', 'superpowers-design', 'superpowers-plan'], recommended };
 }
 
+/** K1-08: the one question forge:route asks, in two parts: the method (the recommended one first) and whether to keep it. */
+export interface RouteAsk {
+  question: string;
+  options: { label: string; option: RouteOption; recommended: boolean }[];
+  remember: { question: string; options: { label: string; remember: boolean }[] };
+}
+
+const OPTION_LABELS: Record<RouteOption, { es: string; en: string }> = {
+  forge: { es: 'forge', en: 'forge' },
+  superpowers: { es: 'superpowers', en: 'superpowers' },
+  'superpowers-design': { es: 'superpowers diseña, forge construye', en: 'superpowers designs, forge builds' },
+  'superpowers-plan': { es: 'superpowers planifica, forge ejecuta', en: 'superpowers plans, forge carries it out' },
+  none: { es: 'sin forge', en: 'without forge' },
+};
+
+export function routeAsk(r: Pick<RouteOutput, 'options' | 'recommended'>, locale: 'es' | 'en'): RouteAsk {
+  const rec = r.recommended.option;
+  const order = [rec, ...r.options.filter(o => o !== rec)];
+  const mark = locale === 'es' ? ' (Recomendado)' : ' (Recommended)';
+  return {
+    question: locale === 'es' ? '¿Cómo hacemos esta tarea?' : 'How should this task be done?',
+    options: order.map(o => ({ label: `${OPTION_LABELS[o][locale]}${o === rec ? mark : ''}`, option: o, recommended: o === rec })),
+    remember: {
+      question: locale === 'es' ? '¿Lo recuerdo para este proyecto?' : 'Remember it for this project?',
+      options: locale === 'es'
+        ? [{ label: 'Sí, no vuelvas a preguntar', remember: true }, { label: 'No, pregúntame cada vez', remember: false }]
+        : [{ label: 'Yes, do not ask again', remember: true }, { label: 'No, ask me every time', remember: false }],
+    },
+  };
+}
+
 /** `session`: Claude's id of the session that chose the route; only that session is reminded of it. */
 export interface RouteDoc { task: string; chosen: RouteOption; by: 'user' | 'auto'; stage: RouteStage; ts: string; spec?: string; plan?: string; session?: string }
 export const routeFile = (root: string) => path.join(root, '.forge', 'route.json');

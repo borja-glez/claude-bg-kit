@@ -1,5 +1,5 @@
 import { spawnSync, execFileSync } from 'node:child_process';
-import { existsSync, statSync, lstatSync, realpathSync, readFileSync, readdirSync, openSync, closeSync, fstatSync, readSync, rmSync, mkdtempSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
+import { existsSync, statSync, lstatSync, realpathSync, readFileSync, readdirSync, openSync, closeSync, fstatSync, readSync, rmSync, mkdtempSync, writeFileSync, mkdirSync, renameSync, rmdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { appendEvent, readEvents, forgeDir, LEDGER_KINDS, type LedgerKind, type LedgerEvent } from '../ledger.js';
@@ -11,11 +11,11 @@ import { isLocale } from '../../lib/forge-run.js';
 import { isSafeId } from '../../lib/execution-state.js';
 import { samePath } from '../../lib/worktree.js';
 import { treeStartFile, parseStatus, parseSnapshot, treeCheck, type TreeSnapshot } from '../tree.js';
-import { triage, implementerFor, zonesFromPaths, announce, announceReview, isBookkeeping, parseNumstat, diffPath, isPerfTask, reviewFor, PATH_ORDER, ZONE_ORDER, type PathName, type AnnounceLocale } from '../triage.js';
+import { triage, implementerFor, zonesFromPaths, announce, announceReview, isBookkeeping, parseNumstat, diffPath, isPerfTask, reviewFor, PATH_ORDER, ZONE_ORDER, type PathName, type AnnounceLocale, type TriageResult } from '../triage.js';
 import { parsePlan, PlanError } from '../../lib/plan.js';
 import { renderBrief, taskText, tddLine } from '../brief.js';
 import { renderThreatModel } from '../threat-model.js';
-import { loadConfig, configValue, agentFor, ROLES, ConfigError, NAME, WORKFLOWS, AUTONOMIES, type Profile } from '../config.js';
+import { loadConfig, configValue, agentFor, ROLES, ConfigError, NAME, WORKFLOWS, AUTONOMIES, type Profile, type Workflow } from '../config.js';
 import { resolvePrefs, isWorkflow, isAutonomy } from '../prefs.js';
 import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, type ReviewerName, type FailingValidator, type VerifyFile } from '../verdict.js';
 import { PROPOSAL_ID, proposalId, saveProposal, loadProposals, loadProposal, decideDoc, mirrorProposal, type DecideError } from '../proposals.js';
@@ -45,7 +45,7 @@ import { readSurfaces, detectDrafts, appendLearned, surfaceFile, permissionHash,
 import { addDecision, allDecisions, listDecisions, renderDecisionsMd, DecisionInputError } from '../decisions.js';
 import { TASK_ID, decisionScope, scopeFileName } from '../../lib/decisions.js';
 import { claudeConfigDir, claudeJsonDir, locateSuperpowers, spLedgerDone, spPlans, spSkillPath, spSpecs } from '../superpowers.js';
-import { ROUTE_OPTIONS, ROUTE_STAGES, firstStage, isRoutePath, isRouteSession, readRoute, routeOptions, writeRoute, type RouteDoc, type RouteOption, type RouteStage } from '../route.js';
+import { ROUTE_OPTIONS, ROUTE_STAGES, firstStage, isRoutePath, isRouteSession, readRoute, routeAsk, routeOptions, writeRoute, type RouteDoc, type RouteOption, type RouteStage } from '../route.js';
 import { checkSpTask, markDone, parseSpPlan, renderSpBrief, SpPlanError } from '../../lib/sp-plan.js';
 
 export interface ExecResult { code: number; output: string; ms: number; timedOut: boolean }
@@ -556,6 +556,184 @@ function cleanupEvidence(dir: string): { killed: number[]; gone: number[] } {
   return cleanupPids(pids, kill);
 }
 
+/** What a triage computes (K1-01): everything `forge triage` prints, before anything is written. */
+interface TriageCore {
+  task: string | undefined; project: string | null; result: TriageResult; names: string[]; fresh: string[];
+  diff: { base: string; stat: { files: string[]; lines: number }; path: PathName } | null;
+  auto: { autonomy?: 'auto' }; review: Record<string, unknown>; output: Record<string, unknown>;
+}
+
+/**
+ * The triage of a task without side effects (K1-01): it reads the ledger (the ratchet), the plan, the config,
+ * local.yaml and git, and writes nothing. `forge triage` then records the validators it knows in local.yaml and the
+ * `triage` event; `forge route --text-file` uses it as a probe.
+ */
+function triageCore(io: Io, args: string[]): TriageCore {
+  const repoDir = io.workdir ?? io.cwd;
+  const flag = (name: string) => {
+    const i = args.indexOf(`--${name}`);
+    const v = i >= 0 ? args[i + 1] : undefined;
+    return v === undefined || v.startsWith('--') ? undefined : v;
+  };
+  const has = (name: string) => args.includes(`--${name}`);
+  const textArgs = [...args];
+  for (const f of ['--task', '--text-file', '--plan', '--superpowers-plan', '--autonomy', '--locale', '--base']) {
+    const i = textArgs.indexOf(f);
+    if (i >= 0) textArgs.splice(i, 2);
+  }
+  let task = textArgs.filter(a => !a.startsWith('--')).join(' ').trim();
+  if (flag('text-file') !== undefined) {
+    try { task = readFileSync(path.resolve(io.cwd, flag('text-file')!), 'utf8').trim(); } catch { throw new UsageError('triage: cannot read --text-file'); }
+  }
+  if (has('plan') && flag('plan') === undefined) throw new UsageError('triage: --plan needs a plan file');
+  const plannedDoc = flag('plan') !== undefined ? planTask(io.cwd, flag('plan'), flag('task')) : null;
+  const planned = plannedDoc?.task ?? null;
+  if (planned) task = taskText(planned);
+  if (has('superpowers-plan') && flag('superpowers-plan') === undefined) throw new UsageError('triage: --superpowers-plan needs a plan file');
+  // A superpowers plan: its title, goal and pending tasks are the text, the files those tasks list are its files.
+  let spFiles: string[] | null = null;
+  if (flag('superpowers-plan') !== undefined) {
+    const file = flag('superpowers-plan')!;
+    let sp;
+    try { sp = spPlanDone(readFileSync(path.resolve(io.cwd, file), 'utf8'), path.resolve(io.cwd, file), repoDir); } catch (e) {
+      throw new UsageError(e instanceof SpPlanError ? `triage: ${file}: ${e.message}` : `triage: cannot read ${file}`);
+    }
+    const pending = sp.tasks.filter(t => !t.done);
+    task = [sp.plan.title, sp.plan.goal, ...pending.map(t => t.title)].filter(Boolean).join('. ');
+    spFiles = [...new Set(pending.flatMap(t => t.files))];
+  }
+  const autonomy = flag('autonomy');
+  if (has('autonomy') && autonomy !== 'auto' && autonomy !== 'ask') throw new UsageError('triage: --autonomy must be auto or ask');
+  const auto = autonomy === 'auto' ? { autonomy: 'auto' as const } : {};
+  const localeArg = flag('locale');
+  if (has('locale') && localeArg !== 'es' && localeArg !== 'en') throw new UsageError('triage: --locale must be es or en');
+  if (!task) throw new UsageError('triage: the task text is required');
+  // --base <sha>: the task is implemented, its real diff from base sizes it again (`flag` would take `-x` for a value).
+  let base: string | null = null;
+  if (has('base')) {
+    const v = args[args.indexOf('--base') + 1];
+    if (!v || v.startsWith('-')) throw new UsageError('triage: --base needs a commit');
+    if (!flag('task')) throw new UsageError('triage: --base needs --task');
+    base = v;
+  }
+  const git = io.git ?? defaultGit(io.cwd);
+  const lines = (out: string | null) => (out ?? '').split('\n').map(s => s.trim()).filter(Boolean);
+  const listed = git(['-c', 'core.quotePath=false', 'ls-files']);
+  // rev-list fails on a repository without commits: that is 0 commits, not a git failure.
+  const commits = Number.parseInt((git(['rev-list', '--count', 'HEAD']) ?? '').trim(), 10) || 0;
+  // The design, the plan and forge's own notes name every symbol of a planned task: a hit there says nothing
+  // about the code the task touches, so the symbol search leaves them out (a task can still name them as paths).
+  const grep = (w: string) => lines(git(['-c', 'core.quotePath=false', 'grep', '-l', '-I', '--fixed-strings', '-w', '-e', w])).filter(f => !isBookkeeping(f));
+  const tracked = lines(listed);
+  const zoneFiles = planned ? tracked.filter(f => planned.zones.some(z => globMatch(z, f))) : [];
+  const extra = planned ? { files: zoneFiles, zones: zonesFromPaths(planned.zones) }
+    : spFiles ? { files: tracked.filter(f => spFiles!.includes(f)), zones: zonesFromPaths(spFiles) } : undefined;
+  const catalog = detectValidators(repoReader(repoDir), loadConfig(repoDir)).map(v => ({ name: v.name, cmd: v.cmd, kind: v.kind, source: v.source }));
+  const names = catalog.map(v => v.name);
+  // A plan task was already designed and planned: a young repository does not make it Large.
+  // Its zones come from its paths and its title, its Large wording, perf and mechanical character only from its title.
+  const result = triage(task, { files: tracked, commits, gitOk: listed !== null, grep }, names, extra,
+    { ignoreGreenfield: planned !== null, ...(planned ? { plan: { title: planned.title } } : {}) });
+  const wordText = planned ? planned.title : task;
+  if (planned?.zones.length && !zoneFiles.length) result.reasons.push('zones match no tracked file (new files?)');
+  // A superpowers plan runs on the Medium path, one task after another: its tasks build on each other.
+  if (spFiles) { result.path = 'medium'; result.reasons.push('superpowers plan: the Medium path, its tasks in order'); }
+  // The real diff alone sizes an implemented task: the text's estimate sets no floor, only a sensitive zone
+  // (its text, its plan zones or its diff) keeps it at Medium.
+  let diff: TriageCore['diff'] = null;
+  if (base !== null) {
+    const out = git(['-c', 'core.quotePath=false', 'diff', '--numstat', '--no-renames', `${base}..HEAD`]);
+    if (out === null) throw new UsageError(`triage: cannot diff ${base}..HEAD`);
+    const stat = parseNumstat(out);
+    const d = diffPath(stat);
+    result.sensitive = ZONE_ORDER.filter(z => result.sensitive.includes(z) || d.sensitive.includes(z));
+    result.path = d.path;
+    result.reasons = [...d.reasons];
+    if (result.sensitive.length && PATH_ORDER.indexOf(result.path) < PATH_ORDER.indexOf('medium')) {
+      result.path = 'medium';
+      result.reasons.push(`sensitive zone: ${result.sensitive.join(', ')}`);
+    }
+    diff = { base, stat, path: d.path };
+  }
+  // The ratchet: a repeated triage of the same task never lowers the path it already reached. With --base only the
+  // earlier --base sizings count, and a plan task only counts the triages of its own plan's project (ids repeat;
+  // `log --kind triage` stamps a raise with it).
+  // A raise the session logged with a `why` explains the path better than the CLI reasons: the announcement uses it.
+  const project = plannedDoc ? plannedDoc.plan.project : null;
+  let raiseWhy: string | null = null;
+  if (flag('task')) {
+    const rank = (p: unknown) => PATH_ORDER.indexOf(p as PathName);
+    const logged = readEvents(io.cwd).filter(e => e.kind === 'triage' && e.task === flag('task') && rank(e.path) >= 0
+      && (base === null || e.diff !== undefined) && (project === null || e.project === project));
+    const prior = logged.reduce<PathName | null>((max, e) => (max === null || rank(e.path) > rank(max) ? e.path as PathName : max), null);
+    if (prior && rank(prior) > rank(result.path)) {
+      result.path = prior;
+      result.reasons.push(`ratchet: kept ${prior} from an earlier triage of this task`);
+    }
+    // The latest raise to the path kept that says why (later triages of the same path log none).
+    if (prior && prior === result.path) {
+      const raise = logged.filter(e => e.path === prior && typeof e.why === 'string' && e.why).at(-1);
+      raiseWhy = raise ? raise.why as string : null;
+    }
+  }
+  // J-14: the plan's `delicate`, or --delicate for a task the person calls delicate.
+  const delicate = planned?.delicate === true || has('delicate');
+  const impl = implementerFor(result, wordText, { batch: has('batch'), plan: planned !== null, delicate });
+  const profile = loadConfig(repoDir).profile;
+  const implementer = { ...impl, agent: impl.role ? agentFor(impl.role, profile) : null };
+  const known = readLocal(io.cwd).known;
+  const fresh = names.filter(n => !known.includes(n));
+  // Who reviews, by the size reached and the configured profile: printed always and logged for review-prep.
+  const reviewPlan = reviewFor(result.path, result.sensitive, isPerfTask(wordText), { delicate, profile });
+  const review = { ...reviewPlan, reviewers: reviewPlan.reviewers.map(r => ({ ...r, agent: agentFor(r.role, profile) })) };
+  // Output only, like `implementer`: the exact line the session prints, and whether a short plan comes first.
+  // The locale: the flag, else the plan passed with --plan, else the plan under docs/waypoint, else English.
+  const locale = localeArg ?? ((plannedDoc?.plan.locale ?? planLocale(io.cwd))?.toLowerCase().split(/[-_]/)[0] === 'es' ? 'es' : 'en');
+  let line = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh, catalog }, locale as AnnounceLocale);
+  let gate: 'plan' | null = result.path === 'medium' ? 'plan' : null;
+  // After the implementation: who reviews it, by its real size. No short plan comes first any more.
+  let reviewed = {};
+  if (diff) {
+    // The new-validators line `announce` appends, kept after the review line.
+    const bare = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh: [], catalog }, locale as AnnounceLocale);
+    line = announceReview({ path: result.path, files: diff.stat.files.length, lines: diff.stat.lines, review: reviewPlan }, locale as AnnounceLocale)
+      + line.slice(bare.length);
+    gate = null;
+    reviewed = { diff: { base: diff.base, files: diff.stat.files, lines: diff.stat.lines, path: diff.path } };
+  }
+  return {
+    task: flag('task'), project, result, names, fresh, diff, auto, review,
+    output: { ...result, catalog, new: fresh, implementer, announce: line, gate, ...auto, ...reviewed, review },
+  };
+}
+
+/**
+ * K1-01: a probe leaves nothing behind. When .forge/ holds only work/<task>/task.txt (the request the skill wrote for
+ * it) and no .gitignore, that file and its empty directories go; anything else there, or a text file elsewhere, stays.
+ */
+function cleanProbe(cwd: string, task: string, textFile: string): boolean {
+  const dir = path.join(cwd, '.forge');
+  const file = path.join(dir, 'work', task, 'task.txt');
+  if (!samePath(path.resolve(cwd, textFile), file)) return false;
+  try {
+    // A .forge/ that is a link (to a shared directory) is not one the probe made.
+    if (!lstatSync(dir).isDirectory()) return false;
+    const entries: string[] = [];
+    const walk = (d: string, rel: string): void => {
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        const r = rel ? `${rel}/${e.name}` : e.name;
+        entries.push(e.isDirectory() ? `${r}/` : r);
+        if (e.isDirectory()) walk(path.join(d, e.name), r);
+      }
+    };
+    walk(dir, '');
+    if (entries.sort().join('\n') !== ['work/', `work/${task}/`, `work/${task}/task.txt`].join('\n')) return false;
+    rmSync(file);
+    for (const d of [path.join(dir, 'work', task), path.join(dir, 'work'), dir]) rmdirSync(d);
+    return true;
+  } catch { return false; }
+}
+
 /** C-03: the commands that run as a job with --out, and the task each works on. */
 function jobOf(argv: string[]): { cmd: string; task: string | null } | null {
   const [cmd, sub, third] = argv;
@@ -685,140 +863,17 @@ function runCommand(argv: string[], io: Io): Result {
         return ok(renderBrief(plan, task, { planPath: flag('plan')!.replace(/\\/g, '/'), designPath, tdd: briefTdd(io, repoDir), threatModel: briefThreatModel(repoDir) }));
       }
       case 'triage': {
-        const textArgs = [...args];
-        for (const f of ['--task', '--text-file', '--plan', '--superpowers-plan', '--autonomy', '--locale', '--base']) {
-          const i = textArgs.indexOf(f);
-          if (i >= 0) textArgs.splice(i, 2);
-        }
-        let task = textArgs.filter(a => !a.startsWith('--')).join(' ').trim();
-        if (flag('text-file') !== undefined) {
-          try { task = readFileSync(path.resolve(io.cwd, flag('text-file')!), 'utf8').trim(); } catch { throw new UsageError('triage: cannot read --text-file'); }
-        }
-        if (has('plan') && flag('plan') === undefined) throw new UsageError('triage: --plan needs a plan file');
-        const plannedDoc = flag('plan') !== undefined ? planTask(io.cwd, flag('plan'), flag('task')) : null;
-        const planned = plannedDoc?.task ?? null;
-        if (planned) task = taskText(planned);
-        if (has('superpowers-plan') && flag('superpowers-plan') === undefined) throw new UsageError('triage: --superpowers-plan needs a plan file');
-        // A superpowers plan: its title, goal and pending tasks are the text, the files those tasks list are its files.
-        let spFiles: string[] | null = null;
-        if (flag('superpowers-plan') !== undefined) {
-          const file = flag('superpowers-plan')!;
-          let sp;
-          try { sp = spPlanDone(readFileSync(path.resolve(io.cwd, file), 'utf8'), path.resolve(io.cwd, file), repoDir); } catch (e) {
-            throw new UsageError(e instanceof SpPlanError ? `triage: ${file}: ${e.message}` : `triage: cannot read ${file}`);
-          }
-          const pending = sp.tasks.filter(t => !t.done);
-          task = [sp.plan.title, sp.plan.goal, ...pending.map(t => t.title)].filter(Boolean).join('. ');
-          spFiles = [...new Set(pending.flatMap(t => t.files))];
-        }
-        const autonomy = flag('autonomy');
-        if (has('autonomy') && autonomy !== 'auto' && autonomy !== 'ask') throw new UsageError('triage: --autonomy must be auto or ask');
-        const auto = autonomy === 'auto' ? { autonomy: 'auto' as const } : {};
-        const localeArg = flag('locale');
-        if (has('locale') && localeArg !== 'es' && localeArg !== 'en') throw new UsageError('triage: --locale must be es or en');
-        if (!task) throw new UsageError('triage: the task text is required');
-        // --base <sha>: the task is implemented, its real diff from base sizes it again (`flag` would take `-x` for a value).
-        let base: string | null = null;
-        if (has('base')) {
-          const v = args[args.indexOf('--base') + 1];
-          if (!v || v.startsWith('-')) throw new UsageError('triage: --base needs a commit');
-          if (!flag('task')) throw new UsageError('triage: --base needs --task');
-          base = v;
-        }
-        const git = io.git ?? defaultGit(io.cwd);
-        const lines = (out: string | null) => (out ?? '').split('\n').map(s => s.trim()).filter(Boolean);
-        const listed = git(['-c', 'core.quotePath=false', 'ls-files']);
-        // rev-list fails on a repository without commits: that is 0 commits, not a git failure.
-        const commits = Number.parseInt((git(['rev-list', '--count', 'HEAD']) ?? '').trim(), 10) || 0;
-        // The design, the plan and forge's own notes name every symbol of a planned task: a hit there says nothing
-        // about the code the task touches, so the symbol search leaves them out (a task can still name them as paths).
-        const grep = (w: string) => lines(git(['-c', 'core.quotePath=false', 'grep', '-l', '-I', '--fixed-strings', '-w', '-e', w])).filter(f => !isBookkeeping(f));
-        const tracked = lines(listed);
-        const zoneFiles = planned ? tracked.filter(f => planned.zones.some(z => globMatch(z, f))) : [];
-        const extra = planned ? { files: zoneFiles, zones: zonesFromPaths(planned.zones) }
-          : spFiles ? { files: tracked.filter(f => spFiles!.includes(f)), zones: zonesFromPaths(spFiles) } : undefined;
-        const catalog = detectValidators(repoReader(repoDir), loadConfig(repoDir)).map(v => ({ name: v.name, cmd: v.cmd, kind: v.kind, source: v.source }));
-        const names = catalog.map(v => v.name);
-        // A plan task was already designed and planned: a young repository does not make it Large.
-        // Its zones come from its paths and its title, its Large wording, perf and mechanical character only from its title.
-        const result = triage(task, { files: tracked, commits, gitOk: listed !== null, grep }, names, extra,
-          { ignoreGreenfield: planned !== null, ...(planned ? { plan: { title: planned.title } } : {}) });
-        const wordText = planned ? planned.title : task;
-        if (planned?.zones.length && !zoneFiles.length) result.reasons.push('zones match no tracked file (new files?)');
-        // A superpowers plan runs on the Medium path, one task after another: its tasks build on each other.
-        if (spFiles) { result.path = 'medium'; result.reasons.push('superpowers plan: the Medium path, its tasks in order'); }
-        // The real diff alone sizes an implemented task: the text's estimate sets no floor, only a sensitive zone
-        // (its text, its plan zones or its diff) keeps it at Medium.
-        let diff: { base: string; stat: { files: string[]; lines: number }; path: PathName } | null = null;
-        if (base !== null) {
-          const out = git(['-c', 'core.quotePath=false', 'diff', '--numstat', '--no-renames', `${base}..HEAD`]);
-          if (out === null) throw new UsageError(`triage: cannot diff ${base}..HEAD`);
-          const stat = parseNumstat(out);
-          const d = diffPath(stat);
-          result.sensitive = ZONE_ORDER.filter(z => result.sensitive.includes(z) || d.sensitive.includes(z));
-          result.path = d.path;
-          result.reasons = [...d.reasons];
-          if (result.sensitive.length && PATH_ORDER.indexOf(result.path) < PATH_ORDER.indexOf('medium')) {
-            result.path = 'medium';
-            result.reasons.push(`sensitive zone: ${result.sensitive.join(', ')}`);
-          }
-          diff = { base, stat, path: d.path };
-        }
-        // The ratchet: a repeated triage of the same task never lowers the path it already reached. With --base only the
-        // earlier --base sizings count, and a plan task only counts the triages of its own plan's project (ids repeat;
-        // `log --kind triage` stamps a raise with it).
-        // A raise the session logged with a `why` explains the path better than the CLI reasons: the announcement uses it.
-        const project = plannedDoc ? plannedDoc.plan.project : null;
-        let raiseWhy: string | null = null;
-        if (flag('task')) {
-          const rank = (p: unknown) => PATH_ORDER.indexOf(p as PathName);
-          const logged = readEvents(io.cwd).filter(e => e.kind === 'triage' && e.task === flag('task') && rank(e.path) >= 0
-            && (base === null || e.diff !== undefined) && (project === null || e.project === project));
-          const prior = logged.reduce<PathName | null>((max, e) => (max === null || rank(e.path) > rank(max) ? e.path as PathName : max), null);
-          if (prior && rank(prior) > rank(result.path)) {
-            result.path = prior;
-            result.reasons.push(`ratchet: kept ${prior} from an earlier triage of this task`);
-          }
-          // The latest raise to the path kept that says why (later triages of the same path log none).
-          if (prior && prior === result.path) {
-            const raise = logged.filter(e => e.path === prior && typeof e.why === 'string' && e.why).at(-1);
-            raiseWhy = raise ? raise.why as string : null;
-          }
-        }
-        // J-14: the plan's `delicate`, or --delicate for a task the person calls delicate.
-        const delicate = planned?.delicate === true || has('delicate');
-        const impl = implementerFor(result, wordText, { batch: has('batch'), plan: planned !== null, delicate });
-        const profile = loadConfig(repoDir).profile;
-        const implementer = { ...impl, agent: impl.role ? agentFor(impl.role, profile) : null };
-        const known = readLocal(io.cwd).known;
-        const fresh = names.filter(n => !known.includes(n));
+        const t = triageCore(io, args);
         // `known` mirrors what exists now: new names are added, vanished ones dropped silently.
-        if (fresh.length || known.some(n => !names.includes(n))) updateLocal(io.cwd, s => ({ ...s, known: names }));
-        // Who reviews, by the size reached and the configured profile: printed always and logged for review-prep.
-        const reviewPlan = reviewFor(result.path, result.sensitive, isPerfTask(wordText), { delicate, profile });
-        const review = { ...reviewPlan, reviewers: reviewPlan.reviewers.map(r => ({ ...r, agent: agentFor(r.role, profile) })) };
-        appendEvent(io.cwd, { ts: ts(), kind: 'triage', ...(flag('task') ? { task: flag('task') } : {}), ...(project !== null ? { project } : {}), ...result, ...auto,
-          ...(diff ? { diff: { base: diff.base, files: diff.stat.files.length, lines: diff.stat.lines } } : {}), review });
-        // Output only, like `implementer`: the exact line the session prints, and whether a short plan comes first.
-        // The locale: the flag, else the plan passed with --plan, else the plan under docs/waypoint, else English.
-        const locale = localeArg ?? ((plannedDoc?.plan.locale ?? planLocale(io.cwd))?.toLowerCase().split(/[-_]/)[0] === 'es' ? 'es' : 'en');
-        let line = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh, catalog }, locale as AnnounceLocale);
-        let gate: 'plan' | null = result.path === 'medium' ? 'plan' : null;
-        // After the implementation: who reviews it, by its real size. No short plan comes first any more.
-        let reviewed = {};
-        if (diff) {
-          // The new-validators line `announce` appends, kept after the review line.
-          const bare = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh: [], catalog }, locale as AnnounceLocale);
-          line = announceReview({ path: result.path, files: diff.stat.files.length, lines: diff.stat.lines, review: reviewPlan }, locale as AnnounceLocale)
-            + line.slice(bare.length);
-          gate = null;
-          reviewed = { diff: { base: diff.base, files: diff.stat.files, lines: diff.stat.lines, path: diff.path } };
-        }
-        // forgeDir creates .forge/.gitignore and no step commits it: say so while git lists it as untracked and not
-        // ignored (a repository that ignores .forge/ has opted out).
-        const untracked = listed !== null && lines(git(['ls-files', '--others', '--exclude-standard', '--', '.forge/.gitignore'])).length
-          ? { untracked: ['.forge/.gitignore'] } : {};
-        return json({ ...result, catalog, new: fresh, implementer, announce: line, gate, ...untracked, ...auto, ...reviewed, review });
+        const known = readLocal(io.cwd).known;
+        if (t.fresh.length || known.some(n => !t.names.includes(n))) updateLocal(io.cwd, s => ({ ...s, known: t.names }));
+        appendEvent(io.cwd, { ts: ts(), kind: 'triage', ...(t.task ? { task: t.task } : {}), ...(t.project !== null ? { project: t.project } : {}), ...t.result, ...t.auto,
+          ...(t.diff ? { diff: { base: t.diff.base, files: t.diff.stat.files.length, lines: t.diff.stat.lines } } : {}), review: t.review });
+        // forgeDir has just created .forge/.gitignore and no step commits it: say so while git lists it as untracked and
+        // not ignored (a repository that ignores .forge/ has opted out). Asked after the writes, which may have made it.
+        const git = io.git ?? defaultGit(io.cwd);
+        const untracked = (git(['ls-files', '--others', '--exclude-standard', '--', '.forge/.gitignore']) ?? '').trim() ? { untracked: ['.forge/.gitignore'] } : {};
+        return json({ ...t.output, ...untracked });
       }
       case 'validate': {
         const config = loadConfig(repoDir);
@@ -1500,6 +1555,11 @@ function runCommand(argv: string[], io: Io): Result {
           const files = paths('route set');
           const session = flag('session');
           if (session !== undefined && !isRouteSession(session)) throw new UsageError('route set: --session is not a plain session id');
+          // K1-08: «remember it» keeps the choice as the project's workflow in local.yaml (`off` for none); none without it
+          // writes nothing at all: no route.json and no decision.
+          const remembered: Workflow | null = has('remember') ? (chosen === 'none' ? 'off' : chosen as Workflow) : null;
+          if (remembered) updateLocal(io.cwd, s => ({ ...s, workflow: remembered }));
+          if (chosen === 'none') return json({ written: false, ...(remembered ? { remembered } : {}) });
           let why = by === 'user' ? 'the user chose it' : 'the recommended option for this request';
           if (flag('why-file') !== undefined) {
             try { why = readFileSync(path.resolve(io.cwd, flag('why-file')!), 'utf8').trim() || why; } catch { throw new UsageError('route set: cannot read --why-file'); }
@@ -1513,7 +1573,7 @@ function runCommand(argv: string[], io: Io): Result {
             point: 'route', what: `route of ${task}`, chosen: doc.chosen, why, by,
             undo: { type: 'none', reason: 'the route only chose who does the work: start the task again to choose another' },
           }, { ts: ts(), task, runId: exec?.active ? exec.runId : null });
-          return json({ ...doc, decision: n });
+          return json({ ...doc, decision: n, ...(remembered ? { remembered } : {}) });
         }
         if (sub === 'stage') {
           const stage = flag('stage');
@@ -1526,11 +1586,17 @@ function runCommand(argv: string[], io: Io): Result {
           return json({ updated: true, ...next });
         }
         if (sub !== undefined && !sub.startsWith('--')) {
-          throw new UsageError('usage: forge route --task id --path p [--workflow w] [--autonomy a] [--run-plan] [--build-spec] | set --task id --chosen o --by user|auto [--spec f] [--plan f] [--why-file f] [--session s] | stage --stage s [--task id] [--spec f] [--plan f]');
+          throw new UsageError('usage: forge route --task id (--path p | --text-file f [--path p]) [--locale es|en] [--workflow w] [--autonomy a] [--run-plan] [--build-spec] | set --task id --chosen o --by user|auto [--spec f] [--plan f] [--why-file f] [--session s] [--remember] | stage --stage s [--task id] [--spec f] [--plan f]');
         }
         const task = flag('task');
-        const p = flag('path');
         if (!task || !TASK_ID.test(task)) throw new UsageError('route: --task <id> is required');
+        const loc = flag('locale');
+        if (has('locale') && loc !== 'es' && loc !== 'en') throw new UsageError('route: --locale must be es or en');
+        if (has('text-file') && flag('text-file') === undefined) throw new UsageError('route: --text-file needs a file');
+        // K1-01: with the request's text, a triage that writes nothing (no ledger, status.json nor local.yaml) gives the path.
+        const textFile = flag('text-file');
+        const probed = textFile !== undefined ? triageCore(io, ['--task', task, '--text-file', textFile, ...(loc ? ['--locale', loc] : [])]) : null;
+        const p = flag('path') ?? probed?.result.path;
         if (!p || !(PATH_ORDER as readonly string[]).includes(p)) throw new UsageError(`route: --path must be one of ${PATH_ORDER.join('|')}`);
         const wf = flag('workflow');
         const au = flag('autonomy');
@@ -1541,7 +1607,17 @@ function runCommand(argv: string[], io: Io): Result {
         const now = io.now().getTime();
         const specs = sp.installed ? spSpecs(repoDir, now, { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)) }) : [];
         const plans = sp.installed ? spPlans(repoDir, now, { committedAt: committedAt(io, repoDir) }) : [];
-        return json(routeOptions({ path: p as PathName, prefs, superpowers: { installed: sp.installed, version: sp.version }, specs, plans, runPlan: has('run-plan'), buildSpec: has('build-spec') }));
+        const options = routeOptions({ path: p as PathName, prefs, superpowers: { installed: sp.installed, version: sp.version }, specs, plans, runPlan: has('run-plan'), buildSpec: has('build-spec') });
+        if (!probed) return json(options);
+        // A raised --path only chooses here; forge:run triages again and records the path it follows.
+        const effective = PATH_ORDER.indexOf(p as PathName) > PATH_ORDER.indexOf(probed.result.path) ? p as PathName : probed.result.path;
+        const stepAside = PATH_ORDER.indexOf(effective) <= PATH_ORDER.indexOf('small') && prefs.workflow !== 'forge';
+        const askLocale: 'es' | 'en' = loc === 'es' || loc === 'en' ? loc : (planLocale(io.cwd) ?? '').toLowerCase().split(/[-_]/)[0] === 'es' ? 'es' : 'en';
+        const cleaned = cleanProbe(io.cwd, task, textFile!);
+        return json({
+          ...options, probe: { path: probed.result.path, reasons: probed.result.reasons, sensitive: probed.result.sensitive, files: probed.result.files, announce: probed.output.announce },
+          stepAside, ask: prefs.workflow !== 'ask' || prefs.autonomy === 'auto' ? null : routeAsk(options, askLocale), cleaned,
+        });
       }
       case 'tdd':
         return json(tddFor(io, repoDir));

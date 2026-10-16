@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { firstStage, normalizeRoute, readRoute, routeOptions } from '../src/forge/route.js';
+import { firstStage, normalizeRoute, readRoute, routeAsk, routeOptions } from '../src/forge/route.js';
 import { resolvePrefs } from '../src/forge/prefs.js';
+import { readLocal } from '../src/forge/local.js';
 import { allDecisions } from '../src/forge/decisions.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 
@@ -44,6 +45,14 @@ describe('routeOptions', () => {
   it('passes the preferences, their sources and the specs and plans through', () => {
     const r = routeOptions(input({ prefs: resolvePrefs({ autonomy: 'auto' }, { workflow: 'forge' }, {}), specs: [SPEC], plans: [PLAN] }));
     expect(r).toMatchObject({ workflow: 'forge', autonomy: 'auto', sources: { workflow: 'local', autonomy: 'request' }, specs: [SPEC.path], plans: [{ path: PLAN.path, tasks: 3, done: 1 }] });
+  });
+  it('routeAsk: the method with the recommended option first, and whether to remember it (K1-08)', () => {
+    const es = routeAsk(routeOptions(input({ path: 'large' })), 'es');
+    expect(es.options.map(o => [o.option, o.recommended])).toEqual([['superpowers-design', true], ['forge', false], ['superpowers', false], ['superpowers-plan', false]]);
+    expect(es.options[0].label).toBe('superpowers diseña, forge construye (Recomendado)');
+    expect(es.remember.options.map(o => o.remember)).toEqual([true, false]);
+    const en = routeAsk(routeOptions(input({ superpowers: { installed: false, version: null } })), 'en');
+    expect(en.options.map(o => o.label)).toEqual(['forge (Recommended)', 'without forge']);
   });
 });
 
@@ -121,5 +130,86 @@ describe('forge route CLI', () => {
   });
   it('stage without a route updates nothing', () => {
     expect(JSON.parse(run(['route', 'stage', '--stage', 'done'], io).stdout)).toEqual({ updated: false });
+  });
+  it('route --text-file probes the request without writing anything and asks once in two parts (K1-01, K1-08)', () => {
+    mkdirSync(path.join(root, '.forge', 'work', 't1'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'work', 't1', 'task.txt'), 'redesign the plugin architecture\n');
+    const r = JSON.parse(run(['route', '--task', 't1', '--text-file', '.forge/work/t1/task.txt', '--locale', 'es'], io).stdout);
+    expect(r.probe).toMatchObject({ path: 'large', sensitive: [], announce: expect.any(String) });
+    expect(r).toMatchObject({ stepAside: false, cleaned: true, options: ['forge', 'none'] });
+    expect(r.ask.options[0]).toEqual({ label: 'forge (Recomendado)', option: 'forge', recommended: true });
+    expect(r.ask.remember.options.map((o: { remember: boolean }) => o.remember)).toEqual([true, false]);
+    expect(existsSync(path.join(root, '.forge'))).toBe(false);
+  });
+  it('a probe never deletes what was there: more files in .forge/, or a text file elsewhere (Review Focus 5)', () => {
+    mkdirSync(path.join(root, '.forge', 'work', 't1'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'work', 't1', 'task.txt'), 'fix the typo in a.ts\n');
+    writeFileSync(path.join(root, '.forge', 'local.yaml'), 'known: []\n');
+    expect(JSON.parse(run(['route', '--task', 't1', '--text-file', '.forge/work/t1/task.txt'], io).stdout)).toMatchObject({ cleaned: false, stepAside: true });
+    expect(existsSync(path.join(root, '.forge', 'work', 't1', 'task.txt'))).toBe(true);
+    expect(existsSync(path.join(root, '.forge', 'ledger.jsonl'))).toBe(false);
+    expect(existsSync(path.join(root, '.forge', 'status.json'))).toBe(false);
+    expect(existsSync(path.join(root, '.forge', '.gitignore'))).toBe(false);
+    writeFileSync(path.join(root, 'req.txt'), 'fix the typo in a.ts\n');
+    expect(JSON.parse(run(['route', '--task', 't2', '--text-file', 'req.txt'], io).stdout).cleaned).toBe(false);
+    expect(existsSync(path.join(root, 'req.txt'))).toBe(true);
+  });
+  it('a probe leaves a .forge/ it did not make as it was: a .gitignore, another file or task, the ledger, status.json and local.yaml (Review Focus 5)', () => {
+    const files = (): Record<string, string> => {
+      const out: Record<string, string> = {};
+      const walk = (d: string, rel: string): void => {
+        for (const e of readdirSync(d, { withFileTypes: true })) {
+          const r = rel ? `${rel}/${e.name}` : e.name;
+          if (e.isDirectory()) { out[`${r}/`] = ''; walk(path.join(d, e.name), r); } else out[r] = readFileSync(path.join(d, e.name), 'utf8');
+        }
+      };
+      walk(path.join(root, '.forge'), '');
+      return out;
+    };
+    mkdirSync(path.join(root, '.forge', 'work', 't1'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'work', 't1', 'task.txt'), 'fix the typo in a.ts\n');
+    const probe = (task = 't1') => JSON.parse(run(['route', '--task', task, '--text-file', '.forge/work/t1/task.txt'], io).stdout);
+    const unchanged = (task = 't1') => {
+      const before = files();
+      expect(probe(task).cleaned).toBe(false);
+      expect(files()).toEqual(before);
+    };
+    // A .gitignore: .forge/ was there before the probe.
+    writeFileSync(path.join(root, '.forge', '.gitignore'), '*\n');
+    unchanged();
+    rmSync(path.join(root, '.forge', '.gitignore'));
+    // Another file next to the task file, or another task's directory.
+    writeFileSync(path.join(root, '.forge', 'work', 't1', 'notes.md'), 'x\n');
+    unchanged();
+    rmSync(path.join(root, '.forge', 'work', 't1', 'notes.md'));
+    mkdirSync(path.join(root, '.forge', 'work', 't2'));
+    unchanged();
+    rmSync(path.join(root, '.forge', 'work', 't2'), { recursive: true });
+    // The task file of another task id is not this probe's.
+    unchanged('t2');
+    // A project with a ledger, status.json and local.yaml: the probe reads the ledger (the ratchet) and writes none of them.
+    expect(run(['triage', '--task', 't1', 'redesign the plugin architecture'], io).code).toBe(0);
+    writeFileSync(path.join(root, '.forge', 'local.yaml'), 'known: []\nworkflow: ask\n');
+    expect(Object.keys(files())).toEqual(expect.arrayContaining(['ledger.jsonl', 'status.json', 'local.yaml', '.gitignore']));
+    const before = files();
+    expect(probe()).toMatchObject({ cleaned: false, stepAside: false, probe: { path: 'large', reasons: expect.arrayContaining([expect.stringContaining('ratchet')]) } });
+    expect(files()).toEqual(before);
+  });
+  it('the probe follows a fixed workflow: no question, and workflow forge never steps aside', () => {
+    writeFileSync(path.join(root, 'req.txt'), 'fix the typo in a.ts\n');
+    expect(JSON.parse(run(['route', '--task', 't1', '--text-file', 'req.txt', '--workflow', 'forge'], io).stdout)).toMatchObject({ stepAside: false, ask: null });
+    expect(JSON.parse(run(['route', '--task', 't1', '--text-file', 'req.txt', '--autonomy', 'auto'], io).stdout).ask).toBeNull();
+    expect(JSON.parse(run(['route', '--task', 't1', '--text-file', 'req.txt', '--path', 'medium'], io).stdout).stepAside).toBe(false);
+    expect(run(['route', '--task', 't1', '--text-file'], io).code).toBe(2);
+    // In a directory without .forge/, a probe creates nothing.
+    expect(existsSync(path.join(root, '.forge'))).toBe(false);
+  });
+  it('route set --remember keeps the choice in local.yaml; none without it writes nothing (K1-08)', () => {
+    expect(JSON.parse(run(['route', 'set', '--task', 't1', '--chosen', 'none', '--by', 'user'], io).stdout)).toEqual({ written: false });
+    expect(existsSync(path.join(root, '.forge'))).toBe(false);
+    expect(JSON.parse(run(['route', 'set', '--task', 't1', '--chosen', 'forge', '--by', 'user', '--remember'], io).stdout)).toMatchObject({ chosen: 'forge', remembered: 'forge' });
+    expect(readLocal(root).workflow).toBe('forge');
+    expect(JSON.parse(run(['route', 'set', '--task', 't2', '--chosen', 'none', '--by', 'user', '--remember'], io).stdout)).toEqual({ written: false, remembered: 'off' });
+    expect(readLocal(root).workflow).toBe('off');
   });
 });
