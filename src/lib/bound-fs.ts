@@ -25,10 +25,25 @@ const SHA = /^[0-9a-f]{7,64}$/;
  *  that clears quickly, so the rename is tried again after 1 ms, up to this many times. */
 const RENAME_TRIES = 50;
 const RENAME_BUSY = new Set(['EPERM', 'EACCES', 'EBUSY']);
-const pause1ms = (): void => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1); };
+/** A bound.json found empty or broken is read once more after this long (see readBound). */
+const REREAD_MS = 8;
+const pause = (ms: number): void => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); };
+const pause1ms = (): void => pause(1);
 
 function readText(file: string, max: number): string | null {
   try { return statSync(file).size > max ? null : readFileSync(file, 'utf8'); } catch { return null; }
+}
+/**
+ * A bound.json's binding. The band renews one with $.fs.write, which is not atomic: a reader may find the file empty or
+ * half written for an instant. A text that is empty or does not parse is read once more after REREAD_MS; one still
+ * broken is no binding (spec §4.10). A missing file is none at once.
+ */
+function readBound(file: string, now?: number): BoundDoc | null {
+  const text = readText(file, BOUND_MAX_BYTES);
+  const b = parseBound(text, now);
+  if (b || text === null) return b;
+  pause(REREAD_MS);
+  return parseBound(readText(file, BOUND_MAX_BYTES), now);
 }
 /** A reader sees the old text or the new one, never a part: the text goes to a temporary file that is renamed in. */
 export function writeAtomic(file: string, text: string): void {
@@ -45,9 +60,9 @@ export function writeAtomic(file: string, text: string): void {
   } finally { rmSync(tmp, { force: true }); }
 }
 
-/** A seat's binding: null when it has none, it does not read, or it names another seat. */
+/** A seat's binding: null when it has none, it does not read (twice, see readBound), or it names another seat. */
 export function readBinding(seatDir: string, sid: string, now?: number): BoundDoc | null {
-  const b = parseBound(readText(boundFile(seatDir), BOUND_MAX_BYTES), now);
+  const b = readBound(boundFile(seatDir), now);
   return b && b.sid === sid ? b : null;
 }
 /** Atomic (a temporary file and a rename), as every writer of a seat does. */
@@ -61,7 +76,7 @@ export function checkoutSid(wpDir: string, now?: number): string | null {
     const s = JSON.parse(readFileSync(path.join(wpDir, 'session.json'), 'utf8')) as { sessionId?: unknown } | null;
     if (typeof s?.sessionId === 'string' && s.sessionId) return s.sessionId;
   } catch { /* no session.json: the binding may name the seat */ }
-  return parseBound(readText(boundFile(wpDir), BOUND_MAX_BYTES), now)?.sid ?? null;
+  return readBound(boundFile(wpDir), now)?.sid ?? null;
 }
 
 /** The checkout's seat (when its id is a safe one) and up to MAX_SEATS extra seats, each with its binding. */

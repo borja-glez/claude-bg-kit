@@ -1,7 +1,8 @@
 import { atom, read, update } from 'claude-code';
 import type { Register, Timer } from 'claude-code';
 import { noneBand, type NoticeBand } from './model.js';
-import { join, listOpt, loadBandModel, readOpt, type Engine } from './files.js';
+import { join, listOpt, loadBandModel, nowMs, readOpt, renewBindings, type Engine } from './files.js';
+import { addDismissal, dismissalKey, dismissalUntil, DISMISS_STORE_KEY, isDismissed, normalizeDismissals, type Dismissals } from './notice-dismiss.js';
 import { bandLine, textsFor } from './band-line.js';
 import { applyWrite, artifactId, writeFailed, writesOf } from './mirror.js';
 
@@ -11,6 +12,29 @@ const hidden = atom({ plugin: 'waypoint', key: 'hidden' } as const, false);
 let refreshing = false;
 let timer: Timer | null = null;
 let lensRecheck: Timer | null = null;
+
+// K5-08: the notices dismissed with ×, read from $.store at each session start and after each write.
+let dismissals: Dismissals = {};
+async function loadDismissals($: Engine): Promise<void> {
+  try { dismissals = normalizeDismissals(await $.store.get(DISMISS_STORE_KEY), await nowMs($)); } catch { /* keep what is in memory */ }
+}
+async function rootOf($: Engine): Promise<string> {
+  try { return await $.session.root(); } catch { return ''; }
+}
+// The notice hides at once; the map, without what expired and at most DISMISS_MAX, goes to the store and is read back.
+// When the store refuses it, the notice stays hidden for this process only.
+async function dismissNotice($: Engine, n: NoticeBand): Promise<void> {
+  const now = await nowMs($);
+  let stored: unknown;
+  try { stored = await $.store.get(DISMISS_STORE_KEY); } catch { stored = undefined; }
+  const next = addDismissal({ ...normalizeDismissals(stored, now), ...dismissals }, dismissalKey(await rootOf($), n.project, n.kind, n.key), dismissalUntil(n, now), now);
+  dismissals = next;
+  $.ui.invalidate('ui.render');
+  try {
+    await $.store.set(DISMISS_STORE_KEY, next);
+    await loadDismissals($);
+  } catch { /* hidden for this process only */ }
+}
 
 async function refresh($: Engine): Promise<void> {
   if (refreshing) return;
@@ -56,9 +80,12 @@ async function checkLens($: Engine): Promise<void> {
   if (next !== lens) { lens = next; $.ui.invalidate('ui.render'); }
 }
 
-// The periodic refresh; a running task's minutes change with time alone, so its band is redrawn too.
+// The periodic refresh; a running task's minutes change with time alone, so its band is redrawn too. It never throws:
+// a step that fails (a $.session.root() refused, a read, a write) leaves the band as it was until the next tick.
 async function tick($: Engine): Promise<void> {
-  await checkLens($);
+  try { await checkLens($); } catch { /* ignore */ }
+  // C3: this conversation's binding stays alive while its band runs (at most one write a minute).
+  try { await renewBindings($); } catch { /* the next tick tries again */ }
   await refresh($);
   try {
     const m = await read($, band);
@@ -66,14 +93,19 @@ async function tick($: Engine): Promise<void> {
   } catch { /* ignore */ }
 }
 
+// One timer per environment: a later session start replaces it rather than adding another.
+function startTimer($: Engine): void {
+  timer?.cancel();
+  timer = $.clock.every(30000, () => { void tick($); });
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     try { await update($, hidden, () => false); } catch { /* ignore */ }
+    await loadDismissals($);
     await checkLens($);
     await refresh($);
-    // One timer per environment: a later session start replaces it rather than adding another.
-    timer?.cancel();
-    timer = $.clock.every(30000, () => { void tick($); });
+    startTimer($);
     // lens may register /lens after this start: look again a second later rather than waiting for the tick.
     lensRecheck?.cancel();
     lensRecheck = $.clock.after(1000, () => { lensRecheck = null; void checkLens($); });
@@ -81,11 +113,27 @@ export const register: Register = on => {
   });
 
   on('session.end', ($, e, next) => {
+    // K5-07: /clear and an in-process resume go on under another id and without a session.start: the timers keep
+    // running, as lens's do, and classic.SessionStart below draws the band for the new conversation.
+    if (e.reason === 'clear' || e.reason === 'resume') return next(e);
     timer?.cancel();
     timer = null;
     lensRecheck?.cancel();
     lensRecheck = null;
     return next(e);
+  });
+
+  // K5-07: the conversation that starts (after /clear, a resume or a fork) gets its own role at once: refresh asks
+  // $.session.id() each time. A /clear or a resume is another conversation, so a band hidden with × shows again. A
+  // process whose timer an earlier end stopped gets it back.
+  on('classic.SessionStart', async ($, e, next) => {
+    const r = await next(e);
+    if (e.source === 'clear' || e.source === 'resume') {
+      try { await update($, hidden, () => false); } catch { /* ignore */ }
+    }
+    if (!timer) startTimer($);
+    void refresh($);
+    return r;
   });
 
   on('turn.complete', ($, e, next) => {
@@ -111,6 +159,8 @@ export const register: Register = on => {
       const m = await read($, band);
       const isHidden = await read($, hidden);
       if (isHidden || !m || e.props.hasSurvey || m.mode === 'none') return below;
+      // K5-08: a notice dismissed with × stays hidden for as long as that notice lasts.
+      if (m.mode === 'notice' && isDismissed(dismissals, dismissalKey(await rootOf($), m.project, m.kind, m.key), await nowMs($))) return below;
       const { Box, Text, Button, Link } = $.ui.resolve(e);
       // A running task's minutes and a notice's age are worked out as the band is drawn; the tick redraws only the first.
       const drawnAt = m.mode === 'notice' || (m.mode === 'work' && m.current?.startedAt) ? await $.clock.now() : 0;
@@ -197,6 +247,11 @@ export const register: Register = on => {
                 ...(m.run ? [<Button key="stop-run" label={t.stopRun} onPress={fillStop} />] : []),
                 ...(m.roadmapUrl ? [link(m.roadmapUrl, t.roadmap)] : []),
               ];
+      // × on a notice is kept per checkout, project, kind and subject (K5-08); on the conversation's own band it lasts the process.
+      const notice = m.mode === 'notice' ? m : null;
+      const dismiss = () => {
+        (notice ? dismissNotice($, notice) : update($, hidden, () => true)).catch(() => undefined);
+      };
       return (
         <Box flexDirection="column">
           <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
@@ -205,7 +260,7 @@ export const register: Register = on => {
               : <Text color="claude" wrap="truncate-end">{line}</Text>}
             {controls}
             {lens ? <Button key="panel" label={t.panel} onPress={submit('/lens')} /> : null}
-            <Button key="dismiss" label="×" role="dismiss" onPress={() => { update($, hidden, () => true).catch(() => undefined); }} />
+            <Button key="dismiss" label="×" role="dismiss" onPress={dismiss} />
           </Box>
           {below}
         </Box>

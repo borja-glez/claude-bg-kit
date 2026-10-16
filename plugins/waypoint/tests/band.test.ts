@@ -17,6 +17,14 @@ function recordCommands(on: On, sent: string[]) {
   on('command.run', (_$, e) => { sent.push(`/${e.command} ${e.args}`.trimEnd()); return { text: '' }; });
 }
 
+// The plugin's own store, answered from memory so a test sees what the band keeps; with `fail`, every write is refused.
+function memoryStore(on: On, start: Record<string, unknown> = {}, fail = false): Record<string, unknown> {
+  const data: Record<string, unknown> = { ...start };
+  on('store.get', (_$, e) => ({ value: data[e.key] }));
+  on('store.set', (_$, e) => { if (fail) throw new Error('store refused'); data[e.key] = e.value; return { value: undefined }; });
+  return data;
+}
+
 // What the engine draws of its own beneath the plugin, so a pass (next) is visible.
 function engineBand(on: On) {
   on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
@@ -287,10 +295,13 @@ const FILES: Record<string, string> = {
 const norm = (path: string) => path.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '');
 
 // The conversation looking at the band is `id()` ($.session.id()); what the plugin writes lands in `files`, and its
-// path in `written`.
-function serveFiles(on: On, files: Record<string, string> = { ...FILES }, listed: string[] = [], id: () => string = () => SESSION_ID, written: string[] = []) {
+// path in `written`. $.session.root() answers `root()`, and refuses while it is null.
+function serveFiles(on: On, files: Record<string, string> = { ...FILES }, listed: string[] = [], id: () => string = () => SESSION_ID, written: string[] = [], root: () => string | null = () => ROOT) {
   const entry = (name: string, kind: 'file' | 'dir') => ({ name, kind, size: 0, mtimeMs: 1, isLink: false });
-  on('session.root', () => ({ value: ROOT }));
+  on('session.root', () => {
+    const value = root();
+    return value === null ? { deny: 'no root' } : { value };
+  });
   on('session.id', () => ({ value: id() }));
   on('fs.write', (_$, e) => { written.push(norm(e.path)); files[norm(e.path)] = e.text; return { value: undefined }; });
   on('fs.read', (_$, e) => {
@@ -611,4 +622,214 @@ test('[Close] on a run still active without its coordinator only fills /forge:st
     expect(toasts).toEqual([]);
     await ui.unmount();
   }
+});
+
+test('a /clear or a resume keeps the refresh timer, and the next conversation is drawn with its own role at once (K5-07)', async ($, on) => {
+  engineBottom(on);
+  const listed: string[] = [];
+  const files = { ...FILES };
+  let id = SESSION_ID;
+  serveFiles(on, files, listed, () => id);
+  const clock = mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }));
+  on('classic.SessionStart', () => ({}));
+  const docsListed = () => listed.filter(p => p === `${ROOT}/docs/waypoint`).length;
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  expect(await ui.find({ key: 'next-task' })).toBeDefined();
+  for (const reason of ['resume', 'clear'] as const) {
+    await $.session.end({ reason, sessionId: id, resume: {} as never });
+    const before = docsListed();
+    await clock.advance(30000);
+    expect(docsListed() - before, reason).toBe(1);
+  }
+  // SessionEnd closed the binding; the process goes on as the conversation conv-2, with no session.start.
+  files[`${ROOT}/.waypoint/demo/bound.json`] = BOUND({ seenAt: '2026-10-11T10:05:30.000Z', endedAt: '2026-10-11T10:06:00.000Z', endReason: 'clear' });
+  id = 'conv-2';
+  await $.classic.SessionStart({ source: 'clear' });
+  await ui.redraw();
+  expect(await ui.find({ key: 'resume' })).toBeDefined();
+  expect(await ui.find({ key: 'next-task' })).toBeUndefined();
+  await ui.unmount();
+});
+
+test('a conversation that starts in a process whose timer an end stopped gets one timer back (K5-07)', async ($, on) => {
+  const listed: string[] = [];
+  serveFiles(on, { ...FILES }, listed);
+  const clock = mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }));
+  on('classic.SessionStart', () => ({}));
+  const docsListed = () => listed.filter(p => p === `${ROOT}/docs/waypoint`).length;
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.session.end({ reason: 'logout', sessionId: SESSION_ID, resume: {} as never });
+  let before = docsListed();
+  await clock.advance(30000);
+  expect(docsListed() - before).toBe(0);
+  await $.classic.SessionStart({ source: 'startup' });
+  await $.classic.SessionStart({ source: 'compact' });
+  // Let the refreshes the starts launched finish, short of the timer's 30 s.
+  await clock.advance(1);
+  before = docsListed();
+  await clock.advance(30000);
+  expect(docsListed() - before).toBe(1);
+});
+
+test('a band hidden with × before /clear does not hide what the next conversation is offered (Review Focus 4)', async ($, on) => {
+  engineBottom(on);
+  const files = { ...FILES };
+  let id = SESSION_ID;
+  serveFiles(on, files, [], () => id);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }));
+  on('classic.SessionStart', () => ({}));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  await ui.press({ key: 'dismiss' });
+  expect(await ui.find({ key: 'next-task' })).toBeUndefined();
+  await $.session.end({ reason: 'clear', sessionId: id, resume: {} as never });
+  files[`${ROOT}/.waypoint/demo/bound.json`] = BOUND({ endedAt: '2026-10-11T10:05:00.000Z', endReason: 'clear' });
+  id = 'conv-2';
+  await $.classic.SessionStart({ source: 'clear' });
+  await ui.redraw();
+  expect(await ui.find({ key: 'resume' })).toBeDefined();
+  await ui.unmount();
+});
+
+test("the 30 s tick renews this conversation's binding once a minute, and no other (C3)", async ($, on) => {
+  engineBottom(on);
+  const files: Record<string, string> = { ...FILES, [`${ROOT}/.waypoint/demo/seats/main-2/bound.json`]: BOUND({ sid: 'main-2', claude: 'conv-2', seenAt: '2026-10-11T10:00:00.000Z' }) };
+  const written: string[] = [];
+  serveFiles(on, files, [], () => SESSION_ID, written);
+  const clock = mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await clock.advance(30000);
+  expect(written).toEqual([`${ROOT}/.waypoint/demo/bound.json`]);
+  expect(JSON.parse(files[`${ROOT}/.waypoint/demo/bound.json`]).seenAt).toBe('2026-10-11T10:05:30.000Z');
+  await clock.advance(30000);
+  expect(written).toHaveLength(1);
+  await clock.advance(30000);
+  expect(written).toHaveLength(2);
+  expect(JSON.parse(files[`${ROOT}/.waypoint/demo/seats/main-2/bound.json`]).seenAt).toBe('2026-10-11T10:00:00.000Z');
+});
+
+test('a tick whose reads fail leaves the band as it was, and the next one renews again (C3)', async ($, on) => {
+  engineBottom(on);
+  let rootFails = false;
+  const written: string[] = [];
+  serveFiles(on, { ...FILES }, [], () => SESSION_ID, written, () => (rootFails ? null : ROOT));
+  const clock = mock.clock(on, { now: Date.parse('2026-10-11T10:05:00.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  rootFails = true;
+  await clock.advance(60000);
+  await ui.redraw();
+  expect(written).toEqual([]);
+  expect((await ui.find({ type: 'Text', text: /^● / }))?.text).toMatch(/^● frente backend 1\/2 · T002 API de pedidos · /);
+  expect(await ui.find({ key: 'next-task' })).toBeDefined();
+  rootFails = false;
+  await clock.advance(30000);
+  expect(written).toEqual([`${ROOT}/.waypoint/demo/bound.json`]);
+  await ui.unmount();
+});
+
+test('× on a notice is kept per checkout, project, kind and subject until the notice would end (K5-08)', async ($, on) => {
+  engineBand(on);
+  serveFiles(on, {});
+  const store = memoryStore(on);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  let band = notice({ kind: 'previous', viewer: PREVIOUS });
+  serveBand(on, () => band);
+  const mount = () => $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  let ui = await mount();
+  await ui.press({ key: 'dismiss' });
+  await ui.redraw();
+  expect(store.dismissed).toEqual({ '/repo|demo|previous|task:T002': '2026-10-12T10:00:00.000Z' });
+  expect(await ui.find({ key: 'resume' })).toBeUndefined();
+  expect(await ui.find({ text: 'engine band' })).toBeDefined();
+  await ui.unmount();
+  // A new start reads the store again: still hidden. Another task shows.
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  ui = await mount();
+  expect(await ui.find({ key: 'resume' })).toBeUndefined();
+  await ui.unmount();
+  band = notice({ kind: 'previous', task: 'T003', title: 'Maqueta de carrito', key: 'task:T003', viewer: PREVIOUS });
+  ui = await mount();
+  expect(await ui.find({ key: 'resume' })).toBeDefined();
+  await ui.unmount();
+  // The same task worked by another live session is another notice: it shows.
+  band = notice();
+  ui = await mount();
+  expect(await ui.find({ key: 'other-track' })).toBeDefined();
+  await ui.unmount();
+  // Another live session's notice: hidden for a day from now.
+  band = notice({ task: null, title: null, key: 'seat:main' });
+  ui = await mount();
+  await ui.press({ key: 'dismiss' });
+  await ui.redraw();
+  expect(store.dismissed).toMatchObject({ '/repo|demo|other-live|seat:main': '2026-10-12T10:12:30.000Z' });
+  await ui.unmount();
+});
+
+test('a notice dismissed in an earlier session stays hidden; an expired dismissal or a junk store hides nothing (K5-08, Review Focus 5)', async ($, on) => {
+  engineBand(on);
+  serveFiles(on, {});
+  const store = memoryStore(on, { dismissed: { '/repo|demo|previous|task:T002': '2026-10-12T10:00:00.000Z', '/repo|demo|other-live|seat:main': '2026-10-11T10:00:00.000Z' } });
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  let band = notice({ kind: 'previous', viewer: PREVIOUS });
+  serveBand(on, () => band);
+  const mount = () => $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  let ui = await mount();
+  expect(await ui.find({ key: 'resume' })).toBeUndefined();
+  await ui.unmount();
+  band = notice({ task: null, title: null, key: 'seat:main' });
+  ui = await mount();
+  expect(await ui.find({ key: 'other-track' })).toBeDefined();
+  await ui.unmount();
+  for (const junk of [['/repo|demo|previous|task:T002'], 'nope', { '/repo|demo|previous|task:T002': 'tomorrow' }]) {
+    store.dismissed = junk;
+    await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+    band = notice({ kind: 'previous', viewer: PREVIOUS });
+    ui = await mount();
+    expect(await ui.find({ key: 'resume' }), JSON.stringify(junk)).toBeDefined();
+    await ui.unmount();
+  }
+  // Dismissing another live session's work on T002 does not hide the offer it leaves once it ends.
+  store.dismissed = { '/repo|demo|other-live|task:T002': '2026-10-12T10:12:30.000Z' };
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  band = notice();
+  ui = await mount();
+  expect(await ui.find({ key: 'other-track' })).toBeUndefined();
+  await ui.unmount();
+  band = notice({ kind: 'previous', viewer: PREVIOUS });
+  ui = await mount();
+  expect(await ui.find({ key: 'resume' })).toBeDefined();
+  await ui.unmount();
+});
+
+test('a store that refuses the write still hides the dismissed notice in this process (Review Focus 5)', async ($, on) => {
+  engineBand(on);
+  serveFiles(on, {});
+  memoryStore(on, {}, true);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  serveBand(on, () => notice({ kind: 'previous', viewer: PREVIOUS }));
+  const mount = () => $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  let ui = await mount();
+  await ui.press({ key: 'dismiss' });
+  await ui.redraw();
+  expect(await ui.find({ key: 'resume' })).toBeUndefined();
+  await ui.unmount();
+  ui = await mount();
+  expect(await ui.find({ key: 'resume' })).toBeUndefined();
+  await ui.unmount();
 });
