@@ -8,7 +8,7 @@ import { detectValidators, selectValidators, runValidators, markPreexisting, blo
 import { PATH_ORDER, zonesFromPaths, type PathName, type ReviewRole } from '../triage.js';
 import { parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, repoRelative, type Finding, type Review, type ReviewerName, type FailingValidator, type AskFinding } from '../verdict.js';
 import { roundDecision } from '../round.js';
-import { parseIndex, assignIds, answeredBy, idsOf, recordRound, openIds, closedFor, previousFindings, asPrevious } from '../findings-index.js';
+import { parseIndex, assignIds, answeredBy, idsOf, recordRound, openIds, closedFor, previousFindings, asPrevious, historyLine, renderHandover } from '../findings-index.js';
 import { reviewsOf } from '../loop.js';
 import { buildCase, readShadow, saveShadow, takeBrief } from '../shadow.js';
 import { renderThreatModel } from '../threat-model.js';
@@ -351,7 +351,8 @@ function askOf(ask: AskFinding[], locale: 'es' | 'en') {
  * Every critical and important finding gets its stable id in <dir>/findings-index-<n>.json (J-06), and the verdict
  * applies the blocking table of the review (C-04): it prints reviews {n, max} (C-13) and ask, the question for a security
  * finding that repeats a closed theme (K4-02). --out-of-model and --defer keep ids in the review's overrides.json; the
- * overrides of every review of the brief apply.
+ * overrides of every review of the brief apply. With next fresh-stronger or redo it writes <dir>/handover-<n>-<round>.md
+ * for the new implementer and prints its path as handover (C-15); revert is the git args that undo a redo's attempt (J-08), null otherwise.
  */
 export function reviewClose(args: string[], deps: ReviewDeps): Result {
   const flag = (name: string) => {
@@ -455,7 +456,8 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
     renameSync(indexPath, aside);
     result.reasons.push(`unreadable findings index set aside as ${rel(deps.cwd, aside)}`);
   }
-  writeFileSync(indexPath, JSON.stringify(recordRound(index, round, result, answered), null, 2) + '\n');
+  const indexNow = recordRound(index, round, result, answered);
+  writeFileSync(indexPath, JSON.stringify(indexNow, null, 2) + '\n');
   if (!Array.isArray(rows)) result.reasons.push('no validation recorded');
   if (preexisting.length) result.reasons.push(`already failing on the base commit, not counted: ${preexisting.join(', ')}`);
 
@@ -497,6 +499,28 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
     findings = rel(deps.cwd, findingsPath);
   } else rmSync(findingsPath, { force: true });
 
+  // C-15: a new implementer (fresh-stronger or redo) starts from a handover with the history of the brief's reviews.
+  let handover: string | null = null;
+  if (d.next === 'fresh-stronger' || d.next === 'redo') {
+    const file = path.join(dir, `handover-${n}-${round}.md`);
+    const wrong = Object.values(reviews).filter(r => r?.verdict === 'fail' && r.approach === 'wrong')
+      .flatMap(r => r!.findings.filter(f => f.severity !== 'minor').map(f => f.problem));
+    writeFileSync(file, renderHandover({
+      task, reviews: reviewsCount, brief: rel(deps.cwd, path.join(dir, `brief-${n}.md`)), diff: rel(deps.cwd, path.join(dir, `diff-${n}.patch`)),
+      base: typeof plan.base === 'string' ? plan.base : '', head: readText(path.join(roundDir, 'head.txt'))?.trim() ?? '',
+      open: [...result.critical, ...result.important], residual: result.deferred, history: historyLine(indexNow),
+      validators: failing.map(v => v.validator), report: rel(deps.cwd, path.join(dir, `report-${n}.txt`)),
+      redo: d.next === 'redo' ? { reasons: wrong } : null,
+    }));
+    handover = rel(deps.cwd, file);
+  }
+  // J-08: a redo undoes the attempt without rewriting history; the skill runs git with these args as printed. Null when
+  // HEAD is still BASE, or when the plan does not say what BASE was (one written by forge 0.17).
+  const planBase = typeof plan.base === 'string' ? plan.base : '';
+  const headNow = (deps.git(['rev-parse', 'HEAD']) ?? '').trim();
+  const revert = d.next === 'redo' && planBase && headNow && headNow !== planBase
+    ? { base: planBase, head: headNow, args: ['-C', deps.repoDir, 'revert', '--no-edit', `${planBase}..HEAD`] } : null;
+
   // The shadow twins (xhigh, in shadow/) never reach the verdict: each one with a file is paired with its high reviewer
   // and the case saved in .forge/shadow.json, replacing the one an earlier close of this round saved. A missing file or
   // one parseReview flags invalid (it would read as no blocking findings) saves no case: it is listed in shadowSkipped.
@@ -528,7 +552,7 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   }
   return json({
     action: result.action, score: result.score, next: d.next, last: d.last, implementer: d.implementer, reviews: reviewsCount,
-    findings, deferred: result.deferred, ask: result.ask.length ? askOf(result.ask, locale === 'es' ? 'es' : 'en') : null,
+    findings, deferred: result.deferred, ask: result.ask.length ? askOf(result.ask, locale === 'es' ? 'es' : 'en') : null, handover, revert,
     invalid: result.reviewers.filter(r => r.invalid).map(r => r.name),
     incomplete: result.reviewers.filter(r => r.incomplete).map(r => r.name), round, reasons: result.reasons, ...(twins.length ? { shadow: twins } : {}), ...(shadowSkipped.length ? { shadowSkipped } : {}),
   });

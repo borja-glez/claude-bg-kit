@@ -200,3 +200,40 @@ export function asPrevious(f: IndexedFinding, withReviewer = false): Finding & {
     ...(f.line !== undefined ? { line: f.line } : {}), problem: f.problem, ...(f.fix ? { fix: f.fix } : {}), ...(f.origin ? { origin: f.origin } : {}),
   };
 }
+
+/** The reviews of the brief in one line for the handover: `1: F1 F2 F3 open · 2: F1 F2 closed, F3 open, F5 residual`. */
+export function historyLine(index: FindingsIndex): string {
+  return index.rounds.map(r => {
+    const groups = (['closed', 'open', 'residual'] as const)
+      .map(s => [s, r.findings.filter(f => f.status === s).map(f => f.id)] as const)
+      .filter(([, ids]) => ids.length);
+    return `${r.round}: ${groups.length ? groups.map(([s, ids]) => `${ids.join(' ')} ${s}`).join(', ') : 'nothing open'}`;
+  }).join(' · ');
+}
+
+/** What a new implementer (fresh-stronger or redo) gets besides the brief (C-15, §4.9). */
+export interface HandoverInput {
+  task: string; reviews: { n: number; max: number }; brief: string; diff: string; base: string; head: string;
+  open: Finding[]; residual: Finding[]; history: string; validators: string[]; report: string; redo: { reasons: string[] } | null;
+}
+
+const oneLine = (s: string) => s.replace(/\s+/g, ' ').trim();
+const where = (f: Finding) => (f.file ? (f.line !== undefined ? ` ${f.file}:${f.line}` : ` ${f.file}`) : '');
+
+/** The handover note, in English for the model: what to fix, what not to chase, what the reviews already closed. */
+export function renderHandover(h: HandoverInput): string {
+  const lines = [
+    `# Handover: ${h.task}, review ${h.reviews.n} of ${h.reviews.max}${h.redo ? ' (the attempt was reverted: start again from the brief with another approach)' : ''}`,
+    `- Brief: ${h.brief} · Whole diff so far: ${h.diff} (base ${h.base || 'unknown'}, head ${h.head || 'unknown'})`,
+    ...(h.redo ? [`- Why it was redone (approach: wrong): ${h.redo.reasons.length ? h.redo.reasons.map(oneLine).join('; ') : 'no reason given'}`] : []),
+    `- Open findings to fix:${h.open.length ? '' : ' none'}`,
+    ...h.open.map(f => `  - ${f.id ?? '-'} [${f.severity}]${where(f)} — ${oneLine(f.problem)}${f.fix ? ` — ${oneLine(f.fix)}` : ''}`),
+    `- Residual, do not chase:${h.residual.length ? '' : ' none'}`,
+    ...h.residual.map(f => `  - ${f.id ?? '-'} [${f.residual ?? f.severity}]${where(f)} ${oneLine(f.problem)}`),
+    `- Reviews so far: ${h.history || 'none'}`,
+    `- Validators now: ${h.validators.length ? `failing ${h.validators.join(', ')}` : 'green'}`,
+    `- Earlier reports: ${h.report} (its Fix round lines say what was tried)`,
+    'Start from the current HEAD and do not redo what is closed.',
+  ];
+  return lines.join('\n') + '\n';
+}
