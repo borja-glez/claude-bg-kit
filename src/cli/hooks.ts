@@ -130,13 +130,18 @@ function ownSeat(ctx: Ctx): { seat: Seat; bound: BoundDoc } | null {
 /**
  * Until the band renews it (wave 2b), the owner's own hooks keep its binding alive: seenAt moves at most once a minute,
  * re-read first so a takeover written meanwhile is never undone. `reopen` (a resumed or compacted conversation, §4.1)
- * also clears its end and records this process's pid.
+ * also clears its end and records this process's pid, unless the end was a release: that one is deliberate, and no
+ * SessionEnd comes before a compact, so only a new bind undoes it. A renewal that cannot be written is left for the
+ * next hook: it never stops what the hook records.
  */
 function touch(seat: Seat, claude: string, now: Date, reopen: boolean, env: Io['env']): void {
-  const cur = parseBound(read(boundFile(seat.dir)), now.getTime());
-  if (!cur || cur.sid !== seat.sid || cur.claude !== claude) return;
-  if (!reopen && (cur.endedAt !== null || now.getTime() - Date.parse(cur.seenAt) < RENEW_MS)) return;
-  writeBinding(boundFile(seat.dir), { ...cur, seenAt: now.toISOString(), ...(reopen ? { endedAt: null, endReason: null, pid: pidFromEnv(env) } : {}) });
+  try {
+    const cur = parseBound(read(boundFile(seat.dir)), now.getTime());
+    if (!cur || cur.sid !== seat.sid || cur.claude !== claude) return;
+    const again = reopen && cur.endReason !== 'released';
+    if (!again && (cur.endedAt !== null || now.getTime() - Date.parse(cur.seenAt) < RENEW_MS)) return;
+    writeBinding(boundFile(seat.dir), { ...cur, seenAt: now.toISOString(), ...(again ? { endedAt: null, endReason: null, pid: pidFromEnv(env) } : {}) });
+  } catch { /* the binding keeps its last renewal */ }
 }
 
 function readPlan(docDir: string): Plan | null {

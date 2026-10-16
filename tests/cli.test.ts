@@ -786,7 +786,7 @@ describe('classic hooks', () => {
   const pending = (seatDir = wp()) => path.join(seatDir, 'pending-commits.jsonl');
   const pendingLines = (seatDir = wp()) => (existsSync(pending(seatDir)) ? readFileSync(pending(seatDir), 'utf8').trim().split('\n').filter(Boolean) : []);
   // A real repository in the test dir.
-  const gitAt = (cwd: string, ...a: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], { cwd, encoding: 'utf8' }).trim();
+  const gitAt = (cwd: string, ...a: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false', ...a], { cwd, encoding: 'utf8' }).trim();
   const git = (...a: string[]) => gitAt(dir, ...a);
   const gitInit = () => { git('init', '-q'); git('add', '.'); git('commit', '-q', '-m', 'init'); };
   const commitFile = (name: string) => { writeFileSync(path.join(dir, name), name); git('add', name); git('commit', '-q', '-m', `add ${name}`); return git('rev-parse', 'HEAD'); };
@@ -865,6 +865,15 @@ describe('classic hooks', () => {
       bindAs('A', { endedAt: ago(5), endReason: 'other' });
       expect(context(hook('session-start', { session_id: 'A', source: 'compact' }))).toContain('Current task: none');
       expect(bound().endedAt).toBeNull();
+    });
+    it('a released binding stays released through a compact or a resume: neither reopened nor renewed, and the seat stays free', () => {
+      setup();
+      for (const source of ['compact', 'resume']) {
+        bindAs('A', { seenAt: ago(4), endedAt: ago(2), endReason: 'released' });
+        hook('session-start', { session_id: 'A', source, seconds_since_last_response: 7300 });
+        expect(bound(), source).toMatchObject({ claude: 'A', seenAt: ago(4), endedAt: ago(2), endReason: 'released' });
+      }
+      expect(run(['bind', 'docs/waypoint/demo-shop/plan.yaml', '--via', 'work', '--claude', 'B'], { ...io, env: {} }).code).toBe(0);
     });
     it('the coordinator and a member of the execution hear from forge only, and so does anyone else (B-10, K5-10)', () => {
       setup(); bindAs('claude-member', { via: 'forge-member' });
@@ -1011,6 +1020,63 @@ describe('classic hooks', () => {
       expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([there]);
       expect(Object.keys(JSON.parse(readFileSync(wp('last-head.json'), 'utf8')).heads)).toHaveLength(2);
     });
+    it('records at most 20 commits per call: the newest, oldest first', () => {
+      setup(); gitInit(); bindAs('A'); ownTask('T002');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      for (let i = 1; i <= 22; i++) git('commit', '-q', '--allow-empty', '-m', `c${i}`);
+      commit('A');
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual(git('rev-list', '--max-count=20', 'HEAD').split('\n').reverse());
+    });
+    it('a reset or a rebase drops the lines of the commits HEAD no longer reaches', () => {
+      setup(); gitInit(); bindAs('A'); ownTask('T002');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      const a = commitFile('a.txt');
+      commit('A');
+      const b = commitFile('b.txt');
+      commit('A');
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([a, b]);
+      git('reset', '-q', '--hard', 'HEAD~1');
+      commit('A', 'git reset --hard HEAD~1');
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([a]);
+      const c = commitFile('c.txt');
+      commit('A');
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([a, c]);
+      // a is dropped from under c, which is replayed onto the base with a new sha.
+      git('rebase', '-q', '--onto', 'HEAD~2', 'HEAD~1');
+      const replayed = git('rev-parse', 'HEAD');
+      commit('A', 'git rebase --onto HEAD~2 HEAD~1');
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([replayed]);
+    });
+    it('a renewal that cannot be written never drops a commit, nor the reminder', () => {
+      setup(); gitInit(); bindAs('A'); ownTask('T002');
+      hook('session-start', { session_id: 'A', cwd: dir });
+      bindAs('A', { seenAt: ago(4) });
+      // bound.json can no longer be replaced: the temporary file writeAtomic writes is a directory.
+      mkdirSync(wp(`bound.json.${process.pid}.tmp`));
+      const sha = commitFile('a.txt');
+      commit('A');
+      expect(pendingLines().map(l => JSON.parse(l).sha)).toEqual([sha]);
+      expect(bound().seenAt).toBe(ago(4));
+      ownTask('T002', 'backend', 'done');
+      expect(JSON.parse(hook('stop', { session_id: 'A' }).stdout).decision).toBe('block');
+      expect(bound().seenAt).toBe(ago(4));
+    });
+    it('an owner by execution records nothing: forge records its commits through integrate (§4.3)', () => {
+      setup(); gitInit(); ownTask('T002');
+      const T = ago(10);
+      mkdirSync(path.join(dir, '.forge', 'members'), { recursive: true });
+      writeFileSync(path.join(dir, '.forge', 'execution.json'), JSON.stringify({ runId: 'r1', kind: 'plan', mode: 'sessions', parallel: 2, project: 'demo-shop', base: 'main', branch: 'forge/run-demo-shop', mergeOnFinish: false,
+        coordinator: 'main', hookSession: 'claude-coord', active: true, stopReason: null, stallReason: null, startedAt: T, lastStepAt: T, lastBlockStep: null, sleepUntil: null, tasks: {} }));
+      writeFileSync(path.join(dir, '.forge', 'members', 'backend.json'), JSON.stringify({ sessionId: 'backend', role: 'executor', runId: 'r1', task: 'T002', name: null, since: T, hookSession: 'claude-member' }));
+      for (const s of ['claude-coord', 'claude-member']) {
+        bindAs(s, { via: 'forge-member' });
+        hook('session-start', { session_id: s, cwd: dir });
+        commitFile(`${s}.txt`);
+        commit(s);
+      }
+      expect(pendingLines()).toHaveLength(0);
+      expect(existsSync(wp('last-head.json'))).toBe(false);
+    });
     it('another session records nothing, and its commits never reach the seat (A-02)', () => {
       setup(); gitInit(); bindAs('A'); ownTask('T002');
       hook('session-start', { session_id: 'A', cwd: dir });
@@ -1108,6 +1174,19 @@ describe('classic hooks', () => {
           bindAs(s, { via: 'forge-run' });
           expect(blocks(s), s).toBe(false);
         }
+        bindAs('owner');
+        expect(blocks('owner')).toBe(true);
+      });
+      it("an active execution of another project, or the checkout's ephemeral run, still steps its own sessions: no reminder for them", () => {
+        forge('execution.json', exec({ project: 'other-shop' }));
+        forge('members/m1.json', { sessionId: 'm1', role: 'executor', runId: 'r1', task: 'T002', name: null, since: T, hookSession: 'claude-member' });
+        for (const s of ['claude-coord', 'claude-member']) {
+          bindAs(s);
+          expect(blocks(s), s).toBe(false);
+        }
+        forge('execution.json', exec({ kind: 'ephemeral', project: 'scratch' }));
+        bindAs('claude-coord');
+        expect(blocks('claude-coord')).toBe(false);
         bindAs('owner');
         expect(blocks('owner')).toBe(true);
       });
