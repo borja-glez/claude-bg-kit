@@ -1,5 +1,5 @@
 import { pairFindings } from './finding-match.js';
-import type { ClosedFinding, Finding, Origin, Residual, Review, ReviewerName, VerdictResult } from './verdict.js';
+import { breaksRubric, type ClosedFinding, type Finding, type Origin, type Residual, type Review, type ReviewerName, type VerdictResult } from './verdict.js';
 
 // The findings index of a brief (J-06, §4.7): `<dir>/findings-index-<n>.json`, written by review-close. Every critical or
 // important finding keeps one id (F1, F2…) across the brief's reviews, so the loop tells a finding still open from a new
@@ -108,12 +108,12 @@ export function assignIds(index: FindingsIndex, round: number, reviews: Partial<
   return out;
 }
 
-/** The reviewers whose result counts for closing findings: not abstaining, not invalid, and not a fail without a critical
- *  or important finding (the rubric, J-05). */
+/** The reviewers whose result counts for closing findings: not abstaining, not invalid, and not breaking the verdict's
+ *  rubric (breaksRubric, J-05). */
 export function answeredBy(reviews: Partial<Record<ReviewerName, Review>>): ReviewerName[] {
   return REVIEWERS.filter(n => {
     const r = reviews[n];
-    return !!r && r.verdict !== 'abstain' && r.invalid !== true && !(r.verdict === 'fail' && !r.findings.some(f => f.severity !== 'minor'));
+    return !!r && r.verdict !== 'abstain' && r.invalid !== true && !breaksRubric(r);
   });
 }
 

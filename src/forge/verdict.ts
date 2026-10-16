@@ -261,6 +261,11 @@ export function verifyReview(v: VerifyFile | null): Review {
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
 const isEvidence = (f: Finding) => !!f.file?.trim() && !!f.problem.trim();
 
+/** J-05, the one rubric: a fail without an important finding or a critical with evidence. Such a review does not score,
+ *  is invalid (synthesize) and closes no finding (answeredBy in findings-index.ts). */
+export const breaksRubric = (r: Review): boolean =>
+  r.verdict === 'fail' && !r.findings.some(f => f.severity === 'important' || (f.severity === 'critical' && isEvidence(f)));
+
 // pass: 0.7 + 0.3c. fail with a critical/important finding: 0.6 - 0.1c. fail with the wrong approach
 // or with nothing concrete to fix: 0.5 - 0.5c.
 function reviewScore(r: Review): number {
@@ -294,8 +299,7 @@ export function synthesize(reviews: Partial<Record<ReviewerName, Review>>, weigh
   const last = opts.last === true;
   const hunks = opts.fixHunks ?? {};
   // J-05: a fail without an important finding or a critical with evidence breaks the rubric.
-  const rubric = names.filter(n => reviews[n]!.verdict === 'fail'
-    && !reviews[n]!.findings.some(f => f.severity === 'important' || (f.severity === 'critical' && isEvidence(f))));
+  const rubric = names.filter(n => breaksRubric(reviews[n]!));
   const rv: Partial<Record<ReviewerName, Review>> = {};
   for (const n of names) {
     const x = reviews[n]!;

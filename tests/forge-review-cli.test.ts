@@ -769,6 +769,22 @@ describe('forge review-close', () => {
     expect(JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8')).rounds.map((r: { round: number }) => r.round)).toEqual([2]);
   });
 
+  it('a reviewer that breaks the rubric closes nothing: its finding left open stays open in the index (I3)', () => {
+    noExpress();
+    prep();
+    write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'wrong two' }] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    close();
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo fixed\n');
+    git('commit', '-q', '-am', 'fix');
+    prep();
+    write(r2(), 'correctness', { verdict: 'fail', confidence: 0.9, findings: [{ severity: 'critical', problem: 'vague' }] });
+    write(r2(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    expect(JSON.parse(close().stdout).invalid).toEqual(['correctness']);
+    const index = JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8'));
+    expect(index.rounds[1].findings.map((f: { id: string; status: string }) => [f.id, f.status])).toEqual([['F1', 'open']]);
+  });
+
   it('round 2: a finding still open whose reviewer copies its id but calls it untouched is previous and blocks (J-06)', () => {
     noExpress();
     prep();
@@ -1136,6 +1152,28 @@ describe('the express review (measure 7)', () => {
     green();
     expect(JSON.parse(close().stdout)).toMatchObject({ action: 'accept', express: true });
     expect(indexRound(2)).toEqual([expect.objectContaining({ id: 'F1', reviewer: 'perf', status: 'closed' })]);
+  });
+
+  // A triage with perf as a third reviewer; review 1 has perf fail with F1 on b.txt:20 (correctness and security pass).
+  const withPerf = () => appendEvent(root, { ts: '2026-10-14T09:30:00.000Z', kind: 'triage', task: 'T1', path: 'medium', sensitive: ['auth'],
+    review: { ...review, flags: ['--sensitive', '--perf'], reviewers: [...review.reviewers, { role: 'review-perf', model: null, effort: 'medium', agent: 'forge-review-perf' }] } });
+
+  it('an express correctness that breaks the rubric (a fail whose only finding is a critical without a file) answers nothing: held, never an accept (I3)', () => {
+    withPerf();
+    prep();
+    write(r1(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+    write(r1(), 'security', { verdict: 'pass', confidence: 0.9, findings: [] });
+    write(r1(), 'perf', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'b.txt', line: 20, problem: 'slow loop over b' }] });
+    expect(JSON.parse(close().stdout).action).toBe('fix');
+    writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo faster\n');
+    git('commit', '-q', '-am', 'fix');
+    expect(JSON.parse(prep().stdout)).toMatchObject({ express: true, delegated: ['perf'] });
+    write(r2(), 'correctness', { verdict: 'fail', confidence: 0.9, findings: [{ severity: 'critical', problem: 'something looks off somewhere' }] });
+    green();
+    const out = JSON.parse(close().stdout);
+    expect(out).toMatchObject({ action: 'fix', express: true, invalid: ['correctness'] });
+    expect(out.reasons.some((x: string) => /correctness did not answer/.test(x))).toBe(true);
+    expect(indexRound(2)).toEqual([expect.objectContaining({ id: 'F1', reviewer: 'perf', status: 'open' })]);
   });
 
   it('with --no-cache the validate command it prints skips the cache too', () => {

@@ -74,6 +74,11 @@ describe('findings index (J-06)', () => {
     expect([...idsOf({ correctness: fail([imp('a', { id: 'F2' }), imp('b')]) })]).toEqual(['F2']);
   });
 
+  it('answeredBy applies the verdict\'s rubric: a fail whose only finding is a critical without a file breaks it and answers nothing (J-05)', () => {
+    expect(answeredBy({ correctness: fail([{ severity: 'critical', problem: 'something looks off somewhere' }]), security: pass })).toEqual(['security']);
+    expect(answeredBy({ correctness: fail([{ severity: 'critical', file: 'src/a.ts', problem: 'crash' }]) })).toEqual(['correctness']);
+  });
+
   it('closedFor lists what earlier reviews closed and what this one is closing, with the last review that had it open', () => {
     const one = review(empty(), 1, { correctness: fail([imp('a')]) }).index;
     expect(closedFor(one, 2, new Set(), ['correctness'])).toEqual({ correctness: [expect.objectContaining({ id: 'F1', reviewer: 'correctness', problem: 'a', round: 1 })] });

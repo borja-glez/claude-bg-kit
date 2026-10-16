@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, parseHunks, correctOrigin, type Review, type Finding, type ClosedFinding, type RoundOptions } from '../src/forge/verdict.js';
+import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, parseHunks, correctOrigin, breaksRubric, type Review, type Finding, type ClosedFinding, type RoundOptions } from '../src/forge/verdict.js';
 
 const pass = (confidence = 1, findings: Review['findings'] = []): Review => ({ verdict: 'pass', confidence, findings });
 const fail = (confidence = 1, findings: Review['findings'] = []): Review => ({ verdict: 'fail', confidence, findings });
@@ -493,6 +493,16 @@ describe('what blocks in each review (C-04, C-06, J-05, J-06, K4-02, K4-09)', ()
     expect(r.reasons).toContain('the last review accepts a fix with green validators and no critical (rule 7)');
     expect(r.reasons.some(x => x.startsWith('accepted at the cap'))).toBe(false);
     expect(r.deferred).toEqual([expect.objectContaining({ id: 'F3', residual: 'docs' })]);
+  });
+
+  it('breaksRubric: a fail without an important finding or a critical with evidence; never a pass or an abstention (J-05)', () => {
+    expect(breaksRubric(fail(0.9, [{ severity: 'critical', problem: 'vibes' }]))).toBe(true);
+    expect(breaksRubric(fail(0.9, [{ severity: 'minor', problem: 'naming' }]))).toBe(true);
+    expect(breaksRubric(fail(0.9, []))).toBe(true);
+    expect(breaksRubric(fail(0.9, [{ severity: 'critical', file: 'src/a.ts', problem: 'crash' }]))).toBe(false);
+    expect(breaksRubric(fail(0.9, [{ severity: 'important', problem: 'no file but important' }]))).toBe(false);
+    expect(breaksRubric(pass(1, [{ severity: 'critical', problem: 'vibes' }]))).toBe(false);
+    expect(breaksRubric({ verdict: 'abstain', confidence: 0, findings: [] })).toBe(false);
   });
 
   it('a fail whose only non-minor finding is a critical without evidence breaks the rubric too; a pass carrying one still accepts (J-05)', () => {
