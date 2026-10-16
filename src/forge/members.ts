@@ -3,6 +3,7 @@ import path from 'node:path';
 import { forgeDir } from './ledger.js';
 import { isPlanId } from '../lib/plan.js';
 import { isSafeId } from '../lib/execution-state.js';
+import { memberOfHook } from '../lib/forge-activity.js';
 
 export type MemberRole = 'executor' | 'manual';
 /**
@@ -65,10 +66,10 @@ export function findMemberByHook(main: string, hookSessionId: string, runId: str
 /**
  * The member of `runId` a hook call comes from: by its recorded hook id, else by a direct lookup for a member whose
  * waypoint SID equals the hook id and that recorded no other hook id (a session that joined with the same id for both).
+ * The rule is memberOfHook (src/lib/forge-activity.ts), shared with waypoint's Stop hook.
  */
 export function memberForHook(main: string, hookSessionId: string, runId: string): MemberDoc | null {
-  const byHook = findMemberByHook(main, hookSessionId, runId);
-  if (byHook) return byHook;
+  if (!isMemberId(hookSessionId)) return null;
   const direct = readMember(main, hookSessionId);
-  return direct && direct.runId === runId && (direct.hookSession === null || direct.hookSession === hookSessionId) ? direct : null;
+  return memberOfHook([...listMembers(main, runId), ...(direct ? [direct] : [])], hookSessionId, runId);
 }

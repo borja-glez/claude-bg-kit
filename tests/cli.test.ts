@@ -747,6 +747,55 @@ describe('classic hooks', () => {
     expect(out.reason).toContain('0 commit(s) / 1 queued');
     expect(hook('stop', {}).stdout.trim()).toBe('');
   });
+
+  describe('stop during a forge execution (A-07)', () => {
+    const T = '2026-10-11T10:00:00.000Z';
+    const forge = (file: string, v: unknown) => {
+      mkdirSync(path.dirname(path.join(dir, '.forge', file)), { recursive: true });
+      writeFileSync(path.join(dir, '.forge', file), typeof v === 'string' ? v : JSON.stringify(v));
+    };
+    const exec = (over: Record<string, unknown> = {}) => ({
+      runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'demo-shop', base: 'main', branch: 'forge/run-demo-shop', mergeOnFinish: false,
+      coordinator: 'main', hookSession: 'claude-coord', active: true, stopReason: null, stallReason: null, startedAt: T, lastStepAt: null,
+      lastBlockStep: null, sleepUntil: null, tasks: {}, ...over,
+    });
+    const blocks = (sessionId: string) => hook('stop', { session_id: sessionId }).stdout.includes('"decision":"block"');
+    beforeEach(() => {
+      setup({ sessionId: 'backend', track: 'backend' });
+      writeFileSync(pending(), '{"ts":"x","task":"T001","command":"git commit","sha":"a"}\n');
+    });
+    it('does not block the coordinator of an active execution, and still blocks another session', () => {
+      forge('execution.json', exec());
+      expect(blocks('claude-coord')).toBe(false);
+      expect(blocks('someone-else')).toBe(true);
+    });
+    it('does not block a member of the execution, nor the session of an active infinite run', () => {
+      forge('execution.json', exec());
+      forge('members/backend.json', { sessionId: 'backend', role: 'executor', runId: 'r1', task: 'T002', name: null, since: T, hookSession: 'claude-member' });
+      forge('run.json', { mode: 'infinite', active: true, startedAt: T, budget: { cycles: 3 }, cycle: 0, noProgress: 0, lastError: null, repeatedError: false, lastBlockEvents: null, queueMax: 10, sessionId: 'claude-inf', blocksSinceCycle: 0 });
+      expect(blocks('claude-member')).toBe(false);
+      expect(blocks('claude-inf')).toBe(false);
+    });
+    it('an inactive execution or a broken execution.json gives no role: it blocks as before', () => {
+      forge('execution.json', exec({ active: false, stopReason: 'stopped' }));
+      expect(blocks('claude-coord')).toBe(true);
+      forge('execution.json', '{"runId":');
+      writeFileSync(pending(), '{"ts":"y","task":"T001","command":"git commit","sha":"b"}\n');
+      expect(blocks('claude-coord')).toBe(true);
+    });
+    it('the commits of the task the session has in progress do not count; the others still do', () => {
+      writeFileSync(path.join(wp(), 'session.json'), JSON.stringify({ sessionId: 'backend', track: 'backend', currentTask: 'T001' }));
+      mkdirSync(path.join(wp(), 'dbcache', 'state'), { recursive: true });
+      writeFileSync(path.join(wp(), 'dbcache', 'state', 'T001.json'), JSON.stringify({ status: 'in_progress', owner: 'backend' }));
+      expect(blocks('s1')).toBe(false);
+      writeFileSync(pending(), '{"ts":"x","task":"T001","command":"git commit","sha":"a"}\n{"ts":"y","task":"T002","command":"git commit","sha":"b"}\n');
+      const out = JSON.parse(hook('stop', { session_id: 's1' }).stdout);
+      expect(out.reason).toContain('1 commit(s)');
+      // Once the task is done, its commits count again.
+      writeFileSync(path.join(wp(), 'dbcache', 'state', 'T001.json'), JSON.stringify({ status: 'done', owner: 'backend' }));
+      expect(JSON.parse(hook('stop', { session_id: 's1' }).stdout).reason).toContain('2 commit(s)');
+    });
+  });
 });
 
 describe('notes command', () => {

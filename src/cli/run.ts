@@ -18,6 +18,8 @@ import { computeMetrics } from '../lib/metrics.js';
 import { normalizeNote, notesSince, noteLines } from '../lib/notes.js';
 import { pickProject } from '../mod/model.js';
 import { BRANCH_RE, mainWorktreeFrom } from '../lib/worktree.js';
+import { mainCheckoutFrom } from '../lib/main-checkout.js';
+import { forgeActivityFrom, forgeRoleOf, MAX_MEMBER_FILES, type ForgeActivity } from '../lib/forge-activity.js';
 import { planLocale, replyIn } from '../lib/locale.js';
 import { launchRun, EFFORTS, MODELS, type Launcher, type Effort, type Model } from '../lib/launcher.js';
 import { roadmapCapabilities, sharingNotice, syncSummary } from '../lib/publish.js';
@@ -531,9 +533,24 @@ function lines(file: string): string[] {
 
 const nonEmpty = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v : undefined);
 
+/**
+ * A-07: what forge is doing in the main checkout of `root`, read as texts (execution.json, at most MAX_MEMBER_FILES
+ * member files, run.json) and interpreted in src/lib: waypoint never imports forge. Nothing is migrated or written.
+ */
+function readForgeActivity(root: string): ForgeActivity {
+  const read = (f: string): string | null => { try { return readFileSync(f, 'utf8'); } catch { return null; } };
+  const main = mainCheckoutFrom(root, read(path.join(root, '.git')));
+  const dir = path.join(main, '.forge', 'members');
+  let names: string[] = [];
+  try { names = readdirSync(dir).filter(f => f.endsWith('.json')).slice(0, MAX_MEMBER_FILES); } catch { names = []; }
+  return forgeActivityFrom({
+    execution: read(path.join(main, '.forge', 'execution.json')), members: names.map(n => read(path.join(dir, n))), run: read(path.join(main, '.forge', 'run.json')),
+  });
+}
+
 // Classic hooks: any failure yields empty output so a broken hook never disturbs the session.
 function runHook(sub: string | undefined, io: Io): string {
-  let input: { cwd?: unknown; stop_hook_active?: boolean; tool_input?: { command?: unknown } } = {};
+  let input: { cwd?: unknown; stop_hook_active?: boolean; session_id?: unknown; tool_input?: { command?: unknown } } = {};
   try { const v = JSON.parse(io.stdin ?? ''); if (v && typeof v === 'object') input = v; else return ''; } catch { return ''; /* unreadable input: say nothing (never risk a stop loop) */ }
   // Cheap check first: most Bash calls are not commits and must not pay for project discovery.
   const cmd = input.tool_input?.command;
@@ -563,7 +580,17 @@ function runHook(sub: string | undefined, io: Io): string {
       return Object.entries(states).find(([, st]) => (st.status === 'in_progress' || st.status === 'claimed') && st.owner === s.sessionId)?.[0] ?? null;
     } catch { return null; }
   };
-  const head = (): string => execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  // A-07: the task the session has in progress (claimed or in progress in the state cache): its commits are recorded
+  // with its done batch, so the Stop hook does not count them.
+  const ongoingTask = (s: { sessionId?: string; currentTask?: string }): string | null => {
+    const t = currentTask(s);
+    if (!t || !isPlanId(t)) return null;
+    try {
+      const st = JSON.parse(readFileSync(path.join(wp, 'dbcache', 'state', `${t}.json`), 'utf8')) as TaskState;
+      return st.status === 'in_progress' || st.status === 'claimed' ? t : null;
+    } catch { return null; }
+  };
+  const head =(): string => execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   const headFile = path.join(wp, 'last-head');
   switch (sub) {
     case 'session-start': {
@@ -607,7 +634,12 @@ function runHook(sub: string | undefined, io: Io): string {
     }
     case 'stop': {
       if (input.stop_hook_active === true) return '';
-      const commits = lines(path.join(wp, 'pending-commits.jsonl'));
+      // A-07: the coordinator or a member of an active forge execution, or the session of forge's infinite run, is
+      // stepped by forge's own Stop hook: waypoint never adds a turn there.
+      if (forgeRoleOf(readForgeActivity(root), typeof input.session_id === 'string' ? input.session_id : null) !== null) return '';
+      const ongoing = ongoingTask(session());
+      const taskOf = (l: string): string | null => { try { const o = JSON.parse(l) as { task?: unknown }; return typeof o?.task === 'string' ? o.task : null; } catch { return null; } };
+      const commits = lines(path.join(wp, 'pending-commits.jsonl')).filter(l => ongoing === null || taskOf(l) !== ongoing);
       const queued = lines(path.join(wp, 'queue.jsonl'));
       if (!commits.length && !queued.length) return '';
       // One reminder per distinct pending set: stopping again with nothing new goes through.
