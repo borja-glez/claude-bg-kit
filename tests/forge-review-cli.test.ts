@@ -1293,7 +1293,14 @@ describe('the express review (measure 7)', () => {
     const waiting = close();
     expect(waiting.code).toBe(3);
     expect(JSON.parse(waiting.stdout).missing).toEqual(['.forge/work/T1/validators-1.json']);
-    expect(run(['validate', '--all', '--path', 'medium', '--base', base, '--baseline', '.forge/work/T1/baseline-1.json', '--task', 'T1-1', '--out', '.forge/work/T1/validators-1.json', '--cwd', wt], io).code).toBe(0);
+    // The printed command as the coordinator runs it in the background: --out is run()'s job wrapper now (C-03), and it
+    // writes the same file, the results as validate prints them, and leaves no job behind.
+    const argv = (out.validators.cmd as string).match(/"[^"]*"|\S+/g)!.map(t => t.replace(/^"(.*)"$/, '$1')).slice(2);
+    expect(argv.slice(0, 2)).toEqual(['validate', '--all']);
+    const validated = run(argv, io);
+    expect(validated.code).toBe(0);
+    expect(JSON.parse(readFileSync(path.join(work(), 'validators-1.json'), 'utf8'))).toEqual(JSON.parse(validated.stdout));
+    expect(existsSync(path.join(root, '.forge', 'jobs')) ? readdirSync(path.join(root, '.forge', 'jobs')) : []).toEqual([]);
     const closed = JSON.parse(close().stdout);
     expect(closed).toMatchObject({ action: 'accept', next: 'done', reviews: { n: 2, max: 4 }, express: true });
     expect(readEvents(root).filter(e => e.kind === 'verdict').at(-1)).toMatchObject({ express: true });

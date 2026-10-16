@@ -11,6 +11,7 @@ import { isLocale } from '../../lib/forge-run.js';
 import { appendEvent, appendPhase, readEvents } from '../ledger.js';
 import { readExecution, updateExecution, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree, type LockDeps } from '../execution.js';
 import { sleepSync } from '../pid.js';
+import { noSlot, type Slot } from '../jobs.js';
 import { schedule, widthOf, widthProfile, relaunchOrBlock, RELAUNCH_CAP, type BgAgent } from '../schedule.js';
 import { LEASE_MINUTES, sessionLiveness } from '../../lib/coordination.js';
 import { planLocale, sessionReply } from '../../lib/locale.js';
@@ -355,6 +356,8 @@ interface MergeOpts {
   /** The main checkout (its .forge/cache/validate) and what the tree cache may do (C6): integrate reads and writes it,
    *  the final merge only writes it. */
   main: string; cache: { read: boolean; write: boolean }; now: () => Date;
+  /** C-03: the validation slot of a merge run with --out in the background (swarm.validateJobs). */
+  slot?: Slot;
 }
 
 // The untracked paths git does not ignore, forge's own state aside (a directory collapsed into `dir/`).
@@ -392,7 +395,7 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
   // A validator run through the tree cache (C6), keyed by the tree `tree` gives and the directory `where` runs them in;
   // what it misses runs as before.
   const cachedRun = (where: GitDeps, owned: boolean, list: Validator[], tree: () => string | null): ValidatorResult[] =>
-    runWithCache(list, misses => validating(where, owned, () => runValidators(misses, where.exec, o.timeoutSec, { ...o.run, execMany: where.execMany })), {
+    runWithCache(list, misses => (misses.length ? (o.slot ?? noSlot) : noSlot)(() => validating(where, owned, () => runValidators(misses, where.exec, o.timeoutSec, { ...o.run, execMany: where.execMany }))), {
       main: o.main, git: cacheGit(where.git), dir: o.cache.read || o.cache.write ? checkoutPrefix(where.git) : null, repo: where.repo, generated,
       read: o.cache.read, write: o.cache.write, tree, now: o.now,
     });
@@ -699,7 +702,7 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
     cacheDir: path.join(io.cwd, '.forge', 'execution'), target: 'run', setup: config.swarm.setup, personal,
     retryDeps: rest.includes('--retry-deps'),
     run: runOptions(config, readEvents(io.cwd), io.now()),
-    main: io.cwd, cache: { read: cache, write: cache }, now: io.now,
+    main: io.cwd, cache: { read: cache, write: cache }, now: io.now, slot: io.slot,
   });
   logValidations(io, task, r.validations);
   const es = spanish(locale, io.cwd, e.project);
@@ -755,7 +758,7 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
     cacheDir: path.join(io.cwd, '.forge', 'execution'), target: 'main', setup: config.swarm.setup,
     runAt: cleanRunWorktree(deps, runWorktree(io.cwd), e.branch), personal: true, retryDeps: rest.includes('--retry-deps'),
     run: runOptions(config, readEvents(io.cwd), io.now()),
-    main: io.cwd, cache: { read: false, write: config.validate.cache }, now: io.now,
+    main: io.cwd, cache: { read: false, write: config.validate.cache }, now: io.now, slot: io.slot,
   });
   const extras = attemptExtras(r, spanish(locale, io.cwd, e.project), e.branch, true);
   if (r.result === 'dirty') return out({ result: 'main-dirty', detail: `the main checkout ${r.detail}`, ...extras });

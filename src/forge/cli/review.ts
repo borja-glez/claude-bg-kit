@@ -16,6 +16,7 @@ import { collectTwins, shadowCommand } from './shadow.js';
 import { restoringRegenerated } from './swarm.js';
 import { mainCheckout } from '../local.js';
 import { runWithCache, cacheGit, checkoutPrefix } from '../validate-cache.js';
+import { noSlot, type Slot } from '../jobs.js';
 import { reviewRound, reviewerKey, type PreviousResult, type ReviewerKey, type RoundPlan, type RoundReviewer, type SpawnEntry, type TriageReview } from '../review-round.js';
 
 // The review commands. run.ts dispatches here; this module never imports run.ts (that would be a cycle).
@@ -23,7 +24,7 @@ import { reviewRound, reviewerKey, type PreviousResult, type ReviewerKey, type R
 type Result = { code: number; stdout: string; stderr: string };
 type Exec = Parameters<typeof runValidators>[1];
 /** What the review commands need from the caller: forge's own dir (`cwd`), the code's dir (`repoDir`) and its tools. */
-export interface ReviewDeps { cwd: string; repoDir: string; now: () => Date; git: (args: string[]) => string | null; exec: Exec; execMany?: ExecMany; repo: RepoReader; self?: string }
+export interface ReviewDeps { cwd: string; repoDir: string; now: () => Date; git: (args: string[]) => string | null; exec: Exec; execMany?: ExecMany; repo: RepoReader; self?: string; slot?: Slot }
 
 const ROLES: readonly ReviewRole[] = ['review-correctness', 'review-security', 'review-perf'];
 const EFFORTS = ['medium', 'high', 'xhigh'] as const;
@@ -78,7 +79,8 @@ function validateList(deps: ReviewDeps, config: ForgeConfig, list: Validator[], 
   const opts = runOptions(config, readEvents(deps.cwd), deps.now(), deps.execMany);
   const use = config.validate.cache && !noCache;
   const results = runWithCache(list,
-    misses => restoringGenerated(deps, config.generated, () => runValidators(misses, deps.exec, config.validatorTimeoutSec, opts), restored),
+    // C-03: with --out, the validators wait for a slot (swarm.validateJobs); a list the cache answered whole does not.
+    misses => (misses.length ? (deps.slot ?? noSlot) : noSlot)(() => restoringGenerated(deps, config.generated, () => runValidators(misses, deps.exec, config.validatorTimeoutSec, opts), restored)),
     { main: mainCheckout(deps.cwd), git: use ? cacheGit(deps.git) : deps.git, dir: use ? checkoutPrefix(deps.git) : null, repo: deps.repo, generated: config.generated, read: use, write: use, now: deps.now });
   return { results, durationMs: Date.now() - t0 };
 }

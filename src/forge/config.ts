@@ -33,6 +33,8 @@ export interface ForgeConfig {
     /** How a sessions-mode member is launched: its own effort, and a model only when set (else the person's default). */
     member: { effort: Effort; model?: Model };
     setup?: string;
+    /** C-03: how many background jobs (prep, review-prep, integrate, step) run their validators at once. */
+    validateJobs: number;
   };
   /** How validators run: through the tree cache (C6), at most `parallel` at once, and which failures run again (C-12). */
   validate: { cache: boolean; parallel: number; retry: RetryPolicy };
@@ -97,12 +99,13 @@ const Schema = z.object({
       model: z.enum(MODELS).optional(),
     }).strict().default({ effort: 'medium' }),
     setup: z.string().min(1).max(500).optional(),
-  }).strict().default({ parallel: 3, launcher: 'bg', member: { effort: 'medium' } }),
+    validateJobs: z.number().int().min(1).max(8).default(2),
+  }).strict().default({ parallel: 3, launcher: 'bg', member: { effort: 'medium' }, validateJobs: 2 }),
 }).strict();
 
 const DEFAULTS: ForgeConfig = {
   profile: 'balanced', detect: true, exclude: [], verify: { limits: { checks: 8, shots: 10, minutes: 10 } },
-  evidence: 'upload', validatorTimeoutSec: 600, validate: { cache: true, parallel: 3, retry: 'flaky' }, review: { express: true, personDocs: [...PERSON_DOCS] }, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' } }, tdd: 'off', generated: [],
+  evidence: 'upload', validatorTimeoutSec: 600, validate: { cache: true, parallel: 3, retry: 'flaky' }, review: { express: true, personDocs: [...PERSON_DOCS] }, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' }, validateJobs: 2 }, tdd: 'off', generated: [],
 };
 
 export function parseConfig(text: string | null): ForgeConfig {

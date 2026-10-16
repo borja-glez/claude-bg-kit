@@ -106,29 +106,36 @@ const xtask = (agent: string | null, updatedAt: string) => ({ T1: { status: 'run
 
 describe('decideExecutionStop', () => {
   it('blocks the bound session of an active execution once per step, and no other session', () => {
-    const d = decideExecutionStop({ session_id: 's1' }, ex(), { now: xnow, stopFile: false });
+    const d = decideExecutionStop({ session_id: 's1' }, ex(), { now: xnow, stopFile: false, jobs: [] });
     expect(d.block).toBe(true);
     if (d.block) expect(d.reason).toContain('forge execution is active (0/3 running)');
-    expect(decideExecutionStop({ session_id: 's2' }, ex(), { now: xnow, stopFile: false }).block).toBe(false);
-    expect(decideExecutionStop({}, ex(), { now: xnow, stopFile: false }).block).toBe(false);
-    expect(decideExecutionStop({ session_id: 's1', stop_hook_active: true }, ex({ lastBlockStep: '2026-10-12T11:59:00.000Z' }), { now: xnow, stopFile: false }).block).toBe(false);
+    expect(decideExecutionStop({ session_id: 's2' }, ex(), { now: xnow, stopFile: false, jobs: [] }).block).toBe(false);
+    expect(decideExecutionStop({}, ex(), { now: xnow, stopFile: false, jobs: [] }).block).toBe(false);
+    expect(decideExecutionStop({ session_id: 's1', stop_hook_active: true }, ex({ lastBlockStep: '2026-10-12T11:59:00.000Z' }), { now: xnow, stopFile: false, jobs: [] }).block).toBe(false);
   });
   it('never blocks while an agent of a task is running (it wakes the session)', () => {
-    expect(decideExecutionStop({ session_id: 's1' }, ex({ tasks: xtask('forge-impl', '2026-10-12T11:58:00.000Z') }), { now: xnow, stopFile: false }).block).toBe(false);
+    expect(decideExecutionStop({ session_id: 's1' }, ex({ tasks: xtask('forge-impl', '2026-10-12T11:58:00.000Z') }), { now: xnow, stopFile: false, jobs: [] }).block).toBe(false);
     // An agent that has not reported for longer than a lease does not hold the block back.
-    expect(decideExecutionStop({ session_id: 's1' }, ex({ tasks: xtask('forge-impl', '2026-10-12T11:40:00.000Z') }), { now: xnow, stopFile: false }).block).toBe(true);
+    expect(decideExecutionStop({ session_id: 's1' }, ex({ tasks: xtask('forge-impl', '2026-10-12T11:40:00.000Z') }), { now: xnow, stopFile: false, jobs: [] }).block).toBe(true);
   });
   it('an unbound execution (started by forge 0.15) blocks no session and comes back unchanged (D-01)', () => {
     const unbound = ex({ hookSession: null });
     for (const input of [{}, { session_id: 's1' }, { session_id: 's1', stop_hook_active: true }]) {
-      expect(decideExecutionStop(input, unbound, { now: xnow, stopFile: false })).toEqual({ block: false, exec: unbound });
-      expect(decideExecutionStop(input, unbound, { now: xnow, stopFile: true })).toEqual({ block: false, exec: unbound });
+      expect(decideExecutionStop(input, unbound, { now: xnow, stopFile: false, jobs: [] })).toEqual({ block: false, exec: unbound });
+      expect(decideExecutionStop(input, unbound, { now: xnow, stopFile: true, jobs: [] })).toEqual({ block: false, exec: unbound });
     }
   });
   it('does not block while sleeping, and ends with one block when the stop file appears', () => {
-    expect(decideExecutionStop({ session_id: 's1' }, ex({ sleepUntil: '2026-10-12T12:03:00.000Z' }), { now: xnow, stopFile: false }).block).toBe(false);
-    const d = decideExecutionStop({ session_id: 's1' }, ex(), { now: xnow, stopFile: true });
+    expect(decideExecutionStop({ session_id: 's1' }, ex({ sleepUntil: '2026-10-12T12:03:00.000Z' }), { now: xnow, stopFile: false, jobs: [] }).block).toBe(false);
+    const d = decideExecutionStop({ session_id: 's1' }, ex(), { now: xnow, stopFile: true, jobs: [] });
     expect(d).toMatchObject({ block: true, ended: 'stopped', exec: { active: false, stopReason: 'stopped' } });
+  });
+  it('never blocks while the session has a live job in the background, which wakes it when it ends (C-03)', () => {
+    const job = { name: 'integrate-T1-42', cmd: 'integrate', task: 'T1', pid: 42, startedAt: '2026-10-12T11:59:00.000Z', out: '.forge/work/run/integrate-T1.json', session: 's1' };
+    expect(decideExecutionStop({ session_id: 's1' }, ex(), { now: xnow, stopFile: false, jobs: [job] }).block).toBe(false);
+    expect(decideExecutionStop({ session_id: 's1' }, ex(), { now: xnow, stopFile: false, jobs: [] }).block).toBe(true);
+    // The stop file still ends the execution.
+    expect(decideExecutionStop({ session_id: 's1' }, ex(), { now: xnow, stopFile: true, jobs: [job] })).toMatchObject({ block: true, ended: 'stopped' });
   });
 });
 

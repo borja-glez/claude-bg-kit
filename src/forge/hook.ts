@@ -2,6 +2,7 @@ import { stopReason, endRun, type RunState, type StopContext } from './run.js';
 
 import { LEASE_MINUTES } from '../lib/coordination.js';
 import type { ExecutionState } from '../lib/execution-state.js';
+import type { JobDoc } from './jobs.js';
 
 export interface HookContext extends StopContext { ledgerEvents: number; swarmSleeping?: boolean }
 
@@ -13,11 +14,12 @@ export const executionEndedReason = (reason: string): string =>
 /**
  * The Stop hook's decision for an execution's coordinator. The execution is bound when it starts (`swarm start` or
  * `swarm takeover` with --hook-session, C1): an unbound one, from forge 0.15, blocks no session, and no other session
- * is ever blocked or bound here. It never blocks while the coordinator sleeps, nor while an agent of a task is
- * running: that agent's return wakes the session, so a block would only add a turn (and fight a /goal evaluator).
- * With stop_hook_active it blocks again only after a new step.
+ * is ever blocked or bound here. It never blocks while the coordinator sleeps, while an agent of a task is running,
+ * nor while a job of the session runs in the background (C-03): the agent's return or the job's end wakes the session,
+ * so a block would only add a turn (and fight a /goal evaluator). With stop_hook_active it blocks again only after a
+ * new step.
  */
-export function decideExecutionStop(input: { stop_hook_active?: boolean; session_id?: unknown }, exec: ExecutionState | null, ctx: { now: Date; stopFile: boolean }):
+export function decideExecutionStop(input: { stop_hook_active?: boolean; session_id?: unknown }, exec: ExecutionState | null, ctx: { now: Date; stopFile: boolean; jobs: readonly JobDoc[] }):
   { block: false; exec: ExecutionState | null } | { block: true; reason: string; exec: ExecutionState; ended?: string } {
   if (!exec || !exec.active) return { block: false, exec };
   const session = typeof input.session_id === 'string' && input.session_id ? input.session_id : null;
@@ -31,6 +33,7 @@ export function decideExecutionStop(input: { stop_hook_active?: boolean; session
   if (Number.isFinite(until) && until > now) return { block: false, exec };
   const agentRunning = Object.values(exec.tasks).some(t => t.status === 'running' && !!t.agent && now - Date.parse(t.updatedAt) < LEASE_MINUTES * 60000);
   if (agentRunning) return { block: false, exec };
+  if (ctx.jobs.length) return { block: false, exec };
   if (input.stop_hook_active === true && exec.lastStepAt === exec.lastBlockStep) return { block: false, exec };
   const running = Object.values(exec.tasks).filter(t => t.status === 'running').length;
   return { block: true, reason: executionBlockReason(running, exec.parallel), exec: { ...exec, lastBlockStep: exec.lastStepAt } };

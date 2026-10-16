@@ -86,6 +86,22 @@ describe('forge swarm integrate (into the run branch)', () => {
     expect(readExecution(root)!.tasks.T1.status).toBe('conflict');
     expect(readExecution(root)!.tasks.T1.finishedAt ?? null).toBeNull();
   });
+  it('integrate --out runs as a job: its validators wait for a slot, and the file holds what it printed with waitedMs (C-03)', () => {
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'swarm:\n  validateJobs: 1\nvalidators: []\n');
+    mkdirSync(path.join(runWt(), '.forge'), { recursive: true });
+    writeFileSync(path.join(runWt(), '.forge', 'config.yaml'), NOBAD);
+    accept('T1', 'a.txt', 'a\n');
+    const jobs = path.join(root, '.forge', 'jobs');
+    mkdirSync(jobs, { recursive: true });
+    writeFileSync(path.join(jobs, 'other.json'), JSON.stringify({ name: 'other', cmd: 'prep', task: 'T2-1', pid: process.pid, startedAt: '2026-10-12T11:00:00.000Z', out: 'x.json', session: null, slot: 'validating' }));
+    let sleeps = 0;
+    const r = run(['swarm', 'integrate', 'T1', '--out', '.forge/work/run/integrate-T1.json'], { ...io, sleep: () => { if (++sleeps === 1) rmSync(path.join(jobs, 'other.json')); } });
+    const file = JSON.parse(readFileSync(path.join(root, '.forge', 'work', 'run', 'integrate-T1.json'), 'utf8'));
+    expect(file).toMatchObject({ result: 'integrated', waitedMs: 1000 });
+    expect(out(r)).toEqual(file);
+    expect(sleeps).toBe(1);
+    expect(readdirSync(jobs)).toEqual([]);
+  });
   it('rolls back when the validators fail after the merge', () => {
     accept('T1', 'bad.txt', 'x\n');
     // Validators run in the run worktree: its own .forge/config.yaml is read from there.

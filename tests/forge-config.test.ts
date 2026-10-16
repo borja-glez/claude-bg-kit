@@ -13,7 +13,7 @@ describe('forge config', () => {
   it('defaults: detect on, nothing excluded, verify limits, evidence upload', () => {
     expect(parseConfig(null)).toEqual({
       profile: 'balanced', detect: true, exclude: [], verify: { limits: { checks: 8, shots: 10, minutes: 10 } },
-      evidence: 'upload', validatorTimeoutSec: 600, validate: { cache: true, parallel: 3, retry: 'flaky' }, review: { express: true, personDocs: ['README.md', 'README.*.md', '**/README.md', '**/README.*.md', 'CHANGELOG.md', '**/CHANGELOG.md'] }, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' } }, tdd: 'off',
+      evidence: 'upload', validatorTimeoutSec: 600, validate: { cache: true, parallel: 3, retry: 'flaky' }, review: { express: true, personDocs: ['README.md', 'README.*.md', '**/README.md', '**/README.*.md', 'CHANGELOG.md', '**/CHANGELOG.md'] }, swarm: { parallel: 3, launcher: 'bg', member: { effort: 'medium' }, validateJobs: 2 }, tdd: 'off',
       generated: [],
     });
   });
@@ -75,8 +75,8 @@ describe('forge config', () => {
     expect(() => parseConfig(`validators:\n  - name: unit\n    cmd: x\n    affected_cmd: ${'x'.repeat(500)} {files}\n`)).toThrow(ConfigError);
   });
   it('swarm: parallel 3 by default, an optional mode and the launcher', () => {
-    expect(parseConfig(null).swarm).toEqual({ parallel: 3, launcher: 'bg', member: { effort: 'medium' } });
-    expect(parseConfig('swarm:\n  mode: sessions\n  parallel: 2\n').swarm).toEqual({ parallel: 2, mode: 'sessions', launcher: 'bg', member: { effort: 'medium' } });
+    expect(parseConfig(null).swarm).toEqual({ parallel: 3, launcher: 'bg', member: { effort: 'medium' }, validateJobs: 2 });
+    expect(parseConfig('swarm:\n  mode: sessions\n  parallel: 2\n').swarm).toEqual({ parallel: 2, mode: 'sessions', launcher: 'bg', member: { effort: 'medium' }, validateJobs: 2 });
     expect(() => parseConfig('swarm:\n  mode: threads\n')).toThrow(ConfigError);
     expect(() => parseConfig('swarm:\n  launcher: tmux\n')).toThrow(ConfigError);
   });
@@ -90,10 +90,15 @@ describe('forge config', () => {
     expect(() => parseConfig('swarm:\n  member:\n    turns: 3\n')).toThrow(ConfigError);
   });
   it('swarm.setup: an optional command of at most 500 characters', () => {
-    expect(parseConfig('swarm:\n  setup: uv sync\n').swarm).toEqual({ parallel: 3, launcher: 'bg', member: { effort: 'medium' }, setup: 'uv sync' });
+    expect(parseConfig('swarm:\n  setup: uv sync\n').swarm).toEqual({ parallel: 3, launcher: 'bg', member: { effort: 'medium' }, validateJobs: 2, setup: 'uv sync' });
     expect(() => parseConfig(`swarm:\n  setup: ${'x'.repeat(501)}\n`)).toThrow(ConfigError);
     expect(() => parseConfig('swarm:\n  setup: ""\n')).toThrow(ConfigError);
     expect(() => parseConfig('swarm:\n  setup: 3\n')).toThrow(ConfigError);
+  });
+  it('swarm.validateJobs: 2 by default, an integer from 1 to 8 (C-03)', () => {
+    expect(parseConfig(null).swarm.validateJobs).toBe(2);
+    expect(parseConfig('swarm:\n  validateJobs: 4\n').swarm.validateJobs).toBe(4);
+    for (const bad of ['0', '9', '1.5', 'many']) expect(() => parseConfig(`swarm:\n  validateJobs: ${bad}\n`)).toThrow(ConfigError);
   });
   it('kind is free text with the name pattern, when is optional', () => {
     const c = parseConfig('validators:\n  - name: a11y\n    cmd: npm run a11y\n    kind: a11y\n    when: final\n');

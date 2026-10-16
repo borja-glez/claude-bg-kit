@@ -38,6 +38,8 @@ import { readLocal, updateLocal, mainCheckout, readLearned, recordLearned, OBJEC
 import { memberForHook } from '../members.js';
 import { hookLive } from '../live.js';
 import { hookRoute } from '../route-hooks.js';
+import { liveJobs, noSlot, slotFor, withJob, writeJsonAtomic, type Slot } from '../jobs.js';
+import { sleepSync } from '../pid.js';
 import { readSurfaces, detectDrafts, appendLearned, surfaceFile, permissionHash, hashMatches, LEARNED_HEADINGS, type Surface } from '../surfaces.js';
 import { addDecision, allDecisions, listDecisions, renderDecisionsMd, DecisionInputError } from '../decisions.js';
 import { TASK_ID, decisionScope, scopeFileName } from '../../lib/decisions.js';
@@ -46,7 +48,7 @@ import { ROUTE_OPTIONS, ROUTE_STAGES, firstStage, isRoutePath, isRouteSession, r
 import { checkSpTask, markDone, parseSpPlan, renderSpBrief, SpPlanError } from '../../lib/sp-plan.js';
 
 export interface ExecResult { code: number; output: string; ms: number; timedOut: boolean }
-export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined> }
+export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined>; slot?: Slot }
 type Result = { code: number; stdout: string; stderr: string };
 
 const USAGE = 'usage: forge <triage|brief|validate|stats|verdict|round|review-prep|review-close|prep|shadow|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|swarm|stop|hook> ...';
@@ -220,14 +222,6 @@ export function defaultGit(cwd: string) {
     try { return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: MAX_GIT_OUTPUT, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }); }
     catch { return null; }
   };
-}
-
-/** Writes a JSON file through a temporary file and a rename, so a reader never sees half of it (validate --out). */
-function writeJsonAtomic(file: string, value: unknown): void {
-  mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n');
-  renameSync(tmp, file);
 }
 
 export const repoReader = (root: string): RepoReader => ({
@@ -485,7 +479,10 @@ function hookStop(io: Io): string {
       if (d.ended) appendEvent(io.cwd, { ts: io.now().toISOString(), kind: 'cycle', action: 'stopped', reason: d.ended });
       return JSON.stringify({ decision: 'block', reason: d.reason + (sessionReply(d.run, exec?.active ? exec : null, () => planLocale(io.cwd, exec?.project)) ?? replyIn(null)) }) + '\n';
     }
-    const d = decideExecutionStop(hookInput, exec, { now: io.now(), stopFile: existsSync(stopFile(main)) });
+    // C-03: a job this session launched in the background (prep, review-prep, integrate, step) wakes it when it ends;
+    // a member's job, with another session, does not.
+    const jobs = sid ? liveJobs(main, io.now()).filter(j => j.session === null || j.session === sid) : [];
+    const d = decideExecutionStop(hookInput, exec, { now: io.now(), stopFile: existsSync(stopFile(main)), jobs });
     if (!d.block) return '';
     // Under the lock, only what the hook decided: a swarm step or an integrate that wrote meanwhile is kept (I-15).
     updateExecution(main, cur => (cur && cur.runId === d.exec.runId
@@ -515,7 +512,50 @@ function logVerifyResult(cwd: string, at: string, task: string, dir: string, ver
   return out;
 }
 
+/** C-03: the commands that run as a job with --out, and the task each works on. */
+function jobOf(argv: string[]): { cmd: string; task: string | null } | null {
+  const [cmd, sub, third] = argv;
+  const value = (name: string) => {
+    const i = argv.indexOf(`--${name}`);
+    const v = i >= 0 ? argv[i + 1] : undefined;
+    return v !== undefined && !v.startsWith('--') ? v : null;
+  };
+  if (cmd === 'prep' || cmd === 'review-prep' || cmd === 'validate') return { cmd, task: value('task') };
+  if (cmd === 'swarm' && sub === 'integrate') return { cmd: 'integrate', task: third !== undefined && !third.startsWith('--') ? third : null };
+  if (cmd === 'swarm' && sub === 'step') return { cmd: 'step', task: null };
+  return null;
+}
+
+/**
+ * The forge CLI. `--out <file>` on prep, review-prep, validate, swarm integrate and swarm step (C-03): the command runs
+ * as a job of .forge/jobs/ (the coordinator launched it with run_in_background and its end wakes it), waits for a
+ * validation slot before its validators (swarm.validateJobs) and writes its JSON to the file atomically, with
+ * `waitedMs` when it is an object; one that failed writes `{error, code}`. Any other command runs as it is.
+ */
 export function run(argv: string[], io: Io): Result {
+  const job = argv.includes('--out') ? jobOf(argv) : null;
+  if (!job) return runCommand(argv, io);
+  const at = argv.indexOf('--out');
+  const file = argv[at + 1];
+  if (file === undefined || file.startsWith('--')) return { code: 2, stdout: '', stderr: `${job.cmd}: --out needs a file\n` };
+  const outFile = path.resolve(io.cwd, file);
+  const main = mainCheckout(io.cwd);
+  let max = 2;
+  try { max = loadConfig(main).swarm.validateJobs; } catch { max = 2; }
+  const spec = { cmd: job.cmd, task: job.task, out: file.replace(/\\/g, '/'), session: claudeSessionId(null, io.env ?? process.env), startedAt: io.now().toISOString() };
+  return withJob(main, spec, j => {
+    const slots = slotFor(main, j, max, { now: io.now, sleep: io.sleep ?? sleepSync });
+    const r = runCommand([...argv.slice(0, at), ...argv.slice(at + 2)], { ...io, slot: slots.slot });
+    let parsed: unknown;
+    try { parsed = JSON.parse(r.stdout); } catch { parsed = undefined; }
+    const value = parsed === undefined ? { error: (r.stderr || r.stdout).trim() || `exit ${r.code}`, code: r.code }
+      : parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? { ...(parsed as Record<string, unknown>), waitedMs: slots.waited() } : parsed;
+    try { writeJsonAtomic(outFile, value); } catch (e) { return { ...r, stderr: `${r.stderr}forge: could not write ${file}: ${(e as Error).message}\n` }; }
+    return parsed !== undefined && value !== parsed ? { ...r, stdout: JSON.stringify(value, null, 2) + '\n' } : r;
+  });
+}
+
+function runCommand(argv: string[], io: Io): Result {
   // --cwd <dir>: the code lives there (validators, git and the project's files), so a coordinator never has to cd
   // into a worktree (a cd outside a subshell sticks). forge's own state (ledger, .forge/work, the execution) and
   // every file flag stay with the caller's directory.
@@ -741,7 +781,6 @@ export function run(argv: string[], io: Io): Result {
         const all = detectValidators(repoReader(repoDir), config);
         const p = flag('path');
         if (p !== undefined && !(PATH_ORDER as readonly string[]).includes(p)) throw new UsageError(`validate: --path must be one of ${PATH_ORDER.join('|')}`);
-        if (has('out') && flag('out') === undefined) throw new UsageError('validate: --out needs a file');
         // --affected a,b names the files; bare (or followed by another flag) it takes those changed since --base (HEAD by
         // default; uncommitted changes included) and the untracked ones, read with -z so git quotes no name. Both relative
         // to the code's directory, as the validators see them (--relative: a project in a subdirectory).
@@ -777,7 +816,8 @@ export function run(argv: string[], io: Io): Result {
         const inRun = io.workdir !== undefined && samePath(io.workdir, runWorktree(io.cwd));
         const restoreAt = { git: io.git ?? defaultGit(repoDir) };
         const runList = (misses: Validator[]) => {
-          const go = () => runValidators(misses, io.exec ?? defaultExec(io.cwd), config.validatorTimeoutSec, opts);
+          // C-03: with --out the validators wait for a slot (swarm.validateJobs); a list the cache answered whole does not.
+          const go = () => (misses.length ? (io.slot ?? noSlot) : noSlot)(() => runValidators(misses, io.exec ?? defaultExec(io.cwd), config.validatorTimeoutSec, opts));
           return inRun ? restoringRegenerated(restoreAt, go, restored) : config.generated.length ? restoringRegenerated(restoreAt, go, restored, config.generated) : go();
         };
         // The tree cache (C6): an --affected pass and --no-cache never touch it; --final writes it but never reads it.
@@ -801,8 +841,6 @@ export function run(argv: string[], io: Io): Result {
         }
         const allOk = results.every(r => !blocking(r));
         appendEvent(io.cwd, validateEvent(ts(), flag('task'), results, durationMs, scope.mode, has('base-run') ? { baseline: true } : {}));
-        // --out: the same JSON in a file, written whole (a caller in the background reads it when the command is done).
-        if (flag('out') !== undefined) writeJsonAtomic(path.resolve(io.cwd, flag('out')!), results);
         const out = json(results, allOk ? 0 : 1);
         if (!list.length) out.stderr = all.length ? 'no validators cover the affected paths\n' : 'no validators detected: add tests or list validators in .forge/config.yaml\n';
         out.stderr += plan.notes.map(n => `${n}\n`).join('');
@@ -1199,6 +1237,7 @@ export function run(argv: string[], io: Io): Result {
         return reviewCommand(cmd, args, {
           cwd: io.cwd, repoDir, now: io.now, git: io.git ?? defaultGit(repoDir), exec: io.exec ?? defaultExec(repoDir), execMany: io.execMany, repo: repoReader(repoDir),
           self: io.scriptPath ?? process.argv[1],
+          slot: io.slot,
         });
       case 'hook': {
         const which = args[0];
