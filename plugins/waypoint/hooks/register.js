@@ -10656,7 +10656,8 @@ var TaskSchema = external_exports.object({
   verification: external_exports.string().optional(),
   depends_on: external_exports.array(id).default([]),
   zones: external_exports.array(external_exports.string().min(1)).default([]),
-  estimate_min: external_exports.number().positive().optional()
+  estimate_min: external_exports.number().positive().optional(),
+  delicate: external_exports.boolean().optional()
 });
 var PlanSchema = external_exports.object({
   project: id,
