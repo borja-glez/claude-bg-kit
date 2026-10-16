@@ -1243,4 +1243,11 @@ describe('forge swarm (execution)', () => {
       expect(next()).toBeNull();
     });
   });
+  it('a swarm sleep --mark in progress keeps the Stop hook from blocking, which the rule for messages leans on (D-13)', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    const stop = () => cli(['hook', 'stop'], { ...io, stdin: JSON.stringify({ session_id: 'hook-main' }) }).stdout;
+    expect(stop()).toContain('"decision":"block"');
+    expect(run(['swarm', 'sleep', '300', '--mark'], io).code).toBe(0);
+    expect(stop()).toBe('');
+  });
 });

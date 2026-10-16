@@ -1148,4 +1148,34 @@ describe('plugin layout', () => {
     // Extend mode and its contract stay.
     for (const w of ['**Extend mode.**', 'closing task', 'never renumber', 'new: <ids>']) expect(planner).toContain(w);
   });
+  it('the coordinator steps with swarm step in the background, asks the start questions once and starts in a clean session (C-03, C-10, D-12, D-13, J-21)', () => {
+    const exec = runRef('execution');
+    const lines = exec.split('\n');
+    const step1 = lines.find(l => l.startsWith('1. **Start (once).**'))!;
+    expect(step1).not.toContain('AskUserQuestion');
+    for (const w of ['launch.json', '/forge:run --execute <project>']) expect(step1).toContain(w);
+    const integ = lines.find(l => l.trimStart().startsWith('- `integrate {task}`'))!;
+    for (const w of ['run_in_background', '--out .forge/work/run/integrate-<T>.json']) expect(integ).toContain(w);
+    expect(lines.find(l => l.startsWith('3. **Decide.**'))).toContain('references/step.md');
+    const requests = exec.slice(exec.indexOf('### Requests during an execution'), exec.indexOf('### Unattended'));
+    for (const w of ['FORGE swarm sleep 300 --mark', 'question note', 'AskUserQuestion']) expect(requests).toContain(w);
+    const step = runRef('step');
+    for (const w of ['FORGE swarm step --plan <plan> --db DB', '--out .forge/work/run/step.json', 'run_in_background', '--returned', '--versions .forge/work/run/versions.json',
+      '`publish`', '`claim: true`', '`spawnImplementer`', '`spawnReviewers`', '`express`', '`validatorsRound`', '`readReport`', '`respawnReviewers`', '`reviewMissing`',
+      '`accepted`', '`resumeImplementer`', '`freshImplementer`', '`redo`', '`ask`', '`blocked`', '`integrated`', '`error`', 'references/task-steps.md', 'references/convergence.md']) expect(step, w).toContain(w);
+    const steps = runRef('task-steps').split('\n');
+    for (const [n, out] of [['1. **brief**', '--out .forge/work/T/prep-1.json'], ['3. **validate**', '--out .forge/work/T/review-prep-<n>.json']] as const) {
+      const l = steps.find(s => s.startsWith(n))!;
+      expect(l, n).toContain('run_in_background');
+      expect(l, n).toContain(out);
+    }
+    const large = runRef('large');
+    for (const w of ['launch.json', '/forge:run --execute <project>', '/clear', '`mostlySerial`', 'FORGE swarm propose --plan <plan> --locale', 'keep the ids of tasks that stay']) expect(large, w).toContain(w);
+    const run = read('plugins/forge/skills/run/SKILL.md');
+    expect(run).toContain('/forge:run --execute <project>');
+    expect(run).not.toContain('two or more briefs');
+    expect(run).toContain('~<min> min');
+    // An express review whose background validation gave no results: review-close exits 2 and the validators run again in the foreground.
+    expect(runRef('convergence')).toContain('review-close exits 2');
+  });
 });
