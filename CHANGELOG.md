@@ -199,7 +199,12 @@ elsewhere and are reconstructed from their READMEs.
 ### 0.19.0 — 2026-10-16
 
 #### Added
-- `swarm step`: one step of a plan execution in one command, run in the background. It renews the leases, prepares the review of each implementer that came back (or hands over its report), closes the reviews that are back, starts the tasks the tick schedules (worktree, brief, triage and prep) and integrates at most one, and prints the actions and the data of the roadmap batch. It waits for the reviewers it respawned, takes up a task a previous step left at `brief` or `validate`, and after a conflict retry reviews from the base the task merged.
+- `swarm step`: one step of a plan execution in one command, run in the background. It renews the leases, prepares the review of each implementer that came back (or hands over its report), closes the reviews that are back, starts the tasks the tick schedules (worktree, brief, triage and prep) and integrates at most one, and prints the actions and the data of the roadmap batch. It waits for the reviewers it respawned, takes up a task a previous step left at `brief` or `validate`, and after a conflict retry reviews from the base the task merged. It also:
+  - takes the person's answer with `--ruling <T>:fix|out-of-model|defer:F3[+F5]|review`: a question (`ask`) waits in `asked.json` and nothing is closed for that task until it is answered; «keep the architecture» re-closes the round with `--defer`, and `review` prepares a new review on the same HEAD for an implementer that came back without a commit;
+  - waits for a verification `verify-plan --dir` planned (`verify-pending.json`) and closes it with `verify-close`, committing its learned notes in the task's worktree and attaching its output (`verify`) to the action;
+  - reviews a member's task adopted after a conflict from where it forks from the run branch, with a baseline run there;
+  - runs one at a time: `.forge/jobs/step.lock` (another step prints `{busy: {pid, startedAt}}` and runs nothing);
+  - emits `integrated` again for a task whose roadmap state is not `done`.
 - `--out <file>` on `prep`, `review-prep`, `validate`, `swarm integrate` and `swarm step`: the command runs as a job of `.forge/jobs/` while the coordinator waits in the background, writes its JSON to the file (with `waitedMs`) and waits for one of `swarm.validateJobs` validation slots (2 by default). The Stop hook does not block while a job of its session is alive. `validate` refuses a `--out` that is not the one right after the command.
 - A clean session for the coordinator: the start questions are answered once in the design session and kept in `.forge/work/<project>/launch.json`; `/clear` and `/forge:run --execute <project>` start the run with them.
 - `verify-close`: the learned notes, the cleanup, the result and the list of screenshots of a verification in one call.
@@ -217,10 +222,14 @@ elsewhere and are reconstructed from their READMEs.
 - Medium briefs run in parallel only when three are independent, or two of more than about 20 minutes each.
 - `/forge:infinite` cites forge:run's decisions reference and the «A Large task» row of Unattended instead of repeating them. The old `/forge:run --plan … run member of` prompt and «→ Run member» are gone from the skills.
 - `review-close` exits 2 and removes an express validators file that holds no results.
+- `swarm merge` answers `busy` (a JSON result, like `main-dirty`) while an integration is in flight, instead of exiting 2.
+- A stale `.forge/execution.lock` is taken over by one process at a time (`execution.lock.takeover`); the Stop hook waits for a live one at most about 2 s and then lets the session stop; the one-time `swarm.json` migration never overwrites an `execution.json`.
+- `route --text-file` cleans its probe on every exit 2 too and reports `cleaned: true` once the task file is gone; it asks (`ask`) when `workflow` names a superpowers option that is not installed; `route set` reads `--why-file` before it writes `local.yaml`.
 - Requires waypoint ^0.21.0.
 
 #### Fixed
-- An integration whose process died in the middle of its merge no longer blocks the run as `run-dirty` forever: the next one aborts that merge (only one of its own, in the same worktree, with HEAD where it started) and says `recovered`; no tick integrates while a merge is in flight. `.forge/execution/merging.json` is exclusive for a whole integration (phases `baseline` and `merge`), and `swarm merge` refuses while one is live.
+- An integration whose process died in the middle of its merge no longer blocks the run as `run-dirty` forever: the next one aborts that merge (only one of its own, in the same worktree, with HEAD where it started) and says `recovered`; no tick integrates while a merge is in flight. `.forge/execution/merging.json` is exclusive for a whole integration (phases `baseline` and `merge`), and an integration checks HEAD and `MERGE_HEAD` again once it holds it.
+- A `redo` after a conflict retry no longer stops on the merge commit the retry made: when the attempt's range holds a merge, `review-close` prints `revert.steps` (`read-tree -u --reset <base>`, then one commit) that restore BASE's tree, keeping the run branch's work, instead of `git revert` over the range (`revert.args` stays for the rest).
 
 ### 0.18.0 — 2026-10-16
 
