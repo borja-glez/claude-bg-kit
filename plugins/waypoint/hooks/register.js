@@ -7,13 +7,6 @@ var __export = (target, all) => {
 // src/mod/register.tsx
 import { atom, read, update } from "claude-code";
 
-// src/lib/main-checkout.ts
-function mainCheckoutFrom(root, gitFileText) {
-  const m = gitFileText ? /^gitdir:\s*(.+?)[\\/]\.git[\\/]worktrees[\\/][^\\/\r\n]+\s*$/m.exec(gitFileText) : null;
-  const dir = m ? m[1] : null;
-  return dir && (/^[A-Za-z]:/.test(dir) || dir.startsWith("/")) ? dir : root;
-}
-
 // src/lib/deps.ts
 var statusOf = (states, id2) => states[id2]?.status ?? "free";
 
@@ -6931,15 +6924,15 @@ var timestamp = {
       throw new Error("!!timestamp expects a date, starting with yyyy-mm-dd");
     const [, year, month, day, hour, minute, second] = match.map(Number);
     const millisec = match[7] ? Number((match[7] + "00").substr(1, 3)) : 0;
-    let date = Date.UTC(year, month - 1, day, hour || 0, minute || 0, second || 0, millisec);
+    let date2 = Date.UTC(year, month - 1, day, hour || 0, minute || 0, second || 0, millisec);
     const tz = match[8];
     if (tz && tz !== "Z") {
       let d = parseSexagesimal(tz, false);
       if (Math.abs(d) < 30)
         d *= 60;
-      date -= 6e4 * d;
+      date2 -= 6e4 * d;
     }
-    return new Date(date);
+    return new Date(date2);
   },
   stringify: ({ value }) => value?.toISOString().replace(/(T00:00:00)?\.000Z$/, "") ?? ""
 };
@@ -11008,7 +11001,118 @@ function decisionsSummary(text2, now) {
   return { count: doc.count, autonomy: doc.autonomy, lastMajor: doc.lastMajor?.what ?? null };
 }
 
+// src/lib/bound.ts
+var BOUND_VIAS = ["work", "design", "forge-run", "forge-member", "forge-infinite"];
+var BOUND_END_REASONS = ["clear", "resume", "logout", "prompt_input_exit", "other", "released"];
+var MAX_SEATS = 10;
+var BOUND_MAX_BYTES = 4096;
+var isBoundVia = (x) => BOUND_VIAS.includes(x);
+var isEndReason = (x) => BOUND_END_REASONS.includes(x);
+function date(x, now) {
+  if (typeof x !== "string") return null;
+  const t = Date.parse(x);
+  if (!Number.isFinite(t)) return null;
+  return now !== void 0 && Number.isFinite(now) && t - now > FUTURE_SKEW_MS ? null : x;
+}
+function normalizeBound(x, now) {
+  if (!x || typeof x !== "object" || Array.isArray(x)) return null;
+  const o = x;
+  if (!isSafeId(o.sid) || !isSafeId(o.claude) || !isBoundVia(o.via)) return null;
+  const since = date(o.since, now);
+  const seenAt = date(o.seenAt, now);
+  if (!since || !seenAt) return null;
+  const ended = o.endedAt === null || o.endedAt === void 0;
+  const endedAt = ended ? null : date(o.endedAt, now);
+  if (!ended && endedAt === null) return null;
+  let endReason = null;
+  if (o.endReason !== null && o.endReason !== void 0) {
+    if (!isEndReason(o.endReason)) return null;
+    endReason = o.endReason;
+  }
+  const pid = typeof o.pid === "number" && Number.isInteger(o.pid) && o.pid > 0 ? o.pid : null;
+  return { sid: o.sid, claude: o.claude, pid, via: o.via, since, seenAt, endedAt, endReason: endedAt ? endReason : null };
+}
+function parseBound(text2, now) {
+  if (typeof text2 !== "string" || !text2 || text2.length > BOUND_MAX_BYTES) return null;
+  try {
+    return normalizeBound(JSON.parse(text2), now);
+  } catch {
+    return null;
+  }
+}
+
+// src/lib/member-doc.ts
+var isMemberId = (s) => isSafeId(s);
+function normalizeMember(x) {
+  if (!x || typeof x !== "object" || Array.isArray(x)) return null;
+  const o = x;
+  const sessionId = typeof o.sessionId === "string" && isMemberId(o.sessionId) ? o.sessionId : null;
+  const role = o.role === "executor" || o.role === "manual" ? o.role : null;
+  const runId = typeof o.runId === "string" && o.runId ? o.runId.slice(0, 120) : null;
+  const since = typeof o.since === "string" && !Number.isNaN(Date.parse(o.since)) ? o.since : null;
+  if (!sessionId || !role || !runId || !since) return null;
+  const task = typeof o.task === "string" && isPlanId(o.task) ? o.task : null;
+  const name = typeof o.name === "string" && o.name ? o.name.slice(0, 80) : null;
+  const hookSession = typeof o.hookSession === "string" && isMemberId(o.hookSession) ? o.hookSession : null;
+  return { sessionId, role, runId, task, name, since, hookSession };
+}
+
+// src/lib/forge-activity.ts
+function memberOfHook(members, sessionId, runId) {
+  const byHook = members.find((m) => m.runId === runId && m.hookSession === sessionId);
+  if (byHook) return byHook;
+  const direct = members.find((m) => m.sessionId === sessionId);
+  return direct && direct.runId === runId && (direct.hookSession === null || direct.hookSession === sessionId) ? direct : null;
+}
+
+// src/lib/viewer-role.ts
+var BOUND_LEASE_MS = 5 * 6e4;
+var PREVIOUS_OFFER_MS = 24 * 36e5;
+function bindingLive(b, now) {
+  const seen = Date.parse(b.seenAt);
+  return b.endedAt === null && Number.isFinite(seen) && now < seen + BOUND_LEASE_MS;
+}
+var NONE = { role: "none", subject: null, binding: null, member: null, coordinator: false, since: null, task: null };
+var time = (s) => {
+  const t = s ? Date.parse(s) : NaN;
+  return Number.isFinite(t) ? t : -Infinity;
+};
+var newest = (list, at) => list.reduce((best, b) => !best || at(b) > at(best) ? b : best, null);
+function describeViewer(i) {
+  const list = i.bound === null ? [] : "sid" in i.bound ? [i.bound] : i.bound;
+  const e = i.execution;
+  const taskOf = (b) => i.openTasks?.[b.sid] ?? null;
+  const sid = i.sessionId;
+  if (sid !== null) {
+    if (e && e.hookSession === sid && isVisibleRun(e, i.now, "owner")) {
+      return { ...NONE, role: "owner", subject: "execution", coordinator: true, since: lastMovedAt(e) };
+    }
+    const m = e ? memberOfHook(i.members, sid, e.runId) : null;
+    if (e && m && isVisibleRun(e, i.now, "owner")) return { ...NONE, role: "owner", subject: "execution", member: m, since: m.since, task: m.task };
+    const own = newest(list.filter((b) => b.claude === sid), (b) => time(b.seenAt));
+    if (own) return { ...NONE, role: "owner", subject: "binding", binding: own, since: own.since, task: taskOf(own) };
+  }
+  if (e && e.active && !i.coordinatorEnded && isVisibleRun(e, i.now, "other-live")) {
+    return { ...NONE, role: "other-live", subject: "execution", since: lastMovedAt(e) };
+  }
+  if (e && (!e.active || i.coordinatorEnded) && isVisibleRun(e, i.now, "previous")) {
+    return { ...NONE, role: "previous", subject: "execution", since: lastMovedAt(e) };
+  }
+  const others = list.filter((b) => b.claude !== sid);
+  const live = newest(others.filter((b) => bindingLive(b, i.now)), (b) => time(b.seenAt));
+  if (live) return { ...NONE, role: "other-live", subject: "binding", binding: live, since: live.seenAt, task: taskOf(live) };
+  const offerAt = (b) => time(b.endedAt ?? b.seenAt);
+  const offered = others.filter((b) => !bindingLive(b, i.now) && offerAt(b) + PREVIOUS_OFFER_MS > i.now);
+  const prev = newest(offered.filter((b) => taskOf(b) !== null), offerAt) ?? newest(offered, offerAt);
+  if (prev) return { ...NONE, role: "previous", subject: "binding", binding: prev, since: prev.endedAt ?? prev.seenAt, task: taskOf(prev) };
+  return NONE;
+}
+
 // src/mod/model.ts
+var NO_VIEWER = { role: "none", coordinator: false, runId: null };
+function noneBand(locale, viewer = NO_VIEWER) {
+  return locale ? { mode: "none", locale, viewer: { ...viewer } } : { mode: "none", viewer: { ...viewer } };
+}
 function json(text2) {
   if (text2 === void 0) return void 0;
   try {
@@ -11027,11 +11131,11 @@ function parsed(rows) {
 }
 function pickProject(entries, sessionId) {
   if (!entries.length) return null;
-  const time = (s) => {
+  const time2 = (s) => {
     const t = s ? Date.parse(s) : NaN;
     return Number.isFinite(t) ? t : -Infinity;
   };
-  const at = (b) => Math.max(time(b.seenAt), time(b.endedAt));
+  const at = (b) => Math.max(time2(b.seenAt), time2(b.endedAt));
   const activity = (e) => Math.max(e.mtimeMs, ...e.bindings.map(at));
   const ownAt = (e) => Math.max(-Infinity, ...e.bindings.filter((b) => b.claude === sessionId).map(at));
   const own = sessionId ? entries.filter((e) => ownAt(e) > -Infinity) : [];
@@ -11043,24 +11147,135 @@ function pickProject(entries, sessionId) {
   };
   return [...own.length ? own : entries].sort(better)[0].name;
 }
+function seatsOf(f, now) {
+  const texts = f.bindings ?? {};
+  const named = json(f.session)?.sessionId;
+  const checkoutBound = parseBound(texts["."], now);
+  const sid = typeof named === "string" && named ? named : checkoutBound?.sid ?? null;
+  const out = [];
+  if (sid !== null && isSafeId(sid)) out.push({ sid, checkout: true, bound: checkoutBound?.sid === sid ? checkoutBound : null, session: f.session });
+  const extra = Object.keys(texts).filter((k) => k !== "." && k !== sid && isSafeId(k)).sort().slice(0, MAX_SEATS);
+  for (const k of extra) {
+    const b = parseBound(texts[k], now);
+    out.push({ sid: k, checkout: false, bound: b?.sid === k ? b : null, session: f.seatSessions?.[k] });
+  }
+  return out;
+}
+function openTasksFrom(states) {
+  const open = /* @__PURE__ */ new Map();
+  for (const id2 of Object.keys(states).sort()) {
+    const s = states[id2];
+    if ((s?.status === "claimed" || s?.status === "in_progress") && typeof s.owner === "string" && !open.has(s.owner)) open.set(s.owner, id2);
+  }
+  return Object.fromEntries(open);
+}
+function projectExecution(project, f, now) {
+  const e = parseExecution(f.execution, now);
+  return e && (e.kind === "ephemeral" || e.project === project) ? e : null;
+}
+function membersOf(f, runId) {
+  return Object.values(f.members ?? {}).flatMap((text2) => {
+    const m = normalizeMember(json(text2));
+    return m && m.runId === runId ? [m] : [];
+  });
+}
+function coordinatorEnded(exec, text2) {
+  return !!exec?.hookSession && normalizeLive(json(text2))?.ended === true;
+}
+function viewerOf(v, exec, now) {
+  const ownsRun = v.role === "owner" && v.subject === "execution";
+  const runId = exec && v.subject === "execution" && isVisibleRun(exec, now, ownsRun ? "owner" : "none") ? exec.runId : null;
+  return { role: v.role, coordinator: v.coordinator, runId };
+}
 function buildBandModel(project, f) {
+  const now = f.now ?? Date.now();
   try {
-    if (f.plan !== void 0 && f.execution !== void 0) {
-      const member = json(f.session)?.launchedBy;
-      const isMember = typeof member === "string" && !!member;
-      const r = isMember ? null : runModel(project, f);
-      if (r) return withAuto(r, f);
+    let plan = null;
+    try {
+      if (f.plan !== void 0) plan = parsePlan(f.plan);
+    } catch {
+      plan = null;
     }
-    if (f.plan !== void 0 && f.session !== void 0) return withAuto(workModel(project, f), f);
-    if (f.design !== void 0) return withAuto(designModel(project, f), f);
+    const exec = projectExecution(project, f, now);
+    const seats = seatsOf(f, now);
+    const v = describeViewer({
+      bound: seats.flatMap((s) => s.bound ? [s.bound] : []),
+      execution: exec,
+      members: exec ? membersOf(f, exec.runId) : [],
+      sessionId: isSafeId(f.sessionId) ? f.sessionId : null,
+      now,
+      coordinatorEnded: coordinatorEnded(exec, f.coordinatorLive),
+      openTasks: openTasksFrom(parsed(f.states))
+    });
+    const viewer = viewerOf(v, exec, now);
+    if (v.coordinator && exec) {
+      const r = runModel(project, f, exec, plan, now, viewer);
+      if (r) return withAuto(r, f, now);
+    }
+    if (f.plan === void 0 && f.design === void 0 || f.plan !== void 0 && !plan) return noneBand(knownLocale(f));
+    const m = roleBand(project, f, plan, v, exec, seats, now, viewer);
+    if (m) return withAuto(m, f, now);
+    return noneBand(knownLocale(f), viewer);
   } catch {
   }
-  const locale = knownLocale(f);
-  return locale ? { mode: "none", locale } : { mode: "none" };
+  return noneBand(knownLocale(f));
 }
-function withAuto(m, f) {
-  if (m.mode === "none") return m;
-  const s = decisionsSummary(f.decisions, Date.now());
+function roleBand(project, f, plan, v, exec, seats, now, viewer) {
+  if (v.role === "owner" && v.member && exec) {
+    if (!plan) return null;
+    const m = v.member;
+    return workModel(project, f, plan, { sid: m.sessionId, ...seatInfo(seats, m.sessionId), task: m.task, since: m.since, run: memberLine(project, m, f, exec) }, now, viewer);
+  }
+  if (v.role === "owner" && v.binding) {
+    const b = v.binding;
+    if (b.via === "design") return f.design !== void 0 ? designModel(project, f, viewer) : null;
+    if (!plan) return null;
+    return workModel(project, f, plan, { sid: b.sid, ...seatInfo(seats, b.sid), task: null, since: null, run: memberRun(project, b.sid, f, exec) }, now, viewer);
+  }
+  if (v.role === "other-live" || v.role === "previous") return noticeModel(project, f, plan, v, exec, now, viewer);
+  return null;
+}
+function noticeModel(project, f, plan, v, exec, now, viewer) {
+  const kind = v.role === "previous" ? "previous" : "other-live";
+  const base = { mode: "notice", project, locale: plan?.locale ?? knownLocale(f) ?? "en", kind, since: v.since, roadmapUrl: plan?.artifacts.roadmap ?? null, viewer };
+  const titleOf = (t) => t && plan ? plan.tasks.find((x) => x.id === t)?.title ?? null : null;
+  if (v.subject === "execution") {
+    if (!exec) return null;
+    const view = executionView({ exec, tasks: publicTasks(f), live: lives(f), now, role: kind });
+    if (!view) return null;
+    return {
+      ...base,
+      subject: "run",
+      seat: null,
+      task: null,
+      title: null,
+      runId: exec.runId,
+      integrated: view.integrated,
+      total: view.total,
+      stopReason: exec.active ? null : exec.stopReason,
+      key: `run:${exec.runId}`
+    };
+  }
+  const b = v.binding;
+  if (!b) return null;
+  if (kind === "other-live") {
+    if (!plan) return null;
+    return { ...base, subject: "task", seat: b.sid, task: v.task, title: titleOf(v.task), runId: null, key: v.task ? `task:${v.task}` : `seat:${b.sid}` };
+  }
+  if (b.via === "design") return isDraft(f) ? { ...base, subject: "design", seat: b.sid, task: null, title: null, runId: null, key: `design:${project}` } : null;
+  if (!v.task || !plan) return null;
+  return { ...base, subject: "task", seat: b.sid, task: v.task, title: titleOf(v.task), runId: null, key: `task:${v.task}` };
+}
+function isDraft(f) {
+  try {
+    return f.design !== void 0 && parseDesign(f.design).meta.status === "draft";
+  } catch {
+    return false;
+  }
+}
+function withAuto(m, f, now) {
+  if (m.mode === "none" || m.mode === "notice") return m;
+  const s = decisionsSummary(f.decisions, now);
   return s ? { ...m, auto: { count: s.count, lastMajor: s.lastMajor } } : m;
 }
 function knownLocale(f) {
@@ -11090,20 +11305,16 @@ function recentDone(tasks, states, now) {
   }
   return out.sort((a, b) => b.at - a.at).slice(0, RECENT_DONE).map(({ at: _at, ...r }) => r);
 }
-function workModel(project, f) {
-  let plan;
-  try {
-    plan = parsePlan(f.plan);
-  } catch {
-    return { mode: "none" };
-  }
-  const session = json(f.session) ?? {};
-  const sid = typeof session.sessionId === "string" ? session.sessionId : "main";
-  const track = typeof session.track === "string" ? session.track : null;
+function seatInfo(seats, sid) {
+  const s = json(seats.find((x) => x.sid === sid)?.session) ?? {};
+  return { track: typeof s.track === "string" ? s.track : null, swarm: typeof s.launchedBy === "string" && !!s.launchedBy };
+}
+function workModel(project, f, plan, seat, now, viewer) {
+  const { sid, track } = seat;
   const states = parsed(f.states);
   const messages = parsed(f.messages);
-  const m = computeMetrics(plan, states, Date.now());
-  const own = plan.tasks.find((t) => states[t.id]?.owner === sid && ["claimed", "in_progress"].includes(states[t.id]?.status ?? ""));
+  const m = computeMetrics(plan, states, now);
+  const own = seat.task ? plan.tasks.find((t) => t.id === seat.task) : plan.tasks.find((t) => states[t.id]?.owner === sid && ["claimed", "in_progress"].includes(states[t.id]?.status ?? ""));
   const byTrack = track ? m.byTrack[track] : void 0;
   const phaseAt = own ? plan.phases.findIndex((p) => p.id === own.phase) : -1;
   const pi = phaseAt >= 0 ? phaseAt : plan.phases.findIndex((p) => m.byPhase[p.id]?.status !== "done");
@@ -11114,7 +11325,7 @@ function workModel(project, f) {
     sid,
     track,
     roadmapUrl: plan.artifacts.roadmap ?? null,
-    current: own ? { id: own.id, title: own.title, startedAt: states[own.id]?.startedAt, estimateMin: own.estimate_min } : null,
+    current: own ? { id: own.id, title: own.title, startedAt: states[own.id]?.startedAt ?? seat.since ?? void 0, estimateMin: own.estimate_min } : null,
     trackDone: byTrack?.done ?? m.done,
     trackTotal: byTrack?.total ?? m.total,
     percent: m.percent,
@@ -11122,43 +11333,37 @@ function workModel(project, f) {
     escalation: Object.values(messages).some((x) => x.type === "escalation" && x.status === "open" && (x.from === sid || x.to === sid)) || escalationCandidates(messages).some((c) => c.sessions.includes(sid)),
     phase: pi >= 0 ? { index: pi + 1, total: plan.phases.length, name: plan.phases[pi].name } : null,
     cells: plan.tasks.filter((t) => !track || t.track === track).slice(0, MAX_CELLS).map((t) => CELL[states[t.id]?.status ?? "free"] ?? "p").join(""),
-    swarm: typeof session.launchedBy === "string" && !!session.launchedBy,
-    run: memberRun(project, sid, f),
-    recentDone: recentDone(plan.tasks.filter((t) => !track || t.track === track), states, Date.now())
+    swarm: seat.swarm,
+    run: seat.run,
+    recentDone: recentDone(plan.tasks.filter((t) => !track || t.track === track), states, now),
+    viewer
   };
 }
-function memberRun(project, sid, f) {
-  try {
-    const exec = parseExecution(f.execution);
-    if (!exec || !exec.active || exec.project !== project) return null;
-    for (const t of Object.values(f.execTasks ?? {})) {
-      const p = normalizePublicTask(json(t));
-      if (p && p.by === sid && p.runId === exec.runId) return { coordinator: exec.coordinator, stage: p.stage };
-    }
-  } catch {
+function memberRun(project, sid, f, exec) {
+  if (!exec || !exec.active || exec.project !== project) return null;
+  for (const t of Object.values(f.execTasks ?? {})) {
+    const p = normalizePublicTask(json(t));
+    if (p && p.by === sid && p.runId === exec.runId) return { coordinator: exec.coordinator, stage: p.stage };
   }
   return null;
 }
-function runModel(project, f) {
-  const exec = parseExecution(f.execution);
-  if (!exec || exec.kind !== "ephemeral" && exec.project !== project) return null;
-  if (!exec.active && exec.stopReason !== "stalled") return null;
-  const tasks = {};
+function memberLine(project, m, f, exec) {
+  return memberRun(project, m.sessionId, f, exec) ?? { coordinator: exec.coordinator, stage: (m.task ? exec.tasks[m.task]?.stage : void 0) ?? "execution" };
+}
+var publicTasks = (f) => {
+  const out = {};
   for (const [id2, t] of Object.entries(f.execTasks ?? {})) {
     const p = normalizePublicTask(json(t));
-    if (p && p.task === id2) tasks[id2] = p;
+    if (p && p.task === id2) out[id2] = p;
   }
-  const live = Object.values(f.live ?? {}).map((t) => normalizeLive(json(t))).filter((d) => d !== null);
-  const v = executionView({ exec, tasks, live, now: Date.now() });
+  return out;
+};
+var lives = (f) => Object.values(f.live ?? {}).map((t) => normalizeLive(json(t))).filter((d) => d !== null);
+function runModel(project, f, exec, plan, now, viewer) {
+  const v = executionView({ exec, tasks: publicTasks(f), live: lives(f), now, role: "owner" });
   if (!v) return null;
   const rank = { alive: 0, silent: 1, stopped: 2 };
   const worst = [v.coordinator.liveness, ...v.slots.map((s) => s.liveness)].reduce((a, b) => rank[b] > rank[a] ? b : a, "alive");
-  let plan;
-  try {
-    plan = parsePlan(f.plan);
-  } catch {
-    plan = null;
-  }
   return {
     mode: "run",
     project,
@@ -11171,12 +11376,13 @@ function runModel(project, f) {
     slots: v.slots.slice(0, 2).map((s) => ({ task: s.task, stage: s.stage, round: s.round })),
     worst,
     stalled: !v.active,
-    roadmapUrl: plan?.artifacts.roadmap ?? null
+    roadmapUrl: plan?.artifacts.roadmap ?? null,
+    viewer
   };
 }
-function designModel(project, f) {
+function designModel(project, f, viewer) {
   const d = parseDesign(f.design);
-  if (d.meta.status !== "draft") return { mode: "none", locale: d.meta.locale };
+  if (d.meta.status !== "draft") return noneBand(d.meta.locale, viewer);
   let changelog = [];
   try {
     changelog = parseChangelog(f.changelog ?? null);
@@ -11204,15 +11410,25 @@ function designModel(project, f) {
     critical: latest?.proposals.filter((p) => p.severity === "critical").length ?? 0,
     pending: pending.length,
     pendingCritical: pending.filter((p) => p.severity === "critical").length,
-    designUrl: d.meta.artifact ?? null
+    designUrl: d.meta.artifact ?? null,
+    viewer
   };
+}
+
+// src/lib/main-checkout.ts
+function mainCheckoutFrom(root, gitFileText) {
+  const m = gitFileText ? /^gitdir:\s*(.+?)[\\/]\.git[\\/]worktrees[\\/][^\\/\r\n]+\s*$/m.exec(gitFileText) : null;
+  const dir = m ? m[1] : null;
+  return dir && (/^[A-Za-z]:/.test(dir) || dir.startsWith("/")) ? dir : root;
 }
 
 // src/mod/band-line.ts
 var TITLE_MAX = 40;
 var SLOT_ID_MAX = 20;
+var BIDI = new RegExp(`[${[1564, 8206, 8207, 8234, 8235, 8236, 8237, 8238, 8294, 8295, 8296, 8297].map((c) => String.fromCharCode(c)).join("")}]`, "g");
+var CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
 function clip(text2, max = TITLE_MAX) {
-  const chars = Array.from(String(text2).replace(/\s+/g, " ").trim());
+  const chars = Array.from(String(text2).replace(CONTROL, " ").replace(BIDI, "").replace(/\s+/g, " ").trim());
   return chars.length <= max ? chars.join("") : chars.slice(0, max - 1).join("") + "\u2026";
 }
 var TEXT = {
@@ -11252,6 +11468,21 @@ var TEXT = {
     stopRun: "Parar",
     integratedN: "integradas",
     memberOf: "de la ejecuci\xF3n de {c}",
+    otherTrack: "Otro frente",
+    view: "Ver",
+    join: "Unirme",
+    resume: "Retomar",
+    release: "Liberar",
+    close: "Cerrar",
+    stopFilled: "/forge:stop est\xE1 en el prompt: pulsa Enter para parar toda la ejecuci\xF3n",
+    ago: "hace {ago}",
+    noticeOtherTask: "otra sesi\xF3n ({seat}) trabaja en {task}",
+    noticeOtherBound: "otra sesi\xF3n ({seat}) est\xE1 ligada al roadmap",
+    noticeOtherRun: "ejecuci\xF3n de forge en curso, la coordina otra sesi\xF3n \xB7 {i}/{t}",
+    noticePrevTask: "qued\xF3 a medias: {task} {title}",
+    noticePrevDesign: "dise\xF1o a medias: {project}",
+    noticeRunStopped: "ejecuci\xF3n parada: {i}/{t} integradas",
+    noticeRunOrphan: "ejecuci\xF3n sin coordinadora: {i}/{t} integradas",
     stage: { brief: "brief", implement: "implementar", validate: "validar", verify: "verificar", review: "revisar", verdict: "veredicto", integrate: "integrar", execution: "ejecuci\xF3n" }
   },
   en: {
@@ -11290,6 +11521,21 @@ var TEXT = {
     stopRun: "Stop",
     integratedN: "integrated",
     memberOf: "in {c}'s execution",
+    otherTrack: "Other track",
+    view: "View",
+    join: "Join",
+    resume: "Resume",
+    release: "Release",
+    close: "Close",
+    stopFilled: "/forge:stop is in the prompt: press Enter to stop the whole execution",
+    ago: "{ago} ago",
+    noticeOtherTask: "another session ({seat}) works on {task}",
+    noticeOtherBound: "another session ({seat}) is bound to the roadmap",
+    noticeOtherRun: "forge execution running, coordinated by another session \xB7 {i}/{t}",
+    noticePrevTask: "left in progress: {task} {title}",
+    noticePrevDesign: "design left in progress: {project}",
+    noticeRunStopped: "execution stopped: {i}/{t} integrated",
+    noticeRunOrphan: "execution without a coordinator: {i}/{t} integrated",
     stage: { brief: "brief", implement: "implement", validate: "validate", verify: "verify", review: "review", verdict: "verdict", integrate: "integrate", execution: "execution" }
   }
 };
@@ -11297,9 +11543,36 @@ var textsFor = (locale) => locale === "es" ? TEXT.es : TEXT.en;
 function autoPart(m) {
   return m.auto ? [`\u2691 auto \xB7 ${m.auto.count}${m.auto.lastMajor ? ` \xB7 ${clip(m.auto.lastMajor, 30)}` : ""}`] : [];
 }
-function bandLine(m, nowMs) {
+function agoText(since, nowMs2) {
+  const t = since ? Date.parse(since) : NaN;
+  if (!Number.isFinite(t)) return null;
+  const min = Math.max(1, Math.floor(Math.max(0, nowMs2 - t) / 6e4));
+  return min < 60 ? `${min} min` : min < 48 * 60 ? `${Math.floor(min / 60)} h` : `${Math.floor(min / 1440)} d`;
+}
+function noticeLine(m, nowMs2, t) {
+  const vals = {
+    seat: m.seat ?? "",
+    task: m.task ?? "",
+    title: m.title ? clip(m.title) : "",
+    project: m.project,
+    i: String(m.integrated ?? 0),
+    t: String(m.total ?? 0)
+  };
+  const fill = (s) => s.replace(/\{(seat|task|title|project|i|t)\}/g, (_, k) => vals[k]).replace(/\s+/g, " ").trim();
+  const ago = agoText(m.since, nowMs2);
+  if (m.kind === "other-live") {
+    if (m.subject === "run") return `\u25E6 ${fill(t.noticeOtherRun)}`;
+    const head2 = `\u25E6 ${fill(m.task ? t.noticeOtherTask : t.noticeOtherBound)}`;
+    return ago ? `${head2} \xB7 ${t.ago.replace("{ago}", ago)}` : head2;
+  }
+  const text2 = m.subject === "run" ? m.stopReason ? t.noticeRunStopped : t.noticeRunOrphan : m.subject === "design" ? t.noticePrevDesign : t.noticePrevTask;
+  const head = `\u25CC ${fill(text2)}`;
+  return ago ? `${head} (${t.ago.replace("{ago}", ago)})` : head;
+}
+function bandLine(m, nowMs2) {
   if (m.mode === "none") return "";
   const t = textsFor(m.locale);
+  if (m.mode === "notice") return noticeLine(m, nowMs2, t);
   if (m.mode === "design") {
     const head = `\u25C6 ${t.design} \xB7 ${m.project} \xB7 v${m.version}`;
     if (m.round === 0) return [`${head} \xB7 ${t.noCritique}`, ...autoPart(m)].join(" \xB7 ");
@@ -11324,8 +11597,8 @@ function bandLine(m, nowMs) {
   if (m.current) {
     parts.push(`${m.current.id} ${clip(m.current.title)}`);
     const started = m.current.startedAt ? Date.parse(m.current.startedAt) : NaN;
-    if (Number.isFinite(started) && nowMs >= started) {
-      const min = Math.floor((nowMs - started) / 6e4);
+    if (Number.isFinite(started) && nowMs2 >= started) {
+      const min = Math.floor((nowMs2 - started) / 6e4);
       parts.push(`${min} min${m.current.estimateMin ? `/${m.current.estimateMin}` : ""}`);
     }
   } else {
@@ -11342,6 +11615,8 @@ function bandLine(m, nowMs) {
 
 // src/mod/files.ts
 var MAX_DOCS = 500;
+var MAX_PROJECTS = 50;
+var RENEW_MS = 6e4;
 var join = (...parts) => parts.join("/");
 async function readOpt($, path) {
   try {
@@ -11364,6 +11639,14 @@ async function mtime($, path) {
     return null;
   }
 }
+async function nowMs($) {
+  try {
+    const n = await $.clock.now();
+    if (Number.isFinite(n)) return n;
+  } catch {
+  }
+  return Date.now();
+}
 async function readCollection($, dir) {
   const out = {};
   const files = (await listOpt($, dir)).filter((f) => f.kind === "file" && f.name.endsWith(".json")).slice(0, MAX_DOCS);
@@ -11373,21 +11656,58 @@ async function readCollection($, dir) {
   }
   return out;
 }
-async function projectEntries($, root) {
+async function sessionIdOf($) {
+  try {
+    const id2 = await $.session.id();
+    return isSafeId(id2) ? id2 : null;
+  } catch {
+    return null;
+  }
+}
+async function readSmall($, path, max) {
+  try {
+    const st = await $.fs.stat(path);
+    if (typeof st.size === "number" && st.size > max) return void 0;
+  } catch {
+    return void 0;
+  }
+  return readOpt($, path);
+}
+var SESSION_FILE_MAX = 8 * 1024;
+async function seatFiles($, wp) {
+  const bindings = {};
+  const seatSessions = {};
+  const session = await readSmall($, join(wp, "session.json"), SESSION_FILE_MAX);
+  const own = await readSmall($, join(wp, "bound.json"), BOUND_MAX_BYTES);
+  if (own !== void 0) bindings["."] = own;
+  const names = (await listOpt($, join(wp, "seats"))).filter((d) => d.kind === "dir" && isSafeId(d.name)).map((d) => d.name).sort().slice(0, MAX_SEATS + 1);
+  for (const n of names) {
+    const text2 = await readSmall($, join(wp, "seats", n, "bound.json"), BOUND_MAX_BYTES);
+    if (text2 === void 0) continue;
+    bindings[n] = text2;
+    const s = await readSmall($, join(wp, "seats", n, "session.json"), SESSION_FILE_MAX);
+    if (s !== void 0) seatSessions[n] = s;
+  }
+  return { session, bindings, seatSessions };
+}
+async function projectEntries($, root, now) {
   const docs = join(root, "docs", "waypoint");
   const dirs = (await listOpt($, docs)).filter((d) => d.kind === "dir");
-  const entries = [];
+  const out = [];
   for (const d of dirs) {
     const times = [await mtime($, join(docs, d.name, "plan.yaml")), await mtime($, join(docs, d.name, "design.md"))].filter((t) => t !== null);
     if (!times.length) continue;
-    entries.push({ name: d.name, bindings: [], mtimeMs: Math.max(...times) });
+    const seats = await seatFiles($, join(root, ".waypoint", d.name));
+    const bindings = seatsOf(seats, now).flatMap((s) => s.bound ? [s.bound] : []);
+    out.push({ entry: { name: d.name, bindings, mtimeMs: Math.max(...times) }, seats });
   }
-  return entries;
+  return out;
 }
 var EXEC_MAX = 64 * 1024;
 var EXEC_FILE_MAX = 8 * 1024;
 var EXEC_TASKS_MAX = 50;
 var LIVE_MAX = 20;
+var MEMBERS_MAX = 50;
 var SAFE_TASK = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,80}$/;
 async function readJsonDir($, dir, max, keep) {
   const out = {};
@@ -11398,7 +11718,7 @@ async function readJsonDir($, dir, max, keep) {
   }
   return out;
 }
-async function loadForge($, root) {
+async function loadForge($, root, now) {
   try {
     const main = mainCheckoutFrom(root, await readOpt($, join(root, ".git")) ?? null);
     const dir = join(main, ".forge");
@@ -11415,15 +11735,25 @@ async function loadForge($, root) {
       out.execTasks = await readJsonDir($, join(dir, "execution"), EXEC_TASKS_MAX, (name) => SAFE_TASK.test(name));
     }
     if (entries.some((f) => f.kind === "dir" && f.name === "live")) out.live = await readJsonDir($, join(dir, "live"), LIVE_MAX, () => true);
+    if (entries.some((f) => f.kind === "dir" && f.name === "members")) out.members = await readJsonDir($, join(dir, "members"), MEMBERS_MAX, (name) => isSafeId(name));
+    const hook = parseExecution(execution, now)?.hookSession;
+    if (hook && isSafeId(hook)) {
+      const signal = out.live?.[hook] ?? await readSmall($, join(dir, "live", `${hook}.json`), EXEC_FILE_MAX);
+      if (signal !== void 0) out.coordinatorLive = signal;
+    }
     return out;
   } catch {
     return {};
   }
 }
-async function loadBandModel($) {
+async function loadBandFiles($) {
   const root = await $.session.root();
-  const project = pickProject(await projectEntries($, root), null);
-  if (!project) return { mode: "none" };
+  const now = await nowMs($);
+  const sessionId = await sessionIdOf($);
+  const projects = await projectEntries($, root, now);
+  const project = pickProject(projects.map((p) => p.entry), sessionId);
+  const chosen = projects.find((p) => p.entry.name === project);
+  if (!project || !chosen) return null;
   const pdocs = join(root, "docs", "waypoint", project);
   const pstate = join(root, ".waypoint", project);
   const critiques = {};
@@ -11437,13 +11767,72 @@ async function loadBandModel($) {
     design: await readOpt($, join(pdocs, "design.md")),
     changelog: await readOpt($, join(pdocs, "design", "changelog.json")),
     dismissed: await readOpt($, join(pstate, "dismissed.json")),
-    session: await readOpt($, join(pstate, "session.json")),
+    ...chosen.seats,
     states: await readCollection($, join(pstate, "dbcache", "state")),
     messages: await readCollection($, join(pstate, "dbcache", "messages")),
-    ...await loadForge($, root),
-    critiques
+    ...await loadForge($, root, now),
+    critiques,
+    sessionId,
+    now
   };
-  return buildBandModel(project, files);
+  return { project, files };
+}
+async function loadBandModel($) {
+  const loaded = await loadBandFiles($);
+  return loaded ? buildBandModel(loaded.project, loaded.files) : noneBand();
+}
+async function renewBindings($) {
+  const id2 = await sessionIdOf($);
+  if (!id2) return 0;
+  const root = await $.session.root();
+  const now = await nowMs($);
+  const due = (b, sid) => b !== null && b.sid === sid && b.claude === id2 && b.endedAt === null && now - Date.parse(b.seenAt) >= RENEW_MS;
+  let renewed = 0;
+  const projects = (await listOpt($, join(root, ".waypoint"))).filter((d) => d.kind === "dir").slice(0, MAX_PROJECTS);
+  for (const p of projects) {
+    const wp = join(root, ".waypoint", p.name);
+    for (const s of seatsOf(await seatFiles($, wp), now)) {
+      if (!due(s.bound, s.sid)) continue;
+      const file = s.checkout ? join(wp, "bound.json") : join(wp, "seats", s.sid, "bound.json");
+      const cur = parseBound(await readOpt($, file), now);
+      if (!due(cur, s.sid)) continue;
+      try {
+        await $.fs.write(file, `${JSON.stringify({ ...cur, seenAt: new Date(now).toISOString() }, null, 2)}
+`);
+        renewed++;
+      } catch {
+      }
+    }
+  }
+  return renewed;
+}
+
+// src/mod/notice-dismiss.ts
+var DISMISS_STORE_KEY = "dismissed";
+var DISMISS_MAX = 200;
+var OTHER_LIVE_DISMISS_MS = 24 * 36e5;
+var dismissalKey = (root, project, kind, key) => `${root}|${project}|${kind}|${key}`;
+function normalizeDismissals(x, now) {
+  if (!x || typeof x !== "object" || Array.isArray(x)) return {};
+  return Object.fromEntries(Object.entries(x).filter((entry) => {
+    const [k, v] = entry;
+    const t = typeof v === "string" ? Date.parse(v) : NaN;
+    return k !== "" && Number.isFinite(t) && t > now;
+  }));
+}
+function dismissalUntil(n, now) {
+  const offerEnds = (n.since ? Date.parse(n.since) : NaN) + PREVIOUS_OFFER_MS;
+  return new Date(n.kind === "previous" && Number.isFinite(offerEnds) && offerEnds > now ? offerEnds : now + OTHER_LIVE_DISMISS_MS).toISOString();
+}
+function addDismissal(d, key, until, now) {
+  const kept = Object.entries(normalizeDismissals(d, now)).filter(([k]) => k !== key);
+  kept.push([key, until]);
+  return Object.fromEntries(kept.slice(-DISMISS_MAX));
+}
+function isDismissed(d, key, now) {
+  const v = Object.prototype.hasOwnProperty.call(d, key) ? d[key] : void 0;
+  const t = typeof v === "string" ? Date.parse(v) : NaN;
+  return Number.isFinite(t) && t > now;
 }
 
 // src/mod/mirror.ts
@@ -11500,19 +11889,59 @@ function applyWrite(prev, w) {
 var writeFailed = (text2) => typeof text2 === "string" && /version_mismatch|not committed|nothing (?:was )?written|refused|denied/i.test(text2);
 
 // src/mod/register.tsx
-var band = atom({ plugin: "waypoint", key: "band" }, { mode: "none" });
+var band = atom({ plugin: "waypoint", key: "band" }, noneBand());
 var hidden = atom({ plugin: "waypoint", key: "hidden" }, false);
 var refreshing = false;
 var timer = null;
 var lensRecheck = null;
+var dismissals = {};
+async function loadDismissals($) {
+  try {
+    dismissals = normalizeDismissals(await $.store.get(DISMISS_STORE_KEY), await nowMs($));
+  } catch {
+  }
+}
+async function rootOf($) {
+  try {
+    return await $.session.root();
+  } catch {
+    return "";
+  }
+}
+async function dismissNotice($, n) {
+  const now = await nowMs($);
+  let stored;
+  try {
+    stored = await $.store.get(DISMISS_STORE_KEY);
+  } catch {
+    stored = void 0;
+  }
+  const next = addDismissal({ ...normalizeDismissals(stored, now), ...dismissals }, dismissalKey(await rootOf($), n.project, n.kind, n.key), dismissalUntil(n, now), now);
+  dismissals = next;
+  $.ui.invalidate("ui.render");
+  try {
+    await $.store.set(DISMISS_STORE_KEY, next);
+    await loadDismissals($);
+  } catch {
+  }
+}
+var refreshPending = false;
 async function refresh($) {
-  if (refreshing) return;
+  if (refreshing) {
+    refreshPending = true;
+    return;
+  }
   refreshing = true;
   try {
-    const model = await loadBandModel($);
-    const current = await read($, band);
-    if (JSON.stringify(current) !== JSON.stringify(model)) await update($, band, () => model);
-  } catch {
+    do {
+      refreshPending = false;
+      try {
+        const model = await loadBandModel($);
+        const current = await read($, band);
+        if (JSON.stringify(current) !== JSON.stringify(model)) await update($, band, () => model);
+      } catch {
+      }
+    } while (refreshPending);
   } finally {
     refreshing = false;
   }
@@ -11552,7 +11981,14 @@ async function checkLens($) {
   }
 }
 async function tick($) {
-  await checkLens($);
+  try {
+    await checkLens($);
+  } catch {
+  }
+  try {
+    await renewBindings($);
+  } catch {
+  }
   await refresh($);
   try {
     const m = await read($, band);
@@ -11560,18 +11996,22 @@ async function tick($) {
   } catch {
   }
 }
+function startTimer($) {
+  timer?.cancel();
+  timer = $.clock.every(3e4, () => {
+    void tick($);
+  });
+}
 export const register = (on) => {
   on("session.start", async ($, e, next) => {
     try {
       await update($, hidden, () => false);
     } catch {
     }
+    await loadDismissals($);
     await checkLens($);
     await refresh($);
-    timer?.cancel();
-    timer = $.clock.every(3e4, () => {
-      void tick($);
-    });
+    startTimer($);
     lensRecheck?.cancel();
     lensRecheck = $.clock.after(1e3, () => {
       lensRecheck = null;
@@ -11580,11 +12020,24 @@ export const register = (on) => {
     return next(e);
   });
   on("session.end", ($, e, next) => {
+    if (e.reason === "clear" || e.reason === "resume") return next(e);
     timer?.cancel();
     timer = null;
     lensRecheck?.cancel();
     lensRecheck = null;
     return next(e);
+  });
+  on("classic.SessionStart", async ($, e, next) => {
+    const r = await next(e);
+    if (e.source === "clear" || e.source === "resume") {
+      try {
+        await update($, hidden, () => false);
+      } catch {
+      }
+    }
+    if (!timer) startTimer($);
+    void refresh($);
+    return r;
   });
   on("turn.complete", ($, e, next) => {
     void checkLens($);
@@ -11605,16 +12058,17 @@ export const register = (on) => {
       const m = await read($, band);
       const isHidden = await read($, hidden);
       if (isHidden || !m || e.props.hasSurvey || m.mode === "none") return below;
+      if (m.mode === "notice" && isDismissed(dismissals, dismissalKey(await rootOf($), m.project, m.kind, m.key), await nowMs($))) return below;
       const { Box, Text, Button, Link } = $.ui.resolve(e);
-      const taskNow = m.mode === "work" && m.current?.startedAt ? await $.clock.now() : 0;
-      const line = bandLine(m, taskNow);
+      const drawnAt = m.mode === "notice" || m.mode === "work" && m.current?.startedAt ? await $.clock.now() : 0;
+      const line = bandLine(m, drawnAt);
       const t = textsFor(m.locale);
-      const submit = (line2) => () => {
-        const [, command = "", args = ""] = /^\/(\S+)\s*(.*)$/.exec(line2) ?? [];
+      const submit = (text2) => () => {
+        const [, command = "", args = ""] = /^\/(\S+)\s*(.*)$/.exec(text2) ?? [];
         $.command.run({ command, args }).catch(async () => {
           try {
-            await $.prompt.fill({ text: line2, mode: "replace" });
-            $.ui.toast(t.pressEnter);
+            const r = await $.prompt.fill({ text: text2, mode: "replace" });
+            if (r.isFilled) $.ui.toast(t.pressEnter);
           } catch {
           }
         });
@@ -11622,6 +12076,35 @@ export const register = (on) => {
       const link = (href, label) => /^https?:\/\//i.test(href) ? /* @__PURE__ */ h(Link, { href, label }) : /* @__PURE__ */ h(Text, { dimColor: true }, href);
       const fill = (text2) => () => {
         $.prompt.fill({ text: text2, mode: "replace" }).catch(() => void 0);
+      };
+      const fillStop = () => {
+        $.prompt.fill({ text: "/forge:stop", mode: "replace" }).then((r) => {
+          if (r.isFilled) $.ui.toast(t.stopFilled);
+        }).catch(() => void 0);
+      };
+      const noticeControls = (n) => {
+        if (n.kind === "other-live") {
+          return n.subject === "run" ? [
+            /* @__PURE__ */ h(Button, { key: "view", label: t.view, onPress: submit("/waypoint:status") }),
+            /* @__PURE__ */ h(Button, { key: "join", label: t.join, onPress: submit("/forge:run --join") })
+          ] : [
+            /* @__PURE__ */ h(Button, { key: "status", label: t.status, onPress: submit("/waypoint:status") }),
+            /* @__PURE__ */ h(Button, { key: "other-track", label: t.otherTrack, onPress: fill("/waypoint:launch ") }),
+            ...n.roadmapUrl ? [link(n.roadmapUrl, t.roadmap)] : []
+          ];
+        }
+        if (n.subject === "run") {
+          return [
+            /* @__PURE__ */ h(Button, { key: "view", label: t.view, onPress: submit("/waypoint:status") }),
+            /* @__PURE__ */ h(Button, { key: "resume", label: t.resume, onPress: submit("/forge:run --resume") }),
+            /* @__PURE__ */ h(Button, { key: "close", label: t.close, onPress: n.stopReason ? submit("/forge:stop") : fillStop })
+          ];
+        }
+        if (n.subject === "design") return [/* @__PURE__ */ h(Button, { key: "resume", label: t.resume, variant: "primary", onPress: submit("/waypoint:design resume") })];
+        return [
+          /* @__PURE__ */ h(Button, { key: "resume", label: t.resume, variant: "primary", onPress: submit("/waypoint:work resume") }),
+          ...n.task ? [/* @__PURE__ */ h(Button, { key: "release", label: `${t.release} ${n.task}`, onPress: submit(`/waypoint:work release ${n.task}`) })] : []
+        ];
       };
       const controls = m.mode === "design" ? [
         ...m.proposals > 0 ? [
@@ -11637,15 +12120,18 @@ export const register = (on) => {
         /* @__PURE__ */ h(Button, { key: "status", label: t.status, onPress: submit("/waypoint:status") }),
         /* @__PURE__ */ h(Button, { key: "stop-run", label: t.stopRun, onPress: submit("/forge:stop") }),
         ...m.roadmapUrl ? [link(m.roadmapUrl, t.roadmap)] : []
-      ] : [
+      ] : m.mode === "notice" ? noticeControls(m) : [
         /* @__PURE__ */ h(Button, { key: "next-task", label: t.nextTask, variant: "primary", onPress: submit("/waypoint:work") }),
         /* @__PURE__ */ h(Button, { key: "status", label: t.status, onPress: submit("/waypoint:status") }),
         /* @__PURE__ */ h(Button, { key: "launch", label: t.launch, onPress: fill("/waypoint:launch ") }),
+        ...m.run ? [/* @__PURE__ */ h(Button, { key: "stop-run", label: t.stopRun, onPress: fillStop })] : [],
         ...m.roadmapUrl ? [link(m.roadmapUrl, t.roadmap)] : []
       ];
-      return /* @__PURE__ */ h(Box, { flexDirection: "column" }, /* @__PURE__ */ h(Box, { flexDirection: "row", flexWrap: "wrap", columnGap: 1 }, /* @__PURE__ */ h(Text, { color: "claude", wrap: "truncate-end" }, line), controls, lens ? /* @__PURE__ */ h(Button, { key: "panel", label: t.panel, onPress: submit("/lens") }) : null, /* @__PURE__ */ h(Button, { key: "dismiss", label: "\xD7", role: "dismiss", onPress: () => {
-        update($, hidden, () => true).catch(() => void 0);
-      } })), below);
+      const notice = m.mode === "notice" ? m : null;
+      const dismiss = () => {
+        (notice ? dismissNotice($, notice) : update($, hidden, () => true)).catch(() => void 0);
+      };
+      return /* @__PURE__ */ h(Box, { flexDirection: "column" }, /* @__PURE__ */ h(Box, { flexDirection: "row", flexWrap: "wrap", columnGap: 1 }, m.mode === "notice" ? /* @__PURE__ */ h(Text, { dimColor: true, wrap: "truncate-end" }, line) : /* @__PURE__ */ h(Text, { color: "claude", wrap: "truncate-end" }, line), controls, lens ? /* @__PURE__ */ h(Button, { key: "panel", label: t.panel, onPress: submit("/lens") }) : null, /* @__PURE__ */ h(Button, { key: "dismiss", label: "\xD7", role: "dismiss", onPress: dismiss })), below);
     } catch {
       return below;
     }

@@ -14242,15 +14242,24 @@ var HEADS_MAX = 50;
 var SHA = /^[0-9a-f]{7,64}$/;
 var RENAME_TRIES = 50;
 var RENAME_BUSY = /* @__PURE__ */ new Set(["EPERM", "EACCES", "EBUSY"]);
-var pause1ms = () => {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+var REREAD_MS = 8;
+var pause = (ms) => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 };
+var pause1ms = () => pause(1);
 function readText(file, max) {
   try {
     return (0, import_node_fs3.statSync)(file).size > max ? null : (0, import_node_fs3.readFileSync)(file, "utf8");
   } catch {
     return null;
   }
+}
+function readBound(file, now) {
+  const text = readText(file, BOUND_MAX_BYTES);
+  const b = parseBound(text, now);
+  if (b || text === null) return b;
+  pause(REREAD_MS);
+  return parseBound(readText(file, BOUND_MAX_BYTES), now);
 }
 function writeAtomic(file, text) {
   (0, import_node_fs3.mkdirSync)(import_node_path4.default.dirname(file), { recursive: true });
@@ -14271,7 +14280,7 @@ function writeAtomic(file, text) {
   }
 }
 function readBinding(seatDir, sid, now) {
-  const b = parseBound(readText(boundFile(seatDir), BOUND_MAX_BYTES), now);
+  const b = readBound(boundFile(seatDir), now);
   return b && b.sid === sid ? b : null;
 }
 function writeBinding(file, doc) {
@@ -14284,7 +14293,7 @@ function checkoutSid(wpDir, now) {
     if (typeof s?.sessionId === "string" && s.sessionId) return s.sessionId;
   } catch {
   }
-  return parseBound(readText(boundFile(wpDir), BOUND_MAX_BYTES), now)?.sid ?? null;
+  return readBound(boundFile(wpDir), now)?.sid ?? null;
 }
 function readSeats(wpDir, now) {
   const out = [];
