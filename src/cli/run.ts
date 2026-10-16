@@ -94,7 +94,10 @@ export function run(argv: string[], io: Io): Result {
     switch (cmd) {
       case 'validate': {
         const p = loadPlan();
-        return ok(`ok: ${p.tasks.length} tasks, ${p.phases.length} phases, ${p.tracks.length} tracks`);
+        // D-09: forge runs a task without zones alone (it may touch anything), so the plan should say what each touches.
+        const loose = p.tasks.filter(t => !t.zones.length).map(t => t.id);
+        const warning = loose.length ? `\nwarning: ${loose.length} task(s) without zones run alone in a forge execution: ${loose.join(', ')}` : '';
+        return ok(`ok: ${p.tasks.length} tasks, ${p.phases.length} phases, ${p.tracks.length} tracks${warning}`);
       }
       case 'clean-cache': {
         const p = loadPlan();

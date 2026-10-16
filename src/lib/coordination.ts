@@ -1,5 +1,5 @@
 import { availableTasks, nextTask, notIntegratedDep, statusOf } from './deps.js';
-import { overlappingZones } from './zones.js';
+import { effectiveZones, overlappingZones } from './zones.js';
 import type { MessageDoc, PlanTask, PlanView, SessionDoc, States, TaskState } from './types.js';
 
 export interface Conflict { taskId: string; owner: string; zones: [string, string][]; ownerIdle?: boolean }
@@ -18,7 +18,7 @@ const ACTIVE = ['claimed', 'in_progress'];
 
 export function zonesOf(task: PlanTask, state?: TaskState): string[] {
   const touched = Array.isArray(state?.zonesTouched) ? state!.zonesTouched! : [];
-  return [...task.zones, ...touched].filter((z): z is string => typeof z === 'string');
+  return [...effectiveZones(task.zones), ...touched].filter((z): z is string => typeof z === 'string');
 }
 
 /** With `sessions`, each conflict also says whether its owner is idle (see isIdle). */

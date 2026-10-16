@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { globsOverlap, overlappingZones, staticPrefix } from '../src/lib/zones.js';
+import { effectiveZones, globsOverlap, overlappingZones, staticPrefix } from '../src/lib/zones.js';
 
 describe('staticPrefix', () => {
   it('keeps the path up to the first wildcard segment', () => {
@@ -49,5 +49,15 @@ describe('literal directory and file zones (fix round)', () => {
   });
   it('sibling literal prefix does not overlap a glob', () => {
     expect(globsOverlap('src/apix', 'src/api/**')).toBe(false);
+  });
+});
+
+describe('effectiveZones (D-09)', () => {
+  it('an empty list is the whole repository; any other list is kept as it is', () => {
+    expect(effectiveZones([])).toEqual(['**']);
+    const zones = ['src/a/**', 'README.md'];
+    expect(effectiveZones(zones)).toEqual(['src/a/**', 'README.md']);
+    expect(effectiveZones(zones)).not.toBe(zones);
+    expect(overlappingZones(effectiveZones([]), ['web/cart/x.ts'])).toEqual([['**', 'web/cart/x.ts']]);
   });
 });

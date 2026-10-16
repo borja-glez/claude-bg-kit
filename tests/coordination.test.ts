@@ -261,3 +261,10 @@ describe('liveness', () => {
     expect(liveness(t0, t0 + 60000)).toBe('alive');
   });
 });
+
+describe('conflictsFor with a task without zones (D-09)', () => {
+  it('a task without zones overlaps every task in progress', () => {
+    const s: States = { T001: { status: 'in_progress', owner: 'be' } };
+    expect(conflictsFor(plan, s, 'T006', 'ui')).toEqual([{ taskId: 'T001', owner: 'be', zones: [['**', 'src/db/**']] }]);
+  });
+});

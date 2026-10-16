@@ -261,3 +261,13 @@ describe('schedule', () => {
       .some(a => a.type === 'nudge')).toBe(false);
   });
 });
+
+describe('a plan task without zones (D-09)', () => {
+  it('runs alone: it never starts beside another task, and widthOf counts it alone', () => {
+    const p = plan([task('T1', [], []), task('T2')]);
+    expect(starts(schedule(input({ plan: p })))).toEqual(['T1']);
+    expect(starts(schedule(input({ plan: p, exec: exec({ tasks: running('T2') }), states: { T2: { status: 'in_progress', owner: 'main' } } })))).toEqual([]);
+    expect(widthOf(p)).toBe(1);
+    expect(widthOf(plan([task('T1'), task('T2')]))).toBe(2);
+  });
+});

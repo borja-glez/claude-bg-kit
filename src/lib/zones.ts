@@ -38,3 +38,8 @@ export function overlappingZones(a: string[], b: string[]): [string, string][] {
   for (const x of a) for (const y of b) if (globsOverlap(x, y)) out.push([x, y]);
   return out;
 }
+
+/** D-09: the zones a task occupies. A task without zones may touch anything, so it counts as the whole repository. */
+export function effectiveZones(zones: readonly string[]): string[] {
+  return zones.length ? [...zones] : ['**'];
+}

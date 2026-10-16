@@ -1,6 +1,6 @@
 import { commitShas, isAvailable, isUnlocked, statusOf } from '../lib/deps.js';
 import { LEASE_MINUTES, sessionLiveness, zonesOf } from '../lib/coordination.js';
-import { overlappingZones } from '../lib/zones.js';
+import { effectiveZones, overlappingZones } from '../lib/zones.js';
 import type { ExecutionState, ExecTask, PublicTask } from '../lib/execution-state.js';
 import type { PlanTask, PlanView, SessionDoc, Stage, States } from '../lib/types.js';
 
@@ -198,7 +198,8 @@ export function widthProfile(plan: PlanView): WidthProfile {
     const wave: PlanTask[] = [];
     for (const t of plan.tasks) {
       if (done.has(t.id) || !t.depends_on.every(d => done.has(d))) continue;
-      if (wave.some(w => overlappingZones(t.zones, w.zones).length > 0)) continue;
+      // D-09: a task without zones may touch anything: it shares its wave with no other task.
+      if (wave.some(w => overlappingZones(effectiveZones(t.zones), effectiveZones(w.zones)).length > 0)) continue;
       wave.push(t);
     }
     if (!wave.length) break;

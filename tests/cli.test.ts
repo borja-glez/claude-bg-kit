@@ -61,7 +61,10 @@ describe('waypoint CLI', () => {
   });
 
   it('validate reports ok and fails with all issues', () => {
-    expect(run(['validate', 'plan.yaml'], io)).toMatchObject({ code: 0, stdout: 'ok: 6 tasks, 2 phases, 2 tracks\n' });
+    expect(run(['validate', 'plan.yaml'], io)).toMatchObject({ code: 0, stdout: 'ok: 6 tasks, 2 phases, 2 tracks\nwarning: 1 task(s) without zones run alone in a forge execution: T006\n' });
+    // With zones on every task there is no warning.
+    writeFileSync(path.join(dir, 'zoned.yaml'), `${readFileSync(FIXTURE, 'utf8').trimEnd()}\n    zones: ["src/mail/**"]\n`);
+    expect(run(['validate', 'zoned.yaml'], io)).toMatchObject({ code: 0, stdout: 'ok: 6 tasks, 2 phases, 2 tracks\n' });
     writeFileSync(path.join(dir, 'bad.yaml'), readFileSync(FIXTURE, 'utf8').replace('depends_on: [T004]', 'depends_on: [T404]'));
     const r = run(['validate', 'bad.yaml'], io);
     expect(r.code).toBe(1);
