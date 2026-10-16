@@ -26,6 +26,9 @@ export interface BandFiles {
   members?: Record<string, string>;
   /** The live signal of the execution's coordinator, .forge/live/<hookSession>.json. */
   coordinatorLive?: string;
+  /** The bound.json texts of the active execution's coordinator (its hook session, any via) in every .waypoint/<p>/ of
+   *  the main checkout, by `<p>/<seat>` ('.' the checkout seat): an open conversation holds one live. */
+  coordinatorBindings?: Record<string, string>;
   /** $.session.id() of the conversation that looks; null or absent: it owns nothing. */
   sessionId?: string | null;
   /** The engine's clock in ms; absent: Date.now(). */
@@ -164,10 +167,12 @@ function viewerOf(v: Viewer, exec: ExecutionState | null, now: number): BandView
 }
 /**
  * What describeViewer reads of forge: the execution, the members of its run, and whether it has no coordinator: its
- * conversation ended or it went silent (B-09, M4), by its own signal as the hooks read it.
+ * conversation ended or it went silent while not open (B-09, M4), by its own signal and bindings as the hooks read
+ * them; the bindings raw, since the band cannot check a pid (M6).
  */
 function runInput(exec: ExecutionState | null, f: BandFiles, now: number): Pick<ViewerInput, 'execution' | 'members' | 'coordinatorEnded'> {
-  return { execution: exec, members: exec ? membersOf(f, exec.runId) : [], coordinatorEnded: coordinatorGone(exec, normalizeLive(json(f.coordinatorLive)), now) };
+  const bindings = Object.values(f.coordinatorBindings ?? {}).flatMap(text => { const b = parseBound(text, now); return b ? [b] : []; });
+  return { execution: exec, members: exec ? membersOf(f, exec.runId) : [], coordinatorEnded: coordinatorGone(exec, normalizeLive(json(f.coordinatorLive)), now, { bindings }) };
 }
 /** The role from the execution alone, with no binding: there is no waypoint project whose seats could be held. */
 function forgeViewer(exec: ExecutionState | null, f: BandFiles, now: number): BandViewer {

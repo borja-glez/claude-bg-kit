@@ -16,17 +16,15 @@ import { coordinatorGone } from '../lib/execution-view.js';
 import { parseRun, type RunState } from '../lib/forge-run.js';
 import { forgeRoleOf } from '../lib/forge-activity.js';
 import { newestMemberFiles, normalizeMember, type MemberDoc } from '../lib/member-doc.js';
-import { endReasonOf, parseBound, type BoundDoc } from '../lib/bound.js';
+import { endReasonOf, MAX_PROJECTS, parseBound, type BoundDoc } from '../lib/bound.js';
 import { bindingLive, describeViewer, type Viewer } from '../lib/viewer-role.js';
-import { boundFile, headOf, openTasksOf, pidFromEnv, readBinding, readLastHead, readSeats, recordBase, settleBinding, writeBinding, writeLastHead, type Seat } from '../lib/bound-fs.js';
+import { boundFile, claudeBindings, headOf, openTasksOf, pidFromEnv, readBinding, readLastHead, readSeats, recordBase, settleBinding, writeBinding, writeLastHead, type Seat } from '../lib/bound-fs.js';
 import { pickProject, type ProjectEntry } from '../mod/model.js';
 import type { MessageDoc, Plan } from '../lib/types.js';
 import type { Io } from './run.js';
 
 const SOURCES = ['startup', 'resume', 'clear', 'compact', 'fork'] as const;
 type Source = (typeof SOURCES)[number];
-/** At most this many project folders of .waypoint/ are scanned for a binding. */
-const MAX_PROJECTS = 50;
 /** The owner's own hooks renew its binding at most once a minute (until the band renews it, wave 2b). */
 const RENEW_MS = 60_000;
 /** post-commit records at most this many commits per call, and checks at most this many lines after a rewrite. */
@@ -68,7 +66,7 @@ const projectDirs = (root: string): string[] => {
   try { return readdirSync(path.join(root, '.waypoint'), { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name).slice(0, MAX_PROJECTS); } catch { return []; }
 };
 
-interface ForgeFiles {
+export interface ForgeFiles {
   /** The execution this roadmap is about: the project's plan run, or forge's ephemeral one; null otherwise. */
   exec: ExecutionState | null;
   /** Whatever execution.json holds (A-07 looks at any active one). */
@@ -79,8 +77,9 @@ interface ForgeFiles {
   coordinatorEnded: boolean;
 }
 
-/** What forge does in the main checkout, read as files: execution.json, the members, run.json and the coordinator's signal. */
-function readForge(root: string, project: string, now: number): ForgeFiles {
+/** What forge does in the main checkout, read as files: execution.json, the members, run.json, and the coordinator's
+ *  signal and bindings. Exported for its tests. */
+export function readForge(root: string, project: string, now: number): ForgeFiles {
   const main = mainCheckoutFrom(root, read(path.join(root, '.git')));
   const dir = path.join(main, '.forge');
   const any = parseExecution(read(path.join(dir, 'execution.json')), now);
@@ -101,7 +100,9 @@ function readForge(root: string, project: string, now: number): ForgeFiles {
   if (exec && isSafeId(exec.hookSession)) {
     try { signal = normalizeLive(JSON.parse(readCapped(path.join(dir, 'live', `${exec.hookSession}.json`), FORGE_DOC_MAX_BYTES) ?? 'null')); } catch { signal = null; }
   }
-  return { exec, any, members, infinite: parseRun(read(path.join(dir, 'run.json'))), coordinatorEnded: coordinatorGone(exec, signal, now) };
+  // An open coordinator conversation (a live binding of its own, in any project, settled by its pid) keeps its run.
+  const bindings = exec?.active && isSafeId(exec.hookSession) ? claudeBindings(main, exec.hookSession, now) : [];
+  return { exec, any, members, infinite: parseRun(read(path.join(dir, 'run.json'))), coordinatorEnded: coordinatorGone(exec, signal, now, { bindings }) };
 }
 
 interface Ctx { root: string; project: string; wp: string; docDir: string; now: number; sid: string | null; seats: Seat[]; viewer: Viewer; forge: ForgeFiles }

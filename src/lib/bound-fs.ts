@@ -8,9 +8,9 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { BOUND_MAX_BYTES, BOUND_REREAD_MS, CACHE_DOCS_MAX, MAX_SEATS, parseBound, SESSION_MAX_BYTES, type BoundDoc } from './bound.js';
+import { bindingLive, BOUND_MAX_BYTES, BOUND_REREAD_MS, CACHE_DOCS_MAX, MAX_PROJECTS, MAX_SEATS, parseBound, SESSION_MAX_BYTES, type BoundDoc } from './bound.js';
 import { isSafeId } from './execution-state.js';
-import { bindingLive, PREVIOUS_OFFER_MS } from './viewer-role.js';
+import { PREVIOUS_OFFER_MS } from './viewer-role.js';
 import { pidAlive } from './pid.js';
 
 export { pidAlive };
@@ -111,6 +111,20 @@ export function boundLive(b: BoundDoc, now: number, alive: (pid: number) => bool
  *  This view is never written back. */
 export function settleBinding(b: BoundDoc, now: number, alive: (pid: number) => boolean = pidAlive): BoundDoc {
   return bindingLive(b, now) && b.pid !== null && !alive(b.pid) ? { ...b, endedAt: b.seenAt } : b;
+}
+
+/**
+ * The bindings of the Claude conversation `claude` among the seats of every project of the checkout `root` (the first
+ * MAX_PROJECTS folders of .waypoint/), of any via, settled by their pid as the hooks read them. A run's coordinator
+ * is found this way, never by its project or its SID: an ephemeral run's project is `loose`, and a takeover through
+ * /waypoint:work binds `work` in whatever project it works.
+ */
+export function claudeBindings(root: string, claude: string, now: number, alive: (pid: number) => boolean = pidAlive): BoundDoc[] {
+  let names: string[] = [];
+  try {
+    names = readdirSync(path.join(root, '.waypoint'), { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name).slice(0, MAX_PROJECTS);
+  } catch { return []; }
+  return names.flatMap(n => readBindings(path.join(root, '.waypoint', n), now)).filter(b => b.claude === claude).map(b => settleBinding(b, now, alive));
 }
 
 /** Each seat's task in progress, from the state cache (`dbcache/state`, the first CACHE_DOCS_MAX files by name, as the

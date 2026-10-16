@@ -1467,6 +1467,39 @@ describe('rebinding a run needs the bound conversation to have stopped (wave 0 h
     expect(out(run(['swarm', 'takeover', '--session', 'main', '--hook-session', 'hook-new'], io))).toEqual({ took: 'already', runId: first.runId });
     expect(readExecution(root)!.hookSession).toBe('hook-new');
   });
+  it('a crashed conversation (no ended signal) stops holding the run 12 minutes after its last step; the refusal says how to go on at once', () => {
+    const first = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    signal(first.runId, false);
+    const after = (min: number) => ({ ...io, now: () => new Date(NOW.getTime() + min * 60000) });
+    const r = run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--hook-session', 'hook-other'], after(11));
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain(`the execution ${first.runId} is bound to another Claude session (hook-main, silent)`);
+    expect(r.stderr).toContain('if it was closed or crashed, `claude --resume hook-main` to go on at once; otherwise wait about 12 min from its last step');
+    expect(r.stderr).not.toMatch(/is alive|still steps/);
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--hook-session', 'hook-other'], after(12)))).toMatchObject({ hookSession: 'hook-other' });
+  });
+  it('an open coordinator conversation is never taken over: its own live binding, in any project, seat and via, settled by its pid (fix round 1)', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'old'], io));
+    const e0 = readExecution(root)!;
+    const after = (min: number) => ({ ...io, now: () => new Date(NOW.getTime() + min * 60000) });
+    const at = (min: number) => new Date(NOW.getTime() + min * 60000).toISOString();
+    const seat = path.join(root, '.waypoint', 'other', 'seats', 'main-2');
+    const bind = (over: object) => {
+      mkdirSync(seat, { recursive: true });
+      writeFileSync(path.join(seat, 'bound.json'), JSON.stringify({ sid: 'main-2', claude: 'hook-main', pid: null, via: 'work', since: at(0), seenAt: at(19), endedAt: null, endReason: null, ...over }));
+    };
+    // Waiting 20 minutes on the person's answer, its band renewing the binding: alive, for takeover and for a resume.
+    bind({});
+    expect(out(run(['swarm', 'takeover', '--session', 'new'], after(20)))).toEqual({ took: false, previous: 'hook-main', liveness: 'alive', joinAs: 'manual' });
+    expect(run(['swarm', 'start', '--project', 'shop', '--session', 'old', '--hook-session', 'hook-other'], after(20)).code).toBe(2);
+    expect(readExecution(root)).toMatchObject({ coordinator: 'old', hookSession: 'hook-main' });
+    // Its process died (only this side checks the pid), the binding ended, or it lapsed: gone, 20 minutes after its last step.
+    for (const over of [{ pid: 2147483646 }, { endedAt: at(18), endReason: 'other' }, { seenAt: at(14) }]) {
+      saveExecution(root, e0);
+      bind(over);
+      expect(out(run(['swarm', 'takeover', '--session', 'new'], after(20))), JSON.stringify(over)).toMatchObject({ took: true, previous: 'hook-main' });
+    }
+  });
   it('swarm status and infinite status say when no session drives the active run (§4.6)', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     expect(out(run(['swarm', 'status'], io))).not.toHaveProperty('unbound');
@@ -1495,6 +1528,14 @@ describe('an ephemeral run is closed by the tick that finishes it (wave 0 handof
     saveExecution(root, { ...e, tasks: loose('integrated') });
     expect(out(run(['swarm', 'tick'], io)).actions).toContainEqual({ type: 'finish' });
     expect(readExecution(root)).toMatchObject({ active: false, stopReason: 'finished', closedAt: at, closedBy: 'merge' });
+  });
+  it('a close already recorded keeps its first time: the tick never moves closedAt', () => {
+    const e = startLoose();
+    const first = new Date(NOW.getTime() - 60000).toISOString();
+    // The state a concurrent tick that finished and closed the run first leaves under the lock.
+    saveExecution(root, { ...e, tasks: loose('integrated'), closedAt: first, closedBy: 'merge' });
+    out(run(['swarm', 'tick'], io));
+    expect(readExecution(root)).toMatchObject({ active: false, stopReason: 'finished', closedAt: first, closedBy: 'merge' });
   });
   it('stalled: it stays open until /forge:stop', () => {
     const e = startLoose();

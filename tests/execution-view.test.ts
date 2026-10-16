@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { coordinatorGone, coordinatorLiveness, executionView, isVisibleRun, signalLiveness, STALE_RUN_TTL_MS, lastMovedAt } from '../src/lib/execution-view.js';
 import type { ExecutionState, PublicTask, LiveDoc } from '../src/lib/execution-state.js';
+import type { BoundDoc } from '../src/lib/bound.js';
 
 const NOW = Date.parse('2026-10-12T12:00:00.000Z');
 const at = (min: number) => new Date(NOW + min * 60000).toISOString();
@@ -231,17 +232,35 @@ describe('coordinatorGone (B-09, M4): a run without its coordinator, for the ban
     expect(coordinatorGone(null, null, NOW)).toBe(false);
   });
   it('a coordinator whose session runs a background job (busy, C-03) waits on it as on an agent; an ended conversation is gone all the same', () => {
-    expect(coordinatorGone(exec({ lastStepAt: at(-30) }), null, NOW, true)).toBe(false);
-    expect(coordinatorGone(exec({ lastStepAt: at(-30) }), idle(-20), NOW, true)).toBe(false);
-    expect(coordinatorGone(exec(), idle(-1, true), NOW, true)).toBe(true);
+    expect(coordinatorGone(exec({ lastStepAt: at(-30) }), null, NOW, { busy: true })).toBe(false);
+    expect(coordinatorGone(exec({ lastStepAt: at(-30) }), idle(-20), NOW, { busy: true })).toBe(false);
+    expect(coordinatorGone(exec(), idle(-1, true), NOW, { busy: true })).toBe(true);
+  });
+  it('an open coordinator conversation (a live binding of its Claude session, any via) is never gone, however long it waits on the person', () => {
+    const b = (over: Partial<BoundDoc> = {}): BoundDoc => ({ sid: 'main', claude: 's1', pid: null, via: 'forge-run', since: at(-60), seenAt: at(-1), endedAt: null, endReason: null, ...over });
+    const quiet = exec({ lastStepAt: at(-20) });
+    expect(coordinatorGone(quiet, null, NOW)).toBe(true);
+    expect(coordinatorGone(quiet, idle(-20), NOW, { bindings: [b()] })).toBe(false);
+    // Of any seat and via: a takeover through /waypoint:work binds `work`.
+    expect(coordinatorGone(quiet, null, NOW, { bindings: [b({ sid: 'main-2', via: 'work' })] })).toBe(false);
+    // Ended or lapsed (no renewal for 5 minutes, the band's own tick renews it every minute), or another conversation's: gone after 12 minutes.
+    expect(coordinatorGone(quiet, null, NOW, { bindings: [b({ endedAt: at(-2), endReason: 'other' })] })).toBe(true);
+    expect(coordinatorGone(quiet, null, NOW, { bindings: [b({ seenAt: at(-6) })] })).toBe(true);
+    expect(coordinatorGone(quiet, null, NOW, { bindings: [b({ claude: 'other' })] })).toBe(true);
+    expect(coordinatorGone(exec({ lastStepAt: at(-11) }), null, NOW, { bindings: [b({ seenAt: at(-6) })] })).toBe(false);
+    // Its conversation ended (its signal says so): gone, whatever the binding still says.
+    expect(coordinatorGone(quiet, idle(-1, true), NOW, { bindings: [b()] })).toBe(true);
+    // A run without a hook session has no conversation of its own to hold one.
+    expect(coordinatorGone(exec({ hookSession: null, lastStepAt: at(-20) }), null, NOW, { bindings: [b()] })).toBe(true);
   });
   it('coordinatorLiveness is the liveness coordinatorGone decides by (swarm takeover reports it): silent from 7 minutes, stopped from 12', () => {
     expect(coordinatorLiveness(exec({ lastStepAt: at(-6) }), null, NOW)).toBe('alive');
     expect(coordinatorLiveness(exec({ lastStepAt: at(-8) }), null, NOW)).toBe('silent');
     expect(coordinatorLiveness(exec({ lastStepAt: at(-13) }), null, NOW)).toBe('stopped');
-    expect(coordinatorLiveness(exec({ lastStepAt: at(-13) }), null, NOW, true)).toBe('alive');
+    expect(coordinatorLiveness(exec({ lastStepAt: at(-13) }), null, NOW, { busy: true })).toBe('alive');
+    expect(coordinatorLiveness(exec({ lastStepAt: at(-13) }), null, NOW, { bindings: [{ sid: 'main', claude: 's1', pid: null, via: 'work', since: at(-60), seenAt: at(-1), endedAt: null, endReason: null }] })).toBe('alive');
     expect(coordinatorLiveness(exec({ lastStepAt: at(-30) }), live(-20), NOW)).toBe('alive');
-    expect(coordinatorLiveness(exec(), idle(-1, true), NOW, true)).toBe('stopped');
+    expect(coordinatorLiveness(exec(), idle(-1, true), NOW, { busy: true })).toBe('stopped');
   });
 });
 

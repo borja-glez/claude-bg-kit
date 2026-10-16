@@ -2,7 +2,7 @@ import type { EngineInterface } from 'claude-code';
 import { mainCheckoutFrom } from '../lib/main-checkout.js';
 import { buildBandModel, checkoutSidOf, executionViewer, noneBand, pickProject, seatsOf, type BandFiles, type BandModel, type BandSeat, type ProjectEntry } from './model.js';
 import { DECISIONS_MAX } from '../lib/decisions.js';
-import { BOUND_MAX_BYTES, BOUND_REREAD_MS, CACHE_DOCS_MAX, MAX_SEATS, parseBound, SESSION_MAX_BYTES, type BoundDoc } from '../lib/bound.js';
+import { BOUND_MAX_BYTES, BOUND_REREAD_MS, CACHE_DOCS_MAX, MAX_PROJECTS, MAX_SEATS, parseBound, SESSION_MAX_BYTES, type BoundDoc } from '../lib/bound.js';
 import { FORGE_DOC_MAX_BYTES, isSafeId, parseExecution } from '../lib/execution-state.js';
 import { newestMemberFiles } from '../lib/member-doc.js';
 
@@ -10,8 +10,6 @@ export type Engine = EngineInterface;
 
 /** At most this many documents of a collection, by name (for the state cache, as openTasksOf on disk). */
 export const MAX_DOCS = CACHE_DOCS_MAX;
-/** At most this many project folders of .waypoint/ are looked at for this conversation's bindings, as the hooks do. */
-const MAX_PROJECTS = 50;
 /** C3: the band's tick renews a binding of this conversation when this long passed since its last renewal. */
 export const RENEW_MS = 60_000;
 
@@ -154,7 +152,26 @@ async function readJsonDir($: Engine, dir: string, max: number, keep: (name: str
   return readEach($, dir, files);
 }
 
-type ForgeFiles = Pick<BandFiles, 'execution' | 'execTasks' | 'live' | 'decisions' | 'members' | 'coordinatorLive'>;
+type ForgeFiles = Pick<BandFiles, 'execution' | 'execTasks' | 'live' | 'decisions' | 'members' | 'coordinatorLive' | 'coordinatorBindings'>;
+
+/**
+ * The bound.json texts of the Claude conversation `claude` in every project of the checkout `main` (the first
+ * MAX_PROJECTS folders of .waypoint/, every seat as seatsOf takes it, any via), by `<p>/<seat>`: claudeBindings on disk,
+ * without its pid check, which the band cannot make.
+ */
+async function claudeBindingTexts($: Engine, main: string, claude: string, now: number): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  const projects = (await listOpt($, join(main, '.waypoint'))).filter(d => d.kind === 'dir').slice(0, MAX_PROJECTS);
+  for (const p of projects) {
+    const seats = await seatFiles($, join(main, '.waypoint', p.name), now);
+    for (const s of seatsOf(seats, now)) {
+      const key = s.checkout ? '.' : s.sid;
+      const text = seats.bindings?.[key];
+      if (s.bound?.claude === claude && text !== undefined) out[`${p.name}/${key}`] = text;
+    }
+  }
+  return out;
+}
 
 // The main checkout's .forge, listed once per refresh whichever worktree this session is in: the execution the
 // coordinator writes (with its task files, live signals and members) and forge's decisions summary (a few hundred
@@ -182,10 +199,16 @@ async function loadForge($: Engine, root: string, now: number): Promise<ForgeFil
       out.members = await readEach($, members, newestMemberFiles((await listOpt($, members)).filter(f => f.kind === 'file')));
     }
     // B-09: whether the coordinator's conversation ended, from its own signal.
-    const hook = parseExecution(execution, now)?.hookSession;
+    const parsed = parseExecution(execution, now);
+    const hook = parsed?.hookSession;
     if (hook && isSafeId(hook)) {
       const signal = out.live?.[hook] ?? await readSmall($, join(dir, 'live', `${hook}.json`), EXEC_FILE_MAX);
       if (signal !== undefined) out.coordinatorLive = signal;
+      // While the run is active, whether its coordinator's conversation is open: a live binding of its own.
+      if (parsed?.active) {
+        const bindings = await claudeBindingTexts($, main, hook, now);
+        if (Object.keys(bindings).length) out.coordinatorBindings = bindings;
+      }
     }
     return out;
   } catch { return {}; }

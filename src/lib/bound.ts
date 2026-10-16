@@ -13,6 +13,10 @@ export interface BoundDoc {
 }
 /** At most this many extra seats (seats/<sid>/) are read per project. */
 export const MAX_SEATS = 10;
+/** At most this many project folders of .waypoint/ are read for one conversation's bindings (the hooks, the band). */
+export const MAX_PROJECTS = 50;
+/** A binding lives this long after its last renewal (seenAt). */
+export const BOUND_LEASE_MS = 5 * 60_000;
 /** A bound.json larger than this is not read. */
 export const BOUND_MAX_BYTES = 4096;
 /** A seat's session.json larger than this is not read, by the CLI and the band alike. */
@@ -58,6 +62,12 @@ export function normalizeBound(x: unknown, now?: number): BoundDoc | null {
   }
   const pid = typeof o.pid === 'number' && Number.isInteger(o.pid) && o.pid > 0 ? o.pid : null;
   return { sid: o.sid, claude: o.claude, pid, via: o.via, since, seenAt, endedAt, endReason: endedAt ? endReason : null };
+}
+
+/** A binding is live while it has not ended and was renewed less than BOUND_LEASE_MS ago. */
+export function bindingLive(b: BoundDoc, now: number): boolean {
+  const seen = Date.parse(b.seenAt);
+  return b.endedAt === null && Number.isFinite(seen) && now < seen + BOUND_LEASE_MS;
 }
 
 /** bound.json's text (null: missing); broken JSON or more than BOUND_MAX_BYTES is no binding. */

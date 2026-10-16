@@ -18,6 +18,7 @@ import { LEASE_MINUTES, type Liveness } from '../../lib/coordination.js';
 import { UNBOUND_WARNING } from '../hook.js';
 import { planLocale, sessionReply } from '../../lib/locale.js';
 import { coordinatorLiveness } from '../../lib/execution-view.js';
+import { claudeBindings } from '../../lib/bound-fs.js';
 import { liveFile } from '../live.js';
 import { STAGES, normalizePublicTask, normalizeLive, normalizeExecution, isSafeId, isRunBranch, type ExecutionState, type ExecTask, type LiveDoc, type PublicTask } from '../../lib/execution-state.js';
 import { claudeSessionId, noClaudeSession } from '../../lib/claude-session.js';
@@ -268,9 +269,10 @@ function memberLaunch(root: string, planPath: string, task: string, e: Execution
 /**
  * How alive the Claude session bound to `e` is, by the run band's rule (coordinatorGone, through coordinatorLiveness),
  * so a takeover or a resume from another session goes ahead exactly when the band offers [Resume]: its own signal
- * (.forge/live/<hookSession>.json) ended, or no step, signal, agent or background job of its session (.forge/jobs/,
- * which only this side can read) for LIVE_STOPPED_MINUTES. The roadmap lease does not count: the band cannot read it.
- * A hook id outside the safe rule names no file.
+ * (.forge/live/<hookSession>.json) ended, or, while its conversation is not open (no live binding of its own in any
+ * project, settled by its pid: a crashed one has none), no step, signal, agent or background job of its session
+ * (.forge/jobs/, which only this side can read) for LIVE_STOPPED_MINUTES. The roadmap lease does not count: the band
+ * cannot read it. A hook id outside the safe rule names no file.
  */
 function boundLiveness(root: string, e: ExecutionState, now: number): Liveness {
   const hook = isSafeId(e.hookSession) ? e.hookSession : null;
@@ -279,7 +281,7 @@ function boundLiveness(root: string, e: ExecutionState, now: number): Liveness {
     try { signal = normalizeLive(JSON.parse(readFileSync(liveFile(root, hook), 'utf8'))); } catch { signal = null; }
   }
   const busy = hook !== null && liveJobs(root, new Date(now)).some(j => j.session === hook);
-  return coordinatorLiveness(e, signal, now, busy);
+  return coordinatorLiveness(e, signal, now, { busy, bindings: hook ? claudeBindings(root, hook, now) : [] });
 }
 
 /** What `tick` and `next` schedule from: the plan, the roadmap listings and the done commits already on the run branch. */
@@ -994,10 +996,11 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
         throw new UsageError(`swarm start: the execution ${prev.runId} is active (kind ${prev.kind}); finish it or stop it (forge stop) first; a request during it goes to that run`);
       }
       // Wave 0 handoff: a resume from another Claude session rebinds only once the bound one stopped, by takeover's
-      // rule; while it lives it still steps its run, and a silent rebind would leave two sessions stepping it.
+      // rule; while it may still step its run, a silent rebind would leave two sessions stepping it. `claude --resume`
+      // goes on under the same id, so it needs no rebind.
       if (resume && prev && prev.hookSession !== null && prev.hookSession !== hook) {
         const liveness = boundLiveness(io.cwd, prev, now.getTime());
-        if (liveness !== 'stopped') throw new UsageError(`swarm start: the execution ${prev.runId} is bound to another Claude session (${prev.hookSession}, ${liveness}): go on from that conversation, or run /forge:run --resume again once it ends`);
+        if (liveness !== 'stopped') throw new UsageError(`swarm start: the execution ${prev.runId} is bound to another Claude session (${prev.hookSession}, ${liveness}): if that conversation is still open, go on from it; if it was closed or crashed, \`claude --resume ${prev.hookSession}\` to go on at once; otherwise wait about 12 min from its last step, then run /forge:run --resume again`);
       }
       if (kind === 'ephemeral') {
         if (resume && prev) {

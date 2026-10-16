@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { run, isCommitCommand, type Io } from '../src/cli/run.js';
-import { makesCommits } from '../src/cli/hooks.js';
+import { makesCommits, readForge } from '../src/cli/hooks.js';
 import { parsePlan } from '../src/lib/plan.js';
 import { launchRun, HERDR_TEMPLATE } from '../src/lib/launcher.js';
 import { buildDocs, planHash } from '../src/lib/sync.js';
@@ -1371,6 +1371,26 @@ describe('classic hooks', () => {
         forge('members/backend.json', { ...member, pad: 'x'.repeat(9000) });
         at(3600_000);
         expect(blocks('claude-member')).toBe(true);
+      });
+      it("an open coordinator conversation keeps its run: its own live binding, in any project, seat and via, settled by its pid (2b carry)", () => {
+        // 20 minutes without a step or a signal: without a binding, the run has no coordinator.
+        forge('execution.json', exec({ lastStepAt: ago(20) }));
+        const gone = () => readForge(dir, 'demo-shop', NOW).coordinatorEnded;
+        expect(gone()).toBe(true);
+        // Bound in another project's extra seat (a takeover through /waypoint:work binds `work`): it waits on the person.
+        const seat = path.join(dir, '.waypoint', 'other', 'seats', 'main-2');
+        bindAs('claude-coord', {}, 'main-2', seat);
+        expect(gone()).toBe(false);
+        // Its process died (the hooks check the pid; the band cannot), its binding ended, or it lapsed: no coordinator.
+        bindAs('claude-coord', { pid: 2147483646 }, 'main-2', seat);
+        expect(gone()).toBe(true);
+        bindAs('claude-coord', { endedAt: ago(2), endReason: 'other' }, 'main-2', seat);
+        expect(gone()).toBe(true);
+        bindAs('claude-coord', { seenAt: ago(6) }, 'main-2', seat);
+        expect(gone()).toBe(true);
+        // Another conversation's live binding says nothing of the coordinator.
+        bindAs('someone-else', {}, 'main-2', seat);
+        expect(gone()).toBe(true);
       });
       it('a closed execution or a broken execution.json gives no forge role: the owner is reminded as before', () => {
         bindAs('claude-coord');

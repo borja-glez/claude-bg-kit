@@ -2,23 +2,17 @@
 // or none. Pure, without Node imports: waypoint's hooks, the band (wave 2b), forge's live hook and lens (wave 3) share it.
 // It judges a binding by its lease alone (bindingLive). The hooks pass bindings already settled by their pid
 // (bound-fs.ts settleBinding, Node only); the band passes them raw (M6).
-import type { BoundDoc } from './bound.js';
+import { bindingLive, type BoundDoc } from './bound.js';
 import type { ExecutionState } from './execution-state.js';
 import type { MemberDoc } from './member-doc.js';
 import { isVisibleRun, lastMovedAt } from './execution-view.js';
 import { memberOfHook } from './forge-activity.js';
 
-/** A binding lives this long after its last renewal (seenAt). */
-export const BOUND_LEASE_MS = 5 * 60_000;
+// The lease rule lives in bound.ts, so execution-view.ts (which this file imports) reads it without a cycle.
+export { bindingLive, BOUND_LEASE_MS } from './bound.js';
 /** An ended or lapsed binding is offered to a later conversation («left in progress») for this long. */
 export const PREVIOUS_OFFER_MS = 24 * 3600_000;
 export type ViewerRole = 'owner' | 'other-live' | 'previous' | 'none';
-
-/** A binding is live while it has not ended and was renewed less than BOUND_LEASE_MS ago. */
-export function bindingLive(b: BoundDoc, now: number): boolean {
-  const seen = Date.parse(b.seenAt);
-  return b.endedAt === null && Number.isFinite(seen) && now < seen + BOUND_LEASE_MS;
-}
 
 export interface ViewerInput {
   /** The bindings of the project: the checkout's seat and its extra seats (spec §9, D1). */

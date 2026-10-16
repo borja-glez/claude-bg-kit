@@ -468,6 +468,16 @@ describe('buildBandModel · notices (B-02, B-07, K3-13, K5-02)', () => {
     // Its coordinator still sees it as its own run.
     expect(buildBandModel('demo-shop', { ...f({ lastStepAt: dead }), sessionId: 's1' })).toMatchObject({ mode: 'run', viewer: { coordinator: true } });
   });
+  it("an open coordinator conversation, waiting 20 minutes on the person, keeps its run: its own live binding, read raw (no pid check)", () => {
+    const f = (coordinatorBindings: Record<string, string>): BandFiles => ({ ...empty, plan, sessionId: 'B', execution: EXEC({ lastStepAt: ago(20) }), coordinatorBindings });
+    // Bound in any project and seat, with any via; the band cannot check a pid, so a dead one does not end it here.
+    expect(buildBandModel('demo-shop', f({ 'demo-shop/.': bound('main', 's1', { via: 'forge-run' }) }))).toMatchObject({ mode: 'notice', kind: 'other-live', subject: 'run' });
+    expect(buildBandModel('demo-shop', f({ 'other/main-2': bound('main-2', 's1', { pid: 2147483646 }) }))).toMatchObject({ mode: 'notice', kind: 'other-live', subject: 'run' });
+    // Ended, lapsed, or another conversation's: no coordinator after 12 minutes, the offer to resume it.
+    expect(buildBandModel('demo-shop', f({ 'demo-shop/.': bound('main', 's1', { endedAt: ago(2), endReason: 'other' }) }))).toMatchObject({ mode: 'notice', kind: 'previous', subject: 'run', stopReason: null });
+    expect(buildBandModel('demo-shop', f({ 'demo-shop/.': bound('main', 's1', { seenAt: ago(6) }) }))).toMatchObject({ mode: 'notice', kind: 'previous', subject: 'run' });
+    expect(buildBandModel('demo-shop', f({ 'demo-shop/.': bound('main', 'B') }))).toMatchObject({ mode: 'notice', kind: 'previous', subject: 'run' });
+  });
   it('only a plan run can be joined: the notice of an ephemeral one says so (I1, swarm join refuses it)', () => {
     expect(buildBandModel('demo-shop', { ...empty, plan, sessionId: 'X', execution: EPHEMERAL() }))
       .toMatchObject({ mode: 'notice', kind: 'other-live', subject: 'run', runId: 'e1', joinable: false });

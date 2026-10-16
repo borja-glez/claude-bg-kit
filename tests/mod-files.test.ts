@@ -332,6 +332,20 @@ describe('loadBandFiles · who looks, and the seats of its project (C3, A-15)', 
     expect(loaded?.files.members).not.toHaveProperty('m0');
     expect(loaded?.files.coordinatorLive).toBe(f[coordinator]);
   });
+  it("reads the coordinator's own bindings in every project of the main checkout, of any seat and via, so an open coordinator keeps its run (2b carry)", async () => {
+    const root = '/repo';
+    // 20 minutes without a step: its run has no coordinator unless its conversation is open.
+    const exec = JSON.stringify({ ...JSON.parse(EXEC), hookSession: 'coord-h', lastStepAt: iso(now - 20 * 60_000) });
+    const seat = `${root}/.waypoint/other/seats/main-2/bound.json`;
+    const mine = bound('main-2', 'coord-h');
+    const f: Record<string, string> = { ...base(root), [`${root}/.forge/execution.json`]: exec, [seat]: mine, [`${root}/.waypoint/demo-shop/seats/main-3/bound.json`]: bound('main-3', 'someone-else') };
+    const looks = () => fake(root, f, { id: 'conv-9' }).$;
+    expect((await loadBandFiles(looks()))?.files.coordinatorBindings).toEqual({ 'other/main-2': mine });
+    expect(await loadBandModel(looks())).toMatchObject({ mode: 'notice', kind: 'other-live', subject: 'run' });
+    delete f[seat];
+    expect((await loadBandFiles(looks()))?.files).not.toHaveProperty('coordinatorBindings');
+    expect(await loadBandModel(looks())).toMatchObject({ mode: 'notice', kind: 'previous', subject: 'run' });
+  });
   it("without a waypoint project the band draws nothing but still publishes the role from forge's execution (I2)", async () => {
     const root = '/repo';
     // forge's ephemeral run of a checkout with no docs/waypoint, coordinated by the conversation that looks.
