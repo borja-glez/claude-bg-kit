@@ -1632,3 +1632,19 @@ describe('swarm worktree prints the work folder of the task (D-08)', () => {
     expect(out(run(['swarm', 'worktree', 'fix-a'], io))).toMatchObject({ work: '.forge/work/fix-a' });
   });
 });
+
+describe('a new run starts without the state of earlier runs (K5-08)', () => {
+  it('swarm start removes the public task files, members and live signals of other runIds; a resume keeps its own', () => {
+    const at = NOW.toISOString();
+    const forge = (...p: string[]) => path.join(root, '.forge', ...p);
+    for (const d of ['execution', 'members', 'live']) mkdirSync(forge(d), { recursive: true });
+    writeFileSync(forge('execution', 'T9.json'), JSON.stringify({ task: 'T9', runId: 'old', stage: 'implement', status: 'running', agent: null, round: 0, since: at, updatedAt: at, leaseUntil: at, by: 'main', mode: 'subagents' }));
+    writeFileSync(forge('members', 'ui.json'), JSON.stringify({ sessionId: 'ui', role: 'manual', runId: 'old', task: null, name: null, since: at, hookSession: null }));
+    writeFileSync(forge('live', 'h0.json'), JSON.stringify({ sessionId: 'h0', role: 'coordinator', runId: 'old', task: null, event: 'Stop', ts: at, agents: [], ended: true }));
+    const first = out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    for (const f of ['execution/T9.json', 'members/ui.json', 'live/h0.json']) expect(existsSync(forge(f)), f).toBe(false);
+    writeMember(root, { sessionId: 'ui', role: 'manual', runId: first.runId, task: null, name: null, since: at });
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    expect(existsSync(forge('members', 'ui.json'))).toBe(true);
+  });
+});

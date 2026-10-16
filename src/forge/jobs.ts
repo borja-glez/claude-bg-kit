@@ -91,6 +91,30 @@ export const stepLockFile = (main: string) => path.join(jobsDir(main), 'step.loc
 /** A step.lock that cannot be read is being written (between its open and its write) while this young: it stands. */
 const STEP_LOCK_UNREADABLE_MS = 30_000;
 
+/** The `{pid, startedAt}` a step.lock's text holds; null when it does not read as one. */
+function lockHolder(text: string | null): { pid: number; startedAt: string } | null {
+  try {
+    const o = JSON.parse(text ?? '') as { pid?: unknown; startedAt?: unknown };
+    return typeof o.pid === 'number' && Number.isInteger(o.pid) && o.pid > 0 && typeof o.startedAt === 'string' && Number.isFinite(Date.parse(o.startedAt)) ? { pid: o.pid, startedAt: o.startedAt } : null;
+  } catch { return null; }
+}
+
+/** Whether the step.lock read as `text` stands: another live process's, younger than JOB_MAX_AGE_MS, or one still being written. */
+function lockStands(file: string, text: string, now: Date, alive: (pid: number) => boolean): boolean {
+  const holder = lockHolder(text);
+  if (holder) return holder.pid !== process.pid && alive(holder.pid) && now.getTime() - Date.parse(holder.startedAt) <= JOB_MAX_AGE_MS;
+  try { return now.getTime() - statSync(file).mtimeMs < STEP_LOCK_UNREADABLE_MS; } catch { return false; }
+}
+
+/** The live `swarm step` that holds .forge/jobs/step.lock now, by takeStepLock's rule (its pid is null while the lock is
+ *  being written); null when none does. It neither takes nor removes the lock. */
+export function stepLockHeld(main: string, now: Date, alive: (pid: number) => boolean = pidAlive): { pid: number | null } | null {
+  const file = stepLockFile(main);
+  let text: string;
+  try { text = readFileSync(file, 'utf8'); } catch { return null; }
+  return lockStands(file, text, now, alive) ? { pid: lockHolder(text)?.pid ?? null } : null;
+}
+
 /**
  * I4: one `swarm step` at a time in a checkout. .forge/jobs/step.lock is created with 'wx' and holds `{pid, startedAt}`;
  * `release` removes it only while it is still this one. A lock whose pid died, or older than JOB_MAX_AGE_MS (a step
@@ -99,12 +123,6 @@ const STEP_LOCK_UNREADABLE_MS = 30_000;
  */
 export function takeStepLock(main: string, now: Date, alive: (pid: number) => boolean = pidAlive): { release: () => void } | { busy: { pid: number | null; startedAt: string | null } } {
   const file = stepLockFile(main);
-  const holder = (text: string | null) => {
-    try {
-      const o = JSON.parse(text ?? '') as { pid?: unknown; startedAt?: unknown };
-      return typeof o.pid === 'number' && Number.isInteger(o.pid) && o.pid > 0 && typeof o.startedAt === 'string' && Number.isFinite(Date.parse(o.startedAt)) ? { pid: o.pid, startedAt: o.startedAt } : null;
-    } catch { return null; }
-  };
   const mine = JSON.stringify({ pid: process.pid, startedAt: now.toISOString() }) + '\n';
   forgeDir(main);
   mkdirSync(jobsDir(main), { recursive: true });
@@ -118,17 +136,16 @@ export function takeStepLock(main: string, now: Date, alive: (pid: number) => bo
     }
     let text: string;
     try { text = readFileSync(file, 'utf8'); } catch { continue; }
-    const h = holder(text);
-    let stands: boolean;
-    if (h) stands = h.pid !== process.pid && alive(h.pid) && now.getTime() - Date.parse(h.startedAt) <= JOB_MAX_AGE_MS;
-    else { try { stands = now.getTime() - statSync(file).mtimeMs < STEP_LOCK_UNREADABLE_MS; } catch { stands = false; } }
-    if (stands) return { busy: { pid: h?.pid ?? null, startedAt: h?.startedAt ?? null } };
+    if (lockStands(file, text, now, alive)) {
+      const holder = lockHolder(text);
+      return { busy: { pid: holder?.pid ?? null, startedAt: holder?.startedAt ?? null } };
+    }
     removeFileIf(file, text);
   }
   let text: string | null = null;
   try { text = readFileSync(file, 'utf8'); } catch { text = null; }
-  const h = holder(text);
-  return { busy: { pid: h?.pid ?? null, startedAt: h?.startedAt ?? null } };
+  const holder = lockHolder(text);
+  return { busy: { pid: holder?.pid ?? null, startedAt: holder?.startedAt ?? null } };
 }
 
 /** The order jobs queue for a slot: who started first, then the name. */

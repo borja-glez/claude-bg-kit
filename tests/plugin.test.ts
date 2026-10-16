@@ -1336,4 +1336,8 @@ describe('plugin layout', () => {
     expect(runRef('resuming')).toMatch(/`<WORK>`[^\n]*`work`[^\n]*`FORGE swarm status`/);
     expect(runRef('decisions')).toContain('`.forge/work/<id>` outside an execution');
   });
+  it('the end of an execution offers swarm cleanup, and records it in auto (D-03)', () => {
+    const exec = runRef('execution');
+    for (const w of ['FORGE swarm cleanup --dry-run', 'FORGE swarm cleanup', 'branch-discard', '`kept`']) expect(exec).toContain(w);
+  });
 });

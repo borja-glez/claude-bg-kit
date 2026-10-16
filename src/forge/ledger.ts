@@ -150,14 +150,27 @@ export function readEvents(root: string): LedgerEvent[] {
   // D-10: a task worktree's own ledger holds what it wrote before its events went to the main checkout's: read first.
   // A line both hold (copied over) is one event: the main ledger's copy is left out, once per copy the worktree has.
   const own = ledgerLines(root);
+  return parseLedger([...own, ...linesNotIn(ledgerLines(target), own)]);
+}
+
+/** The lines of `lines` that `other` lacks: a line both hold counts once per copy `other` has (readEvents' rule). */
+function linesNotIn(lines: readonly string[], other: readonly string[]): string[] {
   const left = new Map<string, number>();
-  for (const line of own) left.set(line, (left.get(line) ?? 0) + 1);
-  const main = ledgerLines(target).filter(line => {
+  for (const line of other) left.set(line, (left.get(line) ?? 0) + 1);
+  return lines.filter(line => {
     const n = left.get(line) ?? 0;
     if (n) left.set(line, n - 1);
     return !n;
   });
-  return parseLedger([...own, ...main]);
+}
+
+/**
+ * The events of `worktree`'s own ledger that the ledger of `main` lacks, by readEvents' rule: what removing that
+ * worktree would lose (a member's events from before D-10, or from a worktree ledgerRoot does not tell as forge's).
+ */
+export function unmergedEvents(worktree: string, main: string): LedgerEvent[] {
+  const own = ledgerLines(worktree);
+  return own.length ? parseLedger(linesNotIn(own, ledgerLines(main))) : [];
 }
 
 /** The non-empty lines of `root`'s ledger, trimmed. */

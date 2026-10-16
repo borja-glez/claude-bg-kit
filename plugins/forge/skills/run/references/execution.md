@@ -28,6 +28,8 @@ This session coordinates; in mode `subagents` it also drives every task through 
 
 The Stop hook only blocks when no agent is running, no background command of yours (`.forge/jobs/`) is alive and no sleep is pending (`forge execution is active`): then go to step 2.
 
+**Cleanup.** After `FORGE swarm merge` answered `merged`, offer to tidy up: `FORGE swarm cleanup --dry-run` → `{dryRun, removed: {worktrees, branches, files, bytes}, kept}`. When `removed` names worktrees or branches: in ask mode, ask once with AskUserQuestion, in the person's language, whether to remove the worktrees and branches already integrated (e.g. «¿Limpio los worktrees y las ramas ya integradas?»), with the counts of `removed` and each entry of `kept` with its `reason`; on yes, run `FORGE swarm cleanup`. In auto, record the decision as `references/decisions.md` says (`point: "other"`, `what: "branch-discard: forge's integrated worktrees and branches"`, `chosen: "swarm cleanup"`, `undo: {"type": "none", "reason": "only integrated branches: their commits are in <branch>"}`) and run `FORGE swarm cleanup`. It only removes forge's worktrees and branches already merged into the branch of the main checkout, and old run state; a worktree with changes, a branch not merged and the waypoint tracks stay, listed in `kept`.
+
 ### Requests during an execution
 
 **Doubts and messages.**

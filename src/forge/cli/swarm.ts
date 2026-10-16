@@ -8,11 +8,11 @@ import { detectValidators, selectValidators, runValidators, markPreexisting, blo
 import { loadConfig } from '../config.js';
 import { stopFile, parseRun, readRunText } from '../run.js';
 import { isLocale } from '../../lib/forge-run.js';
-import { appendEvent, appendPhase, readEvents } from '../ledger.js';
+import { appendEvent, appendPhase, readEvents, unmergedEvents } from '../ledger.js';
 import { readExecution, updateExecution, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree, taskBase, type LockDeps } from '../execution.js';
 import { sleepSync } from '../pid.js';
-import { liveJobs, noSlot, type Slot } from '../jobs.js';
-import { readMergingFile, takeMerging, removeMergingIf, mergingLive, mergingStaleAt, mergeInFlight, type MergingDoc, type MergingHold } from '../merging.js';
+import { liveJobs, noSlot, stepLockHeld, type Slot } from '../jobs.js';
+import { readMerging, readMergingFile, takeMerging, removeMergingIf, mergingLive, mergingStaleAt, mergeInFlight, type MergingDoc, type MergingHold } from '../merging.js';
 import { schedule, widthOf, widthProfile, relaunchOrBlock, RELAUNCH_CAP, type BgAgent } from '../schedule.js';
 import { LEASE_MINUTES, type Liveness } from '../../lib/coordination.js';
 import { UNBOUND_WARNING } from '../hook.js';
@@ -32,6 +32,8 @@ import { parseLooseTasks, planOfLoose, statesOfLoose, writeLoose, readLoose, typ
 import { startAnnounce, integratedSay, rejectedDepsSay, keptFilesSay, proposeSay, VENV_HINT } from '../swarm.js';
 import type { PriorCommit } from '../brief.js';
 import { pickWorkDir, readWorkDir, workDir, workRel } from '../task-ref.js';
+import { forgeBranches, forgeWorktrees, isForgeBranch, pruneRunState, pruneWork } from '../cleanup.js';
+import { copyTree, evidenceOf } from '../evidence-copy.js';
 import { cleanText } from '../../lib/forge-status.js';
 
 export interface GitDeps { git: (args: string[]) => string | null; exec: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany; repo: RepoReader }
@@ -909,7 +911,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
   // I-15: every write of execution.json reads it again under its lock and changes only what this command changes.
   const lockDeps: LockDeps = { now: io.now, sleep: io.sleep };
   const update = (fn: (cur: ExecutionState | null) => ExecutionState | null) => updateExecution(io.cwd, fn, lockDeps);
-  if (['start', 'tick', 'integrate', 'merge', 'sleep', 'worktree', 'retry', 'relaunch', 'nudge', 'takeover', 'step'].includes(sub ?? '') && !(sub === 'worktree' && has('member'))) {
+  if (['start', 'tick', 'integrate', 'merge', 'sleep', 'worktree', 'retry', 'relaunch', 'nudge', 'takeover', 'step', 'cleanup'].includes(sub ?? '') && !(sub === 'worktree' && has('member'))) {
     const top = deps.git(['rev-parse', '--show-toplevel'])?.trim();
     const main = mainWorktreeFrom(deps.git(['worktree', 'list', '--porcelain']));
     if (!top || !main || !samePath(top, main)) {
@@ -1135,7 +1137,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       // A task branch already merged into the base is deleted (an ancestor of it: nothing is lost); `swarm worktree`
       // creates it again from the tip of the run's branch when its turn comes, so it sees the work integrated since.
       for (const tb of moves) {
-        if (deps.git(['branch', '-D', tb]) === null) throw new UsageError(`swarm start: cannot delete ${tb}; if a worktree still holds it, run git worktree prune or remove that worktree (git worktree remove)`);
+        if (deps.git(['branch', '-d', tb]) === null) throw new UsageError(`swarm start: cannot delete ${tb}; if a worktree still holds it, run git worktree prune or remove that worktree (git worktree remove)`);
       }
       // Learned notes two tasks append to the same surface are merged by git's union driver, never left as a conflict.
       const attributes = unionLearned(deps);
@@ -1147,6 +1149,9 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
         ? { ...cur, parallel: state.parallel, mode: state.mode, mergeOnFinish: state.mergeOnFinish, coordinator: state.coordinator, hookSession: state.hookSession, sleepUntil: null, ...auto, ...lang }
         : state), lockDeps);
       if (kind === 'ephemeral' && !resume) writeLoose(io.cwd, { runId: state.runId, tasks: loose });
+      // K5-08: a new run starts clean: the public task files, members and live signals of earlier runs go (a resume keeps
+      // its own).
+      if (!resume) pruneRunState(io.cwd, state.runId, { now: now.getTime(), stale: false, dryRun: false });
       const looseOut = kind === 'ephemeral'
         ? { loose: loose.length, ...(ignoredTasks ? { ignoredTasks: true, message: `the ephemeral run ${state.runId} is resumed with its own ${loose.length} tasks; --tasks was ignored (start a new run for new requests once this one ends)` } : {}) }
         : {};
@@ -1444,6 +1449,81 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
         sessions,
       });
     }
+    case 'cleanup': {
+      // D-03, D-18: forge's worktrees and branches already integrated into the branch of the main checkout, and the
+      // state of the executions that ended. Never `branch -D`, `worktree remove --force` nor `reset`: what git refuses stays.
+      const dryRun = has('dry-run');
+      const e = readExecution(io.cwd);
+      if (e?.active) throw new UsageError(`swarm cleanup: the execution ${e.runId} is active; stop or close it first`);
+      // A worktree removed under a merge, a step or a background command in flight loses their work: none may be running.
+      const marker = readMerging(io.cwd);
+      if (marker && mergingLive(marker, now.getTime())) {
+        throw new UsageError(`swarm cleanup: an integration is merging (.forge/execution/merging.json, pid ${marker.pid}${marker.task ? `, ${marker.task}` : ''}); run it again once it ends`);
+      }
+      const job = liveJobs(io.cwd, now)[0];
+      if (job) throw new UsageError(`swarm cleanup: a background forge command is running (${job.cmd}${job.task ? ` ${job.task}` : ''}, .forge/jobs/${job.name}.json); run it again once it ends`);
+      const step = stepLockHeld(io.cwd, now);
+      if (step) throw new UsageError(`swarm cleanup: a swarm step is running (.forge/jobs/step.lock${step.pid ? `, pid ${step.pid}` : ''}); run it again once it ends`);
+      const head = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim() || 'HEAD';
+      const merged = (b: string) => deps.git(['merge-base', '--is-ancestor', `refs/heads/${b}`, 'HEAD']) !== null;
+      const rel = (p: string) => path.relative(io.cwd, p).split(path.sep).join('/');
+      const taskOf = (b: string) => (b.startsWith('task/') && isPlanId(b.slice(5)) ? b.slice(5) : null);
+      const removed = { worktrees: [] as string[], branches: [] as string[], files: 0, bytes: 0 };
+      const kept: { path?: string; branch?: string; reason: string }[] = [];
+      const gone: string[] = [];
+      const porcelain = deps.git(['worktree', 'list', '--porcelain']) ?? '';
+      const worktrees = forgeWorktrees(porcelain, io.cwd);
+      for (const w of worktrees) {
+        const where = { path: rel(w.path), ...(w.branch ? { branch: w.branch } : {}) };
+        if (!w.branch) { kept.push({ ...where, reason: 'detached HEAD' }); continue; }
+        if (!merged(w.branch)) { kept.push({ ...where, reason: `not merged into ${head}` }); continue; }
+        const status = deps.at(w.path).git(['status', '--porcelain']);
+        if (status === null || status.trim()) { kept.push({ ...where, reason: 'has uncommitted changes or untracked files' }); continue; }
+        // D-10: events only the worktree's own ledger holds (from before D-10, or from a worktree ledgerRoot does not tell
+        // as forge's) would go with it. The main ledger is never rewritten here (its order is the readers'): it stays.
+        if (unmergedEvents(w.path, io.cwd).length) { kept.push({ ...where, reason: 'unmerged ledger' }); continue; }
+        if (!dryRun) {
+          // K2-04: the verification a member left in its worktree reaches the main checkout first; what cannot keeps it.
+          const { skipped } = copyTree(w.path, io.cwd, evidenceOf(w.path), { missingOnly: true });
+          if (skipped.length) {
+            kept.push({ ...where, reason: `its evidence could not be copied to the main checkout (${skipped.length} file${skipped.length === 1 ? '' : 's'}); run swarm cleanup again once it can` });
+            continue;
+          }
+          if (deps.git(['worktree', 'remove', w.path]) === null) { kept.push({ ...where, reason: 'git worktree remove refused it' }); continue; }
+        }
+        removed.worktrees.push(where.path);
+        // The run worktree may hold a branch the person named (--branch): only forge's own branches go.
+        if (!isForgeBranch(w.branch)) { kept.push({ branch: w.branch, reason: 'not a forge branch (task/* or forge/run-*)' }); continue; }
+        if (!dryRun && deps.git(['branch', '-d', w.branch]) === null) { kept.push({ branch: w.branch, reason: 'git branch -d refused it' }); continue; }
+        removed.branches.push(w.branch);
+        const t = taskOf(w.branch);
+        if (t) gone.push(t);
+      }
+      const held = new Set(worktrees.map(w => w.branch).filter((b): b is string => !!b));
+      const refs = deps.git(['for-each-ref', '--format=%(refname)', 'refs/heads/task', 'refs/heads/forge', 'refs/heads/track']) ?? '';
+      for (const b of forgeBranches(refs)) {
+        if (held.has(b)) continue;
+        if (b === head) { kept.push({ branch: b, reason: 'checked out in the main checkout' }); continue; }
+        const holder = worktreeHolding(porcelain, b);
+        if (holder) { kept.push({ branch: b, reason: `checked out in ${rel(holder)}` }); continue; }
+        if (!merged(b)) { kept.push({ branch: b, reason: `not merged into ${head}` }); continue; }
+        if (!dryRun && deps.git(['branch', '-d', b]) === null) { kept.push({ branch: b, reason: 'git branch -d refused it' }); continue; }
+        removed.branches.push(b);
+        const t = taskOf(b);
+        if (t) gone.push(t);
+      }
+      // waypoint's tracks are never forge's: they stay, named.
+      for (const l of refs.split(/\r?\n/).map(x => x.trim())) {
+        if (l.startsWith('refs/heads/track/')) kept.push({ branch: l.slice('refs/heads/'.length), reason: "a waypoint track, not forge's" });
+      }
+      if (!dryRun) deps.git(['worktree', 'prune']);
+      // D-18: the state of the runs that ended: all of it once the execution is closed; that of earlier runs otherwise.
+      const state = pruneRunState(io.cwd, e && !e.closedAt ? e.runId : null, { now: now.getTime(), stale: true, dryRun });
+      const work = pruneWork(io.cwd, gone, dryRun);
+      removed.files = state.files.length + work.files.length;
+      removed.bytes = state.bytes + work.bytes;
+      return json({ dryRun, removed, kept });
+    }
     case 'takeover': {
       const hook = claudeSessionId(flag('hook-session'), io.env ?? process.env);
       if (!hook) throw new UsageError(noClaudeSession('swarm takeover', '--hook-session'));
@@ -1487,6 +1567,6 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
     case 'merge':
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError('usage: forge swarm <start --project P --session SID --hook-session ID [--plan P] [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F [--locale es|en]|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|step --plan P --db DIR [--agents F] [--returned T1,T2] [--versions F] [--locale es|en]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps] [--no-cache]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID [--db DIR]>');
+      throw new UsageError('usage: forge swarm <start --project P --session SID --hook-session ID [--plan P] [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F [--locale es|en]|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|step --plan P --db DIR [--agents F] [--returned T1,T2] [--versions F] [--locale es|en]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps] [--no-cache]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|cleanup [--dry-run]|join--session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID [--db DIR]>');
   }
 }
