@@ -26,9 +26,11 @@ const isOpen = (f: IndexedFinding) => f.status === 'open' || f.status === 'resid
 /** A residual no reviewer gets back to check (hardening, architecture, cap: not SENT): nobody can name it again, so it
  *  stays as it was until a reviewer reports it anew (I1). */
 const unsent = (f: IndexedFinding) => f.status === 'residual' && !(f.residual && SENT.includes(f.residual));
-/** A security finding the person or the reviewer ruled out of the threat model (minor in the index, C-T6): security may
- *  report it again, and it must keep its id so the ruling still applies. Never open for the blocking table. */
-const ruledOutOfModel = (f: IndexedFinding) => f.status === 'minor' && f.outOfModel === true && f.reviewer === 'security';
+/** A finding the person or the reviewer ruled out of the threat model (minor in the index): carried as it was until a
+ *  reviewer names it again, and listed in the accept's deferred (M1). Never open for the blocking table. */
+const outOfModelEntry = (f: IndexedFinding) => f.status === 'minor' && f.outOfModel === true;
+/** Security's: security may report it again, and it must keep its id so the ruling still applies (C-T6). */
+const ruledOutOfModel = (f: IndexedFinding) => outOfModelEntry(f) && f.reviewer === 'security';
 const idNumber = (id: string) => Number(id.slice(1));
 const nextId = (rounds: IndexRound[]) => 1 + Math.max(0, ...rounds.flatMap(r => r.findings.map(f => idNumber(f.id))));
 const before = (index: FindingsIndex, round: number) => index.rounds.filter(r => r.round < round);
@@ -160,8 +162,9 @@ const judgedIds = (verdict: Judged) =>
  * every finding with an id the verdict saw, open when it blocks, residual when it carries a `residual`, minor when the CLI
  * lowered it; then each finding the previous review left open that is not here again: closed when its reviewer answered
  * this review (answeredBy, plus the reviewers an express review covered), else carried as it was. A residual no reviewer
- * gets back (hardening, architecture) is always carried as it was: nobody could name it (I1). After a redo (`fresh`, I4)
- * the reverted attempt's findings are not carried: they were about code that is gone.
+ * gets back (hardening, architecture) is always carried as it was: nobody could name it (I1); so is a finding ruled out of
+ * the threat model, until it is named again (M1). After a redo (`fresh`, I4) the reverted attempt's findings are not
+ * carried: they were about code that is gone.
  */
 export function recordRound(index: FindingsIndex, round: number, verdict: Judged, answered: ReviewerName[], opts: { fresh?: boolean } = {}): FindingsIndex {
   const entries: IndexedFinding[] = [];
@@ -175,7 +178,9 @@ export function recordRound(index: FindingsIndex, round: number, verdict: Judged
   for (const f of verdict.deferred) add(f, 'residual');
   for (const f of verdict.minor) add(f, 'minor');
   for (const o of opts.fresh ? [] : previousOf(index, round)?.findings ?? []) {
-    if (seen.has(o.id) || !isOpen(o)) continue;
+    if (seen.has(o.id)) continue;
+    if (outOfModelEntry(o)) { entries.push(o); continue; }
+    if (!isOpen(o)) continue;
     entries.push(answered.includes(o.reviewer) && !unsent(o) ? { ...o, status: 'closed' } : o);
   }
   const rounds = [...index.rounds.filter(r => r.round !== round), { round, findings: entries }].sort((a, b) => a.round - b.round);
@@ -191,6 +196,18 @@ export function carriedResiduals(index: FindingsIndex, round: number, verdict: J
     id: f.id, reviewer: f.reviewer, severity: f.severity, ...(f.file ? { file: f.file } : {}), ...(f.line !== undefined ? { line: f.line } : {}),
     problem: f.problem, ...(f.fix ? { fix: f.fix } : {}), ...(f.origin ? { origin: f.origin } : {}), ...(f.regression ? { regression: true } : {}),
     ...(f.residual ? { residual: f.residual } : {}),
+  }));
+}
+
+/** M1: the findings ruled out of the threat model in earlier reviews that this verdict does not name: recordRound carries
+ *  them, and an accept lists them in its deferred as the verdict lists its own (minor, with the declared severity and
+ *  `residual: 'out-of-model'`). */
+export function carriedOutOfModel(index: FindingsIndex, round: number, verdict: Judged): Finding[] {
+  const seen = judgedIds(verdict);
+  return (previousOf(index, round)?.findings ?? []).filter(f => outOfModelEntry(f) && !seen.has(f.id)).map(f => ({
+    id: f.id, reviewer: f.reviewer, severity: 'minor' as const, declared: f.severity, ...(f.file ? { file: f.file } : {}),
+    ...(f.line !== undefined ? { line: f.line } : {}), problem: f.problem, ...(f.fix ? { fix: f.fix } : {}), ...(f.origin ? { origin: f.origin } : {}),
+    outOfModel: true, residual: 'out-of-model' as const,
   }));
 }
 

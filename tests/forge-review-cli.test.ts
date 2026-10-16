@@ -797,6 +797,29 @@ describe('forge review-close', () => {
     expect(index.rounds[1].findings.map((f: { id: string; status: string }) => [f.id, f.status])).toEqual([['F2', 'minor'], ['F1', 'closed']]);
   });
 
+  for (const again of ['not at all', 'as a minor finding', 'as an important finding'] as const) {
+    it(`a finding ruled out of the threat model at a fix review is in the accept's deferred when security reports it ${again} (M1)`, () => {
+      noExpress();
+      prep();
+      write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'the second line is not validated' }] });
+      write(r1(), 'security', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'b.txt', line: 20, problem: 'a symlink race on the cache dir' }] });
+      close();
+      expect(JSON.parse(close('--out-of-model', 'F2').stdout).action).toBe('fix');
+      writeFileSync(path.join(wt, 'a.txt'), 'one\ntwo validated\n');
+      git('commit', '-q', '-am', 'fix');
+      prep();
+      write(r2(), 'correctness', { verdict: 'pass', confidence: 0.9, findings: [] });
+      const reported = { file: 'b.txt', line: 20, problem: 'a symlink race on the cache dir', origin: 'previous', id: 'F2', outOfModel: true };
+      write(r2(), 'security', again === 'not at all' ? { verdict: 'pass', confidence: 0.9, findings: [] }
+        : { verdict: 'pass', confidence: 0.9, findings: [{ ...reported, severity: again === 'as a minor finding' ? 'minor' : 'important' }] });
+      const out = JSON.parse(close().stdout);
+      expect(out).toMatchObject({ action: 'accept', next: 'done' });
+      expect(out.deferred).toEqual([expect.objectContaining({ id: 'F2', reviewer: 'security', file: 'b.txt', line: 20, residual: 'out-of-model' })]);
+      const index = JSON.parse(readFileSync(path.join(work(), 'findings-index-1.json'), 'utf8'));
+      expect(index.rounds[1].findings.find((f: { id: string }) => f.id === 'F2')).toMatchObject({ status: 'minor', outOfModel: true });
+    });
+  }
+
   it('--defer leaves a finding as residual architecture and closes the same review again (§4.8)', () => {
     prep();
     write(r1(), 'correctness', { verdict: 'fail', confidence: 0.8, findings: [{ severity: 'important', file: 'a.txt', line: 2, problem: 'the state should live in the store' }] });

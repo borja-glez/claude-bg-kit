@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  parseIndex, assignIds, recordRound, answeredBy, idsOf, openIds, closedFor, previousFindings, asPrevious, historyLine, renderHandover, expressCandidate, carriedResiduals, type FindingsIndex,
+  parseIndex, assignIds, recordRound, answeredBy, idsOf, openIds, closedFor, previousFindings, asPrevious, historyLine, renderHandover, expressCandidate, carriedResiduals, carriedOutOfModel, type FindingsIndex,
 } from '../src/forge/findings-index.js';
 import type { Finding, Review, ReviewerName } from '../src/forge/verdict.js';
 
@@ -116,6 +116,21 @@ describe('findings index (J-06)', () => {
     // Named again in this review, it is this review's finding, not a carried one.
     const named = { ...none, deferred: [{ id: 'F3', reviewer: 'correctness' as const, severity: 'important' as const, problem: 'p3 again', residual: 'hardening' as const }] };
     expect(carriedResiduals(idx, 2, named).map(f => f.id)).toEqual(['F1']);
+  });
+
+  it('a finding ruled out of the threat model is carried as it was until named again, and listed for the accept with residual out-of-model (M1)', () => {
+    const idx = parseIndex(JSON.stringify({ task: 'T', rounds: [{ round: 1, findings: [
+      { id: 'F1', reviewer: 'correctness', severity: 'important', file: 'a.ts', line: 2, problem: 'p1', status: 'open' },
+      { id: 'F2', reviewer: 'security', severity: 'important', file: 'b.ts', line: 20, problem: 'a symlink race', outOfModel: true, status: 'minor' },
+    ] }] }), 'T');
+    const none = { critical: [], important: [], minor: [], deferred: [] };
+    const two = recordRound(idx, 2, none, ['correctness', 'security']);
+    expect(two.rounds[1].findings.map(f => [f.id, f.status])).toEqual([['F1', 'closed'], ['F2', 'minor']]);
+    expect(carriedOutOfModel(idx, 2, none)).toEqual([
+      { id: 'F2', reviewer: 'security', severity: 'minor', declared: 'important', file: 'b.ts', line: 20, problem: 'a symlink race', outOfModel: true, residual: 'out-of-model' }]);
+    const named = { ...none, minor: [{ id: 'F2', reviewer: 'security' as const, severity: 'minor' as const, declared: 'important' as const, problem: 'again', outOfModel: true, residual: 'out-of-model' as const }] };
+    expect(carriedOutOfModel(idx, 2, named)).toEqual([]);
+    expect(recordRound(idx, 2, none, [], { fresh: true }).rounds[1].findings).toEqual([]);
   });
 
   it('after a redo (fresh) nothing of the reverted attempt is paired or carried, and ids go on from the highest (I4)', () => {

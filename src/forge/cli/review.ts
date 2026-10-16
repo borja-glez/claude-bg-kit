@@ -8,7 +8,7 @@ import { detectValidators, selectValidators, runValidators, markPreexisting, blo
 import { PATH_ORDER, zonesFromPaths, type PathName, type ReviewRole } from '../triage.js';
 import { parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, repoRelative, type Finding, type Review, type ReviewerName, type FailingValidator, type AskFinding } from '../verdict.js';
 import { roundDecision } from '../round.js';
-import { parseIndex, assignIds, answeredBy, idsOf, recordRound, carriedResiduals, openIds, closedFor, previousFindings, asPrevious, historyLine, renderHandover, expressCandidate, type FindingsIndex } from '../findings-index.js';
+import { parseIndex, assignIds, answeredBy, idsOf, recordRound, carriedResiduals, carriedOutOfModel, openIds, closedFor, previousFindings, asPrevious, historyLine, renderHandover, expressCandidate, type FindingsIndex } from '../findings-index.js';
 import { reviewsOf } from '../loop.js';
 import { takeBrief } from '../shadow.js';
 import { renderThreatModel } from '../threat-model.js';
@@ -677,8 +677,10 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   // shadowPending and saved by FORGE shadow collect when they are back. They never reach the verdict.
   const twins = collectTwins(task, roundDir, plan, deps);
   // M1: findings out of the threat model are minor in the verdict (and in the ruling), and deferred lists them too, with
-  // residual out-of-model, so the report that closes the work shows every residual (§4.7).
-  const deferred = [...result.deferred, ...result.minor.filter(f => f.residual === 'out-of-model')];
+  // residual out-of-model, so the report that closes the work shows every residual (§4.7); on an accept, also those
+  // ruled out of the model in earlier reviews that this one does not name (the index carries them).
+  const deferred = [...result.deferred, ...result.minor.filter(f => f.residual === 'out-of-model'),
+    ...(result.action === 'accept' && !fresh ? carriedOutOfModel(index, round, result) : [])];
   return json({
     action: result.action, score: result.score, next: d.next, last: d.last, implementer: d.implementer, reviews: reviewsCount, ...(express ? { express: true } : {}),
     findings, deferred, ask: result.ask.length ? askOf(result.ask, locale === 'es' ? 'es' : 'en') : null, handover, revert,
