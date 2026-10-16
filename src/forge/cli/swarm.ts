@@ -12,7 +12,7 @@ import { appendEvent, appendPhase, readEvents, unmergedEvents } from '../ledger.
 import { readExecution, updateExecution, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree, taskBase, type LockDeps } from '../execution.js';
 import { sleepSync } from '../pid.js';
 import { liveJobs, noSlot, stepLockHeld, type Slot } from '../jobs.js';
-import { readMerging, readMergingFile, takeMerging, removeMergingIf, mergingLive, mergingStaleAt, mergeInFlight, type MergingDoc, type MergingHold } from '../merging.js';
+import { readMergingFile, takeMerging, removeMergingIf, mergingLive, mergingStaleAt, mergeInFlight, type MergingDoc, type MergingHold } from '../merging.js';
 import { schedule, widthOf, widthProfile, relaunchOrBlock, RELAUNCH_CAP, type BgAgent } from '../schedule.js';
 import { LEASE_MINUTES, type Liveness } from '../../lib/coordination.js';
 import { UNBOUND_WARNING } from '../hook.js';
@@ -1456,9 +1456,11 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       const e = readExecution(io.cwd);
       if (e?.active) throw new UsageError(`swarm cleanup: the execution ${e.runId} is active; stop or close it first`);
       // A worktree removed under a merge, a step or a background command in flight loses their work: none may be running.
-      const marker = readMerging(io.cwd);
-      if (marker && mergingLive(marker, now.getTime())) {
-        throw new UsageError(`swarm cleanup: an integration is merging (.forge/execution/merging.json, pid ${marker.pid}${marker.task ? `, ${marker.task}` : ''}); run it again once it ends`);
+      // D-07: swarm merge's and swarm tick's rule: a live attempt's marker, or one still being written.
+      const inFlight = mergeInFlight(io.cwd, now.getTime());
+      if (inFlight) {
+        const m = inFlight.doc;
+        throw new UsageError(`swarm cleanup: an integration is merging (.forge/execution/merging.json${m ? `, pid ${m.pid}${m.task ? `, ${m.task}` : ''}` : ''}); run it again once it ends`);
       }
       const job = liveJobs(io.cwd, now)[0];
       if (job) throw new UsageError(`swarm cleanup: a background forge command is running (${job.cmd}${job.task ? ` ${job.task}` : ''}, .forge/jobs/${job.name}.json); run it again once it ends`);
@@ -1471,10 +1473,15 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       const removed = { worktrees: [] as string[], branches: [] as string[], files: 0, bytes: 0 };
       const kept: { path?: string; branch?: string; reason: string }[] = [];
       const gone: string[] = [];
-      const porcelain = deps.git(['worktree', 'list', '--porcelain']) ?? '';
+      // A worktree whose folder is gone (removed by hand) is only git's registration of it: `git worktree prune` drops it
+      // first, so its branch is decided below in this same run. A dry-run reads the ones git marks `prunable` as dropped.
+      if (!dryRun) deps.git(['worktree', 'prune']);
+      const porcelain = (deps.git(['worktree', 'list', '--porcelain']) ?? '').split(/\r?\n\r?\n/).filter(b => !/^prunable\b/m.test(b)).join('\n\n');
       const worktrees = forgeWorktrees(porcelain, io.cwd);
       for (const w of worktrees) {
         const where = { path: rel(w.path), ...(w.branch ? { branch: w.branch } : {}) };
+        // What prune leaves with no folder is locked: git keeps it, and its branch with it.
+        if (!existsSync(w.path)) { kept.push({ ...where, reason: 'its folder is gone and git keeps it registered (locked): git worktree unlock it, then run swarm cleanup again' }); continue; }
         if (!w.branch) { kept.push({ ...where, reason: 'detached HEAD' }); continue; }
         if (!merged(w.branch)) { kept.push({ ...where, reason: `not merged into ${head}` }); continue; }
         const status = deps.at(w.path).git(['status', '--porcelain']);
@@ -1516,7 +1523,6 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       for (const l of refs.split(/\r?\n/).map(x => x.trim())) {
         if (l.startsWith('refs/heads/track/')) kept.push({ branch: l.slice('refs/heads/'.length), reason: "a waypoint track, not forge's" });
       }
-      if (!dryRun) deps.git(['worktree', 'prune']);
       // D-18: the state of the runs that ended: all of it once the execution is closed; that of earlier runs otherwise.
       const state = pruneRunState(io.cwd, e && !e.closedAt ? e.runId : null, { now: now.getTime(), stale: true, dryRun });
       const work = pruneWork(io.cwd, gone, dryRun);
@@ -1567,6 +1573,6 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
     case 'merge':
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError('usage: forge swarm <start --project P --session SID --hook-session ID [--plan P] [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F [--locale es|en]|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|step --plan P --db DIR [--agents F] [--returned T1,T2] [--versions F] [--locale es|en]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps] [--no-cache]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|cleanup [--dry-run]|join--session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID [--db DIR]>');
+      throw new UsageError('usage: forge swarm <start --project P --session SID --hook-session ID [--plan P] [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F [--locale es|en]|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|step --plan P --db DIR [--agents F] [--returned T1,T2] [--versions F] [--locale es|en]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps] [--no-cache]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|cleanup [--dry-run]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID [--db DIR]>');
   }
 }
