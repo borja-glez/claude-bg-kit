@@ -1177,5 +1177,17 @@ describe('plugin layout', () => {
     expect(run).toContain('~<min> min');
     // An express review whose background validation gave no results: review-close exits 2 and the validators run again in the foreground.
     expect(runRef('convergence')).toContain('review-close exits 2');
+    // Fix round 1: every turn ends with a marked sleep, the same rule in step.md and Execution step 6; wait 0 only after
+    // integrated, back to a fresh list; the express command read again from review-plan.json; infinite cycles stay in the foreground.
+    const wait6 = lines.find(l => l.startsWith('6. **Wait.**'))!;
+    const wait5 = step.split('\n').find(l => l.startsWith('5. **Wait.**'))!;
+    for (const s of [wait6, wait5]) for (const w of ['FORGE swarm sleep 300 --mark', 'run_in_background: true', '`swarm sleep 0` exits 2']) expect(s, w).toContain(w);
+    expect(wait5).toContain('back to Execution step 2');
+    for (const w of ['`validatorsCmd`', '`review-plan.json`', 'FORGE swarm stop']) expect(step, w).toContain(w);
+    const decide = lines.find(l => l.startsWith('3. **Decide.**'))!;
+    for (const w of ['/forge:infinite', 'no `swarm step`', 'timeout: 600000']) expect(decide, w).toContain(w);
+    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    expect(inf).toContain('no `swarm step`');
+    expect(inf).not.toContain('instead of the merge question');
   });
 });
