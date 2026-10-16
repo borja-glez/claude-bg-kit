@@ -6,7 +6,7 @@ import path from 'node:path';
 import { run as cli, defaultGit, defaultExec, repoReader, type Io } from '../src/forge/cli/run.js';
 import { readExecution, saveExecution, executionTaskFile, executionLock } from '../src/forge/execution.js';
 import { normalizeExecution, type ExecTask, type ExecutionState } from '../src/lib/execution-state.js';
-import { setupFor, swarmCommand } from '../src/forge/cli/swarm.js';
+import { setupFor, swarmCommand, type SwarmDeps } from '../src/forge/cli/swarm.js';
 import { writeMember } from '../src/forge/members.js';
 import { readLoose } from '../src/forge/loose.js';
 import { samePath } from '../src/lib/worktree.js';
@@ -964,7 +964,7 @@ describe('forge swarm (execution)', () => {
       const at = (min: number) => new Date(NOW.getTime() + min * 60000).toISOString();
       const marker = (staleAt: string) => {
         mkdirSync(path.dirname(mergingFile(root)), { recursive: true });
-        writeFileSync(mergingFile(root), JSON.stringify({ task: 'fix-b', pre: git('rev-parse', 'HEAD'), ref: 'task/fix-b', pid: process.ppid, startedAt: at(-1), staleAt, dir: root }));
+        writeFileSync(mergingFile(root), JSON.stringify({ task: 'fix-b', pre: git('rev-parse', 'HEAD'), ref: 'task/fix-b', pid: process.ppid, startedAt: at(-1), staleAt, dir: root, phase: 'baseline' }));
       };
       marker(at(60));
       const busy = tick();
@@ -973,6 +973,28 @@ describe('forge swarm (execution)', () => {
       expect(readExecution(root)).toMatchObject({ active: true, stopReason: null });
       marker(at(-1));
       expect(tick()[0]).toEqual({ type: 'integrate', task: 'fix-a', ref: 'task/fix-a' });
+    });
+    it('a tick during an integration\'s baseline sees the merge in flight: no integrate, a wait (D-07)', () => {
+      writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators:\n  - name: ok\n    cmd: node -e "0"\n');
+      out(start());
+      out(run(['swarm', 'tick'], io));
+      for (const [task, file] of [['fix-a', 'a.txt'], ['fix-b', 'b.txt']]) {
+        const w = out(run(['swarm', 'worktree', task], io)).worktree;
+        writeFileSync(path.join(w, file), `${file}\n`);
+        execFileSync('git', ['add', file], { cwd: w }); execFileSync('git', ['commit', '-qm', `${task}: work`], { cwd: w });
+        out(run(['swarm', 'task', task, '--stage', 'verdict', '--status', 'accepted'], io));
+      }
+      // The validators of `swarm integrate fix-a` run a `swarm tick` first: the first of them is its baseline.
+      let during: { type: string; seconds?: number }[] | null = null;
+      const deps: SwarmDeps = {
+        git: defaultGit(root), exec: defaultExec(root), repo: repoReader(root),
+        at: dir => ({ git: defaultGit(dir), repo: repoReader(dir), exec: (cmd, t) => { during ??= out(swarmCommand(['tick'], io, deps)).actions; return defaultExec(dir)(cmd, t); } }),
+      };
+      expect(out(swarmCommand(['integrate', 'fix-a'], io, deps))).toMatchObject({ result: 'integrated' });
+      expect(during!.some(a => a.type === 'integrate')).toBe(false);
+      expect(during!.at(-1)).toEqual({ type: 'wait', seconds: STEP_WAIT_SECONDS });
+      // Once it committed, the next tick integrates the other one at once.
+      expect(out(run(['swarm', 'tick'], io)).actions[0]).toEqual({ type: 'integrate', task: 'fix-b', ref: 'task/fix-b' });
     });
     it('a rejected integration into the user checkout removes the node_modules it created, or says the dependencies may not match', () => {
       const counter = path.join(root, '..', `inst-${path.basename(root)}.txt`);

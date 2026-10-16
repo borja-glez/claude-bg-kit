@@ -12,7 +12,7 @@ import { appendEvent, appendPhase, readEvents } from '../ledger.js';
 import { readExecution, updateExecution, writePublicTask, executionTaskFile, runBranch, taskBranch, runWorktree, taskWorktree, type LockDeps } from '../execution.js';
 import { sleepSync } from '../pid.js';
 import { noSlot, type Slot } from '../jobs.js';
-import { readMerging, writeMerging, clearMerging, mergingLive, mergingFile } from '../merging.js';
+import { readMergingFile, takeMerging, removeMergingIf, mergingLive, mergingStaleAt, mergeInFlight, type MergingDoc, type MergingHold } from '../merging.js';
 import { schedule, widthOf, widthProfile, relaunchOrBlock, RELAUNCH_CAP, type BgAgent } from '../schedule.js';
 import { LEASE_MINUTES, sessionLiveness } from '../../lib/coordination.js';
 import { planLocale, sessionReply } from '../../lib/locale.js';
@@ -371,29 +371,37 @@ const baselineFile = (cacheDir: string, key: string, sha: string) => path.join(c
 function readBaseline(cacheDir: string, key: string, sha: string): unknown {
   try { return JSON.parse(readFileSync(baselineFile(cacheDir, key, sha), 'utf8')); } catch { return null; }
 }
+/** D-07: what a merge attempt says when another one holds merging.json (null: one being written, not readable yet). */
+function inFlightDetail(m: MergingDoc | null, place: string | null): string {
+  if (!m) return 'another integration is starting (.forge/execution/merging.json)';
+  return `another integration (${m.task ?? m.ref}, pid ${m.pid}) is merging ${place && samePath(m.dir, place) ? 'there' : `in ${m.dir}`}`;
+}
+
 /**
- * D-07, before a merge attempt in `at`. A marker of a live process merging in this same worktree: it waits (`dirty`).
- * An unfinished merge (MERGE_HEAD) that forge left here, whose process died or ran out of time, with HEAD still where
- * it started: `git merge --abort`, checked, and the attempt goes on (`recovered`). Any other unfinished merge is
- * someone's: `dirty`, untouched. Null when there is nothing to do.
+ * D-07, before a merge attempt in `at`. A marker of a live attempt merging in this same worktree: it waits (`dirty`).
+ * A marker left here by an attempt that died (or ran out of time) in its baseline phase, or with no merge in progress,
+ * is removed: it has nothing to undo. An unfinished merge (MERGE_HEAD) that forge left here in its merge phase, with
+ * HEAD still at `pre` and MERGE_HEAD the tip of `ref`: its marker is taken off first (so of two attempts recovering it
+ * only one aborts), then `git merge --abort`, checked, and the attempt goes on (`recovered`). Any other unfinished
+ * merge is someone's: `dirty`, untouched. Null when there is nothing to do.
  */
 function recoverMerge(at: GitDeps, o: MergeOpts): MergeOutcome | { recovered: { task: string | null; pre: string } } | null {
-  const marker = readMerging(o.main);
+  const read = readMergingFile(o.main);
+  const marker = read?.doc ?? null;
   const place = workdirOf(at);
   const here = !!marker && !!place && samePath(marker.dir, place);
-  const now = o.now().getTime();
-  if (here && mergingLive(marker, now)) return { result: 'dirty', detail: `another integration (${marker!.task ?? marker!.ref}, pid ${marker!.pid}) is merging there` };
-  if (at.git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']) === null) {
-    // A leftover of an attempt that died before its merge: nothing to undo.
-    if (here) rmSync(mergingFile(o.main), { force: true });
-    return null;
-  }
-  if (!here || at.git(['rev-parse', 'HEAD'])?.trim() !== marker!.pre) return { result: 'dirty', detail: 'an unfinished merge is in progress there (git merge --abort to clear it)' };
+  if (here && mergingLive(marker, o.now().getTime())) return { result: 'dirty', detail: inFlightDetail(marker, place) };
+  const mergeHead = at.git(['rev-parse', '-q', '--verify', 'MERGE_HEAD'])?.trim() || null;
+  if (here && (mergeHead === null || marker!.phase === 'baseline')) removeMergingIf(o.main, read!.text);
+  if (mergeHead === null) return null;
+  const tip = (rev: string) => at.git(['rev-parse', '--verify', '-q', `${rev}^{commit}`])?.trim() || null;
+  const own = here && marker!.phase === 'merge' && tip('HEAD') === marker!.pre && mergeHead === tip(marker!.ref);
+  if (!own) return { result: 'dirty', detail: 'an unfinished merge is in progress there (git merge --abort to clear it)' };
+  if (!removeMergingIf(o.main, read!.text)) return { result: 'dirty', detail: 'another integration is recovering the unfinished merge there' };
   at.git(['merge', '--abort']);
-  if (at.git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']) !== null || at.git(['rev-parse', 'HEAD'])?.trim() !== marker!.pre) {
+  if (at.git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']) !== null || tip('HEAD') !== marker!.pre) {
     return { result: 'dirty', detail: 'an unfinished merge forge left there could not be aborted (git merge --abort by hand)' };
   }
-  rmSync(mergingFile(o.main), { force: true });
   return { recovered: { task: marker!.task, pre: marker!.pre } };
 }
 
@@ -412,18 +420,19 @@ function mergeIn(at: GitDeps, ref: string, o: MergeOpts): MergeOutcome {
   if (recovery && 'result' in recovery) return recovery;
   const regenerated: string[] = [];
   const validations: Validations = {};
+  const marker: { hold: MergingHold | null } = { hold: null };
   try {
-    const r = mergeAttempt(at, ref, o, regenerated, validations);
+    const r = mergeAttempt(at, ref, o, regenerated, validations, marker);
     const withRestored = regenerated.length ? { ...r, restored: [...new Set(regenerated)] } : r;
     const out = validations.baseline || validations.merged ? { ...withRestored, validations } : withRestored;
     return recovery ? { ...out, recovered: recovery.recovered } : out;
   } finally {
-    // The marker of this attempt goes after its commit, its rollback or a throw.
-    clearMerging(o.main);
+    // The marker of this attempt goes after its commit, its rollback, a refusal or a throw.
+    marker.hold?.release();
   }
 }
 
-function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: string[], validations: Validations): MergeOutcome {
+function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: string[], validations: Validations, marker: { hold: MergingHold | null }): MergeOutcome {
   // A validator run where `where` is forge's own worktree restores what it regenerated; the person's checkout only the
   // files the config's `generated` names (nothing when it names none). The list is read once, before the merge, on
   // purpose: a task cannot widen what is put back in the person's checkout.
@@ -447,10 +456,27 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
   if (at.git(['rev-parse', '--verify', '-q', `${ref}^{commit}`]) === null) return { result: 'conflict', detail: `unknown ref ${ref}` };
   const pre = at.git(['rev-parse', 'HEAD'])?.trim();
   if (!pre) return { result: 'conflict', detail: 'cannot read HEAD' };
+  const place = workdirOf(at);
+  // D-07: one merge attempt at a time in this checkout, from here to its commit or rollback: merging.json, taken with
+  // 'wx' (mergeIn releases it). Each stamp's staleAt bounds what the attempt has left until its next stamp
+  // (mergingStaleAt): here the install before the baseline; then the baseline's validator run; at `git merge`, the
+  // install after it and a rollback's reinstall; then the merged tree's validator run and a rollback's reinstall.
+  // Its dir is the one git names, or the one it was asked to merge in (configRoot): never empty, so tick reads it.
+  const until = (left: { installs: number; validators?: number }) => mergingStaleAt(o.now(), o.timeoutSec, left);
+  let took: ReturnType<typeof takeMerging>;
+  try {
+    took = takeMerging(o.main, {
+      task: o.task ?? null, pre, ref, pid: process.pid, startedAt: o.now().toISOString(), staleAt: until({ installs: 1 }),
+      dir: place ?? path.resolve(o.configRoot), phase: 'baseline',
+    }, o.now().getTime());
+  } catch (err) {
+    return { result: 'dirty', detail: `cannot write .forge/execution/merging.json (${(err as Error).message})` };
+  }
+  if ('busy' in took) return { result: 'dirty', detail: inFlightDetail(took.busy, place) };
+  const hold = marker.hold = took.hold;
   const before = new Set(untracked(at));
   // The same list indexTree compares against, taken before the merge (the cache assumes the work tree starts clean).
   const cacheBefore = new Set(untrackedPaths(cacheGit(at.git)));
-  const place = workdirOf(at);
   const entry = (): Stats | null => { try { return place ? lstatSync(path.join(place, DEPS_DIR)) : null; } catch { return null; } };
   // Anything at node_modules before the attempt (a directory, a file, a link, even dangling) is the person's. Unknown
   // when the directory is: then it counts as there.
@@ -559,6 +585,8 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
   // What the target detects before the merge: the validators detected only after it are new.
   let detected0: Validator[] | null = null;
   try { detected0 = detectValidators(at.repo, loadConfig(o.configRoot)); } catch { detected0 = null; }
+  // D-07: a stamp that finds merging.json no longer this attempt's (another took it, past its staleAt) stops it.
+  const takenOver = (): MergeOutcome => ({ result: 'dirty', detail: 'another integration took over .forge/execution/merging.json', ...withSetup() });
   // What the target's tip already fails is not caused by this merge: validators red there are "preexisting". The tip is
   // usually the tree the previous integration validated after its merge, so the tree cache (C6) has it.
   let baseline: unknown = readBaseline(o.cacheDir, key, pre);
@@ -566,9 +594,11 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
     // Without its dependencies the tip would fail everything, which would excuse every failure after the merge.
     if (unmoved && needsDeps(at)) baseline = [];
     else {
+      const chosen0 = detected0 ? selectValidators(detected0, selection) : [];
+      if (!hold.stamp('baseline', until({ installs: 0, validators: chosen0.length }))) return takenOver();
       const t0 = Date.now();
       try {
-        const results = detected0 ? cachedRun(at, !o.personal, selectValidators(detected0, selection), () => cleanTree(cacheGit(at.git), generated)) : [];
+        const results = detected0 ? cachedRun(at, !o.personal, chosen0, () => cleanTree(cacheGit(at.git), generated)) : [];
         if (detected0) validations.baseline = { results, durationMs: Date.now() - t0 };
         baseline = results;
       } catch { baseline = []; }
@@ -576,13 +606,8 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
       if (left === null || left.trim() !== '') return { result: 'dirty', detail: `the validators left changes in the worktree: ${(left ?? '').split(/\r?\n/).filter(Boolean).slice(0, 5).join(', ')}`, ...withSetup() };
     }
   }
-  // D-07: the merge in flight, so a later attempt tells its own leftover from someone's (mergeIn removes it).
-  try {
-    writeMerging(o.main, {
-      task: o.task ?? null, pre, ref, pid: process.pid, startedAt: o.now().toISOString(),
-      staleAt: new Date(o.now().getTime() + (o.timeoutSec * Math.max(1, detected0?.length ?? 1) + 600) * 1000).toISOString(), dir: place ?? '',
-    });
-  } catch { /* without a marker a dead merge is left for the person, as before */ }
+  // D-07: the merge phase, so a later attempt tells its own leftover (this ref, from this pre) from someone's.
+  if (!hold.stamp('merge', until({ installs: 2 }))) return takenOver();
   if (at.git(['merge', '--no-ff', '--no-commit', ref]) === null) {
     if (!merging()) return { result: 'conflict', detail: `git refused to merge ${ref}`, ...withSetup() };
     return rollback(`merge conflict with ${ref}`);
@@ -620,6 +645,8 @@ function mergeAttempt(at: GitDeps, ref: string, o: MergeOpts, regenerated: strin
     detected = detectValidators(v.repo, loadConfig(o.configRoot));
     // The run worktree as the target (not the person's) or as the final merge's place to validate (inRun).
     const chosen = selectValidators(detected, selection);
+    // D-07: in the middle of its own merge the attempt goes on even if the stamp fails (it can only fail past the bound).
+    hold.stamp('merge', until({ installs: 1, validators: chosen.length }));
     // The merged tree is the index's (HEAD is still the pre-merge commit): when nothing was integrated since the task
     // branched, it is the tree its review-prep validated, and every result comes from the cache.
     const t0 = Date.now();
@@ -796,6 +823,12 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
   // C2: a merged run that already ended is over: closed, so lens, the band and the roadmap stop drawing it.
   const merged = (v: Record<string, unknown>): Result => out({ ...v, ...(closeEnded(io.cwd, io.now().toISOString(), 'merge', { now: io.now, sleep: io.sleep }) ? { closed: true } : {}) });
   if (e.kind !== 'plan') return merged({ result: 'merged', sha: deps.git(['rev-parse', 'HEAD'])?.trim() ?? '' });
+  // D-07: never while an integration is in flight, wherever it merges; its merging.json stays as it is.
+  const inFlight = mergeInFlight(io.cwd, io.now().getTime());
+  if (inFlight) {
+    const m = inFlight.doc;
+    throw new UsageError(`swarm merge: ${m ? `an integration (${m.task ?? m.ref}, pid ${m.pid}) is merging in ${m.dir}` : 'an integration is starting'}; run swarm merge again once it ends`);
+  }
   if (!e.mergeOnFinish && !rest.includes('--yes')) return out({ result: 'needs-authorization' });
   const branch = deps.git(['rev-parse', '--abbrev-ref', 'HEAD'])?.trim();
   if (branch !== e.base) return out({ result: 'main-dirty', detail: `the main checkout is on ${branch ?? '?'}, not ${e.base}` });
@@ -1171,8 +1204,8 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps): Result {
         if (!Array.isArray(raw)) throw new UsageError('swarm tick: --agents must be a JSON array of {name, state}');
         agents = raw.filter((a): a is BgAgent => !!a && typeof a === 'object' && typeof a.name === 'string' && (a.state === 'working' || a.state === 'idle')).slice(0, 100);
       }
-      // D-07: a live merge of swarm integrate is in flight (merging.json): this tick integrates nothing.
-      const merging = mergingLive(readMerging(io.cwd), now.getTime());
+      // D-07: an integration is in flight (merging.json, from its baseline to its commit): this tick integrates nothing.
+      const merging = mergeInFlight(io.cwd, now.getTime()) !== null;
       // The scheduler decides on the execution as it is under the lock, so a swarm task or an integrate that ran
       // meanwhile is never overwritten (I-15).
       let d!: ReturnType<typeof schedule>;

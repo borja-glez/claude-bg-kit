@@ -1,13 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readFileSync, readdirSync, appendFileSync, lstatSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readFileSync, readdirSync, appendFileSync, lstatSync, symlinkSync, statSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { run, defaultGit, type Io } from '../src/forge/cli/run.js';
+import { run, defaultGit, defaultExec, repoReader, type Io } from '../src/forge/cli/run.js';
+import { swarmCommand, type SwarmDeps } from '../src/forge/cli/swarm.js';
 import { readExecution, saveExecution } from '../src/forge/execution.js';
 import { readLocal } from '../src/forge/local.js';
 import { readEvents } from '../src/forge/ledger.js';
-import { mergingFile } from '../src/forge/merging.js';
+import { loadConfig } from '../src/forge/config.js';
+import { SLOT_MAX_WAIT_MS } from '../src/forge/jobs.js';
+import { mergingFile, readMerging, readMergingFile, removeMergingIf, takeMerging, MERGING_UNREADABLE_MS } from '../src/forge/merging.js';
 
 let root: string;
 let io: Io;
@@ -784,7 +787,7 @@ describe('an integration left half-done (D-07)', () => {
   it('aborts its own merge whose process died, says so and integrates', () => {
     accept('T1', 'a.txt', 'a\n');
     const pre = half('T1');
-    marker({ task: 'T1', pre, ref: 'task/T1', pid: deadPid(), startedAt: '2026-10-12T11:59:00.000Z', staleAt: later, dir: dirOf(runWt()) });
+    marker({ task: 'T1', pre, ref: 'task/T1', pid: deadPid(), startedAt: '2026-10-12T11:59:00.000Z', staleAt: later, dir: dirOf(runWt()), phase: 'merge' });
     const r = out(run(['swarm', 'integrate', 'T1'], io));
     expect(r).toMatchObject({ result: 'integrated', recovered: { task: 'T1', pre } });
     expect(existsSync(mergingFile(root))).toBe(false);
@@ -794,7 +797,7 @@ describe('an integration left half-done (D-07)', () => {
     accept('T1', 'a.txt', 'a\n');
     const pre = half('T1');
     expect(out(run(['swarm', 'integrate', 'T1'], io))).toMatchObject({ result: 'run-dirty', detail: expect.stringContaining('unfinished merge') });
-    marker({ task: 'T1', pre, ref: 'task/T1', pid: deadPid(), startedAt: '2026-10-12T11:59:00.000Z', staleAt: later, dir: dirOf(root) });
+    marker({ task: 'T1', pre, ref: 'task/T1', pid: deadPid(), startedAt: '2026-10-12T11:59:00.000Z', staleAt: later, dir: dirOf(root), phase: 'merge' });
     expect(out(run(['swarm', 'integrate', 'T1'], io)).result).toBe('run-dirty');
     expect(g(runWt(), 'rev-parse', '-q', '--verify', 'MERGE_HEAD')).not.toBe('');
     expect(g(runWt(), 'rev-parse', 'HEAD')).toBe(pre);
@@ -802,7 +805,7 @@ describe('an integration left half-done (D-07)', () => {
   it('a live marker of another process in the same worktree makes the integration wait without touching git', () => {
     accept('T1', 'a.txt', 'a\n');
     const pre = g(runWt(), 'rev-parse', 'HEAD');
-    marker({ task: 'T2', pre, ref: 'task/T2', pid: process.ppid, startedAt: '2026-10-12T11:59:00.000Z', staleAt: later, dir: dirOf(runWt()) });
+    marker({ task: 'T2', pre, ref: 'task/T2', pid: process.ppid, startedAt: '2026-10-12T11:59:00.000Z', staleAt: later, dir: dirOf(runWt()), phase: 'baseline' });
     expect(out(run(['swarm', 'integrate', 'T1'], io))).toMatchObject({ result: 'run-dirty', detail: expect.stringContaining('is merging there') });
     expect(g(runWt(), 'rev-parse', 'HEAD')).toBe(pre);
     expect(readExecution(root)!.tasks.T1.status).toBe('accepted');
@@ -810,7 +813,7 @@ describe('an integration left half-done (D-07)', () => {
   it('a marker here whose HEAD moved, whose process lives or that cannot be read leaves the unfinished merge alone (Review Focus 3)', () => {
     accept('T1', 'a.txt', 'a\n');
     const pre = half('T1');
-    const here = { task: 'T1', ref: 'task/T1', startedAt: '2026-10-12T11:59:00.000Z', staleAt: later, dir: dirOf(runWt()) };
+    const here = { task: 'T1', ref: 'task/T1', startedAt: '2026-10-12T11:59:00.000Z', staleAt: later, dir: dirOf(runWt()), phase: 'merge' };
     // Never `git merge --abort`: the merge stays as it was, HEAD where it was, and the task accepted.
     const untouched = () => {
       expect(g(runWt(), 'rev-parse', '-q', '--verify', 'MERGE_HEAD')).not.toBe('');
@@ -836,14 +839,14 @@ describe('an integration left half-done (D-07)', () => {
   it('a marker past its staleAt counts as dead even when its pid lives: its merge is aborted', () => {
     accept('T1', 'a.txt', 'a\n');
     const pre = half('T1');
-    marker({ task: 'T1', pre, ref: 'task/T1', pid: process.ppid, startedAt: '2026-10-12T11:00:00.000Z', staleAt: '2026-10-12T11:30:00.000Z', dir: dirOf(runWt()) });
+    marker({ task: 'T1', pre, ref: 'task/T1', pid: process.ppid, startedAt: '2026-10-12T11:00:00.000Z', staleAt: '2026-10-12T11:30:00.000Z', dir: dirOf(runWt()), phase: 'merge' });
     expect(out(run(['swarm', 'integrate', 'T1'], io))).toMatchObject({ result: 'integrated', recovered: { task: 'T1', pre } });
     expect(existsSync(mergingFile(root))).toBe(false);
   });
   it('a marker left by an attempt that died before its merge is removed, and the integration goes on', () => {
     accept('T1', 'a.txt', 'a\n');
     const pre = g(runWt(), 'rev-parse', 'HEAD');
-    marker({ task: 'T1', pre, ref: 'task/T1', pid: deadPid(), startedAt: '2026-10-12T11:59:00.000Z', staleAt: later, dir: dirOf(runWt()) });
+    marker({ task: 'T1', pre, ref: 'task/T1', pid: deadPid(), startedAt: '2026-10-12T11:59:00.000Z', staleAt: later, dir: dirOf(runWt()), phase: 'baseline' });
     const r = out(run(['swarm', 'integrate', 'T1'], io));
     expect(r.result).toBe('integrated');
     expect(r.recovered).toBeUndefined();
@@ -857,5 +860,128 @@ describe('an integration left half-done (D-07)', () => {
     commitIn(runWt(), 'base.txt', 'from run\n', 'run change');
     expect(out(run(['swarm', 'integrate', 'T2'], io)).result).toBe('conflict');
     expect(existsSync(mergingFile(root))).toBe(false);
+  });
+
+  // swarm integrate with the deps run() gives it, except that each command run in a worktree (here, only validators:
+  // there is no package.json) calls `during` first; `git` can be wrapped too.
+  const hooked = (during: () => void, git: (dir: string) => (a: string[]) => string | null = defaultGit): SwarmDeps => ({
+    git: defaultGit(root), exec: defaultExec(root), repo: repoReader(root),
+    at: dir => ({ git: git(dir), repo: repoReader(dir), exec: (cmd, t) => { during(); return defaultExec(dir)(cmd, t); } }),
+  });
+  const runValidator = () => { mkdirSync(path.join(runWt(), '.forge'), { recursive: true }); writeFileSync(path.join(runWt(), '.forge', 'config.yaml'), NOBAD); };
+
+  it('one integration at a time from its start: a second one during the first one\'s baseline is turned away, and the first merges', () => {
+    runValidator();
+    accept('T1', 'a.txt', 'a\n');
+    const seen: { phase: string; staleAt: string }[] = [];
+    let second: Record<string, unknown> | null = null;
+    let started = false;
+    const deps: SwarmDeps = hooked(() => {
+      const m = readMerging(root);
+      seen.push({ phase: m?.phase ?? 'none', staleAt: m?.staleAt ?? '' });
+      if (!started) { started = true; second = out(swarmCommand(['integrate', 'T1'], io, deps)); }
+    });
+    const first = out(swarmCommand(['integrate', 'T1'], io, deps));
+    expect(second).toMatchObject({ result: 'run-dirty', detail: expect.stringContaining('is merging there') });
+    expect(first).toMatchObject({ result: 'integrated' });
+    expect(g(runWt(), 'log', '-1', '--format=%s')).toBe('forge: integrate T1');
+    expect(g(runWt(), 'log', '--format=%s')).not.toMatch(/forge: integrate T1[\s\S]*forge: integrate T1/);
+    // The marker stood from the baseline (the first validator run) to the merged tree's run, and went with the commit.
+    expect(seen.map(s => s.phase)).toEqual(['baseline', 'merge']);
+    expect(existsSync(mergingFile(root))).toBe(false);
+    // Each staleAt bounds the run it covers: a full slot wait, then the validator and its retry at the full timeout.
+    const t = loadConfig(root).validatorTimeoutSec;
+    for (const s of seen) expect(Date.parse(s.staleAt) - io.now().getTime()).toBeGreaterThanOrEqual(SLOT_MAX_WAIT_MS + 2 * t * 1000);
+  });
+  it('a live attempt merging in another directory holds the marker too: the integration waits and leaves it as it was', () => {
+    accept('T1', 'a.txt', 'a\n');
+    const pre = g(runWt(), 'rev-parse', 'HEAD');
+    marker({ task: null, pre, ref: 'forge/run-shop', pid: process.ppid, startedAt: '2026-10-12T11:59:00.000Z', staleAt: later, dir: dirOf(root), phase: 'merge' });
+    const before = readFileSync(mergingFile(root), 'utf8');
+    expect(out(run(['swarm', 'integrate', 'T1'], io))).toMatchObject({ result: 'run-dirty', detail: expect.stringContaining('is merging in') });
+    expect(readFileSync(mergingFile(root), 'utf8')).toBe(before);
+    expect(g(runWt(), 'rev-parse', 'HEAD')).toBe(pre);
+    expect(readExecution(root)!.tasks.T1.status).toBe('accepted');
+  });
+  it('a dead marker of the baseline phase is removed, and a merge seen there is someone else\'s: run-dirty, no abort', () => {
+    accept('T1', 'a.txt', 'a\n');
+    const pre = half('T1');
+    marker({ task: 'T1', pre, ref: 'task/T1', pid: deadPid(), startedAt: '2026-10-12T11:59:00.000Z', staleAt: later, dir: dirOf(runWt()), phase: 'baseline' });
+    expect(out(run(['swarm', 'integrate', 'T1'], io))).toMatchObject({ result: 'run-dirty', detail: 'an unfinished merge is in progress there (git merge --abort to clear it)' });
+    expect(existsSync(mergingFile(root))).toBe(false);
+    expect(g(runWt(), 'rev-parse', 'MERGE_HEAD')).toBe(g(runWt(), 'rev-parse', 'task/T1'));
+    expect(g(runWt(), 'rev-parse', 'HEAD')).toBe(pre);
+  });
+  it('a dead marker whose ref is not the merge in progress leaves it alone: run-dirty, untouched', () => {
+    accept('T1', 'a.txt', 'a\n');
+    accept('T2', 'b.txt', 'b\n');
+    const pre = half('T2');
+    marker({ task: 'T1', pre, ref: 'task/T1', pid: deadPid(), startedAt: '2026-10-12T11:59:00.000Z', staleAt: later, dir: dirOf(runWt()), phase: 'merge' });
+    expect(out(run(['swarm', 'integrate', 'T1'], io))).toMatchObject({ result: 'run-dirty', detail: expect.stringContaining('unfinished merge') });
+    expect(g(runWt(), 'rev-parse', 'MERGE_HEAD')).toBe(g(runWt(), 'rev-parse', 'task/T2'));
+    expect(g(runWt(), 'rev-parse', 'HEAD')).toBe(pre);
+    expect(readExecution(root)!.tasks.T1.status).toBe('accepted');
+  });
+  it('swarm merge refuses while an integration is in flight, wherever, and leaves its marker as it was', () => {
+    accept('T1', 'a.txt', 'a\n');
+    out(run(['swarm', 'integrate', 'T1'], io));
+    const live = { task: 'T2', pre: g(runWt(), 'rev-parse', 'HEAD'), ref: 'task/T2', startedAt: '2026-10-12T11:59:00.000Z', staleAt: later, dir: dirOf(runWt()), phase: 'baseline' };
+    marker({ ...live, pid: process.ppid });
+    const before = readFileSync(mergingFile(root), 'utf8');
+    const r = run(['swarm', 'merge', '--yes'], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain(`swarm merge: an integration (T2, pid ${process.ppid}) is merging in`);
+    expect(readFileSync(mergingFile(root), 'utf8')).toBe(before);
+    expect(git('log', '-1', '--format=%s')).toBe('init');
+    // Once its process is gone, the merge goes on.
+    marker({ ...live, pid: deadPid() });
+    expect(out(run(['swarm', 'merge', '--yes'], io))).toMatchObject({ result: 'merged' });
+    expect(existsSync(mergingFile(root))).toBe(false);
+  });
+  it('a leftover marker is removed only while it is still what was read: one written since stays', () => {
+    const doc = { task: 'T1', pre: 'a'.repeat(40), ref: 'task/T1', startedAt: '2026-10-12T11:59:00.000Z', staleAt: later, dir: root, phase: 'baseline' };
+    marker({ ...doc, pid: deadPid() });
+    const read = readMergingFile(root)!;
+    marker({ ...doc, pid: process.ppid });
+    expect(removeMergingIf(root, read.text)).toBe(false);
+    expect(readMerging(root)!.pid).toBe(process.ppid);
+    expect(readdirSync(path.dirname(mergingFile(root))).filter(f => f.startsWith('merging.json.'))).toEqual([]);
+    expect(removeMergingIf(root, readMergingFile(root)!.text)).toBe(true);
+    expect(existsSync(mergingFile(root))).toBe(false);
+  });
+  it('the marker is taken one at a time: a live holder or one being written keeps it, a dead one is taken over', () => {
+    const now = io.now().getTime();
+    const m = { task: 'T1', pre: 'a'.repeat(40), ref: 'task/T1', pid: process.pid, startedAt: '2026-10-12T12:00:00.000Z', staleAt: later, dir: root, phase: 'baseline' as const };
+    const first = takeMerging(root, m, now);
+    if (!('hold' in first)) throw new Error('not taken');
+    expect(takeMerging(root, { ...m, task: 'T2' }, now)).toEqual({ busy: expect.objectContaining({ task: 'T1' }) });
+    // Its own stamp rewrites it; anyone else's marker in its place is not its own any more.
+    expect(first.hold.stamp('merge', later)).toBe(true);
+    expect(readMerging(root)!.phase).toBe('merge');
+    first.hold.release();
+    expect(existsSync(mergingFile(root))).toBe(false);
+    marker({ ...m, pid: deadPid() });
+    const second = takeMerging(root, m, now);
+    if (!('hold' in second)) throw new Error('a dead holder was not taken over');
+    marker({ ...m, pid: process.ppid });
+    expect(second.hold.stamp('merge', later)).toBe(false);
+    second.hold.release();
+    expect(readMerging(root)!.pid).toBe(process.ppid);
+    // An empty marker is one being written: it stands while young, and is taken over once old.
+    writeFileSync(mergingFile(root), '');
+    const written = statSync(mergingFile(root)).mtimeMs;
+    expect(takeMerging(root, m, written + 1000)).toEqual({ busy: null });
+    const third = takeMerging(root, m, written + MERGING_UNREADABLE_MS + 1000);
+    expect('hold' in third).toBe(true);
+    if ('hold' in third) third.hold.release();
+  });
+  it('a worktree git cannot name still gets a marker that can be read', () => {
+    runValidator();
+    accept('T1', 'a.txt', 'a\n');
+    let seen: unknown = undefined;
+    const blind = (dir: string) => (a: string[]) => (a.includes('--show-prefix') ? null : defaultGit(dir)(a));
+    const r = out(swarmCommand(['integrate', 'T1'], io, hooked(() => { seen ??= readMerging(root); }, blind)));
+    expect(r.result).toBe('integrated');
+    expect(seen).toMatchObject({ phase: 'baseline', dir: path.resolve(runWt()) });
   });
 });
