@@ -1,6 +1,6 @@
 # Resuming
 
-Read from forge:run (`## Resuming` in `SKILL.md`). `FORGE` and `<id>` mean what that skill says. `<WORK>` is a task's work folder (`references/task-steps.md`).
+Read from forge:run (`## Resuming` in `SKILL.md`). `FORGE` and `<id>` mean what that skill says. `<WORK>` is a task's work folder (`references/task-steps.md`): in an execution, its `work` in `FORGE swarm status`.
 
 1. `FORGE last --task <id>`: `path` and `phase` (the whole last phase event, with its `brief` number `n`).
 2. `FORGE last --task <id>-<n>`: the last verdict (with its review `dir`) and the last round of that brief.

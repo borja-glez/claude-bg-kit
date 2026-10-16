@@ -1328,5 +1328,12 @@ describe('plugin layout', () => {
     const spawnReviewers = runRef('step').split('\n').find(l => l.includes('`spawnReviewers` ('))!;
     expect(spawnReviewers).toMatch(/`--dir` [^\n]*`inputs\.out`/);
     expect(runRef('step')).toContain('`spawnImplementer`\'s `brief`');
+    // Where no swarm worktree output is at hand, <WORK> is still a field the CLI printed: relaunch's `work`, swarm status's `work`.
+    const relaunch = exec.split('\n').find(l => l.includes('`relaunch {task}`'))!;
+    expect(relaunch).toMatch(/`<WORK>\/handover\.md` \([^)]*`work`/);
+    const end = exec.split('\n').find(l => l.startsWith('7. **End.**'))!;
+    expect(end).toMatch(/`<WORK>\/deferred\.json` \([^)]*`work`[^)]*`FORGE swarm status`/);
+    expect(runRef('resuming')).toMatch(/`<WORK>`[^\n]*`work`[^\n]*`FORGE swarm status`/);
+    expect(runRef('decisions')).toContain('`.forge/work/<id>` outside an execution');
   });
 });

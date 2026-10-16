@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { run as cli, defaultGit, defaultExec, repoReader, type Io } from '../src/forge/cli/run.js';
 import { readExecution, saveExecution, executionTaskFile, executionLock, writePublicTask } from '../src/forge/execution.js';
-import { readStatus } from '../src/forge/ledger.js';
+import { appendEvent, readStatus } from '../src/forge/ledger.js';
 import { saveRun, startRun } from '../src/forge/run.js';
 import { withJob } from '../src/forge/jobs.js';
 import { normalizeExecution, type ExecTask, type ExecutionState } from '../src/lib/execution-state.js';
@@ -713,6 +713,20 @@ describe('forge swarm (execution)', () => {
     out(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io));
     const note = readFileSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'handover.md'), 'utf8');
     expect(note).toContain(`${old} (the brief is brief-<n>.md there`);
+  });
+  it("relaunch and status print each task's work folder, so the skills take <WORK> from the CLI (D-08)", () => {
+    expect(out(run(['swarm', 'status'], io))).not.toHaveProperty('work');
+    sessionsRun();
+    expect(out(run(['swarm', 'relaunch', 'T1', '--plan', 'plan.yaml'], io))).toMatchObject({ task: 'T1', work: '.forge/work/shop/T1' });
+    // A task an earlier version started keeps its folder while its brief is there and the ledger gives it this project.
+    const e = readExecution(root)!;
+    saveExecution(root, { ...e, tasks: { ...e.tasks, T9: { ...e.tasks.T1, branch: 'task/T9', worktree: '' } } });
+    mkdirSync(path.join(root, '.forge', 'work', 'T9'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'work', 'T9', 'brief-1.md'), '# T9\n');
+    appendEvent(root, { ts: NOW.toISOString(), kind: 'triage', task: 'T9', project: 'shop' });
+    const tasks = Object.keys(e.tasks);
+    expect(tasks).toContain('T1');
+    expect(out(run(['swarm', 'status'], io)).work).toEqual({ ...Object.fromEntries(tasks.map(t => [t, `.forge/work/shop/${t}`])), T9: '.forge/work/T9' });
   });
   it('relaunch refuses a blocked and an accepted task', () => {
     sessionsRun();

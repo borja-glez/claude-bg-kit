@@ -31,7 +31,7 @@ import { readMember, writeMember, isMemberId, listMembers, memberFile } from '..
 import { parseLooseTasks, planOfLoose, statesOfLoose, writeLoose, readLoose, type LooseTask } from '../loose.js';
 import { startAnnounce, integratedSay, rejectedDepsSay, keptFilesSay, proposeSay, VENV_HINT } from '../swarm.js';
 import type { PriorCommit } from '../brief.js';
-import { pickWorkDir, workDir, workRel } from '../task-ref.js';
+import { pickWorkDir, readWorkDir, workDir, workRel } from '../task-ref.js';
 import { cleanText } from '../../lib/forge-status.js';
 
 export interface GitDeps { git: (args: string[]) => string | null; exec: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany; repo: RepoReader }
@@ -281,6 +281,22 @@ function addTaskWorktree(deps: SwarmDeps, main: string, task: string, runBranch:
       .filter(p => /^[0-9a-f]{7,64}$/.test(p.sha));
   }
   return { worktree: dir, branch, base, setup, resumed: prior.length > 0, prior };
+}
+
+/**
+ * D-08: each task's work folder, relative to the main checkout, as `swarm status` prints it (`work`): the project's
+ * folder, or the older .forge/work/<T> of a task an earlier version started there (readWorkDir). The skills read <WORK>
+ * from it where no other output gave it (a resumed or closing coordinator), never rebuilding it by hand.
+ */
+function tasksWork(main: string, e: ExecutionState): Record<string, string> {
+  const ids = Object.keys(e.tasks).filter(isSafeId);
+  if (!ids.length) return {};
+  const events = readEvents(main);
+  const project = e.kind === 'plan' ? e.project : null;
+  return Object.fromEntries(ids.map(task => {
+    const ref = { project, task };
+    return [task, readWorkDir(main, ref, events) === workDir(main, ref) ? workRel(ref) : workRel({ project: null, task })];
+  }));
 }
 
 /** The `waypoint launch` arguments of a sessions-mode member of task <T>, with its effort, model and launcher from the config. */
@@ -1139,10 +1155,11 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
     }
     case 'status': {
       // K2-01: the execution of the main checkout, from any worktree.
-      const state = readExecution(mainCheckout(io.cwd));
+      const main = mainCheckout(io.cwd);
+      const state = readExecution(main);
       // §4.6: an active execution that no session drives (forge 0.15 left it unbound) says so.
       const unbound = !!state?.active && state.hookSession === null;
-      return json({ present: state !== null, state, ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}) });
+      return json({ present: state !== null, state, ...(state ? { work: tasksWork(main, state) } : {}), ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}) });
     }
     case 'propose': {
       const plan = !flag('plan') && has('tasks') ? planOfLoose(loadTasksArg(io, flag('tasks'), 'propose')) : loadPlanArg(io, flag('plan'), 'propose');
@@ -1375,7 +1392,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
         `Resume from ${t.branch} in this worktree: read the brief in ${memberWork} if it exists (else write it as the brief stage says), do not redo a step whose output file is already written, and continue from the last stage.`, '',
       ].join('\n'));
       update(cur => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...(cur.tasks[task] ?? t), attempts: attempt, startedAt: iso, nudgedAt: null, updatedAt: iso } } });
-      return json({ task, attempt, note, launch: memberLaunch(io.cwd, planPath, task, e) });
+      return json({ task, attempt, note, work: workRel(ref), launch: memberLaunch(io.cwd, planPath, task, e) });
     }
     case 'sleep': {
       const seconds = Number(rest[0]);
