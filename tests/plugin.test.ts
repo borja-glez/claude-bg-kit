@@ -85,7 +85,7 @@ describe('plugin layout', () => {
       'FORGE waypoint-cli', 'run.json', 'final-validators.json', 'FORGE verdict --task <project>-final', 'final-fix.txt', '`start_prompt`']) expect(large).toContain(w);
     for (const w of ['FORGE brief --plan', '/waypoint:work', 'blocked path']) expect(runRef('execution')).toContain(w);
     const steps = read('plugins/forge/skills/run/references/task-steps.md');
-    for (const w of ['FORGE triage --plan', 'mkdir -p .forge/work/T', 'Commit title prefix']) expect(steps).toContain(w);
+    for (const w of ['FORGE triage --plan', 'mkdir -p <WORK>', 'Commit title prefix']) expect(steps).toContain(w);
     expect(md).not.toContain('report-<n>.md');
   });
   it('forge run skill sizes and reviews each plan task by its real diff', () => {
@@ -688,7 +688,7 @@ describe('plugin layout', () => {
     for (const s of ['**Run members.**', '### Unattended', '### Manual member', 'FORGE decision add --data-file', 'references/manual-member.md']) expect(runMd).toContain(s);
     const exec = runRef('execution');
     for (const s of ['### Requests during an execution', '### Unattended', 'list the background sessions with ListAgents',
-      'FORGE swarm relaunch', 'FORGE swarm nudge', 'The new session reads .forge/work/<T>/handover.md first',
+      'FORGE swarm relaunch', 'FORGE swarm nudge', 'The new session reads <WORK>/handover.md first',
       'An unattended execution never stops to ask']) expect(exec).toContain(s);
     expect(runRef('large')).toContain('--mode sessions');
     expect(runRef('resuming')).toContain('FORGE swarm takeover --session <SID> --hook-session <CSID> --db DB');
@@ -701,14 +701,14 @@ describe('plugin layout', () => {
   });
   it('the task steps live in references/task-steps.md and forge:run no longer repeats them', () => {
     const steps = read('plugins/forge/skills/run/references/task-steps.md');
-    for (const w of ["**A task's steps**", '1. **brief**: `mkdir -p .forge/work/T', '2. **implement**', '3. **validate**', '4. **verify** and **review**', '5. **verdict**',
+    for (const w of ["**A task's steps**", '1. **brief**: `mkdir -p <WORK>', '2. **implement**', '3. **validate**', '4. **verify** and **review**', '5. **verdict**',
       "the implementer's report path when the brief has a `TDD: required` line", 'FORGE swarm task <T> --stage <S>']) expect(steps).toContain(w);
     const run = read('plugins/forge/skills/run/SKILL.md');
     expect(run).toContain('`references/task-steps.md`');
     const exec = runRef('execution');
     expect(exec).toContain('`references/task-steps.md`');
     expect(exec).toMatch(/read it now/);
-    for (const s of [run, exec]) for (const w of ['1. **brief**: `mkdir -p .forge/work/T', '4. **verify** and **review**: ', '5. **verdict**: when the last of them returns']) expect(s).not.toContain(w);
+    for (const s of [run, exec]) for (const w of ['1. **brief**: `mkdir -p <WORK>', '4. **verify** and **review**: ', '5. **verdict**: when the last of them returns']) expect(s).not.toContain(w);
   });
   it('forge:run is split into references: each exists, the core cites it and no longer repeats its text', () => {
     const run = read('plugins/forge/skills/run/SKILL.md');
@@ -802,12 +802,12 @@ describe('plugin layout', () => {
     // 2. review-close no longer waits for the shadow twins (C-11).
     for (const s of [medium, steps]) expect(s).not.toContain('twins included');
     // 3. Deferred findings: written to the main checkout's deferred.json, named in the member's reply, read by the closing reports.
-    for (const s of [steps, member]) expect(s).toContain('<MAIN>/.forge/work/<T>/deferred.json');
+    for (const s of [steps, member]) expect(s).toContain('<MAIN>/<WORK>/deferred.json');
     expect(member).toMatch(/text: "<T> done"[^\n]*deferred\.json/);
     const end = runRef('execution').split('\n').find(l => l.startsWith('7. **End.**'))!;
-    expect(end).toContain('.forge/work/<T>/deferred.json');
+    expect(end).toContain('<WORK>/deferred.json');
     const ephEnd = ephemeral.split('\n').find(l => l.startsWith('4. **End.**'))!;
-    expect(ephEnd).toContain('.forge/work/<T>/deferred.json');
+    expect(ephEnd).toContain('<WORK>/deferred.json');
     expect(Buffer.byteLength(member, 'utf8')).toBeLessThan(15 * 1024);
     // Minors: the entry's mode goes to the reviewer; full is not only round 1; stale references updated.
     for (const s of [medium, steps]) expect(s).toMatch(/its `mode`/);
@@ -1171,7 +1171,7 @@ describe('plugin layout', () => {
       '`publish`', '`claim: true`', '`spawnImplementer`', '`spawnReviewers`', '`express`', '`validatorsRound`', '`readReport`', '`respawnReviewers`', '`reviewMissing`',
       '`accepted`', '`resumeImplementer`', '`freshImplementer`', '`redo`', '`ask`', '`blocked`', '`integrated`', '`error`', 'references/task-steps.md', 'references/convergence.md']) expect(step, w).toContain(w);
     const steps = runRef('task-steps').split('\n');
-    for (const [n, out] of [['1. **brief**', '--out .forge/work/T/prep-1.json'], ['3. **validate**', '--out .forge/work/T/review-prep-<n>.json']] as const) {
+    for (const [n, out] of [['1. **brief**', '--out <WORK>/prep-1.json'], ['3. **validate**', '--out <WORK>/review-prep-<n>.json']] as const) {
       const l = steps.find(s => s.startsWith(n))!;
       expect(l, n).toContain('run_in_background');
       expect(l, n).toContain(out);
@@ -1202,7 +1202,7 @@ describe('plugin layout', () => {
     for (const w of ['--ruling <T>:<answer>', '--ruling <T>:review', 'defer:F3[+F5]', '`busy`', '.forge/jobs/step.lock', '`verify-pending.json`', '`verify`']) expect(step, w).toContain(w);
     const conv = runRef('convergence');
     for (const w of ['--ruling <T>:fix', '--ruling <T>:defer:']) expect(conv, w).toContain(w);
-    expect(runRef('task-steps')).toContain('--dir .forge/work/T/reviews-<n>-<round>');
+    expect(runRef('task-steps')).toContain('--dir <WORK>/reviews-<n>-<round>');
     expect(runRef('execution')).toContain('it needs only that `brief-1.md` and its implementer');
   });
   it('the carries of wave 1c reach the text: safePath, the moved base file, swarm merge busy and route set --why-file (W1c final fix wave, group D)', () => {
@@ -1315,5 +1315,18 @@ describe('plugin layout', () => {
     for (const s of [runRef('task-steps'), runRef('ephemeral'), read('plugins/forge/skills/member/SKILL.md')]) {
       for (const w of ['`prior`', 'prior.json', '--prior-file']) expect(s).toContain(w);
     }
+  });
+  it('the skills take a task folder from what the CLI prints: swarm start gets the plan, worktree and adopt print work, the step names its own dirs (D-08)', () => {
+    const exec = runRef('execution');
+    expect(exec).toContain('FORGE swarm start --project <project> --session <SID> --hook-session <CSID> --plan <plan>');
+    expect(exec).toContain('`FORGE swarm worktree <T>` → `{worktree, branch, base, work, resumed, prior}`');
+    expect(exec).toContain('`FORGE swarm retry <T> --adopt` → `{task, adopted, previous, worktree, branch, work}`');
+    expect(runRef('manual-member')).toContain('`FORGE swarm worktree <T> --member <SID>` → `{worktree, branch, base, work, setup, resumed, prior}`');
+    expect(runRef('ephemeral')).toContain('`FORGE swarm worktree <T>` → `{worktree, branch, base, work, setup, resumed, prior}`');
+    expect(read('plugins/forge/skills/member/SKILL.md')).toContain('`FORGE swarm worktree <T> --member <SID>` → `{worktree, branch, base, work, resumed, prior}`');
+    // Under swarm step the coordinator never sees swarm worktree's work: verify-plan's --dir is the `out` of the step's spawn entries.
+    const spawnReviewers = runRef('step').split('\n').find(l => l.includes('`spawnReviewers` ('))!;
+    expect(spawnReviewers).toMatch(/`--dir` [^\n]*`inputs\.out`/);
+    expect(runRef('step')).toContain('`spawnImplementer`\'s `brief`');
   });
 });

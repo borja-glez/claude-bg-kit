@@ -1,8 +1,8 @@
 # Decisions
 
-Read from forge:run (`## Decisions` in `SKILL.md`). `FORGE`, `WP`, `SID` and `<id>` mean what that skill says.
+Read from forge:run (`## Decisions` in `SKILL.md`). `FORGE`, `WP`, `SID` and `<id>` mean what that skill says. `<WORK>` is the task's work folder: `.forge/work/<id>` on the Medium path; in an execution, the `work` that `FORGE swarm worktree` printed.
 
-A decision you take in place of the user because nobody is there to ask (an unattended execution: the safe paths of `### Unattended` in `references/execution.md`) or because autonomy is `auto` (`references/autonomy.md`) is recorded with `FORGE decision add --data-file <f>`, never with the generic `FORGE log` (it skips the checks and the summary lens reads). Attended rulings stay `FORGE log --kind ruling` and go in the report's rulings, as the paths of `SKILL.md` say: the user is there and sees them. Write the file with the Write tool in `.forge/work/<id>/`:
+A decision you take in place of the user because nobody is there to ask (an unattended execution: the safe paths of `### Unattended` in `references/execution.md`) or because autonomy is `auto` (`references/autonomy.md`) is recorded with `FORGE decision add --data-file <f>`, never with the generic `FORGE log` (it skips the checks and the summary lens reads). Attended rulings stay `FORGE log --kind ruling` and go in the report's rulings, as the paths of `SKILL.md` say: the user is there and sees them. Write the file with the Write tool in `<WORK>/`:
 
 `{"point": "<route|triage|design-apply|design-approve|plan-confirm|mode|ruling|safe-path|other>", "what": "<one line>", "chosen": "<the option taken>", "alternatives": ["<the others>"], "why": "<one line>", "by": "<auto or unattended>", "revert": "<how to undo it, in the user's language>", "undo": <one of the shapes below>, "task": "<id>"}`
 
