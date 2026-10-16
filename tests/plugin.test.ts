@@ -1045,4 +1045,29 @@ describe('plugin layout', () => {
       expect(lines.find(l => l.startsWith('6. ')), a).toContain('`<status> <commit SHA>`');
     }
   });
+  it('reviewers share the verdict rule and the rule on validators, each role has its own severities, and the delta asks for the id and regression (J-05, J-09, J-19, J-20, K4-02)', () => {
+    const reviewers = ['forge-review-correctness', 'forge-review-security', 'forge-review-perf', 'forge-review-final'];
+    const lines = (a: string) => read(`plugins/forge/agents/${a}.md`).split(/\r?\n/);
+    const line = (a: string, start: string) => lines(a).find(l => l.startsWith(start));
+    for (const a of reviewers) {
+      for (const start of ['Verdict rule:', 'Confidence:', 'You may read code around the diff and run read-only commands.']) {
+        expect(line(a, start), `${a}: ${start}`).toBeDefined();
+        expect(line(a, start), `${a}: ${start}`).toBe(line('forge-review-correctness', start));
+      }
+      expect(read(`plugins/forge/agents/${a}.md`), a).not.toContain('focused read-only commands (tests, greps)');
+    }
+    const severities = (a: string) => lines(a).filter(l => /^- (critical|important|minor): /.test(l));
+    const [c, s, p] = ['forge-review-correctness', 'forge-review-security', 'forge-review-perf'].map(severities);
+    for (const x of [c, s, p]) expect(x).toHaveLength(3);
+    expect(new Set([c.join('\n'), s.join('\n'), p.join('\n')]).size).toBe(3);
+    for (const a of ['forge-review-correctness', 'forge-review-security', 'forge-review-perf']) {
+      const md = read(`plugins/forge/agents/${a}.md`);
+      for (const w of ['"id": "F3"', '"regression": true', 'copy its `"id"`']) expect(md, `${a}: ${w}`).toContain(w);
+    }
+    const tdd = line('forge-review-correctness', 'When the brief has a `TDD: required` line')!;
+    for (const w of ['`mode: full`', '`mode: delta`', '"important"', '"minor"']) expect(tdd, w).toContain(w);
+    expect(read('plugins/forge/agents/forge-review-correctness.md')).toContain('`express: true`');
+    const security = read('plugins/forge/agents/forge-review-security.md');
+    for (const w of ['"outOfModel": true', '`threatModel`']) expect(security, w).toContain(w);
+  });
 });
