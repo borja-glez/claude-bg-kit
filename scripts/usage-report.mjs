@@ -1,8 +1,11 @@
 // Cost report over forge usage files (<checkout>/.forge/usage/<session>.json, the format of src/lens/usage-file.ts):
 // a table per agent (kind, model, effort) with runs, steps, mean cost per run and the cost split by token type, and a
-// breakdown per session by group (main, impl, review, verify, plan, other). Plain JavaScript, so `node` runs it as it is.
+// breakdown per session by group, ranked by what its loops add up to (the recorded cost apart), and, for each
+// <checkout>/.forge/usage, the time each forge stage takes, from FORGE stats --json of the built CLI.
+// Plain JavaScript, so `node` runs it as it is.
 // Usage: node scripts/usage-report.mjs <usage dir>...
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -134,7 +137,8 @@ export function byAgent(files) {
   }).sort((a, b) => b.cost - a.cost);
 }
 
-/** One row per session, by cost: its recorded cost (else the sum of its loops), its loop count and its cost per group. */
+/** One row per session, by the sum of its loops (C-14): that sum, the cost the file recorded (null without one), its
+ *  loop count and its cost per group. */
 export function bySession(files) {
   return files.map((f) => {
     const groups = {};
@@ -144,16 +148,59 @@ export function bySession(files) {
       groups[g] = (groups[g] ?? 0) + l.costUsd;
       sum += l.costUsd;
     }
-    return { project: f.project, label: f.label, session: f.session, cost: f.costUsd ?? sum, loops: Object.keys(f.loops).length, groups };
-  }).sort((a, b) => b.cost - a.cost);
+    return { project: f.project, label: f.label, session: f.session, sum, recorded: f.costUsd, loops: Object.keys(f.loops).length, groups };
+  }).sort((a, b) => b.sum - a.sum);
+}
+
+const STAGES = ['implement', 'validate', 'review', 'verdict', 'fix'];
+/** The built forge CLI of this repository. */
+export const FORGE_CLI = fileURLToPath(new URL('../plugins/forge/dist/forge.cjs', import.meta.url));
+
+/** The checkout of a `<checkout>/.forge/usage` dir, else null. */
+export function checkoutOf(dir) {
+  const abs = path.resolve(dir);
+  const parent = path.dirname(abs);
+  return path.basename(abs) === 'usage' && path.basename(parent) === '.forge' ? path.dirname(parent) : null;
+}
+
+/** FORGE stats --json run in a checkout (no shell), or why it could not be read. */
+export function statsOf(checkout, cli = FORGE_CLI) {
+  if (!existsSync(cli)) return { error: `forge CLI not built (${cli}); run npm run build` };
+  try {
+    const out = execFileSync(process.execPath, [cli, 'stats', '--json'], { cwd: checkout, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, timeout: 60000 });
+    const x = JSON.parse(out);
+    return isObj(x) && isObj(x.byPath) ? { stats: x } : { error: 'forge stats printed no byPath' };
+  } catch (e) {
+    return { error: `forge stats failed: ${String((e && e.message) || e).split('\n')[0]}` };
+  }
+}
+
+/** For each <checkout>/.forge/usage dir: a table of the time each stage takes per path, or one line saying why not. */
+export function stageLines(dirs, cli = FORGE_CLI) {
+  const lines = [];
+  for (const dir of dirs) {
+    const checkout = checkoutOf(dir);
+    if (!checkout) continue;
+    const name = path.basename(checkout);
+    const r = statsOf(checkout, cli);
+    if (r.error) { lines.push('', `Time by stage for ${name}: skipped, ${r.error}.`); continue; }
+    lines.push('', `## Time by stage: ${name}`, '', `| path | briefs | p50 min | ${STAGES.join(' | ')} | validators | cache hits |`, `|---|---|---|${STAGES.map(() => '---|').join('')}---|---|`);
+    for (const [p, s] of Object.entries(r.stats.byPath)) {
+      if (!isObj(s)) continue;
+      const stages = isObj(s.stages) ? s.stages : {};
+      const p50 = isObj(s.briefMin) && typeof s.briefMin.p50 === 'number' ? s.briefMin.p50.toFixed(1) : '—';
+      lines.push(`| ${p} | ${num(s.briefs)} | ${p50} | ${STAGES.map((k) => (num(stages[k]) / 60000).toFixed(1)).join(' | ')} | ${pct(num(s.validatorShare))} | ${pct(num(s.cacheHits))} |`);
+    }
+  }
+  return lines;
 }
 
 const GROUPS = ['main', 'impl', 'review', 'verify', 'plan', 'other'];
 const usd = (x) => x.toFixed(2);
 const pct = (x) => `${Math.round(100 * x)} %`;
 
-/** Both tables as Markdown. */
-export function report(files, dirs) {
+/** The tables as Markdown; opts.forgeCli replaces the built CLI that FORGE stats runs from. */
+export function report(files, dirs, opts = {}) {
   const agents = byAgent(files);
   const sessions = bySession(files);
   const lines = [
@@ -170,10 +217,11 @@ export function report(files, dirs) {
     lines.push(`| ${r.kind} | ${r.model ?? '—'} | ${r.effort ?? '—'} | ${r.runs} | ${r.steps} | ${r.avgSteps.toFixed(0)} | ${usd(r.cost)} | ${usd(r.avgCost)} | ${sh.join(' | ')} | ${usd(r.diff)}${note} |`);
   }
   const total = agents.reduce((a, r) => a + r.cost, 0);
-  lines.push('', `Total over loops: ${usd(total)} $`, '', '## By session', '', `| project | label | cost $ | loops | ${GROUPS.join(' | ')} |`, `|---|---|---|---|${GROUPS.map(() => '---|').join('')}`);
+  lines.push('', `Total over loops: ${usd(total)} $`, '', '## By session', '', `| project | label | loops $ | recorded $ | loops | ${GROUPS.join(' | ')} |`, `|---|---|---|---|---|${GROUPS.map(() => '---|').join('')}`);
   for (const s of sessions) {
-    lines.push(`| ${s.project} | ${s.label} | ${usd(s.cost)} | ${s.loops} | ${GROUPS.map((g) => (s.groups[g] === undefined ? '—' : usd(s.groups[g]))).join(' | ')} |`);
+    lines.push(`| ${s.project} | ${s.label} | ${usd(s.sum)} | ${s.recorded === null ? '—' : usd(s.recorded)} | ${s.loops} | ${GROUPS.map((g) => (s.groups[g] === undefined ? '—' : usd(s.groups[g]))).join(' | ')} |`);
   }
+  lines.push(...stageLines(dirs, opts.forgeCli ?? FORGE_CLI));
   return lines.join('\n') + '\n';
 }
 

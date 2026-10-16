@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { PRICES, priceOf, groupOf, splitCost, readUsageDir, byAgent, bySession, report } from '../scripts/usage-report.mjs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { PRICES, priceOf, groupOf, splitCost, readUsageDir, byAgent, bySession, report, checkoutOf } from '../scripts/usage-report.mjs';
 import { priceFor } from '../src/lib/prices.js';
 import { groupOf as lensGroupOf } from '../src/lens/usage-summary.js';
 
@@ -64,18 +66,53 @@ describe('usage-report', () => {
     const rows = bySession(readUsageDir(dir));
     expect(rows.map(r => r.label)).toEqual(['alpha', 'beta']);
     const [a, b] = rows;
-    close(a.cost, 9.4); expect(a.loops).toBe(3); expect(a.project).toBe('usage');
+    close(a.sum, 9.4); expect(a.recorded).toBe(9.4); expect(a.loops).toBe(3); expect(a.project).toBe('usage');
     close(a.groups.main, 6); close(a.groups.impl, 3); close(a.groups.review, 0.4); expect(a.groups.other).toBeUndefined();
-    close(b.cost, 4.5); expect(b.loops).toBe(4); close(b.groups.main, 2); close(b.groups.impl, 2); close(b.groups.other, 0.5);
+    close(b.sum, 4.5); expect(b.loops).toBe(4); close(b.groups.main, 2); close(b.groups.impl, 2); close(b.groups.other, 0.5);
   });
   it('prints both tables and runs as a script', () => {
     const text = report(readUsageDir(dir), [dir]);
     expect(text).toContain('| forge-impl-heavy | claude-opus-5-5 | xhigh | 2 | 30 | 15 | 5.00 | 2.50 |');
-    expect(text).toContain('| usage | alpha | 9.40 | 3 |');
+    expect(text).toContain('| usage | alpha | 9.40 | 9.40 | 3 |');
     const run = spawnSync(process.execPath, [script, dir], { encoding: 'utf8' });
     expect(run.status).toBe(0);
     expect(run.stdout).toContain('forge-impl-heavy');
     const none = spawnSync(process.execPath, [script], { encoding: 'utf8' });
     expect(none.status).toBe(2);
+  });
+  it('ranks sessions by the sum of their loops and shows the recorded cost apart (C-14)', () => {
+    const files = readUsageDir(dir);
+    files.find(f => f.label === 'beta')!.costUsd = 50; // a recorded cost far from what its loops add up to
+    const rows = bySession(files);
+    expect(rows.map(r => r.label)).toEqual(['alpha', 'beta']);
+    close(rows[1].sum, 4.5);
+    expect(rows[1].recorded).toBe(50);
+    const text = report(files, [dir]);
+    expect(text).toContain('| project | label | loops $ | recorded $ | loops |');
+    expect(text).toContain('| usage | beta | 4.50 | 50.00 | 4 |');
+    files.find(f => f.label === 'alpha')!.costUsd = null;
+    expect(report(files, [dir])).toContain('| usage | alpha | 9.40 | — | 3 |');
+  });
+  it('adds a time-by-stage table per checkout from FORGE stats --json, or one line when the CLI is missing (C-09)', () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'usage-report-'));
+    try {
+      const usage = path.join(tmp, 'shop', '.forge', 'usage');
+      mkdirSync(usage, { recursive: true });
+      expect(checkoutOf(usage)).toBe(path.join(tmp, 'shop'));
+      expect(checkoutOf(dir)).toBeNull();
+      expect(report([], [usage], { forgeCli: path.join(tmp, 'missing.cjs') })).toContain('Time by stage for shop: skipped, forge CLI not built');
+      const fake = path.join(tmp, 'fake-forge.cjs');
+      const stats = { byPath: { medium: { briefs: 3, briefMin: { p50: 11.8, p80: 15 }, stages: { implement: 300000, validate: 120000, review: 180000, verdict: 1000, fix: 0 }, validatorShare: 0.25, cacheHits: 0.5 } } };
+      writeFileSync(fake, `if (process.argv[2] !== 'stats' || process.argv[3] !== '--json') process.exit(9);\nprocess.stdout.write(${JSON.stringify(JSON.stringify(stats))});\n`);
+      const text = report([], [usage], { forgeCli: fake });
+      expect(text).toContain('## Time by stage: shop');
+      expect(text).toContain('| medium | 3 | 11.8 | 5.0 | 2.0 | 3.0 | 0.0 | 0.0 | 25 % | 50 % |');
+      writeFileSync(fake, 'process.exit(1);\n');
+      expect(report([], [usage], { forgeCli: fake })).toContain('Time by stage for shop: skipped, forge stats failed');
+      // A usage dir that is not <checkout>/.forge/usage has no stage table.
+      expect(report([], [dir], { forgeCli: fake })).not.toContain('Time by stage');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
