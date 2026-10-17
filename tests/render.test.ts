@@ -1688,3 +1688,26 @@ describe('form fields (Close b)', () => {
     expect(fields.filter(f => !/\sname="[\w-]+"/.test(f))).toEqual([]);
   });
 });
+
+describe('the one forecast end (G-12)', () => {
+  it('the strip, the band of the timeline and the analysis show the same date, with how many work in parallel', () => {
+    const m = base();
+    m.run = runDoc();
+    m.sessions.main = { ...m.sessions.main, role: 'coordinator', runId: 'r1', leaseUntil: new Date(NOW + 5 * 60000).toISOString() };
+    const html = renderApp(m, ui({ view: 'schedule', layers: ['forecast'] }));
+    const strip = /<span class="sf" title="fin previsto ([^"]+) · 3 en paralelo">fin previsto [^<]+<\/span>/.exec(html);
+    const band = /<div class="fc"[^>]*title="fin previsto ([^"]+) · 3 en paralelo">/.exec(html);
+    const line = /<div class="fct">Fin previsto: ([^·<]+) · con 3 en paralelo, al ritmo real \(×1 lo estimado\) y respetando las dependencias<\/div>/.exec(html);
+    expect(strip?.[1]).toBeTruthy();
+    expect(band?.[1]).toBe(strip?.[1]);
+    expect(line?.[1]?.trim()).toBe(strip?.[1]);
+  });
+  it('with everything done there is no forecast in the strip nor in the analysis (Review Focus 1)', () => {
+    const all = { ...base(), states: Object.fromEntries(plan.tasks.map(t => [t.id, { status: 'done' as const }])) };
+    const html = renderApp(all, ui({ view: 'schedule', layers: ['forecast'] }));
+    expect(html).not.toContain('class="sf"');
+    expect(html).not.toContain('class="fc"');
+    expect(html).not.toContain('class="fct"');
+    expect(html).not.toContain('NaN');
+  });
+});

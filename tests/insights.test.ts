@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parsePlan } from '../src/lib/plan.js';
-import { burndown, criticalPath, forecast, remainingMin, zoneHeat } from '../src/lib/insights.js';
+import { burndown, criticalPath, forecastEnd, PACE_MAX, PACE_MIN, paceRatioOf, remainingMin, zoneHeat } from '../src/lib/insights.js';
 import { groupIds, layoutRows, NONE_GROUP, windowAt } from '../src/lib/timeline.js';
-import type { States } from '../src/lib/types.js';
+import type { PlanView, States } from '../src/lib/types.js';
 
 const plan = parsePlan(readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8'));
 const H = 3600000;
@@ -24,12 +24,60 @@ describe('critical path and forecast', () => {
     expect(cp.ids[0]).toBe('T002');
     expect(cp.minutes).toBe(10 + 30 + 30);
   });
-  it('gives a range from the critical path to the serial work, and nothing when all is done', () => {
-    const f = forecast(plan, {}, NOW, { sessions: 1 })!;
-    expect(f.from).toBe(NOW + 110 * 60000);
-    expect(f.to).toBeGreaterThan(f.from);
-    const all: States = Object.fromEntries(plan.tasks.map(t => [t.id, { status: 'done' as const }]));
-    expect(forecast(plan, all, NOW)).toBeNull();
+});
+
+const MIN = 60000;
+/** A plan of one phase and one track whose tasks have the given estimates and dependencies. */
+const mini = (tasks: { id: string; est?: number; deps?: string[] }[]): PlanView => ({
+  tracks: [{ id: 'a', name: 'A', color: 'blue' }], versions: [], phases: [{ id: 'F1', name: 'F', plan_status: 'committed' }],
+  tasks: tasks.map(t => ({ id: t.id, title: t.id, track: 'a', phase: 'F1', done_when: 'x', depends_on: t.deps ?? [], zones: [], ...(t.est !== undefined ? { estimate_min: t.est } : {}) })),
+});
+
+describe('forecastEnd: the one forecast of the page (G-12)', () => {
+  it('a chain takes its whole length however many work in parallel', () => {
+    const chain = mini([{ id: 'A', est: 10 }, { id: 'B', est: 20, deps: ['A'] }, { id: 'C', est: 30, deps: ['B'] }]);
+    expect(forecastEnd(chain, {}, NOW, { parallel: 3, paceRatio: 1 })).toEqual({ at: NOW + 60 * MIN, parallel: 3 });
+  });
+  it('independent tasks take the longest one with enough in parallel, and their sum with one', () => {
+    const three = mini([{ id: 'A', est: 10 }, { id: 'B', est: 20 }, { id: 'C', est: 30 }]);
+    expect(forecastEnd(three, {}, NOW, { parallel: 3, paceRatio: 1 })!.at).toBe(NOW + 30 * MIN);
+    expect(forecastEnd(three, {}, NOW, { parallel: 1, paceRatio: 1 })!.at).toBe(NOW + 60 * MIN);
+  });
+  it('takes first the task with the most critical path ahead, so two workers end in 60 min and not 70', () => {
+    const p = mini([{ id: 'A', est: 10 }, { id: 'B', est: 50, deps: ['A'] }, { id: 'P', est: 30 }, { id: 'Q', est: 30 }]);
+    expect(forecastEnd(p, {}, NOW, { parallel: 2, paceRatio: 1 })!.at).toBe(NOW + 60 * MIN);
+  });
+  it('the running tasks start now with what they have left, and the pace stretches every task', () => {
+    const p = mini([{ id: 'A', est: 30 }, { id: 'B', est: 30 }]);
+    const s: States = { A: { status: 'in_progress', startedAt: new Date(NOW - 20 * MIN).toISOString() } };
+    // A has 10 min left and goes first; B takes 30 after it.
+    expect(forecastEnd(p, s, NOW, { parallel: 1, paceRatio: 1 })!.at).toBe(NOW + 40 * MIN);
+    expect(forecastEnd(p, s, NOW, { parallel: 1, paceRatio: 2 })!.at).toBe(NOW + 80 * MIN);
+  });
+  it('nothing pending gives null; a parallel or a pace out of range is taken within bounds (Review Focus 1, 4)', () => {
+    const p = mini([{ id: 'A', est: 10 }]);
+    expect(forecastEnd(p, { A: { status: 'done' } }, NOW, { parallel: 2, paceRatio: 1 })).toBeNull();
+    expect(forecastEnd(mini([]), {}, NOW, { parallel: 2, paceRatio: 1 })).toBeNull();
+    expect(forecastEnd(p, {}, NOW, { parallel: 0, paceRatio: 1 })).toEqual({ at: NOW + 10 * MIN, parallel: 1 });
+    expect(forecastEnd(p, {}, NOW, { parallel: 2.7, paceRatio: 100 })).toEqual({ at: NOW + 10 * PACE_MAX * MIN, parallel: 2 });
+    expect(forecastEnd(p, {}, NOW, { parallel: 2, paceRatio: Number.NaN })!.at).toBe(NOW + 10 * MIN);
+  });
+  it('a cycle, a dependency outside the plan, a junk estimate and a junk start still give a finite date (Review Focus 4)', () => {
+    const p = mini([{ id: 'A', est: 10, deps: ['B'] }, { id: 'B', est: 10, deps: ['A'] }, { id: 'C', deps: ['Z9'] }, { id: 'D', est: Number.NaN }]);
+    const s: States = { D: { status: 'in_progress', startedAt: 'garbage' } };
+    const f = forecastEnd(p, s, NOW, { parallel: 1, paceRatio: 1 })!;
+    expect(Number.isFinite(f.at)).toBe(true);
+    // A 10 + B 10 + C 30 (the default estimate) + D 30 (a junk estimate and a junk start: the default).
+    expect(f.at).toBe(NOW + 80 * MIN);
+  });
+  it('paceRatioOf: the median of real / estimate over the done tasks that have both, within [0.25, 4]; 1 without any', () => {
+    const p = mini([{ id: 'A', est: 10 }, { id: 'B', est: 10 }, { id: 'C', est: 10 }, { id: 'D' }]);
+    const done = (min: number) => ({ status: 'done' as const, startedAt: new Date(NOW - min * MIN).toISOString(), doneAt: new Date(NOW).toISOString() });
+    expect(paceRatioOf(p, { A: done(10), B: done(20), C: done(40), D: done(5) })).toBe(2);
+    expect(paceRatioOf(p, { A: done(100), B: done(200) })).toBe(PACE_MAX);
+    expect(paceRatioOf(p, { A: done(1) })).toBe(PACE_MIN);
+    expect(paceRatioOf(p, {})).toBe(1);
+    expect(paceRatioOf(p, { A: { status: 'done', startedAt: 'x', doneAt: 'y' } })).toBe(1);
   });
 });
 

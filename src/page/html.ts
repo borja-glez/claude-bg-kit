@@ -1,6 +1,7 @@
 // Helpers every view of the roadmap page shares: escaping, relative times, dates, labels and small marks. Values from the
 // shared database are untrusted: whatever lands in an attribute or a lookup is whitelisted here.
 import { escalationCandidates, liveness } from '../lib/coordination.js';
+import type { ForecastEnd } from '../lib/insights.js';
 import { NOTE_TYPES } from '../lib/notes.js';
 import { ownerCheck, type ApprovalDoc, type ProposalDoc } from '../lib/proposals.js';
 import { TRACK_COLORS, type EventType, type MessageType, type NoteType, type TaskState, type TaskStatus } from '../lib/types.js';
@@ -73,9 +74,10 @@ export function fmt(iso: string, loc: string, withDate = true): string {
   try { const t = new Date(iso); return Number.isNaN(t.getTime()) ? '' : t.toLocaleString(loc, opts); } catch { return ''; }
 }
 
-/** «Fin previsto: entre A y B» for a forecast range (insights.forecast), as the strip, the band and the analysis say it. */
-export function forecastTitle(d: Dict, f: { from: number; to: number }, loc: string): string {
-  return d.insights.forecastRange(fmt(new Date(f.from).toISOString(), loc), fmt(new Date(f.to).toISOString(), loc));
+/** G-12: «fin previsto A · N en paralelo» for the one forecast end (insights.forecastEnd), as the strip and the band of the
+ *  timeline title it; the analysis says it with how it is reckoned (insights.forecastLine). */
+export function forecastTitle(d: Dict, f: ForecastEnd, loc: string): string {
+  return d.strip.forecastTitle(fmt(new Date(f.at).toISOString(), loc), f.parallel);
 }
 
 /** The verification marker next to a task: green when the evidence passed, red otherwise; empty without evidence. */

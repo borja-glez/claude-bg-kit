@@ -72,9 +72,10 @@ function renderStrip(m: Model, d: Dict, dv: Derived, loc: string): string {
   const version = cur && v
     ? `<span class="sv" title="${esc(d.strip.versionTitle(cur, v.done, v.total))}">${esc(versionLabel(cur))} · ${v.percent} %</span>`
     : `<span class="sv">${x.percent} %</span>`;
+  // G-12: the one forecast end, with how many it counts in parallel in its title.
   const f = dv.forecast;
   const forecast = f
-    ? `<span class="sf" title="${esc(forecastTitle(d, f, loc))}">${esc(d.strip.forecast(day(f.to, loc)))}</span>`
+    ? `<span class="sf" title="${esc(forecastTitle(d, f, loc))}">${esc(d.strip.forecast(day(f.at, loc)))}</span>`
     : '';
   const synced = m.syncedAt != null && !m.offline ? `<span class="ss">${esc(d.strip.synced)} ${rel(d, 'ago', new Date(m.syncedAt).toISOString(), m.now)}</span>` : '';
   const links = m.meta?.links;

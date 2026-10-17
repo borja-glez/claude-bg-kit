@@ -10,7 +10,6 @@ export interface Metrics {
   phasesDone: number;
   phaseCount: number;
   paceMin: number | null;
-  etaIso: string | null;
   startedAt: string | null;
   byPhase: Record<string, { done: number; total: number; status: 'done' | 'in_progress' | 'committed' | 'provisional' }>;
   byTrack: Record<string, { done: number; total: number }>;
@@ -20,7 +19,7 @@ export interface Metrics {
   currentVersion: string | null;
 }
 
-export function computeMetrics(plan: PlanView, states: States, now: number, activeSessions = 1): Metrics {
+export function computeMetrics(plan: PlanView, states: States, now: number): Metrics {
   const st = (id: string) => statusOf(states, id);
   const total = plan.tasks.length;
   const done = plan.tasks.filter(t => st(t.id) === 'done').length;
@@ -61,10 +60,6 @@ export function computeMetrics(plan: PlanView, states: States, now: number, acti
     }
   }
   const paceMin = durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : null;
-  const remaining = total - done;
-  const etaIso = paceMin != null && remaining > 0
-    ? new Date(now + (remaining * paceMin * 60000) / Math.max(1, activeSessions)).toISOString()
-    : null;
 
   return {
     total,
@@ -75,7 +70,6 @@ export function computeMetrics(plan: PlanView, states: States, now: number, acti
     phasesDone: Object.values(byPhase).filter(p => p.status === 'done').length,
     phaseCount: plan.phases.length,
     paceMin,
-    etaIso,
     startedAt: starts.length ? new Date(Math.min(...starts)).toISOString() : null,
     byPhase,
     byTrack,

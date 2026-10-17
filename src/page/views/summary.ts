@@ -184,7 +184,7 @@ function renderProgress(m: Model, d: Dict, dv: Derived, loc: string): string {
     ${versions}${phases}
     <dl class="kv">
       <dt>${esc(d.phasesDone)}</dt><dd>${x.phasesDone} ${esc(d.of)} ${x.phaseCount}</dd>
-      <dt>${esc(d.eta)}</dt><dd>${f ? esc(fmt(new Date(f.to).toISOString(), loc)) : '—'}</dd>
+      <dt>${esc(d.eta)}</dt><dd>${f ? esc(fmt(new Date(f.at).toISOString(), loc)) : '—'}</dd>
       <dt>${esc(d.pace)}</dt><dd>${x.paceMin != null ? `${esc(d.dur(x.paceMin))} ${esc(d.progress.perTask)}` : '—'}</dd>
       <dt>${esc(d.devSince)}</dt><dd>${x.startedAt ? esc(fmt(x.startedAt, loc)) : '—'}</dd>
     </dl></section>`;

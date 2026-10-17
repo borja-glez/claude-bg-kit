@@ -2,9 +2,10 @@
 // key adds the minute (the forecast and every liveness move with the clock). The cache is per model object, so two models
 // never share an entry; renderApp without a Derived computes it fresh (computeDerived), which is what tests see.
 import { computeMetrics, type Metrics } from '../lib/metrics.js';
-import { criticalPath, forecast, zoneHeat, type ZoneHeat } from '../lib/insights.js';
+import { criticalPath, forecastEnd, paceRatioOf, zoneHeat, type ForecastEnd, type ZoneHeat } from '../lib/insights.js';
 import { sessionLiveness } from '../lib/coordination.js';
 import { STAGES } from '../lib/types.js';
+import { num } from './html.js';
 import { needsOf, type Need } from './needs.js';
 import type { Model } from './model.js';
 
@@ -12,8 +13,10 @@ export interface Derived {
   metrics: Metrics;
   /** G-11: each version's progress (the same as metrics.byVersion). */
   byVersion: Metrics['byVersion'];
-  /** The forecast range of insights.forecast; its `to` is the forecast end the strip shows. 4c replaces it with forecastEnd. */
-  forecast: { from: number; to: number } | null;
+  /** G-12: the one forecast end of the page, which the strip, the timeline and the analysis read, with its parallelism. */
+  forecast: ForecastEnd | null;
+  /** G-12: the real pace against the estimates (paceRatioOf). */
+  pace: number;
   critical: { ids: string[]; minutes: number };
   zones: ZoneHeat[];
   /** H-08: the plan tasks claimed or in progress, by stage (brief first) and then id; those without an exec go last. */
@@ -24,8 +27,19 @@ export interface Derived {
   needs: Need[];
 }
 
-/** The sessions that work in parallel, for the pace of the forecast: the active ones, at least one. */
-const activeSessions = (m: Model): number => Math.max(1, Object.values(m.sessions).filter(s => s.status === 'active').length);
+/** G-12: how many work in parallel: each live session counts one, the coordinator of the active run its parallel, and the
+ *  sessions of that run (or executors) nothing more, since they are its slots. At least 1. */
+export function parallelOf(m: Model, live: readonly string[]): number {
+  const r = m.run && m.run.active ? m.run : null;
+  let n = 0;
+  for (const sid of live) {
+    const s = m.sessions[sid];
+    if (r && sid === r.coordinator) n += Math.max(1, Math.floor(num(r.parallel)));
+    else if (r && (s?.runId === r.runId || s?.role === 'executor')) continue;
+    else n += 1;
+  }
+  return Math.max(1, n);
+}
 
 const stageRank = (m: Model, id: string): number => {
   const s = m.states[id]?.exec?.stage;
@@ -43,12 +57,11 @@ const once = <T>(f: () => T): (() => T) => {
   };
 };
 
-/** The derived data of a model, computed now (no cache). The metrics and the forecast are read by the strip on every view;
- *  the rest only by the views that show it, so it is computed the first time one reads it (carry 10d): a snapshot on
- *  Conversación computes no critical path, zones or «Te necesita». */
+/** The derived data of a model, computed now (no cache). The metrics and the forecast (with the pace and the live
+ *  sessions it reads) are read by the strip on every view; the rest only by the views that show it, so it is computed the
+ *  first time one reads it (carry 10d): a snapshot on Conversación computes no critical path, zones or «Te necesita». */
 export function computeDerived(m: Model): Derived {
-  const sessions = activeSessions(m);
-  const metrics = computeMetrics(m.plan, m.states, m.now, sessions);
+  const metrics = computeMetrics(m.plan, m.states, m.now);
   const critical = once(() => criticalPath(m.plan, m.states, m.now));
   const zones = once(() => zoneHeat(m.plan, m.states));
   // Carry 6: ties by plain id order, not localeCompare (which depends on the machine's language).
@@ -59,10 +72,12 @@ export function computeDerived(m: Model): Derived {
     return { live, idle: all.length - live.length };
   });
   const needs = once(() => needsOf(m));
+  const pace = paceRatioOf(m.plan, m.states);
   return {
     metrics,
     byVersion: metrics.byVersion,
-    forecast: forecast(m.plan, m.states, m.now, { sessions, paceMin: metrics.paceMin }),
+    forecast: forecastEnd(m.plan, m.states, m.now, { parallel: parallelOf(m, liveSessions().live), paceRatio: pace }),
+    pace,
     get critical() { return critical(); },
     get zones() { return zones(); },
     get running() { return running(); },

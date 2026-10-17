@@ -148,8 +148,9 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
   if (layers.has('forecast')) {
     const f = dv.forecast;
     if (f) {
-      const a = Math.max(0, Math.min(100, pos(f.from)));
-      const b = Math.max(0, Math.min(100, pos(f.to)));
+      // G-12: the work left, from now to the one forecast end.
+      const a = Math.max(0, Math.min(100, pos(m.now)));
+      const b = Math.max(0, Math.min(100, pos(f.at)));
       if (b > 0 && a < 100) band = `<div class="fc" style="left:${a}%;width:${Math.max(0.4, b - a)}%" title="${esc(forecastTitle(d, f, loc))}"><span>${esc(d.tl.forecastEnd)}</span></div>`;
     }
   }
@@ -217,7 +218,7 @@ function renderInsights(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
     ...m.plan.phases.map(p => ({ id: `p:${p.id}`, label: phaseLabel(p.id, p.name), ids: m.plan.tasks.filter(t => t.phase === p.id).map(t => t.id) })),
   ];
   const scope = scopes.find(sc => sc.id === (ui.burnScope ?? '')) ?? scopes[0];
-  const bd = burndown(m.plan, m.states, scope.ids, m.now, f?.to ?? null);
+  const bd = burndown(m.plan, m.states, scope.ids, m.now, f?.at ?? null);
   const W = 520;
   const H = 150;
   let chart = `<div class="muted">${esc(d.insights.allDone)}</div>`;
@@ -245,7 +246,8 @@ function renderInsights(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
         return `<li><button type="button" class="cpl" data-action="open-task" data-id="${esc(id)}" data-k="cp:${esc(id)}"><i class="sd st-${s}"></i><span class="k">${esc(id)}</span> ${esc(t?.title ?? '')}</button></li>`;
       }).join('')}</ol>`
     : `<div class="muted">${esc(d.insights.allDone)}</div>`;
-  const fc = f ? `<div class="fct">${esc(forecastTitle(d, f, loc))}</div>` : '';
+  // G-12, riesgo 10: the date, and in one line how it is reckoned.
+  const fc = f ? `<div class="fct">${esc(d.insights.forecastLine(fmt(new Date(f.at).toISOString(), loc), f.parallel, d.num(Math.round(dv.pace * 100) / 100)))}</div>` : '';
   const heat = dv.zones.slice(0, 12);
   const maxHeat = Math.max(1, ...heat.map(z => z.tasks + z.touched));
   const zones = heat.length

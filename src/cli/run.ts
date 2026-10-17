@@ -16,6 +16,7 @@ import { designFilesOf, readCritiques, readDismissedOf, readHistory, writeDismis
 import { budgetRound, nextRound } from '../lib/design-round.js';
 import { eventId, eventIds, sessionIdFrom } from '../lib/ids.js';
 import { computeMetrics } from '../lib/metrics.js';
+import { forecastEnd, paceRatioOf } from '../lib/insights.js';
 import { normalizeNote, notesSince, noteLines } from '../lib/notes.js';
 import { BRANCH_RE, mainWorktreeFrom, samePath } from '../lib/worktree.js';
 import { excludeWorktrees } from '../lib/git-info.js';
@@ -422,7 +423,9 @@ export function run(argv: string[], io: Io): Result {
         ];
         const next = availableTasks(p, states)[0];
         if (next) lines.push(`next: ${title(next.id)}`);
-        if (m.paceMin != null) lines.push(`pace: ${m.paceMin} min/task · eta: ${m.etaIso ?? '-'}`);
+        // G-12: the roadmap's one forecast end, with one session working.
+        const f = forecastEnd(p, states, io.now().getTime(), { parallel: 1, paceRatio: paceRatioOf(p, states) });
+        if (m.paceMin != null) lines.push(`pace: ${m.paceMin} min/task · eta: ${f ? new Date(f.at).toISOString() : '-'}`);
         return ok(lines.join('\n'));
       }
       case 'session-id':

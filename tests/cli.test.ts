@@ -152,6 +152,15 @@ describe('waypoint CLI', () => {
     expect(r.stdout).toContain('next: T001 Esquema de pedidos');
   });
 
+  it('status gives the same forecast end as the roadmap, with one session working (G-12)', () => {
+    const states = path.join(dir, 'dbcache/state');
+    mkdirSync(states, { recursive: true });
+    writeFileSync(path.join(states, 'T001.json'), JSON.stringify({ status: 'done', startedAt: '2026-10-11T09:00:00.000Z', doneAt: '2026-10-11T09:20:00.000Z' }));
+    const r = run(['status', 'plan.yaml', '--states', 'dbcache/state'], io);
+    // From 10:00, one after another at the pace of T001 (×1): T002 30 + T003 25 + T004, T005 and T006 30 each (the default).
+    expect(r.stdout).toContain('pace: 20 min/task · eta: 2026-10-11T12:25:00.000Z');
+  });
+
   it('small helpers', () => {
     expect(run(['session-id', 'Interfaz Gráfica'], io).stdout).toBe('interfaz-grafica\n');
     expect(run(['event-id', 'main'], io).stdout).toBe('20261011T100000000Z-main-0000\n');

@@ -10,12 +10,13 @@ const NOW = Date.parse('2026-10-11T12:00:00Z');
 describe('computeMetrics', () => {
   it('handles an untouched plan', () => {
     const m = computeMetrics(plan, {}, NOW);
-    expect(m).toMatchObject({ total: 6, done: 0, percent: 0, paceMin: null, etaIso: null, startedAt: null, phasesDone: 0, phaseCount: 2 });
+    expect(m).toMatchObject({ total: 6, done: 0, percent: 0, paceMin: null, startedAt: null, phasesDone: 0, phaseCount: 2 });
+    expect(m).not.toHaveProperty('etaIso');
     expect(m.byPhase.F1.status).toBe('committed');
     expect(m.byPhase.F2.status).toBe('provisional');
   });
 
-  it('computes percent, pace, eta and phase status', () => {
+  it('computes percent, pace and phase status', () => {
     const s: States = {
       T001: { status: 'done', startedAt: '2026-10-11T10:00:00Z', doneAt: '2026-10-11T10:20:00Z' },
       T002: { status: 'done', startedAt: '2026-10-11T10:20:00Z', doneAt: '2026-10-11T11:00:00Z' },
@@ -25,12 +26,10 @@ describe('computeMetrics', () => {
     expect(m.done).toBe(2);
     expect(m.percent).toBe(33);
     expect(m.paceMin).toBe(30);
-    expect(m.etaIso).toBe('2026-10-11T14:00:00.000Z'); // 4 remaining × 30 min
     expect(m.startedAt).toBe('2026-10-11T10:00:00.000Z');
     expect(m.inProgress).toEqual(['T003']);
     expect(m.byPhase.F1).toEqual({ done: 2, total: 3, status: 'in_progress' });
     expect(m.byTrack.backend).toEqual({ done: 2, total: 4 });
-    expect(computeMetrics(plan, s, NOW, 2).etaIso).toBe('2026-10-11T13:00:00.000Z');
   });
 
   it('ignores negative durations from clock skew', () => {

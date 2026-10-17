@@ -20,7 +20,7 @@ import { criticalPath, zoneHeat } from '../src/lib/insights.js';
 import { needsOf } from '../src/page/needs.js';
 import { parsePlan } from '../src/lib/plan.js';
 import { buildDocs } from '../src/lib/sync.js';
-import { computeDerived, derive, deriveKey } from '../src/page/derive.js';
+import { computeDerived, derive, deriveKey, parallelOf } from '../src/page/derive.js';
 import { renderApp, type Model, type UiState } from '../src/page/render.js';
 
 const plan = parsePlan(readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8'));
@@ -124,5 +124,22 @@ describe('derive: the derived data once per revision of the data (H-06)', () => 
     expect(derive(m).metrics.done).toBe(1);
     m.rev = 2;
     expect(derive(m).metrics.done).toBe(2);
+  });
+
+  it('the forecast counts the coordinator of the active run as its parallel, its run as nothing more and anyone else as one (G-12)', () => {
+    const alive = '2026-10-11T12:10:00Z';
+    const run = { runId: 'r1', mode: 'subagents' as const, parallel: 3, branch: 'forge/run-x', mergeOnFinish: false, active: true, stopReason: null, coordinator: 'main', slots: [], kind: 'plan' as const, loose: [] };
+    const m = model({ run, sessions: {
+      main: { name: 'main', heartbeatAt: '2026-10-11T11:59:00Z', leaseUntil: alive, status: 'active', role: 'coordinator', runId: 'r1' },
+      ex: { name: 'ex', heartbeatAt: '2026-10-11T11:59:00Z', leaseUntil: alive, status: 'active', role: 'executor', runId: 'r1' },
+      ana: { name: 'ana', heartbeatAt: '2026-10-11T11:59:00Z', leaseUntil: alive, status: 'active', role: 'manual' },
+      gone: { name: 'gone', heartbeatAt: '2026-10-01T11:59:00Z', status: 'active' },
+    } });
+    const dv = computeDerived(m);
+    expect(parallelOf(m, dv.liveSessions.live)).toBe(4);
+    expect(dv.forecast!.parallel).toBe(4);
+    expect(dv.pace).toBe(1);
+    expect(parallelOf(model({ sessions: {} }), [])).toBe(1);
+    expect(computeDerived(model({ states: Object.fromEntries(plan.tasks.map(t => [t.id, { status: 'done' as const }])) })).forecast).toBeNull();
   });
 });

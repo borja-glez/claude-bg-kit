@@ -53,6 +53,7 @@ const en = {
     snapshot: (date: string) => `snapshot of ${date}`,
     versionTitle: (id: string, done: number, total: number) => `Version ${id}: ${done} of ${total} tasks done`,
     forecast: (date: string) => `forecast end ${date}`,
+    forecastTitle: (date: string, n: number) => `forecast end ${date} · ${n} in parallel`,
     synced: 'synced',
     design: (v?: number) => (v ? `Design v${v}` : 'Design'),
   },
@@ -182,7 +183,7 @@ const en = {
   },
   insights: {
     title: 'Analysis', burndown: 'Burndown', critical: 'Critical path', zones: 'Code zones', ideal: 'Ideal', actual: 'Actual',
-    tasksLeft: 'tasks left', forecastRange: (a: string, b: string) => (a === b ? `Forecast end: ${a}` : `Forecast end: between ${a} and ${b}`),
+    tasksLeft: 'tasks left', forecastLine: (date: string, n: number, pace: string) => `Forecast end: ${date} · with ${n} in parallel, at the real pace (×${pace} the estimate) and following the dependencies`,
     chain: (n: number, min: number) => `${n} tasks · ${min} min in a row`, allDone: 'Everything is done', noZones: 'No zones in the plan',
     zoneLine: (t: number, d: number, a: number) => `${t} tasks · ${d} done${a ? ` · ${a} running` : ''}`, touched: (n: number) => `touched by ${n}`,
     scope: 'Scope', wholePlan: 'Whole plan',
@@ -214,6 +215,7 @@ const es: Dict = {
     snapshot: (date: string) => `instantánea de ${date}`,
     versionTitle: (id: string, done: number, total: number) => `Versión ${id}: ${done} de ${total} tareas hechas`,
     forecast: (date: string) => `fin previsto ${date}`,
+    forecastTitle: (date: string, n: number) => `fin previsto ${date} · ${n} en paralelo`,
     synced: 'sincronizado',
     design: (v?: number) => (v ? `Diseño v${v}` : 'Diseño'),
   },
@@ -343,7 +345,7 @@ const es: Dict = {
   },
   insights: {
     title: 'Análisis', burndown: 'Burndown', critical: 'Camino crítico', zones: 'Zonas de código', ideal: 'Ideal', actual: 'Real',
-    tasksLeft: 'tareas pendientes', forecastRange: (a: string, b: string) => (a === b ? `Fin previsto: ${a}` : `Fin previsto: entre ${a} y ${b}`),
+    tasksLeft: 'tareas pendientes', forecastLine: (date: string, n: number, pace: string) => `Fin previsto: ${date} · con ${n} en paralelo, al ritmo real (×${pace} lo estimado) y respetando las dependencias`,
     chain: (n: number, min: number) => `${n} tareas · ${min} min seguidos`, allDone: 'Todo está hecho', noZones: 'El plan no tiene zonas',
     zoneLine: (t: number, d: number, a: number) => `${t} tareas · ${d} hechas${a ? ` · ${a} en curso` : ''}`, touched: (n: number) => `tocada por ${n}`,
     scope: 'Alcance', wholePlan: 'Plan completo',

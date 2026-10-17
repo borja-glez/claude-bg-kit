@@ -59,19 +59,87 @@ export function criticalPath(plan: PlanView, states: States, now: number): { ids
   return { ids, minutes };
 }
 
+/** G-12: the one forecast end of the page: when the work left ends, and with how many working in parallel. */
+export interface ForecastEnd { at: number; parallel: number }
+/** The latest time a Date can hold (ECMAScript: 8.64e15 ms from the epoch). */
+const MAX_DATE = 8.64e15;
+
+/** G-12: the real pace against the estimates is taken within these bounds. */
+export const PACE_MIN = 0.25;
+export const PACE_MAX = 4;
+const clampPace = (r: number): number => (Number.isFinite(r) && r > 0 ? Math.min(PACE_MAX, Math.max(PACE_MIN, r)) : 1);
+
+/** G-12: how the real durations compare with the estimates: the median of real / estimate over the done tasks that have a
+ *  start, an end and an estimate, within [PACE_MIN, PACE_MAX]; 1 without any. */
+export function paceRatioOf(plan: PlanView, states: States): number {
+  const ratios: number[] = [];
+  for (const t of plan.tasks) {
+    const s = states[t.id];
+    const est = Number(t.estimate_min);
+    if (s?.status !== 'done' || !s.startedAt || !s.doneAt || !(est > 0)) continue;
+    const real = (Date.parse(s.doneAt) - Date.parse(s.startedAt)) / MIN;
+    if (Number.isFinite(real) && real > 0) ratios.push(real / est);
+  }
+  if (!ratios.length) return 1;
+  ratios.sort((a, b) => a - b);
+  const mid = ratios.length >> 1;
+  return clampPace(ratios.length % 2 ? ratios[mid]! : (ratios[mid - 1]! + ratios[mid]!) / 2);
+}
+
 /**
- * The forecast end, as a range: the earliest is the critical path (as many sessions as needed), the latest is all the
- * remaining work done one after another by the active sessions, at the real pace when there is one.
+ * G-12: the one forecast end. A list schedule of the work left: each pending task lasts its remaining minutes times the
+ * pace; the running ones go first, from now; then, in turn, the ready task (its pending dependencies already scheduled)
+ * with the most critical path ahead (itself and the longest chain that waits for it), ties by plain id order (carry 6:
+ * the same on every machine), goes to the worker that lets it start earliest. A dependency outside the plan or already
+ * done does not count; a cycle is scheduled as if free of dependencies. Null when nothing is pending.
  */
-export function forecast(plan: PlanView, states: States, now: number, opts: { sessions?: number; paceMin?: number | null } = {}): { from: number; to: number } | null {
-  const left = plan.tasks.filter(t => !isDone(states, t.id));
-  if (!left.length) return null;
-  const cp = criticalPath(plan, states, now).minutes;
-  const serial = left.reduce((sum, t) => sum + (opts.paceMin ?? remainingMin(plan, states, t.id, now)), 0) / Math.max(1, opts.sessions ?? 1);
-  const a = now + cp * MIN;
-  const b = now + Math.max(cp, serial) * MIN;
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
-  return { from: Math.min(a, b), to: Math.max(a, b) };
+export function forecastEnd(plan: PlanView, states: States, now: number, opts: { parallel: number; paceRatio: number }): ForecastEnd | null {
+  const pending = plan.tasks.filter(t => !isDone(states, t.id));
+  if (!pending.length) return null;
+  const parallel = Math.max(1, Math.floor(Number.isFinite(opts.parallel) ? opts.parallel : 1));
+  const pace = clampPace(opts.paceRatio);
+  const ids = new Set(pending.map(t => t.id));
+  const dur = new Map(pending.map(t => [t.id, remainingMin(plan, states, t.id, now) * pace]));
+  const deps = new Map(pending.map(t => [t.id, [...new Set(t.depends_on)].filter(x => ids.has(x) && x !== t.id)]));
+  const waiting = new Map<string, string[]>();
+  for (const [id, ds] of deps) for (const x of ds) waiting.set(x, [...(waiting.get(x) ?? []), id]);
+  const tail = new Map<string, number>();
+  const visiting = new Set<string>();
+  const tailOf = (id: string): number => {
+    const known = tail.get(id);
+    if (known !== undefined) return known;
+    if (visiting.has(id)) return 0;
+    visiting.add(id);
+    let best = 0;
+    for (const next of waiting.get(id) ?? []) best = Math.max(best, tailOf(next));
+    visiting.delete(id);
+    const v = best + dur.get(id)!;
+    tail.set(id, v);
+    return v;
+  };
+  const running = (id: string): boolean => { const s = states[id]?.status; return s === 'in_progress' || s === 'claimed'; };
+  const rank = (a: string, b: string): number => Number(running(b)) - Number(running(a)) || tailOf(b) - tailOf(a) || (a < b ? -1 : a > b ? 1 : 0);
+  // The minute (from now) at which each worker is free, and the minute each scheduled task ends. Never more workers than
+  // tasks: the others would stay free, and a huge parallel must not allocate a huge array.
+  const free = Array.from({ length: Math.min(parallel, pending.length) }, () => 0);
+  const finish = new Map<string, number>();
+  const left = new Set(ids);
+  while (left.size) {
+    let ready = [...left].filter(id => deps.get(id)!.every(x => finish.has(x)));
+    if (!ready.length) ready = [...left];
+    ready.sort(rank);
+    const id = ready[0]!;
+    const after = Math.max(0, ...deps.get(id)!.map(x => finish.get(x) ?? 0));
+    let w = 0;
+    for (let i = 1; i < free.length; i++) if (Math.max(free[i]!, after) < Math.max(free[w]!, after)) w = i;
+    const end = Math.max(free[w]!, after) + dur.get(id)!;
+    free[w] = end;
+    finish.set(id, end);
+    left.delete(id);
+  }
+  const at = now + Math.max(...finish.values()) * MIN;
+  // A finite date past what a Date holds (an absurd estimate) would throw in toISOString: none rather than a broken page.
+  return Number.isFinite(at) && Math.abs(at) <= MAX_DATE ? { at: Math.round(at), parallel } : null;
 }
 
 export interface Burndown { start: number; end: number; total: number; actual: { t: number; left: number }[]; ideal: { t: number; left: number }[] }
