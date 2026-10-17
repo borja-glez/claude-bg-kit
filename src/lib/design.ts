@@ -62,6 +62,16 @@ export const SLUG_MAX = 80;
 /** `slug` cut to `max` characters, without a dash left at its end. */
 const cutSlug = (slug: string, max: number): string => slug.slice(0, max).replace(/-+$/, '');
 
+/**
+ * K3-03: a design's body, the text after its front matter, without validating it (an older version in the history may
+ * not pass today's schema). A text without front matter is all body; a leading BOM is dropped.
+ */
+export function designBody(text: string): string {
+  const t = text.startsWith(BOM) ? text.slice(1) : text;
+  const m = FM.exec(t);
+  return m ? m[2] : t;
+}
+
 export function slugify(heading: string): string {
   const slug = heading.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -120,7 +130,12 @@ export function wordCount(body: string): number {
 
 const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
 
-export function changedSections(prev: string, next: string): string[] {
+/**
+ * The sections of `next` that are new or changed against `prev` (`_intro` is the text before the first heading), and
+ * (K3-14) the slugs of `prev` that `next` no longer has, in the order of `prev`. Both texts are bodies, without front
+ * matter (K3-03: pass them through designBody).
+ */
+export function changedSections(prev: string, next: string): { changed: string[]; removed: string[] } {
   const p = parseSections(prev);
   const n = parseSections(next);
   const before = new Map<string, string>([['_intro', norm(p.intro)], ...p.sections.map(s => [s.slug, norm(s.text)] as [string, string])]);
@@ -130,5 +145,6 @@ export function changedSections(prev: string, next: string): string[] {
     const old = before.get(slug);
     if (slug === '_intro' ? (old ?? '') !== text : old !== text) changed.push(slug);
   }
-  return changed;
+  const kept = new Set(n.sections.map(s => s.slug));
+  return { changed, removed: p.sections.map(s => s.slug).filter(s => !kept.has(s)) };
 }

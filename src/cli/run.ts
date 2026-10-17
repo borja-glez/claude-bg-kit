@@ -6,7 +6,7 @@ import { buildDocs, buildSyncWrites, planHash, planViewFromDocs, type Known, typ
 import { normalizeMeta, normalizePhase } from '../page/normalize.js';
 import { availableTasks, commitShas } from '../lib/deps.js';
 import { pickTask, conflictsFor, recoverableTasks, inboxFor, escalationCandidates, isIdle, IDLE_MINUTES } from '../lib/coordination.js';
-import { parseDesign, changedSections, DesignError, setDesignStatus } from '../lib/design.js';
+import { parseDesign, changedSections, designBody, DesignError, setDesignStatus } from '../lib/design.js';
 import { importSpec, SpecImportError } from '../lib/design-import.js';
 import { designGate, mergeDismissed, parseDismissed } from '../lib/design-gate.js';
 import { listVersions, nextVersion, parseChangelog, appendChangelog, parseAppliedItems, AppliedError } from '../lib/history.js';
@@ -728,12 +728,13 @@ export function run(argv: string[], io: Io): Result {
         const prevFile = since !== undefined ? path.join(histDir, `v${since}.md`) : undefined;
         if (since === undefined || !prevFile || !existsSync(prevFile)) {
           if (sinceFlag !== undefined) return fail(`design-changed: no history for v${sinceFlag}`);
-          return ok(JSON.stringify({ since: 0, changed: d.sections.map(s => s.slug), scope: 'full' }));
+          return ok(JSON.stringify({ since: 0, changed: d.sections.map(s => s.slug), removed: [], scope: 'full' }));
         }
-        const changed = changedSections(readFileSync(prevFile, 'utf8'), text);
+        // K3-03: the bodies only, so a front matter change (status, artifact) is no change; K3-14: and what went away.
+        const { changed, removed } = changedSections(designBody(readFileSync(prevFile, 'utf8')), d.body);
         const total = d.sections.length;
-        const count = changed.filter(s => s !== '_intro').length;
-        return ok(JSON.stringify({ since, changed, scope: total === 0 || count * 2 > total ? 'full' : 'changed' }));
+        const count = changed.filter(s => s !== '_intro').length + removed.length;
+        return ok(JSON.stringify({ since, changed, removed, scope: total === 0 || count * 2 > total ? 'full' : 'changed' }));
       }
       case 'design-gate': {
         if (!args[0] || args[0].startsWith('--')) return fail('usage: waypoint design-gate <design.md>', 2);

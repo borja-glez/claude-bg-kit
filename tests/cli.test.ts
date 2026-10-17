@@ -700,8 +700,17 @@ describe('design commands', () => {
     run(['design-snapshot', rel, '--note', 'a'], io);
     const p = path.join(dir, rel);
     writeFileSync(p, readFileSync(p, 'utf8').replace('no tiene rollback', 'tiene rollback parcial'));
-    expect(JSON.parse(run(['design-changed', rel], io).stdout)).toEqual({ since: 1, changed: ['riesgos'], scope: 'changed' });
+    expect(JSON.parse(run(['design-changed', rel], io).stdout)).toEqual({ since: 1, changed: ['riesgos'], removed: [], scope: 'changed' });
     expect(JSON.parse(run(['design-changed', rel, '--since', '1'], io).stdout).since).toBe(1);
+  });
+
+  it('design-changed compares the bodies: a front matter change is none, and a removed section is listed (K3-03, K3-14)', () => {
+    run(['design-snapshot', rel, '--note', 'a'], io);
+    const p = path.join(dir, rel);
+    writeFileSync(p, readFileSync(p, 'utf8').replace('start_prompt: /waypoint:work backend', 'start_prompt: /waypoint:work backend\nstatus: approved'));
+    expect(JSON.parse(run(['design-changed', rel], io).stdout)).toEqual({ since: 1, changed: [], removed: [], scope: 'changed' });
+    writeFileSync(p, readFileSync(p, 'utf8').replace('## Arquitectura\n\nBackend en Node y frontend web.\n\n', ''));
+    expect(JSON.parse(run(['design-changed', rel], io).stdout)).toEqual({ since: 1, changed: [], removed: ['arquitectura'], scope: 'changed' });
   });
 
   it('critique-check and critique-select', () => {

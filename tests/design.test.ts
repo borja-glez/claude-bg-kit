@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { changedSections, DesignError, parseDesign, sectionsOf, setDesignStatus, slugify, wordCount } from '../src/lib/design.js';
+import { changedSections, DesignError, designBody, parseDesign, sectionsOf, setDesignStatus, slugify, wordCount } from '../src/lib/design.js';
 
 const fixture = readFileSync(new URL('./fixtures/design.md', import.meta.url), 'utf8');
 const issuesOf = (t: string) => { try { parseDesign(t); } catch (e) { if (e instanceof DesignError) return e.issues; throw e; } throw new Error('expected DesignError'); };
@@ -84,16 +84,19 @@ describe('sections and words', () => {
 });
 
 describe('changedSections', () => {
-  it('reports new and modified sections by slug', () => {
+  it('reports new and modified sections by slug, and nothing removed', () => {
     const prev = '## A\n\nuno\n\n## B\n\ndos\n';
     const next = '## A\n\nuno\n\n## B\n\ndos cambiado\n\n## C\n\ntres\n';
-    expect(changedSections(prev, next)).toEqual(['b', 'c']);
+    expect(changedSections(prev, next)).toEqual({ changed: ['b', 'c'], removed: [] });
   });
-  it('a renamed section counts as new', () => {
-    expect(changedSections('## A\n\nx\n', '## A2\n\nx\n')).toEqual(['a2']);
+  it('a renamed section counts as new, and the old one as removed (K3-14)', () => {
+    expect(changedSections('## A\n\nx\n', '## A2\n\nx\n')).toEqual({ changed: ['a2'], removed: ['a'] });
   });
   it('whitespace-only edits are not changes', () => {
-    expect(changedSections('## A\n\nx  y\n', '## A\n\nx y\n\n')).toEqual([]);
+    expect(changedSections('## A\n\nx  y\n', '## A\n\nx y\n\n')).toEqual({ changed: [], removed: [] });
+  });
+  it('removed sections are listed in the order of the older text (K3-14)', () => {
+    expect(changedSections('## A\n\nx\n\n## B\n\ny\n\n## C\n\nz\n', '## B\n\ny\n')).toEqual({ changed: [], removed: ['a', 'c'] });
   });
 });
 
@@ -118,7 +121,7 @@ describe('fix round 1: fences, headings, BOM, intro, slugs', () => {
     expect(issuesOf('---\n---\nbody').some(i => i.startsWith('title:'))).toBe(true);
   });
   it('editing the intro before the first heading is a change', () => {
-    expect(changedSections('Intro antes.\n\n## A\n\nx\n', 'Intro cambiada.\n\n## A\n\nx\n')).toEqual(['_intro']);
+    expect(changedSections('Intro antes.\n\n## A\n\nx\n', 'Intro cambiada.\n\n## A\n\nx\n')).toEqual({ changed: ['_intro'], removed: [] });
   });
   it('the intro is not part of sectionsOf', () => {
     expect(sectionsOf('Intro.\n\n## A\n\nx\n').map(s => s.slug)).toEqual(['a']);
@@ -126,5 +129,19 @@ describe('fix round 1: fences, headings, BOM, intro, slugs', () => {
   it('duplicate slugs stay unique even when a later heading collides', () => {
     const slugs = sectionsOf('## A\n\nx\n\n## A\n\ny\n\n## A 2\n\nz\n').map(s => s.slug);
     expect(new Set(slugs).size).toBe(3);
+  });
+});
+
+describe('designBody (K3-03)', () => {
+  it('is the text after the front matter, without validating it, and the whole text without one', () => {
+    expect(designBody(fixture)).toBe(parseDesign(fixture).body);
+    expect(designBody('---\nstatus: done\n---\n## A\n\nx\n')).toBe('## A\n\nx\n');
+    expect(designBody('## A\n\nx\n')).toBe('## A\n\nx\n');
+    expect(designBody(`${String.fromCharCode(0xfeff)}---\ntitle: X\n---\nbody\n`)).toBe('body\n');
+  });
+  it('a front matter change is no change of the body, while the whole files would put it in _intro', () => {
+    const approved = fixture.replace('start_prompt: /waypoint:work backend', 'start_prompt: /waypoint:work backend\nstatus: approved');
+    expect(changedSections(designBody(fixture), designBody(approved))).toEqual({ changed: [], removed: [] });
+    expect(changedSections(fixture, approved).changed).toEqual(['_intro']);
   });
 });
