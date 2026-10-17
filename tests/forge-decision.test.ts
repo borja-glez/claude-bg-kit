@@ -172,3 +172,27 @@ describe('forge decision CLI', () => {
     expect(r.stderr).toContain('usage: forge decision');
   });
 });
+
+describe('decision add --session publishes the decision note (H-17)', () => {
+  const cli = (args: string[]) => run(args, { cwd: root, now: () => new Date(at(0)), env: {}, rand: () => 0 });
+  it('prints the note of the decision, and the update that closes the question it resolves', () => {
+    writeFileSync(path.join(root, 'd.json'), JSON.stringify({ ...INPUT, alternatives: ['wait'], revert: 'reopen the design', resolves: 'q-20261013T090000000Z-main-0000' }));
+    const r = JSON.parse(cli(['decision', 'add', '--data-file', 'd.json', '--task', 'T5-2', '--session', 'main']).stdout);
+    const text = 'diseño aprobado (v4) → approve: ronda 2 sin critical';
+    expect(r.publish).toEqual([
+      { op: 'set', collection: 'notes', doc_id: '20261013T100000000Z-main-0000', data: { ts: at(0), type: 'decision', author: 'session:main', text, taskId: 'T5',
+        decision: { point: 'design-approve', what: 'diseño aprobado (v4)', chosen: 'approve', alternatives: ['wait'], why: 'ronda 2 sin critical', revert: 'reopen the design', auto: true } } },
+      { op: 'update', collection: 'notes', doc_id: 'q-20261013T090000000Z-main-0000', data: { answer: text, answeredBy: 'session:main', answeredAt: at(0), answeredByNote: '20261013T100000000Z-main-0000' } },
+    ]);
+    expect(readEvents(root).at(-1)).not.toHaveProperty('resolves');
+  });
+  it('without --session there is no publish; a bad resolves or --session is exit 2 and writes nothing', () => {
+    writeFileSync(path.join(root, 'd.json'), JSON.stringify(INPUT));
+    expect(JSON.parse(cli(['decision', 'add', '--data-file', 'd.json']).stdout)).not.toHaveProperty('publish');
+    writeFileSync(path.join(root, 'bad.json'), JSON.stringify({ ...INPUT, resolves: '../notes/x' }));
+    const before = readEvents(root).length;
+    expect(cli(['decision', 'add', '--data-file', 'bad.json', '--session', 'main']).code).toBe(2);
+    expect(cli(['decision', 'add', '--data-file', 'd.json', '--session', 'a b']).code).toBe(2);
+    expect(readEvents(root)).toHaveLength(before);
+  });
+});

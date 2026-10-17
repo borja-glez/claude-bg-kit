@@ -4,7 +4,9 @@ import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { appendEvent, forgeDir, readEvents, type LedgerEvent } from './ledger.js';
-import { attribute, projectOf } from './task-ref.js';
+import { MAX_NOTE } from '../lib/notes.js';
+import type { Write } from '../lib/sync.js';
+import { attribute, baseOf, projectOf } from './task-ref.js';
 import {
   BRANCH, DECISION_BY, DECISION_POINTS, LIMITS, PROJECT_ID, RUN_ID, SHA, TASK_ID, clean, decisionScope, nextDecisionsDoc,
   normalizeDecision, normalizeDecisionsDoc, weightOf, type Decision, type DecisionsDoc,
@@ -154,4 +156,31 @@ export function renderDecisionsMd(list: Numbered[], scope: string, locale: strin
     out.push(`- **${t.why}:** ${d.why || '—'}`, `- **${t.revert}:** ${howTo}`, `- **${t.when}:** ${d.ts} · ${d.by} · ${d.weight}`, '');
   }
   return out.join('\n');
+}
+
+/** H-17: a note id of the roadmap (an event id, or the page's own id): no `/`, at most 160 characters. */
+export const NOTE_ID = /^[A-Za-z0-9_.:~@+-]{1,160}$/;
+
+/**
+ * H-17: the roadmap writes of a decision, for the skill to send in one batch: its decision note (`notes/<eid>`, the
+ * structure the page shows) and, when it answers a question note (`resolves`), the update that closes that question.
+ */
+export function decisionWrites(i: { event: LedgerEvent; session: string; eid: string; resolves?: string | null }): Write[] {
+  const d = normalizeDecision(i.event);
+  if (!d) return [];
+  const text = `${d.what} → ${d.chosen}: ${d.why}`.slice(0, MAX_NOTE);
+  const author = `session:${i.session}`;
+  const task = d.task ? baseOf(d.task) : null;
+  const note: Write = {
+    op: 'set', collection: 'notes', doc_id: i.eid,
+    data: {
+      ts: d.ts, type: 'decision', author, text, ...(task ? { taskId: task } : {}),
+      decision: {
+        point: d.point, what: d.what, chosen: d.chosen, ...(d.alternatives.length ? { alternatives: d.alternatives } : {}), why: d.why,
+        ...(d.revert ? { revert: d.revert } : {}), auto: d.by !== 'user',
+      },
+    },
+  };
+  if (!i.resolves) return [note];
+  return [note, { op: 'update', collection: 'notes', doc_id: i.resolves, data: { answer: text, answeredBy: author, answeredAt: d.ts, answeredByNote: i.eid } }];
 }

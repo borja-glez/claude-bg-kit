@@ -170,6 +170,8 @@ export interface NoteDoc {
   answer?: string;
   answeredBy?: string;
   answeredAt?: string;
+  /** H-17: the decision note that answered this question (its id). */
+  answeredByNote?: string;
   /** Display names of `author` / `answeredBy`, when the writer stored them. */
   authorName?: string;
   answeredByName?: string;

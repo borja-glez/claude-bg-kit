@@ -48,7 +48,8 @@ import { hookRoute } from '../route-hooks.js';
 import { liveJobs, noSlot, slotFor, withJob, writeJsonAtomic, type Slot } from '../jobs.js';
 import { sleepSync } from '../pid.js';
 import { readSurfaces, detectDrafts, appendLearned, surfaceFile, permissionHash, hashMatches, LEARNED_HEADINGS, type Surface } from '../surfaces.js';
-import { addDecision, allDecisions, listDecisions, renderDecisionsMd, DecisionInputError } from '../decisions.js';
+import { addDecision, allDecisions, listDecisions, renderDecisionsMd, decisionWrites, NOTE_ID, DecisionInputError } from '../decisions.js';
+import { eventId } from '../../lib/ids.js';
 import { TASK_ID, decisionScope, scopeFileName } from '../../lib/decisions.js';
 import { claudeConfigDir, claudeJsonDir, locateSuperpowersFor, spLedgerDone, spPlans, spSkillPath, spSpecs } from '../superpowers.js';
 import { ROUTE_OPTIONS, ROUTE_STAGES, firstStage, isRoutePath, isRouteSession, pruneRoutes, readRoute, routeAsk, routeOptions, writeRoute, type RouteDoc, type RouteOption, type RouteStage } from '../route.js';
@@ -1961,13 +1962,20 @@ function runCommand(argv: string[], io: Io): Result {
           let raw: unknown;
           try { raw = JSON.parse(readFileSync(path.resolve(io.cwd, file), 'utf8')); } catch { throw new UsageError('decision add: --data-file must be a JSON object'); }
           if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new UsageError('decision add: --data-file must be a JSON object');
+          // H-17: `--session` (this session's waypoint id) makes it print the roadmap writes; `resolves` (the question note
+          // the decision answers) is not part of the decision itself.
+          const session = flag('session');
+          if (has('session') && (!session || !/^[A-Za-z0-9_\-.~:@+]{1,80}$/.test(session))) throw new UsageError('decision add: --session needs the waypoint session id');
+          const { resolves, ...decision } = raw as Record<string, unknown>;
+          if (resolves !== undefined && (typeof resolves !== 'string' || !NOTE_ID.test(resolves))) throw new UsageError('decision add: resolves must be the id of a note');
           const task = flag('task');
           if (task !== undefined && (!TASK_ID.test(task) || task === '.' || task === '..')) throw new UsageError(`decision add: invalid --task ${task}`);
           // An active execution names the run the decision belongs to (its scope), unless the data names one.
           const exec = readExecution(root);
           try {
-            const { n, event } = addDecision(root, raw, { ts: ts(), ...(task ? { task } : {}), runId: exec?.active ? exec.runId : null });
-            return json({ n, ...event });
+            const { n, event } = addDecision(root, decision, { ts: ts(), ...(task ? { task } : {}), runId: exec?.active ? exec.runId : null });
+            const publish = session ? decisionWrites({ event, session, eid: eventId(io.now(), session, io.rand), resolves: (resolves as string | undefined) ?? null }) : null;
+            return json({ n, ...event, ...(publish ? { publish } : {}) });
           } catch (e) {
             if (e instanceof DecisionInputError) throw new UsageError(`decision add: ${e.message}`);
             throw e;
@@ -1999,7 +2007,7 @@ function runCommand(argv: string[], io: Io): Result {
           writeFileSync(out, renderDecisionsMd(list, scope, flag('locale') ?? 'en'));
           return json({ written: true, scope, count: list.length, path: out });
         }
-        throw new UsageError('usage: forge decision add --data-file f [--task id] | list [--task id] [--run id] [--since iso] [--all] [--auto] | show <n> | md --scope s [--out f] [--locale es|en]');
+        throw new UsageError('usage: forge decision add --data-file f [--task id] [--session SID] | list [--task id] [--run id] [--since iso] [--all] [--auto] | show <n> | md --scope s [--out f] [--locale es|en]');
       }
       case 'stats': {
         // C-09: the clock of the accepted briefs of the main checkout's ledger (where every worktree's forge writes).

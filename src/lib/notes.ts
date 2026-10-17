@@ -23,6 +23,8 @@ export function normalizeNote(x: unknown): NoteDoc | null {
   if (str(o.answer)) out.answer = o.answer.slice(0, MAX_NOTE);
   if (str(o.answeredBy)) out.answeredBy = o.answeredBy;
   if (str(o.answeredAt)) out.answeredAt = o.answeredAt;
+  // H-17: the decision note that closed this question; an id, never a path.
+  if (str(o.answeredByNote) && /^[A-Za-z0-9_.:~@+-]{1,160}$/.test(o.answeredByNote)) out.answeredByNote = o.answeredByNote;
   // Optional display names a writer may store next to the user:<id>; never required.
   if (str(o.authorName) && o.authorName.trim()) out.authorName = clean(o.authorName, MAX_NAME);
   if (str(o.answeredByName) && o.answeredByName.trim()) out.answeredByName = clean(o.answeredByName, MAX_NAME);

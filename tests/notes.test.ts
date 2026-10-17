@@ -26,6 +26,12 @@ describe('normalizeNote', () => {
     expect(x.text).toHaveLength(2000);
     expect(x.answer).toHaveLength(2000);
   });
+  it('keeps answeredByNote, the decision that closed a question (H-17)', () => {
+    const q = { ts: 't', type: 'question', author: 'user:1', text: 'q?', answer: 'a', answeredBy: 'session:main', answeredAt: 't' };
+    expect(normalizeNote({ ...q, answeredByNote: 'e1' })?.answeredByNote).toBe('e1');
+    expect(normalizeNote({ ...q, answeredByNote: 'a/b' })).not.toHaveProperty('answeredByNote');
+    expect(normalizeNote({ ...q, answeredByNote: 7 })).not.toHaveProperty('answeredByNote');
+  });
 });
 
 describe('normalizeNote · decision', () => {
