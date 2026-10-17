@@ -12189,14 +12189,27 @@ function newestKey(statuses, match, now) {
   }
   return best?.key;
 }
-function newestByTask(statuses, now) {
-  const memo = /* @__PURE__ */ new Map();
-  return (task) => {
-    if (!memo.has(task)) memo.set(task, newestKey(statuses, (st) => st.task === task, now));
-    return memo.get(task);
-  };
+function ownerOf(st, sessionId2, ownTasks2) {
+  if (sessionId2 === void 0) return "own";
+  if (st.session !== null && sessionId2) return st.session === sessionId2 ? "own" : "other";
+  return ownTasks2.some((t) => isOf(st.task, t)) ? "own" : "other";
 }
-var worksOn = (l, task, project, newest3) => l.task === task && (l.project !== null ? l.project === project : (newest3(task) ?? keyOf(task, project)) === keyOf(task, project));
+function homeOf(h2, match) {
+  const of = h2.statuses.filter(match);
+  const loose = of.find((st) => st.project === null);
+  if (loose) return keyOf(loose.task, null);
+  const live = (st) => !st.doneAt && st.phase.toLowerCase() !== "stopped" && ownerOf(st, h2.sessionId, h2.ownTasks) === "own";
+  return newestKey(of, live, h2.now) ?? newestKey(of, () => true, h2.now);
+}
+function linkHomes(h2) {
+  const out = /* @__PURE__ */ new Map();
+  for (const l of h2.links) {
+    const task = l.task;
+    if (!task) continue;
+    out.set(l.id, l.project !== null ? keyOf(task, l.project) : homeOf(h2, (st) => st.task === task) ?? keyOf(task, null));
+  }
+  return out;
+}
 function leftOpen(st, now) {
   if (st.path !== "trivial" && st.path !== "small" || st.doneAt) return false;
   const last = ms(st.lastAt);
@@ -12244,14 +12257,14 @@ function agentOf(l, links2, models, now) {
     depth
   };
 }
-function withSlotAgents(x, links2, models, viewer, now, statuses = []) {
+function withSlotAgents(x, links2, models, viewer, now, homes, drawn = /* @__PURE__ */ new Set()) {
   if (!x) return x;
   const project = x.project ?? null;
-  const newest3 = newestByTask(statuses, now);
+  const home = homes ?? linkHomes({ statuses: [], links: links2, ownTasks: [], now });
   return {
     ...x,
     slots: x.slots.map((s) => {
-      const agents = links2.filter((l) => alive(l) && worksOn(l, s.task, project, newest3)).map((l) => agentOf(l, links2, models, now));
+      const agents = links2.filter((l) => alive(l) && home.get(l.id) === keyOf(s.task, project) && !drawn.has(l.id)).map((l) => agentOf(l, links2, models, now));
       const first = agents.find((g) => g.model);
       const liveness2 = viewer.coordinator && agents.length ? "alive" : s.liveness;
       return { ...s, agents, model: s.model ?? first?.model ?? null, effort: s.effort ?? first?.effort ?? null, liveness: liveness2 };
@@ -12284,12 +12297,18 @@ function buildActivities(i) {
   const known = i.sessionId !== void 0;
   const execProject = i.execution?.project ?? null;
   const slotTasks = new Set(i.execution?.mode === "subagents" ? i.execution.slots.map((s) => s.task) : []);
-  const newest3 = newestByTask(i.statuses, now);
+  const homes = i.homes ?? linkHomes(i);
   const liveJobs = i.jobs.filter((j) => {
     const t = ms(j.startedAt);
     return Number.isFinite(t) && age(t, now) < JOB_ALIVE_MS;
   });
-  const jobHome = new Map(liveJobs.map((j) => [j, j.task === null ? void 0 : newestKey(i.statuses, (st) => isOf(st.task, j.task), now)]));
+  const jobHomeOf = (j) => {
+    const task = j.task;
+    if (task === null) return void 0;
+    const own = j.session !== null ? homeOf({ ...i, statuses: i.statuses.filter((st) => st.session === j.session) }, (st) => isOf(st.task, task)) : void 0;
+    return own ?? homeOf(i, (st) => isOf(st.task, task));
+  };
+  const jobHome = new Map(liveJobs.map((j) => [j, jobHomeOf(j)]));
   const built = [];
   const seen = /* @__PURE__ */ new Set();
   for (const st of i.statuses) {
@@ -12299,13 +12318,13 @@ function buildActivities(i) {
     const last = ms(st.lastAt ?? st.ts);
     if (!Number.isFinite(last)) continue;
     const stopped = st.phase.toLowerCase() === "stopped";
-    const mine = i.links.filter((l) => alive(l) && worksOn(l, st.task, st.project, newest3));
+    const mine = i.links.filter((l) => alive(l) && homes.get(l.id) === key);
     const working = mine.length > 0 || !!st.agent && i.liveTypes.some((t) => tierOf(t).label === tierOf(st.agent).label);
     const left = !stopped && !working && leftOpen(st, now);
     const done = !stopped && (!!st.doneAt || left);
     const ended = st.doneAt ? ms(st.doneAt) : left ? last : NaN;
     const end = left ? last + LEFT_OPEN_MS : ended;
-    const owner = !known ? "own" : st.session !== null && i.sessionId ? st.session === i.sessionId ? "own" : "other" : i.ownTasks.some((t) => isOf(st.task, t)) ? "own" : "other";
+    const owner = ownerOf(st, i.sessionId, i.ownTasks);
     const visible = done || stopped ? Number.isFinite(end) && age(end, now) < DONE_TTL_MS : age(last, now) < (owner === "own" ? OWN_TTL_MS : OTHER_TTL_MS);
     if (!visible) continue;
     const skewed = last - now > FUTURE_SKEW_MS;
@@ -12364,7 +12383,7 @@ function buildActivities(i) {
   built.sort((a, b) => a.rank - b.rank || (a.rank === 2 ? orderAt(b.end, now) - orderAt(a.end, now) : b.at - a.at));
   const forge = built.filter((b) => b.row.kind === "forge" && !b.row.slot);
   const focus = i.focusAgent ? i.links.find((l) => l.id === i.focusAgent) : void 0;
-  const pick2 = (focus ? forge.find((b) => b.st !== null && worksOn(focus, b.st.task, b.st.project, newest3)) : void 0) ?? forge.find((b) => b.rank === 0 && b.row.owner === "own") ?? forge.reduce((best, b) => !best || b.at > best.at ? b : best, void 0);
+  const pick2 = (focus ? forge.find((b) => b.row.key === homes.get(focus.id)) : void 0) ?? forge.find((b) => b.rank === 0 && b.row.owner === "own") ?? forge.reduce((best, b) => !best || b.at > best.at ? b : best, void 0);
   if (pick2) pick2.row.expanded = true;
   const out = built.map((b) => b.row);
   if (i.superpowers) {
@@ -12813,7 +12832,10 @@ function buildPanelModel(input) {
     if (k) titles[k] = title;
   };
   for (const s of execution?.slots ?? []) if (s.title) titleOf(s.task, execution?.project ?? null, s.title);
-  if (wp?.current) titleOf(wp.current.id, wp.project, wp.current.title);
+  if (wp?.current) {
+    titleOf(wp.current.id, wp.project, wp.current.title);
+    if (!titles[wp.current.id]) titleOf(wp.current.id, null, wp.current.title);
+  }
   const sp = superpowers(input);
   const todosModel = todos.total ? todos : null;
   const statuses = parseStatuses(input.forgeStatuses ?? (input.forgeStatus !== void 0 ? [input.forgeStatus] : []));
@@ -12822,7 +12844,9 @@ function buildPanelModel(input) {
   const models = Object.fromEntries(Object.entries(sess?.loops ?? {}).map(([id2, l]) => [id2, { ...l.model ? { model: l.model } : {}, ...l.effort ? { effort: l.effort } : {} }]));
   let view = { activities: [], waiting: null, jobs: [], expanded: null };
   let failed = false;
+  let homes;
   try {
+    homes = linkHomes({ statuses, links: links2, sessionId: input.sessionId, ownTasks: input.ownTasks ?? [], now });
     view = buildActivities({
       statuses,
       links: links2,
@@ -12840,14 +12864,16 @@ function buildPanelModel(input) {
       wakeAt: input.wakeAt ?? null,
       sleepUntil: execution?.sleepUntil ?? null,
       focusAgent: input.focusAgent ?? null,
-      now
+      now,
+      homes
     });
   } catch {
     failed = true;
   }
   const briefsOf = (st) => input.forgeBriefsBy?.[statusKey(st.task, st.project) ?? st.task] ?? (input.forgeStatuses === void 0 ? input.forgeBriefs ?? null : null);
   const forge = failed ? newestForge(statuses, now, briefsOf, liveTypes) : view.expanded ? forgeOf(view.expanded, now, briefsOf(view.expanded), liveTypes) : null;
-  const withAgents = withSlotAgents(execution, links2, models, viewer, now, statuses);
+  const underRows = new Set(view.activities.filter((x) => x.kind === "forge" && !x.slot).flatMap((x) => x.agents.map((g) => g.id)));
+  const withAgents = withSlotAgents(execution, links2, models, viewer, now, homes, underRows);
   const shown = new Set(view.activities.filter((x) => !x.slot && x.kind !== "adhoc").flatMap((x) => x.agents.map((g) => g.id)));
   for (const s of withAgents?.slots ?? []) for (const g of s.agents ?? []) shown.add(g.id);
   const taskOf = new Map(links2.flatMap((l) => l.task ? [[l.id, l.task]] : []));
@@ -14451,7 +14477,7 @@ function resetUsage() {
   seededUsd = 0;
   runBaseline = null;
   bandRead = false;
-  execChecked = null;
+  execSeen = null;
   lastUsageWrite = 0;
   lastUsageSig = "";
   sessionId = null;
@@ -14460,32 +14486,42 @@ function resetUsage() {
   usageFileCache.clear();
   largeRunsCache = null;
 }
-var execChecked = null;
-async function readBandForRun($, main) {
+var execSeen = null;
+async function watchRun($, main) {
   const path = join(main, ".forge", "execution.json");
-  let st;
+  let st = null;
   try {
     st = await $.fs.stat(path);
   } catch {
-    return;
+    st = null;
   }
-  if (execChecked && execChecked.size === st.size && execChecked.mtimeMs === st.mtimeMs) return;
-  const active = st.size <= FORGE_EXEC_MAX && parseExecution(await readOpt($, path), await nowMs($))?.active === true;
-  if (!active) {
-    execChecked = { size: st.size, mtimeMs: st.mtimeMs };
-    return;
+  const seen = st ? `${st.size}:${st.mtimeMs}` : "";
+  if (seen === execSeen) return;
+  if (!bandRead) {
+    const active = !!st && st.size <= FORGE_EXEC_MAX && parseExecution(await readOpt($, path), await nowMs($))?.active === true;
+    if (!active) {
+      execSeen = seen;
+      return;
+    }
   }
   try {
     roadmap = await loadBandModel($);
   } catch {
     return;
   }
+  execSeen = seen;
   bandRead = true;
   keepRunBaseline();
 }
+var endedId = null;
+async function sessionIdNow($) {
+  const id2 = await $.session.id();
+  return id2 === endedId ? null : id2;
+}
 async function usageWhere($) {
   const root = await $.session.root();
-  if (sessionId === null) sessionId = await $.session.id();
+  if (sessionId === null) sessionId = await sessionIdNow($);
+  if (sessionId === null) throw new Error("the session id is not known yet");
   if (mainCheckout === null) mainCheckout = mainCheckoutFrom(root, await readOpt($, join(root, ".git")) ?? null);
   return { root, session: sessionId, main: mainCheckout };
 }
@@ -14528,13 +14564,13 @@ function usageSig() {
   const key = runKeyNow();
   return `${usage.startedAt}|${steps}|${usage.tracking.waypoint}|${usage.tracking.forge}|${usage.activeMs}|${key === void 0 ? "?" : key ?? ""}`;
 }
-async function writeUsageFileNow($, force) {
+async function writeUsageFileNow($, force, watch) {
   try {
     if (usageStartedAt === null) return;
     const now = await nowMs($);
     if (!force && now - lastUsageWrite < USAGE_WRITE_MS) return;
     if (!Object.values(usage.loops).some((l) => l.steps > 0)) return;
-    if (!bandRead) await readBandForRun($, (await usageWhere($)).main);
+    if (watch || !bandRead) await watchRun($, (await usageWhere($)).main);
     const sig = usageSig();
     if (sig === lastUsageSig) return;
     const where = await usageWhere($);
@@ -14551,12 +14587,12 @@ async function writeUsageFileNow($, force) {
   } catch {
   }
 }
-async function writeUsageFile($, force) {
+async function writeUsageFile($, force, watch = false) {
   while (usageWrite) {
     if (!force) return;
     await usageWrite;
   }
-  usageWrite = writeUsageFileNow($, force).finally(() => {
+  usageWrite = writeUsageFileNow($, force, watch).finally(() => {
     usageWrite = null;
   });
   await usageWrite;
@@ -14637,7 +14673,7 @@ async function refreshUsage($, withRun) {
     } catch {
     }
   }
-  await writeUsageFile($, false);
+  await writeUsageFile($, false, !withRun);
 }
 function usageInput() {
   let run = null;
@@ -14699,7 +14735,7 @@ async function buildPanel($) {
   const now = await nowMs($);
   if (sessionId === null) {
     try {
-      sessionId = await $.session.id();
+      sessionId = await sessionIdNow($);
     } catch {
     }
   }
@@ -14785,7 +14821,7 @@ async function refreshPanel($) {
     const now = await nowMs($);
     if (sessionId === null) {
       try {
-        sessionId = await $.session.id();
+        sessionId = await sessionIdNow($);
       } catch {
       }
     }
@@ -15007,6 +15043,7 @@ export const register = (on) => {
   on("session.start", async ($, e, next) => {
     resetPanel();
     resetUsage();
+    endedId = null;
     try {
       await syncUsageStart($);
     } catch {
@@ -15045,6 +15082,7 @@ export const register = (on) => {
     } catch {
     }
     if (e.reason === "clear" || e.reason === "resume") {
+      endedId = typeof e.sessionId === "string" && e.sessionId ? e.sessionId : null;
       try {
         resetUsage();
       } catch {
@@ -15052,9 +15090,11 @@ export const register = (on) => {
       if (e.reason === "clear") {
         try {
           resetPanel();
-          void requestPanelWrite($);
         } catch {
         }
+        const r = await next(e);
+        void requestPanelWrite($);
+        return r;
       }
       return next(e);
     }
@@ -15069,7 +15109,8 @@ export const register = (on) => {
   on("session.compact", async ($, e, next) => {
     const r = await next(e);
     try {
-      if (!e.agentId && !(r && typeof r.skip === "string")) compactUsage(usage);
+      const skipped = !!r && typeof r.skip === "string";
+      if (!e.agentId && e.trigger !== "precompute" && !skipped) compactUsage(usage);
     } catch {
     }
     return r;
