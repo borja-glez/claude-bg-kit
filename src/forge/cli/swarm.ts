@@ -18,7 +18,7 @@ import { LEASE_MINUTES, type Liveness } from '../../lib/coordination.js';
 import { UNBOUND_WARNING } from '../hook.js';
 import { planLocale, sessionReply } from '../../lib/locale.js';
 import { coordinatorLiveness } from '../../lib/execution-view.js';
-import { coordinatorInputs } from '../live.js';
+import { clearEnded, coordinatorInputs } from '../live.js';
 import { STAGES, normalizePublicTask, normalizeExecution, isSafeId, isRunBranch, type ExecutionState, type ExecTask, type PublicTask } from '../../lib/execution-state.js';
 import { claudeSessionId, noClaudeSession } from '../../lib/claude-session.js';
 import { parsePlan, PlanError, isPlanId } from '../../lib/plan.js';
@@ -1341,6 +1341,18 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
         if (liveness !== 'stopped') throw new UsageError(boundElsewhere('retry', x.runId, x.hookSession, liveness));
       };
       gate(e);
+      // R7 (I2): the run this retry revives, under the lock. The bound session reviving its own run is on it again: an
+      // ended signal it left (a SessionEnd before its claude --resume) is cleared, so another session stays gated.
+      let woke: ExecutionState | null = null;
+      const revive = (cur: ExecutionState) => {
+        if (!revived(cur)) return {};
+        woke = cur;
+        return { active: true, stopReason: null, stallReason: null };
+      };
+      const clearOwnEnded = () => {
+        const w = woke as ExecutionState | null;
+        if (w && hook && hook === w.hookSession) clearEnded(io.cwd, w, hook, now);
+      };
       if (has('adopt')) {
         const adoptable = (x: ExecTask | undefined): x is ExecTask => !!x && x.status === 'conflict' && x.executor !== 'subagents';
         const notAdoptable = (x: ExecTask | undefined) =>
@@ -1367,10 +1379,11 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
           if (!adoptable(base)) throw notAdoptable(base);
           adopted = base;
           return {
-            ...cur, ...(revived(cur) ? { active: true, stopReason: null, stallReason: null } : {}),
+            ...cur, ...revive(cur),
             tasks: { ...cur.tasks, [task]: { ...base, status: 'running', stage: 'implement', executor: 'subagents', worktree, attempts: base.attempts + 1, nudgedAt: null, finishedAt: iso, updatedAt: iso, stageSince: iso } },
           };
         });
+        clearOwnEnded();
         writePublicTask(io.cwd, { task, runId: e.runId, stage: 'implement', status: 'running', agent: null, round: adopted.round, since: iso, updatedAt: iso, leaseUntil: new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString(), by: e.coordinator, mode: 'subagents' });
         // D-08: `work`, the task's work folder in the main checkout, where the coordinator writes its brief.
         return json({ task, adopted: true, previous: adopted.executor, worktree, branch: t.branch, work: workRel({ project: e.project, task }) });
@@ -1384,10 +1397,11 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
         const base = cur.tasks[task] ?? t;
         if (!retryable(base)) throw new UsageError(`swarm retry: ${task} is not in conflict or blocked`);
         return {
-          ...cur, ...(revived(cur) ? { active: true, stopReason: null, stallReason: null } : {}),
+          ...cur, ...revive(cur),
           tasks: { ...cur.tasks, [task]: { ...base, status: 'running', stage: 'implement', attempts: base.attempts + 1, detail: null, finishedAt: null, updatedAt: iso, stageSince: iso } },
         };
       });
+      clearOwnEnded();
       return ok();
     }
     case 'relaunch':

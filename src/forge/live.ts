@@ -33,6 +33,28 @@ export function nextLive(prev: LiveDoc | null, ev: { event: LiveEvent; agentId?:
   return { sessionId: ctx.sessionId, role: ctx.role, runId: ctx.runId, task: ctx.task, event: ev.event, ts: ctx.now, agents, ended };
 }
 
+/** Writes a live signal file whole (a reader never sees half of one). */
+function writeLive(main: string, file: string, doc: LiveDoc): void {
+  forgeDir(main);
+  mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  try { writeFileSync(tmp, JSON.stringify(doc)); renameSync(tmp, file); } finally { rmSync(tmp, { force: true }); }
+}
+
+/**
+ * R7 (I2): the bound session `sessionId` acts on run `e` again (swarm retry of its own run), so its conversation did not
+ * end: an ended signal of its own is renewed as a start, and coordinatorLiveness stops reading it as gone. Never throws.
+ */
+export function clearEnded(main: string, e: ExecutionState, sessionId: string, now: Date): void {
+  try {
+    if (!isSafeId(sessionId)) return;
+    const file = liveFile(main, sessionId);
+    const prev = normalizeLive(JSON.parse(readFileSync(file, 'utf8')));
+    if (!prev?.ended || prev.sessionId !== sessionId) return;
+    writeLive(main, file, nextLive(prev, { event: 'SessionStart' }, { sessionId, role: prev.role, runId: e.runId, task: prev.task, now: now.toISOString() }));
+  } catch { /* no signal to clear */ }
+}
+
 /** How long ago, in a SessionStart text: minutes under an hour, hours after. */
 function agoText(ms: number): string {
   return ms < 3600_000 ? `${Math.max(1, Math.round(ms / 60_000))} min` : `${Math.round(ms / 3600_000)} h`;
@@ -136,11 +158,7 @@ export function hookLive(io: Io, forced?: LiveEvent): string {
       if (role !== 'other-live' && role !== 'previous') return '';
       return JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: notOwnerText(exec, role, now) } });
     }
-    // The coordinator, or a member of its run: its signal and its resume text, while the execution is active. R4 (M4):
-    // the coordinator's conversation ending (SessionEnd, e.g. /clear) is recorded for an ended run that is not closed too:
-    // its own ended signal tells swarm retry and /forge:run --resume at once that it is no longer on the run.
-    const coordinatorEnds = event === 'SessionEnd' && viewer.coordinator && exec.hookSession === sessionId && !exec.closedAt;
-    if (!exec.active && !coordinatorEnds) return '';
+    // The coordinator, or a member of its run: its signal and its resume text, while the execution is active.
     const member = viewer.coordinator ? null : viewer.member;
     const role: LiveDoc['role'] = member ? member.role : 'coordinator';
     // A member's signal is keyed by its waypoint SID, the `by` of its public task; the coordinator's by its hook id.
@@ -148,13 +166,18 @@ export function hookLive(io: Io, forced?: LiveEvent): string {
     const file = liveFile(main, signalId);
     let prev: LiveDoc | null = null;
     try { prev = normalizeLive(JSON.parse(readFileSync(file, 'utf8'))); } catch { prev = null; }
-    const doc = nextLive(prev, { event, agentId: typeof input.agent_id === 'string' ? input.agent_id : undefined, agentType: typeof input.agent_type === 'string' ? input.agent_type : undefined },
-      { sessionId: signalId, role, runId: exec.runId, task: member?.task ?? null, now: io.now().toISOString() });
-    forgeDir(main);
-    mkdirSync(path.dirname(file), { recursive: true });
-    const tmp = `${file}.${process.pid}.tmp`;
-    try { writeFileSync(tmp, JSON.stringify(doc)); renameSync(tmp, file); } finally { rmSync(tmp, { force: true }); }
-    if (starting) {
+    if (!exec.active) {
+      // R4 (M4): the coordinator's conversation ending (SessionEnd, e.g. /clear) is recorded for an ended run that is not
+      // closed too: its own ended signal tells swarm retry and /forge:run --resume at once that it is no longer on the
+      // run. R7 (I2): its mirror: that same conversation back (SessionStart, claude --resume) clears it, so it never
+      // outlives the bound session's return.
+      const bound = viewer.coordinator && exec.hookSession === sessionId && !exec.closedAt;
+      if (!bound || !(event === 'SessionEnd' || (event === 'SessionStart' && prev?.ended === true))) return '';
+    }
+    writeLive(main, file, nextLive(prev, { event, agentId: typeof input.agent_id === 'string' ? input.agent_id : undefined, agentType: typeof input.agent_type === 'string' ? input.agent_type : undefined },
+      { sessionId: signalId, role, runId: exec.runId, task: member?.task ?? null, now: io.now().toISOString() }));
+    // The resume text is for a run that is active; an ended one is taken up with /forge:run --resume.
+    if (starting && exec.active) {
       const running = Object.values(exec.tasks).filter(t => t.status === 'running').length;
       const text = role === 'coordinator'
         ? `forge: this session coordinates the execution ${exec.runId} (${exec.mode}, ${running}/${exec.parallel} running, run branch ${exec.branch}). Resume it with /forge:run → Resume: renew your lease, reconcile each task and keep stepping.`

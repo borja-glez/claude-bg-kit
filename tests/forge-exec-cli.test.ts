@@ -1683,6 +1683,31 @@ describe('rebinding a run needs the bound conversation to have stopped (wave 0 h
       expect(run(['swarm', 'retry', 'T1', '--hook-session', 'hook-new'], io).code).toBe(0);
       expect(readExecution(root)).toMatchObject({ active: true, stopReason: null });
     });
+    const live = (sid: string, event: 'SessionStart' | 'SessionEnd') =>
+      run(['hook', 'live'], { ...io, stdin: JSON.stringify({ session_id: sid, hook_event_name: event, reason: 'clear', source: 'resume' }) });
+    const liveness = () => out(run(['swarm', 'status'], io)).coordinator.liveness;
+    it('the bound session coming back (claude --resume, the same CSID) clears its ended signal: another CSID is gated again (R7, I2)', () => {
+      stalled();
+      bind();
+      live('hook-main', 'SessionEnd');
+      expect(liveness()).toBe('stopped');
+      live('hook-main', 'SessionStart');
+      expect(liveness()).not.toBe('stopped');
+      expect(run(['swarm', 'retry', 'T1', '--hook-session', 'hook-other'], io).code).toBe(2);
+      // It gets no resume text for a run that is not active.
+      expect(live('hook-main', 'SessionStart').stdout).toBe('');
+    });
+    it("a retry from the bound session revives the run and clears its ended signal: another CSID's takeover and retry are gated (R7, I2)", () => {
+      stalled();
+      live('hook-main', 'SessionEnd');
+      expect(run(['swarm', 'retry', 'T1', '--hook-session', 'hook-main'], io).code).toBe(0);
+      expect(liveness()).not.toBe('stopped');
+      expect(out(run(['swarm', 'takeover', '--session', 'other-sid', '--hook-session', 'hook-other'], io))).toMatchObject({ took: false, previous: 'hook-main' });
+      // A tick stalls it again: another CSID's retry is still refused.
+      const e = readExecution(root)!;
+      saveExecution(root, { ...e, active: false, stopReason: 'stalled', stallReason: 'T1 is blocked', tasks: { ...e.tasks, T1: { ...e.tasks.T1, status: 'blocked' } } });
+      expect(run(['swarm', 'retry', 'T1', '--hook-session', 'hook-other'], io).code).toBe(2);
+    });
     it('swarm status prints the coordinator of a run that is not closed, with its liveness as if it were active', () => {
       stalled();
       bind();
