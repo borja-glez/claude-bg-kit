@@ -1692,7 +1692,9 @@ describe('plugin layout', () => {
     // (a) step 2: a loop that stops without approval blocks T as the «Otherwise» branch does, the design a draft.
     for (const w of ['stops without approval', 'stays a draft', '**Otherwise**', '--why-file .forge/work/infinite/blocked-<T>.txt', 'el diseño necesita tu decisión', '"action": "blocked-large"']) expect(step(2), w).toContain(w);
     // (b) step 1: T closes only with an approved design and plan tasks whose design_ref is the slug of `## <T>:`.
-    for (const w of ['`## <T>:`', 'closing task only when', '`status: approved`', '`design_ref` is the slug of']) expect(step(1), w).toContain(w);
+    // Re-review N4: the slug is the one forge-planner gives the heading (its rule has the 80-character cut and the -n suffix).
+    for (const w of ['`## <T>:`', 'closing task only when', '`status: approved`', '`design_ref` is the slug `forge-planner` gives that heading']) expect(step(1), w).toContain(w);
+    expect(step(1)).not.toContain('every other run of characters one `-`');
     // (c) step 1: a section without such tasks, or a design not approved, blocks T with the question; no reopen, no work.
     for (const w of ['block `T`', 'never reopen the design', 'nor work `T`']) expect(step(1), w).toContain(w);
     expect(step(1)).not.toContain('work it as a normal task and never reopen the design again');
