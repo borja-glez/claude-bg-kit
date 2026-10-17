@@ -1,6 +1,8 @@
 export { normalizeNote } from '../lib/notes.js';
 import { isPlanId } from '../lib/ids.js';
-import { LOOSE_MAX_TASKS, LOOSE_STATUSES, STAGES, type LooseRunTask, type LooseStatus, type Commit, type EventDoc, type InfiniteDoc, type MessageDoc, type MetaDoc, type PhaseDoc, type PlanTask, type PlanTrack, type RunDoc, type SessionDoc, type Stage, type TaskExec, type TaskState } from '../lib/types.js';
+import { parseForgeDocV2, UNCHECKED_MAX } from '../lib/roadmap-doc.js';
+import { cleanText, REASON_MAX } from '../lib/batches.js';
+import { LOOSE_MAX_TASKS, LOOSE_STATUSES, STAGES, type ForgeV1, type LooseRunTask, type LooseStatus, type Commit, type EventDoc, type InfiniteDoc, type MessageDoc, type MetaDoc, type PhaseDoc, type PlanTask, type PlanTrack, type RunDoc, type SessionDoc, type Stage, type TaskExec, type TaskState } from '../lib/types.js';
 
 // Documents in the shared db are untrusted and may be malformed: coerce them into the shapes the renderer expects.
 type Obj = Record<string, unknown>;
@@ -64,6 +66,9 @@ export function normalizeState(x: unknown, report?: Report): TaskState {
   s.commits = keepAll(arr(o.commits), (c): c is Obj => isObj(c) && typeof c.sha === 'string' && typeof c.title === 'string', 'commits', report) as unknown as Commit[];
   if (!('commits' in o) || o.commits === undefined) delete s.commits;
   s.blockedBy = Array.isArray(o.blockedBy) ? strs(o.blockedBy) : undefined;
+  // H-15: why it is blocked, as `waypoint block --why-file` wrote it: one clean line of at most 300 characters.
+  if (typeof o.blockedReason === 'string' && cleanText(o.blockedReason, REASON_MAX)) s.blockedReason = cleanText(o.blockedReason, REASON_MAX);
+  else { delete s.blockedReason; if (o.blockedReason !== undefined) report?.('blockedReason', 'dropped', kindOf(o.blockedReason)); }
   for (const k of ['claimedAt', 'startedAt', 'doneAt'] as const) s[k] = optStr(o[k]);
   const forge = normalizeForge(o.forge, report);
   if (forge) s.forge = forge; else delete s.forge;
@@ -96,11 +101,20 @@ function normalizeExec(x: unknown, report?: Report): TaskExec | undefined {
 
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
-/** The forge block of a task state: kept only with string path and phase; other fields dropped when mistyped. */
+/** C7: state/T.forge. A v2 block (`v: 2`, FORGE roadmap-doc) is read whole; one that does not parse is read as v1. */
 function normalizeForge(x: unknown, report?: Report): TaskState['forge'] | undefined {
+  if (isObj(x) && x.v === 2) {
+    const v2 = parseForgeDocV2(x, report);
+    if (v2) return v2;
+  }
+  return normalizeForgeV1(x, report);
+}
+
+/** The forge block of a task state: kept only with string path and phase; other fields dropped when mistyped. */
+export function normalizeForgeV1(x: unknown, report?: Report): ForgeV1 | undefined {
   if (x === undefined) return undefined;
   if (!isObj(x) || typeof x.path !== 'string' || typeof x.phase !== 'string') { report?.('forge', 'dropped', isObj(x) ? 'no path or phase' : kindOf(x)); return undefined; }
-  const f: NonNullable<TaskState['forge']> = { path: x.path, phase: x.phase };
+  const f: ForgeV1 = { path: x.path, phase: x.phase };
   if (typeof x.agent === 'string') f.agent = x.agent;
   if (Array.isArray(x.validators)) {
     const vals: { name: string; ok: boolean | null }[] = [];
@@ -218,11 +232,16 @@ function normalizeEvidence(x: unknown, report?: Report): TaskState['evidence'] |
       if (typeof v.id === 'string') shot.id = v.id;
       if (typeof v.expected === 'string') shot.expected = v.expected;
       if (typeof v.observed === 'string') shot.observed = v.observed;
+      // C7 v2: the review round the check belongs to.
+      if (typeof v.round === 'number' && Number.isInteger(v.round) && v.round >= 1 && v.round <= 99) shot.round = v.round;
       return [shot];
     }).slice(0, 30),
   };
   if (typeof x.local === 'string') e.local = x.local;
   if (x.pending === true) e.pending = true;
   if (typeof x.reason === 'string') e.reason = x.reason;
+  // C7 v2: the version, and the checks the verification could not run (K2-14).
+  if (x.v === 2) e.v = 2;
+  if (Array.isArray(x.unchecked)) e.unchecked = strs(x.unchecked).slice(0, UNCHECKED_MAX);
   return e;
 }

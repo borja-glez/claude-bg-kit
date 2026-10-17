@@ -1,4 +1,5 @@
 import type { DecisionPoint } from './decisions.js';
+import type { ForgeDocV2 } from './roadmap-doc.js';
 
 export type TaskStatus = 'free' | 'claimed' | 'in_progress' | 'blocked' | 'done' | 'orphaned';
 export type PlanStatus = 'committed' | 'provisional';
@@ -58,6 +59,12 @@ export interface TaskExec {
   runId: string; mode: 'subagents' | 'sessions' | 'manual'; by: string; agent?: string | null;
   stage: Stage; round?: number; since: string; leaseUntil: string;
 }
+/** C7: state/T.forge as forge 0.15 to 0.21 wrote it (v1). A v2 block (FORGE roadmap-doc, src/lib/roadmap-doc.ts) keeps all of it. */
+export interface ForgeV1 {
+  path: string; phase: string; agent?: string; validators?: { name: string; ok: boolean | null }[];
+  verdict?: { action: string; score: number | null }; round?: number; cap?: number;
+}
+
 export interface TaskState {
   status: TaskStatus;
   owner?: string;
@@ -70,11 +77,11 @@ export interface TaskState {
   commits?: Commit[];
   summary?: string;
   zonesTouched?: string[];
-  forge?: { path: string; phase: string; agent?: string; validators?: { name: string; ok: boolean | null }[]; verdict?: { action: string; score: number | null }; round?: number; cap?: number };
+  forge?: ForgeV1 | ForgeDocV2;
   exec?: TaskExec;
   evidence?: {
-    surfaces: string[]; result: 'pass' | 'fail' | 'blocked'; passed: number; total: number; local?: string; pending?: boolean; reason?: string;
-    shots: { url?: string; id?: string; surface: string; check: string; ok: boolean; expected?: string; observed?: string }[];
+    v?: 2; surfaces: string[]; result: 'pass' | 'fail' | 'blocked'; passed: number; total: number; local?: string; pending?: boolean; reason?: string; unchecked?: string[];
+    shots: { url?: string; id?: string; surface: string; check: string; ok: boolean; expected?: string; observed?: string; round?: number }[];
   };
 }
 export type States = Record<string, TaskState | undefined>;

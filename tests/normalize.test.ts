@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeMeta, normalizePhase, normalizeState, normalizeSession, normalizeEvent, normalizeMessage, normalizeInfinite, normalizeRun } from '../src/page/normalize.js';
+import { normalizeMeta, normalizePhase, normalizeState, normalizeSession, normalizeEvent, normalizeMessage, normalizeInfinite, normalizeRun, normalizeForgeV1 } from '../src/page/normalize.js';
 
 describe('normalizeRun / execution fields', () => {
   it('normalizeRun keeps valid fields and drops junk', () => {
@@ -215,5 +215,50 @@ describe('report (H-04, G-03)', () => {
     normalizeMeta({ name: 'x', metrics: { lastCommit: { sha: 5 } } }, rep);
     expect(got).toEqual(['commits[1] · dropped', 'exec · dropped', 'tasks[1] · dropped', 'slots[0] · dropped', 'metrics.lastCommit · dropped']);
     expect(normalizeState({ exec: { by: 'main' } })).not.toHaveProperty('exec');
+  });
+});
+
+describe('normalizeState: forge v2, evidence v2 and blockedReason (C7, wave 4)', () => {
+  const v2 = {
+    v: 2, path: 'medium', phase: 'done', validators: [{ name: 'test', ok: true, ms: 900, cached: true }], verdict: { action: 'accept', score: 0.9 }, round: 2, cap: 4,
+    brief: 1, stage: 'done',
+    rounds: [{ brief: 1, n: 2, action: 'accept', note: 'accepted', findings: { critical: 0, important: 1, minor: 3, deferred: 2 }, reviewers: ['correctness'], at: '2026-10-16T10:40:00.000Z' }],
+    verify: null, stages: { implement: 540 }, integration: { branch: 'forge/run-shop', sha: 'abc1234', merged: false, target: 'main' },
+    deferred: [{ problem: 'no index' }], acceptedRound: 2, overCap: false, updatedAt: '2026-10-16T11:00:00.000Z',
+  };
+  const v1Of = { path: 'medium', phase: 'done', validators: [{ name: 'test', ok: true }], verdict: { action: 'accept', score: 0.9 }, round: 2, cap: 4 };
+  it('a v2 block is read whole, with nothing reported', () => {
+    const got: string[] = [];
+    expect(normalizeState({ status: 'done', forge: v2 }, f => { got.push(f); }).forge).toEqual(v2);
+    expect(got).toEqual([]);
+  });
+  it('a v2 block that does not parse falls back to its v1 fields, and ?debug=1 lists it', () => {
+    const got: string[] = [];
+    expect(normalizeState({ forge: { ...v2, rounds: 'x' } }, (f, a) => { got.push(`${f} · ${a}`); }).forge).toEqual(v1Of);
+    expect(got).toEqual(['forge.v · dropped']);
+  });
+  it('the v1 normalizer keeps path, phase, every validator, verdict, round and cap of a v2 block (a page published before wave 4)', () => {
+    expect(normalizeForgeV1(v2)).toEqual(v1Of);
+  });
+  it('evidence v2 keeps v, reason, unchecked and the round of each shot', () => {
+    const ev = {
+      v: 2, surfaces: ['web'], result: 'blocked', passed: 1, total: 3, reason: 'the server did not start', unchecked: ['checkout', 'refund'], local: '.forge/work/shop/T1/evidence/1-2',
+      shots: [
+        { surface: 'web', check: 'home', ok: true, round: 2, url: 'https://claude.ai/_blob/a1', id: 'a1' },
+        { surface: 'web', check: 'cart', ok: false, round: 2, expected: 'e', observed: 'o' },
+      ],
+    };
+    expect(normalizeState({ evidence: ev }).evidence).toEqual(ev);
+    expect(normalizeState({ evidence: { ...ev, unchecked: ['a', 3, ...Array(12).fill('b')], shots: [{ surface: 'w', check: 'c', ok: true, round: 0 }] } }).evidence)
+      .toMatchObject({ unchecked: ['a', ...Array(9).fill('b')], shots: [{ surface: 'w', check: 'c', ok: true }] });
+  });
+  it('blockedReason: one clean line of at most 300 characters; anything else is dropped and reported', () => {
+    const bell = String.fromCharCode(7), rlo = String.fromCharCode(0x202e);
+    const s = normalizeState({ status: 'blocked', blockedReason: `Waits for the${bell} payments${rlo} API ${'.'.repeat(400)}` });
+    expect(s.blockedReason!.startsWith('Waits for the payments API')).toBe(true);
+    expect(s.blockedReason).toHaveLength(300);
+    const got: string[] = [];
+    expect(normalizeState({ status: 'blocked', blockedReason: 7 }, (f, a) => { got.push(`${f} · ${a}`); })).not.toHaveProperty('blockedReason');
+    expect(got).toEqual(['blockedReason · dropped']);
   });
 });
