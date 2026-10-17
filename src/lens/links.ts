@@ -173,6 +173,12 @@ export function setTool(links: readonly AgentLink[], id: string, tool: { name: s
   return links.map(l => (l.id === id ? { ...l, tool: tool ? { name: cleanText(String(tool.name ?? '')), since: tool.since } : null } : l));
 }
 
+/** E-11: agent `id`'s tool `name` returned (a call with no id of its own): cleared only when it is the one shown. */
+export function endTool(links: readonly AgentLink[], id: string, name: string): AgentLink[] {
+  const shown = cleanText(String(name ?? ''));
+  return links.map(l => (l.id === id && l.tool?.name === shown ? { ...l, tool: null } : l));
+}
+
 /** A workflow's agent alive past WORKFLOW_AGENT_TTL_MS has ended; one that ended goes after DONE_LINK_MS (a workflow's, WORKFLOW_DONE_MS). */
 export function pruneLinks(links: readonly AgentLink[], now: number): AgentLink[] {
   return links.flatMap(l => {

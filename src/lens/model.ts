@@ -271,7 +271,10 @@ export function forgeOf(st: ForgeStatus, now: number, briefs: number | null = nu
   // agent's tier (the live subagents' types) still runs: that is a long agent, not a forgotten task.
   const working = !!st.agent && liveTypes.some(t => tierOf(t).label === tierOf(st.agent).label);
   const left = !working && leftOpen(st, now);
-  const timing = forgeTiming(left ? { ...st, doneAt: st.lastAt } : st, now);
+  // Review Focus 4: a last event more than FUTURE_SKEW_MS ahead of this clock means its writer's clock is off: the task
+  // shows without times, as its row does.
+  const skewed = Date.parse(st.lastAt ?? st.ts) - now > FUTURE_SKEW_MS;
+  const timing = skewed ? null : forgeTiming(left ? { ...st, doneAt: st.lastAt } : st, now);
   return { ...forge, ...(left ? { agent: null } : {}), briefs, timing };
 }
 

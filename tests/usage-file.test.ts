@@ -154,6 +154,17 @@ describe('the re-read in the usage file (E-08)', () => {
     seedUsage(live, f);
     expect(live.tracking.reread).toBe(100);
   });
+  it('a corrupt re-read (negative, not a number, a string) is left out and reads as 0', () => {
+    const f = toUsageFile(state(10), meta('s2', 5));
+    for (const bad of [-5, 'x', null, Number.NaN]) {
+      const parsed = parseUsageFile(JSON.stringify({ ...f, trackingReread: bad }))!;
+      expect(parsed, String(bad)).not.toHaveProperty('trackingReread');
+      expect(mergeForRun([parsed], { session: 's1', state: newUsage(T0) }, T0).tracking.reread, String(bad)).toBe(0);
+      const live = newUsage(T0);
+      seedUsage(live, parsed);
+      expect(live.tracking.reread, String(bad)).toBe(0);
+    }
+  });
 });
 
 describe('the run counts only its own sessions, each from its baseline (E-07)', () => {
@@ -191,6 +202,38 @@ describe('the run counts only its own sessions, each from its baseline (E-07)', 
     expect(toUsageFile(newUsage(T0), { ...meta('s1', 5), runKey: null })).toMatchObject({ runKey: null, runBaseline: null });
     const { runKey: _k, runBaseline: _b, ...older } = f;
     expect(parseUsageFile(JSON.stringify(older))).not.toHaveProperty('runKey');
+  });
+  it('this session counts from its own baseline too, and the tracking and its re-read scale with the tokens', () => {
+    const live = newUsage(T0);
+    live.loops.main = { ...loops.main };
+    live.tracking = { waypoint: 100, forge: 300, reread: 200 };
+    const sum = mergeForRun([], { session: 's1', state: live, baseline: { runKey: 'r1', costUsd: 2.5, tokens: 250, activeMs: 0 } }, T0, 'r1');
+    expect(sum.loops['s1/main']).toMatchObject({ input: 750 });
+    expect(sum.loops['s1/main'].costUsd).toBeCloseTo(7.5);
+    expect(sum.tracking).toEqual({ waypoint: 75, forge: 225, reread: 150 });
+    expect(sum.runPartial).toBeUndefined();
+    expect(summarizeUsage(sum).partial).toBe(false);
+    // Another run's baseline is not this run's: the session counts whole, and the sum is a bound.
+    const other = mergeForRun([], { session: 's1', state: live, baseline: { runKey: 'r2', costUsd: 2.5, tokens: 250, activeMs: 0 } }, T0, 'r1');
+    expect(other.loops['s1/main'].costUsd).toBe(10);
+    expect(other.runPartial).toBe(true);
+  });
+  it("a file that names this run but carries another run's baseline counts whole and partial; one that names no run (null) is left out without a mark", () => {
+    const stale = file('a', { runKey: 'r1', runBaseline: { runKey: 'r0', costUsd: 4, tokens: 400, activeMs: 1000 } });
+    const none = file('b', { runKey: null });
+    expect(none.runKey).toBeNull();
+    const sum = mergeForRun([stale], { session: 's1', state: newUsage(T0), baseline: own }, T0, 'r1');
+    expect(sum.loops['a/main']).toMatchObject({ input: 1000, costUsd: 10 });
+    expect(sum.runPartial).toBe(true);
+    const left = mergeForRun([none], { session: 's1', state: newUsage(T0), baseline: own }, T0, 'r1');
+    expect(left.loops['b/main']).toBeUndefined();
+    expect(left.runPartial).toBeUndefined();
+  });
+  it('a baseline a hair above its cost (within the slack) never makes a negative cost', () => {
+    const edge = file('a', { runKey: 'r1', runBaseline: { runKey: 'r1', costUsd: 10 + 5e-10, tokens: 400, activeMs: 0 } });
+    const sum = mergeForRun([edge], { session: 's1', state: newUsage(T0), baseline: own }, T0, 'r1');
+    expect(sum.loops['a/main'].costUsd).toBe(0);
+    expect(Object.is(sum.loops['a/main'].costUsd, -0)).toBe(false);
   });
   it("a session that has not read its band yet writes no run key: its file counts whole and marks the run's sum partial (I2)", () => {
     const unread = toUsageFile(newUsage(T0), meta('u', 5));

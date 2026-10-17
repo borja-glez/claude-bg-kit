@@ -8,7 +8,7 @@ export interface UsageSummary {
   tokens: number; costUsd: number; partial: boolean;
   groups: { id: GroupId; model: string | null; effort: string | null; tokens: number; costUsd: number | null; share: number }[];
   tracking: { tokens: number; costUsd: number | null } | null;
-  // E-08: costUsd assumes the tracking was never re-read; lowUsd also takes off what re-reading it as context cost.
+  // E-08: costUsd keeps what re-reading the tracking as context cost (it is in the main loop's cost); lowUsd takes it off.
   withoutForge: { costUsd: number; lowUsd: number; deltaUsd: number; deltaPct: number } | null;
 }
 const ORDER: GroupId[] = ['main', 'impl', 'review', 'verify', 'plan', 'other'];

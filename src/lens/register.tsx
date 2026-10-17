@@ -14,7 +14,7 @@ import { headline, ratio, usageBandText, PALETTE, SECTION_HUE, SECTION_ICON } fr
 import { freshFinished, pushFinished, withoutRunning, type FinishedAgent } from './finished.js';
 import { endTurn, labelLoop, newTurnClock, newUsage, startTurn, touchTurn, recordStep, recordTracking, trackingKind, compactUsage, type UsageState } from './usage.js';
 import { mainCheckoutFrom, mergeForRun, parseUsageFile, runStartedAt, seedUsage, toUsageFile, totalsOf, USAGE_FILE_MAX, USAGE_FILES_MAX, type RunBaseline, type RunSource, type UsageFile } from './usage-file.js';
-import { addOwnTask, endAgent, knownTasks, linkSpawn, ownTaskOf, pruneLinks, setTool, syncListed, type AgentLink, type ListedAgent } from './links.js';
+import { addOwnTask, endAgent, endTool, knownTasks, linkSpawn, LINKS_MAX, ownTaskOf, pruneLinks, setTool, syncListed, type AgentLink, type ListedAgent } from './links.js';
 
 const panel = atom({ plugin: 'lens', key: 'panel' } as const, null as PanelModel | null);
 const hidden = atom({ plugin: 'lens', key: 'hidden' } as const, false);
@@ -57,20 +57,18 @@ const MAX_TODOS = 200;
 // E-02, E-06, E-11: the agents lens heard of and their task (links.ts), the tasks this session touched with forge.cjs,
 // and when the main loop's last ScheduleWakeup wakes it. Module memory only, each with its cap.
 let links: AgentLink[] = [];
+// ownTaskOf keeps `T001-1` whole: activities.ts matches it to the status of `T001` and to its jobs by isOf.
 let ownTasks: string[] = [];
 let wakeAt: number | null = null;
 const WAKE_MIN_S = 60;
 const WAKE_MAX_S = 3600;
-
-// ownTaskOf keeps `T001-1` whole; it counts as `T001` when that is a known task (a status or a link), else a task id
-// that itself ends in `-<n>` stays whole.
-function ownTaskId(id: string | null): string | null {
-  const m = id === null ? null : /^(.+)-\d{1,4}$/.exec(id);
-  if (id === null || !m) return id;
-  const known = knownTasks(bandModel);
-  for (const l of links) if (l.task) known.add(l.task);
-  return known.has(m[1]) ? m[1] : id;
-}
+// E-11: each subagent's tools in flight by call id, in start order: its agent shows the latest still running.
+const agentTools = new Map<string, Map<string, { name: string; since: number }>>();
+// E-09: a subagent's turn.complete heard before its agent.spawn returned (no link yet), by agent id: the link is ended
+// when it appears, if that is within PENDING_END_MS; at most PENDING_ENDS_MAX are kept.
+const pendingEnds = new Map<string, number>();
+const PENDING_END_MS = 2 * 60_000;
+const PENDING_ENDS_MAX = 50;
 // Whether there is activity worth a band of its own (open todos or recent subagents) when no waypoint band shows.
 let busy = false;
 // The roadmap section, read from the waypoint project's files at the panel's pace while the pane is open.
@@ -116,6 +114,22 @@ function resetPanel(): void {
   links = [];
   ownTasks = [];
   wakeAt = null;
+  agentTools.clear();
+  pendingEnds.clear();
+}
+
+// E-11: the tool agent `id` shows: the latest of its calls still in flight, or none.
+function showAgentTool(id: string): void {
+  const last = [...(agentTools.get(id)?.values() ?? [])].at(-1);
+  links = setTool(links, id, last ?? null);
+}
+
+// E-09: a link that just appeared whose turn already ended (pendingEnds) is ended at that moment.
+function applyPendingEnd(id: string, now: number): void {
+  const at = pendingEnds.get(id);
+  if (at === undefined) return;
+  pendingEnds.delete(id);
+  if (now - at <= PENDING_END_MS) links = endAgent(links, id, at);
 }
 
 // Open todos, a subagent heard of within the hour (older entries are dropped here), or an agent of links still alive.
@@ -304,7 +318,7 @@ async function loadForgeFiles($: Engine, root: string, now: number): Promise<Pan
   if (mainEntries.some(f => f.kind === 'dir' && f.name === 'jobs')) {
     const jobs = await readCached($, join(mainDir, 'jobs'), JOBS_MAX, JOB_FILE_MAX, jobCache, () => true);
     if (jobs.length) out.forgeJobs = jobs;
-  }
+  } else jobCache.clear();
   // C5: the statuses beside the ledger: at most the 20 newest touched within the day, each at most 64 KiB.
   const statusRoot = statusRootOf(root, main);
   const statusEntries = statusRoot === root ? entries : mainEntries;
@@ -312,6 +326,8 @@ async function loadForgeFiles($: Engine, root: string, now: number): Promise<Pan
     out.forgeStatuses = await readCached($, join(statusRoot, '.forge', 'status'), FORGE_STATUSES_READ, FORGE_STATUS_MAX, statusCache, f => now - f.mtimeMs < STATUS_AGE_MS);
     out.forgeBriefsBy = await briefsByKey($, statusRoot, out.forgeStatuses);
   } else {
+    // The folder went away: so do its cached reads, or a file back with the same size and mtime would read stale.
+    statusCache.clear();
     // An older forge: the root's one status.json, as before C5.
     const status = entries.find(f => f.kind === 'file' && f.name === 'status.json');
     if (status && status.size <= FORGE_STATUS_MAX) out.forgeStatus = await readOpt($, join(dir, 'status.json'));
@@ -507,7 +523,12 @@ async function syncUsageStart($: Engine): Promise<void> {
     lastUsageSig = '';
     try { await seedFromOwnFile($, u.startedAt); } catch { /* counted from here */ }
   }
-  // The official cost and the own cost at the same moment, after any reset or seed; E-12: a seeded file's cost is not in /cost.
+  takeOfficial(u);
+}
+
+// The official cost and the own cost at the same moment, after any reset or seed; E-12: a seeded file's cost is not in
+// /cost. The usage sync and the session end both take them here.
+function takeOfficial(u: { cost?: { usd: number } | null }): void {
   officialUsd = u.cost?.usd ?? null;
   officialOwnUsd = ownCostUsd() - seededUsd;
 }
@@ -782,6 +803,8 @@ async function refreshPanel($: Engine): Promise<void> {
     // E-09: the agents list is the truth for what it lists; a workflow's agents live by their own turn.
     if (list) links = syncListed(links, list, now, knownTasks(bandModel));
     links = pruneLinks(links, now);
+    // The tools in flight of an agent that ended go with it.
+    for (const id of [...agentTools.keys()]) if (!links.some(l => l.id === id && l.status !== 'done')) agentTools.delete(id);
     await refreshUsage($, true);
     await noteActivity($);
     if (!paneUp) { keepBand($, await buildPanel($)); return; }
@@ -894,7 +917,7 @@ export const register: Register = on => {
     // The last usage file, whatever the 30 s pace says, after any write in flight.
     try {
       const u = await $.session.usage();
-      if (u.startedAt === usageStartedAt) { officialUsd = u.cost?.usd ?? null; officialOwnUsd = ownCostUsd() - seededUsd; }
+      if (u.startedAt === usageStartedAt) takeOfficial(u);
     } catch { /* keep the last cost */ }
     try { await writeUsageFile($, true); } catch { /* ignore */ }
     // `/clear` and an in-process resume go on under a new session id without a session.start: the meter starts over
@@ -917,10 +940,12 @@ export const register: Register = on => {
     return next(e);
   });
 
-  // E-08: after a compaction the tracking gathered so far is no longer in context: it is not re-read from then on.
+  // E-08: after a compaction the tracking gathered so far is no longer in context: it is not re-read from then on. Only
+  // the main conversation's own compaction counts: a subagent's transcript holds no tracking, and a skip compacts nothing.
   on('session.compact', async ($, e, next) => {
-    try { compactUsage(usage); } catch { /* ignore */ }
-    return next(e);
+    const r = await next(e);
+    try { if (!e.agentId && !(r && typeof (r as { skip?: unknown }).skip === 'string')) compactUsage(usage); } catch { /* ignore */ }
+    return r;
   }).catch(($, e, next) => next(e));
 
   on('command.run', { command: 'lens' }, async $ => {
@@ -955,10 +980,21 @@ export const register: Register = on => {
       try { endTurn(usage, turnClock, await nowMs($)); } catch { turnClock.since = null; }
       syncTurn();
       void refreshPanel($);
-    }
-    else {
-      // E-09: a workflow's agent, which no agents list names, ends with its own turn.
-      try { links = endAgent(links, e.agentId, await nowMs($)); void requestPanelWrite($); } catch { /* ignore */ }
+    } else {
+      // E-09: a workflow's agent, which no agents list names, ends with its own turn; one not linked yet (its spawn not
+      // answered) is ended when it is.
+      try {
+        const id = e.agentId;
+        const now = await nowMs($);
+        if (links.some(l => l.id === id)) links = endAgent(links, id, now);
+        else {
+          for (const [k, at] of pendingEnds) if (now - at > PENDING_END_MS) pendingEnds.delete(k);
+          pendingEnds.delete(id);
+          pendingEnds.set(id, now);
+          while (pendingEnds.size > PENDING_ENDS_MAX) pendingEnds.delete(pendingEnds.keys().next().value!);
+        }
+        void requestPanelWrite($);
+      } catch { /* ignore */ }
     }
     return next(e);
   });
@@ -984,12 +1020,14 @@ export const register: Register = on => {
       if (r?.agentId) {
         labelLoop(usage, r.agentId, String(e.subagentType ?? 'unknown'), e.description);
         const wf = e.workflow;
+        const now = await nowMs($);
         links = linkSpawn(links, {
           id: r.agentId, type: String(e.subagentType ?? ''), description: String(e.description ?? ''), prompt: typeof e.prompt === 'string' ? e.prompt : '',
           parentId: typeof e.parentAgentId === 'string' ? e.parentAgentId : null,
           workflow: wf && typeof wf.runId === 'string' ? { runId: wf.runId, index: Number(wf.agentIndex) || 0 } : null,
-          now: await nowMs($),
+          now,
         }, knownTasks(bandModel));
+        applyPendingEnd(r.agentId, now);
         void noteActivity($);
         void requestPanelWrite($);
       }
@@ -1002,32 +1040,53 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     const mine = !e.agentId;
     const input = e as unknown as Record<string, unknown>;
+    // A subagent's call is kept by its own id, so the first of two tools to return does not clear the other.
+    const callId = typeof e.tool_use_id === 'string' && e.tool_use_id ? e.tool_use_id : null;
     void touch($);
-    if (e.tool === 'Bash') {
-      try { ownTasks = addOwnTask(ownTasks, ownTaskId(ownTaskOf(input.command))); } catch { /* ignore */ }
-    }
+    const started = await nowMs($);
     if (mine) {
       try {
         tools.delete(e.tool_use_id);
-        tools.set(e.tool_use_id, { name: clip(String(e.tool), LINE_MAX), since: await nowMs($) });
+        tools.set(e.tool_use_id, { name: clip(String(e.tool), LINE_MAX), since: started });
         while (tools.size > MAX_ACTIVITY) tools.delete(tools.keys().next().value!);
         showTool();
         if (e.tool === 'TodoWrite') {
           activity.todos = Array.isArray(e.todos) ? e.todos.slice(0, MAX_TODOS) : e.todos;
           void noteActivity($);
         }
-        if (e.tool === 'ScheduleWakeup') {
-          // The engine clamps the delay to 60-3600 s; stop ends the loop and its wake-up.
-          const delay = typeof input.delaySeconds === 'number' && Number.isFinite(input.delaySeconds) ? input.delaySeconds : null;
-          wakeAt = input.stop === true || delay === null ? null : (await nowMs($)) + Math.min(WAKE_MAX_S, Math.max(WAKE_MIN_S, delay)) * 1000;
-        }
         void requestPanelWrite($);
       } catch { /* ignore */ }
     } else {
-      try { links = setTool(links, e.agentId!, { name: String(e.tool), since: await nowMs($) }); void requestPanelWrite($); } catch { /* ignore */ }
+      try {
+        const id = e.agentId!;
+        if (callId) {
+          const calls = agentTools.get(id) ?? new Map<string, { name: string; since: number }>();
+          calls.delete(callId);
+          calls.set(callId, { name: String(e.tool), since: started });
+          while (calls.size > MAX_ACTIVITY) calls.delete(calls.keys().next().value!);
+          agentTools.delete(id);
+          agentTools.set(id, calls);
+          while (agentTools.size > LINKS_MAX) agentTools.delete(agentTools.keys().next().value!);
+          showAgentTool(id);
+        } else links = setTool(links, id, { name: String(e.tool), since: started });
+        void requestPanelWrite($);
+      } catch { /* ignore */ }
     }
     try {
       const result = await next(e);
+      // What the call says of this session is kept only once the engine ran it: a refused call records nothing.
+      try {
+        const answer = result as { deny?: unknown; isError?: unknown } | undefined;
+        if (answer && typeof answer.deny !== 'string') {
+          // E-06: a forge.cjs call of any loop names a task this session works on.
+          if (e.tool === 'Bash') ownTasks = addOwnTask(ownTasks, ownTaskOf(input.command));
+          // E-11: the engine clamps the delay to 60-3600 s; stop, or a wake-up that failed, leaves none.
+          if (mine && e.tool === 'ScheduleWakeup') {
+            const delay = typeof input.delaySeconds === 'number' && Number.isFinite(input.delaySeconds) ? input.delaySeconds : null;
+            wakeAt = input.stop === true || delay === null || answer.isError === true ? null : started + Math.min(WAKE_MAX_S, Math.max(WAKE_MIN_S, delay)) * 1000;
+          }
+        }
+      } catch { /* ignore */ }
       // A main-loop waypoint or forge call is tracking: its input and result, about four characters a token.
       if (mine) {
         try {
@@ -1047,7 +1106,13 @@ export const register: Register = on => {
         void requestPanelWrite($);
       }
       if (!mine) {
-        links = setTool(links, e.agentId!, null);
+        const id = e.agentId!;
+        if (callId) {
+          const calls = agentTools.get(id);
+          calls?.delete(callId);
+          if (calls && !calls.size) agentTools.delete(id);
+          showAgentTool(id);
+        } else links = endTool(links, id, String(e.tool));
         void requestPanelWrite($);
       }
     }
@@ -1062,13 +1127,18 @@ export const register: Register = on => {
       const kind = usage.loops[id]?.kind;
       if (!kind || kind === 'unknown') labelLoop(usage, id, String(e.agent_type ?? 'unknown'));
       // E-09: an agent agent.spawn did not see (lens loaded later) is kept too, without a prompt to read its task from.
-      if (!links.some(l => l.id === id)) links = linkSpawn(links, { id, type: String(e.agent_type ?? ''), description: '', prompt: '', parentId: null, workflow: null, now: await nowMs($) }, knownTasks(bandModel));
+      if (!links.some(l => l.id === id)) {
+        const now = await nowMs($);
+        links = linkSpawn(links, { id, type: String(e.agent_type ?? ''), description: '', prompt: '', parentId: null, workflow: null, now }, knownTasks(bandModel));
+        applyPendingEnd(id, now);
+      }
       await touch($);
       await noteActivity($);
       void requestPanelWrite($);
     } catch { /* ignore */ }
     return next(e);
   }).catch(($, e, next) => next(e));
+
   on('classic.SubagentStop', async ($, e, next) => {
     try {
       void touch($);
@@ -1083,6 +1153,7 @@ export const register: Register = on => {
     } catch { /* ignore */ }
     return next(e);
   }).catch(($, e, next) => next(e));
+
   on('classic.TaskCreated', ($, e, next) => {
     try {
       const id = String(e.task_id);
@@ -1091,6 +1162,7 @@ export const register: Register = on => {
     } catch { /* ignore */ }
     return next(e);
   }).catch(($, e, next) => next(e));
+
   on('classic.TaskCompleted', ($, e, next) => {
     try {
       const id = String(e.task_id);
@@ -1102,6 +1174,7 @@ export const register: Register = on => {
     } catch { /* ignore */ }
     return next(e);
   }).catch(($, e, next) => next(e));
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     try {
       const m = await read($, panel);

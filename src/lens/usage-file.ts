@@ -121,17 +121,19 @@ export function runStartedAt(src: { execution?: RunSource; run?: RunSource; larg
  * Every session of the run summed, loops keyed `<session>/<loop>`; the own session counts from its live state. E-07:
  * with the run's key, only that run's files count, each from its baseline (what it had spent when it first saw the run):
  * its loops scaled by what is left of its totals, an approximation by totals and not by loop. A file of an older lens
- * (no runKey) counts whole and makes the sum partial, as does a baseline missing or above its totals; a file of another
- * run is left out. Without a key (the infinite mode, a Large run without an execution), every file counts as before.
+ * (no runKey) counts whole and makes the sum partial, as does a baseline missing, of another run or above its totals; a
+ * file of another run, or of none (runKey null), is left out. Without a key (the infinite mode, a Large run without an execution), every file counts as before.
  */
 export function mergeForRun(files: UsageFile[], own: { session: string; state: UsageState; baseline?: RunBaseline | null }, since: number, runKey: string | null = null): UsageState {
   const out = newUsage(since);
   // Adds one session from its baseline when it holds; says whether it did.
   const add = (session: string, loops: Record<string, UsageLoop>, tracking: { waypoint: number; forge: number }, reread: number, activeMs: number | undefined, baseline: RunBaseline | null): boolean => {
-    const t = totalsOf(loops);
-    const ok = !!baseline && baseline.costUsd <= t.costUsd + 1e-9 && baseline.tokens <= t.tokens && (activeMs === undefined || baseline.activeMs <= activeMs);
-    const cf = ok && t.costUsd > 0 ? 1 - baseline!.costUsd / t.costUsd : 1;
-    const tf = ok && t.tokens > 0 ? 1 - baseline!.tokens / t.tokens : 1;
+    // The totals only when there is a baseline to hold them against (none without a run key).
+    const t = baseline ? totalsOf(loops) : null;
+    const ok = !!baseline && !!t && baseline.costUsd <= t.costUsd + 1e-9 && baseline.tokens <= t.tokens && (activeMs === undefined || baseline.activeMs <= activeMs);
+    // The slack lets a baseline a hair above the cost hold: its factor stops at 0, never a negative cost.
+    const cf = ok && t!.costUsd > 0 ? Math.max(0, 1 - baseline!.costUsd / t!.costUsd) : 1;
+    const tf = ok && t!.tokens > 0 ? 1 - baseline!.tokens / t!.tokens : 1;
     for (const [id, l] of Object.entries(loops)) {
       out.loops[`${session}/${id}`] = { ...l, input: l.input * tf, output: l.output * tf, cacheRead: l.cacheRead * tf, cacheWrite: l.cacheWrite * tf, costUsd: l.costUsd * cf };
     }
@@ -146,7 +148,9 @@ export function mergeForRun(files: UsageFile[], own: { session: string; state: U
   for (const f of files) {
     if (f.session === own.session || Date.parse(f.updatedAt) < since) continue;
     if (runKey !== null && f.runKey !== undefined && f.runKey !== runKey) continue;
-    const ok = add(f.session, f.loops, f.tracking, f.trackingReread ?? 0, f.activeMs, runKey !== null && f.runKey === runKey ? f.runBaseline ?? null : null);
+    // Its baseline only when it is of this run too: one of another (a stale one, a hand edit) counts the file whole.
+    const baseline = runKey !== null && f.runKey === runKey && f.runBaseline?.runKey === runKey ? f.runBaseline : null;
+    const ok = add(f.session, f.loops, f.tracking, f.trackingReread ?? 0, f.activeMs, baseline);
     if (runKey !== null && !ok) out.runPartial = true;
   }
   const ownBaseline = runKey !== null && own.baseline?.runKey === runKey ? own.baseline : null;

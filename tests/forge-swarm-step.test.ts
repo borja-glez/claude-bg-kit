@@ -920,4 +920,26 @@ describe('swarm step hands out the task line of each agent (E-02)', () => {
     expect(spawn.length).toBeGreaterThan(0);
     for (const e of spawn) expect(e.taskLine).toBe('forge-task: T1-1 @shop');
   });
+  it('respawnReviewers and an express review carry it in each spawn entry too', () => {
+    step();
+    commitIn(wt('T1'), 'src/t1/a.ts', 'export const a = 1;\n', 'T1: a');
+    const review = step('--returned', 'T1').actions.find(a => a.task === 'T1' && a.type === 'spawnReviewers')!;
+    const dir = path.join(root, '.forge', 'work', 'shop', 'T1', 'reviews-1-1');
+    // The correctness reviewer leaves a file that does not validate: it runs again, with its task line.
+    for (const e of (review.spawn as { role: string; twin?: boolean }[]).filter(e => !e.twin)) {
+      writeFileSync(path.join(dir, `${e.role.replace(/^review-/, '')}.json`), e.role === 'review-correctness' ? '{"verdict":"maybe"}' : pass);
+    }
+    const again = step().actions.find(a => a.task === 'T1')!;
+    expect(again).toMatchObject({ type: 'respawnReviewers' });
+    expect((again.spawn as { taskLine?: string }[]).map(e => e.taskLine)).toEqual(['forge-task: T1-1 @shop']);
+    // It asks for one important fix; once the implementer commits it, review 2 is an express one.
+    writeFileSync(path.join(dir, 'correctness.json'), JSON.stringify({ verdict: 'fail', confidence: 0.9, findings: [{ severity: 'important', file: 'src/t1/a.ts', line: 1, problem: 'wrong' }] }));
+    expect(step().actions.find(a => a.task === 'T1')).toMatchObject({ type: 'resumeImplementer' });
+    commitIn(wt('T1'), 'src/t1/a.ts', 'export const a = 2;\n', 'T1: fix');
+    const express = step('--returned', 'T1').actions.find(a => a.task === 'T1')!;
+    expect(express).toMatchObject({ type: 'express' });
+    const entries = express.spawn as { taskLine?: string }[];
+    expect(entries.length).toBeGreaterThan(0);
+    for (const e of entries) expect(e.taskLine).toBe('forge-task: T1-1 @shop');
+  });
 });

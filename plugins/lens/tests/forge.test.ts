@@ -523,6 +523,63 @@ test('junk in .forge/status/ and .forge/jobs/ hides only that task and never thr
   const text = await said(ui);
   expect(text).toContain('Tasks in progress · 1');
   expect(text).toContain('T001');
+  // The jobs side: the valid job still shows on its task's row; the junk ones and the oversized one hide only themselves.
+  expect(text).toMatch(/T001[^]*integrating/);
+  expect(text).not.toContain('validating');
+  await ui.unmount();
+});
+
+test('a status file that changes is read again and one deleted drops out (C5, the read cache)', async ($, on) => {
+  const at = new Date(NOW - 60_000).toISOString();
+  const touched: string[] = [];
+  const files: Record<string, string> = {
+    [`${ROOT}/.forge/status/T001.json`]: JSON.stringify({ ...STATUS, task: 'T001', lastAt: at }),
+    [`${ROOT}/.forge/status/T002.json`]: JSON.stringify({ ...STATUS, task: 'T002', lastAt: at }),
+  };
+  serveFiles(on, files, touched, { mtimeMs: NOW - 60_000 });
+  servePanes(on);
+  const clock = start(on);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  const pane = async () => {
+    const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
+    const text = await said(ui);
+    await ui.unmount();
+    return text;
+  };
+  expect(await pane()).toContain('Tasks in progress · 2');
+  files[`${ROOT}/.forge/status/T001.json`] = JSON.stringify({ ...STATUS, task: 'T001', phase: 'implement', agent: 'forge-impl', lastAt: at });
+  delete files[`${ROOT}/.forge/status/T002.json`];
+  touched.length = 0;
+  await clock.advance(10_000);
+  expect(touched).toContain(`${ROOT}/.forge/status/T001.json`);
+  const text = await pane();
+  expect(text).toContain('Tasks in progress · 1');
+  expect(text).toMatch(/medium · implement/);
+  expect(text).not.toContain('T002');
+});
+
+test('when .forge/status/ goes away its cached reads go too: a file back with the same size and time is read again', async ($, on) => {
+  const at = new Date(NOW - 60_000).toISOString();
+  const path = `${ROOT}/.forge/status/T001.json`;
+  // Two texts of the same length: only a fresh read tells them apart.
+  const before = JSON.stringify({ ...STATUS, task: 'T001', phase: 'review', lastAt: at });
+  const after = JSON.stringify({ ...STATUS, task: 'T001', phase: 'verify', lastAt: at });
+  expect(after.length).toBe(before.length);
+  const files: Record<string, string> = { [path]: before };
+  serveFiles(on, files, [], { mtimeMs: NOW - 60_000 });
+  servePanes(on);
+  const clock = start(on);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  delete files[path];
+  await clock.advance(10_000);
+  files[path] = after;
+  await clock.advance(10_000);
+  const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
+  const text = await said(ui);
+  expect(text).toMatch(/medium · verify/);
+  expect(text).not.toMatch(/medium · review/);
   await ui.unmount();
 });
 
@@ -557,6 +614,9 @@ test('when the session id cannot be read, the panel still draws (E-06)', async (
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
   const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
-  expect(await said(ui)).toContain('Tasks in progress · 1');
+  const text = await said(ui);
+  expect(text).toContain('Tasks in progress · 1');
+  // Its status names conv-1, which lens could not tell is this session: drawn as another session's (Review Focus 5).
+  expect(text).toContain('other session');
   await ui.unmount();
 });

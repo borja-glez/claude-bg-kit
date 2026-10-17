@@ -4,7 +4,7 @@ import { buildBandModel, noneBand, NO_VIEWER, type BandModel } from '../src/mod/
 import { newUsage, recordStep, labelLoop, closeTurn } from '../src/lens/usage.js';
 import { FINISHED_TTL_MS } from '../src/lens/finished.js';
 import { headline } from '../src/lens/view.js';
-import { buildPanelModel, bandKey, usageTime, elapsed, forgeFromStatus, parsePlanTasks, parseSddLedger, summarizeTodos, statusRootOf, type Activity, type PanelModel } from '../src/lens/model.js';
+import { buildPanelModel, bandKey, usageTime, elapsed, executionFromFiles, forgeFromStatus, parsePlanTasks, parseSddLedger, summarizeTodos, statusRootOf, type Activity, type PanelModel } from '../src/lens/model.js';
 
 const LEDGER = `# SDD ledger — plan: docs/superpowers/plans/2026-10-11-waypoint-views.md
 
@@ -442,6 +442,10 @@ describe('buildPanelModel · execution', () => {
     expect(m.execution).toMatchObject({ mode: 'subagents', parallel: 3, integrated: 1, total: 2, coordinator: { liveness: 'alive' } });
     expect(m.execution!.slots[0]).toMatchObject({ task: 'T4', stage: 'review', round: 2, seconds: 180, liveness: 'alive' });
   });
+  it("another live session's run and one left behind are drawn dim; the run of its owner is not (C2)", () => {
+    const dimOf = (role: 'owner' | 'other-live' | 'previous' | 'none') => executionFromFiles(execDoc, {}, {}, now, undefined, role)!.dim;
+    expect([dimOf('owner'), dimOf('other-live'), dimOf('previous'), dimOf('none')]).toEqual([false, true, true, false]);
+  });
   it("carries the plan's project, which its slot tasks' statuses are keyed by; an ephemeral run's tasks are loose (C5)", () => {
     const of = (text: string) => buildPanelModel({ band: band(), activity: act(), now, forgeExecution: text, forgeExecTasks: {}, forgeLive: {} }).execution!.project;
     expect(of(execDoc)).toBe('shop');
@@ -682,10 +686,12 @@ describe('todos and superpowers (E-13, E-14)', () => {
     expect(parseSddLedger('## Progress\nTask 3: fix round 2 (x)\n').current).toEqual({ task: '3', round: 2, cap: null });
     const day = 24 * 3600_000;
     const none = { mode: 'none', viewer: { role: 'none', coordinator: false, runId: null } } as const;
-    const stale = buildPanelModel({ band: none, activity: act(), now: 10 * day, ledger: LEDGER, ledgerPlan: PLAN, ledgerMtimeMs: 10 * day - 25 * 3600_000 });
-    expect(stale.superpowers).toMatchObject({ stale: true });
+    // One task of the plan's three done, the second in a fix round.
+    const HALF = '# SDD ledger — plan: docs/superpowers/plans/x.md\n\n## Progress\nTask 1: complete (abc)\nTask 2: fix round 2/5 (flaky)\n';
+    const stale = buildPanelModel({ band: none, activity: act(), now: 10 * day, ledger: HALF, ledgerPlan: PLAN, ledgerMtimeMs: 10 * day - 25 * 3600_000 });
+    expect(stale.superpowers).toMatchObject({ tasks: 3, done: 1, stale: true });
     expect(headline(stale)).toBeNull();
-    const fresh = buildPanelModel({ band: none, activity: act(), now: 10 * day, ledger: LEDGER, ledgerPlan: PLAN, ledgerMtimeMs: 10 * day - 3600_000 });
+    const fresh = buildPanelModel({ band: none, activity: act(), now: 10 * day, ledger: HALF, ledgerPlan: PLAN, ledgerMtimeMs: 10 * day - 3600_000 });
     expect(fresh.superpowers).not.toHaveProperty('stale');
     expect(headline(fresh)).toMatchObject({ section: 'superpowers', detail: 'round 2/5' });
   });
@@ -719,6 +725,25 @@ describe('buildPanelModel: the activities (C5, E-06, E-16)', () => {
     const m = buildPanelModel({ band: none, activity: act(), now, sessionId: null, ownTasks: ['T1'], forgeStatuses: [doc('T1'), doc('T2', { lastAt: new Date(now - 30_000).toISOString() })] });
     expect(m.activities.map(x => [x.key, x.owner, x.dim])).toEqual([['T1', 'own', false], ['T2', 'other', true]]);
     expect(m.forge).toMatchObject({ task: 'T1' });
+  });
+  it('when the activities cannot be built, the forge section falls back to the newest status of the day (task 7 review)', () => {
+    // ownTasks is read only by buildActivities: one that throws makes it fail, and nothing else.
+    const throwing = { some() { throw new Error('boom'); } } as unknown as string[];
+    const m = buildPanelModel({ band: none, activity: act(), now, sessionId: null, ownTasks: throwing, forgeStatuses: [doc('T1')] });
+    expect(m).toMatchObject({ activities: [], waiting: null, jobs: [], forge: { task: 'T1' } });
+  });
+  it('reads at most 20 statuses: a 21st is not a row', () => {
+    const texts = Array.from({ length: 21 }, (_, i) => doc(`T${i + 1}`));
+    const keys = buildPanelModel({ band: none, activity: act(), now, sessionId: 'me', forgeStatuses: texts }).activities.map(x => x.key);
+    expect(keys).toHaveLength(20);
+    expect(keys).not.toContain('T21');
+  });
+  it('the expanded status ahead of this clock past the skew has no timing in the forge section (task 7 review, minor 1)', () => {
+    const later = new Date(now + 10 * 60_000).toISOString();
+    const m = buildPanelModel({ band: none, activity: act(), now, sessionId: 'me', forgeStatuses: [doc('T1', { lastAt: later, taskStartedAt: new Date(now - 600_000).toISOString(), stageSince: new Date(now - 60_000).toISOString() })] });
+    expect(m.forge).toMatchObject({ task: 'T1', timing: null });
+    const fine = buildPanelModel({ band: none, activity: act(), now, sessionId: 'me', forgeStatuses: [doc('T1', { taskStartedAt: new Date(now - 600_000).toISOString(), stageSince: new Date(now - 60_000).toISOString() })] });
+    expect(fine.forge?.timing).toMatchObject({ taskSeconds: 600 });
   });
   it('the forge section never carries who wrote the last event, its run nor its project (C5)', () => {
     const m = buildPanelModel({ band: none, activity: act(), now, sessionId: 'me', forgeStatuses: [doc('T2', { runId: 'r1', project: 'shop' })] });

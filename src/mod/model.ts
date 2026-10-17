@@ -147,12 +147,13 @@ export function openTasksFrom(states: States): Record<string, string> {
 }
 
 /**
- * E-10: the seat of the conversation that looks, from its own binding (the one renewed last when several), else null.
- * describeViewer gives no binding to a coordinator (its subject is the execution), so the seats are searched.
+ * E-10: the seat of the conversation that looks, from its own live binding (the one renewed last when several), else
+ * null; one that ended never gives it. describeViewer gives no binding to a coordinator (its subject is the execution),
+ * so the seats are searched.
  */
 function ownSeat(seats: readonly BandSeat[], sessionId: string | null | undefined): string | null {
   if (!isSafeId(sessionId)) return null;
-  const own = seats.filter(s => s.bound?.claude === sessionId)
+  const own = seats.filter(s => s.bound?.claude === sessionId && !s.bound.endedAt)
     .sort((a, b) => Date.parse(b.bound!.seenAt) - Date.parse(a.bound!.seenAt))[0];
   return own?.sid ?? null;
 }

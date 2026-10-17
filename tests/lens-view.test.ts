@@ -85,6 +85,9 @@ describe('lens view', () => {
     expect(briefCells({ ...FORGE, verdict: { action: 'fix', score: 0.3 }, round: 1, accepted: [1, 2] })!.cells[2]).toBe('failed');
     expect(briefCells({ ...FORGE, brief: null, accepted: [], briefs: null })).toBeNull();
     expect(todoCells({ total: 3, done: 1, inProgress: 'x', next: [] }).cells).toEqual(['done', 'active', 'pending']);
+    // E-13: three todos in progress, each in its own place, whatever their order.
+    expect(todoCells({ total: 5, done: 1, inProgress: 'a', next: ['p'], active: ['a', 'b', 'c'], cells: 'adpaa' }))
+      .toEqual({ cells: ['active', 'done', 'pending', 'active', 'active'], done: 1, total: 5 });
     expect(roadmapCells({ cells: 'ddabpz' } as NonNullable<PanelModel['waypoint']>).cells).toEqual(['done', 'done', 'active', 'blocked', 'pending', 'pending']);
   });
   it('draws text bars of the asked width', () => {
@@ -555,6 +558,13 @@ describe('the Tasks in progress card (wave 3, §4.4)', () => {
     const fix = card({ forge: { ...forge, verdict: { action: 'fix', score: 0.4, round: 2, findings: { critical: 1, important: 2, minor: 0 } } }, activities: [ACT({ expanded: true })] });
     const chips = fix.blocks.find((b): b is Extract<Block, { kind: 'chips' }> => b.kind === 'chips')!.chips.map(x => x.text);
     expect(chips).toContain('fix · round 2/4 · 1 C · 2 I');
+    // The verdict names its round: the round is not said again in a chip of its own (task 8 review, minor 1).
+    const chipsOf = (f: NonNullable<PanelModel['forge']>) => card({ forge: f, activities: [ACT({ expanded: true })] }).blocks
+      .find((b): b is Extract<Block, { kind: 'chips' }> => b.kind === 'chips')!.chips.map(x => x.text);
+    const fixed = { ...forge, round: 2, cap: 4, verdict: { action: 'fix', score: 0.4, round: 2, findings: { critical: 1, important: 2, minor: 0 } } };
+    expect(chipsOf(fixed).filter(c => /round 2/.test(c))).toEqual(['fix · round 2/4 · 1 C · 2 I']);
+    // A later round than the verdict's is still said.
+    expect(chipsOf({ ...fixed, round: 3 })).toContain('round 3/4');
     // Who reviews, when no agent of the task is linked: the reviewers phase review named.
     const named = card({ forge: { ...forge, verdict: null, reviewers: ['correctness', 'security'] }, activities: [ACT({ expanded: true })] });
     expect(cardAlt(named)).toContain('reviewers: correctness, security');
@@ -567,6 +577,21 @@ describe('the Tasks in progress card (wave 3, §4.4)', () => {
     expect(c.blocks.map(b => b.kind)).toEqual(['row']);
     expect(rowsOf(c)[0]).toMatchObject({ dim: true, right: expect.stringContaining('other session') });
     expect(cardAlt(c)).not.toMatch(/accepted|test|Implement/);
+  });
+  it("an expanded row of another session before this session's own expanded one: the card takes its chip and subtitle from the own one", () => {
+    const forge = { ...FORGE, task: 'T003', path: 'medium', phase: 'review', timing: { taskSeconds: 300, done: false, stages: [] } };
+    const c = card({ forge, activities: [
+      ACT({ key: 'T009', task: 'T009', owner: 'other', dim: true, expanded: true, path: 'large' }), ACT({ key: 'T003', task: 'T003', expanded: true }),
+    ] });
+    expect(c.chip?.text).toBe('medium');
+    expect(c.subtitle).toBe('forge · review · 5m 00s');
+  });
+  it('a done or a stopped row with a live job says what the job does and its time', () => {
+    const rows = rowsOf(card({ activities: [
+      ACT({ done: true, dim: true, stage: null, round: null, job: { name: 'integrate', seconds: 30 } }),
+      ACT({ key: 'T004', task: 'T004', title: 'Envíos', stopped: true, dim: true, stage: null, round: null, job: { name: 'validate', seconds: 45 } }),
+    ] }));
+    expect(rows.map(r => r.right)).toEqual(['medium · integrating · 30s', 'medium · validating · 45s']);
   });
   it("the band names a task only when the expanded row is this session's own (M2)", () => {
     // Only another session's task in progress: it is the one expanded, and the band names no task.
@@ -607,6 +632,9 @@ describe('Now, the execution and the subagents (E-02, E-09, E-11)', () => {
     const c = buildCards({ ...EMPTY, waiting: { agents: 3, wakeSeconds: 240 }, jobs: [{ name: 'review-prep', task: 'T003', seconds: 90 }, { name: 'integrate', task: null, seconds: 30 }] }, T, 0)
       .find(x => x.title === T.sNow)!;
     expect(cardAlt(c)).toContain('waiting on 3 subagents · wakes in 4m');
+    const one = buildCards({ ...EMPTY, waiting: { agents: 1, wakeSeconds: null } }, T, 0).find(x => x.title === T.sNow)!;
+    expect(cardAlt(one)).toContain('waiting on 1 subagent');
+    expect(cardAlt(one)).not.toContain('subagents');
     expect(cardAlt(c)).toContain('validating T003 1m');
     expect(cardAlt(c)).toContain('integrating 30s');
   });

@@ -117,7 +117,9 @@ function forgeBlocks(m: PanelModel, f: Forge, t: CardTexts, linked: boolean): Bl
   const chips: { text: string; hue: Hue }[] = f.validators.map(v => ({ text: `${v.ok ? '✓' : '✗'} ${v.name}${v.cached ? ` · ${t.cached}` : ''}`, hue: v.ok ? 'green' : 'red' }));
   const verdict = verdictChip(f, t);
   if (verdict) chips.push(verdict);
-  if (f.round !== null) chips.push({ text: `${t.fixRound} ${f.round}${f.cap !== null ? `/${f.cap}` : ''}`, hue: f.cap !== null && f.round >= f.cap ? 'red' : 'sub' as Hue });
+  // The round once: not again in a chip of its own when the verdict chip already names it.
+  const verdictRound = f.verdict ? f.verdict.round ?? (f.round !== null && f.round >= 1 ? f.round : null) : null;
+  if (f.round !== null && f.round !== verdictRound) chips.push({ text: `${t.fixRound} ${f.round}${f.cap !== null ? `/${f.cap}` : ''}`, hue: f.cap !== null && f.round >= f.cap ? 'red' : 'sub' as Hue });
   if (chips.length) blocks.push({ kind: 'chips', chips });
   return blocks;
 }

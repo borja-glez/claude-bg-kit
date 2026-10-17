@@ -70,26 +70,33 @@ function span(from: number, to: number, now: number): number | null {
 }
 /** How long ago, never negative: a time ahead of now counts as now. */
 const age = (t: number, now: number): number => Math.max(0, now - t);
+/**
+ * Where a time puts its activity in the order: never past now, and one more than FUTURE_SKEW_MS ahead (its writer's
+ * clock is off) is unknown and goes after every known one, so it neither sorts as the newest nor takes the expansion.
+ */
+const orderAt = (t: number, now: number): number => (t - now > FUTURE_SKEW_MS ? -Infinity : Math.min(t, now));
 /** The task itself or one of its briefs, `<task>-<n>`. */
 const isOf = (task: string, id: string): boolean => id === task || (id.startsWith(`${task}-`) && /^\d{1,4}$/.test(id.slice(task.length + 1)));
 const alive = (l: AgentLink): boolean => l.status !== 'done';
 const keyOf = (task: string, project: string | null): string => statusKey(task, project) ?? task;
 
-/** The key of the newest status (by its last event) among those `match` accepts; undefined when none has a time. */
-function newestKey(statuses: readonly ForgeStatus[], match: (st: ForgeStatus) => boolean): string | undefined {
-  let best: { key: string; last: number } | undefined;
+/** The key of the newest status (by its last event, as orderAt places it) among those `match` accepts; undefined when none has a time. */
+function newestKey(statuses: readonly ForgeStatus[], match: (st: ForgeStatus) => boolean, now: number): string | undefined {
+  let best: { key: string; at: number } | undefined;
   for (const st of statuses) {
     const last = ms(st.lastAt ?? st.ts);
-    if (match(st) && Number.isFinite(last) && (!best || last > best.last)) best = { key: keyOf(st.task, st.project), last };
+    if (!match(st) || !Number.isFinite(last)) continue;
+    const at = orderAt(last, now);
+    if (!best || at > best.at) best = { key: keyOf(st.task, st.project), at };
   }
   return best?.key;
 }
 
 /** The key of the newest status of each task id, worked out once per id. */
-function newestByTask(statuses: readonly ForgeStatus[]): (task: string) => string | undefined {
+function newestByTask(statuses: readonly ForgeStatus[], now: number): (task: string) => string | undefined {
   const memo = new Map<string, string | undefined>();
   return task => {
-    if (!memo.has(task)) memo.set(task, newestKey(statuses, st => st.task === task));
+    if (!memo.has(task)) memo.set(task, newestKey(statuses, st => st.task === task, now));
     return memo.get(task);
   };
 }
@@ -160,7 +167,7 @@ export function withSlotAgents(x: PanelModel['execution'], links: readonly Agent
   if (!x) return x;
   type Slot = NonNullable<PanelModel['execution']>['slots'][number];
   const project = x.project ?? null;
-  const newest = newestByTask(statuses);
+  const newest = newestByTask(statuses, now);
   return {
     ...x,
     slots: x.slots.map((s): Slot => {
@@ -190,10 +197,10 @@ export function buildActivities(i: ActivityInput): ActivityView {
   // C5: a slot is a task of the run's own project (null for an ephemeral run, whose tasks are loose).
   const execProject = i.execution?.project ?? null;
   const slotTasks = new Set(i.execution?.mode === 'subagents' ? i.execution.slots.map(s => s.task) : []);
-  const newest = newestByTask(i.statuses);
+  const newest = newestByTask(i.statuses, now);
   const liveJobs = i.jobs.filter(j => { const t = ms(j.startedAt); return Number.isFinite(t) && age(t, now) < JOB_ALIVE_MS; });
   // A job names no project: it goes on the newest status of its task id alone.
-  const jobHome = new Map(liveJobs.map(j => [j, j.task === null ? undefined : newestKey(i.statuses, st => isOf(st.task, j.task!))] as const));
+  const jobHome = new Map(liveJobs.map(j => [j, j.task === null ? undefined : newestKey(i.statuses, st => isOf(st.task, j.task!), now)] as const));
   type Built = { row: Row; at: number; end: number; st: ForgeStatus | null; rank: number };
   const built: Built[] = [];
   const seen = new Set<string>();
@@ -238,7 +245,7 @@ export function buildActivities(i: ActivityInput): ActivityView {
         seconds: skewed ? null : span(ms(st.taskStartedAt), done || stopped ? ended : now, now),
         agents: live ? mine.map(l => agentOf(l, i.links, i.models, now)) : [],
       },
-      at: last, end, st, rank: done || stopped ? 2 : owner === 'own' ? 0 : 1,
+      at: orderAt(last, now), end, st, rank: done || stopped ? 2 : owner === 'own' ? 0 : 1,
     });
   }
   const runs = new Map<string, AgentLink[]>();
@@ -256,7 +263,7 @@ export function buildActivities(i: ActivityInput): ActivityView {
       at: living.length ? now : end, end, st: null, rank: living.length ? 0 : 2,
     });
   }
-  built.sort((a, b) => a.rank - b.rank || (a.rank === 2 ? b.end - a.end : b.at - a.at));
+  built.sort((a, b) => a.rank - b.rank || (a.rank === 2 ? orderAt(b.end, now) - orderAt(a.end, now) : b.at - a.at));
   const forge = built.filter(b => b.row.kind === 'forge' && !b.row.slot);
   const focus = i.focusAgent ? i.links.find(l => l.id === i.focusAgent) : undefined;
   const pick = (focus ? forge.find(b => b.st !== null && worksOn(focus, b.st.task, b.st.project, newest)) : undefined)
@@ -280,11 +287,14 @@ export function buildActivities(i: ActivityInput): ActivityView {
     waiting = { agents: mainAgents.length, wakeSeconds: wakes.length ? Math.round((Math.min(...wakes) - now) / 1000) : null };
   }
   // Wave 1: a live job not drawn on a row (of a slot, of no task, or whose newest status has none) goes to Now, this
-  // session's or one that names none.
+  // session's or one that names none, the newest JOBS_SHOWN by their start. With no session id (Review Focus 5), one
+  // that names a session is this one's when its task is one this session touched with forge.cjs.
   const onRows = new Set(out.filter(a => a.kind === 'forge' && !a.slot && a.job).map(a => a.key));
+  const ownJob = (j: LensJob): boolean => !known || j.session === null
+    || (i.sessionId ? j.session === i.sessionId : j.task !== null && i.ownTasks.some(t => isOf(t, j.task!) || isOf(j.task!, t)));
   const jobs = liveJobs
-    .filter(j => !onRows.has(jobHome.get(j) ?? ''))
-    .filter(j => !known || j.session === null || j.session === i.sessionId)
+    .filter(j => !onRows.has(jobHome.get(j) ?? '') && ownJob(j))
+    .sort((a, b) => ms(b.startedAt) - ms(a.startedAt))
     .slice(0, JOBS_SHOWN)
     .map(j => ({ name: j.cmd, task: j.task, seconds: span(ms(j.startedAt), now, now) }));
   return { activities: out, waiting, jobs, expanded: pick?.st ?? null };

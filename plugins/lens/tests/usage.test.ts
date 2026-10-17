@@ -473,6 +473,55 @@ test('with the pane closed and nothing going on, the usage file names no run unt
   expect(texts.map(t => JSON.parse(t)).filter(f => 'runKey' in f && f.runKey === null)).toEqual([]);
 });
 
+test('a session counts in its run only what it spent once its band names the run: its baseline is taken then (E-07)', async ($, on) => {
+  const files: Record<string, string> = { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n' };
+  serveFiles(on, files);
+  servePanes(on);
+  const panel = panelWrites(on);
+  const clock = start(on);
+  serveSteps(on);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  // $4 before the run, then the run starts and the tick reads the band: the baseline is that $4.
+  await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
+  files[`${ROOT}/.forge/execution.json`] = execution();
+  await clock.advance(30_000);
+  // $4 more within the run.
+  await drain($.turn.step({ turnId: 't1', index: 1, model: 'claude-opus-5-5', messageCount: 2 }));
+  await $.command.run(RUN);
+  const u = panel.last?.usage;
+  expect(u).toMatchObject({ scope: 'run', partial: false });
+  expect(u.costUsd).toBeGreaterThan(3.99);
+  expect(u.costUsd).toBeLessThan(4.01);
+  expect(u.session.costUsd).toBeGreaterThan(7.99);
+  expect(u.session.costUsd).toBeLessThan(8.01);
+});
+
+test("a compaction of the main conversation stops the re-read of the tracking gathered before it; a subagent's does not (E-08)", async ($, on) => {
+  serveFiles(on, {});
+  servePanes(on);
+  const panel = panelWrites(on);
+  const clock = start(on);
+  serveSteps(on);
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'ok' } as never, text: 'x'.repeat(400) }));
+  const summary = [{ role: 'user' as const, text: 'summary', toolUses: [] }];
+  on('session.compact', () => ({ messages: summary }));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await $.tool.call({ tool: 'Bash', command: 'node waypoint.cjs status' } as never);
+  // Each main step re-reads the tracking gathered since the last compaction of the main conversation.
+  const stepThen = async (index: number) => {
+    await drain($.turn.step({ turnId: 't1', index, model: 'claude-opus-5-5', messageCount: index + 1 }));
+    await clock.advance(1000);
+    return panel.last?.usage.tracking.tokens as number;
+  };
+  const once = await stepThen(0);
+  expect(once).toBeGreaterThan(0);
+  await $.session.compact({ trigger: 'auto', agentId: 'a1', messages: summary });
+  expect(await stepThen(1)).toBe(once * 1.5);
+  await $.session.compact({ trigger: 'manual', messages: summary });
+  expect(await stepThen(2)).toBe(once * 1.5);
+});
+
 test('a run that is neither active nor touched within 12 hours is over: only this session shows', async ($, on) => {
   const files = {
     [`${ROOT}/.forge/run.json`]: JSON.stringify({ active: false, startedAt: new Date(NOW - 20 * 3600_000).toISOString() }),

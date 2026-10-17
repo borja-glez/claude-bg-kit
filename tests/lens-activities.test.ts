@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildActivities, parseJob, runRoleOf, withSlotAgents, type ActivityInput } from '../src/lens/activities.js';
+import { buildActivities, JOB_FILE_MAX, parseJob, runRoleOf, withSlotAgents, type ActivityInput } from '../src/lens/activities.js';
 import { normalizeStatus, type ForgeStatus } from '../src/lib/forge-status.js';
 import type { AgentLink } from '../src/lens/links.js';
 import type { PanelModel } from '../src/lens/model.js';
@@ -84,6 +84,19 @@ describe('buildActivities: who owns a task and how long it shows (E-06)', () => 
     expect(view.activities[0].job).toEqual({ name: 'prep', seconds: null });
     expect(view.jobs).toEqual([{ name: 'step', task: null, seconds: null }]);
   });
+  it('a status ahead of this clock past the skew neither sorts as the newest nor takes the expansion (task 7 review, minor 1)', () => {
+    const later = new Date(NOW + 10 * 60_000).toISOString();
+    const view = buildActivities(input({ statuses: [st('S', { lastAt: later }), st('A', { lastAt: ago(5) })] }));
+    expect(view.activities.map(a => a.key)).toEqual(['A', 'S']);
+    expect(view.expanded?.task).toBe('A');
+    // A done one whose end is ahead goes after the done ones whose end is known.
+    const done = buildActivities(input({ statuses: [st('D1', { doneAt: later, lastAt: later }), st('D2', { doneAt: ago(2), lastAt: ago(2) })] }));
+    expect(done.activities.map(a => a.key)).toEqual(['D2', 'D1']);
+  });
+  it('a start less than two minutes ahead of this clock leaves the task without a time, never a negative one', () => {
+    const soon = new Date(NOW + 60_000).toISOString();
+    expect(buildActivities(input({ statuses: [st('F', { taskStartedAt: soon })] })).activities[0]).toMatchObject({ key: 'F', done: false, seconds: null });
+  });
 });
 
 describe('buildActivities: a stopped task (forge stop, wave 2)', () => {
@@ -122,6 +135,22 @@ describe('buildActivities: jobs in the background (wave 1)', () => {
     expect(job({ cmd: 'Prep!' })).toBeNull();
     expect(parseJob('{oops')).toBeNull();
     expect(parseJob('x'.repeat(5000))).toBeNull();
+    // Valid JSON over JOB_FILE_MAX is not parsed either.
+    const big = JSON.stringify({ name: 'prep-T1-1-2', cmd: 'prep', task: 'T1-1', pid: 2, startedAt: ago(1), out: 'x'.repeat(JOB_FILE_MAX), session: 'me' });
+    expect(big.length).toBeGreaterThan(JOB_FILE_MAX);
+    expect(parseJob(big)).toBeNull();
+  });
+  it('Now keeps the newest five jobs by their start, whatever the order they were read in', () => {
+    const jobs = [3, 1, 6, 2, 5, 4].map(m => job({ name: `step-run-${m}`, cmd: 'step', task: null, startedAt: ago(m) })!);
+    expect(buildActivities(input({ jobs })).jobs.map(j => j.seconds)).toEqual([60, 120, 180, 240, 300]);
+  });
+  it("with no session id, Now keeps this session's job, whose task it touched with forge.cjs, and one that names no session", () => {
+    const blind = (ownTasks: string[]) => buildActivities(input({ sessionId: null, ownTasks, jobs: [
+      job({ name: 'prep-T7-1-1', cmd: 'prep', task: 'T7-1', session: 'me' })!, job({ name: 'step-run-2', cmd: 'step', task: null, session: null })!,
+    ] })).jobs.map(j => j.task);
+    expect(blind(['T7'])).toEqual(['T7-1', null]);
+    expect(blind(['T7-1'])).toEqual(['T7-1', null]);
+    expect(blind(['T8'])).toEqual([null]);
   });
 });
 
@@ -144,6 +173,10 @@ describe('withSlotAgents and the slots (E-02)', () => {
     expect(out.slots[0]).toMatchObject({ model: 'claude-opus-5-5', effort: 'high', liveness: 'alive', agents: [{ id: 'a1', tool: 'Edit', status: 'running', model: 'claude-opus-5-5', depth: 0 }] });
     expect(withSlotAgents(EXEC, [link('a1', 'T1')], {}, OWNER, NOW)!.slots[0].liveness).toBe('silent');
     expect(withSlotAgents(null, [], {}, OWNER, NOW)).toBeNull();
+  });
+  it('an agent started by another agent of the same task is drawn one level deeper', () => {
+    const out = withSlotAgents(EXEC, [link('a1', 'T1'), link('a2', 'T1', { parentId: 'a1' }), link('a3', 'T1', { parentId: 'a2' })], {}, COORDINATOR, NOW)!;
+    expect(out.slots[0].agents?.map(g => [g.id, g.depth])).toEqual([['a1', 0], ['a2', 1], ['a3', 2]]);
   });
   it('a slot task is a row marked slot, and is not the one expanded', () => {
     const view = buildActivities(input({ statuses: [st('T1')], execution: EXEC }));
@@ -209,6 +242,7 @@ describe('runRoleOf: the role lens reads from the band (C3)', () => {
     expect(runRoleOf({ mode: 'work', run: { coordinator: 'main', stage: 'implement' }, viewer: { role: 'owner', coordinator: false, runId: 'r1' } })).toBe('owner');
     expect(runRoleOf({ mode: 'work', run: null, viewer: { role: 'owner', coordinator: false, runId: 'r1' } })).toBe('none');
     expect(runRoleOf({ mode: 'notice', viewer: { role: 'other-live', coordinator: false, runId: 'r1' } })).toBe('other-live');
+    expect(runRoleOf({ mode: 'notice', viewer: { role: 'previous', coordinator: false, runId: 'r1' } })).toBe('previous');
     expect(runRoleOf({ mode: 'none' })).toBe('none');
   });
 });

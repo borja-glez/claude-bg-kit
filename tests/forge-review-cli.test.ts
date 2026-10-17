@@ -281,7 +281,6 @@ describe('forge review-prep', () => {
     expect(run(['review-close'], io).stderr).toMatch(/review-close/);
   });
 
-
   it('every spawn entry carries the task line lens reads: without @ for a loose task, with its project for a plan task (E-02)', () => {
     const loose = JSON.parse(prep().stdout);
     expect(loose.spawn.map((s: { taskLine: string }) => s.taskLine)).toEqual(['forge-task: T1-1', 'forge-task: T1-1']);
@@ -1343,7 +1342,7 @@ describe('the express review (measure 7)', () => {
     const out = JSON.parse(run(['review-prep', '--task', 'T1-1', '--path', 'medium', '--base', base, '--baseline', '.forge/work/T1/baseline-1.json', '--dir', '.forge/work/T1',
       '--cwd', wt, '--locale', 'en'], { ...io, scriptPath: self }).stdout);
     expect(out).toMatchObject({ round: 2, reviews: { n: 2, max: 4 }, express: true, carried: ['security'], delegated: ['correctness'] });
-    expect(out.spawn).toEqual([expect.objectContaining({ role: 'review-correctness', model: 'sonnet', effort: 'medium', mode: 'delta', express: true })]);
+    expect(out.spawn).toEqual([expect.objectContaining({ role: 'review-correctness', model: 'sonnet', effort: 'medium', mode: 'delta', express: true, taskLine: 'forge-task: T1-1' })]);
     expect(out.spawn[0].inputs.findings).toBe('.forge/work/T1/reviews-1-2/previous-express.json');
     expect(out.validators).toEqual({ pending: true, file: '.forge/work/T1/validators-1.json',
       cmd: `node "${slash(self)}" validate --all --path medium --base ${base} --baseline "${slash(path.join(work(), 'baseline-1.json'))}" --task T1-1 --out "${slash(path.join(work(), 'validators-1.json'))}" --cwd "${slash(wt)}"` });

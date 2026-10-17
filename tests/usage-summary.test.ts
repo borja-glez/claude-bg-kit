@@ -123,4 +123,34 @@ describe('summarizeUsage: the tracking re-read (E-08)', () => {
     expect(u.withoutForge!.lowUsd).toBeLessThan(u.withoutForge!.costUsd);
     expect(u.groups.reduce((a, g) => a + (g.costUsd ?? 0), 0) + u.tracking!.costUsd!).toBeCloseTo(u.costUsd);
   });
+  // The groups and the tracking row add up to the total, in tokens and dollars, whatever happened to the tracking.
+  const sums = (s: ReturnType<typeof newUsage>) => {
+    const u = summarizeUsage(s);
+    expect(u.groups.reduce((a, g) => a + g.tokens, 0) + (u.tracking?.tokens ?? 0)).toBeCloseTo(u.tokens);
+    expect(u.groups.reduce((a, g) => a + (g.costUsd ?? 0), 0) + (u.tracking?.costUsd ?? 0)).toBeCloseTo(u.costUsd);
+    return u;
+  };
+  it('the sum holds after a compaction, which stops the re-read of the tracking gathered before it', () => {
+    const s = newUsage(1);
+    recordTracking(s, 'forge', 4000);
+    recordStep(s, { model: 'claude-opus-5-5', usage: step(100_000, 1000) });
+    compactUsage(s);
+    for (let i = 0; i < 2; i++) recordStep(s, { model: 'claude-opus-5-5', usage: step(100_000, 1000) });
+    expect(s.tracking.reread).toBe(1000);
+    recordTracking(s, 'waypoint', 800);
+    recordStep(s, { model: 'claude-opus-5-5', usage: step(100_000, 1000) });
+    expect(s.tracking.reread).toBe(1200);
+    expect(sums(s).tracking).toMatchObject({ tokens: 1200 + 1200 });
+  });
+  it('the sum holds for a state of an older lens without the re-read, and with subagents only', () => {
+    const old = newUsage(1);
+    recordTracking(old, 'waypoint', 4000);
+    recordStep(old, { model: 'claude-opus-5-5', usage: step(100_000, 1000) });
+    old.tracking.reread = 0;
+    expect(sums(old).tracking).toMatchObject({ tokens: 1000 });
+    const subs = newUsage(1);
+    recordStep(subs, { agentId: 'i1', model: 'claude-sonnet-5-5', usage: step(100_000, 1000) });
+    labelLoop(subs, 'i1', 'forge:forge-impl');
+    expect(sums(subs).tracking).toBeNull();
+  });
 });

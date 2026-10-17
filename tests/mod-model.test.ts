@@ -533,10 +533,28 @@ describe('buildBandModel · the run band carries the seat, its messages, the pro
   });
   it("the seat is the coordinator's own binding (seats/main-2), never session.json; without a binding, the run's coordinator", () => {
     expect(buildBandModel('demo-shop', coordinator({ bindings: { 'main-2': bound('main-2', 's1', { via: 'forge-run' }) } }))).toMatchObject({
-      mode: 'run', sid: 'main-2', inbox: 1, escalation: false, percent: expect.any(Number), phase: { index: 1, total: 2, name: 'Base' },
+      mode: 'run', sid: 'main-2', inbox: 1, escalation: false, percent: 0, phase: { index: 1, total: 2, name: 'Base' },
       viewer: { role: 'owner', coordinator: true, runId: 'r1' },
     });
     expect(buildBandModel('demo-shop', coordinator())).toMatchObject({ mode: 'run', sid: 'main', inbox: 0, escalation: false });
+  });
+  it("of several bindings the live one of its own renewed last: another session's, or one that ended, never gives the seat", () => {
+    const bindings = {
+      'main-2': bound('main-2', 's1', { via: 'forge-run', seenAt: ago(5) }),
+      'main-3': bound('main-3', 's1', { via: 'forge-run', seenAt: ago(2) }),
+      'main-4': bound('main-4', 'someone-else', { via: 'forge-run', seenAt: ago(0) }),
+      'main-5': bound('main-5', 's1', { via: 'forge-run', seenAt: ago(0), endedAt: ago(0), endReason: 'clear' }),
+    };
+    expect(buildBandModel('demo-shop', coordinator({ bindings }))).toMatchObject({ mode: 'run', sid: 'main-3' });
+    // Only an ended binding of its own, or no .waypoint/ files at all: the run's coordinator.
+    expect(buildBandModel('demo-shop', coordinator({ bindings: { 'main-5': bindings['main-5'] } }))).toMatchObject({ mode: 'run', sid: 'main' });
+    const { session: _session, ...bare } = coordinator();
+    expect(buildBandModel('demo-shop', { ...bare, messages: {} })).toMatchObject({ mode: 'run', sid: 'main', inbox: 0 });
+  });
+  it("an open escalation of its seat sets the run band's escalation, and its percent is the plan's", () => {
+    const escalation = j({ ts: '2026-10-11T10:02:00Z', from: 'main', to: 'ui', type: 'escalation', taskId: 'T002', text: 'decide', status: 'open' });
+    const done = { T001: j({ status: 'done', owner: 'main', startedAt: ago(90), doneAt: ago(60) }) };
+    expect(buildBandModel('demo-shop', coordinator({ messages: { e1: escalation }, states: done }))).toMatchObject({ mode: 'run', sid: 'main', escalation: true, percent: 17 });
   });
   it('without a plan the run band has no progress nor phase', () => {
     const { plan: _plan, ...noPlan } = coordinator();
