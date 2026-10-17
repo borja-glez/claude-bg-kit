@@ -14179,14 +14179,15 @@ function coordinatorOf(e, live, now, stepAt) {
   return { signal, lastSeen, waiting, liveness: liveness2 };
 }
 function coordinatorLiveness(e, signal, now, activity = {}) {
-  const own = e.hookSession ? signal : null;
+  if (e.active && !e.hookSession) return "stopped";
+  const own = e.hookSession && signal?.sessionId === e.hookSession ? signal : null;
   if (own?.ended === true) return "stopped";
   const open = !!e.hookSession && (activity.bindings ?? []).some((b) => b.claude === e.hookSession && bindingLive(b, now));
   return e.active && (open || activity.busy === true) ? "alive" : coordinatorOf(e, own ? [own] : [], now, lastMovedAt(e)).liveness;
 }
 function coordinatorGone(e, signal, now, activity = {}) {
   if (!e) return false;
-  if (e.hookSession && signal?.ended === true) return true;
+  if (e.hookSession && signal?.sessionId === e.hookSession && signal.ended === true) return true;
   return e.active && coordinatorLiveness(e, signal, now, activity) === "stopped";
 }
 
