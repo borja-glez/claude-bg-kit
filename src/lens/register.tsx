@@ -13,6 +13,7 @@ import { headline, ratio, usageBandText, PALETTE, SECTION_HUE, SECTION_ICON } fr
 import { freshFinished, pushFinished, withoutRunning, type FinishedAgent } from './finished.js';
 import { endTurn, labelLoop, newTurnClock, newUsage, startTurn, touchTurn, recordStep, recordTracking, trackingKind, type UsageState } from './usage.js';
 import { mainCheckoutFrom, mergeForRun, parseUsageFile, runStartedAt, seedUsage, toUsageFile, USAGE_FILE_MAX, USAGE_FILES_MAX, type RunSource, type UsageFile } from './usage-file.js';
+import { addOwnTask, endAgent, knownTasks, linkSpawn, ownTaskOf, pruneLinks, setTool, syncListed, type AgentLink, type ListedAgent } from './links.js';
 
 const panel = atom({ plugin: 'lens', key: 'panel' } as const, null as PanelModel | null);
 const hidden = atom({ plugin: 'lens', key: 'hidden' } as const, false);
@@ -52,6 +53,23 @@ async function touch($: Engine): Promise<void> {
 // The main loop's tools in flight by tool_use_id, in start order: "Now" shows the most recent still running.
 const tools = new Map<string, { name: string; since: number }>();
 const MAX_TODOS = 200;
+// E-02, E-06, E-11: the agents lens heard of and their task (links.ts), the tasks this session touched with forge.cjs,
+// and when the main loop's last ScheduleWakeup wakes it. Module memory only, each with its cap.
+let links: AgentLink[] = [];
+let ownTasks: string[] = [];
+let wakeAt: number | null = null;
+const WAKE_MIN_S = 60;
+const WAKE_MAX_S = 3600;
+
+// ownTaskOf keeps `T001-1` whole; it counts as `T001` when that is a known task (a status or a link), else a task id
+// that itself ends in `-<n>` stays whole.
+function ownTaskId(id: string | null): string | null {
+  const m = id === null ? null : /^(.+)-\d{1,4}$/.exec(id);
+  if (id === null || !m) return id;
+  const known = knownTasks(bandModel);
+  for (const l of links) if (l.task) known.add(l.task);
+  return known.has(m[1]) ? m[1] : id;
+}
 // Whether there is activity worth a band of its own (open todos or recent subagents) when no waypoint band shows.
 let busy = false;
 // The roadmap section, read from the waypoint project's files at the panel's pace while the pane is open.
@@ -91,13 +109,16 @@ function resetPanel(): void {
   bandJson = '';
   statusCache.clear();
   jobCache.clear();
+  links = [];
+  ownTasks = [];
+  wakeAt = null;
 }
 
-// Open todos, or a subagent heard of within the hour (older entries are dropped here).
+// Open todos, a subagent heard of within the hour (older entries are dropped here), or an agent of links still alive.
 function isBusy(now: number): boolean {
   activity.subagents = activity.subagents.filter(s => now - s.since < SUBAGENT_TTL_MS);
   const todos = summarizeTodos(activity.todos);
-  return todos.total - todos.done > 0 || activity.subagents.length > 0;
+  return todos.total - todos.done > 0 || activity.subagents.length > 0 || links.some(l => l.status !== 'done');
 }
 
 // Whether waypoint will draw its own band (and its Panel button): its plugin is installed and its band model for
@@ -577,26 +598,32 @@ function recordFinished(ran: Activity['subagents'][number], now: number): void {
   });
 }
 
-// $.agent.list() is the truth on each refresh; without it, event entries older than an hour are dropped.
-async function liveSubagents($: Engine, now: number): Promise<Activity['subagents']> {
-  const fresh = activity.subagents.filter(s => now - s.since < SUBAGENT_TTL_MS);
+// $.agent.list(), each entry with its id, type, description, status and parent; null when it fails or answers junk.
+async function agentList($: Engine): Promise<ListedAgent[] | null> {
   let list: unknown;
-  try { list = await $.agent.list(); } catch { return fresh; }
-  if (!Array.isArray(list)) return fresh;
+  try { list = await $.agent.list(); } catch { return null; }
+  if (!Array.isArray(list)) return null;
+  return list.flatMap((raw): ListedAgent[] => {
+    if (!raw || typeof raw !== 'object') return [];
+    const a = raw as { id?: unknown; type?: unknown; description?: unknown; status?: unknown; parentId?: unknown };
+    if (typeof a.id !== 'string') return [];
+    return [{
+      id: a.id, type: typeof a.type === 'string' ? a.type : '', description: typeof a.description === 'string' ? a.description : '',
+      status: typeof a.status === 'string' ? a.status : '', parentId: typeof a.parentId === 'string' ? a.parentId : null,
+    }];
+  });
+}
+
+// $.agent.list() is the truth on each refresh; without it, event entries older than an hour are dropped. A teammate
+// idle between turns waits: it is not gone (E-09).
+function liveSubagents(now: number, list: ListedAgent[] | null): Activity['subagents'] {
+  const fresh = activity.subagents.filter(s => now - s.since < SUBAGENT_TTL_MS);
+  if (!list) return fresh;
   const since = new Map(fresh.map(s => [s.id, s.since]));
   const out: Activity['subagents'] = [];
-  for (const raw of list) {
-    if (!raw || typeof raw !== 'object') continue;
-    const a = raw as { id?: unknown; type?: unknown; description?: unknown; status?: unknown };
-    if (typeof a.id !== 'string') continue;
-    if (a.status !== 'running' && a.status !== 'pending' && a.status !== 'waiting') continue;
-    out.push({
-      id: a.id,
-      type: typeof a.type === 'string' ? a.type : '',
-      ...(typeof a.description === 'string' ? { description: a.description } : {}),
-      status: a.status,
-      since: since.get(a.id) ?? now,
-    });
+  for (const a of list) {
+    if (a.status !== 'running' && a.status !== 'pending' && a.status !== 'waiting' && a.status !== 'idle') continue;
+    out.push({ id: a.id, type: a.type, ...(a.description ? { description: a.description } : {}), status: a.status, since: since.get(a.id) ?? now });
   }
   // One that was running here and is gone from the list has ended: kept as finished (a later Stop finds nothing).
   const live = new Set(out.map(s => s.id));
@@ -611,6 +638,7 @@ async function buildPanel($: Engine): Promise<PanelModel> {
   const subagents = activity.subagents.filter(s => now - s.since < SUBAGENT_TTL_MS);
   return buildPanelModel({
     band: roadmap, ...panelFiles, activity: { ...activity, subagents, finished: freshFinished(finished, now) }, now, usage: usageInput(), sessionId,
+    links, ownTasks, wakeAt,
     ...(roadmap.locale ? { locale: roadmap.locale } : {}),
   });
 }
@@ -686,7 +714,11 @@ async function refreshPanel($: Engine): Promise<void> {
       try { sessionId = await $.session.id(); } catch { /* nothing is own by its session */ }
     }
     panelFiles = await loadPanelFiles($, now);
-    activity.subagents = await liveSubagents($, now);
+    const list = await agentList($);
+    activity.subagents = liveSubagents(now, list);
+    // E-09: the agents list is the truth for what it lists; a workflow's agents live by their own turn.
+    if (list) links = syncListed(links, list, now, knownTasks(bandModel));
+    links = pruneLinks(links, now);
     await refreshUsage($, true);
     await noteActivity($);
     if (!paneUp) { keepBand($, await buildPanel($)); return; }
@@ -828,6 +860,7 @@ export const register: Register = on => {
     return { text: placed ? t.panelOpened : `${t.panelWaiting}.` };
   });
 
+  // I-11: every hook that gates (ui.close, agent.spawn, tool.call and the classic ones) goes on when it fails.
   on('ui.close', async ($, e, next) => {
     const closed = await next(e);
     if (e.id === PANE) {
@@ -835,7 +868,7 @@ export const register: Register = on => {
       if (!paneUp) stopPanelTimer();
     }
     return closed;
-  });
+  }).catch(($, e, next) => next(e));
 
   on('turn.start', async ($, e, next) => {
     try {
@@ -854,6 +887,10 @@ export const register: Register = on => {
       syncTurn();
       void refreshPanel($);
     }
+    else {
+      // E-09: a workflow's agent, which no agents list names, ends with its own turn.
+      try { links = endAgent(links, e.agentId, await nowMs($)); void requestPanelWrite($); } catch { /* ignore */ }
+    }
     return next(e);
   });
 
@@ -869,19 +906,37 @@ export const register: Register = on => {
     return r;
   });
 
-  // A subagent's loop gets its type and description when it is spawned.
+  // A subagent's loop gets its type and description when it is spawned, and lens keeps which task it works on (E-02):
+  // the task its prompt names, else its parent's; a workflow's agents too, which no agents list names (E-09). It only
+  // observes: the spawn goes on whatever lens makes of it.
   on('agent.spawn', async ($, e, next) => {
     const r = await next(e);
     try {
-      if (r?.agentId) labelLoop(usage, r.agentId, String(e.subagentType ?? 'unknown'), e.description);
+      if (r?.agentId) {
+        labelLoop(usage, r.agentId, String(e.subagentType ?? 'unknown'), e.description);
+        const wf = e.workflow;
+        links = linkSpawn(links, {
+          id: r.agentId, type: String(e.subagentType ?? ''), description: String(e.description ?? ''), prompt: typeof e.prompt === 'string' ? e.prompt : '',
+          parentId: typeof e.parentAgentId === 'string' ? e.parentAgentId : null,
+          workflow: wf && typeof wf.runId === 'string' ? { runId: wf.runId, index: Number(wf.agentIndex) || 0 } : null,
+          now: await nowMs($),
+        }, knownTasks(bandModel));
+        void noteActivity($);
+        void requestPanelWrite($);
+      }
     } catch { /* ignore */ }
     return r;
-  });
+  }).catch(($, e, next) => next(e));
 
-  // The main loop's tool in flight and its todo list; a subagent's calls are its own.
+  // The main loop's tool in flight and its todo list; a subagent's tool goes on its own agent (E-11). A forge.cjs call of
+  // any loop names a task this session works on (E-06), and the main loop's ScheduleWakeup says when it wakes (E-11).
   on('tool.call', async ($, e, next) => {
     const mine = !e.agentId;
+    const input = e as unknown as Record<string, unknown>;
     void touch($);
+    if (e.tool === 'Bash') {
+      try { ownTasks = addOwnTask(ownTasks, ownTaskId(ownTaskOf(input.command))); } catch { /* ignore */ }
+    }
     if (mine) {
       try {
         tools.delete(e.tool_use_id);
@@ -892,15 +947,22 @@ export const register: Register = on => {
           activity.todos = Array.isArray(e.todos) ? e.todos.slice(0, MAX_TODOS) : e.todos;
           void noteActivity($);
         }
+        if (e.tool === 'ScheduleWakeup') {
+          // The engine clamps the delay to 60-3600 s; stop ends the loop and its wake-up.
+          const delay = typeof input.delaySeconds === 'number' && Number.isFinite(input.delaySeconds) ? input.delaySeconds : null;
+          wakeAt = input.stop === true || delay === null ? null : (await nowMs($)) + Math.min(WAKE_MAX_S, Math.max(WAKE_MIN_S, delay)) * 1000;
+        }
         void requestPanelWrite($);
       } catch { /* ignore */ }
+    } else {
+      try { links = setTool(links, e.agentId!, { name: String(e.tool), since: await nowMs($) }); void requestPanelWrite($); } catch { /* ignore */ }
     }
     try {
       const result = await next(e);
       // A main-loop waypoint or forge call is tracking: its input and result, about four characters a token.
       if (mine) {
         try {
-          const kind = trackingKind(String(e.tool), e as unknown as Record<string, unknown>);
+          const kind = trackingKind(String(e.tool), input);
           if (kind) {
             const r = result as { text?: unknown; result?: unknown } | undefined;
             const out = typeof r?.text === 'string' ? r.text.length : (JSON.stringify(r?.result ?? '') ?? '').length;
@@ -915,8 +977,12 @@ export const register: Register = on => {
         showTool();
         void requestPanelWrite($);
       }
+      if (!mine) {
+        links = setTool(links, e.agentId!, null);
+        void requestPanelWrite($);
+      }
     }
-  });
+  }).catch(($, e, next) => next(e));
 
   on('classic.SubagentStart', async ($, e, next) => {
     try {
@@ -926,27 +992,28 @@ export const register: Register = on => {
       // A loop agent.spawn did not label (lens loaded later, another spawn path) takes the hook's type.
       const kind = usage.loops[id]?.kind;
       if (!kind || kind === 'unknown') labelLoop(usage, id, String(e.agent_type ?? 'unknown'));
+      // E-09: an agent agent.spawn did not see (lens loaded later) is kept too, without a prompt to read its task from.
+      if (!links.some(l => l.id === id)) links = linkSpawn(links, { id, type: String(e.agent_type ?? ''), description: '', prompt: '', parentId: null, workflow: null, now: await nowMs($) }, knownTasks(bandModel));
       await touch($);
       await noteActivity($);
       void requestPanelWrite($);
     } catch { /* ignore */ }
     return next(e);
-  });
-
+  }).catch(($, e, next) => next(e));
   on('classic.SubagentStop', async ($, e, next) => {
     try {
       void touch($);
       const id = String(e.agent_id);
       const ran = activity.subagents.find(s => s.id === id);
       activity.subagents = activity.subagents.filter(s => s.id !== e.agent_id);
+      links = endAgent(links, id, await nowMs($), { any: true });
       // Only a subagent still known here is listed (no start, no duration); one a refresh already dropped was recorded then.
       if (ran) recordFinished(ran, await nowMs($));
       void noteActivity($);
       void requestPanelWrite($);
     } catch { /* ignore */ }
     return next(e);
-  });
-
+  }).catch(($, e, next) => next(e));
   on('classic.TaskCreated', ($, e, next) => {
     try {
       const id = String(e.task_id);
@@ -954,8 +1021,7 @@ export const register: Register = on => {
       void requestPanelWrite($);
     } catch { /* ignore */ }
     return next(e);
-  });
-
+  }).catch(($, e, next) => next(e));
   on('classic.TaskCompleted', ($, e, next) => {
     try {
       const id = String(e.task_id);
@@ -966,8 +1032,7 @@ export const register: Register = on => {
       void requestPanelWrite($);
     } catch { /* ignore */ }
     return next(e);
-  });
-
+  }).catch(($, e, next) => next(e));
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     try {
       const m = await read($, panel);
