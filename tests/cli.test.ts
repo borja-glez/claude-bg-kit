@@ -10,6 +10,7 @@ import { parsePlan } from '../src/lib/plan.js';
 import { launchRun, HERDR_TEMPLATE } from '../src/lib/launcher.js';
 import { buildDocs, planHash } from '../src/lib/sync.js';
 import { parseDesign } from '../src/lib/design.js';
+import { PAGE_RULES } from '../src/lib/publish.js';
 
 const FIXTURE = new URL('./fixtures/plan.yaml', import.meta.url);
 let dir: string;
@@ -1715,14 +1716,18 @@ describe('page --publish-info and the sync line', () => {
   };
   const info = () => JSON.parse(run(['page', 'plan.yaml', '--out', 'r.html', '--publish-info'], io).stdout);
   const caps = { db: { rules: [{ path: '', read: 'view', write: 'admin' }, { path: 'notes', read: 'view', write: 'interact' }, { path: 'proposals', read: 'view', write: 'interact' }, { path: 'approvals', read: 'view', write: 'owner' }] }, user: { scopes: ['profile'] }, downloads: true };
+  const WP = (JSON.parse(readFileSync(path.join(process.cwd(), 'plugins', 'waypoint', '.claude-plugin', 'plugin.json'), 'utf8')) as { version: string }).version;
+  // meta/page carries the roadmap id (the plan's project: known before the first publish) so the approvals warning keys on it
+  const pageInfo = () => ({ pageVersion: WP, rules: PAGE_RULES, write: { op: 'set', collection: 'meta', doc_id: 'page', data: { version: WP, rules: PAGE_RULES, roadmap: 'demo-shop', publishedAt: io.now().toISOString() } } });
+  const snapshotOf = (file: string) => JSON.parse(readFileSync(file, 'utf8').match(/<script type="application\/json" id="wp-snapshot">([\s\S]*?)<\/script>/)![1]);
   it('without .forge the roadmap stays shareable and nothing is said', () => {
-    expect(info()).toEqual({ out: path.join(dir, 'r.html'), capabilities: caps, internal: false, say: null });
+    expect(info()).toEqual({ out: path.join(dir, 'r.html'), capabilities: caps, internal: false, say: null, ...pageInfo() });
     expect(existsSync(path.join(dir, 'r.html'))).toBe(true);
   });
   it('with forge evidence uploaded it declares assets and tells the person once, in the plan language', () => {
     mkdirSync(path.join(dir, '.forge'));
     expect(info()).toEqual({ out: path.join(dir, 'r.html'), capabilities: { ...caps, assets: {} }, internal: true,
-      say: 'El roadmap lleva las capturas de verificación de forge, así que queda interno de tu organización y no se puede compartir públicamente (con evidence: local en .forge/config.yaml no se suben).' });
+      say: 'El roadmap lleva las capturas de verificación de forge, así que queda interno de tu organización y no se puede compartir públicamente (con evidence: local en .forge/config.yaml no se suben).', ...pageInfo() });
     const p = path.join(dir, 'plan.yaml');
     writeFileSync(p, readFileSync(p, 'utf8').replace('locale: es', 'locale: en'));
     expect(info().say).toBe("The roadmap carries forge's verification screenshots, so it stays internal to your organization and cannot be shared publicly (with evidence: local in .forge/config.yaml they are not uploaded).");
@@ -1745,5 +1750,21 @@ describe('page --publish-info and the sync line', () => {
     const p = path.join(dir, 'plan.yaml');
     writeFileSync(p, readFileSync(p, 'utf8').replace('locale: es', 'locale: en'));
     expect(say()).toBe('Roadmap: https://claude.ai/artifact/r1 · 6 tasks, 2 phases, 2 tracks.');
+  });
+  it('the snapshot says which waypoint built it; page --states adds the listed states and when they were listed (G-13, G-14)', () => {
+    expect(snapshotOf(run(['page', 'plan.yaml', '--out', 'r.html'], io).stdout.trim())).toMatchObject({ pageVersion: WP });
+    expect(snapshotOf(path.join(dir, 'r.html'))).not.toHaveProperty('states');
+    const st = path.join(dir, 'db', 'state');
+    mkdirSync(st, { recursive: true });
+    const put = (id: string, status: string, at: string) => {
+      writeFileSync(path.join(st, `${id}.json`), JSON.stringify({ status }));
+      utimesSync(path.join(st, `${id}.json`), new Date(at), new Date(at));
+    };
+    put('T001', 'done', '2026-10-11T09:45:00.000Z');
+    put('T002', 'in_progress', '2026-10-11T09:30:00.000Z');
+    put('T003', 'lost', '2026-10-11T09:50:00.000Z');
+    const snap = snapshotOf(run(['page', 'plan.yaml', '--out', 'r.html', '--states', 'db/state'], io).stdout.trim());
+    expect(snap).toMatchObject({ pageVersion: WP, states: { T001: 'done', T002: 'in_progress' }, statesAt: '2026-10-11T09:45:00.000Z' });
+    expect(snap.states).not.toHaveProperty('T003');
   });
 });

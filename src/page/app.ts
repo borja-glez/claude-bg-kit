@@ -8,7 +8,8 @@ import { mergeMetrics, normalizeEvent, normalizeInfinite, normalizeMessage, norm
 import { decodeView, encodeView } from './urlstate.js';
 import { categoryKeys, esc, NOTE_FILTERS, PROPOSAL_FILTERS, relText, renderApp, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, vfilterStatuses, VFILTER_KEYS, VIEWS, type Model, type RelKind, type ProposalFilterKind, type UiState, type VFilterKey, type View } from './render.js';
 
-export interface Snapshot { meta: MetaDoc; phases: PhaseDoc[] }
+/** The page's embedded snapshot; G-13 and G-14: the waypoint that built it and the states the last listing saw (plan 4b shows them). */
+export interface Snapshot { meta: MetaDoc; phases: PhaseDoc[]; pageVersion?: string; states?: Record<string, TaskStatus>; statesAt?: string }
 export interface Env {
   claude?: { use(name: string): Promise<unknown> } | null;
   snapshot: Snapshot | null;

@@ -59,6 +59,7 @@ export function normalizeMeta(x: unknown, report?: Report): MetaDoc | null {
     metrics,
     syncedAt: str(x.syncedAt),
     ...linksOf(x.links),
+    ...(typeof x.waypointVersion === 'string' && /^\d+\.\d+\.\d+/.test(x.waypointVersion) ? { waypointVersion: x.waypointVersion.slice(0, 40) } : {}),
   };
 }
 

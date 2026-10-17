@@ -3,6 +3,9 @@ import { readFileSync } from 'node:fs';
 import { parsePlan } from '../src/lib/plan.js';
 import { buildDocs, buildSyncWrites, planHash, planViewFromDocs } from '../src/lib/sync.js';
 import type { States } from '../src/lib/types.js';
+import { compareVersions, WAYPOINT_VERSION } from '../src/lib/waypoint-version.js';
+
+const WP = (JSON.parse(readFileSync('plugins/waypoint/.claude-plugin/plugin.json', 'utf8')) as { version: string }).version;
 
 const plan = parsePlan(readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8'));
 const NOW = '2026-10-11T10:00:00.000Z';
@@ -113,5 +116,19 @@ describe('buildSyncWrites fix round 1', () => {
     expect(planWrite.doc_id).toBe('F:1');
     expect(planWrite.file_path!.endsWith('plan-F_1.json')).toBe(true);
     expect(Object.keys(files).some(p => p.endsWith('plan-F_1.json'))).toBe(true);
+  });
+});
+
+describe('the waypoint version (G-13)', () => {
+  it('is the manifest version, and buildDocs writes it in meta/project, out of planHash', () => {
+    expect(WAYPOINT_VERSION).toBe(WP);
+    expect(buildDocs(plan, NOW).meta.waypointVersion).toBe(WP);
+  });
+  it('compareVersions compares x.y.z numerically; anything else counts as 0.0.0', () => {
+    expect(compareVersions('0.26.0', '0.25.9')).toBe(1);
+    expect(compareVersions('0.9.0', '0.10.0')).toBe(-1);
+    expect(compareVersions('1.2.3', '1.2.3')).toBe(0);
+    expect(compareVersions('junk', '0.0.1')).toBe(-1);
+    expect(compareVersions(undefined, '0.0.0')).toBe(0);
   });
 });

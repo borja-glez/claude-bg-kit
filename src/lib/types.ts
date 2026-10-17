@@ -2,6 +2,7 @@ import type { DecisionPoint } from './decisions.js';
 import type { ForgeDocV2 } from './roadmap-doc.js';
 
 export type TaskStatus = 'free' | 'claimed' | 'in_progress' | 'blocked' | 'done' | 'orphaned';
+export const TASK_STATUSES: readonly TaskStatus[] = ['free', 'claimed', 'in_progress', 'blocked', 'done', 'orphaned'];
 export type PlanStatus = 'committed' | 'provisional';
 export const TRACK_COLORS = ['blue', 'mauve', 'teal', 'pink', 'sky', 'flamingo'] as const;
 export type TrackColor = (typeof TRACK_COLORS)[number];
@@ -145,6 +146,8 @@ export interface MetaDoc {
   /** G-25: the design the plan comes from and its version (from artifacts.design and design_version). */
   links?: { design?: string; designVersion?: number };
   syncedAt: string;
+  /** G-13: the waypoint that synced the plan; the page compares it with its own version. */
+  waypointVersion?: string;
 }
 /** meta/infinite: forge's infinite run as the roadmap shows it (its own doc, so the meta/project sync never overwrites it). */
 export interface InfiniteDoc {

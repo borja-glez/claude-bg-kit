@@ -19,14 +19,16 @@ import { BRANCH_RE, mainWorktreeFrom, samePath } from '../lib/worktree.js';
 import { excludeWorktrees } from '../lib/git-info.js';
 import { isCommitCommand, runHook } from './hooks.js';
 import { launchRun, EFFORTS, MODELS, type Launcher, type Effort, type Model } from '../lib/launcher.js';
-import { roadmapCapabilities, sharingNotice, syncSummary } from '../lib/publish.js';
+import { PAGE_RULES, roadmapCapabilities, sharingNotice, syncSummary } from '../lib/publish.js';
+import { WAYPOINT_VERSION } from '../lib/waypoint-version.js';
+import { TASK_STATUSES } from '../lib/types.js';
 import { claudeSessionId, noClaudeSession } from '../lib/claude-session.js';
 import { blockBatch, claimBatch, cleanText, doneBatch, freeBatch, heartbeatBatch, registerBatch, REASON_MAX, SUMMARY_MAX } from '../lib/batches.js';
 import { BOUND_VIAS, MAX_SEATS, isBoundVia, type BoundDoc } from '../lib/bound.js';
 import { boundFile, boundLive, checkoutSid, leftSeatOf, openTasksOf, pidFromEnv, readBinding, readSeats, recordBase, secondSeatOf, seatsDir, settleBinding, writeAtomic, writeBinding } from '../lib/bound-fs.js';
 import { isSafeId } from '../lib/execution-state.js';
 import { loadConfig } from '../forge/config.js';
-import type { Commit, MessageDoc, NoteDoc, PhaseDoc, PlanView, SessionDoc, TaskState } from '../lib/types.js';
+import type { Commit, MessageDoc, NoteDoc, PhaseDoc, PlanView, SessionDoc, TaskState, TaskStatus } from '../lib/types.js';
 
 // The classic hooks live in hooks.ts; the tests import isCommitCommand from here.
 export { isCommitCommand };
@@ -124,7 +126,11 @@ export function run(argv: string[], io: Io): Result {
       case 'page': {
         const p = loadPlan();
         const out = abs(flag('out') ?? '.waypoint/roadmap.html');
-        const snapshot = buildDocs(p, io.now().toISOString());
+        const now = io.now().toISOString();
+        // G-13, G-14: the snapshot says which waypoint built the page and, with --states, the states the last listing saw
+        // (the page shows them until the database answers, and offline).
+        const states = flag('states') ? statesOf(abs(flag('states')!)) : null;
+        const snapshot = { ...buildDocs(p, now), pageVersion: WAYPOINT_VERSION, ...(states ? { states: states.states, statesAt: states.at } : {}) };
         const tpl = readFileSync(path.join(io.assetsDir, 'roadmap.template.html'), 'utf8');
         const html = tpl
           .replace('__TITLE__', () => `${p.project} Roadmap`)
@@ -133,7 +139,12 @@ export function run(argv: string[], io: Io): Result {
         writeFileSync(out, html);
         if (!args.includes('--publish-info')) return ok(out);
         const internal = evidenceUploaded(io.cwd);
-        return ok(JSON.stringify({ out, capabilities: roadmapCapabilities(internal), internal, say: sharingNotice(p, internal) }));
+        // G-13, §4.1: meta/page, the version and the rules of what is published (sync --db compares it; infinite reads rules).
+        // `roadmap` is the plan's project, the id known before the first publish: the approvals warning keys on it.
+        return ok(JSON.stringify({
+          out, capabilities: roadmapCapabilities(internal), internal, say: sharingNotice(p, internal), pageVersion: WAYPOINT_VERSION, rules: PAGE_RULES,
+          write: { op: 'set', collection: 'meta', doc_id: 'page', data: { version: WAYPOINT_VERSION, rules: PAGE_RULES, roadmap: p.project, publishedAt: now } },
+        }));
       }
       case 'sync': {
         const p = loadPlan();
@@ -836,6 +847,24 @@ function readDocs<T = unknown>(dir: string | undefined): Record<string, T> {
       .filter(f => f.endsWith('.json'))
       .map(f => [f.slice(0, -5), JSON.parse(readFileSync(path.join(dir, f), 'utf8')) as T]),
   );
+}
+
+/** G-14: the states a `state` listing holds (id → status) and when its newest valid file was written; null with none. */
+function statesOf(dir: string): { states: Record<string, TaskStatus>; at: string } | null {
+  if (!existsSync(dir)) return null;
+  const states: Record<string, TaskStatus> = {};
+  let newest = 0;
+  for (const f of readdirSync(dir).filter(n => n.endsWith('.json')).sort()) {
+    const id = f.slice(0, -5);
+    if (!isPlanId(id)) continue;
+    try {
+      const doc = JSON.parse(readFileSync(path.join(dir, f), 'utf8')) as { status?: unknown } | null;
+      if (!doc || typeof doc.status !== 'string' || !(TASK_STATUSES as readonly string[]).includes(doc.status)) continue;
+      states[id] = doc.status as TaskStatus;
+      newest = Math.max(newest, statSync(path.join(dir, f)).mtimeMs);
+    } catch { /* a broken file is left out */ }
+  }
+  return Object.keys(states).length ? { states, at: new Date(newest).toISOString() } : null;
 }
 
 // forge uploads its verification screenshots to the roadmap (the `assets` capability) when the repository has a .forge/

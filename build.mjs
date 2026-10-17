@@ -1,8 +1,12 @@
 import { build } from 'esbuild';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
+// G-13: the waypoint version the CLIs and the roadmap page are built as (src/lib/waypoint-version.ts reads it).
+const waypointVersion = JSON.parse(await readFile('plugins/waypoint/.claude-plugin/plugin.json', 'utf8')).version;
+const define = { __WAYPOINT_VERSION__: JSON.stringify(waypointVersion) };
 
 await build({
   entryPoints: ['src/cli/main.ts'],
+  define,
   bundle: true,
   platform: 'node',
   format: 'cjs',
@@ -13,6 +17,7 @@ await build({
 
 await build({
   entryPoints: ['src/forge/cli/main.ts'],
+  define,
   bundle: true,
   platform: 'node',
   format: 'cjs',
@@ -23,6 +28,7 @@ await build({
 
 const page = await build({
   entryPoints: ['src/page/main.ts'],
+  define,
   bundle: true,
   format: 'iife',
   target: 'es2020',

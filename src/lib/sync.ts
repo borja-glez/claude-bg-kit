@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { MetaDoc, PhaseDoc, Plan, PlanView, States } from './types.js';
+import { WAYPOINT_VERSION } from './waypoint-version.js';
 
 export function planHash(plan: Plan): string {
   const { artifacts: _ignored, ...rest } = plan;
@@ -22,6 +23,7 @@ export function buildDocs(plan: Plan, nowIso: string): { meta: MetaDoc; phases: 
       phaseOrder: plan.phases.map(p => p.id),
       metrics: {},
       syncedAt: nowIso,
+      waypointVersion: WAYPOINT_VERSION,
       ...(links ? { links } : {}),
     },
     phases: plan.phases.map((p, i) => ({

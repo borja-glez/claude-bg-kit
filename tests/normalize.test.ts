@@ -94,6 +94,11 @@ describe('normalizeMeta', () => {
     expect(normalizePhase({ id: 'F1', name: 'Base', order: 0, tasks: [], goal: 'orders' })!.goal).toBe('orders');
     expect(normalizePhase({ id: 'F1', name: 'Base', order: 0, tasks: [], goal: 5 })).not.toHaveProperty('goal');
   });
+  it('keeps the waypoint version that synced the plan, only when it is one (G-13)', () => {
+    expect(normalizeMeta({ name: 'x', waypointVersion: '0.26.0' })!.waypointVersion).toBe('0.26.0');
+    expect(normalizeMeta({ name: 'x', waypointVersion: 'new' })).not.toHaveProperty('waypointVersion');
+    expect(normalizeMeta({ name: 'x', waypointVersion: 7 })).not.toHaveProperty('waypointVersion');
+  });
 });
 
 describe('normalizePhase', () => {
