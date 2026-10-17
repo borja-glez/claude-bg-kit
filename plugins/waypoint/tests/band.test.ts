@@ -1240,6 +1240,128 @@ test('Close on a run still active, with no coordinator, asks twice as Stop does 
   await ui.unmount();
 });
 
+// A run still active whose coordinator is gone, as a notice: run `runId`, in `locale`.
+const orphan = (runId: string, locale = 'es') => notice({ subject: 'run', seat: null, task: null, title: null, runId, integrated: 3, total: 12, key: `run:${runId}`, kind: 'previous', stopReason: null, viewer: PREVIOUS, locale });
+
+test('Stop and Close folded into ⋯ are confirmed from its row: the arming press keeps it open, the sending one closes it (F-02, F-06)', async ($, on) => {
+  engineBottom(on);
+  const sent: string[] = [];
+  const toasts: string[] = [];
+  recordCommands(on, sent);
+  on('ui.toast', (_$, e) => { toasts.push(e.text); return { value: undefined }; });
+  let model: WaypointBand = RUN;
+  serveBand(on, () => model);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  const cases: [WaypointBand, number, string, string][] = [[RUN, 80, 'stop-run', 't'], [orphan('r1'), 60, 'close', 'c']];
+  for (const [band, columns, key, letter] of cases) {
+    model = band;
+    sent.length = 0;
+    const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: at(columns), viewport: VIEW(false, columns + 5) });
+    expect(await ui.find({ key }), key).toBeUndefined();
+    await ui.press({ key: 'more' });
+    await ui.press({ key });
+    expect(sent, key).toEqual([]);
+    expect(toasts.at(-1), key).toBe(`Pulsa ${letter} otra vez para parar la ejecución`);
+    expect(await ui.find({ key: 'band-row2' }), key).toBeDefined();
+    await ui.press({ key });
+    expect(sent, key).toEqual(['/forge:stop']);
+    expect(await ui.find({ key: 'band-row2' }), key).toBeUndefined();
+    await ui.unmount();
+  }
+});
+
+test('a confirmation armed near the end of the ⋯ row keeps the row open until it is due (F-02, F-06)', async ($, on) => {
+  engineBottom(on);
+  const sent: string[] = [];
+  recordCommands(on, sent);
+  on('ui.toast', () => ({ value: undefined }));
+  serveBand(on, () => RUN);
+  const clock = mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: at(80), viewport: VIEW(false, 85) });
+  await ui.press({ key: 'more' });
+  await clock.advance(28_000);
+  await ui.press({ key: 'stop-run' });
+  // The row's own 30 s are over; the confirmation's 5 s are not.
+  await clock.advance(3_000);
+  expect(await ui.find({ key: 'stop-run' })).toBeDefined();
+  await ui.press({ key: 'stop-run' });
+  expect(sent).toEqual(['/forge:stop']);
+  await ui.unmount();
+});
+
+test('a confirmation is tied to the run the first press saw: another run on the band asks again and sends nothing (F-06)', async ($, on) => {
+  engineBottom(on);
+  const sent: string[] = [];
+  const toasts: string[] = [];
+  recordCommands(on, sent);
+  on('ui.toast', (_$, e) => { toasts.push(e.text); return { value: undefined }; });
+  let model: WaypointBand = RUN;
+  serveBand(on, () => model);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  const cases: [WaypointBand, WaypointBand, string][] = [
+    [RUN, { ...RUN, viewer: { ...COORDINATOR, runId: 'r2' } }, 'stop-run'],
+    [orphan('r1'), orphan('r2'), 'close'],
+  ];
+  for (const [first, second, key] of cases) {
+    model = first;
+    sent.length = 0;
+    toasts.length = 0;
+    const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+    await ui.press({ key });
+    model = second;
+    await ui.redraw();
+    await ui.press({ key });
+    expect(sent, key).toEqual([]);
+    expect(toasts, key).toHaveLength(2);
+    // Armed now for the run it shows: the next press sends.
+    await ui.press({ key });
+    expect(sent, key).toEqual(['/forge:stop']);
+    await ui.unmount();
+  }
+});
+
+test('the confirmation toasts in English name the letter to press again (F-06)', async ($, on) => {
+  engineBottom(on);
+  const toasts: string[] = [];
+  on('ui.toast', (_$, e) => { toasts.push(e.text); return { value: undefined }; });
+  let model: WaypointBand = { ...RUN, locale: 'en' };
+  serveBand(on, () => model);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  let ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  await ui.press({ key: 'stop-run' });
+  expect(toasts.at(-1)).toBe('Press t again to stop the run');
+  await ui.unmount();
+  model = orphan('r1', 'en');
+  ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  await ui.press({ key: 'close' });
+  expect(toasts.at(-1)).toBe('Press c again to stop the run');
+  await ui.unmount();
+});
+
+test("a member's Stop gives no toast when the prompt does not take /forge:stop (B-08)", async ($, on) => {
+  engineBottom(on);
+  const sent: string[] = [];
+  const filled: string[] = [];
+  const toasts: string[] = [];
+  let takes = false;
+  recordCommands(on, sent);
+  on('prompt.fill', (_$, e) => { filled.push(e.text); return { isFilled: takes }; });
+  on('ui.toast', (_$, e) => { toasts.push(e.text); return { value: undefined }; });
+  serveBand(on, () => ({ ...WORK, run: { coordinator: 'main', stage: 'implement' }, viewer: { role: 'owner', coordinator: false, runId: 'r1' } }) as WaypointBand);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  // A prompt that does not take the text (a dialog, headless) gets no toast.
+  await ui.press({ key: 'stop-run' });
+  expect(filled).toEqual(['/forge:stop']);
+  expect(sent).toEqual([]);
+  expect(toasts).toEqual([]);
+  takes = true;
+  await ui.press({ key: 'stop-run' });
+  expect(sent).toEqual([]);
+  expect(toasts).toEqual(['/forge:stop está en el prompt: pulsa Enter para parar toda la ejecución']);
+  await ui.unmount();
+});
+
 test('a task past its estimate shows its clock in hours and minutes, in amber (F-11)', async ($, on) => {
   engineBottom(on);
   serveBand(on, () => WORK);

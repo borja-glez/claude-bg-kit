@@ -78,9 +78,9 @@ async function publishDrawn($: Engine): Promise<void> {
 // F-05: the ⋯ row of a one-row band stays open until an action is pressed or 30 s pass.
 const MORE_OPEN_MS = 30_000;
 let moreUntil = 0;
-// F-06: Stop, and Close on a run still active, ask twice: which button is armed and until when.
+// F-06: Stop, and Close on a run still active, ask twice: which button is armed, for which run, and until when.
 const CONFIRM_MS = 5_000;
-let armed: { key: string; until: number } | null = null;
+let armed: { key: string; runId: string | null; until: number } | null = null;
 // F-06: whether the band was drawn on its last render, for the hint line's tail outside fullscreen.
 let bandShown = false;
 
@@ -162,8 +162,11 @@ function startTimer($: Engine): void {
   timer = $.clock.every(30000, () => { void tick($); });
 }
 
-/** A control of the band: what the layout measures (band-fit.ts), what a press runs, and a link's address. */
-interface Control extends BandControl { press: (e: UiPressArgument) => void; href?: string; variant?: 'primary'; dismiss?: true }
+/**
+ * A control of the band: what the layout measures (band-fit.ts), what a press runs, and a link's address. `confirm`
+ * marks one that asks twice: its first press does nothing yet, so it leaves the ⋯ row open.
+ */
+interface Control extends BandControl { press: (e: UiPressArgument) => void; href?: string; variant?: 'primary'; dismiss?: true; confirm?: true }
 
 // F-06: puts an address on the clipboard of the surface pressed and shows it in a toast; «copied» only when it took.
 async function copyUrl($: Engine, url: string, surface: UiPressArgument['surface'], copied: string, shown: string): Promise<void> {
@@ -178,6 +181,19 @@ async function toggleMore($: Engine): Promise<void> {
   moreUntil = now < moreUntil ? 0 : now + MORE_OPEN_MS;
   $.ui.invalidate('ui.render');
   if (moreUntil) $.clock.after(MORE_OPEN_MS, () => { $.ui.invalidate('ui.render'); });
+}
+
+// F-05: an action closes the ⋯ row.
+function closeMore($: Engine): void {
+  if (moreUntil) { moreUntil = 0; $.ui.invalidate('ui.render'); }
+}
+
+// F-02, F-06: a confirmation armed from the ⋯ row keeps the row open until it is due, so the second press finds its
+// button; the band is redrawn when that time is up.
+function holdMore($: Engine, now: number, until: number): void {
+  if (now >= moreUntil || moreUntil >= until) return;
+  moreUntil = until;
+  $.clock.after(until - now, () => { $.ui.invalidate('ui.render'); });
 }
 
 // The tone of a part of the line: the decision and the warnings in the theme's colours, a notice dim.
@@ -278,16 +294,20 @@ export const register: Register = on => {
       const fillStop = () => {
         $.prompt.fill({ text: '/forge:stop', mode: 'replace' }).then(r => { if (r.isFilled) $.ui.toast(t.stopFilled); }).catch(() => undefined);
       };
-      // F-06: a single key must not stop a run. The first press arms the button for 5 s and says so; the second runs it.
-      const confirmed = (key: string, hotkey: string, command: string) => () => {
+      // F-06: a single key must not stop a run. The first press arms the button for 5 s, for the run the band shows, and
+      // says so; the second runs it, and closes the ⋯ row. A second press on a band that shows another run sends nothing:
+      // it arms the button for that run and asks again.
+      const confirmed = (key: string, hotkey: string, command: string, runId: string | null) => () => {
         void (async () => {
           const pressedAt = await nowMs($);
-          if (armed && armed.key === key && pressedAt <= armed.until) {
+          if (armed && armed.key === key && armed.runId === runId && pressedAt <= armed.until) {
             armed = null;
+            closeMore($);
             submit(command)();
             return;
           }
-          armed = { key, until: pressedAt + CONFIRM_MS };
+          armed = { key, runId, until: pressedAt + CONFIRM_MS };
+          holdMore($, pressedAt, armed.until);
           try { $.ui.toast(t.confirmStop.replace('{k}', hotkey), { timeoutMs: CONFIRM_MS }); } catch { /* the next press asks again */ }
         })();
       };
@@ -323,7 +343,9 @@ export const register: Register = on => {
           return [
             { key: 'view', label: t.view, short: t.short.view, hotkey: 'v', press: submit('/waypoint:status') },
             { key: 'resume', label: t.resume, short: t.short.resume, hotkey: 'e', press: submit('/forge:run --resume') },
-            { key: 'close', label: t.close, short: t.short.close, hotkey: 'c', press: n.stopReason ? submit('/forge:stop') : confirmed('close', 'c', '/forge:stop') },
+            n.stopReason
+              ? { key: 'close', label: t.close, short: t.short.close, hotkey: 'c', press: submit('/forge:stop') }
+              : { key: 'close', label: t.close, short: t.short.close, hotkey: 'c', confirm: true, press: confirmed('close', 'c', '/forge:stop', n.runId) },
           ];
         }
         if (n.subject === 'design') return [{ key: 'resume', label: t.resume, short: t.short.resume, hotkey: 'e', variant: 'primary', press: submit('/waypoint:design resume') }];
@@ -351,7 +373,7 @@ export const register: Register = on => {
       } else if (m.mode === 'run') {
         modeControls = [
           { key: 'status', label: t.status, short: t.short.status, hotkey: 's', press: submit('/waypoint:status') },
-          { key: 'stop-run', label: t.stopRun, hotkey: 't', press: confirmed('stop-run', 't', '/forge:stop') },
+          { key: 'stop-run', label: t.stopRun, hotkey: 't', confirm: true, press: confirmed('stop-run', 't', '/forge:stop', m.viewer.runId) },
           ...roadmap(m.roadmapUrl),
         ];
       } else if (m.mode === 'notice') {
@@ -374,9 +396,9 @@ export const register: Register = on => {
       const panel: Control[] = lens ? [{ key: 'panel', label: t.panel, hotkey: 'p', press: submit('/lens') }] : [];
       const controls: Control[] = [...modeControls, ...panel, { key: DISMISS_KEY, label: '×', hotkey: 'x', dismiss: true, press: dismiss }];
       const lay = layoutBand(bandParts(m, now), controls, { bodyColumns: e.props.bodyColumns, maxRows: e.props.maxRows, fullscreen, moreOpen: now < moreUntil });
-      // Any action closes the ⋯ row.
+      // Any action closes the ⋯ row; a press that only arms a confirmation is not one yet.
       const act = (c: Control) => (pressed: UiPressArgument) => {
-        if (moreUntil) { moreUntil = 0; $.ui.invalidate('ui.render'); }
+        if (!c.confirm) closeMore($);
         c.press(pressed);
       };
       const plain = lay.plain ? { plain: true as const } : {};
