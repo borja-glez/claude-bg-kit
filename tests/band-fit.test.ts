@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { bandLevel, controlWidth, fitParts, joinParts, layoutBand, partsWidth, type BandControl, type BandPart } from '../src/mod/band-fit.js';
 import { stringWidth } from '../src/lib/text-width.js';
-import { bandLine, bandParts } from '../src/mod/band-line.js';
+import { bandLine, bandParts, TEXT } from '../src/mod/band-line.js';
 import { NO_VIEWER, type BandModel } from '../src/mod/model.js';
 
 const P = (key: string, text: string, prio: number, o: Partial<BandPart> = {}): BandPart => ({ key, text, prio, ...o });
@@ -191,5 +191,18 @@ describe('bandParts (F-04, F-09, F-10, F-11, the notice band)', () => {
     expect(bandLine(NOTICE(), NOW)).toBe('◌ quedó a medias: T019 Reparto de pedidos con un título bastan… · hace 2 h');
     expect(fitParts(parts, 16).shown.map(p => p.key)).toEqual(['notice', 'task']);
     expect(joinParts(fitParts(parts, 16).shown)).toBe('◌ a medias T019');
+  });
+});
+
+describe('the short labels (F-05)', () => {
+  it('have the same keys in es and en, each for a long label it never outgrows', () => {
+    expect(Object.keys(TEXT.es.short).sort()).toEqual(Object.keys(TEXT.en.short).sort());
+    for (const lang of ['es', 'en'] as const) {
+      for (const [key, short] of Object.entries(TEXT[lang].short)) {
+        const long = (TEXT[lang] as unknown as Record<string, unknown>)[key];
+        expect(typeof long, `${lang} ${key}`).toBe('string');
+        expect(stringWidth(short), `${lang} ${key}`).toBeLessThanOrEqual(stringWidth(long as string));
+      }
+    }
   });
 });

@@ -45,6 +45,16 @@ export const TEXT = {
     integratedN: 'integradas', queuedN: 'por integrar', memberOf: 'de la ejecución de {c}',
     otherTrack: 'Otro frente', view: 'Ver', join: 'Unirme', resume: 'Retomar', release: 'Liberar', close: 'Cerrar',
     stopFilled: '/forge:stop está en el prompt: pulsa Enter para parar toda la ejecución',
+    // F-05: the short labels of the narrow levels (§4.5); Aprobar, Panel and Parar are short already.
+    short: {
+      nextTask: 'Siguiente', status: 'Estado', launch: 'Lanzar…', roadmap: 'Roadmap', applyAll: 'Aplicar', pick: 'Elegir…', round: 'Ronda',
+      rewrite: 'Reescribir', interview: 'Preguntar', viewDesign: 'Diseño', otherTrack: 'Frente', join: 'Unirme', resume: 'Retomar',
+      release: 'Liberar', view: 'Ver', close: 'Cerrar',
+    },
+    confirmStop: 'Pulsa {k} otra vez para parar la ejecución',
+    roadmapCopied: 'URL del roadmap copiada: {url}', roadmapShown: 'Roadmap: {url}',
+    designCopied: 'URL del diseño copiada: {url}', designShown: 'Diseño: {url}',
+    bandHint: 'ctrl+x tab · banda',
     ago: 'hace {ago}', left: 'a medias', noCoordinator: 'sin coordinadora',
     noticeOtherTask: 'otra sesión ({seat}) trabaja en', noticeOtherBound: 'otra sesión ({seat}) está ligada al roadmap',
     noticeOtherDesign: 'otra sesión ({seat}) trabaja en el diseño',
@@ -66,6 +76,16 @@ export const TEXT = {
     integratedN: 'integrated', queuedN: 'to integrate', memberOf: "in {c}'s execution",
     otherTrack: 'Other track', view: 'View', join: 'Join', resume: 'Resume', release: 'Release', close: 'Close',
     stopFilled: '/forge:stop is in the prompt: press Enter to stop the whole execution',
+    // F-05: the short labels of the narrow levels (§4.5); Approve, Panel and Stop are short already.
+    short: {
+      nextTask: 'Next', status: 'Status', launch: 'Launch…', roadmap: 'Roadmap', applyAll: 'Apply', pick: 'Pick…', round: 'Round',
+      rewrite: 'Rewrite', interview: 'Ask me', viewDesign: 'Design', otherTrack: 'Track', join: 'Join', resume: 'Resume',
+      release: 'Release', view: 'View', close: 'Close',
+    },
+    confirmStop: 'Press {k} again to stop the run',
+    roadmapCopied: 'Roadmap URL copied: {url}', roadmapShown: 'Roadmap: {url}',
+    designCopied: 'Design URL copied: {url}', designShown: 'Design: {url}',
+    bandHint: 'ctrl+x tab · band',
     ago: '{ago} ago', left: 'left', noCoordinator: 'no coordinator',
     noticeOtherTask: 'another session ({seat}) works on', noticeOtherBound: 'another session ({seat}) is bound to the roadmap',
     noticeOtherDesign: 'another session ({seat}) is working on the design',

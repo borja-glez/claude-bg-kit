@@ -72,6 +72,14 @@ async function lineText(ui: { drawn: () => Promise<unknown> }): Promise<DrawnNod
   const box = findNode(await ui.drawn(), el => el.props?.key === 'band-line');
   return box ? findNode(box.children, el => el.type === 'Text') : undefined;
 }
+// The Text whose own strings (not its nested Texts') include `needle`: one part of the line with its tone.
+async function partWith(ui: { drawn: () => Promise<unknown> }, needle: string): Promise<DrawnNode | undefined> {
+  const own = (el: DrawnNode) => (Array.isArray(el.children) ? el.children : [el.children]).filter((c): c is string => typeof c === 'string').join('');
+  return findNode(await ui.drawn(), el => el.type === 'Text' && own(el).includes(needle));
+}
+// The band's props at a given width, the rest as PROPS; and a terminal viewport, in fullscreen or on the main screen.
+const at = (bodyColumns: number, over: object = {}) => ({ ...PROPS, bodyColumns, ...over });
+const VIEW = (isFullscreen: boolean, columns = 205) => ({ columns, rows: 40, isFullscreen });
 
 // The role of the conversation looking at each band (C3): a seat's owner, the run's coordinator, nobody.
 const OWNER: WaypointBand['viewer'] = { role: 'owner', coordinator: false, runId: null };
@@ -132,7 +140,7 @@ test('design band shows counts and submits commands', async ($, on) => {
     for (const key of ['apply-all', 'pick', 'round', 'rewrite', 'interview', 'approve']) {
       expect(await ui.find({ key })).toBeDefined();
     }
-    expect(await ui.find({ type: 'Link', text: 'View design' })).toBeDefined();
+    expect(await ui.find({ type: 'Link', text: 'Design' })).toBeDefined();
     await ui.press({ key: 'apply-all' });
     expect(sent.at(-1)).toBe('/waypoint:design apply all');
     await ui.press({ key: 'pick' });
@@ -165,8 +173,8 @@ test('work band runs /waypoint:work, the cross hides it and a new session shows 
     // A new session shows the band again after a dismiss (no project files here: the model is the served one).
     await $.session.start({ cwd: '.', surface, isInteractive: true });
     const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
-    expect(await lineOf(ui)).toBe('● frente core 2/5 · T3 A very long task title that goes well b… · 12 m / 30 m · global 40 % · ✎ 1 · ▲ decisión pendiente');
-    expect(await ui.find({ type: 'Link', text: 'Abrir roadmap' })).toBeDefined();
+    expect(await lineOf(ui)).toBe('● 2/5 · T3 A very long task title that goes well b… · 12m · 40% · ✎ 1 · ▲ decisión pendiente');
+    expect(await ui.find({ type: 'Link', text: 'Roadmap' })).toBeDefined();
     await ui.press({ key: 'next-task' });
     expect(sent.at(-1)).toBe('/waypoint:work');
     await ui.press({ key: 'status' });
@@ -190,6 +198,7 @@ test('the run band shows the execution, stops it and offers no per-session work 
     expect(await lineOf(ui)).toBe('► EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · T008 implementar · 3/12 integradas · ▲ sin señal');
     expect(await ui.find({ type: 'Button', text: 'Estado' })).toBeDefined();
     expect(await ui.find({ type: 'Button', text: 'Parar' })).toBeDefined();
+    await ui.press({ key: 'stop-run' });
     await ui.press({ key: 'stop-run' });
     expect(sent.at(-1)).toBe('/forge:stop');
     expect(await ui.find({ type: 'Button', text: 'Siguiente tarea' })).toBeUndefined();
@@ -563,8 +572,8 @@ test('a notice of another session at work is drawn dim with Status, Other track 
     const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
     expect(await lineOf(ui)).toBe('◦ otra sesión (main) trabaja en T002 · hace 12 min');
     expect((await lineText(ui))?.props?.dimColor).toBe(true);
-    expect(await ui.find({ type: 'Button', text: 'Otro frente' })).toBeDefined();
-    expect(await ui.find({ type: 'Link', text: 'Abrir roadmap' })).toBeDefined();
+    expect(await ui.find({ type: 'Button', text: 'Frente' })).toBeDefined();
+    expect(await ui.find({ type: 'Link', text: 'Roadmap' })).toBeDefined();
     await ui.press({ key: 'status' });
     expect(sent.at(-1)).toBe('/waypoint:status');
     await ui.press({ key: 'other-track' });
@@ -584,7 +593,7 @@ test('a notice of another session on the design offers Status and the roadmap, n
     const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
     expect(await lineOf(ui)).toBe('◦ otra sesión (main) trabaja en el diseño · hace 12 min');
     expect((await lineText(ui))?.props?.dimColor).toBe(true);
-    expect(await ui.find({ type: 'Link', text: 'Abrir roadmap' })).toBeDefined();
+    expect(await ui.find({ type: 'Link', text: 'Roadmap' })).toBeDefined();
     await ui.press({ key: 'status' });
     expect(sent.at(-1)).toBe('/waypoint:status');
     for (const key of ['other-track', 'resume', 'join', 'stop-run']) expect(await ui.find({ key }), key).toBeUndefined();
@@ -606,7 +615,7 @@ test('the notices of a run and of what an earlier conversation left send their c
     // I1: an ephemeral run takes no members (swarm join refuses it), so its notice offers no Join.
     { model: notice({ ...run, joinable: false }), line: '◦ ejecución de forge en curso, la coordina otra sesión · 3/12', labels: ['Ver'],
       presses: [['view', '/waypoint:status']], absent: ['join'] },
-    { model: notice({ kind: 'previous', viewer: PREVIOUS }), line: '◌ quedó a medias: T002 API de pedidos · hace 12 min', labels: ['Retomar', 'Liberar T002'],
+    { model: notice({ kind: 'previous', viewer: PREVIOUS }), line: '◌ quedó a medias: T002 API de pedidos · hace 12 min', labels: ['Retomar', 'Liberar'],
       presses: [['resume', '/waypoint:work resume'], ['release', '/waypoint:work release T002']] },
     { model: notice({ kind: 'previous', subject: 'design', task: null, title: null, key: 'design:demo', viewer: PREVIOUS }), line: '◌ diseño a medias: demo · hace 12 min', labels: ['Retomar'],
       presses: [['resume', '/waypoint:design resume']] },
@@ -644,6 +653,7 @@ test("Stop is the coordinator's: a member's leaves /forge:stop in the prompt wit
     band = RUN;
     let ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
     await ui.press({ key: 'stop-run' });
+    await ui.press({ key: 'stop-run' });
     expect(sent.at(-1)).toBe('/forge:stop');
     await ui.unmount();
     band = member;
@@ -658,38 +668,6 @@ test("Stop is the coordinator's: a member's leaves /forge:stop in the prompt wit
     band = WORK;
     ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
     expect(await ui.find({ key: 'stop-run' })).toBeUndefined();
-    await ui.unmount();
-  }
-});
-
-test('[Close] on a run still active without its coordinator only fills /forge:stop, with a toast once the prompt holds it (B-08)', async ($, on) => {
-  engineBottom(on);
-  const sent: string[] = [];
-  const filled: string[] = [];
-  const toasts: string[] = [];
-  let takes = true;
-  recordCommands(on, sent);
-  on('prompt.fill', (_$, e) => { filled.push(e.text); return { isFilled: takes }; });
-  on('ui.toast', (_$, e) => { toasts.push(e.text); return { value: undefined }; });
-  serveBand(on, () => notice({ subject: 'run', seat: null, task: null, title: null, runId: 'r1', integrated: 3, total: 12, key: 'run:r1', kind: 'previous', stopReason: null, viewer: PREVIOUS }));
-  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
-  for (const surface of SURFACES) {
-    takes = true;
-    sent.length = 0;
-    toasts.length = 0;
-    const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
-    expect(await lineOf(ui)).toBe('◌ ejecución sin coordinadora: 3/12 integradas · hace 12 min');
-    for (const label of ['Ver', 'Retomar', 'Cerrar']) expect(await ui.find({ type: 'Button', text: label }), label).toBeDefined();
-    await ui.press({ key: 'close' });
-    expect(sent).toEqual([]);
-    expect(filled.at(-1)).toBe('/forge:stop');
-    expect(toasts.at(-1)).toContain('/forge:stop');
-    // A prompt that does not take the text (a dialog, headless) gets no toast.
-    takes = false;
-    toasts.length = 0;
-    await ui.press({ key: 'close' });
-    expect(sent).toEqual([]);
-    expect(toasts).toEqual([]);
     await ui.unmount();
   }
 });
@@ -1091,4 +1069,182 @@ test('the band says whether it is drawn, for lens: its own band, × on it, a dis
   model = { mode: 'none', viewer: NOBODY };
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   expect(published.at(-1)).toBe(false);
+});
+
+test('the band takes the level its width allows: 160 one row and long labels, 120 two rows and short ones, 80 one row and ⋯ (F-05)', async ($, on) => {
+  engineBottom(on);
+  serveBand(on, () => WORK);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  const mount = (props: typeof PROPS) => $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props });
+  let ui = await mount(at(160));
+  expect(await ui.find({ type: 'Button', text: 'Siguiente tarea' })).toBeDefined();
+  expect(await ui.find({ type: 'Link', text: 'Abrir roadmap' })).toBeDefined();
+  expect(await ui.find({ key: 'band-row2' })).toBeUndefined();
+  expect(await lineOf(ui)).toBe('● 2/5 · T3 A very long task title t… · 12m · 40% · ✎ 1 · ▲ decisión pendiente');
+  await ui.unmount();
+  ui = await mount(at(120));
+  expect(await ui.find({ key: 'band-row2' })).toBeDefined();
+  expect(await ui.find({ type: 'Button', text: 'Siguiente' })).toBeDefined();
+  expect(await lineOf(ui)).toBe('● frente core 2/5 · T3 A very long task title that goes well b… · 12 m / 30 m · global 40 % · ✎ 1 · ▲ decisión pendiente');
+  expect((await partWith(ui, '▲ decisión pendiente'))?.props?.color).toBe('error');
+  await ui.unmount();
+  ui = await mount(at(80));
+  expect((await ui.find({ key: 'more' }))?.props.hotkey).toBe('m');
+  expect(await ui.find({ key: 'next-task' })).toBeUndefined();
+  expect(await ui.find({ key: 'dismiss' })).toBeDefined();
+  expect(await ui.find({ key: 'band-row2' })).toBeUndefined();
+  await ui.unmount();
+});
+
+test('with 2 rows the band is one row and ⋯ folds its buttons; ⋯ opens them on a second row and an action closes it (F-02)', async ($, on) => {
+  engineBottom(on);
+  const sent: string[] = [];
+  recordCommands(on, sent);
+  serveBand(on, () => WORK);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: at(100, { maxRows: 2, scroll: { offset: 0, bodyRows: 1 } }) });
+  expect(await ui.find({ key: 'band-row2' })).toBeUndefined();
+  expect(await ui.find({ key: 'next-task' })).toBeUndefined();
+  await ui.press({ key: 'more' });
+  expect(await ui.find({ key: 'band-row2' })).toBeDefined();
+  await ui.press({ key: 'next-task' });
+  expect(sent.at(-1)).toBe('/waypoint:work');
+  expect(await ui.find({ key: 'band-row2' })).toBeUndefined();
+  await ui.unmount();
+});
+
+test('outside fullscreen the band is one row of plain buttons with their letters, and the hint line says how to reach them (F-06, F-15)', async ($, on) => {
+  engineBottom(on);
+  serveBand(on, () => WORK);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  const tails: (string | undefined)[] = [];
+  on('ui.render', { component: 'PromptHint' }, ($, e) => {
+    tails.push(e.props.tail);
+    const { Text } = $.ui.resolve(e);
+    return h(Text, {}, e.props.hint) as RenderElement;
+  });
+  const HINT = { isDraft: false, isWorking: false, hint: '? for shortcuts' };
+  for (const isFullscreen of [false, true]) {
+    const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: at(160), viewport: VIEW(isFullscreen, 165) });
+    const buttons = await ui.findAll({ type: 'Button' });
+    expect(buttons.map(b => [b.key, b.props.hotkey]), String(isFullscreen)).toEqual(isFullscreen
+      ? [['next-task', 'n'], ['status', 's'], ['launch', 'l'], ['dismiss', 'x']]
+      : [['next-task', 'n'], ['status', 's'], ['launch', 'l'], ['roadmap', 'r'], ['dismiss', 'x']]);
+    for (const b of buttons) expect(b.props.plain, `${b.key} ${isFullscreen}`).toBe(isFullscreen ? undefined : true);
+    expect(await ui.find({ key: 'band-row2' })).toBeUndefined();
+    const hint = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'PromptHint', props: HINT, viewport: VIEW(isFullscreen, 165) });
+    expect(tails.at(-1), String(isFullscreen)).toBe(isFullscreen ? undefined : 'ctrl+x tab · banda');
+    await hint.unmount();
+    await ui.unmount();
+  }
+});
+
+test('every button of every band has its letter, none twice in a band, and x closes each (F-06)', async ($, on) => {
+  engineBand(on);
+  serveFiles(on, {});
+  memoryStore(on);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  on('command.list', () => ({ value: [LENS] }));
+  let model: WaypointBand = WORK;
+  serveBand(on, () => model);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  const member = { ...WORK, run: { coordinator: 'main', stage: 'implement' }, viewer: { role: 'owner', coordinator: false, runId: 'r1' } } as WaypointBand;
+  const run = { subject: 'run', seat: null, task: null, title: null, runId: 'r1', integrated: 3, total: 12, key: 'run:r1' } as const;
+  const cases: [WaypointBand, Record<string, string>][] = [
+    [WORK, { 'next-task': 'n', status: 's', launch: 'l', roadmap: 'r', panel: 'p', dismiss: 'x' }],
+    [member, { 'next-task': 'n', status: 's', launch: 'l', 'stop-run': 't', roadmap: 'r', panel: 'p', dismiss: 'x' }],
+    [DESIGN, { 'apply-all': 'a', pick: 'e', round: 'o', rewrite: 'w', interview: 'i', approve: 'y', design: 'd', panel: 'p', dismiss: 'x' }],
+    [RUN, { status: 's', 'stop-run': 't', roadmap: 'r', panel: 'p', dismiss: 'x' }],
+    [notice(), { status: 's', 'other-track': 'l', roadmap: 'r', panel: 'p', dismiss: 'x' }],
+    [notice({ ...run, joinable: true }), { view: 'v', join: 'j', panel: 'p', dismiss: 'x' }],
+    [notice({ kind: 'previous', task: 'T003', key: 'task:T003', viewer: PREVIOUS }), { resume: 'e', release: 'f', panel: 'p', dismiss: 'x' }],
+    [notice({ ...run, kind: 'previous', stopReason: 'stalled', runId: 'r2', key: 'run:r2', viewer: PREVIOUS }), { view: 'v', resume: 'e', close: 'c', panel: 'p', dismiss: 'x' }],
+  ];
+  for (const [band, letters] of cases) {
+    model = band;
+    const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: at(200), viewport: VIEW(false) });
+    const drawn = Object.fromEntries((await ui.findAll({ type: 'Button' })).map(b => [b.key, b.props.hotkey]));
+    expect(drawn, band.mode).toEqual(letters);
+    expect(new Set(Object.values(drawn)).size, band.mode).toBe(Object.keys(drawn).length);
+    await ui.press({ key: 'dismiss' });
+    expect(await ui.find({ key: 'dismiss' }), band.mode).toBeUndefined();
+    await ui.unmount();
+    await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  }
+});
+
+test('outside fullscreen r copies the roadmap address and says so; a copy that fails shows it without saying copied (F-06)', async ($, on) => {
+  engineBottom(on);
+  serveBand(on, () => WORK);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  const copied: string[] = [];
+  const toasts: string[] = [];
+  let take = true;
+  on('ui.copy', (_$, e) => {
+    copied.push(e.text);
+    return { value: take ? { isCopied: true as const } : { isCopied: false as const, reason: 'no-clipboard' as const } };
+  });
+  on('ui.toast', (_$, e) => { toasts.push(e.text); return { value: undefined }; });
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: at(160), viewport: VIEW(false, 165) });
+  await ui.press({ key: 'roadmap' });
+  expect(copied).toEqual(['https://claude.ai/artifact/roadmap']);
+  expect(toasts.at(-1)).toBe('URL del roadmap copiada: https://claude.ai/artifact/roadmap');
+  take = false;
+  await ui.press({ key: 'roadmap' });
+  expect(toasts.at(-1)).toBe('Roadmap: https://claude.ai/artifact/roadmap');
+  await ui.unmount();
+});
+
+test('Stop asks twice: the first t only arms it with a toast, the second within 5 s runs /forge:stop once, later it asks again (F-06, Review Focus 3)', async ($, on) => {
+  engineBottom(on);
+  const sent: string[] = [];
+  const toasts: string[] = [];
+  recordCommands(on, sent);
+  on('ui.toast', (_$, e) => { toasts.push(e.text); return { value: undefined }; });
+  serveBand(on, () => RUN);
+  const clock = mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  await ui.press({ key: 'stop-run' });
+  expect(sent).toEqual([]);
+  expect(toasts.at(-1)).toBe('Pulsa t otra vez para parar la ejecución');
+  await clock.advance(2000);
+  await ui.press({ key: 'stop-run' });
+  expect(sent).toEqual(['/forge:stop']);
+  await clock.advance(1000);
+  await ui.press({ key: 'stop-run' });
+  expect(sent).toEqual(['/forge:stop']);
+  await clock.advance(6000);
+  await ui.press({ key: 'stop-run' });
+  expect(sent).toEqual(['/forge:stop']);
+  expect(toasts.filter(x => x.startsWith('Pulsa t'))).toHaveLength(3);
+  await ui.unmount();
+});
+
+test('Close on a run still active, with no coordinator, asks twice as Stop does (F-06, C2)', async ($, on) => {
+  engineBottom(on);
+  const sent: string[] = [];
+  const toasts: string[] = [];
+  recordCommands(on, sent);
+  on('ui.toast', (_$, e) => { toasts.push(e.text); return { value: undefined }; });
+  serveBand(on, () => notice({ subject: 'run', seat: null, task: null, title: null, runId: 'r1', integrated: 3, total: 12, key: 'run:r1', kind: 'previous', stopReason: null, viewer: PREVIOUS }));
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  expect(await lineOf(ui)).toBe('◌ ejecución sin coordinadora: 3/12 integradas · hace 12 min');
+  for (const label of ['Ver', 'Retomar', 'Cerrar']) expect(await ui.find({ type: 'Button', text: label }), label).toBeDefined();
+  await ui.press({ key: 'close' });
+  expect(sent).toEqual([]);
+  expect(toasts.at(-1)).toBe('Pulsa c otra vez para parar la ejecución');
+  await ui.press({ key: 'close' });
+  expect(sent).toEqual(['/forge:stop']);
+  await ui.unmount();
+});
+
+test('a task past its estimate shows its clock in hours and minutes, in amber (F-11)', async ($, on) => {
+  engineBottom(on);
+  serveBand(on, () => WORK);
+  mock.clock(on, { now: Date.parse('2026-10-11T19:58:00.000Z') });
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: at(240) });
+  expect((await partWith(ui, '9 h 58 m / 30 m'))?.props?.color).toBe('warning');
+  await ui.unmount();
 });

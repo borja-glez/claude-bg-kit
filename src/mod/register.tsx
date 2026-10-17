@@ -1,9 +1,10 @@
 import { atom, read, update } from 'claude-code';
-import type { Register, Timer } from 'claude-code';
+import type { Register, RenderElement, Timer, UiPressArgument } from 'claude-code';
 import { noneBand, type NoticeBand } from './model.js';
 import { join, listOpt, loadBandModel, nowMs, readOpt, renewBindings, type Engine } from './files.js';
 import { addDismissal, dismissalKey, dismissalUntil, DISMISS_STORE_KEY, isDismissed, normalizeDismissals, type Dismissals } from './notice-dismiss.js';
-import { bandLine, textsFor } from './band-line.js';
+import { bandParts, textsFor } from './band-line.js';
+import { DISMISS_KEY, layoutBand, MORE_HOTKEY, MORE_KEY, MORE_LABEL, SEP, type BandControl, type BandHue } from './band-fit.js';
 import { applyWrite, artifactId, writeFailed, writesOf } from './mirror.js';
 
 const band = atom({ plugin: 'waypoint', key: 'band' } as const, noneBand());
@@ -73,6 +74,15 @@ async function publishDrawn($: Engine): Promise<void> {
     if ((await read($, drawn)) !== shown) await update($, drawn, () => shown);
   } catch { /* lens keeps what it read */ }
 }
+
+// F-05: the ⋯ row of a one-row band stays open until an action is pressed or 30 s pass.
+const MORE_OPEN_MS = 30_000;
+let moreUntil = 0;
+// F-06: Stop, and Close on a run still active, ask twice: which button is armed and until when.
+const CONFIRM_MS = 5_000;
+let armed: { key: string; until: number } | null = null;
+// F-06: whether the band was drawn on its last render, for the hint line's tail outside fullscreen.
+let bandShown = false;
 
 // A refresh asked while one runs is not dropped: what the running one read may be the old conversation's (a /clear
 // meanwhile), so it reads once more when it ends ($.session.id() is asked again each time).
@@ -152,8 +162,33 @@ function startTimer($: Engine): void {
   timer = $.clock.every(30000, () => { void tick($); });
 }
 
+/** A control of the band: what the layout measures (band-fit.ts), what a press runs, and a link's address. */
+interface Control extends BandControl { press: (e: UiPressArgument) => void; href?: string; variant?: 'primary'; dismiss?: true }
+
+// F-06: puts an address on the clipboard of the surface pressed and shows it in a toast; «copied» only when it took.
+async function copyUrl($: Engine, url: string, surface: UiPressArgument['surface'], copied: string, shown: string): Promise<void> {
+  let ok = false;
+  try { ok = (await $.ui.copy({ text: url, surface })).isCopied; } catch { ok = false; }
+  try { $.ui.toast((ok ? copied : shown).replace('{url}', url)); } catch { /* nothing else to say */ }
+}
+
+// F-05: the ⋯ row, open for 30 s or closed again; the band is redrawn now, and once more when the 30 s are up.
+async function toggleMore($: Engine): Promise<void> {
+  const now = await nowMs($);
+  moreUntil = now < moreUntil ? 0 : now + MORE_OPEN_MS;
+  $.ui.invalidate('ui.render');
+  if (moreUntil) $.clock.after(MORE_OPEN_MS, () => { $.ui.invalidate('ui.render'); });
+}
+
+// The tone of a part of the line: the decision and the warnings in the theme's colours, a notice dim.
+const TONE: Record<BandHue, { color?: string; dimColor?: boolean }> = {
+  warn: { color: 'warning' }, alert: { color: 'error' }, dim: { dimColor: true }, accent: { color: 'claude' },
+};
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    moreUntil = 0;
+    armed = null;
     try { await update($, hidden, () => false); } catch { /* ignore */ }
     await loadDismissals($);
     await checkLens($);
@@ -205,23 +240,27 @@ export const register: Register = on => {
     return result;
   });
 
-  // The band is one instance per chain: drawing without next(e) hides the bands of the plugins beneath, so ours stacks over them.
+  // The band is one instance per chain: drawing without next(e) hides the bands of the plugins beneath, so ours stacks
+  // over them. F-04, F-05: its parts fitted to the cells it has, at the level its width, rows and screen allow (wide,
+  // two, one with ⋯); F-06: a letter on every button, drawn plain outside fullscreen, where a click does not reach it.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const below = await next(e);
+    bandShown = false;
     try {
       const m = await read($, band);
       const isHidden = await read($, hidden);
       if (isHidden || !m || e.props.hasSurvey || m.mode === 'none') return below;
+      // A running task's minutes and a notice's age are worked out as the band is drawn; the tick redraws only the first.
+      const now = await nowMs($);
       // K5-08: a notice dismissed with × stays hidden for as long as that notice lasts.
       if (m.mode === 'notice') {
         if (!dismissalsLoaded) await readDismissals($);
-        if (isDismissed(dismissals, dismissalKey(await rootOf($), m.project, m.kind, m.key), await nowMs($))) return below;
+        if (isDismissed(dismissals, dismissalKey(await rootOf($), m.project, m.kind, m.key), now)) return below;
       }
       const { Box, Text, Button, Link } = $.ui.resolve(e);
-      // A running task's minutes and a notice's age are worked out as the band is drawn; the tick redraws only the first.
-      const drawnAt = m.mode === 'notice' || (m.mode === 'work' && m.current?.startedAt) ? await $.clock.now() : 0;
-      const line = bandLine(m, drawnAt);
       const t = textsFor(m.locale);
+      // §4.6: an engine that has not said (a remote surface, before it measures) counts as fullscreen, as before.
+      const fullscreen = e.viewport?.isFullscreen !== false;
       // $.prompt.submit refuses a text that starts with '/': slash commands go through $.command.run.
       const submit = (text: string) => () => {
         const [, command = '', args = ''] = /^\/(\S+)\s*(.*)$/.exec(text) ?? [];
@@ -233,100 +272,162 @@ export const register: Register = on => {
           } catch { /* nothing else to do */ }
         });
       };
-      // Only web links are drawn as links; any other address is shown as plain text.
-      const link = (href: string, label: string) => /^https?:\/\//i.test(href)
-        ? <Link href={href} label={label} />
-        : <Text dimColor>{href}</Text>;
       const fill = (text: string) => () => { $.prompt.fill({ text, mode: 'replace' }).catch(() => undefined); };
-      // B-08: Stop belongs to the coordinator's run band. A member's Stop, and [Close] on a run still active without its
-      // coordinator, leave /forge:stop in the prompt for the person to confirm, since it stops the whole execution; the
-      // toast says so only once the prompt holds it.
+      // B-08: Stop belongs to the coordinator's run band. A member's Stop leaves /forge:stop in the prompt for the person
+      // to confirm, since it stops the whole execution; the toast says so only once the prompt holds it.
       const fillStop = () => {
         $.prompt.fill({ text: '/forge:stop', mode: 'replace' }).then(r => { if (r.isFilled) $.ui.toast(t.stopFilled); }).catch(() => undefined);
       };
+      // F-06: a single key must not stop a run. The first press arms the button for 5 s and says so; the second runs it.
+      const confirmed = (key: string, hotkey: string, command: string) => () => {
+        void (async () => {
+          const pressedAt = await nowMs($);
+          if (armed && armed.key === key && pressedAt <= armed.until) {
+            armed = null;
+            submit(command)();
+            return;
+          }
+          armed = { key, until: pressedAt + CONFIRM_MS };
+          try { $.ui.toast(t.confirmStop.replace('{k}', hotkey), { timeoutMs: CONFIRM_MS }); } catch { /* the next press asks again */ }
+        })();
+      };
+      // r and d: the link of today in fullscreen; outside it, where nothing opens an address, a button that copies it.
+      // An address that is not a web link is shown as plain text.
+      const address = (key: string, url: string | null, label: string, short: string, hotkey: string, copied: string, shown: string): Control[] => {
+        if (!url) return [];
+        if (!/^https?:\/\//i.test(url)) return [{ key, label: url, kind: 'text', press: () => undefined }];
+        if (fullscreen) return [{ key, label, short, kind: 'link', href: url, press: () => undefined }];
+        return [{ key, label, short, hotkey, press: pressed => { void copyUrl($, url, pressed.surface, copied, shown); } }];
+      };
+      const roadmap = (url: string | null) => address('roadmap', url, t.roadmap, t.short.roadmap, 'r', t.roadmapCopied, t.roadmapShown);
       // §4.5: what a notice offers. Another live session: what it does and where to work instead. What an earlier one
       // left behind: take it up or let it go. [Close] is /forge:stop, the one entry that stops or closes a run (C2): sent
-      // at once for a run already stopped, only filled for one still active (stopReason null), which it would stop.
-      // [Resume] of a draft binds this conversation to it without a critique round (design resume).
-      const noticeControls = (n: NoticeBand) => {
+      // at once for a run already stopped; on one still active (stopReason null), which it would stop, it asks twice, as
+      // Stop does. [Resume] of a draft binds this conversation to it without a critique round (design resume).
+      const noticeControls = (n: NoticeBand): Control[] => {
         if (n.kind === 'other-live') {
           // Join only where forge takes members: an ephemeral run refuses them (joinable false).
           return n.subject === 'run'
             ? [
-                <Button key="view" label={t.view} onPress={submit('/waypoint:status')} />,
-                ...(n.joinable ? [<Button key="join" label={t.join} onPress={submit('/forge:run --join')} />] : []),
+                { key: 'view', label: t.view, short: t.short.view, hotkey: 'v', press: submit('/waypoint:status') },
+                ...(n.joinable ? [{ key: 'join', label: t.join, short: t.short.join, hotkey: 'j', press: submit('/forge:run --join') }] : []),
               ]
             : [
-                <Button key="status" label={t.status} onPress={submit('/waypoint:status')} />,
+                { key: 'status', label: t.status, short: t.short.status, hotkey: 's', press: submit('/waypoint:status') },
                 // A session on the design holds no track: there is no other one to launch.
-                ...(n.subject === 'design' ? [] : [<Button key="other-track" label={t.otherTrack} onPress={fill('/waypoint:launch ')} />]),
-                ...(n.roadmapUrl ? [link(n.roadmapUrl, t.roadmap)] : []),
+                ...(n.subject === 'design' ? [] : [{ key: 'other-track', label: t.otherTrack, short: t.short.otherTrack, hotkey: 'l', press: fill('/waypoint:launch ') }]),
+                ...roadmap(n.roadmapUrl),
               ];
         }
         if (n.subject === 'run') {
           return [
-            <Button key="view" label={t.view} onPress={submit('/waypoint:status')} />,
-            <Button key="resume" label={t.resume} onPress={submit('/forge:run --resume')} />,
-            <Button key="close" label={t.close} onPress={n.stopReason ? submit('/forge:stop') : fillStop} />,
+            { key: 'view', label: t.view, short: t.short.view, hotkey: 'v', press: submit('/waypoint:status') },
+            { key: 'resume', label: t.resume, short: t.short.resume, hotkey: 'e', press: submit('/forge:run --resume') },
+            { key: 'close', label: t.close, short: t.short.close, hotkey: 'c', press: n.stopReason ? submit('/forge:stop') : confirmed('close', 'c', '/forge:stop') },
           ];
         }
-        if (n.subject === 'design') return [<Button key="resume" label={t.resume} variant="primary" onPress={submit('/waypoint:design resume')} />];
-        return [
-          <Button key="resume" label={t.resume} variant="primary" onPress={submit('/waypoint:work resume')} />,
-          ...(n.task ? [<Button key="release" label={`${t.release} ${n.task}`} onPress={submit(`/waypoint:work release ${n.task}`)} />] : []),
-        ];
+        if (n.subject === 'design') return [{ key: 'resume', label: t.resume, short: t.short.resume, hotkey: 'e', variant: 'primary', press: submit('/waypoint:design resume') }];
+        const release: Control[] = n.task
+          ? [{ key: 'release', label: `${t.release} ${n.task}`, short: t.short.release, hotkey: 'f', press: submit(`/waypoint:work release ${n.task}`) }]
+          : [];
+        return [{ key: 'resume', label: t.resume, short: t.short.resume, hotkey: 'e', variant: 'primary', press: submit('/waypoint:work resume') }, ...release];
       };
-      const controls = m.mode === 'design'
-        ? [
-            ...(m.proposals > 0
-              ? [
-                  <Button key="apply-all" label={t.applyAll} onPress={submit('/waypoint:design apply all')} />,
-                  <Button key="pick" label={t.pick} onPress={fill('/waypoint:design apply ')} />,
-                ]
-              : []),
-            <Button key="round" label={t.round} onPress={submit('/waypoint:design round')} />,
-            <Button key="rewrite" label={t.rewrite} onPress={submit('/waypoint:design rewrite')} />,
-            <Button key="interview" label={t.interview} onPress={submit('/waypoint:design interview')} />,
-            <Button key="approve" label={t.approve} variant="primary" onPress={submit('/waypoint:design approve')} />,
-            ...(m.designUrl ? [link(m.designUrl, t.viewDesign)] : []),
-          ]
-        : m.mode === 'run'
+      let modeControls: Control[];
+      if (m.mode === 'design') {
+        const apply: Control[] = m.proposals > 0
           ? [
-              <Button key="status" label={t.status} onPress={submit('/waypoint:status')} />,
-              <Button key="stop-run" label={t.stopRun} onPress={submit('/forge:stop')} />,
-              ...(m.roadmapUrl ? [link(m.roadmapUrl, t.roadmap)] : []),
+              { key: 'apply-all', label: t.applyAll, short: t.short.applyAll, hotkey: 'a', press: submit('/waypoint:design apply all') },
+              { key: 'pick', label: t.pick, short: t.short.pick, hotkey: 'e', press: fill('/waypoint:design apply ') },
             ]
-          : m.mode === 'notice'
-            ? noticeControls(m)
-            : [
-                <Button key="next-task" label={t.nextTask} variant="primary" onPress={submit('/waypoint:work')} />,
-                <Button key="status" label={t.status} onPress={submit('/waypoint:status')} />,
-                <Button key="launch" label={t.launch} onPress={fill('/waypoint:launch ')} />,
-                ...(m.run ? [<Button key="stop-run" label={t.stopRun} onPress={fillStop} />] : []),
-                ...(m.roadmapUrl ? [link(m.roadmapUrl, t.roadmap)] : []),
-              ];
+          : [];
+        modeControls = [
+          ...apply,
+          { key: 'round', label: t.round, short: t.short.round, hotkey: 'o', press: submit('/waypoint:design round') },
+          { key: 'rewrite', label: t.rewrite, short: t.short.rewrite, hotkey: 'w', press: submit('/waypoint:design rewrite') },
+          { key: 'interview', label: t.interview, short: t.short.interview, hotkey: 'i', press: submit('/waypoint:design interview') },
+          { key: 'approve', label: t.approve, hotkey: 'y', variant: 'primary', press: submit('/waypoint:design approve') },
+          ...address('design', m.designUrl, t.viewDesign, t.short.viewDesign, 'd', t.designCopied, t.designShown),
+        ];
+      } else if (m.mode === 'run') {
+        modeControls = [
+          { key: 'status', label: t.status, short: t.short.status, hotkey: 's', press: submit('/waypoint:status') },
+          { key: 'stop-run', label: t.stopRun, hotkey: 't', press: confirmed('stop-run', 't', '/forge:stop') },
+          ...roadmap(m.roadmapUrl),
+        ];
+      } else if (m.mode === 'notice') {
+        modeControls = noticeControls(m);
+      } else {
+        const stop: Control[] = m.run ? [{ key: 'stop-run', label: t.stopRun, hotkey: 't', press: fillStop }] : [];
+        modeControls = [
+          { key: 'next-task', label: t.nextTask, short: t.short.nextTask, hotkey: 'n', variant: 'primary', press: submit('/waypoint:work') },
+          { key: 'status', label: t.status, short: t.short.status, hotkey: 's', press: submit('/waypoint:status') },
+          { key: 'launch', label: t.launch, short: t.short.launch, hotkey: 'l', press: fill('/waypoint:launch ') },
+          ...stop,
+          ...roadmap(m.roadmapUrl),
+        ];
+      }
       // × on a notice is kept per checkout, project, kind and subject (K5-08); on the conversation's own band it lasts the process.
       const notice = m.mode === 'notice' ? m : null;
       const dismiss = () => {
         (notice ? dismissNotice($, notice) : update($, hidden, () => true).then(() => publishDrawn($))).catch(() => undefined);
       };
+      const panel: Control[] = lens ? [{ key: 'panel', label: t.panel, hotkey: 'p', press: submit('/lens') }] : [];
+      const controls: Control[] = [...modeControls, ...panel, { key: DISMISS_KEY, label: '×', hotkey: 'x', dismiss: true, press: dismiss }];
+      const lay = layoutBand(bandParts(m, now), controls, { bodyColumns: e.props.bodyColumns, maxRows: e.props.maxRows, fullscreen, moreOpen: now < moreUntil });
+      // Any action closes the ⋯ row.
+      const act = (c: Control) => (pressed: UiPressArgument) => {
+        if (moreUntil) { moreUntil = 0; $.ui.invalidate('ui.render'); }
+        c.press(pressed);
+      };
+      const plain = lay.plain ? { plain: true as const } : {};
+      const draw = (c: Control): RenderElement => {
+        const label = lay.long ? c.label : c.short ?? c.label;
+        if (c.kind === 'text') return <Text key={c.key} dimColor>{c.label}</Text>;
+        if (c.kind === 'link') return <Link key={c.key} href={c.href ?? ''} label={label} />;
+        return (
+          <Button key={c.key} label={label} hotkey={c.hotkey} {...plain} {...(c.variant ? { variant: c.variant } : {})}
+            {...(c.dismiss ? { role: 'dismiss' as const } : {})} onPress={act(c)} />
+        );
+      };
+      const byKey = new Map(controls.map(c => [c.key, c] as const));
+      const drawKeys = (keys: readonly string[]) => keys.flatMap(k => { const c = byKey.get(k); return c ? [draw(c)] : []; });
+      const base = m.mode === 'notice' ? { dimColor: true } : { color: 'claude' };
+      const line = (
+        <Text {...base} wrap="truncate-end">
+          {lay.shown.map((p, i) => {
+            const text = `${i ? p.glue ?? SEP : ''}${p.text}`;
+            return p.hue ? <Text key={`part-${p.key}`} {...TONE[p.hue]}>{text}</Text> : text;
+          })}
+        </Text>
+      );
+      bandShown = true;
       return (
         <Box flexDirection="column">
-          <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
-            <Box key="band-line" flexShrink={1} minWidth={0}>
-              {m.mode === 'notice'
-                ? <Text dimColor wrap="truncate-end">{line}</Text>
-                : <Text color="claude" wrap="truncate-end">{line}</Text>}
-            </Box>
-            {controls}
-            {lens ? <Button key="panel" label={t.panel} onPress={submit('/lens')} /> : null}
-            <Button key="dismiss" label="×" role="dismiss" onPress={dismiss} />
+          <Box key="band-row" flexDirection="row" columnGap={1}>
+            <Box key="band-line" flexShrink={1} minWidth={0}>{line}</Box>
+            {drawKeys(lay.inline.filter(k => k !== DISMISS_KEY))}
+            {lay.more ? <Button key={MORE_KEY} label={MORE_LABEL} hotkey={MORE_HOTKEY} {...plain} onPress={() => { void toggleMore($); }} /> : null}
+            {drawKeys(lay.inline.filter(k => k === DISMISS_KEY))}
           </Box>
+          {lay.second.length ? <Box key="band-row2" flexDirection="row" flexWrap="wrap" columnGap={1}>{drawKeys(lay.second)}</Box> : null}
           {below}
         </Box>
       );
     } catch {
+      bandShown = false;
       return below;
     }
+  });
+
+  // F-06, step 1 of §4.6: outside fullscreen, at the end of the hint line under the prompt, how to reach the band's
+  // letters, while the band is drawn and the line has no tail of its own.
+  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+    try {
+      if (bandShown && e.viewport?.isFullscreen === false && !e.props.tail) {
+        const m = await read($, band);
+        return next({ ...e, props: { ...e.props, tail: textsFor(m.locale).bandHint } });
+      }
+    } catch { /* the engine's line */ }
+    return next(e);
   });
 };
