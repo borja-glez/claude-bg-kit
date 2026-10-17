@@ -102,6 +102,7 @@ const approvalsDir = (root: string) => path.join(root, '.forge', 'approvals');
 
 /** Wave 4: the local copy of an owner mark (approvals/<pid>): written by decide without a roadmap and by policy, replaced by `pull --approvals`. */
 export function saveApproval(root: string, id: string, doc: ApprovalDoc): void {
+  if (!PROPOSAL_ID.test(id)) return;
   forgeDir(root);
   mkdirSync(approvalsDir(root), { recursive: true });
   writeFileSync(path.join(approvalsDir(root), `${id}.json`), JSON.stringify(doc, null, 2) + '\n');

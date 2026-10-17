@@ -74,8 +74,8 @@ describe('forge proposals mirror', () => {
 describe('the local owner marks (.forge/approvals/)', () => {
   it('saves, loads, lists and removes a mark; a broken or misnamed file is left out', () => {
     const id = 'p20261016100000abcd';
-    saveApproval(root, id, { status: 'approved', decidedAt: '2026-10-16T10:00:00.000Z', by: 'forge:decide' });
-    expect(loadApproval(root, id)).toEqual({ status: 'approved', decidedAt: '2026-10-16T10:00:00.000Z', by: 'forge:decide' });
+    saveApproval(root, id, { status: 'approved', decidedAt: '2026-10-16T10:00:00.000Z', by: 'forge:decide', digest: '0123456789abcdef' });
+    expect(loadApproval(root, id)).toEqual({ status: 'approved', decidedAt: '2026-10-16T10:00:00.000Z', by: 'forge:decide', digest: '0123456789abcdef' });
     mkdirSync(path.join(root, '.forge', 'approvals'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'approvals', 'p20261016100000bbbb.json'), 'not json');
     writeFileSync(path.join(root, '.forge', 'approvals', 'nope.json'), JSON.stringify({ status: 'approved', decidedAt: 'x', by: 'page' }));

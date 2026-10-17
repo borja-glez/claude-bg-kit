@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { markMatches, normalizeApproval, ownerApproved, normalizeProposal, canDecide, applyDecision, isActionable, clipWords, MAX_PROPOSAL_TEXT, MAX_PROPOSAL_TITLE } from '../src/lib/proposals.js';
+import { proposalDigest, markMatches, normalizeApproval, ownerApproved, normalizeProposal, canDecide, applyDecision, isActionable, clipWords, MAX_PROPOSAL_TEXT, MAX_PROPOSAL_TITLE } from '../src/lib/proposals.js';
 
 const base = { ts: '2026-10-11T10:00:00.000Z', category: 'perf', risk: 'low', title: 'Cache prices', rationale: 'r', evidence: 'bench: 40 ms → 5 ms', pillar: 'Fast checkout', status: 'proposed', source: 'scout', author: 'session:abc' };
 
@@ -98,10 +98,11 @@ describe('decisions', () => {
 });
 
 describe('the owner mark (wave 4, §4.1)', () => {
-  const mark = (status: string) => ({ status, decidedAt: '2026-10-16T10:00:00.000Z', by: 'page' });
+  const digest = proposalDigest(normalizeProposal(base)!);
+  const mark = (status: string) => ({ status, decidedAt: '2026-10-16T10:00:00.000Z', by: 'page', digest });
   it('normalizeApproval keeps a mark and refuses anything else', () => {
     expect(normalizeApproval(mark('approved'))).toEqual(mark('approved'));
-    for (const bad of [null, 'x', mark('proposed'), { ...mark('approved'), by: 'user:me' }, { status: 'approved', by: 'page' }]) expect(normalizeApproval(bad)).toBeNull();
+    for (const bad of [null, 'x', mark('proposed'), { ...mark('approved'), by: 'user:me' }, { status: 'approved', by: 'page' }, { ...mark('approved'), digest: undefined }, { ...mark('approved'), digest: 'xyz' }]) expect(normalizeApproval(bad)).toBeNull();
   });
   it('ownerApproved: both approved or both auto_approved, no task and not done; otherwise never', () => {
     const p = (status: string, over: Record<string, unknown> = {}) => normalizeProposal({ ...base, status, ...over })!;
@@ -114,5 +115,19 @@ describe('the owner mark (wave 4, §4.1)', () => {
     expect(ownerApproved(p('approved', { taskId: 'T9' }), normalizeApproval(mark('approved')))).toBe(false);
     expect(markMatches(p('approved', { taskId: 'T9' }), normalizeApproval(mark('approved')))).toBe(true);
     expect(markMatches(p('done'), normalizeApproval(mark('approved')))).toBe(false);
+  });
+  it('the mark binds the content: a proposal edited after the approval is no longer owner-approved', () => {
+    const p = (over: Record<string, unknown> = {}) => normalizeProposal({ ...base, status: 'approved', ...over })!;
+    const a = normalizeApproval(mark('approved'));
+    expect(ownerApproved(p(), a)).toBe(true);
+    for (const over of [{ title: 'Other' }, { rationale: 'injected' }, { evidence: 'e2' }, { path: 'src/x.ts' }, { estimate: '9h' }, { risk: 'high' }, { category: 'deps' }]) expect(ownerApproved(p(over), a)).toBe(false);
+    expect(markMatches(p({ title: 'Other' }), a)).toBe(true);
+  });
+  it('proposalDigest is 16 hex digits, stable, and blind to the decision fields', () => {
+    const d = proposalDigest(normalizeProposal(base)!);
+    expect(d).toMatch(/^[0-9a-f]{16}$/);
+    expect(proposalDigest(normalizeProposal({ ...base, status: 'approved', decidedBy: 'x', decidedAt: 'y', taskId: 'T1' })!)).toBe(d);
+    expect(proposalDigest(normalizeProposal({ ...base, title: 'Cache prices!' })!)).not.toBe(d);
+    expect(proposalDigest(normalizeProposal({ ...base, title: 'Cañón «ñ»' })!)).toMatch(/^[0-9a-f]{16}$/);
   });
 });
