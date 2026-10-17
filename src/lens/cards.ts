@@ -45,7 +45,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     const cells = roadmapCells(w);
     const blocks: Block[] = [{
       kind: 'bar', ratio: w.percent / 100, hue: SECTION_HUE.roadmap, moving: !!w.current,
-      label: w.track ? `${t.track} ${w.track}` : undefined, right: `${w.trackDone}/${w.trackTotal}`,
+      label: w.track ? `${t.track} ${w.track}` : w.run ? t.integratedN : undefined, right: `${w.trackDone}/${w.trackTotal}`,
     }];
     if (cells.total) blocks.push({ kind: 'cells', cells: cells.cells });
     if (w.current) {
@@ -53,7 +53,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
       const min = Number.isFinite(started) && nowMs >= started ? Math.floor((nowMs - started) / 60000) : null;
       const right = min !== null ? `${min}${w.current.estimateMin ? `/${w.current.estimateMin}` : ''} min` : undefined;
       blocks.push({ kind: 'row', dot: 'peach', spinning: true, tag: { text: w.current.id, hue: 'peach' }, text: w.current.title, right });
-    } else {
+    } else if (!w.run) {
       blocks.push({ kind: 'text', text: t.noTask, dim: true });
     }
     for (const r of w.recentDone ?? []) {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { buildBandModel, noneBand, NO_VIEWER } from '../src/mod/model.js';
+import { buildBandModel, noneBand, NO_VIEWER, type BandModel } from '../src/mod/model.js';
 import { newUsage, recordStep, labelLoop, closeTurn } from '../src/lens/usage.js';
 import { FINISHED_TTL_MS } from '../src/lens/finished.js';
 import { buildPanelModel, bandKey, usageTime, elapsed, forgeFromStatus, parsePlanTasks, parseSddLedger, summarizeTodos, type Activity, type PanelModel } from '../src/lens/model.js';
@@ -210,6 +210,18 @@ describe('buildPanelModel', () => {
   });
   it('omits todos when none were ever written', () => {
     expect(buildPanelModel({ ...base, activity: act({ todos: [] }) }).todos).toBeNull();
+  });
+  it('a run band gives the roadmap section too: progress, messages, decision and phase, without a task (E-10)', () => {
+    const run: BandModel = {
+      mode: 'run', project: 'shop', locale: 'es', executor: 'subagents', running: 1, parallel: 3, integrated: 3, total: 12, slots: [], worst: 'alive', stalled: false,
+      roadmapUrl: null, sid: 'main-2', inbox: 2, escalation: true, percent: 25, phase: { index: 2, total: 4, name: 'API' }, viewer: { role: 'owner', coordinator: true, runId: 'r1' },
+    };
+    const m = buildPanelModel({ ...base, band: run });
+    expect(m.locale).toBe('es');
+    expect(m.waypoint).toEqual({
+      project: 'shop', track: null, percent: 25, trackDone: 3, trackTotal: 12, current: null, inbox: 2, escalation: true, roadmapUrl: null, locale: 'es',
+      phase: { index: 2, total: 4, name: 'API' }, cells: '', recentDone: [], run: true,
+    });
   });
 });
 

@@ -474,3 +474,15 @@ describe('lens timings: forge', () => {
     expect(card.blocks.map(b => b.kind)).toEqual(['stages', 'bar', 'cells', 'row', 'chips']);
   });
 });
+
+describe('the roadmap card of an execution (E-10)', () => {
+  it('its bar counts what is integrated, with the messages and the decision, and no task line', () => {
+    const w = { project: 'shop', track: null, percent: 25, trackDone: 3, trackTotal: 12, current: null, inbox: 2, escalation: true, roadmapUrl: null, locale: 'en',
+      phase: { index: 2, total: 4, name: 'API' }, cells: '', run: true };
+    const card = buildCards({ ...EMPTY, waypoint: w }, T, 0).find(c => c.title === 'shop')!;
+    expect(card.subtitle).toBe('Phase 2/4 · API');
+    expect(cardAlt(card)).toContain('integrated 3/12');
+    expect(cardAlt(card)).not.toContain(T.noTask);
+    expect(card.blocks.find(b => b.kind === 'chips')).toMatchObject({ chips: [{ text: '✉ 2' }, { text: '⚠ decision' }] });
+  });
+});

@@ -62,7 +62,7 @@ const WORK: WaypointBand = {
 const RUN: WaypointBand = {
   mode: 'run', project: 'demo', locale: 'es', executor: 'subagents', running: 2, parallel: 3, integrated: 3, total: 12,
   slots: [{ task: 'T004', stage: 'review', round: 2 }, { task: 'T008', stage: 'implement', round: 1 }], worst: 'silent', stalled: false,
-  roadmapUrl: 'https://claude.ai/artifact/roadmap', viewer: COORDINATOR,
+  roadmapUrl: 'https://claude.ai/artifact/roadmap', sid: 'main', inbox: 0, escalation: false, percent: 25, phase: null, viewer: COORDINATOR,
 };
 type Notice = Extract<WaypointBand, { mode: 'notice' }>;
 const PREVIOUS: WaypointBand['viewer'] = { role: 'previous', coordinator: false, runId: null };

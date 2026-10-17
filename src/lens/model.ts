@@ -118,6 +118,8 @@ export type PanelModel = {
     inbox: number; escalation: boolean; roadmapUrl: string | null; locale: string;
     phase: { index: number; total: number; name: string } | null; cells: string;
     recentDone?: { id: string; minutes: number; estimateMin?: number }[];
+    // run: drawn from the band of an execution, without a task nor cells.
+    run?: boolean;
   } | null;
   superpowers: {
     plan: string; tasks: number; done: number; current: { task: string; round: number } | null; lastLines: string[];
@@ -423,6 +425,7 @@ export function buildPanelModel(input: {
 }): PanelModel {
   const { band, activity: a, now } = input;
   const wp = band.mode === 'work' ? band : null;
+  const rb = band.mode === 'run' ? band : null;
   const cc = a.ccTasks ?? [];
   const todos = summarizeTodos(a.todos);
   const sess = input.usage?.session ?? null;
@@ -448,14 +451,19 @@ export function buildPanelModel(input: {
     };
   }
   return {
-    locale: wp?.locale ?? input.locale ?? 'en',
-    waypoint: wp && {
+    locale: wp?.locale ?? rb?.locale ?? input.locale ?? 'en',
+    waypoint: wp ? {
       project: wp.project, track: wp.track, percent: wp.percent, trackDone: wp.trackDone, trackTotal: wp.trackTotal,
       current: wp.current, inbox: wp.inbox, escalation: wp.escalation, roadmapUrl: wp.roadmapUrl, locale: wp.locale,
       phase: wp.phase ? { ...wp.phase, name: clip(wp.phase.name) } : null,
       cells: typeof wp.cells === 'string' ? wp.cells.replace(/[^dabp]/g, '').slice(0, 120) : '',
       recentDone: (wp.recentDone ?? []).slice(0, 3),
-    },
+    } : rb ? {
+      // E-10: the band of an execution: its progress, the seat's messages and decision and the phase, without a task.
+      project: rb.project, track: null, percent: rb.percent, trackDone: rb.integrated, trackTotal: rb.total, current: null,
+      inbox: rb.inbox, escalation: rb.escalation, roadmapUrl: rb.roadmapUrl, locale: rb.locale,
+      phase: rb.phase ? { ...rb.phase, name: clip(rb.phase.name) } : null, cells: '', recentDone: [], run: true,
+    } : null,
     superpowers: superpowers(input),
     todos: todos.total ? todos : null,
     subagents: (a.subagents ?? []).map(s => {

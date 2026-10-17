@@ -206,7 +206,7 @@ describe('buildBandModel · work', () => {
     expect(run({ slots: [{ task: 'T009', stage: 'weird', round: 1 }] })).toContain('T009 weird');
   });
   it('draws the run band line with stages, rounds and the liveness warning', () => {
-    expect(bandLine({ mode: 'run', project: 'p', locale: 'es', executor: 'subagents', running: 2, parallel: 3, integrated: 3, total: 12, slots: [{ task: 'T004', stage: 'review', round: 2 }, { task: 'T008', stage: 'implement', round: 1 }], worst: 'silent', stalled: false, roadmapUrl: null, viewer: NO_VIEWER }, 0))
+    expect(bandLine({ mode: 'run', project: 'p', locale: 'es', executor: 'subagents', running: 2, parallel: 3, integrated: 3, total: 12, slots: [{ task: 'T004', stage: 'review', round: 2 }, { task: 'T008', stage: 'implement', round: 1 }], worst: 'silent', stalled: false, roadmapUrl: null, sid: 'main', inbox: 0, escalation: false, percent: 25, phase: null, viewer: NO_VIEWER }, 0))
       .toBe('▶ EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · T008 implementar · 3/12 · integradas 3 · ⚠ sin señal');
   });
   it('marks a swarm member in work mode', () => {
@@ -522,5 +522,24 @@ describe('buildBandModel · notices (B-02, B-07, K3-13, K5-02)', () => {
     const work = bandLine({ mode: 'work', project: 'p', locale: 'es', sid: 'main', track: null, roadmapUrl: null, current: { id: 'T002', title: dirty },
       trackDone: 0, trackTotal: 2, percent: 0, inbox: 0, escalation: false, phase: null, cells: 'ap', swarm: false, run: null, viewer: NO_VIEWER } as never, 0);
     expect(work).toBe('● main · T002 API de pedidos · tareas 0/2 · global 0 %');
+  });
+});
+
+describe('buildBandModel · the run band carries the seat, its messages, the progress and the phase (E-10)', () => {
+  const coordinator = (extra: Partial<BandFiles> = {}): BandFiles => ({
+    ...empty, plan, session: j({ sessionId: 'main', track: 'backend' }), execution: EXEC(), sessionId: 's1',
+    messages: { m1: j({ ts: '2026-10-11T10:01:00Z', from: 'ui', to: 'main-2', type: 'overlap_warning', taskId: 'T002', text: 'x', status: 'open' }) },
+    ...extra,
+  });
+  it("the seat is the coordinator's own binding (seats/main-2), never session.json; without a binding, the run's coordinator", () => {
+    expect(buildBandModel('demo-shop', coordinator({ bindings: { 'main-2': bound('main-2', 's1', { via: 'forge-run' }) } }))).toMatchObject({
+      mode: 'run', sid: 'main-2', inbox: 1, escalation: false, percent: expect.any(Number), phase: { index: 1, total: 2, name: 'Base' },
+      viewer: { role: 'owner', coordinator: true, runId: 'r1' },
+    });
+    expect(buildBandModel('demo-shop', coordinator())).toMatchObject({ mode: 'run', sid: 'main', inbox: 0, escalation: false });
+  });
+  it('without a plan the run band has no progress nor phase', () => {
+    const { plan: _plan, ...noPlan } = coordinator();
+    expect(buildBandModel('demo-shop', noPlan)).toMatchObject({ mode: 'run', sid: 'main', percent: 0, phase: null });
   });
 });

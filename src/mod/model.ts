@@ -52,7 +52,11 @@ export type BandModel = (
       recentDone?: { id: string; minutes: number; estimateMin?: number }[]; auto?: { count: number; lastMajor: string | null } }
   | { mode: 'run'; project: string; locale: string; executor: 'subagents' | 'sessions'; running: number; parallel: number;
       integrated: number; total: number; slots: { task: string; stage: string; round: number }[];
-      worst: 'alive' | 'silent' | 'stopped'; stalled: boolean; roadmapUrl: string | null; auto?: { count: number; lastMajor: string | null } }
+      worst: 'alive' | 'silent' | 'stopped'; stalled: boolean; roadmapUrl: string | null;
+      // the seat of the conversation that looks (its own binding, else the run's coordinator), its inbox and pending
+      // decision, the plan's progress and its first phase not done.
+      sid: string; inbox: number; escalation: boolean; percent: number; phase: { index: number; total: number; name: string } | null;
+      auto?: { count: number; lastMajor: string | null } }
   // proposals/critical count the latest critique; pending/pendingCritical the proposals of every round still undecided.
   | { mode: 'design'; project: string; locale: string; version: number; round: number; proposals: number; critical: number;
       pending: number; pendingCritical: number; designUrl: string | null; auto?: { count: number; lastMajor: string | null } }
@@ -142,6 +146,35 @@ export function openTasksFrom(states: States): Record<string, string> {
   return Object.fromEntries(open);
 }
 
+/**
+ * E-10: the seat of the conversation that looks, from its own binding (the one renewed last when several), else null.
+ * describeViewer gives no binding to a coordinator (its subject is the execution), so the seats are searched.
+ */
+function ownSeat(seats: readonly BandSeat[], sessionId: string | null | undefined): string | null {
+  if (!isSafeId(sessionId)) return null;
+  const own = seats.filter(s => s.bound?.claude === sessionId)
+    .sort((a, b) => Date.parse(b.bound!.seenAt) - Date.parse(a.bound!.seenAt))[0];
+  return own?.sid ?? null;
+}
+
+/** A seat's messages waiting for it and whether a decision about it is pending. */
+function seatSignals(f: BandFiles, sid: string): { inbox: number; escalation: boolean } {
+  const messages = parsed<MessageDoc>(f.messages);
+  return {
+    inbox: inboxFor(messages, sid).length,
+    escalation: Object.values(messages).some(x => x.type === 'escalation' && x.status === 'open' && (x.from === sid || x.to === sid))
+      || escalationCandidates(messages).some(c => c.sessions.includes(sid)),
+  };
+}
+
+/** E-10: the plan's percent and its first phase not done; nothing without a plan. */
+function planProgress(plan: Plan | null, f: BandFiles, now: number): { percent: number; phase: { index: number; total: number; name: string } | null } {
+  if (!plan) return { percent: 0, phase: null };
+  const m = computeMetrics(plan, parsed<States[string]>(f.states) as States, now);
+  const pi = plan.phases.findIndex(p => m.byPhase[p.id]?.status !== 'done');
+  return { percent: m.percent, phase: pi >= 0 ? { index: pi + 1, total: plan.phases.length, name: plan.phases[pi].name } : null };
+}
+
 /** The execution this roadmap is about: this project's plan run, or forge's ephemeral one of the checkout (project loose). */
 function projectExecution(project: string, f: BandFiles, now: number): ExecutionState | null {
   const e = parseExecution(f.execution, now);
@@ -215,7 +248,7 @@ export function buildBandModel(project: string, f: BandFiles): BandModel {
     const viewer = viewerOf(v, exec, now);
     // Rule 1: the coordinator's run band, which never needed the plan.
     if (v.coordinator && exec) {
-      const r = runModel(project, f, exec, plan, now, viewer);
+      const r = runModel(project, f, exec, plan, now, viewer, ownSeat(seats, f.sessionId) ?? exec.coordinator);
       if (r) return withAuto(r, f, now);
     }
     // No plan nor design: no waypoint project, nothing drawn, and the role from the execution alone (I2).
@@ -336,7 +369,6 @@ function seatInfo(seats: readonly BandSeat[], sid: string): { track: string | nu
 
 function workModel(project: string, f: BandFiles, plan: Plan, states: States, seat: WorkSeat, now: number, viewer: BandViewer): BandModel {
   const { sid, track } = seat;
-  const messages = parsed<MessageDoc>(f.messages);
   const m = computeMetrics(plan, states, now);
   // A member works the task of its member file; any other seat, the one it has claimed or in progress.
   const own = seat.task
@@ -352,9 +384,7 @@ function workModel(project: string, f: BandFiles, plan: Plan, states: States, se
     current: own ? { id: own.id, title: own.title, startedAt: states[own.id]?.startedAt ?? seat.since ?? undefined, estimateMin: own.estimate_min } : null,
     trackDone: byTrack?.done ?? m.done, trackTotal: byTrack?.total ?? m.total,
     percent: m.percent,
-    inbox: inboxFor(messages, sid).length,
-    escalation: Object.values(messages).some(x => x.type === 'escalation' && x.status === 'open' && (x.from === sid || x.to === sid))
-      || escalationCandidates(messages).some(c => c.sessions.includes(sid)),
+    ...seatSignals(f, sid),
     phase: pi >= 0 ? { index: pi + 1, total: plan.phases.length, name: plan.phases[pi].name } : null,
     cells: plan.tasks.filter(t => !track || t.track === track).slice(0, MAX_CELLS).map(t => CELL[states[t.id]?.status ?? 'free'] ?? 'p').join(''),
     swarm: seat.swarm,
@@ -389,7 +419,7 @@ const lives = (f: BandFiles): LiveDoc[] => Object.values(f.live ?? {}).map(t => 
 
 // Rule 1, the coordinator's band: this project's plan execution or forge's ephemeral one of this checkout, whole until
 // it is closed, also once it stopped (C2: isVisibleRun for its owner, without the 24-hour limit).
-function runModel(project: string, f: BandFiles, exec: ExecutionState, plan: Plan | null, now: number, viewer: BandViewer): BandModel | null {
+function runModel(project: string, f: BandFiles, exec: ExecutionState, plan: Plan | null, now: number, viewer: BandViewer, sid: string): BandModel | null {
   const v = executionView({ exec, tasks: publicTasks(f), live: lives(f), now, role: 'owner' });
   if (!v) return null;
   const rank = { alive: 0, silent: 1, stopped: 2 } as const;
@@ -397,6 +427,8 @@ function runModel(project: string, f: BandFiles, exec: ExecutionState, plan: Pla
   return {
     mode: 'run', project, locale: plan?.locale ?? 'en', executor: v.mode, running: v.slots.length, parallel: v.parallel, integrated: v.integrated, total: v.total,
     slots: v.slots.slice(0, 2).map(s => ({ task: s.task, stage: s.stage, round: s.round })), worst, stalled: !v.active, roadmapUrl: plan?.artifacts.roadmap ?? null, viewer,
+    // E-10: what the roadmap card shows for a run too: the seat's messages and decision, the plan's progress and phase.
+    sid, ...seatSignals(f, sid), ...planProgress(plan, f, now),
   };
 }
 
