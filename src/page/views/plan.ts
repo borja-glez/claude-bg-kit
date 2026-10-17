@@ -77,7 +77,7 @@ function renderVersionsView(m: Model, d: Dict, ui: UiState): string {
         return `<button type="button" class="tc" data-action="open-task" data-id="${esc(t.id)}" data-k="t:${esc(t.id)}"><span class="st st-${st}">${ST_ICON[st]} ${esc(d.status[st])}${eviMark(m, d, t.id)}</span><span class="tt"><span class="k">${esc(t.id)}</span> ${esc(t.title)} ${trackTag(m, t.track)}</span></button>`;
       }).join('');
       if (bare) return tasks;
-      return `<button class="cat" data-action="toggle-cat" data-key="${esc(key)}" aria-expanded="${!closed}"><span><span class="cn">${closed ? '›' : '⌄'} ${esc(cat.name)}</span><span class="mono">${esc(d.entries(cat.tasks.length))}</span></span>${segBar(d, cat.tasks)}</button>${tasks}`;
+      return `<button type="button" class="cat" data-action="toggle-cat" data-key="${esc(key)}" aria-expanded="${!closed}"><span><span class="cn">${closed ? '›' : '⌄'} ${esc(cat.name)}</span><span class="mono">${esc(d.entries(cat.tasks.length))}</span></span>${segBar(d, cat.tasks)}</button>${tasks}`;
     }).join('');
     return `<div class="vcol ph-${ps}">
       <div class="vhd"><div class="v">${esc(c.versionId == null ? d.noVersion : d.versionCol(c.versionId))}</div><div class="ph">${esc(d.phaseN(n))}</div><div class="mono">${esc(c.phase.name)}</div>

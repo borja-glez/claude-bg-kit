@@ -271,6 +271,9 @@ describe('versions view', () => {
     expect(html).toContain('Fase 1');
     expect(html).toContain('Fase 2');
     expect(html).toContain('data-action="toggle-cat"');
+    // Carry 9: the category toggles are buttons of their own type, never a form's submit.
+    expect(html).toMatch(/<button type="button" class="cat" data-action="toggle-cat"/);
+    expect(html).not.toMatch(/<button class="cat"/);
     expect(html).toContain('data-action="open-task" data-id="T002"');
     expect(html).toContain('data-action="vfilter"');
     expect(html).toContain('data-action="vtrack"');
@@ -428,6 +431,24 @@ describe('theme.css', () => {
     expect(css).toMatch(/(^|[\s}])select\{[^}]*max-width:100%/);
     expect(css).toMatch(/\.f\.trk select\{[^}]*max-width:100%/);
     expect(css).toMatch(/\.f\.trk\{[^}]*max-width:100%/);
+  });
+  it('no grid of fixed-width columns overflows a 390 px screen: every auto-fill column fits its box (carry 10b)', () => {
+    const mins = [...CSS.matchAll(/repeat\(auto-(?:fill|fit),\s*minmax\((min\([^)]*\)|[^,)]+),/g)].map(x => x[1]);
+    expect(mins.length).toBeGreaterThanOrEqual(5);
+    for (const min of mins) expect(min).toMatch(/^min\(\d+px,100%\)$/);
+    // Summary's live sessions: the section is a block (its title over the cards), the cards are the grid.
+    const phone = cssMedia(CSS, '(max-width:760px)');
+    expect(cssRule(CSS, '.sess')).not.toContain('grid-template-columns');
+    expect(cssRule(phone, '.sess')).not.toContain('grid-template-columns');
+    expect(cssRule(CSS, '.sess .sgrid2')).toContain('grid-template-columns:repeat(auto-fill,minmax(min(220px,100%),1fr))');
+  });
+  it('a run slot reads like the session cards it replaced, and only the slot buttons make their lines blocks (carry 9)', () => {
+    expect(cssRule(CSS, '.slot .sh')).toContain('font:700 20px');
+    expect(cssRule(CSS, '.slot .mono')).toBe('');
+    expect(cssRule(CSS, 'button.slot .mono')).toContain('display:block');
+  });
+  it('keeps no dead selectors of the summary of before (carry 6)', () => {
+    expect(CSS).not.toContain('.s.idle');
   });
 });
 

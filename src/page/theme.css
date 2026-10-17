@@ -35,8 +35,9 @@ h1{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:34px;marg
 .muted{color:var(--o1);font-size:13px}
 .row3{display:grid;grid-template-columns:1.15fr 1fr 1.1fr;gap:12px;margin-top:14px}
 .card{background:var(--mantle);border:1px solid var(--s0);border-radius:8px;padding:12px;min-width:0}
-.t{font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:600}
-.t em{color:var(--peach);font-style:normal}
+/* The detail's title, scoped to its header: `t` is also the time of an activity entry (review M4). */
+.mh .t{font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:600}
+.mh .t em{color:var(--peach);font-style:normal}
 .big{font-family:'Barlow Condensed',sans-serif;font-size:42px;font-weight:700;line-height:1}
 .bar{height:5px;background:var(--s0);margin-top:7px;border-radius:3px;overflow:hidden}
 .bar i{display:block;height:100%;background:var(--cur)}
@@ -52,10 +53,10 @@ h1{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:34px;marg
 .ok{color:var(--green)} .del{color:var(--red)}
 .tag{font-family:'JetBrains Mono',monospace;font-size:10.5px;padding:1px 6px;border-radius:3px;font-weight:600;background:color-mix(in srgb,currentColor 16%,transparent)}
 .c-blue{color:var(--blue)} .c-mauve{color:var(--mauve)} .c-teal{color:var(--teal)} .c-pink{color:var(--pink)} .c-sky{color:var(--sky)} .c-flamingo{color:var(--flamingo)}
-.sess{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:12px}
+.sess{margin-top:12px}
 .s{background:var(--mantle);border:1px solid var(--s0);border-radius:8px;padding:8px 10px}
 .s .n{font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:600}
-.s .dot{color:var(--green)} .s.idle{opacity:.6} .s.idle .dot{color:var(--o0)}
+.s .dot{color:var(--green)}
 .tabs{display:flex;gap:6px;margin-top:16px;align-items:center;flex-wrap:wrap}
 .tab{font-family:'Barlow Condensed',sans-serif;font-size:13px;letter-spacing:.1em;padding:5px 12px;border:1px solid var(--s0);border-radius:4px;color:var(--o1);text-transform:uppercase}
 .tab.on{color:var(--text);background:var(--s0);border-color:var(--lavender)}
@@ -101,8 +102,9 @@ h1{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:34px;marg
 @keyframes flow{to{background-position:17px 0}}
 @media (prefers-reduced-motion:reduce){.gb.current{animation:none}}
 .gl{position:absolute;top:7px;font-size:12px;color:var(--sub0);white-space:nowrap;pointer-events:none;overflow:hidden;text-overflow:ellipsis}
-.now{position:absolute;top:0;bottom:0;width:2px;background:var(--now);z-index:4;box-shadow:0 0 8px color-mix(in srgb,var(--now) 60%,transparent);pointer-events:none}
-.now span{position:sticky;top:4px;display:inline-block;margin-left:4px;font:10px 'Barlow Condensed',sans-serif;letter-spacing:.1em;background:var(--now);color:var(--crust);padding:0 4px;border-radius:2px}
+/* The timeline's now marker, scoped to the timeline: Summary's «En curso» is a `.card.now` (carry 10a). */
+.tl .now{position:absolute;top:0;bottom:0;width:2px;background:var(--now);z-index:4;box-shadow:0 0 8px color-mix(in srgb,var(--now) 60%,transparent);pointer-events:none}
+.tl .now span{position:sticky;top:4px;display:inline-block;margin-left:4px;font:10px 'Barlow Condensed',sans-serif;letter-spacing:.1em;background:var(--now);color:var(--crust);padding:0 4px;border-radius:2px}
 .legend{display:flex;gap:14px;margin-top:8px;font-size:12px;align-items:center;color:var(--o1);flex-wrap:wrap}
 .lg{display:inline-block;width:14px;height:8px;margin-right:6px;vertical-align:middle;border-radius:4px}
 .legend .hint{margin-left:auto;color:var(--o0);font-size:11.5px}
@@ -125,7 +127,8 @@ html.wp-modal,html.wp-modal body{overflow:hidden}
 .nav{display:block;width:100%}
 .ev-message{color:var(--mauve)}
 .sessions-view{margin-top:14px}
-.sgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+/* Every auto-fill grid takes columns no wider than its box: at 390 px none of them widens the page (carry 10b). */
+.sgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(280px,100%),1fr));gap:12px}
 .sc{background:var(--mantle);border:1px solid var(--s0);border-radius:8px;padding:12px;min-width:0}
 .sc.warn,.s.warn{border-color:var(--yellow)}
 .sc.idle{opacity:.6}
@@ -176,7 +179,7 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .notice{margin-top:6px;font-size:12px;color:var(--yellow)}
 .nfil{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
-.ngrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px;margin-top:10px}
+.ngrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr));gap:10px;margin-top:10px}
 .note{background:var(--mantle);border:1px solid var(--s0);border-left:3px solid var(--s1);border-radius:6px;padding:10px;min-width:0}
 .note .nh{font-family:'Barlow Condensed',sans-serif;font-size:11px;letter-spacing:.12em;text-transform:uppercase;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
 .note .nh .k{text-transform:none;letter-spacing:0}
@@ -196,7 +199,7 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
 .nav .badge{display:inline-block;margin-left:3px;min-width:16px;padding:0 4px;border-radius:8px;background:var(--peach);color:var(--crust);font-size:10px;letter-spacing:0;line-height:16px}
 .pfil{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;align-items:center}
 .pfil .lbl{margin:0 4px 0 0;min-width:64px}
-.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;margin-top:12px}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr));gap:10px;margin-top:12px}
 .prop h3{font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:600;margin:6px 0 2px;overflow-wrap:anywhere}
 .prop .nh{justify-content:flex-start;align-items:center}
 .prop .nh .k{margin-left:auto}
@@ -328,7 +331,6 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
   .overlay{padding:0}
   /* A narrow axis keeps every other tick label (the grid lines stay). */
   .ticks span:nth-child(even){display:none}
-  .sess{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
   .s{padding:6px 8px}
   .s .n{font-size:14px}
 }
@@ -348,8 +350,8 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
 .exec-sec .slot[data-action]{cursor:pointer}
 .exec-sec .slot[data-action]:hover{border-color:var(--s1)}
 button.sc{display:block;width:100%;text-align:left}
-.slot .sh{display:flex;align-items:center;gap:8px;font:600 20px 'Barlow Condensed',sans-serif}
-.slot .mono{display:block}
+.slot .sh{display:flex;align-items:center;gap:8px;font:700 20px 'Barlow Condensed',sans-serif}
+button.slot .mono{display:block}
 button.tr:focus-visible,.tc:focus-visible,.cpl:focus-visible,button.sc:focus-visible{outline:2px solid var(--lavender);outline-offset:-2px}
 section.loose{margin:12px 0}
 section.loose .lts{list-style:none;margin:0;padding:0}
@@ -400,7 +402,7 @@ button.nr:focus-visible,button.act:focus-visible,.nxb:focus-visible,.more:focus-
 .act .l1{display:flex;align-items:baseline;gap:6px;font-size:12px;color:var(--sub0)}
 .act .nums{margin-left:auto;display:inline-grid;grid-template-columns:6ch 6ch;text-align:right;font:11px 'JetBrains Mono',monospace}
 .act .l2{font-size:13px;color:var(--sub1);overflow-wrap:anywhere}
-.sess .sgrid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:6px}
+.sess .sgrid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(220px,100%),1fr));gap:10px;margin-top:6px}
 .sess .more{border:1px dashed var(--s1);border-radius:8px;padding:8px 10px;color:var(--o1);text-align:left}
 .s.silent .dot{color:var(--yellow)}
 @media (max-width:760px){
@@ -408,6 +410,7 @@ button.nr:focus-visible,button.act:focus-visible,.nxb:focus-visible,.more:focus-
   .nr{grid-template-columns:minmax(0,1fr) auto auto auto;grid-template-areas:"task task task task" "stage round val time"}
   .nr .c-task{grid-area:task} .nr .c-stage{grid-area:stage} .nr .c-round{grid-area:round} .nr .c-val{grid-area:val} .nr .c-time{grid-area:time}
   .nr .c-agent,.nr .c-who{display:none}
+  .sess .sgrid2{grid-template-columns:repeat(auto-fill,minmax(min(150px,100%),1fr));gap:6px}
 }
 /* ---- «Te necesita» (G-24) ---- */
 .card.needs{margin-top:12px;border-color:color-mix(in srgb,var(--peach) 55%,var(--s0))}
