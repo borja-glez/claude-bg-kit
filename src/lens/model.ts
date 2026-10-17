@@ -548,7 +548,11 @@ export function buildPanelModel(input: {
   const titles: Record<string, string> = {};
   const titleOf = (task: string, project: string | null, title: string) => { const k = statusKey(task, project); if (k) titles[k] = title; };
   for (const s of execution?.slots ?? []) if (s.title) titleOf(s.task, execution?.project ?? null, s.title);
-  if (wp?.current) titleOf(wp.current.id, wp.project, wp.current.title);
+  if (wp?.current) {
+    titleOf(wp.current.id, wp.project, wp.current.title);
+    // R4: /forge:run's Medium path triages a plan task without --plan: its loose status takes the task's title too.
+    if (!titles[wp.current.id]) titleOf(wp.current.id, null, wp.current.title);
+  }
   const sp = superpowers(input);
   const todosModel = todos.total ? todos : null;
   const statuses = parseStatuses(input.forgeStatuses ?? (input.forgeStatus !== undefined ? [input.forgeStatus] : []));

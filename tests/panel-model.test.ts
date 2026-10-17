@@ -745,6 +745,22 @@ describe('buildPanelModel: the activities (C5, E-06, E-16)', () => {
     const fine = buildPanelModel({ band: none, activity: act(), now, sessionId: 'me', forgeStatuses: [doc('T1', { taskStartedAt: new Date(now - 600_000).toISOString(), stageSince: new Date(now - 60_000).toISOString() })] });
     expect(fine.forge?.timing).toMatchObject({ taskSeconds: 600 });
   });
+  it("the waypoint's current task titles its row whether forge wrote it as the plan's task or as a loose one (R4)", () => {
+    const iso = (ms: number) => new Date(ms).toISOString();
+    const working = buildBandModel('demo-shop', {
+      plan: readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8'),
+      session: JSON.stringify({ sessionId: 'main', track: 'backend' }), messages: {}, critiques: {}, sessionId: 'me',
+      states: { T001: JSON.stringify({ status: 'in_progress', owner: 'main', startedAt: iso(now - 600_000) }) },
+      bindings: { '.': JSON.stringify({ sid: 'main', claude: 'me', pid: null, via: 'work', since: iso(now - 3600_000), seenAt: iso(now - 60_000), endedAt: null, endReason: null }) },
+    });
+    expect(working).toMatchObject({ mode: 'work', current: { id: 'T001', title: 'Esquema de pedidos' } });
+    const titleOf = (project: string | null) => buildPanelModel({ band: working, activity: act(), now, sessionId: 'me', forgeStatuses: [doc('T001', { project })] }).activities[0].title;
+    expect(titleOf('demo-shop')).toBe('Esquema de pedidos');
+    // /forge:run's Medium path triages without --plan: the same task as a loose status.
+    expect(titleOf(null)).toBe('Esquema de pedidos');
+    // Another plan's T001 is not the waypoint's.
+    expect(titleOf('web')).toBeNull();
+  });
   it("in mode sessions a member's agent is drawn under its task's row and not under the slot too (R3, P4)", () => {
     const at = (min: number) => new Date(now - min * 60_000).toISOString();
     const exec = JSON.stringify({ runId: 'r1', kind: 'plan', mode: 'sessions', parallel: 2, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,
