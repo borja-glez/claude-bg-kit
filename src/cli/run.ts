@@ -9,7 +9,7 @@ import { pickTask, conflictsFor, recoverableTasks, inboxFor, escalationCandidate
 import { parseDesign, changedSections, designBody, DesignError, setDesignStatus } from '../lib/design.js';
 import { importSpec, SpecImportError } from '../lib/design-import.js';
 import { designGate, mergeDismissed } from '../lib/design-gate.js';
-import { listVersions, nextVersion, parseChangelog, appendChangelog, parseAppliedItems, roundList, AppliedError, ENTRY_KINDS, type EntryKind } from '../lib/history.js';
+import { listVersions, nextVersion, parseChangelog, appendChangelog, parseAppliedItems, roundList, AppliedError, ENTRY_KINDS, entryKind, type EntryKind } from '../lib/history.js';
 import { parseCritique, selectProposals, formatProposals, CritiqueError, budgetFor, budgetIssues } from '../lib/critique.js';
 import { buildDesignPageData } from '../design-page/build.js';
 import { designFilesOf, readCritiques, readDismissedOf, readHistory, writeDismissed } from './design-files.js';
@@ -699,14 +699,18 @@ export function run(argv: string[], io: Io): Result {
           return fail(`design-snapshot: --kind must be one of ${ENTRY_KINDS.join(', ')}`, 2);
         }
         const kindGiven = kindFlag as EntryKind | undefined;
-        if ((kindGiven === 'amend' || kindGiven === 'approve') && (args.includes('--applied') || args.includes('--rewrite'))) {
-          return fail(`design-snapshot: --kind ${kindGiven} cannot go with --applied or --rewrite: the entry would hide what it applied`, 2);
+        // An approval hides what it applied; an amendment of an approved design may carry the items of its apply or rewrite.
+        if (kindGiven === 'approve' && (args.includes('--applied') || args.includes('--rewrite'))) {
+          return fail('design-snapshot: --kind approve cannot go with --applied or --rewrite: the entry would hide what it applied', 2);
         }
         if ((kindGiven === 'amend' || kindGiven === 'approve') && d.meta.status !== 'approved') {
           return fail(`design-snapshot: --kind ${kindGiven} needs status: approved in the design (it is ${d.meta.status})`, 2);
         }
         if (kindGiven === 'reopen' && d.meta.status !== 'draft') {
           return fail(`design-snapshot: --kind reopen needs status: draft in the design (it is ${d.meta.status}); set it first`, 2);
+        }
+        if (kindGiven === 'reopen' && !log.some(e => entryKind(e) === 'approve')) {
+          return fail('design-snapshot: --kind reopen needs a design that was approved once: this draft was never approved, so there is nothing to reopen', 2);
         }
         // A-04, K3-02: what this entry applied and what its interview resolved, checked against the critiques (K3-10:
         // docs/…/critiques/ first, then .waypoint/<project>/) before anything is written. An id that is in no critique
@@ -842,6 +846,8 @@ export function run(argv: string[], io: Io): Result {
           const reasonFile = flag('reason-file');
           if (!reasonFile || reasonFile.startsWith('--')) return fail(usage, 2);
           try { reason = readFileSync(abs(reasonFile), 'utf8'); } catch { return fail(`critique-dismiss: cannot read ${reasonFile}`, 2); }
+          // A canned reason says nothing: the person's own words (or none, for a minor) are what the gate keeps.
+          if (PLACEHOLDER_REASONS.has(reasonKey(reason))) return fail(`critique-dismiss: "${reason.trim().slice(0, 60)}" is a placeholder, not a reason: pass the person's own words`, 2);
         }
         const file = abs(args[0]);
         const d = parseDesign(readFileSync(file, 'utf8'));
@@ -950,6 +956,17 @@ export function run(argv: string[], io: Io): Result {
 class CacheError extends Error {}
 
 const SHA_RE = /^[0-9a-f]{7,64}$/;
+
+// Reasons that only fill the field (EN and ES), compared after reasonKey.
+const PLACEHOLDER_REASONS = new Set([
+  'dismissed', 'dismissed at approval', 'dismissed on approval', 'dismissed when approving', 'no reason', 'no reason given', 'none', 'n a', 'na', 'tbd', 'todo', 'ok', 'wontfix',
+  'descartada', 'descartado', 'descartada al aprobar', 'descartado al aprobar', 'descartada en la aprobacion', 'descartado en la aprobacion',
+  'sin motivo', 'sin razon', 'ninguno', 'ninguna', 'no aplica',
+]);
+/** Lower case, accents dropped, every run of other characters a single space. */
+function reasonKey(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
 
 /** The commits of done tasks that other tracks depend on and that are already in `base`, as `forge swarm tick` computes them. */
 function integratedShas(plan: PlanView, states: Record<string, TaskState>, base: string, cwd: string): Set<string> {

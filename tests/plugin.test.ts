@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ENTRY_KINDS } from '../src/lib/history.js';
 
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 // A reference of forge:run (plugins/forge/skills/run/references/<name>.md).
@@ -1656,7 +1657,13 @@ describe('plugin layout', () => {
     const critic = read('plugins/waypoint/agents/design-critic.md');
     for (const w of ['"verdict": "<ready|changes>"', '`max`', '`severities`', '`dismissed`', '`resolved`', '`applied`', 'r<R>#<n>', '`contradiction`']) expect(critic, w).toContain(w);
     expect(critic).not.toContain('At most 12 proposals');
-    const plan = read('plugins/waypoint/skills/plan/SKILL.md');
+    // The skill's flags agree with the CLI: every --kind it uses exists, --kind approve never carries the items the CLI
+    // refuses with it, and no dismissal reason is canned (a critical or major one is the person's or the critic's own).
+    const kinds = [...md.matchAll(/--kind ([a-z]+)/g)].map(m => m[1]);
+    expect(kinds.length).toBeGreaterThan(0);
+    for (const k of kinds) expect(ENTRY_KINDS as readonly string[], `--kind ${k}`).toContain(k);
+    for (const line of md.split('\n').filter(l => l.includes('--kind approve'))) expect(line, line).not.toMatch(/--applied|--rewrite/);
+    expect(md).not.toMatch(/dismissed at approval/i);    const plan = read('plugins/waypoint/skills/plan/SKILL.md');
     for (const w of ['artifacts.design', 'design_version', 'design_ref', 'validate <plan> --design docs/waypoint/<project>/design.md', 'waypoint design-impact', '**The link to the design.**']) expect(plan, w).toContain(w);
   });
 });

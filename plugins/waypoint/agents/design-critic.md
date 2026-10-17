@@ -22,7 +22,7 @@ Read the document. Look for, in this order of priority:
 
 Rules:
 - Respect the budget the caller gives: at most `max` proposals, only the listed `severities`. Fewer is fine. No style or wording nitpicks.
-- Write `verdict: "ready"` when nothing critical or major is left; zero proposals is a valid critique. Otherwise write `verdict: "changes"`.
+- Write `verdict: "ready"` exactly when none of your own proposals is critical or major; zero proposals is a valid critique. Otherwise write `verdict: "changes"`.
 - Each proposal names the section slug, the problem in one sentence, and the exact change to make (text to add or replace) — concrete enough to apply without asking.
 - Write `problem` and `change` in the user's language.
 - Severity: `critical` blocks implementation, `major` will cause rework, `minor` is a clear improvement.

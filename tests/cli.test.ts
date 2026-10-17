@@ -989,18 +989,38 @@ describe('design commands', () => {
       expect(parseDesign(readFileSync(p(), 'utf8')).meta.status).toBe('approved');
       expect(run(['design-snapshot', rel, '--note', 'r', '--kind', 'reopen'], io).code).toBe(2);
       writeFileSync(p(), readFileSync(p(), 'utf8').replace('status: approved', 'status: draft'));
+      // a draft that was never approved has nothing to reopen
+      const never = mkdtempSync(path.join(tmpdir(), 'wp-never-'));
+      mkdirSync(path.join(never, 'docs/waypoint/demo-shop'), { recursive: true });
+      copyFileSync(new URL('./fixtures/design.md', import.meta.url), path.join(never, rel));
+      const neverIo = { ...io, cwd: never };
+      run(['design-snapshot', rel, '--note', 'v1', '--round', '0'], neverIo);
+      const neverReopen = run(['design-snapshot', rel, '--note', 'r', '--kind', 'reopen'], neverIo);
+      expect(neverReopen.code).toBe(2);
+      expect(neverReopen.stderr).toContain('never approved');
+      rmSync(never, { recursive: true, force: true });
       expect(run(['design-snapshot', rel, '--note', 'reabierto', '--kind', 'reopen'], io).code).toBe(0);
       for (const bad of [['--kind', 'merge'], ['--kind']]) expect(run(['design-snapshot', rel, '--note', 'x', ...bad], io).code, bad.join(' ')).toBe(2);
       expect(changelog().map((e: { kind?: string }) => e.kind)).toEqual(['draft', 'approve', 'amend', 'reopen']);
     });
-    it('--kind approve or amend with --applied is refused: the entry would hide what it applied', () => {
+    it('--kind approve with --applied or --rewrite is refused (the entry would hide what it applied); --kind amend takes them, as the skill\'s amend route needs', () => {
       approve();
       mkdirSync(path.join(ddir(), 'design/critiques'), { recursive: true });
       writeFileSync(path.join(ddir(), 'design/critiques/r1.json'), JSON.stringify({ round: 1, version: 1, scope: 'full', proposals: [{ n: 1, category: 'gap', severity: 'major', section: '_intro', problem: 'p', change: 'c' }] }));
-      const r = run(['design-snapshot', rel, '--note', 'x', '--round', '1', '--applied', '1', '--kind', 'amend'], io);
-      expect(r.code).toBe(2);
-      expect(r.stderr).toContain('--applied');
+      for (const extra of [['--applied', '1'], ['--rewrite']]) {
+        const r = run(['design-snapshot', rel, '--note', 'x', '--round', '1', ...extra, '--kind', 'approve'], io);
+        expect(r.code, extra.join(' ')).toBe(2);
+        expect(r.stderr).toContain(extra[0]);
+      }
       expect(existsSync(path.join(ddir(), 'design/changelog.json'))).toBe(false);
+      const applied = run(['design-snapshot', rel, '--note', 'x', '--round', '1', '--applied', '1', '--kind', 'amend'], io);
+      expect(applied.code).toBe(0);
+      const rewrite = run(['design-snapshot', rel, '--note', 'y', '--round', '1', '--rewrite', '--kind', 'amend'], io);
+      expect(rewrite.code).toBe(0);
+      const log = changelog();
+      expect(log.map((e: { kind?: string }) => e.kind)).toEqual(['amend', 'amend']);
+      expect(log[0].applied).toEqual({ '1': [1] });
+      expect(log[1].rewrite).toBe(true);
     });
     it('without --kind, --applied records apply, --rewrite records rewrite, and anything else no kind', () => {
       mkdirSync(path.join(ddir(), 'design/critiques'), { recursive: true });
@@ -2051,6 +2071,20 @@ describe('critiques in docs/ (K3-10), dismissed with a reason (K3-05) and resolv
     expect(g.pending.map((p: { n: number }) => p.n)).toEqual([1]);
     expect(run(['critique-dismiss', rel, '--round', '1', '2', '--reason-file', 'missing.txt'], io).code).toBe(2);
     expect(run(['critique-dismiss', rel, '--round', '1', '2', '--reason-file'], io).code).toBe(2);
+  });
+  it('critique-dismiss refuses a canned reason (a placeholder in English or Spanish), for any severity, and writes nothing', () => {
+    crit(docs(), 'r1.json', 1, 1, ['major', 'minor']);
+    for (const canned of ['dismissed at approval', 'Dismissed at approval.', 'descartada al aprobar', 'Sin motivo', 'N/A', 'no reason']) {
+      writeFileSync(path.join(dir, 'canned.txt'), `${canned}\n`);
+      for (const n of ['1', '2']) {
+        const r = run(['critique-dismiss', rel, '--round', '1', n, '--reason-file', 'canned.txt'], io);
+        expect(r.code, `${canned} ${n}`).toBe(2);
+        expect(r.stderr).toContain('placeholder');
+      }
+    }
+    expect(existsSync(path.join(docs(), 'dismissed.json'))).toBe(false);
+    writeFileSync(path.join(dir, 'real.txt'), 'dismissed because the payments design covers it');
+    expect(run(['critique-dismiss', rel, '--round', '1', '1', '--reason-file', 'real.txt'], io).code).toBe(0);
   });
   it('critique-dismiss needs a reason for a major or critical finding (the file, not blank) and lets a minor go without one', () => {
     crit(docs(), 'r1.json', 1, 1, ['major', 'critical', 'minor']);
