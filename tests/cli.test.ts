@@ -902,7 +902,8 @@ describe('design commands', () => {
         crit(1, 1);
         crit(2, 1);
         edit('start_prompt: /waypoint:work backend', 'start_prompt: /waypoint:work backend\nstatus: approved');
-        run(['design-snapshot', rel, '--note', 'aprobado', '--round', '2'], io);
+        // No --round, as the skill approves: the snapshot takes the round of the newest critique (final review I1).
+        run(['design-snapshot', rel, '--note', 'aprobado'], io);
         // Reopened the way older skills did it: status back to draft and a note, no kind.
         edit('status: approved', 'status: draft');
         edit('Backend en Node', 'Backend en Node 22');
@@ -925,6 +926,43 @@ describe('design commands', () => {
         expect(run(['critique-check', 'r4m.json', '--round', '4', '--design', rel], io).stderr).toContain('proposal 1 is minor');
         // A verification stays at 3 critical.
         expect(run(['critique-check', 'r3.json', '--round', '3', '--design', rel, '--verify'], io).code).toBe(1);
+      });
+      it('without --round a snapshot takes the round of the newest critique, from both places, as critique-next counts it; an explicit --round wins', () => {
+        crit(1, 1);
+        mkdirSync(path.join(dir, '.waypoint/demo-shop'), { recursive: true });
+        writeFileSync(path.join(dir, '.waypoint/demo-shop/critique-r2.json'), JSON.stringify({ round: 2, version: 1, scope: 'changed', proposals: [] }));
+        writeFileSync(path.join(ddir(), 'design/critiques/r3.json'), '{not a critique');
+        run(['design-snapshot', rel, '--note', 'x'], io);
+        run(['design-snapshot', rel, '--note', 'y', '--round', '1'], io);
+        expect(changelog().map((e: { round: number }) => e.round)).toEqual([0, 3, 1]);
+      });
+      it('a reopen note that only mentions reopening is not a reopen: the budget does not restart (carry 6)', () => {
+        crit(1, 1);
+        edit('no tiene rollback', 'tiene rollback parcial');
+        run(['design-snapshot', rel, '--note', 'ronda 1: aplicadas 1 - evita reabrir el diseño', '--round', '1'], io);
+        crit(2, 2);
+        expect(next()).toMatchObject({ round: 3, budget: { max: 3, severities: ['critical'] } });
+      });
+      it('only integer rounds of the changelog count: a fractional or huge one is ignored, and the critique path stays r<N>.json (carry 6)', () => {
+        const log = path.join(ddir(), 'design/changelog.json');
+        writeFileSync(log, readFileSync(log, 'utf8').replace('"round": 0', '"round": 2.5'));
+        expect(next()).toMatchObject({ round: 1, out: path.join(ddir(), 'design/critiques/r1.json') });
+        writeFileSync(log, readFileSync(log, 'utf8').replace('"round": 2.5', '"round": 1e999'));
+        expect(next()).toMatchObject({ round: 1, out: path.join(ddir(), 'design/critiques/r1.json') });
+      });
+    });
+    describe('critique-check --design and the changelog (carry 6)', () => {
+      const minor = { n: 1, category: 'risk', severity: 'minor', section: 'riesgos', problem: 'p', change: 'c' };
+      it('a changelog that does not parse exits 2 with a clear message, and no changelog counts the round as it is', () => {
+        writeFileSync(path.join(dir, 'm1.json'), JSON.stringify({ round: 1, version: 1, scope: 'full', proposals: [minor] }));
+        writeFileSync(path.join(dir, 'm2.json'), JSON.stringify({ round: 2, version: 1, scope: 'changed', proposals: [minor] }));
+        rmSync(path.join(ddir(), 'design/changelog.json'));
+        expect(run(['critique-check', 'm1.json', '--round', '1', '--design', rel], io).code).toBe(0);
+        expect(run(['critique-check', 'm2.json', '--round', '2', '--design', rel], io).stderr).toContain('proposal 1 is minor');
+        writeFileSync(path.join(ddir(), 'design/changelog.json'), '{ not json');
+        const bad = run(['critique-check', 'm1.json', '--round', '1', '--design', rel], io);
+        expect(bad.code).toBe(2);
+        expect(bad.stderr).toBe('critique-check: cannot read the changelog of the design: changelog.json is not valid JSON\n');
       });
     });
     it('the usage names critique-next', () => {

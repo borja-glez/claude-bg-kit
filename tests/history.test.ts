@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ENTRY_KINDS, appendChangelog, entryKind, listVersions, nextVersion, normalizeApplied, normalizeResolved, parseAppliedItems, parseChangelog, roundList } from '../src/lib/history.js';
+import { ENTRY_KINDS, appendChangelog, entryKind, entryRound, listVersions, nextVersion, normalizeApplied, normalizeResolved, parseAppliedItems, parseChangelog, roundList } from '../src/lib/history.js';
 
 describe('versions', () => {
   it('lists v<N>.md files only, sorted', () => {
@@ -81,5 +81,17 @@ describe('the kind of an entry (K3-07)', () => {
       ['reopened for T044', 'reopen'], ['enmienda: Node 22', 'amend'], ['amended the scope', 'amend']] as const;
     for (const [note, kind] of notes) expect(entryKind({ ...entry, note }), note).toBe(kind);
     for (const note of ['ronda 1: aplicadas 1,3', 'Borrador inicial', 'entrevista: formulario', 'interview']) expect(entryKind({ ...entry, note }), note).toBeNull();
+  });
+  it('reads a reopen only from a note that starts with it, as an approval: an apply note that mentions reopening is none (carry 6)', () => {
+    for (const note of ['ronda 2: aplicadas 1 - evita reabrir el diseño', 'round 2: applied 1 — no need to reopen', 'aplicadas: el diseño queda reabierto']) {
+      expect(entryKind({ ...entry, note }), note).toBeNull();
+    }
+    for (const note of ['  Reabierto para T044', 'Reopening: the scope grew', 'reabrir por T009']) expect(entryKind({ ...entry, note }), note).toBe('reopen');
+  });
+  it('entryRound counts only a whole round from 0 to ROUND_MAX; anything else is 0 (carry 6)', () => {
+    for (const [round, want] of [[0, 0], [3, 3], [999_999, 999_999], [2.5, 0], [-1, 0], [Infinity, 0], [NaN, 0], [1_000_000, 0]] as const) {
+      expect(entryRound({ ...entry, round }), String(round)).toBe(want);
+    }
+    expect(entryRound(undefined)).toBe(0);
   });
 });

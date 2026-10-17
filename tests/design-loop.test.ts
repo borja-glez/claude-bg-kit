@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -106,5 +106,104 @@ describe('the design loop end to end (§7.3)', () => {
     expect(data.critiques[0].proposals[2].reason).toBe('auto: minor');
     expect(data.critiques[1]).toMatchObject({ round: 2, verdict: 'ready', proposals: [] });
     expect(data.versions.at(-1).diff).toEqual({ changed: ['Arquitectura'], added: [], removed: [] });
+  });
+});
+
+// Final review I1: the skill passes no --round to the approval nor to the reopen, so design-snapshot takes the newest
+// critique round itself; the first round after a reopen then gets round 1's budget, as critique-next and
+// critique-check --design both count it. No command here passes --round.
+describe('a reopen restarts the budget in the normal flow, with no --round anywhere (final review I1)', () => {
+  let repo: string;
+  let elsewhere: string;
+  let io: Io;
+  const design = () => path.join(repo, 'docs/waypoint/demo-shop/design.md');
+  const wp = (...args: string[]) => {
+    const r = run(args, io);
+    if (r.code !== 0) throw new Error(`waypoint ${args.join(' ')} exited ${r.code}: ${r.stderr}`);
+    return r;
+  };
+  const json = (...args: string[]) => JSON.parse(wp(...args).stdout);
+  const edit = (from: string, to: string) => {
+    const text = readFileSync(design(), 'utf8');
+    if (!text.includes(from)) throw new Error(`not in the design: ${from}`);
+    writeFileSync(design(), text.replace(from, to));
+  };
+  const prop = (n: number, severity: string, section: string) => ({ n, category: 'gap', severity, section, problem: `p${n}`, change: `c${n}` });
+  const critique = (out: string, c: object) => { mkdirSync(path.dirname(out), { recursive: true }); writeFileSync(out, JSON.stringify(c)); };
+  const rounds = () => JSON.parse(readFileSync(path.join(repo, 'docs/waypoint/demo-shop/design/changelog.json'), 'utf8')).map((e: { round: number }) => e.round);
+  beforeEach(() => {
+    repo = mkdtempSync(path.join(tmpdir(), 'wp-reopen-'));
+    elsewhere = mkdtempSync(path.join(tmpdir(), 'wp-reopen-cwd-'));
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    mkdirSync(path.dirname(design()), { recursive: true });
+    copyFileSync(new URL('./fixtures/design.md', import.meta.url), design());
+    io = { cwd: elsewhere, now: () => new Date('2026-10-17T10:00:00.000Z'), rand: () => 0, assetsDir: elsewhere, env: {} };
+  });
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(elsewhere, { recursive: true, force: true });
+  });
+  // approve (--kind approve), then a reopen whose change is a new section, as /forge:infinite does for a Large task.
+  const approveAndReopen = () => {
+    edit('start_prompt: /waypoint:work backend', 'start_prompt: /waypoint:work backend\nstatus: approved');
+    wp('design-snapshot', design(), '--note', 'aprobado (auto)', '--kind', 'approve');
+    edit('status: approved', 'status: draft');
+    writeFileSync(design(), `${readFileSync(design(), 'utf8')}\n## T009: Nueva tarea\n\nUna tarea Large nueva con bastante texto.\n`);
+    wp('design-snapshot', design(), '--note', 'reabierto para T009', '--kind', 'reopen');
+  };
+  // The first round after the reopen: the budget of round 1 (12, every severity) on what changed, and the check agrees.
+  const firstRoundAfterReopen = (round: number) => {
+    const next = json('critique-next', design());
+    expect(next).toMatchObject({ round, budget: { max: 12, severities: ['critical', 'major', 'minor'] }, scope: 'changed', review: ['t009-nueva-tarea'] });
+    critique(next.out, { round, version: next.version, scope: 'changed', verdict: 'ready', proposals: [prop(1, 'minor', 't009-nueva-tarea')] });
+    const check = run(['critique-check', next.out, '--version', String(next.version), '--design', design(), '--changed', next.review.join(',')], io);
+    expect(check.stderr).toBe('');
+    expect(check.code).toBe(0);
+  };
+
+  it('round 1, apply, round --verify (ready), approve and reopen: round 3 has the budget of round 1, and critique-check --design accepts a minor', () => {
+    wp('design-snapshot', design(), '--note', 'borrador', '--kind', 'draft');
+    const r1 = json('critique-next', design());
+    critique(r1.out, { round: 1, version: 1, scope: 'full', verdict: 'changes', proposals: [prop(1, 'critical', 'riesgos'), prop(2, 'minor', 'alcance')] });
+    wp('critique-check', r1.out, '--version', '1', '--design', design());
+    edit('no tiene rollback', 'tiene un rollback probado');
+    wp('design-snapshot', design(), '--note', 'ronda 1', '--kind', 'apply', '--applied', 'r1:1');
+    const r2 = json('critique-next', design(), '--verify');
+    expect(r2).toMatchObject({ round: 2, budget: { max: 3, severities: ['critical'] } });
+    critique(r2.out, { round: 2, version: 2, scope: 'changed', verdict: 'ready', proposals: [] });
+    wp('critique-check', r2.out, '--version', '2', '--verify', '--design', design());
+    approveAndReopen();
+    // The approval and the reopen carry the round of the r2 critique that no snapshot recorded.
+    expect(rounds()).toEqual([0, 1, 2, 2]);
+    firstRoundAfterReopen(3);
+  });
+
+  it('two critiques with no snapshot between them (round, round, approve, reopen): the first round after the reopen is round 1 of the budget', () => {
+    wp('design-snapshot', design(), '--note', 'borrador', '--kind', 'draft');
+    const r1 = json('critique-next', design());
+    critique(r1.out, { round: 1, version: 1, scope: 'full', verdict: 'ready', proposals: [prop(1, 'minor', 'alcance')] });
+    wp('critique-check', r1.out, '--version', '1', '--design', design());
+    const r2 = json('critique-next', design(), '--full');
+    expect(r2).toMatchObject({ round: 2, scope: 'full' });
+    critique(r2.out, { round: 2, version: 1, scope: 'full', verdict: 'ready', proposals: [] });
+    wp('critique-check', r2.out, '--version', '1', '--design', design());
+    approveAndReopen();
+    expect(rounds()).toEqual([0, 2, 2]);
+    firstRoundAfterReopen(3);
+  });
+
+  it('a second reopen restarts the budget again', () => {
+    wp('design-snapshot', design(), '--note', 'borrador', '--kind', 'draft');
+    const r1 = json('critique-next', design());
+    critique(r1.out, { round: 1, version: 1, scope: 'full', verdict: 'ready', proposals: [] });
+    approveAndReopen();
+    firstRoundAfterReopen(2);
+    // Approved again and reopened for another task: the next round is round 1 of the budget once more.
+    edit('status: draft', 'status: approved');
+    wp('design-snapshot', design(), '--note', 'aprobado', '--kind', 'approve');
+    edit('status: approved', 'status: draft');
+    edit('Una tarea Large nueva con bastante texto.', 'Una tarea Large nueva con bastante texto y un criterio de hecho.');
+    wp('design-snapshot', design(), '--note', 'reabierto para T010', '--kind', 'reopen');
+    expect(json('critique-next', design())).toMatchObject({ round: 3, budget: { max: 12, severities: ['critical', 'major', 'minor'] }, review: ['t009-nueva-tarea'] });
   });
 });

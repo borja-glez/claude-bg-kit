@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { budgetRound } from '../src/lib/design-round.js';
+import { budgetRound, nextRound } from '../src/lib/design-round.js';
 import type { ChangelogEntry } from '../src/lib/history.js';
 
 const entry = (version: number, round: number, note: string, kind?: ChangelogEntry['kind']): ChangelogEntry =>
@@ -26,5 +26,13 @@ describe('budgetRound: the round counted from the last reopen', () => {
     expect(budgetRound([], 0)).toBe(1);
     expect(budgetRound([], -3)).toBe(1);
     expect(budgetRound([], NaN)).toBe(1);
+  });
+  it('counts only whole rounds of the changelog: a fractional or infinite one is 0 (carry 6)', () => {
+    expect(budgetRound([entry(2, 2.5, 'x', 'reopen')], 3)).toBe(3);
+    expect(budgetRound([entry(2, Infinity, 'x', 'reopen')], 3)).toBe(3);
+    const next = (round: number) => nextRound({ changelog: [entry(1, round, 'x')], critiques: [], history: {}, current: '', sections: [] }).round;
+    expect(next(2.5)).toBe(1);
+    expect(next(Infinity)).toBe(1);
+    expect(next(2)).toBe(3);
   });
 });

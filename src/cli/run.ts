@@ -9,7 +9,7 @@ import { pickTask, conflictsFor, recoverableTasks, inboxFor, escalationCandidate
 import { parseDesign, changedSections, designBody, DesignError, setDesignStatus } from '../lib/design.js';
 import { importSpec, SpecImportError } from '../lib/design-import.js';
 import { designGate, mergeDismissed } from '../lib/design-gate.js';
-import { listVersions, nextVersion, parseChangelog, appendChangelog, parseAppliedItems, roundList, AppliedError, ENTRY_KINDS, entryKind, type EntryKind } from '../lib/history.js';
+import { listVersions, nextVersion, parseChangelog, appendChangelog, parseAppliedItems, roundList, AppliedError, ENTRY_KINDS, entryKind, entryRound, type EntryKind } from '../lib/history.js';
 import { parseCritique, selectProposals, formatProposals, CritiqueError, budgetFor, budgetIssues } from '../lib/critique.js';
 import { buildDesignPageData } from '../design-page/build.js';
 import { designFilesOf, readCritiques, readDismissedOf, readHistory, writeDismissed } from './design-files.js';
@@ -689,8 +689,14 @@ export function run(argv: string[], io: Io): Result {
         const histDir = path.join(base, 'history');
         const log = readChangelog(path.dirname(file));
         const version = nextVersion(existsSync(histDir) ? readdirSync(histDir) : []);
+        // K3-10: the critiques from docs/…/critiques/ first, then .waypoint/<project>/.
+        const files = designFilesOf(file, d.meta.project);
+        const critiques = readCritiques(files);
         const roundFlag = flag('round');
-        const round = roundFlag !== undefined ? Number(roundFlag) : (log[log.length - 1]?.round ?? 0);
+        // Final review I1: without --round, the newest round of the changelog and of the critiques, as critique-next counts
+        // them, so an approval or a reopen after a critique no snapshot recorded carries that critique's round, and the
+        // first round after a reopen gets round 1's budget. An explicit --round wins.
+        const round = roundFlag !== undefined ? Number(roundFlag) : Math.max(entryRound(log[log.length - 1]), ...critiques.map(c => c.round));
         if (!Number.isInteger(round) || round < 0) return fail('design-snapshot: --round must be a non-negative integer', 2);
         // K3-07: what kind of entry this is. An amend or an approve keeps an approved design; a reopen needs it a draft
         // again. The CLI never changes the status: the skill sets it first, and a status that does not match is refused.
@@ -712,11 +718,8 @@ export function run(argv: string[], io: Io): Result {
         if (kindGiven === 'reopen' && !log.some(e => entryKind(e) === 'approve')) {
           return fail('design-snapshot: --kind reopen needs a design that was approved once: this draft was never approved, so there is nothing to reopen', 2);
         }
-        // A-04, K3-02: what this entry applied and what its interview resolved, checked against the critiques (K3-10:
-        // docs/…/critiques/ first, then .waypoint/<project>/) before anything is written. An id that is in no critique
-        // is an error (exit 2) that names it, never ignored.
-        const files = designFilesOf(file, d.meta.project);
-        const critiques = readCritiques(files);
+        // A-04, K3-02: what this entry applied and what its interview resolved, checked against the critiques before
+        // anything is written. An id that is in no critique is an error (exit 2) that names it, never ignored.
         const critiqueOf = (r: number) => critiques.find(c => c.round === r)?.critique ?? null;
         const items: { applied: Record<number, number[]> | null; resolved: Record<number, number[]> | null } = { applied: null, resolved: null };
         for (const name of ['applied', 'resolved'] as const) {
@@ -881,11 +884,16 @@ export function run(argv: string[], io: Io): Result {
         const roundGiven = flag('round');
         const designFlag = flag('design');
         const designParsed = designFlag !== undefined ? parseDesign(readFileSync(abs(designFlag), 'utf8')) : null;
-        // With --design the round counts from the design's last reopen, as critique-next gave it (ruling C1).
+        // With --design the round counts from the design's last reopen, as critique-next gave it (ruling C1). A changelog
+        // that does not parse leaves no budget to apply: exit 2, the critique is not judged (carry 6).
         const absolute = roundGiven !== undefined ? Number(roundGiven) : c.round;
-        const budgetAt = designFlag !== undefined && designParsed
-          ? budgetRound(readChangelog(designFilesOf(abs(designFlag), designParsed.meta.project).dir), absolute)
-          : absolute;
+        let budgetAt = absolute;
+        if (designFlag !== undefined && designParsed) {
+          let log: ReturnType<typeof readChangelog>;
+          try { log = readChangelog(designFilesOf(abs(designFlag), designParsed.meta.project).dir); }
+          catch (e) { return fail(`critique-check: cannot read the changelog of the design: ${(e as Error).message}`, 2); }
+          budgetAt = budgetRound(log, absolute);
+        }
         issues.push(...budgetIssues(c, budgetFor(budgetAt, args.includes('--verify'))));
         const headings: Record<string, string> = {};
         if (designParsed) {

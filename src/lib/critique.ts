@@ -1,5 +1,15 @@
 import { z } from 'zod';
 
+/** The highest round a critique can have: six digits, the bound of the critique file names below. */
+export const ROUND_MAX = 999_999;
+/**
+ * K3-10: the critique file of round N: `r<N>.json` in docs/waypoint/<project>/design/critiques/, `critique-r<N>.json` in
+ * .waypoint/<project>/ (before waypoint 0.27.0). N has no leading zero (so `r01.json` never collides with `r1.json`) and
+ * goes from 1 to ROUND_MAX; a critique set aside as `r<N>.rejected.json` is no round. The CLI and the band read them alike.
+ */
+export const CRITIQUE_FILE = /^r([1-9]\d{0,5})\.json$/;
+export const LEGACY_CRITIQUE_FILE = /^critique-r([1-9]\d{0,5})\.json$/;
+
 export const CATEGORIES = ['scope', 'done_criteria', 'risk', 'contradiction', 'gap'] as const;
 export const SEVERITIES = ['critical', 'major', 'minor'] as const;
 /** K3-04: `ready` when nothing critical or major is left (zero proposals is a valid critique), `changes` otherwise. */

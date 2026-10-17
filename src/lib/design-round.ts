@@ -2,7 +2,7 @@
 // the waypoint CLI reads the files (critique-next).
 import { budgetFor, scopeFor, type Budget } from './critique.js';
 import { changedSections, designBody } from './design.js';
-import { entryKind, type ChangelogEntry } from './history.js';
+import { entryKind, entryRound, type ChangelogEntry } from './history.js';
 import type { GateCritique } from './design-gate.js';
 
 export interface NextRound {
@@ -44,7 +44,7 @@ export interface NextRoundInput {
 export function budgetRound(changelog: ChangelogEntry[], round: number): number {
   const reopen = [...changelog].reverse().find(e => entryKind(e) === 'reopen');
   const n = Number.isFinite(round) ? round : 1;
-  return Math.max(1, n - (reopen?.round ?? 0));
+  return Math.max(1, n - entryRound(reopen));
 }
 
 /**
@@ -53,7 +53,7 @@ export function budgetRound(changelog: ChangelogEntry[], round: number): number 
  */
 export function nextRound(i: NextRoundInput): NextRound {
   const last = i.changelog[i.changelog.length - 1];
-  const round = Math.max(0, last?.round ?? 0, ...i.critiques.map(c => c.round)) + 1;
+  const round = Math.max(entryRound(last), ...i.critiques.map(c => c.round)) + 1;
   const reopened = i.changelog.some(e => entryKind(e) === 'reopen');
   const cycle = budgetRound(i.changelog, round);
   const verify = i.verify ?? false;

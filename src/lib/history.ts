@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ROUND_MAX } from './critique.js';
 
 /** K3-07: what made a changelog entry (`design-snapshot --kind`). */
 export const ENTRY_KINDS = ['draft', 'round', 'apply', 'rewrite', 'interview', 'approve', 'amend', 'reopen'] as const;
@@ -125,11 +126,22 @@ export function appendChangelog(list: ChangelogEntry[], e: ChangelogEntry): Chan
 
 /** The notes of entries written before `kind`, in English or Spanish; the first that matches names the kind. */
 const KIND_NOTES: [EntryKind, RegExp][] = [
-  ['reopen', /\b(?:reopen(?:ed|ing)?|reabiert[oa]|reabrir)\b/i],
+  // Only a note that starts with it, as an approval: "ronda 2: aplicadas 1 - evita reabrir el diseño" is an apply, and
+  // read as a reopen it would restart the budget (carry 6).
+  ['reopen', /^\s*(?:reopen(?:ed|ing)?|reabiert[oa]|reabrir)\b/i],
   ['amend', /\b(?:amend(?:ed|ment)?|enmienda|enmendad[oa])\b/i],
   // Only a note that starts with it: "round 2: applied 1 — approve the rollback" is an apply.
   ['approve', /^\s*(?:approved?|aprobad[oa])\b/i],
 ];
+
+/**
+ * Carry 6: the round of an entry as the budget counts it: a whole number from 0 to ROUND_MAX; anything else the schema
+ * let through (2.5, 1e999, a negative) is 0, so the next round is never `r3.5.json` nor `rInfinity.json`.
+ */
+export function entryRound(e: ChangelogEntry | undefined): number {
+  const r = e?.round;
+  return typeof r === 'number' && Number.isSafeInteger(r) && r >= 0 && r <= ROUND_MAX ? r : 0;
+}
 
 /**
  * K3-07: what made an entry: its `kind`; else `rewrite` or `apply` from what it recorded; else, in an older entry, the
