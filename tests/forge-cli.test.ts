@@ -1511,7 +1511,7 @@ describe('forge waypoint-cli', () => {
     expect(r.stderr).toMatch(/waypoint\.cjs not found/);
   });
   describe('proposals', () => {
-    const prop = { category: 'quality', risk: 'low', title: 'Cut dead code', rationale: 'r', evidence: 'e', pillar: 'quality', source: 'scout' };
+    const prop = { category: 'quality', risk: 'low', title: 'Cut dead code', rationale: 'r', evidence: 'e', pillar: 'quality', source: 'scout', path: 'src/util/dead.ts' };
     const DIG = (id: string) => proposalDigest(id, prop as unknown as ProposalDoc);
     const add = (over: Record<string, unknown> = {}) => {
       writeFileSync(path.join(root, 'p.json'), JSON.stringify({ ...prop, ...over }));
@@ -1761,6 +1761,23 @@ describe('forge waypoint-cli', () => {
       const own = JSON.parse(add().stdout).id;
       saveProposal(root, own, { ...loadProposals(root)[0], rationale: 'quietly different' } as unknown as ProposalDoc);
       expect(JSON.parse(run(['proposals', 'policy', own], io).stdout)).toMatchObject({ status: 'proposed', write: null });
+    });
+    it('policy refuses an add event without a digest, a revision, and a pid someone else already decided', () => {
+      const legacy = 'p20261011090000lgcy';
+      saveProposal(root, legacy, { ...prop, title: 'Legacy quantum widget polish', rationale: 'zeta', ts: 't', status: 'proposed', author: 'a' } as unknown as ProposalDoc);
+      appendEvent(root, { ts: 'T', kind: 'proposal', action: 'add', id: legacy });
+      expect(JSON.parse(run(['proposals', 'policy', legacy], io).stdout)).toMatchObject({ status: 'proposed', write: null });
+      const v1 = JSON.parse(add().stdout).id;
+      io.rand = () => 0.9;
+      writeFileSync(path.join(root, 'v2.json'), JSON.stringify({ ...prop, title: 'Cut more dead code' }));
+      const v2 = JSON.parse(run(['proposals', 'add', '--file', 'v2.json', '--revises', v1], io).stdout).id;
+      expect(JSON.parse(run(['proposals', 'policy', v2], io).stdout)).toMatchObject({ status: 'proposed', write: null });
+      const decided = 'p20261011090000dcdd';
+      const d = { ...prop, title: 'Decided orbital gadget tuning', rationale: 'omega', ts: 't', status: 'proposed', author: 'a' } as unknown as ProposalDoc;
+      saveProposal(root, decided, d);
+      appendEvent(root, { ts: 'T', kind: 'proposal', action: 'add', id: decided, digest: proposalDigest(decided, d) });
+      appendEvent(root, { ts: 'T', kind: 'proposal', action: 'decide', id: decided, status: 'rejected' });
+      expect(JSON.parse(run(['proposals', 'policy', decided], io).stdout)).toMatchObject({ status: 'proposed', write: null });
     });
     describe('to-task', () => {
       const planYaml = '# keep me\nproject: demo\nlocale: en\nversion: "0.1"\nversions:\n  - id: "0.1"\n    phases: [F1]\ntracks:\n  - { id: backend, name: Backend, color: blue }\nphases:\n  - { id: F1, name: Base, plan_status: committed }\ntasks:\n  # first task\n  - { id: T001, title: a, track: backend, phase: F1, done_when: x }\n';

@@ -10,16 +10,20 @@ const BENCH_COLON = /\bbench:/giu;
 const OPS = /ops\/s/giu;
 const BEFORE_AFTER = /\d+(?:\.\d+)?\s*ms\s*(?:→|->)\s*\d+(?:\.\d+)?\s*ms/giu;
 const TEST_WORD = /\b(?:tests?|tested|spec)\b/giu;
-// D-16: a tests proposal names a test file.
-const TEST_PATH = /(^|\/)(tests?|__tests__|spec)\/|\.(test|spec)\.\w+$/;
-// D-16: deleting or migrating data is never approved without the user (unless negated, as hasUnnegated reads it).
+// D-16: a tests proposal names a test file (a bare `spec/` folder only at the root: `docs/spec/` is not a test).
+const TEST_PATH = /(^|\/)(tests?|__tests__)\/|^spec\/|[._]spec\.\w+$|\.test\.\w+$/;
+// D-16: deleting or migrating data is never approved without the user. Fails safe: by stem (any inflection, EN and ES), and a
+// negation never unlocks it («does not drop» is still a proposal about dropping).
 const DESTRUCTIVE = new RegExp([
-  '\\b(?:drop|truncate|wipe|purge|migrat\\w*)\\b',
-  '\\b(?:delete|remove|erase)\\s+(?:(?:the|all|every|old)\\s+)*(?:data|rows?|records?|tables?|columns?|users?|accounts?|entries)\\b',
-  '(?<![\\p{L}\\p{N}_])(?:borr|elimin|vaci)\\p{L}*\\s+(?:(?:los|las|el|la|todos|todas)\\s+)*(?:datos|registros|tablas?|filas|columnas|usuarios|cuentas)(?![\\p{L}\\p{N}_])',
-  '(?<![\\p{L}\\p{N}_])migr\\p{L}*',
-].join('|'), 'giu');
-
+  '(?<![\\p{L}\\p{N}_])(?:drop|delet|purg|truncat|remov|eras|wip|migrat|suprim|supres|borr|elimin|vaci|migr)\\p{L}*',
+  '\\balter\\s+table\\b',
+].join('|'), 'iu');
+// I2: path segments that name a sensitive area, as a substring (oauth, authentication, secrets, permissions, cryptography...).
+const SENSITIVE_PATH = /auth|login|secret|credential|token|permission|session|crypto|security/i;
+// Minor 4: compatibility forms folded, zero-width and format characters stripped, before any match.
+const clean = (s: string): string => String(s).normalize('NFKC').replace(/\p{Cf}/gu, '');
+// A letter outside the Latin script (a Cyrillic «а» inside «drop»): it may hide a word, so nothing is approved.
+const NON_LATIN = /(?!\p{Script=Latin})\p{L}/u;
 const wordsIn = (s: string): string[] => s.match(/[\p{L}\p{N}]+/gu) ?? [];
 
 // True when the pattern matches somewhere without a negator among the 3 words before or the 3 words after it
@@ -33,22 +37,26 @@ function hasUnnegated(text: string, re: RegExp): boolean {
   return false;
 }
 
-// Only low-risk, verifiable work is approved without the user (D-16, K2-16): a tests proposal names a test file, nothing
-// proposes deleting or migrating data, and nothing touches a sensitive zone, by its path or by its words.
+// Only low-risk, verifiable work is approved without the user (D-16, K2-16). Every rule fails safe: when in doubt the
+// proposal goes to the owner. It needs a concrete, safe path (no glob); a tests proposal names a test file; nothing
+// proposes deleting or migrating data; nothing touches a sensitive zone by its path or by its words; no letter outside
+// the Latin script hides in the title, the rationale or the path.
 export function autoApprovable(p: ProposalDoc): boolean {
   if (p.risk !== 'low') return false;
-  const text = `${p.title} ${p.rationale}`;
-  if (hasUnnegated(text, DESTRUCTIVE)) return false;
-  if ((p.path && zonesFromPaths([p.path]).length) || zonesFromText(text).length) return false;
+  const text = clean(`${p.title} ${p.rationale}`);
+  const where = clean(typeof p.path === 'string' ? p.path : '').replace(/\\/g, '/');
+  if (!where || where.includes('*') || !safeZone(where)) return false;
+  if (NON_LATIN.test(text) || NON_LATIN.test(where)) return false;
+  if (DESTRUCTIVE.test(text) || DESTRUCTIVE.test(where) || SENSITIVE_PATH.test(where)) return false;
+  if (zonesFromPaths([where]).length || zonesFromText(`${text} ${where}`).length) return false;
   switch (p.category) {
-    case 'tests': return !!p.path && TEST_PATH.test(p.path.replace(/\\/g, '/'));
+    case 'tests': return TEST_PATH.test(where);
     case 'quality': return true;
     case 'perf': return [BENCH_WORD, BENCH_COLON, OPS, BEFORE_AFTER].some(re => hasUnnegated(p.evidence, re));
     case 'security': return hasUnnegated(p.evidence, TEST_WORD);
     default: return false;
   }
 }
-
 const norm = (s: string): string => s.toLowerCase().replace(/\s+/g, ' ').trim();
 const words = (s: string): Set<string> => new Set((s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter(w => w.length >= 3));
 

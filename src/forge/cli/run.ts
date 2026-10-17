@@ -1238,7 +1238,7 @@ function runCommand(argv: string[], io: Io): Result {
             if (open) return { code: 3, stdout: '', stderr: `proposals add: similar to open proposal ${open}\n` };
             const id = proposalId(io.now(), io.rand ?? Math.random);
             saveProposal(io.cwd, id, doc);
-            appendEvent(io.cwd, { ts: ts(), kind: 'proposal', action: 'add', id, digest: proposalDigest(id, doc) });
+            appendEvent(io.cwd, { ts: ts(), kind: 'proposal', action: 'add', id, digest: proposalDigest(id, doc), ...(revises ? { revises } : {}) });
             return json({ id, doc });
           }
           case 'list': {
@@ -1389,7 +1389,10 @@ function runCommand(argv: string[], io: Io): Result {
             // An owner's mark already decided this one (a non-owner reset its status): the policy does not overwrite it.
             // Origin: only a proposal this checkout added (its ledger `add` event carries the digest of the text it added) is auto-approved;
             // one an editor wrote on the page and a pull saved, or whose text changed since, is left to the owner.
-            const forgeMade = readEvents(io.cwd).some(e => e.kind === 'proposal' && e.action === 'add' && e.id === id && e.digest === proposalDigest(id, doc));
+            // The policy speaks once and first: a pid already decided, reopened or converted, and a v2 (--revises), are left to the owner.
+            const events = readEvents(io.cwd).filter(e => e.kind === 'proposal' && e.id === id);
+            const forgeMade = events.some(e => e.action === 'add' && e.digest === proposalDigest(id, doc) && !e.revises)
+              && !events.some(e => e.action === 'decide' || e.action === 'reopen' || e.action === 'to-task');
             if (doc.status !== 'proposed' || loadApproval(io.cwd, id) !== null || !forgeMade || !autoApprovable(doc)) {
               appendEvent(io.cwd, { ts: ts(), kind: 'proposal', action: 'policy', id, status: doc.status });
               return json({ id, status: doc.status, write: null, approval: null });

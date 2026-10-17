@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { autoApprovable, similarRejected, similarOpen, safeZone } from '../src/forge/policy.js';
 import type { ProposalDoc } from '../src/lib/proposals.js';
 
-const doc = (over: Partial<ProposalDoc> = {}): ProposalDoc => ({ ts: '', category: 'quality', risk: 'low', title: 't', rationale: '', evidence: '', pillar: 'p', status: 'proposed', source: 'scout', author: 'a', ...over });
+const doc = (over: Partial<ProposalDoc> = {}): ProposalDoc => ({ ts: '', category: 'quality', risk: 'low', title: 't', path: 'src/util/x.ts', rationale: '', evidence: '', pillar: 'p', status: 'proposed', source: 'scout', author: 'a', ...over });
 
 describe('autoApprovable', () => {
   it('tests and quality at low risk', () => {
@@ -99,14 +99,37 @@ describe('autoApprovable: objective signals only (D-16, K2-16)', () => {
     expect(autoApprovable(doc({ category: 'tests' }))).toBe(false);
     for (const p of ['tests/app.test.ts', 'src/__tests__/a.ts', 'spec/cart_spec.rb', 'src/cart.spec.ts', 'pkg/a.test.go']) expect(autoApprovable(doc({ category: 'tests', path: p })), p).toBe(true);
   });
-  it('never when it proposes deleting or migrating data, unless it says it does not', () => {
-    for (const t of ['drop the users table', 'Truncate the logs', 'migrate the orders to the new store', 'delete all old records', 'borrar los registros antiguos']) {
+  it('never when it proposes deleting or migrating data, in any inflection, and a negation never unlocks it (I1)', () => {
+    const refused = ['drop the users table', 'Truncate the logs', 'migrate the orders to the new store', 'delete all old records', 'borrar los registros antiguos',
+      'Drop the pending jobs table', 'Purge rows with no owner', 'Delete accounts without activity', 'Delete the users with no orders', 'Delete records missing an owner',
+      'Erase all entries pending review', 'Truncate the table, nothing else changes', 'No-op cleanup: drop the users table', 'Zero-downtime: truncate the logs',
+      'Borrar los registros sin due\u00f1o', 'Drops the legacy users table', 'Dropping unused tables', 'Purged stale rows', 'Truncating the logs table', 'Deletes orphaned rows',
+      'Remove orphaned rows', 'Delete stale records', 'DELETE FROM users WHERE inactive', 'borrar el registro antiguo', 'eliminar la fila duplicada', 'eliminar la cuenta inactiva',
+      'borra la columna vieja', 'eliminar usuario inactivo', 'Wipe the cache dir', 'Erases the old log', 'ALTER TABLE users ADD x', 'Suprimir los datos viejos', 'Vaciar la tabla',
+      'Migraci\u00f3n de los pedidos', 'Migrar los pedidos', 'Removal of old rows', 'Deletion of the backups'];
+    for (const t of refused) expect(autoApprovable(doc({ title: t })), t).toBe(false);
+    for (const r of ['does not drop anything', 'nothing is deleted', 'nothing to migrate', 'no migration needed', 'never deletes data', 'sin borrar datos']) {
+      expect(autoApprovable(doc({ title: 'Tidy the parser', rationale: r })), r).toBe(false);
+    }
+    expect(autoApprovable(doc({ title: 'Tidy the parser', rationale: 'Smaller functions' }))).toBe(true);
+  });
+  it('lookalikes and invisible characters do not hide a word (minor 4)', () => {
+    const zwj = String.fromCharCode(0x200d), shy = String.fromCharCode(0xad);
+    for (const t of ['dr\u043ep the users table', `de${zwj}lete the rows`, `au${zwj}th cleanup`, `Rotate the a${shy}uth key`, '\uff44\uff52\uff4f\uff50 the table', '\uff41\uff55\uff54\uff48 helper', 'Tidy \u0410uth helper']) {
       expect(autoApprovable(doc({ title: t })), t).toBe(false);
     }
-    for (const r of ['does not drop anything', 'nothing is deleted', 'nothing to migrate']) expect(autoApprovable(doc({ title: 'Tidy the parser', rationale: r })), r).toBe(true);
+    expect(autoApprovable(doc({ title: 'Tidy the parser', path: 'src/\u0430pp.ts' }))).toBe(false);
+    expect(autoApprovable(doc({ title: 'Ordena el an\u00e1lisis \u2014 sin cambios' }))).toBe(true);
   });
-  it('a text naming a risky zone is refused even when it says no migration is needed (C6)', () => {
-    expect(autoApprovable(doc({ title: 'Tidy the parser', rationale: 'no migration needed' }))).toBe(false);
+  it('a path needs to be concrete, relative and safe (minor 7, I2)', () => {
+    for (const p of [undefined, '', '**', '*', 'src/**', 'src/*.ts', '../x.ts', '/etc/x.ts', 'C:/x.ts', 'a b.ts']) expect(autoApprovable(doc({ path: p })), String(p)).toBe(false);
+    expect(autoApprovable(doc({ category: 'tests', path: 'tests/**' }))).toBe(false);
+    expect(autoApprovable(doc({ category: 'tests', path: 'tests/../src/app.ts' }))).toBe(false);
+    expect(autoApprovable(doc({ category: 'tests', path: 'docs/spec/api.md' }))).toBe(false);
+  });
+  it('sensitive path segments, whatever the separator (I2)', () => {
+    for (const p of ['src\\auth\\login.ts', 'src/login.ts', 'src/oauth/x.ts', 'src/authentication/x.ts', 'src/secrets/x.ts', 'src/permissions/x.ts', 'src/credentials.ts',
+      'src/tokens/x.ts', 'src/session/x.ts', 'src/cryptography/x.ts', 'src/security/x.ts', 'src/migrate/x.ts']) expect(autoApprovable(doc({ path: p })), p).toBe(false);
   });
   it('never when its path or its words touch a sensitive zone', () => {
     expect(autoApprovable(doc({ path: 'src/auth/login.ts' }))).toBe(false);
