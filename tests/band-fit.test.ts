@@ -52,8 +52,52 @@ describe('fitParts (F-04)', () => {
     expect(line(wide, 20)).toBe('T7 漢字のタイ… · ✎ 1');
     expect(line(wide, 12)).toBe('T7 · ✎ 1');
   });
-  it('without a number of columns it fits in 80 (Review Focus 2)', () => {
-    expect(line(WORK, Number.NaN)).toBe(line(WORK, 80));
+  it('without a finite number of columns it has no room: nothing is shown (layoutBand is the one that defaults to 80)', () => {
+    for (const cols of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) expect(fitParts(WORK, cols).shown, String(cols)).toEqual([]);
+  });
+});
+
+describe('fitParts never returns a line wider than its cells (review fix)', () => {
+  const slots3 = [1, 2, 3].map(i => P(`slot:T00${i}`, `T00${i} implementar`, 4, { short: `T00${i}` }));
+  const tooWide = [P('a', 'aaaaaaaaaaaa', 3), P('b', 'bbbbbbbbbbbb', 5), P('c', 'cccccccccccc', 1)];
+  const ties = [P('a', 'aaaa', 4, { short: 'a' }), P('b', 'bbbb', 4, { short: 'b' }), P('c', 'cccc', 4, { short: 'c' }), P('d', 'dddd', 4)];
+  const run = [P('head', '► EJECUCIÓN · subagentes 3/3', 5, { short: '► 3/3' }), ...slots3, P('integrated', '3/12 integradas', 5, { short: '3/12' })];
+  const sets: Record<string, BandPart[]> = { slots3, tooWide, ties, run, WORK };
+  it('sweeps 0 to 6 columns and a few more over several sets', () => {
+    for (const [name, parts] of Object.entries(sets)) {
+      for (const cols of [0, 1, 2, 3, 4, 5, 6, 8, 12, 20, 40]) {
+        const { shown } = fitParts(parts, cols);
+        expect(stringWidth(joinParts(shown)), `${name} @ ${cols}`).toBeLessThanOrEqual(Math.max(0, cols));
+        expect(partsWidth(shown), `${name} @ ${cols}`).toBeLessThanOrEqual(Math.max(0, cols));
+      }
+    }
+  });
+  it('the «+N» takes part in fitting: dropping more to make room for it, none when it alone does not fit', () => {
+    expect(fitParts(slots3, 1).shown).toEqual([]);
+    expect(fitParts(slots3, 0).shown).toEqual([]);
+    expect(line(slots3, 2)).toBe('+3');
+    expect(line(slots3, 8)).toBe('+3');
+    expect(line(slots3, 9)).toBe('T001 · +2');
+  });
+  it('a short form is used only when it is narrower than the text', () => {
+    const parts = [P('a', 'ab', 5, { short: 'abcdefghijkl' }), P('b', 'cdefghij', 4, { short: 'cd' })];
+    expect(line(parts, 12)).toBe('ab · cd');
+  });
+  it('an empty or zero-width part adds no separator', () => {
+    const zero = String.fromCharCode(0x200b);
+    const parts = [P('a', 'a', 3), P('e', '', 5), P('z', zero, 5), P('b', 'b', 4)];
+    expect(joinParts(parts)).toBe('a · b');
+    expect(partsWidth(parts)).toBe(5);
+    expect(line(parts, 80)).toBe('a · b');
+  });
+  it('the part after a «+N» (or after a dropped part) does not keep a glue meant for another neighbour', () => {
+    const parts = [P('slot:1', 'T001 implementar', 9), P('slot:2', 'T002 implementar', 9), P('task', 'T019', 4, { glue: ' ' })];
+    expect(line(parts, 9)).toBe('+2 · T019');
+  });
+  it('a NaN priority sorts as the least important, the same way every time', () => {
+    const parts = [P('a', 'aaaa', Number.NaN), P('b', 'bbbb', 2), P('c', 'cccc', 3)];
+    expect(line(parts, 12)).toBe('bbbb · cccc');
+    expect(line([...parts].reverse(), 12)).toBe('cccc · bbbb');
   });
 });
 

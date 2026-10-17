@@ -14,12 +14,20 @@ export function span(seconds: number | null | undefined): string | null {
   return seconds > DAY_S ? '>24h' : duration(Math.floor(seconds));
 }
 
-/** Whole minutes as the band's task clock says them: «45 m», «2 h», «9 h 58 m»; compact «45m», «2h», «9h58m». */
+const MAX_MINUTES = 99_999 * 1440;
+
+/**
+ * Whole minutes as the band's task clock says them: «45 m», «2 h», «9 h 58 m»; compact «45m», «2h», «9h58m». From 99 999
+ * days up it prints that cap with a «+» (never an exponent); a negative or non-finite value is «0 m».
+ */
 export function minutesText(minutes: number, compact = false): string {
   const total = Number.isFinite(minutes) ? Math.max(0, Math.floor(minutes)) : 0;
-  if (total < 60) return compact ? `${total}m` : `${total} m`;
-  const hours = Math.floor(total / 60);
-  const rest = total % 60;
-  if (compact) return rest ? `${hours}h${rest}m` : `${hours}h`;
-  return rest ? `${hours} h ${rest} m` : `${hours} h`;
+  const capped = total >= MAX_MINUTES;
+  const n = capped ? MAX_MINUTES : total;
+  const plus = capped ? '+' : '';
+  if (n < 60) return compact ? `${n}m` : `${n} m`;
+  const hours = Math.floor(n / 60);
+  const rest = n % 60;
+  if (compact) return `${rest ? `${hours}h${rest}m` : `${hours}h`}${plus}`;
+  return `${rest ? `${hours} h ${rest} m` : `${hours} h`}${plus}`;
 }

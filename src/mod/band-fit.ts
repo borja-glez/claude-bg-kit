@@ -15,26 +15,33 @@ export const TITLE_MIN = 8;
 export const DEFAULT_COLUMNS = 80;
 const SLOT = 'slot:';
 
+/** The parts that take a cell: an empty or zero-width one adds no separator. */
+const visible = (parts: readonly BandPart[]): BandPart[] => parts.filter(p => stringWidth(p.text) > 0);
+
 /** The cells the parts take joined, each glued to the one before. */
 export function partsWidth(parts: readonly BandPart[], sep = SEP): number {
   let width = 0;
-  parts.forEach((p, i) => { width += stringWidth(p.text) + (i ? stringWidth(p.glue ?? sep) : 0); });
+  visible(parts).forEach((p, i) => { width += stringWidth(p.text) + (i ? stringWidth(p.glue ?? sep) : 0); });
   return width;
 }
 
 /** The parts joined as one line. */
 export function joinParts(parts: readonly BandPart[], sep = SEP): string {
-  return parts.map((p, i) => `${i ? p.glue ?? sep : ''}${p.text}`).join('');
+  return visible(parts).map((p, i) => `${i ? p.glue ?? sep : ''}${p.text}`).join('');
 }
 
+// A width that is not a finite number is no room at all (layoutBand is the one that defaults to DEFAULT_COLUMNS).
 const columnsOf = (cols: unknown): number =>
-  (typeof cols === 'number' && Number.isFinite(cols) ? Math.max(0, Math.floor(cols)) : DEFAULT_COLUMNS);
+  (typeof cols === 'number' && Number.isFinite(cols) ? Math.max(0, Math.floor(cols)) : 0);
+/** A priority as a sort key: a NaN one is the least important (past 9). */
+const prioKey = (p: BandPart): number => (Number.isNaN(p.prio) ? Number.POSITIVE_INFINITY : p.prio);
 
 /**
  * F-04: the parts that fit in `cols` cells. (1) All of them, when they fit. (2) Else, from the least important (9) up,
  * and the later first within a priority, each part clips its title (down to TITLE_MIN cells) and then takes its short
  * form, until they fit. (3) Else parts are dropped in the same order; the `slot:` parts dropped are counted in a «+N»
- * part where the first of them was (E-04). Never more parts than it got; without a number of columns, 80.
+ * part where the first of them was (E-04); the «+N» counts in the width, and when it alone does not fit nothing is
+ * shown. Never more parts than it got, never a line wider than `cols`; a width that is not a finite number is 0.
  */
 export function fitParts(parts: readonly BandPart[], cols: number, sep = SEP): { shown: BandPart[]; dropped: number } {
   const width = columnsOf(cols);
@@ -44,8 +51,15 @@ export function fitParts(parts: readonly BandPart[], cols: number, sep = SEP): {
     const out: BandPart[] = [];
     let more = 0;
     let at = -1;
+    let after = false;
     cur.forEach((p, i) => {
-      if (!gone.has(i)) { out.push(p); return; }
+      if (!gone.has(i)) {
+        // A glue was meant for the part before; once that one is gone, the separator joins it to whatever is now there.
+        out.push(after ? { ...p, glue: undefined } : p);
+        after = false;
+        return;
+      }
+      after = true;
       if (p.key.startsWith(SLOT)) {
         more++;
         if (at < 0) at = out.length;
@@ -57,7 +71,11 @@ export function fitParts(parts: readonly BandPart[], cols: number, sep = SEP): {
   const fits = () => partsWidth(view(), sep) <= width;
   const done = () => ({ shown: view(), dropped: gone.size });
   if (fits()) return done();
-  const order = cur.map((_, i) => i).sort((a, b) => cur[b].prio - cur[a].prio || b - a);
+  const order = cur.map((_, i) => i).sort((a, b) => {
+    const ka = prioKey(cur[a]);
+    const kb = prioKey(cur[b]);
+    return ka === kb ? b - a : kb > ka ? 1 : -1;
+  });
   for (const i of order) {
     const p = cur[i];
     if (p.title && p.text.endsWith(p.title)) {
@@ -67,7 +85,7 @@ export function fitParts(parts: readonly BandPart[], cols: number, sep = SEP): {
         if (fits()) return done();
       }
     }
-    if (p.short !== undefined) {
+    if (p.short !== undefined && stringWidth(p.short) < stringWidth(cur[i].text)) {
       cur[i] = { ...cur[i], text: p.short };
       if (fits()) return done();
     }
@@ -76,7 +94,8 @@ export function fitParts(parts: readonly BandPart[], cols: number, sep = SEP): {
     gone.add(i);
     if (fits()) return done();
   }
-  return done();
+  // Everything is gone and only the «+N» is left, and it does not fit either: no line at all.
+  return { shown: [], dropped: gone.size };
 }
 
 export type BandLevel = 'wide' | 'two' | 'one';
