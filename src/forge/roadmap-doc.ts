@@ -10,20 +10,24 @@ import { deriveStatuses, reviewersOf, statusKey, type ForgeStatus, type StatusMa
 import { STAGES, type Stage, type TaskExec } from '../lib/types.js';
 import type { ExecTask, ExecutionState, PublicTask } from '../lib/execution-state.js';
 import { samePath } from '../lib/worktree.js';
+// Only eventsSince, the pure part of execution.ts, is used here: the generator does no I/O.
 import { eventsSince } from './execution.js';
 import type { LedgerEvent } from './ledger.js';
 import type { VerifyFile } from './verdict.js';
 
 /** A review dir of the task, `reviews-<brief>-<n>/`, and the names of the files in it. */
-export interface ReviewDir { brief: number; n: number; files: readonly string[] }
+/** `at` is the mtime of the dir (C1: one older than the execution is an earlier run's). Never pass the `earlier-<runId>/` dirs prep archives. */
+export interface ReviewDir { brief: number; n: number; files: readonly string[]; at?: string | null }
 /** A verification of the task: its verify.json, its evidence dir relative to the repo, and the absolute path of a screenshot. */
-export interface VerifyRound { brief: number; n: number; file: VerifyFile; local: string; shotPath: (shot: string) => string }
+export interface VerifyRound { brief: number; n: number; file: VerifyFile; local: string; shotPath: (shot: string) => string; at?: string | null }
 /** An uploaded screenshot: the absolute path of the file and the roadmap asset it became. */
 export interface Asset { path: string; id: string; url: string }
 export interface DocInput {
   task: string; status: ForgeStatus | null; events: readonly LedgerEvent[];
   execution: ExecutionState | null; execTask: ExecTask | null; publicTask: PublicTask | null;
   reviews: readonly ReviewDir[]; verifies: readonly VerifyRound[]; deferred: unknown;
+  /** The mtime of deferred.json, for the entries that carry no `ts` of their own. */
+  deferredAt?: string | null;
   integration: IntegrationV2 | null; assets: readonly Asset[]; evidenceMode: 'upload' | 'local'; now: Date;
 }
 export type ExecWrite = TaskExec | { __delete__: true };
@@ -192,14 +196,25 @@ function evidenceOf(i: DocInput, brief: number): EvidenceV2 | null {
  * C1: a task the current execution holds counts only the events since that execution started (as 2c does for reviews):
  * a new run of the same plan task restarts it in the same work folder, and an earlier run's rounds, accepted round,
  * over-cap flag and deferred findings are not this run's. The status is derived again from those events for the same
- * reason (its verdict, reviews and stages). Without a holding execution every event of the task counts.
+ * reason (its verdict, reviews and stages). What forge keeps on disk is dated the same way: deferred.json (by the entry's
+ * own `ts`, else the file's mtime), the review dirs and the verifications (by their mtime) that predate the run are
+ * left out. Without a holding execution (the task is not in it, or its startedAt is no date) everything counts.
  */
 function ownRun(i: DocInput): DocInput {
-  if (!i.execution || !i.execTask) return i;
-  const events = eventsSince(i.events, i.execution.startedAt);
-  const key = statusKey(i.task, i.execution.kind === 'plan' ? i.execution.project : null);
-  const own = key ? events.reduce<StatusMap>((m, e) => deriveStatuses(m, e).map, {})[key] ?? null : null;
-  return { ...i, events, status: own };
+  const e = i.execution;
+  if (!e || !i.execTask || !Object.hasOwn(e.tasks, i.task) || !Number.isFinite(Date.parse(e.startedAt))) return i;
+  const since = Date.parse(e.startedAt);
+  const current = (ts: unknown): boolean => typeof ts !== 'string' || !Number.isFinite(Date.parse(ts)) || Date.parse(ts) >= since;
+  const events = eventsSince(i.events, e.startedAt);
+  const key = statusKey(i.task, e.kind === 'plan' ? e.project : null);
+  const own = key ? events.reduce<StatusMap>((m, ev) => deriveStatuses(m, ev).map, {})[key] ?? null : null;
+  let deferred = i.deferred;
+  if (Array.isArray(deferred) && deferred.length) {
+    const kept = deferred.filter(d => current(isObj(d) && (typeof d.ts === 'string' || typeof d.at === 'string') ? d.ts ?? d.at : i.deferredAt));
+    // A deferred.json of an earlier run is no answer: the rulings of this run's events say what was deferred.
+    deferred = kept.length ? kept : null;
+  }
+  return { ...i, events, status: own, deferred, reviews: i.reviews.filter(r => current(r.at)), verifies: i.verifies.filter(v => current(v.at)) };
 }
 
 /** C7: the forge block v2, the evidence and the exec of one task. */
@@ -211,7 +226,9 @@ export function buildRoadmapData(input: DocInput): RoadmapData {
   // round and cap: reviews {n, max} of the last verdict or round event that says it (wave 1), never their own counters.
   const counted = i.events.filter(e => (e.kind === 'verdict' || e.kind === 'round') && reviewsOf(e.reviews)).at(-1);
   const reviews = counted ? reviewsOf(counted.reviews) : s?.reviews ?? null;
-  const acceptedRound = all.filter(r => r.action === 'accept').at(-1)?.n ?? null;
+  // The accept that closes the brief in progress: its last round, and only when that one is an accept.
+  const lastOfBrief = all.filter(r => r.brief === brief).at(-1);
+  const acceptedRound = lastOfBrief?.action === 'accept' ? lastOfBrief.n : null;
   const overCap = !!reviews && (reviews.n > reviews.max || all.filter(r => r.brief === brief).length > reviews.max);
   const stage = stageOf(i);
   const agent = i.execTask?.agent ?? liveOf(i)?.agent ?? s?.agent ?? null;

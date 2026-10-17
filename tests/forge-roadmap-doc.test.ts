@@ -120,6 +120,43 @@ describe('buildRoadmapData: the forge block v2 (G-02, G-05, K4-05)', () => {
     expect(all.rounds).toHaveLength(2);
     expect(all.acceptedRound).toBe(2);
   });
+  it('C1: deferred.json, review dirs and verifications of an earlier run do not reach the block of the run that restarted the task', () => {
+    const startB = ROADMAP_AT(50);
+    const runB: LedgerEvent[] = [{ ts: ROADMAP_AT(51), kind: 'phase', task: 'T1', project: 'shop', phase: 'implement', brief: 1, base: 'fff9999' }];
+    const e = exec({ T1: task({ stage: 'implement', agent: null, startedAt: startB }) }, startB);
+    const file = parseVerifyFile(JSON.stringify({ surfaces: ['web'], result: 'pass', checks: [{ id: 1, surface: 'web', name: 'home', main: true, ok: true, expected: 'e', observed: 'o', shot: null }], unchecked: [] }))!;
+    const verify = (atMin: number) => ({ brief: 1, n: 1, file, local: '.forge/x', shotPath: (s: string) => s, at: ROADMAP_AT(atMin) });
+    const dirs = (atMin: number) => [{ brief: 1, n: 1, files: ['correctness.json', 'verify.json'], at: ROADMAP_AT(atMin) }];
+    const base = { execution: e, execTask: e.tasks.T1 };
+    const old = buildRoadmapData(input([...MEDIUM_T1, ...runB], { ...base, deferred: [{ problem: 'old one' }], deferredAt: ROADMAP_AT(40), verifies: [verify(40)], reviews: dirs(40) }));
+    expect(old.forge.deferred).toEqual([]);
+    expect(old.evidence).toBeNull();
+    // An entry with its own timestamp is judged by it, whatever the file's mtime.
+    const mixed = buildRoadmapData(input([...MEDIUM_T1, ...runB], { ...base, deferred: [{ problem: 'old', ts: ROADMAP_AT(10) }, { problem: 'new', ts: ROADMAP_AT(55) }], deferredAt: ROADMAP_AT(56) }));
+    expect(mixed.forge.deferred).toEqual([{ problem: 'new' }]);
+    // This run's own pieces are kept.
+    const fresh = buildRoadmapData(input([...MEDIUM_T1, ...runB], { ...base, deferred: [{ problem: 'new one' }], deferredAt: ROADMAP_AT(55), verifies: [verify(55)] }));
+    expect(fresh.forge.deferred).toEqual([{ problem: 'new one' }]);
+    expect(fresh.evidence).not.toBeNull();
+    // Without a holding execution the old pieces count.
+    expect(buildRoadmapData(input(MEDIUM_T1, { deferred: [{ problem: 'old one' }], deferredAt: ROADMAP_AT(40), verifies: [verify(40)] })).forge.deferred).toEqual([{ problem: 'old one' }]);
+  });
+  it('C1: an execution that does not hold the task, or whose startedAt is not a date, filters nothing', () => {
+    const other = exec({ T2: task() }, ROADMAP_AT(50));
+    expect(buildRoadmapData(input(MEDIUM_T1, { execution: other, execTask: task() })).forge.rounds).toHaveLength(2);
+    const bad = exec({ T1: task() }, 'soon');
+    expect(buildRoadmapData(input(MEDIUM_T1, { execution: bad, execTask: bad.tasks.T1 })).forge.rounds).toHaveLength(2);
+  });
+  it('acceptedRound is the accept that closes the brief in progress, never that of an earlier brief', () => {
+    const redo: LedgerEvent[] = [...MEDIUM_T1.slice(0, 11), { ts: ROADMAP_AT(41), kind: 'phase', task: 'T1', project: 'shop', phase: 'implement', brief: 2, base: 'abc1234' },
+      { ts: ROADMAP_AT(42), kind: 'phase', task: 'T1', project: 'shop', phase: 'review', brief: 2, round: 1, reviewers: [] }];
+    const f = buildRoadmapData(input(redo)).forge;
+    expect(f.brief).toBe(2);
+    expect(f.acceptedRound).toBeNull();
+    // A later fix in the same brief leaves no accepted round either.
+    const fixAfter: LedgerEvent[] = [...MEDIUM_T1.slice(0, 11), { ts: ROADMAP_AT(43), kind: 'verdict', task: 'T1-1', project: 'shop', dir: '.forge/work/shop/T1/reviews-1-3', action: 'fix', score: 0.3, signature: 's3', critical: 1, important: 0, minor: 0, deferred: 0, reviews: { n: 3, max: 4 } }];
+    expect(buildRoadmapData(input(fixAfter)).forge.acceptedRound).toBeNull();
+  });
 });
 
 describe('buildRoadmapData: the evidence v2 (K2-14)', () => {
