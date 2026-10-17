@@ -32,7 +32,7 @@ const NOW = new Date('2026-10-12T12:00:00.000Z');
 const g = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, encoding: 'utf8' }).trim();
 const out = (r: { stdout: string; code: number; stderr: string }) => { if (r.code !== 0) throw new Error(r.stderr); return JSON.parse(r.stdout); };
 type Action = { type: string; task?: string; [k: string]: unknown };
-const step = (...extra: string[]) => out(run(['swarm', 'step', '--plan', 'plan.yaml', '--db', 'db', ...extra], io)) as { actions: Action[]; publish: { tasks: { task: string; version: number | null; claim?: true; exec: Record<string, unknown>; forge: Record<string, unknown> }[]; session: Record<string, unknown>; metaRun: Record<string, unknown> }; running: number; parallel: number; wait: number | null; say: string };
+const step = (...extra: string[]) => out(run(['swarm', 'step', '--plan', 'plan.yaml', '--db', 'db', ...extra], io)) as { actions: Action[]; publish: { tasks: { task: string; version: number | null; claim?: true; write: { file_path: string } & Record<string, unknown> | null; event?: Record<string, unknown>; publishError?: string }[]; session: Record<string, unknown>; metaRun: Record<string, unknown> }; running: number; parallel: number; wait: number | null; say: string };
 const wt = (task: string) => path.join(root, '.claude', 'worktrees', `task-${task}`);
 const commitIn = (cwd: string, file: string, text: string, msg: string) => {
   mkdirSync(path.dirname(path.join(cwd, file)), { recursive: true });
@@ -78,7 +78,10 @@ describe('forge swarm step (D-12)', () => {
     expect(readExecution(root)!.tasks.T1).toMatchObject({ stage: 'implement', agent: starts[0].agent });
     expect(readEvents(root).filter(e => e.kind === 'agent' && e.task === 'T1-1')).toHaveLength(1);
     const t1 = s.publish.tasks.find(x => x.task === 'T1')!;
-    expect(t1).toMatchObject({ version: 4, claim: true, exec: { stage: 'implement', by: 'main', mode: 'subagents' }, forge: { phase: 'implement' } });
+    expect(t1).toMatchObject({ version: 4, claim: true, write: { op: 'update', collection: 'state', doc_id: 'T1' },
+      event: { op: 'set', collection: 'events', data: { type: 'started', sessionId: 'main', taskId: 'T1' } } });
+    expect(JSON.parse(readFileSync(t1.write!.file_path, 'utf8'))).toMatchObject({ status: 'in_progress', owner: 'main',
+      exec: { stage: 'implement', by: 'main', mode: 'subagents' }, forge: { v: 2, phase: 'implement' } });
     expect(s.publish.tasks.find(x => x.task === 'T2')).toMatchObject({ version: null, claim: true });
     expect(s.publish.session).toMatchObject({ version: 7 });
     expect(s.publish.metaRun).toMatchObject({ kind: 'plan', loose: [], coordinator: 'main', active: true });
@@ -188,7 +191,7 @@ describe('forge swarm step (D-12)', () => {
     const s = stepWith(() => false);
     expect(s.actions.filter(a => a.type === 'spawnImplementer').map(a => a.task)).toEqual(['T1']);
     expect(stageOf('T1')).toBe('implement');
-    expect(s.publish.tasks.find(x => x.task === 'T1')).toMatchObject({ claim: true, exec: { stage: 'implement' } });
+    expect(s.publish.tasks.find(x => x.task === 'T1')).toMatchObject({ claim: true, write: { doc_id: 'T1' } });
     expect(readEvents(root).filter(e => e.kind === 'agent' && e.task === 'T1-1')).toHaveLength(1);
   });
   it('an implementer whose stage could not be recorded is not handed out; the next step hands it out without running prep again', () => {
@@ -906,6 +909,20 @@ describe('a new execution of the same plan task counts only its own reviews (car
     }
     expect(step().actions.find(a => a.task === 'T1')).toMatchObject({ type: 'resumeImplementer' });
     expect(readEvents(root).filter(e => e.kind === 'round' && e.task === 'T1-1').at(-1)).toMatchObject({ round: 1, next: 'resume' });
+  });
+  it('the publish of a task back from its implementer is the same file roadmap-doc gives (J-15)', () => {
+    step();
+    commitIn(wt('T1'), 'src/t1/a.ts', 'export const a = 1;\n', 'T1: a');
+    writeFileSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'report-1.txt'), 'done\n');
+    const s = step();
+    const t1 = s.publish.tasks.find(x => x.task === 'T1')!;
+    expect(t1).toMatchObject({ write: { op: 'update', collection: 'state', doc_id: 'T1' } });
+    expect(t1).not.toHaveProperty('claim');
+    expect(t1).not.toHaveProperty('event');
+    const fromStep = JSON.parse(readFileSync(t1.write!.file_path, 'utf8'));
+    expect(fromStep.forge).toMatchObject({ v: 2, stage: 'review' });
+    const again = out(run(['roadmap-doc', 'T1', '--project', 'shop', '--out', 'again.json'], io));
+    expect(JSON.parse(readFileSync(again.file, 'utf8'))).toEqual(fromStep);
   });
 });
 

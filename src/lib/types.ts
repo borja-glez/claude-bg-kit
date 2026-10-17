@@ -47,6 +47,8 @@ export interface RunDoc {
   active: boolean; stopReason: string | null; coordinator: string;
   slots: { task: string; stage: Stage; agent: string | null; by: string; since: string }[];
   kind: 'plan' | 'ephemeral'; loose: LooseRunTask[];
+  /** Wave 4: when the run started, its last step, why it stalled (at most 200 characters) and when it was closed (C2). */
+  startedAt?: string; lastStepAt?: string; stallReason?: string; closedAt?: string;
 }
 /** The most requests one ephemeral run takes (spec §4.4); src/forge/loose.ts re-exports it. */
 export const LOOSE_MAX_TASKS = 20;

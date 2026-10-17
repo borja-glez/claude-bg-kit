@@ -53,6 +53,14 @@ describe('normalizeRun / execution fields', () => {
     expect(normalizeRun({ ...run, kind: 'weird', loose: 'x' })).toMatchObject({ kind: 'plan', loose: [] });
     expect(normalizeRun({ ...run, kind: 'plan', loose: [{ id: 'a', title: 'a', status: 'queued', stage: null, agent: null }] })!.loose).toEqual([]);
   });
+  it('normalizeRun keeps the start, the last step, the stall reason and the closing of a run (wave 4)', () => {
+    const run = { runId: 'r1', mode: 'subagents', parallel: 3, branch: 'forge/run-x', mergeOnFinish: false, active: false, stopReason: 'stalled', coordinator: 'main', slots: [],
+      startedAt: '2026-10-16T10:00:00.000Z', lastStepAt: '2026-10-16T11:00:00.000Z', stallReason: 'T2 is blocked'.padEnd(300, '.'), closedAt: '2026-10-16T12:00:00.000Z' };
+    const r = normalizeRun(run)!;
+    expect(r).toMatchObject({ startedAt: run.startedAt, lastStepAt: run.lastStepAt, closedAt: run.closedAt });
+    expect(r.stallReason).toHaveLength(200);
+    expect(normalizeRun({ ...run, startedAt: 'yesterday', lastStepAt: 5, stallReason: 7, closedAt: null })).not.toHaveProperty('startedAt');
+  });
 });
 
 describe('normalizeMeta', () => {

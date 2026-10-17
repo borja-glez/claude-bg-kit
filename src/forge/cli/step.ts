@@ -6,8 +6,9 @@ import { checkPlanProject, commitInfo } from './swarm.js';
 import { readExecution, executionTaskFile, runWorktree, taskBase, writePublicTask } from '../execution.js';
 import { takeStepLock } from '../jobs.js';
 import { appendEvent, readEvents, withEventContext, type LedgerEvent } from '../ledger.js';
-import { eventsOf, isTask, ofTask, readWorkDir, taskLine, workRel } from '../task-ref.js';
-import { reviewsOf } from '../loop.js';
+import { eventsOf, isTask, readWorkDir, taskLine, workRel } from '../task-ref.js';
+import { publishFor, startedEvent } from '../roadmap-sources.js';
+import { runDocOf } from '../run-doc.js';
 import { LEASE_MINUTES } from '../../lib/coordination.js';
 import { normalizePublicTask, type ExecTask, type ExecutionState, type PublicTask } from '../../lib/execution-state.js';
 import { isPlanId, parsePlan } from '../../lib/plan.js';
@@ -591,25 +592,12 @@ function integratedAgain(c: Ctx, task: string, t: ExecTask): void {
   c.actions.push({ type: 'integrated', task, sha, commit: commitInfo(git, sha), again: true });
 }
 
-/** state/T.forge (C7, v1): the task's path, stage, agent, last validators, last verdict and its review count. */
-function forgeOf(events: LedgerEvent[], task: string, t: ExecTask): Json {
-  const mine = ofTask(task);
-  const tri = events.filter(x => x.kind === 'triage' && mine(x) && typeof x.path === 'string').at(-1);
-  const p = typeof tri?.path === 'string' ? tri.path : 'large';
-  const val = events.filter(x => x.kind === 'validate' && mine(x) && x.baseline !== true && Array.isArray(x.results)).at(-1);
-  const verdict = events.filter(x => x.kind === 'verdict' && mine(x)).at(-1);
-  const reviews = reviewsOf(Math.max(1, t.round), p);
-  return {
-    path: p, phase: t.stage, ...(t.agent ? { agent: t.agent } : {}),
-    validators: val ? (val.results as Json[]).map(r => ({ name: String(r.validator ?? ''), ok: r.ok === true })) : [],
-    ...(verdict ? { verdict: { action: String(verdict.action ?? ''), score: typeof verdict.score === 'number' ? verdict.score : null } } : {}),
-    round: reviews.n, cap: reviews.max,
-  };
-}
-
-/** The data of the roadmap batch the skill writes (J-15, wave 4, prints the writes themselves in this same shape). */
+/**
+ * J-15: the roadmap batch of this step, built by the CLI: for each task the coordinator drives, the state/T write of
+ * roadmap-doc (with the claim of a task the tick just started, and its started event); the coordinator's lease; meta/run.
+ */
 function publishOf(io: Io, e: ExecutionState, started: Set<string>, versions: Versions, now: Date): Json {
-  const events = readEvents(io.cwd);
+  const iso = now.toISOString();
   const own = new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString();
   const lease = (task: string) => {
     try {
@@ -618,18 +606,19 @@ function publishOf(io: Io, e: ExecutionState, started: Set<string>, versions: Ve
     } catch { /* none yet */ }
     return own;
   };
-  const tasks = Object.entries(e.tasks).filter(([, t]) => t.executor === 'subagents' && (t.status === 'running' || t.status === 'accepted')).map(([task, t]) => ({
-    task, version: versions.state[task] ?? null, ...(started.has(task) ? { claim: true } : {}),
-    exec: { runId: e.runId, mode: 'subagents', by: e.coordinator, agent: t.agent, stage: t.stage, round: t.round, since: t.stageSince, leaseUntil: lease(task) },
-    forge: forgeOf(eventsOf(events, { project: e.project, task }), task, t),
-  }));
+  const mine = Object.entries(e.tasks).filter(([, t]) => t.executor === 'subagents' && (t.status === 'running' || t.status === 'accepted')).map(([task]) => task);
+  const tasks = mine.map(task => {
+    const claim = started.has(task);
+    const pub = publishFor(io, task, { project: e.project, ...(claim ? { extra: { status: 'in_progress', owner: e.coordinator, claimedAt: iso, startedAt: iso } } : {}) });
+    return {
+      task, version: versions.state[task] ?? null, ...(claim ? { claim: true } : {}),
+      write: pub.publish, ...(pub.publishError ? { publishError: pub.publishError } : {}),
+      ...(claim ? { event: startedEvent(e.coordinator, task, now, io.rand) } : {}),
+    };
+  });
   // The coordinator's own lease is never shorter than one it set for an agent that is still running.
-  const leaseUntil = tasks.reduce((max, x) => (x.exec.leaseUntil > max ? x.exec.leaseUntil : max), own);
-  const slots = Object.entries(e.tasks).filter(([, t]) => t.status === 'running').map(([task, t]) => ({ task, stage: t.stage, agent: t.agent, by: e.coordinator, since: t.stageSince }));
-  return {
-    tasks, session: { version: versions.sessions[e.coordinator] ?? null, leaseUntil },
-    metaRun: { runId: e.runId, kind: 'plan', loose: [], mode: e.mode, parallel: e.parallel, branch: e.branch, mergeOnFinish: e.mergeOnFinish, active: e.active, stopReason: e.stopReason, coordinator: e.coordinator, slots },
-  };
+  const leaseUntil = mine.map(lease).reduce((max, l) => (l > max ? l : max), own);
+  return { tasks, session: { version: versions.sessions[e.coordinator] ?? null, leaseUntil }, metaRun: runDocOf(io.cwd, e) };
 }
 
 const SAY: Record<string, [string, string]> = {

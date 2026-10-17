@@ -14,6 +14,7 @@ import { writeMember } from '../src/forge/members.js';
 import { readLoose } from '../src/forge/loose.js';
 import { samePath } from '../src/lib/worktree.js';
 import { codeSpan, integratedSay, keptFilesSay } from '../src/forge/swarm.js';
+import { normalizeRun } from '../src/page/normalize.js';
 import { mergingFile } from '../src/forge/merging.js';
 import { STEP_WAIT_SECONDS } from '../src/forge/schedule.js';
 
@@ -1901,5 +1902,47 @@ describe('a new run starts without the state of earlier runs (K5-08)', () => {
     writeMember(root, { sessionId: 'ui', role: 'manual', runId: first.runId, task: null, name: null, since: at });
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     expect(existsSync(forge('members', 'ui.json'))).toBe(true);
+  });
+});
+
+describe('the swarm commands print the state/T write the CLI builds (J-15)', () => {
+  const doc = (w: { file_path: string }) => JSON.parse(readFileSync(w.file_path, 'utf8'));
+  it('swarm task prints publish with forge v2 and the exec of its public file; --claim adds the claim and its started event', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    out(run(['swarm', 'worktree', 'T1'], io));
+    const c = out(run(['swarm', 'task', 'T1', '--stage', 'brief', '--claim'], io));
+    expect(c.publish).toMatchObject({ op: 'update', collection: 'state', doc_id: 'T1' });
+    expect(doc(c.publish)).toMatchObject({ status: 'in_progress', owner: 'main', claimedAt: NOW.toISOString(), startedAt: NOW.toISOString(),
+      forge: { v: 2, stage: 'brief', path: 'large' }, exec: { stage: 'brief', by: 'main', mode: 'subagents' } });
+    expect(c.event).toMatchObject({ op: 'set', collection: 'events', data: { type: 'started', sessionId: 'main', taskId: 'T1' } });
+    const r = out(run(['swarm', 'task', 'T1', '--stage', 'review', '--agent', 'forge-review-correctness'], io));
+    const d = doc(r.publish);
+    expect(d.forge).toMatchObject({ v: 2, stage: 'review', phase: 'review', agent: 'forge-review-correctness', integration: { branch: 'forge/run-shop', sha: null, merged: false, target: 'main' } });
+    expect(d.exec).toMatchObject({ runId: readExecution(root)!.runId, stage: 'review' });
+    expect(d).not.toHaveProperty('status');
+    expect(r).not.toHaveProperty('event');
+  });
+  it('swarm report prints the publish of a member, and swarm status publish.run, which normalizeRun keeps whole', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    const e = readExecution(root)!;
+    const at = NOW.toISOString();
+    saveExecution(root, { ...e, tasks: { T2: { status: 'running', stage: 'implement', round: 0, worktree: '', branch: 'task/T2', executor: 'sessions', attempts: 0, agent: null, startedAt: at, stageSince: at, updatedAt: at, detail: null } } });
+    writeMember(root, { sessionId: 'ui', role: 'executor', runId: e.runId, task: 'T2', name: 'wp-shop-T2', since: at, hookSession: 'h2' });
+    const r = out(run(['swarm', 'report', 'T2', '--session', 'ui', '--stage', 'review', '--claim'], io));
+    expect(doc(r.publish)).toMatchObject({ status: 'in_progress', owner: 'ui', forge: { v: 2, stage: 'review' }, exec: { runId: e.runId, mode: 'sessions', by: 'ui', stage: 'review' } });
+    expect(r.event).toMatchObject({ data: { type: 'started', sessionId: 'ui', taskId: 'T2' } });
+    const s = out(run(['swarm', 'status'], io));
+    expect(s.publish.run).toMatchObject({ runId: e.runId, kind: 'plan', loose: [], active: true, stopReason: null, startedAt: e.startedAt, slots: [{ task: 'T2', stage: 'implement', by: 'ui' }] });
+    expect(normalizeRun(s.publish.run)).toEqual(s.publish.run);
+  });
+  it('a task whose document cannot be written keeps its command working: publish null with publishError (Review Focus 5)', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    out(run(['swarm', 'worktree', 'T1'], io));
+    rmSync(path.join(root, '.forge', 'work', 'shop', 'T1'), { recursive: true, force: true });
+    mkdirSync(path.join(root, '.forge', 'work', 'shop'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'work', 'shop', 'T1'), 'not a folder');
+    const r = out(run(['swarm', 'task', 'T1', '--stage', 'implement'], io));
+    expect(r).toMatchObject({ stage: 'implement', publish: null, publishError: expect.any(String) });
+    expect(readExecution(root)!.tasks.T1.stage).toBe('implement');
   });
 });

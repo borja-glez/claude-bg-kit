@@ -172,7 +172,12 @@ export function normalizeRun(x: unknown, report?: Report): RunDoc | null {
   const kind = x.kind === 'ephemeral' ? 'ephemeral' : 'plan';
   return { runId: x.runId, mode, parallel, branch: x.branch, mergeOnFinish: x.mergeOnFinish === true, active: x.active === true,
     stopReason: typeof x.stopReason === 'string' ? x.stopReason : null, coordinator: x.coordinator, slots,
-    kind, loose: kind === 'ephemeral' ? normalizeLoose(x.loose, report) : [] };
+    kind, loose: kind === 'ephemeral' ? normalizeLoose(x.loose, report) : [],
+    ...(isoOrNull(x.startedAt) ? { startedAt: x.startedAt as string } : {}),
+    ...(isoOrNull(x.lastStepAt) ? { lastStepAt: x.lastStepAt as string } : {}),
+    ...(typeof x.stallReason === 'string' && x.stallReason ? { stallReason: x.stallReason.slice(0, 200) } : {}),
+    ...(isoOrNull(x.closedAt) ? { closedAt: x.closedAt as string } : {}),
+  };
 }
 
 /** meta/run.loose: valid ids (the plan's rule), no repeats, a title, a known status; stage and agent or null. At most LOOSE_MAX_TASKS. */

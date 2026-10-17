@@ -15,6 +15,7 @@ import { FORGE_DOC_MAX, fitForgeDoc, parseForgeDocV2, type IntegrationV2 } from 
 import { isSafeId, normalizePublicTask, type ExecTask, type ExecutionState } from '../lib/execution-state.js';
 import { statusKey } from '../lib/forge-status.js';
 import { samePath } from '../lib/worktree.js';
+import { eventId } from '../lib/ids.js';
 
 export class RoadmapDocError extends Error {
   constructor(readonly code: 2 | 3, message: string) { super(message); this.name = 'RoadmapDocError'; }
@@ -192,4 +193,9 @@ export function generateRoadmapDoc(io: DocIo, task: string, opts: GenerateOption
 export function publishFor(io: DocIo, task: string, opts: GenerateOptions = {}): { publish: StateWrite | null; publishError?: string } {
   try { return { publish: generateRoadmapDoc(io, task, opts).write }; }
   catch (e) { return { publish: null, publishError: (e instanceof Error ? e.message : String(e)).slice(0, 300) }; }
+}
+
+/** J-15: the `started` event of a claim, as the roadmap's events collection takes it. */
+export function startedEvent(sid: string, task: string, now: Date, rand?: () => number): { op: 'set'; collection: 'events'; doc_id: string; data: Record<string, unknown> } {
+  return { op: 'set', collection: 'events', doc_id: eventId(now, sid, rand), data: { ts: now.toISOString(), type: 'started', sessionId: sid, taskId: task } };
 }

@@ -767,6 +767,22 @@ describe('forge swarm integrate (into the run branch)', () => {
     expect(out(run(['swarm', 'merge', '--yes'], io))).toMatchObject({ result: 'merged' });
     expect(git('log', '-1', '--format=%s')).toBe('forge: merge forge/run-shop');
   });
+  it('integrate keeps the sha and prints the task done with its commit, not merged yet, and meta/metrics apart; merge prints it again, merged (G-06, J-15, A-10)', () => {
+    accept('T1', 'a.txt', 'a\n');
+    const r = out(run(['swarm', 'integrate', 'T1'], io));
+    expect(readExecution(root)!.tasks.T1.sha).toBe(r.sha);
+    expect(JSON.parse(readFileSync(r.publish.file_path, 'utf8'))).toMatchObject({
+      status: 'done', doneAt: '2026-10-12T12:00:00.000Z', commits: [{ sha: r.sha, title: 'T1: work' }], exec: { __delete__: true },
+      forge: { v: 2, stage: 'done', integration: { branch: 'forge/run-shop', sha: r.sha, merged: false, target: 'main' } },
+    });
+    expect(r.metrics).toEqual({ op: 'update', collection: 'meta', doc_id: 'metrics', data: { lastCommit: { sha: r.sha, ts: r.commit.ts }, updatedAt: '2026-10-12T12:00:00.000Z' } });
+    saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'finished' });
+    const m = out(run(['swarm', 'merge', '--yes'], io));
+    expect(m.publish).toHaveLength(1);
+    const merged = JSON.parse(readFileSync(m.publish[0].file_path, 'utf8'));
+    expect(Object.keys(merged)).toEqual(['forge']);
+    expect(merged.forge).toMatchObject({ v: 2, stage: 'done', integration: { sha: r.sha, merged: true, target: 'main' } });
+  });
 });
 
 describe('an integration left half-done (D-07)', () => {

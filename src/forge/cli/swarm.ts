@@ -34,6 +34,8 @@ import { attribute, isTask, pickWorkDir, readWorkDir, workDir, workRel } from '.
 import { forgeBranches, forgeWorktrees, isForgeBranch, pruneRunState, pruneWork } from '../cleanup.js';
 import { copyTree, evidenceOf } from '../evidence-copy.js';
 import { cleanText } from '../../lib/forge-status.js';
+import { publishFor, startedEvent, type StateWrite } from '../roadmap-sources.js';
+import { runDocOf } from '../run-doc.js';
 
 export interface GitDeps { git: (args: string[]) => string | null; exec: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany; repo: RepoReader }
 export interface SwarmDeps extends GitDeps { at: (dir: string) => GitDeps }
@@ -840,7 +842,7 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
   updateExecution(io.cwd, cur => {
     if (!cur?.tasks[task]) return null;
     const next: ExecTask = r.result === 'merged'
-      ? { ...cur.tasks[task], status: 'integrated', stage: 'integrate', updatedAt: at, detail: null, finishedAt: at }
+      ? { ...cur.tasks[task], status: 'integrated', stage: 'integrate', updatedAt: at, detail: null, finishedAt: at, sha: r.sha }
       : { ...cur.tasks[task], status: 'conflict', detail: r.detail, updatedAt: at };
     return { ...cur, tasks: { ...cur.tasks, [task]: next } };
   }, { now: io.now, sleep: io.sleep });
@@ -849,9 +851,15 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
   if (r.newValidators.length) {
     try { updateLocal(io.cwd, s => ({ ...s, known: [...new Set([...s.known, ...r.newValidators.map(v => v.name)])] })); } catch { /* a later triage announces them again */ }
   }
+  // J-15, A-10: the task's state/T write, built here (done with its commit for a subagents task: a member's session
+  // already wrote its done), and meta/metrics apart. The skill adds the summary and the done event.
+  const commit = commitInfo(target.git, r.sha);
+  const done = t.executor === 'subagents' ? { status: 'done', doneAt: at, commits: [commit] } : undefined;
+  const pub = e.kind === 'plan' ? publishFor(io, task, { project: e.project, ...(done ? { extra: done } : {}) }) : { publish: null };
+  const metrics = e.kind === 'plan' ? { op: 'update' as const, collection: 'meta', doc_id: 'metrics', data: { lastCommit: { sha: commit.sha, ts: commit.ts }, updatedAt: at } } : null;
   const say = integratedSay(es, e.branch, r.newValidators, r.preexisting);
   return out({
-    result: 'integrated', sha: r.sha, commit: commitInfo(target.git, r.sha), preexisting: r.preexisting, newValidators: r.newValidators, say,
+    result: 'integrated', sha: r.sha, commit, ...pub, metrics, preexisting: r.preexisting, newValidators: r.newValidators, say,
     ...(r.surfacesChanged.length ? { surfacesChanged: r.surfacesChanged } : {}), ...extras,
   });
 }
@@ -865,6 +873,19 @@ function closeEnded(root: string, at: string, by: 'merge' | 'close', deps: LockD
     return { ...cur, closedAt: at, closedBy: by };
   }, deps);
   return closed;
+}
+
+/** J-15, G-06: once the run branch is merged into its base, the forge block of every integrated task again (merged: true). */
+function mergedPublish(io: Io, e: ExecutionState): { publish: StateWrite[]; publishErrors?: string[] } {
+  const publish: StateWrite[] = [];
+  const errors: string[] = [];
+  for (const [task, t] of Object.entries(readExecution(io.cwd)?.tasks ?? e.tasks)) {
+    if (t.status !== 'integrated') continue;
+    const p = publishFor(io, task, { project: e.project, only: ['forge'] });
+    if (p.publish) publish.push(p.publish);
+    else if (p.publishError) errors.push(`${task}: ${p.publishError}`);
+  }
+  return { publish, ...(errors.length ? { publishErrors: errors } : {}) };
 }
 
 function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
@@ -896,7 +917,7 @@ function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
   const extras = attemptExtras(r, spanish(locale, io.cwd, e.project), e.branch, true);
   if (r.result === 'dirty') return out({ result: 'main-dirty', detail: `the main checkout ${r.detail}`, ...extras });
   if (r.result === 'deps') return out({ result: 'main-deps', detail: `the main checkout ${r.detail}`, ...extras });
-  return r.result === 'merged' ? merged({ result: 'merged', sha: r.sha, preexisting: r.preexisting, ...extras }) : out({ result: 'conflict', detail: r.detail, ...extras });
+  return r.result === 'merged' ? merged({ result: 'merged', sha: r.sha, preexisting: r.preexisting, ...extras, ...mergedPublish(io, e) }) : out({ result: 'conflict', detail: r.detail, ...extras });
 }
 
 export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { step?: (rest: string[]) => Result } = {}): Result {
@@ -998,7 +1019,12 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       const lease = flag('lease') && !Number.isNaN(Date.parse(flag('lease')!)) ? flag('lease')! : new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString();
       const p: PublicTask = { task, runId: e.runId, stage, status, agent: has('no-agent') ? null : (flag('agent') ?? null), round, since, updatedAt: iso, leaseUntil: lease, by: session, mode: member.role === 'executor' ? 'sessions' : 'manual' };
       writePublicTask(main, p);
-      return json(p);
+      // J-15: the state/T write of this report, built by the CLI; --claim adds the member's claim of its task.
+      const claimed = has('claim') ? { status: 'in_progress', owner: session, claimedAt: iso, startedAt: iso } : null;
+      return json({
+        ...p, ...publishFor(io, task, { project: e.project, ...(claimed ? { extra: claimed } : {}) }),
+        ...(claimed ? { event: startedEvent(session, task, now, io.rand) } : {}),
+      });
     }
     case 'next': {
       const { e, session } = memberCtx(true);
@@ -1189,6 +1215,8 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       return json({
         present: state !== null, state, ...(state ? { work: tasksWork(main, state) } : {}), ...(coordinator ? { coordinator } : {}),
         ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}),
+        // J-15: meta/run as the roadmap takes it, built by the CLI.
+        publish: state ? { run: runDocOf(main, state) } : null,
       });
     }
     case 'propose': {
@@ -1273,7 +1301,11 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       const lease = flag('lease') && !Number.isNaN(Date.parse(flag('lease')!)) ? flag('lease')! : new Date(now.getTime() + LEASE_MINUTES * 60000).toISOString();
       writePublicTask(io.cwd, { task, runId: e.runId, stage: next.stage, status: next.status, agent: next.agent, round: next.round, since: next.stageSince, updatedAt: iso, leaseUntil: lease, by: e.coordinator, mode: base.executor });
       if (base.stage !== next.stage) appendPhase(io.cwd, { ts: iso, kind: 'phase', task, phase: next.stage, ...(e.kind === 'plan' && isSafeId(e.project) ? { project: e.project } : {}) });
-      return json(next);
+      // J-15: the state/T write of this stage, built by the CLI; --claim adds the claim of a task the coordinator starts.
+      // A loose task of an ephemeral run has no state/T.
+      const claimed = has('claim') && e.kind === 'plan' ? { status: 'in_progress', owner: e.coordinator, claimedAt: iso, startedAt: iso } : null;
+      const pub = e.kind === 'plan' ? publishFor(io, task, { project: e.project, ...(claimed ? { extra: claimed } : {}) }) : { publish: null };
+      return json({ ...next, ...pub, ...(claimed ? { event: startedEvent(e.coordinator, task, now, io.rand) } : {}) });
     }
     case 'tick': {
       const e = current();
@@ -1659,6 +1691,6 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
     case 'merge':
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError('usage: forge swarm <start --project P --session SID --hook-session ID [--plan P] [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F [--locale es|en]|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|step --plan P --db DIR [--agents F] [--returned T1,T2] [--versions F] [--locale es|en]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps] [--no-cache]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt] [--hook-session ID]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|cleanup [--dry-run]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID>');
+      throw new UsageError('usage: forge swarm <start --project P --session SID --hook-session ID [--plan P] [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F [--locale es|en]|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO] [--claim]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|step --plan P --db DIR [--agents F] [--returned T1,T2] [--versions F] [--locale es|en]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps] [--no-cache]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt] [--hook-session ID]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|cleanup [--dry-run]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO] [--claim]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID>');
   }
 }
