@@ -2,11 +2,11 @@
 // (r<N>.json and dismissed.json); the ones written before waypoint 0.27.0 stay in the repository's .waypoint/<project>/
 // (critique-r<N>.json and dismissed.json) and are still read. Every path comes from the design file, never from the
 // working directory, so a session in a worktree or in another folder finds the same files.
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { parseCritique, type Critique } from '../lib/critique.js';
-import { parseDismissed, type Dismissed, type GateCritique } from '../lib/design-gate.js';
+import { CRITIQUE_FILE, LEGACY_CRITIQUE_FILE, parseCritique, type Critique } from '../lib/critique.js';
+import { DISMISSED_MAX_CHARS, parseDismissed, unionDismissed, type Dismissed, type GateCritique } from '../lib/design-gate.js';
 import { listVersions } from '../lib/history.js';
 import { writeAtomic } from '../lib/bound-fs.js';
 
@@ -42,18 +42,21 @@ export function designFilesOf(file: string, project: string): DesignFiles {
 /** The critique of a round, with the file it came from. */
 export interface CritiqueFile extends GateCritique { file: string }
 
-/** Every round's critique, from both places, by round: docs/ wins a round both have; a broken file is a null critique. */
+/**
+ * Every round's critique, from both places, by round: docs/ wins a round both have; a broken file is a null critique.
+ * Only the round files of CRITIQUE_FILE count (no `r01.json`, no `r0.json`, no `r<N>.rejected.json`).
+ */
 export function readCritiques(f: DesignFiles): CritiqueFile[] {
   const found = new Map<number, string>();
   const scan = (dir: string, re: RegExp) => {
     if (!existsSync(dir)) return;
     for (const name of readdirSync(dir)) {
       const m = re.exec(name);
-      if (m && Number(m[1]) > 0) found.set(Number(m[1]), path.join(dir, name));
+      if (m) found.set(Number(m[1]), path.join(dir, name));
     }
   };
-  scan(f.legacy, /^critique-r(\d+)\.json$/);
-  scan(f.critiques, /^r(\d+)\.json$/);
+  scan(f.legacy, LEGACY_CRITIQUE_FILE);
+  scan(f.critiques, CRITIQUE_FILE);
   return [...found.entries()].sort((a, b) => a[0] - b[0]).map(([round, file]) => {
     let critique: Critique | null = null;
     try { critique = parseCritique(readFileSync(file, 'utf8')); } catch { critique = null; }
@@ -61,12 +64,19 @@ export function readCritiques(f: DesignFiles): CritiqueFile[] {
   });
 }
 
-/** dismissed.json: the one in docs/ when it exists, else the one in .waypoint/ (missing or junk: nothing dismissed). */
+/**
+ * dismissed.json of both places, merged (carry 5): .waypoint/ first, then docs/, whose reasons win (unionDismissed). Each
+ * is read tolerantly: missing, unreadable (a folder), over DISMISSED_MAX_CHARS bytes or junk, it dismisses nothing and
+ * hides nothing of the other.
+ */
 export function readDismissedOf(f: DesignFiles): Dismissed {
-  for (const p of [path.join(f.critiques, 'dismissed.json'), path.join(f.legacy, 'dismissed.json')]) {
-    if (existsSync(p)) return parseDismissed(readFileSync(p, 'utf8'));
-  }
-  return {};
+  const read = (p: string): Dismissed => {
+    try {
+      if (statSync(p).size > DISMISSED_MAX_CHARS) return {};
+      return parseDismissed(readFileSync(p, 'utf8'));
+    } catch { return {}; }
+  };
+  return unionDismissed(read(path.join(f.legacy, 'dismissed.json')), read(path.join(f.critiques, 'dismissed.json')));
 }
 
 /** Writes dismissed.json in docs/ atomically (a temp file, then a rename), without empty rounds, and returns its path. What came from .waypoint/ is in `d`. */

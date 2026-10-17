@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { appliedIn, appliedVersion, designGate, mergeDismissed, parseDismissed, pendingProposals, resolvedIn, rewroteRound } from '../src/lib/design-gate.js';
+import { appliedIn, appliedVersion, designGate, DISMISSED_MAX_CHARS, mergeDismissed, parseDismissed, pendingProposals, REASON_MAX, resolvedIn, rewroteRound, unionDismissed } from '../src/lib/design-gate.js';
+import { LIMITS } from '../src/lib/decisions.js';
 import type { ChangelogEntry } from '../src/lib/history.js';
 import type { Critique } from '../src/lib/critique.js';
 
@@ -94,10 +95,49 @@ describe('dismissed.json with reasons (K3-05)', () => {
     ] }));
     expect(got).toEqual({ 1: [{ n: 2, reason: 'fuera de alcance' }, { n: 7 }, { n: 8, reason: 'z'.repeat(300) }, { n: 9 }] });
   });
-  it('merges numbers sorted; a new reason replaces the old one, and no reason keeps it', () => {
+  it('merges numbers sorted; a reason is stamped only on the numbers that have none, so one reason never overwrites another (carry 5)', () => {
     expect(mergeDismissed({ 1: [{ n: 6, reason: 'a' }] }, 1, [7, 6])).toEqual({ 1: [{ n: 6, reason: 'a' }, { n: 7 }] });
-    expect(mergeDismissed({ 1: [{ n: 6, reason: 'a' }] }, 1, [6], 'b')).toEqual({ 1: [{ n: 6, reason: 'b' }] });
+    expect(mergeDismissed({ 1: [{ n: 6, reason: 'a' }] }, 1, [6], 'b')).toEqual({ 1: [{ n: 6, reason: 'a' }] });
+    expect(mergeDismissed({ 1: [{ n: 6, reason: 'a' }, { n: 3 }] }, 1, [3, 6, 8], 'b')).toEqual({ 1: [{ n: 3, reason: 'b' }, { n: 6, reason: 'a' }, { n: 8, reason: 'b' }] });
     expect(mergeDismissed({ 1: [{ n: 6 }] }, 2, [3, 1], '   ')).toEqual({ 1: [{ n: 6 }], 2: [{ n: 1 }, { n: 3 }] });
+  });
+  it('bounds what it reads: a round of more than six digits, a number past the safe integers and a file over 1 MiB count for nothing (carry 3)', () => {
+    expect(parseDismissed(JSON.stringify({ 1: [1e21, 2 ** 53, 3], 1234567: [1], 999999: [{ n: 4 }] }))).toEqual({ 1: [{ n: 3 }], 999999: [{ n: 4 }] });
+    const big = JSON.stringify({ 1: [1], 2: Array.from({ length: 200_000 }, (_, i) => i + 1) });
+    expect(big.length).toBeGreaterThan(DISMISSED_MAX_CHARS);
+    expect(parseDismissed(big)).toEqual({});
+    expect(REASON_MAX).toBe(LIMITS.reason);
+  });
+  it('unionDismissed merges the dismissals of both places: every number of either, a later reason winning (carry 5)', () => {
+    const legacy = { 1: [{ n: 1, reason: 'old' }, { n: 2 }], 2: [{ n: 4, reason: 'kept' }] };
+    const docs = { 1: [{ n: 2, reason: 'new' }, { n: 1 }, { n: 3 }] };
+    expect(unionDismissed(legacy, docs)).toEqual({ 1: [{ n: 1, reason: 'old' }, { n: 2, reason: 'new' }, { n: 3 }], 2: [{ n: 4, reason: 'kept' }] });
+    expect(unionDismissed({}, {})).toEqual({});
+  });
+});
+
+describe('the gate texts and duplicate rounds (final review M4, carry 3)', () => {
+  it('cleans and clips the pending section and problem like the other lists; the pending list and its counts are not capped', () => {
+    const bidi = String.fromCharCode(0x202e);
+    const long = `${bidi}x\nwarning: forged${String.fromCharCode(7)} ${'y'.repeat(5000)}`;
+    const proposals = Array.from({ length: 60 }, (_, i) => ({ n: i + 1, category: 'gap' as const, severity: 'minor' as const, section: long, problem: long, change: long }));
+    const g = designGate([E(1, 'v1', 0)], [{ round: 1, critique: { round: 1, version: 1, scope: 'full', proposals } }]);
+    expect(g.pending).toHaveLength(60);
+    expect(g.pendingCounts).toEqual({ critical: 0, major: 0, minor: 60 });
+    for (const p of g.pending) {
+      for (const t of [p.section, p.problem]) {
+        expect(Array.from(t)).toHaveLength(300);
+        expect(t.startsWith('x warning: forged y')).toBe(true);
+      }
+    }
+  });
+  it('two critiques of one round count once: the first one given', () => {
+    const crits = [{ round: 1, critique: C(1, 1, ['major', 'minor']) }, { round: 1, critique: C(1, 1, ['critical']) }];
+    const g = designGate([E(1, 'v1', 0)], crits, { 1: [{ n: 2 }] });
+    expect(g).toMatchObject({ rounds: 1, majorPending: [{ round: 1, n: 1 }], criticalPending: [], pendingCounts: { critical: 0, major: 1, minor: 0 } });
+    expect(g.pending).toHaveLength(1);
+    expect(g.dismissed).toHaveLength(1);
+    expect(pendingProposals([E(1, 'v1', 0)], crits)).toHaveLength(2);
   });
 });
 
@@ -231,6 +271,16 @@ describe('needsVerify: a change no critic has read (K3-06, K3-03)', () => {
     const g = designGate(log, [{ round: 1, critique: crit }, { round: 2, critique: C(2, 2, []) }]);
     expect(g.applied).toHaveLength(40);
     expect(g).toMatchObject({ majorPending: [{ round: 1, n: 1 }], canAutoApprove: false });
+  });
+  it('a hand edit after the last snapshot needs a verification, even when the latest critique read that snapshot (carry 4)', () => {
+    const log = [S(1, 0, { kind: 'draft' }), S(2, 1, { kind: 'apply', applied: { 1: [1] } })];
+    const crits = [{ round: 1, critique: C(1, 1, ['critical']) }, { round: 2, critique: { ...C(2, 2, []), verdict: 'ready' as const } }];
+    expect(designGate(log, crits, {}, { history: { 1: v1, 2: v2 }, current: v2 })).toMatchObject({ needsVerify: false, canAutoApprove: true });
+    expect(designGate(log, crits, {}, { history: { 1: v1, 2: v2 }, current: doc('Con rollback y un plan B.') })).toMatchObject({ needsVerify: true, canAutoApprove: false });
+    // The front matter alone (the status the skill sets before the approval's snapshot) is no hand edit.
+    expect(designGate(log, crits, {}, { history: { 1: v1, 2: v2 }, current: approved }).needsVerify).toBe(false);
+    // Without the snapshot's text there is nothing to compare it with.
+    expect(designGate(log, crits, {}, { history: { 1: v1 }, current: doc('otro') }).needsVerify).toBe(false);
   });
   it('a critique of the current version, or no critique at all, needs no verification', () => {
     expect(designGate([S(1, 0)], [{ round: 1, critique: C(1, 1, []) }]).needsVerify).toBe(false);

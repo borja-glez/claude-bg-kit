@@ -2186,6 +2186,30 @@ describe('design-gate', () => {
     writeFileSync(path.join(d, 'design.md'), readFileSync(path.join(d, 'design.md'), 'utf8') + '\n## Extra\n\nNew text nobody read.\n');
     expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ needsVerify: true, canAutoApprove: false });
   });
+  it('a hand edit of the design after its last snapshot needs a verification, also when the latest critique read that snapshot (carry 4)', () => {
+    const d = path.join(dir, 'docs', 'waypoint', 'demo-shop');
+    mkdirSync(path.join(d, 'design', 'critiques'), { recursive: true });
+    copyFileSync(new URL('./fixtures/design.md', import.meta.url), path.join(d, 'design.md'));
+    const rel = 'docs/waypoint/demo-shop/design.md';
+    run(['design-snapshot', rel, '--note', 'v1', '--round', '0', '--kind', 'draft'], io);
+    writeFileSync(path.join(d, 'design', 'critiques', 'r1.json'), JSON.stringify({ round: 1, version: 1, scope: 'full', verdict: 'ready', proposals: [] }));
+    expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ needsVerify: false, canAutoApprove: true });
+    writeFileSync(path.join(d, 'design.md'), readFileSync(path.join(d, 'design.md'), 'utf8').replace('no tiene rollback', 'tiene rollback'));
+    expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ needsVerify: true, canAutoApprove: false });
+  });
+  it('reads an old dismissed.json of numbers in .waypoint/: those proposals are dismissed, not pending (carry 3)', () => {
+    const d = path.join(dir, 'docs', 'waypoint', 'demo-shop');
+    mkdirSync(path.join(d, 'design'), { recursive: true });
+    copyFileSync(new URL('./fixtures/design.md', import.meta.url), path.join(d, 'design.md'));
+    const local = path.join(dir, '.waypoint', 'demo-shop');
+    mkdirSync(local, { recursive: true });
+    const prop = (n: number) => ({ n, category: 'gap', severity: 'major', section: '_intro', problem: `p${n}`, change: 'c' });
+    writeFileSync(path.join(local, 'critique-r1.json'), JSON.stringify({ round: 1, version: 1, scope: 'full', proposals: [prop(1), prop(2), prop(3)] }));
+    writeFileSync(path.join(local, 'dismissed.json'), JSON.stringify({ 1: [2, 3] }));
+    const g = JSON.parse(run(['design-gate', 'docs/waypoint/demo-shop/design.md'], io).stdout);
+    expect(g.dismissed).toEqual([{ round: 1, n: 2, section: '_intro', problem: 'p2' }, { round: 1, n: 3, section: '_intro', problem: 'p3' }]);
+    expect(g.pending.map((p: { n: number }) => p.n)).toEqual([1]);
+  });
 
   describe('pending proposals and critique-dismiss', () => {
     const rel = 'docs/waypoint/demo-shop/design.md';
@@ -2341,6 +2365,52 @@ describe('critiques in docs/ (K3-10), dismissed with a reason (K3-05) and resolv
     crit(docs(), 'r1.json', 1, 1, ['major']);
     expect(run(['design-snapshot', rel, '--note', 'r1', '--round', '1', '--applied', 'r1:2'], io).code).toBe(2);
     expect(run(['design-snapshot', rel, '--note', 'r1', '--round', '1', '--applied', 'r1:1'], io).code).toBe(0);
+  });
+  it('design-snapshot --applied names every unknown id and writes nothing (carry 5)', () => {
+    crit(docs(), 'r1.json', 1, 1, ['major', 'minor']);
+    const r = run(['design-snapshot', rel, '--note', 'x', '--round', '1', '--applied', 'r1:1,7,9,12'], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toBe('design-snapshot: round 1 has no proposal 7, 9, 12\n');
+    expect(existsSync(path.join(dir, 'docs/waypoint/demo-shop/design/history/v2.md'))).toBe(false);
+  });
+  it('critique-dismiss: an empty reason file is no reason (a minor goes, a major is refused), and the file is read up to 64 KiB (carry 5)', () => {
+    crit(docs(), 'r1.json', 1, 1, ['major', 'minor', 'minor']);
+    writeFileSync(path.join(dir, 'empty.txt'), '');
+    expect(run(['critique-dismiss', rel, '--round', '1', '1', '--reason-file', 'empty.txt'], io).code).toBe(2);
+    expect(run(['critique-dismiss', rel, '--round', '1', '2', '--reason-file', 'empty.txt'], io).code).toBe(0);
+    writeFileSync(path.join(dir, 'far.txt'), `${' '.repeat(64 * 1024)}the reason, too far to be read`);
+    expect(run(['critique-dismiss', rel, '--round', '1', '3', '--reason-file', 'far.txt'], io).code).toBe(0);
+    writeFileSync(path.join(dir, 'huge.txt'), `out of scope ${'x'.repeat(5_000_000)}`);
+    expect(run(['critique-dismiss', rel, '--round', '1', '1', '--reason-file', 'huge.txt'], io).code).toBe(0);
+    const saved = JSON.parse(readFileSync(path.join(docs(), 'dismissed.json'), 'utf8'));
+    expect(saved[1].map((x: { n: number; reason?: string }) => [x.n, x.reason?.length ?? null])).toEqual([[1, 300], [2, null], [3, null]]);
+  });
+  it('critique-dismiss never overwrites a reason already stored: one reason file stamps only the numbers without one (carry 5)', () => {
+    crit(docs(), 'r1.json', 1, 1, ['major', 'major', 'minor']);
+    writeFileSync(path.join(dir, 'a.txt'), 'covered by the payments design');
+    writeFileSync(path.join(dir, 'b.txt'), 'out of scope for 0.1');
+    expect(run(['critique-dismiss', rel, '--round', '1', '1', '--reason-file', 'a.txt'], io).code).toBe(0);
+    expect(run(['critique-dismiss', rel, '--round', '1', '3'], io).code).toBe(0);
+    expect(run(['critique-dismiss', rel, '--round', '1', 'all', '--reason-file', 'b.txt'], io).code).toBe(0);
+    expect(JSON.parse(readFileSync(path.join(docs(), 'dismissed.json'), 'utf8'))).toEqual({ 1: [
+      { n: 1, reason: 'covered by the payments design' }, { n: 2, reason: 'out of scope for 0.1' }, { n: 3, reason: 'out of scope for 0.1' },
+    ] });
+  });
+  it('a junk or unreadable dismissed.json in docs/ neither fails design-gate nor hides the one in .waypoint/ (carry 5)', () => {
+    crit(docs(), 'r1.json', 1, 1, ['major', 'major', 'minor']);
+    mkdirSync(legacy(), { recursive: true });
+    writeFileSync(path.join(legacy(), 'dismissed.json'), JSON.stringify({ 1: [1] }));
+    writeFileSync(path.join(docs(), 'dismissed.json'), '{junk');
+    const pending = () => JSON.parse(run(['design-gate', rel], io).stdout).pending.map((p: { n: number }) => p.n);
+    expect(pending()).toEqual([2, 3]);
+    rmSync(path.join(docs(), 'dismissed.json'));
+    mkdirSync(path.join(docs(), 'dismissed.json'));
+    const r = run(['design-gate', rel], io);
+    expect(r.code).toBe(0);
+    expect(pending()).toEqual([2, 3]);
+    rmSync(path.join(docs(), 'dismissed.json'), { recursive: true });
+    writeFileSync(path.join(docs(), 'dismissed.json'), JSON.stringify({ 1: [{ n: 3 }] }));
+    expect(pending()).toEqual([2]);
   });
 });
 

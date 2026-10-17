@@ -1,9 +1,24 @@
-import { describe, it, expect, afterAll } from 'vitest';
+import { describe, it, expect, afterAll, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { designFilesOf, readCritiques, readDismissedOf, readHistory, repoRootOf, writeDismissed } from '../src/cli/design-files.js';
+
+// Carry 5: a crash between the write of the temp file and its rename, for the atomic-write test. Everything else is
+// node:fs as it is.
+const crash = vi.hoisted(() => ({ rename: false, wrote: false }));
+vi.mock('node:fs', async importOriginal => {
+  const fs = await importOriginal<typeof import('node:fs')>();
+  const renameSync: typeof fs.renameSync = (from, to) => {
+    if (crash.rename) {
+      crash.wrote = fs.existsSync(from);
+      throw Object.assign(new Error('crash before the rename'), { code: 'EIO' });
+    }
+    return fs.renameSync(from, to);
+  };
+  return { ...fs, default: { ...fs, renameSync }, renameSync };
+});
 
 const made: string[] = [];
 const temp = () => { const d = mkdtempSync(path.join(tmpdir(), 'wp-files-')); made.push(d); return d; };
@@ -69,6 +84,52 @@ describe('reading and writing the critiques (K3-10, K3-05)', () => {
     const p = writeDismissed(f, { 2: [{ n: 5, reason: 'x'.repeat(100) }] });
     expect(JSON.parse(readFileSync(p, 'utf8'))).toEqual({ 2: [{ n: 5, reason: 'x'.repeat(100) }] });
     expect(readdirSync(f.critiques)).toEqual(['dismissed.json']);
+  });
+  it('writeDismissed is atomic: a crash between the write and the rename leaves the old file whole and no temp file (carry 5)', () => {
+    const root = temp();
+    const f = filesIn(root);
+    const p = writeDismissed(f, { 1: [{ n: 1, reason: 'old' }] });
+    const before = readFileSync(p, 'utf8');
+    crash.rename = true;
+    try {
+      expect(() => writeDismissed(f, { 2: [{ n: 5 }] })).toThrow('crash before the rename');
+    } finally { crash.rename = false; }
+    expect(crash.wrote).toBe(true);
+    expect(readFileSync(p, 'utf8')).toBe(before);
+    expect(readdirSync(f.critiques)).toEqual(['dismissed.json']);
+  });
+  it('reads dismissed.json from both places and merges them; junk, a folder or a file over 1 MiB in docs/ hides nothing (carry 5)', () => {
+    const root = temp();
+    const f = filesIn(root);
+    mkdirSync(f.critiques, { recursive: true });
+    mkdirSync(f.legacy, { recursive: true });
+    writeFileSync(path.join(f.legacy, 'dismissed.json'), JSON.stringify({ 1: [3, 4] }));
+    const docs = path.join(f.critiques, 'dismissed.json');
+    for (const junk of ['{bad', '[1]', `{"1": [${'1,'.repeat(600_000)}1]}`]) {
+      writeFileSync(docs, junk);
+      expect(readDismissedOf(f), junk.slice(0, 10)).toEqual({ 1: [{ n: 3 }, { n: 4 }] });
+    }
+    rmSync(docs);
+    mkdirSync(docs);
+    expect(readDismissedOf(f)).toEqual({ 1: [{ n: 3 }, { n: 4 }] });
+    rmSync(docs, { recursive: true });
+    writeFileSync(docs, JSON.stringify({ 1: [{ n: 4, reason: 'no' }, { n: 5 }], 2: [1] }));
+    expect(readDismissedOf(f)).toEqual({ 1: [{ n: 3 }, { n: 4, reason: 'no' }, { n: 5 }], 2: [{ n: 1 }] });
+  });
+  it('reads only round files without a leading zero, of 1 to 999999, and never a critique set aside as rejected (carry 5, final review M2)', () => {
+    const root = temp();
+    const f = filesIn(root);
+    mkdirSync(f.critiques, { recursive: true });
+    mkdirSync(f.legacy, { recursive: true });
+    writeFileSync(path.join(f.critiques, 'r1.json'), crit(1, 1));
+    writeFileSync(path.join(f.critiques, 'r01.json'), crit(1, 5));
+    writeFileSync(path.join(f.critiques, 'r0.json'), crit(1, 5));
+    writeFileSync(path.join(f.critiques, 'r2.rejected.json'), crit(2, 5));
+    writeFileSync(path.join(f.critiques, 'r1234567.json'), crit(1, 5));
+    writeFileSync(path.join(f.critiques, 'r999999.json'), crit(1, 2));
+    writeFileSync(path.join(f.legacy, 'critique-r03.json'), crit(3, 5));
+    writeFileSync(path.join(f.legacy, 'critique-r3.rejected.json'), crit(3, 5));
+    expect(readCritiques(f).map(c => [c.round, c.critique?.proposals.length ?? null, path.basename(c.file)])).toEqual([[1, 1, 'r1.json'], [999999, 2, 'r999999.json']]);
   });
   it('readHistory maps each version to its text', () => {
     const root = temp();

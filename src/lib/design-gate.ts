@@ -4,7 +4,7 @@
 import { entryKind, type ChangelogEntry } from './history.js';
 import type { Critique, Proposal } from './critique.js';
 import { changedSections, designBody } from './design.js';
-import { clean } from './decisions.js';
+import { clean, LIMITS } from './decisions.js';
 
 /** The critique of one round: null when its file is not a valid critique. */
 export interface GateCritique { round: number; critique: Critique | null }
@@ -27,8 +27,10 @@ export interface Gate {
   /** How many older entries each list left out (see GATE_LIST_MAX); present only when not 0. */
   dismissedMore?: number; resolvedMore?: number; appliedMore?: number;
 }
-/** K3-05: the longest reason kept for a dismissal, on one clean line. */
-export const REASON_MAX = 300;
+/** K3-05: the longest reason kept for a dismissal, on one clean line: the reason of a decision (carry 3: one constant). */
+export const REASON_MAX = LIMITS.reason;
+/** Carry 3: a dismissed.json longer than this is junk (nothing dismissed, so everything stays pending: the safe side). */
+export const DISMISSED_MAX_CHARS = 1024 * 1024;
 /** The newest entries kept in each list the gate hands the critic, and the code points kept of each of their texts. */
 export const GATE_LIST_MAX = 40;
 export const GATE_TEXT_MAX = 300;
@@ -80,21 +82,23 @@ export function resolvedIn(changelog: ChangelogEntry[], round: number): Set<numb
 
 /**
  * dismissed.json read tolerantly, in its two shapes: `{"1": [2, 5]}` (before K3-05) and `{"1": [{"n": 2, "reason": "…"},
- * {"n": 5}]}`. Junk is nothing dismissed; only positive integer numbers of numeric rounds count; a reason becomes one
- * clean line of REASON_MAX characters at most, and one that is not text, or is blank, is none.
+ * {"n": 5}]}`. Junk is nothing dismissed, and so is a text over DISMISSED_MAX_CHARS; only safe positive integer numbers
+ * of rounds of at most six digits count (carry 3); a reason becomes one clean line of REASON_MAX characters at most, and
+ * one that is not text, or is blank, is none.
  */
 export function parseDismissed(text: string | null | undefined): Dismissed {
+  if (text && text.length > DISMISSED_MAX_CHARS) return {};
   let raw: unknown;
   try { raw = JSON.parse(text ?? ''); } catch { return {}; }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
   const out: Dismissed = {};
   for (const [k, v] of Object.entries(raw)) {
-    if (!/^[1-9]\d*$/.test(k) || !Array.isArray(v)) continue;
+    if (!/^[1-9]\d{0,5}$/.test(k) || !Array.isArray(v)) continue;
     const byN = new Map<number, DismissedItem>();
     for (const x of v as unknown[]) {
       const item = x && typeof x === 'object' ? (x as { n?: unknown; reason?: unknown }) : null;
       const n = item ? item.n : x;
-      if (typeof n !== 'number' || !Number.isInteger(n) || n <= 0) continue;
+      if (typeof n !== 'number' || !Number.isSafeInteger(n) || n <= 0) continue;
       const reason = item && typeof item.reason === 'string' ? clean(item.reason, REASON_MAX) : '';
       byN.set(n, reason ? { n, reason } : (byN.get(n) ?? { n }));
     }
@@ -103,18 +107,46 @@ export function parseDismissed(text: string | null | undefined): Dismissed {
   return out;
 }
 
-/** `d` with `ns` of round R set aside: a number already there keeps its reason unless `reason` gives a new one. */
+/**
+ * `d` with `ns` of round R set aside. Carry 5: `reason` is stamped only on the numbers that have none yet, so one reason
+ * file never overwrites the reason another dismissal stored.
+ */
 export function mergeDismissed(d: Dismissed, round: number, ns: number[], reason?: string): Dismissed {
   const why = reason ? clean(reason, REASON_MAX) : '';
   const byN = new Map((d[round] ?? []).map(x => [x.n, x] as const));
-  for (const n of ns) byN.set(n, why ? { n, reason: why } : (byN.get(n) ?? { n }));
+  for (const n of ns) {
+    const had = byN.get(n);
+    byN.set(n, had?.reason ? had : why ? { n, reason: why } : (had ?? { n }));
+  }
   return { ...d, [round]: [...byN.values()].sort((a, b) => a.n - b.n) };
 }
+
+/**
+ * Carry 5: the dismissals of several dismissed.json files (.waypoint/ first, then docs/), merged: every number of any of
+ * them, the reason of a later one winning where it has one.
+ */
+export function unionDismissed(...lists: Dismissed[]): Dismissed {
+  const out: Dismissed = {};
+  for (const d of lists) {
+    for (const [k, items] of Object.entries(d)) {
+      const byN = new Map((out[Number(k)] ?? []).map(x => [x.n, x] as const));
+      for (const x of items) byN.set(x.n, x.reason ? x : (byN.get(x.n) ?? x));
+      if (byN.size) out[Number(k)] = [...byN.values()].sort((a, b) => a.n - b.n);
+    }
+  }
+  return out;
+}
+
+/** Carry 3: one critique per round, the first one given (the CLI and the band never give two; a caller might). */
+const oneByRound = (critiques: GateCritique[]): GateCritique[] => {
+  const seen = new Set<number>();
+  return critiques.filter(c => !seen.has(c.round) && !!seen.add(c.round));
+};
 
 /** Every proposal of every valid critique still waiting for a decision, by round then number. */
 export function pendingProposals(changelog: ChangelogEntry[], critiques: GateCritique[], dismissed: Dismissed = {}): Pending[] {
   const out: Pending[] = [];
-  for (const { round, critique } of [...critiques].sort((a, b) => a.round - b.round)) {
+  for (const { round, critique } of oneByRound(critiques).sort((a, b) => a.round - b.round)) {
     if (!critique || rewroteRound(changelog, round)) continue;
     const decided = new Set([...appliedIn(changelog, round), ...resolvedIn(changelog, round), ...(dismissed[round] ?? []).map(x => x.n)]);
     for (const p of critique.proposals) {
@@ -129,14 +161,21 @@ export interface GateTexts { history?: Record<number, string>; current?: string 
 
 /**
  * K3-06: whether the design changed after its latest valid critique without any critic reading it: that critique is of
- * an older version and a later entry changed the body. The bodies decide (K3-03), so a change of the front matter alone,
- * such as an approval, is none. Without the texts, any later entry but an approval counts as a change. Without a
- * critique there is nothing to verify (a first round is due).
+ * an older version and a later entry changed the body, or (carry 4) the design file was edited by hand after its last
+ * snapshot. The bodies decide (K3-03), so a change of the front matter alone, such as an approval, is none. Without the
+ * texts, any later entry but an approval counts as a change. Without a critique there is nothing to verify (a first
+ * round is due).
  */
 export function needsVerifyOf(changelog: ChangelogEntry[], critiques: GateCritique[], texts: GateTexts = {}): boolean {
   const top = [...critiques].filter(c => c.critique !== null).sort((a, b) => b.round - a.round)[0]?.critique;
   if (!top) return false;
   const version = changelog[changelog.length - 1]?.version ?? 0;
+  // Carry 4: the file on disk against the last snapshot: a body that differs is a hand edit no critic has read.
+  const snapshot = texts.history?.[version];
+  if (texts.current !== undefined && snapshot !== undefined) {
+    const edit = changedSections(designBody(snapshot), designBody(texts.current));
+    if (edit.changed.length > 0 || edit.removed.length > 0) return true;
+  }
   if (top.version >= version) return false;
   const before = texts.history?.[top.version];
   const after = texts.current ?? texts.history?.[version];
@@ -152,7 +191,8 @@ export function needsVerifyOf(changelog: ChangelogEntry[], critiques: GateCritiq
  * no critique (one just imported) never is. It also lists, round by round, what the next critic must not raise again
  * (K3-04, K3-05, K3-02).
  */
-export function designGate(changelog: ChangelogEntry[], critiques: GateCritique[], dismissed: Dismissed = {}, texts: GateTexts = {}): Gate {
+export function designGate(changelog: ChangelogEntry[], given: GateCritique[], dismissed: Dismissed = {}, texts: GateTexts = {}): Gate {
+  const critiques = oneByRound(given);
   const version = changelog[changelog.length - 1]?.version ?? 0;
   const latestRound = critiques.length ? Math.max(...critiques.map(c => c.round)) : null;
   const latest = latestRound === null ? null : critiques.find(c => c.round === latestRound)?.critique ?? null;
@@ -187,7 +227,10 @@ export function designGate(changelog: ChangelogEntry[], critiques: GateCritique[
     needsVerify,
     canAutoApprove: latest !== null && criticalPending.length === 0 && majorPending.length === 0 && !needsVerify
       && latestCritiqueVersion !== null && latestCritiqueVersion <= version,
-    pending, pendingCounts: { critical: count('critical'), major: count('major'), minor: count('minor') },
+    // Final review M4: what each pending proposal says goes to the critic and to the approve line, so it is one clean
+    // line like the other lists; the list and its counts stay whole, so an old pending proposal is never hidden.
+    pending: pending.map(p => ({ ...p, section: line(p.section), problem: line(p.problem) })),
+    pendingCounts: { critical: count('critical'), major: count('major'), minor: count('minor') },
     dismissed: newest(gone), resolved: newest(solved), applied: newest(done),
     ...(more(gone) ? { dismissedMore: more(gone) } : {}),
     ...(more(solved) ? { resolvedMore: more(solved) } : {}),

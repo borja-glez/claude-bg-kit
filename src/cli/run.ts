@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, rmSync, statSync, renameSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, rmSync, statSync, renameSync, openSync, readSync, closeSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { parsePlan, PlanError, isPlanId } from '../lib/plan.js';
@@ -861,7 +861,8 @@ export function run(argv: string[], io: Io): Result {
         if (args.includes('--reason-file')) {
           const reasonFile = flag('reason-file');
           if (!reasonFile || reasonFile.startsWith('--')) return fail(usage, 2);
-          try { reason = readFileSync(abs(reasonFile), 'utf8'); } catch { return fail(`critique-dismiss: cannot read ${reasonFile}`, 2); }
+          // Carry 5: read up to REASON_READ_MAX bytes; the reason is clipped to 300 characters anyway.
+          try { reason = readHead(abs(reasonFile), REASON_READ_MAX); } catch { return fail(`critique-dismiss: cannot read ${reasonFile}`, 2); }
           // A canned reason says nothing: the person's own words (or none, for a minor) are what the gate keeps.
           if (PLACEHOLDER_REASONS.has(reasonKey(reason))) return fail(`critique-dismiss: "${reason.trim().slice(0, 60)}" is a placeholder, not a reason: pass the person's own words`, 2);
         }
@@ -1001,6 +1002,19 @@ const PLACEHOLDER_REASONS = new Set([
   'descartada', 'descartado', 'descartada al aprobar', 'descartado al aprobar', 'descartada en la aprobacion', 'descartado en la aprobacion',
   'sin motivo', 'sin razon', 'ninguno', 'ninguna', 'no aplica',
 ]);
+/** Carry 5: the most of a reason file critique-dismiss reads. */
+const REASON_READ_MAX = 64 * 1024;
+/** The first `max` bytes of a file as UTF-8 text, without reading the rest. */
+function readHead(file: string, max: number): string {
+  const fd = openSync(file, 'r');
+  try {
+    const buf = Buffer.alloc(max);
+    let got = 0;
+    for (let n = 1; got < max && n > 0; got += n) n = readSync(fd, buf, got, max - got, got);
+    return buf.subarray(0, got).toString('utf8');
+  } finally { closeSync(fd); }
+}
+
 /** Lower case, accents dropped, every run of other characters a single space. */
 function reasonKey(s: string): string {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();

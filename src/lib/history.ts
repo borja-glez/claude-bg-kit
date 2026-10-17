@@ -34,22 +34,26 @@ export function normalizeApplied(x: unknown): Record<number, number[]> | null {
   if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
   const out: Record<number, number[]> = {};
   for (const [k, v] of Object.entries(x)) {
-    if (!/^[1-9]\d*$/.test(k) || !Array.isArray(v)) continue;
-    const ns = v.filter((n): n is number => Number.isInteger(n) && n > 0);
+    // Carry 3: a round of at most six digits (ROUND_MAX) and safe integer numbers.
+    if (!/^[1-9]\d{0,5}$/.test(k) || !Array.isArray(v)) continue;
+    const ns = v.filter((n): n is number => Number.isSafeInteger(n) && n > 0);
     if (ns.length) out[Number(k)] = [...new Set(ns)].sort((a, b) => a - b);
   }
   return Object.keys(out).length ? out : null;
 }
 
-/** K3-02: `resolved` read tolerantly: pairs of positive integers, by round then number and without duplicates; nothing valid is null. */
+/**
+ * K3-02: `resolved` read tolerantly: pairs of safe positive integers (a round up to ROUND_MAX, carry 3), by round then
+ * number and without duplicates; nothing valid is null.
+ */
 export function normalizeResolved(x: unknown): RoundItem[] | null {
   if (!Array.isArray(x)) return null;
-  const positive = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0;
+  const positive = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v > 0;
   const seen = new Map<string, RoundItem>();
   for (const item of x as unknown[]) {
     if (!item || typeof item !== 'object') continue;
     const { round, n } = item as { round?: unknown; n?: unknown };
-    if (positive(round) && positive(n)) seen.set(`${round}:${n}`, { round, n });
+    if (positive(round) && round <= ROUND_MAX && positive(n)) seen.set(`${round}:${n}`, { round, n });
   }
   const out = [...seen.values()].sort((a, b) => a.round - b.round || a.n - b.n);
   return out.length ? out : null;

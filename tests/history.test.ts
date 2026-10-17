@@ -43,6 +43,10 @@ describe('changelog', () => {
     expect(normalizeResolved([])).toBeNull();
     expect(normalizeResolved({ round: 1, n: 1 })).toBeNull();
   });
+  it('bounds the numbers it keeps: rounds of at most six digits, numbers within the safe integers (carry 3)', () => {
+    expect(normalizeApplied({ 1: [1e21, 2 ** 53, 2], 1234567: [1], 999999: [3] })).toEqual({ 1: [2], 999999: [3] });
+    expect(normalizeResolved([{ round: 1e21, n: 1 }, { round: 1_000_000, n: 1 }, { round: 1, n: 2 ** 53 }, { round: 999_999, n: 4 }])).toEqual([{ round: 999_999, n: 4 }]);
+  });
   it('parseAppliedItems names the flag it parses, and roundList turns its map into pairs (K3-02)', () => {
     expect(parseAppliedItems(['r1:5,4', 'r2:1'], 2, 'resolved')).toEqual({ 1: [4, 5], 2: [1] });
     expect(() => parseAppliedItems(['x'], 1, 'resolved')).toThrow('--resolved item x is not r<R>:<numbers> nor <numbers>');
