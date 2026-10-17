@@ -19,6 +19,8 @@ export interface Model {
   approvals?: Record<string, ApprovalDoc>;
   /** §4.1: whether the viewer owns the roadmap (user.isOwner(), once, after connecting); false until then and on any error. */
   isOwner?: boolean;
+  /** G-24: the deferred findings this viewer marked as seen (task → its doneAt), from its own localStorage. */
+  seenDeferred?: Record<string, string>;
   /** forge's infinite run (meta/infinite); the pill shows only while it is active. */
   infinite?: InfiniteDoc | null;
   /** forge's execution (meta/run): the pill, «En curso» and the runs view. */

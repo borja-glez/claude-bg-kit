@@ -8,6 +8,7 @@ import { dictFor } from './i18n.js';
 import { unmarked } from './html.js';
 import { derive } from './derive.js';
 import { morphInto } from './morph.js';
+import { parseSeen, pruneSeen, seenKey } from './needs.js';
 import { mergeMetrics, normalizeEvent, normalizeInfinite, normalizeMessage, normalizeMeta, normalizeMetrics, normalizeNote, normalizePhase, normalizeRun, normalizeSession, normalizeState, type Drop, type Report } from './normalize.js';
 import { decodeView, encodeView, type ViewState } from './urlstate.js';
 import { categoryKeys, esc, GROUPS, NOTE_FILTERS, PROPOSAL_FILTERS, relText, renderApp, TALK_KINDS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, vfilterStatuses, VFILTER_KEYS, VIEWS, VIRTUAL_FROM, type Model, type ProposalFilterKind, type RelKind, type TalkKind, type UiState, type VFilterKey, type View } from './render.js';
@@ -131,6 +132,13 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     applyView(decodeView(location.hash));
     lastHash = location.hash.length > 1 ? location.hash : '';
   } catch { /* no location */ }
+  // G-24: the deferred findings this viewer marked as seen, kept only in this browser (never shared). Every access may
+  // throw (a private window, blocked storage): then the marks last this visit only.
+  const seenStoreKey = () => seenKey(model.meta?.name ?? '');
+  const readSeen = (): Record<string, string> => { try { return parseSeen(localStorage.getItem(seenStoreKey())); } catch { return {}; } };
+  const writeSeen = (seen: Record<string, string>) => { try { localStorage.setItem(seenStoreKey(), JSON.stringify(seen)); } catch { /* the marks last this visit */ } };
+  model.seenDeferred = readSeen();
+  let seenPruned = false;
   /** H-25: set by an action that changes what the person looks at, so the next render adds a history entry. */
   let pushNext = false;
   const viewState = (): ViewState => ({ view: ui.view, c: ui.talk, group: ui.timelineGroup, zoom: ui.zoom, span: ui.span, pan: ui.pan, open: [...ui.expanded], status: ui.statuses, q: ui.search.trim(), layers: ui.layers, debug: model.debug });
@@ -508,6 +516,17 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     else if (action === 'collapse-all') { ui.collapsed = new Set(categoryKeys(model.plan)); }
     else if (action === 'nfilter') { const k = el.dataset.filter as UiState['noteFilter']; if (!NOTE_FILTERS.includes(k)) return; ui.noteFilter = k; }
     else if (action === 'answer-open') { ui.answering = el.dataset.id ?? null; ui.answerDraft = ''; ui.notice = null; }
+    // G-24: [Visto] marks the deferred findings of the listed tasks as seen, in this browser only.
+    else if (action === 'seen-deferred') {
+      const seen = { ...(model.seenDeferred ?? {}) };
+      for (const id of (el.dataset.ids ?? '').split(' ')) {
+        const at = isPlanId(id) ? model.states[id]?.doneAt : undefined;
+        if (at) seen[id] = at;
+      }
+      model.seenDeferred = seen;
+      writeSeen(seen);
+      model.rev = (model.rev ?? 0) + 1;
+    }
     else if (action === 'pfilter') {
       const kind = el.dataset.kind as ProposalFilterKind;
       if (!Object.prototype.hasOwnProperty.call(PROPOSAL_FILTERS, kind)) return;
@@ -895,6 +914,14 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     // G-14: from here on the states are the database's; the strip says when they synced instead of the snapshot's date.
     model.statesAt = null;
     model.syncedAt = now();
+    // G-24: with the database's states in, the marks that no longer mean anything (merged, older than 7 days, redone) go.
+    if (!seenPruned) {
+      seenPruned = true;
+      const before = model.seenDeferred ?? {};
+      const kept = pruneSeen(before, model);
+      if (Object.keys(kept).length !== Object.keys(before).length) writeSeen(kept);
+      model.seenDeferred = kept;
+    }
     changed();
   }) as never, onErr));
   unsubs.push(db.collection('sessions').onSnapshot(((s: QSnap) => { model.sessions = Object.fromEntries(rows(s).map(r => [r.id, normalizeSession(r.body)])) as Record<string, SessionDoc>; changed(); }) as never, onErr));

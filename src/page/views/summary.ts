@@ -7,12 +7,44 @@ import type { ForgeDocV2 } from '../../lib/roadmap-doc.js';
 import type { PlanTask, RunDoc, TaskState } from '../../lib/types.js';
 import type { Derived } from '../derive.js';
 import type { Dict } from '../i18n.js';
-import { authorLabel, escalatedSessions, esc, eviMark, fmt, ICON, isOrphan, liveDot, num, pastMs, rel, roleOf, safeNote, safeType, trackTag } from '../html.js';
+import { MAX_NOTE } from '../../lib/notes.js';
+import type { Need } from '../needs.js';
+import { authorLabel, escalatedSessions, esc, eviMark, fmt, hhmm, ICON, isOrphan, liveDot, num, pastMs, rel, roleOf, safeNote, safeType, trackTag } from '../html.js';
 import type { Model, UiState } from '../model.js';
 
 export function renderSummary(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived): string {
   return `<header class="hd"><h1>${esc(d.views.summary)}</h1>${metaLine(m, d, dv)}</header>
-  ${renderNow(m, d, dv)}${renderNext(m, d)}${renderProgress(m, d, dv, loc)}${renderRecent(m, d, loc)}${renderLive(m, d, dv)}`;
+  ${renderNeeds(m, d, ui, dv)}${renderNow(m, d, dv)}${renderNext(m, d)}${renderProgress(m, d, dv, loc)}${renderRecent(m, d, loc)}${renderLive(m, d, dv)}`;
+}
+
+/** «Te necesita» (G-24): what to do and a link to the object. No button changes shared state: the only ones are the
+ *  answer of a question (a note), navigation and [Visto], which writes only to this browser. */
+function renderNeeds(m: Model, d: Dict, ui: UiState, dv: Derived): string {
+  if (!dv.needs.length) return '';
+  const go = (view: string, label: string, c?: string) => `<button type="button" class="lnk" data-action="view" data-view="${view}"${c ? ` data-c="${c}"` : ''}>${esc(label)}</button>`;
+  const task = (id: string, k: string) => `<button type="button" class="chip" data-action="open-task" data-id="${esc(id)}" data-k="${esc(k)}:t">${esc(id)}</button>`;
+  const hint = (text: string) => `<div class="hint">${esc(text)}</div>`;
+  const keyOf = (n: Need, i: number): string => (n.kind === 'question' ? `need:q:${n.note.id}` : n.kind === 'escalation' ? `need:m:${n.message.id}` : n.kind === 'external' ? `need:x:${n.task}` : `need:${n.kind}:${i}`);
+  const item = (n: Need, k: string): string => {
+    if (n.kind === 'question') {
+      const id = n.note.id;
+      const reply = m.readOnly || ui.modal ? '' : ui.answering === id
+        ? `<div class="areply"><textarea data-role="answer-text" maxlength="${MAX_NOTE}" rows="2" placeholder="${esc(d.answerPlaceholder)}">${esc(ui.answerDraft)}</textarea><button type="button" class="btn pri" data-action="answer-send" data-id="${esc(id)}">${esc(d.send)}</button></div>`
+        : `<button type="button" class="btn" data-action="answer-open" data-id="${esc(id)}">${esc(d.reply)}</button>`;
+      const ref = n.note.taskId && m.plan.tasks.some(t => t.id === n.note.taskId) ? ` ${task(n.note.taskId, k)}` : '';
+      return `<b>${esc(d.needs.question)}</b> ${esc(n.note.text)}${ref}${reply}`;
+    }
+    if (n.kind === 'proposals') return `<b>${esc(d.needs.proposals(n.count))}</b> ${go('talk', d.needs.seeProposals, 'proposals')}${m.isOwner === true ? '' : hint(d.needs.onlyOwner)}`;
+    if (n.kind === 'unowned') return `<b>${esc(d.needs.unowned(n.count))}</b> ${go('talk', d.needs.seeProposals, 'proposals')}`;
+    if (n.kind === 'escalation') return `<b>${esc(`${n.message.from} → ${n.message.to}`)}</b>: ${esc(n.message.text)}${hint(d.needs.escalation(n.message.to))}`;
+    if (n.kind === 'external') return `<b>${esc(d.needs.external)}</b> ${task(n.task, k)} ${esc(n.title)} — ${esc(n.reason ?? d.needs.noReason)}${hint(d.needs.unblock(n.task))}`;
+    if (n.kind === 'deferred') return `<b>${esc(d.needs.deferred(n.findings, n.tasks.length))}</b> ${go('plan', d.needs.seePlan)} <button type="button" class="btn" data-action="seen-deferred" data-ids="${esc(n.tasks.map(t => t.id).join(' '))}">${esc(d.needs.seen)}</button>`;
+    if (n.kind === 'stalled') return `<b>${esc(d.needs.stalled(n.runId) + (n.reason ? `: ${n.reason}` : ''))}</b> ${go('runs', d.needs.seeRuns)}${hint(d.needs.stalledHint)}`;
+    if (n.kind === 'infinite') return `<b>${esc(d.needs.infinite(hhmm(n.since)))}</b>${hint(d.needs.infiniteHint)}`;
+    return `<b>${esc(d.needs.stalePage(n.page, n.plan))}</b>`;
+  };
+  const items = dv.needs.map((n, i) => { const k = keyOf(n, i); return `<li class="need nd-${n.kind}" data-k="${esc(k)}">${item(n, k)}</li>`; }).join('');
+  return `<section class="card needs" aria-labelledby="needs-h"><h2 class="lbl" id="needs-h">${esc(d.needs.title)}</h2><ul class="nd">${items}</ul></section>`;
 }
 
 /** The plan in one line: name, version, phase, tasks done, tracks, tests and the last commit. */

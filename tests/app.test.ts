@@ -1566,3 +1566,65 @@ describe('the timeline scroll, edge cases (H-06)', () => {
     app.stop();
   });
 });
+
+describe('«Te necesita»: the deferred findings seen in this browser (G-24)', () => {
+  const KEY = 'wp-seen-deferred:demo-shop';
+  const doneAt = (days: number) => new Date(NOW - days * 86_400_000).toISOString();
+  const done = (days: number, merged = false) => ({ status: 'done', doneAt: doneAt(days), forge: { v: 2, path: 'medium', phase: 'done', validators: [], brief: 1, stage: 'done',
+    rounds: [], verify: null, stages: {}, integration: { branch: 'forge/run-x', sha: 'abc1234', merged, target: 'main' }, deferred: [{ problem: 'no index' }, { problem: 'n+1' }],
+    acceptedRound: 1, overCap: false, updatedAt: doneAt(days) } });
+  beforeEach(() => { localStorage.clear(); });
+
+  it('[Visto] keeps a mark in this browser only and the entry goes; nothing is written to the roadmap', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    f.push('state', { T001: done(1) });
+    await settle();
+    expect(root.innerHTML).toContain('2 hallazgos aplazados en 1 tarea');
+    click(root, '[data-action="seen-deferred"]');
+    await settle();
+    expect(root.innerHTML).not.toContain('hallazgos aplazados');
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ T001: doneAt(1) });
+    expect(f.add).not.toHaveBeenCalled();
+    expect(f.update).not.toHaveBeenCalled();
+    expect(f.set).not.toHaveBeenCalled();
+    app.stop();
+  });
+
+  it('when the states arrive, the marks of a merged task or of one done 8 days ago are cleaned; a good one still hides its entry', async () => {
+    localStorage.setItem(KEY, JSON.stringify({ T001: doneAt(1), T002: doneAt(8), T003: doneAt(2) }));
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    f.push('state', { T001: done(1, true), T002: done(8), T003: done(2) });
+    await settle();
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ T003: doneAt(2) });
+    expect(root.innerHTML).not.toContain('hallazgos aplazados');
+    app.stop();
+  });
+
+  it('with a localStorage that throws, the entry shows, and [Visto] hides it for this visit (Review Focus 4)', async () => {
+    const get = vi.spyOn(localStorage, 'getItem').mockImplementation(() => { throw new Error('denied'); });
+    const put = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('denied'); });
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    f.push('state', { T001: done(1) });
+    await settle();
+    expect(root.innerHTML).toContain('hallazgos aplazados');
+    click(root, '[data-action="seen-deferred"]');
+    await settle();
+    expect(root.innerHTML).not.toContain('hallazgos aplazados');
+    get.mockRestore();
+    put.mockRestore();
+    app.stop();
+  });
+
+  it('a stored value that is not a map of dates counts as no mark (Review Focus 4)', async () => {
+    localStorage.setItem(KEY, '{"T001": 5');
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    f.push('state', { T001: done(1) });
+    await settle();
+    expect(root.innerHTML).toContain('hallazgos aplazados');
+    app.stop();
+  });
+});

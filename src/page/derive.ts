@@ -5,6 +5,7 @@ import { computeMetrics, type Metrics } from '../lib/metrics.js';
 import { criticalPath, forecast, zoneHeat, type ZoneHeat } from '../lib/insights.js';
 import { sessionLiveness } from '../lib/coordination.js';
 import { STAGES } from '../lib/types.js';
+import { needsOf, type Need } from './needs.js';
 import type { Model } from './model.js';
 
 export interface Derived {
@@ -19,6 +20,8 @@ export interface Derived {
   running: string[];
   /** G-04: the sessions alive or silent (by their lease), and how many stopped. */
   liveSessions: { live: string[]; idle: number };
+  /** G-24: the entries of «Te necesita». */
+  needs: Need[];
 }
 
 /** The sessions that work in parallel, for the pace of the forecast: the active ones, at least one. */
@@ -46,6 +49,7 @@ export function computeDerived(m: Model): Derived {
       const live = all.filter(sid => sessionLiveness(m.sessions[sid], m.now) !== 'stopped');
       return { live, idle: all.length - live.length };
     })(),
+    needs: needsOf(m),
   };
 }
 

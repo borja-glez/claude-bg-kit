@@ -1200,3 +1200,107 @@ describe('one scroll for the page and one for the timeline (H-07)', () => {
     expect(cssRule(phone, '.nrh')).toContain('display:none');
   });
 });
+
+describe('«Te necesita» (G-24, G-13, G-08)', () => {
+  const at = (min: number) => new Date(NOW + min * 60000).toISOString();
+  const needs = (html: string) => { const i = html.indexOf('<section class="card needs"'); return i < 0 ? '' : html.slice(i, html.indexOf('</section>', i)); };
+  const forgeDone = (merged: boolean) => ({ v: 2 as const, path: 'medium' as const, phase: 'done', validators: [], brief: 1, stage: 'done' as const, rounds: [], verify: null, stages: {},
+    integration: { branch: 'forge/run-x', sha: 'abc1234', merged, target: 'main' }, deferred: [{ problem: 'no index' }], acceptedRound: 1, overCap: false, updatedAt: at(-60) });
+  const everything = (): Model => {
+    const m = base();
+    m.isOwner = true;
+    m.approvals = {};
+    m.notes = [note({ id: 'q1', type: 'question', text: '¿A o B?', taskId: 'T003' }), note({ id: 'q2', type: 'question', text: 'cerrada por decisión', answeredByNote: 'd9' })];
+    m.proposals = [P(), P({ id: 'p2', status: 'approved' })];
+    m.messages = [msg({ id: 'm1', type: 'escalation', from: 'be', to: 'ui', text: 'decide el esquema' })];
+    m.states = { ...m.states, T001: { status: 'done', doneAt: at(-60), forge: forgeDone(false) }, T003: { status: 'blocked', blockedBy: ['external'], blockedReason: 'Espera las credenciales' } };
+    m.run = { ...runDoc({ active: false, stopReason: 'stalled' }), lastStepAt: at(-30), stallReason: 'T2 sigue bloqueada' };
+    m.infinite = { active: true, cycle: 1, budget: {}, startedAt: at(-300), lastCycleAt: null, coordinator: { sid: 'main', claude: 'c1', seenAt: at(-40), leaseUntil: at(-30) } };
+    m.meta = { ...m.meta!, waypointVersion: '99.0.0' };
+    return m;
+  };
+
+  it('each entry shows with its condition, in the order of the spec, and says what to do', () => {
+    const s = needs(renderApp(everything(), ui()));
+    expect(s).toContain('<h2 class="lbl" id="needs-h">Te necesita</h2>');
+    expect(s).toContain('¿A o B?');
+    expect(s).not.toContain('cerrada por decisión');
+    expect(s).toContain('data-action="answer-open" data-id="q1"');
+    expect(s).toContain('1 propuesta por decidir');
+    expect(s).toContain('data-action="view" data-view="talk" data-c="proposals"');
+    expect(s).toContain('1 aprobada sin tu marca: confírmala para que cuente');
+    expect(s).toContain('be → ui');
+    expect(s).toContain('Respóndelo en la sesión ui o con /waypoint:work');
+    expect(s).toContain('Espera las credenciales');
+    expect(s).toContain('Cuando esté resuelto, /waypoint:work T003 la desbloquea');
+    expect(s).toContain('1 hallazgo aplazado en 1 tarea');
+    expect(s).toContain('data-action="seen-deferred" data-ids="T001"');
+    expect(s).toContain('La ejecución r1 se atascó: T2 sigue bloqueada');
+    expect(s).toContain('Reanúdala con /forge:run o ciérrala con /forge:stop');
+    expect(s).toMatch(/El modo infinito está sin coordinadora desde las \d\d:\d\d/);
+    expect(s).toContain('Reanuda con /forge:infinite o para con /forge:stop');
+    expect(s).toMatch(/Esta página es de waypoint \d+\.\d+\.\d+ y el plan se sincronizó con 99\.0\.0: republica con \/waypoint:plan/);
+    expect([...s.matchAll(/class="need nd-([\w-]+)"/g)].map(x => x[1])).toEqual(['question', 'proposals', 'unowned', 'escalation', 'external', 'deferred', 'stalled', 'infinite', 'stale-page']);
+    const en = needs(renderApp({ ...everything(), meta: { ...everything().meta!, locale: 'en' } }, ui()));
+    expect(en).toContain('Needs you');
+    expect(en).toContain('1 deferred finding in 1 task');
+  });
+
+  it('C3: the unmarked approvals use the shared predicate (a valid mark, a task, or no snapshot yet hide the entry)', () => {
+    const ps = [P({ id: 'p2', status: 'approved' }), P({ id: 'p3', status: 'approved' }), P({ id: 'p4', status: 'approved', taskId: 'T002' })];
+    const mark = { status: 'approved' as const, decidedAt: '2026-10-11T10:00:00.000Z', by: 'page' as const, digest: proposalDigest('p3', ps[1]!) };
+    const shown = (over: Partial<Model>) => needs(renderApp({ ...base(), isOwner: true, proposals: ps, ...over }, ui()));
+    // p2 has no mark, p3 a good one, p4 already has a task: only p2 counts.
+    expect(shown({ approvals: { p3: mark } })).toContain('1 aprobada sin tu marca');
+    expect(shown({ approvals: { p3: mark, p2: { ...mark, digest: proposalDigest('p2', ps[0]!) } } })).toBe('');
+    // A mark of another text does not back it (the digest).
+    expect(shown({ approvals: { p3: { ...mark, digest: 'bad' }, p2: { ...mark, digest: proposalDigest('p2', ps[0]!) } } })).toContain('1 aprobada sin tu marca');
+    // Until the approvals snapshot arrives the page does not warn.
+    expect(shown({})).toBe('');
+  });
+
+  it('without entries there is no section, and no entry has a button that changes shared state', () => {
+    expect(renderApp(base(), ui())).not.toContain('class="card needs"');
+    const s = needs(renderApp(everything(), ui({ answering: 'q1' })));
+    expect(s).toContain('data-role="answer-text"');
+    for (const a of [...s.matchAll(/data-action="([^"]+)"/g)].map(x => x[1]!)) expect(['answer-open', 'answer-send', 'open-task', 'view', 'seen-deferred'], a).toContain(a);
+  });
+
+  it('to someone who is not the owner: no approvals without the mark, and who decides', () => {
+    const s = needs(renderApp({ ...everything(), isOwner: false }, ui()));
+    expect(s).not.toContain('sin tu marca');
+    expect(s).toContain('Solo el dueño del roadmap decide');
+  });
+
+  it('keeps out: an answered question, a resolved escalation, a merged, old or seen task, a closed run, a live or 25 h old lease, the same version (Review Focus 1)', () => {
+    const m = everything();
+    m.notes = [note({ id: 'q3', type: 'question', text: 'ya', answer: 'sí' })];
+    m.proposals = [];
+    m.messages = [msg({ id: 'm1', type: 'escalation', status: 'resolved' })];
+    m.states = {
+      T001: { status: 'done', doneAt: at(-60), forge: forgeDone(true) },
+      T002: { status: 'done', doneAt: at(-8 * 1440), forge: forgeDone(false) },
+      T004: { status: 'done', doneAt: at(-120), forge: forgeDone(false) },
+      T005: { status: 'blocked', blockedBy: ['T004'] },
+    };
+    m.seenDeferred = { T004: at(-120) };
+    m.run = { ...m.run!, closedAt: at(-10) };
+    m.infinite = { ...m.infinite!, coordinator: { ...m.infinite!.coordinator!, leaseUntil: at(5) } };
+    m.meta = { ...base().meta! };
+    expect(renderApp(m, ui())).not.toContain('class="card needs"');
+    // A run and an infinite run of before 4a (no startedAt, no lastStepAt, no coordinator) never show.
+    const old = { ...m, run: runDoc({ active: false, stopReason: 'stalled' }), infinite: { active: true, cycle: 1, budget: {}, startedAt: at(-300), lastCycleAt: null } };
+    expect(renderApp(old, ui())).not.toContain('class="card needs"');
+    const late = { ...m, infinite: { ...everything().infinite!, coordinator: { ...everything().infinite!.coordinator!, leaseUntil: at(-25 * 60) } } };
+    expect(renderApp(late, ui())).not.toContain('class="card needs"');
+  });
+
+  it('escapes what the entries carry (Review Focus 5)', () => {
+    const m = everything();
+    m.notes = [note({ id: 'q"><script>', type: 'question', text: HOSTILE })];
+    m.messages = [msg({ id: 'm1', type: 'escalation', from: HOSTILE, to: HOSTILE, text: HOSTILE })];
+    m.states = { ...m.states, T003: { status: 'blocked', blockedBy: ['external'], blockedReason: HOSTILE } };
+    m.run = { ...m.run!, stallReason: HOSTILE };
+    clean(renderApp(m, ui()));
+  });
+});

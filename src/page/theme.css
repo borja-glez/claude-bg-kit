@@ -405,3 +405,13 @@ button.nr:focus-visible,button.act:focus-visible,.nxb:focus-visible,.more:focus-
   .nr .c-task{grid-area:task} .nr .c-stage{grid-area:stage} .nr .c-round{grid-area:round} .nr .c-val{grid-area:val} .nr .c-time{grid-area:time}
   .nr .c-agent,.nr .c-who{display:none}
 }
+/* ---- «Te necesita» (G-24) ---- */
+.card.needs{margin-top:12px;border-color:color-mix(in srgb,var(--peach) 55%,var(--s0))}
+.nd{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-direction:column}
+.need{padding:7px 0;border-bottom:1px solid var(--s0);font-size:13px;color:var(--sub1);overflow-wrap:anywhere}
+.need:last-child{border-bottom:0}
+.need b{color:var(--text);font-weight:600}
+.need .hint{margin-top:2px;font:11.5px 'JetBrains Mono',monospace;color:var(--sub0)}
+.need .btn{margin:4px 0 0 6px}
+.lnk{color:var(--blue);border-bottom:1px dotted currentColor;margin-left:6px;font-size:12.5px}
+.lnk:focus-visible,.need .chip:focus-visible{outline:2px solid var(--lavender);outline-offset:2px}
