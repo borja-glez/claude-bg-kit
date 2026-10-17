@@ -11,7 +11,7 @@ export type TermUI = {
   Box: ElementConstructor<BoxProps>; Text: ElementConstructor<TextProps>; Client?: ElementConstructor<ClientProps>;
 };
 
-const hex = (h: Hue): string => PALETTE[h];
+const hex = (hue: Hue): string => PALETTE[hue];
 const STAGE_GLYPH = { done: '●', active: '◉', pending: '○' } as const;
 
 function bar(ui: TermUI, key: string, r: number, width: number, hue: Hue, moving: boolean): RenderElement {

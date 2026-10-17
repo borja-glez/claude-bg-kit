@@ -45,6 +45,7 @@ function servePanes(on: On) {
   on('ui.open', (_$, e) => { open.add(e.id); return { value: { isPlaced: true as const } }; });
   on('ui.close', (_$, e) => { open.delete(e.id); return { value: undefined }; });
   on('ui.panes', () => ({ value: [...open].map(id => ({ id, title: 'lens', isShown: true, isFocused: false, isPlaced: true })) }));
+  return open;
 }
 
 // The engine beneath lens: its clock and session, the agents list `agents.list` answers, and agent.spawn answering the
@@ -451,7 +452,7 @@ test('the agent the person looks at expands its task and puts it first (F-08)', 
     [`${ROOT}/.forge/status/shop__T001.json`]: status('T001', { ts: at(50), lastAt: at(50) }),
     [`${ROOT}/.forge/status/shop__T002.json`]: status('T002'),
   });
-  servePanes(on);
+  const open = servePanes(on);
   const panel = panelWrites(on);
   const agents = { list: [] as unknown[] };
   const clock = start(on, agents, ['a1']);
@@ -465,4 +466,11 @@ test('the agent the person looks at expands its task and puts it first (F-08)', 
   await clock.advance(2_000);
   expect(panel.last?.activities[0]).toMatchObject({ task: 'T001', expanded: true });
   await ui.unmount();
+  // Closed (the kit has no $.ui.close: the engine's ✕ takes the pane away and the next refresh sees it gone), the pane
+  // forgets the agent it showed: opened again, the newest task is the one expanded (carry 5).
+  open.delete(PANE);
+  await clock.advance(10_000);
+  await $.command.run(RUN);
+  await clock.advance(2_000);
+  expect(panel.last?.activities.filter((a: { expanded: boolean }) => a.expanded).map((a: { task: string }) => a.task)).toEqual(['T002']);
 });

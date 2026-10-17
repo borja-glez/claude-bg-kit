@@ -6,9 +6,10 @@ export type BandHue = 'accent' | 'warn' | 'alert' | 'dim';
 /**
  * One part of a band's line. `short` is the form it takes when room runs out; `title`, the end of `text` that may be
  * clipped (down to TITLE_MIN cells) before `short` is used; `glue`, what joins it to the part before (SEP when absent).
- * A part keyed `slot:…` is one of several alike: those dropped are counted in one «+N» part.
+ * A part keyed `slot:…` is one of several alike: those dropped are counted in one «+N» part, each as `count` (1 when
+ * absent: a part that already stands for several, such as the slots a run band does not carry, counts as that many).
  */
-export interface BandPart { key: string; text: string; short?: string; title?: string; prio: number; hue?: BandHue; glue?: string }
+export interface BandPart { key: string; text: string; short?: string; title?: string; prio: number; hue?: BandHue; glue?: string; count?: number }
 
 export const SEP = ' · ';
 export const TITLE_MIN = 8;
@@ -61,7 +62,7 @@ export function fitParts(parts: readonly BandPart[], cols: number, sep = SEP): {
       }
       after = true;
       if (p.key.startsWith(SLOT)) {
-        more++;
+        more += Number.isInteger(p.count) && p.count! > 0 ? p.count! : 1;
         if (at < 0) at = out.length;
       }
     });
@@ -129,17 +130,50 @@ export const MORE_LABEL = '⋯';
 export const MORE_HOTKEY = 'm';
 export const DISMISS_KEY = 'dismiss';
 
-/** How a band is drawn: its level, its parts, the controls on the parts' row and on a second row, and whether ⋯ shows. */
-export interface BandLayout { level: BandLevel; plain: boolean; long: boolean; shown: BandPart[]; inline: string[]; second: string[]; more: boolean }
+/**
+ * How a band is drawn: its level, its parts, the controls on the parts' row and on a second row, whether ⋯ shows, and
+ * the labels of the second row's controls clipped so that row fits (by key; a control not named keeps its label).
+ */
+export interface BandLayout { level: BandLevel; plain: boolean; long: boolean; shown: BandPart[]; inline: string[]; second: string[]; more: boolean; labels: Record<string, string> }
 
 const positive = (v: unknown, fallback: number): number =>
   (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : fallback);
+
+/** The fewest cells a label of a crowded second row keeps, its «…» included. */
+export const LABEL_MIN = 1;
+
+/**
+ * Carry 3: the labels of a second row's controls clipped so the row, one cell of gap between two controls, fits in `cols`
+ * cells and never wraps onto a third: the widest label is cut first, to what the row needs or down to the next widest,
+ * never under LABEL_MIN. A row that fits, or one that cannot even at the floor, keeps what it got that far; an empty map
+ * when nothing was clipped.
+ */
+export function fitRow(controls: readonly BandControl[], cols: number, o: { plain: boolean; long: boolean }): Record<string, string> {
+  const base = (c: BandControl) => (o.long ? c.label : c.short ?? c.label);
+  const cur = controls.map(base);
+  for (;;) {
+    const widths = cur.map(label => stringWidth(label));
+    const used = cur.reduce((n, label, i) => n + controlWidth(label, { plain: o.plain, hotkey: controls[i].hotkey, kind: controls[i].kind }), 0)
+      + Math.max(0, controls.length - 1);
+    const excess = used - cols;
+    if (excess <= 0) break;
+    let at = -1;
+    widths.forEach((w, i) => { if (w > LABEL_MIN && (at < 0 || w > widths[at])) at = i; });
+    if (at < 0) break;
+    const next = Math.max(0, ...widths.filter((_, i) => i !== at));
+    cur[at] = clipWidth(base(controls[at]), Math.min(widths[at] - 1, Math.max(LABEL_MIN, widths[at] - excess, next)));
+  }
+  const out: Record<string, string> = {};
+  controls.forEach((c, i) => { if (cur[i] !== base(c)) out[c.key] = cur[i]; });
+  return out;
+}
 
 /**
  * F-05: the band's layout. `lead` is what goes before the parts (an icon and its gap). wide falls back to two when the
  * parts of priority 1 to 4, whole, do not fit beside the long buttons; in one, the buttons fold into ⋯ (m) when those
  * parts, whole, do not fit beside the short ones, and come back on a second row while `moreOpen`. × always stays on the
- * parts' row. Each control takes one cell of gap before it.
+ * parts' row. Each control takes one cell of gap before it. A second row is fitted to the width (fitRow), so the band
+ * is never taller than its two rows.
  */
 export function layoutBand(parts: readonly BandPart[], controls: readonly BandControl[], o: { bodyColumns: unknown; maxRows: unknown; fullscreen: boolean; moreOpen: boolean; lead?: number }): BandLayout {
   const cols = positive(o.bodyColumns, DEFAULT_COLUMNS);
@@ -153,14 +187,19 @@ export function layoutBand(parts: readonly BandPart[], controls: readonly BandCo
   let level = bandLevel({ bodyColumns: cols, maxRows, fullscreen: o.fullscreen });
   if (level === 'wide') {
     const room = cols - lead - width(controls, true);
-    if (partsWidth(core) <= room) return { level, plain, long: true, shown: fitParts(parts, room).shown, inline: keys(controls), second: [], more: false };
+    if (partsWidth(core) <= room) return { level, plain, long: true, shown: fitParts(parts, room).shown, inline: keys(controls), second: [], more: false, labels: {} };
     level = 'two';
   }
-  if (level === 'two') return { level, plain, long: false, shown: fitParts(parts, cols - lead).shown, inline: [], second: keys(controls), more: false };
+  if (level === 'two') {
+    return { level, plain, long: false, shown: fitParts(parts, cols - lead).shown, inline: [], second: keys(controls), more: false, labels: fitRow(controls, cols, { plain, long: false }) };
+  }
   const room = cols - lead - width(controls, false);
-  if (partsWidth(core) <= room) return { level, plain, long: false, shown: fitParts(parts, room).shown, inline: keys(controls), second: [], more: false };
+  if (partsWidth(core) <= room) return { level, plain, long: false, shown: fitParts(parts, room).shown, inline: keys(controls), second: [], more: false, labels: {} };
   const dismiss = controls.filter(c => c.key === DISMISS_KEY);
   const rest = controls.filter(c => c.key !== DISMISS_KEY);
   const folded = cols - lead - (1 + controlWidth(MORE_LABEL, { plain, hotkey: MORE_HOTKEY })) - width(dismiss, false);
-  return { level, plain, long: false, shown: fitParts(parts, folded).shown, inline: keys(dismiss), second: o.moreOpen ? keys(rest) : [], more: true };
+  return {
+    level, plain, long: false, shown: fitParts(parts, folded).shown, inline: keys(dismiss), second: o.moreOpen ? keys(rest) : [], more: true,
+    labels: o.moreOpen ? fitRow(rest, cols, { plain, long: false }) : {},
+  };
 }

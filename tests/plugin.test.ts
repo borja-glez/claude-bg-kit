@@ -1432,5 +1432,10 @@ describe('plugin layout', () => {
     }
     expect(read('plugins/lens/README.md')).toContain('/lens photo');
     expect(read('plugins/lens/README.es.md')).toContain('/lens foto');
+    // Carry 10: the hint's tail is a contract text in each language, as the band draws it.
+    for (const plugin of ['waypoint', 'lens']) {
+      expect(read(`plugins/${plugin}/README.md`), `${plugin} en`).toContain('ctrl+x tab · band');
+      expect(read(`plugins/${plugin}/README.es.md`), `${plugin} es`).toContain('ctrl+x tab · banda');
+    }
   });
 });

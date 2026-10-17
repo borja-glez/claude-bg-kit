@@ -4,7 +4,8 @@
 // runs them on every capture; it also reads its options here and fills the fixture with fillTemplate and dotted.
 // The engine checks (a) to (d) of the script use the helpers below checkCapture: letterKeys (how a letter is pressed),
 // lettersOn, moreToggled and panelLetter (the positive control and the button to press), pressVerdict, BAND_READY,
-// bandFolds (folded means a ⋯ and no «t: »), stopTriggered, checkPhoto, findText, changedFiles and closeVerdict.
+// stopLetter and bandFolds (folded means a ⋯ and no Stop button), stopTriggered, checkPhoto, cellsOf, PANE_FRAME and
+// findText (the pane's close mark, in cells), changedFiles, closeVerdict, and treeKill (the cleanup on Windows).
 
 export const FIXTURE_IDS = ['T001', 'T002', 'T003'];
 export const MODES = ['fullscreen', 'main'];
@@ -130,10 +131,15 @@ export function pressVerdict(o) {
 }
 
 // Check (a): a letter of a button folded into ⋯ does nothing.
-/** Whether the band folded its buttons into ⋯: the ⋯ is there and Stop shows no «t: » letter. */
+/** The letter the band's Stop button shows («t: Parar», «t: Stop»), read from the screen; null when none is drawn. */
+export function stopLetter(text) {
+  return /(?:^|\s)([a-z0-9]): (?:Parar|Stop)\b/m.exec(String(text))?.[1] ?? null;
+}
+
+/** Whether the band folded its buttons into ⋯: the ⋯ is there and no Stop button is drawn. */
 export function bandFolds(text) {
   const s = String(text);
-  return s.includes('⋯') && !/(^|\s)t: \S/m.test(s);
+  return s.includes('⋯') && stopLetter(s) === null;
 }
 
 const STOP_TEXT = /otra vez para parar|again to stop the run|\/forge:stop/g;
@@ -169,14 +175,41 @@ export function checkPhoto(text, o) {
 }
 
 // Check (d): the engine's own close mark of the pane, found on the screen, and the files lens wrote after it.
-/** The row and column (0-based, in characters) of the first `needle` on the screen, or null. */
-export function findText(text, needle) {
+// The cells a text takes as the terminal draws it: an East Asian wide character or an emoji presented as one takes two,
+// a combining mark or a format character none, anything else one.
+const WIDE_CELL = /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꥠ-꥿가-힣豈-﫿︰-﹏＀-｠￠-￦\u{20000}-\u{3FFFD}]|\p{Emoji_Presentation}/u;
+const ZERO_CELL = /[\p{Mn}\p{Me}\p{Cf}]/u;
+
+/** The cells `text` takes on a terminal. */
+export function cellsOf(text) {
+  let cells = 0;
+  for (const ch of String(text)) cells += ZERO_CELL.test(ch) ? 0 : WIDE_CELL.test(ch) ? 2 : 1;
+  return cells;
+}
+
+/** A row of a pane's frame: the engine's close mark sits on one, never in a card. */
+export const PANE_FRAME = /[─━═╭╮╯╰┌┐└┘]/;
+
+/**
+ * The row and column (0-based, in cells: a wide character before it takes two) of the first `needle` on the screen, on
+ * a row `o.row` accepts when given, or null.
+ */
+export function findText(text, needle, o = {}) {
   const rows = String(text).split(/\r?\n/);
   for (let row = 0; row < rows.length; row++) {
-    const col = rows[row].indexOf(needle);
-    if (col >= 0) return { row, col };
+    if (o.row && !o.row.test(rows[row])) continue;
+    const at = rows[row].indexOf(needle);
+    if (at >= 0) return { row, col: cellsOf(rows[row].slice(0, at)) };
   }
   return null;
+}
+
+/**
+ * How to end the process tree of a session on Windows, where claude runs under cmd.exe and killing the pty ends only
+ * cmd.exe: taskkill /T /F on its pid. Null elsewhere, where the pty's kill is enough.
+ */
+export function treeKill(platform, pid) {
+  return platform === 'win32' && Number.isInteger(pid) && pid > 0 ? { file: 'taskkill', args: ['/PID', String(pid), '/T', '/F'] } : null;
 }
 
 /** The files whose time (or presence) differs between two listings `{ path: mtimeMs }`. */

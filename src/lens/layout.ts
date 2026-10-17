@@ -52,7 +52,8 @@ export const cellsMax = (inner: number): number => 2 * Math.max(1, Math.floor(in
 
 /** F-14: a window of at most `max` boxes around the first active or pending one; the rest summed up by glyph. */
 export function fitCells(cells: readonly CellState[], max: number): { cells: CellState[]; more: string | null } {
-  const limit = Math.max(1, Math.floor(max));
+  // Carry 4: a limit that is not a finite number: Infinity keeps every box, NaN or junk the fewest.
+  const limit = max === Number.POSITIVE_INFINITY ? cells.length : Number.isFinite(max) ? Math.max(1, Math.floor(max)) : 1;
   if (cells.length <= limit) return { cells: [...cells], more: null };
   const size = Math.max(1, limit - SUMMARY_CELLS);
   const first = cells.findIndex(c => c === 'active' || c === 'pending');
@@ -129,6 +130,9 @@ export function clipCard(card: Card, layout: PanelLayout, rows: number): Card {
     const marker: Block = { kind: 'text', text: '…', dim: true };
     // One row: the header alone, its title ending on the marker.
     if (limit === 1 && !layout.boxed) return { ...card, title: `${card.title}…`, subtitle: undefined, chip: undefined, blocks: [] };
+    // Carry 5 (Task 7 minor 4): a framed card takes three rows at least, its frame and header; under that it is cut to
+    // those. Only a docked pane frames its cards, and a docked pane (rows null) is never cut, so this is a floor, not a path.
+    if (layout.boxed && limit < 3) return { ...card, title: `${card.title}…`, subtitle: undefined, blocks: [] };
     const head: Card = { ...card, subtitle: limit >= 3 ? card.subtitle : undefined, blocks: [] };
     const kept: Block[] = [];
     for (const b of card.blocks) {

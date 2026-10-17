@@ -580,4 +580,17 @@ describe('buildBandModel · every slot of the run, at most 12, and those waiting
     const tasks = { ...running(1), T009: { ...running(1).T001, status: 'accepted', worktree: '/w9', branch: 'task/T009' } };
     expect(buildBandModel('demo-shop', coordinator(tasks))).toMatchObject({ mode: 'run', queued: 1 });
   });
+  it('keeps the running, the waiting and the integrated apart, and a stalled run still says what waits to integrate (Task 3 minor 2)', () => {
+    const base = running(1).T001;
+    const tasks = {
+      ...running(2),
+      T009: { ...base, status: 'accepted', worktree: '/w9', branch: 'task/T009' },
+      T010: { ...base, status: 'accepted', worktree: '/w10', branch: 'task/T010' },
+      T011: { ...base, status: 'integrated', stage: 'integrate', worktree: '/w11', branch: 'task/T011', finishedAt: ago(5) },
+    };
+    expect(buildBandModel('demo-shop', coordinator(tasks))).toMatchObject({ mode: 'run', running: 2, queued: 2, integrated: 1, stalled: false });
+    const stalled = buildBandModel('demo-shop', { ...coordinator(tasks), execution: EXEC({ parallel: 14, tasks, active: false, stopReason: 'stalled' }) });
+    expect(stalled).toMatchObject({ mode: 'run', queued: 2, integrated: 1, stalled: true });
+    expect(bandLine(stalled, Date.now())).toBe('► EJECUCIÓN · ▲ parada · 1/5 integradas · por integrar 2');
+  });
 });

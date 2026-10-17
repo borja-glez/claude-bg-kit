@@ -600,6 +600,29 @@ test('inline, the pane draws its cards without a frame and says how many rows it
   await docked.unmount();
 });
 
+test('the first /lens, with no model yet, asks for the rows its cards take, reading the files once (carry 5)', async ($, on) => {
+  const reads: string[] = [];
+  serveFiles(on, reads);
+  const opened: { rows?: number }[] = [];
+  const open = new Set<string>();
+  on('ui.open', (_$, e) => { open.add(e.id); opened.push({ rows: e.rows }); return { value: { isPlaced: true as const } }; });
+  on('ui.panes', () => ({ value: [...open].map(id => ({ id, title: 'lens', isShown: true, isFocused: false, isPlaced: true })) }));
+  on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
+    const { Text } = $.ui.resolve(e);
+    return h(Text, {}, 'engine band') as RenderElement;
+  });
+  start(on);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  // A terminal of 60 rows on the main screen: a third of it is 20.
+  const band = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS, viewport: { columns: 100, rows: 60, isFullscreen: false } });
+  await band.unmount();
+  reads.length = 0;
+  await $.command.run({ ...RUN, args: 'live', presentation: { isFullscreen: false, columns: 100 } });
+  expect(opened.at(-1)?.rows).toBeGreaterThan(6);
+  expect(reads.filter(p => p.endsWith('/new/progress.md'))).toHaveLength(1);
+  expect(open.has(PANE)).toBe(true);
+});
+
 test('/lens asks for the rows its compact cards take, between 6 and a third of the screen, and 56 columns where it docks (F-01)', async ($, on) => {
   serveFiles(on, []);
   const opened: { rows?: number; columns?: number }[] = [];

@@ -147,6 +147,111 @@ describe('layoutBand (F-02, F-05, F-15)', () => {
   it('props that are not numbers lay out as 80 columns and 10 rows (Review Focus 2)', () => {
     expect(lay('x', null)).toEqual(lay(80, 10));
   });
+  it('a second row that fits keeps its labels; one that does not clips the widest first, so it never wraps (carry 3)', () => {
+    expect(lay(120).labels).toEqual({});
+    expect(lay(80, 10, true, true).labels).toEqual({});
+    const narrow = lay(30, 10, false, true);
+    expect(Object.keys(narrow.labels).length).toBeGreaterThan(0);
+    expect(rowTwo(narrow, controls(false))).toBeLessThanOrEqual(30);
+    // the widest label is clipped first: Siguiente goes before Estado
+    expect(narrow.labels['next-task']).toMatch(/…$/);
+  });
+});
+
+// The cells the second row takes, as register.tsx draws it: each control with its label (or the fitted one), one gap
+// between two.
+function rowTwo(l: ReturnType<typeof layoutBand>, cs: readonly BandControl[]): number {
+  const byKey = new Map(cs.map(c => [c.key, c] as const));
+  const widths = l.second.map(k => {
+    const c = byKey.get(k)!;
+    return controlWidth(l.labels[k] ?? (l.long ? c.label : c.short ?? c.label), { plain: l.plain, hotkey: c.hotkey, kind: c.kind });
+  });
+  return widths.reduce((n, w) => n + w, 0) + Math.max(0, widths.length - 1);
+}
+// The cells the first row takes: the parts, then each control on it and ⋯, a gap before each.
+function rowOne(l: ReturnType<typeof layoutBand>, cs: readonly BandControl[]): number {
+  const byKey = new Map(cs.map(c => [c.key, c] as const));
+  const controlsWidth = l.inline.reduce((n, k) => {
+    const c = byKey.get(k)!;
+    return n + 1 + controlWidth(l.long ? c.label : c.short ?? c.label, { plain: l.plain, hotkey: c.hotkey, kind: c.kind });
+  }, 0);
+  return partsWidth(l.shown) + controlsWidth + (l.more ? 1 + controlWidth('⋯', { plain: l.plain, hotkey: 'm' }) : 0);
+}
+
+describe('every band fits its rows at every width (carries 1 and 3)', () => {
+  const NOW = Date.parse('2026-10-11T10:12:30.000Z');
+  type Locale = 'es' | 'en';
+  // The controls as src/mod/register.tsx builds them: Roadmap and View design are links in fullscreen and buttons outside.
+  const address = (key: string, label: string, short: string, hotkey: string, fullscreen: boolean, url = 'https://claude.ai/artifact/x'): BandControl =>
+    (!/^https?:/.test(url) ? { key, label: url, kind: 'text' } : fullscreen ? { key, label, short, kind: 'link' } : { key, label, short, hotkey });
+  const tail = (t: (typeof TEXT)[Locale]): BandControl[] => [{ key: 'panel', label: t.panel, hotkey: 'p' }, { key: 'dismiss', label: '×', hotkey: 'x' }];
+  const bands = (locale: Locale, fullscreen: boolean): [string, BandModel, BandControl[]][] => {
+    const t = TEXT[locale];
+    const roadmap = address('roadmap', t.roadmap, t.short.roadmap, 'r', fullscreen);
+    const slots = Array.from({ length: 12 }, (_, i) => ({ task: `T${String(i + 1).padStart(3, '0')}`, stage: 'review', round: 2 }));
+    const design: BandModel = { mode: 'design', project: 'demo-shop', locale, version: 3, round: 2, proposals: 4, critical: 2, pending: 4, pendingCritical: 2, designUrl: 'https://claude.ai/artifact/d', viewer: NO_VIEWER } as BandModel;
+    const designControls = (url: string): BandControl[] => [
+      { key: 'apply-all', label: t.applyAll, short: t.short.applyAll, hotkey: 'a' }, { key: 'pick', label: t.pick, short: t.short.pick, hotkey: 'e' },
+      { key: 'round', label: t.round, short: t.short.round, hotkey: 'o' }, { key: 'rewrite', label: t.rewrite, short: t.short.rewrite, hotkey: 'w' },
+      { key: 'interview', label: t.interview, short: t.short.interview, hotkey: 'i' }, { key: 'approve', label: t.approve, hotkey: 'y' },
+      address('design', t.viewDesign, t.short.viewDesign, 'd', fullscreen, url), ...tail(t),
+    ];
+    const work: BandModel = {
+      mode: 'work', project: 'demo', locale, sid: 'main', track: 'core', roadmapUrl: 'https://claude.ai/artifact/x',
+      current: { id: 'T3', title: 'Esquema de pedidos con un título largo', startedAt: new Date(NOW - 30 * 60_000).toISOString(), estimateMin: 20 },
+      trackDone: 2, trackTotal: 5, percent: 40, inbox: 2, escalation: true, phase: null, cells: '', swarm: false, run: { coordinator: 'main', stage: 'implement' }, viewer: NO_VIEWER,
+    } as BandModel;
+    const run: BandModel = {
+      mode: 'run', project: 'demo', locale, executor: 'subagents', running: 14, parallel: 14, integrated: 3, queued: 2, total: 20, slots, worst: 'silent', stalled: false,
+      roadmapUrl: 'https://claude.ai/artifact/x', sid: 'main', inbox: 1, escalation: true, percent: 25, phase: null, viewer: NO_VIEWER,
+    } as BandModel;
+    const notice: BandModel = {
+      mode: 'notice', project: 'demo', locale, kind: 'previous', subject: 'run', seat: null, task: null, title: null, since: new Date(NOW - 7200_000).toISOString(),
+      runId: 'r1', integrated: 3, total: 12, stopReason: null, roadmapUrl: null, key: 'run:r1', viewer: NO_VIEWER,
+    } as BandModel;
+    const other: BandModel = {
+      mode: 'notice', project: 'demo', locale, kind: 'other-live', subject: 'task', seat: 'main', task: 'T019', title: 'API de pedidos', since: new Date(NOW - 180_000).toISOString(),
+      runId: null, roadmapUrl: 'https://claude.ai/artifact/x', key: 'task:T019', viewer: NO_VIEWER,
+    } as BandModel;
+    return [
+      ['design', design, designControls('https://claude.ai/artifact/d')],
+      ['design, an address that is no web link', design, designControls('file:///home/someone/projects/demo-shop/docs/design/drafts/version-3/design.html')],
+      ['work', work, [
+        { key: 'next-task', label: t.nextTask, short: t.short.nextTask, hotkey: 'n' }, { key: 'status', label: t.status, short: t.short.status, hotkey: 's' },
+        { key: 'launch', label: t.launch, short: t.short.launch, hotkey: 'l' }, { key: 'stop-run', label: t.stopRun, hotkey: 't' }, roadmap, ...tail(t),
+      ]],
+      ['run', run, [{ key: 'status', label: t.status, short: t.short.status, hotkey: 's' }, { key: 'stop-run', label: t.stopRun, hotkey: 't' }, roadmap, ...tail(t)]],
+      ['notice of a run', notice, [
+        { key: 'view', label: t.view, short: t.short.view, hotkey: 'v' }, { key: 'resume', label: t.resume, short: t.short.resume, hotkey: 'e' },
+        { key: 'close', label: t.close, short: t.short.close, hotkey: 'c' }, ...tail(t),
+      ]],
+      ['notice of another session', other, [
+        { key: 'status', label: t.status, short: t.short.status, hotkey: 's' }, { key: 'other-track', label: t.otherTrack, short: t.short.otherTrack, hotkey: 'l' }, roadmap, ...tail(t),
+      ]],
+    ];
+  };
+  it('row 1 stays within the band\'s cells from 30 to 200 columns, and an open row 2 from 50, in both locales, in and outside fullscreen, at 2 and 10 rows', () => {
+    const over: string[] = [];
+    // Every width where the levels one and two live, then the wide level every 5 columns.
+    const widths = [...Array.from({ length: 111 }, (_, i) => 30 + i), ...Array.from({ length: 13 }, (_, i) => 141 + 5 * i)];
+    for (const locale of ['es', 'en'] as const) {
+      for (const fullscreen of [true, false]) {
+        for (const [name, model, cs] of bands(locale, fullscreen)) {
+          for (const cols of widths) {
+            // Outside fullscreen the band is one row whatever its rows: one count of them is enough there.
+            for (const maxRows of fullscreen ? [2, 10] : [10]) {
+              const l = layoutBand(bandParts(model, NOW), cs, { bodyColumns: cols, maxRows, fullscreen, moreOpen: true });
+              const where = `${locale} ${fullscreen ? 'fullscreen' : 'main'} ${name} @ ${cols}x${maxRows}`;
+              if (rowOne(l, cs) > cols) over.push(`${where}: row 1 ${rowOne(l, cs)}`);
+              // Under 50 columns the nine controls of the design band cannot all keep a cell of label: row 2 is checked from 50.
+              if (cols >= 50 && rowTwo(l, cs) > cols) over.push(`${where}: row 2 ${rowTwo(l, cs)}`);
+            }
+          }
+        }
+      }
+    }
+    expect(over).toEqual([]);
+  });
 });
 
 describe('bandParts (F-04, F-09, F-10, F-11, the notice band)', () => {
@@ -176,6 +281,18 @@ describe('bandParts (F-04, F-09, F-10, F-11, the notice band)', () => {
     const run = RUN({ running: 8, parallel: 8, slots });
     expect(bandParts(run, NOW).filter(p => p.key.startsWith('slot:')).map(p => [p.prio, p.short])).toEqual(slots.map(s => [4, `${s.task} impl`]));
     expect(joinParts(fitParts(bandParts(run, NOW), 80).shown)).toBe('T001 impl · T002 impl · T003 impl · T004 impl · T005 impl · T006 impl · +2');
+  });
+  it('a run with more tasks running than the 12 slots it carries counts the rest in its «+N», shown or folded with the others (Task 3 minor 1)', () => {
+    const slots = Array.from({ length: 12 }, (_, i) => ({ task: `T${String(i + 1).padStart(3, '0')}`, stage: 'implement', round: 1 }));
+    const run = RUN({ running: 14, parallel: 14, slots });
+    expect(bandLine(run, NOW)).toMatch(/· T012 implementar · \+2 · 3\/12 integradas$/);
+    for (const cols of [200, 140, 100, 80, 60]) {
+      const shown = fitParts(bandParts(run, NOW), cols).shown;
+      const named = shown.filter(p => /^T\d{3} /.test(p.text)).length;
+      const more = Number(/^\+(\d+)$/.exec(shown.find(p => p.text.startsWith('+'))?.text ?? '+0')![1]);
+      expect(named + more, String(cols)).toBe(14);
+    }
+    expect(bandParts(RUN({ running: 2 }), NOW).some(p => p.text.startsWith('+'))).toBe(false);
   });
   it('598 minutes against an estimate of 30 read «9 h 58 m / 30 m», in amber (F-11)', () => {
     expect(bandParts(WORKM(), NOW).find(p => p.key === 'minutes')).toEqual({ key: 'minutes', text: '9 h 58 m / 30 m', short: '9h58m', prio: 6, hue: 'warn' });

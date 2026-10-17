@@ -221,4 +221,11 @@ claude plugin validate plugins/<nombre>
 claude plugin test plugins/<nombre>
 ```
 
+`scripts/tui-snapshots.mjs` es un script manual, fuera de `npm test` y del CI. Hace instantáneas de lo que pintan de verdad las bandas y el panel en un pty, a varios tamaños, en fullscreen y en la pantalla principal, y comprueba los comportamientos del motor que el kit de tests no ve. Lanza sesiones reales de `claude` (34 en una pasada completa) con los plugins de este repositorio y, salvo que pases `--config-dir`, con tu `~/.claude` real. Lee antes su cabecera. Necesita `node-pty` y `@xterm/headless`, instalados fuera del repositorio, y los plugins construidos:
+
+```bash
+npm run build
+node scripts/tui-snapshots.mjs --sizes 80x24 --modes main --config-dir <un directorio de configuración aislado>
+```
+
 Sube la versión del plugin en su `plugin.json` con cada cambio: Claude Code guarda en caché los plugins instalados por versión.

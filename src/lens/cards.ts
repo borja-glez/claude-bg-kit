@@ -14,7 +14,7 @@ export interface CardTexts {
   queued: string; conflictsLbl: string; blockedLbl: string; orphans: string; integratedN: string;
   stage: Record<'brief' | 'implement' | 'validate' | 'verify' | 'review' | 'verdict' | 'integrate' | 'execution' | 'triage' | 'design' | 'plan' | 'final', string>;
   track: string; phase: string; noTask: string; decision: string; fixRound: string; done: string; open: string;
-  tool: string; turn: string; briefs: string; cycle: string; hoursLeft: (h: number) => string; auto: string; task: string;
+  tool: string; turn: string; briefs: string; cycle: string; hoursLeft: (hours: number) => string; auto: string; task: string;
   sUsage: string; effort: string; effortLevel: (e: string) => string; thisSession: string; run: string; gMain: string; gImpl: string;
   gReview: string; gPlan: string; gOther: string; tracking: string; withoutForge: string; withoutForgeNote: string;
   forgeCosts: (usd: string, pct: number) => string; forgeSaves: (usd: string) => string; pricesAsOf: string; drift: string; various: string;

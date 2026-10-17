@@ -141,8 +141,6 @@ const ICON_COLUMNS = 2;
 const BAR_MIN = 6;
 const BAR_MAX = 36;
 const BAND_CELLS = 16;
-// F-06: whether lens drew its band on the last render, for the hint line's tail outside fullscreen.
-let bandDrawn = false;
 // Final review m-4: whether waypoint's band was drawn at the last render of lens's, and when lens's band then took the
 // site; a × within TAKEOVER_MS of that was meant for waypoint's band (a double tap, a key repeat) and closes nothing.
 let waypointSeen = false;
@@ -158,6 +156,13 @@ async function closeBand($: Engine, subject: string): Promise<void> {
     hiddenSubject = subject;
     await update($, hidden, () => true);
   } catch { /* the band stays */ }
+}
+
+// F-06, carry 3: whether lens's band is up, from its state rather than its last drawing: activity, no band of waypoint's,
+// not closed for what it is about. Read while the hint draws, so the hint follows waypoint's drawn and lens's × at once.
+async function bandUp($: Engine): Promise<boolean> {
+  if (!busy || await waypointDraws($)) return false;
+  return !(await read($, hidden) && hiddenSubject === bandSubject(bandModel));
 }
 
 // A model about something else than what the band was closed for opens it again (and so does one after a reload, which
@@ -249,22 +254,31 @@ function isBusy(now: number): boolean {
 // this root is not 'none' (a joined plan or a design in progress). Checked only when activity appears and on the
 // 30 s tick while it lasts, never while idle, and not while the minimal band is hidden.
 let waypointBand = false;
+// Carry 2: whether the waypoint plugin is loaded, from the command list (no file is read) when activity appears and on
+// the tick while it lasts; null until checked. A waypoint unloaded mid-session leaves its last `drawn` in $.state,
+// which only its owner writes: from then on lens takes it as unsaid (null) and guesses, so its band comes back.
+let waypointLoaded: boolean | null = null;
 async function checkWaypoint($: Engine): Promise<void> {
   try { if (await read($, hidden)) return; } catch { /* check anyway */ }
-  // F-16: a waypoint that says whether it draws needs no guess (and no read of its files).
-  try { if (typeof (await read($, waypointDrawn)) === 'boolean') return; } catch { /* guess below */ }
   let installed = false;
   try { installed = (await $.command.list()).some(c => c.plugin === 'waypoint' || c.name.startsWith('waypoint:')); } catch { /* treat as absent */ }
+  const loadedChanged = installed !== waypointLoaded;
+  waypointLoaded = installed;
+  // F-16: a loaded waypoint that says whether it draws needs no guess (and no read of its files).
+  let said = false;
+  try { said = installed && typeof (await read($, waypointDrawn)) === 'boolean'; } catch { /* guess below */ }
   let next = false;
-  if (installed) {
+  if (installed && !said) {
     try { next = (await loadBandModel($)).mode !== 'none'; } catch { /* no band */ }
   }
-  if (next !== waypointBand) { waypointBand = next; $.ui.invalidate('ui.render'); }
+  if (next !== waypointBand || loadedChanged) { waypointBand = next; $.ui.invalidate('ui.render'); }
 }
 
 // F-16: whether waypoint draws its band now. It says so itself; an older waypoint does not, and then lens takes its band
-// as drawn unless it was closed with × (its hidden flag), guessing the rest as before (checkWaypoint).
+// as drawn unless it was closed with × (its hidden flag), guessing the rest as before (checkWaypoint). A waypoint no
+// longer loaded says nothing (carry 2).
 async function waypointDraws($: Engine): Promise<boolean> {
+  if (waypointLoaded === false) return waypointBand;
   try {
     const said = await read($, waypointDrawn);
     if (typeof said === 'boolean') return said;
@@ -875,9 +889,11 @@ function keepBand($: Engine, model: PanelModel): void {
 
 // Whether the pane is open, as last seen; a change moves the transcript's width where it docks, so the photos are laid
 // out again (final review m-2).
+// A closed pane forgets the agent it showed (carry 5): the photos and the band expand the default task again.
 function notePane($: Engine, up: boolean): void {
   if (up === paneUp) return;
   paneUp = up;
+  if (!up) focusAgent = null;
   if (photos.size) $.ui.invalidate('ui.render');
 }
 
@@ -924,15 +940,15 @@ function stopPanelTimer(): void {
   panelTimer = null;
 }
 
-// Reads the files and the agents list, only while the pane is open.
-async function refreshPanel($: Engine): Promise<void> {
+// Reads the files and the agents list, only while the pane is open (or `force`d, by a pane about to open).
+async function refreshPanel($: Engine, force = false): Promise<void> {
   if (panelRefreshing) return;
   panelRefreshing = true;
   try {
     notePane($, await isPaneOpen($));
     if (!paneUp) stopPanelTimer();
     // With the pane closed the files are still read while there is activity, for the band: at the 30 s tick's pace.
-    if (!paneUp && !busy) return;
+    if (!paneUp && !busy && !force) return;
     if (paneUp) startPanelTimer($);
     // The roadmap section follows the waypoint project's files at the panel's pace.
     try { roadmap = await loadBandModel($); bandRead = true; } catch { /* keep the last one */ }
@@ -981,7 +997,7 @@ const TEXT = {
     sExecution: 'Ejecución', manualRow: 'manual', modeSubagents: 'subagentes', modeSessions: 'sesiones', alive: 'viva', silent: 'sin señal', stopped: 'parada',
     queued: 'por integrar', orphans: 'huérfanas', conflictsLbl: 'en conflicto', blockedLbl: 'bloqueadas', integratedN: 'integradas',
     stage: { brief: 'brief', implement: 'implementar', validate: 'validar', verify: 'verificar', review: 'revisar', verdict: 'veredicto', integrate: 'integrar', execution: 'ejecución', triage: 'triaje', design: 'diseño', plan: 'plan', final: 'final' },
-    sForge: 'forge', approve: 'Aprobar', reject: 'Rechazar', hoursLeft: (h: number) => `quedan ${h} h`, auto: 'auto',
+    sForge: 'forge', approve: 'Aprobar', reject: 'Rechazar', hoursLeft: (hours: number) => `quedan ${hours} h`, auto: 'auto',
     autoDecisions: (n: number) => `${n} ${n === 1 ? 'decisión automática' : 'decisiones automáticas'}`, autoMode: 'modo auto',
     staleLedger: 'sin cambios desde hace más de un día',
     sTasksInProgress: 'Tareas en curso', otherSession: 'otra sesión', validating: 'validando', integrating: 'integrando', skipped: 'omitida', noResult: 'sin resultado',
@@ -1011,7 +1027,7 @@ const TEXT = {
     sExecution: 'Execution', manualRow: 'manual', modeSubagents: 'subagents', modeSessions: 'sessions', alive: 'alive', silent: 'silent', stopped: 'stopped',
     queued: 'to integrate', orphans: 'orphaned', conflictsLbl: 'in conflict', blockedLbl: 'blocked', integratedN: 'integrated',
     stage: { brief: 'brief', implement: 'implement', validate: 'validate', verify: 'verify', review: 'review', verdict: 'verdict', integrate: 'integrate', execution: 'execution', triage: 'triage', design: 'design', plan: 'plan', final: 'final' },
-    sForge: 'forge', approve: 'Approve', reject: 'Reject', hoursLeft: (h: number) => `${h}h left`, auto: 'auto',
+    sForge: 'forge', approve: 'Approve', reject: 'Reject', hoursLeft: (hours: number) => `${hours}h left`, auto: 'auto',
     autoDecisions: (n: number) => `${n} automatic decision${n === 1 ? '' : 's'}`, autoMode: 'auto mode',
     staleLedger: 'unchanged for over a day',
     sTasksInProgress: 'Tasks in progress', otherSession: 'other session', validating: 'validating', integrating: 'integrating', skipped: 'skipped', noResult: 'no result',
@@ -1032,6 +1048,10 @@ const lensTexts = (): Texts => textsFor(roadmap.locale);
 // third of the screen), docked for 56 columns; both are requests the engine may not grant. Where it is not placed, a
 // toast says why.
 async function openPanel($: Engine): Promise<boolean> {
+  // Carry 5 (Task 7 minor 3): with no model yet (the pane closed and nothing going on) the files are read before the
+  // pane is asked for, so its rows are the cards' and not the minimum; that is the read the open pane makes, done once.
+  const fresh = bandModel === null;
+  if (fresh) await refreshPanel($, true);
   const t = lensTexts();
   let placed = false;
   try {
@@ -1046,7 +1066,16 @@ async function openPanel($: Engine): Promise<boolean> {
   } catch {
     return false;
   }
-  await refreshPanel($);
+  if (!fresh) {
+    await refreshPanel($);
+    return placed;
+  }
+  // Just read: the open pane gets what was read, and its timer.
+  notePane($, await isPaneOpen($));
+  if (paneUp) {
+    startPanelTimer($);
+    await requestPanelWrite($);
+  }
   return placed;
 }
 
@@ -1063,12 +1092,22 @@ async function takePhoto($: Engine): Promise<string> {
   if (sessionId === null) {
     try { sessionId = await sessionIdNow($); } catch { /* nothing is own by its session */ }
   }
-  try { roadmap = await loadBandModel($); } catch { /* keep the last one */ }
+  try { roadmap = await loadBandModel($); bandRead = true; } catch { /* keep the last one */ }
+  keepRunBaseline();
   try { panelFiles = await loadPanelFiles($, now); } catch { /* the files read last */ }
+  // Carry 7: with the pane closed nothing asked the agents list; the photo asks it once, as a refresh does, so a subagent
+  // that ended is not drawn as running.
+  try {
+    const list = await agentList($);
+    activity.subagents = liveSubagents(now, list);
+    if (list) links = syncListed(links, list, now, knownTasks(bandModel));
+    links = pruneLinks(links, now);
+  } catch { /* the agents heard of */ }
   const model = await buildPanel($);
   keepBand($, model);
   const t = textsFor(model.locale);
-  const tasks = model.activities.filter(a => a.kind === 'forge' || a.kind === 'workflow').length;
+  // Carry 7: the tasks going on, neither done nor stopped.
+  const tasks = model.activities.filter(a => (a.kind === 'forge' || a.kind === 'workflow') && !a.done && !a.stopped).length;
   const n = ++photoCount;
   const text = photoText(n, now, t.photoTasks(tasks));
   keepPhoto(photos, n, { text, cards: buildCards(model, t, now) });
@@ -1179,6 +1218,7 @@ export const register: Register = on => {
     endedId = null;
     try { await syncUsageStart($); } catch { /* counted from the first refresh that reads it */ }
     waypointBand = false;
+    waypointLoaded = null;
     roadmap = noneBand();
     try { if (await read($, hidden)) await update($, hidden, () => false); } catch { /* ignore */ }
     try { await $.command.register({ name: 'lens', description: 'Show the lens progress panel', argumentHint: '[live|foto]', immediate: true }); } catch { /* ignore */ }
@@ -1255,12 +1295,21 @@ export const register: Register = on => {
       const n = photoId(e.props.text);
       const shot = n === null ? undefined : photos.get(n);
       if (!shot || shot.text !== e.props.text) return next(e);
-      const { Box, Text } = $.ui.resolve(e);
+      const ui = $.ui.resolve(e);
+      const { Box, Text } = ui;
       const layout = panelLayout({ bodyColumns: transcriptColumns(e.surface, e.viewport), placement: 'inline' });
+      // Carry 7: a surface that draws SVG and is not the terminal gets the SVG cards the pane draws there; the terminal
+      // (and a surface without SVG) the still cells.
+      const Svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : null;
+      const W = Math.max(240, Math.min(900, layout.cols * 8 - 8));
       return (
-        <Box flexDirection="column">
+        <Box flexDirection="column" rowGap={Svg ? 1 : 0}>
           <Text dimColor>{e.props.text}</Text>
-          {shot.cards.map((card, i) => termCard({ Box, Text }, `photo-${n}-${i}`, card, layout))}
+          {shot.cards.map((card, i) => {
+            if (!Svg) return termCard({ Box, Text }, `photo-${n}-${i}`, card, layout);
+            const { source, height } = cardSvg(card, W);
+            return <Svg key={`photo-${n}-${i}`} source={source} alt={cardAlt(card)} width={W} height={height} />;
+          })}
         </Box>
       );
     } catch {
@@ -1583,7 +1632,6 @@ export const register: Register = on => {
     const below = await next(e);
     noteRender($, e.surface, e.viewport, { maxRows: e.props.maxRows, body: e.props.bodyColumns });
     updateStatus($, bandModel);
-    bandDrawn = false;
     try {
       if (e.props.hasSurvey || !busy) return below;
       if (await waypointDraws($)) { waypointSeen = true; return below; }
@@ -1621,7 +1669,6 @@ export const register: Register = on => {
       ];
       const icon = SECTION_ICON[shape.section];
       const hue = SECTION_HUE[shape.section];
-      bandDrawn = true;
       if (e.surface !== 'terminal' && 'Svg' in ui) {
         const { Svg } = ui;
         const W = Math.max(200, Math.min(1600, cols * 8 - 130));
@@ -1647,16 +1694,15 @@ export const register: Register = on => {
         </Box>
       );
     } catch {
-      bandDrawn = false;
       return below;
     }
   });
 
   // F-06, step 1 of §4.6: outside fullscreen, at the end of the hint line, how to reach the band's letters, while lens's
-  // band is drawn and the line has no tail of its own.
+  // band is up (carry 3: from its state, not its last drawing) and the line has no tail of its own.
   on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
     try {
-      if (bandDrawn && e.viewport?.isFullscreen === false && !e.props.tail) return next({ ...e, props: { ...e.props, tail: lensTexts().bandHint } });
+      if (e.viewport?.isFullscreen === false && !e.props.tail && await bandUp($)) return next({ ...e, props: { ...e.props, tail: lensTexts().bandHint } });
     } catch { /* the engine's line */ }
     return next(e);
   });

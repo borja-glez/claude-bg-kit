@@ -71,6 +71,43 @@ describe('fitCells (F-14)', () => {
   });
 });
 
+describe('small panes and odd limits (carry 4)', () => {
+  it('fitCells takes a limit that is not a finite number: Infinity keeps every box, NaN the fewest', () => {
+    const cells = Array<CellState>(30).fill('pending');
+    expect(fitCells(cells, Number.POSITIVE_INFINITY)).toEqual({ cells, more: null });
+    expect(fitCells(cells, Number.NaN)).toEqual({ cells: ['pending'], more: '+29 □' });
+  });
+  it('from 1 to 12 rows and 20 to 60 columns, what the pane draws (cards, the clipped one, «↓») never passes its rows', () => {
+    const cards = [
+      card('now', [row('Opus'), row('tool')]), card('tasks', [row('T1'), row('T2'), dimText('a note')]),
+      card('todos', [{ kind: 'bar', ratio: 0.5, hue: 'sky', label: 'x', right: '1/2' }, { kind: 'cells', cells: Array<CellState>(70).fill('done') }]),
+      card('usage', [row('Main'), dimText('prices as of')]),
+    ];
+    for (let rows = 1; rows <= 12; rows++) {
+      for (let cols = 20; cols <= 60; cols++) {
+        const layout = panelLayout({ bodyColumns: cols, placement: 'inline', scroll: { bodyRows: rows } });
+        const fit = fitCards(cards, layout);
+        // As the pane draws them: «↓» takes the last row from two rows up, and a kept card taller than its room is clipped.
+        const moreRow = fit.hidden > 0 && rows >= 2;
+        const room = moreRow ? rows - 1 : rows;
+        let shown = fit.cards.reduce((n, c) => n + cardRows(c, layout), 0);
+        if (shown > room) shown = cardRows(clipCard(fit.cards[0]!, layout, room), layout);
+        expect(shown + (moreRow ? 1 : 0), `${rows} rows, ${cols} columns`).toBeLessThanOrEqual(rows);
+      }
+    }
+  });
+  it('rows from 0 to 3, columns up to 30 and junk give a layout the pane can draw: at least 20 columns, a row or none', () => {
+    for (const bodyRows of [0, 1, 2, 3, -1, Number.NaN]) {
+      for (const bodyColumns of [1, 10, 20, 30]) {
+        const l = panelLayout({ bodyColumns, placement: 'inline', scroll: { bodyRows } });
+        expect(l.cols, `${bodyRows}x${bodyColumns}`).toBeGreaterThanOrEqual(20);
+        expect(l.rows === null || l.rows >= 1, `${bodyRows}x${bodyColumns}`).toBe(true);
+        expect(innerWidth(l)).toBeGreaterThanOrEqual(6);
+      }
+    }
+  });
+});
+
 describe('clipCard (F-01)', () => {
   const INLINE = panelLayout({ bodyColumns: 60, placement: 'inline', scroll: { bodyRows: 8 } });
   const tall = { ...card('todos', Array.from({ length: 6 }, (_, i) => row(`Step ${i}`))), subtitle: 'sub' };
@@ -86,5 +123,14 @@ describe('clipCard (F-01)', () => {
       if (rows > 1) expect(last).toEqual({ kind: 'text', text: '…', dim: true });
     }
     expect(clipCard(tall, INLINE, 2).blocks).toEqual([{ kind: 'text', text: '…', dim: true }]);
+  });
+  it('a framed card asked for fewer than three rows keeps its frame and header, its title ending on «…» (carry 5)', () => {
+    const dock = panelLayout({ bodyColumns: 60, placement: 'dock' });
+    for (const rows of [1, 2]) {
+      const clipped = clipCard(tall, dock, rows);
+      expect(cardRows(clipped, dock), `rows ${rows}`).toBe(3);
+      expect(clipped.title.endsWith('…')).toBe(true);
+      expect(clipped.blocks).toEqual([]);
+    }
   });
 });

@@ -33,7 +33,8 @@
 // hands the keys back to the prompt. A letter that does not reach the band lands in the composer and draws no button, so
 // each letter check first proves that its keys reach the band (its positive control), and is inconclusive when they do not:
 //   (a) folded-letter-noop        a letter of a button folded into ⋯ does nothing (main screen, 60 columns). Control first:
-//                                 m (the ⋯ button) must open the folded row, its buttons' letters showing.
+//                                 m (the ⋯ button) must open the folded row, its buttons' letters showing; Stop's letter
+//                                 is read there, the row is closed again, and that letter is pressed.
 //   (b) waypoint-panel-to-lens    waypoint's Panel button runs $.command.run('/lens'), which reaches lens's command hook
 //                                 and the photo row draws in the transcript (main screen, 100 columns, both plugins: the
 //                                 band folds its buttons there). Control first: m opens the folded row, where Panel shows
@@ -44,17 +45,22 @@
 //                                 band (the photo, when it draws, already proves the keys reached it).
 //   (c) photo-not-wrapped         the photo's rows neither wrap nor pass the width: CommandOutput rows are not indented in
 //                                 a way that makes the full-width photo wrap (same capture as b).
-//   (d) pane-close-stops          closing the pane with the engine's ✕ stops lens's writes (fullscreen, 160 columns).
-//                                 Inconclusive unless lens wrote a file under .forge/usage/ before the close: lens writes
-//                                 it only after model steps, so with no prompt sent this is the usual outcome.
+//   (d) pane-close-stops          closing the pane with the engine's ✕ (looked for on a row of the pane's frame, its
+//                                 column counted in cells) stops lens's writes (fullscreen, 160 columns). Inconclusive
+//                                 unless lens wrote a file under .forge/usage/ before the close: lens writes it only after
+//                                 model steps, so with no prompt sent this is the usual outcome. The test kit cannot raise
+//                                 ui.close, so this is the only check of lens's ui.close hook against the engine.
+// Until a first real run shows how the engine takes these keys, expect (b2), (d) and the letters' positive controls to
+// come out INCONCLUSIVE: that proves nothing either way, and only a FAIL points at the engine or the plugins.
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  BAND_READY, bandFolds, checkCapture, checkPhoto, closeVerdict, dotted, fillTemplate, findText, letterKeys, lettersOn, moreToggled, panelLetter,
-  parseArgs, pressVerdict, stopTriggered,
+  BAND_READY, bandFolds, checkCapture, checkPhoto, closeVerdict, dotted, fillTemplate, findText, letterKeys, lettersOn, moreToggled, PANE_FRAME,
+  panelLetter, parseArgs, pressVerdict, stopLetter, stopTriggered, treeKill,
 } from './tui/checks.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
@@ -131,6 +137,11 @@ async function until(term, test, ms) {
 // What is still running, so Ctrl+C kills the claude children and removes the temporary folders.
 const live = new Set();
 function cleanup(p, dir) {
+  // On Windows claude runs under cmd.exe, and the pty's kill ends cmd.exe alone: taskkill /T takes its claude child too.
+  const tree = p ? treeKill(process.platform, p.pid) : null;
+  if (tree) {
+    try { spawnSync(tree.file, tree.args, { stdio: 'ignore', windowsHide: true }); } catch { /* already gone */ }
+  }
   try { p?.kill(); } catch { /* already gone */ }
   // Windows keeps a folder busy for a moment after its process dies: retry, and never let a failure here lose a capture.
   try { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 }); } catch { /* left in the temp folder */ }
@@ -218,11 +229,14 @@ async function foldedLetterNoop(engine, cfg) {
     await pressLetter(p, 'm');
     await sleep(1_500);
     const opened = screen(term);
-    if (!moreToggled(first, opened)) return result('inconclusive', ['m (the ⋯ button) did not open the folded row: the keys may not reach the band, so a silent t proves nothing'], opened);
+    if (!moreToggled(first, opened)) return result('inconclusive', ['m (the ⋯ button) did not open the folded row: the keys may not reach the band, so a silent Stop proves nothing'], opened);
+    // Stop's letter as the band draws it in the open row, not a letter assumed here.
+    const stop = stopLetter(opened);
+    if (!stop) return result('inconclusive', ['the open row shows no Stop button, so there is no folded letter to press'], opened);
     await pressLetter(p, 'm');
     await sleep(1_500);
     const baseline = screen(term);
-    await pressLetter(p, 't');
+    await pressLetter(p, stop);
     await sleep(SETTLE_MS);
     const after = screen(term);
     return result(stopTriggered(baseline, after) ? 'fail' : 'pass', stopTriggered(baseline, after) ? ['a letter of a folded button did something (Stop was armed or filled)'] : [], after);
@@ -277,13 +291,13 @@ async function paneCloseStops(engine, cfg) {
   return withClaude(engine, { ...cfg, cols: 160, rows: 40, mode: 'fullscreen' }, async ({ p, term, dir, session }) => {
     p.write('/lens live\r');
     await sleep(SETTLE_MS);
-    const mark = findText(viewport(term), '✕');
-    if (!mark) return result('inconclusive', ['no ✕ on the screen, so the pane did not open or has no close mark'], screen(term));
+    const mark = findText(viewport(term), '✕', { row: PANE_FRAME });
+    if (!mark) return result('inconclusive', ['no ✕ on a row of a frame, so the pane did not open or has no close mark there'], screen(term));
     // SGR mouse: press and release at the mark (1-based).
     p.write(`\x1b[<0;${mark.col + 1};${mark.row + 1}M\x1b[<0;${mark.col + 1};${mark.row + 1}m`);
     await sleep(SETTLE_MS);
     const closed = screen(term);
-    if (findText(viewport(term), '✕')) return result('fail', ['the pane is still open after clicking ✕'], closed);
+    if (findText(viewport(term), '✕', { row: PANE_FRAME })) return result('fail', ['the pane is still open after clicking ✕'], closed);
     const before = usageListing(dir);
     // The run moves on: the fixture's status file is written again, as forge would.
     const file = path.join(dir, '.forge', 'status', 'demo__T001.json');

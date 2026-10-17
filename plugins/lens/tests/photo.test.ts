@@ -16,20 +16,21 @@ const FILES: Record<string, string> = {
 };
 const norm = (path: string) => path.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '');
 
-function serveFiles(on: On, reads: string[] = []) {
+function serveFiles(on: On, reads: string[] = [], extra: Record<string, string> = {}) {
+  const FILES_SERVED: Record<string, string> = { ...FILES, ...extra };
   const entry = (name: string, kind: 'file' | 'dir', size: number) => ({ name, kind, size, mtimeMs: NOW - 60_000, isLink: false });
   on('session.root', () => ({ value: ROOT }));
   on('session.id', () => ({ value: SESSION_ID }));
-  on('fs.read', (_$, e) => { reads.push(e.path); const f = FILES[norm(e.path)]; return f !== undefined ? { value: f } : { deny: `ENOENT ${e.path}` }; });
-  on('fs.exists', (_$, e) => ({ value: norm(e.path) in FILES }));
+  on('fs.read', (_$, e) => { reads.push(e.path); const f = FILES_SERVED[norm(e.path)]; return f !== undefined ? { value: f } : { deny: `ENOENT ${e.path}` }; });
+  on('fs.exists', (_$, e) => ({ value: norm(e.path) in FILES_SERVED }));
   on('fs.stat', (_$, e) => {
-    const f = FILES[norm(e.path)];
+    const f = FILES_SERVED[norm(e.path)];
     return f !== undefined ? { value: { kind: 'file' as const, size: f.length, mtimeMs: NOW - 60_000, isLink: false } } : { deny: `ENOENT ${e.path}` };
   });
   on('fs.list', (_$, e) => {
     const prefix = `${norm(e.path)}/`;
     const names = new Map<string, ReturnType<typeof entry>>();
-    for (const [path, text] of Object.entries(FILES)) {
+    for (const [path, text] of Object.entries(FILES_SERVED)) {
       if (!path.startsWith(prefix)) continue;
       const [head = '', ...rest] = path.slice(prefix.length).split('/');
       names.set(head, entry(head, rest.length ? 'dir' : 'file', rest.length ? 0 : text.length));
@@ -184,15 +185,64 @@ test('a photo reads the files once, writes no state, starts no timer, and its ro
   await clock.advance(600_000);
   expect(reads).toEqual([]);
   expect(written).toEqual([]);
-  // Every row of the drawing fits the viewport, however narrow, and the card count stays what the model holds.
+  // Every row of the drawing fits the viewport, however narrow: measured on what is drawn, the bar's cells two in from the
+  // edge (carry 7: the props alone may hold no width to check).
   for (const columns of [30, 60]) {
     const row = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'CommandOutput', props: OUTPUT(first), viewport: { columns, rows: 30, isFullscreen: false } });
-    const drawn = JSON.stringify(await row.drawn());
-    expect(drawn).toContain('docs/superpowers/plans/run.md'.slice(0, 10));
-    const widths = [...drawn.matchAll(/"(?:width|minWidth)":(\d+)/g)].map(m => Number(m[1]));
-    for (const w of widths) expect(w, `width at ${columns} columns`).toBeLessThanOrEqual(columns);
+    const drawn = await row.drawn();
+    expect(JSON.stringify(drawn)).toContain('docs/superpowers/plans/run.md'.slice(0, 10));
+    expect(widestBar(drawn), `bar at ${columns} columns`).toBeGreaterThan(0);
+    expect(widestBar(drawn) + 2, `bar at ${columns} columns`).toBeLessThanOrEqual(columns);
     await row.unmount();
   }
+});
+
+test('a photo taken with the pane closed asks the agents list first: a subagent that ended is not drawn as running (carry 7)', async ($, on) => {
+  serveFiles(on);
+  servePanes(on);
+  engineRows(on);
+  start(on);
+  on('classic.SubagentStart', () => ({}));
+  await $.session.start(SESSION);
+  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' } as never);
+  // The agents list (empty) says it ended; nothing asked it while the pane was closed.
+  const shot = (await $.command.run({ ...RUN, args: 'foto' })).text!;
+  const row = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'CommandOutput', props: OUTPUT(shot), viewport: MAIN_SCREEN });
+  expect(await said(row)).toMatch(/✓ /);
+  await row.unmount();
+});
+
+test('the photo counts the tasks in progress, not the ones done or stopped (carry 7)', async ($, on) => {
+  const status = (task: string, over: object) => JSON.stringify({
+    ts: new Date(NOW - 60_000).toISOString(), task, path: 'medium', phase: 'implement', agent: 'forge-impl', validators: [], verdict: null, round: null, cap: null,
+    taskStartedAt: new Date(NOW - 600_000).toISOString(), stageSince: new Date(NOW - 60_000).toISOString(), stages: {}, doneAt: null,
+    lastAt: new Date(NOW - 60_000).toISOString(), session: SESSION_ID, runId: null, project: null, ...over,
+  });
+  serveFiles(on, [], {
+    [`${ROOT}/.forge/status/T001.json`]: status('T001', {}),
+    [`${ROOT}/.forge/status/T002.json`]: status('T002', { doneAt: new Date(NOW - 120_000).toISOString() }),
+    [`${ROOT}/.forge/status/T003.json`]: status('T003', { phase: 'stopped', doneAt: new Date(NOW - 120_000).toISOString() }),
+  });
+  servePanes(on);
+  start(on);
+  await $.session.start(SESSION);
+  expect((await $.command.run({ ...RUN, args: 'foto' })).text).toMatch(/ · 1 task$/);
+});
+
+test('on the desktop a photo is drawn as the SVG cards the pane draws there, not as terminal cells (carry 7)', async ($, on) => {
+  serveFiles(on);
+  servePanes(on);
+  engineRows(on);
+  start(on);
+  await $.session.start(SESSION);
+  const shot = (await $.command.run({ ...RUN, args: 'foto' })).text!;
+  const desktop = await $.ui.mount({ plugin: 'lens', surface: 'desktop', component: 'CommandOutput', props: OUTPUT(shot), viewport: { columns: 120, rows: 40 } });
+  expect((await desktop.findAll({ type: 'Svg' })).length).toBeGreaterThan(0);
+  expect(await desktop.find({ text: shot })).toBeDefined();
+  await desktop.unmount();
+  const terminal = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'CommandOutput', props: OUTPUT(shot), viewport: MAIN_SCREEN });
+  expect(await terminal.findAll({ type: 'Svg' })).toEqual([]);
+  await terminal.unmount();
 });
 
 test('a photo is laid out at the transcript width: the screen undocked, narrower beside a docked pane (final review m-2)', async ($, on) => {
@@ -229,6 +279,42 @@ test('a photo is laid out at the transcript width: the screen undocked, narrower
   expect(await bar()).toBe(99 + 5 - 2);
   await band(155);
   expect(await bar()).toBe(155 + 5 - 2);
+});
+
+test("in fullscreen the band's Panel button runs /lens foto at 109 columns and /lens live from 110 (carry 6)", async ($, on) => {
+  serveFiles(on);
+  servePanes(on);
+  engineRows(on);
+  start(on);
+  const ran: string[] = [];
+  on('command.run', (_$, e) => { ran.push(`/${e.command} ${e.args}`.trimEnd()); return { text: '' }; });
+  await $.session.start(SESSION);
+  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'pending', activeForm: 'A' }] });
+  for (const columns of [109, 110]) {
+    const band = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: { ...BAND_PROPS, bodyColumns: columns - 5 }, viewport: { columns, rows: 30, isFullscreen: true } });
+    await band.press({ key: 'panel' });
+    await band.unmount();
+  }
+  expect(ran).toEqual(['/lens foto', '/lens live']);
+});
+
+test('a Panel press that cannot run /lens leaves it in the prompt and says to press Enter (carry 6)', async ($, on) => {
+  serveFiles(on);
+  servePanes(on);
+  engineRows(on);
+  start(on);
+  on('command.run', () => { throw new Error('not from here'); });
+  const filled: string[] = [];
+  const toasts: string[] = [];
+  on('prompt.fill', (_$, e) => { filled.push(e.text); return { isFilled: true }; });
+  on('ui.toast', (_$, e) => { toasts.push(e.text); return { value: undefined }; });
+  await $.session.start(SESSION);
+  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'pending', activeForm: 'A' }] });
+  const band = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS, viewport: { columns: 105, rows: 30, isFullscreen: false } });
+  await band.press({ key: 'panel' });
+  await band.unmount();
+  expect(filled).toEqual(['/lens foto']);
+  expect(toasts).toEqual(['Command ready in the prompt: press Enter']);
 });
 
 test("outside fullscreen the band's Panel button runs /lens foto (§4.6, step 2)", async ($, on) => {

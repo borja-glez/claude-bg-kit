@@ -95,6 +95,18 @@ describe('the glyphs of the band and the panel (F-13)', () => {
     }
     expect(hits).toEqual([]);
   });
+  it('no local or parameter under src/mod or src/lens is named h: it would shadow the JSX factory (global constraint, carry 9)', () => {
+    // A parameter (`(h: …`, `, h)`, `h =>`) or a declaration (`const h =`, `let h,`), outside comments and strings.
+    const named = /(?:[(,]\s*h\s*[:,)=]|(?:^|[^\w.$])h\s*=>|\b(?:const|let|var)\s+h\b)/;
+    const hits: string[] = [];
+    for (const f of [...sources('src/mod'), ...sources('src/lens')]) {
+      readFileSync(f, 'utf8').split('\n').forEach((line, i) => {
+        const code = line.replace(/\/\/.*$/, '').replace(/'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|"(?:[^"\\]|\\.)*"/g, '""');
+        if (named.test(code)) hits.push(`${f.split(path.sep).join('/')}:${i + 1}`);
+      });
+    }
+    expect(hits).toEqual([]);
+  });
   it('every glyph in GLYPHS takes one cell and has no emoji form', () => {
     for (const g of ['▲', '✎', '◷', '►', '⋯', '◦', '◌', '→', '«', '»', '—', '–', '≈', '−', '⠋', '⠏']) expect(GLYPHS).toContain(g);
     for (const g of GLYPHS) {

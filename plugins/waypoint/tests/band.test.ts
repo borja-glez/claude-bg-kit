@@ -1116,6 +1116,10 @@ test('with 2 rows the band is one row and ⋯ folds its buttons; ⋯ opens them 
 test('outside fullscreen the band is one row of plain buttons with their letters, and the hint line says how to reach them (F-06, F-15)', async ($, on) => {
   engineBottom(on);
   serveBand(on, () => WORK);
+  // The hint goes by what the band publishes (carry 3): a session start publishes it.
+  serveFiles(on, {});
+  memoryStore(on);
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
   mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
   const tails: (string | undefined)[] = [];
   on('ui.render', { component: 'PromptHint' }, ($, e) => {
@@ -1123,6 +1127,7 @@ test('outside fullscreen the band is one row of plain buttons with their letters
     const { Text } = $.ui.resolve(e);
     return h(Text, {}, e.props.hint) as RenderElement;
   });
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   const HINT = { isDraft: false, isWorking: false, hint: '? for shortcuts' };
   for (const isFullscreen of [false, true]) {
     const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: at(160), viewport: VIEW(isFullscreen, 165) });
@@ -1369,4 +1374,193 @@ test('a task past its estimate shows its clock in hours and minutes, in amber (F
   const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: at(240) });
   expect((await partWith(ui, '9 h 58 m / 30 m'))?.props?.color).toBe('warning');
   await ui.unmount();
+});
+
+// What waypoint publishes as `drawn`, in order (F-16, carry 2).
+function recordDrawn(on: On): unknown[] {
+  const published: unknown[] = [];
+  on('state.set', (_$, e, next) => {
+    if (e.plugin === 'waypoint' && e.key === 'drawn') published.push(e.value);
+    return next(e);
+  });
+  return published;
+}
+const MAIN_TURN = { turnId: 't', answer: '', durationMs: 1, isAborted: false, reason: 'answer' } as never;
+const settle = async (done: () => boolean) => { for (let i = 0; i < 100 && !done(); i++) await sleepMs(5); };
+
+test('nothing is published before the first refresh: drawn stays null for lens to guess (carry 2)', async ($, on) => {
+  engineBand(on);
+  serveFiles(on, {});
+  memoryStore(on);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  const published = recordDrawn(on);
+  serveBand(on, () => WORK);
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  await ui.unmount();
+  expect(published).toEqual([]);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  expect(published).toEqual([true]);
+});
+
+test('after a hot reload the first refresh waits for the dismissals: a dismissed notice is published as not drawn (carry 2)', async ($, on) => {
+  engineBand(on);
+  serveFiles(on, {});
+  memoryStore(on, { dismissed: T009_DISMISSED });
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  on('turn.complete', () => ({ text: '' }) as never);
+  const published = recordDrawn(on);
+  serveBand(on, T009);
+  // No session start: the module was reloaded, and a turn's end refreshes it.
+  await $.turn.complete(MAIN_TURN);
+  await settle(() => published.length > 0);
+  expect(published).toEqual([false]);
+});
+
+test('a dismissal that ends republishes at once: the notice and drawn come back together (carry 2)', async ($, on) => {
+  engineBand(on);
+  serveFiles(on, {});
+  const now = Date.parse('2026-10-11T10:12:30.000Z');
+  memoryStore(on, { dismissed: { [dismissedKey('previous', 'task:T009')]: new Date(now + 45_000).toISOString() } });
+  const clock = mock.clock(on, { now });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  const published = recordDrawn(on);
+  serveBand(on, T009);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  expect(published.at(-1)).toBe(false);
+  await clock.advance(40_000);
+  expect(published.at(-1)).toBe(false);
+  await clock.advance(6_000);
+  expect(published.at(-1)).toBe(true);
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  expect(await ui.find({ key: 'resume' })).toBeDefined();
+  await ui.unmount();
+});
+
+test('a session start shows a band closed with × again, and says so (carry 2)', async ($, on) => {
+  engineBand(on);
+  serveFiles(on, {});
+  memoryStore(on);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  const published = recordDrawn(on);
+  serveBand(on, () => WORK);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  await ui.press({ key: 'dismiss' });
+  await ui.unmount();
+  expect(published.at(-1)).toBe(false);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  expect(published.at(-1)).toBe(true);
+});
+
+test('a band whose drawing throws is published as not drawn, and as drawn again once it draws (carry 2)', async ($, on) => {
+  engineBand(on);
+  serveFiles(on, {});
+  memoryStore(on);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  const published = recordDrawn(on);
+  let model: WaypointBand = { ...RUN, slots: null } as unknown as WaypointBand;
+  serveBand(on, () => model);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  expect(published.at(-1)).toBe(true);
+  let ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  expect(await ui.find({ text: 'engine band' })).toBeDefined();
+  await ui.unmount();
+  await settle(() => published.at(-1) === false);
+  expect(published.at(-1)).toBe(false);
+  model = RUN;
+  ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  expect(await ui.find({ key: 'status' })).toBeDefined();
+  await ui.unmount();
+  await settle(() => published.at(-1) === true);
+  expect(published.at(-1)).toBe(true);
+});
+
+test('two publishes that overlap: the later one wins, so a refresh that read before × never draws the band back (carry 2)', async ($, on) => {
+  engineBand(on);
+  serveFiles(on, {});
+  memoryStore(on);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  on('turn.complete', () => ({ text: '' }) as never);
+  // The band model as serveBand answers it; the refresh's read of drawn is held until released, after × published.
+  let hold: Promise<void> | null = null;
+  let release = () => {};
+  on('state.get', async (_$, e, next) => {
+    if (e.plugin === 'waypoint' && e.key === 'band') return { value: { value: WORK, version: 1 } };
+    if (e.plugin === 'waypoint' && e.key === 'drawn' && hold) {
+      const held = hold;
+      hold = null;
+      await held;
+    }
+    return next(e);
+  });
+  const published = recordDrawn(on);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  expect(published).toEqual([true]);
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  hold = new Promise<void>(r => { release = r; });
+  await $.turn.complete(MAIN_TURN);
+  await settle(() => hold === null);
+  await ui.press({ key: 'dismiss' });
+  expect(published.at(-1)).toBe(false);
+  release();
+  await sleepMs(50);
+  expect(published.at(-1)).toBe(false);
+  await ui.unmount();
+});
+
+test('the hint line follows what the band publishes, not its last drawing: its tail goes once × closes the band (carry 3)', async ($, on) => {
+  engineBand(on);
+  serveFiles(on, {});
+  memoryStore(on);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  serveBand(on, () => WORK);
+  const tails: (string | undefined)[] = [];
+  on('ui.render', { component: 'PromptHint' }, ($, e) => {
+    tails.push(e.props.tail);
+    const { Text } = $.ui.resolve(e);
+    return h(Text, {}, e.props.hint) as RenderElement;
+  });
+  const HINT = { plugin: 'waypoint' as const, surface: 'terminal' as const, component: 'PromptHint' as const, props: { isDraft: false, isWorking: false, hint: '?' }, viewport: VIEW(false, 120) };
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  // Drawn before any band render: the band is up, so the tail is there.
+  let hint = await $.ui.mount(HINT);
+  expect(tails.at(-1)).toBe('ctrl+x tab · banda');
+  await hint.unmount();
+  const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: at(115), viewport: VIEW(false, 120) });
+  await ui.press({ key: 'dismiss' });
+  await ui.unmount();
+  hint = await $.ui.mount(HINT);
+  expect(tails.at(-1)).toBeUndefined();
+  await hint.unmount();
+});
+
+test("the second row is fitted to the band's width: the Spanish design band with lens at 90 columns stays two rows (carry 3)", async ($, on) => {
+  engineBand(on);
+  serveFiles(on, {});
+  memoryStore(on);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  on('command.list', () => ({ value: [LENS] }));
+  serveBand(on, () => ({ ...DESIGN, locale: 'es', proposals: 4, pending: 4 }));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  for (const [bodyColumns, isFullscreen, more] of [[90, true, false], [96, true, false], [60, false, true], [44, false, true]] as const) {
+    const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: at(bodyColumns), viewport: VIEW(isFullscreen, bodyColumns + 5) });
+    // ⋯ stays open for 30 s across drawings: it is pressed only while closed.
+    if (more && !findNode(await ui.drawn(), el => el.props?.key === 'band-row2')) await ui.press({ key: 'more' });
+    const row = findNode(await ui.drawn(), el => el.props?.key === 'band-row2');
+    const kids = (Array.isArray(row?.children) ? row!.children : [row?.children]).filter(Boolean) as DrawnNode[];
+    const cells = kids.map(k => {
+      const label = String(k.props?.label ?? strings(k.children).join(''));
+      if (k.type === 'Link' || k.type === 'Text') return [...label].length;
+      return k.props?.plain ? [...label].length + (k.props?.hotkey ? 3 : 0) : [...label].length + 4;
+    });
+    expect(kids.length, `${bodyColumns}`).toBeGreaterThan(0);
+    expect(cells.reduce((n, w) => n + w, 0) + kids.length - 1, `${bodyColumns}`).toBeLessThanOrEqual(bodyColumns);
+    await ui.unmount();
+  }
 });

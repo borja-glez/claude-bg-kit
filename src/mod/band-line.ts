@@ -175,6 +175,10 @@ function runParts(m: Extract<BandModel, { mode: 'run' }>, t: Texts): BandPart[] 
         short: `${id} ${STAGE_SHORT[s.stage] ?? s.stage}${round ? ` r${round}` : ''}`, prio: 4,
       });
     }
+    // Task 3 minor 1: the tasks running past the twelve slots the model carries are a «+N» of their own, which joins the
+    // one fitParts makes of the slots it drops.
+    const extra = Number.isInteger(m.running) ? m.running - m.slots.length : 0;
+    if (extra > 0) parts.push({ key: 'slot:+', text: `+${extra}`, prio: 4, count: extra });
   }
   parts.push({ key: 'integrated', text: `${m.integrated}/${m.total} ${t.integratedN}`, short: `${m.integrated}/${m.total}`, prio: 5 });
   if ((m.queued ?? 0) > 0) parts.push({ key: 'queued', text: `${t.queuedN} ${m.queued}`, prio: 8 });

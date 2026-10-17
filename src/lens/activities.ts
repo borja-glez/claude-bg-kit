@@ -113,12 +113,12 @@ export interface HomeInput { statuses: readonly ForgeStatus[]; links: readonly A
  * and a `.forge/work/<T>` path mean a loose task; an ephemeral run's slot is loose too), else the newest this session
  * has in progress, else the newest; undefined when there is none.
  */
-function homeOf(h: Omit<HomeInput, 'links'>, match: (st: ForgeStatus) => boolean): string | undefined {
-  const of = h.statuses.filter(match);
+function homeOf(input: Omit<HomeInput, 'links'>, match: (st: ForgeStatus) => boolean): string | undefined {
+  const of = input.statuses.filter(match);
   const loose = of.find(st => st.project === null);
   if (loose) return keyOf(loose.task, null);
-  const live = (st: ForgeStatus) => !st.doneAt && st.phase.toLowerCase() !== 'stopped' && ownerOf(st, h.sessionId, h.ownTasks) === 'own';
-  return newestKey(of, live, h.now) ?? newestKey(of, () => true, h.now);
+  const live = (st: ForgeStatus) => !st.doneAt && st.phase.toLowerCase() !== 'stopped' && ownerOf(st, input.sessionId, input.ownTasks) === 'own';
+  return newestKey(of, live, input.now) ?? newestKey(of, () => true, input.now);
 }
 
 /**
@@ -126,13 +126,13 @@ function homeOf(h: Omit<HomeInput, 'links'>, match: (st: ForgeStatus) => boolean
  * project, that project's status; one that names none, homeOf's among the statuses of its id, else the loose key. An
  * agent without a task has none.
  */
-export function linkHomes(h: HomeInput): Map<string, string> {
+export function linkHomes(input: HomeInput): Map<string, string> {
   const out = new Map<string, string>();
-  for (const l of h.links) {
+  for (const l of input.links) {
     const task = l.task;
     // 3a m-5: a workflow agent has one home, its workflow row, whatever task its prompt names.
     if (!task || l.workflow) continue;
-    out.set(l.id, l.project !== null ? keyOf(task, l.project) : homeOf(h, st => st.task === task) ?? keyOf(task, null));
+    out.set(l.id, l.project !== null ? keyOf(task, l.project) : homeOf(input, st => st.task === task) ?? keyOf(task, null));
   }
   return out;
 }
@@ -309,8 +309,9 @@ export function buildActivities(i: ActivityInput): ActivityView {
     ?? forge.find(b => b.rank === 0 && b.row.owner === 'own')
     ?? forge.reduce<Built | undefined>((best, b) => (!best || b.at > best.at ? b : best), undefined);
   if (pick) pick.row.expanded = true;
-  // F-08: the task of the agent the person looks at goes first, too.
-  if (pick && focus && pick.row.task === focus.task) built.unshift(...built.splice(built.indexOf(pick), 1));
+  // F-08: the task of the agent the person looks at goes first, too: the row of its home, as it was picked. A workflow
+  // agent has none (3a m-5), so a row that only shares the task id its prompt names stays where it is (carry 4).
+  if (pick && focus && pick.row.key === homes.get(focus.id)) built.unshift(...built.splice(built.indexOf(pick), 1));
   const out = built.map(b => b.row);
   if (i.superpowers) {
     const s = i.superpowers;

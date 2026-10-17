@@ -311,6 +311,13 @@ describe('buildActivities: a workflow, and the agents without a task', () => {
     const loose = buildActivities(input({ statuses: [st('T001')], links: [link('w2', 'T001', { workflow: { runId: 'wf_2', index: 1 } })] }));
     expect(loose.activities.flatMap(a => a.agents.map(g => `${a.key}:${g.id}`))).toEqual(['wf:wf_2:w2']);
   });
+  it('a workflow agent in view has no task home: no row is moved first for it, whatever task its prompt names (carry 4)', () => {
+    const wf = link('w1', 'T001', { project: 'web', workflow: { runId: 'wf_1', index: 1 } });
+    const view = buildActivities(input({ statuses: [st('T001', { project: 'web', lastAt: ago(2) })], links: [wf], focusAgent: 'w1' }));
+    expect(view.activities.map(a => a.key)).toEqual(['wf:wf_1', 'web__T001']);
+    // The newest own task in progress is still the one expanded, as with no agent in view.
+    expect(view.activities.filter(a => a.expanded).map(a => a.key)).toEqual(['web__T001']);
+  });
 });
 
 describe('runRoleOf: the role lens reads from the band (C3)', () => {

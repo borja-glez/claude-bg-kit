@@ -251,6 +251,35 @@ test('waypoint says whether it draws: a dismissed notice (drawn false) leaves th
   expect(await buttons($)).toEqual([[], []]);
 });
 
+test("waypoint's own word wins over its × flag: drawn false with hidden set draws lens's band, a later drawn true takes it away (carry 2)", async ($, on) => {
+  serveFiles(on, WAYPOINT_PROJECT);
+  engineBand(on);
+  start(on);
+  on('command.list', () => ({ value: [WAYPOINT_COMMAND] }));
+  const state = { hidden: true, drawn: false };
+  serveWaypointState(on, state);
+  await $.session.start(SESSION);
+  await $.tool.call(TODOS);
+  expect(await buttons($)).toEqual([['panel', 'dismiss'], ['panel', 'dismiss']]);
+  state.drawn = true;
+  expect(await buttons($)).toEqual([[], []]);
+});
+
+test('a waypoint unloaded mid-session leaves its last drawn behind: within a tick lens takes it as unsaid and draws its band (carry 2)', async ($, on) => {
+  serveFiles(on, WAYPOINT_PROJECT);
+  engineBand(on);
+  const clock = start(on);
+  let commands = [WAYPOINT_COMMAND];
+  on('command.list', () => ({ value: commands }));
+  serveWaypointState(on, { drawn: true });
+  await $.session.start(SESSION);
+  await $.tool.call(TODOS);
+  expect(await buttons($)).toEqual([[], []]);
+  commands = [];
+  await clock.advance(30_000);
+  expect(await buttons($)).toEqual([['panel', 'dismiss'], ['panel', 'dismiss']]);
+});
+
 test("an x within 5 s of waypoint's band going does not close lens's band, which took its place; a later one does (final review m-4)", async ($, on) => {
   serveFiles(on, WAYPOINT_PROJECT);
   engineBand(on);
@@ -352,6 +381,52 @@ test("lens's band fits the width: at 80 columns its parts and measured buttons s
   expect(await ui.find({ key: 'band-bar' })).toBeDefined();
   expect(await ui.find({ key: 'band-cells' })).toBeDefined();
   await ui.unmount();
+});
+
+test("under 30 columns lens's band still draws its two buttons, and what is left of its line fits beside them (carry 6)", async ($, on) => {
+  serveFiles(on, {});
+  engineBand(on);
+  start(on);
+  on('command.list', () => ({ value: [] }));
+  await $.session.start(SESSION);
+  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'a', status: 'in_progress', activeForm: 'Writing the parser for every configuration file' }] });
+  for (const bodyColumns of [12, 16, 20, 24, 28]) {
+    for (const isFullscreen of [true, false]) {
+      const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: { ...BAND_PROPS, bodyColumns }, viewport: { columns: bodyColumns + 5, rows: 30, isFullscreen } });
+      const where = `${bodyColumns} ${isFullscreen}`;
+      expect((await ui.findAll({ type: 'Button' })).map(b => b.key), where).toEqual(['panel', 'dismiss']);
+      const buttons = isFullscreen ? 1 + '[ Panel ]'.length + 1 + '[ × ]'.length : 1 + 'p: Panel'.length + 1 + 'x: ×'.length;
+      const line = (await lineOf(ui)) ?? '';
+      if (line) expect(2 + [...line].length + buttons, where).toBeLessThanOrEqual(bodyColumns);
+      await ui.unmount();
+    }
+  }
+});
+
+test("lens's hint follows its band's state, not its last drawing: there before any drawing, gone once × closes it (carry 3)", async ($, on) => {
+  serveFiles(on, {});
+  engineBand(on);
+  start(on);
+  on('command.list', () => ({ value: [] }));
+  const tails: (string | undefined)[] = [];
+  on('ui.render', { component: 'PromptHint' }, ($, e) => {
+    tails.push(e.props.tail);
+    const { Text } = $.ui.resolve(e);
+    return h(Text, {}, e.props.hint) as RenderElement;
+  });
+  await $.session.start(SESSION);
+  await $.tool.call(TODOS);
+  const viewport = { columns: 105, rows: 30, isFullscreen: false };
+  const HINT = { plugin: 'lens' as const, surface: 'terminal' as const, component: 'PromptHint' as const, props: { isDraft: false, isWorking: false, hint: '?' }, viewport };
+  let hint = await $.ui.mount(HINT);
+  expect(tails.at(-1)).toBe('ctrl+x tab · band');
+  await hint.unmount();
+  const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS, viewport });
+  await ui.press({ key: 'dismiss' });
+  await ui.unmount();
+  hint = await $.ui.mount(HINT);
+  expect(tails.at(-1)).toBeUndefined();
+  await hint.unmount();
 });
 
 test("lens's band buttons have their letters, plain outside fullscreen, and the hint line says ctrl+x tab (F-06)", async ($, on) => {

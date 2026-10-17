@@ -61,18 +61,59 @@ async function dismissNotice($: Engine, n: NoticeBand): Promise<void> {
   try {
     await $.store.set(DISMISS_STORE_KEY, next);
     await loadDismissals($);
+    // Carry 2: the map read back is what the band goes by from here, so drawn is worked out from it too.
+    await publishDrawn($);
   } catch { /* hidden for this process only */ }
 }
 
-// F-16: false with the band hidden with ×, a notice dismissed or nothing to draw; true otherwise. Worked out here, never
-// while drawing, and written only when it changes; lens reads it before drawing a band of its own.
+// F-16, carry 2: every publish is numbered, and one a later publish overtook writes nothing: the last word is the
+// freshest, so a refresh that read before × never draws the band back for lens.
+let drawnGen = 0;
+// Carry 2: whether the band's last drawing threw (its catch left the site to what is beneath); drawn says so until it
+// draws again.
+let renderFailed = false;
+// Carry 2: the one timer that publishes again when the dismissal of the notice the band shows ends; one further off
+// than EXPIRY_MAX_MS is left to the 30 s refresh.
+let expiry: Timer | null = null;
+const EXPIRY_MAX_MS = 2 * 24 * 3600_000;
+
+function watchExpiry($: Engine, ms: number): void {
+  expiry?.cancel();
+  expiry = null;
+  if (!Number.isFinite(ms) || ms <= 0 || ms > EXPIRY_MAX_MS) return;
+  expiry = $.clock.after(ms + 1, () => {
+    expiry = null;
+    $.ui.invalidate('ui.render');
+    void publishDrawn($);
+  });
+}
+
+// F-16: false with the band hidden with ×, a notice dismissed, nothing to draw or a drawing that threw; true otherwise.
+// Worked out here, never while drawing, and written only when it changes; lens reads it before drawing a band of its own.
 async function publishDrawn($: Engine): Promise<void> {
+  const gen = ++drawnGen;
   try {
     const m = await read($, band);
-    let shown = !(await read($, hidden)) && m.mode !== 'none';
-    if (shown && m.mode === 'notice') shown = !isDismissed(dismissals, dismissalKey(await rootOf($), m.project, m.kind, m.key), await nowMs($));
-    if ((await read($, drawn)) !== shown) await update($, drawn, () => shown);
+    let shown = !renderFailed && !(await read($, hidden)) && m.mode !== 'none';
+    if (shown && m.mode === 'notice') {
+      // M6, carry 2: after a hot reload no session start read the dismissals; the notice waits for them, as its drawing does.
+      if (!dismissalsLoaded) await readDismissals($);
+      const key = dismissalKey(await rootOf($), m.project, m.kind, m.key);
+      const now = await nowMs($);
+      shown = !isDismissed(dismissals, key, now);
+      if (!shown) watchExpiry($, Date.parse(Object.prototype.hasOwnProperty.call(dismissals, key) ? dismissals[key]! : '') - now);
+    }
+    const current = await read($, drawn);
+    if (gen !== drawnGen) return;
+    if (current !== shown) await update($, drawn, () => shown);
   } catch { /* lens keeps what it read */ }
+}
+
+// Carry 2: a drawing that throws leaves the band to what is beneath, and lens is told; and told again once it draws.
+function noteDrawing($: Engine, ok: boolean): void {
+  if (renderFailed === !ok) return;
+  renderFailed = !ok;
+  void publishDrawn($);
 }
 
 // F-05: the ⋯ row of a one-row band stays open until an action is pressed or 30 s pass.
@@ -81,8 +122,6 @@ let moreUntil = 0;
 // F-06: Stop, and Close on a run still active, ask twice: which button is armed, for which run, and until when.
 const CONFIRM_MS = 5_000;
 let armed: { key: string; runId: string | null; until: number } | null = null;
-// F-06: whether the band was drawn on its last render, for the hint line's tail outside fullscreen.
-let bandShown = false;
 
 // A refresh asked while one runs is not dropped: what the running one read may be the old conversation's (a /clear
 // meanwhile), so it reads once more when it ends ($.session.id() is asked again each time).
@@ -224,12 +263,15 @@ export const register: Register = on => {
     timer = null;
     lensRecheck?.cancel();
     lensRecheck = null;
+    expiry?.cancel();
+    expiry = null;
     return next(e);
   });
 
   // K5-07: the conversation that starts (after /clear, a resume or a fork) gets its own role at once: refresh asks
   // $.session.id() each time. A /clear or a resume is another conversation, so a band hidden with × shows again. A
   // process whose timer an earlier end stopped gets it back.
+  // I-11, carry 9: like lens's, this gating hook goes on when it fails (the replay-safe next gives what it settled to).
   on('classic.SessionStart', async ($, e, next) => {
     const r = await next(e);
     if (e.source === 'clear' || e.source === 'resume') {
@@ -238,7 +280,7 @@ export const register: Register = on => {
     if (!timer) startTimer($);
     void refresh($);
     return r;
-  });
+  }).catch(($, e, next) => next(e));
 
   on('turn.complete', ($, e, next) => {
     void checkLens($);
@@ -247,21 +289,20 @@ export const register: Register = on => {
   });
 
   // The session's own writes to the roadmap database reach the local copy at once (see mirror.ts), so the band and
-  // lens do not wait for the next listing, which a session may skip.
+  // lens do not wait for the next listing, which a session may skip. It only observes: the call goes on when it fails.
   on('tool.call', { tool: 'ArtifactData' }, async ($, e, next) => {
     const result = await next(e);
     try {
       if (!result.deny && !result.isError && !writeFailed(result.text) && await mirror($, e)) void refresh($);
     } catch { /* the next listing brings the copy up to date */ }
     return result;
-  });
+  }).catch(($, e, next) => next(e));
 
   // The band is one instance per chain: drawing without next(e) hides the bands of the plugins beneath, so ours stacks
   // over them. F-04, F-05: its parts fitted to the cells it has, at the level its width, rows and screen allow (wide,
   // two, one with ⋯); F-06: a letter on every button, drawn plain outside fullscreen, where a click does not reach it.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const below = await next(e);
-    bandShown = false;
     try {
       const m = await read($, band);
       const isHidden = await read($, hidden);
@@ -402,9 +443,10 @@ export const register: Register = on => {
         c.press(pressed);
       };
       const plain = lay.plain ? { plain: true as const } : {};
+      // Carry 3: a second row's labels come fitted to the width (lay.labels), so it never wraps onto a third row.
       const draw = (c: Control): RenderElement => {
-        const label = lay.long ? c.label : c.short ?? c.label;
-        if (c.kind === 'text') return <Text key={c.key} dimColor>{c.label}</Text>;
+        const label = lay.labels[c.key] ?? (lay.long ? c.label : c.short ?? c.label);
+        if (c.kind === 'text') return <Text key={c.key} dimColor>{lay.labels[c.key] ?? c.label}</Text>;
         if (c.kind === 'link') return <Link key={c.key} href={c.href ?? ''} label={label} />;
         return (
           <Button key={c.key} label={label} hotkey={c.hotkey} {...plain} {...(c.variant ? { variant: c.variant } : {})}
@@ -422,8 +464,7 @@ export const register: Register = on => {
           })}
         </Text>
       );
-      bandShown = true;
-      return (
+      const tree = (
         <Box flexDirection="column">
           <Box key="band-row" flexDirection="row" columnGap={1}>
             <Box key="band-line" flexShrink={1} minWidth={0}>{line}</Box>
@@ -435,17 +476,20 @@ export const register: Register = on => {
           {below}
         </Box>
       );
+      noteDrawing($, true);
+      return tree;
     } catch {
-      bandShown = false;
+      noteDrawing($, false);
       return below;
     }
   });
 
   // F-06, step 1 of §4.6: outside fullscreen, at the end of the hint line under the prompt, how to reach the band's
-  // letters, while the band is drawn and the line has no tail of its own.
+  // letters, while the band is drawn and the line has no tail of its own. Carry 3: «drawn» says it, worked out outside any
+  // drawing, and reading it subscribes the hint: the tail goes with a × at once, whichever is drawn first.
   on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
     try {
-      if (bandShown && e.viewport?.isFullscreen === false && !e.props.tail) {
+      if (e.viewport?.isFullscreen === false && !e.props.tail && (await read($, drawn)) === true) {
         const m = await read($, band);
         return next({ ...e, props: { ...e.props, tail: textsFor(m.locale).bandHint } });
       }

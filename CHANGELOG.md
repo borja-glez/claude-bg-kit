@@ -16,14 +16,13 @@ elsewhere and are reconstructed from their READMEs.
 ### 0.25.0 — 2026-10-17
 
 #### Added
-- Band buttons have hotkeys and fit the width; one-row band outside fullscreen; Stop asks for confirmation.
-- The band is a line of parts with a priority, fitted to the cells it has: the least important take a short form and then go, while a pending decision, a silent run and the inbox go last. From 140 columns it is one row with the full buttons, from 90 two rows with short labels; narrower, with fewer than 3 rows above the prompt or outside fullscreen, one row whose buttons fold into ⋯ (`m`).
+- The band is a line of parts with a priority, fitted to the cells it has: the least important take a short form and then go, while a pending decision, a silent run and the inbox go last. From 140 columns it is one row with the full buttons, from 90 two rows with short labels; narrower, with fewer than 3 rows above the prompt or outside fullscreen, one row whose buttons fold into ⋯ (`m`). A second row that does not fit clips its widest labels, so the band never takes a third row.
 - Every button has a letter (`n`, `s`, `l`, `t`, `p`, `x`; `a`, `e`, `o`, `w`, `i`, `y` in design; `v`, `j`, `e`, `f`, `c` in a notice), drawn `n: Next` outside fullscreen, where the hint line ends with `ctrl+x tab · band` and Roadmap (`r`) and Design (`d`) are buttons that copy their address; in fullscreen they stay links, with no letter.
-- The run band shows every slot (up to 12, `+N` for those that do not fit), one integrated count and those waiting to integrate; its model gains `queued`.
+- The run band shows every slot (up to 12; `+N` counts those that do not fit and any running past 12), one integrated count and those waiting to integrate; its model gains `queued`.
 - The band publishes whether it is drawn (`{ plugin: 'waypoint', key: 'drawn' }`), so lens draws its own band when this one is closed.
 
 #### Changed
-- Stop (`t`), and Close on a run still active, ask twice: the first press shows a toast, the second within 5 seconds runs `/forge:stop`. `x` closes the band in every mode.
+- The coordinator's Stop (`t`), and Close on a run still active, ask twice: the first press shows a toast, the second within 5 seconds runs `/forge:stop`; a run member's Stop still only leaves `/forge:stop` in the prompt. `x` closes the band in every mode.
 - A task's clock reads hours and minutes (`9 h 58 m / 30 m`), amber past its estimate; a notice's age is a part of its own (`· 2 h ago`).
 - The band's glyphs are one cell wide: ▲, ✎ and ► instead of the warning sign, the envelope and the play button.
 

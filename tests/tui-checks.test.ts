@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
-  BAND_READY, bandFolds, changedFiles, checkCapture, checkPhoto, closeVerdict, dotted, fillTemplate, findText, letterKeys,
-  lettersOn, moreToggled, panelLetter, parseArgs, pressVerdict, splitIds, stopTriggered,
+  BAND_READY, bandFolds, cellsOf, changedFiles, checkCapture, checkPhoto, closeVerdict, dotted, fillTemplate, findText, letterKeys,
+  lettersOn, moreToggled, PANE_FRAME, panelLetter, parseArgs, pressVerdict, splitIds, stopLetter, stopTriggered, treeKill,
 } from '../scripts/tui/checks.mjs';
 
 const capture = (name: string) => readFileSync(new URL(`./fixtures/tui/${name}`, import.meta.url), 'utf8');
@@ -116,5 +116,31 @@ describe('the engine checks of the TUI snapshots (carried from tasks 5, 8, 9 and
     expect(findText('nothing here', '✕')).toBeNull();
     expect(changedFiles({ a: 1, b: 2 }, { a: 1, b: 2 })).toEqual([]);
     expect(changedFiles({ a: 1 }, { a: 5, c: 3 })).toEqual(['a', 'c']);
+  });
+  it('(d) counts the column in cells, and takes the mark only on a row that passes the test: the pane\'s frame, not a card (carry 8)', () => {
+    // A wide title before the mark takes two cells a character.
+    expect(findText('漢字 ✕', '✕')).toEqual({ row: 0, col: 5 });
+    expect(cellsOf('漢字 ✕')).toBe(6);
+    expect(cellsOf(`e${String.fromCharCode(0x0301)}`)).toBe(1);
+    const screen = 'card: ✕ cancelled\n╭─ lens ───── ✕ ╮\n│ Now          │';
+    expect(findText(screen, '✕')).toEqual({ row: 0, col: 6 });
+    expect(findText(screen, '✕', { row: PANE_FRAME })).toEqual({ row: 1, col: 14 });
+    expect(findText('no frame here ✕', '✕', { row: PANE_FRAME })).toBeNull();
+  });
+});
+
+describe('the snapshot script polish (carry 8)', () => {
+  it('reads the Stop letter from the band, so a fold is a ⋯ with no Stop button on the screen', () => {
+    expect(stopLetter('► 3/3  s: Estado  t: Parar  x: ×')).toBe('t');
+    expect(stopLetter('► 3/3  s: Status  q: Stop  x: ×')).toBe('q');
+    expect(stopLetter('► 3/3  m: ⋯  x: ×')).toBeNull();
+    expect(bandFolds('► 3/3  m: ⋯  x: ×')).toBe(true);
+    expect(bandFolds('► 3/3  m: ⋯  q: Stop  x: ×')).toBe(false);
+    expect(bandFolds('► 3/3  q: Stop  x: ×')).toBe(false);
+  });
+  it('on Windows kills the process tree of the cmd.exe that runs claude; elsewhere the pty kill is enough', () => {
+    expect(treeKill('win32', 4242)).toEqual({ file: 'taskkill', args: ['/PID', '4242', '/T', '/F'] });
+    expect(treeKill('linux', 4242)).toBeNull();
+    expect(treeKill('win32', undefined)).toBeNull();
   });
 });
