@@ -20,8 +20,12 @@ import type { VerifyFile } from './verdict.js';
 export interface ReviewDir { brief: number; n: number; files: readonly string[]; at?: string | null }
 /** A verification of the task: its verify.json, its evidence dir relative to the repo, and the absolute path of a screenshot. */
 export interface VerifyRound { brief: number; n: number; file: VerifyFile; local: string; shotPath: (shot: string) => string; at?: string | null }
-/** An uploaded screenshot: the absolute path of the file and the roadmap asset it became. */
-export interface Asset { path: string; id: string; url: string }
+/**
+ * An uploaded screenshot: the absolute path of the file, the roadmap asset it became and its scope (M5): the run that
+ * held the task when it was uploaded (null outside one) and its verify round, `<brief>-<n>`. A new run re-creates the
+ * same paths, so an upload counts only for its own run and round.
+ */
+export interface Asset { path: string; id: string; url: string; runId: string | null; round: string }
 export interface DocInput {
   task: string; status: ForgeStatus | null; events: readonly LedgerEvent[];
   execution: ExecutionState | null; execTask: ExecTask | null; publicTask: PublicTask | null;
@@ -172,14 +176,16 @@ function evidenceOf(i: DocInput, brief: number): EvidenceV2 | null {
   const rounds = i.verifies.filter(v => v.brief === brief).sort((a, b) => a.n - b.n);
   const last = rounds.at(-1);
   if (!last) return null;
-  const assetFor = (file: string) => i.assets.find(a => samePath(a.path, file));
+  // M5: the upload of this very run (none outside one) and round; an earlier run's upload of the same path is not this one.
+  const runId = i.execution?.runId ?? null;
+  const assetFor = (file: string, r: VerifyRound) => i.assets.find(a => samePath(a.path, file) && a.runId === runId && a.round === `${r.brief}-${r.n}`);
   let missing = false;
   const shots: ShotV2[] = rounds.flatMap(r => r.file.checks.map(c => {
     const s: ShotV2 = { surface: clip(c.surface, 80), check: clip(c.name || `#${c.id}`, 200), ok: c.ok, round: r.n };
     if (c.expected.trim()) s.expected = clip(c.expected, 200);
     if (c.observed.trim()) s.observed = clip(c.observed, 200);
     if (c.shot) {
-      const a = assetFor(r.shotPath(c.shot));
+      const a = assetFor(r.shotPath(c.shot), r);
       if (a) { s.url = a.url; s.id = a.id; } else if (r === last) missing = true;
     }
     return s;

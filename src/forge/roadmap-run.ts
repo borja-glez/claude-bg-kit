@@ -1,9 +1,9 @@
 // G-07, G-04 (data): runs/<runId>, the summary of a forge execution once it ends (or of a Small, Medium or Large task
 // closed outside one, when the project has a roadmap), and `cleanup`, the run's executor sessions to delete from it.
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { listDecisions } from './decisions.js';
-import { readExecution, executionTaskFile } from './execution.js';
+import { eventsSince, readExecution, executionTaskFile } from './execution.js';
 import { readEvents, readStatus, readStatuses, type LedgerEvent } from './ledger.js';
 import { mainCheckout } from './local.js';
 import { readLoose } from './loose.js';
@@ -37,19 +37,36 @@ function writeJsonAtomic(file: string, value: unknown): void {
   try { writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n'); renameSync(tmp, file); } finally { rmSync(tmp, { force: true }); }
 }
 
-/** The deferred findings of a task: deferred.json of its work folder in the main checkout, else its rulings. */
-function deferredCount(main: string, ref: TaskRef, events: readonly LedgerEvent[], mine: readonly LedgerEvent[]): number {
+/**
+ * The deferred findings of a task: deferred.json of its work folder in the main checkout, else its rulings. With `since`
+ * (the start of the run it summarizes, M4) an entry counts by its own `ts` (or `at`), else by the file's mtime, as
+ * roadmap-doc's ownRun dates them: a deferred.json of an earlier run leaves the count to this run's rulings.
+ */
+function deferredCount(main: string, ref: TaskRef, events: readonly LedgerEvent[], mine: readonly LedgerEvent[], since?: string): number {
+  const file = path.join(readWorkDir(main, ref, events), 'deferred.json');
   try {
-    const raw: unknown = JSON.parse(readFileSync(path.join(readWorkDir(main, ref, events), 'deferred.json'), 'utf8'));
-    if (Array.isArray(raw)) return raw.length;
+    const raw: unknown = JSON.parse(readFileSync(file, 'utf8'));
+    if (Array.isArray(raw)) {
+      if (since === undefined) return raw.length;
+      const mtime = statSync(file).mtime.toISOString();
+      const current = (ts: unknown): boolean => typeof ts !== 'string' || !Number.isFinite(Date.parse(ts)) || Date.parse(ts) >= Date.parse(since);
+      const own = (d: unknown): unknown => {
+        const o = d && typeof d === 'object' ? d as { ts?: unknown; at?: unknown } : {};
+        return typeof o.ts === 'string' ? o.ts : typeof o.at === 'string' ? o.at : mtime;
+      };
+      const kept = raw.filter(d => current(own(d))).length;
+      if (kept) return kept;
+    }
   } catch { /* none */ }
   return mine.filter(e => e.kind === 'ruling' && Array.isArray(e.deferred)).reduce((s, e) => s + (e.deferred as unknown[]).length, 0);
 }
 
-function row(main: string, events: readonly LedgerEvent[], ref: TaskRef, status: RunTaskStatus, title: string | null | undefined, seconds: number | undefined): RunSummaryTask {
-  const mine = eventsOf(events, ref);
+/** One task of the summary; `since` (a run's start, M4) keeps only that run's events and deferred findings, as C1 does. */
+function row(main: string, events: readonly LedgerEvent[], ref: TaskRef, status: RunTaskStatus, title: string | null | undefined, seconds: number | undefined, since?: string): RunSummaryTask {
+  const dated = since !== undefined && Number.isFinite(Date.parse(since)) ? since : undefined;
+  const mine = dated ? eventsSince(eventsOf(events, ref), dated) : eventsOf(events, ref);
   const rounds = new Set(mine.filter(e => e.kind === 'verdict' && typeof e.dir === 'string').map(e => String(e.dir))).size;
-  const deferred = deferredCount(main, ref, events, mine);
+  const deferred = deferredCount(main, ref, events, mine, dated);
   return {
     id: ref.task, ...(title ? { title: title.slice(0, 200) } : {}), status, ...(seconds !== undefined ? { seconds } : {}),
     ...(rounds ? { rounds: Math.min(rounds, 99) } : {}), ...(deferred ? { deferred: Math.min(deferred, 999) } : {}),
@@ -73,7 +90,7 @@ function executorsOf(main: string, e: ExecutionState): string[] {
 function runSummary(main: string, e: ExecutionState, now: Date): RunSummaryDoc {
   const events = readEvents(main);
   const project = e.kind === 'plan' ? e.project : null;
-  const tasks = Object.entries(e.tasks).map(([id, t]) => row(main, events, { project, task: id }, t.status, t.title, secondsOf(t.startedAt, t.finishedAt)));
+  const tasks = Object.entries(e.tasks).map(([id, t]) => row(main, events, { project, task: id }, t.status, t.title, secondsOf(t.startedAt, t.finishedAt), e.startedAt));
   // An ephemeral run lists the requests it never started too.
   if (e.kind === 'ephemeral') for (const l of readLoose(main, e.runId)?.tasks ?? []) if (!e.tasks[l.id]) tasks.push({ id: l.id, title: l.title.slice(0, 200), status: 'queued' });
   const final = events.filter(x => x.kind === 'verdict' && x.task === `${e.project}-final` && x.ts >= e.startedAt).at(-1);

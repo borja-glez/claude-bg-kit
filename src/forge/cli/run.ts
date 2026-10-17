@@ -30,6 +30,7 @@ import { UsageError } from './errors.js';
 import { swarmCommand, restoringRegenerated, runSetup } from './swarm.js';
 import { reviewCommand } from './review.js';
 import { roadmapCommand } from './roadmap.js';
+import { readKeptAssets, runHolding } from '../roadmap-sources.js';
 import { infinitePublish } from '../infinite-doc.js';
 import type { fitForgeDoc } from '../../lib/roadmap-doc.js';
 import { swarmStep } from './step.js';
@@ -1188,10 +1189,23 @@ function runCommand(argv: string[], io: Io): Result {
         const db = flag('db');
         if (db) {
           const base = task.replace(/-\d+$/, '');
+          let published: string[] = [];
           try {
             const st = JSON.parse(readFileSync(path.resolve(io.cwd, db, 'state', `${base}.json`), 'utf8')) as { evidence?: { shots?: { id?: unknown }[] } };
-            previous = (st.evidence?.shots ?? []).map(s => s?.id).filter((x): x is string => typeof x === 'string' && x.length > 0);
-          } catch { previous = []; }
+            published = (st.evidence?.shots ?? []).map(s => s?.id).filter((x): x is string => typeof x === 'string' && x.length > 0);
+          } catch { published = []; }
+          // M5: only the assets this checkout knows no screenshot of the task links any more: those its kept uploads hold for
+          // another run or another brief (the evidence keeps every round of the brief in progress). An id it does not know,
+          // or any id without a readable kept list, cannot be judged here and stays.
+          const main = mainCheckout(io.cwd);
+          const project = resolveProject({ flag: flag('project'), dir: dirArg, task, events: ledger });
+          const runId = runHolding(main, base, project);
+          const brief = Number(/-(\d+)$/.exec(task)?.[1] ?? NaN);
+          const kept = readKeptAssets(main, { project, task: base }, ledger) ?? [];
+          const linked = (a: { runId: string | null; round: string }) => a.runId === runId && Number(a.round.split('-')[0]) === brief;
+          const live = new Set(kept.filter(linked).map(a => a.id));
+          const stale = new Set(kept.filter(a => !linked(a)).map(a => a.id));
+          previous = published.filter(id => stale.has(id) && !live.has(id));
         }
         const big = shots.filter(s => s.oversize).length;
         const learnedText = Object.entries(learned).map(([n, k]) => `${n} (${k})`).join(', ');
@@ -1289,9 +1303,12 @@ function runCommand(argv: string[], io: Io): Result {
               const status = base.status;
               if (status !== 'approved' && status !== 'auto_approved' && status !== 'rejected') throw new UsageError(`proposals decide: ${id} is ${status}: only a decided proposal is confirmed`);
               const approval = approvalOf(id, status, at, base);
-              if (from === undefined) saveApproval(io.cwd, id, approval.data);
-              // The latest decision of this checkout: a reopen before it no longer voids the mark it makes.
-              appendEvent(io.cwd, { ts: at, kind: 'proposal', action: 'confirm', id, status });
+              // The latest decision of this checkout: a reopen before it no longer voids the mark it makes. On the roadmap path
+              // it is logged only once the mark landed (M3): the skill logs the `event` printed here.
+              const event = { action: 'confirm', id, status };
+              if (from !== undefined) return json({ id, status, approval, event });
+              saveApproval(io.cwd, id, approval.data);
+              appendEvent(io.cwd, { ts: at, kind: 'proposal', ...event });
               return json({ id, status, approval });
             }
             // A reopen also refuses while the proposal has a task: in the db doc, or in a plan (a task made from it, or
@@ -1301,21 +1318,26 @@ function runCommand(argv: string[], io: Io): Result {
             const r = decideDoc(checked, action as Decision, by, at, reason || undefined, { reopen });
             if (!r.ok) throw new UsageError(`proposals decide: ${decideRefusal(id, checked, r.error)}`);
             const mark = r.doc.status === 'approved' || r.doc.status === 'rejected' ? approvalOf(id, r.doc.status, at, r.doc) : null;
+            // M1: a mark this checkout holds for the pid (one an editor left in place by setting the status back, say) goes
+            // first, as a reopened decision's does: the skill pins the delete to the version it lists, and the new mark, if
+            // any, is then a create. Read before the local path below replaces it.
+            const marked = loadApproval(io.cwd, id) !== null;
+            const event = reopen ? { action: 'reopen', id, from: base.status, to: r.doc.status } : { action: 'decide', id, status: r.doc.status };
             if (from === undefined) {
               saveProposal(io.cwd, id, r.doc);
               if (mark) saveApproval(io.cwd, id, mark.data); else removeApproval(io.cwd, id);
-              appendEvent(io.cwd, reopen
-                ? { ts: at, kind: 'proposal', action: 'reopen', id, from: base.status, to: r.doc.status }
-                : { ts: at, kind: 'proposal', action: 'decide', id, status: r.doc.status });
+              appendEvent(io.cwd, { ts: at, kind: 'proposal', ...event });
             }
-            if (!reopen) return json({ id, status: r.doc.status, write: writeOf(r.doc, by, at), approval: mark });
+            // M3: on the roadmap path the decision is logged only once the roadmap took it: the skill logs this `event`.
+            const logLater = from !== undefined ? { event } : {};
+            const approvalDelete = reopen || marked ? { approvalDelete: { op: 'delete' as const, collection: 'approvals', doc_id: id } } : {};
+            if (!reopen) return json({ id, status: r.doc.status, write: writeOf(r.doc, by, at), approval: mark, ...approvalDelete, ...logLater });
             // The skill sends `write` pinned to the version it read; a stale reason is deleted.
             const write: Record<string, unknown> = { ...writeOf(r.doc, by, at), history: r.doc.history };
             if (!r.doc.reason && base.reason) write.reason = { __delete__: true };
-            // The decision reopened no longer stands: its mark in the roadmap goes (the skill pins the delete to the version it
-            // lists; the new mark, if any, is then a create). Without it an editor who sets the status back finds the old mark.
-            const approvalDelete = { op: 'delete' as const, collection: 'approvals', doc_id: id };
-            return json({ id, status: r.doc.status, previous: base.status, write, approval: mark, approvalDelete });
+            // The decision reopened no longer stands: its mark in the roadmap goes. Without it an editor who sets the status
+            // back finds the old mark.
+            return json({ id, status: r.doc.status, previous: base.status, write, approval: mark, ...approvalDelete, ...logLater });
           }
           case 'save': {
             const from = subFlag('from');
@@ -1326,19 +1348,17 @@ function runCommand(argv: string[], io: Io): Result {
             try { doc = normalizeProposal(JSON.parse(readText(from, '--from'))); } catch (e) { if (e instanceof UsageError) throw e; doc = null; }
             if (!doc) throw new UsageError('proposals save: --from must be a valid proposal doc');
             const { previous, previousDoc } = mirrorProposal(io.cwd, id, doc, taskId => heldTask(planTasksFor(io.cwd, subFlag('plan')), id, taskId) === taskId);
-            const logged = (previous ?? 'proposed') !== doc.status;
-            // A decided proposal that changes status is a reopen; one made by hand (not through
-            // `decide --reopen`) carries no new history entry for the decision it replaced.
-            // Moving to done is the normal lifecycle, never a reopen.
-            const reopened = logged && previousDoc !== null && !canDecide(previousDoc.status) && doc.status !== 'done';
-            if (reopened) appendEvent(io.cwd, { ts: ts(), kind: 'proposal', action: 'reopen', id, from: previousDoc.status, to: doc.status });
-            else if (logged) appendEvent(io.cwd, { ts: ts(), kind: 'proposal', action: 'decide', id, status: doc.status });
+            // M3: save only mirrors. Whoever wrote the status (an editor, say), it is no decision of this checkout's owner: only
+            // decide, confirm, a reopen and the policy log one (the roadmap path logs the `event` decide prints, once it landed).
+            // A decided proposal that changes status is a reopen; one made by hand (not through `decide --reopen`) carries no
+            // new history entry for the decision it replaced. Moving to done is the normal lifecycle, never a reopen.
+            const reopened = (previous ?? 'proposed') !== doc.status && previousDoc !== null && !canDecide(previousDoc.status) && doc.status !== 'done';
             // Tracked: a history entry the mirror lacks that records the mirror's own decision (status, who, when).
             const known = new Set((previousDoc?.history ?? []).map(e => JSON.stringify(e)));
             const tracked = previousDoc !== null && (doc.history ?? []).some(e => !known.has(JSON.stringify(e))
               && e.status === previousDoc.status && e.decidedBy === previousDoc.decidedBy && e.decidedAt === previousDoc.decidedAt);
             const stderr = reopened && !tracked ? `proposals save: ${id} went from ${previousDoc.status} to ${doc.status} with no new history entry: the change was not made through proposals decide --reopen\n` : '';
-            return { ...json({ id, status: doc.status, previous, logged }), stderr };
+            return { ...json({ id, status: doc.status, previous }), stderr };
           }
           case 'pull': {
             const dir = subFlag('dir');

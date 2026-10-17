@@ -59,8 +59,9 @@ export interface DoneInput {
 }
 /**
  * The task done with its commit and summary, the `done` event (its text the commit title, cleaned) and the session
- * without a task; and, apart, the write of meta/metrics (A-10): never in this batch nor pinned, so a clash on the
- * metrics never undoes the delivery, and its `update` keeps the fields it does not name (`tests` without --tests).
+ * without a task; and, apart, the write of meta/metrics (A-10): never in this batch, so a clash on the metrics never
+ * undoes the delivery, and its `update` keeps the fields it does not name (`tests` without --tests). It is printed without
+ * if_version, which is how it is sent only to create meta/metrics: once it exists the skills pin it to its listed version.
  */
 export function doneBatch(i: DoneInput): BatchOut & { metrics: Write } {
   const now = i.now.toISOString();

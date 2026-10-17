@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -73,6 +73,23 @@ describe('FORGE roadmap-run (G-07, G-04)', () => {
       { id: 'T4', status: 'stopped' },
     ]);
     expect(normalizeRunSummary(doc)).toEqual(doc);
+  });
+  it('--run counts only that run\'s rounds and deferred findings: a task restarted in a new run carries none of the earlier one (final review M4)', () => {
+    // Run B starts after T1's two rounds and its deferred.json (both of an earlier run, MEDIUM_T1 up to minute 45).
+    const deferred = path.join(root, '.forge', 'work', 'shop', 'T1', 'deferred.json');
+    utimesSync(deferred, new Date(ROADMAP_AT(45)), new Date(ROADMAP_AT(45)));
+    saveExecution(root, execution({ startedAt: ROADMAP_AT(50) }));
+    const t1 = () => JSON.parse(readFileSync(out(run(['roadmap-run', '--run', RUN], io)).write.file_path, 'utf8')).tasks[0];
+    expect(t1()).toEqual({ id: 'T1', title: 'Cart', status: 'integrated', seconds: 2700 });
+    // This run's own round and a deferred.json entry dated in it count; the earlier one's still do not.
+    appendEvent(root, { ts: ROADMAP_AT(60), kind: 'verdict', task: 'T1-1', project: 'shop', dir: '.forge/work/shop/T1/reviews-1-3', action: 'accept', score: 0.9, signature: 's3', critical: 0, important: 0, minor: 0, deferred: 1, reviews: { n: 1, max: 4 } });
+    writeFileSync(deferred, JSON.stringify([{ problem: 'old', ts: ROADMAP_AT(30) }, { problem: 'new', ts: ROADMAP_AT(61) }]));
+    expect(t1()).toMatchObject({ rounds: 1, deferred: 1 });
+    // A deferred.json of the earlier run (by its mtime) leaves the count to this run's rulings.
+    writeFileSync(deferred, JSON.stringify([{ problem: 'a' }, { problem: 'b' }]));
+    utimesSync(deferred, new Date(ROADMAP_AT(45)), new Date(ROADMAP_AT(45)));
+    appendEvent(root, { ts: ROADMAP_AT(62), kind: 'ruling', task: 'T1-1', project: 'shop', round: 3, dir: '.forge/work/shop/T1/reviews-1-3', deferred: [{ severity: 'important', problem: 'this run' }] });
+    expect(t1()).toMatchObject({ rounds: 1, deferred: 1 });
   });
   it('cleanup deletes each executor session of the run, never its coordinator nor a manual member', () => {
     expect(out(run(['roadmap-run', '--run', RUN], io)).cleanup).toEqual([

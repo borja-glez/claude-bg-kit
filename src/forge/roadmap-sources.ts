@@ -115,17 +115,46 @@ function readReviews(folders: readonly { root: string; dir: string }[]): { revie
   return { reviews, verifies };
 }
 
-const isAsset = (a: unknown): a is { path: string; id: string; url: string } =>
+const isUpload = (a: unknown): a is { path: string; id: string; url: string } =>
   !!a && typeof a === 'object' && typeof (a as Asset).path === 'string' && !!(a as Asset).path && typeof (a as Asset).id === 'string' && ASSET_ID.test((a as Asset).id) && safeUrl((a as Asset).url);
+const ROUND = /^\d{1,4}-\d{1,3}$/;
+/** A kept upload (M5): an upload with its scope, the run that held the task (or null) and its verify round. */
+const isKept = (a: unknown): a is Asset => isUpload(a) && ((a as Asset).runId === null || isSafeId((a as Asset).runId)) && typeof (a as Asset).round === 'string' && ROUND.test((a as Asset).round);
 
-/** --assets: the uploads the skill wrote, `[{path, id, url}]`; an entry with an unsafe id or url, or without a path, is left out. */
-function parseAssets(cwd: string, file: string): Asset[] {
+/** M5: the verify round of a screenshot, from its folder `evidence/<brief>-<n>/`; null for a file anywhere else. */
+export function roundOfShot(file: string): string | null {
+  const m = /^(\d{1,4})-(\d{1,3})$/.exec(path.basename(path.dirname(file)));
+  return m && path.basename(path.dirname(path.dirname(file))) === 'evidence' ? `${Number(m[1])}-${Number(m[2])}` : null;
+}
+
+/**
+ * --assets: the uploads the skill wrote, `[{path, id, url}]`, each scoped to `runId` and to the round of its folder; an
+ * entry with an unsafe id or url, without a path, or outside an `evidence/<brief>-<n>/` folder is left out.
+ */
+function parseAssets(cwd: string, file: string, runId: string | null): Asset[] {
   const raw = readJson(path.resolve(cwd, file));
   if (!Array.isArray(raw)) throw new RoadmapDocError(2, `roadmap-doc: --assets ${file} cannot be read as a JSON list of {path, id, url}`);
-  return raw.filter(isAsset).map(a => ({ path: path.resolve(cwd, a.path), id: a.id, url: a.url }));
+  return raw.filter(isUpload).flatMap(a => {
+    const abs = path.resolve(cwd, a.path);
+    const round = roundOfShot(abs);
+    return round ? [{ path: abs, id: a.id, url: a.url, runId, round }] : [];
+  });
 }
-const readAssets = (file: string): Asset[] => { const raw = readJson(file); return Array.isArray(raw) ? raw.filter(isAsset) : []; };
-const mergeAssets = (old: readonly Asset[], add: readonly Asset[]): Asset[] => [...old.filter(o => !add.some(a => samePath(a.path, o.path))), ...add];
+const readAssets = (file: string): Asset[] => { const raw = readJson(file); return Array.isArray(raw) ? raw.filter(isKept) : []; };
+const sameUpload = (a: Asset, b: Asset) => samePath(a.path, b.path) && a.runId === b.runId && a.round === b.round;
+const mergeAssets = (old: readonly Asset[], add: readonly Asset[]): Asset[] => [...old.filter(o => !add.some(a => sameUpload(a, o))), ...add];
+
+/** M5: the run that holds `task` in the main checkout's execution, as generateRoadmapDoc reads it; null outside one. */
+export function runHolding(main: string, task: string, project: string | null): string | null {
+  const e = readExecution(main);
+  return e && Object.hasOwn(e.tasks, task) && (e.kind !== 'plan' || project == null || project === e.project) ? e.runId : null;
+}
+
+/** M5: the uploads kept for a task (<WORK>/assets.json of the main checkout); null when there are none or they cannot be read. */
+export function readKeptAssets(main: string, ref: TaskRef, events: readonly LedgerEvent[]): Asset[] | null {
+  const raw = readJson(path.join(readWorkDir(main, ref, events), 'assets.json'));
+  return Array.isArray(raw) ? raw.filter(isKept) : null;
+}
 
 /**
  * C7: the state/T write of one task. Reads, in this order: its status (C5; the alias status.json only when it names
@@ -161,8 +190,9 @@ export function generateRoadmapDoc(io: DocIo, task: string, opts: GenerateOption
   const mainWork = readWorkDir(main, ref, events);
   const assetsFile = path.join(mainWork, 'assets.json');
   let assets = readAssets(assetsFile);
-  // The uploads are kept (assetsFile) only once the block has validated: an exit 3 leaves nothing new on disk.
-  const added = opts.assets ? parseAssets(io.cwd, opts.assets) : null;
+  // The uploads are kept (assetsFile) only once the block has validated: an exit 3 leaves nothing new on disk. Each is
+  // scoped to the run that holds the task (M5).
+  const added = opts.assets ? parseAssets(io.cwd, opts.assets, inRun ? execution!.runId : null) : null;
   if (added) assets = mergeAssets(assets, added);
   const deferredFile = roots.map(r => path.join(readWorkDir(r, ref, events), 'deferred.json')).find(f => existsSync(f));
   let evidenceMode: 'upload' | 'local' = 'upload';

@@ -23,7 +23,7 @@ elsewhere and are reconstructed from their READMEs.
 - The page reads forge's v2 data: the task's forge block (rounds with findings, validators with time and cache, verification, stages, integration, deferred findings) and its evidence by round, `blockedReason`, the start, last step, stall reason and closing of a run, the coordinator of the infinite run, `answeredByNote`, and the metrics in `meta/metrics`; `?debug=1` lists what it drops.
 
 #### Changed
-- `waypoint done` prints the metrics apart (`metrics`, an unpinned update of `meta/metrics`) instead of a pinned `meta/project` write in the task's batch, and no longer needs `--meta-version`.
+- `waypoint done` prints the metrics apart (`metrics`, an update of `meta/metrics` printed without `if_version`: the skills send it so only to create the document and pin it once it exists) instead of a pinned `meta/project` write in the task's batch, and no longer needs `--meta-version`.
 - A task the plan drops keeps what it was (`prevStatus`, `doneAt`, `commits`) and a done one comes back done; `meta/project` is written in the last batch of a sync.
 - The skills send the writes the CLI prints and pin them with the newest version they listed; that rule lives in one reference per plugin.
 

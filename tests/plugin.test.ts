@@ -1430,7 +1430,9 @@ describe('plugin layout', () => {
     for (const w of ['`publish.run`', 'FORGE roadmap-run --run <runId>', '`cleanup`', '--claim', '`metrics`', 'block <plan> --db DB']) expect(exec, w).toContain(w);
     for (const w of ['{runId, kind: "plan", loose: []', 'update meta/project', '{exec: {leaseUntil:', 'exec: {runId, mode: "subagents"', '{runId, kind: "ephemeral"']) expect(exec, w).not.toContain(w);
     const verify = runRef('verify');
-    for (const w of ['FORGE roadmap-doc', '--assets', 'assets.json', 'asset: true']) expect(verify, w).toContain(w);
+    for (const w of ['FORGE roadmap-doc', '--assets <WORK>/uploads-<n>-<round>.json', 'asset: true', '`evidence.previous`']) expect(verify, w).toContain(w);
+    // M5: the skill never overwrites forge's kept list of uploads with one pass's.
+    expect(verify).not.toContain('to `<WORK>/assets.json` with the Write tool');
     expect(verify).not.toContain('evidence: {surfaces');
     expect(runRef('ephemeral')).toContain('FORGE roadmap-run --run <runId>');
     const decisions = runRef('decisions');
@@ -1473,6 +1475,26 @@ describe('plugin layout', () => {
     for (const w of ['decision: {point', 'notes/<EID>` `{ts: NOW, type: "decision"', 'state/T.exec']) expect(member, w).not.toContain(w);
     // decide --reopen prints a delete of the mark before its set (Task 14).
     expect(read('plugins/forge/skills/decide/SKILL.md')).toContain('`approvalDelete`');
+    // Final review M1: the delete comes whenever this checkout holds a mark, and is skipped when the roadmap has none; the
+    // old clauses that promised it for any existing mark are gone.
+    const decide = read('plugins/forge/skills/decide/SKILL.md');
+    const writes = runRef('roadmap-writes');
+    expect(decide).not.toContain('(and whenever a mark already exists for the id)');
+    expect(writes).not.toContain('a decision that replaces an earlier mark');
+    for (const [name, text] of [['decide', decide], ['roadmap-writes', writes]] as const) {
+      for (const w of ['`approvalDelete`', '`--reopen`', 'get` `approvals/<id>`']) expect(text, `${name}: ${w}`).toContain(w);
+    }
+    // Final review M3: on the roadmap path the decision reaches the ledger through the `event` decide prints, logged once
+    // the roadmap took it; proposals save only mirrors.
+    const approve = decide.slice(decide.indexOf('- approve / reject:'), decide.indexOf('- comment:'));
+    for (const w of ['`event`', 'FORGE log --kind proposal --data-file .forge/work/decide/<id>.event.json']) expect(approve, w).toContain(w);
+    expect(approve.slice(approve.indexOf('- confirm:'))).toContain('`event`');
+    expect(decide).not.toContain('the local mirror and the ledger record the decision');
+    expect(writes).toContain('`event`');
+    // Final review M2: approve shows every field the mark binds, as confirm does, before it approves.
+    const fields = 'category, risk, title, rationale, evidence, path and estimate';
+    expect(approve.slice(0, approve.indexOf('- confirm:'))).toContain(fields);
+    expect(approve.slice(approve.indexOf('- confirm:'))).toContain(fields);
     // The publish after a block batch is pinned to the version that batch returned (task-steps, member).
     expect(runRef('task-steps')).not.toContain('pinned like any printed write');
   });
@@ -1538,6 +1560,13 @@ describe('plugin layout', () => {
     for (const plugin of ['waypoint', 'lens']) {
       expect(read(`plugins/${plugin}/README.md`), `${plugin} en`).toContain('ctrl+x tab · band');
       expect(read(`plugins/${plugin}/README.es.md`), `${plugin} es`).toContain('ctrl+x tab · banda');
+    }
+  });
+  it('meta/metrics is printed without if_version only to create it, and pinned once it exists (final review M6)', () => {
+    for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md', 'src/lib/batches.ts']) {
+      const text = read(f);
+      for (const w of ['never pinned', 'nunca fijados', 'nor pinned']) expect(text, `${f}: ${w}`).not.toContain(w);
+      expect(text.split('\n').find(l => l.includes('meta/metrics') && l.includes('if_version')), f).toBeDefined();
     }
   });
   it('READMEs describe wave 4a: roadmap-doc and roadmap-run, only the owner approves, the auto-approval limits, meta/metrics, meta/page and sync --db', () => {

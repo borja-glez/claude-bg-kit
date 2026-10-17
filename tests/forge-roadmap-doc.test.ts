@@ -174,7 +174,7 @@ describe('buildRoadmapData: the evidence v2 (K2-14)', () => {
   it('a blocked verification keeps its reason, its unchecked checks and every check, with or without a screenshot', () => {
     const v = round([check(1, 'home', true, '01-home.png'), check(2, 'cart', false, '02-cart.png'), check(3, 'logs', true, null)],
       { result: 'blocked', reason: 'the server did not start', unchecked: ['checkout', 'refund'] });
-    const assets = [{ path: `${evidenceDir}/01-home.png`, id: 'a1', url: 'https://claude.ai/_blob/a1' }, { path: `${evidenceDir}/02-cart.png`, id: 'a2', url: 'https://claude.ai/_blob/a2' }];
+    const assets = [{ path: `${evidenceDir}/01-home.png`, id: 'a1', url: 'https://claude.ai/_blob/a1', runId: null, round: '1-2' }, { path: `${evidenceDir}/02-cart.png`, id: 'a2', url: 'https://claude.ai/_blob/a2', runId: null, round: '1-2' }];
     const ev = buildRoadmapData(input(MEDIUM_T1, { verifies: [v], assets })).evidence!;
     expect(ev).toEqual({
       v: 2, surfaces: ['web'], result: 'blocked', passed: 2, total: 3, reason: 'the server did not start', unchecked: ['checkout', 'refund'], local: '.forge/work/shop/T1/evidence/1-2',
@@ -184,6 +184,18 @@ describe('buildRoadmapData: the evidence v2 (K2-14)', () => {
         { surface: 'web', check: 'logs', ok: true, expected: 'e3', observed: 'o3', round: 2 },
       ],
     });
+  });
+  it('an upload is scoped to its run and round: an earlier run\'s upload of the same path never matches a new screenshot (final review M5)', () => {
+    const v = round([check(1, 'home', true, '01-home.png')]);
+    const upload = (runId: string | null, r = '1-2') => [{ path: `${evidenceDir}/01-home.png`, id: 'a1', url: 'https://claude.ai/_blob/a1', runId, round: r }];
+    const e = exec({ T1: task() }, ROADMAP_AT(0));
+    const held = { execution: e, execTask: e.tasks.T1, verifies: [{ ...v, at: ROADMAP_AT(30) }] };
+    expect(buildRoadmapData(input(MEDIUM_T1, { ...held, assets: upload('shop-r0') })).evidence).toMatchObject({ pending: true, shots: [{ check: 'home' }] });
+    expect(buildRoadmapData(input(MEDIUM_T1, { ...held, assets: upload('shop-r0') })).evidence!.shots[0]).not.toHaveProperty('url');
+    expect(buildRoadmapData(input(MEDIUM_T1, { ...held, assets: upload('shop-r1') })).evidence!.shots[0]).toMatchObject({ url: 'https://claude.ai/_blob/a1', id: 'a1' });
+    // Another round's upload, or one made outside the run, does not match either.
+    expect(buildRoadmapData(input(MEDIUM_T1, { ...held, assets: upload('shop-r1', '1-1') })).evidence!.shots[0]).not.toHaveProperty('url');
+    expect(buildRoadmapData(input(MEDIUM_T1, { ...held, assets: upload(null) })).evidence!.shots[0]).not.toHaveProperty('url');
   });
   it('a screenshot of the last round not uploaded yet is pending with evidence: upload, never with evidence: local', () => {
     const v = round([check(1, 'home', true, '01-home.png')]);
@@ -271,7 +283,10 @@ describe('FORGE roadmap-doc (G-03, G-06)', () => {
     ]);
     expect(path.isAbsolute(ev.local)).toBe(false);
     expect(ev.local).not.toContain('\\');
-    // The upload is kept: a later generation (a swarm task, say) still carries it.
+    // The upload is kept, with its run (none here) and its round: a later generation (a swarm task, say) still carries it.
+    expect(JSON.parse(readFileSync(path.join(root, WORK, 'assets.json'), 'utf8'))).toEqual([
+      { path: path.join(root, shot('01-home.png')), id: 'a1', url: 'https://claude.ai/_blob/a1', runId: null, round: '1-2' },
+    ]);
     out(cli('roadmap-doc', 'T1', '--project', 'shop'));
     expect(data().evidence.shots[0]).toMatchObject({ url: 'https://claude.ai/_blob/a1', id: 'a1' });
     writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators: []\nevidence: local\n');
@@ -351,7 +366,7 @@ describe('FORGE roadmap-doc (G-03, G-06)', () => {
   it('exit 3 when the block is over the cap or does not validate: nothing is written, not even the uploads (C7)', () => {
     const file = path.join(root, WORK, 'roadmap-doc.json');
     const assets = path.join(root, WORK, 'assets.json');
-    writeFileSync(path.join(root, 'up.json'), JSON.stringify([{ path: 'x.png', id: 'a1', url: 'https://claude.ai/_blob/a1' }]));
+    writeFileSync(path.join(root, 'up.json'), JSON.stringify([{ path: `${WORK}/evidence/1-2/x.png`, id: 'a1', url: 'https://claude.ai/_blob/a1' }]));
     const args = ['roadmap-doc', 'T1', '--project', 'shop', '--assets', 'up.json'];
     io = { ...io, roadmapFit: d => ({ ...fitForgeDoc(d), fits: false, bytes: 5000 }) };
     const over = cli(...args);

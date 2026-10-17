@@ -11,6 +11,6 @@ Every forge skill that touches the roadmap follows this page, and it is the only
 - Never address one document twice in one batch. A second write to the same document (the `summary` update of `state/T` on integrate, the `publish` after a `block` batch) goes in its own call after the batch, pinned to the version the batch returned.
 - The same rule covers `meta/run`, `meta/infinite`, `meta/metrics` and `runs/<runId>`: a document you wrote earlier is pinned to the version that write returned.
 
-**Approvals.** `FORGE proposals decide` prints the proposal's `write` and an `approval` (`approvals/<id>`). A `--reopen` of a decision, and a decision that replaces an earlier mark, print an `approvalDelete` plus a `set`: send the delete first, pinned to the mark's version, then the `set` as a create. Only the roadmap's owner can write `approvals/`; a refusal for permission means nothing was saved.
+**Approvals.** `FORGE proposals decide` prints the proposal's `write` and an `approval` (`approvals/<id>`). A `--reopen`, and any decision while this checkout holds a mark for the id, also print an `approvalDelete`: `get` `approvals/<id>`; when it exists, send the delete first, pinned to its version, then the `set` as a create; when it does not, skip the delete. With `--from`, `decide` also prints `event`: log it (`FORGE log --kind proposal --data-file <file>`) only once its writes landed. Only the roadmap's owner can write `approvals/`; a refusal for permission means nothing was saved.
 
 **Any other failure.** Say it in one line and go on.
