@@ -116,7 +116,7 @@ describe('renderApp', () => {
     expect(done).not.toMatch(/class="ye">tardó/);
     const over = base();
     over.states.T001 = { ...over.states.T001, doneAt: '2026-10-11T10:31:00Z' } as never;
-    expect(renderApp(over, ui({ modal: 'T001' }))).toMatch(/<span class="ye">tardó 31 min · estimado 20<\/span>/);
+    expect(renderApp(over, ui({ modal: 'T001' }))).toMatch(/<span class="ye">tardó 31 min · estimado 20 min<\/span>/);
     expect(renderApp(base(), ui({ modal: 'T002' }))).toContain('lleva 15 min');
     const en = { ...base(), meta: { ...base().meta!, locale: 'en' } };
     expect(renderApp(en, ui({ modal: 'T001' }))).toContain('took 20 min · estimated 20');
@@ -270,7 +270,7 @@ describe('versions view', () => {
     expect(html).toContain('data-action="vfilter"');
     expect(html).toContain('data-action="vtrack"');
     expect(html).toContain('Desplegar categorías');
-    expect(html).toContain('Hecho · 1');
+    expect(html).toContain('Hecha · 1');
     expect(html).toContain('Provisional · 3');
   });
   it('filters by task status, phase status and track and hides collapsed categories', () => {
@@ -633,7 +633,7 @@ describe('execution', () => {
     expect(html.match(/\d+ %/)![0]).toBe(before.match(/\d+ %/)![0]);
     expect(html).not.toContain('data-task="fix-cart"');
     expect(html).not.toContain('data-id="fix-cart"');
-    expect(html).not.toContain('huérfana');
+    expect(html).not.toContain('Sin ejecutor');
     expect(timelineSvg(m, ui())).not.toContain('fix-cart');
     expect(renderApp(m, ui({ view: 'versions' }))).not.toContain('fix-cart');
     expect(renderApp(m, ui({ statuses: ['in_progress'] }))).not.toContain('data-task="fix-cart"');
@@ -676,7 +676,10 @@ describe('execution', () => {
     m.states.T002 = { status: 'in_progress', owner: 'main', exec: { runId: 'r1', mode: 'subagents', by: 'main', agent: 'forge-impl-heavy', stage: 'implement', round: 1, since: new Date(NOW - 30 * 60000).toISOString(), leaseUntil: new Date(NOW - 20 * 60000).toISOString() } };
     const html = renderApp(m, ui());
     expect(html).toContain('orphan');
-    expect(html).toContain('huérfana');
+    expect(html).toContain('Sin ejecutor');
+    // G-19: a task the plan dropped is «Retirada del plan», never «Sin ejecutor».
+    const dropped = renderApp({ ...base(), states: { ...base().states, T003: { status: 'orphaned' } } }, ui({ view: 'versions' }));
+    expect(dropped).toContain('Retirada del plan');
   });
   it('speaks English with an English plan', () => {
     const m = { ...base(), meta: { ...base().meta!, locale: 'en' }, run: runDoc() };

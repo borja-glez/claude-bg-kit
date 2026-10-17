@@ -7,8 +7,40 @@ const ago = (es: boolean) => (m: number) =>
   : m < 1440 ? (es ? `hace ${Math.floor(m / 60)} h` : `${Math.floor(m / 60)} h ago`)
   : (es ? `hace ${Math.floor(m / 1440)} d` : `${Math.floor(m / 1440)} d ago`);
 
+// G-20: numbers and plural forms in the page's language (Intl), one instance per language.
+const NUMBER_FORMATS = new Map<string, Intl.NumberFormat>();
+const PLURAL_RULES = new Map<string, Intl.PluralRules>();
+const numIn = (locale: string) => (n: number): string => {
+  let f = NUMBER_FORMATS.get(locale);
+  if (!f) { f = new Intl.NumberFormat(locale); NUMBER_FORMATS.set(locale, f); }
+  return f.format(Number.isFinite(n) ? n : 0);
+};
+/** The form of `n` that Intl.PluralRules picks in the language; `#` in it is the number, formatted. */
+const pluralIn = (locale: string) => (n: number, forms: { one: string; other: string }): string => {
+  let r = PLURAL_RULES.get(locale);
+  if (!r) { r = new Intl.PluralRules(locale); PLURAL_RULES.set(locale, r); }
+  return (r.select(n) === 'one' ? forms.one : forms.other).replace('#', numIn(locale)(n));
+};
+
+/** H-20: a duration in minutes, the same in both languages: «45 min», «2 h 05 min», «3 d 4 h». */
+export function dur(min: number): string {
+  const m = Math.max(0, Math.round(Number.isFinite(min) ? min : 0));
+  if (m < 60) return `${m} min`;
+  if (m < 1440) {
+    const hours = Math.floor(m / 60), rest = m % 60;
+    return rest ? `${hours} h ${String(rest).padStart(2, '0')} min` : `${hours} h`;
+  }
+  const days = Math.floor(m / 1440), hours = Math.floor((m % 1440) / 60);
+  return hours ? `${days} d ${hours} h` : `${days} d`;
+}
+
 const en = {
   live: 'LIVE',
+  num: numIn('en'),
+  plural: pluralIn('en'),
+  dur,
+  path: { trivial: 'trivial', small: 'small', medium: 'medium', large: 'large' } as Record<string, string>,
+  action: { accept: 'accepted', fix: 'fix', redo: 'redo' } as Record<string, string>,
   connecting: 'Connecting…',
   roadmap: 'ROADMAP',
   title: 'Progress tracking',
@@ -20,7 +52,7 @@ const en = {
   versionCol: (v: string) => `Version ${v}`, noVersion: 'No version', phaseN: (n: number) => `Phase ${n}`,
   phaseStatus: { done: 'Completed', in_progress: 'In progress', committed: 'Committed', provisional: 'Provisional' },
   entries: (n: number) => `${n} ${n === 1 ? 'entry' : 'entries'}`,
-  segLabel: (c: { done: number; in_progress: number; blocked: number; free: number }) => `${c.done} done · ${c.in_progress} in progress · ${c.blocked} blocked · ${c.free} pending`, noTasks: 'No tasks match the filters',
+  segLabel: (c: { done: number; in_progress: number; blocked: number; free: number }) => `${c.done} done · ${c.in_progress} in progress · ${c.blocked} blocked · ${c.free} free`, noTasks: 'No tasks match the filters',
   noteType: { decision: 'Decision', idea: 'Idea', debt: 'Tech debt', question: 'Question' } as Record<NoteType, string>,
   openQuestion: 'Open question',
   noteCounts: { decision: 'decisions', idea: 'ideas', debt: 'tech debt', open: 'open questions' },
@@ -42,9 +74,11 @@ const en = {
   run: {
     pill: (mode: string, n: number, max: number) => `▶ execution · ${mode} ${n}/${max}`, silentSince: (t: string) => `no signal since ${t}`, stoppedSince: (t: string) => `stopped since ${t}`,
     title: 'Execution', slots: (n: number, max: number) => `${n}/${max} slots`, coordinator: 'coordinator', free: 'free',
-    role: { coordinator: 'coordinator', executor: 'executor', manual: 'manual' }, orphan: 'orphaned', lastSignal: (t: string) => `stopped · last signal ${t}`,
+    role: { coordinator: 'coordinator', executor: 'executor', manual: 'manual' }, orphan: 'No executor', lastSignal: (t: string) => `stopped · last signal ${t}`,
     mode: { subagents: 'subagents', sessions: 'sessions' } as Record<string, string>,
-    stage: { brief: 'brief', implement: 'implement', validate: 'validate', verify: 'verify', review: 'review', verdict: 'verdict', integrate: 'integrate' } as Record<string, string>,
+    stage: { brief: 'brief', implement: 'implement', validate: 'validate', verify: 'verify', review: 'review', verdict: 'verdict', integrate: 'integrate', triage: 'triage', done: 'done', blocked: 'blocked', stopped: 'stopped' } as Record<string, string>,
+    taskStatus: { integrated: 'integrated', blocked: 'blocked', conflict: 'conflict', accepted: 'accepted', running: 'running', queued: 'queued', stopped: 'stopped' } as Record<string, string>,
+    stoppedHint: 'stopped with /forge:stop',
     loosePill: (mode: string, n: number, max: number) => `▶ loose tasks · ${mode} ${n}/${max}`, looseTitle: 'Loose tasks',
     looseStatus: { queued: 'queued', running: 'running', integrated: 'integrated', conflict: 'conflict', blocked: 'blocked' } as Record<LooseStatus, string>,
   },
@@ -55,10 +89,10 @@ const en = {
   version: 'Version', phase: 'Phase', of: 'of', tasks: 'tasks', tracks: 'tracks', trackHelp: 'Track: a line of work that moves forward in parallel, with its own session, worktree and branch', tests: 'tests', lastCommit: 'last commit',
   ago: ago(false),
   nowRunning: 'Right now · in progress', nothingRunning: 'Nothing in progress',
-  took: (min: number, est?: number) => (est ? `took ${min} min · estimated ${est}` : `took ${min} min`),
+  took: (min: number, est?: number) => (est ? `took ${dur(min)} · estimated ${dur(est)}` : `took ${dur(min)}`),
   tookUnderMin: 'took <1 min',
-  lasts: (min: number) => `running for ${min} min`,
-  elapsed: (e: number, est?: number) => (est ? `${e} min / est. ${est}` : `${e} min`),
+  lasts: (min: number) => `running for ${dur(min)}`,
+  elapsed: (e: number, est?: number) => (est ? `${dur(e)} / est. ${dur(est)}` : dur(e)),
   viewTask: 'View task',
   phasesDone: 'Phases completed', eta: 'Estimated', pace: 'Real pace', minPerTask: 'min/task', devSince: 'In development since',
   recent: 'Recent changes', noEvents: 'No changes yet', heartbeat: 'heartbeat',
@@ -66,7 +100,7 @@ const en = {
   tl: {
     fit: 'FIT', expand: 'Expand all', collapse: 'Collapse all', hint: 'Ctrl + wheel or pinch: zoom · drag or Shift + wheel: move · ← → + − 0: keys',
     smaller: 'Smaller text', larger: 'Larger text', bySession: 'By session', byCategory: 'By category', unassigned: 'Unassigned', uncategorized: 'No category',
-    show: 'Show', layers: 'Layers', critical: 'Critical path', forecast: 'Forecast', forge: 'Reviews', pending: 'Pending', export: 'Export',
+    show: 'Show', layers: 'Layers', critical: 'Critical path', forecast: 'Forecast', forge: 'Reviews', pending: 'Free', export: 'Export',
     forecastEnd: 'Forecast end', blockedBy: 'Needs', unlocks: 'Unlocks', exported: 'File ready to save', exportFailed: 'Could not export',
     minimap: 'Whole plan: click or drag to move the view',
   },
@@ -79,9 +113,9 @@ const en = {
   },
   more: (n: number) => `+${n} more`,
   zoom: { '6h': '6 H', '1d': '1 DAY', '3d': '3 DAYS', '1w': '1 WEEK', '1m': '1 MONTH' },
-  status: { free: 'Free', claimed: 'Claimed', in_progress: 'In progress', blocked: 'Blocked', done: 'Done', orphaned: 'Orphaned' } as Record<TaskStatus, string>,
+  status: { free: 'Free', claimed: 'Claimed', in_progress: 'In progress', blocked: 'Blocked', done: 'Done', orphaned: 'Removed from plan' } as Record<TaskStatus, string>,
   legend: { done: 'Done', current: 'In progress', blocked: 'Blocked', estimate: 'Estimated', now: 'Now' },
-  field: { includes: 'What it includes', doneWhen: 'Done when', verification: 'Verification', commits: 'Commits', period: 'Period', dependsOn: 'Depends on', unlocks: 'Unlocks', zones: 'Zones', wholeRepo: 'whole repository', session: 'Session', summary: 'Summary', branch: 'Branch', agent: 'Address', task: 'Task' },
+  field: { includes: 'What it includes', doneWhen: 'Done when', verification: 'Verification', commits: 'Commits', period: 'Period', dependsOn: 'Depends on', unlocks: 'Unlocks', zones: 'Zones', wholeRepo: 'whole repository', session: 'Session', summary: 'Summary', branch: 'Branch', agent: 'Agent', task: 'Task' },
   close: 'Close',
   refresh: 'Update',
   eventText: { claimed: 'claimed', started: 'started', done: 'done', blocked: 'blocked', unblocked: 'unblocked', commit: 'commit', note: 'note', plan_changed: 'plan updated', message: 'message' } as Record<EventType, string>,
@@ -90,18 +124,23 @@ export type Dict = typeof en;
 
 const es: Dict = {
   live: 'EN VIVO',
+  num: numIn('es'),
+  plural: pluralIn('es'),
+  dur,
+  path: { trivial: 'trivial', small: 'pequeña', medium: 'media', large: 'grande' },
+  action: { accept: 'aceptada', fix: 'arreglo', redo: 'rehacer' },
   connecting: 'Conectando…',
   roadmap: 'HOJA DE RUTA',
   title: 'Seguimiento del progreso',
   offline: 'Sin conexión — mostrando el último plan publicado',
   nav: { tracking: 'Seguimiento', versions: 'Versiones', sessions: 'Sesiones', notes: 'Notas', proposals: 'Propuestas' },
   versionsTitle: 'Vista de versiones', notesTitle: 'Notas y decisiones',
-  vfilter: { done: 'Hecho', in_progress: 'En curso', blocked: 'Bloqueada', committed: 'Comprometido', provisional: 'Provisional' },
+  vfilter: { done: 'Hecha', in_progress: 'En curso', blocked: 'Bloqueada', committed: 'Comprometido', provisional: 'Provisional' },
   expandAll: 'Desplegar categorías', collapseAll: 'Plegar categorías', trackLabel: 'Frente', allTracks: 'Todos',
   versionCol: (v: string) => `Versión ${v}`, noVersion: 'Sin versión', phaseN: (n: number) => `Fase ${n}`,
   phaseStatus: { done: 'Completada', in_progress: 'En curso', committed: 'Comprometida', provisional: 'Provisional' },
   entries: (n: number) => `${n} ${n === 1 ? 'entrada' : 'entradas'}`,
-  segLabel: (c: { done: number; in_progress: number; blocked: number; free: number }) => `${c.done} hechas · ${c.in_progress} en curso · ${c.blocked} bloqueadas · ${c.free} pendientes`, noTasks: 'Ninguna tarea coincide con los filtros',
+  segLabel: (c: { done: number; in_progress: number; blocked: number; free: number }) => `${c.done} hechas · ${c.in_progress} en curso · ${c.blocked} bloqueadas · ${c.free} libres`, noTasks: 'Ninguna tarea coincide con los filtros',
   noteType: { decision: 'Decisión', idea: 'Idea', debt: 'Deuda técnica', question: 'Pregunta' },
   openQuestion: 'Pregunta abierta',
   noteCounts: { decision: 'decisiones', idea: 'ideas', debt: 'deuda técnica', open: 'preguntas abiertas' },
@@ -123,9 +162,11 @@ const es: Dict = {
   run: {
     pill: (mode: string, n: number, max: number) => `▶ ejecución · ${mode} ${n}/${max}`, silentSince: (t: string) => `sin señal desde ${t}`, stoppedSince: (t: string) => `parada desde ${t}`,
     title: 'Ejecución', slots: (n: number, max: number) => `${n}/${max} plazas`, coordinator: 'coordinadora', free: 'libre',
-    role: { coordinator: 'coordinadora', executor: 'ejecutora', manual: 'manual' }, orphan: 'huérfana', lastSignal: (t: string) => `parada · última señal ${t}`,
+    role: { coordinator: 'coordinadora', executor: 'ejecutora', manual: 'manual' }, orphan: 'Sin ejecutor', lastSignal: (t: string) => `parada · última señal ${t}`,
     mode: { subagents: 'subagentes', sessions: 'sesiones' } as Record<string, string>,
-    stage: { brief: 'brief', implement: 'implementar', validate: 'validar', verify: 'verificar', review: 'revisar', verdict: 'veredicto', integrate: 'integrar' } as Record<string, string>,
+    stage: { brief: 'brief', implement: 'implementar', validate: 'validar', verify: 'verificar', review: 'revisar', verdict: 'veredicto', integrate: 'integrar', triage: 'triaje', done: 'hecha', blocked: 'bloqueada', stopped: 'parada' } as Record<string, string>,
+    taskStatus: { integrated: 'integrada', blocked: 'bloqueada', conflict: 'conflicto', accepted: 'aceptada', running: 'en curso', queued: 'en cola', stopped: 'parada' } as Record<string, string>,
+    stoppedHint: 'parada con /forge:stop',
     loosePill: (mode: string, n: number, max: number) => `▶ tareas sueltas · ${mode} ${n}/${max}`, looseTitle: 'Tareas sueltas',
     looseStatus: { queued: 'en cola', running: 'en curso', integrated: 'integrada', conflict: 'conflicto', blocked: 'bloqueada' },
   },
@@ -136,10 +177,10 @@ const es: Dict = {
   version: 'Versión', phase: 'Fase', of: 'de', tasks: 'tareas', tracks: 'frentes', trackHelp: 'Frente: línea de trabajo que avanza en paralelo, con su propia sesión, worktree y rama', tests: 'tests', lastCommit: 'último commit',
   ago: ago(true),
   nowRunning: 'Ahora mismo · en curso', nothingRunning: 'Nada en curso',
-  took: (min: number, est?: number) => (est ? `tardó ${min} min · estimado ${est}` : `tardó ${min} min`),
+  took: (min: number, est?: number) => (est ? `tardó ${dur(min)} · estimado ${dur(est)}` : `tardó ${dur(min)}`),
   tookUnderMin: 'tardó <1 min',
-  lasts: (min: number) => `lleva ${min} min`,
-  elapsed: (e: number, est?: number) => (est ? `${e} min / est. ${est}` : `${e} min`),
+  lasts: (min: number) => `lleva ${dur(min)}`,
+  elapsed: (e: number, est?: number) => (est ? `${dur(e)} / est. ${dur(est)}` : dur(e)),
   viewTask: 'Ver ficha',
   phasesDone: 'Fases completadas', eta: 'Estimada', pace: 'Ritmo real', minPerTask: 'min/tarea', devSince: 'En desarrollo desde',
   recent: 'Últimos cambios', noEvents: 'Aún no hay cambios', heartbeat: 'latido',
@@ -147,7 +188,7 @@ const es: Dict = {
   tl: {
     fit: 'AJUSTAR', expand: 'Desplegar todo', collapse: 'Plegar todo', hint: 'Ctrl + rueda o pellizcar: zoom · arrastrar o Mayús + rueda: mover · ← → + − 0: teclas',
     smaller: 'Texto más pequeño', larger: 'Texto más grande', bySession: 'Por sesiones', byCategory: 'Por categorías', unassigned: 'Sin asignar', uncategorized: 'Sin categoría',
-    show: 'Mostrar', layers: 'Capas', critical: 'Camino crítico', forecast: 'Previsión', forge: 'Revisiones', pending: 'Pendientes', export: 'Exportar',
+    show: 'Mostrar', layers: 'Capas', critical: 'Camino crítico', forecast: 'Previsión', forge: 'Revisiones', pending: 'Libre', export: 'Exportar',
     forecastEnd: 'Fin previsto', blockedBy: 'Necesita', unlocks: 'Desbloquea', exported: 'Archivo listo para guardar', exportFailed: 'No se pudo exportar',
     minimap: 'Plan completo: pulsa o arrastra para mover la vista',
   },
@@ -160,9 +201,9 @@ const es: Dict = {
   },
   more: (n: number) => `+${n} más`,
   zoom: { '6h': '6 H', '1d': '1 DÍA', '3d': '3 DÍAS', '1w': '1 SEM', '1m': '1 MES' },
-  status: { free: 'Libre', claimed: 'Reclamada', in_progress: 'En curso', blocked: 'Bloqueada', done: 'Hecho', orphaned: 'Huérfana' },
-  legend: { done: 'Hecho', current: 'En curso', blocked: 'Bloqueada', estimate: 'Estimado', now: 'Ahora' },
-  field: { includes: 'Qué incluye', doneWhen: 'Hecho cuando', verification: 'Verificación', commits: 'Commits', period: 'Periodo', dependsOn: 'Depende de', unlocks: 'Desbloquea', zones: 'Zonas', wholeRepo: 'todo el repositorio', session: 'Sesión', summary: 'Resumen', branch: 'Rama', agent: 'Dirección', task: 'Tarea' },
+  status: { free: 'Libre', claimed: 'Reclamada', in_progress: 'En curso', blocked: 'Bloqueada', done: 'Hecha', orphaned: 'Retirada del plan' },
+  legend: { done: 'Hecha', current: 'En curso', blocked: 'Bloqueada', estimate: 'Estimado', now: 'Ahora' },
+  field: { includes: 'Qué incluye', doneWhen: 'Hecho cuando', verification: 'Verificación', commits: 'Commits', period: 'Periodo', dependsOn: 'Depende de', unlocks: 'Desbloquea', zones: 'Zonas', wholeRepo: 'todo el repositorio', session: 'Sesión', summary: 'Resumen', branch: 'Rama', agent: 'Agente', task: 'Tarea' },
   close: 'Cerrar',
   refresh: 'Actualizar',
   eventText: { claimed: 'reclamada', started: 'empezada', done: 'hecha', blocked: 'bloqueada', unblocked: 'desbloqueada', commit: 'commit', note: 'nota', plan_changed: 'plan actualizado', message: 'mensaje' },
