@@ -57,6 +57,24 @@ beforeEach(() => {
 });
 afterEach(() => { try { g(root, 'worktree', 'prune'); } catch { /* ignore */ } rmSync(root, { recursive: true, force: true }); });
 
+describe('a set-aside that fails stops prep (R2, M2)', () => {
+  it('exits 2 naming the folder it could not move, and prints earlier only when something moved', () => {
+    runA();
+    // The destination already holds a folder of that name, not empty: no OS renames a folder onto it.
+    put(W(root, 'earlier-shop-B', 'reviews-1-1', 'other.json'), '{}');
+    const r = prepB(root);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('.forge/work/shop/T1/reviews-1-1');
+    expect(r.stderr).toContain('close what holds it and run prep again');
+    expect(read(W(root, 'reviews-1-1', 'verify.json'))).toBe('"A"');
+    // Nothing earlier to set aside: no `earlier`.
+    rmSync(W(root, 'reviews-1-1'), { recursive: true });
+    const again = prepB(root);
+    expect(again.code, again.stderr).toBe(0);
+    expect(JSON.parse(again.stdout)).not.toHaveProperty('earlier');
+  });
+});
+
 describe('an earlier run\'s evidence is never overwritten nor lost (R1, M1)', () => {
   it("prep in a member's worktree sets aside the main checkout's copy too, and swarm cleanup copies the set-aside rounds before it removes the worktree", () => {
     runA();

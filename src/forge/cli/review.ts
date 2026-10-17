@@ -72,9 +72,11 @@ export function reviewRoundOf(events: LedgerEvent[], task: string, since: string
  * execution restarts its tasks with brief 1). That execution's round folders of brief `n` and their evidence, the brief's
  * findings index and the step's validators-head-<n>.json go to `earlier-<runId>/` there, so nothing of them reads as this
  * execution's: review-close and the step take the newest round folder there is, and a reviewer's file there as returned.
- * A round with a phase event of `run` (logged since it started) stays. Returns the folder they went to, or null.
+ * A round with a phase event of `run` (logged since it started) stays. Returns the folder they went to, or null when
+ * nothing moved. R2 (M2): a move that fails (on Windows, a handle open inside the folder is enough) would leave the brief
+ * on a mixed folder, so it is a UsageError that names it (paths relative to `cwd`): prep exits 2.
  */
-function setAsideEarlier(dir: string, n: string, id: string, events: readonly LedgerEvent[], run: ExecutionState): string | null {
+function setAsideEarlier(dir: string, n: string, id: string, events: readonly LedgerEvent[], run: ExecutionState, cwd: string): string | null {
   const ours = new Set(eventsSince(events, run.startedAt)
     .filter(e => e.kind === 'phase' && isTask(e, id) && e.brief === Number(n) && typeof e.round === 'number').map(e => e.round as number));
   let names: string[] = [];
@@ -85,17 +87,23 @@ function setAsideEarlier(dir: string, n: string, id: string, events: readonly Le
   });
   if (!rounds.length) return null;
   const aside = path.join(dir, `earlier-${run.runId}`);
-  const move = (rel: string) => {
-    const from = path.join(dir, rel);
+  let moved = 0;
+  const failed: string[] = [];
+  const move = (name: string) => {
+    const from = path.join(dir, name);
     if (!existsSync(from)) return;
     try {
-      mkdirSync(path.dirname(path.join(aside, rel)), { recursive: true });
-      renameSync(from, path.join(aside, rel));
-    } catch { /* left where it is */ }
+      mkdirSync(path.dirname(path.join(aside, name)), { recursive: true });
+      renameSync(from, path.join(aside, name));
+      moved++;
+    } catch { failed.push(from); }
   };
   for (const k of rounds) { move(`reviews-${n}-${k}`); move(`evidence/${n}-${k}`); }
   for (const f of [`findings-index-${n}.json`, `validators-head-${n}.json`]) move(f);
-  return aside;
+  if (failed.length) {
+    throw new UsageError(`prep: ${failed.map(f => rel(cwd, f)).join(', ')} could not be moved aside to ${rel(cwd, aside)} (an earlier run's review of this brief): close what holds it and run prep again`);
+  }
+  return moved ? aside : null;
 }
 
 /** Runs `fn` (a validator run) putting back the tracked files it regenerated that the config's `generated` names. */
@@ -823,12 +831,12 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   // Carry 3: an earlier execution's reviews of this brief, in the same work folder, are not this one's.
   const run = executionHolding(deps.cwd, { project, task: id });
   const mine = eventsOf(ledger, { project, task: id });
-  const aside = run ? setAsideEarlier(dir, n, id, mine, run) : null;
+  const aside = run ? setAsideEarlier(dir, n, id, mine, run, deps.cwd) : null;
   // R1 (M1): from a forge task worktree, keepEvidence copies this folder's verification to the main checkout's same
   // folder, where the earlier run's copy is: it goes aside too, before this brief's copies land on it.
   const main = ledgerRoot(deps.cwd);
   const inWork = path.relative(deps.cwd, dir);
-  if (run && !samePath(main, deps.cwd) && inWork && !inWork.startsWith('..') && !path.isAbsolute(inWork)) setAsideEarlier(path.join(main, inWork), n, id, mine, run);
+  if (run && !samePath(main, deps.cwd) && inWork && !inWork.startsWith('..') && !path.isAbsolute(inWork)) setAsideEarlier(path.join(main, inWork), n, id, mine, run, deps.cwd);
   const earlier = aside ? { earlier: rel(deps.cwd, aside) } : {};
   const tmFile = config ? writeThreatModel(dir, config) : null;
   const threatModel = tmFile ? rel(deps.cwd, tmFile) : null;
