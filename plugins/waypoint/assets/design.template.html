@@ -1,56 +1,82 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>__TITLE__</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>:root{--crust:#11111b;--mantle:#181825;--base:#1e1e2e;--s0:#313244;--s1:#45475a;--s2:#585b70;--o0:#6c7086;--o1:#7f849c;--sub0:#a6adc8;--sub1:#bac2de;--text:#cdd6f4;
   --lavender:#b4befe;--blue:#89b4fa;--sapphire:#74c7ec;--sky:#89dceb;--teal:#94e2d5;--green:#a6e3a1;--yellow:#f9e2af;--peach:#fab387;--red:#f38ba8;--mauve:#cba6f7;--pink:#f5c2e7;--flamingo:#f2cdcd;
-  --done:var(--sapphire);--cur:var(--peach);--blk:var(--yellow);--now:var(--red);color-scheme:dark}
-@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--crust:#dce0e8;--mantle:#e6e9ef;--base:#eff1f5;--s0:#ccd0da;--s1:#bcc0cc;--s2:#acb0be;--o0:#9ca0b0;--o1:#8c8fa1;--sub0:#6c6f85;--sub1:#5c5f77;--text:#4c4f69;
-  --lavender:#7287fd;--blue:#1e66f5;--sapphire:#209fb5;--sky:#04a5e5;--teal:#179299;--green:#40a02b;--yellow:#df8e1d;--peach:#fe640b;--red:#d20f39;--mauve:#8839ef;--pink:#ea76cb;--flamingo:#dd7878;color-scheme:light}}
+  --done:var(--sapphire);--cur:var(--peach);--blk:var(--yellow);--now:var(--red);
+  --mute:#868ba3;--on-peach:#11111b;--t-peach:var(--peach);--t-yellow:var(--yellow);--t-green:var(--green);--t-blue:var(--blue);--t-lav:var(--lavender);--t-teal:var(--teal);--t-red:var(--red);--t-mauve:var(--mauve);--t-pink:var(--pink);color-scheme:dark}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--crust:#dce0e8;--mantle:#e6e9ef;--base:#eff1f5;--s0:#ccd0da;--s1:#bcc0cc;--s2:#acb0be;--o0:#9ca0b0;--o1:#8c8fa1;--sub0:#62657b;--sub1:#5c5f77;--text:#4c4f69;
+  --lavender:#7287fd;--blue:#1e66f5;--sapphire:#209fb5;--sky:#04a5e5;--teal:#179299;--green:#40a02b;--yellow:#df8e1d;--peach:#fe640b;--red:#d20f39;--mauve:#8839ef;--pink:#ea76cb;--flamingo:#dd7878;
+  --mute:#5c5f77;--on-peach:#11111b;--t-peach:#a3440a;--t-yellow:#8a5a00;--t-green:#2a7020;--t-blue:#1a55c8;--t-lav:#4f5bd5;--t-teal:#0b6573;--t-red:#b0153a;--t-mauve:#7a2fd0;--t-pink:#b8336f;color-scheme:light}}
 :root[data-theme="dark"]{color-scheme:dark}
-:root[data-theme="light"]{--crust:#dce0e8;--mantle:#e6e9ef;--base:#eff1f5;--s0:#ccd0da;--s1:#bcc0cc;--s2:#acb0be;--o0:#9ca0b0;--o1:#8c8fa1;--sub0:#6c6f85;--sub1:#5c5f77;--text:#4c4f69;--lavender:#7287fd;--blue:#1e66f5;--sapphire:#209fb5;--sky:#04a5e5;--teal:#179299;--green:#40a02b;--yellow:#df8e1d;--peach:#fe640b;--red:#d20f39;--mauve:#8839ef;--pink:#ea76cb;--flamingo:#dd7878;color-scheme:light}
+:root[data-theme="light"]{--crust:#dce0e8;--mantle:#e6e9ef;--base:#eff1f5;--s0:#ccd0da;--s1:#bcc0cc;--s2:#acb0be;--o0:#9ca0b0;--o1:#8c8fa1;--sub0:#62657b;--sub1:#5c5f77;--text:#4c4f69;--lavender:#7287fd;--blue:#1e66f5;--sapphire:#209fb5;--sky:#04a5e5;--teal:#179299;--green:#40a02b;--yellow:#df8e1d;--peach:#fe640b;--red:#d20f39;--mauve:#8839ef;--pink:#ea76cb;--flamingo:#dd7878;--mute:#5c5f77;--on-peach:#11111b;--t-peach:#a3440a;--t-yellow:#8a5a00;--t-green:#2a7020;--t-blue:#1a55c8;--t-lav:#4f5bd5;--t-teal:#0b6573;--t-red:#b0153a;--t-mauve:#7a2fd0;--t-pink:#b8336f;color-scheme:light}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--base);color:var(--text);font-family:'IBM Plex Sans',system-ui,sans-serif}
 body{overflow-x:clip}
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 #wp-design-root{max-width:1100px;margin:0 auto;padding:32px 24px 64px}
-.lbl{font-family:'Barlow Condensed',sans-serif;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--o1);margin-bottom:6px}
+.lbl{font-family:'Barlow Condensed',sans-serif;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--mute);margin-bottom:6px}
 header{border-bottom:1px solid var(--s0);padding-bottom:20px}
-.eb{font-family:'Barlow Condensed',sans-serif;font-size:12px;letter-spacing:.16em;color:var(--peach)}
+.eb{font-family:'Barlow Condensed',sans-serif;font-size:12px;letter-spacing:.16em;color:var(--t-peach)}
+.badge{display:inline-block;margin-left:10px;padding:1px 8px;border:1px solid currentColor;border-radius:999px;font-size:11px;letter-spacing:.08em;vertical-align:1px}
+.st-draft{color:var(--t-yellow)}
+.st-approved,.st-amended{color:var(--t-green)}
+.st-parked{color:var(--mute)}
 h1{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:56px;line-height:1;margin:8px 0 12px;text-transform:uppercase;letter-spacing:.01em;overflow-wrap:anywhere}
-.dot{color:var(--peach)}
-.imp{margin:-4px 0 12px;font-size:13px;color:var(--sub0)}
-.imp code{font-family:'JetBrains Mono',monospace;color:var(--lavender);overflow-wrap:anywhere}
+.dot{color:var(--t-peach)}
+.imp{margin:-4px 0 12px;font-size:13px;color:var(--mute)}
+.imp code{font-family:'JetBrains Mono',monospace;color:var(--t-lav);overflow-wrap:anywhere}
 .lead{font-size:17px;line-height:1.55;color:var(--sub1);max-width:70ch;margin:0 0 18px}
 .met{display:flex;flex-wrap:wrap;gap:12px 32px}
-.met div{font-family:'Barlow Condensed',sans-serif;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--o1);min-width:0}
+.met div{font-family:'Barlow Condensed',sans-serif;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--mute);min-width:0}
 .met b{display:block;font-size:26px;font-weight:700;color:var(--text);letter-spacing:0;text-transform:none;overflow-wrap:anywhere}
-.met b.src{font:600 13px 'JetBrains Mono',monospace;padding-top:9px;color:var(--lavender)}
+.met b.src{font:600 13px 'JetBrains Mono',monospace;padding-top:9px;color:var(--t-lav)}
 .vers{margin-top:20px}
 .vl{display:flex;flex-wrap:wrap;gap:6px}
-.vers .v{font-family:'JetBrains Mono',monospace;font-size:12px;padding:5px 10px;border:1px solid var(--s0);border-radius:4px;color:var(--sub0)}
+.vers .v{font-family:'JetBrains Mono',monospace;font-size:12px;padding:5px 10px;border:1px solid var(--s0);border-radius:4px;color:var(--mute)}
 .vers .v:hover{border-color:var(--s2);color:var(--text)}
 .vers .v.on{border-color:var(--peach);color:var(--text);background:var(--mantle)}
-.note{margin:10px 0 0;font-size:13px;color:var(--sub0)}
+.diff{margin:10px 0 0;font-size:13px;color:var(--mute)}
+.note{margin:10px 0 0;font-size:13px;color:var(--mute)}
 .pil{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:20px}
 .p{background:var(--mantle);border:1px solid var(--s0);border-left:3px solid var(--peach);border-radius:6px;padding:12px 14px;min-width:0}
 .p b{display:block;font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:600;margin-bottom:4px}
 .p span{font-size:13.5px;color:var(--sub1);line-height:1.5}
 .pr{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:20px;background:var(--mantle);border:1px solid var(--s0);border-radius:8px;padding:12px 14px}
 .pr>div{min-width:0}
-.pr code{font:600 14px 'JetBrains Mono',monospace;color:var(--peach);overflow-wrap:anywhere}
-.cp{flex:none;background:var(--peach);color:var(--crust);font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;letter-spacing:.1em;text-transform:uppercase;padding:8px 14px;border-radius:4px}
+.pr code{font:600 14px 'JetBrains Mono',monospace;color:var(--t-peach);overflow-wrap:anywhere}
+.cp{flex:none;background:var(--peach);color:var(--on-peach);font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:13px;letter-spacing:.1em;text-transform:uppercase;padding:8px 14px;border-radius:4px}
 .cp:hover{filter:brightness(1.08)}
+.rounds{margin-top:24px}
+.rd{margin-top:8px;background:var(--mantle);border:1px solid var(--s0);border-radius:6px}
+.rd>summary{cursor:pointer;padding:10px 14px;font-size:14px;color:var(--sub1)}
+.rd>summary b{font-family:'Barlow Condensed',sans-serif;font-size:16px;letter-spacing:.04em;color:var(--text)}
+.vd-ready{color:var(--t-green)}
+.vd-changes{color:var(--t-peach)}
+.props{margin:0;padding:0 14px 12px 34px;display:flex;flex-direction:column;gap:8px;font-size:14px;line-height:1.5;overflow-wrap:anywhere}
+.props .tag{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--mute)}
+.none,.more{margin:0;padding:0 14px 12px;font-size:13px;color:var(--mute)}
+.rounds>.more{padding:0 0 4px}
+.fate{display:inline-block;margin-left:6px;padding:0 6px;border:1px solid currentColor;border-radius:4px;font-size:12px}
+.f-applied{color:var(--t-green)}
+.f-resolved{color:var(--t-teal)}
+.f-dismissed{color:var(--mute)}
+.f-rewritten{color:var(--t-mauve)}
+.f-pending{color:var(--t-peach)}
 .doc{display:grid;grid-template-columns:220px minmax(0,1fr);gap:32px;margin-top:28px}
 .toc{position:sticky;top:16px;align-self:start;display:flex;flex-direction:column;gap:2px;font-size:13px;min-width:0}
-.toc a{color:var(--sub0);text-decoration:none;padding:3px 0 3px 10px;border-left:2px solid var(--s0);overflow-wrap:anywhere}
+.toc a{color:var(--mute);text-decoration:none;padding:3px 0 3px 10px;border-left:2px solid var(--s0);overflow-wrap:anywhere}
 .toc a:hover{color:var(--text);border-left-color:var(--peach)}
 .toc a.l3{padding-left:22px;font-size:12.5px}
 .body{min-width:0;font-size:16px;line-height:1.7;overflow-wrap:anywhere}
 .body h2,.body h3{font-family:'Barlow Condensed',sans-serif;line-height:1.15;scroll-margin-top:16px}
 .body h2{font-size:30px;margin:2em 0 .5em;padding-bottom:6px;border-bottom:1px solid var(--s0)}
-.body h3{font-size:22px;margin:1.6em 0 .4em;color:var(--lavender)}
+.body h3{font-size:22px;margin:1.6em 0 .4em;color:var(--t-lav)}
 .body img{max-width:100%;height:auto}
-.body a{color:var(--blue)}
+.body a{color:var(--t-blue)}
 .body code,.body pre{font-family:'JetBrains Mono',monospace;font-size:.88em}
 .body code{background:var(--mantle);padding:1px 5px;border-radius:3px}
 .body pre{background:var(--mantle);border:1px solid var(--s0);border-radius:6px;padding:12px;overflow-x:auto}
@@ -59,6 +85,8 @@ h1{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:56px;line
 .body table{border-collapse:collapse;display:block;overflow-x:auto;max-width:100%}
 .body th,.body td{border:1px solid var(--s0);padding:6px 10px;text-align:left}
 .body th{background:var(--mantle)}
+.vers .v:focus-visible,.cp:focus-visible,.rd>summary:focus-visible,.toc a:focus-visible{outline:2px solid var(--t-blue);outline-offset:2px}
+@media (pointer: coarse){.vers .v,.cp,.rd>summary{min-height:44px}.vers .v{padding:10px 14px}}
 @media (max-width:760px){
   #wp-design-root{padding:20px 16px 48px}
   h1{font-size:40px}
@@ -71,15 +99,17 @@ h1{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:56px;line
 </style>
 <div id="wp-design-root"></div>
 <script type="application/json" id="wp-design-data">__DATA__</script>
-<script>"use strict";(()=>{var $={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"},e=s=>String(s??"").replace(/[&<>"']/g,n=>$[n]),m={en:{eyebrow:"DESIGN DOCUMENT \xB7 EXECUTABLE SPECIFICATION",version:"Version",words:"Words",rounds:"Rounds",source:"Source",prompt:"Start prompt",copy:"Copy prompt",copied:"Copied",versions:"Versions",toc:"Contents",current:"current",imported:"Imported from"},es:{eyebrow:"DOCUMENTO DE DISE\xD1O \xB7 ESPECIFICACI\xD3N EJECUTABLE",version:"Versi\xF3n",words:"Palabras",rounds:"Rondas",source:"Fuente",prompt:"Prompt de arranque",copy:"Copiar prompt",copied:"Copiado",versions:"Versiones",toc:"\xCDndice",current:"actual",imported:"Importado de"}},u=s=>m[(s??"en").toLowerCase().split(/[-_]/)[0]]??m.en;function b(s,n){let o=u(s.meta.locale),r=s.versions.find(t=>t.version===n)??s.versions[s.versions.length-1],i=r?.version??s.current,c=s.versions.map(t=>`<button class="v ${t.version===i?"on":""}" data-version="${e(t.version)}">v${e(t.version)}${t.version===s.current?` \xB7 ${e(o.current)}`:""}</button>`).join(""),d=s.meta.pillars.map(t=>`<div class="p"><b>${e(t.title)}</b><span>${e(t.text)}</span></div>`).join(""),a=(r?.toc??[]).map(t=>`<a class="l${e(t.level)}" href="#${e(t.slug)}">${e(t.heading)}</a>`).join("");return`<header>
-<div class="eb">${e(o.eyebrow)}${r?.date?` \xB7 ${e(r.date)}`:""}</div>
-<h1>${e(s.meta.title)}<span class="dot">.</span></h1>
-${s.meta.source?`<p class="imp">${e(o.imported)} <code>${e(s.meta.source)}</code></p>
-`:""}<p class="lead">${e(s.meta.summary)}</p>
-<div class="met"><div><b>v${e(i)}</b>${e(o.version)}</div><div><b>${e(r?.words??s.words)}</b>${e(o.words)}</div><div><b>${e(s.rounds)}</b>${e(o.rounds)}</div><div><b class="src">${e(s.source)}</b>${e(o.source)}</div></div>
+<script>"use strict";(()=>{var y={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"},n=e=>String(e??"").replace(/[&<>"']/g,r=>y[r]),h=["critical","major","minor"],m={en:{eyebrow:"DESIGN DOCUMENT \xB7 EXECUTABLE SPECIFICATION",version:"Version",words:"Words",rounds:"Rounds",source:"Source",prompt:"Start prompt",copy:"Copy prompt",copied:"Copied",versions:"Versions",toc:"Contents",current:"current",imported:"Imported from",intro:"Intro",round:"Round",none:"No proposals: nothing critical or major is left.",moreRounds:"{n} older rounds not shown",moreProposals:"{n} older proposals not shown",pillars:"Pillars",status:{draft:"draft",approved:"approved",amended:"approved \xB7 amended",parked:"parked"},verdict:{ready:"ready",changes:"changes"},sev:{critical:"critical",major:"major",minor:"minor"},short:{critical:"C",major:"M",minor:"m"},cat:{scope:"Scope",done_criteria:"Done criteria",risk:"Risk",contradiction:"Contradiction",gap:"Gap"},fate:{applied:"applied in v{v}",resolved:"resolved in the interview",dismissed:"dismissed",rewritten:"rewritten",pending:"pending"},diff:{changed:"changed",added:"new",removed:"removed"}},es:{eyebrow:"DOCUMENTO DE DISE\xD1O \xB7 ESPECIFICACI\xD3N EJECUTABLE",version:"Versi\xF3n",words:"Palabras",rounds:"Rondas",source:"Fuente",prompt:"Prompt de arranque",copy:"Copiar prompt",copied:"Copiado",versions:"Versiones",toc:"\xCDndice",current:"actual",imported:"Importado de",intro:"Introducci\xF3n",round:"Ronda",none:"Sin propuestas: no queda nada cr\xEDtico ni mayor.",moreRounds:"{n} rondas anteriores no se muestran",moreProposals:"{n} propuestas anteriores no se muestran",pillars:"Pilares",status:{draft:"borrador",approved:"aprobado",amended:"aprobado \xB7 enmendado",parked:"aparcado"},verdict:{ready:"lista",changes:"con cambios"},sev:{critical:"cr\xEDtica",major:"mayor",minor:"menor"},short:{critical:"C",major:"M",minor:"m"},cat:{scope:"Alcance",done_criteria:"Criterio de hecho",risk:"Riesgo",contradiction:"Contradicci\xF3n",gap:"Hueco"},fate:{applied:"aplicada en v{v}",resolved:"resuelta en la entrevista",dismissed:"descartada",rewritten:"reescrita",pending:"pendiente"},diff:{changed:"cambi\xF3",added:"nueva",removed:"quitada"}}},f=e=>{let r=(e??"en").toLowerCase().split(/[-_]/)[0];return Object.hasOwn(m,r)?m[r]:m.en};function D(e,r){let c=e.status==="approved"?e.amended?"amended":"approved":e.status==="parked"?"parked":"draft";return`<span class="badge st-${c}">${n(r.status[c])}</span>`}function C(e,r){if(!e)return"";let c=t=>`\xA7${t==="_intro"?r.intro:t}`,a=[[r.diff.changed,e.changed],[r.diff.added,e.added],[r.diff.removed,e.removed]].filter(([,t])=>t.length).map(([t,d])=>`${t} ${d.map(c).join(", ")}`).join(" \xB7 ");return a?`<p class="diff">${n(a)}</p>`:""}function E(e,r,c,s){return c==="_intro"?s.intro:(e.versions.find(t=>t.version===r.version)??e.versions[e.versions.length-1])?.toc.find(t=>t.slug===c)?.heading??c}function S(e,r){return e.fate==="applied"?r.fate.applied.replace("{v}",String(e.appliedIn??"?")):e.fate==="dismissed"&&e.reason?`${r.fate.dismissed}: ${e.reason}`:r.fate[e.fate]}var $=(e,r)=>r&&r>0?`<p class="more">${n(e.replace("{n}",String(r)))}</p>`:"";function w(e,r,c){let s=e.critiques??[];if(!s.length)return"";let a=s.map(t=>{let d=h.map(o=>`${t.proposals.filter(i=>i.severity===o).length} ${r.short[o]}`).join(" \xB7 "),l=t.proposals.length?`<ol class="props">${t.proposals.map(o=>{let i=Object.hasOwn(r.cat,o.category)?r.cat[o.category]:o.category;return`<li><span class="tag">[${n(i)} \xB7 ${n(r.sev[o.severity])}]</span> <b>${n(E(e,t,o.section,r))}</b> \u2014 ${n(o.problem)} \u2192 ${n(o.change)} <span class="fate f-${n(o.fate)}">${n(S(o,r))}</span></li>`}).join("")}</ol>`:`<p class="none">${n(r.none)}</p>`;return`<details class="rd" data-round="${n(t.round)}"${c.has(t.round)?" open":""}><summary><b>${n(r.round)} ${n(t.round)}</b> \xB7 v${n(t.version)} \xB7 <span class="vd vd-${n(t.verdict)}">${n(r.verdict[t.verdict])}</span> \xB7 ${n(d)}</summary>${$(r.moreProposals,t.proposalsMore)}${l}</details>`}).join("");return`<section class="rounds" aria-label="${n(r.rounds)}"><div class="lbl">${n(r.rounds)}</div>${$(r.moreRounds,e.critiquesMore)}${a}</section>`}function b(e){let r=e.critiques??[];return new Set(r.length?[r[r.length-1].round]:[])}function P(e,r,c=b(e)){let s=f(e.meta.locale),a=e.versions.find(i=>i.version===r)??e.versions[e.versions.length-1],t=a?.version??e.current,d=e.versions.map(i=>{let p=i.version===t;return`<button type="button" class="v${p?" on":""}" data-version="${n(i.version)}" aria-pressed="${p}">v${n(i.version)}${i.version===e.current?` \xB7 ${n(s.current)}`:""}</button>`}).join(""),l=e.meta.pillars.map(i=>`<div class="p"><b>${n(i.title)}</b><span>${n(i.text)}</span></div>`).join(""),o=(a?.toc??[]).map(i=>`<a class="l${n(i.level)}" href="#${n(i.slug)}">${n(i.heading)}</a>`).join("");return`<header>
+<div class="eb">${n(s.eyebrow)}${a?.date?` \xB7 ${n(a.date)}`:""}${D(e,s)}</div>
+<h1>${n(e.meta.title)}<span class="dot">.</span></h1>
+${e.meta.source?`<p class="imp">${n(s.imported)} <code>${n(e.meta.source)}</code></p>
+`:""}<p class="lead">${n(e.meta.summary)}</p>
+<div class="met"><div><b>v${n(t)}</b>${n(s.version)}</div><div><b>${n(a?.words??e.words)}</b>${n(s.words)}</div><div><b>${n(e.rounds)}</b>${n(s.rounds)}</div><div><b class="src">${n(e.source)}</b>${n(s.source)}</div></div>
 </header>
-<section class="vers"><div class="lbl">${e(o.versions)}</div><div class="vl">${c}</div>${r?.note?`<p class="note">${e(r.note)}</p>`:""}</section>
-<section class="pil">${d}</section>
-<section class="pr"><div><div class="lbl">${e(o.prompt)}</div><code>${e(s.meta.start_prompt)}</code></div><button class="cp" data-action="copy">${e(o.copy)}</button></section>
-<div class="doc"><nav class="toc"><div class="lbl">${e(o.toc)}</div>${a}</nav><article class="body">${r?.html??""}</article></div>`}function E(s,n,o={}){let r=u(n.meta.locale),i=c=>{s.innerHTML=b(n,c)};i(n.current),s.addEventListener("click",c=>{let d=c.target,a=d?.closest("[data-version]");if(a){i(Number(a.dataset.version));return}let t=d?.closest('[data-action="copy"]');if(!t)return;let g=o.copy??(p=>navigator.clipboard.writeText(p));Promise.resolve().then(()=>g(n.meta.start_prompt)).then(()=>{t.textContent=r.copied,setTimeout(()=>{t.isConnected&&(t.textContent=r.copy)},1500)},()=>{let p=s.querySelector(".pr code");if(p){let l=document.createRange();l.selectNodeContents(p);let v=getSelection();v?.removeAllRanges(),v?.addRange(l)}})})}function y(){let s=document.getElementById("wp-design-data");if(!s)return;let n=document.getElementById("wp-design-root");try{E(n,JSON.parse(s.textContent??""))}catch(o){n.textContent=`Error: ${o.message}`}}y();})();
+<main>
+<section class="vers" aria-label="${n(s.versions)}"><div class="lbl">${n(s.versions)}</div><div class="vl">${d}</div>${C(a?.diff,s)}${a?.note?`<p class="note">${n(a.note)}</p>`:""}</section>
+<section class="pil" aria-label="${n(s.pillars)}">${l}</section>
+<section class="pr" aria-label="${n(s.prompt)}"><div><div class="lbl">${n(s.prompt)}</div><code>${n(e.meta.start_prompt)}</code></div><button type="button" class="cp" data-action="copy">${n(s.copy)}</button></section>
+${w(e,s,c)}<div class="doc"><nav class="toc" aria-label="${n(s.toc)}"><div class="lbl">${n(s.toc)}</div>${o}</nav><article class="body">${a?.html??""}</article></div>
+</main>`}function R(e,r,c={}){let s=f(r.meta.locale);e.ownerDocument.documentElement.lang=r.meta.locale||"en";let a=b(r),t=(d,l=!1)=>{e.innerHTML=P(r,d,a),l&&e.querySelector(`[data-version="${d}"]`)?.focus()};t(r.current),e.addEventListener("toggle",d=>{let l=d.target,o=Number(l?.dataset?.round);!l||!Number.isInteger(o)||o<=0||(l.hasAttribute("open")?a.add(o):a.delete(o))},!0),e.addEventListener("click",d=>{let l=d.target,o=l?.closest("[data-version]");if(o){t(Number(o.dataset.version),!0);return}let i=l?.closest('[data-action="copy"]');if(!i)return;let p=c.copy??(u=>navigator.clipboard.writeText(u));Promise.resolve().then(()=>p(r.meta.start_prompt)).then(()=>{i.textContent=s.copied,setTimeout(()=>{i.isConnected&&(i.textContent=s.copy)},1500)},()=>{let u=e.querySelector(".pr code");if(u){let g=document.createRange();g.selectNodeContents(u);let v=getSelection();v?.removeAllRanges(),v?.addRange(g)}})})}function j(){let e=document.getElementById("wp-design-data");if(!e)return;let r=document.getElementById("wp-design-root");try{R(r,JSON.parse(e.textContent??""))}catch(c){r.textContent=`Error: ${c.message}`}}j();})();
 </script>

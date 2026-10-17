@@ -4136,6 +4136,7 @@ var NEVER = INVALID;
 // src/lib/critique.ts
 var CATEGORIES = ["scope", "done_criteria", "risk", "contradiction", "gap"];
 var SEVERITIES = ["critical", "major", "minor"];
+var VERDICTS = ["ready", "changes"];
 var ProposalSchema = external_exports.object({
   n: external_exports.number().int().positive(),
   category: external_exports.enum(CATEGORIES),
@@ -4148,6 +4149,8 @@ var CritiqueSchema = external_exports.object({
   round: external_exports.number().int().positive(),
   version: external_exports.number().int().positive(),
   scope: external_exports.enum(["full", "changed"]),
+  // K3-04: optional, so the critiques written before it still read; parseCritique fills it in.
+  verdict: external_exports.enum(VERDICTS).optional(),
   proposals: external_exports.array(ProposalSchema)
 });
 var CritiqueError = class extends Error {
@@ -4158,6 +4161,9 @@ var CritiqueError = class extends Error {
     this.name = "CritiqueError";
   }
 };
+function verdictOf(c2) {
+  return c2.proposals.some((p) => p.severity !== "minor") ? "changes" : "ready";
+}
 function parseCritique(text2) {
   let raw;
   try {
@@ -4173,64 +4179,72 @@ function parseCritique(text2) {
     if (!ns.every((n2, i) => n2 === i + 1)) issues.push(`proposals must be numbered 1..${props.length} without gaps`);
   }
   if (issues.length || !r.success) throw new CritiqueError(issues);
-  return r.data;
+  const expected = verdictOf(r.data);
+  if (r.data.verdict !== void 0 && r.data.verdict !== expected) {
+    const serious = r.data.proposals.find((p) => p.severity !== "minor");
+    throw new CritiqueError([serious ? `verdict is "${r.data.verdict}" but proposal ${serious.n} is ${serious.severity}` : `verdict is "${r.data.verdict}" but no proposal is critical or major`]);
+  }
+  return { ...r.data, verdict: r.data.verdict ?? expected };
 }
 
-// src/lib/design-gate.ts
-var APPLIED_NOTE = /\b(?:round|ronda)\s+(\d+)\s*:\s*(?:applied|aplicad[ao]s?)\s+(\d+(?:\s*(?:,|y|and)\s*\d+)*)/gi;
-var REWRITE_NOTE = /^\s*(?:round|ronda)\s+(\d+)\s*:\s*(?:rewrite|reescritura|reescrit[ao])/i;
-var legacy = (e) => e.applied === void 0 && e.rewrite === void 0;
-function appliedIn(changelog, round) {
-  const out = /* @__PURE__ */ new Set();
-  for (const e of changelog) {
-    if (e.applied) {
-      for (const n2 of e.applied[round] ?? []) out.add(n2);
-      continue;
-    }
-    if (!legacy(e)) continue;
-    for (const m of e.note.matchAll(APPLIED_NOTE)) {
-      if (Number(m[1]) !== round) continue;
-      for (const n2 of m[2].split(/\s*(?:,|y|and)\s*/i)) if (/^\d+$/.test(n2)) out.add(Number(n2));
-    }
-  }
-  return out;
-}
-function rewroteRound(changelog, round) {
-  return changelog.some((e) => {
-    if (e.round !== round) return false;
-    if (e.rewrite === true) return true;
-    if (!legacy(e)) return false;
-    const m = REWRITE_NOTE.exec(e.note);
-    return !!m && Number(m[1]) === round;
-  });
-}
-function parseDismissed(text2) {
-  let raw;
-  try {
-    raw = JSON.parse(text2 ?? "");
-  } catch {
-    return {};
-  }
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+// src/lib/history.ts
+var ENTRY_KINDS = ["draft", "round", "apply", "rewrite", "interview", "approve", "amend", "reopen"];
+var EntrySchema = external_exports.object({
+  version: external_exports.number(),
+  date: external_exports.string(),
+  note: external_exports.string(),
+  words: external_exports.number(),
+  round: external_exports.number()
+});
+function normalizeApplied(x) {
+  if (!x || typeof x !== "object" || Array.isArray(x)) return null;
   const out = {};
-  for (const [k, v] of Object.entries(raw)) {
+  for (const [k, v] of Object.entries(x)) {
     if (!/^[1-9]\d*$/.test(k) || !Array.isArray(v)) continue;
     const ns = v.filter((n2) => Number.isInteger(n2) && n2 > 0);
     if (ns.length) out[Number(k)] = [...new Set(ns)].sort((a, b) => a - b);
   }
-  return out;
+  return Object.keys(out).length ? out : null;
 }
-function pendingProposals(changelog, critiques, dismissed = {}) {
-  const out = [];
-  for (const { round, critique } of [...critiques].sort((a, b) => a.round - b.round)) {
-    if (!critique || rewroteRound(changelog, round)) continue;
-    const applied = appliedIn(changelog, round);
-    const gone = new Set(dismissed[round] ?? []);
-    for (const p of critique.proposals) {
-      if (!applied.has(p.n) && !gone.has(p.n)) out.push({ round, n: p.n, severity: p.severity, section: p.section });
-    }
+function normalizeResolved(x) {
+  if (!Array.isArray(x)) return null;
+  const positive = (v) => typeof v === "number" && Number.isInteger(v) && v > 0;
+  const seen = /* @__PURE__ */ new Map();
+  for (const item of x) {
+    if (!item || typeof item !== "object") continue;
+    const { round, n: n2 } = item;
+    if (positive(round) && positive(n2)) seen.set(`${round}:${n2}`, { round, n: n2 });
   }
-  return out;
+  const out = [...seen.values()].sort((a, b) => a.round - b.round || a.n - b.n);
+  return out.length ? out : null;
+}
+function parseChangelog(text2) {
+  if (!text2 || !text2.trim()) return [];
+  let raw;
+  try {
+    raw = JSON.parse(text2);
+  } catch {
+    throw new Error("changelog.json is not valid JSON");
+  }
+  if (!Array.isArray(raw)) throw new Error("changelog.json must be a JSON array");
+  return raw.map((e, i) => {
+    const r = EntrySchema.safeParse(e);
+    if (!r.success) {
+      const why = r.error.issues.map((x) => `${x.path.join(".") || "(root)"}: ${x.message}`).join("; ");
+      throw new Error(`changelog.json entry ${i} is invalid: ${why}`);
+    }
+    const entry = e;
+    const applied = normalizeApplied(entry.applied);
+    const resolved = normalizeResolved(entry.resolved);
+    const kind = typeof entry.kind === "string" && ENTRY_KINDS.includes(entry.kind) ? entry.kind : null;
+    return {
+      ...r.data,
+      ...applied ? { applied } : {},
+      ...entry.rewrite === true ? { rewrite: true } : {},
+      ...resolved ? { resolved } : {},
+      ...kind ? { kind } : {}
+    };
+  });
 }
 
 // node_modules/yaml/browser/dist/nodes/identity.js
@@ -10593,43 +10607,126 @@ function wordCount(body) {
   return body.replace(/[#>*_`~\-|[\]()]/g, " ").split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
 }
 
-// src/lib/history.ts
-var EntrySchema = external_exports.object({
-  version: external_exports.number(),
-  date: external_exports.string(),
-  note: external_exports.string(),
-  words: external_exports.number(),
-  round: external_exports.number()
-});
-function normalizeApplied(x) {
-  if (!x || typeof x !== "object" || Array.isArray(x)) return null;
-  const out = {};
-  for (const [k, v] of Object.entries(x)) {
-    if (!/^[1-9]\d*$/.test(k) || !Array.isArray(v)) continue;
-    const ns = v.filter((n2) => Number.isInteger(n2) && n2 > 0);
-    if (ns.length) out[Number(k)] = [...new Set(ns)].sort((a, b) => a - b);
-  }
-  return Object.keys(out).length ? out : null;
+// src/lib/decisions.ts
+var DECISION_POINTS = ["route", "triage", "design-apply", "design-approve", "plan-confirm", "mode", "ruling", "safe-path", "takeover", "revert", "other"];
+var DECISIONS_MAX = 16 * 1024;
+var DECISIONS_WINDOW_MS = 24 * 36e5;
+var LAST_MAX = 5;
+var FUTURE_SKEW_MS = 5 * 6e4;
+var SHORT = 80;
+var isObj = (x) => !!x && typeof x === "object" && !Array.isArray(x);
+var str = (x) => typeof x === "string";
+var oneOf = (list, x) => str(x) && list.includes(x) ? x : null;
+var cp = (n2) => String.fromCharCode(n2);
+var UNSAFE = new RegExp(`[\\x00-\\x1f\\x7f-\\x9f${cp(8234)}-${cp(8238)}${cp(8294)}-${cp(8297)}]`, "g");
+var clean = (s, max) => {
+  const t = s.replace(UNSAFE, " ").replace(/\s+/g, " ").trim();
+  return t.length <= max ? t : Array.from(t).slice(0, max).join("");
+};
+var text = (x, max) => str(x) ? clean(x, max) || null : null;
+var posInt = (x) => typeof x === "number" && Number.isInteger(x) && x > 0 ? x : null;
+function entryOf(x) {
+  if (!isObj(x)) return null;
+  const n2 = posInt(x.n);
+  const ts = str(x.ts) && x.ts ? x.ts : null;
+  const point = oneOf(DECISION_POINTS, x.point);
+  const what = text(x.what, SHORT);
+  const chosen = text(x.chosen, SHORT);
+  return n2 && ts && point && what && chosen ? { n: n2, point, what, chosen, ts } : null;
 }
-function parseChangelog(text2) {
-  if (!text2 || !text2.trim()) return [];
+function normalizeDecisionsDoc(x) {
+  if (!isObj(x)) return null;
+  const ts = str(x.ts) && x.ts ? x.ts : null;
+  const scope = text(x.scope, 120);
+  const count2 = typeof x.count === "number" && Number.isInteger(x.count) && x.count >= 0 ? x.count : null;
+  const autonomy = x.autonomy === "auto" || x.autonomy === "unattended" ? x.autonomy : null;
+  if (!ts || !scope || count2 === null || !autonomy) return null;
+  const last = [];
+  for (const e of Array.isArray(x.last) ? x.last : []) {
+    const entry = entryOf(e);
+    if (entry && isObj(e)) last.push({ ...entry, weight: e.weight === "major" ? "major" : "minor" });
+  }
+  return { ts, scope, count: count2, autonomy, last: last.slice(-LAST_MAX), lastMajor: entryOf(x.lastMajor) };
+}
+function decisionsSummary(text2, now) {
+  if (typeof text2 !== "string" || text2.length > DECISIONS_MAX) return null;
+  let doc;
+  try {
+    doc = normalizeDecisionsDoc(JSON.parse(text2));
+  } catch {
+    return null;
+  }
+  if (!doc || doc.count < 1) return null;
+  const t = Date.parse(doc.ts);
+  if (!Number.isFinite(t) || !Number.isFinite(now) || now - t > DECISIONS_WINDOW_MS || t - now > FUTURE_SKEW_MS) return null;
+  return { count: doc.count, autonomy: doc.autonomy, lastMajor: doc.lastMajor?.what ?? null };
+}
+
+// src/lib/design-gate.ts
+var REASON_MAX = 300;
+var APPLIED_NOTE = /\b(?:round|ronda)\s+(\d+)\s*:\s*(?:applied|aplicad[ao]s?)\s+(\d+(?:\s*(?:,|y|and)\s*\d+)*)/gi;
+var REWRITE_NOTE = /^\s*(?:round|ronda)\s+(\d+)\s*:\s*(?:rewrite|reescritura|reescrit[ao])/i;
+var legacy = (e) => e.applied === void 0 && e.rewrite === void 0;
+function appliedIn(changelog, round) {
+  const out = /* @__PURE__ */ new Set();
+  for (const e of changelog) {
+    if (e.applied) {
+      for (const n2 of e.applied[round] ?? []) out.add(n2);
+      continue;
+    }
+    if (!legacy(e)) continue;
+    for (const m of e.note.matchAll(APPLIED_NOTE)) {
+      if (Number(m[1]) !== round) continue;
+      for (const n2 of m[2].split(/\s*(?:,|y|and)\s*/i)) if (/^\d+$/.test(n2)) out.add(Number(n2));
+    }
+  }
+  return out;
+}
+function rewroteRound(changelog, round) {
+  return changelog.some((e) => {
+    if (e.round !== round) return false;
+    if (e.rewrite === true) return true;
+    if (!legacy(e)) return false;
+    const m = REWRITE_NOTE.exec(e.note);
+    return !!m && Number(m[1]) === round;
+  });
+}
+function resolvedIn(changelog, round) {
+  return new Set(changelog.flatMap((e) => (e.resolved ?? []).filter((x) => x.round === round).map((x) => x.n)));
+}
+function parseDismissed(text2) {
   let raw;
   try {
-    raw = JSON.parse(text2);
+    raw = JSON.parse(text2 ?? "");
   } catch {
-    throw new Error("changelog.json is not valid JSON");
+    return {};
   }
-  if (!Array.isArray(raw)) throw new Error("changelog.json must be a JSON array");
-  return raw.map((e, i) => {
-    const r = EntrySchema.safeParse(e);
-    if (!r.success) {
-      const why = r.error.issues.map((x) => `${x.path.join(".") || "(root)"}: ${x.message}`).join("; ");
-      throw new Error(`changelog.json entry ${i} is invalid: ${why}`);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (!/^[1-9]\d*$/.test(k) || !Array.isArray(v)) continue;
+    const byN = /* @__PURE__ */ new Map();
+    for (const x of v) {
+      const item = x && typeof x === "object" ? x : null;
+      const n2 = item ? item.n : x;
+      if (typeof n2 !== "number" || !Number.isInteger(n2) || n2 <= 0) continue;
+      const reason = item && typeof item.reason === "string" ? clean(item.reason, REASON_MAX) : "";
+      byN.set(n2, reason ? { n: n2, reason } : byN.get(n2) ?? { n: n2 });
     }
-    const entry = e;
-    const applied = normalizeApplied(entry.applied);
-    return { ...r.data, ...applied ? { applied } : {}, ...entry.rewrite === true ? { rewrite: true } : {} };
-  });
+    if (byN.size) out[Number(k)] = [...byN.values()].sort((a, b) => a.n - b.n);
+  }
+  return out;
+}
+function pendingProposals(changelog, critiques, dismissed = {}) {
+  const out = [];
+  for (const { round, critique } of [...critiques].sort((a, b) => a.round - b.round)) {
+    if (!critique || rewroteRound(changelog, round)) continue;
+    const decided = /* @__PURE__ */ new Set([...appliedIn(changelog, round), ...resolvedIn(changelog, round), ...(dismissed[round] ?? []).map((x) => x.n)]);
+    for (const p of critique.proposals) {
+      if (!decided.has(p.n)) out.push({ round, n: p.n, severity: p.severity, section: p.section, problem: p.problem });
+    }
+  }
+  return out;
 }
 
 // src/lib/types.ts
@@ -10800,25 +10897,25 @@ var isRunBranch = (s) => typeof s === "string" && RUN_BRANCH.test(s) && !s.inclu
 var TASK_STATUSES = ["running", "accepted", "integrated", "conflict", "blocked", "stopped"];
 var STOPS = ["finished", "stalled", "stopped", "budget", "migrated"];
 var MAX_TASKS = 500;
-var isObj = (x) => !!x && typeof x === "object" && !Array.isArray(x);
-var str = (x) => typeof x === "string" && x ? x : null;
+var isObj2 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
+var str2 = (x) => typeof x === "string" && x ? x : null;
 var iso = (x) => typeof x === "string" && !Number.isNaN(Date.parse(x)) ? x : null;
-var FUTURE_SKEW_MS = 12e4;
+var FUTURE_SKEW_MS2 = 12e4;
 var finishedOf = (x, now) => {
   const v = iso(x);
   if (!v) return null;
-  return now !== void 0 && Number.isFinite(now) && Date.parse(v) - now > FUTURE_SKEW_MS ? null : v;
+  return now !== void 0 && Number.isFinite(now) && Date.parse(v) - now > FUTURE_SKEW_MS2 ? null : v;
 };
 var int3 = (x, min, max, dflt) => typeof x === "number" && Number.isInteger(x) ? Math.min(max, Math.max(min, x)) : dflt;
-var oneOf = (list, x) => list.includes(x) ? x : null;
+var oneOf2 = (list, x) => list.includes(x) ? x : null;
 var cleanTitle = (x) => typeof x === "string" ? x.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim().slice(0, 200) : "";
 function normalizeTask(x, now) {
-  if (!isObj(x)) return null;
-  const status = oneOf(TASK_STATUSES, x.status);
-  const stage = oneOf(STAGES, x.stage);
-  const executor = oneOf(["subagents", "sessions", "manual"], x.executor);
+  if (!isObj2(x)) return null;
+  const status = oneOf2(TASK_STATUSES, x.status);
+  const stage = oneOf2(STAGES, x.stage);
+  const executor = oneOf2(["subagents", "sessions", "manual"], x.executor);
   const worktree = typeof x.worktree === "string" ? x.worktree : null;
-  const branch = str(x.branch);
+  const branch = str2(x.branch);
   const startedAt = iso(x.startedAt);
   if (!status || !stage || !executor || worktree === null || !branch || !startedAt) return null;
   const title = cleanTitle(x.title);
@@ -10832,7 +10929,7 @@ function normalizeTask(x, now) {
     stageSince: iso(x.stageSince) ?? startedAt,
     round: int3(x.round, 0, 99, 0),
     attempts: int3(x.attempts, 0, 99, 0),
-    agent: str(x.agent),
+    agent: str2(x.agent),
     updatedAt: iso(x.updatedAt) ?? startedAt,
     detail: typeof x.detail === "string" ? x.detail.slice(0, 500) : null,
     ...iso(x.nudgedAt) ? { nudgedAt: iso(x.nudgedAt) } : {},
@@ -10842,15 +10939,15 @@ function normalizeTask(x, now) {
   };
 }
 function normalizeExecution(x, now) {
-  if (!isObj(x)) return null;
-  const mode = oneOf(["subagents", "sessions"], x.mode);
-  const kind = oneOf(["plan", "ephemeral"], x.kind) ?? "plan";
-  const runId = str(x.runId), project = str(x.project), base = str(x.base), branch = str(x.branch), coordinator = str(x.coordinator);
+  if (!isObj2(x)) return null;
+  const mode = oneOf2(["subagents", "sessions"], x.mode);
+  const kind = oneOf2(["plan", "ephemeral"], x.kind) ?? "plan";
+  const runId = str2(x.runId), project = str2(x.project), base = str2(x.base), branch = str2(x.branch), coordinator = str2(x.coordinator);
   const startedAt = iso(x.startedAt);
   if (!mode || !runId || !project || !base || !branch || !coordinator || !startedAt) return null;
   if (!isSafeId(runId) || !isSafeId(coordinator) || !isRunBranch(branch)) return null;
   const tasks = {};
-  if (isObj(x.tasks)) {
+  if (isObj2(x.tasks)) {
     for (const [id2, t] of Object.entries(x.tasks).slice(0, MAX_TASKS)) {
       const n2 = isPlanId(id2) ? normalizeTask(t, now) : null;
       if (n2) tasks[id2] = n2;
@@ -10870,14 +10967,14 @@ function normalizeExecution(x, now) {
     mergeOnFinish: x.mergeOnFinish === true,
     hookSession: isSafeId(x.hookSession) ? x.hookSession : null,
     active: x.active === true,
-    stopReason: oneOf(STOPS, x.stopReason),
+    stopReason: oneOf2(STOPS, x.stopReason),
     stallReason: typeof x.stallReason === "string" ? x.stallReason.slice(0, 1e3) : null,
     lastStepAt: iso(x.lastStepAt),
     lastBlockStep: iso(x.lastBlockStep),
     sleepUntil: iso(x.sleepUntil),
     // C2: closedBy only means something with a closedAt; an older file has neither.
     closedAt: iso(x.closedAt),
-    closedBy: iso(x.closedAt) ? oneOf(["merge", "close"], x.closedBy) : null,
+    closedBy: iso(x.closedAt) ? oneOf2(["merge", "close"], x.closedBy) : null,
     ...typeof x.planned === "number" && Number.isInteger(x.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x.planned)) } : {},
     ...x.autonomy === "auto" ? { autonomy: "auto" } : {},
     ...isLocale(x.locale) ? { locale: x.locale } : {}
@@ -10892,24 +10989,24 @@ function parseExecution(text2, now) {
   }
 }
 function normalizePublicTask(x) {
-  if (!isObj(x)) return null;
-  const task = str(x.task), runId = str(x.runId), by = str(x.by);
-  const stage = oneOf(STAGES, x.stage), status = oneOf(TASK_STATUSES, x.status), mode = oneOf(["subagents", "sessions", "manual"], x.mode);
+  if (!isObj2(x)) return null;
+  const task = str2(x.task), runId = str2(x.runId), by = str2(x.by);
+  const stage = oneOf2(STAGES, x.stage), status = oneOf2(TASK_STATUSES, x.status), mode = oneOf2(["subagents", "sessions", "manual"], x.mode);
   const since = iso(x.since), updatedAt = iso(x.updatedAt), leaseUntil = iso(x.leaseUntil);
   if (!task || !isPlanId(task) || !runId || !by || !stage || !status || !mode || !since || !updatedAt || !leaseUntil) return null;
-  return { task, runId, stage, status, mode, by, since, updatedAt, leaseUntil, agent: str(x.agent), round: int3(x.round, 0, 99, 0) };
+  return { task, runId, stage, status, mode, by, since, updatedAt, leaseUntil, agent: str2(x.agent), round: int3(x.round, 0, 99, 0) };
 }
 var LIVE_SILENT_MINUTES = 7;
 var LIVE_STOPPED_MINUTES = 12;
 var LIVE_MAX_AGE_HOURS = 24;
 var FORGE_DOC_MAX_BYTES = 8 * 1024;
 function normalizeLive(x) {
-  if (!isObj(x)) return null;
-  const sessionId2 = str(x.sessionId), ts = iso(x.ts);
-  const role = oneOf(["coordinator", "executor", "manual"], x.role);
+  if (!isObj2(x)) return null;
+  const sessionId2 = str2(x.sessionId), ts = iso(x.ts);
+  const role = oneOf2(["coordinator", "executor", "manual"], x.role);
   if (!sessionId2 || !ts || !role) return null;
-  const agents = Array.isArray(x.agents) ? x.agents.filter(isObj).map((a) => ({ id: str(a.id), type: str(a.type) ?? "", since: iso(a.since) })).filter((a) => !!a.id && !!a.since).slice(0, 20) : [];
-  return { sessionId: sessionId2, role, ts, agents, runId: str(x.runId), task: str(x.task), event: (str(x.event) ?? "").slice(0, 40), ended: x.ended === true };
+  const agents = Array.isArray(x.agents) ? x.agents.filter(isObj2).map((a) => ({ id: str2(a.id), type: str2(a.type) ?? "", since: iso(a.since) })).filter((a) => !!a.id && !!a.since).slice(0, 20) : [];
+  return { sessionId: sessionId2, role, ts, agents, runId: str2(x.runId), task: str2(x.task), event: (str2(x.event) ?? "").slice(0, 40), ended: x.ended === true };
 }
 
 // src/lib/bound.ts
@@ -10928,7 +11025,7 @@ function date(x, now) {
   if (typeof x !== "string") return null;
   const t = Date.parse(x);
   if (!Number.isFinite(t)) return null;
-  return now !== void 0 && Number.isFinite(now) && t - now > FUTURE_SKEW_MS ? null : x;
+  return now !== void 0 && Number.isFinite(now) && t - now > FUTURE_SKEW_MS2 ? null : x;
 }
 function normalizeBound(x, now) {
   if (!x || typeof x !== "object" || Array.isArray(x)) return null;
@@ -11069,61 +11166,6 @@ function executionView(i) {
     frozenAt: e.active ? null : lastMovedAt(e),
     sleepUntil: e.sleepUntil ?? null
   };
-}
-
-// src/lib/decisions.ts
-var DECISION_POINTS = ["route", "triage", "design-apply", "design-approve", "plan-confirm", "mode", "ruling", "safe-path", "takeover", "revert", "other"];
-var DECISIONS_MAX = 16 * 1024;
-var DECISIONS_WINDOW_MS = 24 * 36e5;
-var LAST_MAX = 5;
-var FUTURE_SKEW_MS2 = 5 * 6e4;
-var SHORT = 80;
-var isObj2 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
-var str2 = (x) => typeof x === "string";
-var oneOf2 = (list, x) => str2(x) && list.includes(x) ? x : null;
-var cp = (n2) => String.fromCharCode(n2);
-var UNSAFE = new RegExp(`[\\x00-\\x1f\\x7f-\\x9f${cp(8234)}-${cp(8238)}${cp(8294)}-${cp(8297)}]`, "g");
-var clean = (s, max) => {
-  const t = s.replace(UNSAFE, " ").replace(/\s+/g, " ").trim();
-  return t.length <= max ? t : Array.from(t).slice(0, max).join("");
-};
-var text = (x, max) => str2(x) ? clean(x, max) || null : null;
-var posInt = (x) => typeof x === "number" && Number.isInteger(x) && x > 0 ? x : null;
-function entryOf(x) {
-  if (!isObj2(x)) return null;
-  const n2 = posInt(x.n);
-  const ts = str2(x.ts) && x.ts ? x.ts : null;
-  const point = oneOf2(DECISION_POINTS, x.point);
-  const what = text(x.what, SHORT);
-  const chosen = text(x.chosen, SHORT);
-  return n2 && ts && point && what && chosen ? { n: n2, point, what, chosen, ts } : null;
-}
-function normalizeDecisionsDoc(x) {
-  if (!isObj2(x)) return null;
-  const ts = str2(x.ts) && x.ts ? x.ts : null;
-  const scope = text(x.scope, 120);
-  const count2 = typeof x.count === "number" && Number.isInteger(x.count) && x.count >= 0 ? x.count : null;
-  const autonomy = x.autonomy === "auto" || x.autonomy === "unattended" ? x.autonomy : null;
-  if (!ts || !scope || count2 === null || !autonomy) return null;
-  const last = [];
-  for (const e of Array.isArray(x.last) ? x.last : []) {
-    const entry = entryOf(e);
-    if (entry && isObj2(e)) last.push({ ...entry, weight: e.weight === "major" ? "major" : "minor" });
-  }
-  return { ts, scope, count: count2, autonomy, last: last.slice(-LAST_MAX), lastMajor: entryOf(x.lastMajor) };
-}
-function decisionsSummary(text2, now) {
-  if (typeof text2 !== "string" || text2.length > DECISIONS_MAX) return null;
-  let doc;
-  try {
-    doc = normalizeDecisionsDoc(JSON.parse(text2));
-  } catch {
-    return null;
-  }
-  if (!doc || doc.count < 1) return null;
-  const t = Date.parse(doc.ts);
-  if (!Number.isFinite(t) || !Number.isFinite(now) || now - t > DECISIONS_WINDOW_MS || t - now > FUTURE_SKEW_MS2) return null;
-  return { count: doc.count, autonomy: doc.autonomy, lastMajor: doc.lastMajor?.what ?? null };
 }
 
 // src/lib/member-doc.ts
@@ -12257,11 +12299,11 @@ var ms = (s) => s ? Date.parse(s) : NaN;
 var clip = (s) => s.length > CLIP2 ? s.slice(0, CLIP2) : s;
 function span2(from, to, now) {
   if (!Number.isFinite(from) || !Number.isFinite(to) || !Number.isFinite(now)) return null;
-  if (from - now > FUTURE_SKEW_MS || to - now > FUTURE_SKEW_MS || to < from) return null;
+  if (from - now > FUTURE_SKEW_MS2 || to - now > FUTURE_SKEW_MS2 || to < from) return null;
   return Math.floor((to - from) / 1e3);
 }
 var age = (t, now) => Math.max(0, now - t);
-var orderAt = (t, now) => t - now > FUTURE_SKEW_MS ? -Infinity : Math.min(t, now);
+var orderAt = (t, now) => t - now > FUTURE_SKEW_MS2 ? -Infinity : Math.min(t, now);
 var isOf = (task, id2) => id2 === task || id2.startsWith(`${task}-`) && /^\d{1,4}$/.test(id2.slice(task.length + 1));
 var alive = (l) => l.status !== "done";
 var keyOf = (task, project) => statusKey(task, project) ?? task;
@@ -12413,7 +12455,7 @@ function buildActivities(i) {
     const owner = ownerOf(st, i.sessionId, i.ownTasks);
     const visible2 = done || stopped ? Number.isFinite(end) && age(end, now) < DONE_TTL_MS : age(last, now) < (owner === "own" ? OWN_TTL_MS : OTHER_TTL_MS);
     if (!visible2) continue;
-    const skewed = last - now > FUTURE_SKEW_MS;
+    const skewed = last - now > FUTURE_SKEW_MS2;
     const job = liveJobs.find((j) => jobHome.get(j) === key);
     const live = owner === "own" && !done && !stopped;
     const idle = live && age(last, now) >= LEFT_OPEN_MS;
@@ -12652,7 +12694,7 @@ function forgeOf(st, now, briefs = null, liveTypes = []) {
   const { ts: _ts, taskStartedAt: _a, stageSince: _b, stages: _c, doneAt: _d, lastAt: _e, session: _s, runId: _r, project: _p, ...forge } = st;
   const working = !!st.agent && liveTypes.some((t) => tierOf(t).label === tierOf(st.agent).label);
   const left = !working && leftOpen(st, now);
-  const skewed = Date.parse(st.lastAt ?? st.ts) - now > FUTURE_SKEW_MS;
+  const skewed = Date.parse(st.lastAt ?? st.ts) - now > FUTURE_SKEW_MS2;
   const timing = skewed ? null : forgeTiming(left ? { ...st, doneAt: st.lastAt } : st, now);
   return { ...forge, ...left ? { agent: null } : {}, briefs, timing };
 }
@@ -12678,7 +12720,7 @@ function newestForge(statuses, now, briefsOf, liveTypes) {
 function elapsed(from, to, now) {
   const t = from ? Date.parse(from) : NaN;
   if (!Number.isFinite(t) || !Number.isFinite(to) || !Number.isFinite(now)) return null;
-  if (t - now > FUTURE_SKEW_MS || to - now > FUTURE_SKEW_MS || to < t) return null;
+  if (t - now > FUTURE_SKEW_MS2 || to - now > FUTURE_SKEW_MS2 || to < t) return null;
   return Math.floor((to - t) / 1e3);
 }
 function forgeTiming(st, now) {
@@ -13451,17 +13493,22 @@ async function readBandFiles($) {
   }
   const pdocs = join(root, "docs", "waypoint", project);
   const pstate = join(root, ".waypoint", project);
+  const pcrit = join(pdocs, "design", "critiques");
   const critiques = {};
-  const critiqueFiles = (await listOpt($, pstate)).filter((f) => f.kind === "file" && /^critique-r\d+\.json$/.test(f.name)).slice(0, MAX_DOCS);
-  for (const f of critiqueFiles) {
-    const text2 = await readOpt($, join(pstate, f.name));
-    if (text2 !== void 0) critiques[f.name] = text2;
+  const places = [[pstate, /^critique-r(\d+)\.json$/], [pcrit, /^r(\d+)\.json$/]];
+  for (const [where, re] of places) {
+    const found = (await listOpt($, where)).filter((f) => f.kind === "file" && re.test(f.name)).slice(0, MAX_DOCS);
+    for (const f of found) {
+      const text2 = await readOpt($, join(where, f.name));
+      const m = re.exec(f.name);
+      if (text2 !== void 0 && m) critiques[`critique-r${Number(m[1])}.json`] = text2;
+    }
   }
   const files = {
     plan: await readOpt($, join(pdocs, "plan.yaml")),
     design: await readOpt($, join(pdocs, "design.md")),
     changelog: await readOpt($, join(pdocs, "design", "changelog.json")),
-    dismissed: await readOpt($, join(pstate, "dismissed.json")),
+    dismissed: await readOpt($, join(pcrit, "dismissed.json")) ?? await readOpt($, join(pstate, "dismissed.json")),
     ...chosen.seats,
     states: await readCollection($, join(pstate, "dbcache", "state"), "first"),
     // The newest MAX_DOCS: the band reads them again on every 30 s tick, one engine call each, so it does not count
