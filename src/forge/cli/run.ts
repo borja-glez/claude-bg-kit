@@ -46,7 +46,7 @@ import { sleepSync } from '../pid.js';
 import { readSurfaces, detectDrafts, appendLearned, surfaceFile, permissionHash, hashMatches, LEARNED_HEADINGS, type Surface } from '../surfaces.js';
 import { addDecision, allDecisions, listDecisions, renderDecisionsMd, DecisionInputError } from '../decisions.js';
 import { TASK_ID, decisionScope, scopeFileName } from '../../lib/decisions.js';
-import { claudeConfigDir, claudeJsonDir, locateSuperpowers, spLedgerDone, spPlans, spSkillPath, spSpecs } from '../superpowers.js';
+import { claudeConfigDir, claudeJsonDir, locateSuperpowersFor, spLedgerDone, spPlans, spSkillPath, spSpecs } from '../superpowers.js';
 import { ROUTE_OPTIONS, ROUTE_STAGES, firstStage, isRoutePath, isRouteSession, pruneRoutes, readRoute, routeAsk, routeOptions, writeRoute, type RouteDoc, type RouteOption, type RouteStage } from '../route.js';
 import { checkSpTask, markDone, parseSpPlan, renderSpBrief, SpPlanError } from '../../lib/sp-plan.js';
 
@@ -341,8 +341,9 @@ export function findWaypointCli(scriptPath: string): string | null {
   return null;
 }
 
-// superpowers as installed for this repository: its main checkout holds the project settings and is the projectPath.
-const superpowersOf = (io: Io, dir: string) => locateSuperpowers({ configDir: claudeConfigDir(io.env ?? process.env), projectDir: mainCheckout(dir) });
+// superpowers as installed for this repository: for the checkout itself or for its main checkout (which holds the project
+// settings and is a worktree's projectPath), as mcpOf reads the MCP servers.
+const superpowersOf = (io: Io, dir: string) => locateSuperpowersFor(claudeConfigDir(io.env ?? process.env), [dir, mainCheckout(dir)]);
 
 // The MCP servers Claude Code has for this repository, as the checkout itself and as its main checkout (where Claude
 // Code keeps a worktree's project entry).
@@ -1876,7 +1877,8 @@ function runCommand(argv: string[], io: Io): Result {
         if (sub === 'list') {
           const since = flag('since');
           if (since !== undefined && !Number.isFinite(Date.parse(since))) throw new UsageError(`decision list: --since must be a date, got ${since}`);
-          return json(listDecisions(root, { task: flag('task'), run: flag('run'), since, all: has('all'), auto: has('auto') }));
+          // Carry 4: --task is that task of its project (--project, else the ledger's), never another plan's of the same id.
+          return json(listDecisions(root, { task: flag('task'), ...(flag('project') !== undefined ? { project: flag('project') } : {}), run: flag('run'), since, all: has('all'), auto: has('auto') }));
         }
         if (sub === 'show') {
           const n = Number(arg);

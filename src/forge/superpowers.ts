@@ -96,6 +96,17 @@ export function locateSuperpowers(opts: { configDir: string; projectDir: string 
   return best;
 }
 
+/** Carry 2: superpowers for any of `projectDirs` (a checkout and its main checkout, as forge reads the MCP servers): the
+ *  highest version installed for one of them. */
+export function locateSuperpowersFor(configDir: string, projectDirs: readonly string[]): Superpowers {
+  let best = NONE;
+  for (const projectDir of new Set(projectDirs.map(d => path.resolve(d)))) {
+    const sp = locateSuperpowers({ configDir, projectDir });
+    if (sp.installed && (!best.installed || newer(sp.version ?? '', best.version ?? ''))) best = sp;
+  }
+  return best;
+}
+
 /** The SKILL.md of one superpowers skill, or null (not installed, no such skill, or a name that is not a plain id). */
 export function spSkillPath(sp: Superpowers, skill: string): string | null {
   if (!sp.installed || !sp.installPath || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(skill)) return null;

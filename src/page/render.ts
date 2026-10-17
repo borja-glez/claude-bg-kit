@@ -345,7 +345,7 @@ function renderSessionsView(m: Model, d: Dict): string {
         <dt>${esc(d.field.branch)}</dt><dd>${esc(s.branch ?? '—')}</dd>
         <dt>${esc(d.field.agent)}</dt><dd>${esc(s.agentName ?? '—')}</dd>
         <dt>${esc(d.heartbeat)}</dt><dd>${hb}</dd>
-        <dt>${esc(d.field.zones)}</dt><dd>${zones.length ? zones.map(esc).join(' · ') : '—'}</dd>
+        <dt>${esc(d.field.zones)}</dt><dd>${task && !task.zones.length ? esc(d.field.wholeRepo) : zones.length ? zones.map(esc).join(' · ') : '—'}</dd>
       </dl>
       ${prog ? `<div class="bar c"><i style="width:${pct}%"></i></div><div class="mono">${num(prog.done)}/${num(prog.total)}</div>` : ''}
       ${thread}
@@ -637,7 +637,7 @@ function renderTaskModal(m: Model, d: Dict, id: string, loc: string): string {
       ${sec(d.field.dependsOn, chips(t.depends_on))}
       ${sec(d.field.unlocks, chips(unlocks))}
       ${sec(d.field.session, esc(s.owner ?? '—'))}
-      ${sec(d.field.zones, t.zones.length ? `<span class="mono">${t.zones.map(esc).join(' · ')}</span>` : '—')}
+      ${sec(d.field.zones, t.zones.length ? `<span class="mono">${t.zones.map(esc).join(' · ')}</span>` : esc(d.field.wholeRepo))}
     </div><div>
       ${t.includes ? sec(d.field.includes, esc(t.includes)) : ''}
       ${sec(d.field.doneWhen, esc(t.done_when))}

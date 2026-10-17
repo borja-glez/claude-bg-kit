@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { addDecision, allDecisions, decisionsFile, listDecisions, readDecisionsDoc, renderDecisionsMd, DecisionInputError } from '../src/forge/decisions.js';
-import { readEvents } from '../src/forge/ledger.js';
+import { appendEvent, readEvents, withEventContext } from '../src/forge/ledger.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { saveExecution } from '../src/forge/execution.js';
 
@@ -65,6 +65,18 @@ describe('listDecisions', () => {
     expect(listDecisions(root, { run: 'r1' }).map(d => d.n)).toEqual([3]);
     expect(listDecisions(root, { since: at(1) }).map(d => d.n)).toEqual([2, 3]);
     expect(listDecisions(root, { all: true })).toHaveLength(3);
+  });
+  it("--task takes the task of its project, as the ledger attributes it: another plan's task of the same id is not it (carry 4)", () => {
+    // Plan web's T001 was decided on first; then plan shop triaged its own T001, and decided on it.
+    withEventContext({ project: 'web' }, () => addDecision(root, INPUT, { ts: at(3), task: 'T001' }));
+    appendEvent(root, { ts: at(4), kind: 'triage', task: 'T001', path: 'large', project: 'shop' });
+    addDecision(root, INPUT, { ts: at(5), task: 'T001-1' });
+    expect(listDecisions(root, { task: 'T001' }).map(d => d.n)).toEqual([5]);
+    expect(listDecisions(root, { task: 'T001', project: 'web' }).map(d => d.n)).toEqual([4]);
+    // The numbering stays the ledger's; decisions of no project keep matching a task of none.
+    expect(listDecisions(root, { task: 'orders' }).map(d => d.n)).toEqual([1, 2]);
+    const io: Io = { cwd: root, now: () => new Date(at(9)) };
+    expect(JSON.parse(run(['decision', 'list', '--task', 'T001', '--project', 'web'], io).stdout).map((d: { n: number }) => d.n)).toEqual([4]);
   });
   it('is empty with no decision', () => {
     expect(listDecisions(mkdtempSync(path.join(tmpdir(), 'forge-dec-')), {})).toEqual([]);

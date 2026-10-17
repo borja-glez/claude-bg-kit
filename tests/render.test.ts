@@ -179,6 +179,17 @@ describe('sessions view', () => {
     expect(html).toContain('1/4');
     expect(html).toContain('class="sc');
   });
+  it('a task without zones reads «whole repository» in its session card and in its detail (carry 1)', () => {
+    const open = { ...plan, tasks: plan.tasks.map(t => (t.id === 'T002' ? { ...t, zones: [] } : t)) };
+    const zonesOf = (html: string, start: string) => html.slice(html.indexOf(start)).match(/>Zonas<\/(?:dt|div)>\s*<(?:dd|div)>([\s\S]*?)<\/(?:dd|div)>/)?.[1];
+    for (const [view, start] of [[ui({ view: 'sessions' }), 'class="sc'], [ui({ modal: 'T002' }), 'class="modal"']] as const) {
+      expect(zonesOf(renderApp({ ...base(), plan: open }, view), start)).toBe('todo el repositorio');
+      expect(renderApp({ ...base(), plan: open, meta: { ...base().meta!, locale: 'en' } }, view)).toContain('whole repository');
+    }
+    expect(renderApp({ ...base(), plan: open }, ui({ view: 'sessions' }))).not.toContain('<dd>**</dd>');
+    // A task with zones keeps them.
+    expect(zonesOf(renderApp(base(), ui({ view: 'sessions' })), 'class="sc')).toBe('src/api/orders/**');
+  });
   it('flags escalated sessions as needing a decision', () => {
     const messages = [1, 2, 3, 4].map(i => msg({ id: `m${i}`, ts: `2026-10-11T11:0${i}:00Z`, from: i % 2 ? 'main' : 'ui' , to: i % 2 ? 'ui' : 'main' }));
     const html = renderApp({ ...base(), messages }, ui({ view: 'sessions' }));

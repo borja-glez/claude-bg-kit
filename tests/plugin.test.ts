@@ -941,6 +941,8 @@ describe('plugin layout', () => {
       for (const w of ['FORGE swarm close', 'active: false', 'status: "free"', 'exec: {"__delete__": true}', 'owner: {"__delete__": true}']) expect(s).toContain(w);
     }
     for (const w of ['`stalled`', '`stopped`', '`budget`']) expect(step7).toContain(w);
+    // Carry 2: a stopped or budget close also reaches the run's member sessions it prints.
+    for (const w of ['`sessions`', '/forge:stop` step 2b']) expect(step7, w).toContain(w);
     expect(stop).toContain('closedAt');
   });
   it('integrating a task writes its summary in the batch and the last commit in a call of its own (H-16)', () => {
@@ -1378,6 +1380,24 @@ describe('plugin layout', () => {
       for (const s of ['.forge/work/<project>/<T>/handover.md', '`unmerged ledger`', '{main, run, execution, release, members, running}', '/forge:run --resume'])
         expect(md, `${f}: ${s}`).toContain(s);
       expect(md, f).not.toContain('`.forge/work/<T>/handover.md`');
+    }
+  });
+  it("forge READMEs pin the CLI contracts of wave 2c's fix waves: close's sessions, relaunch's work, the /clear carry, a route without a session, start's plan, status's coordinator, cleanup's prune (carry 11, final review)", () => {
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
+      const md = read(f);
+      const line = (start: string) => md.split('\n').find(l => l.startsWith(start)) ?? '';
+      expect(line('- `swarm close`'), `${f}: close`).toContain('`sessions`');
+      expect(line('- `swarm relaunch'), `${f}: relaunch`).toContain('`work`');
+      expect(md.split('\n').find(l => l.includes('`.forge/route/<session>.json`') && l.includes('`/clear`')), `${f}: carry`).toMatch(/\b2 min/);
+      for (const cmd of ['- `route set', '- `route stage']) expect(line(cmd), `${f}: ${cmd}`).toMatch(/CLAUDE_CODE_SESSION_ID[^\n]*(code|código) 2/);
+      expect(line('- `swarm start'), `${f}: start`).toContain('[--plan F]');
+      expect(line('- `swarm status'), `${f}: status`).toContain('`coordinator: {hookSession, liveness}`');
+      for (const w of ['`prunable`', '`pruned`']) expect(line('- `swarm cleanup'), `${f}: ${w}`).toContain(w);
+      expect(line('- `swarm worktree'), `${f}: worktree`).toContain('`priorTotal`');
+      expect(line('- `brief --plan'), `${f}: brief`).toContain('--prior-total N');
+      expect(md, f).not.toContain('.forge/work/<id>/');
+      expect(md, f).not.toContain('work/<task-id>/');
+      expect(md, f).not.toContain('work/<id-de-tarea>/');
     }
   });
 });

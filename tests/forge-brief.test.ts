@@ -38,6 +38,13 @@ describe('brief', () => {
       'Track: backend', 'Phase: F1', 'Plan: docs/waypoint/shop/plan.yaml', 'Design: docs/waypoint/shop/design.md']) expect(md).toContain(s);
     expect(md).not.toContain('Verification:');
   });
+  it('a task without zones is told it covers the whole repository and runs alone (carry 1)', () => {
+    const md = renderBrief(PLAN, { ...PLAN.tasks[1], zones: [] }, { planPath: 'p.yaml', designPath: null });
+    const line = md.split('\n').find(l => l.startsWith('Zones: '))!;
+    expect(line).toContain('whole repository');
+    expect(line).toContain('runs alone');
+    expect(line).not.toContain('(none listed)');
+  });
   it('omits the design line when there is none and shows verification when present', () => {
     const md = renderBrief(PLAN, PLAN.tasks[0], { planPath: 'p.yaml', designPath: null });
     expect(md).not.toContain('Design:');

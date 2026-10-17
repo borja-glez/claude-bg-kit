@@ -17,6 +17,7 @@ elsewhere and are reconstructed from their READMEs.
 
 #### Changed
 - `waypoint validate` warns about plan tasks without `zones`: they may touch anything, so `conflicts` counts them against every task in progress and forge runs them alone.
+- The roadmap page says «whole repository» for a task without zones, in its session card and its detail; an active forge run that no session drives offers **Resume** at once.
 
 ### 0.23.0 — 2026-10-16
 
@@ -256,6 +257,7 @@ elsewhere and are reconstructed from their READMEs.
 - The forge Stop hook keeps an agent alive while its task's lease runs, at most 90 minutes after its last report.
 - A resume from another conversation, or a takeover with the coordinator's id, rebinds the run only once the bound conversation stopped. `swarm status` and `infinite status` say `unbound` when no session drives an active run. An ephemeral run closes when it finishes. `swarm takeover` no longer reads the roadmap lease: its usage drops `--db`, still accepted for this version.
 - A plan task without zones runs alone.
+- `swarm retry` refuses a stopped run, and a stalled one from another conversation while its coordinator is still on it (`swarm status` prints that `coordinator`); an active run no session drives has no coordinator at once; `swarm cleanup` checks only the evidence it copies, keeps waypoint's tracks, stops if a run becomes active meanwhile and prunes only for its own worktrees; a new execution of a plan task counts only its own reviews; `swarm worktree` refuses another plan's `task/<T>`.
 - Requires waypoint ^0.23.1.
 
 ### 0.19.2 — 2026-10-16

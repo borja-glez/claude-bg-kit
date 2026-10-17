@@ -4,6 +4,7 @@ import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { appendEvent, forgeDir, readEvents, type LedgerEvent } from './ledger.js';
+import { attribute, projectOf } from './task-ref.js';
 import {
   BRANCH, DECISION_BY, DECISION_POINTS, LIMITS, PROJECT_ID, RUN_ID, SHA, TASK_ID, clean, decisionScope, nextDecisionsDoc,
   normalizeDecision, normalizeDecisionsDoc, weightOf, type Decision, type DecisionsDoc,
@@ -83,27 +84,44 @@ export function addDecision(root: string, raw: unknown, ctx: { ts: string; task?
 }
 
 export type Numbered = Decision & { n: number };
-export interface DecisionFilter { task?: string; run?: string; since?: string; all?: boolean; auto?: boolean }
+/** `project` goes with `task`: its project, else the one the ledger gives the task now (projectOf). */
+export interface DecisionFilter { task?: string; project?: string | null; run?: string; since?: string; all?: boolean; auto?: boolean }
+
+/** The decisions of `events`, numbered by their position among the `decision` events (1-based; the ledger only grows), with their event. */
+function numbered(events: readonly LedgerEvent[]): { d: Numbered; e: LedgerEvent }[] {
+  const out: { d: Numbered; e: LedgerEvent }[] = [];
+  events.filter(e => e.kind === 'decision').forEach((e, i) => {
+    const d = normalizeDecision(e);
+    if (d) out.push({ d: { ...d, n: i + 1 }, e });
+  });
+  return out;
+}
 
 /** Every decision of the ledger, numbered by its position among the `decision` events (1-based; the ledger only grows). */
 export function allDecisions(root: string): Numbered[] {
-  const out: Numbered[] = [];
-  readEvents(root).filter(e => e.kind === 'decision').forEach((e, i) => {
-    const d = normalizeDecision(e);
-    if (d) out.push({ ...d, n: i + 1 });
-  });
-  return out;
+  return numbered(readEvents(root)).map(x => x.d);
 }
 
 // The task itself or one of its briefs, `<task>-<n>`.
 const ownTask = (task: string, t: string | null): boolean =>
   t === task || (!!t && t.startsWith(`${task}-`) && /^\d{1,3}$/.test(t.slice(task.length + 1)));
 
-/** Filters compose. With none of task, run, since or all: the scope of decisions.json, else of the newest decision not by the user. */
+/**
+ * Filters compose. With none of task, run, since or all: the scope of decisions.json, else of the newest decision not by
+ * the user. Carry 4 (D-08: ids repeat between plans): `task` is the pair (project, task), each decision attributed as the
+ * ledger attributes its events (attribute).
+ */
 export function listDecisions(root: string, f: DecisionFilter): Numbered[] {
-  const all = allDecisions(root);
+  const events = readEvents(root);
+  const rows = numbered(events);
+  const all = rows.map(x => x.d);
   let out = all;
-  if (f.task) { const task = f.task; out = out.filter(d => ownTask(task, d.task)); }
+  if (f.task) {
+    const task = f.task;
+    const project = f.project !== undefined ? f.project : projectOf(events, task);
+    const owner = attribute(events);
+    out = rows.filter(x => ownTask(task, x.d.task) && owner(x.e) === project).map(x => x.d);
+  }
   if (f.run) out = out.filter(d => d.runId === f.run);
   if (f.since) { const s = Date.parse(f.since); out = out.filter(d => Date.parse(d.ts) >= s); }
   if (!f.task && !f.run && !f.since && !f.all) {

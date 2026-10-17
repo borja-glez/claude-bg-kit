@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, utimesSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { claudeConfigDir, locateSuperpowers, spPlans, spSkillPath, spSpecs } from '../src/forge/superpowers.js';
@@ -54,6 +55,21 @@ describe('locateSuperpowers', () => {
   it('reads CLAUDE_CONFIG_DIR, else ~/.claude', () => {
     expect(claudeConfigDir({ CLAUDE_CONFIG_DIR: cfg })).toBe(cfg);
     expect(claudeConfigDir({})).toMatch(/\.claude$/);
+  });
+  it('from a worktree, superpowers installed for that checkout or for its main checkout counts, as the MCP servers do (carry 2)', () => {
+    const g = (...a: string[]) => execFileSync('git', a, { cwd: project, encoding: 'utf8' });
+    g('init', '-q', '-b', 'main'); g('config', 'user.email', 'a@b.c'); g('config', 'user.name', 't');
+    g('commit', '-q', '--allow-empty', '-m', 'init');
+    const wt = path.join(project, '.claude', 'worktrees', 'run');
+    g('worktree', 'add', '-q', '-b', 'forge/run-x', wt);
+    const io: Io = { cwd: wt, now: () => new Date(), env: { CLAUDE_CONFIG_DIR: cfg } };
+    const found = () => JSON.parse(run(['sp-path', 'test-driven-development'], io).stdout) as string | null;
+    for (const projectPath of [wt, project]) {
+      registry({ 'superpowers@m': [install('6.4.1', { scope: 'project', projectPath })] });
+      expect(found(), projectPath).toMatch(/SKILL\.md$/);
+    }
+    registry({ 'superpowers@m': [install('6.4.1', { scope: 'project', projectPath: path.join(tmpdir(), 'another-project') })] });
+    expect(found()).toBeNull();
   });
 });
 

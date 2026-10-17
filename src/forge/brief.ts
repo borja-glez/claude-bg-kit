@@ -63,7 +63,8 @@ export function renderBrief(plan: Plan, task: PlanTask, opts: { planPath: string
     `Done when: ${task.done_when}`,
     ...(task.verification ? [`Verification: ${task.verification}`] : []),
     `Commit title prefix: ${task.id}: `,
-    `Zones: ${task.zones.length ? task.zones.join(', ') : '(none listed)'}`,
+    // D-09: a task without zones may touch anything: it counts as the whole repository, so an execution runs it alone.
+    `Zones: ${task.zones.length ? task.zones.join(', ') : 'none listed: the whole repository (in a forge execution this task runs alone)'}`,
     ...(task.depends_on.length ? [`Depends on: ${task.depends_on.join(', ')}`] : []),
     ...(task.estimate_min ? [`Estimate: ${task.estimate_min} min`] : []),
     ...(task.delicate ? ['Delicate: yes'] : []),
