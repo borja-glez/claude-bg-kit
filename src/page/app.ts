@@ -148,12 +148,9 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     const el = document.activeElement as HTMLElement | null;
     return el && el !== env.root && env.root.contains(el) ? el.dataset?.k ?? null : null;
   };
-  // H-25: what the URL says (on load, Back and Forward, or a hash edited by hand), applied to the view state. The URL is
-  // the schedule's whole state: what its hash leaves out is the default (a free span only with `s`, so an explicit `z`
-  // wins over a span set by Ctrl + wheel). The other views never carry those parameters and leave them as they are.
-  const applyView = (v: ViewState) => {
-    ui.view = v.view && (VIEWS as readonly string[]).includes(v.view) ? (v.view as View) : 'summary';
-    if (ui.view !== 'schedule') ui.tl = undefined;
+  // The detail part of what the URL says (t, tt), alone: it changes the detail (ui.modal, ui.tab, the gallery, a pending
+  // link, the opener and the focus) and nothing of the view (review N1).
+  const applyDetail = (v: ViewState) => {
     // The detail: a task of the plan opens (with its tab); anything else closes it, and its opener gets the focus back.
     // Before the database's plan is in, a task the plan lacks waits for it (review I2).
     const want = v.task && isPlanId(v.task) ? v.task : null;
@@ -170,6 +167,14 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     if (task !== ui.modal) ui.shot = null;
     ui.modal = task;
     ui.tab = task ? tab : 'summary';
+  };
+  // H-25: what the URL says (on load, Back and Forward, or a hash edited by hand), applied to the view state. The URL is
+  // the schedule's whole state: what its hash leaves out is the default (a free span only with `s`, so an explicit `z`
+  // wins over a span set by Ctrl + wheel). The other views never carry those parameters and leave them as they are.
+  const applyView = (v: ViewState) => {
+    ui.view = v.view && (VIEWS as readonly string[]).includes(v.view) ? (v.view as View) : 'summary';
+    if (ui.view !== 'schedule') ui.tl = undefined;
+    applyDetail(v);
     if (ui.view === 'talk') ui.talk = v.c && (TALK_KINDS as readonly string[]).includes(v.c) ? (v.c as TalkKind) : 'notes';
     if (ui.view === 'schedule') {
       ui.timelineGroup = v.group && (GROUPS as readonly string[]).includes(v.group) ? (v.group as UiState['timelineGroup']) : 'phase';
@@ -202,6 +207,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   let pushDetail = false;
   // A pending link (review I2) stays in the URL: the render does not rewrite its t and tt away.
   const viewState = (): ViewState => ({ view: ui.view, c: ui.talk, group: ui.timelineGroup, zoom: ui.zoom, span: ui.span, pan: ui.pan, open: [...ui.expanded], status: ui.statuses, q: ui.search.trim(), layers: ui.layers, task: ui.modal ?? linked?.task, tab: ui.modal ? ui.tab : linked?.tab, debug: model.debug });
+  /** What a view state says without the detail (t, tt), as the URL writes it. */
+  const viewPart = (s: ViewState): string => encodeView({ ...s, task: undefined, tab: undefined });
   const openDetail = (id: string, from: HTMLElement): boolean => {
     if (!model.plan.tasks.some(t => t.id === id)) return false;
     if (!ui.modal) opener = from.dataset.k ?? null;
@@ -226,7 +233,9 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     try { back = d > 0 && d < history.length; } catch { back = false; }
     if (m && back) {
       const before = lastHash;
-      applyView(decodeView(m.b));
+      // Only the detail takes what the base says (none, or the detail a link opened there); the view keeps all its state,
+      // the schedule's ‹ › offset included (review N1), and the URL Back lands on is that view: nothing to rewrite.
+      applyDetail(decodeView(m.b));
       lastHash = encodeView(viewState());
       try { history.go(-d); } catch { lastHash = before; /* the render rewrites the URL to what the page shows */ }
     } else {
@@ -274,7 +283,11 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       // Where the URL brought the page: an entry of the trail only if its mark and its hash both say so (review I1).
       trailAt = markHere(hash)?.d ?? 0;
       lastHash = hash;
-      applyView(decodeView(location.hash));
+      // An entry that differs from the page only in t and tt (Back or Forward over the detail's entries) moves only the
+      // detail: the view keeps what the URL does not carry, the schedule's ‹ › offset (review N1). Any other entry
+      // drives the whole view, as the URL is the schedule's whole state (Task 5).
+      const v = decodeView(location.hash);
+      if (viewPart(v) === viewPart(viewState())) applyDetail(v); else applyView(v);
       // An entry of the trail whose task left the plan opens nothing: no detail to go back from.
       if (!ui.modal) trailAt = 0;
     } catch { return; }
@@ -399,9 +412,9 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   // H-06: a change of the data bumps the model's revision (derive() caches by it) and repaints at once; the modal and a
   // focused <select> no longer hold it back, morphdom leaves them as they are.
   const changed = () => { model.rev = (model.rev ?? 0) + 1; schedule(); };
-  // Review I2: the database's plan is in once its snapshot came and, with phases, the meta it is built with; offline or
-  // after a failed subscription (`force`) the plan the page has is all there will be. A pending link then opens if that
-  // plan has its task, else it goes (the render rewrites the URL without t).
+  // Review I2: the database's plan is in once its snapshot came and, with phases, the meta it is built with; offline, or
+  // when the plan's own subscription (or, with no meta, meta/project's) fails (`force`), the plan the page has is all
+  // there will be. A pending link then opens if that plan has its task, else it goes (the render rewrites the URL).
   let planSnap = false;
   const settleLink = (force = false) => {
     if (planIn || (!force && (!planSnap || (phaseDocs.length > 0 && !model.meta)))) return;
@@ -1080,7 +1093,11 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   if (!db) { model.offline = true; model.readOnly = true; settleLink(true); schedule(); return { stop, model, ui }; }
 
   model.offline = false;
-  const onErr = () => { model.offline = true; settleLink(true); schedule(); };
+  const onErr = () => { model.offline = true; schedule(); };
+  // Review N2: a pending link settles on the plan's own failure (the plan will not come), and on meta/project's only while
+  // there is no meta to build the plan with; another subscription's failure leaves it waiting for the plan.
+  const onPlanErr = () => { settleLink(true); onErr(); };
+  const onMetaErr = () => { if (!model.meta) settleLink(true); onErr(); };
   const rebuild = () => { if (model.meta && phaseDocs.length) model.plan = planViewFromDocs(model.meta, phaseDocs); };
   // A-10: the metrics live in meta/metrics; a roadmap a forge before wave 4 wrote keeps them in meta/project.metrics.
   // Carry 7: no meta yet (an empty snapshot) is a missing project, which mergeMetrics takes as it is.
@@ -1096,11 +1113,11 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   };
   const rows = (s: QSnap) => s.docs.map(x => ({ id: x.id, body: x.data() }));
 
-  unsubs.push(db.doc('meta/project').onSnapshot(((s: Snap) => { if (s.exists) { const mm = normalizeMeta(s.data(), reporter('meta/project')('meta/project')); if (mm) { projectMetrics = mm.metrics; model.meta = mm; withMetrics(); rebuild(); settleLink(); } } changed(); }) as never, onErr));
+  unsubs.push(db.doc('meta/project').onSnapshot(((s: Snap) => { if (s.exists) { const mm = normalizeMeta(s.data(), reporter('meta/project')('meta/project')); if (mm) { projectMetrics = mm.metrics; model.meta = mm; withMetrics(); rebuild(); settleLink(); } } changed(); }) as never, onMetaErr));
   unsubs.push(db.doc('meta/metrics').onSnapshot(((s: Snap) => { metricsDoc = s.exists ? normalizeMetrics(s.data(), reporter('meta/metrics')('meta/metrics')) : null; withMetrics(); changed(); }) as never, onErr));
   unsubs.push(db.doc('meta/run').onSnapshot(((s: Snap) => { model.run = s.exists ? normalizeRun(s.data(), reporter('meta/run')('meta/run')) : null; changed(); }) as never, onErr));
   unsubs.push(db.doc('meta/infinite').onSnapshot(((s: Snap) => { model.infinite = s.exists ? normalizeInfinite(s.data(), reporter('meta/infinite')('meta/infinite')) : null; changed(); }) as never, onErr));
-  unsubs.push(db.collection('plan').onSnapshot(((s: QSnap) => { const rep = reporter('plan'); const p = rows(s).map(r => normalizePhase(r.body, rep(`plan/${r.id}`))).filter((x): x is PhaseDoc => x !== null); if (p.length) { phaseDocs = p; rebuild(); } planSnap = true; settleLink(); changed(); }) as never, onErr));
+  unsubs.push(db.collection('plan').onSnapshot(((s: QSnap) => { const rep = reporter('plan'); const p = rows(s).map(r => normalizePhase(r.body, rep(`plan/${r.id}`))).filter((x): x is PhaseDoc => x !== null); if (p.length) { phaseDocs = p; rebuild(); } planSnap = true; settleLink(); changed(); }) as never, onPlanErr));
   unsubs.push(db.collection('state').onSnapshot(((s: QSnap) => {
     const rep = reporter('state');
     model.states = Object.fromEntries(rows(s).map(r => [r.id, normalizeState(r.body, rep(`state/${r.id}`))])) as States;

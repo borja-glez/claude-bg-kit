@@ -2074,4 +2074,60 @@ describe('the task detail: its URL, its tabs and its focus (H-25, §4.7, G-15)',
     go.mockRestore();
     app.stop();
   });
+
+  it('closing the detail with ✕, Escape or Back changes only the detail: the schedule keeps its ‹ › offset, zoom and search, and the URL keeps them (review N1)', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser(), '#v=schedule&z=1w&q=Maqueta&o=F1');
+    // Back is a real one here (happy-dom moves the URL to the entry under it, without events).
+    const go = vi.spyOn(history, 'go');
+    click(root, '[data-action="shift"][data-dir="-1"]');
+    await settle();
+    const base = location.hash;
+    expect(base).toBe('#v=schedule&z=1w&o=F1&q=Maqueta');
+    const view = () => [app.ui.view, app.ui.offset, app.ui.zoom, app.ui.search, [...app.ui.expanded]];
+    const before = view();
+    expect(before).toEqual(['schedule', -1, '1w', 'Maqueta', ['F1']]);
+    const closes: [string, () => void][] = [
+      ['✕', () => click(root, '.modal [data-action="close-modal"]')],
+      ['Escape', () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))],
+      // The person's own Back onto the entry under the detail.
+      ['Back', () => { history.replaceState(null, '', base); window.dispatchEvent(new Event('popstate')); }],
+    ];
+    for (const [how, close] of closes) {
+      click(root, '.tr.tk[data-id="T003"]');
+      await settle();
+      expect(app.ui.modal, how).toBe('T003');
+      expect(location.hash, how).toBe(`${base}&t=T003`);
+      close();
+      await settle();
+      expect(app.ui.modal, how).toBeNull();
+      expect(view(), how).toEqual(before);
+      expect(location.hash, how).toBe(base);
+    }
+    expect(go.mock.calls).toEqual([[-1], [-1]]);
+    go.mockRestore();
+    app.stop();
+  });
+
+  it('a pending link settles on the plan’s first snapshot or the plan’s own error, never on another subscription’s error (review N2)', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser(), '#t=T007&tt=definition');
+    f.fail('events');
+    f.fail('approvals');
+    await settle();
+    expect([app.ui.modal, location.hash]).toEqual([null, '#t=T007&tt=definition']);
+    const T007 = { ...snapshot.phases[0]!.tasks[0]!, id: 'T007', title: 'Tarea-nueva-T007', depends_on: [] };
+    f.push('plan', Object.fromEntries(snapshot.phases.map((p, i) => [p.id, i === 0 ? { ...p, tasks: [...p.tasks, T007] } : p])));
+    await settle();
+    expect([app.ui.modal, app.ui.tab]).toEqual(['T007', 'definition']);
+    expect(root.querySelector('#dtab-definition')!.getAttribute('aria-selected')).toBe('true');
+    app.stop();
+    const g = fakeDb();
+    const failed = await boot(g, fakeUser(), '#t=T007');
+    expect(location.hash).toBe('#t=T007');
+    g.fail('plan');
+    await settle();
+    expect([failed.app.ui.modal, location.hash]).toEqual([null, '']);
+    failed.app.stop();
+  });
 });
