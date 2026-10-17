@@ -11665,7 +11665,7 @@ function fitParts(parts, cols, sep = SEP) {
       }
       after = true;
       if (p.key.startsWith(SLOT)) {
-        more++;
+        more += Number.isInteger(p.count) && p.count > 0 ? p.count : 1;
         if (at < 0) at = out.length;
       }
     });
@@ -11717,6 +11717,29 @@ var MORE_LABEL = "\u22EF";
 var MORE_HOTKEY = "m";
 var DISMISS_KEY = "dismiss";
 var positive = (v, fallback) => typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : fallback;
+var LABEL_MIN = 1;
+function fitRow(controls, cols, o) {
+  const base = (c) => o.long ? c.label : c.short ?? c.label;
+  const cur = controls.map(base);
+  for (; ; ) {
+    const widths = cur.map((label) => stringWidth(label));
+    const used = cur.reduce((n, label, i) => n + controlWidth(label, { plain: o.plain, hotkey: controls[i].hotkey, kind: controls[i].kind }), 0) + Math.max(0, controls.length - 1);
+    const excess = used - cols;
+    if (excess <= 0) break;
+    let at = -1;
+    widths.forEach((w, i) => {
+      if (w > LABEL_MIN && (at < 0 || w > widths[at])) at = i;
+    });
+    if (at < 0) break;
+    const next = Math.max(0, ...widths.filter((_, i) => i !== at));
+    cur[at] = clipWidth(base(controls[at]), Math.min(widths[at] - 1, Math.max(LABEL_MIN, widths[at] - excess, next)));
+  }
+  const out = {};
+  controls.forEach((c, i) => {
+    if (cur[i] !== base(c)) out[c.key] = cur[i];
+  });
+  return out;
+}
 function layoutBand(parts, controls, o) {
   const cols = positive(o.bodyColumns, DEFAULT_COLUMNS);
   const maxRows = positive(o.maxRows, 10);
@@ -11728,16 +11751,27 @@ function layoutBand(parts, controls, o) {
   let level = bandLevel({ bodyColumns: cols, maxRows, fullscreen: o.fullscreen });
   if (level === "wide") {
     const room2 = cols - lead - width(controls, true);
-    if (partsWidth(core) <= room2) return { level, plain, long: true, shown: fitParts(parts, room2).shown, inline: keys(controls), second: [], more: false };
+    if (partsWidth(core) <= room2) return { level, plain, long: true, shown: fitParts(parts, room2).shown, inline: keys(controls), second: [], more: false, labels: {} };
     level = "two";
   }
-  if (level === "two") return { level, plain, long: false, shown: fitParts(parts, cols - lead).shown, inline: [], second: keys(controls), more: false };
+  if (level === "two") {
+    return { level, plain, long: false, shown: fitParts(parts, cols - lead).shown, inline: [], second: keys(controls), more: false, labels: fitRow(controls, cols, { plain, long: false }) };
+  }
   const room = cols - lead - width(controls, false);
-  if (partsWidth(core) <= room) return { level, plain, long: false, shown: fitParts(parts, room).shown, inline: keys(controls), second: [], more: false };
+  if (partsWidth(core) <= room) return { level, plain, long: false, shown: fitParts(parts, room).shown, inline: keys(controls), second: [], more: false, labels: {} };
   const dismiss = controls.filter((c) => c.key === DISMISS_KEY);
   const rest = controls.filter((c) => c.key !== DISMISS_KEY);
   const folded = cols - lead - (1 + controlWidth(MORE_LABEL, { plain, hotkey: MORE_HOTKEY })) - width(dismiss, false);
-  return { level, plain, long: false, shown: fitParts(parts, folded).shown, inline: keys(dismiss), second: o.moreOpen ? keys(rest) : [], more: true };
+  return {
+    level,
+    plain,
+    long: false,
+    shown: fitParts(parts, folded).shown,
+    inline: keys(dismiss),
+    second: o.moreOpen ? keys(rest) : [],
+    more: true,
+    labels: o.moreOpen ? fitRow(rest, cols, { plain, long: false }) : {}
+  };
 }
 
 // src/mod/band-line.ts
@@ -11989,6 +12023,8 @@ function runParts(m, t) {
         prio: 4
       });
     }
+    const extra = Number.isInteger(m.running) ? m.running - m.slots.length : 0;
+    if (extra > 0) parts.push({ key: "slot:+", text: `+${extra}`, prio: 4, count: extra });
   }
   parts.push({ key: "integrated", text: `${m.integrated}/${m.total} ${t.integratedN}`, short: `${m.integrated}/${m.total}`, prio: 5 });
   if ((m.queued ?? 0) > 0) parts.push({ key: "queued", text: `${t.queuedN} ${m.queued}`, prio: 8 });
@@ -12407,23 +12443,51 @@ async function dismissNotice($, n) {
   try {
     await $.store.set(DISMISS_STORE_KEY, next);
     await loadDismissals($);
+    await publishDrawn($);
   } catch {
   }
 }
+var drawnGen = 0;
+var renderFailed = false;
+var expiry = null;
+var EXPIRY_MAX_MS = 2 * 24 * 36e5;
+function watchExpiry($, ms) {
+  expiry?.cancel();
+  expiry = null;
+  if (!Number.isFinite(ms) || ms <= 0 || ms > EXPIRY_MAX_MS) return;
+  expiry = $.clock.after(ms + 1, () => {
+    expiry = null;
+    $.ui.invalidate("ui.render");
+    void publishDrawn($);
+  });
+}
 async function publishDrawn($) {
+  const gen = ++drawnGen;
   try {
     const m = await read($, band);
-    let shown = !await read($, hidden) && m.mode !== "none";
-    if (shown && m.mode === "notice") shown = !isDismissed(dismissals, dismissalKey(await rootOf($), m.project, m.kind, m.key), await nowMs($));
-    if (await read($, drawn) !== shown) await update($, drawn, () => shown);
+    let shown = !renderFailed && !await read($, hidden) && m.mode !== "none";
+    if (shown && m.mode === "notice") {
+      if (!dismissalsLoaded) await readDismissals($);
+      const key = dismissalKey(await rootOf($), m.project, m.kind, m.key);
+      const now = await nowMs($);
+      shown = !isDismissed(dismissals, key, now);
+      if (!shown) watchExpiry($, Date.parse(Object.prototype.hasOwnProperty.call(dismissals, key) ? dismissals[key] : "") - now);
+    }
+    const current = await read($, drawn);
+    if (gen !== drawnGen) return;
+    if (current !== shown) await update($, drawn, () => shown);
   } catch {
   }
+}
+function noteDrawing($, ok) {
+  if (renderFailed === !ok) return;
+  renderFailed = !ok;
+  void publishDrawn($);
 }
 var MORE_OPEN_MS = 3e4;
 var moreUntil = 0;
 var CONFIRM_MS = 5e3;
 var armed = null;
-var bandShown = false;
 var refreshPending = false;
 async function refresh($) {
   if (refreshing) {
@@ -12569,6 +12633,8 @@ export const register = (on) => {
     timer = null;
     lensRecheck?.cancel();
     lensRecheck = null;
+    expiry?.cancel();
+    expiry = null;
     return next(e);
   });
   on("classic.SessionStart", async ($, e, next) => {
@@ -12582,7 +12648,7 @@ export const register = (on) => {
     if (!timer) startTimer($);
     void refresh($);
     return r;
-  });
+  }).catch(($, e, next) => next(e));
   on("turn.complete", ($, e, next) => {
     void checkLens($);
     void refresh($);
@@ -12595,10 +12661,9 @@ export const register = (on) => {
     } catch {
     }
     return result;
-  });
+  }).catch(($, e, next) => next(e));
   on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
     const below = await next(e);
-    bandShown = false;
     try {
       const m = await read($, band);
       const isHidden = await read($, hidden);
@@ -12723,8 +12788,8 @@ export const register = (on) => {
       };
       const plain = lay.plain ? { plain: true } : {};
       const draw = (c) => {
-        const label = lay.long ? c.label : c.short ?? c.label;
-        if (c.kind === "text") return /* @__PURE__ */ h(Text, { key: c.key, dimColor: true }, c.label);
+        const label = lay.labels[c.key] ?? (lay.long ? c.label : c.short ?? c.label);
+        if (c.kind === "text") return /* @__PURE__ */ h(Text, { key: c.key, dimColor: true }, lay.labels[c.key] ?? c.label);
         if (c.kind === "link") return /* @__PURE__ */ h(Link, { key: c.key, href: c.href ?? "", label });
         return /* @__PURE__ */ h(
           Button,
@@ -12749,18 +12814,19 @@ export const register = (on) => {
         const text2 = `${i ? p.glue ?? SEP : ""}${p.text}`;
         return p.hue ? /* @__PURE__ */ h(Text, { key: `part-${p.key}`, ...TONE[p.hue] }, text2) : text2;
       }));
-      bandShown = true;
-      return /* @__PURE__ */ h(Box, { flexDirection: "column" }, /* @__PURE__ */ h(Box, { key: "band-row", flexDirection: "row", columnGap: 1 }, /* @__PURE__ */ h(Box, { key: "band-line", flexShrink: 1, minWidth: 0 }, line), drawKeys(lay.inline.filter((k) => k !== DISMISS_KEY)), lay.more ? /* @__PURE__ */ h(Button, { key: MORE_KEY, label: MORE_LABEL, hotkey: MORE_HOTKEY, ...plain, onPress: () => {
+      const tree = /* @__PURE__ */ h(Box, { flexDirection: "column" }, /* @__PURE__ */ h(Box, { key: "band-row", flexDirection: "row", columnGap: 1 }, /* @__PURE__ */ h(Box, { key: "band-line", flexShrink: 1, minWidth: 0 }, line), drawKeys(lay.inline.filter((k) => k !== DISMISS_KEY)), lay.more ? /* @__PURE__ */ h(Button, { key: MORE_KEY, label: MORE_LABEL, hotkey: MORE_HOTKEY, ...plain, onPress: () => {
         void toggleMore($);
       } }) : null, drawKeys(lay.inline.filter((k) => k === DISMISS_KEY))), lay.second.length ? /* @__PURE__ */ h(Box, { key: "band-row2", flexDirection: "row", flexWrap: "wrap", columnGap: 1 }, drawKeys(lay.second)) : null, below);
+      noteDrawing($, true);
+      return tree;
     } catch {
-      bandShown = false;
+      noteDrawing($, false);
       return below;
     }
   });
   on("ui.render", { component: "PromptHint" }, async ($, e, next) => {
     try {
-      if (bandShown && e.viewport?.isFullscreen === false && !e.props.tail) {
+      if (e.viewport?.isFullscreen === false && !e.props.tail && await read($, drawn) === true) {
         const m = await read($, band);
         return next({ ...e, props: { ...e.props, tail: textsFor(m.locale).bandHint } });
       }

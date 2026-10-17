@@ -12199,19 +12199,19 @@ function ownerOf(st, sessionId2, ownTasks2) {
   if (st.session !== null && sessionId2) return st.session === sessionId2 ? "own" : "other";
   return ownTasks2.some((t) => isOf(st.task, t)) ? "own" : "other";
 }
-function homeOf(h2, match) {
-  const of = h2.statuses.filter(match);
+function homeOf(input, match) {
+  const of = input.statuses.filter(match);
   const loose = of.find((st) => st.project === null);
   if (loose) return keyOf(loose.task, null);
-  const live = (st) => !st.doneAt && st.phase.toLowerCase() !== "stopped" && ownerOf(st, h2.sessionId, h2.ownTasks) === "own";
-  return newestKey(of, live, h2.now) ?? newestKey(of, () => true, h2.now);
+  const live = (st) => !st.doneAt && st.phase.toLowerCase() !== "stopped" && ownerOf(st, input.sessionId, input.ownTasks) === "own";
+  return newestKey(of, live, input.now) ?? newestKey(of, () => true, input.now);
 }
-function linkHomes(h2) {
+function linkHomes(input) {
   const out = /* @__PURE__ */ new Map();
-  for (const l of h2.links) {
+  for (const l of input.links) {
     const task = l.task;
     if (!task || l.workflow) continue;
-    out.set(l.id, l.project !== null ? keyOf(task, l.project) : homeOf(h2, (st) => st.task === task) ?? keyOf(task, null));
+    out.set(l.id, l.project !== null ? keyOf(task, l.project) : homeOf(input, (st) => st.task === task) ?? keyOf(task, null));
   }
   return out;
 }
@@ -12335,6 +12335,7 @@ function buildActivities(i) {
     const skewed = last - now > FUTURE_SKEW_MS;
     const job = liveJobs.find((j) => jobHome.get(j) === key);
     const live = owner === "own" && !done && !stopped;
+    const idle = live && age(last, now) >= LEFT_OPEN_MS;
     const title = i.titles?.[key];
     const slot = slotTasks.has(st.task) && st.project === execProject && !done && !stopped;
     built.push({
@@ -12356,6 +12357,7 @@ function buildActivities(i) {
         cap: st.reviews?.max ?? st.cap,
         verdict: st.verdict ? { action: st.verdict.action, score: st.verdict.score, round: st.verdict.round, findings: st.verdict.findings } : null,
         ...st.autonomy === "auto" ? { autonomy: "auto" } : {},
+        ...idle ? { idle: true } : {},
         job: job ? { name: job.cmd, seconds: span2(ms(job.startedAt), now, now) } : null,
         seconds: skewed ? null : span2(ms(st.taskStartedAt), done || stopped ? ended : now, now),
         agents: live ? mine.map((l) => agentOf(l, i.links, i.models, now)) : []
@@ -12390,7 +12392,7 @@ function buildActivities(i) {
   const focus = i.focusAgent ? i.links.find((l) => l.id === i.focusAgent) : void 0;
   const pick2 = (focus ? forge.find((b) => b.row.key === homes.get(focus.id)) : void 0) ?? forge.find((b) => b.rank === 0 && b.row.owner === "own") ?? forge.reduce((best, b) => !best || b.at > best.at ? b : best, void 0);
   if (pick2) pick2.row.expanded = true;
-  if (pick2 && focus && pick2.row.task === focus.task) built.unshift(...built.splice(built.indexOf(pick2), 1));
+  if (pick2 && focus && pick2.row.key === homes.get(focus.id)) built.unshift(...built.splice(built.indexOf(pick2), 1));
   const out = built.map((b) => b.row);
   if (i.superpowers) {
     const s = i.superpowers;
@@ -13125,7 +13127,7 @@ function fitParts(parts, cols, sep = SEP) {
       }
       after = true;
       if (p.key.startsWith(SLOT)) {
-        more++;
+        more += Number.isInteger(p.count) && p.count > 0 ? p.count : 1;
         if (at < 0) at = out.length;
       }
     });
@@ -13970,7 +13972,7 @@ function panelLayout(props, viewport) {
 var innerWidth = (layout) => Math.max(6, layout.cols - (layout.boxed ? 4 : 2));
 var cellsMax = (inner) => 2 * Math.max(1, Math.floor(inner / 2));
 function fitCells(cells2, max) {
-  const limit = Math.max(1, Math.floor(max));
+  const limit = max === Number.POSITIVE_INFINITY ? cells2.length : Number.isFinite(max) ? Math.max(1, Math.floor(max)) : 1;
   if (cells2.length <= limit) return { cells: [...cells2], more: null };
   const size = Math.max(1, limit - SUMMARY_CELLS);
   const first = cells2.findIndex((c2) => c2 === "active" || c2 === "pending");
@@ -13984,7 +13986,11 @@ function fitCells(cells2, max) {
 }
 function blockRows(b, inner) {
   if (b.kind === "bar") return b.label || b.right ? 2 : 1;
-  if (b.kind === "cells") return b.cells.length ? Math.min(2, Math.ceil(b.cells.length * 2 / Math.max(2, inner))) : 0;
+  if (b.kind === "cells") {
+    if (!b.cells.length) return 0;
+    const fit2 = fitCells(b.cells, cellsMax(inner));
+    return Math.min(2, Math.ceil(fit2.cells.length * 2 / Math.max(2, inner))) + (fit2.more ? 1 : 0);
+  }
   return 1;
 }
 function cardRows(card, layout) {
@@ -14029,6 +14035,7 @@ function clipCard(card, layout, rows) {
     if (cardRows(card, layout) <= limit) return card;
     const marker = { kind: "text", text: "\u2026", dim: true };
     if (limit === 1 && !layout.boxed) return { ...card, title: `${card.title}\u2026`, subtitle: void 0, chip: void 0, blocks: [] };
+    if (layout.boxed && limit < 3) return { ...card, title: `${card.title}\u2026`, subtitle: void 0, blocks: [] };
     const head = { ...card, subtitle: limit >= 3 ? card.subtitle : void 0, blocks: [] };
     const kept = [];
     for (const b of card.blocks) {
@@ -14042,7 +14049,7 @@ function clipCard(card, layout, rows) {
 }
 
 // src/lens/term.tsx
-var hex = (h2) => PALETTE[h2];
+var hex = (hue) => PALETTE[hue];
 var STAGE_GLYPH = { done: "\u25CF", active: "\u25C9", pending: "\u25CB" };
 function bar(ui, key, r, width, hue, moving) {
   const { Box, Text, Client } = ui;
@@ -14128,6 +14135,15 @@ function activityTag(a) {
   const doing = a.job ? VALIDATING2.has(a.job.name) ? "val" : a.job.name === "integrate" ? "int" : a.job.name : a.stage ? STAGE_SHORT[a.stage] ?? a.stage : null;
   return [a.task, doing, a.round ? `r${a.round}` : null].filter(Boolean).join(" ");
 }
+function bandSubject(m) {
+  const acts = ownInProgress(m);
+  if (acts.length >= 2) return `tasks:${acts.map((a) => a.key).join(" ")}`;
+  const head = m ? headline(m) : null;
+  if (!head) return "agents";
+  if (m?.execution?.active) return `run:${m.execution.runId}`;
+  if (head.section === "todos" || head.section === "agents") return head.section;
+  return `${head.section}:${head.title}`;
+}
 function lensBand(m, t, agentsHeard) {
   const acts = ownInProgress(m);
   const head = m ? headline(m) : null;
@@ -14196,6 +14212,9 @@ function activityText(a, t) {
 }
 function ownActive(m, role) {
   return !!m && (ownInProgress(m).length > 0 || role === "owner" && m.execution?.active === true);
+}
+function ownBusy(m, role) {
+  return !!m && (ownInProgress(m).some((a) => !a.idle || a.job !== null || a.agents.length > 0) || role === "owner" && m.execution?.active === true);
 }
 function statusText(m, t, role) {
   if (!m || !ownActive(m, role)) return null;
@@ -14634,26 +14653,63 @@ var roadmap = noneBand();
 var bandRead = false;
 var bandModel = null;
 var bandJson = "";
-var lastView = { columns: null, rows: null, fullscreen: null, maxRows: null };
+var NO_VIEW = { columns: null, rows: null, fullscreen: null, maxRows: null, body: null, docked: false };
+var views = /* @__PURE__ */ new Map();
+var viewOf = (surface) => views.get(String(surface)) ?? NO_VIEW;
 var focusAgent = null;
 var viewNumber = (v) => typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
-function noteView(viewport, maxRows) {
-  if (viewport) {
-    lastView = {
-      ...lastView,
-      columns: viewNumber(viewport.columns) ?? lastView.columns,
-      rows: viewNumber(viewport.rows) ?? lastView.rows,
-      fullscreen: typeof viewport.isFullscreen === "boolean" ? viewport.isFullscreen : lastView.fullscreen
-    };
-  }
-  const above = viewNumber(maxRows);
-  if (above !== null) lastView = { ...lastView, maxRows: above };
+function noteView(surface, viewport, more = {}) {
+  const was = viewOf(surface);
+  views.set(String(surface), {
+    columns: viewNumber(viewport?.columns) ?? was.columns,
+    rows: viewNumber(viewport?.rows) ?? was.rows,
+    fullscreen: typeof viewport?.isFullscreen === "boolean" ? viewport.isFullscreen : was.fullscreen,
+    maxRows: viewNumber(more.maxRows) ?? was.maxRows,
+    body: viewNumber(more.body) ?? was.body,
+    docked: more.docked ?? was.docked
+  });
+}
+var BAND_MARK_COLUMNS = 5;
+function transcriptColumns(surface, viewport) {
+  const screen = viewNumber(viewport?.columns) ?? LINE_MAX;
+  const v = viewOf(surface);
+  if (v.body !== null && v.columns === screen) return Math.min(screen, v.body + BAND_MARK_COLUMNS);
+  if (paneUp && v.docked) return Math.max(1, screen - DOCK_COLUMNS);
+  return screen;
+}
+function noteRender($, surface, viewport, more = {}) {
+  const before = transcriptColumns(surface, viewport);
+  noteView(surface, viewport, more);
+  if (photos.size && transcriptColumns(surface, viewport) !== before) $.ui.invalidate("ui.render");
 }
 var ICON_COLUMNS = 2;
 var BAR_MIN = 6;
 var BAR_MAX = 36;
 var BAND_CELLS = 16;
-var bandDrawn = false;
+var waypointSeen = false;
+var takeoverAt = Number.NEGATIVE_INFINITY;
+var TAKEOVER_MS = 5e3;
+var hiddenSubject = null;
+async function closeBand($, subject) {
+  try {
+    if (await nowMs($) - takeoverAt < TAKEOVER_MS) return;
+    hiddenSubject = subject;
+    await update($, hidden, () => true);
+  } catch {
+  }
+}
+async function bandUp($) {
+  if (!busy || await waypointDraws($)) return false;
+  return !(await read($, hidden) && hiddenSubject === bandSubject(bandModel));
+}
+async function releaseBand($, model) {
+  if (hiddenSubject !== null && hiddenSubject === bandSubject(model)) return;
+  hiddenSubject = null;
+  try {
+    if (await read($, hidden)) await update($, hidden, () => false);
+  } catch {
+  }
+}
 function runLens($, args) {
   $.command.run({ command: "lens", args }).catch(async () => {
     try {
@@ -14685,6 +14741,9 @@ function resetPanel() {
   bandModel = null;
   bandJson = "";
   focusAgent = null;
+  hiddenSubject = null;
+  waypointSeen = false;
+  takeoverAt = Number.NEGATIVE_INFINITY;
   prevModel = null;
   primed = false;
   toastQueue = [];
@@ -14713,16 +14772,13 @@ function applyPendingEnd(id2, now) {
 function isBusy(now) {
   activity.subagents = activity.subagents.filter((s) => now - s.since < SUBAGENT_TTL_MS);
   const todos = summarizeTodos(activity.todos);
-  return todos.total - todos.done > 0 || activity.subagents.length > 0 || links.some((l) => l.status !== "done") || ownActive(bandModel, runRoleOf(roadmap)) || forgeHeardAt !== null && now - forgeHeardAt < FORGE_HEARD_MS;
+  return todos.total - todos.done > 0 || activity.subagents.length > 0 || links.some((l) => l.status !== "done") || ownBusy(bandModel, runRoleOf(roadmap)) || forgeHeardAt !== null && now - forgeHeardAt < FORGE_HEARD_MS;
 }
 var waypointBand = false;
+var waypointLoaded = null;
 async function checkWaypoint($) {
   try {
     if (await read($, hidden)) return;
-  } catch {
-  }
-  try {
-    if (typeof await read($, waypointDrawn) === "boolean") return;
   } catch {
   }
   let installed = false;
@@ -14730,19 +14786,27 @@ async function checkWaypoint($) {
     installed = (await $.command.list()).some((c2) => c2.plugin === "waypoint" || c2.name.startsWith("waypoint:"));
   } catch {
   }
+  const loadedChanged = installed !== waypointLoaded;
+  waypointLoaded = installed;
+  let said = false;
+  try {
+    said = installed && typeof await read($, waypointDrawn) === "boolean";
+  } catch {
+  }
   let next = false;
-  if (installed) {
+  if (installed && !said) {
     try {
       next = (await loadBandModel($)).mode !== "none";
     } catch {
     }
   }
-  if (next !== waypointBand) {
+  if (next !== waypointBand || loadedChanged) {
     waypointBand = next;
     $.ui.invalidate("ui.render");
   }
 }
 async function waypointDraws($) {
+  if (waypointLoaded === false) return waypointBand;
   try {
     const said = await read($, waypointDrawn);
     if (typeof said === "boolean") return said;
@@ -15298,7 +15362,14 @@ function keepBand($, model) {
   bandJson = json2;
   bandModel = model;
   $.ui.invalidate("ui.render");
+  void releaseBand($, model);
   void updateSurfaces($, model);
+}
+function notePane($, up) {
+  if (up === paneUp) return;
+  paneUp = up;
+  if (!up) focusAgent = null;
+  if (photos.size) $.ui.invalidate("ui.render");
 }
 async function writePanel($) {
   if (!paneUp) return;
@@ -15344,13 +15415,13 @@ function stopPanelTimer() {
   panelTimer?.cancel();
   panelTimer = null;
 }
-async function refreshPanel($) {
+async function refreshPanel($, force = false) {
   if (panelRefreshing) return;
   panelRefreshing = true;
   try {
-    paneUp = await isPaneOpen($);
+    notePane($, await isPaneOpen($));
     if (!paneUp) stopPanelTimer();
-    if (!paneUp && !busy) return;
+    if (!paneUp && !busy && !force) return;
     if (paneUp) startPanelTimer($);
     try {
       roadmap = await loadBandModel($);
@@ -15430,7 +15501,7 @@ var TEXT = {
     sForge: "forge",
     approve: "Aprobar",
     reject: "Rechazar",
-    hoursLeft: (h2) => `quedan ${h2} h`,
+    hoursLeft: (hours) => `quedan ${hours} h`,
     auto: "auto",
     autoDecisions: (n2) => `${n2} ${n2 === 1 ? "decisi\xF3n autom\xE1tica" : "decisiones autom\xE1ticas"}`,
     autoMode: "modo auto",
@@ -15523,7 +15594,7 @@ var TEXT = {
     sForge: "forge",
     approve: "Approve",
     reject: "Reject",
-    hoursLeft: (h2) => `${h2}h left`,
+    hoursLeft: (hours) => `${hours}h left`,
     auto: "auto",
     autoDecisions: (n2) => `${n2} automatic decision${n2 === 1 ? "" : "s"}`,
     autoMode: "auto mode",
@@ -15574,23 +15645,34 @@ var TEXT = {
 var textsFor = (locale) => locale === "es" ? TEXT.es : TEXT.en;
 var lensTexts = () => textsFor(roadmap.locale);
 async function openPanel($) {
+  const fresh = bandModel === null;
+  if (fresh) await refreshPanel($, true);
   const t = lensTexts();
   let placed = false;
   try {
-    const compact = panelLayout({ bodyColumns: lastView.columns ?? LINE_MAX, placement: "inline" });
+    const view = viewOf("terminal");
+    const compact = panelLayout({ bodyColumns: view.columns ?? LINE_MAX, placement: "inline" });
     let estimate = 0;
     try {
       if (bandModel) estimate = buildCards(bandModel, t, 0).reduce((n2, card) => n2 + cardRows(card, compact), 0);
     } catch {
       estimate = 0;
     }
-    const opened = await $.ui.open({ id: PANE, title: "lens", rows: paneRows(estimate, lastView.rows), columns: DOCK_COLUMNS });
+    const opened = await $.ui.open({ id: PANE, title: "lens", rows: paneRows(estimate, view.rows), columns: DOCK_COLUMNS });
     placed = opened.isPlaced;
     if (!opened.isPlaced) $.ui.toast(`${t.panelWaiting}: ${clip3(opened.reason, 200)}`);
   } catch {
     return false;
   }
-  await refreshPanel($);
+  if (!fresh) {
+    await refreshPanel($);
+    return placed;
+  }
+  notePane($, await isPaneOpen($));
+  if (paneUp) {
+    startPanelTimer($);
+    await requestPanelWrite($);
+  }
   return placed;
 }
 var photos = /* @__PURE__ */ new Map();
@@ -15605,16 +15687,25 @@ async function takePhoto($) {
   }
   try {
     roadmap = await loadBandModel($);
+    bandRead = true;
+  } catch {
+  }
+  keepRunBaseline();
+  try {
+    panelFiles = await loadPanelFiles($, now);
   } catch {
   }
   try {
-    panelFiles = await loadPanelFiles($, now);
+    const list = await agentList($);
+    activity.subagents = liveSubagents(now, list);
+    if (list) links = syncListed(links, list, now, knownTasks(bandModel));
+    links = pruneLinks(links, now);
   } catch {
   }
   const model = await buildPanel($);
   keepBand($, model);
   const t = textsFor(model.locale);
-  const tasks = model.activities.filter((a) => a.kind === "forge" || a.kind === "workflow").length;
+  const tasks = model.activities.filter((a) => (a.kind === "forge" || a.kind === "workflow") && !a.done && !a.stopped).length;
   const n2 = ++photoCount;
   const text2 = photoText(n2, now, t.photoTasks(tasks));
   keepPhoto(photos, n2, { text: text2, cards: buildCards(model, t, now) });
@@ -15672,7 +15763,8 @@ function clearStatus($) {
 }
 function updateStatus($, model) {
   try {
-    const show = lastView.fullscreen === false || lastView.maxRows !== null && lastView.maxRows < 3;
+    const view = viewOf("terminal");
+    const show = view.fullscreen === false || view.maxRows !== null && view.maxRows < 3;
     const text2 = show && model ? statusText(model, textsFor(model.locale), runRoleOf(roadmap)) ?? void 0 : void 0;
     if (text2 === lastStatus) return;
     lastStatus = text2;
@@ -15733,6 +15825,7 @@ export const register = (on) => {
     } catch {
     }
     waypointBand = false;
+    waypointLoaded = null;
     roadmap = noneBand();
     try {
       if (await read($, hidden)) await update($, hidden, () => false);
@@ -15811,9 +15904,16 @@ export const register = (on) => {
       const n2 = photoId(e.props.text);
       const shot = n2 === null ? void 0 : photos.get(n2);
       if (!shot || shot.text !== e.props.text) return next(e);
-      const { Box, Text } = $.ui.resolve(e);
-      const layout = panelLayout({ bodyColumns: Number(e.viewport?.columns) || LINE_MAX, placement: "inline" });
-      return /* @__PURE__ */ h(Box, { flexDirection: "column" }, /* @__PURE__ */ h(Text, { dimColor: true }, e.props.text), shot.cards.map((card, i) => termCard({ Box, Text }, `photo-${n2}-${i}`, card, layout)));
+      const ui = $.ui.resolve(e);
+      const { Box, Text } = ui;
+      const layout = panelLayout({ bodyColumns: transcriptColumns(e.surface, e.viewport), placement: "inline" });
+      const Svg = e.surface !== "terminal" && "Svg" in ui ? ui.Svg : null;
+      const W = Math.max(240, Math.min(900, layout.cols * 8 - 8));
+      return /* @__PURE__ */ h(Box, { flexDirection: "column", rowGap: Svg ? 1 : 0 }, /* @__PURE__ */ h(Text, { dimColor: true }, e.props.text), shot.cards.map((card, i) => {
+        if (!Svg) return termCard({ Box, Text }, `photo-${n2}-${i}`, card, layout);
+        const { source, height } = cardSvg(card, W);
+        return /* @__PURE__ */ h(Svg, { key: `photo-${n2}-${i}`, source, alt: cardAlt(card), width: W, height });
+      }));
     } catch {
       return next(e);
     }
@@ -15821,7 +15921,7 @@ export const register = (on) => {
   on("ui.close", async ($, e, next) => {
     const closed = await next(e);
     if (e.id === PANE) {
-      paneUp = await isPaneOpen($);
+      notePane($, await isPaneOpen($));
       if (!paneUp) stopPanelTimer();
     }
     return closed;
@@ -16036,7 +16136,7 @@ export const register = (on) => {
   }).catch(($, e, next) => next(e));
   on("ui.render", { component: "Pane", requestId: PANE }, async ($, e, next) => {
     try {
-      noteView(e.viewport);
+      noteRender($, e.surface, e.viewport, { docked: e.props.placement === "dock" });
       updateStatus($, bandModel);
       const layout = panelLayout(e.props, e.viewport);
       if (layout.focusAgent !== focusAgent) {
@@ -16079,11 +16179,22 @@ export const register = (on) => {
   });
   on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
     const below = await next(e);
-    noteView(e.viewport, e.props.maxRows);
+    noteRender($, e.surface, e.viewport, { maxRows: e.props.maxRows, body: e.props.bodyColumns });
     updateStatus($, bandModel);
-    bandDrawn = false;
     try {
-      if (e.props.hasSurvey || !busy || await waypointDraws($) || await read($, hidden)) return below;
+      if (e.props.hasSurvey || !busy) return below;
+      if (await waypointDraws($)) {
+        waypointSeen = true;
+        return below;
+      }
+      if (waypointSeen) {
+        waypointSeen = false;
+        void nowMs($).then((at) => {
+          takeoverAt = at;
+        });
+      }
+      const subject = bandSubject(bandModel);
+      if (await read($, hidden) && hiddenSubject === subject) return below;
       const ui = $.ui.resolve(e);
       const { Box, Button } = ui;
       const t = lensTexts();
@@ -16106,12 +16217,11 @@ export const register = (on) => {
           runLens($, form);
         } }),
         /* @__PURE__ */ h(Button, { key: "dismiss", label: "\xD7", role: "dismiss", hotkey: "x", ...plainProp, onPress: () => {
-          update($, hidden, () => true).catch(() => void 0);
+          void closeBand($, subject);
         } })
       ];
       const icon = SECTION_ICON[shape.section];
       const hue = SECTION_HUE[shape.section];
-      bandDrawn = true;
       if (e.surface !== "terminal" && "Svg" in ui) {
         const { Svg } = ui;
         const W = Math.max(200, Math.min(1600, cols * 8 - 130));
@@ -16121,13 +16231,12 @@ export const register = (on) => {
       }
       return /* @__PURE__ */ h(Box, { flexDirection: "column" }, /* @__PURE__ */ h(Box, { key: "band-row", flexDirection: "row", columnGap: 1 }, termBand(ui, { icon, hue, spin: shape.spin, parts: shown, bar: wide ? { ratio: shape.ratio, width: barWidth, moving: true } : null, cells: wide ? boxes : [] }), /* @__PURE__ */ h(Box, { flexDirection: "row", columnGap: 1, flexShrink: 0 }, buttons)), below);
     } catch {
-      bandDrawn = false;
       return below;
     }
   });
   on("ui.render", { component: "PromptHint" }, async ($, e, next) => {
     try {
-      if (bandDrawn && e.viewport?.isFullscreen === false && !e.props.tail) return next({ ...e, props: { ...e.props, tail: lensTexts().bandHint } });
+      if (e.viewport?.isFullscreen === false && !e.props.tail && await bandUp($)) return next({ ...e, props: { ...e.props, tail: lensTexts().bandHint } });
     } catch {
     }
     return next(e);
