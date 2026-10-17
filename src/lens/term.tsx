@@ -5,6 +5,7 @@ import type { ElementConstructor, BoxProps, TextProps, ClientProps, RenderElemen
 import type { Block, Card } from './svg.js';
 import { PALETTE, STATE_HUE, barParts, type Hue, type CellState } from './view.js';
 import { cellsMax, fitCells, innerWidth, type PanelLayout } from './layout.js';
+import { SEP, type BandPart } from '../mod/band-fit.js';
 
 export type TermUI = {
   Box: ElementConstructor<BoxProps>; Text: ElementConstructor<TextProps>; Client?: ElementConstructor<ClientProps>;
@@ -151,20 +152,36 @@ export function termCard(ui: TermUI, key: string, card: Card, layout: PanelLayou
   );
 }
 
-/** The band's terminal row: icon and title, a bar, the cells and the count. */
-export function termBand(ui: TermUI, o: { icon: string; title: string; detail: string; hue: Hue; ratio: number; label: string; moving: boolean; cells: CellState[]; columns: number; spin: boolean }): RenderElement {
-  const { Box, Text } = ui;
-  const titleW = Math.max(8, Math.min(28, o.title.length + 2, Math.floor(o.columns / 4)));
-  const cellsW = Math.min(o.cells.length, 16) * 2;
-  const barW = Math.max(6, Math.min(36, o.columns - titleW - cellsW - o.label.length - 30));
+// The parts of a band line as one Text, each glued to the one before; a part with a tone is a Text of its own: the
+// count in the section's colour, the dim ones dim, a warning amber and an alert red.
+function partsLine(ui: TermUI, parts: readonly BandPart[], base: Hue): RenderElement {
+  const { Text } = ui;
   return (
-    <Box flexDirection="row" columnGap={1} flexShrink={1}>
-      {o.spin ? spinner(ui, 'band-spin', o.hue) : <Text color={hex(o.hue)}>{o.icon}</Text>}
-      <Box width={titleW} flexShrink={0}><Text bold wrap="truncate-end">{o.title}</Text></Box>
-      {o.cells.length ? bar(ui, 'band-bar', o.ratio, barW, o.hue, o.moving) : null}
-      {o.label ? <Text bold color={hex(o.hue)}>{o.label}</Text> : null}
-      {o.cells.length ? cells(ui, 'band-cells', o.cells.slice(0, 16)) : null}
-      {o.detail ? <Box flexShrink={1}><Text dimColor wrap="truncate-end">{o.detail}</Text></Box> : null}
+    <Text wrap="truncate-end">
+      {parts.map((p, i) => {
+        const text = `${i ? p.glue ?? SEP : ''}${p.text}`;
+        if (p.hue === 'dim') return <Text key={`part-${p.key}`} dimColor>{text}</Text>;
+        if (p.hue === 'accent') return <Text key={`part-${p.key}`} bold color={hex(base)}>{text}</Text>;
+        if (p.hue === 'warn') return <Text key={`part-${p.key}`} color={PALETTE.yellow}>{text}</Text>;
+        if (p.hue === 'alert') return <Text key={`part-${p.key}`} color={PALETTE.red}>{text}</Text>;
+        return text;
+      })}
+    </Text>
+  );
+}
+
+/**
+ * The band's terminal row (F-09, F-12): the icon or a spinner, the parts already fitted to the width, and, where the
+ * band has room for them (wide), a bar of the width left and the task boxes.
+ */
+export function termBand(ui: TermUI, o: { icon: string; hue: Hue; spin: boolean; parts: readonly BandPart[]; bar: { ratio: number; width: number; moving: boolean } | null; cells: CellState[] }): RenderElement {
+  const { Box, Text } = ui;
+  return (
+    <Box flexDirection="row" columnGap={1} flexShrink={1} minWidth={0}>
+      <Box flexShrink={0}>{o.spin ? spinner(ui, 'band-spin', o.hue) : <Text color={hex(o.hue)}>{o.icon}</Text>}</Box>
+      <Box key="band-line" flexShrink={1} minWidth={0}>{partsLine(ui, o.parts, o.hue)}</Box>
+      {o.bar ? <Box flexShrink={0}>{bar(ui, 'band-bar', o.bar.ratio, o.bar.width, o.hue, o.bar.moving)}</Box> : null}
+      {o.cells.length ? <Box flexShrink={0}>{cells(ui, 'band-cells', o.cells)}</Box> : null}
     </Box>
   );
 }

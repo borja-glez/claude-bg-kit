@@ -28,14 +28,14 @@ function serveFiles(on: On, files: Record<string, { text: string; mtimeMs: numbe
   on('fs.list', (_$, e) => {
     reads.push(norm(e.path));
     const prefix = `${norm(e.path)}/`;
-    const names = new Map<string, 'file' | 'dir'>();
-    for (const path of Object.keys(files)) {
+    const names = new Map<string, { kind: 'file' | 'dir'; size: number; mtimeMs: number }>();
+    for (const [path, f] of Object.entries(files)) {
       if (!path.startsWith(prefix)) continue;
       const [head = '', ...rest] = path.slice(prefix.length).split('/');
-      names.set(head, rest.length ? 'dir' : 'file');
+      names.set(head, rest.length ? { kind: 'dir', size: 0, mtimeMs: 1 } : { kind: 'file', size: f.text.length, mtimeMs: f.mtimeMs });
     }
     return names.size
-      ? { value: [...names].map(([name, kind]) => ({ name, kind, size: 0, mtimeMs: 1, isLink: false })) }
+      ? { value: [...names].map(([name, x]) => ({ name, ...x, isLink: false })) }
       : { deny: `ENOENT ${e.path}` };
   });
 }
@@ -61,6 +61,30 @@ function serveWaypointState(on: On, state: { drawn?: boolean | null; hidden?: bo
     ? { value: { value: (state as Record<string, unknown>)[e.key], version: 1 } }
     : next(e)));
 }
+
+// The band's line as drawn: every string under the Box keyed band-line, nested Texts included.
+function strings(n: unknown, out: string[] = []): string[] {
+  if (typeof n === 'string') out.push(n);
+  else if (Array.isArray(n)) for (const c of n) strings(c, out);
+  else if (n && typeof n === 'object') strings((n as { children?: unknown }).children, out);
+  return out;
+}
+async function lineOf(ui: { drawn: () => Promise<unknown> }): Promise<string | undefined> {
+  const find = (n: unknown): { children?: unknown } | undefined => {
+    if (Array.isArray(n)) { for (const c of n) { const hit = find(c); if (hit) return hit; } return undefined; }
+    if (!n || typeof n !== 'object') return undefined;
+    const el = n as { props?: Record<string, unknown>; children?: unknown };
+    return el.props?.key === 'band-line' ? el : find(el.children);
+  };
+  const box = find(await ui.drawn());
+  return box ? strings(box.children).join('') : undefined;
+}
+// A forge task status of this conversation, as forge writes it in .forge/status/ (wave 3).
+const status = (task: string, over: object = {}) => JSON.stringify({
+  ts: new Date(NOW - 60_000).toISOString(), task, path: 'medium', phase: 'implement', agent: 'forge-impl', validators: [], verdict: null, round: null, cap: null,
+  taskStartedAt: new Date(NOW - 600_000).toISOString(), stageSince: new Date(NOW - 60_000).toISOString(), stages: {}, doneAt: null,
+  lastAt: new Date(NOW - 60_000).toISOString(), session: SESSION_ID, runId: null, project: null, ...over,
+});
 
 const SESSION = { cwd: ROOT, surface: 'terminal' as const, isInteractive: true };
 const TODOS = { tool: 'TodoWrite' as const, todos: [{ content: 'a', status: 'in_progress' as const, activeForm: 'a' }] };
@@ -225,4 +249,75 @@ test('waypoint says whether it draws: a dismissed notice (drawn false) leaves th
   expect(await buttons($)).toEqual([['panel', 'dismiss'], ['panel', 'dismiss']]);
   state.drawn = true;
   expect(await buttons($)).toEqual([[], []]);
+});
+
+test("lens's band names this session's tasks in progress, each as short as a band says it (F-09)", async ($, on) => {
+  const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
+  const touched = NOW - 60_000;
+  serveFiles(on, {
+    [`${ROOT}/.forge/status/T001.json`]: { text: status('T001', { lastAt: ago(1) }), mtimeMs: touched },
+    [`${ROOT}/.forge/status/T002.json`]: { text: status('T002', { phase: 'review', round: 2, lastAt: ago(2) }), mtimeMs: touched },
+    [`${ROOT}/.forge/status/T003.json`]: { text: status('T003', { phase: 'validate', lastAt: ago(3) }), mtimeMs: touched },
+  });
+  engineBand(on);
+  const clock = start(on);
+  on('command.list', () => ({ value: [] }));
+  await $.session.start(SESSION);
+  await $.tool.call(TODOS);
+  await clock.advance(30_000);
+  const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS });
+  expect(await lineOf(ui)).toBe('T001 impl · T002 rev r2 · T003 val');
+  await ui.unmount();
+});
+
+test("lens's band fits the width: at 80 columns its parts and measured buttons stay within it, at 160 it adds its bar and boxes (F-12)", async ($, on) => {
+  serveFiles(on, {});
+  engineBand(on);
+  const clock = start(on);
+  on('command.list', () => ({ value: [] }));
+  await $.session.start(SESSION);
+  await $.tool.call({ tool: 'TodoWrite', todos: [
+    { content: 'a', status: 'completed', activeForm: 'A' },
+    { content: 'b', status: 'in_progress', activeForm: 'Writing the parser for every configuration file of the whole project' },
+    { content: 'c', status: 'pending', activeForm: 'C' },
+  ] });
+  await clock.advance(30_000);
+  const mount = (bodyColumns: number) => $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: { ...BAND_PROPS, bodyColumns } });
+  let ui = await mount(80);
+  const line = (await lineOf(ui)) ?? '';
+  expect(line).toContain('1/3');
+  expect(2 + line.length + 1 + '[ Panel ]'.length + 1 + '[ × ]'.length).toBeLessThanOrEqual(80);
+  expect(await ui.find({ key: 'band-bar' })).toBeUndefined();
+  expect(await ui.find({ key: 'band-cells' })).toBeUndefined();
+  await ui.unmount();
+  ui = await mount(160);
+  expect(await lineOf(ui)).toBe('Writing the parser for every configuration file of the whole project · 1/3');
+  expect(await ui.find({ key: 'band-bar' })).toBeDefined();
+  expect(await ui.find({ key: 'band-cells' })).toBeDefined();
+  await ui.unmount();
+});
+
+test("lens's band buttons have their letters, plain outside fullscreen, and the hint line says ctrl+x tab (F-06)", async ($, on) => {
+  serveFiles(on, {});
+  engineBand(on);
+  start(on);
+  on('command.list', () => ({ value: [] }));
+  const tails: (string | undefined)[] = [];
+  on('ui.render', { component: 'PromptHint' }, ($, e) => {
+    tails.push(e.props.tail);
+    const { Text } = $.ui.resolve(e);
+    return h(Text, {}, e.props.hint) as RenderElement;
+  });
+  await $.session.start(SESSION);
+  await $.tool.call(TODOS);
+  for (const isFullscreen of [true, false]) {
+    const viewport = { columns: 105, rows: 30, isFullscreen };
+    const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS, viewport });
+    const plain = isFullscreen ? undefined : true;
+    expect((await ui.findAll({ type: 'Button' })).map(b => [b.key, b.props.hotkey, b.props.plain])).toEqual([['panel', 'p', plain], ['dismiss', 'x', plain]]);
+    const hint = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'PromptHint', props: { isDraft: false, isWorking: false, hint: '?' }, viewport });
+    expect(tails.at(-1), String(isFullscreen)).toBe(isFullscreen ? undefined : 'ctrl+x tab · band');
+    await hint.unmount();
+    await ui.unmount();
+  }
 });

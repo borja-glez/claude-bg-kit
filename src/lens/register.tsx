@@ -10,8 +10,10 @@ import { DECISIONS_MAX } from '../lib/decisions.js';
 import { buildCards, cardAlt } from './cards.js';
 import { cardSvg, bandSvg } from './svg.js';
 import { termCard, termBand, type TermUI } from './term.js';
-import { cardRows, clipCard, DOCK_COLUMNS, fitCards, panelLayout, paneRows } from './layout.js';
-import { headline, ratio, usageBandText, PALETTE, SECTION_HUE, SECTION_ICON } from './view.js';
+import { cardRows, clipCard, DOCK_COLUMNS, DOCK_MIN_COLUMNS, fitCards, panelLayout, paneRows } from './layout.js';
+import { bandLevel, controlWidth, DEFAULT_COLUMNS, fitParts, joinParts, partsWidth } from '../mod/band-fit.js';
+import { lensBand } from './lens-band.js';
+import { PALETTE, SECTION_HUE, SECTION_ICON } from './view.js';
 import { freshFinished, pushFinished, withoutRunning, type FinishedAgent } from './finished.js';
 import { endTurn, labelLoop, newTurnClock, newUsage, startTurn, touchTurn, recordStep, recordTracking, trackingKind, compactUsage, type UsageState } from './usage.js';
 import { mainCheckoutFrom, mergeForRun, parseUsageFile, runStartedAt, seedUsage, toUsageFile, totalsOf, USAGE_FILE_MAX, USAGE_FILES_MAX, type RunBaseline, type RunSource, type UsageFile } from './usage-file.js';
@@ -109,6 +111,23 @@ function noteView(viewport: { columns?: unknown; rows?: unknown; isFullscreen?: 
   }
   const above = viewNumber(maxRows);
   if (above !== null) lastView = { ...lastView, maxRows: above };
+}
+// F-12: the band's measures: the icon and its gap, the bar's narrowest and widest, the boxes it draws at most.
+const ICON_COLUMNS = 2;
+const BAR_MIN = 6;
+const BAR_MAX = 36;
+const BAND_CELLS = 16;
+// F-06: whether lens drew its band on the last render, for the hint line's tail outside fullscreen.
+let bandDrawn = false;
+
+// The Panel button: /lens in the form the band measured, run as the person would; left in the prompt where it cannot run.
+function runLens($: Engine, args: 'live' | 'foto'): void {
+  $.command.run({ command: 'lens', args }).catch(async () => {
+    try {
+      await $.prompt.fill({ text: `/lens ${args}`, mode: 'replace' });
+      $.ui.toast(lensTexts().pressEnter);
+    } catch { /* nothing else to do */ }
+  });
 }
 // An id that names a folder or file: isSafeId's rule (src/lib/execution-state.ts), up to 120 characters, as forge names them.
 const SAFE_TASK = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,120}$/;
@@ -875,6 +894,7 @@ const TEXT = {
     panel: 'Panel', panelOpened: 'Panel de progreso abierto.',
     panelWaiting: 'El panel lens está abierto pero aún no se muestra', nothing: 'Nada que mostrar todavía',
     moreRows: (n: number) => `↓ ${n} más · /lens foto`,
+    bandHint: 'ctrl+x tab · banda',
     noTask: 'sin tarea en curso', track: 'frente', decision: 'decisión pendiente',
     sRoadmap: 'Roadmap', sSuperpowers: 'superpowers', sNow: 'Ahora', sTodos: 'Pendientes', sSubagents: 'Subagentes',
     sTasks: 'Tareas de Claude Code', fixRound: 'ronda', phase: 'Fase', done: 'hechas', open: 'abiertas', tool: 'herramienta', turn: 'turno',
@@ -896,6 +916,7 @@ const TEXT = {
     panel: 'Panel', panelOpened: 'Progress panel opened.',
     panelWaiting: 'The lens panel is open but not shown yet', nothing: 'Nothing to show yet',
     moreRows: (n: number) => `↓ ${n} more · /lens photo`,
+    bandHint: 'ctrl+x tab · band',
     noTask: 'no task in progress', track: 'track', decision: 'decision pending',
     sRoadmap: 'Roadmap', sSuperpowers: 'superpowers', sNow: 'Now', sTodos: 'Todos', sSubagents: 'Subagents',
     sTasks: 'Claude Code tasks', fixRound: 'round', phase: 'Phase', done: 'done', open: 'open', tool: 'tool', turn: 'turn',
@@ -1323,43 +1344,54 @@ export const register: Register = on => {
     }
   });
 
-  // The band above the prompt while subagents or todos are about and waypoint draws no band of its own: the run's
-  // headline with its bar and task cells, then the Panel button. Drawn from module memory: no clock or file call.
+  // The band above the prompt while there is activity and waypoint draws no band of its own (F-16): this session's tasks
+  // in progress, or the run going on, with its count, the agents without a task and the spend, fitted to the width as
+  // waypoint's band is (F-09, F-12); the bar and the task boxes only where there is room (wide). Its buttons have
+  // letters, drawn plain outside fullscreen (F-06). Drawn from module memory: no clock or file call.
   // The band is one instance per chain: drawing without next(e) hides the bands of the plugins beneath, so ours stacks over them.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const below = await next(e);
     noteView(e.viewport, e.props.maxRows);
+    bandDrawn = false;
     try {
       if (e.props.hasSurvey || !busy || await waypointDraws($) || await read($, hidden)) return below;
       const ui = $.ui.resolve(e);
-      const { Box, Text, Button } = ui;
+      const { Box, Button } = ui;
       const t = lensTexts();
-      const head = bandModel ? headline(bandModel) : null;
-      const agents = bandModel?.subagents.length ?? activity.subagents.length;
-      const cells = head?.cells?.cells ?? [];
-      const done = head?.cells?.done ?? 0;
-      const total = head?.cells?.total ?? 0;
-      const section = head?.section ?? 'agents';
-      const spent = bandModel ? usageBandText(bandModel) : null;
-      const o = {
-        icon: SECTION_ICON[section], hue: SECTION_HUE[section],
-        title: head?.title || (section === 'agents' ? t.sSubagents : t.sNow),
-        detail: [head?.detail ?? '', spent ?? ''].filter(Boolean).join(' · '),
-        ratio: ratio(done, total), label: total ? `${done}/${total}` : agents ? `◎ ${agents}` : '', moving: true, cells,
-      };
+      const fullscreen = e.viewport?.isFullscreen !== false;
+      const cols = Number(e.props.bodyColumns) > 0 ? Math.floor(Number(e.props.bodyColumns)) : DEFAULT_COLUMNS;
+      const maxRows = Number(e.props.maxRows) > 0 ? Number(e.props.maxRows) : 10;
+      const plain = !fullscreen;
+      const shape = lensBand(bandModel, t, activity.subagents.length);
+      const buttonsWidth = 1 + controlWidth(t.panel, { plain, hotkey: 'p' }) + 1 + controlWidth('×', { plain, hotkey: 'x' });
+      const boxes = shape.cells.slice(0, BAND_CELLS);
+      const wide = bandLevel({ bodyColumns: cols, maxRows, fullscreen }) === 'wide' && boxes.length > 0;
+      const extra = wide ? 1 + BAR_MIN + 1 + boxes.length * 2 : 0;
+      const shown = fitParts(shape.parts, cols - ICON_COLUMNS - buttonsWidth - extra).shown;
+      const barWidth = wide
+        ? Math.max(BAR_MIN, Math.min(BAR_MAX, cols - ICON_COLUMNS - buttonsWidth - partsWidth(shown) - 1 - boxes.length * 2 - 1))
+        : 0;
+      // The Panel button runs /lens as the band measures the screen: the pane where it docks (fullscreen, 110 columns or
+      // more), else the photo in the transcript (§4.6, steps 2 and 3).
+      const screen = Number(e.viewport?.columns) > 0 ? Number(e.viewport?.columns) : cols + 5;
+      const form = fullscreen && screen >= DOCK_MIN_COLUMNS ? 'live' : 'foto';
+      const plainProp = plain ? { plain: true as const } : {};
       const buttons = [
-        <Button key="panel" label={agents && total ? `${t.panel} · ◎ ${agents}` : t.panel} onPress={() => { void openPanel($); }} />,
-        <Button key="dismiss" label="×" role="dismiss" onPress={() => { update($, hidden, () => true).catch(() => undefined); }} />,
+        <Button key="panel" label={t.panel} hotkey="p" {...plainProp} onPress={() => { runLens($, form); }} />,
+        <Button key="dismiss" label="×" role="dismiss" hotkey="x" {...plainProp} onPress={() => { update($, hidden, () => true).catch(() => undefined); }} />,
       ];
-      const cols = Number(e.props.bodyColumns) || 100;
+      const icon = SECTION_ICON[shape.section];
+      const hue = SECTION_HUE[shape.section];
+      bandDrawn = true;
       if (e.surface !== 'terminal' && 'Svg' in ui) {
         const { Svg } = ui;
         const W = Math.max(200, Math.min(1600, cols * 8 - 130));
-        const { source, height } = bandSvg({ W, ...o });
+        const title = joinParts(shown);
+        const { source, height } = bandSvg({ W, icon, title, detail: '', hue, ratio: shape.ratio, label: '', moving: true, cells: shape.cells });
         return (
           <Box flexDirection="column">
             <Box flexDirection="row" alignItems="center" columnGap={1}>
-              <Svg source={source} alt={[o.title, o.label, o.detail].filter(Boolean).join(' · ')} width={W} height={height} />
+              <Svg source={source} alt={title} width={W} height={height} />
               {buttons}
             </Box>
             {below}
@@ -1368,15 +1400,25 @@ export const register: Register = on => {
       }
       return (
         <Box flexDirection="column">
-          <Box flexDirection="row" columnGap={1}>
-            {termBand(ui as TermUI, { ...o, columns: cols - 16, spin: agents > 0 })}
+          <Box key="band-row" flexDirection="row" columnGap={1}>
+            {termBand(ui as TermUI, { icon, hue, spin: shape.spin, parts: shown, bar: wide ? { ratio: shape.ratio, width: barWidth, moving: true } : null, cells: wide ? boxes : [] })}
             <Box flexDirection="row" columnGap={1} flexShrink={0}>{buttons}</Box>
           </Box>
           {below}
         </Box>
       );
     } catch {
+      bandDrawn = false;
       return below;
     }
+  });
+
+  // F-06, step 1 of §4.6: outside fullscreen, at the end of the hint line, how to reach the band's letters, while lens's
+  // band is drawn and the line has no tail of its own.
+  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+    try {
+      if (bandDrawn && e.viewport?.isFullscreen === false && !e.props.tail) return next({ ...e, props: { ...e.props, tail: lensTexts().bandHint } });
+    } catch { /* the engine's line */ }
+    return next(e);
   });
 };

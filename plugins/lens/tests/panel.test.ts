@@ -191,10 +191,13 @@ test('a surface that places no panes gets a toast with the reason', async ($, on
   expect(ran.text).toBe('The lens panel is open but not shown yet.');
 });
 
-test('without a waypoint project, activity shows the lens minimal band whose Panel button opens the pane', async ($, on) => {
-  const open = servePanes(on);
+test('without a waypoint project, activity shows the lens minimal band whose Panel button runs /lens as the band measures the screen', async ($, on) => {
+  servePanes(on);
   serveFiles(on, []);
   start(on);
+  // A plugin's $.command.run does not reach its own command hook in the kit: record what the button runs.
+  const ran: string[] = [];
+  on('command.run', (_$, e) => { ran.push(`/${e.command} ${e.args}`.trimEnd()); return { text: '' }; });
   on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
   on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
     const { Text } = $.ui.resolve(e);
@@ -211,10 +214,13 @@ test('without a waypoint project, activity shows the lens minimal band whose Pan
     const ui = await $.ui.mount({ plugin: 'lens', surface, component: 'AbovePrompt', props: BAND_PROPS });
     expect((await ui.findAll({ type: 'Button' })).map(b => b.key)).toEqual(['panel', 'dismiss']);
     await ui.press({ key: 'panel' });
-    expect(open.has(PANE)).toBe(true);
-    open.clear();
+    expect(ran.splice(0)).toEqual(['/lens foto']);
     await ui.unmount();
   }
+  const wide = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props: { ...BAND_PROPS, bodyColumns: 160 }, viewport: { columns: 165, rows: 40, isFullscreen: true } });
+  await wide.press({ key: 'panel' });
+  expect(ran.splice(0)).toEqual(['/lens live']);
+  await wide.unmount();
 });
 
 test('a subagent shows until the agents list no longer has it', async ($, on) => {
