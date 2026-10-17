@@ -1780,10 +1780,13 @@ describe('the task detail: its URL, its tabs and its focus (H-25, §4.7, G-15)',
     const { root, app } = await boot(f, fakeUser());
     const go = vi.spyOn(history, 'go').mockImplementation(() => {});
     await openFromSummary(f, root);
+    // A traversal brings back the entry's own history state (the mark the page gave it): the simulations carry it.
+    const at3: unknown = history.state;
     click(root, '.modal [data-action="open-task"][data-id="T005"]');
     await settle();
+    const at5: unknown = history.state;
     // The person goes Back once; a browser fires popstate and then hashchange for that one entry.
-    history.replaceState(null, '', '#t=T003');
+    history.replaceState(at3, '', '#t=T003');
     window.dispatchEvent(new Event('popstate'));
     window.dispatchEvent(new Event('hashchange'));
     await settle();
@@ -1792,15 +1795,26 @@ describe('the task detail: its URL, its tabs and its focus (H-25, §4.7, G-15)',
     await settle();
     expect(go).toHaveBeenLastCalledWith(-1);
     go.mockClear();
-    // Forward onto an entry with t: no entry of this visit is known above it, so closing rewrites the URL.
-    history.replaceState(null, '', '#t=T003');
+    // Forward onto T005's entry: its mark and its hash say it is the second entry this visit pushed.
+    history.replaceState(at5, '', '#t=T005');
     window.dispatchEvent(new Event('popstate'));
     await settle();
-    expect(app.ui.modal).toBe('T003');
+    expect(app.ui.modal).toBe('T005');
     click(root, '.modal [data-action="close-modal"]');
     await settle();
-    expect(go).not.toHaveBeenCalled();
-    expect(location.hash).toBe('');
+    expect(go).toHaveBeenLastCalledWith(-2);
+    go.mockClear();
+    // An entry with t and no mark of this visit (a hand edit, a reload's, another visit's): closing rewrites the URL.
+    for (const state of [null, { wp: 'another-visit', d: 1, b: '' }]) {
+      history.replaceState(state, '', '#t=T003');
+      window.dispatchEvent(new Event('popstate'));
+      await settle();
+      expect(app.ui.modal).toBe('T003');
+      click(root, '.modal [data-action="close-modal"]');
+      await settle();
+      expect(go).not.toHaveBeenCalled();
+      expect(location.hash).toBe('');
+    }
     // A push the browser refuses (a sandboxed frame) is no entry to go back over.
     const push = vi.spyOn(history, 'pushState').mockImplementation(() => { throw new Error('denied'); });
     click(root, '[data-k="t:T003"]');
@@ -1879,6 +1893,185 @@ describe('the task detail: its URL, its tabs and its focus (H-25, §4.7, G-15)',
     expect([app.ui.modal, app.ui.tab, app.ui.shot]).toEqual(['T005', 'summary', null]);
     expect(root.querySelector('.lightbox')).toBeNull();
     expect(document.activeElement?.id).toBe('dtab-summary');
+    app.stop();
+  });
+
+  it('a Back by several entries at once (the history menu) leaves only the entries under that one to go back over (review I1)', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    const go = vi.spyOn(history, 'go').mockImplementation(() => {});
+    const push = vi.spyOn(history, 'pushState');
+    await openFromSummary(f, root);
+    click(root, '[data-action="detail-tab"][data-tab="forge"]');
+    await settle();
+    expect(location.hash).toBe('#t=T003&tt=forge');
+    const first: unknown = history.state;
+    click(root, '.modal [data-action="open-task"][data-id="T005"]');
+    await settle();
+    click(root, '.modal [data-action="open-task"][data-id="T004"]');
+    await settle();
+    expect([app.ui.modal, push.mock.calls.length]).toEqual(['T004', 3]);
+    // The menu jumps two entries back at once: one popstate, onto the first detail's entry (with its own state).
+    history.replaceState(first, '', '#t=T003&tt=forge');
+    window.dispatchEvent(new Event('popstate'));
+    await settle();
+    expect([app.ui.modal, app.ui.tab]).toEqual(['T003', 'forge']);
+    click(root, '.modal [data-action="close-modal"]');
+    await settle();
+    // One entry under it was this visit's: Back over it, never over the page's own first entry.
+    expect(go.mock.calls).toEqual([[-1]]);
+    expect(app.ui.modal).toBeNull();
+    push.mockRestore();
+    go.mockRestore();
+    app.stop();
+  });
+
+  it('a link to a task the embedded plan lacks keeps t in the URL until the database’s plan is in, then opens on its tab (review I2)', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser(), '#t=T007&tt=definition');
+    expect([app.ui.modal, root.querySelector('.modal')]).toEqual([null, null]);
+    expect(location.hash).toBe('#t=T007&tt=definition');
+    f.push('state', { T001: { status: 'done' } });
+    await settle();
+    expect(location.hash).toBe('#t=T007&tt=definition');
+    const T007 = { ...snapshot.phases[0]!.tasks[0]!, id: 'T007', title: 'Tarea-nueva-T007', depends_on: [] };
+    f.push('plan', Object.fromEntries(snapshot.phases.map((p, i) => [p.id, i === 0 ? { ...p, tasks: [...p.tasks, T007] } : p])));
+    await settle();
+    expect([app.ui.modal, app.ui.tab]).toEqual(['T007', 'definition']);
+    expect(root.querySelector('.modal')!.textContent).toContain('Tarea-nueva-T007');
+    expect(document.activeElement?.id).toBe('dtab-definition');
+    expect(location.hash).toBe('#t=T007&tt=definition');
+    app.stop();
+  });
+
+  it('a link to a task in neither plan loses t once the database’s plan is in, and at once offline (review I2)', async () => {
+    const f = fakeDb();
+    const { app } = await boot(f, fakeUser(), '#t=T999&tt=forge');
+    expect(app.ui.modal).toBeNull();
+    expect(location.hash).toBe('#t=T999&tt=forge');
+    f.push('plan', Object.fromEntries(snapshot.phases.map(p => [p.id, p])));
+    await settle();
+    expect(app.ui.modal).toBeNull();
+    expect(location.hash).toBe('');
+    app.stop();
+    history.replaceState(null, '', '#t=T999');
+    const offline = await start({ claude: null, snapshot, root: document.createElement('div'), now: () => NOW });
+    await settle();
+    expect([offline.ui.modal, location.hash]).toEqual([null, '']);
+    offline.stop();
+  });
+
+  it('with no embedded plan, a link waits for both the plan and the meta it is built with (review I2)', async () => {
+    const f = fakeDb();
+    history.replaceState(null, '', '#t=T003');
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const app = await start({ claude: { use: async (n: string) => (n === 'db' ? f.db : n === 'user' ? fakeUser() : null) }, snapshot: null, root, now: () => NOW });
+    await settle();
+    expect(location.hash).toBe('#t=T003');
+    f.push('plan', Object.fromEntries(snapshot.phases.map(p => [p.id, p])));
+    await settle();
+    expect([app.ui.modal, location.hash]).toEqual([null, '#t=T003']);
+    f.push('meta/project', snapshot.meta as unknown as Record<string, unknown>);
+    await settle();
+    expect(app.ui.modal).toBe('T003');
+    expect(location.hash).toBe('#t=T003');
+    app.stop();
+  });
+
+  it('a dependency opened from a detail a link opened closes back to the linked task; closing that leaves the view without t (review M1)', async () => {
+    const f = fakeDb();
+    const go = vi.spyOn(history, 'go').mockImplementation(() => {});
+    const { root, app } = await boot(f, fakeUser(), '#t=T003');
+    click(root, '.modal [data-action="open-task"][data-id="T005"]');
+    await settle();
+    expect([app.ui.modal, location.hash]).toEqual(['T005', '#t=T005']);
+    click(root, '.modal [data-action="close-modal"]');
+    await settle();
+    // Back lands on the link's entry: the page shows its detail at once, never the bare view in between.
+    expect(go).toHaveBeenLastCalledWith(-1);
+    expect(app.ui.modal).toBe('T003');
+    expect(document.activeElement?.id).toBe('dtab-summary');
+    // Where Back lands (the link's entry has no state): nothing changes.
+    history.replaceState(null, '', '#t=T003');
+    window.dispatchEvent(new Event('popstate'));
+    await settle();
+    expect(app.ui.modal).toBe('T003');
+    go.mockClear();
+    click(root, '.modal [data-action="close-modal"]');
+    await settle();
+    expect(go).not.toHaveBeenCalled();
+    expect([app.ui.modal, location.hash]).toEqual([null, '']);
+    expect(document.activeElement).toBe(root.querySelector('main'));
+    go.mockRestore();
+    app.stop();
+  });
+
+  it('an opener whose data-k holds quotes, brackets and a newline gets the focus back, with no CSS.escape; the page never goes offline (review M2)', async () => {
+    vi.stubGlobal('CSS', {});
+    const go = vi.spyOn(history, 'go').mockImplementation(() => {});
+    try {
+      const f = fakeDb();
+      const { root, app } = await boot(f, fakeUser());
+      const id = 'e"]\n[x';
+      f.push('events', { [id]: { ts: '2026-10-11T11:00:00Z', type: 'done', sessionId: 'main', taskId: 'T003', text: 'evento-raro' } });
+      await settle();
+      const act = root.querySelector('button.act[data-id="T003"]') as HTMLElement;
+      expect(act.dataset.k).toBe(`e:${id}`);
+      act.click();
+      await settle();
+      expect(app.ui.modal).toBe('T003');
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await settle();
+      expect(app.model.offline).toBe(false);
+      expect(root.querySelector('.modal')).toBeNull();
+      expect(document.activeElement).toBe(root.querySelector('button.act[data-id="T003"]'));
+      app.stop();
+    } finally {
+      vi.unstubAllGlobals();
+      go.mockRestore();
+    }
+  });
+
+  it('Escape during an IME composition is the composition’s, Safari’s last keydown (keyCode 229) too (review M3, M4)', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    const go = vi.spyOn(history, 'go').mockImplementation(() => {});
+    await openFromSummary(f, root);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 229, bubbles: true }));
+    await settle();
+    expect(app.ui.modal).toBe('T003');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(app.ui.modal).toBeNull();
+    go.mockRestore();
+    app.stop();
+  });
+
+  it('when the plan drops the open task, the focus goes to what opened the detail, or to the main element when that went too (review M4)', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    const go = vi.spyOn(history, 'go').mockImplementation(() => {});
+    const without = (id: string) => Object.fromEntries(snapshot.phases.map(p => [p.id, { ...p, tasks: p.tasks.filter(t => t.id !== id) }]));
+    await openFromSummary(f, root);
+    click(root, '.modal [data-action="open-task"][data-id="T005"]');
+    await settle();
+    f.push('plan', without('T005'));
+    await settle();
+    expect(app.ui.modal).toBeNull();
+    expect(document.activeElement).toBe(root.querySelector('[data-k="t:T003"]'));
+    f.push('plan', Object.fromEntries(snapshot.phases.map(p => [p.id, p])));
+    await settle();
+    click(root, '[data-k="t:T003"]');
+    await settle();
+    expect(app.ui.modal).toBe('T003');
+    f.push('plan', without('T003'));
+    await settle();
+    expect(app.ui.modal).toBeNull();
+    expect(root.querySelector('[data-k="t:T003"]')).toBeNull();
+    expect(document.activeElement).toBe(root.querySelector('main'));
+    go.mockRestore();
     app.stop();
   });
 });

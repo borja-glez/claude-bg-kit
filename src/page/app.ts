@@ -110,13 +110,35 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   // §4.7, H-25: the open detail is in the URL (#t=T044&tt=forge). Opening pushes an entry; closing goes back over the
   // entries it pushed, or rewrites the URL without t when the detail came from a link. The focus goes to the active tab
   // on opening and back to what opened it (its data-k) on closing.
-  /** The entries this visit pushed for the open detail, counted only once the browser took them: closing goes back over
-   *  them. An entry the URL brings (Back, Forward, a hash edited by hand) takes one off, never below zero. */
-  let detailPushes = 0;
+  //
+  // History safety (review I1): `trail` holds the hashes of the entries this visit pushed for the detail, in order from
+  // the entry the first one was pushed over (the trail's base), and `trailAt` how many of them lie under the current
+  // entry, it included. Each of those entries also carries a mark in its history state, written right after its push:
+  // this visit, its depth in the trail and its base's hash. An entry the URL brings back counts as the trail's only when
+  // its mark and its hash both say so, so a Back by several entries at once, a Forward, a reload, a hash edited by hand
+  // or another entry with the same hash never make closing go back further than the entries this visit verifiably
+  // pushed under the current one. Anything unverified rewrites the URL instead.
+  interface Mark { wp: string; d: number; b: string }
+  const VISIT = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  let trail: string[] = [];
+  let trailAt = 0;
+  /** The current entry's mark, when it is this visit's and the trail has this hash at its depth. */
+  const markHere = (hash: string): Mark | null => {
+    let s: unknown;
+    try { s = history.state; } catch { return null; }
+    const m = s as Partial<Mark> | null;
+    if (!m || typeof m !== 'object' || m.wp !== VISIT || typeof m.b !== 'string' || typeof m.d !== 'number' || !Number.isInteger(m.d) || m.d < 1) return null;
+    return trail[m.d - 1] === hash ? (m as Mark) : null;
+  };
+  /** Review I2: a link's task the embedded plan lacks (added since the page was built) stays pending, and in the URL,
+   *  until the database's plan is in (`planIn`); then it opens if that plan has it, else it goes. */
+  let linked: { task: string; tab: DetailTab } | null = null;
+  let planIn = false;
   let opener: string | null = null;
-  /** A selector to focus after the next render. */
-  let focusNext: string | null = null;
-  const byKey = (k: string): string => `[data-k="${(globalThis as { CSS?: { escape?(s: string): string } }).CSS?.escape?.(k) ?? k.replace(/["\\]/g, '')}"]`;
+  /** What to focus after the next render: a selector, or an element's data-k, matched by equality and never put in a
+   *  selector, so no key (from the database) can break the query (review M2). */
+  let focusNext: string | { k: string } | null = null;
+  const byKey = (k: string): { k: string } => ({ k });
   const ACTIVE_TAB = '.modal [role="tab"][aria-selected="true"]';
   /** The detail closed: the focus goes back to what opened it, else (a link opened it) to the view's main element; the
    *  render finds another place when it is gone. Never left on the body. */
@@ -133,7 +155,11 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     ui.view = v.view && (VIEWS as readonly string[]).includes(v.view) ? (v.view as View) : 'summary';
     if (ui.view !== 'schedule') ui.tl = undefined;
     // The detail: a task of the plan opens (with its tab); anything else closes it, and its opener gets the focus back.
-    const task = v.task && isPlanId(v.task) && model.plan.tasks.some(t => t.id === v.task) ? v.task : null;
+    // Before the database's plan is in, a task the plan lacks waits for it (review I2).
+    const want = v.task && isPlanId(v.task) ? v.task : null;
+    const task = want && model.plan.tasks.some(t => t.id === want) ? want : null;
+    const tab: DetailTab = v.tab && (DETAIL_TABS as readonly string[]).includes(v.tab) ? (v.tab as DetailTab) : 'summary';
+    linked = want && !task && !planIn ? { task: want, tab } : null;
     if (!task && ui.modal) focusBack();
     if (task && task !== ui.modal) {
       // Back or Forward onto a detail: what has the focus now (the row a close gave it back to) is what opened it.
@@ -143,8 +169,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     // The gallery belongs to the task it was opened on.
     if (task !== ui.modal) ui.shot = null;
     ui.modal = task;
-    ui.tab = task && v.tab && (DETAIL_TABS as readonly string[]).includes(v.tab) ? (v.tab as DetailTab) : 'summary';
-    detailPushes = task ? Math.max(0, detailPushes - 1) : 0;
+    ui.tab = task ? tab : 'summary';
     if (ui.view === 'talk') ui.talk = v.c && (TALK_KINDS as readonly string[]).includes(v.c) ? (v.c as TalkKind) : 'notes';
     if (ui.view === 'schedule') {
       ui.timelineGroup = v.group && (GROUPS as readonly string[]).includes(v.group) ? (v.group as UiState['timelineGroup']) : 'phase';
@@ -173,35 +198,42 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   let seenPruned = false;
   /** H-25: set by an action that changes what the person looks at, so the next render adds a history entry. */
   let pushNext = false;
-  /** Set with pushNext by opening a detail: the entry that render pushes is one closing goes back over. */
+  /** Set with pushNext by opening a detail: the entry that render pushes goes into the trail. */
   let pushDetail = false;
-  const viewState = (): ViewState => ({ view: ui.view, c: ui.talk, group: ui.timelineGroup, zoom: ui.zoom, span: ui.span, pan: ui.pan, open: [...ui.expanded], status: ui.statuses, q: ui.search.trim(), layers: ui.layers, task: ui.modal ?? undefined, tab: ui.tab, debug: model.debug });
+  // A pending link (review I2) stays in the URL: the render does not rewrite its t and tt away.
+  const viewState = (): ViewState => ({ view: ui.view, c: ui.talk, group: ui.timelineGroup, zoom: ui.zoom, span: ui.span, pan: ui.pan, open: [...ui.expanded], status: ui.statuses, q: ui.search.trim(), layers: ui.layers, task: ui.modal ?? linked?.task, tab: ui.modal ? ui.tab : linked?.tab, debug: model.debug });
   const openDetail = (id: string, from: HTMLElement): boolean => {
     if (!model.plan.tasks.some(t => t.id === id)) return false;
     if (!ui.modal) opener = from.dataset.k ?? null;
     ui.modal = id;
     ui.shot = null;
     ui.tab = 'summary';
+    linked = null;
     pushNext = true;
     pushDetail = true;
     focusNext = ACTIVE_TAB;
     return true;
   };
   const closeDetail = () => {
-    ui.modal = null;
-    ui.shot = null;
-    focusBack();
-    const n = detailPushes;
-    detailPushes = 0;
-    // History safety: only the entries this visit pushed for the detail, and never more than the history holds. The entry
-    // Back returns to has no t: nothing to rewrite in between. Anything else leaves the render to rewrite the URL.
-    const before = lastHash;
-    try {
-      if (n > 0 && n < history.length) {
-        lastHash = encodeView(viewState());
-        history.go(-n);
-      }
-    } catch { lastHash = before; /* not the page's history to move: the render rewrites the URL without t */ }
+    // Back over the entries this visit verifiably pushed under the current one, to the trail's base, never further, and
+    // never more than the history holds. The page shows the base at once, the bare view or the detail a link opened
+    // there (review M1), so nothing is rewritten in between and Back finds it applied. Anything unverified, or a history
+    // the page cannot move, closes here and leaves the render to rewrite the URL without t.
+    const m = trailAt ? markHere(lastHash) : null;
+    const d = m && m.d === trailAt ? m.d : 0;
+    trailAt = 0;
+    let back = false;
+    try { back = d > 0 && d < history.length; } catch { back = false; }
+    if (m && back) {
+      const before = lastHash;
+      applyView(decodeView(m.b));
+      lastHash = encodeView(viewState());
+      try { history.go(-d); } catch { lastHash = before; /* the render rewrites the URL to what the page shows */ }
+    } else {
+      ui.modal = null;
+      ui.shot = null;
+      focusBack();
+    }
     schedule();
   };
   const writeHash = () => {
@@ -212,9 +244,24 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     try {
       const next = encodeView(viewState());
       if (next === lastHash) return;
+      const before = lastHash;
       lastHash = next;
       const url = next || `${location.pathname}${location.search}`;
-      if (push) { history.pushState(null, '', url); if (detail) detailPushes++; } else history.replaceState(null, '', url);
+      if (!push) {
+        // A tab, a zoom, a filter: the same entry, keeping its mark; in the trail it takes its new hash.
+        history.replaceState(history.state ?? null, '', url);
+        if (trailAt) trail[trailAt - 1] = next;
+        return;
+      }
+      // A detail pushed over an entry of the trail extends it; over any other entry it starts one, based there. Only a
+      // push the browser took goes into the trail, and its mark goes on right after it.
+      const under = detail && trailAt ? markHere(before) : null;
+      history.pushState(null, '', url);
+      if (!detail) { trailAt = 0; return; }
+      const d = under ? under.d + 1 : 1;
+      trail = [...trail.slice(0, d - 1), next];
+      trailAt = d;
+      history.replaceState({ wp: VISIT, d, b: under ? under.b : before } satisfies Mark, '', url);
     } catch { /* a sandboxed frame may refuse: the view just is not in the link */ }
   };
   // H-25: Back, Forward and a hash edited by hand apply what the URL says.
@@ -224,8 +271,12 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       // A browser fires popstate and then hashchange for one Back; the second finds that URL applied (or written by the
       // page itself, as closing the detail does before going back): applying it twice would count one entry twice.
       if (hash === lastHash) return;
+      // Where the URL brought the page: an entry of the trail only if its mark and its hash both say so (review I1).
+      trailAt = markHere(hash)?.d ?? 0;
       lastHash = hash;
       applyView(decodeView(location.hash));
+      // An entry of the trail whose task left the plan opens nothing: no detail to go back from.
+      if (!ui.modal) trailAt = 0;
     } catch { return; }
     // H-06: a focused search box keeps its own value through a morph; it takes the URL's here, as the composer does.
     const box = env.root.querySelector('[data-role="search"]') as HTMLInputElement | null;
@@ -282,10 +333,16 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       if (s) { el.scrollTop = s[0]; el.scrollLeft = s[1]; }
     });
   };
-  /** Focuses the element a selector finds in the page; whether it took the focus (a browser refuses one that cannot). */
-  const focusTo = (sel: string | null): boolean => {
-    const el = sel ? env.root.querySelector<HTMLElement>(sel) : null;
-    el?.focus({ preventScroll: true });
+  /** Focuses what a target names in the page (a selector, or a data-k by equality); whether it took the focus. A browser
+   *  refuses an element that cannot have it; a target not found, or a selector that throws, is false: never a render
+   *  failure (review M2). */
+  const focusTo = (target: string | { k: string } | null): boolean => {
+    let el: HTMLElement | null = null;
+    try {
+      if (typeof target === 'string') el = env.root.querySelector<HTMLElement>(target);
+      else if (target) { const k = target.k; el = Array.from(env.root.querySelectorAll<HTMLElement>('[data-k]')).find(x => x.dataset.k === k) ?? null; }
+      el?.focus({ preventScroll: true });
+    } catch { return false; }
     return !!el && document.activeElement === el;
   };
   const render = () => {
@@ -294,7 +351,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     try {
       model.now = now();
       // Review Focus 2: a plan snapshot that dropped the open task closes its detail (and unlocks the page).
-      if (ui.modal && !model.plan.tasks.some(t => t.id === ui.modal)) { ui.modal = null; ui.shot = null; detailPushes = 0; focusBack(); }
+      if (ui.modal && !model.plan.tasks.some(t => t.id === ui.modal)) { ui.modal = null; ui.shot = null; trailAt = 0; focusBack(); }
       const html = renderApp(model, ui, derive(model));
       const page = document.scrollingElement?.scrollTop ?? 0;
       const focus = takeFocus();
@@ -342,6 +399,22 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   // H-06: a change of the data bumps the model's revision (derive() caches by it) and repaints at once; the modal and a
   // focused <select> no longer hold it back, morphdom leaves them as they are.
   const changed = () => { model.rev = (model.rev ?? 0) + 1; schedule(); };
+  // Review I2: the database's plan is in once its snapshot came and, with phases, the meta it is built with; offline or
+  // after a failed subscription (`force`) the plan the page has is all there will be. A pending link then opens if that
+  // plan has its task, else it goes (the render rewrites the URL without t).
+  let planSnap = false;
+  const settleLink = (force = false) => {
+    if (planIn || (!force && (!planSnap || (phaseDocs.length > 0 && !model.meta)))) return;
+    planIn = true;
+    const l = linked;
+    linked = null;
+    if (!l || ui.modal || !model.plan.tasks.some(t => t.id === l.task)) return;
+    ui.modal = l.task;
+    ui.tab = l.tab;
+    ui.shot = null;
+    opener = null;
+    focusNext = ACTIVE_TAB;
+  };
 
   let db: Db | null = null;
 
@@ -564,7 +637,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       const c = el.dataset.c as TalkKind | undefined;
       if (ui.view === 'talk' && c && TALK_KINDS.includes(c)) ui.talk = c;
       // A link inside the detail closes it: the view it opens takes the focus (the link is gone with the detail).
-      if (ui.modal) { ui.modal = null; ui.shot = null; detailPushes = 0; opener = null; focusNext = 'main'; }
+      if (ui.modal) { ui.modal = null; ui.shot = null; trailAt = 0; opener = null; focusNext = 'main'; }
+      linked = null;
       if (ui.notice !== 'readonly') ui.notice = null;
       pushNext = true;
     }
@@ -572,6 +646,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       const c = el.dataset.c as TalkKind;
       if (!TALK_KINDS.includes(c)) return;
       ui.talk = c;
+      linked = null;
       if (ui.notice !== 'readonly') ui.notice = null;
       pushNext = true;
     }
@@ -720,9 +795,10 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   let overTimeline = false;
   const onPointerOver = (ev: PointerEvent) => { overTimeline = !!(ev.target as Element | null)?.closest?.('[data-role="timeline"]'); };
   const onKey = (ev: KeyboardEvent) => {
-    // A key of an IME composition is the composition's (Escape cancels it there); a combination the page does not list
-    // (Alt+←, Ctrl+Tab, Ctrl+Escape…) is the browser's.
-    if (ev.isComposing) return;
+    // A key of an IME composition is the composition's (Escape cancels it there; Safari's keydown that ends one has
+    // isComposing false and keyCode 229); a combination the page does not list (Alt+←, Ctrl+Tab, Ctrl+Escape…) is the
+    // browser's.
+    if (ev.isComposing || ev.keyCode === 229) return;
     const bare = !ev.ctrlKey && !ev.metaKey && !ev.altKey;
     if (ev.key === 'Escape' && bare && !ev.shiftKey && ui.shot !== null) { focusNext = byKey(`shot:${ui.shot}`); ui.shot = null; schedule(); return; }
     if (ev.key === 'Escape' && bare && !ev.shiftKey && ui.modal) { closeDetail(); return; }
@@ -1001,10 +1077,10 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
 
   try { db = env.claude ? ((await env.claude.use('db')) as Db | null) : null; } catch { db = null; }
   model.connecting = false;
-  if (!db) { model.offline = true; model.readOnly = true; schedule(); return { stop, model, ui }; }
+  if (!db) { model.offline = true; model.readOnly = true; settleLink(true); schedule(); return { stop, model, ui }; }
 
   model.offline = false;
-  const onErr = () => { model.offline = true; schedule(); };
+  const onErr = () => { model.offline = true; settleLink(true); schedule(); };
   const rebuild = () => { if (model.meta && phaseDocs.length) model.plan = planViewFromDocs(model.meta, phaseDocs); };
   // A-10: the metrics live in meta/metrics; a roadmap a forge before wave 4 wrote keeps them in meta/project.metrics.
   // Carry 7: no meta yet (an empty snapshot) is a missing project, which mergeMetrics takes as it is.
@@ -1020,11 +1096,11 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   };
   const rows = (s: QSnap) => s.docs.map(x => ({ id: x.id, body: x.data() }));
 
-  unsubs.push(db.doc('meta/project').onSnapshot(((s: Snap) => { if (s.exists) { const mm = normalizeMeta(s.data(), reporter('meta/project')('meta/project')); if (mm) { projectMetrics = mm.metrics; model.meta = mm; withMetrics(); rebuild(); } } changed(); }) as never, onErr));
+  unsubs.push(db.doc('meta/project').onSnapshot(((s: Snap) => { if (s.exists) { const mm = normalizeMeta(s.data(), reporter('meta/project')('meta/project')); if (mm) { projectMetrics = mm.metrics; model.meta = mm; withMetrics(); rebuild(); settleLink(); } } changed(); }) as never, onErr));
   unsubs.push(db.doc('meta/metrics').onSnapshot(((s: Snap) => { metricsDoc = s.exists ? normalizeMetrics(s.data(), reporter('meta/metrics')('meta/metrics')) : null; withMetrics(); changed(); }) as never, onErr));
   unsubs.push(db.doc('meta/run').onSnapshot(((s: Snap) => { model.run = s.exists ? normalizeRun(s.data(), reporter('meta/run')('meta/run')) : null; changed(); }) as never, onErr));
   unsubs.push(db.doc('meta/infinite').onSnapshot(((s: Snap) => { model.infinite = s.exists ? normalizeInfinite(s.data(), reporter('meta/infinite')('meta/infinite')) : null; changed(); }) as never, onErr));
-  unsubs.push(db.collection('plan').onSnapshot(((s: QSnap) => { const rep = reporter('plan'); const p = rows(s).map(r => normalizePhase(r.body, rep(`plan/${r.id}`))).filter((x): x is PhaseDoc => x !== null); if (p.length) { phaseDocs = p; rebuild(); } changed(); }) as never, onErr));
+  unsubs.push(db.collection('plan').onSnapshot(((s: QSnap) => { const rep = reporter('plan'); const p = rows(s).map(r => normalizePhase(r.body, rep(`plan/${r.id}`))).filter((x): x is PhaseDoc => x !== null); if (p.length) { phaseDocs = p; rebuild(); } planSnap = true; settleLink(); changed(); }) as never, onErr));
   unsubs.push(db.collection('state').onSnapshot(((s: QSnap) => {
     const rep = reporter('state');
     model.states = Object.fromEntries(rows(s).map(r => [r.id, normalizeState(r.body, rep(`state/${r.id}`))])) as States;
