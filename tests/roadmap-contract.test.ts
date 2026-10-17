@@ -153,6 +153,13 @@ describe('the roadmap contract (C7, wave 4)', () => {
     walk(out(run(['roadmap-doc', 'T2', '--project', 'shop'], io)));
     walk(out(run(['swarm', 'status'], io)));
     walk(out(run(['stop'], io)));
+    // Re-review m4: the ended run's status and swarm close print the release of the coordinator's stopped task (T4).
+    const ended = out(run(['swarm', 'status'], io));
+    expect(ended.publish.release).toEqual([expect.objectContaining({ task: 'T4', write: expect.objectContaining({ op: 'update', collection: 'state', doc_id: 'T4' }) })]);
+    walk(ended);
+    const closed = out(run(['swarm', 'close'], io));
+    expect(closed.release).toEqual(ended.publish.release);
+    walk(closed);
     saveExecution(root, execution({ active: false, stopReason: 'stopped', closedAt: ROADMAP_AT(250), closedBy: 'close' }));
     walk(out(run(['roadmap-run', '--run', RUN], io)));
     // meta/metrics: an integrate in a run of its own.
@@ -170,7 +177,20 @@ describe('the roadmap contract (C7, wave 4)', () => {
       const w = out(run(['swarm', 'worktree', 'T1'], io2)).worktree;
       writeFileSync(path.join(w, 'a.txt'), 'a\n'); g2(w, 'add', 'a.txt'); g2(w, 'commit', '-qm', 'T1: work');
       out(run(['swarm', 'task', 'T1', '--stage', 'verdict', '--status', 'accepted'], io2));
-      walk(out(run(['swarm', 'integrate', 'T1'], io2)));
+      const integrated = out(run(['swarm', 'integrate', 'T1'], io2));
+      walk(integrated);
+      // Re-review m4: swarm step's recovery (`integrated` again, the roadmap still not done) carries the same writes.
+      // Under .forge/ (ignored), so the main checkout stays clean for the merge below.
+      writeFileSync(path.join(root2, '.forge', 'plan.yaml'), 'project: shop\nlocale: en\nversion: "1"\ntracks:\n  - { id: a, name: A, color: blue }\nphases:\n  - { id: p1, name: P1 }\ntasks:\n  - { id: T1, title: T1, track: a, phase: p1, done_when: x, zones: [a.txt] }\n');
+      for (const c of ['state', 'sessions']) mkdirSync(path.join(root2, '.forge', 'db', c), { recursive: true });
+      writeFileSync(path.join(root2, '.forge', 'db', 'state', 'T1.json'), JSON.stringify({ status: 'in_progress' }));
+      const again = (out(run(['swarm', 'step', '--plan', '.forge/plan.yaml', '--db', '.forge/db'], io2)).actions as Record<string, unknown>[]).find(a => a.again === true)!;
+      expect(again).toMatchObject({ type: 'integrated', task: 'T1', publish: { op: 'update', collection: 'state', doc_id: 'T1' }, metrics: integrated.metrics });
+      walk(again);
+      // Re-review m4: swarm merge prints each integrated task's block (merged: true) for the skill to send.
+      const merged = out(run(['swarm', 'merge', '--yes'], io2));
+      expect(merged).toMatchObject({ result: 'merged', publish: [{ op: 'update', collection: 'state', doc_id: 'T1' }] });
+      walk(merged);
     } finally { try { g2(root2, 'worktree', 'prune'); } catch { /* ignore */ } rmSync(root2, { recursive: true, force: true }); }
     const key = (w: Record<string, unknown>) => `${w.collection}/${w.op}`;
     const unpinned = found.filter(w => w.if_version === undefined);

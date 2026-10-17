@@ -239,6 +239,20 @@ describe('waypoint release', () => {
     expect(run(['release', PLAN, '--claude', 'B', '--seat', 'main', '--free', 'T003', '--state-version', '4'], io).code).toBe(2);
     expect(run(['release', PLAN, '--claude', 'B', '--seat', 'main', '--free', 'T002', '--state-version', 'x'], io).code).toBe(2);
   });
+  it('--free --keep-seat frees the task and keeps the seat bound: the session only loses its task (re-review m5)', () => {
+    bind('A');
+    openTask('T002', 'main');
+    const r = outOf(run(['release', PLAN, '--claude', 'A', '--seat', 'main', '--free', 'T002', '--state-version', '4', '--session-version', '9', '--keep-seat'], io));
+    expect(r.released).toBe(false);
+    expect(json(wp('bound.json')).endedAt).toBeNull();
+    expect(r.batch).toEqual([
+      { op: 'update', collection: 'state', doc_id: 'T002', data: { status: 'free', owner: { __delete__: true }, claimedAt: { __delete__: true }, startedAt: { __delete__: true } }, if_version: 4 },
+      { op: 'update', collection: 'sessions', doc_id: 'main', data: { currentTask: { __delete__: true } }, if_version: 9 },
+    ]);
+    // It only frees a task: without --free it is exit 2, and the binding stays.
+    expect(run(['release', PLAN, '--claude', 'A', '--keep-seat'], io).code).toBe(2);
+    expect(json(wp('bound.json')).endedAt).toBeNull();
+  });
   it('a seat it does not know, or a --db without its directory, is exit 2; a broken bound.json is released as no binding', () => {
     bind('A');
     expect(run(['release', PLAN, '--claude', 'A', '--seat', 'main-7'], io).code).toBe(2);

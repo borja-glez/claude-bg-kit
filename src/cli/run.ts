@@ -567,7 +567,10 @@ export function run(argv: string[], io: Io): Result {
         return out(0, { took, sid, seatDir: rel(seatDir), sessionFile: rel(sessionFile), claude, via, ...(cur && (took === 'takeover' || took === 'previous') ? { previous: prevOf(cur) } : {}) });
       }
       case 'release': {
-        if (!args[0] || args[0].startsWith('--')) return fail('usage: waypoint release <plan.yaml|design.md> [--seat <sid>] [--claude <id>] [--free <T> --state-version <V> [--session-version <SV>] [--db <dir>]]', 2);
+        if (!args[0] || args[0].startsWith('--')) return fail('usage: waypoint release <plan.yaml|design.md> [--seat <sid>] [--claude <id>] [--free <T> --state-version <V> [--session-version <SV>] [--db <dir>] [--keep-seat]]', 2);
+        // Re-review m5: --keep-seat gives a task back and keeps this conversation on its seat (it goes on working).
+        const keepSeat = args.includes('--keep-seat');
+        if (keepSeat && flag('free') === undefined) return fail('release: --keep-seat goes with --free <T>', 2);
         // An empty --db value reads the next flag: the mirror would write the cache under `<cwd>/--seat/`.
         const dbFlag = flag('db');
         if (args.includes('--db') && (!dbFlag || dbFlag.startsWith('-'))) return fail('release: --db needs the cache directory', 2);
@@ -597,12 +600,12 @@ export function run(argv: string[], io: Io): Result {
           let owner: unknown = null;
           try { owner = (JSON.parse(readFileSync(path.join(db, 'state', `${free}.json`), 'utf8')) as { owner?: unknown }).owner; } catch { owner = null; }
           if (owner !== seat.sid) return fail(`release: ${free} is not held by seat ${seat.sid} in the state cache (list state first)`, 2);
-          batch = freeBatch({ sid: seat.sid, task: free, stateVersion: v, sessionVersion: sv });
+          batch = freeBatch({ sid: seat.sid, task: free, stateVersion: v, sessionVersion: sv, keepSeat });
         }
         const b = seat.bound;
         if (b && b.claude !== claude && boundLive(b, t)) return fail(`release: ${seat.sid} is bound to another live session`, 3);
         let released = false;
-        if (b && b.claude === claude && b.endedAt === null) {
+        if (!keepSeat && b && b.claude === claude && b.endedAt === null) {
           writeBinding(boundFile(seat.dir), { ...b, endedAt: now.toISOString(), endReason: 'released' });
           released = true;
         }

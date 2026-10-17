@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { appendEvent, forgeDir, readEvents, type LedgerEvent } from './ledger.js';
 import { MAX_NOTE, NOTE_ID } from '../lib/notes.js';
 import { compactTs } from '../lib/ids.js';
+import { sha256Hex } from '../lib/sha256.js';
 import type { Write } from '../lib/sync.js';
 import { attribute, baseOf, projectOf } from './task-ref.js';
 import {
@@ -66,6 +67,16 @@ function saveDecisionsDoc(root: string, event: LedgerEvent, n: number): void {
  * appends it to the ledger with its weight (from its point when not given) and updates .forge/decisions.json. The
  * `task` of the context (the --task flag) wins over the data's; the data's `runId` wins over the context's.
  */
+/** Re-review m3: the same decision recorded again within this window is the first one (a re-run of the same command). */
+const REPEAT_MS = 10 * 60_000;
+/** A decision's content, its time aside: what makes two records the same decision. */
+const contentOf = (e: LedgerEvent): string | null => {
+  const d = normalizeDecision(e);
+  if (!d) return null;
+  const { ts: _ts, ...rest } = d;
+  return JSON.stringify(rest);
+};
+
 export function addDecision(root: string, raw: unknown, ctx: { ts: string; task?: string; runId?: string | null }): { n: number; event: LedgerEvent } {
   const r = Input.safeParse(raw);
   if (!r.success) throw new DecisionInputError(r.error.issues.map(i => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; '));
@@ -76,6 +87,15 @@ export function addDecision(root: string, raw: unknown, ctx: { ts: string; task?
     ts: ctx.ts, kind: 'decision', ...rest, weight: weight ?? weightOf(rest.point),
     ...(task ? { task } : {}), ...(runId ? { runId } : {}),
   };
+  // Re-review m3: a re-run of the same command is the decision already recorded (same content, within REPEAT_MS): its
+  // number and its event come back, nothing is appended, and its note keeps the same id.
+  const mine = contentOf(event);
+  const before = readEvents(root).filter(e => e.kind === 'decision');
+  for (let i = before.length - 1; i >= 0; i--) {
+    const age = Date.parse(ctx.ts) - Date.parse(before[i].ts);
+    if (!(age >= 0 && age <= REPEAT_MS)) continue;
+    if (mine !== null && contentOf(before[i]) === mine) return { n: i + 1, event: before[i] };
+  }
   appendEvent(root, event);
   // Our own event's position: another session may append right after it, so the count after the append is not enough.
   const line = JSON.stringify(event);
@@ -162,8 +182,12 @@ export function renderDecisionsMd(list: Numbered[], scope: string, locale: strin
 /** H-17: a note id of the roadmap: the same rule as the page's (carry 6, one regex). */
 export { NOTE_ID };
 
-/** Carry 6: the id of a decision's note, derived from the decision (its time, the session and its number), never from chance. */
-export const decisionNoteId = (event: LedgerEvent, session: string, n: number): string => `${compactTs(new Date(event.ts))}-${session}-d${n}`;
+/**
+ * Carry 6, re-review m3: the id of a decision's note, derived from the decision's own event (its time, the session and a
+ * digest of the recorded decision), never from chance: a re-run that returns the same event gives the same note.
+ */
+export const decisionNoteId = (event: LedgerEvent, session: string): string =>
+  `${compactTs(new Date(event.ts))}-${session}-d${sha256Hex(JSON.stringify(normalizeDecision(event) ?? event)).slice(0, 10)}`;
 
 /**
  * H-17: the roadmap writes of a decision, for the skill to send in one batch: its decision note (`notes/<eid>`, the

@@ -135,11 +135,15 @@ export function registerBatch(i: RegisterInput): BatchOut {
   return { now, eid: null, eids: [], leaseUntil, batch: [write] };
 }
 
-export interface FreeInput { sid: string; task: string; stateVersion: number; sessionVersion: number | null }
-/** [Release]: the task free again on the roadmap and, with its version, the seat's session idle without a task. */
+export interface FreeInput { sid: string; task: string; stateVersion: number; sessionVersion: number | null; keepSeat?: boolean }
+/**
+ * [Release]: the task free again on the roadmap and, with its version, the seat's session idle without a task. With
+ * `keepSeat` (re-review m5: a session that gives a task back and goes on working, as forge's infinite cycle or a yield
+ * to a simultaneous claim), the session only loses its task.
+ */
 export function freeBatch(i: FreeInput): Write[] {
   return [
     { op: 'update', collection: 'state', doc_id: i.task, data: { status: 'free', owner: DEL, claimedAt: DEL, startedAt: DEL }, if_version: i.stateVersion },
-    ...(i.sessionVersion !== null ? [{ op: 'update' as const, collection: 'sessions', doc_id: i.sid, data: { currentTask: DEL, status: 'idle' }, if_version: i.sessionVersion }] : []),
+    ...(i.sessionVersion !== null ? [{ op: 'update' as const, collection: 'sessions', doc_id: i.sid, data: i.keepSeat ? { currentTask: DEL } : { currentTask: DEL, status: 'idle' }, if_version: i.sessionVersion }] : []),
   ];
 }

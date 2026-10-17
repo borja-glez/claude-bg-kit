@@ -334,7 +334,8 @@ describe('plugin layout', () => {
     for (const w of ['--build-spec', '`off`', '--session ${CLAUDE_SESSION_ID}', 'FORGE route stage --stage done', '**In a subagent**']) expect(md).toContain(w);
     expect(md).not.toContain('forge local set workflow <option>');
     const inf = read('plugins/forge/skills/infinite/SKILL.md');
-    expect(inf).toContain('{status: "free", owner: {"__delete__": true}, claimedAt: {"__delete__": true}, startedAt: {"__delete__": true}}');
+    // Re-review m5: the release of T is waypoint's printed one, the seat kept.
+    expect(inf).toContain('release <plan> --seat <SID> --free <T> --state-version <TV> --session-version <SV> --keep-seat');
     expect(inf).not.toContain('leave `T` `pending`');
   });
   it('forge hooks: the routing hooks on SessionStart and UserPromptSubmit', () => {
@@ -1329,6 +1330,15 @@ describe('plugin layout', () => {
     // Carry 10: the ended run's status prints those releases, stopped tasks included.
     expect(step7).toContain('`publish.release`');
     expect(step7).toContain('still `running` or `stopped`');
+    // Re-review m5: no skill composes a release of state/T: the infinite cycle and a yield send waypoint's printed one.
+    const skills = ['plugins/forge/skills', 'plugins/waypoint/skills'].flatMap(d => readdirSync(d, { recursive: true }) as string[]).filter(f => String(f).endsWith('.md'));
+    expect(skills.length).toBeGreaterThan(10);
+    for (const d of ['plugins/forge/skills', 'plugins/waypoint/skills']) {
+      for (const f of (readdirSync(d, { recursive: true }) as string[]).filter(x => String(x).endsWith('.md'))) {
+        expect(read(path.join(d, String(f)).split(path.sep).join('/')), String(f)).not.toContain('status: "free"');
+      }
+    }
+    for (const f of ['plugins/forge/skills/infinite/SKILL.md', 'plugins/waypoint/skills/work/SKILL.md']) expect(read(f), f).toContain('--keep-seat');
   });
   it('the ephemeral run says its tick closes it when it finishes (wave 0 handoff)', () => {
     expect(runRef('ephemeral')).toContain('`closedBy: merge`');
@@ -1500,6 +1510,16 @@ describe('plugin layout', () => {
     const fields = 'category, risk, title, rationale, evidence, path and estimate';
     expect(approve.slice(0, approve.indexOf('- confirm:'))).toContain(fields);
     expect(approve.slice(approve.indexOf('- confirm:'))).toContain(fields);
+    // Re-review m4: on a version_mismatch the approve re-reads, and asks again when a bound field changed.
+    const mismatch = decide.split('\n').find(l => l.trimStart().startsWith('- On `version_mismatch`'))!;
+    for (const w of ['AskUserQuestion', fields, 'decide --from']) expect(mismatch, w).toContain(w);
+    // Re-review m2: the delete of an earlier mark goes in a call of its own before the batch; a refused create resends the
+    // whole batch; and a no after the delete landed says what changed.
+    expect(decide).toContain('in a call of its own, before the batch');
+    expect(writes).toContain('in a call of its own, before the batch');
+    expect(decide).toContain('resend the batch with the `set` pinned');
+    expect(decide).not.toContain('resend the same `set` pinned');
+    expect(mismatch).toContain('only the earlier mark was removed: the proposal now needs a new approval');
     // The publish after a block batch is pinned to the version that batch returned (task-steps, member).
     expect(runRef('task-steps')).not.toContain('pinned like any printed write');
   });
@@ -1590,6 +1610,23 @@ describe('plugin layout', () => {
       expect(read(`plugins/${plugin}/README.md`), `${plugin} en`).toContain('ctrl+x tab · band');
       expect(read(`plugins/${plugin}/README.es.md`), `${plugin} es`).toContain('ctrl+x tab · banda');
     }
+  });
+  it('task-17 minors: the README contracts of the republish and the digest, the data paragraph, the proposals wording and the CHANGELOG (re-review m6)', () => {
+    for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) expect(read(f), f).toContain('`republish`');
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) expect(read(f), f).toContain('`digest`');
+    const data = (f: string, head: string) => read(f).split('\n').find(l => l.startsWith(head))!;
+    const en = data('plugins/waypoint/README.md', '**Data of the roadmap.**');
+    const es = data('plugins/waypoint/README.es.md', '**Datos del roadmap.**');
+    for (const [text, exit] of [[en, 'exit 2'], [es, 'sale con 2']] as const) {
+      for (const w of ['`known.json`', '`meta/project`', '`republish`', '`rules`']) expect(text, w).toContain(w);
+      expect(text.toLowerCase()).toContain(exit);
+    }
+    const wp = read('plugins/waypoint/README.md');
+    expect(wp).not.toContain("Only the roadmap's owner's decisions count");
+    expect(wp).toContain("Only decisions by the roadmap's owner count");
+    const log = read('CHANGELOG.md');
+    expect(log.split('\n').find(l => l.includes('`waypoint done` prints the metrics apart'))).toContain('`--meta-version` (still accepted');
+    expect(log).not.toContain('no lookalike of a rejected or open proposal');
   });
   it('meta/metrics is printed without if_version only to create it, and pinned once it exists (final review M6)', () => {
     for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md', 'src/lib/batches.ts']) {

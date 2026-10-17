@@ -179,11 +179,14 @@ describe('decision add --session publishes the decision note (H-17)', () => {
     writeFileSync(path.join(root, 'd.json'), JSON.stringify({ ...INPUT, alternatives: ['wait'], revert: 'reopen the design', resolves: 'q-20261013T090000000Z-main-0000' }));
     const r = JSON.parse(cli(['decision', 'add', '--data-file', 'd.json', '--task', 'T5-2', '--session', 'main']).stdout);
     const text = 'diseño aprobado (v4) → approve: ronda 2 sin critical';
-    // Carry 6: the note's id comes from the decision (its time, the session and its number), never from chance.
+    // Carry 6, re-review m3: the note's id comes from the decision's own event (its time, the session and a digest of the
+    // decision), never from chance.
+    const id = r.publish[0].doc_id as string;
+    expect(id).toMatch(/^20261013T100000000Z-main-d[0-9a-f]{10}$/);
     expect(r.publish).toEqual([
-      { op: 'set', collection: 'notes', doc_id: '20261013T100000000Z-main-d1', data: { ts: at(0), type: 'decision', author: 'session:main', text, taskId: 'T5',
+      { op: 'set', collection: 'notes', doc_id: id, data: { ts: at(0), type: 'decision', author: 'session:main', text, taskId: 'T5',
         decision: { point: 'design-approve', what: 'diseño aprobado (v4)', chosen: 'approve', alternatives: ['wait'], why: 'ronda 2 sin critical', revert: 'reopen the design', auto: true } } },
-      { op: 'update', collection: 'notes', doc_id: 'q-20261013T090000000Z-main-0000', data: { answer: text, answeredBy: 'session:main', answeredAt: at(0), answeredByNote: '20261013T100000000Z-main-d1' } },
+      { op: 'update', collection: 'notes', doc_id: 'q-20261013T090000000Z-main-0000', data: { answer: text, answeredBy: 'session:main', answeredAt: at(0), answeredByNote: id } },
     ]);
     expect(readEvents(root).at(-1)).not.toHaveProperty('resolves');
   });
@@ -203,11 +206,24 @@ describe('decision add --session publishes the decision note (H-17)', () => {
     expect(lone.stderr).toContain('--session');
     expect(readEvents(root)).toHaveLength(before);
   });
-  it('carry 6: the same decision gives the same note id whatever the chance; the next one its own', () => {
+  it('re-review m3: a re-run of the same decision gives the same note id and the same write, never a second note; another decision its own', () => {
     writeFileSync(path.join(root, 'd.json'), JSON.stringify(INPUT));
-    const id = (rand: number) => JSON.parse(run(['decision', 'add', '--data-file', 'd.json', '--session', 'main'], { cwd: root, now: () => new Date(at(0)), env: {}, rand: () => rand }).stdout).publish[0].doc_id;
-    expect(id(0.1)).toBe('20261013T100000000Z-main-d1');
-    expect(id(0.9)).toBe('20261013T100000000Z-main-d2');
+    const add = (file: string, min: number, rand: number) =>
+      JSON.parse(run(['decision', 'add', '--data-file', file, '--session', 'main'], { cwd: root, now: () => new Date(at(min)), env: {}, rand: () => rand }).stdout);
+    const first = add('d.json', 0, 0.1);
+    const again = add('d.json', 1, 0.9);
+    expect(again.n).toBe(first.n);
+    expect(again.publish).toEqual(first.publish);
+    expect(readEvents(root).filter(e => e.kind === 'decision')).toHaveLength(1);
+    // Another decision is its own note.
+    writeFileSync(path.join(root, 'd2.json'), JSON.stringify({ ...INPUT, why: 'otra razón' }));
+    const other = add('d2.json', 2, 0.1);
+    expect(other.n).toBe(2);
+    expect(other.publish[0].doc_id).not.toBe(first.publish[0].doc_id);
+    // The same decision taken again later than the re-run window is a new one.
+    const later = add('d.json', 15, 0.1);
+    expect(later.n).toBe(3);
+    expect(later.publish[0].doc_id).not.toBe(first.publish[0].doc_id);
   });
   it('carry 6: a user decision is not auto, one without a task has no taskId, and the text is clean and never splits a character', () => {
     const rlo = String.fromCharCode(0x202e), face = String.fromCodePoint(0x1f600);

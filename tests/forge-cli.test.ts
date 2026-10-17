@@ -2140,8 +2140,14 @@ describe('forge waypoint-cli', () => {
         saveApproval(root, a, pageMark('2026-10-11T11:00:00.000Z') as ApprovalDoc);
         expect(run(['proposals', 'to-task', a, '--plan', PLAN], io).code).toBe(2);
         expect(JSON.parse(run(['proposals', 'list'], io).stdout).unowned).toBe(1);
-        // Back on a roadmap with the rule: it counts, and turns into a task.
-        pullDb({ [a]: approved }, { [a]: pageMark('2026-10-11T11:00:00.000Z') }, { rules: 2 });
+        // Re-review m1: a mark dated more than 10 minutes ahead of this machine's clock never outranks the local decision.
+        for (const future of ['2099-01-01T00:00:00.000Z', '2026-10-11T10:10:01.000Z']) {
+          pullDb({ [a]: approved }, { [a]: pageMark(future) }, { rules: 2 });
+          expect(JSON.parse(run(['proposals', 'list'], io).stdout).unowned, future).toBe(1);
+          expect(run(['proposals', 'to-task', a, '--plan', PLAN], io).code, future).toBe(2);
+        }
+        // Back on a roadmap with the rule and a mark within the 10 minutes: it counts, and turns into a task.
+        pullDb({ [a]: approved }, { [a]: pageMark('2026-10-11T10:09:59.000Z') }, { rules: 2 });
         expect(JSON.parse(run(['proposals', 'list'], io).stdout).unowned).toBe(0);
         expect(run(['proposals', 'to-task', a, '--plan', PLAN], io).code).toBe(0);
       });

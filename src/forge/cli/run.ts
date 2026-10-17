@@ -475,10 +475,14 @@ function pulledRules(root: string): number {
  * Carry 12: an owner's mark newer than that decision (its decidedAt later than the event) is the owner's own later
  * decision, taken on the page or in another checkout, and counts by itself; only on a roadmap with the owner rule
  * (meta/page.rules ≥ PAGE_RULES at the last pull), where only the owner writes approvals/ and so decidedAt is the owner's.
+ * Re-review m1: and only a decidedAt at most MARK_SKEW_MS ahead of this machine's clock (`now`): a mark dated in the
+ * future (a forged one, or a skewed clock) never outranks a local decision.
  */
-function bindingDecision(last: { status: string; ts: string } | undefined, mark: ApprovalDoc | null | undefined, ownerRule: boolean): string | undefined {
+const MARK_SKEW_MS = 10 * 60_000;
+function bindingDecision(last: { status: string; ts: string } | undefined, mark: ApprovalDoc | null | undefined, ownerRule: boolean, now: number): string | undefined {
   if (!last) return undefined;
-  if (ownerRule && mark && Date.parse(mark.decidedAt) > Date.parse(last.ts)) return undefined;
+  const at = mark ? Date.parse(mark.decidedAt) : NaN;
+  if (ownerRule && Number.isFinite(at) && at > Date.parse(last.ts) && at <= now + MARK_SKEW_MS) return undefined;
   return last.status;
 }
 
@@ -494,26 +498,26 @@ function stopContext(cwd: string, now: Date): StopContext {
     stopFile: existsSync(stopFile(cwd)),
     // Wave 4: approved work counts only with the owner's mark (with or without a task, as before); one without a task also
     // needs the mark to be of its present text: an edited one never becomes a task, so it does not hold the queue open.
-    approvedPending: proposals.filter(p => p.taskId === undefined ? ownerCheck(p.id, p, marks[p.id], bindingDecision(last[p.id], marks[p.id], ownerRule)) === 'ok' : markMatches(p, marks[p.id])).length,
+    approvedPending: proposals.filter(p => p.taskId === undefined ? ownerCheck(p.id, p, marks[p.id], bindingDecision(last[p.id], marks[p.id], ownerRule, now.getTime())) === 'ok' : markMatches(p, marks[p.id])).length,
     pendingProposals: proposals.filter(p => p.status === 'proposed' || p.status === 'discussing').length,
   };
 }
 
 /** Wave 4: approved proposals without a task that lack the roadmap owner's mark, or whose text changed since the mark: they
  *  never become tasks. The reason says which of the two. */
-function unownedReasons(root: string): Record<string, 'no-mark' | 'edited'> {
+function unownedReasons(root: string, now: Date): Record<string, 'no-mark' | 'edited'> {
   const marks = loadApprovals(root);
   const last = lastDecisions(root);
   const ownerRule = pulledRules(root) >= PAGE_RULES;
   const out: Record<string, 'no-mark' | 'edited'> = {};
   for (const p of loadProposals(root)) {
     if (!isActionable(p) || p.taskId !== undefined) continue;
-    const c = ownerCheck(p.id, p, marks[p.id], bindingDecision(last[p.id], marks[p.id], ownerRule));
+    const c = ownerCheck(p.id, p, marks[p.id], bindingDecision(last[p.id], marks[p.id], ownerRule, now.getTime()));
     if (c !== 'ok') out[p.id] = c;
   }
   return out;
 }
-const unownedOf = (root: string): number => Object.keys(unownedReasons(root)).length;
+const unownedOf = (root: string, now: Date): number => Object.keys(unownedReasons(root, now)).length;
 
 /**
  * K2-01: the directory of the infinite run: the main checkout, wherever forge runs from; this directory only when it
@@ -1295,7 +1299,7 @@ function runCommand(argv: string[], io: Io): Result {
             if (status !== undefined && !(PROPOSAL_STATUSES as readonly string[]).includes(status)) throw new UsageError(`proposals list: --status must be one of ${PROPOSAL_STATUSES.join('|')}`);
             const all = loadProposals(io.cwd).filter(p => status === undefined || p.status === status);
             all.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : a.id < b.id ? 1 : -1));
-            const reasons = unownedReasons(io.cwd);
+            const reasons = unownedReasons(io.cwd, io.now());
             return json({ proposals: all, unowned: Object.keys(reasons).length, unownedReasons: reasons });
           }
           case 'decide': {
@@ -1486,7 +1490,7 @@ function runCommand(argv: string[], io: Io): Result {
             // A decision this checkout reopened since stops counting, even if its mark is still in the roadmap, unless the
             // owner decided again after it (carry 12).
             const mark = loadApproval(io.cwd, id);
-            const lastStatus = bindingDecision(lastDecisions(io.cwd)[id], mark, pulledRules(io.cwd) >= PAGE_RULES);
+            const lastStatus = bindingDecision(lastDecisions(io.cwd)[id], mark, pulledRules(io.cwd) >= PAGE_RULES, io.now().getTime());
             const check = ownerCheck(id, found, mark, lastStatus);
             if (check === 'no-mark') throw new UsageError(`proposals to-task: ${id} has no mark of the roadmap's owner (approvals/${id}); only the owner's approvals become tasks`);
             if (!ownerApproved(id, found, mark, lastStatus)) throw new UsageError(`proposals to-task: ${id} was edited after the owner's approval; it needs a new approval`);
@@ -1789,7 +1793,7 @@ function runCommand(argv: string[], io: Io): Result {
           const unbound = !!run?.active && run.sessionId === null;
           // G-08: meta/infinite as the roadmap takes it, for the skill to send as it is.
           const publish = run ? { infinite: infinitePublish(mainCheckout(io.cwd), run, io.now()) } : null;
-          return json({ present: text !== null, valid: run !== null, run, stopReason: reason, reply: runReply(runRoot, run), ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}), unowned: unownedOf(runRoot), publish });
+          return json({ present: text !== null, valid: run !== null, run, stopReason: reason, reply: runReply(runRoot, run), ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}), unowned: unownedOf(runRoot, io.now()), publish });
         }
         throw new UsageError('usage: forge infinite <start --cycles N|--hours H [--queue-max N] [--session ID] [--locale CODE]|status>');
       }
@@ -2056,7 +2060,7 @@ function runCommand(argv: string[], io: Io): Result {
           try {
             const { n, event } = addDecision(root, decision, { ts: ts(), ...(task ? { task } : {}), runId: exec?.active ? exec.runId : null });
             const closes = typeof resolves === 'string' && !resolvesRefused ? resolves : null;
-            const publish = session ? decisionWrites({ event, session, eid: decisionNoteId(event, session, n), resolves: closes }) : null;
+            const publish = session ? decisionWrites({ event, session, eid: decisionNoteId(event, session), resolves: closes }) : null;
             return json({ n, ...event, ...(publish ? { publish } : {}), ...(resolvesRefused ? { resolvesRefused } : {}) });
           } catch (e) {
             if (e instanceof DecisionInputError) throw new UsageError(`decision add: ${e.message}`);
