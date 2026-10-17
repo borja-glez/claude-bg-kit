@@ -38,7 +38,7 @@ import { detectValidators, selectValidators, runValidators, markPreexisting, blo
 import { checkTools, mcpInventory, toolGaps } from '../tools.js';
 import { verifyPlan, cleanupPids, killTarget, askFor, capLines, relabelDiff, type PlanSurface } from '../verify.js';
 import { readLocal, updateLocal, mainCheckout, readLearned, recordLearned, OBJECT_ID, type SurfacePermission } from '../local.js';
-import { memberForHook, listMembers, memberFile } from '../members.js';
+import { memberForHook, allMembersOf, memberFile } from '../members.js';
 import { hookLive } from '../live.js';
 import { hookRoute } from '../route-hooks.js';
 import { liveJobs, noSlot, slotFor, withJob, writeJsonAtomic, type Slot } from '../jobs.js';
@@ -1667,7 +1667,8 @@ function runCommand(argv: string[], io: Io): Result {
             // project of a plan run's task.
             appendEvent(main, { ts: at, kind: 'phase', task: id, phase: 'stopped', runId: after.runId, ...(after.kind === 'plan' && isSafeId(after.project) ? { project: after.project } : {}) });
           }
-          const listed = listMembers(main, after.runId);
+          // Every member of the run, not only those the role readers see: each is messaged, its file goes, its jobs are named.
+          const listed = allMembersOf(main, after.runId);
           members = listed.map(m => ({ sessionId: m.sessionId, name: m.name, role: m.role, task: m.task }));
           for (const m of listed) { if (m.hookSession) own.add(m.hookSession); rmSync(memberFile(main, m.sessionId), { force: true }); }
           // A-23: the coordinator's own tasks go back to free on the roadmap; a member's task stays with its session, and a

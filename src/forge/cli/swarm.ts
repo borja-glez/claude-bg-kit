@@ -26,7 +26,7 @@ import type { SessionDoc, Stage, TaskState } from '../../lib/types.js';
 import { mainWorktreeFrom, samePath } from '../../lib/worktree.js';
 import { appendOnce, excludeWorktrees, gitToplevel, hasLine, infoFile } from '../../lib/git-info.js';
 import { mainCheckout, updateLocal } from '../local.js';
-import { readMember, writeMember, isMemberId, listMembers, memberFile } from '../members.js';
+import { readMember, writeMember, isMemberId, allMembersOf, memberFile } from '../members.js';
 import { parseLooseTasks, planOfLoose, statesOfLoose, writeLoose, readLoose, type LooseTask } from '../loose.js';
 import { startAnnounce, integratedSay, rejectedDepsSay, keptFilesSay, proposeSay, VENV_HINT } from '../swarm.js';
 import type { PriorCommit } from '../brief.js';
@@ -1433,7 +1433,8 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       closeEnded(main, iso, 'close', lockDeps);
       // K2-02: forge stop leaves the tasks it stopped as stopped: they are released like running ones.
       const open = Object.entries(e.tasks).filter(([, t]) => t.status === 'running' || t.status === 'stopped');
-      const sessions = listMembers(main, e.runId).map(m => ({ sessionId: m.sessionId, name: m.name, role: m.role, task: m.task }));
+      // Every member of the run, not only those the role readers see: each is listed to message and its file goes.
+      const sessions = allMembersOf(main, e.runId).map(m => ({ sessionId: m.sessionId, name: m.name, role: m.role, task: m.task }));
       for (const m of sessions) rmSync(memberFile(main, m.sessionId), { force: true });
       return json({
         closed: true, runId: e.runId, kind: e.kind, stopReason: e.stopReason, closedAt: iso,

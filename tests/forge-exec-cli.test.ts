@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, existsSync, utimesSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -1470,6 +1470,44 @@ describe('forge stop stops the execution of the main checkout for real, from any
     expect(out(run(['swarm', 'close'], io))).toMatchObject({ closed: true, members: ['T2'], sessions: [{ sessionId: 'ui', name: 'wp-shop-T2', role: 'executor', task: 'T2' }] });
     expect(existsSync(path.join(root, '.forge', 'members', 'ui.json'))).toBe(false);
     expect(existsSync(path.join(root, '.forge', 'members', 'old.json'))).toBe(true);
+  });
+  // 60 members of the run, all older than 55 member files of another run: none is among the 50 newest that the role
+  // readers see (newestMemberFiles), yet a cleanup must reach each one.
+  const memberPath = (sid: string) => path.join(root, '.forge', 'members', `${sid}.json`);
+  const crowd = (runId: string): string[] => {
+    const put = (sid: string, rid: string, ageS: number, hook: string | null) => {
+      writeMember(root, { sessionId: sid, role: 'manual', runId: rid, task: null, name: null, since: at, hookSession: hook });
+      const t = new Date(NOW.getTime() - ageS * 1000);
+      utimesSync(memberPath(sid), t, t);
+    };
+    const ours = Array.from({ length: 60 }, (_, i) => `m${i}`);
+    ours.forEach((sid, i) => put(sid, runId, 3600 - i, `h${i}`));
+    for (let i = 0; i < 55; i++) put(`x${i}`, 'another-run', 600 - i, null);
+    return ours;
+  };
+  const sids = (list: { sessionId: string }[]) => list.map(m => m.sessionId).sort();
+  it('forge stop lists and removes every member of the run, and names the jobs of each, past the 50 newest member files', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    const e = readExecution(root)!;
+    saveExecution(root, { ...e, tasks: { T2: task('sessions') } });
+    const ours = crowd(e.runId);
+    const wt = path.join(root, '.claude', 'worktrees', 'run');
+    const w = { ...io, cwd: wt, git: defaultGit(wt) };
+    // h0 is the hook id of the oldest member: its job is this run's.
+    const seen = withJob(root, { cmd: 'validate', task: 'T2-1', out: 'validate.json', session: 'h0', startedAt: at }, job => ({ name: job.name, r: out(run(['stop'], w)) }));
+    expect(sids(seen.r.members)).toEqual([...ours].sort());
+    expect(seen.r.running).toEqual([{ name: seen.name, task: 'T2-1' }]);
+    for (const sid of ours) expect(existsSync(memberPath(sid)), sid).toBe(false);
+    for (let i = 0; i < 55; i++) expect(existsSync(memberPath(`x${i}`))).toBe(true);
+  });
+  it('swarm close lists and removes every member of the run, past the 50 newest member files', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    const e = readExecution(root)!;
+    saveExecution(root, { ...e, active: false, stopReason: 'stalled', tasks: { T2: task('sessions') } });
+    const ours = crowd(e.runId);
+    expect(sids(out(run(['swarm', 'close'], io)).sessions)).toEqual([...ours].sort());
+    for (const sid of ours) expect(existsSync(memberPath(sid)), sid).toBe(false);
+    for (let i = 0; i < 55; i++) expect(existsSync(memberPath(`x${i}`))).toBe(true);
   });
 });
 

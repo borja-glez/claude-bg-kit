@@ -8,7 +8,8 @@ import { parseRun, type RunState } from './forge-run.js';
 export interface ActivityMember { sessionId: string; runId: string; hookSession: string | null }
 export interface ForgeActivity { execution: ExecutionState | null; members: ActivityMember[]; infinite: RunState | null }
 export type ForgeRole = 'coordinator' | 'member' | 'infinite';
-/** At most this many member files are read (as listMembers does). */
+/** At most this many member texts forgeActivityFrom parses: a bound on what its caller passes. Waypoint's hooks and the
+ *  band pick theirs with newestMemberFiles (member-doc.ts), at most MEMBERS_MAX. */
 export const MAX_MEMBER_FILES = 200;
 
 export function activityMember(x: unknown): ActivityMember | null {
