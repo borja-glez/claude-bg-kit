@@ -14,6 +14,8 @@ export const WORKFLOW_AGENT_TTL_MS = 2 * 3600_000;
 /** Only this much of a prompt is read. */
 export const PROMPT_SCAN = 8192;
 export const OWN_TASKS_MAX = 100;
+/** An agent spawned this recently is not ended by a list that does not name it yet. */
+export const LIST_GRACE_MS = 15_000;
 const PARENT_DEPTH = 5;
 
 export interface AgentLink {
@@ -135,7 +137,7 @@ const statusOf = (s: string): AgentLink['status'] =>
 
 /**
  * E-09: $.agent.list() is the truth for the agents it lists: their state (a teammate `idle` between turns waits, it is
- * not gone) and their parent; one it no longer lists has ended, except a workflow's (no list names those). One listed
+ * not gone) and their parent; one it no longer lists has ended, except a workflow's (no list names those) and one spawned within LIST_GRACE_MS (the list may not name it yet). One listed
  * that lens never saw spawn (it loaded later) is added, its task from its description or its parent.
  */
 export function syncListed(links: readonly AgentLink[], list: readonly ListedAgent[], now: number, known: ReadonlySet<string>): AgentLink[] {
@@ -146,14 +148,14 @@ export function syncListed(links: readonly AgentLink[], list: readonly ListedAge
       const status = statusOf(a.status);
       return { ...l, status, parentId: a.parentId ?? l.parentId, endedAt: status === 'done' ? l.endedAt ?? now : null, ...(status === 'done' ? { tool: null } : {}) };
     }
-    return l.workflow || l.status === 'done' ? l : { ...l, status: 'done' as const, tool: null, endedAt: now };
+    return l.workflow || l.status === 'done' || now - l.since <= LIST_GRACE_MS ? l : { ...l, status: 'done' as const, tool: null, endedAt: now };
   });
   for (const a of list) {
     if (links.some(l => l.id === a.id) || !LIVE.has(a.status)) continue;
     const own = taskOfPrompt('', a.description, known);
     const up = own ? null : parentTask(out, a.parentId);
     out.push({
-      id: a.id, type: cleanText(a.type), description: cleanText(a.description), since: now,
+      id: a.id, type: cleanText(String(a.type ?? '')), description: cleanText(String(a.description ?? '')), since: now,
       task: own?.task ?? up?.task ?? null, brief: own?.brief ?? up?.brief ?? null, project: own?.project ?? up?.project ?? null,
       via: own?.via ?? (up ? 'parent' : null), parentId: a.parentId, workflow: null, status: statusOf(a.status), tool: null, endedAt: null,
     });
@@ -168,7 +170,7 @@ export function endAgent(links: readonly AgentLink[], id: string, now: number, o
 
 /** E-11: the tool an agent runs now (tool.call with its agentId), or none once it returned. */
 export function setTool(links: readonly AgentLink[], id: string, tool: { name: string; since: number } | null): AgentLink[] {
-  return links.map(l => (l.id === id ? { ...l, tool: tool ? { name: cleanText(tool.name), since: tool.since } : null } : l));
+  return links.map(l => (l.id === id ? { ...l, tool: tool ? { name: cleanText(String(tool.name ?? '')), since: tool.since } : null } : l));
 }
 
 /** A workflow's agent alive past WORKFLOW_AGENT_TTL_MS has ended; one that ended goes after DONE_LINK_MS (a workflow's, WORKFLOW_DONE_MS). */

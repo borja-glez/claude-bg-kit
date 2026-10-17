@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   addOwnTask, endAgent, knownTasks, linkSpawn, ownTaskOf, pruneLinks, setTool, syncListed, taskOfPrompt,
-  DONE_LINK_MS, LINKS_MAX, PROMPT_SCAN, WORKFLOW_AGENT_TTL_MS, type AgentLink,
+  DONE_LINK_MS, LINKS_MAX, LIST_GRACE_MS, PROMPT_SCAN, WORKFLOW_AGENT_TTL_MS, type AgentLink,
 } from '../src/lens/links.js';
 import { taskLine } from '../src/forge/task-ref.js';
 
@@ -51,10 +51,15 @@ describe('taskOfPrompt (E-02)', () => {
     ];
     for (const p of hostile) expect(() => taskOfPrompt(p, '', known)).not.toThrow();
     for (const p of hostile.slice(0, 5)) expect(taskOfPrompt(p, '', known)).toBeNull();
+    expect(taskOfPrompt('.forge/work/../x/y', '', known)).toBeNull();
+    expect(taskOfPrompt('.forge\\work\\..\\..\\x', '', known)).toBeNull();
     for (const bad of [null, {}, [], 7, Symbol.iterator, () => 1]) {
       expect(taskOfPrompt(bad as unknown as string, bad as unknown as string, known)).toBeNull();
     }
     expect(taskOfPrompt('forge-task: T001-1', undefined as unknown as string, known)).toMatchObject({ task: 'T001' });
+  });
+  it('a prompt without a contract line that mentions the work path of another task takes that task (pinned fallback order)', () => {
+    expect(taskOfPrompt('Compare with .forge/work/T002/brief-1.md', 'T001 helper', known)).toEqual({ task: 'T002', brief: 1, project: null, via: 'work-path' });
   });
 });
 
@@ -81,14 +86,31 @@ describe('the agents and their task (E-02, E-09)', () => {
     // tm is still running here: only SubagentStop (`any`) ends it, a plain turn.complete does not
     expect(endAgent(links, 'tm', NOW + 1500).find(l => l.id === 'tm')?.status).toBe('running');
     expect(endAgent(links, 'tm', NOW + 1500, { any: true }).find(l => l.id === 'tm')).toMatchObject({ status: 'done', endedAt: NOW + 1500 });
-    links = syncListed(links, [], NOW + 2000, known);
-    expect(links.find(l => l.id === 'a1')).toMatchObject({ status: 'done', endedAt: NOW + 2000 });
+    const GONE = NOW + LIST_GRACE_MS + 2000;
+    links = syncListed(links, [], GONE, known);
+    expect(links.find(l => l.id === 'a1')).toMatchObject({ status: 'done', endedAt: GONE });
     expect(links.find(l => l.id === 'w1')?.status).toBe('running');
     expect(endAgent(links, 'w1', NOW + 3000).find(l => l.id === 'w1')).toMatchObject({ status: 'done', endedAt: NOW + 3000 });
     expect(endAgent(linkSpawn([], spawn('b1', 'x'), known), 'b1', NOW + 3000)[0].status).toBe('running');
     expect(endAgent(linkSpawn([], spawn('b1', 'x'), known), 'b1', NOW + 3000, { any: true })[0].status).toBe('done');
     expect(pruneLinks(links, NOW + WORKFLOW_AGENT_TTL_MS + 1).find(l => l.id === 'w1')?.status).toBe('done');
-    expect(pruneLinks(links, NOW + 2000 + DONE_LINK_MS + 1).find(l => l.id === 'a1')).toBeUndefined();
+    expect(pruneLinks(links, GONE + DONE_LINK_MS + 1).find(l => l.id === 'a1')).toBeUndefined();
+  });
+  it('a link spawned just before a list that omits it is not ended; an older one is; a future one is not', () => {
+    const at = (age: number) => [{ ...bare('r', null), since: NOW - age }];
+    expect(syncListed(at(5_000), [], NOW, known)[0].status).toBe('running');
+    expect(syncListed(at(LIST_GRACE_MS + 5_000), [], NOW, known)[0]).toMatchObject({ status: 'done', endedAt: NOW });
+    expect(syncListed(at(-60_000), [], NOW, known)[0].status).toBe('running');
+  });
+  it('a listed agent or a tool with odd fields never throws', () => {
+    const odd = [{ id: 'o1', type: undefined, description: undefined, status: 'running', parentId: null }, { id: 'o2', type: 7, description: 9, status: 'idle', parentId: null }] as unknown as Parameters<typeof syncListed>[1];
+    let links: AgentLink[] = [];
+    expect(() => { links = syncListed([], odd, NOW, known); }).not.toThrow();
+    expect(links.map(l => l.id)).toEqual(['o1', 'o2']);
+    links = linkSpawn(links, spawn('t1', 'x'), known);
+    expect(() => { links = setTool(links, 't1', { name: 5 as unknown as string, since: NOW }); }).not.toThrow();
+    expect(links.find(l => l.id === 't1')?.tool?.since).toBe(NOW);
+    expect(() => setTool(links, 't1', { name: undefined as unknown as string, since: NOW })).not.toThrow();
   });
   it('a tool in flight stays on its agent until it returns; the list keeps 100 agents at most', () => {
     let links = linkSpawn([], spawn('a1', 'forge-task: T001-1'), known);
