@@ -257,11 +257,22 @@ describe('the same task id in two plans and loose (C5, spec deviation 2)', () =>
     const p4 = draw({ statuses: [st('T001', { project: 'shop' })], links: [link('s1', 'T001', { project: 'shop' })] }, SESSIONS);
     expect(p4.where('s1')).toEqual(['shop__T001']);
   });
-  it("a row's title and its job follow its key: the title of its own plan, the job on the newest status of its id", () => {
-    const job = parseJob(JSON.stringify({ name: 'review-prep-T001-1-4', cmd: 'review-prep', task: 'T001-1', pid: 4, startedAt: ago(1), out: 'x', session: 'me' }))!;
-    const { row } = drawn('web', { titles: { shop__T001: 'Cart', web__T001: 'Landing' }, jobs: [job] });
-    expect(row('web__T001')).toMatchObject({ title: 'Landing', job: { name: 'review-prep' } });
-    expect(row('T001')).toMatchObject({ title: null, job: null });
+  it("a row's title follows its key: the title of its own plan", () => {
+    const { row } = drawn('web', { titles: { shop__T001: 'Cart', web__T001: 'Landing' } });
+    expect(row('web__T001')).toMatchObject({ title: 'Landing' });
+    expect(row('T001')).toMatchObject({ title: null });
+  });
+  it("a job goes on the status of its id that its own session wrote, whichever moved last (R5, P3)", () => {
+    const job = parseJob(JSON.stringify({ name: 'review-prep-T001-1-4', cmd: 'review-prep', task: 'T001-1', pid: 4, startedAt: ago(1), out: 'x', session: 'B' }))!;
+    const statuses = [st('T001', { project: 'shop', session: 'A', lastAt: ago(1) }), st('T001', { project: 'web', session: 'B', lastAt: ago(3) })];
+    for (const viewer of ['A', 'B']) {
+      const rows = buildActivities(input({ statuses, sessionId: viewer, jobs: [job] })).activities;
+      expect(rows.map(a => [a.key, a.job?.name ?? null]).sort(), viewer).toEqual([['shop__T001', null], ['web__T001', 'review-prep']]);
+    }
+    // A job that names no session, or one whose session wrote none of them, goes by the agents' rule: the loose status first.
+    const loose = [...statuses, st('T001', { session: 'C', lastAt: ago(5) })];
+    const anon = parseJob(JSON.stringify({ name: 'prep-T001-1-5', cmd: 'prep', task: 'T001-1', pid: 5, startedAt: ago(1), out: 'x', session: null }))!;
+    expect(buildActivities(input({ statuses: loose, sessionId: 'A', jobs: [anon] })).activities.find(a => a.job)?.key).toBe('T001');
   });
 });
 

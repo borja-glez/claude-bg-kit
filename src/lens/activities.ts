@@ -228,8 +228,15 @@ export function buildActivities(i: ActivityInput): ActivityView {
   // R3: each agent's one home, shared with the slots (withSlotAgents), so none is drawn twice nor lost.
   const homes = i.homes ?? linkHomes(i);
   const liveJobs = i.jobs.filter(j => { const t = ms(j.startedAt); return Number.isFinite(t) && age(t, now) < JOB_ALIVE_MS; });
-  // A job names no project: it goes on the newest status of its task id alone.
-  const jobHome = new Map(liveJobs.map(j => [j, j.task === null ? undefined : newestKey(i.statuses, st => isOf(st.task, j.task!), now)] as const));
+  // A job names no project: it goes on one status of its task id, the one its own session wrote first (R5), else by the
+  // agents' rule (homeOf).
+  const jobHomeOf = (j: LensJob): string | undefined => {
+    const task = j.task;
+    if (task === null) return undefined;
+    const own = j.session !== null ? homeOf({ ...i, statuses: i.statuses.filter(st => st.session === j.session) }, st => isOf(st.task, task)) : undefined;
+    return own ?? homeOf(i, st => isOf(st.task, task));
+  };
+  const jobHome = new Map(liveJobs.map(j => [j, jobHomeOf(j)] as const));
   type Built = { row: Row; at: number; end: number; st: ForgeStatus | null; rank: number };
   const built: Built[] = [];
   const seen = new Set<string>();
