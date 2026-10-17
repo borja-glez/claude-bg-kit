@@ -104,6 +104,46 @@ describe('a set-aside that fails stops prep (R2, M2)', () => {
   });
 });
 
+describe('a partial set-aside is finished by the next prep (R6, I1)', () => {
+  it("the round folders moved but findings-1-1.json and the index did not: once what held them is gone, prep moves them", () => {
+    runA();
+    for (const f of ['findings-1-1.json', 'findings-index-1.json', 'validators-head-1.json']) put(W(root, f), 'A');
+    // What holds them: a non-empty folder where each would go.
+    for (const f of ['findings-1-1.json', 'findings-index-1.json']) put(W(root, 'earlier-shop-B', f, 'held'), 'x');
+    const first = prepB(root);
+    expect(first.code).toBe(2);
+    for (const f of ['findings-1-1.json', 'findings-index-1.json']) expect(first.stderr, f).toContain(f);
+    expect(existsSync(W(root, 'reviews-1-1'))).toBe(false);
+    expect(existsSync(W(root, 'findings-1-1.json'))).toBe(true);
+    // The person closes what held them and runs prep again: no round folder is left, and the rest still goes.
+    rmSync(W(root, 'earlier-shop-B', 'findings-1-1.json'), { recursive: true });
+    rmSync(W(root, 'earlier-shop-B', 'findings-index-1.json'), { recursive: true });
+    const again = prepB(root);
+    expect(again.code, again.stderr).toBe(0);
+    expect(JSON.parse(again.stdout).earlier).toBe('.forge/work/shop/T1/earlier-shop-B');
+    for (const f of ['findings-1-1.json', 'findings-index-1.json']) {
+      expect(existsSync(W(root, f)), f).toBe(false);
+      expect(read(W(root, 'earlier-shop-B', f)), f).toBe('A');
+    }
+  });
+  it("an earlier run's round left only as evidence, or as root files, still goes; this run's own index and validators-head stay", () => {
+    put(W(root, 'evidence', '1-2', '01.png'), 'A');
+    put(W(root, 'handover-1-3.md'), 'A');
+    // This run (shop-B) already reviewed round 1: its files are its own.
+    appendEvent(root, { ts: at(1), kind: 'phase', task: 'T1', phase: 'validate', brief: 1, round: 1, project: 'shop' });
+    put(W(root, 'findings-1-1.json'), 'B');
+    put(W(root, 'findings-index-1.json'), 'B');
+    put(W(root, 'validators-head-1.json'), JSON.stringify({ round: 2, head: 'a'.repeat(40), runId: 'shop-B' }));
+    expect(prepB(root).code).toBe(0);
+    for (const f of ['evidence/1-2/01.png', 'handover-1-3.md']) expect(read(W(root, 'earlier-shop-B', ...f.split('/'))), f).toBe('A');
+    for (const f of ['findings-1-1.json', 'findings-index-1.json', 'validators-head-1.json']) expect(existsSync(W(root, f)), f).toBe(true);
+    // Another run's validators-head goes, even when this run has rounds.
+    put(W(root, 'validators-head-1.json'), JSON.stringify({ round: 2, head: 'a'.repeat(40), runId: 'shop-A' }));
+    expect(prepB(root).code).toBe(0);
+    expect(existsSync(W(root, 'validators-head-1.json'))).toBe(false);
+  });
+});
+
 describe('an earlier run\'s evidence is never overwritten nor lost (R1, M1)', () => {
   it("prep in a member's worktree sets aside the main checkout's copy too, and swarm cleanup copies the set-aside rounds before it removes the worktree", () => {
     runA();

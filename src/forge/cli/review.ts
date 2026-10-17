@@ -82,11 +82,27 @@ function setAsideEarlier(dir: string, n: string, id: string, events: readonly Le
     .filter(e => e.kind === 'phase' && isTask(e, id) && e.brief === Number(n) && typeof e.round === 'number').map(e => e.round as number));
   let names: string[] = [];
   try { names = readdirSync(dir); } catch { return null; }
-  const rounds = names.flatMap(f => {
-    const m = new RegExp(`^reviews-${n}-(\\d+)$`).exec(f);
-    return m && !ours.has(Number(m[1])) ? [Number(m[1])] : [];
-  });
-  if (!rounds.length) return null;
+  let evidence: string[] = [];
+  try { evidence = readdirSync(path.join(dir, 'evidence')); } catch { evidence = []; }
+  // R6 (I1): an earlier round is any trace of it, its folder, its evidence or its root files, so a set-aside a failed
+  // move left half done is finished by the next prep, also once no round folder is left. This run's own stay.
+  const roundOf = (f: string): number | null => {
+    const m = new RegExp(`^(?:reviews-${n}-(\\d+)|findings-${n}-(\\d+)\\.json|fix-${n}-(\\d+)\\.patch|handover-${n}-(\\d+)\\.md|validators-fix-${n}-(\\d+)-.+\\.json)$`).exec(f);
+    const k = m ? m.slice(1).find(x => x !== undefined) : undefined;
+    return k === undefined ? null : Number(k);
+  };
+  const rounds = [...new Set([
+    ...names.map(roundOf),
+    ...evidence.map(f => { const m = new RegExp(`^${n}-(\\d+)$`).exec(f); return m ? Number(m[1]) : null; }),
+  ].filter((k): k is number => k !== null && !ours.has(k)))].sort((a, b) => a - b);
+  // The brief's findings index is this run's once it reviewed the brief; the step's validators-head says its run.
+  let head: unknown = null;
+  try { head = JSON.parse(readFileSync(path.join(dir, `validators-head-${n}.json`), 'utf8')); } catch { head = null; }
+  const briefFiles = [
+    ...(ours.size ? [] : [`findings-index-${n}.json`]),
+    ...((head as { runId?: unknown } | null)?.runId === run.runId ? [] : [`validators-head-${n}.json`]),
+  ].filter(f => names.includes(f));
+  if (!rounds.length && !briefFiles.length) return null;
   const aside = path.join(dir, `earlier-${run.runId}`);
   let moved = 0;
   const failed: string[] = [];
@@ -103,7 +119,7 @@ function setAsideEarlier(dir: string, n: string, id: string, events: readonly Le
   const roundFiles = (k: number) => names.filter(f => f === `findings-${n}-${k}.json` || f === `fix-${n}-${k}.patch` || f === `handover-${n}-${k}.md`
     || (f.startsWith(`validators-fix-${n}-${k}-`) && f.endsWith('.json')));
   for (const k of rounds) { move(`reviews-${n}-${k}`); move(`evidence/${n}-${k}`); for (const f of roundFiles(k)) move(f); }
-  for (const f of [`findings-index-${n}.json`, `validators-head-${n}.json`]) move(f);
+  for (const f of briefFiles) move(f);
   if (failed.length) {
     throw new UsageError(`prep: ${failed.map(f => rel(cwd, f)).join(', ')} could not be moved aside to ${rel(cwd, aside)} (an earlier run's review of this brief): close what holds it and run prep again`);
   }
