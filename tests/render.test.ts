@@ -1530,9 +1530,11 @@ describe('everything that opens a task is a button (G-15, H-19)', () => {
       expect([...new Set(tags)], view).toEqual(['button']);
     }
   });
-  it('the Conversation task chip is a button with its own data-k', () => {
-    const m = { ...base(), notes: [note({ id: 'n1', taskId: 'T001' })] };
-    expect(renderApp(m, ui({ view: 'talk' }))).toContain('<button type="button" class="chip" data-action="open-task" data-id="T001" data-k="tk:T001">');
+  it('the Conversation task chip is a button keyed by its note: two notes on one task give two keys (review M2)', () => {
+    const m = { ...base(), notes: [note({ id: 'n1', taskId: 'T001' }), note({ id: 'n2', taskId: 'T001' })] };
+    const html = renderApp(m, ui({ view: 'talk' }));
+    expect(html).toContain('<button type="button" class="chip" data-action="open-task" data-id="T001" data-k="tk:n1">');
+    expect(html).toContain('<button type="button" class="chip" data-action="open-task" data-id="T001" data-k="tk:n2">');
   });
   it('the bars are hidden from assistive technology and open their task with a click of their own; groups say whether they are open', () => {
     const html = renderApp(base(), ui({ view: 'schedule', expanded: new Set(['F1']) }));

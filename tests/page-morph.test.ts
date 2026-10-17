@@ -3,7 +3,8 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { start } from '../src/page/app.js';
 import { morphInto, nodeKey } from '../src/page/morph.js';
-import { BIG_NOW, bigDocs, bigSnapshot } from './fixtures/big-plan.js';
+import { renderApp, VIEWS, type UiState } from '../src/page/render.js';
+import { BIG_NOW, bigDocs, bigModel, bigSnapshot } from './fixtures/big-plan.js';
 
 const flush = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 5; i++) await flush(); };
@@ -59,17 +60,21 @@ describe('the page morphs instead of replacing (H-06)', () => {
     app.stop();
   });
 
-  it('the arrows of a hovered task go with a repaint and come back on the next pointerover', async () => {
+  it('the arrows of a hovered task and its highlights go with a repaint and come back on the next pointerover (carry 4)', async () => {
     const { root, app, move } = await boot();
     const hover = () => root.querySelector('[data-k="t:T122"] .lab')!.dispatchEvent(new Event('pointerover', { bubbles: true }));
+    const lit = () => root.querySelectorAll('.dep-up,.dep-down,.dep-self').length;
     hover();
     const arrows = root.querySelector('[data-role="tl-arrows"]')!;
     expect(arrows.innerHTML).toContain('class="up"');
+    expect(lit()).toBeGreaterThan(0);
     move('verify');
     await settle();
     expect(arrows.innerHTML).toBe('');
+    expect(lit()).toBe(0);
     hover();
     expect(arrows.innerHTML).toContain('class="up"');
+    expect(lit()).toBeGreaterThan(0);
     app.stop();
   });
 
@@ -197,6 +202,24 @@ describe('the page morphs instead of replacing (H-06)', () => {
   });
 });
 
+describe('morph keys (review M2)', () => {
+  it('in every view, with the detail open, no two nodes share a morph key (morphdom keeps only one of them)', () => {
+    const m = bigModel();
+    m.notes = [...m.notes, { id: 'na', ts: '2026-10-16T10:00:00.000Z', type: 'idea', author: 'session:main', text: 'una', taskId: 'T121' }, { id: 'nb', ts: '2026-10-16T10:05:00.000Z', type: 'idea', author: 'session:main', text: 'otra', taskId: 'T121' }];
+    m.proposals = [...m.proposals, { ...m.proposals[0]!, id: 'p2', evidence: 'más' }];
+    const all = new Set(m.plan.phases.map(p => p.id));
+    const base = { zoom: '1d' as const, offset: 0, expanded: all, modal: 'T121', search: '', shot: null, versionFilter: { statuses: [], phaseStatuses: [], track: null }, collapsed: new Set<string>(), noteFilter: 'all' as const, timelineGroup: 'phase' as const, draft: { type: 'idea' as const, text: '' }, answering: null, answerDraft: '', notice: null, proposalFilter: { status: 'all' as const, category: 'all' as const, risk: 'all' as const }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '', layers: ['critical', 'forge'] };
+    for (const [view, talk] of [...VIEWS.map(v => [v, 'notes'] as const), ['talk', 'proposals'] as const]) {
+      const box = document.createElement('div');
+      box.innerHTML = renderApp(m, { ...base, view, talk } as UiState);
+      const keys = Array.from(box.querySelectorAll('*')).map(nodeKey).filter((k): k is string => !!k);
+      const twice = keys.filter((k, i) => keys.indexOf(k) !== i);
+      expect(twice, `${view}/${talk}`).toEqual([]);
+      expect(keys.length, view).toBeGreaterThan(5);
+    }
+  });
+});
+
 describe('morphInto (H-06)', () => {
   const mount = (html: string) => {
     const root = document.createElement('div');
@@ -229,6 +252,81 @@ describe('morphInto (H-06)', () => {
     morphInto(root, html);
     expect([root.querySelector('textarea'), root.querySelector('input'), root.querySelector('select')]).toEqual([box, input, sel]);
     expect([box.value, input.value, sel.value]).toEqual(['', 'q', 'b']);
+    root.remove();
+  });
+
+  // Review M3: morphdom, given a keyed node it does not find in the page, walks on through the following siblings, sets
+  // each one aside and appends them again after the new one: an item new at the top of a list moved every item under it.
+  it('a keyed item inserted above keyed siblings leaves them in place: never removed, and a focused textarea keeps its focus with no blur (review M3)', async () => {
+    const card = (id: string) => `<div class="note" data-k="n:${id}"><p>${id}</p><pre class="evid" data-scroll-key="evid:${id}">x</pre><textarea data-role="answer-text"></textarea></div>`;
+    const list = (ids: string[]) => `<div class="ngrid">${ids.map(card).join('')}</div>`;
+    const root = mount(list(['a', 'b', 'c', 'd']));
+    const before = Array.from(root.querySelectorAll('.note'));
+    const box = root.querySelector('[data-k="n:c"] textarea') as HTMLTextAreaElement;
+    box.focus();
+    box.value = 'escribiendo';
+    let blurs = 0;
+    box.addEventListener('blur', () => { blurs++; });
+    const removed: string[] = [];
+    const mo = new MutationObserver(recs => { for (const r of recs) for (const n of Array.from(r.removedNodes)) removed.push((n as Element).getAttribute?.('data-k') ?? n.nodeName); });
+    mo.observe(root, { childList: true, subtree: true });
+    morphInto(root, list(['new', 'a', 'b', 'c', 'd']));
+    await new Promise(r => setTimeout(r, 0));
+    mo.disconnect();
+    expect(removed).toEqual([]);
+    const after = Array.from(root.querySelectorAll('.note'));
+    expect(after.map(n => n.getAttribute('data-k'))).toEqual(['n:new', 'n:a', 'n:b', 'n:c', 'n:d']);
+    expect(after.slice(1)).toEqual(before);
+    expect(document.activeElement).toBe(box);
+    expect(box.value).toBe('escribiendo');
+    expect(blurs).toBe(0);
+    root.remove();
+  });
+
+  it('whatever the change of a keyed list, the page ends up exactly as the render says, with no stand-in left (review M3)', () => {
+    const item = (id: string, inner = '') => `<div data-k="k:${id}"><b>${id}</b>${inner}</div>`;
+    const ul = (ids: string[], key = 'l') => `<section data-scroll-key="${key}">${ids.map(i => item(i)).join('')}</section>`;
+    const cases: [string, string][] = [
+      [ul(['a', 'b', 'c']), ul(['x', 'y', 'a', 'b', 'c'])],
+      [ul(['a', 'b', 'c']), ul(['a', 'x', 'b', 'c'])],
+      [ul(['a', 'b', 'c']), ul(['a', 'b', 'c', 'x'])],
+      [ul(['a', 'b', 'c']), ul(['x', 'a', 'c'])],
+      [ul(['a', 'b', 'c']), ul(['c', 'x', 'a'])],
+      [ul(['a', 'b', 'c']), ul(['b', 'a', 'c'])],
+      [ul(['a', 'b']), `<p>texto</p>${ul(['x', 'a', 'b'])}`],
+      [ul(['a', 'b']) + ul(['c'], 'm'), ul(['b']) + ul(['x', 'a', 'c'], 'm')],
+      [ul(['a', 'b']), `<section data-scroll-key="l">${item('w', item('x') + item('a'))}${item('b')}</section>`],
+      [ul(['a', 'b', 'c']), `<section data-scroll-key="l">${item('w', item('x') + item('b'))}${item('c')}</section>`],
+      [ul(['a', 'b', 'c']), `<section data-scroll-key="l">${item('y')}${item('w', item('x') + item('b'))}${item('a')}${item('c')}</section>`],
+      [ul(['a', 'b']), `<section data-scroll-key="l"><div>${item('x')}${item('a')}</div>${item('b')}</section>`],
+      [ul(['a', 'b']), `<section data-scroll-key="l"><i>u</i>${item('x')}<i>v</i>${item('a')}${item('b')}</section>`],
+      [ul(['a', 'b']), `<section data-scroll-key="l">${item('x')} ${item('a')} ${item('b')}</section>`],
+      [ul(['a', 'b']), `<section data-scroll-key="other">${item('x')}${item('a')}</section>`],
+      ['<div data-morph="skip"></div>' + ul(['a']), '<div data-morph="skip"></div>' + ul(['x', 'a'])],
+    ];
+    for (const [from, to] of cases) {
+      const root = mount(from);
+      morphInto(root, to);
+      const want = document.createElement('div');
+      want.innerHTML = to;
+      expect(root.innerHTML, `${from} → ${to}`).toBe(want.innerHTML);
+      root.remove();
+    }
+  });
+
+  it('the live state of the fields is read once per morph, not once per unchanged node (carry 4)', () => {
+    const m = bigModel();
+    const all = new Set(m.plan.phases.map(p => p.id));
+    const ui = { zoom: '1d' as const, offset: 0, expanded: all, modal: null, search: '', view: 'schedule' as const, shot: null, versionFilter: { statuses: [], phaseStatuses: [], track: null }, collapsed: new Set<string>(), noteFilter: 'all' as const, timelineGroup: 'phase' as const, draft: { type: 'idea' as const, text: '' }, answering: null, answerDraft: '', notice: null, proposalFilter: { status: 'all' as const, category: 'all' as const, risk: 'all' as const }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '' } as UiState;
+    const root = mount(renderApp(m, ui));
+    // One row's title changes: every other row, card and section is equal to its render.
+    const changed = { ...m, plan: { ...m.plan, tasks: m.plan.tasks.map(t => (t.id === 'T030' ? { ...t, title: 'otro título' } : t)) } };
+    const spy = vi.spyOn(Element.prototype, 'querySelectorAll');
+    morphInto(root, renderApp(changed, ui));
+    const calls = spy.mock.calls.length;
+    spy.mockRestore();
+    expect(root.querySelector('[data-k="t:T030"]')!.textContent).toContain('otro título');
+    expect(calls).toBeLessThanOrEqual(4);
     root.remove();
   });
 

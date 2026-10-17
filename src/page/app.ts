@@ -997,7 +997,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   };
   let hoverTask: string | null = null;
   // H-06: after a repaint the arrows point at where the bars were: the layer empties, and the next pointerover (even on
-  // the same task) draws them again. The highlight classes stay, morph.ts keeps them.
+  // the same task) draws them again. Carry 4: the highlight classes go with them (the render does not carry them).
   const dropArrows = () => {
     const svg = env.root.querySelector('[data-role="tl-arrows"]');
     if (svg?.firstChild) svg.innerHTML = '';

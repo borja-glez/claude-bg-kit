@@ -2328,13 +2328,35 @@ describe('the task chip of a note (Task 11 carry)', () => {
     f.push('notes', { n1: { ts: '2026-10-11T11:00:00Z', type: 'idea', author: 'session:backend', text: 'con tarea', taskId: 'T003' } });
     click(root, '[data-view="talk"]');
     await settle();
-    click(root, '[data-k="tk:T003"]');
+    click(root, '[data-k="tk:n1"]');
     await settle();
     expect(app.ui.modal).toBe('T003');
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await settle();
     expect(root.querySelector('.modal')).toBeNull();
-    expect(document.activeElement).toBe(root.querySelector('[data-k="tk:T003"]'));
+    expect(document.activeElement).toBe(root.querySelector('[data-k="tk:n1"]'));
+    go.mockRestore();
+    app.stop();
+  });
+
+  it('two notes about the same task: the focus goes back to the chip of the note the detail was opened from (review M2)', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    const go = vi.spyOn(history, 'go').mockImplementation(() => {});
+    const n = (ts: string, text: string) => ({ ts, type: 'idea', author: 'session:backend', text, taskId: 'T003' });
+    f.push('notes', { a: n('2026-10-11T10:00:00Z', 'la vieja'), b: n('2026-10-11T11:00:00Z', 'la nueva') });
+    click(root, '[data-view="talk"]');
+    await settle();
+    expect(root.querySelectorAll('[data-k^="tk:"]')).toHaveLength(2);
+    const older = root.querySelector('[data-k="n:a"] [data-action="open-task"]') as HTMLElement;
+    expect(older.dataset.k).toBe('tk:a');
+    older.click();
+    await settle();
+    expect(app.ui.modal).toBe('T003');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(document.activeElement).toBe(root.querySelector('[data-k="tk:a"]'));
+    expect((document.activeElement as HTMLElement).closest('[data-k^="n:"]')?.getAttribute('data-k')).toBe('n:a');
     go.mockRestore();
     app.stop();
   });

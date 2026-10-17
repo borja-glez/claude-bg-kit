@@ -48,7 +48,7 @@ function renderNotes(m: Model, d: Dict, ui: UiState, loc: string): string {
       <div class="nh"><span><span class="nt-${t}">${esc(label)}</span>${dec ? ` <span class="nauto">${esc(dec.auto ? d.autoTag : d.yoursTag)}</span>` : ''}</span><span class="k">${esc(authorLabel(m, d, n.author))}${when ? ` · ${esc(when)}` : ''}</span></div>
       <p>${esc(n.text)}</p>
       ${decHtml}
-      ${n.taskId ? `<button type="button" class="chip" data-action="open-task" data-id="${esc(n.taskId)}" data-k="tk:${esc(n.taskId)}">${esc(n.taskId)}</button>` : ''}
+      ${n.taskId ? `<button type="button" class="chip" data-action="open-task" data-id="${esc(n.taskId)}" data-k="tk:${esc(n.id)}">${esc(n.taskId)}</button>` : ''}
       ${n.answer ? `<div class="ans"><span class="k">${esc(d.answeredBy)} · ${esc(authorLabel(m, d, n.answeredBy ?? ''))}</span>${esc(n.answer)}</div>` : ''}
       ${reply}
     </div>`;
