@@ -1,6 +1,6 @@
 // forge:route's choices (spec §5.3): the options for a coding request and the recommended one, and .forge/route/<session>.json,
 // the route a session chose while superpowers designs or plans and forge builds (the prompt hook reminds it).
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { forgeDir } from './ledger.js';
 import { TASK_ID } from '../lib/decisions.js';
@@ -144,22 +144,58 @@ export function writeRoute(root: string, doc: RouteDoc): void {
   try { writeFileSync(tmp, JSON.stringify(doc, null, 2) + '\n'); renameSync(tmp, file); } finally { rmSync(tmp, { force: true }); }
 }
 
-/** Every session's route (50 at most): what route-session reads after /clear or in a fork (K1-13). */
-export function listRoutes(root: string): RouteDoc[] {
-  let names: string[] = [];
-  try { names = readdirSync(routeDir(root)).filter(n => n.endsWith('.json')).slice(0, 50); } catch { return []; }
-  return names.flatMap(n => {
+/** route set removes the route files nobody wrote for this long: past ROUTE_REMINDER_MS a route is neither reminded nor carried. */
+export const ROUTE_PRUNE_MS = 7 * 24 * 3600_000;
+// At most this many names of .forge/route/ are looked at (one stat each) per call, so a folder of thousands of files stays
+// cheap; route set's pruning keeps the folder to the routes of the last week, well under it.
+const ROUTE_SCAN = 500;
+
+/** The files of .forge/route/ (ROUTE_SCAN names at most) with their mtime. */
+function routeEntries(root: string): { name: string; mtime: number }[] {
+  let names: string[];
+  try { names = readdirSync(routeDir(root)).slice(0, ROUTE_SCAN); } catch { return []; }
+  return names.flatMap(name => {
     try {
-      const doc = normalizeRoute(JSON.parse(readFileSync(path.join(routeDir(root), n), 'utf8')));
-      return doc && `${doc.session}.json` === n ? [doc] : [];
+      const st = statSync(path.join(routeDir(root), name));
+      return st.isFile() ? [{ name, mtime: st.mtimeMs }] : [];
     } catch { return []; }
   });
 }
 
-/** K1-13: the conversation of `session` ended (SessionEnd): its route records when and why, once. */
+/** The 50 routes written last, newest first: what route-session reads after /clear or in a fork (K1-13). */
+export function listRoutes(root: string): RouteDoc[] {
+  const newest = routeEntries(root).filter(e => e.name.endsWith('.json')).sort((a, b) => b.mtime - a.mtime).slice(0, 50);
+  return newest.flatMap(({ name }) => {
+    try {
+      const doc = normalizeRoute(JSON.parse(readFileSync(path.join(routeDir(root), name), 'utf8')));
+      return doc && `${doc.session}.json` === name ? [doc] : [];
+    } catch { return []; }
+  });
+}
+
+/** Removes the route files (and leftover temporary files) not written for ROUTE_PRUNE_MS; never `keep`'s own route. */
+export function pruneRoutes(root: string, keep: string, now: number): void {
+  for (const { name, mtime } of routeEntries(root)) {
+    if (name === `${keep}.json` || now - mtime <= ROUTE_PRUNE_MS) continue;
+    try { rmSync(path.join(routeDir(root), name), { force: true }); } catch { /* the next route set tries again */ }
+  }
+}
+
+/** K1-13: the conversation of `session` ended (SessionEnd): its route records when and why; the latest end wins. */
 export function endRoute(root: string, session: string, reason: RouteEndReason, at: string): void {
   const doc = readRoute(root, session);
-  if (doc && !doc.endedAt) writeRoute(root, { ...doc, endedAt: at, endReason: reason });
+  if (doc) writeRoute(root, { ...doc, endedAt: at, endReason: reason });
+}
+
+/** K1-13: the conversation of `session` started again (a SessionStart of the same id, e.g. claude --resume): its route
+ *  is no longer ended. A route without an end is left as it was. */
+export function reopenRoute(root: string, session: string): void {
+  const doc = readRoute(root, session);
+  if (!doc || (doc.endedAt === undefined && doc.endReason === undefined)) return;
+  const live: RouteDoc = { ...doc };
+  delete live.endedAt;
+  delete live.endReason;
+  writeRoute(root, live);
 }
 
 /** Where a route starts: superpowers designs (or plans) first, unless that spec (or plan) already exists. */

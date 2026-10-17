@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { firstStage, listRoutes, normalizeRoute, readRoute, routeAsk, routeOptions, writeRoute } from '../src/forge/route.js';
+import { firstStage, listRoutes, normalizeRoute, pruneRoutes, readRoute, routeAsk, routeOptions, writeRoute } from '../src/forge/route.js';
 import { resolvePrefs } from '../src/forge/prefs.js';
 import { readLocal } from '../src/forge/local.js';
 import { allDecisions } from '../src/forge/decisions.js';
@@ -287,6 +287,37 @@ describe('one route per session (K1-04, K1-05)', () => {
     expect(readRoute(root, 'A')).toBeNull();
     expect(readRoute(root, 'B')).toBeNull();
     expect(listRoutes(root)).toEqual([]);
+  });
+  it('an empty --session falls back to CLAUDE_CODE_SESSION_ID, as in C1; a --session that is not safe still exits 2', () => {
+    const s9 = { ...io, env: { CLAUDE_CODE_SESSION_ID: 'S9' } };
+    expect(JSON.parse(run(['route', 'set', '--task', 't1', '--chosen', 'superpowers-plan', '--by', 'user', '--session'], s9).stdout)).toMatchObject({ session: 'S9', stage: 'designing' });
+    const r = run(['route', 'stage', '--stage', 'planning', '--session', '--plan', 'docs/p.md'], s9);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ updated: true, session: 'S9', stage: 'planning', plan: 'docs/p.md' });
+    expect(readRoute(root, 'S9')).toMatchObject({ stage: 'planning', plan: 'docs/p.md' });
+    expect(run(['route', 'stage', '--stage', 'done', '--session', '../x'], s9).code).toBe(2);
+    expect(run(['route', 'set', '--task', 't1', '--chosen', 'forge', '--by', 'user', '--session', '../x'], s9).code).toBe(2);
+    expect(readRoute(root, 'S9')).toMatchObject({ stage: 'planning' });
+  });
+  it('route set prunes route files not written for 7 days, never its own session\'s', () => {
+    const day = 24 * 3600_000;
+    const now = io.now().getTime();
+    const doc = (session: string) => ({ task: 't1', chosen: 'forge' as const, by: 'user' as const, stage: 'handed-off' as const, ts: io.now().toISOString(), session });
+    const file = (s: string) => path.join(root, '.forge', 'route', `${s}.json`);
+    const age = (s: string, days: number) => { const t = new Date(now - days * day); utimesSync(file(s), t, t); };
+    writeRoute(root, doc('OLD')); age('OLD', 8);
+    writeRoute(root, doc('WEEK')); age('WEEK', 6);
+    expect(run(['route', 'set', '--task', 't2', '--chosen', 'forge', '--by', 'user', '--session', 'NEW'], io).code).toBe(0);
+    expect(existsSync(file('OLD'))).toBe(false);
+    expect(existsSync(file('WEEK'))).toBe(true);
+    expect(existsSync(file('NEW'))).toBe(true);
+    // Its own file stays, however old; a stale temporary file goes too.
+    age('NEW', 30);
+    writeFileSync(path.join(root, '.forge', 'route', 'X.json.123.tmp'), '{');
+    utimesSync(path.join(root, '.forge', 'route', 'X.json.123.tmp'), new Date(now - 9 * day), new Date(now - 9 * day));
+    pruneRoutes(root, 'NEW', now);
+    expect(existsSync(file('NEW'))).toBe(true);
+    expect(readdirSync(path.join(root, '.forge', 'route')).sort()).toEqual(['NEW.json', 'WEEK.json']);
   });
   it('route set --remember without a session leaves local.yaml alone: every input is read before anything is written', () => {
     expect(run(['route', 'set', '--task', 't1', '--chosen', 'forge', '--by', 'user', '--remember'], io).code).toBe(2);

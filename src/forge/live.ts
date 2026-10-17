@@ -6,7 +6,7 @@ import { forgeDir } from './ledger.js';
 import { mainCheckout } from './local.js';
 import { memberForHook } from './members.js';
 import { parseRun, readRunText } from './run.js';
-import { endRoute } from './route.js';
+import { endRoute, reopenRoute } from './route.js';
 import { endReasonOf } from '../lib/bound.js';
 import { planLocale, sessionReply } from '../lib/locale.js';
 import type { Io } from './cli/run.js';
@@ -47,6 +47,10 @@ export function hookLive(io: Io, forced?: LiveEvent): string {
     if (event === 'SessionEnd' && !forced) {
       const reason = endReasonOf(input.reason);
       try { endRoute(main, sessionId, reason === 'released' ? 'other' : reason, io.now().toISOString()); } catch { /* the route is a reminder */ }
+    }
+    // K1-13: the same session starting again (claude --resume keeps its id) is live: its route is no longer ended.
+    if (event === 'SessionStart' && !forced) {
+      try { reopenRoute(main, sessionId); } catch { /* the route is a reminder */ }
     }
     const exec = readExecution(main);
     if (!exec?.active) return '';

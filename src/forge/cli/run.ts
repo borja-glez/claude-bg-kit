@@ -47,7 +47,7 @@ import { readSurfaces, detectDrafts, appendLearned, surfaceFile, permissionHash,
 import { addDecision, allDecisions, listDecisions, renderDecisionsMd, DecisionInputError } from '../decisions.js';
 import { TASK_ID, decisionScope, scopeFileName } from '../../lib/decisions.js';
 import { claudeConfigDir, claudeJsonDir, locateSuperpowers, spLedgerDone, spPlans, spSkillPath, spSpecs } from '../superpowers.js';
-import { ROUTE_OPTIONS, ROUTE_STAGES, firstStage, isRoutePath, isRouteSession, readRoute, routeAsk, routeOptions, writeRoute, type RouteDoc, type RouteOption, type RouteStage } from '../route.js';
+import { ROUTE_OPTIONS, ROUTE_STAGES, firstStage, isRoutePath, isRouteSession, pruneRoutes, readRoute, routeAsk, routeOptions, writeRoute, type RouteDoc, type RouteOption, type RouteStage } from '../route.js';
 import { checkSpTask, markDone, parseSpPlan, renderSpBrief, SpPlanError } from '../../lib/sp-plan.js';
 
 export interface ExecResult { code: number; output: string; ms: number; timedOut: boolean }
@@ -1720,8 +1720,9 @@ function runCommand(argv: string[], io: Io): Result {
           if (by !== 'user' && by !== 'auto') throw new UsageError('route set: --by must be user or auto');
           const files = paths('route set');
           // K1-04, K1-05 (C1): the route is this Claude session's, in .forge/route/<session>.json of the main checkout. It is
-          // read with the other inputs, before anything is written; only none, which writes no route, goes without one.
-          if (has('session') && !isRouteSession(flag('session'))) throw new UsageError('route set: --session is not a plain session id');
+          // read with the other inputs, before anything is written; only none, which writes no route, goes without one. A
+          // --session without a value (an empty substitution) counts as absent, as in C1: the environment's id is used.
+          if (flag('session') !== undefined && !isRouteSession(flag('session'))) throw new UsageError('route set: --session is not a plain session id');
           const session = claudeSessionId(flag('session'), io.env ?? process.env);
           if (!session && chosen !== 'none') throw new UsageError(noClaudeSession('route set', '--session'));
           // K1-08: «remember it» keeps the choice as the project's workflow in local.yaml (`off` for none); none without it
@@ -1735,9 +1736,12 @@ function runCommand(argv: string[], io: Io): Result {
           if (remembered) updateLocal(io.cwd, s => ({ ...s, workflow: remembered }));
           if (chosen === 'none') return json({ written: false, ...(remembered ? { remembered } : {}) });
           // Not none: the session was required above.
-          const doc: RouteDoc = { task, chosen: chosen as RouteOption, by, stage: firstStage(chosen as RouteOption, files), ts: ts(), ...files, session: session! };
+          const owner = session!;
+          const doc: RouteDoc = { task, chosen: chosen as RouteOption, by, stage: firstStage(chosen as RouteOption, files), ts: ts(), ...files, session: owner };
           const root = mainCheckout(io.cwd);
           writeRoute(root, doc);
+          // Routes nobody wrote for a week are neither reminded nor carried: they go, never this session's own.
+          pruneRoutes(root, owner, io.now().getTime());
           // The route is a decision like any other: by the user when asked, by auto mode otherwise (spec §5.5).
           const exec = readExecution(root);
           const { n } = addDecision(root, {
@@ -1750,7 +1754,7 @@ function runCommand(argv: string[], io: Io): Result {
           const stage = flag('stage');
           if (!(ROUTE_STAGES as readonly (string | undefined)[]).includes(stage)) throw new UsageError(`route stage: --stage must be one of ${ROUTE_STAGES.join('|')}`);
           const files = paths('route stage');
-          if (has('session') && !isRouteSession(flag('session'))) throw new UsageError('route stage: --session is not a plain session id');
+          if (flag('session') !== undefined && !isRouteSession(flag('session'))) throw new UsageError('route stage: --session is not a plain session id');
           const session = claudeSessionId(flag('session'), io.env ?? process.env);
           if (!session) throw new UsageError(noClaudeSession('route stage', '--session'));
           // K1-04: only this session's route moves; another session's is never touched.

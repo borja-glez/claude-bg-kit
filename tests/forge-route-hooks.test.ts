@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { inForgeWorktree, looksLikeCoding, routeReminder, routingRule, ROUTE_HINT } from '../src/forge/route-hooks.js';
-import { readRoute, writeRoute } from '../src/forge/route.js';
+import { listRoutes, readRoute, writeRoute } from '../src/forge/route.js';
 import { saveExecution } from '../src/forge/execution.js';
 import { writeMember } from '../src/forge/members.js';
 import { saveRun, startRun } from '../src/forge/run.js';
@@ -170,28 +170,98 @@ describe('route hooks by session (K1-09, K1-12, K1-13)', () => {
     // A fork while the original conversation is open.
     expect(ctx(run(['hook', 'route-session'], io({ session_id: 'FORK', source: 'fork' })))).toContain('the original conversation routed task t1 as "superpowers-design" and it is half done (designing)');
     // /clear ends the original conversation: forge's live hook records it in its route.
-    run(['hook', 'live'], io({ session_id: 'OLD', hook_event_name: 'SessionEnd', reason: 'clear' }, new Date(NOW.getTime() - 2 * 60_000)));
-    expect(readRoute(root, 'OLD')).toMatchObject({ endReason: 'clear', endedAt: new Date(NOW.getTime() - 2 * 60_000).toISOString() });
+    run(['hook', 'live'], io({ session_id: 'OLD', hook_event_name: 'SessionEnd', reason: 'clear' }, new Date(NOW.getTime() - 60_000)));
+    expect(readRoute(root, 'OLD')).toMatchObject({ endReason: 'clear', endedAt: new Date(NOW.getTime() - 60_000).toISOString() });
     const after = ctx(run(['hook', 'route-session'], io({ session_id: 'NEW', source: 'clear' })));
     expect(after).toContain('<FORGE-ROUTING>');
     expect(after).toContain('before /clear this conversation routed task t1 as "superpowers-design" and it is half done (designing)');
     expect(after).toContain('--from-spec');
     expect(after).not.toContain('continue');
     expect(ctx(run(['hook', 'route-session'], io({ session_id: 'NEW2', source: 'startup' })))).not.toContain('before /clear');
-    expect(ctx(run(['hook', 'route-session'], io({ session_id: 'NEW3', source: 'clear' }, new Date(NOW.getTime() + 9 * 60_000))))).not.toContain('before /clear');
+    expect(ctx(run(['hook', 'route-session'], io({ session_id: 'NEW3', source: 'clear' }, new Date(NOW.getTime() + 2 * 60_000))))).not.toContain('before /clear');
     // The route stays the earlier session's: a reminder, never a copy.
     expect(readRoute(root, 'NEW')).toBeNull();
   });
-  it('a route ends once, by the reason SessionEnd gives; a fork with two open routes, or a /clear after a logout, names none (K1-13)', () => {
+  it('the carried line names the earlier session and the command that closes its route once handed off', () => {
+    writeRoute(root, { task: 't1', chosen: 'superpowers-design', by: 'user', stage: 'designing', ts: NOW.toISOString(), session: 'OLD' });
+    const fork = ctx(run(['hook', 'route-session'], io({ session_id: 'FORK', source: 'fork' })));
+    expect(fork).toContain('OLD');
+    expect(fork).toContain('FORGE route stage --stage handed-off --session OLD');
+    run(['hook', 'live'], io({ session_id: 'OLD', hook_event_name: 'SessionEnd', reason: 'clear' }, new Date(NOW.getTime() - 30_000)));
+    const after = ctx(run(['hook', 'route-session'], io({ session_id: 'NEW', source: 'clear' })));
+    expect(after).toContain('FORGE route stage --stage handed-off --session OLD');
+    expect(after).not.toContain('continue');
+    // The new conversation runs it: the earlier route is closed, and nothing is carried again.
+    expect(JSON.parse(run(['route', 'stage', '--stage', 'handed-off', '--session', 'OLD'], { cwd: root, now: () => NOW, env: { CLAUDE_CODE_SESSION_ID: 'NEW' } }).stdout))
+      .toMatchObject({ updated: true, session: 'OLD', stage: 'handed-off' });
+    expect(ctx(run(['hook', 'route-session'], io({ session_id: 'NEW2', source: 'clear' })))).not.toContain('before /clear');
+  });
+  it('the latest end wins, by the reason SessionEnd gives; a fork with two open routes, or a /clear after a logout, names none (K1-13)', () => {
     const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
     writeRoute(root, { task: 't1', chosen: 'superpowers-plan', by: 'user', stage: 'planning', ts: NOW.toISOString(), session: 'A' });
     writeRoute(root, { task: 't2', chosen: 'superpowers-design', by: 'user', stage: 'designing', ts: NOW.toISOString(), session: 'B' });
     expect(ctx(run(['hook', 'route-session'], io({ session_id: 'FORK', source: 'fork' })))).not.toContain('original conversation');
-    run(['hook', 'live'], io({ session_id: 'A', hook_event_name: 'SessionEnd', reason: 'logout' }, at(-1)));
-    run(['hook', 'live'], io({ session_id: 'A', hook_event_name: 'SessionEnd', reason: 'clear' }, at(0)));
-    expect(readRoute(root, 'A')).toMatchObject({ endReason: 'logout', endedAt: at(-1).toISOString() });
+    run(['hook', 'live'], io({ session_id: 'A', hook_event_name: 'SessionEnd', reason: 'clear' }, at(-1)));
+    run(['hook', 'live'], io({ session_id: 'A', hook_event_name: 'SessionEnd', reason: 'logout' }, at(0)));
+    expect(readRoute(root, 'A')).toMatchObject({ endReason: 'logout', endedAt: at(0).toISOString() });
     run(['hook', 'live'], io({ session_id: 'B', hook_event_name: 'SessionEnd', reason: 'something-new' }, at(0)));
     expect(readRoute(root, 'B')).toMatchObject({ endReason: 'other' });
     expect(ctx(run(['hook', 'route-session'], io({ session_id: 'NEW', source: 'clear' })))).not.toContain('before /clear');
+  });
+  it('a /clear carries only a route ended by /clear in the last 2 minutes, the newest when several are (K1-04, K1-13)', () => {
+    const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
+    writeRoute(root, { task: 't1', chosen: 'superpowers-design', by: 'user', stage: 'designing', ts: NOW.toISOString(), session: 'A' });
+    writeRoute(root, { task: 't2', chosen: 'superpowers-plan', by: 'user', stage: 'planning', ts: NOW.toISOString(), session: 'B' });
+    // Ended by /clear 3 minutes ago: another conversation's /clear now is not this one's.
+    run(['hook', 'live'], io({ session_id: 'A', hook_event_name: 'SessionEnd', reason: 'clear' }, at(-3)));
+    expect(ctx(run(['hook', 'route-session'], io({ session_id: 'NEW', source: 'clear' })))).not.toContain('before /clear');
+    run(['hook', 'live'], io({ session_id: 'A', hook_event_name: 'SessionEnd', reason: 'clear' }, at(-1.5)));
+    run(['hook', 'live'], io({ session_id: 'B', hook_event_name: 'SessionEnd', reason: 'clear' }, at(-0.5)));
+    const carried = ctx(run(['hook', 'route-session'], io({ session_id: 'NEW2', source: 'clear' })));
+    expect(carried).toContain('routed task t2');
+    expect(carried).not.toContain('routed task t1');
+  });
+  it('exit, claude --resume and /clear: the route of the resumed conversation is carried (K1-13)', () => {
+    const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
+    writeRoute(root, { task: 't1', chosen: 'superpowers-design', by: 'user', stage: 'designing', ts: NOW.toISOString(), session: 'S1' });
+    run(['hook', 'live'], io({ session_id: 'S1', hook_event_name: 'SessionEnd', reason: 'prompt_input_exit' }, at(-30)));
+    expect(readRoute(root, 'S1')).toMatchObject({ endReason: 'prompt_input_exit' });
+    // claude --resume keeps the session id: its SessionStart reopens the route.
+    run(['hook', 'live'], io({ session_id: 'S1', hook_event_name: 'SessionStart', source: 'resume' }, at(-20)));
+    expect(readRoute(root, 'S1')).not.toHaveProperty('endedAt');
+    expect(readRoute(root, 'S1')).not.toHaveProperty('endReason');
+    run(['hook', 'live'], io({ session_id: 'S1', hook_event_name: 'SessionEnd', reason: 'clear' }, at(-1)));
+    const after = ctx(run(['hook', 'route-session'], io({ session_id: 'NEW', source: 'clear' })));
+    expect(after).toContain('before /clear this conversation routed task t1');
+    expect(after).toContain('--session S1');
+  });
+  it('exit, claude --resume and a fork: the fork names the route of the resumed conversation (K1-13)', () => {
+    const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
+    writeRoute(root, { task: 't1', chosen: 'superpowers-plan', by: 'user', stage: 'planning', ts: NOW.toISOString(), session: 'S1' });
+    run(['hook', 'live'], io({ session_id: 'S1', hook_event_name: 'SessionEnd', reason: 'prompt_input_exit' }, at(-30)));
+    // Ended and not resumed: a fork names nothing.
+    expect(ctx(run(['hook', 'route-session'], io({ session_id: 'FORK0', source: 'fork' })))).not.toContain('original conversation');
+    run(['hook', 'live'], io({ session_id: 'S1', hook_event_name: 'SessionStart', source: 'resume' }, at(-20)));
+    const fork = ctx(run(['hook', 'route-session'], io({ session_id: 'FORK', source: 'fork' })));
+    expect(fork).toContain('the original conversation routed task t1 as "superpowers-plan" and it is half done (planning)');
+    expect(fork).toContain('--session S1');
+    // Another SessionStart of the same session leaves a route without an end as it was.
+    const before = readFileSync(path.join(root, '.forge', 'route', 'S1.json'), 'utf8');
+    run(['hook', 'live'], io({ session_id: 'S1', hook_event_name: 'SessionStart', source: 'compact' }, at(-10)));
+    expect(readFileSync(path.join(root, '.forge', 'route', 'S1.json'), 'utf8')).toBe(before);
+  });
+  it('listRoutes reads the newest routes first: 55 older routes never hide a fresh one (K1-13)', () => {
+    const old = new Date('2020-01-01T00:00:00.000Z');
+    for (let i = 0; i < 55; i++) {
+      const s = `a${String(i).padStart(3, '0')}`;
+      writeRoute(root, { task: 't1', chosen: 'forge', by: 'user', stage: 'done', ts: NOW.toISOString(), session: s });
+      utimesSync(path.join(root, '.forge', 'route', `${s}.json`), old, old);
+    }
+    writeRoute(root, { task: 'fresh', chosen: 'superpowers-design', by: 'user', stage: 'designing', ts: NOW.toISOString(), session: 'zzz' });
+    run(['hook', 'live'], io({ session_id: 'zzz', hook_event_name: 'SessionEnd', reason: 'clear' }, new Date(NOW.getTime() - 60_000)));
+    const routes = listRoutes(root);
+    expect(routes).toHaveLength(50);
+    expect(routes[0]).toMatchObject({ session: 'zzz' });
+    expect(ctx(run(['hook', 'route-session'], io({ session_id: 'NEW', source: 'clear' })))).toContain('routed task fresh');
   });
 });

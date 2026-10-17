@@ -68,28 +68,34 @@ export function routeReminder(r: RouteDoc | null, now: number): string | null {
 
 /** K1-12: a forge task of this session counts as open this long after its last event. */
 export const OPEN_TASK_MS = 24 * 3600_000;
-/** K1-13: after /clear, the earlier conversation's half-done route is named when it ended this recently. */
-export const CLEAR_CARRY_MS = 10 * 60_000;
+/**
+ * K1-13: after /clear, the earlier conversation's half-done route is named when it ended this recently. One /clear fires
+ * its SessionEnd and the new SessionStart back to back, so a narrow window is enough, and it keeps a /clear in another
+ * conversation from carrying this conversation's route (K1-04).
+ */
+export const CLEAR_CARRY_MS = 2 * 60_000;
 
 /** K1-09: a task worktree or the run worktree of forge (`.claude/worktrees/task-*`, `run`): forge drives whatever happens there. */
 export const inForgeWorktree = (cwd: string): boolean => /[\\/]\.claude[\\/]worktrees[\\/](?:task-[^\\/]+|run)(?:[\\/]|$)/.test(path.resolve(cwd));
 
 /**
  * K1-13: the line route-session adds after the rule. After /clear, the half-done route the earlier conversation ended by
- * /clear in the last 10 minutes; in a fork, the only half-done route of a conversation still open. A reminder, never a
- * copy: the route stays that session's.
+ * /clear in the last 2 minutes (the newest end when several did); in a fork, the only half-done route of a conversation
+ * still open. A reminder, never a copy: the route stays that session's, so the line names it and the command that closes
+ * it once handed off.
  */
 export function carriedRoute(routes: readonly RouteDoc[], source: string, sid: string | null, now: number): string | null {
   const half = (r: RouteDoc) => r.session !== sid && routeReminder(r, now) !== null;
+  const close = (r: RouteDoc) => `${routeReminder(r, now)}. Once handed off, close that route with FORGE route stage --stage handed-off --session ${r.session}`;
   if (source === 'clear') {
     const endedAt = (r: RouteDoc) => Date.parse(r.endedAt ?? '');
     const r = routes.filter(x => half(x) && x.endReason === 'clear' && now - endedAt(x) <= CLEAR_CARRY_MS && endedAt(x) - now <= 5 * 60_000)
       .sort((a, b) => endedAt(b) - endedAt(a))[0];
-    return r ? `forge: before /clear this conversation routed task ${r.task} as "${r.chosen}" and it is half done (${r.stage}). ${routeReminder(r, now)}` : null;
+    return r ? `forge: before /clear this conversation routed task ${r.task} as "${r.chosen}" and it is half done (${r.stage}). ${close(r)}` : null;
   }
   if (source === 'fork') {
     const open = routes.filter(x => half(x) && !x.endedAt);
-    return open.length === 1 ? `forge: the original conversation routed task ${open[0].task} as "${open[0].chosen}" and it is half done (${open[0].stage}). ${routeReminder(open[0], now)}` : null;
+    return open.length === 1 ? `forge: the original conversation routed task ${open[0].task} as "${open[0].chosen}" and it is half done (${open[0].stage}). ${close(open[0])}` : null;
   }
   return null;
 }
