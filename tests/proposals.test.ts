@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeProposal, canDecide, applyDecision, isActionable, clipWords, MAX_PROPOSAL_TEXT, MAX_PROPOSAL_TITLE } from '../src/lib/proposals.js';
+import { markMatches, normalizeApproval, ownerApproved, normalizeProposal, canDecide, applyDecision, isActionable, clipWords, MAX_PROPOSAL_TEXT, MAX_PROPOSAL_TITLE } from '../src/lib/proposals.js';
 
 const base = { ts: '2026-10-11T10:00:00.000Z', category: 'perf', risk: 'low', title: 'Cache prices', rationale: 'r', evidence: 'bench: 40 ms → 5 ms', pillar: 'Fast checkout', status: 'proposed', source: 'scout', author: 'session:abc' };
 
@@ -94,5 +94,25 @@ describe('decisions', () => {
     expect(isActionable({ ...normalizeProposal(base)!, status: 'approved' })).toBe(true);
     expect(isActionable({ ...normalizeProposal(base)!, status: 'auto_approved' })).toBe(true);
     expect(isActionable(normalizeProposal(base)!)).toBe(false);
+  });
+});
+
+describe('the owner mark (wave 4, §4.1)', () => {
+  const mark = (status: string) => ({ status, decidedAt: '2026-10-16T10:00:00.000Z', by: 'page' });
+  it('normalizeApproval keeps a mark and refuses anything else', () => {
+    expect(normalizeApproval(mark('approved'))).toEqual(mark('approved'));
+    for (const bad of [null, 'x', mark('proposed'), { ...mark('approved'), by: 'user:me' }, { status: 'approved', by: 'page' }]) expect(normalizeApproval(bad)).toBeNull();
+  });
+  it('ownerApproved: both approved or both auto_approved, no task and not done; otherwise never', () => {
+    const p = (status: string, over: Record<string, unknown> = {}) => normalizeProposal({ ...base, status, ...over })!;
+    expect(ownerApproved(p('approved'), normalizeApproval(mark('approved')))).toBe(true);
+    expect(ownerApproved(p('auto_approved'), normalizeApproval(mark('auto_approved')))).toBe(true);
+    expect(ownerApproved(p('approved'), normalizeApproval(mark('rejected')))).toBe(false);
+    expect(ownerApproved(p('approved'), normalizeApproval(mark('auto_approved')))).toBe(false);
+    expect(ownerApproved(p('approved'), null)).toBe(false);
+    expect(ownerApproved(p('rejected'), normalizeApproval(mark('rejected')))).toBe(false);
+    expect(ownerApproved(p('approved', { taskId: 'T9' }), normalizeApproval(mark('approved')))).toBe(false);
+    expect(markMatches(p('approved', { taskId: 'T9' }), normalizeApproval(mark('approved')))).toBe(true);
+    expect(markMatches(p('done'), normalizeApproval(mark('approved')))).toBe(false);
   });
 });

@@ -7,7 +7,7 @@ import { run as cli, defaultExec, defaultExecMany, type Io } from '../src/forge/
 import { startRun, saveRun } from '../src/forge/run.js';
 import { appendEvent, readEvents } from '../src/forge/ledger.js';
 import { readLocal } from '../src/forge/local.js';
-import { saveProposal, loadProposals } from '../src/forge/proposals.js';
+import { saveProposal, loadProposals, saveApproval, loadApproval, loadApprovals } from '../src/forge/proposals.js';
 import type { ProposalDoc } from '../src/lib/proposals.js';
 import { parsePlan } from '../src/lib/plan.js';
 import { parseStatus } from '../src/forge/tree.js';
@@ -740,9 +740,11 @@ describe('forge infinite', () => {
     saveProposal(root, 'p20261011090000aaaa', doc('proposed'));
     saveProposal(root, 'p20261011090000aaab', doc('discussing'));
     saveProposal(root, 'p20261011090000aaac', doc('approved'));
+    saveApproval(root, 'p20261011090000aaac', { status: 'approved', decidedAt: 'T', by: 'forge:decide' });
     expect(JSON.parse(hook('{}').stdout).decision).toBe('block');
     run(['cycle', '--progress', 'yes'], io);
     saveProposal(root, 'p20261011090000aaac', doc('auto_approved', 'T002'));
+    saveApproval(root, 'p20261011090000aaac', { status: 'auto_approved', decidedAt: 'T', by: 'forge:policy' });
     expect(JSON.parse(hook('{}').stdout).reason).toContain('forge infinite mode is active');
     run(['cycle', '--progress', 'yes'], io);
     saveProposal(root, 'p20261011090000aaac', doc('done', 'T002'));
@@ -1517,7 +1519,7 @@ describe('forge waypoint-cli', () => {
       const { id } = JSON.parse(add().stdout);
       const r = run(['proposals', 'decide', id, 'approve', '--by', 'user:me'], io);
       expect(r.code).toBe(0);
-      expect(JSON.parse(r.stdout)).toEqual({ id, status: 'approved', write: { status: 'approved', decidedBy: 'user:me', decidedAt: '2026-10-11T10:00:00.000Z' } });
+      expect(JSON.parse(r.stdout)).toEqual({ id, status: 'approved', write: { status: 'approved', decidedBy: 'user:me', decidedAt: '2026-10-11T10:00:00.000Z' }, approval: { op: 'set', collection: 'approvals', doc_id: id, data: { status: 'approved', decidedAt: '2026-10-11T10:00:00.000Z', by: 'forge:decide' } } });
       expect(readEvents(root).at(-1)).toMatchObject({ kind: 'proposal', action: 'decide', id, status: 'approved' });
       const again = run(['proposals', 'decide', id, 'reject', '--by', 'user:me'], io);
       expect(again.code).toBe(2);
@@ -1531,7 +1533,7 @@ describe('forge waypoint-cli', () => {
       expect(r.code).toBe(0);
       const at = '2026-10-11T10:00:00.000Z';
       const history = [{ status: 'rejected', decidedBy: 'user:x', decidedAt: at, reason: 'not now', reopenedBy: 'user:y', reopenedAt: at }];
-      expect(JSON.parse(r.stdout)).toEqual({ id, status: 'approved', previous: 'rejected', write: { status: 'approved', decidedBy: 'user:y', decidedAt: at, history, reason: { __delete__: true } } });
+      expect(JSON.parse(r.stdout)).toEqual({ id, status: 'approved', previous: 'rejected', write: { status: 'approved', decidedBy: 'user:y', decidedAt: at, history, reason: { __delete__: true } }, approval: { op: 'set', collection: 'approvals', doc_id: id, data: { status: 'approved', decidedAt: at, by: 'forge:decide' } } });
       const mirror = loadProposals(root)[0];
       expect(mirror).toMatchObject({ status: 'approved', decidedBy: 'user:y', history });
       expect(mirror.reason).toBeUndefined();
@@ -1547,7 +1549,8 @@ describe('forge waypoint-cli', () => {
       const r = run(['proposals', 'decide', id, 'reject', '--reopen', '--from', 'db.json', '--by', 'user:me'], io);
       expect(r.code).toBe(0);
       expect(JSON.parse(r.stdout)).toEqual({ id, status: 'rejected', previous: 'approved', write: { status: 'rejected', decidedBy: 'user:me', decidedAt: '2026-10-11T10:00:00.000Z',
-        history: [{ status: 'approved', decidedBy: 'o', decidedAt: 'a', reopenedBy: 'user:me', reopenedAt: '2026-10-11T10:00:00.000Z' }] } });
+        history: [{ status: 'approved', decidedBy: 'o', decidedAt: 'a', reopenedBy: 'user:me', reopenedAt: '2026-10-11T10:00:00.000Z' }] },
+        approval: { op: 'set', collection: 'approvals', doc_id: id, data: { status: 'rejected', decidedAt: '2026-10-11T10:00:00.000Z', by: 'forge:decide' } } });
       expect(loadProposals(root)).toEqual([]);
       expect(readEvents(root)).toEqual([]);
     });
@@ -1632,9 +1635,9 @@ describe('forge waypoint-cli', () => {
     it('list filters by status', () => {
       const { id } = JSON.parse(add().stdout);
       run(['proposals', 'decide', id, 'approve'], io);
-      expect(JSON.parse(run(['proposals', 'list', '--status', 'approved'], io).stdout)).toHaveLength(1);
-      expect(JSON.parse(run(['proposals', 'list', '--status', 'proposed'], io).stdout)).toHaveLength(0);
-      expect(JSON.parse(run(['proposals', 'list'], io).stdout)[0]).toMatchObject({ id, status: 'approved' });
+      expect(JSON.parse(run(['proposals', 'list', '--status', 'approved'], io).stdout).proposals).toHaveLength(1);
+      expect(JSON.parse(run(['proposals', 'list', '--status', 'proposed'], io).stdout).proposals).toHaveLength(0);
+      expect(JSON.parse(run(['proposals', 'list'], io).stdout).proposals[0]).toMatchObject({ id, status: 'approved' });
     });
     it('pull refreshes the local copy from db docs', () => {
       saveProposal(root, 'p20261011100000aaaa', { ...prop, ts: '', status: 'proposed', author: 'session' } as ProposalDoc);
@@ -1670,7 +1673,7 @@ describe('forge waypoint-cli', () => {
       const a = JSON.parse(add({ ts: '2026-10-01T00:00:00.000Z', title: 'old' }).stdout).id;
       io.rand = () => 0.9;
       const b = JSON.parse(add({ ts: '2026-10-05T00:00:00.000Z', title: 'new' }).stdout).id;
-      expect(JSON.parse(run(['proposals', 'list'], io).stdout).map((x: { id: string }) => x.id)).toEqual([b, a]);
+      expect(JSON.parse(run(['proposals', 'list'], io).stdout).proposals.map((x: { id: string }) => x.id)).toEqual([b, a]);
     });
     it('add refuses a proposal similar to a rejected one without new evidence (exit 3), allows new evidence', () => {
       const first = JSON.parse(add({ title: 'Remove dead code from parser', rationale: 'unused helpers clutter parser', evidence: 'grep: 4 unused helpers' }).stdout).id;
@@ -1724,7 +1727,7 @@ describe('forge waypoint-cli', () => {
       expect(readEvents(root).at(-1)).toMatchObject({ kind: 'proposal', action: 'policy', id: a, status: 'auto_approved' });
       io.rand = () => 0.9;
       const b = JSON.parse(add({ category: 'feature', title: 'Brand new thing' }).stdout).id;
-      expect(JSON.parse(run(['proposals', 'policy', b], io).stdout)).toEqual({ id: b, status: 'proposed', write: null });
+      expect(JSON.parse(run(['proposals', 'policy', b], io).stdout)).toEqual({ id: b, status: 'proposed', write: null, approval: null });
       expect(run(['proposals', 'policy', 'nope'], io).code).toBe(2);
     });
     describe('to-task', () => {
@@ -1783,6 +1786,7 @@ describe('forge waypoint-cli', () => {
       run(['infinite', 'start', '--cycles', '9', '--queue-max', '1'], io);
       const doc = { ts: '', category: 'quality', risk: 'low', title: 't', rationale: '', evidence: '', pillar: '', status: 'approved', source: 'scout', author: 's' } as ProposalDoc;
       saveProposal(root, 'p20261011090000aaac', { ...doc, taskId: 'T002' });
+      saveApproval(root, 'p20261011090000aaac', { status: 'approved', decidedAt: 'T', by: 'forge:decide' });
       saveProposal(root, 'p20261011090000aaad', { ...doc, status: 'proposed' });
       expect(JSON.parse(run(['hook', 'stop'], { ...io, stdin: '{"session_id":"s1"}' }).stdout).reason).toContain('forge infinite mode is active');
       expect(JSON.parse(readFileSync(path.join(root, '.forge', 'run.json'), 'utf8')).active).toBe(true);
@@ -1792,7 +1796,7 @@ describe('forge waypoint-cli', () => {
       writeFileSync(path.join(root, 'db.json'), JSON.stringify({ ...prop, ts: 't', status: 'proposed', author: 'session' }));
       const r = run(['proposals', 'decide', id, 'reject', '--from', 'db.json', '--by', 'user:me'], io);
       expect(r.code).toBe(0);
-      expect(JSON.parse(r.stdout)).toEqual({ id, status: 'rejected', write: { status: 'rejected', decidedBy: 'user:me', decidedAt: '2026-10-11T10:00:00.000Z' } });
+      expect(JSON.parse(r.stdout)).toEqual({ id, status: 'rejected', write: { status: 'rejected', decidedBy: 'user:me', decidedAt: '2026-10-11T10:00:00.000Z' }, approval: { op: 'set', collection: 'approvals', doc_id: id, data: { status: 'rejected', decidedAt: '2026-10-11T10:00:00.000Z', by: 'forge:decide' } } });
       expect(loadProposals(root)).toEqual([]);
       expect(readEvents(root)).toEqual([]);
       expect(run(['proposals', 'decide', id, 'reject', '--from', 'missing.json'], io).code).toBe(2);
@@ -1904,6 +1908,80 @@ describe('forge waypoint-cli', () => {
       const r = run(['proposals', 'add', '--file', 'p.json', '--author', 'session:abc'], io);
       expect(JSON.parse(r.stdout).doc.author).toBe('session:abc');
       expect(JSON.parse(add({ author: 'file', title: 'Split the parser module' }).stdout).doc.author).toBe('file');
+    });
+
+    describe('only the owner approves (§4.1)', () => {
+      const MARK = (status: string, by = 'page') => ({ status, decidedAt: '2026-10-11T09:00:00.000Z', by });
+      const pullDb = (props: Record<string, unknown>, marks: Record<string, unknown>, page: unknown) => {
+        for (const [dir, docs] of [['db/proposals', props], ['db/approvals', marks]] as const) {
+          mkdirSync(path.join(root, dir), { recursive: true });
+          for (const [id, d] of Object.entries(docs)) writeFileSync(path.join(root, dir, `${id}.json`), JSON.stringify(d));
+        }
+        mkdirSync(path.join(root, 'db', 'meta'), { recursive: true });
+        if (page !== undefined) writeFileSync(path.join(root, 'db', 'meta', 'page.json'), JSON.stringify(page));
+        return JSON.parse(run(['proposals', 'pull', '--dir', 'db/proposals', '--approvals', 'db/approvals', '--page', 'db/meta/page.json'], io).stdout);
+      };
+      it('decide prints the approval with the write; without --from it keeps the mark locally; discuss has none', () => {
+        const { id } = JSON.parse(add().stdout);
+        const r = JSON.parse(run(['proposals', 'decide', id, 'approve'], io).stdout);
+        expect(r.approval).toEqual({ op: 'set', collection: 'approvals', doc_id: id, data: { status: 'approved', decidedAt: '2026-10-11T10:00:00.000Z', by: 'forge:decide' } });
+        expect(loadApproval(root, id)).toEqual(r.approval.data);
+        io.rand = () => 0.9;
+        const other = JSON.parse(add({ title: 'Another one', rationale: 'different' }).stdout).id;
+        writeFileSync(path.join(root, 'db.json'), JSON.stringify({ ...prop, ts: 't', status: 'proposed', author: 'session' }));
+        const fromDb = JSON.parse(run(['proposals', 'decide', other, 'reject', '--from', 'db.json'], io).stdout);
+        expect(fromDb.approval).toMatchObject({ doc_id: other, data: { status: 'rejected', by: 'forge:decide' } });
+        expect(loadApproval(root, other)).toBeNull();
+        expect(JSON.parse(run(['proposals', 'decide', other, 'discuss'], io).stdout).approval).toBeNull();
+      });
+      it('decide confirm marks the decision a proposal already has, and only a decided one', () => {
+        const { id } = JSON.parse(add().stdout);
+        expect(run(['proposals', 'decide', id, 'confirm'], io).code).toBe(2);
+        writeFileSync(path.join(root, 'db.json'), JSON.stringify({ ...prop, ts: 't', status: 'approved', author: 'session', decidedBy: 'user:me', decidedAt: 'T' }));
+        const r = JSON.parse(run(['proposals', 'decide', id, 'confirm', '--from', 'db.json'], io).stdout);
+        expect(r).toEqual({ id, status: 'approved', approval: { op: 'set', collection: 'approvals', doc_id: id, data: { status: 'approved', decidedAt: '2026-10-11T10:00:00.000Z', by: 'forge:decide' } } });
+      });
+      it('policy keeps the mark of an auto-approval and prints it', () => {
+        const a = JSON.parse(add().stdout).id;
+        const r = JSON.parse(run(['proposals', 'policy', a], io).stdout);
+        expect(r.approval).toEqual({ op: 'set', collection: 'approvals', doc_id: a, data: { status: 'auto_approved', decidedAt: '2026-10-11T10:00:00.000Z', by: 'forge:policy' } });
+        expect(loadApproval(root, a)?.status).toBe('auto_approved');
+      });
+      it('pull --approvals copies the owner marks of the roadmap and removes a local one the roadmap does not have', () => {
+        const a = 'p20261011100000aaaa', b = 'p20261011100000bbbb';
+        saveApproval(root, b, MARK('approved', 'forge:decide') as never);
+        const r = pullDb({ [a]: { ...prop, ts: '', status: 'approved', author: 'session' } }, { [a]: MARK('approved'), junk: MARK('approved'), [`${b}x`]: 5 }, { version: '0.26.0', rules: 2, publishedAt: 'T' });
+        expect(r).toEqual({ proposals: 1, approvals: 1, removed: 1, rules: 2, ownerRule: true });
+        expect(Object.keys(loadApprovals(root))).toEqual([a]);
+        expect(run(['proposals', 'pull', '--dir', 'db/proposals'], io).stdout.trim()).toBe('1');
+      });
+      it('a roadmap without the owner rule (no meta/page, or rules under 2) counts no mark: pull removes them all (Review Focus 1)', () => {
+        const a = 'p20261011100000aaaa';
+        saveApproval(root, a, MARK('approved', 'forge:decide') as never);
+        expect(pullDb({ [a]: { ...prop, ts: '', status: 'approved', author: 'session' } }, { [a]: MARK('approved') }, undefined))
+          .toEqual({ proposals: 1, approvals: 0, removed: 1, rules: 0, ownerRule: false });
+        expect(loadApprovals(root)).toEqual({});
+        expect(pullDb({}, { [a]: MARK('approved') }, { version: '0.25.0', rules: 1, publishedAt: 'T' })).toMatchObject({ approvals: 0, ownerRule: false });
+        writePlan(root, '  - { id: T001, title: a, track: backend, phase: PX, done_when: x }\n');
+        const to = run(['proposals', 'to-task', a, '--plan', 'docs/waypoint/demo/plan.yaml'], io);
+        expect(to.code).toBe(2);
+        expect(to.stderr).toContain("roadmap's owner");
+      });
+      it('to-task, list and infinite status count only proposals with the owner mark', () => {
+        const a = JSON.parse(add().stdout).id;
+        run(['proposals', 'decide', a, 'approve'], io);
+        io.rand = () => 0.9;
+        const b = JSON.parse(add({ title: 'Unmarked one', rationale: 'from a page before wave 4' }).stdout).id;
+        const unmarked = loadProposals(root).find(p => p.id === b)!;
+        const { id: _id, ...doc } = unmarked;
+        saveProposal(root, b, { ...doc, status: 'approved', decidedBy: 'user:someone', decidedAt: 'T' });
+        expect(JSON.parse(run(['proposals', 'list'], io).stdout).unowned).toBe(1);
+        run(['infinite', 'start', '--cycles', '2'], io);
+        expect(JSON.parse(run(['infinite', 'status'], io).stdout).unowned).toBe(1);
+        writePlan(root, '  - { id: T001, title: a, track: backend, phase: PX, done_when: x }\n');
+        expect(run(['proposals', 'to-task', b, '--plan', 'docs/waypoint/demo/plan.yaml'], io).code).toBe(2);
+        expect(run(['proposals', 'to-task', a, '--plan', 'docs/waypoint/demo/plan.yaml'], io).code).toBe(0);
+      });
     });
   });
 });

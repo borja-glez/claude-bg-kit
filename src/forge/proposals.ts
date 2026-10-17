@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { forgeDir } from './ledger.js';
-import { normalizeProposal, canDecide, applyDecision, MAX_PROPOSAL_HISTORY, type ProposalDoc, type ProposalHistoryEntry, type Decision } from '../lib/proposals.js';
+import { normalizeProposal, normalizeApproval, type ApprovalDoc, canDecide, applyDecision, MAX_PROPOSAL_HISTORY, type ProposalDoc, type ProposalHistoryEntry, type Decision } from '../lib/proposals.js';
 
 export const PROPOSAL_ID = /^p\d{14}[0-9a-z]{4}$/;
 
@@ -96,4 +96,34 @@ export function mirrorProposal(root: string, id: string, doc: ProposalDoc, still
   const keep = prev?.taskId !== undefined && doc.taskId === undefined && stillPlanned(prev.taskId);
   saveProposal(root, id, keep ? { ...doc, taskId: prev.taskId } : doc);
   return { previous: prev ? prev.status : null, previousDoc: prev };
+}
+
+const approvalsDir = (root: string) => path.join(root, '.forge', 'approvals');
+
+/** Wave 4: the local copy of an owner mark (approvals/<pid>): written by decide without a roadmap and by policy, replaced by `pull --approvals`. */
+export function saveApproval(root: string, id: string, doc: ApprovalDoc): void {
+  forgeDir(root);
+  mkdirSync(approvalsDir(root), { recursive: true });
+  writeFileSync(path.join(approvalsDir(root), `${id}.json`), JSON.stringify(doc, null, 2) + '\n');
+}
+
+export function loadApproval(root: string, id: string): ApprovalDoc | null {
+  if (!PROPOSAL_ID.test(id)) return null;
+  try { return normalizeApproval(JSON.parse(readFileSync(path.join(approvalsDir(root), `${id}.json`), 'utf8'))); } catch { return null; }
+}
+
+export function loadApprovals(root: string): Record<string, ApprovalDoc> {
+  let names: string[] = [];
+  try { names = readdirSync(approvalsDir(root)); } catch { return {}; }
+  const out: Record<string, ApprovalDoc> = {};
+  for (const n of names.sort()) {
+    const id = n.endsWith('.json') ? n.slice(0, -5) : '';
+    const a = PROPOSAL_ID.test(id) ? loadApproval(root, id) : null;
+    if (a) out[id] = a;
+  }
+  return out;
+}
+
+export function removeApproval(root: string, id: string): void {
+  if (PROPOSAL_ID.test(id)) rmSync(path.join(approvalsDir(root), `${id}.json`), { force: true });
 }

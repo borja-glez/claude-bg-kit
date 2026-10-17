@@ -18,8 +18,9 @@ import { renderThreatModel } from '../threat-model.js';
 import { loadConfig, configValue, agentFor, ROLES, ConfigError, NAME, WORKFLOWS, AUTONOMIES, type Profile, type Workflow } from '../config.js';
 import { resolvePrefs, isWorkflow, isAutonomy } from '../prefs.js';
 import { parseReview, parseVerifyFile, verifyReview, weightsFor, synthesize, type ReviewerName, type FailingValidator, type VerifyFile } from '../verdict.js';
-import { PROPOSAL_ID, proposalId, saveProposal, loadProposals, loadProposal, decideDoc, mirrorProposal, type DecideError } from '../proposals.js';
-import { normalizeProposal, isActionable, canDecide, PROPOSAL_STATUSES, type Decision, type ProposalDoc } from '../../lib/proposals.js';
+import { PROPOSAL_ID, proposalId, saveProposal, loadProposals, loadProposal, decideDoc, mirrorProposal, saveApproval, loadApproval, loadApprovals, removeApproval, type DecideError } from '../proposals.js';
+import { normalizeProposal, isActionable, canDecide, markMatches, normalizeApproval, ownerApproved, PROPOSAL_STATUSES, type Decision, type ProposalDoc, type ApprovalDoc } from '../../lib/proposals.js';
+import { PAGE_RULES } from '../../lib/publish.js';
 import { autoApprovable, similarRejected, similarOpen } from '../policy.js';
 import { proposalToTask, proposalOfIncludes } from '../to-task.js';
 import type { PlanTask } from '../../lib/types.js';
@@ -453,12 +454,20 @@ function briefThreatModel(dir: string): string | null {
 // Approved work still pending = every approved/auto_approved proposal not yet done, with or without a task.
 function stopContext(cwd: string, now: Date): StopContext {
   const proposals = loadProposals(cwd);
+  const marks = loadApprovals(cwd);
   return {
     now,
     stopFile: existsSync(stopFile(cwd)),
-    approvedPending: proposals.filter(isActionable).length,
+    // Wave 4: approved work counts only with the owner's mark (with or without a task, as before).
+    approvedPending: proposals.filter(p => markMatches(p, marks[p.id])).length,
     pendingProposals: proposals.filter(p => p.status === 'proposed' || p.status === 'discussing').length,
   };
+}
+
+/** Wave 4: approved proposals without a task that lack the roadmap owner's mark: they never become tasks. */
+function unownedOf(root: string): number {
+  const marks = loadApprovals(root);
+  return loadProposals(root).filter(p => isActionable(p) && p.taskId === undefined && !markMatches(p, marks[p.id])).length;
 }
 
 /**
@@ -1194,6 +1203,9 @@ function runCommand(argv: string[], io: Io): Result {
           return w;
         };
         const readText = (f: string, what: string) => { try { return readFileSync(path.resolve(io.cwd, f), 'utf8'); } catch { throw new UsageError(`proposals: cannot read ${what}`); } };
+        // §4.1: the owner's mark of a decision, as approvals/<pid> takes it (only the roadmap's owner can write it).
+        const approvalOf = (id: string, status: ApprovalDoc['status'], at: string, by: ApprovalDoc['by'] = 'forge:decide') =>
+          ({ op: 'set' as const, collection: 'approvals', doc_id: id, data: { status, decidedAt: at, by } });
         switch (sub) {
           case 'add': {
             const file = subFlag('file');
@@ -1225,12 +1237,12 @@ function runCommand(argv: string[], io: Io): Result {
             if (status !== undefined && !(PROPOSAL_STATUSES as readonly string[]).includes(status)) throw new UsageError(`proposals list: --status must be one of ${PROPOSAL_STATUSES.join('|')}`);
             const all = loadProposals(io.cwd).filter(p => status === undefined || p.status === status);
             all.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : a.id < b.id ? 1 : -1));
-            return json(all);
+            return json({ proposals: all, unowned: unownedOf(io.cwd) });
           }
           case 'decide': {
             const [id, action] = rest;
             if (!id || !PROPOSAL_ID.test(id)) throw new UsageError('proposals decide: a proposal id (p + 14 digits + 4 letters/digits) is required');
-            if (action !== 'approve' && action !== 'reject' && action !== 'discuss') throw new UsageError('proposals decide: action must be approve|reject|discuss');
+            if (action !== 'approve' && action !== 'reject' && action !== 'discuss' && action !== 'confirm') throw new UsageError('proposals decide: action must be approve|reject|discuss|confirm');
             const rf = subFlag('reason-file');
             const reason = rf !== undefined ? readText(rf, '--reason-file').trim() : undefined;
             const by = subFlag('by') ?? 'user';
@@ -1247,23 +1259,33 @@ function runCommand(argv: string[], io: Io): Result {
               base = loadProposal(io.cwd, id);
               if (!base) throw new UsageError(`proposals decide: ${id} not found`);
             }
+            // §4.1: confirm marks the decision the proposal already has (one taken on a page that wrote no mark, or before wave 4).
+            if (action === 'confirm') {
+              const status = base.status;
+              if (status !== 'approved' && status !== 'auto_approved' && status !== 'rejected') throw new UsageError(`proposals decide: ${id} is ${status}: only a decided proposal is confirmed`);
+              const approval = approvalOf(id, status, at);
+              if (from === undefined) saveApproval(io.cwd, id, approval.data);
+              return json({ id, status, approval });
+            }
             // A reopen also refuses while the proposal has a task: in the db doc, or in a plan (a task made from it, or
             // the local mirror's taskId, which to-task sets before the roadmap does, while a plan still has that task).
             const held = reopen ? base.taskId ?? heldTask(planTasksFor(io.cwd, subFlag('plan')), id, loadProposal(io.cwd, id)?.taskId) : undefined;
             const checked = held !== undefined ? { ...base, taskId: held } : base;
             const r = decideDoc(checked, action as Decision, by, at, reason || undefined, { reopen });
             if (!r.ok) throw new UsageError(`proposals decide: ${decideRefusal(id, checked, r.error)}`);
+            const mark = r.doc.status === 'approved' || r.doc.status === 'rejected' ? approvalOf(id, r.doc.status, at) : null;
             if (from === undefined) {
               saveProposal(io.cwd, id, r.doc);
+              if (mark) saveApproval(io.cwd, id, mark.data); else removeApproval(io.cwd, id);
               appendEvent(io.cwd, reopen
                 ? { ts: at, kind: 'proposal', action: 'reopen', id, from: base.status, to: r.doc.status }
                 : { ts: at, kind: 'proposal', action: 'decide', id, status: r.doc.status });
             }
-            if (!reopen) return json({ id, status: r.doc.status, write: writeOf(r.doc, by, at) });
+            if (!reopen) return json({ id, status: r.doc.status, write: writeOf(r.doc, by, at), approval: mark });
             // The skill sends `write` pinned to the version it read; a stale reason is deleted.
             const write: Record<string, unknown> = { ...writeOf(r.doc, by, at), history: r.doc.history };
             if (!r.doc.reason && base.reason) write.reason = { __delete__: true };
-            return json({ id, status: r.doc.status, previous: base.status, write });
+            return json({ id, status: r.doc.status, previous: base.status, write, approval: mark });
           }
           case 'save': {
             const from = subFlag('from');
@@ -1292,21 +1314,45 @@ function runCommand(argv: string[], io: Io): Result {
             const dir = subFlag('dir');
             if (!dir) throw new UsageError('proposals pull: --dir is required');
             const abs = path.resolve(io.cwd, dir);
-            let names: string[];
-            if (!existsSync(abs)) return ok('0');
-            try { names = readdirSync(abs); } catch { throw new UsageError(`proposals pull: cannot read ${dir}`); }
             let n = 0;
-            for (const name of names.sort()) {
-              if (!name.endsWith('.json')) continue;
-              const id = name.slice(0, -5);
-              if (!PROPOSAL_ID.test(id)) continue;
-              let doc;
-              try { doc = normalizeProposal(JSON.parse(readFileSync(path.join(abs, name), 'utf8'))); } catch { continue; }
-              if (!doc) continue;
-              saveProposal(io.cwd, id, doc);
-              n++;
+            if (existsSync(abs)) {
+              let names: string[];
+              try { names = readdirSync(abs); } catch { throw new UsageError(`proposals pull: cannot read ${dir}`); }
+              for (const name of names.sort()) {
+                if (!name.endsWith('.json')) continue;
+                const id = name.slice(0, -5);
+                if (!PROPOSAL_ID.test(id)) continue;
+                let doc;
+                try { doc = normalizeProposal(JSON.parse(readFileSync(path.join(abs, name), 'utf8'))); } catch { continue; }
+                if (!doc) continue;
+                saveProposal(io.cwd, id, doc);
+                n++;
+              }
             }
-            return ok(String(n));
+            if (!has('approvals')) return ok(String(n));
+            const marksDir = subFlag('approvals');
+            if (!marksDir) throw new UsageError('proposals pull: --approvals needs the listed approvals folder');
+            // §4.1: the roadmap's marks replace the local ones. Without the owner rule (meta/page.rules under 2: a roadmap
+            // published before wave 4, where approvals/ inherits write: admin) no mark counts and every local one goes.
+            const pageFile = subFlag('page');
+            const page = pageFile ? (() => { try { return JSON.parse(readFileSync(path.resolve(io.cwd, pageFile), 'utf8')) as unknown; } catch { return null; } })() : null;
+            const rules = page && typeof page === 'object' && typeof (page as { rules?: unknown }).rules === 'number' ? (page as { rules: number }).rules : 0;
+            const ownerRule = rules >= PAGE_RULES;
+            const db: Record<string, ApprovalDoc> = {};
+            const marksAbs = path.resolve(io.cwd, marksDir);
+            if (ownerRule && existsSync(marksAbs)) {
+              for (const name of readdirSync(marksAbs).sort()) {
+                const id = name.endsWith('.json') ? name.slice(0, -5) : '';
+                if (!PROPOSAL_ID.test(id)) continue;
+                let a: ApprovalDoc | null = null;
+                try { a = normalizeApproval(JSON.parse(readFileSync(path.join(marksAbs, name), 'utf8'))); } catch { a = null; }
+                if (a) db[id] = a;
+              }
+            }
+            let removed = 0;
+            for (const id of Object.keys(loadApprovals(io.cwd))) if (!db[id]) { removeApproval(io.cwd, id); removed++; }
+            for (const [id, a] of Object.entries(db)) saveApproval(io.cwd, id, a);
+            return json({ proposals: n, approvals: Object.keys(db).length, removed, rules, ownerRule });
           }
           case 'policy': {
             const id = rest[0];
@@ -1316,12 +1362,14 @@ function runCommand(argv: string[], io: Io): Result {
             const { id: _id, ...doc } = found;
             if (doc.status !== 'proposed' || !autoApprovable(doc)) {
               appendEvent(io.cwd, { ts: ts(), kind: 'proposal', action: 'policy', id, status: doc.status });
-              return json({ id, status: doc.status, write: null });
+              return json({ id, status: doc.status, write: null, approval: null });
             }
             const at = ts();
             saveProposal(io.cwd, id, { ...doc, status: 'auto_approved', decidedBy: 'forge:policy', decidedAt: at });
+            const approval = approvalOf(id, 'auto_approved', at, 'forge:policy');
+            saveApproval(io.cwd, id, approval.data);
             appendEvent(io.cwd, { ts: at, kind: 'proposal', action: 'policy', id, status: 'auto_approved' });
-            return json({ id, status: 'auto_approved', write: { status: 'auto_approved', decidedBy: 'forge:policy', decidedAt: at } });
+            return json({ id, status: 'auto_approved', write: { status: 'auto_approved', decidedBy: 'forge:policy', decidedAt: at }, approval });
           }
           case 'to-task': {
             const id = rest[0];
@@ -1332,6 +1380,8 @@ function runCommand(argv: string[], io: Io): Result {
             if (!found) throw new UsageError(`proposals to-task: ${id} not found`);
             if (!isActionable(found)) throw new UsageError(`proposals to-task: ${id} is not approved`);
             if (found.taskId !== undefined) throw new UsageError(`proposals to-task: ${id} already has task ${found.taskId}`);
+            // §4.1: only the roadmap owner's approvals become tasks: the mark must agree with the proposal.
+            if (!ownerApproved(found, loadApproval(io.cwd, id))) throw new UsageError(`proposals to-task: ${id} has no mark of the roadmap's owner (approvals/${id}); only the owner's approvals become tasks`);
             const text = readText(planArg, '--plan');
             let plan;
             try { plan = parsePlan(text); } catch (e) {
@@ -1626,7 +1676,7 @@ function runCommand(argv: string[], io: Io): Result {
           const unbound = !!run?.active && run.sessionId === null;
           // G-08: meta/infinite as the roadmap takes it, for the skill to send as it is.
           const publish = run ? { infinite: infinitePublish(mainCheckout(io.cwd), run, io.now()) } : null;
-          return json({ present: text !== null, valid: run !== null, run, stopReason: reason, reply: runReply(runRoot, run), ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}), publish });
+          return json({ present: text !== null, valid: run !== null, run, stopReason: reason, reply: runReply(runRoot, run), ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}), unowned: unownedOf(runRoot), publish });
         }
         throw new UsageError('usage: forge infinite <start --cycles N|--hours H [--queue-max N] [--session ID] [--locale CODE]|status>');
       }

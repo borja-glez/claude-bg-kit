@@ -1700,7 +1700,7 @@ describe('page --publish-info and the sync line', () => {
     writeFileSync(p, readFileSync(p, 'utf8').replace(/^(locale: \w+\n)/m, `$1artifacts:\n  roadmap: ${url}\n`));
   };
   const info = () => JSON.parse(run(['page', 'plan.yaml', '--out', 'r.html', '--publish-info'], io).stdout);
-  const caps = { db: { rules: [{ path: '', read: 'view', write: 'admin' }, { path: 'notes', read: 'view', write: 'interact' }, { path: 'proposals', read: 'view', write: 'interact' }] }, user: { scopes: ['profile'] }, downloads: true };
+  const caps = { db: { rules: [{ path: '', read: 'view', write: 'admin' }, { path: 'notes', read: 'view', write: 'interact' }, { path: 'proposals', read: 'view', write: 'interact' }, { path: 'approvals', read: 'view', write: 'owner' }] }, user: { scopes: ['profile'] }, downloads: true };
   it('without .forge the roadmap stays shareable and nothing is said', () => {
     expect(info()).toEqual({ out: path.join(dir, 'r.html'), capabilities: caps, internal: false, say: null });
     expect(existsSync(path.join(dir, 'r.html'))).toBe(true);

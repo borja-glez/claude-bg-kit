@@ -77,3 +77,30 @@ function normalizeHistoryEntry(x: unknown): ProposalHistoryEntry | null {
 export const canDecide = (status: ProposalStatus): boolean => status === 'proposed' || status === 'discussing';
 export const applyDecision = (d: Decision): ProposalStatus => (d === 'approve' ? 'approved' : d === 'reject' ? 'rejected' : 'discussing');
 export const isActionable = (p: ProposalDoc): boolean => p.status === 'approved' || p.status === 'auto_approved';
+
+/** Wave 4 (§4.1): the owner's mark on a decision, approvals/<pid>: a collection only the roadmap's owner can write, a rule
+ *  the server enforces. A proposal counts as approved for forge only when its mark agrees with it. */
+export const APPROVAL_STATUSES = ['approved', 'rejected', 'auto_approved'] as const;
+export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
+export const APPROVAL_BY = ['page', 'forge:decide', 'forge:policy'] as const;
+export type ApprovalBy = (typeof APPROVAL_BY)[number];
+export interface ApprovalDoc { status: ApprovalStatus; decidedAt: string; by: ApprovalBy }
+
+/** An approvals/<pid> document, or null: no free text, only its status, when and from where. */
+export function normalizeApproval(x: unknown): ApprovalDoc | null {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
+  const o = x as Record<string, unknown>;
+  if (!oneOf(APPROVAL_STATUSES, o.status) || !oneOf(APPROVAL_BY, o.by) || !str(o.decidedAt) || !o.decidedAt) return null;
+  return { status: o.status, decidedAt: o.decidedAt.slice(0, MAX_PROPOSAL_TITLE), by: o.by };
+}
+
+/** The mark agrees with the proposal: both approved, or both auto_approved, and the proposal is not done. */
+export function markMatches(p: Pick<ProposalDoc, 'status'>, a: ApprovalDoc | null | undefined): boolean {
+  return !!a && (p.status === 'approved' || p.status === 'auto_approved') && a.status === p.status;
+}
+
+/** Wave 4: approved by the roadmap's owner, for auto-approval and to-task: the mark agrees and it has no task yet. Someone
+ *  else can block a proposal by changing proposals/<pid>, never fire it. */
+export function ownerApproved(p: Pick<ProposalDoc, 'status' | 'taskId'>, a: ApprovalDoc | null | undefined): boolean {
+  return markMatches(p, a) && p.taskId === undefined;
+}

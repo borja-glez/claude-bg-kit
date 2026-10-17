@@ -2,6 +2,9 @@
 // artifact internal, and the lines for the person. Pure; the waypoint CLI reads the plan and .forge/config.yaml.
 import type { Plan } from './types.js';
 
+/** G-13, §4.1: the rules of the page this version publishes; 2 is the first with the owner's approvals rule. */
+export const PAGE_RULES = 2;
+
 /** The capabilities of plan skill step 3.2; `assets` (forge's verification screenshots) only when evidence is uploaded. */
 export function roadmapCapabilities(assets: boolean): Record<string, unknown> {
   return {
@@ -9,6 +12,8 @@ export function roadmapCapabilities(assets: boolean): Record<string, unknown> {
       { path: '', read: 'view', write: 'admin' },
       { path: 'notes', read: 'view', write: 'interact' },
       { path: 'proposals', read: 'view', write: 'interact' },
+      // §4.1: only the roadmap's owner writes the mark that makes a decision count for forge (not admin: editors comment).
+      { path: 'approvals', read: 'view', write: 'owner' },
     ] },
     user: { scopes: ['profile'] },
     downloads: true,

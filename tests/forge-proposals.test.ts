@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { proposalId, saveProposal, loadProposals, decideLocal, decideDoc } from '../src/forge/proposals.js';
+import { proposalId, saveProposal, loadProposals, decideLocal, decideDoc, saveApproval, loadApproval, loadApprovals, removeApproval } from '../src/forge/proposals.js';
 import type { ProposalDoc } from '../src/lib/proposals.js';
 
 const doc = (over: Partial<ProposalDoc> = {}): ProposalDoc => ({
@@ -68,5 +68,19 @@ describe('forge proposals mirror', () => {
     const r = decideLocal(root, 'p2', 'reject', 'u', 'x', 'too risky');
     expect(r).toMatchObject({ ok: true, doc: { status: 'rejected', reason: 'too risky' } });
     expect(loadProposals(root)[0]).toMatchObject({ status: 'rejected', reason: 'too risky' });
+  });
+});
+
+describe('the local owner marks (.forge/approvals/)', () => {
+  it('saves, loads, lists and removes a mark; a broken or misnamed file is left out', () => {
+    const id = 'p20261016100000abcd';
+    saveApproval(root, id, { status: 'approved', decidedAt: '2026-10-16T10:00:00.000Z', by: 'forge:decide' });
+    expect(loadApproval(root, id)).toEqual({ status: 'approved', decidedAt: '2026-10-16T10:00:00.000Z', by: 'forge:decide' });
+    mkdirSync(path.join(root, '.forge', 'approvals'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'approvals', 'p20261016100000bbbb.json'), 'not json');
+    writeFileSync(path.join(root, '.forge', 'approvals', 'nope.json'), JSON.stringify({ status: 'approved', decidedAt: 'x', by: 'page' }));
+    expect(Object.keys(loadApprovals(root))).toEqual([id]);
+    removeApproval(root, id);
+    expect(loadApproval(root, id)).toBeNull();
   });
 });
