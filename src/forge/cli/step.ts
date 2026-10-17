@@ -6,7 +6,7 @@ import { checkPlanProject, commitInfo } from './swarm.js';
 import { readExecution, executionTaskFile, runWorktree, taskBase, writePublicTask } from '../execution.js';
 import { takeStepLock } from '../jobs.js';
 import { appendEvent, readEvents, withEventContext, type LedgerEvent } from '../ledger.js';
-import { eventsOf, isTask, ofTask, readWorkDir, workRel } from '../task-ref.js';
+import { eventsOf, isTask, ofTask, readWorkDir, taskLine, workRel } from '../task-ref.js';
 import { reviewsOf } from '../loop.js';
 import { LEASE_MINUTES } from '../../lib/coordination.js';
 import { normalizePublicTask, type ExecTask, type ExecutionState, type PublicTask } from '../../lib/execution-state.js';
@@ -254,7 +254,7 @@ function startTask(c: Ctx, task: string, resume: boolean): boolean {
   logAgent(c, `${task}-1`, agent, typeof impl.role === 'string' ? impl.role : 'impl');
   if (!call(c, task, ['swarm', 'task', task, '--stage', 'implement', '--agent', agent, '--round', '0', '--lease', c.agentLease()])) return false;
   c.actions.push({
-    type: 'spawnImplementer', task, agent, role: impl.role ?? null, brief: slash(brief), report: slash(path.join(work, 'report-1.txt')),
+    type: 'spawnImplementer', task, agent, taskLine: taskLine(`${task}-1`, c.project), role: impl.role ?? null, brief: slash(brief), report: slash(path.join(work, 'report-1.txt')),
     validate: pr.validate ?? null, worktree, base: pr.base ?? null, ...(w.setup ? { setup: w.setup } : {}), ...(tri.announce ? { announce: tri.announce } : {}),
   });
   return true;

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { attribute, baseOf, eventsOf, idChain, isTask, projectOf, projectOfDir, readWorkDir, resolveProject, stampEvent, workDir, workRel } from '../src/forge/task-ref.js';
+import { attribute, baseOf, eventsOf, idChain, isTask, projectOf, projectOfDir, readWorkDir, resolveProject, stampEvent, taskLine, workDir, workRel } from '../src/forge/task-ref.js';
 import type { ExecutionState } from '../src/lib/execution-state.js';
 import { roundDecision } from '../src/forge/round.js';
 import { briefStats } from '../src/forge/stats.js';
@@ -111,5 +111,17 @@ describe('stampEvent (C4)', () => {
   it('an event that names its own session, run or project keeps them', () => {
     const own = { ...e, session: 'keep', runId: 'r0', project: 'mine' };
     expect(stampEvent(own, { session: 'c1', exec, project: 'shop' })).toEqual(own);
+  });
+});
+
+describe('taskLine (E-02)', () => {
+  it('names the brief and, for a plan task, its project', () => {
+    expect(taskLine('T001-1', 'shop')).toBe('forge-task: T001-1 @shop');
+    expect(taskLine('fix-cart-a1b2-1', null)).toBe('forge-task: fix-cart-a1b2-1');
+    expect(taskLine('T001-1', '../x')).toBe('forge-task: T001-1');
+  });
+  it('keeps ids of up to 120 characters whole', () => {
+    const t = 'a'.repeat(120), p = 'b'.repeat(120);
+    expect(taskLine(t, p)).toBe(`forge-task: ${t} @${p}`);
   });
 });

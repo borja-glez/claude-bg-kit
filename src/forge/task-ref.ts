@@ -135,3 +135,11 @@ export function stampEvent(event: LedgerEvent, ctx: StampContext): LedgerEvent {
   if (out.project === undefined && task && isSafeId(ctx.project)) out.project = ctx.project;
   return out;
 }
+
+/**
+ * E-02: the line that starts the prompt of each agent of a task, which lens reads to show the agent under it:
+ * `forge-task: <T>-<n> @<project>` for a plan task, without `@` for a loose one (or a project that is not a safe id).
+ */
+export function taskLine(task: string, project: string | null): string {
+  return `forge-task: ${task}${isSafeId(project) ? ` @${project}` : ''}`;
+}

@@ -9,7 +9,7 @@ import { detectValidators, selectValidators, runValidators, markPreexisting, blo
 import { PATH_ORDER, zonesFromPaths, type PathName, type ReviewRole } from '../triage.js';
 import { parseReview, parseHunks, parseVerifyFile, verifyReview, weightsFor, synthesize, repoRelative, type Finding, type Review, type ReviewerName, type FailingValidator, type AskFinding } from '../verdict.js';
 import { roundDecision } from '../round.js';
-import { eventsOf, isTask, ofTask, readWorkDir, resolveProject } from '../task-ref.js';
+import { eventsOf, isTask, ofTask, readWorkDir, resolveProject, taskLine } from '../task-ref.js';
 import { keepEvidence } from '../evidence-copy.js';
 import { parseIndex, assignIds, answeredBy, idsOf, recordRound, carriedResiduals, carriedOutOfModel, openIds, closedFor, previousFindings, asPrevious, historyLine, renderHandover, expressCandidate, type FindingsIndex } from '../findings-index.js';
 import { reviewsOf } from '../loop.js';
@@ -287,7 +287,7 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   if (round >= 2 && !redo && round < reviewsCount.max && (pathName === 'medium' || pathName === 'large') && config.review.express
     && lastVerdict?.action === 'fix' && Array.isArray(prevSent?.validators) && prevSent!.validators.length === 0 && expressCandidate(index, round)
     && SHA.test(baseSha)) {
-    const express = expressPrep({ deps, task, id, n, round, pathName, review, previous, prevReviews, fixFiles, dir, roundDir, baseSha,
+    const express = expressPrep({ deps, task, project, id, n, round, pathName, review, previous, prevReviews, fixFiles, dir, roundDir, baseSha,
       baselineArg, diff, head, tmFile, index, reviewsCount, locale, noCache: args.includes('--no-cache') });
     if (express) return express;
   }
@@ -369,7 +369,7 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   }
   writeCarried(plan, dir, n, round, roundDir, prevReviews);
 
-  const spawn = plan.spawn.map(spawnOut);
+  const spawn = plan.spawn.map(s => spawnOut(s, taskLine(task, project)));
   writeFileSync(path.join(roundDir, 'head.txt'), head + '\n');
   writeFileSync(planFile, JSON.stringify({
     task, round, path: pathName, base: baseSha, head, light: review.light, flags: review.flags, shadow: plan.shadow,
@@ -409,7 +409,7 @@ function sayValidatorsRound(reviews: { n: number; max: number }, k: number, fail
 }
 
 /** A spawn entry as review-prep prints it and review-plan.json keeps it. */
-const spawnOut = (s: SpawnEntry) => ({ agent: s.agent, model: s.model, effort: s.effort, mode: s.mode, ...(s.twin ? { twin: true } : {}), ...(s.express ? { express: true } : {}), role: s.role, inputs: s.inputs });
+const spawnOut = (s: SpawnEntry, line: string) => ({ agent: s.agent, model: s.model, effort: s.effort, mode: s.mode, ...(s.twin ? { twin: true } : {}), ...(s.express ? { express: true } : {}), role: s.role, inputs: s.inputs, taskLine: line });
 
 /** A carried reviewer's previous file, copied into this review with "carried": true: as written when it is plain JSON,
  *  else as parsed; a reviewer delegated to an express review has no file there, so it gets the result the index gave it
@@ -425,7 +425,7 @@ function writeCarried(plan: RoundPlan, dir: string, n: string, round: number, ro
 }
 
 interface ExpressCtx {
-  deps: ReviewDeps; task: string; id: string; n: string; round: number; pathName: PathName; review: TriageReview;
+  deps: ReviewDeps; task: string; project: string | null; id: string; n: string; round: number; pathName: PathName; review: TriageReview;
   previous: Partial<Record<ReviewRole, PreviousResult>>; prevReviews: Partial<Record<ReviewerKey, Review>>; fixFiles: string[];
   dir: string; roundDir: string; baseSha: string; baselineArg: string; diff: string; head: string; tmFile: string | null;
   index: FindingsIndex; reviewsCount: { n: number; max: number }; locale: string | undefined; noCache: boolean;
@@ -459,7 +459,7 @@ function expressPrep(c: ExpressCtx): Result | null {
   writeFileSync(diffFile, c.diff);
   writeFileSync(expressFile, JSON.stringify(previousFindings(c.index, round).map(f => asPrevious(f, true)), null, 2) + '\n');
   writeCarried(plan, dir, n, round, roundDir, c.prevReviews);
-  const spawn = plan.spawn.map(spawnOut);
+  const spawn = plan.spawn.map(s => spawnOut(s, taskLine(c.task, c.project)));
   // The same form as prep's validate (J-11): paths with / in double quotes, which every shell takes; --no-cache as given.
   const cmd = `node "${slash(deps.self ?? 'forge.cjs')}" validate --all --path ${c.pathName} --base ${c.baseSha} --baseline "${slash(path.resolve(deps.cwd, c.baselineArg))}"`
     + ` --task ${c.task} --out "${slash(validatorsFile)}"${samePath(deps.repoDir, deps.cwd) ? '' : ` --cwd "${slash(deps.repoDir)}"`}${c.noCache ? ' --no-cache' : ''}`;

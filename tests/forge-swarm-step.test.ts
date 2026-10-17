@@ -908,3 +908,16 @@ describe('a new execution of the same plan task counts only its own reviews (car
     expect(readEvents(root).filter(e => e.kind === 'round' && e.task === 'T1-1').at(-1)).toMatchObject({ round: 1, next: 'resume' });
   });
 });
+
+describe('swarm step hands out the task line of each agent (E-02)', () => {
+  it('spawnImplementer and every entry of spawnReviewers carry forge-task: <T>-<n> @<project>', () => {
+    const start = step().actions.find(a => a.type === 'spawnImplementer' && a.task === 'T1')!;
+    expect(start.taskLine).toBe('forge-task: T1-1 @shop');
+    commitIn(wt('T1'), 'src/t1/a.ts', 'export const a = 1;\n', 'T1: a');
+    writeFileSync(path.join(root, String(start.report)), 'done\n');
+    const review = step().actions.find(a => a.task === 'T1' && a.type === 'spawnReviewers')!;
+    const spawn = review.spawn as { taskLine?: string }[];
+    expect(spawn.length).toBeGreaterThan(0);
+    for (const e of spawn) expect(e.taskLine).toBe('forge-task: T1-1 @shop');
+  });
+});

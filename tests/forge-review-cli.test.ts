@@ -281,6 +281,17 @@ describe('forge review-prep', () => {
     expect(run(['review-close'], io).stderr).toMatch(/review-close/);
   });
 
+
+  it('every spawn entry carries the task line lens reads: without @ for a loose task, with its project for a plan task (E-02)', () => {
+    const loose = JSON.parse(prep().stdout);
+    expect(loose.spawn.map((s: { taskLine: string }) => s.taskLine)).toEqual(['forge-task: T1-1', 'forge-task: T1-1']);
+    const plan = JSON.parse(readFileSync(path.join(work(), 'reviews-1-1', 'review-plan.json'), 'utf8'));
+    expect(plan.spawn.map((s: { taskLine: string }) => s.taskLine)).toEqual(['forge-task: T1-1', 'forge-task: T1-1']);
+    // The same task triaged again as a task of the plan shop.
+    appendEvent(root, { ts: '2026-10-14T09:30:00.000Z', kind: 'triage', task: 'T1', path: 'medium', project: 'shop', sensitive: ['auth'], review });
+    const shop = JSON.parse(prep().stdout);
+    expect(shop.spawn.map((s: { taskLine: string }) => s.taskLine)).toEqual(['forge-task: T1-1 @shop', 'forge-task: T1-1 @shop']);
+  });
 });
 
 describe('forge prep', () => {

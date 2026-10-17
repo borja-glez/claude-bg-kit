@@ -1402,4 +1402,11 @@ describe('plugin layout', () => {
       expect(md, f).not.toContain('work/<id-de-tarea>/');
     }
   });
+
+  it('the task line is a contract of the task steps, the run member and the branch review (E-02)', () => {
+    for (const f of ['plugins/forge/skills/run/references/task-steps.md', 'plugins/forge/skills/member/SKILL.md', 'plugins/forge/skills/review/SKILL.md']) {
+      expect(read(f), f).toContain('forge-task:');
+    }
+    expect(read('plugins/forge/skills/run/references/task-steps.md')).toContain('`taskLine`');
+  });
 });
