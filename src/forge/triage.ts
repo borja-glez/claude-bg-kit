@@ -29,6 +29,11 @@ export const ZONE_ORDER: Zone[] = ZONES.map(z => z.zone);
 export function zonesFromPaths(paths: string[]): Zone[] {
   return ZONES.filter(z => paths.some(p => z.path.test(p))).map(z => z.zone);
 }
+/** K2-16: the zones a text names by its words. Unlike the triage it reads the mentions too: a proposal names what it touches. */
+export function zonesFromText(text: string): Zone[] {
+  const t = String(text).slice(0, MAX_TEXT);
+  return ZONES.filter(z => z.text.some(re => re.test(t))).map(z => z.zone);
+}
 const LARGE = [/\b(architecture|redesign|rewrite|subsystem|new (project|app|service|system)|from scratch|migrat(e|ion) (to|from))\b/i,
   es('arquitect|rediseñ|reescrib|reescritur|subsistem', 'desde cero|(?:nuev[oa]|otr[oa]) (?:proyecto|aplicaci[oó]n|app|servicio|sistema)|migr(?:ar|aci[oó]n) (?:a|al|desde)')];
 

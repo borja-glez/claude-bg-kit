@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { triage, implementerFor, isMechanical, announce, parseNumstat, isBookkeeping, diffPath, DIFF_MEDIUM_LINES, isPerfTask, reviewFor, announceReview, stripMentions, type RepoFacts } from '../src/forge/triage.js';
+import { triage, implementerFor, isMechanical, announce, parseNumstat, isBookkeeping, diffPath, DIFF_MEDIUM_LINES, isPerfTask, reviewFor, announceReview, stripMentions, zonesFromText, type RepoFacts } from '../src/forge/triage.js';
 
 const FILES = ['src/app.ts', 'src/auth/login.ts', 'src/util/format.ts', 'src/db/migrations/001.sql', 'package.json', '.github/workflows/ci.yml',
   ...Array.from({ length: 20 }, (_, i) => `src/feature/f${i}.ts`)];
@@ -487,5 +487,14 @@ describe('a mention in the text does not decide the triage', () => {
     // A mechanical or Large word after the head describes something else.
     expect(isMechanical('Añade la validación del carrito. Los fixtures los regenera el script')).toBe(false);
     expect(triage('Añade un campo al formulario. Más adelante habrá que rediseñar la arquitectura', repo(), []).path).not.toBe('large');
+  });
+});
+
+describe('zonesFromText (K2-16)', () => {
+  it('the zones a text names by its words, its mentions included', () => {
+    expect(zonesFromText('Rotate the JWT secret')).toEqual(['auth']);
+    expect(zonesFromText('Add an index to the orders schema')).toEqual(['data']);
+    expect(zonesFromText('Rename `auth.ts` helpers')).toEqual(['auth']);
+    expect(zonesFromText('Tidy the parser')).toEqual([]);
   });
 });

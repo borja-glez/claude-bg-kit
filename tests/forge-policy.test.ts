@@ -6,7 +6,7 @@ const doc = (over: Partial<ProposalDoc> = {}): ProposalDoc => ({ ts: '', categor
 
 describe('autoApprovable', () => {
   it('tests and quality at low risk', () => {
-    expect(autoApprovable(doc({ category: 'tests' }))).toBe(true);
+    expect(autoApprovable(doc({ category: 'tests', path: 'tests/app.test.ts' }))).toBe(true);
     expect(autoApprovable(doc({ category: 'quality' }))).toBe(true);
   });
   it('perf needs a benchmark in the evidence', () => {
@@ -90,5 +90,28 @@ describe('safeZone', () => {
   });
   it('refuses anything else', () => {
     for (const bad of ['../x', 'a/../x', '/etc', 'C:\\x', 'C:/x', '\\\\srv\\x', 'a;rm -rf', '-rf', '-x/y', '`x`', '$(x)', 'a b', '', undefined]) expect(safeZone(bad)).toBeNull();
+  });
+});
+
+describe('autoApprovable: objective signals only (D-16, K2-16)', () => {
+  it('a tests proposal needs the path of a test file', () => {
+    expect(autoApprovable(doc({ category: 'tests', path: 'src/app.ts' }))).toBe(false);
+    expect(autoApprovable(doc({ category: 'tests' }))).toBe(false);
+    for (const p of ['tests/app.test.ts', 'src/__tests__/a.ts', 'spec/cart_spec.rb', 'src/cart.spec.ts', 'pkg/a.test.go']) expect(autoApprovable(doc({ category: 'tests', path: p })), p).toBe(true);
+  });
+  it('never when it proposes deleting or migrating data, unless it says it does not', () => {
+    for (const t of ['drop the users table', 'Truncate the logs', 'migrate the orders to the new store', 'delete all old records', 'borrar los registros antiguos']) {
+      expect(autoApprovable(doc({ title: t })), t).toBe(false);
+    }
+    for (const r of ['does not drop anything', 'nothing is deleted', 'nothing to migrate']) expect(autoApprovable(doc({ title: 'Tidy the parser', rationale: r })), r).toBe(true);
+  });
+  it('a text naming a risky zone is refused even when it says no migration is needed (C6)', () => {
+    expect(autoApprovable(doc({ title: 'Tidy the parser', rationale: 'no migration needed' }))).toBe(false);
+  });
+  it('never when its path or its words touch a sensitive zone', () => {
+    expect(autoApprovable(doc({ path: 'src/auth/login.ts' }))).toBe(false);
+    expect(autoApprovable(doc({ title: 'Rotate the JWT secret' }))).toBe(false);
+    expect(autoApprovable(doc({ category: 'tests', path: 'tests/auth/login.test.ts' }))).toBe(false);
+    expect(autoApprovable(doc({ title: 'Rename a helper', path: 'src/util/strings.ts' }))).toBe(true);
   });
 });

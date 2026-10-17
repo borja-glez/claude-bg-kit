@@ -1749,6 +1749,19 @@ describe('forge waypoint-cli', () => {
       expect(JSON.parse(run(['proposals', 'policy', b], io).stdout)).toEqual({ id: b, status: 'proposed', write: null, approval: null });
       expect(run(['proposals', 'policy', 'nope'], io).code).toBe(2);
     });
+    it('policy auto-approves only a proposal forge itself added (origin, Task 7 carry)', () => {
+      const own = JSON.parse(add().stdout).id;
+      // Same text, written on the page by an editor and pulled: no forge `add` event.
+      const foreign = 'p20261011090000zzzz';
+      saveProposal(root, foreign, { ...prop, ts: 't', status: 'proposed', author: 'editor' } as unknown as ProposalDoc);
+      expect(JSON.parse(run(['proposals', 'policy', foreign], io).stdout)).toEqual({ id: foreign, status: 'proposed', write: null, approval: null });
+      expect(JSON.parse(run(['proposals', 'policy', own], io).stdout).status).toBe('auto_approved');
+    });
+    it('policy refuses a forge-added proposal whose text was replaced afterwards', () => {
+      const own = JSON.parse(add().stdout).id;
+      saveProposal(root, own, { ...loadProposals(root)[0], rationale: 'quietly different' } as unknown as ProposalDoc);
+      expect(JSON.parse(run(['proposals', 'policy', own], io).stdout)).toMatchObject({ status: 'proposed', write: null });
+    });
     describe('to-task', () => {
       const planYaml = '# keep me\nproject: demo\nlocale: en\nversion: "0.1"\nversions:\n  - id: "0.1"\n    phases: [F1]\ntracks:\n  - { id: backend, name: Backend, color: blue }\nphases:\n  - { id: F1, name: Base, plan_status: committed }\ntasks:\n  # first task\n  - { id: T001, title: a, track: backend, phase: F1, done_when: x }\n';
       const approved = (over: Record<string, unknown> = {}) => {

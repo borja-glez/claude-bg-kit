@@ -1,4 +1,5 @@
 import type { ProposalDoc } from '../lib/proposals.js';
+import { zonesFromPaths, zonesFromText } from './triage.js';
 
 const NEGATORS = new Set(['no', 'not', 'without', 'missing', 'lacks', 'nothing', 'zero', 'none', 'absent', 'untested', 'pending', 'would',
   'sin', 'falta', 'ningún', 'ningun']);
@@ -9,6 +10,15 @@ const BENCH_COLON = /\bbench:/giu;
 const OPS = /ops\/s/giu;
 const BEFORE_AFTER = /\d+(?:\.\d+)?\s*ms\s*(?:→|->)\s*\d+(?:\.\d+)?\s*ms/giu;
 const TEST_WORD = /\b(?:tests?|tested|spec)\b/giu;
+// D-16: a tests proposal names a test file.
+const TEST_PATH = /(^|\/)(tests?|__tests__|spec)\/|\.(test|spec)\.\w+$/;
+// D-16: deleting or migrating data is never approved without the user (unless negated, as hasUnnegated reads it).
+const DESTRUCTIVE = new RegExp([
+  '\\b(?:drop|truncate|wipe|purge|migrat\\w*)\\b',
+  '\\b(?:delete|remove|erase)\\s+(?:(?:the|all|every|old)\\s+)*(?:data|rows?|records?|tables?|columns?|users?|accounts?|entries)\\b',
+  '(?<![\\p{L}\\p{N}_])(?:borr|elimin|vaci)\\p{L}*\\s+(?:(?:los|las|el|la|todos|todas)\\s+)*(?:datos|registros|tablas?|filas|columnas|usuarios|cuentas)(?![\\p{L}\\p{N}_])',
+  '(?<![\\p{L}\\p{N}_])migr\\p{L}*',
+].join('|'), 'giu');
 
 const wordsIn = (s: string): string[] => s.match(/[\p{L}\p{N}]+/gu) ?? [];
 
@@ -23,11 +33,16 @@ function hasUnnegated(text: string, re: RegExp): boolean {
   return false;
 }
 
-// Only low-risk, verifiable work is approved without the user.
+// Only low-risk, verifiable work is approved without the user (D-16, K2-16): a tests proposal names a test file, nothing
+// proposes deleting or migrating data, and nothing touches a sensitive zone, by its path or by its words.
 export function autoApprovable(p: ProposalDoc): boolean {
   if (p.risk !== 'low') return false;
+  const text = `${p.title} ${p.rationale}`;
+  if (hasUnnegated(text, DESTRUCTIVE)) return false;
+  if ((p.path && zonesFromPaths([p.path]).length) || zonesFromText(text).length) return false;
   switch (p.category) {
-    case 'tests': case 'quality': return true;
+    case 'tests': return !!p.path && TEST_PATH.test(p.path.replace(/\\/g, '/'));
+    case 'quality': return true;
     case 'perf': return [BENCH_WORD, BENCH_COLON, OPS, BEFORE_AFTER].some(re => hasUnnegated(p.evidence, re));
     case 'security': return hasUnnegated(p.evidence, TEST_WORD);
     default: return false;
