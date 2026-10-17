@@ -1,0 +1,39 @@
+project: demo
+locale: es
+version: "0.1"
+versions:
+  - id: "0.1"
+    phases: [F1]
+tracks:
+  - { id: backend, name: Backend, color: blue }
+  - { id: ui, name: Interfaz, color: mauve }
+phases:
+  - { id: F1, name: Base, plan_status: committed }
+tasks:
+  - id: T001
+    title: Esquema de pedidos con un título largo para ver dónde se recorta
+    track: backend
+    phase: F1
+    done_when: migración aplicada
+    zones: ["src/db/**"]
+    estimate_min: 30
+  - id: T002
+    title: API de pedidos
+    track: backend
+    phase: F1
+    done_when: tests de la API en verde
+    zones: ["src/api/**"]
+    estimate_min: 20
+  - id: T003
+    title: Maqueta de carrito
+    track: ui
+    phase: F1
+    done_when: componente renderiza
+    zones: ["web/**"]
+    estimate_min: 25
+  - id: T004
+    title: Notas de entrega
+    track: ui
+    phase: F1
+    done_when: notas publicadas
+    zones: ["docs/**"]

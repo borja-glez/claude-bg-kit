@@ -1,0 +1,6 @@
+{"runId":"r-tui","kind":"plan","mode":"subagents","parallel":3,"project":"demo","base":"main","branch":"forge/run-demo","mergeOnFinish":false,"coordinator":"main","hookSession":"__SESSION__","active":true,"stopReason":null,"stallReason":null,"startedAt":"__AGO_45__","lastStepAt":"__AGO_1__","lastBlockStep":null,"sleepUntil":null,
+"tasks":{
+"T001":{"status":"running","stage":"implement","round":1,"worktree":"/w1","branch":"task/T001","executor":"subagents","attempts":0,"agent":"forge-impl","startedAt":"__AGO_40__","updatedAt":"__AGO_1__","stageSince":"__AGO_10__","detail":null},
+"T002":{"status":"running","stage":"review","round":2,"worktree":"/w2","branch":"task/T002","executor":"subagents","attempts":0,"agent":"forge-review-correctness","startedAt":"__AGO_40__","updatedAt":"__AGO_1__","stageSince":"__AGO_4__","detail":null},
+"T003":{"status":"running","stage":"validate","round":1,"worktree":"/w3","branch":"task/T003","executor":"subagents","attempts":0,"agent":null,"startedAt":"__AGO_40__","updatedAt":"__AGO_1__","stageSince":"__AGO_2__","detail":null},
+"T004":{"status":"integrated","stage":"integrate","round":1,"worktree":"/w4","branch":"task/T004","executor":"subagents","attempts":0,"agent":null,"startedAt":"__AGO_90__","updatedAt":"__AGO_50__","stageSince":"__AGO_50__","detail":null,"finishedAt":"__AGO_50__"}}}
