@@ -64,13 +64,22 @@ function groupLabel(m: Model, groupBy: GroupBy, r: Row): string {
   return esc(r.label);
 }
 
-function forgeBadge(m: Model, id: string): string {
+/** The forge mark of a row (layer «Revisiones»). K4-05: an accepted task reads its round and its findings by severity;
+ *  the reviewers' score is not a grade of the task, so it goes only in the title. */
+function forgeBadge(m: Model, d: Dict, id: string): string {
   const f = m.states[id]?.forge;
   if (!f) return '';
   const v = f.verdict;
-  const score = v && typeof v.score === 'number' ? v.score.toFixed(2) : null;
+  const title = v && typeof v.score === 'number' ? ` title="${esc(`${d.forge.verdict}: ${v.score.toFixed(2)}`)}"` : '';
+  const doc = 'v' in f && f.v === 2 ? f : null;
+  if (doc && doc.acceptedRound !== null) {
+    const r = doc.rounds.find(x => x.brief === doc.brief && x.n === doc.acceptedRound) ?? doc.rounds[doc.rounds.length - 1];
+    const counts = r ? ` · ${r.findings.critical} C · ${r.findings.important} I · ${r.findings.minor} m` : '';
+    return ` <span class="fg ok"${title}>${esc(`✓ r${doc.acceptedRound}${counts}`)}</span>`;
+  }
   const cls = v?.action === 'accept' ? 'ok' : v?.action === 'redo' ? 'del' : 'warn';
-  return ` <span class="fg ${v ? cls : ''}">⚒ ${esc([v?.action, score].filter(Boolean).join(' ') || f.phase)}${typeof f.round === 'number' ? ` · r${f.round}${typeof f.cap === 'number' ? `/${f.cap}` : ''}` : ''}</span>`;
+  const label = v ? d.action[v.action] ?? v.action : doc ? d.run.stage[doc.stage] ?? doc.stage : f.phase;
+  return ` <span class="fg ${v ? cls : ''}"${title}>⚒ ${esc(label)}${typeof f.round === 'number' ? ` · r${f.round}${typeof f.cap === 'number' ? `/${f.cap}` : ''}` : ''}</span>`;
 }
 
 function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived): string {
@@ -106,15 +115,15 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
   const left = painted.map(r => {
     if (r.kind === 'phase') {
       const pct = r.total ? Math.round(((r.done ?? 0) / r.total) * 100) : 0;
-      return `<div class="tr ph" data-action="toggle-phase" data-id="${esc(r.id)}" data-k="p:${esc(r.id)}" title="${esc(r.label)} · ${esc(r.counter)}"><span class="chev">${expanded.has(r.id) ? '⌄' : '›'}</span> <span class="lab">${groupLabel(m, groupBy, r)}</span><span class="mini"><i style="width:${pct}%"></i></span><span class="c">${esc(r.counter)}</span></div>`;
+      return `<button type="button" class="tr ph" data-action="toggle-phase" data-id="${esc(r.id)}" data-k="p:${esc(r.id)}" aria-expanded="${expanded.has(r.id)}" title="${esc(r.label)} · ${esc(r.counter)}"><span class="chev">${expanded.has(r.id) ? '⌄' : '›'}</span> <span class="lab">${groupLabel(m, groupBy, r)}</span><span class="mini"><i style="width:${pct}%"></i></span><span class="c">${esc(r.counter)}</span></button>`;
     }
     const s = st(r);
-    return `<div class="tr tk${crit.has(r.id) ? ' crit' : ''}" data-action="open-task" data-id="${esc(r.id)}" data-task="${esc(r.id)}" data-deps="${esc(deps(r.id).join(' '))}" data-k="t:${esc(r.id)}" title="${esc(rowTitle(r.id, r.label, d.status[s]))}"><i class="sd st-${s}"></i><span class="k">${esc(r.id)}</span> <span class="lab">${esc(r.label)}</span>${eviMark(m, d, r.id)}${layers.has('forge') ? forgeBadge(m, r.id) : ''} ${groupBy === 'track' ? '' : trackTag(m, r.trackId)}</div>`;
+    return `<button type="button" class="tr tk${crit.has(r.id) ? ' crit' : ''}" data-action="open-task" data-id="${esc(r.id)}" data-task="${esc(r.id)}" data-deps="${esc(deps(r.id).join(' '))}" data-k="t:${esc(r.id)}" title="${esc(rowTitle(r.id, r.label, d.status[s]))}"><i class="sd st-${s}"></i><span class="k">${esc(r.id)}</span> <span class="lab">${esc(r.label)}</span>${eviMark(m, d, r.id)}${layers.has('forge') ? forgeBadge(m, d, r.id) : ''} ${groupBy === 'track' ? '' : trackTag(m, r.trackId)}</button>`;
   }).join('');
   const kindLabel = (k: string) => (k === 'estimate' ? d.legend.estimate : k === 'done' ? d.legend.done : k === 'blocked' ? d.legend.blocked : d.legend.current);
   const right = painted.map(r => {
     const task = r.kind === 'task';
-    const bars = r.bars.map(b => `<div class="gb ${b.kind}${task && crit.has(r.id) ? ' crit' : ''}" style="left:${b.left}%;width:${b.width}%" title="${esc(task ? `${r.id} · ${r.label}` : r.label)} · ${esc(kindLabel(b.kind))}${r.durationMin != null ? ` · ${r.durationMin} min` : ''}"${task ? ` data-action="open-task" data-id="${esc(r.id)}" data-task="${esc(r.id)}"` : ''}></div>`).join('');
+    const bars = r.bars.map(b => `<div class="gb ${b.kind}${task && crit.has(r.id) ? ' crit' : ''}" style="left:${b.left}%;width:${b.width}%" title="${esc(task ? `${r.id} · ${r.label}` : r.label)} · ${esc(kindLabel(b.kind))}${r.durationMin != null ? ` · ${r.durationMin} min` : ''}"${task ? ` data-action="open-bar" data-id="${esc(r.id)}" data-task="${esc(r.id)}"` : ''} aria-hidden="true"></div>`).join('');
     // H-12: a label only for a real bar (never for an estimate); it never crosses the now line when its bar ended before
     // now, and under 4 points there is none (the title keeps it).
     const b0 = r.bars[0];
@@ -233,7 +242,7 @@ function renderInsights(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
         const t = m.plan.tasks.find(x => x.id === id);
         const raw = m.states[id]?.status ?? 'free';
         const s = Object.hasOwn(d.status, raw) ? raw : 'free';
-        return `<li data-action="open-task" data-id="${esc(id)}"><i class="sd st-${s}"></i><span class="k">${esc(id)}</span> ${esc(t?.title ?? '')}</li>`;
+        return `<li><button type="button" class="cpl" data-action="open-task" data-id="${esc(id)}" data-k="cp:${esc(id)}"><i class="sd st-${s}"></i><span class="k">${esc(id)}</span> ${esc(t?.title ?? '')}</button></li>`;
       }).join('')}</ol>`
     : `<div class="muted">${esc(d.insights.allDone)}</div>`;
   const fc = f ? `<div class="fct">${esc(forecastTitle(d, f, loc))}</div>` : '';

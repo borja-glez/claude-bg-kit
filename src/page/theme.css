@@ -71,7 +71,7 @@ h1{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:34px;marg
 .tl .r:active{cursor:grabbing}
 .tr,.rr{height:var(--rh);border-bottom:1px solid var(--base)}
 .vpad{pointer-events:none}
-.tr{display:flex;align-items:center;gap:7px;padding:0 10px;font-size:13px;cursor:pointer;white-space:nowrap;overflow:hidden}
+.tr{display:flex;align-items:center;gap:7px;width:100%;padding:0 10px;font-size:13px;text-align:left;cursor:pointer;white-space:nowrap;overflow:hidden}
 .tr:hover,.rr:hover{background:color-mix(in srgb,var(--s0) 45%,transparent)}
 .tr.axis,.ticks{height:26px;cursor:default;position:sticky;top:0;z-index:3;background:var(--mantle)}
 .tr.ph{font-family:'Barlow Condensed',sans-serif;font-weight:600;letter-spacing:.06em;text-transform:none;font-size:14px}
@@ -160,10 +160,11 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
 .seg{display:flex;flex:0 0 64px;height:6px;border-radius:3px;overflow:hidden;gap:1px;background:var(--s0)}
 .seg i{display:block;min-width:2px}
 .seg .st-done{background:var(--done)} .seg .st-in_progress{background:var(--cur)} .seg .st-blocked{background:var(--blk)} .seg .st-free{background:var(--s1)}
-.tc{background:var(--base);border:1px solid var(--s0);border-radius:4px;margin:0 0 6px 6px;font-size:11.5px;overflow:hidden;cursor:pointer}
+.tc{display:block;width:calc(100% - 6px);text-align:left;background:var(--base);border:1px solid var(--s0);border-radius:4px;margin:0 0 6px 6px;padding:0;font-size:11.5px;overflow:hidden;cursor:pointer}
 .tc:hover{border-color:var(--lavender)}
 .tc .st{font-family:'Barlow Condensed',sans-serif;font-size:10px;letter-spacing:.1em;padding:2px 7px;text-transform:uppercase;background:color-mix(in srgb,currentColor 18%,transparent)}
 .tc .tt{padding:5px 7px;overflow-wrap:anywhere}
+.tc .st,.tc .tt{display:block}
 /* notes view */
 .nt-decision{color:var(--peach)} .nt-idea{color:var(--sapphire)} .nt-debt{color:var(--red)} .nt-question{color:var(--mauve)}
 .nb-decision{border-left-color:var(--peach)!important} .nb-idea{border-left-color:var(--sapphire)!important} .nb-debt{border-left-color:var(--red)!important} .nb-question{border-left-color:var(--mauve)!important}
@@ -279,9 +280,9 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
 .lg.bdl-a{background:var(--done)} .lg.bdl-i{background:none;border-top:2px dashed var(--s2);height:0}
 .fct{margin:6px 0 8px;font-size:14px;color:var(--green)}
 .chain{list-style:none;margin:6px 0 0;padding:0;counter-reset:c}
-.chain li{display:flex;align-items:center;gap:7px;padding:5px 6px;border-radius:5px;font-size:13px;cursor:pointer;color:var(--sub1)}
-.chain li:hover{background:var(--base)}
+.chain li{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--sub1)}
 .chain li::before{counter-increment:c;content:counter(c);font:11px 'JetBrains Mono',monospace;color:var(--red);min-width:16px}
+.chain .cpl{display:flex;align-items:center;gap:7px;flex:1;min-width:0;padding:5px 6px;border-radius:5px;text-align:left}.chain .cpl:hover{background:var(--base)}
 .chain .sd,.tr .sd{flex:0 0 7px;width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block}
 .zones{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:9px}
 .zn{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
@@ -346,6 +347,10 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
 .exec-sec .slot.free{opacity:.45;border-style:dashed}
 .exec-sec .slot[data-action]{cursor:pointer}
 .exec-sec .slot[data-action]:hover{border-color:var(--s1)}
+button.sc{display:block;width:100%;text-align:left}
+.slot .sh{display:flex;align-items:center;gap:8px;font:600 20px 'Barlow Condensed',sans-serif}
+.slot .mono{display:block}
+button.tr:focus-visible,.tc:focus-visible,.cpl:focus-visible,button.sc:focus-visible{outline:2px solid var(--lavender);outline-offset:-2px}
 section.loose{margin:12px 0}
 section.loose .lts{list-style:none;margin:0;padding:0}
 section.loose .lt{display:flex;gap:8px;align-items:baseline;padding:3px 0}

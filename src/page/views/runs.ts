@@ -23,8 +23,13 @@ function renderRunBlock(m: Model, d: Dict): string {
     const l = ex ? liveness(m.now, ex.leaseUntil) : coord ? sessionLiveness(coord, m.now) : 'stopped';
     const since = pastMs(s.since, m.now);
     const title = task?.title ?? r.loose.find(x => x.id === s.task)?.title ?? '';
-    return `<div class="sc slot"${task ? ` data-action="open-task" data-id="${esc(s.task)}"` : ''}><h3>${liveDot(l)} <span class="pe">${esc(s.task)}</span> ${esc(title)}</h3>
-      <div class="mono">${esc(d.run.stage[s.stage] ?? s.stage)}${s.agent ? ` · ${esc(s.agent)}` : ''}${since !== null ? ` · ${rel(d, 'lasts', s.since, m.now)}` : ''}</div></div>`;
+    const head = `${liveDot(l)} <span class="pe">${esc(s.task)}</span> ${esc(title)}`;
+    const line = `${esc(d.run.stage[s.stage] ?? s.stage)}${s.agent ? ` · ${esc(s.agent)}` : ''}${since !== null ? ` · ${rel(d, 'lasts', s.since, m.now)}` : ''}`;
+    // G-15: a plan task's slot opens its detail, so it is a button; a loose task has no detail.
+    return task
+      ? `<button type="button" class="sc slot" data-action="open-task" data-id="${esc(s.task)}" data-k="slot:${esc(s.task)}"><span class="sh">${head}</span><span class="mono">${line}</span></button>`
+      : `<div class="sc slot"><h3>${head}</h3>
+      <div class="mono">${line}</div></div>`;
   };
   const free = Math.max(0, r.parallel - r.slots.length);
   const head = r.kind === 'ephemeral'

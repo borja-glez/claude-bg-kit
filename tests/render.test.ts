@@ -640,7 +640,7 @@ describe('execution', () => {
     const m = base();
     m.run = runDoc();
     // The first busy slot's markup (free slots are `sc slot free`).
-    const slotOf = (html: string) => { const i = html.indexOf('<div class="sc slot"'); return html.slice(i, html.indexOf('</div></div>', i)); };
+    const slotOf = (html: string) => { const i = html.indexOf('class="sc slot"'); return html.slice(i, html.indexOf('</button>', i)); };
     expect(slotOf(renderApp(m, ui({ view: 'runs' })))).toContain('lleva 7 min');
     m.run = runDoc({ slots: [{ task: 'T002', stage: 'implement' as const, agent: null, by: 'main', since: new Date(NOW + 30 * 60000).toISOString() }] });
     const future = slotOf(renderApp(m, ui({ view: 'runs' })));
@@ -908,7 +908,7 @@ describe('the execution of the runs view (H-10)', () => {
     const sv = renderApp(m, ui({ view: 'runs' }));
     expect(sv).toContain('<section class="exec-sec">');
     expect(sv).not.toContain('<section class="run"');
-    expect(sv).toContain('<div class="sc slot" data-action="open-task" data-id="T002">');
+    expect(sv).toContain('<button type="button" class="sc slot" data-action="open-task" data-id="T002" data-k="slot:T002">');
     m.run = looseRun();
     expect(renderApp(m, ui({ view: 'runs' }))).not.toMatch(/class="sc slot" data-action/);
   });
@@ -960,8 +960,8 @@ describe('timeline phases, labels, ticks and minimap (G-21, H-13, H-12, G-22, H-
     const m = base();
     m.states.T003 = { status: 'free', forge: { path: 'medium', phase: 'review', verdict: { action: 'accept', score: 0.97 } } };
     const html = renderApp(m, ui({ view: 'schedule', expanded: new Set(['F1']), layers: ['forge'] }));
-    const at = html.indexOf('<div class="tr tk" data-action="open-task" data-id="T003"');
-    expect(html.slice(at, html.indexOf('</div>', at))).toContain('class="fg ok"');
+    const at = html.indexOf('<button type="button" class="tr tk" data-action="open-task" data-id="T003"');
+    expect(html.slice(at, html.indexOf('</button>', at))).toContain('class="fg ok"');
     expect(rowOf(html, 'T003')).not.toContain('class="gl"');
     expect(rowOf(html, 'T003')).not.toContain('class="fg');
     for (const [sel, decl] of [['.tl', 'grid-template-columns:clamp(150px,28%,340px) minmax(0,1fr)'], ['.ticks span.edge-l', 'transform:none'],
@@ -1475,5 +1475,57 @@ describe('the task detail in four tabs (§4.7)', () => {
       m.notes = [note({ id: 'n1', taskId: 'T002', text: RAW })];
       never(modalOf(renderApp(m, ui({ modal: 'T002', tab: 'talk' }))));
     });
+  });
+});
+
+describe('everything that opens a task is a button (G-15, H-19)', () => {
+  it('in every view, the detail included, no element with data-action="open-task" is a div or a li', () => {
+    const m = { ...base(), run: runDoc(), notes: [note({ id: 'n1', taskId: 'T001' })], states: { ...base().states, T005: { status: 'blocked' as const, blockedBy: ['external'] } } };
+    for (const view of VIEWS) {
+      const html = renderApp(m, ui({ view, modal: 'T002', expanded: new Set(['F1', 'F2']), layers: ['critical', 'forge'] }));
+      const tags = [...html.matchAll(/<(\w+)[^>]*data-action="open-task"/g)].map(x => x[1]);
+      expect(tags.length, view).toBeGreaterThan(0);
+      expect([...new Set(tags)], view).toEqual(['button']);
+    }
+  });
+  it('the Conversation task chip is a button with its own data-k', () => {
+    const m = { ...base(), notes: [note({ id: 'n1', taskId: 'T001' })] };
+    expect(renderApp(m, ui({ view: 'talk' }))).toContain('<button type="button" class="chip" data-action="open-task" data-id="T001" data-k="tk:T001">');
+  });
+  it('the bars are hidden from assistive technology and open their task with a click of their own; groups say whether they are open', () => {
+    const html = renderApp(base(), ui({ view: 'schedule', expanded: new Set(['F1']) }));
+    expect(html).toMatch(/<div class="gb [^"]*"[^>]* data-action="open-bar" data-id="T001" data-task="T001" aria-hidden="true">/);
+    expect(html).not.toMatch(/class="gb[^>]*data-action="open-task"/);
+    expect(html).toContain('<button type="button" class="tr ph" data-action="toggle-phase" data-id="F1" data-k="p:F1" aria-expanded="true"');
+    expect(html).toContain('data-id="F2" data-k="p:F2" aria-expanded="false"');
+    expect(renderApp(base(), ui({ view: 'schedule' }))).toMatch(/<li><button type="button" class="cpl" data-action="open-task" data-id="T00\d" data-k="cp:T00\d">/);
+    expect(renderApp(base(), ui({ view: 'plan' }))).toContain('<button type="button" class="tc" data-action="open-task" data-id="T001" data-k="t:T001">');
+  });
+  it('theme.css: a row button fills its line and is aligned to the left, with a visible focus', () => {
+    expect(cssRule(CSS, '.tr')).toContain('width:100%');
+    expect(cssRule(CSS, '.tr')).toContain('text-align:left');
+    expect(cssRule(CSS, 'button.tr:focus-visible')).toContain('outline:2px solid var(--lavender)');
+  });
+});
+
+describe('the forge mark of the timeline (K4-05)', () => {
+  it('an accepted task reads its round and findings by severity; the score goes only in the title', () => {
+    const m = base();
+    m.states.T001 = { ...m.states.T001!, forge: {
+      v: 2, path: 'medium', phase: 'done', validators: [], verdict: { action: 'accept', score: 0.91 }, round: 2, cap: 4, brief: 1, stage: 'done',
+      rounds: [
+        { brief: 1, n: 1, action: 'fix', note: 'n', findings: { critical: 1, important: 0, minor: 0, deferred: 0 }, reviewers: [], at: '2026-10-11T10:05:00.000Z' },
+        { brief: 1, n: 2, action: 'accept', note: 'ok', findings: { critical: 0, important: 1, minor: 3, deferred: 0 }, reviewers: [], at: '2026-10-11T10:15:00.000Z' },
+      ],
+      verify: null, stages: {}, integration: null, deferred: [], acceptedRound: 2, overCap: false, updatedAt: '2026-10-11T10:20:00.000Z' } };
+    const html = renderApp(m, ui({ view: 'schedule', expanded: new Set(['F1']), layers: ['forge'] }));
+    expect(html).toContain('<span class="fg ok" title="Veredicto: 0.91">✓ r2 · 0 C · 1 I · 3 m</span>');
+    expect(html).not.toMatch(/>[^<]*0\.91/);
+  });
+  it('a task under review reads its stage or its last action and the round; a v1 block too, its score in the title', () => {
+    const m = base();
+    m.states.T002 = { ...m.states.T002!, forge: { path: 'medium', phase: 'review', verdict: { action: 'fix', score: 0.4 }, round: 2, cap: 4 } };
+    const html = renderApp(m, ui({ view: 'schedule', expanded: new Set(['F1']), layers: ['forge'] }));
+    expect(html).toContain('<span class="fg warn" title="Veredicto: 0.40">⚒ arreglo · r2/4</span>');
   });
 });

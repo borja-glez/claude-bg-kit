@@ -2131,3 +2131,38 @@ describe('the task detail: its URL, its tabs and its focus (H-25, §4.7, G-15)',
     failed.app.stop();
   });
 });
+
+describe('the bars of the timeline (G-15)', () => {
+  it('a click on a bar opens its task like its row does', async () => {
+    history.replaceState(null, '', '#v=schedule&o=F1');
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const app = await start({ claude: null, snapshot, root, now: () => NOW });
+    const bar = root.querySelector('.gb[data-id="T001"]') as HTMLElement;
+    expect(bar.getAttribute('aria-hidden')).toBe('true');
+    bar.click();
+    await settle();
+    expect(app.ui.modal).toBe('T001');
+    app.stop();
+  });
+});
+
+describe('the task chip of a note (Task 11 carry)', () => {
+  it('opening the detail from it and closing with Escape gives the focus back to the chip', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    const go = vi.spyOn(history, 'go').mockImplementation(() => {});
+    f.push('notes', { n1: { ts: '2026-10-11T11:00:00Z', type: 'idea', author: 'session:backend', text: 'con tarea', taskId: 'T003' } });
+    click(root, '[data-view="talk"]');
+    await settle();
+    click(root, '[data-k="tk:T003"]');
+    await settle();
+    expect(app.ui.modal).toBe('T003');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(root.querySelector('.modal')).toBeNull();
+    expect(document.activeElement).toBe(root.querySelector('[data-k="tk:T003"]'));
+    go.mockRestore();
+    app.stop();
+  });
+});
