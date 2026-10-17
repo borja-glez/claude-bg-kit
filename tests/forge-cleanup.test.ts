@@ -7,6 +7,8 @@ import { run, defaultExec, defaultGit, repoReader, type Io } from '../src/forge/
 import { swarmCommand, type SwarmDeps } from '../src/forge/cli/swarm.js';
 import { saveExecution } from '../src/forge/execution.js';
 import { forgeBranches, forgeWorktrees } from '../src/forge/cleanup.js';
+import { EVIDENCE_FILES_MAX } from '../src/forge/evidence-copy.js';
+import { UsageError } from '../src/forge/cli/errors.js';
 import { withJob } from '../src/forge/jobs.js';
 import type { ExecutionState } from '../src/lib/execution-state.js';
 
@@ -272,5 +274,90 @@ describe('swarm cleanup leaves what is still in use, or not yet kept anywhere el
     expect(r.kept).toContainEqual({ branch: 'feature/run', reason: "not a forge branch (task/* or forge/run-*)" });
     expect(existsSync(wt('run'))).toBe(false);
     expect(g(root, 'branch', '--list', 'feature/run')).not.toBe('');
+  });
+});
+
+describe('swarm cleanup never loses evidence, a waypoint track or a run that starts meanwhile (final review 3-5, carries 5 and 7)', () => {
+  const work = (...p: string[]) => path.join(wt('task-T1'), '.forge', 'work', 'shop', 'T1', ...p);
+  const many = (dir: string, n: number) => {
+    mkdirSync(dir, { recursive: true });
+    for (let i = 0; i < n; i++) writeFileSync(path.join(dir, `f${String(i).padStart(5, '0')}.png`), '');
+  };
+  it('checks only the evidence it copies: more files than its cap elsewhere under .forge/work hide none of it (final review 3)', () => {
+    many(work('aaa-shots'), EVIDENCE_FILES_MAX + 1);
+    mkdirSync(work('reviews-1-1'), { recursive: true });
+    writeFileSync(work('reviews-1-1', 'verify.json'), '{}');
+    writeFileSync(work('evidence', '1-1', 'zz-last.png'), 'z');
+    const r = JSON.parse(swarmCommand(['cleanup'], io, spyDeps([])).stdout);
+    expect(r.removed.worktrees).toContain('.claude/worktrees/task-T1');
+    for (const f of [['evidence', '1-1', '01.png'], ['evidence', '1-1', 'zz-last.png'], ['reviews-1-1', 'verify.json']]) expect(existsSync(forge('work', 'shop', 'T1', ...f)), f.join('/')).toBe(true);
+    expect(existsSync(forge('work', 'shop', 'T1', 'aaa-shots'))).toBe(false);
+  });
+  it('keeps a worktree whose evidence is more than its walk can check, with its reason, also on --dry-run (final review 3)', () => {
+    many(work('evidence', '1-2'), EVIDENCE_FILES_MAX);
+    for (const argv of [['cleanup', '--dry-run'], ['cleanup']]) {
+      const r = JSON.parse(swarmCommand(argv, io, spyDeps([])).stdout);
+      expect(r.kept, argv.join(' ')).toContainEqual({ path: '.claude/worktrees/task-T1', branch: 'task/T1', reason: 'too many files under .forge/work to check its evidence' });
+      expect(r.removed.worktrees, argv.join(' ')).toEqual([]);
+    }
+    expect(existsSync(wt('task-T1'))).toBe(true);
+    expect(g(root, 'branch', '--list', 'task/T1')).not.toBe('');
+  });
+  it("keeps a waypoint track's worktree, also one named run, and names its branch once (final review 4)", () => {
+    g(root, 'worktree', 'add', '-q', '-b', 'track/run', wt('run'));
+    commitIn(wt('run'), 'r.txt', 'track work');
+    g(root, 'merge', '-q', '--no-ff', 'track/run', '-m', 'phase close');
+    for (const argv of [['cleanup', '--dry-run'], ['cleanup']]) {
+      const r = JSON.parse(swarmCommand(argv, io, spyDeps([])).stdout);
+      expect(r.removed.worktrees, argv.join(' ')).not.toContain('.claude/worktrees/run');
+      expect(r.kept.filter((k: { branch?: string }) => k.branch === 'track/run'), argv.join(' ')).toEqual([{ path: '.claude/worktrees/run', branch: 'track/run', reason: "a waypoint track, not forge's" }]);
+    }
+    expect(existsSync(wt('run'))).toBe(true);
+    expect(g(root, 'branch', '--list', 'track/run')).not.toBe('');
+  });
+  const startsMeanwhile = (when: (a: string[]) => boolean): SwarmDeps => {
+    const base = spyDeps([]);
+    const active = () => saveExecution(root, exec({ runId: 'r2', active: true, stopReason: null, closedAt: null, closedBy: null }));
+    return { ...base, git: a => { const r = base.git(a); if (when(a)) active(); return r; }, at: dir => { const d = base.at(dir); return { ...d, git: a => { const r = d.git(a); if (when(a)) active(); return r; } }; } };
+  };
+  it('stops with exit 2 when the execution becomes active between two removals, and says what it already removed (final review 5)', () => {
+    // Another session's swarm start lands right after the first worktree went.
+    const deps = startsMeanwhile(a => a[0] === 'worktree' && a[1] === 'remove');
+    const err = (() => { try { swarmCommand(['cleanup'], io, deps); return null; } catch (e) { return e; } })();
+    expect(err).toBeInstanceOf(UsageError);
+    expect((err as Error).message).toBe('swarm cleanup: the execution r2 became active; run it again once it ends (already removed: .claude/worktrees/task-T1)');
+    expect(existsSync(wt('task-T1'))).toBe(false);
+    for (const b of ['task/T1', 'task/T4']) expect(g(root, 'branch', '--list', b), b).not.toBe('');
+  });
+  it('re-reads the execution before the first removal too: a run that started meanwhile loses nothing (final review 5)', () => {
+    const deps = startsMeanwhile(a => a[0] === 'status' && a[1] === '--porcelain');
+    expect(() => swarmCommand(['cleanup'], io, deps)).toThrow('swarm cleanup: the execution r2 became active; run it again once it ends (nothing was removed)');
+    expect(existsSync(wt('task-T1'))).toBe(true);
+    for (const b of ['task/T1', 'task/T4']) expect(g(root, 'branch', '--list', b), b).not.toBe('');
+  });
+  it('runs git worktree prune only when one of its own worktrees is prunable, and names what it drops (carry 7)', () => {
+    // A waypoint track's worktree whose folder is gone, under any name, is not forge's: no prune, and it stays registered.
+    g(root, 'worktree', 'add', '-q', '-b', 'track/gone', wt('gone'));
+    g(root, 'worktree', 'add', '-q', '-b', 'track/x', wt('task-x'));
+    for (const d of ['gone', 'task-x']) rmSync(wt(d), { recursive: true, force: true });
+    const calls: string[][] = [];
+    const first = JSON.parse(swarmCommand(['cleanup'], io, spyDeps(calls)).stdout);
+    expect(calls).not.toContainEqual(['worktree', 'prune']);
+    expect(first).not.toHaveProperty('pruned');
+    expect(first.kept).toContainEqual({ path: '.claude/worktrees/task-x', branch: 'track/x', reason: "a waypoint track, not forge's" });
+    for (const d of ['worktrees/gone', 'worktrees/task-x']) expect(g(root, 'worktree', 'list', '--porcelain')).toContain(d);
+    // One of forge's task worktrees lost its folder: the prune runs (git's, for every registration it can drop), and says so.
+    g(root, 'worktree', 'add', '-q', '-b', 'task/T7', wt('task-T7'));
+    rmSync(wt('task-T7'), { recursive: true, force: true });
+    const dryCalls: string[][] = [];
+    const dry = JSON.parse(swarmCommand(['cleanup', '--dry-run'], io, spyDeps(dryCalls)).stdout);
+    expect(dryCalls).not.toContainEqual(['worktree', 'prune']);
+    const all = ['.claude/worktrees/gone', '.claude/worktrees/task-T7', '.claude/worktrees/task-x'];
+    expect([...dry.pruned].sort()).toEqual(all);
+    const realCalls: string[][] = [];
+    const real = JSON.parse(swarmCommand(['cleanup'], io, spyDeps(realCalls)).stdout);
+    expect(realCalls).toContainEqual(['worktree', 'prune']);
+    expect([...real.pruned].sort()).toEqual(all);
+    expect(g(root, 'worktree', 'list', '--porcelain')).not.toMatch(/worktrees\/(task-T7|task-x|gone)\b/);
   });
 });

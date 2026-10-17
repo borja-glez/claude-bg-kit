@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { copyTree, evidenceOf, keepEvidence } from '../src/forge/evidence-copy.js';
+import { copyTree, evidenceOf, keepEvidence, EVIDENCE_FILES_MAX } from '../src/forge/evidence-copy.js';
 
 const dirs = () => ({ from: mkdtempSync(path.join(tmpdir(), 'forge-ev-from-')), to: mkdtempSync(path.join(tmpdir(), 'forge-ev-to-')) });
 const outsideDir = () => mkdtempSync(path.join(tmpdir(), 'forge-ev-out-'));
@@ -112,14 +112,38 @@ describe('keepEvidence and evidenceOf (D-10, K2-04)', () => {
     expect(keepEvidence(wt, path.join(wt, '.forge/work/T2/r'))).toEqual({ skipped: [] });
     expect(existsSync(path.join(main, '.forge/work/T2/r/verify.json'))).toBe(true);
   });
-  it("evidenceOf lists every verify.json and evidence file under a worktree's .forge/work, in path order", () => {
+  it("evidenceOf lists each reviews-* folder's verify.json and every evidence file under a worktree's .forge/work, in path order", () => {
     const { wt } = taskWorktree();
     for (const f of ['.forge/work/shop/T1/reviews-1-1/verify.json', '.forge/work/shop/T1/reviews-1-1/correctness.json', '.forge/work/shop/T1/evidence/1-1/01.png',
-      '.forge/work/shop/T1/brief-1.md', '.forge/work/T2/verify-1/verify.json', '.forge/ledger.jsonl']) {
+      '.forge/work/shop/T1/brief-1.md', '.forge/work/T2/reviews-1-2/verify.json', '.forge/work/T2/evidence/1-2/a/02.png', '.forge/work/T2/verify-1/verify.json', '.forge/ledger.jsonl']) {
       mkdirSync(path.dirname(path.join(wt, f)), { recursive: true });
       writeFileSync(path.join(wt, f), 'x');
     }
-    expect(evidenceOf(wt)).toEqual(['.forge/work/T2/verify-1/verify.json', '.forge/work/shop/T1/evidence/1-1/01.png', '.forge/work/shop/T1/reviews-1-1/verify.json']);
-    expect(evidenceOf(outsideDir())).toEqual([]);
+    expect(evidenceOf(wt)).toEqual({
+      files: ['.forge/work/T2/evidence/1-2/a/02.png', '.forge/work/T2/reviews-1-2/verify.json', '.forge/work/shop/T1/evidence/1-1/01.png', '.forge/work/shop/T1/reviews-1-1/verify.json'],
+      truncated: false,
+    });
+    expect(evidenceOf(outsideDir())).toEqual({ files: [], truncated: false });
+  });
+  it('evidenceOf walks only what it copies: other files never count against its cap; past the cap it says so (final review 3)', () => {
+    const { wt } = taskWorktree();
+    const put = (f: string) => { mkdirSync(path.dirname(path.join(wt, f)), { recursive: true }); writeFileSync(path.join(wt, f), 'x'); };
+    for (let i = 0; i < 5; i++) put(`.forge/work/shop/T1/aaa-shots/${i}.png`);
+    put('.forge/work/shop/T1/evidence/1-1/01.png');
+    put('.forge/work/shop/T1/reviews-1-1/verify.json');
+    expect(evidenceOf(wt, 2)).toEqual({ files: ['.forge/work/shop/T1/evidence/1-1/01.png', '.forge/work/shop/T1/reviews-1-1/verify.json'], truncated: false });
+    put('.forge/work/shop/T1/evidence/1-1/02.png');
+    expect(evidenceOf(wt, 2)).toMatchObject({ truncated: true });
+  });
+});
+
+describe('a walk that stops at its cap is never silent (carry 5)', () => {
+  it('copyTree copies the files it walked and names the folder whose walk stopped in skipped, so keepEvidence lists it as evidenceSkipped', () => {
+    const { from, to } = dirs();
+    mkdirSync(path.join(from, 'e', 'sub'), { recursive: true });
+    for (const f of ['e/a.png', 'e/b.png', 'e/sub/c.png']) writeFileSync(path.join(from, f), 'x');
+    expect(copyTree(from, to, ['e'], { maxFiles: 2 })).toEqual({ copied: ['e/a.png', 'e/b.png'], bytes: 2, skipped: ['e/'] });
+    expect(copyTree(from, to, ['e'], { maxFiles: 3, missingOnly: true })).toEqual({ copied: ['e/sub/c.png'], bytes: 1, skipped: [] });
+    expect(EVIDENCE_FILES_MAX).toBe(5000);
   });
 });
