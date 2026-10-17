@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { parseDocument } from 'yaml';
 import { appendFileSync, mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, symlinkSync, rmSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -740,11 +741,11 @@ describe('forge infinite', () => {
     saveProposal(root, 'p20261011090000aaaa', doc('proposed'));
     saveProposal(root, 'p20261011090000aaab', doc('discussing'));
     saveProposal(root, 'p20261011090000aaac', doc('approved'));
-    saveApproval(root, 'p20261011090000aaac', { status: 'approved', decidedAt: 'T', by: 'forge:decide', digest: proposalDigest(doc('approved')) });
+    saveApproval(root, 'p20261011090000aaac', { status: 'approved', decidedAt: 'T', by: 'forge:decide', digest: proposalDigest('p20261011090000aaac', doc('approved')) });
     expect(JSON.parse(hook('{}').stdout).decision).toBe('block');
     run(['cycle', '--progress', 'yes'], io);
     saveProposal(root, 'p20261011090000aaac', doc('auto_approved', 'T002'));
-    saveApproval(root, 'p20261011090000aaac', { status: 'auto_approved', decidedAt: 'T', by: 'forge:policy', digest: proposalDigest(doc('approved')) });
+    saveApproval(root, 'p20261011090000aaac', { status: 'auto_approved', decidedAt: 'T', by: 'forge:policy', digest: proposalDigest('p20261011090000aaac', doc('approved')) });
     expect(JSON.parse(hook('{}').stdout).reason).toContain('forge infinite mode is active');
     run(['cycle', '--progress', 'yes'], io);
     saveProposal(root, 'p20261011090000aaac', doc('done', 'T002'));
@@ -757,6 +758,15 @@ describe('forge infinite', () => {
     saveProposal(root, 'p20261011090000aaaa', doc('proposed'));
     saveProposal(root, 'p20261011090000aaab', doc('discussing'));
     saveProposal(root, 'p20261011090000aaac', doc('approved'));
+    expect(JSON.parse(hook('{}').stdout)).toEqual(ended('queue-full'));
+  });
+  it('hook stop does not count an approved proposal whose mark no longer matches its text: the queue is full', () => {
+    run(['infinite', 'start', '--cycles', '9', '--queue-max', '2'], io);
+    const doc = (status: ProposalDoc['status'], title = 't'): ProposalDoc => ({ ts: '2026-10-11T09:00:00.000Z', category: 'quality', risk: 'low', title, rationale: '', evidence: '', pillar: '', status, source: 'scout', author: 's' });
+    saveProposal(root, 'p20261011090000aaaa', doc('proposed'));
+    saveProposal(root, 'p20261011090000aaab', doc('discussing'));
+    saveProposal(root, 'p20261011090000aaac', doc('approved', 'edited by someone else'));
+    saveApproval(root, 'p20261011090000aaac', { status: 'approved', decidedAt: 'T', by: 'forge:decide', digest: proposalDigest('p20261011090000aaac', doc('approved')) });
     expect(JSON.parse(hook('{}').stdout)).toEqual(ended('queue-full'));
   });
   it('hook stop blocks only the session the run was bound to at start (K5-03)', () => {
@@ -1502,7 +1512,7 @@ describe('forge waypoint-cli', () => {
   });
   describe('proposals', () => {
     const prop = { category: 'quality', risk: 'low', title: 'Cut dead code', rationale: 'r', evidence: 'e', pillar: 'quality', source: 'scout' };
-    const DIG = proposalDigest(prop as unknown as ProposalDoc);
+    const DIG = (id: string) => proposalDigest(id, prop as unknown as ProposalDoc);
     const add = (over: Record<string, unknown> = {}) => {
       writeFileSync(path.join(root, 'p.json'), JSON.stringify({ ...prop, ...over }));
       return run(['proposals', 'add', '--file', 'p.json'], io);
@@ -1528,7 +1538,7 @@ describe('forge waypoint-cli', () => {
       const { id } = JSON.parse(add().stdout);
       const r = run(['proposals', 'decide', id, 'approve', '--by', 'user:me'], io);
       expect(r.code).toBe(0);
-      expect(JSON.parse(r.stdout)).toEqual({ id, status: 'approved', write: { status: 'approved', decidedBy: 'user:me', decidedAt: '2026-10-11T10:00:00.000Z' }, approval: { op: 'set', collection: 'approvals', doc_id: id, data: { status: 'approved', decidedAt: '2026-10-11T10:00:00.000Z', by: 'forge:decide', digest: DIG } } });
+      expect(JSON.parse(r.stdout)).toEqual({ id, status: 'approved', write: { status: 'approved', decidedBy: 'user:me', decidedAt: '2026-10-11T10:00:00.000Z' }, approval: { op: 'set', collection: 'approvals', doc_id: id, data: { status: 'approved', decidedAt: '2026-10-11T10:00:00.000Z', by: 'forge:decide', digest: DIG(id) } } });
       expect(readEvents(root).at(-1)).toMatchObject({ kind: 'proposal', action: 'decide', id, status: 'approved' });
       const again = run(['proposals', 'decide', id, 'reject', '--by', 'user:me'], io);
       expect(again.code).toBe(2);
@@ -1542,7 +1552,7 @@ describe('forge waypoint-cli', () => {
       expect(r.code).toBe(0);
       const at = '2026-10-11T10:00:00.000Z';
       const history = [{ status: 'rejected', decidedBy: 'user:x', decidedAt: at, reason: 'not now', reopenedBy: 'user:y', reopenedAt: at }];
-      expect(JSON.parse(r.stdout)).toEqual({ id, status: 'approved', previous: 'rejected', write: { status: 'approved', decidedBy: 'user:y', decidedAt: at, history, reason: { __delete__: true } }, approval: { op: 'set', collection: 'approvals', doc_id: id, data: { status: 'approved', decidedAt: at, by: 'forge:decide', digest: DIG } } });
+      expect(JSON.parse(r.stdout)).toEqual({ id, status: 'approved', previous: 'rejected', write: { status: 'approved', decidedBy: 'user:y', decidedAt: at, history, reason: { __delete__: true } }, approval: { op: 'set', collection: 'approvals', doc_id: id, data: { status: 'approved', decidedAt: at, by: 'forge:decide', digest: DIG(id) } } });
       const mirror = loadProposals(root)[0];
       expect(mirror).toMatchObject({ status: 'approved', decidedBy: 'user:y', history });
       expect(mirror.reason).toBeUndefined();
@@ -1559,7 +1569,7 @@ describe('forge waypoint-cli', () => {
       expect(r.code).toBe(0);
       expect(JSON.parse(r.stdout)).toEqual({ id, status: 'rejected', previous: 'approved', write: { status: 'rejected', decidedBy: 'user:me', decidedAt: '2026-10-11T10:00:00.000Z',
         history: [{ status: 'approved', decidedBy: 'o', decidedAt: 'a', reopenedBy: 'user:me', reopenedAt: '2026-10-11T10:00:00.000Z' }] },
-        approval: { op: 'set', collection: 'approvals', doc_id: id, data: { status: 'rejected', decidedAt: '2026-10-11T10:00:00.000Z', by: 'forge:decide', digest: DIG } } });
+        approval: { op: 'set', collection: 'approvals', doc_id: id, data: { status: 'rejected', decidedAt: '2026-10-11T10:00:00.000Z', by: 'forge:decide', digest: DIG(id) } } });
       expect(loadProposals(root)).toEqual([]);
       expect(readEvents(root)).toEqual([]);
     });
@@ -1795,7 +1805,7 @@ describe('forge waypoint-cli', () => {
       run(['infinite', 'start', '--cycles', '9', '--queue-max', '1'], io);
       const doc = { ts: '', category: 'quality', risk: 'low', title: 't', rationale: '', evidence: '', pillar: '', status: 'approved', source: 'scout', author: 's' } as ProposalDoc;
       saveProposal(root, 'p20261011090000aaac', { ...doc, taskId: 'T002' });
-      saveApproval(root, 'p20261011090000aaac', { status: 'approved', decidedAt: 'T', by: 'forge:decide', digest: proposalDigest(doc) });
+      saveApproval(root, 'p20261011090000aaac', { status: 'approved', decidedAt: 'T', by: 'forge:decide', digest: proposalDigest('p20261011090000aaac', doc) });
       saveProposal(root, 'p20261011090000aaad', { ...doc, status: 'proposed' });
       expect(JSON.parse(run(['hook', 'stop'], { ...io, stdin: '{"session_id":"s1"}' }).stdout).reason).toContain('forge infinite mode is active');
       expect(JSON.parse(readFileSync(path.join(root, '.forge', 'run.json'), 'utf8')).active).toBe(true);
@@ -1805,7 +1815,7 @@ describe('forge waypoint-cli', () => {
       writeFileSync(path.join(root, 'db.json'), JSON.stringify({ ...prop, ts: 't', status: 'proposed', author: 'session' }));
       const r = run(['proposals', 'decide', id, 'reject', '--from', 'db.json', '--by', 'user:me'], io);
       expect(r.code).toBe(0);
-      expect(JSON.parse(r.stdout)).toEqual({ id, status: 'rejected', write: { status: 'rejected', decidedBy: 'user:me', decidedAt: '2026-10-11T10:00:00.000Z' }, approval: { op: 'set', collection: 'approvals', doc_id: id, data: { status: 'rejected', decidedAt: '2026-10-11T10:00:00.000Z', by: 'forge:decide', digest: DIG } } });
+      expect(JSON.parse(r.stdout)).toEqual({ id, status: 'rejected', write: { status: 'rejected', decidedBy: 'user:me', decidedAt: '2026-10-11T10:00:00.000Z' }, approval: { op: 'set', collection: 'approvals', doc_id: id, data: { status: 'rejected', decidedAt: '2026-10-11T10:00:00.000Z', by: 'forge:decide', digest: DIG(id) } } });
       expect(loadProposals(root)).toEqual([]);
       expect(readEvents(root)).toEqual([]);
       expect(run(['proposals', 'decide', id, 'reject', '--from', 'missing.json'], io).code).toBe(2);
@@ -1920,7 +1930,8 @@ describe('forge waypoint-cli', () => {
     });
 
     describe('only the owner approves (§4.1)', () => {
-      const MARK = (status: ApprovalDoc['status'], by: ApprovalDoc['by'] = 'page'): ApprovalDoc => ({ status, decidedAt: '2026-10-11T09:00:00.000Z', by, digest: DIG });
+      const MARK = (id: string, status: ApprovalDoc['status'], by: ApprovalDoc['by'] = 'page'): ApprovalDoc => ({ status, decidedAt: '2026-10-11T09:00:00.000Z', by, digest: DIG(id) });
+      let lastErr = '';
       const pullDb = (props: Record<string, unknown>, marks: Record<string, unknown>, page: unknown) => {
         for (const [dir, docs] of [['db/proposals', props], ['db/approvals', marks]] as const) {
           mkdirSync(path.join(root, dir), { recursive: true });
@@ -1928,12 +1939,14 @@ describe('forge waypoint-cli', () => {
         }
         mkdirSync(path.join(root, 'db', 'meta'), { recursive: true });
         if (page !== undefined) writeFileSync(path.join(root, 'db', 'meta', 'page.json'), JSON.stringify(page));
-        return JSON.parse(run(['proposals', 'pull', '--dir', 'db/proposals', '--approvals', 'db/approvals', '--page', 'db/meta/page.json'], io).stdout);
+        const r = run(['proposals', 'pull', '--dir', 'db/proposals', '--approvals', 'db/approvals', '--page', 'db/meta/page.json'], io);
+        lastErr = r.stderr;
+        return JSON.parse(r.stdout);
       };
       it('decide prints the approval with the write; without --from it keeps the mark locally; discuss has none', () => {
         const { id } = JSON.parse(add().stdout);
         const r = JSON.parse(run(['proposals', 'decide', id, 'approve'], io).stdout);
-        expect(r.approval).toEqual({ op: 'set', collection: 'approvals', doc_id: id, data: { status: 'approved', decidedAt: '2026-10-11T10:00:00.000Z', by: 'forge:decide', digest: DIG } });
+        expect(r.approval).toEqual({ op: 'set', collection: 'approvals', doc_id: id, data: { status: 'approved', decidedAt: '2026-10-11T10:00:00.000Z', by: 'forge:decide', digest: DIG(id) } });
         expect(loadApproval(root, id)).toEqual(r.approval.data);
         io.rand = () => 0.9;
         const other = JSON.parse(add({ title: 'Another one', rationale: 'different' }).stdout).id;
@@ -1948,29 +1961,29 @@ describe('forge waypoint-cli', () => {
         expect(run(['proposals', 'decide', id, 'confirm'], io).code).toBe(2);
         writeFileSync(path.join(root, 'db.json'), JSON.stringify({ ...prop, ts: 't', status: 'approved', author: 'session', decidedBy: 'user:me', decidedAt: 'T' }));
         const r = JSON.parse(run(['proposals', 'decide', id, 'confirm', '--from', 'db.json'], io).stdout);
-        expect(r).toEqual({ id, status: 'approved', approval: { op: 'set', collection: 'approvals', doc_id: id, data: { status: 'approved', decidedAt: '2026-10-11T10:00:00.000Z', by: 'forge:decide', digest: DIG } } });
+        expect(r).toEqual({ id, status: 'approved', approval: { op: 'set', collection: 'approvals', doc_id: id, data: { status: 'approved', decidedAt: '2026-10-11T10:00:00.000Z', by: 'forge:decide', digest: DIG(id) } } });
       });
       it('policy keeps the mark of an auto-approval and prints it', () => {
         const a = JSON.parse(add().stdout).id;
         const r = JSON.parse(run(['proposals', 'policy', a], io).stdout);
-        expect(r.approval).toEqual({ op: 'set', collection: 'approvals', doc_id: a, data: { status: 'auto_approved', decidedAt: '2026-10-11T10:00:00.000Z', by: 'forge:policy', digest: DIG } });
+        expect(r.approval).toEqual({ op: 'set', collection: 'approvals', doc_id: a, data: { status: 'auto_approved', decidedAt: '2026-10-11T10:00:00.000Z', by: 'forge:policy', digest: DIG(a) } });
         expect(loadApproval(root, a)?.status).toBe('auto_approved');
       });
       it('pull --approvals copies the owner marks of the roadmap and removes a local one the roadmap does not have', () => {
         const a = 'p20261011100000aaaa', b = 'p20261011100000bbbb';
-        saveApproval(root, b, MARK('approved', 'forge:decide'));
-        const r = pullDb({ [a]: { ...prop, ts: '', status: 'approved', author: 'session' } }, { [a]: MARK('approved'), junk: MARK('approved'), [`${b}x`]: 5 }, { version: '0.26.0', rules: 2, publishedAt: 'T' });
+        saveApproval(root, b, MARK(b, 'approved', 'forge:decide'));
+        const r = pullDb({ [a]: { ...prop, ts: '', status: 'approved', author: 'session' } }, { [a]: MARK(a, 'approved'), junk: MARK(a, 'approved'), [`${b}x`]: 5 }, { version: '0.26.0', rules: 2, publishedAt: 'T' });
         expect(r).toEqual({ proposals: 1, approvals: 1, removed: 1, rules: 2, ownerRule: true });
         expect(Object.keys(loadApprovals(root))).toEqual([a]);
         expect(run(['proposals', 'pull', '--dir', 'db/proposals'], io).stdout.trim()).toBe('1');
       });
       it('a roadmap without the owner rule (no meta/page, or rules under 2) counts no mark: pull removes them all (Review Focus 1)', () => {
         const a = 'p20261011100000aaaa';
-        saveApproval(root, a, MARK('approved', 'forge:decide'));
-        expect(pullDb({ [a]: { ...prop, ts: '', status: 'approved', author: 'session' } }, { [a]: MARK('approved') }, undefined))
+        saveApproval(root, a, MARK(a, 'approved', 'forge:decide'));
+        expect(pullDb({ [a]: { ...prop, ts: '', status: 'approved', author: 'session' } }, { [a]: MARK(a, 'approved') }, undefined))
           .toEqual({ proposals: 1, approvals: 0, removed: 1, rules: 0, ownerRule: false });
         expect(loadApprovals(root)).toEqual({});
-        expect(pullDb({}, { [a]: MARK('approved') }, { version: '0.25.0', rules: 1, publishedAt: 'T' })).toMatchObject({ approvals: 0, ownerRule: false });
+        expect(pullDb({}, { [a]: MARK(a, 'approved') }, { version: '0.25.0', rules: 1, publishedAt: 'T' })).toMatchObject({ approvals: 0, ownerRule: false });
         writePlan(root, '  - { id: T001, title: a, track: backend, phase: PX, done_when: x }\n');
         const to = run(['proposals', 'to-task', a, '--plan', 'docs/waypoint/demo/plan.yaml'], io);
         expect(to.code).toBe(2);
@@ -2027,8 +2040,52 @@ describe('forge waypoint-cli', () => {
         const list = JSON.parse(run(['proposals', 'list'], io).stdout);
         expect(list.unowned).toBe(1);
         expect(list.unownedReasons).toEqual({ [a]: 'edited' });
-        saveApproval(root, a, { ...loadApproval(root, a)!, digest: proposalDigest(loadProposals(root).find(p => p.id === a)!) });
+        saveApproval(root, a, { ...loadApproval(root, a)!, digest: proposalDigest(a, loadProposals(root).find(p => p.id === a)!) });
         expect(run(['proposals', 'to-task', a, '--plan', PLAN], io).code).toBe(0);
+      });
+      it('a proposal with blank rationale and evidence is still tied to its task by the plan', () => {
+        const a = JSON.parse(add({ source: 'user', rationale: '', evidence: '', pillar: '' }).stdout).id;
+        run(['proposals', 'decide', a, 'approve'], io);
+        writePlan(root, '  - { id: T001, title: a, track: backend, phase: PX, done_when: x }\n');
+        expect(run(['proposals', 'to-task', a, '--plan', PLAN], io).code).toBe(0);
+        const { id: _id, ...doc } = loadProposals(root).find(p => p.id === a)!;
+        const { taskId: _t, ...noTask } = doc;
+        saveProposal(root, a, noTask);
+        rmSync(path.join(root, '.forge', 'ledger.jsonl'), { force: true });
+        const again = run(['proposals', 'to-task', a, '--plan', PLAN], io);
+        expect(again.code).toBe(2);
+        expect(again.stderr).toContain('already became T002');
+      });
+      it('the link to the proposal is found wherever it sits in the task, not only on its last line', () => {
+        const a = JSON.parse(add().stdout).id;
+        run(['proposals', 'decide', a, 'approve'], io);
+        writePlan(root, '  - { id: T001, title: a, track: backend, phase: PX, done_when: x }\n');
+        run(['proposals', 'to-task', a, '--plan', PLAN], io);
+        const doc = parseDocument(readFileSync(path.join(root, PLAN), 'utf8'));
+        const idx = (doc.getIn(['tasks']) as { items: unknown[] }).items.length - 1;
+        doc.setIn(['tasks', idx, 'includes'], `${String(doc.getIn(['tasks', idx, 'includes']))}\n\nA line someone added after the link.`);
+        writeFileSync(path.join(root, PLAN), String(doc));
+        const { id: _id, ...p } = loadProposals(root).find(x => x.id === a)!;
+        const { taskId: _t, ...noTask } = p;
+        saveProposal(root, a, noTask);
+        rmSync(path.join(root, '.forge', 'ledger.jsonl'), { force: true });
+        expect(run(['proposals', 'to-task', a, '--plan', PLAN], io).code).toBe(2);
+      });
+      it('the ledger alone refuses a proposal that already became a task, even when the plan lost the link', () => {
+        const a = JSON.parse(add().stdout).id;
+        run(['proposals', 'decide', a, 'approve'], io);
+        writePlan(root, '  - { id: T001, title: a, track: backend, phase: PX, done_when: x }\n');
+        run(['proposals', 'to-task', a, '--plan', PLAN], io);
+        const doc = parseDocument(readFileSync(path.join(root, PLAN), 'utf8'));
+        const idx = (doc.getIn(['tasks']) as { items: unknown[] }).items.length - 1;
+        doc.setIn(['tasks', idx, 'includes'], 'rewritten, no link any more');
+        writeFileSync(path.join(root, PLAN), String(doc));
+        const { id: _id, ...p } = loadProposals(root).find(x => x.id === a)!;
+        const { taskId: _t, ...noTask } = p;
+        saveProposal(root, a, noTask);
+        const again = run(['proposals', 'to-task', a, '--plan', PLAN], io);
+        expect(again.code).toBe(2);
+        expect(again.stderr).toContain('already became T002');
       });
       it('policy leaves a proposal that already has an owner mark alone', () => {
         const a = JSON.parse(add().stdout).id;
@@ -2073,10 +2130,15 @@ describe('forge waypoint-cli', () => {
         const bad = run(['proposals', 'pull', '--dir', 'db/proposals', '--approvals', 'db/file', '--page', 'db/meta/page.json'], io);
         expect(bad.code).toBe(2);
         expect(loadProposals(root)).toEqual([]);
-        const ok = pullDb({ [a]: DOC() }, { [a]: MARK('approved') }, { rules: 2 });
+        const ok = pullDb({ [a]: DOC() }, { [a]: MARK(a, 'approved') }, { rules: 2 });
         expect(ok.approvals).toBe(1);
-        const warned = run(['proposals', 'pull', '--dir', 'db/proposals', '--approvals', 'db/approvals', '--page', 'db/meta/page.json'], io);
-        expect(warned.stderr).toContain('approvals are owner-only once the roadmap is republished with this version; until then an editor could write them');
+        const WARN = 'approvals are owner-only once the roadmap is republished with this version; until then an editor could write them';
+        expect(lastErr).toContain(WARN);
+        const pull = (...more: string[]) => run(['proposals', 'pull', '--dir', 'db/proposals', '--approvals', 'db/approvals', '--page', 'db/meta/page.json', ...more], io).stderr;
+        expect(pull()).toBe('');
+        expect(pull('--roadmap', 'artifact-1')).toContain(WARN);
+        expect(pull('--roadmap', 'artifact-1')).toBe('');
+        expect(pull('--roadmap', 'artifact-2')).toContain(WARN);
         expect(run(['proposals', 'pull', '--dir', 'db/proposals', '--approvals', 'db/approvals', '--page', 'db/none.json'], io).stderr).toBe('');
       });
     });

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { proposalId, saveProposal, loadProposals, decideLocal, decideDoc, saveApproval, loadApproval, loadApprovals, removeApproval } from '../src/forge/proposals.js';
@@ -74,8 +74,10 @@ describe('forge proposals mirror', () => {
 describe('the local owner marks (.forge/approvals/)', () => {
   it('saves, loads, lists and removes a mark; a broken or misnamed file is left out', () => {
     const id = 'p20261016100000abcd';
-    saveApproval(root, id, { status: 'approved', decidedAt: '2026-10-16T10:00:00.000Z', by: 'forge:decide', digest: '0123456789abcdef' });
-    expect(loadApproval(root, id)).toEqual({ status: 'approved', decidedAt: '2026-10-16T10:00:00.000Z', by: 'forge:decide', digest: '0123456789abcdef' });
+    saveApproval(root, id, { status: 'approved', decidedAt: '2026-10-16T10:00:00.000Z', by: 'forge:decide', digest: 'ab'.repeat(32) });
+    expect(loadApproval(root, id)).toEqual({ status: 'approved', decidedAt: '2026-10-16T10:00:00.000Z', by: 'forge:decide', digest: 'ab'.repeat(32) });
+    saveApproval(root, 'not-a-pid', { status: 'approved', decidedAt: 'x', by: 'page', digest: 'ab'.repeat(32) });
+    expect(existsSync(path.join(root, '.forge', 'approvals', 'not-a-pid.json'))).toBe(false);
     mkdirSync(path.join(root, '.forge', 'approvals'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'approvals', 'p20261016100000bbbb.json'), 'not json');
     writeFileSync(path.join(root, '.forge', 'approvals', 'nope.json'), JSON.stringify({ status: 'approved', decidedAt: 'x', by: 'page' }));

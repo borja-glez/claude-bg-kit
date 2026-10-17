@@ -15,18 +15,22 @@ export function estimateMinutes(estimate: string | undefined): number | null {
   return n >= 1 && n <= MAX_ESTIMATE_MIN ? n : null;
 }
 
-/** The proposal a task's `includes` came from: the `(propuesta|proposal <id>)` line to-task ends it with. */
-export function proposalOfIncludes(includes: string | undefined): string | null {
-  const m = /\((?:propuesta|proposal) (p\d{14}[0-9a-z]{4})\)\s*$/.exec(includes ?? '');
-  return m ? m[1] : null;
+/** Every proposal an `includes` links to: a line that is only the `(propuesta|proposal <id>)` reference to-task writes. The link
+ *  is found on any line, so text added around it later does not hide where the task came from. */
+export function proposalsOfIncludes(includes: string | undefined): string[] {
+  return [...(includes ?? '').matchAll(/^\((?:propuesta|proposal) (p\d{14}[0-9a-z]{4})\)[ \t]*$/gm)].map(m => m[1]);
 }
 
-/** The whole rationale, the evidence and a reference to the proposal; undefined when both texts are blank. */
-function includesOf(p: ProposalDoc & { id: string }, es: boolean): string | undefined {
+/** The proposal a task's `includes` came from: the last link line (to-task writes it last; a rationale can quote others). */
+export function proposalOfIncludes(includes: string | undefined): string | null {
+  return proposalsOfIncludes(includes).at(-1) ?? null;
+}
+
+/** The whole rationale, the evidence and, always, a reference to the proposal (even when both texts are blank). */
+function includesOf(p: ProposalDoc & { id: string }, es: boolean): string {
   const parts: string[] = [];
   if (p.rationale.trim()) parts.push(p.rationale.trim());
   if (p.evidence.trim()) parts.push(`${es ? 'Evidencia' : 'Evidence'}: ${p.evidence.trim()}`);
-  if (!parts.length) return undefined;
   parts.push(es ? `(propuesta ${p.id})` : `(proposal ${p.id})`);
   return parts.join('\n\n');
 }
@@ -44,7 +48,7 @@ export function proposalToTask(plan: Plan, p: ProposalDoc & { id: string }, opts
     title: p.title,
     track: opts.track ?? plan.tracks[0]?.id ?? '',
     phase: IMPROVEMENTS_PHASE,
-    ...(includes !== undefined ? { includes } : {}),
+    includes,
     done_when: es ? `${p.title} — los validadores pasan` : `${p.title} — validators pass`,
     depends_on: [],
     zones: zone ? [zone] : [],

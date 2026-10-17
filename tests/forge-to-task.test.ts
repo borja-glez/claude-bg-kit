@@ -37,10 +37,9 @@ describe('proposalToTask', () => {
     expect(en.includes).toBe('why\n\nEvidence: grep: 3 hits\n\n(proposal p20261011100000aaaa)');
     expect(proposalToTask(parsePlan(planText('en')), prop({ rationale: '', evidence: 'only this' }), {}).task.includes).toBe('Evidence: only this\n\n(proposal p20261011100000aaaa)');
   });
-  it('leaves includes out when rationale and evidence are blank', () => {
+  it('keeps only the reference to the proposal in includes when rationale and evidence are blank', () => {
     const { task } = proposalToTask(parsePlan(planText('en')), prop({ rationale: '', evidence: '  ' }), {});
-    expect(task.includes).toBeUndefined();
-    expect('includes' in task).toBe(false);
+    expect(task.includes).toBe('(proposal p20261011100000aaaa)');
   });
   it('maps a simple estimate to minutes, else 30', () => {
     const est = (estimate?: string) => proposalToTask(parsePlan(planText('en')), prop({ estimate }), {}).task.estimate_min;

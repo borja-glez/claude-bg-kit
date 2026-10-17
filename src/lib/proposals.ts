@@ -1,3 +1,4 @@
+import { sha256Hex } from './sha256.js';
 export const PROPOSAL_CATEGORIES = ['feature', 'security', 'perf', 'quality', 'tests', 'deps'] as const;
 export const PROPOSAL_RISKS = ['low', 'medium', 'high'] as const;
 export const PROPOSAL_STATUSES = ['proposed', 'approved', 'rejected', 'discussing', 'auto_approved', 'done'] as const;
@@ -87,21 +88,18 @@ export type ApprovalBy = (typeof APPROVAL_BY)[number];
 export interface ApprovalDoc { status: ApprovalStatus; decidedAt: string; by: ApprovalBy; digest: string }
 
 /** The fields a decision is about, the ones to-task builds the task from (title, rationale, evidence, path for the zone,
- *  estimate) and the policy reads (category, risk). The owner's mark carries their digest: a proposal edited afterwards
- *  is not the one that was approved. FNV-1a 64-bit over their canonical JSON, 16 hex digits; synchronous and pure so a
- *  page can compute it too. Not a defence against collisions made on purpose, only against an unnoticed edit. */
-export function proposalDigest(p: Pick<ProposalDoc, 'category' | 'risk' | 'title' | 'rationale' | 'evidence' | 'path' | 'estimate'>): string {
-  const bytes = new TextEncoder().encode(JSON.stringify([p.category, p.risk, p.title, p.rationale, p.evidence, p.path ?? '', p.estimate ?? '']));
-  let acc = 0xcbf29ce484222325n;
-  for (const b of bytes) acc = BigInt.asUintN(64, (acc ^ BigInt(b)) * 0x100000001b3n);
-  return acc.toString(16).padStart(16, '0');
+ *  estimate) and the policy reads (category, risk), and the pid they belong to. The owner's mark carries their digest: a
+ *  proposal edited afterwards, or the same text under another pid, is not the one that was approved. SHA-256 of their
+ *  canonical JSON (an array, so no key order), 64 hex digits; synchronous and pure so a page computes it too. */
+export function proposalDigest(pid: string, p: Pick<ProposalDoc, 'category' | 'risk' | 'title' | 'rationale' | 'evidence' | 'path' | 'estimate'>): string {
+  return sha256Hex(JSON.stringify([pid, p.category, p.risk, p.title, p.rationale, p.evidence, p.path ?? '', p.estimate ?? '']));
 }
 
 /** An approvals/<pid> document, or null: no free text, only its status, when and from where. */
 export function normalizeApproval(x: unknown): ApprovalDoc | null {
   if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
   const o = x as Record<string, unknown>;
-  if (!oneOf(APPROVAL_STATUSES, o.status) || !oneOf(APPROVAL_BY, o.by) || !str(o.decidedAt) || !o.decidedAt || !str(o.digest) || !/^[0-9a-f]{16}$/.test(o.digest)) return null;
+  if (!oneOf(APPROVAL_STATUSES, o.status) || !oneOf(APPROVAL_BY, o.by) || !str(o.decidedAt) || !o.decidedAt || !str(o.digest) || !/^[0-9a-f]{64}$/.test(o.digest)) return null;
   return { status: o.status, decidedAt: o.decidedAt.slice(0, MAX_PROPOSAL_TITLE), by: o.by, digest: o.digest };
 }
 
@@ -112,13 +110,13 @@ export function markMatches(p: Pick<ProposalDoc, 'status'>, a: ApprovalDoc | nul
 
 /** Why a decided proposal is not the owner's: 'no-mark' (none, or it disagrees with the status), 'edited' (the mark is of other
  *  text than the proposal has now) or 'ok'. */
-export function ownerCheck(p: Pick<ProposalDoc, 'status' | 'category' | 'risk' | 'title' | 'rationale' | 'evidence' | 'path' | 'estimate'>, a: ApprovalDoc | null | undefined): 'ok' | 'no-mark' | 'edited' {
+export function ownerCheck(pid: string, p: Pick<ProposalDoc, 'status' | 'category' | 'risk' | 'title' | 'rationale' | 'evidence' | 'path' | 'estimate'>, a: ApprovalDoc | null | undefined): 'ok' | 'no-mark' | 'edited' {
   if (!a || !markMatches(p, a)) return 'no-mark';
-  return a.digest === proposalDigest(p) ? 'ok' : 'edited';
+  return a.digest === proposalDigest(pid, p) ? 'ok' : 'edited';
 }
 
 /** Wave 4: approved by the roadmap's owner, for auto-approval and to-task: the mark agrees, is of this very text, and it has no
  *  task yet. Someone else can block a proposal by changing proposals/<pid>, never fire it or change what it says. */
-export function ownerApproved(p: Parameters<typeof ownerCheck>[0] & Pick<ProposalDoc, 'taskId'>, a: ApprovalDoc | null | undefined): boolean {
-  return ownerCheck(p, a) === 'ok' && p.taskId === undefined;
+export function ownerApproved(pid: string, p: Parameters<typeof ownerCheck>[1] & Pick<ProposalDoc, 'taskId'>, a: ApprovalDoc | null | undefined): boolean {
+  return ownerCheck(pid, p, a) === 'ok' && p.taskId === undefined;
 }

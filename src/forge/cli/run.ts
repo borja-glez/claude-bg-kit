@@ -22,7 +22,7 @@ import { PROPOSAL_ID, proposalId, saveProposal, loadProposals, loadProposal, dec
 import { normalizeProposal, isActionable, canDecide, markMatches, normalizeApproval, ownerCheck, ownerApproved, proposalDigest, PROPOSAL_STATUSES, type Decision, type ProposalDoc, type ApprovalDoc } from '../../lib/proposals.js';
 import { PAGE_RULES } from '../../lib/publish.js';
 import { autoApprovable, similarRejected, similarOpen } from '../policy.js';
-import { proposalToTask, proposalOfIncludes } from '../to-task.js';
+import { proposalToTask, proposalOfIncludes, proposalsOfIncludes } from '../to-task.js';
 import type { PlanTask } from '../../lib/types.js';
 import { parseDocument } from 'yaml';
 import { claudeSessionId, noClaudeSession } from '../../lib/claude-session.js';
@@ -458,8 +458,9 @@ function stopContext(cwd: string, now: Date): StopContext {
   return {
     now,
     stopFile: existsSync(stopFile(cwd)),
-    // Wave 4: approved work counts only with the owner's mark (with or without a task, as before).
-    approvedPending: proposals.filter(p => markMatches(p, marks[p.id])).length,
+    // Wave 4: approved work counts only with the owner's mark (with or without a task, as before); one without a task also
+    // needs the mark to be of its present text: an edited one never becomes a task, so it does not hold the queue open.
+    approvedPending: proposals.filter(p => p.taskId === undefined ? ownerCheck(p.id, p, marks[p.id]) === 'ok' : markMatches(p, marks[p.id])).length,
     pendingProposals: proposals.filter(p => p.status === 'proposed' || p.status === 'discussing').length,
   };
 }
@@ -471,7 +472,7 @@ function unownedReasons(root: string): Record<string, 'no-mark' | 'edited'> {
   const out: Record<string, 'no-mark' | 'edited'> = {};
   for (const p of loadProposals(root)) {
     if (!isActionable(p) || p.taskId !== undefined) continue;
-    const c = ownerCheck(p, marks[p.id]);
+    const c = ownerCheck(p.id, p, marks[p.id]);
     if (c !== 'ok') out[p.id] = c;
   }
   return out;
@@ -1212,8 +1213,8 @@ function runCommand(argv: string[], io: Io): Result {
         };
         const readText = (f: string, what: string) => { try { return readFileSync(path.resolve(io.cwd, f), 'utf8'); } catch { throw new UsageError(`proposals: cannot read ${what}`); } };
         // §4.1: the owner's mark of a decision, as approvals/<pid> takes it (only the roadmap's owner can write it).
-        const approvalOf = (id: string, status: ApprovalDoc['status'], at: string, p: Parameters<typeof proposalDigest>[0], by: ApprovalDoc['by'] = 'forge:decide') =>
-          ({ op: 'set' as const, collection: 'approvals', doc_id: id, data: { status, decidedAt: at, by, digest: proposalDigest(p) } });
+        const approvalOf = (id: string, status: ApprovalDoc['status'], at: string, p: Parameters<typeof proposalDigest>[1], by: ApprovalDoc['by'] = 'forge:decide') =>
+          ({ op: 'set' as const, collection: 'approvals', doc_id: id, data: { status, decidedAt: at, by, digest: proposalDigest(id, p) } });
         switch (sub) {
           case 'add': {
             const file = subFlag('file');
@@ -1333,12 +1334,13 @@ function runCommand(argv: string[], io: Io): Result {
             const withMarks = has('approvals');
             const db: Record<string, ApprovalDoc> = {};
             let rules = 0;
+            let page: unknown = null;
             if (withMarks) {
               const marksDir = subFlag('approvals');
               if (!marksDir) throw new UsageError('proposals pull: --approvals needs the listed approvals folder');
               const pageFile = subFlag('page');
               if (!pageFile) throw new UsageError('proposals pull: --approvals needs --page (the listed meta/page.json)');
-              const page = (() => { try { return JSON.parse(readFileSync(path.resolve(io.cwd, pageFile), 'utf8')) as unknown; } catch { return null; } })();
+              page = (() => { try { return JSON.parse(readFileSync(path.resolve(io.cwd, pageFile), 'utf8')) as unknown; } catch { return null; } })();
               rules = page && typeof page === 'object' && typeof (page as { rules?: unknown }).rules === 'number' ? (page as { rules: number }).rules : 0;
               const marksAbs = path.resolve(io.cwd, marksDir);
               if (rules >= PAGE_RULES && existsSync(marksAbs)) {
@@ -1370,7 +1372,12 @@ function runCommand(argv: string[], io: Io): Result {
             for (const [id, a] of Object.entries(db)) saveApproval(io.cwd, id, a);
             const count = Object.keys(db).length;
             // The owner rule is known here only from meta/page.rules, which an editor can also write on a roadmap that lacks it.
-            const warning = count > 0 ? 'proposals pull: approvals are owner-only once the roadmap is republished with this version; until then an editor could write them\n' : '';
+            // Said once per checkout and roadmap (--roadmap, else page.roadmap): the marker lives in .forge/.
+            const roadmap = subFlag('roadmap') ?? (page && typeof page === 'object' && typeof (page as { roadmap?: unknown }).roadmap === 'string' ? (page as { roadmap: string }).roadmap : '');
+            const markerFile = path.join(io.cwd, '.forge', 'approvals-warned.json');
+            const warnedFor = (() => { try { return (JSON.parse(readFileSync(markerFile, 'utf8')) as { roadmap?: unknown }).roadmap; } catch { return undefined; } })();
+            const warning = count > 0 && warnedFor !== roadmap ? 'proposals pull: approvals are owner-only once the roadmap is republished with this version; until then an editor could write them\n' : '';
+            if (warning) { forgeDir(io.cwd); writeFileSync(markerFile, JSON.stringify({ roadmap }) + '\n'); }
             return { ...json({ proposals: n, approvals: count, removed, rules, ownerRule: rules >= PAGE_RULES }), stderr: warning };
           }
           case 'policy': {
@@ -1401,9 +1408,9 @@ function runCommand(argv: string[], io: Io): Result {
             if (!isActionable(found)) throw new UsageError(`proposals to-task: ${id} is not approved`);
             if (found.taskId !== undefined) throw new UsageError(`proposals to-task: ${id} already has task ${found.taskId}`);
             // §4.1: only the roadmap owner's approvals become tasks: the mark must agree with the proposal and with its text.
-            const check = ownerCheck(found, loadApproval(io.cwd, id));
+            const check = ownerCheck(id, found, loadApproval(io.cwd, id));
             if (check === 'no-mark') throw new UsageError(`proposals to-task: ${id} has no mark of the roadmap's owner (approvals/${id}); only the owner's approvals become tasks`);
-            if (!ownerApproved(found, loadApproval(io.cwd, id))) throw new UsageError(`proposals to-task: ${id} was edited after the owner's approval; it needs a new approval`);
+            if (!ownerApproved(id, found, loadApproval(io.cwd, id))) throw new UsageError(`proposals to-task: ${id} was edited after the owner's approval; it needs a new approval`);
             // A mark is spent once: a proposal that already became a task (the ledger, which a pull never touches, or the plan)
             // is not turned into another by a copy that lost its taskId.
             const spent = readEvents(io.cwd).find(e => e.kind === 'proposal' && e.action === 'to-task' && e.id === id);
@@ -1413,7 +1420,7 @@ function runCommand(argv: string[], io: Io): Result {
               if (e instanceof PlanError) throw new UsageError(`${planArg}: ${e.issues.join('; ')}`);
               throw e;
             }
-            const became = plan.tasks.find(t => proposalOfIncludes(t.includes) === id)?.id ?? (spent ? String(spent.taskId ?? '?') : undefined);
+            const became = plan.tasks.find(t => proposalsOfIncludes(t.includes).includes(id))?.id ?? (spent ? String(spent.taskId ?? '?') : undefined);
             if (became !== undefined) throw new UsageError(`proposals to-task: proposal ${id} already became ${became}: a new approval of a new proposal is needed`);
             const { task, phase } = proposalToTask(plan, found, { track: subFlag('track') });
             // The Document API keeps comments and order; values are nodes, never spliced into text.
