@@ -22,19 +22,23 @@ const TaskSchema = z.object({
   zones: z.array(z.string().min(1)).default([]),
   estimate_min: z.number().positive().optional(),
   delicate: z.boolean().optional(),
+  // G-25, K3-08: the section of the design the task comes from (a heading's slug, or _intro).
+  design_ref: z.string().regex(/^[a-z0-9-]{1,80}$|^_intro$/, 'design_ref must be a section slug of the design').optional(),
 });
 
 const PlanSchema = z.object({
   project: id,
   locale: z.string().min(1).default('en'),
   version: z.string().min(1),
+  design_version: z.number().int().positive().optional(),
   artifacts: z.object({ roadmap: z.string().url().optional(), design: z.string().url().optional() }).default({}),
-  versions: z.array(z.object({ id, phases: z.array(id) })).default([]),
+  versions: z.array(z.object({ id, phases: z.array(id), target: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'target must be a date (YYYY-MM-DD)').optional() })).default([]),
   tracks: z.array(z.object({ id, name: z.string().min(1), color: z.enum(TRACK_COLORS) })).min(1),
   phases: z.array(z.object({
     id,
     name: z.string().min(1),
     plan_status: z.enum(['committed', 'provisional']).default('committed'),
+    goal: z.string().max(300).optional(),
   })).min(1),
   tasks: z.array(TaskSchema).min(1),
 });

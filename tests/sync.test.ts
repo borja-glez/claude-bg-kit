@@ -28,6 +28,19 @@ describe('buildDocs / planViewFromDocs', () => {
     expect(view.tasks.map(t => t.id)).toEqual(['T001', 'T002', 'T003', 'T004', 'T005', 'T006']);
     expect(view.tracks).toEqual(plan.tracks);
   });
+  it('copies goal and target, and adds meta.links with the design and its version (G-25)', () => {
+    const linked = {
+      ...plan, design_version: 7, artifacts: { design: 'https://claude.ai/artifact/d1' },
+      phases: plan.phases.map((p, i) => (i === 0 ? { ...p, goal: 'orders can be placed' } : p)), versions: [{ ...plan.versions[0], target: '2026-11-30' }],
+    };
+    const { meta, phases } = buildDocs(linked, NOW);
+    expect(meta.links).toEqual({ design: 'https://claude.ai/artifact/d1', designVersion: 7 });
+    expect(meta.versions[0].target).toBe('2026-11-30');
+    expect(phases[0].goal).toBe('orders can be placed');
+    expect(phases[1]).not.toHaveProperty('goal');
+    expect(planViewFromDocs(meta, phases).phases[0].goal).toBe('orders can be placed');
+    expect(buildDocs(plan, NOW).meta).not.toHaveProperty('links');
+  });
 });
 
 describe('buildSyncWrites', () => {

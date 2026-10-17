@@ -83,6 +83,17 @@ describe('normalizeMeta', () => {
     expect(m.metrics.lastCommit).toBeUndefined();
     expect(normalizeMeta({ metrics: { lastCommit: { sha: 'abc', ts: '2026-01-01T00:00:00Z' } } })!.metrics.lastCommit).toEqual({ sha: 'abc', ts: '2026-01-01T00:00:00Z' });
   });
+  it('keeps a version target, the links of the design and a phase goal; drops them when mistyped (G-25)', () => {
+    const got: string[] = [];
+    const m = normalizeMeta({ name: 'x', versions: [{ id: '0.1', phases: ['F1'], target: '2026-11-30' }, { id: '0.2', phases: [], target: 'soon' }],
+      links: { design: 'https://claude.ai/artifact/d1', designVersion: 7 } }, (f, a) => { got.push(`${f} · ${a}`); })!;
+    expect(m.versions).toEqual([{ id: '0.1', phases: ['F1'], target: '2026-11-30' }, { id: '0.2', phases: [] }]);
+    expect(m.links).toEqual({ design: 'https://claude.ai/artifact/d1', designVersion: 7 });
+    expect(got).toEqual(['versions[1].target · dropped']);
+    expect(normalizeMeta({ name: 'x', links: { design: 'javascript:alert(1)', designVersion: -1 } })).not.toHaveProperty('links');
+    expect(normalizePhase({ id: 'F1', name: 'Base', order: 0, tasks: [], goal: 'orders' })!.goal).toBe('orders');
+    expect(normalizePhase({ id: 'F1', name: 'Base', order: 0, tasks: [], goal: 5 })).not.toHaveProperty('goal');
+  });
 });
 
 describe('normalizePhase', () => {

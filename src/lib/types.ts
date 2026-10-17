@@ -21,14 +21,16 @@ export interface PlanTask {
   /** J-14: mistakes here are expensive or hard to see (concurrency, migrations, security boundaries, data formats other
    *  code reads): forge gives it impl-high and correctness at xhigh. */
   delicate?: boolean;
+  design_ref?: string;
 }
-export interface PlanPhase { id: string; name: string; plan_status: PlanStatus }
+export interface PlanPhase { id: string; name: string; plan_status: PlanStatus; goal?: string }
 export interface PlanTrack { id: string; name: string; color: TrackColor }
-export interface PlanVersion { id: string; phases: string[] }
+export interface PlanVersion { id: string; phases: string[]; target?: string }
 export interface Plan {
   project: string;
   locale: string;
   version: string;
+  design_version?: number;
   artifacts: { roadmap?: string; design?: string };
   versions: PlanVersion[];
   tracks: PlanTrack[];
@@ -140,6 +142,8 @@ export interface MetaDoc {
   versions: PlanVersion[];
   phaseOrder: string[];
   metrics: { tests?: number; lastCommit?: { sha: string; ts: string } };
+  /** G-25: the design the plan comes from and its version (from artifacts.design and design_version). */
+  links?: { design?: string; designVersion?: number };
   syncedAt: string;
 }
 /** meta/infinite: forge's infinite run as the roadmap shows it (its own doc, so the meta/project sync never overwrites it). */
@@ -154,7 +158,7 @@ export interface InfiniteDoc {
   /** G-08: why the run stopped, once it is inactive. */
   stopReason?: string | null;
 }
-export interface PhaseDoc { id: string; name: string; plan_status: PlanStatus; order: number; tasks: PlanTask[] }
+export interface PhaseDoc { id: string; name: string; plan_status: PlanStatus; goal?: string; order: number; tasks: PlanTask[] }
 
 export type NoteType = 'decision' | 'idea' | 'debt' | 'question';
 /** The structured part of a decision note: `auto: true` when forge took it without asking, false when the person did. */

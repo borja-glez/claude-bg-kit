@@ -75,6 +75,18 @@ describe('waypoint CLI', () => {
     expect(r.stderr).toContain('task T006: unknown dependency T404');
   });
 
+  it('validate --design warns about a design_ref that is not a section of the design (G-25)', () => {
+    writeFileSync(path.join(dir, 'design.md'), readFileSync(new URL('./fixtures/design.md', import.meta.url), 'utf8'));
+    const p = path.join(dir, 'plan.yaml');
+    writeFileSync(p, readFileSync(p, 'utf8').replace('    title: Esquema de pedidos\n', '    title: Esquema de pedidos\n    design_ref: arquitectura\n')
+      .replace('    title: API de pedidos\n', '    title: API de pedidos\n    design_ref: pagos\n'));
+    const r = run(['validate', 'plan.yaml', '--design', 'design.md'], io);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('warning: 1 design_ref(s) not in the design: T002 (pagos)');
+    expect(run(['validate', 'plan.yaml'], io).stdout).not.toContain('design_ref');
+    expect(run(['validate', 'plan.yaml', '--design', 'nope.md'], io).code).toBe(2);
+  });
+
   it('page embeds a safe snapshot and the title', () => {
     const planPath = path.join(dir, 'plan.yaml');
     writeFileSync(planPath, readFileSync(planPath, 'utf8').replace('title: Esquema de pedidos', 'title: "Esquema </script><b>x"'));

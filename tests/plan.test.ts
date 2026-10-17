@@ -65,3 +65,33 @@ describe('parsePlan', () => {
     expect(issues[0]).toMatch(/^YAML: /);
   });
 });
+
+describe('plan schema: the links to the design (G-25, K3-08)', () => {
+  const base = readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8');
+  it('accepts design_version, design_ref, goal and target', () => {
+    const text = base.replace('version: "0.1"\n', 'version: "0.1"\ndesign_version: 7\n')
+      .replace('    phases: [F1, F2]', '    phases: [F1, F2]\n    target: "2026-11-30"')
+      .replace('  - { id: F1, name: Base, plan_status: committed }', '  - { id: F1, name: Base, plan_status: committed, goal: "orders can be placed" }')
+      .replace('    title: Esquema de pedidos\n', '    title: Esquema de pedidos\n    design_ref: arquitectura\n');
+    const p = parsePlan(text);
+    expect(p.design_version).toBe(7);
+    expect(p.versions[0].target).toBe('2026-11-30');
+    expect(p.phases[0].goal).toBe('orders can be placed');
+    expect(p.tasks[0].design_ref).toBe('arquitectura');
+  });
+  it('a plan without the new fields parses as before', () => {
+    const p = parsePlan(base);
+    expect(p).not.toHaveProperty('design_version');
+    expect(p.versions[0]).toEqual({ id: '0.1', phases: ['F1', 'F2'] });
+    expect(p.phases[0]).toEqual({ id: 'F1', name: 'Base', plan_status: 'committed' });
+    expect(p.tasks[0]).not.toHaveProperty('design_ref');
+  });
+  it('refuses a target that is not a date, a design_ref that is not a slug, a goal over 300 characters and a design_version of 0', () => {
+    for (const bad of [
+      base.replace('    phases: [F1, F2]', '    phases: [F1, F2]\n    target: "next week"'),
+      base.replace('    title: Esquema de pedidos\n', '    title: Esquema de pedidos\n    design_ref: "Arquitectura general"\n'),
+      base.replace('  - { id: F1, name: Base, plan_status: committed }', `  - { id: F1, name: Base, plan_status: committed, goal: "${'g'.repeat(301)}" }`),
+      base.replace('version: "0.1"\n', 'version: "0.1"\ndesign_version: 0\n'),
+    ]) expect(() => parsePlan(bad)).toThrow(PlanError);
+  });
+});

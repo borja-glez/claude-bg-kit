@@ -7,6 +7,10 @@ export function planHash(plan: Plan): string {
 }
 
 export function buildDocs(plan: Plan, nowIso: string): { meta: MetaDoc; phases: PhaseDoc[] } {
+  // G-25: the design the plan comes from, for the page's link (artifacts.design stays out of planHash, as before).
+  const links = plan.artifacts.design || plan.design_version
+    ? { ...(plan.artifacts.design ? { design: plan.artifacts.design } : {}), ...(plan.design_version ? { designVersion: plan.design_version } : {}) }
+    : null;
   return {
     meta: {
       name: plan.project,
@@ -18,11 +22,13 @@ export function buildDocs(plan: Plan, nowIso: string): { meta: MetaDoc; phases: 
       phaseOrder: plan.phases.map(p => p.id),
       metrics: {},
       syncedAt: nowIso,
+      ...(links ? { links } : {}),
     },
     phases: plan.phases.map((p, i) => ({
       id: p.id,
       name: p.name,
       plan_status: p.plan_status,
+      ...(p.goal ? { goal: p.goal } : {}),
       order: i,
       tasks: plan.tasks.filter(t => t.phase === p.id),
     })),
@@ -34,7 +40,7 @@ export function planViewFromDocs(meta: MetaDoc, phases: PhaseDoc[]): PlanView {
   return {
     tracks: meta.tracks,
     versions: meta.versions,
-    phases: ordered.map(({ id, name, plan_status }) => ({ id, name, plan_status })),
+    phases: ordered.map(({ id, name, plan_status, goal }) => ({ id, name, plan_status, ...(goal ? { goal } : {}) })),
     tasks: ordered.flatMap(p => p.tasks),
   };
 }

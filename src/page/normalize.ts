@@ -26,6 +26,15 @@ function keepAll<T>(list: unknown[], keep: (v: unknown) => v is T, field: string
   return out;
 }
 
+/** G-25: meta/project.links, the design the plan comes from: an https url and a positive version; nothing else. */
+function linksOf(x: unknown): { links?: NonNullable<MetaDoc['links']> } {
+  if (!isObj(x)) return {};
+  const links: NonNullable<MetaDoc['links']> = {};
+  if (typeof x.design === 'string' && x.design.startsWith('https://')) links.design = x.design.slice(0, 500);
+  if (typeof x.designVersion === 'number' && Number.isInteger(x.designVersion) && x.designVersion > 0) links.designVersion = x.designVersion;
+  return Object.keys(links).length ? { links } : {};
+}
+
 export function normalizeMeta(x: unknown, report?: Report): MetaDoc | null {
   if (!isObj(x)) return null;
   const mt = isObj(x.metrics) ? x.metrics : {};
@@ -39,10 +48,17 @@ export function normalizeMeta(x: unknown, report?: Report): MetaDoc | null {
     version: str(x.version),
     planHash: str(x.planHash),
     tracks: keepAll(arr(x.tracks), (t): t is PlanTrack => isObj(t) && typeof t.id === 'string' && typeof t.name === 'string', 'tracks', report),
-    versions: arr(x.versions).filter(isObj) as unknown as MetaDoc['versions'],
+    // G-25: a version's target is a date; any other value is dropped (and reported).
+    versions: arr(x.versions).filter(isObj).map((v, i) => {
+      if (v.target === undefined || (typeof v.target === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.target))) return v;
+      report?.(`versions[${i}].target`, 'dropped', kindOf(v.target));
+      const { target: _t, ...rest } = v;
+      return rest;
+    }) as unknown as MetaDoc['versions'],
     phaseOrder: arr(x.phaseOrder) as string[],
     metrics,
     syncedAt: str(x.syncedAt),
+    ...linksOf(x.links),
   };
 }
 
@@ -67,13 +83,17 @@ function normalizeTask(t: Obj): PlanTask {
 
 export function normalizePhase(x: unknown, report?: Report): PhaseDoc | null {
   if (!isObj(x) || typeof x.id !== 'string') return null;
-  return {
+  const out: PhaseDoc = {
     ...(x as unknown as PhaseDoc),
     id: x.id,
     name: str(x.name),
     order: typeof x.order === 'number' && Number.isFinite(x.order) ? x.order : 0,
     tasks: keepAll(arr(x.tasks), (t): t is Obj => isObj(t) && typeof t.id === 'string' && typeof t.title === 'string', 'tasks', report).map(normalizeTask),
   };
+  // G-25: the phase's goal, text of at most 300 characters.
+  if (typeof x.goal === 'string' && x.goal.trim()) out.goal = x.goal.slice(0, 300);
+  else delete out.goal;
+  return out;
 }
 
 export function normalizeState(x: unknown, report?: Report): TaskState {

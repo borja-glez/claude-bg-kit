@@ -97,7 +97,17 @@ export function run(argv: string[], io: Io): Result {
         // D-09: forge runs a task without zones alone (it may touch anything), so the plan should say what each touches.
         const loose = p.tasks.filter(t => !t.zones.length).map(t => t.id);
         const warning = loose.length ? `\nwarning: ${loose.length} task(s) without zones run alone in a forge execution: ${loose.join(', ')}` : '';
-        return ok(`ok: ${p.tasks.length} tasks, ${p.phases.length} phases, ${p.tracks.length} tracks${warning}`);
+        // G-25: with --design, each design_ref must name a section of the design (a warning, never a failure).
+        let refs = '';
+        const designArg = flag('design');
+        if (designArg) {
+          let slugs: Set<string>;
+          try { slugs = new Set(['_intro', ...parseDesign(readFileSync(abs(designArg), 'utf8')).sections.map(s => s.slug)]); }
+          catch (e) { return fail(`validate: cannot read the design ${designArg}: ${(e as Error).message}`, 2); }
+          const unknown = p.tasks.filter(t => t.design_ref && !slugs.has(t.design_ref)).map(t => `${t.id} (${t.design_ref})`);
+          if (unknown.length) refs = `\nwarning: ${unknown.length} design_ref(s) not in the design: ${unknown.join(', ')}`;
+        }
+        return ok(`ok: ${p.tasks.length} tasks, ${p.phases.length} phases, ${p.tracks.length} tracks${warning}${refs}`);
       }
       case 'clean-cache': {
         const p = loadPlan();
