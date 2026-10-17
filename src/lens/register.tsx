@@ -8,11 +8,12 @@ import { JOB_FILE_MAX, runRoleOf } from './activities.js';
 import { isSafeId, parseExecution } from '../lib/execution-state.js';
 import { DECISIONS_MAX } from '../lib/decisions.js';
 import { buildCards, cardAlt } from './cards.js';
-import { cardSvg, bandSvg } from './svg.js';
+import { cardSvg, bandSvg, type Card } from './svg.js';
 import { termCard, termBand, type TermUI } from './term.js';
 import { cardRows, clipCard, DOCK_COLUMNS, DOCK_MIN_COLUMNS, fitCards, panelLayout, paneRows } from './layout.js';
 import { bandLevel, controlWidth, DEFAULT_COLUMNS, fitParts, joinParts, partsWidth } from '../mod/band-fit.js';
 import { lensBand } from './lens-band.js';
+import { keepPhoto, lensMode, photoId, photoText } from './photo.js';
 import { PALETTE, SECTION_HUE, SECTION_ICON } from './view.js';
 import { freshFinished, pushFinished, withoutRunning, type FinishedAgent } from './finished.js';
 import { endTurn, labelLoop, newTurnClock, newUsage, startTurn, touchTurn, recordStep, recordTracking, trackingKind, compactUsage, type UsageState } from './usage.js';
@@ -895,6 +896,7 @@ const TEXT = {
     panelWaiting: 'El panel lens está abierto pero aún no se muestra', nothing: 'Nada que mostrar todavía',
     moreRows: (n: number) => `↓ ${n} más · /lens foto`,
     bandHint: 'ctrl+x tab · banda',
+    photoTasks: (n: number) => (n === 0 ? 'sin tareas' : n === 1 ? '1 tarea' : `${n} tareas`),
     noTask: 'sin tarea en curso', track: 'frente', decision: 'decisión pendiente',
     sRoadmap: 'Roadmap', sSuperpowers: 'superpowers', sNow: 'Ahora', sTodos: 'Pendientes', sSubagents: 'Subagentes',
     sTasks: 'Tareas de Claude Code', fixRound: 'ronda', phase: 'Fase', done: 'hechas', open: 'abiertas', tool: 'herramienta', turn: 'turno',
@@ -917,6 +919,7 @@ const TEXT = {
     panelWaiting: 'The lens panel is open but not shown yet', nothing: 'Nothing to show yet',
     moreRows: (n: number) => `↓ ${n} more · /lens photo`,
     bandHint: 'ctrl+x tab · band',
+    photoTasks: (n: number) => (n === 0 ? 'no tasks' : n === 1 ? '1 task' : `${n} tasks`),
     noTask: 'no task in progress', track: 'track', decision: 'decision pending',
     sRoadmap: 'Roadmap', sSuperpowers: 'superpowers', sNow: 'Now', sTodos: 'Todos', sSubagents: 'Subagents',
     sTasks: 'Claude Code tasks', fixRound: 'round', phase: 'Phase', done: 'done', open: 'open', tool: 'tool', turn: 'turn',
@@ -960,6 +963,28 @@ async function openPanel($: Engine): Promise<boolean> {
   return placed;
 }
 
+// Step 3 of §4.6: the photos `/lens` took, by number, at most PHOTOS_MAX: the cards as they were, never moving.
+const photos = new Map<number, { cards: Card[] }>();
+let photoCount = 0;
+
+// Step 3 of §4.6: the files read once, the model and its cards built and kept under a new number; the command answers
+// one line, so a model that reads command output pays for one line only. Nothing is written to $.state.
+async function takePhoto($: Engine): Promise<string> {
+  const now = await nowMs($);
+  if (sessionId === null) {
+    try { sessionId = await sessionIdNow($); } catch { /* nothing is own by its session */ }
+  }
+  try { roadmap = await loadBandModel($); } catch { /* keep the last one */ }
+  try { panelFiles = await loadPanelFiles($, now); } catch { /* the files read last */ }
+  const model = await buildPanel($);
+  keepBand($, model);
+  const t = textsFor(model.locale);
+  const tasks = model.activities.filter(a => a.kind === 'forge' || a.kind === 'workflow').length;
+  const n = ++photoCount;
+  keepPhoto(photos, n, { cards: buildCards(model, t, now) });
+  return photoText(n, now, t.photoTasks(tasks));
+}
+
 const RISK_HUE: Record<string, 'green' | 'yellow' | 'red'> = { low: 'green', medium: 'yellow', high: 'red' };
 
 // A decision runs /forge:decide; where it cannot run from here it is left in the prompt for the person to send.
@@ -985,7 +1010,7 @@ export const register: Register = on => {
     waypointBand = false;
     roadmap = noneBand();
     try { if (await read($, hidden)) await update($, hidden, () => false); } catch { /* ignore */ }
-    try { await $.command.register({ name: 'lens', description: 'Show the lens progress panel', immediate: true }); } catch { /* ignore */ }
+    try { await $.command.register({ name: 'lens', description: 'Show the lens progress panel', argumentHint: '[live|foto]', immediate: true }); } catch { /* ignore */ }
     // One timer per environment: a later session start replaces it rather than adding another.
     timer?.cancel();
     timer = $.clock.every(30000, () => { void tick($); });
@@ -1042,10 +1067,34 @@ export const register: Register = on => {
     return r;
   }).catch(($, e, next) => next(e));
 
-  on('command.run', { command: 'lens' }, async $ => {
+  // Steps 2 and 3 of §4.6: /lens opens the pane where it docks (fullscreen, 110 columns or more); elsewhere it leaves a
+  // photo in the transcript, which keeps the live region small (F-15). /lens live (or pane) opens the pane anyway;
+  // /lens foto (or photo) always takes the photo.
+  on('command.run', { command: 'lens' }, async ($, e) => {
     const t = lensTexts();
+    if (lensMode(e.args, e.presentation) === 'photo') return { text: await takePhoto($) };
     const placed = await openPanel($);
     return { text: placed ? t.panelOpened : `${t.panelWaiting}.` };
+  });
+
+  // Step 3 of §4.6: the row of a photo /lens took, drawn from module memory, still and compact: its line and its cards.
+  // A line this module does not hold (after a reload, on another surface, or written by hand) stays the engine's.
+  on('ui.render', { component: 'CommandOutput', props: { command: 'lens' } }, async ($, e, next) => {
+    try {
+      const n = photoId(e.props.text);
+      const shot = n === null ? undefined : photos.get(n);
+      if (!shot) return next(e);
+      const { Box, Text } = $.ui.resolve(e);
+      const layout = panelLayout({ bodyColumns: Number(e.viewport?.columns) || LINE_MAX, placement: 'inline' });
+      return (
+        <Box flexDirection="column">
+          <Text dimColor>{e.props.text}</Text>
+          {shot.cards.map((card, i) => termCard({ Box, Text }, `photo-${n}-${i}`, card, layout))}
+        </Box>
+      );
+    } catch {
+      return next(e);
+    }
   });
 
   // I-11: every hook that gates (ui.close, agent.spawn, tool.call and the classic ones) goes on when it fails.
