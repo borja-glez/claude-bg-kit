@@ -139,6 +139,46 @@ describe('buildDesignPageData: the rounds, what became of each proposal and what
     expect(once).toMatchObject({ status: 'approved', amended: false });
     expect(data).toMatchObject({ status: 'draft', amended: false, rounds: 0, critiques: [] });
   });
+  it('gives a proposal one fate when the gate lists it in several: applied, then resolved, dismissed, rewritten, pending', () => {
+    const all = buildDesignPageData({
+      current: fixture, history: {}, source: 's/',
+      changelog: [
+        { version: 1, date: 'd', note: 'ronda 1: aplicadas 1', words: 1, round: 1 },
+        { version: 2, date: 'd', note: 'x', words: 1, round: 1, resolved: [{ round: 1, n: 1 }, { round: 1, n: 2 }] },
+      ],
+      critiques: [{ round: 1, critique: { round: 1, version: 1, scope: 'full', proposals: [prop(1, 'minor', 'a'), prop(2, 'minor', 'a'), prop(3, 'minor', 'a')] } }],
+      dismissed: { 1: [{ n: 1 }, { n: 2 }, { n: 3 }] },
+    });
+    expect(all.critiques[0].proposals.map(p => [p.n, p.fate, p.appliedIn ?? null])).toEqual([[1, 'applied', 1], [2, 'resolved', null], [3, 'dismissed', null]]);
+  });
+  it('bounds and cleans the critique texts it hands the page: 40 newest per list, 300 clean code points, the rest counted', () => {
+    const bidi = String.fromCharCode(0x202e);
+    const bell = String.fromCharCode(7);
+    const hostile = (n: number) => ({ ...prop(n, 'minor', `sec${bell}\n${bidi}<script>`), problem: `${bidi}<script>${bell}\n${'x'.repeat(5000)}`, change: `<img onerror=1>${'y'.repeat(5000)}` });
+    const big = buildDesignPageData({
+      current: fixture, history: {}, source: 's/', changelog: [],
+      critiques: [
+        { round: 1, critique: { round: 1, version: 1, scope: 'full', proposals: Array.from({ length: 200 }, (_, i) => hostile(i + 1)) } },
+        ...Array.from({ length: 49 }, (_, i) => ({ round: i + 2, critique: { round: i + 2, version: 1, scope: 'full' as const, proposals: [hostile(1)] } })),
+      ],
+    });
+    expect(big.rounds).toBe(50);
+    expect(big.critiques).toHaveLength(40);
+    expect(big.critiquesMore).toBe(10);
+    expect(big.critiques[0].round).toBe(11);
+    const first = buildDesignPageData({ current: fixture, history: {}, source: 's/', changelog: [], critiques: [{ round: 1, critique: { round: 1, version: 1, scope: 'full', proposals: Array.from({ length: 200 }, (_, i) => hostile(i + 1)) } }] }).critiques[0];
+    expect(first.proposals).toHaveLength(40);
+    expect(first.proposals[0].n).toBe(161);
+    expect(first.proposalsMore).toBe(160);
+    for (const p of first.proposals) {
+      for (const t of [p.section, p.problem, p.change]) {
+        expect(Array.from(t).length).toBeLessThanOrEqual(300);
+        expect(Array.from(t).filter(c => c.codePointAt(0)! < 32 || c.codePointAt(0)! === 127 || (c.codePointAt(0)! >= 0x202a && c.codePointAt(0)! <= 0x202e) || (c.codePointAt(0)! >= 0x2066 && c.codePointAt(0)! <= 0x2069))).toEqual([]);
+      }
+    }
+    expect(JSON.stringify(big).length).toBeLessThan(40 * 40 * 1000);
+    expect(buildDesignPageData({ current: fixture, history: {}, source: 's/', changelog: [], critiques: [{ round: 1, critique: { round: 1, version: 1, scope: 'full', proposals: [prop(1, 'minor', 'a')] } }] })).not.toHaveProperty('critiquesMore');
+  });
   it('gives every version but the first what it changed, added and removed against the one before, by heading', () => {
     expect(rich.versions.map(v => v.diff)).toEqual([
       null,

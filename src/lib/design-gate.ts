@@ -33,7 +33,7 @@ export const REASON_MAX = 300;
 export const GATE_LIST_MAX = 40;
 export const GATE_TEXT_MAX = 300;
 /** A critique's text as one clean line of GATE_TEXT_MAX code points at most. */
-const line = (s: string): string => Array.from(clean(s, Number.MAX_SAFE_INTEGER)).slice(0, GATE_TEXT_MAX).join('');
+export const line = (s: string): string => Array.from(clean(s, Number.MAX_SAFE_INTEGER)).slice(0, GATE_TEXT_MAX).join('');
 
 /** Notes written before `applied` and `rewrite` existed, in English or Spanish: "round 1: applied 1,3 — …",
  *  "ronda 1: aplicadas 1, 3 y 5 — …"; "round 2: rewrite — …", "ronda 2: reescritura — …". */

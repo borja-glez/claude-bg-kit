@@ -2,7 +2,7 @@ import { changedSections, designBody, parseDesign, sectionsOf, type DesignMeta }
 import { entryKind, type ChangelogEntry } from '../lib/history.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { verdictOf, type Critique, type Proposal, type Verdict } from '../lib/critique.js';
-import { appliedVersion, resolvedIn, rewroteRound, type Dismissed, type GateCritique } from '../lib/design-gate.js';
+import { appliedVersion, resolvedIn, rewroteRound, line, GATE_LIST_MAX, type Dismissed, type GateCritique } from '../lib/design-gate.js';
 
 /** K3-09: what became of a proposal. */
 export type Fate = 'applied' | 'resolved' | 'dismissed' | 'rewritten' | 'pending';
@@ -13,7 +13,11 @@ export interface PageProposal extends Proposal {
   /** The version whose entry applied it. */
   appliedIn?: number;
 }
-export interface PageCritique { round: number; version: number; scope: Critique['scope']; verdict: Verdict; proposals: PageProposal[] }
+export interface PageCritique {
+  round: number; version: number; scope: Critique['scope']; verdict: Verdict; proposals: PageProposal[];
+  /** How many older proposals `proposals` left out (the newest GATE_LIST_MAX are kept); present only when not 0. */
+  proposalsMore?: number;
+}
 /** K3-09: what a version changed against the one before it, by heading (`_intro`: the text before the first heading). */
 export interface VersionDiff { changed: string[]; added: string[]; removed: string[] }
 
@@ -27,11 +31,18 @@ export interface DesignPageData {
   status: DesignMeta['status'];
   /** An amendment came after the last approval. */
   amended: boolean;
+  /** The newest GATE_LIST_MAX valid critiques, by round; the texts are clean lines (HTML escaping is the page's job). */
   critiques: PageCritique[];
+  /** How many older critiques `critiques` left out; present only when not 0. */
+  critiquesMore?: number;
   versions: { version: number; date: string; note: string; words: number; html: string; toc: { level: 2 | 3; heading: string; slug: string }[]; diff: VersionDiff | null }[];
 }
 
-/** K3-09: applied (and in which version), resolved in an interview, dismissed (with its reason), folded in by a rewrite of its round, or pending. */
+/**
+ * K3-09: applied (and in which version), resolved in an interview, dismissed (with its reason), folded in by a rewrite of
+ * its round, or pending. The gate lists a proposal in every list it belongs to; the page shows one fate, in this order of
+ * precedence: applied, resolved, dismissed, rewritten, pending.
+ */
 export function fateOf(changelog: ChangelogEntry[], dismissed: Dismissed, round: number, n: number): Pick<PageProposal, 'fate' | 'reason' | 'appliedIn'> {
   const at = appliedVersion(changelog, round, n);
   if (at !== null) return { fate: 'applied', appliedIn: at };
@@ -83,22 +94,33 @@ export function buildDesignPageData(input: {
     };
   });
   const dismissed = input.dismissed ?? {};
-  const critiques: PageCritique[] = [...(input.critiques ?? [])]
+  // The page data stays bounded and clean like the gate's lists: the newest GATE_LIST_MAX rounds and, in each, the newest
+  // GATE_LIST_MAX proposals, with their texts as one clean line of 300 code points at most; the rest is counted.
+  const valid = [...(input.critiques ?? [])]
     .sort((a, b) => a.round - b.round)
-    .flatMap(({ round, critique }) => (critique ? [{
+    .flatMap(({ round, critique }) => (critique ? [{ round, critique }] : []));
+  const critiques: PageCritique[] = valid.slice(-GATE_LIST_MAX).map(({ round, critique }) => {
+    const more = Math.max(0, critique.proposals.length - GATE_LIST_MAX);
+    return {
       round, version: critique.version, scope: critique.scope, verdict: critique.verdict ?? verdictOf(critique),
-      proposals: critique.proposals.map(p => ({ ...p, ...fateOf(input.changelog, dismissed, round, p.n) })),
-    }] : []));
+      proposals: critique.proposals.slice(-GATE_LIST_MAX).map(p => ({
+        ...p, section: line(p.section), problem: line(p.problem), change: line(p.change), ...fateOf(input.changelog, dismissed, round, p.n),
+      })),
+      ...(more ? { proposalsMore: more } : {}),
+    };
+  });
+  const critiquesMore = valid.length - critiques.length;
   const kinds = input.changelog.map(entryKind);
   return {
     meta: cur.meta,
     words: cur.words,
-    rounds: critiques.length,
+    rounds: valid.length,
     source: input.source,
     current: currentNo,
     status: cur.meta.status,
     amended: cur.meta.status === 'approved' && kinds.lastIndexOf('amend') > kinds.lastIndexOf('approve'),
     critiques,
+    ...(critiquesMore ? { critiquesMore } : {}),
     versions,
   };
 }
