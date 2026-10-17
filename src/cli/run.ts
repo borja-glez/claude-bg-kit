@@ -8,10 +8,11 @@ import { availableTasks, commitShas } from '../lib/deps.js';
 import { pickTask, conflictsFor, recoverableTasks, inboxFor, escalationCandidates, isIdle, IDLE_MINUTES } from '../lib/coordination.js';
 import { parseDesign, changedSections, designBody, DesignError, setDesignStatus } from '../lib/design.js';
 import { importSpec, SpecImportError } from '../lib/design-import.js';
-import { designGate, mergeDismissed, parseDismissed } from '../lib/design-gate.js';
-import { listVersions, nextVersion, parseChangelog, appendChangelog, parseAppliedItems, AppliedError } from '../lib/history.js';
+import { designGate, mergeDismissed } from '../lib/design-gate.js';
+import { listVersions, nextVersion, parseChangelog, appendChangelog, parseAppliedItems, roundList, AppliedError } from '../lib/history.js';
 import { parseCritique, selectProposals, formatProposals, CritiqueError, budgetFor, budgetIssues } from '../lib/critique.js';
 import { buildDesignPageData } from '../design-page/build.js';
+import { designFilesOf, readCritiques, readDismissedOf, readHistory, writeDismissed } from './design-files.js';
 import { eventId, eventIds, sessionIdFrom } from '../lib/ids.js';
 import { computeMetrics } from '../lib/metrics.js';
 import { normalizeNote, notesSince, noteLines } from '../lib/notes.js';
@@ -679,34 +680,38 @@ export function run(argv: string[], io: Io): Result {
         const roundFlag = flag('round');
         const round = roundFlag !== undefined ? Number(roundFlag) : (log[log.length - 1]?.round ?? 0);
         if (!Number.isInteger(round) || round < 0) return fail('design-snapshot: --round must be a non-negative integer', 2);
-        // A-04: what this entry applied, and whether its rewrite folded in its round; all checked before anything is written.
-        const local = path.join(io.cwd, '.waypoint', d.meta.project);
-        const critiqueOf = (r: number) => {
-          const f = path.join(local, `critique-r${r}.json`);
-          if (!existsSync(f)) return null;
-          try { return parseCritique(readFileSync(f, 'utf8')); } catch { return null; }
-        };
-        let applied: Record<number, number[]> | null = null;
-        const at = args.indexOf('--applied');
-        if (at >= 0) {
+        // A-04, K3-02: what this entry applied and what its interview resolved, checked against the critiques (K3-10:
+        // docs/…/critiques/ first, then .waypoint/<project>/) before anything is written. An id that is in no critique
+        // is an error (exit 2) that names it, never ignored.
+        const files = designFilesOf(file, d.meta.project);
+        const critiques = readCritiques(files);
+        const critiqueOf = (r: number) => critiques.find(c => c.round === r)?.critique ?? null;
+        const items: { applied: Record<number, number[]> | null; resolved: Record<number, number[]> | null } = { applied: null, resolved: null };
+        for (const name of ['applied', 'resolved'] as const) {
+          const at = args.indexOf(`--${name}`);
+          if (at < 0) continue;
           const end = args.findIndex((a, i) => i > at && a.startsWith('--'));
-          try { applied = parseAppliedItems(args.slice(at + 1, end < 0 ? args.length : end), roundFlag !== undefined ? round : null); } catch (e) {
+          let got: Record<number, number[]>;
+          try { got = parseAppliedItems(args.slice(at + 1, end < 0 ? args.length : end), roundFlag !== undefined ? round : null, name); } catch (e) {
             if (e instanceof AppliedError) return fail(`design-snapshot: ${e.message}`, 2);
             throw e;
           }
-          for (const [r, ns] of Object.entries(applied)) {
+          for (const [r, ns] of Object.entries(got)) {
             const c = critiqueOf(Number(r));
-            if (!c) return fail(`design-snapshot: round ${r} has no critique (${path.join(local, `critique-r${r}.json`)})`, 2);
-            const missing = ns.find(n => !c.proposals.some(p => p.n === n));
-            if (missing !== undefined) return fail(`design-snapshot: round ${r} has no proposal ${missing}`, 2);
+            if (!c) return fail(`design-snapshot: round ${r} has no critique (${path.join(files.critiques, `r${r}.json`)})`, 2);
+            const missing = ns.filter(n => !c.proposals.some(p => p.n === n));
+            if (missing.length) return fail(`design-snapshot: round ${r} has no proposal ${missing.join(', ')}`, 2);
           }
+          items[name] = got;
         }
+        const applied = items.applied;
+        const resolved = items.resolved ? roundList(items.resolved) : null;
         const rewrite = args.includes('--rewrite');
         if (rewrite && (roundFlag === undefined || !critiqueOf(round))) return fail('design-snapshot: --rewrite needs --round <R> and the critique of that round', 2);
         // Pure check first so a stale changelog fails before anything is written.
         const next = appendChangelog(log, {
           version, date: io.now().toISOString().slice(0, 10), note, words: d.words, round,
-          ...(applied ? { applied } : {}), ...(rewrite ? { rewrite: true as const } : {}),
+          ...(applied ? { applied } : {}), ...(rewrite ? { rewrite: true as const } : {}), ...(resolved ? { resolved } : {}),
         });
         mkdirSync(histDir, { recursive: true });
         const dest = path.join(histDir, `v${version}.md`);
@@ -715,7 +720,7 @@ export function run(argv: string[], io: Io): Result {
           throw e;
         }
         writeFileSync(path.join(base, 'changelog.json'), JSON.stringify(next, null, 2) + '\n');
-        return ok(JSON.stringify({ version, path: dest, ...(applied ? { applied } : {}) }));
+        return ok(JSON.stringify({ version, path: dest, ...(applied ? { applied } : {}), ...(resolved ? { resolved } : {}) }));
       }
       case 'design-changed': {
         const file = abs(args[0]);
@@ -739,41 +744,48 @@ export function run(argv: string[], io: Io): Result {
       case 'design-gate': {
         if (!args[0] || args[0].startsWith('--')) return fail('usage: waypoint design-gate <design.md>', 2);
         const file = abs(args[0]);
-        const d = parseDesign(readFileSync(file, 'utf8'));
-        const local = path.join(io.cwd, '.waypoint', d.meta.project);
-        const critiques = (existsSync(local) ? readdirSync(local) : []).flatMap(f => {
-          const m = /^critique-r(\d+)\.json$/.exec(f);
-          if (!m) return [];
-          let critique = null;
-          try { critique = parseCritique(readFileSync(path.join(local, f), 'utf8')); } catch { critique = null; }
-          return [{ round: Number(m[1]), critique }];
-        });
-        // K3-06: the texts of the history and of the file, so needsVerify compares the bodies.
-        const histDir = path.join(path.dirname(file), 'design', 'history');
-        const history: Record<number, string> = {};
-        for (const v of listVersions(existsSync(histDir) ? readdirSync(histDir) : [])) history[v] = readFileSync(path.join(histDir, `v${v}.md`), 'utf8');
-        return ok(JSON.stringify(designGate(readChangelog(path.dirname(file)), critiques, readDismissed(local), { history, current: readFileSync(file, 'utf8') })));
+        const text = readFileSync(file, 'utf8');
+        const d = parseDesign(text);
+        // K3-10: the critiques and dismissed.json from the design's folder (docs/ first, then .waypoint/), never from the
+        // working directory; K3-06: the history and the file, so that needsVerify compares the bodies.
+        const files = designFilesOf(file, d.meta.project);
+        return ok(JSON.stringify(designGate(readChangelog(files.dir), readCritiques(files), readDismissedOf(files), { history: readHistory(files.dir), current: text })));
       }
       case 'critique-dismiss': {
-        // waypoint critique-dismiss <design> --round <R> <spec>: the spec is the argument after the design that is not --round's value.
-        const usage = 'usage: waypoint critique-dismiss <design.md> --round <R> <all|1,3>';
+        // waypoint critique-dismiss <design> --round <R> <spec> [--reason-file <f>]: the spec is the argument after the
+        // design that is no flag nor a flag's value.
+        const usage = 'usage: waypoint critique-dismiss <design.md> --round <R> <all|1,3> [--reason-file <f>]';
+        const valued = new Set(['--round', '--reason-file']);
         const rest = args.slice(1);
-        const spec = rest.filter((a, i) => a !== '--round' && rest[i - 1] !== '--round')[0];
+        const spec = rest.filter((a, i) => !valued.has(a) && !valued.has(rest[i - 1]))[0];
         const roundFlag = flag('round');
         if (!args[0] || args[0].startsWith('--') || !args.includes('--round') || !spec || spec.startsWith('--')) return fail(usage, 2);
         if (!roundFlag || !/^[1-9]\d*$/.test(roundFlag)) return fail('critique-dismiss: --round must be a positive integer', 2);
         const round = Number(roundFlag);
-        const d = parseDesign(readFileSync(abs(args[0]), 'utf8'));
-        const local = path.join(io.cwd, '.waypoint', d.meta.project);
-        const critiqueFile = path.join(local, `critique-r${round}.json`);
-        if (!existsSync(critiqueFile)) return fail(`critique-dismiss: no critique for round ${round} (${critiqueFile})`, 2);
-        let numbers: number[];
-        try { numbers = selectProposals(parseCritique(readFileSync(critiqueFile, 'utf8')), spec).map(p => p.n); } catch (e) {
+        // K3-05: the person's reason comes in a file, so their words never go through a shell string.
+        let reason: string | undefined;
+        if (args.includes('--reason-file')) {
+          const reasonFile = flag('reason-file');
+          if (!reasonFile || reasonFile.startsWith('--')) return fail(usage, 2);
+          try { reason = readFileSync(abs(reasonFile), 'utf8'); } catch { return fail(`critique-dismiss: cannot read ${reasonFile}`, 2); }
+        }
+        const file = abs(args[0]);
+        const d = parseDesign(readFileSync(file, 'utf8'));
+        const files = designFilesOf(file, d.meta.project);
+        const entry = readCritiques(files).find(c => c.round === round);
+        if (!entry) return fail(`critique-dismiss: no critique for round ${round} (${path.join(files.critiques, `r${round}.json`)})`, 2);
+        if (!entry.critique) return fail(`critique-dismiss: the critique of round ${round} is not valid (${entry.file})`, 2);
+        let picked: { n: number; severity: string }[];
+        try { picked = selectProposals(entry.critique, spec); } catch (e) {
           if (e instanceof CritiqueError) return fail(`critique-dismiss: ${e.message}`, 2);
           throw e;
         }
-        const next = mergeDismissed(readDismissed(local), round, numbers);
-        writeFileSync(path.join(local, 'dismissed.json'), JSON.stringify(next, null, 2) + '\n');
+        // K3-10: written in docs/, with the dismissals read from .waypoint/ carried over.
+        const next = mergeDismissed(readDismissedOf(files), round, picked.map(p => p.n), reason);
+        // A decided critical or major always keeps its reason (a minor may go without one).
+        const bare = picked.filter(p => p.severity !== 'minor' && !(next[round] ?? []).find(x => x.n === p.n)?.reason).map(p => p.n);
+        if (bare.length) return fail(`critique-dismiss: ${bare.length === 1 ? 'proposal' : 'proposals'} ${bare.join(', ')} of round ${round} ${bare.length === 1 ? 'is' : 'are'} major or critical and need a reason: pass --reason-file <f> with the person's words`, 2);
+        writeDismissed(files, next);
         return ok(JSON.stringify({ round, dismissed: (next[round] ?? []).map(x => x.n) }));
       }
       case 'critique-check': {
@@ -964,12 +976,6 @@ const jsonFiles = (dir: string): string[] => (existsSync(dir) ? readdirSync(dir)
 function evidenceUploaded(root: string): boolean {
   if (!existsSync(path.join(root, '.forge'))) return false;
   try { return loadConfig(root).evidence !== 'local'; } catch { return true; }
-}
-
-// .waypoint/<project>/dismissed.json: the proposals the person set aside, by round (missing or junk: none).
-function readDismissed(local: string) {
-  const f = path.join(local, 'dismissed.json');
-  return parseDismissed(existsSync(f) ? readFileSync(f, 'utf8') : null);
 }
 
 function readChangelog(designDir: string) {

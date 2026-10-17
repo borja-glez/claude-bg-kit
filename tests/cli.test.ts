@@ -1767,8 +1767,11 @@ describe('design-gate', () => {
       const a = run(['critique-dismiss', rel, '--round', '1', '3'], io);
       expect(a.code).toBe(0);
       expect(JSON.parse(a.stdout)).toEqual({ round: 1, dismissed: [3] });
-      expect(JSON.parse(run(['critique-dismiss', rel, '--round', '1', '2,3'], io).stdout)).toEqual({ round: 1, dismissed: [2, 3] });
-      expect(JSON.parse(readFileSync(path.join(local(), 'dismissed.json'), 'utf8'))).toEqual({ 1: [{ n: 2 }, { n: 3 }] });
+      // 2 is critical: a decided critical or major needs its reason (K3-05)
+      expect(run(['critique-dismiss', rel, '--round', '1', '2,3'], io).code).toBe(2);
+      writeFileSync(path.join(dir, 'why.txt'), 'out of scope');
+      expect(JSON.parse(run(['critique-dismiss', rel, '--round', '1', '2,3', '--reason-file', 'why.txt'], io).stdout)).toEqual({ round: 1, dismissed: [2, 3] });
+      expect(JSON.parse(readFileSync(path.join(dir, 'docs/waypoint/demo-shop/design/critiques/dismissed.json'), 'utf8'))).toEqual({ 1: [{ n: 2, reason: 'out of scope' }, { n: 3, reason: 'out of scope' }] });
       expect(JSON.parse(run(['critique-dismiss', rel, '--round', '2', 'all'], io).stdout)).toEqual({ round: 2, dismissed: [] });
       expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ pending: [], criticalPending: [], canAutoApprove: true });
     });
@@ -1780,9 +1783,103 @@ describe('design-gate', () => {
       expect(run(['critique-dismiss', rel, '1'], io).code).toBe(2);
       expect(run(['critique-dismiss', rel, '--round', '1'], io).code).toBe(2);
       expect(run(['critique-dismiss'], io).code).toBe(2);
-      expect(existsSync(path.join(local(), 'dismissed.json'))).toBe(false);
+      expect(existsSync(path.join(dir, 'docs/waypoint/demo-shop/design/critiques/dismissed.json'))).toBe(false);
       expect(run(['nope'], io).stderr).toContain('critique-dismiss');
     });
+  });
+});
+
+describe('critiques in docs/ (K3-10), dismissed with a reason (K3-05) and resolved in an interview (K3-02)', () => {
+  const rel = 'docs/waypoint/demo-shop/design.md';
+  const docs = () => path.join(dir, 'docs/waypoint/demo-shop/design/critiques');
+  const legacy = () => path.join(dir, '.waypoint/demo-shop');
+  const prop = (n: number, severity: string) => ({ n, category: 'gap', severity, section: '_intro', problem: `p${n}`, change: `c${n}` });
+  const crit = (where: string, name: string, round: number, version: number, sevs: string[]) => {
+    mkdirSync(where, { recursive: true });
+    writeFileSync(path.join(where, name), JSON.stringify({ round, version, scope: 'full', proposals: sevs.map((s, i) => prop(i + 1, s)) }));
+  };
+  beforeEach(() => {
+    mkdirSync(path.join(dir, 'docs/waypoint/demo-shop'), { recursive: true });
+    copyFileSync(new URL('./fixtures/design.md', import.meta.url), path.join(dir, rel));
+    run(['design-snapshot', rel, '--note', 'v1', '--round', '0'], io);
+  });
+  it('design-gate finds the critiques in docs/ from another working directory; a round only .waypoint/ has is read too, and docs/ wins a round both have (Review Focus 3)', () => {
+    crit(docs(), 'r1.json', 1, 1, ['major']);
+    const elsewhere = mkdtempSync(path.join(tmpdir(), 'wp-else-'));
+    expect(JSON.parse(run(['design-gate', path.join(dir, rel)], { ...io, cwd: elsewhere }).stdout)).toMatchObject({ rounds: 1, latestRound: 1, majorPending: [{ round: 1, n: 1 }] });
+    rmSync(elsewhere, { recursive: true, force: true });
+    crit(legacy(), 'critique-r1.json', 1, 1, ['critical', 'critical']);
+    crit(legacy(), 'critique-r2.json', 2, 1, ['minor']);
+    expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ rounds: 2, latestRound: 2, criticalPending: [], pendingCounts: { critical: 0, major: 1, minor: 1 } });
+  });
+  it('critique-dismiss writes dismissed.json in docs/ with the cleaned reason, carries over the old dismissals, and the gate lists them (Review Focus 1, 4)', () => {
+    crit(docs(), 'r1.json', 1, 1, ['major', 'minor', 'minor']);
+    mkdirSync(legacy(), { recursive: true });
+    writeFileSync(path.join(legacy(), 'dismissed.json'), JSON.stringify({ 1: [3] }));
+    writeFileSync(path.join(dir, 'why.txt'), `fuera de alcance${String.fromCharCode(0x202e)}\n${'x'.repeat(400)}`);
+    const r = run(['critique-dismiss', rel, '--round', '1', '2', '--reason-file', 'why.txt'], io);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toEqual({ round: 1, dismissed: [2, 3] });
+    const saved = JSON.parse(readFileSync(path.join(docs(), 'dismissed.json'), 'utf8'));
+    expect(saved[1]).toHaveLength(2);
+    expect(saved[1][0].n).toBe(2);
+    expect(saved[1][0].reason.startsWith('fuera de alcance x')).toBe(true);
+    expect(saved[1][0].reason).toHaveLength(300);
+    expect(saved[1][1]).toEqual({ n: 3 });
+    const g = JSON.parse(run(['design-gate', rel], io).stdout);
+    expect(g.dismissed).toEqual([{ round: 1, n: 2, section: '_intro', problem: 'p2', reason: saved[1][0].reason }, { round: 1, n: 3, section: '_intro', problem: 'p3' }]);
+    expect(g.pending.map((p: { n: number }) => p.n)).toEqual([1]);
+    expect(run(['critique-dismiss', rel, '--round', '1', '2', '--reason-file', 'missing.txt'], io).code).toBe(2);
+    expect(run(['critique-dismiss', rel, '--round', '1', '2', '--reason-file'], io).code).toBe(2);
+  });
+  it('critique-dismiss needs a reason for a major or critical finding (the file, not blank) and lets a minor go without one', () => {
+    crit(docs(), 'r1.json', 1, 1, ['major', 'critical', 'minor']);
+    const none = path.join(docs(), 'dismissed.json');
+    expect(run(['critique-dismiss', rel, '--round', '1', '1'], io).code).toBe(2);
+    expect(run(['critique-dismiss', rel, '--round', '1', 'all'], io).code).toBe(2);
+    writeFileSync(path.join(dir, 'blank.txt'), `  \n${String.fromCharCode(0x202e)}\n`);
+    expect(run(['critique-dismiss', rel, '--round', '1', '2', '--reason-file', 'blank.txt'], io).code).toBe(2);
+    expect(existsSync(none)).toBe(false);
+    expect(run(['critique-dismiss', rel, '--round', '1', '3'], io).code).toBe(0);
+    writeFileSync(path.join(dir, 'why.txt'), 'covered by the payments design');
+    expect(run(['critique-dismiss', rel, '--round', '1', '1,2', '--reason-file', 'why.txt'], io).code).toBe(0);
+    expect(JSON.parse(readFileSync(none, 'utf8'))).toEqual({ 1: [
+      { n: 1, reason: 'covered by the payments design' }, { n: 2, reason: 'covered by the payments design' }, { n: 3 },
+    ] });
+    // a major that already has its reason can be set aside again without a new one
+    expect(run(['critique-dismiss', rel, '--round', '1', '1'], io).code).toBe(0);
+  });
+  it('critique-dismiss refuses a round whose critique is broken', () => {
+    mkdirSync(docs(), { recursive: true });
+    writeFileSync(path.join(docs(), 'r1.json'), '{bad');
+    expect(run(['critique-dismiss', rel, '--round', '1', 'all'], io).code).toBe(2);
+    expect(existsSync(path.join(docs(), 'dismissed.json'))).toBe(false);
+  });
+  it('design-snapshot --resolved records what an interview resolved, checked against the critiques, and the gate stops counting it (K3-02)', () => {
+    crit(docs(), 'r1.json', 1, 1, ['major', 'major']);
+    const r = run(['design-snapshot', rel, '--note', 'entrevista', '--round', '1', '--resolved', 'r1:2'], io);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout).resolved).toEqual([{ round: 1, n: 2 }]);
+    const g = JSON.parse(run(['design-gate', rel], io).stdout);
+    expect(g.resolved).toEqual([{ round: 1, n: 2, section: '_intro', problem: 'p2' }]);
+    expect(g.pending.map((p: { n: number }) => p.n)).toEqual([1]);
+    expect(g.needsVerify).toBe(false);
+    for (const bad of [['--resolved', 'r1:9'], ['--resolved', 'r2:1'], ['--resolved']]) {
+      expect(run(['design-snapshot', rel, '--note', 'x', '--round', '1', ...bad], io).code, bad.join(' ')).toBe(2);
+    }
+  });
+  it('design-snapshot --resolved names every id that is in no critique and writes nothing', () => {
+    crit(docs(), 'r1.json', 1, 1, ['major']);
+    const r = run(['design-snapshot', rel, '--note', 'x', '--round', '1', '--resolved', 'r1:1,7,9'], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('7');
+    expect(r.stderr).toContain('9');
+    expect(existsSync(path.join(dir, 'docs/waypoint/demo-shop/design/history/v2.md'))).toBe(false);
+  });
+  it('design-snapshot --applied checks the proposals against a critique in docs/', () => {
+    crit(docs(), 'r1.json', 1, 1, ['major']);
+    expect(run(['design-snapshot', rel, '--note', 'r1', '--round', '1', '--applied', 'r1:2'], io).code).toBe(2);
+    expect(run(['design-snapshot', rel, '--note', 'r1', '--round', '1', '--applied', 'r1:1'], io).code).toBe(0);
   });
 });
 
