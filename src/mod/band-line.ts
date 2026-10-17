@@ -1,4 +1,5 @@
 import type { BandModel, NoticeBand } from './model.js';
+import { clipWidth } from '../lib/text-width.js';
 
 const TITLE_MAX = 40;
 // A slot's task id in the run line: loose task ids (`<slug>-<tag>`) run up to 45 characters.
@@ -10,10 +11,12 @@ const BIDI = new RegExp(`[${[0x061c, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x2
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
 
-/** A title or an id as the band shows it: one line, without control or bidi characters, at most `max` characters. */
+/**
+ * A title or an id as the band shows it: one line, without control or bidi characters, cut by the cells it takes (F-13),
+ * not by code points: a wide title is cut where the terminal would cut it.
+ */
 export function clip(text: string, max = TITLE_MAX): string {
-  const chars = Array.from(String(text).replace(CONTROL, ' ').replace(BIDI, '').replace(/\s+/g, ' ').trim());
-  return chars.length <= max ? chars.join('') : chars.slice(0, max - 1).join('') + '…';
+  return clipWidth(String(text).replace(CONTROL, ' ').replace(BIDI, '').replace(/\s+/g, ' ').trim(), max);
 }
 
 export const TEXT = {
@@ -108,11 +111,11 @@ export function bandLine(m: BandModel, nowMs: number): string {
     return [`${head} · ${m.pending} ${m.pending === 1 ? t.pendingOne : t.pending} · ${m.pendingCritical} ${m.pendingCritical === 1 ? t.criticalOne : t.critical}`, ...autoPart(m)].join(' · ');
   }
   if (m.mode === 'run') {
-    if (m.stalled) return [`▶ ${t.run} ${t.stoppedSfx}`, ...autoPart(m)].join(' · ');
-    const parts = [`▶ ${t.run}`, `${m.executor === 'sessions' ? t.sessions : t.subagents} ${m.running}/${m.parallel}`,
+    if (m.stalled) return [`► ${t.run} ${t.stoppedSfx}`, ...autoPart(m)].join(' · ');
+    const parts = [`► ${t.run}`, `${m.executor === 'sessions' ? t.sessions : t.subagents} ${m.running}/${m.parallel}`,
       ...m.slots.map(s => `${clip(s.task, SLOT_ID_MAX)} ${t.stage[s.stage as keyof typeof t.stage] ?? s.stage}${s.round > 1 ? ` (r${s.round})` : ''}`),
       `${m.integrated}/${m.total}`, `${t.integratedN} ${m.integrated}`];
-    if (m.worst !== 'alive') parts.push(`⚠ ${m.worst === 'silent' ? t.silentSfx : t.stoppedSfx}`);
+    if (m.worst !== 'alive') parts.push(`▲ ${m.worst === 'silent' ? t.silentSfx : t.stoppedSfx}`);
     parts.push(...autoPart(m));
     return parts.join(' · ');
   }
@@ -132,8 +135,8 @@ export function bandLine(m: BandModel, nowMs: number): string {
   if (m.run) parts.push(`${t.stage[m.run.stage as keyof typeof t.stage] ?? m.run.stage} · ${t.memberOf.replace('{c}', m.run.coordinator)}`);
   if (!m.track) parts.push(`${t.tasks} ${m.trackDone}/${m.trackTotal}`);
   parts.push(`${t.overall} ${m.percent} %`);
-  if (m.inbox > 0) parts.push(`✉ ${m.inbox}`);
-  if (m.escalation) parts.push(`⚠ ${t.decision}`);
+  if (m.inbox > 0) parts.push(`✎ ${m.inbox}`);
+  if (m.escalation) parts.push(`▲ ${t.decision}`);
   parts.push(...autoPart(m));
   return parts.join(' · ');
 }

@@ -227,8 +227,8 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
       blocks.push({ kind: 'text', text: `✓ ${r.id} · ${r.minutes > 1440 ? '>24h' : r.minutes}${r.estimateMin ? `/${r.estimateMin}` : ''} min`, dim: true, ...(over ? { hue: 'yellow' as Hue } : {}) });
     }
     const chips: { text: string; hue: Hue }[] = [];
-    if (w.inbox > 0) chips.push({ text: `✉ ${w.inbox}`, hue: 'blue' });
-    if (w.escalation) chips.push({ text: `⚠ ${t.decision}`, hue: 'red' });
+    if (w.inbox > 0) chips.push({ text: `✎ ${w.inbox}`, hue: 'blue' });
+    if (w.escalation) chips.push({ text: `▲ ${t.decision}`, hue: 'red' });
     if (chips.length) blocks.push({ kind: 'chips', chips });
     out.push({
       icon: SECTION_ICON.roadmap, title: w.project, hue: SECTION_HUE.roadmap, chip: { text: `${w.percent}%`, hue: SECTION_HUE.roadmap },
@@ -282,8 +282,8 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     const list = (label: string, ids: string[]) => { if (ids.length) blocks.push({ kind: 'text', text: `${label}: ${ids.join(', ')}`, dim: true }); };
     list(t.queued, x.queued); list(t.conflictsLbl, x.conflicts); list(t.blockedLbl, x.blocked); list(t.orphans, x.orphans);
     const coord = x.coordinator.liveness;
-    out.push({ icon: '▶', title: t.sExecution, hue: 'teal', chip: { text: coord === 'alive' ? t.alive : coord === 'silent' ? t.silent : t.stopped, hue: HUE[coord] },
-      subtitle: x.elapsedSeconds != null && span(x.elapsedSeconds) ? `⏱ ${span(x.elapsedSeconds)}` : undefined, blocks,
+    out.push({ icon: '►', title: t.sExecution, hue: 'teal', chip: { text: coord === 'alive' ? t.alive : coord === 'silent' ? t.silent : t.stopped, hue: HUE[coord] },
+      subtitle: x.elapsedSeconds != null && span(x.elapsedSeconds) ? `◷ ${span(x.elapsedSeconds)}` : undefined, blocks,
     });
   }
 
@@ -306,12 +306,12 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     if (u.time) {
       const tm = u.time;
       const line = (active: number, partial: boolean, since: number | null) =>
-        `⏱ ${t.active} ${partial ? '≥ ' : ''}${span(active) ?? '0s'}${since !== null && span(since) ? ` · ${t.sinceStart} ${span(since)}` : ''}`;
+        `◷ ${t.active} ${partial ? '≥ ' : ''}${span(active) ?? '0s'}${since !== null && span(since) ? ` · ${t.sinceStart} ${span(since)}` : ''}`;
       blocks.push({ kind: 'text', text: line(tm.activeSeconds, tm.activePartial, tm.sinceStartSeconds) });
       if (tm.session) blocks.push({ kind: 'text', text: `${t.thisSession}: ${line(tm.session.activeSeconds, false, tm.session.sinceStartSeconds)}`, dim: true });
     }
     if (u.session) blocks.push({ kind: 'text', text: `${t.thisSession}: ${fmtTokens(u.session.tokens, loc)} tok · ${u.sessionPartial ? '≥ ' : ''}${fmtUsd(u.session.costUsd, loc)}`, dim: true });
-    if (u.officialUsd !== null) blocks.push({ kind: 'text', text: `${u.drift ? '⚠ ' : ''}/cost ${fmtUsd(u.officialUsd, loc)}${u.drift ? ` · ${t.drift}` : ''}`, dim: !u.drift });
+    if (u.officialUsd !== null) blocks.push({ kind: 'text', text: `${u.drift ? '▲ ' : ''}/cost ${fmtUsd(u.officialUsd, loc)}${u.drift ? ` · ${t.drift}` : ''}`, dim: !u.drift });
     for (const g of u.groups) {
       blocks.push({ kind: 'row', dot: 'teal', tag: { text: label[g.id], hue: 'teal' }, text: name(g), right: `${fmtTokens(g.tokens, loc)} · ${usd(g.costUsd)} · ${Math.round(g.share * 100)} %` });
     }

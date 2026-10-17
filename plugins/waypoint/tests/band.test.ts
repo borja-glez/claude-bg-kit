@@ -139,7 +139,7 @@ test('work band runs /waypoint:work, the cross hides it and a new session shows 
     await $.session.start({ cwd: '.', surface, isInteractive: true });
     const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
     const line = await ui.find({ type: 'Text', text: /^● frente core 2\/5 · T3 / });
-    expect(line?.text).toBe('● frente core 2/5 · T3 A very long task title that goes well b… · 12 min/30 · global 40 % · ✉ 1 · ⚠ decisión pendiente');
+    expect(line?.text).toBe('● frente core 2/5 · T3 A very long task title that goes well b… · 12 min/30 · global 40 % · ✎ 1 · ▲ decisión pendiente');
     expect(await ui.find({ type: 'Link', text: 'Abrir roadmap' })).toBeDefined();
     await ui.press({ key: 'next-task' });
     expect(sent.at(-1)).toBe('/waypoint:work');
@@ -161,7 +161,7 @@ test('the run band shows the execution, stops it and offers no per-session work 
   serveBand(on, () => RUN);
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
-    expect(await ui.find({ type: 'Text', text: '▶ EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · T008 implementar · 3/12 · integradas 3 · ⚠ sin señal' })).toBeDefined();
+    expect(await ui.find({ type: 'Text', text: '► EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · T008 implementar · 3/12 · integradas 3 · ▲ sin señal' })).toBeDefined();
     expect(await ui.find({ type: 'Button', text: 'Estado' })).toBeDefined();
     expect(await ui.find({ type: 'Button', text: 'Parar' })).toBeDefined();
     await ui.press({ key: 'stop-run' });
@@ -172,7 +172,7 @@ test('the run band shows the execution, stops it and offers no per-session work 
   }
 });
 
-for (const [mode, model, line, button] of [['work', WORK, /^● /, 'next-task'], ['run', RUN, /^▶ /, 'stop-run']] as const) {
+for (const [mode, model, line, button] of [['work', WORK, /^● /, 'next-task'], ['run', RUN, /^► /, 'stop-run']] as const) {
   test(`the ${mode} band stacks over another plugin's band beneath, which stays after the cross`, async ($, on) => {
     serveBand(on, () => model);
     otherBand(on);

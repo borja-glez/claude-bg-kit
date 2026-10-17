@@ -402,7 +402,7 @@ test('at 40 columns an execution row keeps its dot, tag and right text whole: on
   expect(middle).toMatchObject({ type: 'Box', props: { flexGrow: 1, flexShrink: 1, minWidth: 0 } });
   for (const c of parts.filter(c => c !== middle)) expect(c).toMatchObject({ type: 'Box', props: { flexShrink: 0 } });
   // The execution card header: icon and chip whole, the title shrinks.
-  const head = boxes.find(b => b.props?.flexDirection === 'row' && kids(b).length === 3 && textOf(kids(b)[0]) === '▶');
+  const head = boxes.find(b => b.props?.flexDirection === 'row' && kids(b).length === 3 && textOf(kids(b)[0]) === '►');
   expect(head).toBeDefined();
   expect(kids(head!).map(c => c.props?.flexShrink)).toEqual([0, 1, 0]);
   expect(kids(head!)[1].props?.minWidth).toBe(0);

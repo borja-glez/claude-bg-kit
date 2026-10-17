@@ -177,7 +177,7 @@ describe('buildBandModel · work', () => {
     const m = buildBandModel('demo-shop', { ...empty, plan, session: j({ sessionId: 'main', track: null }), sessionId: 's1', execution: EPHEMERAL() });
     expect(m).toMatchObject({ mode: 'run', project: 'demo-shop', locale: 'es', roadmapUrl: 'https://claude.ai/artifact/abc', running: 2, integrated: 0, total: 2, stalled: false });
     const line = bandLine(m, 0);
-    expect(line).toContain('▶ EJECUCIÓN · subagentes 2/3 · ');
+    expect(line).toContain('► EJECUCIÓN · subagentes 2/3 · ');
     expect(line).toContain('fecha-corta-en-la-c… implementar');
     expect(line).toContain('otra-cosa-a7b2 revisar (r2)');
     expect(line).not.toContain(LOOSE);
@@ -198,16 +198,16 @@ describe('buildBandModel · work', () => {
   });
   it('bandLine variants: stalled, stopped, sessions, round 1, en locale, unknown stage', () => {
     const run = (over: object, locale = 'es') => bandLine({ mode: 'run', project: 'p', locale, executor: 'subagents', running: 1, parallel: 2, integrated: 0, total: 4, slots: [{ task: 'T001', stage: 'implement', round: 1 }], worst: 'alive', stalled: false, roadmapUrl: null, viewer: NO_VIEWER, ...over } as never, 0);
-    expect(run({ stalled: true })).toBe('▶ EJECUCIÓN parada');
-    expect(run({ worst: 'stopped' })).toBe('▶ EJECUCIÓN · subagentes 1/2 · T001 implementar · 0/4 · integradas 0 · ⚠ parada');
-    expect(run({ executor: 'sessions' })).toBe('▶ EJECUCIÓN · sesiones 1/2 · T001 implementar · 0/4 · integradas 0');
-    expect(run({}, 'en')).toBe('▶ EXECUTION · subagents 1/2 · T001 implement · 0/4 · integrated 0');
-    expect(run({ worst: 'silent' }, 'en')).toContain('⚠ no signal');
+    expect(run({ stalled: true })).toBe('► EJECUCIÓN parada');
+    expect(run({ worst: 'stopped' })).toBe('► EJECUCIÓN · subagentes 1/2 · T001 implementar · 0/4 · integradas 0 · ▲ parada');
+    expect(run({ executor: 'sessions' })).toBe('► EJECUCIÓN · sesiones 1/2 · T001 implementar · 0/4 · integradas 0');
+    expect(run({}, 'en')).toBe('► EXECUTION · subagents 1/2 · T001 implement · 0/4 · integrated 0');
+    expect(run({ worst: 'silent' }, 'en')).toContain('▲ no signal');
     expect(run({ slots: [{ task: 'T009', stage: 'weird', round: 1 }] })).toContain('T009 weird');
   });
   it('draws the run band line with stages, rounds and the liveness warning', () => {
     expect(bandLine({ mode: 'run', project: 'p', locale: 'es', executor: 'subagents', running: 2, parallel: 3, integrated: 3, total: 12, slots: [{ task: 'T004', stage: 'review', round: 2 }, { task: 'T008', stage: 'implement', round: 1 }], worst: 'silent', stalled: false, roadmapUrl: null, sid: 'main', inbox: 0, escalation: false, percent: 25, phase: null, viewer: NO_VIEWER }, 0))
-      .toBe('▶ EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · T008 implementar · 3/12 · integradas 3 · ⚠ sin señal');
+      .toBe('► EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · T008 implementar · 3/12 · integradas 3 · ▲ sin señal');
   });
   it('marks a swarm member in work mode', () => {
     const m = buildBandModel('demo-shop', { ...files(), session: JSON.stringify({ sessionId: 'backend', track: 'backend', launchedBy: 'main' }) });

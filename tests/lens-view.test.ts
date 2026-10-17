@@ -130,7 +130,7 @@ describe('lens view', () => {
     expect(row.dot).toBe('yellow');
   });
   it('the execution leads the lens band headline', () => {
-    expect(headline({ ...EMPTY, execution: EXEC, forge: FORGE })).toMatchObject({ section: 'forge', title: '▶ 1/3', detail: 'T004 review' });
+    expect(headline({ ...EMPTY, execution: EXEC, forge: FORGE })).toMatchObject({ section: 'forge', title: '► 1/3', detail: 'T004 review' });
     expect(headline({ ...EMPTY, execution: { ...EXEC, active: false, stopReason: 'stalled' }, forge: FORGE })).toMatchObject({ title: 'orders' });
   });
   it('a large forge task during an execution draws the run stages', () => {
@@ -305,7 +305,7 @@ describe('usage formats and card', () => {
     const usage = { scope: 'session' as const, tokens: 10, costUsd: 1, partial: true, sessionPartial: true, officialUsd: 2, drift: true, session: null, groups: [], tracking: null, withoutForge: null, pricesAsOf: '2026-10-12' };
     const text = JSON.stringify(buildCards({ ...EMPTY, usage }, T, 0).find(c => c.title === T.sUsage)!.blocks);
     expect(text).toContain('≥');
-    expect(text).toContain('⚠');
+    expect(text).toContain('▲');
   });
   it('puts the main model line in the Now card and model/effort on subagent rows', () => {
     const m = { ...EMPTY, mainModel: { model: 'claude-opus-5-5', effort: 'high' }, turnSeconds: 3,
@@ -399,13 +399,13 @@ describe('lens timings: usage', () => {
   it('draws the active and since-start line under the main bar, and this session dimmed in a run', () => {
     const one = buildCards({ ...EMPTY, usage: { ...U, time: { activeSeconds: 3900, activePartial: false, sinceStartSeconds: 8040, session: null } } }, T, 0)
       .find(c => c.title === T.sUsage)!;
-    expect(one.blocks[1]).toEqual({ kind: 'text', text: '⏱ active 1h 05m · since start 2h 14m' });
+    expect(one.blocks[1]).toEqual({ kind: 'text', text: '◷ active 1h 05m · since start 2h 14m' });
     const run = buildCards({ ...EMPTY, usage: { ...U, scope: 'run' as const, time: { activeSeconds: 7200, activePartial: true, sinceStartSeconds: 90_000, session: { activeSeconds: 60, sinceStartSeconds: 120 } } } }, T, 0)
       .find(c => c.title === T.sUsage)!;
-    expect(run.blocks[1]).toEqual({ kind: 'text', text: '⏱ active ≥ 2h 00m · since start >24h' });
-    expect(run.blocks[2]).toEqual({ kind: 'text', text: 'this session: ⏱ active 1m 00s · since start 2m 00s', dim: true });
+    expect(run.blocks[1]).toEqual({ kind: 'text', text: '◷ active ≥ 2h 00m · since start >24h' });
+    expect(run.blocks[2]).toEqual({ kind: 'text', text: 'this session: ◷ active 1m 00s · since start 2m 00s', dim: true });
     // Without time (an older model) the card is as before.
-    expect(JSON.stringify(buildCards({ ...EMPTY, usage: U }, T, 0))).not.toContain('⏱');
+    expect(JSON.stringify(buildCards({ ...EMPTY, usage: U }, T, 0))).not.toContain('◷');
   });
 });
 
@@ -427,7 +427,7 @@ describe('lens timings: execution and roadmap', () => {
   it('adds the task time to each slot, a dim finished line and the run time in the subtitle', () => {
     const x = { ...EXEC, elapsedSeconds: 7500, slots: [{ ...EXEC.slots[0], taskSeconds: 1080 }], finished: [{ task: 'T002', seconds: 1320 }, { task: 'T005', seconds: 1860 }] };
     const card = buildCards({ ...EMPTY, execution: x }, T, 0).find(c => c.title === T.sExecution)!;
-    expect(card.subtitle).toBe('⏱ 2h 05m');
+    expect(card.subtitle).toBe('◷ 2h 05m');
     const row = card.blocks.find(b => b.kind === 'row')!;
     expect(row.kind === 'row' && row.right).toBe('review · correctness · 5m 00s · task 18m 00s · r2');
     expect(card.blocks).toContainEqual({ kind: 'text', text: '✓ T002 22m 00s · T005 31m 00s', dim: true });
@@ -497,7 +497,7 @@ describe('the roadmap card of an execution (E-10)', () => {
     expect(card.subtitle).toBe('Phase 2/4 · API');
     expect(cardAlt(card)).toContain('integrated 3/12');
     expect(cardAlt(card)).not.toContain(T.noTask);
-    expect(card.blocks.find(b => b.kind === 'chips')).toMatchObject({ chips: [{ text: '✉ 2' }, { text: '⚠ decision' }] });
+    expect(card.blocks.find(b => b.kind === 'chips')).toMatchObject({ chips: [{ text: '✎ 2' }, { text: '▲ decision' }] });
   });
 });
 

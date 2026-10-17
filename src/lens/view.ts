@@ -28,9 +28,19 @@ export const SECTION_HUE: Record<SectionId, Hue> = {
   roadmap: 'sapphire', forge: 'peach', superpowers: 'mauve', todos: 'green', agents: 'lavender', tasks: 'teal', now: 'sky',
 };
 export const SECTION_ICON: Record<SectionId, string> = {
-  // Single-width glyphs only: some terminals draw ⚒ or ☰ two cells wide and the title runs into them.
+  // Single-width glyphs only: some terminals draw a glyph that has an emoji form two cells wide and the title runs into it (F-13).
   roadmap: '◆', forge: '◈', superpowers: '✦', todos: '≡', agents: '◎', tasks: '▤', now: '▸',
 };
+
+/**
+ * F-13: every glyph the bands and the panel draw beyond ASCII, each one cell wide and with no emoji form: ▲ (not the
+ * warning sign), ✎ (not the envelope), ◷ (not the stopwatch) and ► (not the play button). tests/text-width.test.ts
+ * measures each and scans src/mod and src/lens for any other.
+ */
+export const GLYPHS = [
+  '●', '◆', '◈', '✦', '≡', '◎', '▤', '▸', '►', '▲', '✎', '◷', '✓', '✗', '⊘', '✧', '■', '□', '◉', '○', '◐', '⚑', '∞', '↓', '⋯',
+  '◦', '◌', '─', '‹', '›', '…', '·', '≥', '×', '█', '░', '▏', '▎', '▍', '▌', '▋', '▊', '▉',
+] as const;
 
 // An agent's level: forge's implementer ladder ranked 1 to 6 (mostly cool to warm), the reviewers by what they judge. impl-high is peach,
 // the one palette hue no other agent uses (lavender is the planner's and the fallback for unknown agents).
@@ -205,7 +215,7 @@ export function headline(m: PanelModel): Headline | null {
   if (m.execution?.active) {
     const x = m.execution;
     const detail = x.slots.slice(0, 2).map(s => `${s.task} ${s.stage}`).join(' · ');
-    return { section: 'forge', title: `▶ ${x.slots.length}/${x.parallel}`, detail, cells: null, agent: null };
+    return { section: 'forge', title: `► ${x.slots.length}/${x.parallel}`, detail, cells: null, agent: null };
   }
   // M2: the forge section is the expanded activity's; another session's (expanded when no task of this one is in
   // progress) is not this session's headline. A model whose activities could not be built keeps its fallback.

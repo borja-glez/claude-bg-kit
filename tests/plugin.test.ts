@@ -396,7 +396,7 @@ describe('plugin layout', () => {
   it('READMEs describe the timings', () => {
     for (const f of ['plugins/lens/README.md', 'plugins/lens/README.es.md']) {
       const md = read(f);
-      expect(md).toContain('⏱');
+      expect(md).toContain('◷');
       expect(md).toContain('>24h');
       expect(md).toContain('.forge/usage/<session>.json');
     }
