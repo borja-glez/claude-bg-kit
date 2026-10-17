@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseRun, startRun, recordCycle, stopReason, saveRun, endRun, type RunState } from '../src/forge/run.js';
-import { infiniteDocOf } from '../src/forge/infinite-doc.js';
+import { LEASE_MINUTES } from '../src/lib/coordination.js';
+import { infiniteDocOf, seatOf } from '../src/forge/infinite-doc.js';
 
 const T0 = new Date('2026-10-11T10:00:00.000Z');
 const ctx = (over: Partial<{ now: Date; stopFile: boolean; approvedPending: number; pendingProposals: number }> = {}) =>
@@ -137,17 +138,53 @@ describe('saveRun', () => {
 
 describe('infiniteDocOf: meta/infinite with its coordinator (G-08)', () => {
   const now = new Date('2026-10-16T10:00:00.000Z');
+  // One lease rule: the coordination lease, whatever its value.
+  const lease = new Date(now.getTime() + LEASE_MINUTES * 60_000).toISOString();
   const base = { ...startRun(new Date('2026-10-16T09:00:00.000Z'), { cycles: 5 }, 10, 'c1'), cycle: 2 };
   it('a lease of 10 minutes, or the expected sleep plus 5', () => {
     expect(infiniteDocOf(base, { now, sid: 'main', sleepUntil: null, lastCycleAt: '2026-10-16T09:55:00.000Z' })).toEqual({
       active: true, cycle: 2, budget: { cycles: 5 }, startedAt: '2026-10-16T09:00:00.000Z', lastCycleAt: '2026-10-16T09:55:00.000Z', stopReason: null,
-      coordinator: { sid: 'main', claude: 'c1', seenAt: '2026-10-16T10:00:00.000Z', leaseUntil: '2026-10-16T10:10:00.000Z' },
+      coordinator: { sid: 'main', claude: 'c1', seenAt: '2026-10-16T10:00:00.000Z', leaseUntil: lease },
     });
     expect(infiniteDocOf(base, { now, sid: null, sleepUntil: '2026-10-16T10:20:00.000Z', lastCycleAt: null }).coordinator!.leaseUntil).toBe('2026-10-16T10:25:00.000Z');
-    expect(infiniteDocOf(base, { now, sid: null, sleepUntil: '2026-10-16T09:00:00.000Z', lastCycleAt: null }).coordinator!.leaseUntil).toBe('2026-10-16T10:10:00.000Z');
+    expect(infiniteDocOf(base, { now, sid: null, sleepUntil: '2026-10-16T09:00:00.000Z', lastCycleAt: null }).coordinator!.leaseUntil).toBe(lease);
   });
   it('an inactive run says why it stopped; a run of forge 0.15 (no session) has no coordinator', () => {
     expect(infiniteDocOf(endRun(base, 'budget-cycles'), { now, sid: null, sleepUntil: null, lastCycleAt: null })).toMatchObject({ active: false, stopReason: 'budget-cycles' });
     expect(infiniteDocOf({ ...base, sessionId: null }, { now, sid: null, sleepUntil: null, lastCycleAt: null }).coordinator).toBeNull();
+  });
+});
+
+describe('seatOf: the seat of the run\'s Claude session (G-08)', () => {
+  const NOW = Date.parse('2026-10-16T10:00:00.000Z');
+  const min = (n: number) => new Date(NOW - n * 60_000).toISOString();
+  // A seat of project `proj` in a temp main checkout; the checkout seat is the first one, the others live under seats/.
+  const mk = () => mkdtempSync(path.join(tmpdir(), 'seat-of-'));
+  const bind = (main: string, proj: string, sid: string, o: { claude?: string; seenAt?: string; endedAt?: string | null; pid?: number | null; checkout?: boolean }) => {
+    const wp = path.join(main, '.waypoint', proj);
+    const dir = o.checkout ? wp : path.join(wp, 'seats', sid);
+    mkdirSync(dir, { recursive: true });
+    if (o.checkout) writeFileSync(path.join(wp, 'session.json'), JSON.stringify({ sessionId: sid }));
+    writeFileSync(path.join(dir, 'bound.json'), JSON.stringify({ sid, claude: o.claude ?? 'c1', pid: o.pid ?? null, via: 'forge-infinite',
+      since: min(30), seenAt: o.seenAt ?? min(1), endedAt: o.endedAt ?? null, endReason: null }));
+  };
+  it('the binding renewed last wins, whatever its project or seat sorts first', () => {
+    const main = mk();
+    bind(main, 'a-old', 'old', { seenAt: min(4) });
+    bind(main, 'z-new', 'new', { seenAt: min(1) });
+    expect(seatOf(main, 'c1', NOW)).toBe('new');
+  });
+  it('an ended binding, an expired one, a dead-pid one and another Claude id\'s are not the seat', () => {
+    const main = mk();
+    bind(main, 'a', 'ended', { endedAt: min(2), seenAt: min(1) });
+    bind(main, 'b', 'expired', { seenAt: min(20) });
+    bind(main, 'c', 'dead', { pid: 4242, seenAt: min(1) });
+    bind(main, 'd', 'other', { claude: 'c2', seenAt: min(1) });
+    expect(seatOf(main, 'c1', NOW, () => false)).toBeNull();
+    expect(seatOf(main, 'c2', NOW, () => false)).toBe('other');
+    expect(seatOf(main, 'c1', NOW, () => true)).toBe('dead');
+  });
+  it('no .waypoint folder, no seat', () => {
+    expect(seatOf(mk(), 'c1', NOW)).toBeNull();
   });
 });

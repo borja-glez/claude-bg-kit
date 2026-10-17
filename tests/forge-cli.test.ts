@@ -12,6 +12,7 @@ import type { ProposalDoc } from '../src/lib/proposals.js';
 import { parsePlan } from '../src/lib/plan.js';
 import { parseStatus } from '../src/forge/tree.js';
 import { saveExecution } from '../src/forge/execution.js';
+import { LEASE_MINUTES } from '../src/lib/coordination.js';
 
 // infinite start binds Claude's session id (C1, K5-03). The tests run inside Claude Code, which sets
 // CLAUDE_CODE_SESSION_ID: io.env is {} so nothing leaks from it, and the id comes as --session s1 unless a test gives its own.
@@ -808,7 +809,7 @@ describe('forge infinite', () => {
   it('infinite start, cycle and status print meta/infinite with its coordinator: Claude\'s id, its seat once bound, its lease (G-08)', () => {
     const s = JSON.parse(run(['infinite', 'start', '--cycles', '3'], io).stdout);
     expect(s.publish.infinite).toEqual({ active: true, cycle: 0, budget: { cycles: 3 }, startedAt: '2026-10-11T10:00:00.000Z', lastCycleAt: null, stopReason: null,
-      coordinator: { sid: null, claude: 's1', seenAt: '2026-10-11T10:00:00.000Z', leaseUntil: '2026-10-11T10:10:00.000Z' } });
+      coordinator: { sid: null, claude: 's1', seenAt: '2026-10-11T10:00:00.000Z', leaseUntil: new Date(Date.parse('2026-10-11T10:00:00.000Z') + LEASE_MINUTES * 60_000).toISOString() } });
     // The skill binds after the start (bind --via forge-infinite): from then on the seat is known.
     mkdirSync(path.join(root, '.waypoint', 'demo'), { recursive: true });
     writeFileSync(path.join(root, '.waypoint', 'demo', 'session.json'), JSON.stringify({ sessionId: 'main' }));

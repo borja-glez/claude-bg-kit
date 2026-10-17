@@ -210,6 +210,16 @@ describe('normalizeInfinite', () => {
     expect(got).toEqual(['coordinator · dropped', 'coordinator · dropped']);
     expect(normalizeInfinite({ ...base, coordinator: null })).toEqual({ ...base, coordinator: null });
   });
+  it('hostile coordinator and stop reason shapes are dropped or clipped, never thrown on (G-08)', () => {
+    const base = { active: false, cycle: 1, budget: {}, startedAt: '2026-10-11T09:00:00Z', lastCycleAt: null };
+    const got: string[] = [];
+    for (const coordinator of ['x', ['a'], 7, { sid: 'main', claude: 5, seenAt: '2026-10-11T10:00:00Z', leaseUntil: '2026-10-11T10:10:00Z' }]) {
+      expect(normalizeInfinite({ ...base, coordinator }, (f, a) => { got.push(`${f} · ${a}`); })).not.toHaveProperty('coordinator');
+    }
+    expect(got).toEqual(Array(4).fill('coordinator · dropped'));
+    expect(normalizeInfinite({ ...base, stopReason: 'x'.repeat(500) })!.stopReason).toHaveLength(80);
+    expect(normalizeInfinite({ ...base, stopReason: 7 })!.stopReason).toBeNull();
+  });
 });
 
 describe('report (H-04, G-03)', () => {
