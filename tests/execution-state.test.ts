@@ -135,3 +135,14 @@ describe('the stopped task status (D3, K2-02)', () => {
     expect(normalizePublicTask({ task: 'T1', runId: 'r1', stage: 'implement', status: 'stopped', agent: null, round: 1, since: at, updatedAt: at, leaseUntil: at, by: 'main', mode: 'subagents' })?.status).toBe('stopped');
   });
 });
+
+describe('ExecTask.sha (G-06)', () => {
+  it('keeps the sha swarm integrate wrote, and drops one that is not a sha', () => {
+    const at = '2026-10-16T10:00:00.000Z';
+    const base = { status: 'integrated', stage: 'integrate', round: 1, worktree: '/w', branch: 'task/T1', executor: 'subagents', attempts: 0, agent: null, startedAt: at };
+    const e = (sha: unknown) => normalizeExecution({ runId: 'r1', kind: 'plan', mode: 'subagents', project: 'shop', base: 'main', branch: 'forge/run-shop', coordinator: 'main', startedAt: at, tasks: { T1: { ...base, sha } } });
+    expect(e('abc1234def')?.tasks.T1.sha).toBe('abc1234def');
+    expect(e('not a sha')?.tasks.T1).not.toHaveProperty('sha');
+    expect(e(undefined)?.tasks.T1).not.toHaveProperty('sha');
+  });
+});

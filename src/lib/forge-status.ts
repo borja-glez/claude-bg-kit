@@ -119,14 +119,14 @@ const findingsOf = (x: Record<string, unknown>): Findings | null => {
   const critical = countOf(x.critical), important = countOf(x.important), minor = countOf(x.minor);
   return critical !== null && important !== null && minor !== null ? { critical, important, minor } : null;
 };
-/** C4: a reviewer as phase review names it: a name, or the spawn entry the CLI logs (its role or agent, a twin left out). */
+/** C4: a reviewer as phase review names it: a name, or the spawn entry the CLI logs (its role or agent, a twin left out). roadmap-doc reads them too. */
 const reviewerName = (r: unknown): string | null => {
   if (str(r)) return cleanText(r) || null;
   if (!isObj(r) || r.twin === true) return null;
   const v = str(r.role) ? r.role : str(r.agent) ? r.agent : null;
   return v ? cleanText(v.replace(/^(?:forge:)?(?:forge-)?review-/, '')) || null : null;
 };
-const reviewersOf = (x: unknown): string[] =>
+export const reviewersOf = (x: unknown): string[] =>
   [...new Set((Array.isArray(x) ? x : []).map(reviewerName).filter((s): s is string => !!s))].slice(0, MAX_REVIEWERS);
 
 // The Trivial and Small paths log no review verdict: a passing validate (Trivial) or a verify result finishes them.

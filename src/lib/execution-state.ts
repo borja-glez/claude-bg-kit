@@ -24,6 +24,8 @@ export interface ExecTask {
   /** When the task last finished (integrated, blocked, or handed over by `retry --adopt`); null or absent before. */
   finishedAt?: string | null;
   title?: string | null;
+  /** G-06: the merge commit `swarm integrate` made on the run branch; null or absent before. */
+  sha?: string | null;
 }
 export type ExecStopReason = 'finished' | 'stalled' | 'stopped' | 'budget' | 'migrated';
 export interface ExecutionState {
@@ -88,6 +90,7 @@ function normalizeTask(x: unknown, now?: number): ExecTask | null {
     ...(iso(x.nudgedAt) ? { nudgedAt: iso(x.nudgedAt) } : {}),
     ...(finishedOf(x.finishedAt, now) ? { finishedAt: finishedOf(x.finishedAt, now) } : {}),
     ...(title ? { title } : {}),
+    ...(typeof x.sha === 'string' && /^[0-9a-f]{7,40}$/i.test(x.sha) ? { sha: x.sha } : {}),
   };
 }
 
