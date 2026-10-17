@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { fmtTokens, fmtUsd, usageBandText, barParts, briefCells, forgePhase, headline, stagesFor, tierOf, todoCells, roadmapCells, pct, span, stageOf } from '../src/lens/view.js';
+import { fmtTokens, fmtUsd, usageBandText, barParts, briefCells, forgePhase, headline, stagesFor, tierOf, todoCells, roadmapCells, pct, span, stageOf, forgeDone } from '../src/lens/view.js';
 import { buildCards, cardAlt, type CardTexts } from '../src/lens/cards.js';
-import { bandSvg, cardSvg, fit, xml } from '../src/lens/svg.js';
+import { bandSvg, cardSvg, fit, xml, type Block, type Card } from '../src/lens/svg.js';
 import { executionFromFiles, forgeFromStatus, type PanelModel } from '../src/lens/model.js';
 
 const T: CardTexts = {
@@ -19,6 +19,9 @@ const T: CardTexts = {
   autoDecisions: n => `${n} automatic decision${n === 1 ? '' : 's'}`,
   autoMode: 'auto mode',
   staleLedger: 'unchanged for over a day',
+  sTasksInProgress: 'Tasks in progress', otherSession: 'other session', validating: 'validating', integrating: 'integrating', skipped: 'skipped',
+  noResult: 'no result', accepted: 'accepted', acceptedInRound: n => `accepted in round ${n}`,
+  waitingOn: (n, wake) => `waiting on ${n} subagent${n === 1 ? '' : 's'}${wake ? ` · wakes in ${wake}` : ''}`, waitingLbl: 'waiting', cached: 'cached', reviewersLbl: 'reviewers',
 };
 const FORGE: NonNullable<PanelModel['forge']> = {
   task: 'orders', path: 'large', phase: 'implement', agent: 'forge-impl-heavy', validators: [{ name: 'test', ok: true }],
@@ -148,7 +151,8 @@ describe('lens cards', () => {
     expect(alt).toContain('[implement]');
     expect(alt).toContain('briefs 2/5');
     expect(alt).toContain('heavy forge-impl-heavy');
-    expect(alt).toContain('accept 0.96');
+    expect(alt).toContain('✓ accepted');
+    expect(alt).not.toMatch(/0[.,]96/);
   });
   it('the forge card says when the task runs in auto mode', () => {
     const auto = buildCards({ ...EMPTY, forge: { ...FORGE, autonomy: 'auto' } }, T, 0).find(c => c.title === FORGE.task)!;
@@ -502,5 +506,116 @@ describe('superpowers and todos cards (E-13, E-14)', () => {
     const card = buildCards({ ...EMPTY, todos: { total: 3, done: 1, inProgress: 'A', next: ['c'], active: ['A', 'B'], cells: 'adp' } }, T, 0).find(c => c.title === T.sTodos)!;
     expect(card.blocks.find(b => b.kind === 'cells')).toEqual({ kind: 'cells', cells: ['active', 'done', 'pending'] });
     expect(card.blocks.filter(b => b.kind === 'row').map(b => (b as { text: string }).text)).toEqual(['A', 'B', 'c']);
+  });
+});
+
+const rowsOf = (c: Card) => c.blocks.filter((b): b is Extract<Block, { kind: 'row' }> => b.kind === 'row');
+
+describe('the Tasks in progress card (wave 3, §4.4)', () => {
+  const ACT = (over: Partial<PanelModel['activities'][number]> = {}): PanelModel['activities'][number] => ({
+    key: 'T002', kind: 'forge', owner: 'own', dim: false, done: false, slot: false, expanded: false, stopped: false, task: 'T002', project: null, title: 'Reparto',
+    path: 'medium', stage: 'review', round: 2, cap: 4, verdict: null, job: null, seconds: 720, agents: [], ...over,
+  });
+  const card = (m: Partial<PanelModel>) => buildCards({ ...EMPTY, ...m }, T, 0).find(c => c.title.startsWith(T.sTasksInProgress))!;
+  it("one row per task: tag, title, path, stage and round, time; another session's dim and marked, a done one with ✓, a stopped one says so", () => {
+    const c = card({ activities: [
+      ACT(), ACT({ key: 'T005', task: 'T005', title: 'Pagos', owner: 'other', dim: true, stage: 'implement', round: null, seconds: 60 }),
+      ACT({ key: 'T001', task: 'T001', title: 'Base', done: true, dim: true, stage: null, round: null, seconds: 900 }),
+      ACT({ key: 'T004', task: 'T004', title: 'Envíos', stopped: true, dim: true, stage: null, round: null, seconds: 300 }),
+    ] });
+    expect(c.title).toBe(`${T.sTasksInProgress} · 4`);
+    expect(rowsOf(c).map(r => [r.tag?.text, r.text, r.right, !!r.dim])).toEqual([
+      ['T002', 'Reparto', 'medium · review r2 · 12m', false],
+      ['T005', 'Pagos', 'medium · implement · 1m · other session', true],
+      ['T001', '✓ Base', 'medium · 15m', true],
+      ['T004', 'Envíos', 'medium · stopped · 5m', true],
+    ]);
+  });
+  it('a live job takes the place of the stage; own agents go indented under their task', () => {
+    const c = card({ activities: [ACT({ job: { name: 'review-prep', seconds: 90 }, agents: [
+      { id: 'a1', type: 'forge:forge-impl', description: 'Implement T002', model: 'claude-opus-5-5', tool: 'Edit', seconds: 180, status: 'running', depth: 0 },
+    ] })] });
+    const rows = rowsOf(c);
+    expect(rows[0].right).toBe('medium · validating · 1m');
+    expect(rows[1]).toMatchObject({ indent: true, tag: { text: 'impl' }, text: 'Implement T002', right: 'Opus 5.5 · Edit · 3m', spinning: true });
+  });
+  it('the expanded task carries the detail under its row: the verdict without its score, the validators with the cache (K4-05, C6)', () => {
+    const forge = { ...FORGE, task: 'T002', path: 'medium', phase: 'review', validators: [{ name: 'test', ok: true, cached: true as const }],
+      verdict: { action: 'accept', score: 0.82, round: 2, findings: { critical: 0, important: 1, minor: 3 } }, reviews: { n: 2, max: 4 } };
+    const c = card({ forge, activities: [ACT({ expanded: true })] });
+    expect(cardAlt(c)).toContain('✓ accepted in round 2 · 0 C · 1 I · 3 m');
+    expect(cardAlt(c)).toContain('✓ test · cached');
+    expect(cardAlt(c)).not.toMatch(/0[.,]82/);
+    const fix = card({ forge: { ...forge, verdict: { action: 'fix', score: 0.4, round: 2, findings: { critical: 1, important: 2, minor: 0 } } }, activities: [ACT({ expanded: true })] });
+    const chips = fix.blocks.find((b): b is Extract<Block, { kind: 'chips' }> => b.kind === 'chips')!.chips.map(x => x.text);
+    expect(chips).toContain('fix · round 2/4 · 1 C · 2 I');
+    // Who reviews, when no agent of the task is linked: the reviewers phase review named.
+    const named = card({ forge: { ...forge, verdict: null, reviewers: ['correctness', 'security'] }, activities: [ACT({ expanded: true })] });
+    expect(cardAlt(named)).toContain('reviewers: correctness, security');
+  });
+  it("an expanded row of another session draws only its row: no detail, no verdict, no validators, no agents", () => {
+    const forge = { ...FORGE, task: 'T002', path: 'medium', phase: 'review', validators: [{ name: 'test', ok: true }],
+      verdict: { action: 'accept', score: 0.82, round: 2, findings: { critical: 0, important: 1, minor: 3 } } };
+    const agents = [{ id: 'a1', type: 'forge:forge-impl', description: 'Implement T002', tool: null, seconds: 10, status: 'running' as const, depth: 0 }];
+    const c = card({ forge, activities: [ACT({ owner: 'other', dim: true, expanded: true, agents })] });
+    expect(c.blocks.map(b => b.kind)).toEqual(['row']);
+    expect(rowsOf(c)[0]).toMatchObject({ dim: true, right: expect.stringContaining('other session') });
+    expect(cardAlt(c)).not.toMatch(/accepted|test|Implement/);
+  });
+  it('a slot has no row; without rows the card of today stays for the infinite run', () => {
+    const cards = buildCards({ ...EMPTY, activities: [ACT({ slot: true })], infinite: { cycle: 1, cyclesMax: 3, hoursLeft: null, active: true, autoApproved: [] } }, T, 0);
+    expect(cards.find(c => c.title.startsWith(T.sTasksInProgress))).toBeUndefined();
+    expect(cards.find(c => c.title === 'forge')).toBeDefined();
+  });
+});
+
+describe('a skipped verification and a stopped task (K2-05, forge stop)', () => {
+  const legacy = (f: NonNullable<PanelModel['forge']>) => buildCards({ ...EMPTY, forge: f }, T, 0)[0];
+  it('a skipped verification says so and draws no verify stage; a done task whose verification never ran says no result', () => {
+    const verify = { planned: true, surfaces: ['web'], result: 'skipped', passed: null, total: null, evidence: null, reason: 'docs only', skipped: ['web'], launched: false };
+    const c = legacy({ ...FORGE, path: 'medium', phase: 'review', verify });
+    expect(cardAlt(c)).toContain('⊘ verify web · skipped: docs only');
+    expect((c.blocks.find(b => b.kind === 'stages') as Extract<Block, { kind: 'stages' }>).stages.map(s => s.name)).not.toContain('verify');
+    const done = legacy({ ...FORGE, path: 'small', phase: 'done', verify: { ...verify, result: null, reason: null, skipped: [] }, timing: { taskSeconds: 60, done: true, stages: [] } });
+    expect(cardAlt(done)).toContain('⊘ verify web · skipped: no result');
+  });
+  it('a stopped task marks done only the stages it went through, none active, and is never done', () => {
+    expect(stagesFor('medium', 'stopped', null, false, ['triage', 'implement']).map(s => `${s.name}:${s.state}`))
+      .toEqual(['triage:done', 'implement:done', 'validate:pending', 'review:pending', 'verdict:pending']);
+    const f = { ...FORGE, path: 'medium', phase: 'stopped', timing: { taskSeconds: 300, done: true, stages: [{ name: 'triage', seconds: 10, live: false }, { name: 'implement', seconds: 290, live: false }] } };
+    expect(forgePhase(f)).toBe('stopped');
+    expect(forgeDone(f)).toBe(false);
+    expect(legacy(f).subtitle).toBe('forge · stopped · 5m 00s');
+  });
+});
+
+describe('Now, the execution and the subagents (E-02, E-09, E-11)', () => {
+  it('Now says how many subagents it waits on and when it wakes, and each job in the background without a row', () => {
+    const c = buildCards({ ...EMPTY, waiting: { agents: 3, wakeSeconds: 240 }, jobs: [{ name: 'review-prep', task: 'T003', seconds: 90 }, { name: 'integrate', task: null, seconds: 30 }] }, T, 0)
+      .find(x => x.title === T.sNow)!;
+    expect(cardAlt(c)).toContain('waiting on 3 subagents · wakes in 4m');
+    expect(cardAlt(c)).toContain('validating T003 1m');
+    expect(cardAlt(c)).toContain('integrating 30s');
+  });
+  it('each slot lists its agents, indented; a run of another session is dim', () => {
+    const x = { ...EXEC, slots: [{ ...EXEC.slots[0], agents: [{ id: 'a1', type: 'forge:forge-review-correctness', tool: null, seconds: 60, status: 'running' as const, depth: 0 }] }] };
+    const card = buildCards({ ...EMPTY, execution: x }, T, 0).find(c => c.title === T.sExecution)!;
+    expect(rowsOf(card).map(r => r.indent ?? false)).toEqual([false, true]);
+    const dim = buildCards({ ...EMPTY, execution: { ...x, dim: true } }, T, 0).find(c => c.title === T.sExecution)!;
+    expect(rowsOf(dim).every(r => r.dim)).toBe(true);
+  });
+  it('Subagents leaves out the agents drawn under a task, tags the rest with their task and shows a waiting one as waiting', () => {
+    const subagents = [
+      { id: 'a1', type: 'forge:forge-impl', seconds: 60, task: 'T002', shown: true as const },
+      { id: 'a2', type: 'Explore', description: 'Find it', seconds: 30, task: 'T005' },
+      { id: 'a3', type: 'general-purpose', description: 'Idle mate', status: 'idle', seconds: 10 },
+    ];
+    const c = buildCards({ ...EMPTY, subagents }, T, 0).find(x => x.title === T.sSubagents)!;
+    expect(c.chip?.text).toBe('3');
+    const rows = rowsOf(c);
+    expect(rows.map(r => r.text)).toEqual(['[T005] Find it', 'Idle mate']);
+    expect(rows[1].spinning).toBe(false);
+    expect(rows[1].right).toContain('waiting');
+    expect(buildCards({ ...EMPTY, subagents: [subagents[0]] }, T, 0).find(x => x.title === T.sSubagents)).toBeUndefined();
   });
 });

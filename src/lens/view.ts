@@ -81,7 +81,7 @@ export interface Stage { name: string; state: 'done' | 'active' | 'pending' }
 // Trivial and Small have no reviewers. `validated` says how the last validation went: Trivial logs no phases,
 // so validators that ran are what moves it past implement. Path 'run' is a Large run as a whole while its plan
 // executes: design ▸ plan ▸ execution ▸ final.
-export function stagesFor(path: string, phase: string, validated: 'ok' | 'failed' | null = null, verifyPlanned = false): Stage[] {
+export function stagesFor(path: string, phase: string, validated: 'ok' | 'failed' | null = null, verifyPlanned = false, visited: readonly string[] = []): Stage[] {
   if (path === 'run') {
     if (phase.toLowerCase() === 'done') return RUN_STAGES.map(name => ({ name, state: 'done' }));
     const i = RUN_STAGES.indexOf(STAGE_OF[phase.toLowerCase()] ?? 'execution');
@@ -93,6 +93,8 @@ export function stagesFor(path: string, phase: string, validated: 'ok' | 'failed
   const names = STAGES.filter(s => s !== 'execution' && (large || (s !== 'design' && s !== 'plan' && s !== 'final'))
     && !(light && (s === 'review' || s === 'verdict')) && (s !== 'verify' || verifyPlanned));
   if (phase.toLowerCase() === 'done') return names.map(name => ({ name, state: 'done' }));
+  // A task forge stop stopped: the stages it went through are done, the rest pending, none active.
+  if (phase.toLowerCase() === 'stopped') return names.map(name => ({ name, state: visited.includes(name) ? 'done' : 'pending' }));
   const at = STAGE_OF[phase.toLowerCase()] ?? null;
   let i = at ? names.indexOf(at) : -1;
   const v = names.indexOf('validate');
@@ -109,6 +111,8 @@ export function stagesFor(path: string, phase: string, validated: 'ok' | 'failed
 // so is a finished Trivial or Small task (those paths log no phases).
 // A done phase while the clock still runs (the task reopened) is not read as done.
 export function forgePhase(f: NonNullable<PanelModel['forge']>): string {
+  // forge stop ended the task: stopped, never done.
+  if (f.phase.toLowerCase() === 'stopped') return 'stopped';
   if ((f.path === 'trivial' || f.path === 'small') && f.timing?.done) return 'done';
   if (f.timing?.done === false && f.phase.toLowerCase() === 'done') return '';
   const total = Math.max(f.briefs ?? 0, f.brief ?? 0);
@@ -123,8 +127,8 @@ export const count = (cells: CellState[]): Cells => ({ cells, done: cells.filter
 export const roadmapCells = (w: NonNullable<PanelModel['waypoint']>): Cells =>
   count([...(w.cells ?? '')].map(ch => LETTER[ch] ?? 'pending'));
 
-/** The forge task is over: its phase reads done or its timing ended. */
-export const forgeDone = (f: NonNullable<PanelModel['forge']>): boolean => forgePhase(f) === 'done' || f.timing?.done === true;
+/** The forge task is over: its phase reads done or its timing ended; a stopped task is not done. */
+export const forgeDone = (f: NonNullable<PanelModel['forge']>): boolean => f.phase.toLowerCase() !== 'stopped' && (forgePhase(f) === 'done' || f.timing?.done === true);
 
 // forge's briefs: accepted done, the current one active (failed after a verdict that sent it back), the rest pending.
 // Drawn for Medium and Large; a light task's briefs only once it is done, and then all done (they get no verdict).
@@ -186,6 +190,13 @@ export const DAY_S = 86_400;
 export function span(seconds: number | null | undefined): string | null {
   if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds < 0) return null;
   return seconds > DAY_S ? '>24h' : duration(Math.floor(seconds));
+}
+
+/** A short duration for a row: «45s», «12m», «2h 05m»; null when missing, not finite or negative. */
+export function short(seconds: number | null | undefined): string | null {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds < 0) return null;
+  const s = Math.floor(seconds);
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${Math.floor(s / 3600)}h ${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m`;
 }
 
 // The one-line summary the band shows: the most specific run going on, in this order.

@@ -82,12 +82,13 @@ function block(ui: TermUI, key: string, b: Block, inner: number): RenderElement 
         </Box>
       );
     case 'row':
-      // F-03: the dot, the tag and the right text never shrink; only the text between them does, down to nothing.
+      // F-03: the dot, the tag and the right text never shrink; only the text between them does, down to nothing. An
+      // agent under its task is indented; a row of another session's work, or of a finished one, is dim.
       return (
-        <Box key={key} flexDirection="row" columnGap={1}>
+        <Box key={key} flexDirection="row" columnGap={1} paddingLeft={b.indent ? 2 : 0}>
           <Box flexShrink={0}>{b.spinning ? spinner(ui, `${key}-s`, b.dot) : <Text color={hex(b.dot)}>●</Text>}</Box>
           {b.tag ? <Box flexShrink={0}><Text color={PALETTE.base} backgroundColor={hex(b.tag.hue)} bold>{` ${b.tag.text} `}</Text></Box> : null}
-          <Box flexGrow={1} flexShrink={1} minWidth={0}><Text wrap="truncate-end">{b.text}</Text></Box>
+          <Box flexGrow={1} flexShrink={1} minWidth={0}><Text wrap="truncate-end" dimColor={b.dim}>{b.text}</Text></Box>
           {b.right ? <Box flexShrink={0}><Text dimColor>{b.right}</Text></Box> : null}
         </Box>
       );

@@ -38,7 +38,7 @@ export type Block =
   | { kind: 'bar'; ratio: number; hue: Hue; label?: string; right?: string; moving?: boolean }
   | { kind: 'cells'; cells: CellState[] }
   | { kind: 'stages'; stages: Stage[]; hue: Hue }
-  | { kind: 'row'; dot: Hue; text: string; right?: string; tag?: { text: string; hue: Hue }; spinning?: boolean }
+  | { kind: 'row'; dot: Hue; text: string; right?: string; tag?: { text: string; hue: Hue }; spinning?: boolean; dim?: boolean; indent?: boolean }
   | { kind: 'text'; text: string; dim?: boolean; hue?: Hue }
   | { kind: 'chips'; chips: { text: string; hue: Hue }[] };
 
@@ -119,10 +119,12 @@ function drawBlock(b: Block, x: number, y: number, inner: number, id: string): s
     }
     case 'row': {
       let out = '';
+      // An agent under its task is indented; a row of another session's work, or of a finished one, is dim.
+      const left = b.indent ? x + 14 : x;
       const cy = y + 11;
-      if (b.spinning) out += `<g class="spin"><circle cx="${x + 6}" cy="${cy}" r="5.5" style="fill:none;stroke:${c(b.dot)};stroke-width:2;stroke-dasharray:22 13;stroke-linecap:round"/></g>`;
-      else out += `<circle cx="${x + 6}" cy="${cy}" r="4.5" style="fill:${c(b.dot)}"/>`;
-      let tx = x + 18;
+      if (b.spinning) out += `<g class="spin"><circle cx="${left + 6}" cy="${cy}" r="5.5" style="fill:none;stroke:${c(b.dot)};stroke-width:2;stroke-dasharray:22 13;stroke-linecap:round"/></g>`;
+      else out += `<circle cx="${left + 6}" cy="${cy}" r="4.5" style="fill:${c(b.dot)}"/>`;
+      let tx = left + 18;
       if (b.tag) {
         const tw = Math.round(b.tag.text.length * charW(10.5) + 12);
         out += `<rect x="${tx}" y="${cy - 8}" width="${tw}" height="16" rx="8" style="fill:${c(b.tag.hue)};fill-opacity:.18;stroke:${c(b.tag.hue)};stroke-opacity:.6"/>`
@@ -130,7 +132,7 @@ function drawBlock(b: Block, x: number, y: number, inner: number, id: string): s
         tx += tw + 8;
       }
       const rightW = b.right ? b.right.length * charW(11) + 10 : 0;
-      out += `<text class="t" x="${tx}" y="${cy + 4}" font-family="${FONT}" font-size="12">${xml(fit(b.text, 12, x + inner - tx - rightW))}</text>`;
+      out += `<text class="${b.dim ? 'm' : 't'}" x="${tx}" y="${cy + 4}" font-family="${FONT}" font-size="12">${xml(fit(b.text, 12, x + inner - tx - rightW))}</text>`;
       if (b.right) out += `<text class="m" x="${x + inner}" y="${cy + 4}" text-anchor="end" font-family="${MONO}" font-size="11">${xml(b.right)}</text>`;
       return out;
     }

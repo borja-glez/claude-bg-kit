@@ -111,9 +111,10 @@ test('the pane shows the forge task and its pending proposals', async ($, on) =>
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ plugin: 'lens', surface, component: 'Pane', requestId: PANE, props: PANE_PROPS });
     const text = await said(ui);
-    for (const part of ['hash', 'medium', 'forge · review', 'security', 'forge-review-security', '✓ test', 'accept 0.97', 'round 0/3', 'Cache the parser', 'perf', 'low']) {
+    for (const part of ['hash', 'medium', 'forge · review', 'security', 'forge-review-security', '✓ test', '✓ accepted', 'round 0/3', 'Cache the parser', 'perf', 'low']) {
       expect(text).toContain(part);
     }
+    expect(text).not.toMatch(/0[.,]97/);
     expect(await ui.find({ key: `approve-${ID}` })).toBeDefined();
     expect(await ui.find({ key: `reject-${ID}` })).toBeDefined();
     await ui.unmount();
@@ -179,14 +180,16 @@ test('the ledger is never read, and a status.json over 64 KiB is not read either
   expect(touched).not.toContain(`${ROOT}/.forge/status.json`);
 });
 
-test('a verdict score of 0 shows as 0', async ($, on) => {
+test('a verdict shows its action, never its score (K4-05)', async ($, on) => {
   serveFiles(on, { ...FORGE, [`${ROOT}/.forge/status.json`]: JSON.stringify({ ...STATUS, verdict: { action: 'reject', score: 0 } }) });
   servePanes(on);
   start(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
   const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
-  expect(await said(ui)).toContain('reject 0.00');
+  const text = await said(ui);
+  expect(text).toContain('reject');
+  expect(text).not.toMatch(/0[.,]00/);
   await ui.unmount();
 });
 
