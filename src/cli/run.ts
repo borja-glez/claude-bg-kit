@@ -823,7 +823,7 @@ export function run(argv: string[], io: Io): Result {
           ? changedSections(designBody(history[since]), d.body)
           : { changed: ['_intro', ...d.sections.map(s => s.slug)], removed: [] as string[] };
         // G-14: the tolerant reader, so a broken state file leaves that task with no status instead of failing.
-        const states = flag('states') ? statesOf(abs(flag('states')!))?.states ?? {} : {};
+        const states = flag('states') ? statesOf(abs(flag('states')!), plan.tasks.map(t => t.id))?.states ?? {} : {};
         const hit = new Set([...changed, ...removed]);
         const tasks = plan.tasks.filter(t => t.design_ref && hit.has(t.design_ref))
           .map(t => ({ id: t.id, ref: t.design_ref as string, status: states[t.id] ?? null }));
