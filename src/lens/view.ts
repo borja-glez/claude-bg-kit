@@ -39,7 +39,7 @@ export const SECTION_ICON: Record<SectionId, string> = {
  */
 export const GLYPHS = [
   '●', '◆', '◈', '✦', '≡', '◎', '▤', '▸', '►', '▲', '✎', '◷', '✓', '✗', '⊘', '✧', '■', '□', '◉', '○', '◐', '⚑', '∞', '↓', '⋯',
-  '◦', '◌', '─', '‹', '›', '…', '·', '≥', '×', '█', '░', '▏', '▎', '▍', '▌', '▋', '▊', '▉',
+  '◦', '◌', '─', '‹', '›', '…', '·', '≥', '×', '→', '«', '»', '—', '–', '≈', '−', '⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏', '█', '░', '▏', '▎', '▍', '▌', '▋', '▊', '▉',
 ] as const;
 
 // An agent's level: forge's implementer ladder ranked 1 to 6 (mostly cool to warm), the reviewers by what they judge. impl-high is peach,

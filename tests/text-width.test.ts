@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { charWidth, clipWidth, stringWidth } from '../src/lib/text-width.js';
+import { charWidth, clipWidth, splitClusters, stringWidth } from '../src/lib/text-width.js';
 import { GLYPHS } from '../src/lens/view.js';
 
 // Invisible characters are built from their code points, so this file never holds them raw.
@@ -9,6 +9,7 @@ const cc = (...n: number[]) => String.fromCharCode(...n);
 const ZWJ = cc(0x200d);
 const VS16 = cc(0xfe0f);
 const ACUTE = cc(0x0301);
+const FLAG = cc(0xd83c, 0xddea, 0xd83c, 0xddf8);
 
 // The reference the spec asks for, from Node's own Unicode properties: marks, controls and format characters take no
 // cell, nor do the variation selectors; Emoji_Presentation and the CJK blocks take two; VS16 widens the glyph before it.
@@ -38,12 +39,19 @@ function sources(dir: string): string[] {
 
 describe('stringWidth and clipWidth (F-13)', () => {
   it('agrees with the reference on wide, combining, joined and widened text', () => {
-    const samples = ['T001 Esquema', '漢字', '👍', '✓', 'é', `e${ACUTE}`, `a${ZWJ}b`, `👩${ZWJ}💻`, `✓${VS16}`, `☺${VS16}`, 'Ａｂ', 'ok · …', '●◆▲✎◷►'];
+    const samples = ['T001 Esquema', '漢字', '👍', '✓', 'é', `e${ACUTE}`, `a${ZWJ}b`, `✓${VS16}`, `☺${VS16}`, 'Ａｂ', 'ok · …', '●◆▲✎◷►'];
     for (const s of samples) expect(stringWidth(s), JSON.stringify(s)).toBe(reference(s));
     expect(stringWidth('漢字')).toBe(4);
     expect(stringWidth('👍')).toBe(2);
     expect(stringWidth(`e${ACUTE}`)).toBe(1);
     expect(stringWidth(`✓${VS16}`)).toBe(2);
+  });
+  it("measures a cluster as one glyph: a joined sequence, a flag and a skin tone take two cells", () => {
+    expect(stringWidth(`👩${ZWJ}💻`)).toBe(2);
+    expect(stringWidth(FLAG)).toBe(2);
+    expect(stringWidth(`👍${cc(0xd83c, 0xdffd)}`)).toBe(2);
+    expect(stringWidth(`${cc(0x5d0)}${cc(0x5b0)}`)).toBe(1);
+    expect(stringWidth(cc(0xfeff))).toBe(0);
   });
   it('one code point: controls and zero-width ones take none, emoji two, the rest one', () => {
     expect([charWidth(0x07), charWidth(0x200b), charWidth(0x41), charWidth(0x25b2), charWidth(0x1f44d), charWidth(0x4e00)]).toEqual([0, 0, 1, 1, 2, 2]);
@@ -55,6 +63,24 @@ describe('stringWidth and clipWidth (F-13)', () => {
     expect(clipWidth('漢字かな', 4)).toBe('漢…');
     expect(clipWidth('abc', 1)).toBe('…');
     expect(clipWidth('abc', 0)).toBe('');
+  });
+  it("never splits a cluster and never goes over max, the ellipsis included", () => {
+    const check = (text: string, max: number) => { const out = clipWidth(text, max); expect(stringWidth(out), JSON.stringify(out)).toBeLessThanOrEqual(max); return out; };
+    check(`✓${VS16}✓${VS16}✓${VS16}abc`, 4);
+    for (let max = 1; max <= 8; max++) check(`✓${VS16}✓${VS16}✓${VS16}abc`, max);
+    const joined = check(`x👩${ZWJ}💻👩${ZWJ}💻 tail`, 4);
+    expect(joined.endsWith(`${ZWJ}…`)).toBe(false);
+    expect(joined).toBe('x👩' + ZWJ + '💻…');
+    for (let max = 1; max <= 6; max++) { const out = check(`${FLAG} hola`, max); expect(out.replace('…', '') === cc(0xd83c, 0xddea) ).toBe(false); }
+    expect(check(`a漢字かな`, 4)).toBe('a漢…');
+    expect(check(`e${ACUTE}e${ACUTE}e${ACUTE}`, 2)).toBe(`e${ACUTE}…`);
+  });
+});
+
+describe('the fallback segmentation', () => {
+  it('cuts the clusters the way Intl.Segmenter does', () => {
+    const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+    for (const s of ['abc', '漢字', `e${ACUTE}x`, `✓${VS16}a`, `👩${ZWJ}💻x`, `${FLAG}a`, `👍${cc(0xd83c, 0xdffd)}`, `a${ZWJ}b`]) expect(splitClusters(s), JSON.stringify(s)).toEqual(Array.from(seg.segment(s), p => p.segment));
   });
 });
 
@@ -70,7 +96,7 @@ describe('the glyphs of the band and the panel (F-13)', () => {
     expect(hits).toEqual([]);
   });
   it('every glyph in GLYPHS takes one cell and has no emoji form', () => {
-    for (const g of ['▲', '✎', '◷', '►', '⋯', '◦', '◌']) expect(GLYPHS).toContain(g);
+    for (const g of ['▲', '✎', '◷', '►', '⋯', '◦', '◌', '→', '«', '»', '—', '–', '≈', '−', '⠋', '⠏']) expect(GLYPHS).toContain(g);
     for (const g of GLYPHS) {
       expect(stringWidth(g), g).toBe(1);
       expect(/\p{Emoji}|\p{Extended_Pictographic}/u.test(g), g).toBe(false);
