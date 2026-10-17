@@ -16005,7 +16005,8 @@ function hookLive(io, forced) {
       if (role2 !== "other-live" && role2 !== "previous") return "";
       return JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: notOwnerText(exec, role2, now) } });
     }
-    if (!exec.active) return "";
+    const coordinatorEnds = event === "SessionEnd" && viewer.coordinator && exec.hookSession === sessionId && !exec.closedAt;
+    if (!exec.active && !coordinatorEnds) return "";
     const member = viewer.coordinator ? null : viewer.member;
     const role = member ? member.role : "coordinator";
     const signalId = member ? member.sessionId : sessionId;
@@ -16395,37 +16396,45 @@ function evidenceOf(worktree, max = EVIDENCE_FILES_MAX) {
       return false;
     }
   };
+  const folderNames = (rel3) => {
+    try {
+      return (0, import_node_fs23.readdirSync)(import_node_path23.default.join(worktree, rel3), { withFileTypes: true }).filter((d) => !d.isFile()).map((d) => d.name).sort();
+    } catch {
+      return [];
+    }
+  };
+  const take = (child, name) => {
+    if (name === "evidence") {
+      const under2 = filesUnder(worktree, child, max - files.length);
+      files.push(...under2.files);
+      truncated = under2.truncated;
+      return true;
+    }
+    if (!name.startsWith("reviews-")) return false;
+    const verify = `${child}/verify.json`;
+    let isFile = false;
+    try {
+      isFile = (0, import_node_fs23.lstatSync)(import_node_path23.default.join(worktree, verify)).isFile();
+    } catch {
+      isFile = false;
+    }
+    if (!isFile) return true;
+    if (files.length >= max) truncated = true;
+    else files.push(verify);
+    return true;
+  };
   const visit = (rel3, depth) => {
     if (truncated) return;
     if (++folders > EVIDENCE_FILES_MAX) {
       truncated = true;
       return;
     }
-    let names2 = [];
-    try {
-      names2 = (0, import_node_fs23.readdirSync)(import_node_path23.default.join(worktree, rel3), { withFileTypes: true }).filter((d) => !d.isFile()).map((d) => d.name).sort();
-    } catch {
-      return;
-    }
-    for (const name of names2) {
+    for (const name of folderNames(rel3)) {
       const child = `${rel3}/${name}`;
       if (truncated || !isFolder(child)) continue;
-      if (name === "evidence") {
-        const under2 = filesUnder(worktree, child, max - files.length);
-        files.push(...under2.files);
-        truncated = under2.truncated;
-      } else if (name.startsWith("reviews-")) {
-        const verify = `${child}/verify.json`;
-        let isFile = false;
-        try {
-          isFile = (0, import_node_fs23.lstatSync)(import_node_path23.default.join(worktree, verify)).isFile();
-        } catch {
-          isFile = false;
-        }
-        if (!isFile) continue;
-        if (files.length >= max) truncated = true;
-        else files.push(verify);
-      } else if (depth < WORK_DEPTH) visit(child, depth + 1);
+      if (name.startsWith("earlier-")) {
+        for (const inner of folderNames(child)) if (!truncated && isFolder(`${child}/${inner}`)) take(`${child}/${inner}`, inner);
+      } else if (!take(child, name) && depth < WORK_DEPTH) visit(child, depth + 1);
     }
   };
   if (noLink(worktree, ".forge/work") && isFolder(".forge/work")) visit(".forge/work", 1);
@@ -17561,10 +17570,13 @@ function swarmCommand(args, io, deps, ext = {}) {
       if (e.closedAt) throw new UsageError(`swarm retry: the execution ${e.runId} is closed; start a new one`);
       notEnded(e);
       const revived = (x) => !x.active && x.stopReason === "stalled";
-      if (revived(e) && e.hookSession && claudeSessionId(flag("hook-session"), io.env ?? process.env) !== e.hookSession) {
-        const liveness2 = boundLiveness(io.cwd, { ...e, active: true }, now.getTime());
-        if (liveness2 !== "stopped") throw new UsageError(boundElsewhere("retry", e.runId, e.hookSession, liveness2));
-      }
+      const hook = claudeSessionId(flag("hook-session"), io.env ?? process.env);
+      const gate = (x) => {
+        if (!revived(x) || !x.hookSession || hook === x.hookSession) return;
+        const liveness2 = boundLiveness(io.cwd, { ...x, active: true }, now.getTime());
+        if (liveness2 !== "stopped") throw new UsageError(boundElsewhere("retry", x.runId, x.hookSession, liveness2));
+      };
+      gate(e);
       if (has("adopt")) {
         const adoptable = (x) => !!x && x.status === "conflict" && x.executor !== "subagents";
         const notAdoptable = (x) => new UsageError(`swarm retry: --adopt takes a member's task in conflict (${task} is ${x ? `${x.status}, ${x.executor}` : "not in this execution"})`);
@@ -17583,6 +17595,7 @@ function swarmCommand(args, io, deps, ext = {}) {
         update((cur) => {
           if (!cur) return null;
           notEnded(cur);
+          gate(cur);
           const base = cur.tasks[task] ?? t;
           if (!adoptable(base)) throw notAdoptable(base);
           adopted = base;
@@ -17600,6 +17613,7 @@ function swarmCommand(args, io, deps, ext = {}) {
       update((cur) => {
         if (!cur) return null;
         notEnded(cur);
+        gate(cur);
         const base = cur.tasks[task] ?? t;
         if (!retryable(base)) throw new UsageError(`swarm retry: ${task} is not in conflict or blocked`);
         return {
@@ -18575,7 +18589,7 @@ function reviewRoundOf(events, task, since = null) {
   const dirs = new Set(eventsSince(events, since).filter((e) => e.kind === "verdict" && isTask(e, task)).map((e, i) => typeof e.dir === "string" ? e.dir : `#${i}`));
   return dirs.size + 1;
 }
-function setAsideEarlier(dir, n, id2, events, run2) {
+function setAsideEarlier(dir, n, id2, events, run2, cwd2) {
   const ours = new Set(eventsSince(events, run2.startedAt).filter((e) => e.kind === "phase" && isTask(e, id2) && e.brief === Number(n) && typeof e.round === "number").map((e) => e.round));
   let names2 = [];
   try {
@@ -18589,21 +18603,30 @@ function setAsideEarlier(dir, n, id2, events, run2) {
   });
   if (!rounds.length) return null;
   const aside = import_node_path27.default.join(dir, `earlier-${run2.runId}`);
-  const move = (rel3) => {
-    const from = import_node_path27.default.join(dir, rel3);
+  let moved = 0;
+  const failed = [];
+  const move = (name) => {
+    const from = import_node_path27.default.join(dir, name);
     if (!(0, import_node_fs27.existsSync)(from)) return;
     try {
-      (0, import_node_fs27.mkdirSync)(import_node_path27.default.dirname(import_node_path27.default.join(aside, rel3)), { recursive: true });
-      (0, import_node_fs27.renameSync)(from, import_node_path27.default.join(aside, rel3));
+      (0, import_node_fs27.mkdirSync)(import_node_path27.default.dirname(import_node_path27.default.join(aside, name)), { recursive: true });
+      (0, import_node_fs27.renameSync)(from, import_node_path27.default.join(aside, name));
+      moved++;
     } catch {
+      failed.push(from);
     }
   };
+  const roundFiles = (k) => names2.filter((f) => f === `findings-${n}-${k}.json` || f === `fix-${n}-${k}.patch` || f === `handover-${n}-${k}.md` || f.startsWith(`validators-fix-${n}-${k}-`) && f.endsWith(".json"));
   for (const k of rounds) {
     move(`reviews-${n}-${k}`);
     move(`evidence/${n}-${k}`);
+    for (const f of roundFiles(k)) move(f);
   }
   for (const f of [`findings-index-${n}.json`, `validators-head-${n}.json`]) move(f);
-  return aside;
+  if (failed.length) {
+    throw new UsageError(`prep: ${failed.map((f) => rel2(cwd2, f)).join(", ")} could not be moved aside to ${rel2(cwd2, aside)} (an earlier run's review of this brief): close what holds it and run prep again`);
+  }
+  return moved ? aside : null;
 }
 function restoringGenerated(deps, generated, fn, into) {
   return generated.length ? restoringRegenerated({ git: deps.git }, fn, into, generated) : fn();
@@ -19182,7 +19205,8 @@ function reviewClose(args, deps) {
   }
   const all = readEvents(deps.cwd);
   const events = eventsOf(all, { project, task: id2 });
-  const d = roundDecision(all, task, p, config.profile, project, executionHolding(deps.cwd, { project, task: id2 })?.startedAt ?? null);
+  const since = executionHolding(deps.cwd, { project, task: id2 })?.startedAt ?? null;
+  const d = roundDecision(all, task, p, config.profile, project, since);
   appendEvent(deps.cwd, { ts, kind: "round", task, ...d, reviews: reviewsCount });
   if (result.action !== "accept" && (d.next === "resume" || d.next === "fresh-stronger" || d.next === "redo")) {
     appendPhase(deps.cwd, { ts, kind: "phase", task: id2, phase: "fix", brief: Number(n), round });
@@ -19196,7 +19220,7 @@ function reviewClose(args, deps) {
       ...result.deferred.length ? { deferred: result.deferred } : {}
     };
     const same = JSON.stringify(ruling);
-    const logged = events.some((e) => e.kind === "ruling" && isTask(e, task) && e.dir === ruling.dir && JSON.stringify({ task: e.task, round: e.round, dir: e.dir, ...e.minor ? { minor: e.minor } : {}, ...e.deferred ? { deferred: e.deferred } : {} }) === same);
+    const logged = eventsSince(events, since).some((e) => e.kind === "ruling" && isTask(e, task) && e.dir === ruling.dir && JSON.stringify({ task: e.task, round: e.round, dir: e.dir, ...e.minor ? { minor: e.minor } : {}, ...e.deferred ? { deferred: e.deferred } : {} }) === same);
     if (!logged) appendEvent(deps.cwd, { ts, kind: "ruling", ...ruling });
   }
   let findings = null;
@@ -19302,7 +19326,11 @@ function prep(args, deps) {
   const dir = flag("dir") !== void 0 ? import_node_path27.default.resolve(deps.cwd, flag("dir")) : readWorkDir(deps.cwd, { project, task: id2 }, ledger);
   (0, import_node_fs27.mkdirSync)(dir, { recursive: true });
   const run2 = executionHolding(deps.cwd, { project, task: id2 });
-  const aside = run2 ? setAsideEarlier(dir, n, id2, eventsOf(ledger, { project, task: id2 }), run2) : null;
+  const mine = eventsOf(ledger, { project, task: id2 });
+  const aside = run2 ? setAsideEarlier(dir, n, id2, mine, run2, deps.cwd) : null;
+  const main = ledgerRoot(deps.cwd);
+  const inWork = import_node_path27.default.relative(deps.cwd, dir);
+  if (run2 && !samePath(main, deps.cwd) && inWork && !inWork.startsWith("..") && !import_node_path27.default.isAbsolute(inWork)) setAsideEarlier(import_node_path27.default.join(main, inWork), n, id2, mine, run2, deps.cwd);
   const earlier = aside ? { earlier: rel2(deps.cwd, aside) } : {};
   const tmFile = config ? writeThreatModel(dir, config) : null;
   const threatModel = tmFile ? rel2(deps.cwd, tmFile) : null;
@@ -23086,14 +23114,16 @@ function runCommand(argv, io) {
         const task = flag("task");
         if (!task) throw new UsageError("last: --task is required");
         const ledger = readEvents(io.cwd);
-        const events = eventsOf(ledger, { project: resolveProject({ flag: flag("project"), task, events: ledger }), task }).filter((e) => isTask(e, task));
-        const lastOf = (kind) => [...events].reverse().find((e) => e.kind === kind);
+        const project = resolveProject({ flag: flag("project"), task, events: ledger });
+        const events = eventsOf(ledger, { project, task }).filter((e) => isTask(e, task));
+        const lastOf = (kind, from = events) => [...from].reverse().find((e) => e.kind === kind);
+        const own = eventsSince(events, executionHolding(io.cwd, { project, task: baseOf(task) })?.startedAt ?? null);
         return json3({
           task,
           path: lastOf("triage")?.path ?? null,
           phase: lastOf("phase") ?? null,
-          verdict: lastOf("verdict") ?? null,
-          round: lastOf("round") ?? null,
+          verdict: lastOf("verdict", own) ?? null,
+          round: lastOf("round", own) ?? null,
           events: events.length,
           // Whether the task runs in auto mode: its last fresh triage (a ratchet logged by the session carries none).
           autonomy: [...events].reverse().find((e) => e.kind === "triage" && Array.isArray(e.reasons))?.autonomy === "auto" ? "auto" : null
