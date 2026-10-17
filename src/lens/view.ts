@@ -206,7 +206,7 @@ export interface Headline { section: SectionId; title: string; detail: string; c
 export function headline(m: PanelModel): Headline | null {
   if (m.execution?.active) {
     const x = m.execution;
-    const detail = x.slots.slice(0, 2).map(s => `${s.task} ${s.stage}`).join(' · ');
+    const detail = x.slots.map(s => `${s.task} ${s.stage}`).join(' · ');
     return { section: 'forge', title: `► ${x.slots.length}/${x.parallel}`, detail, cells: null, agent: null };
   }
   // M2: the forge section is the expanded activity's; another session's (expanded when no task of this one is in

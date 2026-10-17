@@ -131,6 +131,8 @@ describe('lens view', () => {
   });
   it('the execution leads the lens band headline', () => {
     expect(headline({ ...EMPTY, execution: EXEC, forge: FORGE })).toMatchObject({ section: 'forge', title: '► 1/3', detail: 'T004 review' });
+    const three = { ...EXEC, slots: [EXEC.slots[0], { ...EXEC.slots[0], task: 'T005', stage: 'implement' }, { ...EXEC.slots[0], task: 'T006', stage: 'validate' }] };
+    expect(headline({ ...EMPTY, execution: three })).toMatchObject({ title: '► 3/3', detail: 'T004 review · T005 implement · T006 validate' });
     expect(headline({ ...EMPTY, execution: { ...EXEC, active: false, stopReason: 'stalled' }, forge: FORGE })).toMatchObject({ title: 'orders' });
   });
   it('a large forge task during an execution draws the run stages', () => {

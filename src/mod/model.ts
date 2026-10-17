@@ -51,7 +51,8 @@ export type BandModel = (
       run: { coordinator: string; stage: string } | null;
       recentDone?: { id: string; minutes: number; estimateMin?: number }[]; auto?: { count: number; lastMajor: string | null } }
   | { mode: 'run'; project: string; locale: string; executor: 'subagents' | 'sessions'; running: number; parallel: number;
-      integrated: number; total: number; slots: { task: string; stage: string; round: number }[];
+      // every running task, at most twelve, and the accepted ones waiting to integrate.
+      integrated: number; queued: number; total: number; slots: { task: string; stage: string; round: number }[];
       worst: 'alive' | 'silent' | 'stopped'; stalled: boolean; roadmapUrl: string | null;
       // the seat of the conversation that looks (its own binding, else the run's coordinator), its inbox and pending
       // decision, the plan's progress and its first phase not done.
@@ -339,6 +340,8 @@ function knownLocale(f: BandFiles): string | undefined {
 }
 
 const MAX_CELLS = 120;
+/** E-04: the run band carries every slot, up to this many; the band shows those that fit and counts the rest as «+N». */
+export const BAND_SLOTS_MAX = 12;
 const CELL: Record<string, string> = { done: 'd', in_progress: 'a', claimed: 'a', blocked: 'b', free: 'p', orphaned: 'b' };
 
 const RECENT_DONE = 3;
@@ -427,7 +430,7 @@ function runModel(project: string, f: BandFiles, exec: ExecutionState, plan: Pla
   const worst = [v.coordinator.liveness, ...v.slots.map(s => s.liveness)].reduce((a, b) => (rank[b] > rank[a] ? b : a), 'alive' as 'alive' | 'silent' | 'stopped');
   return {
     mode: 'run', project, locale: plan?.locale ?? 'en', executor: v.mode, running: v.slots.length, parallel: v.parallel, integrated: v.integrated, total: v.total,
-    slots: v.slots.slice(0, 2).map(s => ({ task: s.task, stage: s.stage, round: s.round })), worst, stalled: !v.active, roadmapUrl: plan?.artifacts.roadmap ?? null, viewer,
+    queued: v.queued.length, slots: v.slots.slice(0, BAND_SLOTS_MAX).map(s => ({ task: s.task, stage: s.stage, round: s.round })), worst, stalled: !v.active, roadmapUrl: plan?.artifacts.roadmap ?? null, viewer,
     // E-10: what the roadmap card shows for a run too: the seat's messages and decision, the plan's progress and phase.
     sid, ...seatSignals(f, sid), ...planProgress(plan, f, now),
   };

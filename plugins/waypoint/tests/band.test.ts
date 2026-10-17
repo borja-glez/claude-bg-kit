@@ -46,6 +46,33 @@ function otherBand(on: On) {
   });
 }
 
+// The band as drawn, walked: lineText finds the Text inside the Box keyed band-line, lineOf joins every string under it
+// (its parts and their separators, nested Texts included).
+type DrawnNode = { type?: string; props?: Record<string, unknown>; children?: unknown };
+function strings(n: unknown, out: string[] = []): string[] {
+  if (typeof n === 'string') out.push(n);
+  else if (Array.isArray(n)) for (const c of n) strings(c, out);
+  else if (n && typeof n === 'object') strings((n as DrawnNode).children, out);
+  return out;
+}
+function findNode(n: unknown, test: (el: DrawnNode) => boolean): DrawnNode | undefined {
+  if (Array.isArray(n)) {
+    for (const c of n) { const hit = findNode(c, test); if (hit) return hit; }
+    return undefined;
+  }
+  if (!n || typeof n !== 'object') return undefined;
+  const el = n as DrawnNode;
+  return test(el) ? el : findNode(el.children, test);
+}
+async function lineOf(ui: { drawn: () => Promise<unknown> }): Promise<string | undefined> {
+  const box = findNode(await ui.drawn(), el => el.props?.key === 'band-line');
+  return box ? strings(box.children).join('') : undefined;
+}
+async function lineText(ui: { drawn: () => Promise<unknown> }): Promise<DrawnNode | undefined> {
+  const box = findNode(await ui.drawn(), el => el.props?.key === 'band-line');
+  return box ? findNode(box.children, el => el.type === 'Text') : undefined;
+}
+
 // The role of the conversation looking at each band (C3): a seat's owner, the run's coordinator, nobody.
 const OWNER: WaypointBand['viewer'] = { role: 'owner', coordinator: false, runId: null };
 const COORDINATOR: WaypointBand['viewer'] = { role: 'owner', coordinator: true, runId: 'r1' };
@@ -60,7 +87,7 @@ const WORK: WaypointBand = {
   trackDone: 2, trackTotal: 5, percent: 40, inbox: 1, escalation: true, phase: { index: 1, total: 2, name: 'Base' }, cells: 'ddapp', swarm: false, run: null, viewer: OWNER,
 };
 const RUN: WaypointBand = {
-  mode: 'run', project: 'demo', locale: 'es', executor: 'subagents', running: 2, parallel: 3, integrated: 3, total: 12,
+  mode: 'run', project: 'demo', locale: 'es', executor: 'subagents', running: 2, parallel: 3, integrated: 3, queued: 0, total: 12,
   slots: [{ task: 'T004', stage: 'review', round: 2 }, { task: 'T008', stage: 'implement', round: 1 }], worst: 'silent', stalled: false,
   roadmapUrl: 'https://claude.ai/artifact/roadmap', sid: 'main', inbox: 0, escalation: false, percent: 25, phase: null, viewer: COORDINATOR,
 };
@@ -80,7 +107,7 @@ test('the Spanish design band says one pending proposal and one critical in the 
   engineBottom(on);
   serveBand(on, () => ({ ...DESIGN, locale: 'es', pending: 1, pendingCritical: 1 }) as WaypointBand);
   const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
-  expect(await ui.find({ type: 'Text', text: '◆ DISEÑO · demo · v3 · 1 pendiente · 1 crítica' })).toBeDefined();
+  expect(await lineOf(ui)).toBe('◆ DISEÑO · demo · v3 · 1 pendiente · 1 crítica');
   await ui.unmount();
 });
 
@@ -88,7 +115,7 @@ test('the design band counts the proposals still pending from every round, not t
   engineBottom(on);
   serveBand(on, () => ({ ...DESIGN, proposals: 4, critical: 0, pending: 0, pendingCritical: 0 }) as WaypointBand);
   const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
-  expect(await ui.find({ type: 'Text', text: '◆ DESIGN · demo · v3 · nothing pending' })).toBeDefined();
+  expect(await lineOf(ui)).toBe('◆ DESIGN · demo · v3 · nothing pending');
   await ui.unmount();
 });
 
@@ -101,7 +128,7 @@ test('design band shows counts and submits commands', async ($, on) => {
   serveBand(on, () => DESIGN);
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
-    expect(await ui.find({ type: 'Text', text: '◆ DESIGN · demo · v3 · 2 pending · 1 critical' })).toBeDefined();
+    expect(await lineOf(ui)).toBe('◆ DESIGN · demo · v3 · 2 pending · 1 critical');
     for (const key of ['apply-all', 'pick', 'round', 'rewrite', 'interview', 'approve']) {
       expect(await ui.find({ key })).toBeDefined();
     }
@@ -138,8 +165,7 @@ test('work band runs /waypoint:work, the cross hides it and a new session shows 
     // A new session shows the band again after a dismiss (no project files here: the model is the served one).
     await $.session.start({ cwd: '.', surface, isInteractive: true });
     const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
-    const line = await ui.find({ type: 'Text', text: /^● frente core 2\/5 · T3 / });
-    expect(line?.text).toBe('● frente core 2/5 · T3 A very long task title that goes well b… · 12 min/30 · global 40 % · ✎ 1 · ▲ decisión pendiente');
+    expect(await lineOf(ui)).toBe('● frente core 2/5 · T3 A very long task title that goes well b… · 12 m / 30 m · global 40 % · ✎ 1 · ▲ decisión pendiente');
     expect(await ui.find({ type: 'Link', text: 'Abrir roadmap' })).toBeDefined();
     await ui.press({ key: 'next-task' });
     expect(sent.at(-1)).toBe('/waypoint:work');
@@ -161,7 +187,7 @@ test('the run band shows the execution, stops it and offers no per-session work 
   serveBand(on, () => RUN);
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
-    expect(await ui.find({ type: 'Text', text: '► EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · T008 implementar · 3/12 · integradas 3 · ▲ sin señal' })).toBeDefined();
+    expect(await lineOf(ui)).toBe('► EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · T008 implementar · 3/12 integradas · ▲ sin señal');
     expect(await ui.find({ type: 'Button', text: 'Estado' })).toBeDefined();
     expect(await ui.find({ type: 'Button', text: 'Parar' })).toBeDefined();
     await ui.press({ key: 'stop-run' });
@@ -201,7 +227,7 @@ test('a swarm member work band is marked', async ($, on) => {
   serveBand(on, () => ({ ...WORK, swarm: true }));
   mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
   const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
-  expect((await ui.find({ type: 'Text', text: /^● frente core 2\/5 · ejecución · T3 / }))?.text).toContain('· ejecución · T3 ');
+  expect(await lineOf(ui)).toContain('· ejecución · T3 ');
   await ui.unmount();
 });
 
@@ -209,9 +235,10 @@ test('a session without a track counts the plan tasks instead of naming a track'
   engineBottom(on);
   serveBand(on, () => ({ ...WORK, track: null, sid: 'main', current: null }));
   const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
-  const line = await ui.find({ type: 'Text', text: /^● main · / });
-  expect(line?.text).toContain('· tareas 2/5 · ');
-  expect(line?.text).not.toContain('frente');
+  const line = await lineOf(ui);
+  expect(line).toContain('· tareas 2/5 · ');
+  expect(line).not.toContain('frente');
+  expect(line).toMatch(/^● main · /);
   await ui.unmount();
 });
 
@@ -355,8 +382,7 @@ test('session start reads the project files and shows the work band', async ($, 
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
-    const line = await ui.find({ type: 'Text', text: /^● / });
-    expect(line?.text).toBe('● frente backend 1/2 · T002 API de pedidos · 5 min/30 · global 33 %');
+    expect(await lineOf(ui)).toBe('● frente backend 1/2 · T002 API de pedidos · 5 m / 30 m · global 33 %');
     expect(await ui.find({ key: 'next-task' })).toBeDefined();
     await ui.unmount();
   }
@@ -373,7 +399,7 @@ test('the periodic refresh redraws a running task with its new minutes', async (
     const before = clock.now();
     await clock.advance(60000);
     const minutes = Math.floor((before + 60000 - Date.parse('2026-10-11T10:00:00.000Z')) / 60000);
-    expect((await ui.find({ type: 'Text', text: /^● / }))?.text).toContain(`· ${minutes} min/30 ·`);
+    expect(await lineOf(ui)).toContain(`· ${minutes} m / 30 m ·`);
     await ui.unmount();
   }
 });
@@ -405,7 +431,7 @@ test('a folder without plan.yaml or design.md is not a project, even with a sess
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
-  expect((await ui.find({ type: 'Text', text: /^◆ / }))?.text).toBe('◆ DESIGN · demo · v0 · no critique yet');
+  expect(await lineOf(ui)).toBe('◆ DESIGN · demo · v0 · no critique yet');
   await ui.unmount();
 });
 
@@ -521,7 +547,7 @@ test('a band with automatic decisions ends with their count and the last major o
   engineBottom(on);
   serveBand(on, () => ({ ...DESIGN, auto: { count: 2, lastMajor: 'design approved (v3)' } }) as WaypointBand);
   const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
-  expect(await ui.find({ type: 'Text', text: '◆ DESIGN · demo · v3 · 2 pending · 1 critical · ⚑ auto · 2 · design approved (v3)' })).toBeDefined();
+  expect(await lineOf(ui)).toBe('◆ DESIGN · demo · v3 · 2 pending · 1 critical · ⚑ auto · 2 · design approved (v3)');
   await ui.unmount();
 });
 
@@ -535,8 +561,8 @@ test('a notice of another session at work is drawn dim with Status, Other track 
   mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
-    const line = await ui.find({ type: 'Text', text: '◦ otra sesión (main) trabaja en T002 · hace 12 min' });
-    expect(line?.props.dimColor).toBe(true);
+    expect(await lineOf(ui)).toBe('◦ otra sesión (main) trabaja en T002 · hace 12 min');
+    expect((await lineText(ui))?.props?.dimColor).toBe(true);
     expect(await ui.find({ type: 'Button', text: 'Otro frente' })).toBeDefined();
     expect(await ui.find({ type: 'Link', text: 'Abrir roadmap' })).toBeDefined();
     await ui.press({ key: 'status' });
@@ -556,8 +582,8 @@ test('a notice of another session on the design offers Status and the roadmap, n
   mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
-    const line = await ui.find({ type: 'Text', text: '◦ otra sesión (main) trabaja en el diseño · hace 12 min' });
-    expect(line?.props.dimColor).toBe(true);
+    expect(await lineOf(ui)).toBe('◦ otra sesión (main) trabaja en el diseño · hace 12 min');
+    expect((await lineText(ui))?.props?.dimColor).toBe(true);
     expect(await ui.find({ type: 'Link', text: 'Abrir roadmap' })).toBeDefined();
     await ui.press({ key: 'status' });
     expect(sent.at(-1)).toBe('/waypoint:status');
@@ -580,17 +606,17 @@ test('the notices of a run and of what an earlier conversation left send their c
     // I1: an ephemeral run takes no members (swarm join refuses it), so its notice offers no Join.
     { model: notice({ ...run, joinable: false }), line: '◦ ejecución de forge en curso, la coordina otra sesión · 3/12', labels: ['Ver'],
       presses: [['view', '/waypoint:status']], absent: ['join'] },
-    { model: notice({ kind: 'previous', viewer: PREVIOUS }), line: '◌ quedó a medias: T002 API de pedidos (hace 12 min)', labels: ['Retomar', 'Liberar T002'],
+    { model: notice({ kind: 'previous', viewer: PREVIOUS }), line: '◌ quedó a medias: T002 API de pedidos · hace 12 min', labels: ['Retomar', 'Liberar T002'],
       presses: [['resume', '/waypoint:work resume'], ['release', '/waypoint:work release T002']] },
-    { model: notice({ kind: 'previous', subject: 'design', task: null, title: null, key: 'design:demo', viewer: PREVIOUS }), line: '◌ diseño a medias: demo (hace 12 min)', labels: ['Retomar'],
+    { model: notice({ kind: 'previous', subject: 'design', task: null, title: null, key: 'design:demo', viewer: PREVIOUS }), line: '◌ diseño a medias: demo · hace 12 min', labels: ['Retomar'],
       presses: [['resume', '/waypoint:design resume']] },
-    { model: notice({ ...run, kind: 'previous', stopReason: 'stalled', viewer: PREVIOUS }), line: '◌ ejecución parada: 3/12 integradas (hace 12 min)', labels: ['Ver', 'Retomar', 'Cerrar'],
+    { model: notice({ ...run, kind: 'previous', stopReason: 'stalled', viewer: PREVIOUS }), line: '◌ ejecución parada: 3/12 integradas · hace 12 min', labels: ['Ver', 'Retomar', 'Cerrar'],
       presses: [['view', '/waypoint:status'], ['resume', '/forge:run --resume'], ['close', '/forge:stop']] },
   ];
   for (const c of cases) {
     band = c.model;
     const ui = await $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
-    expect(await ui.find({ type: 'Text', text: c.line }), c.line).toBeDefined();
+    expect(await lineOf(ui), c.line).toBe(c.line);
     for (const label of c.labels) expect(await ui.find({ type: 'Button', text: label }), label).toBeDefined();
     for (const [key, command] of c.presses) {
       await ui.press({ key });
@@ -652,7 +678,7 @@ test('[Close] on a run still active without its coordinator only fills /forge:st
     sent.length = 0;
     toasts.length = 0;
     const ui = await $.ui.mount({ plugin: 'waypoint', surface, component: 'AbovePrompt', props: PROPS });
-    expect(await ui.find({ type: 'Text', text: '◌ ejecución sin coordinadora: 3/12 integradas (hace 12 min)' })).toBeDefined();
+    expect(await lineOf(ui)).toBe('◌ ejecución sin coordinadora: 3/12 integradas · hace 12 min');
     for (const label of ['Ver', 'Retomar', 'Cerrar']) expect(await ui.find({ type: 'Button', text: label }), label).toBeDefined();
     await ui.press({ key: 'close' });
     expect(sent).toEqual([]);
@@ -799,7 +825,7 @@ test('× on its own band does not hide that another session took the seat over: 
   files[`${ROOT}/.waypoint/demo/bound.json`] = BOUND({ claude: 'conv-9', since: '2026-10-11T10:05:40.000Z', seenAt: '2026-10-11T10:05:40.000Z' });
   await clock.advance(30000);
   await ui.redraw();
-  expect(await ui.find({ type: 'Text', text: '◦ otra sesión (S1) trabaja en T002 · hace 1 min' })).toBeDefined();
+  expect(await lineOf(ui)).toBe('◦ otra sesión (S1) trabaja en T002 · hace 1 min');
   expect(await ui.find({ key: 'other-track' })).toBeDefined();
   await ui.unmount();
 });

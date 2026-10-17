@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { bandLevel, controlWidth, fitParts, joinParts, layoutBand, partsWidth, type BandControl, type BandPart } from '../src/mod/band-fit.js';
 import { stringWidth } from '../src/lib/text-width.js';
+import { bandLine, bandParts } from '../src/mod/band-line.js';
+import { NO_VIEWER, type BandModel } from '../src/mod/model.js';
 
 const P = (key: string, text: string, prio: number, o: Partial<BandPart> = {}): BandPart => ({ key, text, prio, ...o });
 const TITLE = 'A very long task title that goes well b…';
@@ -144,5 +146,50 @@ describe('layoutBand (F-02, F-05, F-15)', () => {
   });
   it('props that are not numbers lay out as 80 columns and 10 rows (Review Focus 2)', () => {
     expect(lay('x', null)).toEqual(lay(80, 10));
+  });
+});
+
+describe('bandParts (F-04, F-09, F-10, F-11, the notice band)', () => {
+  const NOW = Date.parse('2026-10-11T10:12:30.000Z');
+  const RUN = (over: object = {}): BandModel => ({
+    mode: 'run', project: 'demo', locale: 'es', executor: 'subagents', running: 2, parallel: 3, integrated: 3, queued: 0, total: 12,
+    slots: [{ task: 'T004', stage: 'review', round: 2 }, { task: 'T008', stage: 'implement', round: 1 }], worst: 'alive', stalled: false, roadmapUrl: null,
+    sid: 'main', inbox: 0, escalation: false, percent: 25, phase: null, viewer: NO_VIEWER, ...over,
+  }) as BandModel;
+  const WORKM = (over: object = {}): BandModel => ({
+    mode: 'work', project: 'demo', locale: 'es', sid: 'main', track: 'core', roadmapUrl: null,
+    current: { id: 'T3', title: 'Esquema', startedAt: new Date(NOW - 598 * 60_000).toISOString(), estimateMin: 30 },
+    trackDone: 2, trackTotal: 5, percent: 40, inbox: 2, escalation: true, phase: null, cells: '', swarm: false, run: null, viewer: NO_VIEWER, ...over,
+  }) as BandModel;
+  const NOTICE = (over: object = {}): BandModel => ({
+    mode: 'notice', project: 'demo', locale: 'es', kind: 'previous', subject: 'task', seat: 'main', task: 'T019',
+    title: 'Reparto de pedidos con un título bastante más largo', since: new Date(NOW - 2 * 3600_000).toISOString(), runId: null, roadmapUrl: null,
+    key: 'task:T019', viewer: NO_VIEWER, ...over,
+  }) as BandModel;
+  it('the run says its integrated tasks once, «3/12 integradas», and those waiting to integrate apart (F-10)', () => {
+    expect(bandLine(RUN(), NOW)).toBe('► EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · T008 implementar · 3/12 integradas');
+    expect(bandParts(RUN(), NOW).filter(p => p.text.includes('/12'))).toHaveLength(1);
+    expect(bandParts(RUN({ queued: 2 }), NOW).find(p => p.key === 'queued')).toMatchObject({ text: 'por integrar 2', prio: 8 });
+  });
+  it('every slot is a part of priority 4 with its short form; at 80 columns those that do not fit are «+N» (E-04, F-09)', () => {
+    const slots = Array.from({ length: 8 }, (_, i) => ({ task: `T00${i + 1}`, stage: 'implement', round: 1 }));
+    const run = RUN({ running: 8, parallel: 8, slots });
+    expect(bandParts(run, NOW).filter(p => p.key.startsWith('slot:')).map(p => [p.prio, p.short])).toEqual(slots.map(s => [4, `${s.task} impl`]));
+    expect(joinParts(fitParts(bandParts(run, NOW), 80).shown)).toBe('T001 impl · T002 impl · T003 impl · T004 impl · T005 impl · T006 impl · +2');
+  });
+  it('598 minutes against an estimate of 30 read «9 h 58 m / 30 m», in amber (F-11)', () => {
+    expect(bandParts(WORKM(), NOW).find(p => p.key === 'minutes')).toEqual({ key: 'minutes', text: '9 h 58 m / 30 m', short: '9h58m', prio: 6, hue: 'warn' });
+  });
+  it('the parts of a work band carry the priorities of the spec', () => {
+    const parts = bandParts(WORKM(), NOW);
+    expect(parts.map(p => [p.key, p.prio])).toEqual([['progress', 5], ['task', 4], ['minutes', 6], ['percent', 7], ['inbox', 3], ['decision', 1]]);
+    expect(parts.find(p => p.key === 'decision')).toMatchObject({ text: '▲ decisión pendiente', short: '▲ decisión', hue: 'alert' });
+  });
+  it('a notice of a task left behind: the notice (2), the task and its title (4) and how long ago (7), all dim; at 16 columns the age goes before the task', () => {
+    const parts = bandParts(NOTICE(), NOW);
+    expect(parts.map(p => [p.key, p.prio, p.hue])).toEqual([['notice', 2, 'dim'], ['task', 4, 'dim'], ['ago', 7, 'dim']]);
+    expect(bandLine(NOTICE(), NOW)).toBe('◌ quedó a medias: T019 Reparto de pedidos con un título bastan… · hace 2 h');
+    expect(fitParts(parts, 16).shown.map(p => p.key)).toEqual(['notice', 'task']);
+    expect(joinParts(fitParts(parts, 16).shown)).toBe('◌ a medias T019');
   });
 });

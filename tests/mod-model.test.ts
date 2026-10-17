@@ -197,17 +197,17 @@ describe('buildBandModel · work', () => {
     expect(m).toMatchObject({ mode: 'run', worst: 'stopped' });
   });
   it('bandLine variants: stalled, stopped, sessions, round 1, en locale, unknown stage', () => {
-    const run = (over: object, locale = 'es') => bandLine({ mode: 'run', project: 'p', locale, executor: 'subagents', running: 1, parallel: 2, integrated: 0, total: 4, slots: [{ task: 'T001', stage: 'implement', round: 1 }], worst: 'alive', stalled: false, roadmapUrl: null, viewer: NO_VIEWER, ...over } as never, 0);
-    expect(run({ stalled: true })).toBe('► EJECUCIÓN parada');
-    expect(run({ worst: 'stopped' })).toBe('► EJECUCIÓN · subagentes 1/2 · T001 implementar · 0/4 · integradas 0 · ▲ parada');
-    expect(run({ executor: 'sessions' })).toBe('► EJECUCIÓN · sesiones 1/2 · T001 implementar · 0/4 · integradas 0');
-    expect(run({}, 'en')).toBe('► EXECUTION · subagents 1/2 · T001 implement · 0/4 · integrated 0');
+    const run = (over: object, locale = 'es') => bandLine({ mode: 'run', project: 'p', locale, executor: 'subagents', running: 1, parallel: 2, integrated: 0, queued: 0, total: 4, slots: [{ task: 'T001', stage: 'implement', round: 1 }], worst: 'alive', stalled: false, roadmapUrl: null, viewer: NO_VIEWER, ...over } as never, 0);
+    expect(run({ stalled: true })).toBe('► EJECUCIÓN · ▲ parada · 0/4 integradas');
+    expect(run({ worst: 'stopped' })).toBe('► EJECUCIÓN · subagentes 1/2 · T001 implementar · 0/4 integradas · ▲ parada');
+    expect(run({ executor: 'sessions' })).toBe('► EJECUCIÓN · sesiones 1/2 · T001 implementar · 0/4 integradas');
+    expect(run({}, 'en')).toBe('► EXECUTION · subagents 1/2 · T001 implement · 0/4 integrated');
     expect(run({ worst: 'silent' }, 'en')).toContain('▲ no signal');
     expect(run({ slots: [{ task: 'T009', stage: 'weird', round: 1 }] })).toContain('T009 weird');
   });
   it('draws the run band line with stages, rounds and the liveness warning', () => {
-    expect(bandLine({ mode: 'run', project: 'p', locale: 'es', executor: 'subagents', running: 2, parallel: 3, integrated: 3, total: 12, slots: [{ task: 'T004', stage: 'review', round: 2 }, { task: 'T008', stage: 'implement', round: 1 }], worst: 'silent', stalled: false, roadmapUrl: null, sid: 'main', inbox: 0, escalation: false, percent: 25, phase: null, viewer: NO_VIEWER }, 0))
-      .toBe('► EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · T008 implementar · 3/12 · integradas 3 · ▲ sin señal');
+    expect(bandLine({ mode: 'run', project: 'p', locale: 'es', executor: 'subagents', running: 2, parallel: 3, integrated: 3, queued: 0, total: 12, slots: [{ task: 'T004', stage: 'review', round: 2 }, { task: 'T008', stage: 'implement', round: 1 }], worst: 'silent', stalled: false, roadmapUrl: null, sid: 'main', inbox: 0, escalation: false, percent: 25, phase: null, viewer: NO_VIEWER }, 0))
+      .toBe('► EJECUCIÓN · subagentes 2/3 · T004 revisar (r2) · T008 implementar · 3/12 integradas · ▲ sin señal');
   });
   it('marks a swarm member in work mode', () => {
     const m = buildBandModel('demo-shop', { ...files(), session: JSON.stringify({ sessionId: 'backend', track: 'backend', launchedBy: 'main' }) });
@@ -499,16 +499,16 @@ describe('buildBandModel · notices (B-02, B-07, K3-13, K5-02)', () => {
     expect(n({ subject: 'design', task: null, title: null, key: 'design:demo-shop' }, 'en')).toBe('◦ another session (main) is working on the design · 3 min ago');
     expect(n({ since: null })).toBe('◦ otra sesión (main) trabaja en T002');
     expect(n({ subject: 'run', seat: null, task: null, title: null, runId: 'r1', integrated: 3, total: 12 })).toBe('◦ ejecución de forge en curso, la coordina otra sesión · 3/12');
-    expect(n({ kind: 'previous', since: '2026-10-15T10:00:00.000Z' })).toBe('◌ quedó a medias: T002 API de pedidos (hace 2 h)');
-    expect(n({ kind: 'previous', since: '2026-10-15T10:00:00.000Z' }, 'en')).toBe('◌ left in progress: T002 API de pedidos (2 h ago)');
+    expect(n({ kind: 'previous', since: '2026-10-15T10:00:00.000Z' })).toBe('◌ quedó a medias: T002 API de pedidos · hace 2 h');
+    expect(n({ kind: 'previous', since: '2026-10-15T10:00:00.000Z' }, 'en')).toBe('◌ left in progress: T002 API de pedidos · 2 h ago');
     expect(n({ kind: 'previous', title: 'Un título muy largo que pasa de cuarenta caracteres con holgura' })).toContain('Un título muy largo que pasa de cuarent…');
-    expect(n({ kind: 'previous', subject: 'design', task: null, title: null })).toBe('◌ diseño a medias: demo-shop (hace 3 min)');
+    expect(n({ kind: 'previous', subject: 'design', task: null, title: null })).toBe('◌ diseño a medias: demo-shop · hace 3 min');
     // M7: the project is a folder name nobody checks: one line, without controls, at most 40 characters.
     const c = (...codes: number[]) => String.fromCharCode(...codes);
     expect(n({ kind: 'previous', subject: 'design', task: null, title: null, project: `a|b${c(0x1b)}[2J${c(0x202e)}${'x'.repeat(60)}` }))
-      .toBe(`◌ diseño a medias: a|b [2J${'x'.repeat(32)}… (hace 3 min)`);
-    expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 12, stopReason: 'stalled', since: '2026-10-13T12:00:00.000Z' })).toBe('◌ ejecución parada: 3/12 integradas (hace 2 d)');
-    expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 12, stopReason: null }, 'en')).toBe('◌ execution without a coordinator: 3/12 integrated (3 min ago)');
+      .toBe(`◌ diseño a medias: a|b [2J${'x'.repeat(32)}… · hace 3 min`);
+    expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 12, stopReason: 'stalled', since: '2026-10-13T12:00:00.000Z' })).toBe('◌ ejecución parada: 3/12 integradas · hace 2 d');
+    expect(n({ kind: 'previous', subject: 'run', task: null, title: null, integrated: 3, total: 12, stopReason: null }, 'en')).toBe('◌ execution without a coordinator: 3/12 integrated · 3 min ago');
   });
   it('a title loses its control and bidi characters, in a notice and in the work band', () => {
     const c = (...codes: number[]) => String.fromCharCode(...codes);
@@ -559,5 +559,25 @@ describe('buildBandModel · the run band carries the seat, its messages, the pro
   it('without a plan the run band has no progress nor phase', () => {
     const { plan: _plan, ...noPlan } = coordinator();
     expect(buildBandModel('demo-shop', noPlan)).toMatchObject({ mode: 'run', sid: 'main', percent: 0, phase: null });
+  });
+});
+
+describe('buildBandModel · every slot of the run, at most 12, and those waiting to integrate (E-04, F-10)', () => {
+  const running = (n: number) => Object.fromEntries(Array.from({ length: n }, (_, i) => {
+    const id = `T${String(i + 1).padStart(3, '0')}`;
+    return [id, { status: 'running', stage: 'implement', round: 1, worktree: `/w${i}`, branch: `task/${id}`, executor: 'subagents', attempts: 0, agent: null,
+      startedAt: ago(10), updatedAt: ago(1), stageSince: ago(1), detail: null }];
+  }));
+  const coordinator = (tasks: object): BandFiles => ({ ...empty, plan, session: j({ sessionId: 'main', track: null }), sessionId: 's1', execution: EXEC({ parallel: 14, tasks }) });
+  it('the run band carries every slot: five of five, and twelve of fourteen', () => {
+    const five = buildBandModel('demo-shop', coordinator(running(5)));
+    expect(five.mode === 'run' && five.slots.map(s => s.task)).toEqual(['T001', 'T002', 'T003', 'T004', 'T005']);
+    const many = buildBandModel('demo-shop', coordinator(running(14)));
+    expect(many).toMatchObject({ mode: 'run', running: 14 });
+    expect(many.mode === 'run' && many.slots.length).toBe(12);
+  });
+  it('counts the accepted tasks waiting to integrate', () => {
+    const tasks = { ...running(1), T009: { ...running(1).T001, status: 'accepted', worktree: '/w9', branch: 'task/T009' } };
+    expect(buildBandModel('demo-shop', coordinator(tasks))).toMatchObject({ mode: 'run', queued: 1 });
   });
 });

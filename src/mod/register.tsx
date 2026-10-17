@@ -298,9 +298,11 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
           <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
-            {m.mode === 'notice'
-              ? <Text dimColor wrap="truncate-end">{line}</Text>
-              : <Text color="claude" wrap="truncate-end">{line}</Text>}
+            <Box key="band-line" flexShrink={1} minWidth={0}>
+              {m.mode === 'notice'
+                ? <Text dimColor wrap="truncate-end">{line}</Text>
+                : <Text color="claude" wrap="truncate-end">{line}</Text>}
+            </Box>
             {controls}
             {lens ? <Button key="panel" label={t.panel} onPress={submit('/lens')} /> : null}
             <Button key="dismiss" label="×" role="dismiss" onPress={dismiss} />
