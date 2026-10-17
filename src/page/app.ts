@@ -316,14 +316,17 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     if (ceiling !== null) { timers.clearTimeout(ceiling); ceiling = null; }
     if (deferred) { deferred = false; schedule(); }
   };
-  // H-06: what has the focus before a repaint, morph or full replace alike.
+  // H-06: what has the focus before a repaint, morph or full replace alike. Review M1: a row of the timeline (a button
+  // since G-15) falls back to the timeline itself, so a row the virtualization stops painting never drops the focus on
+  // the body.
   const takeFocus = (): Focus | null => {
     const el = document.activeElement as HTMLElement | null;
     if (!el || !env.root.contains(el)) return null;
     const r = el.getAttribute?.('data-role') ?? null;
     const text = !!r && TEXT_ROLES.includes(r);
     const box = el as HTMLInputElement;
-    return { el, role: text || r === 'timeline' ? r : null, caret: text ? [box.selectionStart, box.selectionEnd] : null };
+    const role = text || r === 'timeline' ? r : el.closest?.('[data-role="timeline"]') ? 'timeline' : null;
+    return { el, role, caret: text ? [box.selectionStart, box.selectionEnd] : null };
   };
   // After a repaint the focus goes back to the same element when it is still in the page (morphdom may have moved it,
   // which drops the focus), else to the text box or the timeline with its role, with its caret; anything else that was
@@ -863,12 +866,14 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     const el = ev.target as HTMLElement | null;
     if (!el || el.getAttribute?.('data-role') !== 'timeline') return;
     const rows = Number(el.dataset.rows);
-    // Not virtualized: forget the viewport, so a later growth past the limit starts from the real one.
-    if (!(rows > VIRTUAL_FROM)) { ui.tl = undefined; return; }
-    if (!el.scrollHeight) return;
+    if (!el.scrollHeight || !(rows > 0)) return;
     const first = Math.floor((el.scrollTop / el.scrollHeight) * rows);
     const count = Math.ceil((el.clientHeight / el.scrollHeight) * rows) + 1;
+    // Review I1: kept below the limit too (virtualRange ignores it there), so a timeline that grows past the limit (all
+    // groups opened, a search cleared) paints around the row in view and not from row 0. Only a virtualized timeline
+    // repaints before its viewport reaches the edge of what is painted.
     ui.tl = { first, count };
+    if (!(rows > VIRTUAL_FROM)) return;
     const start = Number(el.dataset.start);
     const end = Number(el.dataset.end);
     if ((start > 0 && first < start + 5) || (end < rows && first + count > end - 5)) scheduleFrame();

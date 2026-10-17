@@ -1515,10 +1515,10 @@ describe('the timeline paints what is in view (H-06)', () => {
 });
 
 describe('the timeline scroll, edge cases (H-06)', () => {
-  const open = async () => {
+  const open = async (o?: string) => {
     const { bigSnapshot } = await import('./fixtures/big-plan.js');
     const big = bigSnapshot(NOW);
-    history.replaceState(null, '', `#v=schedule&o=${big.phases.map(p => p.id).join(',')}`);
+    history.replaceState(null, '', `#v=schedule&o=${o ?? big.phases.map(p => p.id).join(',')}`);
     const root = document.createElement('div');
     document.body.appendChild(root);
     const app = await start({ claude: null, snapshot: big, root, now: () => NOW });
@@ -1556,13 +1556,64 @@ describe('the timeline scroll, edge cases (H-06)', () => {
     app.stop();
   });
 
-  it('a timeline that is no longer virtualized forgets the viewport', async () => {
-    const { app, tl, scrollTo } = await open();
-    await scrollTo(200);
-    expect(app.ui.tl).toBeDefined();
-    tl().dataset.rows = '100';
-    tl().dispatchEvent(new Event('scroll'));
-    expect(app.ui.tl).toBeUndefined();
+  // Review I1: what the person sees, not how: a timeline that grows past the limit paints around the row in view.
+  const toBottom = async (el: HTMLElement, rows: number) => {
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, value: rows * 28 });
+    Object.defineProperty(el, 'clientHeight', { configurable: true, value: 560 });
+    el.scrollTop = rows * 28 - 560;
+    el.dispatchEvent(new Event('scroll'));
+    await new Promise(r => setTimeout(r, 60));
+    await settle();
+  };
+  const paintsTheRowInView = (el: HTMLElement) => {
+    const first = Math.floor(el.scrollTop / 28);
+    expect(Number(el.dataset.rows)).toBeGreaterThan(150);
+    expect(Number(el.dataset.start)).toBeLessThanOrEqual(first);
+    expect(first).toBeLessThan(Number(el.dataset.end));
+  };
+
+  it('a 130-row timeline scrolled to its bottom paints the rows in view after «Desplegar todo» (review I1)', async () => {
+    const { app, root, tl } = await open('F1,F2,F3,F4,F5');
+    expect(tl().dataset.rows).toBe('130');
+    expect(tl().dataset.start).toBeUndefined();
+    await toBottom(tl(), 130);
+    click(root, '[data-action="tl-all"]');
+    await settle();
+    expect(tl().dataset.rows).toBe('358');
+    paintsTheRowInView(tl());
+    app.stop();
+  });
+
+  it('clearing a search that had narrowed the timeline to 150 rows or fewer paints the rows in view (review I1)', async () => {
+    const { app, root, tl } = await open();
+    typeIn(root, 'search', 'T0');
+    await settle();
+    const narrowed = Number(tl().dataset.rows);
+    expect(narrowed).toBeLessThanOrEqual(150);
+    await toBottom(tl(), narrowed);
+    typeIn(root, 'search', '');
+    await settle();
+    expect(tl().dataset.rows).toBe('358');
+    paintsTheRowInView(tl());
+    app.stop();
+  });
+
+  it('a focused row that the repaint no longer paints leaves the focus on the timeline, never on the body (review M1)', async () => {
+    const { app, root, tl, scrollTo } = await open();
+    const row = root.querySelector('[data-k="t:T010"]') as HTMLElement;
+    row.focus();
+    expect(document.activeElement).toBe(row);
+    // End or PageDown: the browser scrolls the timeline (happy-dom does not, so the scroll is set by hand).
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    await scrollTo(250);
+    expect(tl().dataset.start).toBe('230');
+    expect(root.contains(row)).toBe(false);
+    expect(document.activeElement).toBe(tl());
+    // The arrow keys still pan: the focus is in the timeline.
+    const pan = app.ui.pan ?? 0;
+    tl().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    await settle();
+    expect(app.ui.pan).toBeGreaterThan(pan);
     app.stop();
   });
 });
