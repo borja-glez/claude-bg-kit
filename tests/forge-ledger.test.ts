@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { buildSync } from 'esbuild';
 import { samePath } from '../src/lib/worktree.js';
-import { appendEvent, appendPhase, readEvents, readStatus, forgeDir, ledgerRoot } from '../src/forge/ledger.js';
+import { appendEvent, appendPhase, readEvents, readStatus, forgeDir, ledgerRoot, ledgerReads } from '../src/forge/ledger.js';
 import { parseConfig, agentFor, ConfigError } from '../src/forge/config.js';
 
 let root: string;
@@ -66,6 +66,32 @@ describe('ledger', () => {
     appendFileSync(path.join(forgeDir(root), 'ledger.jsonl'), '{"ts":"a","kind":"phase"}');
     appendEvent(root, { ts: 'b', kind: 'phase' });
     expect(readFileSync(path.join(root, '.forge', 'ledger.jsonl'), 'utf8')).toBe('{"ts":"a","kind":"phase"}\n{"ts":"b","kind":"phase"}\n');
+  });
+});
+
+describe('the ledger is parsed once per change, not on every event a command stamps (carry 6)', () => {
+  const file = () => path.join(forgeDir(root), 'ledger.jsonl');
+  it('an event of a task outside a project context, and appendPhase, read only the lines appended since the last read', () => {
+    writeFileSync(file(), Array.from({ length: 2000 }, (_, i) => JSON.stringify({ ts: `t${i}`, kind: 'triage', task: `X${i}`, project: 'shop' })).join('\n') + '\n');
+    expect(readEvents(root)).toHaveLength(2000);
+    const before = { ...ledgerReads };
+    for (let i = 0; i < 5; i++) appendEvent(root, { ts: `p${i}`, kind: 'phase', task: 'X1', phase: `p${i}` });
+    expect(appendPhase(root, { ts: 'q', kind: 'phase', task: 'X1', phase: 'review' })).toBe(true);
+    expect(ledgerReads.whole).toBe(before.whole);
+    expect(ledgerReads.appended).toBeGreaterThan(before.appended);
+    // The ledger's attribution still stamps them, and what is read matches the file.
+    expect(readEvents(root).filter(e => e.task === 'X1' && e.kind === 'phase').map(e => e.project)).toEqual(Array(6).fill('shop'));
+    expect(readEvents(root)).toHaveLength(2006);
+  });
+  it('a ledger rewritten, or one whose last line was half written, is read whole again', () => {
+    appendEvent(root, { ts: 'a', kind: 'phase', task: 'A' });
+    expect(readEvents(root).map(e => e.ts)).toEqual(['a']);
+    appendFileSync(file(), '{"ts":"b","kind":"pha');
+    expect(readEvents(root).map(e => e.ts)).toEqual(['a']);
+    appendFileSync(file(), 'se"}\n{"ts":"c","kind":"phase"}\n');
+    expect(readEvents(root).map(e => e.ts)).toEqual(['a', 'b', 'c']);
+    writeFileSync(file(), '{"ts":"only","kind":"phase"}\n');
+    expect(readEvents(root).map(e => e.ts)).toEqual(['only']);
   });
 });
 

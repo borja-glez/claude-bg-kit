@@ -103,12 +103,13 @@ export function carriedRoute(routes: readonly RouteDoc[], source: string, sid: s
 // forge already drives this session: it coordinates or is a member of an active execution, runs the infinite mode, or
 // has a forge task of its own open (K1-12: its status.json names this session, is not done and moved in the last 24 h).
 // forge writes status.json where its commands run: the session's directory, which is the main checkout's top level
-// unless the session started in a subdirectory, so both are read.
+// unless the session started in a subdirectory, so both are read. The infinite run is the main checkout's (K2-01:
+// infinite start saves it there), else one an older forge left where the session runs: runRootOf's rule.
 function forgeDrives(io: Io, main: string, sid: string | null): boolean {
   if (!sid) return false;
   const exec = readExecution(main);
   if (exec?.active && (exec.hookSession === sid || memberForHook(main, sid, exec.runId))) return true;
-  const run = parseRun(readRunText(io.cwd));
+  const run = parseRun(readRunText(main)) ?? parseRun(readRunText(io.cwd));
   if (run?.active && run.sessionId === sid) return true;
   return [...new Set([io.cwd, main])].some(dir => {
     const st = readStatus(dir);

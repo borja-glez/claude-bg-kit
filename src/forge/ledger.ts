@@ -61,7 +61,8 @@ export interface EventContext { env?: SessionEnv; project?: string | null }
 let context: EventContext = {};
 
 /** Runs `fn` with the context every event it appends is stamped with. What `ctx` leaves out is the enclosing context's:
- *  a command a swarm step runs that names no project keeps the step's (the run's). */
+ *  a command a swarm step runs that names no project keeps the step's (the run's). Sync only: the context is a module
+ *  variable put back when `fn` returns, so what an async `fn` appends after its first await is not stamped with it. */
 export function withEventContext<T>(ctx: EventContext, fn: () => T): T {
   const prev = context;
   context = { ...prev, ...ctx };
@@ -146,20 +147,20 @@ export function readStatus(root: string): ForgeStatus | null {
 
 export function readEvents(root: string): LedgerEvent[] {
   const target = ledgerRoot(root);
-  if (target === root) return parseLedger(ledgerLines(root));
+  if (target === root) return present(readLedger(root).events);
   // D-10: a task worktree's own ledger holds what it wrote before its events went to the main checkout's: read first.
   // A line both hold (copied over) is one event: the main ledger's copy is left out, once per copy the worktree has.
-  const own = ledgerLines(root);
-  return parseLedger([...own, ...linesNotIn(ledgerLines(target), own)]);
+  const own = readLedger(root);
+  return present([...own.events, ...notIn(readLedger(target), own.lines)]);
 }
 
-/** The lines of `lines` that `other` lacks: a line both hold counts once per copy `other` has (readEvents' rule). */
-function linesNotIn(lines: readonly string[], other: readonly string[]): string[] {
+/** The events of `of` whose line `other` lacks: a line both hold counts once per copy `other` has (readEvents' rule). */
+function notIn(of: Ledger, other: readonly string[]): (LedgerEvent | null)[] {
   const left = new Map<string, number>();
   for (const line of other) left.set(line, (left.get(line) ?? 0) + 1);
-  return lines.filter(line => {
-    const n = left.get(line) ?? 0;
-    if (n) left.set(line, n - 1);
+  return of.events.filter((_, i) => {
+    const n = left.get(of.lines[i]) ?? 0;
+    if (n) left.set(of.lines[i], n - 1);
     return !n;
   });
 }
@@ -169,25 +170,69 @@ function linesNotIn(lines: readonly string[], other: readonly string[]): string[
  * worktree would lose (a member's events from before D-10, or from a worktree ledgerRoot does not tell as forge's).
  */
 export function unmergedEvents(worktree: string, main: string): LedgerEvent[] {
-  const own = ledgerLines(worktree);
-  return own.length ? parseLedger(linesNotIn(own, ledgerLines(main))) : [];
+  const own = readLedger(worktree);
+  return own.lines.length ? present(notIn(own, readLedger(main).lines)) : [];
 }
 
-/** The non-empty lines of `root`'s ledger, trimmed. */
-function ledgerLines(root: string): string[] {
+/** A ledger file as read: its non-empty lines, trimmed, and each one's event (null for a line that is none). */
+interface Ledger { lines: string[]; events: (LedgerEvent | null)[] }
+/** What readLedger kept of a file: the ledger, and the size, mtime and last bytes it was read at. */
+interface Kept extends Ledger { size: number; mtimeMs: number; tail: Buffer }
+const TAIL_BYTES = 256;
+const KEPT_FILES = 32;
+const kept = new Map<string, Kept>();
+/** Carry 6: how often readLedger read a file whole, and how often only what was appended to it. For its tests. */
+export const ledgerReads = { whole: 0, appended: 0 };
+
+const present = (events: readonly (LedgerEvent | null)[]): LedgerEvent[] => events.filter((e): e is LedgerEvent => e !== null);
+const lineEvent = (line: string): LedgerEvent | null => {
+  try {
+    const e = JSON.parse(line);
+    return e && typeof e === 'object' && typeof e.ts === 'string' && (LEDGER_KINDS as readonly string[]).includes(e.kind)
+      && ['undefined', 'string'].includes(typeof e.task) ? e : null;
+  } catch { return null; /* a half-written line */ }
+};
+const splitLines = (text: string): string[] => text.split('\n').map(l => l.trim()).filter(Boolean);
+
+/**
+ * `root`'s ledger, kept per process (carry 6): a command stamps each event it appends with the ledger's attribution
+ * (stamped) and appendPhase reads it too, so a file is parsed once per change. Unchanged (the same size, mtime and last
+ * bytes) it is the one kept; grown from a whole last line, with the bytes it ended with still there, only what was
+ * appended is read; any other change reads it whole.
+ */
+function readLedger(root: string): Ledger {
   const file = ledgerFile(root);
-  if (!existsSync(file)) return [];
-  return readFileSync(file, 'utf8').split('\n').map(l => l.trim()).filter(Boolean);
-}
-
-function parseLedger(lines: readonly string[]): LedgerEvent[] {
-  const out: LedgerEvent[] = [];
-  for (const line of lines) {
-    try {
-      const e = JSON.parse(line);
-      if (e && typeof e === 'object' && typeof e.ts === 'string' && (LEDGER_KINDS as readonly string[]).includes(e.kind)
-        && ['undefined', 'string'].includes(typeof e.task)) out.push(e);
-    } catch { /* a half-written line */ }
-  }
-  return out;
+  let fd: number;
+  try { fd = openSync(file, 'r'); } catch { kept.delete(file); return { lines: [], events: [] }; }
+  try {
+    const { size, mtimeMs } = fstatSync(fd);
+    const bytes = (pos: number, len: number): Buffer => {
+      const b = Buffer.alloc(Math.max(0, len));
+      let got = 0;
+      while (got < len) {
+        const n = readSync(fd, b, got, len - got, pos + got);
+        if (!n) break;
+        got += n;
+      }
+      return b.subarray(0, got);
+    };
+    const tailOf = (end: number) => bytes(Math.max(0, end - TAIL_BYTES), Math.min(end, TAIL_BYTES));
+    const was = kept.get(file);
+    const keep = (ledger: Ledger): Ledger => {
+      kept.delete(file);
+      if (kept.size >= KEPT_FILES) kept.delete(kept.keys().next().value!);
+      kept.set(file, { ...ledger, size, mtimeMs, tail: tailOf(size) });
+      return ledger;
+    };
+    if (was && was.size === size && was.mtimeMs === mtimeMs && tailOf(size).equals(was.tail)) return was;
+    if (was && size > was.size && was.tail.at(-1) === 0x0a && tailOf(was.size).equals(was.tail)) {
+      ledgerReads.appended++;
+      const added = splitLines(bytes(was.size, size - was.size).toString('utf8'));
+      return keep({ lines: [...was.lines, ...added], events: [...was.events, ...added.map(lineEvent)] });
+    }
+    ledgerReads.whole++;
+    // Up to the size it was read at: a line appended meanwhile is read with the next change.
+    const lines = splitLines(bytes(0, size).toString('utf8'));
+    return keep({ lines, events: lines.map(lineEvent) });
+  } finally { closeSync(fd); }
 }

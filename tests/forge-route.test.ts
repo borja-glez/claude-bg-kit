@@ -295,6 +295,10 @@ describe('one route per session (K1-04, K1-05)', () => {
     expect(r.code).toBe(0);
     expect(JSON.parse(r.stdout)).toMatchObject({ updated: true, session: 'S9', stage: 'planning', plan: 'docs/p.md' });
     expect(readRoute(root, 'S9')).toMatchObject({ stage: 'planning', plan: 'docs/p.md' });
+    // A quoted empty value (`--session ""`, an empty substitution in a shell) is no id either (carry 8).
+    expect(JSON.parse(run(['route', 'set', '--task', 't2', '--chosen', 'superpowers-plan', '--by', 'user', '--session', ''], s9).stdout)).toMatchObject({ task: 't2', session: 'S9' });
+    expect(JSON.parse(run(['route', 'stage', '--stage', 'planning', '--session', '', '--plan', 'docs/q.md'], s9).stdout)).toMatchObject({ updated: true, session: 'S9', plan: 'docs/q.md' });
+    expect(run(['route', 'stage', '--stage', 'planning', '--session', ''], io)).toMatchObject({ code: 2, stderr: expect.stringContaining('no Claude session id') });
     expect(run(['route', 'stage', '--stage', 'done', '--session', '../x'], s9).code).toBe(2);
     expect(run(['route', 'set', '--task', 't1', '--chosen', 'forge', '--by', 'user', '--session', '../x'], s9).code).toBe(2);
     expect(readRoute(root, 'S9')).toMatchObject({ stage: 'planning' });

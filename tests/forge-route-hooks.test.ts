@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { inForgeWorktree, looksLikeCoding, routeReminder, routingRule, ROUTE_HINT } from '../src/forge/route-hooks.js';
@@ -122,6 +123,18 @@ describe('route hooks by session (K1-09, K1-12, K1-13)', () => {
   const io = (stdin: unknown, at = NOW): Io => ({ cwd: root, now: () => at, stdin: JSON.stringify(stdin), env: { CLAUDE_CONFIG_DIR: cfg } });
   const ctx = (r: { stdout: string }) => (r.stdout ? JSON.parse(r.stdout).hookSpecificOutput.additionalContext as string : '');
   const PROMPT = { session_id: 'S1', prompt: 'Add coupon support to the cart with validation' };
+  it('see an infinite run saved in the main checkout from a session in a subdirectory, as runRootOf does (final review 6)', () => {
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    const sub = path.join(root, 'pkg');
+    mkdirSync(sub, { recursive: true });
+    const at = (stdin: unknown): Io => ({ ...io(stdin), cwd: sub });
+    expect(run(['hook', 'route-prompt'], at(PROMPT)).stdout).not.toBe('');
+    // infinite start saves the run in the main checkout (K2-01).
+    saveRun(root, { ...startRun(NOW, { cycles: 2 }), sessionId: 'S1' });
+    expect(run(['hook', 'route-prompt'], at(PROMPT)).stdout).toBe('');
+    expect(run(['hook', 'route-session'], at({ session_id: 'S1', source: 'startup' })).stdout).toBe('');
+    expect(run(['hook', 'route-prompt'], at({ ...PROMPT, session_id: 'S2' })).stdout).not.toBe('');
+  });
   it('route-session and route-prompt stay silent in a task or run worktree of forge (K1-09)', () => {
     for (const name of ['task-T001', 'run']) {
       const dir = path.join(root, '.claude', 'worktrees', name);

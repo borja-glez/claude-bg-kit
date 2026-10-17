@@ -1721,6 +1721,14 @@ function runCommand(argv: string[], io: Io): Result {
           for (const [name, v] of [['spec', spec], ['plan', plan]] as const) if (v !== undefined && !isRoutePath(v)) throw new UsageError(`${cmdName}: --${name} is not a plain path`);
           return { ...(spec ? { spec } : {}), ...(plan ? { plan } : {}) };
         };
+        // Carry 8: --session's value, null when it has none or an empty one (C1: the environment's id is used then); one
+        // that is not a plain session id exits 2, since it would name the route's file.
+        const routeSessionFlag = (cmdName: string): string | null => {
+          const v = flag('session');
+          if (v === undefined || v.trim() === '') return null;
+          if (!isRouteSession(v)) throw new UsageError(`${cmdName}: --session is not a plain session id`);
+          return v;
+        };
         if (sub === 'set') {
           const task = flag('task');
           const chosen = flag('chosen');
@@ -1731,9 +1739,10 @@ function runCommand(argv: string[], io: Io): Result {
           const files = paths('route set');
           // K1-04, K1-05 (C1): the route is this Claude session's, in .forge/route/<session>.json of the main checkout. It is
           // read with the other inputs, before anything is written; only none, which writes no route, goes without one. A
-          // --session without a value (an empty substitution) counts as absent, as in C1: the environment's id is used.
-          if (flag('session') !== undefined && !isRouteSession(flag('session'))) throw new UsageError('route set: --session is not a plain session id');
-          const session = claudeSessionId(flag('session'), io.env ?? process.env);
+          // --session without a value, or an empty one (`--session ""`: an empty substitution), counts as absent, as in C1:
+          // the environment's id is used.
+          const given = routeSessionFlag('route set');
+          const session = claudeSessionId(given, io.env ?? process.env);
           if (!session && chosen !== 'none') throw new UsageError(noClaudeSession('route set', '--session'));
           // K1-08: «remember it» keeps the choice as the project's workflow in local.yaml (`off` for none); none without it
           // writes nothing at all: no route file and no decision.
@@ -1764,8 +1773,7 @@ function runCommand(argv: string[], io: Io): Result {
           const stage = flag('stage');
           if (!(ROUTE_STAGES as readonly (string | undefined)[]).includes(stage)) throw new UsageError(`route stage: --stage must be one of ${ROUTE_STAGES.join('|')}`);
           const files = paths('route stage');
-          if (flag('session') !== undefined && !isRouteSession(flag('session'))) throw new UsageError('route stage: --session is not a plain session id');
-          const session = claudeSessionId(flag('session'), io.env ?? process.env);
+          const session = claudeSessionId(routeSessionFlag('route stage'), io.env ?? process.env);
           if (!session) throw new UsageError(noClaudeSession('route stage', '--session'));
           // K1-04: only this session's route moves; another session's is never touched.
           const main = mainCheckout(io.cwd);
