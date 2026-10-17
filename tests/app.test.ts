@@ -8,6 +8,7 @@ import { buildDocs } from '../src/lib/sync.js';
 import { normalizeApproval, normalizeProposal, ownerApproved, ownerCheck, proposalDigest } from '../src/lib/proposals.js';
 import { run as forgeCli } from '../src/forge/cli/run.js';
 import { start, type Snapshot } from '../src/page/app.js';
+import { morphInto } from '../src/page/morph.js';
 
 const plan = parsePlan(readFileSync(join(process.cwd(), 'tests', 'fixtures', 'plan.yaml'), 'utf8'));
 const snapshot: Snapshot = buildDocs(plan, '2026-10-11T09:00:00Z');
@@ -51,6 +52,8 @@ describe('start', () => {
   it('renders the embedded snapshot offline when db is unavailable', async () => {
     const root = document.createElement('div');
     const app = await start({ claude: null, snapshot, root, now: () => NOW });
+    // Carry 10d: the repaint lands on the next frame.
+    await flush();
     expect(root.innerHTML).toContain('Sin conexión');
     expect(root.innerHTML).toContain('0 %');
     app.stop();
@@ -1626,6 +1629,70 @@ describe('the views and the URL (§4.6, H-25)', () => {
       expect(root.innerHTML, String(junk)).not.toContain('instantánea de');
       expect(app.model.statesAt, String(junk)).toBeNull();
       app.stop();
+    }
+  });
+});
+
+describe('one repaint per animation frame (carry 10d)', () => {
+  it('a keystroke repaints once, and the keys, inputs and snapshots that come before the next frame repaint together', async () => {
+    const frames: (() => void)[] = [];
+    vi.stubGlobal('requestAnimationFrame', (fn: () => void) => { frames.push(fn); return frames.length; });
+    try {
+      const f = fakeDb();
+      let paints = 0;
+      history.replaceState(null, '', '#v=schedule&o=F1,F2');
+      const root = document.createElement('div');
+      document.body.appendChild(root);
+      const app = await start({ claude: { use: async (n: string) => (n === 'db' ? f.db : n === 'user' ? fakeUser() : null) }, snapshot, root, now: () => NOW, morph: (r, h) => { paints++; morphInto(r, h); } });
+      const frame = async () => { await settle(); while (frames.length) frames.shift()!(); await settle(); };
+      await frame();
+      paints = 0;
+      const box = root.querySelector('[data-role="search"]') as HTMLInputElement;
+      box.focus();
+      // One key: keydown, keypress, input and keyup, each its own task.
+      for (const type of ['keydown', 'keypress']) { box.dispatchEvent(new KeyboardEvent(type, { key: 'T', bubbles: true })); await flush(); }
+      box.value = 'T';
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+      await flush();
+      box.dispatchEvent(new KeyboardEvent('keyup', { key: 'T', bubbles: true }));
+      await flush();
+      expect(paints).toBe(0);
+      await frame();
+      expect(paints).toBe(1);
+      // Two more keys and a snapshot before the next frame: one repaint, with all of them.
+      paints = 0;
+      box.value = 'T0';
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+      await flush();
+      box.value = 'T00';
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+      await flush();
+      f.push('state', { T001: { status: 'done' } });
+      await settle();
+      expect(paints).toBe(0);
+      await frame();
+      expect(paints).toBe(1);
+      expect(app.ui.search).toBe('T00');
+      expect(root.querySelector('[data-k="t:T001"] .sd')!.className).toContain('st-done');
+      app.stop();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('a frame that does not come (a hidden page) is not waited for long: the page still repaints', async () => {
+    vi.stubGlobal('requestAnimationFrame', () => 0);
+    try {
+      const f = fakeDb();
+      const { root, app } = await boot(f, fakeUser());
+      f.push('notes', { n1: { ts: '2026-10-11T11:00:00Z', type: 'idea', author: 'session:backend', text: 'sin marcos' } });
+      await new Promise(r => setTimeout(r, 250));
+      click(root, '[data-view="talk"]');
+      await new Promise(r => setTimeout(r, 250));
+      expect(root.innerHTML).toContain('sin marcos');
+      app.stop();
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 });

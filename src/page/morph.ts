@@ -25,7 +25,7 @@ export const nodeKey = (node: Node): string | undefined => {
  *  morph (it was read again for every unchanged node). A node whose markup equals the render's still differs when one of
  *  these is inside it. A select always counts: what was chosen cannot be told from its markup everywhere (some DOMs move
  *  the `selected` attribute with the choice), and there are only a few. */
-const dirtyFields = (root: Element): Field[] => Array.from(root.querySelectorAll<Field>(FIELDS)).filter(f => {
+const dirtyFields = (marked: Element[]): Field[] => marked.filter(isField).filter(f => {
   if (f.tagName === 'SELECT') return true;
   if (f.tagName === 'TEXTAREA') return f.value !== (f.textContent ?? '');
   const i = f as HTMLInputElement;
@@ -48,16 +48,16 @@ const mirrorAttrs = (from: Element, to: Element): void => {
  * Review M3: morphdom, given a keyed node it does not find in the page, walks on through the siblings that follow, sets
  * each one aside and appends it again after the new node: one item new at the top of a list moved every item under it,
  * which blurs a focused field and loses the scroll of anything inside. So before the morph, a run of new keyed nodes
- * that the render puts right before a keyed node already in the page gets empty stand-ins (their tag and attributes)
- * right before that node: morphdom finds each one in its place and fills it, and nothing else moves. Only in the same
- * container (the same keyed one, or none on both sides) and only for an item new all through: filling the stand-in then
- * moves no node of the page, which morphdom's walk could still be pointing at. A stand-in morphdom never reaches is
- * taken out after the morph.
+ * that the render puts right before a keyed node already in the page goes into the page right before that node, as the
+ * render made it, and the render keeps an empty stand-in of each (its tag and attributes): morphdom finds the new node in
+ * its place, leaves it as it is (it is the render's own), and nothing else moves. Only in the same container (the same
+ * keyed one, or none on both sides) and only for an item new all through, so no node of the page moves into it while
+ * morphdom's walk could still be pointing at it. A node placed so that morphdom never reaches is taken out again.
  */
-const placeStandIns = (root: HTMLElement, next: HTMLElement): Set<Element> => {
+const placeNew = (marked: Element[], root: HTMLElement, next: HTMLElement): Set<Element> => {
   const placed = new Set<Element>();
   const live = new Map<string, Element>();
-  for (const el of Array.from(root.querySelectorAll(KEYED))) { const k = nodeKey(el); if (k && !live.has(k)) live.set(k, el); }
+  for (const el of marked) { const k = nodeKey(el); if (k && !live.has(k)) live.set(k, el); }
   if (!live.size) return placed;
   const isNew = (el: Element): boolean => { const k = nodeKey(el); return !!k && !live.has(k); };
   /** The key of the nearest keyed ancestor below `top`, or null. */
@@ -65,16 +65,22 @@ const placeStandIns = (root: HTMLElement, next: HTMLElement): Set<Element> => {
     for (let p = el.parentElement; p && p !== top; p = p.parentElement) { const k = nodeKey(p); if (k) return k; }
     return null;
   };
-  for (const el of Array.from(next.querySelectorAll(KEYED))) {
-    if (!isNew(el)) continue;
+  const keyed = Array.from(next.querySelectorAll(KEYED));
+  // The nodes of the render that hold a node already in the page: one pass up from each of those.
+  const holdsLive = new Set<Element>();
+  for (const el of keyed) {
+    if (isNew(el)) continue;
+    for (let p = el.parentElement; p && p !== next && !holdsLive.has(p); p = p.parentElement) holdsLive.add(p);
+  }
+  for (const el of keyed) {
+    if (!isNew(el) || holdsLive.has(el)) continue;
     let after = el.nextElementSibling;
     while (after && isNew(after)) after = after.nextElementSibling;
     const anchor = after ? live.get(nodeKey(after) ?? '') : undefined;
-    if (!anchor?.parentNode || boxOf(el, next) !== boxOf(anchor, root)) continue;
-    if (Array.from(el.querySelectorAll(KEYED)).some(d => !isNew(d))) continue;
-    const stand = el.cloneNode(false) as Element;
-    anchor.parentNode.insertBefore(stand, anchor);
-    placed.add(stand);
+    if (!anchor?.parentNode || !el.parentNode || boxOf(el, next) !== boxOf(anchor, root)) continue;
+    el.parentNode.replaceChild(el.cloneNode(false), el);
+    anchor.parentNode.insertBefore(el, anchor);
+    placed.add(el);
   }
   return placed;
 };
@@ -85,13 +91,16 @@ export function morphInto(root: HTMLElement, html: string): void {
   const next = root.cloneNode(false) as HTMLElement;
   next.innerHTML = html;
   const active = root.ownerDocument.activeElement;
-  const dirty = dirtyFields(root);
-  const stands = placeStandIns(root, next);
+  // One query of the page for both: its keyed nodes and its fields.
+  const marked = Array.from(root.querySelectorAll(`${KEYED},${FIELDS}`));
+  const dirty = dirtyFields(marked);
+  const placed = placeNew(marked, root, next);
   morphdom(root, next, {
     childrenOnly: true,
     getNodeKey: nodeKey,
     onBeforeElUpdated(from, to) {
-      stands.delete(from);
+      // Placed by placeNew: already the render's node, its stand-in in the render is empty.
+      if (placed.delete(from)) return false;
       // `from === f` too: some DOMs (happy-dom) say a node does not contain itself.
       if (from.isEqualNode(to) && !dirty.some(f => from === f || from.contains(f))) return false;
       // Filled by hand (the arrows of the dependencies): never entered.
@@ -102,5 +111,5 @@ export function morphInto(root: HTMLElement, html: string): void {
       return true;
     },
   });
-  for (const s of stands) s.remove();
+  for (const el of placed) el.remove();
 }

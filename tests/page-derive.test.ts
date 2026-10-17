@@ -1,13 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 
-// The spy: derive.ts and render.ts call the real computeMetrics through it.
+// The spies: derive.ts and render.ts call the real functions through them.
 vi.mock('../src/lib/metrics.js', async importOriginal => {
   const mod = await importOriginal<typeof import('../src/lib/metrics.js')>();
   return { ...mod, computeMetrics: vi.fn(mod.computeMetrics) };
 });
+vi.mock('../src/lib/insights.js', async importOriginal => {
+  const mod = await importOriginal<typeof import('../src/lib/insights.js')>();
+  return { ...mod, criticalPath: vi.fn(mod.criticalPath), zoneHeat: vi.fn(mod.zoneHeat) };
+});
+vi.mock('../src/page/needs.js', async importOriginal => {
+  const mod = await importOriginal<typeof import('../src/page/needs.js')>();
+  return { ...mod, needsOf: vi.fn(mod.needsOf) };
+});
 
 import { computeMetrics } from '../src/lib/metrics.js';
+import { criticalPath, zoneHeat } from '../src/lib/insights.js';
+import { needsOf } from '../src/page/needs.js';
 import { parsePlan } from '../src/lib/plan.js';
 import { buildDocs } from '../src/lib/sync.js';
 import { computeDerived, derive, deriveKey } from '../src/page/derive.js';
@@ -75,6 +85,29 @@ describe('derive: the derived data once per revision of the data (H-06)', () => 
     const dv = computeDerived(m);
     expect(dv.running).toEqual(['T001', 'T003', 'T002']);
     expect(dv.liveSessions).toEqual({ live: ['a'], idle: 2 });
+  });
+
+  it('a view computes only what it shows, once per revision: Conversation needs no critical path, zones or «Te necesita» (carry 10d)', () => {
+    vi.mocked(criticalPath).mockClear();
+    vi.mocked(zoneHeat).mockClear();
+    vi.mocked(needsOf).mockClear();
+    const ui = (over: Partial<UiState>): UiState => ({
+      zoom: '1d', offset: 0, expanded: new Set(['F1']), modal: null, search: '', view: 'summary', shot: null,
+      versionFilter: { statuses: [], phaseStatuses: [], track: null }, collapsed: new Set(), noteFilter: 'all', timelineGroup: 'phase',
+      draft: { type: 'idea', text: '' }, answering: null, answerDraft: '', notice: null,
+      proposalFilter: { status: 'all', category: 'all', risk: 'all' }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '', ...over,
+    });
+    const m = model();
+    renderApp(m, ui({ view: 'talk' }), derive(m));
+    expect([vi.mocked(criticalPath).mock.calls.length, vi.mocked(zoneHeat).mock.calls.length, vi.mocked(needsOf).mock.calls.length]).toEqual([0, 0, 0]);
+    renderApp(m, ui({ view: 'summary' }), derive(m));
+    expect([vi.mocked(criticalPath).mock.calls.length, vi.mocked(needsOf).mock.calls.length]).toEqual([0, 1]);
+    renderApp(m, ui({ view: 'schedule' }), derive(m));
+    expect([vi.mocked(criticalPath).mock.calls.length, vi.mocked(zoneHeat).mock.calls.length]).toEqual([1, 1]);
+    // Only the view state changed: nothing is computed again.
+    renderApp(m, ui({ view: 'schedule', search: 'T00', expanded: new Set(['F1', 'F2']) }), derive(m));
+    renderApp(m, ui({ view: 'summary', modal: 'T002' }), derive(m));
+    expect([vi.mocked(computeMetrics).mock.calls.length, vi.mocked(criticalPath).mock.calls.length, vi.mocked(zoneHeat).mock.calls.length, vi.mocked(needsOf).mock.calls.length]).toEqual([1, 1, 1, 1]);
   });
 
   it('ties of stage sort by plain id order, the same on every machine and in every language (carry 6)', () => {

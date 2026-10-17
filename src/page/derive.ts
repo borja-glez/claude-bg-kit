@@ -33,24 +33,41 @@ const stageRank = (m: Model, id: string): number => {
   return i < 0 ? STAGES.length : i;
 };
 
-/** The derived data of a model, computed now (no cache). */
+/** A value computed the first time it is read, then kept. */
+const once = <T>(f: () => T): (() => T) => {
+  let done = false;
+  let value: T;
+  return () => {
+    if (!done) { value = f(); done = true; }
+    return value;
+  };
+};
+
+/** The derived data of a model, computed now (no cache). The metrics and the forecast are read by the strip on every view;
+ *  the rest only by the views that show it, so it is computed the first time one reads it (carry 10d): a snapshot on
+ *  Conversación computes no critical path, zones or «Te necesita». */
 export function computeDerived(m: Model): Derived {
   const sessions = activeSessions(m);
   const metrics = computeMetrics(m.plan, m.states, m.now, sessions);
+  const critical = once(() => criticalPath(m.plan, m.states, m.now));
+  const zones = once(() => zoneHeat(m.plan, m.states));
+  // Carry 6: ties by plain id order, not localeCompare (which depends on the machine's language).
+  const running = once(() => [...metrics.inProgress].sort((a, b) => stageRank(m, a) - stageRank(m, b) || (a < b ? -1 : a > b ? 1 : 0)));
+  const liveSessions = once(() => {
+    const all = Object.keys(m.sessions);
+    const live = all.filter(sid => sessionLiveness(m.sessions[sid], m.now) !== 'stopped');
+    return { live, idle: all.length - live.length };
+  });
+  const needs = once(() => needsOf(m));
   return {
     metrics,
     byVersion: metrics.byVersion,
     forecast: forecast(m.plan, m.states, m.now, { sessions, paceMin: metrics.paceMin }),
-    critical: criticalPath(m.plan, m.states, m.now),
-    zones: zoneHeat(m.plan, m.states),
-    // Carry 6: ties by plain id order, not localeCompare (which depends on the machine's language).
-    running: [...metrics.inProgress].sort((a, b) => stageRank(m, a) - stageRank(m, b) || (a < b ? -1 : a > b ? 1 : 0)),
-    liveSessions: (() => {
-      const all = Object.keys(m.sessions);
-      const live = all.filter(sid => sessionLiveness(m.sessions[sid], m.now) !== 'stopped');
-      return { live, idle: all.length - live.length };
-    })(),
-    needs: needsOf(m),
+    get critical() { return critical(); },
+    get zones() { return zones(); },
+    get running() { return running(); },
+    get liveSessions() { return liveSessions(); },
+    get needs() { return needs(); },
   };
 }
 

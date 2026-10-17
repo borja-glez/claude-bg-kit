@@ -401,20 +401,27 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       env.root.innerHTML = `<div class="hd"><div class="live off">● ${esc(d.offline)}</div></div>`;
     }
   };
-  let framed = false;
-  const scheduleFrame = () => {
-    if (framed) return;
-    framed = true;
-    const raf = (globalThis as { requestAnimationFrame?: (fn: () => void) => unknown }).requestAnimationFrame;
-    if (raf) raf(() => { framed = false; schedule(); }); else { framed = false; schedule(); }
-  };
+  // Carry 10d: one repaint per animation frame. What changes the page before the next frame (the keydown, keypress and
+  // input of one key, a few keys typed fast, the answers of the database, one per collection) is painted together, once.
+  // A frame that does not come (a hidden page) is not waited for longer than FRAME_FALLBACK_MS.
+  const FRAME_FALLBACK_MS = 100;
   let scheduled = false;
-  const schedule = () => {
-    if (!scheduled) {
-      scheduled = true;
-      queueMicrotask(render);
-    }
+  let stopped = false;
+  let fallback: ReturnType<typeof setTimeout> | null = null;
+  const frame = () => {
+    if (fallback !== null) { clearTimeout(fallback); fallback = null; }
+    if (scheduled && !stopped) render();
   };
+  const schedule = () => {
+    if (scheduled || stopped) return;
+    scheduled = true;
+    const raf = (globalThis as { requestAnimationFrame?: (fn: () => void) => unknown }).requestAnimationFrame;
+    if (!raf) { queueMicrotask(frame); return; }
+    raf(frame);
+    fallback = setTimeout(frame, FRAME_FALLBACK_MS);
+  };
+  /** The wheel, a drag, the keys and the scroll of the timeline: the same per-frame repaint. */
+  const scheduleFrame = schedule;
   // H-06: a change of the data bumps the model's revision (derive() caches by it) and repaints at once; the modal and a
   // focused <select> no longer hold it back, morphdom leaves them as they are.
   const changed = () => { model.rev = (model.rev ?? 0) + 1; schedule(); };
@@ -1095,6 +1102,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   const timer = setInterval(tick, env.refreshMs ?? 30000);
   const unsubs: (() => void)[] = [];
   const stop = () => {
+    stopped = true;
+    if (fallback !== null) { clearTimeout(fallback); fallback = null; }
     clearInterval(timer);
     document.documentElement.classList.remove('wp-modal');
     unsubs.splice(0).forEach(u => u());
