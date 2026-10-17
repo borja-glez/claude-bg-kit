@@ -176,7 +176,11 @@ export function harnessHtml(template: string, now = Date.now(), snap: Snapshot =
     }, 5000);
   }
 })();`;
-  return template
+  // Carry 10c: the publisher wraps the template in a standards-mode page; without it Chrome opens the file in quirks mode
+  // and the §7.3 walk would measure another layout.
+  const lang = String(snap.meta?.locale ?? 'en').replace(/[^\w-]/g, '') || 'en';
+  const head = `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">`;
+  return head + template
     .replace('__TITLE__', () => 'big-plan Roadmap')
     .replace('__SNAPSHOT__</script>', () => `${snapshot}</script>\n<script>${fake}</script>`);
 }

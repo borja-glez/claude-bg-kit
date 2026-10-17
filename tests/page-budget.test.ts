@@ -66,6 +66,17 @@ describe('the page with the plan of 343 tasks (H-06)', () => {
     expect(html.match(/<\/script/g)).toHaveLength(3);
   });
 
+  it('the harness page opens in standards mode, in the plan’s language, with the head the publisher adds (carry 10c)', () => {
+    const tpl = '<title>__TITLE__</title>\n<script type="application/json" id="wp-snapshot">__SNAPSHOT__</script>\n<script>PAGE()</script>';
+    const head = '<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">';
+    const html = harnessHtml(tpl, BIG_NOW);
+    expect(html.startsWith(head)).toBe(true);
+    expect(html.indexOf('<title>big-plan Roadmap</title>')).toBe(head.length);
+    const snap = bigSnapshot(BIG_NOW);
+    expect(harnessHtml(tpl, BIG_NOW, { ...snap, meta: { ...snap.meta, locale: 'en' } })).toMatch(/^<!doctype html><html lang="en"><head>/);
+    expect(harnessHtml(tpl, BIG_NOW, { ...snap, meta: { ...snap.meta, locale: 'es"><script>' } })).toMatch(/^<!doctype html><html lang="esscript"><head>/);
+  });
+
   it('a task title with </script> cannot break out of the harness page, and reads back the same', () => {
     const tpl = '<title>__TITLE__</title>\n<script type="application/json" id="wp-snapshot">__SNAPSHOT__</script>\n<script>PAGE()</script>';
     const evil = '</script><img src=x onerror=alert(1)>';
