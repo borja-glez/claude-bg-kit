@@ -1712,12 +1712,11 @@ describe('plugin layout', () => {
     }
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) expect(read(f), f).toContain('round --verify');
   });
-  it('READMEs describe wave 4b: the six views of the roadmap, Needs you, the task in the URL and only the owner deciding on the page', () => {
+  // Carry 11: only contract strings (the names of the views and of the section, the link, the collection), no prose.
+  it('the waypoint READMEs name the six views of the roadmap, Needs you, the task in the URL and the owner\'s approvals/', () => {
     const want = {
-      'plugins/waypoint/README.md': ['| **Summary** |', '| **Plan** |', '| **Schedule** |', '| **Runs** |', '| **Sessions** |', '| **Conversation** |', '**Needs you.**', '#t=T044&tt=forge', '`approvals/`'],
-      'plugins/waypoint/README.es.md': ['| **Resumen** |', '| **Plan** |', '| **Cronograma** |', '| **Ejecuciones** |', '| **Sesiones** |', '| **Conversación** |', '**Te necesita.**', '#t=T044&tt=forge', '`approvals/`'],
-      'README.md': ['six views'],
-      'README.es.md': ['seis vistas'],
+      'plugins/waypoint/README.md': ['| **Summary** |', '| **Plan** |', '| **Schedule** |', '| **Runs** |', '| **Sessions** |', '| **Conversation** |', 'Needs you', '#t=T044&tt=forge', '`approvals/`'],
+      'plugins/waypoint/README.es.md': ['| **Resumen** |', '| **Plan** |', '| **Cronograma** |', '| **Ejecuciones** |', '| **Sesiones** |', '| **Conversación** |', 'Te necesita', '#t=T044&tt=forge', '`approvals/`'],
     };
     for (const [f, words] of Object.entries(want)) for (const w of words) expect(read(f), `${f}: ${w}`).toContain(w);
   });
