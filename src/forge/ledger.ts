@@ -165,6 +165,18 @@ function readStatusFile(file: string): ForgeStatus | null {
   } catch { return null; }
 }
 
+/** A status file with its key; the key comes from the content, never from the file name. Null when it is not a status. */
+function keyedStatus(file: string): [string, ForgeStatus] | null {
+  const st = readStatusFile(file);
+  const key = st ? statusKey(st.task, st.project) : null;
+  return st && key ? [key, st] : null;
+}
+
+/** The regular *.json files of the status folder (a directory with such a name is junk, not a status). */
+function jsonNames(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).filter(d => d.isFile() && d.name.endsWith('.json')).map(d => d.name);
+}
+
 /** The status files an event of `task` may reach: <T>.json and *__<T>.json and, for a brief id <T>-<n>, those of <T>. */
 function candidates(names: readonly string[], task: string): string[] {
   const ids = [task, /^(.+)-\d{1,4}$/.exec(task)?.[1]].filter((s): s is string => !!s);
@@ -177,25 +189,37 @@ function candidates(names: readonly string[], task: string): string[] {
  */
 function migrate(root: string): string[] {
   mkdirSync(statusDir(root), { recursive: true });
-  const st = readStatusFile(statusFile(root));
-  const key = st ? statusKey(st.task, st.project) : null;
-  if (!st || !key) return [];
-  writeJsonFile(path.join(statusDir(root), `${key}.json`), st);
-  return [`${key}.json`];
+  const old = keyedStatus(statusFile(root));
+  if (!old) return [];
+  writeJsonFile(path.join(statusDir(root), `${old[0]}.json`), old[1]);
+  return [`${old[0]}.json`];
 }
 
-/** C5: past STATUS_FILES_MAX files, the oldest by lastAt (else by mtime) go, down to STATUS_FILES_KEEP. */
-function prune(root: string): void {
+/** A leftover temporary file (a crash between write and rename) is removed after this long. */
+const TMP_STALE_MS = 10 * 60_000;
+
+/**
+ * C5: past STATUS_FILES_MAX files, the oldest by lastAt (else by mtime; a tie goes by name) go, down to STATUS_FILES_KEEP.
+ * `keep` (the status that just changed) never goes, whatever its lastAt; a future lastAt ranks like any other. Stale
+ * *.tmp leftovers go too. Each removal is its own try: one that fails leaves the rest done.
+ */
+function prune(root: string, keep: string): void {
   const dir = statusDir(root);
-  const files = readdirSync(dir).filter(n => n.endsWith('.json')).map(n => {
+  for (const d of readdirSync(dir, { withFileTypes: true })) {
+    if (!d.isFile() || !d.name.endsWith('.tmp')) continue;
+    const file = path.join(dir, d.name);
+    try { if (Date.now() - statSync(file).mtimeMs > TMP_STALE_MS) rmSync(file, { force: true }); } catch { /* next */ }
+  }
+  const files = jsonNames(dir).map(n => {
     const file = path.join(dir, n);
     let at = Date.parse(readStatusFile(file)?.lastAt ?? '');
     if (!Number.isFinite(at)) { try { at = statSync(file).mtimeMs; } catch { at = 0; } }
-    return { file, at };
+    return { name: n, file, at };
   });
   if (files.length <= STATUS_FILES_MAX) return;
-  files.sort((a, b) => a.at - b.at);
-  for (const f of files.slice(0, files.length - STATUS_FILES_KEEP)) rmSync(f.file, { force: true });
+  files.sort((x, y) => x.at - y.at || (x.name < y.name ? -1 : 1));
+  const doomed = files.filter(f => f.name !== keep).slice(0, files.length - STATUS_FILES_KEEP);
+  for (const f of doomed) { try { rmSync(f.file, { force: true }); } catch { /* next */ } }
 }
 
 // C5: .forge/status/<key>.json follows the ledger one event at a time, so readers (lens, the route hint) never read the
@@ -207,20 +231,19 @@ function updateStatus(root: string, event: LedgerEvent): void {
     if (typeof event.task !== 'string' || !event.task) return;
     const dir = statusDir(root);
     let names: string[];
-    try { names = readdirSync(dir).filter(n => n.endsWith('.json')); } catch { names = migrate(root); }
+    try { names = jsonNames(dir); } catch { names = migrate(root); }
     // Null-prototype, so a task named __proto__ is an ordinary key.
     const map = Object.create(null) as StatusMap;
     for (const n of candidates(names, event.task)) {
-      const st = readStatusFile(path.join(dir, n));
-      const key = st ? statusKey(st.task, st.project) : null;
-      if (st && key) map[key] = st;
+      const one = keyedStatus(path.join(dir, n));
+      if (one) map[one[0]] = one[1];
     }
     const { map: next, changed } = deriveStatuses(map, event);
     if (!changed) return;
     mkdirSync(dir, { recursive: true });
     writeJsonFile(path.join(dir, `${changed}.json`), next[changed]);
     writeJsonFile(statusFile(root), next[changed]);
-    if (names.length + (names.includes(`${changed}.json`) ? 0 : 1) > STATUS_FILES_MAX) prune(root);
+    if (names.length + (names.includes(`${changed}.json`) ? 0 : 1) > STATUS_FILES_MAX) prune(root, `${changed}.json`);
   } catch { /* the ledger is the record; the status is a convenience */ }
 }
 
@@ -230,16 +253,16 @@ function updateStatus(root: string, event: LedgerEvent): void {
  */
 export function readStatuses(root: string): StatusMap {
   const out = Object.create(null) as StatusMap;
-  const keep = (st: ForgeStatus | null) => {
-    const key = st ? statusKey(st.task, st.project) : null;
-    if (st && key) out[key] = st;
-  };
   let names: string[];
-  try { names = readdirSync(statusDir(root)).filter(n => n.endsWith('.json')).sort().slice(0, STATUS_FILES_MAX); } catch {
-    keep(readStatus(root));
+  try { names = jsonNames(statusDir(root)).sort().slice(0, STATUS_FILES_MAX); } catch {
+    const alias = keyedStatus(statusFile(root));
+    if (alias) out[alias[0]] = alias[1];
     return out;
   }
-  for (const n of names) keep(readStatusFile(path.join(statusDir(root), n)));
+  for (const n of names) {
+    const one = keyedStatus(path.join(statusDir(root), n));
+    if (one) out[one[0]] = one[1];
+  }
   return out;
 }
 

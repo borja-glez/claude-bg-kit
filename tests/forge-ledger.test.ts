@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, readFileSync, appendFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, appendFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, utimesSync } from 'node:fs';
 import { execFile, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -315,5 +315,65 @@ describe('one status per task in .forge/status/ (C5)', () => {
     expect(readStatus(main)).toMatchObject({ task: 'T002', phase: 'implement' });
     expect(readStatus(wt)).toMatchObject({ task: 'T002', phase: 'implement' });
     expect(existsSync(path.join(wt, '.forge', 'status'))).toBe(false);
+  });
+});
+
+describe('pruning .forge/status/ (C5)', () => {
+  const dir = () => path.join(root, '.forge', 'status');
+  const fill = (n: number) => {
+    mkdirSync(dir(), { recursive: true });
+    for (let i = 0; i < n; i++) {
+      const at = new Date(Date.parse('2026-10-01T00:00:00.000Z') + i * 60_000).toISOString();
+      writeFileSync(path.join(dir(), `X${i}.json`), JSON.stringify({ ts: at, task: `X${i}`, path: 'small', phase: '', agent: null, validators: [], verdict: null, lastAt: at }));
+    }
+  };
+  const triage = (task: string, ts: string) => appendEvent(root, { ts, kind: 'triage', task, path: 'small', reasons: [] });
+  it('a directory named *.json neither aborts the pruning nor counts as a status, and the alias survives', () => {
+    fill(200);
+    mkdirSync(path.join(dir(), 'Z.json'));
+    triage('NEW', '2026-10-16T10:00:00.000Z');
+    const names = readdirSync(dir());
+    expect(names).toHaveLength(151);
+    expect(names).toContain('Z.json');
+    expect(names).toContain('NEW.json');
+    expect(names).not.toContain('X0.json');
+    expect(readStatus(root)).toMatchObject({ task: 'NEW' });
+  });
+  it('the status that just changed is kept over 150 although its lastAt is the oldest', () => {
+    fill(200);
+    triage('OLD', '2020-01-01T00:00:00.000Z');
+    const names = readdirSync(dir());
+    expect(names).toHaveLength(150);
+    expect(names).toContain('OLD.json');
+    expect(names).not.toContain('X0.json');
+    expect(names).toContain('X199.json');
+  });
+  it('files that tell no lastAt are ranked by mtime, and *.tmp leftovers older than 10 minutes go', () => {
+    mkdirSync(dir(), { recursive: true });
+    for (let i = 0; i < 200; i++) {
+      const f = path.join(dir(), `J${i}.json`);
+      writeFileSync(f, '{oops');
+      const t = new Date(Date.parse('2026-10-01T00:00:00.000Z') + i * 60_000);
+      utimesSync(f, t, t);
+    }
+    const stale = path.join(dir(), 'A.json.1.tmp');
+    const fresh = path.join(dir(), 'B.json.2.tmp');
+    writeFileSync(stale, '{'); writeFileSync(fresh, '{');
+    const old = new Date(Date.now() - 20 * 60_000);
+    utimesSync(stale, old, old);
+    triage('NEW', '2026-10-16T10:00:00.000Z');
+    const names = readdirSync(dir());
+    expect(names.filter(n => n.endsWith('.json'))).toHaveLength(150);
+    expect(names).not.toContain('J0.json');
+    expect(names).toContain('J199.json');
+    expect(names).not.toContain('A.json.1.tmp');
+    expect(names).toContain('B.json.2.tmp');
+  });
+  it('a triage without a project next to shop__T001 opens the loose T001 file', () => {
+    appendEvent(root, { ts: '2026-10-16T10:00:00.000Z', kind: 'triage', task: 'T001', path: 'small', project: 'shop', reasons: [] });
+    triage('T001', '2026-10-16T10:05:00.000Z');
+    expect(readdirSync(dir()).sort()).toEqual(['T001.json', 'shop__T001.json']);
+    expect(readStatuses(root).shop__T001).toMatchObject({ project: 'shop', lastAt: '2026-10-16T10:00:00.000Z' });
+    expect(readStatuses(root).T001).toMatchObject({ project: null, lastAt: '2026-10-16T10:05:00.000Z' });
   });
 });
