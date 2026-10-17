@@ -72,13 +72,25 @@ const placeNew = (marked: Element[], root: HTMLElement, next: HTMLElement): Set<
     if (isNew(el)) continue;
     for (let p = el.parentElement; p && p !== next && !holdsLive.has(p); p = p.parentElement) holdsLive.add(p);
   }
+  // Re-review m2: each run of new siblings is walked once, by its first node, and its anchor kept for the rest of it.
+  const anchorOf = new Map<Element, Element | null>();
+  const doc = root.ownerDocument;
   for (const el of keyed) {
     if (!isNew(el) || holdsLive.has(el)) continue;
-    let after = el.nextElementSibling;
-    while (after && isNew(after)) after = after.nextElementSibling;
-    const anchor = after ? live.get(nodeKey(after) ?? '') : undefined;
+    if (!anchorOf.has(el)) {
+      const run = [el];
+      let after = el.nextElementSibling;
+      while (after && isNew(after)) { run.push(after); after = after.nextElementSibling; }
+      const found = (after && live.get(nodeKey(after) ?? '')) || null;
+      for (const r of run) anchorOf.set(r, found);
+    }
+    const anchor = anchorOf.get(el);
     if (!anchor?.parentNode || !el.parentNode || boxOf(el, next) !== boxOf(anchor, root)) continue;
-    el.parentNode.replaceChild(el.cloneNode(false), el);
+    // Re-review m1: the stand-in never equals the node it stands for (an empty node would, and its parent, otherwise
+    // the render's, would then be skipped with the node never reached): it holds an empty comment.
+    const stand = el.cloneNode(false);
+    stand.appendChild(doc.createComment(''));
+    el.parentNode.replaceChild(stand, el);
     anchor.parentNode.insertBefore(el, anchor);
     placed.add(el);
   }

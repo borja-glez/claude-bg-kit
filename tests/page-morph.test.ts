@@ -303,6 +303,11 @@ describe('morphInto (H-06)', () => {
       [ul(['a', 'b']), `<section data-scroll-key="l">${item('x')} ${item('a')} ${item('b')}</section>`],
       [ul(['a', 'b']), `<section data-scroll-key="other">${item('x')}${item('a')}</section>`],
       ['<div data-morph="skip"></div>' + ul(['a']), '<div data-morph="skip"></div>' + ul(['x', 'a'])],
+      // Re-review m1: a new keyed node with no children, its parent otherwise the render's.
+      ['<section data-scroll-key="l"><i data-k="a"></i></section>', '<section data-scroll-key="l"><i data-k="x"></i><i data-k="a"></i></section>'],
+      ['<div class="p"><i data-k="a"></i><i data-k="b"></i></div>', '<div class="p"><i data-k="x"></i><i data-k="a"></i><i data-k="b"></i></div>'],
+      ['<div class="p"><textarea data-k="a"></textarea></div>', '<div class="p"><textarea data-k="x"></textarea><textarea data-k="a"></textarea></div>'],
+      ['<i data-k="a"></i>', '<i data-k="x"></i><i data-k="y"></i><i data-k="a"></i>'],
     ];
     for (const [from, to] of cases) {
       const root = mount(from);
@@ -311,6 +316,30 @@ describe('morphInto (H-06)', () => {
       want.innerHTML = to;
       expect(root.innerHTML, `${from} → ${to}`).toBe(want.innerHTML);
       root.remove();
+    }
+  });
+
+  it('a long run of new keyed items is placed in linear time, before an item of the page or with none after it (re-review m2)', () => {
+    const card = (i: number) => `<div class="note" data-k="n:${i}"><p>${i}</p><button class="chip" data-k="tk:${i}">T</button></div>`;
+    const list = (ids: number[]) => `<div class="ngrid">${ids.map(card).join('')}</div>`;
+    const nav = '<nav data-k="nav"><b>nav</b></nav>';
+    const steps = (n: number, anchor: boolean) => {
+      const root = mount(nav + (anchor ? list([-1]) : '<div class="ngrid"></div>'));
+      const spy = vi.spyOn(Element.prototype, 'nextElementSibling', 'get');
+      const ids = Array.from({ length: n }, (_, i) => i);
+      morphInto(root, nav + list(anchor ? [...ids, -1] : ids));
+      const count = spy.mock.calls.length;
+      spy.mockRestore();
+      expect(root.querySelectorAll('.note')).toHaveLength(anchor ? n + 1 : n);
+      root.remove();
+      return count;
+    };
+    for (const anchor of [true, false]) {
+      const small = steps(100, anchor);
+      const big = steps(400, anchor);
+      // Four times the items, about four times the steps (a quadratic scan takes sixteen).
+      expect(big, `anchor ${anchor}`).toBeLessThan(small * 6);
+      expect(big, `anchor ${anchor}`).toBeLessThan(400 * 6);
     }
   });
 
