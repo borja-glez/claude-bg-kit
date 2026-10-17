@@ -417,10 +417,10 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
   const left = rows.map(r => {
     if (r.kind === 'phase') {
       const pct = r.total ? Math.round(((r.done ?? 0) / r.total) * 100) : 0;
-      return `<div class="tr ph" data-action="toggle-phase" data-id="${esc(r.id)}" title="${esc(r.label)} · ${esc(r.counter)}"><span class="chev">${expanded.has(r.id) ? '⌄' : '›'}</span> <span class="lab">${groupLabel(m, groupBy, r)}</span><span class="mini"><i style="width:${pct}%"></i></span><span class="c">${esc(r.counter)}</span></div>`;
+      return `<div class="tr ph" data-action="toggle-phase" data-id="${esc(r.id)}" data-k="p:${esc(r.id)}" title="${esc(r.label)} · ${esc(r.counter)}"><span class="chev">${expanded.has(r.id) ? '⌄' : '›'}</span> <span class="lab">${groupLabel(m, groupBy, r)}</span><span class="mini"><i style="width:${pct}%"></i></span><span class="c">${esc(r.counter)}</span></div>`;
     }
     const s = st(r);
-    return `<div class="tr tk${crit.has(r.id) ? ' crit' : ''}" data-action="open-task" data-id="${esc(r.id)}" data-task="${esc(r.id)}" data-deps="${esc(deps(r.id).join(' '))}" title="${esc(r.id)} · ${esc(r.label)} · ${esc(d.status[s])}"><i class="sd st-${s}"></i><span class="k">${esc(r.id)}</span> <span class="lab">${esc(r.label)}</span>${eviMark(m, d, r.id)}${layers.has('forge') ? forgeBadge(m, r.id) : ''} ${groupBy === 'track' ? '' : trackTag(m, r.trackId)}</div>`;
+    return `<div class="tr tk${crit.has(r.id) ? ' crit' : ''}" data-action="open-task" data-id="${esc(r.id)}" data-task="${esc(r.id)}" data-deps="${esc(deps(r.id).join(' '))}" data-k="t:${esc(r.id)}" title="${esc(r.id)} · ${esc(r.label)} · ${esc(d.status[s])}"><i class="sd st-${s}"></i><span class="k">${esc(r.id)}</span> <span class="lab">${esc(r.label)}</span>${eviMark(m, d, r.id)}${layers.has('forge') ? forgeBadge(m, r.id) : ''} ${groupBy === 'track' ? '' : trackTag(m, r.trackId)}</div>`;
   }).join('');
   const kindLabel = (k: string) => (k === 'estimate' ? d.legend.estimate : k === 'done' ? d.legend.done : k === 'blocked' ? d.legend.blocked : d.legend.current);
   const right = rows.map(r => {
@@ -479,7 +479,7 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
       <div class="l"><div class="tr axis"></div>${left}</div>
       <div class="r" data-role="tl-canvas"><div class="ticks">${tickHtml}</div><div class="grid">${grid}</div>${band}${right}
         ${nowLeft >= 0 && nowLeft <= 100 ? `<div class="now" style="left:${nowLeft}%"><span>${esc(d.now)}</span></div>` : ''}
-        <svg class="arrows" data-role="tl-arrows" aria-hidden="true"></svg></div>
+        <svg class="arrows" data-role="tl-arrows" data-morph="skip" aria-hidden="true"></svg></div>
     </div>
     </div>
     ${renderMinimap(m, d, win)}
@@ -630,7 +630,7 @@ function renderTaskModal(m: Model, d: Dict, id: string, loc: string): string {
     <div class="mh"><div><span class="k">${esc(t.id)}</span> <span class="t">${esc(t.title)}</span><br>
       <span class="pill st-${status}${isOrphan(m, s) ? ' orphan' : ''}">${esc(isOrphan(m, s) ? d.run.orphan : d.status[status])}</span> <span class="mono">${esc(ph?.name)}${t.category ? ` · ${esc(t.category)}` : ''}</span> ${trackTag(m, t.track)}
       ${s.exec ? `<div class="mono exec">${execLine(m, d, s.exec)}</div>` : ''}</div>
-      <div class="mhb"><button class="btn" data-action="refresh" data-role="pending" hidden>↻ ${esc(d.refresh)}</button><button class="btn" data-action="close-modal" aria-label="${esc(d.close)}">✕</button></div></div>
+      <div class="mhb"><button class="btn" data-action="close-modal" aria-label="${esc(d.close)}">✕</button></div></div>
     <div class="mgrid"><div>
       ${sec(d.field.period, period + duration)}
       ${sec(d.field.dependsOn, chips(t.depends_on))}

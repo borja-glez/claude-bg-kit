@@ -529,7 +529,8 @@ describe('notes', () => {
     await settle();
     expect(f.add).toHaveBeenCalledTimes(1);
     expect(app.ui.draft.text).toBe('no se pierde');
-    expect(root.innerHTML).toContain('no se pierde');
+    // H-06: the focused textarea is morphed around, not replaced: the draft stays in its value (innerHTML has no value).
+    expect((root.querySelector('[data-role="note-text"]') as HTMLTextAreaElement).value).toBe('no se pierde');
     expect(root.innerHTML).toContain('solo lectura');
     app.stop();
   });
@@ -878,7 +879,7 @@ describe('proposals', () => {
   });
 });
 
-describe('scroll, tick and held repaints (G-01)', () => {
+describe('scroll, tick and live repaints (G-01, H-06)', () => {
   const openT003 = async (root: HTMLElement) => {
     click(root, '[data-action="toggle-phase"][data-id="F1"]');
     await settle();
@@ -886,7 +887,7 @@ describe('scroll, tick and held repaints (G-01)', () => {
     await settle();
   };
   const EVENT = { e9: { ts: '2026-10-11T11:30:00Z', type: 'note', sessionId: 'main', text: 'evento-retenido' } };
-  it('a data snapshot repaints and keeps the scroll of every keyed container', async () => {
+  it('a data snapshot repaints in place and keeps the scroll of every keyed container (H-06)', async () => {
     const f = fakeDb();
     const { root, app } = await boot(f, fakeUser());
     click(root, '[data-view="versions"]');
@@ -896,28 +897,23 @@ describe('scroll, tick and held repaints (G-01)', () => {
     f.push('state', { T001: { status: 'done' } });
     await settle();
     const after = root.querySelector('[data-scroll-key="vcols"]') as HTMLElement;
-    expect(after).not.toBe(before);
+    expect(after).toBe(before);
     expect(after.scrollLeft).toBe(900);
     app.stop();
   });
-  it('with the modal open a snapshot keeps the DOM and shows ↻; ↻ repaints and keeps the overlay scroll', async () => {
+  it('with the modal open a snapshot repaints it at once and keeps the overlay and its scroll (H-06)', async () => {
     const f = fakeDb();
     const { root, app } = await boot(f, fakeUser());
     await openT003(root);
     expect(document.documentElement.classList.contains('wp-modal')).toBe(true);
-    (root.querySelector('[data-scroll-key="modal:T003"]') as HTMLElement).scrollTop = 240;
-    const shell = root.querySelector('.shell');
+    const overlay = root.querySelector('[data-scroll-key="modal:T003"]') as HTMLElement;
+    overlay.scrollTop = 240;
     f.push('state', { T003: { status: 'in_progress', owner: 'main', summary: 'llega-con-modal' } });
     await settle();
-    expect(root.querySelector('.shell')).toBe(shell);
-    expect(root.innerHTML).not.toContain('llega-con-modal');
-    const pending = root.querySelector('[data-role="pending"]') as HTMLButtonElement;
-    expect(pending.hidden).toBe(false);
-    pending.click();
-    await settle();
     expect(root.innerHTML).toContain('llega-con-modal');
-    expect((root.querySelector('[data-scroll-key="modal:T003"]') as HTMLElement).scrollTop).toBe(240);
-    expect((root.querySelector('[data-role="pending"]') as HTMLButtonElement).hidden).toBe(true);
+    expect(root.querySelector('[data-scroll-key="modal:T003"]')).toBe(overlay);
+    expect(overlay.scrollTop).toBe(240);
+    expect(root.querySelector('[data-action="refresh"]')).toBeNull();
     app.stop();
   });
   it('stopping the app with the modal open removes the wp-modal class', async () => {
@@ -927,13 +923,13 @@ describe('scroll, tick and held repaints (G-01)', () => {
     app.stop();
     expect(document.documentElement.classList.contains('wp-modal')).toBe(false);
   });
-  it('closing the modal paints the data it held back', async () => {
+  it('with the modal open, the data behind it paints too; closing it leaves it there (H-06)', async () => {
     const f = fakeDb();
     const { root, app } = await boot(f, fakeUser());
     await openT003(root);
     f.push('events', EVENT);
     await settle();
-    expect(root.innerHTML).not.toContain('evento-retenido');
+    expect(root.innerHTML).toContain('evento-retenido');
     click(root, '.modal [data-action="close-modal"]');
     await settle();
     expect(root.innerHTML).toContain('evento-retenido');
@@ -963,19 +959,16 @@ describe('scroll, tick and held repaints (G-01)', () => {
       vi.useRealTimers();
     }
   });
-  it('with a select focused a snapshot waits; it paints when the select loses focus', async () => {
+  it('with a select focused a snapshot paints, and the select stays the same element with its focus (H-06)', async () => {
     const f = fakeDb();
     const { root, app } = await boot(f, fakeUser());
     const sel = root.querySelector('select[data-action="burn-scope"]') as HTMLSelectElement;
     sel.focus();
-    const shell = root.querySelector('.shell');
     f.push('events', EVENT);
     await settle();
-    expect(root.querySelector('.shell')).toBe(shell);
-    expect(root.innerHTML).not.toContain('evento-retenido');
-    sel.blur();
-    await settle();
     expect(root.innerHTML).toContain('evento-retenido');
+    expect(root.querySelector('select[data-action="burn-scope"]')).toBe(sel);
+    expect(document.activeElement).toBe(sel);
     app.stop();
   });
 });

@@ -117,7 +117,6 @@ const en = {
   legend: { done: 'Done', current: 'In progress', blocked: 'Blocked', estimate: 'Estimated', now: 'Now' },
   field: { includes: 'What it includes', doneWhen: 'Done when', verification: 'Verification', commits: 'Commits', period: 'Period', dependsOn: 'Depends on', unlocks: 'Unlocks', zones: 'Zones', wholeRepo: 'whole repository', session: 'Session', summary: 'Summary', branch: 'Branch', agent: 'Agent', task: 'Task' },
   close: 'Close',
-  refresh: 'Update',
   eventText: { claimed: 'claimed', started: 'started', done: 'done', blocked: 'blocked', unblocked: 'unblocked', commit: 'commit', note: 'note', plan_changed: 'plan updated', message: 'message' } as Record<EventType, string>,
 };
 export type Dict = typeof en;
@@ -205,7 +204,6 @@ const es: Dict = {
   legend: { done: 'Hecha', current: 'En curso', blocked: 'Bloqueada', estimate: 'Estimado', now: 'Ahora' },
   field: { includes: 'Qué incluye', doneWhen: 'Hecho cuando', verification: 'Verificación', commits: 'Commits', period: 'Periodo', dependsOn: 'Depende de', unlocks: 'Desbloquea', zones: 'Zonas', wholeRepo: 'todo el repositorio', session: 'Sesión', summary: 'Resumen', branch: 'Rama', agent: 'Agente', task: 'Tarea' },
   close: 'Cerrar',
-  refresh: 'Actualizar',
   eventText: { claimed: 'reclamada', started: 'empezada', done: 'hecha', blocked: 'bloqueada', unblocked: 'desbloqueada', commit: 'commit', note: 'nota', plan_changed: 'plan actualizado', message: 'mensaje' },
 };
 

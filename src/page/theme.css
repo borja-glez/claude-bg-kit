@@ -110,7 +110,6 @@ h1{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:34px;marg
 html.wp-modal,html.wp-modal body{overflow:hidden}
 .mh .btn{margin:0}
 .mhb{display:flex;gap:6px;align-items:flex-start;flex:0 0 auto}
-.btn[hidden]{display:none}
 .pill{display:inline-block;font-family:'Barlow Condensed',sans-serif;font-size:11px;letter-spacing:.08em;padding:2px 8px;border-radius:3px;border:1px solid currentColor;text-transform:uppercase;margin-top:6px}
 .st-done{color:var(--done)} .st-in_progress,.st-claimed{color:var(--cur)} .st-blocked{color:var(--blk)} .st-free,.st-orphaned{color:var(--o1)}
 .mgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:18px;margin-top:12px}

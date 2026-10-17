@@ -762,10 +762,16 @@ describe('scroll keys and relative times (G-01)', () => {
     expect(relText(d, 'lasts', new Date(NOW + 30 * 60000).toISOString(), NOW)).toBe('');
     expect(renderApp(base(), ui())).toContain('<span data-rel="hb" data-ts="2026-10-11T11:59:00Z">hace 1 min</span>');
   });
-  it('the modal has a hidden ↻ that only repaints', () => {
+  it('the modal has no ↻: it repaints live (H-06)', () => {
     const html = renderApp(base(), ui({ modal: 'T002' }));
-    expect(html).toContain('<button class="btn" data-action="refresh" data-role="pending" hidden>↻ Actualizar</button>');
-    expect(renderApp({ ...base(), meta: { ...base().meta!, locale: 'en' } }, ui({ modal: 'T002' }))).toContain('↻ Update');
+    expect(html).not.toContain('data-action="refresh"');
+    expect(html).not.toContain('↻');
+  });
+  it('the rows of the timeline carry stable keys, and the arrows drawn by hand are left alone (H-06)', () => {
+    const html = renderApp(base(), ui({ expanded: new Set(['F1']) }));
+    expect(html).toContain('data-k="p:F1"');
+    expect(html).toContain('data-k="t:T001"');
+    expect(html).toContain('<svg class="arrows" data-role="tl-arrows" data-morph="skip" aria-hidden="true"></svg>');
   });
 });
 
