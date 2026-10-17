@@ -434,7 +434,7 @@ describe('plugin layout', () => {
   });
   it('plan skill publishes the roadmap with notes and proposals write rules for contributors', () => {
     const md = read('plugins/waypoint/skills/plan/SKILL.md');
-    expect(md).toContain('{"db": {"rules": [{"path": "", "read": "view", "write": "admin"}, {"path": "notes", "read": "view", "write": "interact"}, {"path": "proposals", "read": "view", "write": "interact"}]}, "user": {"scopes": ["profile"]}, "downloads": true, "assets": {}}');
+    expect(md).toContain('{"db": {"rules": [{"path": "", "read": "view", "write": "admin"}, {"path": "notes", "read": "view", "write": "interact"}, {"path": "proposals", "read": "view", "write": "interact"}, {"path": "approvals", "read": "view", "write": "owner"}]}, "user": {"scopes": ["profile"]}, "downloads": true, "assets": {}}');
     expect(md).toContain('waypoint 0.9.4 or earlier');
     expect(md).toContain('0.7.x or earlier');
   });
@@ -1462,6 +1462,29 @@ describe('plugin layout', () => {
     expect(read('plugins/forge/skills/decide/SKILL.md')).toContain('`approvalDelete`');
     // The publish after a block batch is pinned to the version that batch returned (task-steps, member).
     expect(runRef('task-steps')).not.toContain('pinned like any printed write');
+  });
+
+  it('waypoint:work and waypoint:plan use meta/metrics, meta/page, the owner rule and sync --db (wave 4a)', () => {
+    const work = read('plugins/waypoint/skills/work/SKILL.md');
+    expect(work).toContain('`metrics`');
+    for (const w of ['--meta-version', 'for a fresh `MV`', '`MV` for `meta/project`']) expect(work, w).not.toContain(w);
+    const plan = read('plugins/waypoint/skills/plan/SKILL.md');
+    for (const w of ['--db .waypoint/<project>/dbcache', '`republish`', '`removed`', '`missing`', 'meta/page', '{"path": "approvals", "read": "view", "write": "owner"}',
+      '--states .waypoint/<project>/dbcache/state', '`rules`', 'AskUserQuestion']) expect(plan, w).toContain(w);
+  });
+
+  it('the waypoint skills that send CLI writes follow one pin rule stated in a waypoint reference (wave 4a)', () => {
+    const rule = read('plugins/waypoint/skills/plan/references/roadmap-writes.md');
+    for (const w of ['NEWEST version you hold', 'only to create a document', 'On `version_mismatch`, re-read that one document', 'Never address one document twice in one batch',
+      'Never edit the printed data', '`meta/metrics`', '`meta/page`', '`sync --db`']) expect(rule, w).toContain(w);
+    for (const f of ['work', 'plan']) {
+      const md = read(`plugins/waypoint/skills/${f}/SKILL.md`);
+      expect(md, f).toContain('references/roadmap-writes.md');
+      expect(md, f).not.toContain('NEWEST version');
+    }
+    // plan acts on sync's request to republish and writes meta/page after publishing.
+    const plan = read('plugins/waypoint/skills/plan/SKILL.md');
+    for (const w of ['`republish: true`', 'do this step without asking', '`write`']) expect(plan, w).toContain(w);
   });
 
   it('READMEs describe wave 3a: the status per task, the task line, the tasks in progress and the classic hooks', () => {
