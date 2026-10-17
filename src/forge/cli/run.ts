@@ -451,17 +451,30 @@ function briefThreatModel(dir: string): string | null {
   try { const tm = loadConfig(dir).threatModel; return tm ? renderThreatModel(tm) : null; } catch { return null; }
 }
 
+/** The status each proposal's latest decision event in this checkout's ledger left it in: decide, confirm, a reopen (its `to`) and
+ *  the policy's auto-approval; a policy that declined decided nothing. A pid with no such event is absent. */
+function lastDecisions(root: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const e of readEvents(root)) {
+    if (e.kind !== 'proposal' || typeof e.id !== 'string') continue;
+    const status = e.action === 'reopen' ? e.to : e.action === 'decide' || e.action === 'confirm' || (e.action === 'policy' && e.status === 'auto_approved') ? e.status : undefined;
+    if (typeof status === 'string') out[e.id] = status;
+  }
+  return out;
+}
+
 // What the stop conditions need from the repository: the stop file and the proposal mirror.
 // Approved work still pending = every approved/auto_approved proposal not yet done, with or without a task.
 function stopContext(cwd: string, now: Date): StopContext {
   const proposals = loadProposals(cwd);
   const marks = loadApprovals(cwd);
+  const last = lastDecisions(cwd);
   return {
     now,
     stopFile: existsSync(stopFile(cwd)),
     // Wave 4: approved work counts only with the owner's mark (with or without a task, as before); one without a task also
     // needs the mark to be of its present text: an edited one never becomes a task, so it does not hold the queue open.
-    approvedPending: proposals.filter(p => p.taskId === undefined ? ownerCheck(p.id, p, marks[p.id]) === 'ok' : markMatches(p, marks[p.id])).length,
+    approvedPending: proposals.filter(p => p.taskId === undefined ? ownerCheck(p.id, p, marks[p.id], last[p.id]) === 'ok' : markMatches(p, marks[p.id])).length,
     pendingProposals: proposals.filter(p => p.status === 'proposed' || p.status === 'discussing').length,
   };
 }
@@ -470,10 +483,11 @@ function stopContext(cwd: string, now: Date): StopContext {
  *  never become tasks. The reason says which of the two. */
 function unownedReasons(root: string): Record<string, 'no-mark' | 'edited'> {
   const marks = loadApprovals(root);
+  const last = lastDecisions(root);
   const out: Record<string, 'no-mark' | 'edited'> = {};
   for (const p of loadProposals(root)) {
     if (!isActionable(p) || p.taskId !== undefined) continue;
-    const c = ownerCheck(p.id, p, marks[p.id]);
+    const c = ownerCheck(p.id, p, marks[p.id], last[p.id]);
     if (c !== 'ok') out[p.id] = c;
   }
   return out;
@@ -1276,6 +1290,8 @@ function runCommand(argv: string[], io: Io): Result {
               if (status !== 'approved' && status !== 'auto_approved' && status !== 'rejected') throw new UsageError(`proposals decide: ${id} is ${status}: only a decided proposal is confirmed`);
               const approval = approvalOf(id, status, at, base);
               if (from === undefined) saveApproval(io.cwd, id, approval.data);
+              // The latest decision of this checkout: a reopen before it no longer voids the mark it makes.
+              appendEvent(io.cwd, { ts: at, kind: 'proposal', action: 'confirm', id, status });
               return json({ id, status, approval });
             }
             // A reopen also refuses while the proposal has a task: in the db doc, or in a plan (a task made from it, or
@@ -1296,7 +1312,10 @@ function runCommand(argv: string[], io: Io): Result {
             // The skill sends `write` pinned to the version it read; a stale reason is deleted.
             const write: Record<string, unknown> = { ...writeOf(r.doc, by, at), history: r.doc.history };
             if (!r.doc.reason && base.reason) write.reason = { __delete__: true };
-            return json({ id, status: r.doc.status, previous: base.status, write, approval: mark });
+            // The decision reopened no longer stands: its mark in the roadmap goes (the skill pins the delete to the version it
+            // lists; the new mark, if any, is then a create). Without it an editor who sets the status back finds the old mark.
+            const approvalDelete = { op: 'delete' as const, collection: 'approvals', doc_id: id };
+            return json({ id, status: r.doc.status, previous: base.status, write, approval: mark, approvalDelete });
           }
           case 'save': {
             const from = subFlag('from');
@@ -1415,9 +1434,11 @@ function runCommand(argv: string[], io: Io): Result {
             if (!isActionable(found)) throw new UsageError(`proposals to-task: ${id} is not approved`);
             if (found.taskId !== undefined) throw new UsageError(`proposals to-task: ${id} already has task ${found.taskId}`);
             // §4.1: only the roadmap owner's approvals become tasks: the mark must agree with the proposal and with its text.
-            const check = ownerCheck(id, found, loadApproval(io.cwd, id));
+            // A decision this checkout reopened since stops counting, even if its mark is still in the roadmap.
+            const lastStatus = lastDecisions(io.cwd)[id];
+            const check = ownerCheck(id, found, loadApproval(io.cwd, id), lastStatus);
             if (check === 'no-mark') throw new UsageError(`proposals to-task: ${id} has no mark of the roadmap's owner (approvals/${id}); only the owner's approvals become tasks`);
-            if (!ownerApproved(id, found, loadApproval(io.cwd, id))) throw new UsageError(`proposals to-task: ${id} was edited after the owner's approval; it needs a new approval`);
+            if (!ownerApproved(id, found, loadApproval(io.cwd, id), lastStatus)) throw new UsageError(`proposals to-task: ${id} was edited after the owner's approval; it needs a new approval`);
             // A mark is spent once: a proposal that already became a task (the ledger, which a pull never touches, or the plan)
             // is not turned into another by a copy that lost its taskId.
             const spent = readEvents(io.cwd).find(e => e.kind === 'proposal' && e.action === 'to-task' && e.id === id);

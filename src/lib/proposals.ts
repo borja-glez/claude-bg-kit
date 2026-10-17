@@ -109,14 +109,18 @@ export function markMatches(p: Pick<ProposalDoc, 'status'>, a: ApprovalDoc | nul
 }
 
 /** Why a decided proposal is not the owner's: 'no-mark' (none, or it disagrees with the status), 'edited' (the mark is of other
- *  text than the proposal has now) or 'ok'. */
-export function ownerCheck(pid: string, p: Pick<ProposalDoc, 'status' | 'category' | 'risk' | 'title' | 'rationale' | 'evidence' | 'path' | 'estimate'>, a: ApprovalDoc | null | undefined): 'ok' | 'no-mark' | 'edited' {
+ *  text than the proposal has now) or 'ok'. `last` is the status this checkout's latest decision event for the pid
+ *  left it in (a reopen counts as the decision it made, its `to`): a mark of any other status is an older decision that
+ *  was reopened, even if it is still in the roadmap. Undefined when the ledger holds no decision for the pid (a mark made
+ *  in another checkout): the mark and its digest decide. */
+export function ownerCheck(pid: string, p: Pick<ProposalDoc, 'status' | 'category' | 'risk' | 'title' | 'rationale' | 'evidence' | 'path' | 'estimate'>, a: ApprovalDoc | null | undefined, last?: string): 'ok' | 'no-mark' | 'edited' {
   if (!a || !markMatches(p, a)) return 'no-mark';
+  if (last !== undefined && last !== a.status) return 'no-mark';
   return a.digest === proposalDigest(pid, p) ? 'ok' : 'edited';
 }
 
 /** Wave 4: approved by the roadmap's owner, for auto-approval and to-task: the mark agrees, is of this very text, and it has no
  *  task yet. Someone else can block a proposal by changing proposals/<pid>, never fire it or change what it says. */
-export function ownerApproved(pid: string, p: Parameters<typeof ownerCheck>[1] & Pick<ProposalDoc, 'taskId'>, a: ApprovalDoc | null | undefined): boolean {
-  return ownerCheck(pid, p, a) === 'ok' && p.taskId === undefined;
+export function ownerApproved(pid: string, p: Parameters<typeof ownerCheck>[1] & Pick<ProposalDoc, 'taskId'>, a: ApprovalDoc | null | undefined, last?: string): boolean {
+  return ownerCheck(pid, p, a, last) === 'ok' && p.taskId === undefined;
 }

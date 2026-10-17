@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { run, type Io } from '../src/forge/cli/run.js';
+import { run, defaultGit, type Io } from '../src/forge/cli/run.js';
 import { appendEvent } from '../src/forge/ledger.js';
 import { saveExecution, writePublicTask } from '../src/forge/execution.js';
 import { normalizeForgeV1, normalizeInfinite, normalizeRun, normalizeRunSummary, normalizeState } from '../src/page/normalize.js';
@@ -94,11 +94,19 @@ describe('the roadmap contract (C7, wave 4)', () => {
   it('a page published before wave 4 still reads path, phase, agent, every validator, verdict, round and cap of each block', () => {
     for (const t of TASKS) {
       const forge = doc(t).forge;
-      const v1 = normalizeForgeV1(forge)!;
+      const v1 = normalizeForgeV1(forge);
+      expect(v1, t).toBeDefined();
       expect(v1, t).toMatchObject({ path: forge.path, phase: forge.phase });
-      expect(v1.validators ?? [], t).toEqual(forge.validators.map((v: { name: string; ok: boolean }) => ({ name: v.name, ok: v.ok })));
-      for (const k of ['agent', 'verdict', 'round', 'cap'] as const) expect(v1[k], `${t} ${k}`).toEqual(forge[k]);
+      expect(v1!.validators ?? [], t).toEqual(forge.validators.map((v: { name: string; ok: boolean }) => ({ name: v.name, ok: v.ok })));
     }
+    // Fixed values, so a v1 field forge renames or stops printing fails here instead of comparing undefined with undefined.
+    // T1 (Medium, done) fills every v1 field but the agent; T4 (running) carries the agent.
+    expect(normalizeForgeV1(doc('T1').forge), 'T1').toMatchObject({
+      path: 'medium', phase: 'done', verdict: { action: 'accept', score: 0.9 }, round: 2, cap: 4,
+      validators: [{ name: 'test', ok: false }, { name: 'lint', ok: true }, { name: 'e2e', ok: true }],
+    });
+    expect(normalizeForgeV1(doc('T4').forge), 'T4').toMatchObject({ path: 'large', phase: 'implement', agent: 'forge-impl' });
+    expect(normalizeForgeV1(doc('T2').forge), 'T2').toMatchObject({ path: 'large', phase: 'done', verdict: { action: 'accept', score: 0.85 }, round: 2, cap: 5 });
   });
   it('meta/run, runs/<runId> and meta/infinite pass their normalizers whole', () => {
     const d = drops();
@@ -111,10 +119,13 @@ describe('the roadmap contract (C7, wave 4)', () => {
     expect(normalizeInfinite(infinite, d.rep)).toEqual(infinite);
     expect(d.list).toEqual([]);
   });
-  it('every ArtifactData write forge prints either creates, carries if_version, or is one the skill pins by design', () => {
-    // The store refuses an update, delete or replace of an existing document without if_version. These are printed without
-    // one on purpose (the skill pins each to the version it lists): a new entry here is a deliberate change.
-    const UNPINNED_BY_DESIGN = ['state/update', 'meta/update'];
+  it('every ArtifactData write forge prints creates, carries if_version, or is one the skill pins; each of those families is reached', () => {
+    // The store refuses an update, delete or replace of an existing document without if_version. forge prints these families
+    // without one on purpose: the skills pin every printed write whose document exists in their listing to the version they
+    // listed, and send it unpinned only to create it. A new entry here is a deliberate change.
+    const SKILL_PINNED = ['state/update', 'meta/update', 'approvals/set', 'approvals/delete', 'notes/update'];
+    // Documents whose id is new by construction (a run id, a note id): a set of them is always a create.
+    const CREATES = ['runs/set', 'notes/set'];
     const found: Record<string, unknown>[] = [];
     const walk = (v: unknown): void => {
       if (Array.isArray(v)) v.forEach(walk);
@@ -124,17 +135,51 @@ describe('the roadmap contract (C7, wave 4)', () => {
         Object.values(o).forEach(walk);
       }
     };
+    // approvals: decide, reopen (the delete), confirm and the policy.
+    const propose = (title: string, file: string) => {
+      writeFileSync(path.join(root, 'p.json'), JSON.stringify({ category: 'quality', risk: 'low', title, rationale: `why ${title}`, evidence: 'e', pillar: 'quality', source: 'scout', path: file }));
+      return out(run(['proposals', 'add', '--file', 'p.json'], io)).id as string;
+    };
+    const [p1, p2, p3] = [propose('Cut dead code', 'src/util/dead.ts'), propose('Document the cart module', 'src/cart/readme.md'), propose('Tidy the logger imports', 'src/log/index.ts')];
+    walk(out(run(['proposals', 'decide', p1, 'approve'], io)));
+    walk(out(run(['proposals', 'decide', p1, 'reject', '--reopen'], io)));
+    walk(out(run(['proposals', 'decide', p2, 'approve'], io)));
+    walk(out(run(['proposals', 'decide', p2, 'confirm'], io)));
+    walk(out(run(['proposals', 'policy', p3], io)));
+    // notes: a decision that resolves a question (the note is a create, the answer an update).
+    writeFileSync(path.join(root, 'd.json'), JSON.stringify({ point: 'design-approve', what: 'design approved (v4)', chosen: 'approve', why: 'round 2 without critical', by: 'auto', undo: { type: 'design-reopen', project: 'shop' }, resolves: 'q-20261013T090000000Z-main-0000' }));
+    walk(out(run(['decision', 'add', '--data-file', 'd.json', '--task', 'T5-2', '--session', 'main'], io)));
+    // state, runs: the roadmap doc, the stop's release, the run summary.
     walk(out(run(['roadmap-doc', 'T2', '--project', 'shop'], io)));
     walk(out(run(['swarm', 'status'], io)));
     walk(out(run(['stop'], io)));
     saveExecution(root, execution({ active: false, stopReason: 'stopped', closedAt: ROADMAP_AT(250), closedBy: 'close' }));
     walk(out(run(['roadmap-run', '--run', RUN], io)));
-    expect(found.map(w => `${w.collection}/${w.op}`)).toEqual(expect.arrayContaining(['state/update', 'runs/set']));
-    for (const w of found) {
-      const key = `${w.collection}/${w.op}`;
-      if (w.op === 'set' && w.if_version === undefined) continue; // a create
-      if (w.if_version !== undefined) continue;
-      expect(UNPINNED_BY_DESIGN, `${key} ${String(w.doc_id)} is printed without if_version`).toContain(key);
+    // meta/metrics: an integrate in a run of its own.
+    const root2 = mkdtempSync(path.join(tmpdir(), 'roadmap-contract-integ-'));
+    const g2 = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, encoding: 'utf8' }).trim();
+    try {
+      g2(root2, 'init', '-q', '-b', 'main'); g2(root2, 'config', 'user.email', 'a@b.c'); g2(root2, 'config', 'user.name', 't'); g2(root2, 'config', 'core.autocrlf', 'false');
+      writeFileSync(path.join(root2, '.gitignore'), '.forge/\n.claude/\n');
+      writeFileSync(path.join(root2, 'base.txt'), 'base\n');
+      g2(root2, 'add', '.'); g2(root2, 'commit', '-qm', 'init');
+      mkdirSync(path.join(root2, '.forge'), { recursive: true });
+      writeFileSync(path.join(root2, '.forge', 'config.yaml'), 'validators: []\n');
+      const io2: Io = { cwd: root2, now: () => NOW, git: defaultGit(root2), env: {} };
+      out(run(['swarm', 'start', '--project', 'shop', '--session', 'main', '--hook-session', 'hook-main'], io2));
+      const w = out(run(['swarm', 'worktree', 'T1'], io2)).worktree;
+      writeFileSync(path.join(w, 'a.txt'), 'a\n'); g2(w, 'add', 'a.txt'); g2(w, 'commit', '-qm', 'T1: work');
+      out(run(['swarm', 'task', 'T1', '--stage', 'verdict', '--status', 'accepted'], io2));
+      walk(out(run(['swarm', 'integrate', 'T1'], io2)));
+    } finally { try { g2(root2, 'worktree', 'prune'); } catch { /* ignore */ } rmSync(root2, { recursive: true, force: true }); }
+    const key = (w: Record<string, unknown>) => `${w.collection}/${w.op}`;
+    const unpinned = found.filter(w => w.if_version === undefined);
+    for (const w of unpinned) {
+      if (CREATES.includes(key(w))) continue;
+      expect(SKILL_PINNED, `${key(w)} ${String(w.doc_id)} is printed without if_version`).toContain(key(w));
     }
+    // The list cannot rot: each family in it is printed unpinned by some command above, and each create family was reached.
+    for (const k of SKILL_PINNED) expect(unpinned.map(key), `${k} is never printed`).toContain(k);
+    for (const k of CREATES) expect(found.map(key), `${k} is never printed`).toContain(k);
   });
 });

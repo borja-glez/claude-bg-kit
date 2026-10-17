@@ -1552,7 +1552,8 @@ describe('forge waypoint-cli', () => {
       expect(r.code).toBe(0);
       const at = '2026-10-11T10:00:00.000Z';
       const history = [{ status: 'rejected', decidedBy: 'user:x', decidedAt: at, reason: 'not now', reopenedBy: 'user:y', reopenedAt: at }];
-      expect(JSON.parse(r.stdout)).toEqual({ id, status: 'approved', previous: 'rejected', write: { status: 'approved', decidedBy: 'user:y', decidedAt: at, history, reason: { __delete__: true } }, approval: { op: 'set', collection: 'approvals', doc_id: id, data: { status: 'approved', decidedAt: at, by: 'forge:decide', digest: DIG(id) } } });
+      expect(JSON.parse(r.stdout)).toEqual({ id, status: 'approved', previous: 'rejected', write: { status: 'approved', decidedBy: 'user:y', decidedAt: at, history, reason: { __delete__: true } }, approval: { op: 'set', collection: 'approvals', doc_id: id, data: { status: 'approved', decidedAt: at, by: 'forge:decide', digest: DIG(id) } },
+        approvalDelete: { op: 'delete', collection: 'approvals', doc_id: id } });
       const mirror = loadProposals(root)[0];
       expect(mirror).toMatchObject({ status: 'approved', decidedBy: 'user:y', history });
       expect(mirror.reason).toBeUndefined();
@@ -1569,7 +1570,8 @@ describe('forge waypoint-cli', () => {
       expect(r.code).toBe(0);
       expect(JSON.parse(r.stdout)).toEqual({ id, status: 'rejected', previous: 'approved', write: { status: 'rejected', decidedBy: 'user:me', decidedAt: '2026-10-11T10:00:00.000Z',
         history: [{ status: 'approved', decidedBy: 'o', decidedAt: 'a', reopenedBy: 'user:me', reopenedAt: '2026-10-11T10:00:00.000Z' }] },
-        approval: { op: 'set', collection: 'approvals', doc_id: id, data: { status: 'rejected', decidedAt: '2026-10-11T10:00:00.000Z', by: 'forge:decide', digest: DIG(id) } } });
+        approval: { op: 'set', collection: 'approvals', doc_id: id, data: { status: 'rejected', decidedAt: '2026-10-11T10:00:00.000Z', by: 'forge:decide', digest: DIG(id) } },
+        approvalDelete: { op: 'delete', collection: 'approvals', doc_id: id } });
       expect(loadProposals(root)).toEqual([]);
       expect(readEvents(root)).toEqual([]);
     });
@@ -2057,6 +2059,51 @@ describe('forge waypoint-cli', () => {
         expect(viaPlan.code).toBe(2);
         expect(viaPlan.stderr).toContain('already became T002');
         expect(readFileSync(path.join(root, PLAN), 'utf8')).toBe(planAfter);
+      });
+      it('a reopened decision stops counting: its old mark, put back by an editor, does not become a task; reopen prints the delete of the mark', () => {
+        const a = JSON.parse(add().stdout).id;
+        run(['proposals', 'decide', a, 'approve'], io);
+        const old = loadApproval(root, a)!;
+        const reopened = JSON.parse(run(['proposals', 'decide', a, 'reject', '--reopen'], io).stdout);
+        expect(reopened.approvalDelete).toEqual({ op: 'delete', collection: 'approvals', doc_id: a });
+        // The editor sets the proposal back to approved; the owner's first mark is still in the roadmap.
+        const { id: _id, ...doc } = loadProposals(root).find(p => p.id === a)!;
+        saveProposal(root, a, { ...doc, status: 'approved' });
+        saveApproval(root, a, old);
+        writePlan(root, '  - { id: T001, title: a, track: backend, phase: PX, done_when: x }\n');
+        const planBefore = readFileSync(path.join(root, PLAN), 'utf8');
+        const r = run(['proposals', 'to-task', a, '--plan', PLAN], io);
+        expect(r.code).toBe(2);
+        expect(r.stderr).toContain("roadmap's owner");
+        expect(readFileSync(path.join(root, PLAN), 'utf8')).toBe(planBefore);
+        expect(JSON.parse(run(['proposals', 'list'], io).stdout).unowned).toBe(1);
+        run(['infinite', 'start', '--cycles', '2'], io);
+        expect(JSON.parse(run(['infinite', 'status'], io).stdout).unowned).toBe(1);
+      });
+      it('a decision reopened and decided again by the owner counts; one with no decision in the ledger counts by its mark', () => {
+        const a = JSON.parse(add().stdout).id;
+        run(['proposals', 'decide', a, 'approve'], io);
+        run(['proposals', 'decide', a, 'reject', '--reopen'], io);
+        run(['proposals', 'decide', a, 'approve', '--reopen'], io);
+        writePlan(root, '  - { id: T001, title: a, track: backend, phase: PX, done_when: x }\n');
+        expect(run(['proposals', 'to-task', a, '--plan', PLAN], io).code).toBe(0);
+        io.rand = () => 0.9;
+        const b = JSON.parse(add({ title: 'Made in another checkout', rationale: 'no decision here' }).stdout).id;
+        const { id: _id, ...doc } = loadProposals(root).find(p => p.id === b)!;
+        saveProposal(root, b, { ...doc, status: 'approved' });
+        saveApproval(root, b, { status: 'approved', decidedAt: 'T', by: 'page', digest: proposalDigest(b, doc) });
+        expect(run(['proposals', 'to-task', b, '--plan', PLAN], io).code).toBe(0);
+      });
+      it('decide confirm after a reopen is the latest decision: the mark it makes counts', () => {
+        const a = JSON.parse(add().stdout).id;
+        run(['proposals', 'decide', a, 'approve'], io);
+        run(['proposals', 'decide', a, 'reject', '--reopen'], io);
+        const { id: _id, ...doc } = loadProposals(root).find(p => p.id === a)!;
+        saveProposal(root, a, { ...doc, status: 'approved' });
+        expect(run(['proposals', 'decide', a, 'confirm'], io).code).toBe(0);
+        expect(readEvents(root).at(-1)).toMatchObject({ kind: 'proposal', action: 'confirm', id: a, status: 'approved' });
+        writePlan(root, '  - { id: T001, title: a, track: backend, phase: PX, done_when: x }\n');
+        expect(run(['proposals', 'to-task', a, '--plan', PLAN], io).code).toBe(0);
       });
       it('the mark binds the content: a title edited after the approval is refused and counted as unowned with its reason', () => {
         const a = JSON.parse(add().stdout).id;
