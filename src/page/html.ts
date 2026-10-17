@@ -62,6 +62,11 @@ export function fmt(iso: string, loc: string, withDate = true): string {
   try { const t = new Date(iso); return Number.isNaN(t.getTime()) ? '' : t.toLocaleString(loc, opts); } catch { return ''; }
 }
 
+/** «Fin previsto: entre A y B» for a forecast range (insights.forecast), as the strip, the band and the analysis say it. */
+export function forecastTitle(d: Dict, f: { from: number; to: number }, loc: string): string {
+  return d.insights.forecastRange(fmt(new Date(f.from).toISOString(), loc), fmt(new Date(f.to).toISOString(), loc));
+}
+
 /** The verification marker next to a task: green when the evidence passed, red otherwise; empty without evidence. */
 export function eviMark(m: Model, d: Dict, id: string): string {
   const ev = m.states[id]?.evidence;

@@ -6,7 +6,7 @@ import { canDecide, PROPOSAL_STATUSES } from '../lib/proposals.js';
 import { STALE_RUN_TTL_MS } from '../lib/run-ttl.js';
 import { computeDerived, type Derived } from './derive.js';
 import { dictFor, type Dict } from './i18n.js';
-import { esc, fmt, hhmm, num, oneOf, rel } from './html.js';
+import { esc, fmt, forecastTitle, hhmm, num, oneOf, rel } from './html.js';
 import { VIEWS, type Model, type UiState, type View } from './model.js';
 import { renderSummary } from './views/summary.js';
 import { renderPlanView } from './views/plan.js';
@@ -18,7 +18,7 @@ import { renderLightbox, renderTaskModal } from './views/detail.js';
 
 export * from './model.js';
 export { esc, relText, type RelKind } from './html.js';
-export { timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES } from './views/schedule.js';
+export { GROUPS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES } from './views/schedule.js';
 export { categoryKeys, vfilterActive, vfilterStatuses } from './views/plan.js';
 
 const NAV_ICON: Record<View, string> = { summary: '◉', plan: '▤', schedule: '≡', runs: '▶', sessions: '◎', talk: '✎' };
@@ -74,7 +74,7 @@ function renderStrip(m: Model, d: Dict, dv: Derived, loc: string): string {
     : `<span class="sv">${x.percent} %</span>`;
   const f = dv.forecast;
   const forecast = f
-    ? `<span class="sf" title="${esc(d.insights.forecastRange(fmt(new Date(f.from).toISOString(), loc), fmt(new Date(f.to).toISOString(), loc)))}">${esc(d.strip.forecast(day(f.to, loc)))}</span>`
+    ? `<span class="sf" title="${esc(forecastTitle(d, f, loc))}">${esc(d.strip.forecast(day(f.to, loc)))}</span>`
     : '';
   const synced = m.syncedAt != null && !m.offline ? `<span class="ss">${esc(d.strip.synced)} ${rel(d, 'ago', new Date(m.syncedAt).toISOString(), m.now)}</span>` : '';
   const links = m.meta?.links;

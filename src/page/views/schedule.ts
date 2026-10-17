@@ -5,7 +5,7 @@ import { burndown } from '../../lib/insights.js';
 import type { TaskStatus } from '../../lib/types.js';
 import type { Derived } from '../derive.js';
 import { dictFor, type Dict } from '../i18n.js';
-import { esc, eviMark, fmt, trackTag } from '../html.js';
+import { esc, eviMark, fmt, forecastTitle, trackTag } from '../html.js';
 import type { Model, UiState } from '../model.js';
 
 export function renderScheduleView(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived): string {
@@ -21,7 +21,8 @@ export function timelineWindow(ui: UiState, now: number): Win {
   return ui.span ? windowAt(ui.span, now, ui.pan ?? 0) : windowFor(ui.zoom, now, ui.offset);
 }
 
-const GROUPS: readonly GroupBy[] = ['phase', 'track', 'session', 'category'];
+/** The schedule's groupings (app.ts checks a clicked or linked one against these). */
+export const GROUPS: readonly GroupBy[] = ['phase', 'track', 'session', 'category'];
 export const TL_STATUSES = ['in_progress', 'blocked', 'free', 'done'] as const;
 export const TL_LAYERS = ['critical', 'forecast', 'forge'] as const;
 
@@ -111,7 +112,7 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
     if (f) {
       const a = Math.max(0, Math.min(100, pos(f.from)));
       const b = Math.max(0, Math.min(100, pos(f.to)));
-      if (b > 0 && a < 100) band = `<div class="fc" style="left:${a}%;width:${Math.max(0.4, b - a)}%" title="${esc(d.insights.forecastRange(fmt(new Date(f.from).toISOString(), loc), fmt(new Date(f.to).toISOString(), loc)))}"><span>${esc(d.tl.forecastEnd)}</span></div>`;
+      if (b > 0 && a < 100) band = `<div class="fc" style="left:${a}%;width:${Math.max(0.4, b - a)}%" title="${esc(forecastTitle(d, f, loc))}"><span>${esc(d.tl.forecastEnd)}</span></div>`;
     }
   }
   const chip = (kind: 'status' | 'layer', key: string, label: string, on: boolean) =>
@@ -206,7 +207,7 @@ function renderInsights(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
         return `<li data-action="open-task" data-id="${esc(id)}"><i class="sd st-${s}"></i><span class="k">${esc(id)}</span> ${esc(t?.title ?? '')}</li>`;
       }).join('')}</ol>`
     : `<div class="muted">${esc(d.insights.allDone)}</div>`;
-  const fc = f ? `<div class="fct">${esc(d.insights.forecastRange(fmt(new Date(f.from).toISOString(), loc), fmt(new Date(f.to).toISOString(), loc)))}</div>` : '';
+  const fc = f ? `<div class="fct">${esc(forecastTitle(d, f, loc))}</div>` : '';
   const heat = dv.zones.slice(0, 12);
   const maxHeat = Math.max(1, ...heat.map(z => z.tasks + z.touched));
   const zones = heat.length

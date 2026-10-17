@@ -9,7 +9,7 @@ import { derive } from './derive.js';
 import { morphInto } from './morph.js';
 import { mergeMetrics, normalizeEvent, normalizeInfinite, normalizeMessage, normalizeMeta, normalizeMetrics, normalizeNote, normalizePhase, normalizeRun, normalizeSession, normalizeState, type Drop, type Report } from './normalize.js';
 import { decodeView, encodeView, type ViewState } from './urlstate.js';
-import { categoryKeys, esc, NOTE_FILTERS, PROPOSAL_FILTERS, relText, renderApp, TALK_KINDS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, vfilterStatuses, VFILTER_KEYS, VIEWS, type Model, type ProposalFilterKind, type RelKind, type TalkKind, type UiState, type VFilterKey, type View } from './render.js';
+import { categoryKeys, esc, GROUPS, NOTE_FILTERS, PROPOSAL_FILTERS, relText, renderApp, TALK_KINDS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, vfilterStatuses, VFILTER_KEYS, VIEWS, type Model, type ProposalFilterKind, type RelKind, type TalkKind, type UiState, type VFilterKey, type View } from './render.js';
 
 /**
  * The page's embedded snapshot; G-13 and G-14: the waypoint that built it and the states the last listing saw. The page
@@ -47,7 +47,6 @@ const TEXT_ROLES = ['search', 'note-text', 'answer-text', 'reason-text', 'commen
 interface Focus { el: HTMLElement; role: string | null; caret: [number | null, number | null] | null }
 /** Textareas whose focus loss ends an IME composition. */
 const DRAFT_ROLES = ['note-text', 'answer-text', 'reason-text', 'comment-text'];
-const GROUPS = ['phase', 'track', 'session', 'category'] as const;
 const isInvalidArgument = (e: unknown): boolean => {
   const o = e as { code?: unknown; message?: unknown } | null;
   return o?.code === 'invalid_argument' || /invalid_argument/.test(String(o?.message ?? ''));
@@ -105,17 +104,23 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     syncedAt: null,
   };
 
-  // H-25: what the URL says (on load, Back and Forward, or a hash edited by hand), applied to the view state.
+  // H-25: what the URL says (on load, Back and Forward, or a hash edited by hand), applied to the view state. The URL is
+  // the schedule's whole state: what its hash leaves out is the default (a free span only with `s`, so an explicit `z`
+  // wins over a span set by Ctrl + wheel). The other views never carry those parameters and leave them as they are.
   const applyView = (v: ViewState) => {
     ui.view = v.view && (VIEWS as readonly string[]).includes(v.view) ? (v.view as View) : 'summary';
     if (ui.view === 'talk') ui.talk = v.c && (TALK_KINDS as readonly string[]).includes(v.c) ? (v.c as TalkKind) : 'notes';
-    if (v.group && (GROUPS as readonly string[]).includes(v.group)) ui.timelineGroup = v.group as UiState['timelineGroup'];
-    if (v.zoom) ui.zoom = v.zoom;
-    if (v.span) { ui.span = v.span; ui.pan = v.pan ?? 0; }
-    if (v.open) ui.expanded = new Set(v.open);
-    if (v.status) ui.statuses = v.status.filter(x => (TL_STATUSES as readonly string[]).includes(x));
-    if (v.layers) ui.layers = v.layers.filter(x => (TL_LAYERS as readonly string[]).includes(x));
-    if (v.q) ui.search = v.q;
+    if (ui.view === 'schedule') {
+      ui.timelineGroup = v.group && (GROUPS as readonly string[]).includes(v.group) ? (v.group as UiState['timelineGroup']) : 'phase';
+      ui.zoom = v.zoom ?? '1d';
+      ui.offset = 0;
+      ui.span = v.span;
+      ui.pan = v.span ? v.pan ?? 0 : undefined;
+      ui.expanded = new Set(v.open ?? []);
+      ui.statuses = (v.status ?? []).filter(x => (TL_STATUSES as readonly string[]).includes(x));
+      ui.layers = (v.layers ?? []).filter(x => (TL_LAYERS as readonly string[]).includes(x));
+      ui.search = v.q ?? '';
+    }
     if (v.debug) model.debug = true;
   };
   let lastHash = '';
@@ -143,6 +148,9 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       lastHash = location.hash.length > 1 ? location.hash : '';
       applyView(decodeView(location.hash));
     } catch { return; }
+    // H-06: a focused search box keeps its own value through a morph; it takes the URL's here, as the composer does.
+    const box = env.root.querySelector('[data-role="search"]') as HTMLInputElement | null;
+    if (box && box.value !== ui.search) box.value = ui.search;
     schedule();
   };
   let tlNote = '';

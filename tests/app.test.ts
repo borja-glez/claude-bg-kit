@@ -1018,7 +1018,7 @@ describe('scroll, tick and live repaints (G-01, H-06)', () => {
     await settle();
     click(root, '[data-action="talk-c"][data-c="proposals"]');
     await settle();
-    const approve =root.querySelector('[data-action="p-approve"][data-id="p1"]') as HTMLButtonElement;
+    const approve = root.querySelector('[data-action="p-approve"][data-id="p1"]') as HTMLButtonElement;
     approve.focus();
     f.push('proposals', { p1: PROP, p0: { ...PROP, ts: '2026-10-11T11:00:00.000Z', title: 'nueva-p0' } });
     await settle();
@@ -1126,6 +1126,52 @@ describe('the views and the URL (§4.6, H-25)', () => {
     await settle();
     expect([app.ui.view, app.ui.talk]).toEqual(['talk', 'proposals']);
     push.mockRestore();
+    app.stop();
+  });
+
+  it('Back to a schedule entry without parameters shows the defaults, not what the last entry had (H-25)', async () => {
+    const { root, app } = await boot(fakeDb(), fakeUser(), '#v=schedule&z=1w&g=track&o=ui&f=blocked&l=critical');
+    expect([app.ui.zoom, app.ui.timelineGroup, [...app.ui.expanded], app.ui.statuses, app.ui.layers]).toEqual(['1w', 'track', ['ui'], ['blocked'], ['critical']]);
+    history.replaceState(null, '', '#v=schedule');
+    window.dispatchEvent(new Event('popstate'));
+    await settle();
+    expect([app.ui.zoom, app.ui.timelineGroup, [...app.ui.expanded], app.ui.statuses, app.ui.layers]).toEqual(['1d', 'phase', [], [], []]);
+    expect(root.querySelector('[data-zoom="1d"]')!.classList.contains('on')).toBe(true);
+    expect(location.hash).toBe('#v=schedule');
+    app.stop();
+  });
+
+  it('a hash edited to a preset zoom wins over a free span set by Ctrl + wheel (H-25)', async () => {
+    const { root, app } = await boot(fakeDb(), fakeUser(), '#v=schedule');
+    const canvas = root.querySelector('[data-role="tl-canvas"]') as HTMLElement;
+    const wheel = new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true });
+    // happy-dom's WheelEvent drops the modifier keys; a browser's carries them.
+    Object.defineProperty(wheel, 'ctrlKey', { value: true });
+    canvas.dispatchEvent(wheel);
+    await new Promise(r => setTimeout(r, 30));
+    expect(app.ui.span).toBeGreaterThan(0);
+    expect(location.hash).toMatch(/^#v=schedule&s=\d+/);
+    history.replaceState(null, '', '#v=schedule&z=1w');
+    window.dispatchEvent(new Event('hashchange'));
+    await settle();
+    expect([app.ui.zoom, app.ui.span, app.ui.pan]).toEqual(['1w', undefined, undefined]);
+    expect(root.querySelector('[data-zoom="1w"]')!.classList.contains('on')).toBe(true);
+    expect(location.hash).toBe('#v=schedule&z=1w');
+    app.stop();
+  });
+
+  it('a hash edited without q clears the search, in the focused box too, and q is not written back (H-25)', async () => {
+    const { root, app } = await boot(fakeDb(), fakeUser(), '#v=schedule&q=carrito');
+    const box = root.querySelector('[data-role="search"]') as HTMLInputElement;
+    expect([app.ui.search, box.value]).toEqual(['carrito', 'carrito']);
+    box.focus();
+    history.replaceState(null, '', '#v=schedule');
+    window.dispatchEvent(new Event('hashchange'));
+    await settle();
+    expect(app.ui.search).toBe('');
+    expect(root.querySelector('[data-role="search"]')).toBe(box);
+    expect(box.value).toBe('');
+    expect(location.hash).toBe('#v=schedule');
     app.stop();
   });
 
