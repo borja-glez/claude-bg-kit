@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { samePath } from '../../lib/worktree.js';
-import { isSafeId } from '../../lib/execution-state.js';
+import { isSafeId, type ExecutionState } from '../../lib/execution-state.js';
 import { UsageError } from './errors.js';
 import { appendEvent, appendPhase, readEvents, type LedgerEvent } from '../ledger.js';
 import { loadConfig, agentFor, ConfigError, type Profile, type ForgeConfig } from '../config.js';
@@ -18,6 +18,7 @@ import { renderThreatModel } from '../threat-model.js';
 import { collectTwins, shadowCommand } from './shadow.js';
 import { restoringRegenerated } from './swarm.js';
 import { mainCheckout } from '../local.js';
+import { eventsSince, executionHolding } from '../execution.js';
 import { runWithCache, cacheGit, checkoutPrefix } from '../validate-cache.js';
 import { noSlot, type Slot } from '../jobs.js';
 import { reviewRound, reviewerKey, type PreviousResult, type ReviewerKey, type RoundPlan, type RoundReviewer, type SpawnEntry, type TriageReview } from '../review-round.js';
@@ -59,10 +60,42 @@ export function triageReview(events: LedgerEvent[], base: string, profile: Profi
   return { light: r.light === true, reviewers, flags: Array.isArray(r.flags) ? r.flags.filter((f): f is string => typeof f === 'string') : [] };
 }
 
-/** The round a brief's review is in: 1 + the review dirs that already have a verdict (a re-run verdict counts once). */
-export function reviewRoundOf(events: LedgerEvent[], task: string): number {
-  const dirs = new Set(events.filter(e => e.kind === 'verdict' && isTask(e, task)).map((e, i) => (typeof e.dir === 'string' ? e.dir : `#${i}`)));
+/** The round a brief's review is in: 1 + the review dirs that already have a verdict (a re-run verdict counts once).
+ *  Carry 3: with `since` (the start of the execution that holds the task), only the verdicts logged from then. */
+export function reviewRoundOf(events: LedgerEvent[], task: string, since: string | null = null): number {
+  const dirs = new Set(eventsSince(events, since).filter(e => e.kind === 'verdict' && isTask(e, task)).map((e, i) => (typeof e.dir === 'string' ? e.dir : `#${i}`)));
   return dirs.size + 1;
+}
+
+/**
+ * Carry 3: a brief that an earlier execution of the same plan task reviewed in this work folder `dir` starts again (a new
+ * execution restarts its tasks with brief 1). That execution's round folders of brief `n` and their evidence, the brief's
+ * findings index and the step's validators-head-<n>.json go to `earlier-<runId>/` there, so nothing of them reads as this
+ * execution's: review-close and the step take the newest round folder there is, and a reviewer's file there as returned.
+ * A round with a phase event of `run` (logged since it started) stays. Returns the folder they went to, or null.
+ */
+function setAsideEarlier(dir: string, n: string, id: string, events: readonly LedgerEvent[], run: ExecutionState): string | null {
+  const ours = new Set(eventsSince(events, run.startedAt)
+    .filter(e => e.kind === 'phase' && isTask(e, id) && e.brief === Number(n) && typeof e.round === 'number').map(e => e.round as number));
+  let names: string[] = [];
+  try { names = readdirSync(dir); } catch { return null; }
+  const rounds = names.flatMap(f => {
+    const m = new RegExp(`^reviews-${n}-(\\d+)$`).exec(f);
+    return m && !ours.has(Number(m[1])) ? [Number(m[1])] : [];
+  });
+  if (!rounds.length) return null;
+  const aside = path.join(dir, `earlier-${run.runId}`);
+  const move = (rel: string) => {
+    const from = path.join(dir, rel);
+    if (!existsSync(from)) return;
+    try {
+      mkdirSync(path.dirname(path.join(aside, rel)), { recursive: true });
+      renameSync(from, path.join(aside, rel));
+    } catch { /* left where it is */ }
+  };
+  for (const k of rounds) { move(`reviews-${n}-${k}`); move(`evidence/${n}-${k}`); }
+  for (const f of [`findings-index-${n}.json`, `validators-head-${n}.json`]) move(f);
+  return aside;
 }
 
 /** Runs `fn` (a validator run) putting back the tracked files it regenerated that the config's `generated` names. */
@@ -151,7 +184,10 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   if (diff === null) throw new UsageError(`review-prep: cannot diff ${baseSha}..HEAD`);
 
   const dir = path.resolve(deps.cwd, dirArg);
-  const round = reviewRoundOf(events, task);
+  // Carry 3: in an execution, only its own verdicts count (the round, the redo, the express review, the validators rounds).
+  const since = executionHolding(deps.cwd, { project, task: id })?.startedAt ?? null;
+  const counted = eventsSince(events, since);
+  const round = reviewRoundOf(counted, task);
   const roundDir = path.join(dir, `reviews-${n}-${round}`);
   mkdirSync(roundDir, { recursive: true });
   // K4-02: the threat model goes to the security reviewer (reviewRound adds it to its inputs).
@@ -205,13 +241,13 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
     writeFileSync(fixFile, fix.patch);
   }
   // After a redo the work was started again: every reviewer reviews it in full, nothing is carried.
-  const redo = round >= 2 && events.filter(e => e.kind === 'verdict' && isTask(e, task)).at(-1)?.action === 'redo';
+  const redo = round >= 2 && counted.filter(e => e.kind === 'verdict' && isTask(e, task)).at(-1)?.action === 'redo';
 
   // Measure 7 (§4.9): an express review when the previous review asked for a fix with green validators and left one or
   // two important findings with file and line, none from security, a regression or out of the model; never after a redo,
   // on the last review, or with review.express: false. It does not validate here (expressPrep). The validate command it
   // prints carries BASE unquoted, so only a commit id qualifies.
-  const lastVerdict = events.filter(e => e.kind === 'verdict' && isTask(e, task)).at(-1);
+  const lastVerdict = counted.filter(e => e.kind === 'verdict' && isTask(e, task)).at(-1);
   const prevSent = readJson(path.join(dir, `findings-${n}-${round - 1}.json`)) as { validators?: unknown } | undefined;
   if (round >= 2 && !redo && round < reviewsCount.max && (pathName === 'medium' || pathName === 'large') && config.review.express
     && lastVerdict?.action === 'fix' && Array.isArray(prevSent?.validators) && prevSent!.validators.length === 0 && expressCandidate(index, round)
@@ -242,7 +278,7 @@ export function reviewPrep(args: string[], deps: ReviewDeps): Result {
   // at most MAX_VALIDATOR_ROUNDS per review (counted since the brief's last verdict). It writes no verdict, so it never
   // counts against the cap; after them, the review is planned as before and the verdict is a fix by validators.
   if (!ok) {
-    const sinceVerdict = events.slice(events.map(e => e.kind === 'verdict' && isTask(e, task)).lastIndexOf(true) + 1);
+    const sinceVerdict = counted.slice(counted.map(e => e.kind === 'verdict' && isTask(e, task)).lastIndexOf(true) + 1);
     const k = sinceVerdict.filter(e => e.kind === 'phase' && isTask(e, id) && e.phase === 'fix' && e.validators === true && e.brief === Number(n)).length;
     if (k < MAX_VALIDATOR_ROUNDS) {
       const blockers = results.filter(blocking);
@@ -654,7 +690,8 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   // are attributed by its parent's triage, which `events` (those of `<id>` and its briefs) does not hold.
   const all = readEvents(deps.cwd);
   const events = eventsOf(all, { project, task: id });
-  const d = roundDecision(all, task, p, config.profile, project);
+  // Carry 3: in an execution, only its own verdicts count toward the cap and a stall.
+  const d = roundDecision(all, task, p, config.profile, project, executionHolding(deps.cwd, { project, task: id })?.startedAt ?? null);
   appendEvent(deps.cwd, { ts, kind: 'round', task, ...d, reviews: reviewsCount });
   // C4: a verdict that sends the brief back to an implementer opens its fix stage.
   if (result.action !== 'accept' && (d.next === 'resume' || d.next === 'fresh-stronger' || d.next === 'redo')) {
@@ -741,6 +778,8 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
  * `{"phase":<name, default implement>,"brief":<n>,"base":<BASE>}` on `<id>` and prints `{base, baseline, failing, cached, durationMs, validate, threatModel}` (the baseline comes from the tree cache when BASE's tree was validated: C6, I-06; never with --no-cache).
  * validate is the command the implementer runs (J-11). --no-baseline records BASE and the phase without validating (baseline: null; J-13).
  * It also writes <dir>/threat-model.md from the config's threatModel and prints threatModel, its path or null (K4-02).
+ * Carry 3: in an execution that holds the task, the review rounds an earlier run left for this brief in `<dir>` go aside
+ * first (setAsideEarlier), and it prints `earlier`, the folder they went to.
  * A validator failing on BASE is what the baseline is for: prep exits 0.
  */
 export function prep(args: string[], deps: ReviewDeps): Result {
@@ -778,9 +817,13 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   // D-08: without --dir, the task's work folder: its project's, or the older one the ledger still gives it.
   if (flag('dir') === undefined && !isSafeId(id)) throw new UsageError(`prep: --task ${task.slice(0, 80)}: no work folder can be named after its id (letters, digits, _ - . only); pass --dir`);
   const ledger = readEvents(deps.cwd);
-  const dir = flag('dir') !== undefined ? path.resolve(deps.cwd, flag('dir')!)
-    : readWorkDir(deps.cwd, { project: resolveProject({ flag: flag('project'), task: id, events: ledger }), task: id }, ledger);
+  const project = resolveProject({ flag: flag('project'), dir: flag('dir'), task: id, events: ledger });
+  const dir = flag('dir') !== undefined ? path.resolve(deps.cwd, flag('dir')!) : readWorkDir(deps.cwd, { project, task: id }, ledger);
   mkdirSync(dir, { recursive: true });
+  // Carry 3: an earlier execution's reviews of this brief, in the same work folder, are not this one's.
+  const run = executionHolding(deps.cwd, { project, task: id });
+  const aside = run ? setAsideEarlier(dir, n, id, eventsOf(ledger, { project, task: id }), run) : null;
+  const earlier = aside ? { earlier: rel(deps.cwd, aside) } : {};
   const tmFile = config ? writeThreatModel(dir, config) : null;
   const threatModel = tmFile ? rel(deps.cwd, tmFile) : null;
   // J-11: the implementer's validate command, exactly as it runs it: the tests related to its changes since BASE, the
@@ -789,7 +832,7 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   // J-13: --no-baseline (the Small path) records BASE and the phase and runs no validator.
   if (noBaseline || !config) {
     appendEvent(deps.cwd, { ts: deps.now().toISOString(), kind: 'phase', task: id, phase, brief: Number(n), base, ...started });
-    return json({ base, ...started, baseline: null, failing: [], cached: [], durationMs: 0, validate, threatModel });
+    return json({ base, ...started, baseline: null, failing: [], cached: [], durationMs: 0, validate, threatModel, ...earlier });
   }
 
   // The baseline, as `validate --all --path <p> --base-run` runs it: on BASE nothing changed yet, so a heavy path runs
@@ -802,7 +845,7 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   const ts = deps.now().toISOString();
   appendEvent(deps.cwd, validateEvent(ts, task, results, durationMs, scope.mode, { baseline: true }));
   appendEvent(deps.cwd, { ts, kind: 'phase', task: id, phase, brief: Number(n), base, ...started });
-  return json({ base, ...started, baseline: rel(deps.cwd, file), failing: results.filter(blocking).map(r => r.validator), cached: cachedNames(results), durationMs, validate, threatModel, ...(restored.length ? { restored } : {}) });
+  return json({ base, ...started, baseline: rel(deps.cwd, file), failing: results.filter(blocking).map(r => r.validator), cached: cachedNames(results), durationMs, validate, threatModel, ...(restored.length ? { restored } : {}), ...earlier });
 }
 
 /** `review-prep`, `review-close`, `prep` and `shadow` (cli/shadow.ts). */

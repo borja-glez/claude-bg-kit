@@ -3,6 +3,7 @@ import { agentFor, type Profile } from './config.js';
 import { implementerFor, ZONE_ORDER, type ImplRole, type Zone } from './triage.js';
 import { decideRound, nextImplementer, IMPL_LADDER } from './loop.js';
 import { baseOf, eventsOf, isTask } from './task-ref.js';
+import { eventsSince } from './execution.js';
 import type { Action } from './verdict.js';
 
 // The round decision FORGE round and FORGE review-close share. It lives here so that cli/review.ts does not
@@ -13,11 +14,13 @@ import type { Action } from './verdict.js';
  * review dir counts once) and who implements the attempt it starts, resolved with the profile. Only the events of `<T>`
  * of that project count (D-08: ids repeat between plans). The previous implementer is the last `agent` event of the task
  * whose role is on the ladder (that brief first, then any brief of `<T>`); with none, the role `implementerFor` gives a
- * plan task of this path and the zones of the task's last triage.
+ * plan task of this path and the zones of the task's last triage. Carry 3: with `since` (the start of the execution that
+ * holds the task, executionHolding), only the verdicts logged from then count: an earlier run's neither use up the cap
+ * nor make a stall.
  */
-export function roundDecision(events: LedgerEvent[], task: string, p: 'medium' | 'large', profile: Profile, project: string | null) {
+export function roundDecision(events: LedgerEvent[], task: string, p: 'medium' | 'large', profile: Profile, project: string | null, since: string | null = null) {
   const mine = eventsOf(events, { project, task: baseOf(task) });
-  const verdicts = mine.filter(e => e.kind === 'verdict' && isTask(e, task) && (e.action === 'accept' || e.action === 'fix' || e.action === 'redo'));
+  const verdicts = eventsSince(mine, since).filter(e => e.kind === 'verdict' && isTask(e, task) && (e.action === 'accept' || e.action === 'fix' || e.action === 'redo'));
   // Only the last verdict per review dir counts: re-running a verdict (e.g. when resuming) is not a new round.
   const lastPerDir = new Map<string, number>();
   verdicts.forEach((e, i) => { if (typeof e.dir === 'string') lastPerDir.set(e.dir, i); });

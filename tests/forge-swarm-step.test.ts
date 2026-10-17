@@ -274,7 +274,8 @@ describe('forge swarm step (D-12)', () => {
     const diff = readFileSync(path.join(root, '.forge', 'work', 'shop', 'T3', 'diff-1.patch'), 'utf8');
     expect(diff).toContain('src/t3/c.ts');
     expect(diff).not.toContain('src/t2/b.ts');
-    expect(JSON.parse(readFileSync(path.join(root, '.forge', 'work', 'shop', 'T3', 'base-1.json'), 'utf8'))).toMatchObject({ base: moved });
+    // `from`: the BASE prep recorded, which this one replaced (1c).
+    expect(JSON.parse(readFileSync(path.join(root, '.forge', 'work', 'shop', 'T3', 'base-1.json'), 'utf8'))).toMatchObject({ base: moved, from: oldBase });
     // The next round keeps that base and does not run the baseline again.
     const dir = path.join(root, '.forge', 'work', 'shop', 'T3', 'reviews-1-1');
     for (const e of (s.actions.find(a => a.task === 'T3')!.spawn as { role: string; twin?: boolean }[]).filter(e => !e.twin)) {
@@ -683,9 +684,14 @@ describe('swarm step: the person presses Stop while a step starts a task (K2-02)
 });
 
 describe('swarm step briefs a resumed task with its earlier attempt (D-02)', () => {
-  it('writes prior.json and the brief carries the commits the task branch already had', () => {
-    // task/T1 survived an earlier attempt, with its worktree: the tick starts T1 again on it.
+  // task/T1 survived an earlier attempt of this plan, with its worktree; that attempt's prep logged its phase implement.
+  const earlier = () => {
     g(root, 'worktree', 'add', '-q', '-b', 'task/T1', wt('T1'), 'forge/run-shop');
+    appendEvent(root, { ts: new Date(NOW.getTime() - 60000).toISOString(), kind: 'phase', task: 'T1', phase: 'implement', brief: 1, base: g(root, 'rev-parse', 'forge/run-shop'), project: 'shop' });
+  };
+  it('writes prior.json and the brief carries the commits the task branch already had', () => {
+    // The tick starts T1 again on it.
+    earlier();
     commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: first try');
     step();
     const work = path.join(root, '.forge', 'work', 'shop', 'T1');
@@ -694,7 +700,7 @@ describe('swarm step briefs a resumed task with its earlier attempt (D-02)', () 
   });
   it('prep, the implementer and the review take the BASE swarm worktree printed: the review diffs the earlier commits too, on a baseline run in the run worktree', () => {
     const fork = g(root, 'rev-parse', 'forge/run-shop');
-    g(root, 'worktree', 'add', '-q', '-b', 'task/T1', wt('T1'), 'forge/run-shop');
+    earlier();
     commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: first try');
     const s = stepWith(() => false);
     const prep = s.calls.find(a => isCmd(a, 'prep') && a.includes('T1-1'))!;
@@ -715,7 +721,7 @@ describe('swarm step briefs a resumed task with its earlier attempt (D-02)', () 
     expect(JSON.parse(readFileSync(path.join(root, '.forge', 'work', 'shop', 'T1', 'base-1.json'), 'utf8'))).toMatchObject({ base: fork, from: null });
   });
   it('a start left at stage brief after its prep reuses that prep on the same BASE and HEAD', () => {
-    g(root, 'worktree', 'add', '-q', '-b', 'task/T1', wt('T1'), 'forge/run-shop');
+    earlier();
     commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: first try');
     const s = stepWith(argv => isCmd(argv, 'swarm', 'task', 'T1') && argv.includes('implement'));
     expect(s.actions).toContainEqual(expect.objectContaining({ type: 'error', task: 'T1', command: 'swarm task' }));
@@ -853,5 +859,52 @@ describe('every event a step writes carries the run project (C4)', () => {
     const later = readEvents(root).slice(from).filter(e => typeof e.task === 'string' && /^T1(-\d+)?$/.test(e.task));
     expect(later.map(e => e.kind)).toEqual(expect.arrayContaining(['phase', 'validate', 'agent']));
     expect(later.filter(e => e.project !== 'shop')).toEqual([]);
+  });
+});
+
+describe('a new execution of the same plan task counts only its own reviews (carry 3)', () => {
+  it('run A stopped after two review rounds; run B restarts the task with a full review cap and sees a NEEDS_CONTEXT return', () => {
+    const work = path.join(root, '.forge', 'work', 'shop', 'T1');
+    // Review 1 leaves three findings (no express review after it); review 2 keeps two of them open (no stall).
+    const fail = (k: number) => JSON.stringify({ verdict: 'fail', confidence: 0.9, findings: [1, 2, 3].slice(0, 4 - k).map(i => ({ severity: 'important', file: 'src/t1/a.ts', line: 1, problem: `wrong ${i}` })) });
+    const reviewed = (s: { actions: Action[] }, k: number) => {
+      const a = s.actions.find(x => x.task === 'T1')!;
+      expect(a).toMatchObject({ type: 'spawnReviewers', round: k });
+      for (const e of (a.spawn as { role: string; twin?: boolean }[]).filter(e => !e.twin)) writeFileSync(path.join(work, `reviews-1-${k}`, `${e.role.replace(/^review-/, '')}.json`), fail(k));
+      expect(step().actions.find(x => x.task === 'T1')?.type).toMatch(/^(resumeImplementer|freshImplementer)$/);
+    };
+    // Run A: two reviews ask for fixes; the third attempt is committed when the person stops the run.
+    step();
+    commitIn(wt('T1'), 'src/t1/a.ts', 'one\n', 'T1: a');
+    reviewed(step('--returned', 'T1'), 1);
+    commitIn(wt('T1'), 'src/t1/a.ts', 'two\n', 'T1: fix 1');
+    reviewed(step('--returned', 'T1'), 2);
+    commitIn(wt('T1'), 'src/t1/a.ts', 'three\n', 'T1: fix 2');
+    out(run(['stop'], io));
+    // Run B, an hour later: a new execution of the same plan restarts T1 on its branch, with brief 1 again.
+    io = { ...io, now: () => new Date(NOW.getTime() + 3600_000) };
+    expect(out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io)).replaced).toMatchObject({ stopReason: 'stopped' });
+    expect(step().actions.find(a => a.task === 'T1')).toMatchObject({ type: 'spawnImplementer' });
+    // A's rounds are set aside: nothing of them reads as B's.
+    expect(readdirSync(work).filter(f => /^reviews-1-\d+$/.test(f))).toEqual([]);
+    const aside = readdirSync(work).filter(f => f.startsWith('earlier-'));
+    expect(aside).toHaveLength(1);
+    expect(readdirSync(path.join(work, aside[0])).sort()).toEqual(expect.arrayContaining(['reviews-1-1', 'reviews-1-2']));
+    // B's implementer comes back with NEEDS_CONTEXT and no commit: seen, not reviewed.
+    writeFileSync(path.join(work, 'report-1.txt'), 'NEEDS_CONTEXT: which format?\n');
+    expect(step('--returned', 'T1').actions).toContainEqual({ type: 'readReport', task: 'T1', report: '.forge/work/shop/T1/report-1.txt' });
+    // With a commit, B's first review is review 1 of the full cap, in a round folder of its own.
+    commitIn(wt('T1'), 'src/t1/a.ts', 'four\n', 'T1: B');
+    const first = stepWith(() => false, '--returned', 'T1');
+    expect(first.actions.find(a => a.task === 'T1')).toMatchObject({ type: 'spawnReviewers', round: 1 });
+    expect(first.calls.filter(a => isCmd(a, 'review-prep'))).toHaveLength(1);
+    expect(existsSync(path.join(work, 'reviews-1-1', 'correctness.json'))).toBe(false);
+    expect(step().actions.filter(a => a.task === 'T1')).toEqual([]);
+    // Its verdict is round 1 of B's cap: a resume of its implementer, not the fresh one A's two verdicts would bring.
+    for (const e of (first.actions.find(a => a.task === 'T1')!.spawn as { role: string; twin?: boolean }[]).filter(e => !e.twin)) {
+      writeFileSync(path.join(work, 'reviews-1-1', `${e.role.replace(/^review-/, '')}.json`), fail(1));
+    }
+    expect(step().actions.find(a => a.task === 'T1')).toMatchObject({ type: 'resumeImplementer' });
+    expect(readEvents(root).filter(e => e.kind === 'round' && e.task === 'T1-1').at(-1)).toMatchObject({ round: 1, next: 'resume' });
   });
 });

@@ -1344,6 +1344,12 @@ describe('plugin layout', () => {
   it('the end of an execution offers swarm cleanup, and records it in auto (D-03)', () => {
     const exec = runRef('execution');
     for (const w of ['FORGE swarm cleanup --dry-run', 'FORGE swarm cleanup', 'branch-discard', '`kept`']) expect(exec).toContain(w);
+    // Final review 8: an ephemeral run's end offers it too (its task worktrees would refuse a later run's repeated id).
+    const ephEnd = runRef('ephemeral').split('\n').find(l => l.startsWith('4. **End.**'))!;
+    for (const w of ['**Cleanup.**', 'FORGE swarm cleanup --dry-run', 'FORGE swarm cleanup', 'branch-discard', '`kept`']) expect(ephEnd, w).toContain(w);
+  });
+  it('a resumed task whose earlier attempt has more commits than prior lists passes their count to the brief (carry 3)', () => {
+    for (const s of [runRef('task-steps'), runRef('ephemeral')]) for (const w of ['`priorTotal`', '--prior-total']) expect(s, w).toContain(w);
   });
   it('/forge:run --resume is a section of references/resuming.md, and SKILL.md names it in its Resuming line (2b handoff)', () => {
     const res = runRef('resuming');

@@ -932,6 +932,8 @@ describe('forge swarm (execution)', () => {
     it('start refuses an existing task worktree for a loose id', () => {
       git('worktree', 'add', '-q', '-b', 'elsewhere', path.join(root, '.claude', 'worktrees', 'task-fix-b'));
       expect(start().stderr).toMatch(/task-fix-b already exists/);
+      // Final review 8: an earlier ephemeral run's leftover goes with swarm cleanup.
+      expect(start().stderr).toContain('FORGE swarm cleanup');
       expect(readExecution(root)).toBeNull();
     });
     it('start refuses an ephemeral run while a plan execution is active, even from its coordinator', () => {
@@ -1710,11 +1712,15 @@ describe('an ephemeral run is closed by the tick that finishes it (wave 0 handof
 
 describe('a task resumed in its worktree is reviewed with its earlier commits (D-02)', () => {
   const g = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, encoding: 'utf8' }).trim();
+  // The earlier attempt's prep logged its phase implement, of its plan's project.
+  const implemented = (task: string, project: string | null = 'shop') =>
+    appendEvent(root, { ts: NOW.toISOString(), kind: 'phase', task, phase: 'implement', brief: 1, base: 'b'.repeat(40), ...(project ? { project } : {}) });
   it('swarm worktree takes BASE where the task left the run branch and lists the earlier attempt', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     const fork = git('rev-parse', 'forge/run-shop');
     const first = out(run(['swarm', 'worktree', 'T1'], io));
     expect(first).toMatchObject({ base: fork, resumed: false, prior: [] });
+    implemented('T1');
     writeFileSync(path.join(first.worktree, 'one.txt'), '1\n');
     g(first.worktree, 'add', 'one.txt'); g(first.worktree, 'commit', '-qm', 'T1: first try');
     const runWt = path.join(root, '.claude', 'worktrees', 'run');
@@ -1727,12 +1733,30 @@ describe('a task resumed in its worktree is reviewed with its earlier commits (D
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     const fork = git('rev-parse', 'forge/run-shop');
     const first = out(run(['swarm', 'worktree', 'T1'], io));
+    implemented('T1');
     writeFileSync(path.join(first.worktree, 'one.txt'), '1\n');
     g(first.worktree, 'add', 'one.txt'); g(first.worktree, 'commit', '-qm', 'T1: first try');
     const sha = g(first.worktree, 'rev-parse', 'HEAD');
     git('worktree', 'remove', first.worktree);
     expect(out(run(['swarm', 'worktree', 'T1'], io))).toMatchObject({ base: fork, resumed: true, prior: [{ sha, title: 'T1: first try' }] });
     expect(out(run(['swarm', 'worktree', 'T2'], io))).toMatchObject({ base: fork, resumed: false, prior: [] });
+  });
+  it('an earlier attempt of more than 50 commits lists the newest 50 and prints how many there are; brief --prior-total says so (carry 3)', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    const first = out(run(['swarm', 'worktree', 'T1'], io));
+    implemented('T1');
+    for (let i = 1; i <= 52; i++) g(first.worktree, 'commit', '-q', '--allow-empty', '-m', `T1: step ${i}`);
+    const again = out(run(['swarm', 'worktree', 'T1'], io));
+    expect(again).toMatchObject({ resumed: true, priorTotal: 52 });
+    expect(again.prior).toHaveLength(50);
+    expect(again.prior.at(-1).title).toBe('T1: step 52');
+    writeFileSync(path.join(root, 'prior.json'), JSON.stringify(again.prior));
+    const section = run(['brief', '--task', 'T1', '--prior-file', 'prior.json', '--prior-total', '52'], io);
+    expect(section.stdout).toContain('the newest 50 of 52');
+    expect(run(['brief', '--plan', 'plan.yaml', '--task', 'T1', '--prior-file', 'prior.json', '--prior-total', '52'], io).stdout).toContain('the newest 50 of 52');
+    expect(run(['brief', '--task', 'T1', '--prior-file', 'prior.json', '--prior-total', 'x'], io).code).toBe(2);
+    // A short attempt prints no total.
+    expect(out(run(['swarm', 'worktree', 'T2'], io))).not.toHaveProperty('priorTotal');
   });
   it('brief --prior-file adds the earlier attempt; without --plan it prints that section alone', () => {
     writeFileSync(path.join(root, 'prior.json'), JSON.stringify([{ sha: 'b'.repeat(40), title: 'T1: first try' }]));
@@ -1749,6 +1773,43 @@ describe('a task resumed in its worktree is reviewed with its earlier commits (D
     writeFileSync(path.join(root, 'sp.md'), '### Task 1: x\n\n- [ ] a\n');
     expect(run(['brief', '--superpowers-plan', 'sp.md', '--task', '1'], io).code).toBe(0);
     expect(run(['brief', '--superpowers-plan', 'sp.md', '--task', '1', '--prior-file', 'prior.json'], io)).toMatchObject({ code: 2, stderr: expect.stringContaining('--prior-file') });
+  });
+});
+
+describe("a task branch another plan's run left is never this plan's earlier attempt (final review 7)", () => {
+  const g = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, encoding: 'utf8' }).trim();
+  // task/T1 with a commit above forge/run-shop that was never integrated, and no worktree.
+  const leftover = () => {
+    const tmp = path.join(root, '.claude', 'worktrees', 'tmp');
+    git('worktree', 'add', '-q', '-b', 'task/T1', tmp, 'forge/run-shop');
+    writeFileSync(path.join(tmp, 'other.txt'), 'x\n'); g(tmp, 'add', 'other.txt'); g(tmp, 'commit', '-qm', 'T1: some other plan');
+    git('worktree', 'remove', tmp);
+  };
+  const phase = (project: string | null) =>
+    appendEvent(root, { ts: NOW.toISOString(), kind: 'phase', task: 'T1', phase: 'implement', brief: 1, base: 'b'.repeat(40), ...(project ? { project } : {}) });
+  it("refuses another project's commits on task/<T> before anything is created", () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    leftover();
+    appendEvent(root, { ts: NOW.toISOString(), kind: 'triage', task: 'T1', path: 'large', reasons: [], project: 'web' });
+    phase('web');
+    const r = run(['swarm', 'worktree', 'T1'], io);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toBe("swarm worktree: task/T1 holds commits that are not this plan's T1 (another project's run): integrate, rename or remove that branch first\n");
+    expect(existsSync(path.join(root, '.claude', 'worktrees', 'task-T1'))).toBe(false);
+    expect(readExecution(root)!.tasks.T1).toBeUndefined();
+    // Nor does a branch with no implement phase of this plan at all.
+    git('branch', '-m', 'task/T1', 'task/T2');
+    expect(run(['swarm', 'worktree', 'T2'], io).code).toBe(2);
+  });
+  it("accepts this plan's own earlier attempt, and a branch whose implement phases name no project (before 2c)", () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    leftover();
+    phase('shop');
+    expect(out(run(['swarm', 'worktree', 'T1'], io))).toMatchObject({ resumed: true, prior: [{ title: 'T1: some other plan' }] });
+    git('worktree', 'remove', path.join(root, '.claude', 'worktrees', 'task-T1'));
+    git('branch', '-m', 'task/T1', 'task/T2');
+    appendEvent(root, { ts: NOW.toISOString(), kind: 'phase', task: 'T2', phase: 'implement', brief: 1, base: 'b'.repeat(40) });
+    expect(out(run(['swarm', 'worktree', 'T2'], io))).toMatchObject({ resumed: true });
   });
 });
 

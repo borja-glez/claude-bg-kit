@@ -4,6 +4,7 @@ import { forgeDir } from './ledger.js';
 import { UsageError } from './cli/errors.js';
 import { pidAlive, removeFileIf, sleepSync } from './pid.js';
 import { readSwarm, swarmFile } from './swarm.js';
+import { mainCheckout } from './local.js';
 import { fromSwarm, parseExecution, type ExecutionState, type PublicTask } from '../lib/execution-state.js';
 
 export const executionFile = (root: string) => path.join(root, '.forge', 'execution.json');
@@ -21,6 +22,21 @@ export const taskBase = (git: (args: string[]) => string | null, runBranch: stri
   git(['merge-base', 'HEAD', runBranch])?.trim() || null;
 
 export type { PublicTask } from '../lib/execution-state.js';
+
+/**
+ * Carry 3: the execution of the main checkout that holds task `ref.task` (a plan run's task of its own project, or a loose
+ * task of an ephemeral run), or null. A new execution of the same plan task restarts it with brief 1 in the same work
+ * folder: its reviews and verdicts count from its `startedAt`, never those of an earlier run.
+ */
+export function executionHolding(cwd: string, ref: { project: string | null; task: string }): ExecutionState | null {
+  const e = readExecution(mainCheckout(cwd));
+  if (!e || !Object.hasOwn(e.tasks, ref.task) || !Number.isFinite(Date.parse(e.startedAt))) return null;
+  return (e.kind === 'plan' ? e.project === ref.project : ref.project === null) ? e : null;
+}
+
+/** The events of `events` logged since `since` (an ISO time), all of them without one. */
+export const eventsSince = <E extends { ts: string }>(events: readonly E[], since: string | null): E[] =>
+  since === null ? [...events] : events.filter(e => Date.parse(e.ts) >= Date.parse(since));
 
 function writeAtomic(file: string, text: string): void {
   mkdirSync(path.dirname(file), { recursive: true });

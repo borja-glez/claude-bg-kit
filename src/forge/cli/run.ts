@@ -5,7 +5,7 @@ import path from 'node:path';
 import { appendEvent, readEvents, forgeDir, withEventContext, LEDGER_KINDS, type EventContext, type LedgerKind, type LedgerEvent } from '../ledger.js';
 import { parseRun, startRun, recordCycle, stopReason, endRun, readRunText, saveRun, stopFile, type RunState, type StopContext } from '../run.js';
 import { decideStop, decideExecutionStop, UNBOUND_WARNING } from '../hook.js';
-import { readExecution, updateExecution, runWorktree, executionTaskFile, writePublicTask } from '../execution.js';
+import { readExecution, updateExecution, runWorktree, executionTaskFile, writePublicTask, executionHolding } from '../execution.js';
 import { planLocale, replyIn, sessionReply } from '../../lib/locale.js';
 import { isLocale } from '../../lib/forge-run.js';
 import { isSafeId, normalizePublicTask, type PublicTask } from '../../lib/execution-state.js';
@@ -32,7 +32,7 @@ import { swarmStep } from './step.js';
 import { runWithCache, cacheGit, checkoutPrefix } from '../validate-cache.js';
 import { roundDecision } from '../round.js';
 import { keepEvidence } from '../evidence-copy.js';
-import { eventsOf, isTask, projectOf, projectOfDir, readWorkDir, resolveProject, workRel } from '../task-ref.js';
+import { baseOf, eventsOf, isTask, projectOf, projectOfDir, readWorkDir, resolveProject, workRel } from '../task-ref.js';
 import { computeStats, renderStats, type PlanStates } from '../stats.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, globMatch, onPath, runOptions, validateEvent, planAffected, type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { checkTools, mcpInventory, toolGaps } from '../tools.js';
@@ -904,6 +904,7 @@ function runCommand(argv: string[], io: Io): Result {
       case 'brief': {
         // D-02: the earlier attempt of a task resumed on its branch (the `prior` swarm worktree printed).
         let prior: PriorCommit[] | null = null;
+        let priorTotal: number | null = null;
         if (has('prior-file')) {
           const f = flag('prior-file');
           if (!f) throw new UsageError('brief: --prior-file needs a file');
@@ -911,11 +912,17 @@ function runCommand(argv: string[], io: Io): Result {
           try { raw = JSON.parse(readFileSync(path.resolve(io.cwd, f), 'utf8')); } catch { throw new UsageError(`brief: cannot read ${f}`); }
           prior = parsePrior(raw);
           if (!prior) throw new UsageError(`brief: ${f} is not the prior list swarm worktree prints ([{sha, title}])`);
+          // Carry 3: an attempt longer than the list (`priorTotal` of swarm worktree) says how many commits it has.
+          if (has('prior-total')) {
+            const n = Number(flag('prior-total'));
+            if (!Number.isInteger(n) || n < prior.length) throw new UsageError('brief: --prior-total must be the whole number of commits swarm worktree printed as priorTotal');
+            priorTotal = n;
+          }
           // Without a plan (a loose task's brief is written by hand), only the section, to append to it.
           if (!has('plan') && !has('superpowers-plan')) {
             const task = flag('task');
             if (!task || !isPlanId(task)) throw new UsageError('brief: --prior-file without --plan needs --task <id>');
-            return { code: 0, stdout: prior.length ? priorSection(task, prior) : '', stderr: '' };
+            return { code: 0, stdout: prior.length ? priorSection(task, prior, priorTotal) : '', stderr: '' };
           }
           // A superpowers plan's brief has no task branch of its own: never drop the section silently.
           if (has('superpowers-plan')) throw new UsageError('brief: --prior-file goes with --plan, or alone with --task <id>');
@@ -934,7 +941,7 @@ function runCommand(argv: string[], io: Io): Result {
         const { plan, task } = planTask(io.cwd, flag('plan'), flag('task'));
         const design = flag('design') ?? path.join(path.dirname(flag('plan')!), 'design.md');
         const designPath = existsSync(path.resolve(io.cwd, design)) ? design.replace(/\\/g, '/') : null;
-        return ok(renderBrief(plan, task, { planPath: flag('plan')!.replace(/\\/g, '/'), designPath, tdd: briefTdd(io, repoDir), threatModel: briefThreatModel(repoDir), prior }));
+        return ok(renderBrief(plan, task, { planPath: flag('plan')!.replace(/\\/g, '/'), designPath, tdd: briefTdd(io, repoDir), threatModel: briefThreatModel(repoDir), prior, priorTotal }));
       }
       case 'triage': {
         const t = triageCore(io, args);
@@ -1164,7 +1171,9 @@ function runCommand(argv: string[], io: Io): Result {
         const p = flag('path');
         if (!task || (p !== 'medium' && p !== 'large')) throw new UsageError('round: --task and --path medium|large are required');
         const ledger = readEvents(io.cwd);
-        const d = roundDecision(ledger, task, p, loadConfig(repoDir).profile, resolveProject({ flag: flag('project'), task, events: ledger }));
+        const project = resolveProject({ flag: flag('project'), task, events: ledger });
+        // Carry 3: in an execution, only its own verdicts count.
+        const d = roundDecision(ledger, task, p, loadConfig(repoDir).profile, project, executionHolding(io.cwd, { project, task: baseOf(task) })?.startedAt ?? null);
         appendEvent(io.cwd, { ts: ts(), kind: 'round', task, ...d });
         return json(d);
       }

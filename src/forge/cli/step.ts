@@ -29,6 +29,8 @@ interface Ctx {
   io: Io; deps: StepDeps; planArg: string; db: string; runBranch: string; locale: 'es' | 'en'; iso: () => string; agentLease: () => string; rulings: Map<string, Ruling>; actions: StepAction[]; after: (() => void)[];
   /** D-08: the project of the plan execution. */
   project: string;
+  /** Carry 3: the execution's id, recorded in validators-head-<n>.json so another run's is never read as its own. */
+  runId: string;
 }
 /** respawned.json of a review round: each reviewer respawned once, when, and the mtime of the file it was respawned on. */
 type Respawned = Record<string, { at: string; mtimeMs: number }>;
@@ -153,11 +155,13 @@ function latestRound(work: string, n: number): number {
  * no plan of that round; or the commit of a verification's learned notes after review k-1, closeVerify) when k comes
  * after the last review round prepared, else the HEAD that review saw, else `start`, the commit the brief's work started
  * on (BASE, or the HEAD above it of a task resumed on its branch). Whatever the step records for round k always precedes
- * the review of round k, so only a later round number makes it the newer one.
+ * the review of round k, so only a later round number makes it the newer one. Carry 3: only this execution's (`runId`):
+ * a new execution of the same plan task starts brief n again, and prep sets an earlier run's rounds aside.
  */
-function seenOf(work: string, n: number, round: number, start: string | null): string | null {
+function seenOf(work: string, n: number, round: number, start: string | null, runId: string): string | null {
   const v = readJson(path.join(work, `validators-head-${n}.json`)) as Json | null;
-  if (v && typeof v === 'object' && typeof v.head === 'string' && v.head && typeof v.round === 'number' && v.round > round) return v.head;
+  if (v && typeof v === 'object' && typeof v.head === 'string' && v.head && typeof v.round === 'number' && v.round > round
+    && (v.runId === undefined || v.runId === runId)) return v.head;
   return (round ? readText(path.join(work, `reviews-${n}-${round}`, 'head.txt'))?.trim() : null) || start;
 }
 
@@ -231,7 +235,9 @@ function startTask(c: Ctx, task: string, resume: boolean): boolean {
   // D-02: a task resumed on its branch is briefed with its earlier attempt's commits, which are reviewed with it.
   const prior = Array.isArray(w.prior) && w.prior.length ? path.join(work, 'prior.json') : null;
   if (prior) writeFileSync(path.join(c.io.cwd, prior), JSON.stringify(w.prior, null, 2) + '\n');
-  const b = c.deps.cli(['brief', '--plan', c.planArg, '--task', task, ...(prior ? ['--prior-file', slash(prior)] : [])]);
+  // An attempt longer than the list says how many commits it has (carry 3).
+  const total = prior && typeof w.priorTotal === 'number' ? ['--prior-total', String(w.priorTotal)] : [];
+  const b = c.deps.cli(['brief', '--plan', c.planArg, '--task', task, ...(prior ? ['--prior-file', slash(prior), ...total] : [])]);
   if (b.code !== 0) { c.actions.push({ type: 'error', task, command: 'brief', code: b.code, stderr: b.stderr.trim().slice(0, 500) }); return false; }
   const brief = path.join(work, 'brief-1.md');
   mkdirSync(path.join(c.io.cwd, work), { recursive: true });
@@ -317,7 +323,7 @@ function implementerBack(c: Ctx, task: string, t: ExecTask, told: boolean): void
   if (given && given.kind !== 'review') { c.actions.push(stepError(task, `--ruling ${task}:${given.kind}: no question of ${task} waits for that answer`)); return; }
   const head = c.deps.gitAt(t.worktree)(['rev-parse', 'HEAD'])?.trim() || null;
   if (t.stage !== 'validate' && !given) {
-    const seen = seenOf(abs, n, round, brief.head ?? base);
+    const seen = seenOf(abs, n, round, brief.head ?? base, c.runId);
     const committed = !!head && !!seen && head !== seen;
     let fresh = false;
     try { fresh = statSync(path.join(c.io.cwd, report)).mtimeMs > Date.parse(t.stageSince); } catch { fresh = false; }
@@ -338,7 +344,7 @@ function implementerBack(c: Ctx, task: string, t: ExecTask, told: boolean): void
   const r = typeof rp.round === 'number' ? rp.round : round + 1;
   if (rp.validatorsRound && typeof rp.validatorsRound === 'object') {
     // The commit this validators round sends back (seenOf): back without a newer one, the implementer only has its report.
-    if (head) writeFileSync(path.join(abs, `validators-head-${n}.json`), JSON.stringify({ round: r, head }) + '\n');
+    if (head) writeFileSync(path.join(abs, `validators-head-${n}.json`), JSON.stringify({ round: r, head, runId: c.runId }) + '\n');
     // M1: taken up at stage validate (recorded with no agent), the implementer is the last one logged for this brief.
     const agent = t.agent ?? lastAgent(c, `${task}-${n}`);
     if (!call(c, task, ['swarm', 'task', task, '--stage', 'implement', ...(agent ? ['--agent', agent] : ['--no-agent']), '--lease', c.agentLease()])) return;
@@ -548,7 +554,7 @@ function closeVerify(c: Ctx, task: string, t: ExecTask, n: number, round: number
     git(['add', '--', ...files]);
     const committed = git(['commit', '-q', '-m', `${task}: learned notes of its verification`, '--', ...files]) !== null;
     const head = committed ? git(['rev-parse', 'HEAD'])?.trim() : null;
-    if (head) writeJson(path.join(r.abs, `validators-head-${n}.json`), { round: round + 1, head });
+    if (head) writeJson(path.join(r.abs, `validators-head-${n}.json`), { round: round + 1, head, runId: c.runId });
     else c.actions.push({ type: 'error', task, command: 'git commit', code: 1, stderr: `could not commit ${files.join(', ')} in ${slash(t.worktree)}: commit them with the task's work` });
   }
   const { result, learned, cleanup, evidence, commit, proposals, say } = out;
@@ -706,7 +712,7 @@ export function swarmStep(rest: string[], io: Io, deps: StepDeps): Result {
   if ('busy' in lock) return { code: 0, stdout: JSON.stringify({ busy: lock.busy }, null, 2) + '\n', stderr: '' };
   try {
     const c: Ctx = {
-      io, deps, planArg, db, runBranch: e0.branch, project: e0.project, locale, rulings, actions: [], after: [],
+      io, deps, planArg, db, runBranch: e0.branch, project: e0.project, runId: e0.runId, locale, rulings, actions: [], after: [],
       iso: () => io.now().toISOString(), agentLease: () => new Date(io.now().getTime() + AGENT_LEASE_MINUTES * 60000).toISOString(),
     };
     // C4: every event of the step, its own and its commands' (those that name no project), is of the run's project, even

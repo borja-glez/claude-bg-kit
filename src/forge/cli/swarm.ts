@@ -29,8 +29,8 @@ import { mainCheckout, updateLocal } from '../local.js';
 import { readMember, writeMember, isMemberId, allMembersOf, memberFile } from '../members.js';
 import { parseLooseTasks, planOfLoose, statesOfLoose, writeLoose, readLoose, type LooseTask } from '../loose.js';
 import { startAnnounce, integratedSay, rejectedDepsSay, keptFilesSay, proposeSay, VENV_HINT } from '../swarm.js';
-import type { PriorCommit } from '../brief.js';
-import { pickWorkDir, readWorkDir, workDir, workRel } from '../task-ref.js';
+import { PRIOR_MAX, type PriorCommit } from '../brief.js';
+import { attribute, isTask, pickWorkDir, readWorkDir, workDir, workRel } from '../task-ref.js';
 import { forgeBranches, forgeWorktrees, isForgeBranch, pruneRunState, pruneWork } from '../cleanup.js';
 import { copyTree, evidenceOf } from '../evidence-copy.js';
 import { cleanText } from '../../lib/forge-status.js';
@@ -254,17 +254,29 @@ function loadTasksArg(io: Io, file: string | undefined, sub: string): LooseTask[
 /**
  * The worktree `task-<T>` of the main checkout on `task/<T>` (created from `runBranch` when the branch is new), with
  * swarm.setup run when it is created. Shared by the coordinator's `swarm worktree` and a member's `--member`.
- * D-02: `base` is where the task left the run branch, so an earlier attempt's commits are in its diff, and `prior` lists them.
+ * D-02: `base` is where the task left the run branch, so an earlier attempt's commits are in its diff, and `prior` lists them
+ * (the newest PRIOR_MAX; `priorTotal` says how many there are when there are more). Final review 7: `task/<T>` is keyed by
+ * the bare id, so in a plan run (`project`) a branch that already holds commits above the run branch is taken up only when
+ * the ledger holds a phase implement of this plan's `<T>`, or of a `<T>` that names no project (before 2c); another
+ * project's run left it otherwise, and it is refused before anything is created.
  */
-function addTaskWorktree(deps: SwarmDeps, main: string, task: string, runBranch: string): { worktree: string; branch: string; base: string | null; setup: SetupResult; resumed: boolean; prior: PriorCommit[] } {
+function addTaskWorktree(deps: SwarmDeps, main: string, task: string, runBranch: string, project: string | null): { worktree: string; branch: string; base: string | null; setup: SetupResult; resumed: boolean; prior: PriorCommit[]; priorTotal?: number } {
   const dir = taskWorktree(main, task);
   const branch = taskBranch(task);
+  const g = (args: string[]) => deps.git(['-C', main, ...args]);
   let setup: SetupResult = null;
+  const exists = g(['rev-parse', '--verify', '-q', `refs/heads/${branch}`]) !== null;
+  if (exists && project !== null && Number(g(['rev-list', '--count', `${runBranch}..refs/heads/${branch}`])?.trim() || 0) > 0) {
+    const events = readEvents(main);
+    const owner = attribute(events);
+    const implemented = events.filter(e => e.kind === 'phase' && e.phase === 'implement' && isTask(e, task)).map(owner);
+    if (!implemented.some(p => p === project || p === null)) {
+      throw new UsageError(`swarm worktree: ${branch} holds commits that are not this plan's ${task} (another project's run): integrate, rename or remove that branch first`);
+    }
+  }
   let existed = existsSync(dir);
   if (!existed) {
-    const g = (args: string[]) => deps.git(['-C', main, ...args]);
     excludeWorktrees(g);
-    const exists = g(['rev-parse', '--verify', '-q', `refs/heads/${branch}`]) !== null;
     // A branch that outlived its worktree also brings the earlier attempt.
     existed = exists;
     const added = exists ? g(['worktree', 'add', dir, branch]) : g(['worktree', 'add', '-b', branch, dir, runBranch]);
@@ -275,13 +287,15 @@ function addTaskWorktree(deps: SwarmDeps, main: string, task: string, runBranch:
   const head = at(['rev-parse', 'HEAD'])?.trim() || null;
   const base = taskBase(at, runBranch) ?? head;
   let prior: PriorCommit[] = [];
+  let total = 0;
   if (existed && base && head && base !== head) {
-    const log = at(['log', '--reverse', '--max-count=50', '--format=%H%x09%s', `${base}..HEAD`]) ?? '';
+    const log = at(['log', '--reverse', `--max-count=${PRIOR_MAX}`, '--format=%H%x09%s', `${base}..HEAD`]) ?? '';
     // A commit title is the project's text: without controls nor bidi characters, as the brief prints it (parsePrior).
     prior = log.split(/\r?\n/).filter(Boolean).map(l => { const [sha, ...title] = l.split('\t'); return { sha, title: cleanText(title.join('\t')) }; })
       .filter(p => /^[0-9a-f]{7,64}$/.test(p.sha));
+    if (prior.length >= PRIOR_MAX) total = Number(at(['rev-list', '--count', `${base}..HEAD`])?.trim() || 0);
   }
-  return { worktree: dir, branch, base, setup, resumed: prior.length > 0, prior };
+  return { worktree: dir, branch, base, setup, resumed: prior.length > 0, prior, ...(total > prior.length ? { priorTotal: total } : {}) };
 }
 
 /**
@@ -1067,7 +1081,8 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
           // before anything moves.
           for (const t of loose) {
             const dir = taskWorktree(io.cwd, t.id);
-            if (existsSync(dir)) throw new UsageError(`swarm start: ${dir} already exists; remove it (git worktree remove) or use another id`);
+            // Final review 8: an earlier run's integrated task worktree goes with swarm cleanup.
+            if (existsSync(dir)) throw new UsageError(`swarm start: ${dir} already exists; once its task is integrated, FORGE swarm cleanup removes it (else git worktree remove it), or use another id`);
             const tb = taskBranch(t.id);
             if (deps.git(['rev-parse', '--verify', '-q', `refs/heads/${tb}`]) === null) continue;
             if (deps.git(['merge-base', '--is-ancestor', tb, base]) === null) throw new UsageError(`swarm start: ${tb} has work not on ${base}; use another id`);
@@ -1198,11 +1213,12 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
         const task = taskArg();
         const { main, e, session, m } = memberCtx(true);
         if (m!.role === 'executor' && m!.task !== task) throw new UsageError(`swarm worktree: ${session} executes ${m!.task}, not ${task}`);
-        return json({ ...addTaskWorktree(deps, main, task, e.branch), work: workRel({ project: e.project, task }) });
+        return json({ ...addTaskWorktree(deps, main, task, e.branch, e.project), work: workRel({ project: e.project, task }) });
       }
       const task = taskArg();
       const e = notEnded(current());
-      const added = addTaskWorktree(deps, io.cwd, task, e.branch);
+      // Final review 7: a plan run's project, which no other plan's leftover task/<T> may pass for; an ephemeral run has none.
+      const added = addTaskWorktree(deps, io.cwd, task, e.branch, e.kind === 'plan' ? e.project : null);
       const { worktree: dir, branch } = added;
       const t: ExecTask = e.tasks[task] ?? { status: 'running', stage: 'brief', round: 0, worktree: dir, branch, executor: e.mode, attempts: 0, agent: null, startedAt: iso, stageSince: iso, updatedAt: iso, detail: null };
       update(cur => cur && { ...notEnded(cur), tasks: { ...cur.tasks, [task]: { ...(cur.tasks[task] ?? t), worktree: dir, branch, updatedAt: iso } } });
@@ -1336,7 +1352,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
             throw new UsageError(`swarm retry: the worktree of ${t.branch} (${holder}) has uncommitted changes; commit or discard them before --adopt`);
           }
         }
-        const worktree = holder ?? addTaskWorktree(deps, io.cwd, task, e.branch).worktree;
+        const worktree = holder ?? addTaskWorktree(deps, io.cwd, task, e.branch, e.kind === 'plan' ? e.project : null).worktree;
         let adopted = t;
         update(cur => {
           if (!cur) return null;
