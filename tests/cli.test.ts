@@ -1724,6 +1724,21 @@ describe('design-gate', () => {
     expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ rounds: 1, latestRound: 2, invalid: [2], canAutoApprove: false });
     expect(run(['design-gate'], io).code).toBe(2);
   });
+  it('compares the bodies of the history and the file: an approval whose body was also edited needs a verification (K3-06)', () => {
+    const d = path.join(dir, 'docs', 'waypoint', 'demo-shop');
+    mkdirSync(path.join(d, 'design', 'history'), { recursive: true });
+    copyFileSync(new URL('./fixtures/design.md', import.meta.url), path.join(d, 'design.md'));
+    copyFileSync(new URL('./fixtures/design.md', import.meta.url), path.join(d, 'design', 'history', 'v1.md'));
+    const e = (version: number, extra: object) => ({ version, date: '2026-10-13', note: 'x', words: 10, round: 1, ...extra });
+    writeFileSync(path.join(d, 'design', 'changelog.json'), JSON.stringify([e(1, { kind: 'draft', round: 0 }), e(2, { kind: 'approve' })]));
+    const local = path.join(dir, '.waypoint', 'demo-shop');
+    mkdirSync(local, { recursive: true });
+    writeFileSync(path.join(local, 'critique-r1.json'), JSON.stringify({ round: 1, version: 1, scope: 'full', proposals: [] }));
+    const rel = 'docs/waypoint/demo-shop/design.md';
+    expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ needsVerify: false, canAutoApprove: true });
+    writeFileSync(path.join(d, 'design.md'), readFileSync(path.join(d, 'design.md'), 'utf8') + '\n## Extra\n\nNew text nobody read.\n');
+    expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ needsVerify: true, canAutoApprove: false });
+  });
 
   describe('pending proposals and critique-dismiss', () => {
     const rel = 'docs/waypoint/demo-shop/design.md';

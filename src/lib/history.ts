@@ -127,7 +127,8 @@ export function appendChangelog(list: ChangelogEntry[], e: ChangelogEntry): Chan
 const KIND_NOTES: [EntryKind, RegExp][] = [
   ['reopen', /\b(?:reopen(?:ed|ing)?|reabiert[oa]|reabrir)\b/i],
   ['amend', /\b(?:amend(?:ed|ment)?|enmienda|enmendad[oa])\b/i],
-  ['approve', /\b(?:approved?|aprobad[oa])\b/i],
+  // Only a note that starts with it: "round 2: applied 1 — approve the rollback" is an apply.
+  ['approve', /^\s*(?:approved?|aprobad[oa])\b/i],
 ];
 
 /**

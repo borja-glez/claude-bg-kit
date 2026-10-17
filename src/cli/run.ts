@@ -748,7 +748,11 @@ export function run(argv: string[], io: Io): Result {
           try { critique = parseCritique(readFileSync(path.join(local, f), 'utf8')); } catch { critique = null; }
           return [{ round: Number(m[1]), critique }];
         });
-        return ok(JSON.stringify(designGate(readChangelog(path.dirname(file)), critiques, readDismissed(local))));
+        // K3-06: the texts of the history and of the file, so needsVerify compares the bodies.
+        const histDir = path.join(path.dirname(file), 'design', 'history');
+        const history: Record<number, string> = {};
+        for (const v of listVersions(existsSync(histDir) ? readdirSync(histDir) : [])) history[v] = readFileSync(path.join(histDir, `v${v}.md`), 'utf8');
+        return ok(JSON.stringify(designGate(readChangelog(path.dirname(file)), critiques, readDismissed(local), { history, current: readFileSync(file, 'utf8') })));
       }
       case 'critique-dismiss': {
         // waypoint critique-dismiss <design> --round <R> <spec>: the spec is the argument after the design that is not --round's value.

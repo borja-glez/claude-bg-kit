@@ -138,10 +138,10 @@ export function needsVerifyOf(changelog: ChangelogEntry[], critiques: GateCritiq
   if (!top) return false;
   const version = changelog[changelog.length - 1]?.version ?? 0;
   if (top.version >= version) return false;
-  if (!changelog.some(e => e.version > top.version && entryKind(e) !== 'approve')) return false;
   const before = texts.history?.[top.version];
   const after = texts.current ?? texts.history?.[version];
-  if (before === undefined || after === undefined) return true;
+  // No texts: only an approval is known to leave the body alone. With them, the bodies decide whatever the entries say.
+  if (before === undefined || after === undefined) return changelog.some(e => e.version > top.version && entryKind(e) !== 'approve');
   const d = changedSections(designBody(before), designBody(after));
   return d.changed.length > 0 || d.removed.length > 0;
 }

@@ -211,6 +211,27 @@ describe('needsVerify: a change no critic has read (K3-06, K3-03)', () => {
     expect(designGate([S(1, 0), S(2, 1, { kind: 'interview' })], [r1]).needsVerify).toBe(true);
     expect(designGate([S(1, 0), S(2, 1, { kind: 'approve' })], [r1]).needsVerify).toBe(false);
   });
+  it('an approve entry does not vouch for the body: with the texts, a changed body needs a verification', () => {
+    const r1 = { round: 1, critique: C(1, 1, []) };
+    const texts = { history: { 1: v1, 2: approved }, current: approved };
+    expect(designGate([S(1, 0), S(2, 1, { kind: 'approve' })], [r1], {}, texts)).toMatchObject({ needsVerify: true, canAutoApprove: false });
+  });
+  it('a note that only mentions approving is no approval: the old applied notes may have changed the body', () => {
+    const r1 = { round: 1, critique: C(1, 1, []) };
+    const texts = { history: { 1: v1, 2: v2 }, current: v2 };
+    for (const note of ['round 2: applied 1 — approve the rollback plan', 'ronda 2: aplicadas 3 — aprobada la política de reintentos']) {
+      expect(designGate([E(1, 'v1', 0), E(2, note, 2)], [r1], {}, texts).needsVerify, note).toBe(true);
+      expect(designGate([E(1, 'v1', 0), E(2, note, 2)], [r1]).needsVerify, note).toBe(true);
+    }
+  });
+  it('a pending major beyond the cap of the lists still blocks auto-approval', () => {
+    const crit = { ...C(1, 1, ['major', ...Array<'minor'>(0)]), proposals: Array.from({ length: 60 }, (_, i) => ({ n: i + 1, category: 'gap' as const, severity: (i === 0 ? 'major' : 'minor') as 'major' | 'minor', section: '_intro', problem: 'p', change: 'c' })) };
+    const applied = { 1: Array.from({ length: 59 }, (_, i) => i + 2) };
+    const log = [E(1, 'v1', 0), { ...E(2, 'x', 1), applied }];
+    const g = designGate(log, [{ round: 1, critique: crit }, { round: 2, critique: C(2, 2, []) }]);
+    expect(g.applied).toHaveLength(40);
+    expect(g).toMatchObject({ majorPending: [{ round: 1, n: 1 }], canAutoApprove: false });
+  });
   it('a critique of the current version, or no critique at all, needs no verification', () => {
     expect(designGate([S(1, 0)], [{ round: 1, critique: C(1, 1, []) }]).needsVerify).toBe(false);
     expect(designGate([S(1, 0), S(2, 0)], []).needsVerify).toBe(false);
