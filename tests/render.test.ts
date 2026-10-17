@@ -1304,6 +1304,18 @@ describe('one scroll for the page and one for the timeline (H-07)', () => {
     expect(cssRule(phone, '.nr')).toContain('grid-template-areas');
     expect(cssRule(phone, '.nrh')).toContain('display:none');
   });
+  it('on a phone the stage of a row of «En curso» gets the width of its text, on one line, so nothing overlaps at 390 px (Close a)', () => {
+    const phone = cssMedia(CSS, '(max-width:760px)');
+    const nr = cssRule(phone, '.nr');
+    // The second line is stage, round, validators and time: the stage's column is sized by its content.
+    expect(nr).toContain('"stage round val time"');
+    const cols = /grid-template-columns:([^;]+)/.exec(nr)![1]!;
+    expect(cols.split(/\s+(?![^(]*\))/)[0]).toMatch(/^(max-content|minmax\(max-content,auto\))$/);
+    expect(cols.split(/\s+(?![^(]*\))/)).toHaveLength(4);
+    expect(cssRule(phone, '.nr .c-stage')).toContain('white-space:nowrap');
+    // The round and the time take the rest and wrap.
+    for (const c of ['.nr .c-round', '.nr .c-time']) expect(cssRule(phone, c), c).toContain('min-width:0');
+  });
 });
 
 describe('«Te necesita» (G-24, G-13, G-08)', () => {

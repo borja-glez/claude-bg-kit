@@ -407,8 +407,10 @@ button.nr:focus-visible,button.act:focus-visible,.nxb:focus-visible,.more:focus-
 .s.silent .dot{color:var(--yellow)}
 @media (max-width:760px){
   .nrh{display:none}
-  .nr{grid-template-columns:minmax(0,1fr) auto auto auto;grid-template-areas:"task task task task" "stage round val time"}
-  .nr .c-task{grid-area:task} .nr .c-stage{grid-area:stage} .nr .c-round{grid-area:round} .nr .c-val{grid-area:val} .nr .c-time{grid-area:time}
+  /* The stage keeps the width of its text, on one line; the round and the time share the rest and wrap (Close a: a
+     minmax(0,1fr) stage shrank to 24 px at 390 px and «● implementar» ran over the round). */
+  .nr{grid-template-columns:max-content minmax(0,1fr) auto minmax(0,1fr);grid-template-areas:"task task task task" "stage round val time"}
+  .nr .c-task{grid-area:task} .nr .c-stage{grid-area:stage;white-space:nowrap} .nr .c-round{grid-area:round;min-width:0;overflow-wrap:anywhere} .nr .c-val{grid-area:val} .nr .c-time{grid-area:time;min-width:0;overflow-wrap:anywhere}
   .nr .c-agent,.nr .c-who{display:none}
   .sess .sgrid2{grid-template-columns:repeat(auto-fill,minmax(min(150px,100%),1fr));gap:6px}
 }
