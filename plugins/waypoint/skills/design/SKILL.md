@@ -12,13 +12,14 @@ Talk to the user in their language. Everything stored (front matter keys, JSON f
 
 ## Args and paths
 
-The first token of the arguments is the subcommand: `new [--from <spec>]`, `round`, `apply <all|1,3>`, `rewrite`, `interview`, `approve [--auto]`, `resume`, `park`. With no arguments: `new` if `design.md` does not exist, otherwise `round`.
+The first token of the arguments is the subcommand: `new [--from <spec>]`, `round [--verify]`, `apply <all|1,3>`, `rewrite`, `interview`, `approve [--auto]`, `resume`, `amend`, `reopen`, `park`. With no arguments: `new` if `design.md` does not exist, otherwise `round`.
 
 - `DESIGN` = `docs/waypoint/<project>/design.md` (ask which project if there are several).
 - `LOCAL` = `.waypoint/<project>/`. Make sure `.waypoint/` is in the project's `.gitignore`.
+- `CRITIQUES` = `docs/waypoint/<project>/design/critiques/`: the critiques (`r<N>.json`) and `dismissed.json`, committed with the design. Rounds from before waypoint 0.27.0 may still be in `LOCAL/critique-r<N>.json`: the CLI reads both places (`CRITIQUES` first), so never move them by hand. In `LOCAL` this skill keeps only scratch files (`design.rewrite.md`, `dismiss-reason.txt`, `design-page.html`).
 - **Commits** always use pathspecs so nothing else that is staged or modified gets swept in: `git add <paths>` then `git commit -m "<message>" -- <paths>`, where `<paths>` = `DESIGN docs/waypoint/<project>/design/` (plus the `.gitignore` in the first commit of `new`). Follow the repository's commit rules (message style, attribution) for the message.
 - `docs/waypoint/<project>/design/history/v<N>.md` and `design/changelog.json` belong to `design-snapshot`: never edit them by hand.
-- **Binding.** Before the first step of `round`, `apply`, `rewrite` and `interview`, and in `new` once `DESIGN` exists (right after its step 3; `bind` reads the file): `waypoint bind DESIGN --via design --claude ${CLAUDE_SESSION_ID}`, so the start context and the band of the draft are this conversation's. Exit 3 or 4 (another conversation holds the project's seat, or left a task of its plan in progress there): run it again with `--second-seat` and say in one line which conversation keeps the main seat. With `status: parked` in `DESIGN`, set it back to `draft` with Edit before the subcommand's first step.
+- **Binding.** Before the first step of `round`, `apply`, `rewrite`, `interview`, `amend` and `reopen`, and in `new` once `DESIGN` exists (right after its step 3; `bind` reads the file): `waypoint bind DESIGN --via design --claude ${CLAUDE_SESSION_ID}`, so the start context and the band of the draft are this conversation's. Exit 3 or 4 (another conversation holds the project's seat, or left a task of its plan in progress there): run it again with `--second-seat` and say in one line which conversation keeps the main seat. With `status: parked` in `DESIGN`, set it back to `draft` with Edit before the subcommand's first step.
 
 `DESIGN` starts with this front matter:
 
@@ -40,9 +41,13 @@ The body is Markdown with `##` sections.
 
 ## Approved designs
 
-If the front matter has `status: approved`, the plan was derived from this design. Before the first edit of `DESIGN` in `apply`, `rewrite` (when accepting it), or `interview`, warn the user that the design is approved and the plan was derived from it, and ask whether to continue. If no: stop. If yes: set `status: draft` in the front matter, then edit. `round` does not edit `DESIGN`, so it does not ask. The plan is not touched here: after the changes the user re-approves with `approve`, and only then does the `waypoint:plan` skill re-derive or sync the plan by its own rules.
+If the front matter has `status: approved`, the plan was derived from this design. Before the first edit of `DESIGN` in `apply`, `rewrite` (when accepting it) or `interview`, ask once, in the user's language: «¿Enmienda (un cambio pequeño: el diseño sigue aprobado) o reabrir (vuelve a borrador y pasa otra vez por el crítico)?». If neither: stop.
+- **Amend:** make the subcommand's edits keeping `status: approved`; then, instead of its own snapshot, commit and publish, follow `## amend` from its step 2 (the subcommand's `--applied` or `--resolved` items go on that snapshot too).
+- **Reopen:** run `## reopen` steps 1-3, then the subcommand as usual.
 
-**Auto.** `round`, `apply` and `approve` accept `--auto` when forge's auto mode drives the loop (`/forge:run`, `## Autonomy`): never ask. Where a step would ask, take the safe default and say so in one line: `round` with an empty `changed` list ends the loop (nothing new to review); `apply` with a critique of another version applies nothing (run `round` again); an approved design is reopened (`status: draft`) without asking.
+`round` does not edit `DESIGN`, so it does not ask. The plan is not touched here: after an amendment, `/waypoint:plan` syncs it and raises its `design_version`; after a reopen the user re-approves with `approve`, and only then does the `waypoint:plan` skill re-derive or sync the plan by its own rules.
+
+**Auto.** `round`, `apply`, `approve` and `reopen` accept `--auto` when forge's auto mode drives the loop (`/forge:run`, `## Autonomy`): never ask. Where a step would ask, take the safe default and say so in one line: `round` with nothing to review ends the loop (nothing new to review); `apply` with a critique of another version applies nothing (run `round` again); an approved design is reopened (`## reopen`), never amended, without asking.
 
 ## new
 
@@ -51,46 +56,52 @@ If the front matter has `status: approved`, the plan was derived from this desig
    **Otherwise** ask for the user's draft (text, file or the current conversation) and collect it.
 2. Write `DESIGN` with the front matter above (`status: draft`, no `artifact`) and a body with `##` sections.
 3. Run `waypoint design-validate DESIGN` and fix every reported issue until it passes.
-4. `waypoint design-snapshot DESIGN --note "<initial draft, in the user's language>" --round 0` (prints `{"version","path"}`). After an import the note is "<imported from <spec>, in the user's language>".
+4. `waypoint design-snapshot DESIGN --note "<initial draft, in the user's language>" --round 0 --kind draft` (prints `{"version","path"}`). After an import the note is "<imported from <spec>, in the user's language>".
 5. Commit with the message `Design v1` (pathspecs as above; include the `.gitignore` if you edited it for `.waypoint/`).
 6. Publish (see **Publish**), give the URL and offer the first round, then **end the turn**. After an import, offer **another round (recommended)**, since the spec has not been through the critic, or **approve now**. A round runs only when the user asks for it, also when forge drives the session; the one exception is forge's auto mode, which calls `round --auto` itself.
 
 ## round
 
-1. `R` = max(the `round` of the last changelog entry, the highest number N among the `LOCAL/critique-r<N>.json` files) + 1; `V` = the current version (the `version` of the last changelog entry).
-2. If there is no earlier critique in `LOCAL` (R = 1), use `scope: full` and every section. Otherwise run `waypoint design-changed DESIGN --since <version of LOCAL/critique-r<R-1>.json>` (prints `{"since","changed","scope"}`) and take `scope` and `changed`. If `changed` is empty (nothing was edited since the last critique), tell the user and ask whether to run a full review (`scope: full`) or stop. If that critique file (or its version in history) is missing, use `scope: full` and every section.
-3. Launch the critic with the Agent tool (`subagent_type: "waypoint:design-critic"`; if that type is not found, try `"design-critic"`). Pass it: the path of `DESIGN`, `R`, `V`, the scope, the slugs, the user's language, the output path `LOCAL/critique-r<R>.json` and, when R > 1, the proposals still open from earlier rounds: the `pending` list of `waypoint design-gate DESIGN` with each one's `problem` (from its `LOCAL/critique-r<N>.json`), so it neither repeats them as new nor treats them as solved.
-4. `waypoint critique-check LOCAL/critique-r<R>.json --round <R> --version <V> --design DESIGN --locale <locale>` (it also rejects a critique whose round or version differ, or whose `section` is not a slug of `DESIGN` or `_intro`). If it fails, launch the critic again with the same inputs plus the reported problems; if the check still fails, show the errors and stop.
-5. Show the numbered proposals as they are, plus one summary line (how many proposals, how many critical, and how many are still open from earlier rounds, per `design-gate`'s `pendingCounts`), and the options: `apply all`, `apply 1,3`, `apply r1:4,5 r2:all`, `round`, `rewrite`, `interview`, `approve`. End the turn.
+`round --verify` checks the changes applied since the last critique: the critic reads only the sections that changed, with the budget of a verification (at most 3 proposals, critical only).
+
+1. `waypoint critique-next DESIGN` (add `--verify` for `round --verify`) prints `{round, version, budget, scope, since, changed, removed, review, out}`: `R` = `round`, `V` = `version`, the critic's `budget` (`max` proposals and the allowed `severities`), the `scope`, the sections to review (`review`) and `out`, the path of the new critique (`CRITIQUES/r<R>.json`). Exit 2 with `--verify`: there is no critique yet, so run a plain `round`. With `scope: changed` and an empty `review`, nothing was edited since the last critique: tell the user and ask whether to stop or to run a full review (`waypoint critique-next DESIGN --full`); with `--auto` or `--verify`, stop (nothing new to review).
+2. `waypoint design-gate DESIGN`: from it the critic gets the proposals still open from earlier rounds (`pending`, each with its `problem`), the ones the person set aside (`dismissed`, with their `reason`), the ones an interview resolved (`resolved`) and its own earlier proposals that were applied (`applied`, with their `change`).
+3. Launch the critic with the Agent tool (`subagent_type: "waypoint:design-critic"`; if that type is not found, try `"design-critic"`). Pass it: the path of `DESIGN`, `R`, `V`, the `budget`, the `scope` and `review`, the user's language, the output path `out` and, when R > 1, the proposals still open from earlier rounds (`pending`), `dismissed`, `resolved` and `applied`, so it neither repeats them as new nor treats them as solved.
+4. `waypoint critique-check <out> --round <R> --version <V> --design DESIGN --locale <locale>`, adding `--verify` for `round --verify` and `--changed <review, comma-separated>` when the scope is `changed`. It rejects a critique over its budget, with a severity the round does not allow, whose `verdict` does not match its proposals, whose round or version differ, or whose `section` is not a slug of `DESIGN` or `_intro`; a proposal outside `review` is only a warning on stderr (show it). If it fails, launch the critic again with the same inputs plus the reported problems; if the check still fails, show the errors and stop.
+5. Commit the critique: `git add CRITIQUES` then `git commit -m "Design critique r<R> (v<V>)" -- CRITIQUES` (it joins the design's history without making a new version; a `dismissed.json` written since the last commit goes with it).
+6. Show the numbered proposals as they are, plus one summary line (the `verdict`, how many proposals, how many critical, and how many are still open from earlier rounds, per step 2's `pendingCounts`), and the options: `apply all`, `apply 1,3`, `apply r1:4,5 r2:all`, `round`, `rewrite`, `interview`, `approve`. With `verdict: ready` and nothing pending, recommend `approve`. End the turn.
 
 ## apply <spec>
 
 `spec` is `all` or a comma list such as `1,3`, both for the latest critique, or items `r<R>:<list|all>` separated by spaces, for any rounds (`apply r1:4,5 r2:all`).
 
-If no critique exists in `LOCAL`, tell the user to run `round` first. For each round of `spec`: if a rewrite already folded it in (a changelog entry of that round with `rewrite: true`, or in an older changelog a note `round R: rewrite`, or "full rewrite", with that round), warn before applying it again; and compare its critique's `version` with the current version `V`: if they differ, warn that the critique may be stale (the design changed after it was written) and ask whether to apply anyway. Apply the approved-design rule above before editing.
+If `waypoint design-gate DESIGN` shows no critique yet (`latestRound` is null), tell the user to run `round` first. For each round of `spec`: if a rewrite already folded it in (a changelog entry of that round with `rewrite: true`, or in an older changelog a note `round R: rewrite`, or "full rewrite", with that round), warn before applying it again; and compare its critique's `version` with the current version `V`: if they differ, warn that the critique may be stale (the design changed after it was written) and ask whether to apply anyway. Apply the approved-design rule above before editing.
 
-1. For each round `R` of `spec` (the latest critique file that exists for `all` or a bare list): `waypoint critique-select LOCAL/critique-r<R>.json <list|all>`; it prints the chosen proposals.
+1. For each round `R` of `spec` (`design-gate`'s `latestRound` for `all` or a bare list): `waypoint critique-select <its critique> <list|all>`, where its critique is `CRITIQUES/r<R>.json`, or `LOCAL/critique-r<R>.json` when only that one exists (a round from before waypoint 0.27.0); it prints the chosen proposals.
 2. Apply each chosen proposal by editing `DESIGN` (Edit), faithful to its `change`. Apply only the selected proposals and change nothing else in `DESIGN`.
 3. `waypoint design-validate DESIGN`; fix issues.
-4. One snapshot for the whole `apply`: `waypoint design-snapshot DESIGN --note "<summary, in the person's language>" --round <R> --applied r<R1>:<numbers> r<R2>:<numbers>…`, with the numbers `critique-select` printed for each round; `R` is the latest round with a critique (prints the new `version`).
+4. One snapshot for the whole `apply`: `waypoint design-snapshot DESIGN --note "<summary, in the person's language>" --round <R> --kind apply --applied r<R1>:<numbers> r<R2>:<numbers>…`, with the numbers `critique-select` printed for each round; `R` is the latest round with a critique (prints the new `version`).
 5. Commit with the message `Design v<N>: round <R>` (`N` = the printed version; pathspecs as above).
 6. Publish.
-7. Tell the user in two lines what changed and offer another round.
+7. Tell the user in two lines what changed and offer `round --verify`: the critic checks the applied change before `approve`.
 
 ## rewrite
 
 1. Write a complete improved version to `LOCAL/design.rewrite.md` (same front matter; fold in the open proposals of the latest critique).
 2. Show the real diff: `git diff --no-index --word-diff DESIGN LOCAL/design.rewrite.md` (exit code 1 only means they differ), plus a summary of the main differences.
-3. Ask whether to accept. If yes: apply the approved-design rule above, then copy it over `DESIGN` (with `status: draft` in its front matter), run `design-validate`, `design-snapshot` with `--note "<summary, in the person's language>" --round R --rewrite` (`R` = the latest critique file; `--rewrite` tells `design-gate` the rewrite folded in its proposals; without a critique, the note "full rewrite" in the user's language and no `--round`), commit `Design v<N>: rewrite` (pathspecs as above) and publish. If no: leave `LOCAL/design.rewrite.md`; it is overwritten next time.
+3. Ask whether to accept. If yes: apply the approved-design rule above, then copy it over `DESIGN` (its front matter's `status` as that rule left it), run `design-validate`, `design-snapshot` with `--note "<summary, in the person's language>" --round R --rewrite --kind rewrite` (`R` = `design-gate`'s `latestRound`; `--rewrite` tells `design-gate` the rewrite folded in its proposals; without a critique, the note "full rewrite" in the user's language, `--kind rewrite` and no `--round`), commit `Design v<N>: rewrite` (pathspecs as above) and publish. If no: leave `LOCAL/design.rewrite.md`; it is overwritten next time.
 
 ## interview
 
-Apply the approved-design rule above before the first edit. Ask questions one at a time about the weak points of the latest critique (or about the least concrete sections if there is no critique). After each answer, edit `DESIGN`. When the user says enough, or no points remain: run `design-validate`, `design-snapshot` with the note "interview" (in the user's language), commit `Design v<N>: interview` (pathspecs as above) and publish.
+Apply the approved-design rule above before the first edit. Ask questions one at a time about the weak points of the latest critique and the proposals still pending (`waypoint design-gate DESIGN`'s `pending`), or about the least concrete sections if there is no critique. After each answer, edit `DESIGN`. When the user says enough, or no points remain:
+1. Show the pending proposals the interview touched, one line each (`r<round>·<n> [severity] <section> — <problem>`), and ask once which of them the answers resolved.
+2. Run `design-validate`, then `waypoint design-snapshot DESIGN --note "<interview, in the user's language>" --kind interview`, adding `--resolved r<R>:<numbers> …` with the ones the user named (none named: no `--resolved`). `design-gate` stops counting them as pending, and the next critic does not raise them again.
+3. Commit `Design v<N>: interview` (pathspecs as above) and publish.
 
 ## approve
 
-1. Run `waypoint design-gate DESIGN`. Its `pending` lists the proposals of every round that were neither applied (the changelog's `applied`, or in an older changelog a note `round R: applied …`), nor folded in by a rewrite, nor dismissed. When it is not empty, show the `critical` and `major` ones, one line each (`r<round>·<n> [severity] <section> — <problem>`, the problem from that round's critique file), and the `minor` ones as one count, then ask once: apply them first (one call `apply r<R>:<numbers> …` with the pending numbers of each round), or dismiss them and approve. Do not continue without an explicit answer. On dismiss: `waypoint critique-dismiss DESIGN --round <R> <numbers>` for each round, then go on. With `--auto`: do not ask; with the gate's `canAutoApprove: true` go on (the snapshot note of step 2 is "approved (auto)"); otherwise stop and say why (its `criticalPending`, or that no critique round was run yet).
-2. Set `status: approved` in the front matter, run `design-validate`, run `design-snapshot` with the note "approved" (in the user's language), and commit `Design approved (v<N>)` (pathspecs as above).
+1. Run `waypoint design-gate DESIGN`. Its `pending` lists the proposals of every round that were neither applied (the changelog's `applied`, or in an older changelog a note `round R: applied …`), nor resolved in an interview, nor folded in by a rewrite, nor dismissed. When it is not empty, show the `critical` and `major` ones, one line each (`r<round>·<n> [severity] <section> — <problem>`), and the `minor` ones as one count, then ask once: apply them first (one call `apply r<R>:<numbers> …` with the pending numbers of each round), or dismiss them and approve. Do not continue without an explicit answer. On dismiss: write the person's reason (or «dismissed at approval», in their language) to `LOCAL/dismiss-reason.txt` and run `waypoint critique-dismiss DESIGN --round <R> <numbers> --reason-file LOCAL/dismiss-reason.txt` for each round, then go on. A `critical` or `major` proposal cannot be dismissed without a reason (`--reason-file` is required): ask the person for it, or use the one they gave when they decided; never invent one. When `needsVerify` is true, a change was applied after the last critique and no critic has read it: say so in one line and offer `round --verify` first; the person may approve anyway. With `--auto`: do not ask; with the gate's `canAutoApprove: true` go on (the snapshot note of step 2 is "approved (auto)"); otherwise stop and say why (its `criticalPending`, its `majorPending`, `needsVerify`, or that no critique round was run yet).
+2. Set `status: approved` in the front matter, run `design-validate`, run `design-snapshot` with the note "approved" (in the user's language) and `--kind approve`, and commit `Design approved (v<N>)` (pathspecs as above).
 3. Publish.
 4. Run the `waypoint:plan` skill, telling it to start from the approved `design.md`. When forge drives the session (`/forge:run` chose Large), stop after step 3: `/forge:run` continues with `forge-planner`.
 
@@ -101,7 +112,26 @@ Takes up a draft an earlier conversation left (the band's [Resume]): it binds th
 1. With `status: approved` in `DESIGN`, say in one line that the design is approved and the plan was derived from it, and stop. With `status: parked`, set it back to `draft` with Edit.
 2. `waypoint bind DESIGN --via design --resume --claude ${CLAUDE_SESSION_ID}` (`--resume` takes the seat the earlier conversation left). Exit 3 or 4: run it again with `--second-seat` and say in one line which conversation keeps the main seat, as in **Binding** above.
 3. `waypoint design-gate DESIGN` → its `version`, `pending` and `pendingCounts`.
-4. Show the version, the design's URL (`artifact` in the front matter) when it has one, and the pending proposals: the `critical` and `major` ones one line each (`r<round>·<n> [severity] <section> — <problem>`, the problem from that round's critique file), the `minor` ones as one count, or that none is pending. Then the options: `apply r<R>:<numbers>`, `round`, `rewrite`, `interview`, `approve`, `park`. **End the turn.**
+4. Show the version, the design's URL (`artifact` in the front matter) when it has one, and the pending proposals: the `critical` and `major` ones one line each (`r<round>·<n> [severity] <section> — <problem>`), the `minor` ones as one count, or that none is pending; when `needsVerify` is true, say a change was applied that no critic has read. Then the options: `apply r<R>:<numbers>`, `round`, `round --verify`, `rewrite`, `interview`, `approve`, `park`. **End the turn.**
+
+## amend
+
+A small change to an approved design that keeps it approved: a correction, a detail the plan already assumes, a section the tasks do not depend on. Anything that changes what the plan builds is a `reopen`. On a draft there is nothing to amend: edit it and snapshot as usual.
+
+1. Edit `DESIGN` as the user asked, keeping `status: approved`, and run `waypoint design-validate DESIGN`.
+2. `waypoint design-snapshot DESIGN --kind amend --note "<what changed, in the user's language>"` (exit 2: the design is not approved).
+3. When `docs/waypoint/<project>/plan.yaml` exists: `waypoint design-impact DESIGN --plan docs/waypoint/<project>/plan.yaml` (add `--states .waypoint/<project>/dbcache/state` when that folder exists; `--since <N>` compares with another version than the plan's `design_version`) prints `{since, changed, removed, tasks, unref}`: the tasks whose `design_ref` is a section that changed or went away, with their state, and how many tasks have no `design_ref`. When `tasks` is empty and `unref` is every task, the plan is not linked to the design: say so (`/waypoint:plan` links it).
+4. Commit `Design v<N>: amend` (pathspecs as above) and publish.
+5. Tell the user what changed, list the tasks of step 3 one line each (`T012 · <section> · <state>`), and offer `/waypoint:plan`: it syncs the plan and raises its `design_version`.
+
+## reopen
+
+Sends an approved design back to draft and through the critic, for a change that alters what the plan builds.
+
+1. Set `status: draft` in the front matter with Edit (when the reopening comes with a change, such as a new section, make it now too) and run `waypoint design-validate DESIGN`.
+2. `waypoint design-snapshot DESIGN --kind reopen --note "<reopened: why, in the user's language>"` (exit 2: the design is not a draft yet).
+3. Commit `Design v<N>: reopened` (pathspecs as above) and publish.
+4. Go on with the usual loop: `round` (the first round after a reopen gets the full budget again, on what changed), `apply`, `round --verify` and `approve`. Once approved again, `/waypoint:plan` syncs the plan and its `design_version`.
 
 ## park
 
@@ -123,3 +153,4 @@ Sets the design aside: a parked design is neither announced at session start nor
 
 - Never edit `design/history/*.md` or `design/changelog.json` by hand; only `design-snapshot` touches them.
 - Every edit to `DESIGN` that should count as a version ends with `design-validate` then `design-snapshot`.
+- Critiques and `dismissed.json` belong to the CLI (the critic writes a critique, `critique-check` checks it, `critique-dismiss` writes `dismissed.json`): never edit them by hand. They live in `CRITIQUES` and are committed with the design.

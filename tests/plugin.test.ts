@@ -444,7 +444,7 @@ describe('plugin layout', () => {
   });
   it('design skill documents the design loop commands', () => {
     const md = read('plugins/waypoint/skills/design/SKILL.md');
-    for (const w of ['design-snapshot', 'design-changed', 'critique-check', 'critique-select', 'design-page', 'rewrite', 'interview', 'approve', '--since', 'applied']) expect(md).toContain(w);
+    for (const w of ['design-snapshot', 'critique-next', 'critique-check', 'critique-select', 'design-page', 'rewrite', 'interview', 'approve', '--since', 'applied']) expect(md).toContain(w);
     expect(read('plugins/waypoint/skills/plan/SKILL.md')).toContain('plan.yaml does not exist yet');
   });
   it('forge manifest depends on waypoint ^0.26.0 and ships its CLI', () => {
@@ -1644,5 +1644,19 @@ describe('plugin layout', () => {
       const md = read(f);
       for (const s of ['approvals/', '`owner`', 'meta/metrics', 'meta/page', 'sync [--db DIR]', 'page [--publish-info --capabilities F [--page P]] [--states DIR]', 'validate [--design D]']) expect(md, `${f}: ${s}`).toContain(s);
     }
+  });
+  it('waypoint:design runs the converging loop: critique-next, round --verify, the budget, reasons, resolved, amend and reopen, critiques in docs/ (wave 4d)', () => {
+    const md = read('plugins/waypoint/skills/design/SKILL.md');
+    for (const w of ['waypoint critique-next DESIGN', 'round [--verify]', '`amend`, `reopen`, `park`', 'CRITIQUES', 'docs/waypoint/<project>/design/critiques/',
+      '--changed <review, comma-separated>', 'Design critique r<R> (v<V>)', '--reason-file LOCAL/dismiss-reason.txt', '--resolved r<R>:<numbers>',
+      '--kind draft', '--kind apply', '--kind rewrite', '--kind interview', '--kind approve', '--kind amend', '--kind reopen',
+      'waypoint design-impact DESIGN --plan', '## amend', '## reopen', '`needsVerify`', '`majorPending`', '`verdict`', '`dismissed`', '`resolved`', '`applied`',
+      '`interview`, `amend` and `reopen`', '--design DESIGN']) expect(md, w).toContain(w);
+    for (const w of ['the highest number N among the `LOCAL/critique-r<N>.json` files', 'waypoint design-changed DESIGN --since', 'critique-check LOCAL/critique-r<R>.json']) expect(md, w).not.toContain(w);
+    const critic = read('plugins/waypoint/agents/design-critic.md');
+    for (const w of ['"verdict": "<ready|changes>"', '`max`', '`severities`', '`dismissed`', '`resolved`', '`applied`', 'r<R>#<n>', '`contradiction`']) expect(critic, w).toContain(w);
+    expect(critic).not.toContain('At most 12 proposals');
+    const plan = read('plugins/waypoint/skills/plan/SKILL.md');
+    for (const w of ['artifacts.design', 'design_version', 'design_ref', 'validate <plan> --design docs/waypoint/<project>/design.md', 'waypoint design-impact', '**The link to the design.**']) expect(plan, w).toContain(w);
   });
 });

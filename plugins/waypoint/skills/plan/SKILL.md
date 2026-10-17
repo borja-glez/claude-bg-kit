@@ -18,6 +18,8 @@ Location: `docs/waypoint/<project>/plan.yaml`. If it doesn't exist, write it fro
 project: <kebab-id>            # [A-Za-z0-9_.-]
 locale: <user language, e.g. es>
 version: "0.1"
+design_version: 3              # from an approved design: its version (see «The link to the design» below)
+artifacts: { design: <url> }   # from a design: its artifact; publishing adds roadmap
 versions: [{ id: "0.1", phases: [F1, F2] }]
 tracks:   [{ id: backend, name: <visible name>, color: blue }]   # colors: blue mauve teal pink sky flamingo
 phases:   [{ id: F1, name: <visible name>, plan_status: committed }]  # or provisional
@@ -32,6 +34,7 @@ tasks:
     depends_on: []
     zones: ["src/area/**"]      # globs this task will touch
     estimate_min: 30
+    design_ref: arquitectura     # from a design: the slug of the section the task comes from
 ```
 
 If plan.yaml does not exist yet and `docs/waypoint/<project>/design.md` exists with `status: approved`, derive the plan from it:
@@ -39,14 +42,17 @@ If plan.yaml does not exist yet and `docs/waypoint/<project>/design.md` exists w
 - phases following its scope and phasing sections;
 - tasks small enough for one sitting, each with a `done_when` taken from the design's done criteria;
 - `zones` from the architecture.
+- each task's `design_ref`: the slug of the design section it comes from (its `##` or `###` heading in lower case, accents dropped, every other run of characters a single `-`, with `-2` for a repeated heading; `_intro` for the text before the first heading).
 
 Show the user the track and phase outline in one short list before writing plan.yaml, and ask once for confirmation.
 
 Likewise, if plan.yaml does not exist yet and the design's `start_prompt` contains `<track>`, replace it in `design.md` with the id of the plan's first track and make a small commit of `design.md` (no new design version). Then re-run `design-page` and re-publish to the design's `artifact` URL.
 
+**The link to the design.** Whether you wrote plan.yaml or it was already there (forge's `forge-planner` writes it on the Large path), when `docs/waypoint/<project>/design.md` has `status: approved`: set `artifacts.design` to the design's `artifact` (when it has one) and `design_version` to its version (the `v<N>` that `waypoint design-validate` prints for it), and give every task that comes from a section its `design_ref`. Do it again on every later sync from an approved design: an amendment adds versions, and `waypoint design-impact` lists the tasks it touched. While the design is a draft again (reopened), leave `design_version` as it is until it is approved.
+
 Rules: tasks small enough for one sitting (≤ ~60 min); every `done_when` must be checkable; ids stable once published (never renumber).
 
-Run `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" validate <plan>` and fix every reported issue before continuing.
+Run `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" validate <plan> --design docs/waypoint/<project>/design.md` (without `--design` when there is no design) and fix every reported issue, and every warning about `design_ref`, `design_version` or `artifacts.design`, before continuing.
 
 ## 2. Local dir
 
