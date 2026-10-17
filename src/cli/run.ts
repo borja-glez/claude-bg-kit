@@ -13,6 +13,7 @@ import { listVersions, nextVersion, parseChangelog, appendChangelog, parseApplie
 import { parseCritique, selectProposals, formatProposals, CritiqueError, budgetFor, budgetIssues } from '../lib/critique.js';
 import { buildDesignPageData } from '../design-page/build.js';
 import { designFilesOf, readCritiques, readDismissedOf, readHistory, writeDismissed } from './design-files.js';
+import { budgetRound, nextRound } from '../lib/design-round.js';
 import { eventId, eventIds, sessionIdFrom } from '../lib/ids.js';
 import { computeMetrics } from '../lib/metrics.js';
 import { normalizeNote, notesSince, noteLines } from '../lib/notes.js';
@@ -37,7 +38,7 @@ export { isCommitCommand };
 export interface Io { cwd: string; now: () => Date; rand?: () => number; assetsDir: string; stdin?: string; env?: Record<string, string | undefined> }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|critique-check|critique-select|critique-dismiss|design-page|hook> ...`;
+const USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|critique-next|critique-check|critique-select|critique-dismiss|design-page|hook> ...`;
 
 export function run(argv: string[], io: Io): Result {
   const [cmd, ...args] = argv;
@@ -751,6 +752,22 @@ export function run(argv: string[], io: Io): Result {
         const files = designFilesOf(file, d.meta.project);
         return ok(JSON.stringify(designGate(readChangelog(files.dir), readCritiques(files), readDismissedOf(files), { history: readHistory(files.dir), current: text })));
       }
+      case 'critique-next': {
+        // K3-04, K3-06: the next critique round (number, budget, scope, sections, output path), so the skill computes none.
+        if (!args[0] || args[0].startsWith('--')) return fail('usage: waypoint critique-next <design.md> [--verify] [--full]', 2);
+        const file = abs(args[0]);
+        const text = readFileSync(file, 'utf8');
+        const d = parseDesign(text);
+        const files = designFilesOf(file, d.meta.project);
+        const critiques = readCritiques(files);
+        const verify = args.includes('--verify');
+        if (verify && !critiques.some(c => c.critique !== null)) return fail('critique-next: nothing to verify: no critique yet, run a round first', 2);
+        const next = nextRound({
+          changelog: readChangelog(files.dir), critiques, history: readHistory(files.dir), current: text,
+          sections: d.sections.map(s => s.slug), verify, full: args.includes('--full'),
+        });
+        return ok(JSON.stringify({ ...next, out: path.join(files.critiques, `r${next.round}.json`) }));
+      }
       case 'critique-dismiss': {
         // waypoint critique-dismiss <design> --round <R> <spec> [--reason-file <f>]: the spec is the argument after the
         // design that is no flag nor a flag's value.
@@ -799,11 +816,17 @@ export function run(argv: string[], io: Io): Result {
         }
         // K3-04: the budget of this round (the critique's own round without --round), or of a verification.
         const roundGiven = flag('round');
-        issues.push(...budgetIssues(c, budgetFor(roundGiven !== undefined ? Number(roundGiven) : c.round, args.includes('--verify'))));
         const designFlag = flag('design');
+        const designParsed = designFlag !== undefined ? parseDesign(readFileSync(abs(designFlag), 'utf8')) : null;
+        // With --design the round counts from the design's last reopen, as critique-next gave it (ruling C1).
+        const absolute = roundGiven !== undefined ? Number(roundGiven) : c.round;
+        const budgetAt = designFlag !== undefined && designParsed
+          ? budgetRound(readChangelog(designFilesOf(abs(designFlag), designParsed.meta.project).dir), absolute)
+          : absolute;
+        issues.push(...budgetIssues(c, budgetFor(budgetAt, args.includes('--verify'))));
         const headings: Record<string, string> = {};
-        if (designFlag !== undefined) {
-          const sections = parseDesign(readFileSync(abs(designFlag), 'utf8')).sections;
+        if (designParsed) {
+          const sections = designParsed.sections;
           for (const s of sections) headings[s.slug] = s.heading;
           const slugs = new Set(['_intro', ...sections.map(s => s.slug)]);
           for (const p of c.proposals) if (!slugs.has(p.section)) issues.push(`proposal ${p.n}: section "${p.section}" is not a section slug of the design`);

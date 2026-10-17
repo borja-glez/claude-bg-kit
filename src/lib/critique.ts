@@ -66,10 +66,12 @@ export interface Budget { max: number; severities: Severity[] }
 /**
  * Round 1: up to 12 proposals of any severity; round 2: up to 6, critical and major; from round 3, and in any
  * verification (`round --verify`), up to 3 critical ones. The first round after a reopen counts as round 1 again.
+ * A round that is below 1 or not a number is clamped to round 1 on purpose, not left to fall through the comparisons.
  */
 export function budgetFor(round: number, verify = false): Budget {
-  if (verify || round >= 3) return { max: 3, severities: ['critical'] };
-  if (round === 2) return { max: 6, severities: ['critical', 'major'] };
+  const n = Number.isFinite(round) && round >= 1 ? Math.floor(round) : 1;
+  if (verify || n >= 3) return { max: 3, severities: ['critical'] };
+  if (n === 2) return { max: 6, severities: ['critical', 'major'] };
   return { max: 12, severities: ['critical', 'major', 'minor'] };
 }
 

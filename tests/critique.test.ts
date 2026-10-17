@@ -87,6 +87,10 @@ describe('the budget of a round and the verdict (K3-04)', () => {
     expect(budgetFor(1, true)).toEqual({ max: 3, severities: ['critical'] });
     expect(budgetFor(2, true)).toEqual({ max: 3, severities: ['critical'] });
   });
+  it('budgetFor: a round that is 0, negative, fractional or not a number is round 1 (clamped, never an accident of the comparisons)', () => {
+    for (const bad of [0, -1, -7, NaN, 0.5, Infinity - Infinity]) expect(budgetFor(bad)).toEqual(budgetFor(1));
+    expect(budgetFor(0, true)).toEqual({ max: 3, severities: ['critical'] });
+  });
   it('budgetIssues names the extra proposals and every severity the round does not allow', () => {
     const seven = parseCritique(crit(2, ['major', 'major', 'major', 'major', 'major', 'major', 'major']));
     expect(budgetIssues(seven, budgetFor(2))).toEqual(['7 proposals, but this round allows at most 6']);

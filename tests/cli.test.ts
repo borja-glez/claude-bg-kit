@@ -834,6 +834,85 @@ describe('design commands', () => {
     });
   });
 
+  describe('critique-next: the next round, its budget and what it reviews (K3-04, K3-06)', () => {
+    const all = ['alcance', 'fuera-de-alcance', 'arquitectura', 'riesgos'];
+    const crit = (round: number, version: number) => {
+      mkdirSync(path.join(ddir(), 'design/critiques'), { recursive: true });
+      writeFileSync(path.join(ddir(), `design/critiques/r${round}.json`), JSON.stringify({ round, version, scope: round === 1 ? 'full' : 'changed', proposals: [] }));
+    };
+    const edit = (from: string, to: string) => { const p = path.join(dir, rel); writeFileSync(p, readFileSync(p, 'utf8').replace(from, to)); };
+    const next = (...extra: string[]) => JSON.parse(run(['critique-next', rel, ...extra], io).stdout);
+    beforeEach(() => { run(['design-snapshot', rel, '--note', 'borrador', '--round', '0'], io); });
+    it('round 1 reviews everything with the full budget and says where its critique goes; there is nothing to verify yet', () => {
+      expect(next()).toEqual({
+        round: 1, version: 1, budget: { max: 12, severities: ['critical', 'major', 'minor'] }, scope: 'full', since: null,
+        changed: [], removed: [], review: all, out: path.join(dir, 'docs/waypoint/demo-shop/design/critiques/r1.json'),
+      });
+      const v = run(['critique-next', rel, '--verify'], io);
+      expect(v.code).toBe(2);
+      expect(v.stderr).toContain('nothing to verify');
+    });
+    it('round 2 reviews what changed, critical and major only; more than half changed is a full review', () => {
+      crit(1, 1);
+      edit('no tiene rollback', 'tiene rollback parcial');
+      run(['design-snapshot', rel, '--note', 'ronda 1', '--round', '1'], io);
+      expect(next()).toMatchObject({ round: 2, version: 2, budget: { max: 6, severities: ['critical', 'major'] }, scope: 'changed', since: 1, changed: ['riesgos'], review: ['riesgos'] });
+      edit('Backend en Node', 'Backend en Deno');
+      edit('Multi-divisa', 'Multimoneda');
+      expect(next()).toMatchObject({ scope: 'full', changed: ['fuera-de-alcance', 'arquitectura', 'riesgos'], review: all });
+    });
+    it('from round 3, and in a verification, it reviews only what changed with at most 3 critical', () => {
+      crit(1, 1);
+      edit('no tiene rollback', 'tiene rollback parcial');
+      run(['design-snapshot', rel, '--note', 'ronda 1', '--round', '1'], io);
+      crit(2, 2);
+      edit('Backend en Node', 'Backend en Deno');
+      run(['design-snapshot', rel, '--note', 'ronda 2', '--round', '2'], io);
+      const three = { budget: { max: 3, severities: ['critical'] }, scope: 'changed', since: 2, review: ['arquitectura'] };
+      expect(next()).toMatchObject({ round: 3, ...three });
+      expect(next('--verify')).toMatchObject({ round: 3, ...three });
+    });
+    it('with nothing changed since the last critique there is nothing to review; --full reviews everything anyway', () => {
+      crit(1, 1);
+      expect(next()).toMatchObject({ round: 2, scope: 'changed', review: [] });
+      expect(next('--full')).toMatchObject({ round: 2, scope: 'full', review: all });
+    });
+    describe('after a reopen the budget starts again (Review Focus 2, ruling C1)', () => {
+      const reopened = () => {
+        crit(1, 1);
+        crit(2, 1);
+        edit('start_prompt: /waypoint:work backend', 'start_prompt: /waypoint:work backend\nstatus: approved');
+        run(['design-snapshot', rel, '--note', 'aprobado', '--round', '2'], io);
+        // Reopened the way older skills did it: status back to draft and a note, no kind.
+        edit('status: approved', 'status: draft');
+        edit('Backend en Node', 'Backend en Node 22');
+        run(['design-snapshot', rel, '--note', 'reabierto para T044'], io);
+      };
+      it('critique-next: its first round gets the full budget, on what changed', () => {
+        reopened();
+        expect(next()).toMatchObject({ round: 3, version: 3, budget: { max: 12, severities: ['critical', 'major', 'minor'] }, scope: 'changed', since: 1, review: ['arquitectura'] });
+      });
+      it('critique-check --design applies the same budget to round 3 (not the absolute round 3 budget); without --design the round is absolute', () => {
+        reopened();
+        const minor = { n: 1, category: 'risk', severity: 'minor', section: 'arquitectura', problem: 'p', change: 'c' };
+        writeFileSync(path.join(dir, 'r3.json'), JSON.stringify({ round: 3, version: 3, scope: 'changed', proposals: [minor] }));
+        expect(run(['critique-check', 'r3.json', '--round', '3', '--version', '3', '--design', rel], io).code).toBe(0);
+        expect(run(['critique-check', 'r3.json', '--round', '3', '--version', '3'], io).stderr).toContain('proposal 1 is minor');
+        // Round 4 is the second round after the reopen: the budget of round 2 (critical and major).
+        writeFileSync(path.join(dir, 'r4.json'), JSON.stringify({ round: 4, version: 4, scope: 'changed', proposals: [{ ...minor, severity: 'major' }] }));
+        expect(run(['critique-check', 'r4.json', '--round', '4', '--design', rel], io).code).toBe(0);
+        writeFileSync(path.join(dir, 'r4m.json'), JSON.stringify({ round: 4, version: 4, scope: 'changed', proposals: [minor] }));
+        expect(run(['critique-check', 'r4m.json', '--round', '4', '--design', rel], io).stderr).toContain('proposal 1 is minor');
+        // A verification stays at 3 critical.
+        expect(run(['critique-check', 'r3.json', '--round', '3', '--design', rel, '--verify'], io).code).toBe(1);
+      });
+    });
+    it('the usage names critique-next', () => {
+      expect(run(['nope'], io).stderr).toContain('critique-next');
+      expect(run(['critique-next'], io).code).toBe(2);
+    });
+  });
+
   describe('critique-check: the budget, the verdict and the scope (K3-04, K3-15)', () => {
     const prop = (n: number, severity: string, section = 'riesgos') => ({ n, category: 'risk', severity, section, problem: 'p', change: 'c' });
     const write = (name: string, c: object) => writeFileSync(path.join(dir, name), JSON.stringify(c));
