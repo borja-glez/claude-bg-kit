@@ -13,6 +13,11 @@ elsewhere and are reconstructed from their READMEs.
 
 ## waypoint
 
+### 0.23.1 — 2026-10-17
+
+#### Changed
+- `waypoint validate` warns about plan tasks without `zones`: they may touch anything, so `conflicts` counts them against every task in progress and forge runs them alone.
+
 ### 0.23.0 — 2026-10-16
 
 #### Added
@@ -233,6 +238,25 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.20.0 — 2026-10-17
+
+#### Added
+- `forge swarm cleanup [--dry-run]` removes forge's task and run worktrees, and its `task/*` and `forge/run-*` branches, once they are merged into the branch of the main checkout, with `git worktree remove` and `git branch -d` only. What git refuses, a branch not merged, a worktree with changes and waypoint's tracks stay, listed in `kept` with their reason. It also prunes the state of ended runs, the diffs and validator runs of the removed tasks and the baselines of `.forge/execution/baseline/` older than 7 days. The end of a run offers it. It exits with code 2 while an execution is active, a merge is in flight, a background job is live or a step holds `step.lock`, and keeps a worktree whose ledger has events the main one lacks (`unmerged ledger`). A new `swarm start` prunes the state of other runs.
+- A task resumed on its branch is reviewed with the commits of its earlier attempt: `swarm worktree` takes BASE at the merge-base with the run branch and prints `resumed` and `prior`, and `FORGE brief --prior-file` adds a «Previous attempt» section.
+- Every event the CLI writes carries `session` (Claude's id), `runId` (when its task belongs to an execution) and, for a plan task, `project`; `.forge/status.json` gains `session`, `runId` and `project`.
+- `forge stop` prints JSON: what it stopped, `release` (the `state/T` writes of the coordinator's tasks), `members` and `running` (the run's background jobs still running; it kills none). `swarm close` also prints `sessions`, the run's members to message.
+
+#### Changed
+- A plan task is the pair (project, task): its work folder is `.forge/work/<project>/<T>/` (a loose task keeps `.forge/work/<T>/`), `triage --task`, `swarm worktree` and `swarm relaunch` print it as `work` (`swarm status` as a `work` map from task to folder), and rounds, the ratchet, stats and resuming read only the events of that project. Older folders and events are still read.
+- `/forge:stop` works from any worktree and stops an execution for real: its running tasks become `stopped`, their leases end and the run's members are removed. `swarm close` and the end of a run release `stopped` tasks too. `infinite start`, `infinite status`, `cycle`, the Stop hook and `swarm status` read the run and the execution of the main checkout.
+- A run member's events go to the main checkout's ledger, and its verification evidence is copied there (at most 50 MB per call).
+- forge's route is per session, in `.forge/route/<session>.json`: `route set` and `route stage` need the session (`--session`, else `CLAUDE_CODE_SESSION_ID`; without one they exit with code 2) and never touch another one's. The routing rule stays out of forge's task and run worktrees and while the session has a forge task open; after `/clear` (within 2 minutes) or in a fork it names the route the earlier conversation left half done.
+- The live hook speaks by role: a session that does not coordinate the execution is told that it runs under another session, or that it lost its coordinator or stopped, with `/forge:run --resume` and `/forge:stop` as the ways if you ask. `/forge:run --resume` has its own steps.
+- The forge Stop hook keeps an agent alive while its task's lease runs, at most 90 minutes after its last report.
+- A resume from another conversation, or a takeover with the coordinator's id, rebinds the run only once the bound conversation stopped. `swarm status` and `infinite status` say `unbound` when no session drives an active run. An ephemeral run closes when it finishes. `swarm takeover` no longer reads the roadmap lease: its usage drops `--db`, still accepted for this version.
+- A plan task without zones runs alone.
+- Requires waypoint ^0.23.1.
 
 ### 0.19.2 — 2026-10-16
 
@@ -611,6 +635,11 @@ elsewhere and are reconstructed from their READMEs.
 - Requires waypoint ^0.7.0.
 
 ## lens
+
+### 0.11.9 — 2026-10-17
+
+#### Changed
+- The forge card counts a plan task's briefs in `.forge/work/<project>/<task>/`, where forge keeps them now.
 
 ### 0.11.8 — 2026-10-16
 

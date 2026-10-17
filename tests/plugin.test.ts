@@ -21,7 +21,7 @@ describe('plugin layout', () => {
   });
   it('lens manifest, module and contract exist', () => {
     const p = JSON.parse(read('plugins/lens/.claude-plugin/plugin.json'));
-    expect(p).toMatchObject({ name: 'lens', version: '0.11.8', types: './types/index.d.ts' });
+    expect(p).toMatchObject({ name: 'lens', version: '0.11.9', types: './types/index.d.ts' });
     expect(JSON.parse(read('plugins/lens/hooks/hooks.json'))).toEqual({ modules: ['./register.js'] });
     for (const f of ['hooks/register.js', 'types/index.d.ts', 'README.md']) {
       expect(existsSync(new URL(`../plugins/lens/${f}`, import.meta.url))).toBe(true);
@@ -198,20 +198,20 @@ describe('plugin layout', () => {
     expect(md).toMatch(/bundles several independent changes/);
     expect(md).toMatch(/adds new behaviour with its tests/);
   });
-  it('versions: forge 0.19.2, waypoint 0.23.0', () => {
+  it('versions: forge 0.20.0, waypoint 0.23.1', () => {
     const forge = JSON.parse(read('plugins/forge/.claude-plugin/plugin.json'));
-    expect(forge.version).toBe('0.19.2');
-    expect(forge.dependencies).toEqual([{ name: 'waypoint', version: '^0.23.0' }]);
-    expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.23.0');
+    expect(forge.version).toBe('0.20.0');
+    expect(forge.dependencies).toEqual([{ name: 'waypoint', version: '^0.23.1' }]);
+    expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.23.1');
   });
-  it('CHANGELOG has the entries of forge 0.19.2, waypoint 0.23.0 and lens 0.11.8', () => {
+  it('CHANGELOG has the entries of forge 0.20.0, waypoint 0.23.1 and lens 0.11.9', () => {
     const md = read('CHANGELOG.md');
     // Each plugin's section, newest version first.
     const section = (p: string) => md.split(/^## /m).find(s => s.startsWith(`${p}\n`) || s.startsWith(`${p}\r\n`)) ?? '';
     const versions = (p: string) => [...section(p).matchAll(/^### (\d+\.\d+\.\d+) — /gm)].map(m => m[1]);
-    expect(versions('waypoint').slice(0, 2)).toEqual(['0.23.0', '0.22.0']);
-    expect(versions('forge').slice(0, 2)).toEqual(['0.19.2', '0.19.1']);
-    expect(versions('lens').slice(0, 2)).toEqual(['0.11.8', '0.11.7']);
+    expect(versions('waypoint').slice(0, 2)).toEqual(['0.23.1', '0.23.0']);
+    expect(versions('forge').slice(0, 2)).toEqual(['0.20.0', '0.19.2']);
+    expect(versions('lens').slice(0, 2)).toEqual(['0.11.9', '0.11.8']);
   });
   it('READMEs in Spanish and English tell the cost changes', () => {
     for (const lang of ['', '.es']) {
@@ -447,9 +447,9 @@ describe('plugin layout', () => {
     for (const w of ['design-snapshot', 'design-changed', 'critique-check', 'critique-select', 'design-page', 'rewrite', 'interview', 'approve', '--since', 'applied']) expect(md).toContain(w);
     expect(read('plugins/waypoint/skills/plan/SKILL.md')).toContain('plan.yaml does not exist yet');
   });
-  it('forge manifest depends on waypoint ^0.23.0 and ships its CLI', () => {
+  it('forge manifest depends on waypoint ^0.23.1 and ships its CLI', () => {
     const p = JSON.parse(read('plugins/forge/.claude-plugin/plugin.json'));
-    expect(p).toMatchObject({ name: 'forge', version: '0.19.2', dependencies: [{ name: 'waypoint', version: '^0.23.0' }] });
+    expect(p).toMatchObject({ name: 'forge', version: '0.20.0', dependencies: [{ name: 'waypoint', version: '^0.23.1' }] });
     expect(existsSync(new URL('../plugins/forge/dist/forge.cjs', import.meta.url))).toBe(true);
   });
   it('forge scout agent: frontmatter and rules', () => {
@@ -883,7 +883,7 @@ describe('plugin layout', () => {
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
       const md = read(f);
       for (const s of ['`swarm relaunch <task> --plan p`', '`swarm nudge <task> [--plan p]`', '`swarm join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]`',
-        '--stage S [--status running|accepted|blocked] [--agent A | --no-agent] [--round N] [--lease ISO]`', '`swarm takeover --session SID --hook-session ID [--db dir]`']) {
+        '--stage S [--status running|accepted|blocked] [--agent A | --no-agent] [--round N] [--lease ISO]`', '`swarm takeover --session SID --hook-session ID`']) {
         expect(md).toContain(f.endsWith('es.md') ? s.replace(/<task>/g, '<tarea>') : s);
       }
     }
@@ -975,8 +975,10 @@ describe('plugin layout', () => {
   it('READMEs describe swarm close, the Claude session id, the integrated commit and the design loop of wave 0', () => {
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
       const md = read(f);
-      for (const s of ['`swarm close`', '`swarm start --project P --session SID --hook-session ID', '`swarm takeover --session SID --hook-session ID [--db dir]`',
+      for (const s of ['`swarm close`', '`swarm start --project P --session SID --hook-session ID', '`swarm takeover --session SID --hook-session ID`',
         '`infinite start --cycles N | --hours H --session ID', 'CLAUDE_CODE_SESSION_ID', '`commit`', 'kind: e2e']) expect(md).toContain(s);
+      // The takeover no longer reads the roadmap lease: --db is accepted for one more version but no longer documented.
+      expect(md).not.toContain('--hook-session ID [--db dir]');
       expect(md).not.toContain('Stop hook binds');
       expect(md).not.toContain('first Stop or SubagentStart');
       expect(md).not.toContain('primer Stop o SubagentStart');
@@ -1352,5 +1354,21 @@ describe('plugin layout', () => {
     // It binds first, as execution.md step 1 does: a conversation resumed after /clear holds no binding. An ephemeral run binds at its start too.
     expect(res.slice(res.indexOf('## /forge:run --resume'))).toContain('bind <plan> --via forge-run --claude <CSID>');
     expect(runRef('ephemeral').split('\n').find(l => l.startsWith('2. **Start.**'))).toContain('bind <plan> --via forge-run --claude <CSID>');
+  });
+  it('READMEs describe wave 2c: cleanup, stop from any worktree, routes per session, work folders by project and resumed tasks', () => {
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
+      const md = read(f);
+      for (const s of ['`swarm cleanup [--dry-run]`', '`/forge:stop`', '.forge/route/<session>.json', '.forge/work/<project>/<T>/', '`prior`', '--prior-file', '`stopped`', '`unbound: true`'])
+        expect(md, `${f}: ${s}`).toContain(s);
+    }
+    for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) expect(read(f), f).toContain(f.endsWith('es.md') ? 'sin zonas' : 'without zones');
+  });
+  it('forge READMEs name the CLI fields of wave 2c: the handover by project, cleanup\'s unmerged ledger, stop\'s running jobs and /forge:run --resume', () => {
+    for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
+      const md = read(f);
+      for (const s of ['.forge/work/<project>/<T>/handover.md', '`unmerged ledger`', '{main, run, execution, release, members, running}', '/forge:run --resume'])
+        expect(md, `${f}: ${s}`).toContain(s);
+      expect(md, f).not.toContain('`.forge/work/<T>/handover.md`');
+    }
   });
 });
