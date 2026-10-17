@@ -15927,6 +15927,27 @@ function nextLive(prev, ev, ctx) {
   const ended = ev.event === "SessionEnd" ? true : ev.event === "SessionStart" ? false : prev?.ended ?? false;
   return { sessionId: ctx.sessionId, role: ctx.role, runId: ctx.runId, task: ctx.task, event: ev.event, ts: ctx.now, agents, ended };
 }
+function writeLive(main, file, doc) {
+  forgeDir(main);
+  (0, import_node_fs19.mkdirSync)(import_node_path19.default.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    (0, import_node_fs19.writeFileSync)(tmp, JSON.stringify(doc));
+    (0, import_node_fs19.renameSync)(tmp, file);
+  } finally {
+    (0, import_node_fs19.rmSync)(tmp, { force: true });
+  }
+}
+function clearEnded(main, e, sessionId, now) {
+  try {
+    if (!isSafeId(sessionId)) return;
+    const file = liveFile(main, sessionId);
+    const prev = normalizeLive(JSON.parse((0, import_node_fs19.readFileSync)(file, "utf8")));
+    if (!prev?.ended || prev.sessionId !== sessionId) return;
+    writeLive(main, file, nextLive(prev, { event: "SessionStart" }, { sessionId, role: prev.role, runId: e.runId, task: prev.task, now: now.toISOString() }));
+  } catch {
+  }
+}
 function agoText(ms) {
   return ms < 36e5 ? `${Math.max(1, Math.round(ms / 6e4))} min` : `${Math.round(ms / 36e5)} h`;
 }
@@ -16005,8 +16026,6 @@ function hookLive(io, forced) {
       if (role2 !== "other-live" && role2 !== "previous") return "";
       return JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: notOwnerText(exec, role2, now) } });
     }
-    const coordinatorEnds = event === "SessionEnd" && viewer.coordinator && exec.hookSession === sessionId && !exec.closedAt;
-    if (!exec.active && !coordinatorEnds) return "";
     const member = viewer.coordinator ? null : viewer.member;
     const role = member ? member.role : "coordinator";
     const signalId = member ? member.sessionId : sessionId;
@@ -16017,21 +16036,16 @@ function hookLive(io, forced) {
     } catch {
       prev = null;
     }
-    const doc = nextLive(
+    if (!exec.active) {
+      const bound = viewer.coordinator && exec.hookSession === sessionId && !exec.closedAt;
+      if (!bound || !(event === "SessionEnd" || event === "SessionStart" && prev?.ended === true)) return "";
+    }
+    writeLive(main, file, nextLive(
       prev,
       { event, agentId: typeof input.agent_id === "string" ? input.agent_id : void 0, agentType: typeof input.agent_type === "string" ? input.agent_type : void 0 },
       { sessionId: signalId, role, runId: exec.runId, task: member?.task ?? null, now: io.now().toISOString() }
-    );
-    forgeDir(main);
-    (0, import_node_fs19.mkdirSync)(import_node_path19.default.dirname(file), { recursive: true });
-    const tmp = `${file}.${process.pid}.tmp`;
-    try {
-      (0, import_node_fs19.writeFileSync)(tmp, JSON.stringify(doc));
-      (0, import_node_fs19.renameSync)(tmp, file);
-    } finally {
-      (0, import_node_fs19.rmSync)(tmp, { force: true });
-    }
-    if (starting) {
+    ));
+    if (starting && exec.active) {
       const running = Object.values(exec.tasks).filter((t) => t.status === "running").length;
       const text2 = role === "coordinator" ? `forge: this session coordinates the execution ${exec.runId} (${exec.mode}, ${running}/${exec.parallel} running, run branch ${exec.branch}). Resume it with /forge:run \u2192 Resume: renew your lease, reconcile each task and keep stepping.` : `forge: this session is the ${role} session of ${member?.task ?? "a task"} in the execution ${exec.runId} coordinated by ${exec.coordinator}. Resume it with /forge:member: rejoin with FORGE swarm join, renew your lease and continue from your last reported stage.`;
       const run2 = parseRun(readRunText(main));
@@ -17577,6 +17591,16 @@ function swarmCommand(args, io, deps, ext = {}) {
         if (liveness2 !== "stopped") throw new UsageError(boundElsewhere("retry", x.runId, x.hookSession, liveness2));
       };
       gate(e);
+      let woke = null;
+      const revive = (cur) => {
+        if (!revived(cur)) return {};
+        woke = cur;
+        return { active: true, stopReason: null, stallReason: null };
+      };
+      const clearOwnEnded = () => {
+        const w = woke;
+        if (w && hook && hook === w.hookSession) clearEnded(io.cwd, w, hook, now);
+      };
       if (has("adopt")) {
         const adoptable = (x) => !!x && x.status === "conflict" && x.executor !== "subagents";
         const notAdoptable = (x) => new UsageError(`swarm retry: --adopt takes a member's task in conflict (${task} is ${x ? `${x.status}, ${x.executor}` : "not in this execution"})`);
@@ -17601,10 +17625,11 @@ function swarmCommand(args, io, deps, ext = {}) {
           adopted = base;
           return {
             ...cur,
-            ...revived(cur) ? { active: true, stopReason: null, stallReason: null } : {},
+            ...revive(cur),
             tasks: { ...cur.tasks, [task]: { ...base, status: "running", stage: "implement", executor: "subagents", worktree, attempts: base.attempts + 1, nudgedAt: null, finishedAt: iso3, updatedAt: iso3, stageSince: iso3 } }
           };
         });
+        clearOwnEnded();
         writePublicTask(io.cwd, { task, runId: e.runId, stage: "implement", status: "running", agent: null, round: adopted.round, since: iso3, updatedAt: iso3, leaseUntil: new Date(now.getTime() + LEASE_MINUTES * 6e4).toISOString(), by: e.coordinator, mode: "subagents" });
         return json3({ task, adopted: true, previous: adopted.executor, worktree, branch: t.branch, work: workRel({ project: e.project, task }) });
       }
@@ -17618,10 +17643,11 @@ function swarmCommand(args, io, deps, ext = {}) {
         if (!retryable(base)) throw new UsageError(`swarm retry: ${task} is not in conflict or blocked`);
         return {
           ...cur,
-          ...revived(cur) ? { active: true, stopReason: null, stallReason: null } : {},
+          ...revive(cur),
           tasks: { ...cur.tasks, [task]: { ...base, status: "running", stage: "implement", attempts: base.attempts + 1, detail: null, finishedAt: null, updatedAt: iso3, stageSince: iso3 } }
         };
       });
+      clearOwnEnded();
       return ok();
     }
     case "relaunch":
@@ -18597,13 +18623,37 @@ function setAsideEarlier(dir, n, id2, events, run2, cwd2) {
   } catch {
     return null;
   }
-  const rounds = names2.flatMap((f) => {
-    const m = new RegExp(`^reviews-${n}-(\\d+)$`).exec(f);
-    return m && !ours.has(Number(m[1])) ? [Number(m[1])] : [];
-  });
-  if (!rounds.length) return null;
+  let evidence = [];
+  try {
+    evidence = (0, import_node_fs27.readdirSync)(import_node_path27.default.join(dir, "evidence"));
+  } catch {
+    evidence = [];
+  }
+  const roundOf2 = (f) => {
+    const m = new RegExp(`^(?:reviews-${n}-(\\d+)|findings-${n}-(\\d+)\\.json|fix-${n}-(\\d+)\\.patch|handover-${n}-(\\d+)\\.md|validators-fix-${n}-(\\d+)-.+\\.json)$`).exec(f);
+    const k = m ? m.slice(1).find((x) => x !== void 0) : void 0;
+    return k === void 0 ? null : Number(k);
+  };
+  const rounds = [...new Set([
+    ...names2.map(roundOf2),
+    ...evidence.map((f) => {
+      const m = new RegExp(`^${n}-(\\d+)$`).exec(f);
+      return m ? Number(m[1]) : null;
+    })
+  ].filter((k) => k !== null && !ours.has(k)))].sort((a, b) => a - b);
+  let head2 = null;
+  try {
+    head2 = JSON.parse((0, import_node_fs27.readFileSync)(import_node_path27.default.join(dir, `validators-head-${n}.json`), "utf8"));
+  } catch {
+    head2 = null;
+  }
+  const briefFiles = [
+    ...ours.size ? [] : [`findings-index-${n}.json`],
+    ...head2?.runId === run2.runId ? [] : [`validators-head-${n}.json`]
+  ].filter((f) => names2.includes(f));
+  if (!rounds.length && !briefFiles.length) return null;
   const aside = import_node_path27.default.join(dir, `earlier-${run2.runId}`);
-  let moved = 0;
+  const moved = [];
   const failed = [];
   const move = (name) => {
     const from = import_node_path27.default.join(dir, name);
@@ -18611,7 +18661,7 @@ function setAsideEarlier(dir, n, id2, events, run2, cwd2) {
     try {
       (0, import_node_fs27.mkdirSync)(import_node_path27.default.dirname(import_node_path27.default.join(aside, name)), { recursive: true });
       (0, import_node_fs27.renameSync)(from, import_node_path27.default.join(aside, name));
-      moved++;
+      moved.push(name);
     } catch {
       failed.push(from);
     }
@@ -18622,12 +18672,16 @@ function setAsideEarlier(dir, n, id2, events, run2, cwd2) {
     move(`evidence/${n}-${k}`);
     for (const f of roundFiles(k)) move(f);
   }
-  for (const f of [`findings-index-${n}.json`, `validators-head-${n}.json`]) move(f);
+  for (const f of briefFiles) move(f);
   if (failed.length) {
-    throw new UsageError(`prep: ${failed.map((f) => rel2(cwd2, f)).join(", ")} could not be moved aside to ${rel2(cwd2, aside)} (an earlier run's review of this brief): close what holds it and run prep again`);
+    throw new UsageError(`prep: ${failed.map((f) => shown(cwd2, f)).join(", ")} could not be moved aside to ${shown(cwd2, aside)} (an earlier run's review of this brief): close what holds it and run prep again`);
   }
-  return moved ? aside : null;
+  return moved.length ? { aside, moved } : null;
 }
+var shown = (cwd2, p) => {
+  const r2 = rel2(cwd2, p);
+  return r2.startsWith("..") ? import_node_path27.default.resolve(p).split(import_node_path27.default.sep).join("/") : r2;
+};
 function restoringGenerated(deps, generated, fn, into) {
   return generated.length ? restoringRegenerated({ git: deps.git }, fn, into, generated) : fn();
 }
@@ -19330,8 +19384,15 @@ function prep(args, deps) {
   const aside = run2 ? setAsideEarlier(dir, n, id2, mine, run2, deps.cwd) : null;
   const main = ledgerRoot(deps.cwd);
   const inWork = import_node_path27.default.relative(deps.cwd, dir);
-  if (run2 && !samePath(main, deps.cwd) && inWork && !inWork.startsWith("..") && !import_node_path27.default.isAbsolute(inWork)) setAsideEarlier(import_node_path27.default.join(main, inWork), n, id2, mine, run2, deps.cwd);
-  const earlier = aside ? { earlier: rel2(deps.cwd, aside) } : {};
+  if (run2 && !samePath(main, deps.cwd) && inWork && !inWork.startsWith("..") && !import_node_path27.default.isAbsolute(inWork)) {
+    try {
+      setAsideEarlier(import_node_path27.default.join(main, inWork), n, id2, mine, run2, deps.cwd);
+    } catch (err) {
+      if (err instanceof UsageError && aside) throw new UsageError(`${err.message}; already moved this worktree's ${aside.moved.join(", ")} to ${shown(deps.cwd, aside.aside)}`);
+      throw err;
+    }
+  }
+  const earlier = aside ? { earlier: rel2(deps.cwd, aside.aside) } : {};
   const tmFile = config ? writeThreatModel(dir, config) : null;
   const threatModel = tmFile ? rel2(deps.cwd, tmFile) : null;
   const validate = `node "${slash(deps.self ?? "forge.cjs")}" validate --affected --base ${base} --task ${task}${samePath(deps.repoDir, deps.cwd) ? "" : ` --cwd "${slash(deps.repoDir)}"`}`;
