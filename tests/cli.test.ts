@@ -953,6 +953,99 @@ describe('design commands', () => {
       expect(run(['critique-check', 'f.json', '--round', '2', '--changed', 'riesgos'], io).stderr).toBe('');
     });
   });
+
+  describe('design-snapshot --kind (K3-07, A-21)', () => {
+    const p = () => path.join(dir, rel);
+    const approve = () => writeFileSync(p(), readFileSync(p(), 'utf8').replace('start_prompt: /waypoint:work backend', 'start_prompt: /waypoint:work backend\nstatus: approved'));
+    it('records the kind; amend and approve need an approved design and keep it so, reopen needs a draft', () => {
+      expect(JSON.parse(run(['design-snapshot', rel, '--note', 'borrador', '--round', '0', '--kind', 'draft'], io).stdout).kind).toBe('draft');
+      const draftAmend = run(['design-snapshot', rel, '--note', 'x', '--kind', 'amend'], io);
+      expect(draftAmend.code).toBe(2);
+      expect(draftAmend.stderr).toContain('--kind amend needs status: approved');
+      approve();
+      expect(run(['design-snapshot', rel, '--note', 'aprobado', '--kind', 'approve'], io).code).toBe(0);
+      writeFileSync(p(), readFileSync(p(), 'utf8').replace('Backend en Node', 'Backend en Node 22'));
+      expect(run(['design-snapshot', rel, '--note', 'enmienda', '--kind', 'amend'], io).code).toBe(0);
+      expect(parseDesign(readFileSync(p(), 'utf8')).meta.status).toBe('approved');
+      expect(run(['design-snapshot', rel, '--note', 'r', '--kind', 'reopen'], io).code).toBe(2);
+      writeFileSync(p(), readFileSync(p(), 'utf8').replace('status: approved', 'status: draft'));
+      expect(run(['design-snapshot', rel, '--note', 'reabierto', '--kind', 'reopen'], io).code).toBe(0);
+      for (const bad of [['--kind', 'merge'], ['--kind']]) expect(run(['design-snapshot', rel, '--note', 'x', ...bad], io).code, bad.join(' ')).toBe(2);
+      expect(changelog().map((e: { kind?: string }) => e.kind)).toEqual(['draft', 'approve', 'amend', 'reopen']);
+    });
+    it('without --kind, --applied records apply, --rewrite records rewrite, and anything else no kind', () => {
+      mkdirSync(path.join(ddir(), 'design/critiques'), { recursive: true });
+      writeFileSync(path.join(ddir(), 'design/critiques/r1.json'), JSON.stringify({ round: 1, version: 1, scope: 'full', proposals: [{ n: 1, category: 'gap', severity: 'major', section: '_intro', problem: 'p', change: 'c' }] }));
+      expect(JSON.parse(run(['design-snapshot', rel, '--note', 'a', '--round', '1', '--applied', '1'], io).stdout).kind).toBe('apply');
+      expect(JSON.parse(run(['design-snapshot', rel, '--note', 'b', '--round', '1', '--rewrite'], io).stdout).kind).toBe('rewrite');
+      expect(JSON.parse(run(['design-snapshot', rel, '--note', 'c'], io).stdout).kind).toBeUndefined();
+    });
+  });
+
+  describe('design-impact (A-21)', () => {
+    const p = () => path.join(dir, rel);
+    const edit = (from: string, to: string) => writeFileSync(p(), readFileSync(p(), 'utf8').replace(from, to));
+    const linkPlan = (version?: number) => {
+      const plan = path.join(dir, 'plan.yaml');
+      writeFileSync(plan, readFileSync(plan, 'utf8')
+        .replace('version: "0.1"\n', version ? `version: "0.1"\ndesign_version: ${version}\n` : 'version: "0.1"\n')
+        .replace('    title: Esquema de pedidos\n', '    title: Esquema de pedidos\n    design_ref: riesgos\n')
+        .replace('    title: API de pedidos\n', '    title: API de pedidos\n    design_ref: arquitectura\n')
+        .replace('    title: Maqueta de carrito\n', '    title: Maqueta de carrito\n    design_ref: alcance\n'));
+    };
+    const impact = (...extra: string[]) => JSON.parse(run(['design-impact', rel, '--plan', 'plan.yaml', ...extra], io).stdout);
+    beforeEach(() => { run(['design-snapshot', rel, '--note', 'v1', '--round', '0'], io); });
+    it('lists the tasks whose section changed or went away since the plan design_version, with their state, and counts the unlinked ones', () => {
+      linkPlan(1);
+      edit('Backend en Node y frontend web.', 'Backend en Node 22.');
+      edit('\n## Riesgos\n\nLa migración de reembolsos no tiene rollback.\n', '\n');
+      run(['design-snapshot', rel, '--note', 'v2'], io);
+      mkdirSync(path.join(dir, 'states'));
+      writeFileSync(path.join(dir, 'states/T001.json'), JSON.stringify({ status: 'done' }));
+      expect(impact('--states', 'states')).toEqual({
+        since: 1, changed: ['arquitectura'], removed: ['riesgos'],
+        tasks: [{ id: 'T001', ref: 'riesgos', status: 'done' }, { id: 'T002', ref: 'arquitectura', status: null }], unref: 3,
+      });
+    });
+    it('without design_version it compares with the version before the current one; --since wins; a bad or unknown --since exits 2 (Review Focus 5)', () => {
+      linkPlan();
+      edit('Backend en Node y frontend web.', 'Backend en Node 22.');
+      run(['design-snapshot', rel, '--note', 'v2'], io);
+      edit('La versión 0.1 cubre pedidos', 'La versión 0.1 cubre pedidos y devoluciones');
+      run(['design-snapshot', rel, '--note', 'v3'], io);
+      expect(impact()).toMatchObject({ since: 2, changed: ['alcance'], tasks: [{ id: 'T003', ref: 'alcance', status: null }] });
+      expect(impact('--since', '1')).toMatchObject({ since: 1, changed: ['alcance', 'arquitectura'] });
+      for (const bad of [['--since', '9'], ['--since', '0'], ['--since', 'x']]) expect(run(['design-impact', rel, '--plan', 'plan.yaml', ...bad], io).code, bad.join(' ')).toBe(2);
+      expect(run(['design-impact', rel], io).code).toBe(2);
+      expect(run(['design-impact', rel, '--plan', 'nope.yaml'], io).code).toBe(2);
+    });
+    it('a plan without any design_ref has no task to list and says how many are unlinked', () => {
+      expect(impact()).toMatchObject({ since: 0, removed: [], tasks: [], unref: 6 });
+    });
+    it('the usage names design-impact', () => {
+      expect(run(['nope'], io).stderr).toContain('design-impact');
+    });
+  });
+
+  it('validate --design warns when the plan does not link the approved design: its version and its artifact (K3-08)', () => {
+    const p = path.join(dir, rel);
+    const planFile = path.join(dir, 'plan.yaml');
+    run(['design-snapshot', rel, '--note', 'v1', '--round', '0'], io);
+    writeFileSync(p, readFileSync(p, 'utf8').replace('start_prompt: /waypoint:work backend', 'start_prompt: /waypoint:work backend\nstatus: approved\nartifact: https://claude.ai/artifact/d1'));
+    run(['design-snapshot', rel, '--note', 'aprobado', '--kind', 'approve'], io);
+    const out = run(['validate', 'plan.yaml', '--design', rel], io);
+    expect(out.code).toBe(0);
+    expect(out.stdout).toContain('warning: design_version is missing but the approved design is v2: set design_version: 2');
+    expect(out.stdout).toContain("warning: artifacts.design is not the design's artifact: set it to https://claude.ai/artifact/d1");
+    writeFileSync(planFile, readFileSync(planFile, 'utf8').replace('version: "0.1"\n', 'version: "0.1"\ndesign_version: 2\nartifacts: { design: "https://claude.ai/artifact/d1" }\n'));
+    const linked = run(['validate', 'plan.yaml', '--design', rel], io).stdout;
+    expect(linked).not.toContain('warning: design_version');
+    expect(linked).not.toContain('warning: artifacts.design');
+    // A reopened design (a draft) asks nothing of the plan until it is approved again.
+    writeFileSync(p, readFileSync(p, 'utf8').replace('status: approved', 'status: draft'));
+    run(['design-snapshot', rel, '--note', 'reabierto', '--kind', 'reopen'], io);
+    expect(run(['validate', 'plan.yaml', '--design', rel], io).stdout).not.toContain('warning: design_version');
+  });
 });
 
 describe('classic hooks', () => {

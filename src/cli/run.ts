@@ -9,7 +9,7 @@ import { pickTask, conflictsFor, recoverableTasks, inboxFor, escalationCandidate
 import { parseDesign, changedSections, designBody, DesignError, setDesignStatus } from '../lib/design.js';
 import { importSpec, SpecImportError } from '../lib/design-import.js';
 import { designGate, mergeDismissed } from '../lib/design-gate.js';
-import { listVersions, nextVersion, parseChangelog, appendChangelog, parseAppliedItems, roundList, AppliedError } from '../lib/history.js';
+import { listVersions, nextVersion, parseChangelog, appendChangelog, parseAppliedItems, roundList, AppliedError, ENTRY_KINDS, type EntryKind } from '../lib/history.js';
 import { parseCritique, selectProposals, formatProposals, CritiqueError, budgetFor, budgetIssues } from '../lib/critique.js';
 import { buildDesignPageData } from '../design-page/build.js';
 import { designFilesOf, readCritiques, readDismissedOf, readHistory, writeDismissed } from './design-files.js';
@@ -38,7 +38,7 @@ export { isCommitCommand };
 export interface Io { cwd: string; now: () => Date; rand?: () => number; assetsDir: string; stdin?: string; env?: Record<string, string | undefined> }
 type Result = { code: number; stdout: string; stderr: string };
 
-const USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|critique-next|critique-check|critique-select|critique-dismiss|design-page|hook> ...`;
+const USAGE = `usage: waypoint <validate|hash|clean-cache|page|sync|next|conflicts|recover|notes|inbox|escalations|launch|status|session-id|event-id|now|commit-info|claim|done|block|heartbeat|bind|release|design-validate|design-park|design-import|design-snapshot|design-changed|design-gate|design-impact|critique-next|critique-check|critique-select|critique-dismiss|design-page|hook> ...`;
 
 export function run(argv: string[], io: Io): Result {
   const [cmd, ...args] = argv;
@@ -102,6 +102,7 @@ export function run(argv: string[], io: Io): Result {
         const loose = p.tasks.filter(t => !t.zones.length).map(t => t.id);
         const warning = loose.length ? `\nwarning: ${loose.length} task(s) without zones run alone in a forge execution: ${loose.join(', ')}` : '';
         // G-25: with --design, each design_ref must name a section of the design (a warning, never a failure).
+        // K3-08: and the plan of an approved design names that design and its version.
         let refs = '';
         const designArg = flag('design');
         // Carry 8: --design without its file is an error, not a silent skip; a file that cannot be read and one that is
@@ -110,11 +111,21 @@ export function run(argv: string[], io: Io): Result {
         if (designArg) {
           let text: string;
           try { text = readFileSync(abs(designArg), 'utf8'); } catch (e) { return fail(`validate: cannot read the design ${designArg}: ${(e as Error).message}`, 2); }
-          let slugs: Set<string>;
-          try { slugs = new Set(['_intro', ...parseDesign(text).sections.map(s => s.slug)]); }
+          let design: ReturnType<typeof parseDesign>;
+          try { design = parseDesign(text); }
           catch (e) { return fail(`validate: ${designArg} is not a design: ${(e as Error).message}`, 2); }
+          const slugs = new Set(['_intro', ...design.sections.map(s => s.slug)]);
           const unknown = p.tasks.filter(t => t.design_ref && !slugs.has(t.design_ref)).map(t => `${t.id} (${t.design_ref})`);
           if (unknown.length) refs = `\nwarning: ${unknown.length} design_ref(s) not in the design: ${unknown.join(', ')}`;
+          if (design.meta.status === 'approved') {
+            const approved = readChangelog(path.dirname(abs(designArg))).at(-1)?.version;
+            if (approved !== undefined && p.design_version !== approved) {
+              refs += `\nwarning: design_version is ${p.design_version ?? 'missing'} but the approved design is v${approved}: set design_version: ${approved}`;
+            }
+            if (design.meta.artifact && p.artifacts.design !== design.meta.artifact) {
+              refs += `\nwarning: artifacts.design is not the design's artifact: set it to ${design.meta.artifact}`;
+            }
+          }
         }
         return ok(`ok: ${p.tasks.length} tasks, ${p.phases.length} phases, ${p.tracks.length} tracks${warning}${refs}`);
       }
@@ -681,6 +692,19 @@ export function run(argv: string[], io: Io): Result {
         const roundFlag = flag('round');
         const round = roundFlag !== undefined ? Number(roundFlag) : (log[log.length - 1]?.round ?? 0);
         if (!Number.isInteger(round) || round < 0) return fail('design-snapshot: --round must be a non-negative integer', 2);
+        // K3-07: what kind of entry this is. An amend or an approve keeps an approved design; a reopen needs it a draft
+        // again. The CLI never changes the status: the skill sets it first, and a status that does not match is refused.
+        const kindFlag = flag('kind');
+        if (args.includes('--kind') && (kindFlag === undefined || !(ENTRY_KINDS as readonly string[]).includes(kindFlag))) {
+          return fail(`design-snapshot: --kind must be one of ${ENTRY_KINDS.join(', ')}`, 2);
+        }
+        const kindGiven = kindFlag as EntryKind | undefined;
+        if ((kindGiven === 'amend' || kindGiven === 'approve') && d.meta.status !== 'approved') {
+          return fail(`design-snapshot: --kind ${kindGiven} needs status: approved in the design (it is ${d.meta.status})`, 2);
+        }
+        if (kindGiven === 'reopen' && d.meta.status !== 'draft') {
+          return fail(`design-snapshot: --kind reopen needs status: draft in the design (it is ${d.meta.status}); set it first`, 2);
+        }
         // A-04, K3-02: what this entry applied and what its interview resolved, checked against the critiques (K3-10:
         // docs/…/critiques/ first, then .waypoint/<project>/) before anything is written. An id that is in no critique
         // is an error (exit 2) that names it, never ignored.
@@ -709,10 +733,11 @@ export function run(argv: string[], io: Io): Result {
         const resolved = items.resolved ? roundList(items.resolved) : null;
         const rewrite = args.includes('--rewrite');
         if (rewrite && (roundFlag === undefined || !critiqueOf(round))) return fail('design-snapshot: --rewrite needs --round <R> and the critique of that round', 2);
+        const kind: EntryKind | undefined = kindGiven ?? (rewrite ? 'rewrite' : applied ? 'apply' : undefined);
         // Pure check first so a stale changelog fails before anything is written.
         const next = appendChangelog(log, {
           version, date: io.now().toISOString().slice(0, 10), note, words: d.words, round,
-          ...(applied ? { applied } : {}), ...(rewrite ? { rewrite: true as const } : {}), ...(resolved ? { resolved } : {}),
+          ...(applied ? { applied } : {}), ...(rewrite ? { rewrite: true as const } : {}), ...(resolved ? { resolved } : {}), ...(kind ? { kind } : {}),
         });
         mkdirSync(histDir, { recursive: true });
         const dest = path.join(histDir, `v${version}.md`);
@@ -721,7 +746,7 @@ export function run(argv: string[], io: Io): Result {
           throw e;
         }
         writeFileSync(path.join(base, 'changelog.json'), JSON.stringify(next, null, 2) + '\n');
-        return ok(JSON.stringify({ version, path: dest, ...(applied ? { applied } : {}), ...(resolved ? { resolved } : {}) }));
+        return ok(JSON.stringify({ version, path: dest, ...(applied ? { applied } : {}), ...(resolved ? { resolved } : {}), ...(kind ? { kind } : {}) }));
       }
       case 'design-changed': {
         const file = abs(args[0]);
@@ -767,6 +792,34 @@ export function run(argv: string[], io: Io): Result {
           sections: d.sections.map(s => s.slug), verify, full: args.includes('--full'),
         });
         return ok(JSON.stringify({ ...next, out: path.join(files.critiques, `r${next.round}.json`) }));
+      }
+      case 'design-impact': {
+        // A-21: the plan tasks an amendment touches: those whose design_ref is a section that changed or went away since
+        // the version the plan follows, and how many tasks have no design_ref at all.
+        const usage = 'usage: waypoint design-impact <design.md> --plan <plan.yaml> [--since <N>] [--states <dir>]';
+        if (!args[0] || args[0].startsWith('--') || !flag('plan')) return fail(usage, 2);
+        const sinceFlag = flag('since');
+        if (sinceFlag !== undefined && !/^[1-9]\d*$/.test(sinceFlag)) return fail('design-impact: --since must be a positive integer', 2);
+        const file = abs(args[0]);
+        const d = parseDesign(readFileSync(file, 'utf8'));
+        let plan: ReturnType<typeof parsePlan>;
+        try { plan = parsePlan(readFileSync(abs(flag('plan')!), 'utf8')); } catch (e) { return fail(`design-impact: ${(e as Error).message}`, 2); }
+        const dir = path.dirname(file);
+        const history = readHistory(dir);
+        const versions = Object.keys(history).map(Number);
+        const current = readChangelog(dir).at(-1)?.version ?? Math.max(0, ...versions);
+        // Since: --since, else the version the plan follows, else the version before the current one, else nothing (all changed).
+        const before = versions.filter(v => v < current).sort((a, b) => b - a)[0];
+        const since = sinceFlag !== undefined ? Number(sinceFlag) : plan.design_version ?? before ?? 0;
+        if (since > 0 && history[since] === undefined) return fail(`design-impact: no history for v${since}`, 2);
+        const { changed, removed } = since > 0
+          ? changedSections(designBody(history[since]), d.body)
+          : { changed: d.sections.map(s => s.slug), removed: [] as string[] };
+        const states = readDocs<TaskState>(flag('states') && abs(flag('states')!));
+        const hit = new Set([...changed, ...removed]);
+        const tasks = plan.tasks.filter(t => t.design_ref && hit.has(t.design_ref))
+          .map(t => ({ id: t.id, ref: t.design_ref as string, status: states[t.id]?.status ?? null }));
+        return ok(JSON.stringify({ since, changed, removed, tasks, unref: plan.tasks.filter(t => !t.design_ref).length }));
       }
       case 'critique-dismiss': {
         // waypoint critique-dismiss <design> --round <R> <spec> [--reason-file <f>]: the spec is the argument after the
