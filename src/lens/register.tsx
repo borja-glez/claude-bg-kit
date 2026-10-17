@@ -1269,14 +1269,24 @@ export const register: Register = on => {
       // The desktop (and any surface that draws SVG but is not the terminal) gets SVG cards; the terminal, cells.
       const Svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : null;
       const all = m ? buildCards(m, t, nowMs) : [];
-      // The proposals take their own rows: about two for their frame and three for each.
-      const reserve = proposals.length ? 2 + 3 * proposals.length : 0;
-      let fitted = Svg || layout.rows === null ? { cards: all, hidden: 0 } : fitCards(all, { ...layout, rows: Math.max(1, layout.rows - reserve) });
-      if (!Svg && layout.rows !== null && fitted.cards.length) {
-        // fitCards keeps one card whole; where even that one exceeds the rows, it is clipped to them (marker «…»).
-        const room = Math.max(1, layout.rows - reserve - (fitted.hidden ? 1 : 0));
+      // The proposals take their own rows: their frame (2), their header (1) and three for each.
+      const reserve = proposals.length ? 3 + 3 * proposals.length : 0;
+      const avail = layout.rows === null ? null : Math.max(1, layout.rows - reserve);
+      let fitted = Svg || avail === null ? { cards: all, hidden: 0 } : fitCards(all, { ...layout, rows: avail });
+      let more = fitted.hidden;
+      if (!Svg && avail !== null && fitted.cards.length) {
+        // «↓ N more» takes the last row when there are two or more; with one row the card alone is drawn.
+        const moreRow = fitted.hidden > 0 && avail >= 2;
+        const room = moreRow ? avail - 1 : avail;
         const shown = fitted.cards.reduce((n, card) => n + cardRows(card, layout), 0);
-        if (shown > room) fitted = { ...fitted, cards: [clipCard(fitted.cards[0]!, layout, room)] };
+        if (shown > room) {
+          // fitCards keeps one card whole; where even that one exceeds the rows, it is clipped to them (marker «…») and
+          // the rows cut count among the ones left out.
+          const clipped = clipCard(fitted.cards[0]!, layout, room);
+          fitted = { ...fitted, cards: [clipped] };
+          more += shown - cardRows(clipped, layout);
+        }
+        if (!moreRow) more = 0;
       }
       const W = Math.max(240, Math.min(900, layout.cols * 8 - 8));
       const drawn = fitted.cards.map((card, i) => {
@@ -1305,7 +1315,7 @@ export const register: Register = on => {
                 </Box>
               )
             : null}
-          {fitted.hidden ? <Text key="more" dimColor>{t.moreRows(fitted.hidden)}</Text> : null}
+          {more ? <Text key="more" dimColor>{t.moreRows(more)}</Text> : null}
         </Box>
       );
     } catch {

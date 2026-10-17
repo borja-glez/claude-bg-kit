@@ -624,3 +624,34 @@ test('when the session id cannot be read, the panel still draws (E-06)', async (
   expect(text).toContain('other session');
   await ui.unmount();
 });
+
+// The rows a drawing takes, as the terminal lays it out: a column sums its children, a row takes its tallest, a frame
+// adds two rows and a margin its size; a Text or a Button is one.
+function rowsOf(n: unknown): number {
+  if (Array.isArray(n)) return n.reduce((sum: number, c) => sum + rowsOf(c), 0);
+  if (!n || typeof n !== 'object') return 0;
+  const el = n as { type?: string; props?: Record<string, unknown>; children?: unknown };
+  if (el.type === 'Text' || el.type === 'Button') return 1;
+  if (el.type !== 'Box') return rowsOf(el.children);
+  const kids = Array.isArray(el.children) ? el.children : [el.children];
+  const inner = el.props?.flexDirection === 'row' ? Math.max(0, ...kids.map(rowsOf)) : rowsOf(kids);
+  return inner + (el.props?.borderStyle ? 2 : 0) + (typeof el.props?.marginTop === 'number' ? el.props.marginTop : 0);
+}
+
+test('inline with a proposal, the pane draws no more rows than it was given and keeps «↓ N more» in view', async ($, on) => {
+  serveFiles(on, FORGE);
+  servePanes(on);
+  const clock = start(on);
+  on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await $.tool.call({ tool: 'TodoWrite', todos: Array.from({ length: 6 }, (_, i) => ({ content: `Step ${i}`, status: i === 0 ? 'in_progress' : 'pending', activeForm: `Doing step ${i}` })) });
+  await clock.advance(1000);
+  for (const bodyRows of [8, 9, 10, 12]) {
+    const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: { ...PANE_PROPS, placement: 'inline' as const, scroll: { offset: 0, bodyRows } } });
+    expect(await said(ui), `rows ${bodyRows}`).toContain('Cache the parser');
+    expect(rowsOf(await ui.drawn()), `rows ${bodyRows}`).toBeLessThanOrEqual(bodyRows);
+    expect(await said(ui), `rows ${bodyRows}`).toMatch(/↓ \d+ more/);
+    await ui.unmount();
+  }
+});

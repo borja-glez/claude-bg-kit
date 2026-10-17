@@ -37,6 +37,19 @@ function boxesOf(n: unknown, out: { props?: Record<string, unknown> }[] = []): {
   return boxesOf(el.children, out);
 }
 
+// The rows a drawing takes, as the terminal lays it out: a column sums its children, a row takes its tallest, a frame
+// adds two rows and a margin its size; a Text or a Button is one.
+function rowsOf(n: unknown): number {
+  if (Array.isArray(n)) return n.reduce((sum: number, c) => sum + rowsOf(c), 0);
+  if (!n || typeof n !== 'object') return 0;
+  const el = n as { type?: string; props?: Record<string, unknown>; children?: unknown };
+  if (el.type === 'Text' || el.type === 'Button') return 1;
+  if (el.type !== 'Box') return rowsOf(el.children);
+  const kids = Array.isArray(el.children) ? el.children : [el.children];
+  const inner = el.props?.flexDirection === 'row' ? Math.max(0, ...kids.map(rowsOf)) : rowsOf(kids);
+  return inner + (el.props?.borderStyle ? 2 : 0) + (typeof el.props?.marginTop === 'number' ? el.props.marginTop : 0);
+}
+
 // Everything a drawing says, in order: Text strings, Svg alt texts (the desktop's cards) and Button labels.
 async function said(ui: { drawn: () => Promise<unknown> }): Promise<string> {
   const out: string[] = [];
@@ -564,4 +577,21 @@ test('with fewer rows than the one card it keeps, the pane clips that card to it
   expect(rows3.slice(-2)[0]).toBe('…');
   expect(rows3.at(-1)).toMatch(/^↓ \d+ more/);
   await three.unmount();
+});
+
+test('inline at one row the pane draws one row: the kept card clipped, its title ending on «…», and no «↓» row (F-01)', async ($, on) => {
+  serveFiles(on, []);
+  servePanes(on);
+  const clock = start(on);
+  on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  await $.tool.call({ tool: 'TodoWrite', todos: Array.from({ length: 6 }, (_, i) => ({ content: `Step ${i}`, status: i === 0 ? 'in_progress' : 'pending', activeForm: `Doing step ${i}` })) });
+  await clock.advance(1000);
+  const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: { ...PANE_PROPS, placement: 'inline' as const, scroll: { offset: 0, bodyRows: 1 } } });
+  const text = await said(ui);
+  expect(text).not.toContain('↓');
+  expect(text.endsWith('…')).toBe(true);
+  expect(rowsOf(await ui.drawn())).toBe(1);
+  await ui.unmount();
 });
