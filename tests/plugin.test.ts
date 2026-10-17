@@ -1654,8 +1654,13 @@ describe('plugin layout', () => {
       'waypoint design-impact DESIGN --plan', '## amend', '## reopen', '`needsVerify`', '`majorPending`', '`verdict`', '`dismissed`', '`resolved`', '`applied`',
       '`interview`, `amend` and `reopen`', '--design DESIGN']) expect(md, w).toContain(w);
     for (const w of ['the highest number N among the `LOCAL/critique-r<N>.json` files', 'waypoint design-changed DESIGN --since', 'critique-check LOCAL/critique-r<R>.json']) expect(md, w).not.toContain(w);
+    // Final review M1: nothing to review only when `changed` and `removed` are both empty; `removed` goes to the critic.
+    // M2: the second attempt of the check passes --reject-on-fail, so a refused critique is never a round.
+    const round = md.slice(md.indexOf('## round'), md.indexOf('## apply'));
+    for (const w of ['`changed` and `removed` are both empty', '`removed`', '--reject-on-fail', 'r<R>.rejected.json']) expect(round, w).toContain(w);
+    expect(round).not.toMatch(/\bmv\b/);
     const critic = read('plugins/waypoint/agents/design-critic.md');
-    for (const w of ['"verdict": "<ready|changes>"', '`max`', '`severities`', '`dismissed`', '`resolved`', '`applied`', 'r<R>#<n>', '`contradiction`']) expect(critic, w).toContain(w);
+    for (const w of ['"verdict": "<ready|changes>"', '`max`', '`severities`', '`dismissed`', '`resolved`', '`applied`', '`removed`', 'r<R>#<n>', '`contradiction`']) expect(critic, w).toContain(w);
     expect(critic).not.toContain('At most 12 proposals');
     // The skill's flags agree with the CLI: every --kind it uses exists, --kind approve never carries the items the CLI
     // refuses with it, and no dismissal reason is canned (a critical or major one is the person's or the critic's own).
@@ -1674,9 +1679,15 @@ describe('plugin layout', () => {
     const inf = read('plugins/forge/skills/infinite/SKILL.md');
     for (const w of ['/waypoint:design reopen --auto', '`design_ref`', 'the approved-design rule', '`design_version`', '`round --verify`']) expect(inf, w).toContain(w);
     expect(inf).not.toContain('apply the approved-design rule without asking (`status: draft`)');
-    // a task whose `## <T>:` section exists is never reopened again
-    expect(inf).toContain('already has a section `## <T>:`');
-    expect(inf).toContain('never reopen the design again');
+    // Final review I2: one reopen per task, and a pass that stops leaves T blocked, never built without an approved design.
+    const step = (n: number) => inf.split('\n').find(l => l.trimStart().startsWith(`${n}. `) && l.includes('design'))!;
+    // (a) step 2: a loop that stops without approval blocks T as the «Otherwise» branch does, the design a draft.
+    for (const w of ['stops without approval', 'stays a draft', '**Otherwise**', '--why-file .forge/work/infinite/blocked-<T>.txt', 'el diseño necesita tu decisión', '"action": "blocked-large"']) expect(step(2), w).toContain(w);
+    // (b) step 1: T closes only with an approved design and plan tasks whose design_ref is the slug of `## <T>:`.
+    for (const w of ['`## <T>:`', 'closing task only when', '`status: approved`', '`design_ref` is the slug of']) expect(step(1), w).toContain(w);
+    // (c) step 1: a section without such tasks, or a design not approved, blocks T with the question; no reopen, no work.
+    for (const w of ['block `T`', 'never reopen the design', 'nor work `T`']) expect(step(1), w).toContain(w);
+    expect(step(1)).not.toContain('work it as a normal task and never reopen the design again');
     const planner = read('plugins/forge/agents/forge-planner.md');
     for (const w of ['design_ref?', '`design_ref`', '--design <design path>', '`_intro`']) expect(planner, w).toContain(w);
     expect(read('plugins/forge/skills/decisions/SKILL.md')).toContain('design-snapshot DESIGN --kind reopen');
