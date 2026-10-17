@@ -1,11 +1,16 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { buildRoadmapData, type DocInput } from '../src/forge/roadmap-doc.js';
 import { parseVerifyFile } from '../src/forge/verdict.js';
+import { appendEvent, type LedgerEvent } from '../src/forge/ledger.js';
+import { run, type Io } from '../src/forge/cli/run.js';
 import { deriveStatuses, statusKey, type StatusMap } from '../src/lib/forge-status.js';
 import { parseForgeDocV2, STAGE_KEYS } from '../src/lib/roadmap-doc.js';
 import type { ExecTask, ExecutionState } from '../src/lib/execution-state.js';
-import type { LedgerEvent } from '../src/forge/ledger.js';
-import { MEDIUM_T1, ROADMAP_AT } from './fixtures/roadmap-ledger.js';
+import { MEDIUM_T1, ROADMAP_AT, writeVerify } from './fixtures/roadmap-ledger.js';
 
 const NOW = new Date(ROADMAP_AT(60));
 const statusOf = (events: readonly LedgerEvent[], task = 'T1', project: string | null = 'shop') =>
@@ -194,5 +199,126 @@ describe('buildRoadmapData: the evidence v2 (K2-14)', () => {
     expect(ev.shots).toHaveLength(30);
     expect(ev.shots.at(-1)).toMatchObject({ check: 'c20', round: 2 });
     expect(ev.shots.some(s => s.check === 'gone')).toBe(false);
+  });
+});
+
+describe('FORGE roadmap-doc (G-03, G-06)', () => {
+  let root: string;
+  let io: Io;
+  const WORK = '.forge/work/shop/T1';
+  const g = (...a: string[]) => execFileSync('git', a, { cwd: root, encoding: 'utf8' }).trim();
+  const cli = (...a: string[]) => run(a, io);
+  const out = (r: { code: number; stdout: string; stderr: string }) => { if (r.code !== 0) throw new Error(r.stderr); return JSON.parse(r.stdout); };
+  const data = () => JSON.parse(readFileSync(path.join(root, WORK, 'roadmap-doc.json'), 'utf8'));
+  beforeEach(() => {
+    root = mkdtempSync(path.join(tmpdir(), 'forge-roadmap-doc-'));
+    g('init', '-q', '-b', 'main'); g('config', 'user.email', 'a@b.c'); g('config', 'user.name', 't'); g('config', 'core.autocrlf', 'false');
+    writeFileSync(path.join(root, '.gitignore'), '.forge/\n');
+    g('add', '.'); g('commit', '-qm', 'init');
+    mkdirSync(path.join(root, '.forge'), { recursive: true });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators: []\n');
+    io = { cwd: root, now: () => NOW, env: {} };
+    for (const e of MEDIUM_T1) appendEvent(root, e);
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  it('writes the data of update state/T to <WORK>/roadmap-doc.json and prints the write; outside a run the integration is HEAD on the default branch', () => {
+    const r = out(cli('roadmap-doc', 'T1', '--project', 'shop'));
+    const file = path.join(root, WORK, 'roadmap-doc.json');
+    expect(r).toMatchObject({ task: 'T1', project: 'shop', file, write: { op: 'update', collection: 'state', doc_id: 'T1', file_path: file }, dropped: [] });
+    expect(r.bytes).toBeLessThanOrEqual(4096);
+    expect(data().forge).toMatchObject({ v: 2, path: 'medium', stage: 'done', round: 2, cap: 4, acceptedRound: 2,
+      integration: { branch: 'main', sha: g('rev-parse', 'HEAD'), merged: true, target: 'main' } });
+    expect(data()).not.toHaveProperty('exec');
+    expect(data()).not.toHaveProperty('evidence');
+    expect(out(cli('roadmap-doc', 'T1', '--project', 'shop', '--out', 'elsewhere.json')).file).toBe(path.join(root, 'elsewhere.json'));
+  });
+  it('--plan names the project, and a task the plan does not have is exit 2', () => {
+    writeFileSync(path.join(root, 'plan.yaml'), 'project: shop\nlocale: en\nversion: "1"\ntracks:\n  - { id: a, name: A, color: blue }\nphases:\n  - { id: p1, name: P1 }\ntasks:\n  - { id: T1, title: T1, track: a, phase: p1, done_when: x }\n');
+    expect(out(cli('roadmap-doc', 'T1', '--plan', 'plan.yaml')).project).toBe('shop');
+    expect(cli('roadmap-doc', 'T7', '--plan', 'plan.yaml').code).toBe(2);
+  });
+  it('exit 2 for a task forge knows nothing of, an unsafe id, and --assets that cannot be read or is not a list', () => {
+    expect(cli('roadmap-doc', 'T9', '--project', 'shop').code).toBe(2);
+    expect(cli('roadmap-doc', '../x').code).toBe(2);
+    expect(cli('roadmap-doc').code).toBe(2);
+    expect(cli('roadmap-doc', 'T1', '--project', 'shop', '--assets', 'nope.json').code).toBe(2);
+    writeFileSync(path.join(root, 'obj.json'), '{"path": "x"}');
+    expect(cli('roadmap-doc', 'T1', '--project', 'shop', '--assets', 'obj.json').code).toBe(2);
+  });
+  it('--assets puts each upload on its check, ignores a hostile entry, is kept for the next generation, and evidence.local is relative (Review Focus 3)', () => {
+    writeVerify(root, WORK, 1, 2, { surfaces: ['web'], result: 'fail', checks: [
+      { id: 1, surface: 'web', name: 'home', main: true, ok: true, expected: 'the home page', observed: 'it loads', shot: '01-home.png' },
+      { id: 2, surface: 'web', name: 'cart', main: false, ok: false, expected: '3 items', observed: '2 items', shot: '02-cart.png' },
+    ] }, ['01-home.png', '02-cart.png']);
+    const shot = (n: string) => `${WORK}/evidence/1-2/${n}`;
+    writeFileSync(path.join(root, 'up.json'), JSON.stringify([
+      { path: shot('01-home.png'), id: 'a1', url: 'https://claude.ai/_blob/a1' },
+      { path: shot('02-cart.png'), id: 'a2', url: 'javascript:alert(1)' },
+      { path: shot('02-cart.png'), id: '../a3', url: 'https://claude.ai/_blob/a3' },
+      { id: 'a4', url: 'https://claude.ai/_blob/a4' },
+    ]));
+    out(cli('roadmap-doc', 'T1', '--project', 'shop', '--assets', 'up.json'));
+    const ev = data().evidence;
+    expect(ev).toMatchObject({ v: 2, result: 'fail', passed: 1, total: 2, local: `${WORK}/evidence/1-2`, pending: true });
+    expect(ev.shots).toEqual([
+      { surface: 'web', check: 'home', ok: true, expected: 'the home page', observed: 'it loads', round: 2, url: 'https://claude.ai/_blob/a1', id: 'a1' },
+      { surface: 'web', check: 'cart', ok: false, expected: '3 items', observed: '2 items', round: 2 },
+    ]);
+    expect(path.isAbsolute(ev.local)).toBe(false);
+    expect(ev.local).not.toContain('\\');
+    // The upload is kept: a later generation (a swarm task, say) still carries it.
+    out(cli('roadmap-doc', 'T1', '--project', 'shop'));
+    expect(data().evidence.shots[0]).toMatchObject({ url: 'https://claude.ai/_blob/a1', id: 'a1' });
+    writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators: []\nevidence: local\n');
+    out(cli('roadmap-doc', 'T1', '--project', 'shop'));
+    expect(data().evidence).not.toHaveProperty('pending');
+  });
+  it('a ledger from before waves 1 to 3, with only the status alias: reviewers from the files, no round nor cap, validators without time (Review Focus 4)', () => {
+    const old: LedgerEvent[] = [
+      { ts: ROADMAP_AT(70), kind: 'triage', task: 'T2', project: 'shop', path: 'medium', reasons: [] },
+      { ts: ROADMAP_AT(71), kind: 'phase', task: 'T2', phase: 'implement', brief: 1 },
+      { ts: ROADMAP_AT(72), kind: 'validate', task: 'T2-1', ok: true, results: [{ validator: 'test', ok: true, flaky: false, failures: [] }] },
+      { ts: ROADMAP_AT(73), kind: 'verdict', task: 'T2-1', dir: '.forge/work/shop/T2/reviews-1-1', action: 'accept', score: 0.9, signature: 's' },
+      { ts: ROADMAP_AT(73), kind: 'round', task: 'T2-1', round: 0, cap: 3, next: 'done', reason: 'accepted' },
+    ];
+    for (const e of old) appendEvent(root, e);
+    rmSync(path.join(root, '.forge', 'status'), { recursive: true, force: true });
+    const dir = path.join(root, '.forge', 'work', 'shop', 'T2', 'reviews-1-1');
+    mkdirSync(dir, { recursive: true });
+    for (const f of ['security.json', 'correctness.json', 'review-plan.json']) writeFileSync(path.join(dir, f), '{}');
+    const forge = JSON.parse(readFileSync(out(cli('roadmap-doc', 'T2', '--project', 'shop')).file, 'utf8')).forge;
+    expect(forge).not.toHaveProperty('round');
+    expect(forge).not.toHaveProperty('cap');
+    expect(forge.rounds).toEqual([{ brief: 1, n: 1, action: 'accept', note: 'accepted', findings: { critical: 0, important: 0, minor: 0, deferred: 0 }, reviewers: ['correctness', 'security'], at: ROADMAP_AT(73) }]);
+    expect(forge.validators).toEqual([{ name: 'test', ok: true }]);
+    expect(parseForgeDocV2(forge)).toEqual(forge);
+  });
+  it('shop T1, web T1 and a loose T1 in one ledger each produce only their own block', () => {
+    const web = MEDIUM_T1.map(e => ({ ...e, project: 'web', ...(e.dir ? { dir: String(e.dir).replace('/shop/', '/web/') } : {}) }));
+    const loose = [
+      { ts: ROADMAP_AT(80), kind: 'triage', task: 'T1', path: 'small', reasons: [] },
+      { ts: ROADMAP_AT(81), kind: 'phase', task: 'T1', phase: 'implement', brief: 1 },
+    ] as LedgerEvent[];
+    for (const e of web) appendEvent(root, e);
+    for (const e of loose) appendEvent(root, e);
+    const forge = (...a: string[]) => JSON.parse(readFileSync(out(cli('roadmap-doc', 'T1', ...a)).file, 'utf8')).forge;
+    expect(forge('--project', 'shop')).toMatchObject({ path: 'medium', rounds: [{ at: ROADMAP_AT(20) }, { at: ROADMAP_AT(40) }] });
+    expect(forge('--project', 'web')).toMatchObject({ path: 'medium' });
+    expect(forge('--project', 'web').rounds).toHaveLength(2);
+    const l = out(cli('roadmap-doc', 'T1'));
+    expect(l.project).toBeNull();
+    expect(l.file).toBe(path.join(root, '.forge', 'work', 'T1', 'roadmap-doc.json'));
+    const lf = JSON.parse(readFileSync(l.file, 'utf8')).forge;
+    expect(lf.path).toBe('small');
+    expect(lf.rounds ?? []).toEqual([]);
+  });
+  it('never reads the earlier-* folders prep sets aside', () => {
+    const old = path.join(root, WORK, 'earlier-r0', 'reviews-1-9');
+    mkdirSync(old, { recursive: true });
+    for (const f of ['security.json', 'review-plan.json']) writeFileSync(path.join(old, f), '{}');
+    out(cli('roadmap-doc', 'T1', '--project', 'shop'));
+    expect(JSON.stringify(data())).not.toContain('reviews-1-9');
+    expect(data().forge.rounds.some((r: { n: number }) => r.n === 9)).toBe(false);
   });
 });
