@@ -3,7 +3,7 @@ import path from 'node:path';
 import { samePath } from '../../lib/worktree.js';
 import { isSafeId, type ExecutionState } from '../../lib/execution-state.js';
 import { UsageError } from './errors.js';
-import { appendEvent, appendPhase, readEvents, type LedgerEvent } from '../ledger.js';
+import { appendEvent, appendPhase, ledgerRoot, readEvents, type LedgerEvent } from '../ledger.js';
 import { loadConfig, agentFor, ConfigError, type Profile, type ForgeConfig } from '../config.js';
 import { detectValidators, selectValidators, runValidators, markPreexisting, blocking, runOptions, validateEvent, failingLabel, type ExecMany, type RepoReader, type Scope, type Validator, type ValidatorResult } from '../validators.js';
 import { PATH_ORDER, zonesFromPaths, type PathName, type ReviewRole } from '../triage.js';
@@ -822,7 +822,13 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   mkdirSync(dir, { recursive: true });
   // Carry 3: an earlier execution's reviews of this brief, in the same work folder, are not this one's.
   const run = executionHolding(deps.cwd, { project, task: id });
-  const aside = run ? setAsideEarlier(dir, n, id, eventsOf(ledger, { project, task: id }), run) : null;
+  const mine = eventsOf(ledger, { project, task: id });
+  const aside = run ? setAsideEarlier(dir, n, id, mine, run) : null;
+  // R1 (M1): from a forge task worktree, keepEvidence copies this folder's verification to the main checkout's same
+  // folder, where the earlier run's copy is: it goes aside too, before this brief's copies land on it.
+  const main = ledgerRoot(deps.cwd);
+  const inWork = path.relative(deps.cwd, dir);
+  if (run && !samePath(main, deps.cwd) && inWork && !inWork.startsWith('..') && !path.isAbsolute(inWork)) setAsideEarlier(path.join(main, inWork), n, id, mine, run);
   const earlier = aside ? { earlier: rel(deps.cwd, aside) } : {};
   const tmFile = config ? writeThreatModel(dir, config) : null;
   const threatModel = tmFile ? rel(deps.cwd, tmFile) : null;

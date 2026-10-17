@@ -105,34 +105,44 @@ const WORK_DEPTH = 3;
 /**
  * What swarm cleanup copies from a task worktree before removing it, as keepEvidence copied it there: each `reviews-*`
  * folder's verify.json and every file of an `evidence` folder under its .forge/work, in path order. Final review 3: only
- * folders are walked to find them, WORK_DEPTH levels down, so no other file counts against the cap. `truncated` when
- * the walk stopped at `max` files (or EVIDENCE_FILES_MAX folders): what lies past it was not checked.
+ * folders are walked to find them, WORK_DEPTH levels down, so no other file counts against the cap. R1 (M1): the rounds
+ * prep set aside in a task's `earlier-<runId>/` are walked as the task's own, so cleanup copies them to the main checkout
+ * too. `truncated` when the walk stopped at `max` files (or EVIDENCE_FILES_MAX folders): what lies past it was not checked.
  */
 export function evidenceOf(worktree: string, max = EVIDENCE_FILES_MAX): { files: string[]; truncated: boolean } {
   const files: string[] = [];
   let truncated = false;
   let folders = 0;
   const isFolder = (rel: string) => { try { const st = lstatSync(path.join(worktree, rel)); return st.isDirectory() && !st.isSymbolicLink(); } catch { return false; } };
+  const folderNames = (rel: string): string[] => {
+    try { return readdirSync(path.join(worktree, rel), { withFileTypes: true }).filter(d => !d.isFile()).map(d => d.name).sort(); } catch { return []; }
+  };
+  /** Takes a review or evidence folder's files; false for any other folder. */
+  const take = (child: string, name: string): boolean => {
+    if (name === 'evidence') {
+      const under = filesUnder(worktree, child, max - files.length);
+      files.push(...under.files);
+      truncated = under.truncated;
+      return true;
+    }
+    if (!name.startsWith('reviews-')) return false;
+    const verify = `${child}/verify.json`;
+    let isFile = false;
+    try { isFile = lstatSync(path.join(worktree, verify)).isFile(); } catch { isFile = false; }
+    if (!isFile) return true;
+    if (files.length >= max) truncated = true;
+    else files.push(verify);
+    return true;
+  };
   const visit = (rel: string, depth: number) => {
     if (truncated) return;
     if (++folders > EVIDENCE_FILES_MAX) { truncated = true; return; }
-    let names: string[] = [];
-    try { names = readdirSync(path.join(worktree, rel), { withFileTypes: true }).filter(d => !d.isFile()).map(d => d.name).sort(); } catch { return; }
-    for (const name of names) {
+    for (const name of folderNames(rel)) {
       const child = `${rel}/${name}`;
       if (truncated || !isFolder(child)) continue;
-      if (name === 'evidence') {
-        const under = filesUnder(worktree, child, max - files.length);
-        files.push(...under.files);
-        truncated = under.truncated;
-      } else if (name.startsWith('reviews-')) {
-        const verify = `${child}/verify.json`;
-        let isFile = false;
-        try { isFile = lstatSync(path.join(worktree, verify)).isFile(); } catch { isFile = false; }
-        if (!isFile) continue;
-        if (files.length >= max) truncated = true;
-        else files.push(verify);
-      } else if (depth < WORK_DEPTH) visit(child, depth + 1);
+      if (name.startsWith('earlier-')) {
+        for (const inner of folderNames(child)) if (!truncated && isFolder(`${child}/${inner}`)) take(`${child}/${inner}`, inner);
+      } else if (!take(child, name) && depth < WORK_DEPTH) visit(child, depth + 1);
     }
   };
   if (noLink(worktree, '.forge/work') && isFolder('.forge/work')) visit('.forge/work', 1);
