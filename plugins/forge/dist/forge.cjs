@@ -11722,6 +11722,10 @@ var MAX_VALIDATORS = 10;
 var MAX_ACCEPTED = 200;
 var MAX_STAGES = 20;
 var MAX_TS = 40;
+var MAX_REVIEWERS = 6;
+var MAX_SKIPPED = 10;
+var MAX_REVIEWS = 20;
+var MAX_FINDINGS = 999;
 var isoMs = (s2) => s2 !== null && /^\d{4}-\d{2}-\d{2}T/.test(s2) ? Date.parse(s2) : NaN;
 var tsText = (x) => str2(x) && x.length <= MAX_TS ? x : null;
 var stageKey = (phase) => phase ? phase.toLowerCase() : "triage";
@@ -11753,12 +11757,30 @@ var isObj2 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
 var cp = (n) => String.fromCharCode(n);
 var UNSAFE = new RegExp(`[\\x00-\\x1f\\x7f-\\x9f${cp(8234)}-${cp(8238)}${cp(8294)}-${cp(8297)}]`, "g");
 var cleanText = (s2) => s2.replace(UNSAFE, "").slice(0, CLIP);
-var EMPTY_VERIFY = { planned: false, surfaces: [], result: null, passed: null, total: null, evidence: null, reason: null };
+var EMPTY_VERIFY = { planned: false, surfaces: [], result: null, passed: null, total: null, evidence: null, reason: null, skipped: [], launched: false };
 var pathText = (x) => str2(x) ? x.replace(/[\x00-\x1f\x7f-\x9f]/g, "").slice(0, 200) : null;
 var briefOf = (task, t) => str2(t) && t.startsWith(`${task}-`) && /^\d+$/.test(t.slice(task.length + 1)) ? Number(t.slice(task.length + 1)) : null;
 var briefNum = (x) => typeof x === "number" && Number.isInteger(x) && x > 0 && x < 1e4 ? x : null;
 var ownedBy = (task, t) => str2(t) && (t === task || t.startsWith(`${task}-`) && /^\d+$/.test(t.slice(task.length + 1)));
-var validatorsOf = (results) => (Array.isArray(results) ? results : []).filter((r2) => isObj2(r2) && str2(r2.validator)).slice(0, MAX_VALIDATORS).map((r2) => ({ name: cleanText(r2.validator), ok: r2.ok === true }));
+var validatorsOf = (results) => (Array.isArray(results) ? results : []).filter((r2) => isObj2(r2) && str2(r2.validator)).slice(0, MAX_VALIDATORS).map((r2) => ({ name: cleanText(r2.validator), ok: r2.ok === true, ...r2.cached === true ? { cached: true } : {} }));
+var roundOf = (v) => typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= MAX_REVIEWS ? v : null;
+var reviewsOf = (x) => {
+  if (!isObj2(x)) return null;
+  const n = roundOf(x.n), max = roundOf(x.max);
+  return n !== null && max !== null ? { n, max } : null;
+};
+var countOf = (v) => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= MAX_FINDINGS ? v : null;
+var findingsOf = (x) => {
+  const critical = countOf(x.critical), important = countOf(x.important), minor = countOf(x.minor);
+  return critical !== null && important !== null && minor !== null ? { critical, important, minor } : null;
+};
+var reviewerName = (r2) => {
+  if (str2(r2)) return cleanText(r2) || null;
+  if (!isObj2(r2) || r2.twin === true) return null;
+  const v = str2(r2.role) ? r2.role : str2(r2.agent) ? r2.agent : null;
+  return v ? cleanText(v.replace(/^(?:forge:)?(?:forge-)?review-/, "")) || null : null;
+};
+var reviewersOf = (x) => [...new Set((Array.isArray(x) ? x : []).map(reviewerName).filter((s2) => !!s2))].slice(0, MAX_REVIEWERS);
 var isLight = (path34) => path34 === "trivial" || path34 === "small";
 var isVerifyAgent = (agent) => !!agent && agent.startsWith("forge-verify");
 var lastStage = (stages) => Object.keys(stages).filter((k) => k !== "done" && k !== "stopped" && k !== "triage").at(-1) ?? "";
@@ -11780,7 +11802,7 @@ function applyEvent(prev, event) {
   const e = event;
   const ts = event.ts;
   if ((e.kind === "triage" || e.kind === "phase") && str2(e.task) && e.task) {
-    const task = cleanText(e.task);
+    const task = isSafeId(e.task) ? e.task : cleanText(e.task);
     const fresh2 = e.kind === "triage" && Array.isArray(e.reasons);
     const same = !!prev && prev.task === task && !fresh2;
     const base = same ? prev : {
@@ -11803,7 +11825,9 @@ function applyEvent(prev, event) {
       lastAt: tsText(ts),
       session: null,
       runId: null,
-      project: null
+      project: null,
+      reviewers: [],
+      reviews: null
     };
     const next = { ...base, ts };
     if (e.kind === "triage" && str2(e.path)) {
@@ -11824,6 +11848,8 @@ function applyEvent(prev, event) {
       }
       if (done) next.agent = null;
       next.phase = phase;
+      if (phase.toLowerCase() === "review" && Array.isArray(e.reviewers)) next.reviewers = reviewersOf(e.reviewers);
+      if (phase.toLowerCase() === "implement") next.reviewers = [];
     }
     if (e.kind === "phase" && briefNum(e.brief) !== null) next.brief = briefNum(e.brief);
     return next;
@@ -11835,10 +11861,11 @@ function applyEvent(prev, event) {
     case "agent": {
       if (!str2(e.agent)) return prev;
       const agent = cleanText(e.agent);
-      if (!prev.doneAt) return { ...prev, agent };
+      const verify = isVerifyAgent(agent) ? { ...prev.verify ?? EMPTY_VERIFY, launched: true } : prev.verify;
+      if (!prev.doneAt) return { ...prev, agent, verify };
       const closed = prev.phase.toLowerCase() === "done" || prev.phase.toLowerCase() === "stopped";
       const phase = !closed ? prev.phase : isVerifyAgent(agent) ? "verify" : isLight(prev.path) ? "" : lastStage(prev.stages);
-      return { ...prev, agent, phase, verdict: null, doneAt: null, stageSince: ts };
+      return { ...prev, agent, verify, phase, verdict: null, doneAt: null, stageSince: ts };
     }
     case "validate": {
       const next = { ...cur, validators: validatorsOf(e.results) };
@@ -11847,14 +11874,18 @@ function applyEvent(prev, event) {
     case "verdict": {
       if (!str2(e.action)) return prev;
       const accepted = n !== null && e.action === "accept" && !cur.accepted.includes(n) ? [...cur.accepted, n].sort((a, b) => a - b).slice(-MAX_ACCEPTED) : cur.accepted;
-      const verdict = { action: cleanText(e.action), score: num(e.score) };
+      const reviews = reviewsOf(e.reviews);
+      const verdict = { action: cleanText(e.action), score: num(e.score), round: reviews?.n ?? null, findings: findingsOf(e) };
+      const counted = reviews ? { ...cur, reviews } : cur;
       if (n === null && e.action === "accept" && !cur.doneAt) {
-        return { ...cur, accepted, verdict, stages: closeStage(cur, ts), stageSince: ts, doneAt: ts };
+        return { ...counted, accepted, verdict, stages: closeStage(cur, ts), stageSince: ts, doneAt: ts };
       }
-      return { ...cur, accepted, verdict };
+      return { ...counted, accepted, verdict };
     }
-    case "round":
-      return { ...cur, round: num(e.round), cap: num(e.cap) };
+    case "round": {
+      const reviews = reviewsOf(e.reviews);
+      return { ...cur, round: num(e.round), cap: num(e.cap), ...reviews ? { reviews } : {} };
+    }
     case "verify": {
       const v = { ...cur.verify ?? EMPTY_VERIFY };
       if (typeof e.planned === "boolean") {
@@ -11865,6 +11896,8 @@ function applyEvent(prev, event) {
         v.total = null;
         v.evidence = null;
         v.reason = null;
+        v.skipped = [];
+        v.launched = false;
       }
       if (!str2(e.result)) return { ...cur, verify: v };
       v.result = cleanText(e.result);
@@ -11873,6 +11906,17 @@ function applyEvent(prev, event) {
       v.evidence = pathText(e.evidence);
       v.reason = str2(e.reason) ? cleanText(e.reason) : null;
       const next = { ...cur, verify: v, ...isVerifyAgent(cur.agent) ? { agent: null } : {} };
+      return isLight(cur.path) ? finish(next, ts) : next;
+    }
+    case "verify-skip": {
+      if (!str2(e.surface)) return prev;
+      const v = { ...cur.verify ?? EMPTY_VERIFY };
+      const surface = cleanText(e.surface);
+      if (surface && !v.skipped.includes(surface) && v.skipped.length < MAX_SKIPPED) v.skipped = [...v.skipped, surface];
+      if (str2(e.reason)) v.reason = cleanText(e.reason);
+      if (!v.planned || v.surfaces.length === 0 || !v.surfaces.every((s2) => v.skipped.includes(s2))) return { ...cur, verify: v };
+      v.result = "skipped";
+      const next = { ...cur, verify: v };
       return isLight(cur.path) ? finish(next, ts) : next;
     }
     default:
@@ -11886,15 +11930,15 @@ function normalizeStatus(x) {
   let verdict = null;
   if (x.verdict !== null) {
     if (!isObj2(x.verdict) || !str2(x.verdict.action)) return null;
-    verdict = { action: cleanText(x.verdict.action), score: num(x.verdict.score) };
+    verdict = { action: cleanText(x.verdict.action), score: num(x.verdict.score), round: roundOf(x.verdict.round), findings: isObj2(x.verdict.findings) ? findingsOf(x.verdict.findings) : null };
   }
   return {
     ts: x.ts,
-    task: cleanText(x.task),
+    task: isSafeId(x.task) ? x.task : cleanText(x.task),
     path: cleanText(x.path),
     phase: cleanText(x.phase),
     agent: str2(x.agent) ? cleanText(x.agent) : null,
-    validators: x.validators.filter((v) => isObj2(v) && str2(v.name)).slice(0, MAX_VALIDATORS).map((v) => ({ name: cleanText(v.name), ok: v.ok === true })),
+    validators: x.validators.filter((v) => isObj2(v) && str2(v.name)).slice(0, MAX_VALIDATORS).map((v) => ({ name: cleanText(v.name), ok: v.ok === true, ...v.cached === true ? { cached: true } : {} })),
     verdict,
     round: num(x.round),
     cap: num(x.cap),
@@ -11909,7 +11953,9 @@ function normalizeStatus(x) {
       passed: num(x.verify.passed),
       total: num(x.verify.total),
       evidence: pathText(x.verify.evidence),
-      reason: str2(x.verify.reason) ? cleanText(x.verify.reason) : null
+      reason: str2(x.verify.reason) ? cleanText(x.verify.reason) : null,
+      skipped: (Array.isArray(x.verify.skipped) ? x.verify.skipped : []).filter(str2).slice(0, MAX_SKIPPED).map(cleanText),
+      launched: x.verify.launched === true
     } : null,
     // Absent in a status written before timings existed: no times are shown.
     taskStartedAt: tsText(x.taskStartedAt),
@@ -11921,8 +11967,52 @@ function normalizeStatus(x) {
     session: isSafeId(x.session) ? x.session : null,
     runId: isSafeId(x.runId) ? x.runId : null,
     project: isSafeId(x.project) ? x.project : null,
+    reviewers: (Array.isArray(x.reviewers) ? x.reviewers : []).filter(str2).map(cleanText).filter(Boolean).slice(0, MAX_REVIEWERS),
+    reviews: reviewsOf(x.reviews),
     ...x.autonomy === "auto" ? { autonomy: "auto" } : {}
   };
+}
+function statusKey(task, project) {
+  if (!isSafeId(task)) return null;
+  if (project === null) return task;
+  if (!isSafeId(project)) return null;
+  const key = `${project}__${task}`;
+  return isSafeId(key) ? key : null;
+}
+var BRIEF_ID = /^(.+)-(\d{1,4})$/;
+var movedAt = (s2) => {
+  const t = isoMs(s2.lastAt ?? s2.ts);
+  return Number.isFinite(t) ? t : -Infinity;
+};
+function routeEvent(map, event) {
+  if (!isObj2(event) || !str2(event.ts) || !str2(event.kind) || !str2(event.task) || !event.task) return null;
+  const id2 = event.task;
+  const states = Object.values(map);
+  const own = isSafeId(event.project) ? event.project : null;
+  const has = (t) => own === null ? states.some((s2) => s2.task === t) : Object.hasOwn(map, statusKey(t, own) ?? "");
+  let task = id2;
+  let brief = null;
+  if (event.kind !== "triage" && !has(id2)) {
+    const m = BRIEF_ID.exec(id2);
+    if (m && has(m[1])) {
+      task = m[1];
+      brief = Number(m[2]);
+    }
+  }
+  const existing = states.filter((s2) => s2.task === task).sort((a, b) => movedAt(b) - movedAt(a))[0];
+  const project = own ?? (event.kind === "triage" ? null : existing?.project ?? null);
+  const key = statusKey(task, project);
+  return key ? { key, task, brief } : null;
+}
+function deriveStatuses(map, event) {
+  const r2 = routeEvent(map, event);
+  if (!r2) return { map, changed: null };
+  const e = event;
+  const routed = r2.brief !== null && e.kind === "phase" ? { ...e, task: r2.task, brief: briefNum(e.brief) ?? r2.brief } : event;
+  const prev = map[r2.key] ?? null;
+  const next = deriveStatus(prev, routed);
+  if (!next || next === prev) return { map, changed: null };
+  return { map: { ...map, [r2.key]: next }, changed: r2.key };
 }
 
 // src/lib/claude-session.ts
@@ -12016,6 +12106,9 @@ function stampEvent(event, ctx) {
   if (out.project === void 0 && task && isSafeId(ctx.project)) out.project = ctx.project;
   return out;
 }
+function taskLine(task, project) {
+  return `forge-task: ${task}${isSafeId(project) ? ` @${project}` : ""}`;
+}
 
 // src/lib/main-checkout.ts
 function mainCheckoutFrom(root, gitFileText) {
@@ -12058,6 +12151,10 @@ function ledgerRoot(root) {
   const main = mainCheckoutFrom(import_node_path3.default.resolve(root), text2);
   return samePath(import_node_path3.default.join(main, ".claude", "worktrees", name), root) ? main : root;
 }
+var statusDir = (root) => import_node_path3.default.join(forgePath(root), "status");
+var STATUS_FILES_MAX = 200;
+var STATUS_FILES_KEEP = 150;
+var STATUS_FILE_MAX = 64 * 1024;
 function forgeDir(root) {
   const dir = forgePath(root);
   (0, import_node_fs2.mkdirSync)(dir, { recursive: true });
@@ -12126,7 +12223,8 @@ function appendEvent(root, event) {
   const file = ledgerFile(target);
   const e = stamped(root, target, event);
   (0, import_node_fs2.appendFileSync)(file, (endsMidLine(file) ? "\n" : "") + JSON.stringify(e) + "\n");
-  updateStatus(root, e);
+  updateStatus(target, e);
+  if (target !== root) updateWorktreeStatus(root, e);
 }
 function appendPhase(root, event) {
   const events = readEvents(root);
@@ -12137,7 +12235,7 @@ function appendPhase(root, event) {
   appendEvent(root, event);
   return true;
 }
-function updateStatus(root, event) {
+function updateWorktreeStatus(root, event) {
   try {
     const file = statusFile(root);
     let prev = null;
@@ -12147,18 +12245,114 @@ function updateStatus(root, event) {
     }
     const next = deriveStatus(prev, event);
     if (!next || next === prev) return;
-    const tmp = `${file}.${process.pid}.tmp`;
-    (0, import_node_fs2.writeFileSync)(tmp, JSON.stringify(next) + "\n");
-    (0, import_node_fs2.renameSync)(tmp, file);
+    writeJsonFile(file, next);
   } catch {
   }
 }
-function readStatus(root) {
+function writeJsonFile(file, value) {
+  const tmp = `${file}.${process.pid}.tmp`;
+  (0, import_node_fs2.writeFileSync)(tmp, JSON.stringify(value) + "\n");
+  (0, import_node_fs2.renameSync)(tmp, file);
+}
+function readStatusFile(file) {
   try {
-    return normalizeStatus(JSON.parse((0, import_node_fs2.readFileSync)(statusFile(root), "utf8")));
+    if ((0, import_node_fs2.statSync)(file).size > STATUS_FILE_MAX) return null;
+    return normalizeStatus(JSON.parse((0, import_node_fs2.readFileSync)(file, "utf8")));
   } catch {
     return null;
   }
+}
+function keyedStatus(file) {
+  const st = readStatusFile(file);
+  const key = st ? statusKey(st.task, st.project) : null;
+  return st && key ? [key, st] : null;
+}
+function jsonNames(dir) {
+  return (0, import_node_fs2.readdirSync)(dir, { withFileTypes: true }).filter((d) => d.isFile() && d.name.endsWith(".json")).map((d) => d.name);
+}
+function candidates(names2, task) {
+  const ids = [task, /^(.+)-\d{1,4}$/.exec(task)?.[1]].filter((s2) => !!s2);
+  return names2.filter((n) => ids.some((t) => n === `${t}.json` || n.endsWith(`__${t}.json`)));
+}
+function migrate(root) {
+  (0, import_node_fs2.mkdirSync)(statusDir(root), { recursive: true });
+  const old = keyedStatus(statusFile(root));
+  if (!old) return [];
+  writeJsonFile(import_node_path3.default.join(statusDir(root), `${old[0]}.json`), old[1]);
+  return [`${old[0]}.json`];
+}
+var TMP_STALE_MS = 10 * 6e4;
+function prune(root, keep) {
+  const dir = statusDir(root);
+  for (const d of (0, import_node_fs2.readdirSync)(dir, { withFileTypes: true })) {
+    if (!d.isFile() || !d.name.endsWith(".tmp")) continue;
+    const file = import_node_path3.default.join(dir, d.name);
+    try {
+      if (Date.now() - (0, import_node_fs2.statSync)(file).mtimeMs > TMP_STALE_MS) (0, import_node_fs2.rmSync)(file, { force: true });
+    } catch {
+    }
+  }
+  const files = jsonNames(dir).map((n) => {
+    const file = import_node_path3.default.join(dir, n);
+    let at2 = Date.parse(readStatusFile(file)?.lastAt ?? "");
+    if (!Number.isFinite(at2)) {
+      try {
+        at2 = (0, import_node_fs2.statSync)(file).mtimeMs;
+      } catch {
+        at2 = 0;
+      }
+    }
+    return { name: n, file, at: at2 };
+  });
+  if (files.length <= STATUS_FILES_MAX) return;
+  files.sort((x, y) => x.at - y.at || (x.name < y.name ? -1 : 1));
+  const doomed = files.filter((f) => f.name !== keep).slice(0, files.length - STATUS_FILES_KEEP);
+  for (const f of doomed) {
+    try {
+      (0, import_node_fs2.rmSync)(f.file, { force: true });
+    } catch {
+    }
+  }
+}
+function updateStatus(root, event) {
+  try {
+    if (typeof event.task !== "string" || !event.task) return;
+    const dir = statusDir(root);
+    let names2;
+    try {
+      names2 = jsonNames(dir);
+    } catch {
+      names2 = migrate(root);
+    }
+    const map = /* @__PURE__ */ Object.create(null);
+    for (const n of candidates(names2, event.task)) {
+      const one = keyedStatus(import_node_path3.default.join(dir, n));
+      if (one) map[one[0]] = one[1];
+    }
+    const { map: next, changed } = deriveStatuses(map, event);
+    if (!changed) return;
+    (0, import_node_fs2.mkdirSync)(dir, { recursive: true });
+    writeJsonFile(import_node_path3.default.join(dir, `${changed}.json`), next[changed]);
+    writeJsonFile(statusFile(root), next[changed]);
+    if (names2.length + (names2.includes(`${changed}.json`) ? 0 : 1) > STATUS_FILES_MAX) prune(root, `${changed}.json`);
+  } catch {
+  }
+}
+function readStatuses(root) {
+  const out = /* @__PURE__ */ Object.create(null);
+  let names2;
+  try {
+    names2 = jsonNames(statusDir(root)).sort().slice(0, STATUS_FILES_MAX);
+  } catch {
+    const alias = keyedStatus(statusFile(root));
+    if (alias) out[alias[0]] = alias[1];
+    return out;
+  }
+  for (const n of names2) {
+    const one = keyedStatus(import_node_path3.default.join(statusDir(root), n));
+    if (one) out[one[0]] = one[1];
+  }
+  return out;
 }
 function readEvents(root) {
   const target = ledgerRoot(root);
@@ -15395,8 +15589,8 @@ var freshSignal = (d, now) => {
 };
 function coordinatorOf(e, live, now, stepAt) {
   const signal = live.filter((d) => freshSignal(d, now) && d.role === "coordinator" && d.runId === e.runId && (!e.hookSession || d.sessionId === e.hookSession)).reduce((best, d) => !best || Date.parse(d.ts) > Date.parse(best.ts) ? d : best, null);
-  const candidates = [signal?.ts ?? null, stepAt].map((ts) => ({ ts, t: usable(ts, now) })).filter((c) => c.t !== null);
-  const lastSeen = candidates.length ? candidates.reduce((a, b) => b.t > a.t ? b : a).ts : null;
+  const candidates2 = [signal?.ts ?? null, stepAt].map((ts) => ({ ts, t: usable(ts, now) })).filter((c) => c.t !== null);
+  const lastSeen = candidates2.length ? candidates2.reduce((a, b) => b.t > a.t ? b : a).ts : null;
   const waiting = !!e.active && !!signal && !signal.ended && signal.agents.some((a) => {
     const t = usable(a.since, now);
     return t !== null && now - t < AGENT_ALIVE_MS;
@@ -17946,7 +18140,7 @@ function decideRound(history, path34) {
   if (round <= 2) return { round, cap, next: "resume", reason: `round ${round}: resume the implementer${lastNote}`, tierUp, last };
   return { round, cap, next: "fresh-stronger", reason: `round ${round}: fresh implementer one tier up${lastNote}`, tierUp, last };
 }
-function reviewsOf(round, path34) {
+function reviewsOf2(round, path34) {
   return { n: round, max: (path34 === "large" ? CAP.large : CAP.medium) + 1 };
 }
 var IMPL_LADDER = ["mech", "impl-light", "impl", "impl-high", "impl-heavy"];
@@ -18629,13 +18823,13 @@ function setAsideEarlier(dir, n, id2, events, run2, cwd2) {
   } catch {
     evidence = [];
   }
-  const roundOf2 = (f) => {
+  const roundOf3 = (f) => {
     const m = new RegExp(`^(?:reviews-${n}-(\\d+)|findings-${n}-(\\d+)\\.json|fix-${n}-(\\d+)\\.patch|handover-${n}-(\\d+)\\.md|validators-fix-${n}-(\\d+)-.+\\.json)$`).exec(f);
     const k = m ? m.slice(1).find((x) => x !== void 0) : void 0;
     return k === void 0 ? null : Number(k);
   };
   const rounds = [...new Set([
-    ...names2.map(roundOf2),
+    ...names2.map(roundOf3),
     ...evidence.map((f) => {
       const m = new RegExp(`^${n}-(\\d+)$`).exec(f);
       return m ? Number(m[1]) : null;
@@ -18761,7 +18955,7 @@ function reviewPrep(args, deps) {
   (0, import_node_fs27.mkdirSync)(roundDir, { recursive: true });
   const tmFile = writeThreatModel(dir, config);
   const index = parseIndex(readText2(import_node_path27.default.join(dir, `findings-index-${n}.json`)), task);
-  const reviewsCount = reviewsOf(round, pathName);
+  const reviewsCount = reviewsOf2(round, pathName);
   const previous = {};
   let fixFiles = [];
   const fixFile = import_node_path27.default.join(dir, `fix-${n}-${round}.patch`);
@@ -18806,6 +19000,7 @@ function reviewPrep(args, deps) {
     const express = expressPrep({
       deps,
       task,
+      project,
       id: id2,
       n,
       round,
@@ -18905,7 +19100,7 @@ function reviewPrep(args, deps) {
     (0, import_node_fs27.writeFileSync)(findingsFile(s2.name), JSON.stringify(own, null, 2) + "\n");
   }
   writeCarried(plan, dir, n, round, roundDir, prevReviews);
-  const spawn = plan.spawn.map(spawnOut);
+  const spawn = plan.spawn.map((s2) => spawnOut(s2, taskLine(task, project)));
   (0, import_node_fs27.writeFileSync)(import_node_path27.default.join(roundDir, "head.txt"), head2 + "\n");
   (0, import_node_fs27.writeFileSync)(planFile, JSON.stringify({
     task,
@@ -18954,7 +19149,7 @@ function sayPrep(reviews, ok, failing, plan, locale, cached) {
 function sayValidatorsRound(reviews, k, failing, locale) {
   return locale === "es" ? `Revisi\xF3n ${reviews.n} de ${reviews.max}: validadores en rojo (${failing.join(", ")}); ronda de validadores ${k} de ${MAX_VALIDATOR_ROUNDS}: nadie revisa, el implementador los arregla primero.` : `Review ${reviews.n} of ${reviews.max}: validators red (${failing.join(", ")}); validators round ${k} of ${MAX_VALIDATOR_ROUNDS}: nobody reviews, the implementer fixes them first.`;
 }
-var spawnOut = (s2) => ({ agent: s2.agent, model: s2.model, effort: s2.effort, mode: s2.mode, ...s2.twin ? { twin: true } : {}, ...s2.express ? { express: true } : {}, role: s2.role, inputs: s2.inputs });
+var spawnOut = (s2, line2) => ({ agent: s2.agent, model: s2.model, effort: s2.effort, mode: s2.mode, ...s2.twin ? { twin: true } : {}, ...s2.express ? { express: true } : {}, role: s2.role, inputs: s2.inputs, taskLine: line2 });
 function writeCarried(plan, dir, n, round, roundDir, prevReviews) {
   for (const c of plan.carried) {
     const raw = readJson(import_node_path27.default.join(dir, `reviews-${n}-${round - 1}`, `${c.name}.json`));
@@ -18994,7 +19189,7 @@ function expressPrep(c) {
   (0, import_node_fs27.writeFileSync)(diffFile, c.diff);
   (0, import_node_fs27.writeFileSync)(expressFile, JSON.stringify(previousFindings(c.index, round).map((f) => asPrevious(f, true)), null, 2) + "\n");
   writeCarried(plan, dir, n, round, roundDir, c.prevReviews);
-  const spawn = plan.spawn.map(spawnOut);
+  const spawn = plan.spawn.map((s2) => spawnOut(s2, taskLine(c.task, c.project)));
   const cmd = `node "${slash(deps.self ?? "forge.cjs")}" validate --all --path ${c.pathName} --base ${c.baseSha} --baseline "${slash(import_node_path27.default.resolve(deps.cwd, c.baselineArg))}" --task ${c.task} --out "${slash(validatorsFile)}"${samePath(deps.repoDir, deps.cwd) ? "" : ` --cwd "${slash(deps.repoDir)}"`}${c.noCache ? " --no-cache" : ""}`;
   (0, import_node_fs27.writeFileSync)(import_node_path27.default.join(roundDir, "head.txt"), c.head + "\n");
   (0, import_node_fs27.writeFileSync)(import_node_path27.default.join(roundDir, "review-plan.json"), JSON.stringify({
@@ -19160,7 +19355,7 @@ function reviewClose(args, deps) {
     }
   })() : "";
   const config = loadConfig(deps.repoDir);
-  const reviewsCount = reviewsOf(round, p);
+  const reviewsCount = reviewsOf2(round, p);
   const indexPath = import_node_path27.default.join(dir, `findings-index-${n}.json`);
   const indexText = readText2(indexPath);
   const index = parseIndex(indexText, task);
@@ -19612,6 +19807,7 @@ Worktree: ${slash2(worktree)} (work only inside this directory).
     type: "spawnImplementer",
     task,
     agent,
+    taskLine: taskLine(`${task}-1`, c.project),
     role: impl.role ?? null,
     brief: slash2(brief),
     report: slash2(import_node_path28.default.join(work, "report-1.txt")),
@@ -19659,7 +19855,7 @@ function implementerBack(c, task, t, told) {
   const round = latestRound(abs, n);
   const given = c.rulings.get(task);
   if (given?.kind === "defer" && round) {
-    closeRound(c, task, t, n, round, roundOf(c, task, work, n, round), ["--defer", given.ids.join(",")]);
+    closeRound(c, task, t, n, round, roundOf2(c, task, work, n, round), ["--defer", given.ids.join(",")]);
     return;
   }
   if (given && given.kind !== "review") {
@@ -19737,7 +19933,7 @@ function pendingVerify(c, taskN, roundDir) {
   const { at: _at, task: _task, ...rest } = m;
   return { role: "verify", ...rest, surfaces };
 }
-function roundOf(c, task, work, n, round) {
+function roundOf2(c, task, work, n, round) {
   const abs = import_node_path28.default.join(c.io.cwd, work);
   const roundDir = import_node_path28.default.join(abs, `reviews-${n}-${round}`);
   const plan = readJson2(import_node_path28.default.join(roundDir, "review-plan.json"));
@@ -19752,7 +19948,7 @@ function reviewersBack(c, task, t, told) {
   const work = workOf(c, task, events);
   const round = latestRound(import_node_path28.default.join(c.io.cwd, work), n);
   if (!round) return;
-  const r2 = roundOf(c, task, work, n, round);
+  const r2 = roundOf2(c, task, work, n, round);
   const asked = readAsked(import_node_path28.default.join(r2.roundDir, "asked.json"));
   const given = c.rulings.get(task);
   if (asked) {
@@ -19951,7 +20147,7 @@ function forgeOf(events, task, t) {
   const p = typeof tri?.path === "string" ? tri.path : "large";
   const val = events.filter((x) => x.kind === "validate" && mine(x) && x.baseline !== true && Array.isArray(x.results)).at(-1);
   const verdict = events.filter((x) => x.kind === "verdict" && mine(x)).at(-1);
-  const reviews = reviewsOf(Math.max(1, t.round), p);
+  const reviews = reviewsOf2(Math.max(1, t.round), p);
   return {
     path: p,
     phase: t.stage,
@@ -21042,11 +21238,11 @@ function forgeDrives(io, main, sid) {
   if (exec?.active && (exec.hookSession === sid || memberForHook(main, sid, exec.runId))) return true;
   const run2 = parseRun(readRunText(main)) ?? parseRun(readRunText(io.cwd));
   if (run2?.active && run2.sessionId === sid) return true;
-  return [.../* @__PURE__ */ new Set([io.cwd, main])].some((dir) => {
-    const st = readStatus(dir);
-    const last = st ? Date.parse(st.lastAt ?? st.ts) : NaN;
-    return !!st && st.session === sid && st.doneAt === null && Number.isFinite(last) && io.now().getTime() - last < OPEN_TASK_MS;
-  });
+  const now = io.now().getTime();
+  return [.../* @__PURE__ */ new Set([io.cwd, main])].some((dir) => Object.values(readStatuses(dir)).some((st) => {
+    const last = Date.parse(st.lastAt ?? st.ts);
+    return st.session === sid && st.doneAt === null && Number.isFinite(last) && now - last < OPEN_TASK_MS;
+  }));
 }
 function hookRoute(io, which) {
   try {
@@ -22656,8 +22852,8 @@ function runCommand(argv, io) {
         if (has("locale") && loc !== "es" && loc !== "en") throw new UsageError("verify-plan: --locale must be es|en");
         const dirArg = flag("dir");
         const roundDir = dirArg === void 0 ? null : import_node_path33.default.resolve(io.cwd, dirArg);
-        const roundOf2 = roundDir ? /^reviews-(\d+)-(\d+)$/.exec(import_node_path33.default.basename(roundDir)) : null;
-        if (has("dir") && !roundOf2) throw new UsageError("verify-plan: --dir must be a review dir, .forge/work/<project>/<T>/reviews-<n>-<round> (a loose task: .forge/work/<id>/reviews-<n>-<round>)");
+        const roundOf3 = roundDir ? /^reviews-(\d+)-(\d+)$/.exec(import_node_path33.default.basename(roundDir)) : null;
+        if (has("dir") && !roundOf3) throw new UsageError("verify-plan: --dir must be a review dir, .forge/work/<project>/<T>/reviews-<n>-<round> (a loose task: .forge/work/<id>/reviews-<n>-<round>)");
         const es2 = (loc ?? planLocale(io.cwd)) === "es";
         const git = io.git ?? defaultGit(io.cwd);
         const diff = git(["diff", "--name-only", `${base}..HEAD`]);
@@ -22674,12 +22870,12 @@ function runCommand(argv, io) {
           tools: (s2) => s2.tools.length ? toolGaps(s2.tools, { onPath, inventory: inventory ??= mcpOf(io, repoDir) }) : { missing: [], unknown: [] }
         });
         appendEvent(io.cwd, { ts: ts(), kind: "verify", task, planned: plan.eligible, surfaces: plan.surfaces.filter((s2) => s2.permission === "allowed").map((s2) => s2.name) });
-        if (roundDir && roundOf2) {
+        if (roundDir && roundOf3) {
           const pending = import_node_path33.default.join(roundDir, "verify-pending.json");
           const chosen = plan.surfaces.filter((s2) => s2.permission === "allowed");
           const rel3 = (f) => import_node_path33.default.relative(io.cwd, f).split(import_node_path33.default.sep).join("/");
           const work = import_node_path33.default.dirname(roundDir);
-          const [, n, round] = roundOf2;
+          const [, n, round] = roundOf3;
           if (plan.eligible && chosen.length) {
             (0, import_node_fs32.mkdirSync)(roundDir, { recursive: true });
             (0, import_node_fs32.writeFileSync)(pending, JSON.stringify({

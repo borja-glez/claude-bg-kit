@@ -11012,7 +11012,8 @@ function executionView(i) {
     agents: signal?.agents ?? [],
     startedAt: e.startedAt,
     finished,
-    frozenAt: e.active ? null : lastMovedAt(e)
+    frozenAt: e.active ? null : lastMovedAt(e),
+    sleepUntil: e.sleepUntil ?? null
   };
 }
 
@@ -11198,6 +11199,24 @@ function openTasksFrom(states) {
   }
   return Object.fromEntries(open);
 }
+function ownSeat(seats, sessionId) {
+  if (!isSafeId(sessionId)) return null;
+  const own = seats.filter((s) => s.bound?.claude === sessionId).sort((a, b) => Date.parse(b.bound.seenAt) - Date.parse(a.bound.seenAt))[0];
+  return own?.sid ?? null;
+}
+function seatSignals(f, sid) {
+  const messages = parsed(f.messages);
+  return {
+    inbox: inboxFor(messages, sid).length,
+    escalation: Object.values(messages).some((x) => x.type === "escalation" && x.status === "open" && (x.from === sid || x.to === sid)) || escalationCandidates(messages).some((c) => c.sessions.includes(sid))
+  };
+}
+function planProgress(plan, f, now) {
+  if (!plan) return { percent: 0, phase: null };
+  const m = computeMetrics(plan, parsed(f.states), now);
+  const pi = plan.phases.findIndex((p) => m.byPhase[p.id]?.status !== "done");
+  return { percent: m.percent, phase: pi >= 0 ? { index: pi + 1, total: plan.phases.length, name: plan.phases[pi].name } : null };
+}
 function projectExecution(project, f, now) {
   const e = parseExecution(f.execution, now);
   return e && (e.kind === "ephemeral" || e.project === project) ? e : null;
@@ -11253,7 +11272,7 @@ function buildBandModel(project, f) {
     });
     const viewer = viewerOf(v, exec, now);
     if (v.coordinator && exec) {
-      const r = runModel(project, f, exec, plan, now, viewer);
+      const r = runModel(project, f, exec, plan, now, viewer, ownSeat(seats, f.sessionId) ?? exec.coordinator);
       if (r) return withAuto(r, f, now);
     }
     if (f.plan === void 0 && f.design === void 0) return noneBand(knownLocale(f), forgeViewer(exec, f, now));
@@ -11359,7 +11378,6 @@ function seatInfo(seats, sid) {
 }
 function workModel(project, f, plan, states, seat, now, viewer) {
   const { sid, track } = seat;
-  const messages = parsed(f.messages);
   const m = computeMetrics(plan, states, now);
   const own = seat.task ? plan.tasks.find((t) => t.id === seat.task) : plan.tasks.find((t) => states[t.id]?.owner === sid && ["claimed", "in_progress"].includes(states[t.id]?.status ?? ""));
   const byTrack = track ? m.byTrack[track] : void 0;
@@ -11376,8 +11394,7 @@ function workModel(project, f, plan, states, seat, now, viewer) {
     trackDone: byTrack?.done ?? m.done,
     trackTotal: byTrack?.total ?? m.total,
     percent: m.percent,
-    inbox: inboxFor(messages, sid).length,
-    escalation: Object.values(messages).some((x) => x.type === "escalation" && x.status === "open" && (x.from === sid || x.to === sid)) || escalationCandidates(messages).some((c) => c.sessions.includes(sid)),
+    ...seatSignals(f, sid),
     phase: pi >= 0 ? { index: pi + 1, total: plan.phases.length, name: plan.phases[pi].name } : null,
     cells: plan.tasks.filter((t) => !track || t.track === track).slice(0, MAX_CELLS).map((t) => CELL[states[t.id]?.status ?? "free"] ?? "p").join(""),
     swarm: seat.swarm,
@@ -11406,7 +11423,7 @@ var publicTasks = (f) => {
   return out;
 };
 var lives = (f) => Object.values(f.live ?? {}).map((t) => normalizeLive(json(t))).filter((d) => d !== null);
-function runModel(project, f, exec, plan, now, viewer) {
+function runModel(project, f, exec, plan, now, viewer, sid) {
   const v = executionView({ exec, tasks: publicTasks(f), live: lives(f), now, role: "owner" });
   if (!v) return null;
   const rank = { alive: 0, silent: 1, stopped: 2 };
@@ -11424,7 +11441,11 @@ function runModel(project, f, exec, plan, now, viewer) {
     worst,
     stalled: !v.active,
     roadmapUrl: plan?.artifacts.roadmap ?? null,
-    viewer
+    viewer,
+    // E-10: what the roadmap card shows for a run too: the seat's messages and decision, the plan's progress and phase.
+    sid,
+    ...seatSignals(f, sid),
+    ...planProgress(plan, f, now)
   };
 }
 function designModel(project, f, viewer) {

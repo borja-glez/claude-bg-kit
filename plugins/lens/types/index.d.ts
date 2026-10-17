@@ -7,23 +7,28 @@ export type LensPanel = {
     inbox: number; escalation: boolean; roadmapUrl: string | null; locale: string;
     phase: { index: number; total: number; name: string } | null; cells: string;
     recentDone?: { id: string; minutes: number; estimateMin?: number }[];
+    // run: drawn from the band of an execution, without a task nor cells.
+    run?: boolean;
   } | null;
   superpowers: {
-    plan: string; tasks: number; done: number; current: { task: string; round: number } | null; lastLines: string[];
+    plan: string; tasks: number; done: number; current: { task: string; round: number; cap?: number | null } | null; lastLines: string[];
+    // stale: not finished and unchanged for over a day.
+    stale?: boolean;
   } | null;
-  todos: { total: number; done: number; inProgress: string | null; next: string[] } | null;
-  subagents: { id: string; type: string; description?: string; status?: string; seconds: number | null; model?: string; effort?: string }[];
+  todos: { total: number; done: number; inProgress: string | null; next: string[]; active?: string[]; cells?: string } | null;
+  subagents: { id: string; type: string; description?: string; status?: string; seconds: number | null; model?: string; effort?: string; task?: string; shown?: true }[];
   subagentsDone?: { id: string; type: string; description?: string; model?: string; seconds: number }[];
   tool: { name: string; seconds: number | null } | null;
   turnSeconds: number | null;
   ccTasks: { open: number; done: number; recent: string[] } | null;
   forge: {
-    task: string; path: string; phase: string; agent: string | null; validators: { name: string; ok: boolean }[];
-    verdict: { action: string; score: number | null } | null; round: number | null; cap: number | null;
+    task: string; path: string; phase: string; agent: string | null; validators: { name: string; ok: boolean; cached?: true }[];
+    verdict: { action: string; score: number | null; round?: number | null; findings?: { critical: number; important: number; minor: number } | null } | null;
+    round: number | null; cap: number | null; reviewers?: string[]; reviews?: { n: number; max: number } | null;
     brief: number | null; accepted: number[]; briefs: number | null; autonomy?: 'auto';
     verify?: {
       planned: boolean; surfaces: string[]; result: string | null; passed: number | null; total: number | null;
-      evidence: string | null; reason: string | null;
+      evidence: string | null; reason: string | null; skipped?: string[]; launched?: boolean;
     } | null;
     timing?: { taskSeconds: number | null; done: boolean; stages: { name: string; seconds: number; live: boolean }[] } | null;
   } | null;
@@ -36,21 +41,37 @@ export type LensPanel = {
     integrated: number; total: number;
     elapsedSeconds?: number | null;
     finished?: { task: string; seconds: number }[];
+    sleepUntil?: string | null; dim?: boolean;
     slots: {
       task: string; title: string | null; stage: string; agent: string | null; model: string | null; effort: string | null;
       round: number; seconds: number; taskSeconds?: number | null; liveness: 'alive' | 'silent' | 'stopped'; mode: 'subagents' | 'sessions' | 'manual';
+      agents?: { id: string; type: string; description?: string; model?: string; effort?: string; tool: string | null; seconds: number | null; status: 'running' | 'waiting'; depth: number }[];
     }[];
     manual: { task: string; title: string | null; stage: string; seconds: number; liveness: 'alive' | 'silent' | 'stopped'; by: string }[];
     queued: string[]; conflicts: string[]; blocked: string[]; orphans: string[];
   } | null;
   proposals: { id: string; title: string; category: string; risk: string }[];
   mainModel: { model: string; effort: string | null } | null;
+  // one entry per piece of work going on: a forge task, a workflow run, superpowers, the todos, the agents without a task.
+  activities: {
+    key: string; kind: 'forge' | 'workflow' | 'superpowers' | 'todo' | 'adhoc'; owner: 'own' | 'other';
+    dim: boolean; done: boolean; slot: boolean; expanded: boolean; stopped: boolean;
+    task: string | null; project: string | null; title: string | null;
+    path: string | null; stage: string | null; round: number | null; cap: number | null;
+    verdict: { action: string; score: number | null; round?: number | null; findings?: { critical: number; important: number; minor: number } | null } | null;
+    autonomy?: 'auto';
+    job: { name: string; seconds: number | null } | null;
+    seconds: number | null;
+    agents: { id: string; type: string; description?: string; model?: string; effort?: string; tool: string | null; seconds: number | null; status: 'running' | 'waiting'; depth: number }[];
+  }[];
+  waiting: { agents: number; wakeSeconds: number | null } | null;
+  jobs: { name: string; task: string | null; seconds: number | null }[];
   usage: {
     scope: 'session' | 'run'; tokens: number; costUsd: number; partial: boolean; sessionPartial: boolean; officialUsd: number | null; drift: boolean;
     session: { tokens: number; costUsd: number } | null;
     groups: { id: 'main' | 'impl' | 'review' | 'verify' | 'plan' | 'other'; model: string | null; effort?: string | null; tokens: number; costUsd: number | null; share: number }[];
     tracking: { tokens: number; costUsd: number | null } | null;
-    withoutForge: { costUsd: number; deltaUsd: number; deltaPct: number } | null;
+    withoutForge: { costUsd: number; deltaUsd: number; deltaPct: number; lowUsd?: number } | null;
     time?: { activeSeconds: number; activePartial: boolean; sinceStartSeconds: number | null; session: { activeSeconds: number; sinceStartSeconds: number | null } | null };
     pricesAsOf: string;
   } | null;

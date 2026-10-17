@@ -10972,8 +10972,8 @@ function usable(ts, now) {
 function signalLiveness(ts, ended, now) {
   const t = usable(ts, now);
   if (ended || t === null) return "stopped";
-  const age = Math.max(0, now - t);
-  return age < LIVE_SILENT_MINUTES * 6e4 ? "alive" : age < LIVE_STOPPED_MINUTES * 6e4 ? "silent" : "stopped";
+  const age2 = Math.max(0, now - t);
+  return age2 < LIVE_SILENT_MINUTES * 6e4 ? "alive" : age2 < LIVE_STOPPED_MINUTES * 6e4 ? "silent" : "stopped";
 }
 var freshSignal = (d, now) => {
   const t = usable(d.ts, now);
@@ -11056,7 +11056,8 @@ function executionView(i) {
     agents: signal?.agents ?? [],
     startedAt: e.startedAt,
     finished: finished2,
-    frozenAt: e.active ? null : lastMovedAt(e)
+    frozenAt: e.active ? null : lastMovedAt(e),
+    sleepUntil: e.sleepUntil ?? null
   };
 }
 
@@ -11242,6 +11243,24 @@ function openTasksFrom(states) {
   }
   return Object.fromEntries(open);
 }
+function ownSeat(seats, sessionId2) {
+  if (!isSafeId(sessionId2)) return null;
+  const own = seats.filter((s) => s.bound?.claude === sessionId2).sort((a, b) => Date.parse(b.bound.seenAt) - Date.parse(a.bound.seenAt))[0];
+  return own?.sid ?? null;
+}
+function seatSignals(f, sid) {
+  const messages = parsed(f.messages);
+  return {
+    inbox: inboxFor(messages, sid).length,
+    escalation: Object.values(messages).some((x) => x.type === "escalation" && x.status === "open" && (x.from === sid || x.to === sid)) || escalationCandidates(messages).some((c2) => c2.sessions.includes(sid))
+  };
+}
+function planProgress(plan, f, now) {
+  if (!plan) return { percent: 0, phase: null };
+  const m = computeMetrics(plan, parsed(f.states), now);
+  const pi = plan.phases.findIndex((p) => m.byPhase[p.id]?.status !== "done");
+  return { percent: m.percent, phase: pi >= 0 ? { index: pi + 1, total: plan.phases.length, name: plan.phases[pi].name } : null };
+}
 function projectExecution(project, f, now) {
   const e = parseExecution(f.execution, now);
   return e && (e.kind === "ephemeral" || e.project === project) ? e : null;
@@ -11297,7 +11316,7 @@ function buildBandModel(project, f) {
     });
     const viewer = viewerOf(v, exec, now);
     if (v.coordinator && exec) {
-      const r = runModel(project, f, exec, plan, now, viewer);
+      const r = runModel(project, f, exec, plan, now, viewer, ownSeat(seats, f.sessionId) ?? exec.coordinator);
       if (r) return withAuto(r, f, now);
     }
     if (f.plan === void 0 && f.design === void 0) return noneBand(knownLocale(f), forgeViewer(exec, f, now));
@@ -11403,7 +11422,6 @@ function seatInfo(seats, sid) {
 }
 function workModel(project, f, plan, states, seat, now, viewer) {
   const { sid, track } = seat;
-  const messages = parsed(f.messages);
   const m = computeMetrics(plan, states, now);
   const own = seat.task ? plan.tasks.find((t) => t.id === seat.task) : plan.tasks.find((t) => states[t.id]?.owner === sid && ["claimed", "in_progress"].includes(states[t.id]?.status ?? ""));
   const byTrack = track ? m.byTrack[track] : void 0;
@@ -11420,8 +11438,7 @@ function workModel(project, f, plan, states, seat, now, viewer) {
     trackDone: byTrack?.done ?? m.done,
     trackTotal: byTrack?.total ?? m.total,
     percent: m.percent,
-    inbox: inboxFor(messages, sid).length,
-    escalation: Object.values(messages).some((x) => x.type === "escalation" && x.status === "open" && (x.from === sid || x.to === sid)) || escalationCandidates(messages).some((c2) => c2.sessions.includes(sid)),
+    ...seatSignals(f, sid),
     phase: pi >= 0 ? { index: pi + 1, total: plan.phases.length, name: plan.phases[pi].name } : null,
     cells: plan.tasks.filter((t) => !track || t.track === track).slice(0, MAX_CELLS).map((t) => CELL[states[t.id]?.status ?? "free"] ?? "p").join(""),
     swarm: seat.swarm,
@@ -11450,7 +11467,7 @@ var publicTasks = (f) => {
   return out;
 };
 var lives = (f) => Object.values(f.live ?? {}).map((t) => normalizeLive(json(t))).filter((d) => d !== null);
-function runModel(project, f, exec, plan, now, viewer) {
+function runModel(project, f, exec, plan, now, viewer, sid) {
   const v = executionView({ exec, tasks: publicTasks(f), live: lives(f), now, role: "owner" });
   if (!v) return null;
   const rank = { alive: 0, silent: 1, stopped: 2 };
@@ -11468,7 +11485,11 @@ function runModel(project, f, exec, plan, now, viewer) {
     worst,
     stalled: !v.active,
     roadmapUrl: plan?.artifacts.roadmap ?? null,
-    viewer
+    viewer,
+    // E-10: what the roadmap card shows for a run too: the seat's messages and decision, the plan's progress and phase.
+    sid,
+    ...seatSignals(f, sid),
+    ...planProgress(plan, f, now)
   };
 }
 function designModel(project, f, viewer) {
@@ -11574,6 +11595,10 @@ var MAX_VALIDATORS = 10;
 var MAX_ACCEPTED = 200;
 var MAX_STAGES = 20;
 var MAX_TS = 40;
+var MAX_REVIEWERS = 6;
+var MAX_SKIPPED = 10;
+var MAX_REVIEWS = 20;
+var MAX_FINDINGS = 999;
 var tsText = (x) => str4(x) && x.length <= MAX_TS ? x : null;
 function stagesOf(x) {
   const out = /* @__PURE__ */ Object.create(null);
@@ -11594,6 +11619,17 @@ var UNSAFE2 = new RegExp(`[\\x00-\\x1f\\x7f-\\x9f${cp2(8234)}-${cp2(8238)}${cp2(
 var cleanText = (s) => s.replace(UNSAFE2, "").slice(0, CLIP);
 var pathText = (x) => str4(x) ? x.replace(/[\x00-\x1f\x7f-\x9f]/g, "").slice(0, 200) : null;
 var briefNum = (x) => typeof x === "number" && Number.isInteger(x) && x > 0 && x < 1e4 ? x : null;
+var roundOf = (v) => typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= MAX_REVIEWS ? v : null;
+var reviewsOf = (x) => {
+  if (!isObj3(x)) return null;
+  const n2 = roundOf(x.n), max = roundOf(x.max);
+  return n2 !== null && max !== null ? { n: n2, max } : null;
+};
+var countOf = (v) => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= MAX_FINDINGS ? v : null;
+var findingsOf = (x) => {
+  const critical = countOf(x.critical), important = countOf(x.important), minor = countOf(x.minor);
+  return critical !== null && important !== null && minor !== null ? { critical, important, minor } : null;
+};
 function normalizeStatus(x) {
   if (!isObj3(x) || !str4(x.ts) || !str4(x.task) || !x.task || !str4(x.path) || !str4(x.phase)) return null;
   if (x.agent !== null && !str4(x.agent)) return null;
@@ -11601,15 +11637,15 @@ function normalizeStatus(x) {
   let verdict = null;
   if (x.verdict !== null) {
     if (!isObj3(x.verdict) || !str4(x.verdict.action)) return null;
-    verdict = { action: cleanText(x.verdict.action), score: num(x.verdict.score) };
+    verdict = { action: cleanText(x.verdict.action), score: num(x.verdict.score), round: roundOf(x.verdict.round), findings: isObj3(x.verdict.findings) ? findingsOf(x.verdict.findings) : null };
   }
   return {
     ts: x.ts,
-    task: cleanText(x.task),
+    task: isSafeId(x.task) ? x.task : cleanText(x.task),
     path: cleanText(x.path),
     phase: cleanText(x.phase),
     agent: str4(x.agent) ? cleanText(x.agent) : null,
-    validators: x.validators.filter((v) => isObj3(v) && str4(v.name)).slice(0, MAX_VALIDATORS).map((v) => ({ name: cleanText(v.name), ok: v.ok === true })),
+    validators: x.validators.filter((v) => isObj3(v) && str4(v.name)).slice(0, MAX_VALIDATORS).map((v) => ({ name: cleanText(v.name), ok: v.ok === true, ...v.cached === true ? { cached: true } : {} })),
     verdict,
     round: num(x.round),
     cap: num(x.cap),
@@ -11624,7 +11660,9 @@ function normalizeStatus(x) {
       passed: num(x.verify.passed),
       total: num(x.verify.total),
       evidence: pathText(x.verify.evidence),
-      reason: str4(x.verify.reason) ? cleanText(x.verify.reason) : null
+      reason: str4(x.verify.reason) ? cleanText(x.verify.reason) : null,
+      skipped: (Array.isArray(x.verify.skipped) ? x.verify.skipped : []).filter(str4).slice(0, MAX_SKIPPED).map(cleanText),
+      launched: x.verify.launched === true
     } : null,
     // Absent in a status written before timings existed: no times are shown.
     taskStartedAt: tsText(x.taskStartedAt),
@@ -11636,8 +11674,17 @@ function normalizeStatus(x) {
     session: isSafeId(x.session) ? x.session : null,
     runId: isSafeId(x.runId) ? x.runId : null,
     project: isSafeId(x.project) ? x.project : null,
+    reviewers: (Array.isArray(x.reviewers) ? x.reviewers : []).filter(str4).map(cleanText).filter(Boolean).slice(0, MAX_REVIEWERS),
+    reviews: reviewsOf(x.reviews),
     ...x.autonomy === "auto" ? { autonomy: "auto" } : {}
   };
+}
+function statusKey(task, project) {
+  if (!isSafeId(task)) return null;
+  if (project === null) return task;
+  if (!isSafeId(project)) return null;
+  const key = `${project}__${task}`;
+  return isSafeId(key) ? key : null;
 }
 
 // src/lib/prices.ts
@@ -11699,7 +11746,7 @@ var MAIN = "main";
 var MAX_LOOPS = 200;
 var OVERFLOW = "overflow";
 var n = (x) => typeof x === "number" && Number.isFinite(x) && x > 0 ? x : 0;
-var newUsage = (startedAt) => ({ startedAt, loops: {}, tracking: { waypoint: 0, forge: 0 }, activeMs: 0 });
+var newUsage = (startedAt) => ({ startedAt, loops: {}, tracking: { waypoint: 0, forge: 0, reread: 0 }, rereadBase: 0, activeMs: 0 });
 var newTurnClock = () => ({ since: null, lastActivityMs: 0 });
 function touchTurn(c2, now) {
   if (Number.isFinite(now) && now > c2.lastActivityMs) c2.lastActivityMs = now;
@@ -11735,6 +11782,7 @@ function recordStep(s, step) {
   loop.model = model;
   loop.effort = effortText(step.effort);
   loop.steps += 1;
+  if ((step.agentId || MAIN) === MAIN) s.tracking.reread += Math.max(0, s.tracking.waypoint + s.tracking.forge - s.rereadBase);
   if (!step.usage) return;
   const t = { input: n(step.usage.input_tokens), output: n(step.usage.output_tokens), cacheRead: n(step.usage.cache_read_input_tokens), cacheWrite: n(step.usage.cache_creation_input_tokens) };
   loop.input += t.input;
@@ -11767,6 +11815,9 @@ function trackingKind(tool, input) {
 }
 function recordTracking(s, kind, chars) {
   s.tracking[kind] += Math.ceil(n(chars) / 4);
+}
+function compactUsage(s) {
+  s.rereadBase = s.tracking.waypoint + s.tracking.forge;
 }
 
 // src/lens/view.ts
@@ -11886,7 +11937,7 @@ var stageOf = (phase) => {
   const p = String(phase).toLowerCase();
   return Object.hasOwn(STAGE_OF, p) ? STAGE_OF[p] : p;
 };
-function stagesFor(path, phase, validated = null, verifyPlanned = false) {
+function stagesFor(path, phase, validated = null, verifyPlanned = false, visited = []) {
   if (path === "run") {
     if (phase.toLowerCase() === "done") return RUN_STAGES.map((name) => ({ name, state: "done" }));
     const i2 = RUN_STAGES.indexOf(STAGE_OF[phase.toLowerCase()] ?? "execution");
@@ -11897,6 +11948,7 @@ function stagesFor(path, phase, validated = null, verifyPlanned = false) {
   const light = path === "trivial" || path === "small";
   const names = STAGES2.filter((s) => s !== "execution" && (large || s !== "design" && s !== "plan" && s !== "final") && !(light && (s === "review" || s === "verdict")) && (s !== "verify" || verifyPlanned));
   if (phase.toLowerCase() === "done") return names.map((name) => ({ name, state: "done" }));
+  if (phase.toLowerCase() === "stopped") return names.map((name) => ({ name, state: visited.includes(name) ? "done" : "pending" }));
   const at = STAGE_OF[phase.toLowerCase()] ?? null;
   let i = at ? names.indexOf(at) : -1;
   const v = names.indexOf("validate");
@@ -11909,6 +11961,7 @@ function stagesFor(path, phase, validated = null, verifyPlanned = false) {
   return out;
 }
 function forgePhase(f) {
+  if (f.phase.toLowerCase() === "stopped") return "stopped";
   if ((f.path === "trivial" || f.path === "small") && f.timing?.done) return "done";
   if (f.timing?.done === false && f.phase.toLowerCase() === "done") return "";
   const total = Math.max(f.briefs ?? 0, f.brief ?? 0);
@@ -11918,7 +11971,7 @@ function forgePhase(f) {
 }
 var count = (cells2) => ({ cells: cells2, done: cells2.filter((c2) => c2 === "done").length, total: cells2.length });
 var roadmapCells = (w) => count([...w.cells ?? ""].map((ch) => LETTER[ch] ?? "pending"));
-var forgeDone = (f) => forgePhase(f) === "done" || f.timing?.done === true;
+var forgeDone = (f) => f.phase.toLowerCase() !== "stopped" && (forgePhase(f) === "done" || f.timing?.done === true);
 function briefCells(f) {
   const heavy = f.path === "medium" || f.path === "large";
   const done = !heavy && forgeDone(f);
@@ -11934,6 +11987,10 @@ function briefCells(f) {
   return count(cells2);
 }
 function todoCells(t) {
+  if (typeof t.cells === "string" && t.cells) {
+    const cells3 = [...t.cells].slice(0, 60).map((ch) => ch === "d" ? "done" : ch === "a" ? "active" : "pending");
+    return { cells: cells3, done: t.done, total: t.total };
+  }
   const cells2 = [];
   const total = Math.min(t.total, 60);
   for (let i = 0; i < total; i++) cells2.push(i < t.done ? "done" : i === t.done && t.inProgress ? "active" : "pending");
@@ -11961,6 +12018,11 @@ function span(seconds) {
   if (seconds === null || seconds === void 0 || !Number.isFinite(seconds) || seconds < 0) return null;
   return seconds > DAY_S ? ">24h" : duration(Math.floor(seconds));
 }
+function short(seconds) {
+  if (seconds === null || seconds === void 0 || !Number.isFinite(seconds) || seconds < 0) return null;
+  const s = Math.floor(seconds);
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${Math.floor(s / 3600)}h ${String(Math.floor(s % 3600 / 60)).padStart(2, "0")}m`;
+}
 function headline(m) {
   if (m.execution?.active) {
     const x = m.execution;
@@ -11976,9 +12038,9 @@ function headline(m) {
     const w = m.waypoint;
     return { section: "roadmap", title: w.project, detail: w.current ? `${w.current.id} ${w.current.title}` : "", cells: roadmapCells(w), agent: null };
   }
-  if (m.superpowers) {
+  if (m.superpowers && !m.superpowers.stale) {
     const s = m.superpowers;
-    return { section: "superpowers", title: s.plan || "superpowers", detail: s.current ? `round ${s.current.round}/5` : "", cells: superpowersCells(s), agent: null };
+    return { section: "superpowers", title: s.plan || "superpowers", detail: s.current ? `round ${s.current.round}${s.current.cap ? `/${s.current.cap}` : ""}` : "", cells: superpowersCells(s), agent: null };
   }
   if (m.todos) return { section: "todos", title: m.todos.inProgress ?? "", detail: "", cells: todoCells(m.todos), agent: null };
   if (m.subagents.length) return { section: "agents", title: "", detail: "", cells: null, agent: m.subagents.at(-1).type };
@@ -11990,9 +12052,14 @@ function fmtTokens(n2, locale) {
   if (n2 >= 1e3) return `${Math.round(n2 / 1e3)} k`;
   return String(Math.round(n2));
 }
+var usdValue = (n2, locale) => (Math.round(n2 * 100) / 100 < 10 ? n2.toFixed(2) : n2.toFixed(1)).replace(".", dec(locale));
 function fmtUsd(n2, locale) {
-  const v = (Math.round(n2 * 100) / 100 < 10 ? n2.toFixed(2) : n2.toFixed(1)).replace(".", dec(locale));
+  const v = usdValue(n2, locale);
   return locale.startsWith("es") ? `${v} $` : `$${v}`;
+}
+function fmtUsdRange(lo, hi, locale) {
+  const a = usdValue(lo, locale), b = usdValue(hi, locale);
+  return locale.startsWith("es") ? `${a}\u2013${b} $` : `$${a}\u2013${b}`;
 }
 function usageBandText(m) {
   const u = m.usage;
@@ -12032,7 +12099,9 @@ function summarizeUsage(s) {
   const mainModel = dominant(byGroup.get("main") ?? []);
   const trackTokens = s.tracking.waypoint + s.tracking.forge;
   const trackCost = trackTokens && mainModel ? tokensCost(mainModel, { input: trackTokens, output: 0, cacheRead: 0, cacheWrite: 0 }) : null;
-  const partial = entries.some(([, l]) => l.unpriced > 0);
+  const reread = s.tracking.reread ?? 0;
+  const rereadCost = reread && mainModel ? tokensCost(mainModel, { input: 0, output: 0, cacheRead: reread, cacheWrite: 0 }) : null;
+  const partial = entries.some(([, l]) => l.unpriced > 0) || s.runPartial === true;
   const costOf = (loops) => {
     if (loops.length && loops.every((l) => l.unpriced > 0 && l.costUsd === 0)) return null;
     return loops.reduce((a, l) => a + l.costUsd, 0);
@@ -12043,9 +12112,9 @@ function summarizeUsage(s) {
     const loops = byGroup.get(id2);
     let tokens = loops.reduce((a, l) => a + tokensOf(l), 0);
     let costUsd = costOf(loops);
-    if (id2 === "main" && trackTokens) {
-      tokens = Math.max(0, tokens - trackTokens);
-      if (costUsd !== null && trackCost !== null) costUsd = Math.max(0, costUsd - trackCost);
+    if (id2 === "main" && (trackTokens || reread)) {
+      tokens = Math.max(0, tokens - trackTokens - reread);
+      if (costUsd !== null) costUsd = Math.max(0, costUsd - (trackCost ?? 0) - (rereadCost ?? 0));
     }
     const models = new Set(loops.map((l) => l.model).filter(Boolean));
     const efforts = new Set(loops.filter((l) => l.steps > 0).map((l) => l.effort));
@@ -12061,14 +12130,14 @@ function summarizeUsage(s) {
     const others = (byGroup.get("other") ?? []).reduce((a, l) => a + l.costUsd, 0);
     const without = Math.max(0, mainCost - (trackCost ?? 0) + repriced + others);
     const deltaUsd = totalCost - without;
-    withoutForge = { costUsd: without, deltaUsd, deltaPct: without > 0 ? Math.round(deltaUsd / without * 100) || 0 : 0 };
+    withoutForge = { costUsd: without, lowUsd: Math.max(0, without - (rereadCost ?? 0)), deltaUsd, deltaPct: without > 0 ? Math.round(deltaUsd / without * 100) || 0 : 0 };
   }
   return {
     tokens: totalTokens,
     costUsd: totalCost,
     partial,
     groups,
-    tracking: trackTokens ? { tokens: trackTokens, costUsd: trackCost } : null,
+    tracking: trackTokens || reread ? { tokens: trackTokens + reread, costUsd: trackCost === null && rereadCost === null ? null : (trackCost ?? 0) + (rereadCost ?? 0) } : null,
     withoutForge
   };
 }
@@ -12087,10 +12156,212 @@ function freshFinished(list, now) {
   return list.filter((x) => Number.isFinite(now) && x.at <= now && now - x.at < FINISHED_TTL_MS);
 }
 
-// src/lens/model.ts
+// src/lens/activities.ts
+var DONE_TTL_MS = 15 * 6e4;
+var OTHER_TTL_MS = 30 * 6e4;
+var OWN_TTL_MS = 24 * 36e5;
+var LEFT_OPEN_MS = 30 * 6e4;
+var JOB_ALIVE_MS = 2 * 36e5;
+var JOB_FILE_MAX = 4 * 1024;
+var JOBS_SHOWN = 5;
 var CLIP2 = 80;
-var MAX_RANGE = 1e3;
+var PARENT_DEPTH = 5;
+var ms = (s) => s ? Date.parse(s) : NaN;
 var clip = (s) => s.length > CLIP2 ? s.slice(0, CLIP2) : s;
+function span2(from, to, now) {
+  if (!Number.isFinite(from) || !Number.isFinite(to) || !Number.isFinite(now)) return null;
+  if (from - now > FUTURE_SKEW_MS || to - now > FUTURE_SKEW_MS || to < from) return null;
+  return Math.floor((to - from) / 1e3);
+}
+var age = (t, now) => Math.max(0, now - t);
+var isOf = (task, id2) => id2 === task || id2.startsWith(`${task}-`) && /^\d{1,4}$/.test(id2.slice(task.length + 1));
+var alive = (l) => l.status !== "done";
+function leftOpen(st, now) {
+  if (st.path !== "trivial" && st.path !== "small" || st.doneAt) return false;
+  const last = ms(st.lastAt);
+  return Number.isFinite(last) && Number.isFinite(now) && now - last > LEFT_OPEN_MS;
+}
+function runRoleOf(band) {
+  const v = band.viewer;
+  if (!v) return "none";
+  if (v.role !== "owner") return v.role;
+  return v.coordinator || band.mode === "work" && band.run != null ? "owner" : "none";
+}
+function parseJob(text2) {
+  if (typeof text2 !== "string" || text2.length > JOB_FILE_MAX) return null;
+  let o;
+  try {
+    o = JSON.parse(text2);
+  } catch {
+    return null;
+  }
+  if (!o || typeof o !== "object" || Array.isArray(o)) return null;
+  const j = o;
+  if (!isSafeId(j.name) || typeof j.cmd !== "string" || !/^[a-z][a-z-]{0,39}$/.test(j.cmd)) return null;
+  if (typeof j.startedAt !== "string" || !Number.isFinite(Date.parse(j.startedAt))) return null;
+  if (j.task !== null && j.task !== void 0 && !isSafeId(j.task)) return null;
+  return { name: j.name, cmd: j.cmd, task: isSafeId(j.task) ? j.task : null, startedAt: j.startedAt, session: isSafeId(j.session) ? j.session : null };
+}
+function agentOf(l, links2, models, now) {
+  const m = models[l.id];
+  let depth = 0;
+  let up = links2.find((x) => x.id === l.parentId);
+  while (up && up.task === l.task && depth < PARENT_DEPTH) {
+    depth++;
+    const parent = up.parentId;
+    up = links2.find((x) => x.id === parent);
+  }
+  return {
+    id: l.id,
+    type: l.type,
+    ...l.description ? { description: clip(l.description) } : {},
+    ...m?.model ? { model: m.model } : {},
+    ...m?.effort ? { effort: m.effort } : {},
+    tool: l.tool?.name ?? null,
+    seconds: span2(l.since, now, now),
+    status: l.status === "running" ? "running" : "waiting",
+    depth
+  };
+}
+function withSlotAgents(x, links2, models, viewer, now) {
+  if (!x) return x;
+  return {
+    ...x,
+    slots: x.slots.map((s) => {
+      const agents = links2.filter((l) => alive(l) && l.task === s.task).map((l) => agentOf(l, links2, models, now));
+      const first = agents.find((g) => g.model);
+      const liveness2 = viewer.coordinator && agents.length ? "alive" : s.liveness;
+      return { ...s, agents, model: s.model ?? first?.model ?? null, effort: s.effort ?? first?.effort ?? null, liveness: liveness2 };
+    })
+  };
+}
+var summary = (key, kind, o) => ({
+  key,
+  kind,
+  owner: "own",
+  dim: o.dim,
+  done: o.done,
+  slot: false,
+  expanded: false,
+  stopped: false,
+  task: null,
+  project: null,
+  title: o.title,
+  path: null,
+  stage: o.stage ?? null,
+  round: o.round ?? null,
+  cap: o.cap ?? null,
+  verdict: null,
+  job: null,
+  seconds: null,
+  agents: []
+});
+function buildActivities(i) {
+  const now = i.now;
+  const known = i.sessionId !== void 0;
+  const slotTasks = new Set(i.execution?.mode === "subagents" ? i.execution.slots.map((s) => s.task) : []);
+  const liveJobs = i.jobs.filter((j) => {
+    const t = ms(j.startedAt);
+    return Number.isFinite(t) && age(t, now) < JOB_ALIVE_MS;
+  });
+  const built = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const st of i.statuses) {
+    const key = statusKey(st.task, st.project) ?? st.task;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const last = ms(st.lastAt ?? st.ts);
+    if (!Number.isFinite(last)) continue;
+    const stopped = st.phase.toLowerCase() === "stopped";
+    const mine = i.links.filter((l) => alive(l) && l.task === st.task && (l.project === null || st.project === null || l.project === st.project));
+    const working = mine.length > 0 || !!st.agent && i.liveTypes.some((t) => tierOf(t).label === tierOf(st.agent).label);
+    const left = !stopped && !working && leftOpen(st, now);
+    const done = !stopped && (!!st.doneAt || left);
+    const ended = st.doneAt ? ms(st.doneAt) : left ? last : NaN;
+    const end = left ? last + LEFT_OPEN_MS : ended;
+    const owner = !known ? "own" : st.session !== null && i.sessionId ? st.session === i.sessionId ? "own" : "other" : i.ownTasks.some((t) => isOf(st.task, t)) ? "own" : "other";
+    const visible = done || stopped ? Number.isFinite(end) && age(end, now) < DONE_TTL_MS : age(last, now) < (owner === "own" ? OWN_TTL_MS : OTHER_TTL_MS);
+    if (!visible) continue;
+    const skewed = last - now > FUTURE_SKEW_MS;
+    const job = liveJobs.find((j) => j.task !== null && isOf(st.task, j.task));
+    const live = owner === "own" && !done && !stopped;
+    const title = i.titles?.[st.task];
+    built.push({
+      row: {
+        key,
+        kind: "forge",
+        owner,
+        dim: owner === "other" || done || stopped,
+        done,
+        slot: slotTasks.has(st.task) && !done && !stopped,
+        expanded: false,
+        stopped,
+        task: st.task,
+        project: st.project,
+        title: title ? clip(title) : null,
+        path: st.path || null,
+        stage: done || stopped ? null : stageOf(st.phase || "triage"),
+        round: st.reviews?.n ?? st.round,
+        cap: st.reviews?.max ?? st.cap,
+        verdict: st.verdict ? { action: st.verdict.action, score: st.verdict.score, round: st.verdict.round, findings: st.verdict.findings } : null,
+        ...st.autonomy === "auto" ? { autonomy: "auto" } : {},
+        job: job ? { name: job.cmd, seconds: span2(ms(job.startedAt), now, now) } : null,
+        seconds: skewed ? null : span2(ms(st.taskStartedAt), done || stopped ? ended : now, now),
+        agents: live ? mine.map((l) => agentOf(l, i.links, i.models, now)) : []
+      },
+      at: last,
+      end,
+      st,
+      rank: done || stopped ? 2 : owner === "own" ? 0 : 1
+    });
+  }
+  const runs = /* @__PURE__ */ new Map();
+  for (const l of i.links) if (l.workflow) runs.set(l.workflow.runId, [...runs.get(l.workflow.runId) ?? [], l]);
+  for (const [runId, ls] of runs) {
+    const living = ls.filter(alive);
+    const end = Math.max(...ls.map((l) => l.endedAt ?? -Infinity));
+    if (!living.length && !(Number.isFinite(end) && age(end, now) < DONE_TTL_MS)) continue;
+    const start = Math.min(...ls.map((l) => l.since));
+    built.push({
+      row: {
+        ...summary(`wf:${isSafeId(runId) ? runId : "run"}`, "workflow", { title: ls[0].description ? clip(ls[0].description) : null, done: !living.length, dim: !living.length }),
+        seconds: span2(start, living.length ? now : end, now),
+        agents: living.map((l) => agentOf(l, i.links, i.models, now))
+      },
+      at: living.length ? now : end,
+      end,
+      st: null,
+      rank: living.length ? 0 : 2
+    });
+  }
+  built.sort((a, b) => a.rank - b.rank || (a.rank === 2 ? b.end - a.end : b.at - a.at));
+  const forge = built.filter((b) => b.row.kind === "forge" && !b.row.slot);
+  const focus = i.focusAgent ? i.links.find((l) => l.id === i.focusAgent)?.task ?? null : null;
+  const pick2 = (focus ? forge.find((b) => b.row.task === focus) : void 0) ?? forge.find((b) => b.rank === 0 && b.row.owner === "own") ?? forge.reduce((best, b) => !best || b.at > best.at ? b : best, void 0);
+  if (pick2) pick2.row.expanded = true;
+  const out = built.map((b) => b.row);
+  if (i.superpowers) {
+    const s = i.superpowers;
+    out.push(summary("sp", "superpowers", { title: s.plan || null, stage: s.current ? "fix" : null, round: s.current?.round ?? null, cap: s.current?.cap ?? null, done: s.tasks > 0 && s.done >= s.tasks, dim: !!s.stale }));
+  }
+  if (i.todos && i.todos.total > i.todos.done) out.push(summary("todo", "todo", { title: i.todos.inProgress, done: false, dim: false }));
+  const adhoc = i.links.filter((l) => alive(l) && !l.task && !l.workflow);
+  if (adhoc.length) out.push({ ...summary("adhoc", "adhoc", { title: null, done: false, dim: false }), agents: adhoc.map((l) => agentOf(l, i.links, i.models, now)) });
+  const mainAgents = i.links.filter((l) => alive(l) && l.parentId === null);
+  let waiting = null;
+  if (i.turnSince === null && mainAgents.length) {
+    const wakes = [i.viewer.coordinator ? ms(i.sleepUntil) : NaN, i.wakeAt ?? NaN].filter((t) => Number.isFinite(t) && t >= now);
+    waiting = { agents: mainAgents.length, wakeSeconds: wakes.length ? Math.round((Math.min(...wakes) - now) / 1e3) : null };
+  }
+  const rows = out.filter((a) => a.kind === "forge" && !a.slot && a.task !== null).map((a) => a.task);
+  const jobs = liveJobs.filter((j) => !(j.task !== null && rows.some((t) => isOf(t, j.task)))).filter((j) => !known || j.session === null || j.session === i.sessionId).slice(0, JOBS_SHOWN).map((j) => ({ name: j.cmd, task: j.task, seconds: span2(ms(j.startedAt), now, now) }));
+  return { activities: out, waiting, jobs, expanded: pick2?.st ?? null };
+}
+
+// src/lens/model.ts
+var CLIP3 = 80;
+var MAX_RANGE = 1e3;
+var clip2 = (s) => s.length > CLIP3 ? s.slice(0, CLIP3) : s;
 var PROGRESS_LINE = /^\s*(?:[-*]\s*)?Tasks?\s+(\d+)(?:\s*[-–]\s*(\d+))?\s*:\s*(.*)$/i;
 function parseSddLedger(text2) {
   const out = { planPath: null, done: [], current: null, lastLines: [] };
@@ -12124,8 +12395,8 @@ function parseSddLedger(text2) {
         for (let n2 = lo; n2 <= hi; n2++) done.add(n2);
         continue;
       }
-      const fix = /^fix round\s+(\d+)\s*\/\s*\d+/i.exec(rest);
-      if (fix) fixes.push({ lo, hi, label: m[2] !== void 0 ? `${m[1]}-${m[2]}` : m[1], round: Number(fix[1]) });
+      const fix = /^fix round\s+(\d+)(?:\s*\/\s*(\d+))?/i.exec(rest);
+      if (fix) fixes.push({ lo, hi, label: m[2] !== void 0 ? `${m[1]}-${m[2]}` : m[1], round: Number(fix[1]), cap: fix[2] !== void 0 ? Number(fix[2]) : null });
     }
     out.done = [...done].sort((a, b) => a - b);
     for (let i = fixes.length - 1; i >= 0; i--) {
@@ -12136,11 +12407,11 @@ function parseSddLedger(text2) {
         break;
       }
       if (open) {
-        out.current = { task: f.label, round: f.round };
+        out.current = { task: f.label, round: f.round, cap: f.cap };
         break;
       }
     }
-    out.lastLines = section.map((l) => l.trimEnd()).filter((l) => l.trim() !== "").slice(-3).map(clip);
+    out.lastLines = section.map((l) => l.trimEnd()).filter((l) => l.trim() !== "").slice(-3).map(clip2);
   } catch {
   }
   return out;
@@ -12165,18 +12436,27 @@ function parsePlanTasks(md) {
   }
   return tasks;
 }
+var TODO_ACTIVE_MAX = 3;
+var TODO_CELLS_MAX = 200;
 function summarizeTodos(todos) {
-  const out = { total: 0, done: 0, inProgress: null, next: [] };
+  const out = { total: 0, done: 0, inProgress: null, next: [], active: [], cells: "" };
   if (!Array.isArray(todos)) return out;
   for (const raw of todos) {
     if (!raw || typeof raw !== "object") continue;
     const t = raw;
     if (typeof t.content !== "string") continue;
     out.total++;
-    if (t.status === "completed") out.done++;
-    else if (t.status === "in_progress") {
-      if (out.inProgress === null) out.inProgress = clip(typeof t.activeForm === "string" && t.activeForm ? t.activeForm : t.content);
-    } else if (out.next.length < 3) out.next.push(clip(t.content));
+    let cell = "p";
+    if (t.status === "completed") {
+      out.done++;
+      cell = "d";
+    } else if (t.status === "in_progress") {
+      const text2 = clip2(typeof t.activeForm === "string" && t.activeForm ? t.activeForm : t.content);
+      if (out.inProgress === null) out.inProgress = text2;
+      if (out.active.length < TODO_ACTIVE_MAX) out.active.push(text2);
+      cell = "a";
+    } else if (out.next.length < 3) out.next.push(clip2(t.content));
+    if (out.cells.length < TODO_CELLS_MAX) out.cells += cell;
   }
   return out;
 }
@@ -12211,14 +12491,14 @@ function superpowers(input) {
       }
       const stale = input.ledgerMtimeMs !== void 0 && input.now - input.ledgerMtimeMs > STALE_LEDGER_MS;
       if (stale && !l.current && done === tasks) return null;
-      return { plan: clip(l.planPath ?? ""), tasks, done, current: l.current, lastLines: l.lastLines };
+      return { plan: clip2(l.planPath ?? ""), tasks, done, current: l.current, lastLines: l.lastLines, ...stale ? { stale: true } : {} };
     }
     if (input.planFallback !== void 0) {
       const plan = parsePlanTasks(input.planFallback);
       if (!plan.some((p) => p.checked > 0)) return null;
       const title = /^#\s+(.+?)\s*$/m.exec(input.planFallback)?.[1] ?? "";
       return {
-        plan: clip(title),
+        plan: clip2(title),
         tasks: plan.length,
         done: plan.filter((p) => p.steps > 0 && p.checked === p.steps).length,
         current: null,
@@ -12232,28 +12512,31 @@ function superpowers(input) {
 var FORGE_WINDOW_MS = 24 * 36e5;
 var MAX_PROPOSALS = 5;
 var PROPOSAL_ID = /^p\d{14}[0-9a-z]{4}$/;
-function forgeFromStatus(text2, now, briefs = null, liveTypes = []) {
-  if (typeof text2 !== "string") return null;
-  let st;
-  try {
-    st = normalizeStatus(JSON.parse(text2));
-  } catch {
-    return null;
-  }
-  if (!st) return null;
-  const t = Date.parse(st.ts);
-  if (!Number.isFinite(t) || !Number.isFinite(now) || now - t > FORGE_WINDOW_MS) return null;
+function forgeOf(st, now, briefs = null, liveTypes = []) {
   const { ts: _ts, taskStartedAt: _a, stageSince: _b, stages: _c, doneAt: _d, lastAt: _e, session: _s, runId: _r, project: _p, ...forge } = st;
-  const working = !!st.agent && liveTypes.some((t2) => tierOf(t2).label === tierOf(st.agent).label);
+  const working = !!st.agent && liveTypes.some((t) => tierOf(t).label === tierOf(st.agent).label);
   const left = !working && leftOpen(st, now);
   const timing = forgeTiming(left ? { ...st, doneAt: st.lastAt } : st, now);
   return { ...forge, ...left ? { agent: null } : {}, briefs, timing };
 }
-var LEFT_OPEN_MS = 30 * 6e4;
-function leftOpen(st, now) {
-  if (st.path !== "trivial" && st.path !== "small" || st.doneAt) return false;
-  const last = st.lastAt ? Date.parse(st.lastAt) : NaN;
-  return Number.isFinite(last) && Number.isFinite(now) && now - last > LEFT_OPEN_MS;
+var FORGE_STATUSES_READ = 20;
+var FORGE_STATUS_TEXT_MAX = 64 * 1024;
+function parseStatuses(texts) {
+  const out = [];
+  for (const text2 of texts.slice(0, FORGE_STATUSES_READ)) {
+    if (typeof text2 !== "string" || text2.length > FORGE_STATUS_TEXT_MAX) continue;
+    try {
+      const st = normalizeStatus(JSON.parse(text2));
+      if (st) out.push(st);
+    } catch {
+    }
+  }
+  return out;
+}
+function newestForge(statuses, now, briefsOf, liveTypes) {
+  const st = [...statuses].sort((x, y) => (Date.parse(y.lastAt ?? y.ts) || 0) - (Date.parse(x.lastAt ?? x.ts) || 0))[0];
+  const t = st ? Date.parse(st.ts) : NaN;
+  return st && Number.isFinite(t) && now - t <= FORGE_WINDOW_MS ? forgeOf(st, now, briefsOf(st), liveTypes) : null;
 }
 function elapsed(from, to, now) {
   const t = from ? Date.parse(from) : NaN;
@@ -12307,11 +12590,17 @@ var FORGE_EXEC_MAX = 64 * 1024;
 var FORGE_EXEC_FILE_MAX = 8 * 1024;
 var FORGE_EXEC_TASKS_MAX = 50;
 var FORGE_LIVE_MAX = 20;
+function statusRootOf(root, main) {
+  const norm = (p) => p.replace(/\\/g, "/").replace(/\/+$/, "");
+  const r = norm(root);
+  const name = r.split("/").pop() ?? "";
+  return name.startsWith("task-") && r.toLowerCase() === `${norm(main)}/.claude/worktrees/${name}`.toLowerCase() ? main : root;
+}
 function secondsSince(ts, now) {
   const since = Date.parse(ts);
   return Number.isFinite(since) && Number.isFinite(now) ? Math.max(0, Math.round((now - since) / 1e3)) : 0;
 }
-function executionFromFiles(execText, taskTexts = {}, liveTexts = {}, now, titles) {
+function executionFromFiles(execText, taskTexts = {}, liveTexts = {}, now, titles, role) {
   if (typeof execText !== "string" || execText.length > FORGE_EXEC_MAX) return null;
   const tasks = {};
   for (const [id2, t] of Object.entries(taskTexts)) {
@@ -12334,7 +12623,7 @@ function executionFromFiles(execText, taskTexts = {}, liveTexts = {}, now, title
   let v;
   const clean2 = titles && Object.fromEntries(Object.entries(titles).map(([id2, t]) => [id2, cleanText(t)]));
   try {
-    v = executionView({ exec: parseExecution(execText, now), tasks, live, titles: clean2, now });
+    v = executionView({ exec: parseExecution(execText, now), tasks, live, titles: clean2, now, role });
   } catch {
     return null;
   }
@@ -12347,7 +12636,7 @@ function executionFromFiles(execText, taskTexts = {}, liveTexts = {}, now, title
     branch: v.branch,
     active: v.active,
     stopReason: v.stopReason,
-    stallReason: v.stallReason ? clip(v.stallReason) : null,
+    stallReason: v.stallReason ? clip2(v.stallReason) : null,
     coordinator: { ...v.coordinator },
     integrated: v.integrated,
     total: v.total,
@@ -12356,7 +12645,7 @@ function executionFromFiles(execText, taskTexts = {}, liveTexts = {}, now, title
     // model / effort: lens knows them only for its own session's subagents (from the usage loops), not for these.
     slots: v.slots.map((s) => ({
       task: s.task,
-      title: s.title ? clip(s.title) : null,
+      title: s.title ? clip2(s.title) : null,
       stage: s.stage,
       agent: s.agent,
       model: null,
@@ -12369,7 +12658,7 @@ function executionFromFiles(execText, taskTexts = {}, liveTexts = {}, now, title
     })),
     manual: v.manual.map((s) => ({
       task: s.task,
-      title: s.title ? clip(s.title) : null,
+      title: s.title ? clip2(s.title) : null,
       stage: s.stage,
       seconds: secondsSince(s.since, to),
       liveness: s.liveness,
@@ -12378,7 +12667,10 @@ function executionFromFiles(execText, taskTexts = {}, liveTexts = {}, now, title
     queued: v.queued,
     conflicts: v.conflicts,
     blocked: v.blocked,
-    orphans: v.orphans
+    orphans: v.orphans,
+    sleepUntil: v.sleepUntil,
+    // C2: someone else's run (another live session's, or one left behind) is drawn dim; with no role known, it is not.
+    dim: role === "other-live" || role === "previous"
   };
 }
 var MAX_AUTO = 3;
@@ -12412,8 +12704,17 @@ function infiniteFromRun(text2, proposals, now) {
   return { cycle, cyclesMax: max, hoursLeft, active: run.active, autoApproved: autoApproved(proposals) };
 }
 function bandKey(model) {
-  const { subagentsDone: _done, usage: usage2, forge, ...rest } = model;
+  const { subagentsDone: _done, usage: usage2, forge, subagents, tool, turnSeconds: _turn, activities, jobs, waiting, ...rest } = model;
   const key = { ...rest };
+  key.subagents = subagents.map(({ seconds: _s, ...s }) => s);
+  key.tool = tool ? { name: tool.name } : null;
+  key.activities = activities.map(({ seconds: _s, job, agents, ...a }) => ({
+    ...a,
+    job: job ? { name: job.name } : null,
+    agents: agents.map(({ seconds: _x, tool: _y, ...g }) => g)
+  }));
+  key.jobs = jobs.map(({ seconds: _s, ...j }) => j);
+  key.waiting = waiting ? { agents: waiting.agents } : null;
   if (usage2) {
     const { time: _time, ...u } = usage2;
     key.usage = u;
@@ -12423,14 +12724,19 @@ function bandKey(model) {
     key.forge = { ...f, done: timing?.done ?? null };
   } else key.forge = forge;
   if (rest.execution) {
-    const { elapsedSeconds: _e, finished: _f, slots, ...x } = rest.execution;
-    key.execution = { ...x, slots: slots.map(({ taskSeconds: _t, ...s }) => s) };
+    const { elapsedSeconds: _e, finished: _f, slots, manual, ...x } = rest.execution;
+    key.execution = {
+      ...x,
+      slots: slots.map(({ taskSeconds: _t, seconds: _s, agents, ...s }) => ({ ...s, agents: (agents ?? []).map(({ seconds: _a, tool: _b, ...g }) => g) })),
+      manual: manual.map(({ seconds: _m, ...m }) => m)
+    };
   }
   return JSON.stringify(key);
 }
 function buildPanelModel(input) {
   const { band, activity: a, now } = input;
   const wp = band.mode === "work" ? band : null;
+  const rb = band.mode === "run" ? band : null;
   const cc = a.ccTasks ?? [];
   const todos = summarizeTodos(a.todos);
   const sess = input.usage?.session ?? null;
@@ -12440,29 +12746,78 @@ function buildPanelModel(input) {
   let usage2 = null;
   if (input.usage && hasSteps) {
     const own = summarizeUsage(input.usage.session);
-    const shown = input.usage.run ? summarizeUsage(input.usage.run) : own;
+    const shown2 = input.usage.run ? summarizeUsage(input.usage.run) : own;
     const official = input.usage.officialUsd;
     const at = input.usage.officialOwnUsd ?? null;
     const drift = !own.partial && official !== null && official > 0 && at !== null && Math.abs(at - official) > official * 0.1;
     usage2 = {
       scope: input.usage.run ? "run" : "session",
-      tokens: shown.tokens,
-      costUsd: shown.costUsd,
-      partial: shown.partial,
+      tokens: shown2.tokens,
+      costUsd: shown2.costUsd,
+      partial: shown2.partial,
       sessionPartial: own.partial,
       officialUsd: official,
       drift,
       session: input.usage.run ? { tokens: own.tokens, costUsd: own.costUsd } : null,
-      groups: shown.groups,
-      tracking: shown.tracking,
-      withoutForge: shown.withoutForge,
+      groups: shown2.groups,
+      tracking: shown2.tracking,
+      withoutForge: shown2.withoutForge,
       time: usageTime(input.usage.session, input.usage.run, a.turnSince ?? null, now),
       pricesAsOf: PRICES_AS_OF
     };
   }
+  const viewer = band.viewer ?? { role: "none", coordinator: false, runId: null };
+  const execution = executionFromFiles(
+    input.forgeExecution,
+    input.forgeExecTasks,
+    input.forgeLive,
+    now,
+    wp?.current ? { [wp.current.id]: wp.current.title } : void 0,
+    runRoleOf(band)
+  );
+  const titles = {};
+  for (const s of execution?.slots ?? []) if (s.title) titles[s.task] = s.title;
+  if (wp?.current) titles[wp.current.id] = wp.current.title;
+  const sp = superpowers(input);
+  const todosModel = todos.total ? todos : null;
+  const statuses = parseStatuses(input.forgeStatuses ?? (input.forgeStatus !== void 0 ? [input.forgeStatus] : []));
+  const links2 = input.links ?? [];
+  const liveTypes = (a.subagents ?? []).map((s) => s.type);
+  const models = Object.fromEntries(Object.entries(sess?.loops ?? {}).map(([id2, l]) => [id2, { ...l.model ? { model: l.model } : {}, ...l.effort ? { effort: l.effort } : {} }]));
+  let view = { activities: [], waiting: null, jobs: [], expanded: null };
+  let failed = false;
+  try {
+    view = buildActivities({
+      statuses,
+      links: links2,
+      execution,
+      superpowers: sp,
+      todos: todosModel,
+      titles,
+      sessionId: input.sessionId,
+      ownTasks: input.ownTasks ?? [],
+      viewer,
+      jobs: (input.forgeJobs ?? []).map(parseJob).filter((j) => j !== null),
+      models,
+      liveTypes,
+      turnSince: a.turnSince ?? null,
+      wakeAt: input.wakeAt ?? null,
+      sleepUntil: execution?.sleepUntil ?? null,
+      focusAgent: input.focusAgent ?? null,
+      now
+    });
+  } catch {
+    failed = true;
+  }
+  const briefsOf = (st) => input.forgeBriefsBy?.[statusKey(st.task, st.project) ?? st.task] ?? (input.forgeStatuses === void 0 ? input.forgeBriefs ?? null : null);
+  const forge = failed ? newestForge(statuses, now, briefsOf, liveTypes) : view.expanded ? forgeOf(view.expanded, now, briefsOf(view.expanded), liveTypes) : null;
+  const withAgents = withSlotAgents(execution, links2, models, viewer, now);
+  const shown = new Set(view.activities.filter((x) => !x.slot && x.kind !== "adhoc").flatMap((x) => x.agents.map((g) => g.id)));
+  for (const s of withAgents?.slots ?? []) for (const g of s.agents ?? []) shown.add(g.id);
+  const taskOf = new Map(links2.flatMap((l) => l.task ? [[l.id, l.task]] : []));
   return {
-    locale: wp?.locale ?? input.locale ?? "en",
-    waypoint: wp && {
+    locale: wp?.locale ?? rb?.locale ?? input.locale ?? "en",
+    waypoint: wp ? {
       project: wp.project,
       track: wp.track,
       percent: wp.percent,
@@ -12473,47 +12828,62 @@ function buildPanelModel(input) {
       escalation: wp.escalation,
       roadmapUrl: wp.roadmapUrl,
       locale: wp.locale,
-      phase: wp.phase ? { ...wp.phase, name: clip(wp.phase.name) } : null,
+      phase: wp.phase ? { ...wp.phase, name: clip2(wp.phase.name) } : null,
       cells: typeof wp.cells === "string" ? wp.cells.replace(/[^dabp]/g, "").slice(0, 120) : "",
       recentDone: (wp.recentDone ?? []).slice(0, 3)
-    },
-    superpowers: superpowers(input),
-    todos: todos.total ? todos : null,
+    } : rb ? {
+      // E-10: the band of an execution: its progress, the seat's messages and decision and the phase, without a task.
+      project: rb.project,
+      track: null,
+      percent: rb.percent,
+      trackDone: rb.integrated,
+      trackTotal: rb.total,
+      current: null,
+      inbox: rb.inbox,
+      escalation: rb.escalation,
+      roadmapUrl: rb.roadmapUrl,
+      locale: rb.locale,
+      phase: rb.phase ? { ...rb.phase, name: clip2(rb.phase.name) } : null,
+      cells: "",
+      recentDone: [],
+      run: true
+    } : null,
+    superpowers: sp,
+    todos: todosModel,
     subagents: (a.subagents ?? []).map((s) => {
       const loop = loopOfAgent(s.id);
+      const task = taskOf.get(s.id);
       return {
         id: s.id,
         type: s.type,
-        ...s.description !== void 0 ? { description: clip(s.description) } : {},
+        ...s.description !== void 0 ? { description: clip2(s.description) } : {},
         ...s.status !== void 0 ? { status: s.status } : {},
         seconds: secs(now, s.since),
         ...loop?.model ? { model: loop.model } : {},
-        ...loop?.effort ? { effort: loop.effort } : {}
+        ...loop?.effort ? { effort: loop.effort } : {},
+        ...task ? { task } : {},
+        ...shown.has(s.id) ? { shown: true } : {}
       };
     }),
     subagentsDone: freshFinished(a.finished ?? [], now).map((f) => ({
       id: f.id,
       type: f.type,
-      ...f.description ? { description: clip(f.description) } : {},
+      ...f.description ? { description: clip2(f.description) } : {},
       ...f.model ? { model: f.model } : {},
       seconds: f.seconds
     })),
     tool: a.tool ? { name: a.tool.name, seconds: secs(now, a.tool.since) } : null,
     turnSeconds: a.turnSince === null || a.turnSince === void 0 ? null : secs(now, a.turnSince),
-    ccTasks: cc.length ? { open: cc.filter((t) => !t.done).length, done: cc.filter((t) => t.done).length, recent: cc.slice(-3).map((t) => clip(t.subject)) } : null,
-    forge: input.forgeStatus !== void 0 ? forgeFromStatus(input.forgeStatus, now, input.forgeBriefs ?? null, (a.subagents ?? []).map((s) => s.type)) : null,
+    ccTasks: cc.length ? { open: cc.filter((t) => !t.done).length, done: cc.filter((t) => t.done).length, recent: cc.slice(-3).map((t) => clip2(t.subject)) } : null,
+    forge,
     infinite: infiniteFromRun(input.forgeRun, input.proposals, now),
     decisions: decisionsSummary(input.forgeDecisions, now),
-    // The only plan task title the band model carries is the current one's.
-    execution: executionFromFiles(
-      input.forgeExecution,
-      input.forgeExecTasks,
-      input.forgeLive,
-      now,
-      wp?.current ? { [wp.current.id]: wp.current.title } : void 0
-    ),
+    execution: withAgents,
     proposals: pendingProposals2(input.proposals),
     mainModel: mainLoop?.model ? { model: mainLoop.model, effort: mainLoop.effort } : null,
+    activities: view.activities,
+    waiting: view.waiting,
+    jobs: view.jobs,
     usage: usage2
   };
 }
@@ -12529,7 +12899,7 @@ function mainCheckoutFrom(root, gitFileText) {
 var TITLE_MAX = 40;
 var BIDI = new RegExp(`[${[1564, 8206, 8207, 8234, 8235, 8236, 8237, 8238, 8294, 8295, 8296, 8297].map((c2) => String.fromCharCode(c2)).join("")}]`, "g");
 var CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
-function clip2(text2, max = TITLE_MAX) {
+function clip3(text2, max = TITLE_MAX) {
   const chars = Array.from(String(text2).replace(CONTROL, " ").replace(BIDI, "").replace(/\s+/g, " ").trim());
   return chars.length <= max ? chars.join("") : chars.slice(0, max - 1).join("") + "\u2026";
 }
@@ -12741,14 +13111,145 @@ async function loadBandModel($) {
 // src/lens/cards.ts
 var modelRight = (s, t) => s.model ? `${shortModelName(s.model)}${s.effort ? ` \xB7 ${t.effortLevel(s.effort)}` : ""}` : void 0;
 var VERDICT_HUE = { accept: "green", fix: "yellow", redo: "red" };
+var VALIDATING = /* @__PURE__ */ new Set(["prep", "review-prep", "validate"]);
+function jobText(name, t) {
+  return VALIDATING.has(name) ? t.validating : name === "integrate" ? t.integrating : name;
+}
+function verdictChip(f, t) {
+  const v = f.verdict;
+  if (!v) return null;
+  const n2 = v.round ?? (f.round !== null && f.round >= 1 ? f.round : null);
+  const c2 = v.findings;
+  const counts = c2 ? [`${c2.critical} C`, `${c2.important} I`, ...c2.minor > 0 ? [`${c2.minor} m`] : []] : [];
+  const head = v.action === "accept" ? `\u2713 ${n2 !== null ? t.acceptedInRound(n2) : t.accepted}` : [v.action, n2 !== null ? `${t.fixRound} ${n2}${f.reviews?.max ? `/${f.reviews.max}` : ""}` : null].filter(Boolean).join(" \xB7 ");
+  return { text: [head, ...counts].join(" \xB7 "), hue: VERDICT_HUE[v.action] ?? "lavender" };
+}
+function verifyState(f) {
+  const v = f.verify;
+  if (!v?.planned) return { skipped: false, noResult: false };
+  return { skipped: v.result === "skipped", noResult: v.result === null && v.launched !== true && forgeDone(f) };
+}
+function forgeSubtitle(f, t) {
+  const phase = forgePhase(f);
+  if (!phase && f.autonomy !== "auto") return void 0;
+  const time2 = f.timing && span(f.timing.taskSeconds) ? `${f.timing.done && phase !== "stopped" ? "\u2713 " : ""}${span(f.timing.taskSeconds)}` : null;
+  return [t.sForge, phase === "stopped" ? t.stopped : phase, time2, f.autonomy === "auto" && t.autoMode].filter(Boolean).join(" \xB7 ");
+}
+function forgeBlocks(m, f, t, linked) {
+  const blocks = [];
+  const vs = verifyState(f);
+  const stages = m.execution?.active && f.path === "large" ? stagesFor("run", "execution") : stagesFor(
+    f.path,
+    forgePhase(f),
+    f.validators.length ? f.validators.every((v) => v.ok) ? "ok" : "failed" : null,
+    f.verify?.planned === true && !vs.skipped && !vs.noResult,
+    (f.timing?.stages ?? []).map((s) => s.name)
+  );
+  blocks.push({ kind: "stages", stages, hue: SECTION_HUE.forge });
+  const tm = f.timing;
+  if (tm && tm.stages.length) {
+    const label = (n2) => Object.hasOwn(t.stage, n2) ? t.stage[n2] : n2;
+    blocks.push({ kind: "text", text: tm.stages.map((s) => `${label(s.name)} ${span(s.seconds) ?? "0s"}${s.live ? "\u2026" : ""}`).join(" \xB7 "), dim: true });
+  }
+  if (f.verify?.planned) {
+    const v = f.verify;
+    const where = `verify ${v.surfaces.join(", ")}`;
+    const text2 = v.result === "pass" ? `\u2713 ${where} \xB7 ${v.passed}/${v.total}` : v.result === "fail" ? `\u2717 ${where} \xB7 ${v.passed}/${v.total}` : v.result === "blocked" ? `\u2298 ${where} \xB7 ${t.blocked}: ${v.reason ?? ""}` : vs.skipped ? `\u2298 ${where} \xB7 ${t.skipped}: ${v.reason ?? ""}` : vs.noResult ? `\u2298 ${where} \xB7 ${t.skipped}: ${t.noResult}` : where;
+    blocks.push({ kind: "text", text: text2, dim: v.result === null || vs.skipped });
+    if (v.evidence) blocks.push({ kind: "text", text: v.evidence, dim: true });
+  }
+  const c2 = briefCells(f);
+  if (c2) {
+    blocks.push({ kind: "bar", ratio: ratio(c2.done, c2.total), hue: SECTION_HUE.forge, moving: c2.done < c2.total, label: t.briefs, right: `${c2.done}/${c2.total}` });
+    blocks.push({ kind: "cells", cells: c2.cells });
+  }
+  if (!linked && !forgeDone(f)) {
+    if (f.reviewers?.length && f.phase.toLowerCase() === "review") blocks.push({ kind: "text", text: `${t.reviewersLbl}: ${f.reviewers.join(", ")}`, dim: true });
+    else if (f.agent) {
+      const tier = tierOf(f.agent);
+      const live = m.subagents.find((s) => tierOf(s.type).label === tier.label);
+      blocks.push({ kind: "row", dot: tier.hue, spinning: !!live, tag: { text: tier.label, hue: tier.hue }, text: live?.description ?? f.agent, right: [live && modelRight(live, t), duration(live?.seconds)].filter(Boolean).join("  ") || void 0 });
+    }
+  }
+  const chips = f.validators.map((v) => ({ text: `${v.ok ? "\u2713" : "\u2717"} ${v.name}${v.cached ? ` \xB7 ${t.cached}` : ""}`, hue: v.ok ? "green" : "red" }));
+  const verdict = verdictChip(f, t);
+  if (verdict) chips.push(verdict);
+  if (f.round !== null) chips.push({ text: `${t.fixRound} ${f.round}${f.cap !== null ? `/${f.cap}` : ""}`, hue: f.cap !== null && f.round >= f.cap ? "red" : "sub" });
+  if (chips.length) blocks.push({ kind: "chips", chips });
+  return blocks;
+}
+function runBlocks(m, t) {
+  const blocks = [];
+  const inf = m.infinite;
+  if (inf?.active) {
+    const right = [inf.cyclesMax !== null ? `${inf.cycle}/${inf.cyclesMax}` : `${inf.cycle}`, inf.hoursLeft !== null && t.hoursLeft(inf.hoursLeft)].filter(Boolean).join(" \xB7 ");
+    blocks.push({ kind: "bar", ratio: inf.cyclesMax ? ratio(inf.cycle - 1, inf.cyclesMax) : 0, hue: "mauve", moving: true, label: `\u221E ${t.cycle}`, right });
+    for (const title of inf.autoApproved) blocks.push({ kind: "row", dot: "green", tag: { text: t.auto, hue: "green" }, text: title });
+  }
+  const dec2 = m.decisions;
+  if (dec2) {
+    blocks.push({ kind: "row", dot: "yellow", tag: { text: `\u2691 ${t.auto}`, hue: "yellow" }, text: t.autoDecisions(dec2.count) });
+    if (dec2.lastMajor) blocks.push({ kind: "text", text: dec2.lastMajor, dim: true });
+  }
+  return blocks;
+}
+function agentRow(g, t) {
+  const tier = tierOf(g.type);
+  return {
+    kind: "row",
+    dot: tier.hue,
+    spinning: g.status === "running",
+    tag: { text: tier.label, hue: tier.hue },
+    text: g.description || g.type || "?",
+    right: [g.model ? shortModelName(g.model) : null, g.tool, g.status === "waiting" ? t.waitingLbl : null, short(g.seconds)].filter(Boolean).join(" \xB7 ") || void 0,
+    indent: true
+  };
+}
+function activityRow(a, t) {
+  const hue = PATH_HUE[a.path ?? ""] ?? "peach";
+  const stage = a.stage ? Object.hasOwn(t.stage, a.stage) ? t.stage[a.stage] : a.stage : null;
+  const doing = a.job ? jobText(a.job.name, t) : a.stopped ? t.stopped : a.done ? null : [stage, a.round ? `r${a.round}` : null].filter(Boolean).join(" ") || null;
+  return {
+    kind: "row",
+    dot: a.done ? "green" : a.stopped ? "s2" : hue,
+    spinning: a.owner === "own" && !a.done && !a.stopped && a.agents.some((g) => g.status === "running"),
+    tag: { text: a.task ?? "wf", hue },
+    text: `${a.done ? "\u2713 " : ""}${a.title ?? ""}`,
+    right: [a.path, doing, short(a.job ? a.job.seconds : a.seconds), a.owner === "other" ? t.otherSession : null].filter(Boolean).join(" \xB7 ") || void 0,
+    dim: a.dim
+  };
+}
+function tasksCard(m, rows, t) {
+  const blocks = [];
+  const f = m.forge;
+  for (const a of rows) {
+    blocks.push(activityRow(a, t));
+    if (a.owner === "own" && !a.done && !a.stopped) for (const g of a.agents) blocks.push(agentRow(g, t));
+    if (a.expanded && f && a.owner !== "other") blocks.push(...forgeBlocks(m, f, t, a.agents.length > 0));
+  }
+  blocks.push(...runBlocks(m, t));
+  const head = rows.find((a) => a.expanded && a.owner !== "other");
+  return {
+    icon: SECTION_ICON.forge,
+    title: `${t.sTasksInProgress} \xB7 ${rows.length}`,
+    hue: SECTION_HUE.forge,
+    chip: head?.path ? { text: head.path, hue: PATH_HUE[head.path] ?? "peach" } : m.infinite?.active ? { text: "\u221E", hue: "mauve" } : void 0,
+    subtitle: f && head ? forgeSubtitle(f, t) : void 0,
+    blocks
+  };
+}
 function buildCards(m, t, nowMs2) {
   const out = [];
   let usageCard = null;
-  if (m.mainModel || m.tool || m.turnSeconds !== null) {
+  if (m.mainModel || m.tool || m.turnSeconds !== null || m.waiting || m.jobs?.length) {
     const blocks = [];
     if (m.mainModel) blocks.push({ kind: "row", dot: "lavender", text: `${shortModelName(m.mainModel.model)}${m.mainModel.effort ? ` \xB7 ${t.effort} ${t.effortLevel(m.mainModel.effort)}` : ""}` });
     if (m.tool) blocks.push({ kind: "row", dot: "sky", spinning: true, tag: { text: t.tool, hue: "sky" }, text: m.tool.name, right: duration(m.tool.seconds) ?? void 0 });
     if (m.turnSeconds !== null) blocks.push({ kind: "row", dot: "sub", text: t.turn, right: duration(m.turnSeconds) ?? void 0 });
+    if (m.waiting) blocks.push({ kind: "row", dot: "yellow", text: t.waitingOn(m.waiting.agents, short(m.waiting.wakeSeconds)) });
+    for (const j of (m.jobs ?? []).slice(0, 5)) {
+      blocks.push({ kind: "row", dot: "sky", spinning: true, text: [jobText(j.name, t), j.task].filter(Boolean).join(" "), right: short(j.seconds) ?? void 0 });
+    }
     out.push({ icon: SECTION_ICON.now, title: t.sNow, hue: SECTION_HUE.now, blocks });
   }
   if (m.waypoint) {
@@ -12759,7 +13260,7 @@ function buildCards(m, t, nowMs2) {
       ratio: w.percent / 100,
       hue: SECTION_HUE.roadmap,
       moving: !!w.current,
-      label: w.track ? `${t.track} ${w.track}` : void 0,
+      label: w.track ? `${t.track} ${w.track}` : w.run ? t.integratedN : void 0,
       right: `${w.trackDone}/${w.trackTotal}`
     }];
     if (cells2.total) blocks.push({ kind: "cells", cells: cells2.cells });
@@ -12768,7 +13269,7 @@ function buildCards(m, t, nowMs2) {
       const min = Number.isFinite(started) && nowMs2 >= started ? Math.floor((nowMs2 - started) / 6e4) : null;
       const right = min !== null ? `${min}${w.current.estimateMin ? `/${w.current.estimateMin}` : ""} min` : void 0;
       blocks.push({ kind: "row", dot: "peach", spinning: true, tag: { text: w.current.id, hue: "peach" }, text: w.current.title, right });
-    } else {
+    } else if (!w.run) {
       blocks.push({ kind: "text", text: t.noTask, dim: true });
     }
     for (const r of w.recentDone ?? []) {
@@ -12788,57 +13289,17 @@ function buildCards(m, t, nowMs2) {
       blocks
     });
   }
-  if (m.forge || m.infinite?.active || m.decisions) {
-    const blocks = [];
+  const rows = (m.activities ?? []).filter((a) => (a.kind === "forge" || a.kind === "workflow") && !a.slot);
+  if (rows.length) out.push(tasksCard(m, rows, t));
+  else if (m.forge || m.infinite?.active || m.decisions) {
     const f = m.forge;
-    if (f) {
-      const stages = m.execution?.active && f.path === "large" ? stagesFor("run", "execution") : stagesFor(f.path, forgePhase(f), f.validators.length ? f.validators.every((v) => v.ok) ? "ok" : "failed" : null, f.verify?.planned === true);
-      blocks.push({ kind: "stages", stages, hue: SECTION_HUE.forge });
-      const tm = f.timing;
-      if (tm && tm.stages.length) {
-        const label = (n2) => Object.hasOwn(t.stage, n2) ? t.stage[n2] : n2;
-        blocks.push({ kind: "text", text: tm.stages.map((s) => `${label(s.name)} ${span(s.seconds) ?? "0s"}${s.live ? "\u2026" : ""}`).join(" \xB7 "), dim: true });
-      }
-      if (f.verify?.planned) {
-        const v = f.verify;
-        const where = `verify ${v.surfaces.join(", ")}`;
-        const text2 = v.result === "pass" ? `\u2713 ${where} \xB7 ${v.passed}/${v.total}` : v.result === "fail" ? `\u2717 ${where} \xB7 ${v.passed}/${v.total}` : v.result === "blocked" ? `\u2298 ${where} \xB7 ${t.blocked}: ${v.reason ?? ""}` : where;
-        blocks.push({ kind: "text", text: text2, dim: v.result === null });
-        if (v.evidence) blocks.push({ kind: "text", text: v.evidence, dim: true });
-      }
-      const c2 = briefCells(f);
-      if (c2) {
-        blocks.push({ kind: "bar", ratio: ratio(c2.done, c2.total), hue: SECTION_HUE.forge, moving: c2.done < c2.total, label: t.briefs, right: `${c2.done}/${c2.total}` });
-        blocks.push({ kind: "cells", cells: c2.cells });
-      }
-      if (f.agent && !forgeDone(f)) {
-        const tier = tierOf(f.agent);
-        const live = m.subagents.find((s) => tierOf(s.type).label === tier.label);
-        blocks.push({ kind: "row", dot: tier.hue, spinning: !!live, tag: { text: tier.label, hue: tier.hue }, text: live?.description ?? f.agent, right: [live && modelRight(live, t), duration(live?.seconds)].filter(Boolean).join("  ") || void 0 });
-      }
-      const chips = f.validators.map((v) => ({ text: `${v.ok ? "\u2713" : "\u2717"} ${v.name}`, hue: v.ok ? "green" : "red" }));
-      if (f.verdict) chips.push({ text: [f.verdict.action, f.verdict.score !== null && f.verdict.score.toFixed(2)].filter(Boolean).join(" "), hue: VERDICT_HUE[f.verdict.action] ?? "lavender" });
-      if (f.round !== null) chips.push({ text: `${t.fixRound} ${f.round}${f.cap !== null ? `/${f.cap}` : ""}`, hue: f.cap !== null && f.round >= f.cap ? "red" : "sub" });
-      if (chips.length) blocks.push({ kind: "chips", chips });
-    }
-    const inf = m.infinite;
-    if (inf?.active) {
-      const right = [inf.cyclesMax !== null ? `${inf.cycle}/${inf.cyclesMax}` : `${inf.cycle}`, inf.hoursLeft !== null && t.hoursLeft(inf.hoursLeft)].filter(Boolean).join(" \xB7 ");
-      blocks.push({ kind: "bar", ratio: inf.cyclesMax ? ratio(inf.cycle - 1, inf.cyclesMax) : 0, hue: "mauve", moving: true, label: `\u221E ${t.cycle}`, right });
-      for (const title of inf.autoApproved) blocks.push({ kind: "row", dot: "green", tag: { text: t.auto, hue: "green" }, text: title });
-    }
-    const dec2 = m.decisions;
-    if (dec2) {
-      blocks.push({ kind: "row", dot: "yellow", tag: { text: `\u2691 ${t.auto}`, hue: "yellow" }, text: t.autoDecisions(dec2.count) });
-      if (dec2.lastMajor) blocks.push({ kind: "text", text: dec2.lastMajor, dim: true });
-    }
     out.push({
       icon: SECTION_ICON.forge,
       title: f?.task ?? "forge",
       hue: SECTION_HUE.forge,
-      chip: f?.path ? { text: f.path, hue: PATH_HUE[f.path] ?? "peach" } : inf?.active ? { text: "\u221E", hue: "mauve" } : void 0,
-      subtitle: f && (forgePhase(f) || f.autonomy === "auto") ? [t.sForge, forgePhase(f), f.timing && span(f.timing.taskSeconds) ? `${f.timing.done ? "\u2713 " : ""}${span(f.timing.taskSeconds)}` : null, f.autonomy === "auto" && t.autoMode].filter(Boolean).join(" \xB7 ") : void 0,
-      blocks
+      chip: f?.path ? { text: f.path, hue: PATH_HUE[f.path] ?? "peach" } : m.infinite?.active ? { text: "\u221E", hue: "mauve" } : void 0,
+      subtitle: f ? forgeSubtitle(f, t) : void 0,
+      blocks: [...f ? forgeBlocks(m, f, t, false) : [], ...runBlocks(m, t)]
     });
   }
   if (m.execution) {
@@ -12855,6 +13316,7 @@ function buildCards(m, t, nowMs2) {
       right: `${x.integrated + x.queued.length}/${x.total} ${t.done} \xB7 ${x.integrated} ${t.integratedN}`
     }];
     if (x.stallReason) blocks.push({ kind: "text", text: x.stallReason, dim: false });
+    const dim = x.dim ? { dim: true } : {};
     for (const s of x.slots) {
       blocks.push({
         kind: "row",
@@ -12868,8 +13330,10 @@ function buildCards(m, t, nowMs2) {
           duration(s.seconds),
           s.taskSeconds != null && span(s.taskSeconds) ? `${t.taskTime} ${span(s.taskSeconds)}` : null,
           s.round ? `r${s.round}` : null
-        ].filter(Boolean).join(" \xB7 ")
+        ].filter(Boolean).join(" \xB7 "),
+        ...dim
       });
+      for (const g of s.agents ?? []) blocks.push({ ...agentRow(g, t), ...dim });
     }
     for (const s of x.manual) {
       blocks.push({
@@ -12877,7 +13341,8 @@ function buildCards(m, t, nowMs2) {
         dot: HUE[s.liveness],
         spinning: s.liveness === "alive",
         text: `${t.manualRow} \xB7 ${s.task}${s.title ? ` ${s.title}` : ""}`,
-        right: [stage(s.stage), duration(s.seconds)].filter(Boolean).join(" \xB7 ")
+        right: [stage(s.stage), duration(s.seconds)].filter(Boolean).join(" \xB7 "),
+        ...dim
       });
     }
     if (x.finished?.length) blocks.push({ kind: "text", text: `\u2713 ${x.finished.map((f) => `${f.task} ${span(f.seconds) ?? "0s"}`).join(" \xB7 ")}`, dim: true });
@@ -12931,7 +13396,8 @@ function buildCards(m, t, nowMs2) {
     if (u.withoutForge) {
       const w = u.withoutForge;
       const diff = u.partial ? t.noReview : w.deltaUsd >= 0 ? t.forgeCosts(fmtUsd(w.deltaUsd, loc), w.deltaPct) : t.forgeSaves(fmtUsd(-w.deltaUsd, loc));
-      blocks.push({ kind: "text", text: `${t.withoutForge}: ~${fmtUsd(w.costUsd, loc)} \xB7 ${diff}` });
+      const est = w.lowUsd !== void 0 && w.lowUsd < w.costUsd - 5e-3 ? fmtUsdRange(w.lowUsd, w.costUsd, loc) : fmtUsd(w.costUsd, loc);
+      blocks.push({ kind: "text", text: `${t.withoutForge}: ~${est} \xB7 ${diff}` });
       blocks.push({ kind: "text", text: t.withoutForgeNote, dim: true });
     }
     blocks.push({ kind: "text", text: `${t.pricesAsOf} ${u.pricesAsOf}`, dim: true });
@@ -12945,7 +13411,8 @@ function buildCards(m, t, nowMs2) {
       { kind: "bar", ratio: ratio(c2.done, c2.total), hue: SECTION_HUE.superpowers, moving: s.done < s.tasks, label: `${t.task} ${n2}/${s.tasks}`, right: `${s.done} ${t.done}` },
       { kind: "cells", cells: c2.cells }
     ];
-    if (s.current) blocks.push({ kind: "chips", chips: [{ text: `${t.fixRound} ${s.current.round}/5`, hue: "yellow" }] });
+    if (s.current) blocks.push({ kind: "chips", chips: [{ text: `${t.fixRound} ${s.current.round}${s.current.cap ? `/${s.current.cap}` : ""}`, hue: "yellow" }] });
+    if (s.stale) blocks.push({ kind: "text", text: t.staleLedger, dim: true });
     for (const line of s.lastLines) blocks.push({ kind: "text", text: line, dim: true });
     out.push({ icon: SECTION_ICON.superpowers, title: s.plan || t.sSuperpowers, hue: SECTION_HUE.superpowers, chip: { text: `${Math.round(ratio(s.done, s.tasks) * 100)}%`, hue: SECTION_HUE.superpowers }, blocks });
   }
@@ -12953,15 +13420,24 @@ function buildCards(m, t, nowMs2) {
     const td = m.todos;
     const c2 = todoCells(td);
     const blocks = [{ kind: "bar", ratio: ratio(td.done, td.total), hue: SECTION_HUE.todos, moving: !!td.inProgress }, { kind: "cells", cells: c2.cells }];
-    if (td.inProgress) blocks.push({ kind: "row", dot: "peach", spinning: true, text: td.inProgress });
+    for (const text2 of td.active ?? (td.inProgress ? [td.inProgress] : [])) blocks.push({ kind: "row", dot: "peach", spinning: true, text: text2 });
     for (const next of td.next) blocks.push({ kind: "row", dot: "s2", text: next });
     out.push({ icon: SECTION_ICON.todos, title: t.sTodos, hue: SECTION_HUE.todos, chip: { text: `${td.done}/${td.total}`, hue: SECTION_HUE.todos }, blocks });
   }
   const done = m.subagentsDone ?? [];
-  if (m.subagents.length || done.length) {
-    const blocks = m.subagents.slice(-10).map((s) => {
+  const loose = m.subagents.filter((s) => !s.shown);
+  if (loose.length || done.length) {
+    const blocks = loose.slice(-10).map((s) => {
       const tier = tierOf(s.type);
-      return { kind: "row", dot: tier.hue, spinning: s.status !== "waiting", tag: { text: tier.label, hue: tier.hue }, text: s.description || s.type || "?", right: [modelRight(s, t), duration(s.seconds)].filter(Boolean).join("  ") || void 0 };
+      const waiting = s.status === "waiting" || s.status === "idle";
+      return {
+        kind: "row",
+        dot: tier.hue,
+        spinning: !waiting,
+        tag: { text: tier.label, hue: tier.hue },
+        text: `${s.task ? `[${s.task}] ` : ""}${s.description || s.type || "?"}`,
+        right: [modelRight(s, t), waiting ? t.waitingLbl : null, duration(s.seconds)].filter(Boolean).join("  ") || void 0
+      };
     });
     for (const d of done) {
       const text2 = ["\u2713 " + tierOf(d.type).label, d.description, d.model ? shortModelName(d.model) : null, span(d.seconds)].filter(Boolean).join(" \xB7 ");
@@ -13098,17 +13574,18 @@ function drawBlock(b, x, y, inner, id2) {
     }
     case "row": {
       let out = "";
+      const left = b.indent ? x + 14 : x;
       const cy = y + 11;
-      if (b.spinning) out += `<g class="spin"><circle cx="${x + 6}" cy="${cy}" r="5.5" style="fill:none;stroke:${c(b.dot)};stroke-width:2;stroke-dasharray:22 13;stroke-linecap:round"/></g>`;
-      else out += `<circle cx="${x + 6}" cy="${cy}" r="4.5" style="fill:${c(b.dot)}"/>`;
-      let tx = x + 18;
+      if (b.spinning) out += `<g class="spin"><circle cx="${left + 6}" cy="${cy}" r="5.5" style="fill:none;stroke:${c(b.dot)};stroke-width:2;stroke-dasharray:22 13;stroke-linecap:round"/></g>`;
+      else out += `<circle cx="${left + 6}" cy="${cy}" r="4.5" style="fill:${c(b.dot)}"/>`;
+      let tx = left + 18;
       if (b.tag) {
         const tw = Math.round(b.tag.text.length * charW(10.5) + 12);
         out += `<rect x="${tx}" y="${cy - 8}" width="${tw}" height="16" rx="8" style="fill:${c(b.tag.hue)};fill-opacity:.18;stroke:${c(b.tag.hue)};stroke-opacity:.6"/><text x="${tx + tw / 2}" y="${cy + 3.6}" text-anchor="middle" font-family="${FONT}" font-size="10.5" font-weight="600" style="fill:${c(b.tag.hue)}">${xml(b.tag.text)}</text>`;
         tx += tw + 8;
       }
       const rightW = b.right ? b.right.length * charW(11) + 10 : 0;
-      out += `<text class="t" x="${tx}" y="${cy + 4}" font-family="${FONT}" font-size="12">${xml(fit(b.text, 12, x + inner - tx - rightW))}</text>`;
+      out += `<text class="${b.dim ? "m" : "t"}" x="${tx}" y="${cy + 4}" font-family="${FONT}" font-size="12">${xml(fit(b.text, 12, x + inner - tx - rightW))}</text>`;
       if (b.right) out += `<text class="m" x="${x + inner}" y="${cy + 4}" text-anchor="end" font-family="${MONO}" font-size="11">${xml(b.right)}</text>`;
       return out;
     }
@@ -13210,7 +13687,7 @@ function block(ui, key, b, inner) {
     case "stages":
       return /* @__PURE__ */ h(Box, { key, flexDirection: "row", flexWrap: "wrap" }, b.stages.map((s, i) => /* @__PURE__ */ h(Box, { key: `${key}-${i}`, flexDirection: "row" }, i > 0 ? /* @__PURE__ */ h(Text, { color: s.state === "pending" ? PALETTE.s1 : hex(b.hue) }, "\u2500") : null, /* @__PURE__ */ h(Text, { color: s.state === "pending" ? PALETTE.s2 : hex(b.hue) }, STAGE_GLYPH[s.state]), /* @__PURE__ */ h(Text, { bold: s.state === "active", color: s.state === "active" ? hex(b.hue) : void 0, dimColor: s.state === "pending" }, ` ${s.name} `))));
     case "row":
-      return /* @__PURE__ */ h(Box, { key, flexDirection: "row", columnGap: 1 }, /* @__PURE__ */ h(Box, { flexShrink: 0 }, b.spinning ? spinner(ui, `${key}-s`, b.dot) : /* @__PURE__ */ h(Text, { color: hex(b.dot) }, "\u25CF")), b.tag ? /* @__PURE__ */ h(Box, { flexShrink: 0 }, /* @__PURE__ */ h(Text, { color: PALETTE.base, backgroundColor: hex(b.tag.hue), bold: true }, ` ${b.tag.text} `)) : null, /* @__PURE__ */ h(Box, { flexGrow: 1, flexShrink: 1, minWidth: 0 }, /* @__PURE__ */ h(Text, { wrap: "truncate-end" }, b.text)), b.right ? /* @__PURE__ */ h(Box, { flexShrink: 0 }, /* @__PURE__ */ h(Text, { dimColor: true }, b.right)) : null);
+      return /* @__PURE__ */ h(Box, { key, flexDirection: "row", columnGap: 1, paddingLeft: b.indent ? 2 : 0 }, /* @__PURE__ */ h(Box, { flexShrink: 0 }, b.spinning ? spinner(ui, `${key}-s`, b.dot) : /* @__PURE__ */ h(Text, { color: hex(b.dot) }, "\u25CF")), b.tag ? /* @__PURE__ */ h(Box, { flexShrink: 0 }, /* @__PURE__ */ h(Text, { color: PALETTE.base, backgroundColor: hex(b.tag.hue), bold: true }, ` ${b.tag.text} `)) : null, /* @__PURE__ */ h(Box, { flexGrow: 1, flexShrink: 1, minWidth: 0 }, /* @__PURE__ */ h(Text, { wrap: "truncate-end", dimColor: b.dim }, b.text)), b.right ? /* @__PURE__ */ h(Box, { flexShrink: 0 }, /* @__PURE__ */ h(Text, { dimColor: true }, b.right)) : null);
     case "text":
       return /* @__PURE__ */ h(Text, { key, color: b.hue ? hex(b.hue) : void 0, dimColor: b.dim, wrap: "truncate-end" }, b.text);
     case "chips":
@@ -13234,6 +13711,15 @@ function termBand(ui, o) {
 var USAGE_FILE_MAX = 256 * 1024;
 var USAGE_FILES_MAX = 200;
 var USAGE_LOOPS_MAX = 201;
+function totalsOf(loops) {
+  let costUsd = 0;
+  let tokens = 0;
+  for (const l of Object.values(loops)) {
+    costUsd += l.costUsd;
+    tokens += l.input + l.output + l.cacheRead + l.cacheWrite;
+  }
+  return { costUsd, tokens };
+}
 var isObj4 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
 var num2 = (x) => typeof x === "number" && Number.isFinite(x) && x >= 0 ? x : 0;
 var str5 = (x) => typeof x === "string" && x ? x : null;
@@ -13248,8 +13734,11 @@ function toUsageFile(s, meta) {
     updatedAt: new Date(meta.now).toISOString(),
     costUsd: meta.costUsd,
     loops: s.loops,
-    tracking: s.tracking,
-    activeMs: s.activeMs
+    tracking: { waypoint: s.tracking.waypoint, forge: s.tracking.forge },
+    activeMs: s.activeMs,
+    trackingReread: s.tracking.reread,
+    runKey: meta.runKey ?? null,
+    runBaseline: meta.runBaseline ?? null
   };
 }
 function parseLoop(x) {
@@ -13267,6 +13756,12 @@ function parseLoop(x) {
     costUsd: num2(x.costUsd),
     unpriced: num2(x.unpriced)
   };
+}
+function baselineOf(x) {
+  if (!isObj4(x) || !isSafeId(x.runKey)) return null;
+  const amount = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
+  const costUsd = amount(x.costUsd), tokens = amount(x.tokens), activeMs = amount(x.activeMs);
+  return costUsd !== null && tokens !== null && activeMs !== null ? { runKey: x.runKey, costUsd, tokens, activeMs } : null;
 }
 function parseUsageFile(text2) {
   if (typeof text2 !== "string" || text2.length > USAGE_FILE_MAX) return null;
@@ -13297,7 +13792,10 @@ function parseUsageFile(text2) {
     costUsd: typeof x.costUsd === "number" && Number.isFinite(x.costUsd) ? x.costUsd : null,
     loops,
     tracking: { waypoint: num2(t.waypoint), forge: num2(t.forge) },
-    ...typeof x.activeMs === "number" && Number.isFinite(x.activeMs) && x.activeMs >= 0 ? { activeMs: x.activeMs } : {}
+    ..."runKey" in x ? { runKey: isSafeId(x.runKey) ? x.runKey : null } : {},
+    ..."runBaseline" in x ? { runBaseline: baselineOf(x.runBaseline) } : {},
+    ...typeof x.activeMs === "number" && Number.isFinite(x.activeMs) && x.activeMs >= 0 ? { activeMs: x.activeMs } : {},
+    ...typeof x.trackingReread === "number" && Number.isFinite(x.trackingReread) && x.trackingReread >= 0 ? { trackingReread: x.trackingReread } : {}
   };
 }
 var RUN_RECENT_MS = 12 * 36e5;
@@ -13326,21 +13824,32 @@ function runStartedAt(src, now) {
   const large = src.largeRuns.filter((s) => recent(s, now)).map((s) => startOf(parsed2(s.text))).filter((t) => t !== null);
   return large.length ? Math.max(...large) : null;
 }
-function mergeForRun(files, own, since) {
+function mergeForRun(files, own, since, runKey = null) {
   const out = newUsage(since);
-  const add = (session, loops, tracking) => {
-    for (const [id2, l] of Object.entries(loops)) out.loops[`${session}/${id2}`] = { ...l };
-    out.tracking.waypoint += tracking.waypoint;
-    out.tracking.forge += tracking.forge;
+  const add = (session, loops, tracking, reread, activeMs, baseline) => {
+    const t = totalsOf(loops);
+    const ok = !!baseline && baseline.costUsd <= t.costUsd + 1e-9 && baseline.tokens <= t.tokens && (activeMs === void 0 || baseline.activeMs <= activeMs);
+    const cf = ok && t.costUsd > 0 ? 1 - baseline.costUsd / t.costUsd : 1;
+    const tf = ok && t.tokens > 0 ? 1 - baseline.tokens / t.tokens : 1;
+    for (const [id2, l] of Object.entries(loops)) {
+      out.loops[`${session}/${id2}`] = { ...l, input: l.input * tf, output: l.output * tf, cacheRead: l.cacheRead * tf, cacheWrite: l.cacheWrite * tf, costUsd: l.costUsd * cf };
+    }
+    out.tracking.waypoint += tracking.waypoint * tf;
+    out.tracking.forge += tracking.forge * tf;
+    out.tracking.reread += reread * tf;
+    if (activeMs === void 0) out.activePartial = true;
+    else out.activeMs += Math.max(0, activeMs - (ok ? baseline.activeMs : 0));
+    return ok;
   };
   for (const f of files) {
     if (f.session === own.session || Date.parse(f.updatedAt) < since) continue;
-    add(f.session, f.loops, f.tracking);
-    if (f.activeMs === void 0) out.activePartial = true;
-    else out.activeMs += f.activeMs;
+    if (runKey !== null && f.runKey !== void 0 && f.runKey !== runKey) continue;
+    const ok = add(f.session, f.loops, f.tracking, f.trackingReread ?? 0, f.activeMs, runKey !== null && f.runKey === runKey ? f.runBaseline ?? null : null);
+    if (runKey !== null && !ok) out.runPartial = true;
   }
-  add(own.session, own.state.loops, own.state.tracking);
-  out.activeMs += own.state.activeMs;
+  const ownBaseline = runKey !== null && own.baseline?.runKey === runKey ? own.baseline : null;
+  const ownOk = add(own.session, own.state.loops, own.state.tracking, own.state.tracking.reread, own.state.activeMs, ownBaseline);
+  if (runKey !== null && !ownOk) out.runPartial = true;
   return out;
 }
 function seedUsage(s, file) {
@@ -13364,7 +13873,167 @@ function seedUsage(s, file) {
   }
   s.tracking.waypoint += file.tracking.waypoint;
   s.tracking.forge += file.tracking.forge;
+  s.tracking.reread += file.trackingReread ?? 0;
   s.activeMs += file.activeMs ?? 0;
+}
+
+// src/lens/links.ts
+var LINKS_MAX = 100;
+var DONE_LINK_MS = 5 * 6e4;
+var WORKFLOW_DONE_MS = 15 * 6e4;
+var WORKFLOW_AGENT_TTL_MS = 2 * 36e5;
+var PROMPT_SCAN = 8192;
+var OWN_TASKS_MAX = 100;
+var LIST_GRACE_MS = 15e3;
+var PARENT_DEPTH2 = 5;
+var CONTRACT = /^forge-task:[ \t]*([A-Za-z0-9._-]{1,120}?)(?:-(\d{1,4}))?(?:[ \t]+@([A-Za-z0-9._-]{1,120}))?[ \t]*$/m;
+var TASK_ID = /^[ \t]*Task id:[ \t]*([A-Za-z0-9._-]{1,120}?)(?:-(\d{1,4}))?[ \t]*$/mi;
+var WORK = /\.forge\/work\/([A-Za-z0-9._-]{1,120})(?:\/([A-Za-z0-9._-]{1,120}))?(?:\/([A-Za-z0-9._-]{1,120}))?/;
+var ARTIFACT = /^(?:reviews-\d|evidence$|shadow$)|\.(?:md|txt|json|patch)$/;
+var BRIEF_FILE = /^brief-(\d{1,4})\.md$/;
+var NOT_TASKS = /* @__PURE__ */ new Set(["run", "infinite"]);
+var LIVE = /* @__PURE__ */ new Set(["running", "pending", "waiting", "idle"]);
+function pick(t, n2, known) {
+  const full = n2 !== void 0 ? `${t}-${n2}` : t;
+  if (n2 !== void 0 && known.has(full)) return isSafeId(full) ? { task: full, brief: null } : null;
+  return isSafeId(t) ? { task: t, brief: n2 !== void 0 ? Number(n2) : null } : null;
+}
+function workPath(text2) {
+  const m = WORK.exec(text2);
+  if (!m) return null;
+  const [, a, b, c2] = m;
+  if (NOT_TASKS.has(a)) return null;
+  const nested = b !== void 0 && !ARTIFACT.test(b);
+  const project = nested ? a : null;
+  const task = nested ? b : a;
+  const file = nested ? c2 : b;
+  if (!isSafeId(task) || project !== null && !isSafeId(project)) return null;
+  const n2 = file !== void 0 ? BRIEF_FILE.exec(file)?.[1] : void 0;
+  return { task, brief: n2 !== void 0 ? Number(n2) : null, project };
+}
+function taskOfPrompt(prompt, description, known) {
+  const text2 = (typeof prompt === "string" ? prompt : "").slice(0, PROMPT_SCAN).replace(/\r\n?/g, "\n");
+  const c2 = CONTRACT.exec(text2);
+  if (c2 && (c2[3] === void 0 || isSafeId(c2[3]))) {
+    const r = pick(c2[1], c2[2], known);
+    if (r) return { ...r, project: c2[3] ?? null, via: "contract" };
+  }
+  const t = TASK_ID.exec(text2);
+  if (t) {
+    const r = pick(t[1], t[2], known);
+    if (r) return { ...r, project: null, via: "task-id" };
+  }
+  const w = workPath(text2.replace(/\\/g, "/"));
+  if (w) return { ...w, via: "work-path" };
+  const words = (typeof description === "string" ? description : "").slice(0, 240).split(/[\s:·,;()[\]]+/);
+  const word = words.find((x) => x && known.has(x) && isSafeId(x));
+  return word ? { task: word, brief: null, project: null, via: "description" } : null;
+}
+function parentTask(links2, parentId) {
+  let id2 = parentId;
+  for (let depth = 0; id2 && depth < PARENT_DEPTH2; depth++) {
+    const p = links2.find((l) => l.id === id2);
+    if (!p) return null;
+    if (p.task) return { task: p.task, brief: p.brief, project: p.project };
+    id2 = p.parentId;
+  }
+  return null;
+}
+function capped(list) {
+  if (list.length <= LINKS_MAX) return list;
+  const order = [
+    ...list.filter((l) => l.status === "done").sort((a, b) => (a.endedAt ?? 0) - (b.endedAt ?? 0)),
+    ...[...list].sort((a, b) => a.since - b.since)
+  ];
+  const drop = /* @__PURE__ */ new Set();
+  for (const l of order) {
+    if (list.length - drop.size <= LINKS_MAX) break;
+    drop.add(l.id);
+  }
+  return list.filter((l) => !drop.has(l.id));
+}
+function linkSpawn(links2, s, known) {
+  if (!s.id) return [...links2];
+  const own = taskOfPrompt(s.prompt, s.description, known);
+  const up = own ? null : parentTask(links2, s.parentId);
+  const link = {
+    id: s.id,
+    type: cleanText(String(s.type ?? "")),
+    description: cleanText(String(s.description ?? "")),
+    since: s.now,
+    task: own?.task ?? up?.task ?? null,
+    brief: own?.brief ?? up?.brief ?? null,
+    project: own?.project ?? up?.project ?? null,
+    via: own?.via ?? (up ? "parent" : null),
+    parentId: s.parentId,
+    workflow: s.workflow,
+    status: "running",
+    tool: null,
+    endedAt: null
+  };
+  return capped([...links2.filter((l) => l.id !== s.id), link]);
+}
+var statusOf2 = (s) => s === "idle" ? "idle" : s === "waiting" ? "waiting" : s === "running" || s === "pending" ? "running" : "done";
+function syncListed(links2, list, now, known) {
+  const listed = new Map(list.map((a) => [a.id, a]));
+  const out = links2.map((l) => {
+    const a = listed.get(l.id);
+    if (a) {
+      const status = statusOf2(a.status);
+      return { ...l, status, parentId: a.parentId ?? l.parentId, endedAt: status === "done" ? l.endedAt ?? now : null, ...status === "done" ? { tool: null } : {} };
+    }
+    return l.workflow || l.status === "done" || now - l.since <= LIST_GRACE_MS ? l : { ...l, status: "done", tool: null, endedAt: now };
+  });
+  for (const a of list) {
+    if (links2.some((l) => l.id === a.id) || !LIVE.has(a.status)) continue;
+    const own = taskOfPrompt("", a.description, known);
+    const up = own ? null : parentTask(out, a.parentId);
+    out.push({
+      id: a.id,
+      type: cleanText(String(a.type ?? "")),
+      description: cleanText(String(a.description ?? "")),
+      since: now,
+      task: own?.task ?? up?.task ?? null,
+      brief: own?.brief ?? up?.brief ?? null,
+      project: own?.project ?? up?.project ?? null,
+      via: own?.via ?? (up ? "parent" : null),
+      parentId: a.parentId,
+      workflow: null,
+      status: statusOf2(a.status),
+      tool: null,
+      endedAt: null
+    });
+  }
+  return capped(out);
+}
+function endAgent(links2, id2, now, opts = {}) {
+  return links2.map((l) => l.id === id2 && l.status !== "done" && (l.workflow || opts.any) ? { ...l, status: "done", tool: null, endedAt: now } : l);
+}
+function setTool(links2, id2, tool) {
+  return links2.map((l) => l.id === id2 ? { ...l, tool: tool ? { name: cleanText(String(tool.name ?? "")), since: tool.since } : null } : l);
+}
+function pruneLinks(links2, now) {
+  return links2.flatMap((l) => {
+    if (l.workflow && l.status !== "done" && now - l.since > WORKFLOW_AGENT_TTL_MS) return [{ ...l, status: "done", tool: null, endedAt: now }];
+    if (l.status === "done" && l.endedAt !== null && now - l.endedAt > (l.workflow ? WORKFLOW_DONE_MS : DONE_LINK_MS)) return [];
+    return [l];
+  });
+}
+var OWN_TASK = /forge\.cjs\b[^\n]*?(?:--task[ \t]+|swarm[ \t]+task[ \t]+)["']?([A-Za-z0-9._-]{1,120})/;
+function ownTaskOf(command) {
+  if (typeof command !== "string") return null;
+  const m = OWN_TASK.exec(command.slice(0, PROMPT_SCAN));
+  return m && isSafeId(m[1]) ? m[1] : null;
+}
+function addOwnTask(list, id2) {
+  if (!id2) return [...list];
+  return [...list.filter((t) => t !== id2), id2].slice(-OWN_TASKS_MAX);
+}
+function knownTasks(m) {
+  const out = /* @__PURE__ */ new Set();
+  for (const a of m?.activities ?? []) if (a.kind === "forge" && a.task) out.add(a.task);
+  for (const s of m?.execution?.slots ?? []) out.add(s.task);
+  return out;
 }
 
 // src/lens/register.tsx
@@ -13379,6 +14048,9 @@ var WRITE_GAP_MS = 1e3;
 var PLAN_FALLBACK_AGE_MS = 24 * 36e5;
 var FORGE_STATUS_MAX = 64 * 1024;
 var MAX_PROPOSAL_FILES = 50;
+var STATUS_AGE_MS = 24 * 36e5;
+var BRIEF_LISTINGS_MAX = 5;
+var JOBS_MAX = 10;
 var timer = null;
 var emptyActivity = () => ({ tool: null, turnSince: null, todos: void 0, subagents: [], ccTasks: [] });
 var activity = emptyActivity();
@@ -13395,6 +14067,18 @@ async function touch($) {
 }
 var tools = /* @__PURE__ */ new Map();
 var MAX_TODOS = 200;
+var links = [];
+var ownTasks = [];
+var wakeAt = null;
+var WAKE_MIN_S = 60;
+var WAKE_MAX_S = 3600;
+function ownTaskId(id2) {
+  const m = id2 === null ? null : /^(.+)-\d{1,4}$/.exec(id2);
+  if (id2 === null || !m) return id2;
+  const known = knownTasks(bandModel);
+  for (const l of links) if (l.task) known.add(l.task);
+  return known.has(m[1]) ? m[1] : id2;
+}
 var busy = false;
 var roadmap = noneBand();
 var bandModel = null;
@@ -13420,11 +14104,16 @@ function resetPanel() {
   lastJson = "";
   bandModel = null;
   bandJson = "";
+  statusCache.clear();
+  jobCache.clear();
+  links = [];
+  ownTasks = [];
+  wakeAt = null;
 }
 function isBusy(now) {
   activity.subagents = activity.subagents.filter((s) => now - s.since < SUBAGENT_TTL_MS);
   const todos = summarizeTodos(activity.todos);
-  return todos.total - todos.done > 0 || activity.subagents.length > 0;
+  return todos.total - todos.done > 0 || activity.subagents.length > 0 || links.some((l) => l.status !== "done");
 }
 var waypointBand = false;
 async function checkWaypoint($) {
@@ -13497,6 +14186,55 @@ async function newest2($, paths) {
 }
 var proposalCache = null;
 var forgeSeen = null;
+var statusCache = /* @__PURE__ */ new Map();
+var jobCache = /* @__PURE__ */ new Map();
+async function readCached($, dir, max, size, cache, keep) {
+  const files = (await listOpt($, dir)).filter((f) => f.kind === "file" && f.name.endsWith(".json") && f.size <= size && keep(f)).sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, max);
+  const out = [];
+  const names = /* @__PURE__ */ new Set();
+  for (const f of files) {
+    const path = join(dir, f.name);
+    names.add(path);
+    const hit = cache.get(path);
+    if (hit && hit.size === f.size && hit.mtimeMs === f.mtimeMs) {
+      out.push(hit.text);
+      continue;
+    }
+    const text2 = await readOpt($, path);
+    if (text2 === void 0) continue;
+    cache.set(path, { size: f.size, mtimeMs: f.mtimeMs, text: text2 });
+    out.push(text2);
+  }
+  for (const k of [...cache.keys()]) if (k.startsWith(`${dir}/`) && !names.has(k)) cache.delete(k);
+  return out;
+}
+async function briefNumbers($, folder) {
+  return (await listOpt($, folder)).filter((f) => f.kind === "file").map((f) => /^brief-(\d{1,4})\.md$/.exec(f.name)?.[1]).filter(Boolean).map(Number);
+}
+async function briefsByKey($, statusRoot, texts) {
+  const out = {};
+  const work = join(statusRoot, ".forge", "work");
+  let listings = 0;
+  const nums = async (folder) => {
+    listings++;
+    return briefNumbers($, folder);
+  };
+  for (const text2 of texts) {
+    if (listings >= BRIEF_LISTINGS_MAX) break;
+    let st = null;
+    try {
+      st = normalizeStatus(JSON.parse(text2));
+    } catch {
+      st = null;
+    }
+    const key = st ? statusKey(st.task, st.project) : null;
+    if (!st || !key || st.doneAt || !SAFE_TASK2.test(st.task)) continue;
+    let found = st.project && SAFE_TASK2.test(st.project) ? await nums(join(work, st.project, st.task)) : [];
+    if (!found.length && listings < BRIEF_LISTINGS_MAX) found = await nums(join(work, st.task));
+    if (found.length) out[key] = Math.max(...found);
+  }
+  return out;
+}
 async function readJsonDir2($, dir, max, size, keep = () => true) {
   const out = {};
   const files = (await listOpt($, dir)).filter((f) => f.kind === "file" && f.name.endsWith(".json") && f.size <= size && keep(f.name.slice(0, -5))).sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, max);
@@ -13522,7 +14260,7 @@ async function loadExecutionFiles($, main, listing) {
   }
   return out;
 }
-async function loadForgeFiles($, root) {
+async function loadForgeFiles($, root, now) {
   if (mainCheckout === null) mainCheckout = mainCheckoutFrom(root, await readOpt($, join(root, ".git")) ?? null);
   const main = mainCheckout;
   const dir = join(root, ".forge");
@@ -13534,29 +14272,40 @@ async function loadForgeFiles($, root) {
   }
   const out = { ...execFiles };
   const mainDir = join(main, ".forge");
-  const decisions = (main === root ? entries : await listOpt($, mainDir)).find((f) => f.kind === "file" && f.name === "decisions.json");
+  const mainEntries = main === root ? entries : await listOpt($, mainDir);
+  const decisions = mainEntries.find((f) => f.kind === "file" && f.name === "decisions.json");
   if (decisions && decisions.size <= DECISIONS_MAX) out.forgeDecisions = await readOpt($, join(mainDir, "decisions.json"));
+  if (mainEntries.some((f) => f.kind === "dir" && f.name === "jobs")) {
+    const jobs = await readCached($, join(mainDir, "jobs"), JOBS_MAX, JOB_FILE_MAX, jobCache, () => true);
+    if (jobs.length) out.forgeJobs = jobs;
+  }
+  const statusRoot = statusRootOf(root, main);
+  const statusEntries = statusRoot === root ? entries : mainEntries;
+  if (statusEntries.some((f) => f.kind === "dir" && f.name === "status")) {
+    out.forgeStatuses = await readCached($, join(statusRoot, ".forge", "status"), FORGE_STATUSES_READ, FORGE_STATUS_MAX, statusCache, (f) => now - f.mtimeMs < STATUS_AGE_MS);
+    out.forgeBriefsBy = await briefsByKey($, statusRoot, out.forgeStatuses);
+  } else {
+    const status = entries.find((f) => f.kind === "file" && f.name === "status.json");
+    if (status && status.size <= FORGE_STATUS_MAX) out.forgeStatus = await readOpt($, join(dir, "status.json"));
+    if (out.forgeStatus !== void 0) {
+      let st = null;
+      try {
+        st = normalizeStatus(JSON.parse(out.forgeStatus));
+      } catch {
+        st = null;
+      }
+      const task = st?.task;
+      if (task && SAFE_TASK2.test(task)) {
+        const project = st?.project;
+        let nums = project && SAFE_TASK2.test(project) ? await briefNumbers($, join(dir, "work", project, task)) : [];
+        if (!nums.length) nums = await briefNumbers($, join(dir, "work", task));
+        if (nums.length) out.forgeBriefs = Math.max(...nums);
+      }
+    }
+  }
   if (!entries.length) {
     forgeSeen = { dir, entries };
     return out;
-  }
-  const status = entries.find((f) => f.kind === "file" && f.name === "status.json");
-  if (status && status.size <= FORGE_STATUS_MAX) out.forgeStatus = await readOpt($, join(dir, "status.json"));
-  if (out.forgeStatus !== void 0) {
-    let st = null;
-    try {
-      st = normalizeStatus(JSON.parse(out.forgeStatus));
-    } catch {
-      st = null;
-    }
-    const task = st?.task;
-    if (task && SAFE_TASK2.test(task)) {
-      const briefNums = async (folder) => (await listOpt($, folder)).filter((f) => f.kind === "file").map((f) => /^brief-(\d{1,4})\.md$/.exec(f.name)?.[1]).filter(Boolean).map(Number);
-      const project = st?.project;
-      let nums = project && SAFE_TASK2.test(project) ? await briefNums(join(dir, "work", project, task)) : [];
-      if (!nums.length) nums = await briefNums(join(dir, "work", task));
-      if (nums.length) out.forgeBriefs = Math.max(...nums);
-    }
   }
   const run = entries.find((f) => f.kind === "file" && f.name === "run.json");
   if (run && run.size <= FORGE_RUN_MAX) out.forgeRun = await readOpt($, join(dir, "run.json"));
@@ -13585,7 +14334,7 @@ async function loadPanelFiles($, now) {
   let forge = {};
   forgeSeen = null;
   try {
-    forge = await loadForgeFiles($, root);
+    forge = await loadForgeFiles($, root, now);
   } catch {
   }
   return { ...await loadSuperpowersFiles($, root, now), ...forge };
@@ -13627,12 +14376,26 @@ var runInputs = null;
 var usageFileCache = /* @__PURE__ */ new Map();
 var largeRunsCache = null;
 var officialOwnUsd = null;
+var seededUsd = 0;
+var runBaseline = null;
+function runKeyNow() {
+  const id2 = roadmap.viewer?.runId;
+  return runRoleOf(roadmap) === "owner" && isSafeId(id2) ? id2 : null;
+}
+function keepRunBaseline() {
+  const key = runKeyNow();
+  if (key === null || runBaseline?.runKey === key) return;
+  const t = totalsOf(usage.loops);
+  runBaseline = { runKey: key, costUsd: t.costUsd, tokens: t.tokens, activeMs: usage.activeMs };
+}
 var ownCostUsd = () => Object.values(usage.loops).reduce((a, l) => a + l.costUsd, 0);
 function resetUsage() {
   usage = newUsage(0);
   usageStartedAt = null;
   officialUsd = null;
   officialOwnUsd = null;
+  seededUsd = 0;
+  runBaseline = null;
   lastUsageWrite = 0;
   lastUsageSig = "";
   sessionId = null;
@@ -13652,7 +14415,11 @@ async function seedFromOwnFile($, startedAt) {
   const where = await usageWhere($);
   if (!SAFE_SESSION.test(where.session)) return;
   const file = parseUsageFile(await readOpt($, join(where.main, ".forge", "usage", `${where.session}.json`)));
-  if (file && Date.parse(file.startedAt) === startedAt && usage === target && usageStartedAt === startedAt) seedUsage(usage, file);
+  if (file && Date.parse(file.startedAt) === startedAt && usage === target && usageStartedAt === startedAt) {
+    seedUsage(usage, file);
+    seededUsd = Object.values(file.loops).reduce((a, l) => a + l.costUsd, 0);
+    if (file.runBaseline) runBaseline = file.runBaseline;
+  }
 }
 async function syncUsageStart($) {
   const u = await $.session.usage();
@@ -13660,7 +14427,10 @@ async function syncUsageStart($) {
     const adopt = usageStartedAt === null;
     usageStartedAt = u.startedAt;
     if (adopt) usage.startedAt = u.startedAt;
-    else usage = newUsage(u.startedAt);
+    else {
+      usage = newUsage(u.startedAt);
+      seededUsd = 0;
+    }
     lastUsageSig = "";
     try {
       await seedFromOwnFile($, u.startedAt);
@@ -13668,12 +14438,12 @@ async function syncUsageStart($) {
     }
   }
   officialUsd = u.cost?.usd ?? null;
-  officialOwnUsd = ownCostUsd();
+  officialOwnUsd = ownCostUsd() - seededUsd;
 }
 var baseName = (path) => path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
 function usageSig() {
   const steps = Object.values(usage.loops).reduce((a, l) => a + l.steps, 0);
-  return `${usage.startedAt}|${steps}|${usage.tracking.waypoint}|${usage.tracking.forge}|${usage.activeMs}`;
+  return `${usage.startedAt}|${steps}|${usage.tracking.waypoint}|${usage.tracking.forge}|${usage.activeMs}|${runKeyNow() ?? ""}`;
 }
 async function writeUsageFileNow($, force) {
   try {
@@ -13688,7 +14458,8 @@ async function writeUsageFileNow($, force) {
     if (!(await listOpt($, forge)).length) return;
     lastUsageWrite = now;
     const label = roadmap.mode === "work" && roadmap.track ? roadmap.track : baseName(where.root);
-    const text2 = JSON.stringify(toUsageFile(usage, { session: where.session, label, worktree: where.root, now, costUsd: officialUsd }));
+    keepRunBaseline();
+    const text2 = JSON.stringify(toUsageFile(usage, { session: where.session, label, worktree: where.root, now, costUsd: officialUsd, runKey: runKeyNow(), runBaseline }));
     if (text2.length > USAGE_FILE_MAX) return;
     await $.fs.write(join(forge, "usage", `${where.session}.json`), text2);
     lastUsageSig = sig;
@@ -13786,7 +14557,7 @@ async function refreshUsage($, withRun) {
 function usageInput() {
   let run = null;
   try {
-    if (runInputs && sessionId !== null) run = mergeForRun(runInputs.files, { session: sessionId, state: usage }, runInputs.since);
+    if (runInputs && sessionId !== null) run = mergeForRun(runInputs.files, { session: sessionId, state: usage, baseline: runBaseline }, runInputs.since, runKeyNow());
   } catch {
   }
   return { session: usage, run, officialUsd, officialOwnUsd };
@@ -13800,33 +14571,39 @@ function recordFinished(ran, now) {
     type: ran.type,
     seconds: Math.max(0, Math.floor((now - ran.since) / 1e3)),
     at: now,
-    ...description ? { description: clip2(String(description), LINE_MAX) } : {},
+    ...description ? { description: clip3(String(description), LINE_MAX) } : {},
     ...loop?.model ? { model: loop.model } : {}
   });
 }
-async function liveSubagents($, now) {
-  const fresh = activity.subagents.filter((s) => now - s.since < SUBAGENT_TTL_MS);
+async function agentList($) {
   let list;
   try {
     list = await $.agent.list();
   } catch {
-    return fresh;
+    return null;
   }
-  if (!Array.isArray(list)) return fresh;
-  const since = new Map(fresh.map((s) => [s.id, s.since]));
-  const out = [];
-  for (const raw of list) {
-    if (!raw || typeof raw !== "object") continue;
+  if (!Array.isArray(list)) return null;
+  return list.flatMap((raw) => {
+    if (!raw || typeof raw !== "object") return [];
     const a = raw;
-    if (typeof a.id !== "string") continue;
-    if (a.status !== "running" && a.status !== "pending" && a.status !== "waiting") continue;
-    out.push({
+    if (typeof a.id !== "string") return [];
+    return [{
       id: a.id,
       type: typeof a.type === "string" ? a.type : "",
-      ...typeof a.description === "string" ? { description: a.description } : {},
-      status: a.status,
-      since: since.get(a.id) ?? now
-    });
+      description: typeof a.description === "string" ? a.description : "",
+      status: typeof a.status === "string" ? a.status : "",
+      parentId: typeof a.parentId === "string" ? a.parentId : null
+    }];
+  });
+}
+function liveSubagents(now, list) {
+  const fresh = activity.subagents.filter((s) => now - s.since < SUBAGENT_TTL_MS);
+  if (!list) return fresh;
+  const since = new Map(fresh.map((s) => [s.id, s.since]));
+  const out = [];
+  for (const a of list) {
+    if (a.status !== "running" && a.status !== "pending" && a.status !== "waiting" && a.status !== "idle") continue;
+    out.push({ id: a.id, type: a.type, ...a.description ? { description: a.description } : {}, status: a.status, since: since.get(a.id) ?? now });
   }
   const live = new Set(out.map((s) => s.id));
   for (const s of fresh) if (!live.has(s.id)) recordFinished(s, now);
@@ -13842,6 +14619,10 @@ async function buildPanel($) {
     activity: { ...activity, subagents, finished: freshFinished(finished, now) },
     now,
     usage: usageInput(),
+    sessionId,
+    links,
+    ownTasks,
+    wakeAt,
     ...roadmap.locale ? { locale: roadmap.locale } : {}
   });
 }
@@ -13908,9 +14689,19 @@ async function refreshPanel($) {
       roadmap = await loadBandModel($);
     } catch {
     }
+    keepRunBaseline();
     const now = await nowMs($);
+    if (sessionId === null) {
+      try {
+        sessionId = await $.session.id();
+      } catch {
+      }
+    }
     panelFiles = await loadPanelFiles($, now);
-    activity.subagents = await liveSubagents($, now);
+    const list = await agentList($);
+    activity.subagents = liveSubagents(now, list);
+    if (list) links = syncListed(links, list, now, knownTasks(bandModel));
+    links = pruneLinks(links, now);
     await refreshUsage($, true);
     await noteActivity($);
     if (!paneUp) {
@@ -13964,6 +14755,19 @@ var TEXT = {
     auto: "auto",
     autoDecisions: (n2) => `${n2} ${n2 === 1 ? "decisi\xF3n autom\xE1tica" : "decisiones autom\xE1ticas"}`,
     autoMode: "modo auto",
+    staleLedger: "sin cambios desde hace m\xE1s de un d\xEDa",
+    sTasksInProgress: "Tareas en curso",
+    otherSession: "otra sesi\xF3n",
+    validating: "validando",
+    integrating: "integrando",
+    skipped: "omitida",
+    noResult: "sin resultado",
+    accepted: "aceptado",
+    acceptedInRound: (n2) => `aceptado en la ronda ${n2}`,
+    waitingOn: (n2, wake) => `esperando a ${n2} ${n2 === 1 ? "subagente" : "subagentes"}${wake ? ` \xB7 despierta en ${wake}` : ""}`,
+    waitingLbl: "en espera",
+    cached: "cach\xE9",
+    reviewersLbl: "revisan",
     pressEnter: "Comando listo en el prompt: pulsa Enter",
     briefs: "briefs",
     cycle: "ciclo",
@@ -13985,7 +14789,7 @@ var TEXT = {
     gOther: "Otros subagentes",
     tracking: "Seguimiento",
     withoutForge: "Sin forge (estimado)",
-    withoutForgeNote: "orientativo: en una sola sesi\xF3n el contexto crecer\xEDa y costar\xEDa m\xE1s, y no habr\xEDa revisi\xF3n",
+    withoutForgeNote: "orientativo: en una sola sesi\xF3n el contexto crecer\xEDa y costar\xEDa m\xE1s, y no habr\xEDa revisi\xF3n; el extremo bajo supone que todo el seguimiento se rele\xEDa en cada paso",
     forgeCosts: (usd, pct) => `forge cuesta +${usd} (+${pct} %)`,
     forgeSaves: (usd) => `forge ahorra \u2212${usd}`,
     pricesAsOf: "precios a",
@@ -14034,6 +14838,19 @@ var TEXT = {
     auto: "auto",
     autoDecisions: (n2) => `${n2} automatic decision${n2 === 1 ? "" : "s"}`,
     autoMode: "auto mode",
+    staleLedger: "unchanged for over a day",
+    sTasksInProgress: "Tasks in progress",
+    otherSession: "other session",
+    validating: "validating",
+    integrating: "integrating",
+    skipped: "skipped",
+    noResult: "no result",
+    accepted: "accepted",
+    acceptedInRound: (n2) => `accepted in round ${n2}`,
+    waitingOn: (n2, wake) => `waiting on ${n2} subagent${n2 === 1 ? "" : "s"}${wake ? ` \xB7 wakes in ${wake}` : ""}`,
+    waitingLbl: "waiting",
+    cached: "cached",
+    reviewersLbl: "reviewers",
     pressEnter: "Command ready in the prompt: press Enter",
     briefs: "briefs",
     cycle: "cycle",
@@ -14055,7 +14872,7 @@ var TEXT = {
     gOther: "Other subagents",
     tracking: "Tracking",
     withoutForge: "Without forge (estimate)",
-    withoutForgeNote: "rough: in one session the context would grow and cost more, with no review",
+    withoutForgeNote: "rough: in one session the context would grow and cost more, with no review; the low end assumes all the tracking was re-read on every step",
     forgeCosts: (usd, pct) => `forge costs +${usd} (+${pct}%)`,
     forgeSaves: (usd) => `forge saves \u2212${usd}`,
     pricesAsOf: "prices as of",
@@ -14073,7 +14890,7 @@ async function openPanel($) {
   try {
     const opened = await $.ui.open({ id: PANE, title: "lens" });
     placed = opened.isPlaced;
-    if (!opened.isPlaced) $.ui.toast(`${t.panelWaiting}: ${clip2(opened.reason, 200)}`);
+    if (!opened.isPlaced) $.ui.toast(`${t.panelWaiting}: ${clip3(opened.reason, 200)}`);
   } catch {
     return false;
   }
@@ -14129,7 +14946,7 @@ export const register = (on) => {
       const u = await $.session.usage();
       if (u.startedAt === usageStartedAt) {
         officialUsd = u.cost?.usd ?? null;
-        officialOwnUsd = ownCostUsd();
+        officialOwnUsd = ownCostUsd() - seededUsd;
       }
     } catch {
     }
@@ -14142,6 +14959,13 @@ export const register = (on) => {
         resetUsage();
       } catch {
       }
+      if (e.reason === "clear") {
+        try {
+          resetPanel();
+          void requestPanelWrite($);
+        } catch {
+        }
+      }
       return next(e);
     }
     timer?.cancel();
@@ -14152,6 +14976,13 @@ export const register = (on) => {
     paneUp = false;
     return next(e);
   });
+  on("session.compact", async ($, e, next) => {
+    try {
+      compactUsage(usage);
+    } catch {
+    }
+    return next(e);
+  }).catch(($, e, next) => next(e));
   on("command.run", { command: "lens" }, async ($) => {
     const t = lensTexts();
     const placed = await openPanel($);
@@ -14164,7 +14995,7 @@ export const register = (on) => {
       if (!paneUp) stopPanelTimer();
     }
     return closed;
-  });
+  }).catch(($, e, next) => next(e));
   on("turn.start", async ($, e, next) => {
     try {
       startTurn(usage, turnClock, await nowMs($));
@@ -14183,6 +15014,12 @@ export const register = (on) => {
       }
       syncTurn();
       void refreshPanel($);
+    } else {
+      try {
+        links = endAgent(links, e.agentId, await nowMs($));
+        void requestPanelWrite($);
+      } catch {
+      }
     }
     return next(e);
   });
@@ -14200,24 +15037,55 @@ export const register = (on) => {
   on("agent.spawn", async ($, e, next) => {
     const r = await next(e);
     try {
-      if (r?.agentId) labelLoop(usage, r.agentId, String(e.subagentType ?? "unknown"), e.description);
+      if (r?.agentId) {
+        labelLoop(usage, r.agentId, String(e.subagentType ?? "unknown"), e.description);
+        const wf = e.workflow;
+        links = linkSpawn(links, {
+          id: r.agentId,
+          type: String(e.subagentType ?? ""),
+          description: String(e.description ?? ""),
+          prompt: typeof e.prompt === "string" ? e.prompt : "",
+          parentId: typeof e.parentAgentId === "string" ? e.parentAgentId : null,
+          workflow: wf && typeof wf.runId === "string" ? { runId: wf.runId, index: Number(wf.agentIndex) || 0 } : null,
+          now: await nowMs($)
+        }, knownTasks(bandModel));
+        void noteActivity($);
+        void requestPanelWrite($);
+      }
     } catch {
     }
     return r;
-  });
+  }).catch(($, e, next) => next(e));
   on("tool.call", async ($, e, next) => {
     const mine = !e.agentId;
+    const input = e;
     void touch($);
+    if (e.tool === "Bash") {
+      try {
+        ownTasks = addOwnTask(ownTasks, ownTaskId(ownTaskOf(input.command)));
+      } catch {
+      }
+    }
     if (mine) {
       try {
         tools.delete(e.tool_use_id);
-        tools.set(e.tool_use_id, { name: clip2(String(e.tool), LINE_MAX), since: await nowMs($) });
+        tools.set(e.tool_use_id, { name: clip3(String(e.tool), LINE_MAX), since: await nowMs($) });
         while (tools.size > MAX_ACTIVITY) tools.delete(tools.keys().next().value);
         showTool();
         if (e.tool === "TodoWrite") {
           activity.todos = Array.isArray(e.todos) ? e.todos.slice(0, MAX_TODOS) : e.todos;
           void noteActivity($);
         }
+        if (e.tool === "ScheduleWakeup") {
+          const delay = typeof input.delaySeconds === "number" && Number.isFinite(input.delaySeconds) ? input.delaySeconds : null;
+          wakeAt = input.stop === true || delay === null ? null : await nowMs($) + Math.min(WAKE_MAX_S, Math.max(WAKE_MIN_S, delay)) * 1e3;
+        }
+        void requestPanelWrite($);
+      } catch {
+      }
+    } else {
+      try {
+        links = setTool(links, e.agentId, { name: String(e.tool), since: await nowMs($) });
         void requestPanelWrite($);
       } catch {
       }
@@ -14226,7 +15094,7 @@ export const register = (on) => {
       const result = await next(e);
       if (mine) {
         try {
-          const kind = trackingKind(String(e.tool), e);
+          const kind = trackingKind(String(e.tool), input);
           if (kind) {
             const r = result;
             const out = typeof r?.text === "string" ? r.text.length : (JSON.stringify(r?.result ?? "") ?? "").length;
@@ -14242,35 +15110,41 @@ export const register = (on) => {
         showTool();
         void requestPanelWrite($);
       }
+      if (!mine) {
+        links = setTool(links, e.agentId, null);
+        void requestPanelWrite($);
+      }
     }
-  });
+  }).catch(($, e, next) => next(e));
   on("classic.SubagentStart", async ($, e, next) => {
     try {
       const id2 = String(e.agent_id);
       finished = finished.filter((f) => f.id !== id2);
-      activity.subagents = pushCapped(activity.subagents.filter((s) => s.id !== id2), { id: id2, type: clip2(String(e.agent_type ?? ""), LINE_MAX), since: await nowMs($) });
+      activity.subagents = pushCapped(activity.subagents.filter((s) => s.id !== id2), { id: id2, type: clip3(String(e.agent_type ?? ""), LINE_MAX), since: await nowMs($) });
       const kind = usage.loops[id2]?.kind;
       if (!kind || kind === "unknown") labelLoop(usage, id2, String(e.agent_type ?? "unknown"));
+      if (!links.some((l) => l.id === id2)) links = linkSpawn(links, { id: id2, type: String(e.agent_type ?? ""), description: "", prompt: "", parentId: null, workflow: null, now: await nowMs($) }, knownTasks(bandModel));
       await touch($);
       await noteActivity($);
       void requestPanelWrite($);
     } catch {
     }
     return next(e);
-  });
+  }).catch(($, e, next) => next(e));
   on("classic.SubagentStop", async ($, e, next) => {
     try {
       void touch($);
       const id2 = String(e.agent_id);
       const ran = activity.subagents.find((s) => s.id === id2);
       activity.subagents = activity.subagents.filter((s) => s.id !== e.agent_id);
+      links = endAgent(links, id2, await nowMs($), { any: true });
       if (ran) recordFinished(ran, await nowMs($));
       void noteActivity($);
       void requestPanelWrite($);
     } catch {
     }
     return next(e);
-  });
+  }).catch(($, e, next) => next(e));
   on("classic.TaskCreated", ($, e, next) => {
     try {
       const id2 = String(e.task_id);
@@ -14279,7 +15153,7 @@ export const register = (on) => {
     } catch {
     }
     return next(e);
-  });
+  }).catch(($, e, next) => next(e));
   on("classic.TaskCompleted", ($, e, next) => {
     try {
       const id2 = String(e.task_id);
@@ -14289,7 +15163,7 @@ export const register = (on) => {
     } catch {
     }
     return next(e);
-  });
+  }).catch(($, e, next) => next(e));
   on("ui.render", { component: "Pane", requestId: PANE }, async ($, e, next) => {
     try {
       const m = await read($, panel);
@@ -14311,7 +15185,7 @@ export const register = (on) => {
         paneUp = false;
         stopPanelTimer();
         $.ui.close({ id: PANE }).catch(() => void 0);
-      } })), drawn.length || proposals.length ? drawn : /* @__PURE__ */ h(Text, { dimColor: true }, t.nothing), proposals.length ? /* @__PURE__ */ h(Box, { key: "section-proposals", flexDirection: "column", borderStyle: "round", borderColor: PALETTE.yellow, paddingX: 1 }, /* @__PURE__ */ h(Text, { bold: true, color: PALETTE.yellow }, `\u2727 ${t.proposals} \xB7 ${proposals.length}`), proposals.map((p) => /* @__PURE__ */ h(Box, { key: `proposal-${p.id}`, flexDirection: "column", marginTop: 1 }, /* @__PURE__ */ h(Text, { bold: true, wrap: "truncate-end" }, clip2(p.title, cols)), /* @__PURE__ */ h(Box, { flexDirection: "row", columnGap: 1, flexWrap: "wrap" }, /* @__PURE__ */ h(Text, { color: PALETTE.lavender }, `\u2039${p.category}\u203A`), /* @__PURE__ */ h(Text, { color: PALETTE[RISK_HUE[p.risk] ?? "yellow"] }, `\u2039${p.risk}\u203A`), /* @__PURE__ */ h(Button, { key: `approve-${p.id}`, label: `\u2713 ${t.approve}`, onPress: () => decide($, t, p.id, "approve") }), /* @__PURE__ */ h(Button, { key: `reject-${p.id}`, label: `\u2717 ${t.reject}`, onPress: () => decide($, t, p.id, "reject") }))))) : null);
+      } })), drawn.length || proposals.length ? drawn : /* @__PURE__ */ h(Text, { dimColor: true }, t.nothing), proposals.length ? /* @__PURE__ */ h(Box, { key: "section-proposals", flexDirection: "column", borderStyle: "round", borderColor: PALETTE.yellow, paddingX: 1 }, /* @__PURE__ */ h(Text, { bold: true, color: PALETTE.yellow }, `\u2727 ${t.proposals} \xB7 ${proposals.length}`), proposals.map((p) => /* @__PURE__ */ h(Box, { key: `proposal-${p.id}`, flexDirection: "column", marginTop: 1 }, /* @__PURE__ */ h(Text, { bold: true, wrap: "truncate-end" }, clip3(p.title, cols)), /* @__PURE__ */ h(Box, { flexDirection: "row", columnGap: 1, flexWrap: "wrap" }, /* @__PURE__ */ h(Text, { color: PALETTE.lavender }, `\u2039${p.category}\u203A`), /* @__PURE__ */ h(Text, { color: PALETTE[RISK_HUE[p.risk] ?? "yellow"] }, `\u2039${p.risk}\u203A`), /* @__PURE__ */ h(Button, { key: `approve-${p.id}`, label: `\u2713 ${t.approve}`, onPress: () => decide($, t, p.id, "approve") }), /* @__PURE__ */ h(Button, { key: `reject-${p.id}`, label: `\u2717 ${t.reject}`, onPress: () => decide($, t, p.id, "reject") }))))) : null);
     } catch {
       return next(e);
     }
