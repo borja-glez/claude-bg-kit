@@ -42,7 +42,9 @@ export type Block =
   | { kind: 'text'; text: string; dim?: boolean; hue?: Hue }
   | { kind: 'chips'; chips: { text: string; hue: Hue }[] };
 
-export interface Card { icon: string; title: string; hue: Hue; chip?: { text: string; hue: Hue }; subtitle?: string; blocks: Block[] }
+/** Which section a card is: the pane's cut leaves out the least important first (src/lens/layout.ts). */
+export type CardId = 'now' | 'tasks' | 'execution' | 'roadmap' | 'agents' | 'superpowers' | 'todos' | 'ccTasks' | 'usage';
+export interface Card { id?: CardId; icon: string; title: string; hue: Hue; chip?: { text: string; hue: Hue }; subtitle?: string; blocks: Block[] }
 
 const PAD = 14;
 const HEAD_H = 34;

@@ -102,7 +102,7 @@ describe('lens view', () => {
     const card = buildCards({ ...EMPTY, execution: EXEC }, T, 0).find(c => c.title === T.sExecution)!;
     const text = JSON.stringify(card);
     expect(text).toContain('1/3');
-    expect(text).toContain('3 ' + T.integratedN);
+    expect(text).toContain('3/12 ' + T.integratedN);
     expect(text).toContain(T.silent);
     expect(text).toContain('T004');
     expect(text).toContain('r2');
@@ -660,5 +660,17 @@ describe('Now, the execution and the subagents (E-02, E-09, E-11)', () => {
     expect(rows[1].spinning).toBe(false);
     expect(rows[1].right).toContain('waiting');
     expect(buildCards({ ...EMPTY, subagents: [subagents[0]] }, T, 0).find(x => x.title === T.sSubagents)).toBeUndefined();
+  });
+});
+
+describe('card ids and the execution count (F-01, F-10)', () => {
+  it('every card says which section it is, in the order it is drawn', () => {
+    const m = { ...EMPTY, mainModel: { model: 'claude-opus-5-5', effort: 'high' }, forge: FORGE, execution: EXEC, subagents: [{ id: 'a', type: 'Explore', seconds: 5 }] };
+    expect(buildCards(m, T, 0).map(c => c.id)).toEqual(['now', 'tasks', 'execution', 'agents']);
+  });
+  it('the execution card counts what is integrated, as the band does; the accepted ones stay in their own list', () => {
+    const card = buildCards({ ...EMPTY, execution: EXEC }, T, 0).find(c => c.id === 'execution')!;
+    expect(card.blocks[0]).toMatchObject({ kind: 'bar', right: '3/12 integrated' });
+    expect(cardAlt(card)).toContain('to integrate: T003');
   });
 });

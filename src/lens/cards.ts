@@ -180,7 +180,7 @@ function tasksCard(m: PanelModel, rows: ActivityRow[], t: CardTexts): Card {
   blocks.push(...runBlocks(m, t));
   const head = rows.find(a => a.expanded && a.owner !== 'other');
   return {
-    icon: SECTION_ICON.forge, title: `${t.sTasksInProgress} · ${rows.length}`, hue: SECTION_HUE.forge,
+    id: 'tasks', icon: SECTION_ICON.forge, title: `${t.sTasksInProgress} · ${rows.length}`, hue: SECTION_HUE.forge,
     chip: head?.path ? { text: head.path, hue: PATH_HUE[head.path] ?? 'peach' } : m.infinite?.active ? { text: '∞', hue: 'mauve' } : undefined,
     subtitle: f && head ? forgeSubtitle(f, t) : undefined,
     blocks,
@@ -203,7 +203,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     for (const j of (m.jobs ?? []).slice(0, 5)) {
       blocks.push({ kind: 'row', dot: 'sky', spinning: true, text: [jobText(j.name, t), j.task].filter(Boolean).join(' '), right: short(j.seconds) ?? undefined });
     }
-    out.push({ icon: SECTION_ICON.now, title: t.sNow, hue: SECTION_HUE.now, blocks });
+    out.push({ id: 'now', icon: SECTION_ICON.now, title: t.sNow, hue: SECTION_HUE.now, blocks });
   }
 
   if (m.waypoint) {
@@ -231,7 +231,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     if (w.escalation) chips.push({ text: `▲ ${t.decision}`, hue: 'red' });
     if (chips.length) blocks.push({ kind: 'chips', chips });
     out.push({
-      icon: SECTION_ICON.roadmap, title: w.project, hue: SECTION_HUE.roadmap, chip: { text: `${w.percent}%`, hue: SECTION_HUE.roadmap },
+      id: 'roadmap', icon: SECTION_ICON.roadmap, title: w.project, hue: SECTION_HUE.roadmap, chip: { text: `${w.percent}%`, hue: SECTION_HUE.roadmap },
       subtitle: w.phase ? `${t.phase} ${w.phase.index}/${w.phase.total} · ${w.phase.name}` : undefined, blocks,
     });
   }
@@ -243,7 +243,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
   else if (m.forge || m.infinite?.active || m.decisions) {
     const f = m.forge;
     out.push({
-      icon: SECTION_ICON.forge, title: f?.task ?? 'forge', hue: SECTION_HUE.forge,
+      id: 'tasks', icon: SECTION_ICON.forge, title: f?.task ?? 'forge', hue: SECTION_HUE.forge,
       chip: f?.path ? { text: f.path, hue: PATH_HUE[f.path] ?? 'peach' } : m.infinite?.active ? { text: '∞', hue: 'mauve' } : undefined,
       subtitle: f ? forgeSubtitle(f, t) : undefined,
       blocks: [...(f ? forgeBlocks(m, f, t, false) : []), ...runBlocks(m, t)],
@@ -257,8 +257,8 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     const blocks: Block[] = [{
       kind: 'bar', ratio: ratio(x.slots.length, x.parallel), hue: 'teal', moving: x.active && x.slots.length > 0,
       label: `${x.mode === 'sessions' ? t.modeSessions : t.modeSubagents} ${x.slots.length}/${x.parallel}`,
-      // Done: accepted (waiting to integrate) or integrated.
-      right: `${x.integrated + x.queued.length}/${x.total} ${t.done} · ${x.integrated} ${t.integratedN}`,
+      // F-10: integrated out of the total, as the band says it; the accepted ones are listed below («to integrate»).
+      right: `${x.integrated}/${x.total} ${t.integratedN}`,
     }];
     if (x.stallReason) blocks.push({ kind: 'text', text: x.stallReason, dim: false });
     // C2: another session's run is dim; E-02: each slot's agents go under it.
@@ -282,7 +282,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     const list = (label: string, ids: string[]) => { if (ids.length) blocks.push({ kind: 'text', text: `${label}: ${ids.join(', ')}`, dim: true }); };
     list(t.queued, x.queued); list(t.conflictsLbl, x.conflicts); list(t.blockedLbl, x.blocked); list(t.orphans, x.orphans);
     const coord = x.coordinator.liveness;
-    out.push({ icon: '►', title: t.sExecution, hue: 'teal', chip: { text: coord === 'alive' ? t.alive : coord === 'silent' ? t.silent : t.stopped, hue: HUE[coord] },
+    out.push({ id: 'execution', icon: '►', title: t.sExecution, hue: 'teal', chip: { text: coord === 'alive' ? t.alive : coord === 'silent' ? t.silent : t.stopped, hue: HUE[coord] },
       subtitle: x.elapsedSeconds != null && span(x.elapsedSeconds) ? `◷ ${span(x.elapsedSeconds)}` : undefined, blocks,
     });
   }
@@ -327,7 +327,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
       blocks.push({ kind: 'text', text: t.withoutForgeNote, dim: true });
     }
     blocks.push({ kind: 'text', text: `${t.pricesAsOf} ${u.pricesAsOf}`, dim: true });
-    usageCard = { icon: '$', title: t.sUsage, hue: 'teal', chip: { text: `${u.partial ? '≥ ' : ''}${fmtUsd(u.costUsd, loc)}`, hue: 'teal' }, blocks };
+    usageCard = { id: 'usage', icon: '$', title: t.sUsage, hue: 'teal', chip: { text: `${u.partial ? '≥ ' : ''}${fmtUsd(u.costUsd, loc)}`, hue: 'teal' }, blocks };
   }
 
   if (m.superpowers) {
@@ -341,7 +341,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     if (s.current) blocks.push({ kind: 'chips', chips: [{ text: `${t.fixRound} ${s.current.round}${s.current.cap ? `/${s.current.cap}` : ''}`, hue: 'yellow' }] });
     if (s.stale) blocks.push({ kind: 'text', text: t.staleLedger, dim: true });
     for (const line of s.lastLines) blocks.push({ kind: 'text', text: line, dim: true });
-    out.push({ icon: SECTION_ICON.superpowers, title: s.plan || t.sSuperpowers, hue: SECTION_HUE.superpowers, chip: { text: `${Math.round(ratio(s.done, s.tasks) * 100)}%`, hue: SECTION_HUE.superpowers }, blocks });
+    out.push({ id: 'superpowers', icon: SECTION_ICON.superpowers, title: s.plan || t.sSuperpowers, hue: SECTION_HUE.superpowers, chip: { text: `${Math.round(ratio(s.done, s.tasks) * 100)}%`, hue: SECTION_HUE.superpowers }, blocks });
   }
 
   if (m.todos) {
@@ -350,7 +350,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     const blocks: Block[] = [{ kind: 'bar', ratio: ratio(td.done, td.total), hue: SECTION_HUE.todos, moving: !!td.inProgress }, { kind: 'cells', cells: c.cells }];
     for (const text of td.active ?? (td.inProgress ? [td.inProgress] : [])) blocks.push({ kind: 'row', dot: 'peach', spinning: true, text });
     for (const next of td.next) blocks.push({ kind: 'row', dot: 's2', text: next });
-    out.push({ icon: SECTION_ICON.todos, title: t.sTodos, hue: SECTION_HUE.todos, chip: { text: `${td.done}/${td.total}`, hue: SECTION_HUE.todos }, blocks });
+    out.push({ id: 'todos', icon: SECTION_ICON.todos, title: t.sTodos, hue: SECTION_HUE.todos, chip: { text: `${td.done}/${td.total}`, hue: SECTION_HUE.todos }, blocks });
   }
 
   // E-09: an agent drawn under its task or its slot is not drawn again; the rest carry their task, and one that waits
@@ -372,7 +372,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
       blocks.push({ kind: 'text', text, dim: true });
     }
     out.push({
-      icon: SECTION_ICON.agents, title: t.sSubagents, hue: SECTION_HUE.agents,
+      id: 'agents', icon: SECTION_ICON.agents, title: t.sSubagents, hue: SECTION_HUE.agents,
       chip: m.subagents.length ? { text: String(m.subagents.length), hue: SECTION_HUE.agents } : undefined, blocks,
     });
   }
@@ -383,7 +383,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
       { kind: 'bar', ratio: ratio(cc.done, cc.done + cc.open), hue: SECTION_HUE.tasks, label: `${cc.open} ${t.open}`, right: `${cc.done} ${t.done}` },
       ...cc.recent.map(r => ({ kind: 'row', dot: 'teal', text: r }) as Block),
     ];
-    out.push({ icon: SECTION_ICON.tasks, title: t.sTasks, hue: SECTION_HUE.tasks, blocks });
+    out.push({ id: 'ccTasks', icon: SECTION_ICON.tasks, title: t.sTasks, hue: SECTION_HUE.tasks, blocks });
   }
 
   if (usageCard) out.push(usageCard);

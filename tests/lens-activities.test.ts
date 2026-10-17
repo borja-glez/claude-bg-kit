@@ -71,6 +71,7 @@ describe('buildActivities: who owns a task and how long it shows (E-06)', () => 
     // The task of the agent the person looks at is the one expanded.
     const focus = buildActivities(input({ statuses: [st('old', { lastAt: ago(50) }), st('new', { lastAt: ago(2) })], links: [link('a9', 'old')], focusAgent: 'a9' }));
     expect(focus.activities.filter(a => a.expanded).map(a => a.key)).toEqual(['old']);
+    expect(focus.activities.map(a => a.key)).toEqual(['old', 'new']);
   });
   it('a time in the future leaves the activity without a time, never a negative one (Review Focus 4)', () => {
     const later = new Date(NOW + 10 * 60_000).toISOString();
@@ -283,6 +284,21 @@ describe('buildActivities: a workflow, and the agents without a task', () => {
     expect(buildActivities(input({ links: [wf('w1', { status: 'done', endedAt: NOW - 14 * 60_000 })] })).activities[0]).toMatchObject({ key: 'wf:wf_1', done: true, agents: [] });
     expect(buildActivities(input({ links: [wf('w1', { status: 'done', endedAt: NOW - 16 * 60_000 })] })).activities).toEqual([]);
     expect(buildActivities(input({ links: [link('x', null)] })).activities).toMatchObject([{ key: 'adhoc', kind: 'adhoc', agents: [{ id: 'x' }] }]);
+  });
+  it('a workflow agent whose prompt names a task has one home, the workflow row, never also a task row or a slot (3a m-5)', () => {
+    const agent = link('w1', 'T001', { project: 'shop', workflow: { runId: 'wf_1', index: 1 } });
+    const slotted: NonNullable<PanelModel['execution']> = { ...EXEC, project: 'shop', slots: [{ ...EXEC.slots[0], task: 'T001' }] };
+    const i = input({ statuses: [st('T001', { project: 'shop' })], links: [agent, link('n1', 'T001', { project: 'shop' })], execution: slotted, viewer: COORDINATOR });
+    const homes = linkHomes(i);
+    expect(homes.has('w1')).toBe(false);
+    expect(homes.get('n1')).toBe('shop__T001');
+    const view = buildActivities({ ...i, homes });
+    expect(view.activities.flatMap(a => a.agents.filter(g => g.id === 'w1').map(() => a.key))).toEqual(['wf:wf_1']);
+    const slots = withSlotAgents(slotted, i.links, {}, i.viewer, NOW, homes, new Set())!;
+    expect(slots.slots[0].agents?.map(g => g.id)).toEqual(['n1']);
+    // Loose, with its task row in progress and not a slot: still only the workflow row.
+    const loose = buildActivities(input({ statuses: [st('T001')], links: [link('w2', 'T001', { workflow: { runId: 'wf_2', index: 1 } })] }));
+    expect(loose.activities.flatMap(a => a.agents.map(g => `${a.key}:${g.id}`))).toEqual(['wf:wf_2:w2']);
   });
 });
 

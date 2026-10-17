@@ -130,7 +130,8 @@ export function linkHomes(h: HomeInput): Map<string, string> {
   const out = new Map<string, string>();
   for (const l of h.links) {
     const task = l.task;
-    if (!task) continue;
+    // 3a m-5: a workflow agent has one home, its workflow row, whatever task its prompt names.
+    if (!task || l.workflow) continue;
     out.set(l.id, l.project !== null ? keyOf(task, l.project) : homeOf(h, st => st.task === task) ?? keyOf(task, null));
   }
   return out;
@@ -304,6 +305,8 @@ export function buildActivities(i: ActivityInput): ActivityView {
     ?? forge.find(b => b.rank === 0 && b.row.owner === 'own')
     ?? forge.reduce<Built | undefined>((best, b) => (!best || b.at > best.at ? b : best), undefined);
   if (pick) pick.row.expanded = true;
+  // F-08: the task of the agent the person looks at goes first, too.
+  if (pick && focus && pick.row.task === focus.task) built.unshift(...built.splice(built.indexOf(pick), 1));
   const out = built.map(b => b.row);
   if (i.superpowers) {
     const s = i.superpowers;
