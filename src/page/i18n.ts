@@ -15,11 +15,12 @@ const numIn = (locale: string) => (n: number): string => {
   if (!f) { f = new Intl.NumberFormat(locale); NUMBER_FORMATS.set(locale, f); }
   return f.format(Number.isFinite(n) ? n : 0);
 };
-/** The form of `n` that Intl.PluralRules picks in the language; `#` in it is the number, formatted. */
+/** The form of `n` that Intl.PluralRules picks in the language; every `#` in it is the number, formatted. */
 const pluralIn = (locale: string) => (n: number, forms: { one: string; other: string }): string => {
   let r = PLURAL_RULES.get(locale);
   if (!r) { r = new Intl.PluralRules(locale); PLURAL_RULES.set(locale, r); }
-  return (r.select(n) === 'one' ? forms.one : forms.other).replace('#', numIn(locale)(n));
+  const shown = numIn(locale)(n);
+  return (r.select(n) === 'one' ? forms.one : forms.other).replaceAll('#', () => shown);
 };
 
 /** H-20: a duration in minutes, the same in both languages: «45 min», «2 h 05 min», «3 d 4 h». */
@@ -162,15 +163,15 @@ const en = {
   needsDecision: 'Needs your decision', threads: 'Threads', noSessions: 'No sessions yet',
   msgType: { overlap_warning: 'overlap warning', handoff_request: 'handoff request', delegate: 'delegation', reply: 'reply', escalation: 'escalation' } as Record<MessageType, string>,
   version: 'Version', phase: 'Phase', of: 'of', tasks: 'tasks', tracks: 'tracks', trackHelp: 'Track: a line of work that moves forward in parallel, with its own session, worktree and branch', tests: 'tests', lastCommit: 'last commit',
+  versionNow: 'Version in progress', planVersion: 'plan version',
   ago: ago(false),
-  nowRunning: 'Right now · in progress', nothingRunning: 'Nothing in progress',
   took: (min: number, est?: number) => (est ? `took ${dur(min)} · estimated ${dur(est)}` : `took ${dur(min)}`),
   tookUnderMin: 'took <1 min',
   lasts: (min: number) => `running for ${dur(min)}`,
   elapsed: (e: number, est?: number) => (est ? `${dur(e)} / est. ${dur(est)}` : dur(e)),
   viewTask: 'View task',
-  phasesDone: 'Phases completed', eta: 'Forecast end', pace: 'Real pace', minPerTask: 'min/task', devSince: 'In development since',
-  recent: 'Recent changes', noEvents: 'No changes yet', heartbeat: 'heartbeat',
+  phasesDone: 'Phases completed', eta: 'Forecast end', pace: 'Real pace', devSince: 'In development since',
+  recent: 'Recent changes', heartbeat: 'heartbeat',
   byPhase: 'By phase', search: 'Search tasks…', now: 'NOW',
   tl: {
     fit: 'FIT', expand: 'Expand all', collapse: 'Collapse all', hint: 'Ctrl + wheel or pinch: zoom · drag or Shift + wheel: move · ← → + − 0: keys',
@@ -186,7 +187,6 @@ const en = {
     zoneLine: (t: number, d: number, a: number) => `${t} tasks · ${d} done${a ? ` · ${a} running` : ''}`, touched: (n: number) => `touched by ${n}`,
     scope: 'Scope', wholePlan: 'Whole plan',
   },
-  more: (n: number) => `+${n} more`,
   zoom: { '6h': '6 H', '1d': '1 DAY', '3d': '3 DAYS', '1w': '1 WEEK', '1m': '1 MONTH' },
   status: { free: 'Free', claimed: 'Claimed', in_progress: 'In progress', blocked: 'Blocked', done: 'Done', orphaned: 'Removed from plan' } as Record<TaskStatus, string>,
   legend: { done: 'Done', current: 'In progress', blocked: 'Blocked', estimate: 'Estimated', now: 'Now' },
@@ -324,15 +324,15 @@ const es: Dict = {
   needsDecision: 'Necesita tu decisión', threads: 'Hilos', noSessions: 'Aún no hay sesiones',
   msgType: { overlap_warning: 'aviso de solape', handoff_request: 'petición de traspaso', delegate: 'delegación', reply: 'respuesta', escalation: 'escalado' },
   version: 'Versión', phase: 'Fase', of: 'de', tasks: 'tareas', tracks: 'frentes', trackHelp: 'Frente: línea de trabajo que avanza en paralelo, con su propia sesión, worktree y rama', tests: 'tests', lastCommit: 'último commit',
+  versionNow: 'Versión en curso', planVersion: 'versión del plan',
   ago: ago(true),
-  nowRunning: 'Ahora mismo · en curso', nothingRunning: 'Nada en curso',
   took: (min: number, est?: number) => (est ? `tardó ${dur(min)} · estimado ${dur(est)}` : `tardó ${dur(min)}`),
   tookUnderMin: 'tardó <1 min',
   lasts: (min: number) => `lleva ${dur(min)}`,
   elapsed: (e: number, est?: number) => (est ? `${dur(e)} / est. ${dur(est)}` : dur(e)),
   viewTask: 'Ver ficha',
-  phasesDone: 'Fases completadas', eta: 'Fin previsto', pace: 'Ritmo real', minPerTask: 'min/tarea', devSince: 'En desarrollo desde',
-  recent: 'Últimos cambios', noEvents: 'Aún no hay cambios', heartbeat: 'latido',
+  phasesDone: 'Fases completadas', eta: 'Fin previsto', pace: 'Ritmo real', devSince: 'En desarrollo desde',
+  recent: 'Últimos cambios', heartbeat: 'latido',
   byPhase: 'Por fases', search: 'Buscar tareas…', now: 'AHORA',
   tl: {
     fit: 'AJUSTAR', expand: 'Desplegar todo', collapse: 'Plegar todo', hint: 'Ctrl + rueda o pellizcar: zoom · arrastrar o Mayús + rueda: mover · ← → + − 0: teclas',
@@ -348,7 +348,6 @@ const es: Dict = {
     zoneLine: (t: number, d: number, a: number) => `${t} tareas · ${d} hechas${a ? ` · ${a} en curso` : ''}`, touched: (n: number) => `tocada por ${n}`,
     scope: 'Alcance', wholePlan: 'Plan completo',
   },
-  more: (n: number) => `+${n} más`,
   zoom: { '6h': '6 H', '1d': '1 DÍA', '3d': '3 DÍAS', '1w': '1 SEM', '1m': '1 MES' },
   status: { free: 'Libre', claimed: 'Reclamada', in_progress: 'En curso', blocked: 'Bloqueada', done: 'Hecha', orphaned: 'Retirada del plan' },
   legend: { done: 'Hecha', current: 'En curso', blocked: 'Bloqueada', estimate: 'Estimado', now: 'Ahora' },

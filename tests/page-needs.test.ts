@@ -28,6 +28,44 @@ describe('needsOf (G-24)', () => {
     // A mark of an older doneAt (the task was redone) does not hide the new findings.
     expect(needsOf(model({ states: { T001: done(1) }, seenDeferred: { T001: iso(NOW - 5 * DAY) } }))).toHaveLength(1);
   });
+  it('the deferred findings: exactly 7 days after doneAt they still show, a moment later not; a doneAt over a day ahead is junk (carry 7)', () => {
+    const at = (ms: number) => ({ ...done(0), doneAt: iso(NOW + ms) });
+    expect(needsOf(model({ states: { T001: at(-DEFERRED_DAYS * DAY) } }))).toHaveLength(1);
+    expect(needsOf(model({ states: { T001: at(-DEFERRED_DAYS * DAY - 1) } }))).toHaveLength(0);
+    // Up to a day ahead is clock skew; past that the date is not believed.
+    expect(needsOf(model({ states: { T001: at(DAY / 2) } }))).toHaveLength(1);
+    expect(needsOf(model({ states: { T001: at(DAY + 1) } }))).toHaveLength(0);
+  });
+  it('a run that stopped without being closed shows while less than 24 h passed since it last moved, whatever stopped it (carry 7)', () => {
+    const H = 3_600_000;
+    const run = (movedMsAgo: number, stopReason: string | null = 'stalled', over: object = {}) => ({
+      runId: 'r1', mode: 'subagents' as const, parallel: 2, branch: 'forge/run-x', mergeOnFinish: false, active: false, stopReason, coordinator: 'main',
+      kind: 'plan' as const, loose: [], slots: [], startedAt: iso(NOW - movedMsAgo - H), lastStepAt: iso(NOW - movedMsAgo), stallReason: 'T2 sigue bloqueada', ...over,
+    });
+    const kinds = (r: ReturnType<typeof run>) => needsOf(model({ run: r })).map(n => n.kind);
+    expect(needsOf(model({ run: run(23 * H) }))).toEqual([{ kind: 'stalled', runId: 'r1', reason: 'T2 sigue bloqueada' }]);
+    expect(kinds(run(24 * H - 1))).toEqual(['stalled']);
+    // The TTL itself: deleting the check makes these show.
+    expect(kinds(run(24 * H))).toEqual([]);
+    expect(kinds(run(25 * H))).toEqual([]);
+    expect(kinds(run(H, 'stopped'))).toEqual(['stalled']);
+    expect(kinds(run(H, 'budget'))).toEqual(['stalled']);
+    expect(kinds(run(H, null))).toEqual([]);
+    expect(kinds(run(H, 'stalled', { closedAt: iso(NOW - 60000) }))).toEqual([]);
+    expect(kinds(run(H, 'stalled', { active: true }))).toEqual([]);
+    // Without lastStepAt, the start decides.
+    expect(kinds(run(H, 'stalled', { lastStepAt: undefined, startedAt: iso(NOW - 25 * H) }))).toEqual([]);
+    expect(kinds(run(H, 'stalled', { lastStepAt: undefined, startedAt: iso(NOW - 2 * H) }))).toEqual(['stalled']);
+  });
+  it('an infinite run without its coordinator shows by the same rule: less than 24 h after its lease ended (carry 7)', () => {
+    const H = 3_600_000;
+    const inf = (leaseMsAgo: number) => ({ active: true, cycle: 1, budget: {}, startedAt: iso(NOW - 2 * DAY), lastCycleAt: null,
+      coordinator: { sid: 'main', claude: 'c1', seenAt: iso(NOW - leaseMsAgo - 60000), leaseUntil: iso(NOW - leaseMsAgo) } });
+    const kinds = (i: ReturnType<typeof inf>) => needsOf(model({ infinite: i })).map(n => n.kind);
+    expect(kinds(inf(23 * H))).toEqual(['infinite']);
+    expect(kinds(inf(24 * H - 1))).toEqual(['infinite']);
+    expect(kinds(inf(24 * H))).toEqual([]);
+  });
   it('the page is stale only when the plan was synced by a newer waypoint (G-13)', () => {
     const meta = (v?: string) => ({ ...buildDocs(plan, '2026-10-11T09:00:00Z').meta, waypointVersion: v });
     expect(needsOf(model({ meta: meta('0.29.0') }), '0.28.0')).toEqual([{ kind: 'stale-page', page: '0.28.0', plan: '0.29.0' }]);

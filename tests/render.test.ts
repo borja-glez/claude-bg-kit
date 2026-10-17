@@ -1073,6 +1073,9 @@ describe('the status strip (§4.6, H-22, G-08, G-11, G-14, G-25)', () => {
     expect(renderApp({ ...base(), infinite: inf(-2) }, ui())).toMatch(/<span class="pill inf warn">∞ ciclo 2 · sin señal desde \d\d:\d\d<\/span>/);
     expect(renderApp({ ...base(), infinite: inf(-20) }, ui())).toMatch(/<span class="pill inf stopped">∞ ciclo 2 · parada desde \d\d:\d\d<\/span>/);
     expect(renderApp({ ...base(), infinite: inf(-25 * 60) }, ui())).not.toContain('∞');
+    // Carry 7: one rule with «Te necesita» and the runs view: shown while less than 24 h passed, gone at 24 h.
+    expect(renderApp({ ...base(), infinite: inf(-24 * 60 + 1) }, ui())).toContain('pill inf stopped');
+    expect(renderApp({ ...base(), infinite: inf(-24 * 60) }, ui())).not.toContain('∞');
   });
 
   it('says when the snapshot states were listed until the database answers, then when state synced (G-14)', () => {
@@ -1180,6 +1183,23 @@ describe('the summary (§4.6.1, §4.6.2)', () => {
     expect(now).toContain('Fix the cart');
     expect(now).not.toContain('Typo in the README');
     expect(now).not.toContain('data-id="fix-cart"');
+  });
+
+  it('the header names the version in progress as the strip and the progress do, and the plan’s own version apart, labelled (carry 10e)', () => {
+    const header = (html: string) => html.slice(html.indexOf('<header class="hd">'), html.indexOf('</header>'));
+    const m = { ...base(), meta: { ...base().meta!, version: '0.3' }, plan: { ...plan, versions: [{ id: '0.1', phases: ['F1'] }, { id: '0.2', phases: ['F2'] }] } };
+    const html = renderApp(m, ui());
+    expect(header(html)).toContain('Versión en curso <b>v0.1</b> · versión del plan <b>0.3</b>');
+    expect(html.slice(html.indexOf('<div class="strip">'), html.indexOf('<header'))).toContain('>v0.1 · 33 %</span>');
+    expect(section(html, 'card prog')).toContain('<div class="big">v0.1 · 33 %</div>');
+    // The same version: said once.
+    expect(header(renderApp({ ...m, meta: { ...m.meta, version: 'v0.1' } }, ui()))).toMatch(/Versión en curso <b>v0\.1<\/b> · Fase/);
+    // Without versions there is no version in progress: the plan's own, as before.
+    const none = header(renderApp({ ...base(), plan: { ...plan, versions: [] } }, ui()));
+    expect(none).toContain('Versión <b>0.1</b>');
+    expect(none).not.toContain('en curso');
+    const en = header(renderApp({ ...m, meta: { ...m.meta, locale: 'en' } }, ui()));
+    expect(en).toContain('Version in progress <b>v0.1</b> · plan version <b>0.3</b>');
   });
 
   it('the progress shows the current version, a table of versions and one segment per phase (G-11, H-27)', () => {

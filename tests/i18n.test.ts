@@ -34,6 +34,28 @@ describe('the texts of the page (G-19, G-20, H-20)', () => {
     expect(dictFor('en').num(12345)).toBe('12,345');
   });
 
+  it('plural and num at the edges: 0, 1, 2, a large number and non-finite ones; every # is the number (carry 1)', () => {
+    const es = dictFor('es');
+    const en = dictFor('en');
+    const f = { one: '# tarea', other: '# tareas' };
+    expect([0, 1, 2, 1_000_000].map(n => es.plural(n, f))).toEqual(['0 tareas', '1 tarea', '2 tareas', '1.000.000 tareas']);
+    expect([0, 1, 2, 1_000_000].map(n => en.plural(n, { one: '# task', other: '# tasks' }))).toEqual(['0 tasks', '1 task', '2 tasks', '1,000,000 tasks']);
+    for (const n of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      expect(es.num(n)).toBe('0');
+      expect(en.num(n)).toBe('0');
+      expect(es.plural(n, f)).toBe('0 tareas');
+    }
+    expect(es.plural(2, { one: '# de #', other: '# de # tareas' })).toBe('2 de 2 tareas');
+    expect(en.plural(1, { one: '# of #', other: '# of #' })).toBe('1 of 1');
+  });
+
+  it('keeps no texts the views no longer use (carry 6)', () => {
+    for (const k of ['nowRunning', 'nothingRunning', 'noEvents', 'minPerTask', 'more']) {
+      expect(dictFor('es'), k).not.toHaveProperty(k);
+      expect(dictFor('en'), k).not.toHaveProperty(k);
+    }
+  });
+
   it('took, lasts and elapsed read durations', () => {
     const es = dictFor('es');
     expect(es.took(125, 30)).toBe('tardó 2 h 05 min · estimado 30 min');

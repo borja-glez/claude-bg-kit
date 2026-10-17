@@ -197,10 +197,11 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     lastHash = location.hash.length > 1 ? location.hash : '';
   } catch { /* no location */ }
   // G-24: the deferred findings this viewer marked as seen, kept only in this browser (never shared). Every access may
-  // throw (a private window, blocked storage): then the marks last this visit only.
-  const seenStoreKey = () => seenKey(model.meta?.name ?? '');
-  const readSeen = (): Record<string, string> => { try { return parseSeen(localStorage.getItem(seenStoreKey())); } catch { return {}; } };
-  const writeSeen = (seen: Record<string, string>) => { try { localStorage.setItem(seenStoreKey(), JSON.stringify(seen)); } catch { /* the marks last this visit */ } };
+  // throw (a private window, blocked storage): then the marks last this visit only. Carry 7: without a project name there
+  // is no key of its own (one key for every such page would mix projects): the marks last this visit only too.
+  const seenStoreKey = (): string | null => (model.meta?.name ? seenKey(model.meta.name) : null);
+  const readSeen = (): Record<string, string> => { const k = seenStoreKey(); if (!k) return {}; try { return parseSeen(localStorage.getItem(k)); } catch { return {}; } };
+  const writeSeen = (seen: Record<string, string>) => { const k = seenStoreKey(); if (!k) return; try { localStorage.setItem(k, JSON.stringify(seen)); } catch { /* the marks last this visit */ } };
   model.seenDeferred = readSeen();
   let seenPruned = false;
   /** H-25: set by an action that changes what the person looks at, so the next render adds a history entry. */

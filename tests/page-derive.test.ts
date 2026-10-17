@@ -76,4 +76,20 @@ describe('derive: the derived data once per revision of the data (H-06)', () => 
     expect(dv.running).toEqual(['T001', 'T003', 'T002']);
     expect(dv.liveSessions).toEqual({ live: ['a'], idle: 2 });
   });
+
+  it('ties of stage sort by plain id order, the same on every machine and in every language (carry 6)', () => {
+    const p = { ...plan, tasks: plan.tasks.slice(0, 2).map((t, i) => ({ ...t, id: i ? 'B2' : 'a1', depends_on: [] })) };
+    const m = model({ plan: p, states: { a1: { status: 'claimed' }, B2: { status: 'claimed' } } });
+    expect(computeDerived(m).running).toEqual(['B2', 'a1']);
+  });
+
+  it('a change of the data that does not bump the revision is served stale until it does: app.ts bumps it on every snapshot (carry 3)', () => {
+    const m = model();
+    const first = derive(m);
+    m.states = { ...m.states, T003: { status: 'done' } };
+    expect(derive(m)).toBe(first);
+    expect(derive(m).metrics.done).toBe(1);
+    m.rev = 2;
+    expect(derive(m).metrics.done).toBe(2);
+  });
 });

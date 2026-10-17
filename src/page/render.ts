@@ -3,7 +3,7 @@
 // one HTML string out. Each view lives in views/<view>.ts; this module re-exports what app.ts and the tests use.
 import { liveness, sessionLiveness } from '../lib/coordination.js';
 import { canDecide, PROPOSAL_STATUSES } from '../lib/proposals.js';
-import { STALE_RUN_TTL_MS } from '../lib/run-ttl.js';
+import { withinRunTtl } from '../lib/run-ttl.js';
 import { computeDerived, type Derived } from './derive.js';
 import { dictFor, type Dict } from './i18n.js';
 import { esc, fmt, forecastTitle, hhmm, num, oneOf, rel } from './html.js';
@@ -98,7 +98,7 @@ function infinitePill(m: Model, d: Dict): string {
   const c = inf.coordinator;
   if (c) {
     const lease = Date.parse(c.leaseUntil);
-    if (Number.isFinite(lease) && m.now - lease > STALE_RUN_TTL_MS) return '';
+    if (Number.isFinite(lease) && !withinRunTtl(m.now, lease)) return '';
     const l = liveness(m.now, c.leaseUntil);
     if (l === 'silent') { cls = ' warn'; extra = ` · ${d.run.silentSince(hhmm(c.seenAt))}`; }
     else if (l === 'stopped') { cls = ' stopped'; extra = ` · ${d.run.stoppedSince(hhmm(c.seenAt))}`; }

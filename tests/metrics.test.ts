@@ -69,4 +69,15 @@ describe('computeMetrics', () => {
     expect(computeMetrics(two, all, NOW).currentVersion).toBe('0.2');
     expect(computeMetrics({ ...plan, versions: [] }, s, NOW)).toMatchObject({ byVersion: {}, currentVersion: null });
   });
+
+  it('by version: a version with no tasks counts 0 of 0 and is never the current one; a blocked task is work left (carry 3)', () => {
+    const three = { ...plan, versions: [{ id: '0.0', phases: ['F9'] }, { id: '0.1', phases: ['F1'] }, { id: '0.2', phases: ['F2'] }] };
+    const s: States = { T001: { status: 'done' }, T002: { status: 'done' }, T003: { status: 'blocked', blockedBy: ['external'] } };
+    const m = computeMetrics(three, s, NOW);
+    expect(m.byVersion['0.0']).toEqual({ done: 0, total: 0, percent: 0 });
+    expect(m.byVersion['0.1']).toEqual({ done: 2, total: 3, percent: 67 });
+    expect(m.currentVersion).toBe('0.1');
+    // Only empty versions: the last one, as when every version is done.
+    expect(computeMetrics({ ...plan, versions: [{ id: 'a', phases: [] }, { id: 'b', phases: ['F9'] }] }, s, NOW).currentVersion).toBe('b');
+  });
 });

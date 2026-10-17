@@ -1,6 +1,6 @@
-// Resumen (spec §4.6.1, §4.6.2): what is running now, what comes next, how far each version and phase is, what happened
-// lately and which sessions are alive. A section shows only when it has something, except «En curso», which with nothing
-// running says which free task is next. Task 9 puts «Te necesita» on top.
+// Resumen (spec §4.6.1, §4.6.2): what needs the person («Te necesita», on top), what is running now, what comes next, how
+// far each version and phase is, what happened lately and which sessions are alive. A section shows only when it has
+// something, except «En curso», which with nothing running says which free task is next.
 import { availableTasks, statusOf } from '../../lib/deps.js';
 import { liveness, sessionLiveness } from '../../lib/coordination.js';
 import type { ForgeDocV2 } from '../../lib/roadmap-doc.js';
@@ -41,6 +41,7 @@ function renderNeeds(m: Model, d: Dict, ui: UiState, dv: Derived): string {
     if (n.kind === 'escalation') return `<b>${esc(`${n.message.from} → ${n.message.to}`)}</b>: ${esc(n.message.text)}${hint(d.needs.escalation(n.message.to))}`;
     if (n.kind === 'external') return `<b>${esc(d.needs.external)}</b> ${task(n.task, k)} ${esc(n.title)} — ${esc(n.reason ?? d.needs.noReason)}${hint(d.needs.unblock(n.task))}`;
     if (n.kind === 'deferred') return `<b>${esc(d.needs.deferred(n.findings, n.tasks.length))}</b> ${go('plan', d.needs.seePlan)} <button type="button" class="btn" data-action="seen-deferred" data-ids="${esc(n.tasks.map(t => t.id).join(' '))}">${esc(d.needs.seen)}</button>`;
+    // Carry 7: the stall reason goes inside the bold line with the run (the brief had it after); kept, the line reads whole.
     if (n.kind === 'stalled') return `<b>${esc(d.needs.stalled(n.runId) + (n.reason ? `: ${n.reason}` : ''))}</b> ${go('runs', d.needs.seeRuns)}${hint(d.needs.stalledHint)}`;
     if (n.kind === 'infinite') return `<b>${esc(d.needs.infinite(hhmm(n.since)))}</b>${hint(d.needs.infiniteHint)}`;
     return `<b>${esc(d.needs.stalePage(n.page, n.plan))}</b>`;
@@ -49,14 +50,20 @@ function renderNeeds(m: Model, d: Dict, ui: UiState, dv: Derived): string {
   return `<section class="card needs" aria-labelledby="needs-h"><h2 class="lbl" id="needs-h">${esc(d.needs.title)}</h2><ul class="nd">${items}</ul></section>`;
 }
 
-/** The plan in one line: name, version, phase, tasks done, tracks, tests and the last commit. */
+/** The plan in one line: name, version, phase, tasks done, tracks, tests and the last commit. Carry 10e: the version is
+ *  the one in progress, as the strip and the progress say it; the plan's own version (meta.version) goes apart, labelled,
+ *  when it is another one, and alone only when the plan has no versions. */
 function metaLine(m: Model, d: Dict, dv: Derived): string {
   const x = dv.metrics;
   const current = m.plan.phases.findIndex(p => x.byPhase[p.id]?.status !== 'done');
   const idx = current === -1 ? m.plan.phases.length : current + 1;
   const lc = m.meta?.metrics?.lastCommit;
   const tests = m.meta?.metrics?.tests;
-  return `<div class="meta">${esc(m.meta?.name ?? '')} · ${esc(d.version)} <b>${esc(m.meta?.version ?? '')}</b> · ${esc(d.phase)} <b>${idx}</b>/${m.plan.phases.length} · <b>${x.done}</b>/${x.total} ${esc(d.tasks)} · <span title="${esc(d.trackHelp)}"><b>${m.plan.tracks.length}</b> ${esc(d.tracks)}</span>${tests != null ? ` · <b>${num(tests)}</b> ${esc(d.tests)}` : ''}${lc ? ` · ${esc(d.lastCommit)} <b>${esc(lc.sha.slice(0, 7))}</b> ${rel(d, 'ago', lc.ts, m.now)}` : ''}</div>`;
+  const own = m.meta?.version ?? '';
+  const cur = x.currentVersion;
+  const version = !cur ? `${esc(d.version)} <b>${esc(own)}</b>`
+    : `${esc(d.versionNow)} <b>${esc(versionLabel(cur))}</b>${own && versionLabel(own) !== versionLabel(cur) ? ` · ${esc(d.planVersion)} <b>${esc(own)}</b>` : ''}`;
+  return `<div class="meta">${esc(m.meta?.name ?? '')} · ${version} · ${esc(d.phase)} <b>${idx}</b>/${m.plan.phases.length} · <b>${x.done}</b>/${x.total} ${esc(d.tasks)} · <span title="${esc(d.trackHelp)}"><b>${m.plan.tracks.length}</b> ${esc(d.tracks)}</span>${tests != null ? ` · <b>${num(tests)}</b> ${esc(d.tests)}` : ''}${lc ? ` · ${esc(d.lastCommit)} <b>${esc(lc.sha.slice(0, 7))}</b> ${rel(d, 'ago', lc.ts, m.now)}` : ''}</div>`;
 }
 
 const v2 = (f: TaskState['forge']): ForgeDocV2 | null => (f && 'v' in f && f.v === 2 ? f : null);

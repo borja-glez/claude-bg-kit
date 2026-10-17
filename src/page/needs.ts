@@ -5,7 +5,7 @@
 import { liveness } from '../lib/coordination.js';
 import { isPlanId } from '../lib/ids.js';
 import type { ForgeDocV2 } from '../lib/roadmap-doc.js';
-import { STALE_RUN_TTL_MS } from '../lib/run-ttl.js';
+import { withinRunTtl } from '../lib/run-ttl.js';
 import type { MessageDoc, NoteDoc, TaskState } from '../lib/types.js';
 import { compareVersions, WAYPOINT_VERSION } from '../lib/waypoint-version.js';
 import { unmarkedReason } from './html.js';
@@ -71,12 +71,11 @@ export function needsOf(m: Model, pageVersion: string = WAYPOINT_VERSION): Need[
   // §4.3: a run that stopped without being closed, within its 24 h.
   const r = m.run;
   if (r && !r.active && !r.closedAt && (r.stopReason === 'stalled' || r.stopReason === 'stopped' || r.stopReason === 'budget')) {
-    const moved = Date.parse(r.lastStepAt ?? r.startedAt ?? '');
-    if (Number.isFinite(moved) && m.now - moved < STALE_RUN_TTL_MS) out.push({ kind: 'stalled', runId: r.runId, reason: r.stallReason ?? null });
+    if (withinRunTtl(m.now, Date.parse(r.lastStepAt ?? r.startedAt ?? ''))) out.push({ kind: 'stalled', runId: r.runId, reason: r.stallReason ?? null });
   }
-  // G-08: an active infinite run whose coordinator's lease stopped, within its 24 h.
+  // G-08: an active infinite run whose coordinator's lease stopped, within its 24 h (the same rule, carry 7).
   const c = m.infinite?.active === true ? m.infinite.coordinator : null;
-  if (c && liveness(m.now, c.leaseUntil) === 'stopped' && m.now - Date.parse(c.leaseUntil) <= STALE_RUN_TTL_MS) out.push({ kind: 'infinite', since: c.seenAt });
+  if (c && liveness(m.now, c.leaseUntil) === 'stopped' && withinRunTtl(m.now, Date.parse(c.leaseUntil))) out.push({ kind: 'infinite', since: c.seenAt });
   // G-13: the plan was synced by a newer waypoint than the one that built this page.
   const synced = m.meta?.waypointVersion;
   if (synced && compareVersions(pageVersion, synced) < 0) out.push({ kind: 'stale-page', page: pageVersion, plan: synced });

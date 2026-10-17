@@ -1811,6 +1811,31 @@ describe('«Te necesita»: the deferred findings seen in this browser (G-24)', (
     app.stop();
   });
 
+  it('without a project name no key is read or written: the marks last this visit (carry 7)', async () => {
+    const get = vi.spyOn(localStorage, 'getItem');
+    const put = vi.spyOn(localStorage, 'setItem');
+    const f = fakeDb();
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const app = await start({ claude: { use: async (n: string) => (n === 'db' ? f.db : n === 'user' ? fakeUser() : null) }, snapshot: null, root, now: () => NOW });
+    await settle();
+    f.push('state', { T001: done(1) });
+    await settle();
+    const b = document.createElement('button');
+    b.dataset.action = 'seen-deferred';
+    b.dataset.ids = 'T001';
+    root.appendChild(b);
+    b.click();
+    await settle();
+    expect(app.model.seenDeferred).toEqual({ T001: doneAt(1) });
+    const seenKeys = (calls: unknown[][]) => calls.map(c => String(c[0])).filter(k => k.startsWith('wp-seen-deferred'));
+    expect(seenKeys(get.mock.calls)).toEqual([]);
+    expect(seenKeys(put.mock.calls)).toEqual([]);
+    get.mockRestore();
+    put.mockRestore();
+    app.stop();
+  });
+
   it('a stored value that is not a map of dates counts as no mark (Review Focus 4)', async () => {
     localStorage.setItem(KEY, '{"T001": 5');
     const f = fakeDb();

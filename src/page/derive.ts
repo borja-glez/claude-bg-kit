@@ -43,7 +43,8 @@ export function computeDerived(m: Model): Derived {
     forecast: forecast(m.plan, m.states, m.now, { sessions, paceMin: metrics.paceMin }),
     critical: criticalPath(m.plan, m.states, m.now),
     zones: zoneHeat(m.plan, m.states),
-    running: [...metrics.inProgress].sort((a, b) => stageRank(m, a) - stageRank(m, b) || a.localeCompare(b)),
+    // Carry 6: ties by plain id order, not localeCompare (which depends on the machine's language).
+    running: [...metrics.inProgress].sort((a, b) => stageRank(m, a) - stageRank(m, b) || (a < b ? -1 : a > b ? 1 : 0)),
     liveSessions: (() => {
       const all = Object.keys(m.sessions);
       const live = all.filter(sid => sessionLiveness(m.sessions[sid], m.now) !== 'stopped');
