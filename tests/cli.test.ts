@@ -973,6 +973,15 @@ describe('design commands', () => {
       for (const bad of [['--kind', 'merge'], ['--kind']]) expect(run(['design-snapshot', rel, '--note', 'x', ...bad], io).code, bad.join(' ')).toBe(2);
       expect(changelog().map((e: { kind?: string }) => e.kind)).toEqual(['draft', 'approve', 'amend', 'reopen']);
     });
+    it('--kind approve or amend with --applied is refused: the entry would hide what it applied', () => {
+      approve();
+      mkdirSync(path.join(ddir(), 'design/critiques'), { recursive: true });
+      writeFileSync(path.join(ddir(), 'design/critiques/r1.json'), JSON.stringify({ round: 1, version: 1, scope: 'full', proposals: [{ n: 1, category: 'gap', severity: 'major', section: '_intro', problem: 'p', change: 'c' }] }));
+      const r = run(['design-snapshot', rel, '--note', 'x', '--round', '1', '--applied', '1', '--kind', 'amend'], io);
+      expect(r.code).toBe(2);
+      expect(r.stderr).toContain('--applied');
+      expect(existsSync(path.join(ddir(), 'design/changelog.json'))).toBe(false);
+    });
     it('without --kind, --applied records apply, --rewrite records rewrite, and anything else no kind', () => {
       mkdirSync(path.join(ddir(), 'design/critiques'), { recursive: true });
       writeFileSync(path.join(ddir(), 'design/critiques/r1.json'), JSON.stringify({ round: 1, version: 1, scope: 'full', proposals: [{ n: 1, category: 'gap', severity: 'major', section: '_intro', problem: 'p', change: 'c' }] }));
@@ -1018,6 +1027,25 @@ describe('design commands', () => {
       for (const bad of [['--since', '9'], ['--since', '0'], ['--since', 'x']]) expect(run(['design-impact', rel, '--plan', 'plan.yaml', ...bad], io).code, bad.join(' ')).toBe(2);
       expect(run(['design-impact', rel], io).code).toBe(2);
       expect(run(['design-impact', rel, '--plan', 'nope.yaml'], io).code).toBe(2);
+    });
+    it('a broken or hostile state file never fails the command: that task has status null', () => {
+      linkPlan(1);
+      edit('Backend en Node y frontend web.', 'Backend en Node 22.');
+      edit('\n## Riesgos\n\nLa migración de reembolsos no tiene rollback.\n', '\n');
+      run(['design-snapshot', rel, '--note', 'v2'], io);
+      mkdirSync(path.join(dir, 'states'));
+      writeFileSync(path.join(dir, 'states/T001.json'), '{');
+      writeFileSync(path.join(dir, 'states/T002.json'), 'null');
+      writeFileSync(path.join(dir, 'states/T003.json'), JSON.stringify({ status: '<img onerror=x>' }));
+      const r = run(['design-impact', rel, '--plan', 'plan.yaml', '--states', 'states'], io);
+      expect(r.code).toBe(0);
+      expect(JSON.parse(r.stdout).tasks).toEqual([{ id: 'T001', ref: 'riesgos', status: null }, { id: 'T002', ref: 'arquitectura', status: null }]);
+    });
+    it('with no history a task linked to the intro counts as changed', () => {
+      const plan = path.join(dir, 'plan.yaml');
+      writeFileSync(plan, readFileSync(plan, 'utf8').replace('    title: Esquema de pedidos\n', '    title: Esquema de pedidos\n    design_ref: _intro\n'));
+      rmSync(path.join(ddir(), 'design'), { recursive: true });
+      expect(impact()).toMatchObject({ since: 0, tasks: [{ id: 'T001', ref: '_intro', status: null }] });
     });
     it('a plan without any design_ref has no task to list and says how many are unlinked', () => {
       expect(impact()).toMatchObject({ since: 0, removed: [], tasks: [], unref: 6 });

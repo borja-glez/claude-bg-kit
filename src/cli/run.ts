@@ -123,7 +123,7 @@ export function run(argv: string[], io: Io): Result {
               refs += `\nwarning: design_version is ${p.design_version ?? 'missing'} but the approved design is v${approved}: set design_version: ${approved}`;
             }
             if (design.meta.artifact && p.artifacts.design !== design.meta.artifact) {
-              refs += `\nwarning: artifacts.design is not the design's artifact: set it to ${design.meta.artifact}`;
+              refs += `\nwarning: artifacts.design is not the design's artifact: set it to ${design.meta.artifact.replace(/[\u0000-\u001f\u007f]/g, ' ')}`;
             }
           }
         }
@@ -699,6 +699,9 @@ export function run(argv: string[], io: Io): Result {
           return fail(`design-snapshot: --kind must be one of ${ENTRY_KINDS.join(', ')}`, 2);
         }
         const kindGiven = kindFlag as EntryKind | undefined;
+        if ((kindGiven === 'amend' || kindGiven === 'approve') && (args.includes('--applied') || args.includes('--rewrite'))) {
+          return fail(`design-snapshot: --kind ${kindGiven} cannot go with --applied or --rewrite: the entry would hide what it applied`, 2);
+        }
         if ((kindGiven === 'amend' || kindGiven === 'approve') && d.meta.status !== 'approved') {
           return fail(`design-snapshot: --kind ${kindGiven} needs status: approved in the design (it is ${d.meta.status})`, 2);
         }
@@ -814,11 +817,12 @@ export function run(argv: string[], io: Io): Result {
         if (since > 0 && history[since] === undefined) return fail(`design-impact: no history for v${since}`, 2);
         const { changed, removed } = since > 0
           ? changedSections(designBody(history[since]), d.body)
-          : { changed: d.sections.map(s => s.slug), removed: [] as string[] };
-        const states = readDocs<TaskState>(flag('states') && abs(flag('states')!));
+          : { changed: ['_intro', ...d.sections.map(s => s.slug)], removed: [] as string[] };
+        // G-14: the tolerant reader, so a broken state file leaves that task with no status instead of failing.
+        const states = flag('states') ? statesOf(abs(flag('states')!))?.states ?? {} : {};
         const hit = new Set([...changed, ...removed]);
         const tasks = plan.tasks.filter(t => t.design_ref && hit.has(t.design_ref))
-          .map(t => ({ id: t.id, ref: t.design_ref as string, status: states[t.id]?.status ?? null }));
+          .map(t => ({ id: t.id, ref: t.design_ref as string, status: states[t.id] ?? null }));
         return ok(JSON.stringify({ since, changed, removed, tasks, unref: plan.tasks.filter(t => !t.design_ref).length }));
       }
       case 'critique-dismiss': {
