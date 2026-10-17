@@ -977,6 +977,10 @@ describe('design commands', () => {
         const bad = run(['critique-check', 'm1.json', '--round', '1', '--design', rel], io);
         expect(bad.code).toBe(2);
         expect(bad.stderr).toBe('critique-check: cannot read the changelog of the design: changelog.json is not valid JSON\n');
+        // critique-next has no round to give either: it fails and says why.
+        const next = run(['critique-next', rel], io);
+        expect(next.code).toBe(1);
+        expect(next.stderr).toBe('error: changelog.json is not valid JSON\n');
       });
     });
     it('a change that only removes a section is reviewed in full, with what went away, and its verification clears needsVerify (final review M1)', () => {
