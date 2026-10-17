@@ -69,8 +69,9 @@ export function reviewRoundOf(events: LedgerEvent[], task: string, since: string
 
 /**
  * Carry 3: a brief that an earlier execution of the same plan task reviewed in this work folder `dir` starts again (a new
- * execution restarts its tasks with brief 1). That execution's round folders of brief `n` and their evidence, the brief's
- * findings index and the step's validators-head-<n>.json go to `earlier-<runId>/` there, so nothing of them reads as this
+ * execution restarts its tasks with brief 1). That execution's round folders of brief `n`, their evidence and their files
+ * at the folder's root (findings, fix patch, handover, validators rounds), the brief's findings index and the step's
+ * validators-head-<n>.json go to `earlier-<runId>/` there (named after the run that sets them aside), so nothing of them reads as this
  * execution's: review-close and the step take the newest round folder there is, and a reviewer's file there as returned.
  * A round with a phase event of `run` (logged since it started) stays. Returns the folder they went to, or null when
  * nothing moved. R2 (M2): a move that fails (on Windows, a handle open inside the folder is enough) would leave the brief
@@ -98,7 +99,10 @@ function setAsideEarlier(dir: string, n: string, id: string, events: readonly Le
       moved++;
     } catch { failed.push(from); }
   };
-  for (const k of rounds) { move(`reviews-${n}-${k}`); move(`evidence/${n}-${k}`); }
+  // R3 (M3): with each round, the files of that round at the folder's root, so this run's round never overwrites them.
+  const roundFiles = (k: number) => names.filter(f => f === `findings-${n}-${k}.json` || f === `fix-${n}-${k}.patch` || f === `handover-${n}-${k}.md`
+    || (f.startsWith(`validators-fix-${n}-${k}-`) && f.endsWith('.json')));
+  for (const k of rounds) { move(`reviews-${n}-${k}`); move(`evidence/${n}-${k}`); for (const f of roundFiles(k)) move(f); }
   for (const f of [`findings-index-${n}.json`, `validators-head-${n}.json`]) move(f);
   if (failed.length) {
     throw new UsageError(`prep: ${failed.map(f => rel(cwd, f)).join(', ')} could not be moved aside to ${rel(cwd, aside)} (an earlier run's review of this brief): close what holds it and run prep again`);
@@ -699,18 +703,20 @@ export function reviewClose(args: string[], deps: ReviewDeps): Result {
   const all = readEvents(deps.cwd);
   const events = eventsOf(all, { project, task: id });
   // Carry 3: in an execution, only its own verdicts count toward the cap and a stall.
-  const d = roundDecision(all, task, p, config.profile, project, executionHolding(deps.cwd, { project, task: id })?.startedAt ?? null);
+  const since = executionHolding(deps.cwd, { project, task: id })?.startedAt ?? null;
+  const d = roundDecision(all, task, p, config.profile, project, since);
   appendEvent(deps.cwd, { ts, kind: 'round', task, ...d, reviews: reviewsCount });
   // C4: a verdict that sends the brief back to an implementer opens its fix stage.
   if (result.action !== 'accept' && (d.next === 'resume' || d.next === 'fresh-stronger' || d.next === 'redo')) {
     appendPhase(deps.cwd, { ts, kind: 'phase', task: id, phase: 'fix', brief: Number(n), round });
   }
   if (result.minor.length || result.deferred.length) {
-    // Closing the same round again with the same findings does not log the ruling twice.
+    // Closing the same round again with the same findings does not log the ruling twice. R3 (M3): an earlier run's ruling
+    // on the same round folder is not this one's.
     const ruling = { task, round, dir: rel(deps.cwd, roundDir),
       ...(result.minor.length ? { minor: result.minor } : {}), ...(result.deferred.length ? { deferred: result.deferred } : {}) };
     const same = JSON.stringify(ruling);
-    const logged = events.some(e => e.kind === 'ruling' && isTask(e, task) && e.dir === ruling.dir
+    const logged = eventsSince(events, since).some(e => e.kind === 'ruling' && isTask(e, task) && e.dir === ruling.dir
       && JSON.stringify({ task: e.task, round: e.round, dir: e.dir, ...(e.minor ? { minor: e.minor } : {}), ...(e.deferred ? { deferred: e.deferred } : {}) }) === same);
     if (!logged) appendEvent(deps.cwd, { ts, kind: 'ruling', ...ruling });
   }

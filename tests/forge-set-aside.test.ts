@@ -57,6 +57,35 @@ beforeEach(() => {
 });
 afterEach(() => { try { g(root, 'worktree', 'prune'); } catch { /* ignore */ } rmSync(root, { recursive: true, force: true }); });
 
+describe('readers keyed by a round folder see only this execution (R3, M3)', () => {
+  it("FORGE last in run B does not return A's verdict and round on reviews-1-1; B's own are", () => {
+    runA();
+    const dir = '.forge/work/shop/T1/reviews-1-1';
+    appendEvent(root, { ts: at(-59), kind: 'verdict', task: 'T1-1', dir, action: 'fix', score: 0.4, project: 'shop' });
+    appendEvent(root, { ts: at(-59), kind: 'round', task: 'T1-1', next: 'resume', project: 'shop' });
+    const last = () => JSON.parse(run(['last', '--task', 'T1-1'], io(root)).stdout);
+    expect(last()).toMatchObject({ verdict: null, round: null });
+    appendEvent(root, { ts: at(2), kind: 'verdict', task: 'T1-1', dir, action: 'accept', score: 0.9, project: 'shop' });
+    expect(last().verdict).toMatchObject({ ts: at(2), action: 'accept' });
+    // Outside the execution that holds the task, the whole ledger counts, as before.
+    saveExecution(root, exec({ tasks: {} }));
+    expect(last()).toMatchObject({ round: { ts: at(-59) } });
+  });
+  it("prep sets aside the root-level files of the rounds it moves: B's round never overwrites A's findings", () => {
+    runA();
+    put(W(root, 'reviews-1-2', 'head.txt'), 'x');
+    const files = ['findings-1-1.json', 'fix-1-2.patch', 'handover-1-2.md', 'validators-fix-1-1-1.json', 'validators-fix-1-2-2.json'];
+    for (const f of [...files, 'brief-1.md', 'findings-2-1.json']) put(W(root, f), 'A');
+    expect(prepB(root).code).toBe(0);
+    for (const f of files) {
+      expect(existsSync(W(root, f)), f).toBe(false);
+      expect(read(W(root, 'earlier-shop-B', f)), f).toBe('A');
+    }
+    // The brief's own files and another brief's stay.
+    for (const f of ['brief-1.md', 'findings-2-1.json']) expect(existsSync(W(root, f)), f).toBe(true);
+  });
+});
+
 describe('a set-aside that fails stops prep (R2, M2)', () => {
   it('exits 2 naming the folder it could not move, and prints earlier only when something moved', () => {
     runA();
