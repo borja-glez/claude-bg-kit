@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
-  BAND_READY, bandFolds, cellsOf, changedFiles, checkCapture, checkPhoto, closeVerdict, dotted, fillTemplate, findText, letterKeys,
-  lettersOn, moreToggled, PANE_FRAME, panelLetter, parseArgs, pressVerdict, splitIds, stopLetter, stopTriggered, treeKill,
+  BAND_READY, bandFolds, beforeBand, cellsOf, changedFiles, checkCapture, checkPhoto, closeVerdict, dotted, errorResult, fillTemplate, findText,
+  letterKeys, lettersOn, moreToggled, PANE_FRAME, panelLetter, parseArgs, pressVerdict, screenTail, splitIds, stopLetter, stopTriggered, summary,
+  treeKill,
 } from '../scripts/tui/checks.mjs';
 
 const capture = (name: string) => readFileSync(new URL(`./fixtures/tui/${name}`, import.meta.url), 'utf8');
@@ -126,6 +127,27 @@ describe('the engine checks of the TUI snapshots (carried from tasks 5, 8, 9 and
     expect(findText(screen, '✕')).toEqual({ row: 0, col: 6 });
     expect(findText(screen, '✕', { row: PANE_FRAME })).toEqual({ row: 1, col: 14 });
     expect(findText('no frame here ✕', '✕', { row: PANE_FRAME })).toBeNull();
+  });
+});
+
+describe('an error before the band is up proves nothing (re-review I-1)', () => {
+  it('is reported INCONCLUSIVE with its reason; one after the band was reached is a FAIL', () => {
+    const early = beforeBand('no band within 60 s');
+    expect(early).toBeInstanceOf(Error);
+    expect(errorResult(early)).toEqual({ verdict: 'inconclusive', detail: ['the band never came up: no band within 60 s'] });
+    expect(errorResult(new Error('pty write failed'))).toEqual({ verdict: 'fail', detail: ['pty write failed'] });
+    expect(errorResult('odd')).toEqual({ verdict: 'fail', detail: ['odd'] });
+  });
+  it('says how the screen ended, so a login or first-run screen shows in the reason', () => {
+    expect(screenTail('\n  Welcome to Claude Code  \n\n Select login method:\n  1. Claude account\n\n')).toBe('Welcome to Claude Code / Select login method: / 1. Claude account');
+    expect(screenTail('')).toBe('');
+    expect(screenTail(`${'x'.repeat(300)}\n`).length).toBeLessThanOrEqual(160);
+  });
+  it('counts only the FAILs in the exit code: a run with inconclusive checks alone exits 0', () => {
+    expect(summary({ failures: [], inconclusive: ['(b2) lens-panel-button-photo: the band never came up'] })).toEqual({
+      lines: ['every capture passes its checks', 'INCONCLUSIVE (b2) lens-panel-button-photo: the band never came up'], code: 0,
+    });
+    expect(summary({ failures: ['(a) folded-letter-noop: Stop was armed'], inconclusive: [] })).toEqual({ lines: ['(a) folded-letter-noop: Stop was armed'], code: 1 });
   });
 });
 

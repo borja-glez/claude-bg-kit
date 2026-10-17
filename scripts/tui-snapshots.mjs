@@ -27,14 +27,17 @@
 //                                  [--config-dir <dir>] [--no-engine | --engine-only]
 // It writes <out>/<mode>-<cols>x<rows>[-lens|-live|-resized].txt, engine-*.txt and index.md, and exits 1 if any check
 // fails. The engine checks are named in the index and reported PASS, FAIL or INCONCLUSIVE (a premise did not hold, so
-// nothing was proven either way; it does not fail the run). A FAIL always means the keys reached the band and the
-// expected effect was missing.
+// nothing was proven either way; it does not fail the run). A FAIL always means the band was reached and the expected
+// effect was missing. Whatever goes wrong before a band is up (no band within 60 s, a login or first-run screen, a slow
+// start, a fixture that would not copy) is INCONCLUSIVE with its reason, the screen's last rows included, for a size as
+// for an engine check; the exit code counts only the FAILs.
 // Every band letter is pressed as the engine documents it: ctrl+x tab gives the band the focus, then the letter, then Esc
 // hands the keys back to the prompt. A letter that does not reach the band lands in the composer and draws no button, so
 // each letter check first proves that its keys reach the band (its positive control), and is inconclusive when they do not:
 //   (a) folded-letter-noop        a letter of a button folded into ⋯ does nothing (main screen, 60 columns). Control first:
 //                                 m (the ⋯ button) must open the folded row, its buttons' letters showing; Stop's letter
-//                                 is read there, the row is closed again, and that letter is pressed.
+//                                 is read there, the row is closed again (inconclusive unless it folded), and that letter
+//                                 is pressed.
 //   (b) waypoint-panel-to-lens    waypoint's Panel button runs $.command.run('/lens'), which reaches lens's command hook
 //                                 and the photo row draws in the transcript (main screen, 100 columns, both plugins: the
 //                                 band folds its buttons there). Control first: m opens the folded row, where Panel shows
@@ -43,6 +46,12 @@
 //                                 /lens foto. Inconclusive if lens does not draw a band with a Panel letter there. lens's
 //                                 band has no ⋯, so its control comes after a press that drew no photo: × must close the
 //                                 band (the photo, when it draws, already proves the keys reached it).
+//                                 EXPECTED INCONCLUSIVE with this fixture: lens draws a band only while it is busy (open
+//                                 todos, subagents, or this session's forge work in its last model), and with no prompt
+//                                 sent nothing makes it busy: its status files are read only once it is (or its pane is
+//                                 open), so the band never comes up and (b2) reports «the band never came up». It stays in
+//                                 the run for a session that is busy; it is not seeded with a /lens photo, which would
+//                                 leave a photo row for it to find.
 //   (c) photo-not-wrapped         the photo's rows neither wrap nor pass the width: CommandOutput rows are not indented in
 //                                 a way that makes the full-width photo wrap (same capture as b).
 //   (d) pane-close-stops          closing the pane with the engine's ✕ (looked for on a row of the pane's frame, its
@@ -59,8 +68,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  BAND_READY, bandFolds, checkCapture, checkPhoto, closeVerdict, dotted, fillTemplate, findText, letterKeys, lettersOn, moreToggled, PANE_FRAME,
-  panelLetter, parseArgs, pressVerdict, stopLetter, stopTriggered, treeKill,
+  BAND_READY, bandFolds, beforeBand, checkCapture, checkPhoto, closeVerdict, dotted, errorResult, fillTemplate, findText, letterKeys, lettersOn,
+  moreToggled, PANE_FRAME, panelLetter, parseArgs, pressVerdict, screenTail, stopLetter, stopTriggered, summary, treeKill,
 } from './tui/checks.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
@@ -154,30 +163,42 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 }
 
 // Runs `body` on a claude started in a fresh fixture copy, with its band up; always kills claude and removes the copy.
+// Re-review I-1: whatever goes wrong before the band is up (a slow start, a login or first-run screen, a fixture that
+// would not copy) is thrown as beforeBand, which the checks report INCONCLUSIVE: the band was never reached.
 // o: { cols, rows, mode, plugins: 'both' | 'lens', configDir }
 async function withClaude(engine, o, body) {
-  const dir = mkdtempSync(path.join(tmpdir(), 'bgkit-tui-'));
-  const session = randomUUID();
-  const term = new engine.Terminal({ cols: o.cols, rows: o.rows, allowProposedApi: true, scrollback: 2000 });
+  let dir = null;
+  let term = null;
   let p = null;
+  const session = randomUUID();
   try {
-    copyFixture(dir, { session, now: Date.now() });
-    const args = ['--session-id', session, ...PLUGINS[o.plugins ?? 'both'].flatMap(name => ['--plugin-dir', path.join(repo, 'plugins', name)])];
-    // claude is a .cmd on Windows, which only cmd.exe runs.
-    const [file, argv] = process.platform === 'win32' ? [process.env.ComSpec || 'cmd.exe', ['/c', 'claude', ...args]] : ['claude', args];
-    const env = { ...process.env, CLAUDE_CODE_NO_FLICKER: o.mode === 'fullscreen' ? '1' : '0' };
-    if (o.configDir) env.CLAUDE_CONFIG_DIR = path.resolve(o.configDir);
-    p = engine.spawn(file, argv, { name: 'xterm-256color', cols: o.cols, rows: o.rows, cwd: dir, env });
-    live.add([p, dir]);
-    p.onData(data => { term.write(data); });
-    if (await until(term, text => TRUST.test(text), 15_000)) p.write('\r');
-    if (!(await until(term, text => BAND_READY.test(text), BAND_WAIT_MS))) throw new Error('no band within 60 s');
+    try {
+      dir = mkdtempSync(path.join(tmpdir(), 'bgkit-tui-'));
+      term = new engine.Terminal({ cols: o.cols, rows: o.rows, allowProposedApi: true, scrollback: 2000 });
+      copyFixture(dir, { session, now: Date.now() });
+      const args = ['--session-id', session, ...PLUGINS[o.plugins ?? 'both'].flatMap(name => ['--plugin-dir', path.join(repo, 'plugins', name)])];
+      // claude is a .cmd on Windows, which only cmd.exe runs.
+      const [file, argv] = process.platform === 'win32' ? [process.env.ComSpec || 'cmd.exe', ['/c', 'claude', ...args]] : ['claude', args];
+      const env = { ...process.env, CLAUDE_CODE_NO_FLICKER: o.mode === 'fullscreen' ? '1' : '0' };
+      if (o.configDir) env.CLAUDE_CONFIG_DIR = path.resolve(o.configDir);
+      p = engine.spawn(file, argv, { name: 'xterm-256color', cols: o.cols, rows: o.rows, cwd: dir, env });
+      live.add([p, dir]);
+      const shown = term;
+      p.onData(data => { shown.write(data); });
+      if (await until(term, text => TRUST.test(text), 15_000)) p.write('\r');
+      if (!(await until(term, text => BAND_READY.test(text), BAND_WAIT_MS))) {
+        const tail = screenTail(screen(term));
+        throw new Error(`no band within 60 s${tail ? `; the screen ends with «${tail}»` : ''}`);
+      }
+    } catch (err) {
+      throw beforeBand(err instanceof Error ? err.message : String(err));
+    }
     await sleep(SETTLE_MS);
     return await body({ p, term, dir, session });
   } finally {
     for (const entry of live) if (entry[0] === p) live.delete(entry);
-    term.dispose();
-    cleanup(p, dir);
+    try { term?.dispose(); } catch { /* already gone */ }
+    if (dir) cleanup(p, dir);
   }
 }
 
@@ -236,6 +257,8 @@ async function foldedLetterNoop(engine, cfg) {
     await pressLetter(p, 'm');
     await sleep(1_500);
     const baseline = screen(term);
+    // Re-review m-1: the second m must have folded the row again, or Stop is in view and its letter would arm it.
+    if (!bandFolds(baseline)) return result('inconclusive', ['the second m did not fold the row again: Stop is still in view, so its letter proves nothing'], baseline);
     await pressLetter(p, stop);
     await sleep(SETTLE_MS);
     const after = screen(term);
@@ -329,8 +352,11 @@ async function main() {
           for (const f of fails) failures.push(`${name}: ${f}`);
         }
       } catch (err) {
-        failures.push(`${mode}-${cols}x${rows}: ${err.message}`);
-        index.push(`- ${mode}-${cols}x${rows}: ${err.message}`);
+        // Re-review I-1: a size whose band never came up is inconclusive; an error after it is a failure.
+        const r = errorResult(err);
+        const line = `${mode}-${cols}x${rows}: ${r.detail.join('; ')}`;
+        (r.verdict === 'fail' ? failures : inconclusive).push(line);
+        index.push(`- ${mode}-${cols}x${rows}: ${r.verdict.toUpperCase()} — ${r.detail.join('; ')}`);
       }
     }
   }
@@ -343,8 +369,9 @@ async function main() {
       if (r.verdict === 'inconclusive') inconclusive.push(...lines);
     };
     const save = (file, r) => { if (r.text) writeFileSync(path.join(out, file), r.text); };
+    // Re-review I-1: a check that threw before its band came up is INCONCLUSIVE; after it, a FAIL.
     const single = async (id, fn, file) => {
-      try { const r = await fn(); save(file, r); report(id, r, file); } catch (err) { report(id, result('fail', [err.message])); }
+      try { const r = await fn(); save(file, r); report(id, r, file); } catch (err) { report(id, errorResult(err)); }
     };
     const pair = async (idB, idC, plugins, file) => {
       try {
@@ -353,8 +380,8 @@ async function main() {
         report(idB, r.b, file);
         if (idC) report(idC, r.c, file);
       } catch (err) {
-        report(idB, result('fail', [err.message]));
-        if (idC) report(idC, result('fail', [err.message]));
+        report(idB, errorResult(err));
+        if (idC) report(idC, errorResult(err));
       }
     };
     await single('(a) folded-letter-noop', () => foldedLetterNoop(engine, cfg), 'engine-folded-letter.txt');
@@ -363,9 +390,10 @@ async function main() {
     await single('(d) pane-close-stops', () => paneCloseStops(engine, cfg), 'engine-pane-close.txt');
   }
   writeFileSync(path.join(out, 'index.md'), `${index.join('\n')}\n`);
-  const summary = [...(failures.length ? failures : ['every capture passes its checks']), ...inconclusive.map(l => `INCONCLUSIVE ${l}`)];
-  process.stdout.write(`${summary.join('\n')}\n${path.relative(repo, out)}/index.md\n`);
-  process.exit(failures.length ? 1 : 0);
+  // Only a FAIL makes the run exit 1; the INCONCLUSIVE ones are listed after the failures.
+  const end = summary({ failures, inconclusive });
+  process.stdout.write(`${end.lines.join('\n')}\n${path.relative(repo, out)}/index.md\n`);
+  process.exit(end.code);
 }
 
 await main();

@@ -122,6 +122,34 @@ export function panelLetter(text) {
 }
 
 /**
+ * Re-review I-1: an error raised before the band came up (no band within the wait, a login or first-run screen, a
+ * fixture that would not copy): the check never reached the band, so it proves nothing.
+ */
+export function beforeBand(message) {
+  return Object.assign(new Error(String(message)), { beforeBand: true });
+}
+
+/** What an error a check threw is worth: INCONCLUSIVE when it came before the band was up, else a FAIL. */
+export function errorResult(err) {
+  const message = err instanceof Error ? err.message : String(err);
+  return err && err.beforeBand ? { verdict: 'inconclusive', detail: [`the band never came up: ${message}`] } : { verdict: 'fail', detail: [message] };
+}
+
+/** The last rows of a screen that hold anything, joined and cut to 160 characters: how a wait for the band ended. */
+export function screenTail(text, rows = 3) {
+  const kept = String(text).split(/\r?\n/).map(r => r.trim()).filter(Boolean).slice(-rows).join(' / ');
+  return kept.length > 160 ? `${kept.slice(0, 159)}…` : kept;
+}
+
+/** The run's last words and exit code: only a FAIL fails the run; the INCONCLUSIVE ones are listed after. */
+export function summary(o) {
+  return {
+    lines: [...(o.failures.length ? o.failures : ['every capture passes its checks']), ...o.inconclusive.map(l => `INCONCLUSIVE ${l}`)],
+    code: o.failures.length ? 1 : 0,
+  };
+}
+
+/**
  * The verdict of a check that presses a band button: without the positive control (the keys reached the band) nothing is
  * proven, so it is inconclusive and never a fail; once the band was reached, a missing effect fails and a present one passes.
  */
