@@ -4134,6 +4134,9 @@ var coerce = {
 var NEVER = INVALID;
 
 // src/lib/critique.ts
+var ROUND_MAX = 999999;
+var CRITIQUE_FILE = /^r([1-9]\d{0,5})\.json$/;
+var LEGACY_CRITIQUE_FILE = /^critique-r([1-9]\d{0,5})\.json$/;
 var CATEGORIES = ["scope", "done_criteria", "risk", "contradiction", "gap"];
 var SEVERITIES = ["critical", "major", "minor"];
 var VERDICTS = ["ready", "changes"];
@@ -4200,20 +4203,20 @@ function normalizeApplied(x) {
   if (!x || typeof x !== "object" || Array.isArray(x)) return null;
   const out = {};
   for (const [k, v] of Object.entries(x)) {
-    if (!/^[1-9]\d*$/.test(k) || !Array.isArray(v)) continue;
-    const ns = v.filter((n) => Number.isInteger(n) && n > 0);
+    if (!/^[1-9]\d{0,5}$/.test(k) || !Array.isArray(v)) continue;
+    const ns = v.filter((n) => Number.isSafeInteger(n) && n > 0);
     if (ns.length) out[Number(k)] = [...new Set(ns)].sort((a, b) => a - b);
   }
   return Object.keys(out).length ? out : null;
 }
 function normalizeResolved(x) {
   if (!Array.isArray(x)) return null;
-  const positive2 = (v) => typeof v === "number" && Number.isInteger(v) && v > 0;
+  const positive2 = (v) => typeof v === "number" && Number.isSafeInteger(v) && v > 0;
   const seen = /* @__PURE__ */ new Map();
   for (const item of x) {
     if (!item || typeof item !== "object") continue;
     const { round, n } = item;
-    if (positive2(round) && positive2(n)) seen.set(`${round}:${n}`, { round, n });
+    if (positive2(round) && round <= ROUND_MAX && positive2(n)) seen.set(`${round}:${n}`, { round, n });
   }
   const out = [...seen.values()].sort((a, b) => a.round - b.round || a.n - b.n);
   return out.length ? out : null;
@@ -10564,6 +10567,16 @@ var nthSlug = (base, n) => `${cutSlug(base, SLUG_MAX - `-${n}`.length)}-${n}`;
 function sectionsOf(body) {
   return parseSections(body).sections;
 }
+var LINE_BREAK = new RegExp(`[\\r${String.fromCharCode(8232, 8233)}]`);
+function headingOf(line) {
+  const level = line.startsWith("###") ? 3 : line.startsWith("##") ? 2 : 0;
+  if (!level || !/\s/.test(line.charAt(level))) return null;
+  let text2 = line.slice(level).trim();
+  let end = text2.length;
+  while (end > 0 && text2.charCodeAt(end - 1) === 35) end--;
+  if (end > 0 && end < text2.length && /\s/.test(text2.charAt(end - 1))) text2 = text2.slice(0, end).trimEnd();
+  return text2 && !LINE_BREAK.test(text2) ? { level, text: text2 } : null;
+}
 function parseSections(body) {
   const out = [];
   const seen = /* @__PURE__ */ new Set();
@@ -10579,7 +10592,7 @@ function parseSections(body) {
     lines.length = 0;
   };
   for (const line of body.split(/\r?\n/)) {
-    const isHeading = !fence && /^(#{2,3})\s+(.+?)(?:\s+#+)?\s*$/.exec(line);
+    const isHeading = fence ? null : headingOf(line);
     if (fence) {
       const close = /^\s*(`{3,}|~{3,})\s*$/.exec(line);
       if (close && close[1][0] === fence[0] && close[1].length >= fence.length) fence = null;
@@ -10589,11 +10602,11 @@ function parseSections(body) {
     }
     if (isHeading) {
       flush();
-      const base = slugify(isHeading[2]);
+      const base = slugify(isHeading.text);
       let slug = base;
       for (let n = 2; seen.has(slug); n++) slug = nthSlug(base, n);
       seen.add(slug);
-      cur = { level: isHeading[1].length, heading: isHeading[2], slug, text: "" };
+      cur = { level: isHeading.level, heading: isHeading.text, slug, text: "" };
     } else if (cur) {
       lines.push(line);
     } else {
@@ -10609,6 +10622,7 @@ function wordCount(body) {
 
 // src/lib/decisions.ts
 var DECISION_POINTS = ["route", "triage", "design-apply", "design-approve", "plan-confirm", "mode", "ruling", "safe-path", "takeover", "revert", "other"];
+var LIMITS = { what: 200, chosen: 200, alternative: 200, alternatives: 10, why: 500, revert: 500, safePath: 200, reason: 300 };
 var DECISIONS_MAX = 16 * 1024;
 var DECISIONS_WINDOW_MS = 24 * 36e5;
 var LAST_MAX = 5;
@@ -10663,7 +10677,8 @@ function decisionsSummary(text2, now) {
 }
 
 // src/lib/design-gate.ts
-var REASON_MAX = 300;
+var REASON_MAX = LIMITS.reason;
+var DISMISSED_MAX_CHARS = 1024 * 1024;
 var APPLIED_NOTE = /\b(?:round|ronda)\s+(\d+)\s*:\s*(?:applied|aplicad[ao]s?)\s+(\d+(?:\s*(?:,|y|and)\s*\d+)*)/gi;
 var REWRITE_NOTE = /^\s*(?:round|ronda)\s+(\d+)\s*:\s*(?:rewrite|reescritura|reescrit[ao])/i;
 var legacy = (e) => e.applied === void 0 && e.rewrite === void 0;
@@ -10695,6 +10710,7 @@ function resolvedIn(changelog, round) {
   return new Set(changelog.flatMap((e) => (e.resolved ?? []).filter((x) => x.round === round).map((x) => x.n)));
 }
 function parseDismissed(text2) {
+  if (text2 && text2.length > DISMISSED_MAX_CHARS) return {};
   let raw;
   try {
     raw = JSON.parse(text2 ?? "");
@@ -10704,12 +10720,12 @@ function parseDismissed(text2) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const out = {};
   for (const [k, v] of Object.entries(raw)) {
-    if (!/^[1-9]\d*$/.test(k) || !Array.isArray(v)) continue;
+    if (!/^[1-9]\d{0,5}$/.test(k) || !Array.isArray(v)) continue;
     const byN = /* @__PURE__ */ new Map();
     for (const x of v) {
       const item = x && typeof x === "object" ? x : null;
       const n = item ? item.n : x;
-      if (typeof n !== "number" || !Number.isInteger(n) || n <= 0) continue;
+      if (typeof n !== "number" || !Number.isSafeInteger(n) || n <= 0) continue;
       const reason = item && typeof item.reason === "string" ? clean(item.reason, REASON_MAX) : "";
       byN.set(n, reason ? { n, reason } : byN.get(n) ?? { n });
     }
@@ -10717,9 +10733,24 @@ function parseDismissed(text2) {
   }
   return out;
 }
+function unionDismissed(...lists) {
+  const out = {};
+  for (const d of lists) {
+    for (const [k, items] of Object.entries(d)) {
+      const byN = new Map((out[Number(k)] ?? []).map((x) => [x.n, x]));
+      for (const x of items) byN.set(x.n, x.reason ? x : byN.get(x.n) ?? x);
+      if (byN.size) out[Number(k)] = [...byN.values()].sort((a, b) => a.n - b.n);
+    }
+  }
+  return out;
+}
+var oneByRound = (critiques) => {
+  const seen = /* @__PURE__ */ new Set();
+  return critiques.filter((c) => !seen.has(c.round) && !!seen.add(c.round));
+};
 function pendingProposals(changelog, critiques, dismissed = {}) {
   const out = [];
-  for (const { round, critique } of [...critiques].sort((a, b) => a.round - b.round)) {
+  for (const { round, critique } of oneByRound(critiques).sort((a, b) => a.round - b.round)) {
     if (!critique || rewroteRound(changelog, round)) continue;
     const decided = /* @__PURE__ */ new Set([...appliedIn(changelog, round), ...resolvedIn(changelog, round), ...(dismissed[round] ?? []).map((x) => x.n)]);
     for (const p of critique.proposals) {
@@ -11524,7 +11555,7 @@ function designModel(project, f, viewer) {
   });
   const top = valid.find((c) => c.critique !== null);
   const latest = top?.critique ?? null;
-  const pending = pendingProposals(changelog, valid, parseDismissed(f.dismissed));
+  const pending = pendingProposals(changelog, valid, unionDismissed(parseDismissed(f.dismissedLegacy), parseDismissed(f.dismissed)));
   return {
     mode: "design",
     project,
@@ -12400,21 +12431,26 @@ async function readBandFiles($) {
   const pdocs = join(root, "docs", "waypoint", project);
   const pstate = join(root, ".waypoint", project);
   const pcrit = join(pdocs, "design", "critiques");
-  const critiques = {};
-  const places = [[pstate, /^critique-r(\d+)\.json$/], [pcrit, /^r(\d+)\.json$/]];
-  for (const [where, re] of places) {
-    const found = (await listOpt($, where)).filter((f) => f.kind === "file" && re.test(f.name)).slice(0, MAX_DOCS);
-    for (const f of found) {
-      const text2 = await readOpt($, join(where, f.name));
-      const m = re.exec(f.name);
-      if (text2 !== void 0 && m) critiques[`critique-r${Number(m[1])}.json`] = text2;
+  const rounds = /* @__PURE__ */ new Map();
+  for (const [where, re] of [[pstate, LEGACY_CRITIQUE_FILE], [pcrit, CRITIQUE_FILE]]) {
+    for (const f of await listOpt($, where)) {
+      const m = f.kind === "file" ? re.exec(f.name) : null;
+      if (m) rounds.set(Number(m[1]), join(where, f.name));
     }
+  }
+  const critiques = {};
+  for (const [round, file] of [...rounds.entries()].sort((a, b) => b[0] - a[0]).slice(0, MAX_DOCS)) {
+    const text2 = await readOpt($, file);
+    if (text2 !== void 0) critiques[`critique-r${round}.json`] = text2;
   }
   const files = {
     plan: await readOpt($, join(pdocs, "plan.yaml")),
     design: await readOpt($, join(pdocs, "design.md")),
     changelog: await readOpt($, join(pdocs, "design", "changelog.json")),
-    dismissed: await readOpt($, join(pcrit, "dismissed.json")) ?? await readOpt($, join(pstate, "dismissed.json")),
+    // Carry 8: both dismissed.json, merged by the model as the CLI's readDismissedOf merges them; one over the size cap is
+    // not read.
+    dismissed: await readSmall($, join(pcrit, "dismissed.json"), DISMISSED_MAX_CHARS),
+    dismissedLegacy: await readSmall($, join(pstate, "dismissed.json"), DISMISSED_MAX_CHARS),
     ...chosen.seats,
     states: await readCollection($, join(pstate, "dbcache", "state"), "first"),
     // The newest MAX_DOCS: the band reads them again on every 30 s tick, one engine call each, so it does not count

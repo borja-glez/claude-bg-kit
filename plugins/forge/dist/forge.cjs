@@ -21966,6 +21966,16 @@ var nthSlug = (base, n) => `${cutSlug(base, SLUG_MAX - `-${n}`.length)}-${n}`;
 function sectionsOf(body) {
   return parseSections(body).sections;
 }
+var LINE_BREAK2 = new RegExp(`[\\r${String.fromCharCode(8232, 8233)}]`);
+function headingOf(line3) {
+  const level = line3.startsWith("###") ? 3 : line3.startsWith("##") ? 2 : 0;
+  if (!level || !/\s/.test(line3.charAt(level))) return null;
+  let text2 = line3.slice(level).trim();
+  let end = text2.length;
+  while (end > 0 && text2.charCodeAt(end - 1) === 35) end--;
+  if (end > 0 && end < text2.length && /\s/.test(text2.charAt(end - 1))) text2 = text2.slice(0, end).trimEnd();
+  return text2 && !LINE_BREAK2.test(text2) ? { level, text: text2 } : null;
+}
 function parseSections(body) {
   const out = [];
   const seen = /* @__PURE__ */ new Set();
@@ -21981,7 +21991,7 @@ function parseSections(body) {
     lines.length = 0;
   };
   for (const line3 of body.split(/\r?\n/)) {
-    const isHeading = !fence && /^(#{2,3})\s+(.+?)(?:\s+#+)?\s*$/.exec(line3);
+    const isHeading = fence ? null : headingOf(line3);
     if (fence) {
       const close = /^\s*(`{3,}|~{3,})\s*$/.exec(line3);
       if (close && close[1][0] === fence[0] && close[1].length >= fence.length) fence = null;
@@ -21991,11 +22001,11 @@ function parseSections(body) {
     }
     if (isHeading) {
       flush();
-      const base = slugify(isHeading[2]);
+      const base = slugify(isHeading.text);
       let slug = base;
       for (let n = 2; seen.has(slug); n++) slug = nthSlug(base, n);
       seen.add(slug);
-      cur = { level: isHeading[1].length, heading: isHeading[2], slug, text: "" };
+      cur = { level: isHeading.level, heading: isHeading.text, slug, text: "" };
     } else if (cur) {
       lines.push(line3);
     } else {

@@ -12186,6 +12186,17 @@ function designBody(text) {
   const m = FM.exec(t);
   return m ? m[2] : t;
 }
+function designStatus(text) {
+  const m = FM.exec(text.startsWith(BOM) ? text.slice(1) : text);
+  if (!m) return null;
+  try {
+    const raw = (0, import_yaml2.parse)(m[1] ?? "");
+    const status = raw && typeof raw === "object" ? raw.status : void 0;
+    return typeof status === "string" ? status : null;
+  } catch {
+    return null;
+  }
+}
 function slugify(heading) {
   const slug = heading.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return cutSlug(slug, SLUG_MAX) || "section";
@@ -12193,6 +12204,16 @@ function slugify(heading) {
 var nthSlug = (base, n) => `${cutSlug(base, SLUG_MAX - `-${n}`.length)}-${n}`;
 function sectionsOf(body) {
   return parseSections(body).sections;
+}
+var LINE_BREAK = new RegExp(`[\\r${String.fromCharCode(8232, 8233)}]`);
+function headingOf(line2) {
+  const level = line2.startsWith("###") ? 3 : line2.startsWith("##") ? 2 : 0;
+  if (!level || !/\s/.test(line2.charAt(level))) return null;
+  let text = line2.slice(level).trim();
+  let end = text.length;
+  while (end > 0 && text.charCodeAt(end - 1) === 35) end--;
+  if (end > 0 && end < text.length && /\s/.test(text.charAt(end - 1))) text = text.slice(0, end).trimEnd();
+  return text && !LINE_BREAK.test(text) ? { level, text } : null;
 }
 function parseSections(body) {
   const out = [];
@@ -12209,7 +12230,7 @@ function parseSections(body) {
     lines2.length = 0;
   };
   for (const line2 of body.split(/\r?\n/)) {
-    const isHeading = !fence && /^(#{2,3})\s+(.+?)(?:\s+#+)?\s*$/.exec(line2);
+    const isHeading = fence ? null : headingOf(line2);
     if (fence) {
       const close = /^\s*(`{3,}|~{3,})\s*$/.exec(line2);
       if (close && close[1][0] === fence[0] && close[1].length >= fence.length) fence = null;
@@ -12219,11 +12240,11 @@ function parseSections(body) {
     }
     if (isHeading) {
       flush();
-      const base = slugify(isHeading[2]);
+      const base = slugify(isHeading.text);
       let slug = base;
       for (let n = 2; seen.has(slug); n++) slug = nthSlug(base, n);
       seen.add(slug);
-      cur = { level: isHeading[1].length, heading: isHeading[2], slug, text: "" };
+      cur = { level: isHeading.level, heading: isHeading.text, slug, text: "" };
     } else if (cur) {
       lines2.push(line2);
     } else {
@@ -12316,255 +12337,10 @@ ${(0, import_yaml3.stringify)(meta, { lineWidth: 0 })}---
 ${body}`;
 }
 
-// src/lib/history.ts
-var ENTRY_KINDS = ["draft", "round", "apply", "rewrite", "interview", "approve", "amend", "reopen"];
-var EntrySchema = external_exports.object({
-  version: external_exports.number(),
-  date: external_exports.string(),
-  note: external_exports.string(),
-  words: external_exports.number(),
-  round: external_exports.number()
-});
-function normalizeApplied(x2) {
-  if (!x2 || typeof x2 !== "object" || Array.isArray(x2)) return null;
-  const out = {};
-  for (const [k2, v] of Object.entries(x2)) {
-    if (!/^[1-9]\d*$/.test(k2) || !Array.isArray(v)) continue;
-    const ns = v.filter((n) => Number.isInteger(n) && n > 0);
-    if (ns.length) out[Number(k2)] = [...new Set(ns)].sort((a, b) => a - b);
-  }
-  return Object.keys(out).length ? out : null;
-}
-function normalizeResolved(x2) {
-  if (!Array.isArray(x2)) return null;
-  const positive = (v) => typeof v === "number" && Number.isInteger(v) && v > 0;
-  const seen = /* @__PURE__ */ new Map();
-  for (const item of x2) {
-    if (!item || typeof item !== "object") continue;
-    const { round, n } = item;
-    if (positive(round) && positive(n)) seen.set(`${round}:${n}`, { round, n });
-  }
-  const out = [...seen.values()].sort((a, b) => a.round - b.round || a.n - b.n);
-  return out.length ? out : null;
-}
-var AppliedError = class extends Error {
-};
-function parseAppliedItems(items, round, name = "applied") {
-  const option = `--${name}`;
-  if (!items.length) throw new AppliedError(`${option} needs at least one item (r<R>:<numbers> or <numbers>)`);
-  const out = {};
-  for (const item of items) {
-    const m = /^(?:r([1-9]\d*):)?([1-9]\d*(?:,[1-9]\d*)*)$/.exec(item);
-    if (!m) throw new AppliedError(`${option} item ${item.slice(0, 40)} is not r<R>:<numbers> nor <numbers>`);
-    if (!m[1] && round === null) throw new AppliedError(`${option} item ${item} has no round: add --round <R> or write it r<R>:${item}`);
-    const r2 = m[1] ? Number(m[1]) : round;
-    if (round !== null && r2 > round) throw new AppliedError(`${option} round ${r2} is after --round ${round}`);
-    out[r2] = [.../* @__PURE__ */ new Set([...out[r2] ?? [], ...m[2].split(",").map(Number)])].sort((a, b) => a - b);
-  }
-  return out;
-}
-function roundList(r2) {
-  return Object.entries(r2).flatMap(([k2, ns]) => ns.map((n) => ({ round: Number(k2), n }))).sort((a, b) => a.round - b.round || a.n - b.n);
-}
-function listVersions(files) {
-  const set = /* @__PURE__ */ new Set();
-  for (const f of files) {
-    const m = /^v(\d+)\.md$/.exec(f);
-    if (m) set.add(Number(m[1]));
-  }
-  return [...set].sort((a, b) => a - b);
-}
-function nextVersion(files) {
-  const v = listVersions(files);
-  return v.length ? v[v.length - 1] + 1 : 1;
-}
-function parseChangelog(text) {
-  if (!text || !text.trim()) return [];
-  let raw;
-  try {
-    raw = JSON.parse(text);
-  } catch {
-    throw new Error("changelog.json is not valid JSON");
-  }
-  if (!Array.isArray(raw)) throw new Error("changelog.json must be a JSON array");
-  return raw.map((e, i) => {
-    const r2 = EntrySchema.safeParse(e);
-    if (!r2.success) {
-      const why = r2.error.issues.map((x2) => `${x2.path.join(".") || "(root)"}: ${x2.message}`).join("; ");
-      throw new Error(`changelog.json entry ${i} is invalid: ${why}`);
-    }
-    const entry = e;
-    const applied = normalizeApplied(entry.applied);
-    const resolved = normalizeResolved(entry.resolved);
-    const kind = typeof entry.kind === "string" && ENTRY_KINDS.includes(entry.kind) ? entry.kind : null;
-    return {
-      ...r2.data,
-      ...applied ? { applied } : {},
-      ...entry.rewrite === true ? { rewrite: true } : {},
-      ...resolved ? { resolved } : {},
-      ...kind ? { kind } : {}
-    };
-  });
-}
-function appendChangelog(list, e) {
-  const last = list[list.length - 1];
-  if (last && e.version <= last.version) throw new Error(`changelog already has version ${last.version}; cannot append version ${e.version}`);
-  return [...list, e];
-}
-var KIND_NOTES = [
-  ["reopen", /\b(?:reopen(?:ed|ing)?|reabiert[oa]|reabrir)\b/i],
-  ["amend", /\b(?:amend(?:ed|ment)?|enmienda|enmendad[oa])\b/i],
-  // Only a note that starts with it: "round 2: applied 1 — approve the rollback" is an apply.
-  ["approve", /^\s*(?:approved?|aprobad[oa])\b/i]
-];
-function entryKind(e) {
-  if (e.kind) return e.kind;
-  if (e.rewrite) return "rewrite";
-  if (e.applied) return "apply";
-  for (const [kind, re2] of KIND_NOTES) if (re2.test(e.note)) return kind;
-  return null;
-}
-
-// src/lib/design-gate.ts
-var REASON_MAX2 = 300;
-var GATE_LIST_MAX = 40;
-var GATE_TEXT_MAX = 300;
-var line = (s) => Array.from(clean(s, Number.MAX_SAFE_INTEGER)).slice(0, GATE_TEXT_MAX).join("");
-var APPLIED_NOTE = /\b(?:round|ronda)\s+(\d+)\s*:\s*(?:applied|aplicad[ao]s?)\s+(\d+(?:\s*(?:,|y|and)\s*\d+)*)/gi;
-var REWRITE_NOTE = /^\s*(?:round|ronda)\s+(\d+)\s*:\s*(?:rewrite|reescritura|reescrit[ao])/i;
-var legacy = (e) => e.applied === void 0 && e.rewrite === void 0;
-function appliedIn(changelog, round) {
-  const out = /* @__PURE__ */ new Set();
-  for (const e of changelog) {
-    if (e.applied) {
-      for (const n of e.applied[round] ?? []) out.add(n);
-      continue;
-    }
-    if (!legacy(e)) continue;
-    for (const m of e.note.matchAll(APPLIED_NOTE)) {
-      if (Number(m[1]) !== round) continue;
-      for (const n of m[2].split(/\s*(?:,|y|and)\s*/i)) if (/^\d+$/.test(n)) out.add(Number(n));
-    }
-  }
-  return out;
-}
-function rewroteRound(changelog, round) {
-  return changelog.some((e) => {
-    if (e.round !== round) return false;
-    if (e.rewrite === true) return true;
-    if (!legacy(e)) return false;
-    const m = REWRITE_NOTE.exec(e.note);
-    return !!m && Number(m[1]) === round;
-  });
-}
-function appliedVersion(changelog, round, n) {
-  for (const e of changelog) if (appliedIn([e], round).has(n)) return e.version;
-  return null;
-}
-function resolvedIn(changelog, round) {
-  return new Set(changelog.flatMap((e) => (e.resolved ?? []).filter((x2) => x2.round === round).map((x2) => x2.n)));
-}
-function parseDismissed(text) {
-  let raw;
-  try {
-    raw = JSON.parse(text ?? "");
-  } catch {
-    return {};
-  }
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
-  const out = {};
-  for (const [k2, v] of Object.entries(raw)) {
-    if (!/^[1-9]\d*$/.test(k2) || !Array.isArray(v)) continue;
-    const byN = /* @__PURE__ */ new Map();
-    for (const x2 of v) {
-      const item = x2 && typeof x2 === "object" ? x2 : null;
-      const n = item ? item.n : x2;
-      if (typeof n !== "number" || !Number.isInteger(n) || n <= 0) continue;
-      const reason = item && typeof item.reason === "string" ? clean(item.reason, REASON_MAX2) : "";
-      byN.set(n, reason ? { n, reason } : byN.get(n) ?? { n });
-    }
-    if (byN.size) out[Number(k2)] = [...byN.values()].sort((a, b) => a.n - b.n);
-  }
-  return out;
-}
-function mergeDismissed(d, round, ns, reason) {
-  const why = reason ? clean(reason, REASON_MAX2) : "";
-  const byN = new Map((d[round] ?? []).map((x2) => [x2.n, x2]));
-  for (const n of ns) byN.set(n, why ? { n, reason: why } : byN.get(n) ?? { n });
-  return { ...d, [round]: [...byN.values()].sort((a, b) => a.n - b.n) };
-}
-function pendingProposals(changelog, critiques, dismissed = {}) {
-  const out = [];
-  for (const { round, critique } of [...critiques].sort((a, b) => a.round - b.round)) {
-    if (!critique || rewroteRound(changelog, round)) continue;
-    const decided = /* @__PURE__ */ new Set([...appliedIn(changelog, round), ...resolvedIn(changelog, round), ...(dismissed[round] ?? []).map((x2) => x2.n)]);
-    for (const p of critique.proposals) {
-      if (!decided.has(p.n)) out.push({ round, n: p.n, severity: p.severity, section: p.section, problem: p.problem });
-    }
-  }
-  return out;
-}
-function needsVerifyOf(changelog, critiques, texts = {}) {
-  const top = [...critiques].filter((c) => c.critique !== null).sort((a, b) => b.round - a.round)[0]?.critique;
-  if (!top) return false;
-  const version = changelog[changelog.length - 1]?.version ?? 0;
-  if (top.version >= version) return false;
-  const before = texts.history?.[top.version];
-  const after = texts.current ?? texts.history?.[version];
-  if (before === void 0 || after === void 0) return changelog.some((e) => e.version > top.version && entryKind(e) !== "approve");
-  const d = changedSections(designBody(before), designBody(after));
-  return d.changed.length > 0 || d.removed.length > 0;
-}
-function designGate(changelog, critiques, dismissed = {}, texts = {}) {
-  const version = changelog[changelog.length - 1]?.version ?? 0;
-  const latestRound = critiques.length ? Math.max(...critiques.map((c) => c.round)) : null;
-  const latest = latestRound === null ? null : critiques.find((c) => c.round === latestRound)?.critique ?? null;
-  const pending = pendingProposals(changelog, critiques, dismissed);
-  const criticalPending = pending.filter((p) => p.severity === "critical").map((p) => ({ round: p.round, n: p.n }));
-  const majorPending = pending.filter((p) => p.severity === "major").map((p) => ({ round: p.round, n: p.n }));
-  const needsVerify = needsVerifyOf(changelog, critiques, texts);
-  const count = (s) => pending.filter((p) => p.severity === s).length;
-  const latestCritiqueVersion = latest?.version ?? null;
-  const valid = [...critiques].sort((a, b) => a.round - b.round).flatMap((c) => c.critique ? [{ round: c.round, proposals: c.critique.proposals }] : []);
-  const gone = [];
-  const solved = [];
-  const done = [];
-  for (const { round, proposals } of valid) {
-    const applied = appliedIn(changelog, round);
-    const resolved = resolvedIn(changelog, round);
-    const set = new Map((dismissed[round] ?? []).map((x2) => [x2.n, x2]));
-    for (const p of proposals) {
-      const section = () => line(p.section);
-      if (applied.has(p.n)) done.push({ round, n: p.n, section: section(), change: line(p.change) });
-      if (resolved.has(p.n)) solved.push({ round, n: p.n, section: section(), problem: line(p.problem) });
-      const x2 = set.get(p.n);
-      if (x2) gone.push({ round, n: p.n, section: section(), problem: line(p.problem), ...x2.reason ? { reason: x2.reason } : {} });
-    }
-  }
-  const newest2 = (list) => list.slice(-GATE_LIST_MAX);
-  const more = (list) => Math.max(0, list.length - GATE_LIST_MAX);
-  return {
-    version,
-    rounds: valid.length,
-    latestRound,
-    latestCritiqueVersion,
-    criticalPending,
-    majorPending,
-    invalid: critiques.filter((c) => c.critique === null).map((c) => c.round).sort((a, b) => a - b),
-    needsVerify,
-    canAutoApprove: latest !== null && criticalPending.length === 0 && majorPending.length === 0 && !needsVerify && latestCritiqueVersion !== null && latestCritiqueVersion <= version,
-    pending,
-    pendingCounts: { critical: count("critical"), major: count("major"), minor: count("minor") },
-    dismissed: newest2(gone),
-    resolved: newest2(solved),
-    applied: newest2(done),
-    ...more(gone) ? { dismissedMore: more(gone) } : {},
-    ...more(solved) ? { resolvedMore: more(solved) } : {},
-    ...more(done) ? { appliedMore: more(done) } : {}
-  };
-}
-
 // src/lib/critique.ts
+var ROUND_MAX = 999999;
+var CRITIQUE_FILE = /^r([1-9]\d{0,5})\.json$/;
+var LEGACY_CRITIQUE_FILE = /^critique-r([1-9]\d{0,5})\.json$/;
 var CATEGORIES = ["scope", "done_criteria", "risk", "contradiction", "gap"];
 var SEVERITIES = ["critical", "major", "minor"];
 var VERDICTS = ["ready", "changes"];
@@ -12665,6 +12441,288 @@ function formatProposals(c, locale = "en", headings = {}) {
   const flat = (s) => s.replace(/\s*[\r\n]+\s*/g, " ");
   const name = (slug) => slug === "_intro" ? l3.intro : Object.hasOwn(headings, slug) ? flat(headings[slug]) : slug;
   return c.proposals.map((p) => `${p.n}. [${l3.cat[p.category]} \xB7 ${l3.sev[p.severity]}] ${l3.quote(name(p.section))} \u2014 ${flat(p.problem)} \u2192 ${flat(p.change)}`).join("\n");
+}
+
+// src/lib/history.ts
+var ENTRY_KINDS = ["draft", "round", "apply", "rewrite", "interview", "approve", "amend", "reopen"];
+var EntrySchema = external_exports.object({
+  version: external_exports.number(),
+  date: external_exports.string(),
+  note: external_exports.string(),
+  words: external_exports.number(),
+  round: external_exports.number()
+});
+function normalizeApplied(x2) {
+  if (!x2 || typeof x2 !== "object" || Array.isArray(x2)) return null;
+  const out = {};
+  for (const [k2, v] of Object.entries(x2)) {
+    if (!/^[1-9]\d{0,5}$/.test(k2) || !Array.isArray(v)) continue;
+    const ns = v.filter((n) => Number.isSafeInteger(n) && n > 0);
+    if (ns.length) out[Number(k2)] = [...new Set(ns)].sort((a, b) => a - b);
+  }
+  return Object.keys(out).length ? out : null;
+}
+function normalizeResolved(x2) {
+  if (!Array.isArray(x2)) return null;
+  const positive = (v) => typeof v === "number" && Number.isSafeInteger(v) && v > 0;
+  const seen = /* @__PURE__ */ new Map();
+  for (const item of x2) {
+    if (!item || typeof item !== "object") continue;
+    const { round, n } = item;
+    if (positive(round) && round <= ROUND_MAX && positive(n)) seen.set(`${round}:${n}`, { round, n });
+  }
+  const out = [...seen.values()].sort((a, b) => a.round - b.round || a.n - b.n);
+  return out.length ? out : null;
+}
+var AppliedError = class extends Error {
+};
+function parseAppliedItems(items, round, name = "applied") {
+  const option = `--${name}`;
+  if (!items.length) throw new AppliedError(`${option} needs at least one item (r<R>:<numbers> or <numbers>)`);
+  const out = {};
+  for (const item of items) {
+    const m = /^(?:r([1-9]\d*):)?([1-9]\d*(?:,[1-9]\d*)*)$/.exec(item);
+    if (!m) throw new AppliedError(`${option} item ${item.slice(0, 40)} is not r<R>:<numbers> nor <numbers>`);
+    if (!m[1] && round === null) throw new AppliedError(`${option} item ${item} has no round: add --round <R> or write it r<R>:${item}`);
+    const r2 = m[1] ? Number(m[1]) : round;
+    if (round !== null && r2 > round) throw new AppliedError(`${option} round ${r2} is after --round ${round}`);
+    out[r2] = [.../* @__PURE__ */ new Set([...out[r2] ?? [], ...m[2].split(",").map(Number)])].sort((a, b) => a - b);
+  }
+  return out;
+}
+function roundList(r2) {
+  return Object.entries(r2).flatMap(([k2, ns]) => ns.map((n) => ({ round: Number(k2), n }))).sort((a, b) => a.round - b.round || a.n - b.n);
+}
+function listVersions(files) {
+  const set = /* @__PURE__ */ new Set();
+  for (const f of files) {
+    const m = /^v(\d+)\.md$/.exec(f);
+    if (m) set.add(Number(m[1]));
+  }
+  return [...set].sort((a, b) => a - b);
+}
+function nextVersion(files) {
+  const v = listVersions(files);
+  return v.length ? v[v.length - 1] + 1 : 1;
+}
+function parseChangelog(text) {
+  if (!text || !text.trim()) return [];
+  let raw;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    throw new Error("changelog.json is not valid JSON");
+  }
+  if (!Array.isArray(raw)) throw new Error("changelog.json must be a JSON array");
+  return raw.map((e, i) => {
+    const r2 = EntrySchema.safeParse(e);
+    if (!r2.success) {
+      const why = r2.error.issues.map((x2) => `${x2.path.join(".") || "(root)"}: ${x2.message}`).join("; ");
+      throw new Error(`changelog.json entry ${i} is invalid: ${why}`);
+    }
+    const entry = e;
+    const applied = normalizeApplied(entry.applied);
+    const resolved = normalizeResolved(entry.resolved);
+    const kind = typeof entry.kind === "string" && ENTRY_KINDS.includes(entry.kind) ? entry.kind : null;
+    return {
+      ...r2.data,
+      ...applied ? { applied } : {},
+      ...entry.rewrite === true ? { rewrite: true } : {},
+      ...resolved ? { resolved } : {},
+      ...kind ? { kind } : {}
+    };
+  });
+}
+function appendChangelog(list, e) {
+  const last = list[list.length - 1];
+  if (last && e.version <= last.version) throw new Error(`changelog already has version ${last.version}; cannot append version ${e.version}`);
+  return [...list, e];
+}
+var KIND_NOTES = [
+  // Only a note that starts with it, as an approval: "ronda 2: aplicadas 1 - evita reabrir el diseño" is an apply, and
+  // read as a reopen it would restart the budget (carry 6).
+  ["reopen", /^\s*(?:reopen(?:ed|ing)?|reabiert[oa]|reabrir)\b/i],
+  ["amend", /\b(?:amend(?:ed|ment)?|enmienda|enmendad[oa])\b/i],
+  // Only a note that starts with it: "round 2: applied 1 — approve the rollback" is an apply.
+  ["approve", /^\s*(?:approved?|aprobad[oa])\b/i]
+];
+function entryRound(e) {
+  const r2 = e?.round;
+  return typeof r2 === "number" && Number.isSafeInteger(r2) && r2 >= 0 && r2 <= ROUND_MAX ? r2 : 0;
+}
+function entryKind(e) {
+  if (e.kind) return e.kind;
+  if (e.rewrite) return "rewrite";
+  if (e.applied) return "apply";
+  for (const [kind, re2] of KIND_NOTES) if (re2.test(e.note)) return kind;
+  return null;
+}
+
+// src/lib/design-gate.ts
+var REASON_MAX2 = LIMITS.reason;
+var DISMISSED_MAX_CHARS = 1024 * 1024;
+var GATE_LIST_MAX = 40;
+var GATE_TEXT_MAX = 300;
+var line = (s) => Array.from(clean(s, Number.MAX_SAFE_INTEGER)).slice(0, GATE_TEXT_MAX).join("");
+var APPLIED_NOTE = /\b(?:round|ronda)\s+(\d+)\s*:\s*(?:applied|aplicad[ao]s?)\s+(\d+(?:\s*(?:,|y|and)\s*\d+)*)/gi;
+var REWRITE_NOTE = /^\s*(?:round|ronda)\s+(\d+)\s*:\s*(?:rewrite|reescritura|reescrit[ao])/i;
+var legacy = (e) => e.applied === void 0 && e.rewrite === void 0;
+function appliedIn(changelog, round) {
+  const out = /* @__PURE__ */ new Set();
+  for (const e of changelog) {
+    if (e.applied) {
+      for (const n of e.applied[round] ?? []) out.add(n);
+      continue;
+    }
+    if (!legacy(e)) continue;
+    for (const m of e.note.matchAll(APPLIED_NOTE)) {
+      if (Number(m[1]) !== round) continue;
+      for (const n of m[2].split(/\s*(?:,|y|and)\s*/i)) if (/^\d+$/.test(n)) out.add(Number(n));
+    }
+  }
+  return out;
+}
+function rewroteRound(changelog, round) {
+  return changelog.some((e) => {
+    if (e.round !== round) return false;
+    if (e.rewrite === true) return true;
+    if (!legacy(e)) return false;
+    const m = REWRITE_NOTE.exec(e.note);
+    return !!m && Number(m[1]) === round;
+  });
+}
+function appliedVersion(changelog, round, n) {
+  for (const e of changelog) if (appliedIn([e], round).has(n)) return e.version;
+  return null;
+}
+function resolvedIn(changelog, round) {
+  return new Set(changelog.flatMap((e) => (e.resolved ?? []).filter((x2) => x2.round === round).map((x2) => x2.n)));
+}
+function parseDismissed(text) {
+  if (text && text.length > DISMISSED_MAX_CHARS) return {};
+  let raw;
+  try {
+    raw = JSON.parse(text ?? "");
+  } catch {
+    return {};
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out = {};
+  for (const [k2, v] of Object.entries(raw)) {
+    if (!/^[1-9]\d{0,5}$/.test(k2) || !Array.isArray(v)) continue;
+    const byN = /* @__PURE__ */ new Map();
+    for (const x2 of v) {
+      const item = x2 && typeof x2 === "object" ? x2 : null;
+      const n = item ? item.n : x2;
+      if (typeof n !== "number" || !Number.isSafeInteger(n) || n <= 0) continue;
+      const reason = item && typeof item.reason === "string" ? clean(item.reason, REASON_MAX2) : "";
+      byN.set(n, reason ? { n, reason } : byN.get(n) ?? { n });
+    }
+    if (byN.size) out[Number(k2)] = [...byN.values()].sort((a, b) => a.n - b.n);
+  }
+  return out;
+}
+function mergeDismissed(d, round, ns, reason) {
+  const why = reason ? clean(reason, REASON_MAX2) : "";
+  const byN = new Map((d[round] ?? []).map((x2) => [x2.n, x2]));
+  for (const n of ns) {
+    const had = byN.get(n);
+    byN.set(n, had?.reason ? had : why ? { n, reason: why } : had ?? { n });
+  }
+  return { ...d, [round]: [...byN.values()].sort((a, b) => a.n - b.n) };
+}
+function unionDismissed(...lists) {
+  const out = {};
+  for (const d of lists) {
+    for (const [k2, items] of Object.entries(d)) {
+      const byN = new Map((out[Number(k2)] ?? []).map((x2) => [x2.n, x2]));
+      for (const x2 of items) byN.set(x2.n, x2.reason ? x2 : byN.get(x2.n) ?? x2);
+      if (byN.size) out[Number(k2)] = [...byN.values()].sort((a, b) => a.n - b.n);
+    }
+  }
+  return out;
+}
+var oneByRound = (critiques) => {
+  const seen = /* @__PURE__ */ new Set();
+  return critiques.filter((c) => !seen.has(c.round) && !!seen.add(c.round));
+};
+function pendingProposals(changelog, critiques, dismissed = {}) {
+  const out = [];
+  for (const { round, critique } of oneByRound(critiques).sort((a, b) => a.round - b.round)) {
+    if (!critique || rewroteRound(changelog, round)) continue;
+    const decided = /* @__PURE__ */ new Set([...appliedIn(changelog, round), ...resolvedIn(changelog, round), ...(dismissed[round] ?? []).map((x2) => x2.n)]);
+    for (const p of critique.proposals) {
+      if (!decided.has(p.n)) out.push({ round, n: p.n, severity: p.severity, section: p.section, problem: p.problem });
+    }
+  }
+  return out;
+}
+function needsVerifyOf(changelog, critiques, texts = {}) {
+  const top = [...critiques].filter((c) => c.critique !== null).sort((a, b) => b.round - a.round)[0]?.critique;
+  if (!top) return false;
+  const version = changelog[changelog.length - 1]?.version ?? 0;
+  const snapshot = texts.history?.[version];
+  if (texts.current !== void 0 && snapshot !== void 0) {
+    const edit = changedSections(designBody(snapshot), designBody(texts.current));
+    if (edit.changed.length > 0 || edit.removed.length > 0) return true;
+  }
+  if (top.version >= version) return false;
+  const before = texts.history?.[top.version];
+  const after = texts.current ?? texts.history?.[version];
+  if (before === void 0 || after === void 0) return changelog.some((e) => e.version > top.version && entryKind(e) !== "approve");
+  const d = changedSections(designBody(before), designBody(after));
+  return d.changed.length > 0 || d.removed.length > 0;
+}
+function designGate(changelog, given, dismissed = {}, texts = {}) {
+  const critiques = oneByRound(given);
+  const version = changelog[changelog.length - 1]?.version ?? 0;
+  const latestRound = critiques.length ? Math.max(...critiques.map((c) => c.round)) : null;
+  const latest = latestRound === null ? null : critiques.find((c) => c.round === latestRound)?.critique ?? null;
+  const pending = pendingProposals(changelog, critiques, dismissed);
+  const criticalPending = pending.filter((p) => p.severity === "critical").map((p) => ({ round: p.round, n: p.n }));
+  const majorPending = pending.filter((p) => p.severity === "major").map((p) => ({ round: p.round, n: p.n }));
+  const needsVerify = needsVerifyOf(changelog, critiques, texts);
+  const count = (s) => pending.filter((p) => p.severity === s).length;
+  const latestCritiqueVersion = latest?.version ?? null;
+  const valid = [...critiques].sort((a, b) => a.round - b.round).flatMap((c) => c.critique ? [{ round: c.round, proposals: c.critique.proposals }] : []);
+  const gone = [];
+  const solved = [];
+  const done = [];
+  for (const { round, proposals } of valid) {
+    const applied = appliedIn(changelog, round);
+    const resolved = resolvedIn(changelog, round);
+    const set = new Map((dismissed[round] ?? []).map((x2) => [x2.n, x2]));
+    for (const p of proposals) {
+      const section = () => line(p.section);
+      if (applied.has(p.n)) done.push({ round, n: p.n, section: section(), change: line(p.change) });
+      if (resolved.has(p.n)) solved.push({ round, n: p.n, section: section(), problem: line(p.problem) });
+      const x2 = set.get(p.n);
+      if (x2) gone.push({ round, n: p.n, section: section(), problem: line(p.problem), ...x2.reason ? { reason: x2.reason } : {} });
+    }
+  }
+  const newest2 = (list) => list.slice(-GATE_LIST_MAX);
+  const more = (list) => Math.max(0, list.length - GATE_LIST_MAX);
+  return {
+    version,
+    rounds: valid.length,
+    latestRound,
+    latestCritiqueVersion,
+    criticalPending,
+    majorPending,
+    invalid: critiques.filter((c) => c.critique === null).map((c) => c.round).sort((a, b) => a - b),
+    needsVerify,
+    canAutoApprove: latest !== null && criticalPending.length === 0 && majorPending.length === 0 && !needsVerify && latestCritiqueVersion !== null && latestCritiqueVersion <= version,
+    // Final review M4: what each pending proposal says goes to the critic and to the approve line, so it is one clean
+    // line like the other lists; the list and its counts stay whole, so an old pending proposal is never hidden.
+    pending: pending.map((p) => ({ ...p, section: line(p.section), problem: line(p.problem) })),
+    pendingCounts: { critical: count("critical"), major: count("major"), minor: count("minor") },
+    dismissed: newest2(gone),
+    resolved: newest2(solved),
+    applied: newest2(done),
+    ...more(gone) ? { dismissedMore: more(gone) } : {},
+    ...more(solved) ? { resolvedMore: more(solved) } : {},
+    ...more(done) ? { appliedMore: more(done) } : {}
+  };
 }
 
 // node_modules/marked/lib/marked.esm.js
@@ -14086,10 +14144,11 @@ function buildDesignPageData(input) {
       words: d.words,
       html: renderMarkdown(d.body),
       toc: sectionsOf(d.body).map(({ level, heading, slug }) => ({ level, heading, slug })),
-      diff: i === 0 ? null : versionDiff(texts[numbers[i - 1]], texts[n])
+      diff: i === 0 ? null : { ...versionDiff(texts[numbers[i - 1]], texts[n]), ...numbers[i - 1] !== n - 1 ? { against: numbers[i - 1] } : {} }
     };
   });
   const dismissed = input.dismissed ?? {};
+  const known = /* @__PURE__ */ new Set([...input.changelog.map((e) => e.version), currentNo]);
   const valid = [...input.critiques ?? []].sort((a, b) => a.round - b.round).flatMap(({ round, critique }) => critique ? [{ round, critique }] : []);
   const critiques = valid.slice(-GATE_LIST_MAX).map(({ round, critique }) => {
     const more = Math.max(0, critique.proposals.length - GATE_LIST_MAX);
@@ -14105,7 +14164,8 @@ function buildDesignPageData(input) {
         change: line(p.change),
         ...fateOf(input.changelog, dismissed, round, p.n)
       })),
-      ...more ? { proposalsMore: more } : {}
+      ...more ? { proposalsMore: more } : {},
+      ...known.has(critique.version) ? {} : { unknownVersion: true }
     };
   });
   const critiquesMore = valid.length - critiques.length;
@@ -14114,6 +14174,7 @@ function buildDesignPageData(input) {
     meta: cur.meta,
     words: cur.words,
     rounds: valid.length,
+    pending: pendingProposals(input.changelog, input.critiques ?? [], dismissed).length,
     source: input.source,
     current: currentNo,
     status: cur.meta.status,
@@ -14665,11 +14726,11 @@ function readCritiques(f) {
     if (!(0, import_node_fs2.existsSync)(dir)) return;
     for (const name of (0, import_node_fs2.readdirSync)(dir)) {
       const m = re2.exec(name);
-      if (m && Number(m[1]) > 0) found.set(Number(m[1]), import_node_path2.default.join(dir, name));
+      if (m) found.set(Number(m[1]), import_node_path2.default.join(dir, name));
     }
   };
-  scan(f.legacy, /^critique-r(\d+)\.json$/);
-  scan(f.critiques, /^r(\d+)\.json$/);
+  scan(f.legacy, LEGACY_CRITIQUE_FILE);
+  scan(f.critiques, CRITIQUE_FILE);
   return [...found.entries()].sort((a, b) => a[0] - b[0]).map(([round, file]) => {
     let critique = null;
     try {
@@ -14681,10 +14742,15 @@ function readCritiques(f) {
   });
 }
 function readDismissedOf(f) {
-  for (const p of [import_node_path2.default.join(f.critiques, "dismissed.json"), import_node_path2.default.join(f.legacy, "dismissed.json")]) {
-    if ((0, import_node_fs2.existsSync)(p)) return parseDismissed((0, import_node_fs2.readFileSync)(p, "utf8"));
-  }
-  return {};
+  const read2 = (p) => {
+    try {
+      if ((0, import_node_fs2.statSync)(p).size > DISMISSED_MAX_CHARS) return {};
+      return parseDismissed((0, import_node_fs2.readFileSync)(p, "utf8"));
+    } catch {
+      return {};
+    }
+  };
+  return unionDismissed(read2(import_node_path2.default.join(f.legacy, "dismissed.json")), read2(import_node_path2.default.join(f.critiques, "dismissed.json")));
 }
 function writeDismissed(f, d) {
   const p = import_node_path2.default.join(f.critiques, "dismissed.json");
@@ -14704,11 +14770,11 @@ function readHistory(dir) {
 function budgetRound(changelog, round) {
   const reopen = [...changelog].reverse().find((e) => entryKind(e) === "reopen");
   const n = Number.isFinite(round) ? round : 1;
-  return Math.max(1, n - (reopen?.round ?? 0));
+  return Math.max(1, n - entryRound(reopen));
 }
 function nextRound(i) {
   const last = i.changelog[i.changelog.length - 1];
-  const round = Math.max(0, last?.round ?? 0, ...i.critiques.map((c) => c.round)) + 1;
+  const round = Math.max(entryRound(last), ...i.critiques.map((c) => c.round)) + 1;
   const reopened = i.changelog.some((e) => entryKind(e) === "reopen");
   const cycle = budgetRound(i.changelog, round);
   const verify = i.verify ?? false;
@@ -14717,7 +14783,8 @@ function nextRound(i) {
   const since = latest?.version ?? null;
   const prev = since === null ? void 0 : i.history[since];
   const diff = prev === void 0 ? null : changedSections(designBody(prev), designBody(i.current));
-  const scope = i.full || !diff ? "full" : scopeFor({ round: cycle, verify, reopened, changed: diff.changed.filter((s) => s !== "_intro").length + diff.removed.length, total: i.sections.length });
+  const removalOnly = !!diff && diff.changed.length === 0 && diff.removed.length > 0;
+  const scope = i.full || !diff || removalOnly ? "full" : scopeFor({ round: cycle, verify, reopened, changed: diff.changed.filter((s) => s !== "_intro").length + diff.removed.length, total: i.sections.length });
   return {
     round,
     version: last?.version ?? 0,
@@ -14726,7 +14793,7 @@ function nextRound(i) {
     since,
     changed: diff?.changed ?? [],
     removed: diff?.removed ?? [],
-    review: scope === "full" ? i.sections : diff?.changed ?? []
+    review: removalOnly ? ["_intro", ...i.sections] : scope === "full" ? i.sections : diff?.changed ?? []
   };
 }
 
@@ -15557,14 +15624,20 @@ warning: ${loose.length} task(s) without zones run alone in a forge execution: $
           if (unknown.length) refs = `
 warning: ${unknown.length} design_ref(s) not in the design: ${unknown.join(", ")}`;
           if (design.meta.status === "approved") {
-            const approved = readChangelog(import_node_path8.default.dirname(abs(designArg))).at(-1)?.version;
+            let approved;
+            try {
+              approved = readChangelog(import_node_path8.default.dirname(abs(designArg))).at(-1)?.version;
+            } catch (e) {
+              refs += `
+warning: cannot check design_version: ${line(e.message)}`;
+            }
             if (approved !== void 0 && p.design_version !== approved) {
               refs += `
 warning: design_version is ${p.design_version ?? "missing"} but the approved design is v${approved}: set design_version: ${approved}`;
             }
             if (design.meta.artifact && p.artifacts.design !== design.meta.artifact) {
               refs += `
-warning: artifacts.design is not the design's artifact: set it to ${design.meta.artifact.replace(/[\u0000-\u001f\u007f]/g, " ")}`;
+warning: artifacts.design is not the design's artifact: set it to ${line(design.meta.artifact)}`;
             }
           }
         }
@@ -16147,8 +16220,10 @@ warning: artifacts.design is not the design's artifact: set it to ${design.meta.
         const histDir = import_node_path8.default.join(base, "history");
         const log = readChangelog(import_node_path8.default.dirname(file));
         const version = nextVersion((0, import_node_fs7.existsSync)(histDir) ? (0, import_node_fs7.readdirSync)(histDir) : []);
+        const files = designFilesOf(file, d.meta.project);
+        const critiques = readCritiques(files);
         const roundFlag = flag("round");
-        const round = roundFlag !== void 0 ? Number(roundFlag) : log[log.length - 1]?.round ?? 0;
+        const round = roundFlag !== void 0 ? Number(roundFlag) : Math.max(entryRound(log[log.length - 1]), ...critiques.map((c) => c.round));
         if (!Number.isInteger(round) || round < 0) return fail("design-snapshot: --round must be a non-negative integer", 2);
         const kindFlag = flag("kind");
         if (args.includes("--kind") && (kindFlag === void 0 || !ENTRY_KINDS.includes(kindFlag))) {
@@ -16164,11 +16239,9 @@ warning: artifacts.design is not the design's artifact: set it to ${design.meta.
         if (kindGiven === "reopen" && d.meta.status !== "draft") {
           return fail(`design-snapshot: --kind reopen needs status: draft in the design (it is ${d.meta.status}); set it first`, 2);
         }
-        if (kindGiven === "reopen" && !log.some((e) => entryKind(e) === "approve")) {
+        if (kindGiven === "reopen" && !Object.values(readHistory(import_node_path8.default.dirname(file))).some((t) => designStatus(t) === "approved") && !log.some((e) => entryKind(e) === "approve")) {
           return fail("design-snapshot: --kind reopen needs a design that was approved once: this draft was never approved, so there is nothing to reopen", 2);
         }
-        const files = designFilesOf(file, d.meta.project);
-        const critiques = readCritiques(files);
         const critiqueOf = (r2) => critiques.find((c) => c.round === r2)?.critique ?? null;
         const items = { applied: null, resolved: null };
         for (const name of ["applied", "resolved"]) {
@@ -16269,7 +16342,18 @@ warning: artifacts.design is not the design's artifact: set it to ${design.meta.
         const sinceFlag = flag("since");
         if (sinceFlag !== void 0 && !/^[1-9]\d*$/.test(sinceFlag)) return fail("design-impact: --since must be a positive integer", 2);
         const file = abs(args[0]);
-        const d = parseDesign((0, import_node_fs7.readFileSync)(file, "utf8"));
+        let designText;
+        try {
+          designText = (0, import_node_fs7.readFileSync)(file, "utf8");
+        } catch (e) {
+          return fail(`design-impact: cannot read the design ${args[0]}: ${e.message}`, 2);
+        }
+        let d;
+        try {
+          d = parseDesign(designText);
+        } catch (e) {
+          return fail(`design-impact: ${args[0]} is not a design: ${e.message}`, 2);
+        }
         let plan;
         try {
           plan = parsePlan((0, import_node_fs7.readFileSync)(abs(flag("plan")), "utf8"));
@@ -16303,7 +16387,7 @@ warning: artifacts.design is not the design's artifact: set it to ${design.meta.
           const reasonFile = flag("reason-file");
           if (!reasonFile || reasonFile.startsWith("--")) return fail(usage, 2);
           try {
-            reason = (0, import_node_fs7.readFileSync)(abs(reasonFile), "utf8");
+            reason = readHead(abs(reasonFile), REASON_READ_MAX);
           } catch {
             return fail(`critique-dismiss: cannot read ${reasonFile}`, 2);
           }
@@ -16329,40 +16413,62 @@ warning: artifacts.design is not the design's artifact: set it to ${design.meta.
         return ok(JSON.stringify({ round, dismissed: (next[round] ?? []).map((x2) => x2.n) }));
       }
       case "critique-check": {
-        const c = parseCritique((0, import_node_fs7.readFileSync)(abs(args[0]), "utf8"));
-        const issues = [];
-        for (const name of ["round", "version"]) {
-          const given = flag(name);
-          if (given === void 0) continue;
-          if (!/^[1-9]\d*$/.test(given)) return fail(`critique-check: --${name} must be a positive integer`, 2);
-          if (c[name] !== Number(given)) issues.push(`${name} is ${c[name]} but this review is ${name} ${given}`);
-        }
-        const roundGiven = flag("round");
-        const designFlag = flag("design");
-        const designParsed = designFlag !== void 0 ? parseDesign((0, import_node_fs7.readFileSync)(abs(designFlag), "utf8")) : null;
-        const absolute = roundGiven !== void 0 ? Number(roundGiven) : c.round;
-        const budgetAt = designFlag !== void 0 && designParsed ? budgetRound(readChangelog(designFilesOf(abs(designFlag), designParsed.meta.project).dir), absolute) : absolute;
-        issues.push(...budgetIssues(c, budgetFor(budgetAt, args.includes("--verify"))));
-        const headings = {};
-        if (designParsed) {
-          const sections = designParsed.sections;
-          for (const s of sections) headings[s.slug] = s.heading;
-          const slugs = /* @__PURE__ */ new Set(["_intro", ...sections.map((s) => s.slug)]);
-          for (const p of c.proposals) if (!slugs.has(p.section)) issues.push(`proposal ${p.n}: section "${p.section}" is not a section slug of the design`);
-        }
-        if (issues.length) throw new CritiqueError(issues);
-        const warnings = [];
+        const target = abs(args[0]);
         const changedFlag = flag("changed");
-        if (changedFlag !== void 0 && c.scope === "changed") {
-          const allowed = changedFlag.split(",").map((s) => s.trim()).filter(Boolean);
-          for (const p of c.proposals) {
-            if (!allowed.includes(p.section)) warnings.push(`warning: proposal ${p.n} reviews "${p.section}", outside the changed sections (${allowed.join(", ")})`);
-          }
+        const allowed = (changedFlag ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+        if (args.includes("--changed") && (!changedFlag || changedFlag.startsWith("--") || !allowed.length)) {
+          return fail("critique-check: --changed needs the changed section slugs, comma-separated", 2);
         }
-        const text = formatProposals(c, flag("locale") ?? "en", headings);
-        return { code: 0, stdout: text.endsWith("\n") ? text : `${text}
+        try {
+          const c = parseCritique((0, import_node_fs7.readFileSync)(target, "utf8"));
+          const issues = [];
+          for (const name of ["round", "version"]) {
+            const given = flag(name);
+            if (given === void 0) continue;
+            if (!/^[1-9]\d*$/.test(given)) return fail(`critique-check: --${name} must be a positive integer`, 2);
+            if (c[name] !== Number(given)) issues.push(`${name} is ${c[name]} but this review is ${name} ${given}`);
+          }
+          const roundGiven = flag("round");
+          const designFlag = flag("design");
+          const designParsed = designFlag !== void 0 ? parseDesign((0, import_node_fs7.readFileSync)(abs(designFlag), "utf8")) : null;
+          const absolute = roundGiven !== void 0 ? Number(roundGiven) : c.round;
+          let budgetAt = absolute;
+          if (designFlag !== void 0 && designParsed) {
+            let log;
+            try {
+              log = readChangelog(designFilesOf(abs(designFlag), designParsed.meta.project).dir);
+            } catch (e) {
+              return fail(`critique-check: cannot read the changelog of the design: ${e.message}`, 2);
+            }
+            budgetAt = budgetRound(log, absolute);
+          }
+          issues.push(...budgetIssues(c, budgetFor(budgetAt, args.includes("--verify"))));
+          const headings = {};
+          if (designParsed) {
+            const sections = designParsed.sections;
+            for (const s of sections) headings[s.slug] = s.heading;
+            const slugs = /* @__PURE__ */ new Set(["_intro", ...sections.map((s) => s.slug)]);
+            for (const p of c.proposals) if (!slugs.has(p.section)) issues.push(`proposal ${p.n}: section "${p.section}" is not a section slug of the design`);
+          }
+          if (issues.length) throw new CritiqueError(issues);
+          const warnings = [];
+          if (changedFlag !== void 0 && c.scope === "changed") {
+            for (const p of c.proposals) {
+              if (!allowed.includes(p.section)) warnings.push(`warning: proposal ${p.n} reviews "${line(p.section)}", outside the changed sections (${line(allowed.join(", "))})`);
+            }
+          }
+          const text = formatProposals(c, flag("locale") ?? "en", headings);
+          return { code: 0, stdout: text.endsWith("\n") ? text : `${text}
 `, stderr: warnings.length ? `${warnings.join("\n")}
 ` : "" };
+        } catch (e) {
+          if (!(e instanceof CritiqueError) || !args.includes("--reject-on-fail") || !(0, import_node_fs7.existsSync)(target)) throw e;
+          const rejected = import_node_path8.default.join(import_node_path8.default.dirname(target), `${import_node_path8.default.basename(target).replace(/\.json$/i, "")}.rejected.json`);
+          (0, import_node_fs7.rmSync)(rejected, { force: true });
+          (0, import_node_fs7.renameSync)(target, rejected);
+          return fail(`${e.message}
+critique-check: the critique was refused and set aside as ${rejected}`);
+        }
       }
       case "critique-select": {
         const c = parseCritique((0, import_node_fs7.readFileSync)(abs(args[0]), "utf8"));
@@ -16441,6 +16547,18 @@ var PLACEHOLDER_REASONS = /* @__PURE__ */ new Set([
   "ninguna",
   "no aplica"
 ]);
+var REASON_READ_MAX = 64 * 1024;
+function readHead(file, max) {
+  const fd = (0, import_node_fs7.openSync)(file, "r");
+  try {
+    const buf = Buffer.alloc(max);
+    let got = 0;
+    for (let n = 1; got < max && n > 0; got += n) n = (0, import_node_fs7.readSync)(fd, buf, got, max - got, got);
+    return buf.subarray(0, got).toString("utf8");
+  } finally {
+    (0, import_node_fs7.closeSync)(fd);
+  }
+}
 function reasonKey(s) {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
