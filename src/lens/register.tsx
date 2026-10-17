@@ -14,6 +14,7 @@ import { cardRows, clipCard, DOCK_COLUMNS, DOCK_MIN_COLUMNS, fitCards, panelLayo
 import { bandLevel, controlWidth, DEFAULT_COLUMNS, fitParts, joinParts, partsWidth } from '../mod/band-fit.js';
 import { lensBand } from './lens-band.js';
 import { keepPhoto, lensMode, photoId, photoText } from './photo.js';
+import { clipWidth } from '../lib/text-width.js';
 import { modeLabels, ownActive, spinnerText, statusText, surfaceEvents } from './surfaces.js';
 import { PALETTE, SECTION_HUE, SECTION_ICON } from './view.js';
 import { freshFinished, pushFinished, withoutRunning, type FinishedAgent } from './finished.js';
@@ -160,6 +161,7 @@ function resetPanel(): void {
   toastQueue = [];
   toastTimer?.cancel();
   toastTimer = null;
+  toastPending = false;
   forgeHeardAt = null;
   statusCache.clear();
   jobCache.clear();
@@ -1023,23 +1025,32 @@ let primed = false;
 let lastToastAt = -Infinity;
 let toastQueue: string[] = [];
 let toastTimer: Timer | null = null;
+let toastPending = false;
+const TOAST_QUEUE_MAX = 5;
+const TOAST_CELLS = 200;
 const notified = new Set<string>();
 let forgeHeardAt: number | null = null;
 
 // At most one toast every 5 s: what comes sooner waits and goes out with the rest, joined.
+// The queue holds at most TOAST_QUEUE_MAX entries and the joined text TOAST_CELLS cells. `toastPending` is set before
+// the first await, so concurrent calls neither add a second timer nor break the gap.
 async function queueToasts($: Engine, texts: readonly string[]): Promise<void> {
-  toastQueue.push(...texts);
-  if (toastTimer) return;
-  const wait = lastToastAt + TOAST_GAP_MS - await nowMs($);
-  if (wait > 0) {
-    toastTimer = $.clock.after(wait, () => { toastTimer = null; void flushToasts($); });
-    return;
-  }
-  await flushToasts($);
+  toastQueue = [...toastQueue, ...texts].slice(0, TOAST_QUEUE_MAX);
+  if (toastPending) return;
+  toastPending = true;
+  try {
+    const wait = lastToastAt + TOAST_GAP_MS - await nowMs($);
+    if (wait > 0) {
+      toastTimer = $.clock.after(wait, () => { toastTimer = null; toastPending = false; void flushToasts($); });
+      return;
+    }
+    toastPending = false;
+    await flushToasts($);
+  } catch { toastPending = false; }
 }
 async function flushToasts($: Engine): Promise<void> {
   if (!toastQueue.length) return;
-  const text = toastQueue.splice(0).join(' · ');
+  const text = clipWidth(toastQueue.splice(0).join(' · '), TOAST_CELLS);
   lastToastAt = await nowMs($);
   try { $.ui.toast(text); } catch { /* nothing else to say */ }
 }
@@ -1053,16 +1064,22 @@ function clearStatus($: Engine): void {
 // Step 4 of §4.6, after each model the band keeps: the status line (outside fullscreen, or with fewer than 3 rows above
 // the prompt, while this session has work of its own; set only when it changes), the toasts of what moved since the
 // last model (none for the first one after a start or /clear) and the notification of a run of its own that ended.
+// The status line alone: it depends on the view too, so a render that changes the view runs it again (pure, no reads).
+function updateStatus($: Engine, model: PanelModel | null): void {
+  try {
+    const show = lastView.fullscreen === false || (lastView.maxRows !== null && lastView.maxRows < 3);
+    const text = show && model ? statusText(model, textsFor(model.locale), runRoleOf(roadmap)) ?? undefined : undefined;
+    if (text === lastStatus) return;
+    lastStatus = text;
+    try { $.ui.status(text); } catch { /* the next model tries again */ }
+  } catch { /* the line keeps what it had */ }
+}
+
 async function updateSurfaces($: Engine, model: PanelModel): Promise<void> {
   try {
     const t = textsFor(model.locale);
     const role = runRoleOf(roadmap);
-    const show = lastView.fullscreen === false || (lastView.maxRows !== null && lastView.maxRows < 3);
-    const text = show ? statusText(model, t, role) ?? undefined : undefined;
-    if (text !== lastStatus) {
-      lastStatus = text;
-      try { $.ui.status(text); } catch { /* the next model tries again */ }
-    }
+    updateStatus($, model);
     if (!primed) { primed = true; prevModel = model; return; }
     const moved = surfaceEvents(prevModel, model, role, t);
     prevModel = model;
@@ -1425,6 +1442,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     try {
       noteView(e.viewport);
+      updateStatus($, bandModel);
       const layout = panelLayout(e.props, e.viewport);
       if (layout.focusAgent !== focusAgent) {
         focusAgent = layout.focusAgent;
@@ -1501,6 +1519,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const below = await next(e);
     noteView(e.viewport, e.props.maxRows);
+    updateStatus($, bandModel);
     bandDrawn = false;
     try {
       if (e.props.hasSurvey || !busy || await waypointDraws($) || await read($, hidden)) return below;

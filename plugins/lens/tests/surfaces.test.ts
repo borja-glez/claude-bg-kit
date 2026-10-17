@@ -19,10 +19,10 @@ const status = (task: string, over: object = {}) => JSON.stringify({
 });
 
 // A file system answered from memory: `files` may change between reads; every file was touched a minute ago, with its size.
-function serveFiles(on: On, files: Record<string, string>) {
+function serveFiles(on: On, files: Record<string, string>, touched: string[] = []) {
   on('session.root', () => ({ value: ROOT }));
   on('session.id', () => ({ value: SESSION_ID }));
-  on('fs.read', (_$, e) => { const f = files[norm(e.path)]; return f !== undefined ? { value: f } : { deny: `ENOENT ${e.path}` }; });
+  on('fs.read', (_$, e) => { touched.push(norm(e.path)); const f = files[norm(e.path)]; return f !== undefined ? { value: f } : { deny: `ENOENT ${e.path}` }; });
   on('fs.exists', (_$, e) => { const p = norm(e.path); return { value: p in files || Object.keys(files).some(f => f.startsWith(`${p}/`)) }; });
   on('fs.stat', (_$, e) => {
     const f = files[norm(e.path)];
@@ -185,4 +185,126 @@ test('a forge task this session runs keeps lens reading with the pane closed: it
   expect(await band.find({ key: 'panel' })).toBeDefined();
   await band.unmount();
   expect(lines.at(-1)).toBe('lens · T002 implement');
+});
+
+const BAND_AT = (viewport: { columns: number; rows: number; isFullscreen: boolean }, maxRows = 10) =>
+  ({ plugin: 'lens' as const, surface: 'terminal' as const, component: 'AbovePrompt' as const, props: { ...BAND_PROPS, maxRows }, viewport });
+
+test('the status line follows the view: a first model before any render, then fullscreen and maxRows on a stable stage (fix 1)', async ($, on) => {
+  serveFiles(on, { [T2]: status('T002', { phase: 'review', round: 2 }) });
+  servePanes(on);
+  engineRows(on);
+  const lines: (string | undefined)[] = [];
+  on('ui.status', (_$, e) => { lines.push(e.text); return { value: undefined }; });
+  start(on);
+  await $.session.start(SESSION);
+  // The model is built before any band render: the view is unknown, so no line yet.
+  await $.command.run(RUN);
+  expect(lines.at(-1)).toBeUndefined();
+  let band = await $.ui.mount(BAND_AT({ columns: 105, rows: 30, isFullscreen: false }));
+  await band.unmount();
+  expect(lines.at(-1)).toBe('lens · T002 review r2');
+  band = await $.ui.mount(BAND_AT({ columns: 160, rows: 40, isFullscreen: true }));
+  await band.unmount();
+  expect(lines.at(-1)).toBeUndefined();
+  band = await $.ui.mount(BAND_AT({ columns: 160, rows: 40, isFullscreen: true }, 2));
+  await band.unmount();
+  expect(lines.at(-1)).toBe('lens · T002 review r2');
+  band = await $.ui.mount(BAND_AT({ columns: 160, rows: 40, isFullscreen: true }, 8));
+  await band.unmount();
+  expect(lines.at(-1)).toBeUndefined();
+});
+
+test('an accept written together with doneAt still makes its toast (fix 2)', async ($, on) => {
+  const files: Record<string, string> = { [T2]: status('T002', { phase: 'review', round: 2 }) };
+  serveFiles(on, files);
+  servePanes(on);
+  const toasts: string[] = [];
+  on('ui.toast', (_$, e) => { toasts.push(e.text); return { value: undefined }; });
+  const clock = start(on);
+  await $.session.start(SESSION);
+  await $.command.run(RUN);
+  files[T2] = status('T002', { phase: 'stopped', round: 2, doneAt: at(0), lastAt: at(0), verdict: { action: 'accept', score: 0.9, round: 2, findings: null } });
+  await $.turn.complete(MAIN_TURN);
+  await clock.advance(1000);
+  expect(toasts).toEqual(['T002 · accepted in round 2']);
+});
+
+test('a burst keeps the queue and the joined toast short, and one 5 s gap (fix 3)', async ($, on) => {
+  const files: Record<string, string> = {};
+  const ids = ['T001', 'T002', 'T003', 'T004', 'T005', 'T006', 'T007', 'T008'];
+  for (const id of ids) files[`${ROOT}/.forge/status/${id}.json`] = status(id, { phase: 'review', round: 1 });
+  serveFiles(on, files);
+  servePanes(on);
+  const toasts: { at: number; text: string }[] = [];
+  const clock = start(on);
+  let elapsed = 0;
+  on('ui.toast', (_$, e) => { toasts.push({ at: elapsed, text: e.text }); return { value: undefined }; });
+  await $.session.start(SESSION);
+  await $.command.run(RUN);
+  for (const id of ids) {
+    files[`${ROOT}/.forge/status/${id}.json`] = status(id, { phase: 'implement', round: 2, verdict: { action: 'fix', score: 0.4, round: 1, findings: { critical: 1, important: 2, minor: 0 } } });
+  }
+  await $.turn.complete(MAIN_TURN);
+  for (let i = 0; i < 24; i++) { await clock.advance(500); elapsed += 500; }
+  expect(toasts.length).toBeGreaterThan(0);
+  for (const t of toasts) {
+    expect(t.text.length).toBeLessThanOrEqual(200);
+  }
+  for (let i = 1; i < toasts.length; i++) expect(toasts[i]!.at - toasts[i - 1]!.at).toBeGreaterThanOrEqual(5000);
+});
+
+test('the forge.cjs call heard keeps the tick reading for 10 minutes, and no longer (fix 4)', async ($, on) => {
+  const touched: string[] = [];
+  serveFiles(on, { [T2]: status('T002', { phase: 'stopped', doneAt: at(20), lastAt: at(20) }) }, touched);
+  servePanes(on);
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '{}', stderr: '', interrupted: false } }) as never);
+  const clock = start(on);
+  await $.session.start(SESSION);
+  await $.tool.call({ tool: 'Bash', command: 'node "/x/dist/forge.cjs" prep --task T002-1 --path medium', tool_use_id: 'b1' } as never);
+  await clock.advance(31_000);
+  expect(touched.some(p => p.includes('/.forge'))).toBe(true);
+  await clock.advance(11 * 60_000);
+  touched.length = 0;
+  await clock.advance(90_000);
+  expect(touched.filter(p => p.includes('/.forge'))).toEqual([]);
+});
+
+test('/clear takes the status line away (fix 4)', async ($, on) => {
+  serveFiles(on, { [T2]: status('T002', { phase: 'review', round: 2 }) });
+  servePanes(on);
+  engineRows(on);
+  const lines: (string | undefined)[] = [];
+  on('ui.status', (_$, e) => { lines.push(e.text); return { value: undefined }; });
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }));
+  start(on);
+  await $.session.start(SESSION);
+  const band = await $.ui.mount(BAND_AT({ columns: 105, rows: 30, isFullscreen: false }));
+  await band.unmount();
+  await $.command.run(RUN);
+  expect(lines.at(-1)).toBe('lens · T002 review r2');
+  await $.session.end({ reason: 'clear', sessionId: SESSION_ID, resume: {} as never });
+  expect(lines.at(-1)).toBeUndefined();
+});
+
+test('a notification the terminal cannot send falls back to a toast (fix 4)', async ($, on) => {
+  const PLAN = 'project: shop\nlocale: es\nversion: "0.1"\nversions:\n  - id: "0.1"\n    phases: [F1]\ntracks:\n  - { id: backend, name: Backend, color: blue }\nphases:\n  - { id: F1, name: Base, plan_status: committed }\ntasks:\n  - id: T001\n    title: Esquema\n    track: backend\n    phase: F1\n    done_when: x\n    zones: ["src/**"]\n';
+  const exec = (over: object) => JSON.stringify({
+    runId: 'r1', kind: 'plan', mode: 'subagents', parallel: 3, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false, coordinator: 'main',
+    hookSession: SESSION_ID, active: true, stopReason: null, stallReason: null, startedAt: at(30), lastStepAt: at(1), lastBlockStep: null, sleepUntil: null,
+    tasks: { T001: { status: 'running', stage: 'implement', round: 1, worktree: '/w', branch: 'task/T001', executor: 'subagents', attempts: 0, agent: null, startedAt: at(25), updatedAt: at(1), stageSince: at(1), detail: null } },
+    ...over,
+  });
+  const files: Record<string, string> = { [`${ROOT}/docs/waypoint/shop/plan.yaml`]: PLAN, [`${ROOT}/.forge/execution.json`]: exec({}) };
+  serveFiles(on, files);
+  servePanes(on);
+  const toasts: string[] = [];
+  on('ui.toast', (_$, e) => { toasts.push(e.text); return { value: undefined }; });
+  on('ui.notify', () => ({ value: { isSent: false as const } }) as never);
+  const clock = start(on);
+  await $.session.start(SESSION);
+  await $.command.run(RUN);
+  files[`${ROOT}/.forge/execution.json`] = exec({ active: false, stopReason: 'stalled', stallReason: 'sin señal 12 min', lastStepAt: at(2) });
+  await clock.advance(10_000);
+  expect(toasts).toEqual(['Ejecución parada: sin señal 12 min']);
 });
