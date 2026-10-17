@@ -14135,13 +14135,16 @@ function activityTag(a) {
   const doing = a.job ? VALIDATING2.has(a.job.name) ? "val" : a.job.name === "integrate" ? "int" : a.job.name : a.stage ? STAGE_SHORT[a.stage] ?? a.stage : null;
   return [a.task, doing, a.round ? `r${a.round}` : null].filter(Boolean).join(" ");
 }
-function bandSubject(m) {
+function bandSubject(m, live = {}) {
+  const set2 = (xs, sep) => [...new Set(xs)].sort().join(sep);
+  const agents = () => `agents:${set2(live.agents ?? (m?.subagents ?? []).map((s) => s.id), " ")}`;
   const acts = ownInProgress(m);
-  if (acts.length >= 2) return `tasks:${acts.map((a) => a.key).join(" ")}`;
+  if (acts.length >= 2) return `tasks:${set2(acts.map((a) => a.key), " ")}`;
   const head = m ? headline(m) : null;
-  if (!head) return "agents";
+  if (!head) return agents();
   if (m?.execution?.active) return `run:${m.execution.runId}`;
-  if (head.section === "todos" || head.section === "agents") return head.section;
+  if (head.section === "todos") return `todos:${live.todos ? set2(live.todos, "\n") : String(m?.todos?.total ?? 0)}`;
+  if (head.section === "agents") return agents();
   return `${head.section}:${head.title}`;
 }
 function lensBand(m, t, agentsHeard) {
@@ -14698,12 +14701,16 @@ async function closeBand($, subject) {
   } catch {
   }
 }
+function subjectOf(model) {
+  const todos = Array.isArray(activity.todos) ? activity.todos.map((t) => String(t?.content ?? "")) : [];
+  return bandSubject(model, { todos, agents: activity.subagents.map((s) => s.id) });
+}
 async function bandUp($) {
   if (!busy || await waypointDraws($)) return false;
-  return !(await read($, hidden) && hiddenSubject === bandSubject(bandModel));
+  return !(await read($, hidden) && hiddenSubject === subjectOf(bandModel));
 }
 async function releaseBand($, model) {
-  if (hiddenSubject !== null && hiddenSubject === bandSubject(model)) return;
+  if (hiddenSubject !== null && hiddenSubject === subjectOf(model)) return;
   hiddenSubject = null;
   try {
     if (await read($, hidden)) await update($, hidden, () => false);
@@ -14781,13 +14788,15 @@ async function checkWaypoint($) {
     if (await read($, hidden)) return;
   } catch {
   }
-  let installed = false;
+  let listed = null;
   try {
-    installed = (await $.command.list()).some((c2) => c2.plugin === "waypoint" || c2.name.startsWith("waypoint:"));
+    listed = (await $.command.list()).some((c2) => c2.plugin === "waypoint" || c2.name.startsWith("waypoint:"));
   } catch {
+    listed = null;
   }
-  const loadedChanged = installed !== waypointLoaded;
-  waypointLoaded = installed;
+  const loadedChanged = listed !== null && listed !== waypointLoaded;
+  if (listed !== null) waypointLoaded = listed;
+  const installed = waypointLoaded === true;
   let said = false;
   try {
     said = installed && typeof await read($, waypointDrawn) === "boolean";
@@ -16193,7 +16202,7 @@ export const register = (on) => {
           takeoverAt = at;
         });
       }
-      const subject = bandSubject(bandModel);
+      const subject = subjectOf(bandModel);
       if (await read($, hidden) && hiddenSubject === subject) return below;
       const ui = $.ui.resolve(e);
       const { Box, Button } = ui;

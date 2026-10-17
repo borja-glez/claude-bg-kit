@@ -11718,59 +11718,151 @@ var MORE_HOTKEY = "m";
 var DISMISS_KEY = "dismiss";
 var positive = (v, fallback) => typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : fallback;
 var LABEL_MIN = 1;
+function rowLines(widths, cols) {
+  let lines = 0;
+  let used = 0;
+  for (const w of widths) {
+    if (lines && used + 1 + w <= cols) used += 1 + w;
+    else {
+      lines++;
+      used = w;
+    }
+  }
+  return lines;
+}
+var visibleOf = (c, label, plain) => plain && c.hotkey && c.kind !== "link" && c.kind !== "text" ? `${c.hotkey}: ${label}` : label;
 function fitRow(controls, cols, o) {
+  const lines = Math.max(1, Math.floor(o.lines ?? 1));
   const base = (c) => o.long ? c.label : c.short ?? c.label;
-  const cur = controls.map(base);
-  for (; ; ) {
-    const widths = cur.map((label) => stringWidth(label));
-    const used = cur.reduce((n, label, i) => n + controlWidth(label, { plain: o.plain, hotkey: controls[i].hotkey, kind: controls[i].kind }), 0) + Math.max(0, controls.length - 1);
-    const excess = used - cols;
-    if (excess <= 0) break;
-    let at = -1;
-    widths.forEach((w, i) => {
-      if (w > LABEL_MIN && (at < 0 || w > widths[at])) at = i;
-    });
-    if (at < 0) break;
-    const next = Math.max(0, ...widths.filter((_, i) => i !== at));
-    cur[at] = clipWidth(base(controls[at]), Math.min(widths[at] - 1, Math.max(LABEL_MIN, widths[at] - excess, next)));
+  const forms = controls.map((c) => formsOf(base(c)));
+  const asked = forms.map((f) => f.forms.length - 1);
+  const labelAt = (i, t = asked[i]) => forms[i].forms[t];
+  const cellsAt = (i, t = asked[i]) => {
+    const c = controls[i];
+    const w = forms[i].cells[t];
+    return c.kind === "link" || c.kind === "text" ? w : o.plain ? w + (c.hotkey ? 3 : 0) : w + 4;
+  };
+  const linesWith = (i, t) => rowLines(controls.map((_, j) => j === i ? cellsAt(j, t) : cellsAt(j)), cols);
+  const unique = (i, t) => {
+    const seen = visibleOf(controls[i], labelAt(i, t), o.plain);
+    return controls.every((c, j) => j === i || visibleOf(c, labelAt(j), o.plain) !== seen);
+  };
+  while (rowLines(controls.map((_, j) => cellsAt(j)), cols) > lines) {
+    const order = controls.map((_, i) => i).filter((i) => forms[i].cells[asked[i]] > LABEL_MIN).sort((a, b) => forms[b].cells[asked[b]] - forms[a].cells[asked[a]] || a - b);
+    let cut = false;
+    for (const i of order) {
+      const w = forms[i].cells[asked[i]];
+      const others = controls.map((_, j) => forms[j].cells[asked[j]]).filter((_, j) => j !== i);
+      const floor = Math.max(LABEL_MIN, others.some((x) => x === w) ? w - 1 : Math.max(0, ...others.filter((x) => x < w)));
+      let chosen = -1;
+      for (let t = Math.min(asked[i], w) - 1; t >= floor; t--) {
+        if (labelAt(i, t) === labelAt(i) || !unique(i, t)) continue;
+        chosen = t;
+        if (linesWith(i, t) <= lines) break;
+      }
+      if (chosen < 0) continue;
+      asked[i] = chosen;
+      cut = true;
+      break;
+    }
+    if (!cut) return null;
   }
   const out = {};
   controls.forEach((c, i) => {
-    if (cur[i] !== base(c)) out[c.key] = cur[i];
+    if (labelAt(i) !== base(c)) out[c.key] = labelAt(i);
   });
   return out;
+}
+var FORMS = /* @__PURE__ */ new Map();
+var FORMS_MAX = 500;
+function formsOf(label) {
+  let hit = FORMS.get(label);
+  if (!hit) {
+    const full = stringWidth(label);
+    const forms = [];
+    const cells = [];
+    for (let t = 0; t <= full; t++) {
+      const form = t >= full ? label : clipWidth(label, t);
+      forms.push(form);
+      cells.push(stringWidth(form));
+    }
+    hit = { forms, cells };
+    if (FORMS.size >= FORMS_MAX) FORMS.clear();
+    FORMS.set(label, hit);
+  }
+  return hit;
+}
+function pageRow(controls, cols, o) {
+  const pages = [];
+  const labels = {};
+  let rest = [...controls];
+  while (rest.length) {
+    let n = rest.length;
+    let fit = fitRow(rest, cols, o);
+    if (fit === null) {
+      let lo = 1;
+      let hi = rest.length - 1;
+      n = 1;
+      while (lo <= hi) {
+        const mid = lo + hi >> 1;
+        const tried = fitRow(rest.slice(0, mid), cols, o);
+        if (tried === null) hi = mid - 1;
+        else {
+          fit = tried;
+          n = mid;
+          lo = mid + 1;
+        }
+      }
+    }
+    const page = rest.slice(0, n);
+    if (fit === null) {
+      const only = page[0];
+      const label = o.long ? only.label : only.short ?? only.label;
+      fit = stringWidth(label) > LABEL_MIN ? { [only.key]: clipWidth(label, LABEL_MIN) } : {};
+    }
+    pages.push(page.map((c) => c.key));
+    Object.assign(labels, fit);
+    rest = rest.slice(n);
+  }
+  return { pages, labels };
 }
 function layoutBand(parts, controls, o) {
   const cols = positive(o.bodyColumns, DEFAULT_COLUMNS);
   const maxRows = positive(o.maxRows, 10);
   const plain = !o.fullscreen;
   const lead = o.lead ?? 0;
+  const lines = maxRows >= ONE_ROW_BELOW ? 2 : 1;
   const width = (cs, long) => cs.reduce((n, c) => n + 1 + controlWidth(long ? c.label : c.short ?? c.label, { plain, hotkey: c.hotkey, kind: c.kind }), 0);
   const keys = (cs) => cs.map((c) => c.key);
   const core = parts.filter((p) => p.prio <= 4);
   let level = bandLevel({ bodyColumns: cols, maxRows, fullscreen: o.fullscreen });
   if (level === "wide") {
     const room2 = cols - lead - width(controls, true);
-    if (partsWidth(core) <= room2) return { level, plain, long: true, shown: fitParts(parts, room2).shown, inline: keys(controls), second: [], more: false, labels: {} };
+    if (partsWidth(core) <= room2) return { level, plain, long: true, shown: fitParts(parts, room2).shown, inline: keys(controls), second: [], more: false, labels: {}, pages: 1 };
     level = "two";
   }
   if (level === "two") {
-    return { level, plain, long: false, shown: fitParts(parts, cols - lead).shown, inline: [], second: keys(controls), more: false, labels: fitRow(controls, cols, { plain, long: false }) };
+    const labels = fitRow(controls, cols, { plain, long: false, lines });
+    if (labels) return { level, plain, long: false, shown: fitParts(parts, cols - lead).shown, inline: [], second: keys(controls), more: false, labels, pages: 1 };
+    level = "one";
   }
   const room = cols - lead - width(controls, false);
-  if (partsWidth(core) <= room) return { level, plain, long: false, shown: fitParts(parts, room).shown, inline: keys(controls), second: [], more: false, labels: {} };
+  if (partsWidth(core) <= room) return { level, plain, long: false, shown: fitParts(parts, room).shown, inline: keys(controls), second: [], more: false, labels: {}, pages: 1 };
   const dismiss = controls.filter((c) => c.key === DISMISS_KEY);
   const rest = controls.filter((c) => c.key !== DISMISS_KEY);
   const folded = cols - lead - (1 + controlWidth(MORE_LABEL, { plain, hotkey: MORE_HOTKEY })) - width(dismiss, false);
+  const paged = pageRow(rest, cols, { plain, long: false, lines });
+  const page = paged.pages[Math.min(paged.pages.length - 1, Math.max(0, Math.floor(Number(o.page) || 0)))] ?? [];
   return {
     level,
     plain,
     long: false,
     shown: fitParts(parts, folded).shown,
     inline: keys(dismiss),
-    second: o.moreOpen ? keys(rest) : [],
+    second: o.moreOpen ? page : [],
     more: true,
-    labels: o.moreOpen ? fitRow(rest, cols, { plain, long: false }) : {}
+    labels: o.moreOpen ? Object.fromEntries(Object.entries(paged.labels).filter(([k]) => page.includes(k))) : {},
+    pages: Math.max(1, paged.pages.length)
   };
 }
 
@@ -12448,7 +12540,7 @@ async function dismissNotice($, n) {
   }
 }
 var drawnGen = 0;
-var renderFailed = false;
+var failedOn = /* @__PURE__ */ new Set();
 var expiry = null;
 var EXPIRY_MAX_MS = 2 * 24 * 36e5;
 function watchExpiry($, ms) {
@@ -12465,7 +12557,7 @@ async function publishDrawn($) {
   const gen = ++drawnGen;
   try {
     const m = await read($, band);
-    let shown = !renderFailed && !await read($, hidden) && m.mode !== "none";
+    let shown = failedOn.size === 0 && !await read($, hidden) && m.mode !== "none";
     if (shown && m.mode === "notice") {
       if (!dismissalsLoaded) await readDismissals($);
       const key = dismissalKey(await rootOf($), m.project, m.kind, m.key);
@@ -12479,13 +12571,15 @@ async function publishDrawn($) {
   } catch {
   }
 }
-function noteDrawing($, ok) {
-  if (renderFailed === !ok) return;
-  renderFailed = !ok;
-  void publishDrawn($);
+function noteDrawing($, surface, ok) {
+  const before = failedOn.size > 0;
+  if (ok) failedOn.delete(String(surface));
+  else failedOn.add(String(surface));
+  if (before !== failedOn.size > 0) void publishDrawn($);
 }
 var MORE_OPEN_MS = 3e4;
 var moreUntil = 0;
+var morePage = 0;
 var CONFIRM_MS = 5e3;
 var armed = null;
 var refreshPending = false;
@@ -12581,17 +12675,28 @@ async function copyUrl($, url, surface, copied, shown) {
   } catch {
   }
 }
-async function toggleMore($) {
+async function toggleMore($, pages) {
   const now = await nowMs($);
-  moreUntil = now < moreUntil ? 0 : now + MORE_OPEN_MS;
+  const open = now < moreUntil;
+  if (open && morePage + 1 < pages) morePage++;
+  else if (open) {
+    moreUntil = 0;
+    morePage = 0;
+  } else morePage = 0;
+  if (open && !moreUntil) {
+    $.ui.invalidate("ui.render");
+    return;
+  }
+  moreUntil = now + MORE_OPEN_MS;
   $.ui.invalidate("ui.render");
-  if (moreUntil) $.clock.after(MORE_OPEN_MS, () => {
+  $.clock.after(MORE_OPEN_MS, () => {
     $.ui.invalidate("ui.render");
   });
 }
 function closeMore($) {
   if (moreUntil) {
     moreUntil = 0;
+    morePage = 0;
     $.ui.invalidate("ui.render");
   }
 }
@@ -12611,7 +12716,9 @@ var TONE = {
 export const register = (on) => {
   on("session.start", async ($, e, next) => {
     moreUntil = 0;
+    morePage = 0;
     armed = null;
+    failedOn.clear();
     try {
       await update($, hidden, () => false);
     } catch {
@@ -12781,7 +12888,7 @@ export const register = (on) => {
       };
       const panel = lens ? [{ key: "panel", label: t.panel, hotkey: "p", press: submit("/lens") }] : [];
       const controls = [...modeControls, ...panel, { key: DISMISS_KEY, label: "\xD7", hotkey: "x", dismiss: true, press: dismiss }];
-      const lay = layoutBand(bandParts(m, now), controls, { bodyColumns: e.props.bodyColumns, maxRows: e.props.maxRows, fullscreen, moreOpen: now < moreUntil });
+      const lay = layoutBand(bandParts(m, now), controls, { bodyColumns: e.props.bodyColumns, maxRows: e.props.maxRows, fullscreen, moreOpen: now < moreUntil, page: morePage });
       const act = (c) => (pressed) => {
         if (!c.confirm) closeMore($);
         c.press(pressed);
@@ -12815,12 +12922,12 @@ export const register = (on) => {
         return p.hue ? /* @__PURE__ */ h(Text, { key: `part-${p.key}`, ...TONE[p.hue] }, text2) : text2;
       }));
       const tree = /* @__PURE__ */ h(Box, { flexDirection: "column" }, /* @__PURE__ */ h(Box, { key: "band-row", flexDirection: "row", columnGap: 1 }, /* @__PURE__ */ h(Box, { key: "band-line", flexShrink: 1, minWidth: 0 }, line), drawKeys(lay.inline.filter((k) => k !== DISMISS_KEY)), lay.more ? /* @__PURE__ */ h(Button, { key: MORE_KEY, label: MORE_LABEL, hotkey: MORE_HOTKEY, ...plain, onPress: () => {
-        void toggleMore($);
+        void toggleMore($, lay.pages);
       } }) : null, drawKeys(lay.inline.filter((k) => k === DISMISS_KEY))), lay.second.length ? /* @__PURE__ */ h(Box, { key: "band-row2", flexDirection: "row", flexWrap: "wrap", columnGap: 1 }, drawKeys(lay.second)) : null, below);
-      noteDrawing($, true);
+      noteDrawing($, e.surface, true);
       return tree;
     } catch {
-      noteDrawing($, false);
+      noteDrawing($, e.surface, false);
       return below;
     }
   });
