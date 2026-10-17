@@ -12657,15 +12657,17 @@ function pendingProposals(changelog, critiques, dismissed = {}) {
   }
   return out;
 }
+function handEditOf(changelog, texts = {}) {
+  const snapshot = texts.history?.[changelog[changelog.length - 1]?.version ?? 0];
+  if (texts.current === void 0 || snapshot === void 0) return false;
+  const edit = changedSections(designBody(snapshot), designBody(texts.current));
+  return edit.changed.length > 0 || edit.removed.length > 0;
+}
 function needsVerifyOf(changelog, critiques, texts = {}) {
   const top = [...critiques].filter((c) => c.critique !== null).sort((a, b) => b.round - a.round)[0]?.critique;
   if (!top) return false;
   const version = changelog[changelog.length - 1]?.version ?? 0;
-  const snapshot = texts.history?.[version];
-  if (texts.current !== void 0 && snapshot !== void 0) {
-    const edit = changedSections(designBody(snapshot), designBody(texts.current));
-    if (edit.changed.length > 0 || edit.removed.length > 0) return true;
-  }
+  if (handEditOf(changelog, texts)) return true;
   if (top.version >= version) return false;
   const before = texts.history?.[top.version];
   const after = texts.current ?? texts.history?.[version];
@@ -12711,6 +12713,7 @@ function designGate(changelog, given, dismissed = {}, texts = {}) {
     majorPending,
     invalid: critiques.filter((c) => c.critique === null).map((c) => c.round).sort((a, b) => a - b),
     needsVerify,
+    handEdit: handEditOf(changelog, texts),
     canAutoApprove: latest !== null && criticalPending.length === 0 && majorPending.length === 0 && !needsVerify && latestCritiqueVersion !== null && latestCritiqueVersion <= version,
     // Final review M4: what each pending proposal says goes to the critic and to the approve line, so it is one clean
     // line like the other lists; the list and its counts stay whole, so an old pending proposal is never hidden.
@@ -15591,6 +15594,19 @@ function run(argv, io) {
     }
     return { sid, task, v };
   };
+  const readDesignArg = (cmd2, arg) => {
+    let text;
+    try {
+      text = (0, import_node_fs7.readFileSync)(abs(arg), "utf8");
+    } catch (e) {
+      return fail(`${cmd2}: cannot read the design ${arg}: ${e.message}`, 2);
+    }
+    try {
+      return parseDesign(text);
+    } catch (e) {
+      return fail(`${cmd2}: ${arg} is not a design: ${e.message}`, 2);
+    }
+  };
   const planHas = (task) => loadView().view.tasks.some((t) => t.id === task);
   const mirror = (batch) => {
     const db = flag("db");
@@ -15607,18 +15623,8 @@ warning: ${loose.length} task(s) without zones run alone in a forge execution: $
         const designArg = flag("design");
         if (args.includes("--design") && (!designArg || designArg.startsWith("--"))) return fail("validate: --design needs the design file", 2);
         if (designArg) {
-          let text;
-          try {
-            text = (0, import_node_fs7.readFileSync)(abs(designArg), "utf8");
-          } catch (e) {
-            return fail(`validate: cannot read the design ${designArg}: ${e.message}`, 2);
-          }
-          let design;
-          try {
-            design = parseDesign(text);
-          } catch (e) {
-            return fail(`validate: ${designArg} is not a design: ${e.message}`, 2);
-          }
+          const design = readDesignArg("validate", designArg);
+          if ("code" in design) return design;
           const slugs = /* @__PURE__ */ new Set(["_intro", ...design.sections.map((s) => s.slug)]);
           const unknown = p.tasks.filter((t) => t.design_ref && !slugs.has(t.design_ref)).map((t) => `${t.id} (${t.design_ref})`);
           if (unknown.length) refs = `
@@ -16342,18 +16348,8 @@ warning: artifacts.design is not the design's artifact: set it to ${line(design.
         const sinceFlag = flag("since");
         if (sinceFlag !== void 0 && !/^[1-9]\d*$/.test(sinceFlag)) return fail("design-impact: --since must be a positive integer", 2);
         const file = abs(args[0]);
-        let designText;
-        try {
-          designText = (0, import_node_fs7.readFileSync)(file, "utf8");
-        } catch (e) {
-          return fail(`design-impact: cannot read the design ${args[0]}: ${e.message}`, 2);
-        }
-        let d;
-        try {
-          d = parseDesign(designText);
-        } catch (e) {
-          return fail(`design-impact: ${args[0]} is not a design: ${e.message}`, 2);
-        }
+        const d = readDesignArg("design-impact", args[0]);
+        if ("code" in d) return d;
         let plan;
         try {
           plan = parsePlan((0, import_node_fs7.readFileSync)(abs(flag("plan")), "utf8"));
@@ -16448,7 +16444,7 @@ warning: artifacts.design is not the design's artifact: set it to ${line(design.
             const sections = designParsed.sections;
             for (const s of sections) headings[s.slug] = s.heading;
             const slugs = /* @__PURE__ */ new Set(["_intro", ...sections.map((s) => s.slug)]);
-            for (const p of c.proposals) if (!slugs.has(p.section)) issues.push(`proposal ${p.n}: section "${p.section}" is not a section slug of the design`);
+            for (const p of c.proposals) if (!slugs.has(p.section)) issues.push(`proposal ${p.n}: section "${line(p.section)}" is not a section slug of the design`);
           }
           if (issues.length) throw new CritiqueError(issues);
           const warnings = [];
@@ -16463,7 +16459,12 @@ warning: artifacts.design is not the design's artifact: set it to ${line(design.
 ` : "" };
         } catch (e) {
           if (!(e instanceof CritiqueError) || !args.includes("--reject-on-fail") || !(0, import_node_fs7.existsSync)(target)) throw e;
-          const rejected = import_node_path8.default.join(import_node_path8.default.dirname(target), `${import_node_path8.default.basename(target).replace(/\.json$/i, "")}.rejected.json`);
+          const name = import_node_path8.default.basename(target);
+          if (!CRITIQUE_FILE.test(name) && !LEGACY_CRITIQUE_FILE.test(name)) {
+            return fail(`${e.message}
+critique-check: ${target} is not a critique round file (r<N>.json or critique-r<N>.json): not set aside`);
+          }
+          const rejected = import_node_path8.default.join(import_node_path8.default.dirname(target), `${name.slice(0, -".json".length)}.rejected.json`);
           (0, import_node_fs7.rmSync)(rejected, { force: true });
           (0, import_node_fs7.renameSync)(target, rejected);
           return fail(`${e.message}
