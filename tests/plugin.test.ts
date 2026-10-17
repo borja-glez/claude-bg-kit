@@ -1354,6 +1354,9 @@ describe('plugin layout', () => {
     // It binds first, as execution.md step 1 does: a conversation resumed after /clear holds no binding. An ephemeral run binds at its start too.
     expect(res.slice(res.indexOf('## /forge:run --resume'))).toContain('bind <plan> --via forge-run --claude <CSID>');
     expect(runRef('ephemeral').split('\n').find(l => l.startsWith('2. **Start.**'))).toContain('bind <plan> --via forge-run --claude <CSID>');
+    // Final review 1: an ended run whose coordinator is still on it is left to that conversation (swarm status's coordinator).
+    const step4 = res.slice(res.indexOf('## /forge:run --resume')).split('\n').find(l => l.startsWith('4. '))!;
+    for (const w of ['`coordinator.liveness`', '`hookSession`', '<CSID>', 'claude --resume <hookSession>']) expect(step4, w).toContain(w);
   });
   it('READMEs describe wave 2c: cleanup, stop from any worktree, routes per session, work folders by project and resumed tasks', () => {
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {

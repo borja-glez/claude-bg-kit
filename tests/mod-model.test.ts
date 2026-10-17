@@ -468,6 +468,12 @@ describe('buildBandModel · notices (B-02, B-07, K3-13, K5-02)', () => {
     // Its coordinator still sees it as its own run.
     expect(buildBandModel('demo-shop', { ...f({ lastStepAt: dead }), sessionId: 's1' })).toMatchObject({ mode: 'run', viewer: { coordinator: true } });
   });
+  it('an active run no session is bound to has no coordinator at once: the previous notice, which offers [Resume] (final review, item 9)', () => {
+    const f: BandFiles = { ...empty, plan, sessionId: 'B', execution: EXEC({ hookSession: null, lastStepAt: ago(1) }) };
+    expect(buildBandModel('demo-shop', f)).toMatchObject({
+      mode: 'notice', kind: 'previous', subject: 'run', runId: 'r1', stopReason: null, viewer: { role: 'previous', coordinator: false, runId: 'r1' },
+    });
+  });
   it("an open coordinator conversation, waiting 20 minutes on the person, keeps its run: its own live binding, read raw (no pid check)", () => {
     const f = (coordinatorBindings: Record<string, string>): BandFiles => ({ ...empty, plan, sessionId: 'B', execution: EXEC({ lastStepAt: ago(20) }), coordinatorBindings });
     // Bound in any project and seat, with any via; the band cannot check a pid, so a dead one does not end it here.

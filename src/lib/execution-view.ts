@@ -101,20 +101,24 @@ export interface CoordinatorActivity {
 
 /**
  * The liveness of run `e`'s coordinator by the rule coordinatorGone decides with, which `swarm takeover` and a resume
- * from another session report: stopped once its conversation ended (its own signal says so); alive while that
- * conversation is open (a live binding of its own) or waits on a background job (`activity`); else as the run band
- * draws it (coordinatorOf, counted from its last step or its start).
+ * from another session report: stopped at once for an active run no session is bound to (`hookSession` null: no Stop
+ * hook steps it, and forge tells the person to resume it); stopped once its conversation ended (its own signal says
+ * so); alive while that conversation is open (a live binding of its own) or waits on a background job (`activity`);
+ * else as the run band draws it (coordinatorOf, counted from its last step or its start). A signal of another session
+ * says nothing of it.
  */
 export function coordinatorLiveness(e: ExecutionState, signal: LiveDoc | null, now: number, activity: CoordinatorActivity = {}): Liveness {
-  const own = e.hookSession ? signal : null;
+  if (e.active && !e.hookSession) return 'stopped';
+  const own = e.hookSession && signal?.sessionId === e.hookSession ? signal : null;
   if (own?.ended === true) return 'stopped';
   const open = !!e.hookSession && (activity.bindings ?? []).some(b => b.claude === e.hookSession && bindingLive(b, now));
   return e.active && (open || activity.busy === true) ? 'alive' : coordinatorOf(e, own ? [own] : [], now, lastMovedAt(e)).liveness;
 }
 
 /**
- * B-09, M4: run `e` has no coordinator when its conversation ended (its own signal says so), or when the run is active
- * and its coordinator went silent: the run band would draw it stopped (no step nor signal for LIVE_STOPPED_MINUTES, no
+ * B-09, M4: run `e` has no coordinator when its conversation ended (its own signal says so), when the run is active
+ * and no session is bound to it (coordinatorLiveness), or when the run is active and its coordinator went silent: the
+ * run band would draw it stopped (no step nor signal for LIVE_STOPPED_MINUTES, no
  * agent it started still running) and its conversation is not open (no live binding of its own). A run that never
  * stepped counts from its start, as `swarm takeover` does. `signal` is the coordinator's own live/<hookSession>.json and
  * `activity.bindings` its bindings, the files the band and waypoint's hooks both read, so describeViewer gets the same
@@ -125,7 +129,7 @@ export function coordinatorLiveness(e: ExecutionState, signal: LiveDoc | null, n
  */
 export function coordinatorGone(e: ExecutionState | null, signal: LiveDoc | null, now: number, activity: CoordinatorActivity = {}): boolean {
   if (!e) return false;
-  if (e.hookSession && signal?.ended === true) return true;
+  if (e.hookSession && signal?.sessionId === e.hookSession && signal.ended === true) return true;
   return e.active && coordinatorLiveness(e, signal, now, activity) === 'stopped';
 }
 

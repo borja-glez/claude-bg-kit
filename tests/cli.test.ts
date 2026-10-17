@@ -5,6 +5,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { run, isCommitCommand, type Io } from '../src/cli/run.js';
 import { makesCommits, readForge } from '../src/cli/hooks.js';
+import { describeViewer } from '../src/lib/viewer-role.js';
 import { parsePlan } from '../src/lib/plan.js';
 import { launchRun, HERDR_TEMPLATE } from '../src/lib/launcher.js';
 import { buildDocs, planHash } from '../src/lib/sync.js';
@@ -1391,6 +1392,15 @@ describe('classic hooks', () => {
         // Another conversation's live binding says nothing of the coordinator.
         bindAs('someone-else', {}, 'main-2', seat);
         expect(gone()).toBe(true);
+      });
+      it('an active run no session is bound to has no coordinator at once: another session is its previous, whose text forge gives (final review, item 9)', () => {
+        forge('execution.json', exec({ hookSession: null, lastStepAt: ago(1) }));
+        const f = readForge(dir, 'demo-shop', NOW);
+        expect(f.coordinatorEnded).toBe(true);
+        expect(describeViewer({ bound: null, execution: f.exec, members: [], sessionId: 'someone-else', now: NOW, coordinatorEnded: f.coordinatorEnded }))
+          .toMatchObject({ role: 'previous', subject: 'execution' });
+        // B-10: waypoint's SessionStart leaves a run's text to forge's live hook.
+        expect(hook('session-start', { session_id: 'someone-else', source: 'startup' }).stdout).toBe('');
       });
       it('a closed execution or a broken execution.json gives no forge role: the owner is reminded as before', () => {
         bindAs('claude-coord');

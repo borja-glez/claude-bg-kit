@@ -210,7 +210,15 @@ describe('coordinatorGone (B-09, M4): a run without its coordinator, for the ban
   it('its own signal says its conversation ended, whatever the run', () => {
     expect(coordinatorGone(exec(), idle(-1, true), NOW)).toBe(true);
     expect(coordinatorGone(exec({ active: false, stopReason: 'stopped' }), idle(-1, true), NOW)).toBe(true);
-    expect(coordinatorGone(exec({ hookSession: null }), idle(-1, true), NOW)).toBe(false);
+    // A signal that is not the bound session's says nothing of its conversation.
+    expect(coordinatorGone(exec(), { ...idle(-1, true), sessionId: 'other' }, NOW)).toBe(false);
+  });
+  it('an active run no session is bound to has no coordinator at once, whatever its last step (final review, item 9)', () => {
+    expect(coordinatorLiveness(exec({ hookSession: null, lastStepAt: at(-1) }), null, NOW)).toBe('stopped');
+    expect(coordinatorGone(exec({ hookSession: null, lastStepAt: at(-1) }), null, NOW)).toBe(true);
+    expect(coordinatorGone(exec({ hookSession: null }), idle(-1, true), NOW)).toBe(true);
+    // An ended one stopped: it is not «without a coordinator».
+    expect(coordinatorGone(exec({ hookSession: null, active: false, stopReason: 'stalled' }), null, NOW)).toBe(false);
   });
   it('an active run whose coordinator the run band draws stopped: no step nor signal for 12 minutes, no agent running', () => {
     expect(coordinatorGone(exec({ lastStepAt: at(-3 * 24 * 60) }), null, NOW)).toBe(true);

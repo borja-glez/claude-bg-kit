@@ -322,6 +322,12 @@ function boundLiveness(root: string, e: ExecutionState, now: number): Liveness {
   return coordinatorLiveness(e, signal, now, activity);
 }
 
+/** Why `swarm <sub>` refuses a run whose bound Claude session (`hookSession`, of `liveness`) may still step it, and how to go on. */
+function boundElsewhere(sub: string, runId: string, hookSession: string, liveness: Liveness): string {
+  return `swarm ${sub}: the execution ${runId} is bound to another Claude session (${hookSession}, ${liveness}): if that conversation is still open, go on from it; ` +
+    `if it was closed or crashed, \`claude --resume ${hookSession}\` to go on at once; otherwise wait about 12 min from its last step, then run /forge:run --resume again`;
+}
+
 /** What `tick` and `next` schedule from: the plan, the roadmap listings and the done commits already on the run branch. */
 function readTickInput(io: Io, deps: SwarmDeps, e: ExecutionState, planArg: string | undefined, db: string | undefined, sub: string) {
   const plan = loadPlanArg(io, planArg, sub);
@@ -1046,7 +1052,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       // goes on under the same id, so it needs no rebind.
       if (resume && prev && prev.hookSession !== null && prev.hookSession !== hook) {
         const liveness = boundLiveness(io.cwd, prev, now.getTime());
-        if (liveness !== 'stopped') throw new UsageError(`swarm start: the execution ${prev.runId} is bound to another Claude session (${prev.hookSession}, ${liveness}): if that conversation is still open, go on from it; if it was closed or crashed, \`claude --resume ${prev.hookSession}\` to go on at once; otherwise wait about 12 min from its last step, then run /forge:run --resume again`);
+        if (liveness !== 'stopped') throw new UsageError(boundElsewhere('start', prev.runId, prev.hookSession, liveness));
       }
       if (kind === 'ephemeral') {
         if (resume && prev) {
@@ -1162,7 +1168,13 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       const state = readExecution(main);
       // §4.6: an active execution that no session drives (forge 0.15 left it unbound) says so.
       const unbound = !!state?.active && state.hookSession === null;
-      return json({ present: state !== null, state, ...(state ? { work: tasksWork(main, state) } : {}), ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}) });
+      // Final review 1: the Claude session bound to a run that is not closed, and how alive it is judged as if the run
+      // were active, so /forge:run --resume leaves an ended run to a coordinator still on it.
+      const coordinator = state && !state.closedAt ? { hookSession: state.hookSession, liveness: boundLiveness(main, { ...state, active: true }, now.getTime()) } : null;
+      return json({
+        present: state !== null, state, ...(state ? { work: tasksWork(main, state) } : {}), ...(coordinator ? { coordinator } : {}),
+        ...(unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}),
+      });
     }
     case 'propose': {
       const plan = !flag('plan') && has('tasks') ? planOfLoose(loadTasksArg(io, flag('tasks'), 'propose')) : loadPlanArg(io, flag('plan'), 'propose');
@@ -1296,9 +1308,18 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       const e = current();
       const t = e.tasks[task];
       if (e.closedAt) throw new UsageError(`swarm retry: the execution ${e.runId} is closed; start a new one`);
+      // K2-02: a stopped run moves no task (an integrate that ended in conflict after forge stop wakes its coordinator).
+      notEnded(e);
       // Checked on the read above and again under the lock, on the task as it is then: a write that landed since is
       // kept, and a task no longer in that state is left alone (I-15). Only an execution still stalled then is revived.
       const revived = (x: ExecutionState) => !x.active && x.stopReason === 'stalled';
+      // Final review 1: swarm start's rule, before anything moves. Reviving a stalled run from another Claude session
+      // while its bound one may still step it (finishing it, or waiting on the person) leaves two sessions on it. The
+      // coordinator's own retry (its conflict path) passes its own id; one back from /clear has an ended signal.
+      if (revived(e) && e.hookSession && claudeSessionId(flag('hook-session'), io.env ?? process.env) !== e.hookSession) {
+        const liveness = boundLiveness(io.cwd, { ...e, active: true }, now.getTime());
+        if (liveness !== 'stopped') throw new UsageError(boundElsewhere('retry', e.runId, e.hookSession, liveness));
+      }
       if (has('adopt')) {
         const adoptable = (x: ExecTask | undefined): x is ExecTask => !!x && x.status === 'conflict' && x.executor !== 'subagents';
         const notAdoptable = (x: ExecTask | undefined) =>
@@ -1319,6 +1340,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
         let adopted = t;
         update(cur => {
           if (!cur) return null;
+          notEnded(cur);
           const base = cur.tasks[task] ?? t;
           if (!adoptable(base)) throw notAdoptable(base);
           adopted = base;
@@ -1335,6 +1357,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       if (!retryable(t)) throw new UsageError(`swarm retry: ${task} is not in conflict or blocked`);
       update(cur => {
         if (!cur) return null;
+        notEnded(cur);
         const base = cur.tasks[task] ?? t;
         if (!retryable(base)) throw new UsageError(`swarm retry: ${task} is not in conflict or blocked`);
         return {
@@ -1569,6 +1592,6 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
     case 'merge':
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError('usage: forge swarm <start --project P --session SID --hook-session ID [--plan P] [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F [--locale es|en]|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|step --plan P --db DIR [--agents F] [--returned T1,T2] [--versions F] [--locale es|en]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps] [--no-cache]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|cleanup [--dry-run]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID>');
+      throw new UsageError('usage: forge swarm <start --project P --session SID --hook-session ID [--plan P] [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F [--locale es|en]|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|step --plan P --db DIR [--agents F] [--returned T1,T2] [--versions F] [--locale es|en]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps] [--no-cache]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt] [--hook-session ID]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|cleanup [--dry-run]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID>');
   }
 }
