@@ -7,7 +7,7 @@ The model and effort in use, the roadmap, forge stages and executions, superpowe
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.12.0](https://img.shields.io/badge/version-0.12.0-b4befe?style=flat-square)
+![version 0.13.0](https://img.shields.io/badge/version-0.13.0-b4befe?style=flat-square)
 ![no token cost](https://img.shields.io/badge/token%20cost-none-a6e3a1?style=flat-square)
 
 </div>
@@ -40,7 +40,10 @@ lens detects [waypoint](../waypoint/README.md), [forge](../forge/README.md) and 
 
 ## Usage
 
-- `/lens` opens the side panel. With waypoint installed, the **Panel** button in its band does the same.
+- `/lens` opens the side panel where it docks: in fullscreen, from 110 columns. Outside fullscreen, or narrower, it leaves a **photo** of the panel in the transcript instead: one line, `lens · 14:02:11 #1 · 3 tasks`, drawn as the cards by a `CommandOutput` hook, still; the files are read once and nothing is written. `/lens live` opens the pane anyway (inline above the prompt where it does not dock), and `/lens photo` (or `/lens foto`) always takes the photo. The **Panel** button of either band does what `/lens` would.
+- Inline, the pane asks for the rows its cards take (between 6 and a third of the screen), draws them without a frame and ends with `↓ N more · /lens photo` when they do not fit; docked, it asks for 56 columns. It is closed with the engine's own mark (or `ctrl+x x`). A long row of task boxes keeps two rows, the rest summed up (`+42 ■ · 12 □`), and the agent you look at expands its task.
+- **Keyboard.** Outside fullscreen a click does not reach the band: `ctrl+x tab` gives it the keyboard, its buttons read `p: Panel` and `x: ×`, and the hint line under the prompt ends with `ctrl+x tab · band`. With the pane focused, Tab walks its buttons (the proposals' Approve and Reject have no letter).
+- **One line.** Outside fullscreen, or with fewer than 3 rows above the prompt, lens keeps a status line under the prompt (`$.ui.status`) while this session has forge work of its own: `lens · T002 review r2 · 3 subagents · $1.20`. While a turn runs, the spinner names the task (`T002 · review r2`) when the engine has nothing of its own to say, and forge's auto mode and the infinite run show as mode labels (`forge auto`, `∞ 2/5`). A toast says when a task of this session gets a verdict (never its score), starts a new review round or is integrated, at most one every 5 seconds, and a notification says when a run of yours of 20 minutes or more ends.
 - The panel and the band are drawn in the terminal and in the Code tab of the desktop app.
 
 | Where | How it looks |
@@ -93,7 +96,7 @@ lens measures from the moment it loads, from Claude Code's per-request token cou
 
 ## The band
 
-When Claude has open todos or running subagents, and waypoint is not drawing its own band, lens draws a band above the prompt. It shows the most specific run going on (an active forge execution, else forge's last task, the roadmap, superpowers or the todos) with its bar, its task boxes and its count, then this session's usage (`· 1.8M tok · $6.2`), **Panel** and **×**. **×** hides it until the next session.
+When Claude has open todos, running subagents or a forge task of this session in progress, and waypoint is not drawing its own band (waypoint says so; its band closed with **×** counts as not drawn), lens draws a band above the prompt. It names this session's tasks in progress one by one (`T001 impl · T002 rev r2 · T003 val`), or else the most specific run going on (an active forge execution, forge's task, the roadmap, superpowers or the todos) with its count, then the subagents and this session's usage (`· 1.8M tok · $6.2`), **Panel** (`p`) and **×** (`x`), all fitted to the width as waypoint's band is; its bar and task boxes show only from 140 columns. **×** hides it until the next session.
 
 ## How it reads
 

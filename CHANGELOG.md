@@ -13,6 +13,20 @@ elsewhere and are reconstructed from their READMEs.
 
 ## waypoint
 
+### 0.25.0 — 2026-10-17
+
+#### Added
+- Band buttons have hotkeys and fit the width; one-row band outside fullscreen; Stop asks for confirmation.
+- The band is a line of parts with a priority, fitted to the cells it has: the least important take a short form and then go, while a pending decision, a silent run and the inbox go last. From 140 columns it is one row with the full buttons, from 90 two rows with short labels; narrower, with fewer than 3 rows above the prompt or outside fullscreen, one row whose buttons fold into ⋯ (`m`).
+- Every button has a letter (`n`, `s`, `l`, `r`, `t`, `p`, `x`; `a`, `e`, `o`, `w`, `i`, `y`, `d` in design; `v`, `j`, `e`, `f`, `c` in a notice), drawn `n: Next` outside fullscreen, where the hint line ends with `ctrl+x tab · band` and Roadmap and Design copy their address.
+- The run band shows every slot (up to 12, `+N` for those that do not fit), one integrated count and those waiting to integrate; its model gains `queued`.
+- The band publishes whether it is drawn (`{ plugin: 'waypoint', key: 'drawn' }`), so lens draws its own band when this one is closed.
+
+#### Changed
+- Stop (`t`), and Close on a run still active, ask twice: the first press shows a toast, the second within 5 seconds runs `/forge:stop`. `x` closes the band in every mode.
+- A task's clock reads hours and minutes (`9 h 58 m / 30 m`), amber past its estimate; a notice's age is a part of its own (`· 2 h ago`).
+- The band's glyphs are one cell wide: ▲, ✎ and ► instead of the warning sign, the envelope and the play button.
+
 ### 0.24.0 — 2026-10-17
 
 #### Added
@@ -244,6 +258,11 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.21.1 — 2026-10-17
+
+#### Changed
+- Requires waypoint ^0.25.0.
 
 ### 0.21.0 — 2026-10-17
 
@@ -654,6 +673,20 @@ elsewhere and are reconstructed from their READMEs.
 - Requires waypoint ^0.7.0.
 
 ## lens
+
+### 0.13.0 — 2026-10-17
+
+#### Added
+- `/lens` leaves a snapshot in the transcript outside fullscreen; `/lens live` opens the pane; status line, spinner and mode label.
+- `/lens photo` (or `/lens foto`) always takes the snapshot: the files are read once and a `CommandOutput` hook draws the cards, still; at most 20 are kept.
+- Outside fullscreen, or with fewer than 3 rows above the prompt, a status line sums up this session's forge work; the spinner names the task in progress, and forge's auto mode and the infinite run are mode labels. A toast says when a task of this session gets a verdict (never its score), starts a new round or is integrated, at most one every 5 seconds, and a notification says when a run of yours of 20 minutes or more ends.
+
+#### Changed
+- The pane asks for its rows and, inline, draws its cards without a frame and ends with `↓ N more`; its own close row is gone (the engine's mark closes it). The agent you look at expands its task and puts it first.
+- The band names this session's tasks in progress (`T001 impl · T002 rev r2`), fits its width as waypoint's does and draws its bar and boxes only from 140 columns; its buttons have letters (`p`, `x`).
+- A long row of boxes keeps two rows, the rest summed up (`+42 ■ · 12 □`); the execution card counts what is integrated, as the band does.
+- lens draws its band when waypoint's is closed with × or a notice of it was dismissed, and a forge task of this session keeps it reading with no subagent nor todo.
+- The glyphs are one cell wide: ▲, ✎, ◷ and ►.
 
 ### 0.12.0 — 2026-10-17
 

@@ -7,8 +7,8 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.21.0](https://img.shields.io/badge/versi%C3%B3n-0.21.0-fab387?style=flat-square)
-![depende de waypoint ^0.24.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.24.0-cba6f7?style=flat-square)
+![versión 0.21.1](https://img.shields.io/badge/versi%C3%B3n-0.21.1-fab387?style=flat-square)
+![depende de waypoint ^0.25.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.25.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -49,7 +49,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depende de [waypoint](../waypoint/README.es.md) ^0.24.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
+forge depende de [waypoint](../waypoint/README.es.md) ^0.25.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
 
 ## Uso
 

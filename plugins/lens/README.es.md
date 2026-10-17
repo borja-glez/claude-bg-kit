@@ -7,7 +7,7 @@ El modelo y el esfuerzo en uso, el roadmap, las etapas y ejecuciones de forge, l
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.12.0](https://img.shields.io/badge/versi%C3%B3n-0.12.0-b4befe?style=flat-square)
+![versión 0.13.0](https://img.shields.io/badge/versi%C3%B3n-0.13.0-b4befe?style=flat-square)
 ![sin coste en tokens](https://img.shields.io/badge/coste%20en%20tokens-ninguno-a6e3a1?style=flat-square)
 
 </div>
@@ -40,7 +40,10 @@ lens detecta [waypoint](../waypoint/README.es.md), [forge](../forge/README.es.md
 
 ## Uso
 
-- `/lens` abre el panel lateral. Con waypoint instalado, el botón **Panel** de su banda hace lo mismo.
+- `/lens` abre el panel lateral donde se acopla: en fullscreen, desde 110 columnas. Fuera de fullscreen, o más estrecho, deja en su lugar una **foto** del panel en el transcript: una línea, `lens · 14:02:11 #1 · 3 tareas`, que un hook de `CommandOutput` dibuja como las tarjetas, quietas; los ficheros se leen una vez y no se escribe nada. `/lens live` abre el pane de todos modos (en línea sobre el prompt donde no se acopla), y `/lens foto` (o `/lens photo`) da siempre la foto. El botón **Panel** de cualquiera de las dos bandas hace lo que haría `/lens`.
+- En línea, el pane pide las filas que ocupan sus tarjetas (entre 6 y un tercio de la pantalla), las dibuja sin marco y acaba en `↓ N más · /lens foto` cuando no caben; acoplado, pide 56 columnas. Se cierra con la marca del propio motor (o `ctrl+x x`). Una fila larga de cajas de tareas se queda en dos filas, con el resto resumido (`+42 ■ · 12 □`), y el agente que estás mirando despliega su tarea.
+- **Teclado.** Fuera de fullscreen el clic no llega a la banda: `ctrl+x tab` le da el teclado, sus botones se leen `p: Panel` y `x: ×`, y la línea de pistas bajo el prompt acaba en `ctrl+x tab · banda`. Con el pane enfocado, Tab recorre sus botones (Aprobar y Rechazar de las propuestas no llevan letra).
+- **Una línea.** Fuera de fullscreen, o con menos de 3 filas sobre el prompt, lens deja una línea de estado bajo el prompt (`$.ui.status`) mientras esta sesión tiene trabajo de forge propio: `lens · T002 revisar r2 · 3 subagentes · 1,20 $`. Mientras corre un turno, el spinner nombra la tarea (`T002 · revisar r2`) cuando el motor no tiene nada propio que decir, y el modo auto de forge y la ejecución infinita salen como etiquetas de modo (`forge auto`, `∞ 2/5`). Un aviso dice cuándo una tarea de esta sesión recibe un veredicto (nunca su nota), empieza una ronda de revisión nueva o se integra, uno cada 5 segundos como mucho, y una notificación dice cuándo termina una ejecución tuya de 20 minutos o más.
 - El panel y la banda se dibujan en la terminal y en la pestaña Code de la app de escritorio.
 
 | Dónde | Cómo se ve |
@@ -93,7 +96,7 @@ lens mide desde que carga, con los recuentos de tokens que Claude Code da en cad
 
 ## La banda
 
-Cuando Claude tiene pendientes abiertos o subagentes en marcha, y waypoint no está dibujando su propia banda, lens dibuja una banda sobre el prompt. Enseña la ejecución más concreta que haya en marcha (una ejecución de forge activa; si no, la última tarea de forge, el roadmap, superpowers o los pendientes) con su barra, sus cajas de tareas y su recuento, luego el consumo de esta sesión (`· 1,8 M tok · 6,2 $`), **Panel** y **×**. **×** la oculta hasta la siguiente sesión.
+Cuando Claude tiene pendientes abiertos, subagentes en marcha o una tarea de forge de esta sesión en curso, y waypoint no está dibujando su propia banda (waypoint lo dice; su banda cerrada con **×** cuenta como no dibujada), lens dibuja una banda sobre el prompt. Nombra una a una las tareas de esta sesión en curso (`T001 impl · T002 rev r2 · T003 val`) o, si no, la ejecución más concreta que haya en marcha (una ejecución de forge activa, la tarea de forge, el roadmap, superpowers o los pendientes) con su recuento, luego los subagentes y el consumo de esta sesión (`· 1,8 M tok · 6,2 $`), **Panel** (`p`) y **×** (`x`), todo ajustado al ancho como la banda de waypoint; su barra y sus cajas de tareas solo salen desde 140 columnas. **×** la oculta hasta la siguiente sesión.
 
 ## Cómo lee
 

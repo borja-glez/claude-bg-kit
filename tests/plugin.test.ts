@@ -21,7 +21,7 @@ describe('plugin layout', () => {
   });
   it('lens manifest, module and contract exist', () => {
     const p = JSON.parse(read('plugins/lens/.claude-plugin/plugin.json'));
-    expect(p).toMatchObject({ name: 'lens', version: '0.12.0', types: './types/index.d.ts' });
+    expect(p).toMatchObject({ name: 'lens', version: '0.13.0', types: './types/index.d.ts' });
     expect(JSON.parse(read('plugins/lens/hooks/hooks.json'))).toEqual({ modules: ['./register.js'] });
     for (const f of ['hooks/register.js', 'types/index.d.ts', 'README.md']) {
       expect(existsSync(new URL(`../plugins/lens/${f}`, import.meta.url))).toBe(true);
@@ -198,20 +198,20 @@ describe('plugin layout', () => {
     expect(md).toMatch(/bundles several independent changes/);
     expect(md).toMatch(/adds new behaviour with its tests/);
   });
-  it('versions: forge 0.21.0, waypoint 0.24.0', () => {
+  it('versions: forge 0.21.1, waypoint 0.25.0', () => {
     const forge = JSON.parse(read('plugins/forge/.claude-plugin/plugin.json'));
-    expect(forge.version).toBe('0.21.0');
-    expect(forge.dependencies).toEqual([{ name: 'waypoint', version: '^0.24.0' }]);
-    expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.24.0');
+    expect(forge.version).toBe('0.21.1');
+    expect(forge.dependencies).toEqual([{ name: 'waypoint', version: '^0.25.0' }]);
+    expect(JSON.parse(read('plugins/waypoint/.claude-plugin/plugin.json')).version).toBe('0.25.0');
   });
-  it('CHANGELOG has the entries of forge 0.21.0, waypoint 0.24.0 and lens 0.12.0', () => {
+  it('CHANGELOG has the entries of forge 0.21.1, waypoint 0.25.0 and lens 0.13.0', () => {
     const md = read('CHANGELOG.md');
     // Each plugin's section, newest version first.
     const section = (p: string) => md.split(/^## /m).find(s => s.startsWith(`${p}\n`) || s.startsWith(`${p}\r\n`)) ?? '';
     const versions = (p: string) => [...section(p).matchAll(/^### (\d+\.\d+\.\d+) — /gm)].map(m => m[1]);
-    expect(versions('waypoint').slice(0, 2)).toEqual(['0.24.0', '0.23.1']);
-    expect(versions('forge').slice(0, 2)).toEqual(['0.21.0', '0.20.0']);
-    expect(versions('lens').slice(0, 2)).toEqual(['0.12.0', '0.11.9']);
+    expect(versions('waypoint').slice(0, 2)).toEqual(['0.25.0', '0.24.0']);
+    expect(versions('forge').slice(0, 2)).toEqual(['0.21.1', '0.21.0']);
+    expect(versions('lens').slice(0, 2)).toEqual(['0.13.0', '0.12.0']);
   });
   it('READMEs in Spanish and English tell the cost changes', () => {
     for (const lang of ['', '.es']) {
@@ -447,9 +447,9 @@ describe('plugin layout', () => {
     for (const w of ['design-snapshot', 'design-changed', 'critique-check', 'critique-select', 'design-page', 'rewrite', 'interview', 'approve', '--since', 'applied']) expect(md).toContain(w);
     expect(read('plugins/waypoint/skills/plan/SKILL.md')).toContain('plan.yaml does not exist yet');
   });
-  it('forge manifest depends on waypoint ^0.24.0 and ships its CLI', () => {
+  it('forge manifest depends on waypoint ^0.25.0 and ships its CLI', () => {
     const p = JSON.parse(read('plugins/forge/.claude-plugin/plugin.json'));
-    expect(p).toMatchObject({ name: 'forge', version: '0.21.0', dependencies: [{ name: 'waypoint', version: '^0.24.0' }] });
+    expect(p).toMatchObject({ name: 'forge', version: '0.21.1', dependencies: [{ name: 'waypoint', version: '^0.25.0' }] });
     expect(existsSync(new URL('../plugins/forge/dist/forge.cjs', import.meta.url))).toBe(true);
   });
   it('forge scout agent: frontmatter and rules', () => {
@@ -1420,5 +1420,17 @@ describe('plugin layout', () => {
     for (const f of ['plugins/lens/README.md', 'plugins/lens/README.es.md']) {
       for (const s of ['.forge/status/', '.forge/jobs/', '`SubagentStart`', '`TaskCreated`', 'forge-task:']) expect(read(f), `${f}: ${s}`).toContain(s);
     }
+  });
+  it('READMEs describe wave 3b: the band letters and the keyboard outside fullscreen, the photo, the status line', () => {
+    for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) {
+      const md = read(f);
+      for (const s of ['ctrl+x tab', '`n`', '`t`', '`x`', '`m`', '⋯', '▲', '✎', "{ plugin: 'waypoint', key: 'drawn' }"]) expect(md, `${f}: ${s}`).toContain(s);
+    }
+    for (const f of ['plugins/lens/README.md', 'plugins/lens/README.es.md']) {
+      const md = read(f);
+      for (const s of ['/lens live', 'ctrl+x tab', '`p`', '$.ui.status', 'CommandOutput', '↓']) expect(md, `${f}: ${s}`).toContain(s);
+    }
+    expect(read('plugins/lens/README.md')).toContain('/lens photo');
+    expect(read('plugins/lens/README.es.md')).toContain('/lens foto');
   });
 });
