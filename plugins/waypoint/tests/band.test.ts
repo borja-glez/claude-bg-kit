@@ -1060,3 +1060,35 @@ test('a store that refuses the write still hides the dismissed notice in this pr
   expect(await ui.find({ key: 'resume' })).toBeUndefined();
   await ui.unmount();
 });
+
+test('the band says whether it is drawn, for lens: its own band, × on it, a dismissed notice and no band (F-16)', async ($, on) => {
+  engineBand(on);
+  serveFiles(on, {});
+  memoryStore(on);
+  mock.clock(on, { now: Date.parse('2026-10-11T10:12:30.000Z') });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  const published: unknown[] = [];
+  on('state.set', (_$, e, next) => {
+    if (e.plugin === 'waypoint' && e.key === 'drawn') published.push(e.value);
+    return next(e);
+  });
+  let model: WaypointBand = WORK;
+  serveBand(on, () => model);
+  const mount = () => $.ui.mount({ plugin: 'waypoint', surface: 'terminal', component: 'AbovePrompt', props: PROPS });
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  expect(published.at(-1)).toBe(true);
+  let ui = await mount();
+  await ui.press({ key: 'dismiss' });
+  expect(published.at(-1)).toBe(false);
+  await ui.unmount();
+  model = notice({ kind: 'previous', viewer: PREVIOUS });
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  expect(published.at(-1)).toBe(true);
+  ui = await mount();
+  await ui.press({ key: 'dismiss' });
+  expect(published.at(-1)).toBe(false);
+  await ui.unmount();
+  model = { mode: 'none', viewer: NOBODY };
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  expect(published.at(-1)).toBe(false);
+});

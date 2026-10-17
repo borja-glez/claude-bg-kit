@@ -18,6 +18,10 @@ import { addOwnTask, endAgent, endTool, knownTasks, linkSpawn, LINKS_MAX, ownTas
 
 const panel = atom({ plugin: 'lens', key: 'panel' } as const, null as PanelModel | null);
 const hidden = atom({ plugin: 'lens', key: 'hidden' } as const, false);
+// F-16: waypoint's own flags, read (never written) by lens: whether its band is drawn now, and whether it was closed
+// with ×. drawn stays null with a waypoint older than 0.25, which does not publish it.
+const waypointDrawn = atom({ plugin: 'waypoint', key: 'drawn' } as const, null as boolean | null);
+const waypointHidden = atom({ plugin: 'waypoint', key: 'hidden' } as const, false);
 
 const PANE = 'lens';
 const LINE_MAX = 80;
@@ -145,6 +149,8 @@ function isBusy(now: number): boolean {
 let waypointBand = false;
 async function checkWaypoint($: Engine): Promise<void> {
   try { if (await read($, hidden)) return; } catch { /* check anyway */ }
+  // F-16: a waypoint that says whether it draws needs no guess (and no read of its files).
+  try { if (typeof (await read($, waypointDrawn)) === 'boolean') return; } catch { /* guess below */ }
   let installed = false;
   try { installed = (await $.command.list()).some(c => c.plugin === 'waypoint' || c.name.startsWith('waypoint:')); } catch { /* treat as absent */ }
   let next = false;
@@ -152,6 +158,17 @@ async function checkWaypoint($: Engine): Promise<void> {
     try { next = (await loadBandModel($)).mode !== 'none'; } catch { /* no band */ }
   }
   if (next !== waypointBand) { waypointBand = next; $.ui.invalidate('ui.render'); }
+}
+
+// F-16: whether waypoint draws its band now. It says so itself; an older waypoint does not, and then lens takes its band
+// as drawn unless it was closed with × (its hidden flag), guessing the rest as before (checkWaypoint).
+async function waypointDraws($: Engine): Promise<boolean> {
+  try {
+    const said = await read($, waypointDrawn);
+    if (typeof said === 'boolean') return said;
+  } catch { /* guess */ }
+  try { if (await read($, waypointHidden)) return false; } catch { /* as far as lens knows, it draws */ }
+  return waypointBand;
 }
 
 // Redraws the band when activity appears or goes, so the minimal band with its Panel button follows it.
@@ -1263,7 +1280,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const below = await next(e);
     try {
-      if (e.props.hasSurvey || !busy || waypointBand || await read($, hidden)) return below;
+      if (e.props.hasSurvey || !busy || await waypointDraws($) || await read($, hidden)) return below;
       const ui = $.ui.resolve(e);
       const { Box, Text, Button } = ui;
       const t = lensTexts();

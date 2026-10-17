@@ -8,6 +8,8 @@ import { applyWrite, artifactId, writeFailed, writesOf } from './mirror.js';
 
 const band = atom({ plugin: 'waypoint', key: 'band' } as const, noneBand());
 const hidden = atom({ plugin: 'waypoint', key: 'hidden' } as const, false);
+// F-16, for lens: whether this band is drawn now (unless a survey holds it); null until this module has said it.
+const drawn = atom({ plugin: 'waypoint', key: 'drawn' } as const, null as boolean | null);
 
 /** The bands of the conversation's own work, which × hides for the process. */
 const OWN_BANDS: readonly string[] = ['work', 'run', 'design'];
@@ -54,10 +56,22 @@ async function dismissNotice($: Engine, n: NoticeBand): Promise<void> {
   const next = addDismissal({ ...normalizeDismissals(stored, now), ...dismissals }, dismissalKey(await rootOf($), n.project, n.kind, n.key), dismissalUntil(n, now), now);
   dismissals = next;
   $.ui.invalidate('ui.render');
+  void publishDrawn($);
   try {
     await $.store.set(DISMISS_STORE_KEY, next);
     await loadDismissals($);
   } catch { /* hidden for this process only */ }
+}
+
+// F-16: false with the band hidden with ×, a notice dismissed or nothing to draw; true otherwise. Worked out here, never
+// while drawing, and written only when it changes; lens reads it before drawing a band of its own.
+async function publishDrawn($: Engine): Promise<void> {
+  try {
+    const m = await read($, band);
+    let shown = !(await read($, hidden)) && m.mode !== 'none';
+    if (shown && m.mode === 'notice') shown = !isDismissed(dismissals, dismissalKey(await rootOf($), m.project, m.kind, m.key), await nowMs($));
+    if ((await read($, drawn)) !== shown) await update($, drawn, () => shown);
+  } catch { /* lens keeps what it read */ }
 }
 
 // A refresh asked while one runs is not dropped: what the running one read may be the old conversation's (a /clear
@@ -82,6 +96,7 @@ async function refresh($: Engine): Promise<void> {
       } catch {
         // leave the band as it was
       }
+      await publishDrawn($);
     } while (refreshPending);
   } finally {
     refreshing = false;
@@ -293,7 +308,7 @@ export const register: Register = on => {
       // × on a notice is kept per checkout, project, kind and subject (K5-08); on the conversation's own band it lasts the process.
       const notice = m.mode === 'notice' ? m : null;
       const dismiss = () => {
-        (notice ? dismissNotice($, notice) : update($, hidden, () => true)).catch(() => undefined);
+        (notice ? dismissNotice($, notice) : update($, hidden, () => true).then(() => publishDrawn($))).catch(() => undefined);
       };
       return (
         <Box flexDirection="column">

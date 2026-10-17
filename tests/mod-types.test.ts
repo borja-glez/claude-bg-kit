@@ -13,7 +13,8 @@ describe('published mod state contract', () => {
     expect(contract()).toContain(`export type WaypointBand =${band};\n`);
   });
   it('declares the band and hidden state, and no panel', () => {
-    expect(contract()).toContain('waypoint: { band: WaypointBand; hidden: boolean };');
+    expect(contract()).toContain('waypoint: { band: WaypointBand; hidden: boolean; drawn: boolean | null };');
+    expect(readFileSync('src/mod/state.d.ts', 'utf8')).toContain('waypoint: { band: WaypointBand; hidden: boolean; drawn: boolean | null };');
     expect(contract()).not.toContain('Panel');
   });
 });

@@ -55,6 +55,13 @@ function start(on: On) {
   return clock;
 }
 
+// waypoint's own flags as lens reads them (any plugin reads any value), answered beneath lens on state.get.
+function serveWaypointState(on: On, state: { drawn?: boolean | null; hidden?: boolean }) {
+  on('state.get', (_$, e, next) => (e.plugin === 'waypoint' && Object.hasOwn(state, e.key)
+    ? { value: { value: (state as Record<string, unknown>)[e.key], version: 1 } }
+    : next(e)));
+}
+
 const SESSION = { cwd: ROOT, surface: 'terminal' as const, isInteractive: true };
 const TODOS = { tool: 'TodoWrite' as const, todos: [{ content: 'a', status: 'in_progress' as const, activeForm: 'a' }] };
 // A waypoint project this session has joined, which waypoint draws a band for: a plan and its session.
@@ -192,5 +199,30 @@ test('a waypoint command the engine does not attribute still counts as the waypo
   on('command.list', () => ({ value: [{ name: 'waypoint:work', description: 'Work', source: 'plugin' as const }] }));
   await $.session.start(SESSION);
   await $.tool.call(TODOS);
+  expect(await buttons($)).toEqual([[], []]);
+});
+
+test('with the waypoint band closed with ×, lens draws its minimal band (F-16)', async ($, on) => {
+  serveFiles(on, WAYPOINT_PROJECT);
+  engineBand(on);
+  start(on);
+  on('command.list', () => ({ value: [WAYPOINT_COMMAND] }));
+  serveWaypointState(on, { hidden: true });
+  await $.session.start(SESSION);
+  await $.tool.call(TODOS);
+  expect(await buttons($)).toEqual([['panel', 'dismiss'], ['panel', 'dismiss']]);
+});
+
+test('waypoint says whether it draws: a dismissed notice (drawn false) leaves the band to lens, its own band (drawn true) does not (F-16)', async ($, on) => {
+  serveFiles(on, WAYPOINT_PROJECT);
+  engineBand(on);
+  start(on);
+  on('command.list', () => ({ value: [WAYPOINT_COMMAND] }));
+  const state = { drawn: false };
+  serveWaypointState(on, state);
+  await $.session.start(SESSION);
+  await $.tool.call(TODOS);
+  expect(await buttons($)).toEqual([['panel', 'dismiss'], ['panel', 'dismiss']]);
+  state.drawn = true;
   expect(await buttons($)).toEqual([[], []]);
 });
