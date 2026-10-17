@@ -29,6 +29,7 @@ import { UsageError } from './errors.js';
 import { swarmCommand, restoringRegenerated, runSetup } from './swarm.js';
 import { reviewCommand } from './review.js';
 import { roadmapCommand } from './roadmap.js';
+import type { fitForgeDoc } from '../../lib/roadmap-doc.js';
 import { swarmStep } from './step.js';
 import { runWithCache, cacheGit, checkoutPrefix } from '../validate-cache.js';
 import { roundDecision } from '../round.js';
@@ -52,7 +53,7 @@ import { ROUTE_OPTIONS, ROUTE_STAGES, firstStage, isRoutePath, isRouteSession, p
 import { checkSpTask, markDone, parseSpPlan, renderSpBrief, SpPlanError } from '../../lib/sp-plan.js';
 
 export interface ExecResult { code: number; output: string; ms: number; timedOut: boolean }
-export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined>; slot?: Slot }
+export interface Io { cwd: string; workdir?: string; now: () => Date; exec?: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany; git?: (args: string[]) => string | null; scriptPath?: string; rand?: () => number; stdin?: string; sleep?: (ms: number) => void; env?: Record<string, string | undefined>; slot?: Slot; roadmapFit?: typeof fitForgeDoc }
 type Result = { code: number; stdout: string; stderr: string };
 
 const USAGE = 'usage: forge <triage|brief|validate|stats|verdict|round|review-prep|review-close|prep|shadow|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|verify-close|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|swarm|setup|stop|hook|roadmap-doc|roadmap-run> ...';

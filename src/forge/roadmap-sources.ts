@@ -19,7 +19,8 @@ import { samePath } from '../lib/worktree.js';
 export class RoadmapDocError extends Error {
   constructor(readonly code: 2 | 3, message: string) { super(message); this.name = 'RoadmapDocError'; }
 }
-export interface DocIo { cwd: string; workdir?: string; now: () => Date }
+/** `roadmapFit`: a seam for tests, the fit that decides exit 3 (fitForgeDoc by default). */
+export interface DocIo { cwd: string; workdir?: string; now: () => Date; roadmapFit?: typeof fitForgeDoc }
 export interface GenerateOptions {
   project?: string | null; out?: string | null; assets?: string | null;
   /** Fields the command adds to the same update: the claim of a task, a task done with its commit. */
@@ -84,6 +85,7 @@ function integrationInRun(main: string, e: ExecutionState, t: ExecTask): Integra
  */
 function readReviews(folders: readonly { root: string; dir: string }[]): { reviews: ReviewDir[]; verifies: VerifyRound[] } {
   const seen = new Set<string>();
+  const verified = new Set<string>();
   const reviews: ReviewDir[] = [];
   const verifies: VerifyRound[] = [];
   for (const f of folders) {
@@ -91,15 +93,17 @@ function readReviews(folders: readonly { root: string; dir: string }[]): { revie
     try { names = readdirSync(f.dir); } catch { continue; }
     for (const name of names.sort()) {
       const m = /^reviews-(\d+)-(\d+)$/.exec(name);
-      if (!m || seen.has(name)) continue;
-      seen.add(name);
+      if (!m) continue;
       const brief = Number(m[1]), n = Number(m[2]);
       let files: string[] = [];
       try { files = readdirSync(path.join(f.dir, name)).sort(); } catch { files = []; }
-      reviews.push({ brief, n, files, at: mtimeOf(path.join(f.dir, name)) });
+      // A review dir is taken from the first folder that has it; its verify.json from the first one that has a valid one.
+      if (!seen.has(name)) { seen.add(name); reviews.push({ brief, n, files, at: mtimeOf(path.join(f.dir, name)) }); }
+      if (verified.has(name)) continue;
       const verifyFile = path.join(f.dir, name, 'verify.json');
       const file = files.includes('verify.json') ? parseVerifyFile(readText(verifyFile)) : null;
       if (!file) continue;
+      verified.add(name);
       // forge-verify writes verify.json in the review dir and its screenshots in evidence/<brief>-<n>/.
       const evidence = path.join(f.dir, 'evidence', `${brief}-${n}`);
       verifies.push({ brief, n, file, local: relOf(f.root, evidence), shotPath: shot => path.resolve(evidence, shot), at: mtimeOf(verifyFile) });
@@ -154,11 +158,10 @@ export function generateRoadmapDoc(io: DocIo, task: string, opts: GenerateOption
   const mainWork = readWorkDir(main, ref, events);
   const assetsFile = path.join(mainWork, 'assets.json');
   let assets = readAssets(assetsFile);
-  if (opts.assets) {
-    assets = mergeAssets(assets, parseAssets(io.cwd, opts.assets));
-    writeJsonAtomic(assetsFile, assets);
-  }
-  const deferredFile = [here, main].map(r => path.join(readWorkDir(r, ref, events), 'deferred.json')).find(f => existsSync(f));
+  // The uploads are kept (assetsFile) only once the block has validated: an exit 3 leaves nothing new on disk.
+  const added = opts.assets ? parseAssets(io.cwd, opts.assets) : null;
+  if (added) assets = mergeAssets(assets, added);
+  const deferredFile = roots.map(r => path.join(readWorkDir(r, ref, events), 'deferred.json')).find(f => existsSync(f));
   let evidenceMode: 'upload' | 'local' = 'upload';
   try { evidenceMode = loadConfig(main).evidence === 'local' ? 'local' : 'upload'; } catch { /* the default */ }
 
@@ -168,12 +171,13 @@ export function generateRoadmapDoc(io: DocIo, task: string, opts: GenerateOption
     integration: execTask && execution ? integrationInRun(main, execution, execTask) : integrationAt(here),
     assets, evidenceMode, now: io.now(),
   });
-  const fit = fitForgeDoc(built.forge);
+  const fit = (io.roadmapFit ?? fitForgeDoc)(built.forge);
   let drops = 0;
   const parsed = parseForgeDocV2(fit.doc, () => { drops++; });
   if (!parsed || drops || !fit.fits || fit.bytes > FORGE_DOC_MAX) {
     throw new RoadmapDocError(3, `roadmap-doc: the forge block of ${task} does not validate or is over ${FORGE_DOC_MAX} bytes (${fit.bytes})`);
   }
+  if (added) writeJsonAtomic(assetsFile, assets);
   const only = opts.only ?? ['forge', 'evidence', 'exec'];
   const data: Record<string, unknown> = { ...(opts.extra ?? {}) };
   if (only.includes('forge')) data.forge = fit.doc;

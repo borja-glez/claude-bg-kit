@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -8,7 +8,7 @@ import { parseVerifyFile } from '../src/forge/verdict.js';
 import { appendEvent, type LedgerEvent } from '../src/forge/ledger.js';
 import { run, type Io } from '../src/forge/cli/run.js';
 import { deriveStatuses, statusKey, type StatusMap } from '../src/lib/forge-status.js';
-import { parseForgeDocV2, STAGE_KEYS } from '../src/lib/roadmap-doc.js';
+import { fitForgeDoc, parseForgeDocV2, STAGE_KEYS } from '../src/lib/roadmap-doc.js';
 import type { ExecTask, ExecutionState } from '../src/lib/execution-state.js';
 import { MEDIUM_T1, ROADMAP_AT, writeVerify } from './fixtures/roadmap-ledger.js';
 
@@ -210,14 +210,18 @@ describe('FORGE roadmap-doc (G-03, G-06)', () => {
   const cli = (...a: string[]) => run(a, io);
   const out = (r: { code: number; stdout: string; stderr: string }) => { if (r.code !== 0) throw new Error(r.stderr); return JSON.parse(r.stdout); };
   const data = () => JSON.parse(readFileSync(path.join(root, WORK, 'roadmap-doc.json'), 'utf8'));
-  beforeEach(() => {
+  const initRepo = (): string => {
     root = mkdtempSync(path.join(tmpdir(), 'forge-roadmap-doc-'));
     g('init', '-q', '-b', 'main'); g('config', 'user.email', 'a@b.c'); g('config', 'user.name', 't'); g('config', 'core.autocrlf', 'false');
     writeFileSync(path.join(root, '.gitignore'), '.forge/\n');
     g('add', '.'); g('commit', '-qm', 'init');
     mkdirSync(path.join(root, '.forge'), { recursive: true });
     writeFileSync(path.join(root, '.forge', 'config.yaml'), 'validators: []\n');
-    io = { cwd: root, now: () => NOW, env: {} };
+    return root;
+  };
+  beforeEach(() => {
+    initRepo();
+    io ={ cwd: root, now: () => NOW, env: {} };
     for (const e of MEDIUM_T1) appendEvent(root, e);
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
@@ -294,24 +298,37 @@ describe('FORGE roadmap-doc (G-03, G-06)', () => {
     expect(forge.validators).toEqual([{ name: 'test', ok: true }]);
     expect(parseForgeDocV2(forge)).toEqual(forge);
   });
-  it('shop T1, web T1 and a loose T1 in one ledger each produce only their own block', () => {
+  it('shop T1, web T1 and a loose T1 in one ledger each produce only their own block, whatever the order of the triages', () => {
     const web = MEDIUM_T1.map(e => ({ ...e, project: 'web', ...(e.dir ? { dir: String(e.dir).replace('/shop/', '/web/') } : {}) }));
     const loose = [
       { ts: ROADMAP_AT(80), kind: 'triage', task: 'T1', path: 'small', reasons: [] },
       { ts: ROADMAP_AT(81), kind: 'phase', task: 'T1', phase: 'implement', brief: 1 },
     ] as LedgerEvent[];
+    const forge = (...a: string[]) => JSON.parse(readFileSync(out(cli('roadmap-doc', 'T1', ...a)).file, 'utf8')).forge;
+    const check = () => {
+      expect(forge('--project', 'shop')).toMatchObject({ path: 'medium', rounds: [{ at: ROADMAP_AT(20) }, { at: ROADMAP_AT(40) }] });
+      expect(forge('--project', 'web')).toMatchObject({ path: 'medium' });
+      expect(forge('--project', 'web').rounds).toHaveLength(2);
+    };
+    // The loose task last: the last triage is its, so T1 without --project is the loose one.
     for (const e of web) appendEvent(root, e);
     for (const e of loose) appendEvent(root, e);
-    const forge = (...a: string[]) => JSON.parse(readFileSync(out(cli('roadmap-doc', 'T1', ...a)).file, 'utf8')).forge;
-    expect(forge('--project', 'shop')).toMatchObject({ path: 'medium', rounds: [{ at: ROADMAP_AT(20) }, { at: ROADMAP_AT(40) }] });
-    expect(forge('--project', 'web')).toMatchObject({ path: 'medium' });
-    expect(forge('--project', 'web').rounds).toHaveLength(2);
+    check();
     const l = out(cli('roadmap-doc', 'T1'));
     expect(l.project).toBeNull();
     expect(l.file).toBe(path.join(root, '.forge', 'work', 'T1', 'roadmap-doc.json'));
     const lf = JSON.parse(readFileSync(l.file, 'utf8')).forge;
     expect(lf.path).toBe('small');
     expect(lf.rounds ?? []).toEqual([]);
+    // The loose task first: the shop and web blocks are the same, and the loose events never reach them.
+    rmSync(root, { recursive: true, force: true });
+    root = initRepo();
+    io = { cwd: root, now: () => NOW, env: {} };
+    for (const e of loose) appendEvent(root, e);
+    for (const e of MEDIUM_T1) appendEvent(root, e);
+    for (const e of web) appendEvent(root, e);
+    check();
+    expect(out(cli('roadmap-doc', 'T1')).project).toBe('web');
   });
   it('never reads the earlier-* folders prep sets aside', () => {
     const old = path.join(root, WORK, 'earlier-r0', 'reviews-1-9');
@@ -320,5 +337,58 @@ describe('FORGE roadmap-doc (G-03, G-06)', () => {
     out(cli('roadmap-doc', 'T1', '--project', 'shop'));
     expect(JSON.stringify(data())).not.toContain('reviews-1-9');
     expect(data().forge.rounds.some((r: { n: number }) => r.n === 9)).toBe(false);
+  });
+  // A status file the CLI reads is normalized, so a damaged one cannot reach the parse: the fit is the seam (Io.roadmapFit).
+  it('exit 3 when the block is over the cap or does not validate: nothing is written, not even the uploads (C7)', () => {
+    const file = path.join(root, WORK, 'roadmap-doc.json');
+    const assets = path.join(root, WORK, 'assets.json');
+    writeFileSync(path.join(root, 'up.json'), JSON.stringify([{ path: 'x.png', id: 'a1', url: 'https://claude.ai/_blob/a1' }]));
+    const args = ['roadmap-doc', 'T1', '--project', 'shop', '--assets', 'up.json'];
+    io = { ...io, roadmapFit: d => ({ ...fitForgeDoc(d), fits: false, bytes: 5000 }) };
+    const over = cli(...args);
+    expect(over.code).toBe(3);
+    expect(over.stdout).toBe('');
+    expect(over.stderr).toContain('4096');
+    io = { ...io, roadmapFit: d => ({ ...fitForgeDoc(d), doc: { ...fitForgeDoc(d).doc, brief: 0 } }) };
+    expect(cli(...args).code).toBe(3);
+    expect(existsSync(file)).toBe(false);
+    expect(existsSync(assets)).toBe(false);
+    // Without the seam the same call works and keeps the upload.
+    io = { cwd: root, now: () => NOW, env: {} };
+    out(cli(...args));
+    expect(existsSync(file)).toBe(true);
+    expect(existsSync(assets)).toBe(true);
+  });
+  it('deferred.json is looked up where the review dirs are: here, the caller and the main checkout', () => {
+    const wt = path.join(path.dirname(root), `${path.basename(root)}-wt`);
+    const elsewhere = mkdtempSync(path.join(tmpdir(), 'forge-roadmap-here-'));
+    try {
+      g('worktree', 'add', '-q', '-b', 'wt', wt);
+      mkdirSync(path.join(wt, WORK), { recursive: true });
+      writeFileSync(path.join(wt, WORK, 'deferred.json'), JSON.stringify([{ severity: 'important', problem: 'found in the caller folder' }]));
+      const r = run(['roadmap-doc', 'T1', '--project', 'shop'], { cwd: wt, workdir: elsewhere, now: () => NOW, env: {} });
+      expect(r.code).toBe(0);
+      expect(JSON.stringify(JSON.parse(readFileSync(JSON.parse(r.stdout).file, 'utf8')).forge.deferred)).toContain('found in the caller folder');
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+      try { g('worktree', 'remove', '--force', wt); } catch { rmSync(wt, { recursive: true, force: true }); }
+    }
+  });
+  it('a review dir both the caller and the main checkout hold: the verify.json of the one that has it is read', () => {
+    const wt = path.join(path.dirname(root), `${path.basename(root)}-wt2`);
+    try {
+      g('worktree', 'add', '-q', '-b', 'wt2', wt);
+      // The caller's copy has the review files but no verify.json; the main checkout's has it.
+      const dir = path.join(wt, WORK, 'reviews-1-2');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, 'correctness.json'), '{}');
+      writeVerify(root, WORK, 1, 2, { surfaces: ['web'], result: 'pass', checks: [{ id: 1, surface: 'web', name: 'home', main: true, ok: true, expected: 'e', observed: 'o', shot: null }] });
+      const r = run(['roadmap-doc', 'T1', '--project', 'shop'], { cwd: wt, now: () => NOW, env: {} });
+      expect(r.code).toBe(0);
+      const doc = JSON.parse(readFileSync(JSON.parse(r.stdout).file, 'utf8'));
+      expect(doc.evidence).toMatchObject({ result: 'pass', total: 1 });
+    } finally {
+      try { g('worktree', 'remove', '--force', wt); } catch { rmSync(wt, { recursive: true, force: true }); }
+    }
   });
 });
