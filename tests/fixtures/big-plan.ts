@@ -120,8 +120,7 @@ export function bigSnapshot(now = BIG_NOW): Snapshot {
 }
 
 /** Every document of the roadmap by path, as a database serves them: `meta` by document, `coll` by collection and id. */
-export function bigDocs(now = BIG_NOW): { meta: Record<string, unknown>; coll: Record<string, Record<string, unknown>> } {
-  const snap = bigSnapshot(now);
+export function bigDocs(now = BIG_NOW, snap: Snapshot = bigSnapshot(now)): { meta: Record<string, unknown>; coll: Record<string, Record<string, unknown>> } {
   const byId = <T extends { id: string }>(list: T[]) => Object.fromEntries(list.map(({ id, ...body }) => [id, body]));
   return {
     meta: { 'meta/project': snap.meta, 'meta/run': bigRun(now) },
@@ -146,9 +145,9 @@ export function bigModel(now = BIG_NOW): Model {
  * fake window.claude that serves its documents (an owner, and a database that answers each subscription once). With
  * #live=1 in the address, a running task changes stage every 5 s, to watch a snapshot arrive. Nothing is published.
  */
-export function harnessHtml(template: string, now = Date.now()): string {
-  const snapshot = JSON.stringify(bigSnapshot(now)).replace(/</g, '\u003c');
-  const docs = JSON.stringify(bigDocs(now)).replace(/</g, '\u003c');
+export function harnessHtml(template: string, now = Date.now(), snap: Snapshot = bigSnapshot(now)): string {
+  const snapshot = JSON.stringify(snap).replace(/</g, '\\u003c');
+  const docs = JSON.stringify(bigDocs(now, snap)).replace(/</g, '\\u003c');
   const fake = `(() => {
   const DOCS = ${docs};
   const subs = {};

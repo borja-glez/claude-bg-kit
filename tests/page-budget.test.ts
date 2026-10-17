@@ -1,7 +1,7 @@
 // H-06: what the page paints with the plan of 343 tasks, measured without a browser (spec §4.5, §6.2).
 import { describe, it, expect } from 'vitest';
 import { renderApp, type UiState } from '../src/page/render.js';
-import { BIG_NOW, bigModel, bigPlan, harnessHtml } from './fixtures/big-plan.js';
+import { BIG_NOW, bigModel, bigPlan, bigSnapshot, harnessHtml } from './fixtures/big-plan.js';
 
 const ui = (over: Partial<UiState> = {}): UiState => ({
   zoom: '1d', offset: 0, expanded: new Set(), modal: null, search: '', view: 'summary', shot: null,
@@ -64,5 +64,16 @@ describe('the page with the plan of 343 tasks (H-06)', () => {
     expect(html.indexOf('window.claude')).toBeGreaterThan(-1);
     expect(html.indexOf('window.claude')).toBeLessThan(html.indexOf('PAGE()'));
     expect(html.match(/<\/script/g)).toHaveLength(3);
+  });
+
+  it('a task title with </script> cannot break out of the harness page, and reads back the same', () => {
+    const tpl = '<title>__TITLE__</title>\n<script type="application/json" id="wp-snapshot">__SNAPSHOT__</script>\n<script>PAGE()</script>';
+    const evil = '</script><img src=x onerror=alert(1)>';
+    const snap = bigSnapshot(BIG_NOW);
+    const phases = snap.phases.map((p, i) => (i === 0 ? { ...p, tasks: p.tasks.map((t, j) => (j === 0 ? { ...t, title: evil } : t)) } : p));
+    const html = harnessHtml(tpl, BIG_NOW, { ...snap, phases });
+    expect(html.match(/<\/script/g)).toHaveLength(3);
+    expect(html).not.toContain('<img');
+    expect(JSON.parse(html.match(/id="wp-snapshot">([\s\S]*?)<\/script>/)![1]!).phases[0].tasks[0].title).toBe(evil);
   });
 });

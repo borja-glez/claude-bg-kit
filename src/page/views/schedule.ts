@@ -29,7 +29,7 @@ export function virtualRange(total: number, tl?: TlView): { start: number; end: 
   return { start: Math.max(0, first - VIRTUAL_PAD), end: Math.min(total, first + count + VIRTUAL_PAD) };
 }
 
-const ZOOMS: Zoom[] =['6h', '1d', '3d', '1w', '1m'];
+const ZOOMS: Zoom[] = ['6h', '1d', '3d', '1w', '1m'];
 
 /** The timeline window: free zoom and pan when set, else the zoom preset shifted by whole spans. */
 export function timelineWindow(ui: UiState, now: number): Win {
@@ -91,7 +91,7 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
     const unl = unlocksOf.get(id) ?? [];
     return [id, label, status, needs.length ? `${d.tl.blockedBy}: ${needs.join(', ')}` : '', unl.length ? `${d.tl.unlocks}: ${unl.join(', ')}` : ''].filter(Boolean).join(' · ');
   };
-  const pos =(t: number) => ((t - win.from) / (win.to - win.from)) * 100;
+  const pos = (t: number) => ((t - win.from) / (win.to - win.from)) * 100;
   const nowLeft = pos(m.now);
   const span = win.to - win.from;
   const withDate = span > 30 * 3600000;

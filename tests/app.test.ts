@@ -1267,3 +1267,56 @@ describe('the timeline paints what is in view (H-06)', () => {
     app.stop();
   });
 });
+
+describe('the timeline scroll, edge cases (H-06)', () => {
+  const open = async () => {
+    const { bigSnapshot } = await import('./fixtures/big-plan.js');
+    const big = bigSnapshot(NOW);
+    history.replaceState(null, '', `#v=schedule&o=${big.phases.map(p => p.id).join(',')}`);
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const app = await start({ claude: null, snapshot: big, root, now: () => NOW });
+    await settle();
+    const tl = () => root.querySelector('[data-role="timeline"]') as HTMLElement;
+    const scrollTo = async (row: number) => {
+      const el = tl();
+      Object.defineProperty(el, 'scrollHeight', { configurable: true, value: 358 * 28 });
+      Object.defineProperty(el, 'clientHeight', { configurable: true, value: 560 });
+      el.scrollTop = row * 28;
+      el.dispatchEvent(new Event('scroll'));
+      await new Promise(r => setTimeout(r, 60));
+      await settle();
+    };
+    return { app, root, tl, scrollTo };
+  };
+
+  it('a small scroll updates ui.tl but does not repaint', async () => {
+    const { app, tl, scrollTo } = await open();
+    await scrollTo(5);
+    expect(app.ui.tl).toEqual({ first: 5, count: 21 });
+    expect(tl().dataset.start).toBe('0');
+    expect(tl().dataset.end).toBe('55');
+    app.stop();
+  });
+
+  it('scrolling back to the top repaints from row 0 with no rows above', async () => {
+    const { app, root, tl, scrollTo } = await open();
+    await scrollTo(200);
+    expect(tl().dataset.start).toBe('180');
+    await scrollTo(0);
+    expect(tl().dataset.start).toBe('0');
+    expect(tl().dataset.end).toBe('41');
+    expect(root.innerHTML).not.toContain('* 180)');
+    app.stop();
+  });
+
+  it('a timeline that is no longer virtualized forgets the viewport', async () => {
+    const { app, tl, scrollTo } = await open();
+    await scrollTo(200);
+    expect(app.ui.tl).toBeDefined();
+    tl().dataset.rows = '100';
+    tl().dispatchEvent(new Event('scroll'));
+    expect(app.ui.tl).toBeUndefined();
+    app.stop();
+  });
+});

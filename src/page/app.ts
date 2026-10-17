@@ -597,7 +597,9 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     const el = ev.target as HTMLElement | null;
     if (!el || el.getAttribute?.('data-role') !== 'timeline') return;
     const rows = Number(el.dataset.rows);
-    if (!(rows > VIRTUAL_FROM) || !el.scrollHeight) return;
+    // Not virtualized: forget the viewport, so a later growth past the limit starts from the real one.
+    if (!(rows > VIRTUAL_FROM)) { ui.tl = undefined; return; }
+    if (!el.scrollHeight) return;
     const first = Math.floor((el.scrollTop / el.scrollHeight) * rows);
     const count = Math.ceil((el.clientHeight / el.scrollHeight) * rows) + 1;
     ui.tl = { first, count };
