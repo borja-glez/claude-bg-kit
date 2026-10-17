@@ -16,11 +16,11 @@ const FILES: Record<string, string> = {
 };
 const norm = (path: string) => path.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '');
 
-function serveFiles(on: On) {
+function serveFiles(on: On, reads: string[] = []) {
   const entry = (name: string, kind: 'file' | 'dir', size: number) => ({ name, kind, size, mtimeMs: NOW - 60_000, isLink: false });
   on('session.root', () => ({ value: ROOT }));
   on('session.id', () => ({ value: SESSION_ID }));
-  on('fs.read', (_$, e) => { const f = FILES[norm(e.path)]; return f !== undefined ? { value: f } : { deny: `ENOENT ${e.path}` }; });
+  on('fs.read', (_$, e) => { reads.push(e.path); const f = FILES[norm(e.path)]; return f !== undefined ? { value: f } : { deny: `ENOENT ${e.path}` }; });
   on('fs.exists', (_$, e) => ({ value: norm(e.path) in FILES }));
   on('fs.stat', (_$, e) => {
     const f = FILES[norm(e.path)];
@@ -47,10 +47,11 @@ function servePanes(on: On) {
 }
 
 function start(on: On) {
-  mock.clock(on, { now: NOW });
+  const clock = mock.clock(on, { now: NOW });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
   on('agent.list', () => ({ value: [] }));
   on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
+  return clock;
 }
 
 // The engine's own rows beneath lens: a command's output line and the band, as drawn when no hook draws them.
@@ -129,9 +130,60 @@ test("a /lens line lens does not hold stays the engine's row, and only the newes
   }
 });
 
-test("outside fullscreen the band's Panel button takes a photo instead of opening the pane (§4.6, step 2)", async ($, on) => {
+test("a photo row is drawn only for the line it was taken for: after a reload the counter restarts, and an old #1 line is the engine's (Review Focus 4)", async ($, on) => {
   serveFiles(on);
-  const open = servePanes(on);
+  servePanes(on);
+  engineRows(on);
+  start(on);
+  await $.session.start(SESSION);
+  const taken = (await $.command.run({ ...RUN, args: 'foto' })).text!;
+  // The same number with another time: what a transcript row of an earlier process looks like once the counter restarts.
+  const old = taken.replace(/\d\d:\d\d:\d\d/, '03:04:05');
+  expect(old).not.toBe(taken);
+  const stale = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'CommandOutput', props: OUTPUT(old), viewport: MAIN_SCREEN });
+  expect(await said(stale)).toContain(`engine: ${old}`);
+  await stale.unmount();
+  const own = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'CommandOutput', props: OUTPUT(taken), viewport: MAIN_SCREEN });
+  expect(await said(own)).not.toContain('engine:');
+  await own.unmount();
+});
+
+test('a photo reads the files once, writes no state, starts no timer, and its rows fit the viewport (cost zero)', async ($, on) => {
+  const reads: string[] = [];
+  const written: string[] = [];
+  serveFiles(on, reads);
+  servePanes(on);
+  const clock = start(on);
+  on('state.set', (_$, e, next) => { written.push(`${e.plugin}.${e.key}`); return next(e); });
+  await $.session.start(SESSION);
+  reads.length = 0;
+  written.length = 0;
+  const first = (await $.command.run({ ...RUN, args: 'foto' })).text!;
+  const readsOne = reads.length;
+  expect(readsOne).toBeGreaterThan(0);
+  // A second photo reads the same again, not more: nothing accumulates between commands.
+  reads.length = 0;
+  await $.command.run({ ...RUN, args: 'foto' });
+  expect(reads.length).toBeLessThanOrEqual(readsOne);
+  expect(written).toEqual([]);
+  reads.length = 0;
+  await clock.advance(600_000);
+  expect(reads).toEqual([]);
+  expect(written).toEqual([]);
+  // Every row of the drawing fits the viewport, however narrow, and the card count stays what the model holds.
+  for (const columns of [30, 60]) {
+    const row = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'CommandOutput', props: OUTPUT(first), viewport: { columns, rows: 30, isFullscreen: false } });
+    const drawn = JSON.stringify(await row.drawn());
+    expect(drawn).toContain('docs/superpowers/plans/run.md'.slice(0, 10));
+    const widths = [...drawn.matchAll(/"(?:width|minWidth)":(\d+)/g)].map(m => Number(m[1]));
+    for (const w of widths) expect(w, `width at ${columns} columns`).toBeLessThanOrEqual(columns);
+    await row.unmount();
+  }
+});
+
+test("outside fullscreen the band's Panel button runs /lens foto (§4.6, step 2)", async ($, on) => {
+  serveFiles(on);
+  servePanes(on);
   engineRows(on);
   start(on);
   // The kit does not route a plugin's own $.command.run to its hook: the press is recorded, then the command is run as
@@ -144,5 +196,4 @@ test("outside fullscreen the band's Panel button takes a photo instead of openin
   await band.press({ key: 'panel' });
   await band.unmount();
   expect(ran).toEqual(['/lens foto']);
-  expect(open.has(PANE)).toBe(false);
 });

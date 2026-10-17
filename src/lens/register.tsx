@@ -964,7 +964,9 @@ async function openPanel($: Engine): Promise<boolean> {
 }
 
 // Step 3 of §4.6: the photos `/lens` took, by number, at most PHOTOS_MAX: the cards as they were, never moving.
-const photos = new Map<number, { cards: Card[] }>();
+// Each keeps its full line: a row is drawn only when its text is that line, so a number reused after a reload never
+// draws another photo's cards on an older row.
+const photos = new Map<number, { text: string; cards: Card[] }>();
 let photoCount = 0;
 
 // Step 3 of §4.6: the files read once, the model and its cards built and kept under a new number; the command answers
@@ -981,8 +983,9 @@ async function takePhoto($: Engine): Promise<string> {
   const t = textsFor(model.locale);
   const tasks = model.activities.filter(a => a.kind === 'forge' || a.kind === 'workflow').length;
   const n = ++photoCount;
-  keepPhoto(photos, n, { cards: buildCards(model, t, now) });
-  return photoText(n, now, t.photoTasks(tasks));
+  const text = photoText(n, now, t.photoTasks(tasks));
+  keepPhoto(photos, n, { text, cards: buildCards(model, t, now) });
+  return text;
 }
 
 const RISK_HUE: Record<string, 'green' | 'yellow' | 'red'> = { low: 'green', medium: 'yellow', high: 'red' };
@@ -1083,7 +1086,7 @@ export const register: Register = on => {
     try {
       const n = photoId(e.props.text);
       const shot = n === null ? undefined : photos.get(n);
-      if (!shot) return next(e);
+      if (!shot || shot.text !== e.props.text) return next(e);
       const { Box, Text } = $.ui.resolve(e);
       const layout = panelLayout({ bodyColumns: Number(e.viewport?.columns) || LINE_MAX, placement: 'inline' });
       return (
