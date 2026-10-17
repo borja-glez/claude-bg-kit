@@ -1,6 +1,6 @@
-import { computeMetrics, type Metrics } from '../lib/metrics.js';
+import type { Metrics } from '../lib/metrics.js';
 import { autoTicks, groupIds, layoutRows, NONE_GROUP, phaseLabel, phaseName, planRange, SPAN, windowAt, windowFor, type GroupBy, type Row, type Win, type Zoom } from '../lib/timeline.js';
-import { burndown, criticalPath, forecast, zoneHeat } from '../lib/insights.js';
+import { burndown } from '../lib/insights.js';
 import { escalationCandidates, liveness, sessionLiveness, zonesOf } from '../lib/coordination.js';
 import { LOOSE_STATUSES, TRACK_COLORS, type RunDoc, type EventDoc, type EventType, type InfiniteDoc, type MessageDoc, type MessageType, type MetaDoc, type NoteDoc, type NoteType, type PlanStatus, type PlanView, type SessionDoc, type States, type TaskState, type TaskStatus } from '../lib/types.js';
 import { counts, filterNotes, MAX_NOTE, NOTE_TYPES, type NoteFilter } from '../lib/notes.js';
@@ -8,6 +8,7 @@ import { buildVersionColumns, type VersionColumn } from '../lib/versions.js';
 import { canDecide, MAX_PROPOSAL_TEXT, PROPOSAL_CATEGORIES, PROPOSAL_RISKS, PROPOSAL_STATUSES, type ProposalCategory, type ProposalDoc, type ProposalRisk, type ProposalStatus } from '../lib/proposals.js';
 import { dictFor, type Dict } from './i18n.js';
 import type { Drop } from './normalize.js';
+import { computeDerived, type Derived } from './derive.js';
 
 export interface Model {
   meta: MetaDoc | null;
@@ -35,6 +36,8 @@ export interface Model {
   /** H-04: `?debug=1` lists what the normalizers dropped or coerced (`dropped`, by collection). */
   debug?: boolean;
   dropped?: Record<string, Drop[]>;
+  /** H-06: bumped by every change of the data; derive() caches by it. */
+  rev?: number;
 }
 export type View = 'tracking' | 'versions' | 'sessions' | 'notes' | 'proposals';
 export const VIEWS: readonly View[] = ['tracking', 'versions', 'sessions', 'notes', 'proposals'];
@@ -111,16 +114,16 @@ export function relText(d: Dict, kind: RelKind, ts: string, now: number): string
 const rel = (d: Dict, kind: RelKind, ts: string, now: number): string =>
   `<span data-rel="${kind}" data-ts="${esc(ts)}">${esc(relText(d, kind, ts, now))}</span>`;
 
-export function renderApp(m: Model, ui: UiState): string {
+export function renderApp(m: Model, ui: UiState, dv: Derived = computeDerived(m)): string {
   const d = dictFor(m.meta?.locale);
   const loc = m.meta?.locale ?? 'en';
-  const x = computeMetrics(m.plan, m.states, m.now, Math.max(1, Object.values(m.sessions).filter(s => s.status === 'active').length));
+  const x = dv.metrics;
   const navBtn = (view: UiState['view'], icon: string, label: string, badge = 0) =>
     `<button class="nav ${ui.view === view ? 'on' : ''}" data-action="view" data-view="${view}"><b>${icon}</b>${esc(label)}${badge > 0 ? `<span class="badge">${badge}</span>` : ''}</button>`;
   const openProposals = m.proposals.filter(p => canDecide(oneOf(PROPOSAL_STATUSES, p.status, 'done'))).length;
   const body = ui.view === 'sessions'
     ? `${renderHeader(m, d, x, d.sessionsTitle)}
-    ${renderSessionsView(m, d)}`
+    ${renderSessionsView(m, d, dv)}`
     : ui.view === 'versions'
     ? `${renderHeader(m, d, x, d.versionsTitle)}
     ${renderVersionsView(m, d, ui)}`
@@ -132,8 +135,8 @@ export function renderApp(m: Model, ui: UiState): string {
     ${renderCards(m, d, x, loc)}
     ${renderLoose(m, d)}
     ${renderSessions(m, d)}
-    ${renderTimeline(m, d, ui, loc)}
-    ${renderInsights(m, d, ui, loc)}`;
+    ${renderTimeline(m, d, ui, loc, dv)}
+    ${renderInsights(m, d, ui, loc, dv)}`;
   return `<div class="shell">
   <nav class="side" data-scroll-key="side"><div class="brand">${esc((m.meta?.name ?? '').toUpperCase())}</div>${infinitePill(m, d)}${runPill(m, d)}
     ${navBtn('tracking', '≡', d.nav.tracking)}${navBtn('versions', '▥', d.nav.versions)}${navBtn('sessions', '◎', d.nav.sessions)}${navBtn('notes', '✎', d.nav.notes)}${navBtn('proposals', '◇', d.nav.proposals, openProposals)}
@@ -320,8 +323,8 @@ function renderLoose(m: Model, d: Dict): string {
   return `<section class="loose card"><div class="lbl">${esc(d.run.looseTitle)} (${r.loose.length})</div><ul class="lts">${rows}</ul></section>`;
 }
 
-function renderSessionsView(m: Model, d: Dict): string {
-  const x = computeMetrics(m.plan, m.states, m.now, 1);
+function renderSessionsView(m: Model, d: Dict, dv: Derived): string {
+  const x = dv.metrics;
   const esca = escalatedSessions(m);
   const list = Object.entries(m.sessions);
   const cards = list.map(([sid, s]) => {
@@ -395,7 +398,7 @@ function forgeBadge(m: Model, id: string): string {
   return ` <span class="fg ${v ? cls : ''}">⚒ ${esc([v?.action, score].filter(Boolean).join(' ') || f.phase)}${typeof f.round === 'number' ? ` · r${f.round}${typeof f.cap === 'number' ? `/${f.cap}` : ''}` : ''}</span>`;
 }
 
-function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string): string {
+function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived): string {
   const win = timelineWindow(ui, m.now);
   const { rows, groupBy, expanded } = timelineRows(m, d, ui, win);
   const pos = (t: number) => ((t - win.from) / (win.to - win.from)) * 100;
@@ -406,7 +409,7 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string): string {
   const tz = new Date(m.now).getTimezoneOffset();
   const layers = new Set(ui.layers ?? []);
   const filter = new Set(ui.statuses ?? []);
-  const crit = layers.has('critical') ? new Set(criticalPath(m.plan, m.states, m.now).ids) : new Set<string>();
+  const crit = layers.has('critical') ? new Set(dv.critical.ids) : new Set<string>();
   const ids = groupIds(m.plan, m.states, groupBy);
   const allOpen = ids.every(id => expanded.has(id));
   const st = (r: { status?: string }) => (r.status && Object.hasOwn(d.status, r.status) ? r.status as TaskStatus : 'free');
@@ -445,9 +448,7 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string): string {
   const grid = tickList.map(t => `<i style="left:${pos(t)}%"></i>`).join('');
   let band = '';
   if (layers.has('forecast')) {
-    const sessions = Math.max(1, Object.values(m.sessions).filter(x => x.status === 'active').length);
-    const x = computeMetrics(m.plan, m.states, m.now, sessions);
-    const f = forecast(m.plan, m.states, m.now, { sessions, paceMin: x.paceMin });
+    const f = dv.forecast;
     if (f) {
       const a = Math.max(0, Math.min(100, pos(f.from)));
       const b = Math.max(0, Math.min(100, pos(f.to)));
@@ -509,10 +510,8 @@ function renderMinimap(m: Model, d: Dict, win: Win): string {
 }
 
 /** The analysis row under the timeline: burndown, critical path with the forecast end, and the code zones. */
-function renderInsights(m: Model, d: Dict, ui: UiState, loc: string): string {
-  const sessions = Math.max(1, Object.values(m.sessions).filter(x => x.status === 'active').length);
-  const x = computeMetrics(m.plan, m.states, m.now, sessions);
-  const f = forecast(m.plan, m.states, m.now, { sessions, paceMin: x.paceMin });
+function renderInsights(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived): string {
+  const f = dv.forecast;
   // Scope: a version, a phase, or the whole plan.
   const scopes = [
     { id: '', label: d.insights.wholePlan, ids: m.plan.tasks.map(t => t.id) },
@@ -539,7 +538,7 @@ function renderInsights(m: Model, d: Dict, ui: UiState, loc: string): string {
       <div class="legend"><span><i class="lg bdl-a"></i>${esc(d.insights.actual)}</span><span><i class="lg bdl-i"></i>${esc(d.insights.ideal)}</span><span class="mono">${bd.actual.at(-1)!.left} ${esc(d.insights.tasksLeft)}</span></div>`;
   }
   const scopeSel = `<select data-action="burn-scope" aria-label="${esc(d.insights.scope)}">${scopes.map(sc => `<option value="${esc(sc.id)}"${sc.id === scope.id ? ' selected' : ''}>${esc(sc.label)}</option>`).join('')}</select>`;
-  const cp = criticalPath(m.plan, m.states, m.now);
+  const cp = dv.critical;
   const chain = cp.ids.length
     ? `<div class="mono">${esc(d.insights.chain(cp.ids.length, cp.minutes))}</div><ol class="chain" data-scroll-key="chain">${cp.ids.map(id => {
         const t = m.plan.tasks.find(x => x.id === id);
@@ -549,7 +548,7 @@ function renderInsights(m: Model, d: Dict, ui: UiState, loc: string): string {
       }).join('')}</ol>`
     : `<div class="muted">${esc(d.insights.allDone)}</div>`;
   const fc = f ? `<div class="fct">${esc(d.insights.forecastRange(fmt(new Date(f.from).toISOString(), loc), fmt(new Date(f.to).toISOString(), loc)))}</div>` : '';
-  const heat = zoneHeat(m.plan, m.states).slice(0, 12);
+  const heat = dv.zones.slice(0, 12);
   const maxHeat = Math.max(1, ...heat.map(z => z.tasks + z.touched));
   const zones = heat.length
     ? `<ul class="zones" data-scroll-key="zones">${heat.map(z => `<li><div class="zn"><span class="mono">${esc(z.zone)}</span><span class="k">${esc(d.insights.zoneLine(z.tasks, z.done, z.active))}${z.touched ? ` · ${esc(d.insights.touched(z.touched))}` : ''}</span></div>

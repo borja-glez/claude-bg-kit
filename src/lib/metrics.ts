@@ -14,6 +14,10 @@ export interface Metrics {
   startedAt: string | null;
   byPhase: Record<string, { done: number; total: number; status: 'done' | 'in_progress' | 'committed' | 'provisional' }>;
   byTrack: Record<string, { done: number; total: number }>;
+  /** G-11: each version's tasks (those of its phases): done, total and percent. */
+  byVersion: Record<string, { done: number; total: number; percent: number }>;
+  /** G-11: the first version (plan order) with work left; the last one when every version is done; null without versions. */
+  currentVersion: string | null;
 }
 
 export function computeMetrics(plan: PlanView, states: States, now: number, activeSessions = 1): Metrics {
@@ -34,6 +38,16 @@ export function computeMetrics(plan: PlanView, states: States, now: number, acti
     byTrack[tr.id] = { done: ts.filter(t => st(t.id) === 'done').length, total: ts.length };
   }
 
+  const byVersion: Metrics['byVersion'] = {};
+  const versions = plan.versions ?? [];
+  for (const v of versions) {
+    const phases = new Set(v.phases);
+    const ts = plan.tasks.filter(t => phases.has(t.phase));
+    const d = ts.filter(t => st(t.id) === 'done').length;
+    byVersion[v.id] = { done: d, total: ts.length, percent: ts.length ? Math.round((d / ts.length) * 100) : 0 };
+  }
+  const open = versions.find(v => byVersion[v.id]!.done < byVersion[v.id]!.total);
+  const currentVersion = open?.id ?? versions.at(-1)?.id ?? null;
   const durations: number[] = [];
   const starts: number[] = [];
   for (const t of plan.tasks) {
@@ -65,5 +79,7 @@ export function computeMetrics(plan: PlanView, states: States, now: number, acti
     startedAt: starts.length ? new Date(Math.min(...starts)).toISOString() : null,
     byPhase,
     byTrack,
+    byVersion,
+    currentVersion,
   };
 }

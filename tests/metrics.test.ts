@@ -57,4 +57,16 @@ describe('computeMetrics', () => {
     expect(m.byPhase.F1.status).toBe('done');
     expect(m.phasesDone).toBe(1);
   });
+
+  it('by version: the tasks of its phases; the current one is the first with work left (G-11, H-27)', () => {
+    const two = { ...plan, versions: [{ id: '0.1', phases: ['F1'] }, { id: '0.2', phases: ['F2'] }] };
+    const s: States = { T001: { status: 'done' }, T002: { status: 'done' } };
+    const m = computeMetrics(two, s, NOW);
+    expect(m.byVersion).toEqual({ '0.1': { done: 2, total: 3, percent: 67 }, '0.2': { done: 0, total: 3, percent: 0 } });
+    expect(m.currentVersion).toBe('0.1');
+    expect(computeMetrics(two, { ...s, T003: { status: 'done' } }, NOW).currentVersion).toBe('0.2');
+    const all: States = Object.fromEntries(two.tasks.map(t => [t.id, { status: 'done' as const }]));
+    expect(computeMetrics(two, all, NOW).currentVersion).toBe('0.2');
+    expect(computeMetrics({ ...plan, versions: [] }, s, NOW)).toMatchObject({ byVersion: {}, currentVersion: null });
+  });
 });
