@@ -54,12 +54,15 @@ export function claimBatch(i: ClaimInput): BatchOut {
 }
 
 export interface DoneInput {
-  sid: string; task: string; stateVersion: number; sessionVersion: number; metaVersion: number; now: Date; eids: readonly string[];
+  sid: string; task: string; stateVersion: number; sessionVersion: number; now: Date; eids: readonly string[];
   commit: Commit; summary: string; tests?: number;
 }
-/** The task done with its commit and summary, the `done` event (its text the commit title, cleaned), the session
- *  without a task, and meta/project's last commit (with `tests` when known: wave 4 moves the metrics out of this batch, A-10). */
-export function doneBatch(i: DoneInput): BatchOut {
+/**
+ * The task done with its commit and summary, the `done` event (its text the commit title, cleaned) and the session
+ * without a task; and, apart, the write of meta/metrics (A-10): never in this batch nor pinned, so a clash on the
+ * metrics never undoes the delivery, and its `update` keeps the fields it does not name (`tests` without --tests).
+ */
+export function doneBatch(i: DoneInput): BatchOut & { metrics: Write } {
   const now = i.now.toISOString();
   const leaseUntil = iso(i.now.getTime() + LEASE_MINUTES * MIN);
   const eid = i.eids[0];
@@ -70,8 +73,8 @@ export function doneBatch(i: DoneInput): BatchOut {
       { op: 'update', collection: 'state', doc_id: i.task, data: { status: 'done', doneAt: now, commits: [c], summary: cleanText(i.summary, SUMMARY_MAX) }, if_version: i.stateVersion },
       event(eid, { ts: now, type: 'done', sessionId: i.sid, taskId: i.task, text: cleanText(c.title, SUMMARY_MAX), add: c.add, del: c.del, sha: c.sha }),
       { op: 'update', collection: 'sessions', doc_id: i.sid, data: { currentTask: DEL, heartbeatAt: now, leaseUntil }, if_version: i.sessionVersion },
-      { op: 'update', collection: 'meta', doc_id: 'project', data: { metrics: { lastCommit: { sha: c.sha, ts: c.ts }, ...(i.tests !== undefined ? { tests: i.tests } : {}) } }, if_version: i.metaVersion },
     ],
+    metrics: { op: 'update', collection: 'meta', doc_id: 'metrics', data: { lastCommit: { sha: c.sha, ts: c.ts }, ...(i.tests !== undefined ? { tests: i.tests } : {}), updatedAt: now } },
   };
 }
 

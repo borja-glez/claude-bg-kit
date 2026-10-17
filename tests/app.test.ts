@@ -102,7 +102,7 @@ describe('start', () => {
     const f = fakeDb();
     const root = document.createElement('div');
     const app = await start({ claude: { use: async () => f.db }, snapshot, root, now: () => NOW });
-    expect([...f.subs.keys()].sort()).toEqual(['events', 'messages', 'meta/infinite', 'meta/project', 'meta/run', 'notes', 'plan', 'proposals', 'sessions', 'state']);
+    expect([...f.subs.keys()].sort()).toEqual(['events', 'messages', 'meta/infinite', 'meta/metrics', 'meta/project', 'meta/run', 'notes', 'plan', 'proposals', 'sessions', 'state']);
     f.push('state', { T001: { status: 'done', startedAt: '2026-10-11T10:00:00Z', doneAt: '2026-10-11T10:30:00Z' } });
     await flush();
     expect(root.innerHTML).toContain('17 %');
@@ -644,6 +644,19 @@ describe('notes', () => {
     click(root, '[data-action="nfilter"][data-filter="open"]');
     await flush();
     expect(app.ui.noteFilter).toBe('open');
+    app.stop();
+  });
+
+  it('reads meta/metrics apart and completes it with meta/project.metrics, field by field (A-10)', async () => {
+    const f = fakeDb();
+    const root = document.createElement('div');
+    const app = await start({ claude: { use: async () => f.db }, snapshot, root, now: () => NOW });
+    f.push('meta/project', { ...snapshot.meta, metrics: { tests: 41, lastCommit: { sha: '0000000old', ts: '2026-10-10T10:00:00Z' } } });
+    f.push('meta/metrics', { lastCommit: { sha: 'abc1234def', ts: '2026-10-11T11:00:00Z' }, updatedAt: '2026-10-11T11:00:00Z' });
+    await flush();
+    expect(root.innerHTML).toContain('<b>41</b>');
+    expect(root.innerHTML).toContain('<b>abc1234</b>');
+    expect(root.innerHTML).not.toContain('0000000');
     app.stop();
   });
 });

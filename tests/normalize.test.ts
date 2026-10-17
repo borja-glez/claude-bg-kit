@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeMeta, normalizePhase, normalizeState, normalizeSession, normalizeEvent, normalizeMessage, normalizeInfinite, normalizeRun, normalizeForgeV1 } from '../src/page/normalize.js';
+import { normalizeMeta, normalizePhase, normalizeState, normalizeSession, normalizeEvent, normalizeMessage, normalizeInfinite, normalizeRun, normalizeForgeV1, normalizeMetrics, mergeMetrics } from '../src/page/normalize.js';
 
 describe('normalizeRun / execution fields', () => {
   it('normalizeRun keeps valid fields and drops junk', () => {
@@ -294,5 +294,17 @@ describe('normalizeState: forge v2, evidence v2 and blockedReason (C7, wave 4)',
     const got: string[] = [];
     expect(normalizeState({ status: 'blocked', blockedReason: 7 }, (f, a) => { got.push(`${f} · ${a}`); })).not.toHaveProperty('blockedReason');
     expect(got).toEqual(['blockedReason · dropped']);
+  });
+});
+
+describe('meta/metrics (A-10)', () => {
+  it('keeps the last commit and the test count, drops junk with a report, and is completed field by field with meta/project.metrics', () => {
+    const got: string[] = [];
+    const m = normalizeMetrics({ lastCommit: { sha: 'abc', ts: 't' }, tests: 'many', updatedAt: 't' }, (f, a) => { got.push(`${f} · ${a}`); })!;
+    expect(m).toEqual({ lastCommit: { sha: 'abc', ts: 't' } });
+    expect(got).toEqual(['tests · dropped']);
+    expect(normalizeMetrics(null)).toBeNull();
+    expect(mergeMetrics({ tests: 41, lastCommit: { sha: 'old', ts: 'o' } }, m)).toEqual({ tests: 41, lastCommit: { sha: 'abc', ts: 't' } });
+    expect(mergeMetrics({ tests: 41 }, null)).toEqual({ tests: 41 });
   });
 });

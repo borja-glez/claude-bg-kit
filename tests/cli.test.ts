@@ -592,10 +592,12 @@ describe('task batches from the CLI (A-14)', () => {
     const sha = git('rev-parse', 'HEAD');
     expect(o.batch[0]).toMatchObject({ if_version: 4, data: { status: 'done', summary: 'El esquema de pedidos está aplicado.', commits: [{ sha, title: 'T001: esquema' }] } });
     expect(o.batch[1].data).toMatchObject({ type: 'done', sha, text: 'T001: esquema' });
-    expect(o.batch[3]).toMatchObject({ collection: 'meta', if_version: 2, data: { metrics: { lastCommit: { sha }, tests: 12 } } });
+    expect(o.batch).toHaveLength(3);
+    expect(o.metrics).toEqual({ op: 'update', collection: 'meta', doc_id: 'metrics', data: { lastCommit: { sha, ts: expect.any(String) }, tests: 12, updatedAt: '2026-10-11T10:00:00.000Z' } });
     expect(JSON.parse(readFileSync(path.join(dir, 'db', 'state', 'T001.json'), 'utf8')).status).toBe('done');
     expect(cli('done', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T001', '--state-version', '4', '--session-version', '8', '--meta-version', '2').code).toBe(2);
     expect(cli('done', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T001', '--state-version', '4', '--session-version', '8', '--meta-version', '2', '--summary-file', 'summary.txt', '--rev', '--all').code).toBe(2);
+    expect(cli('done', 'plan.yaml', '--db', 'db', '--session', 'be', '--task', 'T001', '--state-version', '4', '--session-version', '8', '--summary-file', 'summary.txt').code).toBe(0);
   });
   it('block --why-file writes the reason in the blocked event and in state/T.blockedReason', () => {
     dbOf();

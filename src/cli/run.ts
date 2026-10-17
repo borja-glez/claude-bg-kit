@@ -339,7 +339,8 @@ export function run(argv: string[], io: Io): Result {
         return ok(JSON.stringify({ ...r, solo }));
       }
       case 'done': {
-        const f = taskFlags('done', ['state-version', 'session-version', 'meta-version']);
+        // A-10: --meta-version is no longer needed: the metrics go apart (an older skill may still pass it).
+        const f = taskFlags('done', ['state-version', 'session-version']);
         if ('code' in f) return f;
         if (!planHas(f.task)) return fail(`done: unknown task ${f.task}`, 2);
         const file = flag('summary-file');
@@ -353,7 +354,7 @@ export function run(argv: string[], io: Io): Result {
         if (!BRANCH_RE.test(rev)) return fail('done: --rev needs a commit', 2);
         const now = io.now();
         const r = doneBatch({
-          sid: f.sid, task: f.task, stateVersion: f.v['state-version'], sessionVersion: f.v['session-version'], metaVersion: f.v['meta-version'],
+          sid: f.sid, task: f.task, stateVersion: f.v['state-version'], sessionVersion: f.v['session-version'],
           now, eids: eventIds(now, f.sid, 1, io.rand), commit: commitInfo(io.cwd, rev), summary, ...(tests !== undefined ? { tests: Number(tests) } : {}),
         });
         mirror(r.batch);

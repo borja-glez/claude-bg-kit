@@ -4,7 +4,7 @@ import { clampSpan, panFor, planRange, zoomAround, type Zoom } from '../lib/time
 import { MAX_NOTE, NOTE_TYPES } from '../lib/notes.js';
 import { applyDecision, canDecide, MAX_PROPOSAL_TEXT, normalizeProposal, type Decision, type ProposalDoc } from '../lib/proposals.js';
 import { dictFor } from './i18n.js';
-import { normalizeEvent, normalizeInfinite, normalizeMessage, normalizeMeta, normalizeNote, normalizePhase, normalizeRun, normalizeSession, normalizeState, type Drop, type Report } from './normalize.js';
+import { mergeMetrics, normalizeEvent, normalizeInfinite, normalizeMessage, normalizeMeta, normalizeMetrics, normalizeNote, normalizePhase, normalizeRun, normalizeSession, normalizeState, type Drop, type Report } from './normalize.js';
 import { decodeView, encodeView } from './urlstate.js';
 import { categoryKeys, esc, NOTE_FILTERS, PROPOSAL_FILTERS, relText, renderApp, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, vfilterStatuses, VFILTER_KEYS, VIEWS, type Model, type RelKind, type ProposalFilterKind, type UiState, type VFilterKey, type View } from './render.js';
 
@@ -718,6 +718,10 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   model.offline = false;
   const onErr = () => { model.offline = true; schedule(); };
   const rebuild = () => { if (model.meta && phaseDocs.length) model.plan = planViewFromDocs(model.meta, phaseDocs); };
+  // A-10: the metrics live in meta/metrics; a roadmap a forge before wave 4 wrote keeps them in meta/project.metrics.
+  let projectMetrics: MetaDoc['metrics'] = model.meta?.metrics ?? {};
+  let metricsDoc: MetaDoc['metrics'] | null = null;
+  const withMetrics = () => { if (model.meta) model.meta = { ...model.meta, metrics: mergeMetrics(projectMetrics, metricsDoc) }; };
   // H-04: with ?debug=1, each snapshot of a collection replaces its list of what the normalizers dropped or coerced.
   const reporter = (key: string): ((doc: string) => Report | undefined) => {
     if (!model.debug) return () => undefined;
@@ -727,7 +731,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   };
   const rows = (s: QSnap) => s.docs.map(x => ({ id: x.id, body: x.data() }));
 
-  unsubs.push(db.doc('meta/project').onSnapshot(((s: Snap) => { if (s.exists) { const mm = normalizeMeta(s.data(), reporter('meta/project')('meta/project')); if (mm) { model.meta = mm; rebuild(); } } scheduleData(); }) as never, onErr));
+  unsubs.push(db.doc('meta/project').onSnapshot(((s: Snap) => { if (s.exists) { const mm = normalizeMeta(s.data(), reporter('meta/project')('meta/project')); if (mm) { projectMetrics = mm.metrics; model.meta = mm; withMetrics(); rebuild(); } } scheduleData(); }) as never, onErr));
+  unsubs.push(db.doc('meta/metrics').onSnapshot(((s: Snap) => { metricsDoc = s.exists ? normalizeMetrics(s.data(), reporter('meta/metrics')('meta/metrics')) : null; withMetrics(); scheduleData(); }) as never, onErr));
   unsubs.push(db.doc('meta/run').onSnapshot(((s: Snap) => { model.run = s.exists ? normalizeRun(s.data(), reporter('meta/run')('meta/run')) : null; scheduleData(); }) as never, onErr));
   unsubs.push(db.doc('meta/infinite').onSnapshot(((s: Snap) => { model.infinite = s.exists ? normalizeInfinite(s.data(), reporter('meta/infinite')('meta/infinite')) : null; scheduleData(); }) as never, onErr));
   unsubs.push(db.collection('plan').onSnapshot(((s: QSnap) => { const rep = reporter('plan'); const p = rows(s).map(r => normalizePhase(r.body, rep(`plan/${r.id}`))).filter((x): x is PhaseDoc => x !== null); if (p.length) { phaseDocs = p; rebuild(); } scheduleData(); }) as never, onErr));

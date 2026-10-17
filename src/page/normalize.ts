@@ -46,6 +46,21 @@ export function normalizeMeta(x: unknown, report?: Report): MetaDoc | null {
   };
 }
 
+/** A-10: meta/metrics, the metrics written apart from meta/project (lastCommit, tests); null when it is not an object. */
+export function normalizeMetrics(x: unknown, report?: Report): MetaDoc['metrics'] | null {
+  if (!isObj(x)) { if (x !== undefined && x !== null) report?.('metrics', 'dropped', kindOf(x)); return null; }
+  const out: MetaDoc['metrics'] = {};
+  const lc = x.lastCommit;
+  if (isObj(lc) && typeof lc.sha === 'string' && typeof lc.ts === 'string') out.lastCommit = { sha: lc.sha, ts: lc.ts };
+  else if (lc !== undefined) report?.('lastCommit', 'dropped', kindOf(lc));
+  if (typeof x.tests === 'number' && Number.isInteger(x.tests) && x.tests >= 0) out.tests = x.tests;
+  else if (x.tests !== undefined) report?.('tests', 'dropped', kindOf(x.tests));
+  return out;
+}
+
+/** A-10: meta/metrics, field by field, completed with meta/project.metrics (what a forge before wave 4 wrote). */
+export const mergeMetrics = (project: MetaDoc['metrics'], doc: MetaDoc['metrics'] | null): MetaDoc['metrics'] => ({ ...project, ...(doc ?? {}) });
+
 function normalizeTask(t: Obj): PlanTask {
   return { ...(t as unknown as PlanTask), id: t.id as string, title: t.title as string, depends_on: strs(t.depends_on), zones: strs(t.zones), done_when: typeof t.done_when === 'string' ? t.done_when : '', track: str(t.track), phase: str(t.phase) };
 }

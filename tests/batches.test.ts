@@ -31,22 +31,22 @@ describe('task batches (A-14)', () => {
     expect(r.batch[0].data).toEqual({ status: 'in_progress', owner: 'main', claimedAt: T, startedAt: T, recoveredFrom: 'ui' });
     expect(r.batch[1].data).toMatchObject({ type: 'started', text: 'recovered from ui' });
   });
-  it('done: the task with its commit and summary, the done event, the session without a task and the last commit', () => {
+  it('done: the task with its commit and summary, the done event and the session without a task; meta/metrics apart, never pinned (A-10)', () => {
     const commit = { sha: 'abc1234', ts: '2026-10-15T11:59:00.000Z', title: 'T019: login', add: 12, del: 3 };
-    const r = doneBatch({ sid: 'main', task: 'T019', stateVersion: 8, sessionVersion: 4, metaVersion: 2, now: NOW, eids: ['e1'], commit, summary: 'Login\nworks.', tests: 41 });
+    const r = doneBatch({ sid: 'main', task: 'T019', stateVersion: 8, sessionVersion: 4, now: NOW, eids: ['e1'], commit, summary: 'Login\nworks.', tests: 41 });
     expect(r.batch).toEqual([
       { op: 'update', collection: 'state', doc_id: 'T019', data: { status: 'done', doneAt: T, commits: [commit], summary: 'Login works.' }, if_version: 8 },
       { op: 'set', collection: 'events', doc_id: 'e1', data: { ts: T, type: 'done', sessionId: 'main', taskId: 'T019', text: 'T019: login', add: 12, del: 3, sha: 'abc1234' } },
       { op: 'update', collection: 'sessions', doc_id: 'main', data: { currentTask: D, heartbeatAt: T, leaseUntil: LEASE }, if_version: 4 },
-      { op: 'update', collection: 'meta', doc_id: 'project', data: { metrics: { lastCommit: { sha: 'abc1234', ts: '2026-10-15T11:59:00.000Z' }, tests: 41 } }, if_version: 2 },
     ]);
-    const noTests = doneBatch({ sid: 'main', task: 'T019', stateVersion: 8, sessionVersion: 4, metaVersion: 2, now: NOW, eids: ['e1'], commit, summary: 'x' });
-    expect(noTests.batch[3].data).toEqual({ metrics: { lastCommit: { sha: 'abc1234', ts: '2026-10-15T11:59:00.000Z' } } });
+    expect(r.metrics).toEqual({ op: 'update', collection: 'meta', doc_id: 'metrics', data: { lastCommit: { sha: 'abc1234', ts: '2026-10-15T11:59:00.000Z' }, tests: 41, updatedAt: T } });
+    const noTests = doneBatch({ sid: 'main', task: 'T019', stateVersion: 8, sessionVersion: 4, now: NOW, eids: ['e1'], commit, summary: 'x' });
+    expect(noTests.metrics.data).toEqual({ lastCommit: { sha: 'abc1234', ts: '2026-10-15T11:59:00.000Z' }, updatedAt: T });
   });
   it('done: the event text is the commit title cleaned, without control or bidi characters', () => {
     const title = `T019:${String.fromCharCode(9)}log${String.fromCharCode(0x202e)}in${String.fromCharCode(7)}`;
     const commit = { sha: 'abc1234', ts: '2026-10-15T11:59:00.000Z', title, add: 1, del: 0 };
-    const r = doneBatch({ sid: 'main', task: 'T019', stateVersion: 8, sessionVersion: 4, metaVersion: 2, now: NOW, eids: ['e1'], commit, summary: 'x' });
+    const r = doneBatch({ sid: 'main', task: 'T019', stateVersion: 8, sessionVersion: 4, now: NOW, eids: ['e1'], commit, summary: 'x' });
     expect(r.batch[1].data).toMatchObject({ type: 'done', text: 'T019: login' });
   });
   it('block: the reason, cleaned, in the event and in state/T.blockedReason', () => {
