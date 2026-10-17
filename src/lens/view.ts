@@ -1,6 +1,8 @@
 // What the lens panel and band draw, worked out once from the PanelModel and drawn twice: as cells on the terminal
 // (term.tsx) and as SVG on the desktop (svg.ts). Pure, so it is tested without a surface.
 import type { PanelModel } from './model.js';
+// F-11: the durations live in src/lib/duration.ts, shared with waypoint's band; lens keeps exporting them from here.
+import { DAY_S, duration, span } from '../lib/duration.js';
 
 // Catppuccin Mocha, the waypoint roadmap's palette; the SVG side switches to Latte under a light scheme.
 export const PALETTE = {
@@ -190,17 +192,7 @@ export function barParts(r: number, width: number): { fill: string; rest: string
   return { fill, rest: '░'.repeat(Math.max(0, w - full - (edge ? 1 : 0))) };
 }
 
-export const duration = (seconds: number | null | undefined): string | null =>
-  seconds === null || seconds === undefined ? null
-    : seconds < 60 ? `${seconds}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`
-      : `${Math.floor(seconds / 3600)}h ${String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')}m`;
-
-export const DAY_S = 86_400;
-/** duration() for a span: null when missing, not finite or negative; «>24h» past a day. */
-export function span(seconds: number | null | undefined): string | null {
-  if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds < 0) return null;
-  return seconds > DAY_S ? '>24h' : duration(Math.floor(seconds));
-}
+export { DAY_S, duration, span };
 
 /** A short duration for a row: «45s», «12m», «2h 05m»; null when missing, not finite or negative. */
 export function short(seconds: number | null | undefined): string | null {
