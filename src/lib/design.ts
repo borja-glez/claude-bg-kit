@@ -72,6 +72,20 @@ export function designBody(text: string): string {
   return m ? m[2] : t;
 }
 
+/**
+ * Final review M3: the `status` a design text's front matter says, read without validating it (an older version in the
+ * history may not pass today's schema); null without front matter, without a status or when the YAML does not parse.
+ */
+export function designStatus(text: string): string | null {
+  const m = FM.exec(text.startsWith(BOM) ? text.slice(1) : text);
+  if (!m) return null;
+  try {
+    const raw: unknown = parse(m[1] ?? '');
+    const status = raw && typeof raw === 'object' ? (raw as { status?: unknown }).status : undefined;
+    return typeof status === 'string' ? status : null;
+  } catch { return null; }
+}
+
 export function slugify(heading: string): string {
   const slug = heading.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { changedSections, DesignError, designBody, parseDesign, sectionsOf, setDesignStatus, slugify, wordCount } from '../src/lib/design.js';
+import { changedSections, DesignError, designBody, designStatus, parseDesign, sectionsOf, setDesignStatus, slugify, wordCount } from '../src/lib/design.js';
 
 const fixture = readFileSync(new URL('./fixtures/design.md', import.meta.url), 'utf8');
 const issuesOf = (t: string) => { try { parseDesign(t); } catch (e) { if (e instanceof DesignError) return e.issues; throw e; } throw new Error('expected DesignError'); };
@@ -143,5 +143,15 @@ describe('designBody (K3-03)', () => {
     const approved = fixture.replace('start_prompt: /waypoint:work backend', 'start_prompt: /waypoint:work backend\nstatus: approved');
     expect(changedSections(designBody(fixture), designBody(approved))).toEqual({ changed: [], removed: [] });
     expect(changedSections(fixture, approved).changed).toEqual(['_intro']);
+  });
+});
+
+describe('designStatus (final review M3)', () => {
+  it('reads the status of any front matter without validating it; none, junk or no front matter is null', () => {
+    expect(designStatus(fixture)).toBeNull();
+    expect(designStatus(fixture.replace('start_prompt: /waypoint:work backend', 'start_prompt: /waypoint:work backend\nstatus: approved'))).toBe('approved');
+    expect(designStatus('---\nstatus: approved\n---\nan old version that no longer passes the schema\n')).toBe('approved');
+    expect(designStatus(`${String.fromCharCode(0xfeff)}---\r\nstatus: draft\r\n---\r\nx`)).toBe('draft');
+    for (const t of ['---\nstatus: [\n---\nx', '---\nstatus: 3\n---\nx', '---\n- a\n---\nx', '## no front matter\n']) expect(designStatus(t), t).toBeNull();
   });
 });

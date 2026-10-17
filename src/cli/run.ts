@@ -6,9 +6,9 @@ import { buildDocs, buildSyncWrites, planHash, planViewFromDocs, type Known, typ
 import { normalizeMeta, normalizePhase } from '../page/normalize.js';
 import { availableTasks, commitShas } from '../lib/deps.js';
 import { pickTask, conflictsFor, recoverableTasks, inboxFor, escalationCandidates, isIdle, IDLE_MINUTES } from '../lib/coordination.js';
-import { parseDesign, changedSections, designBody, DesignError, setDesignStatus } from '../lib/design.js';
+import { parseDesign, changedSections, designBody, designStatus, DesignError, setDesignStatus } from '../lib/design.js';
 import { importSpec, SpecImportError } from '../lib/design-import.js';
-import { designGate, mergeDismissed } from '../lib/design-gate.js';
+import { designGate, line, mergeDismissed } from '../lib/design-gate.js';
 import { listVersions, nextVersion, parseChangelog, appendChangelog, parseAppliedItems, roundList, AppliedError, ENTRY_KINDS, entryKind, entryRound, type EntryKind } from '../lib/history.js';
 import { parseCritique, selectProposals, formatProposals, CritiqueError, budgetFor, budgetIssues } from '../lib/critique.js';
 import { buildDesignPageData } from '../design-page/build.js';
@@ -118,12 +118,19 @@ export function run(argv: string[], io: Io): Result {
           const unknown = p.tasks.filter(t => t.design_ref && !slugs.has(t.design_ref)).map(t => `${t.id} (${t.design_ref})`);
           if (unknown.length) refs = `\nwarning: ${unknown.length} design_ref(s) not in the design: ${unknown.join(', ')}`;
           if (design.meta.status === 'approved') {
-            const approved = readChangelog(path.dirname(abs(designArg))).at(-1)?.version;
+            // Final review M5: a changelog that does not parse is something validate cannot fix (forge-planner fixes
+            // every issue until ok): a warning, and the exit code stays the one the other checks give.
+            let approved: number | undefined;
+            try {
+              approved = readChangelog(path.dirname(abs(designArg))).at(-1)?.version;
+            } catch (e) {
+              refs += `\nwarning: cannot check design_version: ${line((e as Error).message)}`;
+            }
             if (approved !== undefined && p.design_version !== approved) {
               refs += `\nwarning: design_version is ${p.design_version ?? 'missing'} but the approved design is v${approved}: set design_version: ${approved}`;
             }
             if (design.meta.artifact && p.artifacts.design !== design.meta.artifact) {
-              refs += `\nwarning: artifacts.design is not the design's artifact: set it to ${design.meta.artifact.replace(/[\u0000-\u001f\u007f]/g, ' ')}`;
+              refs += `\nwarning: artifacts.design is not the design's artifact: set it to ${line(design.meta.artifact)}`;
             }
           }
         }
@@ -715,7 +722,9 @@ export function run(argv: string[], io: Io): Result {
         if (kindGiven === 'reopen' && d.meta.status !== 'draft') {
           return fail(`design-snapshot: --kind reopen needs status: draft in the design (it is ${d.meta.status}); set it first`, 2);
         }
-        if (kindGiven === 'reopen' && !log.some(e => entryKind(e) === 'approve')) {
+        // Final review M3: approved once when a version of the history says `status: approved` (an approval note was
+        // written in the person's language before 0.27.0), else when the changelog records an approval.
+        if (kindGiven === 'reopen' && !Object.values(readHistory(path.dirname(file))).some(t => designStatus(t) === 'approved') && !log.some(e => entryKind(e) === 'approve')) {
           return fail('design-snapshot: --kind reopen needs a design that was approved once: this draft was never approved, so there is nothing to reopen', 2);
         }
         // A-04, K3-02: what this entry applied and what its interview resolved, checked against the critiques before
@@ -811,7 +820,11 @@ export function run(argv: string[], io: Io): Result {
         const sinceFlag = flag('since');
         if (sinceFlag !== undefined && !/^[1-9]\d*$/.test(sinceFlag)) return fail('design-impact: --since must be a positive integer', 2);
         const file = abs(args[0]);
-        const d = parseDesign(readFileSync(file, 'utf8'));
+        // Carry 7: a design that cannot be read, or is no design, exits 2 like a plan that cannot be read.
+        let designText: string;
+        try { designText = readFileSync(file, 'utf8'); } catch (e) { return fail(`design-impact: cannot read the design ${args[0]}: ${(e as Error).message}`, 2); }
+        let d: ReturnType<typeof parseDesign>;
+        try { d = parseDesign(designText); } catch (e) { return fail(`design-impact: ${args[0]} is not a design: ${(e as Error).message}`, 2); }
         let plan: ReturnType<typeof parsePlan>;
         try { plan = parsePlan(readFileSync(abs(flag('plan')!), 'utf8')); } catch (e) { return fail(`design-impact: ${(e as Error).message}`, 2); }
         const dir = path.dirname(file);
@@ -873,6 +886,12 @@ export function run(argv: string[], io: Io): Result {
       }
       case 'critique-check': {
         const target = abs(args[0]);
+        // Carry 1: --changed names the changed sections; an empty value, or the next flag where it goes, names none.
+        const changedFlag = flag('changed');
+        const allowed = (changedFlag ?? '').split(',').map(s => s.trim()).filter(Boolean);
+        if (args.includes('--changed') && (!changedFlag || changedFlag.startsWith('--') || !allowed.length)) {
+          return fail('critique-check: --changed needs the changed section slugs, comma-separated', 2);
+        }
         try {
           const c = parseCritique(readFileSync(target, 'utf8'));
           const issues: string[] = [];
@@ -905,13 +924,12 @@ export function run(argv: string[], io: Io): Result {
             for (const p of c.proposals) if (!slugs.has(p.section)) issues.push(`proposal ${p.n}: section "${p.section}" is not a section slug of the design`);
           }
           if (issues.length) throw new CritiqueError(issues);
-          // K3-15: a critique of what changed that reviews another section is told, never refused.
+          // K3-15: a critique of what changed that reviews another section is told, never refused; the section is one clean
+          // line, so a critique cannot write lines of its own into the warnings (carry 1).
           const warnings: string[] = [];
-          const changedFlag = flag('changed');
           if (changedFlag !== undefined && c.scope === 'changed') {
-            const allowed = changedFlag.split(',').map(s => s.trim()).filter(Boolean);
             for (const p of c.proposals) {
-              if (!allowed.includes(p.section)) warnings.push(`warning: proposal ${p.n} reviews "${p.section}", outside the changed sections (${allowed.join(', ')})`);
+              if (!allowed.includes(p.section)) warnings.push(`warning: proposal ${p.n} reviews "${line(p.section)}", outside the changed sections (${line(allowed.join(', '))})`);
             }
           }
           const text = formatProposals(c, flag('locale') ?? 'en', headings);

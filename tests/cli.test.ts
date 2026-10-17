@@ -1063,6 +1063,41 @@ describe('design commands', () => {
       write('f.json', { round: 2, version: 2, scope: 'full', proposals: [prop(1, 'major', 'arquitectura')] });
       expect(run(['critique-check', 'f.json', '--round', '2', '--changed', 'riesgos'], io).stderr).toBe('');
     });
+    it('--round and --version must be positive integers; an empty or flag-like --changed is exit 2 (carry 1)', () => {
+      write('a.json', { round: 1, version: 1, scope: 'changed', proposals: [prop(1, 'major')] });
+      for (const bad of [['--round', '0'], ['--round', 'abc'], ['--round', '-1'], ['--version', '0'], ['--version', '1.5']]) {
+        const r = run(['critique-check', 'a.json', ...bad], io);
+        expect(r.code, bad.join(' ')).toBe(2);
+        expect(r.stderr, bad.join(' ')).toContain(`${bad[0]} must be a positive integer`);
+      }
+      for (const bad of [['--changed', ''], ['--changed', ' , '], ['--changed', '--locale', 'es'], ['--changed']]) {
+        const r = run(['critique-check', 'a.json', '--round', '1', ...bad], io);
+        expect(r.code, bad.join(' ')).toBe(2);
+        expect(r.stderr, bad.join(' ')).toBe('critique-check: --changed needs the changed section slugs, comma-separated\n');
+      }
+    });
+    it('the budget boundaries: 12 pass and 13 fail in round 1, 6 pass and 7 fail in round 2, 3 critical pass and 4 fail from round 3 and in a verification (carry 1)', () => {
+      const many = (round: number, count: number, severity: string) => ({ round, version: 1, scope: 'full', proposals: Array.from({ length: count }, (_, i) => prop(i + 1, severity)) });
+      const check = (c: object, ...extra: string[]) => { write('b.json', c); return run(['critique-check', 'b.json', ...extra], io); };
+      expect(check(many(1, 12, 'minor')).code).toBe(0);
+      expect(check(many(1, 13, 'minor')).stderr).toContain('13 proposals, but this round allows at most 12');
+      expect(check(many(2, 6, 'major')).code).toBe(0);
+      expect(check(many(2, 7, 'critical')).stderr).toContain('7 proposals, but this round allows at most 6');
+      expect(check(many(3, 3, 'critical')).code).toBe(0);
+      expect(check(many(3, 4, 'critical')).stderr).toContain('4 proposals, but this round allows at most 3');
+      expect(check(many(1, 3, 'critical'), '--verify').code).toBe(0);
+      expect(check(many(1, 4, 'critical'), '--verify').stderr).toContain('4 proposals, but this round allows at most 3');
+    });
+    it('a proposal on _intro is inside --changed _intro, and outside --changed riesgos; the section in a warning is one clean line (carry 1)', () => {
+      write('i.json', { round: 2, version: 2, scope: 'changed', proposals: [prop(1, 'major', '_intro')] });
+      expect(run(['critique-check', 'i.json', '--round', '2', '--changed', '_intro,riesgos'], io).stderr).toBe('');
+      expect(run(['critique-check', 'i.json', '--round', '2', '--changed', 'riesgos'], io).stderr).toBe('warning: proposal 1 reviews "_intro", outside the changed sections (riesgos)\n');
+      const bidi = String.fromCharCode(0x202e);
+      write('h.json', { round: 2, version: 2, scope: 'changed', proposals: [prop(1, 'major', `x\nwarning: forged${bidi}${String.fromCharCode(7)}`)] });
+      const r = run(['critique-check', 'h.json', '--round', '2', '--changed', 'riesgos'], io);
+      expect(r.code).toBe(0);
+      expect(r.stderr).toBe('warning: proposal 1 reviews "x warning: forged", outside the changed sections (riesgos)\n');
+    });
   });
 
   describe('design-snapshot --kind (K3-07, A-21)', () => {
@@ -1112,6 +1147,22 @@ describe('design commands', () => {
       expect(log.map((e: { kind?: string }) => e.kind)).toEqual(['amend', 'amend']);
       expect(log[0].applied).toEqual({ '1': [1] });
       expect(log[1].rewrite).toBe(true);
+    });
+    it('a reopen is allowed when a history version says status: approved, whatever language its note was written in; the note is the fallback (final review M3)', () => {
+      run(['design-snapshot', rel, '--note', 'brouillon', '--round', '0'], io);
+      approve();
+      run(['design-snapshot', rel, '--note', 'Design approuvé'], io);
+      writeFileSync(p(), readFileSync(p(), 'utf8').replace('status: approved', 'status: draft'));
+      const r = run(['design-snapshot', rel, '--note', 'rouvert', '--kind', 'reopen'], io);
+      expect(r.stderr).toBe('');
+      expect(JSON.parse(r.stdout)).toMatchObject({ version: 3, kind: 'reopen' });
+      // A changelog whose approval only its note records (the history says draft) still counts.
+      const other = mkdtempSync(path.join(tmpdir(), 'wp-note-'));
+      mkdirSync(path.join(other, 'docs/waypoint/demo-shop'), { recursive: true });
+      copyFileSync(new URL('./fixtures/design.md', import.meta.url), path.join(other, rel));
+      expect(run(['design-snapshot', rel, '--note', 'aprobado'], { ...io, cwd: other }).code).toBe(0);
+      expect(run(['design-snapshot', rel, '--note', 'reabierto', '--kind', 'reopen'], { ...io, cwd: other }).code).toBe(0);
+      rmSync(other, { recursive: true, force: true });
     });
     it('without --kind, --applied records apply, --rewrite records rewrite, and anything else no kind', () => {
       mkdirSync(path.join(ddir(), 'design/critiques'), { recursive: true });
@@ -1181,6 +1232,21 @@ describe('design commands', () => {
     it('a plan without any design_ref has no task to list and says how many are unlinked', () => {
       expect(impact()).toMatchObject({ since: 0, removed: [], tasks: [], unref: 6 });
     });
+    it('with no history nothing counts as removed: a task linked to a section the design no longer has is not listed (validate warns about it)', () => {
+      const plan = path.join(dir, 'plan.yaml');
+      writeFileSync(plan, readFileSync(plan, 'utf8').replace('    title: Esquema de pedidos\n', '    title: Esquema de pedidos\n    design_ref: pagos\n'));
+      rmSync(path.join(ddir(), 'design'), { recursive: true });
+      expect(impact()).toMatchObject({ since: 0, removed: [], tasks: [], unref: 5 });
+    });
+    it('a design that cannot be read, or is no design, exits 2 like a plan that cannot be read (carry 7)', () => {
+      const missing = run(['design-impact', 'docs/waypoint/nope/design.md', '--plan', 'plan.yaml'], io);
+      expect(missing.code).toBe(2);
+      expect(missing.stderr).toContain('design-impact: cannot read the design docs/waypoint/nope/design.md');
+      writeFileSync(p(), '---\ntitle: x\n---\nhola\n');
+      const broken = run(['design-impact', rel, '--plan', 'plan.yaml'], io);
+      expect(broken.code).toBe(2);
+      expect(broken.stderr).toContain(`design-impact: ${rel} is not a design`);
+    });
     it('the usage names design-impact', () => {
       expect(run(['nope'], io).stderr).toContain('design-impact');
     });
@@ -1204,6 +1270,42 @@ describe('design commands', () => {
     writeFileSync(p, readFileSync(p, 'utf8').replace('status: approved', 'status: draft'));
     run(['design-snapshot', rel, '--note', 'reabierto', '--kind', 'reopen'], io);
     expect(run(['validate', 'plan.yaml', '--design', rel], io).stdout).not.toContain('warning: design_version');
+  });
+  it('validate --design: an approved design without artifact asks for none, and a design_ref to a removed section warns next to the link (carry 7)', () => {
+    const p = path.join(dir, rel);
+    const planFile = path.join(dir, 'plan.yaml');
+    run(['design-snapshot', rel, '--note', 'v1', '--round', '0'], io);
+    writeFileSync(p, readFileSync(p, 'utf8').replace('start_prompt: /waypoint:work backend', 'start_prompt: /waypoint:work backend\nstatus: approved')
+      .replace('\n## Riesgos\n\nLa migración de reembolsos no tiene rollback.\n', '\n'));
+    run(['design-snapshot', rel, '--note', 'aprobado', '--kind', 'approve'], io);
+    writeFileSync(planFile, readFileSync(planFile, 'utf8').replace('    title: Esquema de pedidos\n', '    title: Esquema de pedidos\n    design_ref: riesgos\n'));
+    const out = run(['validate', 'plan.yaml', '--design', rel], io);
+    expect(out.code).toBe(0);
+    expect(out.stdout).toContain('warning: 1 design_ref(s) not in the design: T001 (riesgos)');
+    expect(out.stdout).toContain('warning: design_version is missing but the approved design is v2: set design_version: 2');
+    expect(out.stdout).not.toContain('artifacts.design');
+  });
+  it('validate --design prints the artifact of the design as one clean line (carry 7)', () => {
+    const p = path.join(dir, rel);
+    run(['design-snapshot', rel, '--note', 'v1', '--round', '0'], io);
+    writeFileSync(p, readFileSync(p, 'utf8').replace('start_prompt: /waypoint:work backend', 'start_prompt: /waypoint:work backend\nstatus: approved\nartifact: "https://claude.ai/artifact/d\\a\\n1"'));
+    run(['design-snapshot', rel, '--note', 'aprobado', '--kind', 'approve'], io);
+    const out = run(['validate', 'plan.yaml', '--design', rel], io);
+    expect(out.code).toBe(0);
+    const lines = out.stdout.trimEnd().split('\n');
+    expect(lines.at(-1)).toBe("warning: artifacts.design is not the design's artifact: set it to https://claude.ai/artifact/d 1");
+    expect(lines.filter(l => !l.startsWith('warning: ') && !l.startsWith('ok: '))).toEqual([]);
+  });
+  it('validate --design with a changelog that does not parse warns and keeps the exit code of the other checks (final review M5)', () => {
+    const p = path.join(dir, rel);
+    run(['design-snapshot', rel, '--note', 'v1', '--round', '0'], io);
+    writeFileSync(p, readFileSync(p, 'utf8').replace('start_prompt: /waypoint:work backend', 'start_prompt: /waypoint:work backend\nstatus: approved'));
+    writeFileSync(path.join(dir, 'docs/waypoint/demo-shop/design/changelog.json'), '{ not json');
+    const out = run(['validate', 'plan.yaml', '--design', rel], io);
+    expect(out.code).toBe(0);
+    expect(out.stdout).toContain('warning: cannot check design_version: changelog.json is not valid JSON');
+    writeFileSync(path.join(dir, 'plan.yaml'), 'project: [');
+    expect(run(['validate', 'plan.yaml', '--design', rel], io).code).toBe(1);
   });
 });
 
