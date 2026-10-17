@@ -254,6 +254,7 @@ elsewhere and are reconstructed from their READMEs.
 
 #### Changed
 - A member's task status reaches the main checkout; the route hint sees this session's open task among all of them.
+- The route hint skips, unread, the task statuses untouched for a day.
 - Requires waypoint ^0.24.0.
 
 ### 0.20.0 — 2026-10-17
@@ -667,6 +668,7 @@ elsewhere and are reconstructed from their READMEs.
 - Run usage counts only the run's sessions from their start; tracking re-reads estimated. A resumed session checks `/cost` against what it spent since it resumed.
 - Up to three todos in progress, with the cells in their order; the superpowers round shows its own cap and a ledger unchanged for a day is dimmed; `/clear` empties the panel.
 - The hooks that gate (`ui.close`, `agent.spawn`, `tool.call` and the classic ones) go on when they fail.
+- The same task id in two plans, or in a plan and a loose task, stays apart: each row takes the agents, job and title of its own task; and a session counts whole in its run's usage, marked `≥`, until lens knows which run it works for.
 
 ### 0.11.9 — 2026-10-17
 
