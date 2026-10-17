@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { buildBandModel, noneBand, NO_VIEWER, type BandModel } from '../src/mod/model.js';
 import { newUsage, recordStep, labelLoop, closeTurn } from '../src/lens/usage.js';
 import { FINISHED_TTL_MS } from '../src/lens/finished.js';
+import { headline } from '../src/lens/view.js';
 import { buildPanelModel, bandKey, usageTime, elapsed, forgeFromStatus, parsePlanTasks, parseSddLedger, summarizeTodos, type Activity, type PanelModel } from '../src/lens/model.js';
 
 const LEDGER = `# SDD ledger — plan: docs/superpowers/plans/2026-10-11-waypoint-views.md
@@ -53,7 +54,7 @@ describe('parseSddLedger', () => {
     const r = parseSddLedger(LEDGER);
     expect(r.planPath).toBe('docs/superpowers/plans/2026-10-11-waypoint-views.md');
     expect(r.done).toEqual([1, 2, 3, 4]);
-    expect(r.current).toEqual({ task: '5', round: 2 });
+    expect(r.current).toEqual({ task: '5', round: 2, cap: 5 });
     expect(r.lastLines).toEqual([
       'Task 4: fix round 3/5 (tests flaky)',
       'Task 4: complete (commit 3a2a37c; ok)',
@@ -66,10 +67,10 @@ describe('parseSddLedger', () => {
   it('does not treat "minor (deferred)" or a fix line mentioning complete as done', () => {
     const r = parseSddLedger('## Progress\nTask 3: minor (deferred): x\nTask 4: fix round 1/5 (complete the thing)\n');
     expect(r.done).toEqual([]);
-    expect(r.current).toEqual({ task: '4', round: 1 });
+    expect(r.current).toEqual({ task: '4', round: 1, cap: 5 });
   });
   it('keeps a range label for current', () => {
-    expect(parseSddLedger('## Progress\nTasks 1-2: fix round 1/5 (x)\n').current).toEqual({ task: '1-2', round: 1 });
+    expect(parseSddLedger('## Progress\nTasks 1-2: fix round 1/5 (x)\n').current).toEqual({ task: '1-2', round: 1, cap: 5 });
   });
   it('falls back to the file tail without a Progress section and clips to 80', () => {
     const r = parseSddLedger(['a', 'b', '', 'c', 'x'.repeat(200), 'd'].join('\n'));
@@ -111,14 +112,14 @@ describe('summarizeTodos', () => {
   const t = (content: string, status: string, activeForm?: string) => ({ content, status, activeForm });
   it('summarizes states, in-progress activeForm and next 3 pending', () => {
     const s = summarizeTodos([t('a', 'completed'), t('b', 'in_progress', 'Doing b'), t('c', 'pending'), t('d', 'pending'), t('e', 'weird'), t('f', 'pending')]);
-    expect(s).toEqual({ total: 6, done: 1, inProgress: 'Doing b', next: ['c', 'd', 'e'] });
+    expect(s).toEqual({ total: 6, done: 1, inProgress: 'Doing b', next: ['c', 'd', 'e'], active: ['Doing b'], cells: 'dapppp' });
   });
   it('falls back to content and clips', () => {
     expect(summarizeTodos([t('y'.repeat(100), 'in_progress')]).inProgress).toBe('y'.repeat(80));
   });
   it('handles empty, non-array, invalid items and >200 items', () => {
-    expect(summarizeTodos([])).toEqual({ total: 0, done: 0, inProgress: null, next: [] });
-    expect(summarizeTodos('nope')).toEqual({ total: 0, done: 0, inProgress: null, next: [] });
+    expect(summarizeTodos([])).toEqual({ total: 0, done: 0, inProgress: null, next: [], active: [], cells: '' });
+    expect(summarizeTodos('nope')).toEqual({ total: 0, done: 0, inProgress: null, next: [], active: [], cells: '' });
     expect(summarizeTodos([null, 3, {}, { content: 5 }, t('ok', 'completed')]).total).toBe(1);
     const big = Array.from({ length: 500 }, (_, i) => t(`t${i}`, i < 100 ? 'completed' : 'pending'));
     const s = summarizeTodos(big);
@@ -153,7 +154,7 @@ describe('buildPanelModel', () => {
     const m = buildPanelModel({ ...base, ledger: LEDGER, ledgerPlan: PLAN });
     expect(m.superpowers).toEqual({
       plan: 'docs/superpowers/plans/2026-10-11-waypoint-views.md', tasks: 3, done: 3,
-      current: { task: '5', round: 2 }, lastLines: parseSddLedger(LEDGER).lastLines,
+      current: { task: '5', round: 2, cap: 5 }, lastLines: parseSddLedger(LEDGER).lastLines,
     });
   });
   it('without a ledger shows the plan by its checked tasks', () => {
@@ -203,7 +204,7 @@ describe('buildPanelModel', () => {
     });
     expect(m.tool).toEqual({ name: 'Bash', seconds: 10 });
     expect(m.turnSeconds).toBe(60);
-    expect(m.todos).toEqual({ total: 1, done: 0, inProgress: null, next: ['a'] });
+    expect(m.todos).toEqual({ total: 1, done: 0, inProgress: null, next: ['a'], active: [], cells: 'p' });
     expect(m.subagents[0]).toEqual({ id: 'x', type: 'Explore', description: 'd'.repeat(80), status: 'running', seconds: 30 });
     expect(m.subagents[1].seconds).toBe(0);
     expect(m.ccTasks).toEqual({ open: 3, done: 2, recent: ['s3', 's4', 's5'] });
@@ -648,5 +649,28 @@ describe('buildPanelModel decisions', () => {
     expect(buildPanelModel({ ...base, forgeDecisions: doc({ count: 0 }) }).decisions).toBeNull();
     expect(buildPanelModel({ ...base, forgeDecisions: '{"ts":' }).decisions).toBeNull();
     expect(buildPanelModel({ ...base, forgeDecisions: doc() + ' '.repeat(16 * 1024) }).decisions).toBeNull();
+  });
+});
+
+describe('todos and superpowers (E-13, E-14)', () => {
+  const t = (content: string, status: string) => ({ content, status, activeForm: `Doing ${content}` });
+  it('up to three todos in progress, and the cells in their real order', () => {
+    const s = summarizeTodos([t('a', 'in_progress'), t('b', 'completed'), t('c', 'pending'), t('d', 'in_progress'), t('e', 'in_progress'), t('f', 'in_progress')]);
+    expect(s.active).toEqual(['Doing a', 'Doing d', 'Doing e']);
+    expect(s.inProgress).toBe('Doing a');
+    expect(s.cells).toBe('adpaaa');
+    expect(summarizeTodos([t('b', 'completed'), t('a', 'in_progress'), t('c', 'pending')]).cells).toBe('dap');
+  });
+  it('a fix round keeps its own cap; a ledger half done and unchanged for 25 h is stale and out of the headline', () => {
+    expect(parseSddLedger('## Progress\nTask 3: fix round 2/3 (x)\n').current).toEqual({ task: '3', round: 2, cap: 3 });
+    expect(parseSddLedger('## Progress\nTask 3: fix round 2 (x)\n').current).toEqual({ task: '3', round: 2, cap: null });
+    const day = 24 * 3600_000;
+    const none = { mode: 'none', viewer: { role: 'none', coordinator: false, runId: null } } as const;
+    const stale = buildPanelModel({ band: none, activity: act(), now: 10 * day, ledger: LEDGER, ledgerPlan: PLAN, ledgerMtimeMs: 10 * day - 25 * 3600_000 });
+    expect(stale.superpowers).toMatchObject({ stale: true });
+    expect(headline(stale)).toBeNull();
+    const fresh = buildPanelModel({ band: none, activity: act(), now: 10 * day, ledger: LEDGER, ledgerPlan: PLAN, ledgerMtimeMs: 10 * day - 3600_000 });
+    expect(fresh.superpowers).not.toHaveProperty('stale');
+    expect(headline(fresh)).toMatchObject({ section: 'superpowers', detail: 'round 2/5' });
   });
 });

@@ -16,7 +16,7 @@ const MAX_RANGE = 1000;
 const clip = (s: string): string => (s.length > CLIP ? s.slice(0, CLIP) : s);
 
 export interface LedgerSummary {
-  planPath: string | null; done: number[]; current: { task: string; round: number } | null; lastLines: string[];
+  planPath: string | null; done: number[]; current: { task: string; round: number; cap: number | null } | null; lastLines: string[];
 }
 
 const PROGRESS_LINE = /^\s*(?:[-*]\s*)?Tasks?\s+(\d+)(?:\s*[-–]\s*(\d+))?\s*:\s*(.*)$/i;
@@ -37,7 +37,7 @@ export function parseSddLedger(text: string): LedgerSummary {
       section = lines.slice(start + 1, end);
     }
     const done = new Set<number>();
-    const fixes: { lo: number; hi: number; label: string; round: number }[] = [];
+    const fixes: { lo: number; hi: number; label: string; round: number; cap: number | null }[] = [];
     for (const line of section) {
       const m = PROGRESS_LINE.exec(line);
       if (!m) continue;
@@ -51,15 +51,16 @@ export function parseSddLedger(text: string): LedgerSummary {
         for (let n = lo; n <= hi; n++) done.add(n);
         continue;
       }
-      const fix = /^fix round\s+(\d+)\s*\/\s*\d+/i.exec(rest);
-      if (fix) fixes.push({ lo, hi, label: m[2] !== undefined ? `${m[1]}-${m[2]}` : m[1], round: Number(fix[1]) });
+      // E-14: the cap is the ledger's own (fix round 2/3), and a line without one still counts.
+      const fix = /^fix round\s+(\d+)(?:\s*\/\s*(\d+))?/i.exec(rest);
+      if (fix) fixes.push({ lo, hi, label: m[2] !== undefined ? `${m[1]}-${m[2]}` : m[1], round: Number(fix[1]), cap: fix[2] !== undefined ? Number(fix[2]) : null });
     }
     out.done = [...done].sort((a, b) => a - b);
     for (let i = fixes.length - 1; i >= 0; i--) {
       const f = fixes[i];
       let open = false;
       for (let n = f.lo; n <= f.hi; n++) if (!done.has(n)) { open = true; break; }
-      if (open) { out.current = { task: f.label, round: f.round }; break; }
+      if (open) { out.current = { task: f.label, round: f.round, cap: f.cap }; break; }
     }
     out.lastLines = section.map(l => l.trimEnd()).filter(l => l.trim() !== '').slice(-3).map(clip);
   } catch { /* junk in, best effort out */ }
@@ -82,20 +83,29 @@ export function parsePlanTasks(md: string): PlanTask[] {
   return tasks;
 }
 
-export interface TodoSummary { total: number; done: number; inProgress: string | null; next: string[] }
+export interface TodoSummary { total: number; done: number; inProgress: string | null; next: string[]; active: string[]; cells: string }
 
+const TODO_ACTIVE_MAX = 3;
+const TODO_CELLS_MAX = 200;
+
+/** E-13: up to three todos in progress (inProgress is the first) and one cell per todo in its order: d done, a in progress, p pending. */
 export function summarizeTodos(todos: unknown): TodoSummary {
-  const out: TodoSummary = { total: 0, done: 0, inProgress: null, next: [] };
+  const out: TodoSummary = { total: 0, done: 0, inProgress: null, next: [], active: [], cells: '' };
   if (!Array.isArray(todos)) return out;
   for (const raw of todos) {
     if (!raw || typeof raw !== 'object') continue;
     const t = raw as { content?: unknown; status?: unknown; activeForm?: unknown };
     if (typeof t.content !== 'string') continue;
     out.total++;
-    if (t.status === 'completed') out.done++;
+    let cell = 'p';
+    if (t.status === 'completed') { out.done++; cell = 'd'; }
     else if (t.status === 'in_progress') {
-      if (out.inProgress === null) out.inProgress = clip(typeof t.activeForm === 'string' && t.activeForm ? t.activeForm : t.content);
+      const text = clip(typeof t.activeForm === 'string' && t.activeForm ? t.activeForm : t.content);
+      if (out.inProgress === null) out.inProgress = text;
+      if (out.active.length < TODO_ACTIVE_MAX) out.active.push(text);
+      cell = 'a';
     } else if (out.next.length < 3) out.next.push(clip(t.content));
+    if (out.cells.length < TODO_CELLS_MAX) out.cells += cell;
   }
   return out;
 }
@@ -122,9 +132,11 @@ export type PanelModel = {
     run?: boolean;
   } | null;
   superpowers: {
-    plan: string; tasks: number; done: number; current: { task: string; round: number } | null; lastLines: string[];
+    plan: string; tasks: number; done: number; current: { task: string; round: number; cap?: number | null } | null; lastLines: string[];
+    // stale: not finished and unchanged for over a day.
+    stale?: boolean;
   } | null;
-  todos: { total: number; done: number; inProgress: string | null; next: string[] } | null;
+  todos: { total: number; done: number; inProgress: string | null; next: string[]; active?: string[]; cells?: string } | null;
   subagents: { id: string; type: string; description?: string; status?: string; seconds: number | null; model?: string; effort?: string }[];
   subagentsDone?: { id: string; type: string; description?: string; model?: string; seconds: number }[];
   tool: { name: string; seconds: number | null } | null;
@@ -207,7 +219,8 @@ function superpowers(input: {
       // A finished run whose ledger has not changed for a day is history, not progress.
       const stale = input.ledgerMtimeMs !== undefined && input.now - input.ledgerMtimeMs > STALE_LEDGER_MS;
       if (stale && !l.current && done === tasks) return null;
-      return { plan: clip(l.planPath ?? ''), tasks, done, current: l.current, lastLines: l.lastLines };
+      // E-14: a run left half done, unchanged for a day, is still drawn, dim and out of the band's headline.
+      return { plan: clip(l.planPath ?? ''), tasks, done, current: l.current, lastLines: l.lastLines, ...(stale ? { stale: true } : {}) };
     }
     if (input.planFallback !== undefined) {
       const plan = parsePlanTasks(input.planFallback);

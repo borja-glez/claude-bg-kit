@@ -144,6 +144,11 @@ export function briefCells(f: NonNullable<PanelModel['forge']>): Cells | null {
 }
 
 export function todoCells(t: NonNullable<PanelModel['todos']>): Cells {
+  // E-13: the todos in their own order when the model says it; an older model, by position.
+  if (typeof t.cells === 'string' && t.cells) {
+    const cells = [...t.cells].slice(0, 60).map((ch): CellState => (ch === 'd' ? 'done' : ch === 'a' ? 'active' : 'pending'));
+    return { cells, done: t.done, total: t.total };
+  }
   const cells: CellState[] = [];
   const total = Math.min(t.total, 60);
   for (let i = 0; i < total; i++) cells.push(i < t.done ? 'done' : i === t.done && t.inProgress ? 'active' : 'pending');
@@ -200,9 +205,9 @@ export function headline(m: PanelModel): Headline | null {
     const w = m.waypoint;
     return { section: 'roadmap', title: w.project, detail: w.current ? `${w.current.id} ${w.current.title}` : '', cells: roadmapCells(w), agent: null };
   }
-  if (m.superpowers) {
+  if (m.superpowers && !m.superpowers.stale) {
     const s = m.superpowers;
-    return { section: 'superpowers', title: s.plan || 'superpowers', detail: s.current ? `round ${s.current.round}/5` : '', cells: superpowersCells(s), agent: null };
+    return { section: 'superpowers', title: s.plan || 'superpowers', detail: s.current ? `round ${s.current.round}${s.current.cap ? `/${s.current.cap}` : ''}` : '', cells: superpowersCells(s), agent: null };
   }
   if (m.todos) return { section: 'todos', title: m.todos.inProgress ?? '', detail: '', cells: todoCells(m.todos), agent: null };
   if (m.subagents.length) return { section: 'agents', title: '', detail: '', cells: null, agent: m.subagents.at(-1)!.type };

@@ -471,3 +471,21 @@ test('/lens is registered to run at once, even mid-turn', async ($, on) => {
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   expect(registered).toContainEqual(expect.objectContaining({ name: 'lens', immediate: true }));
 });
+
+test('/clear empties the todos and the subagents of the panel (E-13)', async ($, on) => {
+  serveFiles(on, []);
+  servePanes(on);
+  start(on);
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }));
+  on('tool.call', { tool: 'TodoWrite' }, () => ({ result: { oldTodos: [], newTodos: [] } }));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'Write the parser', status: 'in_progress', activeForm: 'Writing the parser' }] });
+  await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'Explore' });
+  await $.session.end({ reason: 'clear', sessionId: 'old-conversation', resume: {} as never });
+  await $.command.run(RUN);
+  const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
+  const text = await said(ui);
+  expect(text).not.toContain('Writing the parser');
+  expect(text).not.toContain('Explore');
+  await ui.unmount();
+});

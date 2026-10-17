@@ -18,6 +18,7 @@ const T: CardTexts = {
   taskTime: 'task', noReview: 'no independent review', gVerify: 'verification', blocked: 'blocked', active: 'active', sinceStart: 'since start',
   autoDecisions: n => `${n} automatic decision${n === 1 ? '' : 's'}`,
   autoMode: 'auto mode',
+  staleLedger: 'unchanged for over a day',
 };
 const FORGE: NonNullable<PanelModel['forge']> = {
   task: 'orders', path: 'large', phase: 'implement', agent: 'forge-impl-heavy', validators: [{ name: 'test', ok: true }],
@@ -484,5 +485,22 @@ describe('the roadmap card of an execution (E-10)', () => {
     expect(cardAlt(card)).toContain('integrated 3/12');
     expect(cardAlt(card)).not.toContain(T.noTask);
     expect(card.blocks.find(b => b.kind === 'chips')).toMatchObject({ chips: [{ text: '✉ 2' }, { text: '⚠ decision' }] });
+  });
+});
+
+describe('superpowers and todos cards (E-13, E-14)', () => {
+  it('superpowers shows its round against its own cap and says when the ledger is stale', () => {
+    const sp = { plan: 'p', tasks: 5, done: 2, current: { task: '3', round: 2, cap: 3 }, lastLines: [], stale: true };
+    const card = buildCards({ ...EMPTY, superpowers: sp }, T, 0).find(c => c.title === 'p')!;
+    expect(cardAlt(card)).toContain('round 2/3');
+    expect(cardAlt(card)).toContain('unchanged for over a day');
+    const free = buildCards({ ...EMPTY, superpowers: { ...sp, current: { task: '3', round: 2, cap: null }, stale: undefined } }, T, 0).find(c => c.title === 'p')!;
+    expect(cardAlt(free)).toContain('round 2');
+    expect(cardAlt(free)).not.toContain('round 2/');
+  });
+  it('todos list every one in progress and draw the cells in their order', () => {
+    const card = buildCards({ ...EMPTY, todos: { total: 3, done: 1, inProgress: 'A', next: ['c'], active: ['A', 'B'], cells: 'adp' } }, T, 0).find(c => c.title === T.sTodos)!;
+    expect(card.blocks.find(b => b.kind === 'cells')).toEqual({ kind: 'cells', cells: ['active', 'done', 'pending'] });
+    expect(card.blocks.filter(b => b.kind === 'row').map(b => (b as { text: string }).text)).toEqual(['A', 'B', 'c']);
   });
 });

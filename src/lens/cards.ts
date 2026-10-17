@@ -19,7 +19,7 @@ export interface CardTexts {
   gReview: string; gPlan: string; gOther: string; tracking: string; withoutForge: string; withoutForgeNote: string;
   forgeCosts: (usd: string, pct: number) => string; forgeSaves: (usd: string) => string; pricesAsOf: string; drift: string; various: string;
   noReview: string; gVerify: string; blocked: string; active: string; sinceStart: string; taskTime: string;
-  autoDecisions: (n: number) => string; autoMode: string;
+  autoDecisions: (n: number) => string; autoMode: string; staleLedger: string;
 }
 
 const modelRight = (s: { model?: string; effort?: string }, t: CardTexts): string | undefined =>
@@ -214,7 +214,8 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
       { kind: 'bar', ratio: ratio(c.done, c.total), hue: SECTION_HUE.superpowers, moving: s.done < s.tasks, label: `${t.task} ${n}/${s.tasks}`, right: `${s.done} ${t.done}` },
       { kind: 'cells', cells: c.cells },
     ];
-    if (s.current) blocks.push({ kind: 'chips', chips: [{ text: `${t.fixRound} ${s.current.round}/5`, hue: 'yellow' }] });
+    if (s.current) blocks.push({ kind: 'chips', chips: [{ text: `${t.fixRound} ${s.current.round}${s.current.cap ? `/${s.current.cap}` : ''}`, hue: 'yellow' }] });
+    if (s.stale) blocks.push({ kind: 'text', text: t.staleLedger, dim: true });
     for (const line of s.lastLines) blocks.push({ kind: 'text', text: line, dim: true });
     out.push({ icon: SECTION_ICON.superpowers, title: s.plan || t.sSuperpowers, hue: SECTION_HUE.superpowers, chip: { text: `${Math.round(ratio(s.done, s.tasks) * 100)}%`, hue: SECTION_HUE.superpowers }, blocks });
   }
@@ -223,7 +224,7 @@ export function buildCards(m: PanelModel, t: CardTexts, nowMs: number): Card[] {
     const td = m.todos;
     const c = todoCells(td);
     const blocks: Block[] = [{ kind: 'bar', ratio: ratio(td.done, td.total), hue: SECTION_HUE.todos, moving: !!td.inProgress }, { kind: 'cells', cells: c.cells }];
-    if (td.inProgress) blocks.push({ kind: 'row', dot: 'peach', spinning: true, text: td.inProgress });
+    for (const text of td.active ?? (td.inProgress ? [td.inProgress] : [])) blocks.push({ kind: 'row', dot: 'peach', spinning: true, text });
     for (const next of td.next) blocks.push({ kind: 'row', dot: 's2', text: next });
     out.push({ icon: SECTION_ICON.todos, title: t.sTodos, hue: SECTION_HUE.todos, chip: { text: `${td.done}/${td.total}`, hue: SECTION_HUE.todos }, blocks });
   }
