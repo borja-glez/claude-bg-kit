@@ -17,6 +17,8 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .nav .ns{display:none}
 .nav .nl{display:block;line-height:1.2}
 .main{padding:18px 20px;min-width:0}
+/* §4.7: the focus lands on the view (tabindex="-1") when what opened a closed detail is gone; no ring around the view */
+.main:focus{outline:none}
 /* ---- The status strip (§4.6): one line, sticky over every view ---- */
 .strip{position:sticky;top:0;z-index:15;display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;margin:-18px -20px 12px;padding:8px 20px;background:var(--base);border-bottom:1px solid var(--s0);font:12px 'JetBrains Mono',monospace;color:var(--sub0)}
 .strip .live{font-size:12px}

@@ -175,6 +175,26 @@ describe('the page morphs instead of replacing (H-06)', () => {
     err.mockRestore();
     app.stop();
   });
+
+  it('with the Forge tab of the detail active and focused, a snapshot keeps the tab, its focus and the overlay scroll', async () => {
+    const { root, app, move } = await boot();
+    (root.querySelector('[data-k="t:T121"]') as HTMLElement).click();
+    await settle();
+    (root.querySelector('[data-action="detail-tab"][data-tab="forge"]') as HTMLElement).click();
+    await settle();
+    const tab = root.querySelector('#dtab-forge') as HTMLElement;
+    expect(document.activeElement).toBe(tab);
+    const overlay = root.querySelector('[data-scroll-key="modal:T121"]') as HTMLElement;
+    overlay.scrollTop = 180;
+    move('verdict');
+    await settle();
+    expect(root.querySelector('#dtab-forge')).toBe(tab);
+    expect(tab.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(tab);
+    expect(overlay.scrollTop).toBe(180);
+    expect(root.querySelector('#dpanel-summary')!.textContent).toContain('veredicto');
+    app.stop();
+  });
 });
 
 describe('morphInto (H-06)', () => {

@@ -43,7 +43,7 @@ export function renderApp(m: Model, ui: UiState, dv: Derived = computeDerived(m)
   return `<div class="shell">
   <nav class="side" aria-label="${esc(d.nav.label)}" data-scroll-key="side"><div class="brand">${esc((m.meta?.name ?? '').toUpperCase())}</div>${nav}
     <div class="scale"><button type="button" data-action="scale" data-dir="-1" title="${esc(d.tl.smaller)}" aria-label="${esc(d.tl.smaller)}">A−</button><button type="button" data-action="scale" data-dir="1" title="${esc(d.tl.larger)}" aria-label="${esc(d.tl.larger)}">A+</button></div></nav>
-  <main class="main">
+  <main class="main" tabindex="-1">
     ${renderStrip(m, d, dv, loc)}${body}${renderDebug(m)}
   </main>
   ${ui.modal ? renderTaskModal(m, d, ui, loc) : ''}

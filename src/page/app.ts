@@ -11,7 +11,7 @@ import { morphInto } from './morph.js';
 import { parseSeen, pruneSeen, seenKey } from './needs.js';
 import { mergeMetrics, normalizeEvent, normalizeInfinite, normalizeMessage, normalizeMeta, normalizeMetrics, normalizeNote, normalizePhase, normalizeRun, normalizeSession, normalizeState, type Drop, type Report } from './normalize.js';
 import { decodeView, encodeView, type ViewState } from './urlstate.js';
-import { categoryKeys, esc, GROUPS, NOTE_FILTERS, PROPOSAL_FILTERS, relText, renderApp, TALK_KINDS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, vfilterStatuses, VFILTER_KEYS, VIEWS, VIRTUAL_FROM, type Model, type ProposalFilterKind, type RelKind, type TalkKind, type UiState, type VFilterKey, type View } from './render.js';
+import { categoryKeys, DETAIL_TABS, esc, GROUPS, NOTE_FILTERS, PROPOSAL_FILTERS, relText, renderApp, TALK_KINDS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, vfilterStatuses, VFILTER_KEYS, VIEWS, VIRTUAL_FROM, type DetailTab, type Model, type ProposalFilterKind, type RelKind, type TalkKind, type UiState, type VFilterKey, type View } from './render.js';
 
 /**
  * The page's embedded snapshot; G-13 and G-14: the waypoint that built it and the states the last listing saw. The page
@@ -107,12 +107,44 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     syncedAt: null,
   };
 
+  // §4.7, H-25: the open detail is in the URL (#t=T044&tt=forge). Opening pushes an entry; closing goes back over the
+  // entries it pushed, or rewrites the URL without t when the detail came from a link. The focus goes to the active tab
+  // on opening and back to what opened it (its data-k) on closing.
+  /** The entries this visit pushed for the open detail, counted only once the browser took them: closing goes back over
+   *  them. An entry the URL brings (Back, Forward, a hash edited by hand) takes one off, never below zero. */
+  let detailPushes = 0;
+  let opener: string | null = null;
+  /** A selector to focus after the next render. */
+  let focusNext: string | null = null;
+  const byKey = (k: string): string => `[data-k="${(globalThis as { CSS?: { escape?(s: string): string } }).CSS?.escape?.(k) ?? k.replace(/["\\]/g, '')}"]`;
+  const ACTIVE_TAB = '.modal [role="tab"][aria-selected="true"]';
+  /** The detail closed: the focus goes back to what opened it, else (a link opened it) to the view's main element; the
+   *  render finds another place when it is gone. Never left on the body. */
+  const focusBack = () => { focusNext = opener ? byKey(opener) : 'main'; opener = null; };
+  /** The data-k of the focused element of the page, if it has one. */
+  const focusedKey = (): string | null => {
+    const el = document.activeElement as HTMLElement | null;
+    return el && el !== env.root && env.root.contains(el) ? el.dataset?.k ?? null : null;
+  };
   // H-25: what the URL says (on load, Back and Forward, or a hash edited by hand), applied to the view state. The URL is
   // the schedule's whole state: what its hash leaves out is the default (a free span only with `s`, so an explicit `z`
   // wins over a span set by Ctrl + wheel). The other views never carry those parameters and leave them as they are.
   const applyView = (v: ViewState) => {
     ui.view = v.view && (VIEWS as readonly string[]).includes(v.view) ? (v.view as View) : 'summary';
     if (ui.view !== 'schedule') ui.tl = undefined;
+    // The detail: a task of the plan opens (with its tab); anything else closes it, and its opener gets the focus back.
+    const task = v.task && isPlanId(v.task) && model.plan.tasks.some(t => t.id === v.task) ? v.task : null;
+    if (!task && ui.modal) focusBack();
+    if (task && task !== ui.modal) {
+      // Back or Forward onto a detail: what has the focus now (the row a close gave it back to) is what opened it.
+      if (!ui.modal) opener = focusedKey();
+      focusNext = ACTIVE_TAB;
+    }
+    // The gallery belongs to the task it was opened on.
+    if (task !== ui.modal) ui.shot = null;
+    ui.modal = task;
+    ui.tab = task && v.tab && (DETAIL_TABS as readonly string[]).includes(v.tab) ? (v.tab as DetailTab) : 'summary';
+    detailPushes = task ? Math.max(0, detailPushes - 1) : 0;
     if (ui.view === 'talk') ui.talk = v.c && (TALK_KINDS as readonly string[]).includes(v.c) ? (v.c as TalkKind) : 'notes';
     if (ui.view === 'schedule') {
       ui.timelineGroup = v.group && (GROUPS as readonly string[]).includes(v.group) ? (v.group as UiState['timelineGroup']) : 'phase';
@@ -141,22 +173,58 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   let seenPruned = false;
   /** H-25: set by an action that changes what the person looks at, so the next render adds a history entry. */
   let pushNext = false;
-  const viewState = (): ViewState => ({ view: ui.view, c: ui.talk, group: ui.timelineGroup, zoom: ui.zoom, span: ui.span, pan: ui.pan, open: [...ui.expanded], status: ui.statuses, q: ui.search.trim(), layers: ui.layers, debug: model.debug });
+  /** Set with pushNext by opening a detail: the entry that render pushes is one closing goes back over. */
+  let pushDetail = false;
+  const viewState = (): ViewState => ({ view: ui.view, c: ui.talk, group: ui.timelineGroup, zoom: ui.zoom, span: ui.span, pan: ui.pan, open: [...ui.expanded], status: ui.statuses, q: ui.search.trim(), layers: ui.layers, task: ui.modal ?? undefined, tab: ui.tab, debug: model.debug });
+  const openDetail = (id: string, from: HTMLElement): boolean => {
+    if (!model.plan.tasks.some(t => t.id === id)) return false;
+    if (!ui.modal) opener = from.dataset.k ?? null;
+    ui.modal = id;
+    ui.shot = null;
+    ui.tab = 'summary';
+    pushNext = true;
+    pushDetail = true;
+    focusNext = ACTIVE_TAB;
+    return true;
+  };
+  const closeDetail = () => {
+    ui.modal = null;
+    ui.shot = null;
+    focusBack();
+    const n = detailPushes;
+    detailPushes = 0;
+    // History safety: only the entries this visit pushed for the detail, and never more than the history holds. The entry
+    // Back returns to has no t: nothing to rewrite in between. Anything else leaves the render to rewrite the URL.
+    const before = lastHash;
+    try {
+      if (n > 0 && n < history.length) {
+        lastHash = encodeView(viewState());
+        history.go(-n);
+      }
+    } catch { lastHash = before; /* not the page's history to move: the render rewrites the URL without t */ }
+    schedule();
+  };
   const writeHash = () => {
     const push = pushNext;
+    const detail = pushDetail;
     pushNext = false;
+    pushDetail = false;
     try {
       const next = encodeView(viewState());
       if (next === lastHash) return;
       lastHash = next;
       const url = next || `${location.pathname}${location.search}`;
-      if (push) history.pushState(null, '', url); else history.replaceState(null, '', url);
+      if (push) { history.pushState(null, '', url); if (detail) detailPushes++; } else history.replaceState(null, '', url);
     } catch { /* a sandboxed frame may refuse: the view just is not in the link */ }
   };
   // H-25: Back, Forward and a hash edited by hand apply what the URL says.
   const onUrl = () => {
     try {
-      lastHash = location.hash.length > 1 ? location.hash : '';
+      const hash = location.hash.length > 1 ? location.hash : '';
+      // A browser fires popstate and then hashchange for one Back; the second finds that URL applied (or written by the
+      // page itself, as closing the detail does before going back): applying it twice would count one entry twice.
+      if (hash === lastHash) return;
+      lastHash = hash;
       applyView(decodeView(location.hash));
     } catch { return; }
     // H-06: a focused search box keeps its own value through a morph; it takes the URL's here, as the composer does.
@@ -214,18 +282,32 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       if (s) { el.scrollTop = s[0]; el.scrollLeft = s[1]; }
     });
   };
+  /** Focuses the element a selector finds in the page; whether it took the focus (a browser refuses one that cannot). */
+  const focusTo = (sel: string | null): boolean => {
+    const el = sel ? env.root.querySelector<HTMLElement>(sel) : null;
+    el?.focus({ preventScroll: true });
+    return !!el && document.activeElement === el;
+  };
   const render = () => {
     scheduled = false;
     if (composing) { deferred = true; return; }
     try {
       model.now = now();
+      // Review Focus 2: a plan snapshot that dropped the open task closes its detail (and unlocks the page).
+      if (ui.modal && !model.plan.tasks.some(t => t.id === ui.modal)) { ui.modal = null; ui.shot = null; detailPushes = 0; focusBack(); }
       const html = renderApp(model, ui, derive(model));
       const page = document.scrollingElement?.scrollTop ?? 0;
       const focus = takeFocus();
       // H-06: morphdom touches only the nodes that changed; if it throws, everything is replaced as before.
       try { morph(env.root, html); }
       catch (e) { console.error('[waypoint] morph failed', e); replaceAll(html); }
-      giveFocus(focus);
+      // One focus path, after either: what an action asked to focus wins (§4.7: the active tab on opening, the tab the
+      // keys moved to, the gallery, what opened a detail or a screenshot on closing); else the focus goes back to where it
+      // was (H-06). After an action it is never left on the body: the open detail's tab, else the view's main element.
+      const asked = focusNext;
+      focusNext = null;
+      if (!asked || !focusTo(asked)) giveFocus(focus);
+      if (asked && !env.root.contains(document.activeElement)) focusTo(ui.modal ? ACTIVE_TAB : 'main');
       dropArrows();
       if (document.scrollingElement && document.scrollingElement.scrollTop !== page) document.scrollingElement.scrollTop = page;
       document.documentElement.classList.toggle('wp-modal', ui.modal !== null);
@@ -469,10 +551,11 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     }
     else if (action === 'scale') { setScale(userScale + (Number(el.dataset.dir) > 0 ? 0.1 : -0.1)); return; }
     else if (action === 'toggle-phase') { const id = el.dataset.id!; ui.expanded.has(id) ? ui.expanded.delete(id) : ui.expanded.add(id); }
-    else if (action === 'open-task') { ui.modal = el.dataset.id || null; ui.shot = null; }
-    else if (action === 'close-modal') { ui.modal = null; ui.shot = null; }
-    else if (action === 'open-shot') { const i = Number(el.dataset.i); ui.shot = Number.isInteger(i) && i >= 0 ? i : null; }
-    else if (action === 'close-shot') { ui.shot = null; }
+    else if (action === 'open-task' || action === 'open-bar') { if (!openDetail(el.dataset.id ?? '', el)) return; }
+    else if (action === 'close-modal') { closeDetail(); return; }
+    else if (action === 'open-shot') { const i = Number(el.dataset.i); ui.shot = Number.isInteger(i) && i >= 0 ? i : null; if (ui.shot !== null) focusNext = '.lightbox'; }
+    else if (action === 'close-shot') { if (ui.shot !== null) focusNext = byKey(`shot:${ui.shot}`); ui.shot = null; }
+    else if (action === 'detail-tab') { const k = el.dataset.tab as DetailTab; if (!DETAIL_TABS.includes(k)) return; ui.tab = k; focusNext = `#dtab-${k}`; }
     // H-25: a view (from the nav or a link inside a view) is a new history entry; a link may say which conversation.
     else if (action === 'view') {
       const v = el.dataset.view as View;
@@ -480,7 +563,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       if (ui.view !== 'schedule') ui.tl = undefined;
       const c = el.dataset.c as TalkKind | undefined;
       if (ui.view === 'talk' && c && TALK_KINDS.includes(c)) ui.talk = c;
-      if (ui.modal) { ui.modal = null; ui.shot = null; }
+      // A link inside the detail closes it: the view it opens takes the focus (the link is gone with the detail).
+      if (ui.modal) { ui.modal = null; ui.shot = null; detailPushes = 0; opener = null; focusNext = 'main'; }
       if (ui.notice !== 'readonly') ui.notice = null;
       pushNext = true;
     }
@@ -636,8 +720,41 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   let overTimeline = false;
   const onPointerOver = (ev: PointerEvent) => { overTimeline = !!(ev.target as Element | null)?.closest?.('[data-role="timeline"]'); };
   const onKey = (ev: KeyboardEvent) => {
-    if (ev.key === 'Escape' && ui.shot !== null) { ui.shot = null; schedule(); return; }
-    if (ev.key === 'Escape' && ui.modal) { ui.modal = null; schedule(); return; }
+    // A key of an IME composition is the composition's (Escape cancels it there); a combination the page does not list
+    // (Alt+←, Ctrl+Tab, Ctrl+Escape…) is the browser's.
+    if (ev.isComposing) return;
+    const bare = !ev.ctrlKey && !ev.metaKey && !ev.altKey;
+    if (ev.key === 'Escape' && bare && !ev.shiftKey && ui.shot !== null) { focusNext = byKey(`shot:${ui.shot}`); ui.shot = null; schedule(); return; }
+    if (ev.key === 'Escape' && bare && !ev.shiftKey && ui.modal) { closeDetail(); return; }
+    // G-15: Tab and Shift+Tab stay inside the open dialog (the gallery over the detail, else the detail). From a field too:
+    // Tab types nothing there, it only moves the focus.
+    if (ev.key === 'Tab' && bare && ui.modal) {
+      const box = ((ui.shot !== null ? env.root.querySelector('.lightbox') : null) ?? env.root.querySelector('.modal')) as HTMLElement | null;
+      if (!box) return;
+      const list = Array.from(box.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]'))
+        .filter(el => el.getAttribute('tabindex') !== '-1' && !el.closest('[hidden]'));
+      const first = list[0] ?? box;
+      const last = list[list.length - 1] ?? box;
+      const active = document.activeElement;
+      if (!box.contains(active) || active === box || (ev.shiftKey && active === first) || (!ev.shiftKey && active === last)) {
+        ev.preventDefault();
+        (ev.shiftKey ? last : first).focus();
+      }
+      return;
+    }
+    // §4.7: the arrows, Home and End move between the tabs of the detail.
+    const target = ev.target as HTMLElement | null;
+    if (ui.modal && bare && !ev.shiftKey && target?.getAttribute?.('role') === 'tab' && env.root.contains(target) && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(ev.key)) {
+      const tabs = Array.from(env.root.querySelectorAll<HTMLElement>('.modal [role="tab"]'), b => b.dataset.tab as DetailTab);
+      if (!tabs.length) return;
+      const at = tabs.indexOf(target.dataset.tab as DetailTab);
+      const next = ev.key === 'Home' ? 0 : ev.key === 'End' ? tabs.length - 1 : (at + (ev.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+      ui.tab = tabs[next];
+      focusNext = `#dtab-${tabs[next]}`;
+      ev.preventDefault();
+      schedule();
+      return;
+    }
     const t = ev.target as HTMLElement | null;
     if (ui.modal || ev.ctrlKey || ev.metaKey || ev.altKey || (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))) return;
     const inTimeline = overTimeline || !!t?.closest?.('[data-role="timeline"]');

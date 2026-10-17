@@ -1628,3 +1628,257 @@ describe('«Te necesita»: the deferred findings seen in this browser (G-24)', (
     app.stop();
   });
 });
+
+describe('the task detail: its URL, its tabs and its focus (H-25, §4.7, G-15)', () => {
+  const RUNNING = { T003: { status: 'in_progress', owner: 'main', startedAt: '2026-10-11T11:30:00Z', forge: { path: 'medium', phase: 'review' } } };
+  const openFromSummary = async (f: ReturnType<typeof fakeDb>, root: HTMLElement) => {
+    f.push('state', RUNNING);
+    await settle();
+    click(root, '[data-k="t:T003"]');
+    await settle();
+  };
+
+  it('opening a task pushes #t=…, a tab rewrites it with tt, and Back closes the detail', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    const push = vi.spyOn(history, 'pushState');
+    await openFromSummary(f, root);
+    expect(push).toHaveBeenLastCalledWith(null, '', '#t=T003');
+    click(root, '[data-action="detail-tab"][data-tab="forge"]');
+    await settle();
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(location.hash).toBe('#t=T003&tt=forge');
+    expect(root.querySelector('#dtab-forge')!.getAttribute('aria-selected')).toBe('true');
+    history.replaceState(null, '', location.pathname);
+    window.dispatchEvent(new Event('popstate'));
+    await settle();
+    expect(app.ui.modal).toBeNull();
+    expect(root.querySelector('.modal')).toBeNull();
+    expect(document.documentElement.classList.contains('wp-modal')).toBe(false);
+    push.mockRestore();
+    app.stop();
+  });
+
+  it('closing goes back over every entry the detail pushed; a detail opened from a link rewrites the URL without t', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    const go = vi.spyOn(history, 'go').mockImplementation(() => {});
+    await openFromSummary(f, root);
+    click(root, '.modal [data-action="open-task"][data-id="T005"]');
+    await settle();
+    expect(app.ui.modal).toBe('T005');
+    click(root, '.modal [data-action="close-modal"]');
+    await settle();
+    expect(go).toHaveBeenCalledWith(-2);
+    expect(app.ui.modal).toBeNull();
+    go.mockClear();
+    app.stop();
+    const again = await boot(fakeDb(), fakeUser(), '#t=T003&tt=definition');
+    expect([again.app.ui.modal, again.app.ui.tab]).toEqual(['T003', 'definition']);
+    expect(again.root.querySelector('#dtab-definition')!.getAttribute('aria-selected')).toBe('true');
+    click(again.root, '.modal [data-action="close-modal"]');
+    await settle();
+    expect(go).not.toHaveBeenCalled();
+    expect(location.hash).toBe('');
+    go.mockRestore();
+    again.app.stop();
+  });
+
+  it('#t=…&tt=forge opens the Forge tab once the task has forge data; a task not in the plan opens nothing (Review Focus 3)', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser(), '#t=T003&tt=forge');
+    expect(root.querySelector('#dtab-summary')!.getAttribute('aria-selected')).toBe('true');
+    f.push('state', RUNNING);
+    await settle();
+    expect(root.querySelector('#dtab-forge')!.getAttribute('aria-selected')).toBe('true');
+    app.stop();
+    const none = await boot(fakeDb(), fakeUser(), '#t=T999&tt=forge');
+    expect(none.app.ui.modal).toBeNull();
+    expect(none.root.querySelector('.modal')).toBeNull();
+    none.app.stop();
+  });
+
+  it('focus: the active tab on opening, Tab and Shift+Tab stay in the dialog, Escape closes and the focus goes back to the row', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    const go = vi.spyOn(history, 'go').mockImplementation(() => {});
+    await openFromSummary(f, root);
+    expect(document.activeElement?.id).toBe('dtab-summary');
+    const close = root.querySelector('.modal [data-action="close-modal"]') as HTMLElement;
+    const panel = root.querySelector('#dpanel-summary') as HTMLElement;
+    panel.focus();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    expect(document.activeElement).toBe(close);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }));
+    expect(document.activeElement).toBe(panel);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(root.querySelector('.modal')).toBeNull();
+    expect(document.activeElement).toBe(root.querySelector('[data-k="t:T003"]'));
+    expect(go).toHaveBeenCalledWith(-1);
+    go.mockRestore();
+    app.stop();
+  });
+
+  it('the arrows, Home and End move between the tabs, and the focus goes with them', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    await openFromSummary(f, root);
+    const key = (k: string) => { (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })); return settle(); };
+    await key('ArrowRight');
+    expect([app.ui.tab, document.activeElement?.id]).toEqual(['definition', 'dtab-definition']);
+    await key('End');
+    expect([app.ui.tab, document.activeElement?.id]).toEqual(['talk', 'dtab-talk']);
+    await key('ArrowRight');
+    expect(app.ui.tab).toBe('summary');
+    await key('ArrowLeft');
+    expect(app.ui.tab).toBe('talk');
+    await key('Home');
+    expect([app.ui.tab, document.activeElement?.id]).toEqual(['summary', 'dtab-summary']);
+    app.stop();
+  });
+
+  it('a snapshot of the plan that drops the open task closes its detail and unlocks the page (Review Focus 2)', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    await openFromSummary(f, root);
+    expect(document.documentElement.classList.contains('wp-modal')).toBe(true);
+    f.push('meta/project', snapshot.meta as unknown as Record<string, unknown>);
+    f.push('plan', Object.fromEntries(snapshot.phases.map(p => [p.id, { ...p, tasks: p.tasks.filter(t => t.id !== 'T003') }])));
+    await settle();
+    expect(app.ui.modal).toBeNull();
+    expect(root.querySelector('.modal')).toBeNull();
+    expect(document.documentElement.classList.contains('wp-modal')).toBe(false);
+    expect(location.hash).not.toContain('t=');
+    app.stop();
+  });
+
+  it('the gallery takes the focus, keeps Tab, and gives the focus back to its screenshot on Escape', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    f.push('state', { T003: { ...RUNNING.T003, evidence: { surfaces: ['web'], result: 'pass', passed: 1, total: 1, shots: [{ surface: 'web', check: 'home', ok: true, url: 'https://claude.ai/_blob/a' }] } } });
+    await settle();
+    click(root, '[data-k="t:T003"]');
+    await settle();
+    click(root, '[data-action="detail-tab"][data-tab="forge"]');
+    await settle();
+    click(root, '[data-action="open-shot"][data-i="0"]');
+    await settle();
+    expect(document.activeElement).toBe(root.querySelector('.lightbox'));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    expect(document.activeElement).toBe(root.querySelector('.lightbox'));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(root.querySelector('.lightbox')).toBeNull();
+    expect(document.activeElement).toBe(root.querySelector('[data-k="shot:0"]'));
+    expect(app.ui.modal).toBe('T003');
+    app.stop();
+  });
+
+  it('closing never goes back over an entry it did not push: after Back, after Forward, after a push the browser refused (H-25)', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    const go = vi.spyOn(history, 'go').mockImplementation(() => {});
+    await openFromSummary(f, root);
+    click(root, '.modal [data-action="open-task"][data-id="T005"]');
+    await settle();
+    // The person goes Back once; a browser fires popstate and then hashchange for that one entry.
+    history.replaceState(null, '', '#t=T003');
+    window.dispatchEvent(new Event('popstate'));
+    window.dispatchEvent(new Event('hashchange'));
+    await settle();
+    expect(app.ui.modal).toBe('T003');
+    click(root, '.modal [data-action="close-modal"]');
+    await settle();
+    expect(go).toHaveBeenLastCalledWith(-1);
+    go.mockClear();
+    // Forward onto an entry with t: no entry of this visit is known above it, so closing rewrites the URL.
+    history.replaceState(null, '', '#t=T003');
+    window.dispatchEvent(new Event('popstate'));
+    await settle();
+    expect(app.ui.modal).toBe('T003');
+    click(root, '.modal [data-action="close-modal"]');
+    await settle();
+    expect(go).not.toHaveBeenCalled();
+    expect(location.hash).toBe('');
+    // A push the browser refuses (a sandboxed frame) is no entry to go back over.
+    const push = vi.spyOn(history, 'pushState').mockImplementation(() => { throw new Error('denied'); });
+    click(root, '[data-k="t:T003"]');
+    await settle();
+    expect(app.ui.modal).toBe('T003');
+    click(root, '.modal [data-action="close-modal"]');
+    await settle();
+    expect(go).not.toHaveBeenCalled();
+    expect(app.ui.modal).toBeNull();
+    push.mockRestore();
+    go.mockRestore();
+    app.stop();
+  });
+
+  it('when what opened the detail is gone, or a link opened it, closing leaves the focus on the main element, never on the body', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    const go = vi.spyOn(history, 'go').mockImplementation(() => {});
+    await openFromSummary(f, root);
+    // T003 is done: its row leaves «En curso».
+    f.push('state', { T003: { status: 'done', startedAt: '2026-10-11T11:30:00Z', doneAt: '2026-10-11T11:50:00Z' } });
+    await settle();
+    expect(root.querySelector('[data-k="t:T003"]')).toBeNull();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(root.querySelector('.modal')).toBeNull();
+    expect(document.activeElement).toBe(root.querySelector('main'));
+    // A browser focuses <main> only with a tabindex; -1 keeps it out of the Tab order.
+    expect(root.querySelector('main')!.getAttribute('tabindex')).toBe('-1');
+    app.stop();
+    const again = await boot(fakeDb(), fakeUser(), '#t=T003');
+    expect(document.activeElement?.id).toBe('dtab-summary');
+    click(again.root, '.modal [data-action="close-modal"]');
+    await settle();
+    expect(document.activeElement).toBe(again.root.querySelector('main'));
+    go.mockRestore();
+    again.app.stop();
+  });
+
+  it('keys with modifiers stay the browser’s: Alt+arrow on a tab, Ctrl+Escape and Ctrl+Tab leave the detail as it is', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    await openFromSummary(f, root);
+    const tab = document.activeElement as HTMLElement;
+    expect(tab.id).toBe('dtab-summary');
+    const alt = new KeyboardEvent('keydown', { key: 'ArrowLeft', altKey: true, bubbles: true, cancelable: true });
+    tab.dispatchEvent(alt);
+    await settle();
+    expect([app.ui.tab, alt.defaultPrevented, document.activeElement]).toEqual(['summary', false, tab]);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', ctrlKey: true, bubbles: true }));
+    await settle();
+    expect(app.ui.modal).toBe('T003');
+    (root.querySelector('.modal [data-action="close-modal"]') as HTMLElement).focus();
+    const ctrlTab = new KeyboardEvent('keydown', { key: 'Tab', ctrlKey: true, bubbles: true, cancelable: true });
+    document.dispatchEvent(ctrlTab);
+    expect(ctrlTab.defaultPrevented).toBe(false);
+    app.stop();
+  });
+
+  it('Back onto another task’s entry shows that task and closes the gallery of the one that was open', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    const evidence = { surfaces: ['web'], result: 'pass', passed: 1, total: 1, shots: [{ surface: 'web', check: 'home', ok: true, url: 'https://claude.ai/_blob/a' }] };
+    f.push('state', { T003: { ...RUNNING.T003, evidence }, T005: { status: 'free', evidence } });
+    await settle();
+    click(root, '[data-k="t:T003"]');
+    await settle();
+    click(root, '[data-action="detail-tab"][data-tab="forge"]');
+    await settle();
+    click(root, '[data-action="open-shot"][data-i="0"]');
+    await settle();
+    expect(app.ui.shot).toBe(0);
+    history.replaceState(null, '', '#t=T005');
+    window.dispatchEvent(new Event('popstate'));
+    await settle();
+    expect([app.ui.modal, app.ui.tab, app.ui.shot]).toEqual(['T005', 'summary', null]);
+    expect(root.querySelector('.lightbox')).toBeNull();
+    expect(document.activeElement?.id).toBe('dtab-summary');
+    app.stop();
+  });
+});
