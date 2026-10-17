@@ -13,6 +13,20 @@ elsewhere and are reconstructed from their READMEs.
 
 ## waypoint
 
+### 0.28.0 — 2026-10-17
+
+#### Added
+- The roadmap has six views, Summary, Plan, Schedule, Runs, Sessions and Conversation, under a status strip that stays on top: the connection (with the date of the snapshot's states until the database answers), one run pill and one infinite pill read from its coordinator's lease, the current version's percent, the forecast end, when state last synced and a link to the design. On a phone the views are a tab bar at the bottom.
+- The view and the open task are in the address (`#v=plan`, `#t=T044&tt=forge`): a hash edited by hand changes the view (junk falls back to Summary), a link to a task added after the page was published waits for the live plan before it opens, and links to the old views (Tracking, Versions, Notes, Proposals) open the view that replaced them. Closing the task goes back over the entries the page itself pushed and never leaves the page.
+- Summary opens with «Needs you»: open questions (with Reply), proposals to decide, approvals without the owner's mark, open escalations, external blocks with their reason, recent deferred findings (Seen hides them in this browser only), a stalled run, an infinite run without its coordinator and a page older than the plan's waypoint, each with the command to use. Then «In progress», one row per task with its stage, round, validators, time, agent and who runs it; «Next»; the progress by version and phase; the recent activity in two lines; and the live sessions.
+- The task detail has four tabs, Summary, Definition, Forge and Conversation, and is full screen on a phone: why a task is blocked, the commits still only in its events, its texts with code, bold and links, its section of the design, the zones it touched outside the plan, its dependencies in the colour of their state, every review round (the one over the cap highlighted), every validator, the accepted round and the verification by round.
+- Only the roadmap's owner sees Approve and Reject: the page writes the owner's mark in `approvals/` (`{status, decidedAt, by, digest}`) before the decision, refuses to decide when the proposal changed while the owner was reading it, and anyone else comments. An approval without the mark says it will not become a task, and the owner can confirm it.
+
+#### Changed
+- The page morphs its HTML instead of replacing it (morphdom 2.7.8, bundled in the page): a snapshot keeps the scroll, the focus and an open select, and the detail repaints live, without the ↻ button. The data the views derive is computed once per change, and past 150 rows the timeline paints only those near its viewport.
+- Everything that opens a task is a button, the Conversation chip included; the detail keeps the focus inside, gives it back when it closes, and its tabs move with the arrows.
+- Durations, plurals and numbers follow the page's language. A task the plan dropped is «Removed from plan» and an expired lease «No executor»; «Agent» instead of «Address»; «Free» for the free state. The timeline's forge mark shows the accepted round and its findings, with the reviewers' score only in its title.
+
 ### 0.27.0 — 2026-10-17
 
 #### Added
@@ -291,6 +305,11 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.22.2 — 2026-10-17
+
+#### Changed
+- Depends on waypoint ^0.28.0, whose roadmap shows forge's data in its new Summary, «In progress» and task detail, and lets only the roadmap's owner approve proposals, writing the owner's mark itself. `/forge:decide <id> confirm` remains for a mark written elsewhere.
 
 ### 0.22.1 — 2026-10-17
 
@@ -730,6 +749,11 @@ elsewhere and are reconstructed from their READMEs.
 - Requires waypoint ^0.7.0.
 
 ## lens
+
+### 0.13.3 — 2026-10-17
+
+#### Changed
+- Rebuilt with waypoint 0.28.0's metrics (each version's progress); nothing lens shows changes.
 
 ### 0.13.2 — 2026-10-17
 

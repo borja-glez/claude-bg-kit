@@ -7,9 +7,9 @@ Diséñalas, planifícalas, constrúyelas con revisión independiente, ejecútal
 
 [English](README.md) · **Español** · [Historial de cambios](CHANGELOG.md)
 
-![waypoint 0.27.0](https://img.shields.io/badge/waypoint-0.27.0-cba6f7?style=flat-square)
-![forge 0.22.1](https://img.shields.io/badge/forge-0.22.1-fab387?style=flat-square)
-![lens 0.13.2](https://img.shields.io/badge/lens-0.13.2-b4befe?style=flat-square)
+![waypoint 0.28.0](https://img.shields.io/badge/waypoint-0.28.0-cba6f7?style=flat-square)
+![forge 0.22.2](https://img.shields.io/badge/forge-0.22.2-fab387?style=flat-square)
+![lens 0.13.3](https://img.shields.io/badge/lens-0.13.3-b4befe?style=flat-square)
 ![Marketplace de Claude Code](https://img.shields.io/badge/Claude%20Code-marketplace%20bg--kit-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -78,7 +78,7 @@ Añade el marketplace directamente desde GitHub e instala los plugins que quiera
 claude plugin marketplace add borja-glez/claude-bg-kit
 
 claude plugin install waypoint@bg-kit
-claude plugin install forge@bg-kit     # instala waypoint ^0.27.0 como dependencia
+claude plugin install forge@bg-kit     # instala waypoint ^0.28.0 como dependencia
 claude plugin install lens@bg-kit
 ```
 
@@ -160,7 +160,7 @@ Se clasifica como Trivial o Small: lo hace la sesión principal o un implementad
 
 <p align="center"><img src="docs/assets/roadmap.es.svg" alt="Maqueta del roadmap de waypoint con frentes, tareas, línea temporal y sesiones vivas" width="100%"></p>
 
-Un artifact de claude.ai que se actualiza mientras Claude trabaja. Tiene cinco vistas: Seguimiento (por fases o por frentes), Versiones, Sesiones, Notas y Propuestas. También trae filtros, una línea temporal con zoom, una capa de dependencias, un minimapa, exportación y diseño para móvil. Quien tiene acceso escribe notas y aprueba propuestas allí; Claude las lee como información, nunca como órdenes.
+Un artifact de claude.ai que se actualiza mientras Claude trabaja. Tiene seis vistas, Resumen, Plan, Cronograma, Ejecuciones, Sesiones y Conversación, bajo una franja de estado, y el Resumen dice qué te necesita. También trae filtros, una línea temporal con zoom, una capa de dependencias, un minimapa, exportación y diseño para móvil. Quien tiene acceso escribe notas y comenta propuestas allí, y solo el dueño del roadmap las aprueba; Claude las lee como información, nunca como órdenes.
 
 ### La banda (waypoint)
 

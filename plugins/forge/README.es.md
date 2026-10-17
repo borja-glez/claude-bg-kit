@@ -7,8 +7,8 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.22.1](https://img.shields.io/badge/versi%C3%B3n-0.22.1-fab387?style=flat-square)
-![depende de waypoint ^0.27.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.27.0-cba6f7?style=flat-square)
+![versión 0.22.2](https://img.shields.io/badge/versi%C3%B3n-0.22.2-fab387?style=flat-square)
+![depende de waypoint ^0.28.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.28.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -49,7 +49,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depende de [waypoint](../waypoint/README.es.md) ^0.27.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
+forge depende de [waypoint](../waypoint/README.es.md) ^0.28.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
 
 ## Uso
 
@@ -248,7 +248,7 @@ Una propuesta es un documento con estos campos:
 
 Solo se pueden decidir las propuestas `proposed` y `discussing`, y solo las decides tú (en la página del roadmap o con `/forge:decide`). Las sesiones solo crean propuestas y las comentan. Hay una copia local en `.forge/proposals/<id>.json`; la base de datos del roadmap manda en los campos de la decisión (`proposals pull`).
 
-**Solo aprueba el dueño.** Una decisión cuenta para forge solo con la marca del dueño del roadmap, `approvals/<id>` (`{status, decidedAt, by, digest}`, donde `digest` es un SHA-256 del id de la propuesta y de sus campos decididos): una colección que solo puede escribir el dueño (`write: owner`, una regla de la base que aplica el servidor; los editores comentan, no aprueban). `/forge:decide` escribe la decisión y su marca en un solo batch; `proposals pull --approvals --page` copia las marcas a `.forge/approvals/`; `proposals to-task`, las autoaprobaciones del modo infinito y sus condiciones de parada solo cuentan las propuestas cuya marca coincide, y `proposals list` e `infinite status` cuentan las demás como `unowned`. Una marca solo cuenta si la última decisión de este checkout sobre la propuesta coincide con ella o, en un roadmap con la regla del dueño, si la marca es más reciente que esa decisión (el dueño volvió a decidir en la página o en otro checkout) y su fecha no adelanta en más de 10 minutos al reloj de esta máquina; `to-task` rechaza una propuesta que ya se convirtió en tarea. Una decisión tomada antes de forge 0.22.0, o en la página del roadmap antes de que escriba la marca, la confirma el dueño con `/forge:decide <id> confirm`. Un roadmap publicado antes de waypoint 0.26.0 no tiene la regla: hasta que `/waypoint:plan` lo republique (hazlo tras actualizar), ninguna marca cuenta.
+**Solo aprueba el dueño.** Una decisión cuenta para forge solo con la marca del dueño del roadmap, `approvals/<id>` (`{status, decidedAt, by, digest}`, donde `digest` es un SHA-256 del id de la propuesta y de sus campos decididos): una colección que solo puede escribir el dueño (`write: owner`, una regla de la base que aplica el servidor; los editores comentan, no aprueban). `/forge:decide` escribe la decisión y su marca en un solo batch; `proposals pull --approvals --page` copia las marcas a `.forge/approvals/`; `proposals to-task`, las autoaprobaciones del modo infinito y sus condiciones de parada solo cuentan las propuestas cuya marca coincide, y `proposals list` e `infinite status` cuentan las demás como `unowned`. Una marca solo cuenta si la última decisión de este checkout sobre la propuesta coincide con ella o, en un roadmap con la regla del dueño, si la marca es más reciente que esa decisión (el dueño volvió a decidir en la página o en otro checkout) y su fecha no adelanta en más de 10 minutos al reloj de esta máquina; `to-task` rechaza una propuesta que ya se convirtió en tarea. La página del roadmap escribe la marca ella misma (con su `digest`) cuando el dueño decide allí; una decisión tomada antes de forge 0.22.0, o en una página que no la escribía, la confirma el dueño con `/forge:decide <id> confirm`. Un roadmap publicado antes de waypoint 0.26.0 no tiene la regla: hasta que `/waypoint:plan` lo republique (hazlo tras actualizar), ninguna marca cuenta.
 
 `/forge:decide` funciona desde cualquier sesión, incluso sin roadmap. En ese caso solo cambian la copia local y el registro, y el siguiente `proposals pull` sustituye la decisión local por el estado del roadmap. Con `--from <doc json de la db>`, la CLI comprueba la decisión contra ese documento y no registra nada. Cuando la actualización del roadmap sale bien, `/forge:decide` guarda el documento actualizado con `proposals save --from` y registra el `event` que imprimió `decide`, así que una escritura fallida o rechazada en el roadmap nunca deja una decisión local suelta. `proposals save` solo copia: un estado que escribió otra persona nunca se registra como decisión de este checkout.
 

@@ -7,9 +7,9 @@ Design them, plan them, build them with independent review, run them in parallel
 
 **English** · [Español](README.es.md) · [Changelog](CHANGELOG.md)
 
-![waypoint 0.27.0](https://img.shields.io/badge/waypoint-0.27.0-cba6f7?style=flat-square)
-![forge 0.22.1](https://img.shields.io/badge/forge-0.22.1-fab387?style=flat-square)
-![lens 0.13.2](https://img.shields.io/badge/lens-0.13.2-b4befe?style=flat-square)
+![waypoint 0.28.0](https://img.shields.io/badge/waypoint-0.28.0-cba6f7?style=flat-square)
+![forge 0.22.2](https://img.shields.io/badge/forge-0.22.2-fab387?style=flat-square)
+![lens 0.13.3](https://img.shields.io/badge/lens-0.13.3-b4befe?style=flat-square)
 ![Claude Code plugin marketplace](https://img.shields.io/badge/Claude%20Code-marketplace%20bg--kit-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -78,7 +78,7 @@ Add the marketplace straight from GitHub, then install the plugins you want:
 claude plugin marketplace add borja-glez/claude-bg-kit
 
 claude plugin install waypoint@bg-kit
-claude plugin install forge@bg-kit     # pulls in waypoint ^0.27.0 as a dependency
+claude plugin install forge@bg-kit     # pulls in waypoint ^0.28.0 as a dependency
 claude plugin install lens@bg-kit
 ```
 
@@ -160,7 +160,7 @@ Triaged Trivial or Small: done in the main session or by a light implementer, ch
 
 <p align="center"><img src="docs/assets/roadmap.en.svg" alt="Mock of the waypoint roadmap with tracks, task boxes, a timeline and live sessions" width="100%"></p>
 
-A claude.ai artifact that updates while Claude works. It has five views: Tracking (by phase or by track), Versions, Sessions, Notes and Proposals. It also has filters, a zoomable timeline, a dependency layer, a minimap, export and a phone layout. People with access write notes and approve proposals there; Claude reads them as information, never as orders.
+A claude.ai artifact that updates while Claude works. It has six views, Summary, Plan, Schedule, Runs, Sessions and Conversation, under a status strip, and the Summary says what needs you. It also has filters, a zoomable timeline, a dependency layer, a minimap, export and a phone layout. People with access write notes and comment on proposals there, and only the roadmap's owner approves them; Claude reads them as information, never as orders.
 
 ### The band (waypoint)
 
