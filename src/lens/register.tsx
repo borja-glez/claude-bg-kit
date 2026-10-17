@@ -1,9 +1,10 @@
 import { atom, read, update } from 'claude-code';
 import type { Register, Timer } from 'claude-code';
 import { noneBand, type BandModel } from '../mod/model.js';
-import { buildPanelModel, bandKey, parseSddLedger, summarizeTodos, FORGE_RUN_MAX, FORGE_EXEC_MAX, FORGE_EXEC_FILE_MAX, FORGE_EXEC_TASKS_MAX, FORGE_LIVE_MAX, PROPOSAL_ID, type Activity, type PanelModel } from './model.js';
+import { buildPanelModel, bandKey, parseSddLedger, summarizeTodos, FORGE_RUN_MAX, FORGE_EXEC_MAX, FORGE_EXEC_FILE_MAX, FORGE_EXEC_TASKS_MAX, FORGE_LIVE_MAX, FORGE_STATUSES_READ, PROPOSAL_ID, statusRootOf, type Activity, type PanelModel } from './model.js';
 import { clip, join, listOpt, loadBandModel, mtime, nowMs, readOpt, MAX_DOCS, type Engine } from '../mod/files.js';
-import { normalizeStatus } from '../lib/forge-status.js';
+import { normalizeStatus, statusKey } from '../lib/forge-status.js';
+import { JOB_FILE_MAX } from './activities.js';
 import { DECISIONS_MAX } from '../lib/decisions.js';
 import { buildCards, cardAlt } from './cards.js';
 import { cardSvg, bandSvg } from './svg.js';
@@ -26,6 +27,11 @@ const PLAN_FALLBACK_AGE_MS = 24 * 3600_000;
 // forge's status.json is a few hundred bytes; anything above this is not read.
 const FORGE_STATUS_MAX = 64 * 1024;
 const MAX_PROPOSAL_FILES = 50;
+// C5: a status untouched for a day is not read; at most 5 folders are listed to count the briefs of the tasks in
+// progress. Wave 1: at most 10 job files are read.
+const STATUS_AGE_MS = 24 * 3600_000;
+const BRIEF_LISTINGS_MAX = 5;
+const JOBS_MAX = 10;
 
 let timer: Timer | null = null;
 
@@ -55,6 +61,7 @@ type PanelFiles = {
   ledger?: string; ledgerPlan?: string; planFallback?: string; ledgerMtimeMs?: number;
   forgeStatus?: string; forgeRun?: string; proposals?: Record<string, string>; forgeBriefs?: number; forgeDecisions?: string;
   forgeExecution?: string; forgeExecTasks?: Record<string, string>; forgeLive?: Record<string, string>;
+  forgeStatuses?: string[]; forgeBriefsBy?: Record<string, number>; forgeJobs?: string[];
 };
 // The last model built, kept in module memory for the band (which draws without reading $.state or files).
 let bandModel: PanelModel | null = null;
@@ -82,6 +89,8 @@ function resetPanel(): void {
   lastJson = '';
   bandModel = null;
   bandJson = '';
+  statusCache.clear();
+  jobCache.clear();
 }
 
 // Open todos, or a subagent heard of within the hour (older entries are dropped here).
@@ -161,6 +170,59 @@ let proposalCache: { key: string; proposals: Record<string, string> } | null = n
 type Listing = Awaited<ReturnType<typeof listOpt>>;
 let forgeSeen: { dir: string; entries: Listing; run?: string; execution?: string } | null = null;
 
+// Each status and job file's last read by path, kept while its size and mtime stay (C5, wave 1).
+type FileCache = Map<string, { size: number; mtimeMs: number; text: string }>;
+const statusCache: FileCache = new Map();
+const jobCache: FileCache = new Map();
+
+// The texts of up to `max` .json files of a folder that `keep` accepts, newest first, each at most `size` bytes; a file
+// is read again only when its size or mtime changed, and the cache keeps only what the folder still lists.
+async function readCached($: Engine, dir: string, max: number, size: number, cache: FileCache, keep: (f: Listing[number]) => boolean): Promise<string[]> {
+  const files = (await listOpt($, dir))
+    .filter(f => f.kind === 'file' && f.name.endsWith('.json') && f.size <= size && keep(f))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, max);
+  const out: string[] = [];
+  const names = new Set<string>();
+  for (const f of files) {
+    const path = join(dir, f.name);
+    names.add(path);
+    const hit = cache.get(path);
+    if (hit && hit.size === f.size && hit.mtimeMs === f.mtimeMs) { out.push(hit.text); continue; }
+    const text = await readOpt($, path);
+    if (text === undefined) continue;
+    cache.set(path, { size: f.size, mtimeMs: f.mtimeMs, text });
+    out.push(text);
+  }
+  for (const k of [...cache.keys()]) if (k.startsWith(`${dir}/`) && !names.has(k)) cache.delete(k);
+  return out;
+}
+
+// The numbers of the brief-<n>.md files of a folder.
+async function briefNumbers($: Engine, folder: string): Promise<number[]> {
+  return (await listOpt($, folder))
+    .filter(f => f.kind === 'file').map(f => /^brief-(\d{1,4})\.md$/.exec(f.name)?.[1]).filter(Boolean).map(Number);
+}
+
+// How many briefs each task in progress has, by its status key: the brief-<n>.md files of .forge/work/<project>/<task>
+// for a plan task (C4), else .forge/work/<task>; at most BRIEF_LISTINGS_MAX folders are listed.
+async function briefsByKey($: Engine, statusRoot: string, texts: readonly string[]): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  const work = join(statusRoot, '.forge', 'work');
+  let listings = 0;
+  const nums = async (folder: string) => { listings++; return briefNumbers($, folder); };
+  for (const text of texts) {
+    if (listings >= BRIEF_LISTINGS_MAX) break;
+    let st: ReturnType<typeof normalizeStatus> = null;
+    try { st = normalizeStatus(JSON.parse(text)); } catch { st = null; }
+    const key = st ? statusKey(st.task, st.project) : null;
+    if (!st || !key || st.doneAt || !SAFE_TASK.test(st.task)) continue;
+    let found = st.project && SAFE_TASK.test(st.project) ? await nums(join(work, st.project, st.task)) : [];
+    if (!found.length && listings < BRIEF_LISTINGS_MAX) found = await nums(join(work, st.task));
+    if (found.length) out[key] = Math.max(...found);
+  }
+  return out;
+}
+
 // The texts of up to `max` .json files of a folder, each at most `size` bytes, keyed by name without .json.
 async function readJsonDir($: Engine, dir: string, max: number, size: number, keep: (name: string) => boolean = () => true): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
@@ -193,9 +255,11 @@ async function loadExecutionFiles($: Engine, main: string, listing?: Listing): P
   return out;
 }
 
-// forge's status (kept by forge on each ledger append; the ledger itself is never read), its infinite run and its 50
-// newest proposals from the session root, only when .forge/ lists; the execution from the main checkout.
-async function loadForgeFiles($: Engine, root: string): Promise<PanelFiles> {
+// forge's state for the panel. Each task's status (.forge/status/, kept by forge on each ledger append; the ledger itself
+// is never read) beside the ledger this root writes to (C5: the main checkout for a forge task worktree), else, from an
+// older forge, the root's status.json; the jobs in the background, the automatic decisions and the execution from the
+// main checkout; the infinite run and the 50 newest proposals from the session root, only when its .forge/ lists.
+async function loadForgeFiles($: Engine, root: string, now: number): Promise<PanelFiles> {
   // Resolved once per session and shared with the usage meter (usageWhere). A .git folder does not read (undefined):
   // a normal checkout, the root itself.
   if (mainCheckout === null) mainCheckout = mainCheckoutFrom(root, (await readOpt($, join(root, '.git'))) ?? null);
@@ -208,26 +272,39 @@ async function loadForgeFiles($: Engine, root: string): Promise<PanelFiles> {
   // forge's automatic decisions (.forge/decisions.json, a few hundred bytes; not read above DECISIONS_MAX), kept in the
   // main checkout whichever worktree this session is in, so read even when this root has no .forge/ of its own.
   const mainDir = join(main, '.forge');
-  const decisions = (main === root ? entries : await listOpt($, mainDir)).find(f => f.kind === 'file' && f.name === 'decisions.json');
+  const mainEntries = main === root ? entries : await listOpt($, mainDir);
+  const decisions = mainEntries.find(f => f.kind === 'file' && f.name === 'decisions.json');
   if (decisions && decisions.size <= DECISIONS_MAX) out.forgeDecisions = await readOpt($, join(mainDir, 'decisions.json'));
-  if (!entries.length) { forgeSeen = { dir, entries }; return out; }
-  const status = entries.find(f => f.kind === 'file' && f.name === 'status.json');
-  if (status && status.size <= FORGE_STATUS_MAX) out.forgeStatus = await readOpt($, join(dir, 'status.json'));
-  // How many briefs the current task has: the brief-<n>.md files in its work folder, .forge/work/<project>/<task> for a
-  // plan task (D-08), else (a loose task, an older status or a task started before) .forge/work/<task>.
-  if (out.forgeStatus !== undefined) {
-    let st: ReturnType<typeof normalizeStatus> = null;
-    try { st = normalizeStatus(JSON.parse(out.forgeStatus)); } catch { st = null; }
-    const task = st?.task;
-    if (task && SAFE_TASK.test(task)) {
-      const briefNums = async (folder: string) => (await listOpt($, folder))
-        .filter(f => f.kind === 'file').map(f => /^brief-(\d{1,4})\.md$/.exec(f.name)?.[1]).filter(Boolean).map(Number);
-      const project = st?.project;
-      let nums = project && SAFE_TASK.test(project) ? await briefNums(join(dir, 'work', project, task)) : [];
-      if (!nums.length) nums = await briefNums(join(dir, 'work', task));
-      if (nums.length) out.forgeBriefs = Math.max(...nums);
+  // Wave 1: the commands running in the background (prep, review-prep, validate, integrate, step), in the main checkout.
+  if (mainEntries.some(f => f.kind === 'dir' && f.name === 'jobs')) {
+    const jobs = await readCached($, join(mainDir, 'jobs'), JOBS_MAX, JOB_FILE_MAX, jobCache, () => true);
+    if (jobs.length) out.forgeJobs = jobs;
+  }
+  // C5: the statuses beside the ledger: at most the 20 newest touched within the day, each at most 64 KiB.
+  const statusRoot = statusRootOf(root, main);
+  const statusEntries = statusRoot === root ? entries : mainEntries;
+  if (statusEntries.some(f => f.kind === 'dir' && f.name === 'status')) {
+    out.forgeStatuses = await readCached($, join(statusRoot, '.forge', 'status'), FORGE_STATUSES_READ, FORGE_STATUS_MAX, statusCache, f => now - f.mtimeMs < STATUS_AGE_MS);
+    out.forgeBriefsBy = await briefsByKey($, statusRoot, out.forgeStatuses);
+  } else {
+    // An older forge: the root's one status.json, as before C5.
+    const status = entries.find(f => f.kind === 'file' && f.name === 'status.json');
+    if (status && status.size <= FORGE_STATUS_MAX) out.forgeStatus = await readOpt($, join(dir, 'status.json'));
+    // How many briefs the current task has: the brief-<n>.md files in its work folder, .forge/work/<project>/<task> for a
+    // plan task (D-08), else (a loose task, an older status or a task started before) .forge/work/<task>.
+    if (out.forgeStatus !== undefined) {
+      let st: ReturnType<typeof normalizeStatus> = null;
+      try { st = normalizeStatus(JSON.parse(out.forgeStatus)); } catch { st = null; }
+      const task = st?.task;
+      if (task && SAFE_TASK.test(task)) {
+        const project = st?.project;
+        let nums = project && SAFE_TASK.test(project) ? await briefNumbers($, join(dir, 'work', project, task)) : [];
+        if (!nums.length) nums = await briefNumbers($, join(dir, 'work', task));
+        if (nums.length) out.forgeBriefs = Math.max(...nums);
+      }
     }
   }
+  if (!entries.length) { forgeSeen = { dir, entries }; return out; }
   // The infinite run (.forge/run.json, a few hundred bytes): not read above 16 KiB.
   const run = entries.find(f => f.kind === 'file' && f.name === 'run.json');
   if (run && run.size <= FORGE_RUN_MAX) out.forgeRun = await readOpt($, join(dir, 'run.json'));
@@ -259,7 +336,7 @@ async function loadPanelFiles($: Engine, now: number): Promise<PanelFiles> {
   const root = await $.session.root();
   let forge: PanelFiles = {};
   forgeSeen = null;
-  try { forge = await loadForgeFiles($, root); } catch { /* no forge section */ }
+  try { forge = await loadForgeFiles($, root, now); } catch { /* no forge section */ }
   return { ...await loadSuperpowersFiles($, root, now), ...forge };
 }
 
@@ -533,7 +610,7 @@ async function buildPanel($: Engine): Promise<PanelModel> {
   const now = await nowMs($);
   const subagents = activity.subagents.filter(s => now - s.since < SUBAGENT_TTL_MS);
   return buildPanelModel({
-    band: roadmap, ...panelFiles, activity: { ...activity, subagents, finished: freshFinished(finished, now) }, now, usage: usageInput(),
+    band: roadmap, ...panelFiles, activity: { ...activity, subagents, finished: freshFinished(finished, now) }, now, usage: usageInput(), sessionId,
     ...(roadmap.locale ? { locale: roadmap.locale } : {}),
   });
 }
@@ -604,6 +681,10 @@ async function refreshPanel($: Engine): Promise<void> {
     // The roadmap section follows the waypoint project's files at the panel's pace.
     try { roadmap = await loadBandModel($); } catch { /* keep the last one */ }
     const now = await nowMs($);
+    // E-06: who looks, so the panel knows whose tasks are its own; null when the engine cannot say.
+    if (sessionId === null) {
+      try { sessionId = await $.session.id(); } catch { /* nothing is own by its session */ }
+    }
     panelFiles = await loadPanelFiles($, now);
     activity.subagents = await liveSubagents($, now);
     await refreshUsage($, true);

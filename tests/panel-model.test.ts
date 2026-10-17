@@ -4,7 +4,7 @@ import { buildBandModel, noneBand, NO_VIEWER, type BandModel } from '../src/mod/
 import { newUsage, recordStep, labelLoop, closeTurn } from '../src/lens/usage.js';
 import { FINISHED_TTL_MS } from '../src/lens/finished.js';
 import { headline } from '../src/lens/view.js';
-import { buildPanelModel, bandKey, usageTime, elapsed, forgeFromStatus, parsePlanTasks, parseSddLedger, summarizeTodos, type Activity, type PanelModel } from '../src/lens/model.js';
+import { buildPanelModel, bandKey, usageTime, elapsed, forgeFromStatus, parsePlanTasks, parseSddLedger, summarizeTodos, statusRootOf, type Activity, type PanelModel } from '../src/lens/model.js';
 
 const LEDGER = `# SDD ledger — plan: docs/superpowers/plans/2026-10-11-waypoint-views.md
 
@@ -749,5 +749,15 @@ describe('buildPanelModel: the activities (C5, E-06, E-16)', () => {
     });
     expect(bandKey(shift(1, 'Read'))).toBe(bandKey(shift(99, 'Edit')));
     expect(bandKey(shift(1, 'Read'))).not.toBe(bandKey({ ...shift(1, 'Read'), activities: shift(1, 'Read').activities.map(x => ({ ...x, stage: 'verdict' })) }));
+  });
+});
+
+describe('statusRootOf (C5)', () => {
+  it('the main checkout for a forge task worktree, the root anywhere else', () => {
+    expect(statusRootOf('/repo/.claude/worktrees/task-T002', '/repo')).toBe('/repo');
+    expect(statusRootOf('E:\\repo\\.claude\\worktrees\\task-T1', 'E:/repo')).toBe('E:/repo');
+    expect(statusRootOf('/repo/.claude/worktrees/ui', '/repo')).toBe('/repo/.claude/worktrees/ui');
+    expect(statusRootOf('/repo', '/repo')).toBe('/repo');
+    expect(statusRootOf('/elsewhere/task-T1', '/repo')).toBe('/elsewhere/task-T1');
   });
 });

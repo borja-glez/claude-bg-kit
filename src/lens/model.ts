@@ -368,6 +368,17 @@ export const FORGE_EXEC_FILE_MAX = 8 * 1024;
 export const FORGE_EXEC_TASKS_MAX = 50;
 export const FORGE_LIVE_MAX = 20;
 
+/**
+ * C5: the root whose .forge/status/ holds this session's task statuses, as ledgerRoot gives it on disk: the main
+ * checkout for one of forge's task worktrees (`<main>/.claude/worktrees/task-*`), else the root itself.
+ */
+export function statusRootOf(root: string, main: string): string {
+  const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '');
+  const r = norm(root);
+  const name = r.split('/').pop() ?? '';
+  return name.startsWith('task-') && r.toLowerCase() === `${norm(main)}/.claude/worktrees/${name}`.toLowerCase() ? main : root;
+}
+
 function secondsSince(ts: string, now: number): number {
   const since = Date.parse(ts);
   return Number.isFinite(since) && Number.isFinite(now) ? Math.max(0, Math.round((now - since) / 1000)) : 0;

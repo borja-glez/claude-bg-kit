@@ -11,10 +11,11 @@ const RUN = { command: 'lens', args: '', origin: { kind: 'composer' as const }, 
 const NOW = Date.parse('2026-10-11T12:00:00.000Z');
 const ROOT = '/repo';
 const ID = 'p20261011100000abcd';
+const SESSION = 'conv-1';
 
 // The status forge keeps in .forge/status.json; the ledger beside it is never read by lens.
 const STATUS = {
-  ts: new Date(NOW - 30 * 60_000).toISOString(), task: 'hash', path: 'medium', phase: 'review', agent: 'forge-review-security',
+  ts: new Date(NOW - 30 * 60_000).toISOString(), session: SESSION, task: 'hash', path: 'medium', phase: 'review', agent: 'forge-review-security',
   validators: [{ name: 'test', ok: true }], verdict: { action: 'accept', score: 0.97 }, round: 0, cap: 3,
 };
 const LEDGER = '{"ts":"2026-10-11T11:30:00.000Z","kind":"phase","task":"hash","phase":"review"}\n';
@@ -46,9 +47,11 @@ async function said(ui: { drawn: () => Promise<unknown> }): Promise<string> {
   return out.join(' | ');
 }
 
-// A file system answered from memory; every path the plugin touches is recorded.
-function serveFiles(on: On, files: Record<string, string>, touched: string[] = []) {
-  on('session.root', () => ({ value: ROOT }));
+// A file system answered from memory; every path the plugin touches is recorded. Every file's mtime is `mtimeMs` (1 by
+// default: older than any window) and the session root is `root`.
+function serveFiles(on: On, files: Record<string, string>, touched: string[] = [], opts: { mtimeMs?: number; root?: string } = {}) {
+  const mtimeMs = opts.mtimeMs ?? 1;
+  on('session.root', () => ({ value: opts.root ?? ROOT }));
   on('fs.read', (_$, e) => {
     touched.push(norm(e.path));
     const f = files[norm(e.path)];
@@ -62,7 +65,7 @@ function serveFiles(on: On, files: Record<string, string>, touched: string[] = [
   on('fs.stat', (_$, e) => {
     touched.push(norm(e.path));
     const f = files[norm(e.path)];
-    return f !== undefined ? { value: { kind: 'file' as const, size: f.length, mtimeMs: 1, isLink: false } } : { deny: `ENOENT ${e.path}` };
+    return f !== undefined ? { value: { kind: 'file' as const, size: f.length, mtimeMs, isLink: false } } : { deny: `ENOENT ${e.path}` };
   });
   on('fs.list', (_$, e) => {
     touched.push(norm(e.path));
@@ -74,7 +77,7 @@ function serveFiles(on: On, files: Record<string, string>, touched: string[] = [
       names.set(head, rest.length ? { kind: 'dir', size: 0 } : { kind: 'file', size: text.length });
     }
     return names.size
-      ? { value: [...names].map(([name, f]) => ({ name, kind: f.kind, size: f.size, mtimeMs: 1, isLink: false })) }
+      ? { value: [...names].map(([name, f]) => ({ name, kind: f.kind, size: f.size, mtimeMs, isLink: false })) }
       : { deny: `ENOENT ${e.path}` };
   });
 }
@@ -94,10 +97,11 @@ function servePanes(on: On) {
   return open;
 }
 
-function start(on: On) {
+function start(on: On, sessionId: () => string = () => SESSION) {
   const clock = mock.clock(on, { now: NOW });
   on('session.start', (_$, e) => ({ cwd: e.cwd }));
   on('agent.list', () => ({ value: [] }));
+  on('session.id', () => ({ value: sessionId() }));
   on('classic.SubagentStart', () => ({}));
   return clock;
 }
@@ -440,4 +444,95 @@ test('a project id as long as forge allows (120 characters) still finds its brie
   const term = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'AbovePrompt', props });
   expect(await said(term)).toContain('0/3');
   await term.unmount();
+});
+
+test('every task status of .forge/status/ is a row of Tasks in progress; another session one is marked; a job says it validates (C5, E-06)', async ($, on) => {
+  const at = (min: number) => new Date(NOW - min * 60_000).toISOString();
+  const st = (task: string, over: object = {}) => JSON.stringify({ ...STATUS, ts: at(1), lastAt: at(1), task, ...over });
+  serveFiles(on, {
+    [`${ROOT}/.forge/status/T001.json`]: st('T001'),
+    [`${ROOT}/.forge/status/T002.json`]: st('T002', { phase: 'implement', agent: 'forge-impl' }),
+    [`${ROOT}/.forge/status/T003.json`]: st('T003', { session: 'another-conversation' }),
+    [`${ROOT}/.forge/jobs/review-prep-T002-1-42.json`]: JSON.stringify({ name: 'review-prep-T002-1-42', cmd: 'review-prep', task: 'T002-1', pid: 42, startedAt: at(1.5), out: 'x.json', session: SESSION }),
+  }, [], { mtimeMs: NOW - 60_000 });
+  servePanes(on);
+  start(on);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
+  const text = await said(ui);
+  expect(text).toContain('Tasks in progress · 3');
+  expect(text).toMatch(/T002[^]*validating · 1m/);
+  expect(text).toContain('other session');
+  await ui.unmount();
+});
+
+test("the lens of a forge task worktree reads the statuses beside the main checkout's ledger (C5, D-10)", async ($, on) => {
+  const WT = `${ROOT}/.claude/worktrees/task-T002`;
+  serveFiles(on, {
+    [`${WT}/.git`]: 'gitdir: /repo/.git/worktrees/task-T002\n',
+    [`${ROOT}/.forge/status/shop__T002.json`]: JSON.stringify({ ...STATUS, task: 'T002', project: 'shop', lastAt: new Date(NOW - 60_000).toISOString() }),
+  }, [], { mtimeMs: NOW - 60_000, root: WT });
+  servePanes(on);
+  start(on);
+  await $.session.start({ cwd: WT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
+  expect(await said(ui)).toContain('Tasks in progress · 1');
+  await ui.unmount();
+});
+
+test('lens reads at most the 20 newest statuses, none over 64 KiB, and reads one again only when it changes', async ($, on) => {
+  const touched: string[] = [];
+  const files: Record<string, string> = {};
+  for (let i = 0; i < 25; i++) files[`${ROOT}/.forge/status/T${i}.json`] = JSON.stringify({ ...STATUS, task: `T${i}`, lastAt: new Date(NOW - 60_000).toISOString() });
+  files[`${ROOT}/.forge/status/BIG.json`] = JSON.stringify({ ...STATUS, task: 'BIG', pad: 'x'.repeat(70 * 1024) });
+  serveFiles(on, files, touched, { mtimeMs: NOW - 60_000 });
+  servePanes(on);
+  const clock = start(on);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  const reads = () => touched.filter(p => /\/\.forge\/status\/[^/]+\.json$/.test(p));
+  expect(reads()).toHaveLength(20);
+  expect(reads()).not.toContain(`${ROOT}/.forge/status/BIG.json`);
+  touched.length = 0;
+  await clock.advance(10_000);
+  expect(reads()).toEqual([]);
+});
+
+test('junk in .forge/status/ and .forge/jobs/ hides only that task and never throws', async ($, on) => {
+  const at = new Date(NOW - 60_000).toISOString();
+  const good = (task: string) => JSON.stringify({ ...STATUS, task, lastAt: at });
+  serveFiles(on, {
+    [`${ROOT}/.forge/status/T001.json`]: good('T001'),
+    [`${ROOT}/.forge/status/notjson.json`]: 'not json {',
+    [`${ROOT}/.forge/status/big.json`]: JSON.stringify({ ...STATUS, task: 'big', pad: 'x'.repeat(70 * 1024) }),
+    [`${ROOT}/.forge/status/invalid.json`]: JSON.stringify({ hello: 'world' }),
+    [`${ROOT}/.forge/status/x.json/inner.json`]: good('inner'),
+    [`${ROOT}/.forge/jobs/step.lock`]: 'lock',
+    [`${ROOT}/.forge/jobs/step-run-1.json`]: 'not json {',
+    [`${ROOT}/.forge/jobs/validate-T001-2.json`]: JSON.stringify({ hello: 'world' }),
+    [`${ROOT}/.forge/jobs/integrate-T001-3.json`]: JSON.stringify({ name: 'integrate-T001-3', cmd: 'integrate', task: 'T001', pid: 3, startedAt: at, out: 'x.json' }),
+    [`${ROOT}/.forge/jobs/prep-T001-4.json`]: JSON.stringify({ name: 'prep-T001-4', cmd: 'prep', task: 'T001', pid: 4, startedAt: at, out: 'x.json', pad: 'x'.repeat(5000) }),
+  }, [], { mtimeMs: NOW - 60_000 });
+  servePanes(on);
+  start(on);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
+  const text = await said(ui);
+  expect(text).toContain('Tasks in progress · 1');
+  expect(text).toContain('T001');
+  await ui.unmount();
+});
+
+test('when the session id cannot be read, the panel still draws (E-06)', async ($, on) => {
+  serveFiles(on, { [`${ROOT}/.forge/status/T001.json`]: JSON.stringify({ ...STATUS, task: 'T001', lastAt: new Date(NOW - 60_000).toISOString() }) }, [], { mtimeMs: NOW - 60_000 });
+  servePanes(on);
+  start(on, () => { throw new Error('no id'); });
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
+  expect(await said(ui)).toContain('Tasks in progress · 1');
+  await ui.unmount();
 });
