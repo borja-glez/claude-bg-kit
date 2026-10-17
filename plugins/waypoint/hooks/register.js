@@ -10650,19 +10650,23 @@ var TaskSchema = external_exports.object({
   depends_on: external_exports.array(id).default([]),
   zones: external_exports.array(external_exports.string().min(1)).default([]),
   estimate_min: external_exports.number().positive().optional(),
-  delicate: external_exports.boolean().optional()
+  delicate: external_exports.boolean().optional(),
+  // G-25, K3-08: the section of the design the task comes from (a heading's slug, or _intro).
+  design_ref: external_exports.string().regex(/^[a-z0-9-]{1,80}$|^_intro$/, "design_ref must be a section slug of the design").optional()
 });
 var PlanSchema = external_exports.object({
   project: id,
   locale: external_exports.string().min(1).default("en"),
   version: external_exports.string().min(1),
+  design_version: external_exports.number().int().positive().optional(),
   artifacts: external_exports.object({ roadmap: external_exports.string().url().optional(), design: external_exports.string().url().optional() }).default({}),
-  versions: external_exports.array(external_exports.object({ id, phases: external_exports.array(id) })).default([]),
+  versions: external_exports.array(external_exports.object({ id, phases: external_exports.array(id), target: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "target must be a date (YYYY-MM-DD)").optional() })).default([]),
   tracks: external_exports.array(external_exports.object({ id, name: external_exports.string().min(1), color: external_exports.enum(TRACK_COLORS) })).min(1),
   phases: external_exports.array(external_exports.object({
     id,
     name: external_exports.string().min(1),
-    plan_status: external_exports.enum(["committed", "provisional"]).default("committed")
+    plan_status: external_exports.enum(["committed", "provisional"]).default("committed"),
+    goal: external_exports.string().max(300).optional()
   })).min(1),
   tasks: external_exports.array(TaskSchema).min(1)
 });
@@ -10784,7 +10788,8 @@ function normalizeTask(x, now) {
     detail: typeof x.detail === "string" ? x.detail.slice(0, 500) : null,
     ...iso(x.nudgedAt) ? { nudgedAt: iso(x.nudgedAt) } : {},
     ...finishedOf(x.finishedAt, now) ? { finishedAt: finishedOf(x.finishedAt, now) } : {},
-    ...title ? { title } : {}
+    ...title ? { title } : {},
+    ...typeof x.sha === "string" && /^[0-9a-f]{7,40}$/i.test(x.sha) ? { sha: x.sha } : {}
   };
 }
 function normalizeExecution(x, now) {

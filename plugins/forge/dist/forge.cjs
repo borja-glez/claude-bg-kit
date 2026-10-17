@@ -107,17 +107,17 @@ var require_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    function visit_(key, node, visitor, path34) {
-      const ctrl = callVisitor(key, node, visitor, path34);
+    function visit_(key, node, visitor, path37) {
+      const ctrl = callVisitor(key, node, visitor, path37);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path34, ctrl);
-        return visit_(key, ctrl, visitor, path34);
+        replaceNode(key, path37, ctrl);
+        return visit_(key, ctrl, visitor, path37);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path34 = Object.freeze(path34.concat(node));
+          path37 = Object.freeze(path37.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = visit_(i, node.items[i], visitor, path34);
+            const ci = visit_(i, node.items[i], visitor, path37);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -128,13 +128,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path34 = Object.freeze(path34.concat(node));
-          const ck = visit_("key", node.key, visitor, path34);
+          path37 = Object.freeze(path37.concat(node));
+          const ck = visit_("key", node.key, visitor, path37);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = visit_("value", node.value, visitor, path34);
+          const cv = visit_("value", node.value, visitor, path37);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -155,17 +155,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node, visitor, path34) {
-      const ctrl = await callVisitor(key, node, visitor, path34);
+    async function visitAsync_(key, node, visitor, path37) {
+      const ctrl = await callVisitor(key, node, visitor, path37);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path34, ctrl);
-        return visitAsync_(key, ctrl, visitor, path34);
+        replaceNode(key, path37, ctrl);
+        return visitAsync_(key, ctrl, visitor, path37);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path34 = Object.freeze(path34.concat(node));
+          path37 = Object.freeze(path37.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = await visitAsync_(i, node.items[i], visitor, path34);
+            const ci = await visitAsync_(i, node.items[i], visitor, path37);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -176,13 +176,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path34 = Object.freeze(path34.concat(node));
-          const ck = await visitAsync_("key", node.key, visitor, path34);
+          path37 = Object.freeze(path37.concat(node));
+          const ck = await visitAsync_("key", node.key, visitor, path37);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = await visitAsync_("value", node.value, visitor, path34);
+          const cv = await visitAsync_("value", node.value, visitor, path37);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -209,23 +209,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node, visitor, path34) {
+    function callVisitor(key, node, visitor, path37) {
       if (typeof visitor === "function")
-        return visitor(key, node, path34);
+        return visitor(key, node, path37);
       if (identity.isMap(node))
-        return visitor.Map?.(key, node, path34);
+        return visitor.Map?.(key, node, path37);
       if (identity.isSeq(node))
-        return visitor.Seq?.(key, node, path34);
+        return visitor.Seq?.(key, node, path37);
       if (identity.isPair(node))
-        return visitor.Pair?.(key, node, path34);
+        return visitor.Pair?.(key, node, path37);
       if (identity.isScalar(node))
-        return visitor.Scalar?.(key, node, path34);
+        return visitor.Scalar?.(key, node, path37);
       if (identity.isAlias(node))
-        return visitor.Alias?.(key, node, path34);
+        return visitor.Alias?.(key, node, path37);
       return void 0;
     }
-    function replaceNode(key, path34, node) {
-      const parent = path34[path34.length - 1];
+    function replaceNode(key, path37, node) {
+      const parent = path37[path37.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node;
       } else if (identity.isPair(parent)) {
@@ -297,13 +297,13 @@ var require_directives = __commonJS({
        * @param onError - May be called even if the action was successful
        * @returns `true` on success
        */
-      add(line2, onError) {
+      add(line3, onError) {
         if (this.atNextDocument) {
           this.yaml = { explicit: _Directives.defaultYaml.explicit, version: "1.1" };
           this.tags = Object.assign({}, _Directives.defaultTags);
           this.atNextDocument = false;
         }
-        const parts = line2.trim().split(/[ \t]+/);
+        const parts = line3.trim().split(/[ \t]+/);
         const name = parts.shift();
         switch (name) {
           case "%TAG": {
@@ -837,10 +837,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path34, value) {
+    function collectionFromPath(schema, path37, value) {
       let v = value;
-      for (let i = path34.length - 1; i >= 0; --i) {
-        const k = path34[i];
+      for (let i = path37.length - 1; i >= 0; --i) {
+        const k = path37[i];
         if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
           const a = [];
           a[k] = v;
@@ -859,7 +859,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path34) => path34 == null || typeof path34 === "object" && !!path34[Symbol.iterator]().next().done;
+    var isEmptyPath = (path37) => path37 == null || typeof path37 === "object" && !!path37[Symbol.iterator]().next().done;
     var Collection = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -889,11 +889,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path34, value) {
-        if (isEmptyPath(path34))
+      addIn(path37, value) {
+        if (isEmptyPath(path37))
           this.add(value);
         else {
-          const [key, ...rest] = path34;
+          const [key, ...rest] = path37;
           const node = this.get(key, true);
           if (identity.isCollection(node))
             node.addIn(rest, value);
@@ -907,8 +907,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path34) {
-        const [key, ...rest] = path34;
+      deleteIn(path37) {
+        const [key, ...rest] = path37;
         if (rest.length === 0)
           return this.delete(key);
         const node = this.get(key, true);
@@ -922,8 +922,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path34, keepScalar) {
-        const [key, ...rest] = path34;
+      getIn(path37, keepScalar) {
+        const [key, ...rest] = path37;
         const node = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -941,8 +941,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path34) {
-        const [key, ...rest] = path34;
+      hasIn(path37) {
+        const [key, ...rest] = path37;
         if (rest.length === 0)
           return this.has(key);
         const node = this.get(key, true);
@@ -952,8 +952,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path34, value) {
-        const [key, ...rest] = path34;
+      setIn(path37, value) {
+        const [key, ...rest] = path37;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -1157,27 +1157,27 @@ var require_stringifyString = __commonJS({
       return true;
     }
     function doubleQuotedString(value, ctx) {
-      const json3 = JSON.stringify(value);
+      const json4 = JSON.stringify(value);
       if (ctx.options.doubleQuotedAsJSON)
-        return json3;
+        return json4;
       const { implicitKey } = ctx;
       const minMultiLineLength = ctx.options.doubleQuotedMinMultiLineLength;
       const indent = ctx.indent || (containsDocumentMarker(value) ? "  " : "");
       let str6 = "";
       let start = 0;
-      for (let i = 0, ch = json3[i]; ch; ch = json3[++i]) {
-        if (ch === " " && json3[i + 1] === "\\" && json3[i + 2] === "n") {
-          str6 += json3.slice(start, i) + "\\ ";
+      for (let i = 0, ch = json4[i]; ch; ch = json4[++i]) {
+        if (ch === " " && json4[i + 1] === "\\" && json4[i + 2] === "n") {
+          str6 += json4.slice(start, i) + "\\ ";
           i += 1;
           start = i;
           ch = "\\";
         }
         if (ch === "\\")
-          switch (json3[i + 1]) {
+          switch (json4[i + 1]) {
             case "u":
               {
-                str6 += json3.slice(start, i);
-                const code = json3.substr(i + 2, 4);
+                str6 += json4.slice(start, i);
+                const code = json4.substr(i + 2, 4);
                 switch (code) {
                   case "0000":
                     str6 += "\\0";
@@ -1207,23 +1207,23 @@ var require_stringifyString = __commonJS({
                     if (code.substr(0, 2) === "00")
                       str6 += "\\x" + code.substr(2);
                     else
-                      str6 += json3.substr(i, 6);
+                      str6 += json4.substr(i, 6);
                 }
                 i += 5;
                 start = i + 1;
               }
               break;
             case "n":
-              if (implicitKey || json3[i + 2] === '"' || json3.length < minMultiLineLength) {
+              if (implicitKey || json4[i + 2] === '"' || json4.length < minMultiLineLength) {
                 i += 1;
               } else {
-                str6 += json3.slice(start, i) + "\n\n";
-                while (json3[i + 2] === "\\" && json3[i + 3] === "n" && json3[i + 4] !== '"') {
+                str6 += json4.slice(start, i) + "\n\n";
+                while (json4[i + 2] === "\\" && json4[i + 3] === "n" && json4[i + 4] !== '"') {
                   str6 += "\n";
                   i += 2;
                 }
                 str6 += indent;
-                if (json3[i + 2] === " ")
+                if (json4[i + 2] === " ")
                   str6 += "\\";
                 i += 1;
                 start = i + 1;
@@ -1233,7 +1233,7 @@ var require_stringifyString = __commonJS({
               i += 1;
           }
       }
-      str6 = start ? str6 + json3.slice(start) : json3;
+      str6 = start ? str6 + json4.slice(start) : json4;
       return implicitKey ? str6 : foldFlowLines.foldFlowLines(str6, indent, foldFlowLines.FOLD_QUOTED, getFoldOptions(ctx, false));
     }
     function singleQuotedString(value, ctx) {
@@ -1900,9 +1900,9 @@ var require_stringifyCollection = __commonJS({
       } else {
         str6 = lines[0];
         for (let i = 1; i < lines.length; ++i) {
-          const line2 = lines[i];
-          str6 += line2 ? `
-${indent}${line2}` : "\n";
+          const line3 = lines[i];
+          str6 += line3 ? `
+${indent}${line3}` : "\n";
         }
       }
       if (comment) {
@@ -1960,7 +1960,7 @@ ${indent}${line2}` : "\n";
           str6 += ",";
         } else if (ctx.options.trailingComma) {
           if (ctx.options.lineWidth > 0) {
-            reqNewline || (reqNewline = lines.reduce((sum, line2) => sum + line2.length + 2, 2) + (str6.length + 2) > ctx.options.lineWidth);
+            reqNewline || (reqNewline = lines.reduce((sum, line3) => sum + line3.length + 2, 2) + (str6.length + 2) > ctx.options.lineWidth);
           }
           if (reqNewline) {
             str6 += ",";
@@ -1976,14 +1976,14 @@ ${indent}${line2}` : "\n";
         return start + end;
       } else {
         if (!reqNewline) {
-          const len = lines.reduce((sum, line2) => sum + line2.length + 2, 2);
+          const len = lines.reduce((sum, line3) => sum + line3.length + 2, 2);
           reqNewline = ctx.options.lineWidth > 0 && len > ctx.options.lineWidth;
         }
         if (reqNewline) {
           let str6 = start;
-          for (const line2 of lines)
-            str6 += line2 ? `
-${indentStep}${indent}${line2}` : "\n";
+          for (const line3 of lines)
+            str6 += line3 ? `
+${indentStep}${indent}${line3}` : "\n";
           return `${str6}
 ${indent}${end}`;
         } else {
@@ -2463,7 +2463,7 @@ var require_int = __commonJS({
       resolve: (str6, _onError, opt) => intResolve(str6, 2, 8, opt),
       stringify: (node) => intStringify(node, 8, "0o")
     };
-    var int2 = {
+    var int5 = {
       identify: intIdentify,
       default: true,
       tag: "tag:yaml.org,2002:int",
@@ -2480,7 +2480,7 @@ var require_int = __commonJS({
       resolve: (str6, _onError, opt) => intResolve(str6, 2, 16, opt),
       stringify: (node) => intStringify(node, 16, "0x")
     };
-    exports2.int = int2;
+    exports2.int = int5;
     exports2.intHex = intHex;
     exports2.intOct = intOct;
   }
@@ -2496,16 +2496,16 @@ var require_schema = __commonJS({
     var string = require_string();
     var bool = require_bool();
     var float = require_float();
-    var int2 = require_int();
+    var int5 = require_int();
     var schema = [
       map.map,
       seq.seq,
       string.string,
       _null.nullTag,
       bool.boolTag,
-      int2.intOct,
-      int2.int,
-      int2.intHex,
+      int5.intOct,
+      int5.int,
+      int5.intHex,
       float.floatNaN,
       float.floatExp,
       float.float
@@ -2939,7 +2939,7 @@ var require_int2 = __commonJS({
       resolve: (str6, _onError, opt) => intResolve(str6, 1, 8, opt),
       stringify: (node) => intStringify(node, 8, "0")
     };
-    var int2 = {
+    var int5 = {
       identify: intIdentify,
       default: true,
       tag: "tag:yaml.org,2002:int",
@@ -2956,7 +2956,7 @@ var require_int2 = __commonJS({
       resolve: (str6, _onError, opt) => intResolve(str6, 2, 16, opt),
       stringify: (node) => intStringify(node, 16, "0x")
     };
-    exports2.int = int2;
+    exports2.int = int5;
     exports2.intBin = intBin;
     exports2.intHex = intHex;
     exports2.intOct = intOct;
@@ -3151,7 +3151,7 @@ var require_schema3 = __commonJS({
     var binary = require_binary();
     var bool = require_bool2();
     var float = require_float2();
-    var int2 = require_int2();
+    var int5 = require_int2();
     var merge = require_merge();
     var omap = require_omap();
     var pairs = require_pairs();
@@ -3164,10 +3164,10 @@ var require_schema3 = __commonJS({
       _null.nullTag,
       bool.trueTag,
       bool.falseTag,
-      int2.intBin,
-      int2.intOct,
-      int2.int,
-      int2.intHex,
+      int5.intBin,
+      int5.intOct,
+      int5.int,
+      int5.intHex,
       float.floatNaN,
       float.floatExp,
       float.float,
@@ -3194,7 +3194,7 @@ var require_tags = __commonJS({
     var string = require_string();
     var bool = require_bool();
     var float = require_float();
-    var int2 = require_int();
+    var int5 = require_int();
     var schema = require_schema();
     var schema$1 = require_schema2();
     var binary = require_binary();
@@ -3218,9 +3218,9 @@ var require_tags = __commonJS({
       floatExp: float.floatExp,
       floatNaN: float.floatNaN,
       floatTime: timestamp.floatTime,
-      int: int2.int,
-      intHex: int2.intHex,
-      intOct: int2.intOct,
+      int: int5.int,
+      intHex: int5.intHex,
+      intOct: int5.intOct,
       intTime: timestamp.intTime,
       map: map.map,
       merge: merge.merge,
@@ -3468,9 +3468,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path34, value) {
+      addIn(path37, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path34, value);
+          this.contents.addIn(path37, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -3545,14 +3545,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path34) {
-        if (Collection.isEmptyPath(path34)) {
+      deleteIn(path37) {
+        if (Collection.isEmptyPath(path37)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path34) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path37) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -3567,10 +3567,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path34, keepScalar) {
-        if (Collection.isEmptyPath(path34))
+      getIn(path37, keepScalar) {
+        if (Collection.isEmptyPath(path37))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path34, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path37, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -3581,10 +3581,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path34) {
-        if (Collection.isEmptyPath(path34))
+      hasIn(path37) {
+        if (Collection.isEmptyPath(path37))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path34) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path37) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -3601,13 +3601,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path34, value) {
-        if (Collection.isEmptyPath(path34)) {
+      setIn(path37, value) {
+        if (Collection.isEmptyPath(path37)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, Array.from(path34), value);
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path37), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path34, value);
+          this.contents.setIn(path37, value);
         }
       }
       /**
@@ -3655,11 +3655,11 @@ var require_Document = __commonJS({
           throw new Error(`With a null YAML version, the { schema: Schema } option is required`);
       }
       // json & jsonArg are only used from toJSON()
-      toJS({ json: json3, jsonArg, mapAsMap, maxAliasCount, onAnchor, reviver } = {}) {
+      toJS({ json: json4, jsonArg, mapAsMap, maxAliasCount, onAnchor, reviver } = {}) {
         const ctx = {
           anchors: /* @__PURE__ */ new Map(),
           doc: this,
-          keep: !json3,
+          keep: !json4,
           mapAsMap: mapAsMap === true,
           mapKeyWarned: false,
           maxAliasCount: typeof maxAliasCount === "number" ? maxAliasCount : 100
@@ -3726,10 +3726,10 @@ var require_errors = __commonJS({
       if (error.pos[0] === -1)
         return;
       error.linePos = error.pos.map((pos) => lc.linePos(pos));
-      const { line: line2, col } = error.linePos[0];
-      error.message += ` at line ${line2}, column ${col}`;
+      const { line: line3, col } = error.linePos[0];
+      error.message += ` at line ${line3}, column ${col}`;
       let ci = col - 1;
-      let lineStr = src.substring(lc.lineStarts[line2 - 1], lc.lineStarts[line2]).replace(/[\n\r]+$/, "");
+      let lineStr = src.substring(lc.lineStarts[line3 - 1], lc.lineStarts[line3]).replace(/[\n\r]+$/, "");
       if (ci >= 60 && lineStr.length > 80) {
         const trimStart = Math.min(ci - 39, lineStr.length - 79);
         lineStr = "\u2026" + lineStr.substring(trimStart);
@@ -3737,8 +3737,8 @@ var require_errors = __commonJS({
       }
       if (lineStr.length > 80)
         lineStr = lineStr.substring(0, 79) + "\u2026";
-      if (line2 > 1 && /^ *$/.test(lineStr.substring(0, ci))) {
-        let prev = src.substring(lc.lineStarts[line2 - 2], lc.lineStarts[line2 - 1]);
+      if (line3 > 1 && /^ *$/.test(lineStr.substring(0, ci))) {
+        let prev = src.substring(lc.lineStarts[line3 - 2], lc.lineStarts[line3 - 1]);
         if (prev.length > 80)
           prev = prev.substring(0, 79) + "\u2026\n";
         lineStr = prev + lineStr;
@@ -3746,7 +3746,7 @@ var require_errors = __commonJS({
       if (/[^ ]/.test(lineStr)) {
         let count2 = 1;
         const end = error.linePos[1];
-        if (end?.line === line2 && end.col > col) {
+        if (end?.line === line3 && end.col > col) {
           count2 = Math.max(1, Math.min(end.col - col, 80 - ci));
         }
         const pointer = " ".repeat(ci) + "^".repeat(count2);
@@ -4695,8 +4695,8 @@ var require_resolve_flow_scalar = __commonJS({
       return unfoldLines(source.slice(1, -1)).replace(/''/g, "'");
     }
     function unfoldLines(source) {
-      const line2 = /(.*?)\r?\n/sy;
-      let match = line2.exec(source);
+      const line3 = /(.*?)\r?\n/sy;
+      let match = line3.exec(source);
       if (!match)
         return source;
       let trimEnd, trimBoth;
@@ -4709,8 +4709,8 @@ var require_resolve_flow_scalar = __commonJS({
       }
       let res = match[1].replace(trimEnd, "");
       let sep = " ";
-      let pos = line2.lastIndex;
-      while (match = line2.exec(source)) {
+      let pos = line3.lastIndex;
+      while (match = line3.exec(source)) {
         const lm = match[1].replace(trimBoth, "");
         if (lm === "") {
           if (sep === "\n")
@@ -4721,7 +4721,7 @@ var require_resolve_flow_scalar = __commonJS({
           res += sep + lm;
           sep = " ";
         }
-        pos = line2.lastIndex;
+        pos = line3.lastIndex;
       }
       const last = /[ \t]*(.*)/sy;
       last.lastIndex = pos;
@@ -5568,9 +5568,9 @@ var require_cst_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    visit.itemAtPath = (cst, path34) => {
+    visit.itemAtPath = (cst, path37) => {
       let item = cst;
-      for (const [field2, index] of path34) {
+      for (const [field2, index] of path37) {
         const tok = item?.[field2];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -5579,23 +5579,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit.parentCollection = (cst, path34) => {
-      const parent = visit.itemAtPath(cst, path34.slice(0, -1));
-      const field2 = path34[path34.length - 1][0];
+    visit.parentCollection = (cst, path37) => {
+      const parent = visit.itemAtPath(cst, path37.slice(0, -1));
+      const field2 = path37[path37.length - 1][0];
       const coll = parent?.[field2];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path34, item, visitor) {
-      let ctrl = visitor(item, path34);
+    function _visit(path37, item, visitor) {
+      let ctrl = visitor(item, path37);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field2 of ["key", "value"]) {
         const token = item[field2];
         if (token && "items" in token) {
           for (let i = 0; i < token.items.length; ++i) {
-            const ci = _visit(Object.freeze(path34.concat([[field2, i]])), token.items[i], visitor);
+            const ci = _visit(Object.freeze(path37.concat([[field2, i]])), token.items[i], visitor);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -5606,10 +5606,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field2 === "key")
-            ctrl = ctrl(item, path34);
+            ctrl = ctrl(item, path37);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path34) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path37) : ctrl;
     }
     exports2.visit = visit;
   }
@@ -5851,40 +5851,40 @@ var require_lexer = __commonJS({
         }
       }
       *parseStream() {
-        let line2 = this.getLine();
-        if (line2 === null)
+        let line3 = this.getLine();
+        if (line3 === null)
           return this.setNext("stream");
-        if (line2[0] === cst.BOM) {
+        if (line3[0] === cst.BOM) {
           yield* this.pushCount(1);
-          line2 = line2.substring(1);
+          line3 = line3.substring(1);
         }
-        if (line2[0] === "%") {
-          let dirEnd = line2.length;
-          let cs = line2.indexOf("#");
+        if (line3[0] === "%") {
+          let dirEnd = line3.length;
+          let cs = line3.indexOf("#");
           while (cs !== -1) {
-            const ch = line2[cs - 1];
+            const ch = line3[cs - 1];
             if (ch === " " || ch === "	") {
               dirEnd = cs - 1;
               break;
             } else {
-              cs = line2.indexOf("#", cs + 1);
+              cs = line3.indexOf("#", cs + 1);
             }
           }
           while (true) {
-            const ch = line2[dirEnd - 1];
+            const ch = line3[dirEnd - 1];
             if (ch === " " || ch === "	")
               dirEnd -= 1;
             else
               break;
           }
           const n = (yield* this.pushCount(dirEnd)) + (yield* this.pushSpaces(true));
-          yield* this.pushCount(line2.length - n);
+          yield* this.pushCount(line3.length - n);
           this.pushNewline();
           return "stream";
         }
         if (this.atLineEnd()) {
           const sp = yield* this.pushSpaces(true);
-          yield* this.pushCount(line2.length - sp);
+          yield* this.pushCount(line3.length - sp);
           yield* this.pushNewline();
           return "stream";
         }
@@ -5925,13 +5925,13 @@ var require_lexer = __commonJS({
       }
       *parseDocument() {
         yield* this.pushSpaces(true);
-        const line2 = this.getLine();
-        if (line2 === null)
+        const line3 = this.getLine();
+        if (line3 === null)
           return this.setNext("doc");
         let n = yield* this.pushIndicators();
-        switch (line2[n]) {
+        switch (line3[n]) {
           case "#":
-            yield* this.pushCount(line2.length - n);
+            yield* this.pushCount(line3.length - n);
           // fallthrough
           case void 0:
             yield* this.pushNewline();
@@ -5956,7 +5956,7 @@ var require_lexer = __commonJS({
           case ">":
             n += yield* this.parseBlockScalarHeader();
             n += yield* this.pushSpaces(true);
-            yield* this.pushCount(line2.length - n);
+            yield* this.pushCount(line3.length - n);
             yield* this.pushNewline();
             return yield* this.parseBlockScalar();
           default:
@@ -5976,11 +5976,11 @@ var require_lexer = __commonJS({
           }
           sp += yield* this.pushSpaces(true);
         } while (nl + sp > 0);
-        const line2 = this.getLine();
-        if (line2 === null)
+        const line3 = this.getLine();
+        if (line3 === null)
           return this.setNext("flow");
-        if (indent !== -1 && indent < this.indentNext && line2[0] !== "#" || indent === 0 && (line2.startsWith("---") || line2.startsWith("...")) && isEmpty(line2[3])) {
-          const atFlowEndMarker = indent === this.indentNext - 1 && this.flowLevel === 1 && (line2[0] === "]" || line2[0] === "}");
+        if (indent !== -1 && indent < this.indentNext && line3[0] !== "#" || indent === 0 && (line3.startsWith("---") || line3.startsWith("...")) && isEmpty(line3[3])) {
+          const atFlowEndMarker = indent === this.indentNext - 1 && this.flowLevel === 1 && (line3[0] === "]" || line3[0] === "}");
           if (!atFlowEndMarker) {
             this.flowLevel = 0;
             yield cst.FLOW_END;
@@ -5988,17 +5988,17 @@ var require_lexer = __commonJS({
           }
         }
         let n = 0;
-        while (line2[n] === ",") {
+        while (line3[n] === ",") {
           n += yield* this.pushCount(1);
           n += yield* this.pushSpaces(true);
           this.flowKey = false;
         }
         n += yield* this.pushIndicators();
-        switch (line2[n]) {
+        switch (line3[n]) {
           case void 0:
             return "flow";
           case "#":
-            yield* this.pushCount(line2.length - n);
+            yield* this.pushCount(line3.length - n);
             return "flow";
           case "{":
           case "[":
@@ -7361,13 +7361,13 @@ var require_dist = __commonJS({
 });
 
 // src/forge/cli/main.ts
-var import_node_fs33 = require("node:fs");
+var import_node_fs37 = require("node:fs");
 
 // src/forge/cli/run.ts
-var import_node_child_process2 = require("node:child_process");
-var import_node_fs32 = require("node:fs");
+var import_node_child_process3 = require("node:child_process");
+var import_node_fs36 = require("node:fs");
 var import_node_os2 = require("node:os");
-var import_node_path33 = __toESM(require("node:path"), 1);
+var import_node_path36 = __toESM(require("node:path"), 1);
 
 // src/forge/ledger.ts
 var import_node_fs2 = require("node:fs");
@@ -7647,8 +7647,8 @@ var ZodIssueCode = util.arrayToEnum([
   "not_finite"
 ]);
 var quotelessJson = (obj) => {
-  const json3 = JSON.stringify(obj, null, 2);
-  return json3.replace(/"([^"]+)":/g, "$1:");
+  const json4 = JSON.stringify(obj, null, 2);
+  return json4.replace(/"([^"]+)":/g, "$1:");
 };
 var ZodError = class _ZodError extends Error {
   get errors() {
@@ -7859,8 +7859,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path34, errorMaps, issueData } = params;
-  const fullPath = [...path34, ...issueData.path || []];
+  const { data, path: path37, errorMaps, issueData } = params;
+  const fullPath = [...path37, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -7976,11 +7976,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path34, key) {
+  constructor(parent, value, path37, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path34;
+    this._path = path37;
     this._key = key;
   }
   get path() {
@@ -11423,6 +11423,13 @@ var coerce = {
 var NEVER = INVALID;
 
 // src/lib/ids.ts
+function compactTs(d) {
+  return d.toISOString().replace(/[-:]/g, "").replace(".", "");
+}
+function eventId(d, sessionId, rand = Math.random) {
+  const r2 = Math.floor(rand() * 36 ** 4).toString(36).padStart(4, "0");
+  return `${compactTs(d)}-${sessionId}-${r2}`;
+}
 var PLAN_ID_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 var isPlanId = (s2) => PLAN_ID_RE.test(s2) && s2 !== "." && s2 !== "..";
 
@@ -11440,19 +11447,23 @@ var TaskSchema = external_exports.object({
   depends_on: external_exports.array(id).default([]),
   zones: external_exports.array(external_exports.string().min(1)).default([]),
   estimate_min: external_exports.number().positive().optional(),
-  delicate: external_exports.boolean().optional()
+  delicate: external_exports.boolean().optional(),
+  // G-25, K3-08: the section of the design the task comes from (a heading's slug, or _intro).
+  design_ref: external_exports.string().regex(/^[a-z0-9-]{1,80}$|^_intro$/, "design_ref must be a section slug of the design").optional()
 });
 var PlanSchema = external_exports.object({
   project: id,
   locale: external_exports.string().min(1).default("en"),
   version: external_exports.string().min(1),
+  design_version: external_exports.number().int().positive().optional(),
   artifacts: external_exports.object({ roadmap: external_exports.string().url().optional(), design: external_exports.string().url().optional() }).default({}),
-  versions: external_exports.array(external_exports.object({ id, phases: external_exports.array(id) })).default([]),
+  versions: external_exports.array(external_exports.object({ id, phases: external_exports.array(id), target: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "target must be a date (YYYY-MM-DD)").optional() })).default([]),
   tracks: external_exports.array(external_exports.object({ id, name: external_exports.string().min(1), color: external_exports.enum(TRACK_COLORS) })).min(1),
   phases: external_exports.array(external_exports.object({
     id,
     name: external_exports.string().min(1),
-    plan_status: external_exports.enum(["committed", "provisional"]).default("committed")
+    plan_status: external_exports.enum(["committed", "provisional"]).default("committed"),
+    goal: external_exports.string().max(300).optional()
   })).min(1),
   tasks: external_exports.array(TaskSchema).min(1)
 });
@@ -11618,7 +11629,8 @@ function normalizeTask(x, now) {
     detail: typeof x.detail === "string" ? x.detail.slice(0, 500) : null,
     ...iso(x.nudgedAt) ? { nudgedAt: iso(x.nudgedAt) } : {},
     ...finishedOf(x.finishedAt, now) ? { finishedAt: finishedOf(x.finishedAt, now) } : {},
-    ...title ? { title } : {}
+    ...title ? { title } : {},
+    ...typeof x.sha === "string" && /^[0-9a-f]{7,40}$/i.test(x.sha) ? { sha: x.sha } : {}
   };
 }
 function normalizeExecution(x, now) {
@@ -11781,7 +11793,7 @@ var reviewerName = (r2) => {
   return v ? cleanText(v.replace(/^(?:forge:)?(?:forge-)?review-/, "")) || null : null;
 };
 var reviewersOf = (x) => [...new Set((Array.isArray(x) ? x : []).map(reviewerName).filter((s2) => !!s2))].slice(0, MAX_REVIEWERS);
-var isLight = (path34) => path34 === "trivial" || path34 === "small";
+var isLight = (path37) => path37 === "trivial" || path37 === "small";
 var isVerifyAgent = (agent) => !!agent && agent.startsWith("forge-verify");
 var lastStage = (stages) => Object.keys(stages).filter((k) => k !== "done" && k !== "stopped" && k !== "triage").at(-1) ?? "";
 var PATHS = ["trivial", "small", "medium", "large"];
@@ -12121,8 +12133,8 @@ function mainCheckoutFrom(root, gitFileText) {
 var import_node_path2 = __toESM(require("node:path"), 1);
 function mainWorktreeFrom(porcelain) {
   if (typeof porcelain !== "string") return null;
-  const line2 = porcelain.split(/\r?\n/).find((l) => l.startsWith("worktree "));
-  return line2 ? line2.slice("worktree ".length).trim() || null : null;
+  const line3 = porcelain.split(/\r?\n/).find((l) => l.startsWith("worktree "));
+  return line3 ? line3.slice("worktree ".length).trim() || null : null;
 }
 function samePath(a, b) {
   const norm3 = (p) => {
@@ -12365,6 +12377,13 @@ function readStatuses(root, opts = {}) {
   }
   return out;
 }
+function readStatus(root) {
+  try {
+    return normalizeStatus(JSON.parse((0, import_node_fs2.readFileSync)(statusFile(root), "utf8")));
+  } catch {
+    return null;
+  }
+}
 function readEvents(root) {
   const target = ledgerRoot(root);
   if (target === root) return present(readLedger(root).events);
@@ -12373,7 +12392,7 @@ function readEvents(root) {
 }
 function notIn(of, other) {
   const left = /* @__PURE__ */ new Map();
-  for (const line2 of other) left.set(line2, (left.get(line2) ?? 0) + 1);
+  for (const line3 of other) left.set(line3, (left.get(line3) ?? 0) + 1);
   return of.events.filter((_, i) => {
     const n = left.get(of.lines[i]) ?? 0;
     if (n) left.set(of.lines[i], n - 1);
@@ -12389,9 +12408,9 @@ var KEPT_FILES = 32;
 var kept = /* @__PURE__ */ new Map();
 var ledgerReads = { whole: 0, appended: 0 };
 var present = (events) => events.filter((e) => e !== null);
-var lineEvent = (line2) => {
+var lineEvent = (line3) => {
   try {
-    const e = JSON.parse(line2);
+    const e = JSON.parse(line3);
     return e && typeof e === "object" && typeof e.ts === "string" && LEDGER_KINDS.includes(e.kind) && ["undefined", "string"].includes(typeof e.task) ? e : null;
   } catch {
     return null;
@@ -12979,8 +12998,8 @@ function hashMatches(stored, current) {
   if (!stored) return false;
   return stored === current || /^[0-9a-f]{16}$/.test(stored) && current.startsWith(stored);
 }
-function lineDigest(line2) {
-  return (0, import_node_crypto.createHash)("sha256").update(line2.replace(/\r\n?/g, "\n").trim()).digest("hex");
+function lineDigest(line3) {
+  return (0, import_node_crypto.createHash)("sha256").update(line3.replace(/\r\n?/g, "\n").trim()).digest("hex");
 }
 var LEARNED_HEADINGS = ["Learned", "Aprendido"];
 function permissionHash(text2, learned) {
@@ -13214,10 +13233,10 @@ function readLearned(root) {
   } catch {
     return out;
   }
-  for (const line2 of text2.split("\n")) {
+  for (const line3 of text2.split("\n")) {
     let r2;
     try {
-      r2 = JSON.parse(line2);
+      r2 = JSON.parse(line3);
     } catch {
       continue;
     }
@@ -13238,7 +13257,7 @@ var runBranch = (project) => `forge/run-${project}`;
 var taskBranch = (task) => `task/${task}`;
 var runWorktree = (root) => import_node_path9.default.join(root, ".claude", "worktrees", "run");
 var taskWorktree = (root, task) => import_node_path9.default.join(root, ".claude", "worktrees", `task-${task}`);
-var taskBase = (git, runBranch2) => git(["merge-base", "HEAD", runBranch2])?.trim() || null;
+var taskBase = (git2, runBranch2) => git2(["merge-base", "HEAD", runBranch2])?.trim() || null;
 function executionHolding(cwd2, ref) {
   const e = readExecution(mainCheckout(cwd2));
   if (!e || !Object.hasOwn(e.tasks, ref.task) || !Number.isFinite(Date.parse(e.startedAt))) return null;
@@ -13533,6 +13552,10 @@ var ZONE_ORDER = ZONES.map((z) => z.zone);
 function zonesFromPaths(paths) {
   return ZONES.filter((z) => paths.some((p) => z.path.test(p))).map((z) => z.zone);
 }
+function zonesFromText(text2) {
+  const t = String(text2).slice(0, MAX_TEXT);
+  return ZONES.filter((z) => z.text.some((re) => re.test(t))).map((z) => z.zone);
+}
 var LARGE = [
   /\b(architecture|redesign|rewrite|subsystem|new (project|app|service|system)|from scratch|migrat(e|ion) (to|from))\b/i,
   es("arquitect|redise\xF1|reescrib|reescritur|subsistem", "desde cero|(?:nuev[oa]|otr[oa]) (?:proyecto|aplicaci[o\xF3]n|app|servicio|sistema)|migr(?:ar|aci[o\xF3]n) (?:a|al|desde)")
@@ -13587,12 +13610,12 @@ function implementerFor(r2, text2, opts = {}) {
       return r2.sensitive.length ? { role: "impl-high", self: false, why: `large plan task on a sensitive zone (${r2.sensitive.join(", ")}): impl-high` } : { role: "impl", self: false, why: "large plan task: impl, as a medium one (the plan may need to split it)" };
   }
 }
-var isBookkeeping = (path34) => /^(docs\/waypoint|docs\/superpowers|\.forge|\.waypoint)\//.test(path34);
+var isBookkeeping = (path37) => /^(docs\/waypoint|docs\/superpowers|\.forge|\.waypoint)\//.test(path37);
 function parseNumstat(text2) {
   const files = [];
   let lines = 0;
-  for (const row of String(text2).split("\n")) {
-    const m = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(row.replace(/\r$/, ""));
+  for (const row2 of String(text2).split("\n")) {
+    const m = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(row2.replace(/\r$/, ""));
     if (!m || isBookkeeping(m[3])) continue;
     files.push(m[3]);
     if (m[1] !== "-") lines += Number(m[1]);
@@ -13603,14 +13626,14 @@ function parseNumstat(text2) {
 var DIFF_MEDIUM_LINES = 200;
 function diffPath(stat) {
   const n = stat.files.length;
-  let path34 = n === 0 ? "trivial" : n > 10 ? "large" : n > 3 || stat.lines > DIFF_MEDIUM_LINES ? "medium" : "small";
+  let path37 = n === 0 ? "trivial" : n > 10 ? "large" : n > 3 || stat.lines > DIFF_MEDIUM_LINES ? "medium" : "small";
   const sensitive = zonesFromPaths(stat.files);
   const reasons = [`diff: ${n} file(s), ${stat.lines} line(s)`];
   if (sensitive.length) {
-    if (PATH_ORDER.indexOf(path34) < PATH_ORDER.indexOf("medium")) path34 = "medium";
+    if (PATH_ORDER.indexOf(path37) < PATH_ORDER.indexOf("medium")) path37 = "medium";
     reasons.push(`diff touches a sensitive zone: ${sensitive.join(", ")}`);
   }
-  return { path: path34, sensitive, reasons };
+  return { path: path37, sensitive, reasons };
 }
 var PERF = [
   /\b(perf|performance|latency|throughput|benchmarks?|optimi[sz](e|es|ed|ing|ation|ations)|speed\s?up|faster|memory (usage|leaks?))\b/i,
@@ -13620,8 +13643,8 @@ function isPerfTask(text2) {
   const t = stripMentions(String(text2).slice(0, MAX_TEXT));
   return PERF.some((re) => re.test(t));
 }
-function reviewFor(path34, sensitive, perf, opts = {}) {
-  if (path34 === "trivial" || path34 === "small") return {
+function reviewFor(path37, sensitive, perf, opts = {}) {
+  if (path37 === "trivial" || path37 === "small") return {
     light: true,
     reviewers: [{ role: "review-correctness", model: "sonnet", effort: "medium" }, ...perf ? [{ role: "review-perf", model: null, effort: "medium" }] : []],
     flags: perf ? ["--perf"] : []
@@ -13631,7 +13654,7 @@ function reviewFor(path34, sensitive, perf, opts = {}) {
     if (opts.profile === "quality") return "xhigh";
     if (role === "review-perf") return "medium";
     if (role === "review-security") return sensitive.includes("auth") ? "xhigh" : "high";
-    return sensitive.length || opts.delicate || opts.final && path34 === "large" ? "xhigh" : "high";
+    return sensitive.length || opts.delicate || opts.final && path37 === "large" ? "xhigh" : "high";
   };
   return {
     light: false,
@@ -13666,23 +13689,23 @@ function announce(a, locale) {
   const why = a.why || (es2 ? a.reasons.map(reasonEs) : a.reasons).join("; ");
   const agent = a.implementer.agent;
   const self = a.implementer.self || !agent;
-  let line2;
+  let line3;
   switch (a.path) {
     case "trivial":
     case "small": {
       const name = a.path === "trivial" ? "Trivial" : "Small";
-      line2 = self ? es2 ? `${name}: ${why}; lo hago yo. Puedes corregirlo.` : `${name}: ${why}; I do it myself. You can correct it.` : es2 ? `${name} \u2192 ${agent}: ${why}. Puedes corregirlo.` : `${name} \u2192 ${agent}: ${why}. You can correct it.`;
+      line3 = self ? es2 ? `${name}: ${why}; lo hago yo. Puedes corregirlo.` : `${name}: ${why}; I do it myself. You can correct it.` : es2 ? `${name} \u2192 ${agent}: ${why}. Puedes corregirlo.` : `${name} \u2192 ${agent}: ${why}. You can correct it.`;
       break;
     }
     case "medium":
-      line2 = es2 ? `Medium \u2192 ${agent}: ${why}. Antes de lanzarlo te ense\xF1o un plan corto; puedes corregirlo.` : `Medium \u2192 ${agent}: ${why}. I show you a short plan before launching it; you can correct it.`;
+      line3 = es2 ? `Medium \u2192 ${agent}: ${why}. Antes de lanzarlo te ense\xF1o un plan corto; puedes corregirlo.` : `Medium \u2192 ${agent}: ${why}. I show you a short plan before launching it; you can correct it.`;
       break;
     default:
-      line2 = agent ? es2 ? `Large \u2192 ${agent}: ${why}. Puedes corregirlo.` : `Large \u2192 ${agent}: ${why}. You can correct it.` : es2 ? `Large: ${why}; primero dise\xF1o y plan. Puedes corregirlo.` : `Large: ${why}; design and plan first. You can correct it.`;
+      line3 = agent ? es2 ? `Large \u2192 ${agent}: ${why}. Puedes corregirlo.` : `Large \u2192 ${agent}: ${why}. You can correct it.` : es2 ? `Large: ${why}; primero dise\xF1o y plan. Puedes corregirlo.` : `Large: ${why}; design and plan first. You can correct it.`;
   }
-  if (!a.fresh.length) return line2;
+  if (!a.fresh.length) return line3;
   const list = a.fresh.map((n) => `${n} (\`${a.catalog.find((v) => v.name === n)?.cmd ?? ""}\`)`).join(", ");
-  return `${line2}
+  return `${line3}
 ${es2 ? "Validadores nuevos" : "New validators"}: ${list}.`;
 }
 function announceReview(a, locale) {
@@ -13764,43 +13787,43 @@ function triage(task, repo, validators, extra, opts = {}) {
   if (!repo.gitOk) reasons.push("git unavailable");
   const wordCount2 = text2.trim().split(/\s+/).length;
   const sized = named.size ? named.size : Math.min(files.size, MAX_FILES);
-  let path34;
+  let path37;
   if (greenfield && !opts.ignoreGreenfield) {
-    path34 = "large";
+    path37 = "large";
     reasons.push("greenfield repository");
   } else if (LARGE.some((re) => re.test(headText))) {
-    path34 = "large";
+    path37 = "large";
     reasons.push("architecture-scale wording");
   } else if (sized > 10) {
-    path34 = "large";
+    path37 = "large";
     reasons.push(`${sized} files located`);
   } else if (sized > 3) {
-    path34 = "medium";
+    path37 = "medium";
     reasons.push(`${sized} files located`);
   } else if (sized === 0 && isCopyChange(text2)) {
-    path34 = "trivial";
+    path37 = "trivial";
     reasons.push(COPY_REASON);
   } else if (sized === 0 && quoteFiles.size === 1 && copyGuards(text2) !== null) {
-    path34 = "trivial";
+    path37 = "trivial";
     reasons.push("one file, short task");
   } else if (sized === 0 && quoteFiles.size) {
-    path34 = "small";
+    path37 = "small";
     reasons.push(`quoted text found in ${quoteFiles.size} file(s)`);
   } else if (sized === 0) {
-    path34 = "small";
+    path37 = "small";
     reasons.push("no files located: the session should judge the scope");
   } else if (sized === 1 && wordCount2 <= 25 && !RENAME.some((re) => re.test(text2))) {
-    path34 = "trivial";
+    path37 = "trivial";
     reasons.push(named.size ? "one named file, short task" : "one file, short task");
   } else {
-    path34 = "small";
+    path37 = "small";
     reasons.push(`${sized} file(s) located`);
   }
-  if (sensitive.length && PATH_ORDER.indexOf(path34) < PATH_ORDER.indexOf("medium")) {
-    path34 = "medium";
+  if (sensitive.length && PATH_ORDER.indexOf(path37) < PATH_ORDER.indexOf("medium")) {
+    path37 = "medium";
     reasons.push(`sensitive zone: ${sensitive.join(", ")}`);
   }
-  return { path: path34, files: located, sensitive, greenfield, validators, reasons };
+  return { path: path37, files: located, sensitive, greenfield, validators, reasons };
 }
 
 // src/forge/policy.ts
@@ -13829,6 +13852,14 @@ var BENCH_COLON = /\bbench:/giu;
 var OPS = /ops\/s/giu;
 var BEFORE_AFTER = /\d+(?:\.\d+)?\s*ms\s*(?:→|->)\s*\d+(?:\.\d+)?\s*ms/giu;
 var TEST_WORD = /\b(?:tests?|tested|spec)\b/giu;
+var TEST_PATH = /(^|\/)(tests?|__tests__)\/|^spec\/|[._]spec\.\w+$|\.test\.\w+$/;
+var DESTRUCTIVE = new RegExp([
+  "(?<![\\p{L}\\p{N}_])(?:drop|delet|purg|truncat|remov|eras|wip|migrat|suprim|supres|borr|elimin|vaci|migr)\\p{L}*",
+  "\\balter\\s+table\\b"
+].join("|"), "iu");
+var SENSITIVE_PATH = /auth|login|secret|credential|token|permission|session|crypto|security/i;
+var clean = (s2) => String(s2).normalize("NFKC").replace(new RegExp("\\p{Cf}", "gu"), "");
+var NON_LATIN = new RegExp("(?!\\p{Script=Latin})\\p{L}", "u");
 var wordsIn = (s2) => s2.match(/[\p{L}\p{N}]+/gu) ?? [];
 function hasUnnegated(text2, re) {
   for (const m of text2.matchAll(re)) {
@@ -13840,8 +13871,15 @@ function hasUnnegated(text2, re) {
 }
 function autoApprovable(p) {
   if (p.risk !== "low") return false;
+  const text2 = clean(`${p.title} ${p.rationale}`);
+  const where3 = clean(typeof p.path === "string" ? p.path : "").replace(/\\/g, "/");
+  if (!where3 || where3.includes("*") || !safeZone(where3)) return false;
+  if (NON_LATIN.test(text2) || NON_LATIN.test(where3)) return false;
+  if (DESTRUCTIVE.test(text2) || DESTRUCTIVE.test(where3) || SENSITIVE_PATH.test(where3)) return false;
+  if (zonesFromPaths([where3]).length || zonesFromText(`${text2} ${where3}`).length) return false;
   switch (p.category) {
     case "tests":
+      return TEST_PATH.test(where3);
     case "quality":
       return true;
     case "perf":
@@ -13876,10 +13914,10 @@ function similarOpen(p, all) {
   }
   return null;
 }
-function safeZone(path34) {
-  if (!path34 || !/^[A-Za-z0-9_./*-]+$/.test(path34) || path34.startsWith("-")) return null;
-  if (path34.startsWith("/") || path34.split("/").includes("..")) return null;
-  return path34;
+function safeZone(path37) {
+  if (!path37 || !/^[A-Za-z0-9_./*-]+$/.test(path37) || path37.startsWith("-")) return null;
+  if (path37.startsWith("/") || path37.split("/").includes("..")) return null;
+  return path37;
 }
 
 // src/forge/to-task.ts
@@ -13891,15 +13929,16 @@ function estimateMinutes(estimate) {
   const n = Math.round(Number(m[1].replace(",", ".")) * (/^h/i.test(m[2]) ? 60 : 1));
   return n >= 1 && n <= MAX_ESTIMATE_MIN ? n : null;
 }
+function proposalsOfIncludes(includes) {
+  return [...(includes ?? "").matchAll(/^\((?:propuesta|proposal) (p\d{14}[0-9a-z]{4})\)[ \t]*$/gm)].map((m) => m[1]);
+}
 function proposalOfIncludes(includes) {
-  const m = /\((?:propuesta|proposal) (p\d{14}[0-9a-z]{4})\)\s*$/.exec(includes ?? "");
-  return m ? m[1] : null;
+  return proposalsOfIncludes(includes).at(-1) ?? null;
 }
 function includesOf(p, es2) {
   const parts = [];
   if (p.rationale.trim()) parts.push(p.rationale.trim());
   if (p.evidence.trim()) parts.push(`${es2 ? "Evidencia" : "Evidence"}: ${p.evidence.trim()}`);
-  if (!parts.length) return void 0;
   parts.push(es2 ? `(propuesta ${p.id})` : `(proposal ${p.id})`);
   return parts.join("\n\n");
 }
@@ -13919,7 +13958,7 @@ function proposalToTask(plan, p, opts) {
     title: p.title,
     track: opts.track ?? plan.tracks[0]?.id ?? "",
     phase: IMPROVEMENTS_PHASE,
-    ...includes !== void 0 ? { includes } : {},
+    includes,
     done_when: es2 ? `${p.title} \u2014 los validadores pasan` : `${p.title} \u2014 validators pass`,
     depends_on: [],
     zones: zone ? [zone] : [],
@@ -14413,8 +14452,8 @@ function findingOf(v) {
   const sev = typeof f.severity === "string" ? f.severity.trim().toLowerCase() : "";
   const out = { severity: SEVERITIES.includes(sev) ? sev : "important", problem: f.problem };
   if (typeof f.file === "string" && f.file.trim()) out.file = f.file;
-  const line2 = lineOf(f.line);
-  if (line2 !== void 0) out.line = line2;
+  const line3 = lineOf(f.line);
+  if (line3 !== void 0) out.line = line3;
   if (typeof f.fix === "string") out.fix = f.fix;
   const origin = typeof f.origin === "string" ? f.origin.trim().toLowerCase() : "";
   if (ORIGINS.includes(origin)) out.origin = origin;
@@ -14440,12 +14479,12 @@ function parseHunks(diff) {
   let prev = "";
   let oldLeft = 0, newLeft = 0;
   for (const raw of diff.split("\n")) {
-    const line2 = raw.replace(/\r$/, "");
-    if ((oldLeft > 0 || newLeft > 0) && (line2.startsWith("@@ ") || line2.startsWith("diff "))) oldLeft = newLeft = 0;
+    const line3 = raw.replace(/\r$/, "");
+    if ((oldLeft > 0 || newLeft > 0) && (line3.startsWith("@@ ") || line3.startsWith("diff "))) oldLeft = newLeft = 0;
     if (oldLeft > 0 || newLeft > 0) {
-      if (line2.startsWith("\\")) continue;
-      if (line2.startsWith("-")) oldLeft--;
-      else if (line2.startsWith("+")) newLeft--;
+      if (line3.startsWith("\\")) continue;
+      if (line3.startsWith("-")) oldLeft--;
+      else if (line3.startsWith("+")) newLeft--;
       else {
         oldLeft--;
         newLeft--;
@@ -14453,11 +14492,11 @@ function parseHunks(diff) {
       prev = "";
       continue;
     }
-    if (line2.startsWith("+++ ") && prev.startsWith("--- ")) {
-      const p = line2.slice(4).split("	")[0];
+    if (line3.startsWith("+++ ") && prev.startsWith("--- ")) {
+      const p = line3.slice(4).split("	")[0];
       file = p === "/dev/null" ? null : normPath2(p.startsWith("b/") ? p.slice(2) : p);
     } else {
-      const m = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line2);
+      const m = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line3);
       if (m) {
         oldLeft = m[1] === void 0 ? 1 : Number(m[1]);
         newLeft = m[3] === void 0 ? 1 : Number(m[3]);
@@ -14467,7 +14506,7 @@ function parseHunks(diff) {
         }
       }
     }
-    prev = line2;
+    prev = line3;
   }
   return out;
 }
@@ -14739,6 +14778,117 @@ function synthesize(reviews, weights, validatorsOk, failingValidators = [], opts
 var import_node_fs12 = require("node:fs");
 var import_node_path12 = __toESM(require("node:path"), 1);
 
+// src/lib/sha256.ts
+var K = new Uint32Array([
+  1116352408,
+  1899447441,
+  3049323471,
+  3921009573,
+  961987163,
+  1508970993,
+  2453635748,
+  2870763221,
+  3624381080,
+  310598401,
+  607225278,
+  1426881987,
+  1925078388,
+  2162078206,
+  2614888103,
+  3248222580,
+  3835390401,
+  4022224774,
+  264347078,
+  604807628,
+  770255983,
+  1249150122,
+  1555081692,
+  1996064986,
+  2554220882,
+  2821834349,
+  2952996808,
+  3210313671,
+  3336571891,
+  3584528711,
+  113926993,
+  338241895,
+  666307205,
+  773529912,
+  1294757372,
+  1396182291,
+  1695183700,
+  1986661051,
+  2177026350,
+  2456956037,
+  2730485921,
+  2820302411,
+  3259730800,
+  3345764771,
+  3516065817,
+  3600352804,
+  4094571909,
+  275423344,
+  430227734,
+  506948616,
+  659060556,
+  883997877,
+  958139571,
+  1322822218,
+  1537002063,
+  1747873779,
+  1955562222,
+  2024104815,
+  2227730452,
+  2361852424,
+  2428436474,
+  2756734187,
+  3204031479,
+  3329325298
+]);
+var rotr = (x, n) => x >>> n | x << 32 - n;
+function sha256Hex(input) {
+  const data = typeof input === "string" ? new TextEncoder().encode(input) : input;
+  const total = Math.ceil((data.length + 9) / 64) * 64;
+  const buf = new Uint8Array(total);
+  buf.set(data);
+  buf[data.length] = 128;
+  const view = new DataView(buf.buffer);
+  view.setUint32(total - 8, Math.floor(data.length * 8 / 4294967296));
+  view.setUint32(total - 4, data.length * 8 >>> 0);
+  const state = new Uint32Array([1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635, 1541459225]);
+  const w = new Uint32Array(64);
+  for (let off = 0; off < total; off += 64) {
+    for (let i = 0; i < 16; i++) w[i] = view.getUint32(off + i * 4);
+    for (let i = 16; i < 64; i++) {
+      const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ w[i - 15] >>> 3;
+      const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ w[i - 2] >>> 10;
+      w[i] = w[i - 16] + s0 + w[i - 7] + s1 | 0;
+    }
+    let [a, b, c, d, e, f, g, k] = state;
+    for (let i = 0; i < 64; i++) {
+      const t1 = k + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + (e & f ^ ~e & g) + K[i] + w[i] | 0;
+      const t2 = (rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + (a & b ^ a & c ^ b & c) | 0;
+      k = g;
+      g = f;
+      f = e;
+      e = d + t1 | 0;
+      d = c;
+      c = b;
+      b = a;
+      a = t1 + t2 | 0;
+    }
+    state[0] += a;
+    state[1] += b;
+    state[2] += c;
+    state[3] += d;
+    state[4] += e;
+    state[5] += f;
+    state[6] += g;
+    state[7] += k;
+  }
+  return Array.from(state, (x) => x.toString(16).padStart(8, "0")).join("");
+}
+
 // src/lib/proposals.ts
 var PROPOSAL_CATEGORIES = ["feature", "security", "perf", "quality", "tests", "deps"];
 var PROPOSAL_RISKS = ["low", "medium", "high"];
@@ -14768,15 +14918,15 @@ function normalizeProposal(x) {
   if (o.source !== "scout" && o.source !== "user") return null;
   if (!str4(o.title) || !o.title.trim() || !str4(o.author)) return null;
   const text2 = (v, max = MAX_PROPOSAL_TEXT) => str4(v) ? clipWords(v, max) : "";
-  const line2 = (v) => str4(v) ? clipWords(v.replace(/[\s\x85]+/g, " ").trim(), MAX_PROPOSAL_TITLE) : "";
+  const line3 = (v) => str4(v) ? clipWords(v.replace(/[\s\x85]+/g, " ").trim(), MAX_PROPOSAL_TITLE) : "";
   const out = {
     ts: str4(o.ts) ? o.ts : "",
     category: o.category,
     risk: o.risk,
-    title: line2(o.title),
+    title: line3(o.title),
     rationale: text2(o.rationale),
     evidence: text2(o.evidence),
-    pillar: line2(o.pillar),
+    pillar: line3(o.pillar),
     status: o.status,
     source: o.source,
     author: o.author
@@ -14803,6 +14953,28 @@ function normalizeHistoryEntry(x) {
 var canDecide = (status) => status === "proposed" || status === "discussing";
 var applyDecision = (d) => d === "approve" ? "approved" : d === "reject" ? "rejected" : "discussing";
 var isActionable = (p) => p.status === "approved" || p.status === "auto_approved";
+var APPROVAL_STATUSES = ["approved", "rejected", "auto_approved"];
+var APPROVAL_BY = ["page", "forge:decide", "forge:policy"];
+function proposalDigest(pid, p) {
+  return sha256Hex(JSON.stringify([pid, p.category, p.risk, p.title, p.rationale, p.evidence, p.path ?? "", p.estimate ?? ""]));
+}
+function normalizeApproval(x) {
+  if (!x || typeof x !== "object" || Array.isArray(x)) return null;
+  const o = x;
+  if (!oneOf3(APPROVAL_STATUSES, o.status) || !oneOf3(APPROVAL_BY, o.by) || !str4(o.decidedAt) || !o.decidedAt || !str4(o.digest) || !/^[0-9a-f]{64}$/.test(o.digest)) return null;
+  return { status: o.status, decidedAt: o.decidedAt.slice(0, MAX_PROPOSAL_TITLE), by: o.by, digest: o.digest };
+}
+function markMatches(p, a) {
+  return !!a && (p.status === "approved" || p.status === "auto_approved") && a.status === p.status;
+}
+function ownerCheck(pid, p, a, last) {
+  if (!a || !markMatches(p, a)) return "no-mark";
+  if (last !== void 0 && last !== a.status) return "no-mark";
+  return a.digest === proposalDigest(pid, p) ? "ok" : "edited";
+}
+function ownerApproved(pid, p, a, last) {
+  return ownerCheck(pid, p, a, last) === "ok" && p.taskId === void 0;
+}
 
 // src/forge/proposals.ts
 var PROPOSAL_ID = /^p\d{14}[0-9a-z]{4}$/;
@@ -14876,13 +15048,49 @@ function mirrorProposal(root, id2, doc, stillPlanned = () => false) {
   saveProposal(root, id2, keep ? { ...doc, taskId: prev.taskId } : doc);
   return { previous: prev ? prev.status : null, previousDoc: prev };
 }
+var approvalsDir = (root) => import_node_path12.default.join(root, ".forge", "approvals");
+function saveApproval(root, id2, doc) {
+  if (!PROPOSAL_ID.test(id2)) return;
+  forgeDir(root);
+  (0, import_node_fs12.mkdirSync)(approvalsDir(root), { recursive: true });
+  (0, import_node_fs12.writeFileSync)(import_node_path12.default.join(approvalsDir(root), `${id2}.json`), JSON.stringify(doc, null, 2) + "\n");
+}
+function loadApproval(root, id2) {
+  if (!PROPOSAL_ID.test(id2)) return null;
+  try {
+    return normalizeApproval(JSON.parse((0, import_node_fs12.readFileSync)(import_node_path12.default.join(approvalsDir(root), `${id2}.json`), "utf8")));
+  } catch {
+    return null;
+  }
+}
+function loadApprovals(root) {
+  let names2 = [];
+  try {
+    names2 = (0, import_node_fs12.readdirSync)(approvalsDir(root));
+  } catch {
+    return {};
+  }
+  const out = {};
+  for (const n of names2.sort()) {
+    const id2 = n.endsWith(".json") ? n.slice(0, -5) : "";
+    const a = PROPOSAL_ID.test(id2) ? loadApproval(root, id2) : null;
+    if (a) out[id2] = a;
+  }
+  return out;
+}
+function removeApproval(root, id2) {
+  if (PROPOSAL_ID.test(id2)) (0, import_node_fs12.rmSync)(import_node_path12.default.join(approvalsDir(root), `${id2}.json`), { force: true });
+}
+
+// src/lib/publish.ts
+var PAGE_RULES = 2;
 
 // src/forge/cli/run.ts
 var import_yaml8 = __toESM(require_dist(), 1);
 
 // src/forge/cli/swarm.ts
-var import_node_fs24 = require("node:fs");
-var import_node_path24 = __toESM(require("node:path"), 1);
+var import_node_fs28 = require("node:fs");
+var import_node_path27 = __toESM(require("node:path"), 1);
 var import_node_crypto4 = require("node:crypto");
 
 // src/forge/validate-cache.ts
@@ -14894,29 +15102,29 @@ var MAX_ENTRIES = 500;
 var LOCAL_STATE = [":(exclude).forge", ":(exclude).waypoint", ":(exclude).claude"];
 var OBJECT = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 var KEY = /^[0-9a-f]{64}$/;
-function cacheGit(git) {
-  const top = git(["rev-parse", "--show-toplevel"])?.trim();
-  return top ? (args) => git(["-C", top, ...args]) : git;
+function cacheGit(git2) {
+  const top = git2(["rev-parse", "--show-toplevel"])?.trim();
+  return top ? (args) => git2(["-C", top, ...args]) : git2;
 }
-function checkoutPrefix(git) {
-  const out = git(["rev-parse", "--show-prefix"]);
+function checkoutPrefix(git2) {
+  const out = git2(["rev-parse", "--show-prefix"]);
   return out === null ? null : out.replace(/\r?\n$/, "");
 }
 var cacheDir = (main) => import_node_path13.default.join(main, ".forge", "cache", "validate");
 var excludes = (generated) => [...LOCAL_STATE, ...generated.map((g) => `:(exclude,glob)${g}`)];
-function cleanTree(git, generated) {
-  const status = git(["status", "--porcelain", "-z", "--untracked-files=normal", "--", ".", ...excludes(generated)]);
+function cleanTree(git2, generated) {
+  const status = git2(["status", "--porcelain", "-z", "--untracked-files=normal", "--", ".", ...excludes(generated)]);
   if (status !== "") return null;
-  const tree = git(["rev-parse", "HEAD^{tree}"])?.trim() ?? "";
+  const tree = git2(["rev-parse", "HEAD^{tree}"])?.trim() ?? "";
   return OBJECT.test(tree) ? tree : null;
 }
-function untrackedPaths(git) {
-  return (git(["ls-files", "-z", "--others", "--exclude-standard", "--", ".", ...LOCAL_STATE]) ?? "").split("\0").filter(Boolean);
+function untrackedPaths(git2) {
+  return (git2(["ls-files", "-z", "--others", "--exclude-standard", "--", ".", ...LOCAL_STATE]) ?? "").split("\0").filter(Boolean);
 }
-function indexTree(git, generated, untrackedBefore) {
-  if (git(["diff", "--quiet", "--", ".", ...excludes(generated)]) === null) return null;
-  if (untrackedPaths(git).some((p) => !untrackedBefore.has(p))) return null;
-  const tree = git(["write-tree"])?.trim() ?? "";
+function indexTree(git2, generated, untrackedBefore) {
+  if (git2(["diff", "--quiet", "--", ".", ...excludes(generated)]) === null) return null;
+  if (untrackedPaths(git2).some((p) => !untrackedBefore.has(p))) return null;
+  const tree = git2(["write-tree"])?.trim() ?? "";
   return OBJECT.test(tree) ? tree : null;
 }
 function lockHash(repo) {
@@ -15847,8 +16055,8 @@ var oneOf4 = (list, x) => str5(x) && list.includes(x) ? x : null;
 var notDots = (s2) => s2 !== "." && s2 !== "..";
 var cp2 = (n) => String.fromCharCode(n);
 var UNSAFE2 = new RegExp(`[\\x00-\\x1f\\x7f-\\x9f${cp2(8234)}-${cp2(8238)}${cp2(8294)}-${cp2(8297)}]`, "g");
-var clean = (s2, max) => s2.replace(UNSAFE2, " ").replace(/\s+/g, " ").trim().slice(0, max);
-var text = (x, max) => str5(x) ? clean(x, max) || null : null;
+var clean2 = (s2, max) => s2.replace(UNSAFE2, " ").replace(/\s+/g, " ").trim().slice(0, max);
+var text = (x, max) => str5(x) ? clean2(x, max) || null : null;
 var ident = (x, re) => str5(x) && re.test(x) && notDots(x) ? x : null;
 var weightOf = (point) => MAJOR_POINTS.includes(point) ? "major" : "minor";
 function normalizeUndo(x) {
@@ -15920,7 +16128,7 @@ function nextDecisionsDoc(prev, d, n) {
   if (d.by === "user") return prev;
   const scope = decisionScope(d) ?? "forge";
   const base = prev && prev.scope === scope ? prev : null;
-  const entry2 = { n, point: d.point, what: clean(d.what, SHORT), chosen: clean(d.chosen, SHORT), ts: d.ts };
+  const entry2 = { n, point: d.point, what: clean2(d.what, SHORT), chosen: clean2(d.chosen, SHORT), ts: d.ts };
   return {
     ts: d.ts,
     scope,
@@ -16266,41 +16474,41 @@ function hookLive(io, forced) {
 // src/lib/git-info.ts
 var import_node_fs20 = require("node:fs");
 var import_node_path20 = __toESM(require("node:path"), 1);
-var hasLine = (text2, line2) => text2.split(/\r?\n/).some((l) => l.trim() === line2);
-function appendOnce(file, line2) {
+var hasLine = (text2, line3) => text2.split(/\r?\n/).some((l) => l.trim() === line3);
+function appendOnce(file, line3) {
   let text2 = "";
   try {
     text2 = (0, import_node_fs20.readFileSync)(file, "utf8");
   } catch (e) {
     if (e.code !== "ENOENT") throw e;
   }
-  if (hasLine(text2, line2)) return;
-  (0, import_node_fs20.appendFileSync)(file, `${text2 && !text2.endsWith("\n") ? "\n" : ""}${line2}
+  if (hasLine(text2, line3)) return;
+  (0, import_node_fs20.appendFileSync)(file, `${text2 && !text2.endsWith("\n") ? "\n" : ""}${line3}
 `);
 }
-var gitToplevel = (git) => git(["rev-parse", "--show-toplevel"])?.trim() || null;
-function commonDir(git) {
+var gitToplevel = (git2) => git2(["rev-parse", "--show-toplevel"])?.trim() || null;
+function commonDir(git2) {
   const holdsHead = (d) => (0, import_node_fs20.existsSync)(import_node_path20.default.join(d, "HEAD"));
   const lines = (s2) => (s2 ?? "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  const first = lines(git(["rev-parse", "--path-format=absolute", "--git-common-dir"]));
+  const first = lines(git2(["rev-parse", "--path-format=absolute", "--git-common-dir"]));
   if (first.length === 1 && import_node_path20.default.isAbsolute(first[0]) && holdsHead(first[0])) return import_node_path20.default.resolve(first[0]);
-  const top = gitToplevel(git);
-  const rel3 = top ? lines(git(["-C", top, "rev-parse", "--git-common-dir"])) : [];
+  const top = gitToplevel(git2);
+  const rel3 = top ? lines(git2(["-C", top, "rev-parse", "--git-common-dir"])) : [];
   const dir = top && rel3.length === 1 ? import_node_path20.default.resolve(top, rel3[0]) : null;
   return dir && holdsHead(dir) ? dir : null;
 }
-function infoFile(git, name) {
-  const dir = commonDir(git);
+function infoFile(git2, name) {
+  const dir = commonDir(git2);
   if (!dir) return null;
   const info = import_node_path20.default.join(dir, "info");
   if (!(0, import_node_fs20.existsSync)(info)) (0, import_node_fs20.mkdirSync)(info);
   return import_node_path20.default.join(info, name);
 }
 var WORKTREES_DIR = ".claude/worktrees/";
-function excludeWorktrees(git) {
+function excludeWorktrees(git2) {
   try {
-    if (git(["check-ignore", "-q", WORKTREES_DIR]) !== null) return;
-    const file = infoFile(git, "exclude");
+    if (git2(["check-ignore", "-q", WORKTREES_DIR]) !== null) return;
+    const file = infoFile(git2, "exclude");
     if (file) appendOnce(file, WORKTREES_DIR);
   } catch {
   }
@@ -16660,14 +16868,979 @@ function evidenceOf(worktree, max = EVIDENCE_FILES_MAX) {
   return { files, truncated };
 }
 
+// src/forge/roadmap-sources.ts
+var import_node_child_process2 = require("node:child_process");
+var import_node_fs24 = require("node:fs");
+var import_node_path24 = __toESM(require("node:path"), 1);
+
+// src/lib/roadmap-doc.ts
+var FORGE_DOC_MAX = 4096;
+var ROUNDS_MAX = 6;
+var VALIDATORS_MAX = 10;
+var DEFERRED_MAX = 10;
+var NOTE_MAX = 120;
+var PROBLEM_MAX = 160;
+var SHOTS_MAX = 30;
+var UNCHECKED_MAX = 10;
+var TEXT_MAX = 200;
+var NAME_MAX = 80;
+var REVIEWER_MAX = 40;
+var REVIEWERS_MAX = 6;
+var COUNT_MAX = 999;
+var DOC_PATHS = ["trivial", "small", "medium", "large"];
+var DOC_STAGES = [...STAGES, "triage", "done", "blocked", "stopped"];
+var ACTIONS = ["accept", "fix", "redo"];
+var STAGE_KEYS = [...STAGES, "triage"];
+var isObj5 = (x) => typeof x === "object" && x !== null && !Array.isArray(x);
+var kindOf = (v) => v === null ? "null" : Array.isArray(v) ? "array" : typeof v;
+var int2 = (v, min, max) => typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
+var iso3 = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v) && !Number.isNaN(Date.parse(v));
+var isAction = (v) => ACTIONS.includes(v);
+var BIDI = new RegExp(`[${[1564, 8206, 8207, 8234, 8235, 8236, 8237, 8238, 8294, 8295, 8296, 8297].map((c) => String.fromCharCode(c)).join("")}]`, "g");
+var CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
+var clip = (v, max) => v.length <= max ? v : Array.from(v).slice(0, max).join("");
+var line = (v, max) => clip(v.replace(CONTROL, " ").replace(BIDI, "").trim(), max);
+var byteLength = (s2) => new TextEncoder().encode(s2).length;
+function validatorOf(v) {
+  if (!isObj5(v) || typeof v.name !== "string" || !v.name.trim() || typeof v.ok !== "boolean") return null;
+  const out = { name: line(v.name, NAME_MAX), ok: v.ok };
+  if (v.flaky === true) out.flaky = true;
+  if (typeof v.skipped === "string" && v.skipped.trim()) out.skipped = line(v.skipped, NAME_MAX);
+  if (v.preexisting === true) out.preexisting = true;
+  if (int2(v.ms, 0, 864e5)) out.ms = v.ms;
+  if (v.cached === true) out.cached = true;
+  if (int2(v.failing, 0, 1e5)) out.failing = v.failing;
+  return out;
+}
+function roundOf2(r2) {
+  if (!isObj5(r2) || !int2(r2.brief, 1, 9999) || !int2(r2.n, 1, 99) || !isAction(r2.action) || typeof r2.note !== "string" || !iso3(r2.at)) return null;
+  const f = isObj5(r2.findings) ? r2.findings : {};
+  const c = (k) => int2(f[k], 0, COUNT_MAX) ? f[k] : null;
+  const findings = { critical: c("critical"), important: c("important"), minor: c("minor"), deferred: c("deferred") };
+  if (Object.values(findings).some((x) => x === null)) return null;
+  const reviewers = (Array.isArray(r2.reviewers) ? r2.reviewers : []).filter((x) => typeof x === "string" && !!x.trim()).map((x) => line(x, REVIEWER_MAX)).slice(0, REVIEWERS_MAX);
+  return { brief: r2.brief, n: r2.n, action: r2.action, note: line(r2.note, NOTE_MAX), findings, reviewers, at: r2.at };
+}
+function deferredOf(d) {
+  if (!isObj5(d) || typeof d.problem !== "string" || !d.problem.trim()) return null;
+  const out = { problem: line(d.problem, PROBLEM_MAX) };
+  if (typeof d.file === "string" && d.file.trim()) out.file = line(d.file, TEXT_MAX);
+  if (int2(d.line, 1, 1e7)) out.line = d.line;
+  return out;
+}
+function verifyOf(v, report) {
+  if (typeof v.planned !== "boolean") {
+    report?.("forge.verify", "coerced", "planned");
+    return null;
+  }
+  return {
+    planned: v.planned,
+    result: v.result === "pass" || v.result === "fail" || v.result === "blocked" ? v.result : null,
+    passed: int2(v.passed, 0, 1e3) ? v.passed : null,
+    total: int2(v.total, 0, 1e3) ? v.total : null,
+    skipped: typeof v.skipped === "string" && v.skipped.trim() ? line(v.skipped, TEXT_MAX) : null,
+    surfaces: (Array.isArray(v.surfaces) ? v.surfaces : []).filter((s2) => typeof s2 === "string" && !!s2.trim()).map((s2) => line(s2, NAME_MAX)).slice(0, 10)
+  };
+}
+var SHA2 = /^[0-9a-f]{7,40}$/i;
+function integrationOf(v, report) {
+  if (typeof v.branch !== "string" || !v.branch.trim() || typeof v.target !== "string" || !v.target.trim() || typeof v.merged !== "boolean") {
+    report?.("forge.integration", "coerced", "branch, target or merged");
+    return null;
+  }
+  return { branch: line(v.branch, TEXT_MAX), sha: typeof v.sha === "string" && SHA2.test(v.sha) ? v.sha : null, merged: v.merged, target: line(v.target, TEXT_MAX) };
+}
+function stagesOf2(x) {
+  const out = {};
+  for (const k of STAGE_KEYS) {
+    const v = x[k];
+    if (typeof v === "number" && Number.isFinite(v) && v >= 0) out[k] = Math.round(v);
+  }
+  return out;
+}
+function parseForgeDocV2(x, report) {
+  const bad = (why) => {
+    report?.("forge.v", "dropped", why);
+    return null;
+  };
+  if (!isObj5(x)) return bad(kindOf(x));
+  if (x.v !== 2) return bad("no v: 2");
+  if (!DOC_PATHS.includes(x.path)) return bad("path");
+  if (!DOC_STAGES.includes(x.stage)) return bad("stage");
+  if (typeof x.phase !== "string") return bad("phase");
+  if (!int2(x.brief, 1, 9999)) return bad("brief");
+  if (!Array.isArray(x.rounds) || !Array.isArray(x.validators) || !Array.isArray(x.deferred) || !isObj5(x.stages)) return bad("rounds, validators, deferred or stages");
+  if (x.verify !== null && !isObj5(x.verify)) return bad("verify");
+  if (x.integration !== null && !isObj5(x.integration)) return bad("integration");
+  if (x.acceptedRound !== null && !int2(x.acceptedRound, 1, 99)) return bad("acceptedRound");
+  if (typeof x.overCap !== "boolean" || !iso3(x.updatedAt)) return bad("overCap or updatedAt");
+  const keep = (list, of, field2, max, newest2 = false) => {
+    const out = [];
+    list.forEach((v, i) => {
+      const o = of(v);
+      if (o) out.push(o);
+      else report?.(`forge.${field2}[${i}]`, "dropped", kindOf(v));
+    });
+    return newest2 ? out.slice(-max) : out.slice(0, max);
+  };
+  const doc = {
+    v: 2,
+    path: x.path,
+    phase: line(x.phase, 40),
+    validators: keep(x.validators, validatorOf, "validators", VALIDATORS_MAX),
+    brief: x.brief,
+    stage: x.stage,
+    rounds: keep(x.rounds, roundOf2, "rounds", ROUNDS_MAX, true),
+    verify: x.verify === null ? null : verifyOf(x.verify, report),
+    stages: stagesOf2(x.stages),
+    integration: x.integration === null ? null : integrationOf(x.integration, report),
+    deferred: keep(x.deferred, deferredOf, "deferred", DEFERRED_MAX),
+    acceptedRound: x.acceptedRound,
+    overCap: x.overCap,
+    updatedAt: x.updatedAt
+  };
+  const coerced = (field2, v) => report?.(`forge.${field2}`, "coerced", kindOf(v));
+  if (typeof x.agent === "string" && x.agent.trim()) doc.agent = line(x.agent, NAME_MAX);
+  else if (x.agent !== void 0) coerced("agent", x.agent);
+  if (isObj5(x.verdict) && isAction(x.verdict.action)) {
+    doc.verdict = { action: x.verdict.action, score: typeof x.verdict.score === "number" && Number.isFinite(x.verdict.score) ? x.verdict.score : null };
+    if (doc.verdict.score === null && x.verdict.score !== null) coerced("verdict", x.verdict.score);
+  } else if (x.verdict !== void 0) coerced("verdict", x.verdict);
+  if (int2(x.round, 1, 99)) doc.round = x.round;
+  else if (x.round !== void 0) coerced("round", x.round);
+  if (int2(x.cap, 1, 99)) doc.cap = x.cap;
+  else if (x.cap !== void 0) coerced("cap", x.cap);
+  if (doc.round !== void 0 && doc.cap !== void 0 && doc.round > doc.cap) {
+    delete doc.round;
+    report?.("forge.round", "coerced", "above cap");
+  }
+  return doc;
+}
+var STEPS = [
+  ["deferred>5", (d) => d.deferred.length > 5 ? { ...d, deferred: d.deferred.slice(0, 5) } : null],
+  ["rounds:earlier-briefs", (d) => d.rounds.some((r2) => r2.brief !== d.brief) ? { ...d, rounds: d.rounds.filter((r2) => r2.brief === d.brief) } : null],
+  ["validators.failing", (d) => d.validators.some((v) => v.failing !== void 0) ? { ...d, validators: d.validators.map(({ failing: _f, ...v }) => v) } : null],
+  ["rounds.note:60", (d) => d.rounds.some((r2) => r2.note.length > 60) ? { ...d, rounds: d.rounds.map((r2) => ({ ...r2, note: clip(r2.note, 60) })) } : null],
+  ["deferred.problem:80", (d) => d.deferred.some((x) => x.problem.length > 80) ? { ...d, deferred: d.deferred.map((x) => ({ ...x, problem: clip(x.problem, 80) })) } : null],
+  // The last resort, so the cap is a guarantee: the v1 core and the v2 scalars. Every v2 list goes (rounds, deferred
+  // findings, reviewers, the verification and the integration), and of the validators only the ones that failed stay.
+  ["core", (d) => ({ ...d, validators: d.validators.filter((v) => !v.ok).map((v) => ({ name: v.name, ok: v.ok })), rounds: [], verify: null, integration: null, deferred: [] })]
+];
+function fitForgeDoc(doc, max = FORGE_DOC_MAX) {
+  let cur = doc;
+  const dropped = [];
+  for (const [label, cut] of STEPS) {
+    if (byteLength(JSON.stringify(cur)) <= max) break;
+    const next = cut(cur);
+    if (next) {
+      cur = next;
+      dropped.push(label);
+    }
+  }
+  const bytes = byteLength(JSON.stringify(cur));
+  return { doc: cur, dropped, bytes, fits: bytes <= max };
+}
+
+// src/forge/roadmap-doc.ts
+var isObj6 = (x) => typeof x === "object" && x !== null && !Array.isArray(x);
+var int3 = (v, min, max) => typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
+var isAction2 = (v) => v === "accept" || v === "fix" || v === "redo";
+var clip2 = (v, max) => v.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").trim().slice(0, max);
+var REVIEW_DIR = /reviews-(\d+)-(\d+)$/;
+var REVIEWER_FILE = /^(correctness|security|perf|final)\.json$/;
+var dirOf2 = (e) => {
+  const m = typeof e.dir === "string" ? REVIEW_DIR.exec(e.dir.replace(/\\/g, "/")) : null;
+  return m ? { brief: Number(m[1]), n: Number(m[2]) } : null;
+};
+var reviewsOf2 = (x) => isObj6(x) && int3(x.n, 1, 20) && int3(x.max, 1, 20) ? { n: x.n, max: x.max } : null;
+function reviewersFor(i, d) {
+  const phase = i.events.filter((e) => e.kind === "phase" && e.phase === "review" && e.brief === d.brief && e.round === d.n && Array.isArray(e.reviewers)).at(-1);
+  const dir = i.reviews.find((r2) => r2.brief === d.brief && r2.n === d.n);
+  const names2 = phase ? reviewersOf(phase.reviewers) : (dir?.files ?? []).filter((f) => REVIEWER_FILE.test(f)).map((f) => f.slice(0, -".json".length));
+  if (dir?.files.includes("verify.json") && !names2.includes("verify")) names2.push("verify");
+  return names2.slice(0, 6);
+}
+function roundsOf(i) {
+  const last = /* @__PURE__ */ new Map();
+  i.events.forEach((e, at2) => {
+    const d = e.kind === "verdict" && isAction2(e.action) ? dirOf2(e) : null;
+    if (d) last.set(`${d.brief}-${d.n}`, at2);
+  });
+  const count2 = (v) => int3(v, 0, 999) ? v : 0;
+  return [...last.values()].sort((a, b) => a - b).map((at2) => {
+    const e = i.events[at2];
+    const d = dirOf2(e);
+    const next = i.events.slice(at2 + 1).find((x) => x.kind === "round" && x.task === e.task);
+    return {
+      brief: d.brief,
+      n: d.n,
+      action: e.action,
+      note: typeof next?.reason === "string" ? clip2(next.reason, NOTE_MAX) : "",
+      findings: { critical: count2(e.critical), important: count2(e.important), minor: count2(e.minor), deferred: count2(e.deferred) },
+      reviewers: reviewersFor(i, d),
+      at: e.ts
+    };
+  });
+}
+function validatorsOf2(events) {
+  const e = events.filter((x) => x.kind === "validate" && x.baseline !== true && x.integrate !== "baseline" && x.scope !== "affected" && Array.isArray(x.results)).at(-1);
+  if (!e) return [];
+  return e.results.filter((r2) => isObj6(r2) && typeof r2.validator === "string" && !!r2.validator.trim()).slice(0, VALIDATORS_MAX).map((r2) => {
+    const skipped = typeof r2.skipped === "string" && r2.skipped.trim() ? clip2(r2.skipped, 80) : null;
+    const v = { name: clip2(String(r2.validator), 80), ok: skipped !== null || r2.ok === true };
+    if (r2.flaky === true) v.flaky = true;
+    if (skipped) v.skipped = skipped;
+    if (r2.preexisting === true) v.preexisting = true;
+    if (typeof r2.durationMs === "number" && Number.isFinite(r2.durationMs) && r2.durationMs >= 0 && r2.durationMs <= 864e5) v.ms = Math.round(r2.durationMs);
+    if (r2.cached === true) v.cached = true;
+    if (r2.failingKnown === true && Array.isArray(r2.failing) && r2.failing.length) v.failing = r2.failing.length;
+    return v;
+  });
+}
+function verifyOf2(s2) {
+  const v = s2?.verify;
+  if (!v) return null;
+  const skippedSome = v.result === "skipped" || (v.skipped ?? []).length > 0;
+  return {
+    planned: v.planned,
+    result: v.result === "pass" || v.result === "fail" || v.result === "blocked" ? v.result : null,
+    passed: v.passed,
+    total: v.total,
+    // K2-05: the reason of the verify-skip (the last one given).
+    skipped: skippedSome ? clip2(v.reason ?? "skipped", 200) : null,
+    surfaces: v.surfaces.slice(0, 10)
+  };
+}
+function stagesOf3(s2) {
+  const out = {};
+  for (const [k, sec] of Object.entries(s2?.stages ?? {})) {
+    const key = k === "fix" ? "implement" : k;
+    if (STAGE_KEYS.includes(key)) out[key] = (out[key] ?? 0) + sec;
+  }
+  return out;
+}
+var liveOf = (i) => i.publicTask && i.publicTask.mode !== "subagents" ? i.publicTask : null;
+function stageOf(i) {
+  const t = i.execTask;
+  const live = liveOf(i);
+  if (t || live) {
+    const status = live?.status ?? t.status;
+    if (status === "blocked") return "blocked";
+    if (status === "stopped") return "stopped";
+    if (t?.status === "integrated") return "done";
+    return live?.stage ?? t.stage;
+  }
+  const p = (i.status?.phase ?? "").toLowerCase();
+  if (p === "stopped") return "stopped";
+  if (i.status?.doneAt) return "done";
+  if (p === "fix") return "implement";
+  return STAGES.includes(p) ? p : "triage";
+}
+function pathOf(i) {
+  const tri = i.events.filter((e) => e.kind === "triage" && typeof e.path === "string").at(-1);
+  const found = [tri?.path, i.status?.path].find((p) => DOC_PATHS.includes(p));
+  return found ?? (i.execTask ? "large" : "medium");
+}
+function deferredOf2(i) {
+  const list = Array.isArray(i.deferred) ? i.deferred : i.events.filter((e) => e.kind === "ruling" && Array.isArray(e.deferred)).flatMap((e) => e.deferred);
+  return list.filter((d) => isObj6(d) && typeof d.problem === "string" && !!d.problem.trim()).slice(0, DEFERRED_MAX).map((d) => ({
+    ...typeof d.file === "string" && d.file.trim() ? { file: clip2(d.file, 200) } : {},
+    ...int3(d.line, 1, 1e7) ? { line: d.line } : {},
+    problem: clip2(String(d.problem), PROBLEM_MAX)
+  }));
+}
+function execOf(i) {
+  const t = i.execTask, e = i.execution;
+  if (!t || !e) return null;
+  const status = liveOf(i)?.status ?? t.status;
+  if (t.status === "integrated" || status === "blocked" || status === "conflict" || status === "stopped") return { __delete__: true };
+  const p = i.publicTask;
+  if (!p || p.runId !== e.runId) return null;
+  return { runId: p.runId, mode: p.mode, by: p.by, agent: p.agent, stage: p.stage, round: p.round, since: p.since, leaseUntil: p.leaseUntil };
+}
+function evidenceOf2(i, brief) {
+  const rounds = i.verifies.filter((v) => v.brief === brief).sort((a, b) => a.n - b.n);
+  const last = rounds.at(-1);
+  if (!last) return null;
+  const assetFor = (file) => i.assets.find((a) => samePath(a.path, file));
+  let missing = false;
+  const shots = rounds.flatMap((r2) => r2.file.checks.map((c) => {
+    const s2 = { surface: clip2(c.surface, 80), check: clip2(c.name || `#${c.id}`, 200), ok: c.ok, round: r2.n };
+    if (c.expected.trim()) s2.expected = clip2(c.expected, 200);
+    if (c.observed.trim()) s2.observed = clip2(c.observed, 200);
+    if (c.shot) {
+      const a = assetFor(r2.shotPath(c.shot));
+      if (a) {
+        s2.url = a.url;
+        s2.id = a.id;
+      } else if (r2 === last) missing = true;
+    }
+    return s2;
+  })).slice(-SHOTS_MAX);
+  const f = last.file;
+  const ev = { v: 2, surfaces: f.surfaces.slice(0, 10), result: f.result, passed: f.checks.filter((c) => c.ok).length, total: f.checks.length, local: last.local, shots };
+  if (f.reason) ev.reason = clip2(f.reason, 200);
+  if (f.unchecked.length) ev.unchecked = f.unchecked.slice(0, UNCHECKED_MAX).map((u) => clip2(u, 200));
+  if (i.evidenceMode === "upload" && missing) ev.pending = true;
+  return ev;
+}
+function ownRun(i) {
+  const e = i.execution;
+  if (!e || !i.execTask || !Object.hasOwn(e.tasks, i.task) || !Number.isFinite(Date.parse(e.startedAt))) return i;
+  const since = Date.parse(e.startedAt);
+  const current = (ts) => typeof ts !== "string" || !Number.isFinite(Date.parse(ts)) || Date.parse(ts) >= since;
+  const events = eventsSince(i.events, e.startedAt);
+  const key = statusKey(i.task, e.kind === "plan" ? e.project : null);
+  const own = key ? events.reduce((m, ev) => deriveStatuses(m, ev).map, {})[key] ?? null : null;
+  let deferred = i.deferred;
+  if (Array.isArray(deferred) && deferred.length) {
+    const kept2 = deferred.filter((d) => current(isObj6(d) && (typeof d.ts === "string" || typeof d.at === "string") ? d.ts ?? d.at : i.deferredAt));
+    deferred = kept2.length ? kept2 : null;
+  }
+  return { ...i, events, status: own, deferred, reviews: i.reviews.filter((r2) => current(r2.at)), verifies: i.verifies.filter((v) => current(v.at)) };
+}
+function buildRoadmapData(input) {
+  const i = ownRun(input);
+  const all = roundsOf(i);
+  const s2 = i.status;
+  const brief = s2?.brief ?? all.at(-1)?.brief ?? 1;
+  const counted = i.events.filter((e) => (e.kind === "verdict" || e.kind === "round") && reviewsOf2(e.reviews)).at(-1);
+  const reviews = counted ? reviewsOf2(counted.reviews) : s2?.reviews ?? null;
+  const lastOfBrief = all.filter((r2) => r2.brief === brief).at(-1);
+  const acceptedRound = lastOfBrief?.action === "accept" ? lastOfBrief.n : null;
+  const overCap = !!reviews && (reviews.n > reviews.max || all.filter((r2) => r2.brief === brief).length > reviews.max);
+  const stage = stageOf(i);
+  const agent = i.execTask?.agent ?? liveOf(i)?.agent ?? s2?.agent ?? null;
+  const verdict = s2?.verdict && isAction2(s2.verdict.action) ? { action: s2.verdict.action, score: s2.verdict.score } : null;
+  const forge = {
+    v: 2,
+    path: pathOf(i),
+    phase: stage,
+    ...agent ? { agent: clip2(agent, 80) } : {},
+    validators: validatorsOf2(i.events),
+    ...verdict ? { verdict } : {},
+    ...reviews ? { round: reviews.n, cap: reviews.max } : {},
+    brief,
+    stage,
+    rounds: all.slice(-ROUNDS_MAX),
+    verify: verifyOf2(s2),
+    stages: stagesOf3(s2),
+    integration: i.integration,
+    deferred: deferredOf2(i),
+    acceptedRound,
+    overCap,
+    updatedAt: i.now.toISOString()
+  };
+  return { forge, evidence: evidenceOf2(i, brief), exec: execOf(i) };
+}
+
+// src/forge/roadmap-sources.ts
+var RoadmapDocError = class extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+    this.name = "RoadmapDocError";
+  }
+};
+var ASSET_ID = /^[A-Za-z0-9_-]{1,100}$/;
+var safeUrl = (u) => typeof u === "string" && (u.startsWith("https://claude.ai/") || /^\/_blob\/[\w-]+$/.test(u));
+var slash = (p) => p.split(import_node_path24.default.sep).join("/");
+var readText2 = (f) => {
+  try {
+    return (0, import_node_fs24.readFileSync)(f, "utf8");
+  } catch {
+    return null;
+  }
+};
+var readJson = (f) => {
+  const t = readText2(f);
+  if (t === null) return void 0;
+  try {
+    return JSON.parse(t);
+  } catch {
+    return void 0;
+  }
+};
+var mtimeOf = (f) => {
+  try {
+    return (0, import_node_fs24.statSync)(f).mtime.toISOString();
+  } catch {
+    return null;
+  }
+};
+function writeJsonAtomic2(file, value) {
+  (0, import_node_fs24.mkdirSync)(import_node_path24.default.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    (0, import_node_fs24.writeFileSync)(tmp, JSON.stringify(value, null, 2) + "\n");
+    (0, import_node_fs24.renameSync)(tmp, file);
+  } finally {
+    (0, import_node_fs24.rmSync)(tmp, { force: true });
+  }
+}
+var git = (dir, args) => {
+  try {
+    return (0, import_node_child_process2.execFileSync)("git", args, { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, timeout: 1e4 }).trim();
+  } catch {
+    return null;
+  }
+};
+var relOf = (root, p) => {
+  const r2 = slash(import_node_path24.default.relative(root, p));
+  if (!import_node_path24.default.isAbsolute(r2) && !r2.startsWith("..")) return r2;
+  const at2 = r2.indexOf(".forge/");
+  return at2 >= 0 ? r2.slice(at2) : import_node_path24.default.basename(p);
+};
+function defaultBranch(dir) {
+  const origin = git(dir, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])?.replace(/^origin\//, "");
+  if (origin) return origin;
+  for (const b of ["main", "master"]) if (git(dir, ["rev-parse", "--verify", "-q", `refs/heads/${b}`]) !== null) return b;
+  return null;
+}
+function integrationAt(dir) {
+  const sha = git(dir, ["rev-parse", "HEAD"]);
+  const branch = git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  const target = defaultBranch(dir);
+  if (!sha || !branch || !target) return null;
+  return { branch, sha, merged: git(dir, ["merge-base", "--is-ancestor", sha, target]) !== null, target };
+}
+function integrationInRun(main, e, t) {
+  const sha = t.sha ?? null;
+  return { branch: e.branch, sha, merged: !!sha && git(main, ["merge-base", "--is-ancestor", sha, e.base]) !== null, target: e.base };
+}
+function readReviews(folders) {
+  const seen = /* @__PURE__ */ new Set();
+  const verified = /* @__PURE__ */ new Set();
+  const reviews = [];
+  const verifies = [];
+  for (const f of folders) {
+    let names2 = [];
+    try {
+      names2 = (0, import_node_fs24.readdirSync)(f.dir);
+    } catch {
+      continue;
+    }
+    for (const name of names2.sort()) {
+      const m = /^reviews-(\d+)-(\d+)$/.exec(name);
+      if (!m) continue;
+      const brief = Number(m[1]), n = Number(m[2]);
+      let files = [];
+      try {
+        files = (0, import_node_fs24.readdirSync)(import_node_path24.default.join(f.dir, name)).sort();
+      } catch {
+        files = [];
+      }
+      if (!seen.has(name)) {
+        seen.add(name);
+        reviews.push({ brief, n, files, at: mtimeOf(import_node_path24.default.join(f.dir, name)) });
+      }
+      if (verified.has(name)) continue;
+      const verifyFile = import_node_path24.default.join(f.dir, name, "verify.json");
+      const file = files.includes("verify.json") ? parseVerifyFile(readText2(verifyFile)) : null;
+      if (!file) continue;
+      verified.add(name);
+      const evidence = import_node_path24.default.join(f.dir, "evidence", `${brief}-${n}`);
+      verifies.push({ brief, n, file, local: relOf(f.root, evidence), shotPath: (shot) => import_node_path24.default.resolve(evidence, shot), at: mtimeOf(verifyFile) });
+    }
+  }
+  return { reviews, verifies };
+}
+var isAsset = (a) => !!a && typeof a === "object" && typeof a.path === "string" && !!a.path && typeof a.id === "string" && ASSET_ID.test(a.id) && safeUrl(a.url);
+function parseAssets(cwd2, file) {
+  const raw = readJson(import_node_path24.default.resolve(cwd2, file));
+  if (!Array.isArray(raw)) throw new RoadmapDocError(2, `roadmap-doc: --assets ${file} cannot be read as a JSON list of {path, id, url}`);
+  return raw.filter(isAsset).map((a) => ({ path: import_node_path24.default.resolve(cwd2, a.path), id: a.id, url: a.url }));
+}
+var readAssets = (file) => {
+  const raw = readJson(file);
+  return Array.isArray(raw) ? raw.filter(isAsset) : [];
+};
+var mergeAssets = (old, add) => [...old.filter((o) => !add.some((a) => samePath(a.path, o.path))), ...add];
+function generateRoadmapDoc(io, task, opts = {}) {
+  if (!isSafeId(task)) throw new RoadmapDocError(2, `roadmap-doc: ${String(task).slice(0, 80)} is not a task id`);
+  if (opts.project != null && !isSafeId(opts.project)) throw new RoadmapDocError(2, "roadmap-doc: --project is not a project id");
+  const main = mainCheckout(io.cwd);
+  const here = io.workdir ?? io.cwd;
+  const events = io.events ?? readEvents(io.cwd);
+  const execution = readExecution(main);
+  const inRun = !!execution?.tasks[task] && (execution.kind !== "plan" || opts.project == null || opts.project === execution.project);
+  const project = opts.project ?? (inRun && execution.kind === "plan" ? execution.project : projectOf(events, task));
+  const ref = { project, task };
+  const mine = eventsOf(events, ref);
+  const key = statusKey(task, project);
+  const alias = readStatus(main);
+  const status = (key ? readStatuses(main)[key] : void 0) ?? (alias && alias.task === task && (alias.project ?? null) === project ? alias : null);
+  const execTask = inRun ? execution.tasks[task] : null;
+  let publicTask = inRun ? normalizePublicTask(readJson(executionTaskFile(main, task))) : null;
+  if (publicTask && (publicTask.task !== task || publicTask.runId !== execution.runId)) publicTask = null;
+  if (!status && !mine.length && !execTask) throw new RoadmapDocError(2, `roadmap-doc: forge has no status, event or execution task of ${task}`);
+  const roots = [...new Set([here, io.cwd, main].map((r2) => import_node_path24.default.resolve(r2)))];
+  const folders = roots.map((root) => ({ root, dir: readWorkDir(root, ref, events) })).filter((f) => (0, import_node_fs24.existsSync)(f.dir));
+  const { reviews, verifies } = readReviews(folders);
+  const mainWork = readWorkDir(main, ref, events);
+  const assetsFile = import_node_path24.default.join(mainWork, "assets.json");
+  let assets = readAssets(assetsFile);
+  const added = opts.assets ? parseAssets(io.cwd, opts.assets) : null;
+  if (added) assets = mergeAssets(assets, added);
+  const deferredFile = roots.map((r2) => import_node_path24.default.join(readWorkDir(r2, ref, events), "deferred.json")).find((f) => (0, import_node_fs24.existsSync)(f));
+  let evidenceMode = "upload";
+  try {
+    evidenceMode = loadConfig(main).evidence === "local" ? "local" : "upload";
+  } catch {
+  }
+  const built = buildRoadmapData({
+    task,
+    status,
+    events: mine,
+    execution: inRun ? execution : null,
+    execTask,
+    publicTask,
+    reviews,
+    verifies,
+    deferred: deferredFile ? readJson(deferredFile) : null,
+    deferredAt: deferredFile ? mtimeOf(deferredFile) : null,
+    integration: execTask && execution ? integrationInRun(main, execution, execTask) : integrationAt(here),
+    assets,
+    evidenceMode,
+    now: io.now()
+  });
+  const fit = (io.roadmapFit ?? fitForgeDoc)(built.forge);
+  let drops = 0;
+  const parsed = parseForgeDocV2(fit.doc, () => {
+    drops++;
+  });
+  if (!parsed || drops || !fit.fits || fit.bytes > FORGE_DOC_MAX) {
+    throw new RoadmapDocError(3, `roadmap-doc: the forge block of ${task} does not validate or is over ${FORGE_DOC_MAX} bytes (${fit.bytes})`);
+  }
+  if (added) writeJsonAtomic2(assetsFile, assets);
+  const only = opts.only ?? ["forge", "evidence", "exec"];
+  const data = { ...opts.extra ?? {} };
+  if (only.includes("forge")) data.forge = fit.doc;
+  if (only.includes("evidence") && built.evidence) data.evidence = built.evidence;
+  if (only.includes("exec") && built.exec) data.exec = built.exec;
+  const file = import_node_path24.default.resolve(io.cwd, opts.out ?? import_node_path24.default.join(readWorkDir(io.cwd, ref, events), "roadmap-doc.json"));
+  writeJsonAtomic2(file, data);
+  return { task, project, bytes: fit.bytes, file, write: { op: "update", collection: "state", doc_id: task, file_path: file }, dropped: fit.dropped, data };
+}
+function publishFor(io, task, opts = {}) {
+  try {
+    return { publish: generateRoadmapDoc(io, task, opts).write };
+  } catch (e) {
+    return { publish: null, publishError: (e instanceof Error ? e.message : String(e)).slice(0, 300) };
+  }
+}
+function startedEvent(sid, task, now, rand) {
+  return { op: "set", collection: "events", doc_id: eventId(now, sid, rand), data: { ts: now.toISOString(), type: "started", sessionId: sid, taskId: task } };
+}
+
+// src/forge/run-doc.ts
+var import_node_fs25 = require("node:fs");
+var STALL_MAX = 200;
+function byOf(root, e, task) {
+  if (e.tasks[task]?.executor === "subagents") return e.coordinator;
+  try {
+    const p = normalizePublicTask(JSON.parse((0, import_node_fs25.readFileSync)(executionTaskFile(root, task), "utf8")));
+    if (p && p.task === task && p.runId === e.runId) return p.by;
+  } catch {
+  }
+  return e.coordinator;
+}
+function looseOf(root, e) {
+  return (readLoose(root, e.runId)?.tasks ?? []).map((l) => {
+    const t = e.tasks[l.id];
+    const status = !t ? "queued" : t.status === "accepted" ? "running" : t.status === "stopped" ? "blocked" : t.status;
+    const from = t ? Date.parse(t.startedAt) : NaN, to = t?.finishedAt ? Date.parse(t.finishedAt) : NaN;
+    return {
+      id: l.id,
+      title: l.title,
+      status,
+      stage: t ? t.stage : null,
+      agent: t?.agent ?? null,
+      ...Number.isFinite(from) && Number.isFinite(to) && to >= from ? { seconds: Math.round((to - from) / 1e3) } : {}
+    };
+  });
+}
+function runDocOf(root, e) {
+  const slots = Object.entries(e.tasks).filter(([, t]) => t.status === "running").map(([task, t]) => ({ task, stage: t.stage, agent: t.agent, by: byOf(root, e, task), since: t.stageSince }));
+  const doc = {
+    runId: e.runId,
+    mode: e.mode,
+    parallel: e.parallel,
+    branch: e.branch,
+    mergeOnFinish: e.mergeOnFinish,
+    active: e.active,
+    stopReason: e.active ? null : e.stopReason,
+    coordinator: e.coordinator,
+    slots,
+    kind: e.kind,
+    loose: e.kind === "ephemeral" ? looseOf(root, e) : [],
+    startedAt: e.startedAt
+  };
+  if (e.lastStepAt) doc.lastStepAt = e.lastStepAt;
+  if (e.stallReason) doc.stallReason = e.stallReason.slice(0, STALL_MAX);
+  if (e.closedAt) doc.closedAt = e.closedAt;
+  return doc;
+}
+
+// src/forge/roadmap-run.ts
+var import_node_fs27 = require("node:fs");
+var import_node_path26 = __toESM(require("node:path"), 1);
+
+// src/forge/decisions.ts
+var import_node_fs26 = require("node:fs");
+var import_node_path25 = __toESM(require("node:path"), 1);
+
+// src/lib/notes.ts
+var MAX_NOTE = 2e3;
+
+// src/forge/decisions.ts
+var DecisionInputError = class extends Error {
+};
+var decisionsFile = (root) => import_node_path25.default.join(root, ".forge", "decisions.json");
+var notDots2 = (s2) => s2 !== "." && s2 !== "..";
+var line2 = (max) => external_exports.string().transform((s2) => clean2(s2, max)).pipe(external_exports.string().min(1, "must not be empty"));
+var ident2 = (re) => external_exports.string().regex(re).refine(notDots2, "invalid id");
+var Undo = external_exports.discriminatedUnion("type", [
+  external_exports.object({ type: external_exports.literal("git-revert"), base: external_exports.string().regex(SHA), head: external_exports.string().regex(SHA), cwd: line2(500).optional() }).strict(),
+  external_exports.object({ type: external_exports.literal("design-reopen"), project: ident2(PROJECT_ID) }).strict(),
+  external_exports.object({ type: external_exports.literal("plan-edit"), project: ident2(PROJECT_ID), tasks: external_exports.array(ident2(TASK_ID)).min(1).max(50) }).strict(),
+  external_exports.object({ type: external_exports.literal("branch-discard"), branch: external_exports.string().regex(BRANCH).refine((s2) => !s2.includes(".."), "invalid branch") }).strict(),
+  external_exports.object({ type: external_exports.literal("none"), reason: line2(LIMITS.reason) }).strict()
+]);
+var Input = external_exports.object({
+  point: external_exports.enum(DECISION_POINTS),
+  what: line2(LIMITS.what),
+  chosen: line2(LIMITS.chosen),
+  alternatives: external_exports.array(line2(LIMITS.alternative)).max(LIMITS.alternatives).optional(),
+  why: line2(LIMITS.why),
+  by: external_exports.enum(DECISION_BY),
+  weight: external_exports.enum(["major", "minor"]).optional(),
+  revert: line2(LIMITS.revert).optional(),
+  undo: Undo.optional(),
+  safePath: line2(LIMITS.safePath).optional(),
+  revertOf: external_exports.number().int().positive().optional(),
+  task: ident2(TASK_ID).optional(),
+  runId: ident2(RUN_ID).optional()
+}).strict();
+function readDecisionsDoc(root) {
+  try {
+    return normalizeDecisionsDoc(JSON.parse((0, import_node_fs26.readFileSync)(decisionsFile(root), "utf8")));
+  } catch {
+    return null;
+  }
+}
+function saveDecisionsDoc(root, event, n) {
+  try {
+    const d = normalizeDecision(event);
+    if (!d) return;
+    const prev = readDecisionsDoc(root);
+    const next = nextDecisionsDoc(prev, d, n);
+    if (!next || next === prev) return;
+    forgeDir(root);
+    const file = decisionsFile(root);
+    const tmp = `${file}.${process.pid}.tmp`;
+    try {
+      (0, import_node_fs26.writeFileSync)(tmp, JSON.stringify(next) + "\n");
+      (0, import_node_fs26.renameSync)(tmp, file);
+    } finally {
+      (0, import_node_fs26.rmSync)(tmp, { force: true });
+    }
+  } catch {
+  }
+}
+function addDecision(root, raw, ctx) {
+  const r2 = Input.safeParse(raw);
+  if (!r2.success) throw new DecisionInputError(r2.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; "));
+  const { task: dataTask, runId: dataRun, weight, ...rest } = r2.data;
+  const task = ctx.task ?? dataTask;
+  const runId = dataRun ?? ctx.runId ?? void 0;
+  const event = {
+    ts: ctx.ts,
+    kind: "decision",
+    ...rest,
+    weight: weight ?? weightOf(rest.point),
+    ...task ? { task } : {},
+    ...runId ? { runId } : {}
+  };
+  appendEvent(root, event);
+  const line3 = JSON.stringify(event);
+  const all = readEvents(root).filter((e) => e.kind === "decision");
+  let n = all.length;
+  for (let i = all.length - 1; i >= 0; i--) if (JSON.stringify(all[i]) === line3) {
+    n = i + 1;
+    break;
+  }
+  saveDecisionsDoc(root, event, n);
+  return { n, event };
+}
+function numbered(events) {
+  const out = [];
+  events.filter((e) => e.kind === "decision").forEach((e, i) => {
+    const d = normalizeDecision(e);
+    if (d) out.push({ d: { ...d, n: i + 1 }, e });
+  });
+  return out;
+}
+function allDecisions(root) {
+  return numbered(readEvents(root)).map((x) => x.d);
+}
+var ownTask = (task, t) => t === task || !!t && t.startsWith(`${task}-`) && /^\d{1,3}$/.test(t.slice(task.length + 1));
+function listDecisions(root, f) {
+  const events = readEvents(root);
+  const rows = numbered(events);
+  const all = rows.map((x) => x.d);
+  let out = all;
+  if (f.task) {
+    const task = f.task;
+    const project = f.project !== void 0 ? f.project : projectOf(events, task);
+    const owner = attribute(events);
+    out = rows.filter((x) => ownTask(task, x.d.task) && owner(x.e) === project).map((x) => x.d);
+  }
+  if (f.run) out = out.filter((d) => d.runId === f.run);
+  if (f.since) {
+    const s2 = Date.parse(f.since);
+    out = out.filter((d) => Date.parse(d.ts) >= s2);
+  }
+  if (!f.task && !f.run && !f.since && !f.all) {
+    const latest = [...all].reverse().find((d) => d.by !== "user");
+    const scope = readDecisionsDoc(root)?.scope ?? (latest ? decisionScope(latest) ?? "forge" : null);
+    out = scope ? out.filter((d) => (decisionScope(d) ?? "forge") === scope) : [];
+  }
+  return f.auto ? out.filter((d) => d.by !== "user") : out;
+}
+var MD = {
+  es: {
+    title: "Decisiones autom\xE1ticas",
+    intro: "forge tom\xF3 estas decisiones sin preguntar. Para deshacer una: `/forge:decisions revert <n>`.",
+    chosen: "Elegido",
+    alternatives: "Alternativas",
+    why: "Por qu\xE9",
+    revert: "C\xF3mo revertir",
+    when: "Cu\xE1ndo",
+    noRevert: "no se puede revertir de forma autom\xE1tica"
+  },
+  en: {
+    title: "Automatic decisions",
+    intro: "forge took these decisions without asking. To undo one: `/forge:decisions revert <n>`.",
+    chosen: "Chosen",
+    alternatives: "Alternatives",
+    why: "Why",
+    revert: "How to undo",
+    when: "When",
+    noRevert: "cannot be undone automatically"
+  }
+};
+function renderDecisionsMd(list, scope, locale) {
+  const t = locale.toLowerCase().startsWith("es") ? MD.es : MD.en;
+  const out = [`# ${t.title} \xB7 ${scope}`, "", t.intro, ""];
+  for (const d of list) {
+    out.push(`## ${d.n}. ${d.what}`, "", `- **${t.chosen}:** ${d.chosen}`);
+    if (d.alternatives.length) out.push(`- **${t.alternatives}:** ${d.alternatives.join(", ")}`);
+    const howTo = d.revert ?? (d.undo?.type === "none" ? `${t.noRevert}: ${d.undo.reason}` : t.noRevert);
+    out.push(`- **${t.why}:** ${d.why || "\u2014"}`, `- **${t.revert}:** ${howTo}`, `- **${t.when}:** ${d.ts} \xB7 ${d.by} \xB7 ${d.weight}`, "");
+  }
+  return out.join("\n");
+}
+var NOTE_ID = /^[A-Za-z0-9_.:~@+-]{1,160}$/;
+function decisionWrites(i) {
+  const d = normalizeDecision(i.event);
+  if (!d) return [];
+  const text2 = `${d.what} \u2192 ${d.chosen}: ${d.why}`.slice(0, MAX_NOTE);
+  const author = `session:${i.session}`;
+  const task = d.task ? baseOf(d.task) : null;
+  const note = {
+    op: "set",
+    collection: "notes",
+    doc_id: i.eid,
+    data: {
+      ts: d.ts,
+      type: "decision",
+      author,
+      text: text2,
+      ...task ? { taskId: task } : {},
+      decision: {
+        point: d.point,
+        what: d.what,
+        chosen: d.chosen,
+        ...d.alternatives.length ? { alternatives: d.alternatives } : {},
+        why: d.why,
+        ...d.revert ? { revert: d.revert } : {},
+        auto: d.by !== "user"
+      }
+    }
+  };
+  if (!i.resolves) return [note];
+  return [note, { op: "update", collection: "notes", doc_id: i.resolves, data: { answer: text2, answeredBy: author, answeredAt: d.ts, answeredByNote: i.eid } }];
+}
+
+// src/lib/run-summary.ts
+var RUN_SUMMARY_MAX = 8192;
+var RUN_TASKS_MAX = 60;
+function fitRunSummary(doc) {
+  const dropped = [];
+  let cur = { ...doc, tasks: doc.tasks.slice(0, RUN_TASKS_MAX) };
+  if (cur.tasks.length < doc.tasks.length) dropped.push(`tasks>${RUN_TASKS_MAX}`);
+  const kept2 = cur.tasks.length;
+  while (byteLength(JSON.stringify(cur)) > RUN_SUMMARY_MAX && cur.tasks.length) cur = { ...cur, tasks: cur.tasks.slice(0, -1) };
+  if (cur.tasks.length < kept2) dropped.push(`tasks:${cur.tasks.length}`);
+  return { doc: cur, dropped, bytes: byteLength(JSON.stringify(cur)) };
+}
+
+// src/forge/roadmap-run.ts
+var RoadmapRunError = class extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+    this.name = "RoadmapRunError";
+  }
+};
+var int4 = (v, min, max) => typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
+var secondsOf = (from, to) => {
+  const a = Date.parse(from), b = to ? Date.parse(to) : NaN;
+  return Number.isFinite(a) && Number.isFinite(b) && b >= a && b - a <= 30 * 864e5 ? Math.round((b - a) / 1e3) : void 0;
+};
+function writeJsonAtomic3(file, value) {
+  (0, import_node_fs27.mkdirSync)(import_node_path26.default.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    (0, import_node_fs27.writeFileSync)(tmp, JSON.stringify(value, null, 2) + "\n");
+    (0, import_node_fs27.renameSync)(tmp, file);
+  } finally {
+    (0, import_node_fs27.rmSync)(tmp, { force: true });
+  }
+}
+function deferredCount(main, ref, events, mine) {
+  try {
+    const raw = JSON.parse((0, import_node_fs27.readFileSync)(import_node_path26.default.join(readWorkDir(main, ref, events), "deferred.json"), "utf8"));
+    if (Array.isArray(raw)) return raw.length;
+  } catch {
+  }
+  return mine.filter((e) => e.kind === "ruling" && Array.isArray(e.deferred)).reduce((s2, e) => s2 + e.deferred.length, 0);
+}
+function row(main, events, ref, status, title, seconds) {
+  const mine = eventsOf(events, ref);
+  const rounds = new Set(mine.filter((e) => e.kind === "verdict" && typeof e.dir === "string").map((e) => String(e.dir))).size;
+  const deferred = deferredCount(main, ref, events, mine);
+  return {
+    id: ref.task,
+    ...title ? { title: title.slice(0, 200) } : {},
+    status,
+    ...seconds !== void 0 ? { seconds } : {},
+    ...rounds ? { rounds: Math.min(rounds, 99) } : {},
+    ...deferred ? { deferred: Math.min(deferred, 999) } : {}
+  };
+}
+function executorsOf(main, e) {
+  const out = /* @__PURE__ */ new Set();
+  for (const id2 of Object.keys(e.tasks)) {
+    try {
+      const p = normalizePublicTask(JSON.parse((0, import_node_fs27.readFileSync)(executionTaskFile(main, id2), "utf8")));
+      if (p && p.task === id2 && p.runId === e.runId && p.mode === "sessions") out.add(p.by);
+    } catch {
+    }
+  }
+  for (const m of allMembersOf(main, e.runId)) if (m.role === "executor") out.add(m.sessionId);
+  out.delete(e.coordinator);
+  return [...out].filter(isSafeId).sort();
+}
+function runSummary(main, e, now) {
+  const events = readEvents(main);
+  const project = e.kind === "plan" ? e.project : null;
+  const tasks = Object.entries(e.tasks).map(([id2, t]) => row(main, events, { project, task: id2 }, t.status, t.title, secondsOf(t.startedAt, t.finishedAt)));
+  if (e.kind === "ephemeral") {
+    for (const l of readLoose(main, e.runId)?.tasks ?? []) if (!e.tasks[l.id]) tasks.push({ id: l.id, title: l.title.slice(0, 200), status: "queued" });
+  }
+  const final = events.filter((x) => x.kind === "verdict" && x.task === `${e.project}-final` && x.ts >= e.startedAt).at(-1);
+  const n = (v) => int4(v, 0, 999) ? v : 0;
+  return {
+    v: 1,
+    runId: e.runId,
+    kind: e.kind,
+    mode: e.mode,
+    parallel: e.parallel,
+    branch: e.branch,
+    target: e.base,
+    coordinator: e.coordinator,
+    startedAt: e.startedAt,
+    endedAt: e.closedAt ?? e.lastStepAt ?? now.toISOString(),
+    stopReason: e.stopReason,
+    closedBy: e.closedBy ?? null,
+    merged: e.closedBy === "merge",
+    tasks,
+    loose: e.kind === "ephemeral",
+    finalReview: final && (final.action === "accept" || final.action === "fix" || final.action === "redo") ? { action: final.action, critical: n(final.critical), important: n(final.important), minor: n(final.minor) } : null,
+    decisions: listDecisions(main, { run: e.runId, auto: true }).length,
+    deferred: tasks.reduce((s2, t) => s2 + (t.deferred ?? 0), 0)
+  };
+}
+function singleSummary(io, main, task, given, session, now) {
+  const events = readEvents(io.cwd);
+  const project = given ?? projectOf(events, task);
+  if (project !== null && !isSafeId(project)) throw new RoadmapRunError(2, "roadmap-run: --project is not a project id");
+  const key = statusKey(task, project);
+  const alias = readStatus(main);
+  const s2 = (key ? readStatuses(main)[key] : void 0) ?? (alias && alias.task === task && (alias.project ?? null) === project ? alias : null);
+  if (!s2) throw new RoadmapRunError(2, `roadmap-run: forge has no status of ${task}`);
+  if (s2.path !== "small" && s2.path !== "medium" && s2.path !== "large") throw new RoadmapRunError(2, `roadmap-run: ${task} is ${s2.path || "not triaged"}; only a Small, Medium or Large task has a run summary`);
+  const started = s2.taskStartedAt ?? s2.ts;
+  const at2 = Number.isFinite(Date.parse(started)) ? new Date(started) : now;
+  const integ = integrationAt(io.cwd);
+  const merged = !!s2.doneAt && !!integ?.merged;
+  const t = row(main, events, { project, task }, !s2.doneAt ? "running" : merged ? "integrated" : "accepted", null, secondsOf(started, s2.doneAt));
+  return {
+    v: 1,
+    runId: `single-${task}-${compactTs(at2)}`,
+    kind: "single",
+    mode: "single",
+    parallel: 1,
+    branch: integ?.branch ?? "HEAD",
+    target: integ?.target ?? "HEAD",
+    coordinator: session,
+    startedAt: at2.toISOString(),
+    endedAt: s2.doneAt ?? now.toISOString(),
+    stopReason: s2.doneAt ? "finished" : null,
+    closedBy: null,
+    merged,
+    tasks: [t],
+    loose: project === null,
+    finalReview: null,
+    decisions: listDecisions(main, { task, auto: true }).length,
+    deferred: t.deferred ?? 0
+  };
+}
+function roadmapRun(io, o) {
+  if (!!o.run === !!o.task) throw new RoadmapRunError(2, "usage: forge roadmap-run --run <runId> | --task <id> [--project p] [--session SID] [--out f]");
+  const main = mainCheckout(io.cwd);
+  const now = io.now();
+  let doc;
+  let cleanup = [];
+  if (o.run) {
+    const e = readExecution(main);
+    if (!e || e.runId !== o.run) throw new RoadmapRunError(2, `roadmap-run: ${o.run.slice(0, 120)} is not the execution of this checkout`);
+    if (e.active) throw new RoadmapRunError(2, `roadmap-run: ${e.runId} is still active; its summary is written once it ends`);
+    doc = runSummary(main, e, now);
+    cleanup = executorsOf(main, e).map((doc_id) => ({ op: "delete", collection: "sessions", doc_id }));
+  } else {
+    const task = o.task;
+    if (!isSafeId(task)) throw new RoadmapRunError(2, "roadmap-run: --task is not a task id");
+    const session = o.session ?? "main";
+    if (!isSafeId(session)) throw new RoadmapRunError(2, "roadmap-run: --session is not a session id");
+    doc = singleSummary(io, main, task, o.project, session, now);
+  }
+  const fit = fitRunSummary(doc);
+  const file = import_node_path26.default.resolve(io.cwd, o.out ?? import_node_path26.default.join(main, ".forge", "work", "run", `runs-${fit.doc.runId}.json`));
+  writeJsonAtomic3(file, fit.doc);
+  return { write: { op: "set", collection: "runs", doc_id: fit.doc.runId, file_path: file }, cleanup, bytes: fit.bytes, dropped: fit.dropped, doc: fit.doc };
+}
+
 // src/forge/cli/swarm.ts
 var ID = /^[A-Za-z0-9_\-.~:@+]{1,80}$/;
 var MAX_SLEEP_S = 900;
 function readDocs(dir) {
   const out = {};
-  for (const f of (0, import_node_fs24.readdirSync)(dir).filter((x) => x.endsWith(".json"))) {
+  for (const f of (0, import_node_fs28.readdirSync)(dir).filter((x) => x.endsWith(".json"))) {
     try {
-      out[f.slice(0, -5)] = JSON.parse((0, import_node_fs24.readFileSync)(import_node_path24.default.join(dir, f), "utf8"));
+      out[f.slice(0, -5)] = JSON.parse((0, import_node_fs28.readFileSync)(import_node_path27.default.join(dir, f), "utf8"));
     } catch {
     }
   }
@@ -16705,7 +17878,7 @@ var LEARNED_UNION = "/.forge/verify/*.md merge=union";
 var toplevel = (at2) => gitToplevel(at2.git);
 function workdirOf(at2) {
   const [top, prefix] = (at2.git(["rev-parse", "--show-toplevel", "--show-prefix"]) ?? "").split(/\r?\n/).map((l) => l.trim());
-  return top ? import_node_path24.default.join(top, prefix ?? "") : null;
+  return top ? import_node_path27.default.join(top, prefix ?? "") : null;
 }
 function excludeDeps(at2) {
   if (at2.git(["check-ignore", "-q", DEPS_DIR]) !== null) return;
@@ -16722,14 +17895,14 @@ function unionLearned(deps) {
     if (!top || !file) return { attributesError: "cannot find the git directory" };
     let text2 = "";
     try {
-      text2 = (0, import_node_fs24.readFileSync)(file, "utf8");
+      text2 = (0, import_node_fs28.readFileSync)(file, "utf8");
     } catch (e) {
       if (e.code !== "ENOENT") throw e;
     }
     if (hasLine(text2, LEARNED_UNION)) return {};
     let names2 = [];
     try {
-      names2 = (0, import_node_fs24.readdirSync)(import_node_path24.default.join(top, ".forge", "verify")).filter((f) => f.endsWith(".md")).slice(0, 200);
+      names2 = (0, import_node_fs28.readdirSync)(import_node_path27.default.join(top, ".forge", "verify")).filter((f) => f.endsWith(".md")).slice(0, 200);
     } catch {
     }
     const attrs = deps.git(["-C", top, "check-attr", "merge", "--", ...[...names2, "forge-union-probe.md"].map((n) => `.forge/verify/${n}`)]);
@@ -16763,10 +17936,10 @@ function runInstall(at2, cmd, timeoutSec) {
   if (created) excludeDeps(at2);
   return { setup, created };
 }
-var memoFile = (cacheDir2, dir) => import_node_path24.default.join(cacheDir2, "deps", `${(0, import_node_crypto4.createHash)("sha1").update(import_node_path24.default.resolve(dir)).digest("hex").slice(0, 16)}.json`);
+var memoFile = (cacheDir2, dir) => import_node_path27.default.join(cacheDir2, "deps", `${(0, import_node_crypto4.createHash)("sha1").update(import_node_path27.default.resolve(dir)).digest("hex").slice(0, 16)}.json`);
 function readMemo(file) {
   try {
-    const o = JSON.parse((0, import_node_fs24.readFileSync)(file, "utf8"));
+    const o = JSON.parse((0, import_node_fs28.readFileSync)(file, "utf8"));
     if (!o || typeof o !== "object") return {};
     const s2 = o.failed?.setup;
     const failedOk = !!s2 && typeof s2.cmd === "string" && typeof s2.ok === "boolean" && Array.isArray(s2.tail) && s2.tail.every((l) => typeof l === "string");
@@ -16777,8 +17950,8 @@ function readMemo(file) {
 }
 function writeMemo(file, m) {
   try {
-    (0, import_node_fs24.mkdirSync)(import_node_path24.default.dirname(file), { recursive: true });
-    (0, import_node_fs24.writeFileSync)(file, JSON.stringify(m));
+    (0, import_node_fs28.mkdirSync)(import_node_path27.default.dirname(file), { recursive: true });
+    (0, import_node_fs28.writeFileSync)(file, JSON.stringify(m));
   } catch {
   }
 }
@@ -16797,16 +17970,16 @@ function restoringRegenerated(at2, fn, into, only) {
 }
 function worktreeHolding(porcelain, branch) {
   let at2 = null;
-  for (const line2 of (porcelain ?? "").split(/\r?\n/)) {
-    if (line2.startsWith("worktree ")) at2 = line2.slice("worktree ".length).trim();
-    else if (line2 === `branch refs/heads/${branch}`) return at2;
+  for (const line3 of (porcelain ?? "").split(/\r?\n/)) {
+    if (line3.startsWith("worktree ")) at2 = line3.slice("worktree ".length).trim();
+    else if (line3 === `branch refs/heads/${branch}`) return at2;
   }
   return null;
 }
 function loadPlanArg(io, planArg, sub) {
   if (!planArg) throw new UsageError(`swarm ${sub}: --plan is required`);
   try {
-    return parsePlan((0, import_node_fs24.readFileSync)(import_node_path24.default.resolve(io.cwd, planArg), "utf8"));
+    return parsePlan((0, import_node_fs28.readFileSync)(import_node_path27.default.resolve(io.cwd, planArg), "utf8"));
   } catch (e) {
     throw new UsageError(e instanceof PlanError ? `${planArg}: ${e.issues.join("; ")}` : `swarm ${sub}: cannot read ${planArg}`);
   }
@@ -16819,7 +17992,7 @@ function loadTasksArg(io, file, sub) {
   if (!file) throw new UsageError(`swarm ${sub}: --tasks is required for an ephemeral run`);
   let raw;
   try {
-    raw = JSON.parse((0, import_node_fs24.readFileSync)(import_node_path24.default.resolve(io.cwd, file), "utf8"));
+    raw = JSON.parse((0, import_node_fs28.readFileSync)(import_node_path27.default.resolve(io.cwd, file), "utf8"));
   } catch {
     throw new UsageError(`swarm ${sub}: cannot read ${file}`);
   }
@@ -16841,7 +18014,7 @@ function addTaskWorktree(deps, main, task, runBranch2, project) {
       throw new UsageError(`swarm worktree: ${branch} holds commits that are not this plan's ${task} (another project's run): integrate, rename or remove that branch first`);
     }
   }
-  let existed = (0, import_node_fs24.existsSync)(dir);
+  let existed = (0, import_node_fs28.existsSync)(dir);
   if (!existed) {
     excludeWorktrees(g);
     existed = exists;
@@ -16903,9 +18076,9 @@ function boundElsewhere(sub, runId, hookSession, liveness2) {
 function readTickInput(io, deps, e, planArg, db, sub) {
   const plan = loadPlanArg(io, planArg, sub);
   if (!db) throw new UsageError(`swarm ${sub}: --plan and --db are required`);
-  const stateDir = import_node_path24.default.resolve(io.cwd, db, "state");
-  const sessionsDir = import_node_path24.default.resolve(io.cwd, db, "sessions");
-  if (!(0, import_node_fs24.existsSync)(stateDir) || !(0, import_node_fs24.existsSync)(sessionsDir)) throw new UsageError(`swarm ${sub}: --db must hold the state and sessions listings`);
+  const stateDir = import_node_path27.default.resolve(io.cwd, db, "state");
+  const sessionsDir = import_node_path27.default.resolve(io.cwd, db, "sessions");
+  if (!(0, import_node_fs28.existsSync)(stateDir) || !(0, import_node_fs28.existsSync)(sessionsDir)) throw new UsageError(`swarm ${sub}: --db must hold the state and sessions listings`);
   const states = readDocs(stateDir);
   const sessions = readDocs(sessionsDir);
   const integrated = [];
@@ -16919,10 +18092,10 @@ function readTickInput(io, deps, e, planArg, db, sub) {
 }
 var LOCAL_STATE2 = [":!.forge", ":!.waypoint", ":!.claude"];
 var untracked = (at2) => nulList(at2.git(["ls-files", "-z", "--others", "--exclude-standard", "--directory", "--", ".", ...LOCAL_STATE2]));
-var baselineFile = (cacheDir2, key, sha) => import_node_path24.default.join(cacheDir2, "baseline", `${key}-${sha}.json`);
+var baselineFile = (cacheDir2, key, sha) => import_node_path27.default.join(cacheDir2, "baseline", `${key}-${sha}.json`);
 function readBaseline(cacheDir2, key, sha) {
   try {
-    return JSON.parse((0, import_node_fs24.readFileSync)(baselineFile(cacheDir2, key, sha), "utf8"));
+    return JSON.parse((0, import_node_fs28.readFileSync)(baselineFile(cacheDir2, key, sha), "utf8"));
   } catch {
     return null;
   }
@@ -17004,7 +18177,7 @@ function mergeAttempt(at2, ref, o, regenerated, validations, marker) {
       pid: process.pid,
       startedAt: o.now().toISOString(),
       staleAt: until({ installs: 1 }),
-      dir: place ?? import_node_path24.default.resolve(o.configRoot),
+      dir: place ?? import_node_path27.default.resolve(o.configRoot),
       phase: "baseline"
     }, o.now().getTime());
   } catch (err) {
@@ -17019,7 +18192,7 @@ function mergeAttempt(at2, ref, o, regenerated, validations, marker) {
   const cacheBefore = new Set(untrackedPaths(cacheGit(at2.git)));
   const entry2 = () => {
     try {
-      return place ? (0, import_node_fs24.lstatSync)(import_node_path24.default.join(place, DEPS_DIR)) : null;
+      return place ? (0, import_node_fs28.lstatSync)(import_node_path27.default.join(place, DEPS_DIR)) : null;
     } catch {
       return null;
     }
@@ -17069,7 +18242,7 @@ function mergeAttempt(at2, ref, o, regenerated, validations, marker) {
     const now = entry2();
     if (!hadEntry && now?.isDirectory() && !now.isSymbolicLink()) {
       try {
-        (0, import_node_fs24.rmSync)(import_node_path24.default.join(place, DEPS_DIR), { recursive: true, force: true });
+        (0, import_node_fs28.rmSync)(import_node_path27.default.join(place, DEPS_DIR), { recursive: true, force: true });
         created = false;
         return {};
       } catch {
@@ -17085,9 +18258,9 @@ function mergeAttempt(at2, ref, o, regenerated, validations, marker) {
   const withSetup = () => setup ? { setup } : {};
   const rollback = (detail, extra = {}) => {
     const undone = at2.git(["merge", "--abort"]) !== null;
-    const clean2 = undone && at2.git(["rev-parse", "HEAD"])?.trim() === pre && !merging();
-    const restored = afterMerge ? clean2 ? restoreDeps() : o.personal ? { depsFromRejectedMerge: true } : {} : {};
-    return { result: "conflict", detail: clean2 ? detail : `rollback failed: needs manual attention (${detail})`, ...withSetup(), leftovers: leftovers(), ...extra, ...restored };
+    const clean3 = undone && at2.git(["rev-parse", "HEAD"])?.trim() === pre && !merging();
+    const restored = afterMerge ? clean3 ? restoreDeps() : o.personal ? { depsFromRejectedMerge: true } : {} : {};
+    return { result: "conflict", detail: clean3 ? detail : `rollback failed: needs manual attention (${detail})`, ...withSetup(), leftovers: leftovers(), ...extra, ...restored };
   };
   const unmoved = !!o.runAt && at2.git(["merge-base", "--is-ancestor", "HEAD", ref]) !== null;
   const stale = () => {
@@ -17198,7 +18371,7 @@ function mergeAttempt(at2, ref, o, regenerated, validations, marker) {
   };
 }
 function cleanRunWorktree(deps, wt, branch) {
-  if (!(0, import_node_fs24.existsSync)(wt)) return null;
+  if (!(0, import_node_fs28.existsSync)(wt)) return null;
   const at2 = deps.at(wt);
   const tip = deps.git(["rev-parse", "--verify", "-q", `refs/heads/${branch}`])?.trim();
   if (!tip || at2.git(["rev-parse", "HEAD"])?.trim() !== tip) return null;
@@ -17240,11 +18413,11 @@ function attemptExtras(r2, es2, ref, personal) {
     ...say.length ? { say } : {}
   };
 }
-function commitInfo(git, sha) {
-  const [cI = "", ...subject] = (git(["show", "-s", "--format=%cI%x09%s", sha]) ?? "").trim().split("	");
-  const second = git(["rev-parse", "--verify", "-q", `${sha}^2`])?.trim() || null;
-  const title = second ? (git(["show", "-s", "--format=%s", second]) ?? "").trim() : subject.join("	");
-  const stat = second ? git(["diff", "--shortstat", `${sha}^1`, sha]) ?? "" : "";
+function commitInfo(git2, sha) {
+  const [cI = "", ...subject] = (git2(["show", "-s", "--format=%cI%x09%s", sha]) ?? "").trim().split("	");
+  const second = git2(["rev-parse", "--verify", "-q", `${sha}^2`])?.trim() || null;
+  const title = second ? (git2(["show", "-s", "--format=%s", second]) ?? "").trim() : subject.join("	");
+  const stat = second ? git2(["diff", "--shortstat", `${sha}^1`, sha]) ?? "" : "";
   const num4 = (re) => Number(stat.match(re)?.[1] ?? 0);
   const t = Date.parse(cI);
   return { sha, ts: Number.isFinite(t) ? new Date(t).toISOString() : "", title, add: num4(/(\d+) insertion/), del: num4(/(\d+) deletion/) };
@@ -17282,7 +18455,7 @@ function integrate(rest, io, deps) {
     scope: "heavy",
     timeoutSec: config.validatorTimeoutSec,
     configRoot: wt,
-    cacheDir: import_node_path24.default.join(io.cwd, ".forge", "execution"),
+    cacheDir: import_node_path27.default.join(io.cwd, ".forge", "execution"),
     target: "run",
     setup: config.swarm.setup,
     personal,
@@ -17300,7 +18473,7 @@ function integrate(rest, io, deps) {
   if (r2.result === "deps") return out({ result: "run-deps", detail: r2.detail, ...extras });
   updateExecution(io.cwd, (cur) => {
     if (!cur?.tasks[task]) return null;
-    const next = r2.result === "merged" ? { ...cur.tasks[task], status: "integrated", stage: "integrate", updatedAt: at2, detail: null, finishedAt: at2 } : { ...cur.tasks[task], status: "conflict", detail: r2.detail, updatedAt: at2 };
+    const next = r2.result === "merged" ? { ...cur.tasks[task], status: "integrated", stage: "integrate", updatedAt: at2, detail: null, finishedAt: at2, sha: r2.sha } : { ...cur.tasks[task], status: "conflict", detail: r2.detail, updatedAt: at2 };
     return { ...cur, tasks: { ...cur.tasks, [task]: next } };
   }, { now: io.now, sleep: io.sleep });
   if (r2.result !== "merged") return out({ result: "conflict", detail: r2.detail, ...extras });
@@ -17310,11 +18483,17 @@ function integrate(rest, io, deps) {
     } catch {
     }
   }
+  const commit = commitInfo(target.git, r2.sha);
+  const done = t.executor === "subagents" ? { status: "done", doneAt: at2, commits: [commit] } : void 0;
+  const pub = e.kind === "plan" ? publishFor(io, task, { project: e.project, ...done ? { extra: done } : {} }) : { publish: null };
+  const metrics = e.kind === "plan" ? { op: "update", collection: "meta", doc_id: "metrics", data: { lastCommit: { sha: commit.sha, ts: commit.ts }, updatedAt: at2 } } : null;
   const say = integratedSay(es2, e.branch, r2.newValidators, r2.preexisting);
   return out({
     result: "integrated",
     sha: r2.sha,
-    commit: commitInfo(target.git, r2.sha),
+    commit,
+    ...pub,
+    metrics,
     preexisting: r2.preexisting,
     newValidators: r2.newValidators,
     say,
@@ -17330,6 +18509,26 @@ function closeEnded(root, at2, by, deps) {
     return { ...cur, closedAt: at2, closedBy: by };
   }, deps);
   return closed;
+}
+function mergedPublish(io, e) {
+  const publish = [];
+  const errors = [];
+  const docIo = { ...io, events: readEvents(io.cwd) };
+  for (const [task, t] of Object.entries(readExecution(io.cwd)?.tasks ?? e.tasks)) {
+    if (t.status !== "integrated") continue;
+    const p = publishFor(docIo, task, { project: e.project, only: ["forge"] });
+    if (p.publish) publish.push(p.publish);
+    else if (p.publishError) errors.push(`${task}: ${p.publishError}`);
+  }
+  return { publish, ...errors.length ? { publishErrors: errors } : {} };
+}
+function runsOf(io, runId) {
+  try {
+    const { doc: _doc, ...runs } = roadmapRun({ cwd: io.cwd, now: io.now }, { run: runId });
+    return { runs };
+  } catch (e) {
+    return { runsError: (e instanceof Error ? e.message : String(e)).slice(0, 300) };
+  }
 }
 function mergeFinal(rest, io, deps) {
   const e = readExecution(io.cwd);
@@ -17352,7 +18551,7 @@ function mergeFinal(rest, io, deps) {
     scope: "final",
     timeoutSec: config.validatorTimeoutSec,
     configRoot: io.cwd,
-    cacheDir: import_node_path24.default.join(io.cwd, ".forge", "execution"),
+    cacheDir: import_node_path27.default.join(io.cwd, ".forge", "execution"),
     target: "main",
     setup: config.swarm.setup,
     runAt: cleanRunWorktree(deps, runWorktree(io.cwd), e.branch),
@@ -17367,7 +18566,7 @@ function mergeFinal(rest, io, deps) {
   const extras = attemptExtras(r2, spanish(locale, io.cwd, e.project), e.branch, true);
   if (r2.result === "dirty") return out({ result: "main-dirty", detail: `the main checkout ${r2.detail}`, ...extras });
   if (r2.result === "deps") return out({ result: "main-deps", detail: `the main checkout ${r2.detail}`, ...extras });
-  return r2.result === "merged" ? merged({ result: "merged", sha: r2.sha, preexisting: r2.preexisting, ...extras }) : out({ result: "conflict", detail: r2.detail, ...extras });
+  return r2.result === "merged" ? merged({ result: "merged", sha: r2.sha, preexisting: r2.preexisting, ...extras, ...mergedPublish(io, e) }) : out({ result: "conflict", detail: r2.detail, ...extras });
 }
 function swarmCommand(args, io, deps, ext = {}) {
   const [sub, ...rest] = args;
@@ -17377,10 +18576,10 @@ function swarmCommand(args, io, deps, ext = {}) {
     return v === void 0 || v.startsWith("--") ? void 0 : v;
   };
   const has = (name) => rest.includes(`--${name}`);
-  const json3 = (v) => ({ code: 0, stdout: JSON.stringify(v, null, 2) + "\n", stderr: "" });
+  const json4 = (v) => ({ code: 0, stdout: JSON.stringify(v, null, 2) + "\n", stderr: "" });
   const ok = () => ({ code: 0, stdout: "ok\n", stderr: "" });
   const now = io.now();
-  const iso3 = now.toISOString();
+  const iso4 = now.toISOString();
   const current = () => {
     const e = readExecution(io.cwd);
     if (!e) throw new UsageError(`swarm ${sub}: no execution (forge swarm start)`);
@@ -17432,8 +18631,8 @@ function swarmCommand(args, io, deps, ext = {}) {
       const hookSession = id2 ?? (before3?.runId === e.runId ? before3.hookSession : null);
       const warning = id2 !== null ? null : given ? `--hook-session ${given.slice(0, 130)} is not a usable session id (letters, digits, _ - .; max 120): joined without a live signal` : hookSession === null ? "no Claude session id (--hook-session or CLAUDE_CODE_SESSION_ID): joined without a live signal" : null;
       if (hookSession !== null && hookSession === e.hookSession) throw new UsageError(`swarm join: ${hookSession} coordinates this execution`);
-      writeMember(main, { sessionId: session, role, runId: e.runId, task, name: flag("name") ?? null, since: iso3, hookSession });
-      return json3({ runId: e.runId, role, task, coordinator: e.coordinator, branch: e.branch, mode: e.mode, project: e.project, ...warning ? { warning } : {} });
+      writeMember(main, { sessionId: session, role, runId: e.runId, task, name: flag("name") ?? null, since: iso4, hookSession });
+      return json4({ runId: e.runId, role, task, coordinator: e.coordinator, branch: e.branch, mode: e.mode, project: e.project, ...warning ? { warning } : {} });
     }
     case "report": {
       const task = taskArg();
@@ -17446,9 +18645,10 @@ function swarmCommand(args, io, deps, ext = {}) {
       if (!["running", "accepted", "blocked"].includes(status)) throw new UsageError("swarm report: --status must be running, accepted or blocked");
       const round = has("round") ? Number(flag("round")) : 0;
       if (!Number.isInteger(round) || round < 0 || round > 99) throw new UsageError("swarm report: --round must be an integer from 0 to 99");
+      if (has("claim") && status !== "running") throw new UsageError("swarm report: --claim starts a task and goes only with --status running");
       let prev = null;
       try {
-        prev = normalizePublicTask(JSON.parse((0, import_node_fs24.readFileSync)(executionTaskFile(main, task), "utf8")));
+        prev = normalizePublicTask(JSON.parse((0, import_node_fs28.readFileSync)(executionTaskFile(main, task), "utf8")));
       } catch {
         prev = null;
       }
@@ -17456,11 +18656,16 @@ function swarmCommand(args, io, deps, ext = {}) {
         throw new UsageError(`swarm report: ${task} is reported by ${prev.by} until ${prev.leaseUntil}`);
       }
       if (member.role === "manual" && member.task !== task) writeMember(main, { ...member, task });
-      const since = prev && prev.by === session && prev.stage === stage && prev.runId === e.runId ? prev.since : iso3;
+      const since = prev && prev.by === session && prev.stage === stage && prev.runId === e.runId ? prev.since : iso4;
       const lease = flag("lease") && !Number.isNaN(Date.parse(flag("lease"))) ? flag("lease") : new Date(now.getTime() + LEASE_MINUTES * 6e4).toISOString();
-      const p = { task, runId: e.runId, stage, status, agent: has("no-agent") ? null : flag("agent") ?? null, round, since, updatedAt: iso3, leaseUntil: lease, by: session, mode: member.role === "executor" ? "sessions" : "manual" };
+      const p = { task, runId: e.runId, stage, status, agent: has("no-agent") ? null : flag("agent") ?? null, round, since, updatedAt: iso4, leaseUntil: lease, by: session, mode: member.role === "executor" ? "sessions" : "manual" };
       writePublicTask(main, p);
-      return json3(p);
+      const claimed = has("claim") ? { status: "in_progress", owner: session, claimedAt: iso4, startedAt: iso4 } : null;
+      return json4({
+        ...p,
+        ...publishFor(io, task, { project: e.project, ...claimed ? { extra: claimed } : {} }),
+        ...claimed ? { event: startedEvent(session, task, now, io.rand) } : {}
+      });
     }
     case "next": {
       const { e, session } = memberCtx(true);
@@ -17468,7 +18673,7 @@ function swarmCommand(args, io, deps, ext = {}) {
       const running = Object.values(e.tasks).filter((t) => t.status === "running").length;
       const d = schedule({ plan, states, sessions, exec: { ...e, coordinator: session, parallel: Math.min(10, running + 1) }, integrated, now: now.getTime() });
       const start = d.actions.find((a) => a.type === "start");
-      return json3(start ? { task: start.task, reason: null } : { task: null, reason: d.next.stallReason ?? "nothing is ready" });
+      return json4(start ? { task: start.task, reason: null } : { task: null, reason: d.next.stallReason ?? "nothing is ready" });
     }
     case "start": {
       const project = flag("project");
@@ -17504,7 +18709,7 @@ function swarmCommand(args, io, deps, ext = {}) {
       const branch = flag("branch") ?? runBranch(project);
       if (!isRunBranch(branch)) throw new UsageError("swarm start: --branch is not a valid branch name");
       if (!isMemberId(session)) throw new UsageError("swarm start: --session must use letters, digits, _ - . (at most 120)");
-      if (!isSafeId(`${project}-${iso3.replace(/[:.]/g, "")}`)) throw new UsageError("swarm start: --project must use letters, digits, _ - .");
+      if (!isSafeId(`${project}-${iso4.replace(/[:.]/g, "")}`)) throw new UsageError("swarm start: --project must use letters, digits, _ - .");
       if (kind === "ephemeral" && !isRunBranch(base)) throw new UsageError(`swarm start: the base branch ${base} is outside the run branch rule (letters, digits, _ - . /)`);
       let setup = null;
       let baseSync = null;
@@ -17529,7 +18734,7 @@ function swarmCommand(args, io, deps, ext = {}) {
           loose = loadTasksArg(io, flag("tasks"), "start");
           for (const t of loose) {
             const dir = taskWorktree(io.cwd, t.id);
-            if ((0, import_node_fs24.existsSync)(dir)) throw new UsageError(`swarm start: ${dir} already exists; once its task is integrated, FORGE swarm cleanup removes it (else git worktree remove it), or use another id`);
+            if ((0, import_node_fs28.existsSync)(dir)) throw new UsageError(`swarm start: ${dir} already exists; once its task is integrated, FORGE swarm cleanup removes it (else git worktree remove it), or use another id`);
             const tb = taskBranch(t.id);
             if (deps.git(["rev-parse", "--verify", "-q", `refs/heads/${tb}`]) === null) continue;
             if (deps.git(["merge-base", "--is-ancestor", tb, base]) === null) throw new UsageError(`swarm start: ${tb} has work not on ${base}; use another id`);
@@ -17541,11 +18746,11 @@ function swarmCommand(args, io, deps, ext = {}) {
       if (kind === "plan") {
         const wt = runWorktree(io.cwd);
         if (branch === base) throw new UsageError(`swarm start: ${branch} is the base branch (checked out in the main checkout); the run branch must be another one (omit --branch for ${runBranch(project)})`);
-        const defaultBranch = deps.git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])?.trim().replace(/^origin\//, "") || (deps.git(["rev-parse", "--verify", "-q", "refs/heads/main"]) !== null ? "main" : deps.git(["rev-parse", "--verify", "-q", "refs/heads/master"]) !== null ? "master" : null);
-        if (defaultBranch && branch === defaultBranch) throw new UsageError(`swarm start: ${branch} is the default branch; an execution never integrates into it directly`);
+        const defaultBranch2 = deps.git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])?.trim().replace(/^origin\//, "") || (deps.git(["rev-parse", "--verify", "-q", "refs/heads/main"]) !== null ? "main" : deps.git(["rev-parse", "--verify", "-q", "refs/heads/master"]) !== null ? "master" : null);
+        if (defaultBranch2 && branch === defaultBranch2) throw new UsageError(`swarm start: ${branch} is the default branch; an execution never integrates into it directly`);
         const holder = worktreeHolding(deps.git(["worktree", "list", "--porcelain"]), branch);
         if (holder && !samePath(holder, wt)) throw new UsageError(`swarm start: ${branch} is checked out in another worktree (${holder}); pick another --branch`);
-        if ((0, import_node_fs24.existsSync)(wt)) {
+        if ((0, import_node_fs28.existsSync)(wt)) {
           const on = deps.at(wt).git(["rev-parse", "--abbrev-ref", "HEAD"])?.trim();
           if (on !== branch) throw new UsageError(`swarm start: ${wt} exists and is on ${on ?? "?"}, not ${branch}; switch it or remove it (git worktree remove)`);
         }
@@ -17555,7 +18760,7 @@ function swarmCommand(args, io, deps, ext = {}) {
         }
         const mainDir = mainWorktreeFrom(deps.git(["worktree", "list", "--porcelain"]));
         excludeWorktrees(mainDir ? (args2) => deps.git(["-C", mainDir, ...args2]) : deps.git);
-        if (!(0, import_node_fs24.existsSync)(wt)) {
+        if (!(0, import_node_fs28.existsSync)(wt)) {
           if (deps.git(["worktree", "add", wt, branch]) === null) throw new UsageError(`swarm start: cannot add the worktree ${wt}`);
           setup = runSetup(deps, wt, io.cwd);
         }
@@ -17579,7 +18784,7 @@ function swarmCommand(args, io, deps, ext = {}) {
       }
       const lang = locale ? { locale } : {};
       const state = resume && prev ? { ...prev, parallel, mode, mergeOnFinish: prev.mergeOnFinish || has("merge-on-finish"), coordinator: session, hookSession: hook, sleepUntil: null, ...auto, ...lang } : {
-        runId: `${project}-${iso3.replace(/[:.]/g, "")}`,
+        runId: `${project}-${iso4.replace(/[:.]/g, "")}`,
         kind,
         mode,
         parallel,
@@ -17592,7 +18797,7 @@ function swarmCommand(args, io, deps, ext = {}) {
         active: true,
         stopReason: null,
         stallReason: null,
-        startedAt: iso3,
+        startedAt: iso4,
         lastStepAt: null,
         lastBlockStep: null,
         sleepUntil: null,
@@ -17608,7 +18813,7 @@ function swarmCommand(args, io, deps, ext = {}) {
       }
       const attributes = unionLearned(deps);
       const replaced = prev && !prev.active && !prev.closedAt && !resume ? { runId: prev.runId, stopReason: prev.stopReason } : null;
-      (0, import_node_fs24.rmSync)(stopFile(io.cwd), { force: true });
+      (0, import_node_fs28.rmSync)(stopFile(io.cwd), { force: true });
       updateExecution(io.cwd, (cur) => resume && cur && cur.runId === state.runId ? { ...cur, parallel: state.parallel, mode: state.mode, mergeOnFinish: state.mergeOnFinish, coordinator: state.coordinator, hookSession: state.hookSession, sleepUntil: null, ...auto, ...lang } : state, lockDeps);
       if (kind === "ephemeral" && !resume) writeLoose(io.cwd, { runId: state.runId, tasks: loose });
       if (!resume) pruneRunState(io.cwd, state.runId, { now: now.getTime(), stale: false, dryRun: false });
@@ -17626,19 +18831,21 @@ function swarmCommand(args, io, deps, ext = {}) {
         loose: loose.length,
         setup
       });
-      return json3({ ...state, setup, baseSync, ...looseOut, announce: announce2, ...attributes, ...replaced ? { replaced } : {} });
+      return json4({ ...state, setup, baseSync, ...looseOut, announce: announce2, ...attributes, ...replaced ? { replaced } : {} });
     }
     case "status": {
       const main = mainCheckout(io.cwd);
       const state = readExecution(main);
       const unbound = !!state?.active && state.hookSession === null;
       const coordinator = state && !state.closedAt ? { hookSession: state.hookSession, liveness: boundLiveness(main, { ...state, active: true }, now.getTime()) } : null;
-      return json3({
+      return json4({
         present: state !== null,
         state,
         ...state ? { work: tasksWork(main, state) } : {},
         ...coordinator ? { coordinator } : {},
-        ...unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}
+        ...unbound ? { unbound: true, warning: UNBOUND_WARNING } : {},
+        // J-15: meta/run as the roadmap takes it, built by the CLI.
+        publish: state ? { run: runDocOf(main, state) } : null
       });
     }
     case "propose": {
@@ -17651,7 +18858,7 @@ function swarmCommand(args, io, deps, ext = {}) {
       const parallel = width < 2 ? 1 : Math.min(config.swarm.parallel, width);
       const reasons = [`${plan.tasks.length} tasks`, `up to ${width} at once (dependencies and zones)`];
       const es2 = locale ? locale === "es" : isSpanish(plan.locale);
-      return json3({
+      return json4({
         width,
         configured,
         recommended: { mode: "subagents", parallel },
@@ -17668,15 +18875,15 @@ function swarmCommand(args, io, deps, ext = {}) {
         const task2 = taskArg();
         const { main, e: e2, session, m } = memberCtx(true);
         if (m.role === "executor" && m.task !== task2) throw new UsageError(`swarm worktree: ${session} executes ${m.task}, not ${task2}`);
-        return json3({ ...addTaskWorktree(deps, main, task2, e2.branch, e2.project), work: workRel({ project: e2.project, task: task2 }) });
+        return json4({ ...addTaskWorktree(deps, main, task2, e2.branch, e2.project), work: workRel({ project: e2.project, task: task2 }) });
       }
       const task = taskArg();
       const e = notEnded(current());
       const added = addTaskWorktree(deps, io.cwd, task, e.branch, e.kind === "plan" ? e.project : null);
       const { worktree: dir, branch } = added;
-      const t = e.tasks[task] ?? { status: "running", stage: "brief", round: 0, worktree: dir, branch, executor: e.mode, attempts: 0, agent: null, startedAt: iso3, stageSince: iso3, updatedAt: iso3, detail: null };
-      update((cur) => cur && { ...notEnded(cur), tasks: { ...cur.tasks, [task]: { ...cur.tasks[task] ?? t, worktree: dir, branch, updatedAt: iso3 } } });
-      return json3({ ...added, work: workRel({ project: e.kind === "plan" ? e.project : null, task }) });
+      const t = e.tasks[task] ?? { status: "running", stage: "brief", round: 0, worktree: dir, branch, executor: e.mode, attempts: 0, agent: null, startedAt: iso4, stageSince: iso4, updatedAt: iso4, detail: null };
+      update((cur) => cur && { ...notEnded(cur), tasks: { ...cur.tasks, [task]: { ...cur.tasks[task] ?? t, worktree: dir, branch, updatedAt: iso4 } } });
+      return json4({ ...added, work: workRel({ project: e.kind === "plan" ? e.project : null, task }) });
     }
     case "task": {
       const task = taskArg();
@@ -17689,7 +18896,7 @@ function swarmCommand(args, io, deps, ext = {}) {
           const { [task]: _dropped, ...tasks } = cur.tasks;
           return { ...cur, tasks };
         });
-        (0, import_node_fs24.rmSync)(executionTaskFile(io.cwd, task), { force: true });
+        (0, import_node_fs28.rmSync)(executionTaskFile(io.cwd, task), { force: true });
         return ok();
       }
       notEnded(e);
@@ -17699,7 +18906,7 @@ function swarmCommand(args, io, deps, ext = {}) {
       let detailArg;
       if (flag("detail-file")) {
         try {
-          detailArg = (0, import_node_fs24.readFileSync)(import_node_path24.default.resolve(io.cwd, flag("detail-file")), "utf8").trim().slice(0, 500) || null;
+          detailArg = (0, import_node_fs28.readFileSync)(import_node_path27.default.resolve(io.cwd, flag("detail-file")), "utf8").trim().slice(0, 500) || null;
         } catch {
           throw new UsageError("swarm task: cannot read --detail-file");
         }
@@ -17712,8 +18919,8 @@ function swarmCommand(args, io, deps, ext = {}) {
         const status = statusArg ?? base2.status;
         if (base2.status === "stopped" && status !== "stopped") throw new UsageError(`swarm task: ${task} is stopped (forge stop) and stays stopped`);
         if (!["running", "accepted", "blocked"].includes(status) && status !== base2.status) throw new UsageError("swarm task: --status must be running, accepted or blocked");
-        const stageSince = base2.stage !== stage ? iso3 : base2.stageSince;
-        const finishedAt = status === "blocked" && base2.status !== "blocked" ? iso3 : status === "running" && base2.finishedAt ? null : base2.finishedAt;
+        const stageSince = base2.stage !== stage ? iso4 : base2.stageSince;
+        const finishedAt = status === "blocked" && base2.status !== "blocked" ? iso4 : status === "running" && base2.finishedAt ? null : base2.finishedAt;
         return {
           ...base2,
           stage,
@@ -17721,7 +18928,7 @@ function swarmCommand(args, io, deps, ext = {}) {
           round: roundArg ?? base2.round,
           agent: agentArg === void 0 ? base2.agent : agentArg,
           detail: detailArg === void 0 ? base2.detail : detailArg,
-          updatedAt: iso3,
+          updatedAt: iso4,
           stageSince,
           ...finishedAt !== void 0 ? { finishedAt } : {}
         };
@@ -17736,9 +18943,11 @@ function swarmCommand(args, io, deps, ext = {}) {
         return { ...cur, tasks: { ...cur.tasks, [task]: next } };
       });
       const lease = flag("lease") && !Number.isNaN(Date.parse(flag("lease"))) ? flag("lease") : new Date(now.getTime() + LEASE_MINUTES * 6e4).toISOString();
-      writePublicTask(io.cwd, { task, runId: e.runId, stage: next.stage, status: next.status, agent: next.agent, round: next.round, since: next.stageSince, updatedAt: iso3, leaseUntil: lease, by: e.coordinator, mode: base.executor });
-      if (base.stage !== next.stage) appendPhase(io.cwd, { ts: iso3, kind: "phase", task, phase: next.stage, ...e.kind === "plan" && isSafeId(e.project) ? { project: e.project } : {} });
-      return json3(next);
+      writePublicTask(io.cwd, { task, runId: e.runId, stage: next.stage, status: next.status, agent: next.agent, round: next.round, since: next.stageSince, updatedAt: iso4, leaseUntil: lease, by: e.coordinator, mode: base.executor });
+      if (base.stage !== next.stage) appendPhase(io.cwd, { ts: iso4, kind: "phase", task, phase: next.stage, ...e.kind === "plan" && isSafeId(e.project) ? { project: e.project } : {} });
+      const claimed = has("claim") && e.kind === "plan" ? { status: "in_progress", owner: e.coordinator, claimedAt: iso4, startedAt: iso4 } : null;
+      const pub = e.kind === "plan" ? publishFor(io, task, { project: e.project, ...claimed ? { extra: claimed } : {} }) : { publish: null };
+      return json4({ ...next, ...pub, ...claimed ? { event: startedEvent(e.coordinator, task, now, io.rand) } : {} });
     }
     case "tick": {
       const e = current();
@@ -17751,9 +18960,9 @@ function swarmCommand(args, io, deps, ext = {}) {
       const { plan, states, sessions, integrated } = input;
       const publicTasks = {};
       try {
-        for (const f of (0, import_node_fs24.readdirSync)(import_node_path24.default.join(io.cwd, ".forge", "execution")).filter((n) => n.endsWith(".json")).slice(0, 500)) {
+        for (const f of (0, import_node_fs28.readdirSync)(import_node_path27.default.join(io.cwd, ".forge", "execution")).filter((n) => n.endsWith(".json")).slice(0, 500)) {
           try {
-            const p = normalizePublicTask(JSON.parse((0, import_node_fs24.readFileSync)(import_node_path24.default.join(io.cwd, ".forge", "execution", f), "utf8")));
+            const p = normalizePublicTask(JSON.parse((0, import_node_fs28.readFileSync)(import_node_path27.default.join(io.cwd, ".forge", "execution", f), "utf8")));
             if (p && `${p.task}.json` === f) publicTasks[p.task] = p;
           } catch {
           }
@@ -17764,7 +18973,7 @@ function swarmCommand(args, io, deps, ext = {}) {
       if (flag("agents")) {
         let raw;
         try {
-          raw = JSON.parse((0, import_node_fs24.readFileSync)(import_node_path24.default.resolve(io.cwd, flag("agents")), "utf8"));
+          raw = JSON.parse((0, import_node_fs28.readFileSync)(import_node_path27.default.resolve(io.cwd, flag("agents")), "utf8"));
         } catch {
           throw new UsageError("swarm tick: cannot read --agents");
         }
@@ -17775,12 +18984,12 @@ function swarmCommand(args, io, deps, ext = {}) {
       let d;
       update((cur) => {
         d = schedule({ plan, states, sessions, exec: cur ?? e, integrated, now: now.getTime(), publicTasks, agents, merging });
-        if (d.next.kind === "ephemeral" && !d.next.active && d.next.stopReason === "finished" && !d.next.closedAt) d = { ...d, next: { ...d.next, closedAt: iso3, closedBy: "merge" } };
+        if (d.next.kind === "ephemeral" && !d.next.active && d.next.stopReason === "finished" && !d.next.closedAt) d = { ...d, next: { ...d.next, closedAt: iso4, closedBy: "merge" } };
         return d.next;
       });
       const planPath = flag("plan");
       const actions = e.mode === "sessions" && planPath ? d.actions.map((a) => a.type === "start" ? { ...a, launch: memberLaunch(io.cwd, planPath, a.task, e) } : a) : d.actions;
-      return json3({ actions, running: Object.values(d.next.tasks).filter((t) => t.status === "running").length, parallel: e.parallel });
+      return json4({ actions, running: Object.values(d.next.tasks).filter((t) => t.status === "running").length, parallel: e.parallel });
     }
     case "retry": {
       const task = taskArg();
@@ -17831,12 +19040,12 @@ function swarmCommand(args, io, deps, ext = {}) {
           return {
             ...cur,
             ...revive(cur),
-            tasks: { ...cur.tasks, [task]: { ...base, status: "running", stage: "implement", executor: "subagents", worktree, attempts: base.attempts + 1, nudgedAt: null, finishedAt: iso3, updatedAt: iso3, stageSince: iso3 } }
+            tasks: { ...cur.tasks, [task]: { ...base, status: "running", stage: "implement", executor: "subagents", worktree, attempts: base.attempts + 1, nudgedAt: null, finishedAt: iso4, updatedAt: iso4, stageSince: iso4 } }
           };
         });
         clearOwnEnded();
-        writePublicTask(io.cwd, { task, runId: e.runId, stage: "implement", status: "running", agent: null, round: adopted.round, since: iso3, updatedAt: iso3, leaseUntil: new Date(now.getTime() + LEASE_MINUTES * 6e4).toISOString(), by: e.coordinator, mode: "subagents" });
-        return json3({ task, adopted: true, previous: adopted.executor, worktree, branch: t.branch, work: workRel({ project: e.project, task }) });
+        writePublicTask(io.cwd, { task, runId: e.runId, stage: "implement", status: "running", agent: null, round: adopted.round, since: iso4, updatedAt: iso4, leaseUntil: new Date(now.getTime() + LEASE_MINUTES * 6e4).toISOString(), by: e.coordinator, mode: "subagents" });
+        return json4({ task, adopted: true, previous: adopted.executor, worktree, branch: t.branch, work: workRel({ project: e.project, task }) });
       }
       const retryable = (x) => !!x && (x.status === "conflict" || x.status === "blocked");
       if (!retryable(t)) throw new UsageError(`swarm retry: ${task} is not in conflict or blocked`);
@@ -17849,7 +19058,7 @@ function swarmCommand(args, io, deps, ext = {}) {
         return {
           ...cur,
           ...revive(cur),
-          tasks: { ...cur.tasks, [task]: { ...base, status: "running", stage: "implement", attempts: base.attempts + 1, detail: null, finishedAt: null, updatedAt: iso3, stageSince: iso3 } }
+          tasks: { ...cur.tasks, [task]: { ...base, status: "running", stage: "implement", attempts: base.attempts + 1, detail: null, finishedAt: null, updatedAt: iso4, stageSince: iso4 } }
         };
       });
       clearOwnEnded();
@@ -17866,7 +19075,7 @@ function swarmCommand(args, io, deps, ext = {}) {
       if (planArg) {
         const isFile = (() => {
           try {
-            return (0, import_node_fs24.statSync)(import_node_path24.default.resolve(io.cwd, planArg)).isFile();
+            return (0, import_node_fs28.statSync)(import_node_path27.default.resolve(io.cwd, planArg)).isFile();
           } catch {
             return false;
           }
@@ -17876,25 +19085,25 @@ function swarmCommand(args, io, deps, ext = {}) {
       if (sub === "nudge") {
         const es2 = (planArg ? loadPlanArg(io, planArg, "nudge").locale : planLocale(io.cwd, e.project)) === "es";
         const text2 = es2 ? `[forge run] ${task}: contin\xFAa con ${t.stage}; si est\xE1s bloqueado, m\xE1rcalo como bloqueado` : `[forge run] ${task}: continue with ${t.stage}; if you are blocked, mark it blocked`;
-        update((cur) => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...cur.tasks[task] ?? t, nudgedAt: iso3 } } });
-        return json3({ task, name: `wp-${e.project}-${task}`, text: text2 });
+        update((cur) => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...cur.tasks[task] ?? t, nudgedAt: iso4 } } });
+        return json4({ task, name: `wp-${e.project}-${task}`, text: text2 });
       }
       const planPath = planArg;
       if (!planPath) throw new UsageError("swarm relaunch: --plan is required");
       const verdict = relaunchOrBlock(task, t.attempts);
       if (verdict.type === "block") {
-        update((cur) => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...cur.tasks[task] ?? t, status: "blocked", detail: verdict.reason, updatedAt: iso3, finishedAt: iso3 } } });
-        return json3({ task, blocked: true, reason: verdict.reason });
+        update((cur) => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...cur.tasks[task] ?? t, status: "blocked", detail: verdict.reason, updatedAt: iso4, finishedAt: iso4 } } });
+        return json4({ task, blocked: true, reason: verdict.reason });
       }
       const attempt = verdict.attempt;
       const log = deps.git(["log", "--oneline", "-n", "20", `${e.branch}..${t.branch}`])?.trim();
       const commits = log ? log.split(/\r?\n/).map((l) => `  - ${l}`).join("\n") : "  - none";
       const ref = { project: e.kind === "plan" ? e.project : null, task };
-      const note = import_node_path24.default.join(workDir(io.cwd, ref), "handover.md");
+      const note = import_node_path27.default.join(workDir(io.cwd, ref), "handover.md");
       const memberRoot = t.worktree || taskWorktree(io.cwd, task);
       const memberWork = pickWorkDir(workDir(memberRoot, ref), workDir(memberRoot, { project: null, task }));
-      (0, import_node_fs24.mkdirSync)(import_node_path24.default.dirname(note), { recursive: true });
-      (0, import_node_fs24.writeFileSync)(note, [
+      (0, import_node_fs28.mkdirSync)(import_node_path27.default.dirname(note), { recursive: true });
+      (0, import_node_fs28.writeFileSync)(note, [
         `# Handover: ${task} (attempt ${attempt} of ${RELAUNCH_CAP + 1})`,
         "",
         `- Run: ${e.runId} \xB7 coordinator ${e.coordinator} \xB7 run branch ${e.branch}`,
@@ -17909,8 +19118,8 @@ function swarmCommand(args, io, deps, ext = {}) {
         `Resume from ${t.branch} in this worktree: read the brief in ${memberWork} if it exists (else write it as the brief stage says), do not redo a step whose output file is already written, and continue from the last stage.`,
         ""
       ].join("\n"));
-      update((cur) => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...cur.tasks[task] ?? t, attempts: attempt, startedAt: iso3, nudgedAt: null, updatedAt: iso3 } } });
-      return json3({ task, attempt, note, work: workRel(ref), launch: memberLaunch(io.cwd, planPath, task, e) });
+      update((cur) => cur && { ...cur, tasks: { ...cur.tasks, [task]: { ...cur.tasks[task] ?? t, attempts: attempt, startedAt: iso4, nudgedAt: null, updatedAt: iso4 } } });
+      return json4({ task, attempt, note, work: workRel(ref), launch: memberLaunch(io.cwd, planPath, task, e) });
     }
     case "sleep": {
       const seconds = Number(rest[0]);
@@ -17939,22 +19148,24 @@ function swarmCommand(args, io, deps, ext = {}) {
       const e = readExecution(main);
       if (!e) throw new UsageError("swarm close: no execution");
       if (e.active) throw new UsageError(`swarm close: the execution ${e.runId} is active; stop it first (/forge:stop)`);
-      if (e.closedAt) return json3({ closed: "already", runId: e.runId, closedAt: e.closedAt, closedBy: e.closedBy ?? null });
-      closeEnded(main, iso3, "close", lockDeps);
+      if (e.closedAt) return json4({ closed: "already", runId: e.runId, closedAt: e.closedAt, closedBy: e.closedBy ?? null });
+      closeEnded(main, iso4, "close", lockDeps);
       const open = Object.entries(e.tasks).filter(([, t]) => t.status === "running" || t.status === "stopped");
       const sessions = allMembersOf(main, e.runId).map((m) => ({ sessionId: m.sessionId, name: m.name, role: m.role, task: m.task }));
-      for (const m of sessions) (0, import_node_fs24.rmSync)(memberFile(main, m.sessionId), { force: true });
-      return json3({
+      const runs = runsOf(io, e.runId);
+      for (const m of sessions) (0, import_node_fs28.rmSync)(memberFile(main, m.sessionId), { force: true });
+      return json4({
         closed: true,
         runId: e.runId,
         kind: e.kind,
         stopReason: e.stopReason,
-        closedAt: iso3,
+        closedAt: iso4,
         // The coordinator's own tasks go back to free on the roadmap; a member's task stays with its session.
         // A loose task has no state/T to free, so an ephemeral run releases nothing.
         release: e.kind !== "plan" ? [] : open.filter(([, t]) => t.executor === "subagents").map(([id2]) => id2),
         members: open.filter(([, t]) => t.executor !== "subagents").map(([id2]) => id2),
-        sessions
+        sessions,
+        ...runs
       });
     }
     case "cleanup": {
@@ -17972,7 +19183,7 @@ function swarmCommand(args, io, deps, ext = {}) {
       if (step) throw new UsageError(`swarm cleanup: a swarm step is running (.forge/jobs/step.lock${step.pid ? `, pid ${step.pid}` : ""}); run it again once it ends`);
       const head2 = deps.git(["rev-parse", "--abbrev-ref", "HEAD"])?.trim() || "HEAD";
       const merged = (b) => deps.git(["merge-base", "--is-ancestor", `refs/heads/${b}`, "HEAD"]) !== null;
-      const rel3 = (p) => import_node_path24.default.relative(io.cwd, p).split(import_node_path24.default.sep).join("/");
+      const rel3 = (p) => import_node_path27.default.relative(io.cwd, p).split(import_node_path27.default.sep).join("/");
       const taskOf2 = (b) => b.startsWith("task/") && isPlanId(b.slice(5)) ? b.slice(5) : null;
       const removed = { worktrees: [], branches: [], files: 0, bytes: 0 };
       const kept2 = [];
@@ -17988,7 +19199,7 @@ function swarmCommand(args, io, deps, ext = {}) {
       const prunes = forgeWorktrees(blocks.filter(prunable).join("\n\n"), io.cwd).some((w) => !w.branch?.startsWith("track/"));
       const pruned = prunes ? blocks.filter(prunable).flatMap((b) => {
         const at2 = b.split(/\r?\n/).find((l) => l.startsWith("worktree "))?.slice("worktree ".length).trim();
-        return at2 ? [rel3(import_node_path24.default.resolve(at2))] : [];
+        return at2 ? [rel3(import_node_path27.default.resolve(at2))] : [];
       }) : [];
       if (prunes && !dryRun) deps.git(["worktree", "prune"]);
       const listed = prunes && !dryRun ? (deps.git(["worktree", "list", "--porcelain"]) ?? "").split(/\r?\n\r?\n/) : blocks;
@@ -18000,7 +19211,7 @@ function swarmCommand(args, io, deps, ext = {}) {
           kept2.push({ ...where3, reason: "a waypoint track, not forge's" });
           continue;
         }
-        if (!(0, import_node_fs24.existsSync)(w.path)) {
+        if (!(0, import_node_fs28.existsSync)(w.path)) {
           kept2.push({ ...where3, reason: "its folder is gone and git keeps it registered (locked): git worktree unlock it, then run swarm cleanup again" });
           continue;
         }
@@ -18087,7 +19298,7 @@ function swarmCommand(args, io, deps, ext = {}) {
       const work = pruneWork(io.cwd, gone, dryRun);
       removed.files = state.files.length + work.files.length;
       removed.bytes = state.bytes + work.bytes;
-      return json3({ dryRun, removed, kept: kept2, ...pruned.length ? { pruned } : {} });
+      return json4({ dryRun, removed, kept: kept2, ...pruned.length ? { pruned } : {} });
     }
     case "takeover": {
       const hook = claudeSessionId(flag("hook-session"), io.env ?? process.env);
@@ -18099,21 +19310,21 @@ function swarmCommand(args, io, deps, ext = {}) {
       if (!e.active) throw new UsageError("swarm takeover: the execution is not active");
       if (hook === e.hookSession) {
         if (e.coordinator !== session) update((cur) => cur && { ...cur, coordinator: session });
-        return json3({ took: "already", runId: e.runId });
+        return json4({ took: "already", runId: e.runId });
       }
       if (session === e.coordinator) {
         const alive = e.hookSession === null ? "stopped" : boundLiveness(io.cwd, e, now.getTime());
-        if (alive !== "stopped") return json3({ took: false, previous: e.hookSession, liveness: alive, joinAs: "manual" });
+        if (alive !== "stopped") return json4({ took: false, previous: e.hookSession, liveness: alive, joinAs: "manual" });
         update((cur) => cur && { ...cur, hookSession: hook });
-        return json3({ took: "already", runId: e.runId });
+        return json4({ took: "already", runId: e.runId });
       }
       if (readMember(io.cwd, session)?.runId === e.runId) throw new UsageError(`swarm takeover: ${session} is a member of the execution ${e.runId}; a run member cannot take over the coordinator`);
       const previous = e.hookSession ?? e.coordinator;
       const liveness2 = boundLiveness(io.cwd, e, now.getTime());
-      if (liveness2 !== "stopped") return json3({ took: false, previous, liveness: liveness2, joinAs: "manual" });
+      if (liveness2 !== "stopped") return json4({ took: false, previous, liveness: liveness2, joinAs: "manual" });
       update((cur) => cur && { ...cur, coordinator: session, hookSession: hook, sleepUntil: null });
-      appendEvent(io.cwd, { ts: iso3, kind: "decision", point: "takeover", what: "takeover", chosen: session, why: `the coordinator ${previous} stopped`, by: "user", weight: "minor", previous, session, runId: e.runId });
-      return json3({ took: true, previous, runId: e.runId, running: Object.entries(e.tasks).filter(([, t]) => t.status === "running").map(([id2]) => id2) });
+      appendEvent(io.cwd, { ts: iso4, kind: "decision", point: "takeover", what: "takeover", chosen: session, why: `the coordinator ${previous} stopped`, by: "user", weight: "minor", previous, session, runId: e.runId });
+      return json4({ took: true, previous, runId: e.runId, running: Object.entries(e.tasks).filter(([, t]) => t.status === "running").map(([id2]) => id2) });
     }
     case "step":
       if (!ext.step) throw new UsageError("swarm step: not available here");
@@ -18123,18 +19334,18 @@ function swarmCommand(args, io, deps, ext = {}) {
     case "merge":
       return mergeFinal(rest, io, deps);
     default:
-      throw new UsageError("usage: forge swarm <start --project P --session SID --hook-session ID [--plan P] [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F [--locale es|en]|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|step --plan P --db DIR [--agents F] [--returned T1,T2] [--versions F] [--locale es|en]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps] [--no-cache]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt] [--hook-session ID]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|cleanup [--dry-run]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID>");
+      throw new UsageError("usage: forge swarm <start --project P --session SID --hook-session ID [--plan P] [--mode M] [--parallel N] [--merge-on-finish] [--branch B] [--kind plan|ephemeral] [--tasks F] [--locale CODE]|status|propose --plan P|--tasks F [--locale es|en]|worktree <T>|task <T> --stage S [--agent A|--no-agent] [--round N] [--status S] [--detail-file F] [--lease ISO] [--claim]|task <T> --drop|tick [--plan P --db DIR] [--agents F]|step --plan P --db DIR [--agents F] [--returned T1,T2] [--versions F] [--locale es|en]|relaunch <T> --plan P|nudge <T> [--plan P]|integrate <T> [--locale es|en] [--retry-deps] [--no-cache]|merge [--yes] [--locale es|en] [--retry-deps]|retry <T> [--adopt] [--hook-session ID]|sleep <seconds> [--mark]|stop [--reason stopped|budget]|close|cleanup [--dry-run]|join --session SID --role executor|manual [--task T] [--name N] [--hook-session ID]|report <T> --session SID --stage S [--agent A|--no-agent] [--round N] [--status S] [--lease ISO] [--claim]|worktree <T> --member SID|next --plan P --db DIR --session SID|takeover --session SID --hook-session ID>");
   }
 }
 
 // src/forge/cli/review.ts
-var import_node_fs27 = require("node:fs");
-var import_node_path27 = __toESM(require("node:path"), 1);
+var import_node_fs31 = require("node:fs");
+var import_node_path30 = __toESM(require("node:path"), 1);
 
 // src/forge/loop.ts
 var CAP = { medium: 3, large: 4 };
-function decideRound(history, path34) {
-  const cap = CAP[path34];
+function decideRound(history, path37) {
+  const cap = CAP[path37];
   const latest = history.at(-1);
   const round = history.filter((h) => h.action !== "accept").length;
   const tierUp = round >= 3;
@@ -18151,8 +19362,8 @@ function decideRound(history, path34) {
   if (round <= 2) return { round, cap, next: "resume", reason: `round ${round}: resume the implementer${lastNote}`, tierUp, last };
   return { round, cap, next: "fresh-stronger", reason: `round ${round}: fresh implementer one tier up${lastNote}`, tierUp, last };
 }
-function reviewsOf2(round, path34) {
-  return { n: round, max: (path34 === "large" ? CAP.large : CAP.medium) + 1 };
+function reviewsOf3(round, path37) {
+  return { n: round, max: (path37 === "large" ? CAP.large : CAP.medium) + 1 };
 }
 var IMPL_LADDER = ["mech", "impl-light", "impl", "impl-high", "impl-heavy"];
 function stepUp(role) {
@@ -18456,11 +19667,11 @@ function renderHandover(h) {
 }
 
 // src/forge/shadow.ts
-var import_node_fs25 = require("node:fs");
-var import_node_path25 = __toESM(require("node:path"), 1);
+var import_node_fs29 = require("node:fs");
+var import_node_path28 = __toESM(require("node:path"), 1);
 var DEFAULT_SHADOW_BRIEFS = 10;
 var PASS_RATIO = 0.9;
-var shadowFile = (root) => import_node_path25.default.join(mainCheckout(root), ".forge", "shadow.json");
+var shadowFile = (root) => import_node_path28.default.join(mainCheckout(root), ".forge", "shadow.json");
 var isFinding = (x) => !!x && typeof x === "object" && typeof x.problem === "string" && typeof x.severity === "string";
 var isFindings = (x) => Array.isArray(x) && x.every(isFinding);
 function isCase(x) {
@@ -18481,9 +19692,9 @@ function parseShadow(text2) {
 }
 function readShadow(root) {
   const file = shadowFile(root);
-  if (!(0, import_node_fs25.existsSync)(file)) return null;
+  if (!(0, import_node_fs29.existsSync)(file)) return null;
   try {
-    return parseShadow((0, import_node_fs25.readFileSync)(file, "utf8"));
+    return parseShadow((0, import_node_fs29.readFileSync)(file, "utf8"));
   } catch {
     return null;
   }
@@ -18491,13 +19702,13 @@ function readShadow(root) {
 function saveShadow(root, state) {
   const main = mainCheckout(root);
   forgeDir(main);
-  const file = import_node_path25.default.join(main, ".forge", "shadow.json");
+  const file = import_node_path28.default.join(main, ".forge", "shadow.json");
   const tmp = `${file}.${process.pid}.tmp`;
   try {
-    (0, import_node_fs25.writeFileSync)(tmp, JSON.stringify(state, null, 2) + "\n");
-    (0, import_node_fs25.renameSync)(tmp, file);
+    (0, import_node_fs29.writeFileSync)(tmp, JSON.stringify(state, null, 2) + "\n");
+    (0, import_node_fs29.renameSync)(tmp, file);
   } finally {
-    (0, import_node_fs25.rmSync)(tmp, { force: true });
+    (0, import_node_fs29.rmSync)(tmp, { force: true });
   }
 }
 function startShadow(root, briefs = DEFAULT_SHADOW_BRIEFS, opts = {}) {
@@ -18599,8 +19810,8 @@ function renderShadowReport(report, lang = "es") {
 }
 
 // src/forge/cli/shadow.ts
-var import_node_fs26 = require("node:fs");
-var import_node_path26 = __toESM(require("node:path"), 1);
+var import_node_fs30 = require("node:fs");
+var import_node_path29 = __toESM(require("node:path"), 1);
 
 // src/forge/review-round.ts
 var reviewerKey = (role) => role.slice("review-".length);
@@ -18681,7 +19892,7 @@ function reviewRound(input) {
 var USAGE = "usage: forge shadow start [--tasks <N>] [--reset] | stop | report [--locale es|en] | collect --task <id>-<n> --dir <review dir>";
 var json = (v) => ({ code: 0, stdout: JSON.stringify(v, null, 2) + "\n", stderr: "" });
 var isKey = (k) => k === "correctness" || k === "security" || k === "perf";
-var rel = (cwd2, p) => import_node_path26.default.relative(cwd2, p).split(import_node_path26.default.sep).join("/") || ".";
+var rel = (cwd2, p) => import_node_path29.default.relative(cwd2, p).split(import_node_path29.default.sep).join("/") || ".";
 function twinsOf(plan) {
   const spawn = plan && typeof plan === "object" ? plan.spawn : void 0;
   return (Array.isArray(spawn) ? spawn : []).filter((x) => !!x && typeof x === "object" && x.twin === true).map((x) => isKey(x.name) ? x.name : typeof x.role === "string" && x.role.startsWith("review-") ? reviewerKey(x.role) : void 0).filter(isKey);
@@ -18690,17 +19901,17 @@ function collectTwins(task, roundDir, plan, deps) {
   const out = { shadow: [], shadowSkipped: [], shadowPending: [] };
   const pairs = [];
   for (const k of twinsOf(plan)) {
-    const highFile = import_node_path26.default.join(roundDir, `${k}.json`), twinFile = import_node_path26.default.join(roundDir, "shadow", `${k}.json`);
-    if (!(0, import_node_fs26.existsSync)(twinFile)) {
+    const highFile = import_node_path29.default.join(roundDir, `${k}.json`), twinFile = import_node_path29.default.join(roundDir, "shadow", `${k}.json`);
+    if (!(0, import_node_fs30.existsSync)(twinFile)) {
       out.shadowPending.push({ reviewer: k, file: rel(deps.cwd, twinFile) });
       continue;
     }
-    if (!(0, import_node_fs26.existsSync)(highFile)) {
+    if (!(0, import_node_fs30.existsSync)(highFile)) {
       out.shadowSkipped.push({ reviewer: k, reason: "missing", file: rel(deps.cwd, highFile) });
       continue;
     }
-    const high = parseReview((0, import_node_fs26.readFileSync)(highFile, "utf8"));
-    const xhigh = parseReview((0, import_node_fs26.readFileSync)(twinFile, "utf8"));
+    const high = parseReview((0, import_node_fs30.readFileSync)(highFile, "utf8"));
+    const xhigh = parseReview((0, import_node_fs30.readFileSync)(twinFile, "utf8"));
     const bad = xhigh.invalid ? twinFile : high.invalid ? highFile : null;
     if (bad) {
       out.shadowSkipped.push({ reviewer: k, reason: "unparseable", file: rel(deps.cwd, bad) });
@@ -18766,19 +19977,19 @@ ${renderShadowReport(shadowReport(s2?.cases ?? []), lang)}`, stderr: "" };
     case "collect": {
       const task = flagOf(args, "task"), dirArg = flagOf(args, "dir");
       if (!task || !/^.+-\d{1,4}$/.test(task) || !dirArg) throw new UsageError("shadow collect: --task <id>-<n> and --dir <its review dir, reviews-<n>-<round>> are required");
-      const roundDir = import_node_path26.default.resolve(cwd2, dirArg);
+      const roundDir = import_node_path29.default.resolve(cwd2, dirArg);
       const n = task.slice(task.lastIndexOf("-") + 1);
       const norm3 = (p) => {
-        const s2 = p.split(import_node_path26.default.sep).join("/");
+        const s2 = p.split(import_node_path29.default.sep).join("/");
         return process.platform === "win32" ? s2.toLowerCase() : s2;
       };
-      const m = /^reviews-(\d+)-\d+$/.exec(import_node_path26.default.basename(roundDir));
+      const m = /^reviews-(\d+)-\d+$/.exec(import_node_path29.default.basename(roundDir));
       if (!m || Number(m[1]) !== Number(n) || !`/${norm3(roundDir)}/`.includes("/.forge/work/")) {
         throw new UsageError(`shadow collect: --dir must be this brief's reviews-${n}-<round> dir under a .forge/work/ tree`);
       }
       let plan;
       try {
-        plan = JSON.parse((0, import_node_fs26.readFileSync)(import_node_path26.default.join(roundDir, "review-plan.json"), "utf8"));
+        plan = JSON.parse((0, import_node_fs30.readFileSync)(import_node_path29.default.join(roundDir, "review-plan.json"), "utf8"));
       } catch {
         plan = void 0;
       }
@@ -18798,9 +20009,9 @@ var EFFORTS2 = ["medium", "high", "xhigh"];
 var MAX_VALIDATOR_ROUNDS = 2;
 var TASK_N = /^([A-Za-z0-9_.~:@+]+(?:-[A-Za-z0-9_.~:@+]+)*)-(\d{1,4})$/;
 var json2 = (v, code = 0) => ({ code, stdout: JSON.stringify(v, null, 2) + "\n", stderr: "" });
-var rel2 = (cwd2, p) => import_node_path27.default.relative(cwd2, p).split(import_node_path27.default.sep).join("/") || ".";
-var slash = (p) => import_node_path27.default.resolve(p).split(import_node_path27.default.sep).join("/");
-var SHA2 = /^[0-9a-f]{7,64}$/i;
+var rel2 = (cwd2, p) => import_node_path30.default.relative(cwd2, p).split(import_node_path30.default.sep).join("/") || ".";
+var slash2 = (p) => import_node_path30.default.resolve(p).split(import_node_path30.default.sep).join("/");
+var SHA3 = /^[0-9a-f]{7,64}$/i;
 function triageReview(events, base, profile) {
   const last = events.filter((e) => e.kind === "triage" && ofTask(base)(e) && e.review && typeof e.review === "object").at(-1);
   if (!last) return null;
@@ -18824,23 +20035,23 @@ function setAsideEarlier(dir, n, id2, events, run2, cwd2) {
   const ours = new Set(eventsSince(events, run2.startedAt).filter((e) => e.kind === "phase" && isTask(e, id2) && e.brief === Number(n) && typeof e.round === "number").map((e) => e.round));
   let names2 = [];
   try {
-    names2 = (0, import_node_fs27.readdirSync)(dir);
+    names2 = (0, import_node_fs31.readdirSync)(dir);
   } catch {
     return null;
   }
   let evidence = [];
   try {
-    evidence = (0, import_node_fs27.readdirSync)(import_node_path27.default.join(dir, "evidence"));
+    evidence = (0, import_node_fs31.readdirSync)(import_node_path30.default.join(dir, "evidence"));
   } catch {
     evidence = [];
   }
-  const roundOf3 = (f) => {
+  const roundOf4 = (f) => {
     const m = new RegExp(`^(?:reviews-${n}-(\\d+)|findings-${n}-(\\d+)\\.json|fix-${n}-(\\d+)\\.patch|handover-${n}-(\\d+)\\.md|validators-fix-${n}-(\\d+)-.+\\.json)$`).exec(f);
     const k = m ? m.slice(1).find((x) => x !== void 0) : void 0;
     return k === void 0 ? null : Number(k);
   };
   const rounds = [...new Set([
-    ...names2.map(roundOf3),
+    ...names2.map(roundOf4),
     ...evidence.map((f) => {
       const m = new RegExp(`^${n}-(\\d+)$`).exec(f);
       return m ? Number(m[1]) : null;
@@ -18848,7 +20059,7 @@ function setAsideEarlier(dir, n, id2, events, run2, cwd2) {
   ].filter((k) => k !== null && !ours.has(k)))].sort((a, b) => a - b);
   let head2 = null;
   try {
-    head2 = JSON.parse((0, import_node_fs27.readFileSync)(import_node_path27.default.join(dir, `validators-head-${n}.json`), "utf8"));
+    head2 = JSON.parse((0, import_node_fs31.readFileSync)(import_node_path30.default.join(dir, `validators-head-${n}.json`), "utf8"));
   } catch {
     head2 = null;
   }
@@ -18857,15 +20068,15 @@ function setAsideEarlier(dir, n, id2, events, run2, cwd2) {
     ...head2?.runId === run2.runId ? [] : [`validators-head-${n}.json`]
   ].filter((f) => names2.includes(f));
   if (!rounds.length && !briefFiles.length) return null;
-  const aside = import_node_path27.default.join(dir, `earlier-${run2.runId}`);
+  const aside = import_node_path30.default.join(dir, `earlier-${run2.runId}`);
   const moved = [];
   const failed = [];
   const move = (name) => {
-    const from = import_node_path27.default.join(dir, name);
-    if (!(0, import_node_fs27.existsSync)(from)) return;
+    const from = import_node_path30.default.join(dir, name);
+    if (!(0, import_node_fs31.existsSync)(from)) return;
     try {
-      (0, import_node_fs27.mkdirSync)(import_node_path27.default.dirname(import_node_path27.default.join(aside, name)), { recursive: true });
-      (0, import_node_fs27.renameSync)(from, import_node_path27.default.join(aside, name));
+      (0, import_node_fs31.mkdirSync)(import_node_path30.default.dirname(import_node_path30.default.join(aside, name)), { recursive: true });
+      (0, import_node_fs31.renameSync)(from, import_node_path30.default.join(aside, name));
       moved.push(name);
     } catch {
       failed.push(from);
@@ -18885,7 +20096,7 @@ function setAsideEarlier(dir, n, id2, events, run2, cwd2) {
 }
 var shown = (cwd2, p) => {
   const r2 = rel2(cwd2, p);
-  return r2.startsWith("..") ? import_node_path27.default.resolve(p).split(import_node_path27.default.sep).join("/") : r2;
+  return r2.startsWith("..") ? import_node_path30.default.resolve(p).split(import_node_path30.default.sep).join("/") : r2;
 };
 function restoringGenerated(deps, generated, fn, into) {
   return generated.length ? restoringRegenerated({ git: deps.git }, fn, into, generated) : fn();
@@ -18903,27 +20114,27 @@ function validateList(deps, config, list, restored, noCache) {
   return { results, durationMs: Date.now() - t0 };
 }
 var cachedNames = (results) => results.filter((r2) => r2.cached === true).map((r2) => r2.validator);
-function readJson(file) {
+function readJson2(file) {
   try {
-    return JSON.parse((0, import_node_fs27.readFileSync)(file, "utf8"));
+    return JSON.parse((0, import_node_fs31.readFileSync)(file, "utf8"));
   } catch {
     return void 0;
   }
 }
-function readText2(file) {
+function readText3(file) {
   try {
-    return (0, import_node_fs27.readFileSync)(file, "utf8");
+    return (0, import_node_fs31.readFileSync)(file, "utf8");
   } catch {
     return null;
   }
 }
 function writeThreatModel(dir, config) {
-  const file = import_node_path27.default.join(dir, "threat-model.md");
+  const file = import_node_path30.default.join(dir, "threat-model.md");
   if (!config.threatModel) {
-    (0, import_node_fs27.rmSync)(file, { force: true });
+    (0, import_node_fs31.rmSync)(file, { force: true });
     return null;
   }
-  (0, import_node_fs27.writeFileSync)(file, renderThreatModel(config.threatModel));
+  (0, import_node_fs31.writeFileSync)(file, renderThreatModel(config.threatModel));
   return file;
 }
 function reviewPrep(args, deps) {
@@ -18943,7 +20154,7 @@ function reviewPrep(args, deps) {
   const pathName = p;
   let baseline;
   try {
-    baseline = JSON.parse((0, import_node_fs27.readFileSync)(import_node_path27.default.resolve(deps.cwd, baselineArg), "utf8"));
+    baseline = JSON.parse((0, import_node_fs31.readFileSync)(import_node_path30.default.resolve(deps.cwd, baselineArg), "utf8"));
   } catch {
     throw new UsageError("review-prep: --baseline must be the JSON written by forge validate");
   }
@@ -18958,31 +20169,31 @@ function reviewPrep(args, deps) {
   if (!head2) throw new UsageError("review-prep: cannot read HEAD");
   const diff = deps.git(["diff", `${baseSha}..HEAD`]);
   if (diff === null) throw new UsageError(`review-prep: cannot diff ${baseSha}..HEAD`);
-  const dir = import_node_path27.default.resolve(deps.cwd, dirArg);
+  const dir = import_node_path30.default.resolve(deps.cwd, dirArg);
   const since = executionHolding(deps.cwd, { project, task: id2 })?.startedAt ?? null;
   const counted = eventsSince(events, since);
   const round = reviewRoundOf(counted, task);
-  const roundDir = import_node_path27.default.join(dir, `reviews-${n}-${round}`);
-  (0, import_node_fs27.mkdirSync)(roundDir, { recursive: true });
+  const roundDir = import_node_path30.default.join(dir, `reviews-${n}-${round}`);
+  (0, import_node_fs31.mkdirSync)(roundDir, { recursive: true });
   const tmFile = writeThreatModel(dir, config);
-  const index = parseIndex(readText2(import_node_path27.default.join(dir, `findings-index-${n}.json`)), task);
-  const reviewsCount = reviewsOf2(round, pathName);
+  const index = parseIndex(readText3(import_node_path30.default.join(dir, `findings-index-${n}.json`)), task);
+  const reviewsCount = reviewsOf3(round, pathName);
   const previous = {};
   let fixFiles = [];
-  const fixFile = import_node_path27.default.join(dir, `fix-${n}-${round}.patch`);
-  const findingsFile = (name) => import_node_path27.default.join(roundDir, `previous-${name}.json`);
+  const fixFile = import_node_path30.default.join(dir, `fix-${n}-${round}.patch`);
+  const findingsFile = (name) => import_node_path30.default.join(roundDir, `previous-${name}.json`);
   const prevReviews = {};
   if (round >= 2) {
-    const prevDir = import_node_path27.default.join(dir, `reviews-${n}-${round - 1}`);
+    const prevDir = import_node_path30.default.join(dir, `reviews-${n}-${round - 1}`);
     for (const role of ROLES2) {
-      const file = import_node_path27.default.join(prevDir, `${reviewerKey(role)}.json`);
-      if (!(0, import_node_fs27.existsSync)(file)) continue;
-      const r2 = parseReview((0, import_node_fs27.readFileSync)(file, "utf8"));
+      const file = import_node_path30.default.join(prevDir, `${reviewerKey(role)}.json`);
+      if (!(0, import_node_fs31.existsSync)(file)) continue;
+      const r2 = parseReview((0, import_node_fs31.readFileSync)(file, "utf8"));
       prevReviews[reviewerKey(role)] = r2;
       if (r2.invalid && !r2.dropped) continue;
       previous[role] = { verdict: r2.verdict, findings: r2.findings, ...r2.incomplete ? { incomplete: true } : {}, ...r2.invalid ? { invalid: true } : {} };
     }
-    const prevPlan = readJson(import_node_path27.default.join(prevDir, "review-plan.json"));
+    const prevPlan = readJson2(import_node_path30.default.join(prevDir, "review-plan.json"));
     if (prevPlan?.express === true && Array.isArray(prevPlan.delegated) && index.rounds.some((r2) => r2.round === round - 1)) {
       for (const role of ROLES2) {
         const name = reviewerKey(role);
@@ -18993,7 +20204,7 @@ function reviewPrep(args, deps) {
         previous[role] = { verdict: r2.verdict, findings: r2.findings };
       }
     }
-    const prevHead = (0, import_node_fs27.existsSync)(import_node_path27.default.join(prevDir, "head.txt")) ? (0, import_node_fs27.readFileSync)(import_node_path27.default.join(prevDir, "head.txt"), "utf8").trim() : "";
+    const prevHead = (0, import_node_fs31.existsSync)(import_node_path30.default.join(prevDir, "head.txt")) ? (0, import_node_fs31.readFileSync)(import_node_path30.default.join(prevDir, "head.txt"), "utf8").trim() : "";
     const diffFrom = (from) => {
       const names2 = deps.git(["diff", "--name-only", `${from}..HEAD`]);
       const patch = names2 === null ? null : deps.git(["diff", `${from}..HEAD`]);
@@ -19002,12 +20213,12 @@ function reviewPrep(args, deps) {
     const fix = (prevHead ? diffFrom(prevHead) : null) ?? diffFrom(baseSha);
     if (!fix) throw new UsageError(`review-prep: cannot diff the fix (${prevHead || baseSha}..HEAD)`);
     fixFiles = fix.names.split("\n").map((s2) => s2.trim()).filter(Boolean);
-    (0, import_node_fs27.writeFileSync)(fixFile, fix.patch);
+    (0, import_node_fs31.writeFileSync)(fixFile, fix.patch);
   }
   const redo = round >= 2 && counted.filter((e) => e.kind === "verdict" && isTask(e, task)).at(-1)?.action === "redo";
   const lastVerdict = counted.filter((e) => e.kind === "verdict" && isTask(e, task)).at(-1);
-  const prevSent = readJson(import_node_path27.default.join(dir, `findings-${n}-${round - 1}.json`));
-  if (round >= 2 && !redo && round < reviewsCount.max && (pathName === "medium" || pathName === "large") && config.review.express && lastVerdict?.action === "fix" && Array.isArray(prevSent?.validators) && prevSent.validators.length === 0 && expressCandidate(index, round) && SHA2.test(baseSha)) {
+  const prevSent = readJson2(import_node_path30.default.join(dir, `findings-${n}-${round - 1}.json`));
+  if (round >= 2 && !redo && round < reviewsCount.max && (pathName === "medium" || pathName === "large") && config.review.express && lastVerdict?.action === "fix" && Array.isArray(prevSent?.validators) && prevSent.validators.length === 0 && expressCandidate(index, round) && SHA3.test(baseSha)) {
     const express = expressPrep({
       deps,
       task,
@@ -19041,24 +20252,24 @@ function reviewPrep(args, deps) {
   const validation = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored, args.includes("--no-cache"));
   const results = markPreexisting(validation.results, baseline);
   const ok = results.every((r2) => !blocking(r2));
-  const validatorsFile = import_node_path27.default.join(dir, `validators-${n}.json`);
-  (0, import_node_fs27.writeFileSync)(validatorsFile, JSON.stringify(results, null, 2) + "\n");
+  const validatorsFile = import_node_path30.default.join(dir, `validators-${n}.json`);
+  (0, import_node_fs31.writeFileSync)(validatorsFile, JSON.stringify(results, null, 2) + "\n");
   appendEvent(deps.cwd, validateEvent(deps.now().toISOString(), task, results, validation.durationMs, scope.mode));
-  const diffFile = import_node_path27.default.join(dir, `diff-${n}.patch`);
-  (0, import_node_fs27.writeFileSync)(diffFile, diff);
+  const diffFile = import_node_path30.default.join(dir, `diff-${n}.patch`);
+  (0, import_node_fs31.writeFileSync)(diffFile, diff);
   if (!ok) {
     const sinceVerdict = counted.slice(counted.map((e) => e.kind === "verdict" && isTask(e, task)).lastIndexOf(true) + 1);
     const k = sinceVerdict.filter((e) => e.kind === "phase" && isTask(e, id2) && e.phase === "fix" && e.validators === true && e.brief === Number(n)).length;
     if (k < MAX_VALIDATOR_ROUNDS) {
       const blockers = results.filter(blocking);
-      const roundFile = import_node_path27.default.join(dir, `validators-fix-${n}-${round}-${k + 1}.json`);
-      (0, import_node_fs27.writeFileSync)(roundFile, JSON.stringify({
+      const roundFile = import_node_path30.default.join(dir, `validators-fix-${n}-${round}-${k + 1}.json`);
+      (0, import_node_fs31.writeFileSync)(roundFile, JSON.stringify({
         task,
         round,
         validators: blockers.map((r2) => ({ validator: r2.validator, failures: r2.failures, failing: r2.failing ?? [], ...r2.newFailing?.length ? { newFailing: r2.newFailing } : {} }))
       }, null, 2) + "\n");
       appendPhase(deps.cwd, { ts: deps.now().toISOString(), kind: "phase", task: id2, phase: "fix", brief: Number(n), round, validators: true });
-      (0, import_node_fs27.rmSync)(import_node_path27.default.join(roundDir, "review-plan.json"), { force: true });
+      (0, import_node_fs31.rmSync)(import_node_path30.default.join(roundDir, "review-plan.json"), { force: true });
       const fixOut = {
         round,
         reviews: reviewsCount,
@@ -19073,15 +20284,15 @@ function reviewPrep(args, deps) {
       return json2(fixOut);
     }
   }
-  const planFile = import_node_path27.default.join(roundDir, "review-plan.json");
-  const earlier = readJson(planFile);
+  const planFile = import_node_path30.default.join(roundDir, "review-plan.json");
+  const earlier = readJson2(planFile);
   const twinsAllowed = round === 1 && !review.light && (pathName === "medium" || pathName === "large") && review.reviewers.some((r2) => r2.effort === "high");
   const shadowOpen = twinsAllowed && (earlier && typeof earlier.shadow === "boolean" ? earlier.shadow : takeBrief(deps.cwd));
-  const brief = import_node_path27.default.join(dir, `brief-${n}.md`);
-  const report = import_node_path27.default.join(dir, `report-${n}.txt`);
+  const brief = import_node_path30.default.join(dir, `brief-${n}.md`);
+  const report = import_node_path30.default.join(dir, `report-${n}.txt`);
   let tdd = false;
   try {
-    tdd = /^TDD: required/m.test((0, import_node_fs27.readFileSync)(brief, "utf8"));
+    tdd = /^TDD: required/m.test((0, import_node_fs31.readFileSync)(brief, "utf8"));
   } catch {
   }
   const plan = reviewRound({
@@ -19098,22 +20309,22 @@ function reviewPrep(args, deps) {
       diff: rel2(deps.cwd, diffFile),
       validators: rel2(deps.cwd, validatorsFile),
       out: rel2(deps.cwd, roundDir),
-      shadow: rel2(deps.cwd, import_node_path27.default.join(roundDir, "shadow")),
+      shadow: rel2(deps.cwd, import_node_path30.default.join(roundDir, "shadow")),
       ...round >= 2 ? { fix: rel2(deps.cwd, fixFile), findings: (name) => rel2(deps.cwd, findingsFile(name)) } : {},
-      ...tdd && (0, import_node_fs27.existsSync)(report) ? { report: rel2(deps.cwd, report) } : {},
+      ...tdd && (0, import_node_fs31.existsSync)(report) ? { report: rel2(deps.cwd, report) } : {},
       ...tmFile ? { threatModel: rel2(deps.cwd, tmFile) } : {}
     }
   });
-  if (plan.shadow) (0, import_node_fs27.mkdirSync)(import_node_path27.default.join(roundDir, "shadow"), { recursive: true });
+  if (plan.shadow) (0, import_node_fs31.mkdirSync)(import_node_path30.default.join(roundDir, "shadow"), { recursive: true });
   const indexed = index.rounds.some((r2) => r2.round === round - 1);
   for (const s2 of plan.spawn.filter((s3) => s3.mode === "delta" && !s3.twin)) {
     const own = indexed ? previousFindings(index, round, s2.name).map((f) => asPrevious(f)) : (previous[s2.role]?.findings ?? []).filter((f) => f.severity === "critical" || f.severity === "important");
-    (0, import_node_fs27.writeFileSync)(findingsFile(s2.name), JSON.stringify(own, null, 2) + "\n");
+    (0, import_node_fs31.writeFileSync)(findingsFile(s2.name), JSON.stringify(own, null, 2) + "\n");
   }
   writeCarried(plan, dir, n, round, roundDir, prevReviews);
   const spawn = plan.spawn.map((s2) => spawnOut(s2, taskLine(task, project)));
-  (0, import_node_fs27.writeFileSync)(import_node_path27.default.join(roundDir, "head.txt"), head2 + "\n");
-  (0, import_node_fs27.writeFileSync)(planFile, JSON.stringify({
+  (0, import_node_fs31.writeFileSync)(import_node_path30.default.join(roundDir, "head.txt"), head2 + "\n");
+  (0, import_node_fs31.writeFileSync)(planFile, JSON.stringify({
     task,
     round,
     path: pathName,
@@ -19160,21 +20371,21 @@ function sayPrep(reviews, ok, failing, plan, locale, cached) {
 function sayValidatorsRound(reviews, k, failing, locale) {
   return locale === "es" ? `Revisi\xF3n ${reviews.n} de ${reviews.max}: validadores en rojo (${failing.join(", ")}); ronda de validadores ${k} de ${MAX_VALIDATOR_ROUNDS}: nadie revisa, el implementador los arregla primero.` : `Review ${reviews.n} of ${reviews.max}: validators red (${failing.join(", ")}); validators round ${k} of ${MAX_VALIDATOR_ROUNDS}: nobody reviews, the implementer fixes them first.`;
 }
-var spawnOut = (s2, line2) => ({ agent: s2.agent, model: s2.model, effort: s2.effort, mode: s2.mode, ...s2.twin ? { twin: true } : {}, ...s2.express ? { express: true } : {}, role: s2.role, inputs: s2.inputs, taskLine: line2 });
+var spawnOut = (s2, line3) => ({ agent: s2.agent, model: s2.model, effort: s2.effort, mode: s2.mode, ...s2.twin ? { twin: true } : {}, ...s2.express ? { express: true } : {}, role: s2.role, inputs: s2.inputs, taskLine: line3 });
 function writeCarried(plan, dir, n, round, roundDir, prevReviews) {
   for (const c of plan.carried) {
-    const raw = readJson(import_node_path27.default.join(dir, `reviews-${n}-${round - 1}`, `${c.name}.json`));
+    const raw = readJson2(import_node_path30.default.join(dir, `reviews-${n}-${round - 1}`, `${c.name}.json`));
     const parsed = prevReviews[c.name];
     const prev = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : parsed ? { verdict: parsed.verdict, confidence: parsed.confidence, findings: parsed.findings } : null;
-    if (prev) (0, import_node_fs27.writeFileSync)(import_node_path27.default.join(roundDir, `${c.name}.json`), JSON.stringify({ ...prev, carried: true }, null, 2) + "\n");
+    if (prev) (0, import_node_fs31.writeFileSync)(import_node_path30.default.join(roundDir, `${c.name}.json`), JSON.stringify({ ...prev, carried: true }, null, 2) + "\n");
   }
 }
 function expressPrep(c) {
   const { deps, dir, roundDir, n, round } = c;
   const at2 = (f) => rel2(deps.cwd, f);
-  const validatorsFile = import_node_path27.default.join(dir, `validators-${n}.json`);
-  const diffFile = import_node_path27.default.join(dir, `diff-${n}.patch`);
-  const expressFile = import_node_path27.default.join(roundDir, "previous-express.json");
+  const validatorsFile = import_node_path30.default.join(dir, `validators-${n}.json`);
+  const diffFile = import_node_path30.default.join(dir, `diff-${n}.patch`);
+  const expressFile = import_node_path30.default.join(roundDir, "previous-express.json");
   const plan = reviewRound({
     review: c.review,
     round,
@@ -19184,26 +20395,26 @@ function expressPrep(c) {
     fixZones: zonesFromPaths(c.fixFiles),
     express: true,
     files: {
-      brief: at2(import_node_path27.default.join(dir, `brief-${n}.md`)),
+      brief: at2(import_node_path30.default.join(dir, `brief-${n}.md`)),
       diff: at2(diffFile),
       validators: at2(validatorsFile),
       out: at2(roundDir),
-      shadow: at2(import_node_path27.default.join(roundDir, "shadow")),
-      fix: at2(import_node_path27.default.join(dir, `fix-${n}-${round}.patch`)),
+      shadow: at2(import_node_path30.default.join(roundDir, "shadow")),
+      fix: at2(import_node_path30.default.join(dir, `fix-${n}-${round}.patch`)),
       expressFindings: at2(expressFile),
-      findings: (name) => at2(import_node_path27.default.join(roundDir, `previous-${name}.json`)),
+      findings: (name) => at2(import_node_path30.default.join(roundDir, `previous-${name}.json`)),
       ...c.tmFile ? { threatModel: at2(c.tmFile) } : {}
     }
   });
   if (!plan.express) return null;
-  (0, import_node_fs27.rmSync)(validatorsFile, { force: true });
-  (0, import_node_fs27.writeFileSync)(diffFile, c.diff);
-  (0, import_node_fs27.writeFileSync)(expressFile, JSON.stringify(previousFindings(c.index, round).map((f) => asPrevious(f, true)), null, 2) + "\n");
+  (0, import_node_fs31.rmSync)(validatorsFile, { force: true });
+  (0, import_node_fs31.writeFileSync)(diffFile, c.diff);
+  (0, import_node_fs31.writeFileSync)(expressFile, JSON.stringify(previousFindings(c.index, round).map((f) => asPrevious(f, true)), null, 2) + "\n");
   writeCarried(plan, dir, n, round, roundDir, c.prevReviews);
   const spawn = plan.spawn.map((s2) => spawnOut(s2, taskLine(c.task, c.project)));
-  const cmd = `node "${slash(deps.self ?? "forge.cjs")}" validate --all --path ${c.pathName} --base ${c.baseSha} --baseline "${slash(import_node_path27.default.resolve(deps.cwd, c.baselineArg))}" --task ${c.task} --out "${slash(validatorsFile)}"${samePath(deps.repoDir, deps.cwd) ? "" : ` --cwd "${slash(deps.repoDir)}"`}${c.noCache ? " --no-cache" : ""}`;
-  (0, import_node_fs27.writeFileSync)(import_node_path27.default.join(roundDir, "head.txt"), c.head + "\n");
-  (0, import_node_fs27.writeFileSync)(import_node_path27.default.join(roundDir, "review-plan.json"), JSON.stringify({
+  const cmd = `node "${slash2(deps.self ?? "forge.cjs")}" validate --all --path ${c.pathName} --base ${c.baseSha} --baseline "${slash2(import_node_path30.default.resolve(deps.cwd, c.baselineArg))}" --task ${c.task} --out "${slash2(validatorsFile)}"${samePath(deps.repoDir, deps.cwd) ? "" : ` --cwd "${slash2(deps.repoDir)}"`}${c.noCache ? " --no-cache" : ""}`;
+  (0, import_node_fs31.writeFileSync)(import_node_path30.default.join(roundDir, "head.txt"), c.head + "\n");
+  (0, import_node_fs31.writeFileSync)(import_node_path30.default.join(roundDir, "review-plan.json"), JSON.stringify({
     task: c.task,
     round,
     path: c.pathName,
@@ -19247,7 +20458,7 @@ function sayExpress(reviews, plan, locale) {
 }
 var FINDING_ID = /^F\d{1,3}$/;
 function overridesOf(file) {
-  const raw = readJson(file);
+  const raw = readJson2(file);
   const ids = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string" && FINDING_ID.test(x)) : [];
   return { outOfModel: ids(raw?.outOfModel), defer: ids(raw?.defer) };
 }
@@ -19255,12 +20466,12 @@ function briefOverrides(dir, n) {
   const all = { outOfModel: [], defer: [] };
   let entries = [];
   try {
-    entries = (0, import_node_fs27.readdirSync)(dir);
+    entries = (0, import_node_fs31.readdirSync)(dir);
   } catch {
   }
   for (const e of entries) {
     if (!new RegExp(`^reviews-${n}-\\d+$`).test(e)) continue;
-    const o = overridesOf(import_node_path27.default.join(dir, e, "overrides.json"));
+    const o = overridesOf(import_node_path30.default.join(dir, e, "overrides.json"));
     all.outOfModel.push(...o.outOfModel);
     all.defer.push(...o.defer);
   }
@@ -19301,36 +20512,36 @@ function reviewClose(args, deps) {
   };
   const outOfModelArg = idsArg("out-of-model"), deferArg = idsArg("defer");
   const [, id2, n] = m;
-  let dir = import_node_path27.default.resolve(deps.cwd, dirArg);
+  let dir = import_node_path30.default.resolve(deps.cwd, dirArg);
   let round = 0;
-  const own = new RegExp(`^reviews-${n}-(\\d+)$`).exec(import_node_path27.default.basename(dir));
+  const own = new RegExp(`^reviews-${n}-(\\d+)$`).exec(import_node_path30.default.basename(dir));
   if (own) {
     round = Number(own[1]);
-    dir = import_node_path27.default.dirname(dir);
+    dir = import_node_path30.default.dirname(dir);
   } else {
     let entries = [];
     try {
-      entries = (0, import_node_fs27.readdirSync)(dir);
+      entries = (0, import_node_fs31.readdirSync)(dir);
     } catch {
     }
     for (const e of entries) {
       const r2 = new RegExp(`^reviews-${n}-(\\d+)$`).exec(e);
-      if (r2 && (0, import_node_fs27.existsSync)(import_node_path27.default.join(dir, e, "review-plan.json"))) round = Math.max(round, Number(r2[1]));
+      if (r2 && (0, import_node_fs31.existsSync)(import_node_path30.default.join(dir, e, "review-plan.json"))) round = Math.max(round, Number(r2[1]));
     }
   }
-  const roundDir = import_node_path27.default.join(dir, `reviews-${n}-${round}`);
-  const plan = readJson(import_node_path27.default.join(roundDir, "review-plan.json"));
+  const roundDir = import_node_path30.default.join(dir, `reviews-${n}-${round}`);
+  const plan = readJson2(import_node_path30.default.join(roundDir, "review-plan.json"));
   if (!round || !plan || typeof plan !== "object") throw new UsageError(`review-close: no review-plan.json for ${task} in ${dirArg}: run FORGE review-prep first`);
   const names2 = (list, keep) => (Array.isArray(list) ? list : []).filter((x) => x && typeof x === "object" && keep(x)).map((x) => typeof x.name === "string" ? x.name : typeof x.role === "string" && ROLES2.includes(x.role) ? reviewerKey(x.role) : null).filter((x) => x === "correctness" || x === "security" || x === "perf");
   const spawned = names2(plan.spawn, (x) => x.twin !== true);
   const carried = names2(plan.carried, () => true);
-  const missing = [.../* @__PURE__ */ new Set([...spawned, ...carried])].map((k) => import_node_path27.default.join(roundDir, `${k}.json`)).filter((f) => !(0, import_node_fs27.existsSync)(f));
-  const validatorsPath = import_node_path27.default.join(dir, `validators-${n}.json`);
-  if (plan.validatorsPending === true && !(0, import_node_fs27.existsSync)(validatorsPath)) missing.push(validatorsPath);
-  if (plan.validatorsPending === true && (0, import_node_fs27.existsSync)(validatorsPath)) {
-    const doc = readJson(validatorsPath);
+  const missing = [.../* @__PURE__ */ new Set([...spawned, ...carried])].map((k) => import_node_path30.default.join(roundDir, `${k}.json`)).filter((f) => !(0, import_node_fs31.existsSync)(f));
+  const validatorsPath = import_node_path30.default.join(dir, `validators-${n}.json`);
+  if (plan.validatorsPending === true && !(0, import_node_fs31.existsSync)(validatorsPath)) missing.push(validatorsPath);
+  if (plan.validatorsPending === true && (0, import_node_fs31.existsSync)(validatorsPath)) {
+    const doc = readJson2(validatorsPath);
     if (!Array.isArray(doc)) {
-      (0, import_node_fs27.rmSync)(validatorsPath, { force: true });
+      (0, import_node_fs31.rmSync)(validatorsPath, { force: true });
       const error = doc && typeof doc === "object" && typeof doc.error === "string" ? doc.error : "not a validate result";
       throw new UsageError(`review-close: the validation of ${task} gave no results (${error}); ${rel2(deps.cwd, validatorsPath)} was removed: run its validators command again`);
     }
@@ -19338,17 +20549,17 @@ function reviewClose(args, deps) {
   if (missing.length) return json2({ missing: missing.map((f) => rel2(deps.cwd, f)) }, 3);
   const reviews = {};
   for (const k of ["correctness", "security", "perf"]) {
-    const file = import_node_path27.default.join(roundDir, `${k}.json`);
-    if ((0, import_node_fs27.existsSync)(file)) reviews[k] = parseReview((0, import_node_fs27.readFileSync)(file, "utf8"));
+    const file = import_node_path30.default.join(roundDir, `${k}.json`);
+    if ((0, import_node_fs31.existsSync)(file)) reviews[k] = parseReview((0, import_node_fs31.readFileSync)(file, "utf8"));
   }
-  const verifyPath = import_node_path27.default.join(roundDir, "verify.json");
-  const verifyFile = (0, import_node_fs27.existsSync)(verifyPath) ? parseVerifyFile((0, import_node_fs27.readFileSync)(verifyPath, "utf8")) : void 0;
+  const verifyPath = import_node_path30.default.join(roundDir, "verify.json");
+  const verifyFile = (0, import_node_fs31.existsSync)(verifyPath) ? parseVerifyFile((0, import_node_fs31.readFileSync)(verifyPath, "utf8")) : void 0;
   if (verifyFile !== void 0) reviews.verify = verifyReview(verifyFile);
   if (!Object.keys(reviews).length) throw new UsageError(`review-close: no reviews found in ${rel2(deps.cwd, roundDir)}`);
   for (const k of Object.keys(reviews)) {
     reviews[k] = { ...reviews[k], findings: reviews[k].findings.map((f) => f.file ? { ...f, file: repoRelative(f.file, deps.repoDir) } : f) };
   }
-  const rows = readJson(import_node_path27.default.join(dir, `validators-${n}.json`));
+  const rows = readJson2(import_node_path30.default.join(dir, `validators-${n}.json`));
   const arr = Array.isArray(rows) ? rows.filter((r2) => r2 && typeof r2 === "object") : [];
   const validatorsOk = Array.isArray(rows) && arr.every((r2) => !blocking(r2));
   const failing = arr.filter((r2) => blocking(r2)).map((r2) => ({
@@ -19360,15 +20571,15 @@ function reviewClose(args, deps) {
   const flags = Array.isArray(plan.flags) ? plan.flags : [];
   const fixPatch = round >= 2 ? (() => {
     try {
-      return (0, import_node_fs27.readFileSync)(import_node_path27.default.join(dir, `fix-${n}-${round}.patch`), "utf8");
+      return (0, import_node_fs31.readFileSync)(import_node_path30.default.join(dir, `fix-${n}-${round}.patch`), "utf8");
     } catch {
       return "";
     }
   })() : "";
   const config = loadConfig(deps.repoDir);
-  const reviewsCount = reviewsOf2(round, p);
-  const indexPath = import_node_path27.default.join(dir, `findings-index-${n}.json`);
-  const indexText = readText2(indexPath);
+  const reviewsCount = reviewsOf3(round, p);
+  const indexPath = import_node_path30.default.join(dir, `findings-index-${n}.json`);
+  const indexText = readText3(indexPath);
   const index = parseIndex(indexText, task);
   const express = plan.express === true;
   const roundRel = rel2(deps.cwd, roundDir);
@@ -19385,8 +20596,8 @@ function reviewClose(args, deps) {
         throw new UsageError(`review-close: --${name} ${unknown.join(",")}: no finding of this review, nor one the previous review left open, has that id; nothing was written (ids: ${known.join(", ") || "none"})`);
       }
     }
-    const kept2 = overridesOf(import_node_path27.default.join(roundDir, "overrides.json"));
-    (0, import_node_fs27.writeFileSync)(import_node_path27.default.join(roundDir, "overrides.json"), JSON.stringify({
+    const kept2 = overridesOf(import_node_path30.default.join(roundDir, "overrides.json"));
+    (0, import_node_fs31.writeFileSync)(import_node_path30.default.join(roundDir, "overrides.json"), JSON.stringify({
       outOfModel: [.../* @__PURE__ */ new Set([...kept2.outOfModel, ...outOfModelArg])],
       defer: [.../* @__PURE__ */ new Set([...kept2.defer, ...deferArg])]
     }, null, 2) + "\n");
@@ -19416,11 +20627,11 @@ function reviewClose(args, deps) {
   });
   if (indexText?.trim() && !index.rounds.length) {
     const aside = `${indexPath}.corrupt-${deps.now().toISOString().replace(/[:.]/g, "-")}`;
-    (0, import_node_fs27.renameSync)(indexPath, aside);
+    (0, import_node_fs31.renameSync)(indexPath, aside);
     result.reasons.push(`unreadable findings index set aside as ${rel2(deps.cwd, aside)}`);
   }
   const indexNow = recordRound(index, round, result, answered, { fresh: fresh2 });
-  (0, import_node_fs27.writeFileSync)(indexPath, JSON.stringify(indexNow, null, 2) + "\n");
+  (0, import_node_fs31.writeFileSync)(indexPath, JSON.stringify(indexNow, null, 2) + "\n");
   const carriedResidual = result.action === "accept" && !fresh2 ? carriedResiduals(index, round, result) : [];
   if (carriedResidual.length) {
     result.deferred.push(...carriedResidual);
@@ -19484,36 +20695,36 @@ function reviewClose(args, deps) {
     if (!logged) appendEvent(deps.cwd, { ts, kind: "ruling", ...ruling });
   }
   let findings = null;
-  const findingsPath = import_node_path27.default.join(dir, `findings-${n}-${round}.json`);
+  const findingsPath = import_node_path30.default.join(dir, `findings-${n}-${round}.json`);
   if (result.action !== "accept") {
-    (0, import_node_fs27.writeFileSync)(findingsPath, JSON.stringify({ task, round, action: result.action, findings: [...result.critical, ...result.important], validators: failing }, null, 2) + "\n");
+    (0, import_node_fs31.writeFileSync)(findingsPath, JSON.stringify({ task, round, action: result.action, findings: [...result.critical, ...result.important], validators: failing }, null, 2) + "\n");
     findings = rel2(deps.cwd, findingsPath);
-  } else (0, import_node_fs27.rmSync)(findingsPath, { force: true });
+  } else (0, import_node_fs31.rmSync)(findingsPath, { force: true });
   const sha = (v) => {
-    if (typeof v !== "string" || !SHA2.test(v.trim())) return "";
+    if (typeof v !== "string" || !SHA3.test(v.trim())) return "";
     return (deps.git(["rev-parse", "--verify", "--quiet", `${v.trim()}^{commit}`]) ?? "").trim();
   };
   const planBase = sha(plan.base);
   let handover = null;
-  const handoverFile = import_node_path27.default.join(dir, `handover-${n}-${round}.md`);
+  const handoverFile = import_node_path30.default.join(dir, `handover-${n}-${round}.md`);
   if (d.next === "fresh-stronger" || d.next === "redo") {
     const wrong = Object.values(reviews).filter((r2) => r2?.verdict === "fail" && r2.approach === "wrong").flatMap((r2) => r2.findings.filter((f) => f.severity !== "minor").map((f) => f.problem));
-    (0, import_node_fs27.writeFileSync)(handoverFile, renderHandover({
+    (0, import_node_fs31.writeFileSync)(handoverFile, renderHandover({
       task,
       reviews: reviewsCount,
-      brief: rel2(deps.cwd, import_node_path27.default.join(dir, `brief-${n}.md`)),
-      diff: rel2(deps.cwd, import_node_path27.default.join(dir, `diff-${n}.patch`)),
+      brief: rel2(deps.cwd, import_node_path30.default.join(dir, `brief-${n}.md`)),
+      diff: rel2(deps.cwd, import_node_path30.default.join(dir, `diff-${n}.patch`)),
       base: planBase,
-      head: sha(readText2(import_node_path27.default.join(roundDir, "head.txt"))),
+      head: sha(readText3(import_node_path30.default.join(roundDir, "head.txt"))),
       open: [...result.critical, ...result.important],
       residual: result.deferred,
       history: historyLine(indexNow),
       validators: failing.map((v) => v.validator),
-      report: rel2(deps.cwd, import_node_path27.default.join(dir, `report-${n}.txt`)),
+      report: rel2(deps.cwd, import_node_path30.default.join(dir, `report-${n}.txt`)),
       redo: d.next === "redo" ? { reasons: wrong } : null
     }));
     handover = rel2(deps.cwd, handoverFile);
-  } else (0, import_node_fs27.rmSync)(handoverFile, { force: true });
+  } else (0, import_node_fs31.rmSync)(handoverFile, { force: true });
   const headNow = (deps.git(["rev-parse", "HEAD"]) ?? "").trim();
   const undo = d.next === "redo" && !!planBase && !!headNow && headNow !== planBase;
   const revert = undo ? deps.git(["rev-list", "--merges", `${planBase}..HEAD`])?.trim() ? { base: planBase, head: headNow, steps: [
@@ -19569,7 +20780,7 @@ function prep(args, deps) {
     const given = flag("base");
     if (!given) throw new UsageError("prep: --base needs a commit");
     const sha = (deps.git(["rev-parse", "--verify", "-q", `${given}^{commit}`]) ?? "").trim();
-    if (!SHA2.test(sha) || deps.git(["merge-base", "--is-ancestor", sha, "HEAD"]) === null) throw new UsageError(`prep: --base ${given.slice(0, 80)} is not HEAD or a commit below it`);
+    if (!SHA3.test(sha) || deps.git(["merge-base", "--is-ancestor", sha, "HEAD"]) === null) throw new UsageError(`prep: --base ${given.slice(0, 80)} is not HEAD or a commit below it`);
     base = sha;
   }
   const started = base === head2 ? {} : { head: head2 };
@@ -19583,16 +20794,16 @@ function prep(args, deps) {
   if (flag("dir") === void 0 && !isSafeId(id2)) throw new UsageError(`prep: --task ${task.slice(0, 80)}: no work folder can be named after its id (letters, digits, _ - . only); pass --dir`);
   const ledger = readEvents(deps.cwd);
   const project = resolveProject({ flag: flag("project"), dir: flag("dir"), task: id2, events: ledger });
-  const dir = flag("dir") !== void 0 ? import_node_path27.default.resolve(deps.cwd, flag("dir")) : readWorkDir(deps.cwd, { project, task: id2 }, ledger);
-  (0, import_node_fs27.mkdirSync)(dir, { recursive: true });
+  const dir = flag("dir") !== void 0 ? import_node_path30.default.resolve(deps.cwd, flag("dir")) : readWorkDir(deps.cwd, { project, task: id2 }, ledger);
+  (0, import_node_fs31.mkdirSync)(dir, { recursive: true });
   const run2 = executionHolding(deps.cwd, { project, task: id2 });
   const mine = eventsOf(ledger, { project, task: id2 });
   const aside = run2 ? setAsideEarlier(dir, n, id2, mine, run2, deps.cwd) : null;
   const main = ledgerRoot(deps.cwd);
-  const inWork = import_node_path27.default.relative(deps.cwd, dir);
-  if (run2 && !samePath(main, deps.cwd) && inWork && !inWork.startsWith("..") && !import_node_path27.default.isAbsolute(inWork)) {
+  const inWork = import_node_path30.default.relative(deps.cwd, dir);
+  if (run2 && !samePath(main, deps.cwd) && inWork && !inWork.startsWith("..") && !import_node_path30.default.isAbsolute(inWork)) {
     try {
-      setAsideEarlier(import_node_path27.default.join(main, inWork), n, id2, mine, run2, deps.cwd);
+      setAsideEarlier(import_node_path30.default.join(main, inWork), n, id2, mine, run2, deps.cwd);
     } catch (err) {
       if (err instanceof UsageError && aside) throw new UsageError(`${err.message}; already moved this worktree's ${aside.moved.join(", ")} to ${shown(deps.cwd, aside.aside)}`);
       throw err;
@@ -19601,7 +20812,7 @@ function prep(args, deps) {
   const earlier = aside ? { earlier: rel2(deps.cwd, aside.aside) } : {};
   const tmFile = config ? writeThreatModel(dir, config) : null;
   const threatModel = tmFile ? rel2(deps.cwd, tmFile) : null;
-  const validate = `node "${slash(deps.self ?? "forge.cjs")}" validate --affected --base ${base} --task ${task}${samePath(deps.repoDir, deps.cwd) ? "" : ` --cwd "${slash(deps.repoDir)}"`}`;
+  const validate = `node "${slash2(deps.self ?? "forge.cjs")}" validate --affected --base ${base} --task ${task}${samePath(deps.repoDir, deps.cwd) ? "" : ` --cwd "${slash2(deps.repoDir)}"`}`;
   if (noBaseline || !config) {
     appendEvent(deps.cwd, { ts: deps.now().toISOString(), kind: "phase", task: id2, phase, brief: Number(n), base, ...started });
     return json2({ base, ...started, baseline: null, failing: [], cached: [], durationMs: 0, validate, threatModel, ...earlier });
@@ -19609,8 +20820,8 @@ function prep(args, deps) {
   const scope = p === "trivial" || p === "small" ? { mode: "small" } : { mode: "heavy", changed: null };
   const restored = [];
   const { results, durationMs } = validateList(deps, config, selectValidators(detectValidators(deps.repo, config), scope), restored, args.includes("--no-cache"));
-  const file = import_node_path27.default.join(dir, `baseline-${n}.json`);
-  (0, import_node_fs27.writeFileSync)(file, JSON.stringify(results, null, 2) + "\n");
+  const file = import_node_path30.default.join(dir, `baseline-${n}.json`);
+  (0, import_node_fs31.writeFileSync)(file, JSON.stringify(results, null, 2) + "\n");
   const ts = deps.now().toISOString();
   appendEvent(deps.cwd, validateEvent(ts, task, results, durationMs, scope.mode, { baseline: true }));
   appendEvent(deps.cwd, { ts, kind: "phase", task: id2, phase, brief: Number(n), base, ...started });
@@ -19631,30 +20842,113 @@ function reviewCommand(cmd, args, deps) {
   }
 }
 
+// src/forge/cli/roadmap.ts
+var import_node_fs32 = require("node:fs");
+var import_node_path31 = __toESM(require("node:path"), 1);
+var fail = (code, msg) => ({ code, stdout: "", stderr: `${msg}
+` });
+var json3 = (v) => ({ code: 0, stdout: JSON.stringify(v, null, 2) + "\n", stderr: "" });
+var DOC_USAGE = "usage: forge roadmap-doc <T> [--project p] [--plan plan.yaml] [--assets uploads.json] [--cwd dir] [--out file]";
+function roadmapCommand(cmd, args, io) {
+  const flag = (name) => {
+    const i = args.indexOf(`--${name}`);
+    const v = i >= 0 ? args[i + 1] : void 0;
+    return v === void 0 || v.startsWith("--") ? void 0 : v;
+  };
+  for (const name of ["project", "plan", "assets", "out", "run", "task", "session"]) {
+    if (args.includes(`--${name}`) && flag(name) === void 0) return fail(2, `${cmd}: --${name} needs a value`);
+  }
+  if (cmd === "roadmap-doc") {
+    const task = args[0];
+    if (!task || task.startsWith("--")) return fail(2, DOC_USAGE);
+    let project = flag("project") ?? null;
+    const planArg = flag("plan");
+    if (planArg) {
+      let plan;
+      try {
+        plan = parsePlan((0, import_node_fs32.readFileSync)(import_node_path31.default.resolve(io.cwd, planArg), "utf8"));
+      } catch (e) {
+        return fail(2, `roadmap-doc: ${e instanceof PlanError ? e.issues.join("; ") : `cannot read ${planArg}`}`);
+      }
+      if (!plan.tasks.some((t) => t.id === task)) return fail(2, `roadmap-doc: ${task} is not a task of ${planArg}`);
+      project ??= plan.project;
+    }
+    try {
+      const r2 = generateRoadmapDoc(io, task, { project, assets: flag("assets") ?? null, out: flag("out") ?? null });
+      return json3({ task: r2.task, project: r2.project, bytes: r2.bytes, file: r2.file, write: r2.write, dropped: r2.dropped });
+    } catch (e) {
+      if (e instanceof RoadmapDocError) return fail(e.code, e.message);
+      throw e;
+    }
+  }
+  if (cmd === "roadmap-run") {
+    try {
+      const r2 = roadmapRun(io, { run: flag("run"), task: flag("task"), project: flag("project") ?? null, session: flag("session"), out: flag("out") });
+      return json3({ write: r2.write, cleanup: r2.cleanup, bytes: r2.bytes, dropped: r2.dropped });
+    } catch (e) {
+      if (e instanceof RoadmapRunError) return fail(e.code, e.message);
+      throw e;
+    }
+  }
+  return fail(2, DOC_USAGE);
+}
+
+// src/forge/infinite-doc.ts
+var INFINITE_SLEEP_MARGIN_MIN = 5;
+function seatOf(main, claude, now, alive) {
+  const live = claudeBindings(main, claude, now, alive).filter((b) => !b.endedAt && bindingLive(b, now));
+  return live.sort((a, b) => Date.parse(b.seenAt) - Date.parse(a.seenAt))[0]?.sid ?? null;
+}
+function infiniteDocOf(run2, o) {
+  const t = o.now.getTime();
+  const sleep = o.sleepUntil ? Date.parse(o.sleepUntil) - t : NaN;
+  const ms = Math.max(LEASE_MINUTES * 6e4, Number.isFinite(sleep) && sleep > 0 ? sleep + INFINITE_SLEEP_MARGIN_MIN * 6e4 : 0);
+  const coordinator = run2.sessionId && isSafeId(run2.sessionId) ? { sid: o.sid, claude: run2.sessionId, seenAt: o.now.toISOString(), leaseUntil: new Date(t + ms).toISOString() } : null;
+  return {
+    active: run2.active,
+    cycle: run2.cycle,
+    budget: run2.budget,
+    startedAt: run2.startedAt,
+    lastCycleAt: o.lastCycleAt,
+    coordinator,
+    stopReason: run2.active ? null : run2.stoppedReason ?? null
+  };
+}
+function infinitePublish(main, run2, now) {
+  const exec = readExecution(main);
+  const lastCycleAt = readEvents(main).filter((e) => e.kind === "cycle" && typeof e.cycle === "number" && e.ts >= run2.startedAt).at(-1)?.ts ?? null;
+  return infiniteDocOf(run2, {
+    now,
+    sid: run2.sessionId ? seatOf(main, run2.sessionId, now.getTime()) : null,
+    sleepUntil: exec?.active ? exec.sleepUntil : null,
+    lastCycleAt
+  });
+}
+
 // src/forge/cli/step.ts
-var import_node_fs28 = require("node:fs");
-var import_node_path28 = __toESM(require("node:path"), 1);
+var import_node_fs33 = require("node:fs");
+var import_node_path32 = __toESM(require("node:path"), 1);
 var AGENT_LEASE_MINUTES = 90;
 var ASK_AGAIN_MS = 24 * 36e5;
-var slash2 = (p) => p.split(import_node_path28.default.sep).join("/");
-var readText3 = (f) => {
+var slash3 = (p) => p.split(import_node_path32.default.sep).join("/");
+var readText4 = (f) => {
   try {
-    return (0, import_node_fs28.readFileSync)(f, "utf8");
+    return (0, import_node_fs33.readFileSync)(f, "utf8");
   } catch {
     return null;
   }
 };
-var readJson2 = (f) => {
+var readJson3 = (f) => {
   try {
-    return JSON.parse((0, import_node_fs28.readFileSync)(f, "utf8"));
+    return JSON.parse((0, import_node_fs33.readFileSync)(f, "utf8"));
   } catch {
     return null;
   }
 };
-var writeJson = (f, v) => (0, import_node_fs28.writeFileSync)(f, JSON.stringify(v, null, 2) + "\n");
-var mtimeOf = (f) => {
+var writeJson = (f, v) => (0, import_node_fs33.writeFileSync)(f, JSON.stringify(v, null, 2) + "\n");
+var mtimeOf2 = (f) => {
   try {
-    return (0, import_node_fs28.statSync)(f).mtimeMs;
+    return (0, import_node_fs33.statSync)(f).mtimeMs;
   } catch {
     return null;
   }
@@ -19678,14 +20972,14 @@ function readRulings(rest) {
   return out;
 }
 function readAsked(file) {
-  const raw = readJson2(file);
+  const raw = readJson3(file);
   if (!isObject(raw) || typeof raw.at !== "string" || !isObject(raw.close)) return null;
   const r2 = raw.ruling;
   const ruling = isObject(r2) && r2.kind === "defer" && asList(r2.ids).length ? { kind: "defer", ids: asList(r2.ids) } : isObject(r2) && (r2.kind === "fix" || r2.kind === "out-of-model" || r2.kind === "review") ? { kind: r2.kind } : void 0;
   return { ...raw, findings: asList(raw.findings), ruling };
 }
 function readRespawned(file) {
-  const raw = readJson2(file);
+  const raw = readJson3(file);
   const out = {};
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
   for (const [k, v] of Object.entries(raw)) {
@@ -19697,7 +20991,7 @@ function readRespawned(file) {
 function readVersions(cwd2, file) {
   const out = { state: {}, sessions: {} };
   if (!file) return out;
-  const raw = readJson2(import_node_path28.default.resolve(cwd2, file));
+  const raw = readJson3(import_node_path32.default.resolve(cwd2, file));
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new UsageError(`swarm step: cannot read --versions ${file}`);
   for (const k of ["state", "sessions"]) {
     const m = raw[k];
@@ -19723,25 +21017,25 @@ function briefOf2(events, task) {
   const e = events.filter((x) => x.kind === "phase" && isTask(x, task) && x.phase === "implement" && typeof x.base === "string" && x.base).at(-1);
   return { n: typeof e?.brief === "number" && e.brief >= 1 ? e.brief : 1, base: e ? String(e.base) : null, head: typeof e?.head === "string" && e.head ? e.head : null };
 }
-var workOf = (c, task, events) => import_node_path28.default.relative(c.io.cwd, readWorkDir(c.io.cwd, { project: c.project, task }, events));
+var workOf = (c, task, events) => import_node_path32.default.relative(c.io.cwd, readWorkDir(c.io.cwd, { project: c.project, task }, events));
 function latestRound(work, n) {
   let round = 0;
   let names2 = [];
   try {
-    names2 = (0, import_node_fs28.readdirSync)(work);
+    names2 = (0, import_node_fs33.readdirSync)(work);
   } catch {
     return 0;
   }
   for (const d of names2) {
     const m = new RegExp(`^reviews-${n}-(\\d+)$`).exec(d);
-    if (m && (0, import_node_fs28.existsSync)(import_node_path28.default.join(work, d, "review-plan.json"))) round = Math.max(round, Number(m[1]));
+    if (m && (0, import_node_fs33.existsSync)(import_node_path32.default.join(work, d, "review-plan.json"))) round = Math.max(round, Number(m[1]));
   }
   return round;
 }
 function seenOf(work, n, round, start, runId) {
-  const v = readJson2(import_node_path28.default.join(work, `validators-head-${n}.json`));
+  const v = readJson3(import_node_path32.default.join(work, `validators-head-${n}.json`));
   if (v && typeof v === "object" && typeof v.head === "string" && v.head && typeof v.round === "number" && v.round > round && (v.runId === void 0 || v.runId === runId)) return v.head;
-  return (round ? readText3(import_node_path28.default.join(work, `reviews-${n}-${round}`, "head.txt"))?.trim() : null) || start;
+  return (round ? readText4(import_node_path32.default.join(work, `reviews-${n}-${round}`, "head.txt"))?.trim() : null) || start;
 }
 function lastAgent(c, taskN) {
   const e = ledgerOf(c, taskN).filter((x) => x.kind === "agent" && isTask(x, taskN) && typeof x.agent === "string" && x.agent).at(-1);
@@ -19753,7 +21047,7 @@ function logAgent(c, taskN, agent, role) {
   appendEvent(c.io.cwd, { ts: c.iso(), kind: "agent", task: taskN, agent, role });
 }
 function finished(file) {
-  const text2 = readText3(file);
+  const text2 = readText4(file);
   if (text2 === null) return false;
   try {
     const o = JSON.parse(text2);
@@ -19765,7 +21059,7 @@ function finished(file) {
 function renewLease(io, e, task, t, now) {
   let prev = null;
   try {
-    prev = normalizePublicTask(JSON.parse((0, import_node_fs28.readFileSync)(executionTaskFile(io.cwd, task), "utf8")));
+    prev = normalizePublicTask(JSON.parse((0, import_node_fs33.readFileSync)(executionTaskFile(io.cwd, task), "utf8")));
   } catch {
     prev = null;
   }
@@ -19776,11 +21070,11 @@ function renewLease(io, e, task, t, now) {
   writePublicTask(io.cwd, { ...base, leaseUntil, updatedAt: now.toISOString() });
 }
 function keptPrep(c, task, work, worktree, resumedBase) {
-  const kept2 = readJson2(import_node_path28.default.join(work, "prep-1.json"));
+  const kept2 = readJson3(import_node_path32.default.join(work, "prep-1.json"));
   const head2 = c.deps.gitAt(worktree)(["rev-parse", "HEAD"])?.trim();
   const { n, base } = briefOf2(ledgerOf(c, task), task);
   const want = resumedBase ?? head2;
-  const ok = !!kept2 && typeof kept2 === "object" && typeof kept2.validate === "string" && !!head2 && kept2.base === want && (kept2.head ?? kept2.base) === head2 && base === want && n === 1 && (resumedBase !== null || (0, import_node_fs28.existsSync)(import_node_path28.default.join(work, "baseline-1.json")));
+  const ok = !!kept2 && typeof kept2 === "object" && typeof kept2.validate === "string" && !!head2 && kept2.base === want && (kept2.head ?? kept2.base) === head2 && base === want && n === 1 && (resumedBase !== null || (0, import_node_fs33.existsSync)(import_node_path32.default.join(work, "baseline-1.json")));
   return ok ? kept2 : null;
 }
 function startTask(c, task, resume) {
@@ -19789,27 +21083,27 @@ function startTask(c, task, resume) {
   const worktree = w.worktree;
   const resumedBase = w.resumed === true && typeof w.base === "string" && w.base ? w.base : null;
   const work = workRel({ project: c.project, task });
-  (0, import_node_fs28.mkdirSync)(import_node_path28.default.join(c.io.cwd, work), { recursive: true });
-  const prior = Array.isArray(w.prior) && w.prior.length ? import_node_path28.default.join(work, "prior.json") : null;
-  if (prior) (0, import_node_fs28.writeFileSync)(import_node_path28.default.join(c.io.cwd, prior), JSON.stringify(w.prior, null, 2) + "\n");
+  (0, import_node_fs33.mkdirSync)(import_node_path32.default.join(c.io.cwd, work), { recursive: true });
+  const prior = Array.isArray(w.prior) && w.prior.length ? import_node_path32.default.join(work, "prior.json") : null;
+  if (prior) (0, import_node_fs33.writeFileSync)(import_node_path32.default.join(c.io.cwd, prior), JSON.stringify(w.prior, null, 2) + "\n");
   const total = prior && typeof w.priorTotal === "number" ? ["--prior-total", String(w.priorTotal)] : [];
-  const b = c.deps.cli(["brief", "--plan", c.planArg, "--task", task, ...prior ? ["--prior-file", slash2(prior), ...total] : []]);
+  const b = c.deps.cli(["brief", "--plan", c.planArg, "--task", task, ...prior ? ["--prior-file", slash3(prior), ...total] : []]);
   if (b.code !== 0) {
     c.actions.push({ type: "error", task, command: "brief", code: b.code, stderr: b.stderr.trim().slice(0, 500) });
     return false;
   }
-  const brief = import_node_path28.default.join(work, "brief-1.md");
-  (0, import_node_fs28.mkdirSync)(import_node_path28.default.join(c.io.cwd, work), { recursive: true });
-  (0, import_node_fs28.writeFileSync)(import_node_path28.default.join(c.io.cwd, brief), `${b.stdout.trimEnd()}
+  const brief = import_node_path32.default.join(work, "brief-1.md");
+  (0, import_node_fs33.mkdirSync)(import_node_path32.default.join(c.io.cwd, work), { recursive: true });
+  (0, import_node_fs33.writeFileSync)(import_node_path32.default.join(c.io.cwd, brief), `${b.stdout.trimEnd()}
 
-Worktree: ${slash2(worktree)} (work only inside this directory).
+Worktree: ${slash3(worktree)} (work only inside this directory).
 `);
   const tri = call(c, task, ["triage", "--plan", c.planArg, "--task", task, "--cwd", worktree, "--locale", c.locale]);
   if (!tri) return false;
-  const kept2 = resume ? keptPrep(c, task, import_node_path28.default.join(c.io.cwd, work), worktree, resumedBase) : null;
+  const kept2 = resume ? keptPrep(c, task, import_node_path32.default.join(c.io.cwd, work), worktree, resumedBase) : null;
   const pr = kept2 ?? call(c, task, ["prep", "--task", `${task}-1`, "--path", "large", "--dir", work, "--cwd", worktree, ...resumedBase ? ["--base", resumedBase, "--no-baseline"] : []]);
   if (!pr) return false;
-  if (!kept2) (0, import_node_fs28.writeFileSync)(import_node_path28.default.join(c.io.cwd, work, "prep-1.json"), JSON.stringify(pr, null, 2) + "\n");
+  if (!kept2) (0, import_node_fs33.writeFileSync)(import_node_path32.default.join(c.io.cwd, work, "prep-1.json"), JSON.stringify(pr, null, 2) + "\n");
   const impl = tri.implementer && typeof tri.implementer === "object" ? tri.implementer : {};
   const agent = typeof impl.agent === "string" ? impl.agent : "forge-impl";
   logAgent(c, `${task}-1`, agent, typeof impl.role === "string" ? impl.role : "impl");
@@ -19820,8 +21114,8 @@ Worktree: ${slash2(worktree)} (work only inside this directory).
     agent,
     taskLine: taskLine(`${task}-1`, c.project),
     role: impl.role ?? null,
-    brief: slash2(brief),
-    report: slash2(import_node_path28.default.join(work, "report-1.txt")),
+    brief: slash3(brief),
+    report: slash3(import_node_path32.default.join(work, "report-1.txt")),
     validate: pr.validate ?? null,
     worktree,
     base: pr.base ?? null,
@@ -19834,9 +21128,9 @@ function reviewBase(c, task, t, n, base, rebaseline, work) {
   if (t.attempts < 1 && !rebaseline) return base;
   const moved = taskBase(c.deps.gitAt(t.worktree), c.runBranch);
   if (!moved || moved === base && !rebaseline) return base;
-  const mark = import_node_path28.default.join(work, `base-${n}.json`);
-  const kept2 = readJson2(mark);
-  if (kept2 && typeof kept2 === "object" && kept2.base === moved && (0, import_node_fs28.existsSync)(import_node_path28.default.join(work, `baseline-${n}.json`))) return moved;
+  const mark = import_node_path32.default.join(work, `base-${n}.json`);
+  const kept2 = readJson3(mark);
+  if (kept2 && typeof kept2 === "object" && kept2.base === moved && (0, import_node_fs33.existsSync)(import_node_path32.default.join(work, `baseline-${n}.json`))) return moved;
   const argv = ["validate", "--all", "--path", "large", "--base-run", "--task", `${task}-${n}`, "--cwd", runWorktree(c.io.cwd)];
   const r2 = c.deps.cli(argv);
   let results = null;
@@ -19849,9 +21143,9 @@ function reviewBase(c, task, t, n, base, rebaseline, work) {
     c.actions.push({ type: "error", task, command: "validate", code: r2.code, stderr: (r2.stderr || r2.stdout).trim().slice(0, 500) });
     return null;
   }
-  (0, import_node_fs28.mkdirSync)(work, { recursive: true });
-  (0, import_node_fs28.writeFileSync)(import_node_path28.default.join(work, `baseline-${n}.json`), JSON.stringify(results, null, 2) + "\n");
-  (0, import_node_fs28.writeFileSync)(mark, JSON.stringify({ base: moved, from: moved === base ? null : base, at: c.iso() }, null, 2) + "\n");
+  (0, import_node_fs33.mkdirSync)(work, { recursive: true });
+  (0, import_node_fs33.writeFileSync)(import_node_path32.default.join(work, `baseline-${n}.json`), JSON.stringify(results, null, 2) + "\n");
+  (0, import_node_fs33.writeFileSync)(mark, JSON.stringify({ base: moved, from: moved === base ? null : base, at: c.iso() }, null, 2) + "\n");
   return moved;
 }
 function implementerBack(c, task, t, told) {
@@ -19861,12 +21155,12 @@ function implementerBack(c, task, t, told) {
   const adopted = !brief.base && t.attempts > 0;
   const base = brief.base ?? (adopted ? taskBase(c.deps.gitAt(t.worktree), c.runBranch) : null);
   const work = workOf(c, task, events);
-  const abs = import_node_path28.default.join(c.io.cwd, work);
-  const report = import_node_path28.default.join(work, `report-${n}.txt`);
+  const abs = import_node_path32.default.join(c.io.cwd, work);
+  const report = import_node_path32.default.join(work, `report-${n}.txt`);
   const round = latestRound(abs, n);
   const given = c.rulings.get(task);
   if (given?.kind === "defer" && round) {
-    closeRound(c, task, t, n, round, roundOf2(c, task, work, n, round), ["--defer", given.ids.join(",")]);
+    closeRound(c, task, t, n, round, roundOf3(c, task, work, n, round), ["--defer", given.ids.join(",")]);
     return;
   }
   if (given && given.kind !== "review") {
@@ -19879,13 +21173,13 @@ function implementerBack(c, task, t, told) {
     const committed = !!head2 && !!seen && head2 !== seen;
     let fresh2 = false;
     try {
-      fresh2 = (0, import_node_fs28.statSync)(import_node_path28.default.join(c.io.cwd, report)).mtimeMs > Date.parse(t.stageSince);
+      fresh2 = (0, import_node_fs33.statSync)(import_node_path32.default.join(c.io.cwd, report)).mtimeMs > Date.parse(t.stageSince);
     } catch {
       fresh2 = false;
     }
     if (!told && !(fresh2 && committed)) return;
     if (!committed) {
-      c.actions.push({ type: "readReport", task, report: slash2(report) });
+      c.actions.push({ type: "readReport", task, report: slash3(report) });
       return;
     }
   }
@@ -19908,9 +21202,9 @@ function implementerBack(c, task, t, told) {
     "--base",
     at2,
     "--baseline",
-    slash2(import_node_path28.default.join(work, `baseline-${n}.json`)),
+    slash3(import_node_path32.default.join(work, `baseline-${n}.json`)),
     "--dir",
-    slash2(work),
+    slash3(work),
     "--cwd",
     t.worktree,
     ...loc
@@ -19919,7 +21213,7 @@ function implementerBack(c, task, t, told) {
   const say = typeof rp.say === "string" ? { say: rp.say } : {};
   const r2 = typeof rp.round === "number" ? rp.round : round + 1;
   if (rp.validatorsRound && typeof rp.validatorsRound === "object") {
-    if (head2) (0, import_node_fs28.writeFileSync)(import_node_path28.default.join(abs, `validators-head-${n}.json`), JSON.stringify({ round: r2, head: head2, runId: c.runId }) + "\n");
+    if (head2) (0, import_node_fs33.writeFileSync)(import_node_path32.default.join(abs, `validators-head-${n}.json`), JSON.stringify({ round: r2, head: head2, runId: c.runId }) + "\n");
     const agent = t.agent ?? lastAgent(c, `${task}-${n}`);
     if (!call(c, task, ["swarm", "task", task, "--stage", "implement", ...agent ? ["--agent", agent] : ["--no-agent"], "--lease", c.agentLease()])) return;
     c.actions.push({ type: "validatorsRound", task, implementer: agent, findings: rp.validatorsRound.findings ?? null, ...say });
@@ -19935,7 +21229,7 @@ function implementerBack(c, task, t, told) {
   c.actions.push({ type: "spawnReviewers", task, round: r2, path: tri.path ?? null, base: at2, spawn, ...rp.carried ? { carried: rp.carried } : {}, ...say });
 }
 function pendingVerify(c, taskN, roundDir) {
-  const m = readJson2(import_node_path28.default.join(roundDir, "verify-pending.json"));
+  const m = readJson3(import_node_path32.default.join(roundDir, "verify-pending.json"));
   if (!isObject(m) || typeof m.at !== "string") return null;
   const at2 = m.at;
   const skipped = new Set(ledgerOf(c, taskN).filter((e) => e.kind === "verify-skip" && isTask(e, taskN) && typeof e.ts === "string" && e.ts >= at2 && typeof e.surface === "string").map((e) => String(e.surface)));
@@ -19944,23 +21238,23 @@ function pendingVerify(c, taskN, roundDir) {
   const { at: _at, task: _task, ...rest } = m;
   return { role: "verify", ...rest, surfaces };
 }
-function roundOf2(c, task, work, n, round) {
-  const abs = import_node_path28.default.join(c.io.cwd, work);
-  const roundDir = import_node_path28.default.join(abs, `reviews-${n}-${round}`);
-  const plan = readJson2(import_node_path28.default.join(roundDir, "review-plan.json"));
+function roundOf3(c, task, work, n, round) {
+  const abs = import_node_path32.default.join(c.io.cwd, work);
+  const roundDir = import_node_path32.default.join(abs, `reviews-${n}-${round}`);
+  const plan = readJson3(import_node_path32.default.join(roundDir, "review-plan.json"));
   const verify = pendingVerify(c, `${task}-${n}`, roundDir);
   const entries = [...(isObject(plan) && Array.isArray(plan.spawn) ? plan.spawn : []).filter((s2) => s2.twin !== true), ...verify ? [verify] : []];
-  const respawnedFile = import_node_path28.default.join(roundDir, "respawned.json");
+  const respawnedFile = import_node_path32.default.join(roundDir, "respawned.json");
   return { work, abs, roundDir, plan: isObject(plan) ? plan : null, entries, respawnedFile, respawned: readRespawned(respawnedFile) };
 }
 function reviewersBack(c, task, t, told) {
   const events = readEvents(c.io.cwd);
   const { n } = briefOf2(eventsOf(events, { project: c.project, task }), task);
   const work = workOf(c, task, events);
-  const round = latestRound(import_node_path28.default.join(c.io.cwd, work), n);
+  const round = latestRound(import_node_path32.default.join(c.io.cwd, work), n);
   if (!round) return;
-  const r2 = roundOf2(c, task, work, n, round);
-  const asked = readAsked(import_node_path28.default.join(r2.roundDir, "asked.json"));
+  const r2 = roundOf3(c, task, work, n, round);
+  const asked = readAsked(import_node_path32.default.join(r2.roundDir, "asked.json"));
   const given = c.rulings.get(task);
   if (asked) {
     answer(c, task, t, n, round, r2, asked, given);
@@ -19970,24 +21264,24 @@ function reviewersBack(c, task, t, told) {
     c.actions.push(stepError(task, `--ruling ${task}:${given.kind}: no question of ${task} waits for an answer`));
     return;
   }
-  const pending = r2.plan?.validatorsPending === true && !(0, import_node_fs28.existsSync)(import_node_path28.default.join(r2.abs, `validators-${n}.json`));
+  const pending = r2.plan?.validatorsPending === true && !(0, import_node_fs33.existsSync)(import_node_path32.default.join(r2.abs, `validators-${n}.json`));
   const isBack = (s2) => {
-    const file = import_node_path28.default.join(r2.roundDir, `${keyOf(s2)}.json`);
+    const file = import_node_path32.default.join(r2.roundDir, `${keyOf(s2)}.json`);
     if (!finished(file)) return false;
     const was = r2.respawned[keyOf(s2)];
-    return !was || (mtimeOf(file) ?? 0) > was.mtimeMs || Date.parse(c.iso()) - Date.parse(was.at) > AGENT_LEASE_MINUTES * 6e4;
+    return !was || (mtimeOf2(file) ?? 0) > was.mtimeMs || Date.parse(c.iso()) - Date.parse(was.at) > AGENT_LEASE_MINUTES * 6e4;
   };
   const back = r2.entries.every(isBack) && !pending;
   if (!told && !back) return;
-  if (r2.entries.some((s2) => keyOf(s2) === "verify" && !(0, import_node_fs28.existsSync)(import_node_path28.default.join(r2.roundDir, "verify.json")))) {
-    const missing = r2.entries.filter((s2) => !(0, import_node_fs28.existsSync)(import_node_path28.default.join(r2.roundDir, `${keyOf(s2)}.json`))).map((s2) => slash2(import_node_path28.default.join(r2.work, `reviews-${n}-${round}`, `${keyOf(s2)}.json`)));
+  if (r2.entries.some((s2) => keyOf(s2) === "verify" && !(0, import_node_fs33.existsSync)(import_node_path32.default.join(r2.roundDir, "verify.json")))) {
+    const missing = r2.entries.filter((s2) => !(0, import_node_fs33.existsSync)(import_node_path32.default.join(r2.roundDir, `${keyOf(s2)}.json`))).map((s2) => slash3(import_node_path32.default.join(r2.work, `reviews-${n}-${round}`, `${keyOf(s2)}.json`)));
     c.actions.push({ type: "reviewMissing", task, missing });
     return;
   }
   closeRound(c, task, t, n, round, r2, []);
 }
 function answer(c, task, t, n, round, r2, asked, given) {
-  const file = import_node_path28.default.join(r2.roundDir, "asked.json");
+  const file = import_node_path32.default.join(r2.roundDir, "asked.json");
   const ruling = given ?? asked.ruling;
   if (!ruling) {
     if (!asked.reemitted && Date.parse(c.iso()) - Date.parse(asked.at) > ASK_AGAIN_MS) {
@@ -20013,7 +21307,7 @@ function answer(c, task, t, n, round, r2, asked, given) {
   closeRound(c, task, t, n, round, r2, [ruling.kind === "defer" ? "--defer" : "--out-of-model", ids.join(",")]);
 }
 function closeRound(c, task, t, n, round, r2, extra) {
-  const res = c.deps.cli(["review-close", "--task", `${task}-${n}`, "--dir", slash2(r2.work), "--path", "large", "--cwd", t.worktree, "--locale", c.locale, ...extra]);
+  const res = c.deps.cli(["review-close", "--task", `${task}-${n}`, "--dir", slash3(r2.work), "--path", "large", "--cwd", t.worktree, "--locale", c.locale, ...extra]);
   if (res.code === 3) {
     const m = (() => {
       try {
@@ -20039,7 +21333,7 @@ function closeRound(c, task, t, n, round, r2, extra) {
   const fresh2 = again.filter((k) => !Object.hasOwn(r2.respawned, k));
   if (fresh2.length) {
     const next = { ...r2.respawned };
-    for (const k of fresh2) next[k] = { at: c.iso(), mtimeMs: mtimeOf(import_node_path28.default.join(r2.roundDir, `${k}.json`)) ?? 0 };
+    for (const k of fresh2) next[k] = { at: c.iso(), mtimeMs: mtimeOf2(import_node_path32.default.join(r2.roundDir, `${k}.json`)) ?? 0 };
     c.after.push(() => writeJson(r2.respawnedFile, next));
     c.actions.push({ type: "respawnReviewers", task, reviewers: fresh2, spawn: r2.entries.filter((s2) => fresh2.includes(keyOf(s2))) });
     return;
@@ -20057,7 +21351,7 @@ function closeRound(c, task, t, n, round, r2, extra) {
       revert: out.revert ?? null,
       close: out
     };
-    c.after.push(() => writeJson(import_node_path28.default.join(r2.roundDir, "asked.json"), doc));
+    c.after.push(() => writeJson(import_node_path32.default.join(r2.roundDir, "asked.json"), doc));
     c.actions.push({ type: "ask", task, close: out });
     return;
   }
@@ -20066,15 +21360,15 @@ function closeRound(c, task, t, n, round, r2, extra) {
 function follow(c, task, t, n, round, r2, out) {
   const verify = closeVerify(c, task, t, n, round, r2);
   const v = verify ? { verify } : {};
-  const answered = () => (0, import_node_fs28.rmSync)(import_node_path28.default.join(r2.roundDir, "asked.json"), { force: true });
+  const answered = () => (0, import_node_fs33.rmSync)(import_node_path32.default.join(r2.roundDir, "asked.json"), { force: true });
   const next = out.next;
   const impl = isObject(out.implementer) ? out.implementer : null;
   if (next === "done") {
-    const deferred = Array.isArray(out.deferred) && out.deferred.length ? import_node_path28.default.join(r2.work, "deferred.json") : null;
-    if (deferred) writeJson(import_node_path28.default.join(c.io.cwd, deferred), out.deferred);
+    const deferred = Array.isArray(out.deferred) && out.deferred.length ? import_node_path32.default.join(r2.work, "deferred.json") : null;
+    if (deferred) writeJson(import_node_path32.default.join(c.io.cwd, deferred), out.deferred);
     if (!call(c, task, ["swarm", "task", task, "--stage", "verdict", "--status", "accepted", "--no-agent"])) return;
     answered();
-    c.actions.push({ type: "accepted", task, score: out.score ?? null, deferred: deferred && slash2(deferred), ...v });
+    c.actions.push({ type: "accepted", task, score: out.score ?? null, deferred: deferred && slash3(deferred), ...v });
     return;
   }
   if (next === "resume" || next === "fresh-stronger" || next === "redo") {
@@ -20095,16 +21389,16 @@ function follow(c, task, t, n, round, r2, out) {
     });
     return;
   }
-  const detail = import_node_path28.default.join(r2.work, "blocked.txt");
-  (0, import_node_fs28.writeFileSync)(import_node_path28.default.join(c.io.cwd, detail), `${String(next)}: ${asList(out.reasons).join("; ")}`.slice(0, 500) + "\n");
-  if (!call(c, task, ["swarm", "task", task, "--status", "blocked", "--detail-file", slash2(detail)])) return;
+  const detail = import_node_path32.default.join(r2.work, "blocked.txt");
+  (0, import_node_fs33.writeFileSync)(import_node_path32.default.join(c.io.cwd, detail), `${String(next)}: ${asList(out.reasons).join("; ")}`.slice(0, 500) + "\n");
+  if (!call(c, task, ["swarm", "task", task, "--status", "blocked", "--detail-file", slash3(detail)])) return;
   answered();
   c.actions.push({ type: "blocked", task, next: next ?? null, reasons: asList(out.reasons), ...v });
 }
 function closeVerify(c, task, t, n, round, r2) {
-  if (!(0, import_node_fs28.existsSync)(import_node_path28.default.join(r2.roundDir, "verify.json"))) return null;
-  const keptFile = import_node_path28.default.join(r2.roundDir, "verify-close.json");
-  const kept2 = readJson2(keptFile);
+  if (!(0, import_node_fs33.existsSync)(import_node_path32.default.join(r2.roundDir, "verify.json"))) return null;
+  const keptFile = import_node_path32.default.join(r2.roundDir, "verify-close.json");
+  const kept2 = readJson3(keptFile);
   let out = isObject(kept2) ? kept2 : null;
   if (!out) {
     out = call(c, task, [
@@ -20112,9 +21406,9 @@ function closeVerify(c, task, t, n, round, r2) {
       "--task",
       `${task}-${n}`,
       "--dir",
-      slash2(import_node_path28.default.join(r2.work, `reviews-${n}-${round}`)),
+      slash3(import_node_path32.default.join(r2.work, `reviews-${n}-${round}`)),
       "--evidence",
-      slash2(import_node_path28.default.join(r2.work, "evidence", `${n}-${round}`)),
+      slash3(import_node_path32.default.join(r2.work, "evidence", `${n}-${round}`)),
       "--db",
       c.db,
       "--cwd",
@@ -20126,13 +21420,13 @@ function closeVerify(c, task, t, n, round, r2) {
     writeJson(keptFile, out);
   }
   const files = asList(out.commit);
-  const git = c.deps.gitAt(t.worktree);
-  if (files.length && git(["status", "--porcelain", "--", ...files])?.trim()) {
-    git(["add", "--", ...files]);
-    const committed = git(["commit", "-q", "-m", `${task}: learned notes of its verification`, "--", ...files]) !== null;
-    const head2 = committed ? git(["rev-parse", "HEAD"])?.trim() : null;
-    if (head2) writeJson(import_node_path28.default.join(r2.abs, `validators-head-${n}.json`), { round: round + 1, head: head2, runId: c.runId });
-    else c.actions.push({ type: "error", task, command: "git commit", code: 1, stderr: `could not commit ${files.join(", ")} in ${slash2(t.worktree)}: commit them with the task's work` });
+  const git2 = c.deps.gitAt(t.worktree);
+  if (files.length && git2(["status", "--porcelain", "--", ...files])?.trim()) {
+    git2(["add", "--", ...files]);
+    const committed = git2(["commit", "-q", "-m", `${task}: learned notes of its verification`, "--", ...files]) !== null;
+    const head2 = committed ? git2(["rev-parse", "HEAD"])?.trim() : null;
+    if (head2) writeJson(import_node_path32.default.join(r2.abs, `validators-head-${n}.json`), { round: round + 1, head: head2, runId: c.runId });
+    else c.actions.push({ type: "error", task, command: "git commit", code: 1, stderr: `could not commit ${files.join(", ")} in ${slash3(t.worktree)}: commit them with the task's work` });
   }
   const { result, learned, cleanup, evidence, commit, proposals, say } = out;
   return { result, learned, cleanup, evidence, commit, proposals, say };
@@ -20144,58 +21438,43 @@ function integrateTask(c, task) {
   c.actions.push({ ...rest, type: String(result), task });
 }
 function integratedAgain(c, task, t) {
-  const state = readJson2(import_node_path28.default.resolve(c.io.cwd, c.db, "state", `${task}.json`));
+  const state = readJson3(import_node_path32.default.resolve(c.io.cwd, c.db, "state", `${task}.json`));
   if (!isObject(state) || state.status === "done") return;
-  const git = c.deps.gitAt(c.io.cwd);
-  const tip = git(["rev-parse", "--verify", "-q", `refs/heads/${t.branch}^{commit}`])?.trim() || null;
-  const merges = (git(["log", "--merges", "--format=%H %P", c.runBranch]) ?? "").split("\n").map((l) => l.trim().split(" ")).filter((p) => p.length >= 3);
-  const titled = () => (git(["log", "--merges", "--format=%H%x09%s", c.runBranch]) ?? "").split("\n").map((l) => l.trim().split("	")).find(([, subject]) => subject === `forge: integrate ${task}`)?.[0];
+  const git2 = c.deps.gitAt(c.io.cwd);
+  const tip = git2(["rev-parse", "--verify", "-q", `refs/heads/${t.branch}^{commit}`])?.trim() || null;
+  const merges = (git2(["log", "--merges", "--format=%H %P", c.runBranch]) ?? "").split("\n").map((l) => l.trim().split(" ")).filter((p) => p.length >= 3);
+  const titled = () => (git2(["log", "--merges", "--format=%H%x09%s", c.runBranch]) ?? "").split("\n").map((l) => l.trim().split("	")).find(([, subject]) => subject === `forge: integrate ${task}`)?.[0];
   const sha = (tip ? merges.find((p) => p.slice(2).includes(tip))?.[0] : void 0) ?? titled();
   if (!sha) return;
-  c.actions.push({ type: "integrated", task, sha, commit: commitInfo(git, sha), again: true });
-}
-function forgeOf(events, task, t) {
-  const mine = ofTask(task);
-  const tri = events.filter((x) => x.kind === "triage" && mine(x) && typeof x.path === "string").at(-1);
-  const p = typeof tri?.path === "string" ? tri.path : "large";
-  const val = events.filter((x) => x.kind === "validate" && mine(x) && x.baseline !== true && Array.isArray(x.results)).at(-1);
-  const verdict = events.filter((x) => x.kind === "verdict" && mine(x)).at(-1);
-  const reviews = reviewsOf2(Math.max(1, t.round), p);
-  return {
-    path: p,
-    phase: t.stage,
-    ...t.agent ? { agent: t.agent } : {},
-    validators: val ? val.results.map((r2) => ({ name: String(r2.validator ?? ""), ok: r2.ok === true })) : [],
-    ...verdict ? { verdict: { action: String(verdict.action ?? ""), score: typeof verdict.score === "number" ? verdict.score : null } } : {},
-    round: reviews.n,
-    cap: reviews.max
-  };
+  c.actions.push({ type: "integrated", task, sha, commit: commitInfo(git2, sha), again: true });
 }
 function publishOf(io, e, started, versions, now) {
-  const events = readEvents(io.cwd);
+  const iso4 = now.toISOString();
   const own = new Date(now.getTime() + LEASE_MINUTES * 6e4).toISOString();
   const lease = (task) => {
     try {
-      const p = normalizePublicTask(JSON.parse((0, import_node_fs28.readFileSync)(executionTaskFile(io.cwd, task), "utf8")));
+      const p = normalizePublicTask(JSON.parse((0, import_node_fs33.readFileSync)(executionTaskFile(io.cwd, task), "utf8")));
       if (p && p.runId === e.runId) return p.leaseUntil;
     } catch {
     }
     return own;
   };
-  const tasks = Object.entries(e.tasks).filter(([, t]) => t.executor === "subagents" && (t.status === "running" || t.status === "accepted")).map(([task, t]) => ({
-    task,
-    version: versions.state[task] ?? null,
-    ...started.has(task) ? { claim: true } : {},
-    exec: { runId: e.runId, mode: "subagents", by: e.coordinator, agent: t.agent, stage: t.stage, round: t.round, since: t.stageSince, leaseUntil: lease(task) },
-    forge: forgeOf(eventsOf(events, { project: e.project, task }), task, t)
-  }));
-  const leaseUntil = tasks.reduce((max, x) => x.exec.leaseUntil > max ? x.exec.leaseUntil : max, own);
-  const slots = Object.entries(e.tasks).filter(([, t]) => t.status === "running").map(([task, t]) => ({ task, stage: t.stage, agent: t.agent, by: e.coordinator, since: t.stageSince }));
-  return {
-    tasks,
-    session: { version: versions.sessions[e.coordinator] ?? null, leaseUntil },
-    metaRun: { runId: e.runId, kind: "plan", loose: [], mode: e.mode, parallel: e.parallel, branch: e.branch, mergeOnFinish: e.mergeOnFinish, active: e.active, stopReason: e.stopReason, coordinator: e.coordinator, slots }
-  };
+  const docIo = { ...io, events: readEvents(io.cwd) };
+  const mine = Object.entries(e.tasks).filter(([, t]) => t.executor === "subagents" && (t.status === "running" || t.status === "accepted")).map(([task]) => task);
+  const tasks = mine.map((task) => {
+    const claim = started.has(task);
+    const pub = publishFor(docIo, task, { project: e.project, ...claim ? { extra: { status: "in_progress", owner: e.coordinator, claimedAt: iso4, startedAt: iso4 } } : {} });
+    return {
+      task,
+      version: versions.state[task] ?? null,
+      ...claim ? { claim: true } : {},
+      write: pub.publish,
+      ...pub.publishError ? { publishError: pub.publishError } : {},
+      ...claim ? { event: startedEvent(e.coordinator, task, now, io.rand) } : {}
+    };
+  });
+  const leaseUntil = mine.map(lease).reduce((max, l) => l > max ? l : max, own);
+  return { tasks, session: { version: versions.sessions[e.coordinator] ?? null, leaseUntil }, metaRun: runDocOf(io.cwd, e) };
 }
 var SAY = {
   spawnImplementer: ["{t} empieza con {x}", "{t} starts with {x}"],
@@ -20256,7 +21535,7 @@ function swarmStep(rest, io, deps) {
   if (e0.kind !== "plan") throw new UsageError("swarm step: an ephemeral run steps with the single commands (references/ephemeral.md)");
   let planProject = null;
   try {
-    planProject = parsePlan((0, import_node_fs28.readFileSync)(import_node_path28.default.resolve(io.cwd, planArg), "utf8")).project;
+    planProject = parsePlan((0, import_node_fs33.readFileSync)(import_node_path32.default.resolve(io.cwd, planArg), "utf8")).project;
   } catch {
     planProject = null;
   }
@@ -20345,7 +21624,7 @@ function quantiles(values) {
   const q = (p) => round1(s2[Math.max(0, Math.ceil(p * s2.length) - 1)]);
   return { p50: q(0.5), p80: q(0.8) };
 }
-function pathOf(events, id2, before3, owner, project) {
+function pathOf2(events, id2, before3, owner, project) {
   const of = (t) => events.slice(0, before3).filter((e) => e.kind === "triage" && isTask(e, t) && owner(e) === project && typeof e.path === "string").at(-1)?.path;
   const parent = /^(.+)-\d+$/.exec(id2)?.[1];
   return of(id2) ?? (parent ? of(parent) : void 0) ?? "unknown";
@@ -20400,7 +21679,7 @@ function briefStats(events) {
     const dirs = new Set(events.slice(i, j + 1).filter((e) => e.kind === "verdict" && mine(e, brief)).map((e, x) => typeof e.dir === "string" ? e.dir : `#${x}`));
     out.push({
       task: brief,
-      path: pathOf(events, id2, j, owner, project),
+      path: pathOf2(events, id2, j, owner, project),
       startedAt: new Date(start).toISOString(),
       acceptedAt: events[j].ts,
       totalMs: end - start,
@@ -20488,13 +21767,13 @@ function renderStats(s2, locale) {
 }
 
 // src/forge/tools.ts
-var import_node_fs30 = require("node:fs");
-var import_node_path30 = __toESM(require("node:path"), 1);
+var import_node_fs35 = require("node:fs");
+var import_node_path34 = __toESM(require("node:path"), 1);
 
 // src/forge/superpowers.ts
-var import_node_fs29 = require("node:fs");
+var import_node_fs34 = require("node:fs");
 var import_node_os = require("node:os");
-var import_node_path29 = __toESM(require("node:path"), 1);
+var import_node_path33 = __toESM(require("node:path"), 1);
 
 // src/lib/design.ts
 var import_yaml6 = __toESM(require_dist(), 1);
@@ -20554,13 +21833,13 @@ function parseSections(body) {
     }
     lines.length = 0;
   };
-  for (const line2 of body.split(/\r?\n/)) {
-    const isHeading = !fence && /^(#{2,3})\s+(.+?)(?:\s+#+)?\s*$/.exec(line2);
+  for (const line3 of body.split(/\r?\n/)) {
+    const isHeading = !fence && /^(#{2,3})\s+(.+?)(?:\s+#+)?\s*$/.exec(line3);
     if (fence) {
-      const close = /^\s*(`{3,}|~{3,})\s*$/.exec(line2);
+      const close = /^\s*(`{3,}|~{3,})\s*$/.exec(line3);
       if (close && close[1][0] === fence[0] && close[1].length >= fence.length) fence = null;
     } else {
-      const open = /^\s*(`{3,}|~{3,})/.exec(line2);
+      const open = /^\s*(`{3,}|~{3,})/.exec(line3);
       if (open) fence = open[1];
     }
     if (isHeading) {
@@ -20571,9 +21850,9 @@ function parseSections(body) {
       seen.add(slug);
       cur = { level: isHeading[1].length, heading: isHeading[2], slug, text: "" };
     } else if (cur) {
-      lines.push(line2);
+      lines.push(line3);
     } else {
-      introLines.push(line2);
+      introLines.push(line3);
     }
   }
   flush();
@@ -20795,22 +22074,22 @@ var SP_WINDOW_MS = 14 * 24 * 36e5;
 var SP_MAX = 3;
 var NONE2 = { installed: false, version: null, installPath: null };
 function claudeConfigDir(env = process.env) {
-  return env.CLAUDE_CONFIG_DIR?.trim() || import_node_path29.default.join((0, import_node_os.homedir)(), ".claude");
+  return env.CLAUDE_CONFIG_DIR?.trim() || import_node_path33.default.join((0, import_node_os.homedir)(), ".claude");
 }
 function claudeJsonDir(env = process.env) {
   return env.CLAUDE_CONFIG_DIR?.trim() || (0, import_node_os.homedir)();
 }
-var isObj5 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
-var readJson3 = (file) => {
+var isObj7 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
+var readJson4 = (file) => {
   try {
-    return JSON.parse((0, import_node_fs29.readFileSync)(file, "utf8"));
+    return JSON.parse((0, import_node_fs34.readFileSync)(file, "utf8"));
   } catch {
     return null;
   }
 };
 var samePath2 = (a, b) => {
-  const x = import_node_path29.default.resolve(a);
-  const y = import_node_path29.default.resolve(b);
+  const x = import_node_path33.default.resolve(a);
+  const y = import_node_path33.default.resolve(b);
   return process.platform === "win32" ? x.toLowerCase() === y.toLowerCase() : x === y;
 };
 var versionKey = (v) => v.split(/[.+-]/).map((n) => /^\d+$/.test(n) ? Number(n) : 0);
@@ -20824,7 +22103,7 @@ function newer(a, b) {
   return false;
 }
 function enabledMaps(configDir, projectDir) {
-  return [import_node_path29.default.join(projectDir, ".claude", "settings.local.json"), import_node_path29.default.join(projectDir, ".claude", "settings.json"), import_node_path29.default.join(configDir, "settings.json")].map(readJson3).flatMap((s2) => isObj5(s2) && isObj5(s2.enabledPlugins) ? [s2.enabledPlugins] : []);
+  return [import_node_path33.default.join(projectDir, ".claude", "settings.local.json"), import_node_path33.default.join(projectDir, ".claude", "settings.json"), import_node_path33.default.join(configDir, "settings.json")].map(readJson4).flatMap((s2) => isObj7(s2) && isObj7(s2.enabledPlugins) ? [s2.enabledPlugins] : []);
 }
 var enabled = (key, maps) => {
   const m = maps.find((ep) => typeof ep[key] === "boolean");
@@ -20832,8 +22111,8 @@ var enabled = (key, maps) => {
 };
 function installedPlugins(opts, only) {
   try {
-    const file = readJson3(import_node_path29.default.join(opts.configDir, "plugins", "installed_plugins.json"));
-    const plugins = isObj5(file) && isObj5(file.plugins) ? file.plugins : null;
+    const file = readJson4(import_node_path33.default.join(opts.configDir, "plugins", "installed_plugins.json"));
+    const plugins = isObj7(file) && isObj7(file.plugins) ? file.plugins : null;
     if (!plugins) return [];
     let maps = null;
     const out = [];
@@ -20841,7 +22120,7 @@ function installedPlugins(opts, only) {
       const m = /^([^@\s]+)@[^@\s]+$/.exec(key);
       if (!m || only && !only(m[1]) || !enabled(key, maps ??= enabledMaps(opts.configDir, opts.projectDir))) continue;
       for (const e of Array.isArray(value) ? value : [value]) {
-        if (!isObj5(e) || typeof e.installPath !== "string" || !(0, import_node_fs29.existsSync)(e.installPath)) continue;
+        if (!isObj7(e) || typeof e.installPath !== "string" || !(0, import_node_fs34.existsSync)(e.installPath)) continue;
         const scope = typeof e.scope === "string" ? e.scope : "user";
         if (scope !== "user" && scope !== "managed" && !(typeof e.projectPath === "string" && samePath2(e.projectPath, opts.projectDir))) continue;
         out.push({ key, name: m[1], installPath: e.installPath, version: typeof e.version === "string" && e.version ? e.version : "unknown" });
@@ -20861,7 +22140,7 @@ function locateSuperpowers(opts) {
 }
 function locateSuperpowersFor(configDir, projectDirs) {
   let best = NONE2;
-  for (const projectDir of new Set(projectDirs.map((d) => import_node_path29.default.resolve(d)))) {
+  for (const projectDir of new Set(projectDirs.map((d) => import_node_path33.default.resolve(d)))) {
     const sp = locateSuperpowers({ configDir, projectDir });
     if (sp.installed && (!best.installed || newer(sp.version ?? "", best.version ?? ""))) best = sp;
   }
@@ -20869,33 +22148,33 @@ function locateSuperpowersFor(configDir, projectDirs) {
 }
 function spSkillPath(sp, skill) {
   if (!sp.installed || !sp.installPath || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(skill)) return null;
-  const f = import_node_path29.default.join(sp.installPath, "skills", skill, "SKILL.md");
-  return (0, import_node_fs29.existsSync)(f) ? f : null;
+  const f = import_node_path33.default.join(sp.installPath, "skills", skill, "SKILL.md");
+  return (0, import_node_fs34.existsSync)(f) ? f : null;
 }
 function spLedgerDone(roots, planAbs) {
   const done = /* @__PURE__ */ new Set();
-  const slug = import_node_path29.default.basename(planAbs).replace(/\.md$/i, "");
-  for (const root of [...new Set(roots.map((r2) => import_node_path29.default.resolve(r2)))]) {
-    const rel3 = import_node_path29.default.relative(root, planAbs).split(import_node_path29.default.sep).join("/");
-    if (!rel3 || rel3.startsWith("..") || import_node_path29.default.isAbsolute(rel3)) continue;
-    const base = import_node_path29.default.join(root, ".superpowers", "sdd");
+  const slug = import_node_path33.default.basename(planAbs).replace(/\.md$/i, "");
+  for (const root of [...new Set(roots.map((r2) => import_node_path33.default.resolve(r2)))]) {
+    const rel3 = import_node_path33.default.relative(root, planAbs).split(import_node_path33.default.sep).join("/");
+    if (!rel3 || rel3.startsWith("..") || import_node_path33.default.isAbsolute(rel3)) continue;
+    const base = import_node_path33.default.join(root, ".superpowers", "sdd");
     let names2 = [];
     try {
-      names2 = (0, import_node_fs29.readdirSync)(base);
+      names2 = (0, import_node_fs34.readdirSync)(base);
     } catch {
       continue;
     }
     for (const name of names2) {
       if (name !== slug && !name.startsWith(`${slug}-`)) continue;
-      const dir = import_node_path29.default.join(base, name);
+      const dir = import_node_path33.default.join(base, name);
       let marker = null;
       try {
-        marker = (0, import_node_fs29.readFileSync)(import_node_path29.default.join(dir, "plan-path"), "utf8").trim().replace(/\\/g, "/");
+        marker = (0, import_node_fs34.readFileSync)(import_node_path33.default.join(dir, "plan-path"), "utf8").trim().replace(/\\/g, "/");
       } catch {
       }
       if (marker !== null && marker !== rel3) continue;
       try {
-        for (const n of sddComplete((0, import_node_fs29.readFileSync)(import_node_path29.default.join(dir, "progress.md"), "utf8"), rel3)) done.add(n);
+        for (const n of sddComplete((0, import_node_fs34.readFileSync)(import_node_path33.default.join(dir, "progress.md"), "utf8"), rel3)) done.add(n);
       } catch {
       }
     }
@@ -20905,16 +22184,16 @@ function spLedgerDone(roots, planAbs) {
 function recentMarkdown(root, relDir, now, committedAt2) {
   let names2;
   try {
-    names2 = (0, import_node_fs29.readdirSync)(import_node_path29.default.join(root, relDir));
+    names2 = (0, import_node_fs34.readdirSync)(import_node_path33.default.join(root, relDir));
   } catch {
     return [];
   }
   const out = [];
   for (const name of names2) {
     if (!name.endsWith(".md")) continue;
-    const abs = import_node_path29.default.join(root, relDir, name);
+    const abs = import_node_path33.default.join(root, relDir, name);
     try {
-      const st = (0, import_node_fs29.statSync)(abs);
+      const st = (0, import_node_fs34.statSync)(abs);
       if (!st.isFile()) continue;
       const time2 = committedAt2?.(`${relDir}/${name}`) ?? st.mtimeMs;
       if (now - time2 <= SP_WINDOW_MS) out.push({ name, abs, time: time2 });
@@ -20925,7 +22204,7 @@ function recentMarkdown(root, relDir, now, committedAt2) {
 }
 var titleOf = (file) => {
   try {
-    return specH1((0, import_node_fs29.readFileSync)(file, "utf8"));
+    return specH1((0, import_node_fs34.readFileSync)(file, "utf8"));
   } catch {
     return null;
   }
@@ -20934,12 +22213,12 @@ function spSpecs(root, now, opts = {}) {
   const cited = /* @__PURE__ */ new Set();
   let projects = [];
   try {
-    projects = (0, import_node_fs29.readdirSync)(import_node_path29.default.join(root, "docs", "waypoint"));
+    projects = (0, import_node_fs34.readdirSync)(import_node_path33.default.join(root, "docs", "waypoint"));
   } catch {
   }
   for (const p of projects) {
     try {
-      const s2 = parseDesign((0, import_node_fs29.readFileSync)(import_node_path29.default.join(root, "docs", "waypoint", p, "design.md"), "utf8")).meta.source;
+      const s2 = parseDesign((0, import_node_fs34.readFileSync)(import_node_path33.default.join(root, "docs", "waypoint", p, "design.md"), "utf8")).meta.source;
       if (s2) cited.add(s2.replace(/\\/g, "/").replace(/^\.\//, ""));
     } catch {
     }
@@ -20958,7 +22237,7 @@ function spPlans(root, now, opts = {}) {
   for (const f of recentMarkdown(root, "docs/superpowers/plans", now, opts.committedAt)) {
     let plan;
     try {
-      plan = markDone(parseSpPlan((0, import_node_fs29.readFileSync)(f.abs, "utf8")), spLedgerDone([root], f.abs));
+      plan = markDone(parseSpPlan((0, import_node_fs34.readFileSync)(f.abs, "utf8")), spLedgerDone([root], f.abs));
     } catch {
       continue;
     }
@@ -21025,24 +22304,24 @@ function toolGaps(names2, deps) {
   }
   return out;
 }
-var isObj6 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
-var readJson4 = (file) => {
+var isObj8 = (x) => !!x && typeof x === "object" && !Array.isArray(x);
+var readJson5 = (file) => {
   try {
-    return JSON.parse((0, import_node_fs30.readFileSync)(file, "utf8"));
+    return JSON.parse((0, import_node_fs35.readFileSync)(file, "utf8"));
   } catch {
     return null;
   }
 };
-var serverNames = (x, flat) => !isObj6(x) ? [] : isObj6(x.mcpServers) ? Object.keys(x.mcpServers) : flat && !("mcpServers" in x) ? Object.keys(x) : [];
+var serverNames = (x, flat) => !isObj8(x) ? [] : isObj8(x.mcpServers) ? Object.keys(x.mcpServers) : flat && !("mcpServers" in x) ? Object.keys(x) : [];
 function pluginServers(root) {
   const out = [];
   const fromFile = (rel3) => {
-    const f = import_node_path30.default.resolve(root, rel3.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, "."));
-    const r2 = import_node_path30.default.relative(root, f);
-    if (!r2.startsWith("..") && !import_node_path30.default.isAbsolute(r2)) out.push(...serverNames(readJson4(f), true));
+    const f = import_node_path34.default.resolve(root, rel3.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, "."));
+    const r2 = import_node_path34.default.relative(root, f);
+    if (!r2.startsWith("..") && !import_node_path34.default.isAbsolute(r2)) out.push(...serverNames(readJson5(f), true));
   };
-  const manifest = readJson4(import_node_path30.default.join(root, ".claude-plugin", "plugin.json"));
-  const decl = isObj6(manifest) ? manifest.mcpServers : void 0;
+  const manifest = readJson5(import_node_path34.default.join(root, ".claude-plugin", "plugin.json"));
+  const decl = isObj8(manifest) ? manifest.mcpServers : void 0;
   for (const d of Array.isArray(decl) ? decl : [decl]) {
     if (typeof d === "string") fromFile(d);
     else out.push(...serverNames(d, true));
@@ -21060,8 +22339,8 @@ function mcpInventory(opts) {
     } catch {
     }
   }
-  const legacy = import_node_path30.default.join(opts.configDir, ".config.json");
-  const global = readJson4((0, import_node_fs30.existsSync)(legacy) ? legacy : import_node_path30.default.join(opts.homeDir, ".claude.json"));
+  const legacy = import_node_path34.default.join(opts.configDir, ".config.json");
+  const global = readJson5((0, import_node_fs35.existsSync)(legacy) ? legacy : import_node_path34.default.join(opts.homeDir, ".claude.json"));
   const disabled = /* @__PURE__ */ new Set();
   const approved = /* @__PURE__ */ new Set();
   let approveAll = false;
@@ -21069,30 +22348,30 @@ function mcpInventory(opts) {
     for (const n of strs2(o.enabledMcpjsonServers)) approved.add(n);
     if (o.enableAllProjectMcpServers === true) approveAll = true;
   };
-  if (isObj6(global)) {
+  if (isObj8(global)) {
     names2.push(...serverNames(global, false));
-    const key = import_node_path30.default.resolve(opts.projectDir).replace(/\\/g, "/");
+    const key = import_node_path34.default.resolve(opts.projectDir).replace(/\\/g, "/");
     const same = (k) => process.platform === "win32" ? k.replace(/\\/g, "/").toLowerCase() === key.toLowerCase() : k === key;
-    const projects = isObj6(global.projects) ? global.projects : {};
+    const projects = isObj8(global.projects) ? global.projects : {};
     for (const [k, v] of Object.entries(projects)) {
-      if (!same(k) || !isObj6(v)) continue;
+      if (!same(k) || !isObj8(v)) continue;
       names2.push(...serverNames(v, false));
       approvals(v);
       for (const d of strs2(v.disabledMcpjsonServers)) disabled.add(d);
     }
   }
   const settings = [
-    [import_node_path30.default.join(opts.projectDir, ".claude", "settings.local.json"), true],
-    [import_node_path30.default.join(opts.configDir, "settings.json"), true],
-    [import_node_path30.default.join(opts.projectDir, ".claude", "settings.json"), false]
+    [import_node_path34.default.join(opts.projectDir, ".claude", "settings.local.json"), true],
+    [import_node_path34.default.join(opts.configDir, "settings.json"), true],
+    [import_node_path34.default.join(opts.projectDir, ".claude", "settings.json"), false]
   ];
   for (const [f, mine] of settings) {
-    const s2 = readJson4(f);
-    if (!isObj6(s2)) continue;
+    const s2 = readJson5(f);
+    if (!isObj8(s2)) continue;
     if (mine) approvals(s2);
     for (const d of strs2(s2.disabledMcpjsonServers)) disabled.add(d);
   }
-  names2.push(...serverNames(readJson4(import_node_path30.default.join(opts.projectDir, ".mcp.json")), false).filter((n) => !disabled.has(n) && (approveAll || approved.has(n))));
+  names2.push(...serverNames(readJson5(import_node_path34.default.join(opts.projectDir, ".mcp.json")), false).filter((n) => !disabled.has(n) && (approveAll || approved.has(n))));
   return new Set(names2.flatMap(toolKeys));
 }
 
@@ -21153,7 +22432,7 @@ function cleanupPids(pids, kill, protect = [process.pid, process.ppid]) {
 var killTarget = (pid, pgid) => pgid === pid ? -pid : pid;
 
 // src/forge/route-hooks.ts
-var import_node_path31 = __toESM(require("node:path"), 1);
+var import_node_path35 = __toESM(require("node:path"), 1);
 function routingRule(superpowers) {
   const others = superpowers ? "any other process skill \u2014 superpowers:brainstorming, writing-plans,\nsystematic-debugging and test-driven-development included" : "any other process skill";
   return [
@@ -21230,7 +22509,7 @@ function routeReminder(r2, now) {
 }
 var OPEN_TASK_MS = 24 * 36e5;
 var CLEAR_CARRY_MS = 2 * 6e4;
-var inForgeWorktree = (cwd2) => /[\\/]\.claude[\\/]worktrees[\\/](?:task-[^\\/]+|run)(?:[\\/]|$)/.test(import_node_path31.default.resolve(cwd2));
+var inForgeWorktree = (cwd2) => /[\\/]\.claude[\\/]worktrees[\\/](?:task-[^\\/]+|run)(?:[\\/]|$)/.test(import_node_path35.default.resolve(cwd2));
 function carriedRoute(routes, source, sid, now) {
   const half = (r2) => r2.session !== sid && routeReminder(r2, now) !== null;
   const close = (r2) => `${routeReminder(r2, now)}. Once handed off, close that route with FORGE route stage --stage handed-off --session ${r2.session}`;
@@ -21284,169 +22563,18 @@ ${carried}` : "") } });
   }
 }
 
-// src/forge/decisions.ts
-var import_node_fs31 = require("node:fs");
-var import_node_path32 = __toESM(require("node:path"), 1);
-var DecisionInputError = class extends Error {
-};
-var decisionsFile = (root) => import_node_path32.default.join(root, ".forge", "decisions.json");
-var notDots2 = (s2) => s2 !== "." && s2 !== "..";
-var line = (max) => external_exports.string().transform((s2) => clean(s2, max)).pipe(external_exports.string().min(1, "must not be empty"));
-var ident2 = (re) => external_exports.string().regex(re).refine(notDots2, "invalid id");
-var Undo = external_exports.discriminatedUnion("type", [
-  external_exports.object({ type: external_exports.literal("git-revert"), base: external_exports.string().regex(SHA), head: external_exports.string().regex(SHA), cwd: line(500).optional() }).strict(),
-  external_exports.object({ type: external_exports.literal("design-reopen"), project: ident2(PROJECT_ID) }).strict(),
-  external_exports.object({ type: external_exports.literal("plan-edit"), project: ident2(PROJECT_ID), tasks: external_exports.array(ident2(TASK_ID)).min(1).max(50) }).strict(),
-  external_exports.object({ type: external_exports.literal("branch-discard"), branch: external_exports.string().regex(BRANCH).refine((s2) => !s2.includes(".."), "invalid branch") }).strict(),
-  external_exports.object({ type: external_exports.literal("none"), reason: line(LIMITS.reason) }).strict()
-]);
-var Input = external_exports.object({
-  point: external_exports.enum(DECISION_POINTS),
-  what: line(LIMITS.what),
-  chosen: line(LIMITS.chosen),
-  alternatives: external_exports.array(line(LIMITS.alternative)).max(LIMITS.alternatives).optional(),
-  why: line(LIMITS.why),
-  by: external_exports.enum(DECISION_BY),
-  weight: external_exports.enum(["major", "minor"]).optional(),
-  revert: line(LIMITS.revert).optional(),
-  undo: Undo.optional(),
-  safePath: line(LIMITS.safePath).optional(),
-  revertOf: external_exports.number().int().positive().optional(),
-  task: ident2(TASK_ID).optional(),
-  runId: ident2(RUN_ID).optional()
-}).strict();
-function readDecisionsDoc(root) {
-  try {
-    return normalizeDecisionsDoc(JSON.parse((0, import_node_fs31.readFileSync)(decisionsFile(root), "utf8")));
-  } catch {
-    return null;
-  }
-}
-function saveDecisionsDoc(root, event, n) {
-  try {
-    const d = normalizeDecision(event);
-    if (!d) return;
-    const prev = readDecisionsDoc(root);
-    const next = nextDecisionsDoc(prev, d, n);
-    if (!next || next === prev) return;
-    forgeDir(root);
-    const file = decisionsFile(root);
-    const tmp = `${file}.${process.pid}.tmp`;
-    try {
-      (0, import_node_fs31.writeFileSync)(tmp, JSON.stringify(next) + "\n");
-      (0, import_node_fs31.renameSync)(tmp, file);
-    } finally {
-      (0, import_node_fs31.rmSync)(tmp, { force: true });
-    }
-  } catch {
-  }
-}
-function addDecision(root, raw, ctx) {
-  const r2 = Input.safeParse(raw);
-  if (!r2.success) throw new DecisionInputError(r2.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; "));
-  const { task: dataTask, runId: dataRun, weight, ...rest } = r2.data;
-  const task = ctx.task ?? dataTask;
-  const runId = dataRun ?? ctx.runId ?? void 0;
-  const event = {
-    ts: ctx.ts,
-    kind: "decision",
-    ...rest,
-    weight: weight ?? weightOf(rest.point),
-    ...task ? { task } : {},
-    ...runId ? { runId } : {}
-  };
-  appendEvent(root, event);
-  const line2 = JSON.stringify(event);
-  const all = readEvents(root).filter((e) => e.kind === "decision");
-  let n = all.length;
-  for (let i = all.length - 1; i >= 0; i--) if (JSON.stringify(all[i]) === line2) {
-    n = i + 1;
-    break;
-  }
-  saveDecisionsDoc(root, event, n);
-  return { n, event };
-}
-function numbered(events) {
-  const out = [];
-  events.filter((e) => e.kind === "decision").forEach((e, i) => {
-    const d = normalizeDecision(e);
-    if (d) out.push({ d: { ...d, n: i + 1 }, e });
-  });
-  return out;
-}
-function allDecisions(root) {
-  return numbered(readEvents(root)).map((x) => x.d);
-}
-var ownTask = (task, t) => t === task || !!t && t.startsWith(`${task}-`) && /^\d{1,3}$/.test(t.slice(task.length + 1));
-function listDecisions(root, f) {
-  const events = readEvents(root);
-  const rows = numbered(events);
-  const all = rows.map((x) => x.d);
-  let out = all;
-  if (f.task) {
-    const task = f.task;
-    const project = f.project !== void 0 ? f.project : projectOf(events, task);
-    const owner = attribute(events);
-    out = rows.filter((x) => ownTask(task, x.d.task) && owner(x.e) === project).map((x) => x.d);
-  }
-  if (f.run) out = out.filter((d) => d.runId === f.run);
-  if (f.since) {
-    const s2 = Date.parse(f.since);
-    out = out.filter((d) => Date.parse(d.ts) >= s2);
-  }
-  if (!f.task && !f.run && !f.since && !f.all) {
-    const latest = [...all].reverse().find((d) => d.by !== "user");
-    const scope = readDecisionsDoc(root)?.scope ?? (latest ? decisionScope(latest) ?? "forge" : null);
-    out = scope ? out.filter((d) => (decisionScope(d) ?? "forge") === scope) : [];
-  }
-  return f.auto ? out.filter((d) => d.by !== "user") : out;
-}
-var MD = {
-  es: {
-    title: "Decisiones autom\xE1ticas",
-    intro: "forge tom\xF3 estas decisiones sin preguntar. Para deshacer una: `/forge:decisions revert <n>`.",
-    chosen: "Elegido",
-    alternatives: "Alternativas",
-    why: "Por qu\xE9",
-    revert: "C\xF3mo revertir",
-    when: "Cu\xE1ndo",
-    noRevert: "no se puede revertir de forma autom\xE1tica"
-  },
-  en: {
-    title: "Automatic decisions",
-    intro: "forge took these decisions without asking. To undo one: `/forge:decisions revert <n>`.",
-    chosen: "Chosen",
-    alternatives: "Alternatives",
-    why: "Why",
-    revert: "How to undo",
-    when: "When",
-    noRevert: "cannot be undone automatically"
-  }
-};
-function renderDecisionsMd(list, scope, locale) {
-  const t = locale.toLowerCase().startsWith("es") ? MD.es : MD.en;
-  const out = [`# ${t.title} \xB7 ${scope}`, "", t.intro, ""];
-  for (const d of list) {
-    out.push(`## ${d.n}. ${d.what}`, "", `- **${t.chosen}:** ${d.chosen}`);
-    if (d.alternatives.length) out.push(`- **${t.alternatives}:** ${d.alternatives.join(", ")}`);
-    const howTo = d.revert ?? (d.undo?.type === "none" ? `${t.noRevert}: ${d.undo.reason}` : t.noRevert);
-    out.push(`- **${t.why}:** ${d.why || "\u2014"}`, `- **${t.revert}:** ${howTo}`, `- **${t.when}:** ${d.ts} \xB7 ${d.by} \xB7 ${d.weight}`, "");
-  }
-  return out.join("\n");
-}
-
 // src/forge/cli/run.ts
-var USAGE2 = "usage: forge <triage|brief|validate|stats|verdict|round|review-prep|review-close|prep|shadow|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|verify-close|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|swarm|setup|stop|hook> ...";
+var USAGE2 = "usage: forge <triage|brief|validate|stats|verdict|round|review-prep|review-close|prep|shadow|log|decision|agents|last|proposals|surfaces|tools|local|prefs|route|verify-plan|verify-result|verify-cleanup|verify-close|waypoint-cli|sp-path|sp-specs|sp-plans|sp-plan|tdd|tree|config|infinite|cycle|swarm|setup|stop|hook|roadmap-doc|roadmap-run> ...";
 var MAX_OUTPUT = 4 * 1024 * 1024;
 var MAX_GIT_OUTPUT = 256 * 1024 * 1024;
 var MAX_WHY = 200;
 function readTail(fd) {
-  const size = (0, import_node_fs32.fstatSync)(fd).size;
+  const size = (0, import_node_fs36.fstatSync)(fd).size;
   const len = Math.min(size, MAX_OUTPUT);
   const buf = Buffer.alloc(len);
   let off = 0;
   while (off < len) {
-    const n = (0, import_node_fs32.readSync)(fd, buf, off, len - off, size - len + off);
+    const n = (0, import_node_fs36.readSync)(fd, buf, off, len - off, size - len + off);
     if (n <= 0) break;
     off += n;
   }
@@ -21482,10 +22610,10 @@ function defaultExec(cwd2) {
     let dir;
     let fd;
     try {
-      dir = (0, import_node_fs32.mkdtempSync)(import_node_path33.default.join((0, import_node_os2.tmpdir)(), "forge-exec-"));
-      const file = import_node_path33.default.join(dir, "out.log");
-      fd = (0, import_node_fs32.openSync)(file, "w+");
-      const r2 = (0, import_node_child_process2.spawnSync)(process.execPath, ["-e", WRAPPER_SOURCE, "--", cmd, String(timeoutMs), file], {
+      dir = (0, import_node_fs36.mkdtempSync)(import_node_path36.default.join((0, import_node_os2.tmpdir)(), "forge-exec-"));
+      const file = import_node_path36.default.join(dir, "out.log");
+      fd = (0, import_node_fs36.openSync)(file, "w+");
+      const r2 = (0, import_node_child_process3.spawnSync)(process.execPath, ["-e", WRAPPER_SOURCE, "--", cmd, String(timeoutMs), file], {
         cwd: cwd2,
         windowsHide: true,
         timeout: timeoutMs + 15e3,
@@ -21494,7 +22622,7 @@ function defaultExec(cwd2) {
         maxBuffer: 64 * 1024
       });
       const err = r2.error;
-      const timedOut2 = err?.code === "ETIMEDOUT" || r2.status === TIMEOUT_EXIT && (0, import_node_fs32.existsSync)(`${file}.timeout`);
+      const timedOut2 = err?.code === "ETIMEDOUT" || r2.status === TIMEOUT_EXIT && (0, import_node_fs36.existsSync)(`${file}.timeout`);
       let output = readTail(fd);
       if (r2.stderr) output += `${output && !output.endsWith("\n") ? "\n" : ""}${r2.stderr}`;
       if (err && !timedOut2) output += `${output && !output.endsWith("\n") ? "\n" : ""}${err.message}
@@ -21506,13 +22634,13 @@ function defaultExec(cwd2) {
     } finally {
       if (fd !== void 0) {
         try {
-          (0, import_node_fs32.closeSync)(fd);
+          (0, import_node_fs36.closeSync)(fd);
         } catch {
         }
       }
       if (dir !== void 0) {
         try {
-          (0, import_node_fs32.rmSync)(dir, { recursive: true, force: true });
+          (0, import_node_fs36.rmSync)(dir, { recursive: true, force: true });
         } catch {
         }
       }
@@ -21565,14 +22693,14 @@ function defaultExecMany(cwd2) {
     const t0 = Date.now();
     let dir;
     try {
-      dir = (0, import_node_fs32.mkdtempSync)(import_node_path33.default.join((0, import_node_os2.tmpdir)(), "forge-many-"));
-      const logs = cmds.map((_, i) => import_node_path33.default.join(dir, `${i}.log`));
-      for (const l of logs) (0, import_node_fs32.writeFileSync)(l, "");
-      const out = import_node_path33.default.join(dir, "out.json");
-      const spec = import_node_path33.default.join(dir, "spec.json");
+      dir = (0, import_node_fs36.mkdtempSync)(import_node_path36.default.join((0, import_node_os2.tmpdir)(), "forge-many-"));
+      const logs = cmds.map((_, i) => import_node_path36.default.join(dir, `${i}.log`));
+      for (const l of logs) (0, import_node_fs36.writeFileSync)(l, "");
+      const out = import_node_path36.default.join(dir, "out.json");
+      const spec = import_node_path36.default.join(dir, "spec.json");
       const width = Math.max(1, Math.min(Math.floor(concurrency) || 1, cmds.length || 1));
-      (0, import_node_fs32.writeFileSync)(spec, JSON.stringify({ cmds: cmds.map((cmd, i) => ({ cmd, log: logs[i] })), timeoutMs: timeoutSec * 1e3, concurrency: width, out }));
-      const r2 = (0, import_node_child_process2.spawnSync)(process.execPath, ["-e", MANY_WRAPPER_SOURCE, "--", spec], {
+      (0, import_node_fs36.writeFileSync)(spec, JSON.stringify({ cmds: cmds.map((cmd, i) => ({ cmd, log: logs[i] })), timeoutMs: timeoutSec * 1e3, concurrency: width, out }));
+      const r2 = (0, import_node_child_process3.spawnSync)(process.execPath, ["-e", MANY_WRAPPER_SOURCE, "--", spec], {
         cwd: cwd2,
         windowsHide: true,
         timeout: timeoutSec * 1e3 * Math.ceil(cmds.length / width) + 15e3,
@@ -21582,7 +22710,7 @@ function defaultExecMany(cwd2) {
       });
       let rows = null;
       try {
-        rows = JSON.parse((0, import_node_fs32.readFileSync)(out, "utf8"));
+        rows = JSON.parse((0, import_node_fs36.readFileSync)(out, "utf8"));
       } catch {
         rows = null;
       }
@@ -21591,20 +22719,20 @@ function defaultExecMany(cwd2) {
         let output = "";
         let fd;
         try {
-          fd = (0, import_node_fs32.openSync)(logs[i], "r");
+          fd = (0, import_node_fs36.openSync)(logs[i], "r");
           output = readTail(fd);
         } catch {
           output = "";
         } finally {
           if (fd !== void 0) {
             try {
-              (0, import_node_fs32.closeSync)(fd);
+              (0, import_node_fs36.closeSync)(fd);
             } catch {
             }
           }
         }
-        const row = Array.isArray(rows) ? rows[i] : null;
-        if (row && typeof row.code === "number") return { code: row.code, output, ms: typeof row.ms === "number" ? row.ms : Date.now() - t0, timedOut: row.timedOut === true };
+        const row2 = Array.isArray(rows) ? rows[i] : null;
+        if (row2 && typeof row2.code === "number") return { code: row2.code, output, ms: typeof row2.ms === "number" ? row2.ms : Date.now() - t0, timedOut: row2.timedOut === true };
         const why = err ? err.message : (r2.stderr || "the batch of validators ended early").trim();
         return { code: 1, output: `${output}${output && !output.endsWith("\n") ? "\n" : ""}forge: ${why}
 `, ms: Date.now() - t0, timedOut: err?.code === "ETIMEDOUT" };
@@ -21615,7 +22743,7 @@ function defaultExecMany(cwd2) {
     } finally {
       if (dir !== void 0) {
         try {
-          (0, import_node_fs32.rmSync)(dir, { recursive: true, force: true });
+          (0, import_node_fs36.rmSync)(dir, { recursive: true, force: true });
         } catch {
         }
       }
@@ -21625,24 +22753,24 @@ function defaultExecMany(cwd2) {
 function defaultGit(cwd2) {
   return (args) => {
     try {
-      return (0, import_node_child_process2.execFileSync)("git", args, { cwd: cwd2, encoding: "utf8", maxBuffer: MAX_GIT_OUTPUT, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+      return (0, import_node_child_process3.execFileSync)("git", args, { cwd: cwd2, encoding: "utf8", maxBuffer: MAX_GIT_OUTPUT, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
     } catch {
       return null;
     }
   };
 }
 var repoReader = (root) => ({
-  exists: (rel3) => (0, import_node_fs32.existsSync)(import_node_path33.default.join(root, rel3)),
+  exists: (rel3) => (0, import_node_fs36.existsSync)(import_node_path36.default.join(root, rel3)),
   read: (rel3) => {
     try {
-      return (0, import_node_fs32.readFileSync)(import_node_path33.default.join(root, rel3), "utf8");
+      return (0, import_node_fs36.readFileSync)(import_node_path36.default.join(root, rel3), "utf8");
     } catch {
       return null;
     }
   },
   list: (dir) => {
     try {
-      return (0, import_node_fs32.readdirSync)(import_node_path33.default.join(root, dir ?? ""));
+      return (0, import_node_fs36.readdirSync)(import_node_path36.default.join(root, dir ?? ""));
     } catch {
       return [];
     }
@@ -21652,7 +22780,7 @@ function planTask(cwd2, planArg, id2) {
   if (!planArg || !id2) throw new UsageError("--plan and --task are required");
   let text2;
   try {
-    text2 = (0, import_node_fs32.readFileSync)(import_node_path33.default.resolve(cwd2, planArg), "utf8");
+    text2 = (0, import_node_fs36.readFileSync)(import_node_path36.default.resolve(cwd2, planArg), "utf8");
   } catch {
     throw new UsageError(`cannot read plan ${planArg}`);
   }
@@ -21690,7 +22818,7 @@ function planTasksFor(cwd2, planArg) {
   if (planArg) {
     let text2;
     try {
-      text2 = (0, import_node_fs32.readFileSync)(import_node_path33.default.resolve(cwd2, planArg), "utf8");
+      text2 = (0, import_node_fs36.readFileSync)(import_node_path36.default.resolve(cwd2, planArg), "utf8");
     } catch {
       throw new UsageError(`cannot read plan ${planArg}`);
     }
@@ -21701,26 +22829,26 @@ function planTasksFor(cwd2, planArg) {
       throw new UsageError(`${planArg}: not a valid plan`);
     }
   }
-  const docs = import_node_path33.default.join(cwd2, "docs", "waypoint");
+  const docs = import_node_path36.default.join(cwd2, "docs", "waypoint");
   let projects;
   try {
-    projects = (0, import_node_fs32.readdirSync)(docs);
+    projects = (0, import_node_fs36.readdirSync)(docs);
   } catch {
     return [];
   }
   return projects.flatMap((p) => {
     try {
-      return parsePlan((0, import_node_fs32.readFileSync)(import_node_path33.default.join(docs, p, "plan.yaml"), "utf8")).tasks;
+      return parsePlan((0, import_node_fs36.readFileSync)(import_node_path36.default.join(docs, p, "plan.yaml"), "utf8")).tasks;
     } catch {
       return [];
     }
   });
 }
 function planStates(main) {
-  const docs = import_node_path33.default.join(main, "docs", "waypoint");
+  const docs = import_node_path36.default.join(main, "docs", "waypoint");
   let projects;
   try {
-    projects = (0, import_node_fs32.readdirSync)(docs);
+    projects = (0, import_node_fs36.readdirSync)(docs);
   } catch {
     return [];
   }
@@ -21728,21 +22856,21 @@ function planStates(main) {
   for (const p of projects) {
     let tasks;
     try {
-      tasks = parsePlan((0, import_node_fs32.readFileSync)(import_node_path33.default.join(docs, p, "plan.yaml"), "utf8")).tasks;
+      tasks = parsePlan((0, import_node_fs36.readFileSync)(import_node_path36.default.join(docs, p, "plan.yaml"), "utf8")).tasks;
     } catch {
       continue;
     }
-    const dir = import_node_path33.default.join(main, ".waypoint", p, "dbcache", "state");
+    const dir = import_node_path36.default.join(main, ".waypoint", p, "dbcache", "state");
     const states = {};
     let names2 = [];
     try {
-      names2 = (0, import_node_fs32.readdirSync)(dir).filter((f) => f.endsWith(".json"));
+      names2 = (0, import_node_fs36.readdirSync)(dir).filter((f) => f.endsWith(".json"));
     } catch {
       names2 = [];
     }
     for (const f of names2) {
       try {
-        states[f.slice(0, -5)] = JSON.parse((0, import_node_fs32.readFileSync)(import_node_path33.default.join(dir, f), "utf8"));
+        states[f.slice(0, -5)] = JSON.parse((0, import_node_fs36.readFileSync)(import_node_path36.default.join(dir, f), "utf8"));
       } catch {
       }
     }
@@ -21759,13 +22887,13 @@ function spTaskNumber(v) {
   return Number(v);
 }
 function findWaypointCli(scriptPath) {
-  const forgeRoot = import_node_path33.default.resolve(import_node_path33.default.dirname(scriptPath), "..");
-  const dev = import_node_path33.default.join(forgeRoot, "..", "waypoint", "dist", "waypoint.cjs");
-  if ((0, import_node_fs32.existsSync)(dev)) return import_node_path33.default.resolve(dev);
-  const base = import_node_path33.default.join(forgeRoot, "..", "..", "waypoint");
+  const forgeRoot = import_node_path36.default.resolve(import_node_path36.default.dirname(scriptPath), "..");
+  const dev = import_node_path36.default.join(forgeRoot, "..", "waypoint", "dist", "waypoint.cjs");
+  if ((0, import_node_fs36.existsSync)(dev)) return import_node_path36.default.resolve(dev);
+  const base = import_node_path36.default.join(forgeRoot, "..", "..", "waypoint");
   let versions = [];
   try {
-    versions = (0, import_node_fs32.readdirSync)(base);
+    versions = (0, import_node_fs36.readdirSync)(base);
   } catch {
     return null;
   }
@@ -21779,8 +22907,8 @@ function findWaypointCli(scriptPath) {
     return 0;
   };
   for (const v of versions.sort((a, b) => cmp(b, a))) {
-    const f = import_node_path33.default.join(base, v, "dist", "waypoint.cjs");
-    if ((0, import_node_fs32.existsSync)(f)) return import_node_path33.default.resolve(f);
+    const f = import_node_path36.default.join(base, v, "dist", "waypoint.cjs");
+    if ((0, import_node_fs36.existsSync)(f)) return import_node_path36.default.resolve(f);
   }
   return null;
 }
@@ -21788,15 +22916,15 @@ var superpowersOf = (io, dir) => locateSuperpowersFor(claudeConfigDir(io.env ?? 
 function mcpOf(io, dir) {
   const env = io.env ?? process.env;
   const out = /* @__PURE__ */ new Set();
-  for (const projectDir of /* @__PURE__ */ new Set([import_node_path33.default.resolve(dir), import_node_path33.default.resolve(mainCheckout(dir))])) {
+  for (const projectDir of /* @__PURE__ */ new Set([import_node_path36.default.resolve(dir), import_node_path36.default.resolve(mainCheckout(dir))])) {
     for (const n of mcpInventory({ configDir: claudeConfigDir(env), homeDir: claudeJsonDir(env), projectDir })) out.add(n);
   }
   return out;
 }
 function surfaceBlob(dir, file) {
   try {
-    const text2 = Buffer.from((0, import_node_fs32.readFileSync)(import_node_path33.default.join(dir, file)).toString("latin1").replace(/\r\n/g, "\n"), "latin1");
-    const id2 = (0, import_node_child_process2.execFileSync)("git", ["--no-replace-objects", "hash-object", "-w", "--no-filters", "--stdin"], { cwd: dir, input: text2, encoding: "utf8", timeout: 1e4, stdio: ["pipe", "pipe", "ignore"], windowsHide: true }).trim();
+    const text2 = Buffer.from((0, import_node_fs36.readFileSync)(import_node_path36.default.join(dir, file)).toString("latin1").replace(/\r\n/g, "\n"), "latin1");
+    const id2 = (0, import_node_child_process3.execFileSync)("git", ["--no-replace-objects", "hash-object", "-w", "--no-filters", "--stdin"], { cwd: dir, input: text2, encoding: "utf8", timeout: 1e4, stdio: ["pipe", "pipe", "ignore"], windowsHide: true }).trim();
     return OBJECT_ID.test(id2) ? id2 : null;
   } catch {
     return null;
@@ -21805,28 +22933,28 @@ function surfaceBlob(dir, file) {
 function writeFullDiff(root, name, hash, diff) {
   let dir = root;
   for (const part of [".forge", "work", "surfaces"]) {
-    dir = import_node_path33.default.join(dir, part);
+    dir = import_node_path36.default.join(dir, part);
     try {
-      if ((0, import_node_fs32.lstatSync)(dir).isSymbolicLink()) return null;
+      if ((0, import_node_fs36.lstatSync)(dir).isSymbolicLink()) return null;
     } catch {
     }
   }
-  const file = import_node_path33.default.join(dir, `${name}-${hash.slice(0, 16)}.diff`);
+  const file = import_node_path36.default.join(dir, `${name}-${hash.slice(0, 16)}.diff`);
   const tmp = `${file}.${process.pid}.tmp`;
   try {
-    (0, import_node_fs32.mkdirSync)(dir, { recursive: true });
-    (0, import_node_fs32.writeFileSync)(tmp, diff, { flag: "wx" });
-    (0, import_node_fs32.renameSync)(tmp, file);
+    (0, import_node_fs36.mkdirSync)(dir, { recursive: true });
+    (0, import_node_fs36.writeFileSync)(tmp, diff, { flag: "wx" });
+    (0, import_node_fs36.renameSync)(tmp, file);
     return file;
   } catch {
     try {
-      (0, import_node_fs32.rmSync)(tmp, { force: true });
+      (0, import_node_fs36.rmSync)(tmp, { force: true });
     } catch {
     }
     return null;
   }
 }
-function surfaceQuestion(p, s2, perm, git, dir, work, es2) {
+function surfaceQuestion(p, s2, perm, git2, dir, work, es2) {
   if (p.permission === "allowed") return p;
   if (p.permission === "ask") return { ...p, ask: askFor(s2, "ask", es2) };
   const lines = (out) => (out ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
@@ -21834,21 +22962,21 @@ function surfaceQuestion(p, s2, perm, git, dir, work, es2) {
   let cut = {};
   if (perm?.blob) {
     const now = surfaceBlob(dir, s2.file);
-    const d = now ? git(["--no-replace-objects", "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", perm.blob, now]) : null;
+    const d = now ? git2(["--no-replace-objects", "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", perm.blob, now]) : null;
     if (d && now) {
       const full = relabelDiff(d, perm.blob, now, s2.file);
       diff = capLines(full, 120, es2);
       if (diff !== full) cut = { diffTruncated: true, diffFile: writeFullDiff(work, s2.name, p.hash, full) };
     }
   }
-  const since = perm?.commit ? git(["--no-replace-objects", "log", "--oneline", "-n", "10", `${perm.commit}..HEAD`, "--", s2.file]) : null;
-  const commits = lines(since ?? git(["--no-replace-objects", "log", "--oneline", "-n", "3", "--", s2.file]));
+  const since = perm?.commit ? git2(["--no-replace-objects", "log", "--oneline", "-n", "10", `${perm.commit}..HEAD`, "--", s2.file]) : null;
+  const commits = lines(since ?? git2(["--no-replace-objects", "log", "--oneline", "-n", "3", "--", s2.file]));
   return { ...p, diff, ...cut, commits, ask: askFor(s2, "changed", es2) };
 }
 var committedAt = (io, dir) => {
-  const git = io.git ?? defaultGit(dir);
+  const git2 = io.git ?? defaultGit(dir);
   return (rel3) => {
-    const s2 = Number((git(["log", "-1", "--format=%ct", "--", rel3]) ?? "").trim());
+    const s2 = Number((git2(["log", "-1", "--format=%ct", "--", rel3]) ?? "").trim());
     return Number.isInteger(s2) && s2 > 0 ? s2 * 1e3 : null;
   };
 };
@@ -21874,15 +23002,40 @@ function briefThreatModel(dir) {
     return null;
   }
 }
+function lastDecisions(root) {
+  const out = {};
+  for (const e of readEvents(root)) {
+    if (e.kind !== "proposal" || typeof e.id !== "string") continue;
+    const status = e.action === "reopen" ? e.to : e.action === "decide" || e.action === "confirm" || e.action === "policy" && e.status === "auto_approved" ? e.status : void 0;
+    if (typeof status === "string") out[e.id] = status;
+  }
+  return out;
+}
 function stopContext(cwd2, now) {
   const proposals = loadProposals(cwd2);
+  const marks = loadApprovals(cwd2);
+  const last = lastDecisions(cwd2);
   return {
     now,
-    stopFile: (0, import_node_fs32.existsSync)(stopFile(cwd2)),
-    approvedPending: proposals.filter(isActionable).length,
+    stopFile: (0, import_node_fs36.existsSync)(stopFile(cwd2)),
+    // Wave 4: approved work counts only with the owner's mark (with or without a task, as before); one without a task also
+    // needs the mark to be of its present text: an edited one never becomes a task, so it does not hold the queue open.
+    approvedPending: proposals.filter((p) => p.taskId === void 0 ? ownerCheck(p.id, p, marks[p.id], last[p.id]) === "ok" : markMatches(p, marks[p.id])).length,
     pendingProposals: proposals.filter((p) => p.status === "proposed" || p.status === "discussing").length
   };
 }
+function unownedReasons(root) {
+  const marks = loadApprovals(root);
+  const last = lastDecisions(root);
+  const out = {};
+  for (const p of loadProposals(root)) {
+    if (!isActionable(p) || p.taskId !== void 0) continue;
+    const c = ownerCheck(p.id, p, marks[p.id], last[p.id]);
+    if (c !== "ok") out[p.id] = c;
+  }
+  return out;
+}
+var unownedOf = (root) => Object.keys(unownedReasons(root)).length;
 function runRootOf(cwd2) {
   const main = mainCheckout(cwd2);
   if (samePath(main, cwd2)) return main;
@@ -21918,12 +23071,12 @@ function hookStop(io) {
     for (const [id2, t] of Object.entries(exec?.active ? exec.tasks : {})) {
       if (t.status !== "running") continue;
       try {
-        const p = normalizePublicTask(JSON.parse((0, import_node_fs32.readFileSync)(executionTaskFile(main, id2), "utf8")));
+        const p = normalizePublicTask(JSON.parse((0, import_node_fs36.readFileSync)(executionTaskFile(main, id2), "utf8")));
         if (p && p.task === id2 && p.runId === exec.runId) leases[id2] = p.leaseUntil;
       } catch {
       }
     }
-    const d = decideExecutionStop(hookInput, exec, { now: io.now(), stopFile: (0, import_node_fs32.existsSync)(stopFile(main)), jobs, leases });
+    const d = decideExecutionStop(hookInput, exec, { now: io.now(), stopFile: (0, import_node_fs36.existsSync)(stopFile(main)), jobs, leases });
     if (!d.block) return "";
     try {
       updateExecution(main, (cur) => cur && cur.runId === d.exec.runId ? { ...cur, lastBlockStep: d.exec.lastBlockStep, ...d.ended ? { active: false, stopReason: d.exec.stopReason, sleepUntil: null } : {} } : null, { now: io.now, sleep: io.sleep, waitMs: HOOK_LOCK_WAIT_MS });
@@ -21943,7 +23096,7 @@ function runReply(cwd2, run2) {
   return sessionReply(run2, active, () => planLocale(cwd2, active?.project))?.trim() ?? null;
 }
 function logVerifyResult(cwd2, at2, task, dir, verifyFile) {
-  const rel3 = import_node_path33.default.relative(cwd2, dir).split(import_node_path33.default.sep).join("/");
+  const rel3 = import_node_path36.default.relative(cwd2, dir).split(import_node_path36.default.sep).join("/");
   const evidence = rel3.replace(/reviews-(\d+-\d+)$/, "evidence/$1");
   const out = { result: verifyFile?.result ?? "invalid", passed: verifyFile ? verifyFile.checks.filter((c) => c.ok).length : 0, total: verifyFile ? verifyFile.checks.length : 0 };
   const { skipped } = keepEvidence(cwd2, dir);
@@ -21960,29 +23113,29 @@ function logVerifyResult(cwd2, at2, task, dir, verifyFile) {
 }
 var SHOT_MAX_BYTES = 2 * 1024 * 1024;
 function learnSurface(io, dir, name, notes, heading) {
-  const file = import_node_path33.default.join(dir, surfaceFile(name));
-  if (!(0, import_node_fs32.existsSync)(file)) return { reason: `${surfaceFile(name)} does not exist` };
-  if ((0, import_node_fs32.lstatSync)(file).isSymbolicLink()) return { reason: `${surfaceFile(name)} is a symlink` };
-  const before3 = (0, import_node_fs32.readFileSync)(file, "utf8");
+  const file = import_node_path36.default.join(dir, surfaceFile(name));
+  if (!(0, import_node_fs36.existsSync)(file)) return { reason: `${surfaceFile(name)} does not exist` };
+  if ((0, import_node_fs36.lstatSync)(file).isSymbolicLink()) return { reason: `${surfaceFile(name)} is a symlink` };
+  const before3 = (0, import_node_fs36.readFileSync)(file, "utf8");
   const cur = readLocal(io.cwd).surfaces[name];
   const allowed = cur?.state === "allowed" && hashMatches(cur.hash, permissionHash(before3, readLearned(io.cwd).get(name)));
   const at2 = io.now().toISOString();
   const r2 = appendLearned(before3, at2.slice(0, 10), notes, heading);
-  (0, import_node_fs32.writeFileSync)(file, r2.text);
+  (0, import_node_fs36.writeFileSync)(file, r2.text);
   if (allowed) recordLearned(io.cwd, name, r2.added, at2);
   return { count: r2.count };
 }
 function cleanupEvidence(dir) {
   let pids = [];
   try {
-    const raw = JSON.parse((0, import_node_fs32.readFileSync)(import_node_path33.default.join(dir, "pids.json"), "utf8"));
+    const raw = JSON.parse((0, import_node_fs36.readFileSync)(import_node_path36.default.join(dir, "pids.json"), "utf8"));
     if (Array.isArray(raw)) pids = raw.filter((p) => Number.isInteger(p));
   } catch {
     pids = [];
   }
   const pgid = (pid) => {
     try {
-      const n = Number((0, import_node_child_process2.execFileSync)("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8", timeout: 5e3, stdio: ["ignore", "pipe", "ignore"] }).trim());
+      const n = Number((0, import_node_child_process3.execFileSync)("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8", timeout: 5e3, stdio: ["ignore", "pipe", "ignore"] }).trim());
       return Number.isInteger(n) && n > 0 ? n : null;
     } catch {
       return null;
@@ -21990,7 +23143,7 @@ function cleanupEvidence(dir) {
   };
   const kill = (pid) => {
     try {
-      if (process.platform === "win32") (0, import_node_child_process2.execFileSync)("taskkill", ["/T", "/F", "/PID", String(pid)], { stdio: "ignore", windowsHide: true });
+      if (process.platform === "win32") (0, import_node_child_process3.execFileSync)("taskkill", ["/T", "/F", "/PID", String(pid)], { stdio: "ignore", windowsHide: true });
       else process.kill(killTarget(pid, pgid(pid)), "SIGTERM");
       return true;
     } catch {
@@ -22020,7 +23173,7 @@ function triageCore(io, args) {
   let task = textArgs.filter((a) => !a.startsWith("--")).join(" ").trim();
   if (flag("text-file") !== void 0) {
     try {
-      task = (0, import_node_fs32.readFileSync)(import_node_path33.default.resolve(io.cwd, flag("text-file")), "utf8").trim();
+      task = (0, import_node_fs36.readFileSync)(import_node_path36.default.resolve(io.cwd, flag("text-file")), "utf8").trim();
     } catch {
       throw new UsageError("triage: cannot read --text-file");
     }
@@ -22035,7 +23188,7 @@ function triageCore(io, args) {
     const file = flag("superpowers-plan");
     let sp;
     try {
-      sp = spPlanDone((0, import_node_fs32.readFileSync)(import_node_path33.default.resolve(io.cwd, file), "utf8"), import_node_path33.default.resolve(io.cwd, file), repoDir);
+      sp = spPlanDone((0, import_node_fs36.readFileSync)(import_node_path36.default.resolve(io.cwd, file), "utf8"), import_node_path36.default.resolve(io.cwd, file), repoDir);
     } catch (e) {
       throw new UsageError(e instanceof SpPlanError ? `triage: ${file}: ${e.message}` : `triage: cannot read ${file}`);
     }
@@ -22056,11 +23209,11 @@ function triageCore(io, args) {
     if (!flag("task")) throw new UsageError("triage: --base needs --task");
     base = v;
   }
-  const git = io.git ?? defaultGit(io.cwd);
+  const git2 = io.git ?? defaultGit(io.cwd);
   const lines = (out) => (out ?? "").split("\n").map((s2) => s2.trim()).filter(Boolean);
-  const listed = git(["-c", "core.quotePath=false", "ls-files"]);
-  const commits = Number.parseInt((git(["rev-list", "--count", "HEAD"]) ?? "").trim(), 10) || 0;
-  const grep = (w) => lines(git(["-c", "core.quotePath=false", "grep", "-l", "-I", "--fixed-strings", "-w", "-e", w])).filter((f) => !isBookkeeping(f));
+  const listed = git2(["-c", "core.quotePath=false", "ls-files"]);
+  const commits = Number.parseInt((git2(["rev-list", "--count", "HEAD"]) ?? "").trim(), 10) || 0;
+  const grep = (w) => lines(git2(["-c", "core.quotePath=false", "grep", "-l", "-I", "--fixed-strings", "-w", "-e", w])).filter((f) => !isBookkeeping(f));
   const tracked = lines(listed);
   const zoneFiles = planned ? tracked.filter((f) => planned.zones.some((z) => globMatch(z, f))) : [];
   const extra = planned ? { files: zoneFiles, zones: zonesFromPaths(planned.zones) } : spFiles ? { files: tracked.filter((f) => spFiles.includes(f)), zones: zonesFromPaths(spFiles) } : void 0;
@@ -22081,7 +23234,7 @@ function triageCore(io, args) {
   }
   let diff = null;
   if (base !== null) {
-    const out = git(["-c", "core.quotePath=false", "diff", "--numstat", "--no-renames", `${base}..HEAD`]);
+    const out = git2(["-c", "core.quotePath=false", "diff", "--numstat", "--no-renames", `${base}..HEAD`]);
     if (out === null) throw new UsageError(`triage: cannot diff ${base}..HEAD`);
     const stat = parseNumstat(out);
     const d = diffPath(stat);
@@ -22119,12 +23272,12 @@ function triageCore(io, args) {
   const reviewPlan = reviewFor(result.path, result.sensitive, isPerfTask(wordText), { delicate, profile });
   const review = { ...reviewPlan, reviewers: reviewPlan.reviewers.map((r2) => ({ ...r2, agent: agentFor(r2.role, profile) })) };
   const locale = localeArg2 ?? ((plannedDoc?.plan.locale ?? planLocale(io.cwd))?.toLowerCase().split(/[-_]/)[0] === "es" ? "es" : "en");
-  let line2 = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh: fresh2, catalog }, locale);
+  let line3 = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh: fresh2, catalog }, locale);
   let gate = result.path === "medium" ? "plan" : null;
   let reviewed = {};
   if (diff) {
     const bare = announce({ path: result.path, reasons: result.reasons, implementer, why: raiseWhy, fresh: [], catalog }, locale);
-    line2 = announceReview({ path: result.path, files: diff.stat.files.length, lines: diff.stat.lines, review: reviewPlan }, locale) + line2.slice(bare.length);
+    line3 = announceReview({ path: result.path, files: diff.stat.files.length, lines: diff.stat.lines, review: reviewPlan }, locale) + line3.slice(bare.length);
     gate = null;
     reviewed = { diff: { base: diff.base, files: diff.stat.files, lines: diff.stat.lines, path: diff.path } };
   }
@@ -22137,31 +23290,31 @@ function triageCore(io, args) {
     diff,
     auto,
     review,
-    output: { ...result, catalog, new: fresh2, implementer, announce: line2, gate, ...auto, ...reviewed, review }
+    output: { ...result, catalog, new: fresh2, implementer, announce: line3, gate, ...auto, ...reviewed, review }
   };
 }
-function cleanProbe(cwd2, task, textFile, rmdir = import_node_fs32.rmdirSync) {
-  const dir = import_node_path33.default.join(cwd2, ".forge");
-  const file = import_node_path33.default.join(dir, "work", task, "task.txt");
-  if (!samePath(import_node_path33.default.resolve(cwd2, textFile), file)) return false;
+function cleanProbe(cwd2, task, textFile, rmdir = import_node_fs36.rmdirSync) {
+  const dir = import_node_path36.default.join(cwd2, ".forge");
+  const file = import_node_path36.default.join(dir, "work", task, "task.txt");
+  if (!samePath(import_node_path36.default.resolve(cwd2, textFile), file)) return false;
   try {
-    if (!(0, import_node_fs32.lstatSync)(dir).isDirectory()) return false;
+    if (!(0, import_node_fs36.lstatSync)(dir).isDirectory()) return false;
     const entries = [];
     const walk = (d, rel3) => {
-      for (const e of (0, import_node_fs32.readdirSync)(d, { withFileTypes: true })) {
+      for (const e of (0, import_node_fs36.readdirSync)(d, { withFileTypes: true })) {
         const r2 = rel3 ? `${rel3}/${e.name}` : e.name;
         entries.push(e.isDirectory() ? `${r2}/` : r2);
-        if (e.isDirectory()) walk(import_node_path33.default.join(d, e.name), r2);
+        if (e.isDirectory()) walk(import_node_path36.default.join(d, e.name), r2);
       }
     };
     walk(dir, "");
     if (entries.sort().join("\n") !== ["work/", `work/${task}/`, `work/${task}/task.txt`].join("\n")) return false;
-    (0, import_node_fs32.rmSync)(file);
+    (0, import_node_fs36.rmSync)(file);
   } catch {
     return false;
   }
   try {
-    for (const d of [import_node_path33.default.join(dir, "work", task), import_node_path33.default.join(dir, "work"), dir]) rmdir(d);
+    for (const d of [import_node_path36.default.join(dir, "work", task), import_node_path36.default.join(dir, "work"), dir]) rmdir(d);
   } catch {
   }
   return true;
@@ -22185,7 +23338,7 @@ function runOrJob(argv, io) {
   const file = argv[at2 + 1];
   if (file === void 0 || file.startsWith("--")) return { code: 2, stdout: "", stderr: `${job.cmd}: --out needs a file
 ` };
-  const outFile = import_node_path33.default.resolve(io.cwd, file);
+  const outFile = import_node_path36.default.resolve(io.cwd, file);
   const main = mainCheckout(io.cwd);
   let max = 2;
   try {
@@ -22231,10 +23384,10 @@ function runCommand(argv, io) {
   if (cwdAt >= 0) {
     const dir = argv[cwdAt + 1];
     if (!dir || dir.startsWith("--")) return { code: 2, stdout: "", stderr: "forge: --cwd needs a directory\n" };
-    const abs = import_node_path33.default.resolve(io.cwd, dir);
-    if (!(0, import_node_fs32.existsSync)(abs)) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} does not exist
+    const abs = import_node_path36.default.resolve(io.cwd, dir);
+    if (!(0, import_node_fs36.existsSync)(abs)) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} does not exist
 ` };
-    if (!(0, import_node_fs32.statSync)(abs).isDirectory()) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} is not a directory
+    if (!(0, import_node_fs36.statSync)(abs).isDirectory()) return { code: 2, stdout: "", stderr: `forge: --cwd ${abs} is not a directory
 ` };
     argv = [...argv.slice(0, cwdAt), ...argv.slice(cwdAt + 2)];
     io = { ...io, workdir: abs, git: defaultGit(abs), exec: defaultExec(abs), execMany: defaultExecMany(abs) };
@@ -22249,7 +23402,7 @@ function runCommand(argv, io) {
   const has = (name) => args.includes(`--${name}`);
   const ok = (out) => ({ code: 0, stdout: out.endsWith("\n") ? out : `${out}
 `, stderr: "" });
-  const json3 = (v, code = 0) => ({ code, stdout: JSON.stringify(v, null, 2) + "\n", stderr: "" });
+  const json4 = (v, code = 0) => ({ code, stdout: JSON.stringify(v, null, 2) + "\n", stderr: "" });
   const ts = () => io.now().toISOString();
   try {
     if (cmd !== "swarm" && has("project") && !isSafeId(flag("project"))) throw new UsageError(`${cmd}: --project must use letters, digits, _ - . (at most 120)`);
@@ -22263,7 +23416,7 @@ function runCommand(argv, io) {
           const label = flag("data-file") !== void 0 ? "--data-file" : "--data";
           let parsed;
           try {
-            const raw = flag("data-file") !== void 0 ? (0, import_node_fs32.readFileSync)(import_node_path33.default.resolve(io.cwd, flag("data-file")), "utf8") : flag("data");
+            const raw = flag("data-file") !== void 0 ? (0, import_node_fs36.readFileSync)(import_node_path36.default.resolve(io.cwd, flag("data-file")), "utf8") : flag("data");
             parsed = JSON.parse(raw);
           } catch {
             throw new UsageError(`log: ${label} must be a JSON object`);
@@ -22283,7 +23436,7 @@ function runCommand(argv, io) {
           const inPlan = (project2) => {
             if (!isSafeId(project2)) return false;
             try {
-              return parsePlan((0, import_node_fs32.readFileSync)(import_node_path33.default.join(main, "docs", "waypoint", project2, "plan.yaml"), "utf8")).tasks.some((t) => t.id === task);
+              return parsePlan((0, import_node_fs36.readFileSync)(import_node_path36.default.join(main, "docs", "waypoint", project2, "plan.yaml"), "utf8")).tasks.some((t) => t.id === task);
             } catch {
               return false;
             }
@@ -22302,7 +23455,7 @@ function runCommand(argv, io) {
           if (!f) throw new UsageError("brief: --prior-file needs a file");
           let raw;
           try {
-            raw = JSON.parse((0, import_node_fs32.readFileSync)(import_node_path33.default.resolve(io.cwd, f), "utf8"));
+            raw = JSON.parse((0, import_node_fs36.readFileSync)(import_node_path36.default.resolve(io.cwd, f), "utf8"));
           } catch {
             throw new UsageError(`brief: cannot read ${f}`);
           }
@@ -22326,7 +23479,7 @@ function runCommand(argv, io) {
           const n = spTaskNumber(flag("task"));
           let text2;
           try {
-            text2 = (0, import_node_fs32.readFileSync)(import_node_path33.default.resolve(io.cwd, file), "utf8");
+            text2 = (0, import_node_fs36.readFileSync)(import_node_path36.default.resolve(io.cwd, file), "utf8");
           } catch {
             throw new UsageError(`brief: cannot read ${file}`);
           }
@@ -22338,8 +23491,8 @@ function runCommand(argv, io) {
           }
         }
         const { plan, task } = planTask(io.cwd, flag("plan"), flag("task"));
-        const design = flag("design") ?? import_node_path33.default.join(import_node_path33.default.dirname(flag("plan")), "design.md");
-        const designPath = (0, import_node_fs32.existsSync)(import_node_path33.default.resolve(io.cwd, design)) ? design.replace(/\\/g, "/") : null;
+        const design = flag("design") ?? import_node_path36.default.join(import_node_path36.default.dirname(flag("plan")), "design.md");
+        const designPath = (0, import_node_fs36.existsSync)(import_node_path36.default.resolve(io.cwd, design)) ? design.replace(/\\/g, "/") : null;
         return ok(renderBrief(plan, task, { planPath: flag("plan").replace(/\\/g, "/"), designPath, tdd: briefTdd(io, repoDir), threatModel: briefThreatModel(repoDir), prior, priorTotal }));
       }
       case "triage": {
@@ -22356,10 +23509,10 @@ function runCommand(argv, io) {
           ...t.diff ? { diff: { base: t.diff.base, files: t.diff.stat.files.length, lines: t.diff.stat.lines } } : {},
           review: t.review
         });
-        const git = io.git ?? defaultGit(io.cwd);
-        const untracked2 = (git(["ls-files", "--others", "--exclude-standard", "--", ".forge/.gitignore"]) ?? "").trim() ? { untracked: [".forge/.gitignore"] } : {};
+        const git2 = io.git ?? defaultGit(io.cwd);
+        const untracked2 = (git2(["ls-files", "--others", "--exclude-standard", "--", ".forge/.gitignore"]) ?? "").trim() ? { untracked: [".forge/.gitignore"] } : {};
         const work = t.task && isSafeId(t.task) ? { work: workRel({ project: t.project, task: t.task }) } : {};
-        return json3({ ...t.output, ...work, ...untracked2 });
+        return json4({ ...t.output, ...work, ...untracked2 });
       }
       case "validate": {
         const config = loadConfig(repoDir);
@@ -22370,12 +23523,12 @@ function runCommand(argv, io) {
         const affectedFiles = () => {
           const given = flag("affected");
           if (given !== void 0) return given.split(",").map((s2) => s2.trim()).filter(Boolean);
-          const git = io.git ?? defaultGit(repoDir);
+          const git2 = io.git ?? defaultGit(repoDir);
           const base = flag("base") ?? "HEAD";
           if (base.startsWith("-")) throw new UsageError("validate: --base must be a commit");
-          const changed = git(["diff", "--name-only", "-z", "--relative", base, "--"]);
+          const changed = git2(["diff", "--name-only", "-z", "--relative", base, "--"]);
           if (changed === null) throw new UsageError(`validate --affected: cannot diff against ${base}`);
-          const others = git(["ls-files", "-z", "--others", "--exclude-standard"]) ?? "";
+          const others = git2(["ls-files", "-z", "--others", "--exclude-standard"]) ?? "";
           return [...new Set([...changed.split("\0"), ...others.split("\0")].filter(Boolean))];
         };
         let scope;
@@ -22416,7 +23569,7 @@ function runCommand(argv, io) {
           if (flag("baseline") === void 0) throw new UsageError("validate: --baseline needs the JSON a validate run printed on the base commit");
           let baseline;
           try {
-            baseline = JSON.parse((0, import_node_fs32.readFileSync)(import_node_path33.default.resolve(io.cwd, flag("baseline")), "utf8"));
+            baseline = JSON.parse((0, import_node_fs36.readFileSync)(import_node_path36.default.resolve(io.cwd, flag("baseline")), "utf8"));
           } catch {
             throw new UsageError("validate: --baseline must be the JSON written by forge validate");
           }
@@ -22424,7 +23577,7 @@ function runCommand(argv, io) {
         }
         const allOk = results.every((r2) => !blocking(r2));
         appendEvent(io.cwd, validateEvent(ts(), flag("task"), results, durationMs, scope.mode, has("base-run") ? { baseline: true } : {}));
-        const out = json3(results, allOk ? 0 : 1);
+        const out = json4(results, allOk ? 0 : 1);
         if (!list.length) out.stderr = all.length ? "no validators cover the affected paths\n" : "no validators detected: add tests or list validators in .forge/config.yaml\n";
         out.stderr += plan.notes.map((n) => `${n}
 `).join("");
@@ -22436,14 +23589,14 @@ function runCommand(argv, io) {
         const task = flag("task");
         const dirArg = flag("dir");
         if (!task || !dirArg) throw new UsageError("verdict: --task and --dir are required");
-        const dir = import_node_path33.default.resolve(io.cwd, dirArg);
+        const dir = import_node_path36.default.resolve(io.cwd, dirArg);
         const reviews = {};
         for (const name of ["correctness", "security", "perf"]) {
-          const file = import_node_path33.default.join(dir, `${name}.json`);
-          if ((0, import_node_fs32.existsSync)(file)) reviews[name] = parseReview((0, import_node_fs32.readFileSync)(file, "utf8"));
+          const file = import_node_path36.default.join(dir, `${name}.json`);
+          if ((0, import_node_fs36.existsSync)(file)) reviews[name] = parseReview((0, import_node_fs36.readFileSync)(file, "utf8"));
         }
-        const verifyPath = import_node_path33.default.join(dir, "verify.json");
-        const verifyFile = (0, import_node_fs32.existsSync)(verifyPath) ? parseVerifyFile((0, import_node_fs32.readFileSync)(verifyPath, "utf8")) : void 0;
+        const verifyPath = import_node_path36.default.join(dir, "verify.json");
+        const verifyFile = (0, import_node_fs36.existsSync)(verifyPath) ? parseVerifyFile((0, import_node_fs36.readFileSync)(verifyPath, "utf8")) : void 0;
         if (verifyFile !== void 0) reviews.verify = verifyReview(verifyFile);
         if (!Object.keys(reviews).length) throw new UsageError(`no reviews found in ${dirArg}`);
         let validatorsOk;
@@ -22453,7 +23606,7 @@ function runCommand(argv, io) {
         if (flag("validators")) {
           let results;
           try {
-            results = JSON.parse((0, import_node_fs32.readFileSync)(import_node_path33.default.resolve(io.cwd, flag("validators")), "utf8"));
+            results = JSON.parse((0, import_node_fs36.readFileSync)(import_node_path36.default.resolve(io.cwd, flag("validators")), "utf8"));
           } catch {
             throw new UsageError("verdict: --validators must be the JSON written by forge validate");
           }
@@ -22478,7 +23631,7 @@ function runCommand(argv, io) {
           ts: ts(),
           kind: "verdict",
           task,
-          dir: import_node_path33.default.relative(io.cwd, dir).split(import_node_path33.default.sep).join("/") || ".",
+          dir: import_node_path36.default.relative(io.cwd, dir).split(import_node_path36.default.sep).join("/") || ".",
           action: result.action,
           score: result.score,
           signature: result.signature,
@@ -22487,23 +23640,23 @@ function runCommand(argv, io) {
           minor: result.minor.length
         });
         if (verifyFile !== void 0) logVerifyResult(io.cwd, ts(), task, dir, verifyFile);
-        return json3({ ...result, invalid: result.reviewers.filter((r2) => r2.invalid).map((r2) => r2.name), incomplete: result.reviewers.filter((r2) => r2.incomplete).map((r2) => r2.name) });
+        return json4({ ...result, invalid: result.reviewers.filter((r2) => r2.invalid).map((r2) => r2.name), incomplete: result.reviewers.filter((r2) => r2.incomplete).map((r2) => r2.name) });
       }
       case "verify-result": {
         const task = flag("task");
         const dirArg = flag("dir");
         if (!task || !dirArg) throw new UsageError("verify-result: --task and --dir are required");
-        const dir = import_node_path33.default.resolve(io.cwd, dirArg);
-        const verifyPath = import_node_path33.default.join(dir, "verify.json");
-        if (!(0, import_node_fs32.existsSync)(verifyPath)) throw new UsageError(`verify-result: no verify.json in ${dirArg}`);
-        const verifyFile = parseVerifyFile((0, import_node_fs32.readFileSync)(verifyPath, "utf8"));
+        const dir = import_node_path36.default.resolve(io.cwd, dirArg);
+        const verifyPath = import_node_path36.default.join(dir, "verify.json");
+        if (!(0, import_node_fs36.existsSync)(verifyPath)) throw new UsageError(`verify-result: no verify.json in ${dirArg}`);
+        const verifyFile = parseVerifyFile((0, import_node_fs36.readFileSync)(verifyPath, "utf8"));
         if (!verifyFile) throw new UsageError(`verify-result: ${dirArg}/verify.json is not a usable verify result (result pass|fail|blocked, checks, a reason when blocked)`);
-        return json3({ task, ...logVerifyResult(io.cwd, ts(), task, dir, verifyFile) });
+        return json4({ task, ...logVerifyResult(io.cwd, ts(), task, dir, verifyFile) });
       }
       case "verify-cleanup": {
         const dir = flag("dir");
         if (!dir) throw new UsageError("verify-cleanup: --dir is required");
-        return json3(cleanupEvidence(import_node_path33.default.resolve(io.cwd, dir)));
+        return json4(cleanupEvidence(import_node_path36.default.resolve(io.cwd, dir)));
       }
       case "verify-close": {
         const task = flag("task"), dirArg = flag("dir"), evArg = flag("evidence");
@@ -22511,10 +23664,10 @@ function runCommand(argv, io) {
         const loc = flag("locale");
         if (has("locale") && loc !== "es" && loc !== "en") throw new UsageError("verify-close: --locale must be es|en");
         const es2 = (loc ?? planLocale(io.cwd)) === "es";
-        const dir = import_node_path33.default.resolve(io.cwd, dirArg);
-        const evidence = import_node_path33.default.resolve(io.cwd, evArg);
-        const verifyPath = import_node_path33.default.join(dir, "verify.json");
-        const v = parseVerifyFile((0, import_node_fs32.existsSync)(verifyPath) ? (0, import_node_fs32.readFileSync)(verifyPath, "utf8") : null);
+        const dir = import_node_path36.default.resolve(io.cwd, dirArg);
+        const evidence = import_node_path36.default.resolve(io.cwd, evArg);
+        const verifyPath = import_node_path36.default.join(dir, "verify.json");
+        const v = parseVerifyFile((0, import_node_fs36.existsSync)(verifyPath) ? (0, import_node_fs36.readFileSync)(verifyPath, "utf8") : null);
         if (!v) throw new UsageError(`verify-close: ${dirArg}/verify.json is not a usable verify result (result pass|fail|blocked, checks, a reason when blocked)`);
         const notes = /* @__PURE__ */ new Map();
         for (const l of v.learned) notes.set(l.surface, [...notes.get(l.surface) ?? [], l.note]);
@@ -22536,7 +23689,7 @@ function runCommand(argv, io) {
         }
         const cleanup = cleanupEvidence(evidence);
         const passed = v.checks.filter((c) => c.ok).length, total = v.checks.length;
-        const relDir = import_node_path33.default.relative(io.cwd, dir).split(import_node_path33.default.sep).join("/");
+        const relDir = import_node_path36.default.relative(io.cwd, dir).split(import_node_path36.default.sep).join("/");
         const evRel = relDir.replace(/reviews-(\d+-\d+)$/, "evidence/$1");
         const evField = evRel !== relDir ? evRel : void 0;
         const ledger = readEvents(io.cwd);
@@ -22550,32 +23703,32 @@ function runCommand(argv, io) {
         }
         let realEvidence;
         try {
-          realEvidence = (0, import_node_fs32.realpathSync)(evidence);
+          realEvidence = (0, import_node_fs36.realpathSync)(evidence);
         } catch {
           realEvidence = evidence;
         }
         const inside = (f) => {
-          const r2 = import_node_path33.default.relative(realEvidence, f);
-          return r2 !== "" && !r2.startsWith("..") && !import_node_path33.default.isAbsolute(r2);
+          const r2 = import_node_path36.default.relative(realEvidence, f);
+          return r2 !== "" && !r2.startsWith("..") && !import_node_path36.default.isAbsolute(r2);
         };
         const shots = v.checks.filter((c) => c.shot).flatMap((c) => {
-          const file = import_node_path33.default.resolve(evidence, c.shot);
+          const file = import_node_path36.default.resolve(evidence, c.shot);
           let real, bytes;
           try {
-            real = (0, import_node_fs32.realpathSync)(file);
-            bytes = (0, import_node_fs32.statSync)(real).size;
+            real = (0, import_node_fs36.realpathSync)(file);
+            bytes = (0, import_node_fs36.statSync)(real).size;
           } catch {
             return [];
           }
           if (!inside(real)) return [];
-          return [{ file: import_node_path33.default.relative(io.cwd, file).split(import_node_path33.default.sep).join("/"), surface: c.surface, check: c.name, ok: c.ok, expected: c.expected, observed: c.observed, bytes, oversize: bytes > SHOT_MAX_BYTES }];
+          return [{ file: import_node_path36.default.relative(io.cwd, file).split(import_node_path36.default.sep).join("/"), surface: c.surface, check: c.name, ok: c.ok, expected: c.expected, observed: c.observed, bytes, oversize: bytes > SHOT_MAX_BYTES }];
         });
         let previous = [];
         const db = flag("db");
         if (db) {
           const base = task.replace(/-\d+$/, "");
           try {
-            const st = JSON.parse((0, import_node_fs32.readFileSync)(import_node_path33.default.resolve(io.cwd, db, "state", `${base}.json`), "utf8"));
+            const st = JSON.parse((0, import_node_fs36.readFileSync)(import_node_path36.default.resolve(io.cwd, db, "state", `${base}.json`), "utf8"));
             previous = (st.evidence?.shots ?? []).map((s2) => s2?.id).filter((x) => typeof x === "string" && x.length > 0);
           } catch {
             previous = [];
@@ -22584,7 +23737,7 @@ function runCommand(argv, io) {
         const big = shots.filter((s2) => s2.oversize).length;
         const learnedText = Object.entries(learned).map(([n, k]) => `${n} (${k})`).join(", ");
         const say = es2 ? `Verificaci\xF3n ${v.result}: ${passed}/${total} comprobaciones${learnedText ? `; aprendido en ${learnedText}` : ""}${shots.length ? `; ${shots.length} captura(s)${big ? ` (${big} de m\xE1s de 2 MB)` : ""}` : ""}.` : `Verification ${v.result}: ${passed}/${total} checks${learnedText ? `; learned in ${learnedText}` : ""}${shots.length ? `; ${shots.length} screenshot(s)${big ? ` (${big} over 2 MB)` : ""}` : ""}.`;
-        return json3({
+        return json4({
           task,
           result: v.result,
           passed,
@@ -22593,7 +23746,7 @@ function runCommand(argv, io) {
           ...skipped.length ? { skipped } : {},
           proposals: v.proposals,
           cleanup,
-          evidence: { mode, dir: import_node_path33.default.relative(io.cwd, evidence).split(import_node_path33.default.sep).join("/"), shots, previous },
+          evidence: { mode, dir: import_node_path36.default.relative(io.cwd, evidence).split(import_node_path36.default.sep).join("/"), shots, previous },
           commit,
           say
         });
@@ -22606,7 +23759,7 @@ function runCommand(argv, io) {
         const project = resolveProject({ flag: flag("project"), task, events: ledger });
         const d = roundDecision(ledger, task, p, loadConfig(repoDir).profile, project, executionHolding(io.cwd, { project, task: baseOf(task) })?.startedAt ?? null);
         appendEvent(io.cwd, { ts: ts(), kind: "round", task, ...d });
-        return json3(d);
+        return json4(d);
       }
       case "proposals": {
         const [sub, ...rest] = args;
@@ -22620,20 +23773,21 @@ function runCommand(argv, io) {
           if (d.reason) w.reason = d.reason;
           return w;
         };
-        const readText4 = (f, what) => {
+        const readText5 = (f, what) => {
           try {
-            return (0, import_node_fs32.readFileSync)(import_node_path33.default.resolve(io.cwd, f), "utf8");
+            return (0, import_node_fs36.readFileSync)(import_node_path36.default.resolve(io.cwd, f), "utf8");
           } catch {
             throw new UsageError(`proposals: cannot read ${what}`);
           }
         };
+        const approvalOf = (id2, status, at2, p, by = "forge:decide") => ({ op: "set", collection: "approvals", doc_id: id2, data: { status, decidedAt: at2, by, digest: proposalDigest(id2, p) } });
         switch (sub) {
           case "add": {
             const file = subFlag("file");
             if (!file) throw new UsageError("proposals add: --file is required");
             let raw;
             try {
-              raw = JSON.parse(readText4(file, "--file"));
+              raw = JSON.parse(readText5(file, "--file"));
             } catch (e) {
               if (e instanceof UsageError) throw e;
               throw new UsageError("proposals add: --file must be a JSON object");
@@ -22654,22 +23808,23 @@ function runCommand(argv, io) {
 ` };
             const id2 = proposalId(io.now(), io.rand ?? Math.random);
             saveProposal(io.cwd, id2, doc);
-            appendEvent(io.cwd, { ts: ts(), kind: "proposal", action: "add", id: id2 });
-            return json3({ id: id2, doc });
+            appendEvent(io.cwd, { ts: ts(), kind: "proposal", action: "add", id: id2, digest: proposalDigest(id2, doc), ...revises ? { revises } : {} });
+            return json4({ id: id2, doc });
           }
           case "list": {
             const status = subFlag("status");
             if (status !== void 0 && !PROPOSAL_STATUSES.includes(status)) throw new UsageError(`proposals list: --status must be one of ${PROPOSAL_STATUSES.join("|")}`);
             const all = loadProposals(io.cwd).filter((p) => status === void 0 || p.status === status);
             all.sort((a, b) => a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : a.id < b.id ? 1 : -1);
-            return json3(all);
+            const reasons = unownedReasons(io.cwd);
+            return json4({ proposals: all, unowned: Object.keys(reasons).length, unownedReasons: reasons });
           }
           case "decide": {
             const [id2, action] = rest;
             if (!id2 || !PROPOSAL_ID.test(id2)) throw new UsageError("proposals decide: a proposal id (p + 14 digits + 4 letters/digits) is required");
-            if (action !== "approve" && action !== "reject" && action !== "discuss") throw new UsageError("proposals decide: action must be approve|reject|discuss");
+            if (action !== "approve" && action !== "reject" && action !== "discuss" && action !== "confirm") throw new UsageError("proposals decide: action must be approve|reject|discuss|confirm");
             const rf = subFlag("reason-file");
-            const reason = rf !== void 0 ? readText4(rf, "--reason-file").trim() : void 0;
+            const reason = rf !== void 0 ? readText5(rf, "--reason-file").trim() : void 0;
             const by = subFlag("by") ?? "user";
             const at2 = ts();
             const from = subFlag("from");
@@ -22677,7 +23832,7 @@ function runCommand(argv, io) {
             let base;
             if (from !== void 0) {
               try {
-                base = normalizeProposal(JSON.parse(readText4(from, "--from")));
+                base = normalizeProposal(JSON.parse(readText5(from, "--from")));
               } catch (e) {
                 if (e instanceof UsageError) throw e;
                 base = null;
@@ -22687,27 +23842,39 @@ function runCommand(argv, io) {
               base = loadProposal(io.cwd, id2);
               if (!base) throw new UsageError(`proposals decide: ${id2} not found`);
             }
+            if (action === "confirm") {
+              const status = base.status;
+              if (status !== "approved" && status !== "auto_approved" && status !== "rejected") throw new UsageError(`proposals decide: ${id2} is ${status}: only a decided proposal is confirmed`);
+              const approval = approvalOf(id2, status, at2, base);
+              if (from === void 0) saveApproval(io.cwd, id2, approval.data);
+              appendEvent(io.cwd, { ts: at2, kind: "proposal", action: "confirm", id: id2, status });
+              return json4({ id: id2, status, approval });
+            }
             const held2 = reopen ? base.taskId ?? heldTask(planTasksFor(io.cwd, subFlag("plan")), id2, loadProposal(io.cwd, id2)?.taskId) : void 0;
             const checked = held2 !== void 0 ? { ...base, taskId: held2 } : base;
             const r2 = decideDoc(checked, action, by, at2, reason || void 0, { reopen });
             if (!r2.ok) throw new UsageError(`proposals decide: ${decideRefusal(id2, checked, r2.error)}`);
+            const mark = r2.doc.status === "approved" || r2.doc.status === "rejected" ? approvalOf(id2, r2.doc.status, at2, r2.doc) : null;
             if (from === void 0) {
               saveProposal(io.cwd, id2, r2.doc);
+              if (mark) saveApproval(io.cwd, id2, mark.data);
+              else removeApproval(io.cwd, id2);
               appendEvent(io.cwd, reopen ? { ts: at2, kind: "proposal", action: "reopen", id: id2, from: base.status, to: r2.doc.status } : { ts: at2, kind: "proposal", action: "decide", id: id2, status: r2.doc.status });
             }
-            if (!reopen) return json3({ id: id2, status: r2.doc.status, write: writeOf(r2.doc, by, at2) });
+            if (!reopen) return json4({ id: id2, status: r2.doc.status, write: writeOf(r2.doc, by, at2), approval: mark });
             const write = { ...writeOf(r2.doc, by, at2), history: r2.doc.history };
             if (!r2.doc.reason && base.reason) write.reason = { __delete__: true };
-            return json3({ id: id2, status: r2.doc.status, previous: base.status, write });
+            const approvalDelete = { op: "delete", collection: "approvals", doc_id: id2 };
+            return json4({ id: id2, status: r2.doc.status, previous: base.status, write, approval: mark, approvalDelete });
           }
           case "save": {
             const from = subFlag("from");
             if (!from) throw new UsageError("proposals save: --from is required");
-            const id2 = subFlag("id") ?? import_node_path33.default.basename(from).replace(/(\.db)?\.json$/, "");
+            const id2 = subFlag("id") ?? import_node_path36.default.basename(from).replace(/(\.db)?\.json$/, "");
             if (!PROPOSAL_ID.test(id2)) throw new UsageError("proposals save: a proposal id (p + 14 digits + 4 letters/digits) is required (--id, or a <id>.json / <id>.db.json file name)");
             let doc;
             try {
-              doc = normalizeProposal(JSON.parse(readText4(from, "--from")));
+              doc = normalizeProposal(JSON.parse(readText5(from, "--from")));
             } catch (e) {
               if (e instanceof UsageError) throw e;
               doc = null;
@@ -22722,18 +23889,57 @@ function runCommand(argv, io) {
             const tracked = previousDoc !== null && (doc.history ?? []).some((e) => !known.has(JSON.stringify(e)) && e.status === previousDoc.status && e.decidedBy === previousDoc.decidedBy && e.decidedAt === previousDoc.decidedAt);
             const stderr = reopened && !tracked ? `proposals save: ${id2} went from ${previousDoc.status} to ${doc.status} with no new history entry: the change was not made through proposals decide --reopen
 ` : "";
-            return { ...json3({ id: id2, status: doc.status, previous, logged }), stderr };
+            return { ...json4({ id: id2, status: doc.status, previous, logged }), stderr };
           }
           case "pull": {
             const dir = subFlag("dir");
             if (!dir) throw new UsageError("proposals pull: --dir is required");
-            const abs = import_node_path33.default.resolve(io.cwd, dir);
-            let names2;
-            if (!(0, import_node_fs32.existsSync)(abs)) return ok("0");
-            try {
-              names2 = (0, import_node_fs32.readdirSync)(abs);
-            } catch {
-              throw new UsageError(`proposals pull: cannot read ${dir}`);
+            const abs = import_node_path36.default.resolve(io.cwd, dir);
+            let names2 = [];
+            if ((0, import_node_fs36.existsSync)(abs)) {
+              try {
+                names2 = (0, import_node_fs36.readdirSync)(abs);
+              } catch {
+                throw new UsageError(`proposals pull: cannot read ${dir}`);
+              }
+            }
+            const withMarks = has("approvals");
+            const db = {};
+            let rules = 0;
+            let page = null;
+            if (withMarks) {
+              const marksDir = subFlag("approvals");
+              if (!marksDir) throw new UsageError("proposals pull: --approvals needs the listed approvals folder");
+              const pageFile = subFlag("page");
+              if (!pageFile) throw new UsageError("proposals pull: --approvals needs --page (the listed meta/page.json)");
+              page = (() => {
+                try {
+                  return JSON.parse((0, import_node_fs36.readFileSync)(import_node_path36.default.resolve(io.cwd, pageFile), "utf8"));
+                } catch {
+                  return null;
+                }
+              })();
+              rules = page && typeof page === "object" && typeof page.rules === "number" ? page.rules : 0;
+              const marksAbs = import_node_path36.default.resolve(io.cwd, marksDir);
+              if (rules >= PAGE_RULES && (0, import_node_fs36.existsSync)(marksAbs)) {
+                let marks;
+                try {
+                  marks = (0, import_node_fs36.readdirSync)(marksAbs).sort();
+                } catch {
+                  throw new UsageError(`proposals pull: cannot read ${marksDir}`);
+                }
+                for (const name of marks) {
+                  const id2 = name.endsWith(".json") ? name.slice(0, -5) : "";
+                  if (!PROPOSAL_ID.test(id2)) continue;
+                  let a = null;
+                  try {
+                    a = normalizeApproval(JSON.parse((0, import_node_fs36.readFileSync)(import_node_path36.default.join(marksAbs, name), "utf8")));
+                  } catch {
+                    a = null;
+                  }
+                  if (a) db[id2] = a;
+                }
+              }
             }
             let n = 0;
             for (const name of names2.sort()) {
@@ -22742,7 +23948,7 @@ function runCommand(argv, io) {
               if (!PROPOSAL_ID.test(id2)) continue;
               let doc;
               try {
-                doc = normalizeProposal(JSON.parse((0, import_node_fs32.readFileSync)(import_node_path33.default.join(abs, name), "utf8")));
+                doc = normalizeProposal(JSON.parse((0, import_node_fs36.readFileSync)(import_node_path36.default.join(abs, name), "utf8")));
               } catch {
                 continue;
               }
@@ -22750,7 +23956,29 @@ function runCommand(argv, io) {
               saveProposal(io.cwd, id2, doc);
               n++;
             }
-            return ok(String(n));
+            if (!withMarks) return ok(String(n));
+            let removed = 0;
+            for (const id2 of Object.keys(loadApprovals(io.cwd))) if (!db[id2]) {
+              removeApproval(io.cwd, id2);
+              removed++;
+            }
+            for (const [id2, a] of Object.entries(db)) saveApproval(io.cwd, id2, a);
+            const count2 = Object.keys(db).length;
+            const roadmap = subFlag("roadmap") ?? (page && typeof page === "object" && typeof page.roadmap === "string" ? page.roadmap : "");
+            const markerFile = import_node_path36.default.join(io.cwd, ".forge", "approvals-warned.json");
+            const warnedFor = (() => {
+              try {
+                return JSON.parse((0, import_node_fs36.readFileSync)(markerFile, "utf8")).roadmap;
+              } catch {
+                return void 0;
+              }
+            })();
+            const warning = count2 > 0 && warnedFor !== roadmap ? "proposals pull: approvals are owner-only once the roadmap is republished with this version; until then an editor could write them\n" : "";
+            if (warning) {
+              forgeDir(io.cwd);
+              (0, import_node_fs36.writeFileSync)(markerFile, JSON.stringify({ roadmap }) + "\n");
+            }
+            return { ...json4({ proposals: n, approvals: count2, removed, rules, ownerRule: rules >= PAGE_RULES }), stderr: warning };
           }
           case "policy": {
             const id2 = rest[0];
@@ -22758,14 +23986,18 @@ function runCommand(argv, io) {
             const found = loadProposals(io.cwd).find((p) => p.id === id2);
             if (!found) throw new UsageError(`proposals policy: ${id2} not found`);
             const { id: _id, ...doc } = found;
-            if (doc.status !== "proposed" || !autoApprovable(doc)) {
+            const events = readEvents(io.cwd).filter((e) => e.kind === "proposal" && e.id === id2);
+            const forgeMade = events.some((e) => e.action === "add" && e.digest === proposalDigest(id2, doc) && !e.revises) && !events.some((e) => e.action === "decide" || e.action === "reopen" || e.action === "to-task");
+            if (doc.status !== "proposed" || loadApproval(io.cwd, id2) !== null || !forgeMade || !autoApprovable(doc)) {
               appendEvent(io.cwd, { ts: ts(), kind: "proposal", action: "policy", id: id2, status: doc.status });
-              return json3({ id: id2, status: doc.status, write: null });
+              return json4({ id: id2, status: doc.status, write: null, approval: null });
             }
             const at2 = ts();
             saveProposal(io.cwd, id2, { ...doc, status: "auto_approved", decidedBy: "forge:policy", decidedAt: at2 });
+            const approval = approvalOf(id2, "auto_approved", at2, doc, "forge:policy");
+            saveApproval(io.cwd, id2, approval.data);
             appendEvent(io.cwd, { ts: at2, kind: "proposal", action: "policy", id: id2, status: "auto_approved" });
-            return json3({ id: id2, status: "auto_approved", write: { status: "auto_approved", decidedBy: "forge:policy", decidedAt: at2 } });
+            return json4({ id: id2, status: "auto_approved", write: { status: "auto_approved", decidedBy: "forge:policy", decidedAt: at2 }, approval });
           }
           case "to-task": {
             const id2 = rest[0];
@@ -22776,7 +24008,12 @@ function runCommand(argv, io) {
             if (!found) throw new UsageError(`proposals to-task: ${id2} not found`);
             if (!isActionable(found)) throw new UsageError(`proposals to-task: ${id2} is not approved`);
             if (found.taskId !== void 0) throw new UsageError(`proposals to-task: ${id2} already has task ${found.taskId}`);
-            const text2 = readText4(planArg, "--plan");
+            const lastStatus = lastDecisions(io.cwd)[id2];
+            const check = ownerCheck(id2, found, loadApproval(io.cwd, id2), lastStatus);
+            if (check === "no-mark") throw new UsageError(`proposals to-task: ${id2} has no mark of the roadmap's owner (approvals/${id2}); only the owner's approvals become tasks`);
+            if (!ownerApproved(id2, found, loadApproval(io.cwd, id2), lastStatus)) throw new UsageError(`proposals to-task: ${id2} was edited after the owner's approval; it needs a new approval`);
+            const spent = readEvents(io.cwd).find((e) => e.kind === "proposal" && e.action === "to-task" && e.id === id2);
+            const text2 = readText5(planArg, "--plan");
             let plan;
             try {
               plan = parsePlan(text2);
@@ -22784,6 +24021,8 @@ function runCommand(argv, io) {
               if (e instanceof PlanError) throw new UsageError(`${planArg}: ${e.issues.join("; ")}`);
               throw e;
             }
+            const became = plan.tasks.find((t) => proposalsOfIncludes(t.includes).includes(id2))?.id ?? (spent ? String(spent.taskId ?? "?") : void 0);
+            if (became !== void 0) throw new UsageError(`proposals to-task: proposal ${id2} already became ${became}: a new approval of a new proposal is needed`);
             const { task, phase } = proposalToTask(plan, found, { track: subFlag("track") });
             const ydoc = (0, import_yaml8.parseDocument)(text2);
             if (phase) ydoc.addIn(["phases"], ydoc.createNode(phase));
@@ -22795,11 +24034,11 @@ function runCommand(argv, io) {
               if (e instanceof PlanError) throw new UsageError(`proposals to-task: the resulting plan is invalid: ${e.issues.join("; ")}`);
               throw e;
             }
-            (0, import_node_fs32.writeFileSync)(import_node_path33.default.resolve(io.cwd, planArg), next);
+            (0, import_node_fs36.writeFileSync)(import_node_path36.default.resolve(io.cwd, planArg), next);
             const { id: _id, ...doc } = found;
             saveProposal(io.cwd, id2, { ...doc, taskId: task.id });
             appendEvent(io.cwd, { ts: ts(), kind: "proposal", action: "to-task", id: id2, taskId: task.id });
-            return json3({ id: id2, taskId: task.id, write: { taskId: task.id } });
+            return json4({ id: id2, taskId: task.id, write: { taskId: task.id } });
           }
           default:
             throw new UsageError("usage: forge proposals <add|list|decide|save|pull|policy|to-task> ...");
@@ -22811,7 +24050,7 @@ function runCommand(argv, io) {
           const surfaces = readSurfaces(io.cwd, readLearned(io.cwd));
           const local = readLocal(io.cwd);
           const drafts = detectDrafts(repoReader(repoDir)).filter((d) => !surfaces.some((s2) => s2.name === d.name) && !local.proposed.includes(d.name));
-          return json3({ surfaces, drafts });
+          return json4({ surfaces, drafts });
         }
         const name = flag("name");
         if (!name || !NAME.test(name)) throw new UsageError(`surfaces ${sub}: --name must match ${NAME}`);
@@ -22820,12 +24059,12 @@ function runCommand(argv, io) {
           return ok("ok");
         }
         if (sub === "learn") {
-          const file = import_node_path33.default.join(io.cwd, surfaceFile(name));
-          if (!(0, import_node_fs32.existsSync)(file)) throw new UsageError(`surfaces learn: ${surfaceFile(name)} does not exist`);
-          if ((0, import_node_fs32.lstatSync)(file).isSymbolicLink()) throw new UsageError(`surfaces learn: ${surfaceFile(name)} is a symlink`);
+          const file = import_node_path36.default.join(io.cwd, surfaceFile(name));
+          if (!(0, import_node_fs36.existsSync)(file)) throw new UsageError(`surfaces learn: ${surfaceFile(name)} does not exist`);
+          if ((0, import_node_fs36.lstatSync)(file).isSymbolicLink()) throw new UsageError(`surfaces learn: ${surfaceFile(name)} is a symlink`);
           let notes;
           try {
-            notes = JSON.parse((0, import_node_fs32.readFileSync)(import_node_path33.default.resolve(io.cwd, flag("notes-file") ?? ""), "utf8"));
+            notes = JSON.parse((0, import_node_fs36.readFileSync)(import_node_path36.default.resolve(io.cwd, flag("notes-file") ?? ""), "utf8"));
           } catch {
             throw new UsageError("surfaces learn: --notes-file must be a JSON array of strings");
           }
@@ -22834,7 +24073,7 @@ function runCommand(argv, io) {
           if (!LEARNED_HEADINGS.includes(heading)) throw new UsageError(`surfaces learn: --heading must be ${LEARNED_HEADINGS.join("|")}`);
           const r2 = learnSurface(io, io.cwd, name, notes, heading);
           if ("reason" in r2) throw new UsageError(`surfaces learn: ${r2.reason}`);
-          return json3({ name, count: r2.count });
+          return json4({ name, count: r2.count });
         }
         throw new UsageError("usage: forge surfaces [learn --name N --notes-file F [--heading H] | proposed --name N]");
       }
@@ -22847,7 +24086,7 @@ function runCommand(argv, io) {
           repo: repoReader(repoDir),
           at: (dir) => samePath(dir, repoDir) ? { git: io.git ?? defaultGit(dir), exec: io.exec ?? defaultExec(dir), repo: repoReader(dir) } : defaults(dir)
         }, repoDir, main);
-        return json3({ setup });
+        return json4({ setup });
       }
       case "tools": {
         const all = readSurfaces(repoDir);
@@ -22855,7 +24094,7 @@ function runCommand(argv, io) {
         const picked = one === void 0 ? all : all.filter((s2) => s2.name === one);
         if (one !== void 0 && !picked.length) throw new UsageError(`tools: no surface ${one} in .forge/verify/`);
         const names2 = picked.flatMap((s2) => s2.tools);
-        return json3(checkTools(names2, { onPath, inventory: names2.length ? mcpOf(io, repoDir) : /* @__PURE__ */ new Set(), exec: io.exec ?? defaultExec(io.cwd) }));
+        return json4(checkTools(names2, { onPath, inventory: names2.length ? mcpOf(io, repoDir) : /* @__PURE__ */ new Set(), exec: io.exec ?? defaultExec(io.cwd) }));
       }
       case "verify-plan": {
         const task = flag("task"), p = flag("path"), base = flag("base");
@@ -22864,12 +24103,12 @@ function runCommand(argv, io) {
         const loc = flag("locale");
         if (has("locale") && loc !== "es" && loc !== "en") throw new UsageError("verify-plan: --locale must be es|en");
         const dirArg = flag("dir");
-        const roundDir = dirArg === void 0 ? null : import_node_path33.default.resolve(io.cwd, dirArg);
-        const roundOf3 = roundDir ? /^reviews-(\d+)-(\d+)$/.exec(import_node_path33.default.basename(roundDir)) : null;
-        if (has("dir") && !roundOf3) throw new UsageError("verify-plan: --dir must be a review dir, .forge/work/<project>/<T>/reviews-<n>-<round> (a loose task: .forge/work/<id>/reviews-<n>-<round>)");
+        const roundDir = dirArg === void 0 ? null : import_node_path36.default.resolve(io.cwd, dirArg);
+        const roundOf4 = roundDir ? /^reviews-(\d+)-(\d+)$/.exec(import_node_path36.default.basename(roundDir)) : null;
+        if (has("dir") && !roundOf4) throw new UsageError("verify-plan: --dir must be a review dir, .forge/work/<project>/<T>/reviews-<n>-<round> (a loose task: .forge/work/<id>/reviews-<n>-<round>)");
         const es2 = (loc ?? planLocale(io.cwd)) === "es";
-        const git = io.git ?? defaultGit(io.cwd);
-        const diff = git(["diff", "--name-only", `${base}..HEAD`]);
+        const git2 = io.git ?? defaultGit(io.cwd);
+        const diff = git2(["diff", "--name-only", `${base}..HEAD`]);
         const surfaces = readSurfaces(repoDir, readLearned(io.cwd));
         const local = readLocal(io.cwd);
         let inventory = null;
@@ -22883,35 +24122,35 @@ function runCommand(argv, io) {
           tools: (s2) => s2.tools.length ? toolGaps(s2.tools, { onPath, inventory: inventory ??= mcpOf(io, repoDir) }) : { missing: [], unknown: [] }
         });
         appendEvent(io.cwd, { ts: ts(), kind: "verify", task, planned: plan.eligible, surfaces: plan.surfaces.filter((s2) => s2.permission === "allowed").map((s2) => s2.name) });
-        if (roundDir && roundOf3) {
-          const pending = import_node_path33.default.join(roundDir, "verify-pending.json");
+        if (roundDir && roundOf4) {
+          const pending = import_node_path36.default.join(roundDir, "verify-pending.json");
           const chosen = plan.surfaces.filter((s2) => s2.permission === "allowed");
-          const rel3 = (f) => import_node_path33.default.relative(io.cwd, f).split(import_node_path33.default.sep).join("/");
-          const work = import_node_path33.default.dirname(roundDir);
-          const [, n, round] = roundOf3;
+          const rel3 = (f) => import_node_path36.default.relative(io.cwd, f).split(import_node_path36.default.sep).join("/");
+          const work = import_node_path36.default.dirname(roundDir);
+          const [, n, round] = roundOf4;
           if (plan.eligible && chosen.length) {
-            (0, import_node_fs32.mkdirSync)(roundDir, { recursive: true });
-            (0, import_node_fs32.writeFileSync)(pending, JSON.stringify({
+            (0, import_node_fs36.mkdirSync)(roundDir, { recursive: true });
+            (0, import_node_fs36.writeFileSync)(pending, JSON.stringify({
               task,
               at: ts(),
               surfaces: chosen.map((s2) => ({ name: s2.name, file: surfaceFile(s2.name), missing: s2.missing, unknown: s2.unknown })),
-              brief: rel3(import_node_path33.default.join(work, `brief-${n}.md`)),
-              diff: rel3(import_node_path33.default.join(work, `diff-${n}.patch`)),
+              brief: rel3(import_node_path36.default.join(work, `brief-${n}.md`)),
+              diff: rel3(import_node_path36.default.join(work, `diff-${n}.patch`)),
               dir: rel3(roundDir),
-              evidence: rel3(import_node_path33.default.join(work, "evidence", `${n}-${round}`))
+              evidence: rel3(import_node_path36.default.join(work, "evidence", `${n}-${round}`))
             }, null, 2) + "\n");
-          } else (0, import_node_fs32.rmSync)(pending, { force: true });
+          } else (0, import_node_fs36.rmSync)(pending, { force: true });
         }
-        return json3({ ...plan, surfaces: plan.surfaces.map((ps) => surfaceQuestion(ps, surfaces.find((s2) => s2.name === ps.name), local.surfaces[ps.name], git, repoDir, io.cwd, es2)) });
+        return json4({ ...plan, surfaces: plan.surfaces.map((ps) => surfaceQuestion(ps, surfaces.find((s2) => s2.name === ps.name), local.surfaces[ps.name], git2, repoDir, io.cwd, es2)) });
       }
       case "local": {
         const [sub, key, value] = args;
         if (sub === "get") {
           const s2 = readLocal(io.cwd);
-          if (key === void 0) return json3(s2);
+          if (key === void 0) return json4(s2);
           const m = /^surfaces\.(.+)$/.exec(key);
           if (!m) throw new UsageError("local get: the path must be surfaces.<name>");
-          return json3(s2.surfaces[m[1]] ?? null);
+          return json4(s2.surfaces[m[1]] ?? null);
         }
         if (sub === "set" && (key === "workflow" || key === "autonomy")) {
           if (value === "none") {
@@ -22958,8 +24197,11 @@ function runCommand(argv, io) {
         const au = flag("autonomy");
         if (wf !== void 0 && !isWorkflow(wf)) throw new UsageError(`prefs: --workflow must be one of ${WORKFLOWS.join("|")}`);
         if (au !== void 0 && !isAutonomy(au)) throw new UsageError(`prefs: --autonomy must be one of ${AUTONOMIES.join("|")}`);
-        return json3(resolvePrefs({ ...wf ? { workflow: wf } : {}, ...au ? { autonomy: au } : {} }, readLocal(io.cwd), loadConfig(repoDir)));
+        return json4(resolvePrefs({ ...wf ? { workflow: wf } : {}, ...au ? { autonomy: au } : {} }, readLocal(io.cwd), loadConfig(repoDir)));
       }
+      case "roadmap-doc":
+      case "roadmap-run":
+        return roadmapCommand(cmd, args, io);
       case "swarm":
         return swarmCommand(args, io, {
           git: io.git ?? defaultGit(io.cwd),
@@ -22994,15 +24236,15 @@ function runCommand(argv, io) {
         const usage = "usage: forge tree snapshot --task <id> [--force] [--cwd <dir>] | check --task <id> --base <sha> [--cwd <dir>] (the same --cwd as the snapshot; --base is the task's own base)";
         if (sub !== "snapshot" && sub !== "check" || !task) throw new UsageError(usage);
         if (!isSafeId(task)) throw new UsageError(`tree ${sub}: --task must use letters, digits, _ - . (at most 120)`);
-        const git = io.git ?? defaultGit(repoDir);
-        const top = git(["rev-parse", "--show-toplevel"])?.trim();
+        const git2 = io.git ?? defaultGit(repoDir);
+        const top = git2(["rev-parse", "--show-toplevel"])?.trim();
         if (!top) throw new UsageError(`tree ${sub}: ${repoDir} is not a git work tree`);
-        const treeRoot = import_node_path33.default.resolve(top);
+        const treeRoot = import_node_path36.default.resolve(top);
         const ledger = readEvents(io.cwd);
-        const file = import_node_path33.default.join(readWorkDir(io.cwd, { project: resolveProject({ flag: flag("project"), task, events: ledger }), task }, ledger), "tree-start.json");
+        const file = import_node_path36.default.join(readWorkDir(io.cwd, { project: resolveProject({ flag: flag("project"), task, events: ledger }), task }, ledger), "tree-start.json");
         let text2 = null;
         try {
-          text2 = (0, import_node_fs32.readFileSync)(file, "utf8");
+          text2 = (0, import_node_fs36.readFileSync)(file, "utf8");
         } catch {
           text2 = null;
         }
@@ -23010,27 +24252,27 @@ function runCommand(argv, io) {
         if (sub === "snapshot") {
           if (stored && !has("force")) return ok(`${file} (already taken at ${stored.at}; --force replaces it)`);
           forgeDir(io.cwd);
-          const status2 = git(["status", "--porcelain", "-z", "-uall"]);
+          const status2 = git2(["status", "--porcelain", "-z", "-uall"]);
           if (status2 === null) throw new UsageError(`tree snapshot: git status failed in ${repoDir}`);
-          const head2 = git(["rev-parse", "--verify", "-q", "HEAD"])?.trim() || null;
+          const head2 = git2(["rev-parse", "--verify", "-q", "HEAD"])?.trim() || null;
           const snap = { task, root: treeRoot, at: ts(), head: head2, ...parseStatus(status2) };
-          (0, import_node_fs32.mkdirSync)(import_node_path33.default.dirname(file), { recursive: true });
-          (0, import_node_fs32.writeFileSync)(file, JSON.stringify(snap, null, 2) + "\n");
+          (0, import_node_fs36.mkdirSync)(import_node_path36.default.dirname(file), { recursive: true });
+          (0, import_node_fs36.writeFileSync)(file, JSON.stringify(snap, null, 2) + "\n");
           return ok(file);
         }
         const base = flag("base");
         if (!base) throw new UsageError(usage);
-        if (base.startsWith("-") || git(["rev-parse", "--verify", "-q", `${base}^{commit}`]) === null) throw new UsageError(`tree check: --base ${base} is not a commit`);
-        const status = git(["status", "--porcelain", "-z", "-uall"]);
+        if (base.startsWith("-") || git2(["rev-parse", "--verify", "-q", `${base}^{commit}`]) === null) throw new UsageError(`tree check: --base ${base} is not a commit`);
+        const status = git2(["status", "--porcelain", "-z", "-uall"]);
         if (status === null) throw new UsageError(`tree check: git status failed in ${repoDir}`);
-        const diff = git(["diff", "--name-only", "-z", "--diff-filter=d", `${base}..HEAD`]);
+        const diff = git2(["diff", "--name-only", "-z", "--diff-filter=d", `${base}..HEAD`]);
         if (diff === null) throw new UsageError(`tree check: cannot diff ${base}..HEAD`);
         const snapshot = stored && stored.task === task && samePath(stored.root, treeRoot) ? stored : null;
         const out = treeCheck(snapshot, parseStatus(status), diff.split("\0").filter(Boolean));
-        if (snapshot?.head && git(["merge-base", "--is-ancestor", base, snapshot.head]) === null) {
+        if (snapshot?.head && git2(["merge-base", "--is-ancestor", base, snapshot.head]) === null) {
           out.warning = `--base ${base} is not an ancestor of the snapshot's head ${snapshot.head}: task may list commits that are not the task's`;
         }
-        return json3(out);
+        return json4(out);
       }
       case "config": {
         const [sub, key] = args;
@@ -23063,10 +24305,10 @@ function runCommand(argv, io) {
           if (current?.active && current.sessionId !== null && stopReason(current, stopContext(runRoot, io.now())) === null) throw new UsageError("infinite start: a run is already active (forge stop, or forge infinite status)");
           const main = mainCheckout(io.cwd);
           forgeDir(main);
-          (0, import_node_fs32.rmSync)(stopFile(main), { force: true });
+          (0, import_node_fs36.rmSync)(stopFile(main), { force: true });
           const run2 = startRun(io.now(), { ...cycles !== void 0 ? { cycles } : {}, ...hours !== void 0 ? { hours } : {} }, queueMax, session, locale ?? null);
           saveRun(main, run2);
-          return json3(run2);
+          return json4({ ...run2, publish: { infinite: infinitePublish(main, run2, io.now()) } });
         }
         if (sub === "status") {
           const runRoot = runRootOf(io.cwd);
@@ -23074,7 +24316,8 @@ function runCommand(argv, io) {
           const run2 = parseRun(text2);
           const reason = run2?.active ? stopReason(run2, stopContext(runRoot, io.now())) : null;
           const unbound = !!run2?.active && run2.sessionId === null;
-          return json3({ present: text2 !== null, valid: run2 !== null, run: run2, stopReason: reason, reply: runReply(runRoot, run2), ...unbound ? { unbound: true, warning: UNBOUND_WARNING } : {} });
+          const publish = run2 ? { infinite: infinitePublish(mainCheckout(io.cwd), run2, io.now()) } : null;
+          return json4({ present: text2 !== null, valid: run2 !== null, run: run2, stopReason: reason, reply: runReply(runRoot, run2), ...unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}, unowned: unownedOf(runRoot), publish });
         }
         throw new UsageError("usage: forge infinite <start --cycles N|--hours H [--queue-max N] [--session ID] [--locale CODE]|status>");
       }
@@ -23084,7 +24327,7 @@ function runCommand(argv, io) {
         let error;
         if (flag("error-file") !== void 0) {
           try {
-            error = (0, import_node_fs32.readFileSync)(import_node_path33.default.resolve(io.cwd, flag("error-file")), "utf8");
+            error = (0, import_node_fs36.readFileSync)(import_node_path36.default.resolve(io.cwd, flag("error-file")), "utf8");
           } catch {
             throw new UsageError("cycle: cannot read --error-file");
           }
@@ -23095,7 +24338,7 @@ function runCommand(argv, io) {
         const next = recordCycle(current, { progress: progress === "yes", ...error !== void 0 ? { error } : {} });
         saveRun(runRoot, next);
         appendEvent(runRoot, { ts: ts(), kind: "cycle", cycle: next.cycle, progress: progress === "yes", ...next.lastError ? { error: next.lastError } : {} });
-        return json3({ ...next, reply: runReply(runRoot, next) });
+        return json4({ ...next, reply: runReply(runRoot, next), publish: { infinite: infinitePublish(mainCheckout(io.cwd), next, io.now()) } });
       }
       case "stop": {
         const main = mainCheckout(io.cwd);
@@ -23103,7 +24346,7 @@ function runCommand(argv, io) {
         const at2 = ts();
         for (const dir of samePath(main, runRoot) ? [main] : [main, runRoot]) {
           forgeDir(dir);
-          (0, import_node_fs32.writeFileSync)(stopFile(dir), `${at2}
+          (0, import_node_fs36.writeFileSync)(stopFile(dir), `${at2}
 `);
         }
         const current = parseRun(readRunText(runRoot));
@@ -23129,7 +24372,7 @@ function runCommand(argv, io) {
           for (const id2 of stopped) {
             let p = null;
             try {
-              p = normalizePublicTask(JSON.parse((0, import_node_fs32.readFileSync)(executionTaskFile(main, id2), "utf8")));
+              p = normalizePublicTask(JSON.parse((0, import_node_fs36.readFileSync)(executionTaskFile(main, id2), "utf8")));
             } catch {
               p = null;
             }
@@ -23140,13 +24383,13 @@ function runCommand(argv, io) {
           members = listed.map((m) => ({ sessionId: m.sessionId, name: m.name, role: m.role, task: m.task }));
           for (const m of listed) {
             if (m.hookSession) own.add(m.hookSession);
-            (0, import_node_fs32.rmSync)(memberFile(main, m.sessionId), { force: true });
+            (0, import_node_fs36.rmSync)(memberFile(main, m.sessionId), { force: true });
           }
           const del = { __delete__: true };
           release = after.kind !== "plan" ? [] : stopped.filter((id2) => after.tasks[id2]?.executor === "subagents").map((id2) => ({ task: id2, write: { op: "update", collection: "state", doc_id: id2, data: { status: "free", owner: del, claimedAt: del, startedAt: del, exec: del } } }));
         }
         const running = liveJobs(main, io.now()).filter((j) => j.session === null || own.has(j.session)).map((j) => ({ name: j.name, task: j.task }));
-        return json3({ main, run: { stopped: !!current?.active }, execution: after ? { runId: after.runId, stopped } : null, release, members, running });
+        return json4({ main, run: { stopped: !!current?.active }, execution: after ? { runId: after.runId, stopped } : null, release, members, running });
       }
       case "waypoint-cli": {
         const found = findWaypointCli(io.scriptPath ?? process.argv[1] ?? "");
@@ -23156,19 +24399,19 @@ function runCommand(argv, io) {
       case "sp-path": {
         const skill = args[0];
         if (!skill || skill.startsWith("--")) throw new UsageError("sp-path: the name of a superpowers skill is required");
-        return json3(spSkillPath(superpowersOf(io, repoDir), skill));
+        return json4(spSkillPath(superpowersOf(io, repoDir), skill));
       }
       case "sp-specs": {
         if (has("decline")) {
           const rel3 = (flag("decline") ?? "").replace(/\\/g, "/");
           if (!/^docs\/superpowers\/specs\/[^/]+\.md$/.test(rel3)) throw new UsageError("sp-specs: --decline needs a docs/superpowers/specs/<file>.md path");
           updateLocal(io.cwd, (s2) => ({ ...s2, declinedSpecs: [.../* @__PURE__ */ new Set([...declinedSpecs(s2), rel3])] }));
-          return json3({ declined: rel3 });
+          return json4({ declined: rel3 });
         }
-        return json3(spSpecs(repoDir, io.now().getTime(), { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)) }));
+        return json4(spSpecs(repoDir, io.now().getTime(), { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)) }));
       }
       case "sp-plans":
-        return json3(spPlans(repoDir, io.now().getTime(), { committedAt: committedAt(io, repoDir) }));
+        return json4(spPlans(repoDir, io.now().getTime(), { committedAt: committedAt(io, repoDir) }));
       case "route": {
         const [sub] = args;
         const paths = (cmdName) => {
@@ -23198,13 +24441,13 @@ function runCommand(argv, io) {
           let why = by === "user" ? "the user chose it" : "the recommended option for this request";
           if (flag("why-file") !== void 0) {
             try {
-              why = (0, import_node_fs32.readFileSync)(import_node_path33.default.resolve(io.cwd, flag("why-file")), "utf8").trim() || why;
+              why = (0, import_node_fs36.readFileSync)(import_node_path36.default.resolve(io.cwd, flag("why-file")), "utf8").trim() || why;
             } catch {
               throw new UsageError("route set: cannot read --why-file");
             }
           }
           if (remembered) updateLocal(io.cwd, (s2) => ({ ...s2, workflow: remembered }));
-          if (chosen === "none") return json3({ written: false, ...remembered ? { remembered } : {} });
+          if (chosen === "none") return json4({ written: false, ...remembered ? { remembered } : {} });
           const owner = session;
           const doc = { task: task2, chosen, by, stage: firstStage(chosen, files), ts: ts(), ...files, session: owner };
           const root = mainCheckout(io.cwd);
@@ -23219,7 +24462,7 @@ function runCommand(argv, io) {
             by,
             undo: { type: "none", reason: "the route only chose who does the work: start the task again to choose another" }
           }, { ts: ts(), task: task2, runId: exec?.active ? exec.runId : null });
-          return json3({ ...doc, decision: n, ...remembered ? { remembered } : {} });
+          return json4({ ...doc, decision: n, ...remembered ? { remembered } : {} });
         }
         if (sub === "stage") {
           const stage = flag("stage");
@@ -23229,10 +24472,10 @@ function runCommand(argv, io) {
           if (!session) throw new UsageError(noClaudeSession("route stage", "--session"));
           const main = mainCheckout(io.cwd);
           const cur = readRoute(main, session);
-          if (!cur || flag("task") !== void 0 && flag("task") !== cur.task) return json3({ updated: false });
+          if (!cur || flag("task") !== void 0 && flag("task") !== cur.task) return json4({ updated: false });
           const next = { ...cur, stage, ts: ts(), ...files };
           writeRoute(main, next);
-          return json3({ updated: true, ...next });
+          return json4({ updated: true, ...next });
         }
         if (sub !== void 0 && !sub.startsWith("--")) {
           throw new UsageError("usage: forge route --task id (--path p | --text-file f [--path p]) [--locale es|en] [--workflow w] [--autonomy a] [--run-plan] [--build-spec] | set --task id --chosen o --by user|auto [--spec f] [--plan f] [--why-file f] [--session s] [--remember] | stage --stage s [--task id] [--spec f] [--plan f] [--session s]");
@@ -23267,13 +24510,13 @@ function runCommand(argv, io) {
         const specs = sp.installed ? spSpecs(repoDir, now, { committedAt: committedAt(io, repoDir), declined: declinedSpecs(readLocal(io.cwd)) }) : [];
         const plans = sp.installed ? spPlans(repoDir, now, { committedAt: committedAt(io, repoDir) }) : [];
         const options = routeOptions({ path: p, prefs, superpowers: { installed: sp.installed, version: sp.version }, specs, plans, runPlan: has("run-plan"), buildSpec: has("build-spec") });
-        if (!probed) return json3(options);
+        if (!probed) return json4(options);
         const effective = PATH_ORDER.indexOf(p) > PATH_ORDER.indexOf(probed.result.path) ? p : probed.result.path;
         const stepAside = PATH_ORDER.indexOf(effective) <= PATH_ORDER.indexOf("small") && prefs.workflow !== "forge";
         const askLocale = loc === "es" || loc === "en" ? loc : (planLocale(io.cwd) ?? "").toLowerCase().split(/[-_]/)[0] === "es" ? "es" : "en";
         const cleaned = cleanProbe(io.cwd, task, textFile);
         const unavailable = prefs.workflow.startsWith("superpowers") && !sp.installed;
-        return json3({
+        return json4({
           ...options,
           probe: { path: probed.result.path, reasons: probed.result.reasons, sensitive: probed.result.sensitive, files: probed.result.files, announce: probed.output.announce },
           stepAside,
@@ -23282,26 +24525,26 @@ function runCommand(argv, io) {
         });
       }
       case "tdd":
-        return json3(tddFor(io, repoDir));
+        return json4(tddFor(io, repoDir));
       case "sp-plan": {
         const [sub, file] = args;
         if (sub !== "tasks" && sub !== "check" || !file || file.startsWith("--")) throw new UsageError("usage: forge sp-plan tasks <plan.md> | check <plan.md> --task N");
-        const abs = import_node_path33.default.resolve(io.cwd, file);
+        const abs = import_node_path36.default.resolve(io.cwd, file);
         let text2;
         try {
-          text2 = (0, import_node_fs32.readFileSync)(abs, "utf8");
+          text2 = (0, import_node_fs36.readFileSync)(abs, "utf8");
         } catch {
           throw new UsageError(`sp-plan: cannot read ${file}`);
         }
         try {
           if (sub === "tasks") {
             const { plan, tasks } = spPlanDone(text2, abs, repoDir);
-            return json3({ plan, tasks });
+            return json4({ plan, tasks });
           }
           const n = spTaskNumber(flag("task"));
           const r2 = checkSpTask(text2, n);
-          if (r2.checked) (0, import_node_fs32.writeFileSync)(abs, r2.text);
-          return json3({ task: n, checked: r2.checked });
+          if (r2.checked) (0, import_node_fs36.writeFileSync)(abs, r2.text);
+          return json4({ task: n, checked: r2.checked });
         } catch (e) {
           if (e instanceof SpPlanError) throw new UsageError(`sp-plan: ${file}: ${e.message}`);
           throw e;
@@ -23309,7 +24552,7 @@ function runCommand(argv, io) {
       }
       case "agents": {
         const { profile } = loadConfig(io.cwd);
-        return json3({ profile, agents: Object.fromEntries(ROLES.map((r2) => [r2, agentFor(r2, profile)])) });
+        return json4({ profile, agents: Object.fromEntries(ROLES.map((r2) => [r2, agentFor(r2, profile)])) });
       }
       case "decision": {
         const [sub, arg] = args;
@@ -23319,17 +24562,22 @@ function runCommand(argv, io) {
           if (!file) throw new UsageError("decision add: --data-file is required");
           let raw;
           try {
-            raw = JSON.parse((0, import_node_fs32.readFileSync)(import_node_path33.default.resolve(io.cwd, file), "utf8"));
+            raw = JSON.parse((0, import_node_fs36.readFileSync)(import_node_path36.default.resolve(io.cwd, file), "utf8"));
           } catch {
             throw new UsageError("decision add: --data-file must be a JSON object");
           }
           if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new UsageError("decision add: --data-file must be a JSON object");
+          const session = flag("session");
+          if (has("session") && (!session || !/^[A-Za-z0-9_\-.~:@+]{1,80}$/.test(session))) throw new UsageError("decision add: --session needs the waypoint session id");
+          const { resolves, ...decision } = raw;
+          if (resolves !== void 0 && (typeof resolves !== "string" || !NOTE_ID.test(resolves))) throw new UsageError("decision add: resolves must be the id of a note");
           const task = flag("task");
           if (task !== void 0 && (!TASK_ID.test(task) || task === "." || task === "..")) throw new UsageError(`decision add: invalid --task ${task}`);
           const exec = readExecution(root);
           try {
-            const { n, event } = addDecision(root, raw, { ts: ts(), ...task ? { task } : {}, runId: exec?.active ? exec.runId : null });
-            return json3({ n, ...event });
+            const { n, event } = addDecision(root, decision, { ts: ts(), ...task ? { task } : {}, runId: exec?.active ? exec.runId : null });
+            const publish = session ? decisionWrites({ event, session, eid: eventId(io.now(), session, io.rand), resolves: resolves ?? null }) : null;
+            return json4({ n, ...event, ...publish ? { publish } : {} });
           } catch (e) {
             if (e instanceof DecisionInputError) throw new UsageError(`decision add: ${e.message}`);
             throw e;
@@ -23338,28 +24586,28 @@ function runCommand(argv, io) {
         if (sub === "list") {
           const since = flag("since");
           if (since !== void 0 && !Number.isFinite(Date.parse(since))) throw new UsageError(`decision list: --since must be a date, got ${since}`);
-          return json3(listDecisions(root, { task: flag("task"), ...flag("project") !== void 0 ? { project: flag("project") } : {}, run: flag("run"), since, all: has("all"), auto: has("auto") }));
+          return json4(listDecisions(root, { task: flag("task"), ...flag("project") !== void 0 ? { project: flag("project") } : {}, run: flag("run"), since, all: has("all"), auto: has("auto") }));
         }
         if (sub === "show") {
           const n = Number(arg);
           if (!Number.isInteger(n) || n < 1) throw new UsageError("decision show: <n> must be a positive integer");
           const d = allDecisions(root).find((x) => x.n === n);
           if (!d) throw new UsageError(`decision show: there is no decision ${n}`);
-          return json3(d);
+          return json4(d);
         }
         if (sub === "md") {
           const scope = flag("scope");
           if (!scope) throw new UsageError("decision md: --scope is required");
           const outFlag = flag("out");
-          const out = outFlag !== void 0 ? import_node_path33.default.resolve(io.cwd, outFlag) : import_node_path33.default.join(repoDir, "docs", "forge", "decisions", `${scopeFileName(scope)}.md`);
+          const out = outFlag !== void 0 ? import_node_path36.default.resolve(io.cwd, outFlag) : import_node_path36.default.join(repoDir, "docs", "forge", "decisions", `${scopeFileName(scope)}.md`);
           if (!out.endsWith(".md")) throw new UsageError("decision md: --out must be a .md file");
           const list = allDecisions(root).filter((d) => d.by !== "user" && (decisionScope(d) ?? "forge") === scope);
-          if (!list.length) return json3({ written: false, scope, count: 0 });
-          (0, import_node_fs32.mkdirSync)(import_node_path33.default.dirname(out), { recursive: true });
-          (0, import_node_fs32.writeFileSync)(out, renderDecisionsMd(list, scope, flag("locale") ?? "en"));
-          return json3({ written: true, scope, count: list.length, path: out });
+          if (!list.length) return json4({ written: false, scope, count: 0 });
+          (0, import_node_fs36.mkdirSync)(import_node_path36.default.dirname(out), { recursive: true });
+          (0, import_node_fs36.writeFileSync)(out, renderDecisionsMd(list, scope, flag("locale") ?? "en"));
+          return json4({ written: true, scope, count: list.length, path: out });
         }
-        throw new UsageError("usage: forge decision add --data-file f [--task id] | list [--task id] [--run id] [--since iso] [--all] [--auto] | show <n> | md --scope s [--out f] [--locale es|en]");
+        throw new UsageError("usage: forge decision add --data-file f [--task id] [--session SID] | list [--task id] [--run id] [--since iso] [--all] [--auto] | show <n> | md --scope s [--out f] [--locale es|en]");
       }
       case "stats": {
         if (has("days") && has("since")) throw new UsageError("stats: use --days or --since, not both");
@@ -23378,7 +24626,7 @@ function runCommand(argv, io) {
         if (locale !== "es" && locale !== "en") throw new UsageError("stats: --locale must be es or en");
         const main = mainCheckout(io.cwd);
         const s2 = computeStats({ events: readEvents(main), plans: planStates(main), from });
-        return has("json") ? json3(s2) : ok(renderStats(s2, locale));
+        return has("json") ? json4(s2) : ok(renderStats(s2, locale));
       }
       case "last": {
         const task = flag("task");
@@ -23388,7 +24636,7 @@ function runCommand(argv, io) {
         const events = eventsOf(ledger, { project, task }).filter((e) => isTask(e, task));
         const lastOf = (kind, from = events) => [...from].reverse().find((e) => e.kind === kind);
         const own = eventsSince(events, executionHolding(io.cwd, { project, task: baseOf(task) })?.startedAt ?? null);
-        return json3({
+        return json4({
           task,
           path: lastOf("triage")?.path ?? null,
           phase: lastOf("phase") ?? null,
@@ -23416,7 +24664,7 @@ var cwd = process.cwd();
 var stdin = "";
 if (process.argv[2] === "hook" && !process.stdin.isTTY) {
   try {
-    stdin = (0, import_node_fs33.readFileSync)(0, "utf8");
+    stdin = (0, import_node_fs37.readFileSync)(0, "utf8");
   } catch {
     stdin = "";
   }

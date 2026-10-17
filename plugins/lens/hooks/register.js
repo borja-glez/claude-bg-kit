@@ -10650,19 +10650,23 @@ var TaskSchema = external_exports.object({
   depends_on: external_exports.array(id).default([]),
   zones: external_exports.array(external_exports.string().min(1)).default([]),
   estimate_min: external_exports.number().positive().optional(),
-  delicate: external_exports.boolean().optional()
+  delicate: external_exports.boolean().optional(),
+  // G-25, K3-08: the section of the design the task comes from (a heading's slug, or _intro).
+  design_ref: external_exports.string().regex(/^[a-z0-9-]{1,80}$|^_intro$/, "design_ref must be a section slug of the design").optional()
 });
 var PlanSchema = external_exports.object({
   project: id,
   locale: external_exports.string().min(1).default("en"),
   version: external_exports.string().min(1),
+  design_version: external_exports.number().int().positive().optional(),
   artifacts: external_exports.object({ roadmap: external_exports.string().url().optional(), design: external_exports.string().url().optional() }).default({}),
-  versions: external_exports.array(external_exports.object({ id, phases: external_exports.array(id) })).default([]),
+  versions: external_exports.array(external_exports.object({ id, phases: external_exports.array(id), target: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "target must be a date (YYYY-MM-DD)").optional() })).default([]),
   tracks: external_exports.array(external_exports.object({ id, name: external_exports.string().min(1), color: external_exports.enum(TRACK_COLORS) })).min(1),
   phases: external_exports.array(external_exports.object({
     id,
     name: external_exports.string().min(1),
-    plan_status: external_exports.enum(["committed", "provisional"]).default("committed")
+    plan_status: external_exports.enum(["committed", "provisional"]).default("committed"),
+    goal: external_exports.string().max(300).optional()
   })).min(1),
   tasks: external_exports.array(TaskSchema).min(1)
 });
@@ -10828,7 +10832,8 @@ function normalizeTask(x, now) {
     detail: typeof x.detail === "string" ? x.detail.slice(0, 500) : null,
     ...iso(x.nudgedAt) ? { nudgedAt: iso(x.nudgedAt) } : {},
     ...finishedOf(x.finishedAt, now) ? { finishedAt: finishedOf(x.finishedAt, now) } : {},
-    ...title ? { title } : {}
+    ...title ? { title } : {},
+    ...typeof x.sha === "string" && /^[0-9a-f]{7,40}$/i.test(x.sha) ? { sha: x.sha } : {}
   };
 }
 function normalizeExecution(x, now) {
@@ -11528,6 +11533,74 @@ function designModel(project, f, viewer) {
     viewer
   };
 }
+
+// src/lib/sha256.ts
+var K = new Uint32Array([
+  1116352408,
+  1899447441,
+  3049323471,
+  3921009573,
+  961987163,
+  1508970993,
+  2453635748,
+  2870763221,
+  3624381080,
+  310598401,
+  607225278,
+  1426881987,
+  1925078388,
+  2162078206,
+  2614888103,
+  3248222580,
+  3835390401,
+  4022224774,
+  264347078,
+  604807628,
+  770255983,
+  1249150122,
+  1555081692,
+  1996064986,
+  2554220882,
+  2821834349,
+  2952996808,
+  3210313671,
+  3336571891,
+  3584528711,
+  113926993,
+  338241895,
+  666307205,
+  773529912,
+  1294757372,
+  1396182291,
+  1695183700,
+  1986661051,
+  2177026350,
+  2456956037,
+  2730485921,
+  2820302411,
+  3259730800,
+  3345764771,
+  3516065817,
+  3600352804,
+  4094571909,
+  275423344,
+  430227734,
+  506948616,
+  659060556,
+  883997877,
+  958139571,
+  1322822218,
+  1537002063,
+  1747873779,
+  1955562222,
+  2024104815,
+  2227730452,
+  2361852424,
+  2428436474,
+  2756734187,
+  3204031479,
+  3329325298
+]);
 
 // src/lib/proposals.ts
 var PROPOSAL_CATEGORIES = ["feature", "security", "perf", "quality", "tests", "deps"];

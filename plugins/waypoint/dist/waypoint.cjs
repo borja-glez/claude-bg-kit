@@ -11414,6 +11414,7 @@ var coerce = {
 var NEVER = INVALID;
 
 // src/lib/types.ts
+var TASK_STATUSES = ["free", "claimed", "in_progress", "blocked", "done", "orphaned"];
 var TRACK_COLORS = ["blue", "mauve", "teal", "pink", "sky", "flamingo"];
 var STAGES = ["brief", "implement", "validate", "verify", "review", "verdict", "integrate"];
 
@@ -11450,19 +11451,23 @@ var TaskSchema = external_exports.object({
   depends_on: external_exports.array(id).default([]),
   zones: external_exports.array(external_exports.string().min(1)).default([]),
   estimate_min: external_exports.number().positive().optional(),
-  delicate: external_exports.boolean().optional()
+  delicate: external_exports.boolean().optional(),
+  // G-25, K3-08: the section of the design the task comes from (a heading's slug, or _intro).
+  design_ref: external_exports.string().regex(/^[a-z0-9-]{1,80}$|^_intro$/, "design_ref must be a section slug of the design").optional()
 });
 var PlanSchema = external_exports.object({
   project: id,
   locale: external_exports.string().min(1).default("en"),
   version: external_exports.string().min(1),
+  design_version: external_exports.number().int().positive().optional(),
   artifacts: external_exports.object({ roadmap: external_exports.string().url().optional(), design: external_exports.string().url().optional() }).default({}),
-  versions: external_exports.array(external_exports.object({ id, phases: external_exports.array(id) })).default([]),
+  versions: external_exports.array(external_exports.object({ id, phases: external_exports.array(id), target: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "target must be a date (YYYY-MM-DD)").optional() })).default([]),
   tracks: external_exports.array(external_exports.object({ id, name: external_exports.string().min(1), color: external_exports.enum(TRACK_COLORS) })).min(1),
   phases: external_exports.array(external_exports.object({
     id,
     name: external_exports.string().min(1),
-    plan_status: external_exports.enum(["committed", "provisional"]).default("committed")
+    plan_status: external_exports.enum(["committed", "provisional"]).default("committed"),
+    goal: external_exports.string().max(300).optional()
   })).min(1),
   tasks: external_exports.array(TaskSchema).min(1)
 });
@@ -11537,11 +11542,27 @@ function findCycle(plan) {
 
 // src/lib/sync.ts
 var import_node_crypto = require("node:crypto");
+
+// src/lib/waypoint-version.ts
+var WAYPOINT_VERSION = true ? "0.26.0" : "0.0.0";
+var VERSION = /^(\d{1,6})\.(\d{1,6})\.(\d{1,6})/;
+var partsOf = (v) => {
+  const m = typeof v === "string" ? VERSION.exec(v) : null;
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : [0, 0, 0];
+};
+function compareVersions(a, b) {
+  const x2 = partsOf(a), y2 = partsOf(b);
+  for (let i = 0; i < 3; i++) if (x2[i] !== y2[i]) return x2[i] < y2[i] ? -1 : 1;
+  return 0;
+}
+
+// src/lib/sync.ts
 function planHash(plan) {
   const { artifacts: _ignored, ...rest } = plan;
   return (0, import_node_crypto.createHash)("sha256").update(JSON.stringify(rest)).digest("hex").slice(0, 16);
 }
 function buildDocs(plan, nowIso) {
+  const links = plan.artifacts.design || plan.design_version ? { ...plan.artifacts.design ? { design: plan.artifacts.design } : {}, ...plan.design_version ? { designVersion: plan.design_version } : {} } : null;
   return {
     meta: {
       name: plan.project,
@@ -11552,12 +11573,15 @@ function buildDocs(plan, nowIso) {
       versions: plan.versions,
       phaseOrder: plan.phases.map((p) => p.id),
       metrics: {},
-      syncedAt: nowIso
+      syncedAt: nowIso,
+      waypointVersion: WAYPOINT_VERSION,
+      ...links ? { links } : {}
     },
     phases: plan.phases.map((p, i) => ({
       id: p.id,
       name: p.name,
       plan_status: p.plan_status,
+      ...p.goal ? { goal: p.goal } : {},
       order: i,
       tasks: plan.tasks.filter((t) => t.phase === p.id)
     }))
@@ -11568,10 +11592,11 @@ function planViewFromDocs(meta, phases) {
   return {
     tracks: meta.tracks,
     versions: meta.versions,
-    phases: ordered.map(({ id: id2, name, plan_status }) => ({ id: id2, name, plan_status })),
+    phases: ordered.map(({ id: id2, name, plan_status, goal }) => ({ id: id2, name, plan_status, ...goal ? { goal } : {} })),
     tasks: ordered.flatMap((p) => p.tasks)
   };
 }
+var DEL = { __delete__: true };
 function buildSyncWrites(plan, known, outDir, opts) {
   const k2 = (c) => known[c] ?? {};
   const { meta, phases } = buildDocs(plan, opts.nowIso);
@@ -11583,12 +11608,8 @@ function buildSyncWrites(plan, known, outDir, opts) {
   };
   const writes = [];
   const metaV = k2("meta").project;
-  if (metaV) {
-    const { metrics: _keep, ...rest } = meta;
-    writes.push({ op: "update", collection: "meta", doc_id: "project", file_path: file("meta.json", rest), if_version: metaV });
-  } else {
-    writes.push({ op: "set", collection: "meta", doc_id: "project", file_path: file("meta.json", meta) });
-  }
+  const { metrics: _keep, ...rest } = meta;
+  const metaWrite = metaV ? { op: "update", collection: "meta", doc_id: "project", file_path: file("meta.json", rest), if_version: metaV } : { op: "set", collection: "meta", doc_id: "project", file_path: file("meta.json", meta) };
   for (const ph of phases) {
     const v = k2("plan")[ph.id];
     writes.push({ op: "set", collection: "plan", doc_id: ph.id, file_path: file(`plan-${ph.id.replace(/:/g, "_")}.json`, ph), ...v ? { if_version: v } : {} });
@@ -11597,36 +11618,45 @@ function buildSyncWrites(plan, known, outDir, opts) {
     if (!phases.some((p) => p.id === id2)) writes.push({ op: "delete", collection: "plan", doc_id: id2, if_version: v });
   }
   const taskIds = new Set(plan.tasks.map((t) => t.id));
+  const listed = opts.listed ? new Set(opts.listed) : null;
+  const removed = [], unknownVersion = [], needsList = [];
   for (const t of plan.tasks) {
     const v = k2("state")[t.id];
-    if (!v) writes.push({ op: "set", collection: "state", doc_id: t.id, data: { status: "free" } });
-    else if (opts.states?.[t.id]?.status === "orphaned") {
-      writes.push({
-        op: "update",
-        collection: "state",
-        doc_id: t.id,
-        data: {
-          status: "free",
-          owner: { __delete__: true },
-          claimedAt: { __delete__: true },
-          startedAt: { __delete__: true },
-          doneAt: { __delete__: true },
-          blockedBy: { __delete__: true }
-        },
-        if_version: v
-      });
+    const st2 = opts.states?.[t.id];
+    if (!v) {
+      if (listed?.has(t.id)) {
+        unknownVersion.push(t.id);
+        if (st2?.status === "orphaned") needsList.push(t.id);
+        continue;
+      }
+      writes.push({ op: "set", collection: "state", doc_id: t.id, data: { status: "free" } });
+    } else if (st2?.status === "orphaned") {
+      writes.push(st2.prevStatus === "done" ? { op: "update", collection: "state", doc_id: t.id, data: { status: "done", prevStatus: DEL }, if_version: v } : { op: "update", collection: "state", doc_id: t.id, data: { status: "free", owner: DEL, claimedAt: DEL, startedAt: DEL, doneAt: DEL, blockedBy: DEL, blockedReason: DEL, prevStatus: DEL }, if_version: v });
     }
   }
   for (const [id2, v] of Object.entries(k2("state"))) {
-    if (!taskIds.has(id2) && opts.states?.[id2]?.status !== "orphaned") writes.push({ op: "update", collection: "state", doc_id: id2, data: { status: "orphaned" }, if_version: v });
+    const st2 = opts.states?.[id2];
+    if (taskIds.has(id2) || st2?.status === "orphaned") continue;
+    writes.push({ op: "update", collection: "state", doc_id: id2, data: { status: "orphaned", ...st2?.status ? { prevStatus: st2.status } : {} }, if_version: v });
+    removed.push(id2);
   }
-  writes.push({
-    op: "set",
-    collection: "events",
-    doc_id: opts.eventId,
-    data: { ts: opts.nowIso, type: "plan_changed", sessionId: opts.sessionId, text: `plan ${meta.planHash}` }
-  });
-  return { files, batches: chunk(writes, files) };
+  if (listed) for (const id2 of listed) {
+    if (!taskIds.has(id2) && !k2("state")[id2] && opts.states?.[id2]?.status !== "orphaned") {
+      unknownVersion.push(id2);
+      needsList.push(id2);
+    }
+  }
+  if (!opts.planSynced) {
+    writes.push({
+      op: "set",
+      collection: "events",
+      doc_id: opts.eventId,
+      data: { ts: opts.nowIso, type: "plan_changed", sessionId: opts.sessionId, text: `plan ${meta.planHash}` }
+    });
+  }
+  writes.push(metaWrite);
+  const missing = listed ? plan.tasks.filter((t) => !listed.has(t.id)).map((t) => t.id) : [];
+  return { files, batches: chunk(writes, files), removed, missing, unknownVersion, needsList };
 }
 function chunk(writes, files, max = 50, maxBytes = 9e5) {
   const out = [];
@@ -11672,6 +11702,7 @@ function normalizeNote(x2) {
   if (str(o.answer)) out.answer = o.answer.slice(0, MAX_NOTE);
   if (str(o.answeredBy)) out.answeredBy = o.answeredBy;
   if (str(o.answeredAt)) out.answeredAt = o.answeredAt;
+  if (str(o.answeredByNote) && /^[A-Za-z0-9_.:~@+-]{1,160}$/.test(o.answeredByNote)) out.answeredByNote = o.answeredByNote;
   if (str(o.authorName) && o.authorName.trim()) out.authorName = clean(o.authorName, MAX_NAME);
   if (str(o.answeredByName) && o.answeredByName.trim()) out.answeredByName = clean(o.answeredByName, MAX_NAME);
   if (str(o.proposalId) && o.proposalId && !o.proposalId.includes("/")) out.proposalId = o.proposalId;
@@ -11745,55 +11776,10 @@ function noteLines(notes, since, locale, taskIds) {
   return { say, mentions };
 }
 
-// src/page/normalize.ts
-var isObj = (x2) => typeof x2 === "object" && x2 !== null && !Array.isArray(x2);
-var str2 = (v) => String(v ?? "");
-var arr = (v) => Array.isArray(v) ? v : [];
-var strs = (v) => arr(v).filter((x2) => typeof x2 === "string");
-var kindOf = (v) => v === null ? "null" : Array.isArray(v) ? "array" : typeof v;
-function keepAll(list, keep, field2, report) {
-  const out = [];
-  list.forEach((v, i) => {
-    if (keep(v)) out.push(v);
-    else report?.(`${field2}[${i}]`, "dropped", kindOf(v));
-  });
-  return out;
-}
-function normalizeMeta(x2, report) {
-  if (!isObj(x2)) return null;
-  const mt2 = isObj(x2.metrics) ? x2.metrics : {};
-  const metrics = { ...mt2 };
-  const lc = mt2.lastCommit;
-  if (isObj(lc) && typeof lc.sha === "string" && typeof lc.ts === "string") metrics.lastCommit = { sha: lc.sha, ts: lc.ts };
-  else {
-    delete metrics.lastCommit;
-    if (lc !== void 0) report?.("metrics.lastCommit", "dropped", kindOf(lc));
-  }
-  return {
-    name: str2(x2.name),
-    locale: str2(x2.locale),
-    version: str2(x2.version),
-    planHash: str2(x2.planHash),
-    tracks: keepAll(arr(x2.tracks), (t) => isObj(t) && typeof t.id === "string" && typeof t.name === "string", "tracks", report),
-    versions: arr(x2.versions).filter(isObj),
-    phaseOrder: arr(x2.phaseOrder),
-    metrics,
-    syncedAt: str2(x2.syncedAt)
-  };
-}
-function normalizeTask(t) {
-  return { ...t, id: t.id, title: t.title, depends_on: strs(t.depends_on), zones: strs(t.zones), done_when: typeof t.done_when === "string" ? t.done_when : "", track: str2(t.track), phase: str2(t.phase) };
-}
-function normalizePhase(x2, report) {
-  if (!isObj(x2) || typeof x2.id !== "string") return null;
-  return {
-    ...x2,
-    id: x2.id,
-    name: str2(x2.name),
-    order: typeof x2.order === "number" && Number.isFinite(x2.order) ? x2.order : 0,
-    tasks: keepAll(arr(x2.tasks), (t) => isObj(t) && typeof t.id === "string" && typeof t.title === "string", "tasks", report).map(normalizeTask)
-  };
-}
+// src/lib/roadmap-doc.ts
+var DOC_STAGES = [...STAGES, "triage", "done", "blocked", "stopped"];
+var STAGE_KEYS = [...STAGES, "triage"];
+var BIDI = new RegExp(`[${[1564, 8206, 8207, 8234, 8235, 8236, 8237, 8238, 8294, 8295, 8296, 8297].map((c) => String.fromCharCode(c)).join("")}]`, "g");
 
 // src/lib/deps.ts
 var statusOf = (states, id2) => states[id2]?.status ?? "free";
@@ -11960,6 +11946,175 @@ function escalationCandidates(messages) {
   return out;
 }
 
+// src/lib/batches.ts
+var REASON_MAX = 300;
+var SUMMARY_MAX = 300;
+var DEL2 = { __delete__: true };
+var MIN = 6e4;
+var iso = (ms) => new Date(ms).toISOString();
+var BIDI2 = new RegExp(`[${[1564, 8206, 8207, 8234, 8235, 8236, 8237, 8238, 8294, 8295, 8296, 8297].map((c) => String.fromCharCode(c)).join("")}]`, "g");
+var CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
+function cleanText(text, max) {
+  return text.replace(CONTROL, " ").replace(BIDI2, "").replace(/\s+/g, " ").trim().slice(0, max);
+}
+var event = (doc_id, data) => ({ op: "set", collection: "events", doc_id, data });
+function claimBatch(i) {
+  const now = i.now.toISOString();
+  const leaseUntil = iso(i.now.getTime() + LEASE_MINUTES * MIN);
+  const data = { status: "in_progress", owner: i.sid, claimedAt: now, startedAt: now };
+  if (i.recoveredFrom) data.recoveredFrom = i.recoveredFrom;
+  else data.zonesTouched = [];
+  if (i.unblock) {
+    data.blockedBy = DEL2;
+    data.blockedReason = DEL2;
+  }
+  const eids = i.eids.slice(0, i.unblock ? 2 : 1);
+  const started = eids[eids.length - 1];
+  const base = { ts: now, sessionId: i.sid, taskId: i.task };
+  return {
+    now,
+    eid: eids[0],
+    eids,
+    leaseUntil,
+    batch: [
+      { op: "update", collection: "state", doc_id: i.task, data, if_version: i.stateVersion },
+      ...i.unblock ? [event(eids[0], { ...base, type: "unblocked" })] : [],
+      event(started, { ...base, type: "started", ...i.recoveredFrom ? { text: `recovered from ${i.recoveredFrom}` } : {} }),
+      { op: "update", collection: "sessions", doc_id: i.sid, data: { currentTask: i.task, heartbeatAt: now, leaseUntil, status: "active" }, if_version: i.sessionVersion }
+    ]
+  };
+}
+function doneBatch(i) {
+  const now = i.now.toISOString();
+  const leaseUntil = iso(i.now.getTime() + LEASE_MINUTES * MIN);
+  const eid = i.eids[0];
+  const c = i.commit;
+  return {
+    now,
+    eid,
+    eids: [eid],
+    leaseUntil,
+    batch: [
+      { op: "update", collection: "state", doc_id: i.task, data: { status: "done", doneAt: now, commits: [c], summary: cleanText(i.summary, SUMMARY_MAX) }, if_version: i.stateVersion },
+      event(eid, { ts: now, type: "done", sessionId: i.sid, taskId: i.task, text: cleanText(c.title, SUMMARY_MAX), add: c.add, del: c.del, sha: c.sha }),
+      { op: "update", collection: "sessions", doc_id: i.sid, data: { currentTask: DEL2, heartbeatAt: now, leaseUntil }, if_version: i.sessionVersion }
+    ],
+    metrics: { op: "update", collection: "meta", doc_id: "metrics", data: { lastCommit: { sha: c.sha, ts: c.ts }, ...i.tests !== void 0 ? { tests: i.tests } : {}, updatedAt: now } }
+  };
+}
+function blockBatch(i) {
+  const now = i.now.toISOString();
+  const leaseUntil = iso(i.now.getTime() + LEASE_MINUTES * MIN);
+  const eid = i.eids[0];
+  const reason = cleanText(i.reason, REASON_MAX);
+  return {
+    now,
+    eid,
+    eids: [eid],
+    leaseUntil,
+    batch: [
+      { op: "update", collection: "state", doc_id: i.task, data: { status: "blocked", blockedBy: [...i.by], blockedReason: reason }, if_version: i.stateVersion },
+      event(eid, { ts: now, type: "blocked", sessionId: i.sid, taskId: i.task, text: reason }),
+      { op: "update", collection: "sessions", doc_id: i.sid, data: { currentTask: DEL2, heartbeatAt: now, leaseUntil }, if_version: i.sessionVersion }
+    ]
+  };
+}
+function heartbeatBatch(i) {
+  const t = i.now.getTime();
+  const now = i.now.toISOString();
+  const busy = i.busyUntil ? i.busyUntil.getTime() : NaN;
+  const until = i.idle ? t : Number.isFinite(busy) ? Math.max(t + LEASE_MINUTES * MIN, Math.min(busy, t + LEASE_CAP_MINUTES * MIN)) : t + LEASE_MINUTES * MIN;
+  const leaseUntil = iso(until);
+  return {
+    now,
+    eid: null,
+    eids: [],
+    leaseUntil,
+    batch: [{ op: "update", collection: "sessions", doc_id: i.sid, data: { heartbeatAt: now, leaseUntil, status: i.idle ? "idle" : "active" }, if_version: i.sessionVersion }]
+  };
+}
+function registerBatch(i) {
+  const now = i.now.toISOString();
+  const leaseUntil = iso(i.now.getTime() + LEASE_MINUTES * MIN);
+  const data = { name: i.name, track: i.track, agentName: i.agent, branch: i.branch, worktree: i.worktree, ...i.claude ? { claude: i.claude } : {}, heartbeatAt: now, leaseUntil, status: "active" };
+  const write = i.sessionVersion === null ? { op: "set", collection: "sessions", doc_id: i.sid, data } : { op: "update", collection: "sessions", doc_id: i.sid, data, if_version: i.sessionVersion };
+  return { now, eid: null, eids: [], leaseUntil, batch: [write] };
+}
+function freeBatch(i) {
+  return [
+    { op: "update", collection: "state", doc_id: i.task, data: { status: "free", owner: DEL2, claimedAt: DEL2, startedAt: DEL2 }, if_version: i.stateVersion },
+    ...i.sessionVersion !== null ? [{ op: "update", collection: "sessions", doc_id: i.sid, data: { currentTask: DEL2, status: "idle" }, if_version: i.sessionVersion }] : []
+  ];
+}
+
+// src/page/normalize.ts
+var isObj = (x2) => typeof x2 === "object" && x2 !== null && !Array.isArray(x2);
+var str2 = (v) => String(v ?? "");
+var arr = (v) => Array.isArray(v) ? v : [];
+var strs = (v) => arr(v).filter((x2) => typeof x2 === "string");
+var kindOf = (v) => v === null ? "null" : Array.isArray(v) ? "array" : typeof v;
+function keepAll(list, keep, field2, report) {
+  const out = [];
+  list.forEach((v, i) => {
+    if (keep(v)) out.push(v);
+    else report?.(`${field2}[${i}]`, "dropped", kindOf(v));
+  });
+  return out;
+}
+function linksOf(x2) {
+  if (!isObj(x2)) return {};
+  const links = {};
+  if (typeof x2.design === "string" && x2.design.startsWith("https://")) links.design = x2.design.slice(0, 500);
+  if (typeof x2.designVersion === "number" && Number.isInteger(x2.designVersion) && x2.designVersion > 0) links.designVersion = x2.designVersion;
+  return Object.keys(links).length ? { links } : {};
+}
+function normalizeMeta(x2, report) {
+  if (!isObj(x2)) return null;
+  const mt2 = isObj(x2.metrics) ? x2.metrics : {};
+  const metrics = { ...mt2 };
+  const lc = mt2.lastCommit;
+  if (isObj(lc) && typeof lc.sha === "string" && typeof lc.ts === "string") metrics.lastCommit = { sha: lc.sha, ts: lc.ts };
+  else {
+    delete metrics.lastCommit;
+    if (lc !== void 0) report?.("metrics.lastCommit", "dropped", kindOf(lc));
+  }
+  return {
+    name: str2(x2.name),
+    locale: str2(x2.locale),
+    version: str2(x2.version),
+    planHash: str2(x2.planHash),
+    tracks: keepAll(arr(x2.tracks), (t) => isObj(t) && typeof t.id === "string" && typeof t.name === "string", "tracks", report),
+    // G-25: a version's target is a date; any other value is dropped (and reported).
+    versions: arr(x2.versions).filter(isObj).map((v, i) => {
+      if (v.target === void 0 || typeof v.target === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v.target)) return v;
+      report?.(`versions[${i}].target`, "dropped", kindOf(v.target));
+      const { target: _t, ...rest } = v;
+      return rest;
+    }),
+    phaseOrder: arr(x2.phaseOrder),
+    metrics,
+    syncedAt: str2(x2.syncedAt),
+    ...linksOf(x2.links),
+    ...typeof x2.waypointVersion === "string" && /^\d+\.\d+\.\d+/.test(x2.waypointVersion) ? { waypointVersion: x2.waypointVersion.slice(0, 40) } : {}
+  };
+}
+function normalizeTask(t) {
+  return { ...t, id: t.id, title: t.title, depends_on: strs(t.depends_on), zones: strs(t.zones), done_when: typeof t.done_when === "string" ? t.done_when : "", track: str2(t.track), phase: str2(t.phase) };
+}
+function normalizePhase(x2, report) {
+  if (!isObj(x2) || typeof x2.id !== "string") return null;
+  const out = {
+    ...x2,
+    id: x2.id,
+    name: str2(x2.name),
+    order: typeof x2.order === "number" && Number.isFinite(x2.order) ? x2.order : 0,
+    tasks: keepAll(arr(x2.tasks), (t) => isObj(t) && typeof t.id === "string" && typeof t.title === "string", "tasks", report).map(normalizeTask)
+  };
+  if (typeof x2.goal === "string" && x2.goal.trim()) out.goal = x2.goal.slice(0, 300);
+  else delete out.goal;
+  return out;
+}
+
 // src/lib/design.ts
 var import_yaml2 = __toESM(require_dist(), 1);
 var ID = /^[A-Za-z0-9_.-]{1,64}$/;
@@ -12076,7 +12231,7 @@ function changedSections(prev, next) {
 var import_yaml3 = __toESM(require_dist(), 1);
 var SpecImportError = class extends Error {
 };
-var SUMMARY_MAX = 400;
+var SUMMARY_MAX2 = 400;
 var BOM2 = String.fromCharCode(65279);
 var PURPOSE = /prop[oó]sito|purpose|overview|resumen|summary|objetivo|goal/i;
 function linesOf(text) {
@@ -12111,7 +12266,7 @@ function firstParagraph(lines2) {
     if (para.length) break;
   }
   if (!para.length) return null;
-  return para.join(" ").replace(/\s+/g, " ").trim().slice(0, SUMMARY_MAX).trimEnd();
+  return para.join(" ").replace(/\s+/g, " ").trim().slice(0, SUMMARY_MAX2).trimEnd();
 }
 function importSpec(text, opts) {
   const src = text.startsWith(BOM2) ? text.slice(1) : text;
@@ -13983,15 +14138,15 @@ var SAFE_ID = /^[A-Za-z0-9_\-.]{1,120}$/;
 var isSafeId = (s) => typeof s === "string" && SAFE_ID.test(s) && s !== "." && s !== "..";
 var RUN_BRANCH = /^[A-Za-z0-9_./][A-Za-z0-9_\-./]{0,119}$/;
 var isRunBranch = (s) => typeof s === "string" && RUN_BRANCH.test(s) && !s.includes("..");
-var TASK_STATUSES = ["running", "accepted", "integrated", "conflict", "blocked", "stopped"];
+var TASK_STATUSES2 = ["running", "accepted", "integrated", "conflict", "blocked", "stopped"];
 var STOPS = ["finished", "stalled", "stopped", "budget", "migrated"];
 var MAX_TASKS = 500;
 var isObj2 = (x2) => !!x2 && typeof x2 === "object" && !Array.isArray(x2);
 var str3 = (x2) => typeof x2 === "string" && x2 ? x2 : null;
-var iso = (x2) => typeof x2 === "string" && !Number.isNaN(Date.parse(x2)) ? x2 : null;
+var iso2 = (x2) => typeof x2 === "string" && !Number.isNaN(Date.parse(x2)) ? x2 : null;
 var FUTURE_SKEW_MS2 = 12e4;
 var finishedOf = (x2, now) => {
-  const v = iso(x2);
+  const v = iso2(x2);
   if (!v) return null;
   return now !== void 0 && Number.isFinite(now) && Date.parse(v) - now > FUTURE_SKEW_MS2 ? null : v;
 };
@@ -14000,12 +14155,12 @@ var oneOf = (list, x2) => list.includes(x2) ? x2 : null;
 var cleanTitle = (x2) => typeof x2 === "string" ? x2.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim().slice(0, 200) : "";
 function normalizeTask2(x2, now) {
   if (!isObj2(x2)) return null;
-  const status = oneOf(TASK_STATUSES, x2.status);
+  const status = oneOf(TASK_STATUSES2, x2.status);
   const stage = oneOf(STAGES, x2.stage);
   const executor = oneOf(["subagents", "sessions", "manual"], x2.executor);
   const worktree = typeof x2.worktree === "string" ? x2.worktree : null;
   const branch = str3(x2.branch);
-  const startedAt = iso(x2.startedAt);
+  const startedAt = iso2(x2.startedAt);
   if (!status || !stage || !executor || worktree === null || !branch || !startedAt) return null;
   const title = cleanTitle(x2.title);
   return {
@@ -14015,15 +14170,16 @@ function normalizeTask2(x2, now) {
     worktree,
     branch,
     startedAt,
-    stageSince: iso(x2.stageSince) ?? startedAt,
+    stageSince: iso2(x2.stageSince) ?? startedAt,
     round: int(x2.round, 0, 99, 0),
     attempts: int(x2.attempts, 0, 99, 0),
     agent: str3(x2.agent),
-    updatedAt: iso(x2.updatedAt) ?? startedAt,
+    updatedAt: iso2(x2.updatedAt) ?? startedAt,
     detail: typeof x2.detail === "string" ? x2.detail.slice(0, 500) : null,
-    ...iso(x2.nudgedAt) ? { nudgedAt: iso(x2.nudgedAt) } : {},
+    ...iso2(x2.nudgedAt) ? { nudgedAt: iso2(x2.nudgedAt) } : {},
     ...finishedOf(x2.finishedAt, now) ? { finishedAt: finishedOf(x2.finishedAt, now) } : {},
-    ...title ? { title } : {}
+    ...title ? { title } : {},
+    ...typeof x2.sha === "string" && /^[0-9a-f]{7,40}$/i.test(x2.sha) ? { sha: x2.sha } : {}
   };
 }
 function normalizeExecution(x2, now) {
@@ -14031,7 +14187,7 @@ function normalizeExecution(x2, now) {
   const mode = oneOf(["subagents", "sessions"], x2.mode);
   const kind = oneOf(["plan", "ephemeral"], x2.kind) ?? "plan";
   const runId = str3(x2.runId), project = str3(x2.project), base = str3(x2.base), branch = str3(x2.branch), coordinator = str3(x2.coordinator);
-  const startedAt = iso(x2.startedAt);
+  const startedAt = iso2(x2.startedAt);
   if (!mode || !runId || !project || !base || !branch || !coordinator || !startedAt) return null;
   if (!isSafeId(runId) || !isSafeId(coordinator) || !isRunBranch(branch)) return null;
   const tasks = {};
@@ -14057,12 +14213,12 @@ function normalizeExecution(x2, now) {
     active: x2.active === true,
     stopReason: oneOf(STOPS, x2.stopReason),
     stallReason: typeof x2.stallReason === "string" ? x2.stallReason.slice(0, 1e3) : null,
-    lastStepAt: iso(x2.lastStepAt),
-    lastBlockStep: iso(x2.lastBlockStep),
-    sleepUntil: iso(x2.sleepUntil),
+    lastStepAt: iso2(x2.lastStepAt),
+    lastBlockStep: iso2(x2.lastBlockStep),
+    sleepUntil: iso2(x2.sleepUntil),
     // C2: closedBy only means something with a closedAt; an older file has neither.
-    closedAt: iso(x2.closedAt),
-    closedBy: iso(x2.closedAt) ? oneOf(["merge", "close"], x2.closedBy) : null,
+    closedAt: iso2(x2.closedAt),
+    closedBy: iso2(x2.closedAt) ? oneOf(["merge", "close"], x2.closedBy) : null,
     ...typeof x2.planned === "number" && Number.isInteger(x2.planned) ? { planned: Math.min(MAX_TASKS, Math.max(0, x2.planned)) } : {},
     ...x2.autonomy === "auto" ? { autonomy: "auto" } : {},
     ...isLocale(x2.locale) ? { locale: x2.locale } : {}
@@ -14082,10 +14238,10 @@ var LIVE_MAX_AGE_HOURS = 24;
 var FORGE_DOC_MAX_BYTES = 8 * 1024;
 function normalizeLive(x2) {
   if (!isObj2(x2)) return null;
-  const sessionId = str3(x2.sessionId), ts = iso(x2.ts);
+  const sessionId = str3(x2.sessionId), ts = iso2(x2.ts);
   const role = oneOf(["coordinator", "executor", "manual"], x2.role);
   if (!sessionId || !ts || !role) return null;
-  const agents = Array.isArray(x2.agents) ? x2.agents.filter(isObj2).map((a) => ({ id: str3(a.id), type: str3(a.type) ?? "", since: iso(a.since) })).filter((a) => !!a.id && !!a.since).slice(0, 20) : [];
+  const agents = Array.isArray(x2.agents) ? x2.agents.filter(isObj2).map((a) => ({ id: str3(a.id), type: str3(a.type) ?? "", since: iso2(a.since) })).filter((a) => !!a.id && !!a.since).slice(0, 20) : [];
   return { sessionId, role, ts, agents, runId: str3(x2.runId), task: str3(x2.task), event: (str3(x2.event) ?? "").slice(0, 40), ended: x2.ended === true };
 }
 
@@ -14879,12 +15035,15 @@ function launchRun(launcher, x2) {
 }
 
 // src/lib/publish.ts
+var PAGE_RULES = 2;
 function roadmapCapabilities(assets) {
   return {
     db: { rules: [
       { path: "", read: "view", write: "admin" },
       { path: "notes", read: "view", write: "interact" },
-      { path: "proposals", read: "view", write: "interact" }
+      { path: "proposals", read: "view", write: "interact" },
+      // §4.1: only the roadmap's owner writes the mark that makes a decision count for forge (not admin: editors comment).
+      { path: "approvals", read: "view", write: "owner" }
     ] },
     user: { scopes: ["profile"] },
     downloads: true,
@@ -14910,107 +15069,6 @@ function claudeSessionId(flag, env = process.env) {
   return isSafeId(v) ? v : null;
 }
 var noClaudeSession = (cmd, flagName) => `${cmd}: no Claude session id: pass ${flagName} <id> or run it from Claude Code (CLAUDE_CODE_SESSION_ID)`;
-
-// src/lib/batches.ts
-var REASON_MAX = 300;
-var SUMMARY_MAX2 = 300;
-var DEL = { __delete__: true };
-var MIN = 6e4;
-var iso2 = (ms) => new Date(ms).toISOString();
-var BIDI = new RegExp(`[${[1564, 8206, 8207, 8234, 8235, 8236, 8237, 8238, 8294, 8295, 8296, 8297].map((c) => String.fromCharCode(c)).join("")}]`, "g");
-var CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
-function cleanText(text, max) {
-  return text.replace(CONTROL, " ").replace(BIDI, "").replace(/\s+/g, " ").trim().slice(0, max);
-}
-var event = (doc_id, data) => ({ op: "set", collection: "events", doc_id, data });
-function claimBatch(i) {
-  const now = i.now.toISOString();
-  const leaseUntil = iso2(i.now.getTime() + LEASE_MINUTES * MIN);
-  const data = { status: "in_progress", owner: i.sid, claimedAt: now, startedAt: now };
-  if (i.recoveredFrom) data.recoveredFrom = i.recoveredFrom;
-  else data.zonesTouched = [];
-  if (i.unblock) {
-    data.blockedBy = DEL;
-    data.blockedReason = DEL;
-  }
-  const eids = i.eids.slice(0, i.unblock ? 2 : 1);
-  const started = eids[eids.length - 1];
-  const base = { ts: now, sessionId: i.sid, taskId: i.task };
-  return {
-    now,
-    eid: eids[0],
-    eids,
-    leaseUntil,
-    batch: [
-      { op: "update", collection: "state", doc_id: i.task, data, if_version: i.stateVersion },
-      ...i.unblock ? [event(eids[0], { ...base, type: "unblocked" })] : [],
-      event(started, { ...base, type: "started", ...i.recoveredFrom ? { text: `recovered from ${i.recoveredFrom}` } : {} }),
-      { op: "update", collection: "sessions", doc_id: i.sid, data: { currentTask: i.task, heartbeatAt: now, leaseUntil, status: "active" }, if_version: i.sessionVersion }
-    ]
-  };
-}
-function doneBatch(i) {
-  const now = i.now.toISOString();
-  const leaseUntil = iso2(i.now.getTime() + LEASE_MINUTES * MIN);
-  const eid = i.eids[0];
-  const c = i.commit;
-  return {
-    now,
-    eid,
-    eids: [eid],
-    leaseUntil,
-    batch: [
-      { op: "update", collection: "state", doc_id: i.task, data: { status: "done", doneAt: now, commits: [c], summary: cleanText(i.summary, SUMMARY_MAX2) }, if_version: i.stateVersion },
-      event(eid, { ts: now, type: "done", sessionId: i.sid, taskId: i.task, text: cleanText(c.title, SUMMARY_MAX2), add: c.add, del: c.del, sha: c.sha }),
-      { op: "update", collection: "sessions", doc_id: i.sid, data: { currentTask: DEL, heartbeatAt: now, leaseUntil }, if_version: i.sessionVersion },
-      { op: "update", collection: "meta", doc_id: "project", data: { metrics: { lastCommit: { sha: c.sha, ts: c.ts }, ...i.tests !== void 0 ? { tests: i.tests } : {} } }, if_version: i.metaVersion }
-    ]
-  };
-}
-function blockBatch(i) {
-  const now = i.now.toISOString();
-  const leaseUntil = iso2(i.now.getTime() + LEASE_MINUTES * MIN);
-  const eid = i.eids[0];
-  const reason = cleanText(i.reason, REASON_MAX);
-  return {
-    now,
-    eid,
-    eids: [eid],
-    leaseUntil,
-    batch: [
-      { op: "update", collection: "state", doc_id: i.task, data: { status: "blocked", blockedBy: [...i.by], blockedReason: reason }, if_version: i.stateVersion },
-      event(eid, { ts: now, type: "blocked", sessionId: i.sid, taskId: i.task, text: reason }),
-      { op: "update", collection: "sessions", doc_id: i.sid, data: { currentTask: DEL, heartbeatAt: now, leaseUntil }, if_version: i.sessionVersion }
-    ]
-  };
-}
-function heartbeatBatch(i) {
-  const t = i.now.getTime();
-  const now = i.now.toISOString();
-  const busy = i.busyUntil ? i.busyUntil.getTime() : NaN;
-  const until = i.idle ? t : Number.isFinite(busy) ? Math.max(t + LEASE_MINUTES * MIN, Math.min(busy, t + LEASE_CAP_MINUTES * MIN)) : t + LEASE_MINUTES * MIN;
-  const leaseUntil = iso2(until);
-  return {
-    now,
-    eid: null,
-    eids: [],
-    leaseUntil,
-    batch: [{ op: "update", collection: "sessions", doc_id: i.sid, data: { heartbeatAt: now, leaseUntil, status: i.idle ? "idle" : "active" }, if_version: i.sessionVersion }]
-  };
-}
-function registerBatch(i) {
-  const now = i.now.toISOString();
-  const leaseUntil = iso2(i.now.getTime() + LEASE_MINUTES * MIN);
-  const data = { name: i.name, track: i.track, agentName: i.agent, branch: i.branch, worktree: i.worktree, ...i.claude ? { claude: i.claude } : {}, heartbeatAt: now, leaseUntil, status: "active" };
-  const write = i.sessionVersion === null ? { op: "set", collection: "sessions", doc_id: i.sid, data } : { op: "update", collection: "sessions", doc_id: i.sid, data, if_version: i.sessionVersion };
-  return { now, eid: null, eids: [], leaseUntil, batch: [write] };
-}
-function freeBatch(i) {
-  return [
-    { op: "update", collection: "state", doc_id: i.task, data: { status: "free", owner: DEL, claimedAt: DEL, startedAt: DEL }, if_version: i.stateVersion },
-    ...i.sessionVersion !== null ? [{ op: "update", collection: "sessions", doc_id: i.sid, data: { currentTask: DEL, status: "idle" }, if_version: i.sessionVersion }] : []
-  ];
-}
 
 // src/forge/config.ts
 var import_node_fs5 = require("node:fs");
@@ -15170,7 +15228,20 @@ function run(argv, io) {
         const loose = p.tasks.filter((t) => !t.zones.length).map((t) => t.id);
         const warning = loose.length ? `
 warning: ${loose.length} task(s) without zones run alone in a forge execution: ${loose.join(", ")}` : "";
-        return ok(`ok: ${p.tasks.length} tasks, ${p.phases.length} phases, ${p.tracks.length} tracks${warning}`);
+        let refs = "";
+        const designArg = flag("design");
+        if (designArg) {
+          let slugs;
+          try {
+            slugs = /* @__PURE__ */ new Set(["_intro", ...parseDesign((0, import_node_fs6.readFileSync)(abs(designArg), "utf8")).sections.map((s) => s.slug)]);
+          } catch (e) {
+            return fail(`validate: cannot read the design ${designArg}: ${e.message}`, 2);
+          }
+          const unknown = p.tasks.filter((t) => t.design_ref && !slugs.has(t.design_ref)).map((t) => `${t.id} (${t.design_ref})`);
+          if (unknown.length) refs = `
+warning: ${unknown.length} design_ref(s) not in the design: ${unknown.join(", ")}`;
+        }
+        return ok(`ok: ${p.tasks.length} tasks, ${p.phases.length} phases, ${p.tracks.length} tracks${warning}${refs}`);
       }
       case "clean-cache": {
         const p = loadPlan();
@@ -15187,14 +15258,24 @@ warning: ${loose.length} task(s) without zones run alone in a forge execution: $
       case "page": {
         const p = loadPlan();
         const out2 = abs(flag("out") ?? ".waypoint/roadmap.html");
-        const snapshot = buildDocs(p, io.now().toISOString());
+        const now = io.now().toISOString();
+        const states = flag("states") ? statesOf(abs(flag("states"))) : null;
+        const snapshot = { ...buildDocs(p, now), pageVersion: WAYPOINT_VERSION, ...states ? { states: states.states, statesAt: states.at } : {} };
         const tpl = (0, import_node_fs6.readFileSync)(import_node_path7.default.join(io.assetsDir, "roadmap.template.html"), "utf8");
         const html = tpl.replace("__TITLE__", () => `${p.project} Roadmap`).replace("__SNAPSHOT__", () => JSON.stringify(snapshot).replace(/</g, "\\u003c"));
         (0, import_node_fs6.mkdirSync)(import_node_path7.default.dirname(out2), { recursive: true });
         (0, import_node_fs6.writeFileSync)(out2, html);
         if (!args.includes("--publish-info")) return ok(out2);
         const internal = evidenceUploaded(io.cwd);
-        return ok(JSON.stringify({ out: out2, capabilities: roadmapCapabilities(internal), internal, say: sharingNotice(p, internal) }));
+        return ok(JSON.stringify({
+          out: out2,
+          capabilities: roadmapCapabilities(internal),
+          internal,
+          say: sharingNotice(p, internal),
+          pageVersion: WAYPOINT_VERSION,
+          rules: PAGE_RULES,
+          write: { op: "set", collection: "meta", doc_id: "page", data: { version: WAYPOINT_VERSION, rules: PAGE_RULES, roadmap: p.project, publishedAt: now } }
+        }));
       }
       case "sync": {
         const p = loadPlan();
@@ -15203,15 +15284,46 @@ warning: ${loose.length} task(s) without zones run alone in a forge execution: $
         const session = flag("session") ?? "main";
         const now = io.now();
         const outDir = abs(flag("out") ?? ".waypoint/sync");
-        const { files, batches } = buildSyncWrites(p, known, outDir, {
+        const db = flag("db");
+        let listed;
+        let republish = false;
+        let syncedHash = false;
+        if (db) {
+          for (const c of ["state", "plan", "meta"]) {
+            if (jsonFiles(import_node_path7.default.join(abs(db), c)).length >= LIST_LIMIT) {
+              return fail(`sync: the listing of ${c} may be truncated (${LIST_LIMIT} documents, the most one list returns): split the plan before syncing it`, 2);
+            }
+          }
+          listed = jsonFiles(import_node_path7.default.join(abs(db), "state")).map((f) => f.slice(0, -5));
+          const metaDocs = readDocs(import_node_path7.default.join(abs(db), "meta"));
+          const page = metaDocs.page;
+          republish = !page || compareVersions(page.version, WAYPOINT_VERSION) < 0 || typeof page.rules !== "number" || page.rules < PAGE_RULES;
+          const inDb = { state: new Set(listed), plan: new Set(jsonFiles(import_node_path7.default.join(abs(db), "plan")).map((f) => f.slice(0, -5))), meta: new Set(Object.keys(metaDocs)) };
+          const unlisted = [
+            ...p.phases.map((ph) => ph.id).filter((id2) => inDb.plan.has(id2) && !known.plan?.[id2]).map((id2) => `plan/${id2}`),
+            ...inDb.meta.has("project") && !known.meta?.project ? ["meta/project"] : []
+          ];
+          if (unlisted.length) return fail(`sync: known.json has no version of ${unlisted.join(", ")}, which this sync has to write: list the db first (or refresh known.json)`, 2);
+          for (const c of ["state", "plan", "meta"]) {
+            for (const id2 of Object.keys(known[c] ?? {})) if (!inDb[c].has(id2)) delete known[c][id2];
+          }
+          if (metaDocs.project?.planHash === planHash(p)) syncedHash = true;
+        }
+        const statesDir = flag("states") ?? (db ? import_node_path7.default.join(db, "state") : void 0);
+        const r2 = buildSyncWrites(p, known, outDir, {
           nowIso: now.toISOString(),
           sessionId: session,
           eventId: eventId(now, session, io.rand),
-          states: readDocs(flag("states") && abs(flag("states")))
+          states: readDocs(statesDir && abs(statesDir)),
+          ...listed ? { listed } : {},
+          ...syncedHash ? { planSynced: true } : {}
         });
+        if (r2.needsList.length) {
+          return fail(`sync: known.json has no version of ${r2.needsList.map((id2) => `state/${id2}`).join(", ")}, which this sync has to write: list state again and write known.json from that listing`, 2);
+        }
         (0, import_node_fs6.mkdirSync)(outDir, { recursive: true });
-        for (const [file, body] of Object.entries(files)) (0, import_node_fs6.writeFileSync)(file, JSON.stringify(body, null, 2));
-        return ok(JSON.stringify({ batches, say: syncSummary(p) }));
+        for (const [file, body] of Object.entries(r2.files)) (0, import_node_fs6.writeFileSync)(file, JSON.stringify(body, null, 2));
+        return ok(JSON.stringify({ batches: r2.batches, say: syncSummary(p), removed: r2.removed, missing: r2.missing, unknownVersion: r2.unknownVersion, republish }));
       }
       case "next": {
         const session = flag("session");
@@ -15401,7 +15513,7 @@ warning: ${loose.length} task(s) without zones run alone in a forge execution: $
         return ok(JSON.stringify({ ...r2, solo }));
       }
       case "done": {
-        const f = taskFlags("done", ["state-version", "session-version", "meta-version"]);
+        const f = taskFlags("done", ["state-version", "session-version"]);
         if ("code" in f) return f;
         if (!planHas(f.task)) return fail(`done: unknown task ${f.task}`, 2);
         const file = flag("summary-file");
@@ -15412,7 +15524,7 @@ warning: ${loose.length} task(s) without zones run alone in a forge execution: $
         } catch {
           return fail(`done: cannot read ${file}`, 2);
         }
-        if (!cleanText(summary, SUMMARY_MAX2)) return fail("done: the summary file is empty", 2);
+        if (!cleanText(summary, SUMMARY_MAX)) return fail("done: the summary file is empty", 2);
         const tests = flag("tests");
         if (tests !== void 0 && !/^\d{1,9}$/.test(tests)) return fail("done: --tests must be a whole number", 2);
         const rev = flag("rev") ?? "HEAD";
@@ -15423,7 +15535,6 @@ warning: ${loose.length} task(s) without zones run alone in a forge execution: $
           task: f.task,
           stateVersion: f.v["state-version"],
           sessionVersion: f.v["session-version"],
-          metaVersion: f.v["meta-version"],
           now,
           eids: eventIds(now, f.sid, 1, io.rand),
           commit: commitInfo(io.cwd, rev),
@@ -15933,6 +16044,25 @@ function readDocs(dir) {
     (0, import_node_fs6.readdirSync)(dir).filter((f) => f.endsWith(".json")).map((f) => [f.slice(0, -5), JSON.parse((0, import_node_fs6.readFileSync)(import_node_path7.default.join(dir, f), "utf8"))])
   );
 }
+function statesOf(dir) {
+  if (!(0, import_node_fs6.existsSync)(dir)) return null;
+  const states = {};
+  let newest2 = 0;
+  for (const f of (0, import_node_fs6.readdirSync)(dir).filter((n) => n.endsWith(".json")).sort()) {
+    const id2 = f.slice(0, -5);
+    if (!isPlanId(id2)) continue;
+    try {
+      const doc = JSON.parse((0, import_node_fs6.readFileSync)(import_node_path7.default.join(dir, f), "utf8"));
+      if (!doc || typeof doc.status !== "string" || !TASK_STATUSES.includes(doc.status)) continue;
+      states[id2] = doc.status;
+      newest2 = Math.max(newest2, (0, import_node_fs6.statSync)(import_node_path7.default.join(dir, f)).mtimeMs);
+    } catch {
+    }
+  }
+  return Object.keys(states).length ? { states, at: new Date(newest2).toISOString() } : null;
+}
+var LIST_LIMIT = 1e3;
+var jsonFiles = (dir) => (0, import_node_fs6.existsSync)(dir) ? (0, import_node_fs6.readdirSync)(dir).filter((f) => f.endsWith(".json")) : [];
 function evidenceUploaded(root) {
   if (!(0, import_node_fs6.existsSync)(import_node_path7.default.join(root, ".forge"))) return false;
   try {
