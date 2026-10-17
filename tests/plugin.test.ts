@@ -1395,6 +1395,8 @@ describe('plugin layout', () => {
       for (const w of ['`prunable`', '`pruned`']) expect(line('- `swarm cleanup'), `${f}: ${w}`).toContain(w);
       expect(line('- `swarm worktree'), `${f}: worktree`).toContain('`priorTotal`');
       expect(line('- `brief --plan'), `${f}: brief`).toContain('--prior-total N');
+      // R5: the set-aside folder is named after the run that sets the rounds aside, not the run they came from.
+      expect(line('- `prep --task'), `${f}: prep`).toContain(f.endsWith('es.md') ? 'apartadas por `<runId>`' : 'set aside by `<runId>`');
       expect(md, f).not.toContain('.forge/work/<id>/');
       expect(md, f).not.toContain('work/<task-id>/');
       expect(md, f).not.toContain('work/<id-de-tarea>/');

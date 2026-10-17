@@ -1331,11 +1331,16 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       const revived = (x: ExecutionState) => !x.active && x.stopReason === 'stalled';
       // Final review 1: swarm start's rule, before anything moves. Reviving a stalled run from another Claude session
       // while its bound one may still step it (finishing it, or waiting on the person) leaves two sessions on it. The
-      // coordinator's own retry (its conflict path) passes its own id; one back from /clear has an ended signal.
-      if (revived(e) && e.hookSession && claudeSessionId(flag('hook-session'), io.env ?? process.env) !== e.hookSession) {
-        const liveness = boundLiveness(io.cwd, { ...e, active: true }, now.getTime());
-        if (liveness !== 'stopped') throw new UsageError(boundElsewhere('retry', e.runId, e.hookSession, liveness));
-      }
+      // coordinator's own retry (its conflict path) passes its own id; one back from /clear has an ended signal (the live
+      // hook writes it at the SessionEnd of the bound session, R4). R5: checked on the read and again under the lock, on
+      // the run as it is then, so one a tick stalled meanwhile is gated too.
+      const hook = claudeSessionId(flag('hook-session'), io.env ?? process.env);
+      const gate = (x: ExecutionState): void => {
+        if (!revived(x) || !x.hookSession || hook === x.hookSession) return;
+        const liveness = boundLiveness(io.cwd, { ...x, active: true }, now.getTime());
+        if (liveness !== 'stopped') throw new UsageError(boundElsewhere('retry', x.runId, x.hookSession, liveness));
+      };
+      gate(e);
       if (has('adopt')) {
         const adoptable = (x: ExecTask | undefined): x is ExecTask => !!x && x.status === 'conflict' && x.executor !== 'subagents';
         const notAdoptable = (x: ExecTask | undefined) =>
@@ -1357,6 +1362,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
         update(cur => {
           if (!cur) return null;
           notEnded(cur);
+          gate(cur);
           const base = cur.tasks[task] ?? t;
           if (!adoptable(base)) throw notAdoptable(base);
           adopted = base;
@@ -1374,6 +1380,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       update(cur => {
         if (!cur) return null;
         notEnded(cur);
+        gate(cur);
         const base = cur.tasks[task] ?? t;
         if (!retryable(base)) throw new UsageError(`swarm retry: ${task} is not in conflict or blocked`);
         return {

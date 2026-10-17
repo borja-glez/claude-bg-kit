@@ -481,6 +481,29 @@ describe('forge swarm (execution)', () => {
     expect(readExecution(root)).toMatchObject({ active: false, stopReason: 'stopped' });
     expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'blocked', attempts: 3 });
   });
+  it('the retry gate holds under the lock: a run stalled between the read and the lock is not revived from another session (R5)', () => {
+    out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
+    out(run(['swarm', 'worktree', 'T1'], io));
+    out(run(['swarm', 'task', 'T1', '--status', 'blocked'], io));
+    // Active when retry reads it (no gate then); a tick stalls it while retry waits for the lock. Its coordinator
+    // (hook-main, which started it a moment ago) may still step it.
+    const stall = (e: ExecutionState): ExecutionState => ({ ...e, active: false, stopReason: 'stalled', stallReason: 'T1 is blocked' });
+    const r = run(['swarm', 'retry', 'T1', '--hook-session', 'hook-other'], meanwhile(stall));
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('swarm retry: the execution');
+    expect(r.stderr).toContain('is bound to another Claude session (hook-main, alive)');
+    expect(readExecution(root)).toMatchObject({ active: false, stopReason: 'stalled' });
+    expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'blocked', attempts: 0 });
+  });
+  it('the retry --adopt gate holds under the lock too (R5)', () => {
+    sessionsRun();
+    out(run(['swarm', 'worktree', 'T1'], io));
+    saveExecution(root, onT1({ status: 'conflict', detail: 'merge conflict' })(readExecution(root)!));
+    const r = run(['swarm', 'retry', 'T1', '--adopt', '--hook-session', 'hook-other'], meanwhile(e => ({ ...e, active: false, stopReason: 'stalled' })));
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('is bound to another Claude session (hook-main, alive)');
+    expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'conflict', executor: 'sessions', attempts: 0 });
+  });
   it('swarm retry leaves alone a task that is no longer in conflict or blocked once it holds the lock (I-15)', () => {
     out(run(['swarm', 'start', '--project', 'shop', '--session', 'main'], io));
     out(run(['swarm', 'worktree', 'T1'], io));
