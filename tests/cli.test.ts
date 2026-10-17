@@ -1806,4 +1806,59 @@ describe('sync --db (A-11, A-13, G-13, G-26)', () => {
     expect(r.code).toBe(2);
     expect(r.stderr).toContain('state/T999');
   });
+  it('a phase or meta/project the db holds and known.json does not list: exit 2, nothing printed, naming each', () => {
+    list('plan', { F1: { id: 'F1' } });
+    list('meta', { project: { name: 'demo-shop' } });
+    writeFileSync(path.join(dir, 'known.json'), JSON.stringify({ plan: { F2: 1 } }));
+    const r = sync('--known', 'known.json');
+    expect(r.code).toBe(2);
+    expect(r.stdout).toBe('');
+    expect(r.stderr).toContain('plan/F1');
+    expect(r.stderr).toContain('meta/project');
+    expect(r.stderr).toContain('list the db first');
+    list('meta', { page: { version: WP, rules: 2, publishedAt: 'T' } });
+    rmSync(path.join(dir, 'db', 'meta', 'project.json'));
+    const only = sync('--known', 'known.json');
+    expect(only.code).toBe(2);
+    expect(only.stderr).toContain('plan/F1');
+    expect(only.stderr).not.toContain('meta/project');
+  });
+  it('a version known.json has for a document the db does not hold is dropped, not reused as a pin', () => {
+    list('state', { T001: { status: 'free' } });
+    writeFileSync(path.join(dir, 'known.json'), JSON.stringify({ meta: { project: 3 }, plan: { F1: 2 }, state: { T001: 4, T777: 9 } }));
+    const o = JSON.parse(sync('--known', 'known.json').stdout);
+    const ws = o.batches.flat() as { op: string; collection: string; doc_id: string; if_version?: number }[];
+    expect(ws.find(w => w.collection === 'meta')).toMatchObject({ op: 'set' });
+    expect(ws.find(w => w.collection === 'meta')!.if_version).toBeUndefined();
+    expect(ws.find(w => w.collection === 'plan' && w.doc_id === 'F1')!.if_version).toBeUndefined();
+    expect(ws.some(w => w.doc_id === 'T777')).toBe(false);
+    expect(ws.find(w => w.doc_id === 'T001')).toBeUndefined();
+  });
+  it('a plan phase or meta listing of 1000 documents is also cut (G-26)', () => {
+    list('plan', Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [`P${i}`, { id: `P${i}` }])));
+    const a = sync();
+    expect(a.code).toBe(2);
+    expect(a.stderr).toContain('listing of plan');
+    rmSync(path.join(dir, 'db', 'plan'), { recursive: true });
+    list('meta', Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [`M${i}`, { x: i }])));
+    const b = sync();
+    expect(b.code).toBe(2);
+    expect(b.stderr).toContain('listing of meta');
+  });
+  it('republish is true when meta/page.rules is below this waypoint or absent, even with the same version', () => {
+    list('meta', { page: { version: WP, rules: 1, publishedAt: 'T' } });
+    expect(JSON.parse(sync().stdout).republish).toBe(true);
+    list('meta', { page: { version: WP, publishedAt: 'T' } });
+    expect(JSON.parse(sync().stdout).republish).toBe(true);
+  });
+  it('no plan_changed event when meta/project already carries the plan hash', () => {
+    const hash = planHash(parsePlan(readFileSync(path.join(dir, 'plan.yaml'), 'utf8')));
+    list('meta', { project: { planHash: hash } });
+    writeFileSync(path.join(dir, 'known.json'), JSON.stringify({ meta: { project: 2 } }));
+    const ws = JSON.parse(sync('--known', 'known.json').stdout).batches.flat() as { collection: string }[];
+    expect(ws.some(w => w.collection === 'events')).toBe(false);
+    list('meta', { project: { planHash: 'old' } });
+    const ws2 = JSON.parse(sync('--known', 'known.json').stdout).batches.flat() as { collection: string }[];
+    expect(ws2.some(w => w.collection === 'events')).toBe(true);
+  });
 });

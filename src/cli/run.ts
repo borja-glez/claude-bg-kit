@@ -158,6 +158,7 @@ export function run(argv: string[], io: Io): Result {
         const db = flag('db');
         let listed: string[] | undefined;
         let republish = false;
+        let syncedHash = false;
         if (db) {
           for (const c of ['state', 'plan', 'meta']) {
             if (jsonFiles(path.join(abs(db), c)).length >= LIST_LIMIT) {
@@ -165,8 +166,21 @@ export function run(argv: string[], io: Io): Result {
             }
           }
           listed = jsonFiles(path.join(abs(db), 'state')).map(f => f.slice(0, -5));
-          const page = readDocs<{ version?: unknown }>(path.join(abs(db), 'meta')).page;
-          republish = !page || compareVersions(page.version, WAYPOINT_VERSION) < 0;
+          const metaDocs = readDocs<{ version?: unknown; rules?: unknown; planHash?: unknown }>(path.join(abs(db), 'meta'));
+          const page = metaDocs.page;
+          republish = !page || compareVersions(page.version, WAYPOINT_VERSION) < 0 || typeof page.rules !== 'number' || page.rules < PAGE_RULES;
+          // A-11 for the documents sync writes itself: one the db holds and known.json does not list could only be
+          // printed as an unpinned set, which the store refuses. A version known.json has for a document the db lacks is dropped.
+          const inDb = { state: new Set(listed), plan: new Set(jsonFiles(path.join(abs(db), 'plan')).map(f => f.slice(0, -5))), meta: new Set(Object.keys(metaDocs)) };
+          const unlisted = [
+            ...p.phases.map(ph => ph.id).filter(id => inDb.plan.has(id) && !known.plan?.[id]).map(id => `plan/${id}`),
+            ...(inDb.meta.has('project') && !known.meta?.project ? ['meta/project'] : []),
+          ];
+          if (unlisted.length) return fail(`sync: known.json has no version of ${unlisted.join(', ')}, which this sync has to write: list the db first (or refresh known.json)`, 2);
+          for (const c of ['state', 'plan', 'meta'] as const) {
+            for (const id of Object.keys(known[c] ?? {})) if (!inDb[c].has(id)) delete known[c]![id];
+          }
+          if (metaDocs.project?.planHash === planHash(p)) syncedHash = true;
         }
         const statesDir = flag('states') ?? (db ? path.join(db, 'state') : undefined);
         const r = buildSyncWrites(p, known, outDir, {
@@ -175,6 +189,7 @@ export function run(argv: string[], io: Io): Result {
           eventId: eventId(now, session, io.rand),
           states: readDocs<TaskState>(statesDir && abs(statesDir)),
           ...(listed ? { listed } : {}),
+          ...(syncedHash ? { planSynced: true } : {}),
         });
         if (r.needsList.length) {
           return fail(`sync: known.json has no version of ${r.needsList.map(id => `state/${id}`).join(', ')}, which this sync has to write: list state again and write known.json from that listing`, 2);

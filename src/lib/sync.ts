@@ -57,7 +57,7 @@ export interface Write {
   if_version?: number;
 }
 
-export interface SyncOptions { nowIso: string; sessionId: string; eventId: string; states?: States; listed?: readonly string[] }
+export interface SyncOptions { nowIso: string; sessionId: string; eventId: string; states?: States; listed?: readonly string[]; planSynced?: boolean }
 export interface SyncResult {
   files: Record<string, unknown>; batches: Write[][];
   /** A-12: the tasks this sync retires from the roadmap (orphaned). */
@@ -84,7 +84,7 @@ export function buildSyncWrites(plan: Plan, known: Known, outDir: string, opts: 
 
   // A-13: meta/project goes last, so its planHash says the plan is synced only once every earlier batch went in.
   const metaV = k('meta').project;
-  const { metrics: _keep, ...rest } = meta; // never overwrite live metrics on resync
+  const { metrics: _keep, ...rest } = meta; // the update never carries the empty metrics of buildDocs (live ones are in meta/metrics)
   const metaWrite: Write = metaV
     ? { op: 'update', collection: 'meta', doc_id: 'project', file_path: file('meta.json', rest), if_version: metaV }
     : { op: 'set', collection: 'meta', doc_id: 'project', file_path: file('meta.json', meta) };
@@ -126,12 +126,15 @@ export function buildSyncWrites(plan: Plan, known: Known, outDir: string, opts: 
     if (!taskIds.has(id) && !k('state')[id] && opts.states?.[id]?.status !== 'orphaned') { unknownVersion.push(id); needsList.push(id); }
   }
 
-  writes.push({
-    op: 'set',
-    collection: 'events',
-    doc_id: opts.eventId,
-    data: { ts: opts.nowIso, type: 'plan_changed', sessionId: opts.sessionId, text: `plan ${meta.planHash}` },
-  });
+  // A retry after the plan is synced (meta/project already carries the hash) does not log the change twice.
+  if (!opts.planSynced) {
+    writes.push({
+      op: 'set',
+      collection: 'events',
+      doc_id: opts.eventId,
+      data: { ts: opts.nowIso, type: 'plan_changed', sessionId: opts.sessionId, text: `plan ${meta.planHash}` },
+    });
+  }
   writes.push(metaWrite);
 
   const missing = listed ? plan.tasks.filter(t => !listed.has(t.id)).map(t => t.id) : [];
