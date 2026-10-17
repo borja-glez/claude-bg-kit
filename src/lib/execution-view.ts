@@ -16,6 +16,8 @@ export interface ExecView {
   finished: { task: string; startedAt: string; finishedAt: string }[];
   /** C2: the instant the clock of an ended run stops (its last movement); null while it is active. */
   frozenAt: string | null;
+  /** The coordinator's next wake-up (execution.json), passed through for lens's wait line; null when none. */
+  sleepUntil: string | null;
 }
 
 /** A timestamp more than this far ahead of now is clock skew or corruption: it is invalid, not a sign of life. */
@@ -182,6 +184,6 @@ export function executionView(i: { exec: ExecutionState | null; tasks: Record<st
     coordinator: { liveness: coord, lastSeen }, integrated: ids('integrated').length, total: Math.max(e.planned ?? 0, Object.keys(e.tasks).length),
     slots, queued: ids('accepted'), conflicts: ids('conflict'), blocked: ids('blocked'),
     manual, orphans: [...slots, ...manual].filter(s => s.liveness === 'stopped').map(s => s.task), agents: signal?.agents ?? [],
-    startedAt: e.startedAt, finished, frozenAt: e.active ? null : lastMovedAt(e),
+    startedAt: e.startedAt, finished, frozenAt: e.active ? null : lastMovedAt(e), sleepUntil: e.sleepUntil ?? null,
   };
 }

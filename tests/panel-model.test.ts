@@ -134,7 +134,7 @@ describe('buildPanelModel', () => {
   it('is all-null for an empty project', () => {
     expect(buildPanelModel(base)).toEqual({
       locale: 'en', waypoint: null, superpowers: null, todos: null, subagents: [], subagentsDone: [], tool: null, turnSeconds: null, ccTasks: null,
-      forge: null, infinite: null, decisions: null, execution: null, proposals: [], mainModel: null, usage: null,
+      forge: null, infinite: null, decisions: null, execution: null, proposals: [], mainModel: null, activities: [], waiting: null, jobs: [], usage: null,
     });
   });
   it('derives waypoint from a work band and takes its locale', () => {
@@ -335,7 +335,8 @@ describe('forgeFromStatus', () => {
     const stamped = JSON.stringify({ ...STATUS, session: 'c1', runId: 'r1', project: 'shop' });
     expect(forgeFromStatus(stamped, NOW)).toEqual(forgeFromStatus(JSON.stringify(STATUS), NOW));
     const model = (forgeStatus: string) => buildPanelModel({ band: NONE_BAND, now: NOW, forgeStatus, activity: act() });
-    expect(bandKey(model(stamped))).toBe(bandKey(model(JSON.stringify({ ...STATUS, session: null, runId: 'r2', project: null }))));
+    // The activity row carries the task's key and project, so only who wrote it and its run change here.
+    expect(bandKey(model(stamped))).toBe(bandKey(model(JSON.stringify({ ...STATUS, session: null, runId: 'r2', project: 'shop' }))));
   });
   it('keeps auto mode from status.json', () => {
     expect(forgeFromStatus(JSON.stringify({ ...STATUS, autonomy: 'auto' }), NOW)).toMatchObject({ autonomy: 'auto' });
@@ -507,6 +508,16 @@ describe('buildPanelModel · execution', () => {
     expect(buildPanelModel({ band: band(), activity: act(), now, forgeExecution: '{oops' }).execution).toBeNull();
     expect(buildPanelModel({ band: band(), activity: act(), now, forgeExecution: execDoc.replace('"active":true', '"active":false').replace('"stopReason":null', '"stopReason":"migrated"') }).execution).toBeNull();
   });
+  it('the execution takes its role from the band: dim for another live session, with the next wake-up of the run (C3, E-11)', () => {
+    const d = JSON.parse(execDoc);
+    d.sleepUntil = '2026-10-12T12:04:00.000Z';
+    const as = (role: 'owner' | 'other-live' | 'none', coordinator = false) => buildPanelModel({
+      band: { mode: 'none', viewer: { role, coordinator, runId: 'r1' } }, activity: act(), now, forgeExecution: JSON.stringify(d), forgeExecTasks: {}, forgeLive: {},
+    }).execution;
+    expect(as('other-live')).toMatchObject({ dim: true, sleepUntil: '2026-10-12T12:04:00.000Z' });
+    expect(as('none')).toMatchObject({ dim: false });
+    expect(as('owner', true)).toMatchObject({ dim: false });
+  });
 });
 
 describe('buildPanelModel usage', () => {
@@ -672,5 +683,71 @@ describe('todos and superpowers (E-13, E-14)', () => {
     const fresh = buildPanelModel({ band: none, activity: act(), now: 10 * day, ledger: LEDGER, ledgerPlan: PLAN, ledgerMtimeMs: 10 * day - 3600_000 });
     expect(fresh.superpowers).not.toHaveProperty('stale');
     expect(headline(fresh)).toMatchObject({ section: 'superpowers', detail: 'round 2/5' });
+  });
+});
+
+describe('buildPanelModel: the activities (C5, E-06, E-16)', () => {
+  const now = Date.parse('2026-10-16T12:00:00.000Z');
+  const none: BandModel = { mode: 'none', viewer: { role: 'none', coordinator: false, runId: null } };
+  const doc = (task: string, over: Record<string, unknown> = {}) => JSON.stringify({
+    ts: new Date(now - 60_000).toISOString(), task, path: 'medium', phase: 'review', agent: 'forge-review-correctness', validators: [], verdict: null, round: null, cap: null,
+    lastAt: new Date(now - 60_000).toISOString(), session: 'me', ...over,
+  });
+  const a1 = { id: 'a1', type: 'forge:forge-review-correctness', description: 'review T2', since: now - 60_000, task: 'T2', brief: 1, project: null, via: 'contract' as const,
+    parentId: null, workflow: null, status: 'running' as const, tool: null, endedAt: null };
+  it('one activity per status file; the forge section is the expanded one, with its briefs', () => {
+    const m = buildPanelModel({ band: none, activity: act(), now, sessionId: 'me', forgeBriefsBy: { T2: 3 },
+      forgeStatuses: [doc('T1', { lastAt: new Date(now - 120_000).toISOString() }), doc('T2'), doc('T3', { session: 'other' })] });
+    expect(m.activities.map(x => [x.key, x.owner])).toEqual([['T2', 'own'], ['T1', 'own'], ['T3', 'other']]);
+    expect(m.forge).toMatchObject({ task: 'T2', briefs: 3 });
+    expect(m.waiting).toBeNull();
+    expect(m.jobs).toEqual([]);
+  });
+  it('a junk or oversized status file hides only its task; an older forge without the folder gives its one status (Review Focus 2)', () => {
+    const m = buildPanelModel({ band: none, activity: act(), now, sessionId: 'me', forgeStatuses: ['{oops', doc('T2'), JSON.stringify({ task: 7 }), doc('T9', { pad: 'x'.repeat(70 * 1024) })] });
+    expect(m.activities.map(x => x.key)).toEqual(['T2']);
+    const old = buildPanelModel({ band: none, activity: act(), now, sessionId: 'me', forgeStatus: doc('T5'), forgeBriefs: 2 });
+    expect(old.activities.map(x => x.key)).toEqual(['T5']);
+    expect(old.forge).toMatchObject({ task: 'T5', briefs: 2 });
+  });
+  it('with no session id ($.session.id() failed) nothing throws: the task this session touched is its own, another named one is dim (Review Focus 5)', () => {
+    const m = buildPanelModel({ band: none, activity: act(), now, sessionId: null, ownTasks: ['T1'], forgeStatuses: [doc('T1'), doc('T2', { lastAt: new Date(now - 30_000).toISOString() })] });
+    expect(m.activities.map(x => [x.key, x.owner, x.dim])).toEqual([['T1', 'own', false], ['T2', 'other', true]]);
+    expect(m.forge).toMatchObject({ task: 'T1' });
+  });
+  it('the forge section never carries who wrote the last event, its run nor its project (C5)', () => {
+    const m = buildPanelModel({ band: none, activity: act(), now, sessionId: 'me', forgeStatuses: [doc('T2', { runId: 'r1', project: 'shop' })] });
+    expect(m.activities[0]).toMatchObject({ key: 'shop__T2', project: 'shop' });
+    expect(m.forge).toMatchObject({ task: 'T2' });
+    for (const field of ['session', 'runId', 'project', 'lastAt', 'ts']) expect(m.forge).not.toHaveProperty(field);
+  });
+  it('a subagent drawn under its task is marked shown, with its task; another keeps its place', () => {
+    const m = buildPanelModel({ band: none, now, sessionId: 'me', forgeStatuses: [doc('T2')], links: [a1],
+      activity: act({ subagents: [{ id: 'a1', type: 'forge:forge-review-correctness', since: now - 60_000 }, { id: 'a2', type: 'Explore', since: now - 1000 }] }) });
+    expect(m.activities[0].agents.map(g => g.id)).toEqual(['a1']);
+    expect(m.subagents.find(s => s.id === 'a1')).toMatchObject({ task: 'T2', shown: true });
+    expect(m.subagents.find(s => s.id === 'a2')).not.toHaveProperty('shown');
+  });
+  it('the band key ignores every second: subagents, tool, turn, slots and their agents, activities, their agents and jobs (E-16)', () => {
+    const step = JSON.stringify({ name: 'step-run-1', cmd: 'step', task: null, pid: 1, startedAt: new Date(now - 5000).toISOString(), out: 'x', session: null });
+    const m = buildPanelModel({ band: none, now, sessionId: 'me', forgeStatuses: [doc('T2')], links: [a1], forgeJobs: [step],
+      activity: act({ subagents: [{ id: 'a1', type: 'forge:forge-impl', since: now - 60_000 }], tool: { name: 'Bash', since: now - 1000 }, turnSince: now - 2000 }) });
+    expect(m.jobs).toHaveLength(1);
+    const slot = { task: 'T4', title: null, stage: 'review', agent: null, model: null, effort: null, round: 1, liveness: 'alive' as const, mode: 'subagents' as const };
+    const shift = (secs: number, tool: string): PanelModel => ({
+      ...m, turnSeconds: secs, tool: m.tool && { ...m.tool, seconds: secs },
+      subagents: m.subagents.map(s => ({ ...s, seconds: secs })),
+      activities: m.activities.map(x => ({ ...x, seconds: secs, agents: x.agents.map(g => ({ ...g, seconds: secs, tool })) })),
+      jobs: m.jobs.map(j => ({ ...j, seconds: secs })),
+      waiting: { agents: 1, wakeSeconds: secs },
+      execution: {
+        runId: 'r1', mode: 'subagents', parallel: 3, branch: 'b', active: true, stopReason: null, stallReason: null, coordinator: { liveness: 'alive', lastSeen: null },
+        integrated: 0, total: 4, elapsedSeconds: secs,
+        slots: [{ ...slot, seconds: secs, taskSeconds: secs, agents: [{ id: 'a9', type: 'x', tool, seconds: secs, status: 'running', depth: 0 }] }],
+        manual: [{ task: 'T9', title: null, stage: 'implement', seconds: secs, liveness: 'alive', by: 'M1' }], queued: [], conflicts: [], blocked: [], orphans: [],
+      },
+    });
+    expect(bandKey(shift(1, 'Read'))).toBe(bandKey(shift(99, 'Edit')));
+    expect(bandKey(shift(1, 'Read'))).not.toBe(bandKey({ ...shift(1, 'Read'), activities: shift(1, 'Read').activities.map(x => ({ ...x, stage: 'verdict' })) }));
   });
 });

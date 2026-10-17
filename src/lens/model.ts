@@ -1,6 +1,6 @@
 import type { BandModel } from '../mod/model.js';
 import { normalizeProposal } from '../lib/proposals.js';
-import { cleanText, normalizeStatus } from '../lib/forge-status.js';
+import { cleanText, normalizeStatus, statusKey, type ForgeStatus } from '../lib/forge-status.js';
 import { parseRun } from '../lib/forge-run.js';
 import { FUTURE_SKEW_MS, normalizeLive, normalizePublicTask, parseExecution, type LiveDoc, type PublicTask } from '../lib/execution-state.js';
 import { executionView } from '../lib/execution-view.js';
@@ -10,6 +10,8 @@ import { summarizeUsage } from './usage-summary.js';
 import { PRICES_AS_OF } from '../lib/prices.js';
 import { freshFinished, type FinishedAgent } from './finished.js';
 import { decisionsSummary } from '../lib/decisions.js';
+import { buildActivities, leftOpen, parseJob, runRoleOf, withSlotAgents, type ActivityView, type LensJob, type Models, type Role } from './activities.js';
+import type { AgentLink } from './links.js';
 
 const CLIP = 80;
 const MAX_RANGE = 1000;
@@ -137,18 +139,19 @@ export type PanelModel = {
     stale?: boolean;
   } | null;
   todos: { total: number; done: number; inProgress: string | null; next: string[]; active?: string[]; cells?: string } | null;
-  subagents: { id: string; type: string; description?: string; status?: string; seconds: number | null; model?: string; effort?: string }[];
+  subagents: { id: string; type: string; description?: string; status?: string; seconds: number | null; model?: string; effort?: string; task?: string; shown?: true }[];
   subagentsDone?: { id: string; type: string; description?: string; model?: string; seconds: number }[];
   tool: { name: string; seconds: number | null } | null;
   turnSeconds: number | null;
   ccTasks: { open: number; done: number; recent: string[] } | null;
   forge: {
-    task: string; path: string; phase: string; agent: string | null; validators: { name: string; ok: boolean }[];
-    verdict: { action: string; score: number | null } | null; round: number | null; cap: number | null;
+    task: string; path: string; phase: string; agent: string | null; validators: { name: string; ok: boolean; cached?: true }[];
+    verdict: { action: string; score: number | null; round?: number | null; findings?: { critical: number; important: number; minor: number } | null } | null;
+    round: number | null; cap: number | null; reviewers?: string[]; reviews?: { n: number; max: number } | null;
     brief: number | null; accepted: number[]; briefs: number | null; autonomy?: 'auto';
     verify?: {
       planned: boolean; surfaces: string[]; result: string | null; passed: number | null; total: number | null;
-      evidence: string | null; reason: string | null;
+      evidence: string | null; reason: string | null; skipped?: string[]; launched?: boolean;
     } | null;
     timing?: { taskSeconds: number | null; done: boolean; stages: { name: string; seconds: number; live: boolean }[] } | null;
   } | null;
@@ -161,15 +164,31 @@ export type PanelModel = {
     integrated: number; total: number;
     elapsedSeconds?: number | null;
     finished?: { task: string; seconds: number }[];
+    sleepUntil?: string | null; dim?: boolean;
     slots: {
       task: string; title: string | null; stage: string; agent: string | null; model: string | null; effort: string | null;
       round: number; seconds: number; taskSeconds?: number | null; liveness: 'alive' | 'silent' | 'stopped'; mode: 'subagents' | 'sessions' | 'manual';
+      agents?: { id: string; type: string; description?: string; model?: string; effort?: string; tool: string | null; seconds: number | null; status: 'running' | 'waiting'; depth: number }[];
     }[];
     manual: { task: string; title: string | null; stage: string; seconds: number; liveness: 'alive' | 'silent' | 'stopped'; by: string }[];
     queued: string[]; conflicts: string[]; blocked: string[]; orphans: string[];
   } | null;
   proposals: { id: string; title: string; category: string; risk: string }[];
   mainModel: { model: string; effort: string | null } | null;
+  // one entry per piece of work going on: a forge task, a workflow run, superpowers, the todos, the agents without a task.
+  activities: {
+    key: string; kind: 'forge' | 'workflow' | 'superpowers' | 'todo' | 'adhoc'; owner: 'own' | 'other';
+    dim: boolean; done: boolean; slot: boolean; expanded: boolean; stopped: boolean;
+    task: string | null; project: string | null; title: string | null;
+    path: string | null; stage: string | null; round: number | null; cap: number | null;
+    verdict: { action: string; score: number | null; round?: number | null; findings?: { critical: number; important: number; minor: number } | null } | null;
+    autonomy?: 'auto';
+    job: { name: string; seconds: number | null } | null;
+    seconds: number | null;
+    agents: { id: string; type: string; description?: string; model?: string; effort?: string; tool: string | null; seconds: number | null; status: 'running' | 'waiting'; depth: number }[];
+  }[];
+  waiting: { agents: number; wakeSeconds: number | null } | null;
+  jobs: { name: string; task: string | null; seconds: number | null }[];
   usage: {
     scope: 'session' | 'run'; tokens: number; costUsd: number; partial: boolean; sessionPartial: boolean; officialUsd: number | null; drift: boolean;
     session: { tokens: number; costUsd: number } | null;
@@ -241,36 +260,50 @@ const FORGE_WINDOW_MS = 24 * 3600_000;
 const MAX_PROPOSALS = 5;
 export const PROPOSAL_ID = /^p\d{14}[0-9a-z]{4}$/;
 
+/** The forge section of one task's status: its fields without the times, its briefs and its timing (C5: of the expanded activity). */
+export function forgeOf(st: ForgeStatus, now: number, briefs: number | null = null, liveTypes: readonly string[] = []): NonNullable<PanelModel['forge']> {
+  // C4: who wrote the task's last event, its run and its project are forge's: nothing here draws them, and a session
+  // that comes and goes between events must not change the band key.
+  const { ts: _ts, taskStartedAt: _a, stageSince: _b, stages: _c, doneAt: _d, lastAt: _e, session: _s, runId: _r, project: _p, ...forge } = st;
+  // A light task the session never closed: finished at its last event, its agent gone. Not while a subagent of its
+  // agent's tier (the live subagents' types) still runs: that is a long agent, not a forgotten task.
+  const working = !!st.agent && liveTypes.some(t => tierOf(t).label === tierOf(st.agent).label);
+  const left = !working && leftOpen(st, now);
+  const timing = forgeTiming(left ? { ...st, doneAt: st.lastAt } : st, now);
+  return { ...forge, ...(left ? { agent: null } : {}), briefs, timing };
+}
+
 /**
- * The forge section from .forge/status.json (which forge keeps up to date on each ledger append): null when it does
- * not parse or validate, or when its task last saw a triage or phase event more than a day ago.
+ * The forge section from a status.json text: null when it does not parse or validate, or when its task last saw a
+ * triage or phase event more than a day ago.
  */
-export function forgeFromStatus(text: string, now: number, briefs: number | null = null, liveTypes: string[] = []): PanelModel['forge'] {
+export function forgeFromStatus(text: string, now: number, briefs: number | null = null, liveTypes: readonly string[] = []): PanelModel['forge'] {
   if (typeof text !== 'string') return null;
   let st;
   try { st = normalizeStatus(JSON.parse(text)); } catch { return null; }
   if (!st) return null;
   const t = Date.parse(st.ts);
   if (!Number.isFinite(t) || !Number.isFinite(now) || now - t > FORGE_WINDOW_MS) return null;
-  // C4: who wrote the task's last event, its run and its project are forge's: nothing here draws them, and a session
-  // that comes and goes between events must not change the band key.
-  const { ts: _ts, taskStartedAt: _a, stageSince: _b, stages: _c, doneAt: _d, lastAt: _e, session: _s, runId: _r, project: _p, ...forge } = st;
-  // A light task the session never closed: finished at its last event, its agent gone. Not while a subagent of its
-  // agent's tier (the live subagents' types) still runs: that is a long agent, not a forgotten task.
-  const working = !!st.agent && liveTypes.some(t => tierOf(t).label === tierOf(st!.agent).label);
-  const left = !working && leftOpen(st, now);
-  const timing = forgeTiming(left ? { ...st, doneAt: st.lastAt } : st, now);
-  return { ...forge, ...(left ? { agent: null } : {}), briefs, timing };
+  return forgeOf(st, now, briefs, liveTypes);
 }
 
-const LEFT_OPEN_MS = 30 * 60_000;
+/** C5: the statuses lens read (at most FORGE_STATUSES_READ, each at most FORGE_STATUS_TEXT_MAX); a junk one hides only its task. */
+export const FORGE_STATUSES_READ = 20;
+export const FORGE_STATUS_TEXT_MAX = 64 * 1024;
+function parseStatuses(texts: readonly string[]): ForgeStatus[] {
+  const out: ForgeStatus[] = [];
+  for (const text of texts.slice(0, FORGE_STATUSES_READ)) {
+    if (typeof text !== 'string' || text.length > FORGE_STATUS_TEXT_MAX) continue;
+    try { const st = normalizeStatus(JSON.parse(text)); if (st) out.push(st); } catch { /* that task only */ }
+  }
+  return out;
+}
 
-// A Trivial or Small task with no doneAt and nothing logged for over 30 minutes: the session finished it without
-// saying so (those paths log no done phase nor verdict). Medium and Large are never guessed at.
-function leftOpen(st: { path: string; doneAt: string | null; lastAt: string | null }, now: number): boolean {
-  if ((st.path !== 'trivial' && st.path !== 'small') || st.doneAt) return false;
-  const last = st.lastAt ? Date.parse(st.lastAt) : NaN;
-  return Number.isFinite(last) && Number.isFinite(now) && now - last > LEFT_OPEN_MS;
+/** The forge section when the activities could not be built: the newest status of the last day, as before C5. */
+function newestForge(statuses: readonly ForgeStatus[], now: number, briefsOf: (st: ForgeStatus) => number | null, liveTypes: readonly string[]): PanelModel['forge'] {
+  const st = [...statuses].sort((x, y) => (Date.parse(y.lastAt ?? y.ts) || 0) - (Date.parse(x.lastAt ?? x.ts) || 0))[0];
+  const t = st ? Date.parse(st.ts) : NaN;
+  return st && Number.isFinite(t) && now - t <= FORGE_WINDOW_MS ? forgeOf(st, now, briefsOf(st), liveTypes) : null;
 }
 
 /** Whole seconds from `from` to `to`; null when `from` is missing or not a date, either end is more than FUTURE_SKEW_MS ahead of now, or the span is negative. */
@@ -345,7 +378,7 @@ function secondsSince(ts: string, now: number): number {
  * by task id) and the live signals (.forge/live/*.json): null when absent, oversized, invalid or finished (a stalled
  * one stays to say why). Bad task or signal files are skipped.
  */
-export function executionFromFiles(execText: string | undefined, taskTexts: Record<string, string> = {}, liveTexts: Record<string, string> = {}, now: number, titles?: Record<string, string>): PanelModel['execution'] {
+export function executionFromFiles(execText: string | undefined, taskTexts: Record<string, string> = {}, liveTexts: Record<string, string> = {}, now: number, titles?: Record<string, string>, role?: Role): PanelModel['execution'] {
   if (typeof execText !== 'string' || execText.length > FORGE_EXEC_MAX) return null;
   const tasks: Record<string, PublicTask> = {};
   for (const [id, t] of Object.entries(taskTexts)) {
@@ -359,7 +392,7 @@ export function executionFromFiles(execText: string | undefined, taskTexts: Reco
   }
   let v;
   const clean = titles && Object.fromEntries(Object.entries(titles).map(([id, t]) => [id, cleanText(t)]));
-  try { v = executionView({ exec: parseExecution(execText, now), tasks, live, titles: clean, now }); } catch { return null; }
+  try { v = executionView({ exec: parseExecution(execText, now), tasks, live, titles: clean, now, role }); } catch { return null; }
   if (!v) return null;
   // C2: an ended run's clock stops at its last movement (never past this reader's now).
   const to = v.frozenAt ? Math.min(now, Date.parse(v.frozenAt)) : now;
@@ -379,6 +412,9 @@ export function executionFromFiles(execText: string | undefined, taskTexts: Reco
       task: s.task, title: s.title ? clip(s.title) : null, stage: s.stage, seconds: secondsSince(s.since, to), liveness: s.liveness, by: s.by ?? '',
     })),
     queued: v.queued, conflicts: v.conflicts, blocked: v.blocked, orphans: v.orphans,
+    sleepUntil: v.sleepUntil,
+    // C2: someone else's run (another live session's, or one left behind) is drawn dim; with no role known, it is not.
+    dim: role === 'other-live' || role === 'previous',
   };
 }
 const MAX_AUTO = 3;
@@ -413,17 +449,32 @@ export function infiniteFromRun(text: string | undefined, proposals: Record<stri
   return { cycle, cyclesMax: max, hoursLeft, active: run.active, autoApproved: autoApproved(proposals) };
 }
 
-/** What the band compares and keeps: the model without the seconds it never shows (finished subagents, usage time, forge timing). */
+/**
+ * What the band compares and keeps: the model without any second it never shows (E-16): the subagents', the tool's and
+ * the turn's, the run's, its slots' and their agents', the manual rows', the activities' and their agents' (and those
+ * agents' tools), the jobs' and the wait's, finished subagents and usage time. Ids, stages, rounds, verdicts, counts and
+ * cost stay.
+ */
 export function bandKey(model: PanelModel): string {
-  const { subagentsDone: _done, usage, forge, ...rest } = model;
+  const { subagentsDone: _done, usage, forge, subagents, tool, turnSeconds: _turn, activities, jobs, waiting, ...rest } = model;
   const key: Record<string, unknown> = { ...rest };
+  key.subagents = subagents.map(({ seconds: _s, ...s }) => s);
+  key.tool = tool ? { name: tool.name } : null;
+  key.activities = activities.map(({ seconds: _s, job, agents, ...a }) => ({
+    ...a, job: job ? { name: job.name } : null, agents: agents.map(({ seconds: _x, tool: _y, ...g }) => g),
+  }));
+  key.jobs = jobs.map(({ seconds: _s, ...j }) => j);
+  key.waiting = waiting ? { agents: waiting.agents } : null;
   if (usage) { const { time: _time, ...u } = usage; key.usage = u; } else key.usage = usage;
   // The forge timing's seconds are left out, but not whether the task is done: the band's phase and cells follow it.
   if (forge) { const { timing, ...f } = forge; key.forge = { ...f, done: timing?.done ?? null }; } else key.forge = forge;
-  // The run time, the task times and the finished line are seconds the band never shows.
   if (rest.execution) {
-    const { elapsedSeconds: _e, finished: _f, slots, ...x } = rest.execution;
-    key.execution = { ...x, slots: slots.map(({ taskSeconds: _t, ...s }) => s) };
+    const { elapsedSeconds: _e, finished: _f, slots, manual, ...x } = rest.execution;
+    key.execution = {
+      ...x,
+      slots: slots.map(({ taskSeconds: _t, seconds: _s, agents, ...s }) => ({ ...s, agents: (agents ?? []).map(({ seconds: _a, tool: _b, ...g }) => g) })),
+      manual: manual.map(({ seconds: _m, ...m }) => m),
+    };
   }
   return JSON.stringify(key);
 }
@@ -432,6 +483,13 @@ export function buildPanelModel(input: {
   band: BandModel; ledger?: string; ledgerPlan?: string; planFallback?: string; ledgerMtimeMs?: number;
   forgeStatus?: string; forgeRun?: string; proposals?: Record<string, string>; forgeBriefs?: number; forgeDecisions?: string;
   forgeExecution?: string; forgeExecTasks?: Record<string, string>; forgeLive?: Record<string, string>;
+  // C5: the texts of .forge/status/*.json (forgeStatus, the alias, stands in for them only without the folder), the
+  // briefs of each task by its status key, and the texts of .forge/jobs/*.json.
+  forgeStatuses?: string[]; forgeBriefsBy?: Record<string, number>; forgeJobs?: string[];
+  // What lens heard: the agents and their task, the tasks this session touched with forge.cjs, this session's id
+  // (undefined: not known, every task counts as own, as before; null: it could not be read), when its last
+  // ScheduleWakeup wakes it, and the agent the person looks at.
+  links?: readonly AgentLink[]; ownTasks?: readonly string[]; sessionId?: string | null; wakeAt?: number | null; focusAgent?: string | null;
   activity: Activity; now: number; locale?: string;
   // `officialOwnUsd`: this session's own computed cost at the moment `officialUsd` was read, for the drift check.
   usage?: { session: UsageState; run: UsageState | null; officialUsd: number | null; officialOwnUsd?: number | null };
@@ -463,6 +521,39 @@ export function buildPanelModel(input: {
       pricesAsOf: PRICES_AS_OF,
     };
   }
+  // C3: the role of who looks, as the band publishes it; lens never works it out again.
+  const viewer = band.viewer ?? { role: 'none' as const, coordinator: false, runId: null };
+  // The only plan task title the band model carries is the current one's.
+  const execution = executionFromFiles(input.forgeExecution, input.forgeExecTasks, input.forgeLive, now,
+    wp?.current ? { [wp.current.id]: wp.current.title } : undefined, runRoleOf(band));
+  const titles: Record<string, string> = {};
+  for (const s of execution?.slots ?? []) if (s.title) titles[s.task] = s.title;
+  if (wp?.current) titles[wp.current.id] = wp.current.title;
+  const sp = superpowers(input);
+  const todosModel = todos.total ? todos : null;
+  const statuses = parseStatuses(input.forgeStatuses ?? (input.forgeStatus !== undefined ? [input.forgeStatus] : []));
+  const links = input.links ?? [];
+  const liveTypes = (a.subagents ?? []).map(s => s.type);
+  const models: Models = Object.fromEntries(Object.entries(sess?.loops ?? {}).map(([id, l]) => [id, { ...(l.model ? { model: l.model } : {}), ...(l.effort ? { effort: l.effort } : {}) }]));
+  let view: ActivityView = { activities: [], waiting: null, jobs: [], expanded: null };
+  let failed = false;
+  try {
+    view = buildActivities({
+      statuses, links, execution, superpowers: sp, todos: todosModel, titles, sessionId: input.sessionId, ownTasks: input.ownTasks ?? [], viewer,
+      jobs: (input.forgeJobs ?? []).map(parseJob).filter((j): j is LensJob => j !== null), models, liveTypes, turnSince: a.turnSince ?? null,
+      wakeAt: input.wakeAt ?? null, sleepUntil: execution?.sleepUntil ?? null, focusAgent: input.focusAgent ?? null, now,
+    });
+  } catch { failed = true; }
+  // The briefs of a task: counted in its folder by key; an older forge's alias alone keeps the count read for it.
+  const briefsOf = (st: ForgeStatus): number | null =>
+    input.forgeBriefsBy?.[statusKey(st.task, st.project) ?? st.task] ?? (input.forgeStatuses === undefined ? input.forgeBriefs ?? null : null);
+  const forge = failed ? newestForge(statuses, now, briefsOf, liveTypes)
+    : view.expanded ? forgeOf(view.expanded, now, briefsOf(view.expanded), liveTypes) : null;
+  const withAgents = withSlotAgents(execution, links, models, viewer, now);
+  // A subagent drawn under its task or its slot is not drawn again among the subagents.
+  const shown = new Set(view.activities.filter(x => !x.slot && x.kind !== 'adhoc').flatMap(x => x.agents.map(g => g.id)));
+  for (const s of withAgents?.slots ?? []) for (const g of s.agents ?? []) shown.add(g.id);
+  const taskOf = new Map(links.flatMap(l => (l.task ? [[l.id, l.task] as const] : [])));
   return {
     locale: wp?.locale ?? rb?.locale ?? input.locale ?? 'en',
     waypoint: wp ? {
@@ -477,17 +568,20 @@ export function buildPanelModel(input: {
       inbox: rb.inbox, escalation: rb.escalation, roadmapUrl: rb.roadmapUrl, locale: rb.locale,
       phase: rb.phase ? { ...rb.phase, name: clip(rb.phase.name) } : null, cells: '', recentDone: [], run: true,
     } : null,
-    superpowers: superpowers(input),
-    todos: todos.total ? todos : null,
+    superpowers: sp,
+    todos: todosModel,
     subagents: (a.subagents ?? []).map(s => {
       const loop = loopOfAgent(s.id);
+      const task = taskOf.get(s.id);
       return {
-      id: s.id, type: s.type,
-      ...(s.description !== undefined ? { description: clip(s.description) } : {}),
-      ...(s.status !== undefined ? { status: s.status } : {}),
-      seconds: secs(now, s.since),
-      ...(loop?.model ? { model: loop.model } : {}),
-      ...(loop?.effort ? { effort: loop.effort } : {}),
+        id: s.id, type: s.type,
+        ...(s.description !== undefined ? { description: clip(s.description) } : {}),
+        ...(s.status !== undefined ? { status: s.status } : {}),
+        seconds: secs(now, s.since),
+        ...(loop?.model ? { model: loop.model } : {}),
+        ...(loop?.effort ? { effort: loop.effort } : {}),
+        ...(task ? { task } : {}),
+        ...(shown.has(s.id) ? { shown: true as const } : {}),
       };
     }),
     subagentsDone: freshFinished(a.finished ?? [], now).map(f => ({
@@ -498,14 +592,13 @@ export function buildPanelModel(input: {
     ccTasks: cc.length
       ? { open: cc.filter(t => !t.done).length, done: cc.filter(t => t.done).length, recent: cc.slice(-3).map(t => clip(t.subject)) }
       : null,
-    forge: input.forgeStatus !== undefined ? forgeFromStatus(input.forgeStatus, now, input.forgeBriefs ?? null, (a.subagents ?? []).map(s => s.type)) : null,
+    forge,
     infinite: infiniteFromRun(input.forgeRun, input.proposals, now),
     decisions: decisionsSummary(input.forgeDecisions, now),
-    // The only plan task title the band model carries is the current one's.
-    execution: executionFromFiles(input.forgeExecution, input.forgeExecTasks, input.forgeLive, now,
-      wp?.current ? { [wp.current.id]: wp.current.title } : undefined),
+    execution: withAgents,
     proposals: pendingProposals(input.proposals),
     mainModel: mainLoop?.model ? { model: mainLoop.model, effort: mainLoop.effort } : null,
+    activities: view.activities, waiting: view.waiting, jobs: view.jobs,
     usage,
   };
 }

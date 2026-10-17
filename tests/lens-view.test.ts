@@ -26,7 +26,7 @@ const FORGE: NonNullable<PanelModel['forge']> = {
 };
 const EMPTY: PanelModel = {
   locale: 'en', waypoint: null, superpowers: null, todos: null, subagents: [], tool: null, turnSeconds: null, ccTasks: null,
-  forge: null, infinite: null, decisions: null, execution: null, proposals: [], mainModel: null, usage: null,
+  forge: null, infinite: null, decisions: null, execution: null, proposals: [], mainModel: null, activities: [], waiting: null, jobs: [], usage: null,
 };
 const EXEC: NonNullable<PanelModel['execution']> = {
   runId: 'r1', mode: 'subagents', parallel: 3, branch: 'forge/run-shop', active: true, stopReason: null, stallReason: null,
