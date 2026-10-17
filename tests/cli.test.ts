@@ -108,11 +108,11 @@ describe('waypoint CLI', () => {
     const r = run(['sync', 'plan.yaml', '--out', '.waypoint/sync', '--known', 'known.json', '--session', 'main'], io);
     expect(r.code).toBe(0);
     const { batches } = JSON.parse(r.stdout);
-    const meta = batches[0][0];
+    const meta = batches.flat().at(-1);
     expect(meta).toMatchObject({ op: 'update', collection: 'meta', if_version: 3 });
     expect(path.isAbsolute(meta.file_path)).toBe(true);
     expect(existsSync(meta.file_path)).toBe(true);
-    expect(batches.flat().at(-1).doc_id).toBe('20261011T100000000Z-main-0000');
+    expect(batches.flat().at(-2).doc_id).toBe('20261011T100000000Z-main-0000');
   });
 
   it('sync does not re-orphan a task already orphaned in states', () => {
@@ -1766,5 +1766,44 @@ describe('page --publish-info and the sync line', () => {
     const snap = snapshotOf(run(['page', 'plan.yaml', '--out', 'r.html', '--states', 'db/state'], io).stdout.trim());
     expect(snap).toMatchObject({ pageVersion: WP, states: { T001: 'done', T002: 'in_progress' }, statesAt: '2026-10-11T09:45:00.000Z' });
     expect(snap.states).not.toHaveProperty('T003');
+  });
+});
+
+describe('sync --db (A-11, A-13, G-13, G-26)', () => {
+  const WP = (JSON.parse(readFileSync(path.join(process.cwd(), 'plugins', 'waypoint', '.claude-plugin', 'plugin.json'), 'utf8')) as { version: string }).version;
+  const list = (c: string, docs: Record<string, unknown>) => {
+    const d = path.join(dir, 'db', c);
+    mkdirSync(d, { recursive: true });
+    for (const [id, b] of Object.entries(docs)) writeFileSync(path.join(d, `${id}.json`), JSON.stringify(b));
+  };
+  const sync = (...extra: string[]) => run(['sync', 'plan.yaml', '--out', '.waypoint/sync', '--db', 'db', ...extra], { ...io, env: {} });
+  it('prints removed, missing, unknownVersion and republish; a state whose version it does not know is never set', () => {
+    list('state', { T001: { status: 'done' }, T002: { status: 'free' } });
+    list('meta', { project: { name: 'demo-shop' } });
+    writeFileSync(path.join(dir, 'known.json'), JSON.stringify({ meta: { project: 1 }, state: { T001: 4 } }));
+    const r = sync('--known', 'known.json');
+    expect(r.code).toBe(0);
+    const o = JSON.parse(r.stdout);
+    expect(o).toMatchObject({ removed: [], missing: ['T003', 'T004', 'T005', 'T006'], unknownVersion: ['T002'], republish: true });
+    expect(o.batches.flat().some((w: { collection: string; doc_id: string }) => w.collection === 'state' && w.doc_id === 'T002')).toBe(false);
+    expect(o.batches.flat().at(-1)).toMatchObject({ collection: 'meta', doc_id: 'project' });
+  });
+  it('republish is false once meta/page says this version, and true when it is older (G-13)', () => {
+    list('meta', { page: { version: WP, rules: 2, publishedAt: 'T' } });
+    expect(JSON.parse(sync().stdout).republish).toBe(false);
+    list('meta', { page: { version: '0.1.0', rules: 2, publishedAt: 'T' } });
+    expect(JSON.parse(sync().stdout).republish).toBe(true);
+  });
+  it('a listing of 1000 documents may be cut: exit 2 (G-26)', () => {
+    list('state', Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [`X${i}`, { status: 'free' }])));
+    const r = sync();
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('truncated');
+  });
+  it('a state the sync has to write but whose version known.json lacks: exit 2, asking to list again (A-11)', () => {
+    list('state', { T999: { status: 'done' } });
+    const r = sync();
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('state/T999');
   });
 });

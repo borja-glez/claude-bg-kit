@@ -79,6 +79,8 @@ export interface TaskState {
   blockedBy?: string[];
   /** Why it is blocked, as `waypoint block --why-file` wrote it (at most 300 characters, one line). */
   blockedReason?: string;
+  /** A-12: what the task was when the plan dropped it (orphaned); a done task comes back done. */
+  prevStatus?: TaskStatus;
   commits?: Commit[];
   summary?: string;
   zonesTouched?: string[];

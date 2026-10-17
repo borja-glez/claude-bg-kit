@@ -20,7 +20,7 @@ import { excludeWorktrees } from '../lib/git-info.js';
 import { isCommitCommand, runHook } from './hooks.js';
 import { launchRun, EFFORTS, MODELS, type Launcher, type Effort, type Model } from '../lib/launcher.js';
 import { PAGE_RULES, roadmapCapabilities, sharingNotice, syncSummary } from '../lib/publish.js';
-import { WAYPOINT_VERSION } from '../lib/waypoint-version.js';
+import { compareVersions, WAYPOINT_VERSION } from '../lib/waypoint-version.js';
 import { TASK_STATUSES } from '../lib/types.js';
 import { claudeSessionId, noClaudeSession } from '../lib/claude-session.js';
 import { blockBatch, claimBatch, cleanText, doneBatch, freeBatch, heartbeatBatch, registerBatch, REASON_MAX, SUMMARY_MAX } from '../lib/batches.js';
@@ -153,15 +153,35 @@ export function run(argv: string[], io: Io): Result {
         const session = flag('session') ?? 'main';
         const now = io.now();
         const outDir = abs(flag('out') ?? '.waypoint/sync');
-        const { files, batches } = buildSyncWrites(p, known, outDir, {
+        // A-11, G-13, G-26: with --db (the listings of the roadmap) a document it holds is never set, what is missing is
+        // named, a listing that may be cut stops the sync, and a page older than this waypoint asks to republish.
+        const db = flag('db');
+        let listed: string[] | undefined;
+        let republish = false;
+        if (db) {
+          for (const c of ['state', 'plan', 'meta']) {
+            if (jsonFiles(path.join(abs(db), c)).length >= LIST_LIMIT) {
+              return fail(`sync: the listing of ${c} may be truncated (${LIST_LIMIT} documents, the most one list returns): split the plan before syncing it`, 2);
+            }
+          }
+          listed = jsonFiles(path.join(abs(db), 'state')).map(f => f.slice(0, -5));
+          const page = readDocs<{ version?: unknown }>(path.join(abs(db), 'meta')).page;
+          republish = !page || compareVersions(page.version, WAYPOINT_VERSION) < 0;
+        }
+        const statesDir = flag('states') ?? (db ? path.join(db, 'state') : undefined);
+        const r = buildSyncWrites(p, known, outDir, {
           nowIso: now.toISOString(),
           sessionId: session,
           eventId: eventId(now, session, io.rand),
-          states: readDocs<TaskState>(flag('states') && abs(flag('states')!)),
+          states: readDocs<TaskState>(statesDir && abs(statesDir)),
+          ...(listed ? { listed } : {}),
         });
+        if (r.needsList.length) {
+          return fail(`sync: known.json has no version of ${r.needsList.map(id => `state/${id}`).join(', ')}, which this sync has to write: list state again and write known.json from that listing`, 2);
+        }
         mkdirSync(outDir, { recursive: true });
-        for (const [file, body] of Object.entries(files)) writeFileSync(file, JSON.stringify(body, null, 2));
-        return ok(JSON.stringify({ batches, say: syncSummary(p) }));
+        for (const [file, body] of Object.entries(r.files)) writeFileSync(file, JSON.stringify(body, null, 2));
+        return ok(JSON.stringify({ batches: r.batches, say: syncSummary(p), removed: r.removed, missing: r.missing, unknownVersion: r.unknownVersion, republish }));
       }
       case 'next': {
         const session = flag('session');
@@ -866,6 +886,10 @@ function statesOf(dir: string): { states: Record<string, TaskStatus>; at: string
   }
   return Object.keys(states).length ? { states, at: new Date(newest).toISOString() } : null;
 }
+
+/** G-26: the roadmap lists at most this many documents per call, with no cursor. */
+const LIST_LIMIT = 1000;
+const jsonFiles = (dir: string): string[] => (existsSync(dir) ? readdirSync(dir).filter(f => f.endsWith('.json')) : []);
 
 // forge uploads its verification screenshots to the roadmap (the `assets` capability) when the repository has a .forge/
 // directory and its config does not say `evidence: local`. An unreadable config counts as forge's default, upload.

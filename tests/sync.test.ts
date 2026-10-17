@@ -54,7 +54,8 @@ describe('buildSyncWrites', () => {
     expect(writes.filter(w => w.collection === 'plan').every(w => w.op === 'set' && w.if_version === undefined)).toBe(true);
     expect(writes.filter(w => w.collection === 'state')).toHaveLength(6);
     expect(writes.find(w => w.collection === 'state')).toMatchObject({ op: 'set', data: { status: 'free' } });
-    expect(writes.at(-1)).toMatchObject({ op: 'set', collection: 'events', doc_id: 'E1', data: { type: 'plan_changed', sessionId: 'main' } });
+    expect(writes.at(-2)).toMatchObject({ op: 'set', collection: 'events', doc_id: 'E1', data: { type: 'plan_changed', sessionId: 'main' } });
+    expect(writes.at(-1)).toMatchObject({ collection: 'meta', doc_id: 'project' });
     expect(Object.keys(files)).toEqual(['/tmp/out/meta.json', '/tmp/out/plan-F1.json', '/tmp/out/plan-F2.json']);
   });
 
@@ -97,6 +98,8 @@ describe('buildSyncWrites fix round 1', () => {
         startedAt: { __delete__: true },
         doneAt: { __delete__: true },
         blockedBy: { __delete__: true },
+        blockedReason: { __delete__: true },
+        prevStatus: { __delete__: true },
       },
       if_version: 7,
     });
@@ -116,6 +119,39 @@ describe('buildSyncWrites fix round 1', () => {
     expect(planWrite.doc_id).toBe('F:1');
     expect(planWrite.file_path!.endsWith('plan-F_1.json')).toBe(true);
     expect(Object.keys(files).some(p => p.endsWith('plan-F_1.json'))).toBe(true);
+  });
+});
+
+describe('buildSyncWrites with the listing of the roadmap (A-11, A-12, A-13)', () => {
+  const known = { meta: { project: 4 }, plan: { F1: 2, F2: 2 }, state: { T001: 7, T002: 3, T999: 5 } };
+  it('a state the listing has and known.json lacks gets no set; one that has to be written asks for the list again (A-11)', () => {
+    const listed = ['T001', 'T002', 'T003', 'T999'];
+    const r = buildSyncWrites(plan, known, '/o', { ...opts, listed, states: { T003: { status: 'free' } } as States });
+    expect(r.batches.flat().some(w => w.collection === 'state' && w.doc_id === 'T003')).toBe(false);
+    expect(r.unknownVersion).toEqual(['T003']);
+    expect(r.needsList).toEqual([]);
+    expect(buildSyncWrites(plan, known, '/o', { ...opts, listed, states: { T003: { status: 'orphaned' } } as States }).needsList).toEqual(['T003']);
+    const gone = buildSyncWrites(plan, known, '/o', { ...opts, listed: [...listed, 'T777'], states: { T777: { status: 'done' } } as States });
+    expect(gone.unknownVersion).toContain('T777');
+    expect(gone.needsList).toEqual(['T777']);
+  });
+  it('a task the plan drops keeps what it was; back in the plan, a done one is done again with its commits (A-12)', () => {
+    const r = buildSyncWrites(plan, known, '/o', { ...opts, states: { T999: { status: 'done', doneAt: 'd', commits: [{ sha: 'a' }] } } as unknown as States });
+    expect(r.batches.flat().find(w => w.doc_id === 'T999')).toEqual({ op: 'update', collection: 'state', doc_id: 'T999', data: { status: 'orphaned', prevStatus: 'done' }, if_version: 5 });
+    expect(r.removed).toEqual(['T999']);
+    const back = buildSyncWrites(plan, known, '/o', { ...opts, states: { T001: { status: 'orphaned', prevStatus: 'done', doneAt: 'd' } } as unknown as States });
+    expect(back.batches.flat().find(w => w.doc_id === 'T001')).toEqual({ op: 'update', collection: 'state', doc_id: 'T001', data: { status: 'done', prevStatus: { __delete__: true } }, if_version: 7 });
+    expect(back.removed).toEqual(['T999']);
+  });
+  it('meta/project goes in the last batch; missing lists the plan tasks the listing does not have (A-13)', () => {
+    const big = { ...plan, tasks: Array.from({ length: 60 }, (_, i) => ({ ...plan.tasks[0], id: `T${1000 + i}`, depends_on: [] })) };
+    const r = buildSyncWrites(big, {}, '/o', { ...opts, listed: ['T1000', 'T1001'] });
+    expect(r.batches.length).toBeGreaterThanOrEqual(2);
+    expect(r.batches.at(-1)!.at(-1)).toMatchObject({ collection: 'meta', doc_id: 'project' });
+    expect(r.batches.slice(0, -1).flat().some(w => w.collection === 'meta')).toBe(false);
+    expect(r.missing).toHaveLength(58);
+    expect(r.missing).not.toContain('T1000');
+    expect(buildSyncWrites(big, {}, '/o', opts).missing).toEqual([]);
   });
 });
 
