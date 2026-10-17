@@ -68,7 +68,7 @@ const en = {
   nfilter: { all: 'All', decision: 'Decisions', idea: 'Ideas', debt: 'Debt', open: 'Open questions', mine: 'Mine' },
   notePlaceholder: 'Write a note… (Claude will see it on its next task)', noteTypeLabel: 'Type', add: 'Add',
   you: 'you', someUser: 'user', aUser: 'a user', claude: 'Claude', reply: 'Reply', send: 'Send', answerPlaceholder: 'Your answer…', answeredBy: 'Answer',
-  notice: { readonly: 'Read-only: you cannot write on this page', failed: 'Could not save — your text is kept', answered: 'Already answered — your text is kept', decided: 'This proposal was already decided — nothing was changed' },
+  notice: { readonly: 'Read-only: you cannot write on this page', failed: 'Could not save — your text is kept', answered: 'Already answered — your text is kept', decided: 'This proposal was already decided — nothing was changed', owner: 'Only the roadmap’s owner decides proposals', changed: 'This proposal changed while you were reading it — read it again; nothing was saved' },
   noNotes: 'No notes yet', notesSec: 'Notes',
   autoTag: 'auto', yoursTag: 'yours', decisionChosen: 'Chosen:', decisionWhy: 'Why:', decisionRevert: 'How to undo:',
   noProposals: 'No proposals match the filters',
@@ -78,6 +78,7 @@ const en = {
   pfilter: { status: 'Status', category: 'Category', risk: 'Risk', all: 'All' },
   pfield: { pillar: 'Pillar', evidence: 'Evidence', estimate: 'Estimate', path: 'Path', comments: 'Comments', decided: 'Decided by' },
   approve: 'Approve', reject: 'Reject', comment: 'Comment', sendReject: 'Reject', reasonPlaceholder: 'Why? (optional)', commentPlaceholder: 'Your comment…',
+  owner: { onlyOwner: 'Only the roadmap’s owner decides proposals; your comment reaches them', noMark: 'without the owner’s mark · it will not become a task', confirm: 'Confirm' },
   verify: { title: 'Verification', localOnly: (n: number) => `${n} shots (local only)`, pending: 'upload pending', blocked: 'blocked', shots: 'shots', expected: 'Expected', observed: 'Observed' },
   forge: { title: 'forge', agent: 'Agent', validators: 'Validators', verdict: 'Verdict', round: 'Round', noResult: 'no result' },
   run: {
@@ -164,7 +165,7 @@ const es: Dict = {
   nfilter: { all: 'Todas', decision: 'Decisiones', idea: 'Ideas', debt: 'Deuda', open: 'Preguntas abiertas', mine: 'Mías' },
   notePlaceholder: 'Escribe una nota… (Claude la verá en su siguiente tarea)', noteTypeLabel: 'Tipo', add: 'Añadir',
   you: 'tú', someUser: 'usuario', aUser: 'un usuario', claude: 'Claude', reply: 'Responder', send: 'Enviar', answerPlaceholder: 'Tu respuesta…', answeredBy: 'Respuesta',
-  notice: { readonly: 'Modo solo lectura: no puedes escribir en esta página', failed: 'No se pudo guardar — tu texto se conserva', answered: 'Pregunta ya respondida — tu texto se conserva', decided: 'Esta propuesta ya estaba decidida — no se ha cambiado nada' },
+  notice: { readonly: 'Modo solo lectura: no puedes escribir en esta página', failed: 'No se pudo guardar — tu texto se conserva', answered: 'Pregunta ya respondida — tu texto se conserva', decided: 'Esta propuesta ya estaba decidida — no se ha cambiado nada', owner: 'Solo el dueño del roadmap decide las propuestas', changed: 'Esta propuesta ha cambiado mientras la leías — vuelve a leerla; no se ha guardado nada' },
   noNotes: 'Aún no hay notas', notesSec: 'Notas',
   autoTag: 'auto', yoursTag: 'tuya', decisionChosen: 'Elegido:', decisionWhy: 'Por qué:', decisionRevert: 'Cómo revertir:',
   noProposals: 'Ninguna propuesta coincide con los filtros',
@@ -174,6 +175,7 @@ const es: Dict = {
   pfilter: { status: 'Estado', category: 'Categoría', risk: 'Riesgo', all: 'Todas' },
   pfield: { pillar: 'Pilar', evidence: 'Evidencia', estimate: 'Estimación', path: 'Ruta', comments: 'Comentarios', decided: 'Decidida por' },
   approve: 'Aprobar', reject: 'Rechazar', comment: 'Comentar', sendReject: 'Rechazar', reasonPlaceholder: '¿Por qué? (opcional)', commentPlaceholder: 'Tu comentario…',
+  owner: { onlyOwner: 'Solo el dueño del roadmap decide las propuestas; tu comentario le llega', noMark: 'sin la marca del dueño · no se convertirá en tarea', confirm: 'Confirmar' },
   verify: { title: 'Verificación', localOnly: (n: number) => `${n} capturas (solo en local)`, pending: 'subida pendiente', blocked: 'bloqueada', shots: 'capturas', expected: 'Esperado', observed: 'Observado' },
   forge: { title: 'forge', agent: 'Agente', validators: 'Validadores', verdict: 'Veredicto', round: 'Ronda', noResult: 'sin resultado' },
   run: {

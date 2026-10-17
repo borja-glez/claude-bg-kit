@@ -1,9 +1,12 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parsePlan } from '../src/lib/plan.js';
 import { buildDocs } from '../src/lib/sync.js';
+import { normalizeApproval, normalizeProposal, ownerApproved, ownerCheck, proposalDigest } from '../src/lib/proposals.js';
+import { run as forgeCli } from '../src/forge/cli/run.js';
 import { start, type Snapshot } from '../src/page/app.js';
 
 const plan = parsePlan(readFileSync(join(process.cwd(), 'tests', 'fixtures', 'plan.yaml'), 'utf8'));
@@ -21,6 +24,7 @@ function fakeDb() {
   const add = vi.fn(async (_data: unknown) => ({ id: 'new' }));
   const get = vi.fn(async (p: string) => ({ exists: p in stored, data: () => stored[p] }));
   const update = vi.fn(async (_p: string, _data: unknown) => {});
+  const set = vi.fn(async (_p: string, _data: unknown) => {});
   const query = (path: string) => {
     const q = {
       orderBy: () => q,
@@ -29,12 +33,13 @@ function fakeDb() {
       add: (data: unknown) => add(data),
       get: () => get(path),
       update: (data: unknown) => update(path, data),
+      set: (data: unknown) => set(path, data),
     };
     return q;
   };
   const docs = (rows: Record<string, unknown>) => ({ docs: Object.entries(rows).map(([id, body]) => ({ id, exists: true, data: () => body })) });
   return {
-    add, get, update, stored,
+    add, get, update, set, stored,
     db: { doc: (p: string) => query(p), collection: (p: string) => query(p) },
     push: (path: string, rows: Record<string, unknown>) => subs.get(path)!(path.startsWith('meta/') ? { exists: true, data: () => rows } : docs(rows)),
     fail: (path: string) => errs.get(path)!({ code: 'revoked', message: 'x' }),
@@ -102,7 +107,7 @@ describe('start', () => {
     const f = fakeDb();
     const root = document.createElement('div');
     const app = await start({ claude: { use: async () => f.db }, snapshot, root, now: () => NOW });
-    expect([...f.subs.keys()].sort()).toEqual(['events', 'messages', 'meta/infinite', 'meta/metrics', 'meta/project', 'meta/run', 'notes', 'plan', 'proposals', 'sessions', 'state']);
+    expect([...f.subs.keys()].sort()).toEqual(['approvals', 'events', 'messages', 'meta/infinite', 'meta/metrics', 'meta/project', 'meta/run', 'notes', 'plan', 'proposals', 'sessions', 'state']);
     f.push('state', { T001: { status: 'done', startedAt: '2026-10-11T10:00:00Z', doneAt: '2026-10-11T10:30:00Z' } });
     await flush();
     expect(root.innerHTML).toContain('17 %');
@@ -725,9 +730,11 @@ describe('notes', () => {
 
 const PROP = { ts: '2026-10-11T10:00:00.000Z', category: 'perf', risk: 'low', title: 'Cache prices', rationale: 'why', evidence: 'bench', pillar: 'Fast checkout', status: 'proposed', source: 'scout', author: 'session:abc' };
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+/** C2: the digest of PROP as p1, over its normalized content, as forge computes it. */
+const DIG1 = proposalDigest('p1', normalizeProposal(PROP)!);
 
 describe('proposals', () => {
-  async function bootProposals(f: ReturnType<typeof fakeDb>, user: unknown = fakeUser()) {
+  async function bootProposals(f: ReturnType<typeof fakeDb>, user: unknown = fakeUser({ isOwner: vi.fn(async () => true) })) {
     const r = await boot(f, user);
     f.push('proposals', { p1: PROP, bad: { title: 'x' } });
     click(r.root, '[data-view="talk"]');
@@ -755,6 +762,10 @@ describe('proposals', () => {
     expect(f.update).toHaveBeenCalledTimes(1);
     expect(f.update.mock.calls[0]![0]).toBe('proposals/p1');
     expect(f.update.mock.calls[0]![1]).toEqual({ status: 'approved', decidedBy: 'user:u1', decidedAt: expect.stringMatching(ISO) });
+    // §4.1: the owner's mark first, then the proposal; C2: it carries the digest of the text it approves.
+    expect(f.set).toHaveBeenCalledWith('approvals/p1', { status: 'approved', decidedAt: expect.stringMatching(ISO), by: 'page', digest: DIG1 });
+    expect(f.set.mock.invocationCallOrder[0]!).toBeLessThan(f.update.mock.invocationCallOrder[0]!);
+    expect((f.set.mock.calls[0]![1] as { decidedAt: string }).decidedAt).toBe((f.update.mock.calls[0]![1] as { decidedAt: string }).decidedAt);
     expect(f.get.mock.invocationCallOrder[0]!).toBeLessThan(f.update.mock.invocationCallOrder[0]!);
     expect(app.ui.notice).toBeNull();
     app.stop();
@@ -796,6 +807,7 @@ describe('proposals', () => {
     click(root, '[data-action="p-reject-send"][data-id="p1"]');
     await settle();
     expect(f.update).toHaveBeenCalledTimes(1);
+    expect(f.set).toHaveBeenCalledWith('approvals/p1', { status: 'rejected', decidedAt: expect.stringMatching(ISO), by: 'page', digest: DIG1 });
     expect(f.update.mock.calls[0]![1]).toEqual({ status: 'rejected', decidedBy: 'user:u1', decidedAt: expect.stringMatching(ISO), reason: 'no ahora' });
     expect(app.ui.rejecting).toBeNull();
     expect(app.ui.reasonDraft).toBe('');
@@ -865,11 +877,12 @@ describe('proposals', () => {
     const { root, app } = await bootProposals(f);
     app.ui.reasonDraft = 'x';
     app.ui.commentDraft = 'x';
-    for (const action of ['p-approve', 'p-reject-send', 'p-comment-send']) {
+    for (const action of ['p-approve', 'p-reject-send', 'p-comment-send', 'p-confirm']) {
       for (const id of ['../meta/project', 'p9', 'p1/x']) { inject(root, action, id); await settle(); }
     }
     expect(f.get).not.toHaveBeenCalled();
     expect(f.update).not.toHaveBeenCalled();
+    expect(f.set).not.toHaveBeenCalled();
     expect(f.add).not.toHaveBeenCalled();
     app.stop();
   });
@@ -883,6 +896,7 @@ describe('proposals', () => {
     await settle();
     expect(f.get).not.toHaveBeenCalled();
     expect(f.update).not.toHaveBeenCalled();
+    expect(f.set).not.toHaveBeenCalled();
     app.stop();
   });
 
@@ -922,6 +936,237 @@ describe('proposals', () => {
     ta.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
     await settle();
     expect(root.innerHTML).toContain('llega-durante');
+    app.stop();
+  });
+
+  it('someone who is not the owner sees no Approve or Reject, and a forged click writes nothing (§4.1)', async () => {
+    const f = fakeDb();
+    f.stored['proposals/p1'] = { ...PROP };
+    const { root, app } = await bootProposals(f, fakeUser());
+    expect(app.model.isOwner).toBe(false);
+    expect(root.innerHTML).not.toContain('data-action="p-approve"');
+    expect(root.innerHTML).toContain('data-action="p-comment-open"');
+    expect(root.innerHTML).toContain('Solo el dueño del roadmap decide');
+    inject(root, 'p-approve', 'p1');
+    await settle();
+    expect(f.get).not.toHaveBeenCalled();
+    expect(f.set).not.toHaveBeenCalled();
+    expect(f.update).not.toHaveBeenCalled();
+    app.ui.reasonDraft = 'x';
+    inject(root, 'p-reject-send', 'p1');
+    await settle();
+    f.push('proposals', { p1: { ...PROP, status: 'approved' } });
+    f.push('approvals', {});
+    await settle();
+    expect(root.innerHTML).toContain('sin la marca del dueño');
+    expect(root.innerHTML).not.toContain('data-action="p-confirm"');
+    inject(root, 'p-confirm', 'p1');
+    await settle();
+    expect(f.get).not.toHaveBeenCalled();
+    expect(f.set).not.toHaveBeenCalled();
+    expect(f.update).not.toHaveBeenCalled();
+    app.stop();
+  });
+
+  it('isOwner that throws or says something else counts as not the owner', async () => {
+    for (const isOwner of [vi.fn(async () => { throw new Error('x'); }), vi.fn(async () => 'yes'), vi.fn(() => null)]) {
+      const { app } = await bootProposals(fakeDb(), fakeUser({ isOwner }));
+      expect(app.model.isOwner).toBe(false);
+      app.stop();
+    }
+  });
+
+  it('when the database refuses the mark, the proposal is not touched and the page says only the owner decides (§4.11)', async () => {
+    const f = fakeDb();
+    f.stored['proposals/p1'] = { ...PROP };
+    f.set.mockRejectedValueOnce(Object.assign(new Error('nope'), { code: 'invalid_argument' }));
+    const { root, app } = await bootProposals(f);
+    click(root, '[data-action="p-approve"][data-id="p1"]');
+    await settle();
+    expect(f.set).toHaveBeenCalledTimes(1);
+    expect(f.update).not.toHaveBeenCalled();
+    expect(app.ui.notice).toBe('owner');
+    expect(root.innerHTML).toContain('Solo el dueño del roadmap decide las propuestas');
+    expect(app.model.proposalsReadOnly).toBeFalsy();
+    app.stop();
+  });
+
+  it('any other failure of the mark leaves the proposal alone too, and says it could not save', async () => {
+    const f = fakeDb();
+    f.stored['proposals/p1'] = { ...PROP };
+    f.set.mockRejectedValueOnce(new Error('network'));
+    const { root, app } = await bootProposals(f);
+    click(root, '[data-action="p-approve"][data-id="p1"]');
+    await settle();
+    expect(f.set).toHaveBeenCalledTimes(1);
+    expect(f.update).not.toHaveBeenCalled();
+    expect(app.ui.notice).toBe('failed');
+    app.stop();
+  });
+
+  it('the owner confirms an approval of before this wave: only approvals/ is written, with the proposal’s status', async () => {
+    const f = fakeDb();
+    const { root, app } = await bootProposals(f);
+    f.push('proposals', { p1: { ...PROP, status: 'auto_approved' } });
+    f.push('approvals', {});
+    await settle();
+    expect(root.innerHTML).toContain('sin la marca del dueño');
+    click(root, '[data-action="p-confirm"][data-id="p1"]');
+    await settle();
+    expect(f.set).toHaveBeenCalledWith('approvals/p1', { status: 'auto_approved', decidedAt: expect.stringMatching(ISO), by: 'page', digest: DIG1 });
+    expect(f.get).not.toHaveBeenCalled();
+    expect(f.update).not.toHaveBeenCalled();
+    // The mark it wrote is one the page's own subscription keeps.
+    f.push('approvals', { p1: f.set.mock.calls[0]![1] });
+    await settle();
+    expect(root.innerHTML).not.toContain('sin la marca del dueño');
+    expect(root.innerHTML).not.toContain('data-action="p-confirm"');
+    // Confirmed already: a forged second click writes nothing.
+    inject(root, 'p-confirm', 'p1');
+    await settle();
+    expect(f.set).toHaveBeenCalledTimes(1);
+    app.stop();
+  });
+
+  it('a mark of older text does not count: [Confirmar] binds the text the proposal has now (C3)', async () => {
+    const f = fakeDb();
+    const { root, app } = await bootProposals(f);
+    const edited = { ...PROP, status: 'approved', rationale: 'why, edited after the approval' };
+    f.push('proposals', { p1: edited });
+    f.push('approvals', { p1: { status: 'approved', decidedAt: '2026-10-11T10:00:00.000Z', by: 'page', digest: DIG1 } });
+    await settle();
+    expect(app.model.approvals?.p1?.digest).toBe(DIG1);
+    expect(root.innerHTML).toContain('sin la marca del dueño');
+    click(root, '[data-action="p-confirm"][data-id="p1"]');
+    await settle();
+    const now = proposalDigest('p1', normalizeProposal(edited)!);
+    expect(now).not.toBe(DIG1);
+    expect(f.set).toHaveBeenCalledWith('approvals/p1', { status: 'approved', decidedAt: expect.stringMatching(ISO), by: 'page', digest: now });
+    f.push('approvals', { p1: f.set.mock.calls[0]![1] });
+    await settle();
+    expect(root.innerHTML).not.toContain('sin la marca del dueño');
+    app.stop();
+  });
+
+  it('a mark of another status does not count either; a proposed one is never confirmed (C3)', async () => {
+    const f = fakeDb();
+    const { root, app } = await bootProposals(f);
+    f.push('proposals', { p1: { ...PROP, status: 'approved' }, p2: { ...PROP, ts: '2026-10-11T09:00:00.000Z' } });
+    f.push('approvals', { p1: { status: 'rejected', decidedAt: '2026-10-11T10:00:00.000Z', by: 'page', digest: DIG1 } });
+    await settle();
+    inject(root, 'p-confirm', 'p2');
+    await settle();
+    expect(f.set).not.toHaveBeenCalled();
+    click(root, '[data-action="p-confirm"][data-id="p1"]');
+    await settle();
+    expect(f.set).toHaveBeenCalledTimes(1);
+    expect(f.set).toHaveBeenCalledWith('approvals/p1', { status: 'approved', decidedAt: expect.stringMatching(ISO), by: 'page', digest: DIG1 });
+    app.stop();
+  });
+
+  it('the mark the page writes is the one forge computes and counts (C2)', async () => {
+    const pid = 'p20261011100000abcd';
+    // Whitespace the normalizer collapses: the digest is of the normalized proposal, never of the raw document.
+    const doc = { ...PROP, title: '  Cache\n  prices ', status: 'approved', decidedBy: 'user:u1', decidedAt: '2026-10-11T10:30:00.000Z', estimate: '2h', path: 'src/prices.ts' };
+    const f = fakeDb();
+    const { root, app } = await bootProposals(f);
+    f.push('proposals', { [pid]: doc });
+    f.push('approvals', {});
+    await settle();
+    click(root, `[data-action="p-confirm"][data-id="${pid}"]`);
+    await settle();
+    expect(f.set).toHaveBeenCalledTimes(1);
+    expect(f.set.mock.calls[0]![0]).toBe(`approvals/${pid}`);
+    const written = f.set.mock.calls[0]![1] as Record<string, unknown>;
+    expect(written.digest).toMatch(/^[0-9a-f]{64}$/);
+    // forge's own `proposals decide <pid> confirm --from <doc>` on the same document.
+    const dir = mkdtempSync(join(tmpdir(), 'page-mark-'));
+    writeFileSync(join(dir, 'db.json'), JSON.stringify(doc));
+    const r = forgeCli(['proposals', 'decide', pid, 'confirm', '--from', 'db.json'], { cwd: dir, now: () => new Date(NOW), env: {} });
+    expect(r.code).toBe(0);
+    const forge = (JSON.parse(r.stdout) as { approval: { data: { status: string; digest: string } } }).approval.data;
+    expect(written.digest).toBe(forge.digest);
+    expect(written.status).toBe(forge.status);
+    const p = normalizeProposal(doc)!;
+    expect(written.digest).toBe(proposalDigest(pid, p));
+    expect(written.digest).not.toBe(proposalDigest(pid, doc as never));
+    // A mark forge counts, and one normalizeApproval keeps as it is.
+    const mark = normalizeApproval(written);
+    expect(mark).toEqual(written);
+    expect(ownerCheck(pid, p, mark)).toBe('ok');
+    expect(ownerApproved(pid, p, mark)).toBe(true);
+    f.push('approvals', { [pid]: written });
+    await settle();
+    expect(app.model.approvals?.[pid]).toEqual(written);
+    expect(root.innerHTML).not.toContain('sin la marca del dueño');
+    app.stop();
+  });
+
+  it('deciding binds the normalized text it re-read, and that mark is one forge counts (C2)', async () => {
+    const f = fakeDb();
+    f.stored['proposals/p1'] = { ...PROP, title: '  Cache\n  prices ' };
+    const { root, app } = await bootProposals(f);
+    click(root, '[data-action="p-approve"][data-id="p1"]');
+    await settle();
+    const written = f.set.mock.calls[0]![1] as Record<string, unknown>;
+    expect(written).toEqual({ status: 'approved', decidedAt: expect.stringMatching(ISO), by: 'page', digest: DIG1 });
+    const decided = normalizeProposal({ ...f.stored['proposals/p1'], ...(f.update.mock.calls[0]![1] as object) })!;
+    expect(decided.status).toBe('approved');
+    expect(ownerCheck('p1', decided, normalizeApproval(written))).toBe('ok');
+    app.stop();
+  });
+
+  it('a proposal whose text changed since the page showed it is not decided: the owner decides only what they read', async () => {
+    const f = fakeDb();
+    f.stored['proposals/p1'] = { ...PROP, evidence: 'other evidence, written meanwhile' };
+    const { root, app } = await bootProposals(f);
+    click(root, '[data-action="p-approve"][data-id="p1"]');
+    await settle();
+    expect(f.get).toHaveBeenCalledWith('proposals/p1');
+    expect(f.set).not.toHaveBeenCalled();
+    expect(f.update).not.toHaveBeenCalled();
+    expect(app.ui.notice).toBe('changed');
+    expect(root.innerHTML).toContain('Esta propuesta ha cambiado mientras la leías');
+    app.stop();
+  });
+
+  it('a rejection replaces the whole mark: an older auto_approved one leaves nothing behind', async () => {
+    const f = fakeDb();
+    // A proposal reopened after forge's policy auto-approved it: proposed again, with the old mark still there.
+    f.stored['proposals/p1'] = { ...PROP };
+    f.stored['approvals/p1'] = { status: 'auto_approved', decidedAt: '2026-10-11T09:00:00.000Z', by: 'forge:policy', digest: DIG1, extra: 'x' };
+    f.set.mockImplementation(async (p: string, data: unknown) => { f.stored[p] = data as Record<string, unknown>; });
+    const { root, app } = await bootProposals(f);
+    f.push('approvals', { p1: f.stored['approvals/p1'] });
+    await settle();
+    click(root, '[data-action="p-reject-open"][data-id="p1"]');
+    await settle();
+    click(root, '[data-action="p-reject-send"][data-id="p1"]');
+    await settle();
+    expect(f.set).toHaveBeenCalledTimes(1);
+    expect(f.stored['approvals/p1']).toEqual({ status: 'rejected', decidedAt: expect.stringMatching(ISO), by: 'page', digest: DIG1 });
+    expect(f.update.mock.calls.map(c => c[0])).toEqual(['proposals/p1']);
+    // Read back, the rejected mark backs no approval: a later auto_approved status would still lack the owner's mark.
+    const mark = normalizeApproval(f.stored['approvals/p1']);
+    expect(ownerCheck('p1', { ...normalizeProposal(PROP)!, status: 'auto_approved' }, mark)).toBe('no-mark');
+    app.stop();
+  });
+
+  it('only well-formed marks under an id without a path separator count', async () => {
+    const f = fakeDb();
+    const { app } = await bootProposals(f);
+    const ok = { status: 'approved', decidedAt: '2026-10-11T10:00:00.000Z', by: 'page', digest: DIG1 };
+    f.push('approvals', {
+      p1: ok,
+      'p1/x': ok,
+      p2: { ...ok, digest: undefined },
+      p3: { ...ok, digest: 'ABC' },
+      p4: { ...ok, by: 'user:u1' },
+      p5: { ...ok, status: 'discussing' },
+      p6: null,
+    });
+    await settle();
+    expect(app.model.approvals).toEqual({ p1: ok });
     app.stop();
   });
 });
@@ -1012,7 +1257,8 @@ describe('scroll, tick and live repaints (G-01, H-06)', () => {
   });
   it('a newer proposal arriving above a focused Approve leaves the focus on the Approve of its own proposal (H-06)', async () => {
     const f = fakeDb();
-    const { root, app } = await boot(f, fakeUser());
+    // §4.1: Approve is the owner's.
+    const { root, app } = await boot(f, fakeUser({ isOwner: vi.fn(async () => true) }));
     f.push('proposals', { p1: PROP });
     click(root, '[data-view="talk"]');
     await settle();

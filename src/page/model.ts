@@ -3,7 +3,7 @@
 import type { EventDoc, InfiniteDoc, MessageDoc, MetaDoc, NoteDoc, NoteType, PlanStatus, PlanView, RunDoc, SessionDoc, States, TaskStatus } from '../lib/types.js';
 import type { GroupBy, Zoom } from '../lib/timeline.js';
 import type { NoteFilter } from '../lib/notes.js';
-import { PROPOSAL_CATEGORIES, PROPOSAL_RISKS, type ProposalCategory, type ProposalDoc, type ProposalRisk, type ProposalStatus } from '../lib/proposals.js';
+import { PROPOSAL_CATEGORIES, PROPOSAL_RISKS, type ApprovalDoc, type ProposalCategory, type ProposalDoc, type ProposalRisk, type ProposalStatus } from '../lib/proposals.js';
 import type { Drop } from './normalize.js';
 
 export interface Model {
@@ -15,6 +15,10 @@ export interface Model {
   messages: (MessageDoc & { id: string })[];
   notes: (NoteDoc & { id: string })[];
   proposals: (ProposalDoc & { id: string })[];
+  /** §4.1: the owner's marks (approvals/<pid>), by proposal id; undefined until their first snapshot. */
+  approvals?: Record<string, ApprovalDoc>;
+  /** §4.1: whether the viewer owns the roadmap (user.isOwner(), once, after connecting); false until then and on any error. */
+  isOwner?: boolean;
   /** forge's infinite run (meta/infinite); the pill shows only while it is active. */
   infinite?: InfiniteDoc | null;
   /** forge's execution (meta/run): the pill, «En curso» and the runs view. */
@@ -77,7 +81,7 @@ export interface UiState {
   draft: { type: NoteType; text: string };
   answering: string | null;
   answerDraft: string;
-  notice: 'readonly' | 'failed' | 'answered' | 'decided' | null;
+  notice: 'readonly' | 'failed' | 'answered' | 'decided' | 'owner' | 'changed' | null;
   proposalFilter: ProposalFilter;
   /** Proposal id whose comment composer is open. */
   commenting: string | null;

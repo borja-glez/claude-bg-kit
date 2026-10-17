@@ -5,7 +5,8 @@ import { buildDocs } from '../src/lib/sync.js';
 import { dictFor } from '../src/page/i18n.js';
 import { esc, relText, renderApp, timelineSvg, VIEWS, type Model, type UiState } from '../src/page/render.js';
 import type { MessageDoc, EventType, NoteDoc, PlanTrack, TaskStatus } from '../src/lib/types.js';
-import type { ProposalDoc } from '../src/lib/proposals.js';
+import { proposalDigest, type ProposalDoc } from '../src/lib/proposals.js';
+import { unmarked } from '../src/page/html.js';
 
 const plan = parsePlan(readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8'));
 const NOW = Date.parse('2026-10-11T12:00:00Z');
@@ -435,7 +436,7 @@ const P = (over: Partial<ProposalDoc & { id: string }> = {}) => ({ id: 'p1', ts:
 
 describe('proposals view', () => {
   it('proposals view lists cards with decision buttons for proposed items', () => {
-    const html = renderApp({ ...base(), proposals: [P(), P({ id: 'p2', status: 'approved', title: 'Done one' })] }, { ...ui(), view: 'talk', talk: 'proposals' });
+    const html = renderApp({ ...base(), isOwner: true, proposals: [P(), P({ id: 'p2', status: 'approved', title: 'Done one' })] }, { ...ui(), view: 'talk', talk: 'proposals' });
     expect(html).toContain('data-action="talk-c" data-c="proposals" aria-pressed="true"');
     expect(html).toContain('Cache prices');
     expect((html.match(/data-action="p-approve"/g) ?? []).length).toBe(1);
@@ -499,7 +500,7 @@ describe('proposals view', () => {
       { id: 'c1', ts: '2026-10-11T11:00:00Z', type: 'idea' as const, author: 'session:x', text: 'primero', proposalId: 'p1' },
     ];
     const ps = [P(), P({ id: 'p2', status: 'rejected', decidedBy: 'user:u1', decidedAt: '2026-10-11T11:00:00Z', reason: 'no <ahora>' })];
-    const html = renderApp({ ...base(), me: 'user:u1', notes, proposals: ps }, { ...ui(), view: 'talk', talk: 'proposals', rejecting: 'p1', commenting: 'p1', reasonDraft: 'r<', commentDraft: 'c<' });
+    const html = renderApp({ ...base(), isOwner: true, me: 'user:u1', notes, proposals: ps }, { ...ui(), view: 'talk', talk: 'proposals', rejecting: 'p1', commenting: 'p1', reasonDraft: 'r<', commentDraft: 'c<' });
     expect(html.indexOf('primero')).toBeGreaterThan(-1);
     expect(html.indexOf('primero')).toBeLessThan(html.indexOf('segundo &lt;b&gt;'));
     expect(html).toContain('no &lt;ahora&gt;');
@@ -509,6 +510,69 @@ describe('proposals view', () => {
     expect(html).toContain('data-action="p-comment-send" data-id="p1"');
     expect(html).toContain('r&lt;');
     expect(html).toContain('data-action="pfilter" data-kind="status" data-value="auto_approved"');
+  });
+  it('only the owner sees Approve and Reject; anyone else comments and is told why (§4.1)', () => {
+    const other = renderApp({ ...base(), isOwner: false, proposals: [P()] }, { ...ui(), view: 'talk', talk: 'proposals' });
+    expect(other).not.toContain('data-action="p-approve"');
+    expect(other).not.toContain('data-action="p-reject-open"');
+    expect(other).toContain('data-action="p-comment-open" data-id="p1"');
+    expect(other).toContain('Solo el dueño del roadmap decide las propuestas; tu comentario le llega');
+    const owner = renderApp({ ...base(), isOwner: true, proposals: [P()] }, { ...ui(), view: 'talk', talk: 'proposals' });
+    expect(owner).toContain('data-action="p-approve" data-id="p1"');
+    expect(owner).not.toContain('tu comentario le llega');
+    const en = renderApp({ ...base(), meta: { ...base().meta!, locale: 'en' }, proposals: [P()] }, { ...ui(), view: 'talk', talk: 'proposals' });
+    expect(en).toContain('Only the roadmap’s owner decides proposals; your comment reaches them');
+  });
+  it('an approval without the owner’s mark says it will not become a task; only the owner can confirm it (§4.1)', () => {
+    const ps = [P({ status: 'approved' }), P({ id: 'p2', status: 'auto_approved' }), P({ id: 'p3', status: 'approved' })];
+    const approvals = { p3: { status: 'approved' as const, decidedAt: '2026-10-11T10:00:00.000Z', by: 'page' as const, digest: proposalDigest('p3', ps[2]!) } };
+    const owner = renderApp({ ...base(), isOwner: true, proposals: ps, approvals }, { ...ui(), view: 'talk', talk: 'proposals' });
+    expect(owner.match(/sin la marca del dueño · no se convertirá en tarea/g)).toHaveLength(2);
+    expect(owner).toContain('data-action="p-confirm" data-id="p1"');
+    expect(owner).toContain('data-action="p-confirm" data-id="p2"');
+    expect(owner).not.toContain('data-action="p-confirm" data-id="p3"');
+    const other = renderApp({ ...base(), isOwner: false, proposals: ps, approvals }, { ...ui(), view: 'talk', talk: 'proposals' });
+    expect(other.match(/sin la marca del dueño/g)).toHaveLength(2);
+    expect(other).not.toContain('data-action="p-confirm"');
+  });
+  it('only a mark of this very text and status counts: one of older text or of another status still asks to confirm (§4.1)', () => {
+    const now = P({ id: 'p1', status: 'approved', title: 'Cache prices v2' });
+    const older = proposalDigest('p1', P({ id: 'p1', status: 'approved', title: 'Cache prices' }));
+    const at = '2026-10-11T10:00:00.000Z';
+    const ps = [now, P({ id: 'p2', status: 'approved' }), P({ id: 'p3', status: 'auto_approved', taskId: 'T020' }), P({ id: 'p4', status: 'approved' })];
+    const approvals = {
+      p1: { status: 'approved' as const, decidedAt: at, by: 'page' as const, digest: older },
+      p2: { status: 'auto_approved' as const, decidedAt: at, by: 'forge:policy' as const, digest: proposalDigest('p2', ps[1]!) },
+      // Another proposal's mark (a digest binds its pid) does not count for p4.
+      p4: { status: 'approved' as const, decidedAt: at, by: 'page' as const, digest: proposalDigest('p2', ps[3]!) },
+    };
+    const html = renderApp({ ...base(), isOwner: true, proposals: ps, approvals }, { ...ui(), view: 'talk', talk: 'proposals' });
+    expect(html.match(/sin la marca del dueño/g)).toHaveLength(3);
+    for (const id of ['p1', 'p2', 'p4']) expect(html).toContain(`data-action="p-confirm" data-id="${id}"`);
+    // A proposal that already has its task is not one that «will not become a task».
+    expect(html).not.toContain('data-action="p-confirm" data-id="p3"');
+    // Until the marks arrive the page does not know: no warning and no [Confirmar].
+    const loading = renderApp({ ...base(), isOwner: true, proposals: ps }, { ...ui(), view: 'talk', talk: 'proposals' });
+    expect(loading).not.toContain('sin la marca del dueño');
+    expect(loading).not.toContain('data-action="p-confirm"');
+    // Read-only: the line stays, the button goes.
+    const ro = renderApp({ ...base(), isOwner: true, proposalsReadOnly: true, proposals: ps, approvals }, { ...ui(), view: 'talk', talk: 'proposals' });
+    expect(ro.match(/sin la marca del dueño/g)).toHaveLength(3);
+    expect(ro).not.toContain('data-action="p-confirm"');
+  });
+  it('unmarked is the one rule the card and «Te necesita» share (§4.1)', () => {
+    const p = P({ status: 'approved' });
+    const mark = { status: 'approved' as const, decidedAt: '2026-10-11T10:00:00.000Z', by: 'page' as const, digest: proposalDigest('p1', p) };
+    expect(unmarked('p1', p, undefined)).toBe(false);
+    expect(unmarked('p1', p, {})).toBe(true);
+    expect(unmarked('p1', p, { p1: mark })).toBe(false);
+    expect(unmarked('p1', { ...p, rationale: 'other' }, { p1: mark })).toBe(true);
+    expect(unmarked('p1', { ...p, status: 'auto_approved' }, { p1: mark })).toBe(true);
+    expect(unmarked('p1', { ...p, taskId: 'T020' }, {})).toBe(false);
+    for (const status of ['proposed', 'discussing', 'rejected', 'done'] as const) expect(unmarked('p1', { ...p, status }, {})).toBe(false);
+    // Only an own key counts: nothing inherited from Object.prototype passes for a mark.
+    expect(unmarked('constructor', p, {})).toBe(true);
+    expect(unmarked('toString', p, {})).toBe(true);
   });
 });
 

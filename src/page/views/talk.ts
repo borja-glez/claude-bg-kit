@@ -3,7 +3,7 @@
 import { canDecide, MAX_PROPOSAL_TEXT, PROPOSAL_CATEGORIES, PROPOSAL_RISKS, PROPOSAL_STATUSES, type ProposalStatus } from '../../lib/proposals.js';
 import { counts, filterNotes, MAX_NOTE, NOTE_TYPES } from '../../lib/notes.js';
 import type { Dict } from '../i18n.js';
-import { authorLabel, esc, fmt, oneOf, safeNote } from '../html.js';
+import { authorLabel, esc, fmt, oneOf, safeNote, unmarked } from '../html.js';
 import { NOTE_FILTERS, PROPOSAL_FILTERS, TALK_KINDS, type Model, type ProposalFilter, type ProposalFilterKind, type UiState } from '../model.js';
 
 export function renderTalkView(m: Model, d: Dict, ui: UiState, loc: string): string {
@@ -80,7 +80,8 @@ function renderProposals(m: Model, d: Dict, ui: UiState, loc: string): string {
       `<div class="mnote"><span class="k">${esc(authorLabel(m, d, n.author))}${fmt(n.ts, loc) ? ` · ${esc(fmt(n.ts, loc))}` : ''}</span><div>${esc(n.text)}</div></div>`).join('')}</div>` : '';
     let actions = '';
     if (!ro) {
-      const decide = canDecide(status);
+      // §4.1: only the roadmap's owner decides; anyone else comments, and is told so.
+      const decide = canDecide(status) && m.isOwner === true;
       const rejectUi = !decide ? '' : ui.rejecting === p.id
         ? `<div class="areply"><textarea data-role="reason-text" maxlength="${MAX_PROPOSAL_TEXT}" rows="2" placeholder="${esc(d.reasonPlaceholder)}">${esc(ui.reasonDraft)}</textarea>
           <button class="btn del" data-action="p-reject-send" data-id="${id}">${esc(d.sendReject)}</button></div>`
@@ -89,8 +90,13 @@ function renderProposals(m: Model, d: Dict, ui: UiState, loc: string): string {
         ? `<div class="areply"><textarea data-role="comment-text" maxlength="${MAX_NOTE}" rows="2" placeholder="${esc(d.commentPlaceholder)}">${esc(ui.commentDraft)}</textarea>
           <button class="btn pri" data-action="p-comment-send" data-id="${id}">${esc(d.send)}</button></div>`
         : `<button class="btn" data-action="p-comment-open" data-id="${id}">${esc(d.comment)}</button>`;
-      actions = `<div class="pact">${decide ? `<button class="btn pri" data-action="p-approve" data-id="${id}">${esc(d.approve)}</button>` : ''}${rejectUi}${commentUi}</div>`;
+      const onlyOwner = canDecide(status) && m.isOwner !== true ? `<div class="muted">${esc(d.owner.onlyOwner)}</div>` : '';
+      actions = `<div class="pact">${decide ? `<button class="btn pri" data-action="p-approve" data-id="${id}">${esc(d.approve)}</button>` : ''}${rejectUi}${commentUi}${onlyOwner}</div>`;
     }
+    // §4.1: an approval without the owner's valid mark never becomes a task; the owner confirms it (only approvals/ is written).
+    const mark = unmarked(p.id, p, m.approvals)
+      ? `<div class="pmark"><span class="warn">${esc(d.owner.noMark)}</span>${m.isOwner === true && !ro ? ` <button type="button" class="btn" data-action="p-confirm" data-id="${id}">${esc(d.owner.confirm)}</button>` : ''}</div>`
+      : '';
     return `<div class="note prop pr-${risk}" data-id="${id}" data-k="pr:${id}">
       <div class="nh"><span class="tag pc">${esc(d.pcategory[category])}</span><span class="pill risk-${risk}">${esc(d.prisk[risk])}</span><span class="pill ps-${status}">${esc(d.pstatus[status])}</span><span class="k">${esc(authorLabel(m, d, p.author))}${when ? ` · ${esc(when)}` : ''}</span></div>
       <h3>${esc(p.title)}</h3>
@@ -98,7 +104,7 @@ function renderProposals(m: Model, d: Dict, ui: UiState, loc: string): string {
       ${p.rationale ? `<p>${esc(p.rationale)}</p>` : ''}
       ${p.evidence ? `<div class="lbl">${esc(d.pfield.evidence)}</div><pre class="evid" data-scroll-key="evid:${id}">${esc(p.evidence)}</pre>` : ''}
       ${p.estimate || p.path ? `<div class="mono">${p.estimate ? `${esc(d.pfield.estimate)}: ${esc(p.estimate)}` : ''}${p.estimate && p.path ? ' · ' : ''}${p.path ? `${esc(d.pfield.path)}: ${esc(p.path)}` : ''}</div>` : ''}
-      ${decided}
+      ${decided}${mark}
       ${thread}
       ${actions}
     </div>`;

@@ -136,7 +136,7 @@ export function bigModel(now = BIG_NOW): Model {
   const snap = bigSnapshot(now);
   return {
     meta: snap.meta, plan: bigPlan(), states: bigStates(now), sessions: bigSessions(now), events: bigEvents(now), messages: [], notes: bigNotes(now),
-    proposals: bigProposals(now), infinite: null, run: bigRun(now), me: 'user:owner', profiles: {}, readOnly: false, now, offline: false, connecting: false, rev: 1,
+    proposals: bigProposals(now), infinite: null, run: bigRun(now), me: 'user:owner', isOwner: true, approvals: {}, profiles: {}, readOnly: false, now, offline: false, connecting: false, rev: 1,
   };
 }
 

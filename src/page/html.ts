@@ -2,6 +2,7 @@
 // shared database are untrusted: whatever lands in an attribute or a lookup is whitelisted here.
 import { escalationCandidates, liveness } from '../lib/coordination.js';
 import { NOTE_TYPES } from '../lib/notes.js';
+import { ownerCheck, type ApprovalDoc, type ProposalDoc } from '../lib/proposals.js';
 import { TRACK_COLORS, type EventType, type MessageType, type NoteType, type TaskState, type TaskStatus } from '../lib/types.js';
 import type { Dict } from './i18n.js';
 import type { Model } from './model.js';
@@ -71,6 +72,18 @@ export function forecastTitle(d: Dict, f: { from: number; to: number }, loc: str
 export function eviMark(m: Model, d: Dict, id: string): string {
   const ev = m.states[id]?.evidence;
   return ev ? `<span class="evi ${ev.result === 'pass' ? 'ok' : 'del'}" title="${esc(d.verify.title)}">▣</span>` : '';
+}
+
+/**
+ * §4.1: an approval the owner's mark does not back: approved or auto_approved, without a task yet, and no mark of this
+ * status and of this very text under its pid (ownerCheck, without the ledger's `last`, which the page does not have). Such
+ * a proposal never becomes a task, and the owner can confirm it. The one rule the proposal card, [Confirmar] and «Te
+ * necesita» share. False until the marks arrive (`approvals` undefined): the page does not warn about what it cannot know.
+ */
+export function unmarked(pid: string, p: ProposalDoc, approvals: Readonly<Record<string, ApprovalDoc>> | undefined): boolean {
+  if (!approvals || (p.status !== 'approved' && p.status !== 'auto_approved') || p.taskId !== undefined) return false;
+  const a = Object.prototype.hasOwnProperty.call(approvals, pid) ? approvals[pid] : null;
+  return ownerCheck(pid, p, a) !== 'ok';
 }
 
 export function authorLabel(m: Model, d: Dict, author: string): string {

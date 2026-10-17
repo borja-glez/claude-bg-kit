@@ -216,6 +216,7 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
 .pcom .mnote .k{display:block}
 .pact{display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start;margin-top:4px}
 .pact>.areply{flex-basis:100%}
+.pmark{margin-top:8px;font-size:12px}.pmark .warn{color:var(--yellow)}.pmark .btn{margin:0 0 0 6px}
 .btn.del{border-color:var(--red)}
 .forge div{overflow-wrap:anywhere}
 @media (max-width:760px){
