@@ -1,7 +1,7 @@
 import { planViewFromDocs } from '../lib/sync.js';
 import { isPlanId } from '../lib/ids.js';
 import { TASK_STATUSES, type MessageDoc, type MetaDoc, type NoteDoc, type NoteType, type PhaseDoc, type SessionDoc, type States, type TaskStatus } from '../lib/types.js';
-import { clampSpan, panFor, planRange, zoomAround, type Zoom } from '../lib/timeline.js';
+import { clampPan, clampSpan, panFor, planRange, zoomAround, type Zoom } from '../lib/timeline.js';
 import { MAX_NOTE, NOTE_TYPES } from '../lib/notes.js';
 import { canDecide, MAX_PROPOSAL_TEXT, normalizeApproval, normalizeProposal, proposalDigest, type ApprovalDoc, type ProposalDoc } from '../lib/proposals.js';
 import { dictFor } from './i18n.js';
@@ -181,8 +181,9 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       ui.timelineGroup = v.group && (GROUPS as readonly string[]).includes(v.group) ? (v.group as UiState['timelineGroup']) : 'phase';
       ui.zoom = v.zoom ?? '1d';
       ui.offset = 0;
-      ui.span = v.span;
-      ui.pan = v.span ? v.pan ?? 0 : undefined;
+      // Review M5: clamped here too, whatever decoded the hash.
+      ui.span = v.span ? clampSpan(v.span) : undefined;
+      ui.pan = v.span ? clampPan(v.pan ?? 0) : undefined;
       ui.expanded = new Set(v.open ?? []);
       ui.statuses = (v.status ?? []).filter(x => (TL_STATUSES as readonly string[]).includes(x));
       ui.layers = (v.layers ?? []).filter(x => (TL_LAYERS as readonly string[]).includes(x));
@@ -656,7 +657,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     if (action === 'zoom') { ui.zoom = el.dataset.zoom as Zoom; ui.offset = 0; ui.span = undefined; ui.pan = undefined; }
     else if (action === 'shift') {
       const dir = Number(el.dataset.dir);
-      if (ui.span) ui.pan = dir === 0 ? 0 : (ui.pan ?? 0) + dir * ui.span * 0.5;
+      if (ui.span) ui.pan = dir === 0 ? 0 : clampPan((ui.pan ?? 0) + dir * ui.span * 0.5);
       else ui.offset = dir === 0 ? 0 : ui.offset + dir;
     }
     else if (action === 'fit') {
@@ -800,7 +801,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     ui.pan = z.pan;
     scheduleFrame();
   };
-  const panBy = (fraction: number) => { freeze(); ui.pan = (ui.pan ?? 0) + fraction * (ui.span ?? 0); scheduleFrame(); };
+  const panBy = (fraction: number) => { freeze(); ui.pan = clampPan((ui.pan ?? 0) + fraction * (ui.span ?? 0)); scheduleFrame(); };
   const onWheel = (ev: WheelEvent) => {
     const canvas = canvasOf(ev.target);
     if (!canvas) return;
@@ -831,7 +832,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     const dx = ev.clientX - drag.x;
     if (!drag.moved && Math.abs(dx) < 4) return;
     drag.moved = true;
-    ui.pan = drag.pan - (dx * drag.span) / drag.width;
+    ui.pan = clampPan(drag.pan - (dx * drag.span) / drag.width);
     scheduleFrame();
   };
   const onPointerUp = () => {

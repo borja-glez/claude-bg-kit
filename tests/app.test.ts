@@ -1565,6 +1565,26 @@ describe('the views and the URL (§4.6, H-25)', () => {
     app.stop();
   });
 
+  it('a hash edited with a pan far outside any date shows the schedule, never «Sin conexión» (Review Focus 3, review M5)', async () => {
+    history.replaceState(null, '', '#v=schedule&s=1440&p=99999999999999');
+    const root = document.createElement('div');
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const app = await start({ claude: null, snapshot, root, now: () => NOW });
+    // The render-failure banner («Sin conexión» alone) would replace the whole page, its header included.
+    expect(root.innerHTML).toContain('<h1>Cronograma</h1>');
+    expect(root.querySelector('[data-role="timeline"]')).not.toBeNull();
+    expect(Math.abs(app.ui.pan!)).toBeLessThanOrEqual(10 * 365 * 24 * 3600000);
+    // The same edit after the page loaded (hashchange), the other way.
+    history.replaceState(null, '', '#v=schedule&s=1440&p=-99999999999999');
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    await settle();
+    expect(root.innerHTML).toContain('<h1>Cronograma</h1>');
+    expect(root.querySelector('[data-role="timeline"]')).not.toBeNull();
+    expect(err).not.toHaveBeenCalled();
+    err.mockRestore();
+    app.stop();
+  });
+
   it('the page speaks the plan’s language', async () => {
     const root = document.createElement('div');
     const app = await start({ claude: null, snapshot, root, now: () => NOW });

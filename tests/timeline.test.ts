@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parsePlan } from '../src/lib/plan.js';
-import { autoTicks, clipBar, layoutRows, MIN_SPAN, phaseLabel, phaseName, planRange, stepFor, taskSpan, ticks, windowAt, windowFor, zoomAround } from '../src/lib/timeline.js';
+import { autoTicks, clampPan, clipBar, layoutRows, MAX_PAN, MIN_SPAN, phaseLabel, phaseName, planRange, stepFor, taskSpan, ticks, windowAt, windowFor, zoomAround } from '../src/lib/timeline.js';
 import type { States } from '../src/lib/types.js';
 
 const plan = parsePlan(readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8'));
@@ -104,6 +104,11 @@ describe('continuous zoom and pan', () => {
     expect(windowAt(24 * H, NOW, -24 * H)).toEqual(windowFor('1d', NOW, -1));
     expect(windowAt(1, NOW).to - windowAt(1, NOW).from).toBe(MIN_SPAN);
     expect(windowAt(Infinity, NOW).to - windowAt(Infinity, NOW).from).toBe(24 * H);
+    // Review M5: a pan past ten years either way is held there, so every date of the window is a valid one.
+    expect(windowAt(24 * H, NOW, 1e20).to).toBe(NOW + 6 * H + MAX_PAN);
+    expect(windowAt(24 * H, NOW, -1e20).to).toBe(NOW + 6 * H - MAX_PAN);
+    expect(() => new Date(windowAt(24 * H, NOW, 6e15).from).toISOString()).not.toThrow();
+    expect(clampPan(Number.NaN)).toBe(0);
   });
   it('zooms around the pointer, keeping the instant under it in place', () => {
     const win = windowAt(24 * H, NOW);

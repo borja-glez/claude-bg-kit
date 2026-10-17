@@ -1,7 +1,7 @@
 // The page's state in the URL hash, so a link opens the same thing (spec §4.6, H-25): the view, the kind of the
 // conversation, the open task and its tab, and in the schedule its grouping, zoom (a preset or a free span and pan), open
 // groups, status filter, search and layers. Only what is set is written; links of before wave 4 still open the right view.
-import type { Zoom } from '../lib/timeline.js';
+import { clampPan, clampSpan, type Zoom } from '../lib/timeline.js';
 
 export interface ViewState {
   view?: string; group?: string; zoom?: Zoom; span?: number; pan?: number;
@@ -60,8 +60,9 @@ export function decodeView(hash: string): ViewState {
   if (g && ID.test(g)) out.group = g;
   const z = p.get('z');
   if (z && ZOOMS.includes(z)) out.zoom = z as Zoom;
+  // Review M5: a hand-edited span stays within the zoom limits and a pan within ten years either way.
   const s = int(p.get('s'));
-  if (s && s > 0) { out.span = s * 60000; const pan = int(p.get('p')); if (pan !== undefined) out.pan = pan * 60000; }
+  if (s && s > 0) { out.span = clampSpan(s * 60000); const pan = int(p.get('p')); if (pan !== undefined) out.pan = clampPan(pan * 60000); }
   out.open = list(p.get('o'));
   out.status = list(p.get('f'), 10);
   const q = p.get('q');

@@ -163,10 +163,14 @@ export function layoutRows(
 export const MIN_SPAN = 30 * 60000;
 export const MAX_SPAN = 180 * 24 * H;
 export const clampSpan = (span: number): number => Math.min(MAX_SPAN, Math.max(MIN_SPAN, Number.isFinite(span) ? span : 24 * H));
+/** Review M5: how far the window can move from now either way, ten years; past that a date of the window could be no
+ *  valid date at all (a hand-edited pan of 14 digits of minutes made the render throw). */
+export const MAX_PAN = 10 * 365 * 24 * H;
+export const clampPan = (pan: number): number => Math.min(MAX_PAN, Math.max(-MAX_PAN, Number.isFinite(pan) ? pan : 0));
 
 export function windowAt(span: number, now: number, pan = 0): Win {
   const s = clampSpan(span);
-  const to = now + s * 0.25 + (Number.isFinite(pan) ? pan : 0);
+  const to = now + s * 0.25 + clampPan(pan);
   return { from: to - s, to };
 }
 

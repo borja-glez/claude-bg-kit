@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { decodeView, encodeView } from '../src/page/urlstate.js';
+import { MAX_PAN, MAX_SPAN, MIN_SPAN } from '../src/lib/timeline.js';
 
 describe('view state in the URL (§4.6, H-25)', () => {
   it('keeps debug=1 when the hash is rewritten (H-04)', () => {
@@ -29,6 +30,13 @@ describe('view state in the URL (§4.6, H-25)', () => {
     expect(decodeView('#v=proposals&debug=1')).toEqual({ view: 'talk', c: 'proposals', debug: true });
     // The old default view (Tracking) wrote no v: its timeline parameters still open the schedule.
     expect(decodeView('#g=track&o=F1')).toEqual({ view: 'schedule', group: 'track', open: ['F1'] });
+  });
+  it('bounds a hand-edited span and pan: the span within the zoom limits, the pan within ten years (review M5)', () => {
+    expect(decodeView('#v=schedule&s=1440&p=99999999999999')).toEqual({ view: 'schedule', span: 1440 * 60000, pan: MAX_PAN });
+    expect(decodeView('#v=schedule&s=1440&p=-99999999999999').pan).toBe(-MAX_PAN);
+    expect(decodeView('#v=schedule&s=1&p=0')).toEqual({ view: 'schedule', span: MIN_SPAN, pan: 0 });
+    expect(decodeView('#v=schedule&s=99999999999999').span).toBe(MAX_SPAN);
+    expect(MAX_PAN).toBe(10 * 365 * 24 * 3600000);
   });
   it('ignores junk and unknown values', () => {
     expect(decodeView('#z=9y&s=abc&o=<b>,F1&v=a%20b')).toEqual({ view: 'schedule', open: ['F1'] });
