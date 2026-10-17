@@ -251,16 +251,24 @@ function updateStatus(root: string, event: LedgerEvent): void {
  * C5: every task's status of a checkout, by key (at most STATUS_FILES_MAX files; one that does not read or does not
  * validate is left out). Without .forge/status/ (an older forge), the alias status.json alone.
  */
-export function readStatuses(root: string): StatusMap {
+export function readStatuses(root: string, opts: { maxAgeMs?: number; now?: number } = {}): StatusMap {
   const out = Object.create(null) as StatusMap;
+  // M6: with maxAgeMs, a file whose mtime is older (by `now`, the clock's now by default) is skipped before it is read.
+  const now = opts.now ?? Date.now();
+  const read = (file: string): [string, ForgeStatus] | null => {
+    if (opts.maxAgeMs !== undefined) {
+      try { if (now - statSync(file).mtimeMs > opts.maxAgeMs) return null; } catch { return null; }
+    }
+    return keyedStatus(file);
+  };
   let names: string[];
   try { names = jsonNames(statusDir(root)).sort().slice(0, STATUS_FILES_MAX); } catch {
-    const alias = keyedStatus(statusFile(root));
+    const alias = read(statusFile(root));
     if (alias) out[alias[0]] = alias[1];
     return out;
   }
   for (const n of names) {
-    const one = keyedStatus(path.join(statusDir(root), n));
+    const one = read(path.join(statusDir(root), n));
     if (one) out[one[0]] = one[1];
   }
   return out;

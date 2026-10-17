@@ -691,6 +691,12 @@ function liveSubagents(now: number, list: ListedAgent[] | null): Activity['subag
 
 async function buildPanel($: Engine): Promise<PanelModel> {
   const now = await nowMs($);
+  // M1: /clear and an in-process resume forget the session id with the usage meter; it is read again here, so a write
+  // before the next refresh (a turn starting, a tool call) never draws this session's own tasks as another session's.
+  // The id is the new conversation's: after a resume, the resumed one's.
+  if (sessionId === null) {
+    try { sessionId = await $.session.id(); } catch { /* nothing is own by its session */ }
+  }
   const subagents = activity.subagents.filter(s => now - s.since < SUBAGENT_TTL_MS);
   return buildPanelModel({
     band: roadmap, ...panelFiles, activity: { ...activity, subagents, finished: freshFinished(finished, now) }, now, usage: usageInput(), sessionId,

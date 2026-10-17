@@ -111,9 +111,10 @@ function forgeDrives(io: Io, main: string, sid: string | null): boolean {
   if (exec?.active && (exec.hookSession === sid || memberForHook(main, sid, exec.runId))) return true;
   const run = parseRun(readRunText(main)) ?? parseRun(readRunText(io.cwd));
   if (run?.active && run.sessionId === sid) return true;
-  // K1-12 with C5: the alias is the task that changed last, of any session, so every status of the folder is read.
+  // K1-12 with C5: the alias is the task that changed last, of any session, so every status of the folder is read; M6:
+  // but not a file untouched for longer than an open task lasts, which is skipped by its mtime unread.
   const now = io.now().getTime();
-  return [...new Set([io.cwd, main])].some(dir => Object.values(readStatuses(dir)).some(st => {
+  return [...new Set([io.cwd, main])].some(dir => Object.values(readStatuses(dir, { maxAgeMs: OPEN_TASK_MS, now })).some(st => {
     const last = Date.parse(st.lastAt ?? st.ts);
     return st.session === sid && st.doneAt === null && Number.isFinite(last) && now - last < OPEN_TASK_MS;
   }));

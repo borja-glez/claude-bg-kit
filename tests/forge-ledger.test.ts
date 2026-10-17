@@ -297,6 +297,17 @@ describe('one status per task in .forge/status/ (C5)', () => {
     expect(readStatuses(root).BIG).toBeUndefined();
     expect(Object.keys(readStatuses(root))).toHaveLength(150);
   });
+  it('readStatuses with maxAgeMs skips a status file by its mtime, before reading it; a fresh one still counts (M6)', () => {
+    mkdirSync(dir(), { recursive: true });
+    const now = Date.parse('2026-10-16T12:00:00.000Z');
+    const doc = (task: string) => JSON.stringify({ ts: '2026-10-16T11:00:00.000Z', task, path: 'small', phase: '', agent: null, validators: [], verdict: null });
+    writeFileSync(path.join(dir(), 'OLD.json'), doc('OLD'));
+    writeFileSync(path.join(dir(), 'FRESH.json'), doc('FRESH'));
+    utimesSync(path.join(dir(), 'OLD.json'), new Date(now - 25 * 3600_000), new Date(now - 25 * 3600_000));
+    utimesSync(path.join(dir(), 'FRESH.json'), new Date(now - 60_000), new Date(now - 60_000));
+    expect(Object.keys(readStatuses(root, { maxAgeMs: 24 * 3600_000, now }))).toEqual(['FRESH']);
+    expect(Object.keys(readStatuses(root)).sort()).toEqual(['FRESH', 'OLD']);
+  });
   it('readStatuses reads the alias alone when an older forge left no folder, and nothing when there is none', () => {
     forgeDir(root);
     writeFileSync(path.join(root, '.forge', 'status.json'), JSON.stringify({ ts: '1', task: 'T1', path: 'small', phase: '', agent: null, validators: [], verdict: null, project: 'shop' }));

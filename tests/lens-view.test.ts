@@ -568,6 +568,13 @@ describe('the Tasks in progress card (wave 3, §4.4)', () => {
     expect(rowsOf(c)[0]).toMatchObject({ dim: true, right: expect.stringContaining('other session') });
     expect(cardAlt(c)).not.toMatch(/accepted|test|Implement/);
   });
+  it("the band names a task only when the expanded row is this session's own (M2)", () => {
+    // Only another session's task in progress: it is the one expanded, and the band names no task.
+    expect(headline({ ...EMPTY, forge: FORGE, activities: [ACT({ owner: 'other', dim: true, expanded: true })] })).toBeNull();
+    expect(headline({ ...EMPTY, forge: FORGE, activities: [ACT({ expanded: true })] })).toMatchObject({ section: 'forge', title: 'orders' });
+    // A model whose activities could not be built keeps the forge section it fell back to.
+    expect(headline({ ...EMPTY, forge: FORGE })).toMatchObject({ section: 'forge', title: 'orders' });
+  });
   it('a slot has no row; without rows the card of today stays for the infinite run', () => {
     const cards = buildCards({ ...EMPTY, activities: [ACT({ slot: true })], infinite: { cycle: 1, cyclesMax: 3, hoursLeft: null, active: true, autoApproved: [] } }, T, 0);
     expect(cards.find(c => c.title.startsWith(T.sTasksInProgress))).toBeUndefined();

@@ -170,6 +170,20 @@ describe('route hooks by session (K1-09, K1-12, K1-13)', () => {
     status({ lastAt: new Date(NOW.getTime() - 25 * 3600_000).toISOString() });
     expect(ctx(run(['hook', 'route-prompt'], io(PROMPT)))).toBe(ROUTE_HINT);
   });
+  it('a status file untouched for longer than an open task lasts is not read: its task, open as it says, no longer silences the hint (M6)', () => {
+    mkdirSync(path.join(root, '.forge', 'status'), { recursive: true });
+    const file = path.join(root, '.forge', 'status', 'cart.json');
+    writeFileSync(file, JSON.stringify({
+      ts: NOW.toISOString(), task: 'cart', path: 'medium', phase: 'implement', agent: null, validators: [], verdict: null, round: null, cap: null, brief: 1,
+      accepted: [], verify: null, taskStartedAt: NOW.toISOString(), stageSince: NOW.toISOString(), stages: {}, doneAt: null, lastAt: NOW.toISOString(),
+      session: 'S1', runId: null, project: null,
+    }));
+    utimesSync(file, new Date(NOW.getTime() - 60_000), new Date(NOW.getTime() - 60_000));
+    expect(run(['hook', 'route-prompt'], io(PROMPT)).stdout).toBe('');
+    // Its content still says open and recent, but its mtime is 25 hours old: the file is skipped unread.
+    utimesSync(file, new Date(NOW.getTime() - 25 * 3600_000), new Date(NOW.getTime() - 25 * 3600_000));
+    expect(ctx(run(['hook', 'route-prompt'], io(PROMPT)))).toBe(ROUTE_HINT);
+  });
   it('the open task is the one forge writes for this session in the main checkout: its triage silences the hint, its done ends that (K1-12)', () => {
     const s1 = { cwd: root, now: () => NOW, env: { CLAUDE_CONFIG_DIR: cfg, CLAUDE_CODE_SESSION_ID: 'S1' } };
     expect(run(['triage', '--task', 'cart', 'Add coupon support to the cart with validation'], s1).code).toBe(0);

@@ -207,7 +207,10 @@ export function headline(m: PanelModel): Headline | null {
     const detail = x.slots.slice(0, 2).map(s => `${s.task} ${s.stage}`).join(' · ');
     return { section: 'forge', title: `▶ ${x.slots.length}/${x.parallel}`, detail, cells: null, agent: null };
   }
-  if (m.forge) {
+  // M2: the forge section is the expanded activity's; another session's (expanded when no task of this one is in
+  // progress) is not this session's headline. A model whose activities could not be built keeps its fallback.
+  const expanded = (m.activities ?? []).find(a => a.expanded);
+  if (m.forge && expanded?.owner !== 'other') {
     const f = m.forge;
     const c = briefCells(f);
     return { section: 'forge', title: f.task, detail: [f.path, forgePhase(f)].filter(Boolean).join(' · '), cells: c, agent: f.agent };

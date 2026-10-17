@@ -588,13 +588,13 @@ describe('swarm step: robustness (M1, M2, M7, M9)', () => {
     reviewedT1();
     const revert = { base: 'b', head: 'h', args: ['-C', wt('T1'), 'revert', '--no-edit', 'b..HEAD'] };
     const s = stepClosing(() => ({ ...ASK_CLOSE, ask: null, next: 'redo', implementer: { agent: 'forge-impl-high', role: 'impl-high' }, handover: '.forge/work/shop/T1/handover-1-1.md', revert }));
-    expect(s.actions.filter(a => a.task === 'T1')).toEqual([expect.objectContaining({ type: 'redo', implementer: { agent: 'forge-impl-high', role: 'impl-high' }, handover: '.forge/work/shop/T1/handover-1-1.md', revert })]);
+    expect(s.actions.filter(a => a.task === 'T1')).toEqual([expect.objectContaining({ type: 'redo', implementer: { agent: 'forge-impl-high', role: 'impl-high' }, handover: '.forge/work/shop/T1/handover-1-1.md', revert, taskLine: 'forge-task: T1-1 @shop' })]);
     expect(readExecution(root)!.tasks.T1).toMatchObject({ stage: 'implement', agent: 'forge-impl-high', round: 2 });
   });
   it('freshImplementer carries its handover; the new implementer is logged (M9)', () => {
     reviewedT1();
     const s = stepClosing(() => ({ ...ASK_CLOSE, ask: null, next: 'fresh-stronger', implementer: { agent: 'forge-impl-high', role: 'impl-high' }, handover: '.forge/work/shop/T1/handover-1-1.md' }));
-    expect(s.actions.find(a => a.task === 'T1')).toMatchObject({ type: 'freshImplementer', handover: '.forge/work/shop/T1/handover-1-1.md', implementer: { agent: 'forge-impl-high' } });
+    expect(s.actions.find(a => a.task === 'T1')).toMatchObject({ type: 'freshImplementer', handover: '.forge/work/shop/T1/handover-1-1.md', implementer: { agent: 'forge-impl-high' }, taskLine: 'forge-task: T1-1 @shop' });
     expect(readEvents(root).filter(e => e.kind === 'agent' && e.task === 'T1-1').at(-1)).toMatchObject({ agent: 'forge-impl-high', role: 'impl-high' });
     expect(stageOf('T1')).toBe('implement');
   });

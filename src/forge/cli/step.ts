@@ -515,7 +515,9 @@ function follow(c: Ctx, task: string, t: ExecTask, n: number, round: number, r: 
     answered();
     c.actions.push({
       type: next === 'resume' ? 'resumeImplementer' : next === 'fresh-stronger' ? 'freshImplementer' : 'redo', task, implementer: impl, findings: out.findings ?? null,
-      ...(out.handover ? { handover: out.handover } : {}), ...(next === 'redo' ? { revert: out.revert ?? null } : {}), ...v,
+      ...(out.handover ? { handover: out.handover } : {}), ...(next === 'redo' ? { revert: out.revert ?? null } : {}),
+      // E-02: a new implementer's prompt starts with its task line, as spawnImplementer's; a resumed one keeps its prompt.
+      ...(next !== 'resume' ? { taskLine: taskLine(`${task}-${n}`, c.project) } : {}), ...v,
     });
     return;
   }

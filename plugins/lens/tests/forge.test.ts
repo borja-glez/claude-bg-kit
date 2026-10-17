@@ -526,6 +526,30 @@ test('junk in .forge/status/ and .forge/jobs/ hides only that task and never thr
   await ui.unmount();
 });
 
+test("after an in-process resume the next turn still draws this session's tasks as its own (M1)", async ($, on) => {
+  serveFiles(on, { [`${ROOT}/.forge/status/T001.json`]: JSON.stringify({ ...STATUS, task: 'T001', lastAt: new Date(NOW - 60_000).toISOString() }) }, [], { mtimeMs: NOW - 60_000 });
+  servePanes(on);
+  const clock = start(on);
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }));
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }));
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await $.command.run(RUN);
+  const pane = async () => {
+    const ui = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS });
+    const text = await said(ui);
+    await ui.unmount();
+    return text;
+  };
+  expect(await pane()).toContain('Tasks in progress · 1');
+  expect(await pane()).not.toContain('other session');
+  // The resume forgets the usage meter's session id; the first turn after it writes the panel before any refresh.
+  await $.session.end({ reason: 'resume', sessionId: SESSION, resume: {} as never });
+  await $.turn.start({ text: 'go', turnId: 'main-1' });
+  await clock.advance(1000);
+  expect(await pane()).toContain('Tasks in progress · 1');
+  expect(await pane()).not.toContain('other session');
+});
+
 test('when the session id cannot be read, the panel still draws (E-06)', async ($, on) => {
   serveFiles(on, { [`${ROOT}/.forge/status/T001.json`]: JSON.stringify({ ...STATUS, task: 'T001', lastAt: new Date(NOW - 60_000).toISOString() }) }, [], { mtimeMs: NOW - 60_000 });
   servePanes(on);
