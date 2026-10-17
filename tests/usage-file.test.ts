@@ -188,8 +188,16 @@ describe('the run counts only its own sessions, each from its baseline (E-07)', 
   it('the usage file keeps its run key and baseline; an older one has neither', () => {
     const f = toUsageFile(newUsage(T0), { ...meta('s1', 5), runKey: 'r1', runBaseline: { runKey: 'r1', costUsd: 1, tokens: 2, activeMs: 3 } });
     expect(parseUsageFile(JSON.stringify(f))).toMatchObject({ runKey: 'r1', runBaseline: { runKey: 'r1', costUsd: 1, tokens: 2, activeMs: 3 } });
-    expect(toUsageFile(newUsage(T0), meta('s1', 5))).toMatchObject({ runKey: null, runBaseline: null });
+    expect(toUsageFile(newUsage(T0), { ...meta('s1', 5), runKey: null })).toMatchObject({ runKey: null, runBaseline: null });
     const { runKey: _k, runBaseline: _b, ...older } = f;
     expect(parseUsageFile(JSON.stringify(older))).not.toHaveProperty('runKey');
+  });
+  it("a session that has not read its band yet writes no run key: its file counts whole and marks the run's sum partial (I2)", () => {
+    const unread = toUsageFile(newUsage(T0), meta('u', 5));
+    expect(unread).not.toHaveProperty('runKey');
+    const sum = mergeForRun([file('u', { ...unread, loops })], { session: 's1', state: newUsage(T0), baseline: own }, T0, 'r1');
+    expect(sum.loops['u/main']).toMatchObject({ input: 1000, costUsd: 10 });
+    expect(sum.runPartial).toBe(true);
+    expect(summarizeUsage(sum).partial).toBe(true);
   });
 });

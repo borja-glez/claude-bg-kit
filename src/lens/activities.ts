@@ -35,7 +35,7 @@ export interface ActivityInput {
   execution: PanelModel['execution'];
   superpowers: PanelModel['superpowers'];
   todos: PanelModel['todos'];
-  /** Plan task titles known (the execution's slots, the work band's current task). */
+  /** Plan task titles known (the execution's slots, the work band's current task), by status key (C5). */
   titles?: Readonly<Record<string, string>>;
   /**
    * This session's id; undefined when the caller does not know who looks (every task counts as own, as before); null
@@ -73,6 +73,34 @@ const age = (t: number, now: number): number => Math.max(0, now - t);
 /** The task itself or one of its briefs, `<task>-<n>`. */
 const isOf = (task: string, id: string): boolean => id === task || (id.startsWith(`${task}-`) && /^\d{1,4}$/.test(id.slice(task.length + 1)));
 const alive = (l: AgentLink): boolean => l.status !== 'done';
+const keyOf = (task: string, project: string | null): string => statusKey(task, project) ?? task;
+
+/** The key of the newest status (by its last event) among those `match` accepts; undefined when none has a time. */
+function newestKey(statuses: readonly ForgeStatus[], match: (st: ForgeStatus) => boolean): string | undefined {
+  let best: { key: string; last: number } | undefined;
+  for (const st of statuses) {
+    const last = ms(st.lastAt ?? st.ts);
+    if (match(st) && Number.isFinite(last) && (!best || last > best.last)) best = { key: keyOf(st.task, st.project), last };
+  }
+  return best?.key;
+}
+
+/** The key of the newest status of each task id, worked out once per id. */
+function newestByTask(statuses: readonly ForgeStatus[]): (task: string) => string | undefined {
+  const memo = new Map<string, string | undefined>();
+  return task => {
+    if (!memo.has(task)) memo.set(task, newestKey(statuses, st => st.task === task));
+    return memo.get(task);
+  };
+}
+
+/**
+ * C5: whether agent `l` works on the status of `task` in `project`: one that names a project, only on that project's;
+ * one that names none, only on the newest status of its id (or on a slot of a task with no status), so it goes under
+ * one row.
+ */
+const worksOn = (l: AgentLink, task: string, project: string | null, newest: (task: string) => string | undefined): boolean =>
+  l.task === task && (l.project !== null ? l.project === project : (newest(task) ?? keyOf(task, project)) === keyOf(task, project));
 
 /** A Trivial or Small task with no doneAt and nothing logged for over 30 minutes: the session finished it without saying so. */
 export function leftOpen(st: { path: string; doneAt: string | null; lastAt: string | null }, now: number): boolean {
@@ -125,14 +153,18 @@ function agentOf(l: AgentLink, links: readonly AgentLink[], models: Models, now:
 /**
  * E-02: the execution with the linked agents of each slot under it, the slot's model from the first of them and, in
  * the coordinator (which drives them), the slot alive while one of them lives. executionView itself does not change.
+ * C5: a slot takes the agents of its task in the run's project, and one that names no project when the newest of
+ * `statuses` with that id is the slot's own (or there is none).
  */
-export function withSlotAgents(x: PanelModel['execution'], links: readonly AgentLink[], models: Models, viewer: ViewerLike, now: number): PanelModel['execution'] {
+export function withSlotAgents(x: PanelModel['execution'], links: readonly AgentLink[], models: Models, viewer: ViewerLike, now: number, statuses: readonly ForgeStatus[] = []): PanelModel['execution'] {
   if (!x) return x;
   type Slot = NonNullable<PanelModel['execution']>['slots'][number];
+  const project = x.project ?? null;
+  const newest = newestByTask(statuses);
   return {
     ...x,
     slots: x.slots.map((s): Slot => {
-      const agents = links.filter(l => alive(l) && l.task === s.task).map(l => agentOf(l, links, models, now));
+      const agents = links.filter(l => alive(l) && worksOn(l, s.task, project, newest)).map(l => agentOf(l, links, models, now));
       const first = agents.find(g => g.model);
       const liveness: Slot['liveness'] = viewer.coordinator && agents.length ? 'alive' : s.liveness;
       return { ...s, agents, model: s.model ?? first?.model ?? null, effort: s.effort ?? first?.effort ?? null, liveness };
@@ -155,8 +187,13 @@ const summary = (key: string, kind: Row['kind'], o: { title: string | null; stag
 export function buildActivities(i: ActivityInput): ActivityView {
   const now = i.now;
   const known = i.sessionId !== undefined;
+  // C5: a slot is a task of the run's own project (null for an ephemeral run, whose tasks are loose).
+  const execProject = i.execution?.project ?? null;
   const slotTasks = new Set(i.execution?.mode === 'subagents' ? i.execution.slots.map(s => s.task) : []);
+  const newest = newestByTask(i.statuses);
   const liveJobs = i.jobs.filter(j => { const t = ms(j.startedAt); return Number.isFinite(t) && age(t, now) < JOB_ALIVE_MS; });
+  // A job names no project: it goes on the newest status of its task id alone.
+  const jobHome = new Map(liveJobs.map(j => [j, j.task === null ? undefined : newestKey(i.statuses, st => isOf(st.task, j.task!))] as const));
   type Built = { row: Row; at: number; end: number; st: ForgeStatus | null; rank: number };
   const built: Built[] = [];
   const seen = new Set<string>();
@@ -167,7 +204,7 @@ export function buildActivities(i: ActivityInput): ActivityView {
     const last = ms(st.lastAt ?? st.ts);
     if (!Number.isFinite(last)) continue;
     const stopped = st.phase.toLowerCase() === 'stopped';
-    const mine = i.links.filter(l => alive(l) && l.task === st.task && (l.project === null || st.project === null || l.project === st.project));
+    const mine = i.links.filter(l => alive(l) && worksOn(l, st.task, st.project, newest));
     const working = mine.length > 0 || (!!st.agent && i.liveTypes.some(t => tierOf(t).label === tierOf(st.agent).label));
     const left = !stopped && !working && leftOpen(st, now);
     const done = !stopped && (!!st.doneAt || left);
@@ -185,12 +222,13 @@ export function buildActivities(i: ActivityInput): ActivityView {
     if (!visible) continue;
     // Review Focus 4: an event ahead of this clock means its writer's clock is off: the task shows without a time.
     const skewed = last - now > FUTURE_SKEW_MS;
-    const job = liveJobs.find(j => j.task !== null && isOf(st.task, j.task));
+    const job = liveJobs.find(j => jobHome.get(j) === key);
     const live = owner === 'own' && !done && !stopped;
-    const title = i.titles?.[st.task];
+    const title = i.titles?.[key];
+    const slot = slotTasks.has(st.task) && st.project === execProject && !done && !stopped;
     built.push({
       row: {
-        key, kind: 'forge', owner, dim: owner === 'other' || done || stopped, done, slot: slotTasks.has(st.task) && !done && !stopped, expanded: false, stopped,
+        key, kind: 'forge', owner, dim: owner === 'other' || done || stopped, done, slot, expanded: false, stopped,
         task: st.task, project: st.project, title: title ? clip(title) : null,
         path: st.path || null, stage: done || stopped ? null : stageOf(st.phase || 'triage'),
         round: st.reviews?.n ?? st.round, cap: st.reviews?.max ?? st.cap,
@@ -220,8 +258,8 @@ export function buildActivities(i: ActivityInput): ActivityView {
   }
   built.sort((a, b) => a.rank - b.rank || (a.rank === 2 ? b.end - a.end : b.at - a.at));
   const forge = built.filter(b => b.row.kind === 'forge' && !b.row.slot);
-  const focus = i.focusAgent ? i.links.find(l => l.id === i.focusAgent)?.task ?? null : null;
-  const pick = (focus ? forge.find(b => b.row.task === focus) : undefined)
+  const focus = i.focusAgent ? i.links.find(l => l.id === i.focusAgent) : undefined;
+  const pick = (focus ? forge.find(b => b.st !== null && worksOn(focus, b.st.task, b.st.project, newest)) : undefined)
     ?? forge.find(b => b.rank === 0 && b.row.owner === 'own')
     ?? forge.reduce<Built | undefined>((best, b) => (!best || b.at > best.at ? b : best), undefined);
   if (pick) pick.row.expanded = true;
@@ -241,10 +279,11 @@ export function buildActivities(i: ActivityInput): ActivityView {
     const wakes = [i.viewer.coordinator ? ms(i.sleepUntil) : NaN, i.wakeAt ?? NaN].filter(t => Number.isFinite(t) && t >= now);
     waiting = { agents: mainAgents.length, wakeSeconds: wakes.length ? Math.round((Math.min(...wakes) - now) / 1000) : null };
   }
-  // Wave 1: a live job of a task without a row (or of no task) goes to Now, this session's or one that names none.
-  const rows = out.filter(a => a.kind === 'forge' && !a.slot && a.task !== null).map(a => a.task!);
+  // Wave 1: a live job not drawn on a row (of a slot, of no task, or whose newest status has none) goes to Now, this
+  // session's or one that names none.
+  const onRows = new Set(out.filter(a => a.kind === 'forge' && !a.slot && a.job).map(a => a.key));
   const jobs = liveJobs
-    .filter(j => !(j.task !== null && rows.some(t => isOf(t, j.task!))))
+    .filter(j => !onRows.has(jobHome.get(j) ?? ''))
     .filter(j => !known || j.session === null || j.session === i.sessionId)
     .slice(0, JOBS_SHOWN)
     .map(j => ({ name: j.cmd, task: j.task, seconds: span(ms(j.startedAt), now, now) }));

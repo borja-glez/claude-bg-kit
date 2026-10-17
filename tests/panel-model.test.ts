@@ -442,6 +442,11 @@ describe('buildPanelModel · execution', () => {
     expect(m.execution).toMatchObject({ mode: 'subagents', parallel: 3, integrated: 1, total: 2, coordinator: { liveness: 'alive' } });
     expect(m.execution!.slots[0]).toMatchObject({ task: 'T4', stage: 'review', round: 2, seconds: 180, liveness: 'alive' });
   });
+  it("carries the plan's project, which its slot tasks' statuses are keyed by; an ephemeral run's tasks are loose (C5)", () => {
+    const of = (text: string) => buildPanelModel({ band: band(), activity: act(), now, forgeExecution: text, forgeExecTasks: {}, forgeLive: {} }).execution!.project;
+    expect(of(execDoc)).toBe('shop');
+    expect(of(execDoc.replace('"kind":"plan"', '"kind":"ephemeral"'))).toBeNull();
+  });
   it('a stalled run keeps the same times at any later now, frozen at its last step, and never runs negative (E-05)', () => {
     const doc = execDoc.replace('"active":true', '"active":false').replace('"stopReason":null', '"stopReason":"stalled"');
     const at = (ms: number, text = doc) => buildPanelModel({ band: band(), activity: act(), now: ms, forgeExecution: text, forgeExecTasks: {}, forgeLive: {} }).execution!;

@@ -446,6 +446,33 @@ test('no usage file is written before the session start is known', async ($, on)
   expect(Object.keys(written)).toEqual([]);
 });
 
+// I2: forge's run in a checkout without a roadmap, coordinated by this session: its band names the run as this session's.
+const execution = (over: Record<string, unknown> = {}) => JSON.stringify({
+  runId: 'e1', kind: 'ephemeral', mode: 'subagents', parallel: 2, project: 'loose', base: 'main', branch: 'forge/run-e1', mergeOnFinish: false,
+  coordinator: 'main', hookSession: SESSION, active: true, stopReason: null, stallReason: null, startedAt: new Date(NOW - 3600_000).toISOString(),
+  lastStepAt: new Date(NOW - 60_000).toISOString(), lastBlockStep: null, sleepUntil: null, tasks: {}, ...over,
+});
+
+test('with the pane closed and nothing going on, the usage file names no run until the tick reads the band, then the run (I2)', async ($, on) => {
+  const files: Record<string, string> = { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n' };
+  const texts: string[] = [];
+  serveFiles(on, files, {}, [], (_path, text) => { texts.push(text); });
+  servePanes(on);
+  const clock = start(on);
+  serveSteps(on);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
+  const path = `${ROOT}/.forge/usage/${SESSION}.json`;
+  // No run yet, and the band was never read: the file says nothing of a run (not that it has none).
+  await clock.advance(30_000);
+  expect(JSON.parse(files[path]!)).not.toHaveProperty('runKey');
+  // The run starts: the next tick reads the band once, the file names the run, and its baseline is taken now.
+  files[`${ROOT}/.forge/execution.json`] = execution();
+  await clock.advance(30_000);
+  expect(JSON.parse(files[path]!)).toMatchObject({ runKey: 'e1', runBaseline: { runKey: 'e1' } });
+  expect(texts.map(t => JSON.parse(t)).filter(f => 'runKey' in f && f.runKey === null)).toEqual([]);
+});
+
 test('a run that is neither active nor touched within 12 hours is over: only this session shows', async ($, on) => {
   const files = {
     [`${ROOT}/.forge/run.json`]: JSON.stringify({ active: false, startedAt: new Date(NOW - 20 * 3600_000).toISOString() }),

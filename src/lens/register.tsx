@@ -5,7 +5,7 @@ import { buildPanelModel, bandKey, parseSddLedger, summarizeTodos, FORGE_RUN_MAX
 import { clip, join, listOpt, loadBandModel, mtime, nowMs, readOpt, MAX_DOCS, type Engine } from '../mod/files.js';
 import { normalizeStatus, statusKey } from '../lib/forge-status.js';
 import { JOB_FILE_MAX, runRoleOf } from './activities.js';
-import { isSafeId } from '../lib/execution-state.js';
+import { isSafeId, parseExecution } from '../lib/execution-state.js';
 import { DECISIONS_MAX } from '../lib/decisions.js';
 import { buildCards, cardAlt } from './cards.js';
 import { cardSvg, bandSvg } from './svg.js';
@@ -75,6 +75,9 @@ function ownTaskId(id: string | null): string | null {
 let busy = false;
 // The roadmap section, read from the waypoint project's files at the panel's pace while the pane is open.
 let roadmap: BandModel = noneBand();
+// I2: whether this session read its band since it started (or since /clear or a resume): until then lens cannot tell
+// whether it works for a run, and neither names one in its usage file nor takes a run baseline.
+let bandRead = false;
 
 type PanelFiles = {
   ledger?: string; ledgerPlan?: string; planFallback?: string; ledgerMtimeMs?: number;
@@ -415,8 +418,10 @@ let seededUsd = 0;
 // E-07: this session's totals the first time it saw the run it works for, kept in memory and in its usage file.
 let runBaseline: RunBaseline | null = null;
 
-// E-07: the run this session works for, as the band publishes it (C3: its coordinator or a member), else none.
-function runKeyNow(): string | null {
+// E-07: the run this session works for, as the band publishes it (C3: its coordinator or a member), else none (null);
+// undefined while its band was not read yet (I2).
+function runKeyNow(): string | null | undefined {
+  if (!bandRead) return undefined;
   const id = roadmap.viewer?.runId;
   return runRoleOf(roadmap) === 'owner' && isSafeId(id) ? id : null;
 }
@@ -424,7 +429,7 @@ function runKeyNow(): string | null {
 // E-07: the first time this session sees a run's key, its totals so far: that run counts only what comes after.
 function keepRunBaseline(): void {
   const key = runKeyNow();
-  if (key === null || runBaseline?.runKey === key) return;
+  if (key === null || key === undefined || runBaseline?.runKey === key) return;
   const t = totalsOf(usage.loops);
   runBaseline = { runKey: key, costUsd: t.costUsd, tokens: t.tokens, activeMs: usage.activeMs };
 }
@@ -438,6 +443,8 @@ function resetUsage(): void {
   officialOwnUsd = null;
   seededUsd = 0;
   runBaseline = null;
+  bandRead = false;
+  execChecked = null;
   lastUsageWrite = 0;
   lastUsageSig = '';
   sessionId = null;
@@ -445,6 +452,25 @@ function resetUsage(): void {
   runInputs = null;
   usageFileCache.clear();
   largeRunsCache = null;
+}
+
+// I2: the size and mtime of the main checkout's execution.json when it last read as not active, so an unchanged one is
+// not read again.
+let execChecked: { size: number; mtimeMs: number } | null = null;
+
+// I2: a session whose band was never read (its pane closed, nothing busy) reads it once the main checkout's execution is
+// active, so its usage file names the run it works for and its baseline is taken close to when it joined. One stat
+// each time; the file is read only when it changed.
+async function readBandForRun($: Engine, main: string): Promise<void> {
+  const path = join(main, '.forge', 'execution.json');
+  let st: { size: number; mtimeMs: number };
+  try { st = await $.fs.stat(path); } catch { return; }
+  if (execChecked && execChecked.size === st.size && execChecked.mtimeMs === st.mtimeMs) return;
+  const active = st.size <= FORGE_EXEC_MAX && parseExecution(await readOpt($, path), await nowMs($))?.active === true;
+  if (!active) { execChecked = { size: st.size, mtimeMs: st.mtimeMs }; return; }
+  try { roadmap = await loadBandModel($); } catch { return; }
+  bandRead = true;
+  keepRunBaseline();
 }
 
 // The session's id and its main checkout (the repo a worktree belongs to), resolved once per session.
@@ -488,10 +514,11 @@ async function syncUsageStart($: Engine): Promise<void> {
 
 const baseName = (path: string) => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path;
 
-// What changes the file: the start, the steps and the tracking.
+// What changes the file: the start, the steps, the tracking and the run it works for (unknown until the band is read).
 function usageSig(): string {
   const steps = Object.values(usage.loops).reduce((a, l) => a + l.steps, 0);
-  return `${usage.startedAt}|${steps}|${usage.tracking.waypoint}|${usage.tracking.forge}|${usage.activeMs}|${runKeyNow() ?? ''}`;
+  const key = runKeyNow();
+  return `${usage.startedAt}|${steps}|${usage.tracking.waypoint}|${usage.tracking.forge}|${usage.activeMs}|${key === undefined ? '?' : key ?? ''}`;
 }
 
 // Writes this session's usage file when the main checkout has .forge/ and the count changed: at most every 30 s
@@ -503,8 +530,11 @@ async function writeUsageFileNow($: Engine, force: boolean): Promise<void> {
     if (usageStartedAt === null) return;
     const now = await nowMs($);
     if (!force && now - lastUsageWrite < USAGE_WRITE_MS) return;
+    if (!Object.values(usage.loops).some(l => l.steps > 0)) return;
+    // I2: until its band is read, a run this session joined is looked for on each write.
+    if (!bandRead) await readBandForRun($, (await usageWhere($)).main);
     const sig = usageSig();
-    if (sig === lastUsageSig || !Object.values(usage.loops).some(l => l.steps > 0)) return;
+    if (sig === lastUsageSig) return;
     const where = await usageWhere($);
     if (!SAFE_SESSION.test(where.session)) return;
     const forge = join(where.main, '.forge');
@@ -606,7 +636,7 @@ async function refreshUsage($: Engine, withRun: boolean): Promise<void> {
 function usageInput(): { session: UsageState; run: UsageState | null; officialUsd: number | null; officialOwnUsd: number | null } {
   let run: UsageState | null = null;
   try {
-    if (runInputs && sessionId !== null) run = mergeForRun(runInputs.files, { session: sessionId, state: usage, baseline: runBaseline }, runInputs.since, runKeyNow());
+    if (runInputs && sessionId !== null) run = mergeForRun(runInputs.files, { session: sessionId, state: usage, baseline: runBaseline }, runInputs.since, runKeyNow() ?? null);
   } catch { /* this session only */ }
   return { session: usage, run, officialUsd, officialOwnUsd };
 }
@@ -733,7 +763,7 @@ async function refreshPanel($: Engine): Promise<void> {
     if (!paneUp && !busy) return;
     if (paneUp) startPanelTimer($);
     // The roadmap section follows the waypoint project's files at the panel's pace.
-    try { roadmap = await loadBandModel($); } catch { /* keep the last one */ }
+    try { roadmap = await loadBandModel($); bandRead = true; } catch { /* keep the last one */ }
     keepRunBaseline();
     const now = await nowMs($);
     // E-06: who looks, so the panel knows whose tasks are its own; null when the engine cannot say.

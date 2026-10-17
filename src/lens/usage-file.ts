@@ -19,7 +19,8 @@ export function totalsOf(loops: Record<string, UsageLoop>): { costUsd: number; t
 export interface UsageFile {
   v: 1; session: string; label: string; worktree: string; startedAt: string; updatedAt: string; costUsd: number | null;
   loops: Record<string, UsageLoop>; tracking: { waypoint: number; forge: number }; activeMs?: number; trackingReread?: number;
-  // E-07: the run this session works for (its coordinator or a member), null for none; absent in an older file.
+  // E-07: the run this session works for (its coordinator or a member), null for none; absent in an older file, and in
+  // one written before its session read its band (I2).
   runKey?: string | null; runBaseline?: RunBaseline | null;
 }
 type Obj = Record<string, unknown>;
@@ -28,12 +29,16 @@ const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) && x >=
 const str = (x: unknown) => (typeof x === 'string' && x ? x : null);
 const iso = (x: unknown) => (typeof x === 'string' && !Number.isNaN(Date.parse(x)) ? x : null);
 
+/**
+ * The file of a session's state. `runKey` undefined (I2: its band was not read yet, so whether it works for a run is
+ * unknown) writes no key at all: a reader takes it as an older file, counted whole and marking the run's sum partial.
+ */
 export function toUsageFile(s: UsageState, meta: { session: string; label: string; worktree: string; now: number; costUsd: number | null; runKey?: string | null; runBaseline?: RunBaseline | null }): UsageFile {
   return {
     v: 1, session: meta.session, label: meta.label, worktree: meta.worktree,
     startedAt: new Date(s.startedAt).toISOString(), updatedAt: new Date(meta.now).toISOString(),
     costUsd: meta.costUsd, loops: s.loops, tracking: { waypoint: s.tracking.waypoint, forge: s.tracking.forge }, activeMs: s.activeMs, trackingReread: s.tracking.reread,
-    runKey: meta.runKey ?? null, runBaseline: meta.runBaseline ?? null,
+    ...(meta.runKey !== undefined ? { runKey: meta.runKey } : {}), runBaseline: meta.runBaseline ?? null,
   };
 }
 

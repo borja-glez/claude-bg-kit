@@ -2,7 +2,7 @@ import type { BandModel } from '../mod/model.js';
 import { normalizeProposal } from '../lib/proposals.js';
 import { cleanText, normalizeStatus, statusKey, type ForgeStatus } from '../lib/forge-status.js';
 import { parseRun } from '../lib/forge-run.js';
-import { FUTURE_SKEW_MS, normalizeLive, normalizePublicTask, parseExecution, type LiveDoc, type PublicTask } from '../lib/execution-state.js';
+import { FUTURE_SKEW_MS, isSafeId, normalizeLive, normalizePublicTask, parseExecution, type LiveDoc, type PublicTask } from '../lib/execution-state.js';
 import { executionView } from '../lib/execution-view.js';
 import { MAIN, type UsageState } from './usage.js';
 import { STAGES, stageOf, tierOf } from './view.js';
@@ -159,6 +159,8 @@ export type PanelModel = {
   decisions: { count: number; autonomy: 'auto' | 'unattended'; lastMajor: string | null } | null;
   execution: {
     runId: string; mode: 'subagents' | 'sessions'; parallel: number; branch: string; active: boolean;
+    // project: the plan's, which the statuses of its slot tasks carry; null for an ephemeral run, whose tasks are loose.
+    project?: string | null;
     stopReason: string | null; stallReason: string | null;
     coordinator: { liveness: 'alive' | 'silent' | 'stopped'; lastSeen: string | null };
     integrated: number; total: number;
@@ -402,13 +404,15 @@ export function executionFromFiles(execText: string | undefined, taskTexts: Reco
     try { const d = normalizeLive(JSON.parse(t)); if (d) live.push(d); } catch { /* skip */ }
   }
   let v;
+  let exec;
   const clean = titles && Object.fromEntries(Object.entries(titles).map(([id, t]) => [id, cleanText(t)]));
-  try { v = executionView({ exec: parseExecution(execText, now), tasks, live, titles: clean, now, role }); } catch { return null; }
+  try { exec = parseExecution(execText, now); v = executionView({ exec, tasks, live, titles: clean, now, role }); } catch { return null; }
   if (!v) return null;
   // C2: an ended run's clock stops at its last movement (never past this reader's now).
   const to = v.frozenAt ? Math.min(now, Date.parse(v.frozenAt)) : now;
   return {
-    runId: v.runId, mode: v.mode, parallel: v.parallel, branch: v.branch, active: v.active, stopReason: v.stopReason,
+    runId: v.runId, project: exec?.kind === 'plan' && isSafeId(exec.project) ? exec.project : null,
+    mode: v.mode, parallel: v.parallel, branch: v.branch, active: v.active, stopReason: v.stopReason,
     stallReason: v.stallReason ? clip(v.stallReason) : null,
     coordinator: { ...v.coordinator }, integrated: v.integrated, total: v.total,
     elapsedSeconds: elapsed(v.startedAt, to, now),
@@ -537,9 +541,11 @@ export function buildPanelModel(input: {
   // The only plan task title the band model carries is the current one's.
   const execution = executionFromFiles(input.forgeExecution, input.forgeExecTasks, input.forgeLive, now,
     wp?.current ? { [wp.current.id]: wp.current.title } : undefined, runRoleOf(band));
+  // C5: by status key, so a title goes to its own plan's task and never to a loose task or another plan's of that id.
   const titles: Record<string, string> = {};
-  for (const s of execution?.slots ?? []) if (s.title) titles[s.task] = s.title;
-  if (wp?.current) titles[wp.current.id] = wp.current.title;
+  const titleOf = (task: string, project: string | null, title: string) => { const k = statusKey(task, project); if (k) titles[k] = title; };
+  for (const s of execution?.slots ?? []) if (s.title) titleOf(s.task, execution?.project ?? null, s.title);
+  if (wp?.current) titleOf(wp.current.id, wp.project, wp.current.title);
   const sp = superpowers(input);
   const todosModel = todos.total ? todos : null;
   const statuses = parseStatuses(input.forgeStatuses ?? (input.forgeStatus !== undefined ? [input.forgeStatus] : []));
@@ -560,7 +566,7 @@ export function buildPanelModel(input: {
     input.forgeBriefsBy?.[statusKey(st.task, st.project) ?? st.task] ?? (input.forgeStatuses === undefined ? input.forgeBriefs ?? null : null);
   const forge = failed ? newestForge(statuses, now, briefsOf, liveTypes)
     : view.expanded ? forgeOf(view.expanded, now, briefsOf(view.expanded), liveTypes) : null;
-  const withAgents = withSlotAgents(execution, links, models, viewer, now);
+  const withAgents = withSlotAgents(execution, links, models, viewer, now, statuses);
   // A subagent drawn under its task or its slot is not drawn again among the subagents.
   const shown = new Set(view.activities.filter(x => !x.slot && x.kind !== 'adhoc').flatMap(x => x.agents.map(g => g.id)));
   for (const s of withAgents?.slots ?? []) for (const g of s.agents ?? []) shown.add(g.id);

@@ -152,6 +152,47 @@ describe('withSlotAgents and the slots (E-02)', () => {
   });
 });
 
+describe('the same task id in two plans and loose (C5, spec deviation 2)', () => {
+  // Plan shop runs T001 in a slot; plan web's T001 and a loose T001 are in progress in this session too.
+  const SHOP: NonNullable<PanelModel['execution']> = { ...EXEC, project: 'shop', slots: [{ ...EXEC.slots[0], task: 'T001' }] };
+  const statuses = (newest: 'shop' | 'web' | null) => ['shop', 'web', null].map(project =>
+    st('T001', { project, lastAt: ago(project === newest ? 1 : project === 'shop' ? 3 : 2) }));
+  const links = [link('s1', 'T001', { project: 'shop' }), link('w1', 'T001', { project: 'web' }), link('n1', 'T001')];
+  // Every agent drawn under a row that is not a slot and under a slot, in one list.
+  const drawn = (newest: 'shop' | 'web' | null, over: Partial<ActivityInput> = {}) => {
+    const view = buildActivities(input({ statuses: statuses(newest), links, execution: SHOP, viewer: COORDINATOR, ...over }));
+    const slots = withSlotAgents(SHOP, links, {}, COORDINATOR, NOW, statuses(newest))!;
+    const ids = [...view.activities.filter(a => !a.slot).flatMap(a => a.agents.map(g => g.id)), ...slots.slots.flatMap(s => (s.agents ?? []).map(g => g.id))];
+    return { view, slots, ids, row: (key: string) => view.activities.find(a => a.key === key)! };
+  };
+  it("another plan's task with the slot's id is a row of its own with its agent; the slot keeps its plan's agents", () => {
+    const { view, slots, row } = drawn(null);
+    expect(row('shop__T001')).toMatchObject({ slot: true, project: 'shop' });
+    expect(row('web__T001')).toMatchObject({ slot: false, owner: 'own', project: 'web', agents: [{ id: 'w1' }] });
+    expect(slots.slots[0].agents?.map(g => g.id)).toEqual(['s1']);
+    expect(view.expanded).toMatchObject({ task: 'T001', project: null });
+    // web's T001 can be expanded: the agent the person looks at is its own.
+    expect(buildActivities(input({ statuses: statuses(null), links, execution: SHOP, viewer: COORDINATOR, focusAgent: 'w1' })).expanded).toMatchObject({ task: 'T001', project: 'web' });
+  });
+  it('an agent without a project goes under the newest status of its id alone, a slot included; no agent is drawn twice', () => {
+    for (const newest of ['shop', 'web', null] as const) {
+      const { view, slots, ids } = drawn(newest);
+      expect(ids.sort(), String(newest)).toEqual(['n1', 's1', 'w1']);
+      const where = [
+        ...view.activities.filter(a => !a.slot && a.agents.some(g => g.id === 'n1')).map(a => a.key),
+        ...(slots.slots[0].agents?.some(g => g.id === 'n1') ? ['slot'] : []),
+      ];
+      expect(where, String(newest)).toEqual([newest === 'shop' ? 'slot' : newest === 'web' ? 'web__T001' : 'T001']);
+    }
+  });
+  it("a row's title and its job follow its key: the title of its own plan, the job on the newest status of its id", () => {
+    const job = parseJob(JSON.stringify({ name: 'review-prep-T001-1-4', cmd: 'review-prep', task: 'T001-1', pid: 4, startedAt: ago(1), out: 'x', session: 'me' }))!;
+    const { row } = drawn('web', { titles: { shop__T001: 'Cart', web__T001: 'Landing' }, jobs: [job] });
+    expect(row('web__T001')).toMatchObject({ title: 'Landing', job: { name: 'review-prep' } });
+    expect(row('T001')).toMatchObject({ title: null, job: null });
+  });
+});
+
 describe('buildActivities: a workflow, and the agents without a task', () => {
   it('the agents of a workflow run make one activity while they live and 15 minutes after; agents without a task make adhoc', () => {
     const wf = (id: string, over: Partial<AgentLink> = {}) => link(id, null, { workflow: { runId: 'wf_1', index: 1 }, ...over });
