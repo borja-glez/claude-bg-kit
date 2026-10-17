@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { CritiqueError, formatProposals, parseCritique, selectProposals } from '../src/lib/critique.js';
+import { budgetFor, budgetIssues, CritiqueError, formatProposals, parseCritique, scopeFor, selectProposals, verdictOf } from '../src/lib/critique.js';
 
 const ok = {
   round: 2, version: 2, scope: 'changed',
@@ -71,5 +71,49 @@ describe('fix round 1: selection and formatting', () => {
     expect(en[0]).toContain('] "Intro" — ');
     expect(en[1]).toContain('] "Scope" — ');
     expect(formatProposals(c, 'es', { constructor: 'x' })).not.toContain('§');
+  });
+});
+
+describe('the budget of a round and the verdict (K3-04)', () => {
+  const crit = (round: number, sevs: ('critical' | 'major' | 'minor')[], verdict?: string) => JSON.stringify({
+    round, version: round, scope: 'full', ...(verdict ? { verdict } : {}),
+    proposals: sevs.map((severity, i) => ({ n: i + 1, category: 'gap', severity, section: 'a', problem: 'p', change: 'c' })),
+  });
+  it('budgetFor: 12 of any severity, then 6 critical or major, then 3 critical; a verification is always 3 critical', () => {
+    expect(budgetFor(1)).toEqual({ max: 12, severities: ['critical', 'major', 'minor'] });
+    expect(budgetFor(2)).toEqual({ max: 6, severities: ['critical', 'major'] });
+    expect(budgetFor(3)).toEqual({ max: 3, severities: ['critical'] });
+    expect(budgetFor(7)).toEqual(budgetFor(3));
+    expect(budgetFor(1, true)).toEqual({ max: 3, severities: ['critical'] });
+    expect(budgetFor(2, true)).toEqual({ max: 3, severities: ['critical'] });
+  });
+  it('budgetIssues names the extra proposals and every severity the round does not allow', () => {
+    const seven = parseCritique(crit(2, ['major', 'major', 'major', 'major', 'major', 'major', 'major']));
+    expect(budgetIssues(seven, budgetFor(2))).toEqual(['7 proposals, but this round allows at most 6']);
+    expect(budgetIssues(parseCritique(crit(2, ['minor'])), budgetFor(2))).toEqual(['proposal 1 is minor, but this round allows only critical and major']);
+    expect(budgetIssues(parseCritique(crit(3, ['critical', 'major'])), budgetFor(3))).toEqual(['proposal 2 is major, but this round allows only critical']);
+    expect(budgetIssues(parseCritique(crit(1, ['minor'])), budgetFor(1))).toEqual([]);
+  });
+  it('a ready verdict with no proposal is valid; one that contradicts the proposals is refused; an old critique deduces it', () => {
+    expect(parseCritique(crit(2, [], 'ready')).verdict).toBe('ready');
+    expect(parseCritique(crit(2, [], 'ready')).proposals).toEqual([]);
+    expect(issuesOf(JSON.parse(crit(2, ['minor', 'major'], 'ready')))).toEqual(['verdict is "ready" but proposal 2 is major']);
+    expect(issuesOf(JSON.parse(crit(1, ['minor'], 'changes')))).toEqual(['verdict is "changes" but no proposal is critical or major']);
+    expect(issuesOf(JSON.parse(crit(1, [], 'done'))).some(i => i.startsWith('verdict'))).toBe(true);
+    expect(parseCritique(crit(1, ['critical'])).verdict).toBe('changes');
+    expect(parseCritique(crit(1, ['minor'])).verdict).toBe('ready');
+    expect(verdictOf({ proposals: [] })).toBe('ready');
+  });
+  it('scopeFor: round 1 everything; round 2 what changed unless more than half did; round 3 and verifications what changed; after a reopen round 1 is like round 2', () => {
+    const s = (round: number, changed: number, extra: Partial<{ verify: boolean; reopened: boolean }> = {}) =>
+      scopeFor({ round, verify: false, reopened: false, changed, total: 4, ...extra });
+    expect(s(1, 0)).toBe('full');
+    expect(s(2, 2)).toBe('changed');
+    expect(s(2, 3)).toBe('full');
+    expect(s(3, 4)).toBe('changed');
+    expect(s(2, 3, { verify: true })).toBe('changed');
+    expect(s(1, 1, { reopened: true })).toBe('changed');
+    expect(s(1, 3, { reopened: true })).toBe('full');
+    expect(scopeFor({ round: 2, verify: false, reopened: false, changed: 0, total: 0 })).toBe('full');
   });
 });

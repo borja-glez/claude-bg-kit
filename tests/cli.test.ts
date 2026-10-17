@@ -824,6 +824,47 @@ describe('design commands', () => {
       expect(existsSync(path.join(ddir(), 'design/changelog.json'))).toBe(false);
     });
   });
+
+  describe('critique-check: the budget, the verdict and the scope (K3-04, K3-15)', () => {
+    const prop = (n: number, severity: string, section = 'riesgos') => ({ n, category: 'risk', severity, section, problem: 'p', change: 'c' });
+    const write = (name: string, c: object) => writeFileSync(path.join(dir, name), JSON.stringify(c));
+    it('round 2 allows at most 6 proposals, critical and major only', () => {
+      write('a.json', { round: 2, version: 2, scope: 'changed', proposals: Array.from({ length: 7 }, (_, i) => prop(i + 1, 'major')) });
+      const r = run(['critique-check', 'a.json', '--round', '2'], io);
+      expect(r.code).toBe(1);
+      expect(r.stderr).toContain('7 proposals, but this round allows at most 6');
+      write('b.json', { round: 2, version: 2, scope: 'changed', proposals: [prop(1, 'minor')] });
+      expect(run(['critique-check', 'b.json', '--round', '2'], io).stderr).toContain('proposal 1 is minor');
+      write('c.json', { round: 2, version: 2, scope: 'changed', proposals: [prop(1, 'critical'), prop(2, 'major')] });
+      expect(run(['critique-check', 'c.json', '--round', '2'], io).code).toBe(0);
+    });
+    it('a verification allows at most 3 critical, whatever the round; without --round the critique own round sets the budget', () => {
+      write('v.json', { round: 2, version: 2, scope: 'changed', proposals: [prop(1, 'major')] });
+      expect(run(['critique-check', 'v.json', '--round', '2'], io).code).toBe(0);
+      expect(run(['critique-check', 'v.json', '--round', '2', '--verify'], io).code).toBe(1);
+      write('r3.json', { round: 3, version: 3, scope: 'changed', proposals: [prop(1, 'major')] });
+      expect(run(['critique-check', 'r3.json'], io).code).toBe(1);
+    });
+    it('a ready critique with no proposal passes, a ready one with a major fails, and an old critique without verdict passes', () => {
+      write('ready.json', { round: 2, version: 2, scope: 'changed', verdict: 'ready', proposals: [] });
+      expect(run(['critique-check', 'ready.json', '--round', '2', '--version', '2'], io).code).toBe(0);
+      write('liar.json', { round: 2, version: 2, scope: 'changed', verdict: 'ready', proposals: [prop(1, 'major')] });
+      const liar = run(['critique-check', 'liar.json', '--round', '2'], io);
+      expect(liar.code).toBe(1);
+      expect(liar.stderr).toContain('verdict is "ready" but proposal 1 is major');
+      write('old.json', { round: 1, version: 1, scope: 'full', proposals: [prop(1, 'minor')] });
+      expect(run(['critique-check', 'old.json', '--round', '1'], io).code).toBe(0);
+    });
+    it('a proposal outside the changed sections is a warning on stderr with exit 0; a full critique is never warned (K3-15)', () => {
+      write('w.json', { round: 2, version: 2, scope: 'changed', proposals: [prop(1, 'major', 'arquitectura'), prop(2, 'major', 'riesgos')] });
+      const r = run(['critique-check', 'w.json', '--round', '2', '--changed', 'riesgos'], io);
+      expect(r.code).toBe(0);
+      expect(r.stderr).toBe('warning: proposal 1 reviews "arquitectura", outside the changed sections (riesgos)\n');
+      expect(r.stdout).toMatch(/^1\. \[/);
+      write('f.json', { round: 2, version: 2, scope: 'full', proposals: [prop(1, 'major', 'arquitectura')] });
+      expect(run(['critique-check', 'f.json', '--round', '2', '--changed', 'riesgos'], io).stderr).toBe('');
+    });
+  });
 });
 
 describe('classic hooks', () => {

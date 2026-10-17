@@ -10,7 +10,7 @@ import { parseDesign, changedSections, DesignError, setDesignStatus } from '../l
 import { importSpec, SpecImportError } from '../lib/design-import.js';
 import { designGate, mergeDismissed, parseDismissed } from '../lib/design-gate.js';
 import { listVersions, nextVersion, parseChangelog, appendChangelog, parseAppliedItems, AppliedError } from '../lib/history.js';
-import { parseCritique, selectProposals, formatProposals, CritiqueError } from '../lib/critique.js';
+import { parseCritique, selectProposals, formatProposals, CritiqueError, budgetFor, budgetIssues } from '../lib/critique.js';
 import { buildDesignPageData } from '../design-page/build.js';
 import { eventId, eventIds, sessionIdFrom } from '../lib/ids.js';
 import { computeMetrics } from '../lib/metrics.js';
@@ -780,6 +780,9 @@ export function run(argv: string[], io: Io): Result {
           if (!/^[1-9]\d*$/.test(given)) return fail(`critique-check: --${name} must be a positive integer`, 2);
           if (c[name] !== Number(given)) issues.push(`${name} is ${c[name]} but this review is ${name} ${given}`);
         }
+        // K3-04: the budget of this round (the critique's own round without --round), or of a verification.
+        const roundGiven = flag('round');
+        issues.push(...budgetIssues(c, budgetFor(roundGiven !== undefined ? Number(roundGiven) : c.round, args.includes('--verify'))));
         const designFlag = flag('design');
         const headings: Record<string, string> = {};
         if (designFlag !== undefined) {
@@ -789,7 +792,17 @@ export function run(argv: string[], io: Io): Result {
           for (const p of c.proposals) if (!slugs.has(p.section)) issues.push(`proposal ${p.n}: section "${p.section}" is not a section slug of the design`);
         }
         if (issues.length) throw new CritiqueError(issues);
-        return ok(formatProposals(c, flag('locale') ?? 'en', headings));
+        // K3-15: a critique of what changed that reviews another section is told, never refused.
+        const warnings: string[] = [];
+        const changedFlag = flag('changed');
+        if (changedFlag !== undefined && c.scope === 'changed') {
+          const allowed = changedFlag.split(',').map(s => s.trim()).filter(Boolean);
+          for (const p of c.proposals) {
+            if (!allowed.includes(p.section)) warnings.push(`warning: proposal ${p.n} reviews "${p.section}", outside the changed sections (${allowed.join(', ')})`);
+          }
+        }
+        const text = formatProposals(c, flag('locale') ?? 'en', headings);
+        return { code: 0, stdout: text.endsWith('\n') ? text : `${text}\n`, stderr: warnings.length ? `${warnings.join('\n')}\n` : '' };
       }
       case 'critique-select': {
         const c = parseCritique(readFileSync(abs(args[0]), 'utf8'));

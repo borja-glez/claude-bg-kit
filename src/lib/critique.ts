@@ -2,6 +2,9 @@ import { z } from 'zod';
 
 export const CATEGORIES = ['scope', 'done_criteria', 'risk', 'contradiction', 'gap'] as const;
 export const SEVERITIES = ['critical', 'major', 'minor'] as const;
+/** K3-04: `ready` when nothing critical or major is left (zero proposals is a valid critique), `changes` otherwise. */
+export const VERDICTS = ['ready', 'changes'] as const;
+export type Verdict = (typeof VERDICTS)[number];
 
 const ProposalSchema = z.object({
   n: z.number().int().positive(),
@@ -15,10 +18,13 @@ const CritiqueSchema = z.object({
   round: z.number().int().positive(),
   version: z.number().int().positive(),
   scope: z.enum(['full', 'changed']),
+  // K3-04: optional, so the critiques written before it still read; parseCritique fills it in.
+  verdict: z.enum(VERDICTS).optional(),
   proposals: z.array(ProposalSchema),
 });
 export type Proposal = z.infer<typeof ProposalSchema>;
 export type Critique = z.infer<typeof CritiqueSchema>;
+export type Severity = Proposal['severity'];
 
 export class CritiqueError extends Error {
   constructor(public issues: string[]) {
@@ -27,6 +33,12 @@ export class CritiqueError extends Error {
   }
 }
 
+/** The verdict a critique's proposals call for: `changes` with any critical or major proposal, else `ready`. */
+export function verdictOf(c: { proposals: { severity: Severity }[] }): Verdict {
+  return c.proposals.some(p => p.severity !== 'minor') ? 'changes' : 'ready';
+}
+
+/** A critique as read: valid, numbered 1..K, and with its verdict (written, and then matching its proposals, or deduced). */
 export function parseCritique(text: string): Critique {
   let raw: unknown;
   try { raw = JSON.parse(text); } catch { throw new CritiqueError(['critique is not valid JSON']); }
@@ -38,7 +50,49 @@ export function parseCritique(text: string): Critique {
     if (!ns.every((n, i) => n === i + 1)) issues.push(`proposals must be numbered 1..${props.length} without gaps`);
   }
   if (issues.length || !r.success) throw new CritiqueError(issues);
-  return r.data;
+  const expected = verdictOf(r.data);
+  if (r.data.verdict !== undefined && r.data.verdict !== expected) {
+    const serious = r.data.proposals.find(p => p.severity !== 'minor');
+    throw new CritiqueError([serious
+      ? `verdict is "${r.data.verdict}" but proposal ${serious.n} is ${serious.severity}`
+      : `verdict is "${r.data.verdict}" but no proposal is critical or major`]);
+  }
+  return { ...r.data, verdict: r.data.verdict ?? expected };
+}
+
+/** K3-04: how many proposals the critique of a round may carry, and of which severities. */
+export interface Budget { max: number; severities: Severity[] }
+
+/**
+ * Round 1: up to 12 proposals of any severity; round 2: up to 6, critical and major; from round 3, and in any
+ * verification (`round --verify`), up to 3 critical ones. The first round after a reopen counts as round 1 again.
+ */
+export function budgetFor(round: number, verify = false): Budget {
+  if (verify || round >= 3) return { max: 3, severities: ['critical'] };
+  if (round === 2) return { max: 6, severities: ['critical', 'major'] };
+  return { max: 12, severities: ['critical', 'major', 'minor'] };
+}
+
+/** What a critique breaks of its budget, one line each; none when it fits. */
+export function budgetIssues(c: Critique, b: Budget): string[] {
+  const out: string[] = [];
+  if (c.proposals.length > b.max) out.push(`${c.proposals.length} proposals, but this round allows at most ${b.max}`);
+  for (const p of c.proposals) {
+    if (!b.severities.includes(p.severity)) out.push(`proposal ${p.n} is ${p.severity}, but this round allows only ${b.severities.join(' and ')}`);
+  }
+  return out;
+}
+
+/**
+ * K3-04: what a round reviews. `round` counts from the last reopen. Round 1 of a design reviews everything; round 2,
+ * and the first round after a reopen, what changed, or everything when more than half of the sections changed
+ * (`changed` counts the changed and the removed ones, `total` the sections of today); from round 3, and in a
+ * verification, only what changed.
+ */
+export function scopeFor(o: { round: number; verify: boolean; reopened: boolean; changed: number; total: number }): 'full' | 'changed' {
+  if (o.verify || o.round >= 3) return 'changed';
+  if (o.round <= 1 && !o.reopened) return 'full';
+  return o.total === 0 || o.changed * 2 > o.total ? 'full' : 'changed';
 }
 
 export function selectProposals(c: Critique, spec: string): Proposal[] {
