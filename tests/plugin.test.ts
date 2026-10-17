@@ -1674,6 +1674,9 @@ describe('plugin layout', () => {
     const inf = read('plugins/forge/skills/infinite/SKILL.md');
     for (const w of ['/waypoint:design reopen --auto', '`design_ref`', 'the approved-design rule', '`design_version`', '`round --verify`']) expect(inf, w).toContain(w);
     expect(inf).not.toContain('apply the approved-design rule without asking (`status: draft`)');
+    // a task whose `## <T>:` section exists is never reopened again
+    expect(inf).toContain('already has a section `## <T>:`');
+    expect(inf).toContain('never reopen the design again');
     const planner = read('plugins/forge/agents/forge-planner.md');
     for (const w of ['design_ref?', '`design_ref`', '--design <design path>', '`_intro`']) expect(planner, w).toContain(w);
     expect(read('plugins/forge/skills/decisions/SKILL.md')).toContain('design-snapshot DESIGN --kind reopen');
