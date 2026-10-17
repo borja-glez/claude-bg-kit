@@ -1732,7 +1732,7 @@ describe('page --publish-info and the sync line', () => {
   const info = () => JSON.parse(run(['page', 'plan.yaml', '--out', 'r.html', '--publish-info', '--capabilities', capsFile()], io).stdout);
   const WP = (JSON.parse(readFileSync(path.join(process.cwd(), 'plugins', 'waypoint', '.claude-plugin', 'plugin.json'), 'utf8')) as { version: string }).version;
   // meta/page carries the roadmap id (the plan's project: known before the first publish) so the approvals warning keys on it
-  const pageInfo = () => ({ pageVersion: WP, rules: PAGE_RULES, write: { op: 'set', collection: 'meta', doc_id: 'page', data: { version: WP, rules: PAGE_RULES, roadmap: 'demo-shop', publishedAt: io.now().toISOString() } } });
+  const pageInfo = () => ({ pageVersion: WP, rules: PAGE_RULES, write: { op: 'set', collection: 'meta', doc_id: 'page', data: { version: WP, rules: PAGE_RULES, assets: false, roadmap: 'demo-shop', publishedAt: io.now().toISOString() } } });
   const snapshotOf = (file: string) => JSON.parse(readFileSync(file, 'utf8').match(/<script type="application\/json" id="wp-snapshot">([\s\S]*?)<\/script>/)![1]);
   it('without .forge the roadmap stays shareable and nothing is said', () => {
     expect(info()).toEqual({ out: path.join(dir, 'r.html'), capabilities: caps, internal: false, say: null, ...pageInfo() });
@@ -1776,6 +1776,45 @@ describe('page --publish-info and the sync line', () => {
       // What this checkout should publish is still printed, owner rule included.
       expect(p.capabilities).toEqual(caps);
     }
+  });
+  it('meta/page records whether assets was published, and --page says when a republish changes who can see the roadmap (re-review I1)', () => {
+    const withAssets = { ...caps, assets: {} };
+    const pub = (value: unknown, page?: unknown) => {
+      const args = ['page', 'plan.yaml', '--out', 'r.html', '--publish-info', '--capabilities', capsFile(value)];
+      if (page !== undefined) { writeFileSync(path.join(dir, 'page.json'), JSON.stringify(page)); args.push('--page', 'page.json'); }
+      const r = run(args, io);
+      expect(r.code, r.stderr).toBe(0);
+      return JSON.parse(r.stdout);
+    };
+    expect(pub(withAssets).write.data.assets).toBe(true);
+    expect(pub(caps).write.data.assets).toBe(false);
+    expect(pub(caps)).not.toHaveProperty('capabilitiesChanged');
+    // A first publication has nothing to compare with (its `say` tells the person).
+    expect(pub(withAssets, { assets: false })).toMatchObject({ capabilitiesChanged: false, ask: null });
+    setArtifact('https://claude.ai/artifact/r1');
+    // No assets → assets: the roadmap becomes internal and its public link stops working.
+    const toInternal = pub(withAssets, { version: WP, rules: PAGE_RULES, assets: false });
+    expect(toInternal.capabilitiesChanged).toBe(true);
+    expect(toInternal.ask).toContain('interno de tu organización');
+    // Assets → none: it can be shared publicly again, and the uploaded screenshots stop showing.
+    const toPublic = pub(caps, { version: WP, rules: PAGE_RULES, assets: true });
+    expect(toPublic.capabilitiesChanged).toBe(true);
+    expect(toPublic.ask).toContain('compartirse públicamente');
+    // Unknown (a page from before this record, or none listed) counts as changed when the file declares assets.
+    expect(pub(withAssets, { version: '0.25.0', rules: 1 }).capabilitiesChanged).toBe(true);
+    expect(pub(caps, { version: '0.25.0', rules: 1 })).toMatchObject({ capabilitiesChanged: false, ask: null });
+    const none = JSON.parse(run(['page', 'plan.yaml', '--out', 'r.html', '--publish-info', '--capabilities', capsFile(withAssets), '--page', 'none.json'], io).stdout);
+    expect(none.capabilitiesChanged).toBe(true);
+    // Unchanged.
+    expect(pub(withAssets, { assets: true })).toMatchObject({ capabilitiesChanged: false, ask: null });
+    expect(pub(caps, { assets: false })).toMatchObject({ capabilitiesChanged: false, ask: null });
+    // In the plan's language.
+    const p = path.join(dir, 'plan.yaml');
+    writeFileSync(p, readFileSync(p, 'utf8').replace('locale: es', 'locale: en'));
+    expect(pub(withAssets, { assets: false }).ask).toContain('internal to your organization');
+    expect(pub(caps, { assets: true }).ask).toContain('shared publicly');
+    // --page needs its file.
+    expect(run(['page', 'plan.yaml', '--out', 'r.html', '--publish-info', '--capabilities', capsFile(caps), '--page'], io).code).toBe(2);
   });
   it('a meta/page from a publish without the owner rule: forge trusts no approval, and sync keeps asking to republish (final review I5)', () => {
     const noOwner = { ...caps, db: { rules: caps.db.rules.filter(r => r.path !== 'approvals') } };

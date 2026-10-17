@@ -1554,6 +1554,13 @@ describe('plugin layout', () => {
     expect(publish).not.toContain('omitting `capabilities`');
     expect(publish).not.toContain('in §4)');
     expect(publish).not.toMatch(/`rules` under \d/);
+    // Re-review I1: a republish that changes who can see the roadmap is asked first, even under republish: true or in an
+    // infinite cycle; with nobody to answer, nothing is published and no meta/page is sent.
+    expect(step(1)).toContain('--page .waypoint/<project>/dbcache/meta/page.json');
+    for (const w of ['`capabilitiesChanged: true`', 'AskUserQuestion', '`ask`', '`republish: true`', '/forge:infinite', 'do not send `meta/page`']) expect(step(3), w).toContain(w);
+    const inf = read('plugins/forge/skills/infinite/SKILL.md');
+    const approved = inf.split('\n').find(l => l.startsWith('2. **Approved to tasks.**'))!;
+    expect(approved).toContain('`capabilitiesChanged: true`');
   });
 
   it('READMEs describe wave 3a: the status per task, the task line, the tasks in progress and the classic hooks', () => {
@@ -1598,7 +1605,7 @@ describe('plugin layout', () => {
     }
     for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) {
       const md = read(f);
-      for (const s of ['approvals/', '`owner`', 'meta/metrics', 'meta/page', 'sync [--db DIR]', 'page [--publish-info --capabilities F] [--states DIR]', 'validate [--design D]']) expect(md, `${f}: ${s}`).toContain(s);
+      for (const s of ['approvals/', '`owner`', 'meta/metrics', 'meta/page', 'sync [--db DIR]', 'page [--publish-info --capabilities F [--page P]] [--states DIR]', 'validate [--design D]']) expect(md, `${f}: ${s}`).toContain(s);
     }
   });
 });

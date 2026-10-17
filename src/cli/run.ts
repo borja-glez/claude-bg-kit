@@ -19,7 +19,7 @@ import { BRANCH_RE, mainWorktreeFrom, samePath } from '../lib/worktree.js';
 import { excludeWorktrees } from '../lib/git-info.js';
 import { isCommitCommand, runHook } from './hooks.js';
 import { launchRun, EFFORTS, MODELS, type Launcher, type Effort, type Model } from '../lib/launcher.js';
-import { PAGE_RULES, roadmapCapabilities, rulesOf, sharingNotice, syncSummary } from '../lib/publish.js';
+import { PAGE_RULES, declaresAssets, roadmapCapabilities, rulesOf, sharingChangeAsk, sharingChanged, sharingNotice, syncSummary } from '../lib/publish.js';
 import { compareVersions, WAYPOINT_VERSION } from '../lib/waypoint-version.js';
 import { TASK_STATUSES } from '../lib/types.js';
 import { claudeSessionId, noClaudeSession } from '../lib/claude-session.js';
@@ -139,6 +139,9 @@ export function run(argv: string[], io: Io): Result {
           try { published = JSON.parse(readFileSync(abs(capsArg), 'utf8')); } catch { return fail(`page: cannot read --capabilities ${capsArg} as JSON`, 2); }
           if (!published || typeof published !== 'object' || Array.isArray(published)) return fail(`page: --capabilities ${capsArg} must be a JSON object`, 2);
         }
+        // Re-review I1: --page, the listed meta/page.json, to compare who can see the roadmap now with what this publish gives.
+        const pageArg = flag('page');
+        if (args.includes('--page') && (!pageArg || pageArg.startsWith('--'))) return fail('page: --page needs the listed meta/page.json', 2);
         const out = abs(flag('out') ?? '.waypoint/roadmap.html');
         const now = io.now().toISOString();
         // G-13, G-14: the snapshot says which waypoint built the page and, with --states, the states the last listing saw
@@ -157,9 +160,20 @@ export function run(argv: string[], io: Io): Result {
         // `capabilities` is what this checkout should publish; `rules`, what the published file grants (rulesOf).
         // `roadmap` is the plan's project, the id known before the first publish: the approvals warning keys on it.
         const rules = rulesOf(published);
+        // Re-review I1: meta/page records whether this publish declared `assets`; with --page, whether that changes who can
+        // see and share the published roadmap (a listed page without the record, or none, is unknown), and the line to ask.
+        const assets = declaresAssets(published);
+        let changed: Record<string, unknown> = {};
+        if (pageArg) {
+          let listed: unknown = null;
+          try { listed = JSON.parse(readFileSync(abs(pageArg), 'utf8')); } catch { listed = null; }
+          const before = listed && typeof listed === 'object' && typeof (listed as { assets?: unknown }).assets === 'boolean' ? (listed as { assets: boolean }).assets : undefined;
+          const capabilitiesChanged = sharingChanged(p, assets, before);
+          changed = { capabilitiesChanged, ask: capabilitiesChanged ? sharingChangeAsk(p, assets) : null };
+        }
         return ok(JSON.stringify({
-          out, capabilities: roadmapCapabilities(internal), internal, say: sharingNotice(p, internal), pageVersion: WAYPOINT_VERSION, rules,
-          write: { op: 'set', collection: 'meta', doc_id: 'page', data: { version: WAYPOINT_VERSION, rules, roadmap: p.project, publishedAt: now } },
+          out, capabilities: roadmapCapabilities(internal), internal, say: sharingNotice(p, internal), pageVersion: WAYPOINT_VERSION, rules, ...changed,
+          write: { op: 'set', collection: 'meta', doc_id: 'page', data: { version: WAYPOINT_VERSION, rules, assets, roadmap: p.project, publishedAt: now } },
         }));
       }
       case 'sync': {

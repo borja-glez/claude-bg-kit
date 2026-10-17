@@ -35,6 +35,32 @@ export function rulesOf(capabilities: unknown): number {
   return owner ? PAGE_RULES : 1;
 }
 
+/** Re-review I1: whether a capabilities object declares `assets` (forge's screenshot store), which makes the artifact internal. */
+export const declaresAssets = (capabilities: unknown): boolean =>
+  !!capabilities && typeof capabilities === 'object' && !Array.isArray(capabilities) && Object.hasOwn(capabilities, 'assets');
+
+/**
+ * Re-review I1: whether a republish with `assets` (true or false) changes who can see and share a roadmap whose listed
+ * meta/page recorded `published` (undefined when unknown: no page, or one from before this record). A first publication
+ * changes nothing here (`sharingNotice` speaks for it); an unknown record counts as changed when the file declares assets.
+ */
+export function sharingChanged(plan: Plan, assets: boolean, published: boolean | undefined): boolean {
+  if (!plan.artifacts.roadmap) return false;
+  return published === undefined ? assets : published !== assets;
+}
+
+/** Re-review I1: the line the plan skill asks the person with before a republish that changes the roadmap's sharing. */
+export function sharingChangeAsk(plan: Plan, assets: boolean): string {
+  if (assets) {
+    return isEs(plan.locale)
+      ? 'Al republicar, el roadmap pasa a guardar las capturas de verificación de forge: quedará interno de tu organización y su enlace público dejará de funcionar.'
+      : "Republishing makes the roadmap keep forge's verification screenshots: it becomes internal to your organization and its public link stops working.";
+  }
+  return isEs(plan.locale)
+    ? 'Al republicar, el roadmap deja de guardar las capturas de verificación de forge (evidence: local en .forge/config.yaml): podrá volver a compartirse públicamente y las capturas ya subidas dejarán de verse.'
+    : "Republishing stops the roadmap keeping forge's verification screenshots (evidence: local in .forge/config.yaml): it can be shared publicly again, and the screenshots already uploaded stop showing.";
+}
+
 const isEs = (locale: string | undefined) => (locale ?? '').toLowerCase().split(/[-_]/)[0] === 'es';
 
 /** The one-time notice that `assets` makes the roadmap internal: only for a first publication that declares it. */
