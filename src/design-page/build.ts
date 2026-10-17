@@ -2,7 +2,7 @@ import { changedSections, designBody, parseDesign, sectionsOf, type DesignMeta }
 import { entryKind, type ChangelogEntry } from '../lib/history.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { verdictOf, type Critique, type Proposal, type Verdict } from '../lib/critique.js';
-import { appliedVersion, resolvedIn, rewroteRound, line, GATE_LIST_MAX, type Dismissed, type GateCritique } from '../lib/design-gate.js';
+import { appliedVersion, pendingProposals, resolvedIn, rewroteRound, line, GATE_LIST_MAX, type Dismissed, type GateCritique } from '../lib/design-gate.js';
 
 /** K3-09: what became of a proposal. */
 export type Fate = 'applied' | 'resolved' | 'dismissed' | 'rewritten' | 'pending';
@@ -17,15 +17,22 @@ export interface PageCritique {
   round: number; version: number; scope: Critique['scope']; verdict: Verdict; proposals: PageProposal[];
   /** How many older proposals `proposals` left out (the newest GATE_LIST_MAX are kept); present only when not 0. */
   proposalsMore?: number;
+  /** Carry 9: the critique names a version the changelog does not have; present only then. */
+  unknownVersion?: true;
 }
-/** K3-09: what a version changed against the one before it, by heading (`_intro`: the text before the first heading). */
-export interface VersionDiff { changed: string[]; added: string[]; removed: string[] }
+/**
+ * K3-09: what a version changed against the one before it, by heading (`_intro`: the text before the first heading).
+ * Carry 9: when the history lacks the version right before it, the diff is against the earlier one it has, `against`.
+ */
+export interface VersionDiff { changed: string[]; added: string[]; removed: string[]; against?: number }
 
 export interface DesignPageData {
   meta: DesignMeta;
   words: number;
   /** K3-09: the number of valid critiques. */
   rounds: number;
+  /** Carry 9: the proposals of every round still pending, as the gate counts them (never capped). */
+  pending: number;
   source: string;
   current: number;
   status: DesignMeta['status'];
@@ -90,10 +97,11 @@ export function buildDesignPageData(input: {
       words: d.words,
       html: renderMarkdown(d.body),
       toc: sectionsOf(d.body).map(({ level, heading, slug }) => ({ level, heading, slug })),
-      diff: i === 0 ? null : versionDiff(texts[numbers[i - 1]], texts[n]),
+      diff: i === 0 ? null : { ...versionDiff(texts[numbers[i - 1]], texts[n]), ...(numbers[i - 1] !== n - 1 ? { against: numbers[i - 1] } : {}) },
     };
   });
   const dismissed = input.dismissed ?? {};
+  const known = new Set([...input.changelog.map(e => e.version), currentNo]);
   // The page data stays bounded and clean like the gate's lists: the newest GATE_LIST_MAX rounds and, in each, the newest
   // GATE_LIST_MAX proposals, with their texts as one clean line of 300 code points at most; the rest is counted.
   const valid = [...(input.critiques ?? [])]
@@ -107,6 +115,7 @@ export function buildDesignPageData(input: {
         ...p, section: line(p.section), problem: line(p.problem), change: line(p.change), ...fateOf(input.changelog, dismissed, round, p.n),
       })),
       ...(more ? { proposalsMore: more } : {}),
+      ...(known.has(critique.version) ? {} : { unknownVersion: true as const }),
     };
   });
   const critiquesMore = valid.length - critiques.length;
@@ -115,6 +124,7 @@ export function buildDesignPageData(input: {
     meta: cur.meta,
     words: cur.words,
     rounds: valid.length,
+    pending: pendingProposals(input.changelog, input.critiques ?? [], dismissed).length,
     source: input.source,
     current: currentNo,
     status: cur.meta.status,

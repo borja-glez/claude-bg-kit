@@ -109,6 +109,70 @@ describe('the design loop end to end (§7.3)', () => {
   });
 });
 
+// Carry 9: the same loop for a project whose first round was written before 0.27.0, in .waypoint/<project>/ with a
+// dismissed.json of numbers, run from another folder: the new rounds go to docs/, and the gate and the page read both.
+describe('the design loop through the .waypoint/ route of a project from before 0.27.0 (carry 9)', () => {
+  let repo: string;
+  let elsewhere: string;
+  let io: Io;
+  const design = () => path.join(repo, 'docs/waypoint/demo-shop/design.md');
+  const wp = (...args: string[]) => {
+    const r = run(args, io);
+    if (r.code !== 0) throw new Error(`waypoint ${args.join(' ')} exited ${r.code}: ${r.stderr}`);
+    return r;
+  };
+  const json = (...args: string[]) => JSON.parse(wp(...args).stdout);
+  const edit = (from: string, to: string) => {
+    const text = readFileSync(design(), 'utf8');
+    if (!text.includes(from)) throw new Error(`not in the design: ${from}`);
+    writeFileSync(design(), text.replace(from, to));
+  };
+  beforeAll(() => {
+    repo = mkdtempSync(path.join(tmpdir(), 'wp-legacy-'));
+    elsewhere = mkdtempSync(path.join(tmpdir(), 'wp-legacy-cwd-'));
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    mkdirSync(path.dirname(design()), { recursive: true });
+    copyFileSync(new URL('./fixtures/design.md', import.meta.url), design());
+    const assets = path.join(elsewhere, 'assets');
+    mkdirSync(assets);
+    writeFileSync(path.join(assets, 'design.template.html'), '<title>__TITLE__</title><script type="application/json" id="wp-design-data">__DATA__</script>');
+    io = { cwd: elsewhere, now: () => new Date('2026-10-17T10:00:00.000Z'), rand: () => 0, assetsDir: assets, env: {} };
+  });
+  afterAll(() => {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(elsewhere, { recursive: true, force: true });
+  });
+
+  it('round 1 from .waypoint/, apply, round --verify in docs/, approve: the gate and the page tell both rounds', () => {
+    wp('design-snapshot', design(), '--note', 'Borrador inicial', '--round', '0');
+    const legacy = path.join(repo, '.waypoint/demo-shop');
+    mkdirSync(legacy, { recursive: true });
+    writeFileSync(path.join(legacy, 'critique-r1.json'), JSON.stringify({ round: 1, version: 1, scope: 'full', proposals: [
+      { n: 1, category: 'risk', severity: 'critical', section: 'riesgos', problem: 'Sin rollback', change: 'Añadir rollback' },
+      { n: 2, category: 'gap', severity: 'minor', section: 'arquitectura', problem: 'Sin diagrama', change: 'Añadir diagrama' },
+    ] }));
+    writeFileSync(path.join(legacy, 'dismissed.json'), JSON.stringify({ 1: [2] }));
+    expect(json('design-gate', design())).toMatchObject({ rounds: 1, latestRound: 1, criticalPending: [{ round: 1, n: 1 }], pendingCounts: { critical: 1, major: 0, minor: 0 } });
+
+    edit('no tiene rollback', 'tiene un plan de rollback');
+    wp('design-snapshot', design(), '--note', 'ronda 1', '--kind', 'apply', '--applied', 'r1:1');
+    const r2 = json('critique-next', design(), '--verify');
+    expect(r2).toMatchObject({ round: 2, version: 2, scope: 'changed', review: ['riesgos'], out: path.join(repo, 'docs/waypoint/demo-shop/design/critiques/r2.json') });
+    mkdirSync(path.dirname(r2.out), { recursive: true });
+    writeFileSync(r2.out, JSON.stringify({ round: 2, version: 2, scope: 'changed', verdict: 'ready', proposals: [] }));
+    wp('critique-check', r2.out, '--round', '2', '--version', '2', '--verify', '--changed', 'riesgos', '--design', design());
+    expect(json('design-gate', design())).toMatchObject({ rounds: 2, pending: [], needsVerify: false, canAutoApprove: true });
+
+    edit('start_prompt: /waypoint:work backend', 'start_prompt: /waypoint:work backend\nstatus: approved');
+    wp('design-snapshot', design(), '--note', 'aprobado (auto)', '--kind', 'approve');
+    const out = path.join(elsewhere, 'page.html');
+    wp('design-page', design(), '--out', out);
+    const data = JSON.parse(/id="wp-design-data">(.*?)<\/script>/s.exec(readFileSync(out, 'utf8'))![1]);
+    expect(data).toMatchObject({ status: 'approved', rounds: 2, pending: 0, current: 3 });
+    expect(data.critiques.map((c: { round: number; proposals: { fate: string }[] }) => [c.round, c.proposals.map(p => p.fate)])).toEqual([[1, ['applied', 'dismissed']], [2, []]]);
+  });
+});
+
 // Final review I1: the skill passes no --round to the approval nor to the reopen, so design-snapshot takes the newest
 // critique round itself; the first round after a reopen then gets round 1's budget, as critique-next and
 // critique-check --design both count it. No command here passes --round.

@@ -19,7 +19,7 @@ const data = buildDesignPageData({
 // A design that went through two rounds, a rewrite, an approval and an amendment (K3-09).
 const approved = fixture.replace('start_prompt: /waypoint:work backend', 'start_prompt: /waypoint:work backend\nstatus: approved');
 const prop = (n: number, severity: 'critical' | 'major' | 'minor', section: string) => ({ n, category: 'gap' as const, severity, section, problem: `p${n}`, change: `c${n}` });
-const rich = buildDesignPageData({
+const richInput: Parameters<typeof buildDesignPageData>[0] = {
   current: approved.replace('Backend en Node y frontend web.', 'Backend en Node 22 y frontend web.'),
   history: { 1: fixture.replace('Riesgos', 'Peligros'), 2: fixture, 3: fixture, 4: approved },
   changelog: [
@@ -36,7 +36,8 @@ const rich = buildDesignPageData({
     { round: 3, critique: null },
   ],
   dismissed: { 1: [{ n: 3, reason: 'fuera de alcance' }] },
-});
+};
+const rich = buildDesignPageData(richInput);
 
 describe('renderDesignPage', () => {
   it('renders the editorial header, metrics, pillars, prompt and toc in Spanish', () => {
@@ -188,6 +189,22 @@ describe('buildDesignPageData: the rounds, what became of each proposal and what
       { changed: ['Arquitectura'], added: [], removed: [] },
     ]);
   });
+  it('across a gap in the history the diff is against the earlier version it has, and says which (carry 9)', () => {
+    const gap = buildDesignPageData({ ...richInput, history: { 1: richInput.history[1], 4: richInput.history[4] } });
+    expect(gap.versions.map(v => [v.version, v.diff?.against ?? null])).toEqual([[1, null], [4, 1], [5, null]]);
+    expect(gap.versions[1].diff).toEqual({ changed: [], added: ['Riesgos'], removed: ['Peligros'], against: 1 });
+  });
+  it('marks a critique whose version the changelog does not have (carry 9)', () => {
+    const odd = buildDesignPageData({ ...richInput, critiques: [{ round: 1, critique: { round: 1, version: 9, scope: 'full', proposals: [] } }, { round: 2, critique: { round: 2, version: 2, scope: 'full', proposals: [] } }] });
+    expect(odd.critiques.map(c => [c.round, c.version, c.unknownVersion ?? false])).toEqual([[1, 9, true], [2, 2, false]]);
+  });
+  it('counts every pending proposal, also those beyond the 40 shown, as the gate does (carry 9)', () => {
+    const minors = Array.from({ length: 60 }, (_, i) => prop(i + 1, 'minor', 'a'));
+    const many = buildDesignPageData({ current: fixture, history: {}, source: 's/', changelog: [], critiques: [{ round: 1, critique: { round: 1, version: 1, scope: 'full', proposals: minors } }], dismissed: { 1: [{ n: 60 }] } });
+    expect(many.critiques[0].proposals).toHaveLength(40);
+    expect(many.pending).toBe(59);
+    expect(rich.pending).toBe(1);
+  });
 });
 
 describe('renderDesignPage: badge, rounds, diff and the version buttons (K3-09, K3-11)', () => {
@@ -201,7 +218,7 @@ describe('renderDesignPage: badge, rounds, diff and the version buttons (K3-09, 
   });
   it('tells every round with its verdict, its counts and what became of each proposal; the latest round is open', () => {
     const html = renderDesignPage(rich, 5);
-    expect(html).toContain('<section class="rounds" aria-label="Rondas"><div class="lbl">Rondas</div>');
+    expect(html).toContain('<section class="rounds" aria-labelledby="wp-l-rounds"><h2 class="lbl" id="wp-l-rounds">Rondas</h2>');
     expect(html).toContain('<details class="rd" data-round="1"><summary><b>Ronda 1</b> · v1 · <span class="vd vd-changes">con cambios</span> · 1 C · 1 M · 2 m</summary>');
     expect(html).toContain('<details class="rd" data-round="2" open>');
     expect(html).toContain('[Hueco · crítica]</span> <b>Peligros</b> — p1 → c1 <span class="fate f-applied">aplicada en v2</span>');
@@ -229,6 +246,23 @@ describe('renderDesignPage: badge, rounds, diff and the version buttons (K3-09, 
     expect(renderDesignPage(rich, 2)).toContain('<p class="diff">nueva §Riesgos · quitada §Peligros</p>');
     expect(renderDesignPage(rich, 1)).not.toContain('class="diff"');
     expect(renderDesignPage(rich, 3)).not.toContain('class="diff"');
+  });
+  it('says when a version is compared across a gap in the history, also when nothing changed, in Spanish and English (carry 9)', () => {
+    const gap = buildDesignPageData({ ...richInput, history: { 1: richInput.history[1], 3: richInput.history[3] } });
+    expect(renderDesignPage(gap, 3)).toContain('<p class="diff">nueva §Riesgos · quitada §Peligros · frente a v1: faltan versiones en la historia</p>');
+    expect(renderDesignPage({ ...gap, meta: { ...gap.meta, locale: 'en' } }, 3)).toContain('<p class="diff">new §Riesgos · removed §Peligros · against v1: versions missing from the history</p>');
+    const same = buildDesignPageData({ ...richInput, history: { 2: richInput.history[2], 4: richInput.history[4] } });
+    expect(renderDesignPage(same, 4)).toContain('<p class="diff">frente a v2: faltan versiones en la historia</p>');
+  });
+  it('marks a round whose critique names a version the changelog does not have (carry 9)', () => {
+    const odd = { ...rich, critiques: [{ ...rich.critiques[0], version: 9, unknownVersion: true as const }] };
+    expect(renderDesignPage(odd, 5)).toContain('<b>Ronda 1</b> · v9 (versión desconocida) · ');
+    expect(renderDesignPage({ ...odd, meta: { ...odd.meta, locale: 'en' } }, 5)).toContain('<b>Round 1</b> · v9 (unknown version) · ');
+    expect(renderDesignPage(rich, 5)).not.toContain('desconocida');
+  });
+  it('shows how many proposals are pending in all, as the gate counts them (carry 9)', () => {
+    expect(renderDesignPage({ ...rich, pending: 47 }, 5)).toContain('<div><b>47</b>Pendientes</div>');
+    expect(renderDesignPage({ ...rich, pending: 47, meta: { ...rich.meta, locale: 'en' } }, 5)).toContain('<div><b>47</b>Pending</div>');
   });
   it('marks the version buttons with aria-pressed', () => {
     const html = renderDesignPage(rich, 5);
@@ -273,16 +307,37 @@ describe('mountDesignPage: language, focus and open rounds (K3-11)', () => {
     mounted(nol);
     expect(document.documentElement.lang).toBe('en');
   });
-  it('has a banner, one main and named navigation and sections, in both languages', () => {
+  it('has a banner, one main and named navigation and sections, in both languages; the labels are real headings (carry 10)', () => {
     for (const [d, names] of [[rich, ['Versiones', 'Pilares', 'Prompt de arranque', 'Rondas', 'Índice']], [{ ...rich, meta: { ...rich.meta, locale: 'en' } }, ['Versions', 'Pillars', 'Start prompt', 'Rounds', 'Contents']]] as const) {
       const root = mounted(d);
+      // The accessible name of a region: the heading of the page it points at, else its aria-label.
+      const nameOf = (el: Element) => {
+        const by = el.getAttribute('aria-labelledby');
+        return by ? root.querySelector(`[id="${by}"]`)?.textContent ?? null : el.getAttribute('aria-label');
+      };
       expect(root.querySelectorAll('header').length).toBe(1);
       expect(root.querySelector('header')?.parentElement).toBe(root);
       expect(root.querySelectorAll('main').length).toBe(1);
-      expect(root.querySelector('main nav.toc')?.getAttribute('aria-label')).toBe(names[4]);
-      expect(Array.from(root.querySelectorAll('main section')).map(s => s.getAttribute('aria-label'))).toEqual(names.slice(0, 4));
+      expect(nameOf(root.querySelector('main nav.toc')!)).toBe(names[4]);
+      expect(Array.from(root.querySelectorAll('main section')).map(nameOf)).toEqual(names.slice(0, 4));
+      expect(Array.from(root.querySelectorAll('.lbl')).map(l => [l.tagName, l.textContent])).toEqual([[ 'H2', names[0]], ['H2', names[2]], ['H2', names[3]], ['H2', names[4]]]);
       expect(root.querySelector('main .doc')).not.toBeNull();
+      root.remove();
     }
+  });
+  it('announces the version a click shows in a live region outside the repainted page (carry 10)', () => {
+    const root = mounted(rich);
+    const live = root.nextElementSibling as HTMLElement;
+    expect(live.getAttribute('role')).toBe('status');
+    expect(live.getAttribute('aria-live')).toBe('polite');
+    expect(live.className).toBe('sr');
+    expect(live.textContent).toBe('');
+    (root.querySelector('[data-version="2"]') as HTMLElement).click();
+    expect(live.textContent).toBe('Mostrando v2');
+    expect(root.nextElementSibling).toBe(live);
+    const en = mounted({ ...rich, meta: { ...rich.meta, locale: 'en' } });
+    (en.querySelector('[data-version="5"]') as HTMLElement).click();
+    expect((en.nextElementSibling as HTMLElement).textContent).toBe('Showing v5 · current');
   });
   it('renders a full history (40 rounds of 40 proposals) in a bounded page', () => {
     const p = rich.critiques[0].proposals[0];
