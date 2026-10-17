@@ -1,7 +1,7 @@
 import { computeMetrics } from '../lib/metrics.js';
 import { escalationCandidates, inboxFor } from '../lib/coordination.js';
 import { parseCritique } from '../lib/critique.js';
-import { parseDismissed, pendingProposals, type GateCritique } from '../lib/design-gate.js';
+import { parseDismissed, pendingProposals, unionDismissed, type GateCritique } from '../lib/design-gate.js';
 import { parseDesign } from '../lib/design.js';
 import { parseChangelog } from '../lib/history.js';
 import { parsePlan } from '../lib/plan.js';
@@ -16,7 +16,8 @@ import { describeViewer, type Viewer, type ViewerInput } from '../lib/viewer-rol
 export interface ProjectEntry { name: string; bindings: readonly BoundDoc[]; mtimeMs: number }
 export interface BandFiles {
   plan?: string; session?: string; execution?: string; execTasks?: Record<string, string>; live?: Record<string, string>;
-  design?: string; changelog?: string; decisions?: string; dismissed?: string;
+  /** dismissed.json of docs/…/design/critiques/ and of .waypoint/<project>/ (before 0.27.0): the model merges both. */
+  design?: string; changelog?: string; decisions?: string; dismissed?: string; dismissedLegacy?: string;
   states: Record<string, string>; messages: Record<string, string>; critiques: Record<string, string>;
   /** C3: the project's bindings by seat: '.' is the checkout seat's bound.json, '<sid>' the one in seats/<sid>/. */
   bindings?: Record<string, string>;
@@ -451,7 +452,8 @@ function designModel(project: string, f: BandFiles, viewer: BandViewer): BandMod
   // The highest round with a valid critique; invalid ones are skipped.
   const top = valid.find(c => c.critique !== null);
   const latest = top?.critique ?? null;
-  const pending = pendingProposals(changelog, valid, parseDismissed(f.dismissed));
+  // Carry 8: the dismissals of both places, merged as the CLI's readDismissedOf merges them.
+  const pending = pendingProposals(changelog, valid, unionDismissed(parseDismissed(f.dismissedLegacy), parseDismissed(f.dismissed)));
   return {
     mode: 'design', project, locale: d.meta.locale,
     version: changelog.at(-1)?.version ?? 0,

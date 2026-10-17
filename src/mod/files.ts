@@ -5,6 +5,8 @@ import { DECISIONS_MAX } from '../lib/decisions.js';
 import { BOUND_MAX_BYTES, BOUND_REREAD_MS, CACHE_DOCS_MAX, MAX_PROJECTS, MAX_SEATS, parseBound, SESSION_MAX_BYTES, type BoundDoc } from '../lib/bound.js';
 import { FORGE_DOC_MAX_BYTES, isSafeId, parseExecution } from '../lib/execution-state.js';
 import { newestMemberFiles } from '../lib/member-doc.js';
+import { CRITIQUE_FILE, LEGACY_CRITIQUE_FILE } from '../lib/critique.js';
+import { DISMISSED_MAX_CHARS } from '../lib/design-gate.js';
 
 export type Engine = EngineInterface;
 
@@ -237,24 +239,31 @@ async function readBandFiles($: Engine): Promise<{ project: string | null; files
   const pdocs = join(root, 'docs', 'waypoint', project);
   const pstate = join(root, '.waypoint', project);
   // K3-10: the critiques and dismissed.json live in docs/waypoint/<project>/design/critiques/ (r<N>.json), versioned with
-  // the design; the ones from before waypoint 0.27.0 stay in .waypoint/<project>/ (critique-r<N>.json). docs/ wins a
-  // round both have. The model reads them all under the old name, critique-r<N>.json.
+  // the design; the ones from before waypoint 0.27.0 stay in .waypoint/<project>/ (critique-r<N>.json). The model reads
+  // them all under the old name, critique-r<N>.json. Carry 8, as the CLI's readCritiques: the round files of both places
+  // are listed first and docs/ wins a round both have, so a .waypoint/ file of that round is never read; only the newest
+  // MAX_DOCS rounds are read; round 0, a leading zero and a critique set aside as rejected are no round.
   const pcrit = join(pdocs, 'design', 'critiques');
-  const critiques: Record<string, string> = {};
-  const places: [string, RegExp][] = [[pstate, /^critique-r(\d+)\.json$/], [pcrit, /^r(\d+)\.json$/]];
-  for (const [where, re] of places) {
-    const found = (await listOpt($, where)).filter(f => f.kind === 'file' && re.test(f.name)).slice(0, MAX_DOCS);
-    for (const f of found) {
-      const text = await readOpt($, join(where, f.name));
-      const m = re.exec(f.name);
-      if (text !== undefined && m) critiques[`critique-r${Number(m[1])}.json`] = text;
+  const rounds = new Map<number, string>();
+  for (const [where, re] of [[pstate, LEGACY_CRITIQUE_FILE], [pcrit, CRITIQUE_FILE]] as const) {
+    for (const f of await listOpt($, where)) {
+      const m = f.kind === 'file' ? re.exec(f.name) : null;
+      if (m) rounds.set(Number(m[1]), join(where, f.name));
     }
+  }
+  const critiques: Record<string, string> = {};
+  for (const [round, file] of [...rounds.entries()].sort((a, b) => b[0] - a[0]).slice(0, MAX_DOCS)) {
+    const text = await readOpt($, file);
+    if (text !== undefined) critiques[`critique-r${round}.json`] = text;
   }
   const files: BandFiles = {
     plan: await readOpt($, join(pdocs, 'plan.yaml')),
     design: await readOpt($, join(pdocs, 'design.md')),
     changelog: await readOpt($, join(pdocs, 'design', 'changelog.json')),
-    dismissed: (await readOpt($, join(pcrit, 'dismissed.json'))) ?? (await readOpt($, join(pstate, 'dismissed.json'))),
+    // Carry 8: both dismissed.json, merged by the model as the CLI's readDismissedOf merges them; one over the size cap is
+    // not read.
+    dismissed: await readSmall($, join(pcrit, 'dismissed.json'), DISMISSED_MAX_CHARS),
+    dismissedLegacy: await readSmall($, join(pstate, 'dismissed.json'), DISMISSED_MAX_CHARS),
     ...chosen.seats,
     states: await readCollection($, join(pstate, 'dbcache', 'state'), 'first'),
     // The newest MAX_DOCS: the band reads them again on every 30 s tick, one engine call each, so it does not count
