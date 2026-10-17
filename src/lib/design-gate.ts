@@ -22,9 +22,16 @@ export interface Gate {
   criticalPending: { round: number; n: number }[]; invalid: number[]; canAutoApprove: boolean;
   pending: Pending[]; pendingCounts: { critical: number; major: number; minor: number };
   dismissed: GateDismissed[]; resolved: GateResolved[]; applied: GateApplied[];
+  /** How many older entries each list left out (see GATE_LIST_MAX); present only when not 0. */
+  dismissedMore?: number; resolvedMore?: number; appliedMore?: number;
 }
 /** K3-05: the longest reason kept for a dismissal, on one clean line. */
 export const REASON_MAX = 300;
+/** The newest entries kept in each list the gate hands the critic, and the code points kept of each of their texts. */
+export const GATE_LIST_MAX = 40;
+export const GATE_TEXT_MAX = 300;
+/** A critique's text as one clean line of GATE_TEXT_MAX code points at most. */
+const line = (s: string): string => Array.from(clean(s, Number.MAX_SAFE_INTEGER)).slice(0, GATE_TEXT_MAX).join('');
 
 /** Notes written before `applied` and `rewrite` existed, in English or Spanish: "round 1: applied 1,3 — …",
  *  "ronda 1: aplicadas 1, 3 y 5 — …"; "round 2: rewrite — …", "ronda 2: reescritura — …". */
@@ -137,17 +144,24 @@ export function designGate(changelog: ChangelogEntry[], critiques: GateCritique[
     const resolved = resolvedIn(changelog, round);
     const set = new Map((dismissed[round] ?? []).map(x => [x.n, x] as const));
     for (const p of proposals) {
-      if (applied.has(p.n)) done.push({ round, n: p.n, section: p.section, change: p.change });
-      if (resolved.has(p.n)) solved.push({ round, n: p.n, section: p.section, problem: p.problem });
+      const section = () => line(p.section);
+      if (applied.has(p.n)) done.push({ round, n: p.n, section: section(), change: line(p.change) });
+      if (resolved.has(p.n)) solved.push({ round, n: p.n, section: section(), problem: line(p.problem) });
       const x = set.get(p.n);
-      if (x) gone.push({ round, n: p.n, section: p.section, problem: p.problem, ...(x.reason ? { reason: x.reason } : {}) });
+      if (x) gone.push({ round, n: p.n, section: section(), problem: line(p.problem), ...(x.reason ? { reason: x.reason } : {}) });
     }
   }
+  // The critic's prompt must stay bounded: the newest GATE_LIST_MAX of each list (by round, then number), the rest counted.
+  const newest = <T>(list: T[]) => list.slice(-GATE_LIST_MAX);
+  const more = (list: unknown[]) => Math.max(0, list.length - GATE_LIST_MAX);
   return {
     version, rounds: valid.length, latestRound, latestCritiqueVersion, criticalPending,
     invalid: critiques.filter(c => c.critique === null).map(c => c.round).sort((a, b) => a - b),
     canAutoApprove: latest !== null && criticalPending.length === 0 && latestCritiqueVersion !== null && latestCritiqueVersion <= version,
     pending, pendingCounts: { critical: count('critical'), major: count('major'), minor: count('minor') },
-    dismissed: gone, resolved: solved, applied: done,
+    dismissed: newest(gone), resolved: newest(solved), applied: newest(done),
+    ...(more(gone) ? { dismissedMore: more(gone) } : {}),
+    ...(more(solved) ? { resolvedMore: more(solved) } : {}),
+    ...(more(done) ? { appliedMore: more(done) } : {}),
   };
 }

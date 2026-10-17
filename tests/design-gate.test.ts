@@ -160,6 +160,22 @@ describe('resolved in an interview, and what the gate hands the next critic (K3-
     expect(g.pending).toEqual([]);
     expect(g.rounds).toBe(2);
   });
+  it('bounds the lists for the critic: newest 40 of each, texts cleaned and clipped to 300 code points, the rest counted', () => {
+    const bidi = String.fromCharCode(0x202e);
+    const long = `${bidi}\n` + '😀'.repeat(5000);
+    const proposals = Array.from({ length: 200 }, (_, i) => ({ n: i + 1, category: 'gap' as const, severity: 'minor' as const, section: long, problem: long, change: long }));
+    const crit: Critique = { round: 1, version: 1, scope: 'full', proposals };
+    const all = Array.from({ length: 200 }, (_, i) => i + 1);
+    const log: ChangelogEntry[] = [E(1, 'v1', 0), { ...E(2, 'x', 1), applied: { 1: all }, resolved: all.map(n => ({ round: 1, n })) }];
+    const g = designGate(log, [{ round: 1, critique: crit }], { 1: all.map(n => ({ n })) });
+    for (const list of [g.dismissed, g.resolved, g.applied]) expect(list).toHaveLength(40);
+    expect(g.dismissed.map(x => x.n)).toEqual(all.slice(160));
+    expect(g).toMatchObject({ dismissedMore: 160, resolvedMore: 160, appliedMore: 160 });
+    expect(Array.from(g.dismissed[0].problem)).toHaveLength(300);
+    expect(g.dismissed[0].problem).not.toContain(bidi);
+    expect(g.applied[0].change.startsWith('😀')).toBe(true);
+    expect(JSON.stringify(g).length).toBeLessThan(150_000);
+  });
   it('appliedVersion names the version whose entry applied a proposal, structured or from an old note', () => {
     const log: ChangelogEntry[] = [E(1, 'v1', 0), E(2, 'round 1: applied 2 — a', 1), { ...E(3, 'x', 1), applied: { 1: [1] } }];
     expect(appliedVersion(log, 1, 2)).toBe(2);
