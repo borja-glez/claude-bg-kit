@@ -16,6 +16,28 @@ const data = buildDesignPageData({
   source: 'docs/waypoint/demo-shop/',
 });
 
+// A design that went through two rounds, a rewrite, an approval and an amendment (K3-09).
+const approved = fixture.replace('start_prompt: /waypoint:work backend', 'start_prompt: /waypoint:work backend\nstatus: approved');
+const prop = (n: number, severity: 'critical' | 'major' | 'minor', section: string) => ({ n, category: 'gap' as const, severity, section, problem: `p${n}`, change: `c${n}` });
+const rich = buildDesignPageData({
+  current: approved.replace('Backend en Node y frontend web.', 'Backend en Node 22 y frontend web.'),
+  history: { 1: fixture.replace('Riesgos', 'Peligros'), 2: fixture, 3: fixture, 4: approved },
+  changelog: [
+    { version: 1, date: '2026-10-10', note: 'borrador', words: 40, round: 0, kind: 'draft' },
+    { version: 2, date: '2026-10-11', note: 'ronda 1', words: 45, round: 1, kind: 'apply', applied: { 1: [1] }, resolved: [{ round: 1, n: 2 }] },
+    { version: 3, date: '2026-10-12', note: 'ronda 2', words: 45, round: 2, kind: 'rewrite', rewrite: true },
+    { version: 4, date: '2026-10-13', note: 'aprobado', words: 45, round: 2, kind: 'approve' },
+    { version: 5, date: '2026-10-14', note: 'enmienda', words: 46, round: 2, kind: 'amend' },
+  ],
+  source: 'docs/waypoint/demo-shop/',
+  critiques: [
+    { round: 2, critique: { round: 2, version: 2, scope: 'changed', proposals: [prop(1, 'major', 'riesgos')] } },
+    { round: 1, critique: { round: 1, version: 1, scope: 'full', verdict: 'changes', proposals: [prop(1, 'critical', 'peligros'), prop(2, 'major', 'alcance'), prop(3, 'minor', '_intro'), prop(4, 'minor', 'arquitectura')] } },
+    { round: 3, critique: null },
+  ],
+  dismissed: { 1: [{ n: 3, reason: 'fuera de alcance' }] },
+});
+
 describe('renderDesignPage', () => {
   it('renders the editorial header, metrics, pillars, prompt and toc in Spanish', () => {
     const html = renderDesignPage(data, 2);
@@ -99,5 +121,31 @@ describe('built template', () => {
   it('has no stray closing script tags inside the bundle', () => {
     const html = readFileSync(path.join(process.cwd(), 'plugins/waypoint/assets/design.template.html'), 'utf8');
     expect((html.match(/<\/script/gi) ?? []).length).toBe((html.match(/<script/gi) ?? []).length);
+  });
+});
+
+describe('buildDesignPageData: the rounds, what became of each proposal and what each version changed (K3-09)', () => {
+  it('counts the valid critiques as rounds, in order, with their verdict and the fate of every proposal', () => {
+    expect(rich.rounds).toBe(2);
+    expect(rich.critiques.map(c => [c.round, c.verdict])).toEqual([[1, 'changes'], [2, 'changes']]);
+    expect(rich.critiques[0].proposals.map(p => [p.n, p.fate, p.appliedIn ?? null, p.reason ?? null])).toEqual([
+      [1, 'applied', 2, null], [2, 'resolved', null, null], [3, 'dismissed', null, 'fuera de alcance'], [4, 'pending', null, null],
+    ]);
+    expect(rich.critiques[1].proposals[0].fate).toBe('rewritten');
+  });
+  it('says the status, and amended when an amendment came after the last approval', () => {
+    expect(rich).toMatchObject({ status: 'approved', amended: true, current: 5 });
+    const once = buildDesignPageData({ current: approved, history: {}, changelog: [{ version: 1, date: 'd', note: 'aprobado', words: 1, round: 0, kind: 'approve' }], source: 's/' });
+    expect(once).toMatchObject({ status: 'approved', amended: false });
+    expect(data).toMatchObject({ status: 'draft', amended: false, rounds: 0, critiques: [] });
+  });
+  it('gives every version but the first what it changed, added and removed against the one before, by heading', () => {
+    expect(rich.versions.map(v => v.diff)).toEqual([
+      null,
+      { changed: [], added: ['Riesgos'], removed: ['Peligros'] },
+      { changed: [], added: [], removed: [] },
+      { changed: [], added: [], removed: [] },
+      { changed: ['Arquitectura'], added: [], removed: [] },
+    ]);
   });
 });

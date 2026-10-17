@@ -75,7 +75,7 @@ describe('buildDesignPageData', () => {
       source: 'docs/waypoint/demo-shop/',
     });
     expect(data.current).toBe(2);
-    expect(data.rounds).toBe(1);
+    expect(data.rounds).toBe(0); // K3-09: the number of valid critiques, and none was given
     expect(data.versions.map(v => v.version)).toEqual([1, 2]);
     expect(data.versions[0].html).toContain('Primera versión');
     expect(data.versions[1].toc.map(t => t.slug)).toEqual(['alcance', 'fuera-de-alcance', 'arquitectura', 'riesgos']);

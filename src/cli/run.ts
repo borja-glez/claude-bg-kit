@@ -911,17 +911,18 @@ export function run(argv: string[], io: Io): Result {
         const out = flag('out');
         if (!out) return fail('design-page: --out is required', 2);
         const dirPath = path.dirname(file);
-        const histDir = path.join(dirPath, 'design', 'history');
-        const history: Record<number, string> = {};
-        for (const v of listVersions(existsSync(histDir) ? readdirSync(histDir) : [])) history[v] = readFileSync(path.join(histDir, `v${v}.md`), 'utf8');
+        const history = readHistory(dirPath);
         const current = readFileSync(file, 'utf8');
-        let source = `docs/waypoint/${parseDesign(current).meta.project}/`;
+        const project = parseDesign(current).meta.project;
+        let source = `docs/waypoint/${project}/`;
         try {
           const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: dirPath, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
           const rel = path.relative(path.resolve(root), dirPath).split(path.sep).join('/');
           if (!rel.startsWith('..') && !path.isAbsolute(rel)) source = rel ? `${rel}/` : '';
         } catch { /* not a git repo: keep the docs/waypoint/<project>/ fallback */ }
-        const data = buildDesignPageData({ current, history, changelog: readChangelog(dirPath), source });
+        // K3-09, K3-10: the rounds the page tells, from the critiques and dismissed.json next to the design (or in .waypoint/).
+        const files = designFilesOf(file, project);
+        const data = buildDesignPageData({ current, history, changelog: readChangelog(dirPath), source, critiques: readCritiques(files), dismissed: readDismissedOf(files) });
         const tpl = readFileSync(path.join(io.assetsDir, 'design.template.html'), 'utf8');
         const title = `${data.meta.title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')} · Design`;
         const json = JSON.stringify(data).replace(/</g, '\\u003c');
