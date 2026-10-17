@@ -61,7 +61,7 @@ function renderVersionsView(m: Model, d: Dict, ui: UiState): string {
       const on = vfilterActive(f, k);
       return `<button class="f vf-${k} ${on ? 'on' : ''}" data-action="vfilter" data-key="${k}" aria-pressed="${on}">${VF_ICON[k]} ${esc(d.vfilter[k])} · ${cnt[k]}</button>`;
     }).join('')}
-    <label class="f trk" title="${esc(d.trackHelp)}">${esc(d.trackLabel)}: <select data-action="vtrack"><option value="">${esc(d.allTracks)}</option>${m.plan.tracks.map(t =>
+    <label class="f trk" title="${esc(d.trackHelp)}">${esc(d.trackLabel)}: <select name="track" data-action="vtrack"><option value="">${esc(d.allTracks)}</option>${m.plan.tracks.map(t =>
       `<option value="${esc(t.id)}"${t.id === track ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label>
   </div>`;
   const body = cols.map(c => {

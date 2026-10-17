@@ -22,8 +22,8 @@ function renderNotes(m: Model, d: Dict, ui: UiState, loc: string): string {
   const ro = m.readOnly;
   const notice = ro ? d.notice.readonly : ui.notice && ui.notice !== 'readonly' ? d.notice[ui.notice] : '';
   const comp = `<div class="ncomp ${ro ? 'ro' : ''}">
-    <textarea data-role="note-text" maxlength="${MAX_NOTE}" rows="2" placeholder="${esc(d.notePlaceholder)}"${ro ? ' readonly' : ''}>${esc(ui.draft.text)}</textarea>
-    <label class="btn sel">${esc(d.noteTypeLabel)}: <select data-action="note-type"${ro ? ' disabled' : ''}>${NOTE_TYPES.map(t =>
+    <textarea name="note" data-role="note-text" maxlength="${MAX_NOTE}" rows="2" placeholder="${esc(d.notePlaceholder)}"${ro ? ' readonly' : ''}>${esc(ui.draft.text)}</textarea>
+    <label class="btn sel">${esc(d.noteTypeLabel)}: <select name="note-type" data-action="note-type"${ro ? ' disabled' : ''}>${NOTE_TYPES.map(t =>
       `<option value="${t}"${t === ui.draft.type ? ' selected' : ''}>${esc(d.noteType[t])}</option>`).join('')}</select></label>
     <button class="btn pri" data-action="note-add"${ro ? ' disabled' : ''}>${esc(d.add)}</button>
   </div>${notice ? `<div class="notice" role="status">${esc(notice)}</div>` : ''}`;
@@ -41,7 +41,7 @@ function renderNotes(m: Model, d: Dict, ui: UiState, loc: string): string {
         ${dec.revert ? `<div><span class="k">${esc(d.decisionRevert)}</span> ${esc(dec.revert)}</div>` : ''}
       </div>` : '';
     const reply = !open || ro ? '' : ui.answering === n.id
-      ? `<div class="areply"><textarea data-role="answer-text" maxlength="${MAX_NOTE}" rows="2" placeholder="${esc(d.answerPlaceholder)}">${esc(ui.answerDraft)}</textarea>
+      ? `<div class="areply"><textarea name="answer" data-role="answer-text" maxlength="${MAX_NOTE}" rows="2" placeholder="${esc(d.answerPlaceholder)}">${esc(ui.answerDraft)}</textarea>
         <button class="btn pri" data-action="answer-send" data-id="${esc(n.id)}">${esc(d.send)}</button></div>`
       : `<button class="btn" data-action="answer-open" data-id="${esc(n.id)}">${esc(d.reply)}</button>`;
     return `<div class="note nb-${t}" data-k="n:${esc(n.id)}">
@@ -89,11 +89,11 @@ function renderProposals(m: Model, d: Dict, ui: UiState, loc: string): string {
       // §4.1: only the roadmap's owner decides; anyone else comments, and is told so once it is known (carry 5).
       const decide = open && m.isOwner === true;
       const rejectUi = !decide ? '' : ui.rejecting === p.id
-        ? `<div class="areply"><textarea data-role="reason-text" maxlength="${MAX_PROPOSAL_TEXT}" rows="2" placeholder="${esc(d.reasonPlaceholder)}">${esc(ui.reasonDraft)}</textarea>
+        ? `<div class="areply"><textarea name="reason" data-role="reason-text" maxlength="${MAX_PROPOSAL_TEXT}" rows="2" placeholder="${esc(d.reasonPlaceholder)}">${esc(ui.reasonDraft)}</textarea>
           <button class="btn del" data-action="p-reject-send" data-id="${id}">${esc(d.sendReject)}</button></div>`
         : `<button class="btn" data-action="p-reject-open" data-id="${id}">${esc(d.reject)}</button>`;
       const commentUi = ui.commenting === p.id
-        ? `<div class="areply"><textarea data-role="comment-text" maxlength="${MAX_NOTE}" rows="2" placeholder="${esc(d.commentPlaceholder)}">${esc(ui.commentDraft)}</textarea>
+        ? `<div class="areply"><textarea name="comment" data-role="comment-text" maxlength="${MAX_NOTE}" rows="2" placeholder="${esc(d.commentPlaceholder)}">${esc(ui.commentDraft)}</textarea>
           <button class="btn pri" data-action="p-comment-send" data-id="${id}">${esc(d.send)}</button></div>`
         : `<button class="btn" data-action="p-comment-open" data-id="${id}">${esc(d.comment)}</button>`;
       const onlyOwner = open && m.isOwner === false ? `<div class="muted">${esc(d.owner.onlyOwner)}</div>` : '';

@@ -162,7 +162,7 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
     <div class="tabs">
       ${GROUPS.map(g => `<button class="tab ${groupBy === g ? 'on' : ''}" data-action="tgroup" data-group="${g}"${g === 'track' ? ` title="${esc(d.trackHelp)}"` : ''}>${esc(groupName(g))}</button>`).join('')}
       <button class="tab" data-action="tl-all" data-open="${allOpen ? '0' : '1'}">${esc(allOpen ? d.tl.collapse : d.tl.expand)}</button>
-      <input class="search" data-role="search" placeholder="${esc(d.search)}" value="${esc(ui.search)}">
+      <input class="search" name="search" data-role="search" placeholder="${esc(d.search)}" value="${esc(ui.search)}">
     </div>
     <div class="tools">
       <div class="chips" data-scroll-key="chips:status"><span class="lbl">${esc(d.tl.show)}</span>${TL_STATUSES.map(k => chip('status', k, statusLabel(k), filter.has(k))).join('')}</div>
@@ -235,7 +235,7 @@ function renderInsights(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
       <text class="bdt" x="${W - 10}" y="${H - 6}" text-anchor="end">${esc(fmt(new Date(bd.end).toISOString(), loc))}</text></svg>
       <div class="legend"><span><i class="lg bdl-a"></i>${esc(d.insights.actual)}</span><span><i class="lg bdl-i"></i>${esc(d.insights.ideal)}</span><span class="mono">${bd.actual.at(-1)!.left} ${esc(d.insights.tasksLeft)}</span></div>`;
   }
-  const scopeSel = `<select data-action="burn-scope" aria-label="${esc(d.insights.scope)}">${scopes.map(sc => `<option value="${esc(sc.id)}"${sc.id === scope.id ? ' selected' : ''}>${esc(sc.label)}</option>`).join('')}</select>`;
+  const scopeSel = `<select name="burn-scope" data-action="burn-scope" aria-label="${esc(d.insights.scope)}">${scopes.map(sc => `<option value="${esc(sc.id)}"${sc.id === scope.id ? ' selected' : ''}>${esc(sc.label)}</option>`).join('')}</select>`;
   const cp = dv.critical;
   const chain = cp.ids.length
     ? `<div class="mono">${esc(d.insights.chain(cp.ids.length, cp.minutes))}</div><ol class="chain" data-scroll-key="chain">${cp.ids.map(id => {

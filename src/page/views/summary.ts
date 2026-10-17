@@ -29,7 +29,7 @@ function renderNeeds(m: Model, d: Dict, ui: UiState, dv: Derived): string {
     if (n.kind === 'question') {
       const id = n.note.id;
       const reply = m.readOnly || ui.modal ? '' : ui.answering === id
-        ? `<div class="areply"><textarea data-role="answer-text" maxlength="${MAX_NOTE}" rows="2" placeholder="${esc(d.answerPlaceholder)}">${esc(ui.answerDraft)}</textarea><button type="button" class="btn pri" data-action="answer-send" data-id="${esc(id)}">${esc(d.send)}</button></div>`
+        ? `<div class="areply"><textarea name="answer" data-role="answer-text" maxlength="${MAX_NOTE}" rows="2" placeholder="${esc(d.answerPlaceholder)}">${esc(ui.answerDraft)}</textarea><button type="button" class="btn pri" data-action="answer-send" data-id="${esc(id)}">${esc(d.send)}</button></div>`
         : `<button type="button" class="btn" data-action="answer-open" data-id="${esc(id)}">${esc(d.reply)}</button>`;
       const ref = n.note.taskId && m.plan.tasks.some(t => t.id === n.note.taskId) ? ` ${task(n.note.taskId, k)}` : '';
       return `<b>${esc(d.needs.question)}</b> ${esc(n.note.text)}${ref}${reply}`;

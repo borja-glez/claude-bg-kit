@@ -1670,3 +1670,21 @@ describe('the forge mark of the timeline (K4-05)', () => {
     expect(html).toContain('<span class="fg warn" title="Veredicto: 0.40">⚒ arreglo · r2/4</span>');
   });
 });
+
+describe('form fields (Close b)', () => {
+  it('every field the page renders, in every view and composer, has a name', () => {
+    const m = { ...base(), isOwner: true, me: 'user:u1', notes: [note({ id: 'q1', type: 'question', text: '¿A?', taskId: 'T002' })], proposals: [P()] };
+    const pages = [
+      renderApp(m, ui({ view: 'talk', answering: 'q1' })),
+      renderApp(m, ui({ view: 'talk', talk: 'proposals', rejecting: 'p1', commenting: 'p1' })),
+      renderApp(m, ui({ answering: 'q1' })),
+      renderApp(m, ui({ modal: 'T002', tab: 'talk', answering: 'q1' })),
+      renderApp(m, ui({ view: 'schedule' })),
+      renderApp(m, ui({ view: 'plan' })),
+    ];
+    const fields = pages.flatMap(h => [...h.matchAll(/<(?:input|textarea|select)\b[^>]*>/g)].map(x => x[0]));
+    for (const role of ['search', 'note-text', 'answer-text', 'reason-text', 'comment-text']) expect(fields.filter(f => f.includes(`data-role="${role}"`)).length, role).toBeGreaterThan(0);
+    for (const action of ['note-type', 'burn-scope', 'vtrack']) expect(fields.filter(f => f.includes(`data-action="${action}"`)).length, action).toBeGreaterThan(0);
+    expect(fields.filter(f => !/\sname="[\w-]+"/.test(f))).toEqual([]);
+  });
+});
