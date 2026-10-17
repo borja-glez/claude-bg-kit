@@ -140,7 +140,7 @@ describe('renderApp', () => {
     expect(html).toContain('class="insights"');
     expect(html).toContain('data-action="burn-scope"');
     expect(html).toContain('class="chain"');
-    expect(html).toContain('src/db/**');
+    expect(html).toContain('<span class="mono">src/db</span>');
   });
 
   it('survives an empty model', () => {
@@ -1737,5 +1737,56 @@ describe('the schedule fitted, with the phases in progress open (H-14)', () => {
     expect([...openGroups(base(), ui({ autoOpen: true, timelineGroup: 'track' }), 'track')]).toEqual([]);
     expect([...openGroups(base(), ui({ autoOpen: true, search: 'x' }), 'phase')]).toEqual(['F1', 'F2']);
     expect(phasesInProgress({ ...base(), states: {} })).toEqual([]);
+  });
+});
+
+describe('the analysis: burndown and zones (H-26, G-27)', () => {
+  const chartOf = (html: string) => { const i = html.indexOf('<div class="bdw"'); return html.slice(i, html.indexOf('<div class="legend"', i)); };
+  it('the burndown is as wide as ui.width, and its labels are HTML of 11 px, not SVG text', () => {
+    const chart = chartOf(renderApp(base(), ui({ view: 'schedule', width: 900 })));
+    expect(chart).toContain('<svg class="bd" viewBox="0 0 900 160" preserveAspectRatio="none" aria-hidden="true">');
+    expect(chart).not.toContain('<text');
+    expect(chart).toMatch(/<span class="bdk y" style="top:[\d.]+%">\d+<\/span>/);
+    expect(chart).toContain('<span class="bdk x l">');
+    expect(chart).toContain('<span class="bdk x r">');
+    expect(chartOf(renderApp(base(), ui({ view: 'schedule' })))).toContain('viewBox="0 0 520 160"');
+    expect(cssRule(CSS, '.bdk')).toContain('font:11px');
+  });
+  it('without a version target there is no ideal line, and it says why; with one, the line ends on it', () => {
+    const none = renderApp(base(), ui({ view: 'schedule' }));
+    expect(none).not.toContain('class="bdi"');
+    expect(none).toContain('Sin línea ideal: la versión no tiene fecha objetivo');
+    const m = { ...base(), plan: { ...plan, versions: [{ id: '0.1', phases: ['F1', 'F2'], target: '2026-10-13' }] } };
+    const html = renderApp(m, ui({ view: 'schedule', burnScope: 'v:0.1' }));
+    expect(html).toContain('class="bdi"');
+    expect(html).toMatch(/<span class="bdk tg" style="left:[\d.]+%">objetivo [^<]+<\/span>/);
+    // A phase reads its version's target, and the whole plan its last version's.
+    expect(renderApp(m, ui({ view: 'schedule', burnScope: 'p:F2' }))).toContain('class="bdi"');
+    expect(renderApp(m, ui({ view: 'schedule' }))).toContain('class="bdi"');
+  });
+  it('the zones go by directory, with a legend, and one that two running tasks share is marked first', () => {
+    const m = base();
+    m.plan = { ...m.plan, tasks: m.plan.tasks.map(t => (t.id === 'T003' ? { ...t, zones: ['src/api/cart/**'] } : t)) };
+    m.states = { ...m.states, T003: { status: 'claimed', owner: 'ui' } };
+    const html = renderApp(m, ui({ view: 'schedule' }));
+    expect(html).toMatch(/<ul class="zones" data-scroll-key="zones"><li class="zl shared"><div class="zn"><span class="mono">src\/api<\/span>/);
+    expect(html).toContain('⚠ 2 en curso a la vez');
+    expect(html).toContain('<div class="legend zlg">');
+    expect(html).not.toContain('src/api/orders/**');
+  });
+  it('escapes a zone (Review Focus 5)', () => {
+    clean(renderApp({ ...base(), plan: { ...plan, tasks: plan.tasks.map(t => ({ ...t, zones: [HOSTILE] })) } }, ui({ view: 'schedule' })));
+  });
+  it('an empty plan draws the schedule and its analysis: no NaN, no forecast, nothing thrown (Review Focus 1)', () => {
+    const empty: Model = { ...base(), plan: { tracks: [], versions: [], phases: [], tasks: [] }, states: {}, sessions: {}, events: [] };
+    for (const over of [{}, { layers: ['forecast', 'critical'] }, { width: 900, burnScope: 'v:0.1' }, { fit: true, autoOpen: true }] as Partial<UiState>[]) {
+      const html = renderApp(empty, ui({ view: 'schedule', ...over }));
+      expect(html).toContain('class="insights"');
+      expect(html).not.toContain('NaN');
+      expect(html).not.toContain('Infinity');
+      expect(html).not.toContain('class="fc"');
+      expect(html).not.toContain('class="fct"');
+      expect(html).not.toContain('class="bdw"');
+    }
   });
 });

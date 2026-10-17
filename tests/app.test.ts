@@ -2634,3 +2634,33 @@ describe('the schedule opens fitted, with the phases in progress open (H-14)', (
     two.app.stop();
   });
 });
+
+describe('the burndown at its real width (H-26)', () => {
+  it('a ResizeObserver gives the burndown its width, and the chart redraws at it', async () => {
+    let report!: (entries: { contentRect: { width: number } }[]) => void;
+    const observed: Element[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(cb: (entries: { contentRect: { width: number } }[]) => void) { report = cb; }
+      observe(el: Element) { observed.push(el); }
+      unobserve() {}
+      disconnect() {}
+    });
+    history.replaceState(null, '', '#v=schedule');
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const app = await start({ claude: null, snapshot, root, now: () => NOW });
+    await settle();
+    expect(observed[0]).toBe(root.querySelector('[data-role="burndown"]'));
+    report([{ contentRect: { width: 900 } }]);
+    await new Promise(r => setTimeout(r, 60));
+    await settle();
+    expect(app.ui.width).toBe(900);
+    expect(root.querySelector('.bd')!.getAttribute('viewBox')).toBe('0 0 900 160');
+    // A change under 8 px is not worth a redraw.
+    report([{ contentRect: { width: 905 } }]);
+    await new Promise(r => setTimeout(r, 60));
+    expect(app.ui.width).toBe(900);
+    app.stop();
+    vi.unstubAllGlobals();
+  });
+});

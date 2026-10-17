@@ -83,6 +83,8 @@ export interface UiState {
   statuses?: string[]; layers?: string[];
   /** The scope of the burndown: a version id, a phase id, or empty for the whole plan. */
   burnScope?: string;
+  /** H-26: the burndown's width in CSS px, from a ResizeObserver; undefined until it reports (520 is drawn). */
+  width?: number;
   /** H-06: the timeline's viewport, from its last scroll; undefined until the first one, and after leaving the schedule. */
   tl?: TlView;
   /** Empty arrays = no filter. phaseStatuses filters columns by phase plan status. */

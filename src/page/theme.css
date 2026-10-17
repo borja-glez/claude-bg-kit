@@ -275,12 +275,25 @@ select{padding:1px 4px;font-size:11px;max-width:100%}
 .ins{margin-top:8px}
 .ch{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
 .ch select{background:var(--base);color:var(--text);border:1px solid var(--s1);border-radius:4px;padding:3px 6px;font:12px 'JetBrains Mono',monospace;max-width:60%}
-.bd{display:block;width:100%;height:auto;margin-top:6px}
-.bdg{stroke:var(--s0)} .bdt{fill:var(--o1);font:10px 'JetBrains Mono',monospace}
+.bd{position:absolute;inset:0;width:100%;height:100%}
+.bdg{stroke:var(--s0)} .bdtg{stroke:var(--green);stroke-dasharray:3 3}
 .bdi{stroke:var(--s2);stroke-width:1.5;stroke-dasharray:5 4}
 .bda{fill:none;stroke:var(--done);stroke-width:2.5;stroke-linejoin:round}
 .bdn{stroke:var(--now);stroke-width:1.5}
 .lg.bdl-a{background:var(--done)} .lg.bdl-i{background:none;border-top:2px dashed var(--s2);height:0}
+/* ---- The burndown at its width, its labels in HTML (H-26); the zones by directory (G-27) ---- */
+.bdw{position:relative;margin-top:6px;padding:0 0 22px 34px}
+.bdc{position:relative;height:160px}
+.bd line,.bd path{vector-effect:non-scaling-stroke}
+.bdk{position:absolute;font:11px 'JetBrains Mono',monospace;color:var(--o1);white-space:nowrap;pointer-events:none}
+.bdk.y{left:-34px;width:28px;text-align:right;transform:translateY(-50%)}
+.bdk.x{top:100%;margin-top:4px}
+.bdk.x.l{left:0} .bdk.x.r{right:0}
+.bdk.tg{top:0;transform:translateX(-50%);color:var(--green)}
+.zl.shared{border-left:3px solid var(--yellow);padding-left:6px}
+.zs{font-size:12px;color:var(--yellow)}
+.zlg{margin-top:8px}
+.lg.zd{background:var(--done)} .lg.za{background:var(--cur)} .lg.zp{background:var(--s2)} .lg.zt{background:var(--mauve);opacity:.75}
 .fct{margin:6px 0 8px;font-size:14px;color:var(--green)}
 .chain{list-style:none;margin:6px 0 0;padding:0;counter-reset:c}
 .chain li{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--sub1)}

@@ -1,6 +1,7 @@
 // Read-only analyses of a plan for the roadmap page: the critical path and the forecast end, a burndown series and
 // a heat map of code zones. Pure: plan and states in, plain data out.
 import { DEFAULT_ESTIMATE_MIN } from './timeline.js';
+import { staticPrefix } from './zones.js';
 import type { PlanView, States } from './types.js';
 
 const MIN = 60000;
@@ -142,13 +143,26 @@ export function forecastEnd(plan: PlanView, states: States, now: number, opts: {
   return Number.isFinite(at) && Math.abs(at) <= MAX_DATE ? { at: Math.round(at), parallel } : null;
 }
 
-export interface Burndown { start: number; end: number; total: number; actual: { t: number; left: number }[]; ideal: { t: number; left: number }[] }
+export interface Burndown {
+  start: number; end: number; total: number; actual: { t: number; left: number }[];
+  /** H-26: the straight line from the first start to zero on the version's target; null without a target after the start. */
+  ideal: { t: number; left: number }[] | null;
+  target: number | null;
+}
+
+/** H-26: the end of a version's target day (YYYY-MM-DD), in local time; null for anything else. */
+export function targetMs(target: string | undefined): number | null {
+  if (!target || !/^\d{4}-\d{2}-\d{2}$/.test(target)) return null;
+  const t = Date.parse(`${target}T23:59:59`);
+  return Number.isFinite(t) ? t : null;
+}
 
 /**
- * Tasks left over time for `ids` (a version's or a phase's tasks): the actual line steps down at each doneAt, the
- * ideal line goes straight from the first start to zero at the forecast end (or now when everything is done).
+ * Tasks left over time for `ids` (a version's or a phase's tasks): the actual line steps down at each doneAt. H-26: the
+ * ideal line goes straight from the first start to zero on the version's target, and only with one; the chart reaches the
+ * latest of now, the forecast end and the target.
  */
-export function burndown(plan: PlanView, states: States, ids: string[], now: number, forecastEnd: number | null): Burndown | null {
+export function burndown(plan: PlanView, states: States, ids: string[], now: number, opts: { forecast: number | null; target: number | null }): Burndown | null {
   if (!ids.length) return null;
   const starts = ids.map(id => Date.parse(states[id]?.startedAt ?? states[id]?.claimedAt ?? '')).filter(Number.isFinite);
   const dones = ids.filter(id => isDone(states, id)).map(id => Date.parse(states[id]?.doneAt ?? '')).filter(Number.isFinite).sort((a, b) => a - b);
@@ -160,30 +174,41 @@ export function burndown(plan: PlanView, states: States, ids: string[], now: num
   const doneNow = ids.filter(id => isDone(states, id)).length;
   // Done tasks without a doneAt still count: the line ends at the true number left now.
   actual.push({ t: now, left: total - doneNow });
-  const end = Math.max(now, forecastEnd ?? now, start + MIN);
-  return { start, end, total, actual, ideal: [{ t: start, left: total }, { t: end, left: 0 }] };
+  const target = opts.target !== null && Number.isFinite(opts.target) ? opts.target : null;
+  const end = Math.max(now, opts.forecast ?? now, target ?? now, start + MIN);
+  return { start, end, total, actual, ideal: target !== null && target > start ? [{ t: start, left: total }, { t: target, left: 0 }] : null, target };
 }
 
-export interface ZoneHeat { zone: string; tasks: number; done: number; active: number; touched: number }
+export interface ZoneHeat { zone: string; tasks: number; done: number; active: number; touched: number; shared: boolean }
 
-/** Each code zone with how many tasks plan to touch it, how many are done or running, and how many touched it. */
+/** G-27: a zone by its directory: the first two segments of its path before any glob ('src/a/b/**' and 'src/a/b/c.ts' are
+ *  both 'src/a'); a zone that starts with a glob stays as it is. */
+export function zoneDir(zone: string): string {
+  const parts = staticPrefix(zone).split('/').filter(Boolean);
+  return parts.length ? parts.slice(0, 2).join('/') : zone;
+}
+
+/** G-27: each directory the plan's zones fall in, with how many tasks plan to touch it, how many are done or running and
+ *  how many touched it, and whether two running tasks share it. The shared ones first, then the busiest, ties by plain
+ *  path order (carry 6: the same on every machine). */
 export function zoneHeat(plan: PlanView, states: States): ZoneHeat[] {
   const map = new Map<string, ZoneHeat>();
   const get = (zone: string) => {
     let z = map.get(zone);
-    if (!z) { z = { zone, tasks: 0, done: 0, active: 0, touched: 0 }; map.set(zone, z); }
+    if (!z) { z = { zone, tasks: 0, done: 0, active: 0, touched: 0, shared: false }; map.set(zone, z); }
     return z;
   };
   for (const t of plan.tasks) {
     const st = states[t.id]?.status ?? 'free';
-    for (const zone of new Set(t.zones)) {
+    for (const zone of new Set(t.zones.map(zoneDir))) {
       const z = get(zone);
       z.tasks += 1;
       if (st === 'done') z.done += 1;
       else if (st === 'in_progress' || st === 'claimed') z.active += 1;
     }
     const touched = states[t.id]?.zonesTouched;
-    if (Array.isArray(touched)) for (const zone of new Set(touched.filter((x): x is string => typeof x === 'string'))) get(zone).touched += 1;
+    if (Array.isArray(touched)) for (const zone of new Set(touched.filter((x): x is string => typeof x === 'string').map(zoneDir))) get(zone).touched += 1;
   }
-  return [...map.values()].sort((a, b) => b.tasks + b.touched - (a.tasks + a.touched) || a.zone.localeCompare(b.zone));
+  for (const z of map.values()) z.shared = z.active >= 2;
+  return [...map.values()].sort((a, b) => Number(b.shared) - Number(a.shared) || b.tasks + b.touched - (a.tasks + a.touched) || (a.zone < b.zone ? -1 : a.zone > b.zone ? 1 : 0));
 }

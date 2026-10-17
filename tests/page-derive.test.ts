@@ -62,7 +62,7 @@ describe('derive: the derived data once per revision of the data (H-06)', () => 
     expect(dv.byVersion).toEqual(dv.metrics.byVersion);
     expect(dv.critical.ids.length).toBeGreaterThan(0);
     expect(dv.forecast).not.toBeNull();
-    expect(dv.zones.map(z => z.zone)).toContain('src/db/**');
+    expect(dv.zones.map(z => z.zone)).toContain('src/db');
   });
 
   it('a render computes the metrics once, with the forecast and critical path layers on', () => {

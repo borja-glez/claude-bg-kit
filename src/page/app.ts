@@ -396,6 +396,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       const noteEl = env.root.querySelector('[data-role="tl-note"]');
       if (noteEl) noteEl.textContent = tlNote;
       writeHash();
+      watchBurndown();
       void lookupProfiles();
     } catch (e) {
       console.error('[waypoint] render failed', e);
@@ -937,6 +938,24 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     if ((start > 0 && first < start + 5) || (end < rows && first + count > end - 5)) scheduleFrame();
   };
 
+  // H-26: the burndown draws at the width it has. A ResizeObserver reports it (ui.width); a change under 8 px is ignored,
+  // so a redraw that moves a scrollbar does not loop. Without ResizeObserver it stays at its default width.
+  type Resize = { observe(el: Element): void; unobserve(el: Element): void; disconnect(): void };
+  const RO = (globalThis as { ResizeObserver?: new (cb: (entries: { contentRect: { width: number } }[]) => void) => Resize }).ResizeObserver;
+  let burnBox: Element | null = null;
+  const burnObserver: Resize | null = RO ? new RO(entries => {
+    const w = Math.round(entries[entries.length - 1]?.contentRect.width ?? 0);
+    if (w > 0 && Math.abs(w - (ui.width ?? 0)) >= 8) { ui.width = w; scheduleFrame(); }
+  }) : null;
+  const watchBurndown = () => {
+    if (!burnObserver) return;
+    const el = env.root.querySelector('[data-role="burndown"]');
+    if (el === burnBox) return;
+    if (burnBox) burnObserver.unobserve(burnBox);
+    if (el) burnObserver.observe(el);
+    burnBox = el;
+  };
+
   // ---- Export ----
   // The timeline as SVG or PNG through the downloads capability (the viewer confirms the save).
   const exportTimeline = async (format: 'svg' | 'png') => {
@@ -1148,6 +1167,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     window.removeEventListener('resize', applyScale);
     window.removeEventListener('popstate', onUrl);
     window.removeEventListener('hashchange', onUrl);
+    burnObserver?.disconnect();
     env.root.removeEventListener('scroll', onTlScroll, true);
   };
 

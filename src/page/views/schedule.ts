@@ -2,7 +2,7 @@
 // and 4c adds «Ajustar», the one forecast, the burndown against the version target and the aggregated zones.
 import { autoTicks, fitWindow, groupIds, layoutRows, NONE_GROUP, phaseLabel, phaseName, planRange, SPAN, windowAt, windowFor, type GroupBy, type Row, type Win, type Zoom } from '../../lib/timeline.js';
 import { statusOf } from '../../lib/deps.js';
-import { burndown } from '../../lib/insights.js';
+import { burndown, targetMs, type Burndown, type ZoneHeat } from '../../lib/insights.js';
 import type { TaskStatus } from '../../lib/types.js';
 import type { Derived } from '../derive.js';
 import { dictFor, type Dict } from '../i18n.js';
@@ -12,7 +12,23 @@ import type { Model, TlView, UiState } from '../model.js';
 export function renderScheduleView(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived): string {
   return `<header class="hd"><h1>${esc(d.views.schedule)}</h1></header>
     ${renderTimeline(m, d, ui, loc, dv)}
-    ${renderInsights(m, d, ui, loc, dv)}`;
+    ${insightsOf(m, d, ui, loc, dv)}`;
+}
+
+/**
+ * C31 (carry 4b-1): the analysis reads only the data, the burndown's scope and width and the locale, so it is built once
+ * per data revision and minute (one Derived of derive(), whose cache has that key), scope, width and locale: a search
+ * key, a pan step or «Desplegar todo» repaints the page with the string already built. Keyed by the Derived itself, so a
+ * render with a fresh one (computeDerived, as renderApp without one does) always builds it.
+ */
+const insightsMemo = new WeakMap<Derived, { key: string; html: string }>();
+function insightsOf(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived): string {
+  const key = `${ui.burnScope ?? ''}\n${ui.width ?? ''}\n${loc}`;
+  const hit = insightsMemo.get(dv);
+  if (hit && hit.key === key) return hit.html;
+  const html = renderInsights(m, d, ui, loc, dv);
+  insightsMemo.set(dv, { key, html });
+  return html;
 }
 
 /** H-06: from this many rows (after folding and filtering), the timeline paints only those around its viewport. */
@@ -204,61 +220,71 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
         <svg class="arrows" data-role="tl-arrows" data-morph="skip" aria-hidden="true"></svg></div>
     </div>
     </div>
-    ${renderMinimap(m, d, win)}
+    ${renderMinimap(m, d, win, dv)}
     <div class="legend">${(['done', 'current', 'blocked', 'estimate'] as const).map(k => `<span><i class="lg ${k}"></i>${esc(d.legend[k])}</span>`).join('')}<span><i class="lg nowl"></i>${esc(d.legend.now)}</span>${layers.has('critical') ? `<span><i class="lg critl"></i>${esc(d.tl.critical)}</span>` : ''}${layers.has('forecast') ? `<span><i class="lg fcl"></i>${esc(d.tl.forecastEnd)}</span>` : ''}<span class="hint">${esc(d.tl.hint)}</span></div>
     <div class="tlnote" data-role="tl-note" aria-live="polite"></div>
   </section>`;
 }
 
-/** G-22, H-03: the minimap: one row per phase (per track past 24 phases), compressed over the whole plan, window marked. */
-function renderMinimap(m: Model, d: Dict, win: Win): string {
+/** The minimap's box height, in the units of its viewBox. */
+const MM_VB = 48;
+/** The minimap's bars, drawn over the whole plan (planRange): one row per phase (per track past 24 phases). */
+interface MiniBars { range: Win; groupBy: GroupBy; rows: number; bars: string }
+/** C31 (carry 4b-1): the minimap's bars read only the data: built once per data revision and minute (one Derived of
+ *  derive()), like the analysis; a search key, a pan step or «Desplegar todo» moves only the window drawn over them. */
+const minimapMemo = new WeakMap<Derived, MiniBars | null>();
+function miniBarsOf(m: Model, dv: Derived): MiniBars | null {
+  if (minimapMemo.has(dv)) return minimapMemo.get(dv)!;
   const range = planRange(m.plan, m.states, m.now);
-  const from = Math.min(range.from, win.from);
-  const to = Math.max(range.to, win.to);
   const groupBy: GroupBy = m.plan.phases.length > 24 ? 'track' : 'phase';
-  const groups = layoutRows(m.plan, m.states, m.now, { from, to }, new Set(), { groupBy }).filter(r => r.kind === 'phase');
-  if (!groups.length) return '';
-  const VB = 48;
-  const rowH = Math.min(44 / groups.length, 8);
-  const barH = Math.max(0.6, 0.8 * rowH);
-  const bars = groups.map((r, i) => r.bars.map(b => `<rect class="mb ${b.kind}" x="${b.left * 10}" y="${(2 + i * rowH + (rowH - barH) / 2).toFixed(2)}" width="${Math.max(2, b.width * 10)}" height="${barH.toFixed(2)}" rx="1"/>`).join('')).join('');
-  const vx = ((win.from - from) / (to - from)) * 1000;
-  const vw = ((win.to - win.from) / (to - from)) * 1000;
-  const nx = ((m.now - from) / (to - from)) * 1000;
-  return `<div class="mm" data-role="minimap" data-from="${from}" data-to="${to}" data-group="${groupBy}" data-rows="${groups.length}" title="${esc(d.tl.minimap)}">
-    <svg viewBox="0 0 1000 ${VB}" preserveAspectRatio="none" aria-label="${esc(d.tl.minimap)}">${bars}
-      <line class="mnow" x1="${nx}" x2="${nx}" y1="0" y2="${VB}"/>
-      <rect class="mv" x="${vx}" y="0.5" width="${Math.max(4, vw)}" height="${VB - 1}" rx="3"/></svg></div>`;
+  const groups = layoutRows(m.plan, m.states, m.now, range, new Set(), { groupBy }).filter(r => r.kind === 'phase');
+  let out: MiniBars | null = null;
+  if (groups.length) {
+    const rowH = Math.min(44 / groups.length, 8);
+    const barH = Math.max(0.6, 0.8 * rowH);
+    const bars = groups.map((r, i) => r.bars.map(b => `<rect class="mb ${b.kind}" x="${b.left * 10}" y="${(2 + i * rowH + (rowH - barH) / 2).toFixed(2)}" width="${Math.max(2, b.width * 10)}" height="${barH.toFixed(2)}" rx="1"/>`).join('')).join('');
+    out = { range, groupBy, rows: groups.length, bars };
+  }
+  minimapMemo.set(dv, out);
+  return out;
 }
 
-/** The analysis row under the timeline: burndown, critical path with the forecast end, and the code zones. */
+/** G-22, H-03: the minimap: one row per phase (per track past 24 phases), compressed over the whole plan, window marked.
+ *  A window that reaches past the plan widens the box, and the bars (built over the plan) are scaled into it. */
+function renderMinimap(m: Model, d: Dict, win: Win, dv: Derived): string {
+  const mb = miniBarsOf(m, dv);
+  if (!mb) return '';
+  const { range } = mb;
+  const from = Math.min(range.from, win.from);
+  const to = Math.max(range.to, win.to);
+  const x = (t: number) => ((t - from) / (to - from)) * 1000;
+  // Within a millisecond of the plan's range (a fitted window), the bars are drawn as they were built.
+  const inside = range.from - from < 1 && to - range.to < 1;
+  const bars = inside ? mb.bars : `<g transform="translate(${x(range.from).toFixed(3)} 0) scale(${((range.to - range.from) / (to - from)).toFixed(6)} 1)">${mb.bars}</g>`;
+  const vx = x(win.from);
+  const vw = ((win.to - win.from) / (to - from)) * 1000;
+  const nx = x(m.now);
+  return `<div class="mm" data-role="minimap" data-from="${from}" data-to="${to}" data-group="${mb.groupBy}" data-rows="${mb.rows}" title="${esc(d.tl.minimap)}">
+    <svg viewBox="0 0 1000 ${MM_VB}" preserveAspectRatio="none" aria-label="${esc(d.tl.minimap)}">${bars}
+      <line class="mnow" x1="${nx}" x2="${nx}" y1="0" y2="${MM_VB}"/>
+      <rect class="mv" x="${vx}" y="0.5" width="${Math.max(4, vw)}" height="${MM_VB - 1}" rx="3"/></svg></div>`;
+}
+
+/** The analysis under the timeline (§4.6.4): the burndown of a scope against its version's target (H-26), the critical
+ *  path with the one forecast end and how it is reckoned (G-12), and the code zones by directory (G-27). */
 function renderInsights(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived): string {
   const f = dv.forecast;
-  // Scope: a version, a phase, or the whole plan.
+  // The target of a scope: a version's own; a phase reads the version it belongs to; the whole plan, its last version's.
+  const versionOf = (phase: string) => m.plan.versions.find(v => v.phases.includes(phase));
   const scopes = [
-    { id: '', label: d.insights.wholePlan, ids: m.plan.tasks.map(t => t.id) },
-    ...m.plan.versions.map(v => ({ id: `v:${v.id}`, label: `${d.version} ${v.id}`, ids: m.plan.tasks.filter(t => v.phases.includes(t.phase)).map(t => t.id) })),
-    ...m.plan.phases.map(p => ({ id: `p:${p.id}`, label: phaseLabel(p.id, p.name), ids: m.plan.tasks.filter(t => t.phase === p.id).map(t => t.id) })),
+    { id: '', label: d.insights.wholePlan, ids: m.plan.tasks.map(t => t.id), target: m.plan.versions.at(-1)?.target },
+    ...m.plan.versions.map(v => ({ id: `v:${v.id}`, label: `${d.version} ${v.id}`, ids: m.plan.tasks.filter(t => v.phases.includes(t.phase)).map(t => t.id), target: v.target })),
+    ...m.plan.phases.map(p => ({ id: `p:${p.id}`, label: phaseLabel(p.id, p.name), ids: m.plan.tasks.filter(t => t.phase === p.id).map(t => t.id), target: versionOf(p.id)?.target })),
   ];
-  const scope = scopes.find(sc => sc.id === (ui.burnScope ?? '')) ?? scopes[0];
-  const bd = burndown(m.plan, m.states, scope.ids, m.now, f?.at ?? null);
-  const W = 520;
-  const H = 150;
-  let chart = `<div class="muted">${esc(d.insights.allDone)}</div>`;
-  if (bd) {
-    const px = (t: number) => 34 + ((t - bd.start) / Math.max(1, bd.end - bd.start)) * (W - 44);
-    const py = (left: number) => 10 + (1 - left / Math.max(1, bd.total)) * (H - 34);
-    const steps = bd.actual.map((p, i) => (i === 0 ? `M${px(p.t).toFixed(1)} ${py(p.left).toFixed(1)}` : `H${px(p.t).toFixed(1)} V${py(p.left).toFixed(1)}`)).join(' ');
-    const yTicks = [...new Set([0, Math.round(bd.total / 2), bd.total])];
-    chart = `<svg class="bd" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(d.insights.burndown)}">
-      ${yTicks.map(v => `<line class="bdg" x1="34" x2="${W - 10}" y1="${py(v)}" y2="${py(v)}"/><text class="bdt" x="28" y="${py(v) + 4}" text-anchor="end">${v}</text>`).join('')}
-      <line class="bdi" x1="${px(bd.ideal[0].t)}" y1="${py(bd.ideal[0].left)}" x2="${px(bd.ideal[1].t)}" y2="${py(0)}"/>
-      <path class="bda" d="${steps}"/>
-      <line class="bdn" x1="${px(m.now)}" x2="${px(m.now)}" y1="8" y2="${H - 22}"/>
-      <text class="bdt" x="34" y="${H - 6}">${esc(fmt(new Date(bd.start).toISOString(), loc))}</text>
-      <text class="bdt" x="${W - 10}" y="${H - 6}" text-anchor="end">${esc(fmt(new Date(bd.end).toISOString(), loc))}</text></svg>
-      <div class="legend"><span><i class="lg bdl-a"></i>${esc(d.insights.actual)}</span><span><i class="lg bdl-i"></i>${esc(d.insights.ideal)}</span><span class="mono">${bd.actual.at(-1)!.left} ${esc(d.insights.tasksLeft)}</span></div>`;
-  }
+  const scope = scopes.find(sc => sc.id === (ui.burnScope ?? '')) ?? scopes[0]!;
+  const bd = burndown(m.plan, m.states, scope.ids, m.now, { forecast: f?.at ?? null, target: targetMs(scope.target) });
+  const chart = bd ? burnChart(d, bd, m.now, loc, ui.width) : `<div class="muted">${esc(d.insights.allDone)}</div>`;
+  // 4b (Close b): every field of the page has a name.
   const scopeSel = `<select name="burn-scope" data-action="burn-scope" aria-label="${esc(d.insights.scope)}">${scopes.map(sc => `<option value="${esc(sc.id)}"${sc.id === scope.id ? ' selected' : ''}>${esc(sc.label)}</option>`).join('')}</select>`;
   const cp = dv.critical;
   const chain = cp.ids.length
@@ -271,20 +297,52 @@ function renderInsights(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
     : `<div class="muted">${esc(d.insights.allDone)}</div>`;
   // G-12, riesgo 10: the date, and in one line how it is reckoned.
   const fc = f ? `<div class="fct">${esc(d.insights.forecastLine(fmt(new Date(f.at).toISOString(), loc), f.parallel, d.num(Math.round(dv.pace * 100) / 100)))}</div>` : '';
-  const heat = dv.zones.slice(0, 12);
-  const maxHeat = Math.max(1, ...heat.map(z => z.tasks + z.touched));
-  const zones = heat.length
-    ? `<ul class="zones" data-scroll-key="zones">${heat.map(z => `<li><div class="zn"><span class="mono">${esc(z.zone)}</span><span class="k">${esc(d.insights.zoneLine(z.tasks, z.done, z.active))}${z.touched ? ` · ${esc(d.insights.touched(z.touched))}` : ''}</span></div>
-        <div class="zb"><i class="zd" style="width:${(z.done / maxHeat) * 100}%"></i><i class="za" style="width:${(z.active / maxHeat) * 100}%"></i><i class="zp" style="width:${(Math.max(0, z.tasks - z.done - z.active) / maxHeat) * 100}%"></i><i class="zt" style="width:${(z.touched / maxHeat) * 100}%"></i></div></li>`).join('')}</ul>`
-    : `<div class="muted">${esc(d.insights.noZones)}</div>`;
   return `<section class="insights">
     <h2 class="lbl">${esc(d.insights.title)}</h2>
     <div class="row3 ins">
       <div class="card"><div class="ch"><span class="lbl">${esc(d.insights.burndown)}</span>${scopeSel}</div>${chart}</div>
       <div class="card"><div class="lbl">${esc(d.insights.critical)}</div>${fc}${chain}</div>
-      <div class="card"><div class="lbl">${esc(d.insights.zones)}</div>${zones}</div>
+      <div class="card"><div class="lbl">${esc(d.insights.zones)}</div>${zoneList(d, dv.zones.slice(0, 12))}</div>
     </div>
   </section>`;
+}
+
+/** H-26: the burndown at the width it has (ui.width, from a ResizeObserver; 520 until it reports), its labels in HTML of
+ *  11 px and up, the ideal line only towards a target, and the target day marked. */
+function burnChart(d: Dict, bd: Burndown, now: number, loc: string, width: number | undefined): string {
+  const W = Math.round(Math.min(2000, Math.max(240, Number.isFinite(width) ? width! : 520)));
+  const H = 160;
+  const PAD = 8;
+  const px = (t: number) => PAD + ((t - bd.start) / Math.max(1, bd.end - bd.start)) * (W - 2 * PAD);
+  const py = (left: number) => PAD + (1 - left / Math.max(1, bd.total)) * (H - 2 * PAD);
+  const at = (v: number, of: number) => `${((v / of) * 100).toFixed(2)}%`;
+  const steps = bd.actual.map((p, i) => (i === 0 ? `M${px(p.t).toFixed(1)} ${py(p.left).toFixed(1)}` : `H${px(p.t).toFixed(1)} V${py(p.left).toFixed(1)}`)).join(' ');
+  const yTicks = [...new Set([0, Math.round(bd.total / 2), bd.total])];
+  const ideal = bd.ideal
+    ? `<line class="bdi" x1="${px(bd.ideal[0]!.t).toFixed(1)}" y1="${py(bd.ideal[0]!.left).toFixed(1)}" x2="${px(bd.ideal[1]!.t).toFixed(1)}" y2="${py(0).toFixed(1)}"/>`
+    : '';
+  const target = bd.target !== null ? `<line class="bdtg" x1="${px(bd.target).toFixed(1)}" x2="${px(bd.target).toFixed(1)}" y1="${PAD}" y2="${H - PAD}"/>` : '';
+  const svg = `<svg class="bd" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${yTicks.map(v => `<line class="bdg" x1="${PAD}" x2="${W - PAD}" y1="${py(v).toFixed(1)}" y2="${py(v).toFixed(1)}"/>`).join('')}${target}${ideal}<path class="bda" d="${steps}"/><line class="bdn" x1="${px(now).toFixed(1)}" x2="${px(now).toFixed(1)}" y1="${PAD}" y2="${H - PAD}"/></svg>`;
+  const labels = [
+    ...yTicks.map(v => `<span class="bdk y" style="top:${at(py(v), H)}">${v}</span>`),
+    `<span class="bdk x l">${esc(fmt(new Date(bd.start).toISOString(), loc))}</span>`,
+    `<span class="bdk x r">${esc(fmt(new Date(bd.end).toISOString(), loc))}</span>`,
+    bd.target !== null ? `<span class="bdk tg" style="left:${at(px(bd.target), W)}">${esc(d.insights.target(fmt(new Date(bd.target).toISOString(), loc)))}</span>` : '',
+  ].join('');
+  const left = bd.actual[bd.actual.length - 1]!.left;
+  const legend = `<div class="legend"><span><i class="lg bdl-a"></i>${esc(d.insights.actual)}</span>${bd.ideal ? `<span><i class="lg bdl-i"></i>${esc(d.insights.ideal)}</span>` : `<span class="hint">${esc(d.insights.noTarget)}</span>`}<span class="mono">${left} ${esc(d.insights.tasksLeft)}</span></div>`;
+  return `<div class="bdw" data-role="burndown" role="img" aria-label="${esc(d.insights.burndownLabel(left, bd.total))}"><div class="bdc">${svg}${labels}</div></div>${legend}`;
+}
+
+/** G-27: the code zones by directory, the shared ones marked, with a legend of the bar. */
+function zoneList(d: Dict, heat: ZoneHeat[]): string {
+  if (!heat.length) return `<div class="muted">${esc(d.insights.noZones)}</div>`;
+  const max = Math.max(1, ...heat.map(z => z.tasks + z.touched));
+  const w = (n: number) => `${((n / max) * 100).toFixed(1)}%`;
+  const items = heat.map(z => `<li class="zl${z.shared ? ' shared' : ''}"><div class="zn"><span class="mono">${esc(z.zone)}</span><span class="k">${esc(d.insights.zoneLine(z.tasks, z.done, z.active))}${z.touched ? ` · ${esc(d.insights.touched(z.touched))}` : ''}</span></div>${z.shared ? `<div class="zs">⚠ ${esc(d.insights.shared(z.active))}</div>` : ''}
+      <div class="zb"><i class="zd" style="width:${w(z.done)}"></i><i class="za" style="width:${w(z.active)}"></i><i class="zp" style="width:${w(Math.max(0, z.tasks - z.done - z.active))}"></i><i class="zt" style="width:${w(z.touched)}"></i></div></li>`).join('');
+  const legend = `<div class="legend zlg">${(['done', 'active', 'pending', 'touched'] as const).map((k, i) => `<span><i class="lg ${['zd', 'za', 'zp', 'zt'][i]}"></i>${esc(d.insights.zoneLegend[k])}</span>`).join('')}</div>`;
+  return `<ul class="zones" data-scroll-key="zones">${items}</ul>${legend}`;
 }
 
 /**

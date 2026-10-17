@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parsePlan } from '../src/lib/plan.js';
-import { burndown, criticalPath, forecastEnd, PACE_MAX, PACE_MIN, paceRatioOf, remainingMin, zoneHeat } from '../src/lib/insights.js';
+import { burndown, criticalPath, forecastEnd, PACE_MAX, PACE_MIN, paceRatioOf, remainingMin, targetMs, zoneDir, zoneHeat } from '../src/lib/insights.js';
 import { groupIds, layoutRows, NONE_GROUP, windowAt } from '../src/lib/timeline.js';
 import type { PlanView, States } from '../src/lib/types.js';
 
@@ -81,28 +81,50 @@ describe('forecastEnd: the one forecast of the page (G-12)', () => {
   });
 });
 
-describe('burndown', () => {
-  it('steps down at each doneAt and ends at what is left now', () => {
-    const s: States = {
-      T001: { status: 'done', startedAt: '2026-10-11T08:00:00Z', doneAt: '2026-10-11T09:00:00Z' },
-      T002: { status: 'done', startedAt: '2026-10-11T09:00:00Z', doneAt: '2026-10-11T10:00:00Z' },
-    };
-    const ids = plan.tasks.filter(t => t.phase === 'F1').map(t => t.id);
-    const b = burndown(plan, s, ids, NOW, NOW + 2 * H)!;
+describe('burndown (H-26)', () => {
+  const s: States = {
+    T001: { status: 'done', startedAt: '2026-10-11T08:00:00Z', doneAt: '2026-10-11T09:00:00Z' },
+    T002: { status: 'done', startedAt: '2026-10-11T09:00:00Z', doneAt: '2026-10-11T10:00:00Z' },
+  };
+  const ids = plan.tasks.filter(t => t.phase === 'F1').map(t => t.id);
+  it('steps down at each doneAt and ends at what is left now; without a target there is no ideal line', () => {
+    const b = burndown(plan, s, ids, NOW, { forecast: NOW + 2 * H, target: null })!;
     expect(b.total).toBe(3);
     expect(b.actual.map(p => p.left)).toEqual([3, 2, 1, 1]);
-    expect(b.ideal).toEqual([{ t: Date.parse('2026-10-11T08:00:00Z'), left: 3 }, { t: NOW + 2 * H, left: 0 }]);
-    expect(burndown(plan, s, [], NOW, null)).toBeNull();
+    expect(b.ideal).toBeNull();
+    expect(b.end).toBe(NOW + 2 * H);
+    expect(burndown(plan, s, [], NOW, { forecast: null, target: null })).toBeNull();
+  });
+  it('with a target the ideal line goes from the first start to zero on it, and the chart reaches it', () => {
+    const target = targetMs('2026-10-13')!;
+    const b = burndown(plan, s, ids, NOW, { forecast: NOW + 2 * H, target })!;
+    expect(b.ideal).toEqual([{ t: Date.parse('2026-10-11T08:00:00Z'), left: 3 }, { t: target, left: 0 }]);
+    expect(b.target).toBe(target);
+    expect(b.end).toBe(target);
+  });
+  it('targetMs is the end of the target day, local time; anything else is null', () => {
+    expect(targetMs('2026-10-13')).toBe(Date.parse('2026-10-13T23:59:59'));
+    expect(targetMs('soon')).toBeNull();
+    expect(targetMs(undefined)).toBeNull();
   });
 });
 
-describe('zone heat', () => {
-  it('counts planned, done, running and touched tasks per zone', () => {
-    const s: States = { T001: { status: 'done', zonesTouched: ['src/db/**', 'src/extra/**'] }, T002: { status: 'in_progress' } };
-    const z = zoneHeat(plan, s);
-    expect(z.find(x => x.zone === 'src/db/**')).toEqual({ zone: 'src/db/**', tasks: 1, done: 1, active: 0, touched: 1 });
-    expect(z.find(x => x.zone === 'src/api/orders/**')?.active).toBe(1);
-    expect(z.find(x => x.zone === 'src/extra/**')).toMatchObject({ tasks: 0, touched: 1 });
+describe('zone heat by directory (G-27)', () => {
+  it('zoneDir keeps the first two segments before any glob', () => {
+    expect(zoneDir('src/a/b/**')).toBe('src/a');
+    expect(zoneDir('src/a/b/c.ts')).toBe('src/a');
+    expect(zoneDir('web/cart/**')).toBe('web/cart');
+    expect(zoneDir('README.md')).toBe('README.md');
+    expect(zoneDir('**/*.ts')).toBe('**/*.ts');
+    expect(zoneDir('src\\a\\b\\c.ts')).toBe('src/a');
+  });
+  it('counts planned, done, running and touched tasks per directory, and marks first one that two running tasks share', () => {
+    const p = { ...plan, tasks: plan.tasks.map(t => (t.id === 'T003' ? { ...t, zones: ['src/api/cart/**'] } : t)) };
+    const s: States = { T001: { status: 'done', zonesTouched: ['src/db/**', 'src/extra/x.ts'] }, T002: { status: 'in_progress' }, T003: { status: 'claimed' } };
+    const z = zoneHeat(p, s);
+    expect(z[0]).toEqual({ zone: 'src/api', tasks: 2, done: 0, active: 2, touched: 0, shared: true });
+    expect(z.find(x => x.zone === 'src/db')).toEqual({ zone: 'src/db', tasks: 1, done: 1, active: 0, touched: 1, shared: false });
+    expect(z.find(x => x.zone === 'src/extra')).toMatchObject({ tasks: 0, touched: 1, shared: false });
   });
 });
 
