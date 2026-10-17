@@ -1753,7 +1753,7 @@ describe('design-gate', () => {
       expect(a.code).toBe(0);
       expect(JSON.parse(a.stdout)).toEqual({ round: 1, dismissed: [3] });
       expect(JSON.parse(run(['critique-dismiss', rel, '--round', '1', '2,3'], io).stdout)).toEqual({ round: 1, dismissed: [2, 3] });
-      expect(JSON.parse(readFileSync(path.join(local(), 'dismissed.json'), 'utf8'))).toEqual({ 1: [2, 3] });
+      expect(JSON.parse(readFileSync(path.join(local(), 'dismissed.json'), 'utf8'))).toEqual({ 1: [{ n: 2 }, { n: 3 }] });
       expect(JSON.parse(run(['critique-dismiss', rel, '--round', '2', 'all'], io).stdout)).toEqual({ round: 2, dismissed: [] });
       expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ pending: [], criticalPending: [], canAutoApprove: true });
     });

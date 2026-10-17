@@ -7,11 +7,15 @@ const EntrySchema = z.object({
   words: z.number(),
   round: z.number(),
 });
+/** One proposal of one round. */
+export interface RoundItem { round: number; n: number }
 export type ChangelogEntry = z.infer<typeof EntrySchema> & {
-  /** A-04: round → the proposal numbers this entry applied, sorted and without duplicates (the shape of dismissed.json). */
+  /** A-04: round → the proposal numbers this entry applied, sorted and without duplicates. */
   applied?: Record<number, number[]>;
   /** A-04: the rewrite of this entry folded in the proposals of its round. */
   rewrite?: true;
+  /** K3-02: the proposals this entry's interview resolved, by round then number. */
+  resolved?: RoundItem[];
 };
 
 /**
@@ -30,26 +34,47 @@ export function normalizeApplied(x: unknown): Record<number, number[]> | null {
   return Object.keys(out).length ? out : null;
 }
 
-/** A malformed `--applied` of `design-snapshot`. */
+/** K3-02: `resolved` read tolerantly: pairs of positive integers, by round then number and without duplicates; nothing valid is null. */
+export function normalizeResolved(x: unknown): RoundItem[] | null {
+  if (!Array.isArray(x)) return null;
+  const positive = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0;
+  const seen = new Map<string, RoundItem>();
+  for (const item of x as unknown[]) {
+    if (!item || typeof item !== 'object') continue;
+    const { round, n } = item as { round?: unknown; n?: unknown };
+    if (positive(round) && positive(n)) seen.set(`${round}:${n}`, { round, n });
+  }
+  const out = [...seen.values()].sort((a, b) => a.round - b.round || a.n - b.n);
+  return out.length ? out : null;
+}
+
+/** A malformed `--applied` or `--resolved` of `design-snapshot`. */
 export class AppliedError extends Error {}
 
 /**
- * The items of `design-snapshot --applied` as round → numbers, sorted and without duplicates. An item is `r<R>:<list>`,
- * or a bare `<list>` of `round` (the snapshot's --round; null when it has none); a list is positive integers separated by
- * commas. No item, a malformed one, a bare list without --round, or a round after --round throws AppliedError.
+ * The items of `design-snapshot --applied` (or of `--resolved`: `name`) as round → numbers, sorted and without
+ * duplicates. An item is `r<R>:<list>`, or a bare `<list>` of `round` (the snapshot's --round; null when it has none); a
+ * list is positive integers separated by commas. No item, a malformed one, a bare list without --round, or a round after
+ * --round throws AppliedError, which names the flag.
  */
-export function parseAppliedItems(items: string[], round: number | null): Record<number, number[]> {
-  if (!items.length) throw new AppliedError('--applied needs at least one item (r<R>:<numbers> or <numbers>)');
+export function parseAppliedItems(items: string[], round: number | null, name = 'applied'): Record<number, number[]> {
+  const option = `--${name}`;
+  if (!items.length) throw new AppliedError(`${option} needs at least one item (r<R>:<numbers> or <numbers>)`);
   const out: Record<number, number[]> = {};
   for (const item of items) {
     const m = /^(?:r([1-9]\d*):)?([1-9]\d*(?:,[1-9]\d*)*)$/.exec(item);
-    if (!m) throw new AppliedError(`--applied item ${item.slice(0, 40)} is not r<R>:<numbers> nor <numbers>`);
-    if (!m[1] && round === null) throw new AppliedError(`--applied item ${item} has no round: add --round <R> or write it r<R>:${item}`);
+    if (!m) throw new AppliedError(`${option} item ${item.slice(0, 40)} is not r<R>:<numbers> nor <numbers>`);
+    if (!m[1] && round === null) throw new AppliedError(`${option} item ${item} has no round: add --round <R> or write it r<R>:${item}`);
     const r = m[1] ? Number(m[1]) : round!;
-    if (round !== null && r > round) throw new AppliedError(`--applied round ${r} is after --round ${round}`);
+    if (round !== null && r > round) throw new AppliedError(`${option} round ${r} is after --round ${round}`);
     out[r] = [...new Set([...(out[r] ?? []), ...m[2].split(',').map(Number)])].sort((a, b) => a - b);
   }
   return out;
+}
+
+/** Round → numbers as pairs, by round then number: the shape of `resolved`. */
+export function roundList(r: Record<number, number[]>): RoundItem[] {
+  return Object.entries(r).flatMap(([k, ns]) => ns.map(n => ({ round: Number(k), n }))).sort((a, b) => a.round - b.round || a.n - b.n);
 }
 
 export function listVersions(files: string[]): number[] {
@@ -74,10 +99,11 @@ export function parseChangelog(text: string | null): ChangelogEntry[] {
       const why = r.error.issues.map(x => `${x.path.join('.') || '(root)'}: ${x.message}`).join('; ');
       throw new Error(`changelog.json entry ${i} is invalid: ${why}`);
     }
-    // EntrySchema keeps the five fields of every entry; applied and rewrite are optional and read tolerantly.
+    // EntrySchema keeps the five fields of every entry; applied, rewrite and resolved are optional and read tolerantly.
     const entry = e as Record<string, unknown>;
     const applied = normalizeApplied(entry.applied);
-    return { ...r.data, ...(applied ? { applied } : {}), ...(entry.rewrite === true ? { rewrite: true as const } : {}) };
+    const resolved = normalizeResolved(entry.resolved);
+    return { ...r.data, ...(applied ? { applied } : {}), ...(entry.rewrite === true ? { rewrite: true as const } : {}), ...(resolved ? { resolved } : {}) };
   });
 }
 

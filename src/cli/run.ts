@@ -770,7 +770,7 @@ export function run(argv: string[], io: Io): Result {
         }
         const next = mergeDismissed(readDismissed(local), round, numbers);
         writeFileSync(path.join(local, 'dismissed.json'), JSON.stringify(next, null, 2) + '\n');
-        return ok(JSON.stringify({ round, dismissed: next[round] }));
+        return ok(JSON.stringify({ round, dismissed: (next[round] ?? []).map(x => x.n) }));
       }
       case 'critique-check': {
         const c = parseCritique(readFileSync(abs(args[0]), 'utf8'));

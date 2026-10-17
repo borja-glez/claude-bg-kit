@@ -1,19 +1,30 @@
 // The approval gate of auto mode (spec §5.5): from a design's changelog and its critiques, whether it can be approved
-// without asking. Pure and deterministic, with no Node imports (the band's mod uses it too); the waypoint CLI reads the files.
+// without asking, and what the next critic must not raise again. Pure and deterministic, with no Node imports (the
+// band's mod uses it too); the waypoint CLI reads the files.
 import type { ChangelogEntry } from './history.js';
 import type { Critique, Proposal } from './critique.js';
+import { clean } from './decisions.js';
 
-/** One critique-r<N>.json: null when the file is not a valid critique. */
+/** The critique of one round: null when its file is not a valid critique. */
 export interface GateCritique { round: number; critique: Critique | null }
-/** A proposal of some round that was neither applied, folded in by a rewrite of its round, nor dismissed. */
-export interface Pending { round: number; n: number; severity: Proposal['severity']; section: string }
-/** dismissed.json: round → the proposal numbers the person set aside, sorted. */
-export type Dismissed = Record<number, number[]>;
+/** A proposal of some round that was neither applied, resolved in an interview, folded in by a rewrite of its round, nor dismissed. */
+export interface Pending { round: number; n: number; severity: Proposal['severity']; section: string; problem: string }
+/** K3-05: a proposal the person set aside, with their reason when they gave one. */
+export interface DismissedItem { n: number; reason?: string }
+/** dismissed.json: round → the proposals the person set aside, by number. */
+export type Dismissed = Record<number, DismissedItem[]>;
+/** What the next critic must not raise again: set aside (with the reason), resolved in an interview, or already applied. */
+export interface GateDismissed { round: number; n: number; section: string; problem: string; reason?: string }
+export interface GateResolved { round: number; n: number; section: string; problem: string }
+export interface GateApplied { round: number; n: number; section: string; change: string }
 export interface Gate {
   version: number; rounds: number; latestRound: number | null; latestCritiqueVersion: number | null;
   criticalPending: { round: number; n: number }[]; invalid: number[]; canAutoApprove: boolean;
   pending: Pending[]; pendingCounts: { critical: number; major: number; minor: number };
+  dismissed: GateDismissed[]; resolved: GateResolved[]; applied: GateApplied[];
 }
+/** K3-05: the longest reason kept for a dismissal, on one clean line. */
+export const REASON_MAX = 300;
 
 /** Notes written before `applied` and `rewrite` existed, in English or Spanish: "round 1: applied 1,3 — …",
  *  "ronda 1: aplicadas 1, 3 y 5 — …"; "round 2: rewrite — …", "ronda 2: reescritura — …". */
@@ -47,7 +58,22 @@ export function rewroteRound(changelog: ChangelogEntry[], round: number): boolea
   });
 }
 
-/** dismissed.json read tolerantly: junk is nothing dismissed, and only positive integer numbers of numeric rounds count. */
+/** K3-09: the version of the first changelog entry that applied proposal n of round R, or null. */
+export function appliedVersion(changelog: ChangelogEntry[], round: number, n: number): number | null {
+  for (const e of changelog) if (appliedIn([e], round).has(n)) return e.version;
+  return null;
+}
+
+/** K3-02: the proposal numbers of round R that an interview resolved (the changelog's `resolved`). */
+export function resolvedIn(changelog: ChangelogEntry[], round: number): Set<number> {
+  return new Set(changelog.flatMap(e => (e.resolved ?? []).filter(x => x.round === round).map(x => x.n)));
+}
+
+/**
+ * dismissed.json read tolerantly, in its two shapes: `{"1": [2, 5]}` (before K3-05) and `{"1": [{"n": 2, "reason": "…"},
+ * {"n": 5}]}`. Junk is nothing dismissed; only positive integer numbers of numeric rounds count; a reason becomes one
+ * clean line of REASON_MAX characters at most, and one that is not text, or is blank, is none.
+ */
 export function parseDismissed(text: string | null | undefined): Dismissed {
   let raw: unknown;
   try { raw = JSON.parse(text ?? ''); } catch { return {}; }
@@ -55,15 +81,25 @@ export function parseDismissed(text: string | null | undefined): Dismissed {
   const out: Dismissed = {};
   for (const [k, v] of Object.entries(raw)) {
     if (!/^[1-9]\d*$/.test(k) || !Array.isArray(v)) continue;
-    const ns = v.filter((n): n is number => Number.isInteger(n) && n > 0);
-    if (ns.length) out[Number(k)] = [...new Set(ns)].sort((a, b) => a - b);
+    const byN = new Map<number, DismissedItem>();
+    for (const x of v as unknown[]) {
+      const item = x && typeof x === 'object' ? (x as { n?: unknown; reason?: unknown }) : null;
+      const n = item ? item.n : x;
+      if (typeof n !== 'number' || !Number.isInteger(n) || n <= 0) continue;
+      const reason = item && typeof item.reason === 'string' ? clean(item.reason, REASON_MAX) : '';
+      byN.set(n, reason ? { n, reason } : (byN.get(n) ?? { n }));
+    }
+    if (byN.size) out[Number(k)] = [...byN.values()].sort((a, b) => a.n - b.n);
   }
   return out;
 }
 
-/** `d` with `ns` added to round R, sorted and without duplicates. */
-export function mergeDismissed(d: Dismissed, round: number, ns: number[]): Dismissed {
-  return { ...d, [round]: [...new Set([...(d[round] ?? []), ...ns])].sort((a, b) => a - b) };
+/** `d` with `ns` of round R set aside: a number already there keeps its reason unless `reason` gives a new one. */
+export function mergeDismissed(d: Dismissed, round: number, ns: number[], reason?: string): Dismissed {
+  const why = reason ? clean(reason, REASON_MAX) : '';
+  const byN = new Map((d[round] ?? []).map(x => [x.n, x] as const));
+  for (const n of ns) byN.set(n, why ? { n, reason: why } : (byN.get(n) ?? { n }));
+  return { ...d, [round]: [...byN.values()].sort((a, b) => a.n - b.n) };
 }
 
 /** Every proposal of every valid critique still waiting for a decision, by round then number. */
@@ -71,10 +107,9 @@ export function pendingProposals(changelog: ChangelogEntry[], critiques: GateCri
   const out: Pending[] = [];
   for (const { round, critique } of [...critiques].sort((a, b) => a.round - b.round)) {
     if (!critique || rewroteRound(changelog, round)) continue;
-    const applied = appliedIn(changelog, round);
-    const gone = new Set(dismissed[round] ?? []);
+    const decided = new Set([...appliedIn(changelog, round), ...resolvedIn(changelog, round), ...(dismissed[round] ?? []).map(x => x.n)]);
     for (const p of critique.proposals) {
-      if (!applied.has(p.n) && !gone.has(p.n)) out.push({ round, n: p.n, severity: p.severity, section: p.section });
+      if (!decided.has(p.n)) out.push({ round, n: p.n, severity: p.severity, section: p.section, problem: p.problem });
     }
   }
   return out;
@@ -82,7 +117,8 @@ export function pendingProposals(changelog: ChangelogEntry[], critiques: GateCri
 
 /**
  * Approvable without asking when the latest critique is valid, no critical proposal of any round is left pending, and
- * the latest critique is not of a version newer than the design's. A design with no critique (one just imported) never is.
+ * the latest critique is not of a version newer than the design's. A design with no critique (one just imported) never
+ * is. It also lists, round by round, what the next critic must not raise again (K3-04, K3-05, K3-02).
  */
 export function designGate(changelog: ChangelogEntry[], critiques: GateCritique[], dismissed: Dismissed = {}): Gate {
   const version = changelog[changelog.length - 1]?.version ?? 0;
@@ -92,10 +128,26 @@ export function designGate(changelog: ChangelogEntry[], critiques: GateCritique[
   const criticalPending = pending.filter(p => p.severity === 'critical').map(p => ({ round: p.round, n: p.n }));
   const count = (s: Pending['severity']) => pending.filter(p => p.severity === s).length;
   const latestCritiqueVersion = latest?.version ?? null;
+  const valid = [...critiques].sort((a, b) => a.round - b.round).flatMap(c => (c.critique ? [{ round: c.round, proposals: c.critique.proposals }] : []));
+  const gone: GateDismissed[] = [];
+  const solved: GateResolved[] = [];
+  const done: GateApplied[] = [];
+  for (const { round, proposals } of valid) {
+    const applied = appliedIn(changelog, round);
+    const resolved = resolvedIn(changelog, round);
+    const set = new Map((dismissed[round] ?? []).map(x => [x.n, x] as const));
+    for (const p of proposals) {
+      if (applied.has(p.n)) done.push({ round, n: p.n, section: p.section, change: p.change });
+      if (resolved.has(p.n)) solved.push({ round, n: p.n, section: p.section, problem: p.problem });
+      const x = set.get(p.n);
+      if (x) gone.push({ round, n: p.n, section: p.section, problem: p.problem, ...(x.reason ? { reason: x.reason } : {}) });
+    }
+  }
   return {
-    version, rounds: critiques.filter(c => c.critique !== null).length, latestRound, latestCritiqueVersion, criticalPending,
+    version, rounds: valid.length, latestRound, latestCritiqueVersion, criticalPending,
     invalid: critiques.filter(c => c.critique === null).map(c => c.round).sort((a, b) => a - b),
     canAutoApprove: latest !== null && criticalPending.length === 0 && latestCritiqueVersion !== null && latestCritiqueVersion <= version,
     pending, pendingCounts: { critical: count('critical'), major: count('major'), minor: count('minor') },
+    dismissed: gone, resolved: solved, applied: done,
   };
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { appendChangelog, listVersions, nextVersion, normalizeApplied, parseChangelog } from '../src/lib/history.js';
+import { appendChangelog, listVersions, nextVersion, normalizeApplied, normalizeResolved, parseAppliedItems, parseChangelog, roundList } from '../src/lib/history.js';
 
 describe('versions', () => {
   it('lists v<N>.md files only, sorted', () => {
@@ -34,6 +34,21 @@ describe('changelog', () => {
     }
     expect(normalizeApplied({ 1: [2, 'x', 2], 3: [], '04': [1] })).toEqual({ 1: [2] });
     expect(normalizeApplied(null)).toBeNull();
+  });
+  it('keeps resolved as round and number pairs, sorted and without duplicates, and drops junk (K3-02)', () => {
+    const entry = { version: 3, date: '2026-10-16', note: 'entrevista', words: 10, round: 1 };
+    const raw = [{ round: 2, n: 1 }, { round: 1, n: 4 }, { round: 1, n: 4 }, { round: 0, n: 1 }, { round: 1, n: 'x' }, 7, null];
+    expect(parseChangelog(JSON.stringify([{ ...entry, resolved: raw }]))[0]).toEqual({ ...entry, resolved: [{ round: 1, n: 4 }, { round: 2, n: 1 }] });
+    expect(parseChangelog(JSON.stringify([{ ...entry, resolved: 'r1:4' }]))[0]).toEqual(entry);
+    expect(normalizeResolved([])).toBeNull();
+    expect(normalizeResolved({ round: 1, n: 1 })).toBeNull();
+  });
+  it('parseAppliedItems names the flag it parses, and roundList turns its map into pairs (K3-02)', () => {
+    expect(parseAppliedItems(['r1:5,4', 'r2:1'], 2, 'resolved')).toEqual({ 1: [4, 5], 2: [1] });
+    expect(() => parseAppliedItems(['x'], 1, 'resolved')).toThrow('--resolved item x is not r<R>:<numbers> nor <numbers>');
+    expect(() => parseAppliedItems([], 1, 'resolved')).toThrow('--resolved needs at least one item');
+    expect(() => parseAppliedItems(['x'], 1)).toThrow('--applied item x');
+    expect(roundList({ 2: [1], 1: [5, 4] })).toEqual([{ round: 1, n: 4 }, { round: 1, n: 5 }, { round: 2, n: 1 }]);
   });
 });
 
