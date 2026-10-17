@@ -1,7 +1,13 @@
-> /lens
+> /lens foto
 lens · 14:02:11 #1 · 3 tareas
-╭──────────────────────────────────────────────────────────────────────────────╮
-│ ► Ejecución · 3/4 integradas                                                 │
-│ T001 impl · T002 rev r2 · T003 val                                           │
-╰──────────────────────────────────────────────────────────────────────────────╯
+► Ejecución  viva
+  ◷ 45 m
+  3/4 integradas 75%
+  ██████████████████████████████████████████████████████████▌███████████████████
+  ■ ■ ■ ■
+  ● T001 Esquema de pedidos con un título largo impl · 10 m
+  ● T002 API de pedidos rev r2 · 4 m
+  por integrar: T003
+◆ Hoja de ruta
+  F1 Base · 1/4
 ? for shortcuts

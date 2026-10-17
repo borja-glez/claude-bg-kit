@@ -2,14 +2,18 @@
 // (tests/tui-checks.test.ts): no task id of the fixture split across two rows, ▲ and ✎ in the band at 80 columns,
 // letters on the band's buttons outside fullscreen («x: ×»), and «↓» when the inline pane was cut. The snapshot script
 // runs them on every capture; it also reads its options here and fills the fixture with fillTemplate and dotted.
-// The engine checks (a) to (d) of the script use the helpers at the end: bandFolds, stopTriggered, checkPhoto, findText
-// and changedFiles.
+// The engine checks (a) to (d) of the script use the helpers below checkCapture: BAND_READY, bandFolds (folded means a
+// ⋯ and no «t: »), stopTriggered, sameScreen, checkPhoto, findText, changedFiles and closeVerdict.
 
 export const FIXTURE_IDS = ['T001', 'T002', 'T003'];
 export const MODES = ['fullscreen', 'main'];
 export const DEFAULT_SIZES = [60, 80, 100, 120, 160].flatMap(cols => [14, 24, 40].map(rows => ({ cols, rows })));
 
-/** The options: --out <dir>, --sizes 80x24,120x40, --modes fullscreen,main. A malformed or unknown one throws. */
+/**
+ * The options: --out <dir>, --sizes 80x24,120x40, --modes fullscreen,main, --config-dir <dir> (CLAUDE_CONFIG_DIR of the
+ * sessions), --no-engine and --engine-only. configDir, engine and engineOnly are present only when given. A malformed or
+ * unknown option throws.
+ */
 export function parseArgs(argv, today = new Date().toISOString().slice(0, 10)) {
   const out = { out: `docs/superpowers/notes/tui-${today}`, sizes: DEFAULT_SIZES, modes: MODES };
   for (let i = 0; i < argv.length; i++) {
@@ -30,6 +34,9 @@ export function parseArgs(argv, today = new Date().toISOString().slice(0, 10)) {
       i++;
       continue;
     }
+    if (flag === '--config-dir' && value) { out.configDir = value; i++; continue; }
+    if (flag === '--no-engine') { out.engine = false; continue; }
+    if (flag === '--engine-only') { out.engineOnly = true; continue; }
     throw new Error(`unknown option ${flag}`);
   }
   return out;
@@ -76,21 +83,34 @@ export function dotted(rel) {
   return String(rel).split('/').map(s => (s.startsWith('dot-') ? `.${s.slice(4)}` : s)).join('/');
 }
 
+/** The band is up: its long header, or any short form fitParts leaves at narrow widths (► 2/3, ► 3 tareas…). */
+export const BAND_READY = /EJECUCIÓN|EXECUTION|frente|track|otra sesión|another session|►/;
+
 // Check (a): a letter of a button folded into ⋯ does nothing.
-/** Whether the band folded its buttons into ⋯ and so shows no «t: » (Stop) letter. */
+/** Whether the band folded its buttons into ⋯: the ⋯ is there and Stop shows no «t: » letter. */
 export function bandFolds(text) {
   const s = String(text);
   return s.includes('⋯') && !/(^|\s)t: \S/m.test(s);
 }
 
-/** Whether the screen shows what a press of Stop (t) causes: its confirmation toast or /forge:stop in the prompt. */
-export function stopTriggered(text) {
-  return /otra vez para parar|again to stop the run|\/forge:stop/.test(String(text));
+const STOP_TEXT = /otra vez para parar|again to stop the run|\/forge:stop/g;
+
+/** Whether a press of Stop (t) caused something: its confirmation toast or /forge:stop show more than before the press. */
+export function stopTriggered(before, after) {
+  return (String(after).match(STOP_TEXT) ?? []).length > (String(before).match(STOP_TEXT) ?? []).length;
+}
+
+/** Two screens are the same once clocks and elapsed times («14:02:11», «12 m», «45s», «2 h») are set aside. */
+export function sameScreen(a, b) {
+  const norm = s => String(s).replace(/\d{1,2}:\d{2}(:\d{2})?/g, '#').replace(/\d+\s?(?:h|m|s)\b/g, '#').replace(/[ \t]+$/gm, '').trimEnd();
+  return norm(a) === norm(b);
 }
 
 // Checks (b) and (c): the photo of /lens in the transcript, drawn, and not wrapped by an indent of CommandOutput.
 const STAMP_ROW = /^\s*lens · \d{2}:\d{2}:\d{2} #\d{1,6} · /;
-const FRAME_ROW = /^\s*[╭│╰┌└├─]/;
+// The photo is drawn inline and unboxed (layout.ts: compact, not boxed): each card is a header row and its body indented
+// by two. It ends at a blank row or at the next row of the interface (the prompt, the hint line).
+const AFTER_PHOTO = /^\s*$|^\s*(>|\? for|❯)/;
 
 /**
  * What a capture of `/lens foto` fails: the stamp row must be there with cards drawn under it, and none of those rows
@@ -101,7 +121,7 @@ export function checkPhoto(text, o) {
   const stamp = rows.findIndex(row => STAMP_ROW.test(row));
   if (stamp < 0) return ['no photo row in the transcript'];
   let end = stamp + 1;
-  while (end < rows.length && FRAME_ROW.test(rows[end])) end++;
+  while (end < rows.length && !AFTER_PHOTO.test(rows[end])) end++;
   if (end === stamp + 1) return ['the photo row has no cards under it'];
   const fails = [];
   for (let i = stamp + 1; i < end; i++) {
@@ -126,4 +146,14 @@ export function findText(text, needle) {
 export function changedFiles(before, after) {
   const names = new Set([...Object.keys(before), ...Object.keys(after)]);
   return [...names].filter(name => before[name] !== after[name]).sort();
+}
+
+/**
+ * The verdict of (d) from the listings before and after a quiet window that followed the close: without a write seen
+ * before the close there is nothing to compare, so it is inconclusive, never a pass on two empty observations.
+ */
+export function closeVerdict(before, after) {
+  if (!Object.keys(before).length) return { verdict: 'inconclusive', detail: ['lens had written nothing under .forge/usage before the close, so a quiet window proves nothing'] };
+  const wrote = changedFiles(before, after);
+  return wrote.length ? { verdict: 'fail', detail: wrote.map(name => `lens wrote ${name} after the pane was closed`) } : { verdict: 'pass', detail: [] };
 }
