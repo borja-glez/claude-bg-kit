@@ -106,13 +106,13 @@ const validatorsOf = (results: unknown): ForgeStatus['validators'] =>
     // C6: a result taken from the validation cache says so.
     .map(r => ({ name: cleanText(r.validator), ok: r.ok === true, ...(r.cached === true ? { cached: true as const } : {}) }));
 
+const roundOf = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= MAX_REVIEWS ? v : null);
 /** K4-05: the review count of a verdict or round event (wave 1), n of max, each an integer from 1 to 20; else null. */
 const reviewsOf = (x: unknown): ForgeStatus['reviews'] => {
   if (!isObj(x)) return null;
-  const ok = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= MAX_REVIEWS;
-  return ok(x.n) && ok(x.max) ? { n: x.n, max: x.max } : null;
+  const n = roundOf(x.n), max = roundOf(x.max);
+  return n !== null && max !== null ? { n, max } : null;
 };
-const roundOf = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= MAX_REVIEWS ? v : null);
 const countOf = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= MAX_FINDINGS ? v : null);
 /** K4-05: the counts by severity of a verdict, or null when any of the three is missing or out of range. */
 const findingsOf = (x: Record<string, unknown>): Findings | null => {
@@ -167,7 +167,8 @@ function applyEvent(prev: ForgeStatus | null, event: unknown): ForgeStatus | nul
   const e = event;
   const ts: string = event.ts;
   if ((e.kind === 'triage' || e.kind === 'phase') && str(e.task) && e.task) {
-    const task = cleanText(e.task);
+    // A safe id (up to 120) is kept whole, so the status's task matches its key; any other is clipped.
+    const task = isSafeId(e.task) ? e.task : cleanText(e.task);
     // A fresh triage from the CLI (it carries `reasons`; a ratchet logged by the session does not) starts a new run of
     // the task: nothing of an earlier run under the same id is kept.
     const fresh = e.kind === 'triage' && Array.isArray(e.reasons);
@@ -269,7 +270,7 @@ function applyEvent(prev: ForgeStatus | null, event: unknown): ForgeStatus | nul
       const surface = cleanText(e.surface);
       if (surface && !v.skipped.includes(surface) && v.skipped.length < MAX_SKIPPED) v.skipped = [...v.skipped, surface];
       if (str(e.reason)) v.reason = cleanText(e.reason);
-      if (!v.planned || !v.surfaces.every(s => v.skipped.includes(s))) return { ...cur, verify: v };
+      if (!v.planned || v.surfaces.length === 0 || !v.surfaces.every(s => v.skipped.includes(s))) return { ...cur, verify: v };
       v.result = 'skipped';
       const next = { ...cur, verify: v };
       return isLight(cur.path) ? finish(next, ts) : next;
@@ -289,7 +290,7 @@ export function normalizeStatus(x: unknown): ForgeStatus | null {
     verdict = { action: cleanText(x.verdict.action), score: num(x.verdict.score), round: roundOf(x.verdict.round), findings: isObj(x.verdict.findings) ? findingsOf(x.verdict.findings) : null };
   }
   return {
-    ts: x.ts, task: cleanText(x.task), path: cleanText(x.path), phase: cleanText(x.phase),
+    ts: x.ts, task: isSafeId(x.task) ? x.task : cleanText(x.task), path: cleanText(x.path), phase: cleanText(x.phase),
     agent: str(x.agent) ? cleanText(x.agent) : null,
     validators: (x.validators as unknown[])
       .filter((v): v is { name: string; ok: unknown } => isObj(v) && str(v.name))
@@ -347,14 +348,15 @@ export function routeEvent(map: StatusMap, event: unknown): { key: string; task:
   if (!isObj(event) || !str(event.ts) || !str(event.kind) || !str(event.task) || !event.task) return null;
   const id = event.task;
   const states = Object.values(map);
-  const has = (t: string) => states.some(s => s.task === t);
+  const own = isSafeId(event.project) ? event.project : null;
+  // With a project of its own, only a status of that project counts; without one, any status of the id.
+  const has = (t: string) => (own === null ? states.some(s => s.task === t) : Object.hasOwn(map, statusKey(t, own) ?? ''));
   let task = id;
   let brief: number | null = null;
   if (event.kind !== 'triage' && !has(id)) {
     const m = BRIEF_ID.exec(id);
     if (m && has(m[1])) { task = m[1]; brief = Number(m[2]); }
   }
-  const own = isSafeId(event.project) ? event.project : null;
   const existing = states.filter(s => s.task === task).sort((a, b) => movedAt(b) - movedAt(a))[0];
   const project = own ?? (event.kind === 'triage' ? null : existing?.project ?? null);
   const key = statusKey(task, project);

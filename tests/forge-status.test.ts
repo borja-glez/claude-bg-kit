@@ -436,3 +436,49 @@ describe('normalizeStatus with the fields of C5', () => {
     expect(s.verify).toMatchObject({ skipped: ['web'], launched: true });
   });
 });
+
+describe('deriveStatuses: fix round 1', () => {
+  it('an event without a project goes to the newest of the statuses of its id; the others stay as they were', () => {
+    let { map } = fold([
+      { ts: INTERLEAVED_AT(0), kind: 'triage', task: 'T001', path: 'medium', project: 'shop', reasons: [] },
+      { ts: INTERLEAVED_AT(5), kind: 'triage', task: 'T001', path: 'small', project: 'web', reasons: [] },
+      { ts: INTERLEAVED_AT(2), kind: 'triage', task: 'T001', path: 'trivial', reasons: [] },
+    ]);
+    const before = structuredClone(map);
+    const r = deriveStatuses(map, { ts: INTERLEAVED_AT(9), kind: 'phase', task: 'T001', phase: 'implement' });
+    map = r.map;
+    expect(r.changed).toBe('web__T001');
+    expect(map.web__T001.phase).toBe('implement');
+    expect(map.shop__T001).toEqual(before.shop__T001);
+    expect(map.T001).toEqual(before.T001);
+  });
+  it('a brief with a project only counts a status of that project, and a phase never opens a status of its own', () => {
+    const { map } = fold(INTERLEAVED.slice(0, 1));
+    expect(routeEvent(map, { ts: 'x', kind: 'phase', task: 'T001-2', phase: 'p', project: 'web' })).toEqual({ key: 'web__T001-2', task: 'T001-2', brief: null });
+    expect(routeEvent(map, { ts: 'x', kind: 'phase', task: 'T001-2', phase: 'p', project: 'shop' })).toEqual({ key: 'shop__T001', task: 'T001', brief: 2 });
+    const r = deriveStatuses(map, { ts: INTERLEAVED_AT(3), kind: 'phase', task: 'T001-2', phase: 'implement', project: 'web' });
+    expect(Object.keys(r.map)).toEqual(['shop__T001', 'web__T001-2']);
+  });
+  it('a task id of 100 characters is kept whole: two phases are one status', () => {
+    const id = 'T'.repeat(100);
+    const { map, changed } = fold([
+      { ts: INTERLEAVED_AT(0), kind: 'triage', task: id, path: 'medium', reasons: [] },
+      { ts: INTERLEAVED_AT(1), kind: 'phase', task: id, phase: 'implement' },
+      { ts: INTERLEAVED_AT(2), kind: 'phase', task: id, phase: 'review' },
+    ]);
+    expect(Object.keys(map)).toEqual([id]);
+    expect(map[id].task).toBe(id);
+    expect(map[id].stages).toMatchObject({ triage: 60, implement: 60 });
+    expect(changed).toBe(id);
+    expect(normalizeStatus(map[id])!.task).toBe(id);
+  });
+  it('verify-skip with a plan of no surfaces does not close the verification', () => {
+    const s = apply([
+      { ts: '2026-10-16T10:00:00.000Z', kind: 'triage', task: 'T', path: 'small', reasons: [] },
+      { ts: '2026-10-16T10:01:00.000Z', kind: 'verify', task: 'T', planned: true, surfaces: [] },
+      { ts: '2026-10-16T10:02:00.000Z', kind: 'verify-skip', task: 'T', surface: 'web' },
+    ])!;
+    expect(s.verify).toMatchObject({ skipped: ['web'], result: null });
+    expect(s.doneAt).toBeNull();
+  });
+});
