@@ -12045,7 +12045,7 @@ function registerBatch(i) {
 function freeBatch(i) {
   return [
     { op: "update", collection: "state", doc_id: i.task, data: { status: "free", owner: DEL2, claimedAt: DEL2, startedAt: DEL2 }, if_version: i.stateVersion },
-    ...i.sessionVersion !== null ? [{ op: "update", collection: "sessions", doc_id: i.sid, data: { currentTask: DEL2, status: "idle" }, if_version: i.sessionVersion }] : []
+    ...i.sessionVersion !== null ? [{ op: "update", collection: "sessions", doc_id: i.sid, data: i.keepSeat ? { currentTask: DEL2 } : { currentTask: DEL2, status: "idle" }, if_version: i.sessionVersion }] : []
   ];
 }
 
@@ -15075,6 +15075,17 @@ function rulesOf(capabilities) {
   const owner = onApprovals.length > 0 && onApprovals.every((r2) => field2(r2, "read") === "view" && field2(r2, "write") === "owner");
   return owner ? PAGE_RULES : 1;
 }
+var declaresAssets = (capabilities) => !!capabilities && typeof capabilities === "object" && !Array.isArray(capabilities) && Object.hasOwn(capabilities, "assets");
+function sharingChanged(plan, assets, published) {
+  if (!plan.artifacts.roadmap) return false;
+  return published === void 0 ? assets : published !== assets;
+}
+function sharingChangeAsk(plan, assets) {
+  if (assets) {
+    return isEs(plan.locale) ? "Al republicar, el roadmap pasa a guardar las capturas de verificaci\xF3n de forge: quedar\xE1 interno de tu organizaci\xF3n y su enlace p\xFAblico dejar\xE1 de funcionar." : "Republishing makes the roadmap keep forge's verification screenshots: it becomes internal to your organization and its public link stops working.";
+  }
+  return isEs(plan.locale) ? "Al republicar, el roadmap deja de guardar las capturas de verificaci\xF3n de forge (evidence: local en .forge/config.yaml): podr\xE1 volver a compartirse p\xFAblicamente y las capturas ya subidas dejar\xE1n de verse." : "Republishing stops the roadmap keeping forge's verification screenshots (evidence: local in .forge/config.yaml): it can be shared publicly again, and the screenshots already uploaded stop showing.";
+}
 var isEs = (locale) => (locale ?? "").toLowerCase().split(/[-_]/)[0] === "es";
 function sharingNotice(plan, internal) {
   if (!internal || plan.artifacts.roadmap) return null;
@@ -15300,6 +15311,8 @@ warning: ${unknown.length} design_ref(s) not in the design: ${unknown.join(", ")
           }
           if (!published || typeof published !== "object" || Array.isArray(published)) return fail(`page: --capabilities ${capsArg} must be a JSON object`, 2);
         }
+        const pageArg = flag("page");
+        if (args.includes("--page") && (!pageArg || pageArg.startsWith("--"))) return fail("page: --page needs the listed meta/page.json", 2);
         const out2 = abs(flag("out") ?? ".waypoint/roadmap.html");
         const now = io.now().toISOString();
         const states = flag("states") ? statesOf(abs(flag("states")), p.tasks.map((t) => t.id)) : null;
@@ -15311,6 +15324,19 @@ warning: ${unknown.length} design_ref(s) not in the design: ${unknown.join(", ")
         if (!args.includes("--publish-info")) return ok(out2);
         const internal = evidenceUploaded(io.cwd);
         const rules = rulesOf(published);
+        const assets = declaresAssets(published);
+        let changed = {};
+        if (pageArg) {
+          let listed = null;
+          try {
+            listed = JSON.parse((0, import_node_fs6.readFileSync)(abs(pageArg), "utf8"));
+          } catch {
+            listed = null;
+          }
+          const before = listed && typeof listed === "object" && typeof listed.assets === "boolean" ? listed.assets : void 0;
+          const capabilitiesChanged = sharingChanged(p, assets, before);
+          changed = { capabilitiesChanged, ask: capabilitiesChanged ? sharingChangeAsk(p, assets) : null };
+        }
         return ok(JSON.stringify({
           out: out2,
           capabilities: roadmapCapabilities(internal),
@@ -15318,7 +15344,8 @@ warning: ${unknown.length} design_ref(s) not in the design: ${unknown.join(", ")
           say: sharingNotice(p, internal),
           pageVersion: WAYPOINT_VERSION,
           rules,
-          write: { op: "set", collection: "meta", doc_id: "page", data: { version: WAYPOINT_VERSION, rules, roadmap: p.project, publishedAt: now } }
+          ...changed,
+          write: { op: "set", collection: "meta", doc_id: "page", data: { version: WAYPOINT_VERSION, rules, assets, roadmap: p.project, publishedAt: now } }
         }));
       }
       case "sync": {
@@ -15713,7 +15740,9 @@ warning: ${unknown.length} design_ref(s) not in the design: ${unknown.join(", ")
         return out(0, { took, sid, seatDir: rel(seatDir), sessionFile: rel(sessionFile), claude, via, ...cur && (took === "takeover" || took === "previous") ? { previous: prevOf(cur) } : {} });
       }
       case "release": {
-        if (!args[0] || args[0].startsWith("--")) return fail("usage: waypoint release <plan.yaml|design.md> [--seat <sid>] [--claude <id>] [--free <T> --state-version <V> [--session-version <SV>] [--db <dir>]]", 2);
+        if (!args[0] || args[0].startsWith("--")) return fail("usage: waypoint release <plan.yaml|design.md> [--seat <sid>] [--claude <id>] [--free <T> --state-version <V> [--session-version <SV>] [--db <dir>] [--keep-seat]]", 2);
+        const keepSeat = args.includes("--keep-seat");
+        if (keepSeat && flag("free") === void 0) return fail("release: --keep-seat goes with --free <T>", 2);
         const dbFlag = flag("db");
         if (args.includes("--db") && (!dbFlag || dbFlag.startsWith("-"))) return fail("release: --db needs the cache directory", 2);
         const target = projectOf(abs(args[0]), io.cwd);
@@ -15745,12 +15774,12 @@ warning: ${unknown.length} design_ref(s) not in the design: ${unknown.join(", ")
             owner = null;
           }
           if (owner !== seat.sid) return fail(`release: ${free} is not held by seat ${seat.sid} in the state cache (list state first)`, 2);
-          batch = freeBatch({ sid: seat.sid, task: free, stateVersion: v, sessionVersion: sv });
+          batch = freeBatch({ sid: seat.sid, task: free, stateVersion: v, sessionVersion: sv, keepSeat });
         }
         const b = seat.bound;
         if (b && b.claude !== claude && boundLive(b, t)) return fail(`release: ${seat.sid} is bound to another live session`, 3);
         let released = false;
-        if (b && b.claude === claude && b.endedAt === null) {
+        if (!keepSeat && b && b.claude === claude && b.endedAt === null) {
           writeBinding(boundFile(seat.dir), { ...b, endedAt: now.toISOString(), endReason: "released" });
           released = true;
         }

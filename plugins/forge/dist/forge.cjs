@@ -17622,6 +17622,13 @@ function saveDecisionsDoc(root, event, n) {
   } catch {
   }
 }
+var REPEAT_MS = 10 * 6e4;
+var contentOf = (e) => {
+  const d = normalizeDecision(e);
+  if (!d) return null;
+  const { ts: _ts, ...rest } = d;
+  return JSON.stringify(rest);
+};
 function addDecision(root, raw, ctx) {
   const r2 = Input.safeParse(raw);
   if (!r2.success) throw new DecisionInputError(r2.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; "));
@@ -17636,6 +17643,13 @@ function addDecision(root, raw, ctx) {
     ...task ? { task } : {},
     ...runId ? { runId } : {}
   };
+  const mine = contentOf(event);
+  const before3 = readEvents(root).filter((e) => e.kind === "decision");
+  for (let i = before3.length - 1; i >= 0; i--) {
+    const age = Date.parse(ctx.ts) - Date.parse(before3[i].ts);
+    if (!(age >= 0 && age <= REPEAT_MS)) continue;
+    if (mine !== null && contentOf(before3[i]) === mine) return { n: i + 1, event: before3[i] };
+  }
   appendEvent(root, event);
   const line3 = JSON.stringify(event);
   const all = readEvents(root).filter((e) => e.kind === "decision");
@@ -17715,7 +17729,7 @@ function renderDecisionsMd(list, scope, locale) {
   }
   return out.join("\n");
 }
-var decisionNoteId = (event, session, n) => `${compactTs(new Date(event.ts))}-${session}-d${n}`;
+var decisionNoteId = (event, session) => `${compactTs(new Date(event.ts))}-${session}-d${sha256Hex(JSON.stringify(normalizeDecision(event) ?? event)).slice(0, 10)}`;
 function decisionWrites(i) {
   const d = normalizeDecision(i.event);
   if (!d) return [];
@@ -23153,9 +23167,11 @@ function pulledRules(root) {
     return 0;
   }
 }
-function bindingDecision(last, mark, ownerRule) {
+var MARK_SKEW_MS = 10 * 6e4;
+function bindingDecision(last, mark, ownerRule, now) {
   if (!last) return void 0;
-  if (ownerRule && mark && Date.parse(mark.decidedAt) > Date.parse(last.ts)) return void 0;
+  const at2 = mark ? Date.parse(mark.decidedAt) : NaN;
+  if (ownerRule && Number.isFinite(at2) && at2 > Date.parse(last.ts) && at2 <= now + MARK_SKEW_MS) return void 0;
   return last.status;
 }
 function stopContext(cwd2, now) {
@@ -23168,23 +23184,23 @@ function stopContext(cwd2, now) {
     stopFile: (0, import_node_fs36.existsSync)(stopFile(cwd2)),
     // Wave 4: approved work counts only with the owner's mark (with or without a task, as before); one without a task also
     // needs the mark to be of its present text: an edited one never becomes a task, so it does not hold the queue open.
-    approvedPending: proposals.filter((p) => p.taskId === void 0 ? ownerCheck(p.id, p, marks[p.id], bindingDecision(last[p.id], marks[p.id], ownerRule)) === "ok" : markMatches(p, marks[p.id])).length,
+    approvedPending: proposals.filter((p) => p.taskId === void 0 ? ownerCheck(p.id, p, marks[p.id], bindingDecision(last[p.id], marks[p.id], ownerRule, now.getTime())) === "ok" : markMatches(p, marks[p.id])).length,
     pendingProposals: proposals.filter((p) => p.status === "proposed" || p.status === "discussing").length
   };
 }
-function unownedReasons(root) {
+function unownedReasons(root, now) {
   const marks = loadApprovals(root);
   const last = lastDecisions(root);
   const ownerRule = pulledRules(root) >= PAGE_RULES;
   const out = {};
   for (const p of loadProposals(root)) {
     if (!isActionable(p) || p.taskId !== void 0) continue;
-    const c = ownerCheck(p.id, p, marks[p.id], bindingDecision(last[p.id], marks[p.id], ownerRule));
+    const c = ownerCheck(p.id, p, marks[p.id], bindingDecision(last[p.id], marks[p.id], ownerRule, now.getTime()));
     if (c !== "ok") out[p.id] = c;
   }
   return out;
 }
-var unownedOf = (root) => Object.keys(unownedReasons(root)).length;
+var unownedOf = (root, now) => Object.keys(unownedReasons(root, now)).length;
 function runRootOf(cwd2) {
   const main = mainCheckout(cwd2);
   if (samePath(main, cwd2)) return main;
@@ -23975,7 +23991,7 @@ function runCommand(argv, io) {
             if (status !== void 0 && !PROPOSAL_STATUSES.includes(status)) throw new UsageError(`proposals list: --status must be one of ${PROPOSAL_STATUSES.join("|")}`);
             const all = loadProposals(io.cwd).filter((p) => status === void 0 || p.status === status);
             all.sort((a, b) => a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : a.id < b.id ? 1 : -1);
-            const reasons = unownedReasons(io.cwd);
+            const reasons = unownedReasons(io.cwd, io.now());
             return json4({ proposals: all, unowned: Object.keys(reasons).length, unownedReasons: reasons });
           }
           case "decide": {
@@ -24175,7 +24191,7 @@ function runCommand(argv, io) {
             if (!isActionable(found)) throw new UsageError(`proposals to-task: ${id2} is not approved`);
             if (found.taskId !== void 0) throw new UsageError(`proposals to-task: ${id2} already has task ${found.taskId}`);
             const mark = loadApproval(io.cwd, id2);
-            const lastStatus = bindingDecision(lastDecisions(io.cwd)[id2], mark, pulledRules(io.cwd) >= PAGE_RULES);
+            const lastStatus = bindingDecision(lastDecisions(io.cwd)[id2], mark, pulledRules(io.cwd) >= PAGE_RULES, io.now().getTime());
             const check = ownerCheck(id2, found, mark, lastStatus);
             if (check === "no-mark") throw new UsageError(`proposals to-task: ${id2} has no mark of the roadmap's owner (approvals/${id2}); only the owner's approvals become tasks`);
             if (!ownerApproved(id2, found, mark, lastStatus)) throw new UsageError(`proposals to-task: ${id2} was edited after the owner's approval; it needs a new approval`);
@@ -24484,7 +24500,7 @@ function runCommand(argv, io) {
           const reason = run2?.active ? stopReason(run2, stopContext(runRoot, io.now())) : null;
           const unbound = !!run2?.active && run2.sessionId === null;
           const publish = run2 ? { infinite: infinitePublish(mainCheckout(io.cwd), run2, io.now()) } : null;
-          return json4({ present: text2 !== null, valid: run2 !== null, run: run2, stopReason: reason, reply: runReply(runRoot, run2), ...unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}, unowned: unownedOf(runRoot), publish });
+          return json4({ present: text2 !== null, valid: run2 !== null, run: run2, stopReason: reason, reply: runReply(runRoot, run2), ...unbound ? { unbound: true, warning: UNBOUND_WARNING } : {}, unowned: unownedOf(runRoot, io.now()), publish });
         }
         throw new UsageError("usage: forge infinite <start --cycles N|--hours H [--queue-max N] [--session ID] [--locale CODE]|status>");
       }
@@ -24754,7 +24770,7 @@ function runCommand(argv, io) {
           try {
             const { n, event } = addDecision(root, decision, { ts: ts(), ...task ? { task } : {}, runId: exec?.active ? exec.runId : null });
             const closes = typeof resolves === "string" && !resolvesRefused ? resolves : null;
-            const publish = session ? decisionWrites({ event, session, eid: decisionNoteId(event, session, n), resolves: closes }) : null;
+            const publish = session ? decisionWrites({ event, session, eid: decisionNoteId(event, session), resolves: closes }) : null;
             return json4({ n, ...event, ...publish ? { publish } : {}, ...resolvesRefused ? { resolvesRefused } : {} });
           } catch (e) {
             if (e instanceof DecisionInputError) throw new UsageError(`decision add: ${e.message}`);
