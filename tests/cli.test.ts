@@ -965,6 +965,59 @@ describe('design commands', () => {
         expect(bad.stderr).toBe('critique-check: cannot read the changelog of the design: changelog.json is not valid JSON\n');
       });
     });
+    it('a change that only removes a section is reviewed in full, with what went away, and its verification clears needsVerify (final review M1)', () => {
+      mkdirSync(path.join(ddir(), 'design/critiques'), { recursive: true });
+      writeFileSync(path.join(ddir(), 'design/critiques/r1.json'), JSON.stringify({ round: 1, version: 1, scope: 'full', verdict: 'changes',
+        proposals: [{ n: 1, category: 'scope', severity: 'major', section: 'riesgos', problem: 'p', change: 'quitar la sección' }] }));
+      edit('\n## Riesgos\n\nLa migración de reembolsos no tiene rollback.\n', '\n');
+      expect(run(['design-snapshot', rel, '--note', 'ronda 1: quitar riesgos', '--kind', 'apply', '--applied', 'r1:1'], io).code).toBe(0);
+      const gate = () => JSON.parse(run(['design-gate', rel], io).stdout);
+      expect(gate()).toMatchObject({ needsVerify: true, canAutoApprove: false });
+      const v = next('--verify');
+      expect(v).toMatchObject({ round: 2, version: 2, scope: 'full', changed: [], removed: ['riesgos'], budget: { max: 3, severities: ['critical'] } });
+      expect(v.review).toEqual(['_intro', 'alcance', 'fuera-de-alcance', 'arquitectura']);
+      expect(next()).toMatchObject({ scope: 'full', removed: ['riesgos'], review: ['_intro', 'alcance', 'fuera-de-alcance', 'arquitectura'] });
+      writeFileSync(v.out, JSON.stringify({ round: 2, version: 2, scope: 'full', verdict: 'ready', proposals: [] }));
+      expect(run(['critique-check', v.out, '--round', '2', '--version', '2', '--verify', '--design', rel], io).code).toBe(0);
+      expect(gate()).toMatchObject({ needsVerify: false, canAutoApprove: true });
+      // Nothing changed and nothing removed since: still nothing to review.
+      expect(next()).toMatchObject({ round: 3, scope: 'changed', changed: [], removed: [], review: [] });
+    });
+    describe('critique-check --reject-on-fail (final review M2)', () => {
+      const minors = (count: number) => Array.from({ length: count }, (_, i) => ({ n: i + 1, category: 'gap', severity: 'minor', section: 'alcance', problem: `p${i}`, change: 'c' }));
+      it('sets a refused critique aside as r<R>.rejected.json: the next round is R again and design-gate counts no round; without the flag it stays', () => {
+        const r1 = next();
+        mkdirSync(path.dirname(r1.out), { recursive: true });
+        const rejected = path.join(path.dirname(r1.out), 'r1.rejected.json');
+        writeFileSync(r1.out, JSON.stringify({ round: 1, version: 1, scope: 'full', verdict: 'ready', proposals: minors(13) }));
+        const kept = run(['critique-check', r1.out, '--round', '1', '--version', '1', '--design', rel], io);
+        expect(kept.code).toBe(1);
+        expect(existsSync(r1.out)).toBe(true);
+        const r = run(['critique-check', r1.out, '--round', '1', '--version', '1', '--design', rel, '--reject-on-fail'], io);
+        expect(r.code).toBe(1);
+        expect(r.stderr).toContain('13 proposals, but this round allows at most 12');
+        expect(r.stderr).toContain(`critique-check: the critique was refused and set aside as ${rejected}`);
+        expect(existsSync(r1.out)).toBe(false);
+        expect(existsSync(rejected)).toBe(true);
+        expect(next()).toMatchObject({ round: 1, scope: 'full', budget: { max: 12, severities: ['critical', 'major', 'minor'] } });
+        expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ rounds: 0, latestRound: null, invalid: [], pending: [] });
+        // A second refusal (here a file that is no critique at all) replaces the older one; one that passes stays.
+        writeFileSync(r1.out, '{not json');
+        expect(run(['critique-check', r1.out, '--design', rel, '--reject-on-fail'], io).code).toBe(1);
+        expect(readFileSync(rejected, 'utf8')).toBe('{not json');
+        writeFileSync(r1.out, JSON.stringify({ round: 1, version: 1, scope: 'full', verdict: 'ready', proposals: minors(1) }));
+        expect(run(['critique-check', r1.out, '--round', '1', '--version', '1', '--design', rel, '--reject-on-fail'], io).code).toBe(0);
+        expect(existsSync(r1.out)).toBe(true);
+        expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ rounds: 1, latestRound: 1 });
+      });
+      it('a usage error or a design that does not read leaves the critique where it is', () => {
+        writeFileSync(path.join(dir, 'c.json'), JSON.stringify({ round: 1, version: 1, scope: 'full', proposals: minors(13) }));
+        expect(run(['critique-check', 'c.json', '--round', 'x', '--reject-on-fail'], io).code).toBe(2);
+        expect(run(['critique-check', 'c.json', '--design', 'nope.md', '--reject-on-fail'], io).code).toBe(1);
+        expect(existsSync(path.join(dir, 'c.json'))).toBe(true);
+        expect(existsSync(path.join(dir, 'c.rejected.json'))).toBe(false);
+      });
+    });
     it('the usage names critique-next', () => {
       expect(run(['nope'], io).stderr).toContain('critique-next');
       expect(run(['critique-next'], io).code).toBe(2);

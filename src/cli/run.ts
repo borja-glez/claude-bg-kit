@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, rmSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, rmSync, statSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { parsePlan, PlanError, isPlanId } from '../lib/plan.js';
@@ -872,48 +872,60 @@ export function run(argv: string[], io: Io): Result {
         return ok(JSON.stringify({ round, dismissed: (next[round] ?? []).map(x => x.n) }));
       }
       case 'critique-check': {
-        const c = parseCritique(readFileSync(abs(args[0]), 'utf8'));
-        const issues: string[] = [];
-        for (const name of ['round', 'version'] as const) {
-          const given = flag(name);
-          if (given === undefined) continue;
-          if (!/^[1-9]\d*$/.test(given)) return fail(`critique-check: --${name} must be a positive integer`, 2);
-          if (c[name] !== Number(given)) issues.push(`${name} is ${c[name]} but this review is ${name} ${given}`);
-        }
-        // K3-04: the budget of this round (the critique's own round without --round), or of a verification.
-        const roundGiven = flag('round');
-        const designFlag = flag('design');
-        const designParsed = designFlag !== undefined ? parseDesign(readFileSync(abs(designFlag), 'utf8')) : null;
-        // With --design the round counts from the design's last reopen, as critique-next gave it (ruling C1). A changelog
-        // that does not parse leaves no budget to apply: exit 2, the critique is not judged (carry 6).
-        const absolute = roundGiven !== undefined ? Number(roundGiven) : c.round;
-        let budgetAt = absolute;
-        if (designFlag !== undefined && designParsed) {
-          let log: ReturnType<typeof readChangelog>;
-          try { log = readChangelog(designFilesOf(abs(designFlag), designParsed.meta.project).dir); }
-          catch (e) { return fail(`critique-check: cannot read the changelog of the design: ${(e as Error).message}`, 2); }
-          budgetAt = budgetRound(log, absolute);
-        }
-        issues.push(...budgetIssues(c, budgetFor(budgetAt, args.includes('--verify'))));
-        const headings: Record<string, string> = {};
-        if (designParsed) {
-          const sections = designParsed.sections;
-          for (const s of sections) headings[s.slug] = s.heading;
-          const slugs = new Set(['_intro', ...sections.map(s => s.slug)]);
-          for (const p of c.proposals) if (!slugs.has(p.section)) issues.push(`proposal ${p.n}: section "${p.section}" is not a section slug of the design`);
-        }
-        if (issues.length) throw new CritiqueError(issues);
-        // K3-15: a critique of what changed that reviews another section is told, never refused.
-        const warnings: string[] = [];
-        const changedFlag = flag('changed');
-        if (changedFlag !== undefined && c.scope === 'changed') {
-          const allowed = changedFlag.split(',').map(s => s.trim()).filter(Boolean);
-          for (const p of c.proposals) {
-            if (!allowed.includes(p.section)) warnings.push(`warning: proposal ${p.n} reviews "${p.section}", outside the changed sections (${allowed.join(', ')})`);
+        const target = abs(args[0]);
+        try {
+          const c = parseCritique(readFileSync(target, 'utf8'));
+          const issues: string[] = [];
+          for (const name of ['round', 'version'] as const) {
+            const given = flag(name);
+            if (given === undefined) continue;
+            if (!/^[1-9]\d*$/.test(given)) return fail(`critique-check: --${name} must be a positive integer`, 2);
+            if (c[name] !== Number(given)) issues.push(`${name} is ${c[name]} but this review is ${name} ${given}`);
           }
+          // K3-04: the budget of this round (the critique's own round without --round), or of a verification.
+          const roundGiven = flag('round');
+          const designFlag = flag('design');
+          const designParsed = designFlag !== undefined ? parseDesign(readFileSync(abs(designFlag), 'utf8')) : null;
+          // With --design the round counts from the design's last reopen, as critique-next gave it (ruling C1). A
+          // changelog that does not parse leaves no budget to apply: exit 2, the critique is not judged (carry 6).
+          const absolute = roundGiven !== undefined ? Number(roundGiven) : c.round;
+          let budgetAt = absolute;
+          if (designFlag !== undefined && designParsed) {
+            let log: ReturnType<typeof readChangelog>;
+            try { log = readChangelog(designFilesOf(abs(designFlag), designParsed.meta.project).dir); }
+            catch (e) { return fail(`critique-check: cannot read the changelog of the design: ${(e as Error).message}`, 2); }
+            budgetAt = budgetRound(log, absolute);
+          }
+          issues.push(...budgetIssues(c, budgetFor(budgetAt, args.includes('--verify'))));
+          const headings: Record<string, string> = {};
+          if (designParsed) {
+            const sections = designParsed.sections;
+            for (const s of sections) headings[s.slug] = s.heading;
+            const slugs = new Set(['_intro', ...sections.map(s => s.slug)]);
+            for (const p of c.proposals) if (!slugs.has(p.section)) issues.push(`proposal ${p.n}: section "${p.section}" is not a section slug of the design`);
+          }
+          if (issues.length) throw new CritiqueError(issues);
+          // K3-15: a critique of what changed that reviews another section is told, never refused.
+          const warnings: string[] = [];
+          const changedFlag = flag('changed');
+          if (changedFlag !== undefined && c.scope === 'changed') {
+            const allowed = changedFlag.split(',').map(s => s.trim()).filter(Boolean);
+            for (const p of c.proposals) {
+              if (!allowed.includes(p.section)) warnings.push(`warning: proposal ${p.n} reviews "${p.section}", outside the changed sections (${allowed.join(', ')})`);
+            }
+          }
+          const text = formatProposals(c, flag('locale') ?? 'en', headings);
+          return { code: 0, stdout: text.endsWith('\n') ? text : `${text}\n`, stderr: warnings.length ? `${warnings.join('\n')}\n` : '' };
+        } catch (e) {
+          // Final review M2: with --reject-on-fail, a critique the check refused is set aside as <name>.rejected.json next
+          // to it (an older one of that name is replaced), so it never counts as a round. A usage error, a design that
+          // does not read or a changelog that does not parse judge no critique: it stays.
+          if (!(e instanceof CritiqueError) || !args.includes('--reject-on-fail') || !existsSync(target)) throw e;
+          const rejected = path.join(path.dirname(target), `${path.basename(target).replace(/\.json$/i, '')}.rejected.json`);
+          rmSync(rejected, { force: true });
+          renameSync(target, rejected);
+          return fail(`${e.message}\ncritique-check: the critique was refused and set aside as ${rejected}`);
         }
-        const text = formatProposals(c, flag('locale') ?? 'en', headings);
-        return { code: 0, stdout: text.endsWith('\n') ? text : `${text}\n`, stderr: warnings.length ? `${warnings.join('\n')}\n` : '' };
       }
       case 'critique-select': {
         const c = parseCritique(readFileSync(abs(args[0]), 'utf8'));

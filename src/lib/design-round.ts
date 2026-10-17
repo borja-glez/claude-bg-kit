@@ -17,7 +17,7 @@ export interface NextRound {
   /** The sections changed since that version, and the ones that went away (both empty before any critique). */
   changed: string[];
   removed: string[];
-  /** The sections the critic reviews: every one with a full scope, the changed ones otherwise. */
+  /** The sections the critic reviews: every one with a full scope (and `_intro` too when sections were only removed), the changed ones otherwise. */
   review: string[];
 }
 
@@ -49,7 +49,7 @@ export function budgetRound(changelog: ChangelogEntry[], round: number): number 
 
 /**
  * The next round. The budget counts the rounds since the last reopen (budgetRound); the first round after a reopen still
- * reviews only what changed, unless more than half did (scopeFor).
+ * reviews only what changed, unless more than half did (scopeFor). A change that only removed sections is reviewed in full.
  */
 export function nextRound(i: NextRoundInput): NextRound {
   const last = i.changelog[i.changelog.length - 1];
@@ -62,12 +62,15 @@ export function nextRound(i: NextRoundInput): NextRound {
   const since = latest?.version ?? null;
   const prev = since === null ? undefined : i.history[since];
   const diff = prev === undefined ? null : changedSections(designBody(prev), designBody(i.current));
-  const scope: 'full' | 'changed' = i.full || !diff
+  // Final review M1: a change that only removed sections can leave a reference to them anywhere, so it is reviewed in
+  // full, the intro included; nothing is left to review only when nothing changed and nothing went away.
+  const removalOnly = !!diff && diff.changed.length === 0 && diff.removed.length > 0;
+  const scope: 'full' | 'changed' = i.full || !diff || removalOnly
     ? 'full'
     : scopeFor({ round: cycle, verify, reopened, changed: diff.changed.filter(s => s !== '_intro').length + diff.removed.length, total: i.sections.length });
   return {
     round, version: last?.version ?? 0, budget, scope, since,
     changed: diff?.changed ?? [], removed: diff?.removed ?? [],
-    review: scope === 'full' ? i.sections : diff?.changed ?? [],
+    review: removalOnly ? ['_intro', ...i.sections] : scope === 'full' ? i.sections : diff?.changed ?? [],
   };
 }
