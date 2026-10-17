@@ -11245,7 +11245,7 @@ function openTasksFrom(states) {
 }
 function ownSeat(seats, sessionId2) {
   if (!isSafeId(sessionId2)) return null;
-  const own = seats.filter((s) => s.bound?.claude === sessionId2).sort((a, b) => Date.parse(b.bound.seenAt) - Date.parse(a.bound.seenAt))[0];
+  const own = seats.filter((s) => s.bound?.claude === sessionId2 && !s.bound.endedAt).sort((a, b) => Date.parse(b.bound.seenAt) - Date.parse(a.bound.seenAt))[0];
   return own?.sid ?? null;
 }
 function seatSignals(f, sid) {
@@ -12029,7 +12029,8 @@ function headline(m) {
     const detail = x.slots.slice(0, 2).map((s) => `${s.task} ${s.stage}`).join(" \xB7 ");
     return { section: "forge", title: `\u25B6 ${x.slots.length}/${x.parallel}`, detail, cells: null, agent: null };
   }
-  if (m.forge) {
+  const expanded = (m.activities ?? []).find((a) => a.expanded);
+  if (m.forge && expanded?.owner !== "other") {
     const f = m.forge;
     const c2 = briefCells(f);
     return { section: "forge", title: f.task, detail: [f.path, forgePhase(f)].filter(Boolean).join(" \xB7 "), cells: c2, agent: f.agent };
@@ -12174,8 +12175,28 @@ function span2(from, to, now) {
   return Math.floor((to - from) / 1e3);
 }
 var age = (t, now) => Math.max(0, now - t);
+var orderAt = (t, now) => t - now > FUTURE_SKEW_MS ? -Infinity : Math.min(t, now);
 var isOf = (task, id2) => id2 === task || id2.startsWith(`${task}-`) && /^\d{1,4}$/.test(id2.slice(task.length + 1));
 var alive = (l) => l.status !== "done";
+var keyOf = (task, project) => statusKey(task, project) ?? task;
+function newestKey(statuses, match, now) {
+  let best;
+  for (const st of statuses) {
+    const last = ms(st.lastAt ?? st.ts);
+    if (!match(st) || !Number.isFinite(last)) continue;
+    const at = orderAt(last, now);
+    if (!best || at > best.at) best = { key: keyOf(st.task, st.project), at };
+  }
+  return best?.key;
+}
+function newestByTask(statuses, now) {
+  const memo = /* @__PURE__ */ new Map();
+  return (task) => {
+    if (!memo.has(task)) memo.set(task, newestKey(statuses, (st) => st.task === task, now));
+    return memo.get(task);
+  };
+}
+var worksOn = (l, task, project, newest3) => l.task === task && (l.project !== null ? l.project === project : (newest3(task) ?? keyOf(task, project)) === keyOf(task, project));
 function leftOpen(st, now) {
   if (st.path !== "trivial" && st.path !== "small" || st.doneAt) return false;
   const last = ms(st.lastAt);
@@ -12223,12 +12244,14 @@ function agentOf(l, links2, models, now) {
     depth
   };
 }
-function withSlotAgents(x, links2, models, viewer, now) {
+function withSlotAgents(x, links2, models, viewer, now, statuses = []) {
   if (!x) return x;
+  const project = x.project ?? null;
+  const newest3 = newestByTask(statuses, now);
   return {
     ...x,
     slots: x.slots.map((s) => {
-      const agents = links2.filter((l) => alive(l) && l.task === s.task).map((l) => agentOf(l, links2, models, now));
+      const agents = links2.filter((l) => alive(l) && worksOn(l, s.task, project, newest3)).map((l) => agentOf(l, links2, models, now));
       const first = agents.find((g) => g.model);
       const liveness2 = viewer.coordinator && agents.length ? "alive" : s.liveness;
       return { ...s, agents, model: s.model ?? first?.model ?? null, effort: s.effort ?? first?.effort ?? null, liveness: liveness2 };
@@ -12259,11 +12282,14 @@ var summary = (key, kind, o) => ({
 function buildActivities(i) {
   const now = i.now;
   const known = i.sessionId !== void 0;
+  const execProject = i.execution?.project ?? null;
   const slotTasks = new Set(i.execution?.mode === "subagents" ? i.execution.slots.map((s) => s.task) : []);
+  const newest3 = newestByTask(i.statuses, now);
   const liveJobs = i.jobs.filter((j) => {
     const t = ms(j.startedAt);
     return Number.isFinite(t) && age(t, now) < JOB_ALIVE_MS;
   });
+  const jobHome = new Map(liveJobs.map((j) => [j, j.task === null ? void 0 : newestKey(i.statuses, (st) => isOf(st.task, j.task), now)]));
   const built = [];
   const seen = /* @__PURE__ */ new Set();
   for (const st of i.statuses) {
@@ -12273,7 +12299,7 @@ function buildActivities(i) {
     const last = ms(st.lastAt ?? st.ts);
     if (!Number.isFinite(last)) continue;
     const stopped = st.phase.toLowerCase() === "stopped";
-    const mine = i.links.filter((l) => alive(l) && l.task === st.task && (l.project === null || st.project === null || l.project === st.project));
+    const mine = i.links.filter((l) => alive(l) && worksOn(l, st.task, st.project, newest3));
     const working = mine.length > 0 || !!st.agent && i.liveTypes.some((t) => tierOf(t).label === tierOf(st.agent).label);
     const left = !stopped && !working && leftOpen(st, now);
     const done = !stopped && (!!st.doneAt || left);
@@ -12283,9 +12309,10 @@ function buildActivities(i) {
     const visible = done || stopped ? Number.isFinite(end) && age(end, now) < DONE_TTL_MS : age(last, now) < (owner === "own" ? OWN_TTL_MS : OTHER_TTL_MS);
     if (!visible) continue;
     const skewed = last - now > FUTURE_SKEW_MS;
-    const job = liveJobs.find((j) => j.task !== null && isOf(st.task, j.task));
+    const job = liveJobs.find((j) => jobHome.get(j) === key);
     const live = owner === "own" && !done && !stopped;
-    const title = i.titles?.[st.task];
+    const title = i.titles?.[key];
+    const slot = slotTasks.has(st.task) && st.project === execProject && !done && !stopped;
     built.push({
       row: {
         key,
@@ -12293,7 +12320,7 @@ function buildActivities(i) {
         owner,
         dim: owner === "other" || done || stopped,
         done,
-        slot: slotTasks.has(st.task) && !done && !stopped,
+        slot,
         expanded: false,
         stopped,
         task: st.task,
@@ -12309,7 +12336,7 @@ function buildActivities(i) {
         seconds: skewed ? null : span2(ms(st.taskStartedAt), done || stopped ? ended : now, now),
         agents: live ? mine.map((l) => agentOf(l, i.links, i.models, now)) : []
       },
-      at: last,
+      at: orderAt(last, now),
       end,
       st,
       rank: done || stopped ? 2 : owner === "own" ? 0 : 1
@@ -12334,10 +12361,10 @@ function buildActivities(i) {
       rank: living.length ? 0 : 2
     });
   }
-  built.sort((a, b) => a.rank - b.rank || (a.rank === 2 ? b.end - a.end : b.at - a.at));
+  built.sort((a, b) => a.rank - b.rank || (a.rank === 2 ? orderAt(b.end, now) - orderAt(a.end, now) : b.at - a.at));
   const forge = built.filter((b) => b.row.kind === "forge" && !b.row.slot);
-  const focus = i.focusAgent ? i.links.find((l) => l.id === i.focusAgent)?.task ?? null : null;
-  const pick2 = (focus ? forge.find((b) => b.row.task === focus) : void 0) ?? forge.find((b) => b.rank === 0 && b.row.owner === "own") ?? forge.reduce((best, b) => !best || b.at > best.at ? b : best, void 0);
+  const focus = i.focusAgent ? i.links.find((l) => l.id === i.focusAgent) : void 0;
+  const pick2 = (focus ? forge.find((b) => b.st !== null && worksOn(focus, b.st.task, b.st.project, newest3)) : void 0) ?? forge.find((b) => b.rank === 0 && b.row.owner === "own") ?? forge.reduce((best, b) => !best || b.at > best.at ? b : best, void 0);
   if (pick2) pick2.row.expanded = true;
   const out = built.map((b) => b.row);
   if (i.superpowers) {
@@ -12353,8 +12380,9 @@ function buildActivities(i) {
     const wakes = [i.viewer.coordinator ? ms(i.sleepUntil) : NaN, i.wakeAt ?? NaN].filter((t) => Number.isFinite(t) && t >= now);
     waiting = { agents: mainAgents.length, wakeSeconds: wakes.length ? Math.round((Math.min(...wakes) - now) / 1e3) : null };
   }
-  const rows = out.filter((a) => a.kind === "forge" && !a.slot && a.task !== null).map((a) => a.task);
-  const jobs = liveJobs.filter((j) => !(j.task !== null && rows.some((t) => isOf(t, j.task)))).filter((j) => !known || j.session === null || j.session === i.sessionId).slice(0, JOBS_SHOWN).map((j) => ({ name: j.cmd, task: j.task, seconds: span2(ms(j.startedAt), now, now) }));
+  const onRows = new Set(out.filter((a) => a.kind === "forge" && !a.slot && a.job).map((a) => a.key));
+  const ownJob = (j) => !known || j.session === null || (i.sessionId ? j.session === i.sessionId : j.task !== null && i.ownTasks.some((t) => isOf(t, j.task) || isOf(j.task, t)));
+  const jobs = liveJobs.filter((j) => !onRows.has(jobHome.get(j) ?? "") && ownJob(j)).sort((a, b) => ms(b.startedAt) - ms(a.startedAt)).slice(0, JOBS_SHOWN).map((j) => ({ name: j.cmd, task: j.task, seconds: span2(ms(j.startedAt), now, now) }));
   return { activities: out, waiting, jobs, expanded: pick2?.st ?? null };
 }
 
@@ -12516,7 +12544,8 @@ function forgeOf(st, now, briefs = null, liveTypes = []) {
   const { ts: _ts, taskStartedAt: _a, stageSince: _b, stages: _c, doneAt: _d, lastAt: _e, session: _s, runId: _r, project: _p, ...forge } = st;
   const working = !!st.agent && liveTypes.some((t) => tierOf(t).label === tierOf(st.agent).label);
   const left = !working && leftOpen(st, now);
-  const timing = forgeTiming(left ? { ...st, doneAt: st.lastAt } : st, now);
+  const skewed = Date.parse(st.lastAt ?? st.ts) - now > FUTURE_SKEW_MS;
+  const timing = skewed ? null : forgeTiming(left ? { ...st, doneAt: st.lastAt } : st, now);
   return { ...forge, ...left ? { agent: null } : {}, briefs, timing };
 }
 var FORGE_STATUSES_READ = 20;
@@ -12621,9 +12650,11 @@ function executionFromFiles(execText, taskTexts = {}, liveTexts = {}, now, title
     }
   }
   let v;
+  let exec;
   const clean2 = titles && Object.fromEntries(Object.entries(titles).map(([id2, t]) => [id2, cleanText(t)]));
   try {
-    v = executionView({ exec: parseExecution(execText, now), tasks, live, titles: clean2, now, role });
+    exec = parseExecution(execText, now);
+    v = executionView({ exec, tasks, live, titles: clean2, now, role });
   } catch {
     return null;
   }
@@ -12631,6 +12662,7 @@ function executionFromFiles(execText, taskTexts = {}, liveTexts = {}, now, title
   const to = v.frozenAt ? Math.min(now, Date.parse(v.frozenAt)) : now;
   return {
     runId: v.runId,
+    project: exec?.kind === "plan" && isSafeId(exec.project) ? exec.project : null,
     mode: v.mode,
     parallel: v.parallel,
     branch: v.branch,
@@ -12776,8 +12808,12 @@ function buildPanelModel(input) {
     runRoleOf(band)
   );
   const titles = {};
-  for (const s of execution?.slots ?? []) if (s.title) titles[s.task] = s.title;
-  if (wp?.current) titles[wp.current.id] = wp.current.title;
+  const titleOf = (task, project, title) => {
+    const k = statusKey(task, project);
+    if (k) titles[k] = title;
+  };
+  for (const s of execution?.slots ?? []) if (s.title) titleOf(s.task, execution?.project ?? null, s.title);
+  if (wp?.current) titleOf(wp.current.id, wp.project, wp.current.title);
   const sp = superpowers(input);
   const todosModel = todos.total ? todos : null;
   const statuses = parseStatuses(input.forgeStatuses ?? (input.forgeStatus !== void 0 ? [input.forgeStatus] : []));
@@ -12811,7 +12847,7 @@ function buildPanelModel(input) {
   }
   const briefsOf = (st) => input.forgeBriefsBy?.[statusKey(st.task, st.project) ?? st.task] ?? (input.forgeStatuses === void 0 ? input.forgeBriefs ?? null : null);
   const forge = failed ? newestForge(statuses, now, briefsOf, liveTypes) : view.expanded ? forgeOf(view.expanded, now, briefsOf(view.expanded), liveTypes) : null;
-  const withAgents = withSlotAgents(execution, links2, models, viewer, now);
+  const withAgents = withSlotAgents(execution, links2, models, viewer, now, statuses);
   const shown = new Set(view.activities.filter((x) => !x.slot && x.kind !== "adhoc").flatMap((x) => x.agents.map((g) => g.id)));
   for (const s of withAgents?.slots ?? []) for (const g of s.agents ?? []) shown.add(g.id);
   const taskOf = new Map(links2.flatMap((l) => l.task ? [[l.id, l.task]] : []));
@@ -13174,7 +13210,8 @@ function forgeBlocks(m, f, t, linked) {
   const chips = f.validators.map((v) => ({ text: `${v.ok ? "\u2713" : "\u2717"} ${v.name}${v.cached ? ` \xB7 ${t.cached}` : ""}`, hue: v.ok ? "green" : "red" }));
   const verdict = verdictChip(f, t);
   if (verdict) chips.push(verdict);
-  if (f.round !== null) chips.push({ text: `${t.fixRound} ${f.round}${f.cap !== null ? `/${f.cap}` : ""}`, hue: f.cap !== null && f.round >= f.cap ? "red" : "sub" });
+  const verdictRound = f.verdict ? f.verdict.round ?? (f.round !== null && f.round >= 1 ? f.round : null) : null;
+  if (f.round !== null && f.round !== verdictRound) chips.push({ text: `${t.fixRound} ${f.round}${f.cap !== null ? `/${f.cap}` : ""}`, hue: f.cap !== null && f.round >= f.cap ? "red" : "sub" });
   if (chips.length) blocks.push({ kind: "chips", chips });
   return blocks;
 }
@@ -13737,7 +13774,7 @@ function toUsageFile(s, meta) {
     tracking: { waypoint: s.tracking.waypoint, forge: s.tracking.forge },
     activeMs: s.activeMs,
     trackingReread: s.tracking.reread,
-    runKey: meta.runKey ?? null,
+    ...meta.runKey !== void 0 ? { runKey: meta.runKey } : {},
     runBaseline: meta.runBaseline ?? null
   };
 }
@@ -13827,9 +13864,9 @@ function runStartedAt(src, now) {
 function mergeForRun(files, own, since, runKey = null) {
   const out = newUsage(since);
   const add = (session, loops, tracking, reread, activeMs, baseline) => {
-    const t = totalsOf(loops);
-    const ok = !!baseline && baseline.costUsd <= t.costUsd + 1e-9 && baseline.tokens <= t.tokens && (activeMs === void 0 || baseline.activeMs <= activeMs);
-    const cf = ok && t.costUsd > 0 ? 1 - baseline.costUsd / t.costUsd : 1;
+    const t = baseline ? totalsOf(loops) : null;
+    const ok = !!baseline && !!t && baseline.costUsd <= t.costUsd + 1e-9 && baseline.tokens <= t.tokens && (activeMs === void 0 || baseline.activeMs <= activeMs);
+    const cf = ok && t.costUsd > 0 ? Math.max(0, 1 - baseline.costUsd / t.costUsd) : 1;
     const tf = ok && t.tokens > 0 ? 1 - baseline.tokens / t.tokens : 1;
     for (const [id2, l] of Object.entries(loops)) {
       out.loops[`${session}/${id2}`] = { ...l, input: l.input * tf, output: l.output * tf, cacheRead: l.cacheRead * tf, cacheWrite: l.cacheWrite * tf, costUsd: l.costUsd * cf };
@@ -13844,7 +13881,8 @@ function mergeForRun(files, own, since, runKey = null) {
   for (const f of files) {
     if (f.session === own.session || Date.parse(f.updatedAt) < since) continue;
     if (runKey !== null && f.runKey !== void 0 && f.runKey !== runKey) continue;
-    const ok = add(f.session, f.loops, f.tracking, f.trackingReread ?? 0, f.activeMs, runKey !== null && f.runKey === runKey ? f.runBaseline ?? null : null);
+    const baseline = runKey !== null && f.runKey === runKey && f.runBaseline?.runKey === runKey ? f.runBaseline : null;
+    const ok = add(f.session, f.loops, f.tracking, f.trackingReread ?? 0, f.activeMs, baseline);
     if (runKey !== null && !ok) out.runPartial = true;
   }
   const ownBaseline = runKey !== null && own.baseline?.runKey === runKey ? own.baseline : null;
@@ -14012,6 +14050,10 @@ function endAgent(links2, id2, now, opts = {}) {
 function setTool(links2, id2, tool) {
   return links2.map((l) => l.id === id2 ? { ...l, tool: tool ? { name: cleanText(String(tool.name ?? "")), since: tool.since } : null } : l);
 }
+function endTool(links2, id2, name) {
+  const shown = cleanText(String(name ?? ""));
+  return links2.map((l) => l.id === id2 && l.tool?.name === shown ? { ...l, tool: null } : l);
+}
 function pruneLinks(links2, now) {
   return links2.flatMap((l) => {
     if (l.workflow && l.status !== "done" && now - l.since > WORKFLOW_AGENT_TTL_MS) return [{ ...l, status: "done", tool: null, endedAt: now }];
@@ -14072,15 +14114,13 @@ var ownTasks = [];
 var wakeAt = null;
 var WAKE_MIN_S = 60;
 var WAKE_MAX_S = 3600;
-function ownTaskId(id2) {
-  const m = id2 === null ? null : /^(.+)-\d{1,4}$/.exec(id2);
-  if (id2 === null || !m) return id2;
-  const known = knownTasks(bandModel);
-  for (const l of links) if (l.task) known.add(l.task);
-  return known.has(m[1]) ? m[1] : id2;
-}
+var agentTools = /* @__PURE__ */ new Map();
+var pendingEnds = /* @__PURE__ */ new Map();
+var PENDING_END_MS = 2 * 6e4;
+var PENDING_ENDS_MAX = 50;
 var busy = false;
 var roadmap = noneBand();
+var bandRead = false;
 var bandModel = null;
 var bandJson = "";
 var SAFE_TASK2 = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,120}$/;
@@ -14109,6 +14149,18 @@ function resetPanel() {
   links = [];
   ownTasks = [];
   wakeAt = null;
+  agentTools.clear();
+  pendingEnds.clear();
+}
+function showAgentTool(id2) {
+  const last = [...agentTools.get(id2)?.values() ?? []].at(-1);
+  links = setTool(links, id2, last ?? null);
+}
+function applyPendingEnd(id2, now) {
+  const at = pendingEnds.get(id2);
+  if (at === void 0) return;
+  pendingEnds.delete(id2);
+  if (now - at <= PENDING_END_MS) links = endAgent(links, id2, at);
 }
 function isBusy(now) {
   activity.subagents = activity.subagents.filter((s) => now - s.since < SUBAGENT_TTL_MS);
@@ -14278,13 +14330,14 @@ async function loadForgeFiles($, root, now) {
   if (mainEntries.some((f) => f.kind === "dir" && f.name === "jobs")) {
     const jobs = await readCached($, join(mainDir, "jobs"), JOBS_MAX, JOB_FILE_MAX, jobCache, () => true);
     if (jobs.length) out.forgeJobs = jobs;
-  }
+  } else jobCache.clear();
   const statusRoot = statusRootOf(root, main);
   const statusEntries = statusRoot === root ? entries : mainEntries;
   if (statusEntries.some((f) => f.kind === "dir" && f.name === "status")) {
     out.forgeStatuses = await readCached($, join(statusRoot, ".forge", "status"), FORGE_STATUSES_READ, FORGE_STATUS_MAX, statusCache, (f) => now - f.mtimeMs < STATUS_AGE_MS);
     out.forgeBriefsBy = await briefsByKey($, statusRoot, out.forgeStatuses);
   } else {
+    statusCache.clear();
     const status = entries.find((f) => f.kind === "file" && f.name === "status.json");
     if (status && status.size <= FORGE_STATUS_MAX) out.forgeStatus = await readOpt($, join(dir, "status.json"));
     if (out.forgeStatus !== void 0) {
@@ -14379,12 +14432,13 @@ var officialOwnUsd = null;
 var seededUsd = 0;
 var runBaseline = null;
 function runKeyNow() {
+  if (!bandRead) return void 0;
   const id2 = roadmap.viewer?.runId;
   return runRoleOf(roadmap) === "owner" && isSafeId(id2) ? id2 : null;
 }
 function keepRunBaseline() {
   const key = runKeyNow();
-  if (key === null || runBaseline?.runKey === key) return;
+  if (key === null || key === void 0 || runBaseline?.runKey === key) return;
   const t = totalsOf(usage.loops);
   runBaseline = { runKey: key, costUsd: t.costUsd, tokens: t.tokens, activeMs: usage.activeMs };
 }
@@ -14396,6 +14450,8 @@ function resetUsage() {
   officialOwnUsd = null;
   seededUsd = 0;
   runBaseline = null;
+  bandRead = false;
+  execChecked = null;
   lastUsageWrite = 0;
   lastUsageSig = "";
   sessionId = null;
@@ -14403,6 +14459,29 @@ function resetUsage() {
   runInputs = null;
   usageFileCache.clear();
   largeRunsCache = null;
+}
+var execChecked = null;
+async function readBandForRun($, main) {
+  const path = join(main, ".forge", "execution.json");
+  let st;
+  try {
+    st = await $.fs.stat(path);
+  } catch {
+    return;
+  }
+  if (execChecked && execChecked.size === st.size && execChecked.mtimeMs === st.mtimeMs) return;
+  const active = st.size <= FORGE_EXEC_MAX && parseExecution(await readOpt($, path), await nowMs($))?.active === true;
+  if (!active) {
+    execChecked = { size: st.size, mtimeMs: st.mtimeMs };
+    return;
+  }
+  try {
+    roadmap = await loadBandModel($);
+  } catch {
+    return;
+  }
+  bandRead = true;
+  keepRunBaseline();
 }
 async function usageWhere($) {
   const root = await $.session.root();
@@ -14437,21 +14516,27 @@ async function syncUsageStart($) {
     } catch {
     }
   }
+  takeOfficial(u);
+}
+function takeOfficial(u) {
   officialUsd = u.cost?.usd ?? null;
   officialOwnUsd = ownCostUsd() - seededUsd;
 }
 var baseName = (path) => path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
 function usageSig() {
   const steps = Object.values(usage.loops).reduce((a, l) => a + l.steps, 0);
-  return `${usage.startedAt}|${steps}|${usage.tracking.waypoint}|${usage.tracking.forge}|${usage.activeMs}|${runKeyNow() ?? ""}`;
+  const key = runKeyNow();
+  return `${usage.startedAt}|${steps}|${usage.tracking.waypoint}|${usage.tracking.forge}|${usage.activeMs}|${key === void 0 ? "?" : key ?? ""}`;
 }
 async function writeUsageFileNow($, force) {
   try {
     if (usageStartedAt === null) return;
     const now = await nowMs($);
     if (!force && now - lastUsageWrite < USAGE_WRITE_MS) return;
+    if (!Object.values(usage.loops).some((l) => l.steps > 0)) return;
+    if (!bandRead) await readBandForRun($, (await usageWhere($)).main);
     const sig = usageSig();
-    if (sig === lastUsageSig || !Object.values(usage.loops).some((l) => l.steps > 0)) return;
+    if (sig === lastUsageSig) return;
     const where = await usageWhere($);
     if (!SAFE_SESSION.test(where.session)) return;
     const forge = join(where.main, ".forge");
@@ -14557,7 +14642,7 @@ async function refreshUsage($, withRun) {
 function usageInput() {
   let run = null;
   try {
-    if (runInputs && sessionId !== null) run = mergeForRun(runInputs.files, { session: sessionId, state: usage, baseline: runBaseline }, runInputs.since, runKeyNow());
+    if (runInputs && sessionId !== null) run = mergeForRun(runInputs.files, { session: sessionId, state: usage, baseline: runBaseline }, runInputs.since, runKeyNow() ?? null);
   } catch {
   }
   return { session: usage, run, officialUsd, officialOwnUsd };
@@ -14612,6 +14697,12 @@ function liveSubagents(now, list) {
 }
 async function buildPanel($) {
   const now = await nowMs($);
+  if (sessionId === null) {
+    try {
+      sessionId = await $.session.id();
+    } catch {
+    }
+  }
   const subagents = activity.subagents.filter((s) => now - s.since < SUBAGENT_TTL_MS);
   return buildPanelModel({
     band: roadmap,
@@ -14687,6 +14778,7 @@ async function refreshPanel($) {
     if (paneUp) startPanelTimer($);
     try {
       roadmap = await loadBandModel($);
+      bandRead = true;
     } catch {
     }
     keepRunBaseline();
@@ -14702,6 +14794,7 @@ async function refreshPanel($) {
     activity.subagents = liveSubagents(now, list);
     if (list) links = syncListed(links, list, now, knownTasks(bandModel));
     links = pruneLinks(links, now);
+    for (const id2 of [...agentTools.keys()]) if (!links.some((l) => l.id === id2 && l.status !== "done")) agentTools.delete(id2);
     await refreshUsage($, true);
     await noteActivity($);
     if (!paneUp) {
@@ -14944,10 +15037,7 @@ export const register = (on) => {
     }
     try {
       const u = await $.session.usage();
-      if (u.startedAt === usageStartedAt) {
-        officialUsd = u.cost?.usd ?? null;
-        officialOwnUsd = ownCostUsd() - seededUsd;
-      }
+      if (u.startedAt === usageStartedAt) takeOfficial(u);
     } catch {
     }
     try {
@@ -14977,11 +15067,12 @@ export const register = (on) => {
     return next(e);
   });
   on("session.compact", async ($, e, next) => {
+    const r = await next(e);
     try {
-      compactUsage(usage);
+      if (!e.agentId && !(r && typeof r.skip === "string")) compactUsage(usage);
     } catch {
     }
-    return next(e);
+    return r;
   }).catch(($, e, next) => next(e));
   on("command.run", { command: "lens" }, async ($) => {
     const t = lensTexts();
@@ -15016,7 +15107,15 @@ export const register = (on) => {
       void refreshPanel($);
     } else {
       try {
-        links = endAgent(links, e.agentId, await nowMs($));
+        const id2 = e.agentId;
+        const now = await nowMs($);
+        if (links.some((l) => l.id === id2)) links = endAgent(links, id2, now);
+        else {
+          for (const [k, at] of pendingEnds) if (now - at > PENDING_END_MS) pendingEnds.delete(k);
+          pendingEnds.delete(id2);
+          pendingEnds.set(id2, now);
+          while (pendingEnds.size > PENDING_ENDS_MAX) pendingEnds.delete(pendingEnds.keys().next().value);
+        }
         void requestPanelWrite($);
       } catch {
       }
@@ -15040,6 +15139,7 @@ export const register = (on) => {
       if (r?.agentId) {
         labelLoop(usage, r.agentId, String(e.subagentType ?? "unknown"), e.description);
         const wf = e.workflow;
+        const now = await nowMs($);
         links = linkSpawn(links, {
           id: r.agentId,
           type: String(e.subagentType ?? ""),
@@ -15047,8 +15147,9 @@ export const register = (on) => {
           prompt: typeof e.prompt === "string" ? e.prompt : "",
           parentId: typeof e.parentAgentId === "string" ? e.parentAgentId : null,
           workflow: wf && typeof wf.runId === "string" ? { runId: wf.runId, index: Number(wf.agentIndex) || 0 } : null,
-          now: await nowMs($)
+          now
         }, knownTasks(bandModel));
+        applyPendingEnd(r.agentId, now);
         void noteActivity($);
         void requestPanelWrite($);
       }
@@ -15059,39 +15160,52 @@ export const register = (on) => {
   on("tool.call", async ($, e, next) => {
     const mine = !e.agentId;
     const input = e;
+    const callId = typeof e.tool_use_id === "string" && e.tool_use_id ? e.tool_use_id : null;
     void touch($);
-    if (e.tool === "Bash") {
-      try {
-        ownTasks = addOwnTask(ownTasks, ownTaskId(ownTaskOf(input.command)));
-      } catch {
-      }
-    }
+    const started = await nowMs($);
     if (mine) {
       try {
         tools.delete(e.tool_use_id);
-        tools.set(e.tool_use_id, { name: clip3(String(e.tool), LINE_MAX), since: await nowMs($) });
+        tools.set(e.tool_use_id, { name: clip3(String(e.tool), LINE_MAX), since: started });
         while (tools.size > MAX_ACTIVITY) tools.delete(tools.keys().next().value);
         showTool();
         if (e.tool === "TodoWrite") {
           activity.todos = Array.isArray(e.todos) ? e.todos.slice(0, MAX_TODOS) : e.todos;
           void noteActivity($);
         }
-        if (e.tool === "ScheduleWakeup") {
-          const delay = typeof input.delaySeconds === "number" && Number.isFinite(input.delaySeconds) ? input.delaySeconds : null;
-          wakeAt = input.stop === true || delay === null ? null : await nowMs($) + Math.min(WAKE_MAX_S, Math.max(WAKE_MIN_S, delay)) * 1e3;
-        }
         void requestPanelWrite($);
       } catch {
       }
     } else {
       try {
-        links = setTool(links, e.agentId, { name: String(e.tool), since: await nowMs($) });
+        const id2 = e.agentId;
+        if (callId) {
+          const calls = agentTools.get(id2) ?? /* @__PURE__ */ new Map();
+          calls.delete(callId);
+          calls.set(callId, { name: String(e.tool), since: started });
+          while (calls.size > MAX_ACTIVITY) calls.delete(calls.keys().next().value);
+          agentTools.delete(id2);
+          agentTools.set(id2, calls);
+          while (agentTools.size > LINKS_MAX) agentTools.delete(agentTools.keys().next().value);
+          showAgentTool(id2);
+        } else links = setTool(links, id2, { name: String(e.tool), since: started });
         void requestPanelWrite($);
       } catch {
       }
     }
     try {
       const result = await next(e);
+      try {
+        const answer = result;
+        if (answer && typeof answer.deny !== "string") {
+          if (e.tool === "Bash") ownTasks = addOwnTask(ownTasks, ownTaskOf(input.command));
+          if (mine && e.tool === "ScheduleWakeup") {
+            const delay = typeof input.delaySeconds === "number" && Number.isFinite(input.delaySeconds) ? input.delaySeconds : null;
+            wakeAt = input.stop === true || delay === null || answer.isError === true ? null : started + Math.min(WAKE_MAX_S, Math.max(WAKE_MIN_S, delay)) * 1e3;
+          }
+        }
+      } catch {
+      }
       if (mine) {
         try {
           const kind = trackingKind(String(e.tool), input);
@@ -15111,7 +15225,13 @@ export const register = (on) => {
         void requestPanelWrite($);
       }
       if (!mine) {
-        links = setTool(links, e.agentId, null);
+        const id2 = e.agentId;
+        if (callId) {
+          const calls = agentTools.get(id2);
+          calls?.delete(callId);
+          if (calls && !calls.size) agentTools.delete(id2);
+          showAgentTool(id2);
+        } else links = endTool(links, id2, String(e.tool));
         void requestPanelWrite($);
       }
     }
@@ -15123,7 +15243,11 @@ export const register = (on) => {
       activity.subagents = pushCapped(activity.subagents.filter((s) => s.id !== id2), { id: id2, type: clip3(String(e.agent_type ?? ""), LINE_MAX), since: await nowMs($) });
       const kind = usage.loops[id2]?.kind;
       if (!kind || kind === "unknown") labelLoop(usage, id2, String(e.agent_type ?? "unknown"));
-      if (!links.some((l) => l.id === id2)) links = linkSpawn(links, { id: id2, type: String(e.agent_type ?? ""), description: "", prompt: "", parentId: null, workflow: null, now: await nowMs($) }, knownTasks(bandModel));
+      if (!links.some((l) => l.id === id2)) {
+        const now = await nowMs($);
+        links = linkSpawn(links, { id: id2, type: String(e.agent_type ?? ""), description: "", prompt: "", parentId: null, workflow: null, now }, knownTasks(bandModel));
+        applyPendingEnd(id2, now);
+      }
       await touch($);
       await noteActivity($);
       void requestPanelWrite($);

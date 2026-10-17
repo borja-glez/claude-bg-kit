@@ -12338,18 +12338,29 @@ function updateStatus(root, event) {
   } catch {
   }
 }
-function readStatuses(root) {
+function readStatuses(root, opts = {}) {
   const out = /* @__PURE__ */ Object.create(null);
+  const now = opts.now ?? Date.now();
+  const read = (file) => {
+    if (opts.maxAgeMs !== void 0) {
+      try {
+        if (now - (0, import_node_fs2.statSync)(file).mtimeMs > opts.maxAgeMs) return null;
+      } catch {
+        return null;
+      }
+    }
+    return keyedStatus(file);
+  };
   let names2;
   try {
     names2 = jsonNames(statusDir(root)).sort().slice(0, STATUS_FILES_MAX);
   } catch {
-    const alias = keyedStatus(statusFile(root));
+    const alias = read(statusFile(root));
     if (alias) out[alias[0]] = alias[1];
     return out;
   }
   for (const n of names2) {
-    const one = keyedStatus(import_node_path3.default.join(statusDir(root), n));
+    const one = read(import_node_path3.default.join(statusDir(root), n));
     if (one) out[one[0]] = one[1];
   }
   return out;
@@ -20078,6 +20089,8 @@ function follow(c, task, t, n, round, r2, out) {
       findings: out.findings ?? null,
       ...out.handover ? { handover: out.handover } : {},
       ...next === "redo" ? { revert: out.revert ?? null } : {},
+      // E-02: a new implementer's prompt starts with its task line, as spawnImplementer's; a resumed one keeps its prompt.
+      ...next !== "resume" ? { taskLine: taskLine(`${task}-${n}`, c.project) } : {},
       ...v
     });
     return;
@@ -21239,7 +21252,7 @@ function forgeDrives(io, main, sid) {
   const run2 = parseRun(readRunText(main)) ?? parseRun(readRunText(io.cwd));
   if (run2?.active && run2.sessionId === sid) return true;
   const now = io.now().getTime();
-  return [.../* @__PURE__ */ new Set([io.cwd, main])].some((dir) => Object.values(readStatuses(dir)).some((st) => {
+  return [.../* @__PURE__ */ new Set([io.cwd, main])].some((dir) => Object.values(readStatuses(dir, { maxAgeMs: OPEN_TASK_MS, now })).some((st) => {
     const last = Date.parse(st.lastAt ?? st.ts);
     return st.session === sid && st.doneAt === null && Number.isFinite(last) && now - last < OPEN_TASK_MS;
   }));

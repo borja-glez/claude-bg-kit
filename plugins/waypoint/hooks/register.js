@@ -11201,7 +11201,7 @@ function openTasksFrom(states) {
 }
 function ownSeat(seats, sessionId) {
   if (!isSafeId(sessionId)) return null;
-  const own = seats.filter((s) => s.bound?.claude === sessionId).sort((a, b) => Date.parse(b.bound.seenAt) - Date.parse(a.bound.seenAt))[0];
+  const own = seats.filter((s) => s.bound?.claude === sessionId && !s.bound.endedAt).sort((a, b) => Date.parse(b.bound.seenAt) - Date.parse(a.bound.seenAt))[0];
   return own?.sid ?? null;
 }
 function seatSignals(f, sid) {

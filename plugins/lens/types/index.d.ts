@@ -36,6 +36,8 @@ export type LensPanel = {
   decisions: { count: number; autonomy: 'auto' | 'unattended'; lastMajor: string | null } | null;
   execution: {
     runId: string; mode: 'subagents' | 'sessions'; parallel: number; branch: string; active: boolean;
+    // project: the plan's, which the statuses of its slot tasks carry; null for an ephemeral run, whose tasks are loose.
+    project?: string | null;
     stopReason: string | null; stallReason: string | null;
     coordinator: { liveness: 'alive' | 'silent' | 'stopped'; lastSeen: string | null };
     integrated: number; total: number;
