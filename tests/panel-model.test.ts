@@ -315,7 +315,7 @@ describe('forge light task left open', () => {
 describe('forgeFromStatus', () => {
   it('maps a valid status.json without its ts', () => {
     const { ts: _ts, ...rest } = STATUS;
-    expect(forgeFromStatus(JSON.stringify(STATUS), NOW)).toEqual({ ...rest, brief: null, accepted: [], verify: null, briefs: null, timing: null });
+    expect(forgeFromStatus(JSON.stringify(STATUS), NOW)).toEqual({ ...rest, verdict: { action: 'accept', score: 0.97, round: null, findings: null }, reviewers: [], reviews: null, brief: null, accepted: [], verify: null, briefs: null, timing: null });
     expect(forgeFromStatus(JSON.stringify(STATUS), NOW, 4)).toMatchObject({ briefs: 4 });
   });
   it('leaves out who wrote the last event, its run and its project: nothing draws them, so the band key never follows them (C4)', () => {

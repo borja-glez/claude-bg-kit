@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { cleanText, deriveStatus, normalizeStatus, type ForgeStatus } from '../src/lib/forge-status.js';
+import { cleanText, deriveStatus, deriveStatuses, normalizeStatus, routeEvent, statusKey, type ForgeStatus, type StatusMap } from '../src/lib/forge-status.js';
+import { INTERLEAVED, INTERLEAVED_AT } from './fixtures/interleaved-ledger.js';
 
 const apply = (events: unknown[]) => events.reduce<ForgeStatus | null>((s, e) => deriveStatus(s, e), null);
 
@@ -20,8 +21,8 @@ describe('deriveStatus', () => {
     ]);
     expect(s).toEqual({
       ts: '5', task: 'hash', path: 'medium', phase: 'review', agent: 'forge-review-security',
-      validators: [{ name: 'test', ok: true }, { name: 'lint', ok: false }], verdict: { action: 'accept', score: 0.97 }, round: 0, cap: 3,
-      brief: 1, accepted: [1], verify: null,
+      validators: [{ name: 'test', ok: true }, { name: 'lint', ok: false }], verdict: { action: 'accept', score: 0.97, round: null, findings: null }, round: 0, cap: 3,
+      brief: 1, accepted: [1], verify: null, reviewers: [], reviews: null,
       taskStartedAt: '2', stageSince: '5', stages: {}, doneAt: null, lastAt: '9', session: null, runId: null, project: null,
     });
   });
@@ -48,7 +49,7 @@ describe('deriveStatus', () => {
     ];
     expect(apply([...run, { ts: '5', kind: 'triage', task: 'o', path: 'large' }])).toMatchObject({ path: 'large', phase: 'implement', agent: 'forge-impl', accepted: [1] });
     expect(apply([...run, { ts: '5', kind: 'triage', task: 'o', path: 'large', reasons: ['x'] }])).toEqual({
-      ts: '5', task: 'o', path: 'large', phase: '', agent: null, validators: [], verdict: null, round: null, cap: null, brief: null, accepted: [], verify: null,
+      ts: '5', task: 'o', path: 'large', phase: '', agent: null, validators: [], verdict: null, round: null, cap: null, brief: null, accepted: [], verify: null, reviewers: [], reviews: null,
       taskStartedAt: '5', stageSince: '5', stages: {}, doneAt: null, lastAt: '5', session: null, runId: null, project: null,
     });
   });
@@ -68,8 +69,8 @@ describe('deriveStatus', () => {
   });
   it('keeps a score of 0 and nulls a non-numeric one', () => {
     const base = apply([{ ts: '1', kind: 'triage', task: 't', path: 'small' }]);
-    expect(deriveStatus(base, { ts: '2', kind: 'verdict', task: 't', action: 'reject', score: 0 })?.verdict).toEqual({ action: 'reject', score: 0 });
-    expect(deriveStatus(base, { ts: '2', kind: 'verdict', task: 't', action: 'reject', score: 'x' })?.verdict).toEqual({ action: 'reject', score: null });
+    expect(deriveStatus(base, { ts: '2', kind: 'verdict', task: 't', action: 'reject', score: 0 })?.verdict).toEqual({ action: 'reject', score: 0, round: null, findings: null });
+    expect(deriveStatus(base, { ts: '2', kind: 'verdict', task: 't', action: 'reject', score: 'x' })?.verdict).toEqual({ action: 'reject', score: null, round: null, findings: null });
   });
   it('carries auto mode from a fresh triage, keeps it through a ratchet, and drops it with a new triage', () => {
     const s1 = deriveStatus(null, { ts: '1', kind: 'triage', task: 't', path: 'large', reasons: [], autonomy: 'auto' })!;
@@ -103,9 +104,9 @@ describe('verify in the status', () => {
     let s = deriveStatus(null, { ...t('triage'), path: 'medium', reasons: [] });
     expect(s!.verify).toBeNull();
     s = deriveStatus(s, { ...t('verify'), task: 'x-1', planned: true, surfaces: ['web'] });
-    expect(s!.verify).toEqual({ planned: true, surfaces: ['web'], result: null, passed: null, total: null, evidence: null, reason: null });
+    expect(s!.verify).toEqual({ planned: true, surfaces: ['web'], result: null, passed: null, total: null, evidence: null, reason: null, skipped: [], launched: false });
     s = deriveStatus(s, { ...t('verify'), task: 'x-1', result: 'fail', passed: 4, total: 6, evidence: '.forge/work/x/evidence/1-1' });
-    expect(s!.verify).toEqual({ planned: true, surfaces: ['web'], result: 'fail', passed: 4, total: 6, evidence: '.forge/work/x/evidence/1-1', reason: null });
+    expect(s!.verify).toEqual({ planned: true, surfaces: ['web'], result: 'fail', passed: 4, total: 6, evidence: '.forge/work/x/evidence/1-1', reason: null, skipped: [], launched: false });
     s = deriveStatus(s, { ...t('triage'), path: 'medium', reasons: [] });
     expect(s!.verify).toBeNull();
   });
@@ -113,7 +114,7 @@ describe('verify in the status', () => {
     const base = { ts: 'a', task: 'x', path: 'medium', phase: 'review', agent: null, validators: [], verdict: null, round: null, cap: null, brief: 1, accepted: [] };
     expect(normalizeStatus(base)!.verify).toBeNull();
     expect(normalizeStatus({ ...base, verify: { planned: true, surfaces: ['web', 3], result: 'pass', passed: 1, total: 1, evidence: 'e', reason: null } })!.verify)
-      .toEqual({ planned: true, surfaces: ['web'], result: 'pass', passed: 1, total: 1, evidence: 'e', reason: null });
+      .toEqual({ planned: true, surfaces: ['web'], result: 'pass', passed: 1, total: 1, evidence: 'e', reason: null, skipped: [], launched: false });
     expect(normalizeStatus({ ...base, verify: 'yes' })!.verify).toBeNull();
   });
 });
@@ -305,5 +306,133 @@ describe('deriveStatus: who, which run and which project (C4, D4)', () => {
     const old = normalizeStatus({ ts: '1', task: 't', path: 'small', phase: '', agent: null, validators: [], verdict: null })!;
     expect(old).toMatchObject({ session: null, runId: null, project: null });
     expect(normalizeStatus({ ...old, session: 'a b', runId: 7, project: 'shop' })).toMatchObject({ session: null, runId: null, project: 'shop' });
+  });
+});
+
+const fold = (events: readonly unknown[]) =>
+  events.reduce<{ map: StatusMap; changed: string | null }>((acc, e) => deriveStatuses(acc.map, e), { map: {}, changed: null });
+
+describe('deriveStatuses: one status per task (C5, D-11, E-01, K5-09)', () => {
+  it('three interleaved tasks keep three intact statuses', () => {
+    const { map, changed } = fold(INTERLEAVED);
+    expect(Object.keys(map).sort()).toEqual(['T003', 'shop__T001', 'shop__T002']);
+    expect(changed).toBe('T003');
+    const t1 = map.shop__T001;
+    expect(t1).toMatchObject({
+      task: 'T001', project: 'shop', path: 'medium', phase: 'review', agent: 'forge-impl', accepted: [1], reviewers: ['correctness', 'security'],
+      validators: [{ name: 'test', ok: true, cached: true }], verdict: { action: 'accept', score: 0.9, round: null, findings: null },
+    });
+    expect(t1.stages.implement).toBeGreaterThan(0);
+    expect(map.shop__T002).toMatchObject({ task: 'T002', project: 'shop', path: 'small', doneAt: INTERLEAVED_AT(9), verify: { result: 'pass', passed: 2, total: 2 } });
+    expect(map.T003).toMatchObject({ task: 'T003', project: null, path: 'medium', phase: 'implement', agent: 'forge-impl-high', doneAt: null });
+    // One status for the whole ledger, as before C5, keeps only the task of the last triage or phase: the bug this fixes.
+    expect(INTERLEAVED.reduce<ForgeStatus | null>((s, e) => deriveStatus(s, e), null)?.task).toBe('T001');
+  });
+  it('statusKey: <project>__<T> for a plan task, <T> for a loose one, null for an unsafe part or a key over 120', () => {
+    expect(statusKey('T001', 'shop')).toBe('shop__T001');
+    expect(statusKey('fix-cart-a1b2', null)).toBe('fix-cart-a1b2');
+    expect(statusKey('../x', null)).toBeNull();
+    expect(statusKey('T001', 'a b')).toBeNull();
+    expect(statusKey('T001', 'p'.repeat(114))).toBe(`${'p'.repeat(114)}__T001`);
+    expect(statusKey('T001', 'p'.repeat(115))).toBeNull();
+  });
+  it('routeEvent: a brief of a known task goes to it with its brief; an event without a project takes the existing status one', () => {
+    const { map } = fold(INTERLEAVED.slice(0, 3));
+    expect(routeEvent(map, { ts: 'x', kind: 'agent', task: 'T001-2', agent: 'a' })).toEqual({ key: 'shop__T001', task: 'T001', brief: 2 });
+    expect(routeEvent(map, { ts: 'x', kind: 'triage', task: 'T001-2', path: 'small' })).toEqual({ key: 'T001-2', task: 'T001-2', brief: null });
+    expect(routeEvent(map, { ts: 'x', kind: 'phase', task: 'T009', phase: 'p', project: 'web' })).toEqual({ key: 'web__T009', task: 'T009', brief: null });
+    expect(routeEvent(map, { ts: 'x', kind: 'phase', task: 'T001', phase: 'p', project: '../evil' })).toEqual({ key: 'shop__T001', task: 'T001', brief: null });
+    for (const bad of [null, {}, 'x', { ts: 'x', kind: 'phase' }, { ts: 'x', task: 'T1' }, { kind: 'phase', task: 'T1' }, { ts: 'x', kind: 'phase', task: 'a b' }]) {
+      expect(routeEvent(map, bad)).toBeNull();
+    }
+    // A phase of a brief moves its task: it never opens a status of its own.
+    const r = deriveStatuses(map, { ts: INTERLEAVED_AT(20), kind: 'phase', task: 'T001-2', phase: 'implement' });
+    expect(Object.keys(r.map).sort()).toEqual(['shop__T001', 'shop__T002']);
+    expect(r.map.shop__T001).toMatchObject({ phase: 'implement', brief: 2 });
+    expect(r.changed).toBe('shop__T001');
+  });
+  it('the same id in another project, or loose, is another status; session and runId stay on the task (Review Focus 1)', () => {
+    let { map } = fold(INTERLEAVED.slice(0, 1));
+    ({ map } = deriveStatuses(map, { ts: INTERLEAVED_AT(1), kind: 'triage', task: 'T001', path: 'small', project: 'web', reasons: [] }));
+    ({ map } = deriveStatuses(map, { ts: INTERLEAVED_AT(2), kind: 'triage', task: 'T001', path: 'trivial', reasons: [] }));
+    expect(Object.keys(map).sort()).toEqual(['T001', 'shop__T001', 'web__T001']);
+    expect(map.shop__T001.path).toBe('medium');
+    const r = deriveStatuses(map, { ts: INTERLEAVED_AT(3), kind: 'phase', task: 'T001', phase: 'implement', project: 'shop', session: 'c1', runId: 'r1' });
+    expect(r.changed).toBe('shop__T001');
+    expect(r.map.shop__T001).toMatchObject({ phase: 'implement', session: 'c1', runId: 'r1' });
+    expect(r.map.web__T001.phase).toBe('');
+    expect(r.map.T001.path).toBe('trivial');
+    // An event that changes nothing reports no change.
+    expect(deriveStatuses(r.map, { ts: INTERLEAVED_AT(4), kind: 'cycle' }).changed).toBeNull();
+  });
+  it('reviewers come from phase review (names, or the spawn entries the CLI logs, twins left out) and clear with the next implement', () => {
+    let s = apply([
+      { ts: '1', kind: 'triage', task: 'T', path: 'medium', reasons: [] },
+      { ts: '2', kind: 'phase', task: 'T', phase: 'review', reviewers: [
+        { agent: 'forge-review-correctness', role: 'review-correctness' }, { agent: 'forge-review-security', role: 'review-security', twin: true },
+        { agent: 'forge:forge-review-perf' }, 7,
+      ] },
+    ])!;
+    expect(s.reviewers).toEqual(['correctness', 'perf']);
+    s = deriveStatus(s, { ts: '3', kind: 'phase', task: 'T', phase: 'implement' })!;
+    expect(s.reviewers).toEqual([]);
+  });
+});
+
+describe('deriveStatus: verify-skip and the verify agent (K2-05)', () => {
+  const planned = [
+    { ts: '2026-10-16T10:00:00.000Z', kind: 'triage', task: 'T', path: 'small', reasons: [] },
+    { ts: '2026-10-16T10:01:00.000Z', kind: 'verify', task: 'T', planned: true, surfaces: ['web', 'cli'] },
+  ];
+  it('skipping every planned surface gives result skipped with its reason and closes a small task; skipping one does not', () => {
+    const one = apply([...planned, { ts: '2026-10-16T10:02:00.000Z', kind: 'verify-skip', task: 'T', surface: 'web', reason: 'no change there' }])!;
+    expect(one.verify).toMatchObject({ skipped: ['web'], result: null });
+    expect(one.doneAt).toBeNull();
+    const all = apply([...planned,
+      { ts: '2026-10-16T10:02:00.000Z', kind: 'verify-skip', task: 'T', surface: 'web', reason: 'no change there' },
+      { ts: '2026-10-16T10:03:00.000Z', kind: 'verify-skip', task: 'T', surface: 'web' },
+      { ts: '2026-10-16T10:04:00.000Z', kind: 'verify-skip', task: 'T', surface: 'cli', reason: 'docs only' },
+    ])!;
+    expect(all.verify).toMatchObject({ skipped: ['web', 'cli'], result: 'skipped', reason: 'docs only' });
+    expect(all.doneAt).toBe('2026-10-16T10:04:00.000Z');
+  });
+  it('an agent forge-verify marks the verification launched; a new plan starts over', () => {
+    const s = apply([...planned, { ts: '2026-10-16T10:02:00.000Z', kind: 'agent', task: 'T-1', agent: 'forge-verify' }])!;
+    expect(s.verify).toMatchObject({ launched: true, planned: true });
+    expect(deriveStatus(s, { ts: '2026-10-16T10:03:00.000Z', kind: 'verify', task: 'T', planned: true, surfaces: ['web'] })!.verify).toMatchObject({ launched: false, skipped: [] });
+  });
+});
+
+describe('deriveStatus: the review count and the findings of a verdict (K4-05)', () => {
+  const base = [{ ts: '1', kind: 'triage', task: 'T', path: 'medium', reasons: [] }];
+  it('a verdict with reviews keeps its round and its counts; a round with reviews keeps reviews; an older verdict has none', () => {
+    const s = apply([...base, { ts: '2', kind: 'verdict', task: 'T-1', action: 'accept', score: 0.82, critical: 0, important: 1, minor: 3, reviews: { n: 2, max: 4 } }])!;
+    expect(s.verdict).toEqual({ action: 'accept', score: 0.82, round: 2, findings: { critical: 0, important: 1, minor: 3 } });
+    expect(s.reviews).toEqual({ n: 2, max: 4 });
+    expect(deriveStatus(s, { ts: '3', kind: 'round', task: 'T-1', round: 1, cap: 4, reviews: { n: 3, max: 4 } })!.reviews).toEqual({ n: 3, max: 4 });
+    expect(apply([...base, { ts: '2', kind: 'verdict', task: 'T-1', action: 'fix', score: 0.4 }])!.verdict).toEqual({ action: 'fix', score: 0.4, round: null, findings: null });
+    expect(apply([...base, { ts: '2', kind: 'verdict', task: 'T-1', action: 'fix', critical: -1, important: 1, minor: 0, reviews: { n: 0, max: 99 } }])!.verdict)
+      .toMatchObject({ round: null, findings: null });
+  });
+});
+
+describe('normalizeStatus with the fields of C5', () => {
+  it('reads an older status with empty new fields, and drops what does not validate', () => {
+    const old = normalizeStatus({
+      ts: '1', task: 't', path: 'small', phase: '', agent: null, validators: [{ name: 'test', ok: true }], verdict: { action: 'fix', score: 0.4 },
+      verify: { planned: true, surfaces: ['web'], result: null },
+    })!;
+    expect(old).toMatchObject({ reviewers: [], reviews: null, verdict: { action: 'fix', score: 0.4, round: null, findings: null }, verify: { skipped: [], launched: false } });
+    expect(old.validators).toEqual([{ name: 'test', ok: true }]);
+    const s = normalizeStatus({
+      ...old, reviewers: ['correctness', 7, 'x'.repeat(200), 'a', 'b', 'c', 'd', 'e'], reviews: { n: 2, max: 30 },
+      validators: [{ name: 'test', ok: true, cached: true }], verdict: { action: 'accept', score: 1, round: 3, findings: { critical: 0, important: 1000, minor: 0 } },
+      verify: { ...old.verify, skipped: ['web', 3], launched: true },
+    })!;
+    expect(s.reviewers).toEqual(['correctness', 'x'.repeat(80), 'a', 'b', 'c', 'd']);
+    expect(s.reviews).toBeNull();
+    expect(s.validators).toEqual([{ name: 'test', ok: true, cached: true }]);
+    expect(s.verdict).toEqual({ action: 'accept', score: 1, round: 3, findings: null });
+    expect(s.verify).toMatchObject({ skipped: ['web'], launched: true });
   });
 });

@@ -108,8 +108,8 @@ describe('status.json', () => {
     appendEvent(root, { ts: '2026-10-11T10:06:00.000Z', kind: 'verdict', task: 'other-1', action: 'reject', score: 0.1 });
     expect(status()).toEqual({
       ts: '2026-10-11T10:01:00.000Z', task: 'hash', path: 'medium', phase: 'review', agent: 'forge-review-security',
-      validators: [{ name: 'test', ok: true }], verdict: { action: 'accept', score: 0.97 }, round: 0, cap: 3,
-      brief: 1, accepted: [1], verify: null,
+      validators: [{ name: 'test', ok: true }], verdict: { action: 'accept', score: 0.97, round: null, findings: null }, round: 0, cap: 3,
+      brief: 1, accepted: [1], verify: null, reviewers: [], reviews: null,
       taskStartedAt: '2026-10-11T10:00:00.000Z', stageSince: '2026-10-11T10:01:00.000Z', stages: { triage: 60 }, doneAt: null, lastAt: '2026-10-11T10:05:00.000Z',
       session: null, runId: null, project: null,
     });
