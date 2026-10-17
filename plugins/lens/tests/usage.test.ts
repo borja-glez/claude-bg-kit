@@ -522,6 +522,53 @@ test("a compaction of the main conversation stops the re-read of the tracking ga
   expect(await stepThen(2)).toBe(once * 1.5);
 });
 
+test("after /clear the viewer is never the ending conversation, even when a panel write lands inside session.end's chain (R1)", async ($, on) => {
+  const at = new Date(NOW - 60_000).toISOString();
+  const status = (task: string, session: string) => JSON.stringify({
+    ts: at, task, path: 'medium', phase: 'implement', agent: 'forge-impl', validators: [], verdict: null, round: null, cap: null,
+    taskStartedAt: at, stageSince: at, stages: {}, doneAt: null, lastAt: at, session, runId: null, project: null,
+  });
+  const files: Record<string, string> = {
+    [`${ROOT}/.forge/config.yaml`]: 'x: 1\n',
+    [`${ROOT}/.forge/status/T001.json`]: status('T001', 'conv-1'),
+    [`${ROOT}/.forge/status/T002.json`]: status('T002', 'conv-2'),
+  };
+  const writes: Record<string, string[]> = {};
+  serveFiles(on, files, {}, [], (path, text) => { (writes[path] ??= []).push(text); });
+  servePanes(on);
+  const panel = panelWrites(on);
+  // During session.end's chain $.session.id() still answers the ending conversation; the engine's end step takes a
+  // moment, and the process goes on under the new id once the chain is done.
+  let current = 'conv-1';
+  let startedAt = NOW - 60_000;
+  const clock = mock.clock(on, { now: NOW });
+  on('session.start', (_$, e) => ({ cwd: e.cwd }));
+  on('agent.list', () => ({ value: [] as never }));
+  on('session.id', () => ({ value: current }));
+  on('session.usage', () => ({ value: { startedAt, context: {} as never, rateLimits: [], cost: { usd: 1 } } }));
+  const wait = (ms: number) => new Promise<void>(resolve => { (globalThis as unknown as { setTimeout: (f: () => void, ms: number) => unknown }).setTimeout(resolve, ms); });
+  on('session.end', async (_$, e) => { await wait(50); return { sessionId: e.sessionId }; });
+  serveSteps(on);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
+  await $.command.run(RUN);
+  await clock.advance(2000);
+  const owners = () => (panel.last?.activities ?? []).map((a: { key: string; owner: string }) => `${a.key}:${a.owner}`).sort();
+  expect(owners()).toEqual(['T001:own', 'T002:other']);
+  const old = `${ROOT}/.forge/usage/conv-1.json`;
+  await $.session.end({ reason: 'clear', sessionId: 'conv-1', resume: {} as never });
+  const oldWrites = writes[old]?.length ?? 0;
+  current = 'conv-2';
+  startedAt = NOW + 2000;
+  await drain($.turn.step({ turnId: 't2', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
+  await clock.advance(30_000);
+  await clock.advance(30_000);
+  expect(owners()).toEqual(['T001:other', 'T002:own']);
+  // The ending conversation's file keeps its last write; the new one writes its own.
+  expect(writes[old]?.length ?? 0).toBe(oldWrites);
+  expect(JSON.parse(files[`${ROOT}/.forge/usage/conv-2.json`]!)).toMatchObject({ session: 'conv-2', startedAt: new Date(NOW + 2000).toISOString() });
+});
+
 test('a run that is neither active nor touched within 12 hours is over: only this session shows', async ($, on) => {
   const files = {
     [`${ROOT}/.forge/run.json`]: JSON.stringify({ active: false, startedAt: new Date(NOW - 20 * 3600_000).toISOString() }),

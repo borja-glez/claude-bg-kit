@@ -489,10 +489,20 @@ async function readBandForRun($: Engine, main: string): Promise<void> {
   keepRunBaseline();
 }
 
-// The session's id and its main checkout (the repo a worktree belongs to), resolved once per session.
+// R1: the id of the conversation /clear or a resume just ended. Within its session.end chain $.session.id() still
+// answers it ("until now"), so a read that gives it is not adopted: the id stays unknown and is read again next time.
+let endedId: string | null = null;
+async function sessionIdNow($: Engine): Promise<string | null> {
+  const id = await $.session.id();
+  return id === endedId ? null : id;
+}
+
+// The session's id and its main checkout (the repo a worktree belongs to), resolved once per session. Until the new
+// conversation's id can be read (R1), there is no file of this session to read or write.
 async function usageWhere($: Engine): Promise<{ root: string; session: string; main: string }> {
   const root = await $.session.root();
-  if (sessionId === null) sessionId = await $.session.id();
+  if (sessionId === null) sessionId = await sessionIdNow($);
+  if (sessionId === null) throw new Error('the session id is not known yet');
   // A .git folder does not read (undefined): a normal checkout, the root itself.
   if (mainCheckout === null) mainCheckout = mainCheckoutFrom(root, (await readOpt($, join(root, '.git'))) ?? null);
   return { root, session: sessionId, main: mainCheckout };
@@ -714,9 +724,9 @@ async function buildPanel($: Engine): Promise<PanelModel> {
   const now = await nowMs($);
   // M1: /clear and an in-process resume forget the session id with the usage meter; it is read again here, so a write
   // before the next refresh (a turn starting, a tool call) never draws this session's own tasks as another session's.
-  // The id is the new conversation's: after a resume, the resumed one's.
+  // The id is the new conversation's: after a resume, the resumed one's; never the one that is ending (R1).
   if (sessionId === null) {
-    try { sessionId = await $.session.id(); } catch { /* nothing is own by its session */ }
+    try { sessionId = await sessionIdNow($); } catch { /* nothing is own by its session */ }
   }
   const subagents = activity.subagents.filter(s => now - s.since < SUBAGENT_TTL_MS);
   return buildPanelModel({
@@ -793,9 +803,10 @@ async function refreshPanel($: Engine): Promise<void> {
     try { roadmap = await loadBandModel($); bandRead = true; } catch { /* keep the last one */ }
     keepRunBaseline();
     const now = await nowMs($);
-    // E-06: who looks, so the panel knows whose tasks are its own; null when the engine cannot say.
+    // E-06: who looks, so the panel knows whose tasks are its own; null when the engine cannot say (or still names the
+    // conversation that is ending, R1).
     if (sessionId === null) {
-      try { sessionId = await $.session.id(); } catch { /* nothing is own by its session */ }
+      try { sessionId = await sessionIdNow($); } catch { /* nothing is own by its session */ }
     }
     panelFiles = await loadPanelFiles($, now);
     const list = await agentList($);
@@ -897,6 +908,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     resetPanel();
     resetUsage();
+    endedId = null;
     try { await syncUsageStart($); } catch { /* counted from the first refresh that reads it */ }
     waypointBand = false;
     roadmap = noneBand();
@@ -924,10 +936,16 @@ export const register: Register = on => {
     // (the next sync adopts the new start and id, and a resumed session continues its own file) and the timers keep
     // running, since the process does.
     if (e.reason === 'clear' || e.reason === 'resume') {
+      // R1: from here on, a read of the ending conversation's id is not adopted.
+      endedId = typeof e.sessionId === 'string' && e.sessionId ? e.sessionId : null;
       try { resetUsage(); } catch { /* ignore */ }
-      // E-13: after /clear the new conversation starts with an empty panel: no todos, subagents or tools of the old one.
+      // E-13: after /clear the new conversation starts with an empty panel: no todos, subagents or tools of the old one,
+      // written once the end chain beneath has run.
       if (e.reason === 'clear') {
-        try { resetPanel(); void requestPanelWrite($); } catch { /* ignore */ }
+        try { resetPanel(); } catch { /* ignore */ }
+        const r = await next(e);
+        void requestPanelWrite($);
+        return r;
       }
       return next(e);
     }

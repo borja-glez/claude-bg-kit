@@ -586,7 +586,9 @@ test('when .forge/status/ goes away its cached reads go too: a file back with th
 test("after an in-process resume the next turn still draws this session's tasks as its own (M1)", async ($, on) => {
   serveFiles(on, { [`${ROOT}/.forge/status/T001.json`]: JSON.stringify({ ...STATUS, task: 'T001', lastAt: new Date(NOW - 60_000).toISOString() }) }, [], { mtimeMs: NOW - 60_000 });
   servePanes(on);
-  const clock = start(on);
+  // The conversation conv-9 resumes conv-1, whose status T001 is: the id the engine answers changes with the resume.
+  let current = 'conv-9';
+  const clock = start(on, () => current);
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }));
   on('turn.start', (_$, e) => ({ turnId: e.turnId }));
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
@@ -598,9 +600,10 @@ test("after an in-process resume the next turn still draws this session's tasks 
     return text;
   };
   expect(await pane()).toContain('Tasks in progress · 1');
-  expect(await pane()).not.toContain('other session');
+  expect(await pane()).toContain('other session');
   // The resume forgets the usage meter's session id; the first turn after it writes the panel before any refresh.
-  await $.session.end({ reason: 'resume', sessionId: SESSION, resume: {} as never });
+  await $.session.end({ reason: 'resume', sessionId: 'conv-9', resume: {} as never });
+  current = SESSION;
   await $.turn.start({ text: 'go', turnId: 'main-1' });
   await clock.advance(1000);
   expect(await pane()).toContain('Tasks in progress · 1');
