@@ -16,19 +16,22 @@ elsewhere and are reconstructed from their READMEs.
 ### 0.27.0 — 2026-10-17
 
 #### Added
-- A critic that converges: each round has a budget (round 1 up to 12 proposals of any severity, round 2 up to 6 critical or major ones, from round 3 and in `round --verify` up to 3 critical ones; a reopened design starts again, in `critique-next` and in `critique-check --design` alike), and a critique says `verdict: ready` when nothing critical or major is left (zero proposals is a valid critique; a verdict that does not fit its proposals is refused). `critique-check` enforces both (`--verify`), and with `--changed` it warns about a proposal outside the changed sections without failing.
-- `critique-next <design.md> [--verify] [--full]` prints the next round: its number, the critic's budget, the scope, the sections to review and where its critique goes.
-- `design-gate` prints `needsVerify` (a change applied after the last critique that no critic has read) and `majorPending`, and what the critic must not raise again: `dismissed` (with the reason), `resolved` (in an interview) and `applied` (with its change); each `pending` proposal carries its problem. Each list holds the newest 40, with its texts clipped and a count of what is left out.
-- `critique-dismiss --reason-file` keeps why a proposal was set aside (required for a major or critical one; a placeholder reason is refused), and `design-snapshot --resolved r1:4` records what an interview resolved (an unknown id exits 2).
-- `design-snapshot --kind draft|round|apply|rewrite|interview|approve|amend|reopen`. `/waypoint:design amend` changes an approved design that stays approved, and `waypoint design-impact <design.md> --plan <plan>` lists the plan tasks whose `design_ref` points at a changed or removed section; `/waypoint:design reopen` sends it back to draft and through the critic (a draft that was never approved cannot be reopened).
-- The design page shows a status badge (draft, approved, approved · amended, parked), each round with its verdict and what became of every proposal (applied in vN, dismissed with its reason, resolved in the interview, rewritten or pending), and what each version changed. Everything a critique says is escaped.
+- A critic that converges: each round has a budget (round 1 up to 12 proposals of any severity, round 2 up to 6 critical or major ones, from round 3 and in `round --verify` up to 3 critical ones; a reopened design starts again, in `critique-next` and in `critique-check --design` alike), and a critique says `verdict: ready` when nothing critical or major is left (zero proposals is a valid critique; a verdict that does not fit its proposals is refused). `critique-check` enforces both (`--verify`), and with `--changed` it warns about a proposal outside the changed sections without failing (an empty `--changed` exits 2). `critique-check --reject-on-fail` sets a critique it refuses aside as `r<R>.rejected.json`, so it never counts as a round; `/waypoint:design round` passes it when the critic's second attempt fails too.
+- `critique-next <design.md> [--verify] [--full]` prints the next round: its number, the critic's budget, the scope, the sections to review and where its critique goes. A change that only removed sections is reviewed in full (the intro and every section), with the removed ones in `removed` for the critic.
+- `design-gate` prints `needsVerify` (a change applied after the last critique that no critic has read, or the design file edited by hand after its last snapshot) and `majorPending`, and what the critic must not raise again: `dismissed` (with the reason), `resolved` (in an interview) and `applied` (with its change); each `pending` proposal carries its problem, as one clean line. Each of the other lists holds the newest 40, with its texts clipped and a count of what is left out.
+- `critique-dismiss --reason-file` keeps why a proposal was set aside (required for a major or critical one; a placeholder reason is refused; a reason already stored is never overwritten), and `design-snapshot --resolved r1:4` records what an interview resolved (an unknown id exits 2).
+- `design-snapshot --kind draft|round|apply|rewrite|interview|approve|amend|reopen`; without `--round` it records the newest round of the changelog and of the critiques, so an approval or a reopen after a critique carries its round and the first round after a reopen gets round 1's budget. `/waypoint:design amend` changes an approved design that stays approved, and `waypoint design-impact <design.md> --plan <plan>` lists the plan tasks whose `design_ref` points at a changed or removed section; `/waypoint:design reopen` sends it back to draft and through the critic (a draft that was never approved cannot be reopened; a design approved before this version counts when a version of its history says `status: approved`, whatever its note says).
+- The design page shows a status badge (draft, approved, approved · amended, parked), each round with its verdict and what became of every proposal (applied in vN, dismissed with its reason, resolved in the interview, rewritten or pending), how many proposals are pending in all, and what each version changed (against an earlier version, which it names, when the history lacks the one before). Everything a critique says is escaped.
 
 #### Changed
 - `approve --auto` no longer approves with a major proposal pending nor with an applied change no critic has read (`round --verify` reads it).
-- The critiques and `dismissed.json` live in `docs/waypoint/<project>/design/critiques/`, committed with the design; the ones in `.waypoint/<project>/` are still read, and the band counts both. Every path comes from the design file, never from the working directory.
+- The critiques and `dismissed.json` live in `docs/waypoint/<project>/design/critiques/`, committed with the design; the ones in `.waypoint/<project>/` are still read, and the band counts both. A round in both places is read from `docs/`, and the two `dismissed.json` files are merged (one that is junk, unreadable or over 1 MiB hides nothing of the other). Every path comes from the design file, never from the working directory.
 - `design-changed` compares the bodies only (a front matter change such as `status` is no change) and prints `removed`.
-- The plan skill links the plan to its approved design (`artifacts.design`, `design_version` and each task's `design_ref`), and `validate --design` warns when they do not match the approved design. `design-impact` reads task states tolerantly.
-- The design page declares its language, says which version button is pressed and keeps the focus on it, gives 44 px touch targets, has landmarks and accessible names, and uses text colors of at least 4.5:1 in both themes (a test checks every text and fill pair).
+- The plan skill links the plan to its approved design (`artifacts.design`, `design_version` and each task's `design_ref`), and `validate --design` warns when they do not match the approved design (a changelog that does not parse is a warning, never a failure). `design-impact` reads task states tolerantly and exits 2 on a design it cannot read.
+- The design page declares its language, says which version button is pressed and keeps the focus on it, announces the version shown in a live region, gives 44 px touch targets, has landmarks, section headings and accessible names, and uses text colors of at least 4.5:1 in both themes (a test checks every text and fill pair).
+
+#### Fixed
+- A design heading is read in linear time: a heading line with a long run of spaces no longer hangs the CLI, the band or the page.
 
 ### 0.26.0 — 2026-10-17
 
@@ -293,7 +296,7 @@ elsewhere and are reconstructed from their READMEs.
 
 #### Changed
 - The design loop in auto mode converges: round 1 with its critical and major proposals applied and the minor ones dismissed with their reason, then `round --verify` on what changed until the critic says `ready` (at most 3 rounds; a third `changes` verdict stops the loop and asks you), and approval only when nothing critical or major is left and no applied change is unread.
-- `/forge:infinite` in auto mode reopens the approved design for a Large task (`/waypoint:design reopen`, once per task) and syncs the plan's `design_version`; `forge-planner` gives each task the `design_ref` of its section.
+- `/forge:infinite` in auto mode reopens the approved design for a Large task (`/waypoint:design reopen`, once per task) and syncs the plan's `design_version`; `forge-planner` gives each task the `design_ref` of its section. A loop that stops without approval leaves the design a draft and blocks the task with a question; a task closes its pass only once the design is approved and the plan has tasks for its section, and until then no cycle reopens the design or builds the task.
 - Reverting a design approval reopens the design with `--kind reopen`.
 - Requires waypoint ^0.27.0.
 
@@ -731,7 +734,7 @@ elsewhere and are reconstructed from their READMEs.
 ### 0.13.2 — 2026-10-17
 
 #### Changed
-- Its bundle follows waypoint's design loop: the design band counts the critiques in `docs/waypoint/<project>/design/critiques/` and leaves out the proposals an interview resolved.
+- Its bundle follows waypoint's design loop: the design band counts the critiques in `docs/waypoint/<project>/design/critiques/`, merges the `dismissed.json` of both places as waypoint does, and leaves out the proposals an interview resolved.
 
 ### 0.13.1 — 2026-10-17
 
