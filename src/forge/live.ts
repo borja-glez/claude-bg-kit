@@ -136,8 +136,11 @@ export function hookLive(io: Io, forced?: LiveEvent): string {
       if (role !== 'other-live' && role !== 'previous') return '';
       return JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: notOwnerText(exec, role, now) } });
     }
-    // The coordinator, or a member of its run: its signal and its resume text, while the execution is active.
-    if (!exec.active) return '';
+    // The coordinator, or a member of its run: its signal and its resume text, while the execution is active. R4 (M4):
+    // the coordinator's conversation ending (SessionEnd, e.g. /clear) is recorded for an ended run that is not closed too:
+    // its own ended signal tells swarm retry and /forge:run --resume at once that it is no longer on the run.
+    const coordinatorEnds = event === 'SessionEnd' && viewer.coordinator && exec.hookSession === sessionId && !exec.closedAt;
+    if (!exec.active && !coordinatorEnds) return '';
     const member = viewer.coordinator ? null : viewer.member;
     const role: LiveDoc['role'] = member ? member.role : 'coordinator';
     // A member's signal is keyed by its waypoint SID, the `by` of its public task; the coordinator's by its hook id.

@@ -1645,6 +1645,21 @@ describe('rebinding a run needs the bound conversation to have stopped (wave 0 h
       expect(readExecution(root)).toMatchObject({ active: true, stopReason: null, hookSession: 'hook-main' });
       expect(readExecution(root)!.tasks.T1).toMatchObject({ status: 'running', stage: 'implement' });
     });
+    it("after /clear the coordinator's own conversation takes its stalled run up at once: the SessionEnd of its bound session ends its signal (R4, M4)", () => {
+      stalled();
+      // Its last step 2 minutes ago: by the step clock alone it would hold the run for 10 more minutes.
+      saveExecution(root, { ...readExecution(root)!, lastStepAt: at(-2) });
+      const ended = (sid: string) => run(['hook', 'live'], { ...io, stdin: JSON.stringify({ session_id: sid, hook_event_name: 'SessionEnd', reason: 'clear' }) });
+      // Another session's end says nothing of the coordinator: the run stays held.
+      ended('hook-x');
+      expect(run(['swarm', 'retry', 'T1', '--hook-session', 'hook-new'], io).code).toBe(2);
+      expect(out(run(['swarm', 'status'], io)).coordinator.liveness).not.toBe('stopped');
+      // The bound conversation ended (/clear): stopped at once, and the new conversation revives the run.
+      ended('hook-main');
+      expect(out(run(['swarm', 'status'], io)).coordinator).toEqual({ hookSession: 'hook-main', liveness: 'stopped' });
+      expect(run(['swarm', 'retry', 'T1', '--hook-session', 'hook-new'], io).code).toBe(0);
+      expect(readExecution(root)).toMatchObject({ active: true, stopReason: null });
+    });
     it('swarm status prints the coordinator of a run that is not closed, with its liveness as if it were active', () => {
       stalled();
       bind();
