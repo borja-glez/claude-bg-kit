@@ -199,7 +199,8 @@ test('a verdict shows its action, never its score (K4-05)', async ($, on) => {
 
 test('once the pane is closed and nothing is going on, nothing under .forge/ is read', async ($, on) => {
   const touched: string[] = [];
-  serveFiles(on, FORGE, touched);
+  // Nothing going on: the task of the status is done, so it keeps no tick reading once the pane is closed (§4.6).
+  serveFiles(on, { ...FORGE, [`${ROOT}/.forge/status.json`]: JSON.stringify({ ...STATUS, doneAt: new Date(NOW - 20 * 60_000).toISOString() }) }, touched);
   const open = servePanes(on);
   const clock = start(on);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });

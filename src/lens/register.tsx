@@ -14,6 +14,7 @@ import { cardRows, clipCard, DOCK_COLUMNS, DOCK_MIN_COLUMNS, fitCards, panelLayo
 import { bandLevel, controlWidth, DEFAULT_COLUMNS, fitParts, joinParts, partsWidth } from '../mod/band-fit.js';
 import { lensBand } from './lens-band.js';
 import { keepPhoto, lensMode, photoId, photoText } from './photo.js';
+import { modeLabels, ownActive, spinnerText, statusText, surfaceEvents } from './surfaces.js';
 import { PALETTE, SECTION_HUE, SECTION_ICON } from './view.js';
 import { freshFinished, pushFinished, withoutRunning, type FinishedAgent } from './finished.js';
 import { endTurn, labelLoop, newTurnClock, newUsage, startTurn, touchTurn, recordStep, recordTracking, trackingKind, compactUsage, type UsageState } from './usage.js';
@@ -154,6 +155,12 @@ function resetPanel(): void {
   bandModel = null;
   bandJson = '';
   focusAgent = null;
+  prevModel = null;
+  primed = false;
+  toastQueue = [];
+  toastTimer?.cancel();
+  toastTimer = null;
+  forgeHeardAt = null;
   statusCache.clear();
   jobCache.clear();
   links = [];
@@ -177,11 +184,14 @@ function applyPendingEnd(id: string, now: number): void {
   if (now - at <= PENDING_END_MS) links = endAgent(links, id, at);
 }
 
-// Open todos, a subagent heard of within the hour (older entries are dropped here), or an agent of links still alive.
+// Open todos, a subagent heard of within the hour (older entries are dropped here), an agent of links still alive, or
+// this session's own forge work: in progress in the last model, or a forge.cjs call heard within 10 minutes (§4.6: the
+// surfaces need the tick reading while it lasts).
 function isBusy(now: number): boolean {
   activity.subagents = activity.subagents.filter(s => now - s.since < SUBAGENT_TTL_MS);
   const todos = summarizeTodos(activity.todos);
-  return todos.total - todos.done > 0 || activity.subagents.length > 0 || links.some(l => l.status !== 'done');
+  return todos.total - todos.done > 0 || activity.subagents.length > 0 || links.some(l => l.status !== 'done')
+    || ownActive(bandModel, runRoleOf(roadmap)) || (forgeHeardAt !== null && now - forgeHeardAt < FORGE_HEARD_MS);
 }
 
 // Whether waypoint will draw its own band (and its Panel button): its plugin is installed and its band model for
@@ -808,6 +818,7 @@ function keepBand($: Engine, model: PanelModel): void {
   bandJson = json;
   bandModel = model;
   $.ui.invalidate('ui.render');
+  void updateSurfaces($, model);
 }
 
 async function writePanel($: Engine): Promise<void> {
@@ -897,6 +908,13 @@ const TEXT = {
     moreRows: (n: number) => `↓ ${n} más · /lens foto`,
     bandHint: 'ctrl+x tab · banda',
     photoTasks: (n: number) => (n === 0 ? 'sin tareas' : n === 1 ? '1 tarea' : `${n} tareas`),
+    subagentsN: (n: number) => `${n} ${n === 1 ? 'subagente' : 'subagentes'}`,
+    toastAccepted: (task: string, round: number | null) => (round ? `${task} · aceptada en la ronda ${round}` : `${task} · aceptada`),
+    toastVerdict: (task: string, action: string, counts: string) => `${task} · veredicto ${action}${counts ? ` · ${counts}` : ''}`,
+    toastRound: (task: string, n: number) => `${task} · ronda ${n}`,
+    toastIntegrated: (task: string, done: number, total: number) => `${task} integrada · ${done}/${total}`,
+    runFinished: (done: number, total: number) => `Ejecución terminada: ${done}/${total} integradas`,
+    runStopped: (why: string) => (why ? `Ejecución parada: ${why}` : 'Ejecución parada'),
     noTask: 'sin tarea en curso', track: 'frente', decision: 'decisión pendiente',
     sRoadmap: 'Roadmap', sSuperpowers: 'superpowers', sNow: 'Ahora', sTodos: 'Pendientes', sSubagents: 'Subagentes',
     sTasks: 'Tareas de Claude Code', fixRound: 'ronda', phase: 'Fase', done: 'hechas', open: 'abiertas', tool: 'herramienta', turn: 'turno',
@@ -920,6 +938,13 @@ const TEXT = {
     moreRows: (n: number) => `↓ ${n} more · /lens photo`,
     bandHint: 'ctrl+x tab · band',
     photoTasks: (n: number) => (n === 0 ? 'no tasks' : n === 1 ? '1 task' : `${n} tasks`),
+    subagentsN: (n: number) => `${n} subagent${n === 1 ? '' : 's'}`,
+    toastAccepted: (task: string, round: number | null) => (round ? `${task} · accepted in round ${round}` : `${task} · accepted`),
+    toastVerdict: (task: string, action: string, counts: string) => `${task} · verdict ${action}${counts ? ` · ${counts}` : ''}`,
+    toastRound: (task: string, n: number) => `${task} · round ${n}`,
+    toastIntegrated: (task: string, done: number, total: number) => `${task} integrated · ${done}/${total}`,
+    runFinished: (done: number, total: number) => `Execution finished: ${done}/${total} integrated`,
+    runStopped: (why: string) => (why ? `Execution stopped: ${why}` : 'Execution stopped'),
     noTask: 'no task in progress', track: 'track', decision: 'decision pending',
     sRoadmap: 'Roadmap', sSuperpowers: 'superpowers', sNow: 'Now', sTodos: 'Todos', sSubagents: 'Subagents',
     sTasks: 'Claude Code tasks', fixRound: 'round', phase: 'Phase', done: 'done', open: 'open', tool: 'tool', turn: 'turn',
@@ -988,6 +1013,69 @@ async function takePhoto($: Engine): Promise<string> {
   return text;
 }
 
+// Step 4 of §4.6: the status line last set, the model the toasts compare with, when the last toast went and those
+// waiting for their turn, the runs already notified, and the last forge.cjs call of this session (busy, above).
+const TOAST_GAP_MS = 5_000;
+const FORGE_HEARD_MS = 10 * 60_000;
+let lastStatus: string | undefined;
+let prevModel: PanelModel | null = null;
+let primed = false;
+let lastToastAt = -Infinity;
+let toastQueue: string[] = [];
+let toastTimer: Timer | null = null;
+const notified = new Set<string>();
+let forgeHeardAt: number | null = null;
+
+// At most one toast every 5 s: what comes sooner waits and goes out with the rest, joined.
+async function queueToasts($: Engine, texts: readonly string[]): Promise<void> {
+  toastQueue.push(...texts);
+  if (toastTimer) return;
+  const wait = lastToastAt + TOAST_GAP_MS - await nowMs($);
+  if (wait > 0) {
+    toastTimer = $.clock.after(wait, () => { toastTimer = null; void flushToasts($); });
+    return;
+  }
+  await flushToasts($);
+}
+async function flushToasts($: Engine): Promise<void> {
+  if (!toastQueue.length) return;
+  const text = toastQueue.splice(0).join(' · ');
+  lastToastAt = await nowMs($);
+  try { $.ui.toast(text); } catch { /* nothing else to say */ }
+}
+// A status line left by the conversation before (a new session, a /clear) goes.
+function clearStatus($: Engine): void {
+  if (lastStatus === undefined) return;
+  lastStatus = undefined;
+  try { $.ui.status(undefined); } catch { /* the next model sets it again */ }
+}
+
+// Step 4 of §4.6, after each model the band keeps: the status line (outside fullscreen, or with fewer than 3 rows above
+// the prompt, while this session has work of its own; set only when it changes), the toasts of what moved since the
+// last model (none for the first one after a start or /clear) and the notification of a run of its own that ended.
+async function updateSurfaces($: Engine, model: PanelModel): Promise<void> {
+  try {
+    const t = textsFor(model.locale);
+    const role = runRoleOf(roadmap);
+    const show = lastView.fullscreen === false || (lastView.maxRows !== null && lastView.maxRows < 3);
+    const text = show ? statusText(model, t, role) ?? undefined : undefined;
+    if (text !== lastStatus) {
+      lastStatus = text;
+      try { $.ui.status(text); } catch { /* the next model tries again */ }
+    }
+    if (!primed) { primed = true; prevModel = model; return; }
+    const moved = surfaceEvents(prevModel, model, role, t);
+    prevModel = model;
+    if (moved.toasts.length) await queueToasts($, moved.toasts);
+    if (moved.ended && !notified.has(moved.ended.runId)) {
+      notified.add(moved.ended.runId);
+      let sent = false;
+      try { sent = (await $.ui.notify(moved.ended.text).catch(() => null))?.isSent === true; } catch { sent = false; }
+      if (!sent) await queueToasts($, [moved.ended.text]);
+    }
+  } catch { /* the surfaces keep what they had */ }
+}
+
 const RISK_HUE: Record<string, 'green' | 'yellow' | 'red'> = { low: 'green', medium: 'yellow', high: 'red' };
 
 // A decision runs /forge:decide; where it cannot run from here it is left in the prompt for the person to send.
@@ -1008,6 +1096,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     resetPanel();
     resetUsage();
+    clearStatus($);
     endedId = null;
     try { await syncUsageStart($); } catch { /* counted from the first refresh that reads it */ }
     waypointBand = false;
@@ -1042,7 +1131,7 @@ export const register: Register = on => {
       // E-13: after /clear the new conversation starts with an empty panel: no todos, subagents or tools of the old one,
       // written once the end chain beneath has run.
       if (e.reason === 'clear') {
-        try { resetPanel(); } catch { /* ignore */ }
+        try { resetPanel(); clearStatus($); } catch { /* ignore */ }
         const r = await next(e);
         void requestPanelWrite($);
         return r;
@@ -1225,7 +1314,15 @@ export const register: Register = on => {
         const answer = result as { deny?: unknown; isError?: unknown } | undefined;
         if (answer && typeof answer.deny !== 'string') {
           // E-06: a forge.cjs call of any loop names a task this session works on.
-          if (e.tool === 'Bash') ownTasks = addOwnTask(ownTasks, ownTaskOf(input.command));
+          if (e.tool === 'Bash') {
+            const own = ownTaskOf(input.command);
+            ownTasks = addOwnTask(ownTasks, own);
+            // §4.6: a forge task this session works on keeps the tick reading, with no subagent nor todo.
+            if (own) {
+              forgeHeardAt = await nowMs($);
+              void noteActivity($);
+            }
+          }
           // E-11: the engine clamps the delay to 60-3600 s; stop, or a wake-up that failed, leaves none.
           if (mine && e.tool === 'ScheduleWakeup') {
             const delay = typeof input.delaySeconds === 'number' && Number.isFinite(input.delaySeconds) ? input.delaySeconds : null;
@@ -1471,6 +1568,26 @@ export const register: Register = on => {
     try {
       if (bandDrawn && e.viewport?.isFullscreen === false && !e.props.tail) return next({ ...e, props: { ...e.props, tail: lensTexts().bandHint } });
     } catch { /* the engine's line */ }
+    return next(e);
+  });
+
+  // Step 4 of §4.6: while a turn runs, the spinner names the task of this session it is on, unless the engine has a
+  // message of its own; forge's auto mode and the infinite run show as mode labels, each once.
+  on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
+    try {
+      if (e.props.message === null) {
+        const message = spinnerText(bandModel, bandModel ? textsFor(bandModel.locale) : lensTexts());
+        if (message) return next({ ...e, props: { ...e.props, message } });
+      }
+    } catch { /* the engine's line */ }
+    return next(e);
+  });
+
+  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+    try {
+      const extra = modeLabels(bandModel).filter(x => !e.props.modes.includes(x));
+      if (extra.length) return next({ ...e, props: { ...e.props, modes: [...e.props.modes, ...extra] } });
+    } catch { /* the engine's labels */ }
     return next(e);
   });
 };
