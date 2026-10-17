@@ -10744,7 +10744,7 @@ var SAFE_ID = /^[A-Za-z0-9_\-.]{1,120}$/;
 var isSafeId = (s) => typeof s === "string" && SAFE_ID.test(s) && s !== "." && s !== "..";
 var RUN_BRANCH = /^[A-Za-z0-9_./][A-Za-z0-9_\-./]{0,119}$/;
 var isRunBranch = (s) => typeof s === "string" && RUN_BRANCH.test(s) && !s.includes("..");
-var TASK_STATUSES = ["running", "accepted", "integrated", "conflict", "blocked"];
+var TASK_STATUSES = ["running", "accepted", "integrated", "conflict", "blocked", "stopped"];
 var STOPS = ["finished", "stalled", "stopped", "budget", "migrated"];
 var MAX_TASKS = 500;
 var isObj = (x) => !!x && typeof x === "object" && !Array.isArray(x);
@@ -10858,6 +10858,55 @@ function normalizeLive(x) {
   return { sessionId, role, ts, agents, runId: str(x.runId), task: str(x.task), event: (str(x.event) ?? "").slice(0, 40), ended: x.ended === true };
 }
 
+// src/lib/bound.ts
+var BOUND_VIAS = ["work", "design", "forge-run", "forge-member", "forge-infinite"];
+var BOUND_END_REASONS = ["clear", "resume", "logout", "prompt_input_exit", "other", "released"];
+var MAX_SEATS = 10;
+var MAX_PROJECTS = 50;
+var BOUND_LEASE_MS = 5 * 6e4;
+var BOUND_MAX_BYTES = 4096;
+var SESSION_MAX_BYTES = 8 * 1024;
+var BOUND_REREAD_MS = 8;
+var CACHE_DOCS_MAX = 500;
+var isBoundVia = (x) => BOUND_VIAS.includes(x);
+var isEndReason = (x) => BOUND_END_REASONS.includes(x);
+function date(x, now) {
+  if (typeof x !== "string") return null;
+  const t = Date.parse(x);
+  if (!Number.isFinite(t)) return null;
+  return now !== void 0 && Number.isFinite(now) && t - now > FUTURE_SKEW_MS ? null : x;
+}
+function normalizeBound(x, now) {
+  if (!x || typeof x !== "object" || Array.isArray(x)) return null;
+  const o = x;
+  if (!isSafeId(o.sid) || !isSafeId(o.claude) || !isBoundVia(o.via)) return null;
+  const since = date(o.since, now);
+  const seenAt = date(o.seenAt, now);
+  if (!since || !seenAt) return null;
+  const ended = o.endedAt === null || o.endedAt === void 0;
+  const endedAt = ended ? null : date(o.endedAt, now);
+  if (!ended && endedAt === null) return null;
+  let endReason = null;
+  if (o.endReason !== null && o.endReason !== void 0) {
+    if (!isEndReason(o.endReason)) return null;
+    endReason = o.endReason;
+  }
+  const pid = typeof o.pid === "number" && Number.isInteger(o.pid) && o.pid > 0 ? o.pid : null;
+  return { sid: o.sid, claude: o.claude, pid, via: o.via, since, seenAt, endedAt, endReason: endedAt ? endReason : null };
+}
+function bindingLive(b, now) {
+  const seen = Date.parse(b.seenAt);
+  return b.endedAt === null && Number.isFinite(seen) && now < seen + BOUND_LEASE_MS;
+}
+function parseBound(text2, now) {
+  if (typeof text2 !== "string" || !text2 || text2.length > BOUND_MAX_BYTES) return null;
+  try {
+    return normalizeBound(JSON.parse(text2), now);
+  } catch {
+    return null;
+  }
+}
+
 // src/lib/execution-view.ts
 var FUTURE_TOLERANCE_MS = 2 * 6e4;
 var AGENT_ALIVE_MS = 3 * 36e5;
@@ -10897,11 +10946,16 @@ function coordinatorOf(e, live, now, stepAt) {
   const liveness2 = !e.active ? "stopped" : signal?.ended ? "stopped" : waiting ? "alive" : signalLiveness(lastSeen, false, now);
   return { signal, lastSeen, waiting, liveness: liveness2 };
 }
-function coordinatorGone(e, signal, now) {
-  if (!e) return false;
+function coordinatorLiveness(e, signal, now, activity = {}) {
   const own = e.hookSession ? signal : null;
-  if (own?.ended === true) return true;
-  return e.active && coordinatorOf(e, own ? [own] : [], now, lastMovedAt(e)).liveness === "stopped";
+  if (own?.ended === true) return "stopped";
+  const open = !!e.hookSession && (activity.bindings ?? []).some((b) => b.claude === e.hookSession && bindingLive(b, now));
+  return e.active && (open || activity.busy === true) ? "alive" : coordinatorOf(e, own ? [own] : [], now, lastMovedAt(e)).liveness;
+}
+function coordinatorGone(e, signal, now, activity = {}) {
+  if (!e) return false;
+  if (e.hookSession && signal?.ended === true) return true;
+  return e.active && coordinatorLiveness(e, signal, now, activity) === "stopped";
 }
 function executionView(i) {
   const e = i.exec;
@@ -11013,49 +11067,6 @@ function decisionsSummary(text2, now) {
   return { count: doc.count, autonomy: doc.autonomy, lastMajor: doc.lastMajor?.what ?? null };
 }
 
-// src/lib/bound.ts
-var BOUND_VIAS = ["work", "design", "forge-run", "forge-member", "forge-infinite"];
-var BOUND_END_REASONS = ["clear", "resume", "logout", "prompt_input_exit", "other", "released"];
-var MAX_SEATS = 10;
-var BOUND_MAX_BYTES = 4096;
-var SESSION_MAX_BYTES = 8 * 1024;
-var BOUND_REREAD_MS = 8;
-var CACHE_DOCS_MAX = 500;
-var isBoundVia = (x) => BOUND_VIAS.includes(x);
-var isEndReason = (x) => BOUND_END_REASONS.includes(x);
-function date(x, now) {
-  if (typeof x !== "string") return null;
-  const t = Date.parse(x);
-  if (!Number.isFinite(t)) return null;
-  return now !== void 0 && Number.isFinite(now) && t - now > FUTURE_SKEW_MS ? null : x;
-}
-function normalizeBound(x, now) {
-  if (!x || typeof x !== "object" || Array.isArray(x)) return null;
-  const o = x;
-  if (!isSafeId(o.sid) || !isSafeId(o.claude) || !isBoundVia(o.via)) return null;
-  const since = date(o.since, now);
-  const seenAt = date(o.seenAt, now);
-  if (!since || !seenAt) return null;
-  const ended = o.endedAt === null || o.endedAt === void 0;
-  const endedAt = ended ? null : date(o.endedAt, now);
-  if (!ended && endedAt === null) return null;
-  let endReason = null;
-  if (o.endReason !== null && o.endReason !== void 0) {
-    if (!isEndReason(o.endReason)) return null;
-    endReason = o.endReason;
-  }
-  const pid = typeof o.pid === "number" && Number.isInteger(o.pid) && o.pid > 0 ? o.pid : null;
-  return { sid: o.sid, claude: o.claude, pid, via: o.via, since, seenAt, endedAt, endReason: endedAt ? endReason : null };
-}
-function parseBound(text2, now) {
-  if (typeof text2 !== "string" || !text2 || text2.length > BOUND_MAX_BYTES) return null;
-  try {
-    return normalizeBound(JSON.parse(text2), now);
-  } catch {
-    return null;
-  }
-}
-
 // src/lib/member-doc.ts
 var isMemberId = (s) => isSafeId(s);
 var MEMBERS_MAX = 50;
@@ -11085,12 +11096,7 @@ function memberOfHook(members, sessionId, runId) {
 }
 
 // src/lib/viewer-role.ts
-var BOUND_LEASE_MS = 5 * 6e4;
 var PREVIOUS_OFFER_MS = 24 * 36e5;
-function bindingLive(b, now) {
-  const seen = Date.parse(b.seenAt);
-  return b.endedAt === null && Number.isFinite(seen) && now < seen + BOUND_LEASE_MS;
-}
 var NONE = { role: "none", subject: null, binding: null, member: null, coordinator: false, since: null, task: null };
 var time = (s) => {
   const t = s ? Date.parse(s) : NaN;
@@ -11207,7 +11213,11 @@ function viewerOf(v, exec, now) {
   return { role: v.role, coordinator: v.coordinator, runId };
 }
 function runInput(exec, f, now) {
-  return { execution: exec, members: exec ? membersOf(f, exec.runId) : [], coordinatorEnded: coordinatorGone(exec, normalizeLive(json(f.coordinatorLive)), now) };
+  const bindings = Object.values(f.coordinatorBindings ?? {}).flatMap((text2) => {
+    const b = parseBound(text2, now);
+    return b ? [b] : [];
+  });
+  return { execution: exec, members: exec ? membersOf(f, exec.runId) : [], coordinatorEnded: coordinatorGone(exec, normalizeLive(json(f.coordinatorLive)), now, { bindings }) };
 }
 function forgeViewer(exec, f, now) {
   return viewerOf(describeViewer({ bound: null, ...runInput(exec, f, now), sessionId: isSafeId(f.sessionId) ? f.sessionId : null, now }), exec, now);
@@ -11654,7 +11664,6 @@ function bandLine(m, nowMs2) {
 
 // src/mod/files.ts
 var MAX_DOCS = CACHE_DOCS_MAX;
-var MAX_PROJECTS = 50;
 var RENEW_MS = 6e4;
 var join = (...parts) => parts.join("/");
 async function readOpt($, path) {
@@ -11769,6 +11778,19 @@ async function readJsonDir($, dir, max, keep) {
   const files = (await listOpt($, dir)).filter((f) => f.kind === "file" && f.name.endsWith(".json") && f.size <= EXEC_FILE_MAX && keep(f.name.slice(0, -5))).sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, max);
   return readEach($, dir, files);
 }
+async function claudeBindingTexts($, main, claude, now) {
+  const out = {};
+  const projects = (await listOpt($, join(main, ".waypoint"))).filter((d) => d.kind === "dir").slice(0, MAX_PROJECTS);
+  for (const p of projects) {
+    const seats = await seatFiles($, join(main, ".waypoint", p.name), now);
+    for (const s of seatsOf(seats, now)) {
+      const key = s.checkout ? "." : s.sid;
+      const text2 = seats.bindings?.[key];
+      if (s.bound?.claude === claude && text2 !== void 0) out[`${p.name}/${key}`] = text2;
+    }
+  }
+  return out;
+}
 async function loadForge($, root, now) {
   try {
     const main = mainCheckoutFrom(root, await readOpt($, join(root, ".git")) ?? null);
@@ -11790,10 +11812,15 @@ async function loadForge($, root, now) {
       const members = join(dir, "members");
       out.members = await readEach($, members, newestMemberFiles((await listOpt($, members)).filter((f) => f.kind === "file")));
     }
-    const hook = parseExecution(execution, now)?.hookSession;
+    const parsed2 = parseExecution(execution, now);
+    const hook = parsed2?.hookSession;
     if (hook && isSafeId(hook)) {
       const signal = out.live?.[hook] ?? await readSmall($, join(dir, "live", `${hook}.json`), EXEC_FILE_MAX);
       if (signal !== void 0) out.coordinatorLive = signal;
+      if (parsed2?.active) {
+        const bindings = await claudeBindingTexts($, main, hook, now);
+        if (Object.keys(bindings).length) out.coordinatorBindings = bindings;
+      }
     }
     return out;
   } catch {

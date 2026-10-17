@@ -11859,6 +11859,9 @@ function overlappingZones(a, b) {
   for (const x2 of a) for (const y2 of b) if (globsOverlap(x2, y2)) out.push([x2, y2]);
   return out;
 }
+function effectiveZones(zones) {
+  return zones.length ? [...zones] : ["**"];
+}
 
 // src/lib/coordination.ts
 var IDLE_MINUTES = 15;
@@ -11868,7 +11871,7 @@ var SILENT_MINUTES = 5;
 var ACTIVE = ["claimed", "in_progress"];
 function zonesOf(task, state) {
   const touched = Array.isArray(state?.zonesTouched) ? state.zonesTouched : [];
-  return [...task.zones, ...touched].filter((z2) => typeof z2 === "string");
+  return [...effectiveZones(task.zones), ...touched].filter((z2) => typeof z2 === "string");
 }
 function conflictsFor(plan, states, taskId, sessionId, sessions, now = Date.now()) {
   const task = plan.tasks.find((t) => t.id === taskId);
@@ -13980,7 +13983,7 @@ var SAFE_ID = /^[A-Za-z0-9_\-.]{1,120}$/;
 var isSafeId = (s) => typeof s === "string" && SAFE_ID.test(s) && s !== "." && s !== "..";
 var RUN_BRANCH = /^[A-Za-z0-9_./][A-Za-z0-9_\-./]{0,119}$/;
 var isRunBranch = (s) => typeof s === "string" && RUN_BRANCH.test(s) && !s.includes("..");
-var TASK_STATUSES = ["running", "accepted", "integrated", "conflict", "blocked"];
+var TASK_STATUSES = ["running", "accepted", "integrated", "conflict", "blocked", "stopped"];
 var STOPS = ["finished", "stalled", "stopped", "budget", "migrated"];
 var MAX_TASKS = 500;
 var isObj2 = (x2) => !!x2 && typeof x2 === "object" && !Array.isArray(x2);
@@ -14086,6 +14089,56 @@ function normalizeLive(x2) {
   return { sessionId, role, ts, agents, runId: str3(x2.runId), task: str3(x2.task), event: (str3(x2.event) ?? "").slice(0, 40), ended: x2.ended === true };
 }
 
+// src/lib/bound.ts
+var BOUND_VIAS = ["work", "design", "forge-run", "forge-member", "forge-infinite"];
+var BOUND_END_REASONS = ["clear", "resume", "logout", "prompt_input_exit", "other", "released"];
+var MAX_SEATS = 10;
+var MAX_PROJECTS = 50;
+var BOUND_LEASE_MS = 5 * 6e4;
+var BOUND_MAX_BYTES = 4096;
+var SESSION_MAX_BYTES = 8 * 1024;
+var BOUND_REREAD_MS = 8;
+var CACHE_DOCS_MAX = 500;
+var isBoundVia = (x2) => BOUND_VIAS.includes(x2);
+var isEndReason = (x2) => BOUND_END_REASONS.includes(x2);
+var endReasonOf = (x2) => isEndReason(x2) && x2 !== "released" ? x2 : "other";
+function date(x2, now) {
+  if (typeof x2 !== "string") return null;
+  const t = Date.parse(x2);
+  if (!Number.isFinite(t)) return null;
+  return now !== void 0 && Number.isFinite(now) && t - now > FUTURE_SKEW_MS2 ? null : x2;
+}
+function normalizeBound(x2, now) {
+  if (!x2 || typeof x2 !== "object" || Array.isArray(x2)) return null;
+  const o = x2;
+  if (!isSafeId(o.sid) || !isSafeId(o.claude) || !isBoundVia(o.via)) return null;
+  const since = date(o.since, now);
+  const seenAt = date(o.seenAt, now);
+  if (!since || !seenAt) return null;
+  const ended = o.endedAt === null || o.endedAt === void 0;
+  const endedAt = ended ? null : date(o.endedAt, now);
+  if (!ended && endedAt === null) return null;
+  let endReason = null;
+  if (o.endReason !== null && o.endReason !== void 0) {
+    if (!isEndReason(o.endReason)) return null;
+    endReason = o.endReason;
+  }
+  const pid = typeof o.pid === "number" && Number.isInteger(o.pid) && o.pid > 0 ? o.pid : null;
+  return { sid: o.sid, claude: o.claude, pid, via: o.via, since, seenAt, endedAt, endReason: endedAt ? endReason : null };
+}
+function bindingLive(b, now) {
+  const seen = Date.parse(b.seenAt);
+  return b.endedAt === null && Number.isFinite(seen) && now < seen + BOUND_LEASE_MS;
+}
+function parseBound(text, now) {
+  if (typeof text !== "string" || !text || text.length > BOUND_MAX_BYTES) return null;
+  try {
+    return normalizeBound(JSON.parse(text), now);
+  } catch {
+    return null;
+  }
+}
+
 // src/lib/execution-view.ts
 var FUTURE_TOLERANCE_MS = 2 * 6e4;
 var AGENT_ALIVE_MS = 3 * 36e5;
@@ -14125,11 +14178,16 @@ function coordinatorOf(e, live, now, stepAt) {
   const liveness2 = !e.active ? "stopped" : signal?.ended ? "stopped" : waiting ? "alive" : signalLiveness(lastSeen, false, now);
   return { signal, lastSeen, waiting, liveness: liveness2 };
 }
-function coordinatorGone(e, signal, now) {
-  if (!e) return false;
+function coordinatorLiveness(e, signal, now, activity = {}) {
   const own = e.hookSession ? signal : null;
-  if (own?.ended === true) return true;
-  return e.active && coordinatorOf(e, own ? [own] : [], now, lastMovedAt(e)).liveness === "stopped";
+  if (own?.ended === true) return "stopped";
+  const open = !!e.hookSession && (activity.bindings ?? []).some((b) => b.claude === e.hookSession && bindingLive(b, now));
+  return e.active && (open || activity.busy === true) ? "alive" : coordinatorOf(e, own ? [own] : [], now, lastMovedAt(e)).liveness;
+}
+function coordinatorGone(e, signal, now, activity = {}) {
+  if (!e) return false;
+  if (e.hookSession && signal?.ended === true) return true;
+  return e.active && coordinatorLiveness(e, signal, now, activity) === "stopped";
 }
 
 // src/lib/forge-activity.ts
@@ -14168,57 +14226,8 @@ function normalizeMember(x2) {
   return { sessionId, role, runId, task, name, since, hookSession };
 }
 
-// src/lib/bound.ts
-var BOUND_VIAS = ["work", "design", "forge-run", "forge-member", "forge-infinite"];
-var BOUND_END_REASONS = ["clear", "resume", "logout", "prompt_input_exit", "other", "released"];
-var MAX_SEATS = 10;
-var BOUND_MAX_BYTES = 4096;
-var SESSION_MAX_BYTES = 8 * 1024;
-var BOUND_REREAD_MS = 8;
-var CACHE_DOCS_MAX = 500;
-var isBoundVia = (x2) => BOUND_VIAS.includes(x2);
-var isEndReason = (x2) => BOUND_END_REASONS.includes(x2);
-var endReasonOf = (x2) => isEndReason(x2) && x2 !== "released" ? x2 : "other";
-function date(x2, now) {
-  if (typeof x2 !== "string") return null;
-  const t = Date.parse(x2);
-  if (!Number.isFinite(t)) return null;
-  return now !== void 0 && Number.isFinite(now) && t - now > FUTURE_SKEW_MS2 ? null : x2;
-}
-function normalizeBound(x2, now) {
-  if (!x2 || typeof x2 !== "object" || Array.isArray(x2)) return null;
-  const o = x2;
-  if (!isSafeId(o.sid) || !isSafeId(o.claude) || !isBoundVia(o.via)) return null;
-  const since = date(o.since, now);
-  const seenAt = date(o.seenAt, now);
-  if (!since || !seenAt) return null;
-  const ended = o.endedAt === null || o.endedAt === void 0;
-  const endedAt = ended ? null : date(o.endedAt, now);
-  if (!ended && endedAt === null) return null;
-  let endReason = null;
-  if (o.endReason !== null && o.endReason !== void 0) {
-    if (!isEndReason(o.endReason)) return null;
-    endReason = o.endReason;
-  }
-  const pid = typeof o.pid === "number" && Number.isInteger(o.pid) && o.pid > 0 ? o.pid : null;
-  return { sid: o.sid, claude: o.claude, pid, via: o.via, since, seenAt, endedAt, endReason: endedAt ? endReason : null };
-}
-function parseBound(text, now) {
-  if (typeof text !== "string" || !text || text.length > BOUND_MAX_BYTES) return null;
-  try {
-    return normalizeBound(JSON.parse(text), now);
-  } catch {
-    return null;
-  }
-}
-
 // src/lib/viewer-role.ts
-var BOUND_LEASE_MS = 5 * 6e4;
 var PREVIOUS_OFFER_MS = 24 * 36e5;
-function bindingLive(b, now) {
-  const seen = Date.parse(b.seenAt);
-  return b.endedAt === null && Number.isFinite(seen) && now < seen + BOUND_LEASE_MS;
-}
 var NONE = { role: "none", subject: null, binding: null, member: null, coordinator: false, since: null, task: null };
 var time2 = (s) => {
   const t = s ? Date.parse(s) : NaN;
@@ -14347,6 +14356,7 @@ function readSeats(wpDir, now) {
   }
   return out;
 }
+var readBindings = (wpDir, now) => readSeats(wpDir, now).flatMap((s) => s.bound ? [s.bound] : []);
 var PID_MAX = 2147483647;
 var pidFromEnv = (env) => {
   const v = env?.CLAUDE_PID;
@@ -14357,6 +14367,15 @@ function boundLive(b, now, alive = pidAlive) {
 }
 function settleBinding(b, now, alive = pidAlive) {
   return bindingLive(b, now) && b.pid !== null && !alive(b.pid) ? { ...b, endedAt: b.seenAt } : b;
+}
+function claudeBindings(root, claude, now, alive = pidAlive) {
+  let names = [];
+  try {
+    names = (0, import_node_fs3.readdirSync)(import_node_path4.default.join(root, ".waypoint"), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).slice(0, MAX_PROJECTS);
+  } catch {
+    return [];
+  }
+  return names.flatMap((n) => readBindings(import_node_path4.default.join(root, ".waypoint", n), now)).filter((b) => b.claude === claude).map((b) => settleBinding(b, now, alive));
 }
 function openTasksOf(wpDir) {
   const out = /* @__PURE__ */ Object.create(null);
@@ -14466,7 +14485,6 @@ var SKEW_MS = 2 * 6e4;
 
 // src/cli/hooks.ts
 var SOURCES = ["startup", "resume", "clear", "compact", "fork"];
-var MAX_PROJECTS = 50;
 var RENEW_MS = 6e4;
 var MAX_COMMITS = 20;
 var SHA2 = /^[0-9a-f]{7,64}$/;
@@ -14547,7 +14565,8 @@ function readForge(root, project, now) {
       signal = null;
     }
   }
-  return { exec, any, members, infinite: parseRun(read(import_node_path5.default.join(dir, "run.json"))), coordinatorEnded: coordinatorGone(exec, signal, now) };
+  const bindings = exec?.active && isSafeId(exec.hookSession) ? claudeBindings(main, exec.hookSession, now) : [];
+  return { exec, any, members, infinite: parseRun(read(import_node_path5.default.join(dir, "run.json"))), coordinatorEnded: coordinatorGone(exec, signal, now, { bindings }) };
 }
 var NOBODY = { role: "none", subject: null, binding: null, member: null, coordinator: false, since: null, task: null };
 function contextOf(io, input) {
@@ -15147,7 +15166,10 @@ function run(argv, io) {
     switch (cmd) {
       case "validate": {
         const p = loadPlan();
-        return ok(`ok: ${p.tasks.length} tasks, ${p.phases.length} phases, ${p.tracks.length} tracks`);
+        const loose = p.tasks.filter((t) => !t.zones.length).map((t) => t.id);
+        const warning = loose.length ? `
+warning: ${loose.length} task(s) without zones run alone in a forge execution: ${loose.join(", ")}` : "";
+        return ok(`ok: ${p.tasks.length} tasks, ${p.phases.length} phases, ${p.tracks.length} tracks${warning}`);
       }
       case "clean-cache": {
         const p = loadPlan();
