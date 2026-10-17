@@ -144,6 +144,18 @@ describe('a partial set-aside is finished by the next prep (R6, I1)', () => {
   });
 });
 
+describe("a failed set-aside in the main checkout names what the worktree's already moved (R8)", () => {
+  it('exits 2 with both: what could not move in the main checkout, and what moved from this worktree and where', () => {
+    runA();
+    put(W(root, 'earlier-shop-B', 'reviews-1-1', 'held'), 'x');
+    const r = prepB();
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain(`${W(root, 'reviews-1-1').split(path.sep).join('/')} could not be moved aside`);
+    expect(r.stderr).toContain("already moved this worktree's reviews-1-1, evidence/1-1 to .forge/work/shop/T1/earlier-shop-B");
+    expect(existsSync(W(wt, 'earlier-shop-B', 'reviews-1-1', 'verify.json'))).toBe(true);
+  });
+});
+
 describe('an earlier run\'s evidence is never overwritten nor lost (R1, M1)', () => {
   it("prep in a member's worktree sets aside the main checkout's copy too, and swarm cleanup copies the set-aside rounds before it removes the worktree", () => {
     runA();

@@ -73,11 +73,12 @@ export function reviewRoundOf(events: LedgerEvent[], task: string, since: string
  * at the folder's root (findings, fix patch, handover, validators rounds), the brief's findings index and the step's
  * validators-head-<n>.json go to `earlier-<runId>/` there (named after the run that sets them aside), so nothing of them reads as this
  * execution's: review-close and the step take the newest round folder there is, and a reviewer's file there as returned.
- * A round with a phase event of `run` (logged since it started) stays. Returns the folder they went to, or null when
- * nothing moved. R2 (M2): a move that fails (on Windows, a handle open inside the folder is enough) would leave the brief
- * on a mixed folder, so it is a UsageError that names it (paths relative to `cwd`): prep exits 2.
+ * A round with a phase event of `run` (logged since it started) stays. Returns the folder they went to and what moved
+ * there, or null when nothing moved. R2 (M2): a move that fails (on Windows, a handle open inside the folder is enough)
+ * would leave the brief on a mixed folder, so it is a UsageError that names it (relative to `cwd` when inside it, else
+ * absolute): prep exits 2.
  */
-function setAsideEarlier(dir: string, n: string, id: string, events: readonly LedgerEvent[], run: ExecutionState, cwd: string): string | null {
+function setAsideEarlier(dir: string, n: string, id: string, events: readonly LedgerEvent[], run: ExecutionState, cwd: string): { aside: string; moved: string[] } | null {
   const ours = new Set(eventsSince(events, run.startedAt)
     .filter(e => e.kind === 'phase' && isTask(e, id) && e.brief === Number(n) && typeof e.round === 'number').map(e => e.round as number));
   let names: string[] = [];
@@ -104,7 +105,7 @@ function setAsideEarlier(dir: string, n: string, id: string, events: readonly Le
   ].filter(f => names.includes(f));
   if (!rounds.length && !briefFiles.length) return null;
   const aside = path.join(dir, `earlier-${run.runId}`);
-  let moved = 0;
+  const moved: string[] = [];
   const failed: string[] = [];
   const move = (name: string) => {
     const from = path.join(dir, name);
@@ -112,7 +113,7 @@ function setAsideEarlier(dir: string, n: string, id: string, events: readonly Le
     try {
       mkdirSync(path.dirname(path.join(aside, name)), { recursive: true });
       renameSync(from, path.join(aside, name));
-      moved++;
+      moved.push(name);
     } catch { failed.push(from); }
   };
   // R3 (M3): with each round, the files of that round at the folder's root, so this run's round never overwrites them.
@@ -121,10 +122,16 @@ function setAsideEarlier(dir: string, n: string, id: string, events: readonly Le
   for (const k of rounds) { move(`reviews-${n}-${k}`); move(`evidence/${n}-${k}`); for (const f of roundFiles(k)) move(f); }
   for (const f of briefFiles) move(f);
   if (failed.length) {
-    throw new UsageError(`prep: ${failed.map(f => rel(cwd, f)).join(', ')} could not be moved aside to ${rel(cwd, aside)} (an earlier run's review of this brief): close what holds it and run prep again`);
+    throw new UsageError(`prep: ${failed.map(f => shown(cwd, f)).join(', ')} could not be moved aside to ${shown(cwd, aside)} (an earlier run's review of this brief): close what holds it and run prep again`);
   }
-  return moved ? aside : null;
+  return moved.length ? { aside, moved } : null;
 }
+
+/** A path for a message: relative to `cwd` when it is inside it, else absolute (both with `/`). */
+const shown = (cwd: string, p: string): string => {
+  const r = rel(cwd, p);
+  return r.startsWith('..') ? path.resolve(p).split(path.sep).join('/') : r;
+};
 
 /** Runs `fn` (a validator run) putting back the tracked files it regenerated that the config's `generated` names. */
 function restoringGenerated<T>(deps: ReviewDeps, generated: string[], fn: () => T, into: string[]): T {
@@ -858,8 +865,14 @@ export function prep(args: string[], deps: ReviewDeps): Result {
   // folder, where the earlier run's copy is: it goes aside too, before this brief's copies land on it.
   const main = ledgerRoot(deps.cwd);
   const inWork = path.relative(deps.cwd, dir);
-  if (run && !samePath(main, deps.cwd) && inWork && !inWork.startsWith('..') && !path.isAbsolute(inWork)) setAsideEarlier(path.join(main, inWork), n, id, mine, run, deps.cwd);
-  const earlier = aside ? { earlier: rel(deps.cwd, aside) } : {};
+  if (run && !samePath(main, deps.cwd) && inWork && !inWork.startsWith('..') && !path.isAbsolute(inWork)) {
+    try { setAsideEarlier(path.join(main, inWork), n, id, mine, run, deps.cwd); } catch (err) {
+      // R8: what already moved on this worktree's side is said too, and where.
+      if (err instanceof UsageError && aside) throw new UsageError(`${err.message}; already moved this worktree's ${aside.moved.join(', ')} to ${shown(deps.cwd, aside.aside)}`);
+      throw err;
+    }
+  }
+  const earlier = aside ? { earlier: rel(deps.cwd, aside.aside) } : {};
   const tmFile = config ? writeThreatModel(dir, config) : null;
   const threatModel = tmFile ? rel(deps.cwd, tmFile) : null;
   // J-11: the implementer's validate command, exactly as it runs it: the tests related to its changes since BASE, the
