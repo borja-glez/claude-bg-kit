@@ -1,7 +1,7 @@
 import { planViewFromDocs } from '../lib/sync.js';
 import { isPlanId } from '../lib/ids.js';
 import { TASK_STATUSES, type MessageDoc, type MetaDoc, type NoteDoc, type NoteType, type PhaseDoc, type SessionDoc, type States, type TaskStatus } from '../lib/types.js';
-import { clampPan, clampSpan, panFor, planRange, zoomAround, type Zoom } from '../lib/timeline.js';
+import { clampPan, clampSpan, groupIds, panFor, zoomAround, type Zoom } from '../lib/timeline.js';
 import { MAX_NOTE, NOTE_TYPES } from '../lib/notes.js';
 import { canDecide, MAX_PROPOSAL_TEXT, normalizeApproval, normalizeProposal, proposalDigest, type ApprovalDoc, type ProposalDoc } from '../lib/proposals.js';
 import { dictFor } from './i18n.js';
@@ -11,7 +11,7 @@ import { morphInto } from './morph.js';
 import { parseSeen, pruneSeen, seenKey } from './needs.js';
 import { mergeMetrics, normalizeEvent, normalizeInfinite, normalizeMessage, normalizeMeta, normalizeMetrics, normalizeNote, normalizePhase, normalizeRun, normalizeSession, normalizeState, type Drop, type Report } from './normalize.js';
 import { decodeView, encodeView, type ViewState } from './urlstate.js';
-import { categoryKeys, DETAIL_TABS, esc, GROUPS, NOTE_FILTERS, PROPOSAL_FILTERS, relText, renderApp, TALK_KINDS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, vfilterStatuses, VFILTER_KEYS, VIEWS, VIRTUAL_FROM, type DetailTab, type Model, type ProposalFilterKind, type RelKind, type TalkKind, type UiState, type VFilterKey, type View } from './render.js';
+import { categoryKeys, DETAIL_TABS, esc, GROUPS, NOTE_FILTERS, phasesInProgress, PROPOSAL_FILTERS, relText, renderApp, TALK_KINDS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, vfilterStatuses, VFILTER_KEYS, VIEWS, VIRTUAL_FROM, type DetailTab, type Model, type ProposalFilterKind, type RelKind, type TalkKind, type UiState, type VFilterKey, type View } from './render.js';
 
 /**
  * The page's embedded snapshot; G-13 and G-14: the waypoint that built it and the states the last listing saw. The page
@@ -75,7 +75,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   const now = env.now ?? Date.now;
   const morph = env.morph ?? morphInto;
   const ui: UiState = {
-    zoom: '1d', offset: 0, expanded: new Set(), modal: null, shot: null, search: '', view: 'summary', talk: 'notes',
+    zoom: '1d', offset: 0, expanded: new Set(), modal: null, shot: null, search: '', view: 'summary', talk: 'notes', fit: true, autoOpen: true,
     versionFilter: { statuses: [], phaseStatuses: [], track: null }, collapsed: new Set(), noteFilter: 'all', timelineGroup: 'phase',
     draft: { type: 'idea', text: '' }, answering: null, answerDraft: '', notice: null,
     proposalFilter: { status: 'all', category: 'all', risk: 'all' }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '',
@@ -171,7 +171,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   };
   // H-25: what the URL says (on load, Back and Forward, or a hash edited by hand), applied to the view state. The URL is
   // the schedule's whole state: what its hash leaves out is the default (a free span only with `s`, so an explicit `z`
-  // wins over a span set by Ctrl + wheel). The other views never carry those parameters and leave them as they are.
+  // wins over a span set by Ctrl + wheel; H-14: without `z` nor `s` it fits the plan, and without `o` it opens the phases
+  // in progress). The other views never carry those parameters and leave them as they are.
   const applyView = (v: ViewState) => {
     ui.view = v.view && (VIEWS as readonly string[]).includes(v.view) ? (v.view as View) : 'summary';
     if (ui.view !== 'schedule') ui.tl = undefined;
@@ -184,6 +185,9 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       // Review M5: clamped here too, whatever decoded the hash.
       ui.span = v.span ? clampSpan(v.span) : undefined;
       ui.pan = v.span ? clampPan(v.pan ?? 0) : undefined;
+      ui.fit = !v.zoom && !v.span;
+      // An empty `o=` says the person closed every group; no `o` at all leaves the phases in progress open.
+      ui.autoOpen = v.open === undefined;
       ui.expanded = new Set(v.open ?? []);
       ui.statuses = (v.status ?? []).filter(x => (TL_STATUSES as readonly string[]).includes(x));
       ui.layers = (v.layers ?? []).filter(x => (TL_LAYERS as readonly string[]).includes(x));
@@ -209,7 +213,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   /** Set with pushNext by opening a detail: the entry that render pushes goes into the trail. */
   let pushDetail = false;
   // A pending link (review I2) stays in the URL: the render does not rewrite its t and tt away.
-  const viewState = (): ViewState => ({ view: ui.view, c: ui.talk, group: ui.timelineGroup, zoom: ui.zoom, span: ui.span, pan: ui.pan, open: [...ui.expanded], status: ui.statuses, q: ui.search.trim(), layers: ui.layers, task: ui.modal ?? linked?.task, tab: ui.modal ? ui.tab : linked?.tab, debug: model.debug });
+  const viewState = (): ViewState => ({ view: ui.view, c: ui.talk, group: ui.timelineGroup, zoom: ui.fit ? undefined : ui.zoom, span: ui.fit ? undefined : ui.span, pan: ui.fit ? undefined : ui.pan, open: ui.autoOpen ? undefined : [...ui.expanded], status: ui.statuses, q: ui.search.trim(), layers: ui.layers, task: ui.modal ?? linked?.task, tab: ui.modal ? ui.tab : linked?.tab, debug: model.debug });
   /** What a view state says without the detail (t, tt), as the URL writes it. */
   const viewPart = (s: ViewState): string => encodeView({ ...s, task: undefined, tab: undefined });
   const openDetail = (id: string, from: HTMLElement): boolean => {
@@ -663,23 +667,32 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     const action = el.dataset.action;
     if (action === 'close-modal' && el.classList.contains('overlay') && ev.target !== el) return; // clicks inside the dialog
     if (suppressClick) { suppressClick = false; return; } // the end of a drag on the timeline is not a click
-    if (action === 'zoom') { ui.zoom = el.dataset.zoom as Zoom; ui.offset = 0; ui.span = undefined; ui.pan = undefined; }
+    if (action === 'zoom') { ui.zoom = el.dataset.zoom as Zoom; ui.offset = 0; ui.span = undefined; ui.pan = undefined; ui.fit = false; }
     else if (action === 'shift') {
       const dir = Number(el.dataset.dir);
+      if (ui.fit) freeze();
       if (ui.span) ui.pan = dir === 0 ? 0 : clampPan((ui.pan ?? 0) + dir * ui.span * 0.5);
       else ui.offset = dir === 0 ? 0 : ui.offset + dir;
     }
     else if (action === 'fit') {
-      const r = planRange(model.plan, model.states, model.now);
-      ui.span = clampSpan(r.to - r.from);
-      ui.pan = panFor(r.from, ui.span, model.now);
+      // H-14: «Ajustar» is a mode: the window follows the plan until the person zooms or pans again.
+      ui.fit = true;
+      ui.span = undefined;
+      ui.pan = undefined;
+      ui.offset = 0;
     }
     else if (action === 'tl-all') {
-      const ids = ui.timelineGroup === 'track' ? model.plan.tracks.map(t => t.id) : model.plan.phases.map(p => p.id);
+      const ids = groupIds(model.plan, model.states, ui.timelineGroup);
       ui.expanded = el.dataset.open === '1' ? new Set(ids) : new Set();
+      ui.autoOpen = false;
     }
     else if (action === 'scale') { setScale(userScale + (Number(el.dataset.dir) > 0 ? 0.1 : -0.1)); return; }
-    else if (action === 'toggle-phase') { const id = el.dataset.id!; ui.expanded.has(id) ? ui.expanded.delete(id) : ui.expanded.add(id); }
+    else if (action === 'toggle-phase') {
+      const id = el.dataset.id!;
+      // H-14: the first open or close turns the default (the phases in progress) into the person's own set.
+      if (ui.autoOpen) { ui.expanded = new Set(ui.timelineGroup === 'phase' ? phasesInProgress(model) : []); ui.autoOpen = false; }
+      ui.expanded.has(id) ? ui.expanded.delete(id) : ui.expanded.add(id);
+    }
     else if (action === 'open-task' || action === 'open-bar') { if (!openDetail(el.dataset.id ?? '', el)) return; }
     else if (action === 'close-modal') { closeDetail(); return; }
     else if (action === 'open-shot') { const i = Number(el.dataset.i); ui.shot = Number.isInteger(i) && i >= 0 ? i : null; if (ui.shot !== null) focusNext = '.lightbox'; }
@@ -795,17 +808,19 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     if (composing && role && DRAFT_ROLES.includes(role)) endComposition();
   };
   // ---- Timeline: free zoom and pan ----
-  // The first wheel zoom, drag or key turns the preset window into a free one (span and pan in ms).
+  // The first wheel zoom, drag or key turns the preset window, or the fitted one (H-14), into a free one (span and pan in
+  // ms).
   const freeze = () => {
     if (ui.span) return;
-    const w = timelineWindow(ui, model.now);
+    const w = timelineWindow(model, ui);
     ui.span = w.to - w.from;
     ui.pan = panFor(w.from, ui.span, model.now);
+    ui.fit = false;
   };
   const canvasOf = (t: EventTarget | null) => (t as Element | null)?.closest?.('[data-role="tl-canvas"]') as HTMLElement | null;
   const zoomBy = (factor: number, at: number) => {
     freeze();
-    const z = zoomAround(timelineWindow(ui, model.now), factor, at, model.now);
+    const z = zoomAround(timelineWindow(model, ui), factor, at, model.now);
     ui.span = z.span;
     ui.pan = z.pan;
     scheduleFrame();
@@ -832,14 +847,16 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     if (mm) { mmDrag = true; centreAt(ev, mm); return; }
     const canvas = canvasOf(ev.target);
     if (!canvas) return;
-    freeze();
-    drag = { x: ev.clientX, pan: ui.pan ?? 0, span: ui.span ?? 0, width: canvas.getBoundingClientRect().width || 1, moved: false };
+    // H-14: a press alone moves nothing: a click on a bar keeps «Ajustar» and writes no span into the URL. The window
+    // turns free (and stops fitting the plan) on the first move past 4 px.
+    drag = { x: ev.clientX, pan: 0, span: 0, width: canvas.getBoundingClientRect().width || 1, moved: false };
   };
   const onPointerMove = (ev: PointerEvent) => {
     if (mmDrag) { const mm = env.root.querySelector('[data-role="minimap"]') as HTMLElement | null; if (mm) centreAt(ev, mm); return; }
     if (!drag || pinch) return;
     const dx = ev.clientX - drag.x;
     if (!drag.moved && Math.abs(dx) < 4) return;
+    if (!drag.moved) { freeze(); drag.pan = ui.pan ?? 0; drag.span = ui.span ?? 0; }
     drag.moved = true;
     ui.pan = clampPan(drag.pan - (dx * drag.span) / drag.width);
     scheduleFrame();
@@ -896,7 +913,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     else if (ev.key === 'ArrowRight') panBy(0.15);
     else if (ev.key === '+' || ev.key === '=') zoomBy(0.8, 0.5);
     else if (ev.key === '-' || ev.key === '_') zoomBy(1.25, 0.5);
-    else if (ev.key === '0') { ui.span = undefined; ui.pan = undefined; ui.offset = 0; schedule(); }
+    else if (ev.key === '0') { ui.span = undefined; ui.pan = undefined; ui.offset = 0; ui.fit = true; schedule(); }
     else return;
     ev.preventDefault();
   };

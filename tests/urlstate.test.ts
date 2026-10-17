@@ -43,4 +43,12 @@ describe('view state in the URL (§4.6, H-25)', () => {
     expect(decodeView('#t=../x&tt=a%20b&c=<i>')).toEqual({});
     expect(decodeView('')).toEqual({});
   });
+  it('in the schedule a zoom is always written and open groups even when none, so the fit and the phases in progress are what nothing says (H-14, Review Focus 3)', () => {
+    expect(encodeView({ view: 'schedule' })).toBe('#v=schedule');
+    expect(encodeView({ view: 'schedule', zoom: '1d' })).toBe('#v=schedule&z=1d');
+    expect(encodeView({ view: 'schedule', open: [] })).toBe('#v=schedule&o=');
+    expect(decodeView('#v=schedule&o=')).toEqual({ view: 'schedule', open: [] });
+    expect(decodeView('#v=schedule&z=1d')).toEqual({ view: 'schedule', zoom: '1d' });
+    expect(decodeView('#v=schedule&o=<b>')).toEqual({ view: 'schedule', open: [] });
+  });
 });

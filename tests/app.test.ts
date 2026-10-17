@@ -9,6 +9,9 @@ import { normalizeApproval, normalizeProposal, ownerApproved, ownerCheck, propos
 import { run as forgeCli } from '../src/forge/cli/run.js';
 import { start, type Snapshot } from '../src/page/app.js';
 import { morphInto } from '../src/page/morph.js';
+import { fitWindow } from '../src/lib/timeline.js';
+import { timelineWindow } from '../src/page/render.js';
+import { decodeView } from '../src/page/urlstate.js';
 
 const plan = parsePlan(readFileSync(join(process.cwd(), 'tests', 'fixtures', 'plan.yaml'), 'utf8'));
 const snapshot: Snapshot = buildDocs(plan, '2026-10-11T09:00:00Z');
@@ -198,28 +201,37 @@ describe('start', () => {
     const root = document.createElement('div');
     document.body.appendChild(root);
     const app = await start({ claude: null, snapshot, root, now: () => NOW });
+    expect([app.ui.fit, app.ui.autoOpen]).toEqual([true, true]);
     (root.querySelector('[data-action="tl-all"]') as HTMLElement).click();
     await flush();
     expect([...app.ui.expanded].sort()).toEqual(['F1', 'F2']);
+    expect(app.ui.autoOpen).toBe(false);
     (root.querySelector('[data-action="tl-all"]') as HTMLElement).click();
     await flush();
     expect(app.ui.expanded.size).toBe(0);
+    (root.querySelector('[data-zoom="1w"]') as HTMLElement).click();
+    await flush();
+    expect([app.ui.fit, app.ui.zoom]).toEqual([false, '1w']);
     (root.querySelector('[data-action="fit"]') as HTMLElement).click();
     await flush();
-    expect(app.ui.span).toBeGreaterThan(0);
-    const fitSpan = app.ui.span!;
+    expect([app.ui.fit, app.ui.span]).toEqual([true, undefined]);
+    const fit = timelineWindow(app.model, app.ui);
     const canvas = root.querySelector('[data-role="tl-canvas"]') as HTMLElement;
     const wheel = new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true });
     // happy-dom's WheelEvent drops the modifier keys; a browser's carries them.
     Object.defineProperty(wheel, 'ctrlKey', { value: true });
     canvas.dispatchEvent(wheel);
     await new Promise(r => setTimeout(r, 30));
-    expect(app.ui.span!).toBeLessThan(fitSpan);
+    expect(app.ui.fit).toBe(false);
+    expect(app.ui.span!).toBeLessThan(fit.to - fit.from);
     const before = app.ui.pan!;
     (root.querySelector('[data-role="timeline"]') as HTMLElement).focus();
     root.querySelector('[data-role="timeline"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     await new Promise(r => setTimeout(r, 30));
     expect(app.ui.pan!).toBeGreaterThan(before);
+    root.querySelector('[data-role="timeline"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: '0', bubbles: true }));
+    await new Promise(r => setTimeout(r, 30));
+    expect([app.ui.fit, app.ui.span]).toEqual([true, undefined]);
     (root.querySelector('[data-zoom="1d"]') as HTMLElement).click();
     await flush();
     expect(app.ui.span).toBeUndefined();
@@ -1571,14 +1583,20 @@ describe('the views and the URL (§4.6, H-25)', () => {
     app.stop();
   });
 
-  it('Back to a schedule entry without parameters shows the defaults, not what the last entry had (H-25)', async () => {
-    const { root, app } = await boot(fakeDb(), fakeUser(), '#v=schedule&z=1w&g=track&o=ui&f=blocked&l=critical');
-    expect([app.ui.zoom, app.ui.timelineGroup, [...app.ui.expanded], app.ui.statuses, app.ui.layers]).toEqual(['1w', 'track', ['ui'], ['blocked'], ['critical']]);
+  it('Back to a schedule entry without parameters shows the defaults, not what the last entry had: «Ajustar» and the phases in progress (H-25, H-14)', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser(), '#v=schedule&z=1w&g=track&o=ui&f=blocked&l=critical');
+    f.push('state', { T002: { status: 'in_progress', owner: 'main', startedAt: '2026-10-11T11:45:00Z' } });
+    await settle();
+    expect([app.ui.fit, app.ui.autoOpen, app.ui.zoom, app.ui.timelineGroup, [...app.ui.expanded], app.ui.statuses, app.ui.layers]).toEqual([false, false, '1w', 'track', ['ui'], ['blocked'], ['critical']]);
     history.replaceState(null, '', '#v=schedule');
     window.dispatchEvent(new Event('popstate'));
     await settle();
-    expect([app.ui.zoom, app.ui.timelineGroup, [...app.ui.expanded], app.ui.statuses, app.ui.layers]).toEqual(['1d', 'phase', [], [], []]);
-    expect(root.querySelector('[data-zoom="1d"]')!.classList.contains('on')).toBe(true);
+    expect([app.ui.fit, app.ui.autoOpen, app.ui.span, app.ui.timelineGroup, [...app.ui.expanded], app.ui.statuses, app.ui.layers]).toEqual([true, true, undefined, 'phase', [], [], []]);
+    expect(root.querySelector('[data-action="fit"]')!.getAttribute('aria-pressed')).toBe('true');
+    expect(root.querySelector('[data-action="zoom"].on')).toBeNull();
+    expect(root.querySelector('[data-action="toggle-phase"][data-id="F1"]')!.getAttribute('aria-expanded')).toBe('true');
+    expect(root.querySelector('[data-action="toggle-phase"][data-id="F2"]')!.getAttribute('aria-expanded')).toBe('false');
     expect(location.hash).toBe('#v=schedule');
     app.stop();
   });
@@ -2542,5 +2560,77 @@ describe('the task chip of a note (Task 11 carry)', () => {
     expect((document.activeElement as HTMLElement).closest('[data-k^="n:"]')?.getAttribute('data-k')).toBe('n:a');
     go.mockRestore();
     app.stop();
+  });
+});
+
+describe('the schedule opens fitted, with the phases in progress open (H-14)', () => {
+  it('without a hash it fits the whole plan and opens the phases in progress; a fold and a zoom of the person stay', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    f.push('state', { T001: { status: 'done', startedAt: '2026-10-11T10:00:00Z', doneAt: '2026-10-11T10:20:00Z' }, T002: { status: 'in_progress', owner: 'main', startedAt: '2026-10-11T11:45:00Z' } });
+    await settle();
+    click(root, '[data-view="schedule"]');
+    await settle();
+    expect([app.ui.fit, app.ui.autoOpen]).toEqual([true, true]);
+    expect(timelineWindow(app.model, app.ui)).toEqual(fitWindow(app.model.plan, app.model.states, NOW));
+    expect(root.querySelector('[data-action="fit"]')!.getAttribute('aria-pressed')).toBe('true');
+    expect(root.querySelector('[data-action="toggle-phase"][data-id="F1"]')!.getAttribute('aria-expanded')).toBe('true');
+    expect(root.querySelector('[data-action="toggle-phase"][data-id="F2"]')!.getAttribute('aria-expanded')).toBe('false');
+    expect(location.hash).toBe('#v=schedule');
+    click(root, '[data-action="toggle-phase"][data-id="F2"]');
+    await settle();
+    expect(app.ui.autoOpen).toBe(false);
+    expect([...app.ui.expanded].sort()).toEqual(['F1', 'F2']);
+    click(root, '[data-zoom="1w"]');
+    await settle();
+    expect(app.ui.fit).toBe(false);
+    expect(decodeView(location.hash)).toMatchObject({ view: 'schedule', zoom: '1w', open: ['F1', 'F2'] });
+    click(root, '[data-action="fit"]');
+    await settle();
+    expect(app.ui.fit).toBe(true);
+    expect(decodeView(location.hash).zoom).toBeUndefined();
+    app.stop();
+  });
+
+  it('a hash with a zoom wins over the fit, and one with o= closes every group (Review Focus 3)', async () => {
+    const one = await boot(fakeDb(), fakeUser(), '#v=schedule&z=1w');
+    expect([one.app.ui.fit, one.app.ui.zoom, one.app.ui.autoOpen]).toEqual([false, '1w', true]);
+    expect(one.root.querySelector('[data-zoom="1w"]')!.classList.contains('on')).toBe(true);
+    one.app.stop();
+    const two = await boot(fakeDb(), fakeUser(), '#v=schedule&o=');
+    expect([two.app.ui.fit, two.app.ui.autoOpen, two.app.ui.expanded.size]).toEqual([true, false, 0]);
+    two.app.stop();
+  });
+
+  it('a click on a bar keeps «Ajustar» and writes no span; only a drag past 4 px ends it (C8)', async () => {
+    const one = await boot(fakeDb(), fakeUser(), '#v=schedule&o=F1');
+    const bar = one.root.querySelector('.gb[data-id="T001"]') as HTMLElement;
+    bar.dispatchEvent(new PointerEvent('pointerdown', { button: 0, clientX: 300, bubbles: true }));
+    window.dispatchEvent(new PointerEvent('pointerup', { button: 0, clientX: 301, bubbles: true }));
+    bar.click();
+    await settle();
+    expect(one.app.ui.modal).toBe('T001');
+    expect([one.app.ui.fit, one.app.ui.span, one.app.ui.pan]).toEqual([true, undefined, undefined]);
+    expect(location.hash).toBe('#v=schedule&o=F1&t=T001');
+    one.app.stop();
+    const two = await boot(fakeDb(), fakeUser(), '#v=schedule');
+    const canvas = two.root.querySelector('[data-role="tl-canvas"]') as HTMLElement;
+    canvas.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1000, bottom: 200, width: 1000, height: 200, x: 0, y: 0, toJSON: () => ({}) });
+    const fit = timelineWindow(two.app.model, two.app.ui);
+    canvas.dispatchEvent(new PointerEvent('pointerdown', { button: 0, clientX: 500, bubbles: true }));
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 502, bubbles: true }));
+    await settle();
+    expect([two.app.ui.fit, two.app.ui.span]).toEqual([true, undefined]);
+    expect(location.hash).toBe('#v=schedule');
+    // 100 px of 1000 to the left: the window moves a tenth of its span later, and is no longer the fit.
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 400, bubbles: true }));
+    window.dispatchEvent(new PointerEvent('pointerup', { clientX: 400, bubbles: true }));
+    await new Promise(r => setTimeout(r, 30));
+    await settle();
+    expect(two.app.ui.fit).toBe(false);
+    expect(two.app.ui.span).toBe(fit.to - fit.from);
+    expect(timelineWindow(two.app.model, two.app.ui).from - fit.from).toBeCloseTo((fit.to - fit.from) * 0.1, -3);
+    expect(decodeView(location.hash).span).toBeGreaterThan(0);
+    two.app.stop();
   });
 });

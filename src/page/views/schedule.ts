@@ -1,6 +1,7 @@
 // Cronograma (spec §4.6.4). In 4b, the timeline and the analysis of the old Tracking view; Task 6 virtualizes its rows,
 // and 4c adds «Ajustar», the one forecast, the burndown against the version target and the aggregated zones.
-import { autoTicks, groupIds, layoutRows, NONE_GROUP, phaseLabel, phaseName, planRange, SPAN, windowAt, windowFor, type GroupBy, type Row, type Win, type Zoom } from '../../lib/timeline.js';
+import { autoTicks, fitWindow, groupIds, layoutRows, NONE_GROUP, phaseLabel, phaseName, planRange, SPAN, windowAt, windowFor, type GroupBy, type Row, type Win, type Zoom } from '../../lib/timeline.js';
+import { statusOf } from '../../lib/deps.js';
 import { burndown } from '../../lib/insights.js';
 import type { TaskStatus } from '../../lib/types.js';
 import type { Derived } from '../derive.js';
@@ -31,9 +32,29 @@ export function virtualRange(total: number, tl?: TlView): { start: number; end: 
 
 const ZOOMS: Zoom[] = ['6h', '1d', '3d', '1w', '1m'];
 
-/** The timeline window: free zoom and pan when set, else the zoom preset shifted by whole spans. */
-export function timelineWindow(ui: UiState, now: number): Win {
-  return ui.span ? windowAt(ui.span, now, ui.pan ?? 0) : windowFor(ui.zoom, now, ui.offset);
+/** The timeline window: free zoom and pan when set; else «Ajustar» while ui.fit (H-14); else the zoom preset shifted by
+ *  whole spans. */
+export function timelineWindow(m: Model, ui: UiState): Win {
+  if (ui.span) return windowAt(ui.span, m.now, ui.pan ?? 0);
+  if (ui.fit) return fitWindow(m.plan, m.states, m.now);
+  return windowFor(ui.zoom, m.now, ui.offset);
+}
+
+/** H-14: the phases in progress: some task taken or done, and some not done. */
+export function phasesInProgress(m: Model): string[] {
+  return m.plan.phases.filter(p => {
+    const ts = m.plan.tasks.filter(t => t.phase === p.id);
+    const done = ts.filter(t => statusOf(m.states, t.id) === 'done').length;
+    return ts.length > 0 && done < ts.length && ts.some(t => statusOf(m.states, t.id) !== 'free');
+  }).map(p => p.id);
+}
+
+/** H-14: the groups the schedule shows open: every one while searching; the phases in progress while ui.autoOpen (none in
+ *  other groupings); else the ones the person opened. */
+export function openGroups(m: Model, ui: UiState, groupBy: GroupBy): Set<string> {
+  if (ui.search.trim()) return new Set(groupIds(m.plan, m.states, groupBy));
+  if (ui.autoOpen) return new Set(groupBy === 'phase' ? phasesInProgress(m) : []);
+  return ui.expanded;
 }
 
 /** The schedule's groupings (app.ts checks a clicked or linked one against these). */
@@ -45,7 +66,7 @@ export const TL_LAYERS = ['critical', 'forecast', 'forge'] as const;
 function timelineRows(m: Model, d: Dict, ui: UiState, win: Win): { rows: Row[]; groupBy: GroupBy; expanded: Set<string> } {
   const q = ui.search.trim().toLowerCase();
   const groupBy: GroupBy = GROUPS.includes(ui.timelineGroup) ? ui.timelineGroup : 'phase';
-  const expanded = q ? new Set(groupIds(m.plan, m.states, groupBy)) : ui.expanded;
+  const expanded = openGroups(m, ui, groupBy);
   // 'in_progress' in the filter also covers claimed tasks.
   const statuses = ui.statuses?.length ? ui.statuses.flatMap(x => (x === 'in_progress' ? ['in_progress', 'claimed'] : x === 'blocked' ? ['blocked', 'orphaned'] : [x])) : undefined;
   const rows = layoutRows(m.plan, m.states, m.now, win, expanded, { groupBy, statuses, unassigned: d.tl.unassigned, uncategorized: d.tl.uncategorized })
@@ -83,7 +104,7 @@ function forgeBadge(m: Model, d: Dict, id: string): string {
 }
 
 function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived): string {
-  const win = timelineWindow(ui, m.now);
+  const win = timelineWindow(m, ui);
   const { rows, groupBy, expanded } = timelineRows(m, d, ui, win);
   const deps = (id: string) => m.plan.tasks.find(t => t.id === id)?.depends_on ?? [];
   // H-06: past VIRTUAL_FROM rows only those around the viewport are painted, between two spacers of the height of the rest.
@@ -104,7 +125,9 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
   const nowLeft = pos(m.now);
   const span = win.to - win.from;
   const withDate = span > 30 * 3600000;
-  const preset = ZOOMS.find(z => (ui.span ? Math.abs(SPAN[z] - ui.span) < 1 : z === ui.zoom));
+  // H-14: «Ajustar» is the pressed preset while the window fits the plan.
+  const fitted = !!ui.fit && !ui.span;
+  const preset = fitted ? undefined : ZOOMS.find(z => (ui.span ? Math.abs(SPAN[z] - ui.span) < 1 : z === ui.zoom));
   const tz = new Date(m.now).getTimezoneOffset();
   const layers = new Set(ui.layers ?? []);
   const filter = new Set(ui.statuses ?? []);
@@ -168,8 +191,8 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
     <div class="tools">
       <div class="chips" data-scroll-key="chips:status"><span class="lbl">${esc(d.tl.show)}</span>${TL_STATUSES.map(k => chip('status', k, statusLabel(k), filter.has(k))).join('')}</div>
       <div class="chips" data-scroll-key="chips:layers"><span class="lbl">${esc(d.tl.layers)}</span>${TL_LAYERS.map(k => chip('layer', k, layerLabel(k), layers.has(k))).join('')}</div>
-      <div class="zoom" data-scroll-key="zoom">${ZOOMS.map(z => `<button data-action="zoom" data-zoom="${z}" class="${z === preset ? 'on' : ''}">${esc(d.zoom[z])}</button>`).join('')}
-        <button data-action="fit">${esc(d.tl.fit)}</button>
+      <div class="zoom" data-scroll-key="zoom">${ZOOMS.map(z => `<button type="button" data-action="zoom" data-zoom="${z}" class="${z === preset ? 'on' : ''}" aria-pressed="${z === preset}">${esc(d.zoom[z])}</button>`).join('')}
+        <button type="button" data-action="fit" class="${fitted ? 'on' : ''}" aria-pressed="${fitted}">${esc(d.tl.fit)}</button>
         <button data-action="shift" data-dir="-1" aria-label="‹">‹</button><button data-action="shift" data-dir="0">${esc(d.now)}</button><button data-action="shift" data-dir="1" aria-label="›">›</button>
         <button data-action="export" data-format="svg" class="xp" title="${esc(d.tl.export)} SVG">⤓ SVG</button><button data-action="export" data-format="png" class="xp" title="${esc(d.tl.export)} PNG">⤓ PNG</button></div>
     </div>
@@ -271,7 +294,7 @@ function renderInsights(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
 export function timelineSvg(m: Model, ui: UiState): string {
   const d = dictFor(m.meta?.locale);
   const loc = m.meta?.locale ?? 'en';
-  const win = timelineWindow(ui, m.now);
+  const win = timelineWindow(m, ui);
   const { rows, groupBy } = timelineRows(m, d, ui, win);
   const W = 1600;
   const LW = 360;

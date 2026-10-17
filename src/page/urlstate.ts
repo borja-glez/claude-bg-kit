@@ -27,8 +27,10 @@ export function encodeView(v: ViewState): string {
   if (v.view === 'schedule') {
     if (v.group && v.group !== 'phase') p.set('g', v.group);
     if (v.span) { p.set('s', String(Math.round(v.span / 60000))); if (v.pan) p.set('p', String(Math.round(v.pan / 60000))); }
-    else if (v.zoom && v.zoom !== '1d') p.set('z', v.zoom);
-    if (v.open?.length) p.set('o', v.open.join(','));
+    // H-14: without a span or a zoom the schedule fits the plan, its default; so a preset is always written, 1d too.
+    else if (v.zoom) p.set('z', v.zoom);
+    // Without open groups it opens the phases in progress; an empty list (o=) says the person closed them all.
+    if (v.open) p.set('o', v.open.join(','));
     if (v.status?.length) p.set('f', v.status.join(','));
     if (v.q) p.set('q', v.q.slice(0, 100));
     if (v.layers?.length) p.set('l', v.layers.join(','));
@@ -63,7 +65,7 @@ export function decodeView(hash: string): ViewState {
   // Review M5: a hand-edited span stays within the zoom limits and a pan within ten years either way.
   const s = int(p.get('s'));
   if (s && s > 0) { out.span = clampSpan(s * 60000); const pan = int(p.get('p')); if (pan !== undefined) out.pan = clampPan(pan * 60000); }
-  out.open = list(p.get('o'));
+  out.open = p.has('o') ? list(p.get('o')) ?? [] : undefined;
   out.status = list(p.get('f'), 10);
   const q = p.get('q');
   if (q) out.q = q.slice(0, 100);

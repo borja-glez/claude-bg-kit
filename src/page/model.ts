@@ -74,6 +74,11 @@ export interface UiState {
   shot: number | null;
   /** The timeline window when zoomed or moved freely: its span and its pan from the default anchor, in ms. */
   span?: number; pan?: number;
+  /** H-14: the schedule fits the whole plan («Ajustar»), recomputed at each render, until the person picks a preset, zooms
+   *  or pans. On when the page starts. */
+  fit?: boolean;
+  /** H-14: the schedule's open groups are the phases in progress until the person opens or closes one. On at the start. */
+  autoOpen?: boolean;
   /** Timeline status filter (empty: all) and layers drawn over it. */
   statuses?: string[]; layers?: string[];
   /** The scope of the burndown: a version id, a phase id, or empty for the whole plan. */

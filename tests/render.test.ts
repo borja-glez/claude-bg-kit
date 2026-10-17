@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 import { parsePlan } from '../src/lib/plan.js';
 import { buildDocs } from '../src/lib/sync.js';
 import { dictFor } from '../src/page/i18n.js';
-import { esc, relText, renderApp, timelineSvg, VIEWS, type Model, type UiState } from '../src/page/render.js';
+import { esc, openGroups, phasesInProgress, relText, renderApp, timelineSvg, timelineWindow, VIEWS, type Model, type UiState } from '../src/page/render.js';
+import { fitWindow } from '../src/lib/timeline.js';
 import type { MessageDoc, EventType, NoteDoc, PlanTrack, TaskStatus } from '../src/lib/types.js';
 import { proposalDigest, type ApprovalDoc, type ProposalDoc } from '../src/lib/proposals.js';
 import { unmarked, unmarkedReason } from '../src/page/html.js';
@@ -1709,5 +1710,32 @@ describe('the one forecast end (G-12)', () => {
     expect(html).not.toContain('class="fc"');
     expect(html).not.toContain('class="fct"');
     expect(html).not.toContain('NaN');
+  });
+});
+
+describe('the schedule fitted, with the phases in progress open (H-14)', () => {
+  it('fitted, the window holds the whole plan and «Ajustar» is the pressed preset; the phases in progress are open', () => {
+    const m = base();
+    const html = renderApp(m, ui({ view: 'schedule', fit: true, autoOpen: true }));
+    expect(timelineWindow(m, ui({ fit: true }))).toEqual(fitWindow(m.plan, m.states, NOW));
+    expect(html).toContain('<button type="button" data-action="fit" class="on" aria-pressed="true">');
+    expect(html).not.toMatch(/data-action="zoom" data-zoom="\w+" class="on"/);
+    expect(html).toContain('data-id="F1" data-k="p:F1" aria-expanded="true"');
+    expect(html).toContain('data-id="F2" data-k="p:F2" aria-expanded="false"');
+    expect(html).toContain('data-k="t:T002"');
+    expect(html).not.toContain('data-k="t:T004"');
+  });
+  it('a preset of the person wins over the fit, and the groups they opened over the phases in progress', () => {
+    const html = renderApp(base(), ui({ view: 'schedule', fit: false, zoom: '1w', autoOpen: false, expanded: new Set(['F2']) }));
+    expect(html).toContain('<button type="button" data-action="zoom" data-zoom="1w" class="on" aria-pressed="true">');
+    expect(html).toContain('<button type="button" data-action="fit" class="" aria-pressed="false">');
+    expect(html).toContain('data-id="F1" data-k="p:F1" aria-expanded="false"');
+    expect(html).toContain('data-k="t:T004"');
+  });
+  it('the phases in progress open only grouping by phase, and searching opens every group', () => {
+    expect(phasesInProgress(base())).toEqual(['F1']);
+    expect([...openGroups(base(), ui({ autoOpen: true, timelineGroup: 'track' }), 'track')]).toEqual([]);
+    expect([...openGroups(base(), ui({ autoOpen: true, search: 'x' }), 'phase')]).toEqual(['F1', 'F2']);
+    expect(phasesInProgress({ ...base(), states: {} })).toEqual([]);
   });
 });

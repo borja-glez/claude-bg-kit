@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parsePlan } from '../src/lib/plan.js';
-import { autoTicks, clampPan, clipBar, layoutRows, MAX_PAN, MIN_SPAN, phaseLabel, phaseName, planRange, stepFor, taskSpan, ticks, windowAt, windowFor, zoomAround } from '../src/lib/timeline.js';
+import { autoTicks, clampPan, clipBar, fitWindow, layoutRows, MAX_PAN, MIN_SPAN, phaseLabel, phaseName, planRange, stepFor, taskSpan, ticks, windowAt, windowFor, zoomAround } from '../src/lib/timeline.js';
 import type { States } from '../src/lib/types.js';
 
 const plan = parsePlan(readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8'));
@@ -147,5 +147,15 @@ describe('phaseName and phaseLabel (G-21)', () => {
   it('the timeline groups by phase with that label', () => {
     const p = { ...plan, phases: plan.phases.map(x => ({ ...x, name: `${x.id} · ${x.name}` })) };
     expect(layoutRows(p, {}, NOW, windowFor('1d', NOW), new Set()).filter(r => r.kind === 'phase').map(r => r.label)).toEqual(['F1 · Base', 'F2 · Checkout']);
+  });
+});
+
+describe('fitWindow (H-14)', () => {
+  it('is the window that holds the whole plan, within the zoom limits', () => {
+    const s: States = { T001: { status: 'done', startedAt: '2026-10-11T08:00:00Z', doneAt: '2026-10-11T09:00:00Z' } };
+    expect(fitWindow(plan, s, NOW)).toEqual(planRange(plan, s, NOW));
+    const tiny = { ...plan, tasks: [] };
+    const w = fitWindow(tiny, {}, NOW);
+    expect(w.to - w.from).toBe(MIN_SPAN);
   });
 });

@@ -216,3 +216,10 @@ export function planRange(plan: PlanView, states: States, now: number): Win {
   const pad = Math.max((to - from) * 0.06, 15 * 60000);
   return { from: from - pad, to: to + pad };
 }
+
+/** H-14: «Ajustar»: the window that holds the whole plan (planRange), within the zoom limits. */
+export function fitWindow(plan: PlanView, states: States, now: number): Win {
+  const r = planRange(plan, states, now);
+  const span = clampSpan(r.to - r.from);
+  return windowAt(span, now, panFor(r.from, span, now));
+}
