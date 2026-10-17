@@ -21,6 +21,20 @@ export function roadmapCapabilities(assets: boolean): Record<string, unknown> {
   };
 }
 
+/**
+ * §4.1, final review I5: the rules a publish with these capabilities gives the roadmap. PAGE_RULES only when they hold the
+ * owner's rule on approvals, `{path: 'approvals', read: 'view', write: 'owner'}`; 1 otherwise (approvals/ then inherits
+ * the root rule, which editors meet, so no mark is the owner's). A second, different rule on approvals makes it 1 too.
+ * `capabilities` is what the skill passed to the publish.
+ */
+export function rulesOf(capabilities: unknown): number {
+  const field = (x: unknown, key: string): unknown => (x && typeof x === 'object' && !Array.isArray(x) ? (x as Record<string, unknown>)[key] : undefined);
+  const rules = field(field(capabilities, 'db'), 'rules');
+  const onApprovals = Array.isArray(rules) ? rules.filter(r => field(r, 'path') === 'approvals') : [];
+  const owner = onApprovals.length > 0 && onApprovals.every(r => field(r, 'read') === 'view' && field(r, 'write') === 'owner');
+  return owner ? PAGE_RULES : 1;
+}
+
 const isEs = (locale: string | undefined) => (locale ?? '').toLowerCase().split(/[-_]/)[0] === 'es';
 
 /** The one-time notice that `assets` makes the roadmap internal: only for a first publication that declares it. */

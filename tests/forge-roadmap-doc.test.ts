@@ -330,6 +330,15 @@ describe('FORGE roadmap-doc (G-03, G-06)', () => {
     check();
     expect(out(cli('roadmap-doc', 'T1')).project).toBe('web');
   });
+  it('a task past its review cap (r5/4) still publishes: exit 0, with round 5, cap 4 and overCap (final review I1)', () => {
+    const over: LedgerEvent[] = [5, 6, 7].map(n => ({ ts: ROADMAP_AT(46 + n), kind: 'verdict', task: 'T1-1', project: 'shop', dir: `${WORK}/reviews-1-${n}`,
+      action: 'fix', score: 0.4, signature: `o${n}`, critical: 1, important: 0, minor: 0, deferred: 0, reviews: { n: n - 2, max: 4 } }));
+    for (const e of over) appendEvent(root, e);
+    const r = cli('roadmap-doc', 'T1', '--project', 'shop');
+    expect(r.code, r.stderr).toBe(0);
+    expect(data().forge).toMatchObject({ round: 5, cap: 4, overCap: true });
+    expect(parseForgeDocV2(data().forge)).toEqual(data().forge);
+  });
   it('never reads the earlier-* folders prep sets aside', () => {
     const old = path.join(root, WORK, 'earlier-r0', 'reviews-1-9');
     mkdirSync(old, { recursive: true });

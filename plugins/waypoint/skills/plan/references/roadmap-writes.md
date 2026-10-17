@@ -1,6 +1,6 @@
 # Roadmap writes that the waypoint CLI prints
 
-The waypoint skills that send CLI writes follow this page, and it is the only place the pin rule is stated. The CLI builds each write and prints it (`waypoint done` prints `batch` and `metrics`, `page --publish-info` prints `write` for `meta/page`, `sync --db` prints `batches`); the skill only sends it.
+The waypoint skills that send CLI writes follow this page, and it is the only place the pin rule is stated. The CLI builds each write and prints it (`waypoint done` prints `batch` and `metrics`, `page --publish-info --capabilities F` prints `write` for `meta/page`, `sync --db` prints `batches`); the skill only sends it.
 
 **Pin rule.** ArtifactData refuses a write to an existing document without `if_version`, accepts a document at most once per batch, and returns the new versions of every `set`, `update` and `batch`.
 - Pin every write to an existing document to the NEWEST version you hold for it: the version returned by your own last write to it, otherwise the listed one.

@@ -151,13 +151,13 @@ describe('parseForgeDocV2: hostile input never throws, and coercions are reporte
     expect(p.integration).toBeNull();
     expect(got).toEqual(['forge.verify · coerced', 'forge.integration · coerced', 'forge.agent · coerced', 'forge.verdict · coerced', 'forge.round · coerced', 'forge.cap · coerced']);
   });
-  it('a round above the cap is dropped and reported as coerced', () => {
+  it('a round above the cap is a real state (r5/4): kept, the block marked overCap, and nothing reported', () => {
     const got: string[] = [];
-    const p = parseForgeDocV2(doc({ round: 9, cap: 2 }), (f, a) => { got.push(`${f} · ${a}`); })!;
-    expect(p).not.toHaveProperty('round');
-    expect(p.cap).toBe(2);
-    expect(got).toEqual(['forge.round · coerced']);
-    expect(parseForgeDocV2(doc({ round: 2, cap: 2 }))).toMatchObject({ round: 2, cap: 2 });
+    const p = parseForgeDocV2(doc({ round: 5, cap: 4, overCap: false }), (f, a) => { got.push(`${f} · ${a}`); })!;
+    expect(p).toMatchObject({ round: 5, cap: 4, overCap: true });
+    expect(got).toEqual([]);
+    expect(parseForgeDocV2(doc({ round: 5, cap: 4, overCap: true }))).toMatchObject({ round: 5, cap: 4, overCap: true });
+    expect(parseForgeDocV2(doc({ round: 2, cap: 2 }))).toMatchObject({ round: 2, cap: 2, overCap: false });
   });
   it('a clip never splits a surrogate pair', () => {
     const face = String.fromCodePoint(0x1f600);

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import path from 'node:path';
 import { UsageError } from './errors.js';
 import type { Io } from './run.js';
-import { checkPlanProject, commitInfo } from './swarm.js';
+import { checkPlanProject, commitInfo, integratedPublish } from './swarm.js';
 import { readExecution, executionTaskFile, runWorktree, taskBase, writePublicTask } from '../execution.js';
 import { takeStepLock } from '../jobs.js';
 import { appendEvent, readEvents, withEventContext, type LedgerEvent } from '../ledger.js';
@@ -589,7 +589,9 @@ function integratedAgain(c: Ctx, task: string, t: ExecTask): void {
     .map(l => l.trim().split('\t')).find(([, subject]) => subject === `forge: integrate ${task}`)?.[0];
   const sha = (tip ? merges.find(p => p.slice(2).includes(tip))?.[0] : undefined) ?? titled();
   if (!sha) return;
-  c.actions.push({ type: 'integrated', task, sha, commit: commitInfo(git, sha), again: true });
+  // The same publish and metrics as the integrate that was lost (I3): the skill never composes the done state itself.
+  const commit = commitInfo(git, sha);
+  c.actions.push({ type: 'integrated', task, sha, commit, again: true, ...integratedPublish(c.io, c.project, task, t, commit, t.finishedAt ?? c.iso()) });
 }
 
 /**

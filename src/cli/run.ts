@@ -19,7 +19,7 @@ import { BRANCH_RE, mainWorktreeFrom, samePath } from '../lib/worktree.js';
 import { excludeWorktrees } from '../lib/git-info.js';
 import { isCommitCommand, runHook } from './hooks.js';
 import { launchRun, EFFORTS, MODELS, type Launcher, type Effort, type Model } from '../lib/launcher.js';
-import { PAGE_RULES, roadmapCapabilities, sharingNotice, syncSummary } from '../lib/publish.js';
+import { PAGE_RULES, roadmapCapabilities, rulesOf, sharingNotice, syncSummary } from '../lib/publish.js';
 import { compareVersions, WAYPOINT_VERSION } from '../lib/waypoint-version.js';
 import { TASK_STATUSES } from '../lib/types.js';
 import { claudeSessionId, noClaudeSession } from '../lib/claude-session.js';
@@ -125,6 +125,15 @@ export function run(argv: string[], io: Io): Result {
         return ok(planHash(loadPlan()));
       case 'page': {
         const p = loadPlan();
+        // Final review I5: meta/page's rules are those of the capabilities actually published, the file the skill passed to
+        // the Artifact publish; read (and refused) before the page is built.
+        let published: unknown;
+        if (args.includes('--publish-info')) {
+          const capsArg = flag('capabilities');
+          if (!capsArg || capsArg.startsWith('--')) return fail('page: --publish-info needs --capabilities <file>, the capabilities JSON passed to the Artifact publish', 2);
+          try { published = JSON.parse(readFileSync(abs(capsArg), 'utf8')); } catch { return fail(`page: cannot read --capabilities ${capsArg} as JSON`, 2); }
+          if (!published || typeof published !== 'object' || Array.isArray(published)) return fail(`page: --capabilities ${capsArg} must be a JSON object`, 2);
+        }
         const out = abs(flag('out') ?? '.waypoint/roadmap.html');
         const now = io.now().toISOString();
         // G-13, G-14: the snapshot says which waypoint built the page and, with --states, the states the last listing saw
@@ -140,10 +149,12 @@ export function run(argv: string[], io: Io): Result {
         if (!args.includes('--publish-info')) return ok(out);
         const internal = evidenceUploaded(io.cwd);
         // G-13, §4.1: meta/page, the version and the rules of what is published (sync --db compares it; infinite reads rules).
+        // `capabilities` is what this checkout should publish; `rules`, what the published file grants (rulesOf).
         // `roadmap` is the plan's project, the id known before the first publish: the approvals warning keys on it.
+        const rules = rulesOf(published);
         return ok(JSON.stringify({
-          out, capabilities: roadmapCapabilities(internal), internal, say: sharingNotice(p, internal), pageVersion: WAYPOINT_VERSION, rules: PAGE_RULES,
-          write: { op: 'set', collection: 'meta', doc_id: 'page', data: { version: WAYPOINT_VERSION, rules: PAGE_RULES, roadmap: p.project, publishedAt: now } },
+          out, capabilities: roadmapCapabilities(internal), internal, say: sharingNotice(p, internal), pageVersion: WAYPOINT_VERSION, rules,
+          write: { op: 'set', collection: 'meta', doc_id: 'page', data: { version: WAYPOINT_VERSION, rules, roadmap: p.project, publishedAt: now } },
         }));
       }
       case 'sync': {

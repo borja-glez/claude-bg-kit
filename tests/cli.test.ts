@@ -11,6 +11,7 @@ import { launchRun, HERDR_TEMPLATE } from '../src/lib/launcher.js';
 import { buildDocs, planHash } from '../src/lib/sync.js';
 import { parseDesign } from '../src/lib/design.js';
 import { PAGE_RULES } from '../src/lib/publish.js';
+import { run as forgeRun } from '../src/forge/cli/run.js';
 
 const FIXTURE = new URL('./fixtures/plan.yaml', import.meta.url);
 let dir: string;
@@ -1714,8 +1715,10 @@ describe('page --publish-info and the sync line', () => {
     const p = path.join(dir, 'plan.yaml');
     writeFileSync(p, readFileSync(p, 'utf8').replace(/^(locale: \w+\n)/m, `$1artifacts:\n  roadmap: ${url}\n`));
   };
-  const info = () => JSON.parse(run(['page', 'plan.yaml', '--out', 'r.html', '--publish-info'], io).stdout);
   const caps = { db: { rules: [{ path: '', read: 'view', write: 'admin' }, { path: 'notes', read: 'view', write: 'interact' }, { path: 'proposals', read: 'view', write: 'interact' }, { path: 'approvals', read: 'view', write: 'owner' }] }, user: { scopes: ['profile'] }, downloads: true };
+  // The capabilities the skill passed to the Artifact publish, in the file it hands --publish-info (final review I5).
+  const capsFile = (value: unknown = caps) => { writeFileSync(path.join(dir, 'caps.json'), JSON.stringify(value)); return 'caps.json'; };
+  const info = () => JSON.parse(run(['page', 'plan.yaml', '--out', 'r.html', '--publish-info', '--capabilities', capsFile()], io).stdout);
   const WP = (JSON.parse(readFileSync(path.join(process.cwd(), 'plugins', 'waypoint', '.claude-plugin', 'plugin.json'), 'utf8')) as { version: string }).version;
   // meta/page carries the roadmap id (the plan's project: known before the first publish) so the approvals warning keys on it
   const pageInfo = () => ({ pageVersion: WP, rules: PAGE_RULES, write: { op: 'set', collection: 'meta', doc_id: 'page', data: { version: WP, rules: PAGE_RULES, roadmap: 'demo-shop', publishedAt: io.now().toISOString() } } });
@@ -1741,6 +1744,44 @@ describe('page --publish-info and the sync line', () => {
   });
   it('without the flag page prints the bare path as before', () => {
     expect(run(['page', 'plan.yaml', '--out', 'r.html'], io).stdout).toBe(`${path.join(dir, 'r.html')}\n`);
+  });
+  it('--publish-info needs the capabilities file that was published: none, unreadable or not an object is exit 2 and builds nothing', () => {
+    const bare = run(['page', 'plan.yaml', '--out', 'r.html', '--publish-info'], io);
+    expect(bare.code).toBe(2);
+    expect(bare.stderr).toContain('--capabilities');
+    expect(run(['page', 'plan.yaml', '--out', 'r.html', '--publish-info', '--capabilities', 'nope.json'], io).code).toBe(2);
+    expect(run(['page', 'plan.yaml', '--out', 'r.html', '--publish-info', '--capabilities', capsFile([caps])], io).code).toBe(2);
+    expect(existsSync(path.join(dir, 'r.html'))).toBe(false);
+  });
+  it('rules states what the published capabilities grant: PAGE_RULES only with the owner rule on approvals, else 1 (final review I5)', () => {
+    const page = (value: unknown) => JSON.parse(run(['page', 'plan.yaml', '--out', 'r.html', '--publish-info', '--capabilities', capsFile(value)], io).stdout);
+    expect(page(caps)).toMatchObject({ rules: PAGE_RULES, write: { data: { rules: PAGE_RULES } } });
+    const without = { ...caps, db: { rules: caps.db.rules.filter(r => r.path !== 'approvals') } };
+    const admin = { ...caps, db: { rules: caps.db.rules.map(r => (r.path === 'approvals' ? { ...r, write: 'admin' } : r)) } };
+    for (const value of [without, admin, {}, { db: { rules: 'x' } }]) {
+      const p = page(value);
+      expect(p.rules, JSON.stringify(value)).toBe(1);
+      expect(p.write.data.rules).toBe(1);
+      // What this checkout should publish is still printed, owner rule included.
+      expect(p.capabilities).toEqual(caps);
+    }
+  });
+  it('a meta/page from a publish without the owner rule: forge trusts no approval, and sync keeps asking to republish (final review I5)', () => {
+    const noOwner = { ...caps, db: { rules: caps.db.rules.filter(r => r.path !== 'approvals') } };
+    const { write } = JSON.parse(run(['page', 'plan.yaml', '--out', 'r.html', '--publish-info', '--capabilities', capsFile(noOwner)], io).stdout);
+    for (const c of ['meta', 'proposals', 'approvals']) mkdirSync(path.join(dir, 'db', c), { recursive: true });
+    writeFileSync(path.join(dir, 'db', 'meta', 'page.json'), JSON.stringify(write.data));
+    const pid = 'p20261011100000aaaa';
+    writeFileSync(path.join(dir, 'db', 'approvals', `${pid}.json`), JSON.stringify({ status: 'approved', decidedAt: 'T', by: 'page', digest: 'a'.repeat(64) }));
+    const pulled = forgeRun(['proposals', 'pull', '--dir', 'db/proposals', '--approvals', 'db/approvals', '--page', 'db/meta/page.json'], { cwd: dir, now: io.now, env: {} });
+    expect(JSON.parse(pulled.stdout)).toMatchObject({ approvals: 0, rules: 1, ownerRule: false });
+    expect(JSON.parse(run(['sync', 'plan.yaml', '--out', '.waypoint/sync', '--db', 'db'], { ...io, env: {} }).stdout).republish).toBe(true);
+    // Republished with the owner rule: the same steps trust the marks and sync stops asking.
+    const again = JSON.parse(run(['page', 'plan.yaml', '--out', 'r.html', '--publish-info', '--capabilities', capsFile(caps)], io).stdout);
+    writeFileSync(path.join(dir, 'db', 'meta', 'page.json'), JSON.stringify(again.write.data));
+    expect(JSON.parse(forgeRun(['proposals', 'pull', '--dir', 'db/proposals', '--approvals', 'db/approvals', '--page', 'db/meta/page.json'], { cwd: dir, now: io.now, env: {} }).stdout))
+      .toMatchObject({ approvals: 1, rules: PAGE_RULES, ownerRule: true });
+    expect(JSON.parse(run(['sync', 'plan.yaml', '--out', '.waypoint/sync', '--db', 'db'], { ...io, env: {} }).stdout).republish).toBe(false);
   });
   it('sync says the roadmap url and the counts in the plan language, null without a roadmap', () => {
     const say = () => JSON.parse(run(['sync', 'plan.yaml', '--out', '.waypoint/sync'], io).stdout).say;

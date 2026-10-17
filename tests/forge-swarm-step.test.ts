@@ -567,6 +567,20 @@ describe('swarm step: robustness (M1, M2, M7, M9)', () => {
     writeFileSync(path.join(root, 'db', 'state', 'T1.json'), JSON.stringify({ status: 'done', version: 4 }));
     expect(step().actions.filter(a => a.task === 'T1')).toEqual([]);
   });
+  it('the integrated action again carries the publish and the metrics of a normal integrate: the task done with its commit (final review I3)', () => {
+    step();
+    commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');
+    out(run(['swarm', 'task', 'T1', '--stage', 'verdict', '--status', 'accepted', '--no-agent'], io));
+    const first = step().actions.find(a => a.type === 'integrated')!;
+    const finishedAt = readExecution(root)!.tasks.T1.finishedAt;
+    writeFileSync(path.join(root, 'db', 'state', 'T1.json'), JSON.stringify({ status: 'in_progress', version: 3 }));
+    const again = step().actions.find(a => a.task === 'T1')!;
+    expect(again).toMatchObject({ type: 'integrated', again: true, publish: { op: 'update', collection: 'state', doc_id: 'T1' },
+      metrics: { op: 'update', collection: 'meta', doc_id: 'metrics', data: { lastCommit: { sha: (first.commit as { sha: string }).sha } } } });
+    expect(again.metrics).toEqual(first.metrics);
+    const data = JSON.parse(readFileSync((again.publish as { file_path: string }).file_path, 'utf8'));
+    expect(data).toMatchObject({ status: 'done', doneAt: finishedAt, commits: [first.commit], forge: { v: 2, stage: 'done' }, exec: { __delete__: true } });
+  });
   it('finds an integration by its exact title when the task branch moved since: T1 is never T10\'s merge (M2)', () => {
     step();
     commitIn(wt('T1'), 'src/t1/a.ts', 'x\n', 'T1: a');

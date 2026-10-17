@@ -178,8 +178,9 @@ export function parseForgeDocV2(x: unknown, report?: DocReport): ForgeDocV2 | nu
   else if (x.round !== undefined) coerced('round', x.round);
   if (int(x.cap, 1, 99)) doc.cap = x.cap;
   else if (x.cap !== undefined) coerced('cap', x.cap);
-  // round is reviews.n and cap is reviews.max: a round above its cap is a producer bug, and the round is the one that goes.
-  if (doc.round !== undefined && doc.cap !== undefined && doc.round > doc.cap) { delete doc.round; report?.('forge.round', 'coerced', 'above cap'); }
+  // round is reviews.n and cap is reviews.max: a review past the cap is a real state (a fifth review of a Medium after the
+  // breaker, r5/4), which the block says with overCap. The round stays, and nothing is reported.
+  if (doc.round !== undefined && doc.cap !== undefined && doc.round > doc.cap) doc.overCap = true;
   return doc;
 }
 

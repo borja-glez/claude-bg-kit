@@ -435,8 +435,7 @@ describe('plugin layout', () => {
   it('plan skill publishes the roadmap with notes and proposals write rules for contributors', () => {
     const md = read('plugins/waypoint/skills/plan/SKILL.md');
     expect(md).toContain('{"db": {"rules": [{"path": "", "read": "view", "write": "admin"}, {"path": "notes", "read": "view", "write": "interact"}, {"path": "proposals", "read": "view", "write": "interact"}, {"path": "approvals", "read": "view", "write": "owner"}]}, "user": {"scopes": ["profile"]}, "downloads": true, "assets": {}}');
-    expect(md).toContain('waypoint 0.9.4 or earlier');
-    expect(md).toContain('0.7.x or earlier');
+    // Every publish passes these (final review I5), so a roadmap of any earlier waypoint gets every rule on its republish.
   });
   it('design-critic agent has frontmatter', () => {
     const md = read('plugins/waypoint/agents/design-critic.md');
@@ -954,6 +953,20 @@ describe('plugin layout', () => {
     expect(batch).not.toContain('meta/project');
     const call = integ.slice(apartAt, integ.indexOf('Print its `say` lines'));
     for (const w of ['`metrics`', 'meta/metrics']) expect(call, w).toContain(w);
+    // Final review I4: under swarm step the same rule, never the publish and the summary (both state/T) in one batch.
+    const stepped = runRef('step').split('\n').find(l => l.trimStart().startsWith('- `integrated`, `conflict`'))!;
+    expect(stepped).toContain('the summary in a call of its own pinned to the version that batch returned');
+    expect(stepped).not.toContain('the summary and the `done` event in one batch');
+    // Final review I3: the recovery action carries what it sends.
+    expect(stepped.slice(stepped.indexOf('`again: true`'))).toContain('same `publish` and `metrics`');
+  });
+  it('a merged run sends the publish swarm merge printed, so integration.merged reaches the roadmap (final review I2)', () => {
+    const merged = (text: string) => text.slice(text.indexOf('`merged`'), text.indexOf('`needs-authorization`') > text.indexOf('`merged`') ? text.indexOf('`needs-authorization`') : undefined);
+    const step7 = runRef('execution').split('\n').find(l => l.startsWith('7. **End.**'))!;
+    const finish = read('plugins/forge/skills/infinite/SKILL.md').split('\n').find(l => l.trimStart().startsWith('- `finish` or `stalled`'))!;
+    for (const [name, text] of [['execution step 7', merged(step7)], ['infinite finish', finish.slice(finish.indexOf('FORGE swarm merge'))]] as const) {
+      for (const w of ['`publish`', '`publishErrors`', 'roadmap-writes.md']) expect(text, `${name}: ${w}`).toContain(w);
+    }
   });
   it('design apply records what it applied with --applied, also across rounds (K3-12)', () => {
     const md = read('plugins/waypoint/skills/design/SKILL.md');
@@ -1486,6 +1499,18 @@ describe('plugin layout', () => {
     const plan = read('plugins/waypoint/skills/plan/SKILL.md');
     for (const w of ['`republish: true`', 'do this step without asking', '`write`']) expect(plan, w).toContain(w);
   });
+  it('waypoint:plan hands page --publish-info the capabilities file it publishes, every time (final review I5)', () => {
+    const plan = read('plugins/waypoint/skills/plan/SKILL.md');
+    const publish = plan.slice(plan.indexOf('## 3. Publish the roadmap page'), plan.indexOf('## 4. Sync the database'));
+    const step = (n: number) => publish.slice(publish.indexOf(`\n${n}. `), n < 3 ? publish.indexOf(`\n${n + 1}. `) : undefined);
+    expect(step(1)).toContain('--publish-info --capabilities .waypoint/<project>/capabilities.json');
+    for (const n of [2, 3]) expect(step(n), `step ${n}`).toContain('.waypoint/<project>/capabilities.json');
+    // A republish never keeps the old capabilities (meta/page would claim rules it does not have), and it decides nothing
+    // from a listing that only §4 makes.
+    expect(publish).not.toContain('omitting `capabilities`');
+    expect(publish).not.toContain('in §4)');
+    expect(publish).not.toMatch(/`rules` under \d/);
+  });
 
   it('READMEs describe wave 3a: the status per task, the task line, the tasks in progress and the classic hooks', () => {
     for (const f of ['plugins/forge/README.md', 'plugins/forge/README.es.md']) {
@@ -1522,7 +1547,7 @@ describe('plugin layout', () => {
     }
     for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) {
       const md = read(f);
-      for (const s of ['approvals/', '`owner`', 'meta/metrics', 'meta/page', 'sync [--db DIR]', 'page [--publish-info] [--states DIR]', 'validate [--design D]']) expect(md, `${f}: ${s}`).toContain(s);
+      for (const s of ['approvals/', '`owner`', 'meta/metrics', 'meta/page', 'sync [--db DIR]', 'page [--publish-info --capabilities F] [--states DIR]', 'validate [--design D]']) expect(md, `${f}: ${s}`).toContain(s);
     }
   });
 });

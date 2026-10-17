@@ -793,6 +793,19 @@ export function commitInfo(git: (args: string[]) => string | null, sha: string):
   return { sha, ts: Number.isFinite(t) ? new Date(t).toISOString() : '', title, add: num(/(\d+) insertion/), del: num(/(\d+) deletion/) };
 }
 
+type Commit = ReturnType<typeof commitInfo>;
+/**
+ * J-15, A-10: what a plan run's integration publishes, built here and by swarm step's recovery (an `integrated` again): the
+ * task's state/T write (done with its commit for a subagents task: a member's session already wrote its done) and the
+ * meta/metrics write, apart. `at` is when the task was integrated.
+ */
+export function integratedPublish(io: Io, project: string, task: string, t: ExecTask, commit: Commit, at: string) {
+  const done = t.executor === 'subagents' ? { status: 'done', doneAt: at, commits: [commit] } : undefined;
+  const pub = publishFor(io, task, { project, ...(done ? { extra: done } : {}) });
+  const metrics = { op: 'update' as const, collection: 'meta', doc_id: 'metrics', data: { lastCommit: { sha: commit.sha, ts: commit.ts }, updatedAt: at } };
+  return { ...pub, metrics };
+}
+
 /** The two `validate` events of an integration (C4): the run tip's baseline and the merged tree, both on the task, with
  *  the project of a plan run's task. */
 function logValidations(io: Io, task: string, v: Validations | undefined, project: string | null = null): void {
@@ -852,15 +865,12 @@ function integrate(rest: string[], io: Io, deps: SwarmDeps): Result {
   if (r.newValidators.length) {
     try { updateLocal(io.cwd, s => ({ ...s, known: [...new Set([...s.known, ...r.newValidators.map(v => v.name)])] })); } catch { /* a later triage announces them again */ }
   }
-  // J-15, A-10: the task's state/T write, built here (done with its commit for a subagents task: a member's session
-  // already wrote its done), and meta/metrics apart. The skill adds the summary and the done event.
+  // J-15, A-10: the task's state/T write and meta/metrics apart (integratedPublish). The skill adds the summary and the done event.
   const commit = commitInfo(target.git, r.sha);
-  const done = t.executor === 'subagents' ? { status: 'done', doneAt: at, commits: [commit] } : undefined;
-  const pub = e.kind === 'plan' ? publishFor(io, task, { project: e.project, ...(done ? { extra: done } : {}) }) : { publish: null };
-  const metrics = e.kind === 'plan' ? { op: 'update' as const, collection: 'meta', doc_id: 'metrics', data: { lastCommit: { sha: commit.sha, ts: commit.ts }, updatedAt: at } } : null;
+  const pub = e.kind === 'plan' ? integratedPublish(io, e.project, task, t, commit, at) : { publish: null, metrics: null };
   const say = integratedSay(es, e.branch, r.newValidators, r.preexisting);
   return out({
-    result: 'integrated', sha: r.sha, commit, ...pub, metrics, preexisting: r.preexisting, newValidators: r.newValidators, say,
+    result: 'integrated', sha: r.sha, commit, ...pub, preexisting: r.preexisting, newValidators: r.newValidators, say,
     ...(r.surfacesChanged.length ? { surfacesChanged: r.surfacesChanged } : {}), ...extras,
   });
 }
