@@ -17,6 +17,8 @@ export interface UsageState {
   activeMs: number;
   /** Set by mergeForRun when some session's file had no activeMs (written before it existed). */
   activePartial?: boolean;
+  /** E-07: the run's sum counted some session whole (an older lens, or a baseline that did not hold): a bound, not exact. */
+  runPartial?: boolean;
 }
 type StepUsage = {
   input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number; model?: string;

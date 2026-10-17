@@ -48,7 +48,7 @@ export function summarizeUsage(s: UsageState): UsageSummary {
   // E-08: the tracking gathered so far travels as cached context on each later step of the main loop.
   const reread = s.tracking.reread ?? 0;
   const rereadCost = reread && mainModel ? tokensCost(mainModel, { input: 0, output: 0, cacheRead: reread, cacheWrite: 0 }) : null;
-  const partial = entries.some(([, l]) => l.unpriced > 0);
+  const partial = entries.some(([, l]) => l.unpriced > 0) || s.runPartial === true;
   const costOf = (loops: UsageLoop[]): number | null => {
     if (loops.length && loops.every(l => l.unpriced > 0 && l.costUsd === 0)) return null;
     return loops.reduce((a, l) => a + l.costUsd, 0);

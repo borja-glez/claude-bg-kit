@@ -4,7 +4,8 @@ import { noneBand, type BandModel } from '../mod/model.js';
 import { buildPanelModel, bandKey, parseSddLedger, summarizeTodos, FORGE_RUN_MAX, FORGE_EXEC_MAX, FORGE_EXEC_FILE_MAX, FORGE_EXEC_TASKS_MAX, FORGE_LIVE_MAX, FORGE_STATUSES_READ, PROPOSAL_ID, statusRootOf, type Activity, type PanelModel } from './model.js';
 import { clip, join, listOpt, loadBandModel, mtime, nowMs, readOpt, MAX_DOCS, type Engine } from '../mod/files.js';
 import { normalizeStatus, statusKey } from '../lib/forge-status.js';
-import { JOB_FILE_MAX } from './activities.js';
+import { JOB_FILE_MAX, runRoleOf } from './activities.js';
+import { isSafeId } from '../lib/execution-state.js';
 import { DECISIONS_MAX } from '../lib/decisions.js';
 import { buildCards, cardAlt } from './cards.js';
 import { cardSvg, bandSvg } from './svg.js';
@@ -12,7 +13,7 @@ import { termCard, termBand, type TermUI } from './term.js';
 import { headline, ratio, usageBandText, PALETTE, SECTION_HUE, SECTION_ICON } from './view.js';
 import { freshFinished, pushFinished, withoutRunning, type FinishedAgent } from './finished.js';
 import { endTurn, labelLoop, newTurnClock, newUsage, startTurn, touchTurn, recordStep, recordTracking, trackingKind, compactUsage, type UsageState } from './usage.js';
-import { mainCheckoutFrom, mergeForRun, parseUsageFile, runStartedAt, seedUsage, toUsageFile, USAGE_FILE_MAX, USAGE_FILES_MAX, type RunSource, type UsageFile } from './usage-file.js';
+import { mainCheckoutFrom, mergeForRun, parseUsageFile, runStartedAt, seedUsage, toUsageFile, totalsOf, USAGE_FILE_MAX, USAGE_FILES_MAX, type RunBaseline, type RunSource, type UsageFile } from './usage-file.js';
 import { addOwnTask, endAgent, knownTasks, linkSpawn, ownTaskOf, pruneLinks, setTool, syncListed, type AgentLink, type ListedAgent } from './links.js';
 
 const panel = atom({ plugin: 'lens', key: 'panel' } as const, null as PanelModel | null);
@@ -411,6 +412,22 @@ let largeRunsCache: { key: string; at: number; runs: RunSource[] } | null = null
 let officialOwnUsd: number | null = null;
 // E-12: the cost of this session's own file seeded into the live state on a resume; /cost does not count it.
 let seededUsd = 0;
+// E-07: this session's totals the first time it saw the run it works for, kept in memory and in its usage file.
+let runBaseline: RunBaseline | null = null;
+
+// E-07: the run this session works for, as the band publishes it (C3: its coordinator or a member), else none.
+function runKeyNow(): string | null {
+  const id = roadmap.viewer?.runId;
+  return runRoleOf(roadmap) === 'owner' && isSafeId(id) ? id : null;
+}
+
+// E-07: the first time this session sees a run's key, its totals so far: that run counts only what comes after.
+function keepRunBaseline(): void {
+  const key = runKeyNow();
+  if (key === null || runBaseline?.runKey === key) return;
+  const t = totalsOf(usage.loops);
+  runBaseline = { runKey: key, costUsd: t.costUsd, tokens: t.tokens, activeMs: usage.activeMs };
+}
 
 const ownCostUsd = () => Object.values(usage.loops).reduce((a, l) => a + l.costUsd, 0);
 
@@ -420,6 +437,7 @@ function resetUsage(): void {
   officialUsd = null;
   officialOwnUsd = null;
   seededUsd = 0;
+  runBaseline = null;
   lastUsageWrite = 0;
   lastUsageSig = '';
   sessionId = null;
@@ -447,6 +465,7 @@ async function seedFromOwnFile($: Engine, startedAt: number): Promise<void> {
   if (file && Date.parse(file.startedAt) === startedAt && usage === target && usageStartedAt === startedAt) {
     seedUsage(usage, file);
     seededUsd = Object.values(file.loops).reduce((a, l) => a + l.costUsd, 0);
+    if (file.runBaseline) runBaseline = file.runBaseline;
   }
 }
 
@@ -472,7 +491,7 @@ const baseName = (path: string) => path.replace(/[\\/]+$/, '').split(/[\\/]/).po
 // What changes the file: the start, the steps and the tracking.
 function usageSig(): string {
   const steps = Object.values(usage.loops).reduce((a, l) => a + l.steps, 0);
-  return `${usage.startedAt}|${steps}|${usage.tracking.waypoint}|${usage.tracking.forge}|${usage.activeMs}`;
+  return `${usage.startedAt}|${steps}|${usage.tracking.waypoint}|${usage.tracking.forge}|${usage.activeMs}|${runKeyNow() ?? ''}`;
 }
 
 // Writes this session's usage file when the main checkout has .forge/ and the count changed: at most every 30 s
@@ -492,7 +511,8 @@ async function writeUsageFileNow($: Engine, force: boolean): Promise<void> {
     if (!(await listOpt($, forge)).length) return;
     lastUsageWrite = now;
     const label = roadmap.mode === 'work' && roadmap.track ? roadmap.track : baseName(where.root);
-    const text = JSON.stringify(toUsageFile(usage, { session: where.session, label, worktree: where.root, now, costUsd: officialUsd }));
+    keepRunBaseline();
+    const text = JSON.stringify(toUsageFile(usage, { session: where.session, label, worktree: where.root, now, costUsd: officialUsd, runKey: runKeyNow(), runBaseline }));
     if (text.length > USAGE_FILE_MAX) return;
     await $.fs.write(join(forge, 'usage', `${where.session}.json`), text);
     lastUsageSig = sig;
@@ -586,7 +606,7 @@ async function refreshUsage($: Engine, withRun: boolean): Promise<void> {
 function usageInput(): { session: UsageState; run: UsageState | null; officialUsd: number | null; officialOwnUsd: number | null } {
   let run: UsageState | null = null;
   try {
-    if (runInputs && sessionId !== null) run = mergeForRun(runInputs.files, { session: sessionId, state: usage }, runInputs.since);
+    if (runInputs && sessionId !== null) run = mergeForRun(runInputs.files, { session: sessionId, state: usage, baseline: runBaseline }, runInputs.since, runKeyNow());
   } catch { /* this session only */ }
   return { session: usage, run, officialUsd, officialOwnUsd };
 }
@@ -714,6 +734,7 @@ async function refreshPanel($: Engine): Promise<void> {
     if (paneUp) startPanelTimer($);
     // The roadmap section follows the waypoint project's files at the panel's pace.
     try { roadmap = await loadBandModel($); } catch { /* keep the last one */ }
+    keepRunBaseline();
     const now = await nowMs($);
     // E-06: who looks, so the panel knows whose tasks are its own; null when the engine cannot say.
     if (sessionId === null) {

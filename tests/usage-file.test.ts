@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { newUsage, recordStep, recordTracking, labelLoop, closeTurn } from '../src/lens/usage.js';
-import { toUsageFile, parseUsageFile, mainCheckoutFrom, runStartedAt, mergeForRun, seedUsage, USAGE_FILE_MAX } from '../src/lens/usage-file.js';
+import { toUsageFile, parseUsageFile, mainCheckoutFrom, runStartedAt, mergeForRun, seedUsage, USAGE_FILE_MAX, type UsageFile } from '../src/lens/usage-file.js';
+import { summarizeUsage } from '../src/lens/usage-summary.js';
 import { mainCheckoutFrom as libMainCheckoutFrom } from '../src/lib/worktree.js';
 
 const U = (i: number, o: number) => ({ input_tokens: i, output_tokens: o, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 });
@@ -152,5 +153,43 @@ describe('the re-read in the usage file (E-08)', () => {
     expect(mergeForRun([f], { session: 's1', state: live }, T0).tracking.reread).toBe(100);
     seedUsage(live, f);
     expect(live.tracking.reread).toBe(100);
+  });
+});
+
+describe('the run counts only its own sessions, each from its baseline (E-07)', () => {
+  const loops = { main: { kind: 'main', description: null, model: 'claude-opus-5-5', effort: null, steps: 2, input: 1000, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 10, unpriced: 0 } };
+  const file = (session: string, over: Record<string, unknown>) =>
+    parseUsageFile(JSON.stringify({ ...toUsageFile(newUsage(T0), meta(session, 5)), loops, activeMs: 5000, ...over }))!;
+  const own = { runKey: 'r1', costUsd: 0, tokens: 0, activeMs: 0 };
+  it('with a runKey a file of another run is left out, one of this run counts from its baseline, an older one counts whole and makes it partial', () => {
+    const mine = file('a', { runKey: 'r1', runBaseline: { runKey: 'r1', costUsd: 4, tokens: 400, activeMs: 1000 } });
+    const other = file('b', { runKey: 'r2', runBaseline: { runKey: 'r2', costUsd: 0, tokens: 0, activeMs: 0 } });
+    const { runKey: _k, runBaseline: _b, ...older } = file('c', {});
+    const sum = mergeForRun([mine, other, older as UsageFile], { session: 's1', state: newUsage(T0), baseline: own }, T0, 'r1');
+    expect(sum.loops['a/main'].input).toBeCloseTo(600);
+    expect(sum.loops['a/main'].costUsd).toBeCloseTo(6);
+    expect(sum.loops['b/main']).toBeUndefined();
+    expect(sum.loops['c/main']).toMatchObject({ input: 1000, costUsd: 10 });
+    expect(sum.activeMs).toBe(4000 + 5000);
+    expect(sum.runPartial).toBe(true);
+    expect(summarizeUsage(sum).partial).toBe(true);
+  });
+  it('a baseline above its totals, or one that is not a number, counts the file whole and partial; without a key nothing changes', () => {
+    const big = file('a', { runKey: 'r1', runBaseline: { runKey: 'r1', costUsd: 50, tokens: 400, activeMs: 0 } });
+    const junk = file('d', { runKey: 'r1', runBaseline: { runKey: 'r1', costUsd: 'x', tokens: 1, activeMs: 0 } });
+    const sum = mergeForRun([big, junk], { session: 's1', state: newUsage(T0), baseline: own }, T0, 'r1');
+    expect(sum.loops['a/main'].costUsd).toBe(10);
+    expect(sum.loops['d/main'].costUsd).toBe(10);
+    expect(sum.runPartial).toBe(true);
+    const plain = mergeForRun([big], { session: 's1', state: newUsage(T0) }, T0);
+    expect(plain.loops['a/main'].costUsd).toBe(10);
+    expect(plain.runPartial).toBeUndefined();
+  });
+  it('the usage file keeps its run key and baseline; an older one has neither', () => {
+    const f = toUsageFile(newUsage(T0), { ...meta('s1', 5), runKey: 'r1', runBaseline: { runKey: 'r1', costUsd: 1, tokens: 2, activeMs: 3 } });
+    expect(parseUsageFile(JSON.stringify(f))).toMatchObject({ runKey: 'r1', runBaseline: { runKey: 'r1', costUsd: 1, tokens: 2, activeMs: 3 } });
+    expect(toUsageFile(newUsage(T0), meta('s1', 5))).toMatchObject({ runKey: null, runBaseline: null });
+    const { runKey: _k, runBaseline: _b, ...older } = f;
+    expect(parseUsageFile(JSON.stringify(older))).not.toHaveProperty('runKey');
   });
 });
