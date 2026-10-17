@@ -965,10 +965,14 @@ export const register: Register = on => {
   });
 
   // E-08: after a compaction the tracking gathered so far is no longer in context: it is not re-read from then on. Only
-  // the main conversation's own compaction counts: a subagent's transcript holds no tracking, and a skip compacts nothing.
+  // a real compaction of the main conversation counts: a subagent's transcript holds no tracking, a skip compacts
+  // nothing, and a precompute installs nothing (R6).
   on('session.compact', async ($, e, next) => {
     const r = await next(e);
-    try { if (!e.agentId && !(r && typeof (r as { skip?: unknown }).skip === 'string')) compactUsage(usage); } catch { /* ignore */ }
+    try {
+      const skipped = !!r && typeof (r as { skip?: unknown }).skip === 'string';
+      if (!e.agentId && e.trigger !== 'precompute' && !skipped) compactUsage(usage);
+    } catch { /* ignore */ }
     return r;
   }).catch(($, e, next) => next(e));
 

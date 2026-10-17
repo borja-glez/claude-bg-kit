@@ -496,7 +496,7 @@ test('a session counts in its run only what it spent once its band names the run
   expect(u.session.costUsd).toBeLessThan(8.01);
 });
 
-test("a compaction of the main conversation stops the re-read of the tracking gathered before it; a subagent's does not (E-08)", async ($, on) => {
+test("a compaction of the main conversation stops the re-read of the tracking gathered before it; a subagent's, a precompute's or a skipped one does not (E-08, R6)", async ($, on) => {
   serveFiles(on, {});
   servePanes(on);
   const panel = panelWrites(on);
@@ -504,7 +504,9 @@ test("a compaction of the main conversation stops the re-read of the tracking ga
   serveSteps(on);
   on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: 'ok' } as never, text: 'x'.repeat(400) }));
   const summary = [{ role: 'user' as const, text: 'summary', toolUses: [] }];
-  on('session.compact', () => ({ messages: summary }));
+  const compacted = { messages: summary };
+  let answer: { messages: typeof summary } | { skip: string } = compacted;
+  on('session.compact', () => answer as never);
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
   await $.command.run(RUN);
   await $.tool.call({ tool: 'Bash', command: 'node waypoint.cjs status' } as never);
@@ -518,8 +520,16 @@ test("a compaction of the main conversation stops the re-read of the tracking ga
   expect(once).toBeGreaterThan(0);
   await $.session.compact({ trigger: 'auto', agentId: 'a1', messages: summary });
   expect(await stepThen(1)).toBe(once * 1.5);
+  // A precompute installs nothing: the tracking is still in context and still re-read.
+  await $.session.compact({ trigger: 'precompute', messages: summary });
+  expect(await stepThen(2)).toBe(once * 2);
+  // A skipped compaction leaves the conversation as it is.
+  answer = { skip: 'not now' };
   await $.session.compact({ trigger: 'manual', messages: summary });
-  expect(await stepThen(2)).toBe(once * 1.5);
+  expect(await stepThen(3)).toBe(once * 2.5);
+  answer = compacted;
+  await $.session.compact({ trigger: 'manual', messages: summary });
+  expect(await stepThen(4)).toBe(once * 2.5);
 });
 
 test('a band read before any run, the pane closed and nothing busy: a run that starts later is named in the next usage write (R2)', async ($, on) => {
