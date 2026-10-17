@@ -278,3 +278,29 @@ describe('route hooks by session (K1-09, K1-12, K1-13)', () => {
     expect(ctx(run(['hook', 'route-session'], io({ session_id: 'NEW', source: 'clear' })))).toContain('routed task fresh');
   });
 });
+
+describe('route-prompt reads every forge task of the session (K1-12 with C5)', () => {
+  it("a task of this session keeps the hint away although another session's task changed later and is the alias", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'forge-k112-'));
+    const cfg = mkdtempSync(path.join(tmpdir(), 'forge-k112-cfg-'));
+    const at = (min: number) => new Date(NOW.getTime() - min * 60_000).toISOString();
+    const status = (task: string, session: string, lastAt: string, doneAt: string | null = null) => ({
+      ts: lastAt, task, path: 'medium', phase: 'implement', agent: null, validators: [], verdict: null, round: null, cap: null, brief: 1,
+      accepted: [], verify: null, taskStartedAt: at(60), stageSince: lastAt, stages: {}, doneAt, lastAt, session, runId: null, project: null,
+      reviewers: [], reviews: null,
+    });
+    mkdirSync(path.join(dir, '.forge', 'status'), { recursive: true });
+    const put = (s: { task: string }) => writeFileSync(path.join(dir, '.forge', 'status', `${s.task}.json`), JSON.stringify(s));
+    put(status('T001', 'S1', at(30)));
+    const other = status('T002', 'S2', at(5));
+    put(other);
+    writeFileSync(path.join(dir, '.forge', 'status.json'), JSON.stringify(other));
+    const prompt = (session: string) => run(['hook', 'route-prompt'], {
+      cwd: dir, now: () => NOW, stdin: JSON.stringify({ session_id: session, prompt: 'Add coupon support to the cart with validation' }), env: { CLAUDE_CONFIG_DIR: cfg },
+    });
+    expect(prompt('S1').stdout).toBe('');
+    expect(context(prompt('S3'))?.additionalContext).toBe(ROUTE_HINT);
+    put(status('T001', 'S1', at(30), at(10)));
+    expect(context(prompt('S1'))?.additionalContext).toBe(ROUTE_HINT);
+  });
+});

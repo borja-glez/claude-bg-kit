@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, readFileSync, appendFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, appendFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
 import { execFile, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { buildSync } from 'esbuild';
 import { samePath } from '../src/lib/worktree.js';
-import { appendEvent, appendPhase, readEvents, readStatus, forgeDir, ledgerRoot, ledgerReads } from '../src/forge/ledger.js';
+import { appendEvent, appendPhase, readEvents, readStatus, readStatuses, forgeDir, ledgerRoot, ledgerReads } from '../src/forge/ledger.js';
+import { deriveStatuses, type StatusMap } from '../src/lib/forge-status.js';
+import { INTERLEAVED } from './fixtures/interleaved-ledger.js';
 import { parseConfig, agentFor, ConfigError } from '../src/forge/config.js';
 
 let root: string;
@@ -175,7 +177,7 @@ describe('parseConfig swarm', () => {
 });
 
 describe('the ledger of a forge task worktree (D-10)', () => {
-  it('an event appended in <main>/.claude/worktrees/task-T1 goes to the main ledger; its status.json stays in the worktree', () => {
+  it('an event appended in <main>/.claude/worktrees/task-T1 goes to the main ledger; its status lands beside it, and the worktree keeps its status.json too', () => {
     const main = mkdtempSync(path.join(tmpdir(), 'forge-ledger-main-'));
     const g = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd: main, encoding: 'utf8' });
     g('init', '-q', '-b', 'main'); writeFileSync(path.join(main, '.gitignore'), '.forge/\n.claude/\n'); g('add', '.'); g('commit', '-qm', 'init');
@@ -189,7 +191,7 @@ describe('the ledger of a forge task worktree (D-10)', () => {
     expect(readFileSync(path.join(main, '.forge', 'ledger.jsonl'), 'utf8')).toContain('"phase":"implement"');
     expect(readFileSync(path.join(wt, '.forge', 'ledger.jsonl'), 'utf8')).not.toContain('"phase":"implement"');
     expect(readStatus(wt)).toMatchObject({ task: 'T1', phase: 'implement' });
-    expect(readStatus(main)).toBeNull();
+    expect(readStatus(main)).toMatchObject({ task: 'T1', phase: 'implement' });
     expect(readEvents(wt).map(e => e.kind)).toEqual(['triage', 'phase']);
     expect(readEvents(main).map(e => e.kind)).toEqual(['phase']);
     // A folder that only looks like a task worktree keeps its own ledger.
@@ -251,4 +253,67 @@ for (let i = 0; i < ${N}; i++) appendEvent(process.env.FORGE_ROOT, { ts: new Dat
     expect(readEvents(wt)).toHaveLength(writers.length * N);
     expect(readEvents(main)).toHaveLength(writers.length * N);
   }, 60_000);
+});
+
+describe('one status per task in .forge/status/ (C5)', () => {
+  const dir = () => path.join(root, '.forge', 'status');
+  const fold = (events: readonly unknown[]) => events.reduce<StatusMap>((m, e) => deriveStatuses(m, e).map, {});
+  it('appendEvent over the key ledger leaves the pure fold in .forge/status/, and the last changed task as the alias', () => {
+    for (const e of INTERLEAVED) appendEvent(root, e);
+    expect(readdirSync(dir()).sort()).toEqual(['T003.json', 'shop__T001.json', 'shop__T002.json']);
+    expect(readStatuses(root)).toEqual(fold(INTERLEAVED));
+    expect(readStatus(root)).toEqual(readStatuses(root).T003);
+  });
+  it('migrates an older status.json to its task file before the first event, so the task keeps what it knew', () => {
+    forgeDir(root);
+    writeFileSync(path.join(root, '.forge', 'status.json'), JSON.stringify({
+      ts: '2026-10-16T09:00:00.000Z', task: 'T009', path: 'medium', phase: 'implement', agent: 'forge-impl', validators: [], verdict: null, round: null, cap: null,
+      brief: 1, accepted: [], verify: null, taskStartedAt: '2026-10-16T08:00:00.000Z', stageSince: '2026-10-16T09:00:00.000Z', stages: { triage: 60 }, doneAt: null,
+      lastAt: '2026-10-16T09:00:00.000Z',
+    }));
+    appendEvent(root, { ts: '2026-10-16T09:10:00.000Z', kind: 'phase', task: 'T009', phase: 'review' });
+    expect(readStatuses(root).T009).toMatchObject({
+      task: 'T009', taskStartedAt: '2026-10-16T08:00:00.000Z', phase: 'review', agent: 'forge-impl', stages: { triage: 60, implement: 600 },
+    });
+  });
+  it('past 200 files it keeps the 150 newest; a corrupt or oversized status hides only its task and never fails the append (Review Focus 2)', () => {
+    mkdirSync(dir(), { recursive: true });
+    for (let i = 0; i < 200; i++) {
+      const at = new Date(Date.parse('2026-10-01T00:00:00.000Z') + i * 60_000).toISOString();
+      writeFileSync(path.join(dir(), `X${i}.json`), JSON.stringify({ ts: at, task: `X${i}`, path: 'small', phase: '', agent: null, validators: [], verdict: null, lastAt: at }));
+    }
+    appendEvent(root, { ts: '2026-10-16T10:00:00.000Z', kind: 'triage', task: 'NEW', path: 'small', reasons: [] });
+    const names = readdirSync(dir());
+    expect(names).toHaveLength(150);
+    expect(names).toContain('NEW.json');
+    expect(names).toContain('X199.json');
+    expect(names).not.toContain('X0.json');
+    writeFileSync(path.join(dir(), 'NEW.json'), '{oops');
+    writeFileSync(path.join(dir(), 'BIG.json'), JSON.stringify({ ts: 'x', task: 'BIG', path: 'small', phase: '', agent: null, validators: [], verdict: null, pad: 'x'.repeat(70 * 1024) }));
+    writeFileSync(path.join(dir(), 'NOPE.json'), JSON.stringify({ task: 7 }));
+    expect(() => appendEvent(root, { ts: '2026-10-16T10:01:00.000Z', kind: 'phase', task: 'NEW', phase: 'implement' })).not.toThrow();
+    expect(readEvents(root).at(-1)).toMatchObject({ task: 'NEW', phase: 'implement' });
+    expect(readStatuses(root).NEW).toMatchObject({ phase: 'implement' });
+    expect(readStatuses(root).BIG).toBeUndefined();
+    expect(Object.keys(readStatuses(root))).toHaveLength(150);
+  });
+  it('readStatuses reads the alias alone when an older forge left no folder, and nothing when there is none', () => {
+    forgeDir(root);
+    writeFileSync(path.join(root, '.forge', 'status.json'), JSON.stringify({ ts: '1', task: 'T1', path: 'small', phase: '', agent: null, validators: [], verdict: null, project: 'shop' }));
+    expect(Object.keys(readStatuses(root))).toEqual(['shop__T1']);
+    expect(readStatuses(mkdtempSync(path.join(tmpdir(), 'forge-none-')))).toEqual({});
+  });
+  it("an event of a forge task worktree leaves its task's status beside the main ledger, and the worktree's status.json too (D-10)", () => {
+    const main = mkdtempSync(path.join(tmpdir(), 'forge-c5-main-'));
+    const g = (...a: string[]) => execFileSync('git', ['-c', 'user.email=a@b.c', '-c', 'user.name=t', ...a], { cwd: main, encoding: 'utf8' });
+    g('init', '-q', '-b', 'main'); writeFileSync(path.join(main, '.gitignore'), '.forge/\n.claude/\n'); g('add', '.'); g('commit', '-qm', 'init');
+    const wt = path.join(main, '.claude', 'worktrees', 'task-T002');
+    g('worktree', 'add', '-q', '-b', 'task/T002', wt);
+    appendEvent(wt, { ts: '2026-10-16T10:00:00.000Z', kind: 'triage', task: 'T002', path: 'small', project: 'shop', reasons: [] });
+    appendEvent(wt, { ts: '2026-10-16T10:01:00.000Z', kind: 'phase', task: 'T002', phase: 'implement' });
+    expect(readStatuses(main)).toEqual({ shop__T002: expect.objectContaining({ task: 'T002', phase: 'implement', project: 'shop' }) });
+    expect(readStatus(main)).toMatchObject({ task: 'T002', phase: 'implement' });
+    expect(readStatus(wt)).toMatchObject({ task: 'T002', phase: 'implement' });
+    expect(existsSync(path.join(wt, '.forge', 'status'))).toBe(false);
+  });
 });

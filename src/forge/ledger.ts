@@ -1,6 +1,6 @@
-import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { deriveStatus, normalizeStatus, type ForgeStatus } from '../lib/forge-status.js';
+import { deriveStatus, deriveStatuses, normalizeStatus, statusKey, type ForgeStatus, type StatusMap } from '../lib/forge-status.js';
 import { isSafeId, parseExecution, type ExecutionState } from '../lib/execution-state.js';
 import { claudeSessionId, type SessionEnv } from '../lib/claude-session.js';
 import { attribute, isTask, projectOf, stampEvent } from './task-ref.js';
@@ -31,6 +31,14 @@ export function ledgerRoot(root: string): string {
   const main = mainCheckoutFrom(path.resolve(root), text);
   return samePath(path.join(main, '.claude', 'worktrees', name), root) ? main : root;
 }
+
+/** C5: the folder of the statuses of a checkout, one file per task, `<project>__<T>.json` or `<T>.json`. */
+export const statusDir = (root: string) => path.join(forgePath(root), 'status');
+/** C5: past this many status files the oldest go, down to STATUS_FILES_KEEP; a reader reads at most this many. */
+export const STATUS_FILES_MAX = 200;
+export const STATUS_FILES_KEEP = 150;
+/** A status is a few hundred bytes: one above this is not read. */
+const STATUS_FILE_MAX = 64 * 1024;
 
 export function forgeDir(root: string): string {
   const dir = forgePath(root);
@@ -98,8 +106,7 @@ function stamped(root: string, target: string, event: LedgerEvent): LedgerEvent 
 }
 
 export function appendEvent(root: string, event: LedgerEvent): void {
-  // D-10: a member's events go to the main checkout's ledger, where the coordinator, stats and the roadmap read them;
-  // its status.json stays in its worktree, for its own lens.
+  // D-10: a member's events go to the main checkout's ledger, where the coordinator, stats and the roadmap read them.
   const target = ledgerRoot(root);
   forgeDir(target);
   if (target !== root) forgeDir(root);
@@ -108,7 +115,10 @@ export function appendEvent(root: string, event: LedgerEvent): void {
   // the member and the coordinator writing the same ledger at once never interleave their lines.
   const e = stamped(root, target, event);
   appendFileSync(file, (endsMidLine(file) ? '\n' : '') + JSON.stringify(e) + '\n');
-  updateStatus(root, e);
+  // C5: one status per task beside the ledger it follows (a member's reach the main checkout, D-10), with the alias
+  // status.json; a forge task worktree also keeps its own status.json as wave 2 left it, for an older lens of a member.
+  updateStatus(target, e);
+  if (target !== root) updateWorktreeStatus(root, e);
 }
 
 /** Appends a phase event unless the task's last phase event already names that phase for the same brief (C4: a stage
@@ -126,19 +136,111 @@ export function appendPhase(root: string, event: LedgerEvent & { task: string; p
   return true;
 }
 
-// .forge/status.json follows the ledger one event at a time, so readers (lens) never read the whole ledger.
-// A missing or corrupt status starts over from this event; any failure here leaves the append done.
-function updateStatus(root: string, event: LedgerEvent): void {
+// The status.json of a forge task worktree, as before C5: one status following each of its events, for an older lens
+// of a member. A missing or corrupt one starts over from the event; any failure leaves the append done.
+function updateWorktreeStatus(root: string, event: LedgerEvent): void {
   try {
     const file = statusFile(root);
     let prev: ForgeStatus | null = null;
     try { prev = normalizeStatus(JSON.parse(readFileSync(file, 'utf8'))); } catch { /* none yet, or corrupt */ }
     const next = deriveStatus(prev, event);
     if (!next || next === prev) return;
-    const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(next) + '\n');
-    renameSync(tmp, file);
+    writeJsonFile(file, next);
   } catch { /* the ledger is the record; the status is a convenience */ }
+}
+
+// Through a temporary file and a rename, so a reader never sees half of it. (Duplicates writeJsonAtomic of jobs.ts, which
+// imports this module: importing it here would be a cycle.)
+function writeJsonFile(file: string, value: unknown): void {
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(value) + '\n');
+  renameSync(tmp, file);
+}
+
+/** One status file, or null when it is missing, over STATUS_FILE_MAX, not JSON or not a status. */
+function readStatusFile(file: string): ForgeStatus | null {
+  try {
+    if (statSync(file).size > STATUS_FILE_MAX) return null;
+    return normalizeStatus(JSON.parse(readFileSync(file, 'utf8')));
+  } catch { return null; }
+}
+
+/** The status files an event of `task` may reach: <T>.json and *__<T>.json and, for a brief id <T>-<n>, those of <T>. */
+function candidates(names: readonly string[], task: string): string[] {
+  const ids = [task, /^(.+)-\d{1,4}$/.exec(task)?.[1]].filter((s): s is string => !!s);
+  return names.filter(n => ids.some(t => n === `${t}.json` || n.endsWith(`__${t}.json`)));
+}
+
+/**
+ * C5: before the folder's first status, the status.json of an older forge becomes its task's file, so a task in
+ * progress keeps what it knew. Returns the folder's file names.
+ */
+function migrate(root: string): string[] {
+  mkdirSync(statusDir(root), { recursive: true });
+  const st = readStatusFile(statusFile(root));
+  const key = st ? statusKey(st.task, st.project) : null;
+  if (!st || !key) return [];
+  writeJsonFile(path.join(statusDir(root), `${key}.json`), st);
+  return [`${key}.json`];
+}
+
+/** C5: past STATUS_FILES_MAX files, the oldest by lastAt (else by mtime) go, down to STATUS_FILES_KEEP. */
+function prune(root: string): void {
+  const dir = statusDir(root);
+  const files = readdirSync(dir).filter(n => n.endsWith('.json')).map(n => {
+    const file = path.join(dir, n);
+    let at = Date.parse(readStatusFile(file)?.lastAt ?? '');
+    if (!Number.isFinite(at)) { try { at = statSync(file).mtimeMs; } catch { at = 0; } }
+    return { file, at };
+  });
+  if (files.length <= STATUS_FILES_MAX) return;
+  files.sort((a, b) => a.at - b.at);
+  for (const f of files.slice(0, files.length - STATUS_FILES_KEEP)) rmSync(f.file, { force: true });
+}
+
+// C5: .forge/status/<key>.json follows the ledger one event at a time, so readers (lens, the route hint) never read the
+// whole ledger. Only the statuses the event may reach are read (one or two small files), deriveStatuses applies it to its
+// task alone, and the changed status is written with the alias status.json (the task that changed last). A corrupt or
+// oversized status starts over from the event; any failure here leaves the append done.
+function updateStatus(root: string, event: LedgerEvent): void {
+  try {
+    if (typeof event.task !== 'string' || !event.task) return;
+    const dir = statusDir(root);
+    let names: string[];
+    try { names = readdirSync(dir).filter(n => n.endsWith('.json')); } catch { names = migrate(root); }
+    // Null-prototype, so a task named __proto__ is an ordinary key.
+    const map = Object.create(null) as StatusMap;
+    for (const n of candidates(names, event.task)) {
+      const st = readStatusFile(path.join(dir, n));
+      const key = st ? statusKey(st.task, st.project) : null;
+      if (st && key) map[key] = st;
+    }
+    const { map: next, changed } = deriveStatuses(map, event);
+    if (!changed) return;
+    mkdirSync(dir, { recursive: true });
+    writeJsonFile(path.join(dir, `${changed}.json`), next[changed]);
+    writeJsonFile(statusFile(root), next[changed]);
+    if (names.length + (names.includes(`${changed}.json`) ? 0 : 1) > STATUS_FILES_MAX) prune(root);
+  } catch { /* the ledger is the record; the status is a convenience */ }
+}
+
+/**
+ * C5: every task's status of a checkout, by key (at most STATUS_FILES_MAX files; one that does not read or does not
+ * validate is left out). Without .forge/status/ (an older forge), the alias status.json alone.
+ */
+export function readStatuses(root: string): StatusMap {
+  const out = Object.create(null) as StatusMap;
+  const keep = (st: ForgeStatus | null) => {
+    const key = st ? statusKey(st.task, st.project) : null;
+    if (st && key) out[key] = st;
+  };
+  let names: string[];
+  try { names = readdirSync(statusDir(root)).filter(n => n.endsWith('.json')).sort().slice(0, STATUS_FILES_MAX); } catch {
+    keep(readStatus(root));
+    return out;
+  }
+  for (const n of names) keep(readStatusFile(path.join(statusDir(root), n)));
+  return out;
 }
 
 export function readStatus(root: string): ForgeStatus | null {
