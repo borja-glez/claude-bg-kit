@@ -86,19 +86,21 @@ export function eviMark(m: Model, d: Dict, id: string): string {
 
 /**
  * §4.1: why the owner's mark does not back an approval (approved or auto_approved, without a task yet), as ownerCheck says
- * it without the ledger's `last`, which the page does not have. Such a proposal never becomes a task.
- * - 'no-mark': no mark of this status under its pid (an approval from before the marks existed): the owner confirms it
- *   with [Confirmar].
- * - 'edited' (review I2): a mark of this status whose digest is of other text: the text changed after the owner approved
- *   it. No one-click confirm: the owner decides it again with the text in view (Approve or Reject).
+ * it without the ledger's `last`, which the page does not have. Such a proposal never becomes a task. The page sorts the
+ * cases itself (forge's ownerCheck calls both of them 'no-mark' or 'edited'):
+ * - 'no-mark': no mark at all under its pid (an approval from before the marks existed, §4.1): the owner confirms it with
+ *   [Confirmar].
+ * - 'changed' (review I2, re-review N1): a mark exists and does not back it, of another status (a rejection someone
+ *   turned into an approval, an approval turned into an auto-approval) or of other text: the decision changed after the
+ *   owner took it. No one-click confirm: the owner decides it again with the text in view (Approve or Reject).
  * The one rule the proposal card, [Confirmar], the decision and «Te necesita» share. Null when the mark backs it, and until
  * the marks arrive (`approvals` undefined): the page does not warn about what it cannot know.
  */
-export function unmarkedReason(pid: string, p: ProposalDoc, approvals: Readonly<Record<string, ApprovalDoc>> | undefined): 'no-mark' | 'edited' | null {
+export function unmarkedReason(pid: string, p: ProposalDoc, approvals: Readonly<Record<string, ApprovalDoc>> | undefined): 'no-mark' | 'changed' | null {
   if (!approvals || (p.status !== 'approved' && p.status !== 'auto_approved') || p.taskId !== undefined) return null;
-  const a = Object.prototype.hasOwnProperty.call(approvals, pid) ? approvals[pid] : null;
-  const c = ownerCheck(pid, p, a);
-  return c === 'ok' ? null : c;
+  const a = Object.prototype.hasOwnProperty.call(approvals, pid) ? approvals[pid] : undefined;
+  if (!a) return 'no-mark';
+  return ownerCheck(pid, p, a) === 'ok' ? null : 'changed';
 }
 /** Whether the owner's mark does not back the approval, for either reason (unmarkedReason). */
 export const unmarked = (pid: string, p: ProposalDoc, approvals: Readonly<Record<string, ApprovalDoc>> | undefined): boolean =>

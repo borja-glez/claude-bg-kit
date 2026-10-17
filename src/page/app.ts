@@ -577,8 +577,9 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       const ref = db.doc(`proposals/${pid}`);
       const snap = await ref.get();
       const cur = snap?.exists ? normalizeProposal(snap.data()) : null;
-      // Review I2: an approval edited after the owner approved it is decided again, like a proposed one.
-      if (!cur || !(canDecide(cur.status) || unmarkedReason(pid, cur, model.approvals) === 'edited')) { ui.notice = 'decided'; return; }
+      // Review I2, re-review N1: an approval whose decision changed after the owner took it (other text or another status)
+      // is decided again, like a proposed one.
+      if (!cur || !(canDecide(cur.status) || unmarkedReason(pid, cur, model.approvals) === 'changed')) { ui.notice = 'decided'; return; }
       // C2: the mark binds the normalized text just re-read. The owner decides only the text they read: one edited since
       // the page showed it is left alone (its snapshot is on its way).
       const digest = proposalDigest(pid, cur);
@@ -610,8 +611,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   };
   // §4.1: [Confirmar], the owner's mark for an approval without one (taken before the marks existed, or by forge before
   // 4a): the status the proposal already has and the digest of the text the page shows, written only to approvals/, like
-  // `/forge:decide <id> confirm`. Review I2: never for an approval edited after the owner's mark; that one is decided
-  // again with Approve or Reject.
+  // `/forge:decide <id> confirm`. Review I2, re-review N1: never when a mark exists (its text or its status changed after
+  // the owner's decision); that one is decided again with Approve or Reject.
   const confirmMark = async (pid: string) => {
     if (busy || !knownProposal(pid) || model.isOwner !== true) return;
     const p = model.proposals.find(x => x.id === pid)!;
@@ -1199,17 +1200,34 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   // §4.1: the owner's marks; only well-formed ones under an id without a path separator count. A record without a
   // prototype, so no id (say, __proto__) is anything but a key. Carry 5: bounded like the other collections, the newest
   // decisions first, at twice the proposals the page keeps: the mark of a proposal it shows is left out only behind a
-  // thousand newer decisions.
-  unsubs.push(db.collection('approvals').orderBy('decidedAt', 'desc').limit(1000).onSnapshot(((s: QSnap) => {
-    const marks = Object.create(null) as Record<string, ApprovalDoc>;
+  // thousand newer decisions. Residual round: a runtime that refuses that query (the subscription fails, or orderBy
+  // throws) is asked once for the whole collection instead, bounded here the same way, and the page stays live.
+  const MAX_MARKS = 1000;
+  const onMarks = (s: QSnap) => {
+    const kept: [string, ApprovalDoc][] = [];
     for (const r of rows(s)) {
       const key = String(r.id);
       const mark = normalizeApproval(r.body);
-      if (key && !key.includes('/') && mark) marks[key] = mark;
+      if (key && !key.includes('/') && mark) kept.push([key, mark]);
     }
+    kept.sort((a, b) => (a[1].decidedAt < b[1].decidedAt ? 1 : a[1].decidedAt > b[1].decidedAt ? -1 : 0));
+    const marks = Object.create(null) as Record<string, ApprovalDoc>;
+    for (const [key, mark] of kept.slice(0, MAX_MARKS)) marks[key] = mark;
     model.approvals = marks;
     changed();
-  }) as never, onErr));
+  };
+  const marksDb = db;
+  let marksUnsub: () => void = () => {};
+  let marksPlain = false;
+  const plainMarks = () => {
+    if (marksPlain) return;
+    marksPlain = true;
+    marksUnsub();
+    try { marksUnsub = marksDb.collection('approvals').onSnapshot(onMarks as never, onErr); } catch { onErr(); }
+  };
+  try { marksUnsub = marksDb.collection('approvals').orderBy('decidedAt', 'desc').limit(MAX_MARKS).onSnapshot(onMarks as never, plainMarks); }
+  catch { plainMarks(); }
+  unsubs.push(() => marksUnsub());
   schedule();
 
   // Who is viewing: "you" labels, the "Mine" filter and whether the composer can write.

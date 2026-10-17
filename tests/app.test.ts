@@ -1040,7 +1040,7 @@ describe('proposals', () => {
     f.push('approvals', { p1: { status: 'approved', decidedAt: '2026-10-11T10:00:00.000Z', by: 'page', digest: DIG1 } });
     await settle();
     expect(app.model.approvals?.p1?.digest).toBe(DIG1);
-    expect(root.innerHTML).toContain('editada después de la aprobación: revisa el texto');
+    expect(root.innerHTML).toContain('cambió después de tu decisión: revisa el texto y decide');
     expect(root.innerHTML).not.toContain('sin la marca del dueño');
     expect(root.innerHTML).not.toContain('data-action="p-confirm"');
     // A forged one-click confirm writes nothing.
@@ -1057,7 +1057,7 @@ describe('proposals', () => {
     expect(f.update).toHaveBeenCalledWith('proposals/p1', { status: 'approved', decidedBy: 'user:u1', decidedAt: expect.stringMatching(ISO) });
     f.push('approvals', { p1: f.set.mock.calls[0]![1] });
     await settle();
-    expect(root.innerHTML).not.toContain('editada después de la aprobación');
+    expect(root.innerHTML).not.toContain('cambió después de tu decisión');
     expect(root.innerHTML).not.toContain('data-action="p-approve"');
     app.stop();
   });
@@ -1149,6 +1149,40 @@ describe('proposals', () => {
     app.stop();
   });
 
+  it('a runtime that refuses the ordered query of the marks falls back once to the whole collection, bounded on the page, and the page stays live (residual 2)', async () => {
+    for (const refusal of ['throws', 'errors'] as const) {
+      const f = fakeDb();
+      const plain: string[] = [];
+      const collection = f.db.collection;
+      f.db.collection = (p: string) => {
+        const q = collection(p);
+        if (p !== 'approvals') return q;
+        return {
+          ...q,
+          orderBy: () => {
+            if (refusal === 'throws') throw new Error('orderBy is not supported');
+            return { limit: () => ({ onSnapshot: (_cb: unknown, err: (e: unknown) => void) => { setTimeout(() => err({ code: 'failed_precondition', message: 'no index' }), 0); return () => {}; } }) };
+          },
+          onSnapshot: (cb: Cb, err: (e: unknown) => void) => { plain.push('plain'); return q.onSnapshot(cb, err); },
+        } as never;
+      };
+      const { root, app } = await bootProposals(f);
+      expect(plain, refusal).toEqual(['plain']);
+      expect(app.model.offline, refusal).toBe(false);
+      expect(root.innerHTML, refusal).toContain('EN VIVO');
+      // More than 1000 marks: the newest 1000 by decidedAt are kept.
+      const rows: Record<string, unknown> = {};
+      for (let i = 0; i < 1005; i++) rows[`q${i}`] = { status: 'approved', decidedAt: new Date(Date.UTC(2026, 9, 1) + i * 60000).toISOString(), by: 'page', digest: DIG1 };
+      f.push('approvals', rows);
+      await settle();
+      expect(Object.keys(app.model.approvals!)).toHaveLength(1000);
+      expect(app.model.approvals!.q1004).toBeDefined();
+      expect(app.model.approvals!.q4).toBeUndefined();
+      expect(app.model.approvals!.q5).toBeDefined();
+      app.stop();
+    }
+  });
+
   it('the marks are read like the other collections, newest first and bounded (carry 5)', async () => {
     const f = fakeDb();
     const calls: unknown[][] = [];
@@ -1166,20 +1200,57 @@ describe('proposals', () => {
     app.stop();
   });
 
-  it('a mark of another status does not count either; a proposed one is never confirmed (C3)', async () => {
+  it('an approval edited and flipped to auto_approved after the owner approved it is decided again, never confirmed in one click (re-review N1)', async () => {
     const f = fakeDb();
     const { root, app } = await bootProposals(f);
-    f.push('proposals', { p1: { ...PROP, status: 'approved' }, p2: { ...PROP, ts: '2026-10-11T09:00:00.000Z' } });
-    f.push('approvals', { p1: { status: 'rejected', decidedAt: '2026-10-11T10:00:00.000Z', by: 'page', digest: DIG1 } });
+    const t2 = { ...PROP, status: 'auto_approved', path: 'src/**' };
+    f.stored['proposals/p1'] = t2;
+    f.push('proposals', { p1: t2, p2: { ...PROP, ts: '2026-10-11T09:00:00.000Z' } });
+    f.push('approvals', { p1: { status: 'approved', decidedAt: '2026-10-11T10:00:00.000Z', by: 'page', digest: DIG1 } });
     await settle();
-    inject(root, 'p-confirm', 'p2');
-    await settle();
+    expect(root.innerHTML).toContain('cambió después de tu decisión: revisa el texto y decide');
+    expect(root.innerHTML).not.toContain('sin la marca del dueño');
+    expect(root.innerHTML).not.toContain('data-action="p-confirm"');
+    // A forged one-click confirm writes nothing, for it or for a proposed one.
+    for (const id of ['p1', 'p2']) { inject(root, 'p-confirm', id); await settle(); }
     expect(f.set).not.toHaveBeenCalled();
-    click(root, '[data-action="p-confirm"][data-id="p1"]');
+    click(root, '[data-action="p-approve"][data-id="p1"]');
     await settle();
-    expect(f.set).toHaveBeenCalledTimes(1);
-    expect(f.set).toHaveBeenCalledWith('approvals/p1', { status: 'approved', decidedAt: expect.stringMatching(ISO), by: 'page', digest: DIG1 });
+    const now = proposalDigest('p1', normalizeProposal(t2)!);
+    expect(now).not.toBe(DIG1);
+    expect(f.set).toHaveBeenCalledWith('approvals/p1', { status: 'approved', decidedAt: expect.stringMatching(ISO), by: 'page', digest: now });
+    expect(f.update).toHaveBeenCalledWith('proposals/p1', { status: 'approved', decidedBy: 'user:u1', decidedAt: expect.stringMatching(ISO) });
     app.stop();
+  });
+
+  it('a rejection someone turned into an approval is decided again: Reject writes a rejected mark, Approve one of the text now (re-review N1)', async () => {
+    for (const decision of ['reject', 'approve'] as const) {
+      const f = fakeDb();
+      const { root, app } = await bootProposals(f);
+      const flipped = { ...PROP, status: 'approved', path: 'src/**' };
+      f.stored['proposals/p1'] = flipped;
+      f.push('proposals', { p1: flipped });
+      f.push('approvals', { p1: { status: 'rejected', decidedAt: '2026-10-11T10:00:00.000Z', by: 'page', digest: DIG1 } });
+      await settle();
+      expect(root.innerHTML).toContain('cambió después de tu decisión');
+      expect(root.innerHTML).not.toContain('sin la marca del dueño');
+      expect(root.innerHTML).not.toContain('data-action="p-confirm"');
+      const now = proposalDigest('p1', normalizeProposal(flipped)!);
+      if (decision === 'reject') {
+        click(root, '[data-action="p-reject-open"][data-id="p1"]');
+        await settle();
+        click(root, '[data-action="p-reject-send"][data-id="p1"]');
+        await settle();
+        expect(f.set).toHaveBeenCalledWith('approvals/p1', { status: 'rejected', decidedAt: expect.stringMatching(ISO), by: 'page', digest: now });
+        expect(f.update).toHaveBeenCalledWith('proposals/p1', { status: 'rejected', decidedBy: 'user:u1', decidedAt: expect.stringMatching(ISO) });
+      } else {
+        click(root, '[data-action="p-approve"][data-id="p1"]');
+        await settle();
+        expect(f.set).toHaveBeenCalledWith('approvals/p1', { status: 'approved', decidedAt: expect.stringMatching(ISO), by: 'page', digest: now });
+      }
+      expect(f.set).toHaveBeenCalledTimes(1);
+      app.stop();
+    }
   });
 
   it('the mark the page writes is the one forge computes and counts (C2)', async () => {

@@ -79,10 +79,11 @@ function renderProposals(m: Model, d: Dict, ui: UiState, loc: string): string {
     const thread = comments.length ? `<div class="pcom"><div class="lbl">${esc(d.pfield.comments)}</div>${comments.map(n =>
       `<div class="mnote"><span class="k">${esc(authorLabel(m, d, n.author))}${fmt(n.ts, loc) ? ` · ${esc(fmt(n.ts, loc))}` : ''}</span><div>${esc(n.text)}</div></div>`).join('')}</div>` : '';
     // §4.1: an approval the owner's mark does not back never becomes a task. Without a mark (from before the marks) the owner
-    // confirms it (only approvals/ is written); edited after the owner approved it (review I2), it is decided again with
-    // its text in view, as a proposed one: Approve and Reject, never a one-click confirm.
+    // confirms it (only approvals/ is written); with a mark of other text or another status, the decision changed after the
+    // owner took it (review I2, re-review N1): it is decided again with its text in view, as a proposed one, with Approve
+    // and Reject, never a one-click confirm.
     const why = unmarkedReason(p.id, p, m.approvals);
-    const open = canDecide(status) || why === 'edited';
+    const open = canDecide(status) || why === 'changed';
     let actions = '';
     if (!ro) {
       // §4.1: only the roadmap's owner decides; anyone else comments, and is told so once it is known (carry 5).
@@ -100,7 +101,7 @@ function renderProposals(m: Model, d: Dict, ui: UiState, loc: string): string {
     }
     const mark = why === 'no-mark'
       ? `<div class="pmark"><span class="warn">${esc(d.owner.noMark)}</span>${m.isOwner === true && !ro ? ` <button type="button" class="btn" data-action="p-confirm" data-id="${id}">${esc(d.owner.confirm)}</button>` : ''}</div>`
-      : why === 'edited' ? `<div class="pmark"><span class="warn">${esc(d.owner.edited)}</span></div>` : '';
+      : why === 'changed' ? `<div class="pmark"><span class="warn">${esc(m.isOwner === true ? d.owner.changed : d.owner.changedOther)}</span></div>` : '';
     return `<div class="note prop pr-${risk}" data-id="${id}" data-k="pr:${id}">
       <div class="nh"><span class="tag pc">${esc(d.pcategory[category])}</span><span class="pill risk-${risk}">${esc(d.prisk[risk])}</span><span class="pill ps-${status}">${esc(d.pstatus[status])}</span><span class="k">${esc(authorLabel(m, d, p.author))}${when ? ` · ${esc(when)}` : ''}</span></div>
       <h3>${esc(p.title)}</h3>
