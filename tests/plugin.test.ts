@@ -1659,6 +1659,14 @@ describe('plugin layout', () => {
     const round = md.slice(md.indexOf('## round'), md.indexOf('## apply'));
     for (const w of ['`changed` and `removed` are both empty', '`removed`', '--reject-on-fail', 'r<R>.rejected.json']) expect(round, w).toContain(w);
     expect(round).not.toMatch(/\bmv\b/);
+    // Re-review N1: a hand edit is snapshotted first (--kind round), before critique-next; resume says what clears it.
+    expect(round.indexOf('`handEdit`')).toBeGreaterThan(-1);
+    expect(round.indexOf('--kind round')).toBeGreaterThan(-1);
+    expect(round.indexOf('--kind round')).toBeLessThan(round.indexOf('waypoint critique-next DESIGN'));
+    const resume = md.slice(md.indexOf('\n## resume'), md.indexOf('\n## amend'));
+    for (const w of ['`handEdit`', '`round --verify`']) expect(resume, w).toContain(w);
+    expect(runRef('autonomy')).toContain('`handEdit`');
+    for (const f of ['plugins/waypoint/README.md', 'plugins/waypoint/README.es.md']) expect(read(f), f).toContain('`handEdit`');
     const critic = read('plugins/waypoint/agents/design-critic.md');
     for (const w of ['"verdict": "<ready|changes>"', '`max`', '`severities`', '`dismissed`', '`resolved`', '`applied`', '`removed`', 'r<R>#<n>', '`contradiction`']) expect(critic, w).toContain(w);
     expect(critic).not.toContain('At most 12 proposals');

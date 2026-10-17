@@ -21,7 +21,8 @@ export interface GateApplied { round: number; n: number; section: string; change
 export interface Gate {
   version: number; rounds: number; latestRound: number | null; latestCritiqueVersion: number | null;
   criticalPending: { round: number; n: number }[]; majorPending: { round: number; n: number }[]; invalid: number[];
-  needsVerify: boolean; canAutoApprove: boolean;
+  /** Re-review N1: the design file's body differs from its last snapshot's: edited by hand, and only a snapshot clears it. */
+  needsVerify: boolean; handEdit: boolean; canAutoApprove: boolean;
   pending: Pending[]; pendingCounts: { critical: number; major: number; minor: number };
   dismissed: GateDismissed[]; resolved: GateResolved[]; applied: GateApplied[];
   /** How many older entries each list left out (see GATE_LIST_MAX); present only when not 0. */
@@ -160,6 +161,18 @@ export function pendingProposals(changelog: ChangelogEntry[], critiques: GateCri
 export interface GateTexts { history?: Record<number, string>; current?: string }
 
 /**
+ * Carry 4, re-review N1: whether the design file on disk was edited by hand after its last snapshot: its body differs
+ * from that snapshot's (the front matter apart). A critique does not clear it, since it makes no snapshot: the design
+ * skill's `round` snapshots it first. False without the texts or the snapshot's text.
+ */
+export function handEditOf(changelog: ChangelogEntry[], texts: GateTexts = {}): boolean {
+  const snapshot = texts.history?.[changelog[changelog.length - 1]?.version ?? 0];
+  if (texts.current === undefined || snapshot === undefined) return false;
+  const edit = changedSections(designBody(snapshot), designBody(texts.current));
+  return edit.changed.length > 0 || edit.removed.length > 0;
+}
+
+/**
  * K3-06: whether the design changed after its latest valid critique without any critic reading it: that critique is of
  * an older version and a later entry changed the body, or (carry 4) the design file was edited by hand after its last
  * snapshot. The bodies decide (K3-03), so a change of the front matter alone, such as an approval, is none. Without the
@@ -170,12 +183,7 @@ export function needsVerifyOf(changelog: ChangelogEntry[], critiques: GateCritiq
   const top = [...critiques].filter(c => c.critique !== null).sort((a, b) => b.round - a.round)[0]?.critique;
   if (!top) return false;
   const version = changelog[changelog.length - 1]?.version ?? 0;
-  // Carry 4: the file on disk against the last snapshot: a body that differs is a hand edit no critic has read.
-  const snapshot = texts.history?.[version];
-  if (texts.current !== undefined && snapshot !== undefined) {
-    const edit = changedSections(designBody(snapshot), designBody(texts.current));
-    if (edit.changed.length > 0 || edit.removed.length > 0) return true;
-  }
+  if (handEditOf(changelog, texts)) return true;
   if (top.version >= version) return false;
   const before = texts.history?.[top.version];
   const after = texts.current ?? texts.history?.[version];
@@ -224,7 +232,7 @@ export function designGate(changelog: ChangelogEntry[], given: GateCritique[], d
   return {
     version, rounds: valid.length, latestRound, latestCritiqueVersion, criticalPending, majorPending,
     invalid: critiques.filter(c => c.critique === null).map(c => c.round).sort((a, b) => a - b),
-    needsVerify,
+    needsVerify, handEdit: handEditOf(changelog, texts),
     canAutoApprove: latest !== null && criticalPending.length === 0 && majorPending.length === 0 && !needsVerify
       && latestCritiqueVersion !== null && latestCritiqueVersion <= version,
     // Final review M4: what each pending proposal says goes to the critic and to the approve line, so it is one clean

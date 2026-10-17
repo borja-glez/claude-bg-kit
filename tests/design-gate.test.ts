@@ -14,7 +14,7 @@ describe('designGate', () => {
   it('never approves without a critique (an imported design with no round)', () => {
     expect(designGate([E(1, 'importado de docs/s.md', 0)], [])).toEqual({
       version: 1, rounds: 0, latestRound: null, latestCritiqueVersion: null, criticalPending: [], majorPending: [], invalid: [],
-      needsVerify: false, canAutoApprove: false,
+      needsVerify: false, handEdit: false, canAutoApprove: false,
       pending: [], pendingCounts: { critical: 0, major: 0, minor: 0 }, dismissed: [], resolved: [], applied: [],
     });
   });
@@ -275,12 +275,18 @@ describe('needsVerify: a change no critic has read (K3-06, K3-03)', () => {
   it('a hand edit after the last snapshot needs a verification, even when the latest critique read that snapshot (carry 4)', () => {
     const log = [S(1, 0, { kind: 'draft' }), S(2, 1, { kind: 'apply', applied: { 1: [1] } })];
     const crits = [{ round: 1, critique: C(1, 1, ['critical']) }, { round: 2, critique: { ...C(2, 2, []), verdict: 'ready' as const } }];
-    expect(designGate(log, crits, {}, { history: { 1: v1, 2: v2 }, current: v2 })).toMatchObject({ needsVerify: false, canAutoApprove: true });
-    expect(designGate(log, crits, {}, { history: { 1: v1, 2: v2 }, current: doc('Con rollback y un plan B.') })).toMatchObject({ needsVerify: true, canAutoApprove: false });
+    expect(designGate(log, crits, {}, { history: { 1: v1, 2: v2 }, current: v2 })).toMatchObject({ needsVerify: false, handEdit: false, canAutoApprove: true });
+    expect(designGate(log, crits, {}, { history: { 1: v1, 2: v2 }, current: doc('Con rollback y un plan B.') })).toMatchObject({ needsVerify: true, handEdit: true, canAutoApprove: false });
     // The front matter alone (the status the skill sets before the approval's snapshot) is no hand edit.
-    expect(designGate(log, crits, {}, { history: { 1: v1, 2: v2 }, current: approved }).needsVerify).toBe(false);
+    expect(designGate(log, crits, {}, { history: { 1: v1, 2: v2 }, current: approved })).toMatchObject({ needsVerify: false, handEdit: false });
     // Without the snapshot's text there is nothing to compare it with.
-    expect(designGate(log, crits, {}, { history: { 1: v1 }, current: doc('otro') }).needsVerify).toBe(false);
+    expect(designGate(log, crits, {}, { history: { 1: v1 }, current: doc('otro') })).toMatchObject({ needsVerify: false, handEdit: false });
+  });
+  it('handEdit is the file against its last snapshot, with or without a critique; without the texts it is false (re-review N1)', () => {
+    const log = [S(1, 0, { kind: 'draft' })];
+    expect(designGate(log, [], {}, { history: { 1: v1 }, current: v2 })).toMatchObject({ handEdit: true, needsVerify: false, canAutoApprove: false });
+    expect(designGate(log, [], {}, { history: { 1: v1 }, current: v1 }).handEdit).toBe(false);
+    expect(designGate(log, [{ round: 1, critique: C(1, 1, []) }]).handEdit).toBe(false);
   });
   it('a critique of the current version, or no critique at all, needs no verification', () => {
     expect(designGate([S(1, 0)], [{ round: 1, critique: C(1, 1, []) }]).needsVerify).toBe(false);

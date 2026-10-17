@@ -2201,6 +2201,27 @@ describe('design-gate', () => {
     writeFileSync(path.join(d, 'design.md'), readFileSync(path.join(d, 'design.md'), 'utf8').replace('no tiene rollback', 'tiene rollback'));
     expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ needsVerify: true, canAutoApprove: false });
   });
+  it('a hand edit is reported as handEdit; a snapshot of it, then a verification of the new version, clear it (re-review N1)', () => {
+    const d = path.join(dir, 'docs', 'waypoint', 'demo-shop');
+    mkdirSync(path.join(d, 'design', 'critiques'), { recursive: true });
+    copyFileSync(new URL('./fixtures/design.md', import.meta.url), path.join(d, 'design.md'));
+    const rel = 'docs/waypoint/demo-shop/design.md';
+    const gate = () => JSON.parse(run(['design-gate', rel], io).stdout);
+    run(['design-snapshot', rel, '--note', 'v1', '--round', '0', '--kind', 'draft'], io);
+    writeFileSync(path.join(d, 'design', 'critiques', 'r1.json'), JSON.stringify({ round: 1, version: 1, scope: 'full', verdict: 'ready', proposals: [] }));
+    expect(gate()).toMatchObject({ handEdit: false, needsVerify: false, canAutoApprove: true });
+    writeFileSync(path.join(d, 'design.md'), readFileSync(path.join(d, 'design.md'), 'utf8').replace('no tiene rollback', 'tiene rollback'));
+    expect(gate()).toMatchObject({ handEdit: true, needsVerify: true, canAutoApprove: false });
+    // The design skill's round snapshots the hand edit first (--kind round), then verifies the new version.
+    const snap = run(['design-snapshot', rel, '--note', 'edición a mano', '--kind', 'round'], io);
+    expect(JSON.parse(snap.stdout)).toMatchObject({ version: 2, kind: 'round' });
+    expect(gate()).toMatchObject({ handEdit: false, needsVerify: true, canAutoApprove: false });
+    const v = JSON.parse(run(['critique-next', rel, '--verify'], io).stdout);
+    expect(v).toMatchObject({ round: 2, version: 2, scope: 'changed', since: 1, review: ['riesgos'] });
+    writeFileSync(v.out, JSON.stringify({ round: 2, version: 2, scope: 'changed', verdict: 'ready', proposals: [] }));
+    expect(run(['critique-check', v.out, '--round', '2', '--version', '2', '--verify', '--changed', 'riesgos', '--design', rel], io).code).toBe(0);
+    expect(gate()).toMatchObject({ handEdit: false, needsVerify: false, canAutoApprove: true });
+  });
   it('reads an old dismissed.json of numbers in .waypoint/: those proposals are dismissed, not pending (carry 3)', () => {
     const d = path.join(dir, 'docs', 'waypoint', 'demo-shop');
     mkdirSync(path.join(d, 'design'), { recursive: true });
