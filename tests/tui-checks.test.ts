@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
-  BAND_READY, bandFolds, changedFiles, checkCapture, checkPhoto, closeVerdict, dotted, fillTemplate, findText, parseArgs,
-  sameScreen, splitIds, stopTriggered,
+  BAND_READY, bandFolds, changedFiles, checkCapture, checkPhoto, closeVerdict, dotted, fillTemplate, findText, letterKeys,
+  lettersOn, moreToggled, panelLetter, parseArgs, pressVerdict, splitIds, stopTriggered,
 } from '../scripts/tui/checks.mjs';
 
 const capture = (name: string) => readFileSync(new URL(`./fixtures/tui/${name}`, import.meta.url), 'utf8');
@@ -44,6 +44,34 @@ describe('the checks of the TUI snapshots (F-17)', () => {
   });
 });
 
+describe('pressing a band letter as the engine documents it (final review I-1)', () => {
+  it('builds ctrl+x tab, the letter, then Esc, and refuses what is not one letter or digit', () => {
+    expect(letterKeys('m')).toEqual([String.fromCharCode(0x18, 0x09), 'm', String.fromCharCode(0x1b)]);
+    expect(letterKeys('7')).toEqual([String.fromCharCode(0x18, 0x09), '7', String.fromCharCode(0x1b)]);
+    expect(() => letterKeys('M')).toThrow(/letter/);
+    expect(() => letterKeys('mm')).toThrow(/letter/);
+    expect(() => letterKeys('')).toThrow(/letter/);
+  });
+  it('reads the letters of the plain buttons on a screen, and tells when m opened or closed the folded row', () => {
+    const folded = '► 3/3 · T001 impl · ✎ 1 · ▲ decisión  m: ⋯  x: ×\n? for shortcuts  ctrl+x tab · banda\n';
+    const opened = '► 3/3 · T001 impl · ✎ 1 · ▲ decisión  m: ⋯  x: ×\ns: Estado  t: Parar  p: Panel\n? for shortcuts\n';
+    expect(lettersOn(folded)).toEqual(['m', 'x']);
+    expect(lettersOn(opened)).toEqual(['m', 'x', 's', 't', 'p']);
+    expect(moreToggled(folded, opened)).toBe(true);
+    expect(moreToggled(opened, folded)).toBe(true);
+    // a letter that landed in the composer is no button: the keys did not reach the band
+    expect(moreToggled(folded, `${folded}> m\n`)).toBe(false);
+    expect(panelLetter(opened)).toBe('p');
+    expect(panelLetter(folded)).toBeNull();
+  });
+  it('gives a press check its verdict: inconclusive without the control, fail when reached without the effect, pass with it', () => {
+    expect(pressVerdict({ reached: false, effect: false })).toBe('inconclusive');
+    expect(pressVerdict({ reached: false, effect: true })).toBe('inconclusive');
+    expect(pressVerdict({ reached: true, effect: false })).toBe('fail');
+    expect(pressVerdict({ reached: true, effect: true })).toBe('pass');
+  });
+});
+
 describe('the engine checks of the TUI snapshots (carried from tasks 5, 8, 9 and 7)', () => {
   it('(a) knows a band with its buttons folded into ⋯, and whether a Stop press did anything', () => {
     expect(bandFolds(capture('folded-60x24.txt'))).toBe(true);
@@ -56,10 +84,6 @@ describe('the engine checks of the TUI snapshots (carried from tasks 5, 8, 9 and
     expect(stopTriggered(folded, `${folded}> /forge:stop\n`)).toBe(true);
     // text that was already on the screen before the press is not an effect of it
     expect(stopTriggered('/forge:stop está en el prompt', '/forge:stop está en el prompt')).toBe(false);
-  });
-  it('(a) compares screens ignoring clocks and elapsed times, to tell a press that did something from one that did not', () => {
-    expect(sameScreen('► 3/3 · 12 m  14:02:11', '► 3/3 · 13 m  14:02:15')).toBe(true);
-    expect(sameScreen('► 3/3 · [ ⋯ ]', '► 3/3 · [ ⋯ ]  p: Panel  t: Parar')).toBe(false);
   });
   it('knows when the band is up, including its short header at narrow widths', () => {
     expect(BAND_READY.test('► EJECUCIÓN · subagentes 2/3')).toBe(true);

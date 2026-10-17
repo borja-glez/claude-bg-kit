@@ -27,14 +27,21 @@
 //                                  [--config-dir <dir>] [--no-engine | --engine-only]
 // It writes <out>/<mode>-<cols>x<rows>[-lens|-live|-resized].txt, engine-*.txt and index.md, and exits 1 if any check
 // fails. The engine checks are named in the index and reported PASS, FAIL or INCONCLUSIVE (a premise did not hold, so
-// nothing was proven either way; it does not fail the run):
-//   (a) folded-letter-noop        a letter of a button folded into ⋯ does nothing (main screen, 60 columns). A positive
-//                                 control comes first: ctrl+x m (the ⋯ button) must change the screen, else the chord
-//                                 may not reach the band and the check is inconclusive.
+// nothing was proven either way; it does not fail the run). A FAIL always means the keys reached the band and the
+// expected effect was missing.
+// Every band letter is pressed as the engine documents it: ctrl+x tab gives the band the focus, then the letter, then Esc
+// hands the keys back to the prompt. A letter that does not reach the band lands in the composer and draws no button, so
+// each letter check first proves that its keys reach the band (its positive control), and is inconclusive when they do not:
+//   (a) folded-letter-noop        a letter of a button folded into ⋯ does nothing (main screen, 60 columns). Control first:
+//                                 m (the ⋯ button) must open the folded row, its buttons' letters showing.
 //   (b) waypoint-panel-to-lens    waypoint's Panel button runs $.command.run('/lens'), which reaches lens's command hook
-//                                 and the photo row draws in the transcript (main screen, 120 columns, both plugins).
+//                                 and the photo row draws in the transcript (main screen, 100 columns, both plugins: the
+//                                 band folds its buttons there). Control first: m opens the folded row, where Panel shows
+//                                 with its letter; that letter is then pressed.
 //   (b2) lens-panel-button-photo  the same with only lens loaded, so lens draws its own band and its own Panel button runs
-//                                 /lens foto. Inconclusive if lens does not draw a band with a Panel letter there.
+//                                 /lens foto. Inconclusive if lens does not draw a band with a Panel letter there. lens's
+//                                 band has no ⋯, so its control comes after a press that drew no photo: × must close the
+//                                 band (the photo, when it draws, already proves the keys reached it).
 //   (c) photo-not-wrapped         the photo's rows neither wrap nor pass the width: CommandOutput rows are not indented in
 //                                 a way that makes the full-width photo wrap (same capture as b).
 //   (d) pane-close-stops          closing the pane with the engine's ✕ stops lens's writes (fullscreen, 160 columns).
@@ -45,7 +52,10 @@ import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BAND_READY, bandFolds, checkCapture, checkPhoto, closeVerdict, dotted, fillTemplate, findText, parseArgs, sameScreen, stopTriggered } from './tui/checks.mjs';
+import {
+  BAND_READY, bandFolds, checkCapture, checkPhoto, closeVerdict, dotted, fillTemplate, findText, letterKeys, lettersOn, moreToggled, panelLetter,
+  parseArgs, pressVerdict, stopTriggered,
+} from './tui/checks.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const FIXTURE = path.join(repo, 'scripts', 'tui', 'fixture');
@@ -54,7 +64,8 @@ const TRUST = /trust the files|trust this folder|Do you trust/i;
 const BAND_WAIT_MS = 60_000;
 const SETTLE_MS = 3_000;
 const QUIET_MS = 12_000;
-const CHORD = '\x18'; // ctrl+x: outside fullscreen a band button is ctrl+x and its letter
+// The pause between the writes of one letter press (letterKeys), so the engine reads them as separate keys.
+const KEY_GAP_MS = 300;
 const PLUGINS = { both: ['waypoint', 'lens'], lens: ['lens'] };
 
 async function load() {
@@ -178,11 +189,12 @@ function shoot(engine, o) {
   });
 }
 
-// A button of the band outside fullscreen: ctrl+x, then its letter.
+// A button of the band by its letter: ctrl+x tab (the band takes the focus), the letter, Esc (the prompt takes it back).
 async function pressLetter(p, letter) {
-  p.write(CHORD);
-  await sleep(300);
-  p.write(letter);
+  for (const keys of letterKeys(letter)) {
+    p.write(keys);
+    await sleep(KEY_GAP_MS);
+  }
 }
 
 // Every file under dir/.forge/usage with its time: what lens writes for the run.
@@ -197,8 +209,8 @@ function usageListing(dir) {
 
 const result = (verdict, detail, text) => ({ verdict, detail, text });
 
-// (a) A letter of a button folded into ⋯ does nothing. Premise: a band that folded Stop (t) at 60 columns, and a chord that
-// reaches the band, shown by ctrl+x m (the ⋯ button) changing the screen.
+// (a) A letter of a button folded into ⋯ does nothing. Premise: a band that folded Stop (t) at 60 columns, and keys that
+// reach the band, shown by m (the ⋯ button) opening the folded row.
 async function foldedLetterNoop(engine, cfg) {
   return withClaude(engine, { ...cfg, cols: 60, rows: 24, mode: 'main' }, async ({ p, term }) => {
     const first = screen(term);
@@ -206,7 +218,7 @@ async function foldedLetterNoop(engine, cfg) {
     await pressLetter(p, 'm');
     await sleep(1_500);
     const opened = screen(term);
-    if (sameScreen(first, opened)) return result('inconclusive', ['ctrl+x m (the ⋯ button) changed nothing: the chord may not reach the band, so a silent t proves nothing'], opened);
+    if (!moreToggled(first, opened)) return result('inconclusive', ['m (the ⋯ button) did not open the folded row: the keys may not reach the band, so a silent t proves nothing'], opened);
     await pressLetter(p, 'm');
     await sleep(1_500);
     const baseline = screen(term);
@@ -217,24 +229,44 @@ async function foldedLetterNoop(engine, cfg) {
   });
 }
 
-// (b), (b2), (c) The Panel button's letter runs /lens; the photo draws and does not wrap. `plugins` says whose button it is.
+// (b), (b2), (c) The Panel button's letter runs /lens; the photo draws and does not wrap. `plugins` says whose button it is:
+// waypoint's band (both) folds its buttons at 100 columns, and m opening that row is the control before Panel is pressed;
+// lens's band (lens) has no ⋯, so when Panel drew no photo, × closing the band says whether the keys reached it.
 async function panelButtonPhoto(engine, cfg, plugins) {
-  const cols = 120;
+  const cols = 100;
   return withClaude(engine, { ...cfg, cols, rows: 30, mode: 'main', plugins }, async ({ p, term }) => {
-    const text0 = screen(term);
-    const letter = /(?:^|\s)([a-z]): Panel/m.exec(text0)?.[1];
-    if (!letter) {
-      const note = ['no Panel letter on the band, so the button was not pressed'];
-      return { b: result('inconclusive', note, text0), c: result('inconclusive', ['no photo to measure'], text0) };
+    const unproven = (note, text) => ({ b: result('inconclusive', note, text), c: result('inconclusive', ['no photo to measure'], text) });
+    let shown = screen(term);
+    let reached = false;
+    if (plugins === 'both') {
+      if (!shown.includes('⋯')) return unproven(['the band did not fold its buttons into ⋯, so m had no row to open as the control'], shown);
+      await pressLetter(p, 'm');
+      await sleep(1_500);
+      const opened = screen(term);
+      if (!moreToggled(shown, opened)) return unproven(['m (the ⋯ button) did not open the folded row: the keys may not reach the band, so a missing photo proves nothing'], opened);
+      reached = true;
+      shown = opened;
     }
+    const letter = panelLetter(shown);
+    if (!letter) return unproven(['no Panel letter on the band, so the button was not pressed'], shown);
     await pressLetter(p, letter);
     await sleep(SETTLE_MS);
     const text = screen(term);
     const fails = checkPhoto(text, { cols, wrapped: wrappedRows(term) });
     const missing = fails.filter(f => f.startsWith('no photo row') || f.startsWith('the photo row has no cards'));
     const wrap = fails.filter(f => !missing.includes(f));
+    // The photo drawn is the press's own effect, so it proves the keys reached the band.
+    if (!missing.length) reached = true;
+    else if (!reached) {
+      // lens's band: × closes it when the keys reach it, and its letters go from the screen.
+      await pressLetter(p, 'x');
+      await sleep(1_500);
+      reached = lettersOn(text).includes('x') && moreToggled(text, screen(term));
+    }
+    const verdict = pressVerdict({ reached, effect: !missing.length });
+    const detail = verdict === 'inconclusive' ? ['no photo, and × did not close the band either: the keys may not reach it, so this proves nothing'] : missing;
     return {
-      b: result(missing.length ? 'fail' : 'pass', missing, text),
+      b: result(verdict, detail, text),
       c: missing.length ? result('inconclusive', ['no photo to measure'], text) : result(wrap.length ? 'fail' : 'pass', wrap, text),
     };
   });

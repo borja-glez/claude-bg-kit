@@ -2,8 +2,9 @@
 // (tests/tui-checks.test.ts): no task id of the fixture split across two rows, ▲ and ✎ in the band at 80 columns,
 // letters on the band's buttons outside fullscreen («x: ×»), and «↓» when the inline pane was cut. The snapshot script
 // runs them on every capture; it also reads its options here and fills the fixture with fillTemplate and dotted.
-// The engine checks (a) to (d) of the script use the helpers below checkCapture: BAND_READY, bandFolds (folded means a
-// ⋯ and no «t: »), stopTriggered, sameScreen, checkPhoto, findText, changedFiles and closeVerdict.
+// The engine checks (a) to (d) of the script use the helpers below checkCapture: letterKeys (how a letter is pressed),
+// lettersOn, moreToggled and panelLetter (the positive control and the button to press), pressVerdict, BAND_READY,
+// bandFolds (folded means a ⋯ and no «t: »), stopTriggered, checkPhoto, findText, changedFiles and closeVerdict.
 
 export const FIXTURE_IDS = ['T001', 'T002', 'T003'];
 export const MODES = ['fullscreen', 'main'];
@@ -86,6 +87,48 @@ export function dotted(rel) {
 /** The band is up: its long header, or any short form fitParts leaves at narrow widths (► 2/3, ► 3 tareas…). */
 export const BAND_READY = /EJECUCIÓN|EXECUTION|frente|track|otra sesión|another session|►/;
 
+// Pressing a band button by its letter, as the engine documents it (index.d.ts, Button.hotkey and AbovePrompt): a letter
+// answers only while the band holds the focus, which ctrl+x tab gives it; Esc then hands the keys back to the prompt, so
+// what is typed next (a /lens) goes there.
+const FOCUS_BAND = String.fromCharCode(0x18, 0x09);
+const LEAVE_BAND = String.fromCharCode(0x1b);
+
+/** The writes, in order, that press the band button with `letter`: ctrl+x tab, the letter, Esc. */
+export function letterKeys(letter) {
+  const key = String(letter);
+  if (!/^[a-z0-9]$/.test(key)) throw new Error(`a band button's letter is one lowercase letter or digit, not «${key}»`);
+  return [FOCUS_BAND, key, LEAVE_BAND];
+}
+
+const PLAIN_BUTTON = /(?:^|\s)([a-z0-9]): \S/gm;
+
+/** The letters of the plain buttons («k: label») on a screen, in the order drawn. */
+export function lettersOn(text) {
+  return [...String(text).matchAll(PLAIN_BUTTON)].map(m => m[1]);
+}
+
+/**
+ * The positive control of the letter checks: m (⋯) opened or closed the band's folded row, so the buttons' letters on the
+ * screen changed. A letter that landed in the composer draws no button, so it does not count.
+ */
+export function moreToggled(before, after) {
+  return lettersOn(before).join(' ') !== lettersOn(after).join(' ');
+}
+
+/** The letter the band's Panel button shows («p: Panel»), or null when none is drawn. */
+export function panelLetter(text) {
+  return /(?:^|\s)([a-z0-9]): Panel\b/m.exec(String(text))?.[1] ?? null;
+}
+
+/**
+ * The verdict of a check that presses a band button: without the positive control (the keys reached the band) nothing is
+ * proven, so it is inconclusive and never a fail; once the band was reached, a missing effect fails and a present one passes.
+ */
+export function pressVerdict(o) {
+  if (!o.reached) return 'inconclusive';
+  return o.effect ? 'pass' : 'fail';
+}
+
 // Check (a): a letter of a button folded into ⋯ does nothing.
 /** Whether the band folded its buttons into ⋯: the ⋯ is there and Stop shows no «t: » letter. */
 export function bandFolds(text) {
@@ -98,12 +141,6 @@ const STOP_TEXT = /otra vez para parar|again to stop the run|\/forge:stop/g;
 /** Whether a press of Stop (t) caused something: its confirmation toast or /forge:stop show more than before the press. */
 export function stopTriggered(before, after) {
   return (String(after).match(STOP_TEXT) ?? []).length > (String(before).match(STOP_TEXT) ?? []).length;
-}
-
-/** Two screens are the same once clocks and elapsed times («14:02:11», «12 m», «45s», «2 h») are set aside. */
-export function sameScreen(a, b) {
-  const norm = s => String(s).replace(/\d{1,2}:\d{2}(:\d{2})?/g, '#').replace(/\d+\s?(?:h|m|s)\b/g, '#').replace(/[ \t]+$/gm, '').trimEnd();
-  return norm(a) === norm(b);
 }
 
 // Checks (b) and (c): the photo of /lens in the transcript, drawn, and not wrapped by an indent of CommandOutput.
