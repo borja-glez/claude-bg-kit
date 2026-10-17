@@ -7,8 +7,8 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.22.0](https://img.shields.io/badge/versi%C3%B3n-0.22.0-fab387?style=flat-square)
-![depende de waypoint ^0.26.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.26.0-cba6f7?style=flat-square)
+![versión 0.22.1](https://img.shields.io/badge/versi%C3%B3n-0.22.1-fab387?style=flat-square)
+![depende de waypoint ^0.27.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.27.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -49,7 +49,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depende de [waypoint](../waypoint/README.es.md) ^0.26.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
+forge depende de [waypoint](../waypoint/README.es.md) ^0.27.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
 
 ## Uso
 
@@ -150,7 +150,7 @@ forge trabaja junto a [superpowers](https://github.com/obra/superpowers) y aprov
 
 **Preferencias.** `workflow:` (`ask`, `forge`, `superpowers`, `superpowers-design`, `superpowers-plan`, u `off` para no usar forge) y `autonomy:` (`ask`, `auto`) van en `.forge/config.yaml` (las del equipo) o en `.forge/local.yaml` (las tuyas: `forge local set workflow <w>|none`, `forge local set autonomy ask|auto|none`). Gana lo que dice la petición, luego `local.yaml`, luego `config.yaml` y luego `ask`; `forge prefs` imprime el resultado y de dónde sale cada valor.
 
-**Modo auto.** Con `autonomy: auto`, `/forge:run --auto` o una petición que lo dice, forge pregunta solo al arrancar, en un único mensaje: los cambios del árbol que no son de la tarea, si integra la rama de ejecución al acabar (Large) y el presupuesto (modo infinito). Después decide solo y anota cada decisión (`triage --autonomy auto`, `swarm start --autonomy auto`): el enrutado, subir de camino, aplicar las propuestas critical y major del crítico (hasta 3 rondas), aprobar el diseño cuando `waypoint design-gate` lo permite, confirmar el plan y elegir el modo. Cualquier otra duda se convierte en una nota-pregunta y en el camino seguro. Nunca integra en main sin la respuesta del arranque, no hace push, no borra, no publica más allá del roadmap privado, no toca cambios ajenos a la tarea ni permisos de superficies, no arranca el infinito sin presupuesto, no cierra escalados ni decide propuestas fuera de la política. En el modo infinito con auto, una tarea Large se diseña, se aprueba y se planifica en la rama del infinito en lugar de bloquearse.
+**Modo auto.** Con `autonomy: auto`, `/forge:run --auto` o una petición que lo dice, forge pregunta solo al arrancar, en un único mensaje: los cambios del árbol que no son de la tarea, si integra la rama de ejecución al acabar (Large) y el presupuesto (modo infinito). Después decide solo y anota cada decisión (`triage --autonomy auto`, `swarm start --autonomy auto`): el enrutado, subir de camino, aplicar las propuestas critical y major del crítico y comprobarlas con `round --verify` (hasta 3 rondas en total), aprobar el diseño cuando `waypoint design-gate` lo permite (sin nada critical ni major pendiente y sin cambios aplicados que el crítico no haya leído), confirmar el plan y elegir el modo. Cualquier otra duda se convierte en una nota-pregunta y en el camino seguro. Nunca integra en main sin la respuesta del arranque, no hace push, no borra, no publica más allá del roadmap privado, no toca cambios ajenos a la tarea ni permisos de superficies, no arranca el infinito sin presupuesto, no cierra escalados ni decide propuestas fuera de la política. En el modo infinito con auto, una tarea Large reabre el diseño aprobado con una sección propia, que pasa por el crítico, se aprueba de nuevo y se planifica (cada tarea nueva con su `design_ref`) en la rama del infinito en lugar de bloquearse.
 
 ## Modos de ejecución
 

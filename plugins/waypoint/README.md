@@ -6,7 +6,7 @@
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.26.0](https://img.shields.io/badge/version-0.26.0-cba6f7?style=flat-square)
+![version 0.27.0](https://img.shields.io/badge/version-0.27.0-cba6f7?style=flat-square)
 ![requires claude.ai login](https://img.shields.io/badge/requires-claude.ai%20login-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -55,7 +55,7 @@ Requires a claude.ai login (for the artifacts) and Node ≥ 20. Restart Claude C
 
 | Command | What it does |
 | --- | --- |
-| `/waypoint:design [new [--from <spec>]\|round\|apply <all\|1,3>\|rewrite\|interview\|approve\|resume\|park]` | Write a design document (or import a superpowers spec with `new --from`), improve it in critic rounds and approve it. The approved design seeds the plan. |
+| `/waypoint:design [new [--from <spec>]\|round [--verify]\|apply <all\|1,3>\|rewrite\|interview\|approve\|amend\|reopen\|resume\|park]` | Write a design document (or import a superpowers spec with `new --from`), improve it in critic rounds and approve it. The approved design seeds the plan. |
 | `/waypoint:plan` | Write or sync `docs/waypoint/<project>/plan.yaml` and publish the live roadmap. |
 | `/waypoint:work [track]` | Take tasks one by one; the roadmap updates live. |
 | `/waypoint:status` | Progress summary. |
@@ -67,6 +67,7 @@ A typical run:
 /waypoint:design new              # first draft
 /waypoint:design round            # the critic proposes numbered changes
 /waypoint:design apply 1,3        # apply the ones you want
+/waypoint:design round --verify   # the critic checks what you applied
 /waypoint:design approve
 /waypoint:plan                    # plan.yaml + the roadmap URL
 /waypoint:work                    # or launch a session per track
@@ -78,7 +79,11 @@ A proposal you do not apply stays pending across rounds: the band counts the pen
 
 Each snapshot records what it applied: `/waypoint:design apply r1:4,5 r2:all` applies proposals of several rounds and calls `design-snapshot --round <R> --applied r1:4,5 r2:…`; a rewrite calls it with `--rewrite`. `design-gate` and the band read those fields, and fall back to the note («round 1: applied 1,3», «ronda 1: aplicadas 1,3») only in older changelogs.
 
-With forge's auto mode, `/waypoint:design approve --auto` approves without asking only when `waypoint design-gate` says no critical proposal of any round is left unapplied.
+**A critic that converges.** Each round has a budget: round 1 reviews everything with up to 12 proposals of any severity; round 2 up to 6, critical and major, on what changed; from round 3, and in `round --verify`, up to 3 critical ones (a reopened design starts again). The critic writes `verdict: ready` when nothing critical or major is left (zero proposals is a valid critique), never proposes again what you dismissed (`critique-dismiss --reason-file` keeps your reason) or resolved in an interview (`design-snapshot --resolved r1:4`), and does not pick at the text of its own applied proposals. `critique-next` says which round is next, its budget and what it reviews; `round --verify` reads only the sections changed since the last critique. With forge's auto mode, `/waypoint:design approve --auto` approves without asking only when `waypoint design-gate` says no critical or major proposal of any round is left and no applied change is unread by a critic (`needsVerify`).
+
+**Approved designs: amend or reopen.** A small change to an approved design is an amendment (`/waypoint:design amend`): it stays approved, and `waypoint design-impact` lists the plan tasks whose `design_ref` points at a changed or removed section, so `/waypoint:plan` can sync the plan and its `design_version`. A bigger one reopens it (`/waypoint:design reopen`): back to draft and through the critic, with the full budget in its first round. The plan skill writes the link itself: `artifacts.design`, `design_version` and each task's `design_ref`.
+
+**Critiques in the repository.** The critiques and `dismissed.json` live in `docs/waypoint/<project>/design/critiques/` and are committed with the design; the ones in `.waypoint/<project>/` from earlier versions are still read. The design page shows each round with its verdict and what became of each proposal (applied in vN, dismissed with its reason, resolved in the interview, rewritten or pending), what each version changed, and a status badge (draft, approved, approved · amended).
 
 With [forge](../forge/README.md) installed, `/forge:run` drives these steps for you and adds triage, validation and independent review to each task.
 
@@ -176,8 +181,8 @@ The skills run the CLI as `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" <comma
 
 | Group | Commands |
 | --- | --- |
-| Design | `design-import <spec> --project P --out D`, `design-validate`, `design-snapshot <design.md> --note n [--round R] [--applied r<R>:<n,…>…] [--rewrite]`, `design-changed`, `design-gate <design.md>` (with the `pending` proposals of every round), `critique-check`, `critique-select`, `critique-dismiss <design.md> --round R <all\|1,3>`, `design-page`, `design-park <design.md>` |
-| Plan and page | `validate [--design D]` (warns about tasks without zones: forge runs them alone; with `--design`, warns about a `design_ref` that is not a section of the design), `hash` (prints the plan hash, used to detect an out-of-date roadmap), `page [--publish-info --capabilities F [--page P]] [--states DIR]` (the capabilities to publish with, the line that says the page becomes internal, and the `meta/page` write whose `rules` and `assets` are those of the capabilities file `F` that was published; with `--page`, the listed `meta/page.json`, `capabilitiesChanged` and the `ask` line when a republish changes who can see the roadmap), `sync [--db DIR]` (with the report line: URL and counts; with `--db`, `removed`, `missing`, `unknownVersion` and `republish`), `clean-cache` |
+| Design | `design-import <spec> --project P --out D`, `design-validate`, `design-snapshot <design.md> --note n [--round R] [--applied r<R>:<n,…>…] [--resolved r<R>:<n,…>…] [--rewrite] [--kind k]`, `design-changed` (with `removed`), `design-gate <design.md>` (the `pending`, `dismissed`, `resolved` and `applied` proposals of every round, `majorPending` and `needsVerify`), `critique-next <design.md> [--verify] [--full]`, `design-impact <design.md> --plan P [--since N] [--states DIR]`, `critique-check [--verify] [--changed a,b]`, `critique-select`, `critique-dismiss <design.md> --round R <all\|1,3> [--reason-file F]`, `design-page`, `design-park <design.md>` |
+| Plan and page | `validate [--design D]` (warns about tasks without zones: forge runs them alone; with `--design`, warns about a `design_ref` that is not a section of the design, and about a `design_version` or `artifacts.design` that are not the approved design's), `hash` (prints the plan hash, used to detect an out-of-date roadmap), `page [--publish-info --capabilities F [--page P]] [--states DIR]` (the capabilities to publish with, the line that says the page becomes internal, and the `meta/page` write whose `rules` and `assets` are those of the capabilities file `F` that was published; with `--page`, the listed `meta/page.json`, `capabilitiesChanged` and the `ask` line when a republish changes who can see the roadmap), `sync [--db DIR]` (with the report line: URL and counts; with `--db`, `removed`, `missing`, `unknownVersion` and `republish`), `clean-cache` |
 | Work | `next [--base <branch>]` (with `waiting_on`), `conflicts`, `recover [--minutes N]` (below 5 it acts as 5), `status`, `commit-info`, `claim`, `done`, `block --why-file f`, `heartbeat [--register] [--busy-until t] [--idle]` (each prints `{now, eid, eids, leaseUntil, batch}`) |
 | Sessions | `launch <track> [--base <branch>]`, `launch <plan> <T> --task --run R --coordinator SID --base B [--effort e] [--model m] [--launcher bg\|herdr]`, `inbox`, `escalations`, `notes [--plan p] [--locale es\|en]` (with a line to say per person's note), `session-id`, `bind <plan\|design> --via v [--seat s \| --second-seat] [--resume] [--takeover]`, `release <plan> [--seat s] [--free T --state-version V [--keep-seat]]` (`--keep-seat` gives the task back and keeps the seat bound) |
 | Helpers | `event-id`, `now` |

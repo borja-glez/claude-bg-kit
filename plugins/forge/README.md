@@ -7,8 +7,8 @@ Triage by size, the right model for each role, your own tools first, independent
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.22.0](https://img.shields.io/badge/version-0.22.0-fab387?style=flat-square)
-![depends on waypoint ^0.26.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.26.0-cba6f7?style=flat-square)
+![version 0.22.1](https://img.shields.io/badge/version-0.22.1-fab387?style=flat-square)
+![depends on waypoint ^0.27.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.27.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -49,7 +49,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depends on [waypoint](../waypoint/README.md) ^0.26.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
+forge depends on [waypoint](../waypoint/README.md) ^0.27.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
 
 ## Usage
 
@@ -150,7 +150,7 @@ forge works next to [superpowers](https://github.com/obra/superpowers) and reuse
 
 **Preferences.** `workflow:` (`ask`, `forge`, `superpowers`, `superpowers-design`, `superpowers-plan`, or `off` for no forge) and `autonomy:` (`ask`, `auto`) go in `.forge/config.yaml` (the team's) or `.forge/local.yaml` (yours: `forge local set workflow <w>|none`, `forge local set autonomy ask|auto|none`). What the request says wins, then `local.yaml`, then `config.yaml`, then `ask`; `forge prefs` prints the result and where each value came from.
 
-**Auto mode.** With `autonomy: auto`, `/forge:run --auto` or a request that says so, forge asks only at launch, in one message: changes in the tree that are not the task's, whether to merge the run branch at the end (Large), and the budget (infinite mode). Then it decides alone and records each decision (`triage --autonomy auto`, `swarm start --autonomy auto`): the route, raising the path, applying the critic's critical and major proposals (up to 3 rounds), approving the design when `waypoint design-gate` allows it, confirming the plan and choosing the mode. Any other doubt becomes a question note and the safe path. It never merges into main without the launch answer, pushes, deletes, publishes beyond the private roadmap, touches changes that are not the task's or surface permissions, starts infinite mode without a budget, closes escalations or decides proposals outside the policy. In infinite mode with auto, a Large task is designed, approved and planned on the infinite branch instead of being blocked.
+**Auto mode.** With `autonomy: auto`, `/forge:run --auto` or a request that says so, forge asks only at launch, in one message: changes in the tree that are not the task's, whether to merge the run branch at the end (Large), and the budget (infinite mode). Then it decides alone and records each decision (`triage --autonomy auto`, `swarm start --autonomy auto`): the route, raising the path, applying the critic's critical and major proposals and checking them with `round --verify` (up to 3 rounds in all), approving the design when `waypoint design-gate` allows it (nothing critical or major pending, no applied change the critic has not read), confirming the plan and choosing the mode. Any other doubt becomes a question note and the safe path. It never merges into main without the launch answer, pushes, deletes, publishes beyond the private roadmap, touches changes that are not the task's or surface permissions, starts infinite mode without a budget, closes escalations or decides proposals outside the policy. In infinite mode with auto, a Large task reopens the approved design with a section of its own, which goes through the critic, is approved again and is planned (each new task with its `design_ref`) on the infinite branch instead of being blocked.
 
 ## Execution modes
 

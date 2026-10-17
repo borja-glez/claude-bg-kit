@@ -6,7 +6,7 @@
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.26.0](https://img.shields.io/badge/versi%C3%B3n-0.26.0-cba6f7?style=flat-square)
+![versión 0.27.0](https://img.shields.io/badge/versi%C3%B3n-0.27.0-cba6f7?style=flat-square)
 ![requiere sesión en claude.ai](https://img.shields.io/badge/requiere-sesi%C3%B3n%20en%20claude.ai-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -55,7 +55,7 @@ Necesita sesión iniciada en claude.ai (para los artifacts) y Node ≥ 20. Reini
 
 | Comando | Qué hace |
 | --- | --- |
-| `/waypoint:design [new [--from <spec>]\|round\|apply <all\|1,3>\|rewrite\|interview\|approve\|resume\|park]` | Escribe un documento de diseño (o importa un spec de superpowers con `new --from`), lo mejora en rondas de crítica y lo aprueba. El diseño aprobado da forma al plan. |
+| `/waypoint:design [new [--from <spec>]\|round [--verify]\|apply <all\|1,3>\|rewrite\|interview\|approve\|amend\|reopen\|resume\|park]` | Escribe un documento de diseño (o importa un spec de superpowers con `new --from`), lo mejora en rondas de crítica y lo aprueba. El diseño aprobado da forma al plan. |
 | `/waypoint:plan` | Escribe o sincroniza `docs/waypoint/<proyecto>/plan.yaml` y publica el roadmap vivo. |
 | `/waypoint:work [frente]` | Toma tareas una a una; el roadmap se actualiza en vivo. |
 | `/waypoint:status` | Resumen del progreso. |
@@ -67,6 +67,7 @@ Un recorrido típico:
 /waypoint:design new              # primer borrador
 /waypoint:design round            # el crítico propone cambios numerados
 /waypoint:design apply 1,3        # aplicas los que quieras
+/waypoint:design round --verify   # el crítico revisa lo que aplicaste
 /waypoint:design approve
 /waypoint:plan                    # plan.yaml + la URL del roadmap
 /waypoint:work                    # o lanza una sesión por frente
@@ -78,7 +79,11 @@ Una propuesta que no aplicas sigue pendiente entre rondas: la banda cuenta las p
 
 Cada snapshot anota lo que aplicó: `/waypoint:design apply r1:4,5 r2:all` aplica propuestas de varias rondas y llama a `design-snapshot --round <R> --applied r1:4,5 r2:…`; una reescritura lo llama con `--rewrite`. `design-gate` y la banda leen esos campos, y solo en changelogs antiguos se apoyan en la nota («round 1: applied 1,3», «ronda 1: aplicadas 1,3»).
 
-Con el modo auto de forge, `/waypoint:design approve --auto` aprueba sin preguntar solo cuando `waypoint design-gate` dice que no queda ninguna propuesta critical sin aplicar en ninguna ronda.
+**Un crítico que converge.** Cada ronda tiene un presupuesto: la ronda 1 lo revisa todo con hasta 12 propuestas de cualquier gravedad; la 2, hasta 6, critical y major, sobre lo que cambió; desde la 3, y en `round --verify`, hasta 3 critical (un diseño reabierto empieza de nuevo). El crítico escribe `verdict: ready` cuando no queda nada critical ni major (una crítica sin propuestas es válida), no vuelve a proponer lo que descartaste (`critique-dismiss --reason-file` guarda tu motivo) ni lo que resolviste en una entrevista (`design-snapshot --resolved r1:4`), y no critica el texto de sus propias propuestas aplicadas. `critique-next` dice qué ronda toca, su presupuesto y qué revisa; `round --verify` lee solo las secciones cambiadas desde la última crítica. Con el modo auto de forge, `/waypoint:design approve --auto` aprueba sin preguntar solo cuando `waypoint design-gate` dice que no queda ninguna propuesta critical ni major en ninguna ronda y que un crítico ha leído todo cambio aplicado (`needsVerify`).
+
+**Diseños aprobados: enmendar o reabrir.** Un cambio pequeño en un diseño aprobado es una enmienda (`/waypoint:design amend`): sigue aprobado, y `waypoint design-impact` lista las tareas del plan cuyo `design_ref` apunta a una sección cambiada o quitada, para que `/waypoint:plan` sincronice el plan y su `design_version`. Uno mayor lo reabre (`/waypoint:design reopen`): vuelve a borrador y pasa por el crítico, con el presupuesto completo en su primera ronda. La skill `plan` escribe el enlace ella misma: `artifacts.design`, `design_version` y el `design_ref` de cada tarea.
+
+**Las críticas en el repositorio.** Las críticas y `dismissed.json` viven en `docs/waypoint/<project>/design/critiques/` y se commitean con el diseño; las de versiones anteriores en `.waypoint/<project>/` se siguen leyendo. La página del diseño enseña cada ronda con su veredicto y qué pasó con cada propuesta (aplicada en vN, descartada con su motivo, resuelta en la entrevista, reescrita o pendiente), qué cambió cada versión y una insignia de estado (borrador, aprobado, aprobado · enmendado).
 
 Con [forge](../forge/README.es.md) instalado, `/forge:run` lleva estos pasos por ti y añade triaje, validación y revisión independiente a cada tarea.
 
@@ -176,8 +181,8 @@ Las skills ejecutan la CLI como `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" 
 
 | Grupo | Comandos |
 | --- | --- |
-| Diseño | `design-import <spec> --project P --out D`, `design-validate`, `design-snapshot <design.md> --note n [--round R] [--applied r<R>:<n,…>…] [--rewrite]`, `design-changed`, `design-gate <design.md>` (con las propuestas `pending` de todas las rondas), `critique-check`, `critique-select`, `critique-dismiss <design.md> --round R <all\|1,3>`, `design-page`, `design-park <design.md>` |
-| Plan y página | `validate [--design D]` (avisa de las tareas sin zonas: forge las ejecuta solas; con `--design`, avisa de un `design_ref` que no es una sección del diseño), `hash` (imprime el hash del plan, para detectar un roadmap desactualizado), `page [--publish-info --capabilities F [--page P]] [--states DIR]` (las capacidades con las que publicar, la línea que avisa de que la página queda interna y la escritura de `meta/page`, cuyas `rules` y `assets` son las del fichero de capacidades `F` que se publicó; con `--page`, el `meta/page.json` listado, `capabilitiesChanged` y la línea `ask` cuando una republicación cambia quién puede ver el roadmap), `sync [--db DIR]` (con la línea del informe: URL y cuentas; con `--db`, `removed`, `missing`, `unknownVersion` y `republish`), `clean-cache` |
+| Diseño | `design-import <spec> --project P --out D`, `design-validate`, `design-snapshot <design.md> --note n [--round R] [--applied r<R>:<n,…>…] [--resolved r<R>:<n,…>…] [--rewrite] [--kind k]`, `design-changed` (with `removed`), `design-gate <design.md>` (las propuestas `pending`, `dismissed`, `resolved` y `applied` de todas las rondas, `majorPending` y `needsVerify`), `critique-next <design.md> [--verify] [--full]`, `design-impact <design.md> --plan P [--since N] [--states DIR]`, `critique-check [--verify] [--changed a,b]`, `critique-select`, `critique-dismiss <design.md> --round R <all\|1,3> [--reason-file F]`, `design-page`, `design-park <design.md>` |
+| Plan y página | `validate [--design D]` (avisa de las tareas sin zonas: forge las ejecuta solas; con `--design`, avisa de un `design_ref` que no es una sección del diseño y de un `design_version` o un `artifacts.design` que no son los del diseño aprobado), `hash` (imprime el hash del plan, para detectar un roadmap desactualizado), `page [--publish-info --capabilities F [--page P]] [--states DIR]` (las capacidades con las que publicar, la línea que avisa de que la página queda interna y la escritura de `meta/page`, cuyas `rules` y `assets` son las del fichero de capacidades `F` que se publicó; con `--page`, el `meta/page.json` listado, `capabilitiesChanged` y la línea `ask` cuando una republicación cambia quién puede ver el roadmap), `sync [--db DIR]` (con la línea del informe: URL y cuentas; con `--db`, `removed`, `missing`, `unknownVersion` y `republish`), `clean-cache` |
 | Trabajo | `next [--base <rama>]` (con `waiting_on`), `conflicts`, `recover [--minutes N]` (por debajo de 5 vale 5), `status`, `commit-info`, `claim`, `done`, `block --why-file f`, `heartbeat [--register] [--busy-until t] [--idle]` (cada uno imprime `{now, eid, eids, leaseUntil, batch}`) |
 | Sesiones | `launch <frente> [--base <rama>]`, `launch <plan> <T> --task --run R --coordinator SID --base B [--effort e] [--model m] [--launcher bg\|herdr]`, `inbox`, `escalations`, `notes [--plan p] [--locale es\|en]` (con una línea que decir por cada nota de una persona), `session-id`, `bind <plan\|design> --via v [--seat s \| --second-seat] [--resume] [--takeover]`, `release <plan> [--seat s] [--free T --state-version V [--keep-seat]]` (`--keep-seat` devuelve la tarea y deja el asiento ligado) |
 | Utilidades | `event-id`, `now` |

@@ -7,9 +7,9 @@ Design them, plan them, build them with independent review, run them in parallel
 
 **English** · [Español](README.es.md) · [Changelog](CHANGELOG.md)
 
-![waypoint 0.26.0](https://img.shields.io/badge/waypoint-0.26.0-cba6f7?style=flat-square)
-![forge 0.22.0](https://img.shields.io/badge/forge-0.22.0-fab387?style=flat-square)
-![lens 0.13.1](https://img.shields.io/badge/lens-0.13.1-b4befe?style=flat-square)
+![waypoint 0.27.0](https://img.shields.io/badge/waypoint-0.27.0-cba6f7?style=flat-square)
+![forge 0.22.1](https://img.shields.io/badge/forge-0.22.1-fab387?style=flat-square)
+![lens 0.13.2](https://img.shields.io/badge/lens-0.13.2-b4befe?style=flat-square)
 ![Claude Code plugin marketplace](https://img.shields.io/badge/Claude%20Code-marketplace%20bg--kit-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -61,7 +61,7 @@ lens detects waypoint, forge and superpowers from their files in the project, so
 
 A large task goes through four stages. You make three decisions along the way: you approve the design, you decide on proposals, and you authorize merges.
 
-1. **Design (waypoint).** `/waypoint:design` writes a design document. The `design-critic` agent reviews it in rounds and returns numbered proposals. You apply them, ask for another round, have Claude interview you, or rewrite. You approve it when it is right.
+1. **Design (waypoint).** `/waypoint:design` writes a design document. The `design-critic` agent reviews it in rounds and returns numbered proposals. You apply them, ask for another round, have Claude interview you, or rewrite. You approve it when it is right. Each round has a budget, so the critic converges; a change to an approved design is an amendment or reopens it.
 2. **Plan (waypoint + forge).** `forge-planner` turns the approved design into `plan.yaml`: **tracks** (independent lines of work, called *frentes* in Spanish), phases and small, verifiable tasks with the files each one touches. `/waypoint:plan` publishes it as a **live roadmap** on claude.ai. Everyone with the link sees progress, writes notes and decides proposals there.
 3. **Build (forge).** `/forge:run` triages each task by size and picks a path. The heavier paths go through an implementer chosen by difficulty, then the project's own validators (tests, lint, types, build), then up to three independent reviewers (correctness, security, perf). Their weighted verdict accepts the work or sends it back for a fix round, with a stronger implementer from round 3 and the strongest one (`impl-heavy`, Opus at extra-high effort) only for the last attempt and the fix of the final review. From round 2 the reviewers look at the fix, not the whole task again.
 4. **Execution (forge).** When the plan has unblocked tasks, a coordinator runs them up to `swarm.parallel` at once (3 by default). Each task gets its own git worktree and either a subagent (*subagents* mode, the default) or a background session of its own (*sessions* mode, launched with `/forge:member` at the effort set in `swarm.member`, medium by default), and one planner decides what runs next; one task at a time is just N = 1. Any other session can join the execution as a manual member and take a pending task. Finished work is integrated **one merge at a time** into the run branch `forge/run-<project>`, running the validators after each merge and comparing them with what already failed there. Your checkout is not touched until the final merge, which asks for your permission.
@@ -78,7 +78,7 @@ Add the marketplace straight from GitHub, then install the plugins you want:
 claude plugin marketplace add borja-glez/claude-bg-kit
 
 claude plugin install waypoint@bg-kit
-claude plugin install forge@bg-kit     # pulls in waypoint ^0.26.0 as a dependency
+claude plugin install forge@bg-kit     # pulls in waypoint ^0.27.0 as a dependency
 claude plugin install lens@bg-kit
 ```
 
