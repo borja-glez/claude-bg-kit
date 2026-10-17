@@ -9,7 +9,8 @@ export type WaypointBand = (
       run: { coordinator: string; stage: string } | null;
       recentDone?: { id: string; minutes: number; estimateMin?: number }[]; auto?: { count: number; lastMajor: string | null } }
   | { mode: 'run'; project: string; locale: string; executor: 'subagents' | 'sessions'; running: number; parallel: number;
-      integrated: number; total: number; slots: { task: string; stage: string; round: number }[];
+      // every running task, at most twelve, and the accepted ones waiting to integrate.
+      integrated: number; queued: number; total: number; slots: { task: string; stage: string; round: number }[];
       worst: 'alive' | 'silent' | 'stopped'; stalled: boolean; roadmapUrl: string | null;
       // the seat of the conversation that looks (its own binding, else the run's coordinator), its inbox and pending
       // decision, the plan's progress and its first phase not done.
@@ -25,6 +26,6 @@ export type WaypointBand = (
 ) & { viewer: { role: 'owner' | 'other-live' | 'previous' | 'none'; coordinator: boolean; runId: string | null } };
 declare module 'claude-code' {
   interface PluginState {
-    waypoint: { band: WaypointBand; hidden: boolean };
+    waypoint: { band: WaypointBand; hidden: boolean; drawn: boolean | null };
   }
 }

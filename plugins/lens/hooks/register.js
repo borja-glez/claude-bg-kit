@@ -11401,6 +11401,7 @@ function knownLocale(f) {
   return void 0;
 }
 var MAX_CELLS = 120;
+var BAND_SLOTS_MAX = 12;
 var CELL = { done: "d", in_progress: "a", claimed: "a", blocked: "b", free: "p", orphaned: "b" };
 var RECENT_DONE = 3;
 var SKEW_MS = 2 * 6e4;
@@ -11481,7 +11482,8 @@ function runModel(project, f, exec, plan, now, viewer, sid) {
     parallel: v.parallel,
     integrated: v.integrated,
     total: v.total,
-    slots: v.slots.slice(0, 2).map((s) => ({ task: s.task, stage: s.stage, round: s.round })),
+    queued: v.queued.length,
+    slots: v.slots.slice(0, BAND_SLOTS_MAX).map((s) => ({ task: s.task, stage: s.stage, round: s.round })),
     worst,
     stalled: !v.active,
     roadmapUrl: plan?.artifacts.roadmap ?? null,
@@ -11820,6 +11822,15 @@ function compactUsage(s) {
   s.rereadBase = s.tracking.waypoint + s.tracking.forge;
 }
 
+// src/lib/duration.ts
+var duration = (seconds) => seconds === null || seconds === void 0 ? null : seconds < 60 ? `${seconds}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s` : `${Math.floor(seconds / 3600)}h ${String(Math.floor(seconds % 3600 / 60)).padStart(2, "0")}m`;
+var DAY_S = 86400;
+function span(seconds) {
+  if (seconds === null || seconds === void 0 || !Number.isFinite(seconds) || seconds < 0) return null;
+  return seconds > DAY_S ? ">24h" : duration(Math.floor(seconds));
+}
+var MAX_MINUTES = 99999 * 1440;
+
 // src/lens/view.ts
 var PALETTE = {
   base: "#1e1e2e",
@@ -11879,7 +11890,7 @@ var SECTION_HUE = {
   now: "sky"
 };
 var SECTION_ICON = {
-  // Single-width glyphs only: some terminals draw ⚒ or ☰ two cells wide and the title runs into them.
+  // Single-width glyphs only: some terminals draw a glyph that has an emoji form two cells wide and the title runs into it (F-13).
   roadmap: "\u25C6",
   forge: "\u25C8",
   superpowers: "\u2726",
@@ -12012,12 +12023,6 @@ function barParts(r, width) {
   const fill = "\u2588".repeat(full) + edge;
   return { fill, rest: "\u2591".repeat(Math.max(0, w - full - (edge ? 1 : 0))) };
 }
-var duration = (seconds) => seconds === null || seconds === void 0 ? null : seconds < 60 ? `${seconds}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s` : `${Math.floor(seconds / 3600)}h ${String(Math.floor(seconds % 3600 / 60)).padStart(2, "0")}m`;
-var DAY_S = 86400;
-function span(seconds) {
-  if (seconds === null || seconds === void 0 || !Number.isFinite(seconds) || seconds < 0) return null;
-  return seconds > DAY_S ? ">24h" : duration(Math.floor(seconds));
-}
 function short(seconds) {
   if (seconds === null || seconds === void 0 || !Number.isFinite(seconds) || seconds < 0) return null;
   const s = Math.floor(seconds);
@@ -12026,8 +12031,8 @@ function short(seconds) {
 function headline(m) {
   if (m.execution?.active) {
     const x = m.execution;
-    const detail = x.slots.slice(0, 2).map((s) => `${s.task} ${s.stage}`).join(" \xB7 ");
-    return { section: "forge", title: `\u25B6 ${x.slots.length}/${x.parallel}`, detail, cells: null, agent: null };
+    const detail = x.slots.map((s) => `${s.task} ${s.stage}`).join(" \xB7 ");
+    return { section: "forge", title: `\u25BA ${x.slots.length}/${x.parallel}`, detail, cells: null, agent: null };
   }
   const expanded = (m.activities ?? []).find((a) => a.expanded);
   if (m.forge && expanded?.owner !== "other") {
@@ -12205,7 +12210,7 @@ function linkHomes(h2) {
   const out = /* @__PURE__ */ new Map();
   for (const l of h2.links) {
     const task = l.task;
-    if (!task) continue;
+    if (!task || l.workflow) continue;
     out.set(l.id, l.project !== null ? keyOf(task, l.project) : homeOf(h2, (st) => st.task === task) ?? keyOf(task, null));
   }
   return out;
@@ -12325,8 +12330,8 @@ function buildActivities(i) {
     const ended = st.doneAt ? ms(st.doneAt) : left ? last : NaN;
     const end = left ? last + LEFT_OPEN_MS : ended;
     const owner = ownerOf(st, i.sessionId, i.ownTasks);
-    const visible = done || stopped ? Number.isFinite(end) && age(end, now) < DONE_TTL_MS : age(last, now) < (owner === "own" ? OWN_TTL_MS : OTHER_TTL_MS);
-    if (!visible) continue;
+    const visible2 = done || stopped ? Number.isFinite(end) && age(end, now) < DONE_TTL_MS : age(last, now) < (owner === "own" ? OWN_TTL_MS : OTHER_TTL_MS);
+    if (!visible2) continue;
     const skewed = last - now > FUTURE_SKEW_MS;
     const job = liveJobs.find((j) => jobHome.get(j) === key);
     const live = owner === "own" && !done && !stopped;
@@ -12385,6 +12390,7 @@ function buildActivities(i) {
   const focus = i.focusAgent ? i.links.find((l) => l.id === i.focusAgent) : void 0;
   const pick2 = (focus ? forge.find((b) => b.row.key === homes.get(focus.id)) : void 0) ?? forge.find((b) => b.rank === 0 && b.row.owner === "own") ?? forge.reduce((best, b) => !best || b.at > best.at ? b : best, void 0);
   if (pick2) pick2.row.expanded = true;
+  if (pick2 && focus && pick2.row.task === focus.task) built.unshift(...built.splice(built.indexOf(pick2), 1));
   const out = built.map((b) => b.row);
   if (i.superpowers) {
     const s = i.superpowers;
@@ -12957,14 +12963,234 @@ function mainCheckoutFrom(root, gitFileText) {
   return dir && (/^[A-Za-z]:/.test(dir) || dir.startsWith("/")) ? dir : root;
 }
 
+// src/lib/text-width.ts
+var ZERO = /[\p{Mn}\p{Me}\p{Cf}]/u;
+var WIDE = [
+  [4352, 4447],
+  [8986, 8987],
+  [9193, 9196],
+  [9200, 9200],
+  [9203, 9203],
+  [9725, 9726],
+  [9748, 9749],
+  [9800, 9811],
+  [9855, 9855],
+  [9875, 9875],
+  [9889, 9889],
+  [9898, 9899],
+  [9917, 9918],
+  [9924, 9925],
+  [9934, 9934],
+  [9940, 9940],
+  [9962, 9962],
+  [9970, 9971],
+  [9973, 9973],
+  [9978, 9978],
+  [9981, 9981],
+  [9989, 9989],
+  [9994, 9995],
+  [10024, 10024],
+  [10060, 10060],
+  [10062, 10062],
+  [10067, 10069],
+  [10071, 10071],
+  [10133, 10135],
+  [10160, 10160],
+  [10175, 10175],
+  [11035, 11036],
+  [11088, 11088],
+  [11093, 11093],
+  [11904, 12350],
+  [12353, 13311],
+  [13312, 19903],
+  [19968, 40959],
+  [40960, 42191],
+  [44032, 55203],
+  [63744, 64255],
+  [65072, 65103],
+  [65280, 65376],
+  [65504, 65510],
+  [126980, 126980],
+  [127183, 127183],
+  [127374, 127374],
+  [127377, 127386],
+  [127462, 127487],
+  [127488, 127743],
+  [127744, 129791],
+  [131072, 262141]
+];
+var VS16 = 65039;
+var ZWJ = 8205;
+function within(cp3, ranges) {
+  for (const [lo, hi] of ranges) {
+    if (cp3 < lo) return false;
+    if (cp3 <= hi) return true;
+  }
+  return false;
+}
+function charWidth(cp3) {
+  if (cp3 < 127) return cp3 < 32 ? 0 : 1;
+  if (cp3 < 160) return 0;
+  if (ZERO.test(String.fromCodePoint(cp3))) return 0;
+  return within(cp3, WIDE) ? 2 : 1;
+}
+var isRegional = (cp3) => cp3 >= 127462 && cp3 <= 127487;
+var isTone = (cp3) => cp3 >= 127995 && cp3 <= 127999;
+function splitClusters(text2) {
+  const out = [];
+  let joined = false;
+  let regionals = 0;
+  for (const ch of String(text2)) {
+    const cp3 = ch.codePointAt(0) ?? 0;
+    const sticks = out.length > 0 && (joined && /\p{Extended_Pictographic}/u.test(ch) || cp3 === ZWJ || isTone(cp3) || cp3 >= 65024 && cp3 <= 65039 || cp3 >= 917536 && cp3 <= 917631 || cp3 >= 160 && /[\p{Mn}\p{Me}]/u.test(ch) || isRegional(cp3) && regionals === 1);
+    if (sticks) out[out.length - 1] += ch;
+    else {
+      out.push(ch);
+      regionals = 0;
+    }
+    if (isRegional(cp3)) regionals += 1;
+    joined = cp3 === ZWJ;
+  }
+  return out;
+}
+var segmenter = typeof Intl !== "undefined" && typeof Intl.Segmenter === "function" ? new Intl.Segmenter(void 0, { granularity: "grapheme" }) : null;
+function clustersOf(text2) {
+  const s = String(text2);
+  return segmenter ? Array.from(segmenter.segment(s), (part) => part.segment) : splitClusters(s);
+}
+function clusterWidth(cluster) {
+  let widest = 0;
+  for (const ch of cluster) {
+    const cp3 = ch.codePointAt(0) ?? 0;
+    if (cp3 === VS16) {
+      if (widest > 0) return 2;
+      continue;
+    }
+    widest = Math.max(widest, charWidth(cp3));
+  }
+  return widest;
+}
+function stringWidth(text2) {
+  let width = 0;
+  for (const cluster of clustersOf(text2)) width += clusterWidth(cluster);
+  return width;
+}
+function clipWidth(text2, max) {
+  const s = String(text2);
+  if (stringWidth(s) <= max) return s;
+  if (!(max >= 1)) return "";
+  let out = "";
+  let used = 0;
+  for (const cluster of clustersOf(s)) {
+    const cells2 = clusterWidth(cluster);
+    if (used + cells2 > max - 1) break;
+    out += cluster;
+    used += cells2;
+  }
+  return `${out}\u2026`;
+}
+
+// src/mod/band-fit.ts
+var SEP = " \xB7 ";
+var TITLE_MIN = 8;
+var DEFAULT_COLUMNS = 80;
+var SLOT = "slot:";
+var visible = (parts) => parts.filter((p) => stringWidth(p.text) > 0);
+function partsWidth(parts, sep = SEP) {
+  let width = 0;
+  visible(parts).forEach((p, i) => {
+    width += stringWidth(p.text) + (i ? stringWidth(p.glue ?? sep) : 0);
+  });
+  return width;
+}
+function joinParts(parts, sep = SEP) {
+  return visible(parts).map((p, i) => `${i ? p.glue ?? sep : ""}${p.text}`).join("");
+}
+var columnsOf = (cols) => typeof cols === "number" && Number.isFinite(cols) ? Math.max(0, Math.floor(cols)) : 0;
+var prioKey = (p) => Number.isNaN(p.prio) ? Number.POSITIVE_INFINITY : p.prio;
+function fitParts(parts, cols, sep = SEP) {
+  const width = columnsOf(cols);
+  const cur = parts.map((p) => ({ ...p }));
+  const gone = /* @__PURE__ */ new Set();
+  const view = () => {
+    const out = [];
+    let more = 0;
+    let at = -1;
+    let after = false;
+    cur.forEach((p, i) => {
+      if (!gone.has(i)) {
+        out.push(after ? { ...p, glue: void 0 } : p);
+        after = false;
+        return;
+      }
+      after = true;
+      if (p.key.startsWith(SLOT)) {
+        more++;
+        if (at < 0) at = out.length;
+      }
+    });
+    if (more) out.splice(at, 0, { key: "more", text: `+${more}`, prio: 4 });
+    return out;
+  };
+  const fits = () => partsWidth(view(), sep) <= width;
+  const done = () => ({ shown: view(), dropped: gone.size });
+  if (fits()) return done();
+  const order = cur.map((_, i) => i).sort((a, b) => {
+    const ka = prioKey(cur[a]);
+    const kb = prioKey(cur[b]);
+    return ka === kb ? b - a : kb > ka ? 1 : -1;
+  });
+  for (const i of order) {
+    const p = cur[i];
+    if (p.title && p.text.endsWith(p.title)) {
+      const lead = p.text.slice(0, p.text.length - p.title.length);
+      for (let w = stringWidth(p.title) - 1; w >= TITLE_MIN; w--) {
+        cur[i] = { ...p, text: lead + clipWidth(p.title, w) };
+        if (fits()) return done();
+      }
+    }
+    if (p.short !== void 0 && stringWidth(p.short) < stringWidth(cur[i].text)) {
+      cur[i] = { ...cur[i], text: p.short };
+      if (fits()) return done();
+    }
+  }
+  for (const i of order) {
+    gone.add(i);
+    if (fits()) return done();
+  }
+  return { shown: [], dropped: gone.size };
+}
+var WIDE_COLUMNS = 140;
+var TWO_COLUMNS = 90;
+var ONE_ROW_BELOW = 3;
+function bandLevel(o) {
+  if (!o.fullscreen || o.maxRows < ONE_ROW_BELOW || o.bodyColumns < TWO_COLUMNS) return "one";
+  return o.bodyColumns >= WIDE_COLUMNS ? "wide" : "two";
+}
+function controlWidth(label, o) {
+  const w = stringWidth(label);
+  if (o.kind === "link" || o.kind === "text") return w;
+  return o.plain ? w + (o.hotkey ? 3 : 0) : w + 4;
+}
+
 // src/mod/band-line.ts
 var TITLE_MAX = 40;
 var BIDI = new RegExp(`[${[1564, 8206, 8207, 8234, 8235, 8236, 8237, 8238, 8294, 8295, 8296, 8297].map((c2) => String.fromCharCode(c2)).join("")}]`, "g");
 var CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
 function clip3(text2, max = TITLE_MAX) {
-  const chars = Array.from(String(text2).replace(CONTROL, " ").replace(BIDI, "").replace(/\s+/g, " ").trim());
-  return chars.length <= max ? chars.join("") : chars.slice(0, max - 1).join("") + "\u2026";
+  return clipWidth(String(text2).replace(CONTROL, " ").replace(BIDI, "").replace(/\s+/g, " ").trim(), max);
 }
+var STAGE_SHORT = {
+  triage: "tri",
+  brief: "brief",
+  implement: "impl",
+  validate: "val",
+  verify: "ver",
+  review: "rev",
+  verdict: "verd",
+  integrate: "int",
+  execution: "exec"
+};
 
 // src/mod/files.ts
 var MAX_DOCS = CACHE_DOCS_MAX;
@@ -13182,9 +13408,9 @@ function verdictChip(f, t) {
   if (!v) return null;
   const n2 = v.round ?? (f.round !== null && f.round >= 1 ? f.round : null);
   const c2 = v.findings;
-  const counts = c2 ? [`${c2.critical} C`, `${c2.important} I`, ...c2.minor > 0 ? [`${c2.minor} m`] : []] : [];
+  const counts2 = c2 ? [`${c2.critical} C`, `${c2.important} I`, ...c2.minor > 0 ? [`${c2.minor} m`] : []] : [];
   const head = v.action === "accept" ? `\u2713 ${n2 !== null ? t.acceptedInRound(n2) : t.accepted}` : [v.action, n2 !== null ? `${t.fixRound} ${n2}${f.reviews?.max ? `/${f.reviews.max}` : ""}` : null].filter(Boolean).join(" \xB7 ");
-  return { text: [head, ...counts].join(" \xB7 "), hue: VERDICT_HUE[v.action] ?? "lavender" };
+  return { text: [head, ...counts2].join(" \xB7 "), hue: VERDICT_HUE[v.action] ?? "lavender" };
 }
 function verifyState(f) {
   const v = f.verify;
@@ -13293,6 +13519,7 @@ function tasksCard(m, rows, t) {
   blocks.push(...runBlocks(m, t));
   const head = rows.find((a) => a.expanded && a.owner !== "other");
   return {
+    id: "tasks",
     icon: SECTION_ICON.forge,
     title: `${t.sTasksInProgress} \xB7 ${rows.length}`,
     hue: SECTION_HUE.forge,
@@ -13313,7 +13540,7 @@ function buildCards(m, t, nowMs2) {
     for (const j of (m.jobs ?? []).slice(0, 5)) {
       blocks.push({ kind: "row", dot: "sky", spinning: true, text: [jobText(j.name, t), j.task].filter(Boolean).join(" "), right: short(j.seconds) ?? void 0 });
     }
-    out.push({ icon: SECTION_ICON.now, title: t.sNow, hue: SECTION_HUE.now, blocks });
+    out.push({ id: "now", icon: SECTION_ICON.now, title: t.sNow, hue: SECTION_HUE.now, blocks });
   }
   if (m.waypoint) {
     const w = m.waypoint;
@@ -13340,10 +13567,11 @@ function buildCards(m, t, nowMs2) {
       blocks.push({ kind: "text", text: `\u2713 ${r.id} \xB7 ${r.minutes > 1440 ? ">24h" : r.minutes}${r.estimateMin ? `/${r.estimateMin}` : ""} min`, dim: true, ...over ? { hue: "yellow" } : {} });
     }
     const chips = [];
-    if (w.inbox > 0) chips.push({ text: `\u2709 ${w.inbox}`, hue: "blue" });
-    if (w.escalation) chips.push({ text: `\u26A0 ${t.decision}`, hue: "red" });
+    if (w.inbox > 0) chips.push({ text: `\u270E ${w.inbox}`, hue: "blue" });
+    if (w.escalation) chips.push({ text: `\u25B2 ${t.decision}`, hue: "red" });
     if (chips.length) blocks.push({ kind: "chips", chips });
     out.push({
+      id: "roadmap",
       icon: SECTION_ICON.roadmap,
       title: w.project,
       hue: SECTION_HUE.roadmap,
@@ -13357,6 +13585,7 @@ function buildCards(m, t, nowMs2) {
   else if (m.forge || m.infinite?.active || m.decisions) {
     const f = m.forge;
     out.push({
+      id: "tasks",
       icon: SECTION_ICON.forge,
       title: f?.task ?? "forge",
       hue: SECTION_HUE.forge,
@@ -13375,8 +13604,8 @@ function buildCards(m, t, nowMs2) {
       hue: "teal",
       moving: x.active && x.slots.length > 0,
       label: `${x.mode === "sessions" ? t.modeSessions : t.modeSubagents} ${x.slots.length}/${x.parallel}`,
-      // Done: accepted (waiting to integrate) or integrated.
-      right: `${x.integrated + x.queued.length}/${x.total} ${t.done} \xB7 ${x.integrated} ${t.integratedN}`
+      // F-10: integrated out of the total, as the band says it; the accepted ones are listed below («to integrate»).
+      right: `${x.integrated}/${x.total} ${t.integratedN}`
     }];
     if (x.stallReason) blocks.push({ kind: "text", text: x.stallReason, dim: false });
     const dim = x.dim ? { dim: true } : {};
@@ -13418,11 +13647,12 @@ function buildCards(m, t, nowMs2) {
     list(t.orphans, x.orphans);
     const coord = x.coordinator.liveness;
     out.push({
-      icon: "\u25B6",
+      id: "execution",
+      icon: "\u25BA",
       title: t.sExecution,
       hue: "teal",
       chip: { text: coord === "alive" ? t.alive : coord === "silent" ? t.silent : t.stopped, hue: HUE[coord] },
-      subtitle: x.elapsedSeconds != null && span(x.elapsedSeconds) ? `\u23F1 ${span(x.elapsedSeconds)}` : void 0,
+      subtitle: x.elapsedSeconds != null && span(x.elapsedSeconds) ? `\u25F7 ${span(x.elapsedSeconds)}` : void 0,
       blocks
     });
   }
@@ -13446,12 +13676,12 @@ function buildCards(m, t, nowMs2) {
     }];
     if (u.time) {
       const tm = u.time;
-      const line = (active, partial, since) => `\u23F1 ${t.active} ${partial ? "\u2265 " : ""}${span(active) ?? "0s"}${since !== null && span(since) ? ` \xB7 ${t.sinceStart} ${span(since)}` : ""}`;
+      const line = (active, partial, since) => `\u25F7 ${t.active} ${partial ? "\u2265 " : ""}${span(active) ?? "0s"}${since !== null && span(since) ? ` \xB7 ${t.sinceStart} ${span(since)}` : ""}`;
       blocks.push({ kind: "text", text: line(tm.activeSeconds, tm.activePartial, tm.sinceStartSeconds) });
       if (tm.session) blocks.push({ kind: "text", text: `${t.thisSession}: ${line(tm.session.activeSeconds, false, tm.session.sinceStartSeconds)}`, dim: true });
     }
     if (u.session) blocks.push({ kind: "text", text: `${t.thisSession}: ${fmtTokens(u.session.tokens, loc)} tok \xB7 ${u.sessionPartial ? "\u2265 " : ""}${fmtUsd(u.session.costUsd, loc)}`, dim: true });
-    if (u.officialUsd !== null) blocks.push({ kind: "text", text: `${u.drift ? "\u26A0 " : ""}/cost ${fmtUsd(u.officialUsd, loc)}${u.drift ? ` \xB7 ${t.drift}` : ""}`, dim: !u.drift });
+    if (u.officialUsd !== null) blocks.push({ kind: "text", text: `${u.drift ? "\u25B2 " : ""}/cost ${fmtUsd(u.officialUsd, loc)}${u.drift ? ` \xB7 ${t.drift}` : ""}`, dim: !u.drift });
     for (const g of u.groups) {
       blocks.push({ kind: "row", dot: "teal", tag: { text: label[g.id], hue: "teal" }, text: name(g), right: `${fmtTokens(g.tokens, loc)} \xB7 ${usd(g.costUsd)} \xB7 ${Math.round(g.share * 100)} %` });
     }
@@ -13464,7 +13694,7 @@ function buildCards(m, t, nowMs2) {
       blocks.push({ kind: "text", text: t.withoutForgeNote, dim: true });
     }
     blocks.push({ kind: "text", text: `${t.pricesAsOf} ${u.pricesAsOf}`, dim: true });
-    usageCard = { icon: "$", title: t.sUsage, hue: "teal", chip: { text: `${u.partial ? "\u2265 " : ""}${fmtUsd(u.costUsd, loc)}`, hue: "teal" }, blocks };
+    usageCard = { id: "usage", icon: "$", title: t.sUsage, hue: "teal", chip: { text: `${u.partial ? "\u2265 " : ""}${fmtUsd(u.costUsd, loc)}`, hue: "teal" }, blocks };
   }
   if (m.superpowers) {
     const s = m.superpowers;
@@ -13477,7 +13707,7 @@ function buildCards(m, t, nowMs2) {
     if (s.current) blocks.push({ kind: "chips", chips: [{ text: `${t.fixRound} ${s.current.round}${s.current.cap ? `/${s.current.cap}` : ""}`, hue: "yellow" }] });
     if (s.stale) blocks.push({ kind: "text", text: t.staleLedger, dim: true });
     for (const line of s.lastLines) blocks.push({ kind: "text", text: line, dim: true });
-    out.push({ icon: SECTION_ICON.superpowers, title: s.plan || t.sSuperpowers, hue: SECTION_HUE.superpowers, chip: { text: `${Math.round(ratio(s.done, s.tasks) * 100)}%`, hue: SECTION_HUE.superpowers }, blocks });
+    out.push({ id: "superpowers", icon: SECTION_ICON.superpowers, title: s.plan || t.sSuperpowers, hue: SECTION_HUE.superpowers, chip: { text: `${Math.round(ratio(s.done, s.tasks) * 100)}%`, hue: SECTION_HUE.superpowers }, blocks });
   }
   if (m.todos) {
     const td = m.todos;
@@ -13485,7 +13715,7 @@ function buildCards(m, t, nowMs2) {
     const blocks = [{ kind: "bar", ratio: ratio(td.done, td.total), hue: SECTION_HUE.todos, moving: !!td.inProgress }, { kind: "cells", cells: c2.cells }];
     for (const text2 of td.active ?? (td.inProgress ? [td.inProgress] : [])) blocks.push({ kind: "row", dot: "peach", spinning: true, text: text2 });
     for (const next of td.next) blocks.push({ kind: "row", dot: "s2", text: next });
-    out.push({ icon: SECTION_ICON.todos, title: t.sTodos, hue: SECTION_HUE.todos, chip: { text: `${td.done}/${td.total}`, hue: SECTION_HUE.todos }, blocks });
+    out.push({ id: "todos", icon: SECTION_ICON.todos, title: t.sTodos, hue: SECTION_HUE.todos, chip: { text: `${td.done}/${td.total}`, hue: SECTION_HUE.todos }, blocks });
   }
   const done = m.subagentsDone ?? [];
   const loose = m.subagents.filter((s) => !s.shown);
@@ -13507,6 +13737,7 @@ function buildCards(m, t, nowMs2) {
       blocks.push({ kind: "text", text: text2, dim: true });
     }
     out.push({
+      id: "agents",
       icon: SECTION_ICON.agents,
       title: t.sSubagents,
       hue: SECTION_HUE.agents,
@@ -13520,7 +13751,7 @@ function buildCards(m, t, nowMs2) {
       { kind: "bar", ratio: ratio(cc.done, cc.done + cc.open), hue: SECTION_HUE.tasks, label: `${cc.open} ${t.open}`, right: `${cc.done} ${t.done}` },
       ...cc.recent.map((r) => ({ kind: "row", dot: "teal", text: r }))
     ];
-    out.push({ icon: SECTION_ICON.tasks, title: t.sTasks, hue: SECTION_HUE.tasks, blocks });
+    out.push({ id: "ccTasks", icon: SECTION_ICON.tasks, title: t.sTasks, hue: SECTION_HUE.tasks, blocks });
   }
   if (usageCard) out.push(usageCard);
   return out;
@@ -13712,6 +13943,104 @@ function bandSvg(o) {
   return { source: `<svg xmlns="http://www.w3.org/2000/svg" width="${o.W}" height="${H}" viewBox="0 0 ${o.W} ${H}">${STYLE}${s}</svg>`, height: H };
 }
 
+// src/lens/layout.ts
+var COMPACT_BELOW = 56;
+var DOCK_COLUMNS = 56;
+var DOCK_MIN_COLUMNS = 110;
+var PANE_ROWS_MIN = 6;
+var MIN_COLUMNS = 20;
+var SUMMARY_CELLS = 8;
+var CARD_PRIORITY = ["now", "tasks", "execution", "roadmap", "agents", "superpowers", "todos", "ccTasks", "usage"];
+function panelLayout(props, viewport) {
+  const placement = props?.placement === "inline" ? "inline" : "dock";
+  const fallback = { cols: MIN_COLUMNS, rows: null, placement, compact: true, boxed: false, focusAgent: null };
+  try {
+    const raw = Number(props?.bodyColumns);
+    if (!Number.isFinite(raw) || raw <= 0) return fallback;
+    const cols = Math.max(MIN_COLUMNS, Math.floor(raw));
+    const bodyRows = Number(props?.scroll?.bodyRows);
+    const rows = placement === "inline" && Number.isFinite(bodyRows) && bodyRows > 0 ? Math.floor(bodyRows) : null;
+    const compact = placement === "inline" || cols < COMPACT_BELOW || viewport?.isFullscreen === false;
+    const agent = props?.view?.agentId;
+    return { cols, rows, placement, compact, boxed: !compact, focusAgent: typeof agent === "string" && agent ? agent : null };
+  } catch {
+    return fallback;
+  }
+}
+var innerWidth = (layout) => Math.max(6, layout.cols - (layout.boxed ? 4 : 2));
+var cellsMax = (inner) => 2 * Math.max(1, Math.floor(inner / 2));
+function fitCells(cells2, max) {
+  const limit = Math.max(1, Math.floor(max));
+  if (cells2.length <= limit) return { cells: [...cells2], more: null };
+  const size = Math.max(1, limit - SUMMARY_CELLS);
+  const first = cells2.findIndex((c2) => c2 === "active" || c2 === "pending");
+  const focus = first < 0 ? cells2.length - size : first;
+  const start = Math.max(0, Math.min(focus - 2, cells2.length - size));
+  const left = [...cells2.slice(0, start), ...cells2.slice(start + size)];
+  const empty = left.filter((c2) => c2 === "pending").length;
+  const filled = left.length - empty;
+  const counts2 = [filled ? `${filled} \u25A0` : "", empty ? `${empty} \u25A1` : ""].filter(Boolean);
+  return { cells: cells2.slice(start, start + size), more: counts2.length ? `+${counts2.join(" \xB7 ")}` : null };
+}
+function blockRows(b, inner) {
+  if (b.kind === "bar") return b.label || b.right ? 2 : 1;
+  if (b.kind === "cells") return b.cells.length ? Math.min(2, Math.ceil(b.cells.length * 2 / Math.max(2, inner))) : 0;
+  return 1;
+}
+function cardRows(card, layout) {
+  const inner = innerWidth(layout);
+  return 1 + (card.subtitle ? 1 : 0) + (layout.boxed ? 2 : 0) + card.blocks.reduce((n2, b) => n2 + blockRows(b, inner), 0);
+}
+function fitCards(cards, layout) {
+  try {
+    if (layout.rows === null) return { cards, hidden: 0 };
+    const total = (cs) => cs.reduce((n2, c2) => n2 + cardRows(c2, layout), 0);
+    const before = total(cards);
+    if (before <= layout.rows) return { cards, hidden: 0 };
+    const budget = Math.max(0, layout.rows - 1);
+    const out = cards.map((c2) => ({ ...c2, blocks: [...c2.blocks] }));
+    for (let i = out.length - 1; i >= 0 && total(out) > budget; i--) {
+      out[i] = { ...out[i], blocks: out[i].blocks.filter((b) => !(b.kind === "text" && b.dim)) };
+    }
+    const rank = (c2) => {
+      const k = c2.id ? CARD_PRIORITY.indexOf(c2.id) : -1;
+      return k < 0 ? CARD_PRIORITY.length : k;
+    };
+    while (out.length > 1 && total(out) > budget) {
+      let worst = 0;
+      out.forEach((c2, i) => {
+        if (rank(c2) >= rank(out[worst])) worst = i;
+      });
+      out.splice(worst, 1);
+    }
+    return { cards: out, hidden: Math.max(0, before - total(out)) };
+  } catch {
+    return { cards, hidden: 0 };
+  }
+}
+function paneRows(estimate, viewportRows) {
+  const third = Math.floor((viewportRows && viewportRows > 0 ? viewportRows : 24) / 3);
+  const want = Number.isFinite(estimate) ? Math.ceil(estimate) + 1 : PANE_ROWS_MIN;
+  return Math.max(PANE_ROWS_MIN, Math.min(want, third));
+}
+function clipCard(card, layout, rows) {
+  try {
+    const limit = Math.max(1, Math.floor(rows));
+    if (cardRows(card, layout) <= limit) return card;
+    const marker = { kind: "text", text: "\u2026", dim: true };
+    if (limit === 1 && !layout.boxed) return { ...card, title: `${card.title}\u2026`, subtitle: void 0, chip: void 0, blocks: [] };
+    const head = { ...card, subtitle: limit >= 3 ? card.subtitle : void 0, blocks: [] };
+    const kept = [];
+    for (const b of card.blocks) {
+      if (cardRows({ ...head, blocks: [...kept, b, marker] }, layout) > limit) break;
+      kept.push(b);
+    }
+    return { ...head, blocks: [...kept, marker] };
+  } catch {
+    return card;
+  }
+}
+
 // src/lens/term.tsx
 var hex = (h2) => PALETTE[h2];
 var STAGE_GLYPH = { done: "\u25CF", active: "\u25C9", pending: "\u25CB" };
@@ -13723,15 +14052,17 @@ function bar(ui, key, r, width, hue, moving) {
   const { fill, rest } = barParts(r, width);
   return /* @__PURE__ */ h(Box, { key, flexDirection: "row" }, /* @__PURE__ */ h(Text, { color: hex(hue) }, fill), /* @__PURE__ */ h(Text, { color: PALETTE.s0 }, rest.replace(/░/g, "\u2588")));
 }
-function cells(ui, key, list) {
+function cells(ui, key, list, max) {
   const { Box, Text, Client } = ui;
-  const colors = list.map((s) => hex(STATE_HUE[s]));
-  const glyphs = list.map((s) => s === "pending" ? "\u25A1" : "\u25A0");
-  const active = list.map((s) => s === "active");
-  if (Client && active.some(Boolean)) {
-    return /* @__PURE__ */ h(Client, { key, module: "./pulse.js", props: { kind: "cells", colors, active, dim: PALETTE.s1, glyphs } });
-  }
-  return /* @__PURE__ */ h(Box, { key, flexDirection: "row", flexWrap: "wrap" }, list.map((s, i) => /* @__PURE__ */ h(Text, { key: `${key}-${i}`, color: colors[i] }, `${glyphs[i]} `)));
+  const fit2 = max === void 0 ? { cells: list, more: null } : fitCells(list, max);
+  const shown = fit2.cells;
+  const inner = fit2.more ? `${key}-c` : key;
+  const colors = shown.map((s) => hex(STATE_HUE[s]));
+  const glyphs = shown.map((s) => s === "pending" ? "\u25A1" : "\u25A0");
+  const active = shown.map((s) => s === "active");
+  const boxes = Client && active.some(Boolean) ? /* @__PURE__ */ h(Client, { key: inner, module: "./pulse.js", props: { kind: "cells", colors, active, dim: PALETTE.s1, glyphs } }) : /* @__PURE__ */ h(Box, { key: inner, flexDirection: "row", flexWrap: "wrap" }, shown.map((s, i) => /* @__PURE__ */ h(Text, { key: `${key}-${i}`, color: colors[i] }, `${glyphs[i]} `)));
+  if (!fit2.more) return boxes;
+  return /* @__PURE__ */ h(Box, { key, flexDirection: "row", flexWrap: "wrap", columnGap: 1 }, boxes, /* @__PURE__ */ h(Text, { dimColor: true }, fit2.more));
 }
 function spinner(ui, key, hue) {
   const { Text, Client } = ui;
@@ -13746,7 +14077,7 @@ function block(ui, key, b, inner) {
       return /* @__PURE__ */ h(Box, { key, flexDirection: "column" }, head, bar(ui, `${key}-b`, b.ratio, Math.max(4, inner), b.hue, !!b.moving));
     }
     case "cells":
-      return cells(ui, key, b.cells);
+      return cells(ui, key, b.cells, cellsMax(inner));
     case "stages":
       return /* @__PURE__ */ h(Box, { key, flexDirection: "row", flexWrap: "wrap" }, b.stages.map((s, i) => /* @__PURE__ */ h(Box, { key: `${key}-${i}`, flexDirection: "row" }, i > 0 ? /* @__PURE__ */ h(Text, { color: s.state === "pending" ? PALETTE.s1 : hex(b.hue) }, "\u2500") : null, /* @__PURE__ */ h(Text, { color: s.state === "pending" ? PALETTE.s2 : hex(b.hue) }, STAGE_GLYPH[s.state]), /* @__PURE__ */ h(Text, { bold: s.state === "active", color: s.state === "active" ? hex(b.hue) : void 0, dimColor: s.state === "pending" }, ` ${s.name} `))));
     case "row":
@@ -13757,17 +14088,169 @@ function block(ui, key, b, inner) {
       return /* @__PURE__ */ h(Box, { key, flexDirection: "row", flexWrap: "wrap", columnGap: 1 }, b.chips.map((c2, i) => /* @__PURE__ */ h(Text, { key: `${key}-${i}`, color: hex(c2.hue), bold: true }, `\u2039${c2.text}\u203A`)));
   }
 }
-function termCard(ui, key, card, width) {
+function termCard(ui, key, card, layout) {
   const { Box, Text } = ui;
-  const inner = Math.max(6, width - 4);
-  return /* @__PURE__ */ h(Box, { key, flexDirection: "column", borderStyle: "round", borderColor: hex(card.hue), paddingX: 1 }, /* @__PURE__ */ h(Box, { flexDirection: "row", columnGap: 1 }, /* @__PURE__ */ h(Box, { flexShrink: 0 }, /* @__PURE__ */ h(Text, { color: hex(card.hue), bold: true }, card.icon)), /* @__PURE__ */ h(Box, { flexGrow: 1, flexShrink: 1, minWidth: 0 }, /* @__PURE__ */ h(Text, { bold: true, wrap: "truncate-end" }, card.title)), card.chip ? /* @__PURE__ */ h(Box, { flexShrink: 0 }, /* @__PURE__ */ h(Text, { color: PALETTE.base, backgroundColor: hex(card.chip.hue), bold: true }, ` ${card.chip.text} `)) : null), card.subtitle ? /* @__PURE__ */ h(Text, { dimColor: true, wrap: "truncate-end" }, card.subtitle) : null, card.blocks.map((b, i) => block(ui, `${key}-${i}`, b, inner)));
+  const inner = innerWidth(layout);
+  const head = /* @__PURE__ */ h(Box, { flexDirection: "row", columnGap: 1 }, /* @__PURE__ */ h(Box, { flexShrink: 0 }, /* @__PURE__ */ h(Text, { color: hex(card.hue), bold: true }, card.icon)), /* @__PURE__ */ h(Box, { flexGrow: 1, flexShrink: 1, minWidth: 0 }, layout.boxed ? /* @__PURE__ */ h(Text, { bold: true, wrap: "truncate-end" }, card.title) : /* @__PURE__ */ h(Text, { bold: true, color: hex(card.hue), wrap: "truncate-end" }, card.title)), card.chip ? /* @__PURE__ */ h(Box, { flexShrink: 0 }, /* @__PURE__ */ h(Text, { color: PALETTE.base, backgroundColor: hex(card.chip.hue), bold: true }, ` ${card.chip.text} `)) : null);
+  const body = [
+    ...card.subtitle ? [/* @__PURE__ */ h(Text, { key: `${key}-sub`, dimColor: true, wrap: "truncate-end" }, card.subtitle)] : [],
+    ...card.blocks.map((b, i) => block(ui, `${key}-${i}`, b, inner))
+  ];
+  if (layout.boxed) {
+    return /* @__PURE__ */ h(Box, { key, flexDirection: "column", borderStyle: "round", borderColor: hex(card.hue), paddingX: 1 }, head, body);
+  }
+  return /* @__PURE__ */ h(Box, { key, flexDirection: "column" }, head, /* @__PURE__ */ h(Box, { flexDirection: "column", paddingLeft: 2 }, body));
+}
+function partsLine(ui, parts, base) {
+  const { Text } = ui;
+  return /* @__PURE__ */ h(Text, { wrap: "truncate-end" }, parts.map((p, i) => {
+    const text2 = `${i ? p.glue ?? SEP : ""}${p.text}`;
+    if (p.hue === "dim") return /* @__PURE__ */ h(Text, { key: `part-${p.key}`, dimColor: true }, text2);
+    if (p.hue === "accent") return /* @__PURE__ */ h(Text, { key: `part-${p.key}`, bold: true, color: hex(base) }, text2);
+    if (p.hue === "warn") return /* @__PURE__ */ h(Text, { key: `part-${p.key}`, color: PALETTE.yellow }, text2);
+    if (p.hue === "alert") return /* @__PURE__ */ h(Text, { key: `part-${p.key}`, color: PALETTE.red }, text2);
+    return text2;
+  }));
 }
 function termBand(ui, o) {
   const { Box, Text } = ui;
-  const titleW = Math.max(8, Math.min(28, o.title.length + 2, Math.floor(o.columns / 4)));
-  const cellsW = Math.min(o.cells.length, 16) * 2;
-  const barW = Math.max(6, Math.min(36, o.columns - titleW - cellsW - o.label.length - 30));
-  return /* @__PURE__ */ h(Box, { flexDirection: "row", columnGap: 1, flexShrink: 1 }, o.spin ? spinner(ui, "band-spin", o.hue) : /* @__PURE__ */ h(Text, { color: hex(o.hue) }, o.icon), /* @__PURE__ */ h(Box, { width: titleW, flexShrink: 0 }, /* @__PURE__ */ h(Text, { bold: true, wrap: "truncate-end" }, o.title)), o.cells.length ? bar(ui, "band-bar", o.ratio, barW, o.hue, o.moving) : null, o.label ? /* @__PURE__ */ h(Text, { bold: true, color: hex(o.hue) }, o.label) : null, o.cells.length ? cells(ui, "band-cells", o.cells.slice(0, 16)) : null, o.detail ? /* @__PURE__ */ h(Box, { flexShrink: 1 }, /* @__PURE__ */ h(Text, { dimColor: true, wrap: "truncate-end" }, o.detail)) : null);
+  return /* @__PURE__ */ h(Box, { flexDirection: "row", columnGap: 1, flexShrink: 1, minWidth: 0 }, /* @__PURE__ */ h(Box, { flexShrink: 0 }, o.spin ? spinner(ui, "band-spin", o.hue) : /* @__PURE__ */ h(Text, { color: hex(o.hue) }, o.icon)), /* @__PURE__ */ h(Box, { key: "band-line", flexShrink: 1, minWidth: 0 }, partsLine(ui, o.parts, o.hue)), o.bar ? /* @__PURE__ */ h(Box, { flexShrink: 0 }, bar(ui, "band-bar", o.bar.ratio, o.bar.width, o.hue, o.bar.moving)) : null, o.cells.length ? /* @__PURE__ */ h(Box, { flexShrink: 0 }, cells(ui, "band-cells", o.cells)) : null);
+}
+
+// src/lens/lens-band.ts
+var VALIDATING2 = /* @__PURE__ */ new Set(["prep", "review-prep", "validate"]);
+var AGENTS_NAMED = 3;
+var AGENT_TEXT = 24;
+function ownInProgress(m) {
+  return (m?.activities ?? []).filter((a) => a.kind === "forge" && a.owner === "own" && !a.done && !a.stopped && a.task !== null);
+}
+function activityTag(a) {
+  const doing = a.job ? VALIDATING2.has(a.job.name) ? "val" : a.job.name === "integrate" ? "int" : a.job.name : a.stage ? STAGE_SHORT[a.stage] ?? a.stage : null;
+  return [a.task, doing, a.round ? `r${a.round}` : null].filter(Boolean).join(" ");
+}
+function lensBand(m, t, agentsHeard) {
+  const acts = ownInProgress(m);
+  const head = m ? headline(m) : null;
+  const agents = m ? m.subagents.length : agentsHeard;
+  const parts = [];
+  let section = head?.section ?? "agents";
+  let cells2 = head?.cells ?? null;
+  if (acts.length >= 2) {
+    section = "forge";
+    cells2 = null;
+    for (const a of acts) parts.push({ key: `slot:${a.key}`, text: activityTag(a), prio: 4 });
+  } else {
+    const title = head?.title || (section === "agents" ? t.sSubagents : t.sNow);
+    parts.push({ key: "title", text: title, title, prio: 4 });
+    if (cells2?.total) parts.push({ key: "count", text: `${cells2.done}/${cells2.total}`, prio: 5, hue: "accent" });
+    if (head?.detail) parts.push({ key: "detail", text: head.detail, prio: 6, hue: "dim" });
+  }
+  if (agents > 0) parts.push({ key: "agents", text: `\u25CE ${agents}`, prio: 5, hue: "accent" });
+  const adhoc = (m?.activities ?? []).find((a) => a.kind === "adhoc")?.agents ?? [];
+  for (const g of adhoc.slice(0, AGENTS_NAMED)) {
+    parts.push({ key: `agent:${g.id}`, text: clipWidth((g.description || g.type || "?").replace(/\s+/g, " ").trim(), AGENT_TEXT), prio: 6, hue: "dim" });
+  }
+  const spent = m ? usageBandText(m) : null;
+  if (spent) parts.push({ key: "spend", text: spent, prio: 7, hue: "dim" });
+  return { parts, section, cells: cells2?.cells ?? [], ratio: cells2 ? ratio(cells2.done, cells2.total) : 0, spin: agents > 0 };
+}
+
+// src/lens/photo.ts
+var PHOTOS_MAX = 20;
+var STAMP = /^lens · \d{2}:\d{2}:\d{2} #(\d{1,6}) · /;
+function clockText(nowMs2) {
+  const d = new Date(nowMs2);
+  return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n2) => String(n2).padStart(2, "0")).join(":");
+}
+function photoText(n2, nowMs2, summary2) {
+  return `lens \xB7 ${clockText(nowMs2)} #${n2} \xB7 ${summary2}`;
+}
+function photoId(text2) {
+  const m = typeof text2 === "string" ? STAMP.exec(text2) : null;
+  return m ? Number(m[1]) : null;
+}
+function keepPhoto(photos2, n2, shot) {
+  photos2.set(n2, shot);
+  while (photos2.size > PHOTOS_MAX) {
+    const oldest = photos2.keys().next();
+    if (oldest.done) break;
+    photos2.delete(oldest.value);
+  }
+}
+function lensMode(args, presentation) {
+  const a = String(args ?? "").trim().toLowerCase();
+  if (a === "live" || a === "pane") return "pane";
+  if (a === "foto" || a === "photo") return "photo";
+  const columns = Number(presentation?.columns);
+  const docks = presentation?.isFullscreen !== false && (Number.isFinite(columns) && columns > 0 ? columns : DOCK_MIN_COLUMNS) >= DOCK_MIN_COLUMNS;
+  return docks ? "pane" : "photo";
+}
+
+// src/lens/surfaces.ts
+var STATUS_COLUMNS = 100;
+var RUN_NOTIFY_AFTER_S = 20 * 60;
+var VALIDATING3 = /* @__PURE__ */ new Set(["prep", "review-prep", "validate"]);
+function activityText(a, t) {
+  const doing = a.job ? VALIDATING3.has(a.job.name) ? t.validating : a.job.name === "integrate" ? t.integrating : a.job.name : a.stage ? t.stage[a.stage] ?? a.stage : null;
+  return [a.task, doing, a.round ? `r${a.round}` : null].filter(Boolean).join(" ");
+}
+function ownActive(m, role) {
+  return !!m && (ownInProgress(m).length > 0 || role === "owner" && m.execution?.active === true);
+}
+function statusText(m, t, role) {
+  if (!m || !ownActive(m, role)) return null;
+  const parts = [{ key: "head", text: "lens", prio: 9 }];
+  for (const a of ownInProgress(m)) parts.push({ key: `slot:${a.key}`, text: activityText(a, t), short: activityTag(a), prio: 4 });
+  const run = role === "owner" && m.execution?.active ? m.execution : null;
+  if (run) parts.push({ key: "run", text: `\u25BA ${run.integrated}/${run.total} ${t.integratedN}`, short: `\u25BA ${run.integrated}/${run.total}`, prio: 5 });
+  if (m.subagents.length) parts.push({ key: "agents", text: t.subagentsN(m.subagents.length), short: `\u25CE ${m.subagents.length}`, prio: 6 });
+  if (m.usage) parts.push({ key: "cost", text: fmtUsd((m.usage.session ?? m.usage).costUsd, m.locale), prio: 7 });
+  return joinParts(fitParts(parts, STATUS_COLUMNS).shown);
+}
+function spinnerText(m, t) {
+  const acts = ownInProgress(m);
+  const a = acts.find((x) => x.expanded) ?? acts[0];
+  if (!a?.task) return null;
+  const rest = activityText({ ...a, task: null }, t);
+  return rest ? `${a.task} \xB7 ${rest}` : a.task;
+}
+function modeLabels(m) {
+  if (!m) return [];
+  const out = [];
+  if (ownInProgress(m).some((a) => a.autonomy === "auto")) out.push("forge auto");
+  const inf = m.infinite;
+  if (inf?.active) out.push(`\u221E ${inf.cycle}${inf.cyclesMax !== null ? `/${inf.cyclesMax}` : ""}`);
+  return out;
+}
+var counts = (f) => f ? [`${f.critical} C`, `${f.important} I`, ...f.minor > 0 ? [`${f.minor} m`] : []].join(" \xB7 ") : "";
+function surfaceEvents(prev, next, role, t) {
+  if (!prev) return { toasts: [], ended: null };
+  const toasts = [];
+  const before = new Map(prev.activities.map((a) => [a.key, a]));
+  for (const a of next.activities) {
+    if (a.kind !== "forge" || a.owner !== "own" || !a.task) continue;
+    const b = before.get(a.key);
+    if (!b) continue;
+    const v = a.verdict;
+    if (v && (!b.verdict || b.verdict.action !== v.action || (b.verdict.round ?? null) !== (v.round ?? null))) {
+      toasts.push(v.action === "accept" ? t.toastAccepted(a.task, v.round ?? a.round ?? null) : t.toastVerdict(a.task, v.action, counts(v.findings)));
+    }
+    if (a.round !== null && a.round >= 2 && a.round !== b.round) toasts.push(t.toastRound(a.task, a.round));
+  }
+  const x = next.execution;
+  const y = prev.execution;
+  const same = role === "owner" && !!x && !!y && x.runId === y.runId;
+  if (same && x.integrated > y.integrated) {
+    const seen = new Set((y.finished ?? []).map((f) => f.task));
+    const task = (x.finished ?? []).find((f) => !seen.has(f.task))?.task;
+    if (task) toasts.push(t.toastIntegrated(task, x.integrated, x.total));
+  }
+  let ended = null;
+  if (same && y.active && !x.active && (x.elapsedSeconds ?? 0) >= RUN_NOTIFY_AFTER_S) {
+    const done = x.total > 0 && x.integrated >= x.total;
+    ended = { runId: x.runId, text: done ? t.runFinished(x.integrated, x.total) : t.runStopped(x.stallReason ?? x.stopReason ?? "") };
+  }
+  return { toasts, ended };
 }
 
 // src/lens/usage-file.ts
@@ -14107,6 +14590,8 @@ function knownTasks(m) {
 // src/lens/register.tsx
 var panel = atom({ plugin: "lens", key: "panel" }, null);
 var hidden = atom({ plugin: "lens", key: "hidden" }, false);
+var waypointDrawn = atom({ plugin: "waypoint", key: "drawn" }, null);
+var waypointHidden = atom({ plugin: "waypoint", key: "hidden" }, false);
 var PANE = "lens";
 var LINE_MAX = 80;
 var MAX_ACTIVITY = 50;
@@ -14149,6 +14634,35 @@ var roadmap = noneBand();
 var bandRead = false;
 var bandModel = null;
 var bandJson = "";
+var lastView = { columns: null, rows: null, fullscreen: null, maxRows: null };
+var focusAgent = null;
+var viewNumber = (v) => typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+function noteView(viewport, maxRows) {
+  if (viewport) {
+    lastView = {
+      ...lastView,
+      columns: viewNumber(viewport.columns) ?? lastView.columns,
+      rows: viewNumber(viewport.rows) ?? lastView.rows,
+      fullscreen: typeof viewport.isFullscreen === "boolean" ? viewport.isFullscreen : lastView.fullscreen
+    };
+  }
+  const above = viewNumber(maxRows);
+  if (above !== null) lastView = { ...lastView, maxRows: above };
+}
+var ICON_COLUMNS = 2;
+var BAR_MIN = 6;
+var BAR_MAX = 36;
+var BAND_CELLS = 16;
+var bandDrawn = false;
+function runLens($, args) {
+  $.command.run({ command: "lens", args }).catch(async () => {
+    try {
+      await $.prompt.fill({ text: `/lens ${args}`, mode: "replace" });
+      $.ui.toast(lensTexts().pressEnter);
+    } catch {
+    }
+  });
+}
 var SAFE_TASK2 = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,120}$/;
 var panelFiles = {};
 var paneUp = false;
@@ -14170,6 +14684,14 @@ function resetPanel() {
   lastJson = "";
   bandModel = null;
   bandJson = "";
+  focusAgent = null;
+  prevModel = null;
+  primed = false;
+  toastQueue = [];
+  toastTimer?.cancel();
+  toastTimer = null;
+  toastPending = false;
+  forgeHeardAt = null;
   statusCache.clear();
   jobCache.clear();
   links = [];
@@ -14191,12 +14713,16 @@ function applyPendingEnd(id2, now) {
 function isBusy(now) {
   activity.subagents = activity.subagents.filter((s) => now - s.since < SUBAGENT_TTL_MS);
   const todos = summarizeTodos(activity.todos);
-  return todos.total - todos.done > 0 || activity.subagents.length > 0 || links.some((l) => l.status !== "done");
+  return todos.total - todos.done > 0 || activity.subagents.length > 0 || links.some((l) => l.status !== "done") || ownActive(bandModel, runRoleOf(roadmap)) || forgeHeardAt !== null && now - forgeHeardAt < FORGE_HEARD_MS;
 }
 var waypointBand = false;
 async function checkWaypoint($) {
   try {
     if (await read($, hidden)) return;
+  } catch {
+  }
+  try {
+    if (typeof await read($, waypointDrawn) === "boolean") return;
   } catch {
   }
   let installed = false;
@@ -14215,6 +14741,18 @@ async function checkWaypoint($) {
     waypointBand = next;
     $.ui.invalidate("ui.render");
   }
+}
+async function waypointDraws($) {
+  try {
+    const said = await read($, waypointDrawn);
+    if (typeof said === "boolean") return said;
+  } catch {
+  }
+  try {
+    if (await read($, waypointHidden)) return false;
+  } catch {
+  }
+  return waypointBand;
 }
 async function noteActivity($) {
   try {
@@ -14750,6 +15288,7 @@ async function buildPanel($) {
     links,
     ownTasks,
     wakeAt,
+    focusAgent,
     ...roadmap.locale ? { locale: roadmap.locale } : {}
   });
 }
@@ -14759,6 +15298,7 @@ function keepBand($, model) {
   bandJson = json2;
   bandModel = model;
   $.ui.invalidate("ui.render");
+  void updateSurfaces($, model);
 }
 async function writePanel($) {
   if (!paneUp) return;
@@ -14849,6 +15389,16 @@ var TEXT = {
     panelOpened: "Panel de progreso abierto.",
     panelWaiting: "El panel lens est\xE1 abierto pero a\xFAn no se muestra",
     nothing: "Nada que mostrar todav\xEDa",
+    moreRows: (n2) => `\u2193 ${n2} m\xE1s \xB7 /lens foto`,
+    bandHint: "ctrl+x tab \xB7 banda",
+    photoTasks: (n2) => n2 === 0 ? "sin tareas" : n2 === 1 ? "1 tarea" : `${n2} tareas`,
+    subagentsN: (n2) => `${n2} ${n2 === 1 ? "subagente" : "subagentes"}`,
+    toastAccepted: (task, round) => round ? `${task} \xB7 aceptada en la ronda ${round}` : `${task} \xB7 aceptada`,
+    toastVerdict: (task, action, counts2) => `${task} \xB7 veredicto ${action}${counts2 ? ` \xB7 ${counts2}` : ""}`,
+    toastRound: (task, n2) => `${task} \xB7 ronda ${n2}`,
+    toastIntegrated: (task, done, total) => `${task} integrada \xB7 ${done}/${total}`,
+    runFinished: (done, total) => `Ejecuci\xF3n terminada: ${done}/${total} integradas`,
+    runStopped: (why) => why ? `Ejecuci\xF3n parada: ${why}` : "Ejecuci\xF3n parada",
     noTask: "sin tarea en curso",
     track: "frente",
     decision: "decisi\xF3n pendiente",
@@ -14932,6 +15482,16 @@ var TEXT = {
     panelOpened: "Progress panel opened.",
     panelWaiting: "The lens panel is open but not shown yet",
     nothing: "Nothing to show yet",
+    moreRows: (n2) => `\u2193 ${n2} more \xB7 /lens photo`,
+    bandHint: "ctrl+x tab \xB7 band",
+    photoTasks: (n2) => n2 === 0 ? "no tasks" : n2 === 1 ? "1 task" : `${n2} tasks`,
+    subagentsN: (n2) => `${n2} subagent${n2 === 1 ? "" : "s"}`,
+    toastAccepted: (task, round) => round ? `${task} \xB7 accepted in round ${round}` : `${task} \xB7 accepted`,
+    toastVerdict: (task, action, counts2) => `${task} \xB7 verdict ${action}${counts2 ? ` \xB7 ${counts2}` : ""}`,
+    toastRound: (task, n2) => `${task} \xB7 round ${n2}`,
+    toastIntegrated: (task, done, total) => `${task} integrated \xB7 ${done}/${total}`,
+    runFinished: (done, total) => `Execution finished: ${done}/${total} integrated`,
+    runStopped: (why) => why ? `Execution stopped: ${why}` : "Execution stopped",
     noTask: "no task in progress",
     track: "track",
     decision: "decision pending",
@@ -15017,7 +15577,14 @@ async function openPanel($) {
   const t = lensTexts();
   let placed = false;
   try {
-    const opened = await $.ui.open({ id: PANE, title: "lens" });
+    const compact = panelLayout({ bodyColumns: lastView.columns ?? LINE_MAX, placement: "inline" });
+    let estimate = 0;
+    try {
+      if (bandModel) estimate = buildCards(bandModel, t, 0).reduce((n2, card) => n2 + cardRows(card, compact), 0);
+    } catch {
+      estimate = 0;
+    }
+    const opened = await $.ui.open({ id: PANE, title: "lens", rows: paneRows(estimate, lastView.rows), columns: DOCK_COLUMNS });
     placed = opened.isPlaced;
     if (!opened.isPlaced) $.ui.toast(`${t.panelWaiting}: ${clip3(opened.reason, 200)}`);
   } catch {
@@ -15025,6 +15592,122 @@ async function openPanel($) {
   }
   await refreshPanel($);
   return placed;
+}
+var photos = /* @__PURE__ */ new Map();
+var photoCount = 0;
+async function takePhoto($) {
+  const now = await nowMs($);
+  if (sessionId === null) {
+    try {
+      sessionId = await sessionIdNow($);
+    } catch {
+    }
+  }
+  try {
+    roadmap = await loadBandModel($);
+  } catch {
+  }
+  try {
+    panelFiles = await loadPanelFiles($, now);
+  } catch {
+  }
+  const model = await buildPanel($);
+  keepBand($, model);
+  const t = textsFor(model.locale);
+  const tasks = model.activities.filter((a) => a.kind === "forge" || a.kind === "workflow").length;
+  const n2 = ++photoCount;
+  const text2 = photoText(n2, now, t.photoTasks(tasks));
+  keepPhoto(photos, n2, { text: text2, cards: buildCards(model, t, now) });
+  return text2;
+}
+var TOAST_GAP_MS = 5e3;
+var FORGE_HEARD_MS = 10 * 6e4;
+var lastStatus;
+var prevModel = null;
+var primed = false;
+var lastToastAt = -Infinity;
+var toastQueue = [];
+var toastTimer = null;
+var toastPending = false;
+var TOAST_QUEUE_MAX = 5;
+var TOAST_CELLS = 200;
+var notified = /* @__PURE__ */ new Set();
+var forgeHeardAt = null;
+async function queueToasts($, texts) {
+  toastQueue = [...toastQueue, ...texts].slice(0, TOAST_QUEUE_MAX);
+  if (toastPending) return;
+  toastPending = true;
+  try {
+    const wait = lastToastAt + TOAST_GAP_MS - await nowMs($);
+    if (wait > 0) {
+      toastTimer = $.clock.after(wait, () => {
+        toastTimer = null;
+        toastPending = false;
+        void flushToasts($);
+      });
+      return;
+    }
+    toastPending = false;
+    await flushToasts($);
+  } catch {
+    toastPending = false;
+  }
+}
+async function flushToasts($) {
+  if (!toastQueue.length) return;
+  const text2 = clipWidth(toastQueue.splice(0).join(" \xB7 "), TOAST_CELLS);
+  lastToastAt = await nowMs($);
+  try {
+    $.ui.toast(text2);
+  } catch {
+  }
+}
+function clearStatus($) {
+  if (lastStatus === void 0) return;
+  lastStatus = void 0;
+  try {
+    $.ui.status(void 0);
+  } catch {
+  }
+}
+function updateStatus($, model) {
+  try {
+    const show = lastView.fullscreen === false || lastView.maxRows !== null && lastView.maxRows < 3;
+    const text2 = show && model ? statusText(model, textsFor(model.locale), runRoleOf(roadmap)) ?? void 0 : void 0;
+    if (text2 === lastStatus) return;
+    lastStatus = text2;
+    try {
+      $.ui.status(text2);
+    } catch {
+    }
+  } catch {
+  }
+}
+async function updateSurfaces($, model) {
+  try {
+    const t = textsFor(model.locale);
+    const role = runRoleOf(roadmap);
+    updateStatus($, model);
+    if (!primed) {
+      primed = true;
+      prevModel = model;
+      return;
+    }
+    const moved = surfaceEvents(prevModel, model, role, t);
+    prevModel = model;
+    if (moved.toasts.length) await queueToasts($, moved.toasts);
+    if (moved.ended && !notified.has(moved.ended.runId)) {
+      notified.add(moved.ended.runId);
+      let sent = false;
+      try {
+        sent = (await $.ui.notify(moved.ended.text).catch(() => null))?.isSent === true;
+      } catch {
+        sent = false;
+      }
+      if (!sent) await queueToasts($, [moved.ended.text]);
+    }
+  } catch {
+  }
 }
 var RISK_HUE = { low: "green", medium: "yellow", high: "red" };
 function decide($, t, id2, d) {
@@ -15043,6 +15726,7 @@ export const register = (on) => {
   on("session.start", async ($, e, next) => {
     resetPanel();
     resetUsage();
+    clearStatus($);
     endedId = null;
     try {
       await syncUsageStart($);
@@ -15055,7 +15739,7 @@ export const register = (on) => {
     } catch {
     }
     try {
-      await $.command.register({ name: "lens", description: "Show the lens progress panel", immediate: true });
+      await $.command.register({ name: "lens", description: "Show the lens progress panel", argumentHint: "[live|foto]", immediate: true });
     } catch {
     }
     timer?.cancel();
@@ -15090,6 +15774,7 @@ export const register = (on) => {
       if (e.reason === "clear") {
         try {
           resetPanel();
+          clearStatus($);
         } catch {
         }
         const r = await next(e);
@@ -15115,10 +15800,23 @@ export const register = (on) => {
     }
     return r;
   }).catch(($, e, next) => next(e));
-  on("command.run", { command: "lens" }, async ($) => {
+  on("command.run", { command: "lens" }, async ($, e) => {
     const t = lensTexts();
+    if (lensMode(e.args, e.presentation) === "photo") return { text: await takePhoto($) };
     const placed = await openPanel($);
     return { text: placed ? t.panelOpened : `${t.panelWaiting}.` };
+  });
+  on("ui.render", { component: "CommandOutput", props: { command: "lens" } }, async ($, e, next) => {
+    try {
+      const n2 = photoId(e.props.text);
+      const shot = n2 === null ? void 0 : photos.get(n2);
+      if (!shot || shot.text !== e.props.text) return next(e);
+      const { Box, Text } = $.ui.resolve(e);
+      const layout = panelLayout({ bodyColumns: Number(e.viewport?.columns) || LINE_MAX, placement: "inline" });
+      return /* @__PURE__ */ h(Box, { flexDirection: "column" }, /* @__PURE__ */ h(Text, { dimColor: true }, e.props.text), shot.cards.map((card, i) => termCard({ Box, Text }, `photo-${n2}-${i}`, card, layout)));
+    } catch {
+      return next(e);
+    }
   });
   on("ui.close", async ($, e, next) => {
     const closed = await next(e);
@@ -15239,7 +15937,14 @@ export const register = (on) => {
       try {
         const answer = result;
         if (answer && typeof answer.deny !== "string") {
-          if (e.tool === "Bash") ownTasks = addOwnTask(ownTasks, ownTaskOf(input.command));
+          if (e.tool === "Bash") {
+            const own = ownTaskOf(input.command);
+            ownTasks = addOwnTask(ownTasks, own);
+            if (own) {
+              forgeHeardAt = await nowMs($);
+              void noteActivity($);
+            }
+          }
           if (mine && e.tool === "ScheduleWakeup") {
             const delay = typeof input.delaySeconds === "number" && Number.isFinite(input.delaySeconds) ? input.delaySeconds : null;
             wakeAt = input.stop === true || delay === null || answer.isError === true ? null : started + Math.min(WAKE_MAX_S, Math.max(WAKE_MIN_S, delay)) * 1e3;
@@ -15331,72 +16036,118 @@ export const register = (on) => {
   }).catch(($, e, next) => next(e));
   on("ui.render", { component: "Pane", requestId: PANE }, async ($, e, next) => {
     try {
+      noteView(e.viewport);
+      updateStatus($, bandModel);
+      const layout = panelLayout(e.props, e.viewport);
+      if (layout.focusAgent !== focusAgent) {
+        focusAgent = layout.focusAgent;
+        void requestPanelWrite($);
+      }
       const m = await read($, panel);
       const t = m ? textsFor(m.locale) : lensTexts();
-      const cols = Math.max(20, Number(e.props.bodyColumns) || LINE_MAX);
       const nowMs2 = m?.waypoint?.current?.startedAt ? await $.clock.now() : 0;
-      const cards = m ? buildCards(m, t, nowMs2) : [];
       const proposals = (m?.proposals ?? []).filter((p) => PROPOSAL_ID.test(p.id));
       const ui = $.ui.resolve(e);
       const { Box, Text, Button } = ui;
       const Svg = e.surface !== "terminal" && "Svg" in ui ? ui.Svg : null;
-      const W = Math.max(240, Math.min(900, cols * 8 - 8));
-      const drawn = cards.map((card, i) => {
-        if (!Svg) return termCard(ui, `card-${i}`, card, cols);
+      const all = m ? buildCards(m, t, nowMs2) : [];
+      const reserve = proposals.length ? 3 + 3 * proposals.length : 0;
+      const avail = layout.rows === null ? null : Math.max(1, layout.rows - reserve);
+      let fitted = Svg || avail === null ? { cards: all, hidden: 0 } : fitCards(all, { ...layout, rows: avail });
+      let more = fitted.hidden;
+      if (!Svg && avail !== null && fitted.cards.length) {
+        const moreRow = fitted.hidden > 0 && avail >= 2;
+        const room = moreRow ? avail - 1 : avail;
+        const shown = fitted.cards.reduce((n2, card) => n2 + cardRows(card, layout), 0);
+        if (shown > room) {
+          const clipped = clipCard(fitted.cards[0], layout, room);
+          fitted = { ...fitted, cards: [clipped] };
+          more += shown - cardRows(clipped, layout);
+        }
+        if (!moreRow) more = 0;
+      }
+      const W = Math.max(240, Math.min(900, layout.cols * 8 - 8));
+      const drawn = fitted.cards.map((card, i) => {
+        if (!Svg) return termCard(ui, `card-${i}`, card, layout);
         const { source, height } = cardSvg(card, W);
         return /* @__PURE__ */ h(Svg, { key: `card-${i}`, source, alt: cardAlt(card), width: W, height });
       });
-      return /* @__PURE__ */ h(Box, { flexDirection: "column", rowGap: Svg ? 1 : 0 }, /* @__PURE__ */ h(Box, { flexDirection: "row", justifyContent: "flex-end" }, /* @__PURE__ */ h(Button, { key: "close", label: "\xD7", role: "dismiss", onPress: () => {
-        paneUp = false;
-        stopPanelTimer();
-        $.ui.close({ id: PANE }).catch(() => void 0);
-      } })), drawn.length || proposals.length ? drawn : /* @__PURE__ */ h(Text, { dimColor: true }, t.nothing), proposals.length ? /* @__PURE__ */ h(Box, { key: "section-proposals", flexDirection: "column", borderStyle: "round", borderColor: PALETTE.yellow, paddingX: 1 }, /* @__PURE__ */ h(Text, { bold: true, color: PALETTE.yellow }, `\u2727 ${t.proposals} \xB7 ${proposals.length}`), proposals.map((p) => /* @__PURE__ */ h(Box, { key: `proposal-${p.id}`, flexDirection: "column", marginTop: 1 }, /* @__PURE__ */ h(Text, { bold: true, wrap: "truncate-end" }, clip3(p.title, cols)), /* @__PURE__ */ h(Box, { flexDirection: "row", columnGap: 1, flexWrap: "wrap" }, /* @__PURE__ */ h(Text, { color: PALETTE.lavender }, `\u2039${p.category}\u203A`), /* @__PURE__ */ h(Text, { color: PALETTE[RISK_HUE[p.risk] ?? "yellow"] }, `\u2039${p.risk}\u203A`), /* @__PURE__ */ h(Button, { key: `approve-${p.id}`, label: `\u2713 ${t.approve}`, onPress: () => decide($, t, p.id, "approve") }), /* @__PURE__ */ h(Button, { key: `reject-${p.id}`, label: `\u2717 ${t.reject}`, onPress: () => decide($, t, p.id, "reject") }))))) : null);
+      return /* @__PURE__ */ h(Box, { flexDirection: "column", rowGap: Svg ? 1 : 0 }, drawn.length || proposals.length ? drawn : /* @__PURE__ */ h(Text, { dimColor: true }, t.nothing), proposals.length ? /* @__PURE__ */ h(Box, { key: "section-proposals", flexDirection: "column", borderStyle: "round", borderColor: PALETTE.yellow, paddingX: 1 }, /* @__PURE__ */ h(Text, { bold: true, color: PALETTE.yellow }, `\u2727 ${t.proposals} \xB7 ${proposals.length}`), proposals.map((p) => /* @__PURE__ */ h(Box, { key: `proposal-${p.id}`, flexDirection: "column", marginTop: 1 }, /* @__PURE__ */ h(Text, { bold: true, wrap: "truncate-end" }, clip3(p.title, layout.cols)), /* @__PURE__ */ h(Box, { flexDirection: "row", columnGap: 1, flexWrap: "wrap" }, /* @__PURE__ */ h(Text, { color: PALETTE.lavender }, `\u2039${p.category}\u203A`), /* @__PURE__ */ h(Text, { color: PALETTE[RISK_HUE[p.risk] ?? "yellow"] }, `\u2039${p.risk}\u203A`), /* @__PURE__ */ h(Button, { key: `approve-${p.id}`, label: `\u2713 ${t.approve}`, onPress: () => decide($, t, p.id, "approve") }), /* @__PURE__ */ h(Button, { key: `reject-${p.id}`, label: `\u2717 ${t.reject}`, onPress: () => decide($, t, p.id, "reject") }))))) : null, more ? /* @__PURE__ */ h(Text, { key: "more", dimColor: true }, t.moreRows(more)) : null);
     } catch {
       return next(e);
     }
   });
   on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
     const below = await next(e);
+    noteView(e.viewport, e.props.maxRows);
+    updateStatus($, bandModel);
+    bandDrawn = false;
     try {
-      if (e.props.hasSurvey || !busy || waypointBand || await read($, hidden)) return below;
+      if (e.props.hasSurvey || !busy || await waypointDraws($) || await read($, hidden)) return below;
       const ui = $.ui.resolve(e);
-      const { Box, Text, Button } = ui;
+      const { Box, Button } = ui;
       const t = lensTexts();
-      const head = bandModel ? headline(bandModel) : null;
-      const agents = bandModel?.subagents.length ?? activity.subagents.length;
-      const cells2 = head?.cells?.cells ?? [];
-      const done = head?.cells?.done ?? 0;
-      const total = head?.cells?.total ?? 0;
-      const section = head?.section ?? "agents";
-      const spent = bandModel ? usageBandText(bandModel) : null;
-      const o = {
-        icon: SECTION_ICON[section],
-        hue: SECTION_HUE[section],
-        title: head?.title || (section === "agents" ? t.sSubagents : t.sNow),
-        detail: [head?.detail ?? "", spent ?? ""].filter(Boolean).join(" \xB7 "),
-        ratio: ratio(done, total),
-        label: total ? `${done}/${total}` : agents ? `\u25CE ${agents}` : "",
-        moving: true,
-        cells: cells2
-      };
+      const fullscreen = e.viewport?.isFullscreen !== false;
+      const cols = Number(e.props.bodyColumns) > 0 ? Math.floor(Number(e.props.bodyColumns)) : DEFAULT_COLUMNS;
+      const maxRows = Number(e.props.maxRows) > 0 ? Number(e.props.maxRows) : 10;
+      const plain = !fullscreen;
+      const shape = lensBand(bandModel, t, activity.subagents.length);
+      const buttonsWidth = 1 + controlWidth(t.panel, { plain, hotkey: "p" }) + 1 + controlWidth("\xD7", { plain, hotkey: "x" });
+      const boxes = shape.cells.slice(0, BAND_CELLS);
+      const wide = bandLevel({ bodyColumns: cols, maxRows, fullscreen }) === "wide" && boxes.length > 0;
+      const extra = wide ? 1 + BAR_MIN + 1 + boxes.length * 2 : 0;
+      const shown = fitParts(shape.parts, cols - ICON_COLUMNS - buttonsWidth - extra).shown;
+      const barWidth = wide ? Math.max(BAR_MIN, Math.min(BAR_MAX, cols - ICON_COLUMNS - buttonsWidth - partsWidth(shown) - 1 - boxes.length * 2 - 1)) : 0;
+      const screen = Number(e.viewport?.columns) > 0 ? Number(e.viewport?.columns) : cols + 5;
+      const form = fullscreen && screen >= DOCK_MIN_COLUMNS ? "live" : "foto";
+      const plainProp = plain ? { plain: true } : {};
       const buttons = [
-        /* @__PURE__ */ h(Button, { key: "panel", label: agents && total ? `${t.panel} \xB7 \u25CE ${agents}` : t.panel, onPress: () => {
-          void openPanel($);
+        /* @__PURE__ */ h(Button, { key: "panel", label: t.panel, hotkey: "p", ...plainProp, onPress: () => {
+          runLens($, form);
         } }),
-        /* @__PURE__ */ h(Button, { key: "dismiss", label: "\xD7", role: "dismiss", onPress: () => {
+        /* @__PURE__ */ h(Button, { key: "dismiss", label: "\xD7", role: "dismiss", hotkey: "x", ...plainProp, onPress: () => {
           update($, hidden, () => true).catch(() => void 0);
         } })
       ];
-      const cols = Number(e.props.bodyColumns) || 100;
+      const icon = SECTION_ICON[shape.section];
+      const hue = SECTION_HUE[shape.section];
+      bandDrawn = true;
       if (e.surface !== "terminal" && "Svg" in ui) {
         const { Svg } = ui;
         const W = Math.max(200, Math.min(1600, cols * 8 - 130));
-        const { source, height } = bandSvg({ W, ...o });
-        return /* @__PURE__ */ h(Box, { flexDirection: "column" }, /* @__PURE__ */ h(Box, { flexDirection: "row", alignItems: "center", columnGap: 1 }, /* @__PURE__ */ h(Svg, { source, alt: [o.title, o.label, o.detail].filter(Boolean).join(" \xB7 "), width: W, height }), buttons), below);
+        const title = joinParts(shown);
+        const { source, height } = bandSvg({ W, icon, title, detail: "", hue, ratio: shape.ratio, label: "", moving: true, cells: shape.cells });
+        return /* @__PURE__ */ h(Box, { flexDirection: "column" }, /* @__PURE__ */ h(Box, { flexDirection: "row", alignItems: "center", columnGap: 1 }, /* @__PURE__ */ h(Svg, { source, alt: title, width: W, height }), buttons), below);
       }
-      return /* @__PURE__ */ h(Box, { flexDirection: "column" }, /* @__PURE__ */ h(Box, { flexDirection: "row", columnGap: 1 }, termBand(ui, { ...o, columns: cols - 16, spin: agents > 0 }), /* @__PURE__ */ h(Box, { flexDirection: "row", columnGap: 1, flexShrink: 0 }, buttons)), below);
+      return /* @__PURE__ */ h(Box, { flexDirection: "column" }, /* @__PURE__ */ h(Box, { key: "band-row", flexDirection: "row", columnGap: 1 }, termBand(ui, { icon, hue, spin: shape.spin, parts: shown, bar: wide ? { ratio: shape.ratio, width: barWidth, moving: true } : null, cells: wide ? boxes : [] }), /* @__PURE__ */ h(Box, { flexDirection: "row", columnGap: 1, flexShrink: 0 }, buttons)), below);
     } catch {
+      bandDrawn = false;
       return below;
     }
+  });
+  on("ui.render", { component: "PromptHint" }, async ($, e, next) => {
+    try {
+      if (bandDrawn && e.viewport?.isFullscreen === false && !e.props.tail) return next({ ...e, props: { ...e.props, tail: lensTexts().bandHint } });
+    } catch {
+    }
+    return next(e);
+  });
+  on("ui.render", { component: "Spinner" }, async ($, e, next) => {
+    try {
+      if (e.props.message === null) {
+        const message = spinnerText(bandModel, bandModel ? textsFor(bandModel.locale) : lensTexts());
+        if (message) return next({ ...e, props: { ...e.props, message } });
+      }
+    } catch {
+    }
+    return next(e);
+  });
+  on("ui.render", { component: "SessionMode" }, async ($, e, next) => {
+    try {
+      const extra = modeLabels(bandModel).filter((x) => !e.props.modes.includes(x));
+      if (extra.length) return next({ ...e, props: { ...e.props, modes: [...e.props.modes, ...extra] } });
+    } catch {
+    }
+    return next(e);
   });
 };

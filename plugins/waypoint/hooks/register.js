@@ -11357,6 +11357,7 @@ function knownLocale(f) {
   return void 0;
 }
 var MAX_CELLS = 120;
+var BAND_SLOTS_MAX = 12;
 var CELL = { done: "d", in_progress: "a", claimed: "a", blocked: "b", free: "p", orphaned: "b" };
 var RECENT_DONE = 3;
 var SKEW_MS = 2 * 6e4;
@@ -11437,7 +11438,8 @@ function runModel(project, f, exec, plan, now, viewer, sid) {
     parallel: v.parallel,
     integrated: v.integrated,
     total: v.total,
-    slots: v.slots.slice(0, 2).map((s) => ({ task: s.task, stage: s.stage, round: s.round })),
+    queued: v.queued.length,
+    slots: v.slots.slice(0, BAND_SLOTS_MAX).map((s) => ({ task: s.task, stage: s.stage, round: s.round })),
     worst,
     stalled: !v.active,
     roadmapUrl: plan?.artifacts.roadmap ?? null,
@@ -11490,15 +11492,273 @@ function mainCheckoutFrom(root, gitFileText) {
   return dir && (/^[A-Za-z]:/.test(dir) || dir.startsWith("/")) ? dir : root;
 }
 
+// src/lib/text-width.ts
+var ZERO = /[\p{Mn}\p{Me}\p{Cf}]/u;
+var WIDE = [
+  [4352, 4447],
+  [8986, 8987],
+  [9193, 9196],
+  [9200, 9200],
+  [9203, 9203],
+  [9725, 9726],
+  [9748, 9749],
+  [9800, 9811],
+  [9855, 9855],
+  [9875, 9875],
+  [9889, 9889],
+  [9898, 9899],
+  [9917, 9918],
+  [9924, 9925],
+  [9934, 9934],
+  [9940, 9940],
+  [9962, 9962],
+  [9970, 9971],
+  [9973, 9973],
+  [9978, 9978],
+  [9981, 9981],
+  [9989, 9989],
+  [9994, 9995],
+  [10024, 10024],
+  [10060, 10060],
+  [10062, 10062],
+  [10067, 10069],
+  [10071, 10071],
+  [10133, 10135],
+  [10160, 10160],
+  [10175, 10175],
+  [11035, 11036],
+  [11088, 11088],
+  [11093, 11093],
+  [11904, 12350],
+  [12353, 13311],
+  [13312, 19903],
+  [19968, 40959],
+  [40960, 42191],
+  [44032, 55203],
+  [63744, 64255],
+  [65072, 65103],
+  [65280, 65376],
+  [65504, 65510],
+  [126980, 126980],
+  [127183, 127183],
+  [127374, 127374],
+  [127377, 127386],
+  [127462, 127487],
+  [127488, 127743],
+  [127744, 129791],
+  [131072, 262141]
+];
+var VS16 = 65039;
+var ZWJ = 8205;
+function within(cp2, ranges) {
+  for (const [lo, hi] of ranges) {
+    if (cp2 < lo) return false;
+    if (cp2 <= hi) return true;
+  }
+  return false;
+}
+function charWidth(cp2) {
+  if (cp2 < 127) return cp2 < 32 ? 0 : 1;
+  if (cp2 < 160) return 0;
+  if (ZERO.test(String.fromCodePoint(cp2))) return 0;
+  return within(cp2, WIDE) ? 2 : 1;
+}
+var isRegional = (cp2) => cp2 >= 127462 && cp2 <= 127487;
+var isTone = (cp2) => cp2 >= 127995 && cp2 <= 127999;
+function splitClusters(text2) {
+  const out = [];
+  let joined = false;
+  let regionals = 0;
+  for (const ch of String(text2)) {
+    const cp2 = ch.codePointAt(0) ?? 0;
+    const sticks = out.length > 0 && (joined && /\p{Extended_Pictographic}/u.test(ch) || cp2 === ZWJ || isTone(cp2) || cp2 >= 65024 && cp2 <= 65039 || cp2 >= 917536 && cp2 <= 917631 || cp2 >= 160 && /[\p{Mn}\p{Me}]/u.test(ch) || isRegional(cp2) && regionals === 1);
+    if (sticks) out[out.length - 1] += ch;
+    else {
+      out.push(ch);
+      regionals = 0;
+    }
+    if (isRegional(cp2)) regionals += 1;
+    joined = cp2 === ZWJ;
+  }
+  return out;
+}
+var segmenter = typeof Intl !== "undefined" && typeof Intl.Segmenter === "function" ? new Intl.Segmenter(void 0, { granularity: "grapheme" }) : null;
+function clustersOf(text2) {
+  const s = String(text2);
+  return segmenter ? Array.from(segmenter.segment(s), (part) => part.segment) : splitClusters(s);
+}
+function clusterWidth(cluster) {
+  let widest = 0;
+  for (const ch of cluster) {
+    const cp2 = ch.codePointAt(0) ?? 0;
+    if (cp2 === VS16) {
+      if (widest > 0) return 2;
+      continue;
+    }
+    widest = Math.max(widest, charWidth(cp2));
+  }
+  return widest;
+}
+function stringWidth(text2) {
+  let width = 0;
+  for (const cluster of clustersOf(text2)) width += clusterWidth(cluster);
+  return width;
+}
+function clipWidth(text2, max) {
+  const s = String(text2);
+  if (stringWidth(s) <= max) return s;
+  if (!(max >= 1)) return "";
+  let out = "";
+  let used = 0;
+  for (const cluster of clustersOf(s)) {
+    const cells = clusterWidth(cluster);
+    if (used + cells > max - 1) break;
+    out += cluster;
+    used += cells;
+  }
+  return `${out}\u2026`;
+}
+
+// src/lib/duration.ts
+var MAX_MINUTES = 99999 * 1440;
+function minutesText(minutes, compact = false) {
+  const total = Number.isFinite(minutes) ? Math.max(0, Math.floor(minutes)) : 0;
+  const capped = total >= MAX_MINUTES;
+  const n = capped ? MAX_MINUTES : total;
+  const plus = capped ? "+" : "";
+  if (n < 60) return compact ? `${n}m` : `${n} m`;
+  const hours = Math.floor(n / 60);
+  const rest = n % 60;
+  if (compact) return `${rest ? `${hours}h${rest}m` : `${hours}h`}${plus}`;
+  return `${rest ? `${hours} h ${rest} m` : `${hours} h`}${plus}`;
+}
+
+// src/mod/band-fit.ts
+var SEP = " \xB7 ";
+var TITLE_MIN = 8;
+var DEFAULT_COLUMNS = 80;
+var SLOT = "slot:";
+var visible = (parts) => parts.filter((p) => stringWidth(p.text) > 0);
+function partsWidth(parts, sep = SEP) {
+  let width = 0;
+  visible(parts).forEach((p, i) => {
+    width += stringWidth(p.text) + (i ? stringWidth(p.glue ?? sep) : 0);
+  });
+  return width;
+}
+var columnsOf = (cols) => typeof cols === "number" && Number.isFinite(cols) ? Math.max(0, Math.floor(cols)) : 0;
+var prioKey = (p) => Number.isNaN(p.prio) ? Number.POSITIVE_INFINITY : p.prio;
+function fitParts(parts, cols, sep = SEP) {
+  const width = columnsOf(cols);
+  const cur = parts.map((p) => ({ ...p }));
+  const gone = /* @__PURE__ */ new Set();
+  const view = () => {
+    const out = [];
+    let more = 0;
+    let at = -1;
+    let after = false;
+    cur.forEach((p, i) => {
+      if (!gone.has(i)) {
+        out.push(after ? { ...p, glue: void 0 } : p);
+        after = false;
+        return;
+      }
+      after = true;
+      if (p.key.startsWith(SLOT)) {
+        more++;
+        if (at < 0) at = out.length;
+      }
+    });
+    if (more) out.splice(at, 0, { key: "more", text: `+${more}`, prio: 4 });
+    return out;
+  };
+  const fits = () => partsWidth(view(), sep) <= width;
+  const done = () => ({ shown: view(), dropped: gone.size });
+  if (fits()) return done();
+  const order = cur.map((_, i) => i).sort((a, b) => {
+    const ka = prioKey(cur[a]);
+    const kb = prioKey(cur[b]);
+    return ka === kb ? b - a : kb > ka ? 1 : -1;
+  });
+  for (const i of order) {
+    const p = cur[i];
+    if (p.title && p.text.endsWith(p.title)) {
+      const lead = p.text.slice(0, p.text.length - p.title.length);
+      for (let w = stringWidth(p.title) - 1; w >= TITLE_MIN; w--) {
+        cur[i] = { ...p, text: lead + clipWidth(p.title, w) };
+        if (fits()) return done();
+      }
+    }
+    if (p.short !== void 0 && stringWidth(p.short) < stringWidth(cur[i].text)) {
+      cur[i] = { ...cur[i], text: p.short };
+      if (fits()) return done();
+    }
+  }
+  for (const i of order) {
+    gone.add(i);
+    if (fits()) return done();
+  }
+  return { shown: [], dropped: gone.size };
+}
+var WIDE_COLUMNS = 140;
+var TWO_COLUMNS = 90;
+var ONE_ROW_BELOW = 3;
+function bandLevel(o) {
+  if (!o.fullscreen || o.maxRows < ONE_ROW_BELOW || o.bodyColumns < TWO_COLUMNS) return "one";
+  return o.bodyColumns >= WIDE_COLUMNS ? "wide" : "two";
+}
+function controlWidth(label, o) {
+  const w = stringWidth(label);
+  if (o.kind === "link" || o.kind === "text") return w;
+  return o.plain ? w + (o.hotkey ? 3 : 0) : w + 4;
+}
+var MORE_KEY = "more";
+var MORE_LABEL = "\u22EF";
+var MORE_HOTKEY = "m";
+var DISMISS_KEY = "dismiss";
+var positive = (v, fallback) => typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : fallback;
+function layoutBand(parts, controls, o) {
+  const cols = positive(o.bodyColumns, DEFAULT_COLUMNS);
+  const maxRows = positive(o.maxRows, 10);
+  const plain = !o.fullscreen;
+  const lead = o.lead ?? 0;
+  const width = (cs, long) => cs.reduce((n, c) => n + 1 + controlWidth(long ? c.label : c.short ?? c.label, { plain, hotkey: c.hotkey, kind: c.kind }), 0);
+  const keys = (cs) => cs.map((c) => c.key);
+  const core = parts.filter((p) => p.prio <= 4);
+  let level = bandLevel({ bodyColumns: cols, maxRows, fullscreen: o.fullscreen });
+  if (level === "wide") {
+    const room2 = cols - lead - width(controls, true);
+    if (partsWidth(core) <= room2) return { level, plain, long: true, shown: fitParts(parts, room2).shown, inline: keys(controls), second: [], more: false };
+    level = "two";
+  }
+  if (level === "two") return { level, plain, long: false, shown: fitParts(parts, cols - lead).shown, inline: [], second: keys(controls), more: false };
+  const room = cols - lead - width(controls, false);
+  if (partsWidth(core) <= room) return { level, plain, long: false, shown: fitParts(parts, room).shown, inline: keys(controls), second: [], more: false };
+  const dismiss = controls.filter((c) => c.key === DISMISS_KEY);
+  const rest = controls.filter((c) => c.key !== DISMISS_KEY);
+  const folded = cols - lead - (1 + controlWidth(MORE_LABEL, { plain, hotkey: MORE_HOTKEY })) - width(dismiss, false);
+  return { level, plain, long: false, shown: fitParts(parts, folded).shown, inline: keys(dismiss), second: o.moreOpen ? keys(rest) : [], more: true };
+}
+
 // src/mod/band-line.ts
 var TITLE_MAX = 40;
 var SLOT_ID_MAX = 20;
 var BIDI = new RegExp(`[${[1564, 8206, 8207, 8234, 8235, 8236, 8237, 8238, 8294, 8295, 8296, 8297].map((c) => String.fromCharCode(c)).join("")}]`, "g");
 var CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
 function clip(text2, max = TITLE_MAX) {
-  const chars = Array.from(String(text2).replace(CONTROL, " ").replace(BIDI, "").replace(/\s+/g, " ").trim());
-  return chars.length <= max ? chars.join("") : chars.slice(0, max - 1).join("") + "\u2026";
+  return clipWidth(String(text2).replace(CONTROL, " ").replace(BIDI, "").replace(/\s+/g, " ").trim(), max);
 }
+var STAGE_SHORT = {
+  triage: "tri",
+  brief: "brief",
+  implement: "impl",
+  validate: "val",
+  verify: "ver",
+  review: "rev",
+  verdict: "verd",
+  integrate: "int",
+  execution: "exec"
+};
 var TEXT = {
   es: {
     design: "DISE\xD1O",
@@ -11515,6 +11775,7 @@ var TEXT = {
     tasks: "tareas",
     overall: "global",
     decision: "decisi\xF3n pendiente",
+    decisionShort: "decisi\xF3n",
     applyAll: "Aplicar todas",
     pick: "Elegir\u2026",
     round: "Otra ronda",
@@ -11532,9 +11793,11 @@ var TEXT = {
     subagents: "subagentes",
     sessions: "sesiones",
     silentSfx: "sin se\xF1al",
+    signalShort: "se\xF1al",
     stoppedSfx: "parada",
     stopRun: "Parar",
     integratedN: "integradas",
+    queuedN: "por integrar",
     memberOf: "de la ejecuci\xF3n de {c}",
     otherTrack: "Otro frente",
     view: "Ver",
@@ -11543,15 +11806,42 @@ var TEXT = {
     release: "Liberar",
     close: "Cerrar",
     stopFilled: "/forge:stop est\xE1 en el prompt: pulsa Enter para parar toda la ejecuci\xF3n",
+    // F-05: the short labels of the narrow levels (§4.5); Aprobar, Panel and Parar are short already.
+    short: {
+      nextTask: "Siguiente",
+      status: "Estado",
+      launch: "Lanzar\u2026",
+      roadmap: "Roadmap",
+      applyAll: "Aplicar",
+      pick: "Elegir\u2026",
+      round: "Ronda",
+      rewrite: "Reescribir",
+      interview: "Preguntar",
+      viewDesign: "Dise\xF1o",
+      otherTrack: "Frente",
+      join: "Unirme",
+      resume: "Retomar",
+      release: "Liberar",
+      view: "Ver",
+      close: "Cerrar"
+    },
+    confirmStop: "Pulsa {k} otra vez para parar la ejecuci\xF3n",
+    roadmapCopied: "URL del roadmap copiada: {url}",
+    roadmapShown: "Roadmap: {url}",
+    designCopied: "URL del dise\xF1o copiada: {url}",
+    designShown: "Dise\xF1o: {url}",
+    bandHint: "ctrl+x tab \xB7 banda",
     ago: "hace {ago}",
-    noticeOtherTask: "otra sesi\xF3n ({seat}) trabaja en {task}",
+    left: "a medias",
+    noCoordinator: "sin coordinadora",
+    noticeOtherTask: "otra sesi\xF3n ({seat}) trabaja en",
     noticeOtherBound: "otra sesi\xF3n ({seat}) est\xE1 ligada al roadmap",
     noticeOtherDesign: "otra sesi\xF3n ({seat}) trabaja en el dise\xF1o",
-    noticeOtherRun: "ejecuci\xF3n de forge en curso, la coordina otra sesi\xF3n \xB7 {i}/{t}",
-    noticePrevTask: "qued\xF3 a medias: {task} {title}",
-    noticePrevDesign: "dise\xF1o a medias: {project}",
-    noticeRunStopped: "ejecuci\xF3n parada: {i}/{t} integradas",
-    noticeRunOrphan: "ejecuci\xF3n sin coordinadora: {i}/{t} integradas",
+    noticeOtherRun: "ejecuci\xF3n de forge en curso, la coordina otra sesi\xF3n",
+    noticePrevTask: "qued\xF3 a medias:",
+    noticePrevDesign: "dise\xF1o a medias:",
+    noticeRunStopped: "ejecuci\xF3n parada:",
+    noticeRunOrphan: "ejecuci\xF3n sin coordinadora:",
     stage: { brief: "brief", implement: "implementar", validate: "validar", verify: "verificar", review: "revisar", verdict: "veredicto", integrate: "integrar", execution: "ejecuci\xF3n" }
   },
   en: {
@@ -11569,6 +11859,7 @@ var TEXT = {
     tasks: "tasks",
     overall: "overall",
     decision: "decision pending",
+    decisionShort: "decision",
     applyAll: "Apply all",
     pick: "Pick\u2026",
     round: "Another round",
@@ -11586,9 +11877,11 @@ var TEXT = {
     subagents: "subagents",
     sessions: "sessions",
     silentSfx: "no signal",
+    signalShort: "signal",
     stoppedSfx: "stopped",
     stopRun: "Stop",
     integratedN: "integrated",
+    queuedN: "to integrate",
     memberOf: "in {c}'s execution",
     otherTrack: "Other track",
     view: "View",
@@ -11597,21 +11890,50 @@ var TEXT = {
     release: "Release",
     close: "Close",
     stopFilled: "/forge:stop is in the prompt: press Enter to stop the whole execution",
+    // F-05: the short labels of the narrow levels (§4.5); Approve, Panel and Stop are short already.
+    short: {
+      nextTask: "Next",
+      status: "Status",
+      launch: "Launch\u2026",
+      roadmap: "Roadmap",
+      applyAll: "Apply",
+      pick: "Pick\u2026",
+      round: "Round",
+      rewrite: "Rewrite",
+      interview: "Ask me",
+      viewDesign: "Design",
+      otherTrack: "Track",
+      join: "Join",
+      resume: "Resume",
+      release: "Release",
+      view: "View",
+      close: "Close"
+    },
+    confirmStop: "Press {k} again to stop the run",
+    roadmapCopied: "Roadmap URL copied: {url}",
+    roadmapShown: "Roadmap: {url}",
+    designCopied: "Design URL copied: {url}",
+    designShown: "Design: {url}",
+    bandHint: "ctrl+x tab \xB7 band",
     ago: "{ago} ago",
-    noticeOtherTask: "another session ({seat}) works on {task}",
+    left: "left",
+    noCoordinator: "no coordinator",
+    noticeOtherTask: "another session ({seat}) works on",
     noticeOtherBound: "another session ({seat}) is bound to the roadmap",
     noticeOtherDesign: "another session ({seat}) is working on the design",
-    noticeOtherRun: "forge execution running, coordinated by another session \xB7 {i}/{t}",
-    noticePrevTask: "left in progress: {task} {title}",
-    noticePrevDesign: "design left in progress: {project}",
-    noticeRunStopped: "execution stopped: {i}/{t} integrated",
-    noticeRunOrphan: "execution without a coordinator: {i}/{t} integrated",
+    noticeOtherRun: "forge execution running, coordinated by another session",
+    noticePrevTask: "left in progress:",
+    noticePrevDesign: "design left in progress:",
+    noticeRunStopped: "execution stopped:",
+    noticeRunOrphan: "execution without a coordinator:",
     stage: { brief: "brief", implement: "implement", validate: "validate", verify: "verify", review: "review", verdict: "verdict", integrate: "integrate", execution: "execution" }
   }
 };
 var textsFor = (locale) => locale === "es" ? TEXT.es : TEXT.en;
+var stageText = (t, stage) => t.stage[stage] ?? stage;
+var decisionPart = (t) => ({ key: "decision", text: `\u25B2 ${t.decision}`, short: `\u25B2 ${t.decisionShort}`, prio: 1, hue: "alert" });
 function autoPart(m) {
-  return m.auto ? [`\u2691 auto \xB7 ${m.auto.count}${m.auto.lastMajor ? ` \xB7 ${clip(m.auto.lastMajor, 30)}` : ""}`] : [];
+  return m.auto ? [{ key: "auto", text: `\u2691 auto \xB7 ${m.auto.count}${m.auto.lastMajor ? ` \xB7 ${clip(m.auto.lastMajor, 30)}` : ""}`, short: `\u2691 ${m.auto.count}`, prio: 8 }] : [];
 }
 function agoText(since, nowMs2) {
   const t = since ? Date.parse(since) : NaN;
@@ -11619,69 +11941,102 @@ function agoText(since, nowMs2) {
   const min = Math.max(1, Math.floor(Math.max(0, nowMs2 - t) / 6e4));
   return min < 60 ? `${min} min` : min < 48 * 60 ? `${Math.floor(min / 60)} h` : `${Math.floor(min / 1440)} d`;
 }
-function noticeLine(m, nowMs2, t) {
-  const vals = {
-    // The project is a folder name under docs/waypoint/ that nothing checks: clipped as a title is (M7).
-    seat: m.seat ?? "",
-    task: m.task ?? "",
-    title: m.title ? clip(m.title) : "",
-    project: clip(m.project),
-    i: String(m.integrated ?? 0),
-    t: String(m.total ?? 0)
-  };
-  const fill = (s) => s.replace(/\{(seat|task|title|project|i|t)\}/g, (_, k) => vals[k]).replace(/\s+/g, " ").trim();
-  const ago = agoText(m.since, nowMs2);
-  if (m.kind === "other-live") {
-    if (m.subject === "run") return `\u25E6 ${fill(t.noticeOtherRun)}`;
-    const head2 = `\u25E6 ${fill(m.subject === "design" ? t.noticeOtherDesign : m.task ? t.noticeOtherTask : t.noticeOtherBound)}`;
-    return ago ? `${head2} \xB7 ${t.ago.replace("{ago}", ago)}` : head2;
-  }
-  const text2 = m.subject === "run" ? m.stopReason ? t.noticeRunStopped : t.noticeRunOrphan : m.subject === "design" ? t.noticePrevDesign : t.noticePrevTask;
-  const head = `\u25CC ${fill(text2)}`;
-  return ago ? `${head} (${t.ago.replace("{ago}", ago)})` : head;
-}
-function bandLine(m, nowMs2) {
-  if (m.mode === "none") return "";
-  const t = textsFor(m.locale);
-  if (m.mode === "notice") return noticeLine(m, nowMs2, t);
-  if (m.mode === "design") {
-    const head = `\u25C6 ${t.design} \xB7 ${m.project} \xB7 v${m.version}`;
-    if (m.round === 0) return [`${head} \xB7 ${t.noCritique}`, ...autoPart(m)].join(" \xB7 ");
-    if (m.pending === 0) return [`${head} \xB7 ${t.nothingPending}`, ...autoPart(m)].join(" \xB7 ");
-    return [`${head} \xB7 ${m.pending} ${m.pending === 1 ? t.pendingOne : t.pending} \xB7 ${m.pendingCritical} ${m.pendingCritical === 1 ? t.criticalOne : t.critical}`, ...autoPart(m)].join(" \xB7 ");
-  }
-  if (m.mode === "run") {
-    if (m.stalled) return [`\u25B6 ${t.run} ${t.stoppedSfx}`, ...autoPart(m)].join(" \xB7 ");
-    const parts2 = [
-      `\u25B6 ${t.run}`,
-      `${m.executor === "sessions" ? t.sessions : t.subagents} ${m.running}/${m.parallel}`,
-      ...m.slots.map((s) => `${clip(s.task, SLOT_ID_MAX)} ${t.stage[s.stage] ?? s.stage}${s.round > 1 ? ` (r${s.round})` : ""}`),
-      `${m.integrated}/${m.total}`,
-      `${t.integratedN} ${m.integrated}`
-    ];
-    if (m.worst !== "alive") parts2.push(`\u26A0 ${m.worst === "silent" ? t.silentSfx : t.stoppedSfx}`);
-    parts2.push(...autoPart(m));
-    return parts2.join(" \xB7 ");
-  }
-  const parts = [m.track ? `\u25CF ${t.track} ${m.track} ${m.trackDone}/${m.trackTotal}` : `\u25CF ${m.sid}`];
-  if (m.swarm) parts.push(t.run.toLowerCase());
+function workParts(m, nowMs2, t) {
+  const parts = [m.track ? { key: "progress", text: `\u25CF ${t.track} ${m.track} ${m.trackDone}/${m.trackTotal}`, short: `\u25CF ${m.trackDone}/${m.trackTotal}`, prio: 5 } : { key: "progress", text: `\u25CF ${m.sid}`, prio: 5 }];
+  if (m.swarm) parts.push({ key: "swarm", text: t.run.toLowerCase(), prio: 8 });
   if (m.current) {
-    parts.push(`${m.current.id} ${clip(m.current.title)}`);
+    const title = clip(m.current.title);
+    parts.push({ key: "task", text: `${m.current.id} ${title}`, short: m.current.id, title, prio: 4 });
     const started = m.current.startedAt ? Date.parse(m.current.startedAt) : NaN;
     if (Number.isFinite(started) && nowMs2 >= started) {
       const min = Math.floor((nowMs2 - started) / 6e4);
-      parts.push(`${min} min${m.current.estimateMin ? `/${m.current.estimateMin}` : ""}`);
+      const est = m.current.estimateMin;
+      parts.push({ key: "minutes", text: `${minutesText(min)}${est ? ` / ${minutesText(est)}` : ""}`, short: minutesText(min, true), prio: 6, ...est && min > est ? { hue: "warn" } : {} });
     }
   } else {
-    parts.push(t.noTask);
+    parts.push({ key: "task", text: t.noTask, prio: 6 });
   }
-  if (m.run) parts.push(`${t.stage[m.run.stage] ?? m.run.stage} \xB7 ${t.memberOf.replace("{c}", m.run.coordinator)}`);
-  if (!m.track) parts.push(`${t.tasks} ${m.trackDone}/${m.trackTotal}`);
-  parts.push(`${t.overall} ${m.percent} %`);
-  if (m.inbox > 0) parts.push(`\u2709 ${m.inbox}`);
-  if (m.escalation) parts.push(`\u26A0 ${t.decision}`);
-  parts.push(...autoPart(m));
-  return parts.join(" \xB7 ");
+  if (m.run) {
+    const stage = stageText(t, m.run.stage);
+    parts.push({ key: "member", text: `${stage} \xB7 ${t.memberOf.replace("{c}", m.run.coordinator)}`, short: stage, prio: 6 });
+  }
+  if (!m.track) parts.push({ key: "tasks", text: `${t.tasks} ${m.trackDone}/${m.trackTotal}`, short: `${m.trackDone}/${m.trackTotal}`, prio: 5 });
+  parts.push({ key: "percent", text: `${t.overall} ${m.percent} %`, short: `${m.percent}%`, prio: 7 });
+  if (m.inbox > 0) parts.push({ key: "inbox", text: `\u270E ${m.inbox}`, prio: 3 });
+  if (m.escalation) parts.push(decisionPart(t));
+  return [...parts, ...autoPart(m)];
+}
+function designParts(m, t) {
+  const parts = [{ key: "head", text: `\u25C6 ${t.design} \xB7 ${m.project} \xB7 v${m.version}`, short: `\u25C6 v${m.version}`, prio: 9 }];
+  if (m.round === 0) parts.push({ key: "pending", text: t.noCritique, prio: 4 });
+  else if (m.pending === 0) parts.push({ key: "pending", text: t.nothingPending, prio: 4 });
+  else {
+    parts.push({ key: "pending", text: `${m.pending} ${m.pending === 1 ? t.pendingOne : t.pending}`, prio: 4 });
+    parts.push({ key: "critical", text: `${m.pendingCritical} ${m.pendingCritical === 1 ? t.criticalOne : t.critical}`, prio: 3, ...m.pendingCritical > 0 ? { hue: "alert" } : {} });
+  }
+  return [...parts, ...autoPart(m)];
+}
+function runParts(m, t) {
+  const parts = m.stalled ? [{ key: "head", text: `\u25BA ${t.run}`, prio: 9 }, { key: "state", text: `\u25B2 ${t.stoppedSfx}`, prio: 2, hue: "alert" }] : [{ key: "head", text: `\u25BA ${t.run} \xB7 ${m.executor === "sessions" ? t.sessions : t.subagents} ${m.running}/${m.parallel}`, short: `\u25BA ${m.running}/${m.parallel}`, prio: 5 }];
+  if (!m.stalled) {
+    for (const s of m.slots) {
+      const id2 = clip(s.task, SLOT_ID_MAX);
+      const round = s.round > 1 ? s.round : 0;
+      parts.push({
+        key: `slot:${s.task}`,
+        text: `${id2} ${stageText(t, s.stage)}${round ? ` (r${round})` : ""}`,
+        short: `${id2} ${STAGE_SHORT[s.stage] ?? s.stage}${round ? ` r${round}` : ""}`,
+        prio: 4
+      });
+    }
+  }
+  parts.push({ key: "integrated", text: `${m.integrated}/${m.total} ${t.integratedN}`, short: `${m.integrated}/${m.total}`, prio: 5 });
+  if ((m.queued ?? 0) > 0) parts.push({ key: "queued", text: `${t.queuedN} ${m.queued}`, prio: 8 });
+  if (!m.stalled && m.worst !== "alive") {
+    const silent = m.worst === "silent";
+    parts.push({ key: "state", text: `\u25B2 ${silent ? t.silentSfx : t.stoppedSfx}`, short: `\u25B2 ${silent ? t.signalShort : t.stoppedSfx}`, prio: 2, hue: "alert" });
+  }
+  if ((m.inbox ?? 0) > 0) parts.push({ key: "inbox", text: `\u270E ${m.inbox}`, prio: 3 });
+  if (m.escalation) parts.push(decisionPart(t));
+  return [...parts, ...autoPart(m)];
+}
+function noticeParts(m, nowMs2, t) {
+  const dim = "dim";
+  const seat = m.seat ?? "";
+  const ago = agoText(m.since, nowMs2);
+  const agoPart = ago ? [{ key: "ago", text: t.ago.replace("{ago}", ago), short: ago.replace(" ", ""), prio: 7, hue: dim }] : [];
+  const count = `${m.integrated ?? 0}/${m.total ?? 0}`;
+  if (m.kind === "other-live") {
+    if (m.subject === "run") {
+      return [
+        { key: "notice", text: `\u25E6 ${t.noticeOtherRun}`, short: `\u25E6 ${t.run.toLowerCase()}`, prio: 2, hue: dim },
+        { key: "count", text: count, prio: 5, hue: dim }
+      ];
+    }
+    const lead2 = { key: "notice", text: `\u25E6 ${(m.subject === "design" ? t.noticeOtherDesign : m.task ? t.noticeOtherTask : t.noticeOtherBound).replace("{seat}", seat)}`, short: `\u25E6 ${seat}`, prio: 2, hue: dim };
+    return m.task ? [lead2, { key: "task", text: m.task, prio: 4, hue: dim, glue: " " }, ...agoPart] : [lead2, ...agoPart];
+  }
+  if (m.subject === "run") {
+    return [
+      { key: "notice", text: `\u25CC ${m.stopReason ? t.noticeRunStopped : t.noticeRunOrphan}`, short: `\u25CC ${m.stopReason ? t.stoppedSfx : t.noCoordinator}`, prio: 2, hue: dim },
+      { key: "count", text: `${count} ${t.integratedN}`, short: count, prio: 5, hue: dim, glue: " " },
+      ...agoPart
+    ];
+  }
+  const lead = { key: "notice", text: `\u25CC ${m.subject === "design" ? t.noticePrevDesign : t.noticePrevTask}`, short: `\u25CC ${t.left}`, prio: 2, hue: dim };
+  if (m.subject === "design") return [lead, { key: "task", text: clip(m.project), prio: 4, hue: dim, glue: " " }, ...agoPart];
+  const task = m.task ?? "";
+  const title = m.title ? clip(m.title) : "";
+  const taskPart = title ? { key: "task", text: `${task} ${title}`, short: task, title, prio: 4, hue: dim, glue: " " } : { key: "task", text: task, prio: 4, hue: dim, glue: " " };
+  return [lead, taskPart, ...agoPart];
+}
+function bandParts(m, nowMs2) {
+  if (m.mode === "none") return [];
+  const t = textsFor(m.locale);
+  if (m.mode === "notice") return noticeParts(m, nowMs2, t);
+  if (m.mode === "design") return designParts(m, t);
+  if (m.mode === "run") return runParts(m, t);
+  return workParts(m, nowMs2, t);
 }
 
 // src/mod/files.ts
@@ -12006,6 +12361,7 @@ var writeFailed = (text2) => typeof text2 === "string" && /version_mismatch|not 
 // src/mod/register.tsx
 var band = atom({ plugin: "waypoint", key: "band" }, noneBand());
 var hidden = atom({ plugin: "waypoint", key: "hidden" }, false);
+var drawn = atom({ plugin: "waypoint", key: "drawn" }, null);
 var OWN_BANDS = ["work", "run", "design"];
 var refreshing = false;
 var timer = null;
@@ -12047,12 +12403,27 @@ async function dismissNotice($, n) {
   const next = addDismissal({ ...normalizeDismissals(stored, now), ...dismissals }, dismissalKey(await rootOf($), n.project, n.kind, n.key), dismissalUntil(n, now), now);
   dismissals = next;
   $.ui.invalidate("ui.render");
+  void publishDrawn($);
   try {
     await $.store.set(DISMISS_STORE_KEY, next);
     await loadDismissals($);
   } catch {
   }
 }
+async function publishDrawn($) {
+  try {
+    const m = await read($, band);
+    let shown = !await read($, hidden) && m.mode !== "none";
+    if (shown && m.mode === "notice") shown = !isDismissed(dismissals, dismissalKey(await rootOf($), m.project, m.kind, m.key), await nowMs($));
+    if (await read($, drawn) !== shown) await update($, drawn, () => shown);
+  } catch {
+  }
+}
+var MORE_OPEN_MS = 3e4;
+var moreUntil = 0;
+var CONFIRM_MS = 5e3;
+var armed = null;
+var bandShown = false;
 var refreshPending = false;
 async function refresh($) {
   if (refreshing) {
@@ -12072,6 +12443,7 @@ async function refresh($) {
         }
       } catch {
       }
+      await publishDrawn($);
     } while (refreshPending);
   } finally {
     refreshing = false;
@@ -12133,8 +12505,49 @@ function startTimer($) {
     void tick($);
   });
 }
+async function copyUrl($, url, surface, copied, shown) {
+  let ok = false;
+  try {
+    ok = (await $.ui.copy({ text: url, surface })).isCopied;
+  } catch {
+    ok = false;
+  }
+  try {
+    $.ui.toast((ok ? copied : shown).replace("{url}", url));
+  } catch {
+  }
+}
+async function toggleMore($) {
+  const now = await nowMs($);
+  moreUntil = now < moreUntil ? 0 : now + MORE_OPEN_MS;
+  $.ui.invalidate("ui.render");
+  if (moreUntil) $.clock.after(MORE_OPEN_MS, () => {
+    $.ui.invalidate("ui.render");
+  });
+}
+function closeMore($) {
+  if (moreUntil) {
+    moreUntil = 0;
+    $.ui.invalidate("ui.render");
+  }
+}
+function holdMore($, now, until) {
+  if (now >= moreUntil || moreUntil >= until) return;
+  moreUntil = until;
+  $.clock.after(until - now, () => {
+    $.ui.invalidate("ui.render");
+  });
+}
+var TONE = {
+  warn: { color: "warning" },
+  alert: { color: "error" },
+  dim: { dimColor: true },
+  accent: { color: "claude" }
+};
 export const register = (on) => {
   on("session.start", async ($, e, next) => {
+    moreUntil = 0;
+    armed = null;
     try {
       await update($, hidden, () => false);
     } catch {
@@ -12185,18 +12598,19 @@ export const register = (on) => {
   });
   on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
     const below = await next(e);
+    bandShown = false;
     try {
       const m = await read($, band);
       const isHidden = await read($, hidden);
       if (isHidden || !m || e.props.hasSurvey || m.mode === "none") return below;
+      const now = await nowMs($);
       if (m.mode === "notice") {
         if (!dismissalsLoaded) await readDismissals($);
-        if (isDismissed(dismissals, dismissalKey(await rootOf($), m.project, m.kind, m.key), await nowMs($))) return below;
+        if (isDismissed(dismissals, dismissalKey(await rootOf($), m.project, m.kind, m.key), now)) return below;
       }
       const { Box, Text, Button, Link } = $.ui.resolve(e);
-      const drawnAt = m.mode === "notice" || m.mode === "work" && m.current?.startedAt ? await $.clock.now() : 0;
-      const line = bandLine(m, drawnAt);
       const t = textsFor(m.locale);
+      const fullscreen = e.viewport?.isFullscreen !== false;
       const submit = (text2) => () => {
         const [, command = "", args = ""] = /^\/(\S+)\s*(.*)$/.exec(text2) ?? [];
         $.command.run({ command, args }).catch(async () => {
@@ -12207,7 +12621,6 @@ export const register = (on) => {
           }
         });
       };
-      const link = (href, label) => /^https?:\/\//i.test(href) ? /* @__PURE__ */ h(Link, { href, label }) : /* @__PURE__ */ h(Text, { dimColor: true }, href);
       const fill = (text2) => () => {
         $.prompt.fill({ text: text2, mode: "replace" }).catch(() => void 0);
       };
@@ -12216,59 +12629,143 @@ export const register = (on) => {
           if (r.isFilled) $.ui.toast(t.stopFilled);
         }).catch(() => void 0);
       };
+      const confirmed = (key, hotkey, command, runId) => () => {
+        void (async () => {
+          const pressedAt = await nowMs($);
+          if (armed && armed.key === key && armed.runId === runId && pressedAt <= armed.until) {
+            armed = null;
+            closeMore($);
+            submit(command)();
+            return;
+          }
+          armed = { key, runId, until: pressedAt + CONFIRM_MS };
+          holdMore($, pressedAt, armed.until);
+          try {
+            $.ui.toast(t.confirmStop.replace("{k}", hotkey), { timeoutMs: CONFIRM_MS });
+          } catch {
+          }
+        })();
+      };
+      const address = (key, url, label, short, hotkey, copied, shown) => {
+        if (!url) return [];
+        if (!/^https?:\/\//i.test(url)) return [{ key, label: url, kind: "text", press: () => void 0 }];
+        if (fullscreen) return [{ key, label, short, kind: "link", href: url, press: () => void 0 }];
+        return [{ key, label, short, hotkey, press: (pressed) => {
+          void copyUrl($, url, pressed.surface, copied, shown);
+        } }];
+      };
+      const roadmap = (url) => address("roadmap", url, t.roadmap, t.short.roadmap, "r", t.roadmapCopied, t.roadmapShown);
       const noticeControls = (n) => {
         if (n.kind === "other-live") {
           return n.subject === "run" ? [
-            /* @__PURE__ */ h(Button, { key: "view", label: t.view, onPress: submit("/waypoint:status") }),
-            ...n.joinable ? [/* @__PURE__ */ h(Button, { key: "join", label: t.join, onPress: submit("/forge:run --join") })] : []
+            { key: "view", label: t.view, short: t.short.view, hotkey: "v", press: submit("/waypoint:status") },
+            ...n.joinable ? [{ key: "join", label: t.join, short: t.short.join, hotkey: "j", press: submit("/forge:run --join") }] : []
           ] : [
-            /* @__PURE__ */ h(Button, { key: "status", label: t.status, onPress: submit("/waypoint:status") }),
+            { key: "status", label: t.status, short: t.short.status, hotkey: "s", press: submit("/waypoint:status") },
             // A session on the design holds no track: there is no other one to launch.
-            ...n.subject === "design" ? [] : [/* @__PURE__ */ h(Button, { key: "other-track", label: t.otherTrack, onPress: fill("/waypoint:launch ") })],
-            ...n.roadmapUrl ? [link(n.roadmapUrl, t.roadmap)] : []
+            ...n.subject === "design" ? [] : [{ key: "other-track", label: t.otherTrack, short: t.short.otherTrack, hotkey: "l", press: fill("/waypoint:launch ") }],
+            ...roadmap(n.roadmapUrl)
           ];
         }
         if (n.subject === "run") {
           return [
-            /* @__PURE__ */ h(Button, { key: "view", label: t.view, onPress: submit("/waypoint:status") }),
-            /* @__PURE__ */ h(Button, { key: "resume", label: t.resume, onPress: submit("/forge:run --resume") }),
-            /* @__PURE__ */ h(Button, { key: "close", label: t.close, onPress: n.stopReason ? submit("/forge:stop") : fillStop })
+            { key: "view", label: t.view, short: t.short.view, hotkey: "v", press: submit("/waypoint:status") },
+            { key: "resume", label: t.resume, short: t.short.resume, hotkey: "e", press: submit("/forge:run --resume") },
+            n.stopReason ? { key: "close", label: t.close, short: t.short.close, hotkey: "c", press: submit("/forge:stop") } : { key: "close", label: t.close, short: t.short.close, hotkey: "c", confirm: true, press: confirmed("close", "c", "/forge:stop", n.runId) }
           ];
         }
-        if (n.subject === "design") return [/* @__PURE__ */ h(Button, { key: "resume", label: t.resume, variant: "primary", onPress: submit("/waypoint:design resume") })];
-        return [
-          /* @__PURE__ */ h(Button, { key: "resume", label: t.resume, variant: "primary", onPress: submit("/waypoint:work resume") }),
-          ...n.task ? [/* @__PURE__ */ h(Button, { key: "release", label: `${t.release} ${n.task}`, onPress: submit(`/waypoint:work release ${n.task}`) })] : []
-        ];
+        if (n.subject === "design") return [{ key: "resume", label: t.resume, short: t.short.resume, hotkey: "e", variant: "primary", press: submit("/waypoint:design resume") }];
+        const release = n.task ? [{ key: "release", label: `${t.release} ${n.task}`, short: t.short.release, hotkey: "f", press: submit(`/waypoint:work release ${n.task}`) }] : [];
+        return [{ key: "resume", label: t.resume, short: t.short.resume, hotkey: "e", variant: "primary", press: submit("/waypoint:work resume") }, ...release];
       };
-      const controls = m.mode === "design" ? [
-        ...m.proposals > 0 ? [
-          /* @__PURE__ */ h(Button, { key: "apply-all", label: t.applyAll, onPress: submit("/waypoint:design apply all") }),
-          /* @__PURE__ */ h(Button, { key: "pick", label: t.pick, onPress: fill("/waypoint:design apply ") })
-        ] : [],
-        /* @__PURE__ */ h(Button, { key: "round", label: t.round, onPress: submit("/waypoint:design round") }),
-        /* @__PURE__ */ h(Button, { key: "rewrite", label: t.rewrite, onPress: submit("/waypoint:design rewrite") }),
-        /* @__PURE__ */ h(Button, { key: "interview", label: t.interview, onPress: submit("/waypoint:design interview") }),
-        /* @__PURE__ */ h(Button, { key: "approve", label: t.approve, variant: "primary", onPress: submit("/waypoint:design approve") }),
-        ...m.designUrl ? [link(m.designUrl, t.viewDesign)] : []
-      ] : m.mode === "run" ? [
-        /* @__PURE__ */ h(Button, { key: "status", label: t.status, onPress: submit("/waypoint:status") }),
-        /* @__PURE__ */ h(Button, { key: "stop-run", label: t.stopRun, onPress: submit("/forge:stop") }),
-        ...m.roadmapUrl ? [link(m.roadmapUrl, t.roadmap)] : []
-      ] : m.mode === "notice" ? noticeControls(m) : [
-        /* @__PURE__ */ h(Button, { key: "next-task", label: t.nextTask, variant: "primary", onPress: submit("/waypoint:work") }),
-        /* @__PURE__ */ h(Button, { key: "status", label: t.status, onPress: submit("/waypoint:status") }),
-        /* @__PURE__ */ h(Button, { key: "launch", label: t.launch, onPress: fill("/waypoint:launch ") }),
-        ...m.run ? [/* @__PURE__ */ h(Button, { key: "stop-run", label: t.stopRun, onPress: fillStop })] : [],
-        ...m.roadmapUrl ? [link(m.roadmapUrl, t.roadmap)] : []
-      ];
+      let modeControls;
+      if (m.mode === "design") {
+        const apply = m.proposals > 0 ? [
+          { key: "apply-all", label: t.applyAll, short: t.short.applyAll, hotkey: "a", press: submit("/waypoint:design apply all") },
+          { key: "pick", label: t.pick, short: t.short.pick, hotkey: "e", press: fill("/waypoint:design apply ") }
+        ] : [];
+        modeControls = [
+          ...apply,
+          { key: "round", label: t.round, short: t.short.round, hotkey: "o", press: submit("/waypoint:design round") },
+          { key: "rewrite", label: t.rewrite, short: t.short.rewrite, hotkey: "w", press: submit("/waypoint:design rewrite") },
+          { key: "interview", label: t.interview, short: t.short.interview, hotkey: "i", press: submit("/waypoint:design interview") },
+          { key: "approve", label: t.approve, hotkey: "y", variant: "primary", press: submit("/waypoint:design approve") },
+          ...address("design", m.designUrl, t.viewDesign, t.short.viewDesign, "d", t.designCopied, t.designShown)
+        ];
+      } else if (m.mode === "run") {
+        modeControls = [
+          { key: "status", label: t.status, short: t.short.status, hotkey: "s", press: submit("/waypoint:status") },
+          { key: "stop-run", label: t.stopRun, hotkey: "t", confirm: true, press: confirmed("stop-run", "t", "/forge:stop", m.viewer.runId) },
+          ...roadmap(m.roadmapUrl)
+        ];
+      } else if (m.mode === "notice") {
+        modeControls = noticeControls(m);
+      } else {
+        const stop = m.run ? [{ key: "stop-run", label: t.stopRun, hotkey: "t", press: fillStop }] : [];
+        modeControls = [
+          { key: "next-task", label: t.nextTask, short: t.short.nextTask, hotkey: "n", variant: "primary", press: submit("/waypoint:work") },
+          { key: "status", label: t.status, short: t.short.status, hotkey: "s", press: submit("/waypoint:status") },
+          { key: "launch", label: t.launch, short: t.short.launch, hotkey: "l", press: fill("/waypoint:launch ") },
+          ...stop,
+          ...roadmap(m.roadmapUrl)
+        ];
+      }
       const notice = m.mode === "notice" ? m : null;
       const dismiss = () => {
-        (notice ? dismissNotice($, notice) : update($, hidden, () => true)).catch(() => void 0);
+        (notice ? dismissNotice($, notice) : update($, hidden, () => true).then(() => publishDrawn($))).catch(() => void 0);
       };
-      return /* @__PURE__ */ h(Box, { flexDirection: "column" }, /* @__PURE__ */ h(Box, { flexDirection: "row", flexWrap: "wrap", columnGap: 1 }, m.mode === "notice" ? /* @__PURE__ */ h(Text, { dimColor: true, wrap: "truncate-end" }, line) : /* @__PURE__ */ h(Text, { color: "claude", wrap: "truncate-end" }, line), controls, lens ? /* @__PURE__ */ h(Button, { key: "panel", label: t.panel, onPress: submit("/lens") }) : null, /* @__PURE__ */ h(Button, { key: "dismiss", label: "\xD7", role: "dismiss", onPress: dismiss })), below);
+      const panel = lens ? [{ key: "panel", label: t.panel, hotkey: "p", press: submit("/lens") }] : [];
+      const controls = [...modeControls, ...panel, { key: DISMISS_KEY, label: "\xD7", hotkey: "x", dismiss: true, press: dismiss }];
+      const lay = layoutBand(bandParts(m, now), controls, { bodyColumns: e.props.bodyColumns, maxRows: e.props.maxRows, fullscreen, moreOpen: now < moreUntil });
+      const act = (c) => (pressed) => {
+        if (!c.confirm) closeMore($);
+        c.press(pressed);
+      };
+      const plain = lay.plain ? { plain: true } : {};
+      const draw = (c) => {
+        const label = lay.long ? c.label : c.short ?? c.label;
+        if (c.kind === "text") return /* @__PURE__ */ h(Text, { key: c.key, dimColor: true }, c.label);
+        if (c.kind === "link") return /* @__PURE__ */ h(Link, { key: c.key, href: c.href ?? "", label });
+        return /* @__PURE__ */ h(
+          Button,
+          {
+            key: c.key,
+            label,
+            hotkey: c.hotkey,
+            ...plain,
+            ...c.variant ? { variant: c.variant } : {},
+            ...c.dismiss ? { role: "dismiss" } : {},
+            onPress: act(c)
+          }
+        );
+      };
+      const byKey = new Map(controls.map((c) => [c.key, c]));
+      const drawKeys = (keys) => keys.flatMap((k) => {
+        const c = byKey.get(k);
+        return c ? [draw(c)] : [];
+      });
+      const base = m.mode === "notice" ? { dimColor: true } : { color: "claude" };
+      const line = /* @__PURE__ */ h(Text, { ...base, wrap: "truncate-end" }, lay.shown.map((p, i) => {
+        const text2 = `${i ? p.glue ?? SEP : ""}${p.text}`;
+        return p.hue ? /* @__PURE__ */ h(Text, { key: `part-${p.key}`, ...TONE[p.hue] }, text2) : text2;
+      }));
+      bandShown = true;
+      return /* @__PURE__ */ h(Box, { flexDirection: "column" }, /* @__PURE__ */ h(Box, { key: "band-row", flexDirection: "row", columnGap: 1 }, /* @__PURE__ */ h(Box, { key: "band-line", flexShrink: 1, minWidth: 0 }, line), drawKeys(lay.inline.filter((k) => k !== DISMISS_KEY)), lay.more ? /* @__PURE__ */ h(Button, { key: MORE_KEY, label: MORE_LABEL, hotkey: MORE_HOTKEY, ...plain, onPress: () => {
+        void toggleMore($);
+      } }) : null, drawKeys(lay.inline.filter((k) => k === DISMISS_KEY))), lay.second.length ? /* @__PURE__ */ h(Box, { key: "band-row2", flexDirection: "row", flexWrap: "wrap", columnGap: 1 }, drawKeys(lay.second)) : null, below);
     } catch {
+      bandShown = false;
       return below;
     }
+  });
+  on("ui.render", { component: "PromptHint" }, async ($, e, next) => {
+    try {
+      if (bandShown && e.viewport?.isFullscreen === false && !e.props.tail) {
+        const m = await read($, band);
+        return next({ ...e, props: { ...e.props, tail: textsFor(m.locale).bandHint } });
+      }
+    } catch {
+    }
+    return next(e);
   });
 };
