@@ -52,6 +52,9 @@ export const VIEWS: readonly View[] = ['summary', 'plan', 'schedule', 'runs', 's
 /** What the conversation view shows in 4b: the notes or the proposals (4c joins them). */
 export type TalkKind = 'notes' | 'proposals';
 export const TALK_KINDS: readonly TalkKind[] = ['notes', 'proposals'];
+/** The four tabs of the task detail (§4.7); forge shows only with forge data or evidence. */
+export type DetailTab = 'summary' | 'definition' | 'forge' | 'talk';
+export const DETAIL_TABS: readonly DetailTab[] = ['summary', 'definition', 'forge', 'talk'];
 export type VFilterKey = 'done' | 'in_progress' | 'blocked' | 'committed' | 'provisional';
 export const VFILTER_KEYS: readonly VFilterKey[] = ['done', 'in_progress', 'blocked', 'committed', 'provisional'];
 export const NOTE_FILTERS: readonly NoteFilter[] = ['all', 'decision', 'idea', 'debt', 'open', 'mine'];
@@ -64,6 +67,8 @@ export interface UiState {
   zoom: Zoom; offset: number; expanded: Set<string>; modal: string | null; search: string; view: View;
   /** The conversation's kind (notes by default). */
   talk?: TalkKind;
+  /** The open tab of the task detail (the summary by default). */
+  tab?: DetailTab;
   /** Index of the open verification screenshot in the modal's task, or null. */
   shot: number | null;
   /** The timeline window when zoomed or moved freely: its span and its pan from the default anchor, in ms. */

@@ -46,7 +46,7 @@ export function renderApp(m: Model, ui: UiState, dv: Derived = computeDerived(m)
   <main class="main">
     ${renderStrip(m, d, dv, loc)}${body}${renderDebug(m)}
   </main>
-  ${ui.modal ? renderTaskModal(m, d, ui.modal, loc) : ''}
+  ${ui.modal ? renderTaskModal(m, d, ui, loc) : ''}
   ${ui.modal && ui.shot !== null && evidence ? renderLightbox(d, evidence, ui.shot) : ''}
 </div>`;
 }

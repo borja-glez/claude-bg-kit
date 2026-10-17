@@ -183,7 +183,7 @@ describe('sessions view', () => {
   });
   it('a task without zones reads «whole repository» in its session card and in its detail (carry 1)', () => {
     const open = { ...plan, tasks: plan.tasks.map(t => (t.id === 'T002' ? { ...t, zones: [] } : t)) };
-    const zonesOf = (html: string, start: string) => html.slice(html.indexOf(start)).match(/>Zonas<\/(?:dt|div)>\s*<(?:dd|div)>([\s\S]*?)<\/(?:dd|div)>/)?.[1];
+    const zonesOf = (html: string, start: string) => html.slice(html.indexOf(start)).match(/>Zonas(?: planificadas)?<\/(?:dt|div)>\s*<(?:dd|div)>([\s\S]*?)<\/(?:dd|div)>/)?.[1];
     for (const [view, start] of [[ui({ view: 'sessions' }), 'class="sc'], [ui({ modal: 'T002' }), 'class="modal"']] as const) {
       expect(zonesOf(renderApp({ ...base(), plan: open }, view), start)).toBe('todo el repositorio');
       expect(renderApp({ ...base(), plan: open, meta: { ...base().meta!, locale: 'en' } }, view)).toContain('whole repository');
@@ -853,7 +853,7 @@ describe('scroll keys and relative times (G-01)', () => {
   });
 });
 
-describe('theme.css: the modal, the side bar and the detail grid (H-01, H-11, .mgrid)', () => {
+describe('theme.css: the modal, the side bar and the detail (H-01, H-11, §4.7)', () => {
   const phone = cssMedia(CSS, '(max-width:760px)');
   const zIndex = (rule: string) => Number(/z-index:(\d+)/.exec(rule)?.[1] ?? NaN);
   it('the modal sits above the sticky side bar, its header sticks and the page does not scroll under it (H-01)', () => {
@@ -874,10 +874,11 @@ describe('theme.css: the modal, the side bar and the detail grid (H-01, H-11, .m
     expect(cssRule(phone, '.main')).toContain('padding:12px 12px calc(68px + env(safe-area-inset-bottom))');
     expect(cssRule(CSS, '.strip')).toMatch(/position:sticky;top:0/);
   });
-  it('the detail columns can shrink below their content at 390 px (.mgrid)', () => {
-    expect(cssRule(CSS, '.mgrid')).toContain('grid-template-columns:minmax(0,1fr) minmax(0,1.2fr)');
-    expect(cssRule(cssMedia(CSS, '(max-width:900px)'), '.mgrid')).toContain('grid-template-columns:minmax(0,1fr)');
-    expect(cssRule(CSS, '.mgrid .sec')).toContain('min-width:0;overflow-wrap:anywhere');
+  it('the detail is full screen up to 760 px and its panels can shrink below their content (§4.7)', () => {
+    expect(cssRule(phone, '.modal')).toContain('min-height:100dvh');
+    expect(cssRule(phone, '.overlay')).toContain('padding:0');
+    expect(cssRule(CSS, '.dpanel')).toContain('min-width:0;overflow-wrap:anywhere');
+    expect(CSS).not.toContain('.mgrid');
   });
 });
 
@@ -1302,5 +1303,177 @@ describe('«Te necesita» (G-24, G-13, G-08)', () => {
     m.states = { ...m.states, T003: { status: 'blocked', blockedBy: ['external'], blockedReason: HOSTILE } };
     m.run = { ...m.run!, stallReason: HOSTILE };
     clean(renderApp(m, ui()));
+  });
+});
+
+describe('the task detail in four tabs (§4.7)', () => {
+  const modalOf = (html: string) => html.slice(html.indexOf('<div class="overlay"'));
+  const forgeV2 = (over: object = {}) => ({
+    v: 2 as const, path: 'large' as const, phase: 'review', agent: 'forge-impl', round: 6, cap: 5, brief: 1, stage: 'review' as const, verdict: { action: 'accept' as const, score: 0.91 },
+    validators: [{ name: 'test', ok: true, ms: 41200, cached: true as const }, { name: 'e2e', ok: true, flaky: true as const }, { name: 'lint', ok: true, skipped: 'no config' }, { name: 'types', ok: false, preexisting: true as const, failing: 3 }],
+    rounds: [
+      { brief: 1, n: 5, action: 'fix' as const, note: 'cerrar el caso', findings: { critical: 1, important: 2, minor: 0, deferred: 0 }, reviewers: ['correctness', 'security'], at: '2026-10-11T11:00:00.000Z' },
+      { brief: 1, n: 6, action: 'accept' as const, note: 'listo', findings: { critical: 0, important: 1, minor: 3, deferred: 1 }, reviewers: ['correctness'], at: '2026-10-11T11:40:00.000Z' },
+    ],
+    verify: { planned: true, result: null, passed: null, total: null, skipped: 'sin emulador', surfaces: ['app'] },
+    stages: { brief: 120, implement: 1500, review: 600 }, integration: null, deferred: [{ file: 'src/a.ts', line: 12, problem: 'falta un índice' }],
+    acceptedRound: 6, overCap: true, updatedAt: '2026-10-11T11:50:00.000Z', ...over,
+  });
+
+  it('is a dialog labelled by its title, with ARIA tabs (Forge only with forge data) and every panel, the inactive ones hidden', () => {
+    const html = modalOf(renderApp(base(), ui({ modal: 'T001' })));
+    expect(html).toContain('<div class="modal" role="dialog" aria-modal="true" aria-labelledby="dtitle">');
+    expect(html).toContain('<span class="t" id="dtitle">Esquema de pedidos</span>');
+    expect(html).toContain('<div class="dtabs" role="tablist" aria-label="Secciones de la tarea">');
+    expect(html.match(/role="tab"/g)).toHaveLength(3);
+    expect(html).toContain('<button type="button" role="tab" id="dtab-summary" class="dtab on" aria-selected="true" aria-controls="dpanel-summary" tabindex="0" data-action="detail-tab" data-tab="summary">Resumen</button>');
+    expect(html).toContain('id="dtab-definition" class="dtab" aria-selected="false" aria-controls="dpanel-definition" tabindex="-1"');
+    expect(html).toContain('<div class="dpanel" role="tabpanel" id="dpanel-definition" aria-labelledby="dtab-definition" tabindex="0" hidden>');
+    expect(html).toContain('>Conversación (0)</button>');
+    const m = base();
+    m.states.T001 = { ...m.states.T001!, forge: { path: 'medium', phase: 'review' } };
+    const forge = modalOf(renderApp(m, ui({ modal: 'T001', tab: 'forge' })));
+    expect(forge.match(/role="tab"/g)).toHaveLength(4);
+    expect(forge).toContain('id="dtab-forge" class="dtab on" aria-selected="true"');
+    expect(forge).toContain('<div class="dpanel" role="tabpanel" id="dpanel-forge" aria-labelledby="dtab-forge" tabindex="0">');
+    expect(modalOf(renderApp(base(), ui({ modal: 'T001', tab: 'forge' })))).toContain('id="dtab-summary" class="dtab on"');
+  });
+
+  it('the pill says «hecha · sin fusionar» while the integration is not merged, and «Sin ejecutor» when the lease stopped', () => {
+    const m = base();
+    m.states.T001 = { ...m.states.T001!, forge: forgeV2({ stage: 'done', integration: { branch: 'forge/run-x', sha: 'abc1234', merged: false, target: 'main' } }) };
+    expect(modalOf(renderApp(m, ui({ modal: 'T001' })))).toContain('<span class="pill st-done">hecha · sin fusionar</span>');
+    m.states.T001 = { ...m.states.T001!, forge: forgeV2({ stage: 'done', integration: { branch: 'forge/run-x', sha: 'abc1234', merged: true, target: 'main' } }) };
+    expect(modalOf(renderApp(m, ui({ modal: 'T001' })))).toContain('<span class="pill st-done">Hecha</span>');
+  });
+
+  it('Resumen: why it is blocked on top, who runs it, and the commits the events carry that are not in commits yet (H-15, G-18)', () => {
+    const m = base();
+    m.states.T003 = { status: 'blocked', blockedBy: ['external'], blockedReason: 'Espera la API de pagos' };
+    expect(modalOf(renderApp(m, ui({ modal: 'T003' })))).toContain('<div class="warnbox" role="note"><b>Bloqueada por</b> external · Espera la API de pagos</div>');
+    m.events = [
+      { id: 'c1', ts: '2026-10-11T10:10:00Z', type: 'commit', sessionId: 'main', taskId: 'T001', text: 'T001: paso intermedio', sha: 'fff0001aaa', add: 4, del: 1 },
+      { id: 'c2', ts: '2026-10-11T10:20:00Z', type: 'commit', sessionId: 'main', taskId: 'T001', text: 'ya en commits', sha: 'abcdef1234' },
+    ];
+    const html = modalOf(renderApp(m, ui({ modal: 'T001' })));
+    expect(html).toMatch(/Commits intermedios<\/div><div><div class="mono"><span class="c-blue">fff0001<\/span> T001: paso intermedio <span class="ok">\+4<\/span>/);
+    expect(html).not.toContain('ya en commits');
+    m.states.T002 = { status: 'in_progress', owner: 'be', startedAt: '2026-10-11T11:45:00Z', exec: { runId: 'r1', mode: 'sessions', by: 'be', agent: 'forge-impl', stage: 'implement', since: '2026-10-11T11:50:00Z', leaseUntil: '2026-10-11T12:05:00Z' } };
+    expect(modalOf(renderApp(m, ui({ modal: 'T002' })))).toContain('be · ejecutora · Agente: forge-impl');
+  });
+
+  it('Definición: inline markdown, the design section, the zones touched out of the plan, and the dependencies with their state (G-16, G-25, H-15, G-23)', () => {
+    const m = base();
+    m.meta = { ...m.meta!, links: { design: 'https://claude.ai/artifact/d1', designVersion: 7 } };
+    m.plan = { ...m.plan, tasks: m.plan.tasks.map(t => (t.id === 'T005' ? { ...t, design_ref: 'checkout', includes: 'usa `stripe` y **3DS**', done_when: 'ver https://x.io/a' } : t)) };
+    m.states = { ...m.states, T003: { status: 'done' }, T005: { status: 'free', zonesTouched: ['web/checkout/form.ts', 'src/payments/key.ts'] } };
+    const html = modalOf(renderApp(m, ui({ modal: 'T005', tab: 'definition' })));
+    expect(html).toContain('usa <code>stripe</code> y <strong>3DS</strong>');
+    expect(html).toContain('<a href="https://x.io/a" target="_blank" rel="noopener noreferrer">https://x.io/a</a>');
+    expect(html).toContain('<a href="https://claude.ai/artifact/d1#checkout" target="_blank" rel="noopener noreferrer">checkout</a> <span class="mono">v7</span>');
+    expect(html).toContain('<span class="zt">web/checkout/form.ts</span>');
+    expect(html).toContain('<span class="zt out">src/payments/key.ts · fuera del plan</span>');
+    expect(html).toContain('1/2 hechas · faltan T004');
+    expect(html).toContain('<button type="button" class="chip st-done" data-action="open-task" data-id="T003" data-k="dep:T003" title="Hecha">T003</button>');
+    expect(html).toContain('<button type="button" class="chip st-free" data-action="open-task" data-id="T004" data-k="dep:T004" title="Libre">T004</button>');
+    const three = { ...m, plan: { ...m.plan, tasks: m.plan.tasks.map(t => (t.id === 'T006' ? { ...t, depends_on: ['T001', 'T002', 'T003'] } : t)) }, states: { ...m.states, T003: { status: 'free' as const } } };
+    expect(modalOf(renderApp(three, ui({ modal: 'T006' })))).toContain('1/3 hechas · faltan T002, T003');
+  });
+
+  it('Definición: a task with no zones says «todo el repositorio» (2c wording kept)', () => {
+    const m = base();
+    m.plan = { ...m.plan, tasks: m.plan.tasks.map(t => (t.id === 'T002' ? { ...t, zones: [] } : t)) };
+    expect(modalOf(renderApp(m, ui({ modal: 'T002', tab: 'definition' })))).toContain('todo el repositorio');
+  });
+
+  it('Forge: the stages, the rounds with the one over the cap highlighted, every validator, the accepted round with its score only in the title, deferred, verification by round (K4-05, K2-14)', () => {
+    const m = base();
+    m.states.T002 = { ...m.states.T002!, forge: forgeV2(), evidence: { v: 2, surfaces: ['web'], result: 'fail', passed: 1, total: 3, unchecked: ['refund'], local: '.forge/work/x/evidence/1-6',
+      shots: [{ surface: 'web', check: 'home', ok: true, round: 5, url: 'https://claude.ai/_blob/a' }, { surface: 'web', check: 'cart', ok: false, round: 6 }] } };
+    const html = modalOf(renderApp(m, ui({ modal: 'T002', tab: 'forge' })));
+    expect(html).toContain('<b>grande</b> · revisar · brief 1 · r6/5');
+    expect(html).toContain('Etapas: brief 2 min · implementar 25 min · revisar 10 min');
+    expect(html).toContain('<tr class="over"><td>1·6</td><td>aceptada</td><td>0 C · 1 I · 3 m</td><td>correctness</td><td>listo</td></tr>');
+    expect(html).toContain('<tr><td>1·5</td><td>arreglo</td><td>1 C · 2 I · 0 m</td><td>correctness, security</td><td>cerrar el caso</td></tr>');
+    expect(html).toContain('<div class="ok" title="Veredicto: 0.91">Aceptada en la ronda 6</div>');
+    expect(html).not.toMatch(/>[^<]*0\.91/);
+    expect(html).toContain('<span class="ok">test ✓</span> <span class="mono">41.2 s</span> <span class="mono">caché</span>');
+    expect(html).toContain('<span class="ok">e2e ✓</span> <span class="mono">flaky</span>');
+    expect(html).toContain('<span class="muted">lint ⊘</span> <span class="mono">saltado: no config</span>');
+    expect(html).toContain('<span class="del">types ✗</span> <span class="mono">ya fallaba</span> <span class="mono">3 fallan</span>');
+    expect(html).toContain('src/a.ts:12 — falta un índice');
+    expect(html).toContain('Verificación saltada: sin emulador');
+    expect(html).toContain('<div class="lbl">Ronda 5</div><div class="shots"><button type="button" class="shot ok" data-action="open-shot" data-i="0" data-k="shot:0"');
+    expect(html).toContain('<div class="lbl">Ronda 6</div><div class="shots"><div class="shot-row del">✗ cart</div></div>');
+    expect(html).toContain('Sin comprobar: refund');
+    m.states.T002 = { ...m.states.T002!, forge: forgeV2({ stage: 'stopped' }) };
+    expect(modalOf(renderApp(m, ui({ modal: 'T002', tab: 'forge' })))).toContain('parada con /forge:stop');
+  });
+
+  it('Conversación: the task’s notes with Reply, decisions with their structure and the proposal it came from, with its count', () => {
+    const m = base();
+    m.notes = [
+      note({ id: 'q1', type: 'question', text: '¿`A` o B?', taskId: 'T002' }),
+      note({ id: 'd1', type: 'decision', taskId: 'T002', text: 'elegido A', decision: { point: 'other', what: 'w', chosen: 'A', alternatives: ['B'], why: 'más simple', revert: 'cambiar a B', auto: false } }),
+      note({ id: 'c1', type: 'idea', taskId: 'T002', text: 'comentario de propuesta', proposalId: 'p1' }),
+    ];
+    m.proposals = [P({ id: 'p1', status: 'done', taskId: 'T002', title: 'Origen de T002' })];
+    const html = modalOf(renderApp(m, ui({ modal: 'T002', tab: 'talk' })));
+    expect(html).toContain('>Conversación (3)</button>');
+    expect(html).toContain('¿<code>A</code> o B?');
+    expect(html).toContain('data-action="answer-open" data-id="q1"');
+    expect(html).toContain('<span class="nauto">tuya</span>');
+    expect(html).toContain('Elegido:</span> A');
+    expect(html).toContain('Cómo revertir:</span> cambiar a B');
+    expect(html).not.toContain('comentario de propuesta');
+    expect(html).toContain('Propuesta de origen');
+    expect(html).toContain('Origen de T002');
+    expect(html).toContain('data-action="view" data-view="talk" data-c="proposals"');
+    expect(modalOf(renderApp(m, ui({ modal: 'T002', tab: 'talk', answering: 'q1' })))).toContain('data-role="answer-text"');
+  });
+
+  it('escapes everything the detail shows, and never links anything that is not http(s) (Review Focus 5)', () => {
+    const m = base();
+    m.meta = { ...m.meta!, links: { design: 'https://claude.ai/artifact/d1', designVersion: 7 } };
+    m.plan = { ...m.plan, tasks: m.plan.tasks.map(t => (t.id === 'T002' ? { ...t, title: HOSTILE, includes: `${HOSTILE} javascript:alert(1)`, done_when: HOSTILE, verification: HOSTILE, design_ref: HOSTILE } : t)) };
+    m.states.T002 = { status: 'blocked', blockedBy: [HOSTILE], blockedReason: HOSTILE, summary: `${HOSTILE} [x](javascript:alert(1))`, zonesTouched: [HOSTILE],
+      forge: forgeV2({ agent: HOSTILE, rounds: [{ brief: 1, n: 6, action: 'accept', note: HOSTILE, findings: { critical: 0, important: 0, minor: 0, deferred: 0 }, reviewers: [HOSTILE], at: '2026-10-11T11:40:00.000Z' }], deferred: [{ file: HOSTILE, problem: HOSTILE }] }) };
+    m.notes = [note({ id: 'n1', taskId: 'T002', text: HOSTILE })];
+    for (const tab of ['summary', 'definition', 'forge', 'talk'] as const) {
+      const html = renderApp(m, ui({ modal: 'T002', tab }));
+      clean(html);
+      expect(html).not.toContain('href="javascript');
+    }
+  });
+
+  // Task 2 carry: every inlineMd call site (summary, includes, done_when, verification, note text) gets hostile raw text.
+  describe('inlineMd call sites with hostile raw text', () => {
+    const RAW = '<img src=x onerror=alert(1)> [js](javascript:alert(1)) [q"q](https://x.io/a"onmouseover="alert(1)) **b**';
+    const never = (html: string) => {
+      expect(html).not.toContain('<img');
+      expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+      expect(html).not.toMatch(/<a [^>]*href="javascript/i);
+      expect(html).not.toMatch(/<a [^>]*onmouseover/i);
+      expect(html).not.toMatch(/href="[^"]*&quot;/);
+      expect(html).not.toMatch(/href="[^"]*"onmouseover/);
+    };
+    const withTask = (over: object) => {
+      const m = base();
+      m.plan = { ...m.plan, tasks: m.plan.tasks.map(t => (t.id === 'T002' ? { ...t, ...over } : t)) };
+      return m;
+    };
+    it('summary', () => {
+      const m = base();
+      m.states.T002 = { ...m.states.T002!, summary: RAW };
+      never(modalOf(renderApp(m, ui({ modal: 'T002', tab: 'summary' }))));
+    });
+    it('includes', () => never(modalOf(renderApp(withTask({ includes: RAW }), ui({ modal: 'T002', tab: 'definition' })))));
+    it('done_when', () => never(modalOf(renderApp(withTask({ done_when: RAW }), ui({ modal: 'T002', tab: 'definition' })))));
+    it('verification', () => never(modalOf(renderApp(withTask({ verification: RAW }), ui({ modal: 'T002', tab: 'definition' })))));
+    it('note text', () => {
+      const m = base();
+      m.notes = [note({ id: 'n1', taskId: 'T002', text: RAW })];
+      never(modalOf(renderApp(m, ui({ modal: 'T002', tab: 'talk' }))));
+    });
   });
 });
