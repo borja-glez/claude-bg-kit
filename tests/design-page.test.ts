@@ -189,3 +189,117 @@ describe('buildDesignPageData: the rounds, what became of each proposal and what
     ]);
   });
 });
+
+describe('renderDesignPage: badge, rounds, diff and the version buttons (K3-09, K3-11)', () => {
+  const en = { ...rich, meta: { ...rich.meta, locale: 'en' } };
+  it('shows the status badge in Spanish and English', () => {
+    expect(renderDesignPage(rich, 5)).toContain('<span class="badge st-amended">aprobado · enmendado</span>');
+    expect(renderDesignPage(en, 5)).toContain('<span class="badge st-amended">approved · amended</span>');
+    expect(renderDesignPage({ ...rich, amended: false }, 5)).toContain('<span class="badge st-approved">aprobado</span>');
+    expect(renderDesignPage(data, 2)).toContain('<span class="badge st-draft">borrador</span>');
+    expect(renderDesignPage({ ...data, status: 'parked' }, 2)).toContain('<span class="badge st-parked">aparcado</span>');
+  });
+  it('tells every round with its verdict, its counts and what became of each proposal; the latest round is open', () => {
+    const html = renderDesignPage(rich, 5);
+    expect(html).toContain('<section class="rounds"><div class="lbl">Rondas</div>');
+    expect(html).toContain('<details class="rd" data-round="1"><summary><b>Ronda 1</b> · v1 · <span class="vd vd-changes">con cambios</span> · 1 C · 1 M · 2 m</summary>');
+    expect(html).toContain('<details class="rd" data-round="2" open>');
+    expect(html).toContain('[Hueco · crítica]</span> <b>Peligros</b> — p1 → c1 <span class="fate f-applied">aplicada en v2</span>');
+    expect(html).toContain('<span class="fate f-resolved">resuelta en la entrevista</span>');
+    expect(html).toContain('<b>Introducción</b> — p3 → c3 <span class="fate f-dismissed">descartada: fuera de alcance</span>');
+    expect(html).toContain('<span class="fate f-pending">pendiente</span>');
+    expect(html).toContain('<span class="fate f-rewritten">reescrita</span>');
+    for (const s of ['applied in v2', 'resolved in the interview', 'dismissed: fuera de alcance', '<b>Round 1</b>', '[Gap · critical]']) expect(renderDesignPage(en, 5)).toContain(s);
+    expect(renderDesignPage(data, 2)).not.toContain('class="rounds"');
+  });
+  it('a ready round with no proposals says so', () => {
+    const ready = { ...rich, critiques: [{ round: 3, version: 4, scope: 'changed' as const, verdict: 'ready' as const, proposals: [] }] };
+    expect(renderDesignPage(ready, 5)).toContain('<span class="vd vd-ready">lista</span> · 0 C · 0 M · 0 m</summary><p class="none">Sin propuestas: no queda nada crítico ni mayor.</p>');
+  });
+  it('says how many older rounds and proposals the data left out, so none is hidden silently', () => {
+    const more = { ...rich, critiquesMore: 7, critiques: rich.critiques.map(c => ({ ...c, proposalsMore: 3 })) };
+    const html = renderDesignPage(more, 5);
+    expect(html).toContain('<p class="more">7 rondas anteriores no se muestran</p>');
+    expect(html).toContain('<p class="more">3 propuestas anteriores no se muestran</p>');
+    expect(renderDesignPage({ ...more, meta: { ...more.meta, locale: 'en' } }, 5)).toContain('<p class="more">7 older rounds not shown</p>');
+    expect(renderDesignPage(rich, 5)).not.toContain('class="more"');
+  });
+  it('says under the versions what the shown version changed, added and removed', () => {
+    expect(renderDesignPage(rich, 5)).toContain('<p class="diff">cambió §Arquitectura</p>');
+    expect(renderDesignPage(rich, 2)).toContain('<p class="diff">nueva §Riesgos · quitada §Peligros</p>');
+    expect(renderDesignPage(rich, 1)).not.toContain('class="diff"');
+    expect(renderDesignPage(rich, 3)).not.toContain('class="diff"');
+  });
+  it('marks the version buttons with aria-pressed', () => {
+    const html = renderDesignPage(rich, 5);
+    expect(html).toContain('<button type="button" class="v on" data-version="5" aria-pressed="true">v5 · actual</button>');
+    expect(html).toContain('<button type="button" class="v" data-version="1" aria-pressed="false">v1</button>');
+  });
+  it('escapes what a critique or a reason says (Review Focus 4)', () => {
+    const p = rich.critiques[0].proposals[2];
+    const hostile = { ...rich, critiques: [{ ...rich.critiques[0], proposals: [{ ...p, problem: '<img src=x onerror=1>', change: '"><b>', reason: '"><script>alert(1)</script>' }] }] };
+    const html = renderDesignPage(hostile, 5);
+    expect(html).not.toContain('<img src=x');
+    expect(html).not.toContain('<script>alert');
+    expect(html).toContain('&lt;img src=x onerror=1&gt;');
+  });
+  it('a hostile problem text builds no element and shows literally once mounted', () => {
+    const text = '</script><script>alert(1)</script><img src=x onerror=alert(2)>';
+    const p = rich.critiques[0].proposals[0];
+    const hostile = { ...rich, critiques: [{ ...rich.critiques[1], proposals: [{ ...p, fate: 'pending' as const, problem: text, change: text, section: text }] }] };
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    mountDesignPage(root, hostile);
+    expect(root.querySelector('.rounds script, .rounds img')).toBeNull();
+    expect(root.querySelector('.props li')?.textContent).toContain(text);
+  });
+});
+
+describe('mountDesignPage: language, focus and open rounds (K3-11)', () => {
+  const mounted = (d: typeof rich) => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    mountDesignPage(root, d);
+    return root;
+  };
+  it('sets the document language to the design locale', () => {
+    mounted({ ...rich, meta: { ...rich.meta, locale: 'en' } });
+    expect(document.documentElement.lang).toBe('en');
+    mounted(rich);
+    expect(document.documentElement.lang).toBe('es');
+  });
+  it('a pressed version keeps the focus on its own button, now pressed', () => {
+    const root = mounted(rich);
+    (root.querySelector('[data-version="1"]') as HTMLElement).click();
+    const btn = root.querySelector('[data-version="1"]');
+    expect(document.activeElement).toBe(btn);
+    expect(btn?.getAttribute('aria-pressed')).toBe('true');
+    expect(root.querySelector('[data-version="5"]')?.getAttribute('aria-pressed')).toBe('false');
+  });
+  it('a round the person opened stays open when the version changes', () => {
+    const root = mounted(rich);
+    const first = root.querySelector('details[data-round="1"]') as HTMLElement;
+    first.setAttribute('open', '');
+    first.dispatchEvent(new Event('toggle'));
+    (root.querySelector('[data-version="2"]') as HTMLElement).click();
+    expect(root.querySelector('details[data-round="1"]')?.hasAttribute('open')).toBe(true);
+    expect(root.querySelector('details[data-round="2"]')?.hasAttribute('open')).toBe(true);
+  });
+});
+
+describe('theme of the design page (K3-11)', () => {
+  const css = readFileSync(path.join(process.cwd(), 'src/design-page/theme.css'), 'utf8');
+  it('labels, the eyebrow, the import line and the links use the text tokens; no fill color is used as text', () => {
+    expect(css).toMatch(/\.lbl\{[^}]*color:var\(--mute\)/);
+    expect(css).toMatch(/\.eb\{[^}]*color:var\(--t-peach\)/);
+    expect(css).toMatch(/\.imp\{[^}]*color:var\(--mute\)/);
+    expect(css).toMatch(/\.body a\{[^}]*color:var\(--t-blue\)/);
+    expect(css).not.toMatch(/(^|[{;\s])color:var\(--(o0|o1|sub0|peach|lavender|blue)\)/m);
+  });
+  it('makes the version buttons and the copy button 44 px tall on a touch screen', () => {
+    const coarse = /@media \(pointer: coarse\)\{([^{}]*)\{([^}]*)\}/.exec(css);
+    expect(coarse?.[1]).toContain('.vers .v');
+    expect(coarse?.[1]).toContain('.cp');
+    expect(coarse?.[2]).toContain('min-height:44px');
+  });
+});

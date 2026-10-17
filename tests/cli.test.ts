@@ -755,6 +755,22 @@ describe('design commands', () => {
     expect(data.meta.title).toBe('A __DATA__ b __TITLE__');
   });
 
+  it('design-page embeds a hostile critique text without executable markup and the data round-trips', () => {
+    const text = '</script><script>alert(1)</script><img src=x onerror=1><!-- ' + String.fromCharCode(0x2028, 0x2029);
+    mkdirSync(path.join(dir, '.waypoint', 'demo-shop'), { recursive: true });
+    writeFileSync(path.join(dir, '.waypoint', 'demo-shop', 'critique-r1.json'),
+      JSON.stringify({ round: 1, version: 1, scope: 'full', proposals: [{ n: 1, category: 'gap', severity: 'major', section: '_intro', problem: text, change: text }] }));
+    expect(run(['design-page', rel, '--out', 'h.html'], io).code).toBe(0);
+    const html = readFileSync(path.join(dir, 'h.html'), 'utf8');
+    expect(html).not.toContain('<script>alert');
+    expect(html).not.toContain('<img');
+    expect(html).not.toContain('<!--');
+    expect(html).not.toContain(String.fromCharCode(0x2028));
+    expect(html).not.toContain(String.fromCharCode(0x2029));
+    const data = JSON.parse(/id="wp-design-data">(.*?)<\/script>/s.exec(html)![1]);
+    expect(data.critiques[0].proposals[0].problem).toContain('<script>alert(1)</script>');
+  });
+
   it('design-park parks a draft once, and refuses an approved design (K3-13)', () => {
     const r = run(['design-park', rel], io);
     expect(r.code).toBe(0);
