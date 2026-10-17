@@ -525,14 +525,51 @@ describe('notes', () => {
     click(root, '[data-view="notes"]');
     await settle();
     typeIn(root, 'note-text', 'no se pierde');
+    // A real click moves the focus to the button (happy-dom's click() does not): the render puts the draft back in the box.
+    (root.querySelector('[data-action="note-add"]') as HTMLButtonElement).focus();
     click(root, '[data-action="note-add"]');
     await settle();
     expect(f.add).toHaveBeenCalledTimes(1);
     expect(app.ui.draft.text).toBe('no se pierde');
-    // H-06: the focused textarea is morphed around, not replaced: the draft stays in its value (innerHTML has no value).
-    expect((root.querySelector('[data-role="note-text"]') as HTMLTextAreaElement).value).toBe('no se pierde');
+    const box = root.querySelector('[data-role="note-text"]') as HTMLTextAreaElement;
+    expect([box.value, box.readOnly]).toEqual(['no se pierde', true]);
     expect(root.innerHTML).toContain('solo lectura');
     app.stop();
+  });
+
+  it('a refused add with the box still focused keeps its text, focus and caret, and the box turns read-only (H-06)', async () => {
+    const f = fakeDb();
+    f.add.mockRejectedValueOnce(Object.assign(new Error('nope'), { code: 'invalid_argument' }));
+    const { root, app } = await boot(f, fakeUser({ can: () => null }));
+    click(root, '[data-view="notes"]');
+    await settle();
+    const box = typeIn(root, 'note-text', 'no se pierde');
+    box.setSelectionRange(3, 5);
+    click(root, '[data-action="note-add"]');
+    await settle();
+    expect(root.querySelector('[data-role="note-text"]')).toBe(box);
+    expect(document.activeElement).toBe(box);
+    expect([box.value, box.selectionStart, box.selectionEnd, box.readOnly]).toEqual(['no se pierde', 3, 5, true]);
+    expect(root.innerHTML).toContain('solo lectura');
+    app.stop();
+  });
+
+  it('after a successful add the box is empty on screen, whether a click moved the focus to the button or not (H-06)', async () => {
+    for (const toButton of [true, false]) {
+      const f = fakeDb();
+      const { root, app } = await boot(f, fakeUser());
+      click(root, '[data-view="notes"]');
+      await settle();
+      typeIn(root, 'note-text', 'nueva idea');
+      await settle();
+      if (toButton) (root.querySelector('[data-action="note-add"]') as HTMLButtonElement).focus();
+      click(root, '[data-action="note-add"]');
+      await settle();
+      expect(f.add, `focus on the button: ${toButton}`).toHaveBeenCalledTimes(1);
+      expect((root.querySelector('[data-role="note-text"]') as HTMLTextAreaElement).value, `focus on the button: ${toButton}`).toBe('');
+      app.stop();
+      root.remove();
+    }
   });
 
   it('answers an open question: get then update', async () => {
@@ -958,6 +995,42 @@ describe('scroll, tick and live repaints (G-01, H-06)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+  it('a newer proposal arriving above a focused Approve leaves the focus on the Approve of its own proposal (H-06)', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    f.push('proposals', { p1: PROP });
+    click(root, '[data-view="proposals"]');
+    await settle();
+    const approve = root.querySelector('[data-action="p-approve"][data-id="p1"]') as HTMLButtonElement;
+    approve.focus();
+    f.push('proposals', { p1: PROP, p0: { ...PROP, ts: '2026-10-11T11:00:00.000Z', title: 'nueva-p0' } });
+    await settle();
+    expect(Array.from(root.querySelectorAll('.prop h3'), x => x.textContent)).toEqual(['nueva-p0', 'Cache prices']);
+    expect(document.activeElement).toBe(approve);
+    expect(approve.dataset.id).toBe('p1');
+    expect(approve.closest('.prop')!.querySelector('h3')!.textContent).toBe('Cache prices');
+    app.stop();
+  });
+  it('a note landing above a focused answer box keeps the box, its focus and its caret (H-06)', async () => {
+    const f = fakeDb();
+    const { root, app } = await boot(f, fakeUser());
+    const Q = { ts: '2026-10-11T10:00:00Z', type: 'question', author: 'session:main', text: 'pregunta-q1' };
+    f.push('notes', { q1: Q });
+    click(root, '[data-view="notes"]');
+    await settle();
+    click(root, '[data-action="answer-open"][data-id="q1"]');
+    await settle();
+    const box = typeIn(root, 'answer-text', 'hola mundo');
+    await settle();
+    box.setSelectionRange(2, 4);
+    f.push('notes', { q1: Q, n2: { ts: '2026-10-11T11:00:00Z', type: 'idea', author: 'session:main', text: 'otra-nota' } });
+    await settle();
+    expect(root.innerHTML).toContain('otra-nota');
+    expect(root.querySelector('[data-role="answer-text"]')).toBe(box);
+    expect(document.activeElement).toBe(box);
+    expect([box.value, box.selectionStart, box.selectionEnd]).toEqual(['hola mundo', 2, 4]);
+    app.stop();
   });
   it('with a select focused a snapshot paints, and the select stays the same element with its focus (H-06)', async () => {
     const f = fakeDb();

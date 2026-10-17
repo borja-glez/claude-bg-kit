@@ -773,6 +773,11 @@ describe('scroll keys and relative times (G-01)', () => {
     expect(html).toContain('data-k="t:T001"');
     expect(html).toContain('<svg class="arrows" data-role="tl-arrows" data-morph="skip" aria-hidden="true"></svg>');
   });
+  it('note and proposal cards carry their keys, escaped, so a morph never hands one card\'s focus to another (H-06)', () => {
+    const m = { ...base(), notes: [{ id: 'n"1', ts: '2026-10-11T10:00:00Z', type: 'idea' as const, author: 'session:main', text: 'x' }], proposals: [P({ id: 'p<1' })] };
+    expect(renderApp(m, ui({ view: 'notes' }))).toContain('<div class="note nb-idea" data-k="n:n&quot;1">');
+    expect(renderApp(m, ui({ view: 'proposals' }))).toContain('<div class="note prop pr-low" data-id="p&lt;1" data-k="pr:p&lt;1">');
+  });
 });
 
 describe('theme.css: the modal, the side bar and the detail grid (H-01, H-11, .mgrid)', () => {

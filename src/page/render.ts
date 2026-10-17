@@ -814,7 +814,7 @@ function renderNotesView(m: Model, d: Dict, ui: UiState, loc: string): string {
       ? `<div class="areply"><textarea data-role="answer-text" maxlength="${MAX_NOTE}" rows="2" placeholder="${esc(d.answerPlaceholder)}">${esc(ui.answerDraft)}</textarea>
         <button class="btn pri" data-action="answer-send" data-id="${esc(n.id)}">${esc(d.send)}</button></div>`
       : `<button class="btn" data-action="answer-open" data-id="${esc(n.id)}">${esc(d.reply)}</button>`;
-    return `<div class="note nb-${t}">
+    return `<div class="note nb-${t}" data-k="n:${esc(n.id)}">
       <div class="nh"><span><span class="nt-${t}">${esc(label)}</span>${dec ? ` <span class="nauto">${esc(dec.auto ? d.autoTag : d.yoursTag)}</span>` : ''}</span><span class="k">${esc(authorLabel(m, d, n.author))}${when ? ` · ${esc(when)}` : ''}</span></div>
       <p>${esc(n.text)}</p>
       ${decHtml}
@@ -867,7 +867,7 @@ function renderProposalsView(m: Model, d: Dict, ui: UiState, loc: string): strin
         : `<button class="btn" data-action="p-comment-open" data-id="${id}">${esc(d.comment)}</button>`;
       actions = `<div class="pact">${decide ? `<button class="btn pri" data-action="p-approve" data-id="${id}">${esc(d.approve)}</button>` : ''}${rejectUi}${commentUi}</div>`;
     }
-    return `<div class="note prop pr-${risk}" data-id="${id}">
+    return `<div class="note prop pr-${risk}" data-id="${id}" data-k="pr:${id}">
       <div class="nh"><span class="tag pc">${esc(d.pcategory[category])}</span><span class="pill risk-${risk}">${esc(d.prisk[risk])}</span><span class="pill ps-${status}">${esc(d.pstatus[status])}</span><span class="k">${esc(authorLabel(m, d, p.author))}${when ? ` · ${esc(when)}` : ''}</span></div>
       <h3>${esc(p.title)}</h3>
       ${p.pillar ? `<div class="mono">${esc(d.pfield.pillar)}: ${esc(p.pillar)}</div>` : ''}

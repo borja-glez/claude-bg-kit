@@ -38,6 +38,8 @@ interface Db { doc(p: string): DocRef; collection(p: string): Coll }
 interface User { id(): Promise<string | null> | string | null; profiles?(ids: string[]): unknown }
 
 const TEXT_ROLES = ['search', 'note-text', 'answer-text', 'reason-text', 'comment-text'];
+/** The focused element of the page before a repaint; a text box and the timeline are found again by their role. */
+interface Focus { el: HTMLElement; role: string | null; caret: [number | null, number | null] | null }
 /** Textareas whose focus loss ends an IME composition. */
 const DRAFT_ROLES = ['note-text', 'answer-text', 'reason-text', 'comment-text'];
 const isInvalidArgument = (e: unknown): boolean => {
@@ -119,29 +121,35 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     if (ceiling !== null) { timers.clearTimeout(ceiling); ceiling = null; }
     if (deferred) { deferred = false; schedule(); }
   };
-  // The render of before H-06, kept for when morph throws: it replaces everything and puts back what it can (the scroll
-  // of every keyed container, the focus and caret of a text box, the timeline's focus).
+  // H-06: what has the focus before a repaint, morph or full replace alike.
+  const takeFocus = (): Focus | null => {
+    const el = document.activeElement as HTMLElement | null;
+    if (!el || !env.root.contains(el)) return null;
+    const r = el.getAttribute?.('data-role') ?? null;
+    const text = !!r && TEXT_ROLES.includes(r);
+    const box = el as HTMLInputElement;
+    return { el, role: text || r === 'timeline' ? r : null, caret: text ? [box.selectionStart, box.selectionEnd] : null };
+  };
+  // After a repaint the focus goes back to the same element when it is still in the page (morphdom may have moved it,
+  // which drops the focus), else to the text box or the timeline with its role, with its caret; anything else that was
+  // replaced loses it, as before H-06.
+  const giveFocus = (f: Focus | null) => {
+    if (!f || document.activeElement === f.el) return;
+    const el = env.root.contains(f.el) ? f.el : f.role ? env.root.querySelector<HTMLElement>(`[data-role="${f.role}"]`) : null;
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    if (f.caret && f.caret[0] != null) (el as HTMLInputElement).setSelectionRange(f.caret[0], f.caret[1] ?? f.caret[0]);
+  };
+  // The render of before H-06, kept for when morph throws: it replaces everything and puts back the scroll of every keyed
+  // container (the focus goes back after either path).
   const replaceAll = (html: string) => {
-    const active = document.activeElement as HTMLInputElement | null;
-    const role = active && env.root.contains(active) ? active.getAttribute?.('data-role') : null;
-    const keep = role && TEXT_ROLES.includes(role) ? role : null;
-    const caret = keep ? [active!.selectionStart, active!.selectionEnd] : null;
     const scrolls = new Map<string, [number, number]>();
     env.root.querySelectorAll<HTMLElement>('[data-scroll-key]').forEach(el => scrolls.set(el.dataset.scrollKey ?? '', [el.scrollTop, el.scrollLeft]));
-    const tlw = env.root.querySelector('[data-role="timeline"]') as HTMLElement | null;
-    const tlFocus = !!tlw && document.activeElement === tlw;
     env.root.innerHTML = html;
     env.root.querySelectorAll<HTMLElement>('[data-scroll-key]').forEach(el => {
       const s = scrolls.get(el.dataset.scrollKey ?? '');
       if (s) { el.scrollTop = s[0]; el.scrollLeft = s[1]; }
     });
-    const tlNew = env.root.querySelector('[data-role="timeline"]') as HTMLElement | null;
-    if (tlNew && tlFocus && !keep) tlNew.focus({ preventScroll: true });
-    if (keep) {
-      const input = env.root.querySelector(`[data-role="${keep}"]`) as HTMLInputElement | null;
-      input?.focus();
-      if (input && caret && caret[0] != null) input.setSelectionRange(caret[0], caret[1] ?? caret[0]);
-    }
   };
   const render = () => {
     scheduled = false;
@@ -150,9 +158,12 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       model.now = now();
       const html = renderApp(model, ui, derive(model));
       const page = document.scrollingElement?.scrollTop ?? 0;
+      const focus = takeFocus();
       // H-06: morphdom touches only the nodes that changed; if it throws, everything is replaced as before.
       try { morph(env.root, html); }
       catch (e) { console.error('[waypoint] morph failed', e); replaceAll(html); }
+      giveFocus(focus);
+      dropArrows();
       if (document.scrollingElement && document.scrollingElement.scrollTop !== page) document.scrollingElement.scrollTop = page;
       document.documentElement.classList.toggle('wp-modal', ui.modal !== null);
       const noteEl = env.root.querySelector('[data-role="tl-note"]');
@@ -241,6 +252,9 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       if (!id) { setReadOnly(); return; }
       await db.collection('notes').add({ ts: new Date(now()).toISOString(), type: ui.draft.type, author: `user:${id}`, text });
       ui.draft = { type: ui.draft.type, text: '' };
+      // H-06: the box is morphed, not replaced, and a focused one keeps its value: empty it here.
+      const box = env.root.querySelector('[data-role="note-text"]') as HTMLTextAreaElement | null;
+      if (box) box.value = '';
       ui.notice = null;
     } catch (e) {
       if (isInvalidArgument(e)) setReadOnly(); else ui.notice = 'failed';
@@ -591,6 +605,13 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     svg.innerHTML = out;
   };
   let hoverTask: string | null = null;
+  // H-06: after a repaint the arrows point at where the bars were: the layer empties, and the next pointerover (even on
+  // the same task) draws them again. The highlight classes stay, morph.ts keeps them.
+  const dropArrows = () => {
+    const svg = env.root.querySelector('[data-role="tl-arrows"]');
+    if (svg?.firstChild) svg.innerHTML = '';
+    hoverTask = null;
+  };
   const onDepOver = (ev: PointerEvent) => {
     if (drag?.moved) return;
     const el = (ev.target as Element | null)?.closest?.('[data-task]') as HTMLElement | null;
