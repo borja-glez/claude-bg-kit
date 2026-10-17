@@ -301,3 +301,12 @@ describe('isVisibleRun (C2, B-07, K5-02)', () => {
     }
   });
 });
+
+describe('STALE_RUN_TTL_MS lives in a module without imports (C2)', () => {
+  it('execution-view re-exports the one constant of run-ttl', async () => {
+    const ttl = await import('../src/lib/run-ttl.js');
+    const view = await import('../src/lib/execution-view.js');
+    expect(view.STALE_RUN_TTL_MS).toBe(ttl.STALE_RUN_TTL_MS);
+    expect(ttl.STALE_RUN_TTL_MS).toBe(24 * 3600_000);
+  });
+});

@@ -3,7 +3,7 @@
 // never share an entry; renderApp without a Derived computes it fresh (computeDerived), which is what tests see.
 import { computeMetrics, type Metrics } from '../lib/metrics.js';
 import { criticalPath, forecast, zoneHeat, type ZoneHeat } from '../lib/insights.js';
-import type { Model } from './render.js';
+import type { Model } from './model.js';
 
 export interface Derived {
   metrics: Metrics;

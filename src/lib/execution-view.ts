@@ -3,6 +3,7 @@ import { bindingLive, type BoundDoc } from './bound.js';
 import { LIVE_MAX_AGE_HOURS, LIVE_SILENT_MINUTES, LIVE_STOPPED_MINUTES, type ExecStopReason, type ExecutionState, type LiveDoc, type PublicTask } from './execution-state.js';
 import type { ViewerRole } from './viewer-role.js';
 import type { Stage } from './types.js';
+import { STALE_RUN_TTL_MS } from './run-ttl.js';
 
 export interface ExecSlot { task: string; title: string | null; stage: Stage; agent: string | null; round: number; since: string; liveness: Liveness; mode: 'subagents' | 'sessions' | 'manual'; by: string | null; startedAt: string | null }
 export interface ExecView {
@@ -24,8 +25,8 @@ export interface ExecView {
 const FUTURE_TOLERANCE_MS = 2 * 60000;
 /** An agent listed in a coordinator's signal keeps it alive for this long after it started (the hook prunes it then). */
 const AGENT_ALIVE_MS = 3 * 3600000;
-/** C2: an inactive execution that was not closed is drawn at most this long after its last movement. */
-export const STALE_RUN_TTL_MS = 24 * 3600_000;
+/** C2: an inactive execution that was not closed is drawn at most this long after its last movement (src/lib/run-ttl.ts). */
+export { STALE_RUN_TTL_MS };
 /** C2: the last movement: the last step, else the start. */
 export const lastMovedAt = (e: ExecutionState): string => e.lastStepAt ?? e.startedAt;
 

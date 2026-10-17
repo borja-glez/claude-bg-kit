@@ -1,5 +1,6 @@
 import { planViewFromDocs } from '../lib/sync.js';
-import type { EventDoc, MessageDoc, MetaDoc, NoteDoc, NoteType, PhaseDoc, SessionDoc, States, TaskStatus } from '../lib/types.js';
+import { isPlanId } from '../lib/ids.js';
+import { TASK_STATUSES, type MessageDoc, type MetaDoc, type NoteDoc, type NoteType, type PhaseDoc, type SessionDoc, type States, type TaskStatus } from '../lib/types.js';
 import { clampSpan, panFor, planRange, zoomAround, type Zoom } from '../lib/timeline.js';
 import { MAX_NOTE, NOTE_TYPES } from '../lib/notes.js';
 import { applyDecision, canDecide, MAX_PROPOSAL_TEXT, normalizeProposal, type Decision, type ProposalDoc } from '../lib/proposals.js';
@@ -7,10 +8,14 @@ import { dictFor } from './i18n.js';
 import { derive } from './derive.js';
 import { morphInto } from './morph.js';
 import { mergeMetrics, normalizeEvent, normalizeInfinite, normalizeMessage, normalizeMeta, normalizeMetrics, normalizeNote, normalizePhase, normalizeRun, normalizeSession, normalizeState, type Drop, type Report } from './normalize.js';
-import { decodeView, encodeView } from './urlstate.js';
-import { categoryKeys, esc, NOTE_FILTERS, PROPOSAL_FILTERS, relText, renderApp, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, vfilterStatuses, VFILTER_KEYS, VIEWS, type Model, type RelKind, type ProposalFilterKind, type UiState, type VFilterKey, type View } from './render.js';
+import { decodeView, encodeView, type ViewState } from './urlstate.js';
+import { categoryKeys, esc, NOTE_FILTERS, PROPOSAL_FILTERS, relText, renderApp, TALK_KINDS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, vfilterStatuses, VFILTER_KEYS, VIEWS, type Model, type ProposalFilterKind, type RelKind, type TalkKind, type UiState, type VFilterKey, type View } from './render.js';
 
-/** The page's embedded snapshot; G-13 and G-14: the waypoint that built it and the states the last listing saw (plan 4b shows them). */
+/**
+ * The page's embedded snapshot; G-13 and G-14: the waypoint that built it and the states the last listing saw. The page
+ * shows `states` (only plan ids with a known status) and `statesAt` (only a date) until the database answers.
+ * `pageVersion` (the waypoint that built the page, written by `waypoint page`) is not read by the page.
+ */
 export interface Snapshot { meta: MetaDoc; phases: PhaseDoc[]; pageVersion?: string; states?: Record<string, TaskStatus>; statesAt?: string }
 export interface Env {
   claude?: { use(name: string): Promise<unknown> } | null;
@@ -42,57 +47,44 @@ const TEXT_ROLES = ['search', 'note-text', 'answer-text', 'reason-text', 'commen
 interface Focus { el: HTMLElement; role: string | null; caret: [number | null, number | null] | null }
 /** Textareas whose focus loss ends an IME composition. */
 const DRAFT_ROLES = ['note-text', 'answer-text', 'reason-text', 'comment-text'];
+const GROUPS = ['phase', 'track', 'session', 'category'] as const;
 const isInvalidArgument = (e: unknown): boolean => {
   const o = e as { code?: unknown; message?: unknown } | null;
   return o?.code === 'invalid_argument' || /invalid_argument/.test(String(o?.message ?? ''));
 };
 
+/** G-14: the states the snapshot carries (id → status), shown until the database answers; anything else is left out. */
+function snapshotStates(s: Snapshot | null): States {
+  const out: States = {};
+  const raw: unknown = s?.states;
+  if (!raw || typeof raw !== 'object') return out;
+  for (const [id, st] of Object.entries(raw as Record<string, unknown>)) {
+    if (isPlanId(id) && (TASK_STATUSES as readonly unknown[]).includes(st)) out[id] = { status: st as TaskStatus };
+  }
+  return out;
+}
+
+/** C8: when the snapshot's states were listed, only as a string of at most 40 characters that reads as a date. */
+function snapshotStatesAt(s: Snapshot | null): string | null {
+  const raw: unknown = s?.statesAt;
+  return typeof raw === 'string' && raw.length <= 40 && Number.isFinite(Date.parse(raw)) ? raw : null;
+}
+
 export async function start(env: Env): Promise<{ stop(): void; model: Model; ui: UiState }> {
   const now = env.now ?? Date.now;
   const morph = env.morph ?? morphInto;
   const ui: UiState = {
-    zoom: '1d', offset: 0, expanded: new Set(), modal: null, shot: null, search: '', view: 'tracking',
+    zoom: '1d', offset: 0, expanded: new Set(), modal: null, shot: null, search: '', view: 'summary', talk: 'notes',
     versionFilter: { statuses: [], phaseStatuses: [], track: null }, collapsed: new Set(), noteFilter: 'all', timelineGroup: 'phase',
     draft: { type: 'idea', text: '' }, answering: null, answerDraft: '', notice: null,
     proposalFilter: { status: 'all', category: 'all', risk: 'all' }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '',
   };
-  // A link carries the view (see urlstate.ts): apply it before the first render.
-  const GROUPS = ['phase', 'track', 'session', 'category'] as const;
-  let debugHash = false;
-  try {
-    const v = decodeView(typeof location !== 'undefined' ? location.hash : '');
-    if (v.view && (VIEWS as readonly string[]).includes(v.view)) ui.view = v.view as View;
-    if (v.group && (GROUPS as readonly string[]).includes(v.group)) ui.timelineGroup = v.group as UiState['timelineGroup'];
-    if (v.zoom) ui.zoom = v.zoom;
-    if (v.span) { ui.span = v.span; ui.pan = v.pan ?? 0; }
-    if (v.open) ui.expanded = new Set(v.open);
-    if (v.status) ui.statuses = v.status.filter(x => (TL_STATUSES as readonly string[]).includes(x));
-    if (v.layers) ui.layers = v.layers.filter(x => (TL_LAYERS as readonly string[]).includes(x));
-    if (v.q) ui.search = v.q;
-    if (v.debug) debugHash = true;
-  } catch { /* no location */ }
-  let lastHash = '';
-  const writeHash = () => {
-    try {
-      const h = encodeView({ view: ui.view, group: ui.timelineGroup, zoom: ui.zoom, span: ui.span, pan: ui.pan, open: [...ui.expanded], status: ui.statuses, q: ui.search.trim(), layers: ui.layers, debug: model.debug });
-      if (h === lastHash) return;
-      lastHash = h;
-      history.replaceState(null, '', h || `${location.pathname}${location.search}`);
-    } catch { /* a sandboxed frame may refuse: the view just is not in the link */ }
-  };
-  let tlNote = '';
-  let tlNoteTimer: ReturnType<typeof setTimeout> | null = null;
-  const note = (text: string) => {
-    tlNote = text;
-    if (tlNoteTimer) clearTimeout(tlNoteTimer);
-    tlNoteTimer = setTimeout(() => { tlNote = ''; schedule(); }, 5000);
-    schedule();
-  };
   let phaseDocs: PhaseDoc[] = env.snapshot?.phases ?? [];
+  const snapStates = snapshotStates(env.snapshot);
   const model: Model = {
     meta: env.snapshot?.meta ?? null,
     plan: env.snapshot ? planViewFromDocs(env.snapshot.meta, env.snapshot.phases) : { tracks: [], versions: [], phases: [], tasks: [] },
-    states: {},
+    states: snapStates,
     sessions: {},
     events: [],
     messages: [],
@@ -106,8 +98,60 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     now: now(),
     offline: false,
     connecting: true,
-    debug: env.debug === true || debugHash,
+    debug: env.debug === true,
     dropped: {},
+    rev: 0,
+    statesAt: Object.keys(snapStates).length ? snapshotStatesAt(env.snapshot) : null,
+    syncedAt: null,
+  };
+
+  // H-25: what the URL says (on load, Back and Forward, or a hash edited by hand), applied to the view state.
+  const applyView = (v: ViewState) => {
+    ui.view = v.view && (VIEWS as readonly string[]).includes(v.view) ? (v.view as View) : 'summary';
+    if (ui.view === 'talk') ui.talk = v.c && (TALK_KINDS as readonly string[]).includes(v.c) ? (v.c as TalkKind) : 'notes';
+    if (v.group && (GROUPS as readonly string[]).includes(v.group)) ui.timelineGroup = v.group as UiState['timelineGroup'];
+    if (v.zoom) ui.zoom = v.zoom;
+    if (v.span) { ui.span = v.span; ui.pan = v.pan ?? 0; }
+    if (v.open) ui.expanded = new Set(v.open);
+    if (v.status) ui.statuses = v.status.filter(x => (TL_STATUSES as readonly string[]).includes(x));
+    if (v.layers) ui.layers = v.layers.filter(x => (TL_LAYERS as readonly string[]).includes(x));
+    if (v.q) ui.search = v.q;
+    if (v.debug) model.debug = true;
+  };
+  let lastHash = '';
+  try {
+    applyView(decodeView(location.hash));
+    lastHash = location.hash.length > 1 ? location.hash : '';
+  } catch { /* no location */ }
+  /** H-25: set by an action that changes what the person looks at, so the next render adds a history entry. */
+  let pushNext = false;
+  const viewState = (): ViewState => ({ view: ui.view, c: ui.talk, group: ui.timelineGroup, zoom: ui.zoom, span: ui.span, pan: ui.pan, open: [...ui.expanded], status: ui.statuses, q: ui.search.trim(), layers: ui.layers, debug: model.debug });
+  const writeHash = () => {
+    const push = pushNext;
+    pushNext = false;
+    try {
+      const next = encodeView(viewState());
+      if (next === lastHash) return;
+      lastHash = next;
+      const url = next || `${location.pathname}${location.search}`;
+      if (push) history.pushState(null, '', url); else history.replaceState(null, '', url);
+    } catch { /* a sandboxed frame may refuse: the view just is not in the link */ }
+  };
+  // H-25: Back, Forward and a hash edited by hand apply what the URL says.
+  const onUrl = () => {
+    try {
+      lastHash = location.hash.length > 1 ? location.hash : '';
+      applyView(decodeView(location.hash));
+    } catch { return; }
+    schedule();
+  };
+  let tlNote = '';
+  let tlNoteTimer: ReturnType<typeof setTimeout> | null = null;
+  const note = (text: string) => {
+    tlNote = text;
+    if (tlNoteTimer) clearTimeout(tlNoteTimer);
+    tlNoteTimer = setTimeout(() => { tlNote = ''; schedule(); }, 5000);
+    schedule();
   };
 
   // While an IME composition is active, replacing the textarea would cancel it: hold every render
@@ -166,6 +210,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       dropArrows();
       if (document.scrollingElement && document.scrollingElement.scrollTop !== page) document.scrollingElement.scrollTop = page;
       document.documentElement.classList.toggle('wp-modal', ui.modal !== null);
+      // §4.8: the page speaks the plan's language (screen readers, hyphenation).
+      document.documentElement.lang = model.meta?.locale || 'en';
       const noteEl = env.root.querySelector('[data-role="tl-note"]');
       if (noteEl) noteEl.textContent = tlNote;
       writeHash();
@@ -223,21 +269,21 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     if (!ids.length) return;
     try {
       const res = (await u.profiles(ids)) as Record<string, { name?: unknown } | undefined> | null;
-      let changed = false;
+      let changedName = false;
       for (const id of ids) {
         const raw = res && typeof res === 'object' ? res[id]?.name : undefined;
         const name = typeof raw === 'string' && raw.trim() ? raw.trim().slice(0, 80) : undefined;
         if (name !== model.profiles[id]) {
           if (name) model.profiles[id] = name; else delete model.profiles[id];
-          changed = true;
+          changedName = true;
         }
       }
-      if (changed) schedule();
+      if (changedName) schedule();
     } catch { /* names stay as the generic fallback */ }
   };
 
   const setReadOnly = () => { model.readOnly = true; ui.notice = 'readonly'; };
-  // A refused proposal write (e.g. a roadmap without the proposals schema) locks only the proposals view.
+  // A refused proposal write (e.g. a roadmap without the proposals schema) locks only the proposals.
   const setProposalsReadOnly = () => { model.proposalsReadOnly = true; if (ui.notice !== 'readonly') ui.notice = null; };
 
   // Writes happen only here, from event handlers, and only under notes/ and proposals/.
@@ -370,7 +416,23 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     else if (action === 'close-modal') { ui.modal = null; ui.shot = null; }
     else if (action === 'open-shot') { const i = Number(el.dataset.i); ui.shot = Number.isInteger(i) && i >= 0 ? i : null; }
     else if (action === 'close-shot') { ui.shot = null; }
-    else if (action === 'view') { const v = el.dataset.view as View; ui.view = VIEWS.includes(v) ? v : 'tracking'; if (ui.notice !== 'readonly') ui.notice = null; }
+    // H-25: a view (from the nav or a link inside a view) is a new history entry; a link may say which conversation.
+    else if (action === 'view') {
+      const v = el.dataset.view as View;
+      ui.view = VIEWS.includes(v) ? v : 'summary';
+      const c = el.dataset.c as TalkKind | undefined;
+      if (ui.view === 'talk' && c && TALK_KINDS.includes(c)) ui.talk = c;
+      if (ui.modal) { ui.modal = null; ui.shot = null; }
+      if (ui.notice !== 'readonly') ui.notice = null;
+      pushNext = true;
+    }
+    else if (action === 'talk-c') {
+      const c = el.dataset.c as TalkKind;
+      if (!TALK_KINDS.includes(c)) return;
+      ui.talk = c;
+      if (ui.notice !== 'readonly') ui.notice = null;
+      pushNext = true;
+    }
     else if (action === 'tgroup') {
       const g = el.dataset.group as UiState['timelineGroup'];
       ui.timelineGroup = (GROUPS as readonly string[]).includes(g) ? g : 'phase';
@@ -509,7 +571,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     const t = ev.target as HTMLElement | null;
     if (ui.modal || ev.ctrlKey || ev.metaKey || ev.altKey || (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))) return;
     const inTimeline = overTimeline || !!t?.closest?.('[data-role="timeline"]');
-    if (!inTimeline || ui.view !== 'tracking') return;
+    if (!inTimeline || ui.view !== 'schedule') return;
     if (ev.key === 'ArrowLeft') panBy(-0.15);
     else if (ev.key === 'ArrowRight') panBy(0.15);
     else if (ev.key === '+' || ev.key === '=') zoomBy(0.8, 0.5);
@@ -684,6 +746,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   window.addEventListener('pointerup', onPointerUp);
   window.addEventListener('pointercancel', onPointerUp);
   window.addEventListener('resize', applyScale);
+  window.addEventListener('popstate', onUrl);
+  window.addEventListener('hashchange', onUrl);
   // G-01: every 30 s only the relative times are rewritten in place; every FULL_EVERY ticks (5 min) a full render.
   const FULL_EVERY = 10;
   let ticks = 0;
@@ -723,6 +787,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     window.removeEventListener('pointerup', onPointerUp);
     window.removeEventListener('pointercancel', onPointerUp);
     window.removeEventListener('resize', applyScale);
+    window.removeEventListener('popstate', onUrl);
+    window.removeEventListener('hashchange', onUrl);
   };
 
   render();
@@ -753,7 +819,14 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   unsubs.push(db.doc('meta/run').onSnapshot(((s: Snap) => { model.run = s.exists ? normalizeRun(s.data(), reporter('meta/run')('meta/run')) : null; changed(); }) as never, onErr));
   unsubs.push(db.doc('meta/infinite').onSnapshot(((s: Snap) => { model.infinite = s.exists ? normalizeInfinite(s.data(), reporter('meta/infinite')('meta/infinite')) : null; changed(); }) as never, onErr));
   unsubs.push(db.collection('plan').onSnapshot(((s: QSnap) => { const rep = reporter('plan'); const p = rows(s).map(r => normalizePhase(r.body, rep(`plan/${r.id}`))).filter((x): x is PhaseDoc => x !== null); if (p.length) { phaseDocs = p; rebuild(); } changed(); }) as never, onErr));
-  unsubs.push(db.collection('state').onSnapshot(((s: QSnap) => { const rep = reporter('state'); model.states = Object.fromEntries(rows(s).map(r => [r.id, normalizeState(r.body, rep(`state/${r.id}`))])) as States; changed(); }) as never, onErr));
+  unsubs.push(db.collection('state').onSnapshot(((s: QSnap) => {
+    const rep = reporter('state');
+    model.states = Object.fromEntries(rows(s).map(r => [r.id, normalizeState(r.body, rep(`state/${r.id}`))])) as States;
+    // G-14: from here on the states are the database's; the strip says when they synced instead of the snapshot's date.
+    model.statesAt = null;
+    model.syncedAt = now();
+    changed();
+  }) as never, onErr));
   unsubs.push(db.collection('sessions').onSnapshot(((s: QSnap) => { model.sessions = Object.fromEntries(rows(s).map(r => [r.id, normalizeSession(r.body)])) as Record<string, SessionDoc>; changed(); }) as never, onErr));
   unsubs.push(db.collection('events').orderBy('ts', 'desc').limit(200).onSnapshot(((s: QSnap) => { model.events = rows(s).map(r => ({ ...normalizeEvent(r.body), id: r.id })); changed(); }) as never, onErr));
   unsubs.push(db.collection('messages').orderBy('ts', 'desc').limit(200).onSnapshot(((s: QSnap) => {

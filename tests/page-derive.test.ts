@@ -57,7 +57,7 @@ describe('derive: the derived data once per revision of the data (H-06)', () => 
 
   it('a render computes the metrics once, with the forecast and critical path layers on', () => {
     const ui: UiState = {
-      zoom: '1d', offset: 0, expanded: new Set(['F1']), modal: null, search: '', view: 'tracking', shot: null, layers: ['critical', 'forecast'],
+      zoom: '1d', offset: 0, expanded: new Set(['F1']), modal: null, search: '', view: 'schedule', shot: null, layers: ['critical', 'forecast'],
       versionFilter: { statuses: [], phaseStatuses: [], track: null }, collapsed: new Set(), noteFilter: 'all', timelineGroup: 'phase',
       draft: { type: 'idea', text: '' }, answering: null, answerDraft: '', notice: null,
       proposalFilter: { status: 'all', category: 'all', risk: 'all' }, commenting: null, commentDraft: '', rejecting: null, reasonDraft: '',
