@@ -34,8 +34,10 @@ function renderNeeds(m: Model, d: Dict, ui: UiState, dv: Derived): string {
       const ref = n.note.taskId && m.plan.tasks.some(t => t.id === n.note.taskId) ? ` ${task(n.note.taskId, k)}` : '';
       return `<b>${esc(d.needs.question)}</b> ${esc(n.note.text)}${ref}${reply}`;
     }
-    if (n.kind === 'proposals') return `<b>${esc(d.needs.proposals(n.count))}</b> ${go('talk', d.needs.seeProposals, 'proposals')}${m.isOwner === true ? '' : hint(d.needs.onlyOwner)}`;
+    // Carry 5: «only the owner decides» goes to whoever is known not to be the owner, never while it is being resolved.
+    if (n.kind === 'proposals') return `<b>${esc(d.needs.proposals(n.count))}</b> ${go('talk', d.needs.seeProposals, 'proposals')}${m.isOwner === false ? hint(d.needs.onlyOwner) : ''}`;
     if (n.kind === 'unowned') return `<b>${esc(d.needs.unowned(n.count))}</b> ${go('talk', d.needs.seeProposals, 'proposals')}`;
+    if (n.kind === 'edited') return `<b>${esc(d.needs.edited(n.count))}</b> ${go('talk', d.needs.seeProposals, 'proposals')}`;
     if (n.kind === 'escalation') return `<b>${esc(`${n.message.from} → ${n.message.to}`)}</b>: ${esc(n.message.text)}${hint(d.needs.escalation(n.message.to))}`;
     if (n.kind === 'external') return `<b>${esc(d.needs.external)}</b> ${task(n.task, k)} ${esc(n.title)} — ${esc(n.reason ?? d.needs.noReason)}${hint(d.needs.unblock(n.task))}`;
     if (n.kind === 'deferred') return `<b>${esc(d.needs.deferred(n.findings, n.tasks.length))}</b> ${go('plan', d.needs.seePlan)} <button type="button" class="btn" data-action="seen-deferred" data-ids="${esc(n.tasks.map(t => t.id).join(' '))}">${esc(d.needs.seen)}</button>`;

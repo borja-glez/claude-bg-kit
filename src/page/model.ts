@@ -17,7 +17,8 @@ export interface Model {
   proposals: (ProposalDoc & { id: string })[];
   /** §4.1: the owner's marks (approvals/<pid>), by proposal id; undefined until their first snapshot. */
   approvals?: Record<string, ApprovalDoc>;
-  /** §4.1: whether the viewer owns the roadmap (user.isOwner(), once, after connecting); false until then and on any error. */
+  /** §4.1: whether the viewer owns the roadmap (user.isOwner(), once, after connecting); false on any error. Undefined while
+   *  it resolves (carry 5): neither the owner's buttons nor the line «only the owner decides» show until it is known. */
   isOwner?: boolean;
   /** G-24: the deferred findings this viewer marked as seen (task → its doneAt), from its own localStorage. */
   seenDeferred?: Record<string, string>;
@@ -88,7 +89,8 @@ export interface UiState {
   draft: { type: NoteType; text: string };
   answering: string | null;
   answerDraft: string;
-  notice: 'readonly' | 'failed' | 'answered' | 'decided' | 'owner' | 'changed' | null;
+  /** markSaved (review M6): a decision's mark landed and its proposal update did not; the notice offers to retry it. */
+  notice: 'readonly' | 'failed' | 'answered' | 'decided' | 'owner' | 'changed' | 'markSaved' | null;
   proposalFilter: ProposalFilter;
   /** Proposal id whose comment composer is open. */
   commenting: string | null;

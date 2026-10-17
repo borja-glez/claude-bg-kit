@@ -1,5 +1,5 @@
 // G-24: «Te necesita», what the person has to do now: open questions, proposals to decide, approvals without the owner's
-// mark (only to the owner), open escalations, external blocks with their reason, recent deferred findings, a stalled run,
+// mark and approvals edited after it (only to the owner), open escalations, external blocks with their reason, recent deferred findings, a stalled run,
 // an infinite run without its coordinator and a page older than the plan's waypoint. Pure: the page decides each entry from
 // its model; the view says what to do and links the object. Nothing here changes shared state.
 import { liveness } from '../lib/coordination.js';
@@ -8,7 +8,7 @@ import type { ForgeDocV2 } from '../lib/roadmap-doc.js';
 import { STALE_RUN_TTL_MS } from '../lib/run-ttl.js';
 import type { MessageDoc, NoteDoc, TaskState } from '../lib/types.js';
 import { compareVersions, WAYPOINT_VERSION } from '../lib/waypoint-version.js';
-import { unmarked } from './html.js';
+import { unmarkedReason } from './html.js';
 import type { Model } from './model.js';
 
 /** How long the deferred findings of a done task stay in «Te necesita» (§2, decisión menor). */
@@ -19,6 +19,7 @@ export type Need =
   | { kind: 'question'; note: NoteDoc & { id: string } }
   | { kind: 'proposals'; count: number }
   | { kind: 'unowned'; count: number }
+  | { kind: 'edited'; count: number }
   | { kind: 'escalation'; message: MessageDoc & { id: string } }
   | { kind: 'external'; task: string; title: string; reason: string | null }
   | { kind: 'deferred'; findings: number; tasks: { id: string; doneAt: string }[] }
@@ -48,10 +49,14 @@ export function needsOf(m: Model, pageVersion: string = WAYPOINT_VERSION): Need[
   for (const n of m.notes) if (n.type === 'question' && !n.answer && !n.answeredByNote) out.push({ kind: 'question', note: n });
   const open = m.proposals.filter(p => p.status === 'proposed' || p.status === 'discussing').length;
   if (open) out.push({ kind: 'proposals', count: open });
-  // §4.1: only to the owner, the approvals that will not count until they carry the owner's mark (the one shared predicate).
+  // §4.1: only to the owner, the approvals that will not count until they carry the owner's mark (the one shared predicate):
+  // those without a mark, to confirm, and apart (review I2) those edited after the owner approved them, to decide again.
   if (m.isOwner === true) {
-    const unowned = m.proposals.filter(p => unmarked(p.id, p, m.approvals)).length;
+    const why = m.proposals.map(p => unmarkedReason(p.id, p, m.approvals));
+    const unowned = why.filter(r => r === 'no-mark').length;
+    const edited = why.filter(r => r === 'edited').length;
     if (unowned) out.push({ kind: 'unowned', count: unowned });
+    if (edited) out.push({ kind: 'edited', count: edited });
   }
   for (const g of m.messages) if (g.type === 'escalation' && g.status === 'open') out.push({ kind: 'escalation', message: g });
   for (const t of m.plan.tasks) {

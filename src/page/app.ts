@@ -5,7 +5,7 @@ import { clampSpan, panFor, planRange, zoomAround, type Zoom } from '../lib/time
 import { MAX_NOTE, NOTE_TYPES } from '../lib/notes.js';
 import { canDecide, MAX_PROPOSAL_TEXT, normalizeApproval, normalizeProposal, proposalDigest, type ApprovalDoc, type ProposalDoc } from '../lib/proposals.js';
 import { dictFor } from './i18n.js';
-import { unmarked } from './html.js';
+import { unmarkedReason } from './html.js';
 import { derive } from './derive.js';
 import { morphInto } from './morph.js';
 import { parseSeen, pruneSeen, seenKey } from './needs.js';
@@ -94,7 +94,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     infinite: null,
     run: null,
     me: null,
-    isOwner: false,
+    // Carry 5: unknown (undefined) until user.isOwner() answers; then true or false.
+    isOwner: undefined,
     profiles: {},
     readOnly: false,
     now: now(),
@@ -530,6 +531,25 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
 
   // Only ids we received as proposals, and never a path separator: writes stay under proposals/.
   const knownProposal = (pid: string): boolean => !!pid && !pid.includes('/') && model.proposals.some(p => p.id === pid);
+  /** Review M6: the proposal update of a decision whose mark landed; [Reintentar] re-runs it, and only it. */
+  let pending: { pid: string; change: Record<string, unknown> } | null = null;
+  const retryUpdate = async () => {
+    const p = pending;
+    if (busy || !p || ui.notice !== 'markSaved' || model.isOwner !== true || !knownProposal(p.pid)) return;
+    if (!db || model.readOnly) { setReadOnly(); schedule(); return; }
+    if (model.proposalsReadOnly) { schedule(); return; }
+    busy = true;
+    try {
+      await db.doc(`proposals/${p.pid}`).update(p.change);
+      pending = null;
+      ui.notice = null;
+    } catch (e) {
+      if (isInvalidArgument(e)) { pending = null; setProposalsReadOnly(); }
+    } finally {
+      busy = false;
+      schedule();
+    }
+  };
   const decide = async (pid: string, decision: 'approve' | 'reject') => {
     if (busy || !knownProposal(pid)) return;
     // §4.1: only the roadmap's owner decides; the page never writes a decision for anyone else.
@@ -548,7 +568,8 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       const ref = db.doc(`proposals/${pid}`);
       const snap = await ref.get();
       const cur = snap?.exists ? normalizeProposal(snap.data()) : null;
-      if (!cur || !canDecide(cur.status)) { ui.notice = 'decided'; return; }
+      // Review I2: an approval edited after the owner approved it is decided again, like a proposed one.
+      if (!cur || !(canDecide(cur.status) || unmarkedReason(pid, cur, model.approvals) === 'edited')) { ui.notice = 'decided'; return; }
       // C2: the mark binds the normalized text just re-read. The owner decides only the text they read: one edited since
       // the page showed it is left alone (its snapshot is on its way).
       const digest = proposalDigest(pid, cur);
@@ -560,9 +581,17 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       const mark = { status, decidedAt: at, by: 'page', digest } satisfies ApprovalDoc;
       try { await db.doc(`approvals/${pid}`).set(mark); }
       catch (e) { ui.notice = isInvalidArgument(e) ? 'owner' : 'failed'; return; }
-      await ref.update({ status, decidedBy: `user:${id}`, decidedAt: at, ...(reason ? { reason } : {}) });
+      const change = { status, decidedBy: `user:${id}`, decidedAt: at, ...(reason ? { reason } : {}) };
+      pending = null;
+      try { await ref.update(change); ui.notice = null; }
+      catch (e) {
+        // A refused write locks the proposals (below). Review M6: any other failure leaves the mark saved and the proposal
+        // as it was: the notice says so and its retry re-runs only this update.
+        if (isInvalidArgument(e)) throw e;
+        pending = { pid, change };
+        ui.notice = 'markSaved';
+      }
       if (decision === 'reject') { ui.rejecting = null; ui.reasonDraft = ''; }
-      ui.notice = null;
     } catch (e) {
       if (isInvalidArgument(e)) setProposalsReadOnly(); else ui.notice = 'failed';
     } finally {
@@ -570,15 +599,16 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
       schedule();
     }
   };
-  // §4.1: [Confirmar], the owner's mark for an approval no valid mark backs (taken before the marks existed, by forge before
-  // 4a, or of text edited since): the status the proposal already has and the digest of the text the page shows, written
-  // only to approvals/, like `/forge:decide <id> confirm`.
+  // §4.1: [Confirmar], the owner's mark for an approval without one (taken before the marks existed, or by forge before
+  // 4a): the status the proposal already has and the digest of the text the page shows, written only to approvals/, like
+  // `/forge:decide <id> confirm`. Review I2: never for an approval edited after the owner's mark; that one is decided
+  // again with Approve or Reject.
   const confirmMark = async (pid: string) => {
     if (busy || !knownProposal(pid) || model.isOwner !== true) return;
     const p = model.proposals.find(x => x.id === pid)!;
     const status = p.status;
     // C3: the same rule as the card's line and its button.
-    if ((status !== 'approved' && status !== 'auto_approved') || !unmarked(pid, p, model.approvals)) return;
+    if ((status !== 'approved' && status !== 'auto_approved') || unmarkedReason(pid, p, model.approvals) !== 'no-mark') return;
     if (!db || model.readOnly) { setReadOnly(); schedule(); return; }
     if (model.proposalsReadOnly) { schedule(); return; }
     busy = true;
@@ -713,6 +743,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     else if (action === 'p-comment-open') { ui.commenting = el.dataset.id ?? null; ui.commentDraft = ''; ui.notice = null; }
     else if (action === 'p-approve') { void decide(el.dataset.id ?? '', 'approve'); return; }
     else if (action === 'p-confirm') { void confirmMark(el.dataset.id ?? ''); return; }
+    else if (action === 'p-retry') { void retryUpdate(); return; }
     else if (action === 'p-reject-send') { void decide(el.dataset.id ?? '', 'reject'); return; }
     else if (action === 'p-comment-send') { void sendComment(el.dataset.id ?? ''); return; }
     else if (action === 'note-add') { void addNote(); return; }
@@ -1155,8 +1186,10 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     changed();
   }) as never, onErr));
   // §4.1: the owner's marks; only well-formed ones under an id without a path separator count. A record without a
-  // prototype, so no id (say, __proto__) is anything but a key.
-  unsubs.push(db.collection('approvals').onSnapshot(((s: QSnap) => {
+  // prototype, so no id (say, __proto__) is anything but a key. Carry 5: bounded like the other collections, the newest
+  // decisions first, at twice the proposals the page keeps: the mark of a proposal it shows is left out only behind a
+  // thousand newer decisions.
+  unsubs.push(db.collection('approvals').orderBy('decidedAt', 'desc').limit(1000).onSnapshot(((s: QSnap) => {
     const marks = Object.create(null) as Record<string, ApprovalDoc>;
     for (const r of rows(s)) {
       const key = String(r.id);

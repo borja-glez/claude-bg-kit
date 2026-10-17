@@ -6,7 +6,7 @@ import { dictFor } from '../src/page/i18n.js';
 import { esc, relText, renderApp, timelineSvg, VIEWS, type Model, type UiState } from '../src/page/render.js';
 import type { MessageDoc, EventType, NoteDoc, PlanTrack, TaskStatus } from '../src/lib/types.js';
 import { proposalDigest, type ProposalDoc } from '../src/lib/proposals.js';
-import { unmarked } from '../src/page/html.js';
+import { unmarked, unmarkedReason } from '../src/page/html.js';
 
 const plan = parsePlan(readFileSync(new URL('./fixtures/plan.yaml', import.meta.url), 'utf8'));
 const NOW = Date.parse('2026-10-11T12:00:00Z');
@@ -520,8 +520,13 @@ describe('proposals view', () => {
     const owner = renderApp({ ...base(), isOwner: true, proposals: [P()] }, { ...ui(), view: 'talk', talk: 'proposals' });
     expect(owner).toContain('data-action="p-approve" data-id="p1"');
     expect(owner).not.toContain('tu comentario le llega');
-    const en = renderApp({ ...base(), meta: { ...base().meta!, locale: 'en' }, proposals: [P()] }, { ...ui(), view: 'talk', talk: 'proposals' });
+    const en = renderApp({ ...base(), isOwner: false, meta: { ...base().meta!, locale: 'en' }, proposals: [P()] }, { ...ui(), view: 'talk', talk: 'proposals' });
     expect(en).toContain('Only the roadmap’s owner decides proposals; your comment reaches them');
+    // Carry 5: while isOwner resolves (undefined), neither the buttons nor the line.
+    const resolving = renderApp({ ...base(), proposals: [P()] }, { ...ui(), view: 'talk', talk: 'proposals' });
+    expect(resolving).not.toContain('data-action="p-approve"');
+    expect(resolving).not.toContain('tu comentario le llega');
+    expect(resolving).toContain('data-action="p-comment-open" data-id="p1"');
   });
   it('an approval without the owner’s mark says it will not become a task; only the owner can confirm it (§4.1)', () => {
     const ps = [P({ status: 'approved' }), P({ id: 'p2', status: 'auto_approved' }), P({ id: 'p3', status: 'approved' })];
@@ -535,7 +540,7 @@ describe('proposals view', () => {
     expect(other.match(/sin la marca del dueño/g)).toHaveLength(2);
     expect(other).not.toContain('data-action="p-confirm"');
   });
-  it('only a mark of this very text and status counts: one of older text or of another status still asks to confirm (§4.1)', () => {
+  it('only a mark of this very text and status counts: without one the owner confirms; one of older text says the approval was edited, to decide again (§4.1, review I2)', () => {
     const now = P({ id: 'p1', status: 'approved', title: 'Cache prices v2' });
     const older = proposalDigest('p1', P({ id: 'p1', status: 'approved', title: 'Cache prices' }));
     const at = '2026-10-11T10:00:00.000Z';
@@ -547,18 +552,39 @@ describe('proposals view', () => {
       p4: { status: 'approved' as const, decidedAt: at, by: 'page' as const, digest: proposalDigest('p2', ps[3]!) },
     };
     const html = renderApp({ ...base(), isOwner: true, proposals: ps, approvals }, { ...ui(), view: 'talk', talk: 'proposals' });
-    expect(html.match(/sin la marca del dueño/g)).toHaveLength(3);
-    for (const id of ['p1', 'p2', 'p4']) expect(html).toContain(`data-action="p-confirm" data-id="${id}"`);
+    // p2: a mark of another status is no mark; the owner confirms it.
+    expect(html.match(/sin la marca del dueño/g)).toHaveLength(1);
+    expect(html).toContain('data-action="p-confirm" data-id="p2"');
+    // p1 (older text) and p4 (a digest of another pid): a mark of other text; no one-click confirm, Approve and Reject.
+    expect(html.match(/editada después de la aprobación: revisa el texto/g)).toHaveLength(2);
+    for (const id of ['p1', 'p4']) {
+      expect(html).not.toContain(`data-action="p-confirm" data-id="${id}"`);
+      expect(html).toContain(`data-action="p-approve" data-id="${id}"`);
+      expect(html).toContain(`data-action="p-reject-open" data-id="${id}"`);
+    }
+    expect(html).not.toContain('data-action="p-approve" data-id="p2"');
     // A proposal that already has its task is not one that «will not become a task».
     expect(html).not.toContain('data-action="p-confirm" data-id="p3"');
+    expect(html).not.toContain('data-action="p-approve" data-id="p3"');
     // Until the marks arrive the page does not know: no warning and no [Confirmar].
     const loading = renderApp({ ...base(), isOwner: true, proposals: ps }, { ...ui(), view: 'talk', talk: 'proposals' });
     expect(loading).not.toContain('sin la marca del dueño');
+    expect(loading).not.toContain('editada después de la aprobación');
     expect(loading).not.toContain('data-action="p-confirm"');
-    // Read-only: the line stays, the button goes.
+    expect(loading).not.toContain('data-action="p-approve"');
+    // Read-only: the lines stay, the buttons go.
     const ro = renderApp({ ...base(), isOwner: true, proposalsReadOnly: true, proposals: ps, approvals }, { ...ui(), view: 'talk', talk: 'proposals' });
-    expect(ro.match(/sin la marca del dueño/g)).toHaveLength(3);
+    expect(ro.match(/sin la marca del dueño/g)).toHaveLength(1);
+    expect(ro.match(/editada después de la aprobación/g)).toHaveLength(2);
     expect(ro).not.toContain('data-action="p-confirm"');
+    expect(ro).not.toContain('data-action="p-approve"');
+    // To someone else: the lines and who decides, no buttons.
+    const other = renderApp({ ...base(), isOwner: false, proposals: ps, approvals }, { ...ui(), view: 'talk', talk: 'proposals' });
+    expect(other.match(/editada después de la aprobación/g)).toHaveLength(2);
+    expect(other).not.toContain('data-action="p-approve"');
+    expect(other.match(/tu comentario le llega/g)).toHaveLength(2);
+    const en = renderApp({ ...base(), meta: { ...base().meta!, locale: 'en' }, isOwner: true, proposals: ps, approvals }, { ...ui(), view: 'talk', talk: 'proposals' });
+    expect(en.match(/edited after approval: review the text/g)).toHaveLength(2);
   });
   it('unmarked is the one rule the card and «Te necesita» share (§4.1)', () => {
     const p = P({ status: 'approved' });
@@ -573,6 +599,13 @@ describe('proposals view', () => {
     // Only an own key counts: nothing inherited from Object.prototype passes for a mark.
     expect(unmarked('constructor', p, {})).toBe(true);
     expect(unmarked('toString', p, {})).toBe(true);
+    // Review I2: the reason. No mark (or one of another status) is 'no-mark'; a mark of other text is 'edited'.
+    expect(unmarkedReason('p1', p, {})).toBe('no-mark');
+    expect(unmarkedReason('p1', { ...p, status: 'auto_approved' }, { p1: mark })).toBe('no-mark');
+    expect(unmarkedReason('p1', { ...p, rationale: 'other' }, { p1: mark })).toBe('edited');
+    expect(unmarkedReason('p1', p, { p1: mark })).toBeNull();
+    expect(unmarkedReason('p1', p, undefined)).toBeNull();
+    expect(unmarkedReason('p1', { ...p, rationale: 'other', taskId: 'T020' }, { p1: mark })).toBeNull();
   });
 });
 
@@ -1210,9 +1243,10 @@ describe('«Te necesita» (G-24, G-13, G-08)', () => {
   const everything = (): Model => {
     const m = base();
     m.isOwner = true;
-    m.approvals = {};
     m.notes = [note({ id: 'q1', type: 'question', text: '¿A o B?', taskId: 'T003' }), note({ id: 'q2', type: 'question', text: 'cerrada por decisión', answeredByNote: 'd9' })];
-    m.proposals = [P(), P({ id: 'p2', status: 'approved' })];
+    m.proposals = [P(), P({ id: 'p2', status: 'approved' }), P({ id: 'p3', status: 'approved', rationale: 'editada después' })];
+    // p3: the owner's mark is of the text before an edit (review I2).
+    m.approvals = { p3: { status: 'approved', decidedAt: at(-90), by: 'page', digest: proposalDigest('p3', P({ id: 'p3', status: 'approved' })) } };
     m.messages = [msg({ id: 'm1', type: 'escalation', from: 'be', to: 'ui', text: 'decide el esquema' })];
     m.states = { ...m.states, T001: { status: 'done', doneAt: at(-60), forge: forgeDone(false) }, T003: { status: 'blocked', blockedBy: ['external'], blockedReason: 'Espera las credenciales' } };
     m.run = { ...runDoc({ active: false, stopReason: 'stalled' }), lastStepAt: at(-30), stallReason: 'T2 sigue bloqueada' };
@@ -1230,6 +1264,8 @@ describe('«Te necesita» (G-24, G-13, G-08)', () => {
     expect(s).toContain('1 propuesta por decidir');
     expect(s).toContain('data-action="view" data-view="talk" data-c="proposals"');
     expect(s).toContain('1 aprobada sin tu marca: confírmala para que cuente');
+    // Review I2: an approval edited after the owner's mark is its own entry, not counted with those without a mark.
+    expect(s).toContain('1 propuesta editada después de la aprobación: revisa el texto');
     expect(s).toContain('be → ui');
     expect(s).toContain('Respóndelo en la sesión ui o con /waypoint:work');
     expect(s).toContain('Espera las credenciales');
@@ -1241,10 +1277,11 @@ describe('«Te necesita» (G-24, G-13, G-08)', () => {
     expect(s).toMatch(/El modo infinito está sin coordinadora desde las \d\d:\d\d/);
     expect(s).toContain('Reanuda con /forge:infinite o para con /forge:stop');
     expect(s).toMatch(/Esta página es de waypoint \d+\.\d+\.\d+ y el plan se sincronizó con 99\.0\.0: republica con \/waypoint:plan/);
-    expect([...s.matchAll(/class="need nd-([\w-]+)"/g)].map(x => x[1])).toEqual(['question', 'proposals', 'unowned', 'escalation', 'external', 'deferred', 'stalled', 'infinite', 'stale-page']);
+    expect([...s.matchAll(/class="need nd-([\w-]+)"/g)].map(x => x[1])).toEqual(['question', 'proposals', 'unowned', 'edited', 'escalation', 'external', 'deferred', 'stalled', 'infinite', 'stale-page']);
     const en = needs(renderApp({ ...everything(), meta: { ...everything().meta!, locale: 'en' } }, ui()));
     expect(en).toContain('Needs you');
     expect(en).toContain('1 deferred finding in 1 task');
+    expect(en).toContain('1 proposal edited after approval: review the text');
   });
 
   it('C3: the unmarked approvals use the shared predicate (a valid mark, a task, or no snapshot yet hide the entry)', () => {
@@ -1254,8 +1291,10 @@ describe('«Te necesita» (G-24, G-13, G-08)', () => {
     // p2 has no mark, p3 a good one, p4 already has a task: only p2 counts.
     expect(shown({ approvals: { p3: mark } })).toContain('1 aprobada sin tu marca');
     expect(shown({ approvals: { p3: mark, p2: { ...mark, digest: proposalDigest('p2', ps[0]!) } } })).toBe('');
-    // A mark of another text does not back it (the digest).
-    expect(shown({ approvals: { p3: { ...mark, digest: 'bad' }, p2: { ...mark, digest: proposalDigest('p2', ps[0]!) } } })).toContain('1 aprobada sin tu marca');
+    // A mark of another text does not back it (the digest): it reads as edited after the approval (review I2).
+    const edited = shown({ approvals: { p3: { ...mark, digest: 'bad' }, p2: { ...mark, digest: proposalDigest('p2', ps[0]!) } } });
+    expect(edited).toContain('1 propuesta editada después de la aprobación');
+    expect(edited).not.toContain('sin tu marca');
     // Until the approvals snapshot arrives the page does not warn.
     expect(shown({})).toBe('');
   });
@@ -1270,7 +1309,10 @@ describe('«Te necesita» (G-24, G-13, G-08)', () => {
   it('to someone who is not the owner: no approvals without the mark, and who decides', () => {
     const s = needs(renderApp({ ...everything(), isOwner: false }, ui()));
     expect(s).not.toContain('sin tu marca');
+    expect(s).not.toContain('editada después de la aprobación');
     expect(s).toContain('Solo el dueño del roadmap decide');
+    // Carry 5: while isOwner resolves, the line waits too.
+    expect(needs(renderApp({ ...everything(), isOwner: undefined }, ui()))).not.toContain('Solo el dueño del roadmap decide');
   });
 
   it('keeps out: an answered question, a resolved escalation, a merged, old or seen task, a closed run, a live or 25 h old lease, the same version (Review Focus 1)', () => {

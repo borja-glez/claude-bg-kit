@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parsePlan } from '../src/lib/plan.js';
@@ -1028,23 +1028,138 @@ describe('proposals', () => {
     app.stop();
   });
 
-  it('a mark of older text does not count: [Confirmar] binds the text the proposal has now (C3)', async () => {
+  it('an approval edited after the owner’s mark says so, has no one-click confirm, and is decided again with its text in view (review I2)', async () => {
     const f = fakeDb();
     const { root, app } = await bootProposals(f);
-    const edited = { ...PROP, status: 'approved', rationale: 'why, edited after the approval' };
+    const edited = { ...PROP, status: 'approved', decidedBy: 'user:u1', rationale: 'why, edited after the approval' };
+    f.stored['proposals/p1'] = edited;
     f.push('proposals', { p1: edited });
     f.push('approvals', { p1: { status: 'approved', decidedAt: '2026-10-11T10:00:00.000Z', by: 'page', digest: DIG1 } });
     await settle();
     expect(app.model.approvals?.p1?.digest).toBe(DIG1);
-    expect(root.innerHTML).toContain('sin la marca del dueño');
-    click(root, '[data-action="p-confirm"][data-id="p1"]');
+    expect(root.innerHTML).toContain('editada después de la aprobación: revisa el texto');
+    expect(root.innerHTML).not.toContain('sin la marca del dueño');
+    expect(root.innerHTML).not.toContain('data-action="p-confirm"');
+    // A forged one-click confirm writes nothing.
+    inject(root, 'p-confirm', 'p1');
+    await settle();
+    expect(f.set).not.toHaveBeenCalled();
+    // The owner decides it again: Approve re-reads the text and binds the mark to the text as it is now.
+    click(root, '[data-action="p-approve"][data-id="p1"]');
     await settle();
     const now = proposalDigest('p1', normalizeProposal(edited)!);
     expect(now).not.toBe(DIG1);
+    expect(f.get).toHaveBeenCalledWith('proposals/p1');
     expect(f.set).toHaveBeenCalledWith('approvals/p1', { status: 'approved', decidedAt: expect.stringMatching(ISO), by: 'page', digest: now });
+    expect(f.update).toHaveBeenCalledWith('proposals/p1', { status: 'approved', decidedBy: 'user:u1', decidedAt: expect.stringMatching(ISO) });
     f.push('approvals', { p1: f.set.mock.calls[0]![1] });
     await settle();
-    expect(root.innerHTML).not.toContain('sin la marca del dueño');
+    expect(root.innerHTML).not.toContain('editada después de la aprobación');
+    expect(root.innerHTML).not.toContain('data-action="p-approve"');
+    app.stop();
+  });
+
+  it('an approval edited after the owner’s mark can be rejected again, and the rejection replaces the mark (review I2)', async () => {
+    const f = fakeDb();
+    const { root, app } = await bootProposals(f);
+    const edited = { ...PROP, status: 'auto_approved', path: 'src/everything/**' };
+    f.stored['proposals/p1'] = edited;
+    f.push('proposals', { p1: edited });
+    f.push('approvals', { p1: { status: 'auto_approved', decidedAt: '2026-10-11T10:00:00.000Z', by: 'forge:policy', digest: DIG1 } });
+    await settle();
+    click(root, '[data-action="p-reject-open"][data-id="p1"]');
+    await settle();
+    typeIn(root, 'reason-text', 'la ruta cambió');
+    click(root, '[data-action="p-reject-send"][data-id="p1"]');
+    await settle();
+    const now = proposalDigest('p1', normalizeProposal(edited)!);
+    expect(f.set).toHaveBeenCalledWith('approvals/p1', { status: 'rejected', decidedAt: expect.stringMatching(ISO), by: 'page', digest: now });
+    expect(f.update.mock.calls[0]![1]).toEqual({ status: 'rejected', decidedBy: 'user:u1', decidedAt: expect.stringMatching(ISO), reason: 'la ruta cambió' });
+    app.stop();
+  });
+
+  it('a mark that landed with a proposal update that failed says the mark is saved, and the retry re-runs only the update (review M6)', async () => {
+    const f = fakeDb();
+    f.stored['proposals/p1'] = { ...PROP };
+    f.update.mockRejectedValueOnce(new Error('network'));
+    const { root, app } = await bootProposals(f);
+    click(root, '[data-action="p-approve"][data-id="p1"]');
+    await settle();
+    expect(f.set).toHaveBeenCalledTimes(1);
+    expect(f.update).toHaveBeenCalledTimes(1);
+    expect(app.ui.notice).toBe('markSaved');
+    expect(root.innerHTML).toContain('La marca está guardada; falta actualizar la propuesta');
+    expect(root.innerHTML).not.toContain('No se pudo guardar');
+    const first = f.update.mock.calls[0]![1];
+    click(root, '[data-action="p-retry"]');
+    await settle();
+    expect(f.set).toHaveBeenCalledTimes(1);
+    expect(f.get).toHaveBeenCalledTimes(1);
+    expect(f.update).toHaveBeenCalledTimes(2);
+    expect(f.update.mock.calls[1]).toEqual(['proposals/p1', first]);
+    expect(app.ui.notice).toBeNull();
+    expect(root.innerHTML).not.toContain('data-action="p-retry"');
+    // Nothing left to retry: a forged click writes nothing.
+    inject(root, 'p-retry', '');
+    await settle();
+    expect(f.update).toHaveBeenCalledTimes(2);
+    app.stop();
+  });
+
+  it('a retry that fails again keeps the notice and its retry (review M6)', async () => {
+    const f = fakeDb();
+    f.stored['proposals/p1'] = { ...PROP };
+    f.update.mockRejectedValueOnce(new Error('network')).mockRejectedValueOnce(new Error('network'));
+    const { root, app } = await bootProposals(f);
+    click(root, '[data-action="p-approve"][data-id="p1"]');
+    await settle();
+    click(root, '[data-action="p-retry"]');
+    await settle();
+    expect(f.update).toHaveBeenCalledTimes(2);
+    expect(app.ui.notice).toBe('markSaved');
+    expect(root.innerHTML).toContain('data-action="p-retry"');
+    app.stop();
+  });
+
+  it('while isOwner resolves, neither the owner’s buttons nor «only the owner decides» show (carry 5)', async () => {
+    const f = fakeDb();
+    let answer: (v: unknown) => void = () => {};
+    const user = fakeUser({ isOwner: vi.fn(() => new Promise(r => { answer = r; })) });
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const started = start({ claude: { use: async (n: string) => (n === 'db' ? f.db : n === 'user' ? user : null) }, snapshot, root, now: () => NOW });
+    await settle();
+    f.push('proposals', { p1: PROP });
+    click(root, '[data-view="talk"]');
+    await settle();
+    click(root, '[data-action="talk-c"][data-c="proposals"]');
+    await settle();
+    expect(root.innerHTML).toContain('data-action="p-comment-open" data-id="p1"');
+    expect(root.innerHTML).not.toContain('data-action="p-approve"');
+    expect(root.innerHTML).not.toContain('tu comentario le llega');
+    answer(true);
+    const app = await started;
+    await settle();
+    expect(app.model.isOwner).toBe(true);
+    expect(root.innerHTML).toContain('data-action="p-approve" data-id="p1"');
+    expect(root.innerHTML).not.toContain('tu comentario le llega');
+    app.stop();
+  });
+
+  it('the marks are read like the other collections, newest first and bounded (carry 5)', async () => {
+    const f = fakeDb();
+    const calls: unknown[][] = [];
+    const collection = f.db.collection;
+    f.db.collection = (p: string) => {
+      const q = collection(p);
+      if (p !== 'approvals') return q;
+      return { ...q, orderBy: (...a: unknown[]) => { calls.push(['orderBy', ...a]); return { limit: (n: number) => { calls.push(['limit', n]); return q; } }; } } as never;
+    };
+    const { app } = await bootProposals(f);
+    expect(calls).toEqual([['orderBy', 'decidedAt', 'desc'], ['limit', 1000]]);
+    f.push('approvals', { p1: { status: 'approved', decidedAt: '2026-10-11T10:00:00.000Z', by: 'page', digest: DIG1 } });
+    await settle();
+    expect(app.model.approvals?.p1?.digest).toBe(DIG1);
     app.stop();
   });
 
@@ -1081,8 +1196,15 @@ describe('proposals', () => {
     expect(written.digest).toMatch(/^[0-9a-f]{64}$/);
     // forge's own `proposals decide <pid> confirm --from <doc>` on the same document.
     const dir = mkdtempSync(join(tmpdir(), 'page-mark-'));
-    writeFileSync(join(dir, 'db.json'), JSON.stringify(doc));
-    const r = forgeCli(['proposals', 'decide', pid, 'confirm', '--from', 'db.json'], { cwd: dir, now: () => new Date(NOW), env: {} });
+    let r: ReturnType<typeof forgeCli>;
+    try {
+      writeFileSync(join(dir, 'db.json'), JSON.stringify(doc));
+      r = forgeCli(['proposals', 'decide', pid, 'confirm', '--from', 'db.json'], { cwd: dir, now: () => new Date(NOW), env: {} });
+    } finally {
+      // Carry 5: the test leaves nothing behind.
+      rmSync(dir, { recursive: true, force: true });
+    }
+    expect(existsSync(dir)).toBe(false);
     expect(r.code).toBe(0);
     const forge = (JSON.parse(r.stdout) as { approval: { data: { status: string; digest: string } } }).approval.data;
     expect(written.digest).toBe(forge.digest);
