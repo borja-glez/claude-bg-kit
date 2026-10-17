@@ -18,7 +18,7 @@ import { renderLightbox, renderTaskModal } from './views/detail.js';
 
 export * from './model.js';
 export { esc, relText, type RelKind } from './html.js';
-export { GROUPS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES } from './views/schedule.js';
+export { GROUPS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, VIRTUAL_FROM, virtualRange } from './views/schedule.js';
 export { categoryKeys, vfilterActive, vfilterStatuses } from './views/plan.js';
 
 const NAV_ICON: Record<View, string> = { summary: '◉', plan: '▤', schedule: '≡', runs: '▶', sessions: '◎', talk: '✎' };

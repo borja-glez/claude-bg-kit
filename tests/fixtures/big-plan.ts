@@ -140,3 +140,44 @@ export function bigModel(now = BIG_NOW): Model {
     proposals: bigProposals(now), infinite: null, run: bigRun(now), me: 'user:owner', profiles: {}, readOnly: false, now, offline: false, connecting: false, rev: 1,
   };
 }
+
+/**
+ * The local page of plan 4b's Chrome trace (spec §4.5, §7.3): the built roadmap template with this plan's snapshot and a
+ * fake window.claude that serves its documents (an owner, and a database that answers each subscription once). With
+ * #live=1 in the address, a running task changes stage every 5 s, to watch a snapshot arrive. Nothing is published.
+ */
+export function harnessHtml(template: string, now = Date.now()): string {
+  const snapshot = JSON.stringify(bigSnapshot(now)).replace(/</g, '\u003c');
+  const docs = JSON.stringify(bigDocs(now)).replace(/</g, '\u003c');
+  const fake = `(() => {
+  const DOCS = ${docs};
+  const subs = {};
+  const snap = p => (p.startsWith('meta/')
+    ? { exists: p in DOCS.meta, data: () => DOCS.meta[p] }
+    : { docs: Object.entries(DOCS.coll[p] || {}).map(([id, body]) => ({ id, exists: true, data: () => body })) });
+  const ref = p => {
+    const q = {
+      orderBy: () => q, limit: () => q,
+      onSnapshot: cb => { (subs[p] = subs[p] || []).push(cb); setTimeout(() => cb(snap(p)), 30); return () => {}; },
+      get: async () => ({ exists: false, data: () => undefined }), update: async () => {}, set: async () => {}, add: async () => ({ id: 'local' }),
+    };
+    return q;
+  };
+  const db = { doc: ref, collection: ref };
+  const user = { id: async () => 'owner', isOwner: async () => true, profiles: async () => ({}) };
+  window.claude = { use: async n => (n === 'db' ? db : n === 'user' ? user : null) };
+  if (/(^#|&)live=1(&|$)/.test(location.hash)) {
+    const stages = ['implement', 'validate', 'verify', 'review', 'verdict'];
+    let k = 0;
+    setInterval(() => {
+      const st = Object.values(DOCS.coll.state).find(s => s.exec);
+      if (!st) return;
+      st.exec = Object.assign({}, st.exec, { stage: stages[k++ % stages.length], since: new Date().toISOString(), leaseUntil: new Date(Date.now() + 600000).toISOString() });
+      (subs.state || []).forEach(cb => cb(snap('state')));
+    }, 5000);
+  }
+})();`;
+  return template
+    .replace('__TITLE__', () => 'big-plan Roadmap')
+    .replace('__SNAPSHOT__</script>', () => `${snapshot}</script>\n<script>${fake}</script>`);
+}

@@ -6,7 +6,7 @@ import type { TaskStatus } from '../../lib/types.js';
 import type { Derived } from '../derive.js';
 import { dictFor, type Dict } from '../i18n.js';
 import { esc, eviMark, fmt, forecastTitle, trackTag } from '../html.js';
-import type { Model, UiState } from '../model.js';
+import type { Model, TlView, UiState } from '../model.js';
 
 export function renderScheduleView(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived): string {
   return `<header class="hd"><h1>${esc(d.views.schedule)}</h1></header>
@@ -14,7 +14,22 @@ export function renderScheduleView(m: Model, d: Dict, ui: UiState, loc: string, 
     ${renderInsights(m, d, ui, loc, dv)}`;
 }
 
-const ZOOMS: Zoom[] = ['6h', '1d', '3d', '1w', '1m'];
+/** H-06: from this many rows (after folding and filtering), the timeline paints only those around its viewport. */
+export const VIRTUAL_FROM = 150;
+/** Rows painted above and below the viewport. */
+export const VIRTUAL_PAD = 20;
+/** The rows a viewport holds before the first scroll says it (a 960 px timeline of 28 px rows). */
+const VIEW_ROWS = 35;
+
+/** The rows to paint, [start, end), or null when every row is painted (total ≤ VIRTUAL_FROM). */
+export function virtualRange(total: number, tl?: TlView): { start: number; end: number } | null {
+  if (total <= VIRTUAL_FROM) return null;
+  const first = Math.min(total, Math.max(0, Math.floor(tl?.first ?? 0)));
+  const count = tl && tl.count > 0 ? Math.ceil(tl.count) : VIEW_ROWS;
+  return { start: Math.max(0, first - VIRTUAL_PAD), end: Math.min(total, first + count + VIRTUAL_PAD) };
+}
+
+const ZOOMS: Zoom[] =['6h', '1d', '3d', '1w', '1m'];
 
 /** The timeline window: free zoom and pan when set, else the zoom preset shifted by whole spans. */
 export function timelineWindow(ui: UiState, now: number): Win {
@@ -61,7 +76,22 @@ function forgeBadge(m: Model, id: string): string {
 function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived): string {
   const win = timelineWindow(ui, m.now);
   const { rows, groupBy, expanded } = timelineRows(m, d, ui, win);
-  const pos = (t: number) => ((t - win.from) / (win.to - win.from)) * 100;
+  const deps = (id: string) => m.plan.tasks.find(t => t.id === id)?.depends_on ?? [];
+  // H-06: past VIRTUAL_FROM rows only those around the viewport are painted, between two spacers of the height of the rest.
+  const vr = virtualRange(rows.length, ui.tl);
+  const painted = vr ? rows.slice(vr.start, vr.end) : rows;
+  const pad = (n: number) => (vr ? `<div class="vpad" style="height:calc(var(--rh) * ${n})"></div>` : '');
+  const padTop = vr ? pad(vr.start) : '';
+  const padBottom = vr ? pad(rows.length - vr.end) : '';
+  // A row's arrows are drawn only to painted rows: its title lists every task it needs and unlocks.
+  const unlocksOf = new Map<string, string[]>();
+  for (const t of m.plan.tasks) for (const dep of t.depends_on) unlocksOf.set(dep, [...(unlocksOf.get(dep) ?? []), t.id]);
+  const rowTitle = (id: string, label: string, status: string): string => {
+    const needs = deps(id);
+    const unl = unlocksOf.get(id) ?? [];
+    return [id, label, status, needs.length ? `${d.tl.blockedBy}: ${needs.join(', ')}` : '', unl.length ? `${d.tl.unlocks}: ${unl.join(', ')}` : ''].filter(Boolean).join(' · ');
+  };
+  const pos =(t: number) => ((t - win.from) / (win.to - win.from)) * 100;
   const nowLeft = pos(m.now);
   const span = win.to - win.from;
   const withDate = span > 30 * 3600000;
@@ -73,17 +103,16 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
   const ids = groupIds(m.plan, m.states, groupBy);
   const allOpen = ids.every(id => expanded.has(id));
   const st = (r: { status?: string }) => (r.status && Object.hasOwn(d.status, r.status) ? r.status as TaskStatus : 'free');
-  const deps = (id: string) => m.plan.tasks.find(t => t.id === id)?.depends_on ?? [];
-  const left = rows.map(r => {
+  const left = painted.map(r => {
     if (r.kind === 'phase') {
       const pct = r.total ? Math.round(((r.done ?? 0) / r.total) * 100) : 0;
       return `<div class="tr ph" data-action="toggle-phase" data-id="${esc(r.id)}" data-k="p:${esc(r.id)}" title="${esc(r.label)} · ${esc(r.counter)}"><span class="chev">${expanded.has(r.id) ? '⌄' : '›'}</span> <span class="lab">${groupLabel(m, groupBy, r)}</span><span class="mini"><i style="width:${pct}%"></i></span><span class="c">${esc(r.counter)}</span></div>`;
     }
     const s = st(r);
-    return `<div class="tr tk${crit.has(r.id) ? ' crit' : ''}" data-action="open-task" data-id="${esc(r.id)}" data-task="${esc(r.id)}" data-deps="${esc(deps(r.id).join(' '))}" data-k="t:${esc(r.id)}" title="${esc(r.id)} · ${esc(r.label)} · ${esc(d.status[s])}"><i class="sd st-${s}"></i><span class="k">${esc(r.id)}</span> <span class="lab">${esc(r.label)}</span>${eviMark(m, d, r.id)}${layers.has('forge') ? forgeBadge(m, r.id) : ''} ${groupBy === 'track' ? '' : trackTag(m, r.trackId)}</div>`;
+    return `<div class="tr tk${crit.has(r.id) ? ' crit' : ''}" data-action="open-task" data-id="${esc(r.id)}" data-task="${esc(r.id)}" data-deps="${esc(deps(r.id).join(' '))}" data-k="t:${esc(r.id)}" title="${esc(rowTitle(r.id, r.label, d.status[s]))}"><i class="sd st-${s}"></i><span class="k">${esc(r.id)}</span> <span class="lab">${esc(r.label)}</span>${eviMark(m, d, r.id)}${layers.has('forge') ? forgeBadge(m, r.id) : ''} ${groupBy === 'track' ? '' : trackTag(m, r.trackId)}</div>`;
   }).join('');
   const kindLabel = (k: string) => (k === 'estimate' ? d.legend.estimate : k === 'done' ? d.legend.done : k === 'blocked' ? d.legend.blocked : d.legend.current);
-  const right = rows.map(r => {
+  const right = painted.map(r => {
     const task = r.kind === 'task';
     const bars = r.bars.map(b => `<div class="gb ${b.kind}${task && crit.has(r.id) ? ' crit' : ''}" style="left:${b.left}%;width:${b.width}%" title="${esc(task ? `${r.id} · ${r.label}` : r.label)} · ${esc(kindLabel(b.kind))}${r.durationMin != null ? ` · ${r.durationMin} min` : ''}"${task ? ` data-action="open-task" data-id="${esc(r.id)}" data-task="${esc(r.id)}"` : ''}></div>`).join('');
     // H-12: a label only for a real bar (never for an estimate); it never crosses the now line when its bar ended before
@@ -134,10 +163,10 @@ function renderTimeline(m: Model, d: Dict, ui: UiState, loc: string, dv: Derived
         <button data-action="shift" data-dir="-1" aria-label="‹">‹</button><button data-action="shift" data-dir="0">${esc(d.now)}</button><button data-action="shift" data-dir="1" aria-label="›">›</button>
         <button data-action="export" data-format="svg" class="xp" title="${esc(d.tl.export)} SVG">⤓ SVG</button><button data-action="export" data-format="png" class="xp" title="${esc(d.tl.export)} PNG">⤓ PNG</button></div>
     </div>
-    <div class="tlw" data-role="timeline" data-scroll-key="timeline" tabindex="0" aria-label="${esc(d.tl.hint)}">
+    <div class="tlw" data-role="timeline" data-scroll-key="timeline" data-rows="${rows.length}"${vr ? ` data-start="${vr.start}" data-end="${vr.end}"` : ''} tabindex="0" aria-label="${esc(d.tl.hint)}">
     <div class="tl">
-      <div class="l"><div class="tr axis"></div>${left}</div>
-      <div class="r" data-role="tl-canvas"><div class="ticks">${tickHtml}</div><div class="grid">${grid}</div>${band}${right}
+      <div class="l"><div class="tr axis"></div>${padTop}${left}${padBottom}</div>
+      <div class="r" data-role="tl-canvas"><div class="ticks">${tickHtml}</div><div class="grid">${grid}</div>${band}${padTop}${right}${padBottom}
         ${nowLeft >= 0 && nowLeft <= 100 ? `<div class="now" style="left:${nowLeft}%"><span>${esc(d.now)}</span></div>` : ''}
         <svg class="arrows" data-role="tl-arrows" data-morph="skip" aria-hidden="true"></svg></div>
     </div>

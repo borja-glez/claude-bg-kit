@@ -50,6 +50,10 @@ export type VFilterKey = 'done' | 'in_progress' | 'blocked' | 'committed' | 'pro
 export const VFILTER_KEYS: readonly VFilterKey[] = ['done', 'in_progress', 'blocked', 'committed', 'provisional'];
 export const NOTE_FILTERS: readonly NoteFilter[] = ['all', 'decision', 'idea', 'debt', 'open', 'mine'];
 
+/** H-06: what the timeline's viewport shows, as rows: the first visible one and how many fit. Proportions of its scroll,
+ *  so the page's zoom does not change them. */
+export interface TlView { first: number; count: number }
+
 export interface UiState {
   zoom: Zoom; offset: number; expanded: Set<string>; modal: string | null; search: string; view: View;
   /** The conversation's kind (notes by default). */
@@ -62,6 +66,8 @@ export interface UiState {
   statuses?: string[]; layers?: string[];
   /** The scope of the burndown: a version id, a phase id, or empty for the whole plan. */
   burnScope?: string;
+  /** H-06: the timeline's viewport, from its last scroll; undefined until the first one, and after leaving the schedule. */
+  tl?: TlView;
   /** Empty arrays = no filter. phaseStatuses filters columns by phase plan status. */
   versionFilter: { statuses: TaskStatus[]; phaseStatuses: PlanStatus[]; track: string | null };
   /** Collapsed version categories, keyed 'phaseId|category'. */

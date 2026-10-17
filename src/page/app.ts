@@ -9,7 +9,7 @@ import { derive } from './derive.js';
 import { morphInto } from './morph.js';
 import { mergeMetrics, normalizeEvent, normalizeInfinite, normalizeMessage, normalizeMeta, normalizeMetrics, normalizeNote, normalizePhase, normalizeRun, normalizeSession, normalizeState, type Drop, type Report } from './normalize.js';
 import { decodeView, encodeView, type ViewState } from './urlstate.js';
-import { categoryKeys, esc, GROUPS, NOTE_FILTERS, PROPOSAL_FILTERS, relText, renderApp, TALK_KINDS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, vfilterStatuses, VFILTER_KEYS, VIEWS, type Model, type ProposalFilterKind, type RelKind, type TalkKind, type UiState, type VFilterKey, type View } from './render.js';
+import { categoryKeys, esc, GROUPS, NOTE_FILTERS, PROPOSAL_FILTERS, relText, renderApp, TALK_KINDS, timelineSvg, timelineWindow, TL_LAYERS, TL_STATUSES, vfilterStatuses, VFILTER_KEYS, VIEWS, VIRTUAL_FROM, type Model, type ProposalFilterKind, type RelKind, type TalkKind, type UiState, type VFilterKey, type View } from './render.js';
 
 /**
  * The page's embedded snapshot; G-13 and G-14: the waypoint that built it and the states the last listing saw. The page
@@ -109,6 +109,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   // wins over a span set by Ctrl + wheel). The other views never carry those parameters and leave them as they are.
   const applyView = (v: ViewState) => {
     ui.view = v.view && (VIEWS as readonly string[]).includes(v.view) ? (v.view as View) : 'summary';
+    if (ui.view !== 'schedule') ui.tl = undefined;
     if (ui.view === 'talk') ui.talk = v.c && (TALK_KINDS as readonly string[]).includes(v.c) ? (v.c as TalkKind) : 'notes';
     if (ui.view === 'schedule') {
       ui.timelineGroup = v.group && (GROUPS as readonly string[]).includes(v.group) ? (v.group as UiState['timelineGroup']) : 'phase';
@@ -428,6 +429,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     else if (action === 'view') {
       const v = el.dataset.view as View;
       ui.view = VIEWS.includes(v) ? v : 'summary';
+      if (ui.view !== 'schedule') ui.tl = undefined;
       const c = el.dataset.c as TalkKind | undefined;
       if (ui.view === 'talk' && c && TALK_KINDS.includes(c)) ui.talk = c;
       if (ui.modal) { ui.modal = null; ui.shot = null; }
@@ -587,6 +589,21 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     else if (ev.key === '0') { ui.span = undefined; ui.pan = undefined; ui.offset = 0; schedule(); }
     else return;
     ev.preventDefault();
+  };
+
+  // H-06: the schedule paints only the rows around its viewport. Its scroll (passive) says which rows are in view, as
+  // proportions of the scroll so the page's zoom does not matter, and repaints before they reach the edge of what is painted.
+  const onTlScroll = (ev: Event) => {
+    const el = ev.target as HTMLElement | null;
+    if (!el || el.getAttribute?.('data-role') !== 'timeline') return;
+    const rows = Number(el.dataset.rows);
+    if (!(rows > VIRTUAL_FROM) || !el.scrollHeight) return;
+    const first = Math.floor((el.scrollTop / el.scrollHeight) * rows);
+    const count = Math.ceil((el.clientHeight / el.scrollHeight) * rows) + 1;
+    ui.tl = { first, count };
+    const start = Number(el.dataset.start);
+    const end = Number(el.dataset.end);
+    if ((start > 0 && first < start + 5) || (end < rows && first + count > end - 5)) scheduleFrame();
   };
 
   // ---- Export ----
@@ -756,6 +773,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
   window.addEventListener('resize', applyScale);
   window.addEventListener('popstate', onUrl);
   window.addEventListener('hashchange', onUrl);
+  env.root.addEventListener('scroll', onTlScroll, { capture: true, passive: true });
   // G-01: every 30 s only the relative times are rewritten in place; every FULL_EVERY ticks (5 min) a full render.
   const FULL_EVERY = 10;
   let ticks = 0;
@@ -797,6 +815,7 @@ export async function start(env: Env): Promise<{ stop(): void; model: Model; ui:
     window.removeEventListener('resize', applyScale);
     window.removeEventListener('popstate', onUrl);
     window.removeEventListener('hashchange', onUrl);
+    env.root.removeEventListener('scroll', onTlScroll, true);
   };
 
   render();

@@ -1241,3 +1241,29 @@ describe('the views and the URL (§4.6, H-25)', () => {
     }
   });
 });
+
+describe('the timeline paints what is in view (H-06)', () => {
+  it('scrolling the timeline far enough repaints the rows around the new position', async () => {
+    const { bigSnapshot } = await import('./fixtures/big-plan.js');
+    const big = bigSnapshot(NOW);
+    history.replaceState(null, '', `#v=schedule&o=${big.phases.map(p => p.id).join(',')}`);
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const app = await start({ claude: null, snapshot: big, root, now: () => NOW });
+    await settle();
+    const tlw = root.querySelector('[data-role="timeline"]') as HTMLElement;
+    expect(tlw.dataset.start).toBe('0');
+    Object.defineProperty(tlw, 'scrollHeight', { configurable: true, value: 358 * 28 });
+    Object.defineProperty(tlw, 'clientHeight', { configurable: true, value: 560 });
+    tlw.scrollTop = 200 * 28;
+    tlw.dispatchEvent(new Event('scroll'));
+    await new Promise(r => setTimeout(r, 60));
+    await settle();
+    expect(app.ui.tl).toEqual({ first: 200, count: 21 });
+    expect((root.querySelector('[data-role="timeline"]') as HTMLElement).dataset.start).toBe('180');
+    click(root, '[data-view="summary"]');
+    await settle();
+    expect(app.ui.tl).toBeUndefined();
+    app.stop();
+  });
+});
