@@ -522,6 +522,33 @@ test("a compaction of the main conversation stops the re-read of the tracking ga
   expect(await stepThen(2)).toBe(once * 1.5);
 });
 
+test('a band read before any run, the pane closed and nothing busy: a run that starts later is named in the next usage write (R2)', async ($, on) => {
+  const files: Record<string, string> = { [`${ROOT}/.forge/config.yaml`]: 'x: 1\n' };
+  serveFiles(on, files);
+  servePanes(on);
+  const clock = start(on);
+  serveSteps(on);
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true });
+  await drain($.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
+  // The person opens /lens (the band is read: no run), then closes the pane.
+  await $.command.run(RUN);
+  const pane = await $.ui.mount({ plugin: 'lens', surface: 'terminal', component: 'Pane', requestId: PANE, props: { title: 'lens', isFocused: false, bodyColumns: 60, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 30 }, view: {} } });
+  await pane.press({ key: 'close' });
+  await pane.unmount();
+  const path = `${ROOT}/.forge/usage/${SESSION}.json`;
+  expect(JSON.parse(files[path]!)).toMatchObject({ runKey: null });
+  // Later this session coordinates a run in mode sessions, without subagents or todos.
+  files[`${ROOT}/.forge/execution.json`] = execution({ mode: 'sessions' });
+  await drain($.turn.step({ turnId: 't2', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
+  await clock.advance(30_000);
+  expect(JSON.parse(files[path]!)).toMatchObject({ runKey: 'e1', runBaseline: { runKey: 'e1' } });
+  // The run ends and its file goes: the next write names no run.
+  delete files[`${ROOT}/.forge/execution.json`];
+  await drain($.turn.step({ turnId: 't3', index: 0, model: 'claude-opus-5-5', messageCount: 1 }));
+  await clock.advance(30_000);
+  expect(JSON.parse(files[path]!)).toMatchObject({ runKey: null });
+});
+
 test("after /clear the viewer is never the ending conversation, even when a panel write lands inside session.end's chain (R1)", async ($, on) => {
   const at = new Date(NOW - 60_000).toISOString();
   const status = (task: string, session: string) => JSON.stringify({

@@ -460,7 +460,7 @@ function resetUsage(): void {
   seededUsd = 0;
   runBaseline = null;
   bandRead = false;
-  execChecked = null;
+  execSeen = null;
   lastUsageWrite = 0;
   lastUsageSig = '';
   sessionId = null;
@@ -470,21 +470,25 @@ function resetUsage(): void {
   largeRunsCache = null;
 }
 
-// I2: the size and mtime of the main checkout's execution.json when it last read as not active, so an unchanged one is
-// not read again.
-let execChecked: { size: number; mtimeMs: number } | null = null;
+// The main checkout's execution.json as the last check saw it (`<size>:<mtime>`, '' when absent), null before any.
+let execSeen: string | null = null;
 
-// I2: a session whose band was never read (its pane closed, nothing busy) reads it once the main checkout's execution is
-// active, so its usage file names the run it works for and its baseline is taken close to when it joined. One stat
-// each time; the file is read only when it changed.
-async function readBandForRun($: Engine, main: string): Promise<void> {
+// I2, R2: with the pane closed and nothing busy no refresh reads the band, so the usage write stats the main checkout's
+// execution.json (one stat) and reads the band again when that file appeared, went or changed: the run this session
+// works for, and its baseline, follow a run as it starts and ends. A band never read is read only for an active run
+// (until then the file names no run); the execution file itself is read only then, and only when it changed.
+async function watchRun($: Engine, main: string): Promise<void> {
   const path = join(main, '.forge', 'execution.json');
-  let st: { size: number; mtimeMs: number };
-  try { st = await $.fs.stat(path); } catch { return; }
-  if (execChecked && execChecked.size === st.size && execChecked.mtimeMs === st.mtimeMs) return;
-  const active = st.size <= FORGE_EXEC_MAX && parseExecution(await readOpt($, path), await nowMs($))?.active === true;
-  if (!active) { execChecked = { size: st.size, mtimeMs: st.mtimeMs }; return; }
+  let st: { size: number; mtimeMs: number } | null = null;
+  try { st = await $.fs.stat(path); } catch { st = null; }
+  const seen = st ? `${st.size}:${st.mtimeMs}` : '';
+  if (seen === execSeen) return;
+  if (!bandRead) {
+    const active = !!st && st.size <= FORGE_EXEC_MAX && parseExecution(await readOpt($, path), await nowMs($))?.active === true;
+    if (!active) { execSeen = seen; return; }
+  }
   try { roadmap = await loadBandModel($); } catch { return; }
+  execSeen = seen;
   bandRead = true;
   keepRunBaseline();
 }
@@ -554,16 +558,17 @@ function usageSig(): string {
 
 // Writes this session's usage file when the main checkout has .forge/ and the count changed: at most every 30 s
 // unless forced (session end). A failed write is ignored. The engine's fs has no rename, so the file is written in
-// place; a reader that catches it half-written skips it and reads it again when its size or mtime changes.
-async function writeUsageFileNow($: Engine, force: boolean): Promise<void> {
+// place; a reader that catches it half-written skips it and reads it again when its size or mtime changes. `watch`: no
+// refresh reads the band (the 30 s tick with the pane closed and nothing busy), so the write follows the run (R2).
+async function writeUsageFileNow($: Engine, force: boolean, watch: boolean): Promise<void> {
   try {
     // Before the session's start is known there is no file to write (its start would read 1970).
     if (usageStartedAt === null) return;
     const now = await nowMs($);
     if (!force && now - lastUsageWrite < USAGE_WRITE_MS) return;
     if (!Object.values(usage.loops).some(l => l.steps > 0)) return;
-    // I2: until its band is read, a run this session joined is looked for on each write.
-    if (!bandRead) await readBandForRun($, (await usageWhere($)).main);
+    // I2, R2: the run this session works for, while no refresh reads the band, or as long as it was never read.
+    if (watch || !bandRead) await watchRun($, (await usageWhere($)).main);
     const sig = usageSig();
     if (sig === lastUsageSig) return;
     const where = await usageWhere($);
@@ -581,12 +586,12 @@ async function writeUsageFileNow($: Engine, force: boolean): Promise<void> {
 }
 
 // One write at a time: a throttled write finding one in flight is dropped; a forced one waits for it and then runs.
-async function writeUsageFile($: Engine, force: boolean): Promise<void> {
+async function writeUsageFile($: Engine, force: boolean, watch = false): Promise<void> {
   while (usageWrite) {
     if (!force) return;
     await usageWrite;
   }
-  usageWrite = writeUsageFileNow($, force).finally(() => { usageWrite = null; });
+  usageWrite = writeUsageFileNow($, force, watch).finally(() => { usageWrite = null; });
   await usageWrite;
 }
 
@@ -654,13 +659,14 @@ async function refreshRunInputs($: Engine, now: number): Promise<void> {
 }
 
 // The meter's file side at the refresh / tick pace: the start and official cost, the run's inputs (when a panel or
-// band will show them) and the throttled write.
+// band will show them) and the throttled write. Without them (the tick with the pane closed and nothing busy) no
+// refresh has just read the band, so the write watches the execution itself (R2).
 async function refreshUsage($: Engine, withRun: boolean): Promise<void> {
   try { await syncUsageStart($); } catch { /* no official cost */ }
   if (withRun) {
     try { await refreshRunInputs($, await nowMs($)); } catch { /* keep the last inputs */ }
   }
-  await writeUsageFile($, false);
+  await writeUsageFile($, false, !withRun);
 }
 
 // What the panel model gets for the Usage card: the live state, the run merged from the last read inputs.
