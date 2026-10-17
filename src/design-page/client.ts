@@ -10,7 +10,7 @@ type StatusKey = 'draft' | 'approved' | 'amended' | 'parked';
 interface Dict {
   eyebrow: string; version: string; words: string; rounds: string; source: string; prompt: string; copy: string; copied: string;
   versions: string; toc: string; current: string; imported: string; intro: string; round: string; none: string;
-  moreRounds: string; moreProposals: string;
+  moreRounds: string; moreProposals: string; pillars: string;
   status: Record<StatusKey, string>;
   verdict: { ready: string; changes: string };
   sev: Record<Sev, string>;
@@ -24,7 +24,7 @@ const DICT: Record<string, Dict> = {
     eyebrow: 'DESIGN DOCUMENT · EXECUTABLE SPECIFICATION', version: 'Version', words: 'Words', rounds: 'Rounds', source: 'Source', prompt: 'Start prompt',
     copy: 'Copy prompt', copied: 'Copied', versions: 'Versions', toc: 'Contents', current: 'current', imported: 'Imported from',
     intro: 'Intro', round: 'Round', none: 'No proposals: nothing critical or major is left.',
-    moreRounds: '{n} older rounds not shown', moreProposals: '{n} older proposals not shown',
+    moreRounds: '{n} older rounds not shown', moreProposals: '{n} older proposals not shown', pillars: 'Pillars',
     status: { draft: 'draft', approved: 'approved', amended: 'approved · amended', parked: 'parked' },
     verdict: { ready: 'ready', changes: 'changes' },
     sev: { critical: 'critical', major: 'major', minor: 'minor' },
@@ -37,7 +37,7 @@ const DICT: Record<string, Dict> = {
     eyebrow: 'DOCUMENTO DE DISEÑO · ESPECIFICACIÓN EJECUTABLE', version: 'Versión', words: 'Palabras', rounds: 'Rondas', source: 'Fuente', prompt: 'Prompt de arranque',
     copy: 'Copiar prompt', copied: 'Copiado', versions: 'Versiones', toc: 'Índice', current: 'actual', imported: 'Importado de',
     intro: 'Introducción', round: 'Ronda', none: 'Sin propuestas: no queda nada crítico ni mayor.',
-    moreRounds: '{n} rondas anteriores no se muestran', moreProposals: '{n} propuestas anteriores no se muestran',
+    moreRounds: '{n} rondas anteriores no se muestran', moreProposals: '{n} propuestas anteriores no se muestran', pillars: 'Pilares',
     status: { draft: 'borrador', approved: 'aprobado', amended: 'aprobado · enmendado', parked: 'aparcado' },
     verdict: { ready: 'lista', changes: 'con cambios' },
     sev: { critical: 'crítica', major: 'mayor', minor: 'menor' },
@@ -96,7 +96,7 @@ function renderRounds(data: DesignPageData, d: Dict, open: ReadonlySet<number>):
       : `<p class="none">${esc(d.none)}</p>`;
     return `<details class="rd" data-round="${esc(c.round)}"${open.has(c.round) ? ' open' : ''}><summary><b>${esc(d.round)} ${esc(c.round)}</b> · v${esc(c.version)} · <span class="vd vd-${esc(c.verdict)}">${esc(d.verdict[c.verdict])}</span> · ${esc(counts)}</summary>${moreLine(d.moreProposals, c.proposalsMore)}${list}</details>`;
   }).join('');
-  return `<section class="rounds"><div class="lbl">${esc(d.rounds)}</div>${moreLine(d.moreRounds, data.critiquesMore)}${items}</section>`;
+  return `<section class="rounds" aria-label="${esc(d.rounds)}"><div class="lbl">${esc(d.rounds)}</div>${moreLine(d.moreRounds, data.critiquesMore)}${items}</section>`;
 }
 
 /** The rounds open at first: the latest one. */
@@ -122,16 +122,18 @@ export function renderDesignPage(data: DesignPageData, version: number, open: Re
 ${data.meta.source ? `<p class="imp">${esc(d.imported)} <code>${esc(data.meta.source)}</code></p>\n` : ''}<p class="lead">${esc(data.meta.summary)}</p>
 <div class="met"><div><b>v${esc(no)}</b>${esc(d.version)}</div><div><b>${esc(v?.words ?? data.words)}</b>${esc(d.words)}</div><div><b>${esc(data.rounds)}</b>${esc(d.rounds)}</div><div><b class="src">${esc(data.source)}</b>${esc(d.source)}</div></div>
 </header>
-<section class="vers"><div class="lbl">${esc(d.versions)}</div><div class="vl">${vers}</div>${diffLine(v?.diff, d)}${v?.note ? `<p class="note">${esc(v.note)}</p>` : ''}</section>
-<section class="pil">${pillars}</section>
-<section class="pr"><div><div class="lbl">${esc(d.prompt)}</div><code>${esc(data.meta.start_prompt)}</code></div><button type="button" class="cp" data-action="copy">${esc(d.copy)}</button></section>
-${renderRounds(data, d, open)}<div class="doc"><nav class="toc"><div class="lbl">${esc(d.toc)}</div>${toc}</nav><article class="body">${v?.html ?? ''}</article></div>`;
+<main>
+<section class="vers" aria-label="${esc(d.versions)}"><div class="lbl">${esc(d.versions)}</div><div class="vl">${vers}</div>${diffLine(v?.diff, d)}${v?.note ? `<p class="note">${esc(v.note)}</p>` : ''}</section>
+<section class="pil" aria-label="${esc(d.pillars)}">${pillars}</section>
+<section class="pr" aria-label="${esc(d.prompt)}"><div><div class="lbl">${esc(d.prompt)}</div><code>${esc(data.meta.start_prompt)}</code></div><button type="button" class="cp" data-action="copy">${esc(d.copy)}</button></section>
+${renderRounds(data, d, open)}<div class="doc"><nav class="toc" aria-label="${esc(d.toc)}"><div class="lbl">${esc(d.toc)}</div>${toc}</nav><article class="body">${v?.html ?? ''}</article></div>
+</main>`;
 }
 
 export function mountDesignPage(root: HTMLElement, data: DesignPageData, deps: { copy?: (t: string) => Promise<void> } = {}): void {
   const d = dictFor(data.meta.locale);
   // K3-11: the document says its language (screen readers, hyphenation).
-  root.ownerDocument.documentElement.lang = data.meta.locale;
+  root.ownerDocument.documentElement.lang = data.meta.locale || 'en';
   const open = latestOpen(data);
   const paint = (n: number, focus = false) => {
     root.innerHTML = renderDesignPage(data, n, open);

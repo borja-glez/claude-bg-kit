@@ -760,14 +760,18 @@ describe('design commands', () => {
     mkdirSync(path.join(dir, '.waypoint', 'demo-shop'), { recursive: true });
     writeFileSync(path.join(dir, '.waypoint', 'demo-shop', 'critique-r1.json'),
       JSON.stringify({ round: 1, version: 1, scope: 'full', proposals: [{ n: 1, category: 'gap', severity: 'major', section: '_intro', problem: text, change: text }] }));
+    const sep = String.fromCharCode(0x2028, 0x2029);
+    const p = path.join(dir, rel);
+    writeFileSync(p, readFileSync(p, 'utf8').replace('title: Tienda Demo', `title: "T${sep}x"`));
     expect(run(['design-page', rel, '--out', 'h.html'], io).code).toBe(0);
     const html = readFileSync(path.join(dir, 'h.html'), 'utf8');
-    expect(html).not.toContain('<script>alert');
-    expect(html).not.toContain('<img');
-    expect(html).not.toContain('<!--');
-    expect(html).not.toContain(String.fromCharCode(0x2028));
-    expect(html).not.toContain(String.fromCharCode(0x2029));
-    const data = JSON.parse(/id="wp-design-data">(.*?)<\/script>/s.exec(html)![1]);
+    const block = /id="wp-design-data">(.*?)<\/script>/s.exec(html)![1];
+    expect(block).not.toContain('<');
+    expect(block).not.toContain(String.fromCharCode(0x2028));
+    expect(block).not.toContain(String.fromCharCode(0x2029));
+    expect(block).toContain('\\u2028\\u2029');
+    const data = JSON.parse(block);
+    expect(data.meta.title).toBe(`T${sep}x`);
     expect(data.critiques[0].proposals[0].problem).toContain('<script>alert(1)</script>');
   });
 

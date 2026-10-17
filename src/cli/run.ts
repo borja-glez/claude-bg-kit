@@ -925,7 +925,8 @@ export function run(argv: string[], io: Io): Result {
         const data = buildDesignPageData({ current, history, changelog: readChangelog(dirPath), source, critiques: readCritiques(files), dismissed: readDismissedOf(files) });
         const tpl = readFileSync(path.join(io.assetsDir, 'design.template.html'), 'utf8');
         const title = `${data.meta.title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')} · Design`;
-        const json = JSON.stringify(data).replace(/</g, '\\u003c');
+        // `<` (a closing tag, a comment) and the line separators U+2028/U+2029 are written as escapes.
+        const json = JSON.stringify(data).replace(/</g, '\\u003c').replace(new RegExp(String.fromCharCode(0x2028), 'g'), '\\u2028').replace(new RegExp(String.fromCharCode(0x2029), 'g'), '\\u2029');
         // One pass: a title or text containing a placeholder is never re-substituted.
         const html = tpl.replace(/__TITLE__|__DATA__/g, m => (m === '__TITLE__' ? title : json));
         const target = abs(out);

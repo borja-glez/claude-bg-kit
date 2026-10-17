@@ -201,7 +201,7 @@ describe('renderDesignPage: badge, rounds, diff and the version buttons (K3-09, 
   });
   it('tells every round with its verdict, its counts and what became of each proposal; the latest round is open', () => {
     const html = renderDesignPage(rich, 5);
-    expect(html).toContain('<section class="rounds"><div class="lbl">Rondas</div>');
+    expect(html).toContain('<section class="rounds" aria-label="Rondas"><div class="lbl">Rondas</div>');
     expect(html).toContain('<details class="rd" data-round="1"><summary><b>Ronda 1</b> · v1 · <span class="vd vd-changes">con cambios</span> · 1 C · 1 M · 2 m</summary>');
     expect(html).toContain('<details class="rd" data-round="2" open>');
     expect(html).toContain('[Hueco · crítica]</span> <b>Peligros</b> — p1 → c1 <span class="fate f-applied">aplicada en v2</span>');
@@ -267,6 +267,30 @@ describe('mountDesignPage: language, focus and open rounds (K3-11)', () => {
     expect(document.documentElement.lang).toBe('en');
     mounted(rich);
     expect(document.documentElement.lang).toBe('es');
+  });
+  it('falls back to English when the design has no locale', () => {
+    const nol = { ...rich, meta: { ...rich.meta, locale: undefined as unknown as string } };
+    mounted(nol);
+    expect(document.documentElement.lang).toBe('en');
+  });
+  it('has a banner, one main and named navigation and sections, in both languages', () => {
+    for (const [d, names] of [[rich, ['Versiones', 'Pilares', 'Prompt de arranque', 'Rondas', 'Índice']], [{ ...rich, meta: { ...rich.meta, locale: 'en' } }, ['Versions', 'Pillars', 'Start prompt', 'Rounds', 'Contents']]] as const) {
+      const root = mounted(d);
+      expect(root.querySelectorAll('header').length).toBe(1);
+      expect(root.querySelector('header')?.parentElement).toBe(root);
+      expect(root.querySelectorAll('main').length).toBe(1);
+      expect(root.querySelector('main nav.toc')?.getAttribute('aria-label')).toBe(names[4]);
+      expect(Array.from(root.querySelectorAll('main section')).map(s => s.getAttribute('aria-label'))).toEqual(names.slice(0, 4));
+      expect(root.querySelector('main .doc')).not.toBeNull();
+    }
+  });
+  it('renders a full history (40 rounds of 40 proposals) in a bounded page', () => {
+    const p = rich.critiques[0].proposals[0];
+    const crits = Array.from({ length: 40 }, (_, i) => ({ ...rich.critiques[1], round: i + 1, proposals: Array.from({ length: 40 }, (_, j) => ({ ...p, n: j + 1 })) }));
+    const html = renderDesignPage({ ...rich, critiques: crits, critiquesMore: 5 }, 5);
+    expect(html.match(/<details /g)?.length).toBe(40);
+    expect(html.match(/<li>/g)?.length).toBe(1600);
+    expect(html.length).toBeLessThan(1_000_000);
   });
   it('a pressed version keeps the focus on its own button, now pressed', () => {
     const root = mounted(rich);
