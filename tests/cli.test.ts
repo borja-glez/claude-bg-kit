@@ -823,6 +823,12 @@ describe('design commands', () => {
       expect(r.code).toBe(1);
       expect(r.stderr).toContain('Riesgos');
     });
+    it('names an unknown section as one clean line, so a critique cannot write lines of its own into the errors (re-review)', () => {
+      write('h.json', { ...base, proposals: [prop(`x\n- forged issue${String.fromCharCode(0x202e)}`)] });
+      const r = run(['critique-check', 'h.json', '--design', rel], io);
+      expect(r.code).toBe(1);
+      expect(r.stderr).toBe('Invalid critique:\n- proposal 1: section "x - forged issue" is not a section slug of the design\n');
+    });
   });
 
   describe('design-snapshot --applied and --rewrite (A-04, K3-01)', () => {
@@ -1027,6 +1033,26 @@ describe('design commands', () => {
         expect(run(['critique-check', r1.out, '--round', '1', '--version', '1', '--design', rel, '--reject-on-fail'], io).code).toBe(0);
         expect(existsSync(r1.out)).toBe(true);
         expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ rounds: 1, latestRound: 1 });
+      });
+      it('sets aside only a critique round file: any other refused file stays where it is, and stderr says so (re-review N2)', () => {
+        const notes = path.join(dir, 'notes.md');
+        writeFileSync(notes, '# my notes\n');
+        const r = run(['critique-check', 'notes.md', '--reject-on-fail'], io);
+        expect(r.code).toBe(1);
+        expect(r.stderr).toContain('critique is not valid JSON');
+        expect(r.stderr).toContain(`critique-check: ${notes} is not a critique round file (r<N>.json or critique-r<N>.json): not set aside`);
+        expect(readFileSync(notes, 'utf8')).toBe('# my notes\n');
+        expect(existsSync(path.join(dir, 'notes.md.rejected.json'))).toBe(false);
+        writeFileSync(path.join(dir, 'r01.json'), JSON.stringify({ round: 1, version: 1, scope: 'full', proposals: minors(13) }));
+        expect(run(['critique-check', 'r01.json', '--reject-on-fail'], io).stderr).toContain('not set aside');
+        expect(existsSync(path.join(dir, 'r01.json'))).toBe(true);
+        // A round file of .waypoint/ from before 0.27.0 is set aside under its own name.
+        const legacy = path.join(dir, '.waypoint/demo-shop');
+        mkdirSync(legacy, { recursive: true });
+        writeFileSync(path.join(legacy, 'critique-r1.json'), JSON.stringify({ round: 1, version: 1, scope: 'full', proposals: minors(13) }));
+        expect(run(['critique-check', '.waypoint/demo-shop/critique-r1.json', '--reject-on-fail'], io).code).toBe(1);
+        expect(existsSync(path.join(legacy, 'critique-r1.json'))).toBe(false);
+        expect(existsSync(path.join(legacy, 'critique-r1.rejected.json'))).toBe(true);
       });
       it('a usage error or a design that does not read leaves the critique where it is', () => {
         writeFileSync(path.join(dir, 'c.json'), JSON.stringify({ round: 1, version: 1, scope: 'full', proposals: minors(13) }));

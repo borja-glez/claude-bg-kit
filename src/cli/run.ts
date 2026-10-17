@@ -10,7 +10,7 @@ import { parseDesign, changedSections, designBody, designStatus, DesignError, se
 import { importSpec, SpecImportError } from '../lib/design-import.js';
 import { designGate, line, mergeDismissed } from '../lib/design-gate.js';
 import { listVersions, nextVersion, parseChangelog, appendChangelog, parseAppliedItems, roundList, AppliedError, ENTRY_KINDS, entryKind, entryRound, type EntryKind } from '../lib/history.js';
-import { parseCritique, selectProposals, formatProposals, CritiqueError, budgetFor, budgetIssues } from '../lib/critique.js';
+import { parseCritique, selectProposals, formatProposals, CritiqueError, budgetFor, budgetIssues, CRITIQUE_FILE, LEGACY_CRITIQUE_FILE } from '../lib/critique.js';
 import { buildDesignPageData } from '../design-page/build.js';
 import { designFilesOf, readCritiques, readDismissedOf, readHistory, writeDismissed } from './design-files.js';
 import { budgetRound, nextRound } from '../lib/design-round.js';
@@ -88,6 +88,13 @@ export function run(argv: string[], io: Io): Result {
     }
     return { sid, task, v };
   };
+  // Carry 8 (4a), carry 7, re-review N3: a design file a command reads whole; one that cannot be read and one that is no
+  // design are exit 2, each with its own message.
+  const readDesignArg = (cmd: string, arg: string): ReturnType<typeof parseDesign> | Result => {
+    let text: string;
+    try { text = readFileSync(abs(arg), 'utf8'); } catch (e) { return fail(`${cmd}: cannot read the design ${arg}: ${(e as Error).message}`, 2); }
+    try { return parseDesign(text); } catch (e) { return fail(`${cmd}: ${arg} is not a design: ${(e as Error).message}`, 2); }
+  };
   // A task of the runtime plan (the db cache with --db, else the plan file): claim, done and block take no other.
   const planHas = (task: string): boolean => loadView().view.tasks.some(t => t.id === task);
   // With --db the local cache sees the state write at once (the hooks read the seat's task there); a write the
@@ -109,11 +116,8 @@ export function run(argv: string[], io: Io): Result {
         // no design say so apart.
         if (args.includes('--design') && (!designArg || designArg.startsWith('--'))) return fail('validate: --design needs the design file', 2);
         if (designArg) {
-          let text: string;
-          try { text = readFileSync(abs(designArg), 'utf8'); } catch (e) { return fail(`validate: cannot read the design ${designArg}: ${(e as Error).message}`, 2); }
-          let design: ReturnType<typeof parseDesign>;
-          try { design = parseDesign(text); }
-          catch (e) { return fail(`validate: ${designArg} is not a design: ${(e as Error).message}`, 2); }
+          const design = readDesignArg('validate', designArg);
+          if ('code' in design) return design;
           const slugs = new Set(['_intro', ...design.sections.map(s => s.slug)]);
           const unknown = p.tasks.filter(t => t.design_ref && !slugs.has(t.design_ref)).map(t => `${t.id} (${t.design_ref})`);
           if (unknown.length) refs = `\nwarning: ${unknown.length} design_ref(s) not in the design: ${unknown.join(', ')}`;
@@ -821,10 +825,8 @@ export function run(argv: string[], io: Io): Result {
         if (sinceFlag !== undefined && !/^[1-9]\d*$/.test(sinceFlag)) return fail('design-impact: --since must be a positive integer', 2);
         const file = abs(args[0]);
         // Carry 7: a design that cannot be read, or is no design, exits 2 like a plan that cannot be read.
-        let designText: string;
-        try { designText = readFileSync(file, 'utf8'); } catch (e) { return fail(`design-impact: cannot read the design ${args[0]}: ${(e as Error).message}`, 2); }
-        let d: ReturnType<typeof parseDesign>;
-        try { d = parseDesign(designText); } catch (e) { return fail(`design-impact: ${args[0]} is not a design: ${(e as Error).message}`, 2); }
+        const d = readDesignArg('design-impact', args[0]);
+        if ('code' in d) return d;
         let plan: ReturnType<typeof parsePlan>;
         try { plan = parsePlan(readFileSync(abs(flag('plan')!), 'utf8')); } catch (e) { return fail(`design-impact: ${(e as Error).message}`, 2); }
         const dir = path.dirname(file);
@@ -922,7 +924,8 @@ export function run(argv: string[], io: Io): Result {
             const sections = designParsed.sections;
             for (const s of sections) headings[s.slug] = s.heading;
             const slugs = new Set(['_intro', ...sections.map(s => s.slug)]);
-            for (const p of c.proposals) if (!slugs.has(p.section)) issues.push(`proposal ${p.n}: section "${p.section}" is not a section slug of the design`);
+            // The section as one clean line: the errors go to the critic's retry prompt (re-review).
+            for (const p of c.proposals) if (!slugs.has(p.section)) issues.push(`proposal ${p.n}: section "${line(p.section)}" is not a section slug of the design`);
           }
           if (issues.length) throw new CritiqueError(issues);
           // K3-15: a critique of what changed that reviews another section is told, never refused; the section is one clean
@@ -938,9 +941,14 @@ export function run(argv: string[], io: Io): Result {
         } catch (e) {
           // Final review M2: with --reject-on-fail, a critique the check refused is set aside as <name>.rejected.json next
           // to it (an older one of that name is replaced), so it never counts as a round. A usage error, a design that
-          // does not read or a changelog that does not parse judge no critique: it stays.
+          // does not read or a changelog that does not parse judge no critique: it stays. Re-review N2: only a critique
+          // round file (r<N>.json, critique-r<N>.json) is ever renamed; any other file stays where it is.
           if (!(e instanceof CritiqueError) || !args.includes('--reject-on-fail') || !existsSync(target)) throw e;
-          const rejected = path.join(path.dirname(target), `${path.basename(target).replace(/\.json$/i, '')}.rejected.json`);
+          const name = path.basename(target);
+          if (!CRITIQUE_FILE.test(name) && !LEGACY_CRITIQUE_FILE.test(name)) {
+            return fail(`${e.message}\ncritique-check: ${target} is not a critique round file (r<N>.json or critique-r<N>.json): not set aside`);
+          }
+          const rejected = path.join(path.dirname(target), `${name.slice(0, -'.json'.length)}.rejected.json`);
           rmSync(rejected, { force: true });
           renameSync(target, rejected);
           return fail(`${e.message}\ncritique-check: the critique was refused and set aside as ${rejected}`);
