@@ -23,8 +23,8 @@ export const nodeKey = (node: Node): string | undefined => {
 
 /** Carry 4: the fields whose live state (what was typed, checked or chosen) is not what their markup says, read once per
  *  morph (it was read again for every unchanged node). A node whose markup equals the render's still differs when one of
- *  these is inside it. A select always counts: what was chosen cannot be told from its markup everywhere (some DOMs move
- *  the `selected` attribute with the choice), and there are only a few. */
+ *  these is inside it. A select always counts: the page has three at most, and walking into one costs less than working
+ *  out which option its markup chooses by default. */
 const dirtyFields = (marked: Element[]): Field[] => marked.filter(isField).filter(f => {
   if (f.tagName === 'SELECT') return true;
   if (f.tagName === 'TEXTAREA') return f.value !== (f.textContent ?? '');
