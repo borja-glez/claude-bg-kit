@@ -55,6 +55,8 @@ export interface ActivityInput {
   sleepUntil?: string | null;
   /** The agent the person looks at (Pane view.agentId): its task is the one expanded. */
   focusAgent?: string | null;
+  /** R3: where each agent works (linkHomes), when the caller worked it out for the slots too; else it is worked out here. */
+  homes?: ReadonlyMap<string, string>;
   now: number;
 }
 export interface ActivityView { activities: Row[]; waiting: PanelModel['waiting']; jobs: PanelModel['jobs']; expanded: ForgeStatus | null }
@@ -92,22 +94,47 @@ function newestKey(statuses: readonly ForgeStatus[], match: (st: ForgeStatus) =>
   return best?.key;
 }
 
-/** The key of the newest status of each task id, worked out once per id. */
-function newestByTask(statuses: readonly ForgeStatus[], now: number): (task: string) => string | undefined {
-  const memo = new Map<string, string | undefined>();
-  return task => {
-    if (!memo.has(task)) memo.set(task, newestKey(statuses, st => st.task === task, now));
-    return memo.get(task);
-  };
+/**
+ * E-06: whose a task is. Without a session id at all (an older caller) every task is own; with an id, a status that
+ * names a session is own when it names this one; else (no session named, or the id could not be read, Review Focus 5)
+ * it is own when this session touched it with forge.cjs.
+ */
+function ownerOf(st: ForgeStatus, sessionId: string | null | undefined, ownTasks: readonly string[]): Row['owner'] {
+  if (sessionId === undefined) return 'own';
+  if (st.session !== null && sessionId) return st.session === sessionId ? 'own' : 'other';
+  return ownTasks.some(t => isOf(st.task, t)) ? 'own' : 'other';
+}
+
+/** What lens needs to tell where each agent works: the statuses, who looks and the tasks it touched, and now. */
+export interface HomeInput { statuses: readonly ForgeStatus[]; links: readonly AgentLink[]; sessionId?: string | null; ownTasks: readonly string[]; now: number }
+
+/**
+ * R3: of the statuses `match` takes, the one a piece of work that names no project belongs to: the loose one (no `@`
+ * and a `.forge/work/<T>` path mean a loose task; an ephemeral run's slot is loose too), else the newest this session
+ * has in progress, else the newest; undefined when there is none.
+ */
+function homeOf(h: Omit<HomeInput, 'links'>, match: (st: ForgeStatus) => boolean): string | undefined {
+  const of = h.statuses.filter(match);
+  const loose = of.find(st => st.project === null);
+  if (loose) return keyOf(loose.task, null);
+  const live = (st: ForgeStatus) => !st.doneAt && st.phase.toLowerCase() !== 'stopped' && ownerOf(st, h.sessionId, h.ownTasks) === 'own';
+  return newestKey(of, live, h.now) ?? newestKey(of, () => true, h.now);
 }
 
 /**
- * C5: whether agent `l` works on the status of `task` in `project`: one that names a project, only on that project's;
- * one that names none, only on the newest status of its id (or on a slot of a task with no status), so it goes under
- * one row.
+ * R3: the one status key each agent works on, so it is drawn once, under its row or its slot: one that names a
+ * project, that project's status; one that names none, homeOf's among the statuses of its id, else the loose key. An
+ * agent without a task has none.
  */
-const worksOn = (l: AgentLink, task: string, project: string | null, newest: (task: string) => string | undefined): boolean =>
-  l.task === task && (l.project !== null ? l.project === project : (newest(task) ?? keyOf(task, project)) === keyOf(task, project));
+export function linkHomes(h: HomeInput): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const l of h.links) {
+    const task = l.task;
+    if (!task) continue;
+    out.set(l.id, l.project !== null ? keyOf(task, l.project) : homeOf(h, st => st.task === task) ?? keyOf(task, null));
+  }
+  return out;
+}
 
 /** A Trivial or Small task with no doneAt and nothing logged for over 30 minutes: the session finished it without saying so. */
 export function leftOpen(st: { path: string; doneAt: string | null; lastAt: string | null }, now: number): boolean {
@@ -160,18 +187,19 @@ function agentOf(l: AgentLink, links: readonly AgentLink[], models: Models, now:
 /**
  * E-02: the execution with the linked agents of each slot under it, the slot's model from the first of them and, in
  * the coordinator (which drives them), the slot alive while one of them lives. executionView itself does not change.
- * C5: a slot takes the agents of its task in the run's project, and one that names no project when the newest of
- * `statuses` with that id is the slot's own (or there is none).
+ * R3: a slot takes an agent whose home (linkHomes; without them, its project's key or the loose one) is the slot's
+ * status, `<project>__<T>` of the run's project, unless the agent is drawn under that status's own row (`drawn`: in
+ * mode sessions a member's task is a row, not a slot).
  */
-export function withSlotAgents(x: PanelModel['execution'], links: readonly AgentLink[], models: Models, viewer: ViewerLike, now: number, statuses: readonly ForgeStatus[] = []): PanelModel['execution'] {
+export function withSlotAgents(x: PanelModel['execution'], links: readonly AgentLink[], models: Models, viewer: ViewerLike, now: number, homes?: ReadonlyMap<string, string>, drawn: ReadonlySet<string> = new Set()): PanelModel['execution'] {
   if (!x) return x;
   type Slot = NonNullable<PanelModel['execution']>['slots'][number];
   const project = x.project ?? null;
-  const newest = newestByTask(statuses, now);
+  const home = homes ?? linkHomes({ statuses: [], links, ownTasks: [], now });
   return {
     ...x,
     slots: x.slots.map((s): Slot => {
-      const agents = links.filter(l => alive(l) && worksOn(l, s.task, project, newest)).map(l => agentOf(l, links, models, now));
+      const agents = links.filter(l => alive(l) && home.get(l.id) === keyOf(s.task, project) && !drawn.has(l.id)).map(l => agentOf(l, links, models, now));
       const first = agents.find(g => g.model);
       const liveness: Slot['liveness'] = viewer.coordinator && agents.length ? 'alive' : s.liveness;
       return { ...s, agents, model: s.model ?? first?.model ?? null, effort: s.effort ?? first?.effort ?? null, liveness };
@@ -197,7 +225,8 @@ export function buildActivities(i: ActivityInput): ActivityView {
   // C5: a slot is a task of the run's own project (null for an ephemeral run, whose tasks are loose).
   const execProject = i.execution?.project ?? null;
   const slotTasks = new Set(i.execution?.mode === 'subagents' ? i.execution.slots.map(s => s.task) : []);
-  const newest = newestByTask(i.statuses, now);
+  // R3: each agent's one home, shared with the slots (withSlotAgents), so none is drawn twice nor lost.
+  const homes = i.homes ?? linkHomes(i);
   const liveJobs = i.jobs.filter(j => { const t = ms(j.startedAt); return Number.isFinite(t) && age(t, now) < JOB_ALIVE_MS; });
   // A job names no project: it goes on the newest status of its task id alone.
   const jobHome = new Map(liveJobs.map(j => [j, j.task === null ? undefined : newestKey(i.statuses, st => isOf(st.task, j.task!), now)] as const));
@@ -211,7 +240,7 @@ export function buildActivities(i: ActivityInput): ActivityView {
     const last = ms(st.lastAt ?? st.ts);
     if (!Number.isFinite(last)) continue;
     const stopped = st.phase.toLowerCase() === 'stopped';
-    const mine = i.links.filter(l => alive(l) && worksOn(l, st.task, st.project, newest));
+    const mine = i.links.filter(l => alive(l) && homes.get(l.id) === key);
     const working = mine.length > 0 || (!!st.agent && i.liveTypes.some(t => tierOf(t).label === tierOf(st.agent).label));
     const left = !stopped && !working && leftOpen(st, now);
     const done = !stopped && (!!st.doneAt || left);
@@ -221,9 +250,7 @@ export function buildActivities(i: ActivityInput): ActivityView {
     const end = left ? last + LEFT_OPEN_MS : ended;
     // Review Focus 5: an id that could not be read (null) owns only what this session touched with forge.cjs, which
     // stamps this session's own id on its events.
-    const owner: Row['owner'] = !known ? 'own'
-      : st.session !== null && i.sessionId ? (st.session === i.sessionId ? 'own' : 'other')
-        : i.ownTasks.some(t => isOf(st.task, t)) ? 'own' : 'other';
+    const owner = ownerOf(st, i.sessionId, i.ownTasks);
     const visible = done || stopped ? Number.isFinite(end) && age(end, now) < DONE_TTL_MS
       : age(last, now) < (owner === 'own' ? OWN_TTL_MS : OTHER_TTL_MS);
     if (!visible) continue;
@@ -266,7 +293,7 @@ export function buildActivities(i: ActivityInput): ActivityView {
   built.sort((a, b) => a.rank - b.rank || (a.rank === 2 ? orderAt(b.end, now) - orderAt(a.end, now) : b.at - a.at));
   const forge = built.filter(b => b.row.kind === 'forge' && !b.row.slot);
   const focus = i.focusAgent ? i.links.find(l => l.id === i.focusAgent) : undefined;
-  const pick = (focus ? forge.find(b => b.st !== null && worksOn(focus, b.st.task, b.st.project, newest)) : undefined)
+  const pick = (focus ? forge.find(b => b.row.key === homes.get(focus.id)) : undefined)
     ?? forge.find(b => b.rank === 0 && b.row.owner === 'own')
     ?? forge.reduce<Built | undefined>((best, b) => (!best || b.at > best.at ? b : best), undefined);
   if (pick) pick.row.expanded = true;

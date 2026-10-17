@@ -10,7 +10,7 @@ import { summarizeUsage } from './usage-summary.js';
 import { PRICES_AS_OF } from '../lib/prices.js';
 import { freshFinished, type FinishedAgent } from './finished.js';
 import { decisionsSummary } from '../lib/decisions.js';
-import { buildActivities, leftOpen, parseJob, runRoleOf, withSlotAgents, type ActivityView, type LensJob, type Models, type Role } from './activities.js';
+import { buildActivities, leftOpen, linkHomes, parseJob, runRoleOf, withSlotAgents, type ActivityView, type LensJob, type Models, type Role } from './activities.js';
 import type { AgentLink } from './links.js';
 
 const CLIP = 80;
@@ -557,11 +557,14 @@ export function buildPanelModel(input: {
   const models: Models = Object.fromEntries(Object.entries(sess?.loops ?? {}).map(([id, l]) => [id, { ...(l.model ? { model: l.model } : {}), ...(l.effort ? { effort: l.effort } : {}) }]));
   let view: ActivityView = { activities: [], waiting: null, jobs: [], expanded: null };
   let failed = false;
+  // R3: each agent's one home, for the task rows and the slots alike.
+  let homes: Map<string, string> | undefined;
   try {
+    homes = linkHomes({ statuses, links, sessionId: input.sessionId, ownTasks: input.ownTasks ?? [], now });
     view = buildActivities({
       statuses, links, execution, superpowers: sp, todos: todosModel, titles, sessionId: input.sessionId, ownTasks: input.ownTasks ?? [], viewer,
       jobs: (input.forgeJobs ?? []).map(parseJob).filter((j): j is LensJob => j !== null), models, liveTypes, turnSince: a.turnSince ?? null,
-      wakeAt: input.wakeAt ?? null, sleepUntil: execution?.sleepUntil ?? null, focusAgent: input.focusAgent ?? null, now,
+      wakeAt: input.wakeAt ?? null, sleepUntil: execution?.sleepUntil ?? null, focusAgent: input.focusAgent ?? null, now, homes,
     });
   } catch { failed = true; }
   // The briefs of a task: counted in its folder by key; an older forge's alias alone keeps the count read for it.
@@ -569,7 +572,9 @@ export function buildPanelModel(input: {
     input.forgeBriefsBy?.[statusKey(st.task, st.project) ?? st.task] ?? (input.forgeStatuses === undefined ? input.forgeBriefs ?? null : null);
   const forge = failed ? newestForge(statuses, now, briefsOf, liveTypes)
     : view.expanded ? forgeOf(view.expanded, now, briefsOf(view.expanded), liveTypes) : null;
-  const withAgents = withSlotAgents(execution, links, models, viewer, now, statuses);
+  // A slot leaves out the agents its status's own row draws (in mode sessions a member's task is a row, not a slot).
+  const underRows = new Set(view.activities.filter(x => x.kind === 'forge' && !x.slot).flatMap(x => x.agents.map(g => g.id)));
+  const withAgents = withSlotAgents(execution, links, models, viewer, now, homes, underRows);
   // A subagent drawn under its task or its slot is not drawn again among the subagents.
   const shown = new Set(view.activities.filter(x => !x.slot && x.kind !== 'adhoc').flatMap(x => x.agents.map(g => g.id)));
   for (const s of withAgents?.slots ?? []) for (const g of s.agents ?? []) shown.add(g.id);

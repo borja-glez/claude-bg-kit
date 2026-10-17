@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildActivities, JOB_FILE_MAX, parseJob, runRoleOf, withSlotAgents, type ActivityInput } from '../src/lens/activities.js';
+import { buildActivities, JOB_FILE_MAX, linkHomes, parseJob, runRoleOf, withSlotAgents, type ActivityInput } from '../src/lens/activities.js';
 import { normalizeStatus, type ForgeStatus } from '../src/lib/forge-status.js';
 import type { AgentLink } from '../src/lens/links.js';
 import type { PanelModel } from '../src/lens/model.js';
@@ -191,13 +191,22 @@ describe('the same task id in two plans and loose (C5, spec deviation 2)', () =>
   const statuses = (newest: 'shop' | 'web' | null) => ['shop', 'web', null].map(project =>
     st('T001', { project, lastAt: ago(project === newest ? 1 : project === 'shop' ? 3 : 2) }));
   const links = [link('s1', 'T001', { project: 'shop' }), link('w1', 'T001', { project: 'web' }), link('n1', 'T001')];
-  // Every agent drawn under a row that is not a slot and under a slot, in one list.
-  const drawn = (newest: 'shop' | 'web' | null, over: Partial<ActivityInput> = {}) => {
-    const view = buildActivities(input({ statuses: statuses(newest), links, execution: SHOP, viewer: COORDINATOR, ...over }));
-    const slots = withSlotAgents(SHOP, links, {}, COORDINATOR, NOW, statuses(newest))!;
+  // The rows and the slots as buildPanelModel draws them, from one set of homes; every agent drawn, in one list.
+  const draw = (over: Partial<ActivityInput>, exec: NonNullable<PanelModel['execution']> = SHOP) => {
+    const i = input({ links, execution: exec, viewer: COORDINATOR, ...over });
+    const homes = linkHomes(i);
+    const view = buildActivities({ ...i, homes });
+    const underRows = new Set(view.activities.filter(a => a.kind === 'forge' && !a.slot).flatMap(a => a.agents.map(g => g.id)));
+    const slots = withSlotAgents(exec, i.links, {}, i.viewer, NOW, homes, underRows)!;
     const ids = [...view.activities.filter(a => !a.slot).flatMap(a => a.agents.map(g => g.id)), ...slots.slots.flatMap(s => (s.agents ?? []).map(g => g.id))];
-    return { view, slots, ids, row: (key: string) => view.activities.find(a => a.key === key)! };
+    // Where an agent is drawn: the keys of the rows that draw it, and 'slot' when the slot does.
+    const where = (id: string) => [
+      ...view.activities.filter(a => !a.slot && a.agents.some(g => g.id === id)).map(a => a.key),
+      ...(slots.slots[0].agents?.some(g => g.id === id) ? ['slot'] : []),
+    ];
+    return { view, slots, ids, where, row: (key: string) => view.activities.find(a => a.key === key)! };
   };
+  const drawn = (newest: 'shop' | 'web' | null, over: Partial<ActivityInput> = {}) => draw({ statuses: statuses(newest), ...over });
   it("another plan's task with the slot's id is a row of its own with its agent; the slot keeps its plan's agents", () => {
     const { view, slots, row } = drawn(null);
     expect(row('shop__T001')).toMatchObject({ slot: true, project: 'shop' });
@@ -207,16 +216,46 @@ describe('the same task id in two plans and loose (C5, spec deviation 2)', () =>
     // web's T001 can be expanded: the agent the person looks at is its own.
     expect(buildActivities(input({ statuses: statuses(null), links, execution: SHOP, viewer: COORDINATOR, focusAgent: 'w1' })).expanded).toMatchObject({ task: 'T001', project: 'web' });
   });
-  it('an agent without a project goes under the newest status of its id alone, a slot included; no agent is drawn twice', () => {
+  it('an agent without a project goes under the loose status of its id, whichever moved last; no agent is drawn twice (R3)', () => {
     for (const newest of ['shop', 'web', null] as const) {
-      const { view, slots, ids } = drawn(newest);
+      const { ids, where } = drawn(newest);
       expect(ids.sort(), String(newest)).toEqual(['n1', 's1', 'w1']);
-      const where = [
-        ...view.activities.filter(a => !a.slot && a.agents.some(g => g.id === 'n1')).map(a => a.key),
-        ...(slots.slots[0].agents?.some(g => g.id === 'n1') ? ['slot'] : []),
-      ];
-      expect(where, String(newest)).toEqual([newest === 'shop' ? 'slot' : newest === 'web' ? 'web__T001' : 'T001']);
+      expect(where('n1'), String(newest)).toEqual(['T001']);
     }
+  });
+  it("without a loose status, under the newest of its id this session has in progress, a slot included; else the newest (R3)", () => {
+    const two = (newest: 'shop' | 'web', web: Record<string, unknown> = {}) => draw({ links: [link('n1', 'T001')], statuses: [
+      st('T001', { project: 'shop', lastAt: ago(newest === 'shop' ? 1 : 3) }), st('T001', { project: 'web', lastAt: ago(newest === 'web' ? 1 : 3), ...web }),
+    ] });
+    expect(two('shop').where('n1')).toEqual(['slot']);
+    expect(two('web').where('n1')).toEqual(['web__T001']);
+    // Another session's status that moved last, or a done one, never takes this session's agent from its own task.
+    expect(two('web', { session: 'other' }).where('n1')).toEqual(['slot']);
+    expect(two('web', { doneAt: ago(1) }).where('n1')).toEqual(['slot']);
+  });
+  it("an own loose task keeps its agent when another session's same id moved last, and is the one expanded for it (P1)", () => {
+    const statuses = [st('T001', { lastAt: ago(5) }), st('T001', { project: 'web', session: 'other', lastAt: ago(1) })];
+    const p1 = draw({ statuses, links: [link('n1', 'T001')], focusAgent: 'n1' }, EXEC);
+    expect(p1.where('n1')).toEqual(['T001']);
+    expect(p1.view.expanded).toMatchObject({ task: 'T001', project: null });
+  });
+  it('an own loose task in progress keeps its agent when a done status of the same id moved later (P2)', () => {
+    const statuses = [st('T001', { lastAt: ago(20) }), st('T001', { project: 'shop', doneAt: ago(2), lastAt: ago(2) })];
+    expect(draw({ statuses, links: [link('n1', 'T001')] }, EXEC).where('n1')).toEqual(['T001']);
+  });
+  it("forge's Medium form: a loose T001 of this session, its agent linked by .forge/work/T001, another session's shop slot T001 moving last: the agent stays on the loose row (P6)", () => {
+    const OTHER = { role: 'other-live' as const, coordinator: false, runId: 'r1' };
+    for (const aLast of [true, false]) {
+      const statuses = [st('T001', { project: 'shop', session: 'A', lastAt: ago(aLast ? 1 : 3) }), st('T001', { session: 'B', lastAt: ago(aLast ? 3 : 1) })];
+      const p6 = draw({ statuses, links: [link('b1', 'T001', { via: 'work-path' })], sessionId: 'B', viewer: OTHER });
+      expect(p6.where('b1'), String(aLast)).toEqual(['T001']);
+      expect(p6.slots.slots[0].agents, String(aLast)).toEqual([]);
+    }
+  });
+  it("in mode sessions a member's agent is drawn under its task's row, not under the slot too (P4)", () => {
+    const SESSIONS: NonNullable<PanelModel['execution']> = { ...SHOP, mode: 'sessions', slots: [{ ...SHOP.slots[0], mode: 'sessions' }] };
+    const p4 = draw({ statuses: [st('T001', { project: 'shop' })], links: [link('s1', 'T001', { project: 'shop' })] }, SESSIONS);
+    expect(p4.where('s1')).toEqual(['shop__T001']);
   });
   it("a row's title and its job follow its key: the title of its own plan, the job on the newest status of its id", () => {
     const job = parseJob(JSON.stringify({ name: 'review-prep-T001-1-4', cmd: 'review-prep', task: 'T001-1', pid: 4, startedAt: ago(1), out: 'x', session: 'me' }))!;

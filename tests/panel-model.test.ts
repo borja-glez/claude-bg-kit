@@ -745,6 +745,17 @@ describe('buildPanelModel: the activities (C5, E-06, E-16)', () => {
     const fine = buildPanelModel({ band: none, activity: act(), now, sessionId: 'me', forgeStatuses: [doc('T1', { taskStartedAt: new Date(now - 600_000).toISOString(), stageSince: new Date(now - 60_000).toISOString() })] });
     expect(fine.forge?.timing).toMatchObject({ taskSeconds: 600 });
   });
+  it("in mode sessions a member's agent is drawn under its task's row and not under the slot too (R3, P4)", () => {
+    const at = (min: number) => new Date(now - min * 60_000).toISOString();
+    const exec = JSON.stringify({ runId: 'r1', kind: 'plan', mode: 'sessions', parallel: 2, project: 'shop', base: 'main', branch: 'forge/run-shop', mergeOnFinish: false,
+      coordinator: 'main', hookSession: 'coord', active: true, stopReason: null, stallReason: null, startedAt: at(60), lastStepAt: at(1), lastBlockStep: null, sleepUntil: null,
+      tasks: { T2: { status: 'running', stage: 'review', round: 1, worktree: '/w', branch: 'task/T2', executor: 'sessions', attempts: 0, agent: null, startedAt: at(30), updatedAt: at(1), stageSince: at(2), detail: null } } });
+    const m = buildPanelModel({ band: none, activity: act(), now, sessionId: 'me', forgeExecution: exec, forgeExecTasks: {}, forgeLive: {},
+      forgeStatuses: [doc('T2', { project: 'shop' })], links: [{ ...a1, project: 'shop' }] });
+    expect(m.execution?.slots.map(s => s.task)).toEqual(['T2']);
+    expect(m.activities.find(x => x.key === 'shop__T2')).toMatchObject({ slot: false, agents: [{ id: 'a1' }] });
+    expect(m.execution?.slots[0].agents).toEqual([]);
+  });
   it('the forge section never carries who wrote the last event, its run nor its project (C5)', () => {
     const m = buildPanelModel({ band: none, activity: act(), now, sessionId: 'me', forgeStatuses: [doc('T2', { runId: 'r1', project: 'shop' })] });
     expect(m.activities[0]).toMatchObject({ key: 'shop__T2', project: 'shop' });
