@@ -892,6 +892,20 @@ describe('design commands', () => {
       expect(next()).toMatchObject({ round: 3, ...three });
       expect(next('--verify')).toMatchObject({ round: 3, ...three });
     });
+    it('a removed section counts toward more than half changed, in critique-next and in design-changed (carry 2)', () => {
+      crit(1, 1);
+      edit('La versión 0.1 cubre pedidos', 'La versión 0.1 cubre pedidos y devoluciones');
+      edit('\n## Riesgos\n\nLa migración de reembolsos no tiene rollback.\n', '\n');
+      // One changed and one removed of the three sections left: more than half, a full review.
+      expect(next()).toMatchObject({ round: 2, scope: 'full', changed: ['alcance'], removed: ['riesgos'], review: ['alcance', 'fuera-de-alcance', 'arquitectura'] });
+      expect(JSON.parse(run(['design-changed', rel], io).stdout)).toEqual({ since: 1, changed: ['alcance'], removed: ['riesgos'], scope: 'full' });
+    });
+    it('an old version in the history that today\'s schema refuses is still compared by its body (carry 2)', () => {
+      crit(1, 1);
+      writeFileSync(path.join(hist(), 'v1.md'), readFileSync(path.join(hist(), 'v1.md'), 'utf8').replace('project: demo-shop\n', 'status: published\n'));
+      edit('no tiene rollback', 'tiene rollback parcial');
+      expect(next()).toMatchObject({ round: 2, since: 1, scope: 'changed', changed: ['riesgos'], review: ['riesgos'] });
+    });
     it('with nothing changed since the last critique there is nothing to review; --full reviews everything anyway', () => {
       crit(1, 1);
       expect(next()).toMatchObject({ round: 2, scope: 'changed', review: [] });

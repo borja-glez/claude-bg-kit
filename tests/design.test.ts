@@ -146,6 +146,47 @@ describe('designBody (K3-03)', () => {
   });
 });
 
+describe('the heading parser on hostile lines (carry 2)', () => {
+  // A regex with competing whitespace runs was quadratic here (1.1 s at 40 000 spaces): a 1 MB line would hang the CLI,
+  // the band and the page. The vitest timeout catches a regression; the assertions pin what is parsed.
+  it('reads a 1 MB line with long whitespace runs in linear time, as the same heading as before', () => {
+    const n = 1_000_000;
+    const spaces = ' '.repeat(n);
+    expect(sectionsOf(`## x${spaces}y\n\ntexto`)).toEqual([{ level: 2, heading: `x${spaces}y`, slug: 'x-y', text: 'texto' }]);
+    expect(sectionsOf(`## x${spaces}`)[0].heading).toBe('x');
+    expect(sectionsOf(`###${spaces}x${spaces}##${spaces}`)[0]).toMatchObject({ level: 3, heading: 'x' });
+    expect(sectionsOf(`## ${'#'.repeat(n)}x`)[0].heading).toBe(`${'#'.repeat(n)}x`);
+    expect(sectionsOf(`## x${'\t'.repeat(n)}#${spaces}y`)[0].heading).toBe(`x${'\t'.repeat(n)}#${spaces}y`);
+    expect(sectionsOf(`#${spaces}x`)).toEqual([]);
+    expect(changedSections(`## a${spaces}b\n\nuno`, `## a${spaces}b\n\ndos`)).toEqual({ changed: ['a-b'], removed: [] });
+  });
+  it('a heading is ## or ### and whitespace, then its text, without a closing run of # that follows whitespace', () => {
+    const ls = String.fromCharCode(0x2028);
+    const cases: [string, string | null][] = [
+      ['## Riesgos', 'Riesgos'], ['###  Fuera de alcance  ', 'Fuera de alcance'], ['## Riesgos ##', 'Riesgos'], ['## C# y F#', 'C# y F#'],
+      ['## a # #', 'a #'], ['## #', '#'], ['### ##', '##'], ['## a #b', 'a #b'], [`## a${ls}`, 'a'], [`## a${ls}b`, null], ['## a\rb', null],
+      ['##x', null], ['#### x', null], ['# x', null], ['##', null], ['## ', null], ['##   ', null], ['##\t#', '#'],
+    ];
+    for (const [text, heading] of cases) expect(sectionsOf(text)[0]?.heading ?? null, JSON.stringify(text)).toBe(heading);
+  });
+});
+
+describe('changedSections: line endings, duplicates and what is not a change (carry 2)', () => {
+  it('CRLF and LF bodies of the same text are no change', () => {
+    const body = designBody(fixture);
+    expect(changedSections(body, body.replace(/\n/g, '\r\n'))).toEqual({ changed: [], removed: [] });
+  });
+  it('removing the first of two equal headings reads as the first changed and the second removed', () => {
+    const two = '## A\n\nuno\n\n## A\n\ndos\n';
+    expect(sectionsOf(two).map(s => s.slug)).toEqual(['a', 'a-2']);
+    expect(changedSections(two, '## A\n\ndos\n')).toEqual({ changed: ['a'], removed: ['a-2'] });
+  });
+  it('reordering sections or changing a heading level with the same text is no change', () => {
+    expect(changedSections('## A\n\nuno\n\n## B\n\ndos\n', '## B\n\ndos\n\n## A\n\nuno\n')).toEqual({ changed: [], removed: [] });
+    expect(changedSections('## A\n\nuno\n', '### A\n\nuno\n')).toEqual({ changed: [], removed: [] });
+  });
+});
+
 describe('designStatus (final review M3)', () => {
   it('reads the status of any front matter without validating it; none, junk or no front matter is null', () => {
     expect(designStatus(fixture)).toBeNull();

@@ -104,6 +104,25 @@ export function sectionsOf(body: string): Section[] {
   return parseSections(body).sections;
 }
 
+// A carriage return and the separators U+2028 and U+2029, from their code points so the source never holds them.
+const LINE_BREAK = new RegExp(`[\\r${String.fromCharCode(0x2028, 0x2029)}]`);
+
+/**
+ * An ATX heading of level 2 or 3: `##` or `###`, whitespace, its text, and an optional closing run of `#` that follows
+ * whitespace. Carry 2: read with a trim and a scan from the end, never a regex whose whitespace runs compete (that one
+ * was quadratic: a 1 MB line would hang every reader). A heading without text, or whose text holds a line separator, is
+ * none.
+ */
+function headingOf(line: string): { level: 2 | 3; text: string } | null {
+  const level = line.startsWith('###') ? 3 : line.startsWith('##') ? 2 : 0;
+  if (!level || !/\s/.test(line.charAt(level))) return null;
+  let text = line.slice(level).trim();
+  let end = text.length;
+  while (end > 0 && text.charCodeAt(end - 1) === 35) end--;
+  if (end > 0 && end < text.length && /\s/.test(text.charAt(end - 1))) text = text.slice(0, end).trimEnd();
+  return text && !LINE_BREAK.test(text) ? { level, text } : null;
+}
+
 function parseSections(body: string): { intro: string; sections: Section[] } {
   const out: Section[] = [];
   const seen = new Set<string>();
@@ -113,7 +132,7 @@ function parseSections(body: string): { intro: string; sections: Section[] } {
   const introLines: string[] = [];
   const flush = () => { if (cur) { cur.text = lines.join('\n').trim(); out.push(cur); } lines.length = 0; };
   for (const line of body.split(/\r?\n/)) {
-    const isHeading = !fence && /^(#{2,3})\s+(.+?)(?:\s+#+)?\s*$/.exec(line);
+    const isHeading = fence ? null : headingOf(line);
     if (fence) {
       const close = /^\s*(`{3,}|~{3,})\s*$/.exec(line);
       if (close && close[1][0] === fence[0] && close[1].length >= fence.length) fence = null;
@@ -123,11 +142,11 @@ function parseSections(body: string): { intro: string; sections: Section[] } {
     }
     if (isHeading) {
       flush();
-      const base = slugify(isHeading[2]);
+      const base = slugify(isHeading.text);
       let slug = base;
       for (let n = 2; seen.has(slug); n++) slug = nthSlug(base, n);
       seen.add(slug);
-      cur = { level: isHeading[1].length as 2 | 3, heading: isHeading[2], slug, text: '' };
+      cur = { level: isHeading.level, heading: isHeading.text, slug, text: '' };
     } else if (cur) {
       lines.push(line);
     } else {
@@ -147,7 +166,8 @@ const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
 /**
  * The sections of `next` that are new or changed against `prev` (`_intro` is the text before the first heading), and
  * (K3-14) the slugs of `prev` that `next` no longer has, in the order of `prev`. Both texts are bodies, without front
- * matter (K3-03: pass them through designBody).
+ * matter (K3-03: pass them through designBody). A section is its slug and its text with whitespace collapsed, so line
+ * endings, reordered sections and a heading moved from `##` to `###` with the same text are no change.
  */
 export function changedSections(prev: string, next: string): { changed: string[]; removed: string[] } {
   const p = parseSections(prev);
