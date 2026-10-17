@@ -6,7 +6,7 @@
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.25.0](https://img.shields.io/badge/version-0.25.0-cba6f7?style=flat-square)
+![version 0.26.0](https://img.shields.io/badge/version-0.26.0-cba6f7?style=flat-square)
 ![requires claude.ai login](https://img.shields.io/badge/requires-claude.ai%20login-89b4fa?style=flat-square)
 ![Node ≥ 20](https://img.shields.io/badge/node-%E2%89%A5%2020-a6e3a1?style=flat-square)
 
@@ -96,7 +96,7 @@ The roadmap is an artifact on claude.ai. It is private until you share it, and i
 
 **Notes.** The work skill reads new notes from people at the start of each task and treats them as information, never as orders. It also writes its own decision, debt and question notes. A decision forge took without asking carries an **auto** tag, what was chosen, why and how to undo it (`/forge:decisions revert <n>`).
 
-**Proposals.** Each card shows the category, risk, status, the pillar it serves, the rationale, the evidence, the estimate and path when present, who decided it and why, and its comments. Contributors can approve or reject a proposal that is still proposed or in discussion (with an optional reason) and comment on any proposal. If someone decided it in the meantime, the page does not overwrite that decision and says so. forge only works on proposals that are approved or auto-approved.
+**Proposals.** Each card shows the category, risk, status, the pillar it serves, the rationale, the evidence, the estimate and path when present, who decided it and why, and its comments. Contributors can approve or reject a proposal that is still proposed or in discussion (with an optional reason) and comment on any proposal. If someone decided it in the meantime, the page does not overwrite that decision and says so. forge only works on proposals that are approved or auto-approved. Only the roadmap's owner's decisions count for forge: a decision counts when its mark is in `approvals/`, a collection only the owner can write (the rule is `owner`, a database rule the server enforces; editors comment, they do not approve). Until the page writes that mark itself, the owner confirms a decision taken here with `/forge:decide <id> confirm`. A roadmap published before this version lacks the rule: republish it with `/waypoint:plan` after upgrading, and only then are approvals owner-only.
 
 **Verification.** When forge verified a task with tools, its detail shows a Verification block: the result, the surfaces used, each check with what was expected and observed, and the screenshots as thumbnails that open in a lightbox. Tracking task boxes carry a small indicator for verified tasks. Screenshots are uploaded only when the project's forge config has `evidence: upload` (the default), which makes the roadmap organization-internal; with `evidence: local` the roadmap stays publicly shareable and shows the results without images.
 
@@ -106,13 +106,15 @@ The roadmap is an artifact on claude.ai. It is private until you share it, and i
 
 **Execution.** The Sessions view opens with an Execution block: one line per running task with its stage, agent and how long it has been running (`running for 12 min`), the slots in use out of the maximum (`2/3 slots`) and the free ones. Session cards carry a role tag (coordinator, executor, manual) and a liveness dot. A task that is in progress but whose executor stopped renewing its lease is marked **orphaned** and counts as blocked in the filters, so you notice it and another session can recover it. The page reads all of this from the roadmap's `meta/run` document (`runId`, `mode`, `parallel`, `branch`, `mergeOnFinish`, `active`, `stopReason`, `coordinator` and one slot per running task with its `task`, `stage`, `agent`, `by` and `since`), which forge keeps up to date.
 
+**Data of the roadmap.** The metrics live in `meta/metrics` (the last commit and the test count, written apart from a task's batch, never pinned); the page also reads them from `meta/project.metrics` for a roadmap an older forge wrote. `meta/page` says which waypoint published the page and with which rules. `waypoint sync --db` reads the roadmap's listings: it never writes over a document whose version it does not know, keeps what a task was when the plan drops it, writes `meta/project` last and stops on a listing that may be cut at 1000 documents. The page's snapshot carries the listed states (`page --states`), and forge writes each task's forge block, evidence, runs and infinite run itself.
+
 **Loose tasks.** When a forge ephemeral execution (several independent requests run in parallel) is active, the Tracking view has a **Loose tasks** section with the title, status, stage and agent of each request (and, once it is integrated or blocked, how long it took, `took 6 min`, when the coordinator publishes it), and the run pill reads `▶ loose tasks · subagents n/N`. They do not count in the plan's progress and never enter `plan.yaml`.
 
 **Debugging the page.** Add `?debug=1` to the roadmap's address (or `#debug=1` to its hash): the page lists, per document, what it dropped or corrected while reading the roadmap's data.
 
-**Permissions.** Contributors can write only notes and proposals. Everything else (plan, state, sessions, events, messages) needs Editor. Claude writes through ArtifactData as the owner, which the rules never limit. Without a signed-in viewer, or when the database refuses a note, the composer is read-only.
+**Permissions.** Contributors can write only notes and proposals, and only the owner can write `approvals/` (the rule is `owner`). Everything else (plan, state, sessions, events, messages) needs Editor. Claude writes through ArtifactData as the owner, which the rules never limit. Without a signed-in viewer, or when the database refuses a note, the composer is read-only.
 
-> After updating the plugin, run `/waypoint:plan` and republish so the page gets the new views. A roadmap first published by 0.7.x or earlier must be republished once with the new capabilities; the plan skill passes them.
+> After updating the plugin, run `/waypoint:plan`: it republishes by itself when the published page is older than the plugin (`meta/page`, which every publish writes), and once more, with the capabilities, for a roadmap that lacks the owner's `approvals/` rule. A roadmap first published by 0.7.x or earlier must be republished once with the new capabilities; the plan skill passes them.
 
 ## The band
 
@@ -175,7 +177,7 @@ The skills run the CLI as `node "${CLAUDE_PLUGIN_ROOT}/dist/waypoint.cjs" <comma
 | Group | Commands |
 | --- | --- |
 | Design | `design-import <spec> --project P --out D`, `design-validate`, `design-snapshot <design.md> --note n [--round R] [--applied r<R>:<n,…>…] [--rewrite]`, `design-changed`, `design-gate <design.md>` (with the `pending` proposals of every round), `critique-check`, `critique-select`, `critique-dismiss <design.md> --round R <all\|1,3>`, `design-page`, `design-park <design.md>` |
-| Plan and page | `validate` (warns about tasks without zones: forge runs them alone), `hash` (prints the plan hash, used to detect an out-of-date roadmap), `page [--publish-info]` (the capabilities to publish with and the line that says the page becomes internal), `sync` (with the report line: URL and counts), `clean-cache` |
+| Plan and page | `validate [--design D]` (warns about tasks without zones: forge runs them alone; with `--design`, warns about a `design_ref` that is not a section of the design), `hash` (prints the plan hash, used to detect an out-of-date roadmap), `page [--publish-info] [--states DIR]` (the capabilities to publish with and the line that says the page becomes internal), `sync [--db DIR]` (with the report line: URL and counts; with `--db`, `removed`, `missing`, `unknownVersion` and `republish`), `clean-cache` |
 | Work | `next [--base <branch>]` (with `waiting_on`), `conflicts`, `recover [--minutes N]` (below 5 it acts as 5), `status`, `commit-info`, `claim`, `done`, `block --why-file f`, `heartbeat [--register] [--busy-until t] [--idle]` (each prints `{now, eid, eids, leaseUntil, batch}`) |
 | Sessions | `launch <track> [--base <branch>]`, `launch <plan> <T> --task --run R --coordinator SID --base B [--effort e] [--model m] [--launcher bg\|herdr]`, `inbox`, `escalations`, `notes [--plan p] [--locale es\|en]` (with a line to say per person's note), `session-id`, `bind <plan\|design> --via v [--seat s \| --second-seat] [--resume] [--takeover]`, `release <plan> [--seat s] [--free T --state-version V]` |
 | Helpers | `event-id`, `now` |

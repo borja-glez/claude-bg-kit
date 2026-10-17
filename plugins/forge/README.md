@@ -7,8 +7,8 @@ Triage by size, the right model for each role, your own tools first, independent
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.21.1](https://img.shields.io/badge/version-0.21.1-fab387?style=flat-square)
-![depends on waypoint ^0.25.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.25.0-cba6f7?style=flat-square)
+![version 0.22.0](https://img.shields.io/badge/version-0.22.0-fab387?style=flat-square)
+![depends on waypoint ^0.26.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.26.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -49,7 +49,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depends on [waypoint](../waypoint/README.md) ^0.25.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
+forge depends on [waypoint](../waypoint/README.md) ^0.26.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
 
 ## Usage
 
@@ -217,7 +217,7 @@ Sequential execution is not a third mode: it is subagents with N = 1.
 4. when `waypoint next` finds no task, or every 3 cycles, spawns `forge-scout` to write new proposals (`proposals add`, `proposals policy`);
 5. records the cycle with `forge cycle --progress yes|no`.
 
-**Policy.** Only low-risk, verifiable proposals are auto-approved: a tests fix, small quality debt, perf with a benchmark in the evidence, or security with a test in the evidence. Features, dependencies, architecture and any medium or high risk wait for you (on the roadmap, in lens or with `/forge:decide`). A proposal similar to a rejected one is refused unless its evidence is new. One similar to an open proposal is always refused; a v2 names the proposal it revises with `--revises`. **Nothing is merged into main or pushed without your authorization.**
+**Policy.** Only low-risk, verifiable proposals are auto-approved: a tests fix that names a test file, small quality debt, perf with a benchmark in the evidence, or security with a test in the evidence; never one that proposes deleting or migrating data, nor one whose path or words touch a sensitive zone (auth, data, public API, dependencies, CI). Features, dependencies, architecture and any medium or high risk wait for you (on the roadmap, in lens or with `/forge:decide`). Only the roadmap owner's approvals turn into tasks ([Proposals](#proposals)). A proposal similar to a rejected one is refused unless its evidence is new. One similar to an open proposal is always refused; a v2 names the proposal it revises with `--revises`. **Nothing is merged into main or pushed without your authorization.**
 
 **Stop conditions:**
 
@@ -248,9 +248,11 @@ A proposal is a document with these fields:
 
 Only `proposed` and `discussing` proposals can be decided, and only by you (on the roadmap page or with `/forge:decide`). Sessions only create proposals and comment on them. A local mirror lives in `.forge/proposals/<id>.json`; the roadmap's database wins for the decided fields (`proposals pull`).
 
+**Only the owner approves.** A decision counts for forge only with the roadmap owner's mark, `approvals/<id>` (`{status, decidedAt, by, digest}`, where `digest` is a SHA-256 of the proposal's id and decided fields): a collection only the owner can write (`write: owner`, a database rule the server enforces; editors comment, they do not approve). `/forge:decide` writes the decision and its mark in one batch; `proposals pull --approvals --page` copies the marks to `.forge/approvals/`; `proposals to-task`, the infinite run's auto-approvals and its stop conditions count only proposals whose mark agrees with them, and `proposals list` and `infinite status` count the others as `unowned`. A mark counts only if this checkout's latest decision on the proposal matches it, and `to-task` refuses a proposal already turned into a task. A decision taken before this version, or on the roadmap page before it writes the mark, is confirmed by the owner with `/forge:decide <id> confirm`. A roadmap published before waypoint 0.26.0 lacks the rule: until `/waypoint:plan` republishes it (do it after upgrading), no mark counts.
+
 `/forge:decide` works from any session, even without the roadmap. In that case only the local copy and the ledger change, and the next `proposals pull` replaces the local decision with the roadmap's state. With `--from <db doc json>`, the CLI checks the decision against that document and records nothing. After the roadmap update succeeds, `/forge:decide` stores the updated document with `proposals save --from`, so a failed or refused roadmap write never leaves a local decision behind.
 
-While forge works a waypoint task, it also writes a small `forge` block (path, phase, agent, validators, verdict, round) to the task's `state/T` document, which the roadmap and lens show.
+**On the roadmap.** forge builds every roadmap write itself, and the skills only pin them (`if_version`). `roadmap-doc` writes the task's `state/T` update: a `forge` block of at most 4 KB (brief, stage, review rounds with their findings by severity and reviewers, the accepted round, validators with time and cache, verification, stage times, integration and deferred findings), its `evidence` by round and its `exec`; `swarm task`, `report`, `step`, `integrate` and `merge` print the same `publish`. `swarm status` prints `meta/run`; `infinite start`, `cycle` and `infinite status` print `meta/infinite` with the session that drives the run and its lease; `roadmap-run` writes `runs/<runId>`, the summary of a run once it ends, with the executor sessions to remove; `decision add --session` prints the decision note and closes the question it answers.
 
 ## Verification
 
@@ -412,7 +414,7 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 - `review-close --task <id>-<n> --dir d --path medium|large [--locale es|en] [--out-of-model F2,F5] [--defer F3]` - close the review: check every spawned reviewer left its file, and an express review its validators file (exit 3 and `missing` if not), give each finding its id in `findings-index-<n>.json`, weigh the verdict, record minor and `deferred` findings as rulings, write `findings-<n>-<round>.json` and print `{action, score, next, last, implementer, reviews, findings, deferred, ask, handover, revert, invalid, incomplete}` (plus `shadow`, `shadowSkipped` and `shadowPending`). `handover` is the note for a new implementer (`handover-<n>-<round>.md`), `revert` what undoes a redo's attempt: `args` for git, or, when the attempt merged the run branch (a merge in its range), `steps` that restore BASE's tree in one commit (never `git revert -m 1`, which would drop the run branch's work). `--out-of-model` closes the same review again with those ids as minor findings out of the threat model and `--defer` leaves them as residual `architecture`; both are kept in `overrides.json` for the brief, and both refuse an id that is neither in this review nor left open by the previous one (exit 2, nothing written). `deferred` lists every finding that does not block with its `residual`, those out of the threat model included.
 - `shadow start [--tasks N] [--reset] | stop | report [--locale es|en] | collect --task <id>-<n> --dir <review dir>` - the shadow trial of the reviewers at high against xhigh twins (see [Agents](#agents)); starting again keeps the cases collected, `--reset` clears them; `collect` saves the twins that came back after `review-close`.
 - `log --kind k [--task id] [--data json | --data-file f]` - append to the ledger. A `triage` entry that raises the path may carry a `why`, which the next `announce` names.
-- `decision add --data-file f [--task id]` - record a decision forge took (strict JSON: `point`, `what`, `chosen`, `why`, `by`, optional `alternatives`, `weight`, `revert`, `undo`, `safePath`, `revertOf`, `task`, `runId`); prints it with its number `n` and keeps `.forge/decisions.json`, the summary lens and the band read. During an active execution it carries the run's id.
+- `decision add --data-file f [--task id] [--session SID]` - record a decision forge took (strict JSON: `point`, `what`, `chosen`, `why`, `by`, optional `alternatives`, `weight`, `revert`, `undo`, `safePath`, `revertOf`, `task`, `runId`); prints it with its number `n` and keeps `.forge/decisions.json`, the summary lens and the band read. During an active execution it carries the run's id. With `--session`, it also prints `publish`: the decision note for the roadmap and, when the file says which question note it `resolves`, the update that closes it.
 - `decision list [--task id [--project P]] [--run id] [--since iso] [--all] [--auto]` - the decisions, numbered; with no filter, those of the latest scope. `--task` is that task of its project (`--project`, else the one the ledger gives it now), never another plan's task of the same id. `--auto` leaves out your own answers.
 - `decision show <n>` - one decision, with its `undo`.
 - `decision md --scope s [--out f] [--locale es|en]` - write the automatic decisions of a scope to `docs/forge/decisions/<scope>.md` (or `--out`); writes nothing when there are none.
@@ -430,6 +432,8 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 - `waypoint-cli` - print the absolute path of waypoint's `waypoint.cjs` (found next to this plugin, highest version); exits with 2 when it is not found.
 - `tree snapshot --task id [--cwd d] [--force]` / `tree check --task id --base sha [--cwd d]` - record the tree when a task starts (the first snapshot is kept) and, before closing it, list the files the task's commits hold (`task`) apart from the new (`appeared`) and modified (`changed`) files nobody in the task created: those are the person's, and the session never deletes or reverts them.
 - `config get <key>` - the current value of a `.forge/config.yaml` key of the main checkout, defaults applied (`config get evidence` prints `upload` or `local`); read right before acting, since the person can change it while a task runs.
+- `roadmap-doc <T> [--project p] [--plan plan.yaml] [--assets uploads.json] [--out file]` - write the task's `state/T` update (forge block v2, evidence, exec) to a file and print its `write`; `--assets` takes the screenshots uploaded to the roadmap (`[{path, id, url}]`) and keeps them for later updates. Exit 2 when forge knows nothing of the task, 3 when the block does not fit in 4 KB.
+- `roadmap-run --run <runId> | --task <id> [--project p] [--session SID] [--out file]` - write `runs/<runId>`, the summary of an ended run (or of a Small, Medium or Large task closed outside one), and print its `write` and `cleanup`, the run's executor sessions to delete.
 
 </details>
 
@@ -437,11 +441,11 @@ Run as `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <command>`.
 <summary><b>Proposals</b></summary>
 
 - `proposals add --file f [--author a]` - create a local proposal (id `p` + timestamp + 4 characters); `--author` wins over an `author` in the file.
-- `proposals list [--status s]`
-- `proposals decide <id> approve|reject|discuss [--reason-file f] [--by who] [--reopen]` - decide the local copy, log it and print the `write` payload. With `--from <db doc json>` it only checks that document and prints the `write`. A proposal already decided is refused (it says who and when); `--reopen`, used only after the person confirms, changes an approval or a rejection and keeps the earlier decision in its `history` (never a `done` proposal or one already turned into a task).
+- `proposals list [--status s]` - the proposals, newest first, and `unowned`: approved ones without the owner's mark.
+- `proposals decide <id> approve|reject|discuss [--reason-file f] [--by who] [--reopen]` - decide the local copy, log it and print the `write` payload. With `--from <db doc json>` it only checks that document and prints the `write`. A proposal already decided is refused (it says who and when); `--reopen`, used only after the person confirms, changes an approval or a rejection and keeps the earlier decision in its `history` (never a `done` proposal or one already turned into a task). It also prints `approval`, the owner's mark for `approvals/<id>` (without `--from` it keeps it locally); `confirm` prints only the mark of the decision the proposal already has. `--reopen` also prints the deletion of the mark.
 - `proposals save --from <db doc json> [--id id]` - store a roadmap document as the local mirror, and log the decision if its status changed.
-- `proposals pull --dir d` - refresh the local mirror from the roadmap's `proposals` documents.
-- `proposals policy`, `proposals to-task` - auto-approval and turning approved proposals into plan tasks.
+- `proposals pull --dir d [--approvals d --page f]` - refresh the local mirror from the roadmap's `proposals` documents; with `--approvals` (and `--page`, the roadmap's `meta/page`), also the owner's marks, removing the local ones the roadmap does not have (none counts while the page lacks the owner's rule).
+- `proposals policy`, `proposals to-task` - auto-approval (it prints the mark, `approval`) and turning the owner's approved proposals into plan tasks (exit 2 without the mark).
 
 </details>
 

@@ -13,6 +13,20 @@ elsewhere and are reconstructed from their READMEs.
 
 ## waypoint
 
+### 0.26.0 — 2026-10-17
+
+#### Added
+- Only the roadmap's owner approves proposals: the roadmap declares `approvals/` writable by its owner alone (a rule the server enforces), and `page --publish-info` prints `rules: 2` and the `meta/page` write (the page's version and rules) the plan skill sends after each publish. A roadmap published before this version lacks the rule: republish it with `/waypoint:plan` after upgrading, and only then are approvals owner-only (`sync` asks for it when `meta/page.rules` is below the page's rules version).
+- `sync --db` reads the roadmap's listings: it never sets a task document whose version `known.json` lacks (`unknownVersion`; exit 2 when it has to write it), stops on a listing of 1000 documents or on an incomplete one, and prints `removed`, `missing` and `republish` (the published page is older than the plugin or its rules are older, so the plan skill republishes it).
+- `plan.yaml` gains `design_version`, `tasks[].design_ref`, `phases[].goal` and `versions[].target`; the roadmap's `meta/project` gains `links` (the design and its version) and `waypointVersion`; `validate --design` warns about a `design_ref` that is not a section of the design.
+- `page --states` puts the listed task states in the page's snapshot, with the version that built it.
+- The page reads forge's v2 data: the task's forge block (rounds with findings, validators with time and cache, verification, stages, integration, deferred findings) and its evidence by round, `blockedReason`, the start, last step, stall reason and closing of a run, the coordinator of the infinite run, `answeredByNote`, and the metrics in `meta/metrics`; `?debug=1` lists what it drops.
+
+#### Changed
+- `waypoint done` prints the metrics apart (`metrics`, an unpinned update of `meta/metrics`) instead of a pinned `meta/project` write in the task's batch, and no longer needs `--meta-version`.
+- A task the plan drops keeps what it was (`prevStatus`, `doneAt`, `commits`) and a done one comes back done; `meta/project` is written in the last batch of a sync.
+- The skills send the writes the CLI prints and pin them with the newest version they listed; that rule lives in one reference per plugin.
+
 ### 0.25.0 — 2026-10-17
 
 #### Added
@@ -257,6 +271,21 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.22.0 — 2026-10-17
+
+#### Added
+- `FORGE roadmap-doc <T>` writes the task's `state/T` update, built by the CLI: a forge block of at most 4 KB (brief, stage, review rounds with their findings and reviewers, the accepted round, validators with time and cache, verification, stage times, integration, deferred findings), the evidence of every check by round (`--assets` adds the uploaded screenshots and keeps them) and its `exec`. `swarm task`, `report`, `step`, `integrate` and `merge` print the same `publish`, `swarm task` and `report` take `--claim`, and `swarm status` prints `meta/run`.
+- `FORGE roadmap-run --run <id> | --task <id>` writes `runs/<runId>`, the summary of a run once it ends (or of a task closed outside one), and `cleanup`, the executor sessions to remove; `swarm close` prints it.
+- `infinite start`, `cycle` and `infinite status` print `meta/infinite` with its coordinator (seat, Claude's id and lease).
+- `swarm integrate` keeps the integrated `sha` and prints `meta/metrics` apart; the roadmap knows when a task is done but not merged yet.
+- `decision add --session <SID>` prints the decision note and, with `resolves`, the update that closes the question it answers.
+- Only the roadmap's owner approves: `proposals decide` and `policy` print the owner's mark (`approval`: status, `decidedAt`, `by` and a SHA-256 `digest` of the proposal's id and decided fields, so a proposal edited after its approval is no longer approved), `decide confirm` marks an earlier decision, `proposals pull --approvals --page` copies the marks, and `to-task`, the infinite run and `proposals list` (`unowned`) count only proposals whose mark agrees with them. `to-task` refuses a spent proposal (one already turned into a task). `reopen` prints the deletion of the remote mark, and a mark counts only if this checkout's latest decision for the proposal matches it. A roadmap published before waypoint 0.26.0 lacks the owner's rule: republish it with `/waypoint:plan` after upgrading, and until then no mark counts.
+
+#### Changed
+- Auto-approval fails safe: only proposals forge itself added are auto-approved, and only with objective signals (a tests proposal names a test file); nothing that proposes deleting or migrating data, or touches a sensitive zone by its path or its words, and no lookalike of a rejected or open proposal, is approved without you.
+- The skills no longer compose `state/T.forge`, `evidence`, `meta/run`, `runs/`, `meta/infinite` or decision notes: they send what the CLI prints and pin it with the newest version they listed. Forge's blocking paths give their reason (`waypoint block --why-file`) and members finish with `waypoint done`.
+- Requires waypoint ^0.26.0.
 
 ### 0.21.1 — 2026-10-17
 
@@ -672,6 +701,11 @@ elsewhere and are reconstructed from their READMEs.
 - Requires waypoint ^0.7.0.
 
 ## lens
+
+### 0.13.1 — 2026-10-17
+
+#### Changed
+- Its bundle follows waypoint's plan schema (`design_version`, `design_ref`, `goal`, `target`) and the execution's integrated `sha`; nothing it shows changes.
 
 ### 0.13.0 — 2026-10-17
 

@@ -7,8 +7,8 @@ Triaje por tamaño, el modelo adecuado para cada papel, primero tus propias herr
 
 [English](README.md) · **Español** · [← bg-kit](../../README.es.md)
 
-![versión 0.21.1](https://img.shields.io/badge/versi%C3%B3n-0.21.1-fab387?style=flat-square)
-![depende de waypoint ^0.25.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.25.0-cba6f7?style=flat-square)
+![versión 0.22.0](https://img.shields.io/badge/versi%C3%B3n-0.22.0-fab387?style=flat-square)
+![depende de waypoint ^0.26.0](https://img.shields.io/badge/depende%20de-waypoint%20%5E0.26.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -49,7 +49,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depende de [waypoint](../waypoint/README.es.md) ^0.25.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
+forge depende de [waypoint](../waypoint/README.es.md) ^0.26.0, que se instala con él. [lens](../lens/README.es.md) es opcional y recomendable. Reinicia Claude Code después de instalar o actualizar. Permiso recomendado: `Bash(node *forge.cjs*)`.
 
 ## Uso
 
@@ -217,7 +217,7 @@ La ejecución secuencial no es un tercer modo: es subagents con N = 1.
 4. cuando `waypoint next` no encuentra tarea, o cada 3 ciclos, lanza `forge-scout` para escribir propuestas nuevas (`proposals add`, `proposals policy`);
 5. registra el ciclo con `forge cycle --progress yes|no`.
 
-**Política.** Solo se autoaprueban las propuestas de bajo riesgo y verificables: un arreglo de tests, deuda de calidad pequeña, rendimiento con un benchmark en las pruebas o seguridad con un test en las pruebas. Las funcionalidades, las dependencias, la arquitectura y cualquier riesgo medio o alto te esperan (en el roadmap, en lens o con `/forge:decide`). Una propuesta parecida a otra rechazada se descarta salvo que traiga pruebas nuevas. Una parecida a otra abierta se descarta siempre; una v2 nombra la propuesta que revisa con `--revises`. **No se integra nada en main ni se hace push sin tu autorización.**
+**Política.** Solo se autoaprueban las propuestas de bajo riesgo y verificables: un arreglo de tests que nombra un fichero de test, deuda de calidad pequeña, rendimiento con un benchmark en las pruebas o seguridad con un test en las pruebas; nunca una que propone borrar o migrar datos, ni una cuya ruta o cuyas palabras tocan una zona sensible (autenticación, datos, API pública, dependencias, CI). Las funcionalidades, las dependencias, la arquitectura y cualquier riesgo medio o alto te esperan (en el roadmap, en lens o con `/forge:decide`). Solo las aprobaciones del dueño del roadmap se convierten en tareas ([Propuestas](#propuestas)). Una propuesta parecida a otra rechazada se descarta salvo que traiga pruebas nuevas. Una parecida a otra abierta se descarta siempre; una v2 nombra la propuesta que revisa con `--revises`. **No se integra nada en main ni se hace push sin tu autorización.**
 
 **Condiciones de parada:**
 
@@ -248,9 +248,11 @@ Una propuesta es un documento con estos campos:
 
 Solo se pueden decidir las propuestas `proposed` y `discussing`, y solo las decides tú (en la página del roadmap o con `/forge:decide`). Las sesiones solo crean propuestas y las comentan. Hay una copia local en `.forge/proposals/<id>.json`; la base de datos del roadmap manda en los campos de la decisión (`proposals pull`).
 
+**Solo aprueba el dueño.** Una decisión cuenta para forge solo con la marca del dueño del roadmap, `approvals/<id>` (`{status, decidedAt, by, digest}`, donde `digest` es un SHA-256 del id de la propuesta y de sus campos decididos): una colección que solo puede escribir el dueño (`write: owner`, una regla de la base que aplica el servidor; los editores comentan, no aprueban). `/forge:decide` escribe la decisión y su marca en un solo batch; `proposals pull --approvals --page` copia las marcas a `.forge/approvals/`; `proposals to-task`, las autoaprobaciones del modo infinito y sus condiciones de parada solo cuentan las propuestas cuya marca coincide, y `proposals list` e `infinite status` cuentan las demás como `unowned`. Una marca solo cuenta si la última decisión de este checkout sobre la propuesta coincide con ella, y `to-task` rechaza una propuesta que ya se convirtió en tarea. Una decisión tomada antes de esta versión, o en la página del roadmap antes de que escriba la marca, la confirma el dueño con `/forge:decide <id> confirm`. Un roadmap publicado antes de waypoint 0.26.0 no tiene la regla: hasta que `/waypoint:plan` lo republique (hazlo tras actualizar), ninguna marca cuenta.
+
 `/forge:decide` funciona desde cualquier sesión, incluso sin roadmap. En ese caso solo cambian la copia local y el registro, y el siguiente `proposals pull` sustituye la decisión local por el estado del roadmap. Con `--from <doc json de la db>`, la CLI comprueba la decisión contra ese documento y no registra nada. Cuando la actualización del roadmap sale bien, `/forge:decide` guarda el documento actualizado con `proposals save --from`, así que una escritura fallida o rechazada en el roadmap nunca deja una decisión local suelta.
 
-Mientras forge trabaja una tarea de waypoint, también escribe un pequeño bloque `forge` (camino, fase, agente, validadores, veredicto, ronda) en el documento `state/T` de la tarea, que enseñan el roadmap y lens.
+**En el roadmap.** forge construye él mismo cada escritura del roadmap, y las skills solo las fijan (`if_version`). `roadmap-doc` escribe la actualización de `state/T` de la tarea: un bloque `forge` de 4 KB como mucho (brief, etapa, rondas de revisión con sus hallazgos por severidad y sus revisores, la ronda aceptada, validadores con tiempo y caché, verificación, tiempos por etapa, integración y hallazgos aplazados), su `evidence` por ronda y su `exec`; `swarm task`, `report`, `step`, `integrate` y `merge` imprimen el mismo `publish`. `swarm status` imprime `meta/run`; `infinite start`, `cycle` e `infinite status` imprimen `meta/infinite` con la sesión que conduce el run y su lease; `roadmap-run` escribe `runs/<runId>`, el resumen de una ejecución cuando termina, con las sesiones ejecutoras que hay que quitar; `decision add --session` imprime la nota de la decisión y cierra la pregunta que responde.
 
 ## Verificación
 
@@ -412,7 +414,7 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 - `review-close --task <id>-<n> --dir d --path medium|large [--locale es|en] [--out-of-model F2,F5] [--defer F3]` - cierra la revisión: comprueba que cada revisor lanzado dejó su fichero, y una revisión exprés su fichero de validadores (sale con código 3 y `missing` si no), da a cada hallazgo su id en `findings-index-<n>.json`, pondera el veredicto, registra los hallazgos menores y los `deferred` como rulings, escribe `findings-<n>-<ronda>.json` e imprime `{action, score, next, last, implementer, reviews, findings, deferred, ask, handover, revert, invalid, incomplete}` (más `shadow`, `shadowSkipped` y `shadowPending`). `handover` es la nota para un implementador nuevo (`handover-<n>-<round>.md`) y `revert`, lo que deshace el intento de un redo: `args` para git o, si el intento fusionó la rama de ejecución (un merge en su rango), `steps` que devuelven el árbol de BASE en un solo commit (nunca `git revert -m 1`, que quitaría el trabajo de la rama de ejecución). `--out-of-model` vuelve a cerrar la misma revisión con esos ids como hallazgos menores fuera del modelo de amenazas y `--defer` los deja como residual `architecture`; los dos se guardan en `overrides.json` para el brief, y los dos rechazan un id que no está en esta revisión ni lo dejó abierto la anterior (código 2, sin escribir nada). `deferred` lista cada hallazgo que no bloquea con su `residual`, también los que quedan fuera del modelo de amenazas.
 - `shadow start [--tasks N] [--reset] | stop | report [--locale es|en] | collect --task <id>-<n> --dir <review dir>` - la prueba en sombra de los revisores en high frente a gemelos en xhigh (ver [Agentes](#agentes)); abrirla de nuevo conserva los casos reunidos, `--reset` los borra; `collect` guarda los gemelos que volvieron después de `review-close`.
 - `log --kind k [--task id] [--data json | --data-file f]` - añade una entrada al registro. Una entrada `triage` que sube el camino puede llevar un `why`, que nombra el siguiente `announce`.
-- `decision add --data-file f [--task id]` - registra una decisión de forge (JSON estricto: `point`, `what`, `chosen`, `why`, `by` y, si hace falta, `alternatives`, `weight`, `revert`, `undo`, `safePath`, `revertOf`, `task`, `runId`); la imprime con su número `n` y mantiene `.forge/decisions.json`, el resumen que leen lens y la banda. Con una ejecución activa lleva su id.
+- `decision add --data-file f [--task id] [--session SID]` - registra una decisión de forge (JSON estricto: `point`, `what`, `chosen`, `why`, `by` y, si hace falta, `alternatives`, `weight`, `revert`, `undo`, `safePath`, `revertOf`, `task`, `runId`); la imprime con su número `n` y mantiene `.forge/decisions.json`, el resumen que leen lens y la banda. Con una ejecución activa lleva su id. Con `--session`, imprime además `publish`: la nota de la decisión para el roadmap y, cuando el fichero dice qué nota de pregunta `resolves`, la actualización que la cierra.
 - `decision list [--task id [--project P]] [--run id] [--since iso] [--all] [--auto]` - las decisiones numeradas; sin filtro, las del último ámbito. `--task` es esa tarea de su proyecto (`--project` o, si no, el que le da ahora el registro), nunca la tarea con el mismo id de otro plan. `--auto` deja fuera tus propias respuestas.
 - `decision show <n>` - una decisión, con su `undo`.
 - `decision md --scope s [--out f] [--locale es|en]` - escribe las decisiones automáticas de un ámbito en `docs/forge/decisions/<ámbito>.md` (o en `--out`); no escribe nada si no hay ninguna.
@@ -430,6 +432,8 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 - `waypoint-cli` - imprime la ruta absoluta del `waypoint.cjs` de waypoint (el de mayor versión junto a este plugin); sale con 2 si no lo encuentra.
 - `tree snapshot --task id [--cwd d] [--force]` / `tree check --task id --base sha [--cwd d]` - guarda el árbol al empezar una tarea (se conserva la primera foto) y, antes de cerrarla, lista los ficheros que contienen los commits de la tarea (`task`) aparte de los nuevos (`appeared`) y modificados (`changed`) que nadie de la tarea creó: esos son de la persona, y la sesión nunca los borra ni los revierte.
 - `config get <clave>` - el valor actual de una clave de `.forge/config.yaml` del checkout principal, con los valores por defecto (`config get evidence` imprime `upload` o `local`); se lee justo antes de actuar, porque la persona puede cambiarlo mientras corre una tarea.
+- `roadmap-doc <T> [--project p] [--plan plan.yaml] [--assets subidas.json] [--out fichero]` - escribe en un fichero la actualización de `state/T` de la tarea (bloque forge v2, evidencia, exec) e imprime su `write`; `--assets` toma las capturas subidas al roadmap (`[{path, id, url}]`) y las guarda para las actualizaciones siguientes. Sale con 2 si forge no sabe nada de la tarea y con 3 si el bloque no cabe en 4 KB.
+- `roadmap-run --run <runId> | --task <id> [--project p] [--session SID] [--out fichero]` - escribe `runs/<runId>`, el resumen de una ejecución terminada (o de una tarea Small, Medium o Large cerrada fuera de una), e imprime su `write` y `cleanup`, las sesiones ejecutoras de la ejecución que hay que borrar.
 
 </details>
 
@@ -437,11 +441,11 @@ Se ejecuta como `node "${CLAUDE_PLUGIN_ROOT}/dist/forge.cjs" <comando>`.
 <summary><b>Propuestas</b></summary>
 
 - `proposals add --file f [--author a]` - crea una propuesta local (id `p` + marca de tiempo + 4 caracteres); `--author` tiene prioridad sobre el `author` del fichero.
-- `proposals list [--status s]`
-- `proposals decide <id> approve|reject|discuss [--reason-file f] [--by quién] [--reopen]` - decide la copia local, lo registra e imprime la escritura para el roadmap. Con `--from <doc json de la db>` solo comprueba ese documento e imprime la escritura. Una propuesta ya decidida se rechaza (dice quién y cuándo); `--reopen`, solo después de que la persona lo confirme, cambia una aprobación o un rechazo y guarda la decisión anterior en su `history` (nunca una propuesta `done` ni una ya convertida en tarea).
+- `proposals list [--status s]` - las propuestas, de la más reciente a la más antigua, y `unowned`: las aprobadas sin la marca del dueño.
+- `proposals decide <id> approve|reject|discuss [--reason-file f] [--by quién] [--reopen]` - decide la copia local, lo registra e imprime la escritura para el roadmap. Con `--from <doc json de la db>` solo comprueba ese documento e imprime la escritura. Una propuesta ya decidida se rechaza (dice quién y cuándo); `--reopen`, solo después de que la persona lo confirme, cambia una aprobación o un rechazo y guarda la decisión anterior en su `history` (nunca una propuesta `done` ni una ya convertida en tarea). Imprime además `approval`, la marca del dueño para `approvals/<id>` (sin `--from` la guarda en local); `confirm` imprime solo la marca de la decisión que ya tiene la propuesta. `--reopen` imprime además el borrado de la marca.
 - `proposals save --from <doc json de la db> [--id id]` - guarda un documento del roadmap como copia local y registra la decisión si cambió su estado.
-- `proposals pull --dir d` - refresca la copia local desde los documentos `proposals` del roadmap.
-- `proposals policy`, `proposals to-task` - autoaprobación y conversión de propuestas aprobadas en tareas del plan.
+- `proposals pull --dir d [--approvals d --page f]` - refresca la copia local desde los documentos `proposals` del roadmap; con `--approvals` (y `--page`, el `meta/page` del roadmap), también las marcas del dueño, y borra las locales que el roadmap no tiene (ninguna cuenta mientras la página no tenga la regla del dueño).
+- `proposals policy`, `proposals to-task` - autoaprobación (imprime la marca, `approval`) y conversión de las propuestas aprobadas por el dueño en tareas del plan (sale con 2 sin la marca).
 
 </details>
 
