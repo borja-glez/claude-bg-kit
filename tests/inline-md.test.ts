@@ -28,4 +28,29 @@ describe('inlineMd (G-16)', () => {
     expect(md('sin marcas')).toBe('sin marcas');
     expect(md('a `b y **c')).toBe('a `b y **c');
   });
+
+  const a = (url: string) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+  it('a ) that closes a ( of the link stays in it; one that closes the sentence does not (carry 2)', () => {
+    expect(md('https://es.wikipedia.org/wiki/Rust_(lenguaje)')).toBe(a('https://es.wikipedia.org/wiki/Rust_(lenguaje)'));
+    expect(md('(ver https://x.io/a_(b)).')).toBe(`(ver ${a('https://x.io/a_(b)')}).`);
+    expect(md('(https://x.io/q)')).toBe(`(${a('https://x.io/q')})`);
+  });
+  it('a ** inside a link does not cut it, and a link inside bold stays a link (carry 2)', () => {
+    expect(md('https://x.io/**b**/c')).toBe(a('https://x.io/**b**/c'));
+    expect(md('**https://x.io/a**')).toBe(`<strong>${a('https://x.io/a')}</strong>`);
+    expect(md('**mira https://x.io/a**')).toBe(`<strong>mira ${a('https://x.io/a')}</strong>`);
+    expect(md('**a `c` b**')).toBe('**a <code>c</code> b**');
+  });
+  it('a quote in the middle of a link ends it; javascript in any case or as entities is never a link (carry 2)', () => {
+    expect(md('https://x.io/a"onmouseover="alert(1)')).toBe(`${a('https://x.io/a')}&quot;onmouseover=&quot;alert(1)`);
+    expect(md("https://x.io/a'b")).toBe(`${a('https://x.io/a')}&#39;b`);
+    for (const s of ['JaVaScRiPt:alert(1)', 'java&#x73;cript:alert(1)', 'jav&#97;script:alert(1)', 'HTTPS://x.io']) expect(md(s)).not.toContain('<a ');
+  });
+  it('a long run of punctuation after a link takes linear time (carry 2)', () => {
+    const t0 = performance.now();
+    const out = md(`https://a${'.'.repeat(100_000)}x y https://b${'.'.repeat(100_000)}`);
+    expect(performance.now() - t0).toBeLessThan(250);
+    expect(out.endsWith(`${'.'.repeat(100_000)}`)).toBe(true);
+    expect(out).toContain(a('https://b'));
+  });
 });

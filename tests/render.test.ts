@@ -846,6 +846,16 @@ describe('execution', () => {
     expect(html).toContain('empty');
     expect(html).toContain('1 item');
   });
+  it('a screenshot reaches <img> and the lightbox only from https or the roadmap’s own store, whatever the model holds (carry 8)', () => {
+    const m = base();
+    const urls = ['javascript:alert(1)', 'http://x.io/a.png', 'data:image/svg+xml,<svg onload=alert(1)>', ' https://x.io/b.png', 'https://claude.ai/_blob/ok', '/_blob/abc-1'];
+    m.states.T001 = { ...m.states.T001!, evidence: { surfaces: ['web'], result: 'fail', passed: 0, total: urls.length, shots: urls.map((url, i) => ({ url, surface: 'web', check: `c${i}`, ok: false })) } };
+    const html = renderApp(m, { ...ui(), modal: 'T001' });
+    expect([...html.matchAll(/<img src="([^"]*)"/g)].map(x => x[1])).toEqual(['https://claude.ai/_blob/ok', '/_blob/abc-1']);
+    expect(html.match(/data-action="open-shot"/g)).toHaveLength(2);
+    for (const i of [0, 1, 2, 3]) expect(renderApp(m, { ...ui(), modal: 'T001', shot: i })).not.toContain('class="lightbox"');
+    expect(renderApp(m, { ...ui(), modal: 'T001', shot: 4 })).toContain('<img src="https://claude.ai/_blob/ok"');
+  });
   it('renders no lightbox for an out-of-range shot', () => {
     const m = base();
     m.states.T001 = { ...m.states.T001!, evidence: { surfaces: ['web'], result: 'pass', passed: 1, total: 1, shots: [{ url: 'https://claude.ai/_blob/b', surface: 'web', check: 'c', ok: true }] } };
@@ -1531,10 +1541,14 @@ describe('the task detail in four tabs (§4.7)', () => {
 
   // Task 2 carry: every inlineMd call site (summary, includes, done_when, verification, note text) gets hostile raw text.
   describe('inlineMd call sites with hostile raw text', () => {
-    const RAW = '<img src=x onerror=alert(1)> [js](javascript:alert(1)) [q"q](https://x.io/a"onmouseover="alert(1)) **b**';
+    // Carry 8: hostile text inside a code span and inside bold too, so those branches are guarded.
+    const RAW = '<img src=x onerror=alert(1)> [js](javascript:alert(1)) [q"q](https://x.io/a"onmouseover="alert(1)) **b** `<img src=y onerror=alert(2)>` **<svg onload=alert(3)>**';
     const never = (html: string) => {
       expect(html).not.toContain('<img');
+      expect(html).not.toContain('<svg');
       expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+      expect(html).toContain('<code>&lt;img src=y onerror=alert(2)&gt;</code>');
+      expect(html).toContain('<strong>&lt;svg onload=alert(3)&gt;</strong>');
       expect(html).not.toMatch(/<a [^>]*href="javascript/i);
       expect(html).not.toMatch(/<a [^>]*onmouseover/i);
       expect(html).not.toMatch(/href="[^"]*&quot;/);

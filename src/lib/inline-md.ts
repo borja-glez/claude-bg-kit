@@ -4,18 +4,39 @@
 
 /** A link: http(s), up to a space, a quote, an angle bracket or an escaped one (&quot; &#39; &lt; &gt;). */
 const URL_RE = /\bhttps?:\/\/(?:(?!&(?:quot|#39|lt|gt);)[^\s<>"'`])+/g;
-/** Punctuation that ends a sentence, not the link. */
-const TRAIL = /[.,:!?)\]]+$/;
+/** Punctuation that ends a sentence, not the link (a `)` only when the link has no `(` it closes). */
+const TRAIL = new Set(['.', ',', ':', '!', '?', ']', '*']);
 
-const link = (raw: string): string => {
-  const trail = TRAIL.exec(raw)?.[0] ?? '';
-  const url = raw.slice(0, raw.length - trail.length);
-  return /^https?:\/\/./.test(url) ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>${trail}` : raw;
+/** A link and the punctuation after it. Carry 2: one pass from the end (a regex anchored at the end was quadratic on a
+ *  long run of dots), and a `)` stays when it closes a `(` of the link (https://…/Rust_(lenguaje)). */
+const splitTrail = (raw: string): [string, string] => {
+  let opens = 0;
+  let closes = 0;
+  for (const ch of raw) { if (ch === '(') opens++; else if (ch === ')') closes++; }
+  let end = raw.length;
+  while (end > 0) {
+    const ch = raw[end - 1]!;
+    if (ch === ')' && closes > opens) closes--;
+    else if (!TRAIL.has(ch)) break;
+    end--;
+  }
+  return [raw.slice(0, end), raw.slice(end)];
 };
 
-/** Code spans first (their content stays as it is), then bold and links in the rest. `escaped` must come from esc(). */
+/** Code spans first (their content stays as it is), then links, then bold. `escaped` must come from esc(). Carry 2: the
+ *  links are set aside under a mark escaped text cannot hold (<n>) before bold, so a `**` in a link never cuts it and a
+ *  link inside bold stays a link. */
 export function inlineMd(escaped: string): string {
-  return escaped.split(/(`[^`\n]+`)/g).map((part, i) => (i % 2 === 1
-    ? `<code>${part.slice(1, -1)}</code>`
-    : part.replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>').replace(URL_RE, link))).join('');
+  return escaped.split(/(`[^`\n]+`)/g).map((part, i) => {
+    if (i % 2 === 1) return `<code>${part.slice(1, -1)}</code>`;
+    const links: string[] = [];
+    const marked = part.replace(URL_RE, raw => {
+      const [url, trail] = splitTrail(raw);
+      if (!/^https?:\/\/./.test(url)) return raw;
+      links.push(url);
+      return `<${links.length - 1}>${trail}`;
+    });
+    return marked.replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/<(\d+)>/g, (m, n: string) => { const url = links[Number(n)]; return url === undefined ? m : `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`; });
+  }).join('');
 }

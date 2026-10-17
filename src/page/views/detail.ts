@@ -12,6 +12,9 @@ import { authorLabel, esc, execLine, fmt, isOrphan, num, oneOf, pastMs, rel, rol
 import { DETAIL_TABS, type DetailTab, type Model, type UiState } from '../model.js';
 
 const sec = (label: string, body: string) => `<div class="sec"><div class="lbl">${esc(label)}</div><div>${body}</div></div>`;
+/** Carry 8: a screenshot's address as <img src> and the lightbox take it: https, or the roadmap's own store (/_blob/<id>).
+ *  normalize.ts keeps only those already; checked again here, as the design link is. */
+const shotUrl = (u: string | undefined): string | undefined => (u && (/^https:\/\//.test(u) || /^\/_blob\/[\w-]+$/.test(u)) ? u : undefined);
 const forgeV2 = (f: TaskState['forge']): ForgeDocV2 | null => (f && 'v' in f && f.v === 2 ? f : null);
 
 export function renderTaskModal(m: Model, d: Dict, ui: UiState, loc: string): string {
@@ -157,9 +160,9 @@ function renderEvidence(d: Dict, e: NonNullable<TaskState['evidence']>): string 
   const head = e.result === 'pass' ? `<span class="ok">✓ ${num(e.passed)}/${num(e.total)}</span>`
     : e.result === 'fail' ? `<span class="del">✗ ${num(e.passed)}/${num(e.total)}</span>`
     : `<span class="warn">⊘ ${esc(d.verify.blocked)}${e.reason ? `: ${esc(e.reason)}` : ''}</span>`;
-  const withUrl = e.shots.filter(s => s.url);
-  const shot = (s: (typeof e.shots)[number], i: number) => (s.url
-    ? `<button type="button" class="shot ${s.ok ? 'ok' : 'del'}" data-action="open-shot" data-i="${i}" data-k="shot:${i}" title="${esc(s.check)}"><img src="${esc(s.url)}" alt="${esc(s.check)}" loading="lazy"></button>`
+  const withUrl = e.shots.filter(s => shotUrl(s.url));
+  const shot = (s: (typeof e.shots)[number], i: number) => (shotUrl(s.url)
+    ? `<button type="button" class="shot ${s.ok ? 'ok' : 'del'}" data-action="open-shot" data-i="${i}" data-k="shot:${i}" title="${esc(s.check)}"><img src="${esc(shotUrl(s.url))}" alt="${esc(s.check)}" loading="lazy"></button>`
     : `<div class="shot-row ${s.ok ? 'ok' : 'del'}">${s.ok ? '✓' : '✗'} ${esc(s.check)}</div>`);
   const rounds = [...new Set(e.shots.map(s => s.round ?? 0))];
   const strip = !e.shots.length ? ''
@@ -172,8 +175,9 @@ function renderEvidence(d: Dict, e: NonNullable<TaskState['evidence']>): string 
 
 export function renderLightbox(d: Dict, e: NonNullable<TaskState['evidence']>, i: number): string {
   const s = e.shots[i];
-  if (!s?.url) return '';
-  return `<div class="lightbox" data-action="close-shot" role="dialog" aria-modal="true" aria-label="${esc(s.check)}" tabindex="-1"><img src="${esc(s.url)}" alt="${esc(s.check)}">
+  const url = shotUrl(s?.url);
+  if (!s || !url) return '';
+  return `<div class="lightbox" data-action="close-shot" role="dialog" aria-modal="true" aria-label="${esc(s.check)}" tabindex="-1"><img src="${esc(url)}" alt="${esc(s.check)}">
     <div class="cap"><b>${esc(s.surface)}</b> · ${esc(s.check)} ${s.ok ? '<span class="ok">✓</span>' : '<span class="del">✗</span>'}
     ${s.expected ? `<div>${esc(d.verify.expected)}: ${esc(s.expected)}</div>` : ''}${s.observed ? `<div>${esc(d.verify.observed)}: ${esc(s.observed)}</div>` : ''}</div></div>`;
 }
