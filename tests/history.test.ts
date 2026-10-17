@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { appendChangelog, listVersions, nextVersion, normalizeApplied, normalizeResolved, parseAppliedItems, parseChangelog, roundList } from '../src/lib/history.js';
+import { ENTRY_KINDS, appendChangelog, entryKind, listVersions, nextVersion, normalizeApplied, normalizeResolved, parseAppliedItems, parseChangelog, roundList } from '../src/lib/history.js';
 
 describe('versions', () => {
   it('lists v<N>.md files only, sorted', () => {
@@ -63,5 +63,23 @@ describe('fix round 1: changelog validation', () => {
   it('rejects an entry missing a field', () => {
     const { note: _n, ...noNote } = good;
     expect(() => parseChangelog(JSON.stringify([noNote]))).toThrow(/entry 0/);
+  });
+});
+
+describe('the kind of an entry (K3-07)', () => {
+  const entry = { version: 2, date: '2026-10-16', note: 'x', words: 10, round: 1 };
+  it('keeps a known kind and drops an unknown one', () => {
+    expect(parseChangelog(JSON.stringify([{ ...entry, kind: 'amend' }]))[0]).toEqual({ ...entry, kind: 'amend' });
+    expect(parseChangelog(JSON.stringify([{ ...entry, kind: 'merge' }]))[0]).toEqual(entry);
+    expect(ENTRY_KINDS).toEqual(['draft', 'round', 'apply', 'rewrite', 'interview', 'approve', 'amend', 'reopen']);
+  });
+  it('entryKind reads the kind, then what the entry recorded, then the notes of older entries in English or Spanish (Review Focus 2)', () => {
+    expect(entryKind({ ...entry, kind: 'interview', note: 'aprobado' })).toBe('interview');
+    expect(entryKind({ ...entry, rewrite: true })).toBe('rewrite');
+    expect(entryKind({ ...entry, applied: { 1: [2] } })).toBe('apply');
+    const notes = [['aprobado', 'approve'], ['approved (auto)', 'approve'], ['Aprobada la v3', 'approve'], ['reabierto: revert of decision 4', 'reopen'],
+      ['reopened for T044', 'reopen'], ['enmienda: Node 22', 'amend'], ['amended the scope', 'amend']] as const;
+    for (const [note, kind] of notes) expect(entryKind({ ...entry, note }), note).toBe(kind);
+    for (const note of ['ronda 1: aplicadas 1,3', 'Borrador inicial', 'entrevista: formulario', 'interview']) expect(entryKind({ ...entry, note }), note).toBeNull();
   });
 });

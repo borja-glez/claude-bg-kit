@@ -1,5 +1,9 @@
 import { z } from 'zod';
 
+/** K3-07: what made a changelog entry (`design-snapshot --kind`). */
+export const ENTRY_KINDS = ['draft', 'round', 'apply', 'rewrite', 'interview', 'approve', 'amend', 'reopen'] as const;
+export type EntryKind = (typeof ENTRY_KINDS)[number];
+
 const EntrySchema = z.object({
   version: z.number(),
   date: z.string(),
@@ -16,6 +20,8 @@ export type ChangelogEntry = z.infer<typeof EntrySchema> & {
   rewrite?: true;
   /** K3-02: the proposals this entry's interview resolved, by round then number. */
   resolved?: RoundItem[];
+  /** K3-07: what made the entry; older entries have none, and entryKind reads them. */
+  kind?: EntryKind;
 };
 
 /**
@@ -103,7 +109,11 @@ export function parseChangelog(text: string | null): ChangelogEntry[] {
     const entry = e as Record<string, unknown>;
     const applied = normalizeApplied(entry.applied);
     const resolved = normalizeResolved(entry.resolved);
-    return { ...r.data, ...(applied ? { applied } : {}), ...(entry.rewrite === true ? { rewrite: true as const } : {}), ...(resolved ? { resolved } : {}) };
+    const kind = typeof entry.kind === 'string' && (ENTRY_KINDS as readonly string[]).includes(entry.kind) ? (entry.kind as EntryKind) : null;
+    return {
+      ...r.data, ...(applied ? { applied } : {}), ...(entry.rewrite === true ? { rewrite: true as const } : {}), ...(resolved ? { resolved } : {}),
+      ...(kind ? { kind } : {}),
+    };
   });
 }
 
@@ -111,4 +121,23 @@ export function appendChangelog(list: ChangelogEntry[], e: ChangelogEntry): Chan
   const last = list[list.length - 1];
   if (last && e.version <= last.version) throw new Error(`changelog already has version ${last.version}; cannot append version ${e.version}`);
   return [...list, e];
+}
+
+/** The notes of entries written before `kind`, in English or Spanish; the first that matches names the kind. */
+const KIND_NOTES: [EntryKind, RegExp][] = [
+  ['reopen', /\b(?:reopen(?:ed|ing)?|reabiert[oa]|reabrir)\b/i],
+  ['amend', /\b(?:amend(?:ed|ment)?|enmienda|enmendad[oa])\b/i],
+  ['approve', /\b(?:approved?|aprobad[oa])\b/i],
+];
+
+/**
+ * K3-07: what made an entry: its `kind`; else `rewrite` or `apply` from what it recorded; else, in an older entry, the
+ * reopen, amend or approve its note names; else null (unknown: a reader treats it as a change).
+ */
+export function entryKind(e: ChangelogEntry): EntryKind | null {
+  if (e.kind) return e.kind;
+  if (e.rewrite) return 'rewrite';
+  if (e.applied) return 'apply';
+  for (const [kind, re] of KIND_NOTES) if (re.test(e.note)) return kind;
+  return null;
 }

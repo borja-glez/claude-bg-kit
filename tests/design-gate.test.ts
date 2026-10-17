@@ -12,17 +12,21 @@ const E = (version: number, note: string, round: number): ChangelogEntry => ({ v
 describe('designGate', () => {
   it('never approves without a critique (an imported design with no round)', () => {
     expect(designGate([E(1, 'importado de docs/s.md', 0)], [])).toEqual({
-      version: 1, rounds: 0, latestRound: null, latestCritiqueVersion: null, criticalPending: [], invalid: [], canAutoApprove: false,
+      version: 1, rounds: 0, latestRound: null, latestCritiqueVersion: null, criticalPending: [], majorPending: [], invalid: [],
+      needsVerify: false, canAutoApprove: false,
       pending: [], pendingCounts: { critical: 0, major: 0, minor: 0 }, dismissed: [], resolved: [], applied: [],
     });
   });
   it('waits for a critical proposal not applied yet', () => {
     expect(designGate([E(1, 'v1', 0)], [{ round: 1, critique: C(1, 1, ['major', 'critical']) }])).toMatchObject({ criticalPending: [{ round: 1, n: 2 }], canAutoApprove: false });
   });
-  it('approves once the changelog records the critical proposals as applied, or when there were none', () => {
+  it('approves once nothing critical or major is pending and a critic read the current version (K3-06)', () => {
     const log = [E(1, 'v1', 0), E(2, 'round 1: applied 1,2 — fixes', 1)];
-    expect(designGate(log, [{ round: 1, critique: C(1, 1, ['major', 'critical']) }])).toMatchObject({ version: 2, rounds: 1, latestRound: 1, latestCritiqueVersion: 1, criticalPending: [], canAutoApprove: true });
-    expect(designGate([E(1, 'v1', 0)], [{ round: 1, critique: C(1, 1, ['major', 'minor']) }]).canAutoApprove).toBe(true);
+    const r1 = { round: 1, critique: C(1, 1, ['major', 'critical']) };
+    expect(designGate(log, [r1])).toMatchObject({ version: 2, rounds: 1, latestRound: 1, latestCritiqueVersion: 1, criticalPending: [], majorPending: [], needsVerify: true, canAutoApprove: false });
+    expect(designGate(log, [r1, { round: 2, critique: C(2, 2, []) }])).toMatchObject({ needsVerify: false, canAutoApprove: true });
+    expect(designGate([E(1, 'v1', 0)], [{ round: 1, critique: C(1, 1, ['major', 'minor']) }])).toMatchObject({ majorPending: [{ round: 1, n: 1 }], canAutoApprove: false });
+    expect(designGate([E(1, 'v1', 0)], [{ round: 1, critique: C(1, 1, ['minor']) }]).canAutoApprove).toBe(true);
   });
   it('refuses a critique of a newer version and an invalid latest critique', () => {
     expect(designGate([E(1, 'v1', 0)], [{ round: 1, critique: C(1, 3, []) }]).canAutoApprove).toBe(false);
@@ -182,5 +186,38 @@ describe('resolved in an interview, and what the gate hands the next critic (K3-
     expect(appliedVersion(log, 1, 1)).toBe(3);
     expect(appliedVersion(log, 1, 5)).toBeNull();
     expect(appliedVersion(log, 2, 2)).toBeNull();
+  });
+});
+
+describe('needsVerify: a change no critic has read (K3-06, K3-03)', () => {
+  const doc = (riesgos: string, status = '') => `---\ntitle: X\nproject: p\nsummary: S\n${status}---\n\n## Alcance\n\nPedidos.\n\n## Riesgos\n\n${riesgos}\n`;
+  const v1 = doc('Sin rollback.');
+  const v2 = doc('Con rollback.');
+  const approved = doc('Con rollback.', 'status: approved\n');
+  const S = (version: number, round: number, extra: Partial<ChangelogEntry> = {}): ChangelogEntry => ({ ...E(version, 'resumen', round), ...extra });
+  it('after an apply nobody critiqued it needs a verification and is not approvable; a ready critique of that version clears it', () => {
+    const log = [S(1, 0, { kind: 'draft' }), S(2, 1, { kind: 'apply', applied: { 1: [1] } })];
+    const r1 = { round: 1, critique: C(1, 1, ['critical']) };
+    const texts = { history: { 1: v1, 2: v2 }, current: v2 };
+    expect(designGate(log, [r1], {}, texts)).toMatchObject({ needsVerify: true, canAutoApprove: false, criticalPending: [], majorPending: [] });
+    const r2 = { round: 2, critique: { ...C(2, 2, []), verdict: 'ready' as const } };
+    expect(designGate(log, [r1, r2], {}, texts)).toMatchObject({ needsVerify: false, canAutoApprove: true });
+  });
+  it('an entry that changed only the front matter needs none: the bodies decide; without the texts only an approve is safe', () => {
+    const r1 = { round: 1, critique: C(1, 1, []) };
+    const texts = { history: { 1: v2, 2: approved }, current: approved };
+    expect(designGate([S(1, 0), S(2, 1, { kind: 'approve' })], [r1], {}, texts).needsVerify).toBe(false);
+    expect(designGate([S(1, 0), S(2, 1, { kind: 'interview' })], [r1], {}, texts).needsVerify).toBe(false);
+    expect(designGate([S(1, 0), S(2, 1, { kind: 'interview' })], [r1]).needsVerify).toBe(true);
+    expect(designGate([S(1, 0), S(2, 1, { kind: 'approve' })], [r1]).needsVerify).toBe(false);
+  });
+  it('a critique of the current version, or no critique at all, needs no verification', () => {
+    expect(designGate([S(1, 0)], [{ round: 1, critique: C(1, 1, []) }]).needsVerify).toBe(false);
+    expect(designGate([S(1, 0), S(2, 0)], []).needsVerify).toBe(false);
+  });
+  it('old changelogs: an «aprobado» note is an approval, a «ronda 1: aplicadas» note may have changed the body (Review Focus 2)', () => {
+    const reparto = [E(1, 'Borrador inicial', 0), E(2, 'ronda 1: aplicadas 1,3 — x', 1), E(3, 'aprobado', 1)];
+    expect(designGate(reparto, [{ round: 1, critique: C(1, 2, []) }]).needsVerify).toBe(false);
+    expect(designGate(reparto, [{ round: 1, critique: C(1, 1, []) }]).needsVerify).toBe(true);
   });
 });

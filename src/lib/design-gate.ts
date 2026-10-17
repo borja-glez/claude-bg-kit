@@ -1,8 +1,9 @@
 // The approval gate of auto mode (spec §5.5): from a design's changelog and its critiques, whether it can be approved
 // without asking, and what the next critic must not raise again. Pure and deterministic, with no Node imports (the
 // band's mod uses it too); the waypoint CLI reads the files.
-import type { ChangelogEntry } from './history.js';
+import { entryKind, type ChangelogEntry } from './history.js';
 import type { Critique, Proposal } from './critique.js';
+import { changedSections, designBody } from './design.js';
 import { clean } from './decisions.js';
 
 /** The critique of one round: null when its file is not a valid critique. */
@@ -19,7 +20,8 @@ export interface GateResolved { round: number; n: number; section: string; probl
 export interface GateApplied { round: number; n: number; section: string; change: string }
 export interface Gate {
   version: number; rounds: number; latestRound: number | null; latestCritiqueVersion: number | null;
-  criticalPending: { round: number; n: number }[]; invalid: number[]; canAutoApprove: boolean;
+  criticalPending: { round: number; n: number }[]; majorPending: { round: number; n: number }[]; invalid: number[];
+  needsVerify: boolean; canAutoApprove: boolean;
   pending: Pending[]; pendingCounts: { critical: number; major: number; minor: number };
   dismissed: GateDismissed[]; resolved: GateResolved[]; applied: GateApplied[];
   /** How many older entries each list left out (see GATE_LIST_MAX); present only when not 0. */
@@ -122,17 +124,42 @@ export function pendingProposals(changelog: ChangelogEntry[], critiques: GateCri
   return out;
 }
 
+/** K3-06: the texts that tell whether a critic read the current body: the history by version and the design file. */
+export interface GateTexts { history?: Record<number, string>; current?: string }
+
 /**
- * Approvable without asking when the latest critique is valid, no critical proposal of any round is left pending, and
- * the latest critique is not of a version newer than the design's. A design with no critique (one just imported) never
- * is. It also lists, round by round, what the next critic must not raise again (K3-04, K3-05, K3-02).
+ * K3-06: whether the design changed after its latest valid critique without any critic reading it: that critique is of
+ * an older version and a later entry changed the body. The bodies decide (K3-03), so a change of the front matter alone,
+ * such as an approval, is none. Without the texts, any later entry but an approval counts as a change. Without a
+ * critique there is nothing to verify (a first round is due).
  */
-export function designGate(changelog: ChangelogEntry[], critiques: GateCritique[], dismissed: Dismissed = {}): Gate {
+export function needsVerifyOf(changelog: ChangelogEntry[], critiques: GateCritique[], texts: GateTexts = {}): boolean {
+  const top = [...critiques].filter(c => c.critique !== null).sort((a, b) => b.round - a.round)[0]?.critique;
+  if (!top) return false;
+  const version = changelog[changelog.length - 1]?.version ?? 0;
+  if (top.version >= version) return false;
+  if (!changelog.some(e => e.version > top.version && entryKind(e) !== 'approve')) return false;
+  const before = texts.history?.[top.version];
+  const after = texts.current ?? texts.history?.[version];
+  if (before === undefined || after === undefined) return true;
+  const d = changedSections(designBody(before), designBody(after));
+  return d.changed.length > 0 || d.removed.length > 0;
+}
+
+/**
+ * Approvable without asking when the latest critique is valid and not of a version newer than the design's, no critical
+ * nor major proposal of any round is left pending, and no applied change is unread by a critic (K3-06). A design with
+ * no critique (one just imported) never is. It also lists, round by round, what the next critic must not raise again
+ * (K3-04, K3-05, K3-02).
+ */
+export function designGate(changelog: ChangelogEntry[], critiques: GateCritique[], dismissed: Dismissed = {}, texts: GateTexts = {}): Gate {
   const version = changelog[changelog.length - 1]?.version ?? 0;
   const latestRound = critiques.length ? Math.max(...critiques.map(c => c.round)) : null;
   const latest = latestRound === null ? null : critiques.find(c => c.round === latestRound)?.critique ?? null;
   const pending = pendingProposals(changelog, critiques, dismissed);
   const criticalPending = pending.filter(p => p.severity === 'critical').map(p => ({ round: p.round, n: p.n }));
+  const majorPending = pending.filter(p => p.severity === 'major').map(p => ({ round: p.round, n: p.n }));
+  const needsVerify = needsVerifyOf(changelog, critiques, texts);
   const count = (s: Pending['severity']) => pending.filter(p => p.severity === s).length;
   const latestCritiqueVersion = latest?.version ?? null;
   const valid = [...critiques].sort((a, b) => a.round - b.round).flatMap(c => (c.critique ? [{ round: c.round, proposals: c.critique.proposals }] : []));
@@ -155,9 +182,11 @@ export function designGate(changelog: ChangelogEntry[], critiques: GateCritique[
   const newest = <T>(list: T[]) => list.slice(-GATE_LIST_MAX);
   const more = (list: unknown[]) => Math.max(0, list.length - GATE_LIST_MAX);
   return {
-    version, rounds: valid.length, latestRound, latestCritiqueVersion, criticalPending,
+    version, rounds: valid.length, latestRound, latestCritiqueVersion, criticalPending, majorPending,
     invalid: critiques.filter(c => c.critique === null).map(c => c.round).sort((a, b) => a - b),
-    canAutoApprove: latest !== null && criticalPending.length === 0 && latestCritiqueVersion !== null && latestCritiqueVersion <= version,
+    needsVerify,
+    canAutoApprove: latest !== null && criticalPending.length === 0 && majorPending.length === 0 && !needsVerify
+      && latestCritiqueVersion !== null && latestCritiqueVersion <= version,
     pending, pendingCounts: { critical: count('critical'), major: count('major'), minor: count('minor') },
     dismissed: newest(gone), resolved: newest(solved), applied: newest(done),
     ...(more(gone) ? { dismissedMore: more(gone) } : {}),

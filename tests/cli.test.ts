@@ -1719,7 +1719,7 @@ describe('design-gate', () => {
     const local = path.join(dir, '.waypoint', 'demo-shop');
     mkdirSync(local, { recursive: true });
     writeFileSync(path.join(local, 'critique-r1.json'), JSON.stringify({ round: 1, version: 1, scope: 'full', proposals: [{ n: 1, category: 'gap', severity: 'major', section: '_intro', problem: 'p', change: 'c' }] }));
-    expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ rounds: 1, latestRound: 1, canAutoApprove: true });
+    expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ rounds: 1, latestRound: 1, majorPending: [{ round: 1, n: 1 }], canAutoApprove: false });
     writeFileSync(path.join(local, 'critique-r2.json'), 'not json');
     expect(JSON.parse(run(['design-gate', rel], io).stdout)).toMatchObject({ rounds: 1, latestRound: 2, invalid: [2], canAutoApprove: false });
     expect(run(['design-gate'], io).code).toBe(2);
