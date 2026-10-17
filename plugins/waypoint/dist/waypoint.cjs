@@ -11545,7 +11545,7 @@ function findCycle(plan) {
 var import_node_crypto = require("node:crypto");
 
 // src/lib/waypoint-version.ts
-var WAYPOINT_VERSION = true ? "0.27.0" : "0.0.0";
+var WAYPOINT_VERSION = true ? "0.28.0" : "0.0.0";
 var VERSION = /^(\d{1,6})\.(\d{1,6})\.(\d{1,6})/;
 var partsOf = (v) => {
   const m = typeof v === "string" ? VERSION.exec(v) : null;
@@ -14408,10 +14408,12 @@ function parseBound(text, now) {
   }
 }
 
+// src/lib/run-ttl.ts
+var STALE_RUN_TTL_MS = 24 * 36e5;
+
 // src/lib/execution-view.ts
 var FUTURE_TOLERANCE_MS = 2 * 6e4;
 var AGENT_ALIVE_MS = 3 * 36e5;
-var STALE_RUN_TTL_MS = 24 * 36e5;
 var lastMovedAt = (e) => e.lastStepAt ?? e.startedAt;
 var VISIBLE_STOPS = ["stalled", "stopped", "budget", "finished"];
 function isVisibleRun(e, now, role) {
@@ -14817,6 +14819,16 @@ function computeMetrics(plan, states, now, activeSessions = 1) {
     const ts = plan.tasks.filter((t) => t.track === tr.id);
     byTrack[tr.id] = { done: ts.filter((t) => st2(t.id) === "done").length, total: ts.length };
   }
+  const byVersion = {};
+  const versions = plan.versions ?? [];
+  for (const v of versions) {
+    const phases = new Set(v.phases);
+    const ts = plan.tasks.filter((t) => phases.has(t.phase));
+    const d = ts.filter((t) => st2(t.id) === "done").length;
+    byVersion[v.id] = { done: d, total: ts.length, percent: ts.length ? Math.round(d / ts.length * 100) : 0 };
+  }
+  const open = versions.find((v) => byVersion[v.id].done < byVersion[v.id].total);
+  const currentVersion = open?.id ?? versions.at(-1)?.id ?? null;
   const durations = [];
   const starts = [];
   for (const t of plan.tasks) {
@@ -14843,7 +14855,9 @@ function computeMetrics(plan, states, now, activeSessions = 1) {
     etaIso,
     startedAt: starts.length ? new Date(Math.min(...starts)).toISOString() : null,
     byPhase,
-    byTrack
+    byTrack,
+    byVersion,
+    currentVersion
   };
 }
 

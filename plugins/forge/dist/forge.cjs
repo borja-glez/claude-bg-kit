@@ -15781,10 +15781,12 @@ function parseBound(text2, now) {
   }
 }
 
+// src/lib/run-ttl.ts
+var STALE_RUN_TTL_MS = 24 * 36e5;
+
 // src/lib/execution-view.ts
 var FUTURE_TOLERANCE_MS = 2 * 6e4;
 var AGENT_ALIVE_MS = 3 * 36e5;
-var STALE_RUN_TTL_MS = 24 * 36e5;
 var lastMovedAt = (e) => e.lastStepAt ?? e.startedAt;
 var VISIBLE_STOPS = ["stalled", "stopped", "budget", "finished"];
 function isVisibleRun(e, now, role) {
