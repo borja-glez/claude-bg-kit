@@ -13,6 +13,11 @@ elsewhere and are reconstructed from their READMEs.
 
 ## waypoint
 
+### 0.24.0 — 2026-10-17
+
+#### Added
+- The run band model carries inbox, escalation, progress and phase, and the seat of the conversation that looks (its own binding's, else the run's coordinator).
+
 ### 0.23.1 — 2026-10-17
 
 #### Changed
@@ -239,6 +244,17 @@ elsewhere and are reconstructed from their READMEs.
 - Hooks that record commits (PostToolUse) and remind of pending writes (Stop), and a SessionStart context injection.
 
 ## forge
+
+### 0.21.0 — 2026-10-17
+
+#### Added
+- Per-task status in `.forge/status/<key>.json` (`<project>__<T>` for a plan task, `<T>` for a loose one); `status.json` stays as the latest task's alias. An older `status.json` is moved to its task's file on the first event, and past 200 files the 150 newest stay.
+- `review-prep` and `swarm step` print each spawn's `taskLine` (`forge-task: <T>-<n> @<project>`), the line that starts the agent's prompt; the task steps, `forge:member` and `forge:review` ask for it.
+- A task's status keeps who reviews it, the review count and the findings of its verdict by severity, whether a validator came from the cache, and the verify surfaces skipped: with every planned surface skipped the verification is `skipped` and a light task is done.
+
+#### Changed
+- A member's task status reaches the main checkout; the route hint sees this session's open task among all of them.
+- Requires waypoint ^0.24.0.
 
 ### 0.20.0 — 2026-10-17
 
@@ -637,6 +653,20 @@ elsewhere and are reconstructed from their READMEs.
 - Requires waypoint ^0.7.0.
 
 ## lens
+
+### 0.12.0 — 2026-10-17
+
+#### Added
+- Tasks in progress: one row per forge task with its own agents; other sessions' tasks dimmed and short-lived; stopped tasks shown as stopped; background validation shown.
+- Agents are shown under their task by the `forge-task:` line of their prompt (else `Task id:`, a `.forge/work/` path or the task in the description, or their parent's task); a workflow's agents show although the agents list does not name them, and an idle teammate is waiting, not finished.
+- Now says how many subagents it waits on and when the session wakes; each execution slot lists its agents; the Roadmap card shows during a run too.
+
+#### Changed
+- Verdicts show the accepting review and findings by severity instead of the score.
+- A skipped verification says so and draws no verify stage; a stopped task shows only the stages it went through.
+- Run usage counts only the run's sessions from their start; tracking re-reads estimated. A resumed session checks `/cost` against what it spent since it resumed.
+- Up to three todos in progress, with the cells in their order; the superpowers round shows its own cap and a ledger unchanged for a day is dimmed; `/clear` empties the panel.
+- The hooks that gate (`ui.close`, `agent.spawn`, `tool.call` and the classic ones) go on when they fail.
 
 ### 0.11.9 — 2026-10-17
 

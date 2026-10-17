@@ -7,8 +7,8 @@ Triage by size, the right model for each role, your own tools first, independent
 
 **English** · [Español](README.es.md) · [← bg-kit](../../README.md)
 
-![version 0.20.0](https://img.shields.io/badge/version-0.20.0-fab387?style=flat-square)
-![depends on waypoint ^0.23.1](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.23.1-cba6f7?style=flat-square)
+![version 0.21.0](https://img.shields.io/badge/version-0.21.0-fab387?style=flat-square)
+![depends on waypoint ^0.24.0](https://img.shields.io/badge/depends%20on-waypoint%20%5E0.24.0-cba6f7?style=flat-square)
 
 </div>
 
@@ -49,7 +49,7 @@ claude plugin marketplace add borja-glez/claude-bg-kit
 claude plugin install forge@bg-kit
 ```
 
-forge depends on [waypoint](../waypoint/README.md) ^0.23.1, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
+forge depends on [waypoint](../waypoint/README.md) ^0.24.0, which is installed with it. [lens](../lens/README.md) is optional and recommended. Restart Claude Code after installing or updating. Recommended permission: `Bash(node *forge.cjs*)`.
 
 ## Usage
 
@@ -145,6 +145,8 @@ forge works next to [superpowers](https://github.com/obra/superpowers) and reuse
 **Routing.** forge puts a short rule in each new session (a `SessionStart` hook) and, on prompts that look like coding work, a one-line hint (`UserPromptSubmit`): before any other process skill, superpowers' included, the session runs `forge:route`. It triages the request, and trivial and small work go on without it. For Medium and larger work it asks once who does it: forge, superpowers, «superpowers diseña, forge construye» (brainstorming writes the spec, forge builds from it) or «superpowers planifica, forge ejecuta» (superpowers writes the plan, forge executes it); without superpowers, forge or no forge. The recommended option comes first. While superpowers designs or plans, the prompt hook reminds the session that chose the route to hand over to forge. A recent spec is recommended only when the request asks to build it. The hooks stay quiet inside forge's own executions and infinite runs, and with `workflow: superpowers` or `workflow: off`.
 
 **Routes per session.** A route lives in `.forge/route/<session>.json`: each conversation is reminded only of its own, `route stage` never moves another one's, and a route an older forge kept in `.forge/route.json` counts only for the session it names. The rule stays out of forge's task and run worktrees and while the conversation has a forge task open; after `/clear`, or in a fork, the new conversation is told the route the earlier one left half done. After `/clear`, only a route whose conversation `/clear` ended in the last 2 minutes is carried.
+
+**Task status and agents.** forge keeps each task's status in `.forge/status/<key>.json` (`<project>__<T>` for a plan task, `<T>` for a loose one; at most 200, the 150 newest kept), beside the ledger it follows, so a run member's statuses reach the main checkout; `.forge/status.json` is the task that changed last, for older readers. `review-prep` and `swarm step` print a `taskLine` for each agent they hand out (`forge-task: <T>-<n> @<project>`), and forge's skills start every agent's prompt with that line, so lens shows each agent under its task.
 
 **Preferences.** `workflow:` (`ask`, `forge`, `superpowers`, `superpowers-design`, `superpowers-plan`, or `off` for no forge) and `autonomy:` (`ask`, `auto`) go in `.forge/config.yaml` (the team's) or `.forge/local.yaml` (yours: `forge local set workflow <w>|none`, `forge local set autonomy ask|auto|none`). What the request says wins, then `local.yaml`, then `config.yaml`, then `ask`; `forge prefs` prints the result and where each value came from.
 
@@ -279,7 +281,7 @@ Your own tools run before any reviewer reads the diff, and forge keeps them chea
 
 ## Configuration
 
-`.forge/` in the project holds `config.yaml`, `verify/` (the surfaces), the ledger, `local.yaml` (your preferences and surface permissions), `learned.jsonl` (the `Learned` lines forge added), `status.json` (the last task, with `taskStartedAt`, `stageSince`, `stages` (seconds per phase) and `doneAt` for lens's timings), `work/<project>/<T>/` (briefs, diffs, reports, reviews, verification evidence; a loose task's `work/<T>/`), `proposals/`, `run.json`, `execution/` (the execution and its baselines; each task in `execution.json` records `finishedAt` when it is integrated, blocked or adopted with `swarm retry <T> --adopt`), `live/` (the local signal) and `usage/`. Git ignores everything in it except `config.yaml` and `verify/*.md`.
+`.forge/` in the project holds `config.yaml`, `verify/` (the surfaces), the ledger, `local.yaml` (your preferences and surface permissions), `learned.jsonl` (the `Learned` lines forge added), `status/` (one status per task, with `taskStartedAt`, `stageSince`, `stages` (seconds per phase) and `doneAt` for lens's timings) and `status.json` (the task that changed last), `work/<project>/<T>/` (briefs, diffs, reports, reviews, verification evidence; a loose task's `work/<T>/`), `proposals/`, `run.json`, `execution/` (the execution and its baselines; each task in `execution.json` records `finishedAt` when it is integrated, blocked or adopted with `swarm retry <T> --adopt`), `live/` (the local signal) and `usage/`. Git ignores everything in it except `config.yaml` and `verify/*.md`.
 
 ```yaml
 profile: balanced              # balanced | economy | quality
