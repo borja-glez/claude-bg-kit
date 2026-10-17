@@ -36,6 +36,7 @@ import { copyTree, evidenceOf } from '../evidence-copy.js';
 import { cleanText } from '../../lib/forge-status.js';
 import { publishFor, startedEvent, type StateWrite } from '../roadmap-sources.js';
 import { runDocOf } from '../run-doc.js';
+import { roadmapRun } from '../roadmap-run.js';
 
 export interface GitDeps { git: (args: string[]) => string | null; exec: (cmd: string, timeoutSec: number) => ExecResult; execMany?: ExecMany; repo: RepoReader }
 export interface SwarmDeps extends GitDeps { at: (dir: string) => GitDeps }
@@ -889,6 +890,14 @@ function mergedPublish(io: Io, e: ExecutionState): { publish: StateWrite[]; publ
   return { publish, ...(errors.length ? { publishErrors: errors } : {}) };
 }
 
+/** G-07: the summary of the run swarm close just closed, for /forge:stop to publish; runsError when it cannot be built. */
+function runsOf(io: Io, runId: string): Record<string, unknown> {
+  try {
+    const { doc: _doc, ...runs } = roadmapRun({ cwd: io.cwd, now: io.now }, { run: runId });
+    return { runs };
+  } catch (e) { return { runsError: (e instanceof Error ? e.message : String(e)).slice(0, 300) }; }
+}
+
 function mergeFinal(rest: string[], io: Io, deps: SwarmDeps): Result {
   const e = readExecution(io.cwd);
   if (!e) throw new UsageError('swarm merge: no execution (forge swarm start)');
@@ -1530,6 +1539,8 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
       const open = Object.entries(e.tasks).filter(([, t]) => t.status === 'running' || t.status === 'stopped');
       // Every member of the run, not only those the role readers see: each is listed to message and its file goes.
       const sessions = allMembersOf(main, e.runId).map(m => ({ sessionId: m.sessionId, name: m.name, role: m.role, task: m.task }));
+      // C4: the summary and its cleanup read the member files, so they are built before those files go.
+      const runs = runsOf(io, e.runId);
       for (const m of sessions) rmSync(memberFile(main, m.sessionId), { force: true });
       return json({
         closed: true, runId: e.runId, kind: e.kind, stopReason: e.stopReason, closedAt: iso,
@@ -1538,6 +1549,7 @@ export function swarmCommand(args: string[], io: Io, deps: SwarmDeps, ext: { ste
         release: e.kind !== 'plan' ? [] : open.filter(([, t]) => t.executor === 'subagents').map(([id]) => id),
         members: open.filter(([, t]) => t.executor !== 'subagents').map(([id]) => id),
         sessions,
+        ...runs,
       });
     }
     case 'cleanup': {

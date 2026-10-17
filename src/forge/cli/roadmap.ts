@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { Io } from './run.js';
 import { generateRoadmapDoc, RoadmapDocError } from '../roadmap-sources.js';
+import { roadmapRun, RoadmapRunError } from '../roadmap-run.js';
 import { parsePlan, PlanError } from '../../lib/plan.js';
 
 type Result = { code: number; stdout: string; stderr: string };
@@ -36,6 +37,15 @@ export function roadmapCommand(cmd: string, args: string[], io: Io): Result {
       return json({ task: r.task, project: r.project, bytes: r.bytes, file: r.file, write: r.write, dropped: r.dropped });
     } catch (e) {
       if (e instanceof RoadmapDocError) return fail(e.code, e.message);
+      throw e;
+    }
+  }
+  if (cmd === 'roadmap-run') {
+    try {
+      const r = roadmapRun(io, { run: flag('run'), task: flag('task'), project: flag('project') ?? null, session: flag('session'), out: flag('out') });
+      return json({ write: r.write, cleanup: r.cleanup, bytes: r.bytes, dropped: r.dropped });
+    } catch (e) {
+      if (e instanceof RoadmapRunError) return fail(e.code, e.message);
       throw e;
     }
   }

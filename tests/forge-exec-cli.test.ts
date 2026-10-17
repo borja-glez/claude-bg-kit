@@ -75,7 +75,8 @@ describe('forge swarm (execution)', () => {
     expect(() => swarmCommand(['close'], io, deps)).toThrow(`swarm close: the execution ${e.runId} is active; stop it first (/forge:stop)`);
     saveExecution(root, { ...readExecution(root)!, active: false, stopReason: 'stalled', stallReason: 'T2 is blocked' });
     expect(JSON.parse(swarmCommand(['close'], io, deps).stdout))
-      .toEqual({ closed: true, runId: e.runId, kind: 'plan', stopReason: 'stalled', closedAt: at, release: ['T1'], members: ['T2'], sessions: [] });
+      .toEqual({ closed: true, runId: e.runId, kind: 'plan', stopReason: 'stalled', closedAt: at, release: ['T1'], members: ['T2'], sessions: [],
+        runs: { write: { op: 'set', collection: 'runs', doc_id: e.runId, file_path: expect.stringContaining(`runs-${e.runId}.json`) }, cleanup: [], bytes: expect.any(Number), dropped: [] } });
     expect(readExecution(root)).toMatchObject({ active: false, closedAt: at, closedBy: 'close' });
     expect(JSON.parse(swarmCommand(['close'], io, deps).stdout)).toEqual({ closed: 'already', runId: e.runId, closedAt: at, closedBy: 'close' });
     expect(calls).toEqual([]);

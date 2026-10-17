@@ -1,4 +1,5 @@
 export { normalizeNote } from '../lib/notes.js';
+export { normalizeRunSummary } from '../lib/run-summary.js';
 import { isPlanId } from '../lib/ids.js';
 import { parseForgeDocV2, UNCHECKED_MAX } from '../lib/roadmap-doc.js';
 import { cleanText, REASON_MAX } from '../lib/batches.js';
